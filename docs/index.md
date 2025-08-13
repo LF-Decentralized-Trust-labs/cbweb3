@@ -1,0 +1,5 @@
+# Introduction
+
+CBWeb3 is a IDB Lab project that seeks to enable a regional test-network (Test Net) for Latin America and the Caribbean that will allow for the issuance of tCeBM (tokenized Central Bank Money) and the tokenization of financial assets, with a focus on cross-regional interoperability between central banks and financial institutions. The Test Net will build upon the technological capabilities and infrastructure of IDB Lab’s initiative LACChain and LACNet the Alliance for the Development of the Blockchain Ecosystem in Latin America and the Caribbean, and capitalize on the Korean experience on the topic including Korean entities from the public, private and academic sectors such as the Bank of Korea (BOK), Korea Exchange (KRX), KAIST Network Security and Privacy Lab and Sungkyunkwan University (SKKU). 
+
+Its strategic intent is to be recognised as a Digital Public Good (DPG) — freely reusable, transparent and co‑governed by the region’s public sector, regional financial organisations such as CEMLA and FLAR, alongside the open‑source community
