@@ -1,0 +1,118 @@
+site_name: Hyperledger CBWeb3
+repo_name: LF-Decentralized-Trust-labs/cbweb3
+repo_url: https://github.com/LF-Decentralized-Trust-labs/cbweb3
+theme:
+  name: material
+  custom_dir: overrides
+  logo: assets/CBWeb3Negros.png
+  favicon: assets/project-icon.png
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+  - content.code.copy
+  - navigation.expand
+  - navigation.footer
+  - navigation.instant
+  - navigation.tabs
+  - navigation.tabs.sticky
+  - navigation.top
+  - navigation.tracking
+  - toc.follow
+  - toc.integrate
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      repo_url_shorthand: true
+      user: squidfunk
+      repo: mkdocs-material
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+plugins:
+  - search
+  - mike
+extra:
+  analytics:
+    provider: google
+    property: !ENV GOOGLE_ANALYTICS_KEY
+  version:
+    provider: mike
+nav:
+  - Introduction: index.md
+  # - Overview:
+  #   - What is CBWeb3?: overview/what-is-cbweb3.md
+  #   - Features: overview/features.md
+  #   - Architecture: overview/architecture.md
+  #   - Use Cases: overview/use-cases.md
+  #   - DPG and CBWeb3: overview/dpg-and-cbweb3.md
+  #   - DPG Working Group Guidelines: overview/dpg-wg-guidelines.md
+  # - Concepts:
+  #   - Concept 1: concepts/concept-1.md
+  #   - Concept 2: concepts/concept-2.md
+  #   - Concept 3: concepts/concept-3.md
+  # - Getting Started:
+  #   - Installation: getting-started/installation.md
+  #   - Running: getting-started/running.md
+  # - Tutorials:
+  #   - Introduction: tutorials/index.md
+  #   - Tutorial 1: tutorials/tutorial-1.md
+  #   - Tutorial 2: tutorials/tutorial-2.md
+  #   - Tutorial 3: tutorials/tutorial-3.md
+  # - Guides:
+  #   - Operations: guides/operations.md
+  #   - Developers: guides/developers.md
+  #   - Upgrading: guides/upgrading.md
+  # - References:
+  #   - Architecture: references/architecture.md
+  #   - Commands: references/commands.md
+  #   - Roadmap: references/roadmap.md
+  # - Contributing:
+  #   - How to Contribute: contributing/how-to-contribute.md
+  #   - Reporting a Bug: contributing/reporting-a-bug.md
+  #   - Requesting a Change: contributing/requesting-a-change.md
+  #   - Asking a Question: contributing/asking-a-question.md
+  # - FAQs: faqs.md
+  # - Glossary: glossary.md
