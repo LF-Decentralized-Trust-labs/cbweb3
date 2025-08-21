@@ -4,33 +4,6 @@ Digital Public Group (DPGWG)
 
 Version 0.1 – 11/07/2025
 
-| **System/Service** | RG-T4567<br><br>Phase I (Take-Off): A Regional Solution for Accelerating the Deployment of Central Bank Digital Currencies (CBDC's) for Inclusion in Latin America and the Caribbean |     |     |
-| --- | --- |     |     | --- | --- |
-| **Status** | DRAFT |     |     |
-| **Approved by owner** |     |     |     |
-| **Authors** | CV  | Carolina Velasquez | LACChain: Blockchain Solutions Architect |
-| **Contributors** | NU  | Nayam Hanashiro | LACChain Coordinator for Strategic Projects. |
-
-Content
-
-[1\. Purpose & Mission 3](#_Toc203156169)
-
-[2\. Scope & Key Deliverables 3](#_Toc203156170)
-
-[3\. Membership & Roles 3](#_Toc203156171)
-
-[4\. Governance & Decision‑Making 3](#_Toc203156172)
-
-[5\. Meetings & Communication 4](#_Toc203156173)
-
-[6\. Collaboration Tools & Workflow 4](#_Toc203156174)
-
-[7\. Timeline & Milestones (high-level) 4](#_Toc203156175)
-
-[8\. Code of Conduct 5](#_Toc203156176)
-
-[9\. Review & Approval 5](#_Toc203156177)
-
 ## Purpose & Mission
 
 **Mission.** The DPG WG fosters an open, inclusive community that architects, builds, and validates the CBWeb3 technology stack and reference implementations as an _opensource Digital Public Good_ for the Latin American and Caribbean region, leveraging collective expertise from CEMLA, FLAR, LACChain and global technology contributors.
