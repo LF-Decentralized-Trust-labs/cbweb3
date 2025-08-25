@@ -1,0 +1,27 @@
+# Node / Frontend
+node_modules/
+dist/
+.next/
+coverage/
+*.log
+
+# Python / Go caches
+__pycache__/
+*.pyc
+
+# Environment
+.env
+.env.*
+
+# Terraform
+.terraform/
+terraform.tfstate*
+*.tfvars
+
+# Generated SDKs / Artifacts
+apis/sdk/*/dist/
+build/
+artifacts/
+
+# OS
+.DS_Store
