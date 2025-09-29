@@ -35,7 +35,7 @@ All members are granted _contributor_ access to the LFDT GitHub repository after
 
 ## Meetings & Communication
 
-- **Weekly Technical Sync.** Virtual, every Thursday, 1 hour.
+- **Weekly Technical Sync.** Virtual, every Thursday, 1 hour, you are welcome to join by attending our weekly calls on Thursdays at 8AM Pacific: <https://zoom-lfx.platform.linuxfoundation.org/meetings/lf-decentralized-trust-labs?view=week>
 - **Core Planning Call (CEMLA/FLAR/LACChain).** Mondays.
 - **Async channels.** GitHub Issues & Discussions serves as the established forum. Mailing list at <cbweb3-dpg@lists.lfdt.io> for announcements.
 
