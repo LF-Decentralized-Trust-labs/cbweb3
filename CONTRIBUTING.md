@@ -2,11 +2,11 @@
 
 Digital Public Group (DPGWG)
 
-Version 0.1 – 11/07/2025
+Version 0.2 – 31/10/2025
 
 ## Purpose & Mission
 
-**Mission.** The DPG WG fosters an open, inclusive community that architects, builds, and validates the CBWeb3 technology stack and reference implementations as an _opensource Digital Public Good_ for the Latin American and Caribbean region, leveraging collective expertise from CEMLA, FLAR, LACChain and global technology contributors.
+**Mission.** The DPG WG fosters an open, inclusive community that architects, builds, and validates the CBWeb3 technology stack and reference implementations as an _opensource Digital Public Good_ for the Latin American and Caribbean region, leveraging collective expertise from CEMLA, FLAR, LNet and global technology contributors.
 
 ## Scope & Key Deliverables
 
@@ -18,7 +18,7 @@ Version 0.1 – 11/07/2025
 
 | **Role** | **Eligibility** | **On‑boarding** | **Responsibilities** |
 | --- | --- | --- | --- |
-| **Maintainer Core** | LACChain technical lead + LFDT approvers | Listed in MAINTAINERS.md | Merge PRs, enforce workflow, coordinate with CBWG |
+| **Maintainer Core** | LNet technical lead + LFDT approvers | Listed in MAINTAINERS.md | Merge PRs, enforce workflow, coordinate with CBWG |
 | **Cochair** | CEMLA / FLAR nominees | Endorsed by Maintainers | Facilitate meetings, curate backlog |
 | **Contributor** | Any individual / organization interested in LAC | Add GitHub handle to /participants/ via PR | File issues, submit PRs, review code |
 
@@ -35,8 +35,8 @@ All members are granted _contributor_ access to the LFDT GitHub repository after
 
 ## Meetings & Communication
 
-- **Weekly Technical Sync.** Virtual, every Thursday, 1 hour, you are welcome to join by attending our weekly calls on Thursdays at 8AM Pacific: <https://zoom-lfx.platform.linuxfoundation.org/meetings/lf-decentralized-trust-labs?view=week>
-- **Core Planning Call (CEMLA/FLAR/LACChain).** Mondays.
+- **Weekly Technical Sync.** Virtual, every Thursday, 1 hour, you are welcome to join by attending our bi-weekly calls on Thursdays at 8AM Pacific: <https://zoom-lfx.platform.linuxfoundation.org/meetings/lf-decentralized-trust-labs?view=week>
+- **Core Planning Call (CEMLA/FLAR/LNet).** Mondays.
 - **Async channels.** GitHub Issues & Discussions serves as the established forum. Mailing list at <cbweb3-dpg@lists.lfdt.io> for announcements.
 
 ## Collaboration Tools & Workflow
@@ -63,4 +63,4 @@ This WG adopts the Linux Foundation Code of Conduct (<https://lf-decentralized-t
 
 ## Review & Approval
 
-Drafts and other artefacts are reviewed by LFDT Maintainers and **LACChain** inside GitHub Pull Requests. Standard review window: **14 days**. Lack of comment is considered approval.
+Drafts and other artefacts are reviewed by LFDT Maintainers and **LNet** inside GitHub Pull Requests. Standard review window: **14 days**. Lack of comment is considered approval.
