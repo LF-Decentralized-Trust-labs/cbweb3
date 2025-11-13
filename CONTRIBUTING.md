@@ -35,9 +35,9 @@ All members are granted _contributor_ access to the LFDT GitHub repository after
 
 ## Meetings & Communication
 
-- **Weekly Technical Sync.** Virtual, every Thursday, 1 hour, you are welcome to join by attending our bi-weekly calls on Thursdays at 8AM Pacific: <https://zoom-lfx.platform.linuxfoundation.org/meetings/lf-decentralized-trust-labs?view=week>
+- **Bi-Weekly Technical Sync.** Virtual, every other Thursday, 1 hour, you are welcome to join by attending our bi-weekly calls on Thursdays at 9AM Pacific: <https://zoom-lfx.platform.linuxfoundation.org/meetings/lf-decentralized-trust-labs?view=week>
 - **Core Planning Call (CEMLA/FLAR/LNet).** Mondays.
-- **Async channels.** GitHub Issues & Discussions serves as the established forum. Mailing list at <cbweb3-dpg@lists.lfdt.io> for announcements.
+- **Async channels.** GitHub Issues & Discussions serves as the established forum. Join us on Discord at #cbweb3 channel: https://discord.lfdecentralizedtrust.org.
 
 ## Collaboration Tools & Workflow
 
