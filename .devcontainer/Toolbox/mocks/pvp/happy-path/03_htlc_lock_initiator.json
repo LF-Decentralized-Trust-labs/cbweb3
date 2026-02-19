@@ -1,0 +1,31 @@
+{
+  "id": "mock-pvp-hp-03",
+  "title": "Step 3: Initiator locks tCeBM-CRC via HTLC",
+  "description": "Costa Rica locks 1,000,000 tCeBM-CRC with a hashLock. The hashLock is SHA-256('cbweb3-test-secret-2026') = 0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069.",
+  "notes": "The secret 'cbweb3-test-secret-2026' is synthetic and used only for testing. timeLock is set to 1740000000 (Unix timestamp, ~2025-02-19T20:00:00Z).",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/lock",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.SYNTHETIC_TOKEN_CB001"
+    },
+    "body": {
+      "agreementId": "agr-2026-001",
+      "hashLock": "0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+      "timeLock": 1740000000
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "contractId": "htlc-2026-001a",
+      "transactionHash": "0xaaa111bbb222ccc333ddd444eee555fff666777888999000aabbccddeeff0011",
+      "status": "LOCKED",
+      "blockNumber": 18500001
+    }
+  }
+}

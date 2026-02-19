@@ -1,0 +1,451 @@
+openapi: 3.0.3
+info:
+  title: CBWeb3 PvP Settlement API
+  description: >
+    Interface contract for the Payment-versus-Payment (PvP) settlement flow
+    in the CBWeb3 Toolbox. Covers FX Agreement negotiation and HTLC-based
+    atomic settlement between two central banks exchanging tCeBM.
+
+    This contract is derived from the CBWeb3 Pilot API (Deliverable 5)
+    and scoped to the PvP domain only.
+  version: 0.1.0
+  contact:
+    name: CBWeb3 DPG Working Group
+  license:
+    name: Apache-2.0
+
+servers:
+  - url: https://mock.toolbox.cbweb3.org/api/v1
+    description: Toolbox Mock Server
+
+tags:
+  - name: FX Agreement
+    description: Bilateral FX negotiation and agreement signing
+  - name: HTLC Settlement
+    description: Hash Time-Lock Contract operations for atomic cross-border settlement
+
+paths:
+  # ==========================================
+  # FX AGREEMENT
+  # ==========================================
+  /fx/agreement:
+    post:
+      tags: [FX Agreement]
+      operationId: createFxAgreement
+      summary: Create FX Agreement
+      description: >
+        Proposes a new FX agreement between two central banks.
+        Returns a unique agreementId with status PROPOSED.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FxAgreementRequest"
+            example:
+              sourceCurrency: "tCeBM-CRC"
+              targetCurrency: "tCeBM-DOP"
+              sourceAmount: "1000000"
+              exchangeRate: "0.058"
+              counterpartyAddress: "0xCB002_DominicanRepublic"
+      responses:
+        "201":
+          description: Agreement proposed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FxAgreementResponse"
+              example:
+                agreementId: "agr-2026-001"
+                status: "PROPOSED"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fx/agreement/{id}/accept:
+    post:
+      tags: [FX Agreement]
+      operationId: acceptFxAgreement
+      summary: Accept FX Agreement
+      description: >
+        Counterparty accepts and signs the agreement.
+        Status changes from PROPOSED to READY_FOR_SETTLEMENT.
+      parameters:
+        - $ref: "#/components/parameters/AgreementId"
+      responses:
+        "200":
+          description: Agreement accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FxAgreementResponse"
+              example:
+                agreementId: "agr-2026-001"
+                status: "READY_FOR_SETTLEMENT"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Agreement already accepted or cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /fx/agreement/{id}:
+    get:
+      tags: [FX Agreement]
+      operationId: getFxAgreement
+      summary: Get Agreement Details
+      description: Retrieves full agreement details including amounts and addresses for HTLC creation.
+      parameters:
+        - $ref: "#/components/parameters/AgreementId"
+      responses:
+        "200":
+          description: Agreement details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FxAgreementDetails"
+              example:
+                agreementId: "agr-2026-001"
+                sourceCurrency: "tCeBM-CRC"
+                targetCurrency: "tCeBM-DOP"
+                sourceAmount: "1000000"
+                targetAmount: "58000"
+                exchangeRate: "0.058"
+                initiatorAddress: "0xCB001_CostaRica"
+                counterpartyAddress: "0xCB002_DominicanRepublic"
+                status: "READY_FOR_SETTLEMENT"
+                createdAt: "2026-02-19T10:00:00Z"
+                acceptedAt: "2026-02-19T10:05:00Z"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ==========================================
+  # HTLC SETTLEMENT
+  # ==========================================
+  /htlc/lock:
+    post:
+      tags: [HTLC Settlement]
+      operationId: lockHTLC
+      summary: Lock Funds (linked to Agreement)
+      description: >
+        Locks tCeBM UTXOs based on terms in a signed FX Agreement.
+        The amount and recipient are derived from the agreementId (source of truth).
+        Requires a hashLock (SHA-256 of secret) and timeLock (Unix timestamp).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HtlcLockRequest"
+            example:
+              agreementId: "agr-2026-001"
+              hashLock: "0x2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+              timeLock: 1740000000
+      responses:
+        "201":
+          description: Funds locked successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HtlcResponse"
+              example:
+                contractId: "htlc-2026-001a"
+                transactionHash: "0xabc123...def456"
+                status: "LOCKED"
+                blockNumber: 18500001
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Funds already locked for this agreement
+
+  /htlc/settle:
+    post:
+      tags: [HTLC Settlement]
+      operationId: settleHTLC
+      summary: Settle HTLC (Reveal Secret)
+      description: >
+        Reveals the pre-image (secret) to claim locked tCeBM.
+        Transfers ownership of locked UTXOs to the final recipient.
+        The secret MUST hash to the hashLock used during lock.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HtlcSettleRequest"
+            example:
+              contractId: "htlc-2026-001a"
+              secret: "hello"
+      responses:
+        "200":
+          description: HTLC settled, funds transferred
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HtlcResponse"
+              example:
+                contractId: "htlc-2026-001a"
+                transactionHash: "0xdef789...abc012"
+                status: "SETTLED"
+                blockNumber: 18500010
+        "400":
+          description: Invalid secret (hash mismatch)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: "HTLC_HASH_MISMATCH"
+                message: "Provided secret does not match the hashLock"
+        "410":
+          description: HTLC expired (timeLock exceeded)
+
+  /htlc/refund:
+    post:
+      tags: [HTLC Settlement]
+      operationId: refundHTLC
+      summary: Refund HTLC
+      description: >
+        Returns locked UTXOs to the original owner after the timeLock has expired.
+        Can only be called after the timeLock timestamp has passed and
+        the HTLC has NOT been settled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contractId]
+              properties:
+                contractId:
+                  type: string
+            example:
+              contractId: "htlc-2026-001a"
+      responses:
+        "200":
+          description: Refund processed, funds returned to sender
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HtlcResponse"
+              example:
+                contractId: "htlc-2026-001a"
+                transactionHash: "0x999aaa...bbb000"
+                status: "REFUNDED"
+                blockNumber: 18500050
+        "409":
+          description: HTLC already settled or not yet expired
+
+  /htlc/status:
+    get:
+      tags: [HTLC Settlement]
+      operationId: getHtlcStatus
+      summary: Check HTLC Status
+      description: Returns the current state of an HTLC contract.
+      parameters:
+        - in: query
+          name: contractId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HTLC status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HtlcStatusResponse"
+              example:
+                contractId: "htlc-2026-001a"
+                status: "LOCKED"
+                hashLock: "0x2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                timeLock: 1740000000
+                amount: "1000000"
+                sender: "0xCB001_CostaRica"
+                receiver: "0xCB002_DominicanRepublic"
+
+# ==========================================
+# COMPONENTS
+# ==========================================
+components:
+  parameters:
+    AgreementId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+      description: Unique FX Agreement identifier
+
+  responses:
+    BadRequest:
+      description: Invalid request payload
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing or invalid authentication token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+        message:
+          type: string
+          description: Human-readable error description
+        details:
+          type: object
+          description: Additional error context (optional)
+
+    FxAgreementRequest:
+      type: object
+      required:
+        - sourceCurrency
+        - targetCurrency
+        - sourceAmount
+        - exchangeRate
+        - counterpartyAddress
+      properties:
+        sourceCurrency:
+          type: string
+          description: Currency code of the initiator (e.g., tCeBM-CRC)
+        targetCurrency:
+          type: string
+          description: Currency code of the counterparty (e.g., tCeBM-DOP)
+        sourceAmount:
+          type: string
+          description: Amount to exchange in source currency (string to avoid floating-point)
+        exchangeRate:
+          type: string
+          description: Agreed exchange rate (source/target)
+        counterpartyAddress:
+          type: string
+          description: Blockchain address of the counterparty
+
+    FxAgreementResponse:
+      type: object
+      properties:
+        agreementId:
+          type: string
+        status:
+          type: string
+          enum: [PROPOSED, READY_FOR_SETTLEMENT, SETTLED, CANCELLED, EXPIRED]
+
+    FxAgreementDetails:
+      type: object
+      properties:
+        agreementId:
+          type: string
+        sourceCurrency:
+          type: string
+        targetCurrency:
+          type: string
+        sourceAmount:
+          type: string
+        targetAmount:
+          type: string
+          description: Calculated from sourceAmount * exchangeRate
+        exchangeRate:
+          type: string
+        initiatorAddress:
+          type: string
+        counterpartyAddress:
+          type: string
+        status:
+          type: string
+          enum: [PROPOSED, READY_FOR_SETTLEMENT, SETTLED, CANCELLED, EXPIRED]
+        createdAt:
+          type: string
+          format: date-time
+        acceptedAt:
+          type: string
+          format: date-time
+
+    HtlcLockRequest:
+      type: object
+      required:
+        - agreementId
+        - hashLock
+        - timeLock
+      properties:
+        agreementId:
+          type: string
+          description: Reference to the FX Agreement (source of truth for amounts)
+        hashLock:
+          type: string
+          description: SHA-256 hash of the secret (hex-encoded)
+        timeLock:
+          type: integer
+          description: Unix timestamp after which refund is allowed
+
+    HtlcSettleRequest:
+      type: object
+      required:
+        - contractId
+        - secret
+      properties:
+        contractId:
+          type: string
+          description: HTLC contract identifier
+        secret:
+          type: string
+          description: Pre-image that hashes to the hashLock
+
+    HtlcResponse:
+      type: object
+      properties:
+        contractId:
+          type: string
+        transactionHash:
+          type: string
+        status:
+          type: string
+          enum: [LOCKED, SETTLED, REFUNDED, EXPIRED]
+        blockNumber:
+          type: integer
+
+    HtlcStatusResponse:
+      type: object
+      properties:
+        contractId:
+          type: string
+        status:
+          type: string
+          enum: [LOCKED, SETTLED, REFUNDED, EXPIRED]
+        hashLock:
+          type: string
+        timeLock:
+          type: integer
+        amount:
+          type: string
+        sender:
+          type: string
+        receiver:
+          type: string
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - BearerAuth: []

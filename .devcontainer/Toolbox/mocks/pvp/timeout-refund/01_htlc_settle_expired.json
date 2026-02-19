@@ -1,0 +1,27 @@
+{
+  "id": "mock-pvp-to-01",
+  "title": "Timeout: Attempt to settle after timeLock expired",
+  "description": "Initiator tries to reveal the secret after the timeLock has passed. The HTLC contract rejects the settlement because the window has closed.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/settle",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.SYNTHETIC_TOKEN_CB001"
+    },
+    "body": {
+      "contractId": "htlc-2026-002a",
+      "secret": "cbweb3-test-secret-expired"
+    }
+  },
+  "response": {
+    "status": 410,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "code": "HTLC_EXPIRED",
+      "message": "HTLC timeLock has expired. Settlement is no longer possible. Use /htlc/refund to reclaim funds."
+    }
+  }
+}

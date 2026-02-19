@@ -1,0 +1,30 @@
+{
+  "id": "mock-pvp-hp-04",
+  "title": "Step 4: Counterparty locks tCeBM-DOP via HTLC",
+  "description": "Dominican Republic locks 58,000 tCeBM-DOP (1,000,000 * 0.058) using the SAME hashLock as the initiator.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/lock",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.SYNTHETIC_TOKEN_CB002"
+    },
+    "body": {
+      "agreementId": "agr-2026-001",
+      "hashLock": "0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+      "timeLock": 1739996400
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "contractId": "htlc-2026-001b",
+      "transactionHash": "0x112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00",
+      "status": "LOCKED",
+      "blockNumber": 18500005
+    }
+  }
+}

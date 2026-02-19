@@ -1,0 +1,29 @@
+{
+  "id": "mock-pvp-hp-05",
+  "title": "Step 5: Initiator settles counterparty's HTLC (claims tCeBM-DOP)",
+  "description": "Costa Rica reveals the secret to claim the 58,000 tCeBM-DOP locked by Dominican Republic. This exposes the secret on-chain.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/settle",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.SYNTHETIC_TOKEN_CB001"
+    },
+    "body": {
+      "contractId": "htlc-2026-001b",
+      "secret": "cbweb3-test-secret-2026"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "contractId": "htlc-2026-001b",
+      "transactionHash": "0xfedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      "status": "SETTLED",
+      "blockNumber": 18500010
+    }
+  }
+}

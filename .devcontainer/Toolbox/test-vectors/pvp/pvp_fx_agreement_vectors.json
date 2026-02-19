@@ -1,0 +1,122 @@
+{
+  "contract": "PvP Settlement — FX Agreement",
+  "contractVersion": "0.1.0",
+  "generatedAt": "2026-02-19",
+  "vectors": [
+    {
+      "id": "fx-hp-01",
+      "title": "Create FX Agreement — happy path",
+      "description": "A valid FX agreement proposal with all required fields returns 201 and a new agreementId.",
+      "category": "happy-path",
+      "preconditions": {
+        "authenticatedAs": "CB-CostaRica (0xCB001_CostaRica)",
+        "counterpartyExists": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/fx/agreement",
+        "body": {
+          "sourceCurrency": "tCeBM-CRC",
+          "targetCurrency": "tCeBM-DOP",
+          "sourceAmount": "1000000",
+          "exchangeRate": "0.058",
+          "counterpartyAddress": "0xCB002_DominicanRepublic"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "agreementId": "{{NON_EMPTY_STRING}}",
+          "status": "PROPOSED"
+        }
+      },
+      "notes": "agreementId is implementation-specific; test should assert it is a non-empty string."
+    },
+    {
+      "id": "fx-hp-02",
+      "title": "Accept FX Agreement — happy path",
+      "description": "Counterparty accepts a PROPOSED agreement. Status transitions to READY_FOR_SETTLEMENT.",
+      "category": "happy-path",
+      "preconditions": {
+        "authenticatedAs": "CB-DominicanRepublic (0xCB002_DominicanRepublic)",
+        "agreementExists": true,
+        "agreementStatus": "PROPOSED"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/fx/agreement/{agreementId}/accept"
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "agreementId": "{{SAME_AS_PRECONDITION}}",
+          "status": "READY_FOR_SETTLEMENT"
+        }
+      },
+      "notes": "Only the counterpartyAddress from the agreement should be allowed to accept."
+    },
+    {
+      "id": "fx-err-01",
+      "title": "Create FX Agreement — missing required field",
+      "description": "Request without exchangeRate should return 400.",
+      "category": "error",
+      "preconditions": {
+        "authenticatedAs": "CB-CostaRica (0xCB001_CostaRica)"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/fx/agreement",
+        "body": {
+          "sourceCurrency": "tCeBM-CRC",
+          "targetCurrency": "tCeBM-DOP",
+          "sourceAmount": "1000000",
+          "counterpartyAddress": "0xCB002_DominicanRepublic"
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "code": "{{ERROR_CODE}}",
+          "message": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Exact error code is implementation-specific; test should assert 400 status and Error schema."
+    },
+    {
+      "id": "fx-err-02",
+      "title": "Accept FX Agreement — already accepted (409)",
+      "description": "Attempting to accept an agreement that is already READY_FOR_SETTLEMENT returns 409.",
+      "category": "error",
+      "preconditions": {
+        "authenticatedAs": "CB-DominicanRepublic (0xCB002_DominicanRepublic)",
+        "agreementExists": true,
+        "agreementStatus": "READY_FOR_SETTLEMENT"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/fx/agreement/{agreementId}/accept"
+      },
+      "expectedOutput": {
+        "status": 409
+      },
+      "notes": "Agreement state machine: PROPOSED → READY_FOR_SETTLEMENT is the only valid accept transition."
+    },
+    {
+      "id": "fx-err-03",
+      "title": "Get non-existent agreement (404)",
+      "description": "Querying an agreement that does not exist returns 404.",
+      "category": "error",
+      "preconditions": {
+        "authenticatedAs": "CB-CostaRica (0xCB001_CostaRica)"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/fx/agreement/agr-nonexistent-999"
+      },
+      "expectedOutput": {
+        "status": 404
+      },
+      "notes": null
+    }
+  ]
+}

@@ -1,0 +1,220 @@
+{
+  "contract": "PvP Settlement — HTLC",
+  "contractVersion": "0.1.0",
+  "generatedAt": "2026-02-19",
+  "hashFunction": "SHA-256",
+  "syntheticSecrets": {
+    "validSecret": "cbweb3-test-secret-2026",
+    "validHashLock": "0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+    "invalidSecret": "wrong-secret",
+    "note": "SHA-256('cbweb3-test-secret-2026') = 7f83b165... — implementations can verify this."
+  },
+  "vectors": [
+    {
+      "id": "htlc-hp-01",
+      "title": "Lock funds — happy path",
+      "description": "Lock tCeBM linked to an accepted FX agreement. Returns 201 with status LOCKED.",
+      "category": "happy-path",
+      "preconditions": {
+        "authenticatedAs": "CB-CostaRica (0xCB001_CostaRica)",
+        "agreementExists": true,
+        "agreementStatus": "READY_FOR_SETTLEMENT",
+        "sufficientBalance": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/lock",
+        "body": {
+          "agreementId": "{{VALID_AGREEMENT_ID}}",
+          "hashLock": "0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+          "timeLock": 1740000000
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "contractId": "{{NON_EMPTY_STRING}}",
+          "transactionHash": "{{NON_EMPTY_STRING}}",
+          "status": "LOCKED",
+          "blockNumber": "{{POSITIVE_INTEGER}}"
+        }
+      },
+      "notes": "timeLock should be sufficiently in the future to allow counterparty to also lock and then settle."
+    },
+    {
+      "id": "htlc-hp-02",
+      "title": "Settle HTLC — valid secret",
+      "description": "Reveal the correct pre-image to claim locked funds. Status transitions from LOCKED to SETTLED.",
+      "category": "happy-path",
+      "preconditions": {
+        "htlcExists": true,
+        "htlcStatus": "LOCKED",
+        "timeLockNotExpired": true,
+        "authenticatedAs": "Recipient of the locked funds"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/settle",
+        "body": {
+          "contractId": "{{VALID_CONTRACT_ID}}",
+          "secret": "cbweb3-test-secret-2026"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "contractId": "{{SAME_AS_INPUT}}",
+          "status": "SETTLED"
+        }
+      },
+      "notes": "After settlement, the secret is visible on-chain. The counterparty can read it and settle the mirror HTLC."
+    },
+    {
+      "id": "htlc-err-01",
+      "title": "Settle HTLC — invalid secret (hash mismatch)",
+      "description": "Providing a secret that does not hash to the hashLock returns 400.",
+      "category": "error",
+      "preconditions": {
+        "htlcExists": true,
+        "htlcStatus": "LOCKED",
+        "timeLockNotExpired": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/settle",
+        "body": {
+          "contractId": "{{VALID_CONTRACT_ID}}",
+          "secret": "wrong-secret"
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "code": "HTLC_HASH_MISMATCH",
+          "message": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "SHA-256('wrong-secret') != hashLock. Contract MUST reject."
+    },
+    {
+      "id": "htlc-err-02",
+      "title": "Settle HTLC — expired timeLock (410)",
+      "description": "Attempting to settle after timeLock has passed returns 410.",
+      "category": "error",
+      "preconditions": {
+        "htlcExists": true,
+        "htlcStatus": "LOCKED",
+        "timeLockNotExpired": false,
+        "currentTime": "after timeLock"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/settle",
+        "body": {
+          "contractId": "{{VALID_CONTRACT_ID}}",
+          "secret": "cbweb3-test-secret-2026"
+        }
+      },
+      "expectedOutput": {
+        "status": 410,
+        "body": {
+          "code": "HTLC_EXPIRED"
+        }
+      },
+      "notes": "Even with the correct secret, settlement is blocked after expiry to protect the refund path."
+    },
+    {
+      "id": "htlc-hp-03",
+      "title": "Refund HTLC — after timeLock expiry",
+      "description": "After timeLock expires and no settlement occurred, the original sender can reclaim funds.",
+      "category": "happy-path",
+      "preconditions": {
+        "htlcExists": true,
+        "htlcStatus": "LOCKED",
+        "timeLockNotExpired": false,
+        "authenticatedAs": "Original sender of locked funds"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/refund",
+        "body": {
+          "contractId": "{{VALID_CONTRACT_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "contractId": "{{SAME_AS_INPUT}}",
+          "status": "REFUNDED"
+        }
+      },
+      "notes": "Refund returns UTXOs to the original sender's address."
+    },
+    {
+      "id": "htlc-err-03",
+      "title": "Refund HTLC — not yet expired (409)",
+      "description": "Attempting refund before timeLock expiry returns 409.",
+      "category": "error",
+      "preconditions": {
+        "htlcExists": true,
+        "htlcStatus": "LOCKED",
+        "timeLockNotExpired": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/refund",
+        "body": {
+          "contractId": "{{VALID_CONTRACT_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 409
+      },
+      "notes": "Refund is only valid after timeLock expiry. This prevents the sender from reclaiming funds while the receiver still has time to settle."
+    },
+    {
+      "id": "htlc-err-04",
+      "title": "Refund HTLC — already settled (409)",
+      "description": "Attempting to refund an HTLC that was already settled returns 409.",
+      "category": "error",
+      "preconditions": {
+        "htlcExists": true,
+        "htlcStatus": "SETTLED"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/refund",
+        "body": {
+          "contractId": "{{VALID_CONTRACT_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 409
+      },
+      "notes": "Once settled, funds belong to the receiver. Refund is impossible."
+    },
+    {
+      "id": "htlc-edge-01",
+      "title": "Lock HTLC — agreement not yet accepted",
+      "description": "Attempting to lock funds for an agreement still in PROPOSED status returns 400.",
+      "category": "edge-case",
+      "preconditions": {
+        "agreementExists": true,
+        "agreementStatus": "PROPOSED"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/htlc/lock",
+        "body": {
+          "agreementId": "{{PROPOSED_AGREEMENT_ID}}",
+          "hashLock": "0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+          "timeLock": 1740000000
+        }
+      },
+      "expectedOutput": {
+        "status": 400
+      },
+      "notes": "Lock should only be allowed when agreement status is READY_FOR_SETTLEMENT."
+    }
+  ]
+}
