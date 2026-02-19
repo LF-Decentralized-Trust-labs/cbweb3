@@ -25,7 +25,7 @@ This is **not** a full product implementation. It is a **shared "integration kit
 ## Repository structure
 
 ```text
-.devcontainer/Toolbox/
+Toolbox/
 │
 ├── docs/
 │   ├── charter/                    # This document — scope, principles, conventions
