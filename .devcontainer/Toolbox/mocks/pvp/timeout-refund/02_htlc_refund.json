@@ -1,0 +1,28 @@
+{
+  "id": "mock-pvp-to-02",
+  "title": "Timeout: Refund locked funds after expiry",
+  "description": "After the timeLock has expired and no settlement occurred, the original sender reclaims the locked tCeBM via refund.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/refund",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.SYNTHETIC_TOKEN_CB001"
+    },
+    "body": {
+      "contractId": "htlc-2026-002a"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "contractId": "htlc-2026-002a",
+      "transactionHash": "0xrefund111222333444555666777888999000aaabbbcccdddeeefff000111222",
+      "status": "REFUNDED",
+      "blockNumber": 18600100
+    }
+  }
+}

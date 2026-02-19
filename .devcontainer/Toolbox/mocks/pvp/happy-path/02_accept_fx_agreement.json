@@ -1,0 +1,24 @@
+{
+  "id": "mock-pvp-hp-02",
+  "title": "Step 2: Accept FX Agreement",
+  "description": "Central Bank of Dominican Republic accepts the proposed agreement. Status changes to READY_FOR_SETTLEMENT.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/fx/agreement/agr-2026-001/accept",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.SYNTHETIC_TOKEN_CB002"
+    },
+    "body": {}
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "agreementId": "agr-2026-001",
+      "status": "READY_FOR_SETTLEMENT"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "mock-pvp-hp-06",
+  "title": "Step 6: Counterparty settles initiator's HTLC (claims tCeBM-CRC)",
+  "description": "Dominican Republic reads the revealed secret from on-chain and uses it to claim the 1,000,000 tCeBM-CRC locked by Costa Rica. PvP settlement is now complete.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/settle",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.SYNTHETIC_TOKEN_CB002"
+    },
+    "body": {
+      "contractId": "htlc-2026-001a",
+      "secret": "cbweb3-test-secret-2026"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "contractId": "htlc-2026-001a",
+      "transactionHash": "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "status": "SETTLED",
+      "blockNumber": 18500012
+    }
+  }
+}

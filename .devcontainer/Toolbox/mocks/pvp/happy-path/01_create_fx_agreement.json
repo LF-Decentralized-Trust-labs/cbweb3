@@ -1,0 +1,30 @@
+{
+  "id": "mock-pvp-hp-01",
+  "title": "Step 1: Create FX Agreement",
+  "description": "Central Bank of Costa Rica proposes an FX agreement to exchange 1,000,000 tCeBM-CRC for tCeBM-DOP at rate 0.058",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/fx/agreement",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.SYNTHETIC_TOKEN_CB001"
+    },
+    "body": {
+      "sourceCurrency": "tCeBM-CRC",
+      "targetCurrency": "tCeBM-DOP",
+      "sourceAmount": "1000000",
+      "exchangeRate": "0.058",
+      "counterpartyAddress": "0xCB002_DominicanRepublic"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "agreementId": "agr-2026-001",
+      "status": "PROPOSED"
+    }
+  }
+}
