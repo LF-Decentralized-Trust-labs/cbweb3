@@ -27,11 +27,8 @@ This is **not** a full product implementation. It is a **shared "integration kit
 ```text
 Toolbox/
 │
-├── docs/
-│   ├── charter/                    # This document — scope, principles, conventions
-│   │   ├── README.md
-│   │   └── CONTRIBUTING.md
-│   └── onboarding/                 # Quickstart, FAQs (planned — Session 4)
+├── README.md                       # This document — scope, principles, conventions
+├── CONTRIBUTING.md                 # Contribution workflow, quality requirements
 │
 ├── contracts/                      # Interface contracts (OpenAPI specs per domain)
 │   ├── pvp/                        # ✅ PvP Settlement (FX Agreement + HTLC)
