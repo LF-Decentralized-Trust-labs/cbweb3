@@ -1,0 +1,40 @@
+{
+  "name": "@cbweb3/ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./styles.css": "./src/styles.css"
+  },
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "dependencies": {
+    "@radix-ui/react-select": "^2.2.6",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.575.0",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss-animate": "^1.0.7"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "vite": "^7.3.1"
+  },
+  "scripts": {
+    "lint": "echo \"No lint configured for @cbweb3/ui yet\""
+  },
+  "license": "ISC"
+}
