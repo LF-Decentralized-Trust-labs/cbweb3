@@ -1,8 +1,7 @@
 @import "tailwindcss";
 
 @source "./**/*.{ts,tsx}";
-@source "../../apps/bank/src/**/*.{ts,tsx}";
-@source "../../apps/supervisor/src/**/*.{ts,tsx}";
+@source "../../apps/*/src/**/*.{ts,tsx}";
 
 @custom-variant dark (&:where(.dark, .dark *));
 

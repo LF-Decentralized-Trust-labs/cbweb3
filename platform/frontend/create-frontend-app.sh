@@ -31,7 +31,8 @@ cd "$APP_DIR"
 
 npm pkg set "dependencies.@cbweb3/ui=*"
 npm pkg set "devDependencies.@cbweb3/config=*"
-npm pkg set "devDependencies.tailwindcss=^3.4.17"
+npm pkg set "devDependencies.@tailwindcss/postcss=^4.1.12"
+npm pkg set "devDependencies.tailwindcss=^4.1.12"
 npm pkg set "devDependencies.postcss=^8.5.6"
 npm pkg set "devDependencies.autoprefixer=^10.4.21"
 
@@ -91,24 +92,10 @@ export default defineConfig({
 });
 EOF
 
-cat > tailwind.config.cjs <<'EOF'
-const config = require("@cbweb3/config/tailwind-preset");
-
-module.exports = {
-  presets: [config],
-  content: [
-    "./index.html",
-    "./src/**/*.{ts,tsx}",
-    "../../packages/ui/src/**/*.{ts,tsx}",
-  ],
-  darkMode: ["class"],
-};
-EOF
-
 cat > postcss.config.cjs <<'EOF'
 module.exports = {
   plugins: {
-    tailwindcss: {},
+    "@tailwindcss/postcss": {},
     autoprefixer: {},
   },
 };
