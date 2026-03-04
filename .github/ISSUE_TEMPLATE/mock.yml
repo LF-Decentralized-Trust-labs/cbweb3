@@ -1,0 +1,45 @@
+name: "Reference Mock"
+description: "Propose or update reference mocks (canonical simulated API responses)"
+labels: ["area:mocks"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to propose new reference mocks or update existing ones.
+        Mocks must use **synthetic data only** and align with the corresponding interface contract.
+  - type: input
+    id: domain
+    attributes:
+      label: Domain
+      description: "Which domain do these mocks belong to?"
+      placeholder: "e.g., pvp, amm, compliance, auth"
+    validations:
+      required: true
+  - type: input
+    id: related-contract
+    attributes:
+      label: Related contract
+      description: "Path to the interface contract these mocks implement."
+      placeholder: "e.g., Toolbox/contracts/pvp/openapi_pvp_v0.1.0.yaml"
+    validations:
+      required: true
+  - type: textarea
+    id: scenarios
+    attributes:
+      label: Scenarios to mock
+      description: "List the scenarios (happy path, error, edge case) and the steps in each."
+    validations:
+      required: true
+  - type: textarea
+    id: definition-of-done
+    attributes:
+      label: Definition of Done
+      description: "What must be true for these mocks to be considered complete?"
+      value: |
+        - [ ] JSON fixtures with id, title, description, request, response
+        - [ ] Organized by scenario (happy-path/, timeout-refund/, etc.)
+        - [ ] Consistent with the related OpenAPI contract
+        - [ ] Uses only synthetic data (no real credentials, endpoints, or participant info)
+        - [ ] README.md with usage guide
+    validations:
+      required: true

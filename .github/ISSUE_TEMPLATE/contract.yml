@@ -1,0 +1,50 @@
+name: "Interface Contract"
+description: "Propose or update an interface contract (OpenAPI spec, schema, ABI)"
+labels: ["area:contracts"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to propose a new interface contract or request changes to an existing one.
+  - type: input
+    id: domain
+    attributes:
+      label: Domain
+      description: "Which domain does this contract belong to?"
+      placeholder: "e.g., pvp, amm, compliance, auth"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: "What integration gap or ambiguity does this contract address?"
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-artifact
+    attributes:
+      label: Proposed artifact
+      description: "Describe the contract (endpoints, schemas, error model). Reference deliverables (D2-D6) if applicable."
+    validations:
+      required: true
+  - type: textarea
+    id: definition-of-done
+    attributes:
+      label: Definition of Done
+      description: "What must be true for this contract to be considered complete?"
+      value: |
+        - [ ] OpenAPI 3.0.3 spec with paths, schemas, error model, and examples
+        - [ ] CHANGELOG.md with version history
+        - [ ] README.md with flow diagram and validation instructions
+        - [ ] Passes Spectral lint without errors
+        - [ ] No secrets or sensitive data
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security considerations
+      description: "Auth boundaries, input validation, data exposure risks, abuse cases."
+    validations:
+      required: false

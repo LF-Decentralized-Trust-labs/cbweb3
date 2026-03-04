@@ -1,0 +1,52 @@
+name: "Test Vector"
+description: "Propose or update test vectors (deterministic input/output fixtures)"
+labels: ["area:test-vectors"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to propose new test vectors or update existing ones.
+        Test vectors define **what MUST happen** under specific conditions.
+  - type: input
+    id: domain
+    attributes:
+      label: Domain
+      description: "Which domain do these vectors belong to?"
+      placeholder: "e.g., pvp, amm, compliance, auth"
+    validations:
+      required: true
+  - type: input
+    id: related-contract
+    attributes:
+      label: Related contract
+      description: "Path to the interface contract these vectors validate."
+      placeholder: "e.g., Toolbox/contracts/pvp/openapi_pvp_v0.1.0.yaml"
+    validations:
+      required: true
+  - type: textarea
+    id: vectors
+    attributes:
+      label: Vectors to create
+      description: "List the test cases (happy path, error, edge case) with expected behavior."
+    validations:
+      required: true
+  - type: textarea
+    id: definition-of-done
+    attributes:
+      label: Definition of Done
+      description: "What must be true for these vectors to be considered complete?"
+      value: |
+        - [ ] JSON file with id, title, description, category, preconditions, input, expectedOutput
+        - [ ] Covers happy paths, error cases, and edge cases
+        - [ ] Uses placeholder conventions ({{NON_EMPTY_STRING}}, etc.) where appropriate
+        - [ ] Cryptographic values are verifiable (real hashes of stated inputs)
+        - [ ] README.md with validation guide
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security considerations
+      description: "Any security-relevant test cases (auth bypass, injection, replay)?"
+    validations:
+      required: false
