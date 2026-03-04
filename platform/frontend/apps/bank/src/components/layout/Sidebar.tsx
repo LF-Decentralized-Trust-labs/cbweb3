@@ -1,0 +1,37 @@
+import { NavLink } from "react-router-dom";
+import { ArrowRightLeft, Coins, LayoutDashboard, Scale, Settings, ShieldCheck } from "lucide-react";
+
+const links = [
+  { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/tokens", label: "Token Management", icon: Coins },
+  { to: "/htlc", label: "HTLC Trading", icon: ArrowRightLeft },
+  { to: "/amm", label: "AMM Trading", icon: Scale },
+  { to: "/compliance", label: "Compliance", icon: ShieldCheck },
+  { to: "/settings", label: "Settings", icon: Settings },
+];
+
+export function Sidebar() {
+  return (
+    <aside className="w-full border-b border-border bg-card p-3 md:w-64 md:border-b-0 md:border-r">
+      <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">LACnet</p>
+      <p className="mb-3 text-sm font-semibold">Bank Portal</p>
+      <nav className="grid gap-1">
+        {links.map((link) => (
+          <NavLink
+            key={link.to}
+            to={link.to}
+            end={link.to === "/"}
+            className={({ isActive }) =>
+              `flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
+                isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              }`
+            }
+          >
+            <link.icon className="h-4 w-4" />
+            {link.label}
+          </NavLink>
+        ))}
+      </nav>
+    </aside>
+  );
+}

@@ -6,17 +6,34 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "type-check": "tsc --noEmit",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest"
   },
   "dependencies": {
+    "@cbweb3/ui": "*",
+    "@hookform/resolvers": "^5.2.2",
+    "@tanstack/react-query": "^5.90.3",
+    "axios": "^1.13.2",
+    "crypto-js": "^4.2.0",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.575.0",
+    "radix-ui": "^1.4.3",
     "react": "^19.2.0",
+    "react-day-picker": "^9.14.0",
     "react-dom": "^19.2.0",
-    "@cbweb3/ui": "*"
+    "react-hook-form": "^7.66.0",
+    "react-is": "^19.2.0",
+    "react-router-dom": "^7.9.5",
+    "recharts": "^3.4.1",
+    "zod": "^4.1.12",
+    "zustand": "^5.0.8"
   },
   "devDependencies": {
     "@cbweb3/config": "*",
     "@eslint/js": "^9.39.1",
+    "@types/crypto-js": "^4.2.2",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
