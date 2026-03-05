@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toolbox.cbweb3.org/schemas/mock.schema.json",
+  "title": "CBWeb3 Toolbox Mock File",
+  "description": "Schema for reference mock JSON files (canonical API request/response pairs)",
+  "type": "object",
+  "required": ["id", "title", "description", "request", "response"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^mock-[a-z]+-[a-z]+-\\d+$",
+      "description": "Unique mock identifier (format: mock-<domain>-<scenario>-<number>)"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short human-readable title"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What this mock demonstrates"
+    },
+    "request": {
+      "type": "object",
+      "required": ["method", "path"],
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/api/v\\d+/"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "body": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": ["status", "body"],
+      "properties": {
+        "status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "body": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

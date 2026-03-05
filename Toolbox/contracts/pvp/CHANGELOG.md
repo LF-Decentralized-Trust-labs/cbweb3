@@ -4,6 +4,12 @@ All notable changes to the PvP interface contract are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-03-05
+
+### Fixed
+- Added Error response schema to HTTP 410 on `/htlc/settle` (was missing `content` block).
+- Added Error response schema to HTTP 409 on `/htlc/lock` and `/htlc/refund` (consistency with other error responses).
+
 ## [0.1.0] — 2026-02-19
 
 ### Added
