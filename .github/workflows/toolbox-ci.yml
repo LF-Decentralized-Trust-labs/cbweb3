@@ -1,0 +1,75 @@
+name: Toolbox CI
+
+on:
+  pull_request:
+    paths:
+      - 'Toolbox/**'
+      - '.github/workflows/toolbox-ci.yml'
+
+jobs:
+  lint-openapi:
+    name: Lint OpenAPI specs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Spectral
+        run: npm install -g @stoplight/spectral-cli
+      - name: Lint all OpenAPI specs
+        run: |
+          for spec in Toolbox/contracts/*/openapi_*.yaml; do
+            echo "--- Linting $spec ---"
+            spectral lint "$spec" --fail-severity=error
+          done
+
+  validate-schemas:
+    name: Validate mock and vector schemas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install ajv-cli
+        run: npm install -g ajv-cli ajv-formats
+      - name: Validate mock files
+        run: |
+          for mock in $(find Toolbox/mocks -name '*.json' -not -name 'README*'); do
+            echo "--- Validating $mock ---"
+            ajv validate -s Toolbox/schemas/mock.schema.json -d "$mock" --spec=draft2020
+          done
+      - name: Validate test vector files
+        run: |
+          for vector in $(find Toolbox/test-vectors -name '*.json' -not -name 'README*'); do
+            echo "--- Validating $vector ---"
+            ajv validate -s Toolbox/schemas/vector.schema.json -d "$vector" --spec=draft2020
+          done
+
+  conformance-smoke:
+    name: Conformance smoke tests (Prism)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          npm install -g @stoplight/prism-cli
+          pip install pytest requests
+      - name: Start Prism mock server
+        run: |
+          prism mock Toolbox/contracts/pvp/openapi_pvp_v0.1.0.yaml --port 4010 --host 0.0.0.0 &
+          sleep 3
+          curl -s http://localhost:4010/api/v1/fx/agreement -X POST -H "Content-Type: application/json" -d '{}' || true
+      - name: Run conformance tests (happy-path only against mock)
+        run: |
+          cd Toolbox/conformance
+          pytest tests/ -m happy_path -v --base-url=http://localhost:4010 || true
+        env:
+          CBWEB3_BASE_URL: http://localhost:4010

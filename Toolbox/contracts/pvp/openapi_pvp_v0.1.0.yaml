@@ -160,6 +160,10 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "409":
           description: Funds already locked for this agreement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /htlc/settle:
     post:
@@ -202,6 +206,13 @@ paths:
                 message: "Provided secret does not match the hashLock"
         "410":
           description: HTLC expired (timeLock exceeded)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: "HTLC_EXPIRED"
+                message: "HTLC timeLock has expired. Settlement is no longer possible. Use /htlc/refund to reclaim funds."
 
   /htlc/refund:
     post:
@@ -238,6 +249,10 @@ paths:
                 blockNumber: 18500050
         "409":
           description: HTLC already settled or not yet expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /htlc/status:
     get:
