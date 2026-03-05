@@ -1,0 +1,61 @@
+{
+  "genesis": {
+    "config": {
+      "chainId": 1338,
+      "berlinBlock": 0,
+      "qbft": {
+        "blockperiodseconds": 2,
+        "epochlength": 30000,
+        "requesttimeoutseconds": 4
+      }
+    },
+    "nonce": "0x0",
+    "timestamp": "0x58ee40ba",
+    "gasLimit": "0x1c9c380",
+    "difficulty": "0x1",
+    "mixHash": "0x63746963616c2062797a616e74696e65206661756c7420746f6c6572616e6365",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "alloc": {
+      "fe3b557e8fb62b89f4916b721be55ceb828dbd73": {
+        "privateKey": "8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63",
+        "balance": "10000000000000000000000"
+      },
+      "627306090abaB3A6e1400e9345bC60c78a8BEf57": {
+        "privateKey": "c87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3",
+        "balance": "10000000000000000000000"
+      },
+      "f17f52151EbEF6C7334FAD080c5704D77216b732": {
+        "privateKey": "ae6ae8e5ccbfb04590405997ee2d52d2b330726137b875053c36d94e974d162f",
+        "balance": "10000000000000000000000"
+      },
+      "A2ef7fAd3FB7705424b7Cc27d21526828dc08aE8": {
+        "privateKey": "5b02fc9b19facc6de72b514a03db7f7fbd9f46b6ad6ffb24b8df575593ae87f1",
+        "balance": "10000000000000000000000"
+      },
+      "17e2FB46C3c8445cF458Fe94b795E32aE50fabA9": {
+        "privateKey": "808757b2a58565d728ad93093521bc6542fb3cf13a887669f7addf7a82ef085c",
+        "balance": "10000000000000000000000"
+      },
+      "3fCB45E5fED0c339e621bf1C2f87a3d1fB92E399": {
+        "privateKey": "c93fa4edf409b4dc98d0982235f75ac4b9c72d970986474508a08adc3f7ab7a9",
+        "balance": "10000000000000000000000"
+      },
+      "ccBa841B4CA824e72609609f79DEe43A99E44b74": {
+        "privateKey": "92f407740816a68b070375ff77002e3c44e577cfa4174be1ffabd7d74381b746",
+        "balance": "10000000000000000000000"
+      },
+      "12e28F145001CE04cCb26CBC944c244613d47270": {
+        "privateKey": "cd9cad007753ac89f39b72af18244e05b5fdc29b100b78b9bdd00a3946047c08",
+        "balance": "10000000000000000000000"
+      },
+      "7834B5AcFd91706b4d11046Ac7F296CA2e9528Ec": {
+        "privateKey": "ad7f423fe95b75d2d5492ee3fd75d2eaa3e191779e0385b18eac14aa586e9f1e",
+        "balance": "10000000000000000000000"
+      },
+      "2D5BEc6764271CddE02E6A7273ae1E65D58156Af": {
+        "privateKey": "027c7c15318e6ad5155041943c7f2a047111e205813d6befd3bc6ecde7154f97",
+        "balance": "10000000000000000000000"
+      }
+    }
+  }
+}
