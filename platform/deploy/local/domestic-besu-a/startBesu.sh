@@ -29,7 +29,7 @@ fi
 
 echo -e "${YELLOW}Setting up default values...${NC}"
 # Default values
-NODES=1
+NODES=3
 BASE_P2P_PORT=30303
 BASE_RPC_PORT=8545
 DEBUG_MODE=false
@@ -38,12 +38,12 @@ echo -e "${YELLOW}Checking if besu binary is installed...${NC}"
 # Check if besu binary is installed and download it if not
 if ! [ -x "$(command -v ./bin/besu)" ]; then
     if [ "$OS" = "Darwin" ]; then
-        wget -P . https://github.com/hyperledger/besu/releases/download/25.4.1/besu-25.4.1.tar.gz || curl -L -o besu-25.4.1.tar.gz https://github.com/hyperledger/besu/releases/download/25.4.1/besu-25.4.1.tar.gz
+        wget -P . https://github.com/hyperledger/besu/releases/download/25.8.0/besu-25.8.0.tar.gz || curl -L -o besu-25.8.0.tar.gz https://github.com/hyperledger/besu/releases/download/25.8.0/besu-25.8.0.tar.gz
     else
-        wget -P . https://github.com/hyperledger/besu/releases/download/25.4.1/besu-25.4.1.tar.gz
+        wget -P . https://github.com/hyperledger/besu/releases/download/25.8.0/besu-25.8.0.tar.gz
     fi
-    tar --strip-components=1 -xzf besu-25.4.1.tar.gz
-    rm besu-25.4.1.tar.gz
+    tar --strip-components=1 -xzf besu-25.8.0.tar.gz
+    rm besu-25.8.0.tar.gz
 fi
 echo
 
