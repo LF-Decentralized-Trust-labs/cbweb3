@@ -15,8 +15,11 @@ fi
 export $(grep -v '^#' .env.network | xargs)
 
 NEW_NODES=1
-BASE_P2P_PORT=30303
-BASE_RPC_PORT=8545
+CONTAINER_PREFIX="${CONTAINER_PREFIX:-cbweb3-spoke-a-besu}"
+NETWORK_NAME="${NETWORK_NAME:-cbweb3_spoke_a_besu_network}"
+BASE_P2P_PORT="${BASE_P2P_PORT:-30320}"
+BASE_RPC_PORT="${BASE_RPC_PORT:-8646}"
+BOOT_RPC_PORT="${BOOT_RPC_PORT:-8645}"
 DEBUG_MODE=""
 
 # Parse options
@@ -42,9 +45,11 @@ ECHO_NODES=$NEW_NODES
 
 generate_nodes_function() {
     for ((i = NODES; i <= (NEW_NODES + NODES - 1); i++)); do
-        local node_name="besu.node-${i}"
+        local node_name="${CONTAINER_PREFIX}.node-${i}"
         local p2p_port=$((BASE_P2P_PORT + i))
         local rpc_port=$((BASE_RPC_PORT + i))
+
+        mkdir -p "nodes/node${i}/data"
 
         echo -e "${BLUE}Creating node: ${node_name}${NC}"
         docker run -d \
@@ -52,14 +57,13 @@ generate_nodes_function() {
             --user root \
             -v "$(pwd)/nodes/node${i}/data:/opt/besu/data" \
             -v "$(pwd)/genesis:/opt/besu/genesis" \
-            -p ${rpc_port}:${rpc_port} \
-            -p ${p2p_port}:${p2p_port} \
-            -p ${rpc_port}:${rpc_port}/udp \
-            -p ${p2p_port}:${p2p_port}/udp \
-            --network besu_test_network \
+            -p ${rpc_port}:8545 \
+            -p ${p2p_port}:30303 \
+            -p ${p2p_port}:30303/udp \
+            --network "${NETWORK_NAME}" \
             --restart always \
             hyperledger/besu:latest \
-            --data-path=data --genesis-file=genesis/genesis.json --bootnodes=${E_ADDRESS} --p2p-port=${p2p_port} --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT --host-allowlist='*' --rpc-http-cors-origins='all' --rpc-http-port=${rpc_port} ${DEBUG_MODE}
+            --data-path=data --genesis-file=genesis/genesis.json --bootnodes=${E_ADDRESS} --p2p-port=30303 --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT --host-allowlist='*' --rpc-http-cors-origins='all' --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' --rpc-http-port=8545 --rpc-ws-port=8546 ${DEBUG_MODE}
         echo -e "${GREEN}Node ${node_name} created.${NC}\n"
     done
 }
@@ -92,20 +96,20 @@ for ((i = NODES; i <= (NEW_NODES + NODES - 1); i++)); do
 
     if [ $MAX_TRIES -eq $TRY_COUNT ]; then
         echo -e "${RED}Failed to retrieve NODE_ADDRESS. Stopping and removing node...${NC}"
-        docker stop node${i}
-        docker rm node${i} -f
+        docker stop "${CONTAINER_PREFIX}.node-${i}"
+        docker rm "${CONTAINER_PREFIX}.node-${i}" -f
         break
     fi
 
     echo -e "${BLUE}Cleaned NODE_ADDRESS: $NODE_ADDRESS${NC}"
 
     echo -e "${YELLOW}Starting Validator Voting Process${NC}"
-    echo -e "Requesting validator to node ${i} from http://localhost:8545..."
-    curl -s -X POST --data "{\"jsonrpc\":\"2.0\",\"method\":\"qbft_proposeValidatorVote\",\"params\":[\"$NODE_ADDRESS\",true],\"id\":1}" http://localhost:8545
+    echo -e "Requesting validator to node ${i} from http://localhost:${BOOT_RPC_PORT}..."
+    curl -s -X POST --data "{\"jsonrpc\":\"2.0\",\"method\":\"qbft_proposeValidatorVote\",\"params\":[\"$NODE_ADDRESS\",true],\"id\":1}" "http://localhost:${BOOT_RPC_PORT}"
     echo ""
 
     echo -e "Checking pending votes..."
-    curl -s -X POST --data '{"jsonrpc":"2.0","method":"qbft_getPendingVotes","params":[], "id":1}' http://localhost:8545
+    curl -s -X POST --data '{"jsonrpc":"2.0","method":"qbft_getPendingVotes","params":[], "id":1}' "http://localhost:${BOOT_RPC_PORT}"
     echo ""
 
     echo -e "Running requests from all validators to node${i}..."
@@ -118,7 +122,7 @@ for ((i = NODES; i <= (NEW_NODES + NODES - 1); i++)); do
 
     echo -e "${YELLOW}Waiting for validator to be added on list...${NC}"
     while [ true ]; do
-        VALIDATOR_LIST_LENGTH=$(curl -s -X POST --data '{"jsonrpc":"2.0","method":"qbft_getValidatorsByBlockNumber","params":["latest"],"id":1}' http://localhost:8545 | jq '.result | length')
+        VALIDATOR_LIST_LENGTH=$(curl -s -X POST --data '{"jsonrpc":"2.0","method":"qbft_getValidatorsByBlockNumber","params":["latest"],"id":1}' "http://localhost:${BOOT_RPC_PORT}" | jq '.result | length')
         if [ $VALIDATOR_LIST_LENGTH -eq $NODES ]; then
             echo -e "Validator add pending..."
             sleep 5
@@ -130,8 +134,8 @@ for ((i = NODES; i <= (NEW_NODES + NODES - 1); i++)); do
     done
 
     echo -e "${YELLOW}Close Validator Voting Process${NC}"
-    echo -e "Closing validator voting process for ${NODE_ADDRESS} from http://localhost:8545..."
-    curl -s -X POST --data "{\"jsonrpc\":\"2.0\",\"method\":\"qbft_discardValidatorVote\",\"params\":[\"$NODE_ADDRESS\"],\"id\":1}" http://localhost:8545
+    echo -e "Closing validator voting process for ${NODE_ADDRESS} from http://localhost:${BOOT_RPC_PORT}..."
+    curl -s -X POST --data "{\"jsonrpc\":\"2.0\",\"method\":\"qbft_discardValidatorVote\",\"params\":[\"$NODE_ADDRESS\"],\"id\":1}" "http://localhost:${BOOT_RPC_PORT}"
     echo ""
 
     for ((j = 1; j <= NODES - 1; j++)); do
@@ -142,7 +146,7 @@ for ((i = NODES; i <= (NEW_NODES + NODES - 1); i++)); do
     done
 
     echo -e "Checking pending votes..."
-    curl -s -X POST --data '{"jsonrpc":"2.0","method":"qbft_getPendingVotes","params":[], "id":1}' http://localhost:8545
+    curl -s -X POST --data '{"jsonrpc":"2.0","method":"qbft_getPendingVotes","params":[], "id":1}' "http://localhost:${BOOT_RPC_PORT}"
     echo ""
 
     NODES=$((NODES + 1))
@@ -153,6 +157,11 @@ echo -e "${BLUE}Updating network tracker file...${NC}"
 echo "NODES=$((NODES + NEW_NODES))" >.env.network
 echo "ITERATION=$((ITERATION + 1))" >>.env.network
 echo "E_ADDRESS=${E_ADDRESS}" >>.env.network
+echo "NETWORK_NAME=${NETWORK_NAME}" >>.env.network
+echo "CONTAINER_PREFIX=${CONTAINER_PREFIX}" >>.env.network
+echo "BOOT_RPC_PORT=${BOOT_RPC_PORT}" >>.env.network
+echo "BASE_RPC_PORT=${BASE_RPC_PORT}" >>.env.network
+echo "BASE_P2P_PORT=${BASE_P2P_PORT}" >>.env.network
 
 echo -e "${GREEN}==================================================${NC}"
 echo -e "${GREEN}$ECHO_NODES validator node(s) added successfully!${NC}"
