@@ -7,6 +7,14 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+NETWORK_NAME="spoke_a_besu_network"
+CONTAINER_PREFIX="cbweb3-spoke-a-besu"
+BOOTNODE_CONTAINER="${CONTAINER_PREFIX}.bootnode"
+NODE_CONTAINER_PREFIX="${CONTAINER_PREFIX}.node"
+
+BOOT_P2P_PORT=31303
+BOOT_RPC_PORT=8645
+
 # Remove previous Besu network
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo -e "${YELLOW}Stopping any existing Besu network...${NC}"
@@ -30,8 +38,8 @@ fi
 echo -e "${YELLOW}Setting up default values...${NC}"
 # Default values
 NODES=3
-BASE_P2P_PORT=30303
-BASE_RPC_PORT=8545
+BASE_P2P_PORT=30320
+BASE_RPC_PORT=8646
 DEBUG_MODE=false
 
 echo -e "${YELLOW}Checking if besu binary is installed...${NC}"
@@ -129,8 +137,8 @@ else
 fi
 echo
 
-echo -e "${BLUE}Starting docker network 'besu_test_network'...${NC}"
-docker network create --driver bridge besu_test_network
+echo -e "${BLUE}Starting docker network '${NETWORK_NAME}'...${NC}"
+docker network create --driver bridge "${NETWORK_NAME}"
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}Docker network created successfully.${NC}\n"
 else
@@ -139,18 +147,17 @@ fi
 
 echo -e "${BLUE}Starting bootnode on docker...${NC}"
 docker run -d \
-    --name besu.bootnode \
+    --name "${BOOTNODE_CONTAINER}" \
     --user root \
     -v "$(pwd)/nodes/bootnode/data:/opt/besu/data" \
     -v "$(pwd)/genesis:/opt/besu/genesis" \
-    -p 30303:30303 \
-    -p 8545:8545 \
-    -p 30303:30303/udp \
-    -p 8545:8545/udp \
-    --network besu_test_network \
+    -p ${BOOT_P2P_PORT}:30303 \
+    -p ${BOOT_RPC_PORT}:8545 \
+    -p ${BOOT_P2P_PORT}:30303/udp \
+    --network "${NETWORK_NAME}" \
     --restart always \
     hyperledger/besu:latest \
-    --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT --host-allowlist='*' --rpc-http-cors-origins='all' --rpc-http-host='0.0.0.0'  $BESU_LOGGING
+    --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT --host-allowlist='*' --rpc-http-cors-origins='all' --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
 
 echo
 
@@ -164,7 +171,7 @@ retry_delay=3
 retry_count=0
 
 while [ $retry_count -lt $max_retries ]; do
-    ENODE=$(curl -s -X POST --data '{"jsonrpc":"2.0","method":"net_enode","params":[],"id":1}' http://127.0.0.1:8545 | jq -r '.result')
+    ENODE=$(curl -s -X POST --data '{"jsonrpc":"2.0","method":"net_enode","params":[],"id":1}' "http://127.0.0.1:${BOOT_RPC_PORT}" | jq -r '.result')
     if [ -n "$ENODE" ] && [ "$ENODE" != "null" ]; then
         echo -e "${GREEN}ENODE retrieved successfully.${NC}"
         break
@@ -183,14 +190,14 @@ fi
 echo -e "${BLUE}ENODE: $ENODE${NC}\n"
 
 export E_ADDRESS="${ENODE#enode://}"
-DOCKER_NODE_1_ADDRESS=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' besu.bootnode)
+DOCKER_NODE_1_ADDRESS=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${BOOTNODE_CONTAINER}")
 export E_ADDRESS=$(echo "$E_ADDRESS" | sed -e "s/127.0.0.1/$DOCKER_NODE_1_ADDRESS/g")
 export E_ADDRESS="enode://$E_ADDRESS"
 
 generate_nodes_function() {
     local i=1
     while [ $i -le $((NODES - 1)) ]; do
-        local node_name="besu.node-${i}"
+        local node_name="${NODE_CONTAINER_PREFIX}-${i}"
         local p2p_port=$((BASE_P2P_PORT + i))
         local rpc_port=$((BASE_RPC_PORT + i))
 
@@ -200,14 +207,13 @@ generate_nodes_function() {
             --user root \
             -v "$(pwd)/nodes/node${i}/data:/opt/besu/data" \
             -v "$(pwd)/genesis:/opt/besu/genesis" \
-            -p ${rpc_port}:${rpc_port} \
-            -p ${p2p_port}:${p2p_port} \
-            -p ${rpc_port}:${rpc_port}/udp \
-            -p ${p2p_port}:${p2p_port}/udp \
-            --network besu_test_network \
+            -p ${rpc_port}:8545 \
+            -p ${p2p_port}:30303 \
+            -p ${p2p_port}:30303/udp \
+            --network "${NETWORK_NAME}" \
             --restart always \
             hyperledger/besu:latest \
-            --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 --bootnodes=${E_ADDRESS} --p2p-port=${p2p_port} --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT --host-allowlist='*' --rpc-http-cors-origins='all' --rpc-http-host='0.0.0.0' --rpc-http-port=${rpc_port} $BESU_LOGGING
+            --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 --bootnodes=${E_ADDRESS} --p2p-port=30303 --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT --host-allowlist='*' --rpc-http-cors-origins='all' --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' --rpc-http-port=8545 --rpc-ws-port=8546 $BESU_LOGGING
 
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}Node ${node_name} started successfully!${NC}\n"
@@ -225,6 +231,11 @@ cat >.env.network <<EOF
 NODES=$NODES
 ITERATION=1
 E_ADDRESS=$E_ADDRESS
+NETWORK_NAME=$NETWORK_NAME
+CONTAINER_PREFIX=$CONTAINER_PREFIX
+BOOT_RPC_PORT=$BOOT_RPC_PORT
+BASE_RPC_PORT=$BASE_RPC_PORT
+BASE_P2P_PORT=$BASE_P2P_PORT
 EOF
 
 echo -e "${GREEN}============================="

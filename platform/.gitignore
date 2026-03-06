@@ -26,3 +26,7 @@ artifacts/
 
 # OS
 .DS_Store
+
+# Custom agent assets
+.github/assets/*
+!.github/assets/README.md

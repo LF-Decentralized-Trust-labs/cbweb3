@@ -2,7 +2,7 @@
 
 This folder contains the local runtime setup for the CBWeb3 platform, focused on three main infrastructure components:
 
-- Besu private networks (domestic A, domestic B, international)
+- Besu private networks (hub, spoke A, spoke B)
 - Keycloak (identity and access management)
 - PostgreSQL (relational storage for local services)
 
@@ -14,9 +14,9 @@ It follows the same modular architecture described in the project root documenta
 
 There are three independent Besu environments:
 
-- `domestic-besu-a` (chainId 1337)
-- `domestic-besu-b` (chainId 1338)
-- `international-besu` (chainId 1339)
+- `hub-besu`
+- `spoke-besu-a`
+- `spoke-besu-b`
 
 Each environment has its own scripts and artifacts:
 
@@ -25,6 +25,14 @@ Each environment has its own scripts and artifacts:
 - optional node expansion with `addNewNode.sh`
 
 These networks simulate distinct ledgers for domestic and cross-border scenarios.
+
+Each network now uses:
+
+- dedicated Docker network name,
+- dedicated container prefix,
+- dedicated host RPC/P2P port range.
+
+This avoids collisions when all three Besu stacks run at the same time.
 
 ### 2) Keycloak
 
@@ -54,7 +62,7 @@ It is intended to back local backend services that require relational persistenc
 
 ## How components communicate
 
-- Besu nodes communicate inside their own Docker bridge network (`besu_test_network`, created by each Besu start script).
+- Besu nodes communicate inside their own Docker bridge network (one per stack, created by each `startBesu.sh`).
 - Keycloak and PostgreSQL communicate on `cbweb3_network` (external Docker network used by Compose).
 - Local applications can access:
   - Keycloak on `localhost:${KEYCLOAK_PORT}` (default `8081`)
@@ -87,13 +95,17 @@ Use these templates:
 
 From repository root:
 
-- `make up` starts:
-  - domestic Besu A
-  - domestic Besu B
-  - international Besu
-  - Compose services (Keycloak + PostgreSQL)
+- `make up-besu` starts only Besu stacks (hub + spoke A + spoke B).
 
-- `make down` stops Compose services and all Besu environments.
+- `make up-infra` starts Compose services (Keycloak + PostgreSQL).
+
+- `make up` starts full local stack (Besu + infra).
+
+- `make down-infra` stops Compose services.
+
+- `make down-besu` stops only Besu stacks.
+
+- `make down` stops full local stack.
 
 ## Manual Keycloak credentials refresh
 
@@ -106,6 +118,8 @@ The script reads admin/container settings from `.env` and recreates `.env.keyclo
 ## Compose variable fallbacks
 
 Compose uses shell-style defaults (e.g. `${POSTGRES_PORT:-5432}`), so local startup still works when some variables are not explicitly set.
+
+Only Keycloak and PostgreSQL variables are currently used by Compose in local mode.
 
 ## Security note
 
