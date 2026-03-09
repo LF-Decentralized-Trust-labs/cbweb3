@@ -15,12 +15,14 @@ class MockSSEService {
     this.timer = setInterval(() => {
       const event: SupervisorEvent = {
         id: `evt_${Math.random().toString(36).slice(2, 10)}`,
-        type: Math.random() > 0.5 ? "POOL_IMBALANCE" : "CIRCUIT_BREAKER",
+        type: Math.random() > 0.66 ? "POOL_IMBALANCE" : Math.random() > 0.5 ? "AUDIT_ACTIVITY" : "REGISTRY_STATUS",
         severity: Math.random() > 0.7 ? "CRITICAL" : "HIGH",
         message:
-          Math.random() > 0.5
+          Math.random() > 0.66
             ? "Imbalance alert from Liquidity Monitor (threshold exceeded 70/30)"
-            : "Governance action recorded for AMM stability controls",
+            : Math.random() > 0.5
+              ? "New compliance audit activity recorded"
+              : "Compliance registry status update received",
         createdAt: new Date().toISOString(),
       };
       this.subscribers.forEach((subscriber) => subscriber(event));

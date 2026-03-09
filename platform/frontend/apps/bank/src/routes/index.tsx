@@ -6,9 +6,9 @@ import { AMMTradingPage } from "../pages/AMMTradingPage";
 import { ComplianceCenterPage } from "../pages/ComplianceCenterPage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { HTLCTradingPage } from "../pages/HTLCTradingPage";
+import { LiquidityTransfersPage } from "../pages/LiquidityTransfersPage";
 import { LoginPage } from "../pages/LoginPage";
 import { SettingsPage } from "../pages/SettingsPage";
-import { TokenManagementPage } from "../pages/TokenManagementPage";
 
 export const routes: RouteObject[] = [
   {
@@ -23,7 +23,7 @@ export const routes: RouteObject[] = [
         element: <AppLayout />,
         children: [
           { index: true, element: <DashboardPage /> },
-          { path: "tokens", element: <TokenManagementPage /> },
+          { path: "liquidity", element: <LiquidityTransfersPage /> },
           { path: "htlc", element: <HTLCTradingPage /> },
           { path: "amm", element: <AMMTradingPage /> },
           { path: "compliance", element: <ComplianceCenterPage /> },

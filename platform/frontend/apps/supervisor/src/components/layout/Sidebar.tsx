@@ -4,9 +4,9 @@ import { Activity, ShieldCheck, Users, Search, SlidersHorizontal, Settings } fro
 const links = [
   { to: "/", label: "Dashboard", icon: Activity },
   { to: "/liquidity", label: "Liquidity Monitor", icon: SlidersHorizontal },
-  { to: "/participants", label: "Participants", icon: Users },
+  { to: "/participants", label: "Compliance Registry", icon: Users },
   { to: "/audit", label: "Audit Vault", icon: Search },
-  { to: "/stability", label: "Stability Controls", icon: ShieldCheck },
+  { to: "/stability", label: "Stability Insights", icon: ShieldCheck },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 

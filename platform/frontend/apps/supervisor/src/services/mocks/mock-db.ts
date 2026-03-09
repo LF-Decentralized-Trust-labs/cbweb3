@@ -1,18 +1,11 @@
 import type {
-  AMMConfigRequest,
   AuditLogEntry,
-  CircuitBreakerRequest,
-  CredentialRevocationRequest,
-  CredentialRevocationResponse,
   DecryptTransactionRequest,
   DecryptTransactionResponse,
-  InstitutionalOnboardingRequest,
   LoginResponse,
   NetworkOverview,
   Participant,
   PoolStatus,
-  SanctionsCheckResponse,
-  SanctionsListEntry,
   StabilityAlert,
   SupervisorUser,
 } from "../../types";
@@ -31,29 +24,17 @@ const supervisorUser: SupervisorUser = {
   walletAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0",
   permissions: [
     Permission.VIEW_NETWORK,
-    Permission.MANAGE_PARTICIPANTS,
-    Permission.REVOKE_CREDENTIALS,
+    Permission.VIEW_REGISTRY,
+    Permission.VIEW_AUDIT_LOGS,
     Permission.DECRYPT_TRANSACTIONS,
-    Permission.CIRCUIT_BREAKER,
-    Permission.MANAGE_AMM,
-    Permission.CHECK_SANCTIONS,
+    Permission.VIEW_STABILITY,
   ],
   createdAt: nowIso(),
 };
 
 let sessionActive = false;
 
-const sanctionsList: SanctionsListEntry[] = [
-  {
-    address: "0x1111111111111111111111111111111111111111",
-    entityName: "Sanctioned Finance Group",
-    reason: "AML investigation",
-    addedAt: "2026-02-01T12:00:00.000Z",
-    source: "OFAC",
-  },
-];
-
-let participants: Participant[] = [
+const participants: Participant[] = [
   {
     id: "ptc_001",
     institutionName: "Banco Andino",
@@ -98,10 +79,6 @@ const pools: PoolStatus[] = [
     updatedAt: nowIso(),
   },
 ];
-
-let circuitBreakerActive = false;
-let feeBps = 30;
-let slippageBps = 50;
 
 let auditLogs: AuditLogEntry[] = [
   {
@@ -169,78 +146,9 @@ export const mockDb = {
     return participants;
   },
 
-  async onboardInstitution(payload: InstitutionalOnboardingRequest): Promise<Participant> {
-    await wait(450);
-    const participant: Participant = {
-      id: makeId("ptc"),
-      institutionName: payload.institutionName,
-      evmAddress: payload.evmAddress,
-      publicKey: payload.publicKey,
-      credentialStatus: CredentialStatus.ACTIVE,
-      jurisdictionCode: payload.jurisdictionCode,
-      institutionType: payload.institutionType,
-      onboardedAt: nowIso(),
-      lastActivityAt: nowIso(),
-    };
-    participants = [participant, ...participants];
-    addAudit("INSTITUTION_ONBOARDED", payload.evmAddress);
-    return participant;
-  },
-
-  async revokeCredential(payload: CredentialRevocationRequest): Promise<CredentialRevocationResponse> {
-    await wait(400);
-    participants = participants.map((participant) =>
-      participant.evmAddress.toLowerCase() === payload.address.toLowerCase()
-        ? { ...participant, credentialStatus: CredentialStatus.REVOKED, lastActivityAt: nowIso() }
-        : participant,
-    );
-    addAudit("CREDENTIAL_REVOKED", payload.address);
-    return {
-      address: payload.address,
-      revokedAt: nowIso(),
-      reason: payload.reason,
-      effectiveDate: payload.effectiveDate ?? nowIso(),
-    };
-  },
-
-  async checkSanctions(address: string): Promise<SanctionsCheckResponse> {
-    await wait(200);
-    const matches = sanctionsList.filter((item) => item.address.toLowerCase() === address.toLowerCase());
-    addAudit("SANCTIONS_CHECK_PERFORMED", address);
-    return {
-      address,
-      isSanctioned: matches.length > 0,
-      matches,
-      checkedAt: nowIso(),
-    };
-  },
-
   async getPoolStatuses(): Promise<PoolStatus[]> {
     await wait(220);
     return pools;
-  },
-
-  async setCircuitBreaker(payload: CircuitBreakerRequest) {
-    await wait(250);
-    circuitBreakerActive = payload.action === "PAUSE";
-    addAudit(`CIRCUIT_BREAKER_${payload.action}`, payload.reason);
-    return {
-      isActive: circuitBreakerActive,
-      updatedAt: nowIso(),
-      reason: payload.reason,
-    };
-  },
-
-  async updateAmmConfig(payload: AMMConfigRequest) {
-    await wait(250);
-    feeBps = payload.feeBps;
-    slippageBps = payload.slippageBps;
-    addAudit("AMM_CONFIG_UPDATED", payload.reason);
-    return {
-      feeBps,
-      slippageBps,
-      updatedAt: nowIso(),
-    };
   },
 
   async getStabilityAlerts(): Promise<StabilityAlert[]> {

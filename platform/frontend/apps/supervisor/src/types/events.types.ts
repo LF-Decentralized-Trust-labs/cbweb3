@@ -1,4 +1,4 @@
-export type SupervisorEventType = "POOL_IMBALANCE" | "CIRCUIT_BREAKER" | "PARTICIPANT_ONBOARDED" | "CREDENTIAL_REVOKED";
+export type SupervisorEventType = "POOL_IMBALANCE" | "AUDIT_ACTIVITY" | "REGISTRY_STATUS";
 
 export interface SupervisorEvent {
   id: string;

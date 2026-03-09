@@ -6,6 +6,8 @@ import type {
   CreateAgreementRequest,
   FXAgreement,
   HTLCLock,
+  OnRampRequest,
+  OnRampRequestPayload,
   TokenBalance,
   TokenTransaction,
   TransferRequest,
@@ -32,8 +34,19 @@ let tokenBalance: TokenBalance = {
 };
 
 let tokenTransactions: TokenTransaction[] = [
-  { id: makeId("tx"), kind: "MINT", amount: "500000", status: "CONFIRMED", createdAt: nowIso() },
   { id: makeId("tx"), kind: "TRANSFER", amount: "75000", status: "PENDING", createdAt: nowIso() },
+];
+
+let onRampRequests: OnRampRequest[] = [
+  {
+    id: makeId("req"),
+    type: "ON_RAMP",
+    amount: "200000",
+    fiatProofRef: "reserve-proof-2026-03",
+    justification: "Monthly settlement window liquidity allocation.",
+    status: "PENDING",
+    createdAt: nowIso(),
+  },
 ];
 
 let agreements: FXAgreement[] = [];
@@ -77,17 +90,6 @@ export const mockDb = {
     await wait(250);
     return tokenBalance;
   },
-  async mint(amount: string, _fiatProofRef: string) {
-    await wait(500);
-    tokenBalance = {
-      ...tokenBalance,
-      publicBalance: String(BigInt(tokenBalance.publicBalance) + BigInt(amount)),
-      updatedAt: nowIso(),
-    };
-    const tx: TokenTransaction = { id: makeId("tx"), kind: "MINT", amount, status: "CONFIRMED", createdAt: nowIso() };
-    tokenTransactions = [tx, ...tokenTransactions];
-    return tx;
-  },
   async transfer(params: TransferRequest) {
     await wait(500);
     const amount = BigInt(params.amount);
@@ -109,6 +111,33 @@ export const mockDb = {
     };
     tokenTransactions = [tx, ...tokenTransactions];
     return tx;
+  },
+  async submitOnRampRequest(payload: OnRampRequestPayload) {
+    await wait(500);
+    const request: OnRampRequest = {
+      id: makeId("req"),
+      type: payload.type,
+      amount: payload.amount,
+      fiatProofRef: payload.fiatProofRef,
+      justification: payload.justification,
+      status: "PENDING",
+      createdAt: nowIso(),
+    };
+    onRampRequests = [request, ...onRampRequests];
+
+    const tx: TokenTransaction = {
+      id: makeId("tx"),
+      kind: "ON_RAMP_REQUEST",
+      amount: payload.amount,
+      status: "CONFIRMED",
+      createdAt: nowIso(),
+    };
+    tokenTransactions = [tx, ...tokenTransactions];
+    return request;
+  },
+  async getOnRampRequests() {
+    await wait(250);
+    return onRampRequests;
   },
   async getTransactions() {
     await wait(250);
@@ -139,8 +168,11 @@ export const mockDb = {
     locks = [lock, ...locks];
     return lock;
   },
-  async settle(lockId: string, _secret: string) {
+  async settle(lockId: string, secret: string) {
     await wait(500);
+    if (!secret.trim()) {
+      throw new Error("Secret is required");
+    }
     locks = locks.map((item) => (item.id === lockId ? { ...item, status: "SETTLED" } : item));
     const settled = locks.find((item) => item.id === lockId);
     if (!settled) throw new Error("Lock not found");

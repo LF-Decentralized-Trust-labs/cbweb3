@@ -1,4 +1,4 @@
-export type UserRole = "CENTRAL_BANK_ADMIN" | "COMMERCIAL_BANK_OPERATOR";
+export type UserRole = "COMMERCIAL_BANK_OPERATOR";
 
 export type AsyncStatus = "idle" | "loading" | "success" | "error";
 

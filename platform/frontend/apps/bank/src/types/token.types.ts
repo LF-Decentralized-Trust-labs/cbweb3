@@ -5,9 +5,25 @@ export interface TokenBalance {
   updatedAt: string;
 }
 
-export interface MintRequest {
+export type LiquidityRequestType = "ON_RAMP" | "OFF_RAMP";
+
+export interface OnRampRequestPayload {
+  type: LiquidityRequestType;
   amount: string;
   fiatProofRef: string;
+  justification: string;
+}
+
+export type OnRampRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "COMPLETED";
+
+export interface OnRampRequest {
+  id: string;
+  type: LiquidityRequestType;
+  amount: string;
+  fiatProofRef: string;
+  justification: string;
+  status: OnRampRequestStatus;
+  createdAt: string;
 }
 
 export interface TransferRequest {
@@ -18,7 +34,7 @@ export interface TransferRequest {
 
 export interface TokenTransaction {
   id: string;
-  kind: "MINT" | "TRANSFER";
+  kind: "TRANSFER" | "ON_RAMP_REQUEST";
   amount: string;
   status: "PENDING" | "CONFIRMED" | "FAILED";
   createdAt: string;

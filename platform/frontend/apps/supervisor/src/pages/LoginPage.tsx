@@ -40,7 +40,7 @@ export function LoginPage() {
   useEffect(() => {
     if (isAuthenticated) {
       toast("SSO session established", {
-        description: "Welcome to the Supervisor Control Plane.",
+        description: "Welcome to the Supervisor Oversight Portal.",
       });
       navigate("/", { replace: true });
     }
@@ -59,7 +59,7 @@ export function LoginPage() {
           </Badge>
           <h1 className="text-3xl font-semibold tracking-tight">Regional Supervisor Portal</h1>
           <p className="mt-3 max-w-md text-sm text-muted-foreground">
-            Monitor AMM stability, manage institutional credentials, and run forensic oversight over shielded flows.
+            Monitor AMM stability, review compliance registry visibility, and run forensic oversight over shielded flows.
           </p>
 
           <div className="mt-8 grid gap-4">
@@ -86,7 +86,7 @@ export function LoginPage() {
               <Building2 className="h-5 w-5" />
             </div>
             <CardTitle>Sign in to Supervisor Portal</CardTitle>
-            <CardDescription>Use institutional SSO/OIDC credentials to access governance controls.</CardDescription>
+            <CardDescription>Use institutional SSO/OIDC credentials to access supervisory oversight.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={onSubmit} className="space-y-4">

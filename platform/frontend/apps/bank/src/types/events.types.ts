@@ -1,8 +1,8 @@
 export type EventType =
   | "htlc.locked"
   | "htlc.settled"
-  | "token.minted"
   | "token.transferred"
+  | "onramp.request.updated"
   | "amm.pool.updated";
 
 export interface BankEvent<TPayload = unknown> {

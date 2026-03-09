@@ -3,7 +3,7 @@ import { ArrowRightLeft, Coins, LayoutDashboard, Scale, Settings, ShieldCheck } 
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/tokens", label: "Token Management", icon: Coins },
+  { to: "/liquidity", label: "Liquidity & Transfers", icon: Coins },
   { to: "/htlc", label: "HTLC Trading", icon: ArrowRightLeft },
   { to: "/amm", label: "AMM Trading", icon: Scale },
   { to: "/compliance", label: "Compliance", icon: ShieldCheck },

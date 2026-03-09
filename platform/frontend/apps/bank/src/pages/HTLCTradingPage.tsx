@@ -44,9 +44,7 @@ export function HTLCTradingPage() {
   const [counterparty, setCounterparty] = useState("Bank-US");
   const [rate, setRate] = useState("5.10");
   const [notional, setNotional] = useState("10000");
-  const [expiryAt, setExpiryAt] = useState<Date | undefined>(
-    new Date(Date.now() + 60 * 60 * 1000),
-  );
+  const [expiryAt, setExpiryAt] = useState<Date | undefined>(undefined);
   const [agreementIdForLock, setAgreementIdForLock] = useState<string>("");
   const [secret, setSecret] = useState("my-secret");
   const [lastHashLock, setLastHashLock] = useState("");

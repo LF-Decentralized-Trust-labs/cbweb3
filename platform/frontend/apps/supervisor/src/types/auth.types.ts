@@ -8,12 +8,10 @@ export type SupervisorRole = (typeof SupervisorRole)[keyof typeof SupervisorRole
 
 export const Permission = {
   VIEW_NETWORK: "VIEW_NETWORK",
-  MANAGE_PARTICIPANTS: "MANAGE_PARTICIPANTS",
-  REVOKE_CREDENTIALS: "REVOKE_CREDENTIALS",
+  VIEW_REGISTRY: "VIEW_REGISTRY",
+  VIEW_AUDIT_LOGS: "VIEW_AUDIT_LOGS",
   DECRYPT_TRANSACTIONS: "DECRYPT_TRANSACTIONS",
-  MANAGE_AMM: "MANAGE_AMM",
-  CIRCUIT_BREAKER: "CIRCUIT_BREAKER",
-  CHECK_SANCTIONS: "CHECK_SANCTIONS",
+  VIEW_STABILITY: "VIEW_STABILITY",
 } as const;
 
 export type Permission = (typeof Permission)[keyof typeof Permission];

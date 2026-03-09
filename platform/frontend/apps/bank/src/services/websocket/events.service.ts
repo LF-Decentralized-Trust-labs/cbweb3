@@ -3,7 +3,7 @@ import type { BankEvent, EventType } from "../../types";
 type Subscriber = (event: BankEvent) => void;
 
 const randomEvent = (): BankEvent => {
-  const types: EventType[] = ["htlc.locked", "htlc.settled", "token.minted", "token.transferred", "amm.pool.updated"];
+  const types: EventType[] = ["htlc.locked", "htlc.settled", "token.transferred", "onramp.request.updated", "amm.pool.updated"];
   return {
     id: `evt_${Math.random().toString(36).slice(2, 10)}`,
     type: types[Math.floor(Math.random() * types.length)],

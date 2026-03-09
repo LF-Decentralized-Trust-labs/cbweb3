@@ -1,9 +1,9 @@
-import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Progress } from "@cbweb3/ui";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, Progress } from "@cbweb3/ui";
 import { useEffect } from "react";
 import { useStabilityStore } from "../stores";
 
 export function StabilityControlsPage() {
-  const { pools, alerts, circuitBreakerActive, refresh } = useStabilityStore();
+  const { pools, alerts, refresh } = useStabilityStore();
 
   useEffect(() => {
     void refresh();
@@ -13,15 +13,10 @@ export function StabilityControlsPage() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Stability Controls Dashboard</CardTitle>
-          <CardDescription>Dedicated scenario-B controls and risk posture for AMM network.</CardDescription>
+          <CardTitle>Stability Insights Dashboard</CardTitle>
+          <CardDescription>Read-only scenario-B risk posture for AMM network.</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-3">
-          <div className="rounded-md border border-border p-3">
-            <p className="text-sm text-muted-foreground">Circuit Breaker</p>
-            <p className="mt-1 text-lg font-semibold">{circuitBreakerActive ? "PAUSED" : "ACTIVE"}</p>
-            <Badge variant={circuitBreakerActive ? "destructive" : "success"}>{circuitBreakerActive ? "Emergency mode" : "Normal mode"}</Badge>
-          </div>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-md border border-border p-3">
             <p className="text-sm text-muted-foreground">Imbalanced Pools</p>
             <p className="mt-1 text-lg font-semibold">{pools.filter((pool) => pool.isImbalanced).length}</p>
