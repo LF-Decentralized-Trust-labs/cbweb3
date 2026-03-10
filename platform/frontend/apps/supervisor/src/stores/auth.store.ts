@@ -38,12 +38,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
   },
   checkSession: async () => {
-    set({ status: "loading" });
-    try {
-      const response = await authApi.me();
-      set({ user: response.user, isAuthenticated: true, initialized: true, status: "idle", error: null });
-    } catch {
-      set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
-    }
+    set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
   },
 }));

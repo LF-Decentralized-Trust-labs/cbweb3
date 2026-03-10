@@ -1,16 +1,15 @@
 import { create } from "zustand";
 import { authApi } from "../services/api";
-import type { User } from "../types";
+import type { AsyncStatus, TreasuryUser } from "../types";
 
 type AuthState = {
-  user: User | null;
+  user: TreasuryUser | null;
   isAuthenticated: boolean;
   initialized: boolean;
-  status: "idle" | "loading" | "error";
+  status: AsyncStatus;
   error: string | null;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  bindWallet: (walletAddress: string) => Promise<void>;
   checkSession: () => Promise<void>;
 };
 
@@ -29,23 +28,14 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({
         status: "error",
         error: error instanceof Error ? error.message : "Unable to login",
-        initialized: true,
         isAuthenticated: false,
+        initialized: true,
       });
     }
   },
   logout: async () => {
     await authApi.logout();
     set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
-  },
-  bindWallet: async (walletAddress) => {
-    set({ status: "loading", error: null });
-    try {
-      const user = await authApi.bindWallet(walletAddress);
-      set({ user, status: "idle" });
-    } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to bind wallet" });
-    }
   },
   checkSession: async () => {
     set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });

@@ -6,13 +6,27 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "type-check": "tsc --noEmit",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest"
   },
   "dependencies": {
     "@cbweb3/ui": "*",
+    "@hookform/resolvers": "^5.2.2",
+    "@tanstack/react-query": "^5.90.21",
+    "axios": "^1.13.6",
+    "date-fns": "^4.1.0",
+    "immer": "^11.1.4",
+    "lucide-react": "^0.577.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "react-hook-form": "^7.71.2",
+    "react-router-dom": "^7.13.1",
+    "recharts": "^3.7.0",
+    "socket.io-client": "^4.8.1",
+    "zod": "^4.3.6",
+    "zustand": "^5.0.11"
   },
   "devDependencies": {
     "@cbweb3/config": "*",
@@ -31,6 +45,7 @@
     "tailwindcss": "^4.1.12",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
+    "vitest": "^3.2.4",
     "vite": "^7.3.1"
   }
 }
