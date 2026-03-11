@@ -4,21 +4,33 @@ DEPLOY_DIR := deploy/$(TARGET)
 create-shared-network:
 	@docker network inspect cbweb3_network >/dev/null 2>&1 || docker network create cbweb3_network
 
-up-besu:
+up-hub:
 	@echo "Starting Hub Besu..."
 	@cd ./$(DEPLOY_DIR)/hub-besu && ./startBesu.sh
+
+up-spoke-a:
 	@echo "Starting Spoke Besu A..."
 	@cd ./$(DEPLOY_DIR)/spoke-besu-a && ./startBesu.sh
+
+up-spoke-b:
 	@echo "Starting Spoke Besu B..."
 	@cd ./$(DEPLOY_DIR)/spoke-besu-b && ./startBesu.sh
 
-down-besu:
+up-besu: up-hub up-spoke-a up-spoke-b
+
+down-hub:
 	@echo "Stopping Hub Besu..."
 	@cd ./$(DEPLOY_DIR)/hub-besu && ./stopBesu.sh
+
+down-spoke-a:
 	@echo "Stopping Spoke Besu A..."
 	@cd ./$(DEPLOY_DIR)/spoke-besu-a && ./stopBesu.sh
+
+down-spoke-b:
 	@echo "Stopping Spoke Besu B..."
 	@cd ./$(DEPLOY_DIR)/spoke-besu-b && ./stopBesu.sh
+
+down-besu: down-hub down-spoke-a down-spoke-b
 
 up-infra: create-shared-network
 	@echo "Starting Compose Services (Keycloak, Postgres)..."
@@ -31,7 +43,11 @@ down-infra:
 
 up: up-besu up-infra
 
+up-minimal: up-hub up-infra
+
 down: down-infra down-besu
+
+down-minimal: down-infra down-hub
 
 test-api-gateway:
 	@echo "Running api-gateway tests..."
@@ -55,7 +71,4 @@ down-backend:
 	@echo "Stopping backend stack..."
 	@docker compose -f backend/docker-compose-backend.yaml down -v
 
-.PHONY: create-shared-network up-besu down-besu up-infra down-infra up down \
-	test-api-gateway test-identity test-data-access test-services \
-	up-backend down-backend
-.PHONY: create-shared-network up-besu down-besu up-infra down-infra up down
+.PHONY: create-shared-network up-hub up-spoke-a up-spoke-b down-hub down-spoke-a down-spoke-b up-besu down-besu up-infra down-infra up up-minimal down down-minimal test-api-gateway test-identity test-data-access test-services up-backend down-backend
