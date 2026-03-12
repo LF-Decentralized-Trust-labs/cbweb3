@@ -12,7 +12,7 @@ import (
 // It loads runtime configuration, builds the HTTP app with all dependencies,
 // and starts listening on the configured port.
 func main() {
-	// Load environment-driven configuration (port, auth mode, timeouts, etc.).
+	// Load environment-driven configuration (port, timeouts, etc.).
 	cfg := config.Load()
 
 	// Build the Fiber app and wire adapters, handlers, and middleware.
@@ -22,9 +22,8 @@ func main() {
 	}
 
 	// Start the HTTP server and keep the process alive until it exits.
-	log.Printf("api-gateway listening on :%s (mode=%s)", cfg.AppPort, cfg.AuthMode)
+	log.Printf("api-gateway listening on :%s", cfg.AppPort)
 	if err := server.Listen(":" + cfg.AppPort); err != nil {
 		log.Fatalf("server stopped with error: %v", err)
 	}
 }
-

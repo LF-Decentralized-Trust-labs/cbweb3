@@ -3,13 +3,16 @@ package app_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +21,10 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gofiber/fiber/v2"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/encoding"
+	"google.golang.org/grpc/status"
 )
 
 func TestGatewayHealth(t *testing.T) {
@@ -132,15 +139,13 @@ func TestKYCStatusEndpoint(t *testing.T) {
 
 func mustNewGateway(t *testing.T) *fiber.App {
 	t.Helper()
+	identityAddr, cleanup := startIdentityMockGRPC(t)
+	t.Cleanup(cleanup)
 
 	cfg := config.Config{
-		AppPort:        "8080",
-		AuthMode:       config.ModeMock,
-		TokenTTL:       15 * time.Minute,
-		TokenIssuer:    "test-issuer",
-		TokenAudience:  "test-audience",
-		MockClients:    map[string]string{"bank-a": "secret-a", "bank-b": "secret-b", "bank-z": "secret-z"},
-		RequestTimeout: 2 * time.Second,
+		AppPort:          "8080",
+		RequestTimeout:   2 * time.Second,
+		IdentityGRPCAddr: identityAddr,
 	}
 
 	server, err := app.New(cfg)
@@ -206,3 +211,157 @@ func signWalletBind(t *testing.T, key *ecdsa.PrivateKey, subject, walletAddress 
 	return "0x" + hex.EncodeToString(sig)
 }
 
+type jsonCodec struct{}
+
+func (jsonCodec) Name() string { return "json" }
+func (jsonCodec) Marshal(v any) ([]byte, error) {
+	return json.Marshal(v)
+}
+func (jsonCodec) Unmarshal(data []byte, v any) error {
+	return json.Unmarshal(data, v)
+}
+
+type identityMock struct {
+	mu           sync.Mutex
+	byUser       map[string]string
+	byWallet     map[string]string
+	tokenToUser  map[string]string
+	validSecrets map[string]string
+}
+
+type identityMockService interface{}
+
+func startIdentityMockGRPC(t *testing.T) (string, func()) {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start tcp listener: %v", err)
+	}
+	codec := jsonCodec{}
+	encoding.RegisterCodec(codec)
+
+	mock := &identityMock{
+		byUser:       map[string]string{},
+		byWallet:     map[string]string{},
+		tokenToUser:  map[string]string{},
+		validSecrets: map[string]string{"bank-a": "secret-a", "bank-b": "secret-b", "bank-z": "secret-z"},
+	}
+
+	server := grpc.NewServer(grpc.ForceServerCodec(codec))
+	server.RegisterService(&grpc.ServiceDesc{
+		ServiceName: "identity.v1.IdentityService",
+		HandlerType: (*identityMockService)(nil),
+		Methods: []grpc.MethodDesc{
+			{MethodName: "Login", Handler: mock.loginHandler},
+			{MethodName: "ValidateToken", Handler: mock.validateHandler},
+			{MethodName: "BindWallet", Handler: mock.bindHandler},
+			{MethodName: "GetByUser", Handler: mock.getByUserHandler},
+		},
+	}, mock)
+
+	go func() {
+		_ = server.Serve(lis)
+	}()
+
+	cleanup := func() {
+		server.Stop()
+		_ = lis.Close()
+	}
+	return lis.Addr().String(), cleanup
+}
+
+func (m *identityMock) loginHandler(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+	var req struct {
+		User     string `json:"user"`
+		Password string `json:"password"`
+	}
+	if err := dec(&req); err != nil {
+		return nil, err
+	}
+	secret, ok := m.validSecrets[req.User]
+	if !ok || secret != req.Password {
+		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
+	}
+	token := "token-" + req.User
+	m.mu.Lock()
+	m.tokenToUser[token] = req.User
+	m.mu.Unlock()
+	return &struct {
+		AccessToken string `json:"access_token"`
+		TokenType   string `json:"token_type"`
+		ExpiresIn   int    `json:"expires_in"`
+	}{
+		AccessToken: token,
+		TokenType:   "Bearer",
+		ExpiresIn:   900,
+	}, nil
+}
+
+func (m *identityMock) validateHandler(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+	var req struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := dec(&req); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	user, ok := m.tokenToUser[req.AccessToken]
+	m.mu.Unlock()
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "invalid token")
+	}
+	return &struct {
+		Subject string   `json:"subject"`
+		Issuer  string   `json:"issuer"`
+		Roles   []string `json:"roles"`
+	}{Subject: user, Issuer: "identity-mock", Roles: []string{"bank"}}, nil
+}
+
+func (m *identityMock) bindHandler(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+	var req struct {
+		UserID        string `json:"user_id"`
+		WalletAddress string `json:"wallet_address"`
+	}
+	if err := dec(&req); err != nil {
+		return nil, err
+	}
+	userID := strings.TrimSpace(req.UserID)
+	wallet := strings.ToLower(strings.TrimSpace(req.WalletAddress))
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existingUser, ok := m.byWallet[wallet]; ok && existingUser != userID {
+		return nil, status.Error(codes.AlreadyExists, "wallet already bound")
+	}
+	if existingWallet, ok := m.byUser[userID]; ok && !strings.EqualFold(existingWallet, wallet) {
+		return nil, status.Error(codes.FailedPrecondition, "user already bound")
+	}
+	m.byWallet[wallet] = userID
+	m.byUser[userID] = wallet
+	return &struct {
+		UserID        string `json:"user_id"`
+		WalletAddress string `json:"wallet_address"`
+	}{UserID: userID, WalletAddress: wallet}, nil
+}
+
+func (m *identityMock) getByUserHandler(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+	var req struct {
+		UserID string `json:"user_id"`
+	}
+	if err := dec(&req); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	wallet, ok := m.byUser[req.UserID]
+	m.mu.Unlock()
+	if !ok {
+		return &struct {
+			Binding any  `json:"binding,omitempty"`
+			Found   bool `json:"found"`
+		}{Found: false}, nil
+	}
+	return &struct {
+		Binding any  `json:"binding,omitempty"`
+		Found   bool `json:"found"`
+	}{Binding: map[string]string{"user_id": req.UserID, "wallet_address": wallet}, Found: true}, nil
+}
