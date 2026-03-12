@@ -15,21 +15,29 @@ if [ -z "$TOTAL_LINE" ]; then
     exit 1
 fi
 
-COVERAGE_PERCENT=$(echo "$TOTAL_LINE" | sed -n 's/.*| *\([0-9.]*\)%.*/\1/p' | head -n1)
+TOTAL_METRICS=$(echo "$TOTAL_LINE" | grep -oE '[0-9]+\.[0-9]+%' | tr -d '%')
+LINES_PERCENT=$(echo "$TOTAL_METRICS" | sed -n '1p')
+STATEMENTS_PERCENT=$(echo "$TOTAL_METRICS" | sed -n '2p')
+BRANCHES_PERCENT=$(echo "$TOTAL_METRICS" | sed -n '3p')
+FUNCS_PERCENT=$(echo "$TOTAL_METRICS" | sed -n '4p')
 
-if [ -z "$COVERAGE_PERCENT" ]; then
+if [ -z "$LINES_PERCENT" ] || [ -z "$STATEMENTS_PERCENT" ] || [ -z "$BRANCHES_PERCENT" ] || [ -z "$FUNCS_PERCENT" ]; then
     echo ""
-    echo "❌ Error: Unable to extract coverage percentage"
+    echo "❌ Error: Unable to extract one or more Total coverage metrics"
     echo "Total Line: $TOTAL_LINE"
     exit 1
 fi
 
-# Convert to integer for comparison
-COVERAGE_INT=$(echo "$COVERAGE_PERCENT" | cut -d. -f1)
+LINES_INT=$(echo "$LINES_PERCENT" | cut -d. -f1)
+STATEMENTS_INT=$(echo "$STATEMENTS_PERCENT" | cut -d. -f1)
+BRANCHES_INT=$(echo "$BRANCHES_PERCENT" | cut -d. -f1)
+FUNCS_INT=$(echo "$FUNCS_PERCENT" | cut -d. -f1)
 THRESHOLD_INT=$COVERAGE_THRESHOLD
 
-# Calculate difference
-DIFFERENCE=$(echo "$THRESHOLD_INT - $COVERAGE_INT" | awk '{print $1 - $3}')
+LINES_DIFF=$((THRESHOLD_INT - LINES_INT))
+STATEMENTS_DIFF=$((THRESHOLD_INT - STATEMENTS_INT))
+BRANCHES_DIFF=$((THRESHOLD_INT - BRANCHES_INT))
+FUNCS_DIFF=$((THRESHOLD_INT - FUNCS_INT))
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════════"
@@ -38,14 +46,20 @@ echo "════════════════════════�
 echo ""
 echo "  Coverage Metrics:"
 echo "  ────────────────────────────────────────────────────────────────"
-printf "    • Current Coverage:        %s%%\n" "$COVERAGE_PERCENT"
+printf "    • Lines Coverage:          %s%%\n" "$LINES_PERCENT"
+printf "    • Statements Coverage:     %s%%\n" "$STATEMENTS_PERCENT"
+printf "    • Branches Coverage:       %s%%\n" "$BRANCHES_PERCENT"
+printf "    • Functions Coverage:      %s%%\n" "$FUNCS_PERCENT"
 printf "    • Required Threshold:      %s%%\n" "$COVERAGE_THRESHOLD"
 echo ""
 
-if [ "$COVERAGE_INT" -lt "$THRESHOLD_INT" ]; then
+if [ "$LINES_INT" -lt "$THRESHOLD_INT" ] || [ "$STATEMENTS_INT" -lt "$THRESHOLD_INT" ] || [ "$BRANCHES_INT" -lt "$THRESHOLD_INT" ] || [ "$FUNCS_INT" -lt "$THRESHOLD_INT" ]; then
     echo "  Status: ❌ FAILURE"
     echo "  ────────────────────────────────────────────────────────────────"
-    printf "    Coverage falls short by %s%%\n" "$DIFFERENCE"
+    [ "$LINES_INT" -lt "$THRESHOLD_INT" ] && printf "    • Lines below threshold by:      %s%%\n" "$LINES_DIFF"
+    [ "$STATEMENTS_INT" -lt "$THRESHOLD_INT" ] && printf "    • Statements below threshold by: %s%%\n" "$STATEMENTS_DIFF"
+    [ "$BRANCHES_INT" -lt "$THRESHOLD_INT" ] && printf "    • Branches below threshold by:   %s%%\n" "$BRANCHES_DIFF"
+    [ "$FUNCS_INT" -lt "$THRESHOLD_INT" ] && printf "    • Functions below threshold by:  %s%%\n" "$FUNCS_DIFF"
     echo ""
     echo "═══════════════════════════════════════════════════════════════════"
     echo ""
@@ -53,7 +67,10 @@ if [ "$COVERAGE_INT" -lt "$THRESHOLD_INT" ]; then
 else
     echo "  Status: ✅ SUCCESS"
     echo "  ────────────────────────────────────────────────────────────────"
-    printf "    Coverage exceeds threshold by %s%%\n" "$((COVERAGE_INT - THRESHOLD_INT))"
+    printf "    • Lines exceed threshold by:      %s%%\n" "$((LINES_INT - THRESHOLD_INT))"
+    printf "    • Statements exceed threshold by: %s%%\n" "$((STATEMENTS_INT - THRESHOLD_INT))"
+    printf "    • Branches exceed threshold by:   %s%%\n" "$((BRANCHES_INT - THRESHOLD_INT))"
+    printf "    • Functions exceed threshold by:  %s%%\n" "$((FUNCS_INT - THRESHOLD_INT))"
     echo ""
     echo "═══════════════════════════════════════════════════════════════════"
     echo ""
