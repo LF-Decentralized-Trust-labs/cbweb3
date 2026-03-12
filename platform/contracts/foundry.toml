@@ -3,6 +3,15 @@ src = "src"
 out = "out"
 libs = ["dependencies"]
 
+[profile.ci]
+src = "src"
+out = "out"
+libs = ["dependencies"]
+gas_reports = ["*"]
+optimizer = true
+optimizer_runs = 200
+fuzz = { runs = 10000 }
+
 [dependencies]
 forge-std = "1.15.0"
 
