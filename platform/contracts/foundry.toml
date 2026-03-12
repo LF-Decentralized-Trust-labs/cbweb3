@@ -17,4 +17,7 @@ fuzz = { runs = 10000 }
 forge-std = "1.15.0"
 "@openzeppelin-contracts" = "5.0.2"
 
+[rpc_endpoints]
+besu = '${BESU_RPC_URL}'
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
