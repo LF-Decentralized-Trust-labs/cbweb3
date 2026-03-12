@@ -58,3 +58,4 @@ down-backend:
 .PHONY: create-shared-network up-besu down-besu up-infra down-infra up down \
 	test-api-gateway test-identity test-data-access test-services \
 	up-backend down-backend
+.PHONY: create-shared-network up-besu down-besu up-infra down-infra up down
