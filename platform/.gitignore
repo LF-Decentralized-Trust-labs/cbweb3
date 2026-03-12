@@ -30,5 +30,16 @@ artifacts/
 # Custom agent assets
 .github/assets/*
 !.github/assets/README.md
+
 # Docs-reference
 docs-reference/
+
+# Foundry
+contracts/cache/
+contracts/out/
+!contracts/broadcast
+contracts/broadcast/*/1337/
+contracts/broadcast/*/31337/
+contracts/broadcast/**/dry-run/
+contracts/*.flattened.*
+contracts/dependencies
