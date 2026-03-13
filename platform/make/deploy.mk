@@ -71,4 +71,15 @@ deploy.down-backend:
 	@echo "Stopping backend stack..."
 	@docker compose -f backend/docker-compose-backend.yaml down -v
 
-.PHONY: deploy.create-shared-network deploy.up-hub deploy.up-spoke-a deploy.up-spoke-b deploy.down-hub deploy.down-spoke-a deploy.down-spoke-b deploy.up-besu deploy.down-besu deploy.up-infra deploy.down-infra deploy.up deploy.down deploy.test-api-gateway deploy.test-identity deploy.test-data-access deploy.test-services deploy.up-backend deploy.down-backend
+deploy.build-ci-runner:
+	@docker build -t cbweb3-act-runner:latest -f ./$(DEPLOY_DIR)/act/Dockerfile .
+
+deploy.ci-local: deploy.build-ci-runner
+	@docker run --rm \
+		-v /var/run/docker.sock:/var/run/docker.sock \
+		-v $(shell pwd):/src \
+		cbweb3-act-runner:latest \
+		-P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-22.04 \
+		$(ARGS)
+
+.PHONY: deploy.create-shared-network deploy.up-hub deploy.up-spoke-a deploy.up-spoke-b deploy.down-hub deploy.down-spoke-a deploy.down-spoke-b deploy.up-besu deploy.down-besu deploy.up-infra deploy.down-infra deploy.up deploy.down deploy.test-api-gateway deploy.test-identity deploy.test-data-access deploy.test-services deploy.up-backend deploy.down-backend deploy.build-ci-runner deploy.ci-local
