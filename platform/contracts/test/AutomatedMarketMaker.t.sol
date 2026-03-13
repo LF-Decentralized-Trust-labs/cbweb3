@@ -277,13 +277,20 @@ contract DeployAMMTest is Test {
         deployScript = new DeployAMM();
         deployScript.setUp();
 
-        /// @dev Read script inputs directly from .env / environment
-        deployerPrivateKey = vm.envUint(ENV_DEPLOYER_PRIVATE_KEY);
+        /// @dev Read script inputs from .env or use default test values
+        deployerPrivateKey = vm.envOr(ENV_DEPLOYER_PRIVATE_KEY, uint256(0x1));
         expectedDeployer = vm.addr(deployerPrivateKey);
-        expectedTokenA = vm.envAddress(ENV_TOKEN_A_ADDRESS);
-        expectedTokenB = vm.envAddress(ENV_TOKEN_B_ADDRESS);
-        expectedAdmin = vm.envAddress(ENV_ADMIN_ADDRESS);
-        expectedGovernance = vm.envAddress(ENV_GOVERNANCE_ADDRESS);
+        expectedTokenA = vm.envOr(ENV_TOKEN_A_ADDRESS, address(0x3456789012345678901234567890123456789012));
+        expectedTokenB = vm.envOr(ENV_TOKEN_B_ADDRESS, address(0x4567890123456789012345678901234567890123));
+        expectedAdmin = vm.envOr(ENV_ADMIN_ADDRESS, address(0x1234567890123456789012345678901234567890));
+        expectedGovernance = vm.envOr(ENV_GOVERNANCE_ADDRESS, address(0x5678901234567890123456789012345678901234));
+
+        /// @dev Set environment variables for the script if not already set
+        vm.setEnv(ENV_DEPLOYER_PRIVATE_KEY, vm.toString(deployerPrivateKey));
+        vm.setEnv(ENV_TOKEN_A_ADDRESS, vm.toString(expectedTokenA));
+        vm.setEnv(ENV_TOKEN_B_ADDRESS, vm.toString(expectedTokenB));
+        vm.setEnv(ENV_ADMIN_ADDRESS, vm.toString(expectedAdmin));
+        vm.setEnv(ENV_GOVERNANCE_ADDRESS, vm.toString(expectedGovernance));
     }
 
     /// @dev The script should successfully deploy the AMM contract using env vars.

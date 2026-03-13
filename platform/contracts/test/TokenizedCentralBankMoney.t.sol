@@ -120,11 +120,16 @@ contract DeployTCeBMTest is Test {
         deployScript = new DeployTCeBM();
         deployScript.setUp();
 
-        /// @dev Read script inputs directly from .env / environment
-        deployerPrivateKey = vm.envUint(ENV_DEPLOYER_PRIVATE_KEY);
-        expectedAdmin = vm.envAddress(ENV_ADMIN_ADDRESS);
-        expectedCentralBank = vm.envAddress(ENV_CENTRAL_BANK_ADDRESS);
+        /// @dev Read script inputs from .env or use default test values
+        deployerPrivateKey = vm.envOr(ENV_DEPLOYER_PRIVATE_KEY, uint256(0x1));
+        expectedAdmin = vm.envOr(ENV_ADMIN_ADDRESS, address(0x1234567890123456789012345678901234567890));
+        expectedCentralBank = vm.envOr(ENV_CENTRAL_BANK_ADDRESS, address(0x2345678901234567890123456789012345678901));
         expectedDeployer = vm.addr(deployerPrivateKey);
+
+        /// @dev Set environment variables for the script if not already set
+        vm.setEnv(ENV_DEPLOYER_PRIVATE_KEY, vm.toString(deployerPrivateKey));
+        vm.setEnv(ENV_ADMIN_ADDRESS, vm.toString(expectedAdmin));
+        vm.setEnv(ENV_CENTRAL_BANK_ADDRESS, vm.toString(expectedCentralBank));
     }
 
     /**

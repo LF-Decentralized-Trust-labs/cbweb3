@@ -181,9 +181,12 @@ contract DeployHTLCTest is Test {
         deployScript = new DeployHTLC();
         deployScript.setUp();
 
-        /// @dev Read script input directly from .env / environment
-        deployerPrivateKey = vm.envUint(ENV_DEPLOYER_PRIVATE_KEY);
+        /// @dev Read script input from .env or use default test value
+        deployerPrivateKey = vm.envOr(ENV_DEPLOYER_PRIVATE_KEY, uint256(0x1));
         expectedDeployer = vm.addr(deployerPrivateKey);
+
+        /// @dev Set environment variable for the script if not already set
+        vm.setEnv(ENV_DEPLOYER_PRIVATE_KEY, vm.toString(deployerPrivateKey));
     }
 
     ///
