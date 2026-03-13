@@ -7,14 +7,6 @@ on:
   pull_request: { branches: [main] }
 
 jobs:
-  show-structure:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Show repository tree
-        run: ls -R
-
   api-gateway:
     runs-on: ubuntu-latest
     defaults:

@@ -11,7 +11,7 @@ env:
   FOUNDRY_PROFILE: ci
 
 jobs:
-  check:
+  contracts:
     name: Foundry Contracts
     runs-on: ubuntu-latest
     permissions:
