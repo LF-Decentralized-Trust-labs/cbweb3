@@ -34,6 +34,9 @@ artifacts/
 # Docs-reference
 docs-reference/
 
+# Go Coverage
+backend/**/*.out
+
 # Foundry
 contracts/cache/
 contracts/out/
