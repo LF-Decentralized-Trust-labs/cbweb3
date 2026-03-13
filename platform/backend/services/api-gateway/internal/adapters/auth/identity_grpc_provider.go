@@ -14,7 +14,7 @@ import (
 
 const (
 	identityLoginMethod         = "/identity.v1.IdentityService/Login"
-	identityValidateTokenMethod = "/identity.v1.IdentityService/ValidateToken"
+	identityValidateTokenMethod = "/identity.v1.IdentityService/ValidateToken" // #nosec G101 -- This is a gRPC method path, not a credential
 )
 
 type jsonCodec struct{}

@@ -1,15 +1,12 @@
-name: ci
+name: Backend CI
+
+permissions: {}
+
 on:
   push: { branches: [main] }
   pull_request: { branches: [main] }
-jobs:
-  show-structure:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Show repository tree
-        run: ls -R
 
+jobs:
   api-gateway:
     runs-on: ubuntu-latest
     defaults:
@@ -17,14 +14,19 @@ jobs:
         working-directory: backend/services/api-gateway
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/services/api-gateway/go.mod
+
       - name: Download dependencies
         run: go mod download
+
       - name: Run go vet
         run: make vet
+
       - name: Run tests with coverage threshold
         run: make test-coverage
+
       - name: Run gosec
         run: make security
