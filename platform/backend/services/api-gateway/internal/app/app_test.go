@@ -104,6 +104,74 @@ func TestWalletBindConflictsAndValidation(t *testing.T) {
 	callWalletBind(t, server, tokenB, invalid, http.StatusBadRequest)
 }
 
+func TestWalletBindUserAlreadyBoundConflict(t *testing.T) {
+	t.Parallel()
+
+	server := mustNewGateway(t)
+	token := loginAndGetToken(t, server, "bank-a", "secret-a")
+
+	keyA, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+	walletA := crypto.PubkeyToAddress(keyA.PublicKey).Hex()
+	payloadA := map[string]string{
+		"walletAddress": walletA,
+		"signature":     signWalletBind(t, keyA, "bank-a", walletA),
+	}
+	callWalletBind(t, server, token, payloadA, http.StatusOK)
+
+	keyB, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+	walletB := crypto.PubkeyToAddress(keyB.PublicKey).Hex()
+	payloadB := map[string]string{
+		"walletAddress": walletB,
+		"signature":     signWalletBind(t, keyB, "bank-a", walletB),
+	}
+	callWalletBind(t, server, token, payloadB, http.StatusConflict)
+}
+
+func TestWalletBindRequiresBearerToken(t *testing.T) {
+	t.Parallel()
+
+	server := mustNewGateway(t)
+
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+	walletAddress := crypto.PubkeyToAddress(key.PublicKey).Hex()
+	payload := map[string]string{
+		"walletAddress": walletAddress,
+		"signature":     signWalletBind(t, key, "bank-a", walletAddress),
+	}
+
+	body, _ := json.Marshal(payload)
+	reqWithoutBearer := httptest.NewRequest(http.MethodPost, "/auth/wallet/bind", bytes.NewReader(body))
+	reqWithoutBearer.Header.Set("Content-Type", "application/json")
+	resp, err := server.Test(reqWithoutBearer)
+	if err != nil {
+		t.Fatalf("wallet bind without bearer failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without bearer, got %d", resp.StatusCode)
+	}
+
+	body2, _ := json.Marshal(payload)
+	reqInvalidBearer := httptest.NewRequest(http.MethodPost, "/auth/wallet/bind", bytes.NewReader(body2))
+	reqInvalidBearer.Header.Set("Content-Type", "application/json")
+	reqInvalidBearer.Header.Set("Authorization", "Bearer invalid-token")
+	resp2, err := server.Test(reqInvalidBearer)
+	if err != nil {
+		t.Fatalf("wallet bind with invalid bearer failed: %v", err)
+	}
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with invalid bearer, got %d", resp2.StatusCode)
+	}
+}
+
 func TestRejectedKYCCannotBindWallet(t *testing.T) {
 	t.Parallel()
 
