@@ -22,6 +22,7 @@ This repository proposes a **reference structure** for the CBWeb3 platform codeb
     ledger-gateway/        (RPC/WS client, event subscribers)
     compliance/            (KYC/AML hooks, audit trails)
     identity/              (PKI/OIDC/SSI abstractions)
+    data-access/           (shared data access via gRPC)
   shared/                  
   config/
 

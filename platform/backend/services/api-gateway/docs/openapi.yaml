@@ -1,0 +1,246 @@
+openapi: 3.0.3
+info:
+  title: CBWeb3 API Gateway
+  version: 1.0.0
+  description: >
+    OpenAPI specification for the currently implemented API Gateway endpoints.
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+tags:
+  - name: Health
+    description: Service health endpoint
+  - name: Authentication
+    description: Login and wallet binding flows
+  - name: Compliance
+    description: KYC status lookup
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate client credentials
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid body or required fields missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalidBody:
+                  value: { error: "invalid body" }
+                missingFields:
+                  value: { error: "clientId and clientSecret are required" }
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "invalid credentials"
+
+  /auth/wallet/bind:
+    post:
+      tags: [Authentication]
+      summary: Bind wallet to authenticated subject
+      operationId: walletBind
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletBindRequest"
+      responses:
+        "200":
+          description: Wallet successfully bound
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletBindResponse"
+        "400":
+          description: Invalid body, missing fields, or invalid signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalidBody:
+                  value: { error: "invalid body" }
+                missingFields:
+                  value: { error: "walletAddress and signature are required" }
+                invalidSignature:
+                  value: { error: "invalid signature" }
+        "401":
+          description: Missing/invalid bearer token or invalid token claims
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missingBearer:
+                  value: { error: "missing bearer token" }
+                invalidToken:
+                  value: { error: "invalid token" }
+                invalidClaims:
+                  value: { error: "invalid token claims" }
+        "403":
+          description: KYC rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "kyc status rejected"
+        "409":
+          description: Wallet/user binding conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                walletConflict:
+                  value: { error: "wallet already bound" }
+                userConflict:
+                  value: { error: "user already bound to another wallet" }
+        "500":
+          description: Internal bind error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "unable to bind wallet"
+
+  /compliance/kyc/status/{subject}:
+    get:
+      tags: [Compliance]
+      summary: Get KYC status by subject
+      operationId: getKycStatus
+      parameters:
+        - name: subject
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: KYC status returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KYCStatusResponse"
+        "400":
+          description: Subject is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "subject is required"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    LoginRequest:
+      type: object
+      required: [clientId, clientSecret]
+      properties:
+        clientId:
+          type: string
+        clientSecret:
+          type: string
+          format: password
+
+    AuthResponse:
+      type: object
+      required: [accessToken, expiresIn, tokenType]
+      properties:
+        accessToken:
+          type: string
+        expiresIn:
+          type: integer
+        tokenType:
+          type: string
+          example: Bearer
+
+    WalletBindRequest:
+      type: object
+      required: [walletAddress, signature]
+      properties:
+        walletAddress:
+          type: string
+          description: Ethereum wallet address in hex format
+        signature:
+          type: string
+          description: Signature of CBWEB3_WALLET_BIND message
+
+    WalletBindResponse:
+      type: object
+      required: [userId, walletAddress, status]
+      properties:
+        userId:
+          type: string
+        walletAddress:
+          type: string
+        status:
+          type: string
+          example: BOUND
+
+    KYCStatusResponse:
+      type: object
+      required: [subject, status]
+      properties:
+        subject:
+          type: string
+        status:
+          type: string
+          enum: [APPROVED, PENDING, REJECTED]

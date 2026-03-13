@@ -1,3 +1,8 @@
+Besu user documentation was moved to a separate repository to help manage versions and releases.
+
+If you want to contribute to the doc site, make a pull request against https://github.com/hyperledger/besu-docs
+
+The generated doc website is at https://besu.hyperledger.org/
 # Hyperledger Besu Test Network
 
 The `startDev.sh` script sets up and starts a local Hyperledger Besu network using the QBFT consensus mechanism, generating the necessary files and configuring and starting 4 nodes. It can receive the param `-n X` to define the number of starting nodes of the network.

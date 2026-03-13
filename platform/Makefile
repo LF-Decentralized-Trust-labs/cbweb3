@@ -33,4 +33,29 @@ up: up-besu up-infra
 
 down: down-infra down-besu
 
+test-api-gateway:
+	@echo "Running api-gateway tests..."
+	@cd ./backend/services/api-gateway && go test ./...
+
+test-identity:
+	@echo "Running identity tests (including E2E)..."
+	@cd ./backend/services/identity && go test ./...
+
+test-data-access:
+	@echo "Running data-access tests..."
+	@cd ./backend/services/data-access && go test ./...
+
+test-services: test-data-access test-identity test-api-gateway
+
+up-backend:
+	@echo "Starting backend stack (postgres, keycloak, data-access, identity, api-gateway)..."
+	@docker compose -f backend/docker-compose-backend.yaml up -d
+
+down-backend:
+	@echo "Stopping backend stack..."
+	@docker compose -f backend/docker-compose-backend.yaml down -v
+
+.PHONY: create-shared-network up-besu down-besu up-infra down-infra up down \
+	test-api-gateway test-identity test-data-access test-services \
+	up-backend down-backend
 .PHONY: create-shared-network up-besu down-besu up-infra down-infra up down

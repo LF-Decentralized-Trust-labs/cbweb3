@@ -1,0 +1,95 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: cbweb3-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: default
+      POSTGRES_PASSWORD: default
+      POSTGRES_DB: default
+    ports:
+      - "5432:5432"
+    volumes:
+      - cbweb3_postgres_data:/var/lib/postgresql/data
+    networks:
+      - cbweb3_backend
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2.5
+    container_name: cbweb3-keycloak
+    command: ["start-dev", "--http-port=8080"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "8081:8080"
+    networks:
+      - cbweb3_backend
+
+  data-access:
+    image: golang:1.25-alpine
+    container_name: cbweb3-data-access
+    working_dir: /workspace/backend/services/data-access
+    command: ["sh", "-c", "go run ./cmd/data-access"]
+    environment:
+      DATA_ACCESS_GRPC_PORT: "9092"
+      DATA_ACCESS_REQUEST_TIMEOUT_SEC: "5"
+      POSTGRES_DSN: "postgres://default:default@postgres:5432/default?sslmode=disable"
+      DATA_ACCESS_DB_MAX_OPEN_CONNS: "10"
+      DATA_ACCESS_DB_MAX_IDLE_CONNS: "5"
+      DATA_ACCESS_DB_CONN_MAX_LIFETIME_SEC: "300"
+    volumes:
+      - ../:/workspace
+    ports:
+      - "9092:9092"
+    depends_on:
+      - postgres
+    networks:
+      - cbweb3_backend
+
+  identity:
+    image: golang:1.25-alpine
+    container_name: cbweb3-identity
+    working_dir: /workspace/backend/services/identity
+    command: ["sh", "-c", "go run ./cmd/identity"]
+    environment:
+      IDENTITY_PROVIDER: local
+      IDENTITY_GRPC_PORT: "9091"
+      IDENTITY_KMS_PROVIDER: localkms
+      INTERNAL_JWT_PROVIDER: local
+      IDENTITY_JWT_SECRET: local-identity-secret
+      INTERNAL_JWT_SECRET: local-identity-secret
+      DATA_ACCESS_GRPC_ADDR: data-access:9092
+      DATA_ACCESS_REQUEST_TIMEOUT_SEC: "5"
+    volumes:
+      - ../:/workspace
+    ports:
+      - "9091:9091"
+    depends_on:
+      - data-access
+    networks:
+      - cbweb3_backend
+
+  api-gateway:
+    image: golang:1.25-alpine
+    container_name: cbweb3-api-gateway
+    working_dir: /workspace/backend/services/api-gateway
+    command: ["sh", "-c", "go run ./cmd/api-gateway"]
+    environment:
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "5"
+      IDENTITY_GRPC_ADDR: identity:9091
+    volumes:
+      - ../:/workspace
+    ports:
+      - "8080:8080"
+    depends_on:
+      - identity
+    networks:
+      - cbweb3_backend
+
+volumes:
+  cbweb3_postgres_data:
+
+networks:
+  cbweb3_backend:
