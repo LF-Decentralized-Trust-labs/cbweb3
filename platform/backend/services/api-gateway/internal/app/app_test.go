@@ -70,6 +70,23 @@ func TestLoginAndWalletBindFlow(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
+	var bindResp struct {
+		UserID        string `json:"userId"`
+		WalletAddress string `json:"walletAddress"`
+		Status        string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&bindResp); err != nil {
+		t.Fatalf("failed to decode wallet bind success response: %v", err)
+	}
+	if bindResp.UserID != "bank-a" {
+		t.Fatalf("expected userId bank-a, got %s", bindResp.UserID)
+	}
+	if bindResp.WalletAddress == "" {
+		t.Fatal("expected non-empty walletAddress")
+	}
+	if bindResp.Status != "BOUND" {
+		t.Fatalf("expected status BOUND, got %s", bindResp.Status)
+	}
 }
 
 func TestWalletBindConflictsAndValidation(t *testing.T) {
@@ -89,19 +106,105 @@ func TestWalletBindConflictsAndValidation(t *testing.T) {
 		"walletAddress": walletAddress,
 		"signature":     signWalletBind(t, key, "bank-a", walletAddress),
 	}
-	callWalletBind(t, server, tokenA, first, http.StatusOK)
+	callWalletBindSuccess(t, server, tokenA, first, "bank-a")
 
 	second := map[string]string{
 		"walletAddress": walletAddress,
 		"signature":     signWalletBind(t, key, "bank-b", walletAddress),
 	}
-	callWalletBind(t, server, tokenB, second, http.StatusConflict)
+	callWalletBindError(t, server, tokenB, second, http.StatusConflict, "wallet already bound")
 
 	invalid := map[string]string{
 		"walletAddress": walletAddress,
 		"signature":     "0xdeadbeef",
 	}
-	callWalletBind(t, server, tokenB, invalid, http.StatusBadRequest)
+	callWalletBindError(t, server, tokenB, invalid, http.StatusBadRequest, "invalid signature")
+}
+
+func TestWalletBindUserAlreadyBoundConflict(t *testing.T) {
+	t.Parallel()
+
+	server := mustNewGateway(t)
+	token := loginAndGetToken(t, server, "bank-a", "secret-a")
+
+	keyA, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+	walletA := crypto.PubkeyToAddress(keyA.PublicKey).Hex()
+	payloadA := map[string]string{
+		"walletAddress": walletA,
+		"signature":     signWalletBind(t, keyA, "bank-a", walletA),
+	}
+	callWalletBindSuccess(t, server, token, payloadA, "bank-a")
+
+	keyB, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+	walletB := crypto.PubkeyToAddress(keyB.PublicKey).Hex()
+	payloadB := map[string]string{
+		"walletAddress": walletB,
+		"signature":     signWalletBind(t, keyB, "bank-a", walletB),
+	}
+	callWalletBindError(t, server, token, payloadB, http.StatusConflict, "user already bound to another wallet")
+}
+
+func TestWalletBindRequiresBearerToken(t *testing.T) {
+	t.Parallel()
+
+	server := mustNewGateway(t)
+
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+	walletAddress := crypto.PubkeyToAddress(key.PublicKey).Hex()
+	payload := map[string]string{
+		"walletAddress": walletAddress,
+		"signature":     signWalletBind(t, key, "bank-a", walletAddress),
+	}
+
+	body, _ := json.Marshal(payload)
+	reqWithoutBearer := httptest.NewRequest(http.MethodPost, "/auth/wallet/bind", bytes.NewReader(body))
+	reqWithoutBearer.Header.Set("Content-Type", "application/json")
+	resp, err := server.Test(reqWithoutBearer)
+	if err != nil {
+		t.Fatalf("wallet bind without bearer failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without bearer, got %d", resp.StatusCode)
+	}
+	var errResp1 struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&errResp1); err != nil {
+		t.Fatalf("failed to decode missing bearer error response: %v", err)
+	}
+	if errResp1.Error != "missing bearer token" {
+		t.Fatalf("expected missing bearer token error, got %q", errResp1.Error)
+	}
+
+	body2, _ := json.Marshal(payload)
+	reqInvalidBearer := httptest.NewRequest(http.MethodPost, "/auth/wallet/bind", bytes.NewReader(body2))
+	reqInvalidBearer.Header.Set("Content-Type", "application/json")
+	reqInvalidBearer.Header.Set("Authorization", "Bearer invalid-token")
+	resp2, err := server.Test(reqInvalidBearer)
+	if err != nil {
+		t.Fatalf("wallet bind with invalid bearer failed: %v", err)
+	}
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with invalid bearer, got %d", resp2.StatusCode)
+	}
+	var errResp2 struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&errResp2); err != nil {
+		t.Fatalf("failed to decode invalid bearer error response: %v", err)
+	}
+	if errResp2.Error != "invalid token" {
+		t.Fatalf("expected invalid token error, got %q", errResp2.Error)
+	}
 }
 
 func TestRejectedKYCCannotBindWallet(t *testing.T) {
@@ -120,7 +223,7 @@ func TestRejectedKYCCannotBindWallet(t *testing.T) {
 		"walletAddress": walletAddress,
 		"signature":     signWalletBind(t, key, "bank-z", walletAddress),
 	}
-	callWalletBind(t, server, token, payload, http.StatusForbidden)
+	callWalletBindError(t, server, token, payload, http.StatusForbidden, "kyc status rejected")
 }
 
 func TestKYCStatusEndpoint(t *testing.T) {
@@ -184,7 +287,7 @@ func loginAndGetToken(t *testing.T, server *fiber.App, clientID, secret string) 
 	return payload.AccessToken
 }
 
-func callWalletBind(t *testing.T, server *fiber.App, token string, payload map[string]string, expected int) {
+func callWalletBindSuccess(t *testing.T, server *fiber.App, token string, payload map[string]string, expectedUserID string) {
 	t.Helper()
 	body, _ := json.Marshal(payload)
 	req := httptest.NewRequest(http.MethodPost, "/auth/wallet/bind", bytes.NewReader(body))
@@ -195,8 +298,50 @@ func callWalletBind(t *testing.T, server *fiber.App, token string, payload map[s
 	if err != nil {
 		t.Fatalf("wallet bind call failed: %v", err)
 	}
-	if resp.StatusCode != expected {
-		t.Fatalf("expected %d, got %d", expected, resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected %d, got %d", http.StatusOK, resp.StatusCode)
+	}
+	var successResp struct {
+		UserID        string `json:"userId"`
+		WalletAddress string `json:"walletAddress"`
+		Status        string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&successResp); err != nil {
+		t.Fatalf("failed to decode wallet bind success response: %v", err)
+	}
+	if successResp.UserID != expectedUserID {
+		t.Fatalf("expected userId %s, got %s", expectedUserID, successResp.UserID)
+	}
+	if successResp.WalletAddress == "" {
+		t.Fatal("expected non-empty walletAddress")
+	}
+	if successResp.Status != "BOUND" {
+		t.Fatalf("expected status BOUND, got %s", successResp.Status)
+	}
+}
+
+func callWalletBindError(t *testing.T, server *fiber.App, token string, payload map[string]string, expectedStatus int, expectedError string) {
+	t.Helper()
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/auth/wallet/bind", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := server.Test(req)
+	if err != nil {
+		t.Fatalf("wallet bind call failed: %v", err)
+	}
+	if resp.StatusCode != expectedStatus {
+		t.Fatalf("expected %d, got %d", expectedStatus, resp.StatusCode)
+	}
+	var errorResp struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
+		t.Fatalf("failed to decode wallet bind error response: %v", err)
+	}
+	if errorResp.Error != expectedError {
+		t.Fatalf("expected error %q, got %q", expectedError, errorResp.Error)
 	}
 }
 
