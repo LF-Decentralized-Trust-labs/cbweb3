@@ -19,6 +19,14 @@ func (s authProviderStub) Authenticate(_ context.Context, _, _ string) (domain.A
 	return domain.AuthToken{}, errors.New("not used")
 }
 
+func (s authProviderStub) RefreshToken(_ context.Context, _ string) (domain.AuthToken, error) {
+	return domain.AuthToken{}, errors.New("not used")
+}
+
+func (s authProviderStub) Logout(_ context.Context, _ string) error {
+	return nil
+}
+
 type identityManagerStub struct{}
 
 func (s identityManagerStub) BindWallet(_, _ string) (domain.WalletBinding, error) {

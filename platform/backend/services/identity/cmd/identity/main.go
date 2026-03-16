@@ -11,7 +11,6 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/dataaccessclient"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/grpc/server"
 	identityproviders "github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/identityprovider/providers"
-	kmsproviders "github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/kmsprovider/providers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/tokenissuer"
 )
 
@@ -28,10 +27,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create identity provider: %v", err)
 	}
-	kms, err := kmsproviders.New(getEnv("IDENTITY_KMS_PROVIDER", kmsproviders.ProviderLocalKMS))
-	if err != nil {
-		log.Fatalf("failed to create kms provider: %v", err)
-	}
+
 	dataAccess, err := dataaccessclient.New(
 		getEnv("DATA_ACCESS_GRPC_ADDR", "localhost:9092"),
 		time.Duration(getEnvInt("DATA_ACCESS_REQUEST_TIMEOUT_SEC", 5))*time.Second,
@@ -48,12 +44,11 @@ func main() {
 		log.Fatalf("failed to listen on port %s: %v", port, err)
 	}
 
-	grpcServer := server.New(identityProvider, dataAccess, kms, internalTokenIssuer)
+	grpcServer := server.New(identityProvider, dataAccess, internalTokenIssuer)
 	log.Printf(
-		"identity gRPC listening on :%s (provider=%s, kms=%s, jwt=%s)",
+		"identity gRPC listening on :%s (provider=%s, jwt=%s)",
 		port,
 		identityProvider.Name(),
-		kms.Name(),
 		internalTokenIssuer.Name(),
 	)
 	if err := grpcServer.Serve(lis); err != nil {

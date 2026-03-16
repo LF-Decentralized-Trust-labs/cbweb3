@@ -30,6 +30,14 @@ func (s participantsRepoStub) GetByUser(ctx context.Context, userID string) (rep
 	return repository.Participant{}, false, nil
 }
 
+func (s participantsRepoStub) UpsertKYCCredential(_ context.Context, _ repository.KYCCredential) error {
+	return nil
+}
+
+func (s participantsRepoStub) CreateAuditLog(_ context.Context, _ repository.AuditEntry) error {
+	return nil
+}
+
 func TestUpsertParticipantInvalidArgument(t *testing.T) {
 	t.Parallel()
 

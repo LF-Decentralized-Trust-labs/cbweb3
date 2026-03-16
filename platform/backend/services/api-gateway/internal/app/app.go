@@ -6,9 +6,7 @@ import (
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/application/compliance"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
@@ -16,7 +14,7 @@ import (
 )
 
 func New(cfg config.Config) (*fiber.App, error) {
-	// The gateway always delegates authentication/token validation to identity gRPC.
+	// All identity + auth operations delegate to the identity gRPC service.
 	identityGRPCProvider, err := auth.NewIdentityGRPCAuthProvider(cfg.IdentityGRPCAddr, cfg.RequestTimeout)
 	if err != nil {
 		return nil, err
@@ -26,20 +24,15 @@ func New(cfg config.Config) (*fiber.App, error) {
 		return nil, errors.New("identity gRPC provider does not implement token validator")
 	}
 
+	// IdentityGRPCManager handles wallet binding + KYC operations.
+	// The in-memory compliance service is REMOVED — all KYC is delegated to identity gRPC.
 	identityManager, err := identityadapter.NewIdentityGRPCManager(cfg.IdentityGRPCAddr, cfg.RequestTimeout)
 	if err != nil {
 		return nil, err
 	}
 
-	// Initialize compliance service.
-	complianceService := compliance.NewService(map[string]domain.KYCStatus{
-		"bank-a": domain.KYCApproved,
-		"bank-b": domain.KYCApproved,
-		"bank-z": domain.KYCRejected,
-	})
-
-	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, complianceService)
-	complianceHandler := handlers.NewComplianceHandler(complianceService)
+	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, identityManager)
+	complianceHandler := handlers.NewComplianceHandler(identityManager)
 
 	fiberApp := fiber.New(
 		fiber.Config{

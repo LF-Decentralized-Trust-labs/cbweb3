@@ -1,9 +1,14 @@
 openapi: 3.0.3
 info:
   title: CBWeb3 API Gateway
-  version: 1.0.0
+  version: 2.0.0
   description: >
-    OpenAPI specification for the currently implemented API Gateway endpoints.
+    OpenAPI specification for the CBWeb3 platform API Gateway.
+    Implements authentication, participant onboarding, wallet management,
+    KYC/AML compliance, and governance operations.
+    
+    Security note: All /compliance write endpoints require CENTRAL_BANK role.
+    X-Correlation-Id is generated automatically if not provided.
 servers:
   - url: http://localhost:8080
     description: Local development server
@@ -11,9 +16,9 @@ tags:
   - name: Health
     description: Service health endpoint
   - name: Authentication
-    description: Login and wallet binding flows
+    description: Login, refresh, logout, onboarding and wallet binding
   - name: Compliance
-    description: KYC status lookup
+    description: KYC credential issuance, verification, AML screening, and governance
 paths:
   /healthz:
     get:
@@ -31,7 +36,7 @@ paths:
   /auth/login:
     post:
       tags: [Authentication]
-      summary: Authenticate client credentials
+      summary: Authenticate client credentials and obtain access + refresh tokens
       operationId: login
       requestBody:
         required: true
@@ -47,29 +52,117 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
         "400":
-          description: Invalid body or required fields missing
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Issue a new access token from a valid refresh token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: New access token issued
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                invalidBody:
-                  value: { error: "invalid body" }
-                missingFields:
-                  value: { error: "clientId and clientSecret are required" }
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
-          description: Invalid credentials
+          description: Invalid or expired refresh token
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: "invalid credentials"
+                error: "invalid or expired refresh token"
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke the current access token (logout)
+      operationId: logout
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Logged out successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "logged out successfully"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/onboarding:
+    post:
+      tags: [Authentication]
+      summary: >
+        Register a new participant. Enforces KYC gate for non-Central Bank actors.
+        Central Bank actors bypass the KYC gate.
+      operationId: onboarding
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingRequest"
+      responses:
+        "201":
+          description: Participant registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingResponse"
+        "202":
+          description: Awaiting Central Bank KYC approval
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "awaiting central bank approval"
+                  subject:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: KYC status is not eligible (FROZEN, REVOKED, REJECTED)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Participant already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /auth/wallet/bind:
     post:
       tags: [Authentication]
-      summary: Bind wallet to authenticated subject
+      summary: Bind a wallet address to the authenticated subject via EIP-191 signature
       operationId: walletBind
       security:
         - BearerAuth: []
@@ -87,70 +180,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/WalletBindResponse"
         "400":
-          description: Invalid body, missing fields, or invalid signature
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                invalidBody:
-                  value: { error: "invalid body" }
-                missingFields:
-                  value: { error: "walletAddress and signature are required" }
-                invalidSignature:
-                  value: { error: "invalid signature" }
+          $ref: "#/components/responses/BadRequest"
         "401":
-          description: Missing/invalid bearer token or invalid token claims
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                missingBearer:
-                  value: { error: "missing bearer token" }
-                invalidToken:
-                  value: { error: "invalid token" }
-                invalidClaims:
-                  value: { error: "invalid token claims" }
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: KYC rejected
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-              example:
-                error: "kyc status rejected"
         "409":
           description: Wallet/user binding conflict
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                walletConflict:
-                  value: { error: "wallet already bound" }
-                userConflict:
-                  value: { error: "user already bound to another wallet" }
         "500":
-          description: Internal bind error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              example:
-                error: "unable to bind wallet"
+          $ref: "#/components/responses/InternalError"
 
   /compliance/kyc/status/{subject}:
     get:
       tags: [Compliance]
-      summary: Get KYC status by subject
+      summary: Get KYC lifecycle status for a subject
       operationId: getKycStatus
+      security:
+        - BearerAuth: []
       parameters:
         - name: subject
           in: path
           required: true
           schema:
             type: string
+          description: The userID or participant identifier
       responses:
         "200":
           description: KYC status returned
@@ -159,13 +220,208 @@ paths:
               schema:
                 $ref: "#/components/schemas/KYCStatusResponse"
         "400":
-          description: Subject is required
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /compliance/kyc/issue-credential:
+    post:
+      tags: [Compliance]
+      summary: >
+        Issue a Verifiable Credential (VC) for a participant.
+        Requires CENTRAL_BANK role. Generates a ZKP pointer (SHA-256) for on-chain verification.
+      operationId: issueKycCredential
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueCredentialRequest"
+      responses:
+        "201":
+          description: Credential issued
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              example:
-                error: "subject is required"
+                $ref: "#/components/schemas/IssueCredentialResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /compliance/kyc/verify-proof:
+    post:
+      tags: [Compliance]
+      summary: Verify a ZKP pointer against the Claims Verifier
+      operationId: verifyKycProof
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [zkpPointer]
+              properties:
+                zkpPointer:
+                  type: string
+                  description: SHA-256 hash of the VC payload
+      responses:
+        "200":
+          description: Proof verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyProofResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /compliance/aml/screen:
+    post:
+      tags: [Compliance]
+      summary: >
+        AML/CFT screening gate — checks if a subject is sanctioned.
+        Returns 403 if FROZEN, REVOKED, or REJECTED (REQ-COM-007).
+      operationId: amlScreen
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject:
+                  type: string
+      responses:
+        "200":
+          description: Subject is not sanctioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AMLScreenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Subject is sanctioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AMLScreenResponse"
+
+  /compliance/participants/provision:
+    post:
+      tags: [Compliance]
+      summary: >
+        Set KYC status for a participant (CENTRAL_BANK only).
+        Used for initial approval, freeze, unfreeze, and revocation.
+      operationId: provisionParticipant
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisionRequest"
+      responses:
+        "200":
+          description: Participant provisioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /compliance/accounts/freeze:
+    post:
+      tags: [Compliance]
+      summary: >
+        Freeze an account (CENTRAL_BANK only — REQ-COM-003, UT-API-16).
+        Sets KYC status to FROZEN — all operations are suspended.
+      operationId: freezeAccount
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject:
+                  type: string
+      responses:
+        "200":
+          description: Account frozen
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /compliance/accounts/unfreeze:
+    post:
+      tags: [Compliance]
+      summary: Restore a frozen account to APPROVED status (CENTRAL_BANK only)
+      operationId: unfreezeAccount
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject:
+                  type: string
+      responses:
+        "200":
+          description: Account unfrozen
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
 components:
   securitySchemes:
@@ -173,6 +429,37 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: >
+        JWT issued by the identity service. Includes enriched claims:
+        sub, roles, did, wallet, country, bank_id, privacy_group (D7 §7.4).
+
+  responses:
+    BadRequest:
+      description: Invalid body or missing required fields
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Insufficient permissions (requires CENTRAL_BANK role)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "insufficient permissions"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
     ErrorResponse:
@@ -196,9 +483,18 @@ components:
       properties:
         clientId:
           type: string
+          example: bank-a
         clientSecret:
           type: string
           format: password
+          example: secret-a
+
+    RefreshTokenRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
 
     AuthResponse:
       type: object
@@ -206,11 +502,53 @@ components:
       properties:
         accessToken:
           type: string
+        refreshToken:
+          type: string
         expiresIn:
           type: integer
+          example: 3600
         tokenType:
           type: string
           example: Bearer
+
+    OnboardingRequest:
+      type: object
+      properties:
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+          example: BR
+        bank_code:
+          type: string
+          example: "001"
+        role:
+          type: string
+          enum: [CENTRAL_BANK, COMMERCIAL_BANK, MLP]
+          example: COMMERCIAL_BANK
+        institution_name:
+          type: string
+          example: "Banco do Brasil"
+        wallet_type:
+          type: string
+          enum: [Direct, Correspondent, Escrow]
+          description: Wallet classification (REQ-CAP-004)
+          example: Direct
+
+    OnboardingResponse:
+      type: object
+      required: [userId, did, walletAddress]
+      properties:
+        userId:
+          type: string
+        did:
+          type: string
+          example: "did:lac:openprotest:0x..."
+        walletAddress:
+          type: string
+          example: "0x..."
+        signerProvider:
+          type: string
+          example: local
 
     WalletBindRequest:
       type: object
@@ -218,10 +556,10 @@ components:
       properties:
         walletAddress:
           type: string
-          description: Ethereum wallet address in hex format
+          description: Ethereum wallet address
         signature:
           type: string
-          description: Signature of CBWEB3_WALLET_BIND message
+          description: EIP-191 signature of CBWEB3_WALLET_BIND message
 
     WalletBindResponse:
       type: object
@@ -243,4 +581,73 @@ components:
           type: string
         status:
           type: string
-          enum: [APPROVED, PENDING, REJECTED]
+          enum: [PENDING, APPROVED, FROZEN, REVOKED, REJECTED]
+
+    IssueCredentialRequest:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+          description: UserID of the participant to be credentialed
+        institution_name:
+          type: string
+        country_code:
+          type: string
+          example: BR
+        bank_code:
+          type: string
+
+    IssueCredentialResponse:
+      type: object
+      required: [vcJwt, zkpPointer, issuedAt]
+      properties:
+        vcJwt:
+          type: string
+          description: Verifiable Credential JWT
+        zkpPointer:
+          type: string
+          description: SHA-256 hash of VC payload — on-chain verification pointer
+        issuedAt:
+          type: string
+          format: date-time
+
+    VerifyProofResponse:
+      type: object
+      required: [valid, zkpPointer]
+      properties:
+        valid:
+          type: boolean
+        zkpPointer:
+          type: string
+
+    AMLScreenResponse:
+      type: object
+      required: [subject, status, sanctioned]
+      properties:
+        subject:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, FROZEN, REVOKED, REJECTED]
+        sanctioned:
+          type: boolean
+
+    ProvisionRequest:
+      type: object
+      required: [subject, status]
+      properties:
+        subject:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, FROZEN, REVOKED]
+
+    ProvisionResponse:
+      type: object
+      required: [subject, status]
+      properties:
+        subject:
+          type: string
+        status:
+          type: string

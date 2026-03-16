@@ -11,30 +11,60 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// Participant is the canonical domain struct for participant data.
 type Participant struct {
-	UserID         string
-	DID            string
-	WalletAddress  string
-	Country        string
-	BankCode       string
-	Role           string
-	SignerProvider string
-	KMSKeyID       string
+	UserID          string
+	DID             string
+	WalletAddress   string
+	Country         string
+	BankCode        string
+	Role            string
+	InstitutionName string
+	WalletType      string
+	SignerProvider  string
+	KMSKeyID        string
 }
 
+// KYCCredential holds a VC pointer for a participant.
+type KYCCredential struct {
+	Subject    string
+	ZKPPointer string
+	VCJWT      string
+	IssuedAt   string
+}
+
+// AuditEntry is the domain struct for an audit log record.
+type AuditEntry struct {
+	ActorSubject  string
+	ActorAddress  string
+	ActionType    string
+	TargetSubject string
+	CorrelationID string
+	IPAddress     string
+	Result        string
+	Details       string
+}
+
+// ParticipantsRepository defines the persistence operations for participants.
 type ParticipantsRepository interface {
 	Upsert(ctx context.Context, p Participant) error
 	GetByUser(ctx context.Context, userID string) (Participant, bool, error)
+	UpsertKYCCredential(ctx context.Context, cred KYCCredential) error
+	CreateAuditLog(ctx context.Context, entry AuditEntry) error
 }
 
+// --- In-memory implementation (dev / testing) ---
+
 type memoryParticipantsRepository struct {
-	mu   sync.RWMutex
-	data map[string]Participant
+	mu          sync.RWMutex
+	data        map[string]Participant
+	credentials map[string]KYCCredential // subject → credential
 }
 
 func NewMemoryParticipantsRepository() ParticipantsRepository {
 	return &memoryParticipantsRepository{
-		data: map[string]Participant{},
+		data:        map[string]Participant{},
+		credentials: map[string]KYCCredential{},
 	}
 }
 
@@ -54,6 +84,19 @@ func (r *memoryParticipantsRepository) GetByUser(_ context.Context, userID strin
 	p, ok := r.data[userID]
 	return p, ok, nil
 }
+
+func (r *memoryParticipantsRepository) UpsertKYCCredential(_ context.Context, cred KYCCredential) error {
+	r.mu.Lock()
+	r.credentials[cred.Subject] = cred
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *memoryParticipantsRepository) CreateAuditLog(_ context.Context, _ AuditEntry) error {
+	return nil // no-op for in-memory; audit is fire-and-forget
+}
+
+// --- Postgres / GORM implementation ---
 
 type gormParticipantsRepository struct {
 	db *gorm.DB
@@ -87,7 +130,7 @@ func NewGormParticipantsRepositoryWithConfig(dsn string, cfg PostgresConfig) (Pa
 	if cfg.ConnMaxLifetime > 0 {
 		sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
 	}
-	if err := db.AutoMigrate(&ParticipantModel{}); err != nil {
+	if err := db.AutoMigrate(&ParticipantModel{}, &KYCCredentialModel{}, &AuditLogModel{}); err != nil {
 		return nil, err
 	}
 	return &gormParticipantsRepository{db: db}, nil
@@ -98,27 +141,24 @@ func (r *gormParticipantsRepository) Upsert(ctx context.Context, p Participant) 
 		return errors.New("userID is required")
 	}
 	model := ParticipantModel{
-		UserID:         p.UserID,
-		DID:            p.DID,
-		WalletAddress:  p.WalletAddress,
-		Country:        p.Country,
-		BankCode:       p.BankCode,
-		Role:           p.Role,
-		SignerProvider: p.SignerProvider,
-		KMSKeyID:       p.KMSKeyID,
+		UserID:          p.UserID,
+		DID:             p.DID,
+		WalletAddress:   p.WalletAddress,
+		CountryCode:     p.Country,
+		BankCode:        p.BankCode,
+		Role:            p.Role,
+		InstitutionName: p.InstitutionName,
+		WalletType:      p.WalletType,
+		SignerProvider:  p.SignerProvider,
+		KMSKeyID:        p.KMSKeyID,
 	}
-
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "user_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"did",
-				"wallet_address",
-				"country",
-				"bank_code",
-				"role",
-				"signer_provider",
-				"kms_key_id",
+				"did", "wallet_address", "country_code", "bank_code",
+				"participant_role", "institution_name", "wallet_type",
+				"signer_provider", "kms_key_id", "updated_at",
 			}),
 		}).
 		Create(&model).Error
@@ -134,13 +174,44 @@ func (r *gormParticipantsRepository) GetByUser(ctx context.Context, userID strin
 		return Participant{}, false, err
 	}
 	return Participant{
-		UserID:         model.UserID,
-		DID:            model.DID,
-		WalletAddress:  model.WalletAddress,
-		Country:        model.Country,
-		BankCode:       model.BankCode,
-		Role:           model.Role,
-		SignerProvider: model.SignerProvider,
-		KMSKeyID:       model.KMSKeyID,
+		UserID:          model.UserID,
+		DID:             model.DID,
+		WalletAddress:   model.WalletAddress,
+		Country:         model.CountryCode,
+		BankCode:        model.BankCode,
+		Role:            model.Role,
+		InstitutionName: model.InstitutionName,
+		WalletType:      model.WalletType,
+		SignerProvider:  model.SignerProvider,
+		KMSKeyID:        model.KMSKeyID,
 	}, true, nil
+}
+
+func (r *gormParticipantsRepository) UpsertKYCCredential(ctx context.Context, cred KYCCredential) error {
+	model := KYCCredentialModel{
+		Subject:    cred.Subject,
+		ZKPPointer: cred.ZKPPointer,
+		VCJWT:      cred.VCJWT,
+		IssuedAt:   cred.IssuedAt,
+	}
+	return r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "subject"}},
+			DoUpdates: clause.AssignmentColumns([]string{"zkp_pointer", "vc_jwt", "issued_at", "updated_at"}),
+		}).
+		Create(&model).Error
+}
+
+func (r *gormParticipantsRepository) CreateAuditLog(ctx context.Context, entry AuditEntry) error {
+	model := AuditLogModel{
+		ActorSubject:  entry.ActorSubject,
+		ActorAddress:  entry.ActorAddress,
+		ActionType:    entry.ActionType,
+		TargetSubject: entry.TargetSubject,
+		CorrelationID: entry.CorrelationID,
+		IPAddress:     entry.IPAddress,
+		Result:        entry.Result,
+		Details:       entry.Details,
+	}
+	return r.db.WithContext(ctx).Create(&model).Error
 }

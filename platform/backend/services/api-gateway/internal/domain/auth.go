@@ -4,7 +4,6 @@ package domain
 import "errors"
 
 var (
-	// Domain-level errors used across auth and wallet binding flows.
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrWalletAlreadyBound = errors.New("wallet already bound")
 	ErrUserAlreadyBound   = errors.New("user already bound to another wallet")
@@ -15,17 +14,23 @@ var (
 
 // AuthToken represents the token response returned by auth providers.
 type AuthToken struct {
-	AccessToken string
-	ExpiresIn   int
-	TokenType   string
+	AccessToken  string
+	RefreshToken string
+	ExpiresIn    int
+	TokenType    string
 }
 
-// TokenClaims represents normalized token claims used by handlers/middleware.
+// TokenClaims represents enriched token claims used by handlers/middleware (D7 §7.4).
 type TokenClaims struct {
-	Subject string
-	Issuer  string
-	Scope   string
-	Roles   []string
+	Subject      string
+	Issuer       string
+	Scope        string
+	Roles        []string
+	DID          string
+	Wallet       string
+	Country      string
+	BankID       string
+	PrivacyGroup string
 }
 
 // WalletBinding represents a user-wallet association.
@@ -34,13 +39,21 @@ type WalletBinding struct {
 	WalletAddress string
 }
 
-// KYCStatus describes a subject compliance status.
+// KYCStatus describes a subject compliance lifecycle status.
 type KYCStatus string
 
 const (
-	// Known KYC statuses for compliance checks.
 	KYCApproved KYCStatus = "APPROVED"
 	KYCPending  KYCStatus = "PENDING"
+	KYCFrozen   KYCStatus = "FROZEN"  // account frozen by Central Bank (REQ-COM-003)
+	KYCRevoked  KYCStatus = "REVOKED" // credential revoked / permanent ban
+	// KYCRejected kept for backward-compat with existing tests and code.
 	KYCRejected KYCStatus = "REJECTED"
 )
 
+// Canonical participant role constants (mirrors identityprovider package).
+const (
+	RoleCentralBank    = "CENTRAL_BANK"
+	RoleCommercialBank = "COMMERCIAL_BANK"
+	RoleMLP            = "MLP"
+)

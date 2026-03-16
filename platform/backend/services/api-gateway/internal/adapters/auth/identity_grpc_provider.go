@@ -14,7 +14,9 @@ import (
 
 const (
 	identityLoginMethod         = "/identity.v1.IdentityService/Login"
-	identityValidateTokenMethod = "/identity.v1.IdentityService/ValidateToken" // #nosec G101 -- This is a gRPC method path, not a credential
+	identityRefreshTokenMethod  = "/identity.v1.IdentityService/RefreshToken"
+	identityRevokeTokenMethod   = "/identity.v1.IdentityService/RevokeToken"
+	identityValidateTokenMethod = "/identity.v1.IdentityService/ValidateToken" // #nosec G101 -- gRPC method path
 )
 
 type jsonCodec struct{}
@@ -35,19 +37,34 @@ type identityLoginRequest struct {
 }
 
 type identityLoginResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+}
+
+type identityRefreshTokenRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+type identityRevokeTokenRequest struct {
 	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int    `json:"expires_in"`
 }
 
 type identityValidateTokenRequest struct {
 	AccessToken string `json:"access_token"`
 }
 
+// identityValidateTokenResponse includes enriched D7 §7.4 claims.
 type identityValidateTokenResponse struct {
-	Subject string   `json:"subject"`
-	Issuer  string   `json:"issuer"`
-	Roles   []string `json:"roles"`
+	Subject      string   `json:"subject"`
+	Issuer       string   `json:"issuer"`
+	Roles        []string `json:"roles"`
+	DID          string   `json:"did"`
+	Wallet       string   `json:"wallet"`
+	Country      string   `json:"country"`
+	BankID       string   `json:"bank_id"`
+	PrivacyGroup string   `json:"privacy_group"`
 }
 
 // IdentityGRPCAuthProvider authenticates users via identity gRPC service.
@@ -73,7 +90,6 @@ func NewIdentityGRPCAuthProvider(address string, timeout time.Duration) (*Identi
 	if err != nil {
 		return nil, err
 	}
-
 	return &IdentityGRPCAuthProvider{
 		conn:   conn,
 		codec:  codec,
@@ -83,22 +99,49 @@ func NewIdentityGRPCAuthProvider(address string, timeout time.Duration) (*Identi
 
 // Authenticate delegates login to identity gRPC.
 func (p *IdentityGRPCAuthProvider) Authenticate(ctx context.Context, clientID, clientSecret string) (domain.AuthToken, error) {
-	req := &identityLoginRequest{
-		User:     clientID,
-		Password: clientSecret,
-	}
+	req := &identityLoginRequest{User: clientID, Password: clientSecret}
 	out := &identityLoginResponse{}
 	if err := p.client.Invoke(ctx, identityLoginMethod, req, out, grpc.ForceCodec(p.codec)); err != nil {
 		return domain.AuthToken{}, domain.ErrInvalidCredentials
 	}
 	return domain.AuthToken{
-		AccessToken: out.AccessToken,
-		TokenType:   out.TokenType,
-		ExpiresIn:   out.ExpiresIn,
+		AccessToken:  out.AccessToken,
+		RefreshToken: out.RefreshToken,
+		TokenType:    out.TokenType,
+		ExpiresIn:    out.ExpiresIn,
 	}, nil
 }
 
-// Validate delegates token validation to identity gRPC.
+// RefreshToken issues a new access token via identity gRPC.
+func (p *IdentityGRPCAuthProvider) RefreshToken(ctx context.Context, refreshToken string) (domain.AuthToken, error) {
+	req := &identityRefreshTokenRequest{RefreshToken: refreshToken}
+	out := &identityLoginResponse{}
+	if err := p.client.Invoke(ctx, identityRefreshTokenMethod, req, out, grpc.ForceCodec(p.codec)); err != nil {
+		return domain.AuthToken{}, domain.ErrInvalidToken
+	}
+	return domain.AuthToken{
+		AccessToken:  out.AccessToken,
+		RefreshToken: out.RefreshToken,
+		TokenType:    out.TokenType,
+		ExpiresIn:    out.ExpiresIn,
+	}, nil
+}
+
+// Logout revokes the access token via identity gRPC.
+func (p *IdentityGRPCAuthProvider) Logout(ctx context.Context, accessToken string) error {
+	req := &identityRevokeTokenRequest{AccessToken: accessToken}
+	var out struct {
+		Success bool `json:"success"`
+	}
+	if err := p.client.Invoke(ctx, identityRevokeTokenMethod, req, &out, grpc.ForceCodec(p.codec)); err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() != 0 {
+			return domain.ErrInvalidToken
+		}
+	}
+	return nil
+}
+
+// Validate delegates token validation to identity gRPC, returning enriched claims.
 func (p *IdentityGRPCAuthProvider) Validate(ctx context.Context, token string) (domain.TokenClaims, error) {
 	req := &identityValidateTokenRequest{AccessToken: token}
 	out := &identityValidateTokenResponse{}
@@ -109,8 +152,13 @@ func (p *IdentityGRPCAuthProvider) Validate(ctx context.Context, token string) (
 		return domain.TokenClaims{}, domain.ErrInvalidToken
 	}
 	return domain.TokenClaims{
-		Subject: out.Subject,
-		Issuer:  out.Issuer,
-		Roles:   out.Roles,
+		Subject:      out.Subject,
+		Issuer:       out.Issuer,
+		Roles:        out.Roles,
+		DID:          out.DID,
+		Wallet:       out.Wallet,
+		Country:      out.Country,
+		BankID:       out.BankID,
+		PrivacyGroup: out.PrivacyGroup,
 	}, nil
 }

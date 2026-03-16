@@ -39,19 +39,37 @@ func NewLocalIssuer(secret, issuer, audience string, ttl time.Duration) Issuer {
 
 func (i *LocalIssuer) Name() string { return "local" }
 
+// Issue creates a signed HS256 JWT with enriched claims (D7 §7.4).
 func (i *LocalIssuer) Issue(_ context.Context, req IssueRequest) (IssueResponse, error) {
 	if strings.TrimSpace(req.Subject) == "" {
 		return IssueResponse{}, errors.New("subject is required")
 	}
 	now := time.Now().UTC()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	c := jwt.MapClaims{
 		"sub":   req.Subject,
 		"iss":   i.issuer,
 		"aud":   i.audience,
 		"roles": req.Roles,
 		"iat":   now.Unix(),
 		"exp":   now.Add(i.ttl).Unix(),
-	})
+	}
+	// Enrich with LNET/D7 claims when available
+	if req.DID != "" {
+		c["did"] = req.DID
+	}
+	if req.Wallet != "" {
+		c["wallet"] = req.Wallet
+	}
+	if req.Country != "" {
+		c["country"] = req.Country
+	}
+	if req.BankID != "" {
+		c["bank_id"] = req.BankID
+	}
+	if req.PrivacyGroup != "" {
+		c["privacy_group"] = req.PrivacyGroup
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, c)
 	signed, err := token.SignedString([]byte(i.secret))
 	if err != nil {
 		return IssueResponse{}, err
@@ -63,6 +81,7 @@ func (i *LocalIssuer) Issue(_ context.Context, req IssueRequest) (IssueResponse,
 	}, nil
 }
 
+// Validate parses the internal HS256 JWT and extracts all claims.
 func (i *LocalIssuer) Validate(_ context.Context, accessToken string) (IssueRequest, error) {
 	accessToken = strings.TrimSpace(accessToken)
 	if accessToken == "" {
@@ -90,5 +109,19 @@ func (i *LocalIssuer) Validate(_ context.Context, accessToken string) (IssueRequ
 			}
 		}
 	}
-	return IssueRequest{Subject: subject, Roles: roles}, nil
+	did, _ := claims["did"].(string)
+	wallet, _ := claims["wallet"].(string)
+	country, _ := claims["country"].(string)
+	bankID, _ := claims["bank_id"].(string)
+	privacyGroup, _ := claims["privacy_group"].(string)
+
+	return IssueRequest{
+		Subject:      subject,
+		Roles:        roles,
+		DID:          did,
+		Wallet:       wallet,
+		Country:      country,
+		BankID:       bankID,
+		PrivacyGroup: privacyGroup,
+	}, nil
 }
