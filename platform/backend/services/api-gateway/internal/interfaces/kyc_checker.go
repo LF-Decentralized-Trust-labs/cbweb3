@@ -31,13 +31,12 @@ type KYCCredentialResult struct {
 
 // ParticipantRegistrar handles participant onboarding via identity gRPC.
 type ParticipantRegistrar interface {
-	RegisterParticipant(ctx context.Context, accessToken, country, bankCode, role, institutionName, walletType string) (RegisterParticipantResult, error)
+	RegisterParticipant(ctx context.Context, accessToken, country, bankCode, role, institutionName string) (RegisterParticipantResult, error)
 }
 
 // RegisterParticipantResult holds the response from participant registration.
 type RegisterParticipantResult struct {
-	UserID         string
-	DID            string
-	WalletAddress  string
-	SignerProvider string
+	UserID        string
+	DID           string
+	WalletAddress string
 }

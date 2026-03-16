@@ -122,27 +122,24 @@ func (m *IdentityGRPCManager) GetByUser(ctx context.Context, userID string) (dom
 
 // --- ParticipantRegistrar ---
 
-func (m *IdentityGRPCManager) RegisterParticipant(ctx context.Context, accessToken, country, bankCode, role, institutionName, walletType string) (interfaces.RegisterParticipantResult, error) {
+func (m *IdentityGRPCManager) RegisterParticipant(ctx context.Context, accessToken, country, bankCode, role, institutionName string) (interfaces.RegisterParticipantResult, error) {
 	req := &struct {
 		AccessToken     string `json:"access_token"`
 		Country         string `json:"country"`
 		BankCode        string `json:"bank_code"`
 		Role            string `json:"role"`
 		InstitutionName string `json:"institution_name"`
-		WalletType      string `json:"wallet_type"`
 	}{
 		AccessToken:     accessToken,
 		Country:         country,
 		BankCode:        bankCode,
 		Role:            role,
 		InstitutionName: institutionName,
-		WalletType:      walletType,
 	}
 	out := &struct {
-		UserID         string `json:"user_id"`
-		DID            string `json:"did"`
-		WalletAddress  string `json:"wallet_address"`
-		SignerProvider string `json:"signer_provider"`
+		UserID        string `json:"user_id"`
+		DID           string `json:"did"`
+		WalletAddress string `json:"wallet_address"`
 	}{}
 	if err := m.client.Invoke(ctx, registerParticipantMethod, req, out, grpc.ForceCodec(m.codec)); err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
@@ -151,10 +148,9 @@ func (m *IdentityGRPCManager) RegisterParticipant(ctx context.Context, accessTok
 		return interfaces.RegisterParticipantResult{}, err
 	}
 	return interfaces.RegisterParticipantResult{
-		UserID:         out.UserID,
-		DID:            out.DID,
-		WalletAddress:  out.WalletAddress,
-		SignerProvider: out.SignerProvider,
+		UserID:        out.UserID,
+		DID:           out.DID,
+		WalletAddress: out.WalletAddress,
 	}, nil
 }
 

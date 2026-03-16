@@ -35,7 +35,6 @@ type onboardingRequest struct {
 	BankCode        string `json:"bank_code"`
 	Role            string `json:"role"`
 	InstitutionName string `json:"institution_name"`
-	WalletType      string `json:"wallet_type"`
 }
 
 // NewAuthHandler builds an AuthHandler with its required dependencies.
@@ -177,7 +176,6 @@ func (h *AuthHandler) Onboarding(c *fiber.Ctx) error {
 		req.BankCode,
 		req.Role,
 		req.InstitutionName,
-		req.WalletType,
 	)
 	if err != nil {
 		if errors.Is(err, domain.ErrWalletAlreadyBound) {
@@ -187,10 +185,9 @@ func (h *AuthHandler) Onboarding(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"userId":         result.UserID,
-		"did":            result.DID,
-		"walletAddress":  result.WalletAddress,
-		"signerProvider": result.SignerProvider,
+		"userId":        result.UserID,
+		"did":           result.DID,
+		"walletAddress": result.WalletAddress,
 	})
 }
 

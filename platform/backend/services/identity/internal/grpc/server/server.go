@@ -319,17 +319,14 @@ func (s *identityService) RegisterParticipant(ctx context.Context, req *contract
 		BankCode:        req.BankCode,
 		Role:            req.Role,
 		InstitutionName: req.InstitutionName,
-		WalletType:      req.WalletType,
-		SignerProvider:  s.provider.Name(),
 	}); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	resp := &contract.RegisterParticipantResponse{
-		UserID:         claims.Subject,
-		DID:            wallet.DID,
-		WalletAddress:  binding.WalletAddress,
-		SignerProvider: s.provider.Name(),
+		UserID:        claims.Subject,
+		DID:           wallet.DID,
+		WalletAddress: binding.WalletAddress,
 	}
 	s.emitAudit(ctx, dataaccessclient.AuditEntry{
 		ActorSubject:  claims.Subject,
@@ -358,10 +355,9 @@ func (s *identityService) SignTransaction(ctx context.Context, req *contract.Sig
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	return &contract.SignTransactionResponse{
-		UserID:         req.UserID,
-		SignerProvider: out.SignerProvider,
-		Address:        out.Address,
-		Signature:      out.Signature,
+		UserID:    req.UserID,
+		Address:   out.Address,
+		Signature: out.Signature,
 	}, nil
 }
 

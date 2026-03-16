@@ -2,7 +2,7 @@ package repository
 
 import "time"
 
-// ParticipantModel is the canonical GORM model for participants (D7 §7.1 + REQ-CAP-004).
+// ParticipantModel is the canonical GORM model for participants (D7 §7.1).
 type ParticipantModel struct {
 	UserID          string     `gorm:"column:user_id;primaryKey"`
 	DID             string     `gorm:"column:did;uniqueIndex;not null"`
@@ -11,13 +11,11 @@ type ParticipantModel struct {
 	BankCode        string     `gorm:"column:bank_code"`
 	CountryCode     string     `gorm:"column:country_code"`        // ISO 3166-1
 	Role            string     `gorm:"column:participant_role"`    // CENTRAL_BANK, COMMERCIAL_BANK, MLP
-	WalletType      string     `gorm:"column:wallet_type"`         // Direct, Correspondent, Escrow (REQ-CAP-004)
 	KYCStatus       string     `gorm:"column:kyc_status;default:PENDING"`
 	KYCVCHash       string     `gorm:"column:kyc_vc_hash"`         // ZKP pointer (SHA-256)
 	KYCLastVerify   *time.Time `gorm:"column:kyc_last_verify"`
 	PrivacyDomainID string     `gorm:"column:privacy_domain_id"`   // Paladin privacy domain
 	CactiRelayAddr  string     `gorm:"column:cacti_relay_address"` // Cacti relay endpoint
-	SignerProvider  string     `gorm:"column:signer_provider"`     // "local" | "dwallet_api"
 	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }

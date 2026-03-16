@@ -26,8 +26,6 @@ type Participant struct {
 	BankCode        string
 	Role            string
 	InstitutionName string
-	WalletType      string // Direct, Correspondent, Escrow (REQ-CAP-004)
-	SignerProvider  string
 }
 
 // KYCCredential stores the issued VC pointer for a participant.
@@ -102,8 +100,6 @@ func (c *grpcClient) UpsertParticipant(ctx context.Context, p Participant) error
 			BankCode        string `json:"bank_code"`
 			Role            string `json:"role"`
 			InstitutionName string `json:"institution_name"`
-			WalletType      string `json:"wallet_type"`
-			SignerProvider  string `json:"signer_provider"`
 		} `json:"participant"`
 	}{}
 	req.Participant.UserID = p.UserID
@@ -113,8 +109,6 @@ func (c *grpcClient) UpsertParticipant(ctx context.Context, p Participant) error
 	req.Participant.BankCode = p.BankCode
 	req.Participant.Role = p.Role
 	req.Participant.InstitutionName = p.InstitutionName
-	req.Participant.WalletType = p.WalletType
-	req.Participant.SignerProvider = p.SignerProvider
 	var resp struct {
 		Success bool `json:"success"`
 	}
@@ -180,8 +174,6 @@ func (c *grpcClient) GetParticipantByUser(ctx context.Context, userID string) (P
 			BankCode        string `json:"bank_code"`
 			Role            string `json:"role"`
 			InstitutionName string `json:"institution_name"`
-			WalletType      string `json:"wallet_type"`
-			SignerProvider  string `json:"signer_provider"`
 		} `json:"participant"`
 	}
 	if err := c.cc.Invoke(ctx, getParticipantByUserMethod, &req, &resp, grpc.ForceCodec(c.codec)); err != nil {
@@ -198,7 +190,5 @@ func (c *grpcClient) GetParticipantByUser(ctx context.Context, userID string) (P
 		BankCode:        resp.Participant.BankCode,
 		Role:            resp.Participant.Role,
 		InstitutionName: resp.Participant.InstitutionName,
-		WalletType:      resp.Participant.WalletType,
-		SignerProvider:  resp.Participant.SignerProvider,
 	}, true, nil
 }

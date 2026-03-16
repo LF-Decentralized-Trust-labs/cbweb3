@@ -24,8 +24,6 @@ type Participant struct {
 	BankCode        string `json:"bank_code"`
 	Role            string `json:"role"`
 	InstitutionName string `json:"institution_name"`
-	WalletType      string `json:"wallet_type"`
-	SignerProvider  string `json:"signer_provider"`
 }
 
 type UpsertParticipantRequest struct {

@@ -114,14 +114,12 @@ type RegisterParticipantRequest struct {
 	BankCode        string `json:"bank_code"`
 	Role            string `json:"role"`
 	InstitutionName string `json:"institution_name"`
-	WalletType      string `json:"wallet_type"` // Direct, Correspondent, Escrow (REQ-CAP-004)
 }
 
 type RegisterParticipantResponse struct {
-	UserID         string `json:"user_id"`
-	DID            string `json:"did"`
-	WalletAddress  string `json:"wallet_address"`
-	SignerProvider string `json:"signer_provider"`
+	UserID        string `json:"user_id"`
+	DID           string `json:"did"`
+	WalletAddress string `json:"wallet_address"`
 }
 
 // --- Signing ---
@@ -132,10 +130,9 @@ type SignTransactionRequest struct {
 }
 
 type SignTransactionResponse struct {
-	UserID         string `json:"user_id"`
-	SignerProvider string `json:"signer_provider"`
-	Address        string `json:"address"`
-	Signature      string `json:"signature"`
+	UserID    string `json:"user_id"`
+	Address   string `json:"address"`
+	Signature string `json:"signature"`
 }
 
 // --- KYC / Credentials ---

@@ -94,9 +94,6 @@ func TestIdentityAndDataAccessE2E(t *testing.T) {
 	if registerResp.UserID != "bank-a" {
 		t.Fatalf("unexpected user id: %s", registerResp.UserID)
 	}
-	if registerResp.SignerProvider == "" {
-		t.Fatal("expected non-empty signer provider")
-	}
 	if registerResp.WalletAddress == "" {
 		t.Fatal("expected non-empty wallet address")
 	}
@@ -122,9 +119,6 @@ func TestIdentityAndDataAccessE2E(t *testing.T) {
 	}
 	if signResp.Signature == "" || !strings.HasPrefix(signResp.Signature, "0x") {
 		t.Fatalf("unexpected signature value: %q", signResp.Signature)
-	}
-	if signResp.SignerProvider == "" {
-		t.Fatal("expected signer provider in sign response")
 	}
 }
 

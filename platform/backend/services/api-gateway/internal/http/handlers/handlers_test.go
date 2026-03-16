@@ -117,7 +117,7 @@ func (s participantRegistrarStub) GetByUser(_ context.Context, _ string) (domain
 	return domain.WalletBinding{}, false
 }
 
-func (s participantRegistrarStub) RegisterParticipant(_ context.Context, _, _, _, _, _, _ string) (interfaces.RegisterParticipantResult, error) {
+func (s participantRegistrarStub) RegisterParticipant(_ context.Context, _, _, _, _, _ string) (interfaces.RegisterParticipantResult, error) {
 	return s.regResult, s.regErr
 }
 
@@ -466,7 +466,7 @@ func TestOnboardingCentralBankBypassKYC(t *testing.T) {
 	stub := participantRegistrarStub{
 		kycManagerStub: kycManagerStub{status: domain.KYCPending},
 		regResult: interfaces.RegisterParticipantResult{
-			UserID: "cb-001", DID: "did:lac:cb-001", WalletAddress: "0xABC", SignerProvider: "local",
+			UserID: "cb-001", DID: "did:lac:cb-001", WalletAddress: "0xABC",
 		},
 	}
 	handler := NewAuthHandler(authProviderStub{}, stub, stub)
@@ -496,7 +496,7 @@ func TestOnboardingKYCApprovedProceed(t *testing.T) {
 	stub := participantRegistrarStub{
 		kycManagerStub: kycManagerStub{status: domain.KYCApproved},
 		regResult: interfaces.RegisterParticipantResult{
-			UserID: "bank-001", DID: "did:lac:bank-001", WalletAddress: "0xDEF", SignerProvider: "local",
+			UserID: "bank-001", DID: "did:lac:bank-001", WalletAddress: "0xDEF",
 		},
 	}
 	handler := NewAuthHandler(authProviderStub{}, stub, stub)

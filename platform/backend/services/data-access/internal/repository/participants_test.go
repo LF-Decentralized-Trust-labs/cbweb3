@@ -10,13 +10,12 @@ func TestMemoryParticipantsRepositoryUpsertAndGet(t *testing.T) {
 
 	repo := NewMemoryParticipantsRepository()
 	err := repo.Upsert(context.Background(), Participant{
-		UserID:         "bank-a",
-		DID:            "did:example:bank-a",
-		WalletAddress:  "0x1111111111111111111111111111111111111111",
-		Country:        "BR",
-		BankCode:       "001",
-		Role:           "bank",
-		SignerProvider: "local",
+		UserID:        "bank-a",
+		DID:           "did:example:bank-a",
+		WalletAddress: "0x1111111111111111111111111111111111111111",
+		Country:       "BR",
+		BankCode:      "001",
+		Role:          "bank",
 	})
 	if err != nil {
 		t.Fatalf("unexpected upsert error: %v", err)

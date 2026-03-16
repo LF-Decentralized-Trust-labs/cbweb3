@@ -20,8 +20,6 @@ type Participant struct {
 	BankCode        string
 	Role            string
 	InstitutionName string
-	WalletType      string
-	SignerProvider  string
 }
 
 // KYCCredential holds a VC pointer for a participant.
@@ -147,16 +145,13 @@ func (r *gormParticipantsRepository) Upsert(ctx context.Context, p Participant) 
 		BankCode:        p.BankCode,
 		Role:            p.Role,
 		InstitutionName: p.InstitutionName,
-		WalletType:      p.WalletType,
-		SignerProvider:  p.SignerProvider,
 	}
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "user_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"did", "wallet_address", "country_code", "bank_code",
-				"participant_role", "institution_name", "wallet_type",
-				"signer_provider", "updated_at",
+				"participant_role", "institution_name", "updated_at",
 			}),
 		}).
 		Create(&model).Error
@@ -179,8 +174,6 @@ func (r *gormParticipantsRepository) GetByUser(ctx context.Context, userID strin
 		BankCode:        model.BankCode,
 		Role:            model.Role,
 		InstitutionName: model.InstitutionName,
-		WalletType:      model.WalletType,
-		SignerProvider:  model.SignerProvider,
 	}, true, nil
 }
 
