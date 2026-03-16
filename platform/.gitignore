@@ -46,3 +46,8 @@ contracts/broadcast/*/31337/
 contracts/broadcast/**/dry-run/
 contracts/*.flattened.*
 contracts/dependencies
+
+.cursor/
+
+# Git worktrees
+.worktrees/
