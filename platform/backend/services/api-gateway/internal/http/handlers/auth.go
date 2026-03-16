@@ -72,7 +72,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientId and clientSecret are required"})
 	}
 
-	token, err := h.authProvider.Authenticate(c.Context(), req.ClientID, req.ClientSecret)
+	token, err := h.authProvider.Authenticate(c.UserContext(), req.ClientID, req.ClientSecret)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
 	}
@@ -99,7 +99,7 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "refreshToken is required"})
 	}
 
-	token, err := h.authProvider.RefreshToken(c.Context(), body.RefreshToken)
+	token, err := h.authProvider.RefreshToken(c.UserContext(), body.RefreshToken)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired refresh token"})
 	}
@@ -118,7 +118,7 @@ func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 	if token == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bearer token is required"})
 	}
-	if err := h.authProvider.Logout(c.Context(), token); err != nil {
+	if err := h.authProvider.Logout(c.UserContext(), token); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "logout failed"})
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "logged out successfully"})
@@ -146,7 +146,7 @@ func (h *AuthHandler) Onboarding(c *fiber.Ctx) error {
 	isCentralBank := containsRole(claims.Roles, domain.RoleCentralBank)
 
 	if !isCentralBank && h.kycManager != nil {
-		kycStatus, err := h.kycManager.GetKYCStatus(c.Context(), claims.Subject)
+		kycStatus, err := h.kycManager.GetKYCStatus(c.UserContext(), claims.Subject)
 		if err != nil {
 			kycStatus = domain.KYCStatus(h.kycChecker.GetStatus(claims.Subject))
 		}
@@ -171,7 +171,7 @@ func (h *AuthHandler) Onboarding(c *fiber.Ctx) error {
 	}
 
 	result, err := h.participantRegistrar.RegisterParticipant(
-		c.Context(),
+		c.UserContext(),
 		strings.TrimPrefix(c.Get("Authorization"), "Bearer "),
 		req.Country,
 		req.BankCode,
@@ -210,15 +210,16 @@ func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "walletAddress and signature are required"})
 	}
 
-	if h.kycChecker.GetStatus(claims.Subject) == domain.KYCRejected {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "kyc status rejected"})
+	kycStatus := domain.KYCStatus(h.kycChecker.GetStatus(claims.Subject))
+	if kycStatus != domain.KYCApproved {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "kyc status does not allow wallet binding"})
 	}
 
 	if err := auth.VerifyWalletSignature(claims.Subject, req.WalletAddress, req.Signature); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid signature"})
 	}
 
-	binding, err := h.identityManager.BindWallet(claims.Subject, req.WalletAddress)
+	binding, err := h.identityManager.BindWallet(c.UserContext(), claims.Subject, req.WalletAddress)
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrWalletAlreadyBound), errors.Is(err, domain.ErrUserAlreadyBound):

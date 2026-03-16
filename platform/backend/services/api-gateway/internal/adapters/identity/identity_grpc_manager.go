@@ -80,10 +80,10 @@ type getByUserResponse struct {
 
 // --- IIdentityManager ---
 
-func (m *IdentityGRPCManager) BindWallet(userID, walletAddress string) (domain.WalletBinding, error) {
+func (m *IdentityGRPCManager) BindWallet(ctx context.Context, userID, walletAddress string) (domain.WalletBinding, error) {
 	req := &bindWalletRequest{UserID: userID, WalletAddress: walletAddress}
 	out := &walletBindingResponse{}
-	if err := m.client.Invoke(context.Background(), bindWalletMethod, req, out, grpc.ForceCodec(m.codec)); err != nil {
+	if err := m.client.Invoke(ctx, bindWalletMethod, req, out, grpc.ForceCodec(m.codec)); err != nil {
 		if st, ok := status.FromError(err); ok {
 			if st.Code() == codes.AlreadyExists {
 				return domain.WalletBinding{}, domain.ErrWalletAlreadyBound
@@ -100,12 +100,12 @@ func (m *IdentityGRPCManager) BindWallet(userID, walletAddress string) (domain.W
 	}, nil
 }
 
-func (m *IdentityGRPCManager) GetByUser(userID string) (domain.WalletBinding, bool) {
+func (m *IdentityGRPCManager) GetByUser(ctx context.Context, userID string) (domain.WalletBinding, bool) {
 	req := &struct {
 		UserID string `json:"user_id"`
 	}{UserID: userID}
 	out := &getByUserResponse{}
-	if err := m.client.Invoke(context.Background(), getByUserMethod, req, out, grpc.ForceCodec(m.codec)); err != nil {
+	if err := m.client.Invoke(ctx, getByUserMethod, req, out, grpc.ForceCodec(m.codec)); err != nil {
 		return domain.WalletBinding{}, false
 	}
 	if !out.Found || out.Binding == nil {

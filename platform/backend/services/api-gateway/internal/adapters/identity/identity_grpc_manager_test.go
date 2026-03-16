@@ -57,7 +57,7 @@ func TestBindWallet_Success(t *testing.T) {
 		codec:  jsonCodec{},
 	}
 
-	binding, err := manager.BindWallet("user123", "0xabc")
+	binding, err := manager.BindWallet(context.Background(), "user123", "0xabc")
 
 	assert.NoError(t, err)
 	assert.Equal(t, "user123", binding.UserID)
@@ -76,7 +76,7 @@ func TestBindWallet_AlreadyExists(t *testing.T) {
 		codec:  jsonCodec{},
 	}
 
-	_, err := manager.BindWallet("user123", "0xabc")
+	_, err := manager.BindWallet(context.Background(), "user123", "0xabc")
 
 	assert.ErrorIs(t, err, domain.ErrWalletAlreadyBound)
 }
@@ -93,7 +93,7 @@ func TestBindWallet_UserAlreadyBound(t *testing.T) {
 		codec:  jsonCodec{},
 	}
 
-	_, err := manager.BindWallet("user123", "0xabc")
+	_, err := manager.BindWallet(context.Background(), "user123", "0xabc")
 
 	assert.ErrorIs(t, err, domain.ErrUserAlreadyBound)
 }
@@ -110,7 +110,7 @@ func TestBindWallet_GenericError(t *testing.T) {
 		codec:  jsonCodec{},
 	}
 
-	_, err := manager.BindWallet("user123", "0xabc")
+	_, err := manager.BindWallet(context.Background(), "user123", "0xabc")
 
 	assert.Error(t, err)
 	assert.NotErrorIs(t, err, domain.ErrWalletAlreadyBound)
@@ -138,7 +138,7 @@ func TestGetByUser_Success(t *testing.T) {
 		codec:  jsonCodec{},
 	}
 
-	binding, found := manager.GetByUser("user123")
+	binding, found := manager.GetByUser(context.Background(), "user123")
 
 	assert.True(t, found)
 	assert.Equal(t, "user123", binding.UserID)
@@ -159,7 +159,7 @@ func TestGetByUser_NotFound(t *testing.T) {
 		codec:  jsonCodec{},
 	}
 
-	_, found := manager.GetByUser("user123")
+	_, found := manager.GetByUser(context.Background(), "user123")
 
 	assert.False(t, found)
 }
@@ -176,7 +176,7 @@ func TestGetByUser_Error(t *testing.T) {
 		codec:  jsonCodec{},
 	}
 
-	_, found := manager.GetByUser("user123")
+	_, found := manager.GetByUser(context.Background(), "user123")
 
 	assert.False(t, found)
 }
@@ -196,7 +196,7 @@ func TestGetByUser_NilBinding(t *testing.T) {
 		codec:  jsonCodec{},
 	}
 
-	_, found := manager.GetByUser("user123")
+	_, found := manager.GetByUser(context.Background(), "user123")
 
 	assert.False(t, found)
 }
@@ -219,7 +219,7 @@ func TestGetByUser_EmptyUserID(t *testing.T) {
 		codec:  jsonCodec{},
 	}
 
-	_, found := manager.GetByUser("user123")
+	_, found := manager.GetByUser(context.Background(), "user123")
 
 	assert.False(t, found)
 }
@@ -242,7 +242,7 @@ func TestGetByUser_EmptyWalletAddress(t *testing.T) {
 		codec:  jsonCodec{},
 	}
 
-	_, found := manager.GetByUser("user123")
+	_, found := manager.GetByUser(context.Background(), "user123")
 
 	assert.False(t, found)
 }

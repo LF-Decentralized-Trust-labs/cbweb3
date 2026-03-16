@@ -223,14 +223,17 @@ func TestRejectedKYCCannotBindWallet(t *testing.T) {
 		"walletAddress": walletAddress,
 		"signature":     signWalletBind(t, key, "bank-z", walletAddress),
 	}
-	callWalletBindError(t, server, token, payload, http.StatusForbidden, "kyc status rejected")
+	callWalletBindError(t, server, token, payload, http.StatusForbidden, "kyc status does not allow wallet binding")
 }
 
 func TestKYCStatusEndpoint(t *testing.T) {
 	t.Parallel()
 
 	server := mustNewGateway(t)
+	token := loginAndGetToken(t, server, "bank-a", "secret-a")
+
 	req := httptest.NewRequest(http.MethodGet, "/compliance/kyc/status/bank-a", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := server.Test(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -372,6 +375,7 @@ type identityMock struct {
 	byWallet     map[string]string
 	tokenToUser  map[string]string
 	validSecrets map[string]string
+	kycStatus    map[string]string // subject → KYC status string
 }
 
 type identityMockService interface{}
@@ -390,6 +394,8 @@ func startIdentityMockGRPC(t *testing.T) (string, func()) {
 		byWallet:     map[string]string{},
 		tokenToUser:  map[string]string{},
 		validSecrets: map[string]string{"bank-a": "secret-a", "bank-b": "secret-b", "bank-z": "secret-z"},
+		// bank-z is seeded as REVOKED (consistent with LocalProvider) to test the KYC gate on wallet bind.
+		kycStatus: map[string]string{"bank-z": "REVOKED"},
 	}
 
 	server := grpc.NewServer(grpc.ForceServerCodec(codec))
@@ -401,6 +407,7 @@ func startIdentityMockGRPC(t *testing.T) (string, func()) {
 			{MethodName: "ValidateToken", Handler: mock.validateHandler},
 			{MethodName: "BindWallet", Handler: mock.bindHandler},
 			{MethodName: "GetByUser", Handler: mock.getByUserHandler},
+			{MethodName: "GetKYCStatus", Handler: mock.getKYCStatusHandler},
 		},
 	}, mock)
 
@@ -509,4 +516,23 @@ func (m *identityMock) getByUserHandler(srv any, ctx context.Context, dec func(a
 		Binding any  `json:"binding,omitempty"`
 		Found   bool `json:"found"`
 	}{Binding: map[string]string{"user_id": req.UserID, "wallet_address": wallet}, Found: true}, nil
+}
+
+func (m *identityMock) getKYCStatusHandler(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+	var req struct {
+		Subject string `json:"subject"`
+	}
+	if err := dec(&req); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	kyc, ok := m.kycStatus[req.Subject]
+	m.mu.Unlock()
+	if !ok {
+		kyc = "APPROVED"
+	}
+	return &struct {
+		Subject string `json:"subject"`
+		Status  string `json:"status"`
+	}{Subject: req.Subject, Status: kyc}, nil
 }

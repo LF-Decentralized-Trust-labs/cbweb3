@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/dataaccessclient"
@@ -11,6 +12,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/tokenissuer"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -129,9 +131,11 @@ func (s *identityService) Login(ctx context.Context, req *contract.LoginRequest)
 		ExpiresIn:    int32(internalToken.ExpiresIn),
 	}
 	s.emitAudit(ctx, dataaccessclient.AuditEntry{
-		ActorSubject: claims.Subject,
-		ActionType:   "LOGIN",
-		Result:       "SUCCESS",
+		ActorSubject:  claims.Subject,
+		ActionType:    "LOGIN",
+		Result:        "SUCCESS",
+		CorrelationID: correlationIDFromCtx(ctx),
+		IPAddress:     ipAddressFromCtx(ctx),
 	})
 	return resp, nil
 }
@@ -171,9 +175,21 @@ func (s *identityService) RevokeToken(ctx context.Context, req *contract.RevokeT
 	if strings.TrimSpace(req.AccessToken) == "" {
 		return nil, status.Error(codes.InvalidArgument, "access_token is required")
 	}
+	// Extract subject before revoking — token is still valid at this point.
+	subject := "unknown"
+	if claims, err := s.provider.ValidateToken(ctx, req.AccessToken); err == nil {
+		subject = claims.Subject
+	}
 	if err := s.provider.RevokeToken(ctx, req.AccessToken); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+	s.emitAudit(ctx, dataaccessclient.AuditEntry{
+		ActorSubject:  subject,
+		ActionType:    "LOGOUT",
+		Result:        "SUCCESS",
+		CorrelationID: correlationIDFromCtx(ctx),
+		IPAddress:     ipAddressFromCtx(ctx),
+	})
 	return &contract.RevokeTokenResponse{Success: true}, nil
 }
 
@@ -318,9 +334,12 @@ func (s *identityService) RegisterParticipant(ctx context.Context, req *contract
 		SignerProvider: s.provider.Name(),
 	}
 	s.emitAudit(ctx, dataaccessclient.AuditEntry{
-		ActorSubject: claims.Subject,
-		ActionType:   "REGISTER",
-		Result:       "SUCCESS",
+		ActorSubject:  claims.Subject,
+		ActionType:    "REGISTER",
+		Result:        "SUCCESS",
+		CorrelationID: correlationIDFromCtx(ctx),
+		IPAddress:     ipAddressFromCtx(ctx),
+		Details:       fmt.Sprintf(`{"provider":%q}`, s.provider.Name()),
 	})
 	return resp, nil
 }
@@ -381,6 +400,9 @@ func (s *identityService) IssueKYCCredential(ctx context.Context, req *contract.
 		ActionType:    "ISSUE_KYC",
 		TargetSubject: req.Subject,
 		Result:        "SUCCESS",
+		CorrelationID: correlationIDFromCtx(ctx),
+		IPAddress:     ipAddressFromCtx(ctx),
+		Details:       fmt.Sprintf(`{"bank_code":%q,"country":%q}`, req.BankCode, req.CountryCode),
 	})
 	return resp, nil
 }
@@ -430,6 +452,9 @@ func (s *identityService) ProvisionParticipant(ctx context.Context, req *contrac
 		ActionType:    action,
 		TargetSubject: req.Subject,
 		Result:        "SUCCESS",
+		CorrelationID: correlationIDFromCtx(ctx),
+		IPAddress:     ipAddressFromCtx(ctx),
+		Details:       fmt.Sprintf(`{"status":%q}`, req.Status),
 	})
 	return &contract.ProvisionParticipantResponse{
 		Subject: req.Subject,
@@ -445,6 +470,27 @@ func (s *identityService) emitAudit(ctx context.Context, entry dataaccessclient.
 	go func() {
 		_ = s.dataAccess.CreateAuditLog(ctx, entry)
 	}()
+}
+
+// correlationIDFromCtx extracts the X-Correlation-Id forwarded by the api-gateway
+// as gRPC incoming metadata. Returns empty string if absent.
+func correlationIDFromCtx(ctx context.Context) string {
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if vals := md.Get("x-correlation-id"); len(vals) > 0 {
+			return vals[0]
+		}
+	}
+	return ""
+}
+
+// ipAddressFromCtx extracts the client IP forwarded via gRPC incoming metadata.
+func ipAddressFromCtx(ctx context.Context) string {
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if vals := md.Get("x-forwarded-for"); len(vals) > 0 {
+			return vals[0]
+		}
+	}
+	return ""
 }
 
 // --- gRPC handler adapters (boilerplate) ---

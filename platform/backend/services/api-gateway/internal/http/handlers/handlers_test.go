@@ -43,7 +43,7 @@ type identityManagerStub struct {
 	err     error
 }
 
-func (s identityManagerStub) BindWallet(userID, walletAddress string) (domain.WalletBinding, error) {
+func (s identityManagerStub) BindWallet(_ context.Context, userID, walletAddress string) (domain.WalletBinding, error) {
 	if s.err != nil {
 		return domain.WalletBinding{}, s.err
 	}
@@ -53,7 +53,7 @@ func (s identityManagerStub) BindWallet(userID, walletAddress string) (domain.Wa
 	return s.binding, nil
 }
 
-func (s identityManagerStub) GetByUser(_ string) (domain.WalletBinding, bool) {
+func (s identityManagerStub) GetByUser(_ context.Context, _ string) (domain.WalletBinding, bool) {
 	return domain.WalletBinding{}, false
 }
 
@@ -109,11 +109,11 @@ type participantRegistrarStub struct {
 	regErr    error
 }
 
-func (s participantRegistrarStub) BindWallet(userID, walletAddress string) (domain.WalletBinding, error) {
+func (s participantRegistrarStub) BindWallet(_ context.Context, userID, walletAddress string) (domain.WalletBinding, error) {
 	return domain.WalletBinding{UserID: userID, WalletAddress: walletAddress}, nil
 }
 
-func (s participantRegistrarStub) GetByUser(_ string) (domain.WalletBinding, bool) {
+func (s participantRegistrarStub) GetByUser(_ context.Context, _ string) (domain.WalletBinding, bool) {
 	return domain.WalletBinding{}, false
 }
 

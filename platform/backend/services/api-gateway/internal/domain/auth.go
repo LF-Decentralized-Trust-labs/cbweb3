@@ -9,7 +9,7 @@ var (
 	ErrUserAlreadyBound   = errors.New("user already bound to another wallet")
 	ErrInvalidToken       = errors.New("invalid token")
 	ErrInvalidSignature   = errors.New("invalid signature")
-	ErrRejectedByKYC      = errors.New("kyc status rejected")
+	ErrRejectedByKYC      = errors.New("kyc status does not allow wallet binding")
 )
 
 // AuthToken represents the token response returned by auth providers.

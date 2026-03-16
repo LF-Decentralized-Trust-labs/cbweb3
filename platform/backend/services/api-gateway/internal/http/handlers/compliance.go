@@ -30,7 +30,7 @@ func (h *ComplianceHandler) GetKYCStatus(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "subject is required"})
 	}
 	if h.kycMgr != nil {
-		kycStatus, err := h.kycMgr.GetKYCStatus(c.Context(), subject)
+		kycStatus, err := h.kycMgr.GetKYCStatus(c.UserContext(), subject)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get kyc status"})
 		}
@@ -63,7 +63,7 @@ func (h *ComplianceHandler) IssueKYCCredential(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "kyc manager not available"})
 	}
 
-	result, err := h.kycMgr.IssueKYCCredential(c.Context(), body.Subject, claims.Subject, body.InstitutionName, body.CountryCode, body.BankCode)
+	result, err := h.kycMgr.IssueKYCCredential(c.UserContext(), body.Subject, claims.Subject, body.InstitutionName, body.CountryCode, body.BankCode)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to issue credential"})
 	}
@@ -89,7 +89,7 @@ func (h *ComplianceHandler) VerifyKYCProof(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "kyc manager not available"})
 	}
 
-	valid, err := h.kycMgr.VerifyKYCProof(c.Context(), body.ZKPPointer)
+	valid, err := h.kycMgr.VerifyKYCProof(c.UserContext(), body.ZKPPointer)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "verification failed"})
 	}
@@ -110,7 +110,7 @@ func (h *ComplianceHandler) AMLScreen(c *fiber.Ctx) error {
 
 	var kycStatus domain.KYCStatus
 	if h.kycMgr != nil {
-		s, err := h.kycMgr.GetKYCStatus(c.Context(), body.Subject)
+		s, err := h.kycMgr.GetKYCStatus(c.UserContext(), body.Subject)
 		if err != nil {
 			s = domain.KYCStatus(h.kyc.GetStatus(body.Subject))
 		}
@@ -147,7 +147,7 @@ func (h *ComplianceHandler) ProvisionParticipant(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "kyc manager not available"})
 	}
 
-	if err := h.kycMgr.ProvisionParticipant(c.Context(), body.Subject, domain.KYCStatus(body.Status)); err != nil {
+	if err := h.kycMgr.ProvisionParticipant(c.UserContext(), body.Subject, domain.KYCStatus(body.Status)); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "provisioning failed"})
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"subject": body.Subject, "status": body.Status})
@@ -168,7 +168,7 @@ func (h *ComplianceHandler) FreezeAccount(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "kyc manager not available"})
 	}
 
-	if err := h.kycMgr.ProvisionParticipant(c.Context(), body.Subject, domain.KYCFrozen); err != nil {
+	if err := h.kycMgr.ProvisionParticipant(c.UserContext(), body.Subject, domain.KYCFrozen); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "freeze failed"})
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"subject": body.Subject, "status": string(domain.KYCFrozen)})
@@ -189,7 +189,7 @@ func (h *ComplianceHandler) UnfreezeAccount(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "kyc manager not available"})
 	}
 
-	if err := h.kycMgr.ProvisionParticipant(c.Context(), body.Subject, domain.KYCApproved); err != nil {
+	if err := h.kycMgr.ProvisionParticipant(c.UserContext(), body.Subject, domain.KYCApproved); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "unfreeze failed"})
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"subject": body.Subject, "status": string(domain.KYCApproved)})
