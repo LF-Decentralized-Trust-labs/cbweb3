@@ -18,8 +18,6 @@ type ParticipantModel struct {
 	PrivacyDomainID string     `gorm:"column:privacy_domain_id"`   // Paladin privacy domain
 	CactiRelayAddr  string     `gorm:"column:cacti_relay_address"` // Cacti relay endpoint
 	SignerProvider  string     `gorm:"column:signer_provider"`     // "local" | "dwallet_api"
-	// KMSKeyID kept for backward-compat; not used with LNET D-Wallet custody.
-	KMSKeyID   string    `gorm:"column:kms_key_id"`
 	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }

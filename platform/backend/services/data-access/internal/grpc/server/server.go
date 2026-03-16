@@ -55,7 +55,6 @@ func (s *dataAccessService) UpsertParticipant(ctx context.Context, req *contract
 		InstitutionName: req.Participant.InstitutionName,
 		WalletType:      req.Participant.WalletType,
 		SignerProvider:  req.Participant.SignerProvider,
-		KMSKeyID:        req.Participant.KMSKeyID,
 	})
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "required") {
@@ -89,7 +88,6 @@ func (s *dataAccessService) GetParticipantByUser(ctx context.Context, req *contr
 			InstitutionName: p.InstitutionName,
 			WalletType:      p.WalletType,
 			SignerProvider:  p.SignerProvider,
-			KMSKeyID:        p.KMSKeyID,
 		},
 	}, nil
 }

@@ -39,8 +39,6 @@ type identityServiceServer interface {
 }
 
 // New builds a configured gRPC server and registers all identity handlers.
-// The KMS provider has been removed — signing is now delegated to the
-// identityprovider.Provider (D-Wallet API in prod, LocalProvider in dev).
 func New(
 	provider identityprovider.Provider,
 	dataAccess dataaccessclient.Client,
@@ -347,7 +345,7 @@ func (s *identityService) RegisterParticipant(ctx context.Context, req *contract
 // --- Signing ---
 
 // SignTransaction delegates to the provider — D-Wallet API in prod,
-// secp256k1 in-process for LocalProvider. KMS is no longer a separate layer.
+// secp256k1 in-process for LocalProvider.
 func (s *identityService) SignTransaction(ctx context.Context, req *contract.SignTransactionRequest) (*contract.SignTransactionResponse, error) {
 	if strings.TrimSpace(req.UserID) == "" || strings.TrimSpace(req.Digest) == "" {
 		return nil, status.Error(codes.InvalidArgument, "user_id and digest are required")

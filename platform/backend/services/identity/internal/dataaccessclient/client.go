@@ -28,7 +28,6 @@ type Participant struct {
 	InstitutionName string
 	WalletType      string // Direct, Correspondent, Escrow (REQ-CAP-004)
 	SignerProvider  string
-	KMSKeyID        string // kept for backward-compat; unused with LNET custody
 }
 
 // KYCCredential stores the issued VC pointer for a participant.
@@ -105,7 +104,6 @@ func (c *grpcClient) UpsertParticipant(ctx context.Context, p Participant) error
 			InstitutionName string `json:"institution_name"`
 			WalletType      string `json:"wallet_type"`
 			SignerProvider  string `json:"signer_provider"`
-			KMSKeyID        string `json:"kms_key_id"`
 		} `json:"participant"`
 	}{}
 	req.Participant.UserID = p.UserID
@@ -117,7 +115,6 @@ func (c *grpcClient) UpsertParticipant(ctx context.Context, p Participant) error
 	req.Participant.InstitutionName = p.InstitutionName
 	req.Participant.WalletType = p.WalletType
 	req.Participant.SignerProvider = p.SignerProvider
-	req.Participant.KMSKeyID = p.KMSKeyID
 	var resp struct {
 		Success bool `json:"success"`
 	}
@@ -185,7 +182,6 @@ func (c *grpcClient) GetParticipantByUser(ctx context.Context, userID string) (P
 			InstitutionName string `json:"institution_name"`
 			WalletType      string `json:"wallet_type"`
 			SignerProvider  string `json:"signer_provider"`
-			KMSKeyID        string `json:"kms_key_id"`
 		} `json:"participant"`
 	}
 	if err := c.cc.Invoke(ctx, getParticipantByUserMethod, &req, &resp, grpc.ForceCodec(c.codec)); err != nil {
@@ -204,6 +200,5 @@ func (c *grpcClient) GetParticipantByUser(ctx context.Context, userID string) (P
 		InstitutionName: resp.Participant.InstitutionName,
 		WalletType:      resp.Participant.WalletType,
 		SignerProvider:  resp.Participant.SignerProvider,
-		KMSKeyID:        resp.Participant.KMSKeyID,
 	}, true, nil
 }

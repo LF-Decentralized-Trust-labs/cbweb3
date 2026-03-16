@@ -26,7 +26,6 @@ type Participant struct {
 	InstitutionName string `json:"institution_name"`
 	WalletType      string `json:"wallet_type"`
 	SignerProvider  string `json:"signer_provider"`
-	KMSKeyID        string `json:"kms_key_id"`
 }
 
 type UpsertParticipantRequest struct {

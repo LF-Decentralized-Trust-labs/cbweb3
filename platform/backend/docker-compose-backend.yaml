@@ -55,7 +55,6 @@ services:
     environment:
       IDENTITY_PROVIDER: local
       IDENTITY_GRPC_PORT: "9091"
-      IDENTITY_KMS_PROVIDER: localkms
       INTERNAL_JWT_PROVIDER: local
       IDENTITY_JWT_SECRET: local-identity-secret
       INTERNAL_JWT_SECRET: local-identity-secret

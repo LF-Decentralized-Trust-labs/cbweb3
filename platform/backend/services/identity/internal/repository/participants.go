@@ -15,7 +15,6 @@ type Participant struct {
 	BankCode       string
 	Role           string
 	SignerProvider string
-	KMSKeyID       string
 }
 
 type ParticipantsRepository interface {
@@ -69,8 +68,7 @@ func EnsurePostgresSchema(ctx context.Context, db *sql.DB) error {
 			country TEXT,
 			bank_code TEXT,
 			role TEXT,
-			signer_provider TEXT,
-			kms_key_id TEXT
+			signer_provider TEXT
 		)`,
 	)
 	return err
@@ -82,17 +80,16 @@ func (r *postgresParticipantsRepository) Upsert(ctx context.Context, p Participa
 	}
 	_, err := r.db.ExecContext(
 		ctx,
-		`INSERT INTO participants (user_id, did, wallet_address, country, bank_code, role, signer_provider, kms_key_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		`INSERT INTO participants (user_id, did, wallet_address, country, bank_code, role, signer_provider)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7)
 		 ON CONFLICT (user_id)
 		 DO UPDATE SET did = EXCLUDED.did,
 		               wallet_address = EXCLUDED.wallet_address,
 		               country = EXCLUDED.country,
 		               bank_code = EXCLUDED.bank_code,
 		               role = EXCLUDED.role,
-		               signer_provider = EXCLUDED.signer_provider,
-		               kms_key_id = EXCLUDED.kms_key_id`,
-		p.UserID, p.DID, p.WalletAddress, p.Country, p.BankCode, p.Role, p.SignerProvider, p.KMSKeyID,
+		               signer_provider = EXCLUDED.signer_provider`,
+		p.UserID, p.DID, p.WalletAddress, p.Country, p.BankCode, p.Role, p.SignerProvider,
 	)
 	return err
 }
@@ -100,13 +97,13 @@ func (r *postgresParticipantsRepository) Upsert(ctx context.Context, p Participa
 func (r *postgresParticipantsRepository) GetByUser(ctx context.Context, userID string) (Participant, bool, error) {
 	row := r.db.QueryRowContext(
 		ctx,
-		`SELECT user_id, did, wallet_address, country, bank_code, role, signer_provider, kms_key_id
+		`SELECT user_id, did, wallet_address, country, bank_code, role, signer_provider
 		 FROM participants WHERE user_id = $1`,
 		userID,
 	)
 	var p Participant
 	if err := row.Scan(
-		&p.UserID, &p.DID, &p.WalletAddress, &p.Country, &p.BankCode, &p.Role, &p.SignerProvider, &p.KMSKeyID,
+		&p.UserID, &p.DID, &p.WalletAddress, &p.Country, &p.BankCode, &p.Role, &p.SignerProvider,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Participant{}, false, nil

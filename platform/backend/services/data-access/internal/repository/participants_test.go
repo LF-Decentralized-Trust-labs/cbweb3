@@ -16,8 +16,7 @@ func TestMemoryParticipantsRepositoryUpsertAndGet(t *testing.T) {
 		Country:        "BR",
 		BankCode:       "001",
 		Role:           "bank",
-		SignerProvider: "localkms",
-		KMSKeyID:       "kms-1",
+		SignerProvider: "local",
 	})
 	if err != nil {
 		t.Fatalf("unexpected upsert error: %v", err)
@@ -30,7 +29,7 @@ func TestMemoryParticipantsRepositoryUpsertAndGet(t *testing.T) {
 	if !found {
 		t.Fatal("expected participant to be found")
 	}
-	if got.UserID != "bank-a" || got.KMSKeyID != "kms-1" {
+	if got.UserID != "bank-a" {
 		t.Fatalf("unexpected participant: %+v", got)
 	}
 }
