@@ -13,7 +13,8 @@
     "dev:bank": "npm run dev --workspace=bank --",
     "dev:supervisor": "npm run dev --workspace=supervisor --",
     "dev:treasury": "npm run dev --workspace=treasury --",
-    "dev:noc": "npm run dev --workspace=noc --"
+    "dev:noc": "npm run dev --workspace=noc --",
+    "dev:governance": "npm run dev --workspace=governance --"
   },
   "license": "ISC"
 }
