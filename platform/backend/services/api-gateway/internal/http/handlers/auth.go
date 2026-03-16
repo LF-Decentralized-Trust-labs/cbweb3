@@ -194,8 +194,14 @@ func (h *AuthHandler) Onboarding(c *fiber.Ctx) error {
 	})
 }
 
+const walletBindDeprecationWarning = `299 - "POST /auth/wallet/bind is deprecated; wallet binding will move to internal identity flow"`
+
 // WalletBind validates a signed wallet binding request for the authenticated subject.
+// Deprecated: wallet binding will happen internally in the identity service.
 func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
+	c.Set("Deprecation", "true")
+	c.Set("Warning", walletBindDeprecationWarning)
+
 	rawClaims := c.Locals("claims")
 	claims, ok := rawClaims.(domain.TokenClaims)
 	if !ok || claims.Subject == "" {

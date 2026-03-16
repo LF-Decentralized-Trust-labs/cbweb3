@@ -162,8 +162,12 @@ paths:
   /auth/wallet/bind:
     post:
       tags: [Authentication]
-      summary: Bind a wallet address to the authenticated subject via EIP-191 signature
+      summary: "[DEPRECATED] Bind wallet via EIP-191 signature"
+      description: >
+        Deprecated endpoint. Wallet binding is being moved to an internal identity flow.
+        Keep only for backward compatibility during migration.
       operationId: walletBind
+      deprecated: true
       security:
         - BearerAuth: []
       requestBody:
@@ -184,7 +188,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: KYC rejected
+          description: KYC status does not allow wallet binding (any status != APPROVED)
           content:
             application/json:
               schema:

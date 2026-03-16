@@ -12,8 +12,6 @@ Identity gRPC microservice using a provider/adapter approach to decouple externa
 
 - `internal/identityprovider`: identity contract and shared types.
 - `internal/identityprovider/providers`: identity providers factory and concrete implementations.
-- `internal/kmsprovider`: KMS contract and shared types.
-- `internal/kmsprovider/providers`: KMS factory and concrete implementations.
 - `internal/dataaccessclient`: gRPC client for participants metadata in `data-access`.
 - `internal/tokenissuer`: internal JWT issuer (`local` or `keycloak`).
 - `internal/grpc`: gRPC contract and server.
@@ -29,7 +27,6 @@ Identity gRPC microservice using a provider/adapter approach to decouple externa
 - `IDENTITY_REQUEST_TIMEOUT_SEC=5`
 - `DATA_ACCESS_GRPC_ADDR=localhost:9092`
 - `DATA_ACCESS_REQUEST_TIMEOUT_SEC=5`
-- `IDENTITY_KMS_PROVIDER=localkms|awskms|gcpkms` (`localkms` implemented now)
 - `INTERNAL_JWT_PROVIDER=local|keycloak`
 - `INTERNAL_JWT_SECRET=<optional>`
 - `INTERNAL_JWT_TTL_SEC=<optional, default 3600>`
@@ -52,8 +49,6 @@ IDENTITY_REQUEST_TIMEOUT_SEC=5
 DATA_ACCESS_GRPC_ADDR=localhost:9092
 DATA_ACCESS_REQUEST_TIMEOUT_SEC=5
 
-IDENTITY_KMS_PROVIDER=localkms
-
 INTERNAL_JWT_PROVIDER=local
 INTERNAL_JWT_SECRET=identity-internal-secret
 INTERNAL_JWT_ISSUER=identity-internal
@@ -70,8 +65,6 @@ IDENTITY_HOST_URL=https://<dwallet-api-host>
 IDENTITY_REQUEST_TIMEOUT_SEC=5
 DATA_ACCESS_GRPC_ADDR=localhost:9092
 DATA_ACCESS_REQUEST_TIMEOUT_SEC=5
-
-IDENTITY_KMS_PROVIDER=localkms
 
 INTERNAL_JWT_PROVIDER=keycloak
 INTERNAL_KEYCLOAK_TOKEN_URL=http://localhost:8080/realms/cbweb3/protocol/openid-connect/token
