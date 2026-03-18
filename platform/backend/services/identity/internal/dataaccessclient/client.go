@@ -26,6 +26,7 @@ type Participant struct {
 	BankCode        string
 	Role            string
 	InstitutionName string
+	KYCStatus       string // PENDING, APPROVED, FROZEN, REVOKED
 }
 
 // KYCCredential stores the issued VC pointer for a participant.
@@ -100,6 +101,7 @@ func (c *grpcClient) UpsertParticipant(ctx context.Context, p Participant) error
 			BankCode        string `json:"bank_code"`
 			Role            string `json:"role"`
 			InstitutionName string `json:"institution_name"`
+			KYCStatus       string `json:"kyc_status,omitempty"`
 		} `json:"participant"`
 	}{}
 	req.Participant.UserID = p.UserID
@@ -109,6 +111,7 @@ func (c *grpcClient) UpsertParticipant(ctx context.Context, p Participant) error
 	req.Participant.BankCode = p.BankCode
 	req.Participant.Role = p.Role
 	req.Participant.InstitutionName = p.InstitutionName
+	req.Participant.KYCStatus = p.KYCStatus
 	var resp struct {
 		Success bool `json:"success"`
 	}
@@ -174,6 +177,7 @@ func (c *grpcClient) GetParticipantByUser(ctx context.Context, userID string) (P
 			BankCode        string `json:"bank_code"`
 			Role            string `json:"role"`
 			InstitutionName string `json:"institution_name"`
+			KYCStatus       string `json:"kyc_status"`
 		} `json:"participant"`
 	}
 	if err := c.cc.Invoke(ctx, getParticipantByUserMethod, &req, &resp, grpc.ForceCodec(c.codec)); err != nil {
@@ -190,5 +194,6 @@ func (c *grpcClient) GetParticipantByUser(ctx context.Context, userID string) (P
 		BankCode:        resp.Participant.BankCode,
 		Role:            resp.Participant.Role,
 		InstitutionName: resp.Participant.InstitutionName,
+		KYCStatus:       resp.Participant.KYCStatus,
 	}, true, nil
 }

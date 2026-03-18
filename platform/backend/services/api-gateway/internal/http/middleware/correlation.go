@@ -16,18 +16,15 @@ const (
 	CorrelationIDLocal = "correlation_id"
 )
 
-// CorrelationID ensures every request carries an X-Correlation-Id header.
-// If the client provides one, it is used; otherwise a new UUIDv4-like hex is generated.
+// CorrelationID ensures every request carries a server-generated X-Correlation-Id header.
+// Any value provided by the client is ignored/overridden.
 // The value is:
 //   - Accessible via c.Locals(CorrelationIDLocal) for downstream gRPC calls.
 //   - Embedded in c.UserContext() as gRPC outgoing metadata so adapters propagate it automatically.
 //   - Echoed back in the response header for end-to-end tracing.
 func CorrelationID() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		corrID := c.Get(CorrelationIDHeader)
-		if corrID == "" {
-			corrID = newCorrelationID()
-		}
+		corrID := newCorrelationID()
 		c.Locals(CorrelationIDLocal, corrID)
 		c.Set(CorrelationIDHeader, corrID)
 		// Embed into Go context so handlers can pass correlation ID to gRPC adapters via c.UserContext().

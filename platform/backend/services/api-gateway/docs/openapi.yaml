@@ -4,11 +4,10 @@ info:
   version: 2.0.0
   description: >
     OpenAPI specification for the CBWeb3 platform API Gateway.
-    Implements authentication, participant onboarding, wallet management,
-    KYC/AML compliance, and governance operations.
+    Implements authentication, participant onboarding, KYC/AML compliance,
+    and governance operations over the identity service (Keycloak + KMS).
     
     Security note: All /compliance write endpoints require CENTRAL_BANK role.
-    X-Correlation-Id is generated automatically if not provided.
 servers:
   - url: http://localhost:8080
     description: Local development server
@@ -16,7 +15,7 @@ tags:
   - name: Health
     description: Service health endpoint
   - name: Authentication
-    description: Login, refresh, logout, onboarding and wallet binding
+    description: Login, refresh, logout and onboarding
   - name: Compliance
     description: KYC credential issuance, verification, AML screening, and governance
 paths:
@@ -162,45 +161,24 @@ paths:
   /auth/wallet/bind:
     post:
       tags: [Authentication]
-      summary: "[DEPRECATED] Bind wallet via EIP-191 signature"
+      summary: "[REMOVED] Wallet bind endpoint"
       description: >
-        Deprecated endpoint. Wallet binding is being moved to an internal identity flow.
-        Keep only for backward compatibility during migration.
+        This endpoint was removed. Wallet binding now happens internally during
+        onboarding in the identity service.
       operationId: walletBind
       deprecated: true
       security:
         - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/WalletBindRequest"
       responses:
-        "200":
-          description: Wallet successfully bound
+        "410":
+          description: Endpoint removed
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WalletBindResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          description: KYC status does not allow wallet binding (any status != APPROVED)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "409":
-          description: Wallet/user binding conflict
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: "#/components/schemas/ErrorCodeResponse"
+              example:
+                error: "wallet bind endpoint has been removed"
+                code: "GONE"
 
   /compliance/kyc/status/{subject}:
     get:
@@ -233,7 +211,7 @@ paths:
       tags: [Compliance]
       summary: >
         Issue a Verifiable Credential (VC) for a participant.
-        Requires CENTRAL_BANK role. Generates a ZKP pointer (SHA-256) for on-chain verification.
+        Currently not implemented.
       operationId: issueKycCredential
       security:
         - BearerAuth: []
@@ -244,52 +222,33 @@ paths:
             schema:
               $ref: "#/components/schemas/IssueCredentialRequest"
       responses:
-        "201":
-          description: Credential issued
+        "501":
+          description: Not implemented
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/IssueCredentialResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: "#/components/schemas/ErrorCodeResponse"
+              example:
+                error: "KYC credential issuance is not yet available"
+                code: "NOT_IMPLEMENTED"
 
   /compliance/kyc/verify-proof:
     post:
       tags: [Compliance]
-      summary: Verify a ZKP pointer against the Claims Verifier
+      summary: Verify a ZKP pointer
       operationId: verifyKycProof
       security:
         - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [zkpPointer]
-              properties:
-                zkpPointer:
-                  type: string
-                  description: SHA-256 hash of the VC payload
       responses:
-        "200":
-          description: Proof verification result
+        "501":
+          description: Not implemented
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/VerifyProofResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                $ref: "#/components/schemas/ErrorCodeResponse"
+              example:
+                error: "KYC proof verification is not yet available"
+                code: "NOT_IMPLEMENTED"
 
   /compliance/aml/screen:
     post:
@@ -472,6 +431,14 @@ components:
       properties:
         error:
           type: string
+    ErrorCodeResponse:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
 
     HealthResponse:
       type: object
@@ -532,11 +499,6 @@ components:
         institution_name:
           type: string
           example: "Banco do Brasil"
-        wallet_type:
-          type: string
-          enum: [Direct, Correspondent, Escrow]
-          description: Wallet classification (REQ-CAP-004)
-          example: Direct
 
     OnboardingResponse:
       type: object
@@ -550,32 +512,6 @@ components:
         walletAddress:
           type: string
           example: "0x..."
-        signerProvider:
-          type: string
-          example: local
-
-    WalletBindRequest:
-      type: object
-      required: [walletAddress, signature]
-      properties:
-        walletAddress:
-          type: string
-          description: Ethereum wallet address
-        signature:
-          type: string
-          description: EIP-191 signature of CBWEB3_WALLET_BIND message
-
-    WalletBindResponse:
-      type: object
-      required: [userId, walletAddress, status]
-      properties:
-        userId:
-          type: string
-        walletAddress:
-          type: string
-        status:
-          type: string
-          example: BOUND
 
     KYCStatusResponse:
       type: object
@@ -600,29 +536,6 @@ components:
           type: string
           example: BR
         bank_code:
-          type: string
-
-    IssueCredentialResponse:
-      type: object
-      required: [vcJwt, zkpPointer, issuedAt]
-      properties:
-        vcJwt:
-          type: string
-          description: Verifiable Credential JWT
-        zkpPointer:
-          type: string
-          description: SHA-256 hash of VC payload — on-chain verification pointer
-        issuedAt:
-          type: string
-          format: date-time
-
-    VerifyProofResponse:
-      type: object
-      required: [valid, zkpPointer]
-      properties:
-        valid:
-          type: boolean
-        zkpPointer:
           type: string
 
     AMLScreenResponse:

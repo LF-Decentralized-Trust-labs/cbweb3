@@ -15,12 +15,8 @@ import (
 )
 
 const (
-	bindWalletMethod           = "/identity.v1.IdentityService/BindWallet"
-	getByUserMethod            = "/identity.v1.IdentityService/GetByUser"
 	registerParticipantMethod  = "/identity.v1.IdentityService/RegisterParticipant"
 	getKYCStatusMethod         = "/identity.v1.IdentityService/GetKYCStatus"
-	issueKYCCredentialMethod   = "/identity.v1.IdentityService/IssueKYCCredential"
-	verifyKYCProofMethod       = "/identity.v1.IdentityService/VerifyKYCProof"
 	provisionParticipantMethod = "/identity.v1.IdentityService/ProvisionParticipant"
 )
 
@@ -35,7 +31,7 @@ func (jsonCodec) Unmarshal(data []byte, v any) error {
 }
 
 // IdentityGRPCManager delegates identity and KYC operations to the identity service.
-// It implements IIdentityManager, KYCManager, and ParticipantRegistrar.
+// It implements KYCChecker, KYCManager, and ParticipantRegistrar.
 type IdentityGRPCManager struct {
 	client grpc.ClientConnInterface
 	codec  encoding.Codec
@@ -60,64 +56,6 @@ func NewIdentityGRPCManager(address string, timeout time.Duration) (*IdentityGRP
 		client: conn,
 		codec:  codec,
 	}, nil
-}
-
-// named private types for testability within the same package
-type bindWalletRequest struct {
-	UserID        string `json:"user_id"`
-	WalletAddress string `json:"wallet_address"`
-}
-
-type walletBindingResponse struct {
-	UserID        string `json:"user_id"`
-	WalletAddress string `json:"wallet_address"`
-}
-
-type getByUserResponse struct {
-	Binding *walletBindingResponse `json:"binding"`
-	Found   bool                   `json:"found"`
-}
-
-// --- IIdentityManager ---
-
-func (m *IdentityGRPCManager) BindWallet(ctx context.Context, userID, walletAddress string) (domain.WalletBinding, error) {
-	req := &bindWalletRequest{UserID: userID, WalletAddress: walletAddress}
-	out := &walletBindingResponse{}
-	if err := m.client.Invoke(ctx, bindWalletMethod, req, out, grpc.ForceCodec(m.codec)); err != nil {
-		if st, ok := status.FromError(err); ok {
-			if st.Code() == codes.AlreadyExists {
-				return domain.WalletBinding{}, domain.ErrWalletAlreadyBound
-			}
-			if st.Code() == codes.FailedPrecondition {
-				return domain.WalletBinding{}, domain.ErrUserAlreadyBound
-			}
-		}
-		return domain.WalletBinding{}, err
-	}
-	return domain.WalletBinding{
-		UserID:        out.UserID,
-		WalletAddress: out.WalletAddress,
-	}, nil
-}
-
-func (m *IdentityGRPCManager) GetByUser(ctx context.Context, userID string) (domain.WalletBinding, bool) {
-	req := &struct {
-		UserID string `json:"user_id"`
-	}{UserID: userID}
-	out := &getByUserResponse{}
-	if err := m.client.Invoke(ctx, getByUserMethod, req, out, grpc.ForceCodec(m.codec)); err != nil {
-		return domain.WalletBinding{}, false
-	}
-	if !out.Found || out.Binding == nil {
-		return domain.WalletBinding{}, false
-	}
-	if out.Binding.UserID == "" || out.Binding.WalletAddress == "" {
-		return domain.WalletBinding{}, false
-	}
-	return domain.WalletBinding{
-		UserID:        out.Binding.UserID,
-		WalletAddress: out.Binding.WalletAddress,
-	}, true
 }
 
 // --- ParticipantRegistrar ---
@@ -172,53 +110,11 @@ func (m *IdentityGRPCManager) GetKYCStatus(ctx context.Context, subject string) 
 
 // GetStatus satisfies KYCChecker (sync fallback — uses background context).
 func (m *IdentityGRPCManager) GetStatus(subject string) domain.KYCStatus {
-	status, err := m.GetKYCStatus(context.Background(), subject)
+	s, err := m.GetKYCStatus(context.Background(), subject)
 	if err != nil {
 		return domain.KYCPending
 	}
-	return status
-}
-
-func (m *IdentityGRPCManager) IssueKYCCredential(ctx context.Context, subject, issuerSubject, institutionName, countryCode, bankCode string) (interfaces.KYCCredentialResult, error) {
-	req := &struct {
-		Subject         string `json:"subject"`
-		IssuerSubject   string `json:"issuer_subject"`
-		InstitutionName string `json:"institution_name"`
-		CountryCode     string `json:"country_code"`
-		BankCode        string `json:"bank_code"`
-	}{
-		Subject:         subject,
-		IssuerSubject:   issuerSubject,
-		InstitutionName: institutionName,
-		CountryCode:     countryCode,
-		BankCode:        bankCode,
-	}
-	out := &struct {
-		VCJWT      string `json:"vc_jwt"`
-		ZKPPointer string `json:"zkp_pointer"`
-		IssuedAt   string `json:"issued_at"`
-	}{}
-	if err := m.client.Invoke(ctx, issueKYCCredentialMethod, req, out, grpc.ForceCodec(m.codec)); err != nil {
-		return interfaces.KYCCredentialResult{}, err
-	}
-	return interfaces.KYCCredentialResult{
-		VCJWT:      out.VCJWT,
-		ZKPPointer: out.ZKPPointer,
-		IssuedAt:   out.IssuedAt,
-	}, nil
-}
-
-func (m *IdentityGRPCManager) VerifyKYCProof(ctx context.Context, zkpPointer string) (bool, error) {
-	req := &struct {
-		ZKPPointer string `json:"zkp_pointer"`
-	}{ZKPPointer: zkpPointer}
-	out := &struct {
-		Valid bool `json:"valid"`
-	}{}
-	if err := m.client.Invoke(ctx, verifyKYCProofMethod, req, out, grpc.ForceCodec(m.codec)); err != nil {
-		return false, err
-	}
-	return out.Valid, nil
+	return s
 }
 
 func (m *IdentityGRPCManager) ProvisionParticipant(ctx context.Context, subject string, kycStatus domain.KYCStatus) error {

@@ -39,61 +39,20 @@ func (h *ComplianceHandler) GetKYCStatus(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"subject": subject, "status": h.kyc.GetStatus(subject)})
 }
 
-// IssueKYCCredential issues a Verifiable Credential for a participant (CENTRAL_BANK only).
+// IssueKYCCredential is not yet available — credential issuance is handled internally by the identity service.
 func (h *ComplianceHandler) IssueKYCCredential(c *fiber.Ctx) error {
-	rawClaims := c.Locals("claims")
-	claims, ok := rawClaims.(domain.TokenClaims)
-	if !ok || claims.Subject == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token claims"})
-	}
-
-	var body struct {
-		Subject         string `json:"subject"`
-		InstitutionName string `json:"institution_name"`
-		CountryCode     string `json:"country_code"`
-		BankCode        string `json:"bank_code"`
-	}
-	if err := c.BodyParser(&body); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
-	}
-	if body.Subject == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "subject is required"})
-	}
-	if h.kycMgr == nil {
-		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "kyc manager not available"})
-	}
-
-	result, err := h.kycMgr.IssueKYCCredential(c.UserContext(), body.Subject, claims.Subject, body.InstitutionName, body.CountryCode, body.BankCode)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to issue credential"})
-	}
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"vcJwt":      result.VCJWT,
-		"zkpPointer": result.ZKPPointer,
-		"issuedAt":   result.IssuedAt,
+	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+		"error": "KYC credential issuance is not yet available",
+		"code":  "NOT_IMPLEMENTED",
 	})
 }
 
-// VerifyKYCProof verifies a ZKP pointer against the on-chain Claims Verifier.
+// VerifyKYCProof is not yet available — ZKP verification is handled internally by the identity service.
 func (h *ComplianceHandler) VerifyKYCProof(c *fiber.Ctx) error {
-	var body struct {
-		ZKPPointer string `json:"zkpPointer"`
-	}
-	if err := c.BodyParser(&body); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
-	}
-	if body.ZKPPointer == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "zkpPointer is required"})
-	}
-	if h.kycMgr == nil {
-		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "kyc manager not available"})
-	}
-
-	valid, err := h.kycMgr.VerifyKYCProof(c.UserContext(), body.ZKPPointer)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "verification failed"})
-	}
-	return c.JSON(fiber.Map{"valid": valid, "zkpPointer": body.ZKPPointer})
+	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+		"error": "KYC proof verification is not yet available",
+		"code":  "NOT_IMPLEMENTED",
+	})
 }
 
 // AMLScreen checks the KYC status as an AML/CFT gate (REQ-COM-007).

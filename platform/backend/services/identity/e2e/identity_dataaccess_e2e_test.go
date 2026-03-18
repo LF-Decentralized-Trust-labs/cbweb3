@@ -98,14 +98,6 @@ func TestIdentityAndDataAccessE2E(t *testing.T) {
 		t.Fatal("expected non-empty wallet address")
 	}
 
-	getResp, err := client.GetByUser(ctx, &contract.GetByUserRequest{UserID: "bank-a"})
-	if err != nil {
-		t.Fatalf("get by user failed: %v", err)
-	}
-	if !getResp.Found || getResp.Binding == nil {
-		t.Fatal("expected wallet binding for bank-a")
-	}
-
 	digest := make([]byte, 32)
 	for i := range digest {
 		digest[i] = byte(i + 1)

@@ -4,20 +4,14 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
-	"github.com/ethereum/go-ethereum/accounts"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -38,25 +32,6 @@ func (s authProviderStub) Logout(_ context.Context, _ string) error {
 	return s.err
 }
 
-type identityManagerStub struct {
-	binding domain.WalletBinding
-	err     error
-}
-
-func (s identityManagerStub) BindWallet(_ context.Context, userID, walletAddress string) (domain.WalletBinding, error) {
-	if s.err != nil {
-		return domain.WalletBinding{}, s.err
-	}
-	if s.binding.UserID == "" {
-		return domain.WalletBinding{UserID: userID, WalletAddress: walletAddress}, nil
-	}
-	return s.binding, nil
-}
-
-func (s identityManagerStub) GetByUser(_ context.Context, _ string) (domain.WalletBinding, bool) {
-	return domain.WalletBinding{}, false
-}
-
 type kycCheckerStub struct {
 	status domain.KYCStatus
 }
@@ -70,10 +45,8 @@ func (s kycCheckerStub) GetStatus(_ string) domain.KYCStatus {
 
 // kycManagerStub implements both KYCChecker and KYCManager for handler tests.
 type kycManagerStub struct {
-	status    domain.KYCStatus
-	vcResult  interfaces.KYCCredentialResult
-	verifyOk  bool
-	err       error
+	status domain.KYCStatus
+	err    error
 }
 
 func (s kycManagerStub) GetStatus(_ string) domain.KYCStatus {
@@ -90,31 +63,15 @@ func (s kycManagerStub) GetKYCStatus(_ context.Context, _ string) (domain.KYCSta
 	return s.status, s.err
 }
 
-func (s kycManagerStub) IssueKYCCredential(_ context.Context, _, _, _, _, _ string) (interfaces.KYCCredentialResult, error) {
-	return s.vcResult, s.err
-}
-
-func (s kycManagerStub) VerifyKYCProof(_ context.Context, _ string) (bool, error) {
-	return s.verifyOk, s.err
-}
-
 func (s kycManagerStub) ProvisionParticipant(_ context.Context, _ string, _ domain.KYCStatus) error {
 	return s.err
 }
 
-// participantRegistrarStub implements IIdentityManager + KYCChecker + KYCManager + ParticipantRegistrar.
+// participantRegistrarStub implements KYCChecker + KYCManager + ParticipantRegistrar.
 type participantRegistrarStub struct {
 	kycManagerStub
 	regResult interfaces.RegisterParticipantResult
 	regErr    error
-}
-
-func (s participantRegistrarStub) BindWallet(_ context.Context, userID, walletAddress string) (domain.WalletBinding, error) {
-	return domain.WalletBinding{UserID: userID, WalletAddress: walletAddress}, nil
-}
-
-func (s participantRegistrarStub) GetByUser(_ context.Context, _ string) (domain.WalletBinding, bool) {
-	return domain.WalletBinding{}, false
 }
 
 func (s participantRegistrarStub) RegisterParticipant(_ context.Context, _, _, _, _, _ string) (interfaces.RegisterParticipantResult, error) {
@@ -138,7 +95,7 @@ func TestAuthHandlerLogin(t *testing.T) {
 	t.Parallel()
 	handler := NewAuthHandler(authProviderStub{
 		token: domain.AuthToken{AccessToken: "token", ExpiresIn: 1, TokenType: "Bearer"},
-	}, identityManagerStub{}, kycCheckerStub{})
+	}, kycCheckerStub{})
 	app := fiber.New()
 	app.Post("/auth/login", handler.Login)
 
@@ -158,7 +115,7 @@ func TestAuthHandlerLoginInvalidCases(t *testing.T) {
 	t.Parallel()
 
 	t.Run("missing fields", func(t *testing.T) {
-		handler := NewAuthHandler(authProviderStub{}, identityManagerStub{}, kycCheckerStub{})
+		handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{})
 		app := fiber.New()
 		app.Post("/auth/login", handler.Login)
 		body, _ := json.Marshal(map[string]string{"clientId": ""})
@@ -174,7 +131,7 @@ func TestAuthHandlerLoginInvalidCases(t *testing.T) {
 	})
 
 	t.Run("invalid credentials", func(t *testing.T) {
-		handler := NewAuthHandler(authProviderStub{err: errors.New("invalid")}, identityManagerStub{}, kycCheckerStub{})
+		handler := NewAuthHandler(authProviderStub{err: errors.New("invalid")}, kycCheckerStub{})
 		app := fiber.New()
 		app.Post("/auth/login", handler.Login)
 		body, _ := json.Marshal(map[string]string{"clientId": "bank", "clientSecret": "bad"})
@@ -190,7 +147,7 @@ func TestAuthHandlerLoginInvalidCases(t *testing.T) {
 	})
 
 	t.Run("invalid body", func(t *testing.T) {
-		handler := NewAuthHandler(authProviderStub{}, identityManagerStub{}, kycCheckerStub{})
+		handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{})
 		app := fiber.New()
 		app.Post("/auth/login", handler.Login)
 		req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewReader([]byte("{")))
@@ -201,136 +158,6 @@ func TestAuthHandlerLoginInvalidCases(t *testing.T) {
 		}
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d", resp.StatusCode)
-		}
-	})
-}
-
-func TestAuthHandlerWalletBindRejected(t *testing.T) {
-	t.Parallel()
-	handler := NewAuthHandler(authProviderStub{}, identityManagerStub{}, kycCheckerStub{status: domain.KYCRejected})
-	app := fiber.New()
-	app.Post("/auth/wallet/bind", func(c *fiber.Ctx) error {
-		c.Locals("claims", domain.TokenClaims{Subject: "bank-a"})
-		return handler.WalletBind(c)
-	})
-
-	payload, _ := json.Marshal(map[string]string{
-		"walletAddress": "0x1111111111111111111111111111111111111111",
-		"signature":     "0xdeadbeef",
-	})
-	req := httptest.NewRequest(http.MethodPost, "/auth/wallet/bind", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d", resp.StatusCode)
-	}
-}
-
-func TestAuthHandlerWalletBindSuccess(t *testing.T) {
-	t.Parallel()
-	handler := NewAuthHandler(authProviderStub{}, identityManagerStub{}, kycCheckerStub{status: domain.KYCApproved})
-	app := fiber.New()
-	app.Post("/auth/wallet/bind", func(c *fiber.Ctx) error {
-		c.Locals("claims", domain.TokenClaims{Subject: "bank-a"})
-		return handler.WalletBind(c)
-	})
-
-	key, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatalf("failed to generate key: %v", err)
-	}
-	wallet := crypto.PubkeyToAddress(key.PublicKey).Hex()
-	msg := fmt.Sprintf("CBWEB3_WALLET_BIND:%s:%s", "bank-a", strings.ToLower(wallet))
-	hash := accounts.TextHash([]byte(msg))
-	sig, err := crypto.Sign(hash, key)
-	if err != nil {
-		t.Fatalf("failed to sign message: %v", err)
-	}
-
-	payload, _ := json.Marshal(map[string]string{
-		"walletAddress": wallet,
-		"signature":     "0x" + hex.EncodeToString(sig),
-	})
-	req := httptest.NewRequest(http.MethodPost, "/auth/wallet/bind", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-}
-
-func TestAuthHandlerWalletBindInvalidCases(t *testing.T) {
-	t.Parallel()
-
-	t.Run("missing claims", func(t *testing.T) {
-		handler := NewAuthHandler(authProviderStub{}, identityManagerStub{}, kycCheckerStub{})
-		app := fiber.New()
-		app.Post("/auth/wallet/bind", handler.WalletBind)
-		req := httptest.NewRequest(http.MethodPost, "/auth/wallet/bind", bytes.NewReader([]byte(`{}`)))
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := app.Test(req)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.StatusCode != http.StatusUnauthorized {
-			t.Fatalf("expected 401, got %d", resp.StatusCode)
-		}
-	})
-
-	t.Run("missing fields", func(t *testing.T) {
-		handler := NewAuthHandler(authProviderStub{}, identityManagerStub{}, kycCheckerStub{})
-		app := fiber.New()
-		app.Post("/auth/wallet/bind", func(c *fiber.Ctx) error {
-			c.Locals("claims", domain.TokenClaims{Subject: "bank-a"})
-			return handler.WalletBind(c)
-		})
-		req := httptest.NewRequest(http.MethodPost, "/auth/wallet/bind", bytes.NewReader([]byte(`{}`)))
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := app.Test(req)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("expected 400, got %d", resp.StatusCode)
-		}
-	})
-
-	t.Run("internal error", func(t *testing.T) {
-		handler := NewAuthHandler(authProviderStub{}, identityManagerStub{err: errors.New("db down")}, kycCheckerStub{status: domain.KYCApproved})
-		app := fiber.New()
-		app.Post("/auth/wallet/bind", func(c *fiber.Ctx) error {
-			c.Locals("claims", domain.TokenClaims{Subject: "bank-a"})
-			return handler.WalletBind(c)
-		})
-		key, err := crypto.GenerateKey()
-		if err != nil {
-			t.Fatalf("failed to generate key: %v", err)
-		}
-		wallet := crypto.PubkeyToAddress(key.PublicKey).Hex()
-		msg := fmt.Sprintf("CBWEB3_WALLET_BIND:%s:%s", "bank-a", strings.ToLower(wallet))
-		hash := accounts.TextHash([]byte(msg))
-		sig, err := crypto.Sign(hash, key)
-		if err != nil {
-			t.Fatalf("failed to sign message: %v", err)
-		}
-		payload, _ := json.Marshal(map[string]string{
-			"walletAddress": wallet,
-			"signature":     "0x" + hex.EncodeToString(sig),
-		})
-		req := httptest.NewRequest(http.MethodPost, "/auth/wallet/bind", bytes.NewReader(payload))
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := app.Test(req)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.StatusCode != http.StatusInternalServerError {
-			t.Fatalf("expected 500, got %d", resp.StatusCode)
 		}
 	})
 }
@@ -374,7 +201,7 @@ func TestAuthHandlerRefreshSuccess(t *testing.T) {
 	t.Parallel()
 	handler := NewAuthHandler(authProviderStub{
 		token: domain.AuthToken{AccessToken: "new-token", RefreshToken: "rt", ExpiresIn: 3600, TokenType: "Bearer"},
-	}, identityManagerStub{}, kycCheckerStub{})
+	}, kycCheckerStub{})
 	app := fiber.New()
 	app.Post("/auth/refresh", handler.Refresh)
 
@@ -392,7 +219,7 @@ func TestAuthHandlerRefreshSuccess(t *testing.T) {
 
 func TestAuthHandlerRefreshInvalid(t *testing.T) {
 	t.Parallel()
-	handler := NewAuthHandler(authProviderStub{err: errors.New("expired")}, identityManagerStub{}, kycCheckerStub{})
+	handler := NewAuthHandler(authProviderStub{err: errors.New("expired")}, kycCheckerStub{})
 	app := fiber.New()
 	app.Post("/auth/refresh", handler.Refresh)
 
@@ -410,7 +237,7 @@ func TestAuthHandlerRefreshInvalid(t *testing.T) {
 
 func TestAuthHandlerRefreshMissingBody(t *testing.T) {
 	t.Parallel()
-	handler := NewAuthHandler(authProviderStub{}, identityManagerStub{}, kycCheckerStub{})
+	handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{})
 	app := fiber.New()
 	app.Post("/auth/refresh", handler.Refresh)
 
@@ -428,7 +255,7 @@ func TestAuthHandlerRefreshMissingBody(t *testing.T) {
 
 func TestAuthHandlerLogoutSuccess(t *testing.T) {
 	t.Parallel()
-	handler := NewAuthHandler(authProviderStub{}, identityManagerStub{}, kycCheckerStub{})
+	handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{})
 	app := fiber.New()
 	app.Post("/auth/logout", handler.Logout)
 
@@ -445,7 +272,7 @@ func TestAuthHandlerLogoutSuccess(t *testing.T) {
 
 func TestAuthHandlerLogoutMissingToken(t *testing.T) {
 	t.Parallel()
-	handler := NewAuthHandler(authProviderStub{}, identityManagerStub{}, kycCheckerStub{})
+	handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{})
 	app := fiber.New()
 	app.Post("/auth/logout", handler.Logout)
 
@@ -469,7 +296,7 @@ func TestOnboardingCentralBankBypassKYC(t *testing.T) {
 			UserID: "cb-001", DID: "did:lac:cb-001", WalletAddress: "0xABC",
 		},
 	}
-	handler := NewAuthHandler(authProviderStub{}, stub, stub)
+	handler := NewAuthHandler(authProviderStub{}, stub)
 	app := fiber.New()
 	app.Post("/auth/onboarding", func(c *fiber.Ctx) error {
 		c.Locals("claims", domain.TokenClaims{Subject: "cb-001", Roles: []string{domain.RoleCentralBank}})
@@ -499,7 +326,7 @@ func TestOnboardingKYCApprovedProceed(t *testing.T) {
 			UserID: "bank-001", DID: "did:lac:bank-001", WalletAddress: "0xDEF",
 		},
 	}
-	handler := NewAuthHandler(authProviderStub{}, stub, stub)
+	handler := NewAuthHandler(authProviderStub{}, stub)
 	app := fiber.New()
 	app.Post("/auth/onboarding", func(c *fiber.Ctx) error {
 		c.Locals("claims", domain.TokenClaims{Subject: "bank-001", Roles: []string{domain.RoleCommercialBank}})
@@ -524,7 +351,7 @@ func TestOnboardingKYCPendingReturns202(t *testing.T) {
 	stub := participantRegistrarStub{
 		kycManagerStub: kycManagerStub{status: domain.KYCPending},
 	}
-	handler := NewAuthHandler(authProviderStub{}, stub, stub)
+	handler := NewAuthHandler(authProviderStub{}, stub)
 	app := fiber.New()
 	app.Post("/auth/onboarding", func(c *fiber.Ctx) error {
 		c.Locals("claims", domain.TokenClaims{Subject: "bank-002", Roles: []string{domain.RoleCommercialBank}})
@@ -548,7 +375,7 @@ func TestOnboardingKYCFrozenReturns403(t *testing.T) {
 	stub := participantRegistrarStub{
 		kycManagerStub: kycManagerStub{status: domain.KYCFrozen},
 	}
-	handler := NewAuthHandler(authProviderStub{}, stub, stub)
+	handler := NewAuthHandler(authProviderStub{}, stub)
 	app := fiber.New()
 	app.Post("/auth/onboarding", func(c *fiber.Ctx) error {
 		c.Locals("claims", domain.TokenClaims{Subject: "bank-003", Roles: []string{domain.RoleCommercialBank}})
@@ -569,7 +396,7 @@ func TestOnboardingKYCFrozenReturns403(t *testing.T) {
 
 func TestOnboardingMissingClaims(t *testing.T) {
 	t.Parallel()
-	handler := NewAuthHandler(authProviderStub{}, identityManagerStub{}, kycCheckerStub{})
+	handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{})
 	app := fiber.New()
 	app.Post("/auth/onboarding", handler.Onboarding)
 
@@ -587,15 +414,9 @@ func TestOnboardingMissingClaims(t *testing.T) {
 
 // ---------- Compliance extended tests ----------
 
-func TestIssueKYCCredentialSuccess(t *testing.T) {
+func TestIssueKYCCredentialReturns501(t *testing.T) {
 	t.Parallel()
-	stub := kycManagerStub{
-		vcResult: interfaces.KYCCredentialResult{
-			VCJWT:      "vc.jwt.token",
-			ZKPPointer: "abc123hash",
-			IssuedAt:   time.Now().UTC().Format(time.RFC3339),
-		},
-	}
+	stub := kycManagerStub{}
 	handler := NewComplianceHandler(stub)
 	app := fiber.New()
 	app.Post("/compliance/kyc/issue-credential", func(c *fiber.Ctx) error {
@@ -610,55 +431,14 @@ func TestIssueKYCCredentialSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d", resp.StatusCode)
 	}
 }
 
-func TestIssueKYCCredentialMissingSubject(t *testing.T) {
+func TestVerifyKYCProofReturns501(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{}
-	handler := NewComplianceHandler(stub)
-	app := fiber.New()
-	app.Post("/compliance/kyc/issue-credential", func(c *fiber.Ctx) error {
-		c.Locals("claims", domain.TokenClaims{Subject: "cb-001"})
-		return handler.IssueKYCCredential(c)
-	})
-
-	body, _ := json.Marshal(map[string]string{})
-	req := httptest.NewRequest(http.MethodPost, "/compliance/kyc/issue-credential", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", resp.StatusCode)
-	}
-}
-
-func TestIssueKYCCredentialNoAuth(t *testing.T) {
-	t.Parallel()
-	stub := kycManagerStub{}
-	handler := NewComplianceHandler(stub)
-	app := fiber.New()
-	app.Post("/compliance/kyc/issue-credential", handler.IssueKYCCredential)
-
-	body, _ := json.Marshal(map[string]string{"subject": "bank-001"})
-	req := httptest.NewRequest(http.MethodPost, "/compliance/kyc/issue-credential", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", resp.StatusCode)
-	}
-}
-
-func TestVerifyKYCProofSuccess(t *testing.T) {
-	t.Parallel()
-	stub := kycManagerStub{verifyOk: true}
 	handler := NewComplianceHandler(stub)
 	app := fiber.New()
 	app.Post("/compliance/kyc/verify-proof", handler.VerifyKYCProof)
@@ -670,27 +450,8 @@ func TestVerifyKYCProofSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-}
-
-func TestVerifyKYCProofMissingPointer(t *testing.T) {
-	t.Parallel()
-	stub := kycManagerStub{}
-	handler := NewComplianceHandler(stub)
-	app := fiber.New()
-	app.Post("/compliance/kyc/verify-proof", handler.VerifyKYCProof)
-
-	body, _ := json.Marshal(map[string]string{})
-	req := httptest.NewRequest(http.MethodPost, "/compliance/kyc/verify-proof", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d", resp.StatusCode)
 	}
 }
 
@@ -881,4 +642,3 @@ func TestGetKYCStatusViaManager(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }
-

@@ -53,11 +53,17 @@ services:
     working_dir: /workspace/backend/services/identity
     command: ["sh", "-c", "go run ./cmd/identity"]
     environment:
-      IDENTITY_PROVIDER: local
       IDENTITY_GRPC_PORT: "9091"
-      INTERNAL_JWT_PROVIDER: local
-      IDENTITY_JWT_SECRET: local-identity-secret
-      INTERNAL_JWT_SECRET: local-identity-secret
+      # KMS
+      KMS_PROVIDER: local
+      # Keycloak (OIDC + JWKS)
+      KEYCLOAK_BASE_URL: http://keycloak:8080
+      KEYCLOAK_REALM: cbweb3
+      KEYCLOAK_CLIENT_ID: cbweb3-identity
+      KEYCLOAK_CLIENT_SECRET: change-me
+      KEYCLOAK_JWKS_CACHE_TTL_SEC: "300"
+      KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
+      # Data Access
       DATA_ACCESS_GRPC_ADDR: data-access:9092
       DATA_ACCESS_REQUEST_TIMEOUT_SEC: "5"
     volumes:
@@ -66,6 +72,7 @@ services:
       - "9091:9091"
     depends_on:
       - data-access
+      - keycloak
     networks:
       - cbweb3_backend
 

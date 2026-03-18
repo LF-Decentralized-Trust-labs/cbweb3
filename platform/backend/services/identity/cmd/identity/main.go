@@ -5,27 +5,32 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/dataaccessclient"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/grpc/server"
-	identityproviders "github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/identityprovider/providers"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/tokenissuer"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/keycloak"
+	kmsproviders "github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/kms/providers"
 )
 
 func main() {
-	cfg := identityproviders.FactoryConfig{
-		Provider:       strings.ToLower(getEnv("IDENTITY_PROVIDER", identityproviders.ProviderLocal)),
-		HostURL:        getEnv("IDENTITY_HOST_URL", getEnv("IDENTITY_DWALLET_API_URL", getEnv("IDENTITY_REMOTE_BASE_URL", getEnv("DWALLET_REMOTE_BASE_URL", "")))),
-		JWTSecret:      getEnv("IDENTITY_JWT_SECRET", getEnv("DWALLET_JWT_SECRET", "local-identity-secret")),
-		AccessTokenTTL: time.Duration(getEnvInt("IDENTITY_ACCESS_TOKEN_TTL_SEC", getEnvInt("DWALLET_ACCESS_TOKEN_TTL_SEC", 3600))) * time.Second,
-		RequestTimeout: time.Duration(getEnvInt("IDENTITY_REQUEST_TIMEOUT_SEC", 5)) * time.Second,
+	kmsProvider, err := kmsproviders.New(kmsproviders.Config{
+		Provider: getEnv("KMS_PROVIDER", "local"),
+	})
+	if err != nil {
+		log.Fatalf("kms: %v", err)
 	}
 
-	identityProvider, err := identityproviders.NewIdentityProvider(cfg)
+	kcClient, err := keycloak.New(keycloak.Config{
+		BaseURL:        mustEnv("KEYCLOAK_BASE_URL"),
+		Realm:          getEnv("KEYCLOAK_REALM", "cbweb3"),
+		ClientID:       getEnv("KEYCLOAK_CLIENT_ID", "cbweb3-identity"),
+		ClientSecret:   getEnv("KEYCLOAK_CLIENT_SECRET", ""),
+		JWKSCacheTTL:   time.Duration(getEnvInt("KEYCLOAK_JWKS_CACHE_TTL_SEC", 300)) * time.Second,
+		RequestTimeout: time.Duration(getEnvInt("KEYCLOAK_REQUEST_TIMEOUT_SEC", 10)) * time.Second,
+	})
 	if err != nil {
-		log.Fatalf("failed to create identity provider: %v", err)
+		log.Fatalf("keycloak: %v", err)
 	}
 
 	dataAccess, err := dataaccessclient.New(
@@ -33,65 +38,48 @@ func main() {
 		time.Duration(getEnvInt("DATA_ACCESS_REQUEST_TIMEOUT_SEC", 5))*time.Second,
 	)
 	if err != nil {
-		log.Fatalf("failed to create data-access client: %v", err)
+		log.Fatalf("data-access: %v", err)
 	}
 
-	internalTokenIssuer := newTokenIssuer()
+	grpcServer := server.New(kcClient, kmsProvider, dataAccess)
 
 	port := getEnv("IDENTITY_GRPC_PORT", "9091")
 	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		log.Fatalf("failed to listen on port %s: %v", port, err)
+		log.Fatalf("listen: %v", err)
 	}
 
-	grpcServer := server.New(identityProvider, dataAccess, internalTokenIssuer)
-	log.Printf(
-		"identity gRPC listening on :%s (provider=%s, jwt=%s)",
-		port,
-		identityProvider.Name(),
-		internalTokenIssuer.Name(),
-	)
+	log.Printf("identity gRPC server starting on :%s [kms=%s keycloak_realm=%s]",
+		port, kmsProvider.Name(), getEnv("KEYCLOAK_REALM", "cbweb3"))
+
 	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("identity gRPC stopped with error: %v", err)
+		log.Fatalf("serve: %v", err)
 	}
 }
 
-func getEnv(name, fallback string) string {
-	value := strings.TrimSpace(os.Getenv(name))
-	if value == "" {
-		return fallback
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
-	return value
+	return fallback
 }
 
-func getEnvInt(name string, fallback int) int {
-	raw := getEnv(name, "")
-	if raw == "" {
+func mustEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		log.Fatalf("required env var %q is not set", key)
+	}
+	return v
+}
+
+func getEnvInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
 		return fallback
 	}
-	n, err := strconv.Atoi(raw)
+	n, err := strconv.Atoi(v)
 	if err != nil {
 		return fallback
 	}
 	return n
-}
-
-func newTokenIssuer() tokenissuer.Issuer {
-	mode := strings.ToLower(strings.TrimSpace(getEnv("INTERNAL_JWT_PROVIDER", "local")))
-	switch mode {
-	case "keycloak":
-		return tokenissuer.NewKeycloakIssuer(
-			getEnv("INTERNAL_KEYCLOAK_TOKEN_URL", ""),
-			getEnv("INTERNAL_KEYCLOAK_CLIENT_ID", ""),
-			getEnv("INTERNAL_KEYCLOAK_CLIENT_SECRET", ""),
-			time.Duration(getEnvInt("INTERNAL_KEYCLOAK_TIMEOUT_SEC", 5))*time.Second,
-		)
-	default:
-		return tokenissuer.NewLocalIssuer(
-			getEnv("INTERNAL_JWT_SECRET", "identity-internal-secret"),
-			getEnv("INTERNAL_JWT_ISSUER", "identity-internal"),
-			getEnv("INTERNAL_JWT_AUDIENCE", "cbweb3-internal"),
-			time.Duration(getEnvInt("INTERNAL_JWT_TTL_SEC", 3600))*time.Second,
-		)
-	}
 }

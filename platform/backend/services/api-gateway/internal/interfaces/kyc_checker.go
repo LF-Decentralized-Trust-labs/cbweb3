@@ -13,20 +13,11 @@ type KYCChecker interface {
 	GetStatus(subject string) domain.KYCStatus
 }
 
-// KYCManager defines the full KYC lifecycle (issue, verify, provision, freeze).
+// KYCManager defines the full KYC lifecycle (provision, freeze, status).
 // Implemented by IdentityGRPCManager which delegates to identity service.
 type KYCManager interface {
 	GetKYCStatus(ctx context.Context, subject string) (domain.KYCStatus, error)
-	IssueKYCCredential(ctx context.Context, subject, issuerSubject, institutionName, countryCode, bankCode string) (KYCCredentialResult, error)
-	VerifyKYCProof(ctx context.Context, zkpPointer string) (bool, error)
 	ProvisionParticipant(ctx context.Context, subject string, status domain.KYCStatus) error
-}
-
-// KYCCredentialResult holds the result of a credential issuance.
-type KYCCredentialResult struct {
-	VCJWT      string
-	ZKPPointer string
-	IssuedAt   string
 }
 
 // ParticipantRegistrar handles participant onboarding via identity gRPC.

@@ -29,16 +29,6 @@ func (s authProviderStub) Logout(_ context.Context, _ string) error {
 	return nil
 }
 
-type identityManagerStub struct{}
-
-func (s identityManagerStub) BindWallet(_ context.Context, _, _ string) (domain.WalletBinding, error) {
-	return domain.WalletBinding{}, nil
-}
-
-func (s identityManagerStub) GetByUser(_ context.Context, _ string) (domain.WalletBinding, bool) {
-	return domain.WalletBinding{}, false
-}
-
 type kycCheckerStub struct{}
 
 func (s kycCheckerStub) GetStatus(_ string) domain.KYCStatus {
@@ -58,16 +48,8 @@ func (s roleValidatorStub) Validate(_ context.Context, _ string) (domain.TokenCl
 	return domain.TokenClaims{Subject: "bank-a", Roles: s.roles}, nil
 }
 
-// fullKYCManagerStub implements IIdentityManager + KYCChecker + KYCManager + ParticipantRegistrar.
+// fullKYCManagerStub implements KYCChecker + KYCManager + ParticipantRegistrar.
 type fullKYCManagerStub struct{}
-
-func (s fullKYCManagerStub) BindWallet(_ context.Context, _, _ string) (domain.WalletBinding, error) {
-	return domain.WalletBinding{}, nil
-}
-
-func (s fullKYCManagerStub) GetByUser(_ context.Context, _ string) (domain.WalletBinding, bool) {
-	return domain.WalletBinding{}, false
-}
 
 func (s fullKYCManagerStub) GetStatus(_ string) domain.KYCStatus { return domain.KYCApproved }
 
@@ -75,19 +57,11 @@ func (s fullKYCManagerStub) GetKYCStatus(_ context.Context, _ string) (domain.KY
 	return domain.KYCApproved, nil
 }
 
-func (s fullKYCManagerStub) IssueKYCCredential(_ context.Context, _, _, _, _, _ string) (interfaces.KYCCredentialResult, error) {
-	return interfaces.KYCCredentialResult{}, nil
-}
-
-func (s fullKYCManagerStub) VerifyKYCProof(_ context.Context, _ string) (bool, error) {
-	return true, nil
-}
-
 func (s fullKYCManagerStub) ProvisionParticipant(_ context.Context, _ string, _ domain.KYCStatus) error {
 	return nil
 }
 
-func (s fullKYCManagerStub) RegisterParticipant(_ context.Context, _, _, _, _, _, _ string) (interfaces.RegisterParticipantResult, error) {
+func (s fullKYCManagerStub) RegisterParticipant(_ context.Context, _, _, _, _, _ string) (interfaces.RegisterParticipantResult, error) {
 	return interfaces.RegisterParticipantResult{}, nil
 }
 
@@ -95,7 +69,7 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 	t.Parallel()
 
 	mgr := fullKYCManagerStub{}
-	authHandler := handlers.NewAuthHandler(authProviderStub{}, mgr, mgr)
+	authHandler := handlers.NewAuthHandler(authProviderStub{}, mgr)
 	complianceHandler := handlers.NewComplianceHandler(mgr)
 	app := fiber.New()
 	// Validator always returns COMMERCIAL_BANK role — never CENTRAL_BANK.
@@ -132,7 +106,7 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 func TestSetupRegistersRoutes(t *testing.T) {
 	t.Parallel()
 
-	authHandler := handlers.NewAuthHandler(authProviderStub{}, identityManagerStub{}, kycCheckerStub{})
+	authHandler := handlers.NewAuthHandler(authProviderStub{}, kycCheckerStub{})
 	complianceHandler := handlers.NewComplianceHandler(kycCheckerStub{})
 	app := fiber.New()
 	Setup(app, Dependencies{
@@ -165,4 +139,3 @@ func TestSetupRegistersRoutes(t *testing.T) {
 		t.Fatalf("expected 200 from swagger route, got %d", swaggerResp.StatusCode)
 	}
 }
-

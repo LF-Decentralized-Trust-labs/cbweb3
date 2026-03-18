@@ -34,10 +34,12 @@ func Setup(app *fiber.App, deps Dependencies) {
 		middleware.RequireBearerToken(deps.TokenValidator),
 		deps.AuthHandler.Onboarding,
 	)
-	authGroup.Post("/wallet/bind",
-		middleware.RequireBearerToken(deps.TokenValidator),
-		deps.AuthHandler.WalletBind,
-	)
+	authGroup.Post("/wallet/bind", func(c *fiber.Ctx) error {
+		return c.Status(fiber.StatusGone).JSON(fiber.Map{
+			"error": "wallet bind endpoint has been removed",
+			"code":  "GONE",
+		})
+	})
 
 	// --- Compliance ---
 	complianceGroup := app.Group("/compliance", middleware.RequireBearerToken(deps.TokenValidator))
