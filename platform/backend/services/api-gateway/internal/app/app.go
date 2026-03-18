@@ -2,14 +2,11 @@
 package app
 
 import (
-	"errors"
-
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -18,10 +15,6 @@ func New(cfg config.Config) (*fiber.App, error) {
 	identityGRPCProvider, err := auth.NewIdentityGRPCAuthProvider(cfg.IdentityGRPCAddr, cfg.RequestTimeout)
 	if err != nil {
 		return nil, err
-	}
-	tokenValidator, ok := any(identityGRPCProvider).(interfaces.TokenValidator)
-	if !ok {
-		return nil, errors.New("identity gRPC provider does not implement token validator")
 	}
 
 	// IdentityGRPCManager handles wallet binding + KYC operations.
@@ -43,7 +36,7 @@ func New(cfg config.Config) (*fiber.App, error) {
 	router.Setup(fiberApp, router.Dependencies{
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
-		TokenValidator:    tokenValidator,
+		AuthProvider:      identityGRPCProvider,
 	})
 
 	return fiberApp, nil

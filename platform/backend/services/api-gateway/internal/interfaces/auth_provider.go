@@ -12,4 +12,5 @@ type IAuthProvider interface {
 	Authenticate(ctx context.Context, clientID, clientSecret string) (domain.AuthToken, error)
 	RefreshToken(ctx context.Context, refreshToken string) (domain.AuthToken, error)
 	Logout(ctx context.Context, accessToken string) error
+	Validate(ctx context.Context, token string) (domain.TokenClaims, error)
 }

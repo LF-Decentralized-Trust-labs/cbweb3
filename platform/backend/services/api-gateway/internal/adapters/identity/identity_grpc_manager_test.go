@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 )
@@ -63,3 +64,63 @@ func TestJSONCodec_MarshalUnmarshal(t *testing.T) {
 	assert.Equal(t, original.UserID, decoded.UserID)
 	assert.Equal(t, original.Country, decoded.Country)
 }
+
+func TestOnboardParticipant_Success(t *testing.T) {
+	t.Parallel()
+
+	mgr := &IdentityGRPCManager{
+		codec: jsonCodec{},
+		client: &mockClientConn{
+			invokeFunc: func(_ context.Context, method string, args, reply any, _ ...grpc.CallOption) error {
+				assert.Equal(t, onboardParticipantMethod, method)
+				out := reply.(*struct {
+					UserID        string `json:"user_id"`
+					WalletAddress string `json:"wallet_address,omitempty"`
+					DID           string `json:"did,omitempty"`
+					TxHash        string `json:"tx_hash,omitempty"`
+				})
+				out.UserID = "new-user-uuid"
+				out.WalletAddress = "0xABCD"
+				out.DID = "did:lac:openprotest:0xabcd"
+				out.TxHash = "0xtxhash"
+				return nil
+			},
+		},
+	}
+
+	result, err := mgr.OnboardParticipant(context.Background(), interfaces.OnboardParticipantRequest{
+		Username: "banco-brasil",
+		Email:    "admin@bb.com",
+		Role:     "ROLE_COMMERCIAL_BANK",
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, "new-user-uuid", result.UserID)
+	assert.Equal(t, "0xABCD", result.WalletAddress)
+	assert.Equal(t, "did:lac:openprotest:0xabcd", result.DID)
+	assert.Equal(t, "0xtxhash", result.TxHash)
+}
+
+func TestOnboardParticipant_Error(t *testing.T) {
+	t.Parallel()
+
+	mgr := &IdentityGRPCManager{
+		codec: jsonCodec{},
+		client: &mockClientConn{
+			invokeFunc: func(_ context.Context, _ string, _, _ any, _ ...grpc.CallOption) error {
+				return errors.New("grpc error")
+			},
+		},
+	}
+
+	_, err := mgr.OnboardParticipant(context.Background(), interfaces.OnboardParticipantRequest{
+		Username: "banco-brasil",
+		Email:    "admin@bb.com",
+		Role:     "ROLE_COMMERCIAL_BANK",
+	})
+
+	assert.Error(t, err)
+}
+
+// Compile-time check: IdentityGRPCManager must implement ParticipantOnboarder.
+var _ interfaces.ParticipantOnboarder = (*IdentityGRPCManager)(nil)

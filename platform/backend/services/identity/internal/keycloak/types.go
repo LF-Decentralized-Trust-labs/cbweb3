@@ -11,6 +11,15 @@ type TokenResponse struct {
 	TokenType        string `json:"token_type"`
 }
 
+// CreateUserRequest carries the fields sent to Keycloak's Admin REST API
+// POST /admin/realms/{realm}/users endpoint.
+type CreateUserRequest struct {
+	Username    string   `json:"username"`
+	Email       string   `json:"email"`
+	Enabled     bool     `json:"enabled"`
+	RealmRoles  []string `json:"-"` // assigned separately via role-mapping API
+}
+
 type jwksKey struct {
 	Kid string `json:"kid"`
 	Kty string `json:"kty"`

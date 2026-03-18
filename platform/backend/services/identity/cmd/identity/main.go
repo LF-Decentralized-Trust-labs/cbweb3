@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/blockchain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/dataaccessclient"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/grpc/server"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/keycloak"
@@ -41,7 +42,9 @@ func main() {
 		log.Fatalf("data-access: %v", err)
 	}
 
-	grpcServer := server.New(kcClient, kmsProvider, dataAccess)
+	blockchainClient := newBlockchainClient()
+
+	grpcServer := server.New(kcClient, kmsProvider, dataAccess, blockchainClient)
 
 	port := getEnv("IDENTITY_GRPC_PORT", "9091")
 	lis, err := net.Listen("tcp", ":"+port)
@@ -49,11 +52,36 @@ func main() {
 		log.Fatalf("listen: %v", err)
 	}
 
-	log.Printf("identity gRPC server starting on :%s [kms=%s keycloak_realm=%s]",
-		port, kmsProvider.Name(), getEnv("KEYCLOAK_REALM", "cbweb3"))
+	log.Printf("identity gRPC server starting on :%s [kms=%s keycloak_realm=%s blockchain=%s]",
+		port, kmsProvider.Name(), getEnv("KEYCLOAK_REALM", "cbweb3"), getEnv("BLOCKCHAIN_CLIENT", "noop"))
 
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("serve: %v", err)
+	}
+}
+
+// newBlockchainClient constructs the blockchain client based on the
+// BLOCKCHAIN_CLIENT environment variable (default: "noop").
+// When set to "besu", BESU_RPC_URL, PARTICIPANT_REGISTRY_ADDRESS, CB_PRIVATE_KEY,
+// and BESU_CHAIN_ID must also be set.
+func newBlockchainClient() blockchain.Client {
+	switch getEnv("BLOCKCHAIN_CLIENT", "noop") {
+	case "besu":
+		chainID := int64(getEnvInt("BESU_CHAIN_ID", 1337))
+		bc, err := blockchain.NewBesuClient(blockchain.BesuConfig{
+			RPCURL:          mustEnv("BESU_RPC_URL"),
+			RegistryAddress: mustEnv("PARTICIPANT_REGISTRY_ADDRESS"),
+			CBPrivateKeyHex: mustEnv("CB_PRIVATE_KEY"),
+			ChainID:         chainID,
+			RequestTimeout:  time.Duration(getEnvInt("BLOCKCHAIN_REQUEST_TIMEOUT_SEC", 15)) * time.Second,
+		})
+		if err != nil {
+			log.Fatalf("blockchain: %v", err)
+		}
+		return bc
+	default:
+		log.Println("blockchain: using noop client (no on-chain registration)")
+		return blockchain.NoopClient{}
 	}
 }
 

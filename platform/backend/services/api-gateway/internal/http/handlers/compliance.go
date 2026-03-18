@@ -3,6 +3,8 @@
 package handlers
 
 import (
+	"strings"
+
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
@@ -10,8 +12,9 @@ import (
 
 // ComplianceHandler exposes compliance-related HTTP endpoints.
 type ComplianceHandler struct {
-	kyc    interfaces.KYCChecker
-	kycMgr interfaces.KYCManager
+	kyc        interfaces.KYCChecker
+	kycMgr     interfaces.KYCManager
+	onboarder  interfaces.ParticipantOnboarder
 }
 
 // NewComplianceHandler builds a ComplianceHandler.
@@ -20,7 +23,11 @@ func NewComplianceHandler(kyc interfaces.KYCChecker) *ComplianceHandler {
 	if mgr, ok := kyc.(interfaces.KYCManager); ok {
 		kycMgr = mgr
 	}
-	return &ComplianceHandler{kyc: kyc, kycMgr: kycMgr}
+	var onboarder interfaces.ParticipantOnboarder
+	if ob, ok := kyc.(interfaces.ParticipantOnboarder); ok {
+		onboarder = ob
+	}
+	return &ComplianceHandler{kyc: kyc, kycMgr: kycMgr, onboarder: onboarder}
 }
 
 // GetKYCStatus returns the KYC lifecycle status for the requested subject.
@@ -131,6 +138,79 @@ func (h *ComplianceHandler) FreezeAccount(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "freeze failed"})
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"subject": body.Subject, "status": string(domain.KYCFrozen)})
+}
+
+// RegisterParticipant is called by the Central Bank to onboard a new
+// Commercial Bank or Treasury user (POST /compliance/register).
+// The CB must be authenticated (Bearer token validated upstream).
+func (h *ComplianceHandler) RegisterParticipant(c *fiber.Ctx) error {
+	if h.onboarder == nil {
+		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+			"error": "participant onboarding not available",
+			"code":  "NOT_IMPLEMENTED",
+		})
+	}
+
+	var body struct {
+		Username        string `json:"username"`
+		Email           string `json:"email"`
+		Role            string `json:"role"`
+		InstitutionName string `json:"institution_name"`
+		Country         string `json:"country"`
+		BankCode        string `json:"bank_code"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
+	}
+	if body.Username == "" || body.Email == "" || body.Role == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "username, email, and role are required",
+		})
+	}
+
+	result, err := h.onboarder.OnboardParticipant(c.UserContext(), interfaces.OnboardParticipantRequest{
+		Username:        body.Username,
+		Email:           body.Email,
+		Role:            body.Role,
+		InstitutionName: body.InstitutionName,
+		Country:         body.Country,
+		BankCode:        body.BankCode,
+	})
+	if err != nil {
+		if isConflictError(err) {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "onboarding failed"})
+	}
+
+	resp := fiber.Map{
+		"userId": result.UserID,
+		"role":   body.Role,
+	}
+	if result.WalletAddress != "" {
+		resp["walletAddress"] = result.WalletAddress
+	}
+	if result.DID != "" {
+		resp["did"] = result.DID
+	}
+	if result.TxHash != "" {
+		resp["txHash"] = result.TxHash
+	}
+	return c.Status(fiber.StatusCreated).JSON(resp)
+}
+
+// isConflictError returns true if the error indicates a duplicate resource.
+func isConflictError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, kw := range []string{"already exists", "conflict", "duplicate"} {
+		if strings.Contains(msg, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // UnfreezeAccount restores APPROVED status for a frozen account (CENTRAL_BANK only).

@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/blockchain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/dataaccessclient"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/identity/internal/grpc/contract"
@@ -19,9 +20,10 @@ import (
 )
 
 type identityService struct {
-	keycloak   keycloak.Client
-	kms        kms.Provider
-	dataAccess dataaccessclient.Client
+	keycloak         keycloak.Client
+	kms              kms.Provider
+	dataAccess       dataaccessclient.Client
+	blockchainClient blockchain.Client
 }
 
 type identityServiceServer interface {
@@ -33,14 +35,16 @@ type identityServiceServer interface {
 	SignTransaction(ctx context.Context, req *contract.SignTransactionRequest) (*contract.SignTransactionResponse, error)
 	GetKYCStatus(ctx context.Context, req *contract.GetKYCStatusRequest) (*contract.GetKYCStatusResponse, error)
 	ProvisionParticipant(ctx context.Context, req *contract.ProvisionParticipantRequest) (*contract.ProvisionParticipantResponse, error)
+	OnboardParticipant(ctx context.Context, req *contract.OnboardParticipantRequest) (*contract.OnboardParticipantResponse, error)
 }
 
 // New builds a configured gRPC server and registers all identity handlers.
-func New(kc keycloak.Client, kmsProvider kms.Provider, da dataaccessclient.Client) *grpc.Server {
+func New(kc keycloak.Client, kmsProvider kms.Provider, da dataaccessclient.Client, bc blockchain.Client) *grpc.Server {
 	svc := &identityService{
-		keycloak:   kc,
-		kms:        kmsProvider,
-		dataAccess: da,
+		keycloak:         kc,
+		kms:              kmsProvider,
+		dataAccess:       da,
+		blockchainClient: bc,
 	}
 	grpcServer := grpc.NewServer(grpc.ForceServerCodec(jsoncodec.Codec{}))
 	grpcServer.RegisterService(&grpc.ServiceDesc{
@@ -55,6 +59,7 @@ func New(kc keycloak.Client, kmsProvider kms.Provider, da dataaccessclient.Clien
 			{MethodName: "SignTransaction", Handler: signTransactionHandler},
 			{MethodName: "GetKYCStatus", Handler: getKYCStatusHandler},
 			{MethodName: "ProvisionParticipant", Handler: provisionParticipantHandler},
+			{MethodName: "OnboardParticipant", Handler: onboardParticipantHandler},
 		},
 		Streams:  []grpc.StreamDesc{},
 		Metadata: "identity.v1",
@@ -200,6 +205,82 @@ func (s *identityService) ProvisionParticipant(ctx context.Context, req *contrac
 	}
 	s.emitAudit(ctx, "PROVISION_PARTICIPANT", "", "", req.Subject, correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS")
 	return &contract.ProvisionParticipantResponse{}, nil
+}
+
+// --- Administrative Participant Onboarding ---
+
+// OnboardParticipant is called by the Central Bank to register a new
+// Commercial Bank or Treasury user. The flow is:
+//
+//  1. Obtain a Keycloak admin token via service-account client_credentials.
+//  2. Create the user in Keycloak.
+//  3. Conditionally generate a KMS key pair (roles requiring KMS).
+//  4. Conditionally register the wallet address on-chain via ParticipantRegistry
+//     (roles requiring on-chain registration, signed with CB_PRIVATE_KEY).
+//  5. Persist the participant record via data-access service.
+func (s *identityService) OnboardParticipant(ctx context.Context, req *contract.OnboardParticipantRequest) (*contract.OnboardParticipantResponse, error) {
+	if req.Username == "" || req.Email == "" || req.Role == "" {
+		return nil, status.Error(codes.InvalidArgument, "username, email, and role are required")
+	}
+	if !domain.IsAdminRole(req.Role) {
+		return nil, status.Errorf(codes.InvalidArgument, "role %q is not a valid admin-onboarded role", req.Role)
+	}
+
+	// 1. Obtain Keycloak admin token.
+	adminToken, err := s.keycloak.GetAdminToken(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "onboard: obtaining admin token: %v", err)
+	}
+
+	// 2. Create user in Keycloak.
+	userID, err := s.keycloak.CreateUser(ctx, adminToken, keycloak.CreateUserRequest{
+		Username: req.Username,
+		Email:    req.Email,
+		Enabled:  true,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			return nil, status.Errorf(codes.AlreadyExists, "onboard: %v", err)
+		}
+		return nil, status.Errorf(codes.Internal, "onboard: creating keycloak user: %v", err)
+	}
+
+	resp := &contract.OnboardParticipantResponse{UserID: userID}
+
+	// 3. Optionally generate KMS key.
+	if domain.RequiresKMS(req.Role) {
+		keyInfo, kmsErr := s.kms.CreateKey(ctx, userID)
+		if kmsErr != nil {
+			return nil, status.Errorf(codes.Internal, "onboard: creating kms key: %v", kmsErr)
+		}
+		resp.WalletAddress = keyInfo.Address
+		resp.DID = keyInfo.DID
+	}
+
+	// 4. Optionally register on-chain.
+	if domain.RequiresOnChain(req.Role) && resp.WalletAddress != "" {
+		txHash, chainErr := s.blockchainClient.RegisterMember(ctx, resp.WalletAddress, req.Role)
+		if chainErr != nil {
+			return nil, status.Errorf(codes.Internal, "onboard: on-chain registration: %v", chainErr)
+		}
+		resp.TxHash = txHash
+	}
+
+	// 5. Persist participant record.
+	if upsertErr := s.dataAccess.UpsertParticipant(ctx, dataaccessclient.Participant{
+		UserID:          userID,
+		DID:             resp.DID,
+		WalletAddress:   resp.WalletAddress,
+		Country:         req.Country,
+		BankCode:        req.BankCode,
+		Role:            req.Role,
+		InstitutionName: req.InstitutionName,
+	}); upsertErr != nil {
+		return nil, status.Errorf(codes.Internal, "onboard: persisting participant: %v", upsertErr)
+	}
+
+	s.emitAudit(ctx, "ONBOARD_PARTICIPANT", userID, resp.WalletAddress, "", correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS")
+	return resp, nil
 }
 
 // --- Audit helper ---
@@ -367,5 +448,19 @@ func provisionParticipantHandler(srv any, ctx context.Context, dec func(any) err
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: contract.ProvisionParticipantMethod}
 	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
 		return srv.(*identityService).ProvisionParticipant(ctx, req.(*contract.ProvisionParticipantRequest))
+	})
+}
+
+func onboardParticipantHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(contract.OnboardParticipantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(*identityService).OnboardParticipant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: contract.OnboardParticipantMethod}
+	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
+		return srv.(*identityService).OnboardParticipant(ctx, req.(*contract.OnboardParticipantRequest))
 	})
 }

@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
@@ -18,6 +19,7 @@ const (
 	registerParticipantMethod  = "/identity.v1.IdentityService/RegisterParticipant"
 	getKYCStatusMethod         = "/identity.v1.IdentityService/GetKYCStatus"
 	provisionParticipantMethod = "/identity.v1.IdentityService/ProvisionParticipant"
+	onboardParticipantMethod   = "/identity.v1.IdentityService/OnboardParticipant"
 )
 
 type jsonCodec struct{}
@@ -127,4 +129,44 @@ func (m *IdentityGRPCManager) ProvisionParticipant(ctx context.Context, subject 
 		Status  string `json:"status"`
 	}
 	return m.client.Invoke(ctx, provisionParticipantMethod, req, &out, grpc.ForceCodec(m.codec))
+}
+
+// --- ParticipantOnboarder ---
+
+// OnboardParticipant delegates administrative participant registration to the
+// identity gRPC service's OnboardParticipant method.
+func (m *IdentityGRPCManager) OnboardParticipant(ctx context.Context, req interfaces.OnboardParticipantRequest) (interfaces.OnboardParticipantResult, error) {
+	grpcReq := &struct {
+		Username        string `json:"username"`
+		Email           string `json:"email"`
+		Role            string `json:"role"`
+		InstitutionName string `json:"institution_name,omitempty"`
+		Country         string `json:"country,omitempty"`
+		BankCode        string `json:"bank_code,omitempty"`
+	}{
+		Username:        req.Username,
+		Email:           req.Email,
+		Role:            req.Role,
+		InstitutionName: req.InstitutionName,
+		Country:         req.Country,
+		BankCode:        req.BankCode,
+	}
+	out := &struct {
+		UserID        string `json:"user_id"`
+		WalletAddress string `json:"wallet_address,omitempty"`
+		DID           string `json:"did,omitempty"`
+		TxHash        string `json:"tx_hash,omitempty"`
+	}{}
+	if err := m.client.Invoke(ctx, onboardParticipantMethod, grpcReq, out, grpc.ForceCodec(m.codec)); err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
+			return interfaces.OnboardParticipantResult{}, fmt.Errorf("already exists: %s", st.Message())
+		}
+		return interfaces.OnboardParticipantResult{}, err
+	}
+	return interfaces.OnboardParticipantResult{
+		UserID:        out.UserID,
+		WalletAddress: out.WalletAddress,
+		DID:           out.DID,
+		TxHash:        out.TxHash,
+	}, nil
 }

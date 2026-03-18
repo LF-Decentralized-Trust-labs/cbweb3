@@ -29,26 +29,36 @@ func (s authProviderStub) Logout(_ context.Context, _ string) error {
 	return nil
 }
 
+func (s authProviderStub) Validate(_ context.Context, _ string) (domain.TokenClaims, error) {
+	return domain.TokenClaims{Subject: "bank-a"}, nil
+}
+
+// roleValidatorStub returns a configurable set of roles for every token.
+type roleAuthProviderStub struct{ roles []string }
+
+func (s roleAuthProviderStub) Authenticate(_ context.Context, _, _ string) (domain.AuthToken, error) {
+	return domain.AuthToken{}, errors.New("not used")
+}
+
+func (s roleAuthProviderStub) RefreshToken(_ context.Context, _ string) (domain.AuthToken, error) {
+	return domain.AuthToken{}, errors.New("not used")
+}
+
+func (s roleAuthProviderStub) Logout(_ context.Context, _ string) error {
+	return nil
+}
+
+func (s roleAuthProviderStub) Validate(_ context.Context, _ string) (domain.TokenClaims, error) {
+	return domain.TokenClaims{Subject: "bank-a", Roles: s.roles}, nil
+}
+
 type kycCheckerStub struct{}
 
 func (s kycCheckerStub) GetStatus(_ string) domain.KYCStatus {
 	return domain.KYCApproved
 }
 
-type validatorStub struct{}
-
-func (s validatorStub) Validate(_ context.Context, _ string) (domain.TokenClaims, error) {
-	return domain.TokenClaims{Subject: "bank-a"}, nil
-}
-
-// roleValidatorStub returns a configurable set of roles for every token.
-type roleValidatorStub struct{ roles []string }
-
-func (s roleValidatorStub) Validate(_ context.Context, _ string) (domain.TokenClaims, error) {
-	return domain.TokenClaims{Subject: "bank-a", Roles: s.roles}, nil
-}
-
-// fullKYCManagerStub implements KYCChecker + KYCManager + ParticipantRegistrar.
+// fullKYCManagerStub implements KYCChecker + KYCManager + ParticipantRegistrar + ParticipantOnboarder.
 type fullKYCManagerStub struct{}
 
 func (s fullKYCManagerStub) GetStatus(_ string) domain.KYCStatus { return domain.KYCApproved }
@@ -65,6 +75,10 @@ func (s fullKYCManagerStub) RegisterParticipant(_ context.Context, _, _, _, _, _
 	return interfaces.RegisterParticipantResult{}, nil
 }
 
+func (s fullKYCManagerStub) OnboardParticipant(_ context.Context, _ interfaces.OnboardParticipantRequest) (interfaces.OnboardParticipantResult, error) {
+	return interfaces.OnboardParticipantResult{UserID: "stub-user-id"}, nil
+}
+
 func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 	t.Parallel()
 
@@ -73,11 +87,11 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 	complianceHandler := handlers.NewComplianceHandler(mgr)
 	app := fiber.New()
 	// Validator always returns COMMERCIAL_BANK role — never CENTRAL_BANK.
-	validator := roleValidatorStub{roles: []string{domain.RoleCommercialBank}}
+	authProvider := roleAuthProviderStub{roles: []string{domain.RoleCommercialBank}}
 	Setup(app, Dependencies{
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
-		TokenValidator:    validator,
+		AuthProvider:      authProvider,
 	})
 
 	protectedRoutes := []struct {
@@ -88,6 +102,7 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 		{http.MethodPost, "/compliance/participants/provision"},
 		{http.MethodPost, "/compliance/accounts/freeze"},
 		{http.MethodPost, "/compliance/accounts/unfreeze"},
+		{http.MethodPost, "/compliance/register"},
 	}
 	for _, tc := range protectedRoutes {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
@@ -112,7 +127,7 @@ func TestSetupRegistersRoutes(t *testing.T) {
 	Setup(app, Dependencies{
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
-		TokenValidator:    validatorStub{},
+		AuthProvider:      authProviderStub{},
 	})
 
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/healthz", nil))

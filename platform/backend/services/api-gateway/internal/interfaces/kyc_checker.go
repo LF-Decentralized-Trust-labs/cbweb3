@@ -31,3 +31,29 @@ type RegisterParticipantResult struct {
 	DID           string
 	WalletAddress string
 }
+
+// OnboardParticipantResult holds the response from the administrative
+// onboarding flow (POST /compliance/register).
+type OnboardParticipantResult struct {
+	UserID        string
+	WalletAddress string
+	DID           string
+	TxHash        string
+}
+
+// ParticipantOnboarder handles administrative onboarding of new participants
+// (Commercial Banks, Treasury users) by the Central Bank.
+type ParticipantOnboarder interface {
+	OnboardParticipant(ctx context.Context, req OnboardParticipantRequest) (OnboardParticipantResult, error)
+}
+
+// OnboardParticipantRequest carries the payload for the administrative
+// registration flow delegated to the identity gRPC service.
+type OnboardParticipantRequest struct {
+	Username        string
+	Email           string
+	Role            string
+	InstitutionName string
+	Country         string
+	BankCode        string
+}

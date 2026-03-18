@@ -9,7 +9,7 @@ import (
 )
 
 // RequireBearerToken validates Authorization bearer tokens and stores claims in context.
-func RequireBearerToken(validator interfaces.TokenValidator) fiber.Handler {
+func RequireBearerToken(authProvider interfaces.IAuthProvider) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		authHeader := c.Get("Authorization")
 		if !strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
@@ -17,7 +17,7 @@ func RequireBearerToken(validator interfaces.TokenValidator) fiber.Handler {
 		}
 
 		token := strings.TrimSpace(authHeader[7:])
-		claims, err := validator.Validate(c.Context(), token)
+		claims, err := authProvider.Validate(c.Context(), token)
 		if err != nil {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
 		}

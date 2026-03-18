@@ -13,7 +13,7 @@ import (
 type Dependencies struct {
 	AuthHandler       *handlers.AuthHandler
 	ComplianceHandler *handlers.ComplianceHandler
-	TokenValidator    interfaces.TokenValidator
+	AuthProvider      interfaces.IAuthProvider
 }
 
 // Setup registers all gateway HTTP routes and middleware.
@@ -29,9 +29,9 @@ func Setup(app *fiber.App, deps Dependencies) {
 	authGroup := app.Group("/auth")
 	authGroup.Post("/login", deps.AuthHandler.Login)
 	authGroup.Post("/refresh", deps.AuthHandler.Refresh)
-	authGroup.Post("/logout", middleware.RequireBearerToken(deps.TokenValidator), deps.AuthHandler.Logout)
+	authGroup.Post("/logout", middleware.RequireBearerToken(deps.AuthProvider), deps.AuthHandler.Logout)
 	authGroup.Post("/onboarding",
-		middleware.RequireBearerToken(deps.TokenValidator),
+		middleware.RequireBearerToken(deps.AuthProvider),
 		deps.AuthHandler.Onboarding,
 	)
 	authGroup.Post("/wallet/bind", func(c *fiber.Ctx) error {
@@ -42,7 +42,7 @@ func Setup(app *fiber.App, deps Dependencies) {
 	})
 
 	// --- Compliance ---
-	complianceGroup := app.Group("/compliance", middleware.RequireBearerToken(deps.TokenValidator))
+	complianceGroup := app.Group("/compliance", middleware.RequireBearerToken(deps.AuthProvider))
 
 	// KYC read — any authenticated user
 	complianceGroup.Get("/kyc/status/:subject", deps.ComplianceHandler.GetKYCStatus)
@@ -55,4 +55,8 @@ func Setup(app *fiber.App, deps Dependencies) {
 	centralBankRoutes.Post("/participants/provision", deps.ComplianceHandler.ProvisionParticipant)
 	centralBankRoutes.Post("/accounts/freeze", deps.ComplianceHandler.FreezeAccount)
 	centralBankRoutes.Post("/accounts/unfreeze", deps.ComplianceHandler.UnfreezeAccount)
+
+	// Administrative participant registration — CENTRAL_BANK only.
+	// The CB uses this endpoint to onboard Commercial Banks and Treasury users.
+	centralBankRoutes.Post("/register", deps.ComplianceHandler.RegisterParticipant)
 }

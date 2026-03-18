@@ -25,6 +25,13 @@ type Client interface {
 	Refresh(ctx context.Context, refreshToken string) (TokenResponse, error)
 	Logout(ctx context.Context, refreshToken string) error
 	ValidateToken(ctx context.Context, accessToken string) (domain.TokenClaims, error)
+	// CreateUser provisions a new user in Keycloak via the Admin REST API and
+	// returns the newly created user's UUID. The caller must supply a valid
+	// admin access token obtained from the service-account credentials.
+	CreateUser(ctx context.Context, adminToken string, user CreateUserRequest) (userID string, err error)
+	// GetAdminToken exchanges client_credentials for an admin-capable access
+	// token using the service account associated with ClientID/ClientSecret.
+	GetAdminToken(ctx context.Context) (string, error)
 }
 
 type jwksCache struct {
@@ -280,6 +287,68 @@ func (c *keycloakClient) postForm(ctx context.Context, endpoint string, form url
 		return TokenResponse{}, fmt.Errorf("keycloak: decoding token response: %w", err)
 	}
 	return tr, nil
+}
+
+// adminUsersURL returns the Keycloak Admin REST API URL for user management.
+func (c *keycloakClient) adminUsersURL() string {
+	return fmt.Sprintf("%s/admin/realms/%s/users", c.cfg.BaseURL, c.cfg.Realm)
+}
+
+// GetAdminToken exchanges client_credentials for an admin-scoped access token
+// using the service account attached to ClientID/ClientSecret.
+func (c *keycloakClient) GetAdminToken(ctx context.Context) (string, error) {
+	form := url.Values{}
+	form.Set("grant_type", "client_credentials")
+	form.Set("client_id", c.cfg.ClientID)
+	form.Set("client_secret", c.cfg.ClientSecret)
+	tr, err := c.postForm(ctx, c.tokenURL(), form)
+	if err != nil {
+		return "", fmt.Errorf("keycloak: obtaining admin token: %w", err)
+	}
+	return tr.AccessToken, nil
+}
+
+// CreateUser creates a user in Keycloak via the Admin REST API and returns the
+// new user's UUID extracted from the Location header of the 201 response.
+// adminToken must be a valid admin-capable Bearer token.
+func (c *keycloakClient) CreateUser(ctx context.Context, adminToken string, user CreateUserRequest) (string, error) {
+	body, err := json.Marshal(user)
+	if err != nil {
+		return "", fmt.Errorf("keycloak: marshaling create-user request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.adminUsersURL(), strings.NewReader(string(body)))
+	if err != nil {
+		return "", fmt.Errorf("keycloak: building create-user request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("keycloak: create-user request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusConflict {
+		return "", fmt.Errorf("keycloak: user %q already exists", user.Username)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("keycloak: create-user returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Keycloak returns the new user UUID in the Location header:
+	// Location: {baseURL}/admin/realms/{realm}/users/{uuid}
+	location := resp.Header.Get("Location")
+	if location == "" {
+		return "", errors.New("keycloak: create-user response missing Location header")
+	}
+	parts := strings.Split(location, "/")
+	if len(parts) == 0 {
+		return "", errors.New("keycloak: cannot parse user UUID from Location header")
+	}
+	return parts[len(parts)-1], nil
 }
 
 // extractRealmRoles extracts the roles array from the Keycloak claim

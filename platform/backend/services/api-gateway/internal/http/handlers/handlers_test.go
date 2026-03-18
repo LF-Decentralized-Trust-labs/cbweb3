@@ -32,6 +32,10 @@ func (s authProviderStub) Logout(_ context.Context, _ string) error {
 	return s.err
 }
 
+func (s authProviderStub) Validate(_ context.Context, _ string) (domain.TokenClaims, error) {
+	return domain.TokenClaims{Subject: "stub-user"}, s.err
+}
+
 type kycCheckerStub struct {
 	status domain.KYCStatus
 }
@@ -76,6 +80,17 @@ type participantRegistrarStub struct {
 
 func (s participantRegistrarStub) RegisterParticipant(_ context.Context, _, _, _, _, _ string) (interfaces.RegisterParticipantResult, error) {
 	return s.regResult, s.regErr
+}
+
+// participantOnboarderStub implements KYCChecker + KYCManager + ParticipantOnboarder.
+type participantOnboarderStub struct {
+	kycManagerStub
+	result interfaces.OnboardParticipantResult
+	err    error
+}
+
+func (s participantOnboarderStub) OnboardParticipant(_ context.Context, _ interfaces.OnboardParticipantRequest) (interfaces.OnboardParticipantResult, error) {
+	return s.result, s.err
 }
 
 func TestHealth(t *testing.T) {
@@ -623,6 +638,101 @@ func TestFreezeAccountError(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", resp.StatusCode)
+	}
+}
+
+func TestRegisterParticipantSuccess(t *testing.T) {
+	t.Parallel()
+	stub := participantOnboarderStub{
+		result: interfaces.OnboardParticipantResult{
+			UserID:        "user-uuid-123",
+			WalletAddress: "0xABCD",
+			DID:           "did:lac:openprotest:0xabcd",
+			TxHash:        "0xtx",
+		},
+	}
+	handler := NewComplianceHandler(stub)
+	app := fiber.New()
+	app.Post("/compliance/register", handler.RegisterParticipant)
+
+	body, _ := json.Marshal(map[string]string{
+		"username": "banco-brasil",
+		"email":    "admin@bb.com",
+		"role":     "ROLE_COMMERCIAL_BANK",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/compliance/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+}
+
+func TestRegisterParticipantMissingFields(t *testing.T) {
+	t.Parallel()
+	stub := participantOnboarderStub{}
+	handler := NewComplianceHandler(stub)
+	app := fiber.New()
+	app.Post("/compliance/register", handler.RegisterParticipant)
+
+	body, _ := json.Marshal(map[string]string{"username": "banco-brasil"})
+	req := httptest.NewRequest(http.MethodPost, "/compliance/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestRegisterParticipantConflict(t *testing.T) {
+	t.Parallel()
+	stub := participantOnboarderStub{err: errors.New("already exists: user already registered")}
+	handler := NewComplianceHandler(stub)
+	app := fiber.New()
+	app.Post("/compliance/register", handler.RegisterParticipant)
+
+	body, _ := json.Marshal(map[string]string{
+		"username": "banco-brasil",
+		"email":    "admin@bb.com",
+		"role":     "ROLE_COMMERCIAL_BANK",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/compliance/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", resp.StatusCode)
+	}
+}
+
+func TestRegisterParticipantNotAvailable(t *testing.T) {
+	t.Parallel()
+	// kycManagerStub does NOT implement ParticipantOnboarder
+	handler := NewComplianceHandler(kycManagerStub{})
+	app := fiber.New()
+	app.Post("/compliance/register", handler.RegisterParticipant)
+
+	body, _ := json.Marshal(map[string]string{
+		"username": "banco-brasil",
+		"email":    "admin@bb.com",
+		"role":     "ROLE_COMMERCIAL_BANK",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/compliance/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d", resp.StatusCode)
 	}
 }
 
