@@ -21,7 +21,7 @@ jobs:
         run: |
           for spec in Toolbox/contracts/*/openapi_*.yaml; do
             echo "--- Linting $spec ---"
-            spectral lint "$spec" --fail-severity=error --ruleset spectral:oas
+            spectral lint "$spec" --fail-severity=error
           done
 
   validate-schemas:
