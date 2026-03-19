@@ -11,10 +11,10 @@ import (
 
 // Dependencies groups handlers and validators required by route registration.
 type Dependencies struct {
-	AuthHandler        *handlers.AuthHandler
-	ComplianceHandler  *handlers.ComplianceHandler
-	GovernanceHandler  *handlers.GovernanceHandler
-	AuthProvider       interfaces.IAuthProvider
+	AuthHandler       *handlers.AuthHandler
+	ComplianceHandler *handlers.ComplianceHandler
+	GovernanceHandler *handlers.GovernanceHandler
+	AuthProvider      interfaces.IAuthProvider
 }
 
 // Setup registers all gateway HTTP routes and middleware.
@@ -23,7 +23,7 @@ func Setup(app *fiber.App, deps Dependencies) {
 	app.Use(middleware.CorrelationID())
 
 	app.Get("/openapi.yaml", handlers.OpenAPIYAML)
-	app.Get("/swagger", handlers.SwaggerUI)
+	app.Get("/docs", handlers.SwaggerUI)
 	app.Get("/healthz", handlers.Health)
 
 	// --- Auth ---
