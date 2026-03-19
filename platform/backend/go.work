@@ -5,5 +5,5 @@ use (
 	./services/auth
 	./services/compliance
 	./shared/blockchain
-	./shared/pki
+	./shared/identity
 )

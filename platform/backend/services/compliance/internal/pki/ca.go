@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/pki"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/identity"
 )
 
 // CA holds the loaded Central Bank CA credentials.

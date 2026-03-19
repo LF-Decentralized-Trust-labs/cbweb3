@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain v0.0.0
-	github.com/LACNetNetworks/cbweb3-platform/backend/shared/pki v0.0.0
+	github.com/LACNetNetworks/cbweb3-platform/backend/shared/identity v0.0.0
 	google.golang.org/grpc v1.79.2
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.0
@@ -12,7 +12,7 @@ require (
 
 replace (
 	github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain => ../../shared/blockchain
-	github.com/LACNetNetworks/cbweb3-platform/backend/shared/pki => ../../shared/pki
+	github.com/LACNetNetworks/cbweb3-platform/backend/shared/identity => ../../shared/identity
 )
 
 require (

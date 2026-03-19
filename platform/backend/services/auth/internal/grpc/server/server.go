@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/pki"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/identity"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/complianceclient"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/grpc/contract"
