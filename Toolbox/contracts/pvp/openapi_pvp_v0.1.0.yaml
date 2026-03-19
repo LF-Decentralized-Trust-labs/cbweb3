@@ -43,11 +43,11 @@ paths:
             schema:
               $ref: "#/components/schemas/FxAgreementRequest"
             example:
-              sourceCurrency: "tCeBM-CRC"
-              targetCurrency: "tCeBM-DOP"
+              sourceCurrency: "tCeBM-A"
+              targetCurrency: "tCeBM-B"
               sourceAmount: "1000000"
               exchangeRate: "0.058"
-              counterpartyAddress: "0xCB002_DominicanRepublic"
+              counterpartyAddress: "0xCB002_CountryB"
       responses:
         "201":
           description: Agreement proposed successfully
@@ -109,13 +109,13 @@ paths:
                 $ref: "#/components/schemas/FxAgreementDetails"
               example:
                 agreementId: "agr-2026-001"
-                sourceCurrency: "tCeBM-CRC"
-                targetCurrency: "tCeBM-DOP"
+                sourceCurrency: "tCeBM-A"
+                targetCurrency: "tCeBM-B"
                 sourceAmount: "1000000"
                 targetAmount: "58000"
                 exchangeRate: "0.058"
-                initiatorAddress: "0xCB001_CostaRica"
-                counterpartyAddress: "0xCB002_DominicanRepublic"
+                initiatorAddress: "0xCB001_CountryA"
+                counterpartyAddress: "0xCB002_CountryB"
                 status: "READY_FOR_SETTLEMENT"
                 createdAt: "2026-02-19T10:00:00Z"
                 acceptedAt: "2026-02-19T10:05:00Z"
@@ -279,8 +279,8 @@ paths:
                 hashLock: "0x2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
                 timeLock: 1740000000
                 amount: "1000000"
-                sender: "0xCB001_CostaRica"
-                receiver: "0xCB002_DominicanRepublic"
+                sender: "0xCB001_CountryA"
+                receiver: "0xCB002_CountryB"
 
 # ==========================================
 # COMPONENTS
@@ -341,10 +341,10 @@ components:
       properties:
         sourceCurrency:
           type: string
-          description: Currency code of the initiator (e.g., tCeBM-CRC)
+          description: Currency code of the initiator (e.g., tCeBM-A)
         targetCurrency:
           type: string
-          description: Currency code of the counterparty (e.g., tCeBM-DOP)
+          description: Currency code of the counterparty (e.g., tCeBM-B)
         sourceAmount:
           type: string
           description: Amount to exchange in source currency (string to avoid floating-point)

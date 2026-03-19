@@ -25,7 +25,8 @@ pytest -v
 
 ### Run against a real implementation (Level 3)
 ```bash
-export CBWEB3_BASE_URL=https://your-deployment.example.com
+# Include the base path (/api/v1) in the URL — tests use spec-relative paths like /fx/agreement
+export CBWEB3_BASE_URL=https://your-deployment.example.com/api/v1
 export CBWEB3_AUTH_TOKEN=your-jwt-token
 cd Toolbox/conformance
 pytest -v
@@ -51,7 +52,7 @@ conformance/
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CBWEB3_BASE_URL` | `http://localhost:4010` | Target API base URL |
+| `CBWEB3_BASE_URL` | `http://localhost:4010` | Target API base URL. For Prism, use `http://localhost:4010`. For real implementations, include the base path: `https://api.example.com/api/v1` |
 | `CBWEB3_AUTH_TOKEN` | Synthetic token | Bearer token for authentication |
 
 You can also use `--base-url` as a pytest CLI option:

@@ -23,14 +23,14 @@ class TestCreateFxAgreement:
     def test_returns_201(self, base_url, auth_headers):
         """A valid FX agreement proposal returns 201."""
         payload = {
-            "sourceCurrency": "tCeBM-CRC",
-            "targetCurrency": "tCeBM-DOP",
+            "sourceCurrency": "tCeBM-A",
+            "targetCurrency": "tCeBM-B",
             "sourceAmount": "1000000",
             "exchangeRate": "0.058",
-            "counterpartyAddress": "0xCB002_DominicanRepublic",
+            "counterpartyAddress": "0xCB002_CountryB",
         }
         resp = requests.post(
-            f"{base_url}/api/v1/fx/agreement",
+            f"{base_url}/fx/agreement",
             json=payload,
             headers=auth_headers,
         )
@@ -45,14 +45,14 @@ class TestCreateFxAgreement:
     def test_response_matches_schema(self, base_url, auth_headers):
         """Response body matches FxAgreementResponse schema."""
         payload = {
-            "sourceCurrency": "tCeBM-CRC",
-            "targetCurrency": "tCeBM-DOP",
+            "sourceCurrency": "tCeBM-A",
+            "targetCurrency": "tCeBM-B",
             "sourceAmount": "500000",
             "exchangeRate": "0.058",
-            "counterpartyAddress": "0xCB002_DominicanRepublic",
+            "counterpartyAddress": "0xCB002_CountryB",
         }
         resp = requests.post(
-            f"{base_url}/api/v1/fx/agreement",
+            f"{base_url}/fx/agreement",
             json=payload,
             headers=auth_headers,
         )
@@ -80,14 +80,14 @@ class TestCreateFxAgreementMissingField:
     def test_missing_exchange_rate(self, base_url, auth_headers):
         """Request without exchangeRate returns 400 with Error schema."""
         payload = {
-            "sourceCurrency": "tCeBM-CRC",
-            "targetCurrency": "tCeBM-DOP",
+            "sourceCurrency": "tCeBM-A",
+            "targetCurrency": "tCeBM-B",
             "sourceAmount": "1000000",
-            "counterpartyAddress": "0xCB002_DominicanRepublic",
+            "counterpartyAddress": "0xCB002_CountryB",
             # exchangeRate intentionally omitted
         }
         resp = requests.post(
-            f"{base_url}/api/v1/fx/agreement",
+            f"{base_url}/fx/agreement",
             json=payload,
             headers=auth_headers,
         )
@@ -102,13 +102,13 @@ class TestCreateFxAgreementMissingField:
     def test_missing_source_currency(self, base_url, auth_headers):
         """Request without sourceCurrency returns 400."""
         payload = {
-            "targetCurrency": "tCeBM-DOP",
+            "targetCurrency": "tCeBM-B",
             "sourceAmount": "1000000",
             "exchangeRate": "0.058",
-            "counterpartyAddress": "0xCB002_DominicanRepublic",
+            "counterpartyAddress": "0xCB002_CountryB",
         }
         resp = requests.post(
-            f"{base_url}/api/v1/fx/agreement",
+            f"{base_url}/fx/agreement",
             json=payload,
             headers=auth_headers,
         )
@@ -128,14 +128,14 @@ class TestAcceptFxAgreement:
         """Accepting a PROPOSED agreement returns 200 with READY_FOR_SETTLEMENT."""
         # First create an agreement to accept
         create_payload = {
-            "sourceCurrency": "tCeBM-CRC",
-            "targetCurrency": "tCeBM-DOP",
+            "sourceCurrency": "tCeBM-A",
+            "targetCurrency": "tCeBM-B",
             "sourceAmount": "1000000",
             "exchangeRate": "0.058",
-            "counterpartyAddress": "0xCB002_DominicanRepublic",
+            "counterpartyAddress": "0xCB002_CountryB",
         }
         create_resp = requests.post(
-            f"{base_url}/api/v1/fx/agreement",
+            f"{base_url}/fx/agreement",
             json=create_payload,
             headers=auth_headers,
         )
@@ -144,7 +144,7 @@ class TestAcceptFxAgreement:
 
         # Accept it
         resp = requests.post(
-            f"{base_url}/api/v1/fx/agreement/{agreement_id}/accept",
+            f"{base_url}/fx/agreement/{agreement_id}/accept",
             headers=auth_headers,
         )
 
@@ -166,13 +166,13 @@ class TestAcceptFxAgreementAlreadyAccepted:
         """Accepting an agreement that is already READY_FOR_SETTLEMENT returns 409."""
         # Create and accept
         create_resp = requests.post(
-            f"{base_url}/api/v1/fx/agreement",
+            f"{base_url}/fx/agreement",
             json={
-                "sourceCurrency": "tCeBM-CRC",
-                "targetCurrency": "tCeBM-DOP",
+                "sourceCurrency": "tCeBM-A",
+                "targetCurrency": "tCeBM-B",
                 "sourceAmount": "1000000",
                 "exchangeRate": "0.058",
-                "counterpartyAddress": "0xCB002_DominicanRepublic",
+                "counterpartyAddress": "0xCB002_CountryB",
             },
             headers=auth_headers,
         )
@@ -180,14 +180,14 @@ class TestAcceptFxAgreementAlreadyAccepted:
         agreement_id = create_resp.json()["agreementId"]
 
         accept_resp = requests.post(
-            f"{base_url}/api/v1/fx/agreement/{agreement_id}/accept",
+            f"{base_url}/fx/agreement/{agreement_id}/accept",
             headers=auth_headers,
         )
         assert accept_resp.status_code == 200
 
         # Try to accept again
         resp = requests.post(
-            f"{base_url}/api/v1/fx/agreement/{agreement_id}/accept",
+            f"{base_url}/fx/agreement/{agreement_id}/accept",
             headers=auth_headers,
         )
 
@@ -205,7 +205,7 @@ class TestGetNonExistentAgreement:
     def test_returns_404(self, base_url, auth_headers):
         """Querying a non-existent agreement returns 404."""
         resp = requests.get(
-            f"{base_url}/api/v1/fx/agreement/agr-nonexistent-999",
+            f"{base_url}/fx/agreement/agr-nonexistent-999",
             headers=auth_headers,
         )
 
@@ -224,13 +224,13 @@ class TestGetFxAgreementDetails:
         """Querying an existing agreement returns 200 with FxAgreementDetails schema."""
         # Create an agreement first
         create_resp = requests.post(
-            f"{base_url}/api/v1/fx/agreement",
+            f"{base_url}/fx/agreement",
             json={
-                "sourceCurrency": "tCeBM-CRC",
-                "targetCurrency": "tCeBM-DOP",
+                "sourceCurrency": "tCeBM-A",
+                "targetCurrency": "tCeBM-B",
                 "sourceAmount": "1000000",
                 "exchangeRate": "0.058",
-                "counterpartyAddress": "0xCB002_DominicanRepublic",
+                "counterpartyAddress": "0xCB002_CountryB",
             },
             headers=auth_headers,
         )
@@ -239,7 +239,7 @@ class TestGetFxAgreementDetails:
 
         # Query it
         resp = requests.get(
-            f"{base_url}/api/v1/fx/agreement/{agreement_id}",
+            f"{base_url}/fx/agreement/{agreement_id}",
             headers=auth_headers,
         )
 

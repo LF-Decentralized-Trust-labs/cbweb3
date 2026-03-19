@@ -17,4 +17,4 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - FX Agreement endpoints: create, accept, get details.
 - HTLC endpoints: lock, settle, refund, status.
 - Error model with machine-readable codes.
-- Example payloads for all endpoints using synthetic data (Costa Rica ↔ Dominican Republic corridor).
+- Example payloads for all endpoints using synthetic data (Country A ↔ Country B corridor).
