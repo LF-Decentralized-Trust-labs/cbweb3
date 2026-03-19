@@ -49,7 +49,7 @@ func (h *GovernanceHandler) RegisterParticipant(c *fiber.Ctx) error {
 	if p.Status == "" {
 		p.Status = "PENDING"
 	}
-	if err := h.compliance.RegisterParticipant(c.Context(), p); err != nil {
+	if err := h.compliance.RegisterParticipant(c.UserContext(), p); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"user_id": p.UserID, "status": p.Status})
@@ -61,7 +61,7 @@ func (h *GovernanceHandler) GetRegistry(c *fiber.Ctx) error {
 	statusFilter := c.Query("status")
 	search := c.Query("search")
 
-	participants, err := h.compliance.ListParticipants(c.Context(), statusFilter, search)
+	participants, err := h.compliance.ListParticipants(c.UserContext(), statusFilter, search)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -84,7 +84,7 @@ func (h *GovernanceHandler) IssueCredential(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user_id, role, and institution_name are required"})
 	}
 
-	issued, err := h.compliance.IssueParticipantCertificate(c.Context(), req.UserID, req.Role, req.InstitutionName, req.CNPJ)
+	issued, err := h.compliance.IssueParticipantCertificate(c.UserContext(), req.UserID, req.Role, req.InstitutionName, req.CNPJ)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -111,7 +111,7 @@ func (h *GovernanceHandler) ApproveKYC(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "subject is required"})
 	}
 
-	result, err := h.compliance.ApproveKYC(c.Context(), req.Subject, actorFromClaims(c), req.Reason)
+	result, err := h.compliance.ApproveKYC(c.UserContext(), req.Subject, actorFromClaims(c), req.Reason)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -136,7 +136,7 @@ func actorFromClaims(c *fiber.Ctx) string {
 // GetAccounts handles GET /api/v1/governance/accounts.
 // Lists participants with account status information.
 func (h *GovernanceHandler) GetAccounts(c *fiber.Ctx) error {
-	participants, err := h.compliance.ListParticipants(c.Context(), "", "")
+	participants, err := h.compliance.ListParticipants(c.UserContext(), "", "")
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -155,7 +155,7 @@ func (h *GovernanceHandler) FreezeAccount(c *fiber.Ctx) error {
 	if req.Subject == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "subject is required"})
 	}
-	if err := h.compliance.ManageParticipantStatus(c.Context(), req.Subject, "FROZEN", req.Reason); err != nil {
+	if err := h.compliance.ManageParticipantStatus(c.UserContext(), req.Subject, "FROZEN", req.Reason); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"subject": req.Subject, "status": "FROZEN"})
@@ -173,7 +173,7 @@ func (h *GovernanceHandler) UnfreezeAccount(c *fiber.Ctx) error {
 	if req.Subject == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "subject is required"})
 	}
-	if err := h.compliance.ManageParticipantStatus(c.Context(), req.Subject, "ACTIVE", req.Reason); err != nil {
+	if err := h.compliance.ManageParticipantStatus(c.UserContext(), req.Subject, "ACTIVE", req.Reason); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"subject": req.Subject, "status": "ACTIVE"})
@@ -181,7 +181,7 @@ func (h *GovernanceHandler) UnfreezeAccount(c *fiber.Ctx) error {
 
 // GetCircuitBreakerStatus handles GET /api/v1/governance/circuit-breaker/status.
 func (h *GovernanceHandler) GetCircuitBreakerStatus(c *fiber.Ctx) error {
-	st, err := h.compliance.GetCircuitBreakerStatus(c.Context())
+	st, err := h.compliance.GetCircuitBreakerStatus(c.UserContext())
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -200,7 +200,7 @@ func (h *GovernanceHandler) ToggleCircuitBreaker(c *fiber.Ctx) error {
 	if req.Reason == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "reason is required"})
 	}
-	isPaused, err := h.compliance.ToggleCircuitBreaker(c.Context(), req.Pause, req.Reason)
+	isPaused, err := h.compliance.ToggleCircuitBreaker(c.UserContext(), req.Pause, req.Reason)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -209,7 +209,7 @@ func (h *GovernanceHandler) ToggleCircuitBreaker(c *fiber.Ctx) error {
 
 // GetParameters handles GET /api/v1/governance/parameters.
 func (h *GovernanceHandler) GetParameters(c *fiber.Ctx) error {
-	params, err := h.compliance.GetSystemParameters(c.Context())
+	params, err := h.compliance.GetSystemParameters(c.UserContext())
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -230,7 +230,7 @@ func (h *GovernanceHandler) UpdateParameters(c *fiber.Ctx) error {
 	}
 
 	actorSubject := actorFromClaims(c)
-	if err := h.compliance.UpdateSystemParameters(c.Context(), req.SystemParameters, req.Reason, actorSubject); err != nil {
+	if err := h.compliance.UpdateSystemParameters(c.UserContext(), req.SystemParameters, req.Reason, actorSubject); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"success": true})
@@ -245,7 +245,7 @@ func (h *GovernanceHandler) GetAuditLogs(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "50"))
 
-	logs, err := h.compliance.GetAuditLogs(c.Context(), category, severity, fromDate, toDate, page, limit)
+	logs, err := h.compliance.GetAuditLogs(c.UserContext(), category, severity, fromDate, toDate, page, limit)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}

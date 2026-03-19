@@ -15,8 +15,11 @@ import (
 
 type governanceComplianceStub struct {
 	lastActorSubject string
+	lastRequestID    string
 	updateErr        error
 }
+
+type testContextKey string
 
 func (s *governanceComplianceStub) RegisterParticipant(context.Context, complianceadapter.Participant) error {
 	return nil
@@ -54,8 +57,11 @@ func (s *governanceComplianceStub) GetSystemParameters(context.Context) (complia
 	return complianceadapter.SystemParameters{}, nil
 }
 
-func (s *governanceComplianceStub) UpdateSystemParameters(_ context.Context, _ complianceadapter.SystemParameters, _ string, actorSubject string) error {
+func (s *governanceComplianceStub) UpdateSystemParameters(ctx context.Context, _ complianceadapter.SystemParameters, _ string, actorSubject string) error {
 	s.lastActorSubject = actorSubject
+	if reqID, ok := ctx.Value(testContextKey("request-id")).(string); ok {
+		s.lastRequestID = reqID
+	}
 	return s.updateErr
 }
 
@@ -67,6 +73,7 @@ func TestGovernanceUpdateParametersUsesClaimsSubject(t *testing.T) {
 
 	app := fiber.New()
 	app.Put("/api/v1/governance/parameters", func(c *fiber.Ctx) error {
+		c.SetUserContext(context.WithValue(c.UserContext(), testContextKey("request-id"), "corr-123"))
 		c.Locals("claims", domain.TokenClaims{Subject: "gov-123"})
 		return handler.UpdateParameters(c)
 	})
@@ -90,5 +97,8 @@ func TestGovernanceUpdateParametersUsesClaimsSubject(t *testing.T) {
 	}
 	if stub.lastActorSubject != "gov-123" {
 		t.Fatalf("expected actor subject gov-123, got %q", stub.lastActorSubject)
+	}
+	if stub.lastRequestID != "corr-123" {
+		t.Fatalf("expected propagated request id corr-123, got %q", stub.lastRequestID)
 	}
 }
