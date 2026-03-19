@@ -34,13 +34,13 @@ PAST_TIME_LOCK = 1700000000
 def accepted_agreement(base_url, auth_headers):
     """Create and accept an FX agreement, return the agreementId."""
     create_resp = requests.post(
-        f"{base_url}/api/v1/fx/agreement",
+        f"{base_url}/fx/agreement",
         json={
-            "sourceCurrency": "tCeBM-CRC",
-            "targetCurrency": "tCeBM-DOP",
+            "sourceCurrency": "tCeBM-A",
+            "targetCurrency": "tCeBM-B",
             "sourceAmount": "1000000",
             "exchangeRate": "0.058",
-            "counterpartyAddress": "0xCB002_DominicanRepublic",
+            "counterpartyAddress": "0xCB002_CountryB",
         },
         headers=auth_headers,
     )
@@ -48,7 +48,7 @@ def accepted_agreement(base_url, auth_headers):
     agreement_id = create_resp.json()["agreementId"]
 
     accept_resp = requests.post(
-        f"{base_url}/api/v1/fx/agreement/{agreement_id}/accept",
+        f"{base_url}/fx/agreement/{agreement_id}/accept",
         headers=auth_headers,
     )
     assert accept_resp.status_code == 200
@@ -60,13 +60,13 @@ def accepted_agreement(base_url, auth_headers):
 def proposed_agreement(base_url, auth_headers):
     """Create an FX agreement but do NOT accept it. Return the agreementId."""
     create_resp = requests.post(
-        f"{base_url}/api/v1/fx/agreement",
+        f"{base_url}/fx/agreement",
         json={
-            "sourceCurrency": "tCeBM-CRC",
-            "targetCurrency": "tCeBM-DOP",
+            "sourceCurrency": "tCeBM-A",
+            "targetCurrency": "tCeBM-B",
             "sourceAmount": "1000000",
             "exchangeRate": "0.058",
-            "counterpartyAddress": "0xCB002_DominicanRepublic",
+            "counterpartyAddress": "0xCB002_CountryB",
         },
         headers=auth_headers,
     )
@@ -78,7 +78,7 @@ def proposed_agreement(base_url, auth_headers):
 def locked_htlc(base_url, auth_headers, accepted_agreement):
     """Lock funds for an accepted agreement, return (agreementId, contractId)."""
     lock_resp = requests.post(
-        f"{base_url}/api/v1/htlc/lock",
+        f"{base_url}/htlc/lock",
         json={
             "agreementId": accepted_agreement,
             "hashLock": VALID_HASH_LOCK,
@@ -104,7 +104,7 @@ class TestHtlcLock:
     ):
         """Locking funds for a READY_FOR_SETTLEMENT agreement returns 201 LOCKED."""
         resp = requests.post(
-            f"{base_url}/api/v1/htlc/lock",
+            f"{base_url}/htlc/lock",
             json={
                 "agreementId": accepted_agreement,
                 "hashLock": VALID_HASH_LOCK,
@@ -139,7 +139,7 @@ class TestHtlcSettle:
         _, contract_id = locked_htlc
 
         resp = requests.post(
-            f"{base_url}/api/v1/htlc/settle",
+            f"{base_url}/htlc/settle",
             json={
                 "contractId": contract_id,
                 "secret": VALID_SECRET,
@@ -166,7 +166,7 @@ class TestHtlcSettleInvalidSecret:
         _, contract_id = locked_htlc
 
         resp = requests.post(
-            f"{base_url}/api/v1/htlc/settle",
+            f"{base_url}/htlc/settle",
             json={
                 "contractId": contract_id,
                 "secret": INVALID_SECRET,
@@ -193,7 +193,7 @@ class TestHtlcSettleExpired:
         """Settling an expired HTLC returns 410 with HTLC_EXPIRED error."""
         # Lock with a timeLock in the past
         lock_resp = requests.post(
-            f"{base_url}/api/v1/htlc/lock",
+            f"{base_url}/htlc/lock",
             json={
                 "agreementId": accepted_agreement,
                 "hashLock": VALID_HASH_LOCK,
@@ -209,7 +209,7 @@ class TestHtlcSettleExpired:
         contract_id = lock_resp.json()["contractId"]
 
         resp = requests.post(
-            f"{base_url}/api/v1/htlc/settle",
+            f"{base_url}/htlc/settle",
             json={
                 "contractId": contract_id,
                 "secret": VALID_SECRET,
@@ -236,7 +236,7 @@ class TestHtlcRefund:
         """Refunding an expired, unsettled HTLC returns 200 REFUNDED."""
         # Lock with a timeLock in the past
         lock_resp = requests.post(
-            f"{base_url}/api/v1/htlc/lock",
+            f"{base_url}/htlc/lock",
             json={
                 "agreementId": accepted_agreement,
                 "hashLock": VALID_HASH_LOCK,
@@ -250,7 +250,7 @@ class TestHtlcRefund:
         contract_id = lock_resp.json()["contractId"]
 
         resp = requests.post(
-            f"{base_url}/api/v1/htlc/refund",
+            f"{base_url}/htlc/refund",
             json={"contractId": contract_id},
             headers=auth_headers,
         )
@@ -274,7 +274,7 @@ class TestHtlcRefundNotExpired:
         _, contract_id = locked_htlc
 
         resp = requests.post(
-            f"{base_url}/api/v1/htlc/refund",
+            f"{base_url}/htlc/refund",
             json={"contractId": contract_id},
             headers=auth_headers,
         )
@@ -296,7 +296,7 @@ class TestHtlcRefundAlreadySettled:
 
         # Settle it first
         settle_resp = requests.post(
-            f"{base_url}/api/v1/htlc/settle",
+            f"{base_url}/htlc/settle",
             json={
                 "contractId": contract_id,
                 "secret": VALID_SECRET,
@@ -307,7 +307,7 @@ class TestHtlcRefundAlreadySettled:
 
         # Try to refund
         resp = requests.post(
-            f"{base_url}/api/v1/htlc/refund",
+            f"{base_url}/htlc/refund",
             json={"contractId": contract_id},
             headers=auth_headers,
         )
@@ -326,7 +326,7 @@ class TestHtlcLockNotAccepted:
     def test_returns_400(self, base_url, auth_headers, proposed_agreement):
         """Lock should only be allowed when agreement is READY_FOR_SETTLEMENT."""
         resp = requests.post(
-            f"{base_url}/api/v1/htlc/lock",
+            f"{base_url}/htlc/lock",
             json={
                 "agreementId": proposed_agreement,
                 "hashLock": VALID_HASH_LOCK,
@@ -351,7 +351,7 @@ class TestHtlcStatus:
         _, contract_id = locked_htlc
 
         resp = requests.get(
-            f"{base_url}/api/v1/htlc/status",
+            f"{base_url}/htlc/status",
             params={"contractId": contract_id},
             headers=auth_headers,
         )

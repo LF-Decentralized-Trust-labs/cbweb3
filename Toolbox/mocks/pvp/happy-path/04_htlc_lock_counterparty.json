@@ -1,7 +1,7 @@
 {
   "id": "mock-pvp-hp-04",
-  "title": "Step 4: Counterparty locks tCeBM-DOP via HTLC",
-  "description": "Dominican Republic locks 58,000 tCeBM-DOP (1,000,000 * 0.058) using the SAME hashLock as the initiator.",
+  "title": "Step 4: Counterparty locks tCeBM-B via HTLC",
+  "description": "Country B locks 58,000 tCeBM-B (1,000,000 * 0.058) using the SAME hashLock as the initiator.",
   "request": {
     "method": "POST",
     "path": "/api/v1/htlc/lock",

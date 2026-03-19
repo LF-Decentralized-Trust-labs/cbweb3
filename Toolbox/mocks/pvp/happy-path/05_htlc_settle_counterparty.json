@@ -1,7 +1,7 @@
 {
   "id": "mock-pvp-hp-05",
-  "title": "Step 5: Initiator settles counterparty's HTLC (claims tCeBM-DOP)",
-  "description": "Costa Rica reveals the secret to claim the 58,000 tCeBM-DOP locked by Dominican Republic. This exposes the secret on-chain.",
+  "title": "Step 5: Initiator settles counterparty's HTLC (claims tCeBM-B)",
+  "description": "Country A reveals the secret to claim the 58,000 tCeBM-B locked by Country B. This exposes the secret on-chain.",
   "request": {
     "method": "POST",
     "path": "/api/v1/htlc/settle",

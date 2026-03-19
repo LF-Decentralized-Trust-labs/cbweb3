@@ -156,12 +156,12 @@ The 6-step happy path simulates a full PvP settlement between two central banks:
 ```
 Step  Endpoint                            Actor           Action
 ───── ─────────────────────────────────── ─────────────── ──────────────────────────────
-  1   POST /fx/agreement                  CB Costa Rica   Propose FX deal (1M CRC @ 0.058)
-  2   POST /fx/agreement/{id}/accept      CB Dom. Rep.    Accept terms → READY_FOR_SETTLEMENT
-  3   POST /htlc/lock                     CB Costa Rica   Lock 1,000,000 tCeBM-CRC (hashLock)
-  4   POST /htlc/lock                     CB Dom. Rep.    Lock 58,000 tCeBM-DOP (same hashLock)
-  5   POST /htlc/settle                   CB Costa Rica   Reveal secret → claim tCeBM-DOP
-  6   POST /htlc/settle                   CB Dom. Rep.    Use revealed secret → claim tCeBM-CRC
+  1   POST /fx/agreement                  Central Bank A   Propose FX deal (1M A @ 0.058)
+  2   POST /fx/agreement/{id}/accept      Central Bank B    Accept terms → READY_FOR_SETTLEMENT
+  3   POST /htlc/lock                     Central Bank A   Lock 1,000,000 tCeBM-A (hashLock)
+  4   POST /htlc/lock                     Central Bank B    Lock 58,000 tCeBM-B (same hashLock)
+  5   POST /htlc/settle                   Central Bank A   Reveal secret → claim tCeBM-B
+  6   POST /htlc/settle                   Central Bank B    Use revealed secret → claim tCeBM-A
 ```
 
 #### How to use mocks
@@ -268,11 +268,11 @@ All artifacts use **synthetic data** exclusively. The reference corridor is:
 
 | Entity | Address | Currency |
 |--------|---------|----------|
-| Central Bank of Costa Rica (initiator) | `0xCB001_CostaRica` | tCeBM-CRC |
-| Central Bank of Dominican Republic (counterparty) | `0xCB002_DominicanRepublic` | tCeBM-DOP |
+| Central Bank A (initiator) | `0xCB001_CountryA` | tCeBM-A |
+| Central Bank B (counterparty) | `0xCB002_CountryB` | tCeBM-B |
 
 - **Exchange rate:** 0.058 (synthetic)
-- **Amount:** 1,000,000 tCeBM-CRC → 58,000 tCeBM-DOP
+- **Amount:** 1,000,000 tCeBM-A → 58,000 tCeBM-B
 - **JWT tokens:** Prefixed with `SYNTHETIC_TOKEN_` — not valid for any real system
 - **Transaction hashes and block numbers:** Fabricated
 

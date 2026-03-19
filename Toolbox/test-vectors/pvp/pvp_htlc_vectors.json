@@ -16,7 +16,7 @@
       "description": "Lock tCeBM linked to an accepted FX agreement. Returns 201 with status LOCKED.",
       "category": "happy-path",
       "preconditions": {
-        "authenticatedAs": "CB-CostaRica (0xCB001_CostaRica)",
+        "authenticatedAs": "CB-CountryA (0xCB001_CountryA)",
         "agreementExists": true,
         "agreementStatus": "READY_FOR_SETTLEMENT",
         "sufficientBalance": true

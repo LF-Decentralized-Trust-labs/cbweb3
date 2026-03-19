@@ -6,11 +6,11 @@ Canonical simulated responses for the PvP settlement flow. These mocks allow int
 
 ## Scenario
 
-**Corridor:** Costa Rica (tCeBM-CRC) ↔ Dominican Republic (tCeBM-DOP)
+**Corridor:** Country A (tCeBM-A) ↔ Country B (tCeBM-B)
 
 The mock data simulates a complete PvP settlement between two central banks:
-- **CB-CostaRica** (initiator): `0xCB001_CostaRica`
-- **CB-DominicanRepublic** (counterparty): `0xCB002_DominicanRepublic`
+- **CB-CountryA** (initiator): `0xCB001_CountryA`
+- **CB-CountryB** (counterparty): `0xCB002_CountryB`
 
 ## Files
 
