@@ -2,7 +2,10 @@
 package app
 
 import (
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
+	"log"
+
+	authadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
+	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
@@ -11,17 +14,27 @@ import (
 )
 
 func New(cfg config.Config) (*fiber.App, error) {
-	// All identity + auth operations delegate to the identity gRPC service.
-	identityGRPCProvider, err := auth.NewIdentityGRPCAuthProvider(cfg.IdentityGRPCAddr, cfg.RequestTimeout)
+	// Auth gRPC provider: auth + PKI nonce/verify methods.
+	identityGRPCProvider, err := authadapter.NewIdentityGRPCAuthProvider(cfg.AuthGRPCAddr, cfg.RequestTimeout)
 	if err != nil {
 		return nil, err
 	}
 
-	// IdentityGRPCManager handles wallet binding + KYC operations.
-	// The in-memory compliance service is REMOVED — all KYC is delegated to identity gRPC.
-	identityManager, err := identityadapter.NewIdentityGRPCManager(cfg.IdentityGRPCAddr, cfg.RequestTimeout)
+	// AuthGRPCManager handles KYC + participant onboarding.
+	identityManager, err := identityadapter.NewIdentityGRPCManager(cfg.AuthGRPCAddr, cfg.RequestTimeout)
 	if err != nil {
 		return nil, err
+	}
+
+	// Compliance gRPC adapter: governance portal operations.
+	var governanceHandler *handlers.GovernanceHandler
+	if cfg.ComplianceGRPCAddr != "" {
+		complianceGRPC, cerr := complianceadapter.NewGRPCAdapter(cfg.ComplianceGRPCAddr, cfg.RequestTimeout)
+		if cerr != nil {
+			log.Printf("WARN: compliance gRPC unavailable at %s: %v — governance endpoints disabled", cfg.ComplianceGRPCAddr, cerr)
+		} else {
+			governanceHandler = handlers.NewGovernanceHandler(complianceGRPC)
+		}
 	}
 
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager)
@@ -29,13 +42,14 @@ func New(cfg config.Config) (*fiber.App, error) {
 
 	fiberApp := fiber.New(
 		fiber.Config{
-			BodyLimit: 10 * 1024 * 1024, // 10MB limit
+			BodyLimit: 10 * 1024 * 1024,
 			AppName:   "api-gateway",
 		},
 	)
 	router.Setup(fiberApp, router.Dependencies{
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
+		GovernanceHandler: governanceHandler,
 		AuthProvider:      identityGRPCProvider,
 	})
 

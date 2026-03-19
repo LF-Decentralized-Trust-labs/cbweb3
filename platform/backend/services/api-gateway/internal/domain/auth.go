@@ -51,9 +51,16 @@ const (
 	KYCRejected KYCStatus = "REJECTED"
 )
 
-// Canonical participant role constants (mirrors identityprovider package).
+// Canonical participant role constants (mirrors identity service roles).
 const (
-	RoleCentralBank    = "CENTRAL_BANK"
-	RoleCommercialBank = "COMMERCIAL_BANK"
-	RoleMLP            = "MLP"
+	RoleGovernance        = "ROLE_GOVERNANCE"
+	RoleCommercialBank    = "ROLE_COMMERCIAL_BANK"
+	RoleTreasury          = "ROLE_TREASURY"
+	RoleSupervisor        = "ROLE_SUPERVISOR"
+	RoleNOC               = "ROLE_NOC"
+	RoleGovernanceOfficer = "ROLE_GOVERNANCE_OFFICER"
+
+	// Legacy constants kept for backward-compat with existing tests.
+	RoleCentralBank = "CENTRAL_BANK"
+	RoleMLP         = "MLP"
 )

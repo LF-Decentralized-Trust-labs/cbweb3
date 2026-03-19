@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	registerParticipantMethod  = "/identity.v1.IdentityService/RegisterParticipant"
-	getKYCStatusMethod         = "/identity.v1.IdentityService/GetKYCStatus"
-	provisionParticipantMethod = "/identity.v1.IdentityService/ProvisionParticipant"
-	onboardParticipantMethod   = "/identity.v1.IdentityService/OnboardParticipant"
+	registerParticipantMethod  = "/auth.v1.AuthService/RegisterParticipant"
+	getKYCStatusMethod         = "/auth.v1.AuthService/GetKYCStatus"
+	provisionParticipantMethod = "/auth.v1.AuthService/ProvisionParticipant"
+	onboardParticipantMethod   = "/auth.v1.AuthService/OnboardParticipant"
 )
 
 type jsonCodec struct{}

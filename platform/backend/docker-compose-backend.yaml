@@ -26,52 +26,48 @@ services:
     networks:
       - cbweb3_backend
 
-  data-access:
+  compliance:
     image: golang:1.25-alpine
-    container_name: cbweb3-data-access
-    working_dir: /workspace/backend/services/data-access
-    command: ["sh", "-c", "go run ./cmd/data-access"]
+    container_name: cbweb3-compliance
+    working_dir: /workspace/backend/services/compliance
+    command: ["sh", "-c", "go run ./cmd/compliance"]
     environment:
-      DATA_ACCESS_GRPC_PORT: "9092"
-      DATA_ACCESS_REQUEST_TIMEOUT_SEC: "5"
+      COMPLIANCE_GRPC_PORT: "9093"
       POSTGRES_DSN: "postgres://default:default@postgres:5432/default?sslmode=disable"
-      DATA_ACCESS_DB_MAX_OPEN_CONNS: "10"
-      DATA_ACCESS_DB_MAX_IDLE_CONNS: "5"
-      DATA_ACCESS_DB_CONN_MAX_LIFETIME_SEC: "300"
+      # CA_CERT_FILE and CA_KEY_FILE must be mounted for certificate issuance:
+      # CA_CERT_FILE: /certs/ca.crt
+      # CA_KEY_FILE:  /certs/ca.key
     volumes:
       - ../:/workspace
     ports:
-      - "9092:9092"
+      - "9093:9093"
     depends_on:
       - postgres
     networks:
       - cbweb3_backend
 
-  identity:
+  auth:
     image: golang:1.25-alpine
-    container_name: cbweb3-identity
-    working_dir: /workspace/backend/services/identity
-    command: ["sh", "-c", "go run ./cmd/identity"]
+    container_name: cbweb3-auth
+    working_dir: /workspace/backend/services/auth
+    command: ["sh", "-c", "go run ./cmd/auth"]
     environment:
-      IDENTITY_GRPC_PORT: "9091"
-      # KMS
+      AUTH_GRPC_PORT: "9091"
       KMS_PROVIDER: local
-      # Keycloak (OIDC + JWKS)
       KEYCLOAK_BASE_URL: http://keycloak:8080
       KEYCLOAK_REALM: cbweb3
-      KEYCLOAK_CLIENT_ID: cbweb3-identity
+      KEYCLOAK_CLIENT_ID: cbweb3-auth
       KEYCLOAK_CLIENT_SECRET: change-me
       KEYCLOAK_JWKS_CACHE_TTL_SEC: "300"
       KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
-      # Data Access
-      DATA_ACCESS_GRPC_ADDR: data-access:9092
-      DATA_ACCESS_REQUEST_TIMEOUT_SEC: "5"
+      COMPLIANCE_GRPC_ADDR: compliance:9093
+      COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
     volumes:
       - ../:/workspace
     ports:
       - "9091:9091"
     depends_on:
-      - data-access
+      - compliance
       - keycloak
     networks:
       - cbweb3_backend
@@ -84,13 +80,15 @@ services:
     environment:
       APP_PORT: "8080"
       REQUEST_TIMEOUT_SEC: "5"
-      IDENTITY_GRPC_ADDR: identity:9091
+      AUTH_GRPC_ADDR: auth:9091
+      COMPLIANCE_GRPC_ADDR: compliance:9093
     volumes:
       - ../:/workspace
     ports:
       - "8080:8080"
     depends_on:
-      - identity
+      - auth
+      - compliance
     networks:
       - cbweb3_backend
 

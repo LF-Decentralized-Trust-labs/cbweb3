@@ -58,9 +58,9 @@ func mustNewGateway(t *testing.T) *fiber.App {
 	t.Cleanup(cleanup)
 
 	cfg := config.Config{
-		AppPort:          "8080",
-		RequestTimeout:   2 * time.Second,
-		IdentityGRPCAddr: identityAddr,
+		AppPort:        "8080",
+		RequestTimeout: 2 * time.Second,
+		AuthGRPCAddr:   identityAddr,
 	}
 
 	server, err := app.New(cfg)
@@ -135,7 +135,7 @@ func startIdentityMockGRPC(t *testing.T) (string, func()) {
 
 	server := grpc.NewServer(grpc.ForceServerCodec(codec))
 	server.RegisterService(&grpc.ServiceDesc{
-		ServiceName: "identity.v1.IdentityService",
+		ServiceName: "auth.v1.AuthService",
 		HandlerType: (*identityMockService)(nil),
 		Methods: []grpc.MethodDesc{
 			{MethodName: "Login", Handler: mock.loginHandler},

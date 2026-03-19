@@ -13,10 +13,12 @@ import (
 )
 
 const (
-	identityLoginMethod         = "/identity.v1.IdentityService/Login"
-	identityRefreshTokenMethod  = "/identity.v1.IdentityService/RefreshToken"
-	identityRevokeTokenMethod   = "/identity.v1.IdentityService/RevokeToken"
-	identityValidateTokenMethod = "/identity.v1.IdentityService/ValidateToken" // #nosec G101 -- gRPC method path
+	identityLoginMethod         = "/auth.v1.AuthService/Login"
+	identityRefreshTokenMethod  = "/auth.v1.AuthService/RefreshToken"
+	identityRevokeTokenMethod   = "/auth.v1.AuthService/RevokeToken"
+	identityValidateTokenMethod = "/auth.v1.AuthService/ValidateToken" // #nosec G101 -- gRPC method path
+	identityIssueNonceMethod    = "/auth.v1.AuthService/IssueLoginNonce"
+	identityVerifyPKIMethod     = "/auth.v1.AuthService/VerifyPKILogin"
 )
 
 type jsonCodec struct{}
@@ -160,5 +162,39 @@ func (p *IdentityGRPCAuthProvider) Validate(ctx context.Context, token string) (
 		Country:      out.Country,
 		BankID:       out.BankID,
 		PrivacyGroup: out.PrivacyGroup,
+	}, nil
+}
+
+// IssueLoginNonce requests a PKI login nonce for the given user (step 1).
+func (p *IdentityGRPCAuthProvider) IssueLoginNonce(ctx context.Context, userID string) (string, error) {
+	req := struct {
+		UserID string `json:"user_id"`
+	}{UserID: userID}
+	var out struct {
+		Nonce string `json:"nonce"`
+	}
+	if err := p.client.Invoke(ctx, identityIssueNonceMethod, &req, &out, grpc.ForceCodec(p.codec)); err != nil {
+		return "", err
+	}
+	return out.Nonce, nil
+}
+
+// VerifyPKILogin completes PKI login step 2: validates the signed nonce + X.509 cert.
+func (p *IdentityGRPCAuthProvider) VerifyPKILogin(ctx context.Context, userID, nonceSignatureHex, certPEM string) (domain.AuthToken, error) {
+	req := struct {
+		UserID            string `json:"user_id"`
+		NonceSignatureHex string `json:"nonce_signature_hex"`
+		CertPEM           string `json:"cert_pem"`
+	}{UserID: userID, NonceSignatureHex: nonceSignatureHex, CertPEM: certPEM}
+
+	out := &identityLoginResponse{}
+	if err := p.client.Invoke(ctx, identityVerifyPKIMethod, &req, out, grpc.ForceCodec(p.codec)); err != nil {
+		return domain.AuthToken{}, err
+	}
+	return domain.AuthToken{
+		AccessToken:  out.AccessToken,
+		RefreshToken: out.RefreshToken,
+		TokenType:    out.TokenType,
+		ExpiresIn:    out.ExpiresIn,
 	}, nil
 }

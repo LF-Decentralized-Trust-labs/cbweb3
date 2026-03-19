@@ -13,6 +13,7 @@ import (
 // AuthHandler implements authentication and onboarding endpoints.
 type AuthHandler struct {
 	authProvider        interfaces.IAuthProvider
+	pkiAuthProvider     interfaces.IPKIAuthProvider // optional; nil if PKI is not enabled
 	kycChecker          interfaces.KYCChecker
 	kycManager          interfaces.KYCManager
 	participantRegistrar interfaces.ParticipantRegistrar
@@ -37,14 +38,19 @@ func NewAuthHandler(
 ) *AuthHandler {
 	var kycMgr interfaces.KYCManager
 	var participantReg interfaces.ParticipantRegistrar
+	var pkiProvider interfaces.IPKIAuthProvider
 	if mgr, ok := kycChecker.(interfaces.KYCManager); ok {
 		kycMgr = mgr
 	}
 	if reg, ok := kycChecker.(interfaces.ParticipantRegistrar); ok {
 		participantReg = reg
 	}
+	if pki, ok := authProvider.(interfaces.IPKIAuthProvider); ok {
+		pkiProvider = pki
+	}
 	return &AuthHandler{
 		authProvider:        authProvider,
+		pkiAuthProvider:     pkiProvider,
 		kycChecker:          kycChecker,
 		kycManager:          kycMgr,
 		participantRegistrar: participantReg,
@@ -182,6 +188,43 @@ func (h *AuthHandler) Onboarding(c *fiber.Ctx) error {
 }
 
 // containsRole checks if a role is in the claims roles list.
+// WalletBind handles PKI login step 2 (POST /api/v1/auth/wallet/bind).
+// The client submits the DER-encoded ECDSA signature of their nonce (hex) plus
+// their X.509 certificate PEM issued by the Central Bank CA.
+// On success, a Keycloak JWT is returned.
+func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
+	if h.pkiAuthProvider == nil {
+		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "PKI authentication not configured"})
+	}
+
+	type walletBindRequest struct {
+		UserID            string `json:"user_id"`
+		NonceSignatureHex string `json:"nonce_signature_hex"`
+		CertPEM           string `json:"cert_pem"`
+	}
+	var req walletBindRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if req.UserID == "" || req.NonceSignatureHex == "" || req.CertPEM == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "user_id, nonce_signature_hex, and cert_pem are required",
+		})
+	}
+
+	token, err := h.pkiAuthProvider.VerifyPKILogin(c.Context(), req.UserID, req.NonceSignatureHex, req.CertPEM)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "PKI verification failed"})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"access_token":  token.AccessToken,
+		"refresh_token": token.RefreshToken,
+		"token_type":    token.TokenType,
+		"expires_in":    token.ExpiresIn,
+	})
+}
+
 func containsRole(roles []string, role string) bool {
 	for _, r := range roles {
 		if r == role {
