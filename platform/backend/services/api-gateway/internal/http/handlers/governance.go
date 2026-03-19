@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"context"
 	"strconv"
 
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
@@ -11,13 +12,27 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// GovernanceCompliance defines compliance operations used by governance HTTP handlers.
+type GovernanceCompliance interface {
+	RegisterParticipant(ctx context.Context, p complianceadapter.Participant) error
+	ListParticipants(ctx context.Context, statusFilter, search string) ([]complianceadapter.Participant, error)
+	IssueParticipantCertificate(ctx context.Context, userID, role, institutionName, cnpj string) (complianceadapter.IssuedCertificate, error)
+	ApproveKYC(ctx context.Context, subject, actorSubject, reason string) (complianceadapter.ApproveKYCResult, error)
+	ManageParticipantStatus(ctx context.Context, subject, statusVal, reason string) error
+	GetAuditLogs(ctx context.Context, category, severity, fromDate, toDate string, page, limit int) ([]complianceadapter.AuditRecord, error)
+	GetCircuitBreakerStatus(ctx context.Context) (complianceadapter.CircuitBreakerStatus, error)
+	ToggleCircuitBreaker(ctx context.Context, pause bool, reason string) (bool, error)
+	GetSystemParameters(ctx context.Context) (complianceadapter.SystemParameters, error)
+	UpdateSystemParameters(ctx context.Context, params complianceadapter.SystemParameters, reason, actorSubject string) error
+}
+
 // GovernanceHandler exposes governance portal operations for ROLE_GOVERNANCE users.
 type GovernanceHandler struct {
-	compliance *complianceadapter.GRPCAdapter
+	compliance GovernanceCompliance
 }
 
 // NewGovernanceHandler constructs a GovernanceHandler.
-func NewGovernanceHandler(c *complianceadapter.GRPCAdapter) *GovernanceHandler {
+func NewGovernanceHandler(c GovernanceCompliance) *GovernanceHandler {
 	return &GovernanceHandler{compliance: c}
 }
 
@@ -214,7 +229,7 @@ func (h *GovernanceHandler) UpdateParameters(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "reason is required"})
 	}
 
-	actorSubject := c.Locals("subject").(string)
+	actorSubject := actorFromClaims(c)
 	if err := h.compliance.UpdateSystemParameters(c.Context(), req.SystemParameters, req.Reason, actorSubject); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
