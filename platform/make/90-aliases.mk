@@ -1,0 +1,33 @@
+up-hub: deploy.up-hub
+up-spoke-a: deploy.up-spoke-a
+up-spoke-b: deploy.up-spoke-b
+up-besu: deploy.up-besu
+up-infra: deploy.up-infra
+up: deploy.up
+up-minimal: deploy.up-minimal
+
+down-hub: deploy.down-hub
+down-spoke-a: deploy.down-spoke-a
+down-spoke-b: deploy.down-spoke-b
+down-besu: deploy.down-besu
+down-infra: deploy.down-infra
+down: deploy.down
+down-minimal: deploy.down-minimal
+
+up-backend: deploy.up-backend
+down-backend: deploy.down-backend
+up-backend-spoke-a: deploy.up-backend-spoke-a
+down-backend-spoke-a: deploy.down-backend-spoke-a
+up-backend-spoke-b: deploy.up-backend-spoke-b
+down-backend-spoke-b: deploy.down-backend-spoke-b
+up-backend-hub: deploy.up-backend-hub
+down-backend-hub: deploy.down-backend-hub
+up-backend-domains: deploy.up-backend-domains
+down-backend-domains: deploy.down-backend-domains
+validate-backend-domains: deploy.validate-backend-domains
+test-api-gateway: deploy.test-api-gateway
+test-identity: deploy.test-identity
+test-data-access: deploy.test-data-access
+test-services: deploy.test-services
+
+.PHONY: up-hub up-spoke-a up-spoke-b up-besu up-infra up up-minimal down-hub down-spoke-a down-spoke-b down-besu down-infra down down-minimal up-backend down-backend up-backend-spoke-a down-backend-spoke-a up-backend-spoke-b down-backend-spoke-b up-backend-hub down-backend-hub up-backend-domains down-backend-domains validate-backend-domains test-api-gateway test-identity test-data-access test-services

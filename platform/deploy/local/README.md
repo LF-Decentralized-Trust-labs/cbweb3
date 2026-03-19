@@ -46,14 +46,12 @@ On startup, the script:
 3. ensures realm `cbweb3-spoke-a` with client `cbweb3-spoke-a-client`,
 4. ensures realm `cbweb3-spoke-b` with client `cbweb3-spoke-b-client`,
 5. fetches both client secrets,
-6. recreates runtime credential files under `backend/config/`:
-   - `.env.keycloak.spoke-a`
-   - `.env.keycloak.spoke-b`
-   - compatibility aliases:
-     - `.env.keycloack.spoke-a`
-     - `.env.keycloack.spoke-b`
+6. recreates runtime infra env files under `backend/config/` from `.example` templates:
+   - `.env.infra.spoke-a`
+   - `.env.infra.spoke-b`
+   - `.env.infra.hub`
 
-This keeps Keycloak client credentials always synchronized with the running container.
+This keeps Keycloak settings and client credentials synchronized in the domain infra files.
 
 ### 3) PostgreSQL
 
@@ -94,13 +92,13 @@ Default local access:
 Important separation:
 
 - `backend/config/.env.infra.spoke-a`, `.env.infra.spoke-b`, and `.env.infra.hub` contain environment settings split by domain.
-- `backend/config/.env.keycloak.spoke-a` and `backend/config/.env.keycloak.spoke-b` are generated at runtime by Keycloak initialization.
+- these files are generated/updated from `*.example` templates with Keycloak-specific values and secrets.
 - Compose still supports standard environment variables (with fallbacks), and you should provide one domain env file from `backend/config`.
 
 In other words:
 
 - **Infra/domain configuration goes to `backend/config/.env.infra.*`.**
-- **Runtime Keycloak credentials stay in `backend/config` as generated files.**
+- **`*.example` files remain templates only; runtime values are written to `.env.infra.*`.**
 
 Use these templates:
 
@@ -116,8 +114,57 @@ Use these templates:
    - `backend/config/.env.infra.hub.example` -> `backend/config/.env.infra.hub`
 2. Start local stack with one selected domain env file, for example:
    - `docker compose --env-file backend/config/.env.infra.spoke-a -f deploy/local/compose.yml up -d`
-3. Keycloak will regenerate runtime files in `backend/config/`.
+3. Keycloak will regenerate `.env.infra.spoke-a`, `.env.infra.spoke-b`, and `.env.infra.hub` in `backend/config/`.
 4. Use the domain-specific files in backend services (`spoke-a`, `spoke-b`, `hub`).
+
+### Backend compose by domain (hub/spokes)
+
+After starting shared infra (`keycloak`, `postgres`, `redis`) with `deploy/local/compose.yml`,
+you can start backend services with one compose file per domain:
+
+- `backend/docker-compose-backend.spoke-a.yaml`
+- `backend/docker-compose-backend.spoke-b.yaml`
+- `backend/docker-compose-backend.hub.yaml`
+
+All three backend files:
+
+- load domain settings from `backend/config/.env.infra.*`,
+- keep service-to-service traffic in a dedicated backend network per domain,
+- connect to shared infra through external network `cbweb3_network`,
+- use non-overlapping host ports to run all domains at once.
+
+Commands (from repository root):
+
+- Validate compose syntax:
+  - `docker compose -f backend/docker-compose-backend.spoke-a.yaml config`
+  - `docker compose -f backend/docker-compose-backend.spoke-b.yaml config`
+  - `docker compose -f backend/docker-compose-backend.hub.yaml config`
+- Start backend per domain:
+  - `docker compose -f backend/docker-compose-backend.spoke-a.yaml up -d`
+  - `docker compose -f backend/docker-compose-backend.spoke-b.yaml up -d`
+  - `docker compose -f backend/docker-compose-backend.hub.yaml up -d`
+- Stop backend per domain:
+  - `docker compose -f backend/docker-compose-backend.spoke-a.yaml down`
+  - `docker compose -f backend/docker-compose-backend.spoke-b.yaml down`
+  - `docker compose -f backend/docker-compose-backend.hub.yaml down`
+
+Make targets (equivalent shortcuts):
+
+- `make validate-backend-domains`
+- `make up-backend-spoke-a`
+- `make up-backend-spoke-b`
+- `make up-backend-hub`
+- `make up-backend-domains`
+- `make down-backend-spoke-a`
+- `make down-backend-spoke-b`
+- `make down-backend-hub`
+- `make down-backend-domains`
+
+Default host ports:
+
+- Spoke A: API `18080`, Auth gRPC `19091`, Compliance gRPC `19093`
+- Spoke B: API `28080`, Auth gRPC `29091`, Compliance gRPC `29093`
+- Hub: API `38080`, Auth gRPC `39091`, Compliance gRPC `39093`
 
 ## Start and stop
 

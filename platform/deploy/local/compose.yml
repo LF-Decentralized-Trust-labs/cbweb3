@@ -3,7 +3,8 @@ services:
     build:
       context: ./keycloak
       dockerfile: Dockerfile
-    container_name: "${KEYCLOAK_CONTAINER_NAME:-keycloak}"
+    container_name: "${KEYCLOAK_CONTAINER_NAME:-cbweb3-keycloak}"
+    user: "0:0"
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: "${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
       KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
@@ -11,7 +12,7 @@ services:
       KEYCLOAK_PORT: "${KEYCLOAK_PORT:-8081}"
     volumes:
       - ./keycloak/init.sh:/opt/keycloak/init.sh
-      - ./:/opt/keycloak/host
+      - ../../:/opt/keycloak/host
     entrypoint: ["bash", "/opt/keycloak/init.sh"]
     networks:
       - cbweb3_network
@@ -20,7 +21,7 @@ services:
 
   postgres:
     image: "postgres:${POSTGRES_IMAGE_TAG:-17-alpine}"
-    container_name: "${POSTGRES_CONTAINER_NAME:-postgres}"
+    container_name: "${POSTGRES_CONTAINER_NAME:-cbweb3-postgres}"
     restart: always
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-default}"

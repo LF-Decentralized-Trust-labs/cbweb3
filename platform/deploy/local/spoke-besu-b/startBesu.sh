@@ -130,10 +130,9 @@ mkdir -p genesis
 cp tmpFiles/networkFiles/genesis.json genesis/genesis.json
 
 echo -e "${YELLOW}Removing tmpFiles...${NC}"
-if [ "$OS" = "Darwin" ]; then
-    rm -rf tmpFiles
-else
-    sudo rm -rf tmpFiles
+if ! rm -rf tmpFiles 2>/dev/null; then
+    # Fallback for root-owned temp files.
+    docker run --rm -v "$(pwd):/workspace" alpine:3.20 sh -c "rm -rf /workspace/tmpFiles" >/dev/null 2>&1 || true
 fi
 echo
 

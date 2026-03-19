@@ -51,3 +51,9 @@ contracts/dependencies
 
 # Git worktrees
 .worktrees/
+
+
+# Besu
+deploy/local/spoke-besu-a/tmpFiles/
+deploy/local/spoke-besu-b/tmpFiles/
+deploy/local/hub-besu/tmpFiles/
