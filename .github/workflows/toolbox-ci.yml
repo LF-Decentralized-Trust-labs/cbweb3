@@ -21,7 +21,7 @@ jobs:
         run: |
           for spec in Toolbox/contracts/*/openapi_*.yaml; do
             echo "--- Linting $spec ---"
-            spectral lint "$spec" --fail-severity=error
+            spectral lint "$spec" --fail-severity=error --ruleset spectral:oas
           done
 
   validate-schemas:
@@ -66,7 +66,7 @@ jobs:
         run: |
           prism mock Toolbox/contracts/pvp/openapi_pvp_v0.1.0.yaml --port 4010 --host 0.0.0.0 &
           sleep 3
-          curl -sf http://localhost:4010/fx/agreement -X POST -H "Content-Type: application/json" -d '{"sourceCurrency":"tCeBM-CRC","targetCurrency":"tCeBM-DOP","sourceAmount":"1000000","exchangeRate":"0.058","counterpartyAddress":"0xCB002"}' > /dev/null
+          curl -sf http://localhost:4010/fx/agreement -X POST -H "Content-Type: application/json" -H "Authorization: Bearer SYNTHETIC_TOKEN_CI" -d '{"sourceCurrency":"tCeBM-A","targetCurrency":"tCeBM-B","sourceAmount":"1000000","exchangeRate":"0.058","counterpartyAddress":"0xCB002_CountryB"}' > /dev/null
       - name: Run conformance tests (happy-path only against mock)
         run: |
           cd Toolbox/conformance

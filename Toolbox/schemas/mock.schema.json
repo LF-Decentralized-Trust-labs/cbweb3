@@ -7,6 +7,10 @@
   "required": ["id", "title", "description", "request", "response"],
   "additionalProperties": false,
   "properties": {
+    "notes": {
+      "type": "string",
+      "description": "Optional implementation notes or caveats"
+    },
     "id": {
       "type": "string",
       "pattern": "^mock-[a-z]+-[a-z]+-\\d+$",
