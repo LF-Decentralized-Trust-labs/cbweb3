@@ -5,7 +5,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
+	"time"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 	compliancepki "github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/pki"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/repository"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/grpc/server"
@@ -39,7 +42,8 @@ func main() {
 		log.Println("WARN: CA_CERT_FILE not set — certificate issuance disabled (dev mode)")
 	}
 
-	grpcServer := server.New(repo, ca)
+	bc := newBlockchainClient()
+	grpcServer := server.New(repo, ca, bc)
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
 	if err != nil {
@@ -49,6 +53,29 @@ func main() {
 	log.Printf("compliance-orchestrator gRPC listening on :%s", port)
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("compliance: serve: %v", err)
+	}
+}
+
+func newBlockchainClient() registry.RegistryWriter {
+	switch getEnv("BLOCKCHAIN_CLIENT", "noop") {
+	case "besu":
+		chainID, _ := strconv.ParseInt(getEnv("BESU_CHAIN_ID", "1337"), 10, 64)
+		bc, err := registry.NewBesuClient(registry.BesuConfig{
+			RPCURL:          os.Getenv("BESU_RPC_URL"),
+			RegistryAddress: os.Getenv("PARTICIPANT_REGISTRY_ADDRESS"),
+			CBPrivateKeyHex: os.Getenv("CB_PRIVATE_KEY"),
+			ChainID:         chainID,
+			RequestTimeout:  time.Duration(15) * time.Second,
+		})
+		if err != nil {
+			log.Printf("WARN: blockchain client init failed: %v — using noop mode", err)
+			return registry.NoopRegistryClient{}
+		}
+		log.Println("compliance: blockchain client connected to", os.Getenv("BESU_RPC_URL"))
+		return bc
+	default:
+		log.Println("compliance: blockchain noop mode (no on-chain writes)")
+		return registry.NoopRegistryClient{}
 	}
 }
 

@@ -7,39 +7,38 @@ import (
 	"errors"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/pki"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/blockchain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/complianceclient"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/grpc/contract"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/grpc/jsoncodec"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/keycloak"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/kms"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/noncestore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
-// nonce store — TTL-based in-memory map for PKI login step 1.
-// For production, replace with Redis.
-type nonceEntry struct {
-	nonce     string
-	expiresAt time.Time
+// blockchainRegistry combines read and write access to the ParticipantRegistry contract.
+// auth-service requires both: writes during RegisterParticipant / ProvisionParticipant,
+// reads during VerifyPKILogin.
+type blockchainRegistry interface {
+	registry.RegistryWriter
+	registry.RegistryReader
 }
 
 type identityService struct {
 	keycloak         keycloak.Client
 	kms              kms.Provider
 	compliance       complianceclient.Client
-	blockchainClient blockchain.Client
+	blockchainClient blockchainRegistry
 	caCertPEM        string // Central Bank CA cert PEM for PKI verification
-
-	nonceMu sync.Mutex
-	nonces  map[string]nonceEntry // userID → nonceEntry
+	nonceStore       noncestore.NonceStore
 }
 
 type identityServiceServer interface {
@@ -57,14 +56,16 @@ type identityServiceServer interface {
 }
 
 // New builds a configured gRPC server and registers all identity handlers.
-func New(kc keycloak.Client, kmsProvider kms.Provider, compliance complianceclient.Client, bc blockchain.Client, caCertPEM string) *grpc.Server {
+// ns is the NonceStore used for PKI 2FA nonces; use noncestore.NewInMemoryStore()
+// for dev or noncestore.NewRedisStore() for production.
+func New(kc keycloak.Client, kmsProvider kms.Provider, compliance complianceclient.Client, bc blockchainRegistry, caCertPEM string, ns noncestore.NonceStore) *grpc.Server {
 	svc := &identityService{
 		keycloak:         kc,
 		kms:              kmsProvider,
 		compliance:       compliance,
 		blockchainClient: bc,
 		caCertPEM:        caCertPEM,
-		nonces:           make(map[string]nonceEntry),
+		nonceStore:       ns,
 	}
 	grpcServer := grpc.NewServer(grpc.ForceServerCodec(jsoncodec.Codec{}))
 	grpcServer.RegisterService(&grpc.ServiceDesc{
@@ -276,7 +277,7 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *contract.
 
 	// 4. Optionally register on-chain.
 	if domain.RequiresOnChain(req.Role) && resp.WalletAddress != "" {
-		txHash, chainErr := s.blockchainClient.RegisterMember(ctx, resp.WalletAddress, req.Role)
+		txHash, chainErr := s.blockchainClient.SetParticipant(ctx, resp.WalletAddress, req.Role, true)
 		if chainErr != nil {
 			return nil, status.Errorf(codes.Internal, "onboard: on-chain registration: %v", chainErr)
 		}
@@ -327,47 +328,58 @@ func (s *identityService) IssueLoginNonce(ctx context.Context, req *contract.Iss
 	}
 	nonce := hex.EncodeToString(raw)
 
-	s.nonceMu.Lock()
-	s.nonces[req.UserID] = nonceEntry{nonce: nonce, expiresAt: time.Now().Add(5 * time.Minute)}
-	s.nonceMu.Unlock()
+	if err := s.nonceStore.Set(ctx, req.UserID, nonce, 5*time.Minute); err != nil {
+		return nil, status.Errorf(codes.Internal, "nonce store: %v", err)
+	}
 
 	return &contract.IssueLoginNonceResponse{Nonce: nonce}, nil
 }
 
 // VerifyPKILogin completes PKI login step 2:
-//  1. Verifies the X.509 cert chain against the Central Bank CA.
-//  2. Validates the nonce signature against the cert's public key.
-//  3. Issues a Keycloak token on success.
+//  1. Retrieves and validates the nonce from the store.
+//  2. Verifies the X.509 cert chain against the Central Bank CA.
+//  3. Validates the nonce signature against the cert's public key.
+//  4. Checks on-chain authorization for the participant's wallet (best-effort).
+//  5. Issues a Keycloak token on success.
 func (s *identityService) VerifyPKILogin(ctx context.Context, req *contract.VerifyPKILoginRequest) (*contract.VerifyPKILoginResponse, error) {
 	if req.UserID == "" || req.NonceSignatureHex == "" || req.CertPEM == "" {
 		return nil, status.Error(codes.InvalidArgument, "user_id, nonce_signature_hex, and cert_pem are required")
 	}
 
-	// 1. Retrieve and validate nonce
-	s.nonceMu.Lock()
-	entry, ok := s.nonces[req.UserID]
-	if ok {
-		delete(s.nonces, req.UserID)
+	// 1. Retrieve and consume nonce (single-use, TTL enforced by store)
+	nonce, found, err := s.nonceStore.GetAndDelete(ctx, req.UserID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "nonce store: %v", err)
 	}
-	s.nonceMu.Unlock()
-
-	if !ok || time.Now().After(entry.expiresAt) {
+	if !found {
 		return nil, status.Error(codes.Unauthenticated, "nonce expired or not found — restart PKI login")
 	}
 
 	// 2. Verify certificate chain against Central Bank CA
 	if s.caCertPEM != "" {
 		if err := pki.VerifyChain(req.CertPEM, s.caCertPEM); err != nil {
-			return nil, status.Errorf(codes.Unauthenticated, "PKI: %v", err)
+			return nil, status.Error(codes.Unauthenticated, "INVALID_CERTIFICATE_CHAIN")
 		}
 	}
 
 	// 3. Validate nonce signature against cert's public key
-	if err := pki.ValidateSignature(req.CertPEM, entry.nonce, req.NonceSignatureHex); err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "PKI signature: %v", err)
+	if err := pki.ValidateSignature(req.CertPEM, nonce, req.NonceSignatureHex); err != nil {
+		return nil, status.Error(codes.Unauthenticated, "NONCE_SIGNATURE_MISMATCH")
 	}
 
-	// 4. Issue Keycloak token using the user's credentials (service-account flow)
+	// 4. On-chain authorization check (best-effort: warn on errors, hard-fail only when explicitly unauthorized)
+	if participant, found, lookupErr := s.compliance.GetParticipantByUser(ctx, req.UserID); lookupErr != nil {
+		log.Printf("WARN: VerifyPKILogin: compliance lookup %s: %v (skipping on-chain check)", req.UserID, lookupErr)
+	} else if found && participant.WalletAddress != "" {
+		authorized, authErr := s.blockchainClient.IsMemberAuthorized(ctx, participant.WalletAddress)
+		if authErr != nil {
+			log.Printf("WARN: VerifyPKILogin: on-chain check %s: %v (skipping)", req.UserID, authErr)
+		} else if !authorized {
+			return nil, status.Error(codes.PermissionDenied, "wallet not authorized on-chain")
+		}
+	}
+
+	// 5. Issue Keycloak token
 	tr, err := s.keycloak.Login(ctx, req.UserID, "")
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "PKI: keycloak token: %v", err)

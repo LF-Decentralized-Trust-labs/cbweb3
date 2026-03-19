@@ -17,6 +17,7 @@ const (
 	listParticipantsMethod            = "/compliance.v1.ComplianceService/ListParticipants"
 	upsertParticipantMethod           = "/compliance.v1.ComplianceService/UpsertParticipant"
 	issueParticipantCertificateMethod = "/compliance.v1.ComplianceService/IssueParticipantCertificate"
+	approveKYCMethod                  = "/compliance.v1.ComplianceService/ApproveKYC"
 	manageParticipantStatusMethod     = "/compliance.v1.ComplianceService/ManageParticipantStatus"
 	getAuditLogsMethod                = "/compliance.v1.ComplianceService/GetAuditLogs"
 	getCircuitBreakerStatusMethod     = "/compliance.v1.ComplianceService/GetCircuitBreakerStatus"
@@ -140,6 +141,30 @@ func (a *GRPCAdapter) IssueParticipantCertificate(ctx context.Context, userID, r
 		return IssuedCertificate{}, err
 	}
 	return resp, nil
+}
+
+// ApproveKYCResult holds the result of an ApproveKYC call.
+type ApproveKYCResult struct {
+	Subject string
+	Status  string
+	TxHash  string
+}
+
+func (a *GRPCAdapter) ApproveKYC(ctx context.Context, subject, actorSubject, reason string) (ApproveKYCResult, error) {
+	req := struct {
+		Subject      string `json:"subject"`
+		ActorSubject string `json:"actor_subject"`
+		Reason       string `json:"reason,omitempty"`
+	}{Subject: subject, ActorSubject: actorSubject, Reason: reason}
+	var resp struct {
+		Subject string `json:"subject"`
+		Status  string `json:"status"`
+		TxHash  string `json:"tx_hash"`
+	}
+	if err := a.cc.Invoke(ctx, approveKYCMethod, &req, &resp, grpc.ForceCodec(a.codec)); err != nil {
+		return ApproveKYCResult{}, err
+	}
+	return ApproveKYCResult{Subject: resp.Subject, Status: resp.Status, TxHash: resp.TxHash}, nil
 }
 
 func (a *GRPCAdapter) ManageParticipantStatus(ctx context.Context, subject, statusVal, reason string) error {

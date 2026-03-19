@@ -1,4 +1,13 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: cbweb3-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - cbweb3_backend
+
   postgres:
     image: postgres:17-alpine
     container_name: cbweb3-postgres
@@ -62,6 +71,7 @@ services:
       KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
       COMPLIANCE_GRPC_ADDR: compliance:9093
       COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
+      REDIS_ADDR: redis:6379
     volumes:
       - ../:/workspace
     ports:
@@ -69,6 +79,7 @@ services:
     depends_on:
       - compliance
       - keycloak
+      - redis
     networks:
       - cbweb3_backend
 

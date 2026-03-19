@@ -4,5 +4,6 @@ use (
 	./services/api-gateway
 	./services/auth
 	./services/compliance
+	./shared/blockchain
 	./shared/pki
 )

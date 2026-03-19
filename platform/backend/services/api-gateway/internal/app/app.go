@@ -2,7 +2,7 @@
 package app
 
 import (
-	"log"
+	"fmt"
 
 	authadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
@@ -26,16 +26,15 @@ func New(cfg config.Config) (*fiber.App, error) {
 		return nil, err
 	}
 
-	// Compliance gRPC adapter: governance portal operations.
-	var governanceHandler *handlers.GovernanceHandler
-	if cfg.ComplianceGRPCAddr != "" {
-		complianceGRPC, cerr := complianceadapter.NewGRPCAdapter(cfg.ComplianceGRPCAddr, cfg.RequestTimeout)
-		if cerr != nil {
-			log.Printf("WARN: compliance gRPC unavailable at %s: %v — governance endpoints disabled", cfg.ComplianceGRPCAddr, cerr)
-		} else {
-			governanceHandler = handlers.NewGovernanceHandler(complianceGRPC)
-		}
+	// Compliance gRPC adapter: governance portal operations (mandatory).
+	if cfg.ComplianceGRPCAddr == "" {
+		return nil, fmt.Errorf("COMPLIANCE_GRPC_ADDR is required but not set")
 	}
+	complianceGRPC, err := complianceadapter.NewGRPCAdapter(cfg.ComplianceGRPCAddr, cfg.RequestTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("compliance gRPC unavailable at %s: %w", cfg.ComplianceGRPCAddr, err)
+	}
+	governanceHandler := handlers.NewGovernanceHandler(complianceGRPC)
 
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager)
 	complianceHandler := handlers.NewComplianceHandler(identityManager)

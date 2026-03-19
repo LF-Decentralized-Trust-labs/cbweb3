@@ -98,11 +98,11 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodPost, "/compliance/kyc/issue-credential"},
-		{http.MethodPost, "/compliance/participants/provision"},
-		{http.MethodPost, "/compliance/accounts/freeze"},
-		{http.MethodPost, "/compliance/accounts/unfreeze"},
-		{http.MethodPost, "/compliance/register"},
+		{http.MethodPost, "/api/v1/compliance/kyc/issue-credential"},
+		{http.MethodPost, "/api/v1/compliance/participants/provision"},
+		{http.MethodPost, "/api/v1/compliance/accounts/freeze"},
+		{http.MethodPost, "/api/v1/compliance/accounts/unfreeze"},
+		{http.MethodPost, "/api/v1/compliance/register"},
 	}
 	for _, tc := range protectedRoutes {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))

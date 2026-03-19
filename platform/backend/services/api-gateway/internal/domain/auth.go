@@ -43,7 +43,8 @@ type WalletBinding struct {
 type KYCStatus string
 
 const (
-	KYCApproved KYCStatus = "APPROVED"
+	KYCActive   KYCStatus = "ACTIVE"   // canonical active status in compliance-orchestrator
+	KYCApproved KYCStatus = "APPROVED" // legacy alias — prefer KYCActive for new code
 	KYCPending  KYCStatus = "PENDING"
 	KYCFrozen   KYCStatus = "FROZEN"  // account frozen by Central Bank (REQ-COM-003)
 	KYCRevoked  KYCStatus = "REVOKED" // credential revoked / permanent ban

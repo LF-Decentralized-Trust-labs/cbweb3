@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/grpc/contract"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/grpc/jsoncodec"
@@ -21,8 +22,9 @@ import (
 )
 
 type complianceService struct {
-	repo repository.Repository
-	ca   *compliancepki.CA
+	repo       repository.Repository
+	ca         *compliancepki.CA
+	blockchain registry.RegistryWriter
 }
 
 type complianceServiceServer interface {
@@ -32,6 +34,7 @@ type complianceServiceServer interface {
 	CreateAuditLog(ctx context.Context, req *contract.CreateAuditLogRequest) (*contract.CreateAuditLogResponse, error)
 	GetAuditLogs(ctx context.Context, req *contract.GetAuditLogsRequest) (*contract.GetAuditLogsResponse, error)
 	IssueParticipantCertificate(ctx context.Context, req *contract.IssueParticipantCertificateRequest) (*contract.IssueParticipantCertificateResponse, error)
+	ApproveKYC(ctx context.Context, req *contract.ApproveKYCRequest) (*contract.ApproveKYCResponse, error)
 	ManageParticipantStatus(ctx context.Context, req *contract.ManageParticipantStatusRequest) (*contract.ManageParticipantStatusResponse, error)
 	GetCircuitBreakerStatus(ctx context.Context, req *struct{}) (*contract.GetCircuitBreakerStatusResponse, error)
 	ToggleCircuitBreaker(ctx context.Context, req *contract.ToggleCircuitBreakerRequest) (*contract.ToggleCircuitBreakerResponse, error)
@@ -40,8 +43,12 @@ type complianceServiceServer interface {
 }
 
 // New builds a configured gRPC server with all compliance handlers.
-func New(repo repository.Repository, ca *compliancepki.CA) *grpc.Server {
-	svc := &complianceService{repo: repo, ca: ca}
+// bc may be nil; when nil, a NoopRegistryClient is used (dev/test mode).
+func New(repo repository.Repository, ca *compliancepki.CA, bc registry.RegistryWriter) *grpc.Server {
+	if bc == nil {
+		bc = registry.NoopRegistryClient{}
+	}
+	svc := &complianceService{repo: repo, ca: ca, blockchain: bc}
 	grpcServer := grpc.NewServer(grpc.ForceServerCodec(jsoncodec.Codec{}))
 	grpcServer.RegisterService(&grpc.ServiceDesc{
 		ServiceName: contract.ServiceName,
@@ -53,6 +60,7 @@ func New(repo repository.Repository, ca *compliancepki.CA) *grpc.Server {
 			{MethodName: "CreateAuditLog", Handler: createAuditLogHandler},
 			{MethodName: "GetAuditLogs", Handler: getAuditLogsHandler},
 			{MethodName: "IssueParticipantCertificate", Handler: issueParticipantCertificateHandler},
+			{MethodName: "ApproveKYC", Handler: approveKYCHandler},
 			{MethodName: "ManageParticipantStatus", Handler: manageParticipantStatusHandler},
 			{MethodName: "GetCircuitBreakerStatus", Handler: getCircuitBreakerStatusHandler},
 			{MethodName: "ToggleCircuitBreaker", Handler: toggleCircuitBreakerHandler},
@@ -218,6 +226,53 @@ func (s *complianceService) IssueParticipantCertificate(ctx context.Context, req
 }
 
 // --- Governance ---
+
+// ApproveKYC sets the participant status to ACTIVE in PostgreSQL and calls
+// setParticipant(wallet, role, true) on the ParticipantRegistry contract.
+// This is the canonical "approve" operation for the PKI-based login flow.
+func (s *complianceService) ApproveKYC(ctx context.Context, req *contract.ApproveKYCRequest) (*contract.ApproveKYCResponse, error) {
+	if req.Subject == "" {
+		return nil, status.Error(codes.InvalidArgument, "subject is required")
+	}
+
+	p, found, err := s.repo.GetParticipantByUser(ctx, req.Subject)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	if !found {
+		return nil, status.Errorf(codes.NotFound, "participant %q not found", req.Subject)
+	}
+	if p.WalletAddress == "" {
+		return nil, status.Errorf(codes.FailedPrecondition, "participant %q has no wallet address", req.Subject)
+	}
+
+	// Activate on-chain first; the DB update is the commit point.
+	txHash, err := s.blockchain.SetParticipant(ctx, p.WalletAddress, p.Role, true)
+	if err != nil {
+		log.Printf("WARN: ApproveKYC: on-chain activation failed for %s: %v", req.Subject, err)
+		txHash = ""
+	}
+
+	p.Status = string(domain.StatusActive)
+	if err := s.repo.UpsertParticipant(ctx, p); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	detailsJSON, _ := json.Marshal(map[string]string{
+		"status":  string(domain.StatusActive),
+		"reason":  req.Reason,
+		"tx_hash": txHash,
+	})
+	s.emitAudit(ctx, "APPROVE_KYC", req.ActorSubject, "", req.Subject,
+		correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS",
+		string(domain.CategoryCredential), string(domain.SeverityInfo), string(detailsJSON))
+
+	return &contract.ApproveKYCResponse{
+		Subject: req.Subject,
+		Status:  string(domain.StatusActive),
+		TxHash:  txHash,
+	}, nil
+}
 
 func (s *complianceService) ManageParticipantStatus(ctx context.Context, req *contract.ManageParticipantStatusRequest) (*contract.ManageParticipantStatusResponse, error) {
 	if req.Subject == "" || req.Status == "" {
@@ -498,6 +553,20 @@ func issueParticipantCertificateHandler(srv any, ctx context.Context, dec func(a
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: contract.IssueParticipantCertificateMethod}
 	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
 		return srv.(*complianceService).IssueParticipantCertificate(ctx, req.(*contract.IssueParticipantCertificateRequest))
+	})
+}
+
+func approveKYCHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(contract.ApproveKYCRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(*complianceService).ApproveKYC(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: contract.ApproveKYCMethod}
+	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
+		return srv.(*complianceService).ApproveKYC(ctx, req.(*contract.ApproveKYCRequest))
 	})
 }
 

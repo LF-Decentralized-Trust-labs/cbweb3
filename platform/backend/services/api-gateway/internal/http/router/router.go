@@ -27,7 +27,7 @@ func Setup(app *fiber.App, deps Dependencies) {
 	app.Get("/healthz", handlers.Health)
 
 	// --- Auth ---
-	authGroup := app.Group("/auth")
+	authGroup := app.Group("/api/v1/auth")
 	authGroup.Post("/login", deps.AuthHandler.Login)
 	authGroup.Post("/refresh", deps.AuthHandler.Refresh)
 	authGroup.Post("/logout", middleware.RequireBearerToken(deps.AuthProvider), deps.AuthHandler.Logout)
@@ -38,44 +38,41 @@ func Setup(app *fiber.App, deps Dependencies) {
 	// PKI login step 2: submit signed nonce + X.509 certificate
 	authGroup.Post("/wallet/bind", deps.AuthHandler.WalletBind)
 
-	// --- Compliance (legacy / KYC) ---
-	complianceGroup := app.Group("/compliance", middleware.RequireBearerToken(deps.AuthProvider))
+	// --- Compliance (KYC status, AML gate, onboarding, provisioning) ---
+	complianceGroup := app.Group("/api/v1/compliance", middleware.RequireBearerToken(deps.AuthProvider))
 	complianceGroup.Get("/kyc/status/:subject", deps.ComplianceHandler.GetKYCStatus)
-	complianceGroup.Post("/kyc/verify-proof", deps.ComplianceHandler.VerifyKYCProof)
 	complianceGroup.Post("/aml/screen", deps.ComplianceHandler.AMLScreen)
 
 	centralBankRoutes := complianceGroup.Group("", middleware.RequireRole(domain.RoleGovernance))
-	centralBankRoutes.Post("/kyc/issue-credential", deps.ComplianceHandler.IssueKYCCredential)
+	centralBankRoutes.Post("/approve-kyc", deps.GovernanceHandler.ApproveKYC)
 	centralBankRoutes.Post("/participants/provision", deps.ComplianceHandler.ProvisionParticipant)
 	centralBankRoutes.Post("/accounts/freeze", deps.ComplianceHandler.FreezeAccount)
 	centralBankRoutes.Post("/accounts/unfreeze", deps.ComplianceHandler.UnfreezeAccount)
 	centralBankRoutes.Post("/register", deps.ComplianceHandler.RegisterParticipant)
 
 	// --- Governance Portal (PKI / ROLE_GOVERNANCE only) ---
-	if deps.GovernanceHandler != nil {
-		govGroup := app.Group("/api/v1/governance",
-			middleware.RequireBearerToken(deps.AuthProvider),
-			middleware.RequireRole(domain.RoleGovernance),
-		)
-		// Participant registration and registry
-		govGroup.Post("/participants", deps.GovernanceHandler.RegisterParticipant)
-		govGroup.Get("/registry", deps.GovernanceHandler.GetRegistry)
-		govGroup.Post("/registry/credential", deps.GovernanceHandler.IssueCredential)
+	govGroup := app.Group("/api/v1/governance",
+		middleware.RequireBearerToken(deps.AuthProvider),
+		middleware.RequireRole(domain.RoleGovernance),
+	)
+	// Participant registration and registry
+	govGroup.Post("/participants", deps.GovernanceHandler.RegisterParticipant)
+	govGroup.Get("/registry", deps.GovernanceHandler.GetRegistry)
+	govGroup.Post("/registry/credential", deps.GovernanceHandler.IssueCredential)
 
-		// Account management
-		govGroup.Get("/accounts", deps.GovernanceHandler.GetAccounts)
-		govGroup.Post("/accounts/freeze", deps.GovernanceHandler.FreezeAccount)
-		govGroup.Post("/accounts/unfreeze", deps.GovernanceHandler.UnfreezeAccount)
+	// Account management
+	govGroup.Get("/accounts", deps.GovernanceHandler.GetAccounts)
+	govGroup.Post("/accounts/freeze", deps.GovernanceHandler.FreezeAccount)
+	govGroup.Post("/accounts/unfreeze", deps.GovernanceHandler.UnfreezeAccount)
 
-		// Circuit breaker
-		govGroup.Get("/circuit-breaker/status", deps.GovernanceHandler.GetCircuitBreakerStatus)
-		govGroup.Post("/circuit-breaker/toggle", deps.GovernanceHandler.ToggleCircuitBreaker)
+	// Circuit breaker
+	govGroup.Get("/circuit-breaker/status", deps.GovernanceHandler.GetCircuitBreakerStatus)
+	govGroup.Post("/circuit-breaker/toggle", deps.GovernanceHandler.ToggleCircuitBreaker)
 
-		// Global parameters
-		govGroup.Get("/parameters", deps.GovernanceHandler.GetParameters)
-		govGroup.Put("/parameters", deps.GovernanceHandler.UpdateParameters)
+	// Global parameters
+	govGroup.Get("/parameters", deps.GovernanceHandler.GetParameters)
+	govGroup.Put("/parameters", deps.GovernanceHandler.UpdateParameters)
 
-		// Audit logs
-		govGroup.Get("/audit/logs", deps.GovernanceHandler.GetAuditLogs)
-	}
+	// Audit logs
+	govGroup.Get("/audit/logs", deps.GovernanceHandler.GetAuditLogs)
 }

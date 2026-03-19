@@ -429,47 +429,6 @@ func TestOnboardingMissingClaims(t *testing.T) {
 
 // ---------- Compliance extended tests ----------
 
-func TestIssueKYCCredentialReturns501(t *testing.T) {
-	t.Parallel()
-	stub := kycManagerStub{}
-	handler := NewComplianceHandler(stub)
-	app := fiber.New()
-	app.Post("/compliance/kyc/issue-credential", func(c *fiber.Ctx) error {
-		c.Locals("claims", domain.TokenClaims{Subject: "cb-001", Roles: []string{domain.RoleCentralBank}})
-		return handler.IssueKYCCredential(c)
-	})
-
-	body, _ := json.Marshal(map[string]string{"subject": "bank-001", "country_code": "BR"})
-	req := httptest.NewRequest(http.MethodPost, "/compliance/kyc/issue-credential", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Fatalf("expected 501, got %d", resp.StatusCode)
-	}
-}
-
-func TestVerifyKYCProofReturns501(t *testing.T) {
-	t.Parallel()
-	stub := kycManagerStub{}
-	handler := NewComplianceHandler(stub)
-	app := fiber.New()
-	app.Post("/compliance/kyc/verify-proof", handler.VerifyKYCProof)
-
-	body, _ := json.Marshal(map[string]string{"zkpPointer": "somehash"})
-	req := httptest.NewRequest(http.MethodPost, "/compliance/kyc/verify-proof", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Fatalf("expected 501, got %d", resp.StatusCode)
-	}
-}
-
 func TestAMLScreenApproved(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{status: domain.KYCApproved}

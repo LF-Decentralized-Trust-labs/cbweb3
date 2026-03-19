@@ -46,22 +46,6 @@ func (h *ComplianceHandler) GetKYCStatus(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"subject": subject, "status": h.kyc.GetStatus(subject)})
 }
 
-// IssueKYCCredential is not yet available — credential issuance is handled internally by the identity service.
-func (h *ComplianceHandler) IssueKYCCredential(c *fiber.Ctx) error {
-	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
-		"error": "KYC credential issuance is not yet available",
-		"code":  "NOT_IMPLEMENTED",
-	})
-}
-
-// VerifyKYCProof is not yet available — ZKP verification is handled internally by the identity service.
-func (h *ComplianceHandler) VerifyKYCProof(c *fiber.Ctx) error {
-	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
-		"error": "KYC proof verification is not yet available",
-		"code":  "NOT_IMPLEMENTED",
-	})
-}
-
 // AMLScreen checks the KYC status as an AML/CFT gate (REQ-COM-007).
 func (h *ComplianceHandler) AMLScreen(c *fiber.Ctx) error {
 	var body struct {
@@ -213,7 +197,7 @@ func isConflictError(err error) bool {
 	return false
 }
 
-// UnfreezeAccount restores APPROVED status for a frozen account (CENTRAL_BANK only).
+// UnfreezeAccount restores ACTIVE status for a frozen account (CENTRAL_BANK only).
 func (h *ComplianceHandler) UnfreezeAccount(c *fiber.Ctx) error {
 	var body struct {
 		Subject string `json:"subject"`
@@ -228,8 +212,8 @@ func (h *ComplianceHandler) UnfreezeAccount(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "kyc manager not available"})
 	}
 
-	if err := h.kycMgr.ProvisionParticipant(c.UserContext(), body.Subject, domain.KYCApproved); err != nil {
+	if err := h.kycMgr.ProvisionParticipant(c.UserContext(), body.Subject, domain.KYCActive); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "unfreeze failed"})
 	}
-	return c.Status(fiber.StatusOK).JSON(fiber.Map{"subject": body.Subject, "status": string(domain.KYCApproved)})
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"subject": body.Subject, "status": string(domain.KYCActive)})
 }

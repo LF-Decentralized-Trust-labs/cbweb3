@@ -23,6 +23,7 @@ const (
 	IssueParticipantCertificateMethod = "/compliance.v1.ComplianceService/IssueParticipantCertificate"
 
 	// Governance operations
+	ApproveKYCMethod              = "/compliance.v1.ComplianceService/ApproveKYC"
 	ManageParticipantStatusMethod = "/compliance.v1.ComplianceService/ManageParticipantStatus"
 	GetCircuitBreakerStatusMethod = "/compliance.v1.ComplianceService/GetCircuitBreakerStatus"
 	ToggleCircuitBreakerMethod    = "/compliance.v1.ComplianceService/ToggleCircuitBreaker"
@@ -137,6 +138,18 @@ type IssueParticipantCertificateResponse struct {
 }
 
 // --- Governance ---
+
+type ApproveKYCRequest struct {
+	Subject      string `json:"subject"`       // Keycloak user ID
+	ActorSubject string `json:"actor_subject"` // Who is approving
+	Reason       string `json:"reason,omitempty"`
+}
+
+type ApproveKYCResponse struct {
+	Subject string `json:"subject"`
+	Status  string `json:"status"`  // ACTIVE
+	TxHash  string `json:"tx_hash"` // on-chain transaction hash
+}
 
 type ManageParticipantStatusRequest struct {
 	Subject string `json:"subject"`

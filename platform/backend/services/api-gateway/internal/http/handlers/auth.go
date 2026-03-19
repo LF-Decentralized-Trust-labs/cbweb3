@@ -8,6 +8,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
+	"google.golang.org/grpc/status"
 )
 
 // AuthHandler implements authentication and onboarding endpoints.
@@ -212,9 +213,16 @@ func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
 		})
 	}
 
-	token, err := h.pkiAuthProvider.VerifyPKILogin(c.Context(), req.UserID, req.NonceSignatureHex, req.CertPEM)
+	token, err := h.pkiAuthProvider.VerifyPKILogin(c.UserContext(), req.UserID, req.NonceSignatureHex, req.CertPEM)
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "PKI verification failed"})
+		errMsg := "PKI verification failed"
+		if st, ok := status.FromError(err); ok {
+			msg := st.Message()
+			if msg == "INVALID_CERTIFICATE_CHAIN" || msg == "NONCE_SIGNATURE_MISMATCH" {
+				errMsg = msg
+			}
+		}
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": errMsg})
 	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{

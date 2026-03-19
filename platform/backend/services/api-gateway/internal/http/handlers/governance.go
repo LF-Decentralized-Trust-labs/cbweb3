@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -78,6 +79,43 @@ func (h *GovernanceHandler) IssueCredential(c *fiber.Ctx) error {
 		"priv_key_pem": issued.PrivKeyPEM,
 		"expires_at":  issued.ExpiresAt,
 	})
+}
+
+// ApproveKYC handles POST /api/v1/compliance/approve-kyc.
+// Activates the participant in PostgreSQL and calls setParticipant on the Besu contract.
+// Allowed roles: ROLE_GOVERNANCE, ROLE_SUPERVISOR.
+func (h *GovernanceHandler) ApproveKYC(c *fiber.Ctx) error {
+	var req struct {
+		Subject string `json:"subject"`
+		Reason  string `json:"reason,omitempty"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if req.Subject == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "subject is required"})
+	}
+
+	result, err := h.compliance.ApproveKYC(c.Context(), req.Subject, actorFromClaims(c), req.Reason)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	resp := fiber.Map{
+		"subject": result.Subject,
+		"status":  result.Status,
+	}
+	if result.TxHash != "" {
+		resp["tx_hash"] = result.TxHash
+	}
+	return c.Status(fiber.StatusOK).JSON(resp)
+}
+
+// actorFromClaims extracts the subject from the JWT claims stored in Locals.
+func actorFromClaims(c *fiber.Ctx) string {
+	if claims, ok := c.Locals("claims").(domain.TokenClaims); ok {
+		return claims.Subject
+	}
+	return ""
 }
 
 // GetAccounts handles GET /api/v1/governance/accounts.
