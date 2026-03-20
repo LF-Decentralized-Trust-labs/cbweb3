@@ -16,7 +16,6 @@ import (
 )
 
 const (
-	registerParticipantMethod  = "/auth.v1.AuthService/RegisterParticipant"
 	getKYCStatusMethod         = "/auth.v1.AuthService/GetKYCStatus"
 	provisionParticipantMethod = "/auth.v1.AuthService/ProvisionParticipant"
 	onboardParticipantMethod   = "/auth.v1.AuthService/OnboardParticipant"
@@ -33,7 +32,7 @@ func (jsonCodec) Unmarshal(data []byte, v any) error {
 }
 
 // IdentityGRPCManager delegates identity and KYC operations to the identity service.
-// It implements KYCChecker, KYCManager, and ParticipantRegistrar.
+// It implements KYCChecker, KYCManager, and ParticipantOnboarder.
 type IdentityGRPCManager struct {
 	client grpc.ClientConnInterface
 	codec  encoding.Codec
@@ -57,40 +56,6 @@ func NewIdentityGRPCManager(address string, timeout time.Duration) (*IdentityGRP
 	return &IdentityGRPCManager{
 		client: conn,
 		codec:  codec,
-	}, nil
-}
-
-// --- ParticipantRegistrar ---
-
-func (m *IdentityGRPCManager) RegisterParticipant(ctx context.Context, accessToken, country, bankCode, role, institutionName string) (interfaces.RegisterParticipantResult, error) {
-	req := &struct {
-		AccessToken     string `json:"access_token"`
-		Country         string `json:"country"`
-		BankCode        string `json:"bank_code"`
-		Role            string `json:"role"`
-		InstitutionName string `json:"institution_name"`
-	}{
-		AccessToken:     accessToken,
-		Country:         country,
-		BankCode:        bankCode,
-		Role:            role,
-		InstitutionName: institutionName,
-	}
-	out := &struct {
-		UserID        string `json:"user_id"`
-		DID           string `json:"did"`
-		WalletAddress string `json:"wallet_address"`
-	}{}
-	if err := m.client.Invoke(ctx, registerParticipantMethod, req, out, grpc.ForceCodec(m.codec)); err != nil {
-		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
-			return interfaces.RegisterParticipantResult{}, domain.ErrWalletAlreadyBound
-		}
-		return interfaces.RegisterParticipantResult{}, err
-	}
-	return interfaces.RegisterParticipantResult{
-		UserID:        out.UserID,
-		DID:           out.DID,
-		WalletAddress: out.WalletAddress,
 	}, nil
 }
 
@@ -154,7 +119,7 @@ func (m *IdentityGRPCManager) OnboardParticipant(ctx context.Context, req interf
 	out := &struct {
 		UserID        string `json:"user_id"`
 		WalletAddress string `json:"wallet_address,omitempty"`
-		DID           string `json:"did,omitempty"`
+		CertPEM       string `json:"cert_pem,omitempty"`
 		TxHash        string `json:"tx_hash,omitempty"`
 	}{}
 	if err := m.client.Invoke(ctx, onboardParticipantMethod, grpcReq, out, grpc.ForceCodec(m.codec)); err != nil {
@@ -166,7 +131,7 @@ func (m *IdentityGRPCManager) OnboardParticipant(ctx context.Context, req interf
 	return interfaces.OnboardParticipantResult{
 		UserID:        out.UserID,
 		WalletAddress: out.WalletAddress,
-		DID:           out.DID,
+		CertPEM:       out.CertPEM,
 		TxHash:        out.TxHash,
 	}, nil
 }

@@ -78,14 +78,25 @@ func (c *keycloakClient) certsURL() string {
 	return fmt.Sprintf("%s/realms/%s/protocol/openid-connect/certs", c.cfg.BaseURL, c.cfg.Realm)
 }
 
-// Login authenticates with username/password and returns tokens.
+// Login authenticates and returns tokens.
+//
+// When username equals the configured ClientID (i.e. the caller is authenticating
+// as the realm service account itself), client_credentials grant is used — Keycloak
+// service accounts have no password and cannot use the password grant.
+// For all other callers the password grant is used as usual.
 func (c *keycloakClient) Login(ctx context.Context, username, password string) (TokenResponse, error) {
 	form := url.Values{}
-	form.Set("grant_type", "password")
-	form.Set("client_id", c.cfg.ClientID)
-	form.Set("client_secret", c.cfg.ClientSecret)
-	form.Set("username", username)
-	form.Set("password", password)
+	if username == c.cfg.ClientID {
+		form.Set("grant_type", "client_credentials")
+		form.Set("client_id", username)
+		form.Set("client_secret", password)
+	} else {
+		form.Set("grant_type", "password")
+		form.Set("client_id", c.cfg.ClientID)
+		form.Set("client_secret", c.cfg.ClientSecret)
+		form.Set("username", username)
+		form.Set("password", password)
+	}
 	return c.postForm(ctx, c.tokenURL(), form)
 }
 

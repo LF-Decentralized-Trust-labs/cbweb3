@@ -14,10 +14,9 @@ import (
 )
 
 const (
-	listParticipantsMethod            = "/compliance.v1.ComplianceService/ListParticipants"
-	upsertParticipantMethod           = "/compliance.v1.ComplianceService/UpsertParticipant"
-	issueParticipantCertificateMethod = "/compliance.v1.ComplianceService/IssueParticipantCertificate"
-	signParticipantCSRMethod          = "/compliance.v1.ComplianceService/SignParticipantCSR"
+	listParticipantsMethod        = "/compliance.v1.ComplianceService/ListParticipants"
+	upsertParticipantMethod       = "/compliance.v1.ComplianceService/UpsertParticipant"
+	signParticipantCSRMethod      = "/compliance.v1.ComplianceService/SignParticipantCSR"
 	approveKYCMethod                  = "/compliance.v1.ComplianceService/ApproveKYC"
 	manageParticipantStatusMethod     = "/compliance.v1.ComplianceService/ManageParticipantStatus"
 	getAuditLogsMethod                = "/compliance.v1.ComplianceService/GetAuditLogs"
@@ -71,12 +70,6 @@ type CircuitBreakerStatus struct {
 	IsPaused   bool   `json:"is_paused"`
 	LastUpdate string `json:"last_update"`
 	UpdatedBy  string `json:"updated_by"`
-}
-
-type IssuedCertificate struct {
-	CertPEM    string `json:"cert_pem"`
-	PrivKeyPEM string `json:"priv_key_pem"`
-	ExpiresAt  string `json:"expires_at"`
 }
 
 // SignedCSRResult holds the CA-signed certificate returned from a CSR submission.
@@ -133,21 +126,6 @@ func (a *GRPCAdapter) RegisterParticipant(ctx context.Context, p Participant) er
 	}{Participant: p}
 	var resp struct{ Success bool `json:"success"` }
 	return a.cc.Invoke(ctx, upsertParticipantMethod, &req, &resp, grpc.ForceCodec(a.codec))
-}
-
-func (a *GRPCAdapter) IssueParticipantCertificate(ctx context.Context, userID, role, institutionName, cnpj string) (IssuedCertificate, error) {
-	req := struct {
-		UserID          string `json:"user_id"`
-		Role            string `json:"role"`
-		InstitutionName string `json:"institution_name"`
-		CNPJ            string `json:"cnpj"`
-	}{UserID: userID, Role: role, InstitutionName: institutionName, CNPJ: cnpj}
-
-	var resp IssuedCertificate
-	if err := a.cc.Invoke(ctx, issueParticipantCertificateMethod, &req, &resp, grpc.ForceCodec(a.codec)); err != nil {
-		return IssuedCertificate{}, err
-	}
-	return resp, nil
 }
 
 // SignParticipantCSR submits a PKCS#10 CSR to the compliance-orchestrator for

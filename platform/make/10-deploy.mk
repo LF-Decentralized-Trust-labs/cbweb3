@@ -3,6 +3,9 @@ DEPLOY_DIR := deploy/$(TARGET)
 BACKEND_COMPOSE_SPOKE_A := backend/docker-compose-backend.spoke-a.yaml
 BACKEND_COMPOSE_SPOKE_B := backend/docker-compose-backend.spoke-b.yaml
 BACKEND_COMPOSE_HUB := backend/docker-compose-backend.hub.yaml
+BACKEND_ENV_SPOKE_A := backend/config/.env.infra.spoke-a
+BACKEND_ENV_SPOKE_B := backend/config/.env.infra.spoke-b
+BACKEND_ENV_HUB := backend/config/.env.infra.hub
 
 deploy.create-shared-network:
 	@docker network inspect cbweb3_network >/dev/null 2>&1 || docker network create cbweb3_network
@@ -58,7 +61,7 @@ deploy.up-infra: deploy.create-shared-network
 	init_done_marker="KEYCLOAK_INIT_DONE"; \
 	max_attempts=60; \
 	attempt=1; \
-	until docker logs "$$keycloak_container" 2>&1 | rg -q "$$init_done_marker"; do \
+	until docker logs "$$keycloak_container" 2>&1 | grep -Fq "$$init_done_marker"; do \
 		if [ "$$attempt" -ge "$$max_attempts" ]; then \
 			echo "ERROR: Keycloak init script did not finish within 180 seconds. Check logs: docker logs $$keycloak_container"; \
 			exit 1; \
@@ -91,39 +94,39 @@ deploy.down-backend:
 	@$(MAKE) deploy.down-backend-domains
 
 deploy.validate-backend-spoke-a:
-	@docker compose -f $(BACKEND_COMPOSE_SPOKE_A) config -q
+	@docker compose --env-file $(BACKEND_ENV_SPOKE_A) -f $(BACKEND_COMPOSE_SPOKE_A) config -q
 
 deploy.validate-backend-spoke-b:
-	@docker compose -f $(BACKEND_COMPOSE_SPOKE_B) config -q
+	@docker compose --env-file $(BACKEND_ENV_SPOKE_B) -f $(BACKEND_COMPOSE_SPOKE_B) config -q
 
 deploy.validate-backend-hub:
-	@docker compose -f $(BACKEND_COMPOSE_HUB) config -q
+	@docker compose --env-file $(BACKEND_ENV_HUB) -f $(BACKEND_COMPOSE_HUB) config -q
 
 deploy.validate-backend-domains: deploy.validate-backend-spoke-a deploy.validate-backend-spoke-b deploy.validate-backend-hub
 
 deploy.up-backend-spoke-a:
 	@echo "Starting backend spoke-a services..."
-	@docker compose -f $(BACKEND_COMPOSE_SPOKE_A) up -d
+	@docker compose --env-file $(BACKEND_ENV_SPOKE_A) -f $(BACKEND_COMPOSE_SPOKE_A) up -d
 
 deploy.down-backend-spoke-a:
 	@echo "Stopping backend spoke-a services..."
-	@docker compose -f $(BACKEND_COMPOSE_SPOKE_A) down -v
+	@docker compose --env-file $(BACKEND_ENV_SPOKE_A) -f $(BACKEND_COMPOSE_SPOKE_A) down -v
 
 deploy.up-backend-spoke-b:
 	@echo "Starting backend spoke-b services..."
-	@docker compose -f $(BACKEND_COMPOSE_SPOKE_B) up -d
+	@docker compose --env-file $(BACKEND_ENV_SPOKE_B) -f $(BACKEND_COMPOSE_SPOKE_B) up -d
 
 deploy.down-backend-spoke-b:
 	@echo "Stopping backend spoke-b services..."
-	@docker compose -f $(BACKEND_COMPOSE_SPOKE_B) down -v
+	@docker compose --env-file $(BACKEND_ENV_SPOKE_B) -f $(BACKEND_COMPOSE_SPOKE_B) down -v
 
 deploy.up-backend-hub:
 	@echo "Starting backend hub services..."
-	@docker compose -f $(BACKEND_COMPOSE_HUB) up -d
+	@docker compose --env-file $(BACKEND_ENV_HUB) -f $(BACKEND_COMPOSE_HUB) up -d
 
 deploy.down-backend-hub:
 	@echo "Stopping backend hub services..."
-	@docker compose -f $(BACKEND_COMPOSE_HUB) down -v
+	@docker compose --env-file $(BACKEND_ENV_HUB) -f $(BACKEND_COMPOSE_HUB) down -v
 
 deploy.up-backend-domains: deploy.up-backend-spoke-a deploy.up-backend-spoke-b deploy.up-backend-hub
 

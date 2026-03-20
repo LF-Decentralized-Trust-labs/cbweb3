@@ -31,10 +31,6 @@ func Setup(app *fiber.App, deps Dependencies) {
 	authGroup.Post("/login", deps.AuthHandler.Login)
 	authGroup.Post("/refresh", deps.AuthHandler.Refresh)
 	authGroup.Post("/logout", middleware.RequireBearerToken(deps.AuthProvider), deps.AuthHandler.Logout)
-	authGroup.Post("/onboarding",
-		middleware.RequireBearerToken(deps.AuthProvider),
-		deps.AuthHandler.Onboarding,
-	)
 	// PKI login step 2: submit signed nonce + X.509 certificate
 	authGroup.Post("/wallet/bind", deps.AuthHandler.WalletBind)
 
@@ -58,7 +54,6 @@ func Setup(app *fiber.App, deps Dependencies) {
 	// Participant registration and registry
 	govGroup.Post("/participants", deps.GovernanceHandler.RegisterParticipant)
 	govGroup.Get("/registry", deps.GovernanceHandler.GetRegistry)
-	govGroup.Post("/registry/credential", deps.GovernanceHandler.IssueCredential)
 	govGroup.Post("/registry/csr", deps.GovernanceHandler.SubmitCSR)
 
 	// Account management

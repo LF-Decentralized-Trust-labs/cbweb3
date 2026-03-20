@@ -29,10 +29,6 @@ func (s *governanceComplianceStub) ListParticipants(context.Context, string, str
 	return nil, nil
 }
 
-func (s *governanceComplianceStub) IssueParticipantCertificate(context.Context, string, string, string, string) (complianceadapter.IssuedCertificate, error) {
-	return complianceadapter.IssuedCertificate{}, nil
-}
-
 func (s *governanceComplianceStub) SignParticipantCSR(context.Context, string, string, string, string, string) (complianceadapter.SignedCSRResult, error) {
 	return complianceadapter.SignedCSRResult{}, nil
 }

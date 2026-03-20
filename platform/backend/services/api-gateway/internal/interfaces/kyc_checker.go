@@ -20,24 +20,12 @@ type KYCManager interface {
 	ProvisionParticipant(ctx context.Context, subject string, status domain.KYCStatus) error
 }
 
-// ParticipantRegistrar handles participant onboarding via identity gRPC.
-type ParticipantRegistrar interface {
-	RegisterParticipant(ctx context.Context, accessToken, country, bankCode, role, institutionName string) (RegisterParticipantResult, error)
-}
-
-// RegisterParticipantResult holds the response from participant registration.
-type RegisterParticipantResult struct {
-	UserID        string
-	DID           string
-	WalletAddress string
-}
-
 // OnboardParticipantResult holds the response from the administrative
 // onboarding flow (POST /compliance/register).
 type OnboardParticipantResult struct {
 	UserID        string
 	WalletAddress string
-	DID           string
+	CertPEM       string
 	TxHash        string
 }
 

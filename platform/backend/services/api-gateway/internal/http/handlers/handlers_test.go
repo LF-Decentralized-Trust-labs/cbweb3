@@ -73,17 +73,6 @@ func (s kycManagerStub) ProvisionParticipant(_ context.Context, _ string, _ doma
 	return s.err
 }
 
-// participantRegistrarStub implements KYCChecker + KYCManager + ParticipantRegistrar.
-type participantRegistrarStub struct {
-	kycManagerStub
-	regResult interfaces.RegisterParticipantResult
-	regErr    error
-}
-
-func (s participantRegistrarStub) RegisterParticipant(_ context.Context, _, _, _, _, _ string) (interfaces.RegisterParticipantResult, error) {
-	return s.regResult, s.regErr
-}
-
 // participantOnboarderStub implements KYCChecker + KYCManager + ParticipantOnboarder.
 type participantOnboarderStub struct {
 	kycManagerStub
@@ -303,160 +292,6 @@ func TestAuthHandlerLogoutMissingToken(t *testing.T) {
 	}
 }
 
-// ---------- Onboarding tests ----------
-
-func TestOnboardingGovernanceBypassKYC(t *testing.T) {
-	t.Parallel()
-	stub := participantRegistrarStub{
-		kycManagerStub: kycManagerStub{status: domain.KYCPending},
-		regResult: interfaces.RegisterParticipantResult{
-			UserID: "cb-001", DID: "did:lac:cb-001", WalletAddress: "0xABC",
-		},
-	}
-	handler := NewAuthHandler(authProviderStub{}, stub)
-	app := fiber.New()
-	app.Post("/auth/onboarding", func(c *fiber.Ctx) error {
-		c.Locals("claims", domain.TokenClaims{Subject: "cb-001", Roles: []string{domain.RoleGovernance}})
-		return handler.Onboarding(c)
-	})
-
-	body, _ := json.Marshal(map[string]string{
-		"country": "BR", "bank_code": "0000", "role": domain.RoleGovernance, "institution_name": "BCB",
-	})
-	req := httptest.NewRequest(http.MethodPost, "/auth/onboarding", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer test-token")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", resp.StatusCode)
-	}
-}
-
-func TestOnboardingKYCApprovedProceed(t *testing.T) {
-	t.Parallel()
-	stub := participantRegistrarStub{
-		kycManagerStub: kycManagerStub{status: domain.KYCApproved},
-		regResult: interfaces.RegisterParticipantResult{
-			UserID: "bank-001", DID: "did:lac:bank-001", WalletAddress: "0xDEF",
-		},
-	}
-	handler := NewAuthHandler(authProviderStub{}, stub)
-	app := fiber.New()
-	app.Post("/auth/onboarding", func(c *fiber.Ctx) error {
-		c.Locals("claims", domain.TokenClaims{Subject: "bank-001", Roles: []string{domain.RoleCommercialBank}})
-		return handler.Onboarding(c)
-	})
-
-	body, _ := json.Marshal(map[string]string{"role": "COMMERCIAL_BANK"})
-	req := httptest.NewRequest(http.MethodPost, "/auth/onboarding", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer test-token")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", resp.StatusCode)
-	}
-}
-
-func TestOnboardingKYCActiveProceed(t *testing.T) {
-	t.Parallel()
-	stub := participantRegistrarStub{
-		kycManagerStub: kycManagerStub{status: domain.KYCActive},
-		regResult: interfaces.RegisterParticipantResult{
-			UserID: "bank-active", DID: "did:lac:bank-active", WalletAddress: "0xAAA",
-		},
-	}
-	handler := NewAuthHandler(authProviderStub{}, stub)
-	app := fiber.New()
-	app.Post("/auth/onboarding", func(c *fiber.Ctx) error {
-		c.Locals("claims", domain.TokenClaims{Subject: "bank-active", Roles: []string{domain.RoleCommercialBank}})
-		return handler.Onboarding(c)
-	})
-
-	body, _ := json.Marshal(map[string]string{"role": "COMMERCIAL_BANK"})
-	req := httptest.NewRequest(http.MethodPost, "/auth/onboarding", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer test-token")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201 for ACTIVE, got %d", resp.StatusCode)
-	}
-}
-
-func TestOnboardingKYCPendingReturns202(t *testing.T) {
-	t.Parallel()
-	stub := participantRegistrarStub{
-		kycManagerStub: kycManagerStub{status: domain.KYCPending},
-	}
-	handler := NewAuthHandler(authProviderStub{}, stub)
-	app := fiber.New()
-	app.Post("/auth/onboarding", func(c *fiber.Ctx) error {
-		c.Locals("claims", domain.TokenClaims{Subject: "bank-002", Roles: []string{domain.RoleCommercialBank}})
-		return handler.Onboarding(c)
-	})
-
-	body, _ := json.Marshal(map[string]string{"role": "COMMERCIAL_BANK"})
-	req := httptest.NewRequest(http.MethodPost, "/auth/onboarding", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d", resp.StatusCode)
-	}
-}
-
-func TestOnboardingKYCFrozenReturns403(t *testing.T) {
-	t.Parallel()
-	stub := participantRegistrarStub{
-		kycManagerStub: kycManagerStub{status: domain.KYCFrozen},
-	}
-	handler := NewAuthHandler(authProviderStub{}, stub)
-	app := fiber.New()
-	app.Post("/auth/onboarding", func(c *fiber.Ctx) error {
-		c.Locals("claims", domain.TokenClaims{Subject: "bank-003", Roles: []string{domain.RoleCommercialBank}})
-		return handler.Onboarding(c)
-	})
-
-	body, _ := json.Marshal(map[string]string{"role": "COMMERCIAL_BANK"})
-	req := httptest.NewRequest(http.MethodPost, "/auth/onboarding", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d", resp.StatusCode)
-	}
-}
-
-func TestOnboardingMissingClaims(t *testing.T) {
-	t.Parallel()
-	handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{})
-	app := fiber.New()
-	app.Post("/auth/onboarding", handler.Onboarding)
-
-	body, _ := json.Marshal(map[string]string{"role": "COMMERCIAL_BANK"})
-	req := httptest.NewRequest(http.MethodPost, "/auth/onboarding", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", resp.StatusCode)
-	}
-}
-
 func TestOpenAPIWalletBindEndpointIsActive(t *testing.T) {
 	t.Parallel()
 
@@ -666,7 +501,7 @@ func TestRegisterParticipantSuccess(t *testing.T) {
 		result: interfaces.OnboardParticipantResult{
 			UserID:        "user-uuid-123",
 			WalletAddress: "0xABCD",
-			DID:           "did:lac:openprotest:0xabcd",
+			CertPEM:       "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----",
 			TxHash:        "0xtx",
 		},
 	}

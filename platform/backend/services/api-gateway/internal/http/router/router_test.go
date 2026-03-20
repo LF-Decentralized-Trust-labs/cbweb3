@@ -58,7 +58,7 @@ func (s kycCheckerStub) GetStatus(_ string) domain.KYCStatus {
 	return domain.KYCApproved
 }
 
-// fullKYCManagerStub implements KYCChecker + KYCManager + ParticipantRegistrar + ParticipantOnboarder.
+// fullKYCManagerStub implements KYCChecker + KYCManager + ParticipantOnboarder.
 type fullKYCManagerStub struct{}
 
 func (s fullKYCManagerStub) GetStatus(_ string) domain.KYCStatus { return domain.KYCApproved }
@@ -69,10 +69,6 @@ func (s fullKYCManagerStub) GetKYCStatus(_ context.Context, _ string) (domain.KY
 
 func (s fullKYCManagerStub) ProvisionParticipant(_ context.Context, _ string, _ domain.KYCStatus) error {
 	return nil
-}
-
-func (s fullKYCManagerStub) RegisterParticipant(_ context.Context, _, _, _, _, _ string) (interfaces.RegisterParticipantResult, error) {
-	return interfaces.RegisterParticipantResult{}, nil
 }
 
 func (s fullKYCManagerStub) OnboardParticipant(_ context.Context, _ interfaces.OnboardParticipantRequest) (interfaces.OnboardParticipantResult, error) {

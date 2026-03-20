@@ -73,16 +73,16 @@ func TestOnboardParticipant_Success(t *testing.T) {
 		client: &mockClientConn{
 			invokeFunc: func(_ context.Context, method string, args, reply any, _ ...grpc.CallOption) error {
 				assert.Equal(t, onboardParticipantMethod, method)
-				out := reply.(*struct {
-					UserID        string `json:"user_id"`
-					WalletAddress string `json:"wallet_address,omitempty"`
-					DID           string `json:"did,omitempty"`
-					TxHash        string `json:"tx_hash,omitempty"`
-				})
-				out.UserID = "new-user-uuid"
-				out.WalletAddress = "0xABCD"
-				out.DID = "did:lac:openprotest:0xabcd"
-				out.TxHash = "0xtxhash"
+			out := reply.(*struct {
+				UserID        string `json:"user_id"`
+				WalletAddress string `json:"wallet_address,omitempty"`
+				CertPEM       string `json:"cert_pem,omitempty"`
+				TxHash        string `json:"tx_hash,omitempty"`
+			})
+			out.UserID = "new-user-uuid"
+			out.WalletAddress = "0xABCD"
+			out.CertPEM = "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----"
+			out.TxHash = "0xtxhash"
 				return nil
 			},
 		},
@@ -97,7 +97,7 @@ func TestOnboardParticipant_Success(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "new-user-uuid", result.UserID)
 	assert.Equal(t, "0xABCD", result.WalletAddress)
-	assert.Equal(t, "did:lac:openprotest:0xabcd", result.DID)
+	assert.Equal(t, "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----", result.CertPEM)
 	assert.Equal(t, "0xtxhash", result.TxHash)
 }
 

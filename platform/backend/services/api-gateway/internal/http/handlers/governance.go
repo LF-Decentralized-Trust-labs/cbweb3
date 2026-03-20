@@ -16,7 +16,6 @@ import (
 type GovernanceCompliance interface {
 	RegisterParticipant(ctx context.Context, p complianceadapter.Participant) error
 	ListParticipants(ctx context.Context, statusFilter, search string) ([]complianceadapter.Participant, error)
-	IssueParticipantCertificate(ctx context.Context, userID, role, institutionName, cnpj string) (complianceadapter.IssuedCertificate, error)
 	SignParticipantCSR(ctx context.Context, csrPEM, userID, role, institutionName, cnpj string) (complianceadapter.SignedCSRResult, error)
 	ApproveKYC(ctx context.Context, subject, actorSubject, reason string) (complianceadapter.ApproveKYCResult, error)
 	ManageParticipantStatus(ctx context.Context, subject, statusVal, reason string) error
@@ -67,34 +66,6 @@ func (h *GovernanceHandler) GetRegistry(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"participants": participants})
-}
-
-// IssueCredential handles POST /api/v1/governance/registry/credential.
-// Issues an X.509 certificate for a registered participant.
-func (h *GovernanceHandler) IssueCredential(c *fiber.Ctx) error {
-	var req struct {
-		UserID          string `json:"user_id"`
-		Role            string `json:"role"`
-		InstitutionName string `json:"institution_name"`
-		CNPJ            string `json:"cnpj"`
-	}
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
-	}
-	if req.UserID == "" || req.Role == "" || req.InstitutionName == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user_id, role, and institution_name are required"})
-	}
-
-	issued, err := h.compliance.IssueParticipantCertificate(c.UserContext(), req.UserID, req.Role, req.InstitutionName, req.CNPJ)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"user_id":     req.UserID,
-		"cert_pem":    issued.CertPEM,
-		"priv_key_pem": issued.PrivKeyPEM,
-		"expires_at":  issued.ExpiresAt,
-	})
 }
 
 // SubmitCSR handles POST /api/v1/governance/registry/csr.

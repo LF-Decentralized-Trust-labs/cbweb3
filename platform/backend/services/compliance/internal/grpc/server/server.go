@@ -2,16 +2,12 @@ package server
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"time"
-
-	gethcrypto "github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/domain"
@@ -231,9 +227,12 @@ func (s *complianceService) IssueParticipantCertificate(ctx context.Context, req
 	}, nil
 }
 
-// SignParticipantCSR signs a PKCS#10 CSR submitted by a participant, derives
-// the on-chain wallet address from CB_PRIVATE_KEY, upserts the participant
-// record and (best-effort) registers on the blockchain.
+// SignParticipantCSR signs a PKCS#10 CSR submitted by a participant, updates
+// only the certificate fields in the participant record, and (best-effort)
+// registers on the blockchain using the wallet address set during onboarding.
+//
+// The participant's wallet address is set by the KMS during OnboardParticipant
+// and must be preserved here — it is NOT derived from CB_PRIVATE_KEY.
 func (s *complianceService) SignParticipantCSR(ctx context.Context, req *contract.SignParticipantCSRRequest) (*contract.SignParticipantCSRResponse, error) {
 	if req.CSRPEM == "" || req.UserID == "" || req.Role == "" {
 		return nil, status.Error(codes.InvalidArgument, "csr_pem, user_id, and role are required")
@@ -247,20 +246,39 @@ func (s *complianceService) SignParticipantCSR(ctx context.Context, req *contrac
 		return nil, status.Errorf(codes.InvalidArgument, "sign CSR: %v", err)
 	}
 
-	walletAddr, err := deriveWalletFromPrivKey()
-	if err != nil {
-		log.Printf("WARN: SignParticipantCSR: could not derive wallet address: %v", err)
+	// Fetch existing record to preserve the KMS-generated wallet address and
+	// other fields set during onboarding that are not present in the CSR request.
+	existing, found, fetchErr := s.repo.GetParticipantByUser(ctx, req.UserID)
+	if fetchErr != nil {
+		return nil, status.Errorf(codes.Internal, "sign CSR: lookup participant: %v", fetchErr)
+	}
+	if !found {
+		return nil, status.Errorf(codes.NotFound, "participant %q not found; call POST /compliance/register first", req.UserID)
+	}
+	if existing.WalletAddress == "" {
+		log.Printf("WARN: SignParticipantCSR: participant %s has no wallet address — ApproveKYC will fail until wallet is set", req.UserID)
 	}
 
 	expiresAt := time.Now().UTC().AddDate(1, 0, 0).Format(time.RFC3339)
 
+	institutionName := req.InstitutionName
+	if institutionName == "" {
+		institutionName = existing.InstitutionName
+	}
+	cnpj := req.CNPJ
+	if cnpj == "" {
+		cnpj = existing.CNPJ
+	}
+
 	p := repository.Participant{
 		UserID:          req.UserID,
-		InstitutionName: req.InstitutionName,
-		CNPJ:            req.CNPJ,
+		InstitutionName: institutionName,
+		CNPJ:            cnpj,
+		BankCode:        existing.BankCode,
+		CountryCode:     existing.CountryCode,
 		Role:            req.Role,
-		Status:          string(domain.StatusPending),
-		WalletAddress:   walletAddr,
+		Status:          existing.Status,
+		WalletAddress:   existing.WalletAddress,
 		CertificateData: issued.CertPEM,
 	}
 	if t, err2 := time.Parse(time.RFC3339, expiresAt); err2 == nil {
@@ -270,8 +288,8 @@ func (s *complianceService) SignParticipantCSR(ctx context.Context, req *contrac
 		return nil, status.Errorf(codes.Internal, "upsert participant: %v", err)
 	}
 
-	if walletAddr != "" {
-		if _, err := s.blockchain.SetParticipant(ctx, walletAddr, req.Role, true); err != nil {
+	if existing.WalletAddress != "" {
+		if _, err := s.blockchain.SetParticipant(ctx, existing.WalletAddress, req.Role, true); err != nil {
 			log.Printf("WARN: SignParticipantCSR: on-chain registration failed (non-fatal): %v", err)
 		}
 	}
@@ -510,24 +528,6 @@ func actorFromCtx(ctx context.Context) string {
 	return ""
 }
 
-// deriveWalletFromPrivKey reads CB_PRIVATE_KEY from the environment and
-// returns the corresponding Ethereum wallet address. Returns an empty string
-// (non-fatal) when the variable is unset.
-func deriveWalletFromPrivKey() (string, error) {
-	raw := strings.TrimPrefix(os.Getenv("CB_PRIVATE_KEY"), "0x")
-	if raw == "" {
-		return "", nil
-	}
-	b, err := hex.DecodeString(raw)
-	if err != nil {
-		return "", fmt.Errorf("invalid CB_PRIVATE_KEY hex: %w", err)
-	}
-	privKey, err := gethcrypto.ToECDSA(b)
-	if err != nil {
-		return "", fmt.Errorf("invalid CB_PRIVATE_KEY ECDSA: %w", err)
-	}
-	return gethcrypto.PubkeyToAddress(privKey.PublicKey).Hex(), nil
-}
 
 func boolStr(b bool) string {
 	if b {

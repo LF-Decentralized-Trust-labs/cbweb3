@@ -170,12 +170,10 @@ func (h *ComplianceHandler) RegisterParticipant(c *fiber.Ctx) error {
 	resp := fiber.Map{
 		"userId": result.UserID,
 		"role":   body.Role,
+		"status": "PENDING",
 	}
 	if result.WalletAddress != "" {
 		resp["walletAddress"] = result.WalletAddress
-	}
-	if result.DID != "" {
-		resp["did"] = result.DID
 	}
 	if result.TxHash != "" {
 		resp["txHash"] = result.TxHash

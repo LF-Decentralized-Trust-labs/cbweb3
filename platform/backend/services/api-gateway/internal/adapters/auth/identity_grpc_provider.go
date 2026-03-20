@@ -62,7 +62,6 @@ type identityValidateTokenResponse struct {
 	Subject      string   `json:"subject"`
 	Issuer       string   `json:"issuer"`
 	Roles        []string `json:"roles"`
-	DID          string   `json:"did"`
 	Wallet       string   `json:"wallet"`
 	Country      string   `json:"country"`
 	BankID       string   `json:"bank_id"`
@@ -157,7 +156,6 @@ func (p *IdentityGRPCAuthProvider) Validate(ctx context.Context, token string) (
 		Subject:      out.Subject,
 		Issuer:       out.Issuer,
 		Roles:        out.Roles,
-		DID:          out.DID,
 		Wallet:       out.Wallet,
 		Country:      out.Country,
 		BankID:       out.BankID,

@@ -2,34 +2,24 @@
 package handlers
 
 import (
-	"errors"
 	"strings"
 
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 	"google.golang.org/grpc/status"
 )
 
-// AuthHandler implements authentication and onboarding endpoints.
+// AuthHandler implements authentication endpoints.
 type AuthHandler struct {
-	authProvider        interfaces.IAuthProvider
-	pkiAuthProvider     interfaces.IPKIAuthProvider // optional; nil if PKI is not enabled
-	kycChecker          interfaces.KYCChecker
-	kycManager          interfaces.KYCManager
-	participantRegistrar interfaces.ParticipantRegistrar
+	authProvider    interfaces.IAuthProvider
+	pkiAuthProvider interfaces.IPKIAuthProvider // optional; nil if PKI is not enabled
+	kycChecker      interfaces.KYCChecker
+	kycManager      interfaces.KYCManager
 }
 
 type loginRequest struct {
 	ClientID     string `json:"clientId"`
 	ClientSecret string `json:"clientSecret"`
-}
-
-type onboardingRequest struct {
-	Country         string `json:"country"`
-	BankCode        string `json:"bank_code"`
-	Role            string `json:"role"`
-	InstitutionName string `json:"institution_name"`
 }
 
 // NewAuthHandler builds an AuthHandler with its required dependencies.
@@ -38,23 +28,18 @@ func NewAuthHandler(
 	kycChecker interfaces.KYCChecker,
 ) *AuthHandler {
 	var kycMgr interfaces.KYCManager
-	var participantReg interfaces.ParticipantRegistrar
 	var pkiProvider interfaces.IPKIAuthProvider
 	if mgr, ok := kycChecker.(interfaces.KYCManager); ok {
 		kycMgr = mgr
-	}
-	if reg, ok := kycChecker.(interfaces.ParticipantRegistrar); ok {
-		participantReg = reg
 	}
 	if pki, ok := authProvider.(interfaces.IPKIAuthProvider); ok {
 		pkiProvider = pki
 	}
 	return &AuthHandler{
-		authProvider:        authProvider,
-		pkiAuthProvider:     pkiProvider,
-		kycChecker:          kycChecker,
-		kycManager:          kycMgr,
-		participantRegistrar: participantReg,
+		authProvider:    authProvider,
+		pkiAuthProvider: pkiProvider,
+		kycChecker:      kycChecker,
+		kycManager:      kycMgr,
 	}
 }
 
@@ -118,74 +103,6 @@ func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "logout failed"})
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "logged out successfully"})
-}
-
-// Onboarding registers a new participant. It enforces the KYC gate for non-Central Bank actors.
-//
-// KYC Gate logic (REQ-COM-007):
-//   - CENTRAL_BANK role → bypass (they ARE the KYC authority)
-//   - APPROVED        → proceed with registration
-//   - PENDING         → 202 Accepted (awaiting central bank approval)
-//   - FROZEN/REVOKED/REJECTED → 403 Forbidden
-func (h *AuthHandler) Onboarding(c *fiber.Ctx) error {
-	rawClaims := c.Locals("claims")
-	claims, ok := rawClaims.(domain.TokenClaims)
-	if !ok || claims.Subject == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token claims"})
-	}
-
-	var req onboardingRequest
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
-	}
-
-	isCentralBank := containsRole(claims.Roles, domain.RoleGovernance)
-
-	if !isCentralBank && h.kycManager != nil {
-		kycStatus, err := h.kycManager.GetKYCStatus(c.UserContext(), claims.Subject)
-		if err != nil {
-			kycStatus = domain.KYCStatus(h.kycChecker.GetStatus(claims.Subject))
-		}
-		switch kycStatus {
-		case domain.KYCActive, domain.KYCApproved:
-			// proceed
-		case domain.KYCPending:
-			return c.Status(fiber.StatusAccepted).JSON(fiber.Map{
-				"message": "awaiting central bank approval",
-				"subject": claims.Subject,
-			})
-		default:
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"error":  "participant is not eligible for onboarding",
-				"status": string(kycStatus),
-			})
-		}
-	}
-
-	if h.participantRegistrar == nil {
-		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "registration not available"})
-	}
-
-	result, err := h.participantRegistrar.RegisterParticipant(
-		c.UserContext(),
-		strings.TrimPrefix(c.Get("Authorization"), "Bearer "),
-		req.Country,
-		req.BankCode,
-		req.Role,
-		req.InstitutionName,
-	)
-	if err != nil {
-		if errors.Is(err, domain.ErrWalletAlreadyBound) {
-			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
-		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "onboarding failed"})
-	}
-
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"userId":        result.UserID,
-		"did":           result.DID,
-		"walletAddress": result.WalletAddress,
-	})
 }
 
 // containsRole checks if a role is in the claims roles list.

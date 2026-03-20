@@ -101,6 +101,8 @@ func (s *identityService) Login(ctx context.Context, req *contract.LoginRequest)
 	return &contract.LoginResponse{
 		AccessToken:  tr.AccessToken,
 		RefreshToken: tr.RefreshToken,
+		TokenType:    tr.TokenType,
+		ExpiresIn:    int32(tr.ExpiresIn),
 	}, nil
 }
 
@@ -112,6 +114,8 @@ func (s *identityService) RefreshToken(ctx context.Context, req *contract.Refres
 	return &contract.RefreshTokenResponse{
 		AccessToken:  tr.AccessToken,
 		RefreshToken: tr.RefreshToken,
+		TokenType:    tr.TokenType,
+		ExpiresIn:    int32(tr.ExpiresIn),
 	}, nil
 }
 
@@ -272,7 +276,6 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *contract.
 			return nil, status.Errorf(codes.Internal, "onboard: creating kms key: %v", kmsErr)
 		}
 		resp.WalletAddress = keyInfo.Address
-		resp.DID = keyInfo.DID
 	}
 
 	// 4. Optionally register on-chain.
@@ -284,21 +287,13 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *contract.
 		resp.TxHash = txHash
 	}
 
-	// 4b. Issue PKI certificate for roles that require it.
-	if domain.RequiresPKI(req.Role) {
-		issued, certErr := s.compliance.IssueParticipantCertificate(ctx, userID, req.Role, req.InstitutionName, req.BankCode)
-		if certErr != nil {
-			log.Printf("WARN: onboard: issue certificate for %s: %v (continuing)", userID, certErr)
-		} else {
-			resp.DID = issued.CertPEM // store cert PEM as the "identity credential"
-		}
-	}
-
 	// 5. Persist participant record.
+	// CertificateData is intentionally empty here — the certificate is issued
+	// separately via POST /governance/registry/csr (Modalidade B, preferred)
+	// or POST /governance/registry/credential (Modalidade A).
 	if upsertErr := s.compliance.UpsertParticipant(ctx, complianceclient.Participant{
 		UserID:          userID,
 		WalletAddress:   resp.WalletAddress,
-		CertificateData: resp.DID,
 		CountryCode:     req.Country,
 		BankCode:        req.BankCode,
 		Role:            req.Role,

@@ -26,7 +26,6 @@ type TokenClaims struct {
 	Issuer       string
 	Scope        string
 	Roles        []string
-	DID          string
 	Wallet       string
 	Country      string
 	BankID       string
