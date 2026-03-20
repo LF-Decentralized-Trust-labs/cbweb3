@@ -11,9 +11,7 @@ import {IdentityRegistryLibrary} from "../src/libraries/IdentityRegistryLibrary.
 /// @dev Implements tests for onboarding, RBAC, and status management.
 contract IdentityRegistryTest is Test {
     /// @dev Local event redeclarations for vm.expectEmit assertions (Forge pattern).
-    event ParticipantRegistered(
-        address indexed account, IdentityRegistryLibrary.ParticipantRole role, string name
-    );
+    event ParticipantRegistered(address indexed account, IdentityRegistryLibrary.ParticipantRole role, string name);
     event IdentityUpdated(
         address indexed account,
         IdentityRegistryLibrary.KycStatus oldStatus,
@@ -203,9 +201,7 @@ contract IdentityRegistryTest is Test {
     function test_RegisterParticipant_EmitsEvent() public {
         vm.prank(admin);
         vm.expectEmit(true, true, false, true);
-        emit ParticipantRegistered(
-            bankA, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, BANK_NAME
-        );
+        emit ParticipantRegistered(bankA, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, BANK_NAME);
         registry.registerParticipant(
             bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
         );

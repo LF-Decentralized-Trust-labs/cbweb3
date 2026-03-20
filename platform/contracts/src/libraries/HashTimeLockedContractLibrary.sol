@@ -24,5 +24,4 @@ library HashTimeLockedContractLibrary {
         bytes32 secret;
         HTLCState state;
     }
-
 }

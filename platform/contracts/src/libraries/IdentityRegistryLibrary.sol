@@ -35,5 +35,4 @@ library IdentityRegistryLibrary {
         bytes32 zkPointer;
         uint256 lastUpdate;
     }
-
 }

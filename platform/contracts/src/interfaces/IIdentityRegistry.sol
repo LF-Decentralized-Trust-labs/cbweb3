@@ -8,9 +8,7 @@ import {IdentityRegistryLibrary} from "../libraries/IdentityRegistryLibrary.sol"
 /// @dev Standardizes how external modules (AMM, HTLC) interact with identity data.
 interface IIdentityRegistry {
     /// @notice Emitted when a new institution is onboarded to the network.
-    event ParticipantRegistered(
-        address indexed account, IdentityRegistryLibrary.ParticipantRole role, string name
-    );
+    event ParticipantRegistered(address indexed account, IdentityRegistryLibrary.ParticipantRole role, string name);
 
     /// @notice Emitted when an institution's status is modified by governance.
     event IdentityUpdated(
