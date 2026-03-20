@@ -9,7 +9,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -137,6 +136,9 @@ func (p *IdentityGRPCAuthProvider) Logout(ctx context.Context, accessToken strin
 	if err := p.client.Invoke(ctx, identityRevokeTokenMethod, req, &out, grpc.ForceCodec(p.codec)); err != nil {
 		return domain.ErrInvalidToken
 	}
+	if !out.Success {
+		return domain.ErrInvalidToken
+	}
 	return nil
 }
 
@@ -145,9 +147,6 @@ func (p *IdentityGRPCAuthProvider) Validate(ctx context.Context, token string) (
 	req := &identityValidateTokenRequest{AccessToken: token}
 	out := &identityValidateTokenResponse{}
 	if err := p.client.Invoke(ctx, identityValidateTokenMethod, req, out, grpc.ForceCodec(p.codec)); err != nil {
-		if st, ok := status.FromError(err); ok && st.Code() != 0 {
-			return domain.TokenClaims{}, domain.ErrInvalidToken
-		}
 		return domain.TokenClaims{}, domain.ErrInvalidToken
 	}
 	return domain.TokenClaims{
