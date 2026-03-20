@@ -36,8 +36,10 @@ up-backend-domains: deploy.up-backend-domains
 down-backend-domains: deploy.down-backend-domains
 validate-backend-domains: deploy.validate-backend-domains
 test-api-gateway: deploy.test-api-gateway
+test-auth: deploy.test-auth
+test-compliance: deploy.test-compliance
 test-identity: deploy.test-identity
 test-data-access: deploy.test-data-access
 test-services: deploy.test-services
 
-.PHONY: gen-pki gen-pki-hub gen-pki-spoke-a gen-pki-spoke-b check-pki clean-pki gen-pki-commercial-banks check-pki-commercial-banks clean-pki-commercial-banks up-hub up-spoke-a up-spoke-b up-besu up-infra up up-minimal down-hub down-spoke-a down-spoke-b down-besu down-infra down down-minimal up-backend down-backend up-backend-spoke-a down-backend-spoke-a up-backend-spoke-b down-backend-spoke-b up-backend-hub down-backend-hub up-backend-domains down-backend-domains validate-backend-domains test-api-gateway test-identity test-data-access test-services
+.PHONY: gen-pki gen-pki-hub gen-pki-spoke-a gen-pki-spoke-b check-pki clean-pki gen-pki-commercial-banks check-pki-commercial-banks clean-pki-commercial-banks up-hub up-spoke-a up-spoke-b up-besu up-infra up up-minimal down-hub down-spoke-a down-spoke-b down-besu down-infra down down-minimal up-backend down-backend up-backend-spoke-a down-backend-spoke-a up-backend-spoke-b down-backend-spoke-b up-backend-hub down-backend-hub up-backend-domains down-backend-domains validate-backend-domains test-api-gateway test-auth test-compliance test-identity test-data-access test-services

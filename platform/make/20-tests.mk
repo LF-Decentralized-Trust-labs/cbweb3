@@ -2,14 +2,20 @@ deploy.test-api-gateway:
 	@echo "Running api-gateway tests..."
 	@cd ./backend/services/api-gateway && go test ./...
 
+deploy.test-auth:
+	@echo "Running auth tests (including E2E)..."
+	@cd ./backend/services/auth && go test ./...
+
+deploy.test-compliance:
+	@echo "Running compliance tests..."
+	@cd ./backend/services/compliance && go test ./...
+
 deploy.test-identity:
-	@echo "Running identity tests (including E2E)..."
-	@cd ./backend/services/identity && go test ./...
+	@$(MAKE) deploy.test-auth
 
 deploy.test-data-access:
-	@echo "Running data-access tests..."
-	@cd ./backend/services/data-access && go test ./...
+	@$(MAKE) deploy.test-compliance
 
-deploy.test-services: deploy.test-data-access deploy.test-identity deploy.test-api-gateway
+deploy.test-services: deploy.test-compliance deploy.test-auth deploy.test-api-gateway
 
-.PHONY: deploy.test-api-gateway deploy.test-identity deploy.test-data-access deploy.test-services
+.PHONY: deploy.test-api-gateway deploy.test-auth deploy.test-compliance deploy.test-identity deploy.test-data-access deploy.test-services
