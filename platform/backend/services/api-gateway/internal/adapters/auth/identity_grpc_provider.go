@@ -135,9 +135,7 @@ func (p *IdentityGRPCAuthProvider) Logout(ctx context.Context, accessToken strin
 		Success bool `json:"success"`
 	}
 	if err := p.client.Invoke(ctx, identityRevokeTokenMethod, req, &out, grpc.ForceCodec(p.codec)); err != nil {
-		if st, ok := status.FromError(err); ok && st.Code() != 0 {
-			return domain.ErrInvalidToken
-		}
+		return domain.ErrInvalidToken
 	}
 	return nil
 }
