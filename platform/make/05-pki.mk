@@ -72,8 +72,8 @@ pki.gen-spoke-b:
 	@echo "==> Spoke B (BCB-B) CA"
 	$(call gen_ca,$(PKI_DIR)/spoke-b-ca.key,SpokeB,$(PKI_DIR)/spoke-b-ca.crt,/CN=CBWeb3-SpokeB-CA/O=BCB-B/C=BR)
 
-pki.gen-all: pki.gen-hub pki.gen-spoke-a pki.gen-spoke-b
-	@echo "==> All CA credentials generated in $(PKI_DIR)/"
+pki.gen-all: pki.gen-hub pki.gen-spoke-a pki.gen-spoke-b pki.gen-commercial-banks
+	@echo "==> All PKI credentials generated in $(PKI_DIR)/"
 
 pki.gen-commercial-bank-%:
 	@echo "==> Commercial Bank PKI: $*"
@@ -82,7 +82,7 @@ pki.gen-commercial-bank-%:
 pki.gen-commercial-banks: $(COMMERCIAL_BANK_GEN_TARGETS)
 	@echo "==> Commercial bank certificates generated in $(PKI_DIR)/"
 
-pki.check:
+pki.check: pki.check-commercial-banks
 	@echo "==> PKI certificate status ($(PKI_DIR)/):"
 	@for f in hub-ca.key hub-ca.crt spoke-a-ca.key spoke-a-ca.crt spoke-b-ca.key spoke-b-ca.crt; do \
 		if [ -f "$(PKI_DIR)/$$f" ]; then \

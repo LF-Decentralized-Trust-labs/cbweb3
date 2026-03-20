@@ -38,8 +38,36 @@ deploy.down-besu: deploy.down-hub deploy.down-spoke-a deploy.down-spoke-b
 deploy.up-infra: deploy.create-shared-network
 	@echo "Starting Compose Services (Keycloak, Postgres)..."
 	@docker compose -f $(DEPLOY_DIR)/compose.yml up -d
-	@echo "Waiting 10 seconds for Keycloak startup..."
-	@sleep 10
+	@echo "Waiting for Keycloak readiness (timeout: 120s)..."
+	@keycloak_port="$${KEYCLOAK_PORT:-8081}"; \
+	keycloak_url="http://localhost:$$keycloak_port/realms/master"; \
+	max_attempts=40; \
+	attempt=1; \
+	until curl -fsS "$$keycloak_url" >/dev/null 2>&1; do \
+		if [ "$$attempt" -ge "$$max_attempts" ]; then \
+			echo "ERROR: Keycloak did not become ready at $$keycloak_url within 120 seconds."; \
+			exit 1; \
+		fi; \
+		echo "  [$$attempt/$$max_attempts] waiting for $$keycloak_url..."; \
+		attempt=$$((attempt + 1)); \
+		/bin/sleep 3; \
+	done; \
+	echo "Keycloak is ready at $$keycloak_url."
+	@echo "Waiting for Keycloak init script completion (timeout: 180s)..."
+	@keycloak_container="$${KEYCLOAK_CONTAINER_NAME:-cbweb3-keycloak}"; \
+	init_done_marker="Configuração concluída. Keycloak está em execução."; \
+	max_attempts=60; \
+	attempt=1; \
+	until docker logs "$$keycloak_container" 2>&1 | rg -q "$$init_done_marker"; do \
+		if [ "$$attempt" -ge "$$max_attempts" ]; then \
+			echo "ERROR: Keycloak init script did not finish within 180 seconds. Check logs: docker logs $$keycloak_container"; \
+			exit 1; \
+		fi; \
+		echo "  [$$attempt/$$max_attempts] waiting for init completion in $$keycloak_container logs..."; \
+		attempt=$$((attempt + 1)); \
+		/bin/sleep 3; \
+	done; \
+	echo "Keycloak init script finished."
 
 deploy.down-infra:
 	@echo "Stopping Compose Services..."
