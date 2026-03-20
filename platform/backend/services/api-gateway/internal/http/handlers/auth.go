@@ -147,7 +147,7 @@ func (h *AuthHandler) Onboarding(c *fiber.Ctx) error {
 			kycStatus = domain.KYCStatus(h.kycChecker.GetStatus(claims.Subject))
 		}
 		switch kycStatus {
-		case domain.KYCApproved:
+		case domain.KYCActive, domain.KYCApproved:
 			// proceed
 		case domain.KYCPending:
 			return c.Status(fiber.StatusAccepted).JSON(fiber.Map{

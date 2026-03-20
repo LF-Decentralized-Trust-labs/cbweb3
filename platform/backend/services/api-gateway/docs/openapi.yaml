@@ -161,24 +161,55 @@ paths:
   /api/v1/auth/wallet/bind:
     post:
       tags: [Authentication]
-      summary: "[REMOVED] Wallet bind endpoint"
+      summary: Verify PKI login challenge and issue tokens
       description: >
-        This endpoint was removed. Wallet binding now happens internally during
-        onboarding in the identity service.
+        Step 2 of PKI authentication flow. The client submits:
+        user_id, the ECDSA signature (DER hex) of the login nonce, and the
+        participant X.509 certificate PEM issued by the Central Bank CA.
       operationId: walletBind
-      deprecated: true
       security:
         - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, nonce_signature_hex, cert_pem]
+              properties:
+                user_id:
+                  type: string
+                nonce_signature_hex:
+                  type: string
+                  description: DER-encoded ECDSA signature in hex format
+                cert_pem:
+                  type: string
+                  description: PEM-encoded participant certificate
       responses:
-        "410":
-          description: Endpoint removed
+        "200":
+          description: PKI verification successful
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorCodeResponse"
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: PKI verification failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: "wallet bind endpoint has been removed"
-                code: "GONE"
+                error: "PKI verification failed"
+        "501":
+          description: PKI authentication not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "PKI authentication not configured"
 
   /api/v1/compliance/kyc/status/{subject}:
     get:

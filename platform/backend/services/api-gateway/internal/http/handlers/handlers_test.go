@@ -8,6 +8,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
@@ -361,6 +363,34 @@ func TestOnboardingKYCApprovedProceed(t *testing.T) {
 	}
 }
 
+func TestOnboardingKYCActiveProceed(t *testing.T) {
+	t.Parallel()
+	stub := participantRegistrarStub{
+		kycManagerStub: kycManagerStub{status: domain.KYCActive},
+		regResult: interfaces.RegisterParticipantResult{
+			UserID: "bank-active", DID: "did:lac:bank-active", WalletAddress: "0xAAA",
+		},
+	}
+	handler := NewAuthHandler(authProviderStub{}, stub)
+	app := fiber.New()
+	app.Post("/auth/onboarding", func(c *fiber.Ctx) error {
+		c.Locals("claims", domain.TokenClaims{Subject: "bank-active", Roles: []string{domain.RoleCommercialBank}})
+		return handler.Onboarding(c)
+	})
+
+	body, _ := json.Marshal(map[string]string{"role": "COMMERCIAL_BANK"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/onboarding", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-token")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 for ACTIVE, got %d", resp.StatusCode)
+	}
+}
+
 func TestOnboardingKYCPendingReturns202(t *testing.T) {
 	t.Parallel()
 	stub := participantRegistrarStub{
@@ -424,6 +454,36 @@ func TestOnboardingMissingClaims(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestOpenAPIWalletBindEndpointIsActive(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("../../../docs/openapi.yaml")
+	if err != nil {
+		t.Fatalf("failed to read openapi.yaml: %v", err)
+	}
+	spec := string(data)
+	start := strings.Index(spec, "/api/v1/auth/wallet/bind:")
+	if start == -1 {
+		t.Fatalf("wallet/bind path missing from OpenAPI")
+	}
+	rest := spec[start:]
+	nextPath := strings.Index(rest, "\n  /")
+	section := rest
+	if nextPath != -1 {
+		section = rest[:nextPath]
+	}
+
+	if strings.Contains(section, "deprecated: true") {
+		t.Fatalf("wallet/bind endpoint must not be deprecated in OpenAPI")
+	}
+	if strings.Contains(section, "\"410\":") {
+		t.Fatalf("wallet/bind endpoint must not declare 410 Gone in OpenAPI")
+	}
+	if !strings.Contains(section, "\"200\":") {
+		t.Fatalf("wallet/bind endpoint must declare 200 success response in OpenAPI")
 	}
 }
 

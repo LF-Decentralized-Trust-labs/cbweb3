@@ -4,6 +4,9 @@ gen-pki-spoke-a: pki.gen-spoke-a
 gen-pki-spoke-b: pki.gen-spoke-b
 check-pki: pki.check
 clean-pki: pki.clean
+gen-pki-commercial-banks: pki.gen-commercial-banks
+check-pki-commercial-banks: pki.check-commercial-banks
+clean-pki-commercial-banks: pki.clean-commercial-banks
 
 up-hub: deploy.up-hub
 up-spoke-a: deploy.up-spoke-a
@@ -37,4 +40,4 @@ test-identity: deploy.test-identity
 test-data-access: deploy.test-data-access
 test-services: deploy.test-services
 
-.PHONY: gen-pki gen-pki-hub gen-pki-spoke-a gen-pki-spoke-b check-pki clean-pki up-hub up-spoke-a up-spoke-b up-besu up-infra up up-minimal down-hub down-spoke-a down-spoke-b down-besu down-infra down down-minimal up-backend down-backend up-backend-spoke-a down-backend-spoke-a up-backend-spoke-b down-backend-spoke-b up-backend-hub down-backend-hub up-backend-domains down-backend-domains validate-backend-domains test-api-gateway test-identity test-data-access test-services
+.PHONY: gen-pki gen-pki-hub gen-pki-spoke-a gen-pki-spoke-b check-pki clean-pki gen-pki-commercial-banks check-pki-commercial-banks clean-pki-commercial-banks up-hub up-spoke-a up-spoke-b up-besu up-infra up up-minimal down-hub down-spoke-a down-spoke-b down-besu down-infra down down-minimal up-backend down-backend up-backend-spoke-a down-backend-spoke-a up-backend-spoke-b down-backend-spoke-b up-backend-hub down-backend-hub up-backend-domains down-backend-domains validate-backend-domains test-api-gateway test-identity test-data-access test-services

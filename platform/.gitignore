@@ -62,3 +62,5 @@ deploy/local/hub-besu/tmpFiles/
 backend/config/pki/*.key
 backend/config/pki/*.crt
 backend/config/pki/*.pem
+backend/config/pki/*.srl
+backend/config/pki/*.csr
