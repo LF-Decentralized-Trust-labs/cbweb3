@@ -12,6 +12,14 @@ interface IAutomatedMarketMaker {
         address indexed user, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut
     );
 
+    /// @dev Custom errors for exact-output pricing and pool interactions.
+    error AMM__ZeroAddress();
+    error AMM__ZeroAmount();
+    error AMM__InvalidToken();
+    error AMM__InsufficientLiquidity();
+    error AMM__InsufficientOutputAmount();
+    error AMM__SlippageExceeded(uint256 requiredAmountIn, uint256 maxAmountIn);
+
     /// @notice Adds initial or subsequent liquidity to the pool.
     /// @param amountA The amount of token A to add.
     /// @param amountB The amount of token B to add.

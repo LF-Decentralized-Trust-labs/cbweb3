@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {HashTimeLockedContract} from "../src/HashTimeLockedContract.sol";
+import {IHashTimeLockedContract} from "../src/interfaces/IHashTimeLockedContract.sol";
 import {HashTimeLockedContractLibrary} from "../src/libraries/HashTimeLockedContractLibrary.sol";
 import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
 import {DeployHTLC} from "../script/HashTimeLockedContract.s.sol";
@@ -105,7 +106,7 @@ contract HashTimeLockedContractTest is Test {
         vm.startPrank(sender);
         htlc.lock(contractId, receiver, address(tCeBm), lockAmount, hashLock, timeLock);
 
-        vm.expectRevert(HashTimeLockedContractLibrary.HTLC__ContractAlreadyExists.selector);
+        vm.expectRevert(IHashTimeLockedContract.HTLC__ContractAlreadyExists.selector);
         htlc.lock(contractId, receiver, address(tCeBm), lockAmount, hashLock, timeLock);
         vm.stopPrank();
     }
@@ -115,7 +116,7 @@ contract HashTimeLockedContractTest is Test {
         bytes32 newContractId = keccak256("FX_AGREEMENT_INVALID_AMOUNT");
 
         vm.prank(sender);
-        vm.expectRevert(HashTimeLockedContractLibrary.HTLC__InvalidAmount.selector);
+        vm.expectRevert(IHashTimeLockedContract.HTLC__InvalidAmount.selector);
         htlc.lock(newContractId, receiver, address(tCeBm), 0, hashLock, timeLock);
     }
 
@@ -125,7 +126,7 @@ contract HashTimeLockedContractTest is Test {
         uint256 expiredTimeLock = block.timestamp;
 
         vm.prank(sender);
-        vm.expectRevert(HashTimeLockedContractLibrary.HTLC__TimeLockExpired.selector);
+        vm.expectRevert(IHashTimeLockedContract.HTLC__TimeLockExpired.selector);
         htlc.lock(newContractId, receiver, address(tCeBm), lockAmount, hashLock, expiredTimeLock);
     }
 
@@ -136,7 +137,7 @@ contract HashTimeLockedContractTest is Test {
 
         bytes32 wrongSecret = "wrong_secret";
 
-        vm.expectRevert(HashTimeLockedContractLibrary.HTLC__InvalidSecret.selector);
+        vm.expectRevert(IHashTimeLockedContract.HTLC__InvalidSecret.selector);
         htlc.settle(contractId, wrongSecret);
     }
 
@@ -144,7 +145,7 @@ contract HashTimeLockedContractTest is Test {
     function test_Revert_Settle_ContractNotLocked() public {
         bytes32 nonExistingContractId = keccak256("FX_AGREEMENT_NON_EXISTING_SETTLE");
 
-        vm.expectRevert(HashTimeLockedContractLibrary.HTLC__ContractNotLocked.selector);
+        vm.expectRevert(IHashTimeLockedContract.HTLC__ContractNotLocked.selector);
         htlc.settle(nonExistingContractId, secret);
     }
 
@@ -154,7 +155,7 @@ contract HashTimeLockedContractTest is Test {
         htlc.lock(contractId, receiver, address(tCeBm), lockAmount, hashLock, timeLock);
 
         /// @dev Attempt to refund immediately (before `vm.warp`)
-        vm.expectRevert(HashTimeLockedContractLibrary.HTLC__TimeLockNotExpired.selector);
+        vm.expectRevert(IHashTimeLockedContract.HTLC__TimeLockNotExpired.selector);
         htlc.refund(contractId);
     }
 
@@ -162,7 +163,7 @@ contract HashTimeLockedContractTest is Test {
     function test_Revert_Refund_ContractNotLocked() public {
         bytes32 nonExistingContractId = keccak256("FX_AGREEMENT_NON_EXISTING_REFUND");
 
-        vm.expectRevert(HashTimeLockedContractLibrary.HTLC__ContractNotLocked.selector);
+        vm.expectRevert(IHashTimeLockedContract.HTLC__ContractNotLocked.selector);
         htlc.refund(nonExistingContractId);
     }
 }

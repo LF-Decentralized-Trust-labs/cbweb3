@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {AutomatedMarketMaker} from "../src/AutomatedMarketMaker.sol";
-import {AutomatedMarketMakerLibrary} from "../src/libraries/AutomatedMarketMakerLibrary.sol";
+import {IAutomatedMarketMaker} from "../src/interfaces/IAutomatedMarketMaker.sol";
 import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
 import {DeployAMM} from "../script/AutomatedMarketMaker.s.sol";
 import {IAccessControl} from "@openzeppelin-contracts/access/IAccessControl.sol";
@@ -74,7 +74,7 @@ contract AutomatedMarketMakerTest is Test {
     /// @dev Test that adding liquidity reverts when amount is zero.
     function test_Revert_AddLiquidity_ZeroAmount() public {
         vm.prank(liquidityProvider);
-        vm.expectRevert(AutomatedMarketMakerLibrary.AMM__ZeroAmount.selector);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__ZeroAmount.selector);
         amm.addLiquidity(0, INITIAL_LIQUIDITY);
     }
 
@@ -94,7 +94,7 @@ contract AutomatedMarketMakerTest is Test {
 
     /// @dev Test that `getAmountIn` reverts when attempting to withdraw >= reserve.
     function test_Revert_GetAmountIn_InsufficientLiquidity() public {
-        vm.expectRevert(AutomatedMarketMakerLibrary.AMM__InsufficientLiquidity.selector);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InsufficientLiquidity.selector);
         amm.getAmountIn(1000, 1000, 1000);
     }
 
@@ -138,7 +138,7 @@ contract AutomatedMarketMakerTest is Test {
         vm.prank(swapper);
         vm.expectRevert(
             abi.encodeWithSelector(
-                AutomatedMarketMakerLibrary.AMM__SlippageExceeded.selector, calculatedAmountIn, maxAmountIn
+                IAutomatedMarketMaker.AMM__SlippageExceeded.selector, calculatedAmountIn, maxAmountIn
             )
         );
         amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOutDesired, maxAmountIn, swapper);
@@ -147,7 +147,7 @@ contract AutomatedMarketMakerTest is Test {
     /// @dev Test that swap reverts when invalid token pair is provided.
     function test_Revert_Swap_InvalidToken() public {
         vm.prank(swapper);
-        vm.expectRevert(AutomatedMarketMakerLibrary.AMM__InvalidToken.selector);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InvalidToken.selector);
         amm.swapTokensForExactTokens(address(tokenA), address(tokenA), 100, 100, swapper);
     }
 
@@ -201,7 +201,7 @@ contract AutomatedMarketMakerTest is Test {
         vm.prank(liquidityProvider);
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
 
-        vm.expectRevert(AutomatedMarketMakerLibrary.AMM__ZeroAmount.selector);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__ZeroAmount.selector);
         vm.prank(swapper);
         amm.swapTokensForExactTokens(address(tokenA), address(tokenB), 0, 100, swapper);
     }
@@ -234,13 +234,13 @@ contract AutomatedMarketMakerTest is Test {
 
     /// @dev Test that constructor reverts when tokenA is zero address.
     function test_Revert_Constructor_ZeroAddressTokenA() public {
-        vm.expectRevert(AutomatedMarketMakerLibrary.AMM__ZeroAddress.selector);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__ZeroAddress.selector);
         new AutomatedMarketMaker(address(0), address(tokenB), admin, governance);
     }
 
     /// @dev Test that constructor reverts when tokenB is zero address.
     function test_Revert_Constructor_ZeroAddressTokenB() public {
-        vm.expectRevert(AutomatedMarketMakerLibrary.AMM__ZeroAddress.selector);
+        vm.expectRevert(IAutomatedMarketMaker.AMM__ZeroAddress.selector);
         new AutomatedMarketMaker(address(tokenA), address(0), admin, governance);
     }
 }
