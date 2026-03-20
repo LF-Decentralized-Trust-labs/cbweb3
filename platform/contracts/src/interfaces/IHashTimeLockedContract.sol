@@ -24,6 +24,14 @@ interface IHashTimeLockedContract {
     /// @notice Emitted when the time-lock expires and funds are returned to the sender.
     event LogHTLCRefunded(bytes32 indexed contractId);
 
+    /// @dev Custom errors for gas-efficient HTLC failure paths.
+    error HTLC__ContractAlreadyExists();
+    error HTLC__ContractNotLocked();
+    error HTLC__InvalidSecret();
+    error HTLC__TimeLockNotExpired();
+    error HTLC__TimeLockExpired();
+    error HTLC__InvalidAmount();
+
     /// @notice Locks the specified amount of tCeBm tokens into the contract.
     /// @param contractId Unique identifier for the agreement.
     /// @param receiver The address of the beneficiary.

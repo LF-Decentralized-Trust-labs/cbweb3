@@ -24,12 +24,4 @@ library HashTimeLockedContractLibrary {
         bytes32 secret;
         HTLCState state;
     }
-
-    /// @dev Custom errors for gas optimization
-    error HTLC__ContractAlreadyExists();
-    error HTLC__ContractNotLocked();
-    error HTLC__InvalidSecret();
-    error HTLC__TimeLockNotExpired();
-    error HTLC__TimeLockExpired();
-    error HTLC__InvalidAmount();
 }

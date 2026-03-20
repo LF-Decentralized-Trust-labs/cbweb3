@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {DeployCBWeb3} from "../script/CBWeb3.s.sol";
+import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
 import {HashTimeLockedContract} from "../src/HashTimeLockedContract.sol";
 import {HashTimeLockedContractLibrary} from "../src/libraries/HashTimeLockedContractLibrary.sol";
@@ -64,22 +65,37 @@ contract DeployCBWeb3Test is Test {
         /// @dev Act
         deployScript.run();
 
+        IdentityRegistry identityRegistry = deployScript.identityRegistry();
         TokenizedCentralBankMoney tokenBrl = deployScript.tokenBrl();
         TokenizedCentralBankMoney tokenEur = deployScript.tokenEur();
         HashTimeLockedContract htlc = deployScript.htlc();
         AutomatedMarketMaker amm = deployScript.amm();
 
         /// @dev Assert: All contracts deployed
+        assertTrue(address(identityRegistry) != address(0), "IdentityRegistry was not deployed");
         assertTrue(address(tokenBrl) != address(0), "TokenBRL was not deployed");
         assertTrue(address(tokenEur) != address(0), "TokenEUR was not deployed");
         assertTrue(address(htlc) != address(0), "HTLC was not deployed");
         assertTrue(address(amm) != address(0), "AMM was not deployed");
 
         /// @dev Assert: Contracts have bytecode
+        assertGt(address(identityRegistry).code.length, 0, "IdentityRegistry has no runtime bytecode");
         assertGt(address(tokenBrl).code.length, 0, "TokenBRL has no runtime bytecode");
         assertGt(address(tokenEur).code.length, 0, "TokenEUR has no runtime bytecode");
         assertGt(address(htlc).code.length, 0, "HTLC has no runtime bytecode");
         assertGt(address(amm).code.length, 0, "AMM has no runtime bytecode");
+
+        /// @dev Assert: IdentityRegistry RBAC configuration
+        assertTrue(
+            identityRegistry.hasRole(DEFAULT_ADMIN_ROLE, expectedAdmin), "IdentityRegistry admin role not granted"
+        );
+        assertTrue(
+            identityRegistry.hasRole(GOVERNANCE_ROLE, expectedAdmin), "IdentityRegistry governance role not granted"
+        );
+        assertFalse(
+            identityRegistry.hasRole(DEFAULT_ADMIN_ROLE, expectedDeployer),
+            "IdentityRegistry deployer should not be admin"
+        );
 
         /// @dev Assert: TokenBRL configuration
         assertEq(tokenBrl.name(), TOKEN_BRL_NAME, "TokenBRL name incorrect");

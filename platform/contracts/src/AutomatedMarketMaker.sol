@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import {IAutomatedMarketMaker} from "./interfaces/IAutomatedMarketMaker.sol";
-import {AutomatedMarketMakerLibrary} from "./libraries/AutomatedMarketMakerLibrary.sol";
 import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin-contracts/utils/ReentrancyGuard.sol";
@@ -32,7 +31,7 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
     /// @param _governance Address to receive GOVERNANCE_ROLE.
     constructor(address _tokenA, address _tokenB, address _admin, address _governance) {
         if (_tokenA == address(0) || _tokenB == address(0)) {
-            revert AutomatedMarketMakerLibrary.AMM__ZeroAddress();
+            revert AMM__ZeroAddress();
         }
 
         TOKEN_A = IERC20(_tokenA);
@@ -56,7 +55,7 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
     /// @inheritdoc IAutomatedMarketMaker
     function addLiquidity(uint256 amountA, uint256 amountB) external nonReentrant whenNotPaused {
         if (amountA == 0 || amountB == 0) {
-            revert AutomatedMarketMakerLibrary.AMM__ZeroAmount();
+            revert AMM__ZeroAmount();
         }
 
         // [INTERACTIONS] - Pull tokens from liquidity provider
@@ -77,7 +76,7 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
         returns (uint256 amountIn)
     {
         if (amountOut >= reserveOut) {
-            revert AutomatedMarketMakerLibrary.AMM__InsufficientLiquidity();
+            revert AMM__InsufficientLiquidity();
         }
 
         // Constant Product Formula for Exact Output: dx = (x * dy) / (y - dy)
@@ -97,13 +96,13 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
         address to
     ) external nonReentrant whenNotPaused returns (uint256 amountIn) {
         // [CHECKS]
-        if (amountOut == 0) revert AutomatedMarketMakerLibrary.AMM__ZeroAmount();
-        if (tokenIn == tokenOut) revert AutomatedMarketMakerLibrary.AMM__InvalidToken();
+        if (amountOut == 0) revert AMM__ZeroAmount();
+        if (tokenIn == tokenOut) revert AMM__InvalidToken();
 
         bool isAIn = tokenIn == address(TOKEN_A) && tokenOut == address(TOKEN_B);
         bool isBIn = tokenIn == address(TOKEN_B) && tokenOut == address(TOKEN_A);
 
-        if (!isAIn && !isBIn) revert AutomatedMarketMakerLibrary.AMM__InvalidToken();
+        if (!isAIn && !isBIn) revert AMM__InvalidToken();
 
         uint256 reserveIn = isAIn ? reserveA : reserveB;
         uint256 reserveOut = isAIn ? reserveB : reserveA;
@@ -113,7 +112,7 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
 
         // Slippage Protection
         if (amountIn > maxAmountIn) {
-            revert AutomatedMarketMakerLibrary.AMM__SlippageExceeded(amountIn, maxAmountIn);
+            revert AMM__SlippageExceeded(amountIn, maxAmountIn);
         }
 
         // [EFFECTS] - Optimistically update state
