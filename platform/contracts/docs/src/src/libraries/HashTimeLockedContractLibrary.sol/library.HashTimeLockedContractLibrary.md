@@ -1,50 +1,11 @@
 # HashTimeLockedContractLibrary
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/4cd0c0e1e4b2b4fc9cca7cd214e363327de8cb65/src/libraries/HashTimeLockedContractLibrary.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/c83cda8b94a84ac16a0315dd4782ddc7f679cccf/src/libraries/HashTimeLockedContractLibrary.sol)
 
 **Title:**
 HashTimeLockedContractLibrary
 
 Core data structures and custom errors for the Scenario A HTLC logic.
 
-
-## Errors
-### HTLC__ContractAlreadyExists
-Custom errors for gas optimization
-
-
-```solidity
-error HTLC__ContractAlreadyExists();
-```
-
-### HTLC__ContractNotLocked
-
-```solidity
-error HTLC__ContractNotLocked();
-```
-
-### HTLC__InvalidSecret
-
-```solidity
-error HTLC__InvalidSecret();
-```
-
-### HTLC__TimeLockNotExpired
-
-```solidity
-error HTLC__TimeLockNotExpired();
-```
-
-### HTLC__TimeLockExpired
-
-```solidity
-error HTLC__TimeLockExpired();
-```
-
-### HTLC__InvalidAmount
-
-```solidity
-error HTLC__InvalidAmount();
-```
 
 ## Structs
 ### LockDetails

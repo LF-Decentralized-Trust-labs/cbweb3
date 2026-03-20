@@ -1,5 +1,5 @@
 # TokenizedCentralBankMoney
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/4cd0c0e1e4b2b4fc9cca7cd214e363327de8cb65/src/TokenizedCentralBankMoney.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/c83cda8b94a84ac16a0315dd4782ddc7f679cccf/src/TokenizedCentralBankMoney.sol)
 
 **Inherits:**
 ERC20, AccessControl
