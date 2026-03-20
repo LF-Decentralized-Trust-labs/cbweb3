@@ -2,12 +2,16 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	gethcrypto "github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/domain"
@@ -34,6 +38,7 @@ type complianceServiceServer interface {
 	CreateAuditLog(ctx context.Context, req *contract.CreateAuditLogRequest) (*contract.CreateAuditLogResponse, error)
 	GetAuditLogs(ctx context.Context, req *contract.GetAuditLogsRequest) (*contract.GetAuditLogsResponse, error)
 	IssueParticipantCertificate(ctx context.Context, req *contract.IssueParticipantCertificateRequest) (*contract.IssueParticipantCertificateResponse, error)
+	SignParticipantCSR(ctx context.Context, req *contract.SignParticipantCSRRequest) (*contract.SignParticipantCSRResponse, error)
 	ApproveKYC(ctx context.Context, req *contract.ApproveKYCRequest) (*contract.ApproveKYCResponse, error)
 	ManageParticipantStatus(ctx context.Context, req *contract.ManageParticipantStatusRequest) (*contract.ManageParticipantStatusResponse, error)
 	GetCircuitBreakerStatus(ctx context.Context, req *struct{}) (*contract.GetCircuitBreakerStatusResponse, error)
@@ -59,8 +64,9 @@ func New(repo repository.Repository, ca *compliancepki.CA, bc registry.RegistryW
 			{MethodName: "ListParticipants", Handler: listParticipantsHandler},
 			{MethodName: "CreateAuditLog", Handler: createAuditLogHandler},
 			{MethodName: "GetAuditLogs", Handler: getAuditLogsHandler},
-			{MethodName: "IssueParticipantCertificate", Handler: issueParticipantCertificateHandler},
-			{MethodName: "ApproveKYC", Handler: approveKYCHandler},
+		{MethodName: "IssueParticipantCertificate", Handler: issueParticipantCertificateHandler},
+		{MethodName: "SignParticipantCSR", Handler: signParticipantCSRHandler},
+		{MethodName: "ApproveKYC", Handler: approveKYCHandler},
 			{MethodName: "ManageParticipantStatus", Handler: manageParticipantStatusHandler},
 			{MethodName: "GetCircuitBreakerStatus", Handler: getCircuitBreakerStatusHandler},
 			{MethodName: "ToggleCircuitBreaker", Handler: toggleCircuitBreakerHandler},
@@ -222,6 +228,62 @@ func (s *complianceService) IssueParticipantCertificate(ctx context.Context, req
 		CertPEM:    issued.CertPEM,
 		PrivKeyPEM: issued.PrivKeyPEM,
 		ExpiresAt:  expiresAt,
+	}, nil
+}
+
+// SignParticipantCSR signs a PKCS#10 CSR submitted by a participant, derives
+// the on-chain wallet address from CB_PRIVATE_KEY, upserts the participant
+// record and (best-effort) registers on the blockchain.
+func (s *complianceService) SignParticipantCSR(ctx context.Context, req *contract.SignParticipantCSRRequest) (*contract.SignParticipantCSRResponse, error) {
+	if req.CSRPEM == "" || req.UserID == "" || req.Role == "" {
+		return nil, status.Error(codes.InvalidArgument, "csr_pem, user_id, and role are required")
+	}
+	if s.ca == nil {
+		return nil, status.Error(codes.Unimplemented, "CA not configured")
+	}
+
+	issued, err := s.ca.SignCSR(req.CSRPEM)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "sign CSR: %v", err)
+	}
+
+	walletAddr, err := deriveWalletFromPrivKey()
+	if err != nil {
+		log.Printf("WARN: SignParticipantCSR: could not derive wallet address: %v", err)
+	}
+
+	expiresAt := time.Now().UTC().AddDate(1, 0, 0).Format(time.RFC3339)
+
+	p := repository.Participant{
+		UserID:          req.UserID,
+		InstitutionName: req.InstitutionName,
+		CNPJ:            req.CNPJ,
+		Role:            req.Role,
+		Status:          string(domain.StatusPending),
+		WalletAddress:   walletAddr,
+		CertificateData: issued.CertPEM,
+	}
+	if t, err2 := time.Parse(time.RFC3339, expiresAt); err2 == nil {
+		p.CertificateExpiry = &t
+	}
+	if err := s.repo.UpsertParticipant(ctx, p); err != nil {
+		return nil, status.Errorf(codes.Internal, "upsert participant: %v", err)
+	}
+
+	if walletAddr != "" {
+		if _, err := s.blockchain.SetParticipant(ctx, walletAddr, req.Role, true); err != nil {
+			log.Printf("WARN: SignParticipantCSR: on-chain registration failed (non-fatal): %v", err)
+		}
+	}
+
+	s.emitAudit(ctx, "SIGN_CSR", actorFromCtx(ctx), "", req.UserID,
+		correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS",
+		string(domain.CategoryCredential), string(domain.SeverityInfo),
+		fmt.Sprintf(`{"role":%q,"institution":%q}`, req.Role, req.InstitutionName))
+
+	return &contract.SignParticipantCSRResponse{
+		CertPEM:   issued.CertPEM,
+		ExpiresAt: expiresAt,
 	}, nil
 }
 
@@ -448,6 +510,25 @@ func actorFromCtx(ctx context.Context) string {
 	return ""
 }
 
+// deriveWalletFromPrivKey reads CB_PRIVATE_KEY from the environment and
+// returns the corresponding Ethereum wallet address. Returns an empty string
+// (non-fatal) when the variable is unset.
+func deriveWalletFromPrivKey() (string, error) {
+	raw := strings.TrimPrefix(os.Getenv("CB_PRIVATE_KEY"), "0x")
+	if raw == "" {
+		return "", nil
+	}
+	b, err := hex.DecodeString(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid CB_PRIVATE_KEY hex: %w", err)
+	}
+	privKey, err := gethcrypto.ToECDSA(b)
+	if err != nil {
+		return "", fmt.Errorf("invalid CB_PRIVATE_KEY ECDSA: %w", err)
+	}
+	return gethcrypto.PubkeyToAddress(privKey.PublicKey).Hex(), nil
+}
+
 func boolStr(b bool) string {
 	if b {
 		return "true"
@@ -553,6 +634,20 @@ func issueParticipantCertificateHandler(srv any, ctx context.Context, dec func(a
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: contract.IssueParticipantCertificateMethod}
 	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
 		return srv.(*complianceService).IssueParticipantCertificate(ctx, req.(*contract.IssueParticipantCertificateRequest))
+	})
+}
+
+func signParticipantCSRHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(contract.SignParticipantCSRRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(*complianceService).SignParticipantCSR(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: contract.SignParticipantCSRMethod}
+	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
+		return srv.(*complianceService).SignParticipantCSR(ctx, req.(*contract.SignParticipantCSRRequest))
 	})
 }
 

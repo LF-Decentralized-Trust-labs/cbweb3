@@ -6,7 +6,9 @@ services:
     container_name: "backend-compliance-hub"
     env_file:
       - path: ./config/.env.infra.hub
-        required: false     
+        required: false
+      - path: ./config/.env.infra.hub.example
+        required: false
     environment:
       COMPLIANCE_GRPC_PORT: "9093"
       POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_hub}?sslmode=disable"

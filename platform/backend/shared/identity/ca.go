@@ -96,6 +96,65 @@ func IssueCertificate(caCertPEM, caKeyPEM string, req CertRequest) (IssuedCert, 
 	return IssuedCert{CertPEM: certPEM, PrivKeyPEM: privKeyPEM}, nil
 }
 
+// SignCSR signs a PKCS#10 Certificate Signing Request using the provided CA.
+// The subject, organization, and public key from the CSR are preserved; the CA
+// enforces the validity period. Returns an IssuedCert with an empty PrivKeyPEM
+// because the participant retains their own private key.
+func SignCSR(caCertPEM, caKeyPEM, csrPEM string, validYears int) (IssuedCert, error) {
+	caCert, err := parseCertPEM(caCertPEM)
+	if err != nil {
+		return IssuedCert{}, fmt.Errorf("pki: parse CA cert: %w", err)
+	}
+
+	caKey, err := parseECPrivKeyPEM(caKeyPEM)
+	if err != nil {
+		return IssuedCert{}, fmt.Errorf("pki: parse CA key: %w", err)
+	}
+
+	block, _ := pem.Decode([]byte(csrPEM))
+	if block == nil {
+		return IssuedCert{}, fmt.Errorf("pki: failed to decode CSR PEM")
+	}
+
+	csr, err := x509.ParseCertificateRequest(block.Bytes)
+	if err != nil {
+		return IssuedCert{}, fmt.Errorf("pki: parse CSR: %w", err)
+	}
+
+	if err := csr.CheckSignature(); err != nil {
+		return IssuedCert{}, fmt.Errorf("pki: invalid CSR signature: %w", err)
+	}
+
+	if validYears <= 0 {
+		validYears = 1
+	}
+
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return IssuedCert{}, fmt.Errorf("pki: generate serial: %w", err)
+	}
+
+	now := time.Now().UTC()
+	template := &x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               csr.Subject,
+		NotBefore:             now,
+		NotAfter:              now.AddDate(validYears, 0, 0),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  false,
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, caCert, csr.PublicKey, caKey)
+	if err != nil {
+		return IssuedCert{}, fmt.Errorf("pki: sign CSR: %w", err)
+	}
+
+	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
+	return IssuedCert{CertPEM: certPEM, PrivKeyPEM: ""}, nil
+}
+
 // GenerateSelfSignedCA creates a new self-signed CA certificate and key pair.
 // Intended for the Central Bank's root CA bootstrap and for testing.
 func GenerateSelfSignedCA(commonName, org string, validYears int) (certPEM, keyPEM string, err error) {

@@ -7,6 +7,8 @@ services:
     env_file:
       - path: ./config/.env.infra.spoke-a
         required: false
+      - path: ./config/.env.infra.spoke-a.example
+        required: false
     environment:
       COMPLIANCE_GRPC_PORT: "9093"
       POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_spoke_a}?sslmode=disable"

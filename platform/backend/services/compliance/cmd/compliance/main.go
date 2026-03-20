@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -8,10 +9,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/bootstrap"
 	compliancepki "github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/pki"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/repository"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/grpc/server"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 )
 
 func main() {
@@ -43,6 +45,14 @@ func main() {
 	}
 
 	bc := newBlockchainClient()
+
+	if ca != nil {
+		ctx := context.Background()
+		if err := bootstrap.EnsureGovernanceParticipant(ctx, repo, bc, ca); err != nil {
+			log.Printf("WARN: governance participant bootstrap: %v", err)
+		}
+	}
+
 	grpcServer := server.New(repo, ca, bc)
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))

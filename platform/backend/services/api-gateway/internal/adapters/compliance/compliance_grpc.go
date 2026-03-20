@@ -17,6 +17,7 @@ const (
 	listParticipantsMethod            = "/compliance.v1.ComplianceService/ListParticipants"
 	upsertParticipantMethod           = "/compliance.v1.ComplianceService/UpsertParticipant"
 	issueParticipantCertificateMethod = "/compliance.v1.ComplianceService/IssueParticipantCertificate"
+	signParticipantCSRMethod          = "/compliance.v1.ComplianceService/SignParticipantCSR"
 	approveKYCMethod                  = "/compliance.v1.ComplianceService/ApproveKYC"
 	manageParticipantStatusMethod     = "/compliance.v1.ComplianceService/ManageParticipantStatus"
 	getAuditLogsMethod                = "/compliance.v1.ComplianceService/GetAuditLogs"
@@ -76,6 +77,12 @@ type IssuedCertificate struct {
 	CertPEM    string `json:"cert_pem"`
 	PrivKeyPEM string `json:"priv_key_pem"`
 	ExpiresAt  string `json:"expires_at"`
+}
+
+// SignedCSRResult holds the CA-signed certificate returned from a CSR submission.
+type SignedCSRResult struct {
+	CertPEM   string `json:"cert_pem"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 // GRPCAdapter is the api-gateway adapter for the compliance-orchestrator gRPC service.
@@ -139,6 +146,24 @@ func (a *GRPCAdapter) IssueParticipantCertificate(ctx context.Context, userID, r
 	var resp IssuedCertificate
 	if err := a.cc.Invoke(ctx, issueParticipantCertificateMethod, &req, &resp, grpc.ForceCodec(a.codec)); err != nil {
 		return IssuedCertificate{}, err
+	}
+	return resp, nil
+}
+
+// SignParticipantCSR submits a PKCS#10 CSR to the compliance-orchestrator for
+// signing by the CA. The participant record is created/updated automatically.
+func (a *GRPCAdapter) SignParticipantCSR(ctx context.Context, csrPEM, userID, role, institutionName, cnpj string) (SignedCSRResult, error) {
+	req := struct {
+		CSRPEM          string `json:"csr_pem"`
+		UserID          string `json:"user_id"`
+		Role            string `json:"role"`
+		InstitutionName string `json:"institution_name"`
+		CNPJ            string `json:"cnpj,omitempty"`
+	}{CSRPEM: csrPEM, UserID: userID, Role: role, InstitutionName: institutionName, CNPJ: cnpj}
+
+	var resp SignedCSRResult
+	if err := a.cc.Invoke(ctx, signParticipantCSRMethod, &req, &resp, grpc.ForceCodec(a.codec)); err != nil {
+		return SignedCSRResult{}, err
 	}
 	return resp, nil
 }

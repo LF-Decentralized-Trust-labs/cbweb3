@@ -59,6 +59,7 @@ func Setup(app *fiber.App, deps Dependencies) {
 	govGroup.Post("/participants", deps.GovernanceHandler.RegisterParticipant)
 	govGroup.Get("/registry", deps.GovernanceHandler.GetRegistry)
 	govGroup.Post("/registry/credential", deps.GovernanceHandler.IssueCredential)
+	govGroup.Post("/registry/csr", deps.GovernanceHandler.SubmitCSR)
 
 	// Account management
 	govGroup.Get("/accounts", deps.GovernanceHandler.GetAccounts)

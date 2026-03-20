@@ -21,6 +21,7 @@ const (
 
 	// PKI certificate issuance
 	IssueParticipantCertificateMethod = "/compliance.v1.ComplianceService/IssueParticipantCertificate"
+	SignParticipantCSRMethod           = "/compliance.v1.ComplianceService/SignParticipantCSR"
 
 	// Governance operations
 	ApproveKYCMethod              = "/compliance.v1.ComplianceService/ApproveKYC"
@@ -137,6 +138,23 @@ type IssueParticipantCertificateResponse struct {
 	ExpiresAt  string `json:"expires_at"`   // ISO-8601 UTC
 }
 
+// --- PKI CSR signing ---
+
+type SignParticipantCSRRequest struct {
+	// CSRPEM is a PEM-encoded PKCS#10 Certificate Signing Request.
+	CSRPEM          string `json:"csr_pem"`
+	UserID          string `json:"user_id"`
+	Role            string `json:"role"`
+	InstitutionName string `json:"institution_name"`
+	CNPJ            string `json:"cnpj,omitempty"`
+}
+
+type SignParticipantCSRResponse struct {
+	// CertPEM is the CA-signed participant certificate in PEM format.
+	CertPEM   string `json:"cert_pem"`
+	ExpiresAt string `json:"expires_at"` // ISO-8601 UTC
+}
+
 // --- Governance ---
 
 type ApproveKYCRequest struct {
@@ -207,6 +225,7 @@ type ComplianceServiceClient interface {
 	CreateAuditLog(ctx context.Context, in *CreateAuditLogRequest, opts ...grpc.CallOption) (*CreateAuditLogResponse, error)
 	GetAuditLogs(ctx context.Context, in *GetAuditLogsRequest, opts ...grpc.CallOption) (*GetAuditLogsResponse, error)
 	IssueParticipantCertificate(ctx context.Context, in *IssueParticipantCertificateRequest, opts ...grpc.CallOption) (*IssueParticipantCertificateResponse, error)
+	SignParticipantCSR(ctx context.Context, in *SignParticipantCSRRequest, opts ...grpc.CallOption) (*SignParticipantCSRResponse, error)
 	ManageParticipantStatus(ctx context.Context, in *ManageParticipantStatusRequest, opts ...grpc.CallOption) (*ManageParticipantStatusResponse, error)
 	GetCircuitBreakerStatus(ctx context.Context, opts ...grpc.CallOption) (*GetCircuitBreakerStatusResponse, error)
 	ToggleCircuitBreaker(ctx context.Context, in *ToggleCircuitBreakerRequest, opts ...grpc.CallOption) (*ToggleCircuitBreakerResponse, error)
@@ -250,6 +269,11 @@ func (c *complianceServiceClient) GetAuditLogs(ctx context.Context, in *GetAudit
 func (c *complianceServiceClient) IssueParticipantCertificate(ctx context.Context, in *IssueParticipantCertificateRequest, opts ...grpc.CallOption) (*IssueParticipantCertificateResponse, error) {
 	out := new(IssueParticipantCertificateResponse)
 	return out, c.cc.Invoke(ctx, IssueParticipantCertificateMethod, in, out, opts...)
+}
+
+func (c *complianceServiceClient) SignParticipantCSR(ctx context.Context, in *SignParticipantCSRRequest, opts ...grpc.CallOption) (*SignParticipantCSRResponse, error) {
+	out := new(SignParticipantCSRResponse)
+	return out, c.cc.Invoke(ctx, SignParticipantCSRMethod, in, out, opts...)
 }
 
 func (c *complianceServiceClient) ManageParticipantStatus(ctx context.Context, in *ManageParticipantStatusRequest, opts ...grpc.CallOption) (*ManageParticipantStatusResponse, error) {

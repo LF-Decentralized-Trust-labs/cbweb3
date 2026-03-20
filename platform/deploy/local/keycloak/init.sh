@@ -119,6 +119,8 @@ create_realm_and_client() {
     exit 1
   fi
 
+  add_attribute_mappers "$realm_name" "$client_uuid"
+
   local service_username
   service_username=$(
     /opt/keycloak/bin/kcadm.sh get "clients/${client_uuid}/service-account-user" -r "$realm_name" \
@@ -160,33 +162,103 @@ create_realm_and_client() {
   set_env_var "$domain_env_file" "KC_REALM" "$realm_name"
   set_env_var "$domain_env_file" "KC_CLIENT_ID" "$client_id"
   set_env_var "$domain_env_file" "KC_CLIENT_SECRET" "$client_secret"
+  set_env_var "$domain_env_file" "GOVERNANCE_USER_ID" "service-account-${client_id}"
 }
 
-refresh_hub_infra() {
-  echo "Recreating ${INFRA_ENV_HUB} from template and injecting Keycloak values..."
-  load_hub_defaults
-  copy_example_to_env "$INFRA_ENV_HUB_EXAMPLE" "$INFRA_ENV_HUB"
-  set_env_var "$INFRA_ENV_HUB" "KEYCLOAK_CONTAINER_NAME" "${KEYCLOAK_CONTAINER_NAME:-cbweb3-keycloak}"
-  set_env_var "$INFRA_ENV_HUB" "KEYCLOAK_PORT" "${KEYCLOAK_PORT:-8081}"
-  set_env_var "$INFRA_ENV_HUB" "KEYCLOAK_ENV_OUTPUT_DIR" "${KEYCLOAK_ENV_OUTPUT_DIR:-$CONFIG_DIR}"
-  set_env_var "$INFRA_ENV_HUB" "KC_BOOTSTRAP_ADMIN_USERNAME" "${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
-  set_env_var "$INFRA_ENV_HUB" "KC_BOOTSTRAP_ADMIN_PASSWORD" "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
-  set_env_var "$INFRA_ENV_HUB" "KC_BASE_PATH" "${KC_BASE_PATH:-$KC_BASE_PATH_VALUE}"
+create_platform_roles() {
+  local realm_name="$1"
+  shift
+  local roles=("$@")
+  echo -e "\n=== Provisioning roles in realm '${realm_name}' ==="
+  for role in "${roles[@]}"; do
+    if ! /opt/keycloak/bin/kcadm.sh get roles -r "$realm_name" --fields name \
+        | jq -e ".[] | select(.name==\"${role}\")" > /dev/null 2>&1; then
+      /opt/keycloak/bin/kcadm.sh create roles -r "$realm_name" -s "name=${role}"
+      echo "  Created role: ${role}"
+    else
+      echo "  Role already exists: ${role}"
+    fi
+  done
 }
+
+add_attribute_mappers() {
+  local realm_name="$1"
+  local client_uuid="$2"
+  local attrs=("wallet" "country" "bank_id" "privacy_group")
+  echo "  Adding attribute mappers for client in realm '${realm_name}'..."
+  for attr in "${attrs[@]}"; do
+    /opt/keycloak/bin/kcadm.sh create \
+      "clients/${client_uuid}/protocol-mappers/models" \
+      -r "$realm_name" \
+      -s "name=${attr}" \
+      -s protocol=openid-connect \
+      -s protocolMapper=oidc-usermodel-attribute-mapper \
+      -s consentRequired=false \
+      -s "config.user.attribute=${attr}" \
+      -s "config.claim.name=${attr}" \
+      -s "config.jsonType.label=String" \
+      -s "config.access.token.claim=true" \
+      -s "config.id.token.claim=true" \
+      -s "config.userinfo.token.claim=true" \
+      -s "config.multivalued=false" \
+      2>/dev/null || echo "    Mapper '${attr}' may already exist — skipping"
+  done
+}
+
+assign_governance_role_to_service_account() {
+  local realm_name="$1"
+  local client_id="$2"
+  echo "  Assigning ROLE_GOVERNANCE to service account of '${client_id}' in realm '${realm_name}'..."
+  local client_uuid
+  client_uuid=$(
+    /opt/keycloak/bin/kcadm.sh get clients -r "$realm_name" --fields id,clientId \
+      | jq -r ".[] | select(.clientId==\"${client_id}\") | .id"
+  )
+  if [[ -z "$client_uuid" ]]; then
+    echo "  Warning: client '${client_id}' not found in realm '${realm_name}', skipping"
+    return 0
+  fi
+  local service_username
+  service_username=$(
+    /opt/keycloak/bin/kcadm.sh get "clients/${client_uuid}/service-account-user" -r "$realm_name" \
+      | jq -r '.username'
+  )
+  if [[ -n "$service_username" && "$service_username" != "null" ]]; then
+    /opt/keycloak/bin/kcadm.sh add-roles \
+      --rolename ROLE_GOVERNANCE \
+      --uusername "$service_username" \
+      -r "$realm_name" || true
+    echo "  Assigned ROLE_GOVERNANCE to ${service_username}"
+  else
+    echo "  Warning: service account for '${client_id}' not found, skipping"
+  fi
+}
+
+SPOKE_ROLES=(ROLE_COMMERCIAL_BANK ROLE_TREASURY ROLE_SUPERVISOR ROLE_NOC ROLE_GOVERNANCE_OFFICER ROLE_GOVERNANCE)
 
 create_realm_and_client \
   "cbweb3-spoke-a" \
   "cbweb3-spoke-a-client" \
   "$INFRA_ENV_SPOKE_A" \
   "$INFRA_ENV_SPOKE_A_EXAMPLE"
+create_platform_roles "cbweb3-spoke-a" "${SPOKE_ROLES[@]}"
+assign_governance_role_to_service_account "cbweb3-spoke-a" "cbweb3-spoke-a-client"
 
 create_realm_and_client \
   "cbweb3-spoke-b" \
   "cbweb3-spoke-b-client" \
   "$INFRA_ENV_SPOKE_B" \
   "$INFRA_ENV_SPOKE_B_EXAMPLE"
+create_platform_roles "cbweb3-spoke-b" "${SPOKE_ROLES[@]}"
+assign_governance_role_to_service_account "cbweb3-spoke-b" "cbweb3-spoke-b-client"
 
-refresh_hub_infra
+create_realm_and_client \
+  "cbweb3" \
+  "cbweb3-auth" \
+  "$INFRA_ENV_HUB" \
+  "$INFRA_ENV_HUB_EXAMPLE"
+create_platform_roles "cbweb3" "ROLE_GOVERNANCE"
+assign_governance_role_to_service_account "cbweb3" "cbweb3-auth"
 
 echo -e "\nConfiguração concluída. Keycloak está em execução."
 

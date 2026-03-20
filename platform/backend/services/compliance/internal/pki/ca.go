@@ -47,6 +47,18 @@ func (ca *CA) CertPEM() string {
 	return ca.certPEM
 }
 
+// SignCSR signs a PKCS#10 Certificate Signing Request submitted by a
+// participant. The participant's public key and subject from the CSR are
+// preserved; the CA enforces the validity period. The caller is responsible
+// for persisting the returned CertPEM; no private key is returned.
+func (ca *CA) SignCSR(csrPEM string) (pki.IssuedCert, error) {
+	issued, err := pki.SignCSR(ca.certPEM, ca.keyPEM, csrPEM, 1)
+	if err != nil {
+		return pki.IssuedCert{}, fmt.Errorf("compliance/pki: sign CSR: %w", err)
+	}
+	return issued, nil
+}
+
 // IssueParticipantCert issues a signed X.509 certificate for a participant.
 func (ca *CA) IssueParticipantCert(userID, institutionName, role string) (pki.IssuedCert, error) {
 	issued, err := pki.IssueCertificate(ca.certPEM, ca.keyPEM, pki.CertRequest{
