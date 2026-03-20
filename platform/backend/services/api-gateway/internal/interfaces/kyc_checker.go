@@ -27,6 +27,9 @@ type OnboardParticipantResult struct {
 	WalletAddress string
 	CertPEM       string
 	TxHash        string
+	// ClientSecret is the one-time secret generated at onboarding.
+	// Must be stored by the caller; the server will not expose it again.
+	ClientSecret string
 }
 
 // ParticipantOnboarder handles administrative onboarding of new participants

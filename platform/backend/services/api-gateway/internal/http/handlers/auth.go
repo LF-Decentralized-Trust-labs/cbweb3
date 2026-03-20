@@ -12,7 +12,8 @@ import (
 // AuthHandler implements authentication endpoints.
 type AuthHandler struct {
 	authProvider    interfaces.IAuthProvider
-	pkiAuthProvider interfaces.IPKIAuthProvider // optional; nil if PKI is not enabled
+	pkiAuthProvider     interfaces.IPKIAuthProvider     // optional; nil if PKI is not enabled
+	clientSecretChanger interfaces.IClientSecretChanger // optional; nil if not supported
 	kycChecker      interfaces.KYCChecker
 	kycManager      interfaces.KYCManager
 }
@@ -29,17 +30,22 @@ func NewAuthHandler(
 ) *AuthHandler {
 	var kycMgr interfaces.KYCManager
 	var pkiProvider interfaces.IPKIAuthProvider
+	var secretChanger interfaces.IClientSecretChanger
 	if mgr, ok := kycChecker.(interfaces.KYCManager); ok {
 		kycMgr = mgr
 	}
 	if pki, ok := authProvider.(interfaces.IPKIAuthProvider); ok {
 		pkiProvider = pki
 	}
+	if sc, ok := authProvider.(interfaces.IClientSecretChanger); ok {
+		secretChanger = sc
+	}
 	return &AuthHandler{
-		authProvider:    authProvider,
-		pkiAuthProvider: pkiProvider,
-		kycChecker:      kycChecker,
-		kycManager:      kycMgr,
+		authProvider:        authProvider,
+		pkiAuthProvider:     pkiProvider,
+		clientSecretChanger: secretChanger,
+		kycChecker:          kycChecker,
+		kycManager:          kycMgr,
 	}
 }
 
@@ -47,16 +53,15 @@ func NewAuthHandler(
 //
 // Two flows are supported:
 //
-//  1. Service-account / password login (clientSecret non-empty):
-//     Delegates to the identity gRPC service and returns
-//     { "accessToken", "tokenType", "expiresIn" }.
+//  1. PKI nonce request (ROLE_COMMERCIAL_BANK / ROLE_TREASURY):
+//     clientSecret is validated as the first factor, then a short-lived nonce
+//     is issued. Returns { "nonce": "hex-64-chars" }.
+//     The client must sign the nonce with its X.509 private key and submit it
+//     via POST /auth/wallet/bind to complete PKI 2FA (step 2).
 //
-//  2. PKI nonce request (clientSecret empty, pkiAuthProvider configured):
-//     Issues a short-lived nonce for the supplied clientId (user UUID).
-//     Returns { "nonce": "hex-64-chars" }.
-//     The client must sign the nonce with its X.509 private key and submit
-//     it via POST /auth/wallet/bind to complete PKI 2FA (ROLE_COMMERCIAL_BANK,
-//     ROLE_TREASURY).
+//  2. Direct login (ROLE_GOVERNANCE, ROLE_SUPERVISOR, ROLE_NOC, etc.):
+//     clientId + clientSecret are forwarded to the identity service which
+//     delegates to Keycloak. Returns { "accessToken", "tokenType", "expiresIn" }.
 func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	var req loginRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -65,21 +70,32 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	if req.ClientID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientId is required"})
 	}
-
-	// PKI nonce challenge: clientSecret is empty → issue nonce for step 1 of PKI 2FA.
-	// Actual authentication is deferred to POST /auth/wallet/bind (step 2).
 	if req.ClientSecret == "" {
-		if h.pkiAuthProvider == nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientId and clientSecret are required"})
-		}
-		nonce, err := h.pkiAuthProvider.IssueLoginNonce(c.UserContext(), req.ClientID)
-		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "failed to issue login nonce"})
-		}
-		return c.Status(fiber.StatusOK).JSON(fiber.Map{"nonce": nonce})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientSecret is required"})
 	}
 
-	// Normal login: clientSecret provided → authenticate via identity service.
+	// Attempt PKI nonce flow first (ROLE_COMMERCIAL_BANK / ROLE_TREASURY).
+	// IssueLoginNonce validates the clientSecret and checks PKI role eligibility.
+	// If the participant is not found or does not require PKI, fall through to
+	// normal direct login.
+	if h.pkiAuthProvider != nil {
+		nonce, err := h.pkiAuthProvider.IssueLoginNonce(c.UserContext(), req.ClientID, req.ClientSecret)
+		if err == nil {
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{"nonce": nonce})
+		}
+		// Determine whether to fall through or reject hard.
+		if st, ok := status.FromError(err); ok {
+			msg := st.Message()
+			if msg != "participant not found" && msg != "PKI_NOT_REQUIRED" {
+				// Auth failure (invalid credentials, internal error) — reject.
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
+			}
+		}
+		// participant not found or PKI not required → fall through to direct login.
+	}
+
+	// Direct login: Central Bank (client_credentials via Keycloak service account)
+	// or other non-PKI roles (ROLE_SUPERVISOR, ROLE_NOC, ROLE_GOVERNANCE_OFFICER).
 	token, err := h.authProvider.Authenticate(c.UserContext(), req.ClientID, req.ClientSecret)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
@@ -175,6 +191,43 @@ func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
 		"tokenType":    token.TokenType,
 		"expiresIn":    token.ExpiresIn,
 	})
+}
+
+// ChangeClientSecret allows an authenticated user to rotate their clientSecret.
+// Requires a valid Bearer token; the user ID is extracted from the token claims.
+func (h *AuthHandler) ChangeClientSecret(c *fiber.Ctx) error {
+	if h.clientSecretChanger == nil {
+		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "client secret rotation not available"})
+	}
+
+	var body struct {
+		CurrentClientSecret string `json:"current_client_secret"`
+		NewClientSecret     string `json:"new_client_secret"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
+	}
+	if body.CurrentClientSecret == "" || body.NewClientSecret == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "current_client_secret and new_client_secret are required"})
+	}
+
+	authHeader := c.Get("Authorization")
+	rawToken := strings.TrimPrefix(authHeader, "Bearer ")
+	if rawToken == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "bearer token required"})
+	}
+	claims, err := h.authProvider.Validate(c.UserContext(), rawToken)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
+	}
+
+	if chErr := h.clientSecretChanger.ChangeClientSecret(c.UserContext(), claims.Subject, body.CurrentClientSecret, body.NewClientSecret); chErr != nil {
+		if st, ok := status.FromError(chErr); ok && st.Message() == "invalid current client secret" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid current client secret"})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "client secret rotation failed"})
+	}
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "client secret changed successfully"})
 }
 
 func containsRole(roles []string, role string) bool {

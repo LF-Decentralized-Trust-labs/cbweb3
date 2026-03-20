@@ -121,6 +121,7 @@ func (m *IdentityGRPCManager) OnboardParticipant(ctx context.Context, req interf
 		WalletAddress string `json:"wallet_address,omitempty"`
 		CertPEM       string `json:"cert_pem,omitempty"`
 		TxHash        string `json:"tx_hash,omitempty"`
+		ClientSecret  string `json:"client_secret,omitempty"`
 	}{}
 	if err := m.client.Invoke(ctx, onboardParticipantMethod, grpcReq, out, grpc.ForceCodec(m.codec)); err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
@@ -133,5 +134,6 @@ func (m *IdentityGRPCManager) OnboardParticipant(ctx context.Context, req interf
 		WalletAddress: out.WalletAddress,
 		CertPEM:       out.CertPEM,
 		TxHash:        out.TxHash,
+		ClientSecret:  out.ClientSecret,
 	}, nil
 }

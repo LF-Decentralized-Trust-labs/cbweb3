@@ -33,6 +33,8 @@ func Setup(app *fiber.App, deps Dependencies) {
 	authGroup.Post("/logout", middleware.RequireBearerToken(deps.AuthProvider), deps.AuthHandler.Logout)
 	// PKI login step 2: submit signed nonce + X.509 certificate
 	authGroup.Post("/wallet/bind", deps.AuthHandler.WalletBind)
+	// Client secret rotation (requires valid Bearer token)
+	authGroup.Post("/client-secret/change", middleware.RequireBearerToken(deps.AuthProvider), deps.AuthHandler.ChangeClientSecret)
 
 	// --- Compliance (KYC status, AML gate, onboarding, provisioning) ---
 	complianceGroup := app.Group("/api/v1/compliance", middleware.RequireBearerToken(deps.AuthProvider))

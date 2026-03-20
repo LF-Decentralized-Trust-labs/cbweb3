@@ -111,8 +111,9 @@ REGISTER_RESP=$(curl -s -X POST "$BASE_URL/compliance/register" \
 
 # FRONTEND (expected contract):
 # request:  username/email/role/institution_name/country/bank_code
-# response: userId + status (typically PENDING) + registration metadata
+# response: userId + status (typically PENDING) + clientSecret (ONE TIME) + registration metadata
 # note: existing username conflicts usually return 409.
+# SECURITY: clientSecret is returned ONLY at registration. Store it securely.
 
 BANK_USER_ID=$(echo "$REGISTER_RESP" | jq -r '.userId // empty')
 if [ -z "$BANK_USER_ID" ]; then
@@ -122,8 +123,18 @@ if [ -z "$BANK_USER_ID" ]; then
   exit 1
 fi
 
-echo "BANK_USER_ID: $BANK_USER_ID"
-echo "Status:       $(echo "$REGISTER_RESP" | jq -r '.status // "N/A"')"
+CLIENT_SECRET=$(echo "$REGISTER_RESP" | jq -r '.clientSecret // empty')
+if [ -z "$CLIENT_SECRET" ]; then
+  echo "ERROR: clientSecret not returned in registration response." >&2
+  echo "Response: $REGISTER_RESP" >&2
+  exit 1
+fi
+
+echo "BANK_USER_ID:  $BANK_USER_ID"
+echo "CLIENT_SECRET: $CLIENT_SECRET"
+echo "Status:        $(echo "$REGISTER_RESP" | jq -r '.status // "N/A"')"
+echo ""
+echo ">>> WARNING: save the CLIENT_SECRET above. It will NOT be recoverable after this point. <<<"
 
 # ---------------------------------------------------------------------------
 # [3] Submit bank-001 CSR
@@ -208,15 +219,19 @@ echo "KYC status: ${KYC_STATUS:-"(no status in response)"}"
 echo ""
 echo "=== [5/6] bank-001 PKI login - step 1: get nonce ==="
 
-# PKI roles (ROLE_COMMERCIAL_BANK) return { "nonce": "..." } instead of accessToken
+# PKI roles (ROLE_COMMERCIAL_BANK) return { "nonce": "..." } instead of accessToken.
+# clientSecret is the first factor: the server validates it before issuing the nonce.
 NONCE_RESP=$(curl -s -X POST "$BASE_URL/auth/login" \
   -H "Content-Type: application/json" \
-  -d "{\"clientId\": \"$BANK_USER_ID\", \"clientSecret\": \"\"}")
+  --data "$(jq -n \
+    --arg cid "$BANK_USER_ID" \
+    --arg sec "$CLIENT_SECRET" \
+    '{clientId: $cid, clientSecret: $sec}')")
 
 # FRONTEND (expected contract):
-# request:  { clientId: userId, clientSecret: "" }
+# request:  { clientId: userId, clientSecret: "<rawSecret from step 2>" }
 # response: { nonce }
-# note: nonce has a short TTL; if it expires, this step must be repeated.
+# note: nonce has a short TTL (5 min); if it expires, this step must be repeated.
 
 NONCE=$(echo "$NONCE_RESP" | jq -r '.nonce // empty')
 if [ -z "$NONCE" ]; then
@@ -277,7 +292,10 @@ echo ""
 echo "======================================================"
 echo "  Flow completed successfully"
 echo "======================================================"
-echo "  BANK_USER_ID : $BANK_USER_ID"
-echo "  CB_TOKEN     : ${CB_TOKEN:0:60}..."
-echo "  BANK_TOKEN   : ${BANK_TOKEN:0:60}..."
+echo "  BANK_USER_ID  : $BANK_USER_ID"
+echo "  CLIENT_SECRET : $CLIENT_SECRET"
+echo "  CB_TOKEN      : ${CB_TOKEN:0:60}..."
+echo "  BANK_TOKEN    : ${BANK_TOKEN:0:60}..."
 echo "======================================================"
+echo ""
+echo "  >>> Store the CLIENT_SECRET above. It is shown only once. <<<"

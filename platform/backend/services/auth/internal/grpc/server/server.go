@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"log"
@@ -53,6 +54,7 @@ type identityServiceServer interface {
 	OnboardParticipant(ctx context.Context, req *contract.OnboardParticipantRequest) (*contract.OnboardParticipantResponse, error)
 	IssueLoginNonce(ctx context.Context, req *contract.IssueLoginNonceRequest) (*contract.IssueLoginNonceResponse, error)
 	VerifyPKILogin(ctx context.Context, req *contract.VerifyPKILoginRequest) (*contract.VerifyPKILoginResponse, error)
+	ChangeClientSecret(ctx context.Context, req *contract.ChangeClientSecretRequest) (*contract.ChangeClientSecretResponse, error)
 }
 
 // New builds a configured gRPC server and registers all identity handlers.
@@ -83,6 +85,7 @@ func New(kc keycloak.Client, kmsProvider kms.Provider, compliance complianceclie
 			{MethodName: "OnboardParticipant", Handler: onboardParticipantHandler},
 			{MethodName: "IssueLoginNonce", Handler: issueLoginNonceHandler},
 			{MethodName: "VerifyPKILogin", Handler: verifyPKILoginHandler},
+			{MethodName: "ChangeClientSecret", Handler: changeClientSecretHandler},
 		},
 		Streams:  []grpc.StreamDesc{},
 		Metadata: "identity.v1",
@@ -313,20 +316,21 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *contract.
 		return nil, status.Errorf(codes.Internal, "onboard: persisting participant: %v", upsertErr)
 	}
 
-	// 6. For PKI roles (ROLE_COMMERCIAL_BANK, ROLE_TREASURY), set the user's
-	//    Keycloak password to their UUID. VerifyPKILogin will later call:
-	//      GetUserUsername → Login(username, userID)
-	//    where password = userID (UUID). The actual authentication is proven by
-	//    PKI signature verification; the password only satisfies Keycloak's
-	//    credential requirement.
-	//    NOTE: UpdateUsername is intentionally skipped — the Keycloak realm has
-	//    the username field marked as read-only (error-user-attribute-read-only),
-	//    so VerifyPKILogin resolves the username dynamically via GetUserUsername.
-	if domain.RequiresPKI(req.Role) {
-		if pErr := s.keycloak.ResetPassword(ctx, adminToken, userID, userID); pErr != nil {
-			log.Printf("WARN: onboard: setting PKI password for %s: %v (non-fatal)", userID, pErr)
-		}
+	// 6. Generate a cryptographically secure clientSecret (256 bits, base64-encoded).
+	//    This is used as the first authentication factor in PKI login (IssueLoginNonce)
+	//    and as the credential for password-based roles.
+	//    The raw secret is returned ONCE in this response; Keycloak stores only the
+	//    Argon2 hash. It is not recoverable after this point.
+	rawBytes := make([]byte, 32)
+	if _, rndErr := rand.Read(rawBytes); rndErr != nil {
+		return nil, status.Errorf(codes.Internal, "onboard: generating client secret: %v", rndErr)
 	}
+	rawSecret := base64.StdEncoding.EncodeToString(rawBytes)
+
+	if pErr := s.keycloak.ResetPassword(ctx, adminToken, userID, rawSecret); pErr != nil {
+		log.Printf("WARN: onboard: setting password for %s: %v (non-fatal)", userID, pErr)
+	}
+	resp.ClientSecret = rawSecret
 
 	s.emitAudit(ctx, "ONBOARD_PARTICIPANT", userID, resp.WalletAddress, "", correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS")
 	return resp, nil
@@ -334,21 +338,55 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *contract.
 
 // --- Audit helper ---
 
-// IssueLoginNonce generates a short-lived nonce for PKI login step 1.
-// The caller (api-gateway) must forward this nonce to the client, which signs
-// it with its X.509 private key and sends it back via VerifyPKILogin.
+// IssueLoginNonce is PKI login step 1.
+// It validates the clientSecret (first factor via Keycloak), checks that the
+// user has a PKI role, then issues a short-lived nonce for the client to sign.
+// The clientSecret is stored alongside the nonce so that VerifyPKILogin can
+// authenticate with Keycloak in step 2 without asking for it again.
 func (s *identityService) IssueLoginNonce(ctx context.Context, req *contract.IssueLoginNonceRequest) (*contract.IssueLoginNonceResponse, error) {
 	if req.UserID == "" {
 		return nil, status.Error(codes.InvalidArgument, "user_id is required")
 	}
+	if req.ClientSecret == "" {
+		return nil, status.Error(codes.InvalidArgument, "client_secret is required")
+	}
 
+	// 0. Verify this is a PKI-enabled participant.
+	participant, found, lookupErr := s.compliance.GetParticipantByUser(ctx, req.UserID)
+	if lookupErr != nil {
+		return nil, status.Errorf(codes.Internal, "issue nonce: compliance lookup: %v", lookupErr)
+	}
+	if !found {
+		return nil, status.Error(codes.NotFound, "participant not found")
+	}
+	if !domain.RequiresPKI(participant.Role) {
+		return nil, status.Error(codes.PermissionDenied, "PKI_NOT_REQUIRED")
+	}
+
+	// 1. Validate clientSecret (first factor) via Keycloak.
+	adminToken, adminErr := s.keycloak.GetAdminToken(ctx)
+	if adminErr != nil {
+		return nil, status.Errorf(codes.Internal, "issue nonce: admin token: %v", adminErr)
+	}
+	username, usernameErr := s.keycloak.GetUserUsername(ctx, adminToken, req.UserID)
+	if usernameErr != nil {
+		return nil, status.Errorf(codes.Internal, "issue nonce: get username: %v", usernameErr)
+	}
+	if _, loginErr := s.keycloak.Login(ctx, username, req.ClientSecret); loginErr != nil {
+		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
+	}
+
+	// 2. Generate nonce.
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return nil, status.Errorf(codes.Internal, "generate nonce: %v", err)
 	}
 	nonce := hex.EncodeToString(raw)
 
-	if err := s.nonceStore.Set(ctx, req.UserID, nonce, 5*time.Minute); err != nil {
+	// 3. Store "nonce|clientSecret" so VerifyPKILogin can retrieve the secret.
+	//    The separator "|" is safe because base64 does not contain it.
+	stored := nonce + "|" + req.ClientSecret
+	if err := s.nonceStore.Set(ctx, req.UserID, stored, 5*time.Minute); err != nil {
 		return nil, status.Errorf(codes.Internal, "nonce store: %v", err)
 	}
 
@@ -366,13 +404,20 @@ func (s *identityService) VerifyPKILogin(ctx context.Context, req *contract.Veri
 		return nil, status.Error(codes.InvalidArgument, "user_id, nonce_signature_hex, and cert_pem are required")
 	}
 
-	// 1. Retrieve and consume nonce (single-use, TTL enforced by store)
-	nonce, found, err := s.nonceStore.GetAndDelete(ctx, req.UserID)
+	// 1. Retrieve and consume nonce (single-use, TTL enforced by store).
+	//    Stored value format: "nonce_hex|clientSecret" (set by IssueLoginNonce).
+	stored, found, err := s.nonceStore.GetAndDelete(ctx, req.UserID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "nonce store: %v", err)
 	}
 	if !found {
 		return nil, status.Error(codes.Unauthenticated, "nonce expired or not found — restart PKI login")
+	}
+	parts := strings.SplitN(stored, "|", 2)
+	nonce := parts[0]
+	clientSecret := ""
+	if len(parts) == 2 {
+		clientSecret = parts[1]
 	}
 
 	// 2. Verify certificate chain against Central Bank CA
@@ -399,12 +444,11 @@ func (s *identityService) VerifyPKILogin(ctx context.Context, req *contract.Veri
 		}
 	}
 
-	// 5. Issue Keycloak token.
-	// PKI users are created with password=UUID (see OnboardParticipant step 6).
-	// The username may not equal the UUID if Keycloak's username field is read-only,
-	// so we fetch it from the Admin API first. The actual PKI authentication was
-	// already proven via signature verification; the password here only satisfies
-	// Keycloak's credential requirement.
+	// 5. Issue Keycloak token using the clientSecret validated in step 1.
+	//    The username may differ from the UUID (Keycloak read-only username policy),
+	//    so we fetch it via the Admin API. PKI authentication was already proven by
+	//    signature verification; the password here satisfies Keycloak's credential
+	//    requirement and doubles as the first-factor secret.
 	adminToken, err := s.keycloak.GetAdminToken(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "PKI: get admin token: %v", err)
@@ -413,7 +457,7 @@ func (s *identityService) VerifyPKILogin(ctx context.Context, req *contract.Veri
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "PKI: get user username: %v", err)
 	}
-	tr, err := s.keycloak.Login(ctx, username, req.UserID)
+	tr, err := s.keycloak.Login(ctx, username, clientSecret)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "PKI: keycloak token: %v", err)
 	}
@@ -425,6 +469,32 @@ func (s *identityService) VerifyPKILogin(ctx context.Context, req *contract.Veri
 		RefreshToken: tr.RefreshToken,
 		TokenType:    "Bearer",
 	}, nil
+}
+
+// ChangeClientSecret allows an authenticated user to rotate their clientSecret.
+// The current secret is validated via Keycloak before setting the new one.
+func (s *identityService) ChangeClientSecret(ctx context.Context, req *contract.ChangeClientSecretRequest) (*contract.ChangeClientSecretResponse, error) {
+	if req.UserID == "" || req.CurrentClientSecret == "" || req.NewClientSecret == "" {
+		return nil, status.Error(codes.InvalidArgument, "user_id, current_client_secret, and new_client_secret are required")
+	}
+
+	adminToken, err := s.keycloak.GetAdminToken(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "change client secret: admin token: %v", err)
+	}
+	username, err := s.keycloak.GetUserUsername(ctx, adminToken, req.UserID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "change client secret: get username: %v", err)
+	}
+	if _, loginErr := s.keycloak.Login(ctx, username, req.CurrentClientSecret); loginErr != nil {
+		return nil, status.Error(codes.Unauthenticated, "invalid current client secret")
+	}
+	if err := s.keycloak.ResetPassword(ctx, adminToken, req.UserID, req.NewClientSecret); err != nil {
+		return nil, status.Errorf(codes.Internal, "change client secret: reset: %v", err)
+	}
+
+	s.emitAudit(ctx, "CHANGE_CLIENT_SECRET", req.UserID, "", "", correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS")
+	return &contract.ChangeClientSecretResponse{}, nil
 }
 
 // emitAudit fires an audit log entry asynchronously (fire-and-forget).
@@ -634,5 +704,19 @@ func verifyPKILoginHandler(srv any, ctx context.Context, dec func(any) error, in
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: contract.VerifyPKILoginMethod}
 	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
 		return srv.(*identityService).VerifyPKILogin(ctx, req.(*contract.VerifyPKILoginRequest))
+	})
+}
+
+func changeClientSecretHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(contract.ChangeClientSecretRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(*identityService).ChangeClientSecret(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: contract.ChangeClientSecretMethod}
+	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
+		return srv.(*identityService).ChangeClientSecret(ctx, req.(*contract.ChangeClientSecretRequest))
 	})
 }

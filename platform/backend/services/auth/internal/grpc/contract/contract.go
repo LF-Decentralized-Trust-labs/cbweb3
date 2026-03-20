@@ -22,6 +22,9 @@ const (
 	// PKI 2FA methods
 	IssueLoginNonceMethod = "/auth.v1.AuthService/IssueLoginNonce"
 	VerifyPKILoginMethod  = "/auth.v1.AuthService/VerifyPKILogin"
+
+	// Client secret management
+	ChangeClientSecretMethod = "/auth.v1.AuthService/ChangeClientSecret"
 )
 
 // --- Auth ---
@@ -158,6 +161,10 @@ type OnboardParticipantResponse struct {
 	// TxHash is the on-chain transaction hash from ParticipantRegistry.registerMember
 	// (only set for roles that require on-chain registration).
 	TxHash string `json:"tx_hash,omitempty"`
+	// ClientSecret is the cryptographically secure random secret generated at
+	// onboarding time. It is exposed only once and must be stored by the caller.
+	// The secret is hashed (Keycloak Argon2) and not recoverable after this response.
+	ClientSecret string `json:"client_secret,omitempty"`
 }
 
 // --- PKI 2FA ---
@@ -165,6 +172,9 @@ type OnboardParticipantResponse struct {
 // IssueLoginNonceRequest initiates PKI login step 1 for roles that require X.509.
 type IssueLoginNonceRequest struct {
 	UserID string `json:"user_id"`
+	// ClientSecret is the first-factor credential (obtained at onboarding).
+	// The server validates this before issuing the nonce challenge.
+	ClientSecret string `json:"client_secret"`
 }
 
 // IssueLoginNonceResponse carries a short-lived nonce for the client to sign.
@@ -191,6 +201,18 @@ type VerifyPKILoginResponse struct {
 	ExpiresIn    int32  `json:"expires_in"`
 }
 
+// --- Password Management ---
+
+// ChangeClientSecretRequest allows an authenticated user to rotate their clientSecret.
+type ChangeClientSecretRequest struct {
+	UserID               string `json:"user_id"`
+	CurrentClientSecret  string `json:"current_client_secret"`
+	NewClientSecret      string `json:"new_client_secret"`
+}
+
+// ChangeClientSecretResponse is returned on successful secret rotation.
+type ChangeClientSecretResponse struct{}
+
 // --- Client Interface ---
 
 // IdentityServiceClient is the typed client for all identity gRPC methods.
@@ -206,6 +228,7 @@ type IdentityServiceClient interface {
 	OnboardParticipant(ctx context.Context, in *OnboardParticipantRequest, opts ...grpc.CallOption) (*OnboardParticipantResponse, error)
 	IssueLoginNonce(ctx context.Context, in *IssueLoginNonceRequest, opts ...grpc.CallOption) (*IssueLoginNonceResponse, error)
 	VerifyPKILogin(ctx context.Context, in *VerifyPKILoginRequest, opts ...grpc.CallOption) (*VerifyPKILoginResponse, error)
+	ChangeClientSecret(ctx context.Context, in *ChangeClientSecretRequest, opts ...grpc.CallOption) (*ChangeClientSecretResponse, error)
 }
 
 type identityServiceClient struct {
@@ -269,4 +292,9 @@ func (c *identityServiceClient) IssueLoginNonce(ctx context.Context, in *IssueLo
 func (c *identityServiceClient) VerifyPKILogin(ctx context.Context, in *VerifyPKILoginRequest, opts ...grpc.CallOption) (*VerifyPKILoginResponse, error) {
 	out := new(VerifyPKILoginResponse)
 	return out, c.cc.Invoke(ctx, VerifyPKILoginMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) ChangeClientSecret(ctx context.Context, in *ChangeClientSecretRequest, opts ...grpc.CallOption) (*ChangeClientSecretResponse, error) {
+	out := new(ChangeClientSecretResponse)
+	return out, c.cc.Invoke(ctx, ChangeClientSecretMethod, in, out, opts...)
 }

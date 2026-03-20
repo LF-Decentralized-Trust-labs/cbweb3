@@ -12,12 +12,13 @@ import (
 )
 
 const (
-	identityLoginMethod         = "/auth.v1.AuthService/Login"
-	identityRefreshTokenMethod  = "/auth.v1.AuthService/RefreshToken"
-	identityRevokeTokenMethod   = "/auth.v1.AuthService/RevokeToken"
-	identityValidateTokenMethod = "/auth.v1.AuthService/ValidateToken" // #nosec G101 -- gRPC method path
-	identityIssueNonceMethod    = "/auth.v1.AuthService/IssueLoginNonce"
-	identityVerifyPKIMethod     = "/auth.v1.AuthService/VerifyPKILogin"
+	identityLoginMethod          = "/auth.v1.AuthService/Login"
+	identityRefreshTokenMethod   = "/auth.v1.AuthService/RefreshToken"
+	identityRevokeTokenMethod    = "/auth.v1.AuthService/RevokeToken"
+	identityValidateTokenMethod  = "/auth.v1.AuthService/ValidateToken" // #nosec G101 -- gRPC method path
+	identityIssueNonceMethod     = "/auth.v1.AuthService/IssueLoginNonce"
+	identityVerifyPKIMethod      = "/auth.v1.AuthService/VerifyPKILogin"
+	identityChangeClientSecretMethod = "/auth.v1.AuthService/ChangeClientSecret"
 )
 
 type jsonCodec struct{}
@@ -160,11 +161,12 @@ func (p *IdentityGRPCAuthProvider) Validate(ctx context.Context, token string) (
 	}, nil
 }
 
-// IssueLoginNonce requests a PKI login nonce for the given user (step 1).
-func (p *IdentityGRPCAuthProvider) IssueLoginNonce(ctx context.Context, userID string) (string, error) {
+// IssueLoginNonce validates clientSecret (first factor) and requests a PKI login nonce (step 1).
+func (p *IdentityGRPCAuthProvider) IssueLoginNonce(ctx context.Context, userID, clientSecret string) (string, error) {
 	req := struct {
-		UserID string `json:"user_id"`
-	}{UserID: userID}
+		UserID       string `json:"user_id"`
+		ClientSecret string `json:"client_secret"`
+	}{UserID: userID, ClientSecret: clientSecret}
 	var out struct {
 		Nonce string `json:"nonce"`
 	}
@@ -172,6 +174,18 @@ func (p *IdentityGRPCAuthProvider) IssueLoginNonce(ctx context.Context, userID s
 		return "", err
 	}
 	return out.Nonce, nil
+}
+
+
+// ChangeClientSecret rotates the clientSecret for the given user.
+func (p *IdentityGRPCAuthProvider) ChangeClientSecret(ctx context.Context, userID, currentClientSecret, newClientSecret string) error {
+	req := struct {
+		UserID              string `json:"user_id"`
+		CurrentClientSecret string `json:"current_client_secret"`
+		NewClientSecret     string `json:"new_client_secret"`
+	}{UserID: userID, CurrentClientSecret: currentClientSecret, NewClientSecret: newClientSecret}
+	var out struct{}
+	return p.client.Invoke(ctx, identityChangeClientSecretMethod, &req, &out, grpc.ForceCodec(p.codec))
 }
 
 // VerifyPKILogin completes PKI login step 2: validates the signed nonce + X.509 cert.

@@ -178,6 +178,10 @@ func (h *ComplianceHandler) RegisterParticipant(c *fiber.Ctx) error {
 	if result.TxHash != "" {
 		resp["txHash"] = result.TxHash
 	}
+	if result.ClientSecret != "" {
+		// Exposed only once. The caller must store this value securely.
+		resp["clientSecret"] = result.ClientSecret
+	}
 	return c.Status(fiber.StatusCreated).JSON(resp)
 }
 
