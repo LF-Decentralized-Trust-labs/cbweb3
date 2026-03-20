@@ -226,10 +226,10 @@ func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"access_token":  token.AccessToken,
-		"refresh_token": token.RefreshToken,
-		"token_type":    token.TokenType,
-		"expires_in":    token.ExpiresIn,
+		"accessToken":  token.AccessToken,
+		"refreshToken": token.RefreshToken,
+		"tokenType":    token.TokenType,
+		"expiresIn":    token.ExpiresIn,
 	})
 }
 
