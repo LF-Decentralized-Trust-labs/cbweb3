@@ -32,6 +32,19 @@ type Client interface {
 	// GetAdminToken exchanges client_credentials for an admin-capable access
 	// token using the service account associated with ClientID/ClientSecret.
 	GetAdminToken(ctx context.Context) (string, error)
+	// UpdateUsername renames a Keycloak user's login username via the Admin REST
+	// API. NOTE: some Keycloak realm configurations mark the username field as
+	// read-only; callers should treat errors as non-fatal.
+	UpdateUsername(ctx context.Context, adminToken, userID, newUsername string) error
+	// ResetPassword sets (or clears) the password for a Keycloak user via the
+	// Admin REST API. Pass an empty string to create a credential-less account
+	// that accepts grant_type=password with an empty password field.
+	ResetPassword(ctx context.Context, adminToken, userID, password string) error
+	// GetUserUsername returns the Keycloak login username for the user identified
+	// by userID (UUID). Used by VerifyPKILogin to perform grant_type=password with
+	// the user's actual username, which may differ from the UUID when UpdateUsername
+	// is blocked by a read-only username policy.
+	GetUserUsername(ctx context.Context, adminToken, userID string) (string, error)
 }
 
 type jwksCache struct {
@@ -358,6 +371,106 @@ func (c *keycloakClient) CreateUser(ctx context.Context, adminToken string, user
 		return "", errors.New("keycloak: cannot parse user UUID from Location header")
 	}
 	return parts[len(parts)-1], nil
+}
+
+// UpdateUsername renames a Keycloak user's login name via the Admin REST API.
+// This is called during PKI-user onboarding so that the user's Keycloak username
+// matches their UUID, enabling keycloak.Login(ctx, userID, "") in VerifyPKILogin.
+func (c *keycloakClient) UpdateUsername(ctx context.Context, adminToken, userID, newUsername string) error {
+	body, err := json.Marshal(map[string]any{"username": newUsername})
+	if err != nil {
+		return fmt.Errorf("keycloak: marshaling update-username request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/%s", c.adminUsersURL(), userID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("keycloak: building update-username request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("keycloak: update-username request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("keycloak: update-username returned %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// ResetPassword sets the password for a Keycloak user via the Admin REST API.
+// Passing an empty string creates a credential that allows grant_type=password
+// with password="" (used by VerifyPKILogin to issue a Keycloak token after
+// successful PKI signature verification).
+func (c *keycloakClient) ResetPassword(ctx context.Context, adminToken, userID, password string) error {
+	body, err := json.Marshal(map[string]any{
+		"type":      "password",
+		"value":     password,
+		"temporary": false,
+	})
+	if err != nil {
+		return fmt.Errorf("keycloak: marshaling reset-password request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/%s/reset-password", c.adminUsersURL(), userID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("keycloak: building reset-password request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("keycloak: reset-password request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("keycloak: reset-password returned %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// GetUserUsername fetches the Keycloak username for the user identified by
+// userID (UUID) via the Admin REST API. This is used by VerifyPKILogin to
+// obtain the user's actual login username when the username field is read-only
+// and could not be changed to the UUID during onboarding.
+func (c *keycloakClient) GetUserUsername(ctx context.Context, adminToken, userID string) (string, error) {
+	url := fmt.Sprintf("%s/%s", c.adminUsersURL(), userID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("keycloak: building get-user request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("keycloak: get-user request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("keycloak: get-user returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var user struct {
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return "", fmt.Errorf("keycloak: decoding get-user response: %w", err)
+	}
+	if user.Username == "" {
+		return "", fmt.Errorf("keycloak: user %s has no username", userID)
+	}
+	return user.Username, nil
 }
 
 // extractRealmRoles extracts the roles array from the Keycloak claim

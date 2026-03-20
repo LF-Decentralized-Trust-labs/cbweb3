@@ -43,16 +43,43 @@ func NewAuthHandler(
 	}
 }
 
-// Login authenticates a client and returns access + refresh tokens.
+// Login authenticates a client and returns tokens or a PKI nonce challenge.
+//
+// Two flows are supported:
+//
+//  1. Service-account / password login (clientSecret non-empty):
+//     Delegates to the identity gRPC service and returns
+//     { "accessToken", "tokenType", "expiresIn" }.
+//
+//  2. PKI nonce request (clientSecret empty, pkiAuthProvider configured):
+//     Issues a short-lived nonce for the supplied clientId (user UUID).
+//     Returns { "nonce": "hex-64-chars" }.
+//     The client must sign the nonce with its X.509 private key and submit
+//     it via POST /auth/wallet/bind to complete PKI 2FA (ROLE_COMMERCIAL_BANK,
+//     ROLE_TREASURY).
 func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	var req loginRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
 	}
-	if req.ClientID == "" || req.ClientSecret == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientId and clientSecret are required"})
+	if req.ClientID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientId is required"})
 	}
 
+	// PKI nonce challenge: clientSecret is empty → issue nonce for step 1 of PKI 2FA.
+	// Actual authentication is deferred to POST /auth/wallet/bind (step 2).
+	if req.ClientSecret == "" {
+		if h.pkiAuthProvider == nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "clientId and clientSecret are required"})
+		}
+		nonce, err := h.pkiAuthProvider.IssueLoginNonce(c.UserContext(), req.ClientID)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "failed to issue login nonce"})
+		}
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{"nonce": nonce})
+	}
+
+	// Normal login: clientSecret provided → authenticate via identity service.
 	token, err := h.authProvider.Authenticate(c.UserContext(), req.ClientID, req.ClientSecret)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})

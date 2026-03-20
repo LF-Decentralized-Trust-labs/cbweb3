@@ -255,10 +255,20 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *contract.
 	}
 
 	// 2. Create user in Keycloak.
+	// firstName/lastName are required by the realm user-profile policy.
+	// EmailVerified is set to true because onboarding is administrative —
+	// the Central Bank has already validated the institution's identity.
+	displayName := req.InstitutionName
+	if displayName == "" {
+		displayName = req.Username
+	}
 	userID, err := s.keycloak.CreateUser(ctx, adminToken, keycloak.CreateUserRequest{
-		Username: req.Username,
-		Email:    req.Email,
-		Enabled:  true,
+		Username:      req.Username,
+		Email:         req.Email,
+		FirstName:     displayName,
+		LastName:      displayName,
+		EmailVerified: true,
+		Enabled:       true,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
@@ -301,6 +311,21 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *contract.
 		Status:          string(domain.ParticipantStatusPending),
 	}); upsertErr != nil {
 		return nil, status.Errorf(codes.Internal, "onboard: persisting participant: %v", upsertErr)
+	}
+
+	// 6. For PKI roles (ROLE_COMMERCIAL_BANK, ROLE_TREASURY), set the user's
+	//    Keycloak password to their UUID. VerifyPKILogin will later call:
+	//      GetUserUsername → Login(username, userID)
+	//    where password = userID (UUID). The actual authentication is proven by
+	//    PKI signature verification; the password only satisfies Keycloak's
+	//    credential requirement.
+	//    NOTE: UpdateUsername is intentionally skipped — the Keycloak realm has
+	//    the username field marked as read-only (error-user-attribute-read-only),
+	//    so VerifyPKILogin resolves the username dynamically via GetUserUsername.
+	if domain.RequiresPKI(req.Role) {
+		if pErr := s.keycloak.ResetPassword(ctx, adminToken, userID, userID); pErr != nil {
+			log.Printf("WARN: onboard: setting PKI password for %s: %v (non-fatal)", userID, pErr)
+		}
 	}
 
 	s.emitAudit(ctx, "ONBOARD_PARTICIPANT", userID, resp.WalletAddress, "", correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS")
@@ -374,8 +399,21 @@ func (s *identityService) VerifyPKILogin(ctx context.Context, req *contract.Veri
 		}
 	}
 
-	// 5. Issue Keycloak token
-	tr, err := s.keycloak.Login(ctx, req.UserID, "")
+	// 5. Issue Keycloak token.
+	// PKI users are created with password=UUID (see OnboardParticipant step 6).
+	// The username may not equal the UUID if Keycloak's username field is read-only,
+	// so we fetch it from the Admin API first. The actual PKI authentication was
+	// already proven via signature verification; the password here only satisfies
+	// Keycloak's credential requirement.
+	adminToken, err := s.keycloak.GetAdminToken(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "PKI: get admin token: %v", err)
+	}
+	username, err := s.keycloak.GetUserUsername(ctx, adminToken, req.UserID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "PKI: get user username: %v", err)
+	}
+	tr, err := s.keycloak.Login(ctx, username, req.UserID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "PKI: keycloak token: %v", err)
 	}
