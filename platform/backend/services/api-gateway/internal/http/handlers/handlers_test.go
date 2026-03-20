@@ -303,7 +303,7 @@ func TestAuthHandlerLogoutMissingToken(t *testing.T) {
 
 // ---------- Onboarding tests ----------
 
-func TestOnboardingCentralBankBypassKYC(t *testing.T) {
+func TestOnboardingGovernanceBypassKYC(t *testing.T) {
 	t.Parallel()
 	stub := participantRegistrarStub{
 		kycManagerStub: kycManagerStub{status: domain.KYCPending},
@@ -314,12 +314,12 @@ func TestOnboardingCentralBankBypassKYC(t *testing.T) {
 	handler := NewAuthHandler(authProviderStub{}, stub)
 	app := fiber.New()
 	app.Post("/auth/onboarding", func(c *fiber.Ctx) error {
-		c.Locals("claims", domain.TokenClaims{Subject: "cb-001", Roles: []string{domain.RoleCentralBank}})
+		c.Locals("claims", domain.TokenClaims{Subject: "cb-001", Roles: []string{domain.RoleGovernance}})
 		return handler.Onboarding(c)
 	})
 
 	body, _ := json.Marshal(map[string]string{
-		"country": "BR", "bank_code": "0000", "role": "CENTRAL_BANK", "institution_name": "BCB",
+		"country": "BR", "bank_code": "0000", "role": domain.RoleGovernance, "institution_name": "BCB",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/auth/onboarding", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

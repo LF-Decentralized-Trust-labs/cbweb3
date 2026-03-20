@@ -33,6 +33,10 @@ func (s *governanceComplianceStub) IssueParticipantCertificate(context.Context, 
 	return complianceadapter.IssuedCertificate{}, nil
 }
 
+func (s *governanceComplianceStub) SignParticipantCSR(context.Context, string, string, string, string, string) (complianceadapter.SignedCSRResult, error) {
+	return complianceadapter.SignedCSRResult{}, nil
+}
+
 func (s *governanceComplianceStub) ApproveKYC(context.Context, string, string, string) (complianceadapter.ApproveKYCResult, error) {
 	return complianceadapter.ApproveKYCResult{}, nil
 }

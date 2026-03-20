@@ -86,7 +86,7 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 	authHandler := handlers.NewAuthHandler(authProviderStub{}, mgr)
 	complianceHandler := handlers.NewComplianceHandler(mgr)
 	app := fiber.New()
-	// Validator always returns COMMERCIAL_BANK role — never CENTRAL_BANK.
+	// Validator always returns COMMERCIAL_BANK role — never ROLE_GOVERNANCE.
 	authProvider := roleAuthProviderStub{roles: []string{domain.RoleCommercialBank}}
 	Setup(app, Dependencies{
 		AuthHandler:       authHandler,
@@ -146,7 +146,7 @@ func TestSetupRegistersRoutes(t *testing.T) {
 		t.Fatalf("expected 200 from openapi route, got %d", openAPIResp.StatusCode)
 	}
 
-	swaggerResp, err := app.Test(httptest.NewRequest(http.MethodGet, "/swagger", nil))
+	swaggerResp, err := app.Test(httptest.NewRequest(http.MethodGet, "/docs", nil))
 	if err != nil {
 		t.Fatalf("unexpected error on swagger route: %v", err)
 	}
