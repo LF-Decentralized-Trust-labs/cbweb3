@@ -53,6 +53,7 @@ To get the OpenAPI document in JSON format:
 
 ## Main integration variables
 
-- `IDENTITY_GRPC_ADDR`
+- `AUTH_GRPC_ADDR`
+- `COMPLIANCE_GRPC_ADDR`
 - `REQUEST_TIMEOUT_SEC`
 

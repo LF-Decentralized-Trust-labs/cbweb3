@@ -139,7 +139,7 @@ func (h *AuthHandler) Onboarding(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
 	}
 
-	isCentralBank := containsRole(claims.Roles, domain.RoleCentralBank)
+	isCentralBank := containsRole(claims.Roles, domain.RoleGovernance)
 
 	if !isCentralBank && h.kycManager != nil {
 		kycStatus, err := h.kycManager.GetKYCStatus(c.UserContext(), claims.Subject)
