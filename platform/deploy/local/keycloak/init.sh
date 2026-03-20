@@ -260,6 +260,7 @@ create_realm_and_client \
 create_platform_roles "cbweb3" "ROLE_GOVERNANCE"
 assign_governance_role_to_service_account "cbweb3" "cbweb3-auth"
 
+echo "KEYCLOAK_INIT_DONE"
 echo -e "\nConfiguração concluída. Keycloak está em execução."
 
 wait $KEYCLOAK_PID

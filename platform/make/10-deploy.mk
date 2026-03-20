@@ -55,7 +55,7 @@ deploy.up-infra: deploy.create-shared-network
 	echo "Keycloak is ready at $$keycloak_url."
 	@echo "Waiting for Keycloak init script completion (timeout: 180s)..."
 	@keycloak_container="$${KEYCLOAK_CONTAINER_NAME:-cbweb3-keycloak}"; \
-	init_done_marker="Configuração concluída. Keycloak está em execução."; \
+	init_done_marker="KEYCLOAK_INIT_DONE"; \
 	max_attempts=60; \
 	attempt=1; \
 	until docker logs "$$keycloak_container" 2>&1 | rg -q "$$init_done_marker"; do \
