@@ -38,6 +38,38 @@ type ParticipantOnboarder interface {
 	OnboardParticipant(ctx context.Context, req OnboardParticipantRequest) (OnboardParticipantResult, error)
 }
 
+// UserSummary is a condensed participant view for list responses.
+type UserSummary struct {
+	UserID          string
+	InstitutionName string
+	Role            string
+	Status          string
+	WalletAddress   string
+	Country         string
+	BankCode        string
+}
+
+// UserDetail is the full profile of a single participant.
+type UserDetail struct {
+	UserID          string
+	Username        string
+	Email           string
+	InstitutionName string
+	Role            string
+	Status          string
+	WalletAddress   string
+	Country         string
+	BankCode        string
+}
+
+// UserManager allows the Central Bank to list and retrieve registered participants.
+type UserManager interface {
+	// ListUsers returns participants filtered by optional role and status.
+	ListUsers(ctx context.Context, role, status string) ([]UserSummary, int, error)
+	// GetUser returns the full profile of a single participant by their Keycloak UUID.
+	GetUser(ctx context.Context, userID string) (UserDetail, error)
+}
+
 // OnboardParticipantRequest carries the payload for the administrative
 // registration flow delegated to the identity gRPC service.
 type OnboardParticipantRequest struct {

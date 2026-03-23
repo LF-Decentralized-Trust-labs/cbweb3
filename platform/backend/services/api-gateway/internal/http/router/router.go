@@ -30,14 +30,18 @@ func Setup(app *fiber.App, deps Dependencies) {
 	authGroup := app.Group("/api/v1/auth")
 	authGroup.Post("/login", deps.AuthHandler.Login)
 	authGroup.Post("/refresh", deps.AuthHandler.Refresh)
-	authGroup.Post("/logout", middleware.RequireBearerToken(deps.AuthProvider), deps.AuthHandler.Logout)
+	authGroup.Post("/logout", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.Logout)
 	// PKI login step 2: submit signed nonce + X.509 certificate
 	authGroup.Post("/wallet/bind", deps.AuthHandler.WalletBind)
-	// Client secret rotation (requires valid Bearer token)
-	authGroup.Post("/client-secret/change", middleware.RequireBearerToken(deps.AuthProvider), deps.AuthHandler.ChangeClientSecret)
+	// MVP-only: signs a PKI nonce using a .pem file from PKI_DIR; remove before production
+	authGroup.Post("/resolve-challenge", deps.AuthHandler.ResolveChallenger)
+	// Client secret rotation (requires valid access_token cookie)
+	authGroup.Post("/client-secret/change", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.ChangeClientSecret)
+	// Self-profile: returns token claims for the authenticated caller
+	authGroup.Get("/me", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.Me)
 
 	// --- Compliance (KYC status, AML gate, onboarding, provisioning) ---
-	complianceGroup := app.Group("/api/v1/compliance", middleware.RequireBearerToken(deps.AuthProvider))
+	complianceGroup := app.Group("/api/v1/compliance", middleware.RequireCookieAuth(deps.AuthProvider))
 	complianceGroup.Get("/kyc/status/:subject", deps.ComplianceHandler.GetKYCStatus)
 	complianceGroup.Post("/aml/screen", deps.ComplianceHandler.AMLScreen)
 
@@ -50,7 +54,7 @@ func Setup(app *fiber.App, deps Dependencies) {
 
 	// --- Governance Portal (PKI / ROLE_GOVERNANCE only) ---
 	govGroup := app.Group("/api/v1/governance",
-		middleware.RequireBearerToken(deps.AuthProvider),
+		middleware.RequireCookieAuth(deps.AuthProvider),
 		middleware.RequireRole(domain.RoleGovernance),
 	)
 	// Participant registration and registry
@@ -73,4 +77,8 @@ func Setup(app *fiber.App, deps Dependencies) {
 
 	// Audit logs
 	govGroup.Get("/audit/logs", deps.GovernanceHandler.GetAuditLogs)
+
+	// User management (list and get registered participants)
+	govGroup.Get("/users", deps.GovernanceHandler.ListUsers)
+	govGroup.Get("/users/:userId", deps.GovernanceHandler.GetUser)
 }

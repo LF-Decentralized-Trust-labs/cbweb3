@@ -19,6 +19,8 @@ const (
 	getKYCStatusMethod         = "/auth.v1.AuthService/GetKYCStatus"
 	provisionParticipantMethod = "/auth.v1.AuthService/ProvisionParticipant"
 	onboardParticipantMethod   = "/auth.v1.AuthService/OnboardParticipant"
+	listUsersMethod            = "/auth.v1.AuthService/ListUsers"
+	getUserMethod              = "/auth.v1.AuthService/GetUser"
 )
 
 type jsonCodec struct{}
@@ -135,5 +137,78 @@ func (m *IdentityGRPCManager) OnboardParticipant(ctx context.Context, req interf
 		CertPEM:       out.CertPEM,
 		TxHash:        out.TxHash,
 		ClientSecret:  out.ClientSecret,
+	}, nil
+}
+
+// --- UserManager ---
+
+// ListUsers delegates to the identity gRPC service's ListUsers method.
+func (m *IdentityGRPCManager) ListUsers(ctx context.Context, role, userStatus string) ([]interfaces.UserSummary, int, error) {
+	req := &struct {
+		Role   string `json:"role,omitempty"`
+		Status string `json:"status,omitempty"`
+	}{Role: role, Status: userStatus}
+	out := &struct {
+		Users []struct {
+			UserID          string `json:"user_id"`
+			InstitutionName string `json:"institution_name,omitempty"`
+			Role            string `json:"role"`
+			Status          string `json:"status"`
+			WalletAddress   string `json:"wallet_address,omitempty"`
+			Country         string `json:"country,omitempty"`
+			BankCode        string `json:"bank_code,omitempty"`
+		} `json:"users"`
+		Total int `json:"total"`
+	}{}
+	if err := m.client.Invoke(ctx, listUsersMethod, req, out, grpc.ForceCodec(m.codec)); err != nil {
+		return nil, 0, err
+	}
+	result := make([]interfaces.UserSummary, 0, len(out.Users))
+	for _, u := range out.Users {
+		result = append(result, interfaces.UserSummary{
+			UserID:          u.UserID,
+			InstitutionName: u.InstitutionName,
+			Role:            u.Role,
+			Status:          u.Status,
+			WalletAddress:   u.WalletAddress,
+			Country:         u.Country,
+			BankCode:        u.BankCode,
+		})
+	}
+	return result, out.Total, nil
+}
+
+// GetUser delegates to the identity gRPC service's GetUser method.
+func (m *IdentityGRPCManager) GetUser(ctx context.Context, userID string) (interfaces.UserDetail, error) {
+	req := &struct {
+		UserID string `json:"user_id"`
+	}{UserID: userID}
+	out := &struct {
+		UserID          string `json:"user_id"`
+		Username        string `json:"username"`
+		Email           string `json:"email"`
+		InstitutionName string `json:"institution_name,omitempty"`
+		Role            string `json:"role"`
+		Status          string `json:"status"`
+		WalletAddress   string `json:"wallet_address,omitempty"`
+		Country         string `json:"country,omitempty"`
+		BankCode        string `json:"bank_code,omitempty"`
+	}{}
+	if err := m.client.Invoke(ctx, getUserMethod, req, out, grpc.ForceCodec(m.codec)); err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+			return interfaces.UserDetail{}, fmt.Errorf("not found: %s", st.Message())
+		}
+		return interfaces.UserDetail{}, err
+	}
+	return interfaces.UserDetail{
+		UserID:          out.UserID,
+		Username:        out.Username,
+		Email:           out.Email,
+		InstitutionName: out.InstitutionName,
+		Role:            out.Role,
+		Status:          out.Status,
+		WalletAddress:   out.WalletAddress,
+		Country:         out.Country,
+		BankCode:        out.BankCode,
 	}, nil
 }

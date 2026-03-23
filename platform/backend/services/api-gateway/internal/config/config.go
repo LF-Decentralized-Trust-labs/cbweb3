@@ -14,6 +14,7 @@ type Config struct {
 	RequestTimeout     time.Duration
 	AuthGRPCAddr       string
 	ComplianceGRPCAddr string // compliance-orchestrator address (optional; enables governance endpoints)
+	CookieSecure       bool   // true for HTTPS (Secure flag); false for plain HTTP
 }
 
 // Load reads environment variables and returns a fully populated Config.
@@ -23,6 +24,7 @@ func Load() Config {
 		RequestTimeout:     time.Duration(getEnvInt("REQUEST_TIMEOUT_SEC", 5)) * time.Second,
 		AuthGRPCAddr:       getEnv("AUTH_GRPC_ADDR", "localhost:9091"),
 		ComplianceGRPCAddr: getEnv("COMPLIANCE_GRPC_ADDR", "localhost:9093"),
+		CookieSecure:       getEnvBool("COOKIE_SECURE", false),
 	}
 }
 
@@ -43,4 +45,13 @@ func getEnvInt(name string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+// getEnvBool parses a boolean environment variable ("true"/"1" → true) with fallback.
+func getEnvBool(name string, fallback bool) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	return raw == "true" || raw == "1"
 }

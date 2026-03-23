@@ -6,9 +6,11 @@ package handlers
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -28,12 +30,25 @@ type GovernanceCompliance interface {
 
 // GovernanceHandler exposes governance portal operations for ROLE_GOVERNANCE users.
 type GovernanceHandler struct {
-	compliance GovernanceCompliance
+	compliance  GovernanceCompliance
+	userManager interfaces.UserManager
 }
 
 // NewGovernanceHandler constructs a GovernanceHandler.
+// If the provided GovernanceCompliance also implements interfaces.UserManager,
+// user-listing endpoints are automatically enabled.
 func NewGovernanceHandler(c GovernanceCompliance) *GovernanceHandler {
-	return &GovernanceHandler{compliance: c}
+	var um interfaces.UserManager
+	if mgr, ok := c.(interfaces.UserManager); ok {
+		um = mgr
+	}
+	return &GovernanceHandler{compliance: c, userManager: um}
+}
+
+// WithUserManager explicitly sets the UserManager dependency (useful in tests and wiring).
+func (h *GovernanceHandler) WithUserManager(um interfaces.UserManager) *GovernanceHandler {
+	h.userManager = um
+	return h
 }
 
 // RegisterParticipant handles POST /api/v1/governance/participants.
@@ -254,3 +269,84 @@ func (h *GovernanceHandler) GetAuditLogs(c *fiber.Ctx) error {
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"logs": logs})
 }
+
+// ListUsers handles GET /api/v1/governance/users.
+// Optional query params: ?role=ROLE_COMMERCIAL_BANK&status=ACTIVE
+func (h *GovernanceHandler) ListUsers(c *fiber.Ctx) error {
+	if h.userManager == nil {
+		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "user management not available"})
+	}
+	role := c.Query("role")
+	userStatus := c.Query("status")
+
+	users, total, err := h.userManager.ListUsers(c.UserContext(), role, userStatus)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to list users"})
+	}
+
+	out := make([]fiber.Map, 0, len(users))
+	for _, u := range users {
+		entry := fiber.Map{
+			"userId": u.UserID,
+			"role":   u.Role,
+			"status": u.Status,
+		}
+		if u.InstitutionName != "" {
+			entry["institutionName"] = u.InstitutionName
+		}
+		if u.WalletAddress != "" {
+			entry["walletAddress"] = u.WalletAddress
+		}
+		if u.Country != "" {
+			entry["country"] = u.Country
+		}
+		if u.BankCode != "" {
+			entry["bankCode"] = u.BankCode
+		}
+		out = append(out, entry)
+	}
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"users": out, "total": total})
+}
+
+// GetUser handles GET /api/v1/governance/users/:userId.
+func (h *GovernanceHandler) GetUser(c *fiber.Ctx) error {
+	if h.userManager == nil {
+		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "user management not available"})
+	}
+	userID := c.Params("userId")
+	if userID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "userId is required"})
+	}
+
+	user, err := h.userManager.GetUser(c.UserContext(), userID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get user"})
+	}
+
+	resp := fiber.Map{
+		"userId":   user.UserID,
+		"username": user.Username,
+		"role":     user.Role,
+		"status":   user.Status,
+	}
+	if user.Email != "" {
+		resp["email"] = user.Email
+	}
+	if user.InstitutionName != "" {
+		resp["institutionName"] = user.InstitutionName
+	}
+	if user.WalletAddress != "" {
+		resp["walletAddress"] = user.WalletAddress
+	}
+	if user.Country != "" {
+		resp["country"] = user.Country
+	}
+	if user.BankCode != "" {
+		resp["bankCode"] = user.BankCode
+	}
+	return c.Status(fiber.StatusOK).JSON(resp)
+}
+

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 )
@@ -101,7 +102,7 @@ func TestAuthHandlerLogin(t *testing.T) {
 	t.Parallel()
 	handler := NewAuthHandler(authProviderStub{
 		token: domain.AuthToken{AccessToken: "token", ExpiresIn: 1, TokenType: "Bearer"},
-	}, kycCheckerStub{})
+	}, kycCheckerStub{}, false)
 	app := fiber.New()
 	app.Post("/auth/login", handler.Login)
 
@@ -121,7 +122,7 @@ func TestAuthHandlerLoginInvalidCases(t *testing.T) {
 	t.Parallel()
 
 	t.Run("missing fields", func(t *testing.T) {
-		handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{})
+		handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false)
 		app := fiber.New()
 		app.Post("/auth/login", handler.Login)
 		body, _ := json.Marshal(map[string]string{"clientId": ""})
@@ -137,7 +138,7 @@ func TestAuthHandlerLoginInvalidCases(t *testing.T) {
 	})
 
 	t.Run("invalid credentials", func(t *testing.T) {
-		handler := NewAuthHandler(authProviderStub{err: errors.New("invalid")}, kycCheckerStub{})
+		handler := NewAuthHandler(authProviderStub{err: errors.New("invalid")}, kycCheckerStub{}, false)
 		app := fiber.New()
 		app.Post("/auth/login", handler.Login)
 		body, _ := json.Marshal(map[string]string{"clientId": "bank", "clientSecret": "bad"})
@@ -153,7 +154,7 @@ func TestAuthHandlerLoginInvalidCases(t *testing.T) {
 	})
 
 	t.Run("invalid body", func(t *testing.T) {
-		handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{})
+		handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false)
 		app := fiber.New()
 		app.Post("/auth/login", handler.Login)
 		req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewReader([]byte("{")))
@@ -207,7 +208,7 @@ func TestAuthHandlerRefreshSuccess(t *testing.T) {
 	t.Parallel()
 	handler := NewAuthHandler(authProviderStub{
 		token: domain.AuthToken{AccessToken: "new-token", RefreshToken: "rt", ExpiresIn: 3600, TokenType: "Bearer"},
-	}, kycCheckerStub{})
+	}, kycCheckerStub{}, false)
 	app := fiber.New()
 	app.Post("/auth/refresh", handler.Refresh)
 
@@ -225,7 +226,7 @@ func TestAuthHandlerRefreshSuccess(t *testing.T) {
 
 func TestAuthHandlerRefreshInvalid(t *testing.T) {
 	t.Parallel()
-	handler := NewAuthHandler(authProviderStub{err: errors.New("expired")}, kycCheckerStub{})
+	handler := NewAuthHandler(authProviderStub{err: errors.New("expired")}, kycCheckerStub{}, false)
 	app := fiber.New()
 	app.Post("/auth/refresh", handler.Refresh)
 
@@ -243,7 +244,7 @@ func TestAuthHandlerRefreshInvalid(t *testing.T) {
 
 func TestAuthHandlerRefreshMissingBody(t *testing.T) {
 	t.Parallel()
-	handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{})
+	handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false)
 	app := fiber.New()
 	app.Post("/auth/refresh", handler.Refresh)
 
@@ -261,12 +262,12 @@ func TestAuthHandlerRefreshMissingBody(t *testing.T) {
 
 func TestAuthHandlerLogoutSuccess(t *testing.T) {
 	t.Parallel()
-	handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{})
+	handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false)
 	app := fiber.New()
 	app.Post("/auth/logout", handler.Logout)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
-	req.Header.Set("Authorization", "Bearer some-token")
+	req.AddCookie(&http.Cookie{Name: "access_token", Value: "some-token"})
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -278,7 +279,7 @@ func TestAuthHandlerLogoutSuccess(t *testing.T) {
 
 func TestAuthHandlerLogoutMissingToken(t *testing.T) {
 	t.Parallel()
-	handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{})
+	handler := NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false)
 	app := fiber.New()
 	app.Post("/auth/logout", handler.Logout)
 
@@ -604,5 +605,245 @@ func TestGetKYCStatusViaManager(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+// ---------- GET /auth/me tests ----------
+
+func TestMeSuccess(t *testing.T) {
+	t.Parallel()
+	provider := authProviderStub{
+		token: domain.AuthToken{AccessToken: "tok", TokenType: "Bearer", ExpiresIn: 3600},
+	}
+	handler := NewAuthHandler(provider, kycCheckerStub{}, false)
+	app := fiber.New()
+	app.Get("/auth/me", middleware.RequireCookieAuth(provider), handler.Me)
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	req.AddCookie(&http.Cookie{Name: "access_token", Value: "valid-token"})
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if body["subject"] != "stub-user" {
+		t.Errorf("expected subject stub-user, got %v", body["subject"])
+	}
+}
+
+func TestMeMissingToken(t *testing.T) {
+	t.Parallel()
+	provider := authProviderStub{}
+	handler := NewAuthHandler(provider, kycCheckerStub{}, false)
+	app := fiber.New()
+	app.Get("/auth/me", middleware.RequireCookieAuth(provider), handler.Me)
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestMeInvalidToken(t *testing.T) {
+	t.Parallel()
+	provider := authProviderStub{err: errors.New("bad token")}
+	handler := NewAuthHandler(provider, kycCheckerStub{}, false)
+	app := fiber.New()
+	app.Get("/auth/me", middleware.RequireCookieAuth(provider), handler.Me)
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	req.AddCookie(&http.Cookie{Name: "access_token", Value: "bad-token"})
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
+// ---------- RegisterParticipant role validation ----------
+
+func TestRegisterParticipantInvalidRole(t *testing.T) {
+	t.Parallel()
+	stub := participantOnboarderStub{
+		result: interfaces.OnboardParticipantResult{UserID: "uid"},
+	}
+	handler := NewComplianceHandler(stub)
+	app := fiber.New()
+	app.Post("/compliance/register", handler.RegisterParticipant)
+
+	body, _ := json.Marshal(map[string]string{
+		"username": "banco-brasil",
+		"email":    "admin@bb.com",
+		"role":     "ROLE_GOVERNANCE",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/compliance/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid role, got %d", resp.StatusCode)
+	}
+}
+
+// ---------- userManagerStub for GovernanceHandler tests ----------
+
+type userManagerStub struct {
+	users []interfaces.UserSummary
+	user  interfaces.UserDetail
+	err   error
+}
+
+func (s userManagerStub) ListUsers(_ context.Context, _, _ string) ([]interfaces.UserSummary, int, error) {
+	return s.users, len(s.users), s.err
+}
+
+func (s userManagerStub) GetUser(_ context.Context, _ string) (interfaces.UserDetail, error) {
+	return s.user, s.err
+}
+
+// ---------- GovernanceHandler ListUsers tests ----------
+
+func TestListUsersSuccess(t *testing.T) {
+	t.Parallel()
+	stub := userManagerStub{
+		users: []interfaces.UserSummary{
+			{UserID: "uid-1", InstitutionName: "Banco do Brasil", Role: "ROLE_COMMERCIAL_BANK", Status: "ACTIVE", WalletAddress: "0xABCD"},
+		},
+	}
+	handler := NewGovernanceHandler(nil).WithUserManager(stub)
+	app := fiber.New()
+	app.Get("/governance/users", handler.ListUsers)
+
+	req := httptest.NewRequest(http.MethodGet, "/governance/users", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if body["total"].(float64) != 1 {
+		t.Errorf("expected total=1, got %v", body["total"])
+	}
+}
+
+func TestListUsersNotAvailable(t *testing.T) {
+	t.Parallel()
+	handler := NewGovernanceHandler(nil)
+	app := fiber.New()
+	app.Get("/governance/users", handler.ListUsers)
+
+	req := httptest.NewRequest(http.MethodGet, "/governance/users", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d", resp.StatusCode)
+	}
+}
+
+func TestListUsersError(t *testing.T) {
+	t.Parallel()
+	stub := userManagerStub{err: errors.New("backend error")}
+	handler := NewGovernanceHandler(nil).WithUserManager(stub)
+	app := fiber.New()
+	app.Get("/governance/users", handler.ListUsers)
+
+	req := httptest.NewRequest(http.MethodGet, "/governance/users", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", resp.StatusCode)
+	}
+}
+
+// ---------- GovernanceHandler GetUser tests ----------
+
+func TestGetUserSuccess(t *testing.T) {
+	t.Parallel()
+	stub := userManagerStub{
+		user: interfaces.UserDetail{
+			UserID:   "uid-1",
+			Username: "banco-brasil",
+			Email:    "admin@bb.com",
+			Role:     "ROLE_COMMERCIAL_BANK",
+			Status:   "ACTIVE",
+		},
+	}
+	handler := NewGovernanceHandler(nil).WithUserManager(stub)
+	app := fiber.New()
+	app.Get("/governance/users/:userId", handler.GetUser)
+
+	req := httptest.NewRequest(http.MethodGet, "/governance/users/uid-1", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if body["username"] != "banco-brasil" {
+		t.Errorf("expected username banco-brasil, got %v", body["username"])
+	}
+}
+
+func TestGetUserNotFound(t *testing.T) {
+	t.Parallel()
+	stub := userManagerStub{err: errors.New("not found: user not found")}
+	handler := NewGovernanceHandler(nil).WithUserManager(stub)
+	app := fiber.New()
+	app.Get("/governance/users/:userId", handler.GetUser)
+
+	req := httptest.NewRequest(http.MethodGet, "/governance/users/unknown-id", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestGetUserNotAvailable(t *testing.T) {
+	t.Parallel()
+	handler := NewGovernanceHandler(nil)
+	app := fiber.New()
+	app.Get("/governance/users/:userId", handler.GetUser)
+
+	req := httptest.NewRequest(http.MethodGet, "/governance/users/uid-1", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d", resp.StatusCode)
 	}
 }

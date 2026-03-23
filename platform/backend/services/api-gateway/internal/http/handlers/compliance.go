@@ -151,6 +151,11 @@ func (h *ComplianceHandler) RegisterParticipant(c *fiber.Ctx) error {
 			"error": "username, email, and role are required",
 		})
 	}
+	if !domain.IsAdminRole(body.Role) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid role: must be one of ROLE_COMMERCIAL_BANK, ROLE_TREASURY, ROLE_NOC, ROLE_SUPERVISOR, ROLE_GOVERNANCE_OFFICER",
+		})
+	}
 
 	result, err := h.onboarder.OnboardParticipant(c.UserContext(), interfaces.OnboardParticipantRequest{
 		Username:        body.Username,

@@ -45,6 +45,8 @@ type Client interface {
 	// the user's actual username, which may differ from the UUID when UpdateUsername
 	// is blocked by a read-only username policy.
 	GetUserUsername(ctx context.Context, adminToken, userID string) (string, error)
+	// GetUserEmail returns the email address for the user identified by userID (UUID).
+	GetUserEmail(ctx context.Context, adminToken, userID string) (string, error)
 }
 
 type jwksCache struct {
@@ -471,6 +473,36 @@ func (c *keycloakClient) GetUserUsername(ctx context.Context, adminToken, userID
 		return "", fmt.Errorf("keycloak: user %s has no username", userID)
 	}
 	return user.Username, nil
+}
+
+// GetUserEmail fetches the email address for the user identified by userID (UUID)
+// via the Keycloak Admin REST API.
+func (c *keycloakClient) GetUserEmail(ctx context.Context, adminToken, userID string) (string, error) {
+	userURL := fmt.Sprintf("%s/%s", c.adminUsersURL(), userID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, userURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("keycloak: building get-user-email request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("keycloak: get-user-email request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("keycloak: get-user-email returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var user struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return "", fmt.Errorf("keycloak: decoding get-user-email response: %w", err)
+	}
+	return user.Email, nil
 }
 
 // extractRealmRoles extracts the roles array from the Keycloak claim

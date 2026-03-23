@@ -17,6 +17,7 @@ import (
 const (
 	upsertParticipantMethod           = "/compliance.v1.ComplianceService/UpsertParticipant"
 	getParticipantByUserMethod        = "/compliance.v1.ComplianceService/GetParticipantByUser"
+	listParticipantsMethod            = "/compliance.v1.ComplianceService/ListParticipants"
 	createAuditLogMethod              = "/compliance.v1.ComplianceService/CreateAuditLog"
 	issueParticipantCertificateMethod = "/compliance.v1.ComplianceService/IssueParticipantCertificate"
 	manageParticipantStatusMethod     = "/compliance.v1.ComplianceService/ManageParticipantStatus"
@@ -57,10 +58,17 @@ type IssuedCertificate struct {
 	ExpiresAt  string
 }
 
+// ParticipantFilter holds optional filters for ListParticipants.
+type ParticipantFilter struct {
+	Role   string
+	Status string
+}
+
 // Client defines the compliance gRPC operations used by the identity service.
 type Client interface {
 	UpsertParticipant(ctx context.Context, p Participant) error
 	GetParticipantByUser(ctx context.Context, userID string) (Participant, bool, error)
+	ListParticipants(ctx context.Context, filter ParticipantFilter) ([]Participant, error)
 	CreateAuditLog(ctx context.Context, entry AuditEntry) error
 	IssueParticipantCertificate(ctx context.Context, userID, role, institutionName, cnpj string) (IssuedCertificate, error)
 	ManageParticipantStatus(ctx context.Context, subject, status, reason string) error
@@ -226,6 +234,41 @@ func (c *grpcClient) IssueParticipantCertificate(ctx context.Context, userID, ro
 		PrivKeyPEM: resp.PrivKeyPEM,
 		ExpiresAt:  resp.ExpiresAt,
 	}, nil
+}
+
+func (c *grpcClient) ListParticipants(ctx context.Context, filter ParticipantFilter) ([]Participant, error) {
+	req := struct {
+		Role   string `json:"role,omitempty"`
+		Status string `json:"status,omitempty"`
+	}{Role: filter.Role, Status: filter.Status}
+
+	var resp struct {
+		Participants []struct {
+			UserID          string `json:"user_id"`
+			InstitutionName string `json:"institution_name"`
+			BankCode        string `json:"bank_code"`
+			CountryCode     string `json:"country_code"`
+			Role            string `json:"role"`
+			WalletAddress   string `json:"wallet_address"`
+			Status          string `json:"status"`
+		} `json:"participants"`
+	}
+	if err := c.cc.Invoke(ctx, listParticipantsMethod, &req, &resp, grpc.ForceCodec(c.codec)); err != nil {
+		return nil, err
+	}
+	result := make([]Participant, 0, len(resp.Participants))
+	for _, p := range resp.Participants {
+		result = append(result, Participant{
+			UserID:          p.UserID,
+			InstitutionName: p.InstitutionName,
+			BankCode:        p.BankCode,
+			CountryCode:     p.CountryCode,
+			Role:            p.Role,
+			WalletAddress:   p.WalletAddress,
+			Status:          p.Status,
+		})
+	}
+	return result, nil
 }
 
 func (c *grpcClient) ManageParticipantStatus(ctx context.Context, subject, status, reason string) error {

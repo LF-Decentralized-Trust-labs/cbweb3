@@ -52,6 +52,8 @@ type identityServiceServer interface {
 	GetKYCStatus(ctx context.Context, req *contract.GetKYCStatusRequest) (*contract.GetKYCStatusResponse, error)
 	ProvisionParticipant(ctx context.Context, req *contract.ProvisionParticipantRequest) (*contract.ProvisionParticipantResponse, error)
 	OnboardParticipant(ctx context.Context, req *contract.OnboardParticipantRequest) (*contract.OnboardParticipantResponse, error)
+	ListUsers(ctx context.Context, req *contract.ListUsersRequest) (*contract.ListUsersResponse, error)
+	GetUser(ctx context.Context, req *contract.GetUserRequest) (*contract.GetUserResponse, error)
 	IssueLoginNonce(ctx context.Context, req *contract.IssueLoginNonceRequest) (*contract.IssueLoginNonceResponse, error)
 	VerifyPKILogin(ctx context.Context, req *contract.VerifyPKILoginRequest) (*contract.VerifyPKILoginResponse, error)
 	ChangeClientSecret(ctx context.Context, req *contract.ChangeClientSecretRequest) (*contract.ChangeClientSecretResponse, error)
@@ -83,6 +85,8 @@ func New(kc keycloak.Client, kmsProvider kms.Provider, compliance complianceclie
 			{MethodName: "GetKYCStatus", Handler: getKYCStatusHandler},
 			{MethodName: "ProvisionParticipant", Handler: provisionParticipantHandler},
 			{MethodName: "OnboardParticipant", Handler: onboardParticipantHandler},
+			{MethodName: "ListUsers", Handler: listUsersHandler},
+			{MethodName: "GetUser", Handler: getUserHandler},
 			{MethodName: "IssueLoginNonce", Handler: issueLoginNonceHandler},
 			{MethodName: "VerifyPKILogin", Handler: verifyPKILoginHandler},
 			{MethodName: "ChangeClientSecret", Handler: changeClientSecretHandler},
@@ -334,6 +338,71 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *contract.
 
 	s.emitAudit(ctx, "ONBOARD_PARTICIPANT", userID, resp.WalletAddress, "", correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS")
 	return resp, nil
+}
+
+// --- User Management ---
+
+// ListUsers returns a filtered list of registered participants sourced from the compliance service.
+func (s *identityService) ListUsers(ctx context.Context, req *contract.ListUsersRequest) (*contract.ListUsersResponse, error) {
+	participants, err := s.compliance.ListParticipants(ctx, complianceclient.ParticipantFilter{
+		Role:   req.Role,
+		Status: req.Status,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list users: %v", err)
+	}
+	users := make([]contract.UserSummary, 0, len(participants))
+	for _, p := range participants {
+		users = append(users, contract.UserSummary{
+			UserID:          p.UserID,
+			InstitutionName: p.InstitutionName,
+			Role:            p.Role,
+			Status:          p.Status,
+			WalletAddress:   p.WalletAddress,
+			Country:         p.CountryCode,
+			BankCode:        p.BankCode,
+		})
+	}
+	return &contract.ListUsersResponse{Users: users, Total: len(users)}, nil
+}
+
+// GetUser returns the full profile of a single participant, enriched with the Keycloak username.
+func (s *identityService) GetUser(ctx context.Context, req *contract.GetUserRequest) (*contract.GetUserResponse, error) {
+	if req.UserID == "" {
+		return nil, status.Error(codes.InvalidArgument, "user_id is required")
+	}
+	participant, found, err := s.compliance.GetParticipantByUser(ctx, req.UserID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get user: compliance lookup: %v", err)
+	}
+	if !found {
+		return nil, status.Error(codes.NotFound, "user not found")
+	}
+
+	adminToken, err := s.keycloak.GetAdminToken(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get user: admin token: %v", err)
+	}
+	username, err := s.keycloak.GetUserUsername(ctx, adminToken, req.UserID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get user: keycloak lookup: %v", err)
+	}
+	email, err := s.keycloak.GetUserEmail(ctx, adminToken, req.UserID)
+	if err != nil {
+		log.Printf("WARN: GetUser: email lookup %s: %v (non-fatal)", req.UserID, err)
+	}
+
+	return &contract.GetUserResponse{
+		UserID:          participant.UserID,
+		Username:        username,
+		Email:           email,
+		InstitutionName: participant.InstitutionName,
+		Role:            participant.Role,
+		Status:          participant.Status,
+		WalletAddress:   participant.WalletAddress,
+		Country:         participant.CountryCode,
+		BankCode:        participant.BankCode,
+	}, nil
 }
 
 // --- Audit helper ---
@@ -718,5 +787,33 @@ func changeClientSecretHandler(srv any, ctx context.Context, dec func(any) error
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: contract.ChangeClientSecretMethod}
 	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
 		return srv.(*identityService).ChangeClientSecret(ctx, req.(*contract.ChangeClientSecretRequest))
+	})
+}
+
+func listUsersHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(contract.ListUsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(*identityService).ListUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: contract.ListUsersMethod}
+	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
+		return srv.(*identityService).ListUsers(ctx, req.(*contract.ListUsersRequest))
+	})
+}
+
+func getUserHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(contract.GetUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(*identityService).GetUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: contract.GetUserMethod}
+	return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) {
+		return srv.(*identityService).GetUser(ctx, req.(*contract.GetUserRequest))
 	})
 }
