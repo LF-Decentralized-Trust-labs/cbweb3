@@ -54,7 +54,7 @@ contracts/dependencies
 
 
 # Besu
-deploy/local/spoke-besu-a/tmpFiles/
+*/**/tmpFiles
 deploy/local/spoke-besu-b/tmpFiles/
 deploy/local/hub-besu/tmpFiles/
 
