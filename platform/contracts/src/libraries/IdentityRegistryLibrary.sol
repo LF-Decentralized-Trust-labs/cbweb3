@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.20;
+
+/// @title IdentityLib
+/// @notice Shared data structures and constants for the CBDC network identity management.
+/// @dev This library centralizes enums and structs to ensure byte-code consistency across the ecosystem.
+library IdentityRegistryLibrary {
+    /// @notice Possible compliance states for an institutional participant.
+    enum KycStatus {
+        None,
+        Pending,
+        Verified,
+        Suspended,
+        Expired
+    }
+
+    /// @notice Functional roles assigned to network participants.
+    enum ParticipantRole {
+        NONE,
+        CENTRAL_BANK,
+        COMMERCIAL_BANK,
+        LIQUIDITY_PROVIDER
+    }
+
+    /// @notice Core entity representing an institutional identity on the ledger.
+    /// @param legalName Registered legal name of the institution.
+    /// @param role Functional role (e.g., Commercial Bank) governing access rights.
+    /// @param status Current KYC/AML verification state.
+    /// @param zkPointer Hash reference to private credentials handled by the privacy layer.
+    /// @param lastUpdate Unix timestamp of the last identity modification.
+    struct Participant {
+        string legalName;
+        ParticipantRole role;
+        KycStatus status;
+        bytes32 zkPointer;
+        uint256 lastUpdate;
+    }
+}

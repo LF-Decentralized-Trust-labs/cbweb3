@@ -1,5 +1,8 @@
 include contracts/.env
 
+contracts.setup:
+	@cd contracts && forge soldeer install
+
 contracts.fmt:
 	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge fmt
 
@@ -33,6 +36,9 @@ contracts.deploy-htlc-besu:
 contracts.deploy-amm-besu:
 	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/AutomatedMarketMaker.s.sol:DeployAMM --rpc-url ${BESU_RPC_URL} --broadcast
 
+contracts.deploy-identity-registry-besu:
+	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/IdentityRegistry.s.sol:DeployIdentityRegistry --rpc-url ${BESU_RPC_URL} --broadcast
+
 contracts.deploy-cbweb3-besu:
 	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3.s.sol:DeployCBWeb3 --rpc-url ${BESU_RPC_URL} --broadcast
 
@@ -41,4 +47,4 @@ contracts.slither:
 
 contracts.full-check: contracts.build contracts.fmt contracts.lint contracts.test contracts.coverage contracts.slither
 
-.PHONY: contracts.fmt contracts.lint contracts.test contracts.coverage contracts.build contracts.clean contracts.gen-doc contracts.serve-doc contracts.deploy-tcebm-besu contracts.deploy-htlc-besu contracts.deploy-amm-besu contracts.deploy-cbweb3-besu contracts.slither contracts.full-check
+.PHONY: contracts.setup contracts.fmt contracts.lint contracts.test contracts.coverage contracts.build contracts.clean contracts.gen-doc contracts.serve-doc contracts.deploy-tcebm-besu contracts.deploy-htlc-besu contracts.deploy-amm-besu contracts.deploy-identity-registry-besu contracts.deploy-cbweb3-besu contracts.slither contracts.full-check

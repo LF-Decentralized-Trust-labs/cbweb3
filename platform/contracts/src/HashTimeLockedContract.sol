@@ -30,13 +30,13 @@ contract HashTimeLockedContract is IHashTimeLockedContract, ReentrancyGuard {
         uint256 timeLock
     ) external nonReentrant {
         if (_locks[contractId].state != HashTimeLockedContractLibrary.HTLCState.INVALID) {
-            revert HashTimeLockedContractLibrary.HTLC__ContractAlreadyExists();
+            revert HTLC__ContractAlreadyExists();
         }
         if (amount == 0) {
-            revert HashTimeLockedContractLibrary.HTLC__InvalidAmount();
+            revert HTLC__InvalidAmount();
         }
         if (timeLock <= block.timestamp) {
-            revert HashTimeLockedContractLibrary.HTLC__TimeLockExpired();
+            revert HTLC__TimeLockExpired();
         }
 
         _locks[contractId] = HashTimeLockedContractLibrary.LockDetails({
@@ -62,11 +62,11 @@ contract HashTimeLockedContract is IHashTimeLockedContract, ReentrancyGuard {
         HashTimeLockedContractLibrary.LockDetails storage lockDetails = _locks[contractId];
 
         if (lockDetails.state != HashTimeLockedContractLibrary.HTLCState.LOCKED) {
-            revert HashTimeLockedContractLibrary.HTLC__ContractNotLocked();
+            revert HTLC__ContractNotLocked();
         }
 
         if (sha256(abi.encodePacked(secret)) != lockDetails.hashLock) {
-            revert HashTimeLockedContractLibrary.HTLC__InvalidSecret();
+            revert HTLC__InvalidSecret();
         }
 
         lockDetails.secret = secret;
@@ -84,11 +84,11 @@ contract HashTimeLockedContract is IHashTimeLockedContract, ReentrancyGuard {
         HashTimeLockedContractLibrary.LockDetails storage lockDetails = _locks[contractId];
 
         if (lockDetails.state != HashTimeLockedContractLibrary.HTLCState.LOCKED) {
-            revert HashTimeLockedContractLibrary.HTLC__ContractNotLocked();
+            revert HTLC__ContractNotLocked();
         }
 
         if (block.timestamp < lockDetails.timeLock) {
-            revert HashTimeLockedContractLibrary.HTLC__TimeLockNotExpired();
+            revert HTLC__TimeLockNotExpired();
         }
 
         lockDetails.state = HashTimeLockedContractLibrary.HTLCState.REFUNDED;
