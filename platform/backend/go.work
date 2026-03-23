@@ -1,9 +1,0 @@
-go 1.25.5
-
-use (
-	./services/api-gateway
-	./services/auth
-	./services/compliance
-	./shared/blockchain
-	./shared/identity
-)

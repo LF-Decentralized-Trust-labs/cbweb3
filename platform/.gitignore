@@ -64,3 +64,6 @@ deploy/local/hub-besu/tmpFiles/
 *.pem
 *.srl
 *.csr
+
+*/**/go.work
+*/**/go.work.sum
