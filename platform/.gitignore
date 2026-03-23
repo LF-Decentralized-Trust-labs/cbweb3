@@ -59,8 +59,8 @@ deploy/local/spoke-besu-b/tmpFiles/
 deploy/local/hub-besu/tmpFiles/
 
 # PKI — local CA credentials (never commit private keys or certificates)
-backend/config/pki/*.key
-backend/config/pki/*.crt
-backend/config/pki/*.pem
-backend/config/pki/*.srl
-backend/config/pki/*.csr
+*.key
+*.crt
+*.pem
+*.srl
+*.csr
