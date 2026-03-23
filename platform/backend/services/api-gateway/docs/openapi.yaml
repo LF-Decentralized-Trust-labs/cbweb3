@@ -1,9 +1,13 @@
 openapi: 3.0.3
 info:
   title: CBWeb3 API Gateway
-  version: 1.0.0
+  version: 2.0.0
   description: >
-    OpenAPI specification for the currently implemented API Gateway endpoints.
+    OpenAPI specification for the CBWeb3 platform API Gateway.
+    Implements authentication, participant onboarding, KYC/AML compliance,
+    and governance operations over the identity service (Keycloak + KMS).
+    
+    Security note: All /compliance write endpoints require CENTRAL_BANK role.
 servers:
   - url: http://localhost:8080
     description: Local development server
@@ -11,9 +15,14 @@ tags:
   - name: Health
     description: Service health endpoint
   - name: Authentication
-    description: Login and wallet binding flows
+    description: Login, refresh, logout and onboarding
   - name: Compliance
-    description: KYC status lookup
+    description: KYC credential issuance, verification, AML screening, and governance
+  - name: Governance
+    description: >
+      Governance Portal — endpoints exclusive to the Central Bank (ROLE_GOVERNANCE).
+      Participant registration, PKI certificate management, account control,
+      circuit breaker, global parameters, and audit logs.
 paths:
   /healthz:
     get:
@@ -28,10 +37,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
 
-  /auth/login:
+  /api/v1/auth/login:
     post:
       tags: [Authentication]
-      summary: Authenticate client credentials
+      summary: Authenticate client credentials and obtain access + refresh tokens
       operationId: login
       requestBody:
         required: true
@@ -47,29 +56,70 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
         "400":
-          description: Invalid body or required fields missing
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Issue a new access token from a valid refresh token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: New access token issued
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                invalidBody:
-                  value: { error: "invalid body" }
-                missingFields:
-                  value: { error: "clientId and clientSecret are required" }
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
-          description: Invalid credentials
+          description: Invalid or expired refresh token
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: "invalid credentials"
+                error: "invalid or expired refresh token"
 
-  /auth/wallet/bind:
+  /api/v1/auth/logout:
     post:
       tags: [Authentication]
-      summary: Bind wallet to authenticated subject
+      summary: Revoke the current access token (logout)
+      operationId: logout
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Logged out successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "logged out successfully"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/wallet/bind:
+    post:
+      tags: [Authentication]
+      summary: Verify PKI login challenge and issue tokens
+      description: >
+        Step 2 of PKI authentication flow. The client submits:
+        user_id, the ECDSA signature (DER hex) of the login nonce, and the
+        participant X.509 certificate PEM issued by the Central Bank CA.
       operationId: walletBind
       security:
         - BearerAuth: []
@@ -78,79 +128,57 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/WalletBindRequest"
+              type: object
+              required: [user_id, nonce_signature_hex, cert_pem]
+              properties:
+                user_id:
+                  type: string
+                nonce_signature_hex:
+                  type: string
+                  description: DER-encoded ECDSA signature in hex format
+                cert_pem:
+                  type: string
+                  description: PEM-encoded participant certificate
       responses:
         "200":
-          description: Wallet successfully bound
+          description: PKI verification successful
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WalletBindResponse"
+                $ref: "#/components/schemas/AuthResponse"
         "400":
-          description: Invalid body, missing fields, or invalid signature
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                invalidBody:
-                  value: { error: "invalid body" }
-                missingFields:
-                  value: { error: "walletAddress and signature are required" }
-                invalidSignature:
-                  value: { error: "invalid signature" }
+          $ref: "#/components/responses/BadRequest"
         "401":
-          description: Missing/invalid bearer token or invalid token claims
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                missingBearer:
-                  value: { error: "missing bearer token" }
-                invalidToken:
-                  value: { error: "invalid token" }
-                invalidClaims:
-                  value: { error: "invalid token claims" }
-        "403":
-          description: KYC rejected
+          description: PKI verification failed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: "kyc status rejected"
-        "409":
-          description: Wallet/user binding conflict
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                walletConflict:
-                  value: { error: "wallet already bound" }
-                userConflict:
-                  value: { error: "user already bound to another wallet" }
-        "500":
-          description: Internal bind error
+                error: "PKI verification failed"
+        "501":
+          description: PKI authentication not configured
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: "unable to bind wallet"
+                error: "PKI authentication not configured"
 
-  /compliance/kyc/status/{subject}:
+  /api/v1/compliance/kyc/status/{subject}:
     get:
       tags: [Compliance]
-      summary: Get KYC status by subject
+      summary: Get KYC lifecycle status for a subject
       operationId: getKycStatus
+      security:
+        - BearerAuth: []
       parameters:
         - name: subject
           in: path
           required: true
           schema:
             type: string
+          description: The userID or participant identifier
       responses:
         "200":
           description: KYC status returned
@@ -159,13 +187,582 @@ paths:
               schema:
                 $ref: "#/components/schemas/KYCStatusResponse"
         "400":
-          description: Subject is required
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/compliance/approve-kyc:
+    post:
+      tags: [Compliance]
+      summary: >
+        Approve KYC for a participant (GOVERNANCE only).
+        Sets status to ACTIVE in PostgreSQL and calls setParticipant(wallet, role, true)
+        on the ParticipantRegistry contract (Hyperledger Besu).
+      operationId: approveKyc
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject:
+                  type: string
+                  description: Keycloak user ID of the participant to approve
+                reason:
+                  type: string
+                  description: Optional reason for audit log
+      responses:
+        "200":
+          description: Participant approved — ACTIVE on-chain and off-chain
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subject, status]
+                properties:
+                  subject:
+                    type: string
+                  status:
+                    type: string
+                    example: ACTIVE
+                  tx_hash:
+                    type: string
+                    description: On-chain transaction hash (absent if Besu unavailable)
+                    example: "0x1234..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Participant not found
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-              example:
-                error: "subject is required"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/compliance/aml/screen:
+    post:
+      tags: [Compliance]
+      summary: >
+        AML/CFT screening gate — checks if a subject is sanctioned.
+        Returns 403 if FROZEN, REVOKED, or REJECTED (REQ-COM-007).
+      operationId: amlScreen
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject:
+                  type: string
+      responses:
+        "200":
+          description: Subject is not sanctioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AMLScreenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Subject is sanctioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AMLScreenResponse"
+
+  /api/v1/compliance/participants/provision:
+    post:
+      tags: [Compliance]
+      summary: >
+        Set KYC status for a participant (CENTRAL_BANK only).
+        Used for initial approval, freeze, unfreeze, and revocation.
+      operationId: provisionParticipant
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisionRequest"
+      responses:
+        "200":
+          description: Participant provisioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/compliance/accounts/freeze:
+    post:
+      tags: [Compliance]
+      summary: >
+        Freeze an account (CENTRAL_BANK only — REQ-COM-003, UT-API-16).
+        Sets KYC status to FROZEN — all operations are suspended.
+      operationId: freezeAccount
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject:
+                  type: string
+      responses:
+        "200":
+          description: Account frozen
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/compliance/accounts/unfreeze:
+    post:
+      tags: [Compliance]
+      summary: Restore a frozen account to APPROVED status (CENTRAL_BANK only)
+      operationId: unfreezeAccount
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject:
+                  type: string
+      responses:
+        "200":
+          description: Account unfrozen
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/compliance/register:
+    post:
+      tags: [Compliance]
+      summary: Register a new participant (Commercial Bank or Treasury user) — CENTRAL_BANK only
+      description: >
+        Called by Central Bank administrators to onboard new Commercial Banks and
+        Treasury users. The identity service creates a Keycloak user, optionally
+        generates a KMS key pair, and optionally registers the wallet address
+        on-chain in the ParticipantRegistry smart contract (signed with CB_PRIVATE_KEY).
+      operationId: registerParticipant
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterParticipantRequest"
+      responses:
+        "201":
+          description: Participant successfully registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterParticipantResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Participant already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ---------------------------------------------------------------------------
+  # Governance Portal — ROLE_GOVERNANCE only
+  # All endpoints below require: Authorization: Bearer <CB_TOKEN>
+  # ---------------------------------------------------------------------------
+
+  /api/v1/governance/participants:
+    post:
+      tags: [Governance]
+      summary: Register a participant in the registry (without CSR)
+      description: >
+        Inserts a participant directly into the compliance-orchestrator database.
+        Does not create a Keycloak user — use this endpoint when the Keycloak user
+        already exists and you only want to insert/update the compliance record.
+        To create the Keycloak user and register, use POST /api/v1/compliance/register.
+      operationId: govRegisterParticipant
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovParticipantRequest"
+      responses:
+        "201":
+          description: Participant registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string }
+                  status:  { type: string, example: PENDING }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/registry:
+    get:
+      tags: [Governance]
+      summary: List registered participants
+      operationId: govGetRegistry
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [PENDING, ACTIVE, FROZEN, REVOKED] }
+          description: Filter by status
+        - name: search
+          in: query
+          schema: { type: string }
+          description: Search by name, CNPJ, or user_id
+      responses:
+        "200":
+          description: List of participants
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participants:
+                    type: array
+                    items: { $ref: "#/components/schemas/ParticipantRecord" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/registry/csr:
+    post:
+      tags: [Governance]
+      summary: Sign a PKCS#10 CSR submitted by the participant (preferred flow)
+      description: >
+        The participant generates their own ECDSA-P256 key pair locally,
+        creates a PKCS#10 CSR, and delivers it to the Central Bank out-of-band.
+        The Central Bank submits the CSR via this endpoint; the CA signs the certificate
+        without ever seeing the participant's private key.
+        The participant is registered with status PENDING until KYC approval
+        (POST /api/v1/compliance/approve-kyc).
+
+        Prerequisite: the participant's Keycloak user must already exist
+        (created via POST /api/v1/compliance/register). The user_id in the payload
+        is the UUID returned by that endpoint.
+      operationId: govSubmitCSR
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitCSRRequest"
+            example:
+              csr_pem: "-----BEGIN CERTIFICATE REQUEST-----\nMIIB...-----END CERTIFICATE REQUEST-----"
+              user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+              role: "ROLE_COMMERCIAL_BANK"
+              institution_name: "Banco Itau S.A."
+              cnpj: "60.701.190/0001-04"
+      responses:
+        "201":
+          description: CSR signed — X.509 certificate issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitCSRResponse"
+        "400":
+          description: Missing required field or invalid CSR signature
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500":
+          description: CA_CERT_FILE not configured or internal error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v1/governance/accounts:
+    get:
+      tags: [Governance]
+      summary: List accounts with operational status
+      operationId: govGetAccounts
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items: { $ref: "#/components/schemas/ParticipantRecord" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/accounts/freeze:
+    post:
+      tags: [Governance]
+      summary: Freeze a participant account
+      operationId: govFreezeAccount
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubjectReasonRequest" }
+      responses:
+        "200":
+          description: Account frozen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subject: { type: string }
+                  status:  { type: string, example: FROZEN }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/accounts/unfreeze:
+    post:
+      tags: [Governance]
+      summary: Unfreeze a participant account
+      operationId: govUnfreezeAccount
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubjectReasonRequest" }
+      responses:
+        "200":
+          description: Account unfrozen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subject: { type: string }
+                  status:  { type: string, example: ACTIVE }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/circuit-breaker/status:
+    get:
+      tags: [Governance]
+      summary: Get global circuit breaker status
+      operationId: govGetCircuitBreakerStatus
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Current circuit breaker status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CircuitBreakerStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/circuit-breaker/toggle:
+    post:
+      tags: [Governance]
+      summary: Enable or disable the global circuit breaker
+      operationId: govToggleCircuitBreaker
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pause, reason]
+              properties:
+                pause:
+                  type: boolean
+                  description: true to pause, false to resume
+                reason:
+                  type: string
+                  example: "emergency maintenance"
+      responses:
+        "200":
+          description: State changed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_paused: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/parameters:
+    get:
+      tags: [Governance]
+      summary: Get global system parameters
+      operationId: govGetParameters
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Current parameters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SystemParameters" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    put:
+      tags: [Governance]
+      summary: Update global system parameters
+      description: The `reason` field is required — returns 400 if absent.
+      operationId: govUpdateParameters
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/SystemParameters"
+                - type: object
+                  required: [reason]
+                  properties:
+                    reason:
+                      type: string
+                      example: "quarterly operational adjustment"
+      responses:
+        "200":
+          description: Parameters updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/audit/logs:
+    get:
+      tags: [Governance]
+      summary: Get audit logs
+      operationId: govGetAuditLogs
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [SESSION, CREDENTIAL, FREEZE, CIRCUIT_BREAKER, PARAMETER, PARTICIPANT]
+        - name: severity
+          in: query
+          schema: { type: string, enum: [INFO, WARNING, CRITICAL] }
+        - name: from_date
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to_date
+          in: query
+          schema: { type: string, format: date-time }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditRecord" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
 components:
   securitySchemes:
@@ -173,6 +770,37 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: >
+        JWT issued by the identity service. Includes enriched claims:
+        sub, roles, did, wallet, country, bank_id, privacy_group (D7 §7.4).
+
+  responses:
+    BadRequest:
+      description: Invalid body or missing required fields
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Insufficient permissions (requires CENTRAL_BANK role)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "insufficient permissions"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
     ErrorResponse:
@@ -180,6 +808,14 @@ components:
       required: [error]
       properties:
         error:
+          type: string
+    ErrorCodeResponse:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+        code:
           type: string
 
     HealthResponse:
@@ -196,9 +832,18 @@ components:
       properties:
         clientId:
           type: string
+          example: bank-a
         clientSecret:
           type: string
           format: password
+          example: secret-a
+
+    RefreshTokenRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
 
     AuthResponse:
       type: object
@@ -206,34 +851,14 @@ components:
       properties:
         accessToken:
           type: string
+        refreshToken:
+          type: string
         expiresIn:
           type: integer
+          example: 3600
         tokenType:
           type: string
           example: Bearer
-
-    WalletBindRequest:
-      type: object
-      required: [walletAddress, signature]
-      properties:
-        walletAddress:
-          type: string
-          description: Ethereum wallet address in hex format
-        signature:
-          type: string
-          description: Signature of CBWEB3_WALLET_BIND message
-
-    WalletBindResponse:
-      type: object
-      required: [userId, walletAddress, status]
-      properties:
-        userId:
-          type: string
-        walletAddress:
-          type: string
-        status:
-          type: string
-          example: BOUND
 
     KYCStatusResponse:
       type: object
@@ -243,4 +868,237 @@ components:
           type: string
         status:
           type: string
-          enum: [APPROVED, PENDING, REJECTED]
+          enum: [PENDING, APPROVED, FROZEN, REVOKED, REJECTED]
+
+    AMLScreenResponse:
+      type: object
+      required: [subject, status, sanctioned]
+      properties:
+        subject:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, FROZEN, REVOKED, REJECTED]
+        sanctioned:
+          type: boolean
+
+    ProvisionRequest:
+      type: object
+      required: [subject, status]
+      properties:
+        subject:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, FROZEN, REVOKED]
+
+    ProvisionResponse:
+      type: object
+      required: [subject, status]
+      properties:
+        subject:
+          type: string
+        status:
+          type: string
+
+    RegisterParticipantRequest:
+      type: object
+      required: [username, email, role]
+      properties:
+        username:
+          type: string
+          description: Keycloak username / login identifier for the new participant
+          example: "banco-brasil-admin"
+        email:
+          type: string
+          format: email
+          description: Email address of the new participant
+          example: "admin@bancodobrasil.com.br"
+        role:
+          type: string
+          description: >
+            Prefixed role to assign. One of: ROLE_COMMERCIAL_BANK, ROLE_NOC,
+            ROLE_SUPERVISOR, ROLE_TREASURY, ROLE_GOVERNANCE.
+          enum:
+            - ROLE_COMMERCIAL_BANK
+            - ROLE_NOC
+            - ROLE_SUPERVISOR
+            - ROLE_TREASURY
+            - ROLE_GOVERNANCE
+          example: "ROLE_COMMERCIAL_BANK"
+        institution_name:
+          type: string
+          description: Human-readable institution name
+          example: "Banco do Brasil S.A."
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+          example: "BR"
+        bank_code:
+          type: string
+          description: Optional regulatory or internal bank identifier
+          example: "001"
+
+    RegisterParticipantResponse:
+      type: object
+      required: [userId, role, status]
+      properties:
+        userId:
+          type: string
+          description: Keycloak UUID of the newly created user
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        role:
+          type: string
+          example: "ROLE_COMMERCIAL_BANK"
+        status:
+          type: string
+          description: >
+            Initial lifecycle status. Always PENDING — the participant must
+            submit a CSR via POST /governance/registry/csr,
+            and then be approved via POST /compliance/approve-kyc.
+          example: "PENDING"
+        walletAddress:
+          type: string
+          description: EVM address generated by the KMS (present for ROLE_COMMERCIAL_BANK)
+          example: "0xAbCd..."
+        txHash:
+          type: string
+          description: On-chain transaction hash from ParticipantRegistry.registerMember
+          example: "0x1234..."
+
+    # --- Governance schemas ---
+
+    GovParticipantRequest:
+      type: object
+      required: [user_id, role]
+      properties:
+        user_id:
+          type: string
+          description: Keycloak UUID of the participant (obtained from POST /api/v1/compliance/register)
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        role:
+          type: string
+          enum: [ROLE_COMMERCIAL_BANK, ROLE_TREASURY, ROLE_NOC, ROLE_SUPERVISOR, ROLE_GOVERNANCE_OFFICER]
+          example: ROLE_COMMERCIAL_BANK
+        institution_name:
+          type: string
+          example: "Banco Itau S.A."
+        cnpj:
+          type: string
+          example: "60.701.190/0001-04"
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, FROZEN, REVOKED]
+          default: PENDING
+
+    ParticipantRecord:
+      type: object
+      properties:
+        user_id:         { type: string }
+        institution_name: { type: string }
+        cnpj:            { type: string }
+        role:            { type: string }
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, FROZEN, REVOKED]
+        wallet_address:  { type: string }
+        cert_expiry:     { type: string, format: date-time }
+
+    SubmitCSRRequest:
+      type: object
+      required: [csr_pem, user_id, role, institution_name]
+      properties:
+        csr_pem:
+          type: string
+          description: >
+            PEM content of the PKCS#10 CSR generated by the participant via
+            `openssl req -new -key ec_key.pem -out bank.csr -subj "/CN=<user_id>/O=<institution>/OU=<role>/C=BR"`
+          example: "-----BEGIN CERTIFICATE REQUEST-----\nMIIB...-----END CERTIFICATE REQUEST-----"
+        user_id:
+          type: string
+          description: >
+            Keycloak UUID of the commercial bank. Obtained from the response of
+            POST /api/v1/compliance/register (field userId).
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        role:
+          type: string
+          enum: [ROLE_COMMERCIAL_BANK, ROLE_TREASURY]
+          example: ROLE_COMMERCIAL_BANK
+        institution_name:
+          type: string
+          example: "Banco Itau S.A."
+        cnpj:
+          type: string
+          example: "60.701.190/0001-04"
+
+    SubmitCSRResponse:
+      type: object
+      properties:
+        user_id:
+          type: string
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        cert_pem:
+          type: string
+          description: X.509 certificate signed by the Central Bank CA. Deliver to the participant.
+        expires_at:
+          type: string
+          format: date-time
+          example: "2027-03-20T00:00:00Z"
+
+    SubjectReasonRequest:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+          description: Keycloak UUID of the target participant
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        reason:
+          type: string
+          example: "suspected fraud"
+
+    CircuitBreakerStatus:
+      type: object
+      properties:
+        is_paused:  { type: boolean }
+        reason:     { type: string }
+        updated_at: { type: string, format: date-time }
+
+    SystemParameters:
+      type: object
+      properties:
+        transaction_minimum:
+          type: string
+          example: "10"
+        transaction_maximum:
+          type: string
+          example: "1000000"
+        slippage_tolerance:
+          type: number
+          format: float
+          example: 0.01
+        settlement_window:
+          type: integer
+          example: 60
+
+    AuditRecord:
+      type: object
+      properties:
+        log_id:          { type: string }
+        timestamp:       { type: string, format: date-time }
+        actor_subject:   { type: string }
+        actor_address:   { type: string }
+        action_type:     { type: string }
+        target_subject:  { type: string }
+        correlation_id:  { type: string }
+        ip_address:      { type: string }
+        result:          { type: string }
+        category:
+          type: string
+          enum: [SESSION, CREDENTIAL, FREEZE, CIRCUIT_BREAKER, PARAMETER, PARTICIPANT]
+        severity:
+          type: string
+          enum: [INFO, WARNING, CRITICAL]
+        details:
+          type: object
+          additionalProperties: true

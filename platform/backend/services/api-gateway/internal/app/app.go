@@ -2,55 +2,54 @@
 package app
 
 import (
-	"errors"
+	"fmt"
 
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
+	authadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
+	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/application/compliance"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 )
 
 func New(cfg config.Config) (*fiber.App, error) {
-	// The gateway always delegates authentication/token validation to identity gRPC.
-	identityGRPCProvider, err := auth.NewIdentityGRPCAuthProvider(cfg.IdentityGRPCAddr, cfg.RequestTimeout)
-	if err != nil {
-		return nil, err
-	}
-	tokenValidator, ok := any(identityGRPCProvider).(interfaces.TokenValidator)
-	if !ok {
-		return nil, errors.New("identity gRPC provider does not implement token validator")
-	}
-
-	identityManager, err := identityadapter.NewIdentityGRPCManager(cfg.IdentityGRPCAddr, cfg.RequestTimeout)
+	// Auth gRPC provider: auth + PKI nonce/verify methods.
+	identityGRPCProvider, err := authadapter.NewIdentityGRPCAuthProvider(cfg.AuthGRPCAddr, cfg.RequestTimeout)
 	if err != nil {
 		return nil, err
 	}
 
-	// Initialize compliance service.
-	complianceService := compliance.NewService(map[string]domain.KYCStatus{
-		"bank-a": domain.KYCApproved,
-		"bank-b": domain.KYCApproved,
-		"bank-z": domain.KYCRejected,
-	})
+	// AuthGRPCManager handles KYC + participant onboarding.
+	identityManager, err := identityadapter.NewIdentityGRPCManager(cfg.AuthGRPCAddr, cfg.RequestTimeout)
+	if err != nil {
+		return nil, err
+	}
 
-	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, complianceService)
-	complianceHandler := handlers.NewComplianceHandler(complianceService)
+	// Compliance gRPC adapter: governance portal operations (mandatory).
+	if cfg.ComplianceGRPCAddr == "" {
+		return nil, fmt.Errorf("COMPLIANCE_GRPC_ADDR is required but not set")
+	}
+	complianceGRPC, err := complianceadapter.NewGRPCAdapter(cfg.ComplianceGRPCAddr, cfg.RequestTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("compliance gRPC unavailable at %s: %w", cfg.ComplianceGRPCAddr, err)
+	}
+	governanceHandler := handlers.NewGovernanceHandler(complianceGRPC)
+
+	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager)
+	complianceHandler := handlers.NewComplianceHandler(identityManager)
 
 	fiberApp := fiber.New(
 		fiber.Config{
-			BodyLimit: 10 * 1024 * 1024, // 10MB limit
+			BodyLimit: 10 * 1024 * 1024,
 			AppName:   "api-gateway",
 		},
 	)
 	router.Setup(fiberApp, router.Dependencies{
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
-		TokenValidator:    tokenValidator,
+		GovernanceHandler: governanceHandler,
+		AuthProvider:      identityGRPCProvider,
 	})
 
 	return fiberApp, nil

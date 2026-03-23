@@ -8,14 +8,14 @@ import (
 
 func TestLoadConfig(t *testing.T) {
 	t.Setenv("APP_PORT", "9090")
-	t.Setenv("IDENTITY_GRPC_ADDR", "localhost:19091")
+	t.Setenv("AUTH_GRPC_ADDR", "localhost:19091")
 
 	cfg := Load()
 	if cfg.AppPort != "9090" {
 		t.Fatalf("unexpected app port: %s", cfg.AppPort)
 	}
-	if cfg.IdentityGRPCAddr != "localhost:19091" {
-		t.Fatalf("unexpected grpc addr: %s", cfg.IdentityGRPCAddr)
+	if cfg.AuthGRPCAddr != "localhost:19091" {
+		t.Fatalf("unexpected grpc addr: %s", cfg.AuthGRPCAddr)
 	}
 }
 

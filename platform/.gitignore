@@ -46,3 +46,24 @@ contracts/broadcast/*/31337/
 contracts/broadcast/**/dry-run/
 contracts/*.flattened.*
 contracts/dependencies
+
+.cursor/
+
+# Git worktrees
+.worktrees/
+
+
+# Besu
+*/**/tmpFiles
+deploy/local/spoke-besu-b/tmpFiles/
+deploy/local/hub-besu/tmpFiles/
+
+# PKI — local CA credentials (never commit private keys or certificates)
+*.key
+*.crt
+*.pem
+*.srl
+*.csr
+
+*/**/go.work
+*/**/go.work.sum

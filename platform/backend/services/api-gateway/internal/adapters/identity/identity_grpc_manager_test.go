@@ -5,11 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type mockClientConn struct {
@@ -28,7 +26,6 @@ func (m *mockClientConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, m
 }
 
 func TestNewIdentityGRPCManager(t *testing.T) {
-	// Test that it can create the manager successfully
 	// Note: gRPC creates connection lazily, so it won't fail immediately
 	// even if the server is not running
 	manager, err := NewIdentityGRPCManager("localhost:99999", 1*1000000000) // 1 second in nanoseconds
@@ -39,214 +36,6 @@ func TestNewIdentityGRPCManager(t *testing.T) {
 	assert.NotNil(t, manager.codec)
 }
 
-func TestBindWallet_Success(t *testing.T) {
-	mockClient := &mockClientConn{
-		invokeFunc: func(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
-			if method == bindWalletMethod {
-				resp := reply.(*walletBindingResponse)
-				resp.UserID = "user123"
-				resp.WalletAddress = "0xabc"
-				return nil
-			}
-			return errors.New("unexpected method")
-		},
-	}
-
-	manager := &IdentityGRPCManager{
-		client: mockClient,
-		codec:  jsonCodec{},
-	}
-
-	binding, err := manager.BindWallet("user123", "0xabc")
-
-	assert.NoError(t, err)
-	assert.Equal(t, "user123", binding.UserID)
-	assert.Equal(t, "0xabc", binding.WalletAddress)
-}
-
-func TestBindWallet_AlreadyExists(t *testing.T) {
-	mockClient := &mockClientConn{
-		invokeFunc: func(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
-			return status.Error(codes.AlreadyExists, "wallet already bound")
-		},
-	}
-
-	manager := &IdentityGRPCManager{
-		client: mockClient,
-		codec:  jsonCodec{},
-	}
-
-	_, err := manager.BindWallet("user123", "0xabc")
-
-	assert.ErrorIs(t, err, domain.ErrWalletAlreadyBound)
-}
-
-func TestBindWallet_UserAlreadyBound(t *testing.T) {
-	mockClient := &mockClientConn{
-		invokeFunc: func(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
-			return status.Error(codes.FailedPrecondition, "user already bound")
-		},
-	}
-
-	manager := &IdentityGRPCManager{
-		client: mockClient,
-		codec:  jsonCodec{},
-	}
-
-	_, err := manager.BindWallet("user123", "0xabc")
-
-	assert.ErrorIs(t, err, domain.ErrUserAlreadyBound)
-}
-
-func TestBindWallet_GenericError(t *testing.T) {
-	mockClient := &mockClientConn{
-		invokeFunc: func(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
-			return errors.New("network error")
-		},
-	}
-
-	manager := &IdentityGRPCManager{
-		client: mockClient,
-		codec:  jsonCodec{},
-	}
-
-	_, err := manager.BindWallet("user123", "0xabc")
-
-	assert.Error(t, err)
-	assert.NotErrorIs(t, err, domain.ErrWalletAlreadyBound)
-	assert.NotErrorIs(t, err, domain.ErrUserAlreadyBound)
-}
-
-func TestGetByUser_Success(t *testing.T) {
-	mockClient := &mockClientConn{
-		invokeFunc: func(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
-			if method == getByUserMethod {
-				resp := reply.(*getByUserResponse)
-				resp.Found = true
-				resp.Binding = &walletBindingResponse{
-					UserID:        "user123",
-					WalletAddress: "0xdef",
-				}
-				return nil
-			}
-			return errors.New("unexpected method")
-		},
-	}
-
-	manager := &IdentityGRPCManager{
-		client: mockClient,
-		codec:  jsonCodec{},
-	}
-
-	binding, found := manager.GetByUser("user123")
-
-	assert.True(t, found)
-	assert.Equal(t, "user123", binding.UserID)
-	assert.Equal(t, "0xdef", binding.WalletAddress)
-}
-
-func TestGetByUser_NotFound(t *testing.T) {
-	mockClient := &mockClientConn{
-		invokeFunc: func(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
-			resp := reply.(*getByUserResponse)
-			resp.Found = false
-			return nil
-		},
-	}
-
-	manager := &IdentityGRPCManager{
-		client: mockClient,
-		codec:  jsonCodec{},
-	}
-
-	_, found := manager.GetByUser("user123")
-
-	assert.False(t, found)
-}
-
-func TestGetByUser_Error(t *testing.T) {
-	mockClient := &mockClientConn{
-		invokeFunc: func(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
-			return errors.New("connection error")
-		},
-	}
-
-	manager := &IdentityGRPCManager{
-		client: mockClient,
-		codec:  jsonCodec{},
-	}
-
-	_, found := manager.GetByUser("user123")
-
-	assert.False(t, found)
-}
-
-func TestGetByUser_NilBinding(t *testing.T) {
-	mockClient := &mockClientConn{
-		invokeFunc: func(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
-			resp := reply.(*getByUserResponse)
-			resp.Found = true
-			resp.Binding = nil
-			return nil
-		},
-	}
-
-	manager := &IdentityGRPCManager{
-		client: mockClient,
-		codec:  jsonCodec{},
-	}
-
-	_, found := manager.GetByUser("user123")
-
-	assert.False(t, found)
-}
-
-func TestGetByUser_EmptyUserID(t *testing.T) {
-	mockClient := &mockClientConn{
-		invokeFunc: func(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
-			resp := reply.(*getByUserResponse)
-			resp.Found = true
-			resp.Binding = &walletBindingResponse{
-				UserID:        "",
-				WalletAddress: "0xdef",
-			}
-			return nil
-		},
-	}
-
-	manager := &IdentityGRPCManager{
-		client: mockClient,
-		codec:  jsonCodec{},
-	}
-
-	_, found := manager.GetByUser("user123")
-
-	assert.False(t, found)
-}
-
-func TestGetByUser_EmptyWalletAddress(t *testing.T) {
-	mockClient := &mockClientConn{
-		invokeFunc: func(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
-			resp := reply.(*getByUserResponse)
-			resp.Found = true
-			resp.Binding = &walletBindingResponse{
-				UserID:        "user123",
-				WalletAddress: "",
-			}
-			return nil
-		},
-	}
-
-	manager := &IdentityGRPCManager{
-		client: mockClient,
-		codec:  jsonCodec{},
-	}
-
-	_, found := manager.GetByUser("user123")
-
-	assert.False(t, found)
-}
-
 func TestJSONCodec_Name(t *testing.T) {
 	codec := jsonCodec{}
 	assert.Equal(t, "json", codec.Name())
@@ -255,18 +44,83 @@ func TestJSONCodec_Name(t *testing.T) {
 func TestJSONCodec_MarshalUnmarshal(t *testing.T) {
 	codec := jsonCodec{}
 
-	original := bindWalletRequest{
-		UserID:        "user123",
-		WalletAddress: "0xabc",
+	type testPayload struct {
+		UserID  string `json:"user_id"`
+		Country string `json:"country"`
+	}
+
+	original := testPayload{
+		UserID:  "user123",
+		Country: "BR",
 	}
 
 	data, err := codec.Marshal(original)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, data)
 
-	var decoded bindWalletRequest
+	var decoded testPayload
 	err = codec.Unmarshal(data, &decoded)
 	assert.NoError(t, err)
 	assert.Equal(t, original.UserID, decoded.UserID)
-	assert.Equal(t, original.WalletAddress, decoded.WalletAddress)
+	assert.Equal(t, original.Country, decoded.Country)
 }
+
+func TestOnboardParticipant_Success(t *testing.T) {
+	t.Parallel()
+
+	mgr := &IdentityGRPCManager{
+		codec: jsonCodec{},
+		client: &mockClientConn{
+			invokeFunc: func(_ context.Context, method string, args, reply any, _ ...grpc.CallOption) error {
+				assert.Equal(t, onboardParticipantMethod, method)
+			out := reply.(*struct {
+				UserID        string `json:"user_id"`
+				WalletAddress string `json:"wallet_address,omitempty"`
+				CertPEM       string `json:"cert_pem,omitempty"`
+				TxHash        string `json:"tx_hash,omitempty"`
+			})
+			out.UserID = "new-user-uuid"
+			out.WalletAddress = "0xABCD"
+			out.CertPEM = "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----"
+			out.TxHash = "0xtxhash"
+				return nil
+			},
+		},
+	}
+
+	result, err := mgr.OnboardParticipant(context.Background(), interfaces.OnboardParticipantRequest{
+		Username: "banco-brasil",
+		Email:    "admin@bb.com",
+		Role:     "ROLE_COMMERCIAL_BANK",
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, "new-user-uuid", result.UserID)
+	assert.Equal(t, "0xABCD", result.WalletAddress)
+	assert.Equal(t, "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----", result.CertPEM)
+	assert.Equal(t, "0xtxhash", result.TxHash)
+}
+
+func TestOnboardParticipant_Error(t *testing.T) {
+	t.Parallel()
+
+	mgr := &IdentityGRPCManager{
+		codec: jsonCodec{},
+		client: &mockClientConn{
+			invokeFunc: func(_ context.Context, _ string, _, _ any, _ ...grpc.CallOption) error {
+				return errors.New("grpc error")
+			},
+		},
+	}
+
+	_, err := mgr.OnboardParticipant(context.Background(), interfaces.OnboardParticipantRequest{
+		Username: "banco-brasil",
+		Email:    "admin@bb.com",
+		Role:     "ROLE_COMMERCIAL_BANK",
+	})
+
+	assert.Error(t, err)
+}
+
+// Compile-time check: IdentityGRPCManager must implement ParticipantOnboarder.
+var _ interfaces.ParticipantOnboarder = (*IdentityGRPCManager)(nil)

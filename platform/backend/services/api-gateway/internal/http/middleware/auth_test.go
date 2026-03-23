@@ -16,6 +16,18 @@ type tokenValidatorStub struct {
 	err    error
 }
 
+func (s tokenValidatorStub) Authenticate(_ context.Context, _, _ string) (domain.AuthToken, error) {
+	return domain.AuthToken{}, s.err
+}
+
+func (s tokenValidatorStub) RefreshToken(_ context.Context, _ string) (domain.AuthToken, error) {
+	return domain.AuthToken{}, s.err
+}
+
+func (s tokenValidatorStub) Logout(_ context.Context, _ string) error {
+	return s.err
+}
+
 func (s tokenValidatorStub) Validate(_ context.Context, _ string) (domain.TokenClaims, error) {
 	return s.claims, s.err
 }
