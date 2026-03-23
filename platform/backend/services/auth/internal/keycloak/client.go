@@ -47,6 +47,10 @@ type Client interface {
 	GetUserUsername(ctx context.Context, adminToken, userID string) (string, error)
 	// GetUserEmail returns the email address for the user identified by userID (UUID).
 	GetUserEmail(ctx context.Context, adminToken, userID string) (string, error)
+	// AssignRealmRole assigns a realm-level role to the user identified by userID.
+	// It first looks up the role by name to obtain its UUID, then calls the
+	// role-mappings API. Non-fatal: callers should log and continue on error.
+	AssignRealmRole(ctx context.Context, adminToken, userID, roleName string) error
 }
 
 type jwksCache struct {
@@ -503,6 +507,66 @@ func (c *keycloakClient) GetUserEmail(ctx context.Context, adminToken, userID st
 		return "", fmt.Errorf("keycloak: decoding get-user-email response: %w", err)
 	}
 	return user.Email, nil
+}
+
+// AssignRealmRole assigns a Keycloak realm role to a user via the Admin REST API.
+// It first resolves the role ID by name, then posts the role mapping.
+func (c *keycloakClient) AssignRealmRole(ctx context.Context, adminToken, userID, roleName string) error {
+	// 1. Resolve role ID.
+	roleURL := fmt.Sprintf("%s/admin/realms/%s/roles/%s", c.cfg.BaseURL, c.cfg.Realm, roleName)
+	roleReq, err := http.NewRequestWithContext(ctx, http.MethodGet, roleURL, nil)
+	if err != nil {
+		return fmt.Errorf("keycloak: building get-role request: %w", err)
+	}
+	roleReq.Header.Set("Authorization", "Bearer "+adminToken)
+
+	roleResp, err := c.httpClient.Do(roleReq)
+	if err != nil {
+		return fmt.Errorf("keycloak: get-role request failed: %w", err)
+	}
+	defer roleResp.Body.Close()
+
+	if roleResp.StatusCode >= 400 {
+		body, _ := io.ReadAll(roleResp.Body)
+		return fmt.Errorf("keycloak: get-role %q returned %d: %s", roleName, roleResp.StatusCode, string(body))
+	}
+
+	var role struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(roleResp.Body).Decode(&role); err != nil {
+		return fmt.Errorf("keycloak: decoding get-role response: %w", err)
+	}
+	if role.ID == "" {
+		return fmt.Errorf("keycloak: role %q returned empty id", roleName)
+	}
+
+	// 2. Assign role to user.
+	mappingURL := fmt.Sprintf("%s/admin/realms/%s/users/%s/role-mappings/realm", c.cfg.BaseURL, c.cfg.Realm, userID)
+	payload, err := json.Marshal([]map[string]string{{"id": role.ID, "name": role.Name}})
+	if err != nil {
+		return fmt.Errorf("keycloak: marshaling role-mapping request: %w", err)
+	}
+
+	mapReq, err := http.NewRequestWithContext(ctx, http.MethodPost, mappingURL, strings.NewReader(string(payload)))
+	if err != nil {
+		return fmt.Errorf("keycloak: building role-mapping request: %w", err)
+	}
+	mapReq.Header.Set("Content-Type", "application/json")
+	mapReq.Header.Set("Authorization", "Bearer "+adminToken)
+
+	mapResp, err := c.httpClient.Do(mapReq)
+	if err != nil {
+		return fmt.Errorf("keycloak: role-mapping request failed: %w", err)
+	}
+	defer mapResp.Body.Close()
+
+	if mapResp.StatusCode >= 400 {
+		body, _ := io.ReadAll(mapResp.Body)
+		return fmt.Errorf("keycloak: role-mapping returned %d: %s", mapResp.StatusCode, string(body))
+	}
+	return nil
 }
 
 // extractRealmRoles extracts the roles array from the Keycloak claim

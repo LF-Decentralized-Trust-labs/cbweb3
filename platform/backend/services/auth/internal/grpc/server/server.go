@@ -100,7 +100,8 @@ func New(kc keycloak.Client, kmsProvider kms.Provider, compliance complianceclie
 // --- Auth handlers ---
 
 func (s *identityService) Login(ctx context.Context, req *contract.LoginRequest) (*contract.LoginResponse, error) {
-	tr, err := s.keycloak.Login(ctx, req.User, req.Password)
+	user := resolveLoginUsernameForKeycloak(ctx, s.keycloak, req.User)
+	tr, err := s.keycloak.Login(ctx, user, req.Password)
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, err.Error())
 	}
@@ -142,6 +143,32 @@ func (s *identityService) ValidateToken(ctx context.Context, req *contract.Valid
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, err.Error())
 	}
+
+	// Best-effort enrichment: supplement JWT claims with compliance data when
+	// wallet/country/bankId or roles are absent (e.g. users onboarded before
+	// realm-role assignment was introduced, or Keycloak protocol mappers not
+	// configured for custom attributes).
+	if claims.Subject != "" {
+		if p, found, lookupErr := s.compliance.GetParticipantByUser(ctx, claims.Subject); lookupErr == nil && found {
+			// Append the participant's platform role if not already present in the JWT.
+			// Keycloak default realm roles (e.g. default-roles-*, offline_access,
+			// uma_authorization) are always present and must not prevent adding
+			// the application role (ROLE_NOC, ROLE_COMMERCIAL_BANK, …).
+			if p.Role != "" && !containsRoleSlice(claims.Roles, p.Role) {
+				claims.Roles = append(claims.Roles, p.Role)
+			}
+			if claims.Wallet == "" && p.WalletAddress != "" {
+				claims.Wallet = p.WalletAddress
+			}
+			if claims.Country == "" && p.CountryCode != "" {
+				claims.Country = p.CountryCode
+			}
+			if claims.BankID == "" && p.BankCode != "" {
+				claims.BankID = p.BankCode
+			}
+		}
+	}
+
 	return &contract.ValidateTokenResponse{
 		Subject:      claims.Subject,
 		Issuer:       claims.Issuer,
@@ -335,6 +362,12 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *contract.
 		log.Printf("WARN: onboard: setting password for %s: %v (non-fatal)", userID, pErr)
 	}
 	resp.ClientSecret = rawSecret
+
+	// Assign the participant role in Keycloak so the JWT realm_access.roles
+	// contains it and auth/me returns it correctly. Non-fatal.
+	if roleErr := s.keycloak.AssignRealmRole(ctx, adminToken, userID, req.Role); roleErr != nil {
+		log.Printf("WARN: onboard: assigning realm role %s to %s: %v (non-fatal)", req.Role, userID, roleErr)
+	}
 
 	s.emitAudit(ctx, "ONBOARD_PARTICIPANT", userID, resp.WalletAddress, "", correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS")
 	return resp, nil
@@ -604,6 +637,16 @@ func ipAddressFromCtx(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+// containsRoleSlice reports whether role is present in the slice.
+func containsRoleSlice(roles []string, role string) bool {
+	for _, r := range roles {
+		if r == role {
+			return true
+		}
+	}
+	return false
 }
 
 // isConflict returns true if the error message indicates a duplicate/conflict.
