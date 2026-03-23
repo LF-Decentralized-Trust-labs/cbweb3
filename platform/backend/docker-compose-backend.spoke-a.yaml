@@ -60,6 +60,7 @@ services:
       REQUEST_TIMEOUT_SEC: "30"
       AUTH_GRPC_ADDR: auth-spoke-a:9091
       COMPLIANCE_GRPC_ADDR: compliance-spoke-a:9093
+      PKI_DIR: /workspace/backend/config/pki
     volumes:
       - ../:/workspace
     ports:

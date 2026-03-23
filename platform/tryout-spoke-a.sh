@@ -53,9 +53,10 @@ fi
 # ---------------------------------------------------------------------------
 
 # FRONTEND (step goal):
-# - Authenticate the governance actor (Central Bank) and obtain an administrative Bearer token.
-# - This token (CB_TOKEN) authorizes the onboarding steps: register, CSR, and approve-kyc.
-# - Without this token, the next calls return 401/403.
+# - Authenticate the governance actor (Central Bank) and obtain an access token.
+# - The token (CB_TOKEN) is extracted from the JSON body and passed as the access_token cookie
+#   in subsequent calls, which authorizes the onboarding steps: register, CSR, and approve-kyc.
+# - Without this cookie, the next calls return 401/403.
 
 echo ""
 echo "=== [1/6] Central Bank login (Spoke-A) ==="
@@ -83,7 +84,7 @@ if [ -z "$CB_TOKEN" ]; then
   exit 1
 fi
 
-echo "CB_TOKEN obtained: ${CB_TOKEN:0:60}..."
+echo "CB_TOKEN obtained (used as access_token cookie): ${CB_TOKEN:0:60}..."
 
 # ---------------------------------------------------------------------------
 # [2] Register bank-001 in Keycloak
@@ -98,7 +99,7 @@ echo ""
 echo "=== [2/6] Register bank-001 ==="
 
 REGISTER_RESP=$(curl -s -X POST "$BASE_URL/compliance/register" \
-  -H "Authorization: Bearer $CB_TOKEN" \
+  --cookie "access_token=$CB_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "username":         "bank-001",
@@ -151,7 +152,7 @@ echo "=== [3/6] Submit bank-001 CSR ==="
 CSR_PEM=$(cat "$PKI_DIR/bank-001.csr")
 
 CSR_RESP=$(curl -s -X POST "$BASE_URL/governance/registry/csr" \
-  -H "Authorization: Bearer $CB_TOKEN" \
+  --cookie "access_token=$CB_TOKEN" \
   -H "Content-Type: application/json" \
   --data "$(jq -n \
     --arg csr  "$CSR_PEM" \
@@ -190,7 +191,7 @@ echo ""
 echo "=== [4/6] Approve bank-001 KYC ==="
 
 KYC_RESP=$(curl -s -X POST "$BASE_URL/compliance/approve-kyc" \
-  -H "Authorization: Bearer $CB_TOKEN" \
+  --cookie "access_token=$CB_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"subject\": \"$BANK_USER_ID\", \"reason\": \"KYC approved - tryout-spoke-a\"}")
 
@@ -294,8 +295,8 @@ echo "  Flow completed successfully"
 echo "======================================================"
 echo "  BANK_USER_ID  : $BANK_USER_ID"
 echo "  CLIENT_SECRET : $CLIENT_SECRET"
-echo "  CB_TOKEN      : ${CB_TOKEN:0:60}..."
-echo "  BANK_TOKEN    : ${BANK_TOKEN:0:60}..."
+echo "  CB_TOKEN      : ${CB_TOKEN:0:60}...  (cookie: access_token)"
+echo "  BANK_TOKEN    : ${BANK_TOKEN:0:60}...  (cookie: access_token)"
 echo "======================================================"
 echo ""
 echo "  >>> Store the CLIENT_SECRET above. It is shown only once. <<<"
