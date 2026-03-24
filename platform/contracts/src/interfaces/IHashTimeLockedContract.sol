@@ -31,6 +31,7 @@ interface IHashTimeLockedContract {
     error HTLC__TimeLockNotExpired();
     error HTLC__TimeLockExpired();
     error HTLC__InvalidAmount();
+    error HTLC__ParticipantNotVerified(address account);
 
     /// @notice Locks the specified amount of tCeBm tokens into the contract.
     /// @param contractId Unique identifier for the agreement.

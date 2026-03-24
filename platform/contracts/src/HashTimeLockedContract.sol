@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {IHashTimeLockedContract} from "./interfaces/IHashTimeLockedContract.sol";
+import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
 import {HashTimeLockedContractLibrary} from "./libraries/HashTimeLockedContractLibrary.sol";
 import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
@@ -15,8 +16,31 @@ contract HashTimeLockedContract is IHashTimeLockedContract, ReentrancyGuard {
     /// @dev Utilises SafeERC20 wrappers for secure ERC20 transfers.
     using SafeERC20 for IERC20;
 
+    /// @notice The Identity Registry used for participant clearance gates.
+    IIdentityRegistry public immutable IDENTITY_REGISTRY;
+
     /// @dev Stores lock records indexed by `contractId`.
     mapping(bytes32 => HashTimeLockedContractLibrary.LockDetails) private _locks;
+
+    /// @notice Initializes the HTLC with the IdentityRegistry for clearance gates.
+    /// @param _identityRegistry Address of the IdentityRegistry contract.
+    constructor(address _identityRegistry) {
+        IDENTITY_REGISTRY = IIdentityRegistry(_identityRegistry);
+    }
+
+    /// @notice Ensures the given account is a verified participant in the IdentityRegistry.
+    /// @param account The address to verify.
+    modifier onlyVerified(address account) {
+        _onlyVerified(account);
+        _;
+    }
+
+    /// @dev Internal check extracted from the modifier to reduce bytecode duplication at call sites.
+    function _onlyVerified(address account) internal view {
+        if (!IDENTITY_REGISTRY.canTransact(account)) {
+            revert HTLC__ParticipantNotVerified(account);
+        }
+    }
 
     /// @notice Locks funds in escrow under a hash-lock and time-lock.
     /// @dev Reverts if the lock already exists, amount is zero, or time-lock is already expired.
@@ -28,7 +52,7 @@ contract HashTimeLockedContract is IHashTimeLockedContract, ReentrancyGuard {
         uint256 amount,
         bytes32 hashLock,
         uint256 timeLock
-    ) external nonReentrant {
+    ) external nonReentrant onlyVerified(msg.sender) onlyVerified(receiver) {
         if (_locks[contractId].state != HashTimeLockedContractLibrary.HTLCState.INVALID) {
             revert HTLC__ContractAlreadyExists();
         }
