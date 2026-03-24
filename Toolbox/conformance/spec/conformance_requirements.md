@@ -20,7 +20,8 @@ This document defines what it means for a CBWeb3 implementation to be **conforma
 ### Out of scope (v0.1.0)
 - Authentication & Access endpoints
 - Token & Lifecycle (Zeto) endpoints
-- AMM & Liquidity endpoints
+- CCIP / Cross-chain bridging endpoints (#28)
+- Privacy conformance endpoints (#30)
 - Compliance & Governance endpoints
 - Performance, load, and stress testing
 - Network-level security (TLS configuration, firewall rules)
