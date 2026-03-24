@@ -35,8 +35,9 @@ Toolbox/
 │   │   ├── openapi_pvp_v0.1.0.yaml
 │   │   ├── CHANGELOG.md
 │   │   └── README.md
-│   ├── amm/                        # AMM & Liquidity (planned)
-│   └── compliance/                 # Compliance & Governance (planned)
+│   ├── ccip/                       # CCIP Integration Adapter (planned — #28)
+│   ├── privacy/                    # Paladin Privacy Conformance (planned — #30)
+│   └── compliance/                 # Policy-as-Code / Governance (planned — #31)
 │
 ├── mocks/                          # Reference mocks (static JSON fixtures)
 │   └── pvp/                        # ✅ PvP Settlement mocks
@@ -296,7 +297,7 @@ All artifacts use **synthetic data** exclusively. The reference corridor is:
 ### Contracts
 - MUST include: **version**, **breaking change notes** (CHANGELOG.md), **error model**, and **examples**
 - MUST use stable, language-neutral formats (OpenAPI 3.0.3 / JSON Schema)
-- MUST be scoped to a single domain (e.g., `pvp/`, `amm/`, `compliance/`)
+- MUST be scoped to a single domain (e.g., `pvp/`, `ccip/`, `privacy/`)
 - SHOULD be validatable with standard tools (Spectral, swagger-cli)
 
 ### Reference mocks

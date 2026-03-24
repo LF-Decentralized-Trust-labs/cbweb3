@@ -15,8 +15,8 @@ CBWeb3 uses a **dual-layer architecture**:
 │                    TRANSNATIONAL HUB                            │
 │                                                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
-│  │ AMM Contract │  │  Governance  │  │ Relayer Registry      │  │
-│  │ (CPMM pool)  │  │  Contracts   │  │ (cross-chain proofs)  │  │
+│  │  CCIP / Cacti │  │  Governance  │  │ Relayer Registry      │  │
+│  │  (bridging)   │  │  Contracts   │  │ (cross-chain proofs)  │  │
 │  └──────────────┘  └──────────────┘  └───────────────────────┘  │
 │                                                                 │
 │         Hyperledger Besu (QBFT consensus, gasless)              │
@@ -58,7 +58,7 @@ Each participating country operates its own **private Hyperledger Besu** network
 ### Transnational network (Hub)
 
 A shared settlement layer for cross-border operations:
-- Hosts the **AMM smart contract** (Constant Product Market Maker)
+- Hosts **cross-chain bridging** contracts (CCIP adapters, Cacti relay plugins)
 - Hosts **governance contracts** (circuit breaker, participant registry)
 - Operated by a neutral multilateral entity
 - All central banks participate on equal footing
@@ -86,14 +86,14 @@ Bilateral PvP settlement using **Hash Time-Lock Contracts**. This is the scenari
 
 > The Toolbox simplifies this to a 2-party model (Central Bank A <-> Central Bank B) for clarity.
 
-### Scenario B: Automated Market Maker (AMM)
+### Scenario B: Cross-Chain Interoperability (CCIP / Fabric-X)
 
-Hub-based liquidity pool using the **Constant Product formula (x * y = k)**:
-- Commercial banks bridge tCeBM to the Hub via lock-and-mint
-- AMM determines exchange rates algorithmically
-- Swaps execute atomically within a single Hub transaction
+Hub-mediated bridging for multi-network settlement:
+- CCIP adapters relay messages and token transfers between Spokes and the Hub
+- Fabric-X corridor kit enables settlement across heterogeneous DLTs (Besu ↔ Fabric)
+- Cryptographic proofs verify cross-chain events before releasing funds
 
-> Not yet covered in Toolbox artifacts. Planned for post-Q1 sessions.
+> Not yet covered in Toolbox artifacts. See backlog issues #28 (CCIP Adapter) and #29 (Fabric-X Corridor Kit).
 
 ---
 
@@ -102,7 +102,7 @@ Hub-based liquidity pool using the **Constant Product formula (x * y = k)**:
 | Layer | Technology | Language |
 |-------|-----------|----------|
 | **Backend** | Go microservices (Auth Service, Payment Orchestrator, Compliance Orchestrator, Liquidity Monitor) | Go 1.25+ |
-| **Smart contracts** | HTLC.sol, AMM.sol | Solidity |
+| **Smart contracts** | HTLC.sol, Bridge.sol | Solidity |
 | **Blockchain** | Hyperledger Besu | EVM-compatible |
 | **Consensus** | QBFT (Byzantine Fault Tolerant) | — |
 | **Privacy** | Hyperledger Paladin + Zeto tokens (ZK-SNARKs) | — |

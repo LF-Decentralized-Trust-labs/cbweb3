@@ -45,10 +45,10 @@ If you are building a CBWeb3-compatible API:
 
 | Area | Status | Good first contribution |
 |------|--------|------------------------|
-| `contracts/amm/` | Vacante | Extract AMM endpoints from D5 OpenAPI spec |
-| `contracts/compliance/` | Vacante | Extract compliance endpoints from D5 OpenAPI spec |
-| `mocks/` | PvP complete | Add mock scenarios for AMM or compliance flows |
-| `test-vectors/` | PvP complete | Add test vectors for AMM or compliance flows |
+| `contracts/ccip/` | Vacante | CCIP Integration Adapter contract (#28) |
+| `contracts/privacy/` | Vacante | Paladin Privacy Conformance contract (#30) |
+| `mocks/` | PvP complete | Add mock scenarios for CCIP, privacy, or observability flows |
+| `test-vectors/` | PvP complete | Add test vectors for CCIP, privacy, or observability flows |
 | `conformance/` | PvP complete | Add tests for new domains as contracts are created |
 | `sandbox/` | New | Improve tutorials, add Besu devnet local setup |
 
@@ -60,7 +60,7 @@ These external deliverables provide context for the Toolbox artifacts:
 
 | Document | Content | Relevance |
 |----------|---------|-----------|
-| D2 - Use Cases | PvP, HTLC, AMM use cases | Defines the flows |
+| D2 - Use Cases | PvP, HTLC, cross-chain interoperability use cases | Defines the flows |
 | D3 - Requirements | Functional/non-functional requirements | Validation criteria |
 | D4 - Architecture | System architecture (Spoke/Hub topology) | Component interactions |
 | D5 - Endpoints Specification | Full OpenAPI spec + Postman | Contract baseline |

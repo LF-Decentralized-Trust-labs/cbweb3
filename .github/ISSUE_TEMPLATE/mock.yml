@@ -12,7 +12,7 @@ body:
     attributes:
       label: Domain
       description: "Which domain do these mocks belong to?"
-      placeholder: "e.g., pvp, amm, compliance, auth"
+      placeholder: "e.g., pvp, ccip, privacy, observability"
     validations:
       required: true
   - type: input

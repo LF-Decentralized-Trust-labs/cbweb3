@@ -11,7 +11,7 @@ body:
     attributes:
       label: Domain
       description: "Which domain does this contract belong to?"
-      placeholder: "e.g., pvp, amm, compliance, auth"
+      placeholder: "e.g., pvp, ccip, privacy, observability"
     validations:
       required: true
   - type: textarea
