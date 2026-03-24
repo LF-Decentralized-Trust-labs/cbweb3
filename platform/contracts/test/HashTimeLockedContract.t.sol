@@ -6,11 +6,16 @@ import {HashTimeLockedContract} from "../src/HashTimeLockedContract.sol";
 import {IHashTimeLockedContract} from "../src/interfaces/IHashTimeLockedContract.sol";
 import {HashTimeLockedContractLibrary} from "../src/libraries/HashTimeLockedContractLibrary.sol";
 import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
+import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {IdentityRegistryLibrary} from "../src/libraries/IdentityRegistryLibrary.sol";
 import {DeployHTLC} from "../script/HashTimeLockedContract.s.sol";
 
 contract HashTimeLockedContractTest is Test {
     /// @notice HTLC contract under test
     HashTimeLockedContract public htlc;
+
+    /// @notice Identity Registry for clearance gate tests
+    IdentityRegistry public identityRegistry;
 
     /// @notice Mock token used as escrowed asset in tests
     TokenizedCentralBankMoney public tCeBm;
@@ -34,8 +39,19 @@ contract HashTimeLockedContractTest is Test {
         /// @dev 1. Deploy the tCeBm mock asset
         tCeBm = new TokenizedCentralBankMoney("Tokenized BRL", "tCeBM_BRL", admin, centralBank);
 
-        /// @dev 2. Deploy the HTLC Escrow
-        htlc = new HashTimeLockedContract();
+        /// @dev 2. Deploy IdentityRegistry and register test participants
+        identityRegistry = new IdentityRegistry(admin);
+        vm.startPrank(admin);
+        identityRegistry.registerParticipant(
+            sender, "Commercial Bank A", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+        );
+        identityRegistry.registerParticipant(
+            receiver, "Commercial Bank B", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+        );
+        vm.stopPrank();
+
+        /// @dev 3. Deploy the HTLC Escrow
+        htlc = new HashTimeLockedContract(address(identityRegistry));
 
         /// @dev 3. Mint tokens to the sender and approve the HTLC to spend them
         vm.startPrank(centralBank);
@@ -166,6 +182,35 @@ contract HashTimeLockedContractTest is Test {
         vm.expectRevert(IHashTimeLockedContract.HTLC__ContractNotLocked.selector);
         htlc.refund(nonExistingContractId);
     }
+
+    /// @dev Test that lock reverts when caller is not verified in the IdentityRegistry.
+    function test_Revert_Lock_UnverifiedSender() public {
+        address unverified = makeAddr("unverifiedSender");
+        vm.startPrank(centralBank);
+        tCeBm.mint(unverified, lockAmount);
+        vm.stopPrank();
+
+        vm.startPrank(unverified);
+        tCeBm.approve(address(htlc), lockAmount);
+        bytes32 newContractId = keccak256("FX_AGREEMENT_UNVERIFIED_SENDER");
+        vm.expectRevert(
+            abi.encodeWithSelector(IHashTimeLockedContract.HTLC__ParticipantNotVerified.selector, unverified)
+        );
+        htlc.lock(newContractId, receiver, address(tCeBm), lockAmount, hashLock, timeLock);
+        vm.stopPrank();
+    }
+
+    /// @dev Test that lock reverts when receiver is not verified in the IdentityRegistry.
+    function test_Revert_Lock_UnverifiedReceiver() public {
+        address unverifiedReceiver = makeAddr("unverifiedReceiver");
+        bytes32 newContractId = keccak256("FX_AGREEMENT_UNVERIFIED_RECEIVER");
+
+        vm.prank(sender);
+        vm.expectRevert(
+            abi.encodeWithSelector(IHashTimeLockedContract.HTLC__ParticipantNotVerified.selector, unverifiedReceiver)
+        );
+        htlc.lock(newContractId, unverifiedReceiver, address(tCeBm), lockAmount, hashLock, timeLock);
+    }
 }
 
 contract DeployHTLCTest is Test {
@@ -177,6 +222,7 @@ contract DeployHTLCTest is Test {
     address private expectedDeployer;
 
     string private constant ENV_DEPLOYER_PRIVATE_KEY = "DEPLOYER_PRIVATE_KEY";
+    string private constant ENV_IDENTITY_REGISTRY_ADDRESS = "IDENTITY_REGISTRY_ADDRESS";
 
     function setUp() public {
         deployScript = new DeployHTLC();
@@ -188,6 +234,7 @@ contract DeployHTLCTest is Test {
 
         /// @dev Set environment variable for the script if not already set
         vm.setEnv(ENV_DEPLOYER_PRIVATE_KEY, vm.toString(deployerPrivateKey));
+        vm.setEnv(ENV_IDENTITY_REGISTRY_ADDRESS, vm.toString(address(0x6789012345678901234567890123456789012345)));
     }
 
     ///

@@ -179,7 +179,7 @@ contract IdentityRegistryTest is Test {
         assertEq(p.lastUpdate, 0);
     }
 
-    /// @notice Verifies that CENTRAL_BANK and LIQUIDITY_PROVIDER roles can transact when Verified.
+    /// @notice Verifies that CENTRAL_BANK and COMMERCIAL_BANK roles can transact when Verified.
     function test_CanTransact_AllTransactableRoles() public {
         address centralBankAddr = address(0x4);
         address lpAddr = address(0x5);
@@ -189,7 +189,7 @@ contract IdentityRegistryTest is Test {
             centralBankAddr, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, ZK_POINTER
         );
         registry.registerParticipant(
-            lpAddr, "Liquidity Provider", IdentityRegistryLibrary.ParticipantRole.LIQUIDITY_PROVIDER, ZK_POINTER
+            lpAddr, "Liquidity Provider", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
         );
         vm.stopPrank();
 
@@ -230,13 +230,13 @@ contract IdentityRegistryTest is Test {
         );
         bytes32 newPointer = keccak256("new_proof");
         registry.registerParticipant(
-            bankA, "Updated Bank Name", IdentityRegistryLibrary.ParticipantRole.LIQUIDITY_PROVIDER, newPointer
+            bankA, "Updated Bank Name", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, newPointer
         );
         vm.stopPrank();
 
         IdentityRegistryLibrary.Participant memory p = registry.getParticipant(bankA);
         assertEq(p.legalName, "Updated Bank Name");
-        assertEq(uint256(p.role), uint256(IdentityRegistryLibrary.ParticipantRole.LIQUIDITY_PROVIDER));
+        assertEq(uint256(p.role), uint256(IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK));
         assertEq(p.zkPointer, newPointer);
         assertEq(uint256(p.status), uint256(IdentityRegistryLibrary.KycStatus.Verified));
     }
@@ -269,6 +269,53 @@ contract IdentityRegistryTest is Test {
 
         IdentityRegistryLibrary.Participant memory p = registry.getParticipant(bankA);
         assertEq(p.lastUpdate, laterTs);
+    }
+
+    /// @notice Verifies that canGovern returns true for CENTRAL_BANK and GOVERNANCE roles when Verified.
+    function test_CanGovern_GovernanceRoles() public {
+        address centralBankAddr = address(0x10);
+        address governanceAddr = address(0x11);
+
+        vm.startPrank(admin);
+        registry.registerParticipant(
+            centralBankAddr, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, ZK_POINTER
+        );
+        registry.registerParticipant(
+            governanceAddr, "Governance Entity", IdentityRegistryLibrary.ParticipantRole.GOVERNANCE, ZK_POINTER
+        );
+        vm.stopPrank();
+
+        assertTrue(registry.canGovern(centralBankAddr));
+        assertTrue(registry.canGovern(governanceAddr));
+    }
+
+    /// @notice Verifies that canGovern returns false for non-governance roles.
+    function test_CanGovern_ReturnsFalseForNonGovernanceRoles() public {
+        vm.prank(admin);
+        registry.registerParticipant(
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+        );
+
+        assertFalse(registry.canGovern(bankA));
+    }
+
+    /// @notice Verifies that canGovern returns false for suspended governance participants.
+    function test_CanGovern_ReturnsFalseWhenSuspended() public {
+        address centralBankAddr = address(0x10);
+
+        vm.startPrank(admin);
+        registry.registerParticipant(
+            centralBankAddr, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, ZK_POINTER
+        );
+        registry.updateStatus(centralBankAddr, IdentityRegistryLibrary.KycStatus.Suspended);
+        vm.stopPrank();
+
+        assertFalse(registry.canGovern(centralBankAddr));
+    }
+
+    /// @notice Verifies that canGovern returns false for unregistered addresses.
+    function test_CanGovern_ReturnsFalseForUnregistered() public view {
+        assertFalse(registry.canGovern(maliciousUser));
     }
 
     /// @notice Verifies that the constructor grants both DEFAULT_ADMIN_ROLE and GOVERNANCE_ROLE to admin.
