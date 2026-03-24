@@ -19,6 +19,8 @@ interface IAutomatedMarketMaker {
     error AMM__InsufficientLiquidity();
     error AMM__InsufficientOutputAmount();
     error AMM__SlippageExceeded(uint256 requiredAmountIn, uint256 maxAmountIn);
+    error AMM__ParticipantNotVerified(address account);
+    error AMM__NotGovernance(address account);
 
     /// @notice Adds initial or subsequent liquidity to the pool.
     /// @param amountA The amount of token A to add.
