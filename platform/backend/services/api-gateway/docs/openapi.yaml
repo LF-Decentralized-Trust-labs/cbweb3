@@ -15,7 +15,9 @@ tags:
   - name: Health
     description: Service health endpoint
   - name: Authentication
-    description: Login, refresh, logout and onboarding
+    description: >
+      Login, refresh, logout, PKI wallet bind, and optional MVP helper
+      `resolve-challenge` (development only — signs nonce from a PEM file under PKI_DIR).
   - name: Compliance
     description: KYC credential issuance, verification, AML screening, and governance
   - name: Governance
@@ -41,6 +43,16 @@ paths:
     post:
       tags: [Authentication]
       summary: Authenticate client credentials and obtain access + refresh tokens
+      description: >
+        Two authentication flows depending on the participant role:
+
+        **Direct login** (ROLE_GOVERNANCE, ROLE_SUPERVISOR, ROLE_NOC, etc.):
+        Returns accessToken + optional refreshToken in the JSON body.
+        Also sets HttpOnly cookies access_token and refresh_token automatically.
+
+        **PKI nonce flow** (ROLE_COMMERCIAL_BANK, ROLE_TREASURY):
+        Returns { "nonce": "<hex>" } only — no tokens, no cookies.
+        The client must sign the nonce and complete login via POST /auth/wallet/bind.
       operationId: login
       requestBody:
         required: true
@@ -50,7 +62,18 @@ paths:
               $ref: "#/components/schemas/LoginRequest"
       responses:
         "200":
-          description: Login successful
+          description: >
+            Login successful. For direct flows the response body contains tokens
+            and the Set-Cookie headers inject HttpOnly cookies. For PKI flows
+            only a nonce is returned (no cookies).
+          headers:
+            Set-Cookie:
+              description: >
+                HttpOnly auth cookies set for direct login flows only.
+                Two cookies are emitted: access_token and refresh_token (when present).
+              schema:
+                type: string
+                example: "access_token=eyJ...; Path=/; HttpOnly; SameSite=Strict; Max-Age=300"
           content:
             application/json:
               schema:
@@ -64,6 +87,9 @@ paths:
     post:
       tags: [Authentication]
       summary: Issue a new access token from a valid refresh token
+      description: >
+        Exchanges a valid refresh token for new access and refresh tokens.
+        The response also renews the access_token and refresh_token HttpOnly cookies.
       operationId: refreshToken
       requestBody:
         required: true
@@ -73,7 +99,14 @@ paths:
               $ref: "#/components/schemas/RefreshTokenRequest"
       responses:
         "200":
-          description: New access token issued
+          description: New access token issued and cookies renewed
+          headers:
+            Set-Cookie:
+              description: >
+                Renewed access_token and refresh_token HttpOnly cookies.
+              schema:
+                type: string
+                example: "access_token=eyJ...; Path=/; HttpOnly; SameSite=Strict; Max-Age=3600"
           content:
             application/json:
               schema:
@@ -92,13 +125,24 @@ paths:
   /api/v1/auth/logout:
     post:
       tags: [Authentication]
-      summary: Revoke the current access token (logout)
+      summary: Revoke the current access token and clear auth cookies
+      description: >
+        Revokes the access token at the identity provider (Keycloak).
+        The token is read from the access_token HttpOnly cookie.
+        On success, both access_token and refresh_token cookies are expired (MaxAge=-1).
       operationId: logout
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       responses:
         "200":
-          description: Logged out successfully
+          description: Logged out successfully; auth cookies expired
+          headers:
+            Set-Cookie:
+              description: >
+                access_token and refresh_token cookies are expired (MaxAge=-1).
+              schema:
+                type: string
+                example: "access_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=-1"
           content:
             application/json:
               schema:
@@ -111,18 +155,21 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/auth/wallet/bind:
     post:
       tags: [Authentication]
       summary: Verify PKI login challenge and issue tokens
       description: >
-        Step 2 of PKI authentication flow. The client submits:
-        user_id, the ECDSA signature (DER hex) of the login nonce, and the
-        participant X.509 certificate PEM issued by the Central Bank CA.
+        Step 2 of the PKI authentication flow (public endpoint — no authentication required).
+        The client submits the user_id, the DER-encoded ECDSA signature (hex) of the
+        login nonce obtained from POST /auth/login, and the participant X.509
+        certificate PEM issued by the Central Bank CA.
+        On success, access_token and refresh_token HttpOnly cookies are set in addition
+        to the JSON response body.
       operationId: walletBind
-      security:
-        - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -141,7 +188,14 @@ paths:
                   description: PEM-encoded participant certificate
       responses:
         "200":
-          description: PKI verification successful
+          description: PKI verification successful; tokens issued and cookies set
+          headers:
+            Set-Cookie:
+              description: >
+                access_token and refresh_token HttpOnly cookies set on successful PKI login.
+              schema:
+                type: string
+                example: "access_token=eyJ...; Path=/; HttpOnly; SameSite=Strict; Max-Age=900"
           content:
             application/json:
               schema:
@@ -154,8 +208,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-              example:
-                error: "PKI verification failed"
+              examples:
+                pkiFailed:
+                  value:
+                    error: "PKI verification failed"
+                invalidChain:
+                  value:
+                    error: "INVALID_CERTIFICATE_CHAIN"
+                nonceMismatch:
+                  value:
+                    error: "NONCE_SIGNATURE_MISMATCH"
         "501":
           description: PKI authentication not configured
           content:
@@ -165,13 +227,140 @@ paths:
               example:
                 error: "PKI authentication not configured"
 
+  /api/v1/auth/resolve-challenge:
+    post:
+      tags: [Authentication]
+      summary: "[MVP] Sign PKI login nonce from a local PEM file"
+      description: >
+        Development-only helper. Reads a combined PEM file from the directory
+        set by environment variable PKI_DIR (default `./config/pki`).
+        The file must contain both a CERTIFICATE block and an EC PRIVATE KEY block.
+        Returns the DER ECDSA signature (hex) and certificate PEM for use with
+        POST /api/v1/auth/wallet/bind. Do not expose in production.
+      operationId: resolveChallenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveChallengeRequest"
+      responses:
+        "200":
+          description: Nonce signed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolveChallengeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          description: PEM file missing, invalid, or not found under PKI_DIR
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                notFound:
+                  value:
+                    error: "cert file not found: bank.pem"
+                badPem:
+                  value:
+                    error: "CERTIFICATE block not found in bank.pem"
+
+  /api/v1/auth/me:
+    get:
+      tags: [Authentication]
+      summary: Return the authenticated caller's token claims
+      description: >
+        Validates the bearer token (or access_token cookie) and returns the
+        enriched claims embedded in the JWT by the identity service.
+        Optional fields (wallet, country, bankId, privacyGroup) are only present
+        when populated in the token.
+      operationId: getMe
+      security:
+        - CookieAuth: []
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Token claims for the authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+              example:
+                subject: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                issuer: "http://keycloak:8080/realms/cbweb3-spoke-a"
+                roles: ["ROLE_COMMERCIAL_BANK"]
+                wallet: "0x4a3b..."
+                country: "BR"
+                bankId: "341"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/client-secret/change:
+    post:
+      tags: [Authentication]
+      summary: Rotate the clientSecret for the authenticated participant
+      description: >
+        Allows an authenticated participant (ROLE_COMMERCIAL_BANK, ROLE_TREASURY) to
+        rotate their own clientSecret. Requires a valid access_token cookie and
+        knowledge of the current secret.
+        After rotation the old clientSecret is immediately invalidated.
+      operationId: changeClientSecret
+      security:
+        - CookieAuth: []
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeClientSecretRequest"
+      responses:
+        "200":
+          description: Client secret rotated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "client secret changed successfully"
+        "400":
+          description: Missing current_client_secret or new_client_secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "current_client_secret and new_client_secret are required"
+        "401":
+          description: Invalid bearer token or current_client_secret is incorrect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "invalid current client secret"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "501":
+          description: Client secret rotation not available in this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "client secret rotation not available"
+
   /api/v1/compliance/kyc/status/{subject}:
     get:
       tags: [Compliance]
       summary: Get KYC lifecycle status for a subject
       operationId: getKycStatus
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: subject
           in: path
@@ -200,7 +389,7 @@ paths:
         on the ParticipantRegistry contract (Hyperledger Besu).
       operationId: approveKyc
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -256,7 +445,7 @@ paths:
         Returns 403 if FROZEN, REVOKED, or REJECTED (REQ-COM-007).
       operationId: amlScreen
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -293,7 +482,7 @@ paths:
         Used for initial approval, freeze, unfreeze, and revocation.
       operationId: provisionParticipant
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -324,7 +513,7 @@ paths:
         Sets KYC status to FROZEN — all operations are suspended.
       operationId: freezeAccount
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -357,7 +546,7 @@ paths:
       summary: Restore a frozen account to APPROVED status (CENTRAL_BANK only)
       operationId: unfreezeAccount
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -395,7 +584,7 @@ paths:
         on-chain in the ParticipantRegistry smart contract (signed with CB_PRIVATE_KEY).
       operationId: registerParticipant
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -426,7 +615,7 @@ paths:
 
   # ---------------------------------------------------------------------------
   # Governance Portal — ROLE_GOVERNANCE only
-  # All endpoints below require: Authorization: Bearer <CB_TOKEN>
+  # All endpoints below require: access_token cookie (ROLE_GOVERNANCE)
   # ---------------------------------------------------------------------------
 
   /api/v1/governance/participants:
@@ -440,7 +629,7 @@ paths:
         To create the Keycloak user and register, use POST /api/v1/compliance/register.
       operationId: govRegisterParticipant
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -468,7 +657,7 @@ paths:
       summary: List registered participants
       operationId: govGetRegistry
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: status
           in: query
@@ -510,7 +699,7 @@ paths:
         is the UUID returned by that endpoint.
       operationId: govSubmitCSR
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -549,7 +738,7 @@ paths:
       summary: List accounts with operational status
       operationId: govGetAccounts
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       responses:
         "200":
           description: List of accounts
@@ -571,7 +760,7 @@ paths:
       summary: Freeze a participant account
       operationId: govFreezeAccount
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -598,7 +787,7 @@ paths:
       summary: Unfreeze a participant account
       operationId: govUnfreezeAccount
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -625,7 +814,7 @@ paths:
       summary: Get global circuit breaker status
       operationId: govGetCircuitBreakerStatus
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       responses:
         "200":
           description: Current circuit breaker status
@@ -642,7 +831,7 @@ paths:
       summary: Enable or disable the global circuit breaker
       operationId: govToggleCircuitBreaker
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -677,7 +866,7 @@ paths:
       summary: Get global system parameters
       operationId: govGetParameters
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       responses:
         "200":
           description: Current parameters
@@ -693,7 +882,7 @@ paths:
       description: The `reason` field is required — returns 400 if absent.
       operationId: govUpdateParameters
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -727,7 +916,7 @@ paths:
       summary: Get audit logs
       operationId: govGetAuditLogs
       security:
-        - BearerAuth: []
+        - CookieAuth: []
       parameters:
         - name: category
           in: query
@@ -766,13 +955,16 @@ paths:
 
 components:
   securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
       description: >
-        JWT issued by the identity service. Includes enriched claims:
-        sub, roles, did, wallet, country, bank_id, privacy_group (D7 §7.4).
+        HttpOnly cookie set automatically by POST /auth/login (direct flow),
+        POST /auth/wallet/bind, and POST /auth/refresh.
+        All protected endpoints require this cookie to be present.
+        Attributes: HttpOnly, SameSite=Strict, Path=/; Secure flag depends on
+        the COOKIE_SECURE environment variable (true for HTTPS, false for HTTP).
 
   responses:
     BadRequest:
@@ -782,7 +974,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     Unauthorized:
-      description: Missing or invalid bearer token
+      description: Missing or invalid access_token cookie
       content:
         application/json:
           schema:
@@ -845,6 +1037,31 @@ components:
         refreshToken:
           type: string
 
+    ResolveChallengeRequest:
+      type: object
+      required: [nonce, cert_file]
+      properties:
+        nonce:
+          type: string
+          description: Hex-encoded login nonce from POST /auth/login (32 bytes as 64 hex chars)
+          example: "a1b2c3d4e5f6789012345678901234567890abcdef0123456789abcdef0123"
+        cert_file:
+          type: string
+          description: >
+            Filename only (no path segments). Resolved as PKI_DIR/cert_file.
+          example: "banco_itau_bundle.pem"
+
+    ResolveChallengeResponse:
+      type: object
+      required: [nonce_signature_hex, cert_pem]
+      properties:
+        nonce_signature_hex:
+          type: string
+          description: DER-encoded ECDSA signature (hex) of SHA-256(nonce bytes)
+        cert_pem:
+          type: string
+          description: PEM-encoded participant certificate extracted from the file
+
     AuthResponse:
       type: object
       required: [accessToken, expiresIn, tokenType]
@@ -859,6 +1076,54 @@ components:
         tokenType:
           type: string
           example: Bearer
+
+    MeResponse:
+      type: object
+      required: [subject, issuer, roles]
+      properties:
+        subject:
+          type: string
+          description: Keycloak user UUID
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        issuer:
+          type: string
+          description: Token issuer (Keycloak realm URL)
+          example: "http://keycloak:8080/realms/cbweb3-spoke-a"
+        roles:
+          type: array
+          items:
+            type: string
+          example: ["ROLE_COMMERCIAL_BANK"]
+        wallet:
+          type: string
+          description: EVM wallet address (present when bound)
+          example: "0x4a3b..."
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code (present when set)
+          example: "BR"
+        bankId:
+          type: string
+          description: Regulatory bank identifier (present when set)
+          example: "341"
+        privacyGroup:
+          type: string
+          description: Besu privacy group ID (present when set)
+
+    ChangeClientSecretRequest:
+      type: object
+      required: [current_client_secret, new_client_secret]
+      properties:
+        current_client_secret:
+          type: string
+          description: The participant's current clientSecret (first factor for PKI login)
+          example: "X5Kp2mN8vQzR1tYwLjHdGfAeNcUoBs7p3I4xV6yKE0Z="
+        new_client_secret:
+          type: string
+          description: >
+            The new clientSecret to set. Must be a strong random value (256-bit base64 recommended).
+            Store securely — it is not recoverable after this call.
+          example: "NovoSegredoBase64ForteGeradoLocalmente=="
 
     KYCStatusResponse:
       type: object

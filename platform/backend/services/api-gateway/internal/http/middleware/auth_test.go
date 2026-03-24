@@ -1,4 +1,4 @@
-// This file tests bearer-token middleware authorization scenarios.
+// This file tests cookie-auth middleware authorization scenarios.
 package middleware
 
 import (
@@ -32,18 +32,18 @@ func (s tokenValidatorStub) Validate(_ context.Context, _ string) (domain.TokenC
 	return s.claims, s.err
 }
 
-func TestRequireBearerToken(t *testing.T) {
+func TestRequireCookieAuth(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	app.Get("/protected", RequireBearerToken(tokenValidatorStub{
+	app.Get("/protected", RequireCookieAuth(tokenValidatorStub{
 		claims: domain.TokenClaims{Subject: "bank-a"},
 	}), func(c *fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusOK)
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
-	req.Header.Set("Authorization", "Bearer valid-token")
+	req.AddCookie(&http.Cookie{Name: "access_token", Value: "valid-token"})
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -53,11 +53,11 @@ func TestRequireBearerToken(t *testing.T) {
 	}
 }
 
-func TestRequireBearerTokenMissing(t *testing.T) {
+func TestRequireCookieAuthMissing(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New()
-	app.Get("/protected", RequireBearerToken(tokenValidatorStub{}), func(c *fiber.Ctx) error {
+	app.Get("/protected", RequireCookieAuth(tokenValidatorStub{}), func(c *fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusOK)
 	})
 
@@ -70,4 +70,3 @@ func TestRequireBearerTokenMissing(t *testing.T) {
 		t.Fatalf("expected 401, got %d", resp.StatusCode)
 	}
 }
-

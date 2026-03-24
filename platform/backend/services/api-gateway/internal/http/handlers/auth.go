@@ -2,8 +2,19 @@
 package handlers
 
 import (
+	"crypto/ecdsa"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/asn1"
+	"encoding/hex"
+	"encoding/pem"
+	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 	"google.golang.org/grpc/status"
@@ -11,11 +22,12 @@ import (
 
 // AuthHandler implements authentication endpoints.
 type AuthHandler struct {
-	authProvider    interfaces.IAuthProvider
+	authProvider        interfaces.IAuthProvider
 	pkiAuthProvider     interfaces.IPKIAuthProvider     // optional; nil if PKI is not enabled
 	clientSecretChanger interfaces.IClientSecretChanger // optional; nil if not supported
-	kycChecker      interfaces.KYCChecker
-	kycManager      interfaces.KYCManager
+	kycChecker          interfaces.KYCChecker
+	kycManager          interfaces.KYCManager
+	cookieSecure        bool // mirrors COOKIE_SECURE env var; true = HTTPS only
 }
 
 type loginRequest struct {
@@ -24,9 +36,12 @@ type loginRequest struct {
 }
 
 // NewAuthHandler builds an AuthHandler with its required dependencies.
+// cookieSecure should be true when the gateway is served over HTTPS so that
+// auth cookies are sent with the Secure flag; use false for plain HTTP (local dev).
 func NewAuthHandler(
 	authProvider interfaces.IAuthProvider,
 	kycChecker interfaces.KYCChecker,
+	cookieSecure bool,
 ) *AuthHandler {
 	var kycMgr interfaces.KYCManager
 	var pkiProvider interfaces.IPKIAuthProvider
@@ -46,7 +61,56 @@ func NewAuthHandler(
 		clientSecretChanger: secretChanger,
 		kycChecker:          kycChecker,
 		kycManager:          kycMgr,
+		cookieSecure:        cookieSecure,
 	}
+}
+
+// setAuthCookies injects HttpOnly auth cookies for the access and refresh tokens.
+// Both cookies share the same security attributes; refresh cookie is only set when
+// the token is non-empty.
+func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string, expiresIn int, secure bool) {
+	c.Cookie(&fiber.Cookie{
+		Name:     "access_token",
+		Value:    accessToken,
+		Path:     "/",
+		MaxAge:   expiresIn,
+		HTTPOnly: true,
+		Secure:   secure,
+		SameSite: "Strict",
+	})
+	if refreshToken != "" {
+		c.Cookie(&fiber.Cookie{
+			Name:     "refresh_token",
+			Value:    refreshToken,
+			Path:     "/",
+			MaxAge:   expiresIn,
+			HTTPOnly: true,
+			Secure:   secure,
+			SameSite: "Strict",
+		})
+	}
+}
+
+// clearAuthCookies removes the auth cookies from the browser by expiring them immediately.
+func clearAuthCookies(c *fiber.Ctx, secure bool) {
+	c.Cookie(&fiber.Cookie{
+		Name:     "access_token",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HTTPOnly: true,
+		Secure:   secure,
+		SameSite: "Strict",
+	})
+	c.Cookie(&fiber.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HTTPOnly: true,
+		Secure:   secure,
+		SameSite: "Strict",
+	})
 }
 
 // Login authenticates a client and returns tokens or a PKI nonce challenge.
@@ -100,6 +164,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
 	}
+	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, h.cookieSecure)
 	resp := fiber.Map{
 		"accessToken": token.AccessToken,
 		"expiresIn":   token.ExpiresIn,
@@ -127,6 +192,7 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired refresh token"})
 	}
+	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, h.cookieSecure)
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"accessToken":  token.AccessToken,
 		"refreshToken": token.RefreshToken,
@@ -135,16 +201,18 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 	})
 }
 
-// Logout revokes the current access token (Bearer from header).
+// Logout revokes the current access token. The token is read from the
+// access_token HttpOnly cookie set by login/refresh endpoints.
+// On success the auth cookies are cleared.
 func (h *AuthHandler) Logout(c *fiber.Ctx) error {
-	authHeader := c.Get("Authorization")
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	if token == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bearer token is required"})
+	rawToken := c.Cookies("access_token")
+	if rawToken == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "access_token cookie is required"})
 	}
-	if err := h.authProvider.Logout(c.UserContext(), token); err != nil {
+	if err := h.authProvider.Logout(c.UserContext(), rawToken); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "logout failed"})
 	}
+	clearAuthCookies(c, h.cookieSecure)
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "logged out successfully"})
 }
 
@@ -185,6 +253,7 @@ func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": errMsg})
 	}
 
+	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, h.cookieSecure)
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"accessToken":  token.AccessToken,
 		"refreshToken": token.RefreshToken,
@@ -194,10 +263,15 @@ func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
 }
 
 // ChangeClientSecret allows an authenticated user to rotate their clientSecret.
-// Requires a valid Bearer token; the user ID is extracted from the token claims.
+// The user ID is read from the claims injected by RequireCookieAuth middleware.
 func (h *AuthHandler) ChangeClientSecret(c *fiber.Ctx) error {
 	if h.clientSecretChanger == nil {
 		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{"error": "client secret rotation not available"})
+	}
+
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok || claims.Subject == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 	}
 
 	var body struct {
@@ -211,16 +285,6 @@ func (h *AuthHandler) ChangeClientSecret(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "current_client_secret and new_client_secret are required"})
 	}
 
-	authHeader := c.Get("Authorization")
-	rawToken := strings.TrimPrefix(authHeader, "Bearer ")
-	if rawToken == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "bearer token required"})
-	}
-	claims, err := h.authProvider.Validate(c.UserContext(), rawToken)
-	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
-	}
-
 	if chErr := h.clientSecretChanger.ChangeClientSecret(c.UserContext(), claims.Subject, body.CurrentClientSecret, body.NewClientSecret); chErr != nil {
 		if st, ok := status.FromError(chErr); ok && st.Message() == "invalid current client secret" {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid current client secret"})
@@ -228,6 +292,147 @@ func (h *AuthHandler) ChangeClientSecret(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "client secret rotation failed"})
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "client secret changed successfully"})
+}
+
+// Me returns the authenticated user's profile from the claims injected by RequireCookieAuth middleware.
+func (h *AuthHandler) Me(c *fiber.Ctx) error {
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok || claims.Subject == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	resp := fiber.Map{
+		"subject": claims.Subject,
+		"issuer":  claims.Issuer,
+		"roles":   claims.Roles,
+	}
+	if claims.Wallet != "" {
+		resp["wallet"] = claims.Wallet
+	}
+	if claims.Country != "" {
+		resp["country"] = claims.Country
+	}
+	if claims.BankID != "" {
+		resp["bankId"] = claims.BankID
+	}
+	if claims.PrivacyGroup != "" {
+		resp["privacyGroup"] = claims.PrivacyGroup
+	}
+	return c.Status(fiber.StatusOK).JSON(resp)
+}
+
+// ResolveChallenger signs a PKI login nonce using the EC private key found in
+// the PKI_DIR directory. Intended for MVP use only —
+// remove this endpoint before deploying to production.
+//
+// cert_file can be:
+//   - a combined .pem file containing both CERTIFICATE and EC PRIVATE KEY blocks
+//   - a .crt file; in this case the matching .key file (same base name) is loaded
+//     automatically from PKI_DIR (e.g. "bank-001.crt" → also reads "bank-001.key")
+//
+// Request: { "nonce": "<64-char hex>", "cert_file": "bank-001.crt" }
+// Response: { "nonce_signature_hex": "<hex DER>", "cert_pem": "<PEM>" }
+func (h *AuthHandler) ResolveChallenger(c *fiber.Ctx) error { // MVP-only
+	var req struct {
+		Nonce    string `json:"nonce"`
+		CertFile string `json:"cert_file"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if req.Nonce == "" || req.CertFile == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "nonce and cert_file are required"})
+	}
+	// Reject path traversal attempts.
+	if strings.Contains(req.CertFile, "/") || strings.Contains(req.CertFile, "..") {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "cert_file must be a plain filename without path separators"})
+	}
+
+	pkiDir := os.Getenv("PKI_DIR")
+	if pkiDir == "" {
+		pkiDir = "./config/pki"
+	}
+	certPath := filepath.Join(pkiDir, req.CertFile)
+
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "cert file not found: " + req.CertFile})
+	}
+
+	var certPEMBlock, keyPEMBlock *pem.Block
+	remaining := data
+	for {
+		var block *pem.Block
+		block, remaining = pem.Decode(remaining)
+		if block == nil {
+			break
+		}
+		switch block.Type {
+		case "CERTIFICATE":
+			certPEMBlock = block
+		case "EC PRIVATE KEY":
+			keyPEMBlock = block
+		}
+	}
+	if certPEMBlock == nil {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "CERTIFICATE block not found in " + req.CertFile})
+	}
+
+	// If the private key was not found in the cert file, look for a sibling .key
+	// file with the same base name (e.g. "bank-001.crt" → "bank-001.key").
+	// This matches the file layout produced by `make pki.gen-commercial-banks`.
+	if keyPEMBlock == nil {
+		ext := filepath.Ext(req.CertFile)
+		keyFileName := req.CertFile[:len(req.CertFile)-len(ext)] + ".key"
+		keyPath := filepath.Join(pkiDir, keyFileName)
+		keyData, keyErr := os.ReadFile(keyPath)
+		if keyErr != nil {
+			return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+				"error": "EC PRIVATE KEY not found in " + req.CertFile + " and no matching key file: " + keyFileName,
+			})
+		}
+		rem := keyData
+		for {
+			var block *pem.Block
+			block, rem = pem.Decode(rem)
+			if block == nil {
+				break
+			}
+			if block.Type == "EC PRIVATE KEY" {
+				keyPEMBlock = block
+				break
+			}
+		}
+		if keyPEMBlock == nil {
+			return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "EC PRIVATE KEY block not found in " + keyFileName})
+		}
+	}
+
+	privKey, err := x509.ParseECPrivateKey(keyPEMBlock.Bytes)
+	if err != nil {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "failed to parse EC private key: " + err.Error()})
+	}
+
+	nonceBytes, err := hex.DecodeString(req.Nonce)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "nonce is not valid hex"})
+	}
+	digest := sha256.Sum256(nonceBytes)
+
+	r, s, err := ecdsa.Sign(rand.Reader, privKey, digest[:])
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "signing failed"})
+	}
+	sigDER, err := asn1.Marshal(struct{ R, S *big.Int }{r, s})
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to encode signature"})
+	}
+
+	certPEM := string(pem.EncodeToMemory(certPEMBlock))
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"nonce_signature_hex": hex.EncodeToString(sigDER),
+		"cert_pem":            certPEM,
+	})
 }
 
 func containsRole(roles []string, role string) bool {

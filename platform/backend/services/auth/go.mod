@@ -5,6 +5,7 @@ go 1.25.5
 require (
 	github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain v0.0.0
 	github.com/LACNetNetworks/cbweb3-platform/backend/shared/identity v0.0.0
+	github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto v0.0.0
 	github.com/ethereum/go-ethereum v1.17.1
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/redis/go-redis/v9 v9.18.0
@@ -14,6 +15,7 @@ require (
 replace (
 	github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain => ../../shared/blockchain
 	github.com/LACNetNetworks/cbweb3-platform/backend/shared/identity => ../../shared/identity
+	github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto => ../../shared/proto
 )
 
 require (

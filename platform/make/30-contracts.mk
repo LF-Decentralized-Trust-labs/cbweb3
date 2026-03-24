@@ -1,5 +1,20 @@
 include contracts/.env
 
+# ── Protobuf / gRPC code generation ──────────────────────────────────────────
+# Prerequisites (install once):
+#   go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+#   go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+#   go install github.com/bufbuild/buf/cmd/buf@latest
+proto-gen:
+	@cd apis/proto && buf generate
+
+proto-lint:
+	@cd apis/proto && buf lint
+
+proto-breaking:
+	@cd apis/proto && buf breaking --against '.git#branch=main'
+
+# ── Solidity contracts ────────────────────────────────────────────────────────
 contracts.setup:
 	@cd contracts && forge soldeer install
 

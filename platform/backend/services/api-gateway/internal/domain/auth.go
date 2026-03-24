@@ -64,3 +64,17 @@ const (
 	RoleCentralBank = "CENTRAL_BANK"
 	RoleMLP         = "MLP"
 )
+
+// adminRoles is the set of roles that the Central Bank may assign during onboarding.
+var adminRoles = map[string]bool{
+	RoleCommercialBank:    true,
+	RoleTreasury:          true,
+	RoleNOC:               true,
+	RoleSupervisor:        true,
+	RoleGovernanceOfficer: true,
+}
+
+// IsAdminRole reports whether the given role may be assigned by the Central Bank.
+func IsAdminRole(role string) bool {
+	return adminRoles[role]
+}

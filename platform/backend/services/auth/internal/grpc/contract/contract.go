@@ -18,6 +18,8 @@ const (
 	GetKYCStatusMethod         = "/auth.v1.AuthService/GetKYCStatus"
 	ProvisionParticipantMethod = "/auth.v1.AuthService/ProvisionParticipant"
 	OnboardParticipantMethod   = "/auth.v1.AuthService/OnboardParticipant"
+	ListUsersMethod            = "/auth.v1.AuthService/ListUsers"
+	GetUserMethod              = "/auth.v1.AuthService/GetUser"
 
 	// PKI 2FA methods
 	IssueLoginNonceMethod = "/auth.v1.AuthService/IssueLoginNonce"
@@ -201,6 +203,51 @@ type VerifyPKILoginResponse struct {
 	ExpiresIn    int32  `json:"expires_in"`
 }
 
+// --- User Management ---
+
+// ListUsersRequest carries optional filters for the ListUsers method.
+type ListUsersRequest struct {
+	// Role filters by participant role (e.g. ROLE_COMMERCIAL_BANK). Empty = all roles.
+	Role string `json:"role,omitempty"`
+	// Status filters by lifecycle status (e.g. ACTIVE, PENDING). Empty = all statuses.
+	Status string `json:"status,omitempty"`
+}
+
+// UserSummary is a condensed view of a participant for list responses.
+type UserSummary struct {
+	UserID          string `json:"user_id"`
+	InstitutionName string `json:"institution_name,omitempty"`
+	Role            string `json:"role"`
+	Status          string `json:"status"`
+	WalletAddress   string `json:"wallet_address,omitempty"`
+	Country         string `json:"country,omitempty"`
+	BankCode        string `json:"bank_code,omitempty"`
+}
+
+// ListUsersResponse contains the paginated user list.
+type ListUsersResponse struct {
+	Users []UserSummary `json:"users"`
+	Total int           `json:"total"`
+}
+
+// GetUserRequest identifies a single user to retrieve.
+type GetUserRequest struct {
+	UserID string `json:"user_id"`
+}
+
+// GetUserResponse contains the full profile of a participant.
+type GetUserResponse struct {
+	UserID          string `json:"user_id"`
+	Username        string `json:"username"`
+	Email           string `json:"email"`
+	InstitutionName string `json:"institution_name,omitempty"`
+	Role            string `json:"role"`
+	Status          string `json:"status"`
+	WalletAddress   string `json:"wallet_address,omitempty"`
+	Country         string `json:"country,omitempty"`
+	BankCode        string `json:"bank_code,omitempty"`
+}
+
 // --- Password Management ---
 
 // ChangeClientSecretRequest allows an authenticated user to rotate their clientSecret.
@@ -226,6 +273,8 @@ type IdentityServiceClient interface {
 	GetKYCStatus(ctx context.Context, in *GetKYCStatusRequest, opts ...grpc.CallOption) (*GetKYCStatusResponse, error)
 	ProvisionParticipant(ctx context.Context, in *ProvisionParticipantRequest, opts ...grpc.CallOption) (*ProvisionParticipantResponse, error)
 	OnboardParticipant(ctx context.Context, in *OnboardParticipantRequest, opts ...grpc.CallOption) (*OnboardParticipantResponse, error)
+	ListUsers(ctx context.Context, in *ListUsersRequest, opts ...grpc.CallOption) (*ListUsersResponse, error)
+	GetUser(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*GetUserResponse, error)
 	IssueLoginNonce(ctx context.Context, in *IssueLoginNonceRequest, opts ...grpc.CallOption) (*IssueLoginNonceResponse, error)
 	VerifyPKILogin(ctx context.Context, in *VerifyPKILoginRequest, opts ...grpc.CallOption) (*VerifyPKILoginResponse, error)
 	ChangeClientSecret(ctx context.Context, in *ChangeClientSecretRequest, opts ...grpc.CallOption) (*ChangeClientSecretResponse, error)
@@ -282,6 +331,16 @@ func (c *identityServiceClient) ProvisionParticipant(ctx context.Context, in *Pr
 func (c *identityServiceClient) OnboardParticipant(ctx context.Context, in *OnboardParticipantRequest, opts ...grpc.CallOption) (*OnboardParticipantResponse, error) {
 	out := new(OnboardParticipantResponse)
 	return out, c.cc.Invoke(ctx, OnboardParticipantMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) ListUsers(ctx context.Context, in *ListUsersRequest, opts ...grpc.CallOption) (*ListUsersResponse, error) {
+	out := new(ListUsersResponse)
+	return out, c.cc.Invoke(ctx, ListUsersMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) GetUser(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*GetUserResponse, error) {
+	out := new(GetUserResponse)
+	return out, c.cc.Invoke(ctx, GetUserMethod, in, out, opts...)
 }
 
 func (c *identityServiceClient) IssueLoginNonce(ctx context.Context, in *IssueLoginNonceRequest, opts ...grpc.CallOption) (*IssueLoginNonceResponse, error) {

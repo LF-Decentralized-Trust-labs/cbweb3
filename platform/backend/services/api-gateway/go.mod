@@ -3,10 +3,13 @@ module github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway
 go 1.25.5
 
 require (
+	github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto v0.0.0
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/stretchr/testify v1.11.1
 	google.golang.org/grpc v1.79.2
 )
+
+replace github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto => ../../shared/proto
 
 require (
 	github.com/andybalholm/brotli v1.1.0 // indirect
@@ -27,7 +30,7 @@ require (
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251222181119-0a764e51fe1b // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

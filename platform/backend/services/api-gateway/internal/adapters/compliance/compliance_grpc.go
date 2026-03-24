@@ -5,32 +5,14 @@ package compliance
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
+	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/encoding"
+	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-const (
-	listParticipantsMethod        = "/compliance.v1.ComplianceService/ListParticipants"
-	upsertParticipantMethod       = "/compliance.v1.ComplianceService/UpsertParticipant"
-	signParticipantCSRMethod      = "/compliance.v1.ComplianceService/SignParticipantCSR"
-	approveKYCMethod                  = "/compliance.v1.ComplianceService/ApproveKYC"
-	manageParticipantStatusMethod     = "/compliance.v1.ComplianceService/ManageParticipantStatus"
-	getAuditLogsMethod                = "/compliance.v1.ComplianceService/GetAuditLogs"
-	getCircuitBreakerStatusMethod     = "/compliance.v1.ComplianceService/GetCircuitBreakerStatus"
-	toggleCircuitBreakerMethod        = "/compliance.v1.ComplianceService/ToggleCircuitBreaker"
-	getSystemParametersMethod         = "/compliance.v1.ComplianceService/GetSystemParameters"
-	updateSystemParametersMethod      = "/compliance.v1.ComplianceService/UpdateSystemParameters"
-)
-
-type jsonCodec struct{}
-
-func (jsonCodec) Name() string                       { return "json" }
-func (jsonCodec) Marshal(v any) ([]byte, error)      { return json.Marshal(v) }
-func (jsonCodec) Unmarshal(data []byte, v any) error { return json.Unmarshal(data, v) }
 
 // Participant is a simplified view used in HTTP handler responses.
 type Participant struct {
@@ -78,17 +60,20 @@ type SignedCSRResult struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
+// ApproveKYCResult holds the result of an ApproveKYC call.
+type ApproveKYCResult struct {
+	Subject string
+	Status  string
+	TxHash  string
+}
+
 // GRPCAdapter is the api-gateway adapter for the compliance-orchestrator gRPC service.
 type GRPCAdapter struct {
-	cc    grpc.ClientConnInterface
-	codec encoding.Codec
+	cc compliancv1.ComplianceServiceClient
 }
 
 // NewGRPCAdapter connects to the compliance-orchestrator and returns a GRPCAdapter.
 func NewGRPCAdapter(address string, timeout time.Duration) (*GRPCAdapter, error) {
-	codec := jsonCodec{}
-	encoding.RegisterCodec(codec)
-
 	dialCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -97,155 +82,173 @@ func NewGRPCAdapter(address string, timeout time.Duration) (*GRPCAdapter, error)
 		dialCtx,
 		address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.ForceCodec(codec)),
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &GRPCAdapter{cc: conn, codec: codec}, nil
+	return &GRPCAdapter{cc: compliancv1.NewComplianceServiceClient(conn)}, nil
 }
 
 func (a *GRPCAdapter) ListParticipants(ctx context.Context, statusFilter, search string) ([]Participant, error) {
-	req := struct {
-		Status string `json:"status,omitempty"`
-		Search string `json:"search,omitempty"`
-	}{Status: statusFilter, Search: search}
-
-	var resp struct {
-		Participants []Participant `json:"participants"`
-	}
-	if err := a.cc.Invoke(ctx, listParticipantsMethod, &req, &resp, grpc.ForceCodec(a.codec)); err != nil {
+	resp, err := a.cc.ListParticipants(ctx, &compliancv1.ListParticipantsRequest{
+		Status: statusFilter,
+		Search: search,
+	})
+	if err != nil {
 		return nil, err
 	}
-	return resp.Participants, nil
+	result := make([]Participant, 0, len(resp.Participants))
+	for _, p := range resp.Participants {
+		part := Participant{
+			UserID:          p.UserId,
+			InstitutionName: p.InstitutionName,
+			CNPJ:            p.Cnpj,
+			BankCode:        p.BankCode,
+			CountryCode:     p.CountryCode,
+			Role:            p.Role,
+			WalletAddress:   p.WalletAddress,
+			Status:          p.Status,
+			CertificateData: p.CertificateData,
+		}
+		if p.CertificateExpiry != nil {
+			t := p.CertificateExpiry.AsTime()
+			part.CertificateExpiry = &t
+		}
+		result = append(result, part)
+	}
+	return result, nil
 }
 
 func (a *GRPCAdapter) RegisterParticipant(ctx context.Context, p Participant) error {
-	req := struct {
-		Participant Participant `json:"participant"`
-	}{Participant: p}
-	var resp struct{ Success bool `json:"success"` }
-	return a.cc.Invoke(ctx, upsertParticipantMethod, &req, &resp, grpc.ForceCodec(a.codec))
+	participant := &compliancv1.Participant{
+		UserId:          p.UserID,
+		InstitutionName: p.InstitutionName,
+		Cnpj:            p.CNPJ,
+		BankCode:        p.BankCode,
+		CountryCode:     p.CountryCode,
+		Role:            p.Role,
+		WalletAddress:   p.WalletAddress,
+		Status:          p.Status,
+		CertificateData: p.CertificateData,
+	}
+	if p.CertificateExpiry != nil {
+		participant.CertificateExpiry = timestamppb.New(*p.CertificateExpiry)
+	}
+	_, err := a.cc.UpsertParticipant(ctx, &compliancv1.UpsertParticipantRequest{Participant: participant})
+	return err
 }
 
 // SignParticipantCSR submits a PKCS#10 CSR to the compliance-orchestrator for
 // signing by the CA. The participant record is created/updated automatically.
 func (a *GRPCAdapter) SignParticipantCSR(ctx context.Context, csrPEM, userID, role, institutionName, cnpj string) (SignedCSRResult, error) {
-	req := struct {
-		CSRPEM          string `json:"csr_pem"`
-		UserID          string `json:"user_id"`
-		Role            string `json:"role"`
-		InstitutionName string `json:"institution_name"`
-		CNPJ            string `json:"cnpj,omitempty"`
-	}{CSRPEM: csrPEM, UserID: userID, Role: role, InstitutionName: institutionName, CNPJ: cnpj}
-
-	var resp SignedCSRResult
-	if err := a.cc.Invoke(ctx, signParticipantCSRMethod, &req, &resp, grpc.ForceCodec(a.codec)); err != nil {
+	resp, err := a.cc.SignParticipantCSR(ctx, &compliancv1.SignParticipantCSRRequest{
+		CsrPem:          csrPEM,
+		UserId:          userID,
+		Role:            role,
+		InstitutionName: institutionName,
+		Cnpj:            cnpj,
+	})
+	if err != nil {
 		return SignedCSRResult{}, err
 	}
-	return resp, nil
-}
-
-// ApproveKYCResult holds the result of an ApproveKYC call.
-type ApproveKYCResult struct {
-	Subject string
-	Status  string
-	TxHash  string
+	return SignedCSRResult{CertPEM: resp.CertPem, ExpiresAt: resp.ExpiresAt}, nil
 }
 
 func (a *GRPCAdapter) ApproveKYC(ctx context.Context, subject, actorSubject, reason string) (ApproveKYCResult, error) {
-	req := struct {
-		Subject      string `json:"subject"`
-		ActorSubject string `json:"actor_subject"`
-		Reason       string `json:"reason,omitempty"`
-	}{Subject: subject, ActorSubject: actorSubject, Reason: reason}
-	var resp struct {
-		Subject string `json:"subject"`
-		Status  string `json:"status"`
-		TxHash  string `json:"tx_hash"`
-	}
-	if err := a.cc.Invoke(ctx, approveKYCMethod, &req, &resp, grpc.ForceCodec(a.codec)); err != nil {
+	resp, err := a.cc.ApproveKYC(ctx, &compliancv1.ApproveKYCRequest{
+		Subject:      subject,
+		ActorSubject: actorSubject,
+		Reason:       reason,
+	})
+	if err != nil {
 		return ApproveKYCResult{}, err
 	}
 	return ApproveKYCResult{Subject: resp.Subject, Status: resp.Status, TxHash: resp.TxHash}, nil
 }
 
 func (a *GRPCAdapter) ManageParticipantStatus(ctx context.Context, subject, statusVal, reason string) error {
-	req := struct {
-		Subject string `json:"subject"`
-		Status  string `json:"status"`
-		Reason  string `json:"reason"`
-	}{Subject: subject, Status: statusVal, Reason: reason}
-	var resp struct{ Subject string `json:"subject"` }
-	return a.cc.Invoke(ctx, manageParticipantStatusMethod, &req, &resp, grpc.ForceCodec(a.codec))
+	_, err := a.cc.ManageParticipantStatus(ctx, &compliancv1.ManageParticipantStatusRequest{
+		Subject: subject,
+		Status:  statusVal,
+		Reason:  reason,
+	})
+	return err
 }
 
 func (a *GRPCAdapter) GetAuditLogs(ctx context.Context, category, severity, fromDate, toDate string, page, limit int) ([]AuditRecord, error) {
-	req := struct {
-		Category string `json:"category,omitempty"`
-		Severity string `json:"severity,omitempty"`
-		FromDate string `json:"from_date,omitempty"`
-		ToDate   string `json:"to_date,omitempty"`
-		Page     int    `json:"page,omitempty"`
-		Limit    int    `json:"limit,omitempty"`
-	}{Category: category, Severity: severity, FromDate: fromDate, ToDate: toDate, Page: page, Limit: limit}
-
-	var resp struct {
-		Logs []AuditRecord `json:"logs"`
-	}
-	if err := a.cc.Invoke(ctx, getAuditLogsMethod, &req, &resp, grpc.ForceCodec(a.codec)); err != nil {
+	resp, err := a.cc.GetAuditLogs(ctx, &compliancv1.GetAuditLogsRequest{
+		Category: category,
+		Severity: severity,
+		FromDate: fromDate,
+		ToDate:   toDate,
+		Page:     int32(page),
+		Limit:    int32(limit),
+	})
+	if err != nil {
 		return nil, err
 	}
-	return resp.Logs, nil
+	result := make([]AuditRecord, 0, len(resp.Logs))
+	for _, r := range resp.Logs {
+		result = append(result, AuditRecord{
+			LogID:         r.LogId,
+			Timestamp:     r.Timestamp,
+			ActorSubject:  r.ActorSubject,
+			ActorAddress:  r.ActorAddress,
+			ActionType:    r.ActionType,
+			TargetSubject: r.TargetSubject,
+			Category:      r.Category,
+			Severity:      r.Severity,
+			Result:        r.Result,
+			Details:       r.Details,
+		})
+	}
+	return result, nil
 }
 
 func (a *GRPCAdapter) GetCircuitBreakerStatus(ctx context.Context) (CircuitBreakerStatus, error) {
-	var resp CircuitBreakerStatus
-	if err := a.cc.Invoke(ctx, getCircuitBreakerStatusMethod, struct{}{}, &resp, grpc.ForceCodec(a.codec)); err != nil {
+	resp, err := a.cc.GetCircuitBreakerStatus(ctx, &emptypb.Empty{})
+	if err != nil {
 		return CircuitBreakerStatus{}, err
 	}
-	return resp, nil
+	return CircuitBreakerStatus{
+		IsPaused:   resp.IsPaused,
+		LastUpdate: resp.LastUpdate,
+		UpdatedBy:  resp.UpdatedBy,
+	}, nil
 }
 
 func (a *GRPCAdapter) ToggleCircuitBreaker(ctx context.Context, pause bool, reason string) (bool, error) {
-	req := struct {
-		Pause  bool   `json:"pause"`
-		Reason string `json:"reason"`
-	}{Pause: pause, Reason: reason}
-	var resp struct {
-		IsPaused bool   `json:"is_paused"`
-		TxHash   string `json:"tx_hash,omitempty"`
-	}
-	if err := a.cc.Invoke(ctx, toggleCircuitBreakerMethod, &req, &resp, grpc.ForceCodec(a.codec)); err != nil {
+	resp, err := a.cc.ToggleCircuitBreaker(ctx, &compliancv1.ToggleCircuitBreakerRequest{
+		Pause:  pause,
+		Reason: reason,
+	})
+	if err != nil {
 		return false, err
 	}
 	return resp.IsPaused, nil
 }
 
 func (a *GRPCAdapter) GetSystemParameters(ctx context.Context) (SystemParameters, error) {
-	var resp SystemParameters
-	if err := a.cc.Invoke(ctx, getSystemParametersMethod, struct{}{}, &resp, grpc.ForceCodec(a.codec)); err != nil {
+	resp, err := a.cc.GetSystemParameters(ctx, &emptypb.Empty{})
+	if err != nil {
 		return SystemParameters{}, err
 	}
-	return resp, nil
+	return SystemParameters{
+		TransactionMinimum: resp.TransactionMinimum,
+		TransactionMaximum: resp.TransactionMaximum,
+		SlippageTolerance:  resp.SlippageTolerance,
+		SettlementWindow:   resp.SettlementWindow,
+	}, nil
 }
 
 func (a *GRPCAdapter) UpdateSystemParameters(ctx context.Context, params SystemParameters, reason, actorSubject string) error {
-	req := struct {
-		TransactionMinimum string  `json:"transaction_minimum"`
-		TransactionMaximum string  `json:"transaction_maximum"`
-		SlippageTolerance  float64 `json:"slippage_tolerance"`
-		SettlementWindow   int64   `json:"settlement_window"`
-		Reason             string  `json:"reason"`
-		ActorSubject       string  `json:"actor_subject"`
-	}{
+	_, err := a.cc.UpdateSystemParameters(ctx, &compliancv1.UpdateSystemParametersRequest{
 		TransactionMinimum: params.TransactionMinimum,
 		TransactionMaximum: params.TransactionMaximum,
 		SlippageTolerance:  params.SlippageTolerance,
 		SettlementWindow:   params.SettlementWindow,
 		Reason:             reason,
 		ActorSubject:       actorSubject,
-	}
-	var resp struct{ Success bool `json:"success"` }
-	return a.cc.Invoke(ctx, updateSystemParametersMethod, &req, &resp, grpc.ForceCodec(a.codec))
+	})
+	return err
 }

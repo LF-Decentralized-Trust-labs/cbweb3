@@ -79,7 +79,7 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 	t.Parallel()
 
 	mgr := fullKYCManagerStub{}
-	authHandler := handlers.NewAuthHandler(authProviderStub{}, mgr)
+	authHandler := handlers.NewAuthHandler(authProviderStub{}, mgr, false)
 	complianceHandler := handlers.NewComplianceHandler(mgr)
 	app := fiber.New()
 	// Validator always returns COMMERCIAL_BANK role — never ROLE_GOVERNANCE.
@@ -102,7 +102,7 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 	}
 	for _, tc := range protectedRoutes {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
-		req.Header.Set("Authorization", "Bearer fake-token")
+		req.AddCookie(&http.Cookie{Name: "access_token", Value: "fake-token"})
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := app.Test(req)
 		if err != nil {
@@ -117,7 +117,7 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 func TestSetupRegistersRoutes(t *testing.T) {
 	t.Parallel()
 
-	authHandler := handlers.NewAuthHandler(authProviderStub{}, kycCheckerStub{})
+	authHandler := handlers.NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false)
 	complianceHandler := handlers.NewComplianceHandler(kycCheckerStub{})
 	app := fiber.New()
 	Setup(app, Dependencies{
@@ -148,5 +148,69 @@ func TestSetupRegistersRoutes(t *testing.T) {
 	}
 	if swaggerResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 from swagger route, got %d", swaggerResp.StatusCode)
+	}
+}
+
+func TestMeRouteRequiresToken(t *testing.T) {
+	t.Parallel()
+
+	authHandler := handlers.NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false)
+	complianceHandler := handlers.NewComplianceHandler(kycCheckerStub{})
+	app := fiber.New()
+	Setup(app, Dependencies{
+		AuthHandler:       authHandler,
+		ComplianceHandler: complianceHandler,
+		AuthProvider:      authProviderStub{},
+	})
+
+	// Without cookie → 401 from RequireCookieAuth middleware.
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 without token, got %d", resp.StatusCode)
+	}
+
+	// With cookie → 200 (stub always validates).
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	req.AddCookie(&http.Cookie{Name: "access_token", Value: "valid-token"})
+	resp2, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 with token, got %d", resp2.StatusCode)
+	}
+}
+
+func TestGovernanceUsersRoutesRequireRole(t *testing.T) {
+	t.Parallel()
+
+	mgr := fullKYCManagerStub{}
+	authHandler := handlers.NewAuthHandler(authProviderStub{}, mgr, false)
+	complianceHandler := handlers.NewComplianceHandler(mgr)
+	app := fiber.New()
+	// ROLE_COMMERCIAL_BANK → must be blocked from governance routes.
+	authProvider := roleAuthProviderStub{roles: []string{domain.RoleCommercialBank}}
+	Setup(app, Dependencies{
+		AuthHandler:       authHandler,
+		ComplianceHandler: complianceHandler,
+		AuthProvider:      authProvider,
+	})
+
+	for _, path := range []string{
+		"/api/v1/governance/users",
+		"/api/v1/governance/users/some-id",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.AddCookie(&http.Cookie{Name: "access_token", Value: "fake-token"})
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("GET %s: unexpected error: %v", path, err)
+		}
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("GET %s: expected 403, got %d", path, resp.StatusCode)
+		}
 	}
 }

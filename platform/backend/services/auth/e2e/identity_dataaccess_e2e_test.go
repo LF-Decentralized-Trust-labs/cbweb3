@@ -13,12 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/grpc/contract"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/grpc/jsoncodec"
+	authv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/status"
 )
 
@@ -45,28 +43,25 @@ func TestIdentityAndDataAccessE2E(t *testing.T) {
 	// INTERNAL_JWT_SECRET matches AUTH_JWT_SECRET so login token can be used
 	// by provider.ValidateToken during RegisterParticipant in this E2E flow.
 	startService(t, ctx, authDir, map[string]string{
-		"AUTH_GRPC_PORT":                  identityPort,
-		"COMPLIANCE_GRPC_ADDR":            dataAccessAddr,
-		"COMPLIANCE_REQUEST_TIMEOUT_SEC":  "5",
+		"AUTH_GRPC_PORT":                 identityPort,
+		"COMPLIANCE_GRPC_ADDR":           dataAccessAddr,
+		"COMPLIANCE_REQUEST_TIMEOUT_SEC": "5",
 	})
 	waitForTCP(t, identityAddr, 20*time.Second)
 
-	codec := jsoncodec.Codec{}
-	encoding.RegisterCodec(codec)
 	conn, err := grpc.DialContext(
 		ctx,
 		identityAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.ForceCodec(codec)),
 	)
 	if err != nil {
 		t.Fatalf("failed to dial identity grpc: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
-	client := contract.NewIdentityServiceClient(conn)
+	client := authv1.NewAuthServiceClient(conn)
 
-	loginResp, err := client.Login(ctx, &contract.LoginRequest{
+	loginResp, err := client.Login(ctx, &authv1.LoginRequest{
 		User:     "bank-a",
 		Password: "secret-a",
 	})
@@ -77,7 +72,7 @@ func TestIdentityAndDataAccessE2E(t *testing.T) {
 		t.Fatal("expected non-empty login access token")
 	}
 
-	registerResp, err := client.RegisterParticipant(ctx, &contract.RegisterParticipantRequest{
+	registerResp, err := client.RegisterParticipant(ctx, &authv1.RegisterParticipantRequest{
 		AccessToken: loginResp.AccessToken,
 		Country:     "BR",
 		BankCode:    "001",
@@ -86,8 +81,8 @@ func TestIdentityAndDataAccessE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register participant failed: %v", err)
 	}
-	if registerResp.UserID != "bank-a" {
-		t.Fatalf("unexpected user id: %s", registerResp.UserID)
+	if registerResp.UserId != "bank-a" {
+		t.Fatalf("unexpected user id: %s", registerResp.UserId)
 	}
 	if registerResp.WalletAddress == "" {
 		t.Fatal("expected non-empty wallet address")
@@ -97,8 +92,8 @@ func TestIdentityAndDataAccessE2E(t *testing.T) {
 	for i := range digest {
 		digest[i] = byte(i + 1)
 	}
-	signResp, err := client.SignTransaction(ctx, &contract.SignTransactionRequest{
-		UserID: "bank-a",
+	signResp, err := client.SignTransaction(ctx, &authv1.SignTransactionRequest{
+		UserId: "bank-a",
 		Digest: hex.EncodeToString(digest),
 	})
 	if err != nil {
@@ -136,22 +131,19 @@ func TestIdentityAndDataAccessE2ENegativeScenarios(t *testing.T) {
 	})
 	waitForTCP(t, identityAddr, 20*time.Second)
 
-	codec := jsoncodec.Codec{}
-	encoding.RegisterCodec(codec)
 	conn, err := grpc.DialContext(
 		ctx,
 		identityAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.ForceCodec(codec)),
 	)
 	if err != nil {
 		t.Fatalf("failed to dial identity grpc: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
-	client := contract.NewIdentityServiceClient(conn)
+	client := authv1.NewAuthServiceClient(conn)
 
-	_, err = client.RegisterParticipant(ctx, &contract.RegisterParticipantRequest{
+	_, err = client.RegisterParticipant(ctx, &authv1.RegisterParticipantRequest{
 		AccessToken: "invalid-token",
 		Country:     "BR",
 		BankCode:    "001",
@@ -164,8 +156,8 @@ func TestIdentityAndDataAccessE2ENegativeScenarios(t *testing.T) {
 		t.Fatalf("expected Unauthenticated, got %v", status.Code(err))
 	}
 
-	_, err = client.SignTransaction(ctx, &contract.SignTransactionRequest{
-		UserID: "unknown-user",
+	_, err = client.SignTransaction(ctx, &authv1.SignTransactionRequest{
+		UserId: "unknown-user",
 		Digest: strings.Repeat("ab", 32),
 	})
 	if err == nil {
@@ -175,8 +167,8 @@ func TestIdentityAndDataAccessE2ENegativeScenarios(t *testing.T) {
 		t.Fatalf("expected NotFound, got %v", status.Code(err))
 	}
 
-	_, err = client.SignTransaction(ctx, &contract.SignTransactionRequest{
-		UserID: "bank-a",
+	_, err = client.SignTransaction(ctx, &authv1.SignTransactionRequest{
+		UserId: "bank-a",
 		Digest: "abcd",
 	})
 	if err == nil {
@@ -186,14 +178,14 @@ func TestIdentityAndDataAccessE2ENegativeScenarios(t *testing.T) {
 		t.Fatalf("expected NotFound before onboarding, got %v", status.Code(err))
 	}
 
-	loginResp, err := client.Login(ctx, &contract.LoginRequest{
+	loginResp, err := client.Login(ctx, &authv1.LoginRequest{
 		User:     "bank-a",
 		Password: "secret-a",
 	})
 	if err != nil {
 		t.Fatalf("login failed: %v", err)
 	}
-	_, err = client.RegisterParticipant(ctx, &contract.RegisterParticipantRequest{
+	_, err = client.RegisterParticipant(ctx, &authv1.RegisterParticipantRequest{
 		AccessToken: loginResp.AccessToken,
 		Country:     "BR",
 		BankCode:    "001",
@@ -203,8 +195,8 @@ func TestIdentityAndDataAccessE2ENegativeScenarios(t *testing.T) {
 		t.Fatalf("register participant failed: %v", err)
 	}
 
-	_, err = client.SignTransaction(ctx, &contract.SignTransactionRequest{
-		UserID: "bank-a",
+	_, err = client.SignTransaction(ctx, &authv1.SignTransactionRequest{
+		UserId: "bank-a",
 		Digest: "abcd",
 	})
 	if err == nil {
