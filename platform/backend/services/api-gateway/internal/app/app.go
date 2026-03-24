@@ -3,6 +3,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 
 	authadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
@@ -11,6 +12,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 )
 
 func New(cfg config.Config) (*fiber.App, error) {
@@ -45,6 +47,14 @@ func New(cfg config.Config) (*fiber.App, error) {
 			AppName:   "api-gateway",
 		},
 	)
+
+	fiberApp.Use(cors.New(cors.Config{
+		AllowOrigins:     os.Getenv("CORS_ALLOW_ORIGINS"),
+		AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept",
+		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
+		AllowCredentials: true,
+	}))
+
 	router.Setup(fiberApp, router.Dependencies{
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
