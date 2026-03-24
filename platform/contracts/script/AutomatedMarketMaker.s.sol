@@ -19,12 +19,11 @@ contract DeployAMM is Script {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address tokenAAddress = vm.envAddress("TOKEN_A_ADDRESS");
         address tokenBAddress = vm.envAddress("TOKEN_B_ADDRESS");
-        address adminAddress = vm.envAddress("ADMIN_ADDRESS");
-        address governanceAddress = vm.envAddress("GOVERNANCE_ADDRESS");
+        address identityRegistryAddress = vm.envAddress("IDENTITY_REGISTRY_ADDRESS");
 
         vm.startBroadcast(deployerPrivateKey);
 
-        amm = new AutomatedMarketMaker(tokenAAddress, tokenBAddress, adminAddress, governanceAddress);
+        amm = new AutomatedMarketMaker(tokenAAddress, tokenBAddress, identityRegistryAddress);
 
         vm.stopBroadcast();
     }

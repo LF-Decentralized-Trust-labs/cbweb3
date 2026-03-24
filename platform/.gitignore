@@ -42,12 +42,17 @@ contracts/cache/
 contracts/out/
 !contracts/broadcast
 contracts/broadcast/*/1337/
+contracts/broadcast/*/1338/
+contracts/broadcast/*/1339/
 contracts/broadcast/*/31337/
 contracts/broadcast/**/dry-run/
 contracts/*.flattened.*
 contracts/dependencies
 
+# IDEs
 .cursor/
+.vscode/
+.idea/
 
 # Git worktrees
 .worktrees/
@@ -65,5 +70,6 @@ deploy/local/hub-besu/tmpFiles/
 *.srl
 *.csr
 
+# Go Workspace files
 */**/go.work
 */**/go.work.sum

@@ -2,49 +2,74 @@
 pragma solidity ^0.8.20;
 
 import {IAutomatedMarketMaker} from "./interfaces/IAutomatedMarketMaker.sol";
+import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
 import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin-contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin-contracts/utils/Pausable.sol";
-import {AccessControl} from "@openzeppelin-contracts/access/AccessControl.sol";
 
 /// @title Automated Market Maker (AMM)
 /// @dev Constant Product Liquidity Pool for Scenario B (Exact-Output pricing).
-contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausable, AccessControl {
+///      All identity and role checks are delegated to the IdentityRegistry (single source of truth).
+contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
-
-    /// @notice Role identifier for Governance, which can trigger the circuit breaker.
-    bytes32 public constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");
 
     /// @notice The ERC20 tokens in the liquidity pool
     IERC20 public immutable TOKEN_A;
     IERC20 public immutable TOKEN_B;
 
+    /// @notice The Identity Registry used for participant clearance gates.
+    IIdentityRegistry public immutable IDENTITY_REGISTRY;
+
     /// @notice The current reserves of the pool to compute the constant product (x * y = k)
     uint256 public reserveA;
     uint256 public reserveB;
 
-    /// @notice Initializes the AMM with the token pair and RBAC.
+    /// @notice Initializes the AMM with the token pair and IdentityRegistry.
     /// @param _tokenA Address of the first token (e.g., tCeBM_BRL).
     /// @param _tokenB Address of the second token (e.g., tCeBM_EUR).
-    /// @param _admin Address to receive DEFAULT_ADMIN_ROLE.
-    /// @param _governance Address to receive GOVERNANCE_ROLE.
-    constructor(address _tokenA, address _tokenB, address _admin, address _governance) {
-        if (_tokenA == address(0) || _tokenB == address(0)) {
+    /// @param _identityRegistry Address of the IdentityRegistry (single source of truth for roles).
+    constructor(address _tokenA, address _tokenB, address _identityRegistry) {
+        if (_tokenA == address(0) || _tokenB == address(0) || _identityRegistry == address(0)) {
             revert AMM__ZeroAddress();
         }
 
         TOKEN_A = IERC20(_tokenA);
         TOKEN_B = IERC20(_tokenB);
+        IDENTITY_REGISTRY = IIdentityRegistry(_identityRegistry);
+    }
 
-        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
-        _grantRole(GOVERNANCE_ROLE, _governance);
+    /// @notice Ensures the given account is a verified participant in the IdentityRegistry.
+    /// @param account The address to verify.
+    modifier onlyVerified(address account) {
+        _onlyVerified(account);
+        _;
+    }
+
+    /// @dev Internal check extracted from the modifier to reduce bytecode duplication at call sites.
+    function _onlyVerified(address account) internal view {
+        if (!IDENTITY_REGISTRY.canTransact(account)) {
+            revert AMM__ParticipantNotVerified(account);
+        }
+    }
+
+    /// @notice Restricts access to accounts with a governance-capable role in the IdentityRegistry.
+    modifier onlyGovernance() {
+        _onlyGovernance();
+        _;
+    }
+
+    /// @dev Internal governance check — delegates to the IdentityRegistry (single source of truth).
+    function _onlyGovernance() internal view {
+        if (!IDENTITY_REGISTRY.canGovern(msg.sender)) {
+            revert AMM__NotGovernance(msg.sender);
+        }
     }
 
     /// @notice Circuit breaker: Pauses or unpauses all pool operations.
-    /// @dev Only the GOVERNANCE_ROLE can call this function.
+    /// @dev Only governance-capable participants (CENTRAL_BANK, GOVERNANCE) can call this.
     /// @param status True to pause, False to unpause.
-    function setPause(bool status) external onlyRole(GOVERNANCE_ROLE) {
+    function setPause(bool status) external onlyGovernance {
         if (status) {
             _pause();
         } else {
@@ -53,7 +78,12 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
     }
 
     /// @inheritdoc IAutomatedMarketMaker
-    function addLiquidity(uint256 amountA, uint256 amountB) external nonReentrant whenNotPaused {
+    function addLiquidity(uint256 amountA, uint256 amountB)
+        external
+        nonReentrant
+        whenNotPaused
+        onlyVerified(msg.sender)
+    {
         if (amountA == 0 || amountB == 0) {
             revert AMM__ZeroAmount();
         }
@@ -94,7 +124,7 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
         uint256 amountOut,
         uint256 maxAmountIn,
         address to
-    ) external nonReentrant whenNotPaused returns (uint256 amountIn) {
+    ) external nonReentrant whenNotPaused onlyVerified(msg.sender) onlyVerified(to) returns (uint256 amountIn) {
         // [CHECKS]
         if (amountOut == 0) revert AMM__ZeroAmount();
         if (tokenIn == tokenOut) revert AMM__InvalidToken();

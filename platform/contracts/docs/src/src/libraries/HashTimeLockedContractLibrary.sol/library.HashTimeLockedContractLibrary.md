@@ -1,5 +1,5 @@
 # HashTimeLockedContractLibrary
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/c83cda8b94a84ac16a0315dd4782ddc7f679cccf/src/libraries/HashTimeLockedContractLibrary.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/e19c9456a3de8cd6d3345c4656e5c68bf8aefa97/src/libraries/HashTimeLockedContractLibrary.sol)
 
 **Title:**
 HashTimeLockedContractLibrary

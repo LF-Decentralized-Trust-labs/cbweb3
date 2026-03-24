@@ -57,7 +57,8 @@ deploy.up-infra: deploy.create-shared-network
 	done; \
 	echo "Keycloak is ready at $$keycloak_url."
 	@echo "Waiting for Keycloak init script completion (timeout: 180s)..."
-	@keycloak_container="$${KEYCLOAK_CONTAINER_NAME:-cbweb3-keycloak}"; \
+	@set -a; . ./$(DEPLOY_DIR)/.env 2>/dev/null; set +a; \
+	keycloak_container="$${KEYCLOAK_CONTAINER_NAME:-cbweb3-keycloak}"; \
 	init_done_marker="KEYCLOAK_INIT_DONE"; \
 	max_attempts=60; \
 	attempt=1; \
@@ -78,6 +79,8 @@ deploy.down-infra:
 	@docker network rm cbweb3_network 2>/dev/null || true
 
 deploy.up: deploy.up-besu deploy.up-infra
+
+deploy.up-with-contracts: deploy.up contracts.deploy-all-with-sync
 
 deploy.up-minimal: deploy.up-hub deploy.up-infra
 
@@ -143,4 +146,4 @@ deploy.ci-local: deploy.build-ci-runner
 		-P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-22.04 \
 		$(ARGS)
 
-.PHONY: deploy.create-shared-network deploy.up-hub deploy.up-spoke-a deploy.up-spoke-b deploy.down-hub deploy.down-spoke-a deploy.down-spoke-b deploy.up-besu deploy.down-besu deploy.up-infra deploy.down-infra deploy.up deploy.down deploy.up-minimal deploy.down-minimal deploy.up-backend deploy.down-backend deploy.validate-backend-spoke-a deploy.validate-backend-spoke-b deploy.validate-backend-hub deploy.validate-backend-domains deploy.up-backend-spoke-a deploy.down-backend-spoke-a deploy.up-backend-spoke-b deploy.down-backend-spoke-b deploy.up-backend-hub deploy.down-backend-hub deploy.up-backend-domains deploy.down-backend-domains deploy.build-ci-runner deploy.ci-local
+.PHONY: deploy.create-shared-network deploy.up-hub deploy.up-spoke-a deploy.up-spoke-b deploy.down-hub deploy.down-spoke-a deploy.down-spoke-b deploy.up-besu deploy.down-besu deploy.up-infra deploy.down-infra deploy.up deploy.up-with-contracts deploy.down deploy.up-minimal deploy.down-minimal deploy.up-backend deploy.down-backend deploy.validate-backend-spoke-a deploy.validate-backend-spoke-b deploy.validate-backend-hub deploy.validate-backend-domains deploy.up-backend-spoke-a deploy.down-backend-spoke-a deploy.up-backend-spoke-b deploy.down-backend-spoke-b deploy.up-backend-hub deploy.down-backend-hub deploy.up-backend-domains deploy.down-backend-domains deploy.build-ci-runner deploy.ci-local

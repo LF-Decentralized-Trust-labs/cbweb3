@@ -6,7 +6,6 @@
 [![Framework](https://img.shields.io/badge/Foundry-Fast-e6522c.svg)](https://getfoundry.sh/)
 [![Coverage](https://img.shields.io/badge/Coverage-%E2%89%A590%25-brightgreen.svg)]()
 [![Security](https://img.shields.io/badge/Slither-0_Vulnerabilities-success.svg)]()
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
 
@@ -41,7 +40,7 @@ A Constant Product Liquidity Pool ($x \cdot y = k$) enabling seamless foreign ex
 
 - **Exact-Output Pricing:** Calculates the precise input (`amountIn`) required to purchase an exact output (`amountOut`).
 - **Slippage Protection:** Reverts transactions if the mathematically required input exceeds the payer's acceptable `maxAmountIn`.
-- **Circuit Breaker:** Implements OpenZeppelin's `Pausable` modifier, allowing the `GOVERNANCE_ROLE` to halt all pool operations in emergency scenarios.
+- **Circuit Breaker:** Implements OpenZeppelin's `Pausable` modifier, allowing governance-capable participants (verified via `IdentityRegistry`) to halt all pool operations in emergency scenarios.
 
 ## 🛡️ Security & Standards
 
@@ -78,7 +77,7 @@ Copy the example environment file and populate it with your local Besu credentia
 cp .env.example .env
 ```
 
-_Ensure the `.env` includes `DEPLOYER_PRIVATE_KEY`, `ADMIN_ADDRESS`, `CENTRAL_BANK_ADDRESS`, and `GOVERNANCE_ADDRESS`._
+_Ensure the `.env` includes `DEPLOYER_PRIVATE_KEY`, `ADMIN_ADDRESS`, `CENTRAL_BANK_ADDRESS`, `HUB_RPC_URL`, `SPOKE_A_RPC_URL`, and `SPOKE_B_RPC_URL`._
 
 ### 3. Build & Test
 
@@ -105,14 +104,23 @@ make contracts.slither
 
 ### 5. Local Deployment (Hyperledger Besu)
 
-A master orchestration script (`DeployCBWeb3.s.sol`) is provided to deploy the entire core topology (Tokens, HTLC, and AMM) in a single transaction sequence.
+Two deployment scripts are provided — one for the hub (full platform) and one for spokes (regional ledger):
 
 ```bash
 # Load environment variables
 source .env
 
-# Execute the deployment script via Forge Broadcast
-forge script script/DeployCBWeb3.s.sol:DeployCBWeb3 --rpc-url $BESU_RPC_URL --broadcast
+# Deploy hub contracts (IdentityRegistry + tCeBM_BRL + tCeBM_EUR + HTLC + AMM)
+make contracts.deploy-hub
+
+# Deploy spoke-a contracts (IdentityRegistry + tCeBM_BRL)
+make contracts.deploy-spoke-a
+
+# Deploy spoke-b contracts (IdentityRegistry + tCeBM_EUR)
+make contracts.deploy-spoke-b
+
+# Deploy all domains + sync addresses to backend config
+make contracts.deploy-all-with-sync
 ```
 
 ## 📝 Upgradability Note

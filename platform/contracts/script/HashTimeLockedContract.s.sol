@@ -17,10 +17,11 @@ contract DeployHTLC is Script {
     /// @dev Reads `DEPLOYER_PRIVATE_KEY` from environment and broadcasts the deployment transaction.
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        address identityRegistryAddress = vm.envAddress("IDENTITY_REGISTRY_ADDRESS");
 
         vm.startBroadcast(deployerPrivateKey);
 
-        htlc = new HashTimeLockedContract();
+        htlc = new HashTimeLockedContract(identityRegistryAddress);
 
         vm.stopBroadcast();
     }
