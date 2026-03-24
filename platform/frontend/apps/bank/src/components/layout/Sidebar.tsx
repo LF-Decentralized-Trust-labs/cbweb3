@@ -12,7 +12,7 @@ const links = [
 
 export function Sidebar() {
   return (
-    <aside className="w-full border-b border-border bg-card p-3 md:w-64 md:border-b-0 md:border-r">
+    <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:border-b-0 md:border-r">
       <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">LACnet</p>
       <p className="mb-3 text-sm font-semibold">Bank Portal</p>
       <nav className="grid gap-1">

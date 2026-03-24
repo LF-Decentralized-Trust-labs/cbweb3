@@ -27,4 +27,5 @@ artifacts/
 .DS_Store
 AGENTS.md
 .github/agents/
-.github/copilot-instructions.md
+.github/copilot-instructions.md.agent/
+.agent/
