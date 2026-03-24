@@ -1,8 +1,10 @@
 services:
   compliance-spoke-b:
-    image: golang:1.25-alpine
-    working_dir: /workspace/backend/services/compliance
-    command: ["sh", "-c", "go run ./cmd/compliance"]
+    build:
+      context: .
+      dockerfile: services/compliance/Dockerfile
+    image: cbweb3/compliance:local
+    pull_policy: build
     container_name: "backend-compliance-spoke-b"
     env_file:
       - path: ./config/.env.infra.spoke-b
@@ -10,8 +12,6 @@ services:
     environment:
       COMPLIANCE_GRPC_PORT: "9093"
       POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_spoke_b}?sslmode=disable"
-    volumes:
-      - ../:/workspace
     ports:
       - "29093:9093"
     networks:
@@ -19,9 +19,11 @@ services:
       - cbweb3_network
 
   auth-spoke-b:
-    image: golang:1.25-alpine
-    working_dir: /workspace/backend/services/auth
-    command: ["sh", "-c", "go run ./cmd/auth"]
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    image: cbweb3/auth:local
+    pull_policy: build
     container_name: "backend-auth-spoke-b"
     env_file:
       - path: ./config/.env.infra.spoke-b
@@ -37,8 +39,6 @@ services:
       COMPLIANCE_GRPC_ADDR: compliance-spoke-b:9093
       COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
       REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
-    volumes:
-      - ../:/workspace
     ports:
       - "29091:9091"
     depends_on:
@@ -48,9 +48,11 @@ services:
       - cbweb3_network
 
   api-gateway-spoke-b:
-    image: golang:1.25-alpine
-    working_dir: /workspace/backend/services/api-gateway
-    command: ["sh", "-c", "go run ./cmd/api-gateway"]
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    image: cbweb3/api-gateway:local
+    pull_policy: build
     container_name: "backend-api-gateway-spoke-b"
     env_file:
       - path: ./config/.env.infra.spoke-b
@@ -62,7 +64,7 @@ services:
       COMPLIANCE_GRPC_ADDR: compliance-spoke-b:9093
       PKI_DIR: /workspace/backend/config/pki
     volumes:
-      - ../:/workspace
+      - ./config/pki:/workspace/backend/config/pki
     ports:
       - "28080:8080"
     depends_on:

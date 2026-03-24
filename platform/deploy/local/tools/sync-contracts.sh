@@ -13,6 +13,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
+# GNU sed (Linux) uses `sed -i`; BSD sed (macOS) requires `sed -i ''`
+if [[ "$(uname)" == "Darwin" ]]; then
+  SED_INPLACE=(sed -i '')
+else
+  SED_INPLACE=(sed -i)
+fi
+
 HUB_CHAIN_ID="${HUB_CHAIN_ID:-1337}"
 SPOKE_A_CHAIN_ID="${SPOKE_A_CHAIN_ID:-1338}"
 SPOKE_B_CHAIN_ID="${SPOKE_B_CHAIN_ID:-1339}"
@@ -45,7 +52,7 @@ extract_address() {
 upsert_env() {
   local file="$1" key="$2" value="$3"
   if grep -qE "^#?${key}=" "${file}" 2>/dev/null; then
-    sed -i '' "s|^#*${key}=.*|${key}=${value}|" "${file}"
+    "${SED_INPLACE[@]}" "s|^#*${key}=.*|${key}=${value}|" "${file}"
   else
     echo "${key}=${value}" >> "${file}"
   fi

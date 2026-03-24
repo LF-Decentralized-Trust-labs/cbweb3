@@ -10,6 +10,13 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
       KEYCLOAK_ENV_OUTPUT_DIR: "${KEYCLOAK_ENV_OUTPUT_DIR:-/opt/keycloak/host/backend/config}"
       KEYCLOAK_PORT: "${KEYCLOAK_PORT:-8081}"
+      KC_DB: postgres
+      KC_DB_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB_KEYCLOAK:-cbweb3_keycloak}"
+      KC_DB_USERNAME: "${POSTGRES_USER:-default}"
+      KC_DB_PASSWORD: "${POSTGRES_PASSWORD:-default}"
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - ./keycloak/init.sh:/opt/keycloak/init.sh
       - ../../:/opt/keycloak/host
@@ -30,11 +37,17 @@ services:
       POSTGRES_DB_SPOKE_A: "${POSTGRES_DB_SPOKE_A:-cbweb3_spoke_a}"
       POSTGRES_DB_SPOKE_B: "${POSTGRES_DB_SPOKE_B:-cbweb3_spoke_b}"
       POSTGRES_DB_HUB: "${POSTGRES_DB_HUB:-cbweb3_hub}"
+      POSTGRES_DB_KEYCLOAK: "${POSTGRES_DB_KEYCLOAK:-cbweb3_keycloak}"
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init-multi-db.sh:/docker-entrypoint-initdb.d/01-init-multi-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-default}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     networks:
       - cbweb3_network
 

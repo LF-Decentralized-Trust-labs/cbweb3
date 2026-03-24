@@ -1,8 +1,10 @@
 services:
   compliance-hub:
-    image: golang:1.25-alpine
-    working_dir: /workspace/backend/services/compliance
-    command: ["sh", "-c", "go run ./cmd/compliance"]
+    build:
+      context: .
+      dockerfile: services/compliance/Dockerfile
+    image: cbweb3/compliance:local
+    pull_policy: build
     container_name: "backend-compliance-hub"
     env_file:
       - path: ./config/.env.infra.hub
@@ -10,8 +12,6 @@ services:
     environment:
       COMPLIANCE_GRPC_PORT: "9093"
       POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_hub}?sslmode=disable"
-    volumes:
-      - ../:/workspace
     ports:
       - "39093:9093"
     networks:
@@ -19,9 +19,11 @@ services:
       - cbweb3_network
 
   auth-hub:
-    image: golang:1.25-alpine
-    working_dir: /workspace/backend/services/auth
-    command: ["sh", "-c", "go run ./cmd/auth"]
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    image: cbweb3/auth:local
+    pull_policy: build
     container_name: "backend-auth-hub"
     env_file:
       - path: ./config/.env.infra.hub
@@ -37,8 +39,6 @@ services:
       COMPLIANCE_GRPC_ADDR: compliance-hub:9093
       COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
       REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
-    volumes:
-      - ../:/workspace
     ports:
       - "39091:9091"
     depends_on:
@@ -48,9 +48,11 @@ services:
       - cbweb3_network
 
   api-gateway-hub:
-    image: golang:1.25-alpine
-    working_dir: /workspace/backend/services/api-gateway
-    command: ["sh", "-c", "go run ./cmd/api-gateway"]
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    image: cbweb3/api-gateway:local
+    pull_policy: build
     container_name: "backend-api-gateway-hub"
     env_file:
       - path: ./config/.env.infra.hub
@@ -60,8 +62,6 @@ services:
       REQUEST_TIMEOUT_SEC: "30"
       AUTH_GRPC_ADDR: auth-hub:9091
       COMPLIANCE_GRPC_ADDR: compliance-hub:9093
-    volumes:
-      - ../:/workspace
     ports:
       - "38080:8080"
     depends_on:

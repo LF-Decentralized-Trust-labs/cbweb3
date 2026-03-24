@@ -4,6 +4,7 @@ set -eu
 POSTGRES_DB_SPOKE_A="${POSTGRES_DB_SPOKE_A:-cbweb3_spoke_a}"
 POSTGRES_DB_SPOKE_B="${POSTGRES_DB_SPOKE_B:-cbweb3_spoke_b}"
 POSTGRES_DB_HUB="${POSTGRES_DB_HUB:-cbweb3_hub}"
+POSTGRES_DB_KEYCLOAK="${POSTGRES_DB_KEYCLOAK:-cbweb3_keycloak}"
 
 create_db_if_missing() {
   db_name="$1"
@@ -23,3 +24,4 @@ create_db_if_missing() {
 create_db_if_missing "$POSTGRES_DB_SPOKE_A"
 create_db_if_missing "$POSTGRES_DB_SPOKE_B"
 create_db_if_missing "$POSTGRES_DB_HUB"
+create_db_if_missing "$POSTGRES_DB_KEYCLOAK"

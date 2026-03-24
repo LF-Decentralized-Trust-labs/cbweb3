@@ -68,7 +68,7 @@ contracts.deploy-spoke-b:
 	@cd contracts && TOKEN_NAME="Tokenized EUR" TOKEN_SYMBOL="tCeBM_EUR" \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_B_RPC_URL} --broadcast
 
-contracts.deploy-all: contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b
+contracts.deploy-all: contracts.setup contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b
 
 contracts.deploy-cbweb3-besu: contracts.deploy-hub
 

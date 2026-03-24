@@ -35,6 +35,8 @@ Each network now uses:
 
 This avoids collisions when all three Besu stacks run at the same time.
 
+By default each stack runs **one** QBFT validator (single bootnode container) to reduce local resource usage. To use more validators on every stack, from the repo root run `make up-besu BESU_NODE_COUNT=3`, or invoke `./startBesu.sh -n <count>` inside each `hub-besu` / `spoke-besu-a` / `spoke-besu-b` directory. After changing the node count, run `make down-besu` before `make up-besu` so genesis and data are regenerated.
+
 ### 2) Keycloak
 
 Keycloak is started by Docker Compose and initialized by [keycloak/init.sh](keycloak/init.sh).
@@ -52,6 +54,20 @@ On startup, the script:
    - `.env.infra.hub`
 
 This keeps Keycloak settings and client credentials synchronized in the domain infra files.
+
+When you run `make up-infra` or `make up` from the repository root, [`make/10-deploy.mk`](../../make/10-deploy.mk) waits in **two separate phases** (not a single 120s cap on the whole flow):
+
+1. **HTTP readiness**: polls `http://localhost:${KEYCLOAK_PORT}/realms/master` until it responds.
+2. **Init completion**: polls container logs until `init.sh` prints `KEYCLOAK_INIT_DONE` (after realms and clients are provisioned).
+
+Override waits (defaults: 40×3s for HTTP, 120×3s for init):
+
+- `KEYCLOAK_READY_ATTEMPTS`, `KEYCLOAK_INIT_ATTEMPTS`, `KEYCLOAK_WAIT_SLEEP_SEC`
+- `KEYCLOAK_INIT_LOG_TAIL` (lines shown if init times out)
+
+Example: `make up-infra KEYCLOAK_INIT_ATTEMPTS=200`.
+
+If the init phase fails or times out, inspect **`docker logs cbweb3-keycloak`** (or your `KEYCLOAK_CONTAINER_NAME`) for `kcadm` / `jq` errors or missing `backend/config/.env.infra.*.example` files inside the mounted repo.
 
 ### 3) PostgreSQL
 
@@ -170,7 +186,7 @@ Default host ports:
 
 From repository root:
 
-- `make up-besu` starts only Besu stacks (hub + spoke A + spoke B).
+- `make up-besu` starts only Besu stacks (hub + spoke A + spoke B), one validator per stack by default (`BESU_NODE_COUNT=1`). Override with e.g. `make up-besu BESU_NODE_COUNT=3`.
 
 - `make up-infra` starts Compose services (Keycloak + PostgreSQL + Redis).
 

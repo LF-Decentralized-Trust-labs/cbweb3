@@ -37,7 +37,7 @@ fi
 
 echo -e "${YELLOW}Setting up default values...${NC}"
 # Default values
-NODES=3
+NODES=1
 BASE_P2P_PORT=30320
 BASE_RPC_PORT=8646
 DEBUG_MODE=false
