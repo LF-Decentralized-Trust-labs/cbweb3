@@ -14,10 +14,11 @@ import (
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/app"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
+	authv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1"
+	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
 	"github.com/gofiber/fiber/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/status"
 )
 
@@ -42,7 +43,7 @@ func TestKYCStatusEndpoint(t *testing.T) {
 	token := loginAndGetToken(t, server, "bank-a", "secret-a")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/compliance/kyc/status/bank-a", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Cookie", "access_token="+token)
 	resp, err := server.Test(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -74,7 +75,9 @@ func mustNewGateway(t *testing.T) *fiber.App {
 	return server
 }
 
-type complianceMockService interface{}
+type complianceMockService struct {
+	compliancv1.UnimplementedComplianceServiceServer
+}
 
 func startComplianceMockGRPC(t *testing.T) (string, func()) {
 	t.Helper()
@@ -82,13 +85,8 @@ func startComplianceMockGRPC(t *testing.T) (string, func()) {
 	if err != nil {
 		t.Fatalf("failed to start compliance tcp listener: %v", err)
 	}
-	codec := jsonCodec{}
-	server := grpc.NewServer(grpc.ForceServerCodec(codec))
-	server.RegisterService(&grpc.ServiceDesc{
-		ServiceName: "compliance.v1.ComplianceService",
-		HandlerType: (*complianceMockService)(nil),
-		Methods:     []grpc.MethodDesc{},
-	}, struct{ complianceMockService }{})
+	server := grpc.NewServer()
+	compliancv1.RegisterComplianceServiceServer(server, &complianceMockService{})
 	go func() { _ = server.Serve(lis) }()
 	return lis.Addr().String(), func() {
 		server.Stop()
@@ -125,24 +123,13 @@ func loginAndGetToken(t *testing.T, server *fiber.App, clientID, secret string) 
 	return payload.AccessToken
 }
 
-type jsonCodec struct{}
-
-func (jsonCodec) Name() string { return "json" }
-func (jsonCodec) Marshal(v any) ([]byte, error) {
-	return json.Marshal(v)
-}
-func (jsonCodec) Unmarshal(data []byte, v any) error {
-	return json.Unmarshal(data, v)
-}
-
 type identityMock struct {
+	authv1.UnimplementedAuthServiceServer
 	mu           sync.Mutex
 	tokenToUser  map[string]string
 	validSecrets map[string]string
 	kycStatus    map[string]string // subject → KYC status string
 }
-
-type identityMockService interface{}
 
 func startIdentityMockGRPC(t *testing.T) (string, func()) {
 	t.Helper()
@@ -150,8 +137,6 @@ func startIdentityMockGRPC(t *testing.T) (string, func()) {
 	if err != nil {
 		t.Fatalf("failed to start tcp listener: %v", err)
 	}
-	codec := jsonCodec{}
-	encoding.RegisterCodec(codec)
 
 	mock := &identityMock{
 		tokenToUser:  map[string]string{},
@@ -159,16 +144,8 @@ func startIdentityMockGRPC(t *testing.T) (string, func()) {
 		kycStatus:    map[string]string{"bank-z": "REVOKED"},
 	}
 
-	server := grpc.NewServer(grpc.ForceServerCodec(codec))
-	server.RegisterService(&grpc.ServiceDesc{
-		ServiceName: "auth.v1.AuthService",
-		HandlerType: (*identityMockService)(nil),
-		Methods: []grpc.MethodDesc{
-			{MethodName: "Login", Handler: mock.loginHandler},
-			{MethodName: "ValidateToken", Handler: mock.validateHandler},
-			{MethodName: "GetKYCStatus", Handler: mock.getKYCStatusHandler},
-		},
-	}, mock)
+	server := grpc.NewServer()
+	authv1.RegisterAuthServiceServer(server, mock)
 
 	go func() {
 		_ = server.Serve(lis)
@@ -181,14 +158,7 @@ func startIdentityMockGRPC(t *testing.T) (string, func()) {
 	return lis.Addr().String(), cleanup
 }
 
-func (m *identityMock) loginHandler(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
-	var req struct {
-		User     string `json:"user"`
-		Password string `json:"password"`
-	}
-	if err := dec(&req); err != nil {
-		return nil, err
-	}
+func (m *identityMock) Login(_ context.Context, req *authv1.LoginRequest) (*authv1.LoginResponse, error) {
 	secret, ok := m.validSecrets[req.User]
 	if !ok || secret != req.Password {
 		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
@@ -197,52 +167,39 @@ func (m *identityMock) loginHandler(srv any, ctx context.Context, dec func(any) 
 	m.mu.Lock()
 	m.tokenToUser[token] = req.User
 	m.mu.Unlock()
-	return &struct {
-		AccessToken string `json:"access_token"`
-		TokenType   string `json:"token_type"`
-		ExpiresIn   int    `json:"expires_in"`
-	}{
+	return &authv1.LoginResponse{
 		AccessToken: token,
 		TokenType:   "Bearer",
 		ExpiresIn:   900,
 	}, nil
 }
 
-func (m *identityMock) validateHandler(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
-	var req struct {
-		AccessToken string `json:"access_token"`
-	}
-	if err := dec(&req); err != nil {
-		return nil, err
-	}
+func (m *identityMock) ValidateToken(_ context.Context, req *authv1.ValidateTokenRequest) (*authv1.ValidateTokenResponse, error) {
 	m.mu.Lock()
 	user, ok := m.tokenToUser[req.AccessToken]
 	m.mu.Unlock()
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "invalid token")
 	}
-	return &struct {
-		Subject string   `json:"subject"`
-		Issuer  string   `json:"issuer"`
-		Roles   []string `json:"roles"`
-	}{Subject: user, Issuer: "identity-mock", Roles: []string{"bank"}}, nil
+	return &authv1.ValidateTokenResponse{
+		Subject: user,
+		Issuer:  "identity-mock",
+		Roles:   []string{"bank"},
+	}, nil
 }
 
-func (m *identityMock) getKYCStatusHandler(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
-	var req struct {
-		Subject string `json:"subject"`
-	}
-	if err := dec(&req); err != nil {
-		return nil, err
-	}
+func (m *identityMock) GetKYCStatus(_ context.Context, req *authv1.GetKYCStatusRequest) (*authv1.GetKYCStatusResponse, error) {
 	m.mu.Lock()
 	kyc, ok := m.kycStatus[req.Subject]
 	m.mu.Unlock()
 	if !ok {
 		kyc = "APPROVED"
 	}
-	return &struct {
-		Subject string `json:"subject"`
-		Status  string `json:"status"`
-	}{Subject: req.Subject, Status: kyc}, nil
+	return &authv1.GetKYCStatusResponse{Subject: req.Subject, Status: kyc}, nil
+}
+
+// IssueLoginNonce returns PKI_NOT_REQUIRED so the Login handler falls through
+// to direct (non-PKI) login for all test users.
+func (m *identityMock) IssueLoginNonce(_ context.Context, _ *authv1.IssueLoginNonceRequest) (*authv1.IssueLoginNonceResponse, error) {
+	return nil, status.Error(codes.FailedPrecondition, "PKI_NOT_REQUIRED")
 }

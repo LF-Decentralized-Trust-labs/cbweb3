@@ -8,9 +8,9 @@ import (
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/complianceclient"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/domain"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/grpc/contract"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/keycloak"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/kms"
+	authv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -86,11 +86,15 @@ func (m *mockComplianceValidate) ManageParticipantStatus(_ context.Context, _, _
 // stubKMS satisfies kms.Provider (unused in ValidateToken path).
 type stubKMS struct{}
 
-func (s *stubKMS) Name() string                                      { return "stub" }
-func (s *stubKMS) CreateKey(_ context.Context, _ string) (kms.KeyInfo, error) { return kms.KeyInfo{}, nil }
-func (s *stubKMS) Sign(_ context.Context, _, _ string) (kms.SignResult, error) { return kms.SignResult{}, nil }
+func (s *stubKMS) Name() string { return "stub" }
+func (s *stubKMS) CreateKey(_ context.Context, _ string) (kms.KeyInfo, error) {
+	return kms.KeyInfo{}, nil
+}
+func (s *stubKMS) Sign(_ context.Context, _, _ string) (kms.SignResult, error) {
+	return kms.SignResult{}, nil
+}
 func (s *stubKMS) GetAddress(_ context.Context, _ string) (string, error) { return "", nil }
-func (s *stubKMS) DeleteKey(_ context.Context, _ string) error        { return nil }
+func (s *stubKMS) DeleteKey(_ context.Context, _ string) error            { return nil }
 
 // stubNonce satisfies noncestore.NonceStore (unused in ValidateToken path).
 type stubNonce struct{}
@@ -106,8 +110,10 @@ type stubRegistry struct{}
 func (s *stubRegistry) SetParticipant(_ context.Context, _, _ string, _ bool) (string, error) {
 	return "", nil
 }
-func (s *stubRegistry) IsMemberAuthorized(_ context.Context, _ string) (bool, error) { return false, nil }
-func (s *stubRegistry) GetMemberRole(_ context.Context, _ string) (uint8, error)    { return 0, nil }
+func (s *stubRegistry) IsMemberAuthorized(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+func (s *stubRegistry) GetMemberRole(_ context.Context, _ string) (uint8, error) { return 0, nil }
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -138,7 +144,7 @@ func TestValidateToken_Enrichment(t *testing.T) {
 			found:       true,
 		}
 		svc := newTestIdentityService(kc, comp)
-		resp, err := svc.ValidateToken(ctx, &contract.ValidateTokenRequest{AccessToken: "tok"})
+		resp, err := svc.ValidateToken(ctx, &authv1.ValidateTokenRequest{AccessToken: "tok"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -159,7 +165,7 @@ func TestValidateToken_Enrichment(t *testing.T) {
 			found:       true,
 		}
 		svc := newTestIdentityService(kc, comp)
-		resp, err := svc.ValidateToken(ctx, &contract.ValidateTokenRequest{AccessToken: "tok"})
+		resp, err := svc.ValidateToken(ctx, &authv1.ValidateTokenRequest{AccessToken: "tok"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -179,7 +185,7 @@ func TestValidateToken_Enrichment(t *testing.T) {
 			found:       true,
 		}
 		svc := newTestIdentityService(kc, comp)
-		resp, err := svc.ValidateToken(ctx, &contract.ValidateTokenRequest{AccessToken: "tok"})
+		resp, err := svc.ValidateToken(ctx, &authv1.ValidateTokenRequest{AccessToken: "tok"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -207,7 +213,7 @@ func TestValidateToken_Enrichment(t *testing.T) {
 			found: true,
 		}
 		svc := newTestIdentityService(kc, comp)
-		resp, err := svc.ValidateToken(ctx, &contract.ValidateTokenRequest{AccessToken: "tok"})
+		resp, err := svc.ValidateToken(ctx, &authv1.ValidateTokenRequest{AccessToken: "tok"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -217,8 +223,8 @@ func TestValidateToken_Enrichment(t *testing.T) {
 		if resp.Country != "BR" {
 			t.Errorf("country: got %q, want BR", resp.Country)
 		}
-		if resp.BankID != "001" {
-			t.Errorf("bankId: got %q, want 001", resp.BankID)
+		if resp.BankId != "001" {
+			t.Errorf("bankId: got %q, want 001", resp.BankId)
 		}
 	})
 
@@ -229,7 +235,7 @@ func TestValidateToken_Enrichment(t *testing.T) {
 			found:       true,
 		}
 		svc := newTestIdentityService(kc, comp)
-		resp, err := svc.ValidateToken(ctx, &contract.ValidateTokenRequest{AccessToken: "tok"})
+		resp, err := svc.ValidateToken(ctx, &authv1.ValidateTokenRequest{AccessToken: "tok"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -242,7 +248,7 @@ func TestValidateToken_Enrichment(t *testing.T) {
 		kc := &mockKeycloakValidate{claims: domain.TokenClaims{Subject: "uid-5", Roles: []string{"ROLE_NOC"}}}
 		comp := &mockComplianceValidate{err: errors.New("connection refused")}
 		svc := newTestIdentityService(kc, comp)
-		resp, err := svc.ValidateToken(ctx, &contract.ValidateTokenRequest{AccessToken: "tok"})
+		resp, err := svc.ValidateToken(ctx, &authv1.ValidateTokenRequest{AccessToken: "tok"})
 		if err != nil {
 			t.Fatalf("compliance error must not reject token: %v", err)
 		}
@@ -255,7 +261,7 @@ func TestValidateToken_Enrichment(t *testing.T) {
 		kc := &mockKeycloakValidate{err: errors.New("invalid token")}
 		comp := &mockComplianceValidate{}
 		svc := newTestIdentityService(kc, comp)
-		_, err := svc.ValidateToken(ctx, &contract.ValidateTokenRequest{AccessToken: "bad"})
+		_, err := svc.ValidateToken(ctx, &authv1.ValidateTokenRequest{AccessToken: "bad"})
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}

@@ -1,0 +1,220 @@
+syntax = "proto3";
+
+package auth.v1;
+
+option go_package = "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1;authv1";
+
+// ─── Auth ──────────────────────────────────────────────────────────────────
+
+message LoginRequest {
+  string user = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  string token_type = 3;
+  int32 expires_in = 4;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  string token_type = 3;
+  int32 expires_in = 4;
+}
+
+message RevokeTokenRequest {
+  // In practice callers send the refresh_token here (Keycloak logout requires it).
+  string access_token = 1;
+}
+
+message RevokeTokenResponse {
+  bool success = 1;
+}
+
+// ─── Token validation ──────────────────────────────────────────────────────
+
+message ValidateTokenRequest {
+  string access_token = 1;
+}
+
+// ValidateTokenResponse carries enriched JWT claims (D7 §7.4).
+message ValidateTokenResponse {
+  string subject = 1;
+  string issuer = 2;
+  repeated string roles = 3;
+  string wallet = 4;
+  string country = 5;
+  string bank_id = 6;
+  string privacy_group = 7;
+}
+
+// ─── Participant registration ──────────────────────────────────────────────
+
+message RegisterParticipantRequest {
+  string access_token = 1;
+  string country = 2;
+  string bank_code = 3;
+  string role = 4;
+  string institution_name = 5;
+}
+
+message RegisterParticipantResponse {
+  string user_id = 1;
+  string wallet_address = 2;
+}
+
+// ─── Transaction signing ───────────────────────────────────────────────────
+
+message SignTransactionRequest {
+  string user_id = 1;
+  string digest = 2;
+}
+
+message SignTransactionResponse {
+  string user_id = 1;
+  string address = 2;
+  string signature = 3;
+}
+
+// ─── KYC status ───────────────────────────────────────────────────────────
+
+message GetKYCStatusRequest {
+  string subject = 1;
+}
+
+message GetKYCStatusResponse {
+  string subject = 1;
+  string status = 2;
+}
+
+message ProvisionParticipantRequest {
+  string subject = 1;
+  string status = 2; // PENDING | APPROVED | FROZEN | REVOKED
+}
+
+message ProvisionParticipantResponse {
+  string subject = 1;
+  string status = 2;
+}
+
+// ─── Administrative onboarding ────────────────────────────────────────────
+
+message OnboardParticipantRequest {
+  string username = 1;
+  string email = 2;
+  string role = 3;
+  string institution_name = 4;
+  string country = 5;
+  string bank_code = 6;
+}
+
+message OnboardParticipantResponse {
+  string user_id = 1;
+  string wallet_address = 2;
+  string cert_pem = 3;
+  string tx_hash = 4;
+  // client_secret is exposed only once; caller must store it securely.
+  string client_secret = 5;
+}
+
+// ─── PKI 2FA ──────────────────────────────────────────────────────────────
+
+message IssueLoginNonceRequest {
+  string user_id = 1;
+  // client_secret is the first-factor credential obtained at onboarding.
+  string client_secret = 2;
+}
+
+message IssueLoginNonceResponse {
+  // nonce is hex-encoded, valid for 5 minutes.
+  string nonce = 1;
+}
+
+message VerifyPKILoginRequest {
+  string user_id = 1;
+  // nonce_signature_hex is the DER-encoded ECDSA signature of SHA-256(nonce), hex-encoded.
+  string nonce_signature_hex = 2;
+  // cert_pem is the institution's X.509 certificate issued by the Central Bank CA.
+  string cert_pem = 3;
+}
+
+message VerifyPKILoginResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  string token_type = 3;
+  int32 expires_in = 4;
+}
+
+// ─── User management ──────────────────────────────────────────────────────
+
+message ListUsersRequest {
+  string role = 1; // empty = all roles
+  string status = 2; // empty = all statuses
+}
+
+message UserSummary {
+  string user_id = 1;
+  string institution_name = 2;
+  string role = 3;
+  string status = 4;
+  string wallet_address = 5;
+  string country = 6;
+  string bank_code = 7;
+}
+
+message ListUsersResponse {
+  repeated UserSummary users = 1;
+  int32 total = 2;
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message GetUserResponse {
+  string user_id = 1;
+  string username = 2;
+  string email = 3;
+  string institution_name = 4;
+  string role = 5;
+  string status = 6;
+  string wallet_address = 7;
+  string country = 8;
+  string bank_code = 9;
+}
+
+// ─── Client secret rotation ───────────────────────────────────────────────
+
+message ChangeClientSecretRequest {
+  string user_id = 1;
+  string current_secret = 2;
+  string new_secret = 3;
+}
+
+message ChangeClientSecretResponse {}
+
+// ─── Service ──────────────────────────────────────────────────────────────
+
+service AuthService {
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+  rpc RegisterParticipant(RegisterParticipantRequest) returns (RegisterParticipantResponse);
+  rpc SignTransaction(SignTransactionRequest) returns (SignTransactionResponse);
+  rpc GetKYCStatus(GetKYCStatusRequest) returns (GetKYCStatusResponse);
+  rpc ProvisionParticipant(ProvisionParticipantRequest) returns (ProvisionParticipantResponse);
+  rpc OnboardParticipant(OnboardParticipantRequest) returns (OnboardParticipantResponse);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc IssueLoginNonce(IssueLoginNonceRequest) returns (IssueLoginNonceResponse);
+  rpc VerifyPKILogin(VerifyPKILoginRequest) returns (VerifyPKILoginResponse);
+  rpc ChangeClientSecret(ChangeClientSecretRequest) returns (ChangeClientSecretResponse);
+}

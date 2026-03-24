@@ -6,24 +6,80 @@ import (
 	"testing"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
+	authv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-type mockClientConn struct {
-	invokeFunc func(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error
+// mockAuthClient is a test-only implementation of authv1.AuthServiceClient.
+// Only the methods exercised by IdentityGRPCManager are non-trivially implemented.
+type mockAuthClient struct {
+	getKYCStatusFn         func(*authv1.GetKYCStatusRequest) (*authv1.GetKYCStatusResponse, error)
+	provisionParticipantFn func(*authv1.ProvisionParticipantRequest) (*authv1.ProvisionParticipantResponse, error)
+	onboardParticipantFn   func(*authv1.OnboardParticipantRequest) (*authv1.OnboardParticipantResponse, error)
+	listUsersFn            func(*authv1.ListUsersRequest) (*authv1.ListUsersResponse, error)
+	getUserFn              func(*authv1.GetUserRequest) (*authv1.GetUserResponse, error)
 }
 
-func (m *mockClientConn) Invoke(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
-	if m.invokeFunc != nil {
-		return m.invokeFunc(ctx, method, args, reply, opts...)
+func (m *mockAuthClient) GetKYCStatus(_ context.Context, in *authv1.GetKYCStatusRequest, _ ...grpc.CallOption) (*authv1.GetKYCStatusResponse, error) {
+	if m.getKYCStatusFn != nil {
+		return m.getKYCStatusFn(in)
 	}
-	return nil
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) ProvisionParticipant(_ context.Context, in *authv1.ProvisionParticipantRequest, _ ...grpc.CallOption) (*authv1.ProvisionParticipantResponse, error) {
+	if m.provisionParticipantFn != nil {
+		return m.provisionParticipantFn(in)
+	}
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) OnboardParticipant(_ context.Context, in *authv1.OnboardParticipantRequest, _ ...grpc.CallOption) (*authv1.OnboardParticipantResponse, error) {
+	if m.onboardParticipantFn != nil {
+		return m.onboardParticipantFn(in)
+	}
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) ListUsers(_ context.Context, in *authv1.ListUsersRequest, _ ...grpc.CallOption) (*authv1.ListUsersResponse, error) {
+	if m.listUsersFn != nil {
+		return m.listUsersFn(in)
+	}
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) GetUser(_ context.Context, in *authv1.GetUserRequest, _ ...grpc.CallOption) (*authv1.GetUserResponse, error) {
+	if m.getUserFn != nil {
+		return m.getUserFn(in)
+	}
+	return nil, errors.New("not implemented")
 }
 
-func (m *mockClientConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+// Stub implementations for unused methods (satisfy authv1.AuthServiceClient interface).
+func (m *mockAuthClient) Login(_ context.Context, _ *authv1.LoginRequest, _ ...grpc.CallOption) (*authv1.LoginResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) RefreshToken(_ context.Context, _ *authv1.RefreshTokenRequest, _ ...grpc.CallOption) (*authv1.RefreshTokenResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) RevokeToken(_ context.Context, _ *authv1.RevokeTokenRequest, _ ...grpc.CallOption) (*authv1.RevokeTokenResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) ValidateToken(_ context.Context, _ *authv1.ValidateTokenRequest, _ ...grpc.CallOption) (*authv1.ValidateTokenResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) RegisterParticipant(_ context.Context, _ *authv1.RegisterParticipantRequest, _ ...grpc.CallOption) (*authv1.RegisterParticipantResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) SignTransaction(_ context.Context, _ *authv1.SignTransactionRequest, _ ...grpc.CallOption) (*authv1.SignTransactionResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) IssueLoginNonce(_ context.Context, _ *authv1.IssueLoginNonceRequest, _ ...grpc.CallOption) (*authv1.IssueLoginNonceResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) VerifyPKILogin(_ context.Context, _ *authv1.VerifyPKILoginRequest, _ ...grpc.CallOption) (*authv1.VerifyPKILoginResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) ChangeClientSecret(_ context.Context, _ *authv1.ChangeClientSecretRequest, _ ...grpc.CallOption) (*authv1.ChangeClientSecretResponse, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -34,59 +90,24 @@ func TestNewIdentityGRPCManager(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.NotNil(t, manager)
-	assert.NotNil(t, manager.client)
-	assert.NotNil(t, manager.codec)
-}
-
-func TestJSONCodec_Name(t *testing.T) {
-	codec := jsonCodec{}
-	assert.Equal(t, "json", codec.Name())
-}
-
-func TestJSONCodec_MarshalUnmarshal(t *testing.T) {
-	codec := jsonCodec{}
-
-	type testPayload struct {
-		UserID  string `json:"user_id"`
-		Country string `json:"country"`
-	}
-
-	original := testPayload{
-		UserID:  "user123",
-		Country: "BR",
-	}
-
-	data, err := codec.Marshal(original)
-	assert.NoError(t, err)
-	assert.NotEmpty(t, data)
-
-	var decoded testPayload
-	err = codec.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-	assert.Equal(t, original.UserID, decoded.UserID)
-	assert.Equal(t, original.Country, decoded.Country)
+	assert.NotNil(t, manager.cc)
 }
 
 func TestOnboardParticipant_Success(t *testing.T) {
 	t.Parallel()
 
 	mgr := &IdentityGRPCManager{
-		codec: jsonCodec{},
-		client: &mockClientConn{
-			invokeFunc: func(_ context.Context, method string, args, reply any, _ ...grpc.CallOption) error {
-				assert.Equal(t, onboardParticipantMethod, method)
-			out := reply.(*struct {
-				UserID        string `json:"user_id"`
-				WalletAddress string `json:"wallet_address,omitempty"`
-				CertPEM       string `json:"cert_pem,omitempty"`
-				TxHash        string `json:"tx_hash,omitempty"`
-				ClientSecret  string `json:"client_secret,omitempty"`
-			})
-			out.UserID = "new-user-uuid"
-			out.WalletAddress = "0xABCD"
-			out.CertPEM = "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----"
-			out.TxHash = "0xtxhash"
-				return nil
+		cc: &mockAuthClient{
+			onboardParticipantFn: func(in *authv1.OnboardParticipantRequest) (*authv1.OnboardParticipantResponse, error) {
+				assert.Equal(t, "banco-brasil", in.Username)
+				assert.Equal(t, "admin@bb.com", in.Email)
+				assert.Equal(t, "ROLE_COMMERCIAL_BANK", in.Role)
+				return &authv1.OnboardParticipantResponse{
+					UserId:        "new-user-uuid",
+					WalletAddress: "0xABCD",
+					CertPem:       "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----",
+					TxHash:        "0xtxhash",
+				}, nil
 			},
 		},
 	}
@@ -104,14 +125,34 @@ func TestOnboardParticipant_Success(t *testing.T) {
 	assert.Equal(t, "0xtxhash", result.TxHash)
 }
 
+func TestOnboardParticipant_AlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	mgr := &IdentityGRPCManager{
+		cc: &mockAuthClient{
+			onboardParticipantFn: func(_ *authv1.OnboardParticipantRequest) (*authv1.OnboardParticipantResponse, error) {
+				return nil, status.Error(codes.AlreadyExists, "user already exists")
+			},
+		},
+	}
+
+	_, err := mgr.OnboardParticipant(context.Background(), interfaces.OnboardParticipantRequest{
+		Username: "banco-brasil",
+		Email:    "admin@bb.com",
+		Role:     "ROLE_COMMERCIAL_BANK",
+	})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists")
+}
+
 func TestOnboardParticipant_Error(t *testing.T) {
 	t.Parallel()
 
 	mgr := &IdentityGRPCManager{
-		codec: jsonCodec{},
-		client: &mockClientConn{
-			invokeFunc: func(_ context.Context, _ string, _, _ any, _ ...grpc.CallOption) error {
-				return errors.New("grpc error")
+		cc: &mockAuthClient{
+			onboardParticipantFn: func(_ *authv1.OnboardParticipantRequest) (*authv1.OnboardParticipantResponse, error) {
+				return nil, errors.New("grpc error")
 			},
 		},
 	}
@@ -133,39 +174,22 @@ func TestListUsers_Success(t *testing.T) {
 	t.Parallel()
 
 	mgr := &IdentityGRPCManager{
-		codec: jsonCodec{},
-		client: &mockClientConn{
-			invokeFunc: func(_ context.Context, method string, _, reply any, _ ...grpc.CallOption) error {
-				assert.Equal(t, listUsersMethod, method)
-				out := reply.(*struct {
-					Users []struct {
-						UserID          string `json:"user_id"`
-						InstitutionName string `json:"institution_name,omitempty"`
-						Role            string `json:"role"`
-						Status          string `json:"status"`
-						WalletAddress   string `json:"wallet_address,omitempty"`
-						Country         string `json:"country,omitempty"`
-						BankCode        string `json:"bank_code,omitempty"`
-					} `json:"users"`
-					Total int `json:"total"`
-				})
-				out.Users = append(out.Users, struct {
-					UserID          string `json:"user_id"`
-					InstitutionName string `json:"institution_name,omitempty"`
-					Role            string `json:"role"`
-					Status          string `json:"status"`
-					WalletAddress   string `json:"wallet_address,omitempty"`
-					Country         string `json:"country,omitempty"`
-					BankCode        string `json:"bank_code,omitempty"`
-				}{
-					UserID:          "uid-1",
-					InstitutionName: "Banco do Brasil",
-					Role:            "ROLE_COMMERCIAL_BANK",
-					Status:          "ACTIVE",
-					WalletAddress:   "0xABCD",
-				})
-				out.Total = 1
-				return nil
+		cc: &mockAuthClient{
+			listUsersFn: func(in *authv1.ListUsersRequest) (*authv1.ListUsersResponse, error) {
+				assert.Equal(t, "ROLE_COMMERCIAL_BANK", in.Role)
+				assert.Equal(t, "ACTIVE", in.Status)
+				return &authv1.ListUsersResponse{
+					Users: []*authv1.UserSummary{
+						{
+							UserId:          "uid-1",
+							InstitutionName: "Banco do Brasil",
+							Role:            "ROLE_COMMERCIAL_BANK",
+							Status:          "ACTIVE",
+							WalletAddress:   "0xABCD",
+						},
+					},
+					Total: 1,
+				}, nil
 			},
 		},
 	}
@@ -182,10 +206,9 @@ func TestListUsers_Error(t *testing.T) {
 	t.Parallel()
 
 	mgr := &IdentityGRPCManager{
-		codec: jsonCodec{},
-		client: &mockClientConn{
-			invokeFunc: func(_ context.Context, _ string, _, _ any, _ ...grpc.CallOption) error {
-				return errors.New("grpc error")
+		cc: &mockAuthClient{
+			listUsersFn: func(_ *authv1.ListUsersRequest) (*authv1.ListUsersResponse, error) {
+				return nil, errors.New("grpc error")
 			},
 		},
 	}
@@ -198,27 +221,16 @@ func TestGetUser_Success(t *testing.T) {
 	t.Parallel()
 
 	mgr := &IdentityGRPCManager{
-		codec: jsonCodec{},
-		client: &mockClientConn{
-			invokeFunc: func(_ context.Context, method string, _, reply any, _ ...grpc.CallOption) error {
-				assert.Equal(t, getUserMethod, method)
-				out := reply.(*struct {
-					UserID          string `json:"user_id"`
-					Username        string `json:"username"`
-					Email           string `json:"email"`
-					InstitutionName string `json:"institution_name,omitempty"`
-					Role            string `json:"role"`
-					Status          string `json:"status"`
-					WalletAddress   string `json:"wallet_address,omitempty"`
-					Country         string `json:"country,omitempty"`
-					BankCode        string `json:"bank_code,omitempty"`
-				})
-				out.UserID = "uid-1"
-				out.Username = "banco-brasil"
-				out.Email = "admin@bb.com"
-				out.Role = "ROLE_COMMERCIAL_BANK"
-				out.Status = "ACTIVE"
-				return nil
+		cc: &mockAuthClient{
+			getUserFn: func(in *authv1.GetUserRequest) (*authv1.GetUserResponse, error) {
+				assert.Equal(t, "uid-1", in.UserId)
+				return &authv1.GetUserResponse{
+					UserId:   "uid-1",
+					Username: "banco-brasil",
+					Email:    "admin@bb.com",
+					Role:     "ROLE_COMMERCIAL_BANK",
+					Status:   "ACTIVE",
+				}, nil
 			},
 		},
 	}
@@ -234,10 +246,9 @@ func TestGetUser_NotFound(t *testing.T) {
 	t.Parallel()
 
 	mgr := &IdentityGRPCManager{
-		codec: jsonCodec{},
-		client: &mockClientConn{
-			invokeFunc: func(_ context.Context, _ string, _, _ any, _ ...grpc.CallOption) error {
-				return status.Error(codes.NotFound, "user not found")
+		cc: &mockAuthClient{
+			getUserFn: func(_ *authv1.GetUserRequest) (*authv1.GetUserResponse, error) {
+				return nil, status.Error(codes.NotFound, "user not found")
 			},
 		},
 	}
@@ -246,3 +257,5 @@ func TestGetUser_NotFound(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
+
+
