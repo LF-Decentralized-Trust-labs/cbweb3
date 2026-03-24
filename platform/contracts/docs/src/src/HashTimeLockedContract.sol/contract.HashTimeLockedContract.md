@@ -1,5 +1,5 @@
 # HashTimeLockedContract
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/c83cda8b94a84ac16a0315dd4782ddc7f679cccf/src/HashTimeLockedContract.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/e19c9456a3de8cd6d3345c4656e5c68bf8aefa97/src/HashTimeLockedContract.sol)
 
 **Inherits:**
 [IHashTimeLockedContract](/src/interfaces/IHashTimeLockedContract.sol/interface.IHashTimeLockedContract.md), ReentrancyGuard
@@ -14,9 +14,18 @@ Escrow contract for atomic settlement flows using hash-lock and time-lock contro
 
 
 ## State Variables
-### _locks
+### IDENTITY_REGISTRY
+The Identity Registry used for participant clearance gates.
+
 Utilises SafeERC20 wrappers for secure ERC20 transfers.
 
+
+```solidity
+IIdentityRegistry public immutable IDENTITY_REGISTRY
+```
+
+
+### _locks
 Stores lock records indexed by `contractId`.
 
 
@@ -26,6 +35,45 @@ mapping(bytes32 => HashTimeLockedContractLibrary.LockDetails) private _locks
 
 
 ## Functions
+### constructor
+
+Initializes the HTLC with the IdentityRegistry for clearance gates.
+
+
+```solidity
+constructor(address _identityRegistry) ;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`_identityRegistry`|`address`|Address of the IdentityRegistry contract.|
+
+
+### onlyVerified
+
+Ensures the given account is a verified participant in the IdentityRegistry.
+
+
+```solidity
+modifier onlyVerified(address account) ;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`account`|`address`|The address to verify.|
+
+
+### _onlyVerified
+
+Internal check extracted from the modifier to reduce bytecode duplication at call sites.
+
+
+```solidity
+function _onlyVerified(address account) internal view;
+```
+
 ### lock
 
 Locks funds in escrow under a hash-lock and time-lock.
@@ -41,7 +89,7 @@ function lock(
     uint256 amount,
     bytes32 hashLock,
     uint256 timeLock
-) external nonReentrant;
+) external nonReentrant onlyVerified(msg.sender) onlyVerified(receiver);
 ```
 **Parameters**
 

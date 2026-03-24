@@ -1,25 +1,17 @@
 # AutomatedMarketMaker
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/c83cda8b94a84ac16a0315dd4782ddc7f679cccf/src/AutomatedMarketMaker.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/e19c9456a3de8cd6d3345c4656e5c68bf8aefa97/src/AutomatedMarketMaker.sol)
 
 **Inherits:**
-[IAutomatedMarketMaker](/src/interfaces/IAutomatedMarketMaker.sol/interface.IAutomatedMarketMaker.md), ReentrancyGuard, Pausable, AccessControl
+[IAutomatedMarketMaker](/src/interfaces/IAutomatedMarketMaker.sol/interface.IAutomatedMarketMaker.md), ReentrancyGuard, Pausable
 
 **Title:**
 Automated Market Maker (AMM)
 
 Constant Product Liquidity Pool for Scenario B (Exact-Output pricing).
+All identity and role checks are delegated to the IdentityRegistry (single source of truth).
 
 
 ## State Variables
-### GOVERNANCE_ROLE
-Role identifier for Governance, which can trigger the circuit breaker.
-
-
-```solidity
-bytes32 public constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE")
-```
-
-
 ### TOKEN_A
 The ERC20 tokens in the liquidity pool
 
@@ -33,6 +25,15 @@ IERC20 public immutable TOKEN_A
 
 ```solidity
 IERC20 public immutable TOKEN_B
+```
+
+
+### IDENTITY_REGISTRY
+The Identity Registry used for participant clearance gates.
+
+
+```solidity
+IIdentityRegistry public immutable IDENTITY_REGISTRY
 ```
 
 
@@ -55,11 +56,11 @@ uint256 public reserveB
 ## Functions
 ### constructor
 
-Initializes the AMM with the token pair and RBAC.
+Initializes the AMM with the token pair and IdentityRegistry.
 
 
 ```solidity
-constructor(address _tokenA, address _tokenB, address _admin, address _governance) ;
+constructor(address _tokenA, address _tokenB, address _identityRegistry) ;
 ```
 **Parameters**
 
@@ -67,19 +68,60 @@ constructor(address _tokenA, address _tokenB, address _admin, address _governanc
 |----|----|-----------|
 |`_tokenA`|`address`|Address of the first token (e.g., tCeBM_BRL).|
 |`_tokenB`|`address`|Address of the second token (e.g., tCeBM_EUR).|
-|`_admin`|`address`|Address to receive DEFAULT_ADMIN_ROLE.|
-|`_governance`|`address`|Address to receive GOVERNANCE_ROLE.|
+|`_identityRegistry`|`address`|Address of the IdentityRegistry (single source of truth for roles).|
 
+
+### onlyVerified
+
+Ensures the given account is a verified participant in the IdentityRegistry.
+
+
+```solidity
+modifier onlyVerified(address account) ;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`account`|`address`|The address to verify.|
+
+
+### _onlyVerified
+
+Internal check extracted from the modifier to reduce bytecode duplication at call sites.
+
+
+```solidity
+function _onlyVerified(address account) internal view;
+```
+
+### onlyGovernance
+
+Restricts access to accounts with a governance-capable role in the IdentityRegistry.
+
+
+```solidity
+modifier onlyGovernance() ;
+```
+
+### _onlyGovernance
+
+Internal governance check — delegates to the IdentityRegistry (single source of truth).
+
+
+```solidity
+function _onlyGovernance() internal view;
+```
 
 ### setPause
 
 Circuit breaker: Pauses or unpauses all pool operations.
 
-Only the GOVERNANCE_ROLE can call this function.
+Only governance-capable participants (CENTRAL_BANK, GOVERNANCE) can call this.
 
 
 ```solidity
-function setPause(bool status) external onlyRole(GOVERNANCE_ROLE);
+function setPause(bool status) external onlyGovernance;
 ```
 **Parameters**
 
@@ -94,7 +136,11 @@ Adds initial or subsequent liquidity to the pool.
 
 
 ```solidity
-function addLiquidity(uint256 amountA, uint256 amountB) external nonReentrant whenNotPaused;
+function addLiquidity(uint256 amountA, uint256 amountB)
+    external
+    nonReentrant
+    whenNotPaused
+    onlyVerified(msg.sender);
 ```
 **Parameters**
 
@@ -144,7 +190,7 @@ function swapTokensForExactTokens(
     uint256 amountOut,
     uint256 maxAmountIn,
     address to
-) external nonReentrant whenNotPaused returns (uint256 amountIn);
+) external nonReentrant whenNotPaused onlyVerified(msg.sender) onlyVerified(to) returns (uint256 amountIn);
 ```
 **Parameters**
 

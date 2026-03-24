@@ -1,5 +1,5 @@
 # IdentityRegistryLibrary
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/c83cda8b94a84ac16a0315dd4782ddc7f679cccf/src/libraries/IdentityRegistryLibrary.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/e19c9456a3de8cd6d3345c4656e5c68bf8aefa97/src/libraries/IdentityRegistryLibrary.sol)
 
 **Title:**
 IdentityLib
@@ -56,9 +56,10 @@ Functional roles assigned to network participants.
 ```solidity
 enum ParticipantRole {
     NONE,
+    TREASURY,
+    GOVERNANCE,
     CENTRAL_BANK,
-    COMMERCIAL_BANK,
-    LIQUIDITY_PROVIDER
+    COMMERCIAL_BANK
 }
 ```
 

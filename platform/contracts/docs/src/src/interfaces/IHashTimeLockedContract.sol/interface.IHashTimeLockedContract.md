@@ -1,5 +1,5 @@
 # IHashTimeLockedContract
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/c83cda8b94a84ac16a0315dd4782ddc7f679cccf/src/interfaces/IHashTimeLockedContract.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/e19c9456a3de8cd6d3345c4656e5c68bf8aefa97/src/interfaces/IHashTimeLockedContract.sol)
 
 **Title:**
 IHashTimeLockedContract
@@ -159,5 +159,11 @@ error HTLC__TimeLockExpired();
 
 ```solidity
 error HTLC__InvalidAmount();
+```
+
+### HTLC__ParticipantNotVerified
+
+```solidity
+error HTLC__ParticipantNotVerified(address account);
 ```
 

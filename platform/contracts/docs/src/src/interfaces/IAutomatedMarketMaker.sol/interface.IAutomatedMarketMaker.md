@@ -1,5 +1,5 @@
 # IAutomatedMarketMaker
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/c83cda8b94a84ac16a0315dd4782ddc7f679cccf/src/interfaces/IAutomatedMarketMaker.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/e19c9456a3de8cd6d3345c4656e5c68bf8aefa97/src/interfaces/IAutomatedMarketMaker.sol)
 
 **Title:**
 IAutomatedMarketMaker
@@ -139,5 +139,17 @@ error AMM__InsufficientOutputAmount();
 
 ```solidity
 error AMM__SlippageExceeded(uint256 requiredAmountIn, uint256 maxAmountIn);
+```
+
+### AMM__ParticipantNotVerified
+
+```solidity
+error AMM__ParticipantNotVerified(address account);
+```
+
+### AMM__NotGovernance
+
+```solidity
+error AMM__NotGovernance(address account);
 ```
 

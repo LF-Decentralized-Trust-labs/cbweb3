@@ -1,5 +1,5 @@
 # IdentityRegistry
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/c83cda8b94a84ac16a0315dd4782ddc7f679cccf/src/IdentityRegistry.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/e19c9456a3de8cd6d3345c4656e5c68bf8aefa97/src/IdentityRegistry.sol)
 
 **Inherits:**
 [IIdentityRegistry](/src/interfaces/IIdentityRegistry.sol/interface.IIdentityRegistry.md), AccessControl
@@ -93,6 +93,27 @@ function canTransact(address account) external view override returns (bool);
 |Name|Type|Description|
 |----|----|-----------|
 |`<none>`|`bool`|bool True if authorized, false if the account is blocked or unknown.|
+
+
+### canGovern
+
+Gatekeeper function to verify governance-level authorization.
+
+
+```solidity
+function canGovern(address account) external view override returns (bool);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`account`|`address`|The address to verify.|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`bool`|bool True if the account is Verified with a governance-capable role (CENTRAL_BANK or GOVERNANCE).|
 
 
 ### isWhitelisted
