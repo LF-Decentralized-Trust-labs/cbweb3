@@ -38,6 +38,11 @@ interface IIdentityRegistry {
     /// @return bool True if authorized, false if the account is blocked or unknown.
     function canTransact(address account) external view returns (bool);
 
+    /// @notice Gatekeeper function to verify governance-level authorization.
+    /// @param account The address to verify.
+    /// @return bool True if the account is Verified with a governance-capable role (CENTRAL_BANK or GOVERNANCE).
+    function canGovern(address account) external view returns (bool);
+
     /// @notice Registers a new participant. Restricted to governance authorities.
     /// @param account Target wallet address.
     /// @param name Legal name of the entity.

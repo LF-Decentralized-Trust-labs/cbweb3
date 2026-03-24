@@ -54,6 +54,14 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
     }
 
     /// @inheritdoc IIdentityRegistry
+    function canGovern(address account) external view override returns (bool) {
+        IdentityRegistryLibrary.Participant memory p = _participants[account];
+        return (p.status == IdentityRegistryLibrary.KycStatus.Verified
+                && (p.role == IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
+                    || p.role == IdentityRegistryLibrary.ParticipantRole.GOVERNANCE));
+    }
+
+    /// @inheritdoc IIdentityRegistry
     function isWhitelisted(address account) external view override returns (bool) {
         return _participants[account].status == IdentityRegistryLibrary.KycStatus.Verified;
     }

@@ -17,9 +17,10 @@ library IdentityRegistryLibrary {
     /// @notice Functional roles assigned to network participants.
     enum ParticipantRole {
         NONE,
+        TREASURY,
+        GOVERNANCE,
         CENTRAL_BANK,
-        COMMERCIAL_BANK,
-        LIQUIDITY_PROVIDER
+        COMMERCIAL_BANK
     }
 
     /// @notice Core entity representing an institutional identity on the ledger.
