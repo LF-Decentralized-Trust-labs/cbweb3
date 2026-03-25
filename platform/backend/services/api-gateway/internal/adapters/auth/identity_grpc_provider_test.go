@@ -94,6 +94,15 @@ func (m *mockAuthServiceClient) ListUsers(ctx context.Context, in *authv1.ListUs
 func (m *mockAuthServiceClient) GetUser(ctx context.Context, in *authv1.GetUserRequest, opts ...grpc.CallOption) (*authv1.GetUserResponse, error) {
 	return &authv1.GetUserResponse{}, nil
 }
+func (m *mockAuthServiceClient) SubmitCredentialRequest(ctx context.Context, in *authv1.SubmitCredentialRequestReq, opts ...grpc.CallOption) (*authv1.SubmitCredentialRequestResp, error) {
+	return &authv1.SubmitCredentialRequestResp{}, nil
+}
+func (m *mockAuthServiceClient) GetOnboardingStatus(ctx context.Context, in *authv1.GetOnboardingStatusRequest, opts ...grpc.CallOption) (*authv1.GetOnboardingStatusResponse, error) {
+	return &authv1.GetOnboardingStatusResponse{}, nil
+}
+func (m *mockAuthServiceClient) CompleteOnboarding(ctx context.Context, in *authv1.CompleteOnboardingRequest, opts ...grpc.CallOption) (*authv1.CompleteOnboardingResponse, error) {
+	return &authv1.CompleteOnboardingResponse{}, nil
+}
 
 func TestNewIdentityGRPCAuthProvider(t *testing.T) {
 	// gRPC creates the connection lazily, so it won't fail even if server is not running.
