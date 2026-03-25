@@ -62,11 +62,32 @@ func RequiresKMS(role string) bool {
 type ParticipantStatus string
 
 const (
-	ParticipantStatusPending  ParticipantStatus = "PENDING"
-	ParticipantStatusActive   ParticipantStatus = "ACTIVE"
-	ParticipantStatusFrozen   ParticipantStatus = "FROZEN"
-	ParticipantStatusRevoked  ParticipantStatus = "REVOKED"
+	ParticipantStatusPending              ParticipantStatus = "PENDING"
+	ParticipantStatusCredentialRequested  ParticipantStatus = "CREDENTIAL_REQUESTED"
+	ParticipantStatusKYCApproved          ParticipantStatus = "KYC_APPROVED"
+	ParticipantStatusActive               ParticipantStatus = "ACTIVE"
+	ParticipantStatusFrozen               ParticipantStatus = "FROZEN"
+	ParticipantStatusRevoked              ParticipantStatus = "REVOKED"
 )
+
+// validTransitions defines the allowed state machine for participant lifecycle.
+var validTransitions = map[ParticipantStatus][]ParticipantStatus{
+	ParticipantStatusPending:             {ParticipantStatusCredentialRequested, ParticipantStatusActive},
+	ParticipantStatusCredentialRequested: {ParticipantStatusKYCApproved, ParticipantStatusRevoked},
+	ParticipantStatusKYCApproved:         {ParticipantStatusActive, ParticipantStatusRevoked},
+	ParticipantStatusActive:              {ParticipantStatusFrozen, ParticipantStatusRevoked},
+	ParticipantStatusFrozen:              {ParticipantStatusActive, ParticipantStatusRevoked},
+}
+
+// IsValidTransition reports whether moving from current to next is allowed.
+func IsValidTransition(current, next ParticipantStatus) bool {
+	for _, allowed := range validTransitions[current] {
+		if allowed == next {
+			return true
+		}
+	}
+	return false
+}
 
 // TokenClaims is the normalized token claims payload extracted from a Keycloak JWT.
 type TokenClaims struct {

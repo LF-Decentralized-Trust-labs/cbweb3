@@ -38,6 +38,7 @@ func New(cfg config.Config) (*fiber.App, error) {
 
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure)
 	complianceHandler := handlers.NewComplianceHandler(identityManager)
+	onboardingHandler := handlers.NewOnboardingHandler(identityManager)
 
 	fiberApp := fiber.New(
 		fiber.Config{
@@ -49,6 +50,7 @@ func New(cfg config.Config) (*fiber.App, error) {
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
 		GovernanceHandler: governanceHandler,
+		OnboardingHandler: onboardingHandler,
 		AuthProvider:      identityGRPCProvider,
 	})
 

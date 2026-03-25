@@ -19,20 +19,23 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AuthService_Login_FullMethodName                = "/auth.v1.AuthService/Login"
-	AuthService_RefreshToken_FullMethodName         = "/auth.v1.AuthService/RefreshToken"
-	AuthService_RevokeToken_FullMethodName          = "/auth.v1.AuthService/RevokeToken"
-	AuthService_ValidateToken_FullMethodName        = "/auth.v1.AuthService/ValidateToken"
-	AuthService_RegisterParticipant_FullMethodName  = "/auth.v1.AuthService/RegisterParticipant"
-	AuthService_SignTransaction_FullMethodName      = "/auth.v1.AuthService/SignTransaction"
-	AuthService_GetKYCStatus_FullMethodName         = "/auth.v1.AuthService/GetKYCStatus"
-	AuthService_ProvisionParticipant_FullMethodName = "/auth.v1.AuthService/ProvisionParticipant"
-	AuthService_OnboardParticipant_FullMethodName   = "/auth.v1.AuthService/OnboardParticipant"
-	AuthService_ListUsers_FullMethodName            = "/auth.v1.AuthService/ListUsers"
-	AuthService_GetUser_FullMethodName              = "/auth.v1.AuthService/GetUser"
-	AuthService_IssueLoginNonce_FullMethodName      = "/auth.v1.AuthService/IssueLoginNonce"
-	AuthService_VerifyPKILogin_FullMethodName       = "/auth.v1.AuthService/VerifyPKILogin"
-	AuthService_ChangeClientSecret_FullMethodName   = "/auth.v1.AuthService/ChangeClientSecret"
+	AuthService_Login_FullMethodName                   = "/auth.v1.AuthService/Login"
+	AuthService_RefreshToken_FullMethodName            = "/auth.v1.AuthService/RefreshToken"
+	AuthService_RevokeToken_FullMethodName             = "/auth.v1.AuthService/RevokeToken"
+	AuthService_ValidateToken_FullMethodName           = "/auth.v1.AuthService/ValidateToken"
+	AuthService_RegisterParticipant_FullMethodName     = "/auth.v1.AuthService/RegisterParticipant"
+	AuthService_SignTransaction_FullMethodName         = "/auth.v1.AuthService/SignTransaction"
+	AuthService_GetKYCStatus_FullMethodName            = "/auth.v1.AuthService/GetKYCStatus"
+	AuthService_ProvisionParticipant_FullMethodName    = "/auth.v1.AuthService/ProvisionParticipant"
+	AuthService_OnboardParticipant_FullMethodName      = "/auth.v1.AuthService/OnboardParticipant"
+	AuthService_ListUsers_FullMethodName               = "/auth.v1.AuthService/ListUsers"
+	AuthService_GetUser_FullMethodName                 = "/auth.v1.AuthService/GetUser"
+	AuthService_IssueLoginNonce_FullMethodName         = "/auth.v1.AuthService/IssueLoginNonce"
+	AuthService_VerifyPKILogin_FullMethodName          = "/auth.v1.AuthService/VerifyPKILogin"
+	AuthService_ChangeClientSecret_FullMethodName      = "/auth.v1.AuthService/ChangeClientSecret"
+	AuthService_SubmitCredentialRequest_FullMethodName = "/auth.v1.AuthService/SubmitCredentialRequest"
+	AuthService_GetOnboardingStatus_FullMethodName     = "/auth.v1.AuthService/GetOnboardingStatus"
+	AuthService_CompleteOnboarding_FullMethodName      = "/auth.v1.AuthService/CompleteOnboarding"
 )
 
 // AuthServiceClient is the client API for AuthService service.
@@ -47,12 +50,17 @@ type AuthServiceClient interface {
 	SignTransaction(ctx context.Context, in *SignTransactionRequest, opts ...grpc.CallOption) (*SignTransactionResponse, error)
 	GetKYCStatus(ctx context.Context, in *GetKYCStatusRequest, opts ...grpc.CallOption) (*GetKYCStatusResponse, error)
 	ProvisionParticipant(ctx context.Context, in *ProvisionParticipantRequest, opts ...grpc.CallOption) (*ProvisionParticipantResponse, error)
+	// Deprecated: use SubmitCredentialRequest + CompleteOnboarding instead.
 	OnboardParticipant(ctx context.Context, in *OnboardParticipantRequest, opts ...grpc.CallOption) (*OnboardParticipantResponse, error)
 	ListUsers(ctx context.Context, in *ListUsersRequest, opts ...grpc.CallOption) (*ListUsersResponse, error)
 	GetUser(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*GetUserResponse, error)
 	IssueLoginNonce(ctx context.Context, in *IssueLoginNonceRequest, opts ...grpc.CallOption) (*IssueLoginNonceResponse, error)
 	VerifyPKILogin(ctx context.Context, in *VerifyPKILoginRequest, opts ...grpc.CallOption) (*VerifyPKILoginResponse, error)
 	ChangeClientSecret(ctx context.Context, in *ChangeClientSecretRequest, opts ...grpc.CallOption) (*ChangeClientSecretResponse, error)
+	// New onboarding flow (3-phase PKI + Blockchain)
+	SubmitCredentialRequest(ctx context.Context, in *SubmitCredentialRequestReq, opts ...grpc.CallOption) (*SubmitCredentialRequestResp, error)
+	GetOnboardingStatus(ctx context.Context, in *GetOnboardingStatusRequest, opts ...grpc.CallOption) (*GetOnboardingStatusResponse, error)
+	CompleteOnboarding(ctx context.Context, in *CompleteOnboardingRequest, opts ...grpc.CallOption) (*CompleteOnboardingResponse, error)
 }
 
 type authServiceClient struct {
@@ -203,6 +211,36 @@ func (c *authServiceClient) ChangeClientSecret(ctx context.Context, in *ChangeCl
 	return out, nil
 }
 
+func (c *authServiceClient) SubmitCredentialRequest(ctx context.Context, in *SubmitCredentialRequestReq, opts ...grpc.CallOption) (*SubmitCredentialRequestResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubmitCredentialRequestResp)
+	err := c.cc.Invoke(ctx, AuthService_SubmitCredentialRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) GetOnboardingStatus(ctx context.Context, in *GetOnboardingStatusRequest, opts ...grpc.CallOption) (*GetOnboardingStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOnboardingStatusResponse)
+	err := c.cc.Invoke(ctx, AuthService_GetOnboardingStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) CompleteOnboarding(ctx context.Context, in *CompleteOnboardingRequest, opts ...grpc.CallOption) (*CompleteOnboardingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CompleteOnboardingResponse)
+	err := c.cc.Invoke(ctx, AuthService_CompleteOnboarding_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthServiceServer is the server API for AuthService service.
 // All implementations should embed UnimplementedAuthServiceServer
 // for forward compatibility.
@@ -215,12 +253,17 @@ type AuthServiceServer interface {
 	SignTransaction(context.Context, *SignTransactionRequest) (*SignTransactionResponse, error)
 	GetKYCStatus(context.Context, *GetKYCStatusRequest) (*GetKYCStatusResponse, error)
 	ProvisionParticipant(context.Context, *ProvisionParticipantRequest) (*ProvisionParticipantResponse, error)
+	// Deprecated: use SubmitCredentialRequest + CompleteOnboarding instead.
 	OnboardParticipant(context.Context, *OnboardParticipantRequest) (*OnboardParticipantResponse, error)
 	ListUsers(context.Context, *ListUsersRequest) (*ListUsersResponse, error)
 	GetUser(context.Context, *GetUserRequest) (*GetUserResponse, error)
 	IssueLoginNonce(context.Context, *IssueLoginNonceRequest) (*IssueLoginNonceResponse, error)
 	VerifyPKILogin(context.Context, *VerifyPKILoginRequest) (*VerifyPKILoginResponse, error)
 	ChangeClientSecret(context.Context, *ChangeClientSecretRequest) (*ChangeClientSecretResponse, error)
+	// New onboarding flow (3-phase PKI + Blockchain)
+	SubmitCredentialRequest(context.Context, *SubmitCredentialRequestReq) (*SubmitCredentialRequestResp, error)
+	GetOnboardingStatus(context.Context, *GetOnboardingStatusRequest) (*GetOnboardingStatusResponse, error)
+	CompleteOnboarding(context.Context, *CompleteOnboardingRequest) (*CompleteOnboardingResponse, error)
 }
 
 // UnimplementedAuthServiceServer should be embedded to have
@@ -271,6 +314,15 @@ func (UnimplementedAuthServiceServer) VerifyPKILogin(context.Context, *VerifyPKI
 }
 func (UnimplementedAuthServiceServer) ChangeClientSecret(context.Context, *ChangeClientSecretRequest) (*ChangeClientSecretResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ChangeClientSecret not implemented")
+}
+func (UnimplementedAuthServiceServer) SubmitCredentialRequest(context.Context, *SubmitCredentialRequestReq) (*SubmitCredentialRequestResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitCredentialRequest not implemented")
+}
+func (UnimplementedAuthServiceServer) GetOnboardingStatus(context.Context, *GetOnboardingStatusRequest) (*GetOnboardingStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetOnboardingStatus not implemented")
+}
+func (UnimplementedAuthServiceServer) CompleteOnboarding(context.Context, *CompleteOnboardingRequest) (*CompleteOnboardingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CompleteOnboarding not implemented")
 }
 func (UnimplementedAuthServiceServer) testEmbeddedByValue() {}
 
@@ -544,6 +596,60 @@ func _AuthService_ChangeClientSecret_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_SubmitCredentialRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubmitCredentialRequestReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).SubmitCredentialRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_SubmitCredentialRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).SubmitCredentialRequest(ctx, req.(*SubmitCredentialRequestReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_GetOnboardingStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOnboardingStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).GetOnboardingStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_GetOnboardingStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).GetOnboardingStatus(ctx, req.(*GetOnboardingStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_CompleteOnboarding_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CompleteOnboardingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).CompleteOnboarding(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_CompleteOnboarding_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).CompleteOnboarding(ctx, req.(*CompleteOnboardingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AuthService_ServiceDesc is the grpc.ServiceDesc for AuthService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -606,6 +712,18 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ChangeClientSecret",
 			Handler:    _AuthService_ChangeClientSecret_Handler,
+		},
+		{
+			MethodName: "SubmitCredentialRequest",
+			Handler:    _AuthService_SubmitCredentialRequest_Handler,
+		},
+		{
+			MethodName: "GetOnboardingStatus",
+			Handler:    _AuthService_GetOnboardingStatus_Handler,
+		},
+		{
+			MethodName: "CompleteOnboarding",
+			Handler:    _AuthService_CompleteOnboarding_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

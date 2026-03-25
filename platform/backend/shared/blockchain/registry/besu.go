@@ -118,6 +118,58 @@ func (b *BesuClient) GetMemberRole(ctx context.Context, address string) (uint8, 
 	return decoded[31], nil
 }
 
+// SetCertFingerprint calls setCertFingerprint(address, bytes32) on-chain.
+func (b *BesuClient) SetCertFingerprint(ctx context.Context, wallet string, fingerprint [32]byte) (string, error) {
+	cbAddress := gethcrypto.PubkeyToAddress(b.privKey.PublicKey).Hex()
+
+	nonce, err := b.getNonce(ctx, cbAddress)
+	if err != nil {
+		return "", fmt.Errorf("registry: fetching nonce: %w", err)
+	}
+	gasPrice, err := b.getGasPrice(ctx)
+	if err != nil {
+		return "", fmt.Errorf("registry: fetching gas price: %w", err)
+	}
+
+	data := encodeSetCertFingerprint(wallet, fingerprint)
+	dataBytes, err := hex.DecodeString(strings.TrimPrefix(data, "0x"))
+	if err != nil {
+		return "", fmt.Errorf("registry: encoding cert fingerprint tx data: %w", err)
+	}
+
+	registryAddr := common.HexToAddress(b.cfg.RegistryAddress)
+	tx := types.NewTransaction(nonce, registryAddr, big.NewInt(0), 200000, gasPrice, dataBytes)
+
+	signer := types.NewEIP155Signer(big.NewInt(b.cfg.ChainID))
+	signedTx, err := types.SignTx(tx, signer, b.privKey)
+	if err != nil {
+		return "", fmt.Errorf("registry: signing cert fingerprint tx: %w", err)
+	}
+
+	rawTx, err := signedTx.MarshalBinary()
+	if err != nil {
+		return "", fmt.Errorf("registry: marshaling cert fingerprint tx: %w", err)
+	}
+
+	return b.sendRawTransaction(ctx, "0x"+hex.EncodeToString(rawTx))
+}
+
+// GetCertFingerprint calls getCertFingerprint(address) on the contract via eth_call.
+func (b *BesuClient) GetCertFingerprint(ctx context.Context, address string) ([32]byte, error) {
+	data := encodeGetCertFingerprint(address)
+	result, err := b.ethCall(ctx, b.cfg.RegistryAddress, data)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	decoded, err := hex.DecodeString(strings.TrimPrefix(result, "0x"))
+	if err != nil || len(decoded) < 32 {
+		return [32]byte{}, nil
+	}
+	var fp [32]byte
+	copy(fp[:], decoded[:32])
+	return fp, nil
+}
+
 func (b *BesuClient) sendRegisterMember(ctx context.Context, wallet string, roleCode uint8) (string, error) {
 	cbAddress := gethcrypto.PubkeyToAddress(b.privKey.PublicKey).Hex()
 

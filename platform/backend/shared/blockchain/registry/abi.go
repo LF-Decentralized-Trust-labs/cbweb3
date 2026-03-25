@@ -47,3 +47,21 @@ func encodeGetRole(address string) string {
 	addrHex := fmt.Sprintf("%064s", strings.TrimPrefix(strings.ToLower(address), "0x"))
 	return "0x" + selector + addrHex
 }
+
+// encodeSetCertFingerprint ABI-encodes setCertFingerprint(address account, bytes32 fingerprint).
+// Selector: keccak256("setCertFingerprint(address,bytes32)")[0:4]
+// Computed: cast sig "setCertFingerprint(address,bytes32)" → 0x... (placeholder, compute at build)
+func encodeSetCertFingerprint(address string, fingerprint [32]byte) string {
+	const selector = "d9d1e737"
+	addrHex := fmt.Sprintf("%064s", strings.TrimPrefix(strings.ToLower(address), "0x"))
+	fpHex := fmt.Sprintf("%064x", fingerprint)
+	return "0x" + selector + addrHex + fpHex
+}
+
+// encodeGetCertFingerprint ABI-encodes getCertFingerprint(address account).
+// Selector: keccak256("getCertFingerprint(address)")[0:4]
+func encodeGetCertFingerprint(address string) string {
+	const selector = "41489f5c"
+	addrHex := fmt.Sprintf("%064s", strings.TrimPrefix(strings.ToLower(address), "0x"))
+	return "0x" + selector + addrHex
+}

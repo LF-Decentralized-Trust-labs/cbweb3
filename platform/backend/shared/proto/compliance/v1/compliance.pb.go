@@ -24,20 +24,23 @@ const (
 )
 
 type Participant struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	UserId          string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	InstitutionName string                 `protobuf:"bytes,2,opt,name=institution_name,json=institutionName,proto3" json:"institution_name,omitempty"`
-	Cnpj            string                 `protobuf:"bytes,3,opt,name=cnpj,proto3" json:"cnpj,omitempty"`
-	BankCode        string                 `protobuf:"bytes,4,opt,name=bank_code,json=bankCode,proto3" json:"bank_code,omitempty"`
-	CountryCode     string                 `protobuf:"bytes,5,opt,name=country_code,json=countryCode,proto3" json:"country_code,omitempty"`
-	Role            string                 `protobuf:"bytes,6,opt,name=role,proto3" json:"role,omitempty"`
-	WalletAddress   string                 `protobuf:"bytes,7,opt,name=wallet_address,json=walletAddress,proto3" json:"wallet_address,omitempty"`
-	Status          string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"` // PENDING | ACTIVE | FROZEN | REVOKED
-	CertificateData string                 `protobuf:"bytes,9,opt,name=certificate_data,json=certificateData,proto3" json:"certificate_data,omitempty"`
-	// certificate_expiry is optional; unset when no certificate exists.
-	CertificateExpiry *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=certificate_expiry,json=certificateExpiry,proto3,oneof" json:"certificate_expiry,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	UserId              string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	InstitutionName     string                 `protobuf:"bytes,2,opt,name=institution_name,json=institutionName,proto3" json:"institution_name,omitempty"`
+	Cnpj                string                 `protobuf:"bytes,3,opt,name=cnpj,proto3" json:"cnpj,omitempty"`
+	BankCode            string                 `protobuf:"bytes,4,opt,name=bank_code,json=bankCode,proto3" json:"bank_code,omitempty"`
+	CountryCode         string                 `protobuf:"bytes,5,opt,name=country_code,json=countryCode,proto3" json:"country_code,omitempty"`
+	Role                string                 `protobuf:"bytes,6,opt,name=role,proto3" json:"role,omitempty"`
+	WalletAddress       string                 `protobuf:"bytes,7,opt,name=wallet_address,json=walletAddress,proto3" json:"wallet_address,omitempty"`
+	Status              string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"` // PENDING | CREDENTIAL_REQUESTED | KYC_APPROVED | ACTIVE | FROZEN | REVOKED
+	CertificateData     string                 `protobuf:"bytes,9,opt,name=certificate_data,json=certificateData,proto3" json:"certificate_data,omitempty"`
+	CertificateExpiry   *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=certificate_expiry,json=certificateExpiry,proto3,oneof" json:"certificate_expiry,omitempty"`
+	BlockchainPubKeyHex string                 `protobuf:"bytes,11,opt,name=blockchain_pub_key_hex,json=blockchainPubKeyHex,proto3" json:"blockchain_pub_key_hex,omitempty"`
+	CsrPem              string                 `protobuf:"bytes,12,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"`
+	PopNonce            string                 `protobuf:"bytes,13,opt,name=pop_nonce,json=popNonce,proto3" json:"pop_nonce,omitempty"`
+	PopNonceExpiresAt   *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=pop_nonce_expires_at,json=popNonceExpiresAt,proto3,oneof" json:"pop_nonce_expires_at,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *Participant) Reset() {
@@ -136,6 +139,34 @@ func (x *Participant) GetCertificateData() string {
 func (x *Participant) GetCertificateExpiry() *timestamppb.Timestamp {
 	if x != nil {
 		return x.CertificateExpiry
+	}
+	return nil
+}
+
+func (x *Participant) GetBlockchainPubKeyHex() string {
+	if x != nil {
+		return x.BlockchainPubKeyHex
+	}
+	return ""
+}
+
+func (x *Participant) GetCsrPem() string {
+	if x != nil {
+		return x.CsrPem
+	}
+	return ""
+}
+
+func (x *Participant) GetPopNonce() string {
+	if x != nil {
+		return x.PopNonce
+	}
+	return ""
+}
+
+func (x *Participant) GetPopNonceExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.PopNonceExpiresAt
 	}
 	return nil
 }
@@ -1193,10 +1224,13 @@ func (x *ApproveKYCRequest) GetReason() string {
 }
 
 type ApproveKYCResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Subject       string                 `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
-	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`               // ACTIVE
-	TxHash        string                 `protobuf:"bytes,3,opt,name=tx_hash,json=txHash,proto3" json:"tx_hash,omitempty"` // on-chain transaction hash
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Subject string                 `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
+	Status  string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`               // KYC_APPROVED (no longer ACTIVE; activation happens at CompleteOnboarding)
+	TxHash  string                 `protobuf:"bytes,3,opt,name=tx_hash,json=txHash,proto3" json:"tx_hash,omitempty"` // on-chain transaction hash (empty in new flow; kept for backward compat)
+	// pop_nonce is the hex-encoded 32-byte nonce the commercial bank must sign
+	// with its secp256k1 key to prove wallet ownership (Proof of Possession).
+	PopNonce      string `protobuf:"bytes,4,opt,name=pop_nonce,json=popNonce,proto3" json:"pop_nonce,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1248,6 +1282,13 @@ func (x *ApproveKYCResponse) GetStatus() string {
 func (x *ApproveKYCResponse) GetTxHash() string {
 	if x != nil {
 		return x.TxHash
+	}
+	return ""
+}
+
+func (x *ApproveKYCResponse) GetPopNonce() string {
+	if x != nil {
+		return x.PopNonce
 	}
 	return ""
 }
@@ -1728,7 +1769,7 @@ var File_compliance_v1_compliance_proto protoreflect.FileDescriptor
 
 const file_compliance_v1_compliance_proto_rawDesc = "" +
 	"\n" +
-	"\x1ecompliance/v1/compliance.proto\x12\rcompliance.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8a\x03\n" +
+	"\x1ecompliance/v1/compliance.proto\x12\rcompliance.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe0\x04\n" +
 	"\vParticipant\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12)\n" +
 	"\x10institution_name\x18\x02 \x01(\tR\x0finstitutionName\x12\x12\n" +
@@ -1740,8 +1781,13 @@ const file_compliance_v1_compliance_proto_rawDesc = "" +
 	"\x06status\x18\b \x01(\tR\x06status\x12)\n" +
 	"\x10certificate_data\x18\t \x01(\tR\x0fcertificateData\x12N\n" +
 	"\x12certificate_expiry\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampH\x00R\x11certificateExpiry\x88\x01\x01B\x15\n" +
-	"\x13_certificate_expiry\"X\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampH\x00R\x11certificateExpiry\x88\x01\x01\x123\n" +
+	"\x16blockchain_pub_key_hex\x18\v \x01(\tR\x13blockchainPubKeyHex\x12\x17\n" +
+	"\acsr_pem\x18\f \x01(\tR\x06csrPem\x12\x1b\n" +
+	"\tpop_nonce\x18\r \x01(\tR\bpopNonce\x12P\n" +
+	"\x14pop_nonce_expires_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampH\x01R\x11popNonceExpiresAt\x88\x01\x01B\x15\n" +
+	"\x13_certificate_expiryB\x17\n" +
+	"\x15_pop_nonce_expires_at\"X\n" +
 	"\x18UpsertParticipantRequest\x12<\n" +
 	"\vparticipant\x18\x01 \x01(\v2\x1a.compliance.v1.ParticipantR\vparticipant\"5\n" +
 	"\x19UpsertParticipantResponse\x12\x18\n" +
@@ -1821,11 +1867,12 @@ const file_compliance_v1_compliance_proto_rawDesc = "" +
 	"\x11ApproveKYCRequest\x12\x18\n" +
 	"\asubject\x18\x01 \x01(\tR\asubject\x12#\n" +
 	"\ractor_subject\x18\x02 \x01(\tR\factorSubject\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reason\"_\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"|\n" +
 	"\x12ApproveKYCResponse\x12\x18\n" +
 	"\asubject\x18\x01 \x01(\tR\asubject\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x17\n" +
-	"\atx_hash\x18\x03 \x01(\tR\x06txHash\"j\n" +
+	"\atx_hash\x18\x03 \x01(\tR\x06txHash\x12\x1b\n" +
+	"\tpop_nonce\x18\x04 \x01(\tR\bpopNonce\"j\n" +
 	"\x1eManageParticipantStatusRequest\x12\x18\n" +
 	"\asubject\x18\x01 \x01(\tR\asubject\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x16\n" +
@@ -1922,42 +1969,43 @@ var file_compliance_v1_compliance_proto_goTypes = []any{
 }
 var file_compliance_v1_compliance_proto_depIdxs = []int32{
 	27, // 0: compliance.v1.Participant.certificate_expiry:type_name -> google.protobuf.Timestamp
-	0,  // 1: compliance.v1.UpsertParticipantRequest.participant:type_name -> compliance.v1.Participant
-	0,  // 2: compliance.v1.GetParticipantByUserResponse.participant:type_name -> compliance.v1.Participant
-	0,  // 3: compliance.v1.ListParticipantsResponse.participants:type_name -> compliance.v1.Participant
-	7,  // 4: compliance.v1.CreateAuditLogRequest.entry:type_name -> compliance.v1.AuditLogEntry
-	11, // 5: compliance.v1.GetAuditLogsResponse.logs:type_name -> compliance.v1.AuditLogRecord
-	1,  // 6: compliance.v1.ComplianceService.UpsertParticipant:input_type -> compliance.v1.UpsertParticipantRequest
-	3,  // 7: compliance.v1.ComplianceService.GetParticipantByUser:input_type -> compliance.v1.GetParticipantByUserRequest
-	5,  // 8: compliance.v1.ComplianceService.ListParticipants:input_type -> compliance.v1.ListParticipantsRequest
-	8,  // 9: compliance.v1.ComplianceService.CreateAuditLog:input_type -> compliance.v1.CreateAuditLogRequest
-	10, // 10: compliance.v1.ComplianceService.GetAuditLogs:input_type -> compliance.v1.GetAuditLogsRequest
-	13, // 11: compliance.v1.ComplianceService.IssueParticipantCertificate:input_type -> compliance.v1.IssueParticipantCertificateRequest
-	15, // 12: compliance.v1.ComplianceService.SignParticipantCSR:input_type -> compliance.v1.SignParticipantCSRRequest
-	17, // 13: compliance.v1.ComplianceService.ApproveKYC:input_type -> compliance.v1.ApproveKYCRequest
-	19, // 14: compliance.v1.ComplianceService.ManageParticipantStatus:input_type -> compliance.v1.ManageParticipantStatusRequest
-	28, // 15: compliance.v1.ComplianceService.GetCircuitBreakerStatus:input_type -> google.protobuf.Empty
-	22, // 16: compliance.v1.ComplianceService.ToggleCircuitBreaker:input_type -> compliance.v1.ToggleCircuitBreakerRequest
-	28, // 17: compliance.v1.ComplianceService.GetSystemParameters:input_type -> google.protobuf.Empty
-	25, // 18: compliance.v1.ComplianceService.UpdateSystemParameters:input_type -> compliance.v1.UpdateSystemParametersRequest
-	2,  // 19: compliance.v1.ComplianceService.UpsertParticipant:output_type -> compliance.v1.UpsertParticipantResponse
-	4,  // 20: compliance.v1.ComplianceService.GetParticipantByUser:output_type -> compliance.v1.GetParticipantByUserResponse
-	6,  // 21: compliance.v1.ComplianceService.ListParticipants:output_type -> compliance.v1.ListParticipantsResponse
-	9,  // 22: compliance.v1.ComplianceService.CreateAuditLog:output_type -> compliance.v1.CreateAuditLogResponse
-	12, // 23: compliance.v1.ComplianceService.GetAuditLogs:output_type -> compliance.v1.GetAuditLogsResponse
-	14, // 24: compliance.v1.ComplianceService.IssueParticipantCertificate:output_type -> compliance.v1.IssueParticipantCertificateResponse
-	16, // 25: compliance.v1.ComplianceService.SignParticipantCSR:output_type -> compliance.v1.SignParticipantCSRResponse
-	18, // 26: compliance.v1.ComplianceService.ApproveKYC:output_type -> compliance.v1.ApproveKYCResponse
-	20, // 27: compliance.v1.ComplianceService.ManageParticipantStatus:output_type -> compliance.v1.ManageParticipantStatusResponse
-	21, // 28: compliance.v1.ComplianceService.GetCircuitBreakerStatus:output_type -> compliance.v1.GetCircuitBreakerStatusResponse
-	23, // 29: compliance.v1.ComplianceService.ToggleCircuitBreaker:output_type -> compliance.v1.ToggleCircuitBreakerResponse
-	24, // 30: compliance.v1.ComplianceService.GetSystemParameters:output_type -> compliance.v1.GetSystemParametersResponse
-	26, // 31: compliance.v1.ComplianceService.UpdateSystemParameters:output_type -> compliance.v1.UpdateSystemParametersResponse
-	19, // [19:32] is the sub-list for method output_type
-	6,  // [6:19] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	27, // 1: compliance.v1.Participant.pop_nonce_expires_at:type_name -> google.protobuf.Timestamp
+	0,  // 2: compliance.v1.UpsertParticipantRequest.participant:type_name -> compliance.v1.Participant
+	0,  // 3: compliance.v1.GetParticipantByUserResponse.participant:type_name -> compliance.v1.Participant
+	0,  // 4: compliance.v1.ListParticipantsResponse.participants:type_name -> compliance.v1.Participant
+	7,  // 5: compliance.v1.CreateAuditLogRequest.entry:type_name -> compliance.v1.AuditLogEntry
+	11, // 6: compliance.v1.GetAuditLogsResponse.logs:type_name -> compliance.v1.AuditLogRecord
+	1,  // 7: compliance.v1.ComplianceService.UpsertParticipant:input_type -> compliance.v1.UpsertParticipantRequest
+	3,  // 8: compliance.v1.ComplianceService.GetParticipantByUser:input_type -> compliance.v1.GetParticipantByUserRequest
+	5,  // 9: compliance.v1.ComplianceService.ListParticipants:input_type -> compliance.v1.ListParticipantsRequest
+	8,  // 10: compliance.v1.ComplianceService.CreateAuditLog:input_type -> compliance.v1.CreateAuditLogRequest
+	10, // 11: compliance.v1.ComplianceService.GetAuditLogs:input_type -> compliance.v1.GetAuditLogsRequest
+	13, // 12: compliance.v1.ComplianceService.IssueParticipantCertificate:input_type -> compliance.v1.IssueParticipantCertificateRequest
+	15, // 13: compliance.v1.ComplianceService.SignParticipantCSR:input_type -> compliance.v1.SignParticipantCSRRequest
+	17, // 14: compliance.v1.ComplianceService.ApproveKYC:input_type -> compliance.v1.ApproveKYCRequest
+	19, // 15: compliance.v1.ComplianceService.ManageParticipantStatus:input_type -> compliance.v1.ManageParticipantStatusRequest
+	28, // 16: compliance.v1.ComplianceService.GetCircuitBreakerStatus:input_type -> google.protobuf.Empty
+	22, // 17: compliance.v1.ComplianceService.ToggleCircuitBreaker:input_type -> compliance.v1.ToggleCircuitBreakerRequest
+	28, // 18: compliance.v1.ComplianceService.GetSystemParameters:input_type -> google.protobuf.Empty
+	25, // 19: compliance.v1.ComplianceService.UpdateSystemParameters:input_type -> compliance.v1.UpdateSystemParametersRequest
+	2,  // 20: compliance.v1.ComplianceService.UpsertParticipant:output_type -> compliance.v1.UpsertParticipantResponse
+	4,  // 21: compliance.v1.ComplianceService.GetParticipantByUser:output_type -> compliance.v1.GetParticipantByUserResponse
+	6,  // 22: compliance.v1.ComplianceService.ListParticipants:output_type -> compliance.v1.ListParticipantsResponse
+	9,  // 23: compliance.v1.ComplianceService.CreateAuditLog:output_type -> compliance.v1.CreateAuditLogResponse
+	12, // 24: compliance.v1.ComplianceService.GetAuditLogs:output_type -> compliance.v1.GetAuditLogsResponse
+	14, // 25: compliance.v1.ComplianceService.IssueParticipantCertificate:output_type -> compliance.v1.IssueParticipantCertificateResponse
+	16, // 26: compliance.v1.ComplianceService.SignParticipantCSR:output_type -> compliance.v1.SignParticipantCSRResponse
+	18, // 27: compliance.v1.ComplianceService.ApproveKYC:output_type -> compliance.v1.ApproveKYCResponse
+	20, // 28: compliance.v1.ComplianceService.ManageParticipantStatus:output_type -> compliance.v1.ManageParticipantStatusResponse
+	21, // 29: compliance.v1.ComplianceService.GetCircuitBreakerStatus:output_type -> compliance.v1.GetCircuitBreakerStatusResponse
+	23, // 30: compliance.v1.ComplianceService.ToggleCircuitBreaker:output_type -> compliance.v1.ToggleCircuitBreakerResponse
+	24, // 31: compliance.v1.ComplianceService.GetSystemParameters:output_type -> compliance.v1.GetSystemParametersResponse
+	26, // 32: compliance.v1.ComplianceService.UpdateSystemParameters:output_type -> compliance.v1.UpdateSystemParametersResponse
+	20, // [20:33] is the sub-list for method output_type
+	7,  // [7:20] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_compliance_v1_compliance_proto_init() }

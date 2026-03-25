@@ -14,6 +14,7 @@ type Dependencies struct {
 	AuthHandler       *handlers.AuthHandler
 	ComplianceHandler *handlers.ComplianceHandler
 	GovernanceHandler *handlers.GovernanceHandler
+	OnboardingHandler *handlers.OnboardingHandler
 	AuthProvider      interfaces.IAuthProvider
 }
 
@@ -39,6 +40,14 @@ func Setup(app *fiber.App, deps Dependencies) {
 	authGroup.Post("/client-secret/change", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.ChangeClientSecret)
 	// Self-profile: returns token claims for the authenticated caller
 	authGroup.Get("/me", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.Me)
+
+	// --- Onboarding (3-phase PKI + Blockchain) ---
+	if deps.OnboardingHandler != nil {
+		onboardGroup := app.Group("/api/v1/onboarding")
+		onboardGroup.Post("/credential-request", deps.OnboardingHandler.SubmitCredentialRequest)
+		onboardGroup.Get("/status/:requestId", deps.OnboardingHandler.GetOnboardingStatus)
+		onboardGroup.Post("/complete", deps.OnboardingHandler.CompleteOnboarding)
+	}
 
 	// --- Compliance (KYC status, AML gate, onboarding, provisioning) ---
 	complianceGroup := app.Group("/api/v1/compliance", middleware.RequireCookieAuth(deps.AuthProvider))

@@ -1752,6 +1752,459 @@ func (*ChangeClientSecretResponse) Descriptor() ([]byte, []int) {
 	return file_auth_v1_auth_proto_rawDescGZIP(), []int{28}
 }
 
+type SubmitCredentialRequestReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// PKCS#10 CSR signed with the bank's P-256 key.
+	CsrPem string `protobuf:"bytes,1,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"`
+	// Hex-encoded uncompressed secp256k1 public key (04‖X‖Y, 65 bytes).
+	BlockchainPubKeyHex string `protobuf:"bytes,2,opt,name=blockchain_pub_key_hex,json=blockchainPubKeyHex,proto3" json:"blockchain_pub_key_hex,omitempty"`
+	InstitutionName     string `protobuf:"bytes,3,opt,name=institution_name,json=institutionName,proto3" json:"institution_name,omitempty"`
+	Cnpj                string `protobuf:"bytes,4,opt,name=cnpj,proto3" json:"cnpj,omitempty"`
+	BankCode            string `protobuf:"bytes,5,opt,name=bank_code,json=bankCode,proto3" json:"bank_code,omitempty"`
+	Country             string `protobuf:"bytes,6,opt,name=country,proto3" json:"country,omitempty"`
+	Role                string `protobuf:"bytes,7,opt,name=role,proto3" json:"role,omitempty"`
+	Email               string `protobuf:"bytes,8,opt,name=email,proto3" json:"email,omitempty"`
+	Username            string `protobuf:"bytes,9,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *SubmitCredentialRequestReq) Reset() {
+	*x = SubmitCredentialRequestReq{}
+	mi := &file_auth_v1_auth_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitCredentialRequestReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitCredentialRequestReq) ProtoMessage() {}
+
+func (x *SubmitCredentialRequestReq) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitCredentialRequestReq.ProtoReflect.Descriptor instead.
+func (*SubmitCredentialRequestReq) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *SubmitCredentialRequestReq) GetCsrPem() string {
+	if x != nil {
+		return x.CsrPem
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequestReq) GetBlockchainPubKeyHex() string {
+	if x != nil {
+		return x.BlockchainPubKeyHex
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequestReq) GetInstitutionName() string {
+	if x != nil {
+		return x.InstitutionName
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequestReq) GetCnpj() string {
+	if x != nil {
+		return x.Cnpj
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequestReq) GetBankCode() string {
+	if x != nil {
+		return x.BankCode
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequestReq) GetCountry() string {
+	if x != nil {
+		return x.Country
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequestReq) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequestReq) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequestReq) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+type SubmitCredentialRequestResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	WalletAddress string                 `protobuf:"bytes,3,opt,name=wallet_address,json=walletAddress,proto3" json:"wallet_address,omitempty"`
+	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"` // CREDENTIAL_REQUESTED
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubmitCredentialRequestResp) Reset() {
+	*x = SubmitCredentialRequestResp{}
+	mi := &file_auth_v1_auth_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitCredentialRequestResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitCredentialRequestResp) ProtoMessage() {}
+
+func (x *SubmitCredentialRequestResp) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitCredentialRequestResp.ProtoReflect.Descriptor instead.
+func (*SubmitCredentialRequestResp) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *SubmitCredentialRequestResp) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequestResp) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequestResp) GetWalletAddress() string {
+	if x != nil {
+		return x.WalletAddress
+	}
+	return ""
+}
+
+func (x *SubmitCredentialRequestResp) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+type GetOnboardingStatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetOnboardingStatusRequest) Reset() {
+	*x = GetOnboardingStatusRequest{}
+	mi := &file_auth_v1_auth_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetOnboardingStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetOnboardingStatusRequest) ProtoMessage() {}
+
+func (x *GetOnboardingStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetOnboardingStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetOnboardingStatusRequest) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *GetOnboardingStatusRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+type GetOnboardingStatusResponse struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	UserId    string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Status    string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"` // CREDENTIAL_REQUESTED | KYC_APPROVED | ACTIVE
+	// pop_nonce is only populated when status = KYC_APPROVED.
+	PopNonce      string `protobuf:"bytes,4,opt,name=pop_nonce,json=popNonce,proto3" json:"pop_nonce,omitempty"`
+	WalletAddress string `protobuf:"bytes,5,opt,name=wallet_address,json=walletAddress,proto3" json:"wallet_address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetOnboardingStatusResponse) Reset() {
+	*x = GetOnboardingStatusResponse{}
+	mi := &file_auth_v1_auth_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetOnboardingStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetOnboardingStatusResponse) ProtoMessage() {}
+
+func (x *GetOnboardingStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetOnboardingStatusResponse.ProtoReflect.Descriptor instead.
+func (*GetOnboardingStatusResponse) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *GetOnboardingStatusResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *GetOnboardingStatusResponse) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *GetOnboardingStatusResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *GetOnboardingStatusResponse) GetPopNonce() string {
+	if x != nil {
+		return x.PopNonce
+	}
+	return ""
+}
+
+func (x *GetOnboardingStatusResponse) GetWalletAddress() string {
+	if x != nil {
+		return x.WalletAddress
+	}
+	return ""
+}
+
+type CompleteOnboardingRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	UserId    string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// Hex-encoded 65-byte recoverable secp256k1 signature of SHA-256(pop_nonce).
+	PopSignatureHex string `protobuf:"bytes,3,opt,name=pop_signature_hex,json=popSignatureHex,proto3" json:"pop_signature_hex,omitempty"`
+	// Hex-encoded uncompressed secp256k1 public key (must match credential request).
+	BlockchainPubKeyHex string `protobuf:"bytes,4,opt,name=blockchain_pub_key_hex,json=blockchainPubKeyHex,proto3" json:"blockchain_pub_key_hex,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *CompleteOnboardingRequest) Reset() {
+	*x = CompleteOnboardingRequest{}
+	mi := &file_auth_v1_auth_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompleteOnboardingRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompleteOnboardingRequest) ProtoMessage() {}
+
+func (x *CompleteOnboardingRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompleteOnboardingRequest.ProtoReflect.Descriptor instead.
+func (*CompleteOnboardingRequest) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *CompleteOnboardingRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CompleteOnboardingRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *CompleteOnboardingRequest) GetPopSignatureHex() string {
+	if x != nil {
+		return x.PopSignatureHex
+	}
+	return ""
+}
+
+func (x *CompleteOnboardingRequest) GetBlockchainPubKeyHex() string {
+	if x != nil {
+		return x.BlockchainPubKeyHex
+	}
+	return ""
+}
+
+type CompleteOnboardingResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	WalletAddress string                 `protobuf:"bytes,2,opt,name=wallet_address,json=walletAddress,proto3" json:"wallet_address,omitempty"`
+	CertPem       string                 `protobuf:"bytes,3,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
+	TxHash        string                 `protobuf:"bytes,4,opt,name=tx_hash,json=txHash,proto3" json:"tx_hash,omitempty"`
+	ClientSecret  string                 `protobuf:"bytes,5,opt,name=client_secret,json=clientSecret,proto3" json:"client_secret,omitempty"`
+	Status        string                 `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"` // ACTIVE
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompleteOnboardingResponse) Reset() {
+	*x = CompleteOnboardingResponse{}
+	mi := &file_auth_v1_auth_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompleteOnboardingResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompleteOnboardingResponse) ProtoMessage() {}
+
+func (x *CompleteOnboardingResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompleteOnboardingResponse.ProtoReflect.Descriptor instead.
+func (*CompleteOnboardingResponse) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *CompleteOnboardingResponse) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *CompleteOnboardingResponse) GetWalletAddress() string {
+	if x != nil {
+		return x.WalletAddress
+	}
+	return ""
+}
+
+func (x *CompleteOnboardingResponse) GetCertPem() string {
+	if x != nil {
+		return x.CertPem
+	}
+	return ""
+}
+
+func (x *CompleteOnboardingResponse) GetTxHash() string {
+	if x != nil {
+		return x.TxHash
+	}
+	return ""
+}
+
+func (x *CompleteOnboardingResponse) GetClientSecret() string {
+	if x != nil {
+		return x.ClientSecret
+	}
+	return ""
+}
+
+func (x *CompleteOnboardingResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
 var File_auth_v1_auth_proto protoreflect.FileDescriptor
 
 const file_auth_v1_auth_proto_rawDesc = "" +
@@ -1877,7 +2330,46 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\x0ecurrent_secret\x18\x02 \x01(\tR\rcurrentSecret\x12\x1d\n" +
 	"\n" +
 	"new_secret\x18\x03 \x01(\tR\tnewSecret\"\x1c\n" +
-	"\x1aChangeClientSecretResponse2\xff\b\n" +
+	"\x1aChangeClientSecretResponse\"\xa6\x02\n" +
+	"\x1aSubmitCredentialRequestReq\x12\x17\n" +
+	"\acsr_pem\x18\x01 \x01(\tR\x06csrPem\x123\n" +
+	"\x16blockchain_pub_key_hex\x18\x02 \x01(\tR\x13blockchainPubKeyHex\x12)\n" +
+	"\x10institution_name\x18\x03 \x01(\tR\x0finstitutionName\x12\x12\n" +
+	"\x04cnpj\x18\x04 \x01(\tR\x04cnpj\x12\x1b\n" +
+	"\tbank_code\x18\x05 \x01(\tR\bbankCode\x12\x18\n" +
+	"\acountry\x18\x06 \x01(\tR\acountry\x12\x12\n" +
+	"\x04role\x18\a \x01(\tR\x04role\x12\x14\n" +
+	"\x05email\x18\b \x01(\tR\x05email\x12\x1a\n" +
+	"\busername\x18\t \x01(\tR\busername\"\x94\x01\n" +
+	"\x1bSubmitCredentialRequestResp\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12%\n" +
+	"\x0ewallet_address\x18\x03 \x01(\tR\rwalletAddress\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\";\n" +
+	"\x1aGetOnboardingStatusRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\"\xb1\x01\n" +
+	"\x1bGetOnboardingStatusResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12\x1b\n" +
+	"\tpop_nonce\x18\x04 \x01(\tR\bpopNonce\x12%\n" +
+	"\x0ewallet_address\x18\x05 \x01(\tR\rwalletAddress\"\xb4\x01\n" +
+	"\x19CompleteOnboardingRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12*\n" +
+	"\x11pop_signature_hex\x18\x03 \x01(\tR\x0fpopSignatureHex\x123\n" +
+	"\x16blockchain_pub_key_hex\x18\x04 \x01(\tR\x13blockchainPubKeyHex\"\xcd\x01\n" +
+	"\x1aCompleteOnboardingResponse\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12%\n" +
+	"\x0ewallet_address\x18\x02 \x01(\tR\rwalletAddress\x12\x19\n" +
+	"\bcert_pem\x18\x03 \x01(\tR\acertPem\x12\x17\n" +
+	"\atx_hash\x18\x04 \x01(\tR\x06txHash\x12#\n" +
+	"\rclient_secret\x18\x05 \x01(\tR\fclientSecret\x12\x16\n" +
+	"\x06status\x18\x06 \x01(\tR\x06status2\xa6\v\n" +
 	"\vAuthService\x126\n" +
 	"\x05Login\x12\x15.auth.v1.LoginRequest\x1a\x16.auth.v1.LoginResponse\x12K\n" +
 	"\fRefreshToken\x12\x1c.auth.v1.RefreshTokenRequest\x1a\x1d.auth.v1.RefreshTokenResponse\x12H\n" +
@@ -1892,7 +2384,10 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\aGetUser\x12\x17.auth.v1.GetUserRequest\x1a\x18.auth.v1.GetUserResponse\x12T\n" +
 	"\x0fIssueLoginNonce\x12\x1f.auth.v1.IssueLoginNonceRequest\x1a .auth.v1.IssueLoginNonceResponse\x12Q\n" +
 	"\x0eVerifyPKILogin\x12\x1e.auth.v1.VerifyPKILoginRequest\x1a\x1f.auth.v1.VerifyPKILoginResponse\x12]\n" +
-	"\x12ChangeClientSecret\x12\".auth.v1.ChangeClientSecretRequest\x1a#.auth.v1.ChangeClientSecretResponseBOZMgithub.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1;authv1b\x06proto3"
+	"\x12ChangeClientSecret\x12\".auth.v1.ChangeClientSecretRequest\x1a#.auth.v1.ChangeClientSecretResponse\x12d\n" +
+	"\x17SubmitCredentialRequest\x12#.auth.v1.SubmitCredentialRequestReq\x1a$.auth.v1.SubmitCredentialRequestResp\x12`\n" +
+	"\x13GetOnboardingStatus\x12#.auth.v1.GetOnboardingStatusRequest\x1a$.auth.v1.GetOnboardingStatusResponse\x12]\n" +
+	"\x12CompleteOnboarding\x12\".auth.v1.CompleteOnboardingRequest\x1a#.auth.v1.CompleteOnboardingResponseBOZMgithub.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1;authv1b\x06proto3"
 
 var (
 	file_auth_v1_auth_proto_rawDescOnce sync.Once
@@ -1906,7 +2401,7 @@ func file_auth_v1_auth_proto_rawDescGZIP() []byte {
 	return file_auth_v1_auth_proto_rawDescData
 }
 
-var file_auth_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_auth_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_auth_v1_auth_proto_goTypes = []any{
 	(*LoginRequest)(nil),                 // 0: auth.v1.LoginRequest
 	(*LoginResponse)(nil),                // 1: auth.v1.LoginResponse
@@ -1937,6 +2432,12 @@ var file_auth_v1_auth_proto_goTypes = []any{
 	(*GetUserResponse)(nil),              // 26: auth.v1.GetUserResponse
 	(*ChangeClientSecretRequest)(nil),    // 27: auth.v1.ChangeClientSecretRequest
 	(*ChangeClientSecretResponse)(nil),   // 28: auth.v1.ChangeClientSecretResponse
+	(*SubmitCredentialRequestReq)(nil),   // 29: auth.v1.SubmitCredentialRequestReq
+	(*SubmitCredentialRequestResp)(nil),  // 30: auth.v1.SubmitCredentialRequestResp
+	(*GetOnboardingStatusRequest)(nil),   // 31: auth.v1.GetOnboardingStatusRequest
+	(*GetOnboardingStatusResponse)(nil),  // 32: auth.v1.GetOnboardingStatusResponse
+	(*CompleteOnboardingRequest)(nil),    // 33: auth.v1.CompleteOnboardingRequest
+	(*CompleteOnboardingResponse)(nil),   // 34: auth.v1.CompleteOnboardingResponse
 }
 var file_auth_v1_auth_proto_depIdxs = []int32{
 	23, // 0: auth.v1.ListUsersResponse.users:type_name -> auth.v1.UserSummary
@@ -1954,22 +2455,28 @@ var file_auth_v1_auth_proto_depIdxs = []int32{
 	18, // 12: auth.v1.AuthService.IssueLoginNonce:input_type -> auth.v1.IssueLoginNonceRequest
 	20, // 13: auth.v1.AuthService.VerifyPKILogin:input_type -> auth.v1.VerifyPKILoginRequest
 	27, // 14: auth.v1.AuthService.ChangeClientSecret:input_type -> auth.v1.ChangeClientSecretRequest
-	1,  // 15: auth.v1.AuthService.Login:output_type -> auth.v1.LoginResponse
-	3,  // 16: auth.v1.AuthService.RefreshToken:output_type -> auth.v1.RefreshTokenResponse
-	5,  // 17: auth.v1.AuthService.RevokeToken:output_type -> auth.v1.RevokeTokenResponse
-	7,  // 18: auth.v1.AuthService.ValidateToken:output_type -> auth.v1.ValidateTokenResponse
-	9,  // 19: auth.v1.AuthService.RegisterParticipant:output_type -> auth.v1.RegisterParticipantResponse
-	11, // 20: auth.v1.AuthService.SignTransaction:output_type -> auth.v1.SignTransactionResponse
-	13, // 21: auth.v1.AuthService.GetKYCStatus:output_type -> auth.v1.GetKYCStatusResponse
-	15, // 22: auth.v1.AuthService.ProvisionParticipant:output_type -> auth.v1.ProvisionParticipantResponse
-	17, // 23: auth.v1.AuthService.OnboardParticipant:output_type -> auth.v1.OnboardParticipantResponse
-	24, // 24: auth.v1.AuthService.ListUsers:output_type -> auth.v1.ListUsersResponse
-	26, // 25: auth.v1.AuthService.GetUser:output_type -> auth.v1.GetUserResponse
-	19, // 26: auth.v1.AuthService.IssueLoginNonce:output_type -> auth.v1.IssueLoginNonceResponse
-	21, // 27: auth.v1.AuthService.VerifyPKILogin:output_type -> auth.v1.VerifyPKILoginResponse
-	28, // 28: auth.v1.AuthService.ChangeClientSecret:output_type -> auth.v1.ChangeClientSecretResponse
-	15, // [15:29] is the sub-list for method output_type
-	1,  // [1:15] is the sub-list for method input_type
+	29, // 15: auth.v1.AuthService.SubmitCredentialRequest:input_type -> auth.v1.SubmitCredentialRequestReq
+	31, // 16: auth.v1.AuthService.GetOnboardingStatus:input_type -> auth.v1.GetOnboardingStatusRequest
+	33, // 17: auth.v1.AuthService.CompleteOnboarding:input_type -> auth.v1.CompleteOnboardingRequest
+	1,  // 18: auth.v1.AuthService.Login:output_type -> auth.v1.LoginResponse
+	3,  // 19: auth.v1.AuthService.RefreshToken:output_type -> auth.v1.RefreshTokenResponse
+	5,  // 20: auth.v1.AuthService.RevokeToken:output_type -> auth.v1.RevokeTokenResponse
+	7,  // 21: auth.v1.AuthService.ValidateToken:output_type -> auth.v1.ValidateTokenResponse
+	9,  // 22: auth.v1.AuthService.RegisterParticipant:output_type -> auth.v1.RegisterParticipantResponse
+	11, // 23: auth.v1.AuthService.SignTransaction:output_type -> auth.v1.SignTransactionResponse
+	13, // 24: auth.v1.AuthService.GetKYCStatus:output_type -> auth.v1.GetKYCStatusResponse
+	15, // 25: auth.v1.AuthService.ProvisionParticipant:output_type -> auth.v1.ProvisionParticipantResponse
+	17, // 26: auth.v1.AuthService.OnboardParticipant:output_type -> auth.v1.OnboardParticipantResponse
+	24, // 27: auth.v1.AuthService.ListUsers:output_type -> auth.v1.ListUsersResponse
+	26, // 28: auth.v1.AuthService.GetUser:output_type -> auth.v1.GetUserResponse
+	19, // 29: auth.v1.AuthService.IssueLoginNonce:output_type -> auth.v1.IssueLoginNonceResponse
+	21, // 30: auth.v1.AuthService.VerifyPKILogin:output_type -> auth.v1.VerifyPKILoginResponse
+	28, // 31: auth.v1.AuthService.ChangeClientSecret:output_type -> auth.v1.ChangeClientSecretResponse
+	30, // 32: auth.v1.AuthService.SubmitCredentialRequest:output_type -> auth.v1.SubmitCredentialRequestResp
+	32, // 33: auth.v1.AuthService.GetOnboardingStatus:output_type -> auth.v1.GetOnboardingStatusResponse
+	34, // 34: auth.v1.AuthService.CompleteOnboarding:output_type -> auth.v1.CompleteOnboardingResponse
+	18, // [18:35] is the sub-list for method output_type
+	1,  // [1:18] is the sub-list for method input_type
 	1,  // [1:1] is the sub-list for extension type_name
 	1,  // [1:1] is the sub-list for extension extendee
 	0,  // [0:1] is the sub-list for field type_name
@@ -1986,7 +2493,7 @@ func file_auth_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auth_v1_auth_proto_rawDesc), len(file_auth_v1_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   29,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

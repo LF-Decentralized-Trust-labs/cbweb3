@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -52,17 +54,26 @@ func (s *complianceService) UpsertParticipant(ctx context.Context, req *complian
 		t := req.Participant.CertificateExpiry.AsTime()
 		certExpiry = &t
 	}
+	var popExpiry *time.Time
+	if req.Participant.PopNonceExpiresAt != nil {
+		t := req.Participant.PopNonceExpiresAt.AsTime()
+		popExpiry = &t
+	}
 	p := repository.Participant{
-		UserID:            req.Participant.UserId,
-		InstitutionName:   req.Participant.InstitutionName,
-		CNPJ:              req.Participant.Cnpj,
-		BankCode:          req.Participant.BankCode,
-		CountryCode:       req.Participant.CountryCode,
-		Role:              req.Participant.Role,
-		WalletAddress:     req.Participant.WalletAddress,
-		Status:            req.Participant.Status,
-		CertificateData:   req.Participant.CertificateData,
-		CertificateExpiry: certExpiry,
+		UserID:              req.Participant.UserId,
+		InstitutionName:     req.Participant.InstitutionName,
+		CNPJ:                req.Participant.Cnpj,
+		BankCode:            req.Participant.BankCode,
+		CountryCode:         req.Participant.CountryCode,
+		Role:                req.Participant.Role,
+		WalletAddress:       req.Participant.WalletAddress,
+		Status:              req.Participant.Status,
+		CertificateData:     req.Participant.CertificateData,
+		CertificateExpiry:   certExpiry,
+		BlockchainPubKeyHex: req.Participant.BlockchainPubKeyHex,
+		CsrPem:              req.Participant.CsrPem,
+		PopNonce:            req.Participant.PopNonce,
+		PopNonceExpiresAt:   popExpiry,
 	}
 	if p.Status == "" {
 		p.Status = string(domain.StatusPending)
@@ -278,9 +289,17 @@ func (s *complianceService) SignParticipantCSR(ctx context.Context, req *complia
 
 // --- Governance ---
 
-// ApproveKYC sets the participant status to ACTIVE in PostgreSQL and calls
-// setParticipant(wallet, role, true) on the ParticipantRegistry contract.
-// This is the canonical "approve" operation for the PKI-based login flow.
+// popNonceTTL is the time-to-live for Proof of Possession nonces (72 hours).
+// The commercial bank discovers the nonce via polling and must complete
+// onboarding within this window.
+const popNonceTTL = 72 * time.Hour
+
+// ApproveKYC sets the participant status to KYC_APPROVED and generates a PoP
+// nonce for the commercial bank to sign with its secp256k1 key.
+//
+// Unlike the legacy flow, ApproveKYC no longer activates the participant
+// on-chain or sets status to ACTIVE. On-chain registration happens in
+// CompleteOnboarding after the bank proves wallet ownership.
 func (s *complianceService) ApproveKYC(ctx context.Context, req *compliancv1.ApproveKYCRequest) (*compliancv1.ApproveKYCResponse, error) {
 	if req.Subject == "" {
 		return nil, status.Error(codes.InvalidArgument, "subject is required")
@@ -293,35 +312,40 @@ func (s *complianceService) ApproveKYC(ctx context.Context, req *compliancv1.App
 	if !found {
 		return nil, status.Errorf(codes.NotFound, "participant %q not found", req.Subject)
 	}
-	if p.WalletAddress == "" {
-		return nil, status.Errorf(codes.FailedPrecondition, "participant %q has no wallet address", req.Subject)
+
+	if p.Status != string(domain.StatusCredentialRequested) && p.Status != string(domain.StatusPending) {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"participant %q has status %q; expected CREDENTIAL_REQUESTED or PENDING", req.Subject, p.Status)
 	}
 
-	// Activate on-chain first; the DB update is the commit point.
-	txHash, err := s.blockchain.SetParticipant(ctx, p.WalletAddress, p.Role, true)
-	if err != nil {
-		log.Printf("WARN: ApproveKYC: on-chain activation failed for %s: %v", req.Subject, err)
-		txHash = ""
+	// Generate 32-byte PoP nonce for the commercial bank to sign with secp256k1.
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return nil, status.Errorf(codes.Internal, "generate pop nonce: %v", err)
 	}
+	popNonce := hex.EncodeToString(raw)
+	expiresAt := time.Now().UTC().Add(popNonceTTL)
 
-	p.Status = string(domain.StatusActive)
+	p.Status = string(domain.StatusKYCApproved)
+	p.PopNonce = popNonce
+	p.PopNonceExpiresAt = &expiresAt
+
 	if err := s.repo.UpsertParticipant(ctx, p); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	detailsJSON, _ := json.Marshal(map[string]string{
-		"status":  string(domain.StatusActive),
-		"reason":  req.Reason,
-		"tx_hash": txHash,
+		"status": string(domain.StatusKYCApproved),
+		"reason": req.Reason,
 	})
 	s.emitAudit(ctx, "APPROVE_KYC", req.ActorSubject, "", req.Subject,
 		correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS",
 		string(domain.CategoryCredential), string(domain.SeverityInfo), string(detailsJSON))
 
 	return &compliancv1.ApproveKYCResponse{
-		Subject: req.Subject,
-		Status:  string(domain.StatusActive),
-		TxHash:  txHash,
+		Subject:  req.Subject,
+		Status:   string(domain.StatusKYCApproved),
+		PopNonce: popNonce,
 	}, nil
 }
 
@@ -508,18 +532,24 @@ func boolStr(b bool) string {
 
 func participantToProto(p repository.Participant) *compliancv1.Participant {
 	result := &compliancv1.Participant{
-		UserId:          p.UserID,
-		InstitutionName: p.InstitutionName,
-		Cnpj:            p.CNPJ,
-		BankCode:        p.BankCode,
-		CountryCode:     p.CountryCode,
-		Role:            p.Role,
-		WalletAddress:   p.WalletAddress,
-		Status:          p.Status,
-		CertificateData: p.CertificateData,
+		UserId:              p.UserID,
+		InstitutionName:     p.InstitutionName,
+		Cnpj:                p.CNPJ,
+		BankCode:            p.BankCode,
+		CountryCode:         p.CountryCode,
+		Role:                p.Role,
+		WalletAddress:       p.WalletAddress,
+		Status:              p.Status,
+		CertificateData:     p.CertificateData,
+		BlockchainPubKeyHex: p.BlockchainPubKeyHex,
+		CsrPem:              p.CsrPem,
+		PopNonce:            p.PopNonce,
 	}
 	if p.CertificateExpiry != nil {
 		result.CertificateExpiry = timestamppb.New(*p.CertificateExpiry)
+	}
+	if p.PopNonceExpiresAt != nil {
+		result.PopNonceExpiresAt = timestamppb.New(*p.PopNonceExpiresAt)
 	}
 	return result
 }

@@ -27,6 +27,9 @@ type CertRequest struct {
 	Role string
 	// ValidYears is the certificate validity period in years (default: 1).
 	ValidYears int
+	// WalletAddress, when non-empty, is embedded as a custom X.509 extension
+	// (OID 1.3.6.1.4.1.<PEN>.1.1) binding this certificate to a blockchain address.
+	WalletAddress string
 }
 
 // IssuedCert contains the issued certificate and the newly generated key pair.
@@ -80,6 +83,14 @@ func IssueCertificate(caCertPEM, caKeyPEM string, req CertRequest) (IssuedCert, 
 		IsCA:                  false,
 	}
 
+	if req.WalletAddress != "" {
+		ext, extErr := WalletExtension(req.WalletAddress)
+		if extErr != nil {
+			return IssuedCert{}, fmt.Errorf("pki: wallet extension: %w", extErr)
+		}
+		template.ExtraExtensions = append(template.ExtraExtensions, ext)
+	}
+
 	certDER, err := x509.CreateCertificate(rand.Reader, template, caCert, &privKey.PublicKey, caKey)
 	if err != nil {
 		return IssuedCert{}, fmt.Errorf("pki: create certificate: %w", err)
@@ -96,11 +107,17 @@ func IssueCertificate(caCertPEM, caKeyPEM string, req CertRequest) (IssuedCert, 
 	return IssuedCert{CertPEM: certPEM, PrivKeyPEM: privKeyPEM}, nil
 }
 
+// SignCSROptions holds optional parameters for CSR signing.
+type SignCSROptions struct {
+	// WalletAddress, when non-empty, is embedded as a custom X.509 extension.
+	WalletAddress string
+}
+
 // SignCSR signs a PKCS#10 Certificate Signing Request using the provided CA.
 // The subject, organization, and public key from the CSR are preserved; the CA
 // enforces the validity period. Returns an IssuedCert with an empty PrivKeyPEM
 // because the participant retains their own private key.
-func SignCSR(caCertPEM, caKeyPEM, csrPEM string, validYears int) (IssuedCert, error) {
+func SignCSR(caCertPEM, caKeyPEM, csrPEM string, validYears int, opts ...SignCSROptions) (IssuedCert, error) {
 	caCert, err := parseCertPEM(caCertPEM)
 	if err != nil {
 		return IssuedCert{}, fmt.Errorf("pki: parse CA cert: %w", err)
@@ -144,6 +161,14 @@ func SignCSR(caCertPEM, caKeyPEM, csrPEM string, validYears int) (IssuedCert, er
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  false,
+	}
+
+	if len(opts) > 0 && opts[0].WalletAddress != "" {
+		ext, extErr := WalletExtension(opts[0].WalletAddress)
+		if extErr != nil {
+			return IssuedCert{}, fmt.Errorf("pki: wallet extension: %w", extErr)
+		}
+		template.ExtraExtensions = append(template.ExtraExtensions, ext)
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, caCert, csr.PublicKey, caKey)

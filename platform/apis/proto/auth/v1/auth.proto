@@ -200,6 +200,64 @@ message ChangeClientSecretRequest {
 
 message ChangeClientSecretResponse {}
 
+// ─── Credential request (Phase 1: Commercial Bank → Central Bank) ─────────
+
+message SubmitCredentialRequestReq {
+  // PKCS#10 CSR signed with the bank's P-256 key.
+  string csr_pem = 1;
+  // Hex-encoded uncompressed secp256k1 public key (04‖X‖Y, 65 bytes).
+  string blockchain_pub_key_hex = 2;
+  string institution_name = 3;
+  string cnpj = 4;
+  string bank_code = 5;
+  string country = 6;
+  string role = 7;
+  string email = 8;
+  string username = 9;
+}
+
+message SubmitCredentialRequestResp {
+  string request_id = 1;
+  string user_id = 2;
+  string wallet_address = 3;
+  string status = 4; // CREDENTIAL_REQUESTED
+}
+
+// ─── Onboarding status polling (Phase 2.5) ────────────────────────────────
+
+message GetOnboardingStatusRequest {
+  string request_id = 1;
+}
+
+message GetOnboardingStatusResponse {
+  string request_id = 1;
+  string user_id = 2;
+  string status = 3; // CREDENTIAL_REQUESTED | KYC_APPROVED | ACTIVE
+  // pop_nonce is only populated when status = KYC_APPROVED.
+  string pop_nonce = 4;
+  string wallet_address = 5;
+}
+
+// ─── Complete onboarding (Phase 3: wallet bind + PoP) ─────────────────────
+
+message CompleteOnboardingRequest {
+  string request_id = 1;
+  string user_id = 2;
+  // Hex-encoded 65-byte recoverable secp256k1 signature of SHA-256(pop_nonce).
+  string pop_signature_hex = 3;
+  // Hex-encoded uncompressed secp256k1 public key (must match credential request).
+  string blockchain_pub_key_hex = 4;
+}
+
+message CompleteOnboardingResponse {
+  string user_id = 1;
+  string wallet_address = 2;
+  string cert_pem = 3;
+  string tx_hash = 4;
+  string client_secret = 5;
+  string status = 6; // ACTIVE
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────
 
 service AuthService {
@@ -211,10 +269,16 @@ service AuthService {
   rpc SignTransaction(SignTransactionRequest) returns (SignTransactionResponse);
   rpc GetKYCStatus(GetKYCStatusRequest) returns (GetKYCStatusResponse);
   rpc ProvisionParticipant(ProvisionParticipantRequest) returns (ProvisionParticipantResponse);
+  // Deprecated: use SubmitCredentialRequest + CompleteOnboarding instead.
   rpc OnboardParticipant(OnboardParticipantRequest) returns (OnboardParticipantResponse);
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
   rpc GetUser(GetUserRequest) returns (GetUserResponse);
   rpc IssueLoginNonce(IssueLoginNonceRequest) returns (IssueLoginNonceResponse);
   rpc VerifyPKILogin(VerifyPKILoginRequest) returns (VerifyPKILoginResponse);
   rpc ChangeClientSecret(ChangeClientSecretRequest) returns (ChangeClientSecretResponse);
+
+  // New onboarding flow (3-phase PKI + Blockchain)
+  rpc SubmitCredentialRequest(SubmitCredentialRequestReq) returns (SubmitCredentialRequestResp);
+  rpc GetOnboardingStatus(GetOnboardingStatusRequest) returns (GetOnboardingStatusResponse);
+  rpc CompleteOnboarding(CompleteOnboardingRequest) returns (CompleteOnboardingResponse);
 }
