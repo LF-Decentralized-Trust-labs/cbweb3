@@ -11,11 +11,12 @@ import (
 
 // Dependencies groups handlers and validators required by route registration.
 type Dependencies struct {
-	AuthHandler       *handlers.AuthHandler
-	ComplianceHandler *handlers.ComplianceHandler
-	GovernanceHandler *handlers.GovernanceHandler
-	OnboardingHandler *handlers.OnboardingHandler
-	AuthProvider      interfaces.IAuthProvider
+	AuthHandler            *handlers.AuthHandler
+	ComplianceHandler      *handlers.ComplianceHandler
+	GovernanceHandler      *handlers.GovernanceHandler
+	OnboardingHandler      *handlers.OnboardingHandler      // Central Bank: processes onboarding locally
+	OnboardingProxyHandler *handlers.OnboardingProxyHandler  // Commercial Bank: proxies onboarding to CB
+	AuthProvider           interfaces.IAuthProvider
 }
 
 // Setup registers all gateway HTTP routes and middleware.
@@ -42,11 +43,18 @@ func Setup(app *fiber.App, deps Dependencies) {
 	authGroup.Get("/me", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.Me)
 
 	// --- Onboarding (3-phase PKI + Blockchain) ---
-	if deps.OnboardingHandler != nil {
-		onboardGroup := app.Group("/api/v1/onboarding")
-		onboardGroup.Post("/credential-request", deps.OnboardingHandler.SubmitCredentialRequest)
-		onboardGroup.Get("/status/:requestId", deps.OnboardingHandler.GetOnboardingStatus)
-		onboardGroup.Post("/complete", deps.OnboardingHandler.CompleteOnboarding)
+	if deps.OnboardingProxyHandler != nil {
+		// Commercial Bank: protected proxy routes forwarding to the Central Bank.
+		g := app.Group("/api/v1/onboarding", middleware.RequireCookieAuth(deps.AuthProvider))
+		g.Post("/initiate", deps.OnboardingProxyHandler.InitiateCredentialRequest)
+		g.Get("/status/:requestId", deps.OnboardingProxyHandler.GetOnboardingStatus)
+		g.Post("/complete", deps.OnboardingProxyHandler.CompleteOnboarding)
+	} else if deps.OnboardingHandler != nil {
+		// Central Bank: public endpoints that process onboarding requests.
+		g := app.Group("/api/v1/onboarding")
+		g.Post("/credential-request", deps.OnboardingHandler.SubmitCredentialRequest)
+		g.Get("/status/:requestId", deps.OnboardingHandler.GetOnboardingStatus)
+		g.Post("/complete", deps.OnboardingHandler.CompleteOnboarding)
 	}
 
 	// --- Compliance (KYC status, AML gate, onboarding, provisioning) ---

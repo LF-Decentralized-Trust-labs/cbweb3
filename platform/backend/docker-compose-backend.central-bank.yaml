@@ -12,6 +12,8 @@ services:
     environment:
       COMPLIANCE_GRPC_PORT: "9093"
       POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_central_bank}?sslmode=disable"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
     ports:
       - "39093:9093"
     networks:
@@ -73,6 +75,7 @@ services:
       - compliance-central-bank
     networks:
       - cbweb3_backend_central_bank
+      - cbweb3_network
 
 networks:
   cbweb3_backend_central_bank:

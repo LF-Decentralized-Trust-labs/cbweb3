@@ -38,7 +38,19 @@ func New(cfg config.Config) (*fiber.App, error) {
 
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure)
 	complianceHandler := handlers.NewComplianceHandler(identityManager)
-	onboardingHandler := handlers.NewOnboardingHandler(identityManager)
+
+	deps := router.Dependencies{
+		AuthHandler:       authHandler,
+		ComplianceHandler: complianceHandler,
+		GovernanceHandler: governanceHandler,
+		AuthProvider:      identityGRPCProvider,
+	}
+
+	if cfg.CentralBankAPIURL != "" {
+		deps.OnboardingProxyHandler = handlers.NewOnboardingProxyHandler(cfg.CentralBankAPIURL)
+	} else {
+		deps.OnboardingHandler = handlers.NewOnboardingHandler(identityManager)
+	}
 
 	fiberApp := fiber.New(
 		fiber.Config{
@@ -46,13 +58,7 @@ func New(cfg config.Config) (*fiber.App, error) {
 			AppName:   "api-gateway",
 		},
 	)
-	router.Setup(fiberApp, router.Dependencies{
-		AuthHandler:       authHandler,
-		ComplianceHandler: complianceHandler,
-		GovernanceHandler: governanceHandler,
-		OnboardingHandler: onboardingHandler,
-		AuthProvider:      identityGRPCProvider,
-	})
+	router.Setup(fiberApp, deps)
 
 	return fiberApp, nil
 }

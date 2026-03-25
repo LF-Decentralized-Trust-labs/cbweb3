@@ -59,6 +59,12 @@ type ParticipantFilter struct {
 	Status string
 }
 
+// SignedCSR contains the certificate produced by signing a participant's CSR.
+type SignedCSR struct {
+	CertPEM   string
+	ExpiresAt string
+}
+
 // Client defines the compliance gRPC operations used by the identity service.
 type Client interface {
 	UpsertParticipant(ctx context.Context, p Participant) error
@@ -66,6 +72,7 @@ type Client interface {
 	ListParticipants(ctx context.Context, filter ParticipantFilter) ([]Participant, error)
 	CreateAuditLog(ctx context.Context, entry AuditEntry) error
 	IssueParticipantCertificate(ctx context.Context, userID, role, institutionName, cnpj string) (IssuedCertificate, error)
+	SignParticipantCSR(ctx context.Context, csrPem, userID, role, institutionName, cnpj string) (SignedCSR, error)
 	ManageParticipantStatus(ctx context.Context, subject, status, reason string) error
 }
 
@@ -205,6 +212,23 @@ func (c *grpcClient) ListParticipants(ctx context.Context, filter ParticipantFil
 		})
 	}
 	return result, nil
+}
+
+func (c *grpcClient) SignParticipantCSR(ctx context.Context, csrPem, userID, role, institutionName, cnpj string) (SignedCSR, error) {
+	resp, err := c.cc.SignParticipantCSR(ctx, &compliancv1.SignParticipantCSRRequest{
+		CsrPem:          csrPem,
+		UserId:          userID,
+		Role:            role,
+		InstitutionName: institutionName,
+		Cnpj:            cnpj,
+	})
+	if err != nil {
+		return SignedCSR{}, err
+	}
+	return SignedCSR{
+		CertPEM:   resp.CertPem,
+		ExpiresAt: resp.ExpiresAt,
+	}, nil
 }
 
 func (c *grpcClient) ManageParticipantStatus(ctx context.Context, subject, status, reason string) error {

@@ -177,11 +177,14 @@ func (s *identityService) CompleteOnboarding(ctx context.Context, req *authv1.Co
 		return nil, status.Errorf(codes.InvalidArgument, "public key mismatch: %v", err)
 	}
 
-	// 5. Sign the CSR to issue certificate with wallet extension.
-	certResult, certErr := s.compliance.IssueParticipantCertificate(ctx,
-		participant.UserID, participant.Role, participant.InstitutionName, participant.CNPJ)
+	// 5. Sign the stored CSR to issue certificate preserving the participant's public key.
+	if participant.CsrPem == "" {
+		return nil, status.Error(codes.FailedPrecondition, "no CSR found for participant; re-submit credential request")
+	}
+	certResult, certErr := s.compliance.SignParticipantCSR(ctx,
+		participant.CsrPem, participant.UserID, participant.Role, participant.InstitutionName, participant.CNPJ)
 	if certErr != nil {
-		return nil, status.Errorf(codes.Internal, "complete onboarding: issue certificate: %v", certErr)
+		return nil, status.Errorf(codes.Internal, "complete onboarding: sign CSR: %v", certErr)
 	}
 
 	// 6. Register on-chain.

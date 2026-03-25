@@ -12,6 +12,8 @@ services:
     environment:
       COMPLIANCE_GRPC_PORT: "9093"
       POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_bank_b}?sslmode=disable"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
     ports:
       - "29093:9093"
     networks:
@@ -64,6 +66,7 @@ services:
       AUTH_GRPC_ADDR: auth-bank-b:9091
       COMPLIANCE_GRPC_ADDR: compliance-bank-b:9093
       PKI_DIR: /workspace/backend/config/pki
+      CENTRAL_BANK_API_URL: "http://api-gateway-central-bank:8080"
     volumes:
       - ./config/pki:/workspace/backend/config/pki
     ports:
@@ -73,6 +76,7 @@ services:
       - compliance-bank-b
     networks:
       - cbweb3_backend_bank_b
+      - cbweb3_network
 
 networks:
   cbweb3_backend_bank_b:

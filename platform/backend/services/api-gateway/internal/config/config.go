@@ -15,6 +15,7 @@ type Config struct {
 	AuthGRPCAddr       string
 	ComplianceGRPCAddr string // compliance-orchestrator address (optional; enables governance endpoints)
 	CookieSecure       bool   // true for HTTPS (Secure flag); false for plain HTTP
+	CentralBankAPIURL  string // when set, this gateway acts as a commercial bank and proxies onboarding calls to the CB
 }
 
 // Load reads environment variables and returns a fully populated Config.
@@ -25,6 +26,7 @@ func Load() Config {
 		AuthGRPCAddr:       getEnv("AUTH_GRPC_ADDR", "localhost:9091"),
 		ComplianceGRPCAddr: getEnv("COMPLIANCE_GRPC_ADDR", "localhost:9093"),
 		CookieSecure:       getEnvBool("COOKIE_SECURE", false),
+		CentralBankAPIURL:  getEnv("CENTRAL_BANK_API_URL", ""),
 	}
 }
 

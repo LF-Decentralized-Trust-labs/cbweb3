@@ -79,6 +79,9 @@ func (m *mockComplianceValidate) CreateAuditLog(_ context.Context, _ compliancec
 func (m *mockComplianceValidate) IssueParticipantCertificate(_ context.Context, _, _, _, _ string) (complianceclient.IssuedCertificate, error) {
 	return complianceclient.IssuedCertificate{}, errors.New("unexpected")
 }
+func (m *mockComplianceValidate) SignParticipantCSR(_ context.Context, _, _, _, _, _ string) (complianceclient.SignedCSR, error) {
+	return complianceclient.SignedCSR{}, errors.New("unexpected")
+}
 func (m *mockComplianceValidate) ManageParticipantStatus(_ context.Context, _, _, _ string) error {
 	return errors.New("unexpected")
 }
@@ -114,6 +117,12 @@ func (s *stubRegistry) IsMemberAuthorized(_ context.Context, _ string) (bool, er
 	return false, nil
 }
 func (s *stubRegistry) GetMemberRole(_ context.Context, _ string) (uint8, error) { return 0, nil }
+func (s *stubRegistry) GetCertFingerprint(_ context.Context, _ string) ([32]byte, error) {
+	return [32]byte{}, nil
+}
+func (s *stubRegistry) SetCertFingerprint(_ context.Context, _ string, _ [32]byte) (string, error) {
+	return "", nil
+}
 
 // ---------------------------------------------------------------------------
 // Helper

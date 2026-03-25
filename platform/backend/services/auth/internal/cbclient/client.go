@@ -20,7 +20,6 @@ import (
 // Config holds the connection parameters for the central bank API.
 type Config struct {
 	BaseURL string
-	APIKey  string
 	Timeout time.Duration
 }
 
@@ -28,7 +27,6 @@ type Config struct {
 type Client struct {
 	httpClient *http.Client
 	baseURL    string
-	apiKey     string
 }
 
 // New creates a Client from the given Config.
@@ -40,7 +38,6 @@ func New(cfg Config) *Client {
 	return &Client{
 		httpClient: &http.Client{Timeout: timeout},
 		baseURL:    cfg.BaseURL,
-		apiKey:     cfg.APIKey,
 	}
 }
 
@@ -130,9 +127,6 @@ func (c *Client) post(ctx context.Context, path string, body, target interface{}
 		return fmt.Errorf("cbclient: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		httpReq.Header.Set("X-API-Key", c.apiKey)
-	}
 
 	return c.doRequest(httpReq, target)
 }
@@ -141,9 +135,6 @@ func (c *Client) get(ctx context.Context, path string, target interface{}) error
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("cbclient: build request: %w", err)
-	}
-	if c.apiKey != "" {
-		httpReq.Header.Set("X-API-Key", c.apiKey)
 	}
 
 	return c.doRequest(httpReq, target)
