@@ -7,14 +7,14 @@ export const registryApi = {
     if (useMocks) {
       return mockDb.listParticipants();
     }
-    const response = await httpClient.get<Participant[]>("/api/v1/compliance/registry");
+    const response = await httpClient.get<Participant[]>("/compliance/registry");
     return response.data;
   },
   issueCredential: async (payload: IssueCredentialPayload): Promise<CredentialIssuanceResult> => {
     if (useMocks) {
       return mockDb.issueCredential(payload);
     }
-    const response = await httpClient.post<CredentialIssuanceResult>("/api/v1/compliance/kyc/issue-credential", payload);
+    const response = await httpClient.post<CredentialIssuanceResult>("/compliance/kyc/issue-credential", payload);
     return response.data;
   },
 };

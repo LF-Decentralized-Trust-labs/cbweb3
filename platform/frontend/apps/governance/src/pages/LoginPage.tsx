@@ -20,8 +20,10 @@ import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores";
 
 const schema = z.object({
-  username: z.string().min(3),
-  password: z.string().min(6),
+  clientId: z.string().min(3, "Client ID must be at least 3 characters"),
+  clientSecret: z
+    .string()
+    .min(6, "Client Secret must be at least 6 characters"),
 });
 
 type LoginForm = z.infer<typeof schema>;
@@ -33,8 +35,8 @@ export function LoginPage() {
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
     defaultValues: {
-      username: "governance.admin",
-      password: "GovAdmin2026!",
+      clientId: "",
+      clientSecret: "",
     },
   });
 
@@ -48,7 +50,7 @@ export function LoginPage() {
   }, [isAuthenticated, navigate]);
 
   const onSubmit = form.handleSubmit(async (values) => {
-    await login(values.username, values.password);
+    await login(values.clientId, values.clientSecret);
   });
 
   return (
@@ -58,9 +60,12 @@ export function LoginPage() {
           <Badge variant="secondary" className="mb-4 w-fit">
             LACnet · Governance
           </Badge>
-          <h1 className="text-3xl font-semibold tracking-tight">Central Bank Governance Portal</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">
+            Central Bank Governance Portal
+          </h1>
           <p className="mt-3 max-w-md text-sm text-muted-foreground">
-            Execute sovereign controls for participant admission, emergency interventions, and policy parameters.
+            Execute sovereign controls for participant admission, emergency
+            interventions, and policy parameters.
           </p>
 
           <div className="mt-8 grid gap-4">
@@ -68,21 +73,28 @@ export function LoginPage() {
               <ShieldCheck className="mt-0.5 h-5 w-5 text-primary" />
               <div>
                 <p className="text-sm font-medium">Highest RBAC tier</p>
-                <p className="text-xs text-muted-foreground">Access restricted to CENTRAL_BANK_ADMIN operators.</p>
+                <p className="text-xs text-muted-foreground">
+                  Access restricted to ROLE_GOVERNANCE operators.
+                </p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-lg border border-border/80 bg-background/80 p-4">
               <Siren className="mt-0.5 h-5 w-5 text-primary" />
               <div>
                 <p className="text-sm font-medium">Emergency controls</p>
-                <p className="text-xs text-muted-foreground">Circuit breaker and account freeze actions are confirmation-gated.</p>
+                <p className="text-xs text-muted-foreground">
+                  Circuit breaker and account freeze actions are
+                  confirmation-gated.
+                </p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-lg border border-border/80 bg-background/80 p-4">
               <LockKeyhole className="mt-0.5 h-5 w-5 text-primary" />
               <div>
                 <p className="text-sm font-medium">Immutable accountability</p>
-                <p className="text-xs text-muted-foreground">Every governance action is recorded in auditable logs.</p>
+                <p className="text-xs text-muted-foreground">
+                  Every governance action is recorded in auditable logs.
+                </p>
               </div>
             </div>
           </div>
@@ -94,36 +106,59 @@ export function LoginPage() {
               <Building2 className="h-5 w-5" />
             </div>
             <CardTitle>Sign in to Governance Portal</CardTitle>
-            <CardDescription>Use institutional credentials to access sovereign controls.</CardDescription>
+            <CardDescription>
+              Use institutional credentials to access sovereign controls.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
-                <Input id="username" {...form.register("username")} autoComplete="username" />
-                {form.formState.errors.username ? <p className="text-xs text-destructive">{form.formState.errors.username.message}</p> : null}
+                <Label htmlFor="clientId">Client ID</Label>
+                <Input
+                  id="clientId"
+                  {...form.register("clientId")}
+                  autoComplete="username"
+                />
+                {form.formState.errors.clientId ? (
+                  <p className="text-xs text-destructive">
+                    {form.formState.errors.clientId.message}
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input id="password" type="password" {...form.register("password")} autoComplete="current-password" />
-                {form.formState.errors.password ? <p className="text-xs text-destructive">{form.formState.errors.password.message}</p> : null}
+                <Label htmlFor="clientSecret">Client Secret</Label>
+                <Input
+                  id="clientSecret"
+                  type="password"
+                  {...form.register("clientSecret")}
+                  autoComplete="current-password"
+                />
+                {form.formState.errors.clientSecret ? (
+                  <p className="text-xs text-destructive">
+                    {form.formState.errors.clientSecret.message}
+                  </p>
+                ) : null}
               </div>
 
-              <div className="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-                Demo credentials are prefilled for local structural testing.
-              </div>
+              {error ? (
+                <p className="text-sm text-destructive">{error}</p>
+              ) : null}
 
-              {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-              <Button type="submit" className="w-full" disabled={status === "loading"}>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={status === "loading"}
+              >
                 {status === "loading" ? "Signing in..." : "Sign in"}
               </Button>
             </form>
 
             <Separator className="my-4" />
 
-            <p className="text-center text-xs text-muted-foreground">Privileged environment · Governance-only operations</p>
+            <p className="text-center text-xs text-muted-foreground">
+              Privileged environment · Governance-only operations
+            </p>
           </CardContent>
         </Card>
       </div>

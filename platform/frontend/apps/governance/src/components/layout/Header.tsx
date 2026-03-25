@@ -4,7 +4,7 @@ import { useAuth, useCircuitBreaker } from "../../hooks";
 
 export function Header() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { profile, logout } = useAuth();
   const { circuitBreaker } = useCircuitBreaker();
 
   const isHalted = circuitBreaker?.state === "HALTED";
@@ -25,7 +25,7 @@ export function Header() {
           <Badge variant={isHalted ? "destructive" : "default"}>
             Circuit Breaker: {circuitBreaker?.state ?? "LIVE"}
           </Badge>
-          <span className="text-xs text-muted-foreground">{user?.displayName ?? user?.username}</span>
+          <span className="text-xs text-muted-foreground">{profile?.subject ?? "Unknown operator"}</span>
           <Button variant="outline" size="sm" onClick={() => void onLogout()}>
             Sign out
           </Button>

@@ -14,7 +14,7 @@ import { useState } from "react";
 import { useAuth } from "../hooks";
 
 export function SettingsPage() {
-  const { user } = useAuth();
+  const { profile } = useAuth();
   const [timezone, setTimezone] = useState("America/Sao_Paulo");
   const [dateFormat, setDateFormat] = useState("dd/MM/yyyy HH:mm");
   const [soundAlerts, setSoundAlerts] = useState(true);
@@ -28,8 +28,8 @@ export function SettingsPage() {
       <CardContent className="space-y-4">
         <div className="rounded-md border border-border p-3 text-sm">
           <p className="font-medium">Current Session</p>
-          <p className="text-muted-foreground">User: {user?.username ?? "—"}</p>
-          <p className="text-muted-foreground">Role: {user?.role ?? "—"}</p>
+          <p className="text-muted-foreground">User: {profile?.subject ?? "—"}</p>
+          <p className="text-muted-foreground">Role: {profile?.roles.join(", ") ?? "—"}</p>
         </div>
 
         <div className="space-y-2">

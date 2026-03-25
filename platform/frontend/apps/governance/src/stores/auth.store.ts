@@ -1,41 +1,43 @@
 import { create } from "zustand";
 import { authApi } from "../services/api";
-import type { AsyncStatus, GovernanceUser } from "../types";
+import type { AsyncStatus, UserProfile } from "../types";
 
 type AuthState = {
-  user: GovernanceUser | null;
-  token: string | null;
+  profile: UserProfile | null;
   isAuthenticated: boolean;
   initialized: boolean;
   status: AsyncStatus;
   error: string | null;
-  login: (username: string, password: string) => Promise<void>;
+  login: (clientId: string, clientSecret: string) => Promise<void>;
   logout: () => Promise<void>;
+  forceLogout: () => void;
   checkSession: () => Promise<void>;
 };
 
 export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
-  token: null,
+  profile: null,
   isAuthenticated: false,
   initialized: false,
   status: "idle",
   error: null,
-  login: async (username, password) => {
+  login: async (clientId, clientSecret) => {
     set({ status: "loading", error: null });
     try {
-      const response = await authApi.login(username, password);
+      const loginResponse = await authApi.login(clientId, clientSecret);
+      if ("nonce" in loginResponse) {
+        throw new Error("PKI authentication is required for this account and is not available in Governance login.");
+      }
+      const profile = await authApi.me();
       set({
-        user: response.user,
-        token: response.token,
+        profile,
         isAuthenticated: true,
         initialized: true,
         status: "idle",
+        error: null,
       });
     } catch (error) {
       set({
-        user: null,
-        token: null,
+        profile: null,
         isAuthenticated: false,
         initialized: true,
         status: "error",
@@ -44,10 +46,34 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
   logout: async () => {
-    await authApi.logout();
-    set({ user: null, token: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
+    try {
+      await authApi.logout();
+    } finally {
+      set({ profile: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
+    }
+  },
+  forceLogout: () => {
+    set({ profile: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
   },
   checkSession: async () => {
-    set({ user: null, token: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
+    set({ status: "loading", error: null });
+    try {
+      const profile = await authApi.me();
+      set({
+        profile,
+        isAuthenticated: true,
+        initialized: true,
+        status: "idle",
+        error: null,
+      });
+    } catch {
+      set({
+        profile: null,
+        isAuthenticated: false,
+        initialized: true,
+        status: "idle",
+        error: null,
+      });
+    }
   },
 }));

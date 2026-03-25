@@ -1,16 +1,19 @@
-import type { LoginResponse } from "../../types";
-import { mockDb } from "../mocks/mock-db";
-import { httpClient, useMocks } from "./http-client";
+import type { LoginResponse, UserProfile } from "../../types";
+import { httpClient } from "./http-client";
 
 export const authApi = {
-  login: async (username: string, password: string): Promise<LoginResponse> => {
-    if (useMocks) {
-      return mockDb.login(username, password);
-    }
-    const response = await httpClient.post<LoginResponse>("/api/v1/auth/login", { username, password });
+  login: async (clientId: string, clientSecret: string): Promise<LoginResponse> => {
+    const response = await httpClient.post<LoginResponse>("/auth/login", { clientId, clientSecret });
     return response.data;
   },
+  me: async (): Promise<UserProfile> => {
+    const response = await httpClient.get<UserProfile>("/auth/me");
+    return response.data;
+  },
+  refresh: async () => {
+    await httpClient.post("/auth/refresh", {});
+  },
   logout: async () => {
-    return Promise.resolve();
+    await httpClient.post("/auth/logout", {});
   },
 };

@@ -37,21 +37,6 @@ const appendAudit = (entry: Omit<GovernanceAuditEntry, "id" | "createdAt">) => {
 };
 
 export const mockDb = {
-  login: async (username: string, password: string) => {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    if (username !== "governance.admin" || password !== "GovAdmin2026!") {
-      throw new Error("Invalid credentials");
-    }
-    return {
-      token: "mock-governance-token",
-      user: {
-        id: "gov-001",
-        username,
-        displayName: "Governance Committee Operator",
-        role: "CENTRAL_BANK_ADMIN" as const,
-      },
-    };
-  },
   listParticipants: async () => {
     await new Promise((resolve) => setTimeout(resolve, 160));
     return participants;

@@ -7,7 +7,7 @@ export const auditApi = {
     if (useMocks) {
       return mockDb.listAuditLogs(filter);
     }
-    const response = await httpClient.get<GovernanceAuditEntry[]>("/api/v1/compliance/audit/logs", {
+    const response = await httpClient.get<GovernanceAuditEntry[]>("/compliance/audit/logs", {
       params: filter,
     });
     return response.data;

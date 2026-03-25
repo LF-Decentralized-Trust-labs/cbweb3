@@ -1,23 +1,27 @@
-export type GovernanceRole = "CENTRAL_BANK_ADMIN";
-
-export type GovernanceUser = {
-  id: string;
-  username: string;
-  displayName: string;
-  role: GovernanceRole;
-};
-
-export type AuthClaims = {
-  sub: string;
-  role: GovernanceRole;
-};
-
 export type LoginRequest = {
-  username: string;
-  password: string;
+  clientId: string;
+  clientSecret: string;
 };
 
-export type LoginResponse = {
-  token: string;
-  user: GovernanceUser;
+export type TokenResponse = {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+};
+
+export type PkiChallengeResponse = {
+  nonce: string;
+};
+
+export type LoginResponse = TokenResponse | PkiChallengeResponse;
+
+export type UserProfile = {
+  subject: string;
+  issuer: string;
+  roles: string[];
+  wallet?: string;
+  country?: string;
+  bankId?: string;
+  privacyGroup?: string;
 };
