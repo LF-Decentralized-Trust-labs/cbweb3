@@ -1,79 +1,80 @@
 services:
-  compliance-spoke-b:
+  compliance-bank-b:
     build:
       context: .
       dockerfile: services/compliance/Dockerfile
     image: cbweb3/compliance:local
     pull_policy: build
-    container_name: "backend-compliance-spoke-b"
+    container_name: "backend-compliance-bank-b"
     env_file:
-      - path: ./config/.env.infra.spoke-b
+      - path: ./config/.env.infra.bank-b
         required: true
     environment:
       COMPLIANCE_GRPC_PORT: "9093"
-      POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_spoke_b}?sslmode=disable"
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_bank_b}?sslmode=disable"
     ports:
       - "29093:9093"
     networks:
-      - cbweb3_backend_spoke_b
+      - cbweb3_backend_bank_b
       - cbweb3_network
 
-  auth-spoke-b:
+  auth-bank-b:
     build:
       context: .
       dockerfile: services/auth/Dockerfile
     image: cbweb3/auth:local
     pull_policy: build
-    container_name: "backend-auth-spoke-b"
+    container_name: "backend-auth-bank-b"
     env_file:
-      - path: ./config/.env.infra.spoke-b
+      - path: ./config/.env.infra.bank-b
         required: true
     environment:
       AUTH_GRPC_PORT: "9091"
       KEYCLOAK_BASE_URL: "${KEYCLOAK_BASE_URL:-http://keycloak:8080}"
-      KEYCLOAK_REALM: "${KC_REALM:-cbweb3-spoke-b}"
-      KEYCLOAK_CLIENT_ID: "${KC_CLIENT_ID:-cbweb3-spoke-b-client}"
+      KEYCLOAK_REALM: "${KC_REALM:-bank-b}"
+      KEYCLOAK_CLIENT_ID: "${KC_CLIENT_ID:-bank-b-client}"
       KEYCLOAK_CLIENT_SECRET: "${KC_CLIENT_SECRET:-change-me}"
       KEYCLOAK_JWKS_CACHE_TTL_SEC: "3000"
       KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
-      COMPLIANCE_GRPC_ADDR: compliance-spoke-b:9093
+      COMPLIANCE_GRPC_ADDR: compliance-bank-b:9093
       COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
       REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
+      REDIS_DB: "1"
     ports:
       - "29091:9091"
     depends_on:
-      - compliance-spoke-b
+      - compliance-bank-b
     networks:
-      - cbweb3_backend_spoke_b
+      - cbweb3_backend_bank_b
       - cbweb3_network
 
-  api-gateway-spoke-b:
+  api-gateway-bank-b:
     build:
       context: .
       dockerfile: services/api-gateway/Dockerfile
     image: cbweb3/api-gateway:local
     pull_policy: build
-    container_name: "backend-api-gateway-spoke-b"
+    container_name: "backend-api-gateway-bank-b"
     env_file:
-      - path: ./config/.env.infra.spoke-b
+      - path: ./config/.env.infra.bank-b
         required: true
     environment:
       APP_PORT: "8080"
       REQUEST_TIMEOUT_SEC: "30"
-      AUTH_GRPC_ADDR: auth-spoke-b:9091
-      COMPLIANCE_GRPC_ADDR: compliance-spoke-b:9093
+      AUTH_GRPC_ADDR: auth-bank-b:9091
+      COMPLIANCE_GRPC_ADDR: compliance-bank-b:9093
       PKI_DIR: /workspace/backend/config/pki
     volumes:
       - ./config/pki:/workspace/backend/config/pki
     ports:
       - "28080:8080"
     depends_on:
-      - auth-spoke-b
-      - compliance-spoke-b
+      - auth-bank-b
+      - compliance-bank-b
     networks:
-      - cbweb3_backend_spoke_b
+      - cbweb3_backend_bank_b
 
 networks:
-  cbweb3_backend_spoke_b:
+  cbweb3_backend_bank_b:
   cbweb3_network:
     external: true

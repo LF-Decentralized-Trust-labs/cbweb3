@@ -22,9 +22,9 @@
 # General prerequisites:
 #   - Spoke-A stack running (e.g. make dev.up-spoke-a)
 #   - curl, jq, openssl, xxd
-#   - backend/config/.env.infra.spoke-a with KC_CLIENT_SECRET
+#   - backend/config/.env.infra.central-bank with KC_CLIENT_SECRET
 # Full mode prerequisite:
-#   - backend/config/pki/bank-001.{csr,key} (make pki.gen-spoke-a pki.gen-commercial-banks)
+#   - backend/config/pki/bank-001.{csr,key} (make pki.gen-bank-a pki.gen-commercial-banks)
 #
 # Examples:
 #   ./tryout-spoke-a.sh
@@ -41,7 +41,7 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:18080/api/v1}"
 PKI_DIR="${PKI_DIR:-backend/config/pki}"
-ENV_FILE="${ENV_FILE:-backend/config/.env.infra.spoke-a}"
+ENV_FILE="${ENV_FILE:-backend/config/.env.infra.central-bank}"
 
 # Globals set by helpers (full flow)
 CB_TOKEN=""
@@ -72,9 +72,9 @@ Roles for POST /compliance/register (ROLE_GOVERNANCE = Keycloak service account,
 General prerequisites:
   - Spoke-A stack running (e.g. make dev.up-spoke-a)
   - curl, jq, openssl, xxd
-  - backend/config/.env.infra.spoke-a with KC_CLIENT_SECRET
+  - backend/config/.env.infra.central-bank with KC_CLIENT_SECRET
 Full mode prerequisite:
-  - backend/config/pki/bank-001.{csr,key} (make pki.gen-spoke-a pki.gen-commercial-banks)
+  - backend/config/pki/bank-001.{csr,key} (make pki.gen-bank-a pki.gen-commercial-banks)
 
 Examples:
   ./tryout-spoke-a.sh
@@ -112,7 +112,7 @@ require_cmds() {
 require_env_file() {
   if [ ! -f "$ENV_FILE" ]; then
     echo "ERROR: environment file '$ENV_FILE' not found." >&2
-    echo "      Run 'make dev.up-spoke-a' first." >&2
+    echo "      Run 'make dev.up' first." >&2
     exit 1
   fi
 }
@@ -120,7 +120,7 @@ require_env_file() {
 require_pki_bank001() {
   if [ ! -f "$PKI_DIR/bank-001.csr" ] || [ ! -f "$PKI_DIR/bank-001.key" ]; then
     echo "ERROR: PKI files not found at $PKI_DIR/bank-001.{csr,key}." >&2
-    echo "      Run 'make pki.gen-spoke-a pki.gen-commercial-banks' first." >&2
+    echo "      Run 'make pki.gen-bank-a pki.gen-commercial-banks' first." >&2
     exit 1
   fi
 }
@@ -135,13 +135,13 @@ cb_login() {
   KC_SECRET=$(grep KC_CLIENT_SECRET "$ENV_FILE" | cut -d= -f2-)
   if [ -z "$KC_SECRET" ]; then
     echo "ERROR: KC_CLIENT_SECRET not found in $ENV_FILE." >&2
-    echo "      Run './deploy/local/keycloak/get_credentials_direct.sh --spoke a' to sync it." >&2
+    echo "      Run './deploy/local/keycloak/get_credentials_direct.sh --entity central-bank' to sync it." >&2
     exit 1
   fi
   local CB_LOGIN_RESP
   CB_LOGIN_RESP=$(curl -s -X POST "$BASE_URL/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"clientId\": \"cbweb3-spoke-a-client\", \"clientSecret\": \"$KC_SECRET\"}")
+    -d "{\"clientId\": \"central-bank-client\", \"clientSecret\": \"$KC_SECRET\"}")
   CB_TOKEN=$(echo "$CB_LOGIN_RESP" | jq -r '.accessToken // empty')
   if [ -z "$CB_TOKEN" ]; then
     echo "ERROR: Central Bank login failed." >&2

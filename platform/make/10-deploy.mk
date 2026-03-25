@@ -1,14 +1,11 @@
 TARGET ?= local
 DEPLOY_DIR := deploy/$(TARGET)
-BACKEND_COMPOSE_SPOKE_A := backend/docker-compose-backend.spoke-a.yaml
-BACKEND_COMPOSE_SPOKE_B := backend/docker-compose-backend.spoke-b.yaml
-BACKEND_COMPOSE_HUB := backend/docker-compose-backend.hub.yaml
-BACKEND_ENV_SPOKE_A := backend/config/.env.infra.spoke-a
-BACKEND_ENV_SPOKE_B := backend/config/.env.infra.spoke-b
-BACKEND_ENV_HUB := backend/config/.env.infra.hub
-
-# QBFT validators per Besu stack (hub, spoke-a, spoke-b). Default 1 saves RAM/CPU locally.
-BESU_NODE_COUNT ?= 1
+BACKEND_COMPOSE_BANK_A    := backend/docker-compose-backend.bank-a.yaml
+BACKEND_COMPOSE_BANK_B    := backend/docker-compose-backend.bank-b.yaml
+BACKEND_COMPOSE_CENTRAL_BANK := backend/docker-compose-backend.central-bank.yaml
+BACKEND_ENV_BANK_A        := backend/config/.env.infra.bank-a
+BACKEND_ENV_BANK_B        := backend/config/.env.infra.bank-b
+BACKEND_ENV_CENTRAL_BANK  := backend/config/.env.infra.central-bank
 
 # Keycloak HTTP readiness wait in deploy.up-infra: attempts * sleep = max wall time.
 KEYCLOAK_READY_ATTEMPTS ?= 40
@@ -17,36 +14,20 @@ KEYCLOAK_WAIT_SLEEP_SEC ?= 3
 deploy.create-shared-network:
 	@docker network inspect cbweb3_network >/dev/null 2>&1 || docker network create cbweb3_network
 
-deploy.up-hub:
-	@echo "Starting Hub Besu..."
-	@cd ./$(DEPLOY_DIR)/hub-besu && ./startBesu.sh -n $(BESU_NODE_COUNT)
-
 deploy.up-spoke-a:
-	@echo "Starting Spoke Besu A..."
-	@cd ./$(DEPLOY_DIR)/spoke-besu-a && ./startBesu.sh -n $(BESU_NODE_COUNT)
-
-deploy.up-spoke-b:
-	@echo "Starting Spoke Besu B..."
-	@cd ./$(DEPLOY_DIR)/spoke-besu-b && ./startBesu.sh -n $(BESU_NODE_COUNT)
-
-deploy.up-besu: deploy.up-hub deploy.up-spoke-a deploy.up-spoke-b
-
-deploy.down-hub:
-	@echo "Stopping Hub Besu..."
-	@cd ./$(DEPLOY_DIR)/hub-besu && ./stopBesu.sh
+	@echo "Starting Spoke-A Besu (central-bank + bank-a + bank-b nodes)..."
+	@cd ./$(DEPLOY_DIR)/spoke-besu-a && ./startBesu.sh
 
 deploy.down-spoke-a:
-	@echo "Stopping Spoke Besu A..."
+	@echo "Stopping Spoke-A Besu..."
 	@cd ./$(DEPLOY_DIR)/spoke-besu-a && ./stopBesu.sh
 
-deploy.down-spoke-b:
-	@echo "Stopping Spoke Besu B..."
-	@cd ./$(DEPLOY_DIR)/spoke-besu-b && ./stopBesu.sh
+deploy.up-besu: deploy.up-spoke-a
 
-deploy.down-besu: deploy.down-hub deploy.down-spoke-a deploy.down-spoke-b
+deploy.down-besu: deploy.down-spoke-a
 
 deploy.up-infra: deploy.create-shared-network
-	@echo "Starting Compose Services (Keycloak, Postgres)..."
+	@echo "Starting Compose Services (Keycloak, Postgres, Redis)..."
 	@docker compose -f $(DEPLOY_DIR)/compose.yml up -d
 	@ready_max=$$(( $(KEYCLOAK_READY_ATTEMPTS) * $(KEYCLOAK_WAIT_SLEEP_SEC) )); \
 	echo "Waiting for Keycloak HTTP readiness (max ~$$ready_max seconds, $(KEYCLOAK_READY_ATTEMPTS) attempts × $(KEYCLOAK_WAIT_SLEEP_SEC)s)..."; \
@@ -86,64 +67,60 @@ deploy.up: deploy.up-besu deploy.up-infra
 
 deploy.up-with-contracts: deploy.up contracts.deploy-all-with-sync
 
-deploy.up-minimal: deploy.up-hub deploy.up-infra
-
 deploy.down: deploy.down-infra deploy.down-besu
-
-deploy.down-minimal: deploy.down-infra deploy.down-hub
 
 deploy.build-backend:
 	@echo "Building backend service images..."
-	@docker compose -f $(BACKEND_COMPOSE_SPOKE_A) build
-	@docker compose -f $(BACKEND_COMPOSE_SPOKE_B) build
-	@docker compose -f $(BACKEND_COMPOSE_HUB) build
+	@docker compose -f $(BACKEND_COMPOSE_BANK_A) build
+	@docker compose -f $(BACKEND_COMPOSE_BANK_B) build
+	@docker compose -f $(BACKEND_COMPOSE_CENTRAL_BANK) build
 
 deploy.up-backend:
-	@echo "Starting backend stack for all domains (spoke-a, spoke-b, hub)..."
-	@$(MAKE) deploy.up-backend-domains
+	@echo "Starting backend stack for all entities (bank-a, bank-b, central-bank)..."
+	@$(MAKE) deploy.up-backend-entities
 
 deploy.down-backend:
-	@echo "Stopping backend stack for all domains (spoke-a, spoke-b, hub)..."
-	@$(MAKE) deploy.down-backend-domains
+	@echo "Stopping backend stack for all entities (bank-a, bank-b, central-bank)..."
+	@$(MAKE) deploy.down-backend-entities
 
-deploy.validate-backend-spoke-a:
-	@docker compose --env-file $(BACKEND_ENV_SPOKE_A) -f $(BACKEND_COMPOSE_SPOKE_A) config -q
+deploy.validate-backend-bank-a:
+	@docker compose --env-file $(BACKEND_ENV_BANK_A) -f $(BACKEND_COMPOSE_BANK_A) config -q
 
-deploy.validate-backend-spoke-b:
-	@docker compose --env-file $(BACKEND_ENV_SPOKE_B) -f $(BACKEND_COMPOSE_SPOKE_B) config -q
+deploy.validate-backend-bank-b:
+	@docker compose --env-file $(BACKEND_ENV_BANK_B) -f $(BACKEND_COMPOSE_BANK_B) config -q
 
-deploy.validate-backend-hub:
-	@docker compose --env-file $(BACKEND_ENV_HUB) -f $(BACKEND_COMPOSE_HUB) config -q
+deploy.validate-backend-central-bank:
+	@docker compose --env-file $(BACKEND_ENV_CENTRAL_BANK) -f $(BACKEND_COMPOSE_CENTRAL_BANK) config -q
 
-deploy.validate-backend-domains: deploy.validate-backend-spoke-a deploy.validate-backend-spoke-b deploy.validate-backend-hub
+deploy.validate-backend-entities: deploy.validate-backend-bank-a deploy.validate-backend-bank-b deploy.validate-backend-central-bank
 
-deploy.up-backend-spoke-a:
-	@echo "Starting backend spoke-a services..."
-	@docker compose --env-file $(BACKEND_ENV_SPOKE_A) -f $(BACKEND_COMPOSE_SPOKE_A) up -d
+deploy.up-backend-bank-a:
+	@echo "Starting backend bank-a services..."
+	@docker compose --env-file $(BACKEND_ENV_BANK_A) -f $(BACKEND_COMPOSE_BANK_A) up -d
 
-deploy.down-backend-spoke-a:
-	@echo "Stopping backend spoke-a services..."
-	@docker compose --env-file $(BACKEND_ENV_SPOKE_A) -f $(BACKEND_COMPOSE_SPOKE_A) down -v
+deploy.down-backend-bank-a:
+	@echo "Stopping backend bank-a services..."
+	@docker compose --env-file $(BACKEND_ENV_BANK_A) -f $(BACKEND_COMPOSE_BANK_A) down -v
 
-deploy.up-backend-spoke-b:
-	@echo "Starting backend spoke-b services..."
-	@docker compose --env-file $(BACKEND_ENV_SPOKE_B) -f $(BACKEND_COMPOSE_SPOKE_B) up -d
+deploy.up-backend-bank-b:
+	@echo "Starting backend bank-b services..."
+	@docker compose --env-file $(BACKEND_ENV_BANK_B) -f $(BACKEND_COMPOSE_BANK_B) up -d
 
-deploy.down-backend-spoke-b:
-	@echo "Stopping backend spoke-b services..."
-	@docker compose --env-file $(BACKEND_ENV_SPOKE_B) -f $(BACKEND_COMPOSE_SPOKE_B) down -v
+deploy.down-backend-bank-b:
+	@echo "Stopping backend bank-b services..."
+	@docker compose --env-file $(BACKEND_ENV_BANK_B) -f $(BACKEND_COMPOSE_BANK_B) down -v
 
-deploy.up-backend-hub:
-	@echo "Starting backend hub services..."
-	@docker compose --env-file $(BACKEND_ENV_HUB) -f $(BACKEND_COMPOSE_HUB) up -d
+deploy.up-backend-central-bank:
+	@echo "Starting backend central-bank services..."
+	@docker compose --env-file $(BACKEND_ENV_CENTRAL_BANK) -f $(BACKEND_COMPOSE_CENTRAL_BANK) up -d
 
-deploy.down-backend-hub:
-	@echo "Stopping backend hub services..."
-	@docker compose --env-file $(BACKEND_ENV_HUB) -f $(BACKEND_COMPOSE_HUB) down -v
+deploy.down-backend-central-bank:
+	@echo "Stopping backend central-bank services..."
+	@docker compose --env-file $(BACKEND_ENV_CENTRAL_BANK) -f $(BACKEND_COMPOSE_CENTRAL_BANK) down -v
 
-deploy.up-backend-domains: deploy.up-backend-spoke-a deploy.up-backend-spoke-b deploy.up-backend-hub
+deploy.up-backend-entities: deploy.up-backend-bank-a deploy.up-backend-bank-b deploy.up-backend-central-bank
 
-deploy.down-backend-domains: deploy.down-backend-hub deploy.down-backend-spoke-b deploy.down-backend-spoke-a
+deploy.down-backend-entities: deploy.down-backend-central-bank deploy.down-backend-bank-b deploy.down-backend-bank-a
 
 deploy.build-ci-runner:
 	@docker build -t cbweb3-act-runner:latest -f ./$(DEPLOY_DIR)/act/Dockerfile .
@@ -156,4 +133,4 @@ deploy.ci-local: deploy.build-ci-runner
 		-P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-22.04 \
 		$(ARGS)
 
-.PHONY: deploy.create-shared-network deploy.up-hub deploy.up-spoke-a deploy.up-spoke-b deploy.down-hub deploy.down-spoke-a deploy.down-spoke-b deploy.up-besu deploy.down-besu deploy.up-infra deploy.down-infra deploy.up deploy.up-with-contracts deploy.down deploy.up-minimal deploy.down-minimal deploy.build-backend deploy.up-backend deploy.down-backend deploy.validate-backend-spoke-a deploy.validate-backend-spoke-b deploy.validate-backend-hub deploy.validate-backend-domains deploy.up-backend-spoke-a deploy.down-backend-spoke-a deploy.up-backend-spoke-b deploy.down-backend-spoke-b deploy.up-backend-hub deploy.down-backend-hub deploy.up-backend-domains deploy.down-backend-domains deploy.build-ci-runner deploy.ci-local
+.PHONY: deploy.create-shared-network deploy.up-spoke-a deploy.down-spoke-a deploy.up-besu deploy.down-besu deploy.up-infra deploy.down-infra deploy.up deploy.up-with-contracts deploy.down deploy.build-backend deploy.up-backend deploy.down-backend deploy.validate-backend-bank-a deploy.validate-backend-bank-b deploy.validate-backend-central-bank deploy.validate-backend-entities deploy.up-backend-bank-a deploy.down-backend-bank-a deploy.up-backend-bank-b deploy.down-backend-bank-b deploy.up-backend-central-bank deploy.down-backend-central-bank deploy.up-backend-entities deploy.down-backend-entities deploy.build-ci-runner deploy.ci-local

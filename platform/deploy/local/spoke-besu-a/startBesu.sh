@@ -1,127 +1,114 @@
 #!/bin/bash
+#
+# startBesu.sh — Inicia a rede Besu do spoke-a com 3 nós fixos nomeados por entidade:
+#
+#   cbweb3-spoke-a-besu.central-bank  (bootnode / validador)  RPC: 8645
+#   cbweb3-spoke-a-besu.bank-a        (validador)              RPC: 8646
+#   cbweb3-spoke-a-besu.bank-b        (validador)              RPC: 8647
+#
+# Cada backend conecta ao RPC do seu próprio nó via BESU_RPC_URL no .env.infra.*
+#
+# Uso: ./startBesu.sh [-d|--debug]
 
-# Color codes for colored output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 NETWORK_NAME="spoke_a_besu_network"
 CONTAINER_PREFIX="cbweb3-spoke-a-besu"
-BOOTNODE_CONTAINER="${CONTAINER_PREFIX}.bootnode"
-NODE_CONTAINER_PREFIX="${CONTAINER_PREFIX}.node"
 
-BOOT_P2P_PORT=31303
-BOOT_RPC_PORT=8645
+NODE_CENTRAL_BANK="${CONTAINER_PREFIX}.central-bank"
+NODE_BANK_A="${CONTAINER_PREFIX}.bank-a"
+NODE_BANK_B="${CONTAINER_PREFIX}.bank-b"
 
-# Remove previous Besu network
+RPC_PORT_CENTRAL_BANK=8645
+RPC_PORT_BANK_A=8646
+RPC_PORT_BANK_B=8647
+
+P2P_PORT_CENTRAL_BANK=31303
+P2P_PORT_BANK_A=31304
+P2P_PORT_BANK_B=31305
+
+NODES=3
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo -e "${YELLOW}Stopping any existing Besu network...${NC}"
 if [ -f "$SCRIPT_DIR/stopBesu.sh" ]; then
     bash "$SCRIPT_DIR/stopBesu.sh"
 fi
 
-echo -e "${YELLOW}Detecting operating system...${NC}"
-# Detect operating system
 OS="$(uname)"
 if [ "$OS" = "Darwin" ]; then
-    # macOS specific settings
     SED_CMD="sed -i ''"
     MKTEMP_CMD="mktemp -t tmp"
 else
-    # Linux specific settings
     SED_CMD="sed -i"
     MKTEMP_CMD="mktemp"
 fi
 
-echo -e "${YELLOW}Setting up default values...${NC}"
-# Default values
-NODES=1
-BASE_P2P_PORT=30320
-BASE_RPC_PORT=8646
 DEBUG_MODE=false
+while getopts ":d-:" opt; do
+    case $opt in
+    d) DEBUG_MODE=true ;;
+    -)
+        case $OPTARG in
+            debug) DEBUG_MODE=true ;;
+        esac
+        ;;
+    esac
+done
+
+if [ "$DEBUG_MODE" = true ]; then
+    BESU_LOGGING="--logging=DEBUG"
+    echo -e "${YELLOW}Debug mode enabled.${NC}"
+else
+    BESU_LOGGING=""
+fi
 
 echo -e "${YELLOW}Checking if besu binary is installed...${NC}"
-# Check if besu binary is installed and download it if not
 if ! [ -x "$(command -v ./bin/besu)" ]; then
     if [ "$OS" = "Darwin" ]; then
-        wget -P . https://github.com/hyperledger/besu/releases/download/25.8.0/besu-25.8.0.tar.gz || curl -L -o besu-25.8.0.tar.gz https://github.com/hyperledger/besu/releases/download/25.8.0/besu-25.8.0.tar.gz
+        wget -P . https://github.com/hyperledger/besu/releases/download/25.8.0/besu-25.8.0.tar.gz || \
+            curl -L -o besu-25.8.0.tar.gz https://github.com/hyperledger/besu/releases/download/25.8.0/besu-25.8.0.tar.gz
     else
         wget -P . https://github.com/hyperledger/besu/releases/download/25.8.0/besu-25.8.0.tar.gz
     fi
     tar --strip-components=1 -xzf besu-25.8.0.tar.gz
     rm besu-25.8.0.tar.gz
 fi
-echo
-
 BESU=./bin/besu
 
-# Parse command line arguments
-echo -e "${YELLOW}Parsing command line arguments...${NC}"
-while getopts ":n:d-:" opt; do
-    case $opt in
-    n)
-        NODES=${OPTARG}
-        ;;
-    d)
-        DEBUG_MODE=true
-        ;;
-    -)
-        case $OPTARG in
-            debug)
-                DEBUG_MODE=true
-                ;;
-        esac
-        ;;
-    esac
-done
-
-if [ -z "$NODES" ]; then
-    echo -e "${RED}NODES is not set. Please set the number of nodes to create.${NC}"
-    exit 1
-fi
-
-# Export NODES for use in functions
-export NODES
-
-# Define extra logging flag if debug mode is enabled
-if [ "$DEBUG_MODE" = true ]; then
-    BESU_LOGGING="--logging=DEBUG"
-    echo -e "${YELLOW}Debug mode enabled. Besu nodes will start with DEBUG logging.${NC}"
-else
-    BESU_LOGGING=""
-fi
-
-echo -e "${YELLOW}Creating qbftConfigFile.json based on template...${NC}"
-jq '.blockchain += {
-    "nodes": {
-      "generate": true,
-      "count": '"$NODES"'
-    }
-  }' config/configTemplate.json >config/qbftConfigFile.json
-
-echo -e "${YELLOW}Creating bootnode folder...${NC}"
-mkdir -p nodes/bootnode
+echo -e "${YELLOW}Creating qbftConfigFile.json (3 validators)...${NC}"
+jq '.blockchain += {"nodes": {"generate": true, "count": '"$NODES"'}}' \
+    config/configTemplate.json > config/qbftConfigFile.json
 
 echo -e "${YELLOW}Generating blockchain config and keys...${NC}"
+mkdir -p nodes/central-bank/data nodes/bank-a/data nodes/bank-b/data
 mkdir tmpFiles && cd tmpFiles
-../$BESU operator generate-blockchain-config --config-file=../config/qbftConfigFile.json --to=networkFiles --private-key-file-name=key
-
+../$BESU operator generate-blockchain-config \
+    --config-file=../config/qbftConfigFile.json \
+    --to=networkFiles \
+    --private-key-file-name=key
 cd ..
 
 counter=0
 for folder in tmpFiles/networkFiles/keys/*; do
-    if [ $counter -eq 0 ]; then
-        echo -e "${YELLOW}Copying bootnode files...${NC}"
-        mkdir -p nodes/bootnode/data
-        cp -r "$folder"/* nodes/bootnode/data/
-    else
-        echo -e "${YELLOW}Copying node $counter files...${NC}"
-        mkdir -p nodes/node$counter
-        mkdir -p nodes/node$counter/data
-        cp -r "$folder"/* nodes/node$counter/data/
-    fi
+    case $counter in
+    0)
+        echo -e "${YELLOW}Copying central-bank node files...${NC}"
+        cp -r "$folder"/* nodes/central-bank/data/
+        ;;
+    1)
+        echo -e "${YELLOW}Copying bank-a node files...${NC}"
+        cp -r "$folder"/* nodes/bank-a/data/
+        ;;
+    2)
+        echo -e "${YELLOW}Copying bank-b node files...${NC}"
+        cp -r "$folder"/* nodes/bank-b/data/
+        ;;
+    esac
     counter=$((counter + 1))
 done
 
@@ -131,54 +118,60 @@ cp tmpFiles/networkFiles/genesis.json genesis/genesis.json
 
 echo -e "${YELLOW}Removing tmpFiles...${NC}"
 if ! rm -rf tmpFiles 2>/dev/null; then
-    # Fallback for root-owned temp files.
-    docker run --rm -v "$(pwd):/workspace" alpine:3.20 sh -c "rm -rf /workspace/tmpFiles" >/dev/null 2>&1 || true
+    docker run --rm -v "$(pwd):/workspace" alpine:3.20 \
+        sh -c "rm -rf /workspace/tmpFiles" >/dev/null 2>&1 || true
 fi
-echo
 
 echo -e "${BLUE}Starting docker network '${NETWORK_NAME}'...${NC}"
-docker network create --driver bridge "${NETWORK_NAME}"
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}Docker network created successfully.${NC}\n"
-else
-    echo -e "${YELLOW}Docker network may already exist. Continuing...${NC}\n"
-fi
+docker network create --driver bridge "${NETWORK_NAME}" && \
+    echo -e "${GREEN}Docker network created.${NC}\n" || \
+    echo -e "${YELLOW}Network may already exist. Continuing...${NC}\n"
 
-echo -e "${BLUE}Starting bootnode on docker...${NC}"
+# Ensure shared network exists (backends need to reach Besu nodes by container name)
+docker network inspect cbweb3_network >/dev/null 2>&1 || docker network create cbweb3_network
+
+# ─── Start central-bank node (bootnode) ─────────────────────────────────────
+echo -e "${BLUE}Starting central-bank node (bootnode)...${NC}"
 docker run -d \
-    --name "${BOOTNODE_CONTAINER}" \
+    --name "${NODE_CENTRAL_BANK}" \
     --user root \
-    -v "$(pwd)/nodes/bootnode/data:/opt/besu/data" \
+    -v "$(pwd)/nodes/central-bank/data:/opt/besu/data" \
     -v "$(pwd)/genesis:/opt/besu/genesis" \
-    -p ${BOOT_P2P_PORT}:30303 \
-    -p ${BOOT_RPC_PORT}:8545 \
-    -p ${BOOT_P2P_PORT}:30303/udp \
+    -p ${RPC_PORT_CENTRAL_BANK}:8545 \
+    -p ${P2P_PORT_CENTRAL_BANK}:30303 \
+    -p ${P2P_PORT_CENTRAL_BANK}:30303/udp \
     --network "${NETWORK_NAME}" \
     --restart always \
     hyperledger/besu:latest \
-    --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT --host-allowlist='*' --rpc-http-cors-origins='all' --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
+    --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 \
+    --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT \
+    --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT \
+    --host-allowlist='*' --rpc-http-cors-origins='all' \
+    --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' \
+    --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
 
-echo
-
-echo -e "${GREEN}Bootnode created!${NC}"
-echo -e "${YELLOW}Waiting 5 seconds for bootnode to start...${NC}"
+echo -e "${GREEN}central-bank node started.${NC}"
+echo -e "${YELLOW}Waiting 5 seconds for central-bank node to be ready...${NC}"
 sleep 5
-echo -e "${YELLOW}Fetching ENODE from bootnode...${NC}"
 
+# Fetch ENODE from central-bank node via host port
+echo -e "${YELLOW}Fetching ENODE from central-bank node...${NC}"
 max_retries=30
 retry_delay=3
 retry_count=0
+ENODE=""
 
 while [ $retry_count -lt $max_retries ]; do
-    ENODE=$(curl -s -X POST --data '{"jsonrpc":"2.0","method":"net_enode","params":[],"id":1}' "http://127.0.0.1:${BOOT_RPC_PORT}" | jq -r '.result')
+    ENODE=$(curl -s -X POST \
+        --data '{"jsonrpc":"2.0","method":"net_enode","params":[],"id":1}' \
+        "http://127.0.0.1:${RPC_PORT_CENTRAL_BANK}" | jq -r '.result')
     if [ -n "$ENODE" ] && [ "$ENODE" != "null" ]; then
         echo -e "${GREEN}ENODE retrieved successfully.${NC}"
         break
-    else
-        echo -e "${RED}Failed to retrieve ENODE. Retrying in $retry_delay seconds...${NC}"
-        sleep $retry_delay
-        ((retry_count++))
     fi
+    echo -e "${RED}Failed to retrieve ENODE. Retrying in $retry_delay seconds...${NC}"
+    sleep $retry_delay
+    ((retry_count++))
 done
 
 if [ $retry_count -eq $max_retries ]; then
@@ -188,55 +181,89 @@ fi
 
 echo -e "${BLUE}ENODE: $ENODE${NC}\n"
 
-export E_ADDRESS="${ENODE#enode://}"
-DOCKER_NODE_1_ADDRESS=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${BOOTNODE_CONTAINER}")
-export E_ADDRESS=$(echo "$E_ADDRESS" | sed -e "s/127.0.0.1/$DOCKER_NODE_1_ADDRESS/g")
-export E_ADDRESS="enode://$E_ADDRESS"
+# Get IP from the Besu-specific network only (avoids multi-network IP concatenation)
+CENTRAL_BANK_IP=$(docker inspect \
+    -f "{{(index .NetworkSettings.Networks \"${NETWORK_NAME}\").IPAddress}}" \
+    "${NODE_CENTRAL_BANK}")
+ENODE_INTERNAL=$(echo "$ENODE" | sed -e "s/127.0.0.1/${CENTRAL_BANK_IP}/g")
+echo -e "${BLUE}ENODE (internal): $ENODE_INTERNAL${NC}\n"
 
-generate_nodes_function() {
-    local i=1
-    while [ $i -le $((NODES - 1)) ]; do
-        local node_name="${NODE_CONTAINER_PREFIX}-${i}"
-        local p2p_port=$((BASE_P2P_PORT + i))
-        local rpc_port=$((BASE_RPC_PORT + i))
+# Now connect central-bank to shared network (after IP/ENODE capture to avoid multi-IP issue)
+docker network connect cbweb3_network "${NODE_CENTRAL_BANK}" 2>/dev/null || true
 
-        echo -e "${BLUE}Creating docker container ${node_name}...${NC}"
-        docker run -d \
-            --name ${node_name} \
-            --user root \
-            -v "$(pwd)/nodes/node${i}/data:/opt/besu/data" \
-            -v "$(pwd)/genesis:/opt/besu/genesis" \
-            -p ${rpc_port}:8545 \
-            -p ${p2p_port}:30303 \
-            -p ${p2p_port}:30303/udp \
-            --network "${NETWORK_NAME}" \
-            --restart always \
-            hyperledger/besu:latest \
-            --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 --bootnodes=${E_ADDRESS} --p2p-port=30303 --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT --host-allowlist='*' --rpc-http-cors-origins='all' --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' --rpc-http-port=8545 --rpc-ws-port=8546 $BESU_LOGGING
+# ─── Start bank-a node ───────────────────────────────────────────────────────
+echo -e "${BLUE}Starting bank-a node...${NC}"
+docker run -d \
+    --name "${NODE_BANK_A}" \
+    --user root \
+    -v "$(pwd)/nodes/bank-a/data:/opt/besu/data" \
+    -v "$(pwd)/genesis:/opt/besu/genesis" \
+    -p ${RPC_PORT_BANK_A}:8545 \
+    -p ${P2P_PORT_BANK_A}:30303 \
+    -p ${P2P_PORT_BANK_A}:30303/udp \
+    --network "${NETWORK_NAME}" \
+    --restart always \
+    hyperledger/besu:latest \
+    --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 \
+    --bootnodes=${ENODE_INTERNAL} \
+    --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT \
+    --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT \
+    --host-allowlist='*' --rpc-http-cors-origins='all' \
+    --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' \
+    --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
 
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}Node ${node_name} started successfully!${NC}\n"
-        else
-            echo -e "${RED}Failed to start node ${node_name}.${NC}\n"
-        fi
-        i=$((i + 1))
-    done
-}
+docker network connect cbweb3_network "${NODE_BANK_A}" 2>/dev/null || true
+echo -e "${GREEN}bank-a node started.${NC}\n"
 
-generate_nodes_function
+# ─── Start bank-b node ───────────────────────────────────────────────────────
+echo -e "${BLUE}Starting bank-b node...${NC}"
+docker run -d \
+    --name "${NODE_BANK_B}" \
+    --user root \
+    -v "$(pwd)/nodes/bank-b/data:/opt/besu/data" \
+    -v "$(pwd)/genesis:/opt/besu/genesis" \
+    -p ${RPC_PORT_BANK_B}:8545 \
+    -p ${P2P_PORT_BANK_B}:30303 \
+    -p ${P2P_PORT_BANK_B}:30303/udp \
+    --network "${NETWORK_NAME}" \
+    --restart always \
+    hyperledger/besu:latest \
+    --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 \
+    --bootnodes=${ENODE_INTERNAL} \
+    --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT \
+    --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT \
+    --host-allowlist='*' --rpc-http-cors-origins='all' \
+    --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' \
+    --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
+
+docker network connect cbweb3_network "${NODE_BANK_B}" 2>/dev/null || true
+echo -e "${GREEN}bank-b node started.${NC}\n"
 
 echo -e "${YELLOW}Creating network tracker file...${NC}"
-cat >.env.network <<EOF
+cat > .env.network <<EOF
 NODES=$NODES
-ITERATION=1
-E_ADDRESS=$E_ADDRESS
 NETWORK_NAME=$NETWORK_NAME
 CONTAINER_PREFIX=$CONTAINER_PREFIX
-BOOT_RPC_PORT=$BOOT_RPC_PORT
-BASE_RPC_PORT=$BASE_RPC_PORT
-BASE_P2P_PORT=$BASE_P2P_PORT
+NODE_CENTRAL_BANK=$NODE_CENTRAL_BANK
+NODE_BANK_A=$NODE_BANK_A
+NODE_BANK_B=$NODE_BANK_B
+RPC_PORT_CENTRAL_BANK=$RPC_PORT_CENTRAL_BANK
+RPC_PORT_BANK_A=$RPC_PORT_BANK_A
+RPC_PORT_BANK_B=$RPC_PORT_BANK_B
+P2P_PORT_CENTRAL_BANK=$P2P_PORT_CENTRAL_BANK
+P2P_PORT_BANK_A=$P2P_PORT_BANK_A
+P2P_PORT_BANK_B=$P2P_PORT_BANK_B
+ENODE=$ENODE_INTERNAL
 EOF
 
 echo -e "${GREEN}============================="
 echo -e "Network started successfully!"
-echo -e "=============================${NC}\n"
+echo -e "=============================${NC}"
+echo ""
+echo -e "  ${BLUE}central-bank${NC}  RPC: http://localhost:${RPC_PORT_CENTRAL_BANK}  (${NODE_CENTRAL_BANK})"
+echo -e "  ${BLUE}bank-a      ${NC}  RPC: http://localhost:${RPC_PORT_BANK_A}          (${NODE_BANK_A})"
+echo -e "  ${BLUE}bank-b      ${NC}  RPC: http://localhost:${RPC_PORT_BANK_B}          (${NODE_BANK_B})"
+echo ""
+echo -e "  Network : ${NETWORK_NAME}"
+echo -e "  ENODE   : ${ENODE_INTERNAL}"
+echo ""

@@ -55,20 +55,16 @@ contracts.deploy-identity-registry-besu:
 	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/IdentityRegistry.s.sol:DeployIdentityRegistry --rpc-url ${BESU_RPC_URL} --broadcast
 
 contracts.deploy-hub:
-	@echo "Deploying CBWeb3 hub contracts to chain 1337..."
-	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Hub.s.sol:DeployCBWeb3Hub --rpc-url ${HUB_RPC_URL} --broadcast
+	@echo "Deploying CBWeb3 hub contracts to chain 1337 (legacy — hub-besu removed)..."
+	@echo "WARNING: hub-besu was removed. Use contracts.deploy-spoke-a for the spoke-a chain (1338)."
+	@exit 1
 
 contracts.deploy-spoke-a:
-	@echo "Deploying CBWeb3 spoke-a contracts to chain 1338..."
+	@echo "Deploying CBWeb3 spoke-a contracts to chain 1338 (bank-a, bank-b, central-bank)..."
 	@cd contracts && TOKEN_NAME="Tokenized BRL" TOKEN_SYMBOL="tCeBM_BRL" \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_A_RPC_URL} --broadcast
 
-contracts.deploy-spoke-b:
-	@echo "Deploying CBWeb3 spoke-b contracts to chain 1339..."
-	@cd contracts && TOKEN_NAME="Tokenized EUR" TOKEN_SYMBOL="tCeBM_EUR" \
-		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_B_RPC_URL} --broadcast
-
-contracts.deploy-all: contracts.setup contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b
+contracts.deploy-all: contracts.setup contracts.deploy-spoke-a
 
 contracts.deploy-cbweb3-besu: contracts.deploy-hub
 
@@ -84,4 +80,4 @@ contracts.slither:
 
 contracts.full-check: contracts.build contracts.fmt contracts.lint contracts.test contracts.coverage contracts.slither
 
-.PHONY: contracts.setup contracts.fmt contracts.lint contracts.test contracts.coverage contracts.build contracts.clean contracts.gen-doc contracts.serve-doc contracts.deploy-tcebm-besu contracts.deploy-htlc-besu contracts.deploy-amm-besu contracts.deploy-identity-registry-besu contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b contracts.deploy-all contracts.deploy-cbweb3-besu contracts.sync-addresses contracts.deploy-all-with-sync contracts.deploy-cbweb3-with-sync contracts.slither contracts.full-check
+.PHONY: contracts.setup contracts.fmt contracts.lint contracts.test contracts.coverage contracts.build contracts.clean contracts.gen-doc contracts.serve-doc contracts.deploy-tcebm-besu contracts.deploy-htlc-besu contracts.deploy-amm-besu contracts.deploy-identity-registry-besu contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-all contracts.deploy-cbweb3-besu contracts.sync-addresses contracts.deploy-all-with-sync contracts.deploy-cbweb3-with-sync contracts.slither contracts.full-check

@@ -5,19 +5,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 BOOTSTRAP_ENV_FILE="$PROJECT_ROOT/backend/config/.env.keycloak.bootstrap"
 BOOTSTRAP_ENV_FILE_ALIAS="$PROJECT_ROOT/backend/config/.env.keycloack.bootstrap"
-TARGET_SPOKE="a"
+TARGET_ENTITY="bank-a"
 
 usage() {
-  echo "Usage: $0 [--spoke a|b]"
+  echo "Usage: $0 [--entity bank-a|bank-b|central-bank]"
   exit 1
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --spoke)
+    --entity)
       shift
       [[ $# -gt 0 ]] || usage
-      TARGET_SPOKE="$1"
+      TARGET_ENTITY="$1"
       ;;
     *)
       usage
@@ -26,17 +26,27 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-case "$TARGET_SPOKE" in
-  a)
-    DOMAIN_INFRA_ENV_FILE="$PROJECT_ROOT/backend/config/.env.infra.spoke-a"
-    DOMAIN_INFRA_ENV_FILE_EXAMPLE="$PROJECT_ROOT/backend/config/.env.infra.spoke-a.example"
+case "$TARGET_ENTITY" in
+  bank-a)
+    DOMAIN_INFRA_ENV_FILE="$PROJECT_ROOT/backend/config/.env.infra.bank-a"
+    DOMAIN_INFRA_ENV_FILE_EXAMPLE="$PROJECT_ROOT/backend/config/.env.infra.bank-a.example"
+    DEFAULT_REALM="bank-a"
+    DEFAULT_CLIENT_ID="bank-a-client"
     ;;
-  b)
-    DOMAIN_INFRA_ENV_FILE="$PROJECT_ROOT/backend/config/.env.infra.spoke-b"
-    DOMAIN_INFRA_ENV_FILE_EXAMPLE="$PROJECT_ROOT/backend/config/.env.infra.spoke-b.example"
+  bank-b)
+    DOMAIN_INFRA_ENV_FILE="$PROJECT_ROOT/backend/config/.env.infra.bank-b"
+    DOMAIN_INFRA_ENV_FILE_EXAMPLE="$PROJECT_ROOT/backend/config/.env.infra.bank-b.example"
+    DEFAULT_REALM="bank-b"
+    DEFAULT_CLIENT_ID="bank-b-client"
+    ;;
+  central-bank)
+    DOMAIN_INFRA_ENV_FILE="$PROJECT_ROOT/backend/config/.env.infra.central-bank"
+    DOMAIN_INFRA_ENV_FILE_EXAMPLE="$PROJECT_ROOT/backend/config/.env.infra.central-bank.example"
+    DEFAULT_REALM="central-bank"
+    DEFAULT_CLIENT_ID="central-bank-client"
     ;;
   *)
-    echo "Error: invalid spoke '$TARGET_SPOKE'. Use 'a' or 'b'."
+    echo "Error: invalid entity '$TARGET_ENTITY'. Use 'bank-a', 'bank-b' or 'central-bank'."
     exit 1
     ;;
 esac
@@ -51,8 +61,6 @@ source_if_exists() {
   fi
 }
 
-source_if_exists "$PROJECT_ROOT/backend/config/.env.infra.hub.example"
-source_if_exists "$PROJECT_ROOT/backend/config/.env.infra.hub"
 source_if_exists "$DOMAIN_INFRA_ENV_FILE_EXAMPLE"
 
 if [[ -f "$DOMAIN_INFRA_ENV_FILE" ]]; then
@@ -99,26 +107,11 @@ KC_ADMIN_USER="${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
 KC_ADMIN_PASSWORD="${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
 KC_PUBLIC_PORT="${KEYCLOAK_PORT:-8081}"
 KC_BASE_PATH_VALUE="${KC_BASE_PATH_VALUE:-http://localhost:${KC_PUBLIC_PORT}}"
-HUB_INFRA_ENV_FILE="$PROJECT_ROOT/backend/config/.env.infra.hub"
-HUB_INFRA_ENV_FILE_EXAMPLE="$PROJECT_ROOT/backend/config/.env.infra.hub.example"
-
-case "$TARGET_SPOKE" in
-  a)
-    KC_REALM="${KC_REALM:-cbweb3-spoke-a}"
-    KC_CLIENT_ID_VALUE="${KC_CLIENT_ID:-cbweb3-spoke-a-client}"
-    ;;
-  b)
-    KC_REALM="${KC_REALM:-cbweb3-spoke-b}"
-    KC_CLIENT_ID_VALUE="${KC_CLIENT_ID:-cbweb3-spoke-b-client}"
-    ;;
-  *)
-    echo "Error: invalid spoke '$TARGET_SPOKE'. Use 'a' or 'b'."
-    exit 1
-    ;;
-esac
+KC_REALM="${KC_REALM:-$DEFAULT_REALM}"
+KC_CLIENT_ID_VALUE="${KC_CLIENT_ID:-$DEFAULT_CLIENT_ID}"
 
 # Direct script to get Keycloak credentials
-echo "=== GETTING KEYCLOAK CREDENTIALS (SPOKE-${TARGET_SPOKE^^}) ==="
+echo "=== GETTING KEYCLOAK CREDENTIALS (${TARGET_ENTITY^^}) ==="
 
 # Check if the container is running
 if ! docker ps --format '{{.Names}}' | grep -q "^${KEYCLOAK_CONTAINER_NAME}$"; then
@@ -166,14 +159,5 @@ set_env_var "$DOMAIN_INFRA_ENV_FILE" "KC_BASE_PATH" "$KC_BASE_PATH_VALUE"
 set_env_var "$DOMAIN_INFRA_ENV_FILE" "KC_REALM" "$KC_REALM"
 set_env_var "$DOMAIN_INFRA_ENV_FILE" "KC_CLIENT_ID" "$KC_CLIENT_ID_VALUE"
 set_env_var "$DOMAIN_INFRA_ENV_FILE" "KC_CLIENT_SECRET" "$CLIENT_SECRET"
-
-echo "Recreating $HUB_INFRA_ENV_FILE from template and injecting shared Keycloak values..."
-copy_example_to_env "$HUB_INFRA_ENV_FILE_EXAMPLE" "$HUB_INFRA_ENV_FILE"
-set_env_var "$HUB_INFRA_ENV_FILE" "KEYCLOAK_CONTAINER_NAME" "$KEYCLOAK_CONTAINER_NAME"
-set_env_var "$HUB_INFRA_ENV_FILE" "KEYCLOAK_PORT" "$KC_PUBLIC_PORT"
-set_env_var "$HUB_INFRA_ENV_FILE" "KEYCLOAK_ENV_OUTPUT_DIR" "${KEYCLOAK_ENV_OUTPUT_DIR:-$PROJECT_ROOT/backend/config}"
-set_env_var "$HUB_INFRA_ENV_FILE" "KC_BOOTSTRAP_ADMIN_USERNAME" "$KC_ADMIN_USER"
-set_env_var "$HUB_INFRA_ENV_FILE" "KC_BOOTSTRAP_ADMIN_PASSWORD" "$KC_ADMIN_PASSWORD"
-set_env_var "$HUB_INFRA_ENV_FILE" "KC_BASE_PATH" "$KC_BASE_PATH_VALUE"
 
 echo "Done. ${DOMAIN_INFRA_ENV_FILE##*/} updated successfully."

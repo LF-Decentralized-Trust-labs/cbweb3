@@ -4,12 +4,12 @@ set -euo pipefail
 PROJECT_ROOT="${PROJECT_ROOT:-/opt/keycloak/host}"
 CONFIG_DIR="$PROJECT_ROOT/backend/config"
 
-INFRA_ENV_SPOKE_A="$CONFIG_DIR/.env.infra.spoke-a"
-INFRA_ENV_SPOKE_A_EXAMPLE="$CONFIG_DIR/.env.infra.spoke-a.example"
-INFRA_ENV_SPOKE_B="$CONFIG_DIR/.env.infra.spoke-b"
-INFRA_ENV_SPOKE_B_EXAMPLE="$CONFIG_DIR/.env.infra.spoke-b.example"
-INFRA_ENV_HUB="$CONFIG_DIR/.env.infra.hub"
-INFRA_ENV_HUB_EXAMPLE="$CONFIG_DIR/.env.infra.hub.example"
+INFRA_ENV_BANK_A="$CONFIG_DIR/.env.infra.bank-a"
+INFRA_ENV_BANK_A_EXAMPLE="$CONFIG_DIR/.env.infra.bank-a.example"
+INFRA_ENV_BANK_B="$CONFIG_DIR/.env.infra.bank-b"
+INFRA_ENV_BANK_B_EXAMPLE="$CONFIG_DIR/.env.infra.bank-b.example"
+INFRA_ENV_CENTRAL_BANK="$CONFIG_DIR/.env.infra.central-bank"
+INFRA_ENV_CENTRAL_BANK_EXAMPLE="$CONFIG_DIR/.env.infra.central-bank.example"
 
 source_if_exists() {
   local env_file="$1"
@@ -50,12 +50,12 @@ set_env_var() {
   fi
 }
 
-load_hub_defaults() {
-  source_if_exists "$INFRA_ENV_HUB_EXAMPLE"
-  source_if_exists "$INFRA_ENV_HUB"
+load_bank_a_defaults() {
+  source_if_exists "$INFRA_ENV_BANK_A_EXAMPLE"
+  source_if_exists "$INFRA_ENV_BANK_A"
 }
 
-load_hub_defaults
+load_bank_a_defaults
 KC_PUBLIC_PORT="${KEYCLOAK_PORT:-8081}"
 KC_BASE_PATH_VALUE="${KC_BASE_PATH_VALUE:-http://localhost:${KC_PUBLIC_PORT}}"
 
@@ -234,31 +234,35 @@ assign_governance_role_to_service_account() {
   fi
 }
 
-SPOKE_ROLES=(ROLE_COMMERCIAL_BANK ROLE_TREASURY ROLE_SUPERVISOR ROLE_NOC ROLE_GOVERNANCE_OFFICER ROLE_GOVERNANCE)
+# Roles for commercial banks (bank-a and bank-b)
+BANK_ROLES=(ROLE_COMMERCIAL_BANK ROLE_TREASURY ROLE_SUPERVISOR ROLE_NOC ROLE_GOVERNANCE_OFFICER ROLE_GOVERNANCE)
+
+# Roles for the central bank (superset: includes governance authority)
+CENTRAL_BANK_ROLES=(ROLE_COMMERCIAL_BANK ROLE_TREASURY ROLE_SUPERVISOR ROLE_NOC ROLE_GOVERNANCE_OFFICER ROLE_GOVERNANCE)
 
 create_realm_and_client \
-  "cbweb3-spoke-a" \
-  "cbweb3-spoke-a-client" \
-  "$INFRA_ENV_SPOKE_A" \
-  "$INFRA_ENV_SPOKE_A_EXAMPLE"
-create_platform_roles "cbweb3-spoke-a" "${SPOKE_ROLES[@]}"
-assign_governance_role_to_service_account "cbweb3-spoke-a" "cbweb3-spoke-a-client"
+  "bank-a" \
+  "bank-a-client" \
+  "$INFRA_ENV_BANK_A" \
+  "$INFRA_ENV_BANK_A_EXAMPLE"
+create_platform_roles "bank-a" "${BANK_ROLES[@]}"
+assign_governance_role_to_service_account "bank-a" "bank-a-client"
 
 create_realm_and_client \
-  "cbweb3-spoke-b" \
-  "cbweb3-spoke-b-client" \
-  "$INFRA_ENV_SPOKE_B" \
-  "$INFRA_ENV_SPOKE_B_EXAMPLE"
-create_platform_roles "cbweb3-spoke-b" "${SPOKE_ROLES[@]}"
-assign_governance_role_to_service_account "cbweb3-spoke-b" "cbweb3-spoke-b-client"
+  "bank-b" \
+  "bank-b-client" \
+  "$INFRA_ENV_BANK_B" \
+  "$INFRA_ENV_BANK_B_EXAMPLE"
+create_platform_roles "bank-b" "${BANK_ROLES[@]}"
+assign_governance_role_to_service_account "bank-b" "bank-b-client"
 
 create_realm_and_client \
-  "cbweb3" \
-  "cbweb3-auth" \
-  "$INFRA_ENV_HUB" \
-  "$INFRA_ENV_HUB_EXAMPLE"
-create_platform_roles "cbweb3" "ROLE_GOVERNANCE"
-assign_governance_role_to_service_account "cbweb3" "cbweb3-auth"
+  "central-bank" \
+  "central-bank-client" \
+  "$INFRA_ENV_CENTRAL_BANK" \
+  "$INFRA_ENV_CENTRAL_BANK_EXAMPLE"
+create_platform_roles "central-bank" "${CENTRAL_BANK_ROLES[@]}"
+assign_governance_role_to_service_account "central-bank" "central-bank-client"
 
 echo "KEYCLOAK_INIT_DONE"
 echo -e "\nConfiguração concluída. Keycloak está em execução."

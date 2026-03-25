@@ -73,8 +73,8 @@ func newNonceStore() noncestore.NonceStore {
 		log.Println("nonce store: REDIS_ADDR not set, using in-memory store (not suitable for production)")
 		return noncestore.NewInMemoryStore()
 	}
-	log.Printf("nonce store: connecting to Redis at %s", addr)
-	return noncestore.NewRedisStore(addr, os.Getenv("REDIS_PASSWORD"), 0)
+	log.Printf("nonce store: connecting to Redis at %s (db=%d)", addr, getEnvInt("REDIS_DB", 0))
+	return noncestore.NewRedisStore(addr, os.Getenv("REDIS_PASSWORD"), getEnvInt("REDIS_DB", 0))
 }
 
 // blockchainRegistry combines read and write access for use in auth-service.
