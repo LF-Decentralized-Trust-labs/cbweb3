@@ -16,16 +16,20 @@ import (
 
 // Participant holds all participant metadata.
 type Participant struct {
-	UserID            string
-	InstitutionName   string
-	CNPJ              string
-	BankCode          string
-	CountryCode       string
-	Role              string
-	WalletAddress     string
-	Status            string // PENDING | ACTIVE | FROZEN | REVOKED
-	CertificateData   string
-	CertificateExpiry *time.Time
+	UserID              string
+	InstitutionName     string
+	CNPJ                string
+	BankCode            string
+	CountryCode         string
+	Role                string
+	WalletAddress       string
+	Status              string
+	CertificateData     string
+	CertificateExpiry   *time.Time
+	BlockchainPubKeyHex string
+	CsrPem              string
+	PopNonce            string
+	PopNonceExpiresAt   *time.Time
 }
 
 // AuditEntry carries a single audit event for persistence.
@@ -55,6 +59,12 @@ type ParticipantFilter struct {
 	Status string
 }
 
+// SignedCSR contains the certificate produced by signing a participant's CSR.
+type SignedCSR struct {
+	CertPEM   string
+	ExpiresAt string
+}
+
 // Client defines the compliance gRPC operations used by the identity service.
 type Client interface {
 	UpsertParticipant(ctx context.Context, p Participant) error
@@ -62,6 +72,7 @@ type Client interface {
 	ListParticipants(ctx context.Context, filter ParticipantFilter) ([]Participant, error)
 	CreateAuditLog(ctx context.Context, entry AuditEntry) error
 	IssueParticipantCertificate(ctx context.Context, userID, role, institutionName, cnpj string) (IssuedCertificate, error)
+	SignParticipantCSR(ctx context.Context, csrPem, userID, role, institutionName, cnpj string) (SignedCSR, error)
 	ManageParticipantStatus(ctx context.Context, subject, status, reason string) error
 }
 
@@ -88,18 +99,24 @@ func New(address string, timeout time.Duration) (Client, error) {
 
 func (c *grpcClient) UpsertParticipant(ctx context.Context, p Participant) error {
 	participant := &compliancv1.Participant{
-		UserId:          p.UserID,
-		InstitutionName: p.InstitutionName,
-		Cnpj:            p.CNPJ,
-		BankCode:        p.BankCode,
-		CountryCode:     p.CountryCode,
-		Role:            p.Role,
-		WalletAddress:   p.WalletAddress,
-		Status:          p.Status,
-		CertificateData: p.CertificateData,
+		UserId:              p.UserID,
+		InstitutionName:     p.InstitutionName,
+		Cnpj:                p.CNPJ,
+		BankCode:            p.BankCode,
+		CountryCode:         p.CountryCode,
+		Role:                p.Role,
+		WalletAddress:       p.WalletAddress,
+		Status:              p.Status,
+		CertificateData:     p.CertificateData,
+		BlockchainPubKeyHex: p.BlockchainPubKeyHex,
+		CsrPem:              p.CsrPem,
+		PopNonce:            p.PopNonce,
 	}
 	if p.CertificateExpiry != nil {
 		participant.CertificateExpiry = timestamppb.New(*p.CertificateExpiry)
+	}
+	if p.PopNonceExpiresAt != nil {
+		participant.PopNonceExpiresAt = timestamppb.New(*p.PopNonceExpiresAt)
 	}
 	_, err := c.cc.UpsertParticipant(ctx, &compliancv1.UpsertParticipantRequest{Participant: participant})
 	return err
@@ -115,19 +132,26 @@ func (c *grpcClient) GetParticipantByUser(ctx context.Context, userID string) (P
 	}
 	pp := resp.Participant
 	result := Participant{
-		UserID:          pp.UserId,
-		InstitutionName: pp.InstitutionName,
-		CNPJ:            pp.Cnpj,
-		BankCode:        pp.BankCode,
-		CountryCode:     pp.CountryCode,
-		Role:            pp.Role,
-		WalletAddress:   pp.WalletAddress,
-		Status:          pp.Status,
-		CertificateData: pp.CertificateData,
+		UserID:              pp.UserId,
+		InstitutionName:     pp.InstitutionName,
+		CNPJ:                pp.Cnpj,
+		BankCode:            pp.BankCode,
+		CountryCode:         pp.CountryCode,
+		Role:                pp.Role,
+		WalletAddress:       pp.WalletAddress,
+		Status:              pp.Status,
+		CertificateData:     pp.CertificateData,
+		BlockchainPubKeyHex: pp.BlockchainPubKeyHex,
+		CsrPem:              pp.CsrPem,
+		PopNonce:            pp.PopNonce,
 	}
 	if pp.CertificateExpiry != nil {
 		t := pp.CertificateExpiry.AsTime()
 		result.CertificateExpiry = &t
+	}
+	if pp.PopNonceExpiresAt != nil {
+		t := pp.PopNonceExpiresAt.AsTime()
+		result.PopNonceExpiresAt = &t
 	}
 	return result, true, nil
 }
@@ -188,6 +212,23 @@ func (c *grpcClient) ListParticipants(ctx context.Context, filter ParticipantFil
 		})
 	}
 	return result, nil
+}
+
+func (c *grpcClient) SignParticipantCSR(ctx context.Context, csrPem, userID, role, institutionName, cnpj string) (SignedCSR, error) {
+	resp, err := c.cc.SignParticipantCSR(ctx, &compliancv1.SignParticipantCSRRequest{
+		CsrPem:          csrPem,
+		UserId:          userID,
+		Role:            role,
+		InstitutionName: institutionName,
+		Cnpj:            cnpj,
+	})
+	if err != nil {
+		return SignedCSR{}, err
+	}
+	return SignedCSR{
+		CertPEM:   resp.CertPem,
+		ExpiresAt: resp.ExpiresAt,
+	}, nil
 }
 
 func (c *grpcClient) ManageParticipantStatus(ctx context.Context, subject, status, reason string) error {

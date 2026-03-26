@@ -6,13 +6,14 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/bootstrap"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/grpc/server"
 	compliancepki "github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/pki"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/repository"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/grpc/server"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 )
 
@@ -46,6 +47,21 @@ func main() {
 
 	bc := newBlockchainClient()
 
+	// Bootstrap PKI files for commercial banks (idempotent).
+	if bankCode := os.Getenv("BANK_CODE"); bankCode != "" {
+		pkiDir := getEnv("PKI_DIR", "")
+		if pkiDir == "" {
+			if v := os.Getenv("CA_CERT_FILE"); v != "" {
+				pkiDir = filepath.Dir(v)
+			}
+		}
+		if pkiDir != "" {
+			if err := bootstrap.EnsurePKIFiles(pkiDir, bankCode, "", "", ""); err != nil {
+				log.Printf("WARN: PKI bootstrap failed: %v", err)
+			}
+		}
+	}
+
 	if ca != nil {
 		ctx := context.Background()
 		if err := bootstrap.EnsureGovernanceParticipant(ctx, repo, bc, ca); err != nil {
@@ -69,19 +85,30 @@ func main() {
 func newBlockchainClient() registry.RegistryWriter {
 	switch getEnv("BLOCKCHAIN_CLIENT", "noop") {
 	case "besu":
+		cbKey := os.Getenv("CB_PRIVATE_KEY")
+		if cbKey == "" {
+			log.Println("compliance: CB_PRIVATE_KEY not set — on-chain writes disabled (commercial bank mode)")
+			return registry.NoopRegistryClient{}
+		}
+
+		signer, err := registry.NewStaticKeySigner(cbKey)
+		if err != nil {
+			log.Printf("WARN: invalid CB_PRIVATE_KEY: %v — using noop mode", err)
+			return registry.NoopRegistryClient{}
+		}
+
 		chainID, _ := strconv.ParseInt(getEnv("BESU_CHAIN_ID", "1337"), 10, 64)
 		bc, err := registry.NewBesuClient(registry.BesuConfig{
 			RPCURL:          os.Getenv("BESU_RPC_URL"),
 			RegistryAddress: os.Getenv("PARTICIPANT_REGISTRY_ADDRESS"),
-			CBPrivateKeyHex: os.Getenv("CB_PRIVATE_KEY"),
 			ChainID:         chainID,
 			RequestTimeout:  time.Duration(15) * time.Second,
-		})
+		}, signer)
 		if err != nil {
 			log.Printf("WARN: blockchain client init failed: %v — using noop mode", err)
 			return registry.NoopRegistryClient{}
 		}
-		log.Println("compliance: blockchain client connected to", os.Getenv("BESU_RPC_URL"))
+		log.Println("compliance: central bank mode — blockchain client connected to", os.Getenv("BESU_RPC_URL"))
 		return bc
 	default:
 		log.Println("compliance: blockchain noop mode (no on-chain writes)")

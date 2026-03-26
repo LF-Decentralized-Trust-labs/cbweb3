@@ -20,7 +20,7 @@ func looksLikeKeycloakUserUUID(s string) bool {
 // resolveLoginUsernameForKeycloak maps a UUID user id to the Keycloak username
 // when possible. On any failure (not a UUID, admin API error, user not found),
 // the original string is returned so Keycloak can still authenticate literal
-// usernames (e.g. tryout-noc, bank-001).
+// usernames (e.g. tryout-noc, bank-a).
 func resolveLoginUsernameForKeycloak(ctx context.Context, kc keycloak.Client, user string) string {
 	u := strings.TrimSpace(user)
 	if u == "" || !looksLikeKeycloakUserUUID(u) {

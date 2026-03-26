@@ -1,8 +1,10 @@
-PALADIN_DIR      := deploy/local/paladin
-PALADIN_SCRIPTS  := $(PALADIN_DIR)/scripts
-PALADIN_TIMEOUT  ?= 5m
-BESU_RPC_URL_A   ?= http://127.0.0.1:8645
-BESU_RPC_URL_B   ?= http://127.0.0.1:8745
+PALADIN_DIR        := deploy/local/paladin
+PALADIN_SCRIPTS    := $(PALADIN_DIR)/scripts
+PALADIN_TIMEOUT    ?= 5m
+BESU_READY_WAIT    ?= 60
+PALADIN_READY_WAIT ?= 10
+BESU_RPC_URL_A     ?= http://127.0.0.1:8645
+BESU_RPC_URL_B     ?= http://127.0.0.1:8745
 
 # ── contract deployment ──────────────────────────────────────────────────────
 
@@ -88,29 +90,29 @@ paladin.stop-spoke-b:
 # Expects the corresponding Besu network to already be running.
 
 setup-spoke-a: deploy.up-spoke-a
-	@echo "Waiting for Besu spoke-a to be ready..."
-	@sleep 15
+	@echo "Waiting for Besu spoke-a to be ready ($(BESU_READY_WAIT)s)..."
+	@sleep $(BESU_READY_WAIT)
 	@$(MAKE) paladin.deploy-contracts-spoke-a
 	@$(MAKE) paladin.generate-certs-spoke-a
 	@$(MAKE) paladin.render-configs-spoke-a
 	@$(MAKE) paladin.register-nodes-spoke-a
 	@$(MAKE) paladin.stop-spoke-a
 	@$(MAKE) paladin.start-spoke-a
-	@echo "Waiting for Paladin spoke-a nodes to be ready..."
-	@sleep 10
+	@echo "Waiting for Paladin spoke-a nodes to be ready ($(PALADIN_READY_WAIT)s)..."
+	@sleep $(PALADIN_READY_WAIT)
 	@echo "Spoke-a setup complete."
 
 setup-spoke-b: deploy.up-spoke-b
-	@echo "Waiting for Besu spoke-b to be ready..."
-	@sleep 15
+	@echo "Waiting for Besu spoke-b to be ready ($(BESU_READY_WAIT)s)..."
+	@sleep $(BESU_READY_WAIT)
 	@$(MAKE) paladin.deploy-contracts-spoke-b
 	@$(MAKE) paladin.generate-certs-spoke-b
 	@$(MAKE) paladin.render-configs-spoke-b
 	@$(MAKE) paladin.register-nodes-spoke-b
 	@$(MAKE) paladin.stop-spoke-b
 	@$(MAKE) paladin.start-spoke-b
-	@echo "Waiting for Paladin spoke-b nodes to be ready..."
-	@sleep 10
+	@echo "Waiting for Paladin spoke-b nodes to be ready ($(PALADIN_READY_WAIT)s)..."
+	@sleep $(PALADIN_READY_WAIT)
 	@echo "Spoke-b setup complete."
 
 setup-spoke-uc: setup-spoke-a setup-spoke-b
@@ -125,4 +127,4 @@ setup-spoke-uc: setup-spoke-a setup-spoke-b
 	paladin.render-configs-spoke-a paladin.render-configs-spoke-b \
 	paladin.start-spoke-a paladin.stop-spoke-a \
 	paladin.start-spoke-b paladin.stop-spoke-b \
-	setup-spoke-a setup-spoke-b setup-scope-uc
+	setup-spoke-a setup-spoke-b setup-spoke-uc

@@ -3,6 +3,7 @@ package pki
 import (
 	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -28,4 +29,9 @@ func parseECPrivKeyPEM(keyPEM string) (*ecdsa.PrivateKey, error) {
 // randReader returns the crypto/rand reader. Extracted to allow patching in tests.
 func randReader() io.Reader {
 	return rand.Reader
+}
+
+// sha256Raw returns the SHA-256 hash of raw bytes as a fixed-size array.
+func sha256Raw(data []byte) [32]byte {
+	return sha256.Sum256(data)
 }

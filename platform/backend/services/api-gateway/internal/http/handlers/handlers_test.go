@@ -332,7 +332,7 @@ func TestAMLScreenApproved(t *testing.T) {
 	app := fiber.New()
 	app.Post("/compliance/aml/screen", handler.AMLScreen)
 
-	body, _ := json.Marshal(map[string]string{"subject": "bank-001"})
+	body, _ := json.Marshal(map[string]string{"subject": "bank-a"})
 	req := httptest.NewRequest(http.MethodPost, "/compliance/aml/screen", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -408,7 +408,7 @@ func TestProvisionParticipantSuccess(t *testing.T) {
 	app := fiber.New()
 	app.Post("/compliance/participants/provision", handler.ProvisionParticipant)
 
-	body, _ := json.Marshal(map[string]string{"subject": "bank-001", "status": "APPROVED"})
+	body, _ := json.Marshal(map[string]string{"subject": "bank-a", "status": "APPROVED"})
 	req := httptest.NewRequest(http.MethodPost, "/compliance/participants/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -427,7 +427,7 @@ func TestProvisionParticipantMissingFields(t *testing.T) {
 	app := fiber.New()
 	app.Post("/compliance/participants/provision", handler.ProvisionParticipant)
 
-	body, _ := json.Marshal(map[string]string{"subject": "bank-001"})
+	body, _ := json.Marshal(map[string]string{"subject": "bank-a"})
 	req := httptest.NewRequest(http.MethodPost, "/compliance/participants/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -446,7 +446,7 @@ func TestFreezeAccountSuccess(t *testing.T) {
 	app := fiber.New()
 	app.Post("/compliance/accounts/freeze", handler.FreezeAccount)
 
-	body, _ := json.Marshal(map[string]string{"subject": "bank-001"})
+	body, _ := json.Marshal(map[string]string{"subject": "bank-a"})
 	req := httptest.NewRequest(http.MethodPost, "/compliance/accounts/freeze", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -465,7 +465,7 @@ func TestUnfreezeAccountSuccess(t *testing.T) {
 	app := fiber.New()
 	app.Post("/compliance/accounts/unfreeze", handler.UnfreezeAccount)
 
-	body, _ := json.Marshal(map[string]string{"subject": "bank-001"})
+	body, _ := json.Marshal(map[string]string{"subject": "bank-a"})
 	req := httptest.NewRequest(http.MethodPost, "/compliance/accounts/unfreeze", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -484,7 +484,7 @@ func TestFreezeAccountError(t *testing.T) {
 	app := fiber.New()
 	app.Post("/compliance/accounts/freeze", handler.FreezeAccount)
 
-	body, _ := json.Marshal(map[string]string{"subject": "bank-001"})
+	body, _ := json.Marshal(map[string]string{"subject": "bank-a"})
 	req := httptest.NewRequest(http.MethodPost, "/compliance/accounts/freeze", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)

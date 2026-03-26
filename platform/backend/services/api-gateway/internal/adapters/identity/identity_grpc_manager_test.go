@@ -82,6 +82,24 @@ func (m *mockAuthClient) VerifyPKILogin(_ context.Context, _ *authv1.VerifyPKILo
 func (m *mockAuthClient) ChangeClientSecret(_ context.Context, _ *authv1.ChangeClientSecretRequest, _ ...grpc.CallOption) (*authv1.ChangeClientSecretResponse, error) {
 	return nil, errors.New("not implemented")
 }
+func (m *mockAuthClient) SubmitCredentialRequest(_ context.Context, _ *authv1.SubmitCredentialRequestReq, _ ...grpc.CallOption) (*authv1.SubmitCredentialRequestResp, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) GetOnboardingStatus(_ context.Context, _ *authv1.GetOnboardingStatusRequest, _ ...grpc.CallOption) (*authv1.GetOnboardingStatusResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) CompleteOnboarding(_ context.Context, _ *authv1.CompleteOnboardingRequest, _ ...grpc.CallOption) (*authv1.CompleteOnboardingResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) CreateOnboardingKey(_ context.Context, _ *authv1.CreateOnboardingKeyRequest, _ ...grpc.CallOption) (*authv1.CreateOnboardingKeyResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) SignOnboardingPoP(_ context.Context, _ *authv1.SignOnboardingPoPRequest, _ ...grpc.CallOption) (*authv1.SignOnboardingPoPResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockAuthClient) GetOnboardingKey(_ context.Context, _ *authv1.GetOnboardingKeyRequest, _ ...grpc.CallOption) (*authv1.GetOnboardingKeyResponse, error) {
+	return nil, errors.New("not implemented")
+}
 
 func TestNewIdentityGRPCManager(t *testing.T) {
 	// Note: gRPC creates connection lazily, so it won't fail immediately

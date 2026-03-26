@@ -2,9 +2,11 @@
 # sync-contracts.sh — Extracts deployed contract addresses from Foundry broadcast
 # output and updates .env.infra.* files used by backend microservices.
 #
-# Hub  (chain 1337): IdentityRegistry, tCeBM_BRL, tCeBM_EUR, HTLC, AMM, FXAgreement, ManualOracle
 # Spoke-A (chain 1338): IdentityRegistry, tCeBM (domestic token), HTLC, SpokeBridge
-# Spoke-B (chain 1339): IdentityRegistry, tCeBM (domestic token), HTLC, SpokeBridge
+#   All three entities (bank-a, bank-c, central-bank-a) share the same spoke-a
+#   Besu network, so the same contract addresses are written to all three env files.
+#
+# Spoke-B (chain 1339): same contracts; written to bank-b, bank-d, central-bank-b.
 #
 # Requires: jq
 
@@ -13,17 +15,24 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
-HUB_CHAIN_ID="${HUB_CHAIN_ID:-1337}"
+# GNU sed (Linux) uses `sed -i`; BSD sed (macOS) requires `sed -i ''`
+if [[ "$(uname)" == "Darwin" ]]; then
+  SED_INPLACE=(sed -i '')
+else
+  SED_INPLACE=(sed -i)
+fi
+
 SPOKE_A_CHAIN_ID="${SPOKE_A_CHAIN_ID:-1338}"
-SPOKE_B_CHAIN_ID="${SPOKE_B_CHAIN_ID:-1339}"
 
-HUB_BROADCAST="${ROOT_DIR}/contracts/broadcast/CBWeb3Hub.s.sol/${HUB_CHAIN_ID}/run-latest.json"
 SPOKE_A_BROADCAST="${ROOT_DIR}/contracts/broadcast/CBWeb3Spoke.s.sol/${SPOKE_A_CHAIN_ID}/run-latest.json"
-SPOKE_B_BROADCAST="${ROOT_DIR}/contracts/broadcast/CBWeb3Spoke.s.sol/${SPOKE_B_CHAIN_ID}/run-latest.json"
 
-ENV_HUB="${ROOT_DIR}/backend/config/.env.infra.hub"
-ENV_SPOKE_A="${ROOT_DIR}/backend/config/.env.infra.spoke-a"
-ENV_SPOKE_B="${ROOT_DIR}/backend/config/.env.infra.spoke-b"
+ENV_BANK_A="${ROOT_DIR}/backend/config/.env.infra.bank-a"
+ENV_BANK_B="${ROOT_DIR}/backend/config/.env.infra.bank-b"
+ENV_CENTRAL_BANK_A="${ROOT_DIR}/backend/config/.env.infra.central-bank-a"
+
+ENV_BANK_C="${ROOT_DIR}/backend/config/.env.infra.bank-c"
+ENV_BANK_D="${ROOT_DIR}/backend/config/.env.infra.bank-d"
+ENV_CENTRAL_BANK_B="${ROOT_DIR}/backend/config/.env.infra.central-bank-b"
 
 # --- Preflight checks ---
 if ! command -v jq &>/dev/null; then
@@ -45,7 +54,7 @@ extract_address() {
 upsert_env() {
   local file="$1" key="$2" value="$3"
   if grep -qE "^#?${key}=" "${file}" 2>/dev/null; then
-    sed -i '' "s|^#*${key}=.*|${key}=${value}|" "${file}"
+    "${SED_INPLACE[@]}" "s|^#*${key}=.*|${key}=${value}|" "${file}"
   else
     echo "${key}=${value}" >> "${file}"
   fi
@@ -54,60 +63,7 @@ upsert_env() {
 UPDATED=0
 
 # ============================================================
-# HUB (chain 1337)
-# ============================================================
-if [[ -f "${HUB_BROADCAST}" ]]; then
-  echo "--- Hub (chain ${HUB_CHAIN_ID}) ---"
-
-  HUB_IDENTITY_REGISTRY=$(extract_address "${HUB_BROADCAST}" "IdentityRegistry")
-  HUB_TOKEN_BRL=$(extract_address "${HUB_BROADCAST}" "TokenizedCentralBankMoney" 1)
-  HUB_TOKEN_EUR=$(extract_address "${HUB_BROADCAST}" "TokenizedCentralBankMoney" 2)
-  HUB_HTLC=$(extract_address "${HUB_BROADCAST}" "HashTimeLockedContract")
-  HUB_AMM=$(extract_address "${HUB_BROADCAST}" "AutomatedMarketMaker")
-  HUB_FX_AGREEMENT=$(extract_address "${HUB_BROADCAST}" "FXAgreement")
-  HUB_ORACLE=$(extract_address "${HUB_BROADCAST}" "ManualOracle")
-
-  MISSING=()
-  [[ -z "${HUB_IDENTITY_REGISTRY}" ]] && MISSING+=("IdentityRegistry")
-  [[ -z "${HUB_TOKEN_BRL}" ]]         && MISSING+=("tCeBM_BRL")
-  [[ -z "${HUB_TOKEN_EUR}" ]]         && MISSING+=("tCeBM_EUR")
-  [[ -z "${HUB_HTLC}" ]]              && MISSING+=("HTLC")
-  [[ -z "${HUB_AMM}" ]]               && MISSING+=("AMM")
-  [[ -z "${HUB_FX_AGREEMENT}" ]]      && MISSING+=("FXAgreement")
-  [[ -z "${HUB_ORACLE}" ]]            && MISSING+=("ManualOracle")
-
-  if [[ ${#MISSING[@]} -gt 0 ]]; then
-    echo "ERROR: Hub — missing addresses: ${MISSING[*]}" >&2
-    exit 1
-  fi
-
-  if [[ -f "${ENV_HUB}" ]]; then
-    upsert_env "${ENV_HUB}" "PARTICIPANT_REGISTRY_ADDRESS" "${HUB_IDENTITY_REGISTRY}"
-    upsert_env "${ENV_HUB}" "TOKEN_BRL_ADDRESS"            "${HUB_TOKEN_BRL}"
-    upsert_env "${ENV_HUB}" "TOKEN_EUR_ADDRESS"            "${HUB_TOKEN_EUR}"
-    upsert_env "${ENV_HUB}" "HTLC_ADDRESS"                 "${HUB_HTLC}"
-    upsert_env "${ENV_HUB}" "AMM_ADDRESS"                  "${HUB_AMM}"
-    upsert_env "${ENV_HUB}" "FX_AGREEMENT_ADDRESS"         "${HUB_FX_AGREEMENT}"
-    upsert_env "${ENV_HUB}" "ORACLE_ADDRESS"               "${HUB_ORACLE}"
-    UPDATED=$((UPDATED + 1))
-    echo "  Updated: ${ENV_HUB}"
-  else
-    echo "  WARN: ${ENV_HUB} not found, skipping." >&2
-  fi
-
-  echo "  IdentityRegistry : ${HUB_IDENTITY_REGISTRY}"
-  echo "  tCeBM_BRL        : ${HUB_TOKEN_BRL}"
-  echo "  tCeBM_EUR        : ${HUB_TOKEN_EUR}"
-  echo "  HTLC             : ${HUB_HTLC}"
-  echo "  AMM              : ${HUB_AMM}"
-  echo "  FX Agreement     : ${HUB_FX_AGREEMENT}"
-  echo "  Manual Oracle    : ${HUB_ORACLE}"
-else
-  echo "WARN: Hub broadcast not found: ${HUB_BROADCAST} — skipping hub sync." >&2
-fi
-
-# ============================================================
-# SPOKE-A (chain 1338)
+# SPOKE-A (chain 1338) — shared by bank-a, bank-c, central-bank-a
 # ============================================================
 if [[ -f "${SPOKE_A_BROADCAST}" ]]; then
   echo "--- Spoke-A (chain ${SPOKE_A_CHAIN_ID}) ---"
@@ -128,28 +84,35 @@ if [[ -f "${SPOKE_A_BROADCAST}" ]]; then
     exit 1
   fi
 
-  if [[ -f "${ENV_SPOKE_A}" ]]; then
-    upsert_env "${ENV_SPOKE_A}" "PARTICIPANT_REGISTRY_ADDRESS" "${SA_IDENTITY_REGISTRY}"
-    upsert_env "${ENV_SPOKE_A}" "TOKEN_ADDRESS"                "${SA_TOKEN}"
-    upsert_env "${ENV_SPOKE_A}" "HTLC_ADDRESS"                 "${SA_HTLC}"
-    upsert_env "${ENV_SPOKE_A}" "SPOKE_BRIDGE_ADDRESS"         "${SA_SPOKE_BRIDGE}"
-    UPDATED=$((UPDATED + 1))
-    echo "  Updated: ${ENV_SPOKE_A}"
-  else
-    echo "  WARN: ${ENV_SPOKE_A} not found, skipping." >&2
-  fi
-
   echo "  IdentityRegistry : ${SA_IDENTITY_REGISTRY}"
   echo "  Token            : ${SA_TOKEN}"
   echo "  HTLC             : ${SA_HTLC}"
   echo "  Spoke Bridge     : ${SA_SPOKE_BRIDGE}"
+
+  # Write same addresses to all three entity env files
+  for ENV_FILE in "${ENV_BANK_A}" "${ENV_BANK_C}" "${ENV_CENTRAL_BANK_A}"; do
+    if [[ -f "${ENV_FILE}" ]]; then
+      upsert_env "${ENV_FILE}" "PARTICIPANT_REGISTRY_ADDRESS" "${SA_IDENTITY_REGISTRY}"
+      upsert_env "${ENV_FILE}" "TOKEN_ADDRESS"                "${SA_TOKEN}"
+      upsert_env "${ENV_FILE}" "HTLC_ADDRESS"                 "${SA_HTLC}"
+      upsert_env "${ENV_FILE}" "SPOKE_BRIDGE_ADDRESS"         "${SA_SPOKE_BRIDGE}"
+      UPDATED=$((UPDATED + 1))
+      echo "  Updated: ${ENV_FILE}"
+    else
+      echo "  WARN: ${ENV_FILE} not found, skipping." >&2
+    fi
+  done
 else
   echo "WARN: Spoke-A broadcast not found: ${SPOKE_A_BROADCAST} — skipping spoke-a sync." >&2
 fi
 
 # ============================================================
-# SPOKE-B (chain 1339)
+# SPOKE-B (chain 1339) — shared by bank-b, bank-d, central-bank-b
 # ============================================================
+SPOKE_B_CHAIN_ID="${SPOKE_B_CHAIN_ID:-1339}"
+
+SPOKE_B_BROADCAST="${ROOT_DIR}/contracts/broadcast/CBWeb3Spoke.s.sol/${SPOKE_B_CHAIN_ID}/run-latest.json"
+
 if [[ -f "${SPOKE_B_BROADCAST}" ]]; then
   echo "--- Spoke-B (chain ${SPOKE_B_CHAIN_ID}) ---"
 
@@ -158,34 +121,58 @@ if [[ -f "${SPOKE_B_BROADCAST}" ]]; then
   SB_HTLC=$(extract_address "${SPOKE_B_BROADCAST}" "HashTimeLockedContract")
   SB_SPOKE_BRIDGE=$(extract_address "${SPOKE_B_BROADCAST}" "SpokeBridge")
 
-  MISSING=()
-  [[ -z "${SB_IDENTITY_REGISTRY}" ]] && MISSING+=("IdentityRegistry")
-  [[ -z "${SB_TOKEN}" ]]             && MISSING+=("Token")
-  [[ -z "${SB_HTLC}" ]]              && MISSING+=("HTLC")
-  [[ -z "${SB_SPOKE_BRIDGE}" ]]      && MISSING+=("SpokeBridge")
+  MISSING_B=()
+  [[ -z "${SB_IDENTITY_REGISTRY}" ]] && MISSING_B+=("IdentityRegistry")
+  [[ -z "${SB_TOKEN}" ]]             && MISSING_B+=("Token")
+  [[ -z "${SB_HTLC}" ]]              && MISSING_B+=("HTLC")
+  [[ -z "${SB_SPOKE_BRIDGE}" ]]      && MISSING_B+=("SpokeBridge")
 
-  if [[ ${#MISSING[@]} -gt 0 ]]; then
-    echo "ERROR: Spoke-B — missing addresses: ${MISSING[*]}" >&2
+  if [[ ${#MISSING_B[@]} -gt 0 ]]; then
+    echo "ERROR: Spoke-B — missing addresses: ${MISSING_B[*]}" >&2
     exit 1
-  fi
-
-  if [[ -f "${ENV_SPOKE_B}" ]]; then
-    upsert_env "${ENV_SPOKE_B}" "PARTICIPANT_REGISTRY_ADDRESS" "${SB_IDENTITY_REGISTRY}"
-    upsert_env "${ENV_SPOKE_B}" "TOKEN_ADDRESS"                "${SB_TOKEN}"
-    upsert_env "${ENV_SPOKE_B}" "HTLC_ADDRESS"                 "${SB_HTLC}"
-    upsert_env "${ENV_SPOKE_B}" "SPOKE_BRIDGE_ADDRESS"         "${SB_SPOKE_BRIDGE}"
-    UPDATED=$((UPDATED + 1))
-    echo "  Updated: ${ENV_SPOKE_B}"
-  else
-    echo "  WARN: ${ENV_SPOKE_B} not found, skipping." >&2
   fi
 
   echo "  IdentityRegistry : ${SB_IDENTITY_REGISTRY}"
   echo "  Token            : ${SB_TOKEN}"
   echo "  HTLC             : ${SB_HTLC}"
   echo "  Spoke Bridge     : ${SB_SPOKE_BRIDGE}"
+
+  for ENV_FILE in "${ENV_BANK_B}" "${ENV_BANK_D}" "${ENV_CENTRAL_BANK_B}"; do
+    if [[ -f "${ENV_FILE}" ]]; then
+      upsert_env "${ENV_FILE}" "PARTICIPANT_REGISTRY_ADDRESS" "${SB_IDENTITY_REGISTRY}"
+      upsert_env "${ENV_FILE}" "TOKEN_ADDRESS"                "${SB_TOKEN}"
+      upsert_env "${ENV_FILE}" "HTLC_ADDRESS"                 "${SB_HTLC}"
+      upsert_env "${ENV_FILE}" "SPOKE_BRIDGE_ADDRESS"         "${SB_SPOKE_BRIDGE}"
+      UPDATED=$((UPDATED + 1))
+      echo "  Updated: ${ENV_FILE}"
+    else
+      echo "  WARN: ${ENV_FILE} not found, skipping." >&2
+    fi
+  done
 else
   echo "WARN: Spoke-B broadcast not found: ${SPOKE_B_BROADCAST} — skipping spoke-b sync." >&2
+fi
+
+# ============================================================
+# CB_PRIVATE_KEY — Propagate deployer key to central bank envs only
+# ============================================================
+CONTRACTS_ENV="${ROOT_DIR}/contracts/.env"
+if [[ -f "${CONTRACTS_ENV}" ]]; then
+  DEPLOYER_KEY=$(grep -E '^DEPLOYER_PRIVATE_KEY=' "${CONTRACTS_ENV}" | head -1 | cut -d= -f2-)
+  DEPLOYER_KEY="${DEPLOYER_KEY#0x}"
+  if [[ -n "${DEPLOYER_KEY}" ]]; then
+    echo "--- CB_PRIVATE_KEY (deployer) ---"
+    for CB_ENV in "${ENV_CENTRAL_BANK_A}" "${ENV_CENTRAL_BANK_B}"; do
+      if [[ -f "${CB_ENV}" ]]; then
+        upsert_env "${CB_ENV}" "CB_PRIVATE_KEY" "${DEPLOYER_KEY}"
+        echo "  Updated CB_PRIVATE_KEY in: ${CB_ENV}"
+      fi
+    done
+  else
+    echo "WARN: DEPLOYER_PRIVATE_KEY is empty in ${CONTRACTS_ENV} — skipping CB_PRIVATE_KEY." >&2
+  fi
+else
+  echo "WARN: ${CONTRACTS_ENV} not found — skipping CB_PRIVATE_KEY propagation." >&2
 fi
 
 # --- Summary ---

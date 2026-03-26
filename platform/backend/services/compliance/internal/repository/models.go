@@ -6,18 +6,22 @@ import "time"
 // It replaces the data-access ParticipantModel, removing ZKP/DID fields and
 // adding PKI certificate fields.
 type ParticipantModel struct {
-	UserID           string     `gorm:"column:user_id;primaryKey"`
-	InstitutionName  string     `gorm:"column:institution_name"`
-	CNPJ             string     `gorm:"column:cnpj"`
-	BankCode         string     `gorm:"column:bank_code"`
-	CountryCode      string     `gorm:"column:country_code"`
-	Role             string     `gorm:"column:participant_role"`
-	WalletAddress    string     `gorm:"column:wallet_address;uniqueIndex"`
-	Status           string     `gorm:"column:status;default:PENDING"` // PENDING|ACTIVE|FROZEN|REVOKED
-	CertificateData  string     `gorm:"column:certificate_data;type:text"`
-	CertificateExpiry *time.Time `gorm:"column:certificate_expiry"`
-	CreatedAt        time.Time  `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt        time.Time  `gorm:"column:updated_at;autoUpdateTime"`
+	UserID              string     `gorm:"column:user_id;primaryKey"`
+	InstitutionName     string     `gorm:"column:institution_name"`
+	CNPJ                string     `gorm:"column:cnpj"`
+	BankCode            string     `gorm:"column:bank_code"`
+	CountryCode         string     `gorm:"column:country_code"`
+	Role                string     `gorm:"column:participant_role"`
+	WalletAddress       string     `gorm:"column:wallet_address;uniqueIndex"`
+	Status              string     `gorm:"column:status;default:PENDING"`
+	CertificateData     string     `gorm:"column:certificate_data;type:text"`
+	CertificateExpiry   *time.Time `gorm:"column:certificate_expiry"`
+	BlockchainPubKeyHex string     `gorm:"column:blockchain_pub_key_hex"`
+	CsrPem              string     `gorm:"column:csr_pem;type:text"`
+	PopNonce            string     `gorm:"column:pop_nonce"`
+	PopNonceExpiresAt   *time.Time `gorm:"column:pop_nonce_expires_at"`
+	CreatedAt           time.Time  `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt           time.Time  `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (ParticipantModel) TableName() string { return "participants" }

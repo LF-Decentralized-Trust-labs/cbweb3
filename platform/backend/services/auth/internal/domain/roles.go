@@ -36,10 +36,11 @@ func RequiresPKI(role string) bool {
 	return pkiRoles[role]
 }
 
-// onChainRoles is the subset of roles that require on-chain registration.
+// onChainRoles is the subset of roles that require on-chain registration
+// in the IdentityRegistry contract. Only roles that exist in the Solidity
+// ParticipantRole enum are included.
 var onChainRoles = map[string]bool{
 	RoleCommercialBank: true,
-	RoleNOC:            true,
 }
 
 // RequiresOnChain reports whether role demands on-chain registration.
@@ -62,11 +63,32 @@ func RequiresKMS(role string) bool {
 type ParticipantStatus string
 
 const (
-	ParticipantStatusPending  ParticipantStatus = "PENDING"
-	ParticipantStatusActive   ParticipantStatus = "ACTIVE"
-	ParticipantStatusFrozen   ParticipantStatus = "FROZEN"
-	ParticipantStatusRevoked  ParticipantStatus = "REVOKED"
+	ParticipantStatusPending              ParticipantStatus = "PENDING"
+	ParticipantStatusCredentialRequested  ParticipantStatus = "CREDENTIAL_REQUESTED"
+	ParticipantStatusKYCApproved          ParticipantStatus = "KYC_APPROVED"
+	ParticipantStatusActive               ParticipantStatus = "ACTIVE"
+	ParticipantStatusFrozen               ParticipantStatus = "FROZEN"
+	ParticipantStatusRevoked              ParticipantStatus = "REVOKED"
 )
+
+// validTransitions defines the allowed state machine for participant lifecycle.
+var validTransitions = map[ParticipantStatus][]ParticipantStatus{
+	ParticipantStatusPending:             {ParticipantStatusCredentialRequested, ParticipantStatusActive},
+	ParticipantStatusCredentialRequested: {ParticipantStatusKYCApproved, ParticipantStatusRevoked},
+	ParticipantStatusKYCApproved:         {ParticipantStatusActive, ParticipantStatusRevoked},
+	ParticipantStatusActive:              {ParticipantStatusFrozen, ParticipantStatusRevoked},
+	ParticipantStatusFrozen:              {ParticipantStatusActive, ParticipantStatusRevoked},
+}
+
+// IsValidTransition reports whether moving from current to next is allowed.
+func IsValidTransition(current, next ParticipantStatus) bool {
+	for _, allowed := range validTransitions[current] {
+		if allowed == next {
+			return true
+		}
+	}
+	return false
+}
 
 // TokenClaims is the normalized token claims payload extracted from a Keycloak JWT.
 type TokenClaims struct {

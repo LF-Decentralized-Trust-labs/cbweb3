@@ -9,6 +9,7 @@ import (
 	"encoding/asn1"
 	"encoding/hex"
 	"encoding/pem"
+	"log"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
@@ -148,12 +150,14 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 			return c.Status(fiber.StatusOK).JSON(fiber.Map{"nonce": nonce})
 		}
 		// Determine whether to fall through or reject hard.
-		if st, ok := status.FromError(err); ok {
-			msg := st.Message()
-			if msg != "participant not found" && msg != "PKI_NOT_REQUIRED" {
-				// Auth failure (invalid credentials, internal error) — reject.
-				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
-			}
+		st, ok := status.FromError(err)
+		if !ok {
+			// Non-gRPC error (network, timeout, context cancelled) — reject.
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable"})
+		}
+		msg := st.Message()
+		if msg != "participant not found" && msg != "PKI_NOT_REQUIRED" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
 		}
 		// participant not found or PKI not required → fall through to direct login.
 	}
@@ -244,13 +248,21 @@ func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
 	token, err := h.pkiAuthProvider.VerifyPKILogin(c.UserContext(), req.UserID, req.NonceSignatureHex, req.CertPEM)
 	if err != nil {
 		errMsg := "PKI verification failed"
+		httpStatus := fiber.StatusUnauthorized
 		if st, ok := status.FromError(err); ok {
 			msg := st.Message()
-			if msg == "INVALID_CERTIFICATE_CHAIN" || msg == "NONCE_SIGNATURE_MISMATCH" {
+			switch {
+			case msg == "INVALID_CERTIFICATE_CHAIN" || msg == "NONCE_SIGNATURE_MISMATCH":
 				errMsg = msg
+			case st.Code() == codes.PermissionDenied:
+				errMsg = msg
+				httpStatus = fiber.StatusForbidden
+			case st.Code() == codes.Internal:
+				log.Printf("WARN: WalletBind: internal error for user %s: %s", req.UserID, msg)
+				httpStatus = fiber.StatusInternalServerError
 			}
 		}
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": errMsg})
+		return c.Status(httpStatus).JSON(fiber.Map{"error": errMsg})
 	}
 
 	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, h.cookieSecure)
@@ -327,9 +339,9 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 // cert_file can be:
 //   - a combined .pem file containing both CERTIFICATE and EC PRIVATE KEY blocks
 //   - a .crt file; in this case the matching .key file (same base name) is loaded
-//     automatically from PKI_DIR (e.g. "bank-001.crt" → also reads "bank-001.key")
+//     automatically from PKI_DIR (e.g. "bank-a.crt" → also reads "bank-a.key")
 //
-// Request: { "nonce": "<64-char hex>", "cert_file": "bank-001.crt" }
+// Request: { "nonce": "<64-char hex>", "cert_file": "bank-a.crt" }
 // Response: { "nonce_signature_hex": "<hex DER>", "cert_pem": "<PEM>" }
 func (h *AuthHandler) ResolveChallenger(c *fiber.Ctx) error { // MVP-only
 	var req struct {
@@ -378,7 +390,7 @@ func (h *AuthHandler) ResolveChallenger(c *fiber.Ctx) error { // MVP-only
 	}
 
 	// If the private key was not found in the cert file, look for a sibling .key
-	// file with the same base name (e.g. "bank-001.crt" → "bank-001.key").
+	// file with the same base name (e.g. "bank-a.crt" → "bank-a.key").
 	// This matches the file layout produced by `make pki.gen-commercial-banks`.
 	if keyPEMBlock == nil {
 		ext := filepath.Ext(req.CertFile)

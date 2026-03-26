@@ -80,3 +80,71 @@ type OnboardParticipantRequest struct {
 	Country         string
 	BankCode        string
 }
+
+// --- 3-Phase Onboarding (PKI + Blockchain) ---
+
+// CredentialRequest carries the Phase 1 payload from a commercial bank.
+type CredentialRequest struct {
+	CsrPem              string
+	BlockchainPubKeyHex string
+	InstitutionName     string
+	CNPJ                string
+	BankCode            string
+	Country             string
+	Role                string
+	Email               string
+	Username            string
+}
+
+// CredentialRequestResult is the Phase 1 response.
+type CredentialRequestResult struct {
+	RequestID     string
+	UserID        string
+	WalletAddress string
+	Status        string
+}
+
+// OnboardingStatus is the Phase 2.5 polling response.
+type OnboardingStatus struct {
+	RequestID     string
+	UserID        string
+	Status        string
+	PopNonce      string
+	WalletAddress string
+}
+
+// CompleteOnboardingRequest is the Phase 3 payload.
+type CompleteOnboardingRequest struct {
+	RequestID           string
+	UserID              string
+	PopSignatureHex     string
+	BlockchainPubKeyHex string
+}
+
+// CompleteOnboardingResult is the Phase 3 response.
+type CompleteOnboardingResult struct {
+	UserID        string
+	WalletAddress string
+	CertPEM       string
+	TxHash        string
+	ClientSecret  string
+	Status        string
+}
+
+// OnboardingManager handles the 3-phase PKI+Blockchain onboarding flow.
+type OnboardingManager interface {
+	SubmitCredentialRequest(ctx context.Context, req CredentialRequest) (CredentialRequestResult, error)
+	GetOnboardingStatus(ctx context.Context, requestID string) (OnboardingStatus, error)
+	CompleteOnboarding(ctx context.Context, req CompleteOnboardingRequest) (CompleteOnboardingResult, error)
+}
+
+// OnboardingKeyManager provides KMS operations for the commercial bank proxy.
+// The proxy uses these to generate blockchain keys and sign PoP nonces
+// internally, removing the burden from the frontend.
+type OnboardingKeyManager interface {
+	// CreateOnboardingKey generates (or retrieves) a secp256k1 key for bankCode.
+	CreateOnboardingKey(ctx context.Context, bankCode string) (pubKeyHex, address string, err error)
+	// SignOnboardingPoP signs the PoP nonce with the KMS key for keyID.
+	// Returns the signature (V=0/1) and the public key hex.
+	SignOnboardingPoP(ctx context.Context, keyID, nonceHex string) (signatureHex, pubKeyHex string, err error)
+}

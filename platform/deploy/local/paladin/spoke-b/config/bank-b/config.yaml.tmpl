@@ -1,4 +1,4 @@
-nodeName: spoke-b-bank-d
+nodeName: spoke-b-bank-b
 
 log:
   level: debug
@@ -19,12 +19,12 @@ rpcServer:
     port: 8549
     address: 0.0.0.0
 
-# Besu node-2 for spoke-b (host port 8748/8758)
+# Besu node-1 for spoke-b (host port 8746/8756)
 blockchain:
   http:
-    url: "http://host.docker.internal:8748"
+    url: "http://host.docker.internal:8746"
   ws:
-    url: "ws://host.docker.internal:8758"
+    url: "ws://host.docker.internal:8756"
 
 transports:
   grpc:
@@ -34,7 +34,7 @@ transports:
     config:
       port: 9000
       address: 0.0.0.0
-      externalHostname: paladin-spoke-b-bank-d
+      externalHostname: paladin-spoke-b-bank-b
       tls:
         certFile: /etc/paladin/tls.crt
         keyFile: /etc/paladin/tls.key
@@ -85,7 +85,7 @@ wallets:
           keys:
             funded_operator:
               encoding: hex
-              inline: "5b02fc9b19facc6de72b514a03db7f7fbd9f46b6ad6ffb24b8df575593ae87f1"
+              inline: "ae6ae8e5ccbfb04590405997ee2d52d2b330726137b875053c36d94e974d162f"
       keyDerivation:
         type: direct
   - name: "hd_wallet"

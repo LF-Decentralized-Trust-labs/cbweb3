@@ -39,6 +39,7 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
             role: role,
             status: IdentityRegistryLibrary.KycStatus.Verified,
             zkPointer: zkPointer,
+            certFingerprint: bytes32(0),
             lastUpdate: block.timestamp
         });
 
@@ -88,5 +89,23 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
         _participants[account].lastUpdate = block.timestamp;
 
         emit IdentityUpdated(account, oldStatus, newStatus);
+    }
+
+    /// @inheritdoc IIdentityRegistry
+    /// @dev Binds an X.509 certificate to a participant's on-chain identity.
+    function setCertFingerprint(address account, bytes32 fingerprint)
+        external
+        override
+        onlyRole(GOVERNANCE_ROLE)
+    {
+        _participants[account].certFingerprint = fingerprint;
+        _participants[account].lastUpdate = block.timestamp;
+
+        emit CertificateRegistered(account, fingerprint);
+    }
+
+    /// @inheritdoc IIdentityRegistry
+    function getCertFingerprint(address account) external view override returns (bytes32) {
+        return _participants[account].certFingerprint;
     }
 }

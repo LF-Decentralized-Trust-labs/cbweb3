@@ -24,9 +24,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// blockchainRegistry combines read and write access to the ParticipantRegistry contract.
-// auth-service requires both: writes during RegisterParticipant / ProvisionParticipant,
-// reads during VerifyPKILogin.
+// blockchainRegistry combines read and write access to the IdentityRegistry contract.
+// auth-service requires both: writes during onboarding, reads during VerifyPKILogin.
 type blockchainRegistry interface {
 	registry.RegistryWriter
 	registry.RegistryReader
@@ -285,8 +284,11 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *authv1.On
 	}
 
 	// 4. Optionally register on-chain.
+	// Only the Central Bank calls OnboardParticipant — signing uses the
+	// static CB_PRIVATE_KEY (StaticKeySigner). Commercial banks do NOT
+	// perform on-chain registration directly; they proxy via CENTRAL_BANK_API_URL.
 	if domain.RequiresOnChain(req.Role) && resp.WalletAddress != "" {
-		txHash, chainErr := s.blockchainClient.SetParticipant(ctx, resp.WalletAddress, req.Role, true)
+		txHash, chainErr := s.blockchainClient.RegisterParticipant(ctx, resp.WalletAddress, displayName, req.Role, [32]byte{})
 		if chainErr != nil {
 			return nil, status.Errorf(codes.Internal, "onboard: on-chain registration: %v", chainErr)
 		}
@@ -500,7 +502,7 @@ func (s *identityService) VerifyPKILogin(ctx context.Context, req *authv1.Verify
 	if participant, found, lookupErr := s.compliance.GetParticipantByUser(ctx, req.UserId); lookupErr != nil {
 		log.Printf("WARN: VerifyPKILogin: compliance lookup %s: %v (skipping on-chain check)", req.UserId, lookupErr)
 	} else if found && participant.WalletAddress != "" {
-		authorized, authErr := s.blockchainClient.IsMemberAuthorized(ctx, participant.WalletAddress)
+		authorized, authErr := s.blockchainClient.CanTransact(ctx, participant.WalletAddress)
 		if authErr != nil {
 			log.Printf("WARN: VerifyPKILogin: on-chain check %s: %v (skipping)", req.UserId, authErr)
 		} else if !authorized {

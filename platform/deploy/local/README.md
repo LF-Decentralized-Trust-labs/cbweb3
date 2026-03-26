@@ -1,4 +1,4 @@
-# Local Deployment (CBWeb3 Platform)
+# Local Deployment (CBWeb3 Platform — Two Spokes)
 
 This folder contains the local runtime setup for the CBWeb3 platform, focused on five main infrastructure components:
 
@@ -8,76 +8,126 @@ This folder contains the local runtime setup for the CBWeb3 platform, focused on
 - Redis (cache and message-oriented local support)
 - Paladin nodes (privacy-preserving smart contract execution, spoke A and spoke B)
 
-It follows the same modular architecture described in the project root documentation, but tailored for local development and testing.
+```
+spoke-a (chain 1338)
+├── Besu (chain 1338)          ← 3 nodes: central-bank-a, bank-a, bank-c
+spoke-b (chain 1339)
+├── Besu (chain 1339)          ← 3 nodes: central-bank-b, bank-b, bank-d
+shared infra
+├── Keycloak                   ← 6 realms
+├── PostgreSQL                 ← 7 databases
+├── Redis                      ← 6 logical DBs (0-5)
+```
+
+Per-entity backend stacks (api-gateway / auth / compliance) use dedicated host
+ports and internal Docker networks; see **Port allocations** below.
 
 ## Components
 
-### 1) Besu networks
+### 1) Besu networks — spoke-besu-a and spoke-besu-b
 
-There are three independent Besu environments:
+Two separate Besu QBFT networks: **spoke-a** (chain **1338**) and **spoke-b**
+(chain **1339**), each with **three fixed named nodes**, one per entity.
 
-- `hub-besu`
-- `spoke-besu-a`
-- `spoke-besu-b`
+| Spoke   | Directory      | Chain ID | Docker network           | Container prefix        |
+|---------|----------------|----------|--------------------------|-------------------------|
+| spoke-a | `spoke-besu-a/` | `1338`   | `spoke_a_besu_network`   | `cbweb3-spoke-a-besu`   |
+| spoke-b | `spoke-besu-b/` | `1339`   | `spoke_b_besu_network`   | `cbweb3-spoke-b-besu`   |
 
-Each environment has its own scripts and artifacts:
+Scripts: `startBesu.sh` / `stopBesu.sh` (and `addNewNode.sh` where present).
 
-- `startBesu.sh` / `stopBesu.sh`
-- `config/`, `genesis/`, `nodes/`
-- optional node expansion with `addNewNode.sh`
+| Spoke   | Node (entity)    | Container name                         | Host RPC | Host P2P |
+|---------|------------------|----------------------------------------|----------|----------|
+| spoke-a | central-bank-a   | `cbweb3-spoke-a-besu.central-bank-a`   | `8645`   | `31303`  |
+| spoke-a | bank-a           | `cbweb3-spoke-a-besu.bank-a`           | `8646`   | `31304`  |
+| spoke-a | bank-c           | `cbweb3-spoke-a-besu.bank-c`           | `8647`   | `31305`  |
+| spoke-b | central-bank-b   | `cbweb3-spoke-b-besu.central-bank-b`   | `8745`   | `31403`  |
+| spoke-b | bank-b           | `cbweb3-spoke-b-besu.bank-b`           | `8746`   | `31404`  |
+| spoke-b | bank-d           | `cbweb3-spoke-b-besu.bank-d`           | `8747`   | `31405`  |
 
-These networks simulate distinct ledgers for domestic and cross-border scenarios.
+Each backend service connects to its own node’s RPC endpoint via `BESU_RPC_URL`
+in `.env.infra.*`. When `BLOCKCHAIN_CLIENT=besu`, backends use the container
+name (Docker DNS) on the spoke’s Besu network.
 
-Each network now uses:
+**Besu lifecycle (repository root):**
 
-- dedicated Docker network name,
-- dedicated container prefix,
-- dedicated host RPC/P2P port range.
-
-This avoids collisions when all three Besu stacks run at the same time.
+- `make deploy.up-spoke-a` / `make deploy.down-spoke-a` — spoke-a only  
+- `make deploy.up-spoke-b` / `make deploy.down-spoke-b` — spoke-b only  
+- `make deploy.up-besu` — both spokes (spoke-a then spoke-b)  
+- `make deploy.down-besu` — both spokes (spoke-b then spoke-a)  
 
 ### 2) Keycloak
 
-Keycloak is started by Docker Compose and initialized by [keycloak/init.sh](keycloak/init.sh).
+Keycloak is started by Docker Compose and initialized by
+[keycloak/init.sh](keycloak/init.sh).
 
 On startup, the script:
 
-1. waits for Keycloak readiness,
-2. authenticates with admin credentials,
-3. ensures realm `cbweb3-spoke-a` with client `cbweb3-spoke-a-client`,
-4. ensures realm `cbweb3-spoke-b` with client `cbweb3-spoke-b-client`,
-5. fetches both client secrets,
-6. recreates runtime infra env files under `backend/config/` from `.example` templates:
-   - `.env.infra.spoke-a`
-   - `.env.infra.spoke-b`
-   - `.env.infra.hub`
+1. Waits for Keycloak readiness.
+2. Authenticates with admin credentials.
+3. Creates **six** realms, each with one OIDC client:
+   - **`bank-a`** / `bank-a-client`
+   - **`bank-b`** / `bank-b-client`
+   - **`central-bank-a`** / `central-bank-a-client`
+   - **`bank-c`** / `bank-c-client`
+   - **`bank-d`** / `bank-d-client`
+   - **`central-bank-b`** / `central-bank-b-client`
+4. Fetches each client secret and writes runtime infra env files:
+   - `backend/config/.env.infra.bank-a`
+   - `backend/config/.env.infra.bank-b`
+   - `backend/config/.env.infra.central-bank-a`
+   - `backend/config/.env.infra.bank-c`
+   - `backend/config/.env.infra.bank-d`
+   - `backend/config/.env.infra.central-bank-b`
 
-This keeps Keycloak settings and client credentials synchronized in the domain infra files.
+When you run `make deploy.up-infra` or `make dev.up` from the repository root,
+[`make/10-deploy.mk`](../../make/10-deploy.mk) waits in two phases:
+
+1. **HTTP readiness**: polls `http://localhost:${KEYCLOAK_PORT}/realms/master`.
+2. **Init completion**: polls container logs until `KEYCLOAK_INIT_DONE` appears.
+
+Override waits (defaults: 40×3s for HTTP, 600s for init):
+
+- `KEYCLOAK_READY_ATTEMPTS`, `KEYCLOAK_WAIT_SLEEP_SEC`
 
 ### 3) PostgreSQL
 
-PostgreSQL runs as a container managed by Compose, with:
+PostgreSQL runs as a container managed by Compose with a persistent volume.
+[postgres/init-multi-db.sh](postgres/init-multi-db.sh) creates **seven**
+databases at first start (six application DBs + Keycloak):
 
-- configurable image tag,
-- configurable host port,
-- configurable user/password,
-- persistent volume (`postgres_data`).
-
-It initializes multiple logical databases in the same instance via [postgres/init-multi-db.sh](postgres/init-multi-db.sh):
-
-- `cbweb3_spoke_a`
-- `cbweb3_spoke_b`
-- `cbweb3_hub`
-
-This supports the MVP split for spoke A, spoke B and international hub while keeping a single local Postgres container.
+- `cbweb3_bank_a`
+- `cbweb3_bank_b`
+- `cbweb3_bank_c`
+- `cbweb3_bank_d`
+- `cbweb3_central_bank_a`
+- `cbweb3_central_bank_b`
+- `cbweb3_keycloak`
 
 ### 4) Redis
 
-Redis runs as a Compose service in the same `cbweb3_network`, with configurable image tag and host port.
+Redis runs as a Compose service on `cbweb3_network`. Each entity uses a
+dedicated Redis logical DB for nonce isolation:
 
-Default local access:
+| Entity         | Redis DB |
+|----------------|----------|
+| bank-a         | 0        |
+| bank-b         | 1        |
+| central-bank-a | 2        |
+| bank-c         | 3        |
+| bank-d         | 4        |
+| central-bank-b | 5        |
 
-- `localhost:${REDIS_PORT}` (default `6379`)
+## Port allocations (backend host ports)
+
+| Entity         | Spoke   | API (api-gateway) | Auth gRPC | Compliance gRPC |
+|----------------|---------|-------------------|-----------|-----------------|
+| bank-a         | spoke-a | `18080`           | `19091`   | `19093`         |
+| bank-b         | spoke-b | `28080`           | `29091`   | `29093`         |
+| central-bank-a | spoke-a | `38080`           | `39091`   | `39093`         |
+| bank-c         | spoke-a | `48080`           | `49091`   | `49093`         |
+| bank-d         | spoke-b | `58080`           | `59091`   | `59093`         |
+| central-bank-b | spoke-b | `60080`           | `60091`   | `60093`         |
 
 ### 5) Paladin nodes
 
@@ -128,107 +178,120 @@ paladin/
 
 ## How components communicate
 
-- Besu nodes communicate inside their own Docker bridge network (one per stack, created by each `startBesu.sh`).
-- Keycloak, PostgreSQL and Redis communicate on `cbweb3_network` (external Docker network used by Compose).
-- Local applications can access:
-  - Keycloak on `localhost:${KEYCLOAK_PORT}` (default `8081`)
-  - PostgreSQL on `localhost:${POSTGRES_PORT}` (default `5432`)
-  - Redis on `localhost:${REDIS_PORT}` (default `6379`)
+- Besu nodes on a spoke communicate inside that spoke’s Docker network
+  (`spoke_a_besu_network` / `spoke_b_besu_network`, created by the respective
+  `startBesu.sh`).
+- Keycloak, PostgreSQL and Redis communicate on `cbweb3_network` (external
+  Docker network created by `deploy.create-shared-network`).
+- Backend services within each entity communicate on a dedicated internal
+  network per entity and reach infra via `cbweb3_network`.
+- Local access:
+  - Keycloak: `http://localhost:${KEYCLOAK_PORT}` (default `8081`)
+  - PostgreSQL: `localhost:${POSTGRES_PORT}` (default `5432`)
+  - Redis: `localhost:${REDIS_PORT}` (default `6379`)
+  - Besu RPC (spoke-a): central-bank-a `http://localhost:8645`, bank-a `8646`, bank-c `8647`
+  - Besu RPC (spoke-b): central-bank-b `http://localhost:8745`, bank-b `8746`, bank-d `8747`
 
 ## Configuration model
 
-Important separation:
+Runtime infra files (six entities):
 
-- `backend/config/.env.infra.spoke-a`, `.env.infra.spoke-b`, and `.env.infra.hub` contain environment settings split by domain.
-- these files are generated/updated from `*.example` templates with Keycloak-specific values and secrets.
-- Compose still supports standard environment variables (with fallbacks), and you should provide one domain env file from `backend/config`.
+- `backend/config/.env.infra.bank-a`
+- `backend/config/.env.infra.bank-b`
+- `backend/config/.env.infra.central-bank-a`
+- `backend/config/.env.infra.bank-c`
+- `backend/config/.env.infra.bank-d`
+- `backend/config/.env.infra.central-bank-b`
 
-In other words:
-
-- **Infra/domain configuration goes to `backend/config/.env.infra.*`.**
-- **`*.example` files remain templates only; runtime values are written to `.env.infra.*`.**
-
-Use these templates:
-
-- [../backend/config/.env.infra.spoke-a.example](../backend/config/.env.infra.spoke-a.example)
-- [../backend/config/.env.infra.spoke-b.example](../backend/config/.env.infra.spoke-b.example)
-- [../backend/config/.env.infra.hub.example](../backend/config/.env.infra.hub.example)
+These are generated/updated from `*.example` templates with Keycloak-specific
+values and secrets. **`*.example` files are templates only**; runtime values are
+written to `.env.infra.*` by `keycloak/init.sh`.
 
 ### Recommended setup
 
-1. Copy and adjust one env file per domain:
-   - `backend/config/.env.infra.spoke-a.example` -> `backend/config/.env.infra.spoke-a`
-   - `backend/config/.env.infra.spoke-b.example` -> `backend/config/.env.infra.spoke-b`
-   - `backend/config/.env.infra.hub.example` -> `backend/config/.env.infra.hub`
-2. Start local stack with one selected domain env file, for example:
-   - `docker compose --env-file backend/config/.env.infra.spoke-a -f deploy/local/compose.yml up -d`
-3. Keycloak will regenerate `.env.infra.spoke-a`, `.env.infra.spoke-b`, and `.env.infra.hub` in `backend/config/`.
-4. Use the domain-specific files in backend services (`spoke-a`, `spoke-b`, `hub`).
+1. Copy and adjust the example files (one per entity), e.g.  
+   `backend/config/.env.infra.bank-a.example` → `backend/config/.env.infra.bank-a`  
+   (repeat for `bank-b`, `central-bank-a`, `bank-c`, `bank-d`, `central-bank-b`).
+2. Start infra (Keycloak will regenerate the files automatically):
+   ```bash
+   make deploy.up-infra
+   ```
+3. Start the Besu networks (one or both spokes):
+   ```bash
+   make deploy.up-spoke-a
+   make deploy.up-spoke-b
+   # or: make deploy.up-besu
+   ```
+4. Start backend services per entity or all at once:
+   ```bash
+   make deploy.up-backend-entities
+   ```
 
-### Backend compose by domain (hub/spokes)
+### Backend compose by entity
 
-After starting shared infra (`keycloak`, `postgres`, `redis`) with `deploy/local/compose.yml`,
-you can start backend services with one compose file per domain:
+After starting shared infra, start backends with one compose file per entity:
 
-- `backend/docker-compose-backend.spoke-a.yaml`
-- `backend/docker-compose-backend.spoke-b.yaml`
-- `backend/docker-compose-backend.hub.yaml`
+- `backend/docker-compose-backend.bank-a.yaml`
+- `backend/docker-compose-backend.bank-b.yaml`
+- `backend/docker-compose-backend.central-bank-a.yaml`
+- `backend/docker-compose-backend.bank-c.yaml`
+- `backend/docker-compose-backend.bank-d.yaml`
+- `backend/docker-compose-backend.central-bank-b.yaml`
 
-All three backend files:
+All six backend files:
 
-- load domain settings from `backend/config/.env.infra.*`,
-- keep service-to-service traffic in a dedicated backend network per domain,
-- connect to shared infra through external network `cbweb3_network`,
-- use non-overlapping host ports to run all domains at once.
+- Load entity settings from `backend/config/.env.infra.*`.
+- Keep service-to-service traffic in a dedicated backend network per entity.
+- Connect to shared infra through external network `cbweb3_network`.
+- Use non-overlapping host ports so all entities can run simultaneously.
 
 Commands (from repository root):
 
 - Validate compose syntax:
-  - `docker compose -f backend/docker-compose-backend.spoke-a.yaml config`
-  - `docker compose -f backend/docker-compose-backend.spoke-b.yaml config`
-  - `docker compose -f backend/docker-compose-backend.hub.yaml config`
-- Start backend per domain:
-  - `docker compose -f backend/docker-compose-backend.spoke-a.yaml up -d`
-  - `docker compose -f backend/docker-compose-backend.spoke-b.yaml up -d`
-  - `docker compose -f backend/docker-compose-backend.hub.yaml up -d`
-- Stop backend per domain:
-  - `docker compose -f backend/docker-compose-backend.spoke-a.yaml down`
-  - `docker compose -f backend/docker-compose-backend.spoke-b.yaml down`
-  - `docker compose -f backend/docker-compose-backend.hub.yaml down`
+  ```bash
+  make deploy.validate-backend-entities
+  ```
+  (or `docker compose --env-file backend/config/.env.infra.<entity> -f backend/docker-compose-backend.<entity>.yaml config` per file.)
+- Start / stop backends:
+  ```bash
+  make deploy.up-backend-entities
+  make deploy.down-backend-entities
+  ```
 
-Make targets (equivalent shortcuts):
+Per-entity Make shortcuts:
 
-- `make validate-backend-domains`
-- `make up-backend-spoke-a`
-- `make up-backend-spoke-b`
-- `make up-backend-hub`
-- `make up-backend-domains`
-- `make down-backend-spoke-a`
-- `make down-backend-spoke-b`
-- `make down-backend-hub`
-- `make down-backend-domains`
-
-Default host ports:
-
-- Spoke A: API `18080`, Auth gRPC `19091`, Compliance gRPC `19093`
-- Spoke B: API `28080`, Auth gRPC `29091`, Compliance gRPC `29093`
-- Hub: API `38080`, Auth gRPC `39091`, Compliance gRPC `39093`
+- `make deploy.validate-backend-bank-a` … `deploy.validate-backend-central-bank-b`
+- `make deploy.up-backend-bank-a` … `deploy.up-backend-central-bank-b`
+- `make deploy.down-backend-bank-a` … `deploy.down-backend-central-bank-b`
 
 ## Start and stop
 
 From repository root:
 
-- `make up-besu` starts only Besu stacks (hub + spoke A + spoke B).
-
-- `make up-infra` starts Compose services (Keycloak + PostgreSQL + Redis).
-
-- `make up` starts full local stack (Besu + infra).
-
-- `make down-infra` stops Compose services.
-
-- `make down-besu` stops only Besu stacks.
-
-- `make down` stops full local stack.
+| Target | Description |
+|--------|-------------|
+| `make dev.up` | Full environment: PKI + both Besu spokes + infra + contracts + all six backends. |
+| `make dev.down` | Stop full environment in reverse order (PKI files kept; `deploy.down` tears down both Besu spokes). |
+| `make dev.up-bank-a` | PKI (bank-a CA + commercial banks) + infra + **spoke-a** Besu + bank-a backend. |
+| `make dev.down-bank-a` | Stop bank-a backend only. |
+| `make dev.up-bank-b` | PKI (bank-b CA + commercial banks) + infra + **spoke-b** Besu + bank-b backend. |
+| `make dev.down-bank-b` | Stop bank-b backend only. |
+| `make dev.up-central-bank-a` | PKI (central-bank-a CA) + infra + **spoke-a** Besu + central-bank-a backend. |
+| `make dev.down-central-bank-a` | Stop central-bank-a backend only. |
+| `make dev.up-bank-c` | PKI (bank-c CA + commercial banks) + infra + **spoke-a** Besu + bank-c backend. |
+| `make dev.down-bank-c` | Stop bank-c backend only. |
+| `make dev.up-bank-d` | PKI (bank-d CA + commercial banks) + infra + **spoke-b** Besu + bank-d backend. |
+| `make dev.down-bank-d` | Stop bank-d backend only. |
+| `make dev.up-central-bank-b` | PKI (central-bank-b CA) + infra + **spoke-b** Besu + central-bank-b backend. |
+| `make dev.down-central-bank-b` | Stop central-bank-b backend only. |
+| `make deploy.up-infra` | Shared infra only (Keycloak + Postgres + Redis). |
+| `make deploy.down-infra` | Stop shared infra. |
+| `make deploy.up-spoke-a` / `make deploy.down-spoke-a` | Besu spoke-a only. |
+| `make deploy.up-spoke-b` / `make deploy.down-spoke-b` | Besu spoke-b only. |
+| `make deploy.up-besu` / `make deploy.down-besu` | Both Besu spokes. |
+| `make deploy.up-backend` | Same as `deploy.up-backend-entities` (all six backends). |
+| `make deploy.down-backend` | Same as `deploy.down-backend-entities`. |
+| `make deploy.build-backend` | Build images for all six entity compose files. |
 
 ### Paladin setup and lifecycle
 
@@ -276,17 +339,21 @@ If needed, refresh Keycloak credentials manually with:
 
 Examples:
 
-- `./deploy/local/keycloak/get_credentials_direct.sh --spoke a`
-- `./deploy/local/keycloak/get_credentials_direct.sh --spoke b`
-
-The script reads domain infra settings from `backend/config/.env.infra.spoke-a|spoke-b` and recreates files in `backend/config/`.
+```bash
+./deploy/local/keycloak/get_credentials_direct.sh --entity bank-a
+./deploy/local/keycloak/get_credentials_direct.sh --entity bank-b
+./deploy/local/keycloak/get_credentials_direct.sh --entity central-bank-a
+./deploy/local/keycloak/get_credentials_direct.sh --entity bank-c
+./deploy/local/keycloak/get_credentials_direct.sh --entity bank-d
+./deploy/local/keycloak/get_credentials_direct.sh --entity central-bank-b
+```
 
 ## Compose variable fallbacks
 
-Compose uses shell-style defaults (e.g. `${POSTGRES_PORT:-5432}`), so local startup still works when some variables are not explicitly set.
-
-Compose currently uses Keycloak, PostgreSQL and Redis variables in local mode.
+Compose uses shell-style defaults (e.g. `${POSTGRES_PORT:-5432}`), so local
+startup still works when some variables are not explicitly set.
 
 ## Security note
 
-Do not commit real secrets. Treat all runtime files in `backend/config/.env.*` as local sensitive files.
+Do not commit real secrets. Treat all runtime files in `backend/config/.env.*`
+as local sensitive files.

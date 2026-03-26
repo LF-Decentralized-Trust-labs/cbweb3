@@ -41,6 +41,24 @@ func New(cfg config.Config) (*fiber.App, error) {
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure)
 	complianceHandler := handlers.NewComplianceHandler(identityManager)
 
+	deps := router.Dependencies{
+		AuthHandler:       authHandler,
+		ComplianceHandler: complianceHandler,
+		GovernanceHandler: governanceHandler,
+		AuthProvider:      identityGRPCProvider,
+	}
+
+	if cfg.CentralBankAPIURL != "" {
+		deps.OnboardingProxyHandler = handlers.NewOnboardingProxyHandler(
+			cfg.CentralBankAPIURL,
+			cfg.PKIDir,
+			cfg.BankCode,
+			identityManager, // implements OnboardingKeyManager
+		)
+	} else {
+		deps.OnboardingHandler = handlers.NewOnboardingHandler(identityManager)
+	}
+
 	fiberApp := fiber.New(
 		fiber.Config{
 			BodyLimit: 10 * 1024 * 1024,
@@ -55,12 +73,7 @@ func New(cfg config.Config) (*fiber.App, error) {
 		AllowCredentials: true,
 	}))
 
-	router.Setup(fiberApp, router.Dependencies{
-		AuthHandler:       authHandler,
-		ComplianceHandler: complianceHandler,
-		GovernanceHandler: governanceHandler,
-		AuthProvider:      identityGRPCProvider,
-	})
+	router.Setup(fiberApp, deps)
 
 	return fiberApp, nil
 }

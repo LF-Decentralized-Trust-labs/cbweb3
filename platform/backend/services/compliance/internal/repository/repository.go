@@ -14,16 +14,20 @@ import (
 // --- Domain structs ---
 
 type Participant struct {
-	UserID            string
-	InstitutionName   string
-	CNPJ              string
-	BankCode          string
-	CountryCode       string
-	Role              string
-	WalletAddress     string
-	Status            string
-	CertificateData   string
-	CertificateExpiry *time.Time
+	UserID              string
+	InstitutionName     string
+	CNPJ                string
+	BankCode            string
+	CountryCode         string
+	Role                string
+	WalletAddress       string
+	Status              string
+	CertificateData     string
+	CertificateExpiry   *time.Time
+	BlockchainPubKeyHex string
+	CsrPem              string
+	PopNonce            string
+	PopNonceExpiresAt   *time.Time
 }
 
 type AuditEntry struct {
@@ -223,7 +227,10 @@ func (r *gormRepository) UpsertParticipant(ctx context.Context, p Participant) e
 			DoUpdates: clause.AssignmentColumns([]string{
 				"institution_name", "cnpj", "bank_code", "country_code",
 				"participant_role", "wallet_address", "status",
-				"certificate_data", "certificate_expiry", "updated_at",
+				"certificate_data", "certificate_expiry",
+				"blockchain_pub_key_hex", "csr_pem",
+				"pop_nonce", "pop_nonce_expires_at",
+				"updated_at",
 			}),
 		}).
 		Create(&model).Error
@@ -353,30 +360,38 @@ func (r *gormRepository) UpsertSystemParameter(ctx context.Context, p SystemPara
 
 func participantToModel(p Participant) ParticipantModel {
 	return ParticipantModel{
-		UserID:            p.UserID,
-		InstitutionName:   p.InstitutionName,
-		CNPJ:              p.CNPJ,
-		BankCode:          p.BankCode,
-		CountryCode:       p.CountryCode,
-		Role:              p.Role,
-		WalletAddress:     p.WalletAddress,
-		Status:            p.Status,
-		CertificateData:   p.CertificateData,
-		CertificateExpiry: p.CertificateExpiry,
+		UserID:              p.UserID,
+		InstitutionName:     p.InstitutionName,
+		CNPJ:                p.CNPJ,
+		BankCode:            p.BankCode,
+		CountryCode:         p.CountryCode,
+		Role:                p.Role,
+		WalletAddress:       p.WalletAddress,
+		Status:              p.Status,
+		CertificateData:     p.CertificateData,
+		CertificateExpiry:   p.CertificateExpiry,
+		BlockchainPubKeyHex: p.BlockchainPubKeyHex,
+		CsrPem:              p.CsrPem,
+		PopNonce:            p.PopNonce,
+		PopNonceExpiresAt:   p.PopNonceExpiresAt,
 	}
 }
 
 func participantFromModel(m ParticipantModel) Participant {
 	return Participant{
-		UserID:            m.UserID,
-		InstitutionName:   m.InstitutionName,
-		CNPJ:              m.CNPJ,
-		BankCode:          m.BankCode,
-		CountryCode:       m.CountryCode,
-		Role:              m.Role,
-		WalletAddress:     m.WalletAddress,
-		Status:            m.Status,
-		CertificateData:   m.CertificateData,
-		CertificateExpiry: m.CertificateExpiry,
+		UserID:              m.UserID,
+		InstitutionName:     m.InstitutionName,
+		CNPJ:                m.CNPJ,
+		BankCode:            m.BankCode,
+		CountryCode:         m.CountryCode,
+		Role:                m.Role,
+		WalletAddress:       m.WalletAddress,
+		Status:              m.Status,
+		CertificateData:     m.CertificateData,
+		CertificateExpiry:   m.CertificateExpiry,
+		BlockchainPubKeyHex: m.BlockchainPubKeyHex,
+		CsrPem:              m.CsrPem,
+		PopNonce:            m.PopNonce,
+		PopNonceExpiresAt:   m.PopNonceExpiresAt,
 	}
 }

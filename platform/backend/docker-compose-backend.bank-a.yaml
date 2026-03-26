@@ -1,0 +1,87 @@
+services:
+  compliance-bank-a:
+    build:
+      context: .
+      dockerfile: services/compliance/Dockerfile
+    image: cbweb3/compliance:local
+    pull_policy: build
+    container_name: "backend-compliance-bank-a"
+    env_file:
+      - path: ./config/.env.infra.bank-a
+        required: true
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+      BANK_CODE: "bank-a"
+      PKI_DIR: /workspace/backend/config/pki
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_bank_a}?sslmode=disable"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "19093:9093"
+    networks:
+      - cbweb3_backend_bank_a
+      - cbweb3_network
+
+  auth-bank-a:
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    image: cbweb3/auth:local
+    pull_policy: build
+    container_name: "backend-auth-bank-a"
+    env_file:
+      - path: ./config/.env.infra.bank-a
+        required: true
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      KEYCLOAK_BASE_URL: "${KEYCLOAK_BASE_URL:-http://keycloak:8080}"
+      KEYCLOAK_REALM: "${KC_REALM:-bank-a}"
+      KEYCLOAK_CLIENT_ID: "${KC_CLIENT_ID:-bank-a-client}"
+      KEYCLOAK_CLIENT_SECRET: "${KC_CLIENT_SECRET:-change-me}"
+      KEYCLOAK_JWKS_CACHE_TTL_SEC: "3000"
+      KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
+      COMPLIANCE_GRPC_ADDR: compliance-bank-a:9093
+      COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
+      REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
+      REDIS_DB: "0"
+    ports:
+      - "19091:9091"
+    depends_on:
+      - compliance-bank-a
+    networks:
+      - cbweb3_backend_bank_a
+      - cbweb3_network
+
+  api-gateway-bank-a:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    image: cbweb3/api-gateway:local
+    pull_policy: build
+    container_name: "backend-api-gateway-bank-a"
+    env_file:
+      - path: ./config/.env.infra.bank-a
+        required: true
+    environment:
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "30"
+      AUTH_GRPC_ADDR: auth-bank-a:9091
+      COMPLIANCE_GRPC_ADDR: compliance-bank-a:9093
+      PKI_DIR: /workspace/backend/config/pki
+      BANK_CODE: "bank-a"
+      CENTRAL_BANK_API_URL: "http://api-gateway-central-bank-a:8080"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "18080:8080"
+    depends_on:
+      - auth-bank-a
+      - compliance-bank-a
+    networks:
+      - cbweb3_backend_bank_a
+      - cbweb3_network
+
+networks:
+  cbweb3_backend_bank_a:
+  cbweb3_network:
+    external: true

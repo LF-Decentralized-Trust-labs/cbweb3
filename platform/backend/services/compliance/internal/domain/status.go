@@ -4,11 +4,32 @@ package domain
 type ParticipantStatus string
 
 const (
-	StatusPending  ParticipantStatus = "PENDING"  // awaiting BC approval
-	StatusActive   ParticipantStatus = "ACTIVE"   // approved and operational
-	StatusFrozen   ParticipantStatus = "FROZEN"   // temporarily suspended
-	StatusRevoked  ParticipantStatus = "REVOKED"  // permanently disabled
+	StatusPending             ParticipantStatus = "PENDING"              // initial state
+	StatusCredentialRequested ParticipantStatus = "CREDENTIAL_REQUESTED" // CSR + pub_key submitted, awaiting KYC review
+	StatusKYCApproved         ParticipantStatus = "KYC_APPROVED"         // KYC approved, awaiting PoP + wallet bind
+	StatusActive              ParticipantStatus = "ACTIVE"               // fully operational on the network
+	StatusFrozen              ParticipantStatus = "FROZEN"               // temporarily suspended
+	StatusRevoked             ParticipantStatus = "REVOKED"              // permanently disabled
 )
+
+// validTransitions defines the allowed state machine for participant lifecycle.
+var validTransitions = map[ParticipantStatus][]ParticipantStatus{
+	StatusPending:             {StatusCredentialRequested, StatusActive},
+	StatusCredentialRequested: {StatusKYCApproved, StatusRevoked},
+	StatusKYCApproved:         {StatusActive, StatusRevoked},
+	StatusActive:              {StatusFrozen, StatusRevoked},
+	StatusFrozen:              {StatusActive, StatusRevoked},
+}
+
+// IsValidTransition reports whether moving from current to next is allowed.
+func IsValidTransition(current, next ParticipantStatus) bool {
+	for _, allowed := range validTransitions[current] {
+		if allowed == next {
+			return true
+		}
+	}
+	return false
+}
 
 // AuditCategory classifies governance actions for filtering in the portal.
 type AuditCategory string

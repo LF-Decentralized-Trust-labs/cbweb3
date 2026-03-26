@@ -17,6 +17,9 @@ interface IIdentityRegistry {
         IdentityRegistryLibrary.KycStatus newStatus
     );
 
+    /// @notice Emitted when a certificate fingerprint is registered or updated.
+    event CertificateRegistered(address indexed account, bytes32 certFingerprint);
+
     /// @notice Error thrown when an unverified account attempts a restricted operation.
     error ParticipantNotVerified(address account);
 
@@ -59,4 +62,14 @@ interface IIdentityRegistry {
     /// @param account The address to be updated.
     /// @param newStatus The target KycStatus.
     function updateStatus(address account, IdentityRegistryLibrary.KycStatus newStatus) external;
+
+    /// @notice Registers or updates the X.509 certificate fingerprint for a participant.
+    /// @param account The wallet address whose certificate is being bound.
+    /// @param fingerprint SHA-256 hash of the DER-encoded X.509 certificate.
+    function setCertFingerprint(address account, bytes32 fingerprint) external;
+
+    /// @notice Returns the certificate fingerprint for a participant.
+    /// @param account The wallet address to query.
+    /// @return The SHA-256 fingerprint, or bytes32(0) if not set.
+    function getCertFingerprint(address account) external view returns (bytes32);
 }

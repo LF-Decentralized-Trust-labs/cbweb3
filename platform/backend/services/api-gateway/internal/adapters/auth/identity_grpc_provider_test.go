@@ -94,6 +94,24 @@ func (m *mockAuthServiceClient) ListUsers(ctx context.Context, in *authv1.ListUs
 func (m *mockAuthServiceClient) GetUser(ctx context.Context, in *authv1.GetUserRequest, opts ...grpc.CallOption) (*authv1.GetUserResponse, error) {
 	return &authv1.GetUserResponse{}, nil
 }
+func (m *mockAuthServiceClient) SubmitCredentialRequest(ctx context.Context, in *authv1.SubmitCredentialRequestReq, opts ...grpc.CallOption) (*authv1.SubmitCredentialRequestResp, error) {
+	return &authv1.SubmitCredentialRequestResp{}, nil
+}
+func (m *mockAuthServiceClient) GetOnboardingStatus(ctx context.Context, in *authv1.GetOnboardingStatusRequest, opts ...grpc.CallOption) (*authv1.GetOnboardingStatusResponse, error) {
+	return &authv1.GetOnboardingStatusResponse{}, nil
+}
+func (m *mockAuthServiceClient) CompleteOnboarding(ctx context.Context, in *authv1.CompleteOnboardingRequest, opts ...grpc.CallOption) (*authv1.CompleteOnboardingResponse, error) {
+	return &authv1.CompleteOnboardingResponse{}, nil
+}
+func (m *mockAuthServiceClient) CreateOnboardingKey(ctx context.Context, in *authv1.CreateOnboardingKeyRequest, opts ...grpc.CallOption) (*authv1.CreateOnboardingKeyResponse, error) {
+	return &authv1.CreateOnboardingKeyResponse{}, nil
+}
+func (m *mockAuthServiceClient) SignOnboardingPoP(ctx context.Context, in *authv1.SignOnboardingPoPRequest, opts ...grpc.CallOption) (*authv1.SignOnboardingPoPResponse, error) {
+	return &authv1.SignOnboardingPoPResponse{}, nil
+}
+func (m *mockAuthServiceClient) GetOnboardingKey(ctx context.Context, in *authv1.GetOnboardingKeyRequest, opts ...grpc.CallOption) (*authv1.GetOnboardingKeyResponse, error) {
+	return &authv1.GetOnboardingKeyResponse{}, nil
+}
 
 func TestNewIdentityGRPCAuthProvider(t *testing.T) {
 	// gRPC creates the connection lazily, so it won't fail even if server is not running.

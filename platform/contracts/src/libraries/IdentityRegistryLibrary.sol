@@ -28,12 +28,14 @@ library IdentityRegistryLibrary {
     /// @param role Functional role (e.g., Commercial Bank) governing access rights.
     /// @param status Current KYC/AML verification state.
     /// @param zkPointer Hash reference to private credentials handled by the privacy layer.
+    /// @param certFingerprint SHA-256 fingerprint of the X.509 certificate binding PKI identity to this wallet.
     /// @param lastUpdate Unix timestamp of the last identity modification.
     struct Participant {
         string legalName;
         ParticipantRole role;
         KycStatus status;
         bytes32 zkPointer;
+        bytes32 certFingerprint;
         uint256 lastUpdate;
     }
 }

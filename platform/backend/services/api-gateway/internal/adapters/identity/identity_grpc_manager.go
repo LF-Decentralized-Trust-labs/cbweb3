@@ -113,6 +113,71 @@ func (m *IdentityGRPCManager) ListUsers(ctx context.Context, role, userStatus st
 	return result, int(out.Total), nil
 }
 
+// --- Onboarding (3-phase PKI flow) ---
+
+func (m *IdentityGRPCManager) SubmitCredentialRequest(ctx context.Context, req interfaces.CredentialRequest) (interfaces.CredentialRequestResult, error) {
+	out, err := m.cc.SubmitCredentialRequest(ctx, &authv1.SubmitCredentialRequestReq{
+		CsrPem:              req.CsrPem,
+		BlockchainPubKeyHex: req.BlockchainPubKeyHex,
+		InstitutionName:     req.InstitutionName,
+		Cnpj:                req.CNPJ,
+		BankCode:            req.BankCode,
+		Country:             req.Country,
+		Role:                req.Role,
+		Email:               req.Email,
+		Username:            req.Username,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.AlreadyExists {
+			return interfaces.CredentialRequestResult{}, fmt.Errorf("already exists: %s", st.Message())
+		}
+		return interfaces.CredentialRequestResult{}, err
+	}
+	return interfaces.CredentialRequestResult{
+		RequestID:     out.RequestId,
+		UserID:        out.UserId,
+		WalletAddress: out.WalletAddress,
+		Status:        out.Status,
+	}, nil
+}
+
+func (m *IdentityGRPCManager) GetOnboardingStatus(ctx context.Context, requestID string) (interfaces.OnboardingStatus, error) {
+	out, err := m.cc.GetOnboardingStatus(ctx, &authv1.GetOnboardingStatusRequest{RequestId: requestID})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+			return interfaces.OnboardingStatus{}, fmt.Errorf("not found: %s", st.Message())
+		}
+		return interfaces.OnboardingStatus{}, err
+	}
+	return interfaces.OnboardingStatus{
+		RequestID:     out.RequestId,
+		UserID:        out.UserId,
+		Status:        out.Status,
+		PopNonce:      out.PopNonce,
+		WalletAddress: out.WalletAddress,
+	}, nil
+}
+
+func (m *IdentityGRPCManager) CompleteOnboarding(ctx context.Context, req interfaces.CompleteOnboardingRequest) (interfaces.CompleteOnboardingResult, error) {
+	out, err := m.cc.CompleteOnboarding(ctx, &authv1.CompleteOnboardingRequest{
+		RequestId:           req.RequestID,
+		UserId:              req.UserID,
+		PopSignatureHex:     req.PopSignatureHex,
+		BlockchainPubKeyHex: req.BlockchainPubKeyHex,
+	})
+	if err != nil {
+		return interfaces.CompleteOnboardingResult{}, err
+	}
+	return interfaces.CompleteOnboardingResult{
+		UserID:        out.UserId,
+		WalletAddress: out.WalletAddress,
+		CertPEM:       out.CertPem,
+		TxHash:        out.TxHash,
+		ClientSecret:  out.ClientSecret,
+		Status:        out.Status,
+	}, nil
+}
+
 // GetUser delegates to the identity gRPC service's GetUser method.
 func (m *IdentityGRPCManager) GetUser(ctx context.Context, userID string) (interfaces.UserDetail, error) {
 	out, err := m.cc.GetUser(ctx, &authv1.GetUserRequest{UserId: userID})
@@ -133,4 +198,24 @@ func (m *IdentityGRPCManager) GetUser(ctx context.Context, userID string) (inter
 		Country:         out.Country,
 		BankCode:        out.BankCode,
 	}, nil
+}
+
+// --- OnboardingKeyManager (KMS operations for commercial bank proxy) ---
+
+// CreateOnboardingKey delegates to the auth service's CreateOnboardingKey RPC.
+func (m *IdentityGRPCManager) CreateOnboardingKey(ctx context.Context, bankCode string) (string, string, error) {
+	out, err := m.cc.CreateOnboardingKey(ctx, &authv1.CreateOnboardingKeyRequest{BankCode: bankCode})
+	if err != nil {
+		return "", "", fmt.Errorf("create onboarding key: %w", err)
+	}
+	return out.PubKeyHex, out.Address, nil
+}
+
+// SignOnboardingPoP delegates to the auth service's SignOnboardingPoP RPC.
+func (m *IdentityGRPCManager) SignOnboardingPoP(ctx context.Context, keyID, nonceHex string) (string, string, error) {
+	out, err := m.cc.SignOnboardingPoP(ctx, &authv1.SignOnboardingPoPRequest{KeyId: keyID, NonceHex: nonceHex})
+	if err != nil {
+		return "", "", fmt.Errorf("sign onboarding pop: %w", err)
+	}
+	return out.SignatureHex, out.PubKeyHex, nil
 }

@@ -29,7 +29,9 @@ echo
 cleanup_path "tmpFiles"
 cleanup_path "networkFiles"
 cleanup_path "genesis"
-cleanup_path "nodes"
+cleanup_path "nodes/central-bank-b"
+cleanup_path "nodes/bank-b"
+cleanup_path "nodes/bank-d"
 cleanup_path "config/qbftConfigFile.json"
 cleanup_path ".env.network"
 

@@ -14,10 +14,13 @@ message Participant {
   string country_code = 5;
   string role = 6;
   string wallet_address = 7;
-  string status = 8; // PENDING | ACTIVE | FROZEN | REVOKED
+  string status = 8; // PENDING | CREDENTIAL_REQUESTED | KYC_APPROVED | ACTIVE | FROZEN | REVOKED
   string certificate_data = 9;
-  // certificate_expiry is optional; unset when no certificate exists.
   optional google.protobuf.Timestamp certificate_expiry = 10;
+  string blockchain_pub_key_hex = 11;
+  string csr_pem = 12;
+  string pop_nonce = 13;
+  optional google.protobuf.Timestamp pop_nonce_expires_at = 14;
 }
 
 message UpsertParticipantRequest {
@@ -136,8 +139,11 @@ message ApproveKYCRequest {
 
 message ApproveKYCResponse {
   string subject = 1;
-  string status = 2; // ACTIVE
-  string tx_hash = 3; // on-chain transaction hash
+  string status = 2; // KYC_APPROVED (no longer ACTIVE; activation happens at CompleteOnboarding)
+  string tx_hash = 3; // on-chain transaction hash (empty in new flow; kept for backward compat)
+  // pop_nonce is the hex-encoded 32-byte nonce the commercial bank must sign
+  // with its secp256k1 key to prove wallet ownership (Proof of Possession).
+  string pop_nonce = 4;
 }
 
 message ManageParticipantStatusRequest {

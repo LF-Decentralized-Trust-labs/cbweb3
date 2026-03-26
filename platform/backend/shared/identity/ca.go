@@ -27,6 +27,9 @@ type CertRequest struct {
 	Role string
 	// ValidYears is the certificate validity period in years (default: 1).
 	ValidYears int
+	// WalletAddress, when non-empty, is embedded as a custom X.509 extension
+	// (OID 1.3.6.1.4.1.<PEN>.1.1) binding this certificate to a blockchain address.
+	WalletAddress string
 }
 
 // IssuedCert contains the issued certificate and the newly generated key pair.
@@ -80,6 +83,14 @@ func IssueCertificate(caCertPEM, caKeyPEM string, req CertRequest) (IssuedCert, 
 		IsCA:                  false,
 	}
 
+	if req.WalletAddress != "" {
+		ext, extErr := WalletExtension(req.WalletAddress)
+		if extErr != nil {
+			return IssuedCert{}, fmt.Errorf("pki: wallet extension: %w", extErr)
+		}
+		template.ExtraExtensions = append(template.ExtraExtensions, ext)
+	}
+
 	certDER, err := x509.CreateCertificate(rand.Reader, template, caCert, &privKey.PublicKey, caKey)
 	if err != nil {
 		return IssuedCert{}, fmt.Errorf("pki: create certificate: %w", err)
@@ -96,11 +107,17 @@ func IssueCertificate(caCertPEM, caKeyPEM string, req CertRequest) (IssuedCert, 
 	return IssuedCert{CertPEM: certPEM, PrivKeyPEM: privKeyPEM}, nil
 }
 
+// SignCSROptions holds optional parameters for CSR signing.
+type SignCSROptions struct {
+	// WalletAddress, when non-empty, is embedded as a custom X.509 extension.
+	WalletAddress string
+}
+
 // SignCSR signs a PKCS#10 Certificate Signing Request using the provided CA.
 // The subject, organization, and public key from the CSR are preserved; the CA
 // enforces the validity period. Returns an IssuedCert with an empty PrivKeyPEM
 // because the participant retains their own private key.
-func SignCSR(caCertPEM, caKeyPEM, csrPEM string, validYears int) (IssuedCert, error) {
+func SignCSR(caCertPEM, caKeyPEM, csrPEM string, validYears int, opts ...SignCSROptions) (IssuedCert, error) {
 	caCert, err := parseCertPEM(caCertPEM)
 	if err != nil {
 		return IssuedCert{}, fmt.Errorf("pki: parse CA cert: %w", err)
@@ -146,6 +163,14 @@ func SignCSR(caCertPEM, caKeyPEM, csrPEM string, validYears int) (IssuedCert, er
 		IsCA:                  false,
 	}
 
+	if len(opts) > 0 && opts[0].WalletAddress != "" {
+		ext, extErr := WalletExtension(opts[0].WalletAddress)
+		if extErr != nil {
+			return IssuedCert{}, fmt.Errorf("pki: wallet extension: %w", extErr)
+		}
+		template.ExtraExtensions = append(template.ExtraExtensions, ext)
+	}
+
 	certDER, err := x509.CreateCertificate(rand.Reader, template, caCert, csr.PublicKey, caKey)
 	if err != nil {
 		return IssuedCert{}, fmt.Errorf("pki: sign CSR: %w", err)
@@ -153,6 +178,40 @@ func SignCSR(caCertPEM, caKeyPEM, csrPEM string, validYears int) (IssuedCert, er
 
 	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
 	return IssuedCert{CertPEM: certPEM, PrivKeyPEM: ""}, nil
+}
+
+// GenerateCSR creates a new PKCS#10 Certificate Signing Request with a P-256
+// key. Returns the PEM-encoded CSR and the PEM-encoded private key.
+// The caller is responsible for persisting both securely.
+func GenerateCSR(cn, org, ou, country string) (csrPEM, keyPEM string, err error) {
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", fmt.Errorf("pki: generate CSR key: %w", err)
+	}
+
+	template := &x509.CertificateRequest{
+		Subject: pkix.Name{
+			CommonName:         cn,
+			Organization:       []string{org},
+			OrganizationalUnit: []string{ou},
+			Country:            []string{country},
+		},
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, template, privKey)
+	if err != nil {
+		return "", "", fmt.Errorf("pki: create CSR: %w", err)
+	}
+
+	csrPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}))
+
+	keyDER, err := x509.MarshalECPrivateKey(privKey)
+	if err != nil {
+		return "", "", fmt.Errorf("pki: marshal CSR key: %w", err)
+	}
+	keyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
+
+	return csrPEM, keyPEM, nil
 }
 
 // GenerateSelfSignedCA creates a new self-signed CA certificate and key pair.
