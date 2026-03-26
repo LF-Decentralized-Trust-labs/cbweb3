@@ -21,23 +21,24 @@ case "$SPOKE" in
     ;;
 esac
 
-for name in "${!NODES[@]}"; do
-    hostname="${NODES[$name]}"
-    cert_dir="$SCRIPT_DIR/$SPOKE/config/$name"
-    mkdir -p "$cert_dir"
+for pair in $NODE_PAIRS; do
+  name="${pair%%:*}"
+  hostname="${pair##*:}"
+  cert_dir="$SCRIPT_DIR/$SPOKE/config/$name"
+  mkdir -p "$cert_dir"
 
-    echo "Generating TLS cert for '$name' (hostname: $hostname) ..."
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
-        -days 3650 -nodes \
-        -keyout "$cert_dir/tls.key" \
-        -out  "$cert_dir/tls.crt" \
-        -subj "/CN=$name" \
-        -addext "subjectAltName=DNS:$hostname,DNS:$name,DNS:localhost" \
-        2>/dev/null
+  echo "Generating TLS cert for '$name' (hostname: $hostname) ..."
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+    -days 3650 -nodes \
+    -keyout "$cert_dir/tls.key" \
+    -out  "$cert_dir/tls.crt" \
+    -subj "/CN=$name" \
+    -addext "subjectAltName=DNS:$hostname,DNS:$name,DNS:localhost" \
+    2>/dev/null
 
-    chmod 644 "$cert_dir/tls.crt"
-    chmod 600 "$cert_dir/tls.key"
-    echo "  -> $cert_dir/tls.{crt,key}"
+  chmod 644 "$cert_dir/tls.crt"
+  chmod 600 "$cert_dir/tls.key"
+  echo "  -> $cert_dir/tls.{crt,key}"
 done
 
 echo "Certificate generation complete for $SPOKE."
