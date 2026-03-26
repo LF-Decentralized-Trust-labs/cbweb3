@@ -14,6 +14,7 @@ NODE_CONTAINER_PREFIX="${CONTAINER_PREFIX}.node"
 
 BOOT_P2P_PORT=31303
 BOOT_RPC_PORT=8645
+BOOT_WS_PORT=8655
 
 # Remove previous Besu network
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,6 +41,7 @@ echo -e "${YELLOW}Setting up default values...${NC}"
 NODES=3
 BASE_P2P_PORT=30320
 BASE_RPC_PORT=8646
+BASE_WS_PORT=8656
 DEBUG_MODE=false
 
 echo -e "${YELLOW}Checking if besu binary is installed...${NC}"
@@ -152,6 +154,7 @@ docker run -d \
     -v "$(pwd)/genesis:/opt/besu/genesis" \
     -p ${BOOT_P2P_PORT}:30303 \
     -p ${BOOT_RPC_PORT}:8545 \
+    -p ${BOOT_WS_PORT}:8546 \
     -p ${BOOT_P2P_PORT}:30303/udp \
     --network "${NETWORK_NAME}" \
     --restart always \
@@ -199,6 +202,7 @@ generate_nodes_function() {
         local node_name="${NODE_CONTAINER_PREFIX}-${i}"
         local p2p_port=$((BASE_P2P_PORT + i))
         local rpc_port=$((BASE_RPC_PORT + i))
+        local ws_port=$((BASE_WS_PORT + i))
 
         echo -e "${BLUE}Creating docker container ${node_name}...${NC}"
         docker run -d \
@@ -207,6 +211,7 @@ generate_nodes_function() {
             -v "$(pwd)/nodes/node${i}/data:/opt/besu/data" \
             -v "$(pwd)/genesis:/opt/besu/genesis" \
             -p ${rpc_port}:8545 \
+            -p ${ws_port}:8546 \
             -p ${p2p_port}:30303 \
             -p ${p2p_port}:30303/udp \
             --network "${NETWORK_NAME}" \
@@ -234,6 +239,8 @@ NETWORK_NAME=$NETWORK_NAME
 CONTAINER_PREFIX=$CONTAINER_PREFIX
 BOOT_RPC_PORT=$BOOT_RPC_PORT
 BASE_RPC_PORT=$BASE_RPC_PORT
+BOOT_WS_PORT=$BOOT_WS_PORT
+BASE_WS_PORT=$BASE_WS_PORT
 BASE_P2P_PORT=$BASE_P2P_PORT
 EOF
 
