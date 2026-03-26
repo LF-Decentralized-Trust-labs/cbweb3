@@ -153,6 +153,28 @@ else
   echo "WARN: Spoke-B broadcast not found: ${SPOKE_B_BROADCAST} — skipping spoke-b sync." >&2
 fi
 
+# ============================================================
+# CB_PRIVATE_KEY — Propagate deployer key to central bank envs only
+# ============================================================
+CONTRACTS_ENV="${ROOT_DIR}/contracts/.env"
+if [[ -f "${CONTRACTS_ENV}" ]]; then
+  DEPLOYER_KEY=$(grep -E '^DEPLOYER_PRIVATE_KEY=' "${CONTRACTS_ENV}" | head -1 | cut -d= -f2-)
+  DEPLOYER_KEY="${DEPLOYER_KEY#0x}"
+  if [[ -n "${DEPLOYER_KEY}" ]]; then
+    echo "--- CB_PRIVATE_KEY (deployer) ---"
+    for CB_ENV in "${ENV_CENTRAL_BANK_A}" "${ENV_CENTRAL_BANK_B}"; do
+      if [[ -f "${CB_ENV}" ]]; then
+        upsert_env "${CB_ENV}" "CB_PRIVATE_KEY" "${DEPLOYER_KEY}"
+        echo "  Updated CB_PRIVATE_KEY in: ${CB_ENV}"
+      fi
+    done
+  else
+    echo "WARN: DEPLOYER_PRIVATE_KEY is empty in ${CONTRACTS_ENV} — skipping CB_PRIVATE_KEY." >&2
+  fi
+else
+  echo "WARN: ${CONTRACTS_ENV} not found — skipping CB_PRIVATE_KEY propagation." >&2
+fi
+
 # --- Summary ---
 echo ""
 echo "=========================================="

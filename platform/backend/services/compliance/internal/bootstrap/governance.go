@@ -33,16 +33,20 @@ func EnsureGovernanceParticipant(
 	bc registry.RegistryWriter,
 	ca *compliancepki.CA,
 ) error {
+	cbKey := os.Getenv("CB_PRIVATE_KEY")
+	if strings.TrimSpace(cbKey) == "" {
+		log.Println("bootstrap: CB_PRIVATE_KEY not set — skipping governance bootstrap (commercial bank mode)")
+		return nil
+	}
+
 	userID := getEnv("GOVERNANCE_USER_ID", "service-account-cbweb3-auth")
 
-	// 1. Already registered — nothing to do.
 	if _, found, _ := repo.GetParticipantByUser(ctx, userID); found {
 		log.Printf("bootstrap: governance participant '%s' already exists — skipping", userID)
 		return nil
 	}
 
-	// 2. Derive wallet address from CB_PRIVATE_KEY.
-	walletAddr, err := deriveWalletAddress(os.Getenv("CB_PRIVATE_KEY"))
+	walletAddr, err := deriveWalletAddress(cbKey)
 	if err != nil {
 		return fmt.Errorf("bootstrap: derive wallet: %w", err)
 	}
@@ -87,7 +91,7 @@ func EnsureGovernanceParticipant(
 // Ethereum-style wallet address (keccak256 of public key → last 20 bytes).
 func deriveWalletAddress(privKeyHex string) (string, error) {
 	if strings.TrimSpace(privKeyHex) == "" {
-		return "", fmt.Errorf("CB_PRIVATE_KEY is not set")
+		return "", fmt.Errorf("private key hex is empty")
 	}
 	b, err := hex.DecodeString(strings.TrimPrefix(privKeyHex, "0x"))
 	if err != nil {

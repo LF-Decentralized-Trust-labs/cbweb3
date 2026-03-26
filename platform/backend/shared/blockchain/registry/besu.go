@@ -3,7 +3,6 @@ package registry
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	gethcrypto "github.com/ethereum/go-ethereum/crypto"
 )
 
 // BesuConfig holds the configuration required to connect to a Besu node and
@@ -24,49 +22,41 @@ import (
 //
 // Environment variables used by services:
 //
-//	BLOCKCHAIN_CLIENT          — "besu" or "noop" (default: "noop")
-//	BESU_RPC_URL               — e.g. "http://besu-node:8545"
+//	BLOCKCHAIN_CLIENT           — "besu" or "noop" (default: "noop")
+//	BESU_RPC_URL                — e.g. "http://besu-node:8545"
 //	PARTICIPANT_REGISTRY_ADDRESS — deployed ParticipantRegistry address "0x..."
-//	CB_PRIVATE_KEY             — Central Bank private key (hex, with or without 0x prefix)
-//	BESU_CHAIN_ID              — Besu network chain ID (default: 1337)
+//	CB_PRIVATE_KEY              — Central Bank private key (hex); only required for Central Bank nodes
+//	BESU_CHAIN_ID               — Besu network chain ID (default: 1337)
 //	BLOCKCHAIN_REQUEST_TIMEOUT_SEC — HTTP timeout in seconds (default: 15)
 type BesuConfig struct {
 	RPCURL          string
 	RegistryAddress string
-	CBPrivateKeyHex string
 	ChainID         int64
 	RequestTimeout  time.Duration
 }
 
 // BesuClient implements RegistryWriter and RegistryReader by sending JSON-RPC
-// calls to a Besu node. Transaction signing is performed locally with
-// CB_PRIVATE_KEY using go-ethereum/crypto — no external KMS involved.
+// calls to a Besu node.
+//
+// Read operations (IsMemberAuthorized, GetMemberRole, GetCertFingerprint) always
+// work — they use eth_call and require no signing key.
+//
+// Write operations (SetParticipant, SetCertFingerprint) require a
+// TransactionSigner. When signer is nil, writes return ErrNoSigner.
 type BesuClient struct {
 	cfg        BesuConfig
-	privKey    *ecdsa.PrivateKey
+	signer     TransactionSigner
 	httpClient *http.Client
 }
 
-// NewBesuClient creates a BesuClient. Returns an error if any required
-// configuration field is missing or the private key is invalid.
-func NewBesuClient(cfg BesuConfig) (*BesuClient, error) {
+// NewBesuClient creates a BesuClient. The signer is optional: pass nil for a
+// read-only client where write operations will return ErrNoSigner.
+func NewBesuClient(cfg BesuConfig, signer TransactionSigner) (*BesuClient, error) {
 	if strings.TrimSpace(cfg.RPCURL) == "" {
 		return nil, errors.New("registry: BESU_RPC_URL is required")
 	}
 	if strings.TrimSpace(cfg.RegistryAddress) == "" {
 		return nil, errors.New("registry: PARTICIPANT_REGISTRY_ADDRESS is required")
-	}
-	if strings.TrimSpace(cfg.CBPrivateKeyHex) == "" {
-		return nil, errors.New("registry: CB_PRIVATE_KEY is required")
-	}
-
-	privKeyBytes, err := hex.DecodeString(strings.TrimPrefix(cfg.CBPrivateKeyHex, "0x"))
-	if err != nil {
-		return nil, fmt.Errorf("registry: decoding CB_PRIVATE_KEY: %w", err)
-	}
-	privKey, err := gethcrypto.ToECDSA(privKeyBytes)
-	if err != nil {
-		return nil, fmt.Errorf("registry: parsing CB_PRIVATE_KEY: %w", err)
 	}
 
 	timeout := cfg.RequestTimeout
@@ -75,7 +65,7 @@ func NewBesuClient(cfg BesuConfig) (*BesuClient, error) {
 	}
 	return &BesuClient{
 		cfg:        cfg,
-		privKey:    privKey,
+		signer:     signer,
 		httpClient: &http.Client{Timeout: timeout},
 	}, nil
 }
@@ -120,9 +110,16 @@ func (b *BesuClient) GetMemberRole(ctx context.Context, address string) (uint8, 
 
 // SetCertFingerprint calls setCertFingerprint(address, bytes32) on-chain.
 func (b *BesuClient) SetCertFingerprint(ctx context.Context, wallet string, fingerprint [32]byte) (string, error) {
-	cbAddress := gethcrypto.PubkeyToAddress(b.privKey.PublicKey).Hex()
+	if b.signer == nil {
+		return "", ErrNoSigner
+	}
 
-	nonce, err := b.getNonce(ctx, cbAddress)
+	signerAddr, err := b.signer.SignerAddress(ctx)
+	if err != nil {
+		return "", fmt.Errorf("registry: resolving signer address: %w", err)
+	}
+
+	nonce, err := b.getNonce(ctx, signerAddr)
 	if err != nil {
 		return "", fmt.Errorf("registry: fetching nonce: %w", err)
 	}
@@ -140,8 +137,7 @@ func (b *BesuClient) SetCertFingerprint(ctx context.Context, wallet string, fing
 	registryAddr := common.HexToAddress(b.cfg.RegistryAddress)
 	tx := types.NewTransaction(nonce, registryAddr, big.NewInt(0), 200000, gasPrice, dataBytes)
 
-	signer := types.NewEIP155Signer(big.NewInt(b.cfg.ChainID))
-	signedTx, err := types.SignTx(tx, signer, b.privKey)
+	signedTx, err := b.signer.SignTx(ctx, tx, big.NewInt(b.cfg.ChainID))
 	if err != nil {
 		return "", fmt.Errorf("registry: signing cert fingerprint tx: %w", err)
 	}
@@ -171,9 +167,16 @@ func (b *BesuClient) GetCertFingerprint(ctx context.Context, address string) ([3
 }
 
 func (b *BesuClient) sendRegisterMember(ctx context.Context, wallet string, roleCode uint8) (string, error) {
-	cbAddress := gethcrypto.PubkeyToAddress(b.privKey.PublicKey).Hex()
+	if b.signer == nil {
+		return "", ErrNoSigner
+	}
 
-	nonce, err := b.getNonce(ctx, cbAddress)
+	signerAddr, err := b.signer.SignerAddress(ctx)
+	if err != nil {
+		return "", fmt.Errorf("registry: resolving signer address: %w", err)
+	}
+
+	nonce, err := b.getNonce(ctx, signerAddr)
 	if err != nil {
 		return "", fmt.Errorf("registry: fetching nonce: %w", err)
 	}
@@ -191,8 +194,7 @@ func (b *BesuClient) sendRegisterMember(ctx context.Context, wallet string, role
 	registryAddr := common.HexToAddress(b.cfg.RegistryAddress)
 	tx := types.NewTransaction(nonce, registryAddr, big.NewInt(0), 300000, gasPrice, dataBytes)
 
-	signer := types.NewEIP155Signer(big.NewInt(b.cfg.ChainID))
-	signedTx, err := types.SignTx(tx, signer, b.privKey)
+	signedTx, err := b.signer.SignTx(ctx, tx, big.NewInt(b.cfg.ChainID))
 	if err != nil {
 		return "", fmt.Errorf("registry: signing transaction: %w", err)
 	}

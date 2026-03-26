@@ -7,12 +7,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/blockchain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/complianceclient"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/grpc/server"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/keycloak"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/kms"
 	kmsproviders "github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/kms/providers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/noncestore"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 )
 
 func main() {
@@ -43,9 +45,9 @@ func main() {
 		log.Fatalf("compliance: %v", err)
 	}
 
-	caCertPEM := os.Getenv("CA_CERT_PEM") // PEM string injected directly (optional)
+	caCertPEM := os.Getenv("CA_CERT_PEM")
 
-	blockchainClient := newBlockchainClient()
+	blockchainClient := newBlockchainClient(kmsProvider)
 
 	ns := newNonceStore()
 
@@ -65,8 +67,6 @@ func main() {
 	}
 }
 
-// newNonceStore returns a Redis-backed NonceStore when REDIS_ADDR is set,
-// otherwise falls back to the in-memory store (dev only).
 func newNonceStore() noncestore.NonceStore {
 	addr := os.Getenv("REDIS_ADDR")
 	if addr == "" {
@@ -77,33 +77,52 @@ func newNonceStore() noncestore.NonceStore {
 	return noncestore.NewRedisStore(addr, os.Getenv("REDIS_PASSWORD"), getEnvInt("REDIS_DB", 0))
 }
 
-// blockchainRegistry combines read and write access for use in auth-service.
 type blockchainRegistryClient interface {
 	registry.RegistryWriter
 	registry.RegistryReader
 }
 
-// newBlockchainClient constructs the blockchain client based on the
-// BLOCKCHAIN_CLIENT environment variable (default: "noop").
-// When set to "besu", BESU_RPC_URL, PARTICIPANT_REGISTRY_ADDRESS, CB_PRIVATE_KEY,
-// and BESU_CHAIN_ID must also be set.
-func newBlockchainClient() blockchainRegistryClient {
+// newBlockchainClient constructs the blockchain client based on BLOCKCHAIN_CLIENT.
+//
+// When set to "besu", two modes are supported:
+//   - Central Bank: CB_PRIVATE_KEY is set → uses StaticKeySigner for on-chain writes.
+//   - Commercial Bank: CB_PRIVATE_KEY absent → uses KMSSigner backed by the
+//     participant's key in the KMS (created during onboarding).
+func newBlockchainClient(kmsProvider kms.Provider) blockchainRegistryClient {
 	switch getEnv("BLOCKCHAIN_CLIENT", "noop") {
 	case "besu":
-		chainID := int64(getEnvInt("BESU_CHAIN_ID", 1337))
-		bc, err := registry.NewBesuClient(registry.BesuConfig{
+		cfg := registry.BesuConfig{
 			RPCURL:          mustEnv("BESU_RPC_URL"),
 			RegistryAddress: mustEnv("PARTICIPANT_REGISTRY_ADDRESS"),
-			CBPrivateKeyHex: mustEnv("CB_PRIVATE_KEY"),
-			ChainID:         chainID,
+			ChainID:         int64(getEnvInt("BESU_CHAIN_ID", 1337)),
 			RequestTimeout:  time.Duration(getEnvInt("BLOCKCHAIN_REQUEST_TIMEOUT_SEC", 15)) * time.Second,
-		})
+		}
+
+		var signer registry.TransactionSigner
+
+		if cbKey := os.Getenv("CB_PRIVATE_KEY"); cbKey != "" {
+			s, err := registry.NewStaticKeySigner(cbKey)
+			if err != nil {
+				log.Fatalf("blockchain: invalid CB_PRIVATE_KEY: %v", err)
+			}
+			signer = s
+			log.Println("blockchain: central bank mode (static key signer)")
+		} else {
+			userID := getEnv("GOVERNANCE_USER_ID", "")
+			if userID == "" {
+				log.Println("blockchain: WARN — GOVERNANCE_USER_ID not set; on-chain writes will fail until KMS key is provisioned")
+			}
+			signer = &blockchain.KMSSigner{KMS: kmsProvider, UserID: userID}
+			log.Printf("blockchain: commercial bank mode (KMS signer, userID=%s)", userID)
+		}
+
+		bc, err := registry.NewBesuClient(cfg, signer)
 		if err != nil {
 			log.Fatalf("blockchain: %v", err)
 		}
 		return bc
 	default:
-		log.Println("blockchain: using noop client (no on-chain registration)")
+		log.Println("blockchain: using noop client (no on-chain operations)")
 		return registry.NoopRegistryClient{}
 	}
 }
