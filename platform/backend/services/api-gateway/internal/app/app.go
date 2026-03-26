@@ -73,12 +73,7 @@ func New(cfg config.Config) (*fiber.App, error) {
 		AllowCredentials: true,
 	}))
 
-	router.Setup(fiberApp, router.Dependencies{
-		AuthHandler:       authHandler,
-		ComplianceHandler: complianceHandler,
-		GovernanceHandler: governanceHandler,
-		AuthProvider:      identityGRPCProvider,
-	})
+	router.Setup(fiberApp, deps)
 
 	return fiberApp, nil
 }
