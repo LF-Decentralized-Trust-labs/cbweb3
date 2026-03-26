@@ -6,19 +6,31 @@
 spoke-a: pki.gen-central-bank-a pki.gen-bank-a pki.gen-bank-c pki.gen-commercial-banks \
          deploy.up-infra deploy.up-spoke-a \
          contracts.setup contracts.deploy-spoke-a contracts.sync-addresses \
+         paladin.deploy-contracts-spoke-a \
+         paladin.generate-certs-spoke-a \
+         paladin.render-configs-spoke-a \
+         paladin.register-nodes-spoke-a \
+         paladin.stop-spoke-a \
+         paladin.start-spoke-a \
          deploy.up-backend-spoke-a
-	@echo "Spoke-A stack is up."
+	@echo "Spoke-A stack is up (with Paladin)."
 
-spoke-a-down: deploy.down-backend-spoke-a deploy.down-spoke-a
+spoke-a-down: deploy.down-backend-spoke-a paladin.stop-spoke-a deploy.down-spoke-a
 	@echo "Spoke-A stack is down (shared infra left running)."
 
 spoke-b: pki.gen-central-bank-b pki.gen-bank-b pki.gen-bank-d pki.gen-commercial-banks \
          deploy.up-infra deploy.up-spoke-b \
          contracts.setup contracts.deploy-spoke-b contracts.sync-addresses \
+         paladin.deploy-contracts-spoke-b \
+         paladin.generate-certs-spoke-b \
+         paladin.render-configs-spoke-b \
+         paladin.register-nodes-spoke-b \
+         paladin.stop-spoke-b \
+         paladin.start-spoke-b \
          deploy.up-backend-spoke-b
-	@echo "Spoke-B stack is up."
+	@echo "Spoke-B stack is up (with Paladin)."
 
-spoke-b-down: deploy.down-backend-spoke-b deploy.down-spoke-b
+spoke-b-down: deploy.down-backend-spoke-b paladin.stop-spoke-b deploy.down-spoke-b
 	@echo "Spoke-B stack is down (shared infra left running)."
 
 spoke-all:
@@ -33,8 +45,15 @@ spoke-all-down:
 
 # ── Full environment ─────────────────────────────────────────────────────────
 
-dev.up: pki.gen-all deploy.up contracts.deploy-all-with-sync deploy.up-backend-entities
-dev.down: deploy.down-backend-entities deploy.down
+dev.up: pki.gen-all deploy.up contracts.deploy-all-with-sync \
+        paladin.deploy-contracts-spoke-a paladin.deploy-contracts-spoke-b \
+        paladin.generate-certs-spoke-a paladin.generate-certs-spoke-b \
+        paladin.render-configs-spoke-a paladin.render-configs-spoke-b \
+        paladin.register-nodes-spoke-a paladin.register-nodes-spoke-b \
+        paladin.stop-spoke-a paladin.stop-spoke-b \
+        paladin.start-spoke-a paladin.start-spoke-b \
+        deploy.up-backend-entities
+dev.down: deploy.down-backend-entities paladin.stop-spoke-a paladin.stop-spoke-b deploy.down
 
 # ── Per-entity shortcuts ─────────────────────────────────────────────────────
 

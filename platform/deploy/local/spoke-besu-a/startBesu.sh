@@ -27,6 +27,10 @@ RPC_PORT_CENTRAL_BANK=8645
 RPC_PORT_BANK_A=8646
 RPC_PORT_BANK_C=8647
 
+WS_PORT_CENTRAL_BANK=8655
+WS_PORT_BANK_A=8656
+WS_PORT_BANK_C=8657
+
 P2P_PORT_CENTRAL_BANK=31303
 P2P_PORT_BANK_A=31304
 P2P_PORT_BANK_C=31305
@@ -138,6 +142,7 @@ docker run -d \
     -v "$(pwd)/nodes/central-bank-a/data:/opt/besu/data" \
     -v "$(pwd)/genesis:/opt/besu/genesis" \
     -p ${RPC_PORT_CENTRAL_BANK}:8545 \
+    -p ${WS_PORT_CENTRAL_BANK}:8546 \
     -p ${P2P_PORT_CENTRAL_BANK}:30303 \
     -p ${P2P_PORT_CENTRAL_BANK}:30303/udp \
     --network "${NETWORK_NAME}" \
@@ -199,6 +204,7 @@ docker run -d \
     -v "$(pwd)/nodes/bank-a/data:/opt/besu/data" \
     -v "$(pwd)/genesis:/opt/besu/genesis" \
     -p ${RPC_PORT_BANK_A}:8545 \
+    -p ${WS_PORT_BANK_A}:8546 \
     -p ${P2P_PORT_BANK_A}:30303 \
     -p ${P2P_PORT_BANK_A}:30303/udp \
     --network "${NETWORK_NAME}" \
@@ -223,6 +229,7 @@ docker run -d \
     -v "$(pwd)/nodes/bank-c/data:/opt/besu/data" \
     -v "$(pwd)/genesis:/opt/besu/genesis" \
     -p ${RPC_PORT_BANK_C}:8545 \
+    -p ${WS_PORT_BANK_C}:8546 \
     -p ${P2P_PORT_BANK_C}:30303 \
     -p ${P2P_PORT_BANK_C}:30303/udp \
     --network "${NETWORK_NAME}" \

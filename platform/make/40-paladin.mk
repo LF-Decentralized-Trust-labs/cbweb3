@@ -125,4 +125,4 @@ setup-spoke-uc: setup-spoke-a setup-spoke-b
 	paladin.render-configs-spoke-a paladin.render-configs-spoke-b \
 	paladin.start-spoke-a paladin.stop-spoke-a \
 	paladin.start-spoke-b paladin.stop-spoke-b \
-	setup-spoke-a setup-spoke-b setup-scope-uc
+	setup-spoke-a setup-spoke-b setup-spoke-uc
