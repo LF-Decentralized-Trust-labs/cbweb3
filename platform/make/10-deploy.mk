@@ -1,30 +1,43 @@
 TARGET ?= local
 DEPLOY_DIR := deploy/$(TARGET)
-BACKEND_COMPOSE_BANK_A    := backend/docker-compose-backend.bank-a.yaml
-BACKEND_COMPOSE_BANK_B    := backend/docker-compose-backend.bank-b.yaml
-BACKEND_COMPOSE_CENTRAL_BANK := backend/docker-compose-backend.central-bank.yaml
-BACKEND_ENV_BANK_A        := backend/config/.env.infra.bank-a
-BACKEND_ENV_BANK_B        := backend/config/.env.infra.bank-b
-BACKEND_ENV_CENTRAL_BANK  := backend/config/.env.infra.central-bank
 
-# Keycloak HTTP readiness wait in deploy.up-infra: attempts * sleep = max wall time.
+SPOKE_A_ENTITIES := central-bank-a bank-a bank-c
+SPOKE_B_ENTITIES := central-bank-b bank-b bank-d
+ALL_ENTITIES     := $(SPOKE_A_ENTITIES) $(SPOKE_B_ENTITIES)
+
+BACKEND_DIR     := backend
+BACKEND_ENV_DIR := $(BACKEND_DIR)/config
+
 KEYCLOAK_READY_ATTEMPTS ?= 40
 KEYCLOAK_WAIT_SLEEP_SEC ?= 3
+
+# ── Shared network ───────────────────────────────────────────────────────────
 
 deploy.create-shared-network:
 	@docker network inspect cbweb3_network >/dev/null 2>&1 || docker network create cbweb3_network
 
+# ── Besu spokes ──────────────────────────────────────────────────────────────
+
 deploy.up-spoke-a:
-	@echo "Starting Spoke-A Besu (central-bank + bank-a + bank-b nodes)..."
+	@echo "Starting Spoke-A Besu (central-bank-a + bank-a + bank-c nodes)..."
 	@cd ./$(DEPLOY_DIR)/spoke-besu-a && ./startBesu.sh
 
 deploy.down-spoke-a:
 	@echo "Stopping Spoke-A Besu..."
 	@cd ./$(DEPLOY_DIR)/spoke-besu-a && ./stopBesu.sh
 
-deploy.up-besu: deploy.up-spoke-a
+deploy.up-spoke-b:
+	@echo "Starting Spoke-B Besu (central-bank-b + bank-b + bank-d nodes)..."
+	@cd ./$(DEPLOY_DIR)/spoke-besu-b && ./startBesu.sh
 
-deploy.down-besu: deploy.down-spoke-a
+deploy.down-spoke-b:
+	@echo "Stopping Spoke-B Besu..."
+	@cd ./$(DEPLOY_DIR)/spoke-besu-b && ./stopBesu.sh
+
+deploy.up-besu: deploy.up-spoke-a deploy.up-spoke-b
+deploy.down-besu: deploy.down-spoke-b deploy.down-spoke-a
+
+# ── Infra (Keycloak, Postgres, Redis) ────────────────────────────────────────
 
 deploy.up-infra: deploy.create-shared-network
 	@echo "Starting Compose Services (Keycloak, Postgres, Redis)..."
@@ -63,64 +76,45 @@ deploy.down-infra:
 	@docker compose -f $(DEPLOY_DIR)/compose.yml down -v
 	@docker network rm cbweb3_network 2>/dev/null || true
 
+# ── Full environment ─────────────────────────────────────────────────────────
+
 deploy.up: deploy.up-besu deploy.up-infra
-
 deploy.up-with-contracts: deploy.up contracts.deploy-all-with-sync
-
 deploy.down: deploy.down-infra deploy.down-besu
 
+# ── Backend services (pattern rules) ─────────────────────────────────────────
+
+deploy.up-backend-%:
+	@echo "Starting backend $* services..."
+	@docker compose --env-file $(BACKEND_ENV_DIR)/.env.infra.$* \
+		-f $(BACKEND_DIR)/docker-compose-backend.$*.yaml up -d
+
+deploy.down-backend-%:
+	@echo "Stopping backend $* services..."
+	@docker compose --env-file $(BACKEND_ENV_DIR)/.env.infra.$* \
+		-f $(BACKEND_DIR)/docker-compose-backend.$*.yaml down -v
+
+deploy.validate-backend-%:
+	@docker compose --env-file $(BACKEND_ENV_DIR)/.env.infra.$* \
+		-f $(BACKEND_DIR)/docker-compose-backend.$*.yaml config -q
+
 deploy.build-backend:
-	@echo "Building backend service images..."
-	@docker compose -f $(BACKEND_COMPOSE_BANK_A) build
-	@docker compose -f $(BACKEND_COMPOSE_BANK_B) build
-	@docker compose -f $(BACKEND_COMPOSE_CENTRAL_BANK) build
+	@echo "Building backend service images ($(ALL_ENTITIES))..."
+	@$(foreach e,$(ALL_ENTITIES),docker compose -f $(BACKEND_DIR)/docker-compose-backend.$(e).yaml build &&) true
 
-deploy.up-backend:
-	@echo "Starting backend stack for all entities (bank-a, bank-b, central-bank)..."
-	@$(MAKE) deploy.up-backend-entities
+deploy.up-backend-spoke-a: $(addprefix deploy.up-backend-,$(SPOKE_A_ENTITIES))
+deploy.down-backend-spoke-a: $(addprefix deploy.down-backend-,$(SPOKE_A_ENTITIES))
+deploy.up-backend-spoke-b: $(addprefix deploy.up-backend-,$(SPOKE_B_ENTITIES))
+deploy.down-backend-spoke-b: $(addprefix deploy.down-backend-,$(SPOKE_B_ENTITIES))
 
-deploy.down-backend:
-	@echo "Stopping backend stack for all entities (bank-a, bank-b, central-bank)..."
-	@$(MAKE) deploy.down-backend-entities
+deploy.up-backend-entities: $(addprefix deploy.up-backend-,$(ALL_ENTITIES))
+deploy.down-backend-entities: $(addprefix deploy.down-backend-,$(ALL_ENTITIES))
+deploy.validate-backend-entities: $(addprefix deploy.validate-backend-,$(ALL_ENTITIES))
 
-deploy.validate-backend-bank-a:
-	@docker compose --env-file $(BACKEND_ENV_BANK_A) -f $(BACKEND_COMPOSE_BANK_A) config -q
+deploy.up-backend: deploy.up-backend-entities
+deploy.down-backend: deploy.down-backend-entities
 
-deploy.validate-backend-bank-b:
-	@docker compose --env-file $(BACKEND_ENV_BANK_B) -f $(BACKEND_COMPOSE_BANK_B) config -q
-
-deploy.validate-backend-central-bank:
-	@docker compose --env-file $(BACKEND_ENV_CENTRAL_BANK) -f $(BACKEND_COMPOSE_CENTRAL_BANK) config -q
-
-deploy.validate-backend-entities: deploy.validate-backend-bank-a deploy.validate-backend-bank-b deploy.validate-backend-central-bank
-
-deploy.up-backend-bank-a:
-	@echo "Starting backend bank-a services..."
-	@docker compose --env-file $(BACKEND_ENV_BANK_A) -f $(BACKEND_COMPOSE_BANK_A) up -d
-
-deploy.down-backend-bank-a:
-	@echo "Stopping backend bank-a services..."
-	@docker compose --env-file $(BACKEND_ENV_BANK_A) -f $(BACKEND_COMPOSE_BANK_A) down -v
-
-deploy.up-backend-bank-b:
-	@echo "Starting backend bank-b services..."
-	@docker compose --env-file $(BACKEND_ENV_BANK_B) -f $(BACKEND_COMPOSE_BANK_B) up -d
-
-deploy.down-backend-bank-b:
-	@echo "Stopping backend bank-b services..."
-	@docker compose --env-file $(BACKEND_ENV_BANK_B) -f $(BACKEND_COMPOSE_BANK_B) down -v
-
-deploy.up-backend-central-bank:
-	@echo "Starting backend central-bank services..."
-	@docker compose --env-file $(BACKEND_ENV_CENTRAL_BANK) -f $(BACKEND_COMPOSE_CENTRAL_BANK) up -d
-
-deploy.down-backend-central-bank:
-	@echo "Stopping backend central-bank services..."
-	@docker compose --env-file $(BACKEND_ENV_CENTRAL_BANK) -f $(BACKEND_COMPOSE_CENTRAL_BANK) down -v
-
-deploy.up-backend-entities: deploy.up-backend-bank-a deploy.up-backend-bank-b deploy.up-backend-central-bank
-
-deploy.down-backend-entities: deploy.down-backend-central-bank deploy.down-backend-bank-b deploy.down-backend-bank-a
+# ── CI ────────────────────────────────────────────────────────────────────────
 
 deploy.build-ci-runner:
 	@docker build -t cbweb3-act-runner:latest -f ./$(DEPLOY_DIR)/act/Dockerfile .
@@ -133,4 +127,12 @@ deploy.ci-local: deploy.build-ci-runner
 		-P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-22.04 \
 		$(ARGS)
 
-.PHONY: deploy.create-shared-network deploy.up-spoke-a deploy.down-spoke-a deploy.up-besu deploy.down-besu deploy.up-infra deploy.down-infra deploy.up deploy.up-with-contracts deploy.down deploy.build-backend deploy.up-backend deploy.down-backend deploy.validate-backend-bank-a deploy.validate-backend-bank-b deploy.validate-backend-central-bank deploy.validate-backend-entities deploy.up-backend-bank-a deploy.down-backend-bank-a deploy.up-backend-bank-b deploy.down-backend-bank-b deploy.up-backend-central-bank deploy.down-backend-central-bank deploy.up-backend-entities deploy.down-backend-entities deploy.build-ci-runner deploy.ci-local
+.PHONY: deploy.create-shared-network \
+	deploy.up-spoke-a deploy.down-spoke-a deploy.up-spoke-b deploy.down-spoke-b \
+	deploy.up-besu deploy.down-besu deploy.up-infra deploy.down-infra \
+	deploy.up deploy.up-with-contracts deploy.down \
+	deploy.build-backend deploy.up-backend deploy.down-backend \
+	deploy.up-backend-spoke-a deploy.down-backend-spoke-a \
+	deploy.up-backend-spoke-b deploy.down-backend-spoke-b \
+	deploy.up-backend-entities deploy.down-backend-entities deploy.validate-backend-entities \
+	deploy.build-ci-runner deploy.ci-local

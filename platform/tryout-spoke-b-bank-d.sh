@@ -1,35 +1,35 @@
 #!/usr/bin/env bash
-# tryout-spoke-a.sh — Onboard a commercial bank (bank-a) to the Central Bank
+# tryout-spoke-b-bank-d.sh — Onboard a commercial bank (bank-d) to the Central Bank
 #
 # Dual-entity 3-phase PKI + Blockchain onboarding flow.
-# The script simulates both sides (Bank-A operator and CB governance) and
+# The script simulates both sides (Bank-D operator and CB governance) and
 # exercises the full round-trip across two API Gateways.
 #
 # Flow (7 steps):
 #
-#   Step 1  Bank-A operator login (Bank-A Keycloak)
-#   Step 2  Credential Request via Bank-A proxy -> CB public endpoint
+#   Step 1  Bank-D operator login (Bank-D Keycloak)
+#   Step 2  Credential Request via Bank-D proxy -> CB public endpoint
 #   Step 3  Central Bank governance login (CB Keycloak)
 #   Step 4  Approve KYC (CB governance)
-#   Step 5  Polling via Bank-A proxy (discovers pop_nonce)
-#   Step 6  Complete Onboarding via Bank-A proxy (PoP + wallet bind)
+#   Step 5  Polling via Bank-D proxy (discovers pop_nonce)
+#   Step 6  Complete Onboarding via Bank-D proxy (PoP + wallet bind)
 #   Step 7  PKI Login directly on CB (validation)
 #
 # Prerequisites:
-#   - Both stacks running: make dev.up (or dev.up-bank-a + dev.up-central-bank-a)
+#   - Both stacks running: make dev.up (or dev.up-bank-d + dev.up-central-bank-b)
 #   - curl, jq, openssl, xxd, cast (Foundry)
-#   - backend/config/.env.infra.bank-a    with KC_CLIENT_SECRET
-#   - backend/config/.env.infra.central-bank-a with KC_CLIENT_SECRET
-#   - backend/config/pki/bank-a.{csr,key}
+#   - backend/config/.env.infra.bank-d    with KC_CLIENT_SECRET
+#   - backend/config/.env.infra.central-bank-b with KC_CLIENT_SECRET
+#   - backend/config/pki/bank-d.{csr,key}
 #
 # Usage:
-#   ./tryout-spoke-a.sh
+#   ./tryout-spoke-b-bank-d.sh
 #
 # Environment variables (optional):
-#   BANK_URL   Bank-A API base         (default: http://localhost:18080/api/v1)
-#   CB_URL     Central Bank API base   (default: http://localhost:38080/api/v1)
-#   BANK_ENV   Bank-A .env file        (default: backend/config/.env.infra.bank-a)
-#   CB_ENV     Central Bank .env file  (default: backend/config/.env.infra.central-bank-a)
+#   BANK_URL   Bank-D API base         (default: http://localhost:58080/api/v1)
+#   CB_URL     Central Bank API base   (default: http://localhost:60080/api/v1)
+#   BANK_ENV   Bank-D .env file        (default: backend/config/.env.infra.bank-d)
+#   CB_ENV     Central Bank .env file  (default: backend/config/.env.infra.central-bank-b)
 #   PKI_DIR    Path to PKI files       (default: backend/config/pki)
 
 set -euo pipefail
@@ -38,10 +38,10 @@ set -euo pipefail
 # Configuration
 # ---------------------------------------------------------------------------
 
-BANK_URL="${BANK_URL:-http://localhost:18080/api/v1}"
-CB_URL="${CB_URL:-http://localhost:38080/api/v1}"
-BANK_ENV="${BANK_ENV:-backend/config/.env.infra.bank-a}"
-CB_ENV="${CB_ENV:-backend/config/.env.infra.central-bank-a}"
+BANK_URL="${BANK_URL:-http://localhost:58080/api/v1}"
+CB_URL="${CB_URL:-http://localhost:60080/api/v1}"
+BANK_ENV="${BANK_ENV:-backend/config/.env.infra.bank-d}"
+CB_ENV="${CB_ENV:-backend/config/.env.infra.central-bank-b}"
 PKI_DIR="${PKI_DIR:-backend/config/pki}"
 
 # Globals populated during execution
@@ -75,7 +75,7 @@ require_cmds() {
 
 require_env_files() {
   if [ ! -f "$BANK_ENV" ]; then
-    echo "ERROR: Bank-A env file '$BANK_ENV' not found." >&2
+    echo "ERROR: Bank-D env file '$BANK_ENV' not found." >&2
     exit 1
   fi
   if [ ! -f "$CB_ENV" ]; then
@@ -84,10 +84,10 @@ require_env_files() {
   fi
 }
 
-require_pki_bank_a() {
-  if [ ! -f "$PKI_DIR/bank-a.csr" ] || [ ! -f "$PKI_DIR/bank-a.key" ]; then
-    echo "ERROR: PKI files not found at $PKI_DIR/bank-a.{csr,key}." >&2
-    echo "       Run 'make pki.gen-bank-a pki.gen-commercial-banks' first." >&2
+require_pki_bank_d() {
+  if [ ! -f "$PKI_DIR/bank-d.csr" ] || [ ! -f "$PKI_DIR/bank-d.key" ]; then
+    echo "ERROR: PKI files not found at $PKI_DIR/bank-d.{csr,key}." >&2
+    echo "       Run 'make pki.gen-bank-d pki.gen-commercial-banks' first." >&2
     exit 1
   fi
 }
@@ -104,9 +104,9 @@ read_kc_secret() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 1 — Bank-A operator login (actor: Bank-A operator)
-# Authenticates against Bank-A's Keycloak to get an operator token used
-# for the protected proxy routes on Bank-A's gateway.
+# Step 1 — Bank-D operator login (actor: Bank-D operator)
+# Authenticates against Bank-D's Keycloak to get an operator token used
+# for the protected proxy routes on Bank-D's gateway.
 # ---------------------------------------------------------------------------
 
 bank_operator_login() {
@@ -114,18 +114,18 @@ bank_operator_login() {
   kc_secret=$(read_kc_secret "$BANK_ENV")
   login_resp=$(curl -s -X POST "$BANK_URL/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"clientId\": \"bank-a-client\", \"clientSecret\": \"$kc_secret\"}")
+    -d "{\"clientId\": \"bank-d-client\", \"clientSecret\": \"$kc_secret\"}")
   BANK_OPERATOR_TOKEN=$(echo "$login_resp" | jq -r '.accessToken // empty')
   if [ -z "$BANK_OPERATOR_TOKEN" ]; then
-    echo "ERROR: Bank-A operator login failed." >&2
+    echo "ERROR: Bank-D operator login failed." >&2
     echo "Response: $login_resp" >&2
     exit 1
   fi
 }
 
 # ---------------------------------------------------------------------------
-# Step 2 — Phase 1: Credential Request (actor: Bank-A operator)
-# Calls Bank-A's protected proxy route which forwards to the Central Bank's
+# Step 2 — Phase 1: Credential Request (actor: Bank-D operator)
+# Calls Bank-D's protected proxy route which forwards to the Central Bank's
 # public /onboarding/credential-request endpoint.
 # ---------------------------------------------------------------------------
 
@@ -140,7 +140,7 @@ generate_secp256k1_keypair() {
 
 submit_credential_request() {
   local csr_pem tmp code body
-  csr_pem=$(cat "$PKI_DIR/bank-a.csr")
+  csr_pem=$(cat "$PKI_DIR/bank-d.csr")
   tmp=$(mktemp)
   code=$(curl -sS -X POST "$BANK_URL/onboarding/initiate" \
     --cookie "access_token=$BANK_OPERATOR_TOKEN" \
@@ -148,12 +148,12 @@ submit_credential_request() {
     --data "$(jq -n \
       --arg csr "$csr_pem" \
       --arg pub "$SECP256K1_PUB_KEY" \
-      --arg inst "Bank A S.A." \
-      --arg bank "a" \
+      --arg inst "Bank D S.A." \
+      --arg bank "d" \
       --arg country "BR" \
       --arg role "ROLE_COMMERCIAL_BANK" \
-      --arg email "ops@bank-a.com.br" \
-      --arg user "bank-a" \
+      --arg email "ops@bank-d.com.br" \
+      --arg user "bank-d" \
       '{
         csr_pem: $csr,
         blockchain_pub_key_hex: $pub,
@@ -188,7 +188,7 @@ cb_governance_login() {
   kc_secret=$(read_kc_secret "$CB_ENV")
   login_resp=$(curl -s -X POST "$CB_URL/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"clientId\": \"central-bank-a-client\", \"clientSecret\": \"$kc_secret\"}")
+    -d "{\"clientId\": \"central-bank-b-client\", \"clientSecret\": \"$kc_secret\"}")
   CB_TOKEN=$(echo "$login_resp" | jq -r '.accessToken // empty')
   if [ -z "$CB_TOKEN" ]; then
     echo "ERROR: Central Bank governance login failed." >&2
@@ -207,7 +207,7 @@ approve_kyc() {
   resp=$(curl -s -X POST "$CB_URL/compliance/approve-kyc" \
     --cookie "access_token=$CB_TOKEN" \
     -H "Content-Type: application/json" \
-    -d "$(jq -n --arg s "$BANK_USER_ID" '{subject: $s, reason: "KYC approved - tryout-spoke-a"}')")
+    -d "$(jq -n --arg s "$BANK_USER_ID" '{subject: $s, reason: "KYC approved - tryout-spoke-b-bank-d"}')")
   status_val=$(echo "$resp" | jq -r '.status // empty')
   POP_NONCE=$(echo "$resp" | jq -r '.pop_nonce // empty')
   if [ "$status_val" != "KYC_APPROVED" ]; then
@@ -219,8 +219,8 @@ approve_kyc() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 5 — Phase 2.5: Polling (actor: Bank-A operator)
-# Calls Bank-A's protected proxy route to discover the KYC approval and
+# Step 5 — Phase 2.5: Polling (actor: Bank-D operator)
+# Calls Bank-D's protected proxy route to discover the KYC approval and
 # retrieve the PoP nonce.
 # ---------------------------------------------------------------------------
 
@@ -246,8 +246,8 @@ poll_onboarding_status() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 6 — Phase 3: Complete Onboarding (actor: Bank-A operator)
-# Calls Bank-A's protected proxy route. Signs the PoP nonce with secp256k1
+# Step 6 — Phase 3: Complete Onboarding (actor: Bank-D operator)
+# Calls Bank-D's protected proxy route. Signs the PoP nonce with secp256k1
 # to prove wallet ownership.
 # ---------------------------------------------------------------------------
 
@@ -321,7 +321,7 @@ pki_login() {
   echo "  Nonce received: ${nonce:0:32}..."
 
   nonce_sig=$(echo -n "$nonce" | xxd -r -p \
-    | openssl dgst -sha256 -sign "$PKI_DIR/bank-a.key" \
+    | openssl dgst -sha256 -sign "$PKI_DIR/bank-d.key" \
     | xxd -p | tr -d '\n')
 
   bind_resp=$(curl -s -X POST "$CB_URL/auth/wallet/bind" \
@@ -346,23 +346,23 @@ pki_login() {
 main() {
   require_cmds
   require_env_files
-  require_pki_bank_a
+  require_pki_bank_d
 
   echo ""
   echo "======================================================"
-  echo "  Onboarding: bank-a -> Central-Bank-A (3-phase PKI)"
-  echo "  Bank-A Gateway : $BANK_URL"
+  echo "  Onboarding: bank-d -> Central-Bank-B (3-phase PKI)"
+  echo "  Bank-D Gateway : $BANK_URL"
   echo "  Central Bank GW: $CB_URL"
   echo "======================================================"
 
   echo ""
-  echo "--- Actor: BANK-A OPERATOR ---"
-  echo "=== [1/7] Bank-A operator login ==="
+  echo "--- Actor: BANK-D OPERATOR ---"
+  echo "=== [1/7] Bank-D operator login ==="
   bank_operator_login
   echo "  BANK_OPERATOR_TOKEN: ${BANK_OPERATOR_TOKEN:0:60}..."
 
   echo ""
-  echo "=== [2/7] Phase 1 — Credential Request (via Bank-A proxy) ==="
+  echo "=== [2/7] Phase 1 — Credential Request (via Bank-D proxy) ==="
   echo "  Generating secp256k1 keypair..."
   generate_secp256k1_keypair
   echo "  secp256k1 address: $SECP256K1_ADDRESS"
@@ -386,13 +386,13 @@ main() {
   echo "  pop_nonce: ${POP_NONCE:0:32}..."
 
   echo ""
-  echo "--- Actor: BANK-A OPERATOR ---"
-  echo "=== [5/7] Phase 2.5 — Polling (via Bank-A proxy) ==="
+  echo "--- Actor: BANK-D OPERATOR ---"
+  echo "=== [5/7] Phase 2.5 — Polling (via Bank-D proxy) ==="
   poll_onboarding_status
   echo "  Confirmed: status=KYC_APPROVED, pop_nonce present"
 
   echo ""
-  echo "=== [6/7] Phase 3 — Complete Onboarding (via Bank-A proxy) ==="
+  echo "=== [6/7] Phase 3 — Complete Onboarding (via Bank-D proxy) ==="
   echo "  Signing PoP nonce with secp256k1..."
   sign_pop_nonce
   echo "  PoP signature: ${POP_SIGNATURE_HEX:0:32}..."

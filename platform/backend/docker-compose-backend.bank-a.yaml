@@ -66,7 +66,7 @@ services:
       AUTH_GRPC_ADDR: auth-bank-a:9091
       COMPLIANCE_GRPC_ADDR: compliance-bank-a:9093
       PKI_DIR: /workspace/backend/config/pki
-      CENTRAL_BANK_API_URL: "http://api-gateway-central-bank:8080"
+      CENTRAL_BANK_API_URL: "http://api-gateway-central-bank-a:8080"
     volumes:
       - ./config/pki:/workspace/backend/config/pki
     ports:

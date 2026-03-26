@@ -1,84 +1,83 @@
 services:
-  compliance-bank-b:
+  compliance-central-bank-b:
     build:
       context: .
       dockerfile: services/compliance/Dockerfile
     image: cbweb3/compliance:local
     pull_policy: build
-    container_name: "backend-compliance-bank-b"
+    container_name: "backend-compliance-central-bank-b"
     env_file:
-      - path: ./config/.env.infra.bank-b
+      - path: ./config/.env.infra.central-bank-b
         required: true
     environment:
       COMPLIANCE_GRPC_PORT: "9093"
-      POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_bank_b}?sslmode=disable"
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_central_bank_b}?sslmode=disable"
     volumes:
       - ./config/pki:/workspace/backend/config/pki
     ports:
-      - "29093:9093"
+      - "60093:9093"
     networks:
-      - cbweb3_backend_bank_b
+      - cbweb3_backend_central_bank_b
       - cbweb3_network
 
-  auth-bank-b:
+  auth-central-bank-b:
     build:
       context: .
       dockerfile: services/auth/Dockerfile
     image: cbweb3/auth:local
     pull_policy: build
-    container_name: "backend-auth-bank-b"
+    container_name: "backend-auth-central-bank-b"
     env_file:
-      - path: ./config/.env.infra.bank-b
+      - path: ./config/.env.infra.central-bank-b
         required: true
     environment:
       AUTH_GRPC_PORT: "9091"
       KEYCLOAK_BASE_URL: "${KEYCLOAK_BASE_URL:-http://keycloak:8080}"
-      KEYCLOAK_REALM: "${KC_REALM:-bank-b}"
-      KEYCLOAK_CLIENT_ID: "${KC_CLIENT_ID:-bank-b-client}"
+      KEYCLOAK_REALM: "${KC_REALM:-central-bank-b}"
+      KEYCLOAK_CLIENT_ID: "${KC_CLIENT_ID:-central-bank-b-client}"
       KEYCLOAK_CLIENT_SECRET: "${KC_CLIENT_SECRET:-change-me}"
       KEYCLOAK_JWKS_CACHE_TTL_SEC: "3000"
       KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
-      COMPLIANCE_GRPC_ADDR: compliance-bank-b:9093
+      COMPLIANCE_GRPC_ADDR: compliance-central-bank-b:9093
       COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
       REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
-      REDIS_DB: "1"
+      REDIS_DB: "5"
     ports:
-      - "29091:9091"
+      - "60091:9091"
     depends_on:
-      - compliance-bank-b
+      - compliance-central-bank-b
     networks:
-      - cbweb3_backend_bank_b
+      - cbweb3_backend_central_bank_b
       - cbweb3_network
 
-  api-gateway-bank-b:
+  api-gateway-central-bank-b:
     build:
       context: .
       dockerfile: services/api-gateway/Dockerfile
     image: cbweb3/api-gateway:local
     pull_policy: build
-    container_name: "backend-api-gateway-bank-b"
+    container_name: "backend-api-gateway-central-bank-b"
     env_file:
-      - path: ./config/.env.infra.bank-b
+      - path: ./config/.env.infra.central-bank-b
         required: true
     environment:
       APP_PORT: "8080"
       REQUEST_TIMEOUT_SEC: "30"
-      AUTH_GRPC_ADDR: auth-bank-b:9091
-      COMPLIANCE_GRPC_ADDR: compliance-bank-b:9093
+      AUTH_GRPC_ADDR: auth-central-bank-b:9091
+      COMPLIANCE_GRPC_ADDR: compliance-central-bank-b:9093
       PKI_DIR: /workspace/backend/config/pki
-      CENTRAL_BANK_API_URL: "http://api-gateway-central-bank-b:8080"
     volumes:
       - ./config/pki:/workspace/backend/config/pki
     ports:
-      - "28080:8080"
+      - "60080:8080"
     depends_on:
-      - auth-bank-b
-      - compliance-bank-b
+      - auth-central-bank-b
+      - compliance-central-bank-b
     networks:
-      - cbweb3_backend_bank_b
+      - cbweb3_backend_central_bank_b
       - cbweb3_network
 
 networks:
-  cbweb3_backend_bank_b:
+  cbweb3_backend_central_bank_b:
   cbweb3_network:
     external: true

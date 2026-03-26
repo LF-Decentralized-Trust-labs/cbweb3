@@ -11,8 +11,8 @@ BLUE='\033[0;34m'
 YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 
-NETWORK_NAME="spoke_a_besu_network"
-CONTAINER_PREFIX="cbweb3-spoke-a-besu"
+NETWORK_NAME="spoke_b_besu_network"
+CONTAINER_PREFIX="cbweb3-spoke-b-besu"
 
 cleanup_path() {
     local relative_path="$1"
@@ -29,9 +29,9 @@ echo
 cleanup_path "tmpFiles"
 cleanup_path "networkFiles"
 cleanup_path "genesis"
-cleanup_path "nodes/central-bank-a"
-cleanup_path "nodes/bank-a"
-cleanup_path "nodes/bank-c"
+cleanup_path "nodes/central-bank-b"
+cleanup_path "nodes/bank-b"
+cleanup_path "nodes/bank-d"
 cleanup_path "config/qbftConfigFile.json"
 cleanup_path ".env.network"
 

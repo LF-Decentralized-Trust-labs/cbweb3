@@ -15,7 +15,7 @@ import (
 // gateway to the Central Bank's public onboarding endpoints.
 type OnboardingProxyHandler struct {
 	client  *http.Client
-	baseURL string // Central Bank API base URL (e.g. "http://api-gateway-central-bank:8080")
+	baseURL string // Central Bank API base URL (e.g. "http://api-gateway-central-bank-a:8080")
 }
 
 // NewOnboardingProxyHandler creates a proxy handler targeting the given Central Bank URL.

@@ -8,8 +8,14 @@ INFRA_ENV_BANK_A="$CONFIG_DIR/.env.infra.bank-a"
 INFRA_ENV_BANK_A_EXAMPLE="$CONFIG_DIR/.env.infra.bank-a.example"
 INFRA_ENV_BANK_B="$CONFIG_DIR/.env.infra.bank-b"
 INFRA_ENV_BANK_B_EXAMPLE="$CONFIG_DIR/.env.infra.bank-b.example"
-INFRA_ENV_CENTRAL_BANK="$CONFIG_DIR/.env.infra.central-bank"
-INFRA_ENV_CENTRAL_BANK_EXAMPLE="$CONFIG_DIR/.env.infra.central-bank.example"
+INFRA_ENV_BANK_C="$CONFIG_DIR/.env.infra.bank-c"
+INFRA_ENV_BANK_C_EXAMPLE="$CONFIG_DIR/.env.infra.bank-c.example"
+INFRA_ENV_BANK_D="$CONFIG_DIR/.env.infra.bank-d"
+INFRA_ENV_BANK_D_EXAMPLE="$CONFIG_DIR/.env.infra.bank-d.example"
+INFRA_ENV_CENTRAL_BANK_A="$CONFIG_DIR/.env.infra.central-bank-a"
+INFRA_ENV_CENTRAL_BANK_A_EXAMPLE="$CONFIG_DIR/.env.infra.central-bank-a.example"
+INFRA_ENV_CENTRAL_BANK_B="$CONFIG_DIR/.env.infra.central-bank-b"
+INFRA_ENV_CENTRAL_BANK_B_EXAMPLE="$CONFIG_DIR/.env.infra.central-bank-b.example"
 
 source_if_exists() {
   local env_file="$1"
@@ -257,12 +263,36 @@ create_platform_roles "bank-b" "${BANK_ROLES[@]}"
 assign_governance_role_to_service_account "bank-b" "bank-b-client"
 
 create_realm_and_client \
-  "central-bank" \
-  "central-bank-client" \
-  "$INFRA_ENV_CENTRAL_BANK" \
-  "$INFRA_ENV_CENTRAL_BANK_EXAMPLE"
-create_platform_roles "central-bank" "${CENTRAL_BANK_ROLES[@]}"
-assign_governance_role_to_service_account "central-bank" "central-bank-client"
+  "central-bank-a" \
+  "central-bank-a-client" \
+  "$INFRA_ENV_CENTRAL_BANK_A" \
+  "$INFRA_ENV_CENTRAL_BANK_A_EXAMPLE"
+create_platform_roles "central-bank-a" "${CENTRAL_BANK_ROLES[@]}"
+assign_governance_role_to_service_account "central-bank-a" "central-bank-a-client"
+
+create_realm_and_client \
+  "bank-c" \
+  "bank-c-client" \
+  "$INFRA_ENV_BANK_C" \
+  "$INFRA_ENV_BANK_C_EXAMPLE"
+create_platform_roles "bank-c" "${BANK_ROLES[@]}"
+assign_governance_role_to_service_account "bank-c" "bank-c-client"
+
+create_realm_and_client \
+  "bank-d" \
+  "bank-d-client" \
+  "$INFRA_ENV_BANK_D" \
+  "$INFRA_ENV_BANK_D_EXAMPLE"
+create_platform_roles "bank-d" "${BANK_ROLES[@]}"
+assign_governance_role_to_service_account "bank-d" "bank-d-client"
+
+create_realm_and_client \
+  "central-bank-b" \
+  "central-bank-b-client" \
+  "$INFRA_ENV_CENTRAL_BANK_B" \
+  "$INFRA_ENV_CENTRAL_BANK_B_EXAMPLE"
+create_platform_roles "central-bank-b" "${CENTRAL_BANK_ROLES[@]}"
+assign_governance_role_to_service_account "central-bank-b" "central-bank-b-client"
 
 echo "KEYCLOAK_INIT_DONE"
 echo -e "\nConfiguração concluída. Keycloak está em execução."

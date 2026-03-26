@@ -327,9 +327,9 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 // cert_file can be:
 //   - a combined .pem file containing both CERTIFICATE and EC PRIVATE KEY blocks
 //   - a .crt file; in this case the matching .key file (same base name) is loaded
-//     automatically from PKI_DIR (e.g. "bank-001.crt" → also reads "bank-001.key")
+//     automatically from PKI_DIR (e.g. "bank-a.crt" → also reads "bank-a.key")
 //
-// Request: { "nonce": "<64-char hex>", "cert_file": "bank-001.crt" }
+// Request: { "nonce": "<64-char hex>", "cert_file": "bank-a.crt" }
 // Response: { "nonce_signature_hex": "<hex DER>", "cert_pem": "<PEM>" }
 func (h *AuthHandler) ResolveChallenger(c *fiber.Ctx) error { // MVP-only
 	var req struct {
@@ -378,7 +378,7 @@ func (h *AuthHandler) ResolveChallenger(c *fiber.Ctx) error { // MVP-only
 	}
 
 	// If the private key was not found in the cert file, look for a sibling .key
-	// file with the same base name (e.g. "bank-001.crt" → "bank-001.key").
+	// file with the same base name (e.g. "bank-a.crt" → "bank-a.key").
 	// This matches the file layout produced by `make pki.gen-commercial-banks`.
 	if keyPEMBlock == nil {
 		ext := filepath.Ext(req.CertFile)

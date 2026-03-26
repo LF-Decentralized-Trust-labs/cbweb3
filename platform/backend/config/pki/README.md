@@ -1,10 +1,14 @@
 # Local PKI — CA Credentials
 
 This directory holds the **Certificate Authority (CA)** credentials for each
-entity in **spoke-a**. All three entities — Central Bank, Bank-A and Bank-B —
-share the same spoke-a Besu network (chain 1338) but each has its **own
-independent CA** used to sign participant CSRs and bootstrap the governance
-participant on startup.
+entity across **two Besu spokes**. Each entity has its **own independent CA**
+used to sign participant CSRs and bootstrap the governance participant on
+startup.
+
+**Architecture**
+
+- **Spoke-A (chain 1338):** central-bank-a, bank-a, bank-c  
+- **Spoke-B (chain 1339):** central-bank-b, bank-b, bank-d  
 
 > **Security notice:** `*.key`, `*.crt`, and `*.pem` files in this directory are
 > listed in `.gitignore` and must **never** be committed to the repository.
@@ -13,11 +17,14 @@ participant on startup.
 
 ## File naming convention
 
-| Entity          | CA certificate           | CA private key           |
-|-----------------|--------------------------|--------------------------|
-| Central Bank    | `central-bank-ca.crt`    | `central-bank-ca.key`    |
-| Bank-A          | `bank-a-ca.crt`          | `bank-a-ca.key`          |
-| Bank-B          | `bank-b-ca.crt`          | `bank-b-ca.key`          |
+| Entity          | CA certificate              | CA private key             |
+|-----------------|-----------------------------|----------------------------|
+| Central-Bank-A  | `central-bank-a-ca.crt`     | `central-bank-a-ca.key`    |
+| Central-Bank-B  | `central-bank-b-ca.crt`     | `central-bank-b-ca.key`    |
+| Bank-A          | `bank-a-ca.crt`             | `bank-a-ca.key`            |
+| Bank-B          | `bank-b-ca.crt`             | `bank-b-ca.key`            |
+| Bank-C          | `bank-c-ca.crt`             | `bank-c-ca.key`            |
+| Bank-D          | `bank-d-ca.crt`             | `bank-d-ca.key`            |
 
 ---
 
@@ -31,65 +38,75 @@ the key already exists (idempotent). To force regeneration add `FORCE=1`.
 make pki.gen-all
 
 # Individual entity CAs
-make pki.gen-central-bank
+make pki.gen-central-bank-a
+make pki.gen-central-bank-b
 make pki.gen-bank-a
 make pki.gen-bank-b
+make pki.gen-bank-c
+make pki.gen-bank-d
 
-# Commercial bank participant certificates (bank-001 … bank-006)
+# Commercial bank participant certificates (bank-a through bank-d)
 make pki.gen-commercial-banks
 ```
 
 Alternatively, generate manually with `openssl`:
 
-### Central Bank CA
+### Central-Bank-A CA
 
 ```bash
 openssl ecparam -genkey -name prime256v1 -noout \
-  -out backend/config/pki/central-bank-ca.key
+  -out backend/config/pki/central-bank-a-ca.key
 
 openssl req -new -x509 \
-  -key backend/config/pki/central-bank-ca.key \
-  -out backend/config/pki/central-bank-ca.crt \
+  -key backend/config/pki/central-bank-a-ca.key \
+  -out backend/config/pki/central-bank-a-ca.crt \
   -days 3650 \
-  -subj "/CN=CBWeb3-CentralBank-CA/O=CentralBank/C=BR"
+  -subj "/CN=CBWeb3-CentralBankA-CA/O=CentralBankA/C=BR"
 ```
 
-### Bank-A CA
+### Bank-C CA
 
 ```bash
 openssl ecparam -genkey -name prime256v1 -noout \
-  -out backend/config/pki/bank-a-ca.key
+  -out backend/config/pki/bank-c-ca.key
 
 openssl req -new -x509 \
-  -key backend/config/pki/bank-a-ca.key \
-  -out backend/config/pki/bank-a-ca.crt \
+  -key backend/config/pki/bank-c-ca.key \
+  -out backend/config/pki/bank-c-ca.crt \
   -days 3650 \
-  -subj "/CN=CBWeb3-BankA-CA/O=BankA/C=BR"
+  -subj "/CN=CBWeb3-BankC-CA/O=BankC/C=BR"
 ```
 
-### Bank-B CA
+### Bank-D CA
 
 ```bash
 openssl ecparam -genkey -name prime256v1 -noout \
-  -out backend/config/pki/bank-b-ca.key
+  -out backend/config/pki/bank-d-ca.key
 
 openssl req -new -x509 \
-  -key backend/config/pki/bank-b-ca.key \
-  -out backend/config/pki/bank-b-ca.crt \
+  -key backend/config/pki/bank-d-ca.key \
+  -out backend/config/pki/bank-d-ca.crt \
   -days 3650 \
-  -subj "/CN=CBWeb3-BankB-CA/O=BankB/C=BR"
+  -subj "/CN=CBWeb3-BankD-CA/O=BankD/C=BR"
 ```
 
-After running these commands the directory should contain:
+After running generation, the directory should contain the six entity CA pairs
+plus this file:
 
 ```
 backend/config/pki/
-├── central-bank-ca.crt   ← Central Bank CA certificate
-├── central-bank-ca.key   ← Central Bank CA private key  (SECRET)
-├── bank-a-ca.crt         ← Bank-A CA certificate
-├── bank-a-ca.key         ← Bank-A CA private key        (SECRET)
-├── bank-b-ca.crt         ← Bank-B CA certificate
-├── bank-b-ca.key         ← Bank-B CA private key        (SECRET)
+├── central-bank-a-ca.crt   ← Central-Bank-A CA certificate
+├── central-bank-a-ca.key   ← Central-Bank-A CA private key  (SECRET)
+├── central-bank-b-ca.crt   ← Central-Bank-B CA certificate
+├── central-bank-b-ca.key   ← Central-Bank-B CA private key  (SECRET)
+├── bank-a-ca.crt           ← Bank-A CA certificate
+├── bank-a-ca.key           ← Bank-A CA private key            (SECRET)
+├── bank-b-ca.crt           ← Bank-B CA certificate
+├── bank-b-ca.key           ← Bank-B CA private key            (SECRET)
+├── bank-c-ca.crt           ← Bank-C CA certificate
+├── bank-c-ca.key           ← Bank-C CA private key            (SECRET)
+├── bank-d-ca.crt           ← Bank-D CA certificate
+├── bank-d-ca.key           ← Bank-D CA private key            (SECRET)
 └── README.md
 ```
 
@@ -101,11 +118,14 @@ The `compliance-orchestrator` reads the paths from two environment variables,
 which are pre-configured per entity in the respective `.env.infra.*.example`
 files:
 
-| Entity       | `CA_CERT_FILE`                                           | `CA_KEY_FILE`                                           |
-|--------------|----------------------------------------------------------|---------------------------------------------------------|
-| Central Bank | `/workspace/backend/config/pki/central-bank-ca.crt`     | `/workspace/backend/config/pki/central-bank-ca.key`    |
-| Bank-A       | `/workspace/backend/config/pki/bank-a-ca.crt`           | `/workspace/backend/config/pki/bank-a-ca.key`          |
-| Bank-B       | `/workspace/backend/config/pki/bank-b-ca.crt`           | `/workspace/backend/config/pki/bank-b-ca.key`          |
+| Entity         | `CA_CERT_FILE`                                                | `CA_KEY_FILE`                                                |
+|----------------|---------------------------------------------------------------|--------------------------------------------------------------|
+| Central-Bank-A | `/workspace/backend/config/pki/central-bank-a-ca.crt`       | `/workspace/backend/config/pki/central-bank-a-ca.key`        |
+| Central-Bank-B | `/workspace/backend/config/pki/central-bank-b-ca.crt`       | `/workspace/backend/config/pki/central-bank-b-ca.key`        |
+| Bank-A         | `/workspace/backend/config/pki/bank-a-ca.crt`               | `/workspace/backend/config/pki/bank-a-ca.key`                |
+| Bank-B         | `/workspace/backend/config/pki/bank-b-ca.crt`               | `/workspace/backend/config/pki/bank-b-ca.key`                |
+| Bank-C         | `/workspace/backend/config/pki/bank-c-ca.crt`               | `/workspace/backend/config/pki/bank-c-ca.key`                |
+| Bank-D         | `/workspace/backend/config/pki/bank-d-ca.crt`               | `/workspace/backend/config/pki/bank-d-ca.key`                |
 
 The Docker Compose files mount the `backend/config/pki` directory as
 `/workspace/backend/config/pki` inside the container, so the paths above

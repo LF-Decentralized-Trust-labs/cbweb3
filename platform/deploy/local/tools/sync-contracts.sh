@@ -3,8 +3,10 @@
 # output and updates .env.infra.* files used by backend microservices.
 #
 # Spoke-A (chain 1338): IdentityRegistry, tCeBM (domestic token), HTLC, SpokeBridge
-#   All three entities (bank-a, bank-b, central-bank) share the same spoke-a
+#   All three entities (bank-a, bank-c, central-bank-a) share the same spoke-a
 #   Besu network, so the same contract addresses are written to all three env files.
+#
+# Spoke-B (chain 1339): same contracts; written to bank-b, bank-d, central-bank-b.
 #
 # Requires: jq
 
@@ -26,7 +28,11 @@ SPOKE_A_BROADCAST="${ROOT_DIR}/contracts/broadcast/CBWeb3Spoke.s.sol/${SPOKE_A_C
 
 ENV_BANK_A="${ROOT_DIR}/backend/config/.env.infra.bank-a"
 ENV_BANK_B="${ROOT_DIR}/backend/config/.env.infra.bank-b"
-ENV_CENTRAL_BANK="${ROOT_DIR}/backend/config/.env.infra.central-bank"
+ENV_CENTRAL_BANK_A="${ROOT_DIR}/backend/config/.env.infra.central-bank-a"
+
+ENV_BANK_C="${ROOT_DIR}/backend/config/.env.infra.bank-c"
+ENV_BANK_D="${ROOT_DIR}/backend/config/.env.infra.bank-d"
+ENV_CENTRAL_BANK_B="${ROOT_DIR}/backend/config/.env.infra.central-bank-b"
 
 # --- Preflight checks ---
 if ! command -v jq &>/dev/null; then
@@ -57,7 +63,7 @@ upsert_env() {
 UPDATED=0
 
 # ============================================================
-# SPOKE-A (chain 1338) — shared by bank-a, bank-b, central-bank
+# SPOKE-A (chain 1338) — shared by bank-a, bank-c, central-bank-a
 # ============================================================
 if [[ -f "${SPOKE_A_BROADCAST}" ]]; then
   echo "--- Spoke-A (chain ${SPOKE_A_CHAIN_ID}) ---"
@@ -84,7 +90,7 @@ if [[ -f "${SPOKE_A_BROADCAST}" ]]; then
   echo "  Spoke Bridge     : ${SA_SPOKE_BRIDGE}"
 
   # Write same addresses to all three entity env files
-  for ENV_FILE in "${ENV_BANK_A}" "${ENV_BANK_B}" "${ENV_CENTRAL_BANK}"; do
+  for ENV_FILE in "${ENV_BANK_A}" "${ENV_BANK_C}" "${ENV_CENTRAL_BANK_A}"; do
     if [[ -f "${ENV_FILE}" ]]; then
       upsert_env "${ENV_FILE}" "PARTICIPANT_REGISTRY_ADDRESS" "${SA_IDENTITY_REGISTRY}"
       upsert_env "${ENV_FILE}" "TOKEN_ADDRESS"                "${SA_TOKEN}"
@@ -98,6 +104,53 @@ if [[ -f "${SPOKE_A_BROADCAST}" ]]; then
   done
 else
   echo "WARN: Spoke-A broadcast not found: ${SPOKE_A_BROADCAST} — skipping spoke-a sync." >&2
+fi
+
+# ============================================================
+# SPOKE-B (chain 1339) — shared by bank-b, bank-d, central-bank-b
+# ============================================================
+SPOKE_B_CHAIN_ID="${SPOKE_B_CHAIN_ID:-1339}"
+
+SPOKE_B_BROADCAST="${ROOT_DIR}/contracts/broadcast/CBWeb3Spoke.s.sol/${SPOKE_B_CHAIN_ID}/run-latest.json"
+
+if [[ -f "${SPOKE_B_BROADCAST}" ]]; then
+  echo "--- Spoke-B (chain ${SPOKE_B_CHAIN_ID}) ---"
+
+  SB_IDENTITY_REGISTRY=$(extract_address "${SPOKE_B_BROADCAST}" "IdentityRegistry")
+  SB_TOKEN=$(extract_address "${SPOKE_B_BROADCAST}" "TokenizedCentralBankMoney" 1)
+  SB_HTLC=$(extract_address "${SPOKE_B_BROADCAST}" "HashTimeLockedContract")
+  SB_SPOKE_BRIDGE=$(extract_address "${SPOKE_B_BROADCAST}" "SpokeBridge")
+
+  MISSING_B=()
+  [[ -z "${SB_IDENTITY_REGISTRY}" ]] && MISSING_B+=("IdentityRegistry")
+  [[ -z "${SB_TOKEN}" ]]             && MISSING_B+=("Token")
+  [[ -z "${SB_HTLC}" ]]              && MISSING_B+=("HTLC")
+  [[ -z "${SB_SPOKE_BRIDGE}" ]]      && MISSING_B+=("SpokeBridge")
+
+  if [[ ${#MISSING_B[@]} -gt 0 ]]; then
+    echo "ERROR: Spoke-B — missing addresses: ${MISSING_B[*]}" >&2
+    exit 1
+  fi
+
+  echo "  IdentityRegistry : ${SB_IDENTITY_REGISTRY}"
+  echo "  Token            : ${SB_TOKEN}"
+  echo "  HTLC             : ${SB_HTLC}"
+  echo "  Spoke Bridge     : ${SB_SPOKE_BRIDGE}"
+
+  for ENV_FILE in "${ENV_BANK_B}" "${ENV_BANK_D}" "${ENV_CENTRAL_BANK_B}"; do
+    if [[ -f "${ENV_FILE}" ]]; then
+      upsert_env "${ENV_FILE}" "PARTICIPANT_REGISTRY_ADDRESS" "${SB_IDENTITY_REGISTRY}"
+      upsert_env "${ENV_FILE}" "TOKEN_ADDRESS"                "${SB_TOKEN}"
+      upsert_env "${ENV_FILE}" "HTLC_ADDRESS"                 "${SB_HTLC}"
+      upsert_env "${ENV_FILE}" "SPOKE_BRIDGE_ADDRESS"         "${SB_SPOKE_BRIDGE}"
+      UPDATED=$((UPDATED + 1))
+      echo "  Updated: ${ENV_FILE}"
+    else
+      echo "  WARN: ${ENV_FILE} not found, skipping." >&2
+    fi
+  done
+else
+  echo "WARN: Spoke-B broadcast not found: ${SPOKE_B_BROADCAST} — skipping spoke-b sync." >&2
 fi
 
 # --- Summary ---

@@ -8,7 +8,7 @@ BOOTSTRAP_ENV_FILE_ALIAS="$PROJECT_ROOT/backend/config/.env.keycloack.bootstrap"
 TARGET_ENTITY="bank-a"
 
 usage() {
-  echo "Usage: $0 [--entity bank-a|bank-b|central-bank]"
+  echo "Usage: $0 [--entity bank-a|bank-b|bank-c|bank-d|central-bank-a|central-bank-b]"
   exit 1
 }
 
@@ -39,14 +39,32 @@ case "$TARGET_ENTITY" in
     DEFAULT_REALM="bank-b"
     DEFAULT_CLIENT_ID="bank-b-client"
     ;;
-  central-bank)
-    DOMAIN_INFRA_ENV_FILE="$PROJECT_ROOT/backend/config/.env.infra.central-bank"
-    DOMAIN_INFRA_ENV_FILE_EXAMPLE="$PROJECT_ROOT/backend/config/.env.infra.central-bank.example"
-    DEFAULT_REALM="central-bank"
-    DEFAULT_CLIENT_ID="central-bank-client"
+  bank-c)
+    DOMAIN_INFRA_ENV_FILE="$PROJECT_ROOT/backend/config/.env.infra.bank-c"
+    DOMAIN_INFRA_ENV_FILE_EXAMPLE="$PROJECT_ROOT/backend/config/.env.infra.bank-c.example"
+    DEFAULT_REALM="bank-c"
+    DEFAULT_CLIENT_ID="bank-c-client"
+    ;;
+  bank-d)
+    DOMAIN_INFRA_ENV_FILE="$PROJECT_ROOT/backend/config/.env.infra.bank-d"
+    DOMAIN_INFRA_ENV_FILE_EXAMPLE="$PROJECT_ROOT/backend/config/.env.infra.bank-d.example"
+    DEFAULT_REALM="bank-d"
+    DEFAULT_CLIENT_ID="bank-d-client"
+    ;;
+  central-bank-a)
+    DOMAIN_INFRA_ENV_FILE="$PROJECT_ROOT/backend/config/.env.infra.central-bank-a"
+    DOMAIN_INFRA_ENV_FILE_EXAMPLE="$PROJECT_ROOT/backend/config/.env.infra.central-bank-a.example"
+    DEFAULT_REALM="central-bank-a"
+    DEFAULT_CLIENT_ID="central-bank-a-client"
+    ;;
+  central-bank-b)
+    DOMAIN_INFRA_ENV_FILE="$PROJECT_ROOT/backend/config/.env.infra.central-bank-b"
+    DOMAIN_INFRA_ENV_FILE_EXAMPLE="$PROJECT_ROOT/backend/config/.env.infra.central-bank-b.example"
+    DEFAULT_REALM="central-bank-b"
+    DEFAULT_CLIENT_ID="central-bank-b-client"
     ;;
   *)
-    echo "Error: invalid entity '$TARGET_ENTITY'. Use 'bank-a', 'bank-b' or 'central-bank'."
+    echo "Error: invalid entity '$TARGET_ENTITY'. Use 'bank-a', 'bank-b', 'bank-c', 'bank-d', 'central-bank-a' or 'central-bank-b'."
     exit 1
     ;;
 esac
