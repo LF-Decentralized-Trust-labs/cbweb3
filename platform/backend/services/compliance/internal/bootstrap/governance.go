@@ -68,7 +68,7 @@ func EnsureGovernanceParticipant(
 	}
 
 	// 4. Register on-chain (best-effort — never fails startup).
-	if _, err := bc.SetParticipant(ctx, walletAddr, "ROLE_GOVERNANCE", true); err != nil {
+	if _, err := bc.RegisterParticipant(ctx, walletAddr, "Banco Central", "ROLE_GOVERNANCE", [32]byte{}); err != nil {
 		log.Printf("bootstrap: on-chain registration failed (non-fatal): %v", err)
 	}
 

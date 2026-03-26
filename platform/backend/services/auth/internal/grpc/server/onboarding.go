@@ -190,7 +190,7 @@ func (s *identityService) CompleteOnboarding(ctx context.Context, req *authv1.Co
 	// 6. Register on-chain.
 	var txHash string
 	if domain.RequiresOnChain(participant.Role) && participant.WalletAddress != "" {
-		hash, chainErr := s.blockchainClient.SetParticipant(ctx, participant.WalletAddress, participant.Role, true)
+		hash, chainErr := s.blockchainClient.RegisterParticipant(ctx, participant.WalletAddress, participant.InstitutionName, participant.Role, [32]byte{})
 		if chainErr != nil {
 			return nil, status.Errorf(codes.Internal, "complete onboarding: on-chain registration: %v", chainErr)
 		}

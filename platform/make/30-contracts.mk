@@ -85,4 +85,20 @@ contracts.slither:
 
 contracts.full-check: contracts.build contracts.fmt contracts.lint contracts.test contracts.coverage contracts.slither
 
-.PHONY: contracts.setup contracts.fmt contracts.lint contracts.test contracts.coverage contracts.build contracts.clean contracts.gen-doc contracts.serve-doc contracts.deploy-tcebm-besu contracts.deploy-htlc-besu contracts.deploy-amm-besu contracts.deploy-identity-registry-besu contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b contracts.deploy-all contracts.deploy-cbweb3-besu contracts.sync-addresses contracts.deploy-all-with-sync contracts.deploy-cbweb3-with-sync contracts.slither contracts.full-check
+# ── Go bindings (abigen) ─────────────────────────────────────────────────────
+# Prerequisites (install once):
+#   go install github.com/ethereum/go-ethereum/cmd/abigen@v1.17.1
+ABIGEN_OUT_DIR := backend/shared/blockchain/registry/bindings
+
+contracts.abigen: contracts.build
+	@echo "Generating Go bindings for IdentityRegistry..."
+	@mkdir -p $(ABIGEN_OUT_DIR)
+	@cd contracts && forge inspect IdentityRegistry abi --json > /tmp/IdentityRegistry.abi
+	@abigen --abi /tmp/IdentityRegistry.abi \
+		--pkg bindings \
+		--type IdentityRegistry \
+		--out $(ABIGEN_OUT_DIR)/identity_registry.go
+	@rm -f /tmp/IdentityRegistry.abi
+	@echo "Go bindings generated at $(ABIGEN_OUT_DIR)/identity_registry.go"
+
+.PHONY: contracts.setup contracts.fmt contracts.lint contracts.test contracts.coverage contracts.build contracts.clean contracts.gen-doc contracts.serve-doc contracts.deploy-tcebm-besu contracts.deploy-htlc-besu contracts.deploy-amm-besu contracts.deploy-identity-registry-besu contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b contracts.deploy-all contracts.deploy-cbweb3-besu contracts.sync-addresses contracts.deploy-all-with-sync contracts.deploy-cbweb3-with-sync contracts.slither contracts.full-check contracts.abigen

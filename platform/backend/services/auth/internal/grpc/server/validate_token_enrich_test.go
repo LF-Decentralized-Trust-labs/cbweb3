@@ -10,6 +10,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/keycloak"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/kms"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 	authv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1"
 )
 
@@ -110,18 +111,26 @@ func (s *stubNonce) GetAndDelete(_ context.Context, _ string) (string, bool, err
 // stubRegistry satisfies blockchainRegistry (unused in ValidateToken path).
 type stubRegistry struct{}
 
-func (s *stubRegistry) SetParticipant(_ context.Context, _, _ string, _ bool) (string, error) {
+func (s *stubRegistry) RegisterParticipant(_ context.Context, _, _, _ string, _ [32]byte) (string, error) {
 	return "", nil
 }
-func (s *stubRegistry) IsMemberAuthorized(_ context.Context, _ string) (bool, error) {
-	return false, nil
-}
-func (s *stubRegistry) GetMemberRole(_ context.Context, _ string) (uint8, error) { return 0, nil }
-func (s *stubRegistry) GetCertFingerprint(_ context.Context, _ string) ([32]byte, error) {
-	return [32]byte{}, nil
+func (s *stubRegistry) UpdateStatus(_ context.Context, _ string, _ uint8) (string, error) {
+	return "", nil
 }
 func (s *stubRegistry) SetCertFingerprint(_ context.Context, _ string, _ [32]byte) (string, error) {
 	return "", nil
+}
+func (s *stubRegistry) CanTransact(_ context.Context, _ string) (bool, error) {
+	return true, nil
+}
+func (s *stubRegistry) IsWhitelisted(_ context.Context, _ string) (bool, error) {
+	return true, nil
+}
+func (s *stubRegistry) GetParticipant(_ context.Context, _ string) (registry.OnChainParticipant, error) {
+	return registry.OnChainParticipant{}, nil
+}
+func (s *stubRegistry) GetCertFingerprint(_ context.Context, _ string) ([32]byte, error) {
+	return [32]byte{}, nil
 }
 
 // ---------------------------------------------------------------------------

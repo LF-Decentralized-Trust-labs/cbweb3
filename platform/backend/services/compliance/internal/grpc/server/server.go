@@ -271,7 +271,7 @@ func (s *complianceService) SignParticipantCSR(ctx context.Context, req *complia
 	}
 
 	if existing.WalletAddress != "" {
-		if _, err := s.blockchain.SetParticipant(ctx, existing.WalletAddress, req.Role, true); err != nil {
+		if _, err := s.blockchain.RegisterParticipant(ctx, existing.WalletAddress, institutionName, req.Role, [32]byte{}); err != nil {
 			log.Printf("WARN: SignParticipantCSR: on-chain registration failed (non-fatal): %v", err)
 		}
 	}

@@ -36,10 +36,11 @@ func RequiresPKI(role string) bool {
 	return pkiRoles[role]
 }
 
-// onChainRoles is the subset of roles that require on-chain registration.
+// onChainRoles is the subset of roles that require on-chain registration
+// in the IdentityRegistry contract. Only roles that exist in the Solidity
+// ParticipantRole enum are included.
 var onChainRoles = map[string]bool{
 	RoleCommercialBank: true,
-	RoleNOC:            true,
 }
 
 // RequiresOnChain reports whether role demands on-chain registration.
