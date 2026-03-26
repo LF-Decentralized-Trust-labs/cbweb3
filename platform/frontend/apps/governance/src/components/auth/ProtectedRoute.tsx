@@ -1,8 +1,7 @@
 import { useEffect } from "react";
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../hooks";
-
-const REQUIRED_ROLE = "ROLE_GOVERNANCE";
+import { hasGovernanceAccess } from "../../auth/authorization";
 
 export function ProtectedRoute() {
   const { isAuthenticated, initialized, status, profile, checkSession } = useAuth();
@@ -17,7 +16,7 @@ export function ProtectedRoute() {
     return <div className="p-6 text-sm text-muted-foreground">Checking governance session...</div>;
   }
 
-  if (!isAuthenticated || !profile?.roles.includes(REQUIRED_ROLE)) {
+  if (!isAuthenticated || !hasGovernanceAccess(profile)) {
     return <Navigate to="/login" replace />;
   }
 

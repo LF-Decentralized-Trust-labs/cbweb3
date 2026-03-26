@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { authApi } from "../services/api";
 import type { AsyncStatus, UserProfile } from "../types";
+import { GOVERNANCE_UNAUTHORIZED_MESSAGE, hasGovernanceAccess } from "../auth/authorization";
 
 type AuthState = {
   profile: UserProfile | null;
@@ -27,13 +28,15 @@ export const useAuthStore = create<AuthState>((set) => ({
       if ("nonce" in loginResponse) {
         throw new Error("PKI authentication is required for this account and is not available in Governance login.");
       }
+
       const profile = await authApi.me();
+      const authorized = hasGovernanceAccess(profile);
       set({
         profile,
-        isAuthenticated: true,
+        isAuthenticated: authorized,
         initialized: true,
         status: "idle",
-        error: null,
+        error: authorized ? null : GOVERNANCE_UNAUTHORIZED_MESSAGE,
       });
     } catch (error) {
       set({
@@ -59,12 +62,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ status: "loading", error: null });
     try {
       const profile = await authApi.me();
+      const authorized = hasGovernanceAccess(profile);
       set({
         profile,
-        isAuthenticated: true,
+        isAuthenticated: authorized,
         initialized: true,
         status: "idle",
-        error: null,
+        error: authorized ? null : GOVERNANCE_UNAUTHORIZED_MESSAGE,
       });
     } catch {
       set({

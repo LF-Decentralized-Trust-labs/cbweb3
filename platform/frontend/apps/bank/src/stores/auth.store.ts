@@ -1,53 +1,103 @@
 import { create } from "zustand";
 import { authApi } from "../services/api";
-import type { User } from "../types";
+import type { AsyncStatus, UserProfile } from "../types";
+import { BANK_UNAUTHORIZED_MESSAGE, hasBankAccess } from "../auth/authorization";
 
 type AuthState = {
-  user: User | null;
+  profile: UserProfile | null;
   isAuthenticated: boolean;
   initialized: boolean;
-  status: "idle" | "loading" | "error";
+  status: AsyncStatus;
   error: string | null;
-  login: (username: string, password: string) => Promise<void>;
+  login: (clientId: string, clientSecret: string) => Promise<void>;
   logout: () => Promise<void>;
+  forceLogout: () => void;
   bindWallet: (walletAddress: string) => Promise<void>;
   checkSession: () => Promise<void>;
 };
 
 export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
+  profile: null,
   isAuthenticated: false,
   initialized: false,
   status: "idle",
   error: null,
-  login: async (username, password) => {
+  login: async (clientId, clientSecret) => {
     set({ status: "loading", error: null });
+
     try {
-      const response = await authApi.login(username, password);
-      set({ user: response.user, isAuthenticated: true, initialized: true, status: "idle" });
+      const loginResponse = await authApi.login(clientId, clientSecret);
+      if ("nonce" in loginResponse) {
+        throw new Error("PKI authentication is not supported in the Bank Portal.");
+      }
+
+      const profile = await authApi.me();
+      const authorized = hasBankAccess(profile);
+      set({
+        profile,
+        isAuthenticated: authorized,
+        initialized: true,
+        status: "idle",
+        error: authorized ? null : BANK_UNAUTHORIZED_MESSAGE,
+      });
     } catch (error) {
       set({
+        profile: null,
+        isAuthenticated: false,
+        initialized: true,
         status: "error",
         error: error instanceof Error ? error.message : "Unable to login",
-        initialized: true,
-        isAuthenticated: false,
       });
     }
   },
   logout: async () => {
-    await authApi.logout();
-    set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
-  },
-  bindWallet: async (walletAddress) => {
-    set({ status: "loading", error: null });
     try {
-      const user = await authApi.bindWallet(walletAddress);
-      set({ user, status: "idle" });
-    } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to bind wallet" });
+      await authApi.logout();
+    } finally {
+      set({
+        profile: null,
+        isAuthenticated: false,
+        initialized: true,
+        status: "idle",
+        error: null,
+      });
     }
   },
+  forceLogout: () => {
+    set({
+      profile: null,
+      isAuthenticated: false,
+      initialized: true,
+      status: "idle",
+      error: null,
+    });
+  },
+
+  bindWallet: async (walletAddress) => {
+    void walletAddress;
+    // TODO: implement against real wallet API when available.
+  },
   checkSession: async () => {
-    set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
+    set({ status: "loading", error: null });
+
+    try {
+      const profile = await authApi.me();
+      const authorized = hasBankAccess(profile);
+      set({
+        profile,
+        isAuthenticated: authorized,
+        initialized: true,
+        status: "idle",
+        error: authorized ? null : BANK_UNAUTHORIZED_MESSAGE,
+      });
+    } catch {
+      set({
+        profile: null,
+        isAuthenticated: false,
+        initialized: true,
+        status: "idle",
+        error: null,
+      });
+    }
   },
 }));

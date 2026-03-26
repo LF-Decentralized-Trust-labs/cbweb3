@@ -18,6 +18,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores";
+import { hasGovernanceAccess } from "../auth/authorization";
 
 const schema = z.object({
   clientId: z.string().min(3, "Client ID must be at least 3 characters"),
@@ -30,7 +31,7 @@ type LoginForm = z.infer<typeof schema>;
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { login, status, error, isAuthenticated } = useAuthStore();
+  const { login, status, error, isAuthenticated, profile } = useAuthStore();
 
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
@@ -41,13 +42,13 @@ export function LoginPage() {
   });
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && hasGovernanceAccess(profile)) {
       toast("Signed in", {
         description: "Welcome to the Governance Portal.",
       });
       navigate("/", { replace: true });
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigate, profile]);
 
   const onSubmit = form.handleSubmit(async (values) => {
     await login(values.clientId, values.clientSecret);

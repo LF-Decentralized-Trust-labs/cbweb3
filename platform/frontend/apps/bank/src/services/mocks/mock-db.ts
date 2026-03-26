@@ -11,14 +11,21 @@ import type {
   TokenBalance,
   TokenTransaction,
   TransferRequest,
-  User,
 } from "../../types";
+
+type MockUser = {
+  id: string;
+  name: string;
+  institutionId: string;
+  role: "COMMERCIAL_BANK_OPERATOR";
+  walletAddress?: string;
+};
 
 const nowIso = () => new Date().toISOString();
 
 const makeId = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 
-const currentUser: User = {
+const currentUser: MockUser = {
   id: "user_bank_operator",
   name: "Bank Operator",
   institutionId: "bank-bra",

@@ -1,22 +1,26 @@
-import type { UserRole } from "./common.types";
+export type LoginRequest = {
+  clientId: string;
+  clientSecret: string;
+};
 
-export interface User {
-  id: string;
-  name: string;
-  institutionId: string;
-  role: UserRole;
-  walletAddress?: string;
-}
+export type TokenResponse = {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+};
 
-export interface LoginRequest {
-  username: string;
-  password: string;
-}
+export type PkiChallengeResponse = {
+  nonce: string;
+};
 
-export interface LoginResponse {
-  user: User;
-}
+export type LoginResponse = TokenResponse | PkiChallengeResponse;
 
-export interface WalletBindRequest {
-  walletAddress: string;
-}
+export type UserProfile = {
+  subject: string;
+  issuer: string;
+  roles: string[];
+  wallet?: string;
+  bankId?: string;
+  country?: string;
+};
