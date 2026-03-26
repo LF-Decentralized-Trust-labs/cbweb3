@@ -9,6 +9,7 @@ import (
 	"encoding/asn1"
 	"encoding/hex"
 	"encoding/pem"
+	"log"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
@@ -246,13 +248,21 @@ func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
 	token, err := h.pkiAuthProvider.VerifyPKILogin(c.UserContext(), req.UserID, req.NonceSignatureHex, req.CertPEM)
 	if err != nil {
 		errMsg := "PKI verification failed"
+		httpStatus := fiber.StatusUnauthorized
 		if st, ok := status.FromError(err); ok {
 			msg := st.Message()
-			if msg == "INVALID_CERTIFICATE_CHAIN" || msg == "NONCE_SIGNATURE_MISMATCH" {
+			switch {
+			case msg == "INVALID_CERTIFICATE_CHAIN" || msg == "NONCE_SIGNATURE_MISMATCH":
 				errMsg = msg
+			case st.Code() == codes.PermissionDenied:
+				errMsg = msg
+				httpStatus = fiber.StatusForbidden
+			case st.Code() == codes.Internal:
+				log.Printf("WARN: WalletBind: internal error for user %s: %s", req.UserID, msg)
+				httpStatus = fiber.StatusInternalServerError
 			}
 		}
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": errMsg})
+		return c.Status(httpStatus).JSON(fiber.Map{"error": errMsg})
 	}
 
 	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, h.cookieSecure)

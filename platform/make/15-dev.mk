@@ -21,6 +21,16 @@ spoke-b: pki.gen-central-bank-b pki.gen-bank-b pki.gen-bank-d pki.gen-commercial
 spoke-b-down: deploy.down-backend-spoke-b deploy.down-spoke-b
 	@echo "Spoke-B stack is down (shared infra left running)."
 
+spoke-all:
+	$(MAKE) spoke-a
+	$(MAKE) spoke-b
+	@echo "Both Spoke-A and Spoke-B stacks are up."
+
+spoke-all-down:
+	$(MAKE) spoke-b-down
+	$(MAKE) spoke-a-down
+	@echo "Both Spoke-A and Spoke-B stacks are down (shared infra left running)."
+
 # ── Full environment ─────────────────────────────────────────────────────────
 
 dev.up: pki.gen-all deploy.up contracts.deploy-all-with-sync deploy.up-backend-entities
@@ -46,7 +56,7 @@ dev.down-central-bank-a: deploy.down-backend-central-bank-a
 dev.up-central-bank-b: pki.gen-central-bank-b deploy.up-infra deploy.up-spoke-b deploy.up-backend-central-bank-b
 dev.down-central-bank-b: deploy.down-backend-central-bank-b
 
-.PHONY: spoke-a spoke-a-down spoke-b spoke-b-down \
+.PHONY: spoke-a spoke-a-down spoke-b spoke-b-down spoke-all spoke-all-down \
 	dev.up dev.down \
 	dev.up-bank-a dev.down-bank-a dev.up-bank-b dev.down-bank-b \
 	dev.up-bank-c dev.down-bank-c dev.up-bank-d dev.down-bank-d \
