@@ -1,10 +1,12 @@
 # Local Deployment (CBWeb3 Platform — Two Spokes)
 
-This folder contains the local runtime setup for the CBWeb3 platform. Six
-entities run across **two Besu spokes**, sharing one Keycloak instance, one
-PostgreSQL instance and one Redis instance, with logical isolation per entity.
+This folder contains the local runtime setup for the CBWeb3 platform, focused on five main infrastructure components:
 
-## Architecture overview
+- Besu private networks (hub, spoke A, spoke B)
+- Keycloak (identity and access management)
+- PostgreSQL (relational storage for local services)
+- Redis (cache and message-oriented local support)
+- Paladin nodes (privacy-preserving smart contract execution, spoke A and spoke B)
 
 ```
 spoke-a (chain 1338)
@@ -127,6 +129,53 @@ dedicated Redis logical DB for nonce isolation:
 | bank-d         | spoke-b | `58080`           | `59091`   | `59093`         |
 | central-bank-b | spoke-b | `60080`           | `60091`   | `60093`         |
 
+### 5) Paladin nodes
+
+Paladin provides privacy-preserving smart contract execution using zero-knowledge proofs (Zeto domain). Each spoke runs three Paladin nodes, one per Besu validator, in a 1-to-1 mapping:
+
+| Paladin container | Besu node | RPC port | gRPC port | Metrics port |
+|---|---|---|---|---|
+| `paladin-spoke-a-cb` | bootnode (8645) | 31648 | 31649 | 9011 |
+| `paladin-spoke-a-bank-a` | node-1 (8647) | 31658 | 31659 | 9012 |
+| `paladin-spoke-a-bank-b` | node-2 (8648) | 31668 | 31669 | 9013 |
+| `paladin-spoke-b-cb` | bootnode (8745) | 31748 | 31749 | 9021 |
+| `paladin-spoke-b-bank-a` | node-1 (8747) | 31758 | 31759 | 9022 |
+| `paladin-spoke-b-bank-b` | node-2 (8748) | 31768 | 31769 | 9023 |
+
+Paladin nodes run on the same Docker network as Besu (`spoke_a_besu_network` / `spoke_b_besu_network`).
+
+#### Setup steps (automated by `make setup-spoke-a` / `make setup-spoke-b`)
+
+1. **Deploy contracts** — deploys a Paladin `IdentityRegistry` and a `ZetoFactory` (with `Zeto_AnonNullifier` implementation) to the spoke's Besu network. Contract addresses are written to `paladin/spoke-{a,b}/.deployed-addrs.env`.
+2. **Generate TLS certificates** — creates self-signed P-256 certificates for each node's gRPC transport (`paladin/spoke-{a,b}/config/<node>/tls.{crt,key}`).
+3. **Render configs** — substitutes contract addresses from `.deployed-addrs.env` into each node's `config.yaml.tmpl`, producing `config.yaml`.
+4. **Register nodes** — calls `registerIdentity` and `setIdentityProperty(transport.grpc)` on the `IdentityRegistry` for all three nodes.
+5. **Start containers** — brings up the three Paladin containers via Docker Compose.
+
+#### Directory structure
+
+```
+paladin/
+  artifacts/          # Paladin K8s artifact YAMLs (contract bytecode + link refs)
+  generate-certs.sh   # TLS cert generation (SPOKE=spoke-a|spoke-b)
+  render-configs.sh   # Config template rendering (SPOKE=spoke-a|spoke-b)
+  scripts/            # Go programs for contract deployment and node registration
+    cmd/
+      deploy-registry/       # Deploys IdentityRegistry
+      deploy-zeto-factory/   # Deploys ZetoFactory + Zeto_AnonNullifier impl
+      register-nodes/        # Registers nodes in IdentityRegistry
+    helpers.go               # Shared helpers (artifact reading, bytecode linking)
+  spoke-a/
+    docker-compose.yml
+    config/{central-bank,bank-a,bank-b}/
+      config.yaml.tmpl        # Template (placeholders for contract addresses)
+      config.yaml             # Rendered at setup time
+      tls.{crt,key}           # Generated at setup time
+    .deployed-addrs.env       # Written by deploy scripts
+  spoke-b/
+    (same structure)
+```
+
 ## How components communicate
 
 - Besu nodes on a spoke communicate inside that spoke’s Docker network
@@ -243,6 +292,44 @@ From repository root:
 | `make deploy.up-backend` | Same as `deploy.up-backend-entities` (all six backends). |
 | `make deploy.down-backend` | Same as `deploy.down-backend-entities`. |
 | `make deploy.build-backend` | Build images for all six entity compose files. |
+
+### Paladin setup and lifecycle
+
+Full spoke setup (starts Besu, deploys contracts, registers nodes, starts Paladin):
+
+```bash
+make setup-spoke-a      # set up spoke A end-to-end
+make setup-spoke-b      # set up spoke B end-to-end
+make setup-scope-uc     # set up both spokes sequentially
+```
+
+Granular Paladin targets:
+
+```bash
+# Contract deployment
+make paladin.deploy-contracts-spoke-a   # deploy IdentityRegistry + ZetoFactory on spoke A
+make paladin.deploy-contracts-spoke-b
+
+# TLS certificates
+make paladin.generate-certs-spoke-a     # generate node TLS certs
+make paladin.generate-certs-spoke-b
+
+# Config rendering (requires .deployed-addrs.env)
+make paladin.render-configs-spoke-a     # render config.yaml from templates
+make paladin.render-configs-spoke-b
+
+# Node registration
+make paladin.register-nodes-spoke-a     # register nodes in IdentityRegistry
+make paladin.register-nodes-spoke-b
+
+# Container lifecycle
+make paladin.start-spoke-a
+make paladin.stop-spoke-a
+make paladin.start-spoke-b
+make paladin.stop-spoke-b
+```
+
+> **Note:** `setup-spoke-a` / `setup-spoke-b` expect the corresponding Besu network to not already be running — they call `deploy.up-spoke-{a,b}` themselves. If Besu is already up, run the granular targets directly.
 
 ## Manual Keycloak credentials refresh
 

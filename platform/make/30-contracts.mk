@@ -1,4 +1,4 @@
-include contracts/.env
+-include contracts/.env
 
 # ── Protobuf / gRPC code generation ──────────────────────────────────────────
 # Prerequisites (install once):

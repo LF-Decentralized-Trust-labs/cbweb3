@@ -6,6 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gofiber/fiber/v2/log"
+	"github.com/joho/godotenv"
 )
 
 // Config holds runtime settings loaded from environment variables.
@@ -22,6 +25,11 @@ type Config struct {
 
 // Load reads environment variables and returns a fully populated Config.
 func Load() Config {
+
+	if err := godotenv.Load(".env"); err != nil {
+		log.Warnf("no .env (.env) file(s) found, using environment variables: function error: %s", err.Error())
+	}
+
 	return Config{
 		AppPort:            getEnv("APP_PORT", "8080"),
 		RequestTimeout:     time.Duration(getEnvInt("REQUEST_TIMEOUT_SEC", 5)) * time.Second,

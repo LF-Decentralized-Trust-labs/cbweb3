@@ -5,6 +5,7 @@ go 1.25.5
 require (
 	github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto v0.0.0
 	github.com/gofiber/fiber/v2 v2.52.9
+	github.com/joho/godotenv v1.5.1
 	github.com/stretchr/testify v1.11.1
 	google.golang.org/grpc v1.79.2
 )

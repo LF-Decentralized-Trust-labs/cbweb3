@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # Paladin Central Bank Node — wired to Besu bootnode (RPC :8645. WS :8655)
+  paladin-spoke-a-cb:
+    image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
+    container_name: paladin-spoke-a-cb
+    ports:
+      - "31648:8548"  # HTTP RPC
+      - "31649:8549"  # WebSocket RPC
+      - "9011:9000"   # gRPC Transport
+    environment:
+      - PALADIN_LOG_LEVEL=debug
+    volumes:
+      - ./config/central-bank:/etc/paladin
+      - paladin_spoke_a_cb_data:/data
+    tmpfs:
+      - /app/jna:exec,mode=1777
+      - /data/keystore:mode=0777
+    networks:
+      - spoke_a_besu_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    command: ["/etc/paladin/config.yaml", "engine"]
+
+  # Paladin Bank A Node — wired to Besu node-1 (RPC :8647, WS :8657)
+  paladin-spoke-a-bank-a:
+    image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
+    container_name: paladin-spoke-a-bank-a
+    ports:
+      - "31658:8548"  # HTTP RPC
+      - "31659:8549"  # WebSocket RPC
+      - "9012:9000"   # gRPC Transport
+    environment:
+      - PALADIN_LOG_LEVEL=debug
+    volumes:
+      - ./config/bank-a:/etc/paladin
+      - paladin_spoke_a_bank_a_data:/data
+    tmpfs:
+      - /app/jna:exec,mode=1777
+      - /data/keystore:mode=0777
+    networks:
+      - spoke_a_besu_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    command: ["/etc/paladin/config.yaml", "engine"]
+
+  # Paladin Bank C Node — wired to Besu node-2 (RPC :8648, WS :8658)
+  paladin-spoke-a-bank-c:
+    image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
+    container_name: paladin-spoke-a-bank-c
+    ports:
+      - "31668:8548"  # HTTP RPC
+      - "31669:8549"  # WebSocket RPC
+      - "9013:9000"   # gRPC Transport
+    environment:
+      - PALADIN_LOG_LEVEL=debug
+    volumes:
+      - ./config/bank-c:/etc/paladin
+      - paladin_spoke_a_bank_c_data:/data
+    tmpfs:
+      - /app/jna:exec,mode=1777
+      - /data/keystore:mode=0777
+    networks:
+      - spoke_a_besu_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    command: ["/etc/paladin/config.yaml", "engine"]
+
+volumes:
+  paladin_spoke_a_cb_data:
+  paladin_spoke_a_bank_a_data:
+  paladin_spoke_a_bank_c_data:
+
+networks:
+  spoke_a_besu_network:
+    external: true
