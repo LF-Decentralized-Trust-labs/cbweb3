@@ -4,24 +4,24 @@ pragma solidity ^0.8.20;
 import {HashTimeLockedContractLibrary} from "../libraries/HashTimeLockedContractLibrary.sol";
 
 /// @title IHashTimeLockedContract
-/// @dev Interface for the Hash Time-Lock Contract (Scenario A: Enhanced Correspondent Banking).
-/// @dev Orchestrates the cross-border atomic settlement via cryptographic escrows.
+/// @dev Coordination-only interface for the Hash Time-Lock Contract (Scenario A).
+/// @dev Records hashLock/timeLock and emits events for cross-chain relay (Cacti).
+///      Actual token movement is handled by Zeto lock/unlock via Paladin sidecar.
 interface IHashTimeLockedContract {
-    /// @notice Emitted when funds are successfully locked in escrow.
+    /// @notice Emitted when a lock coordination record is created.
     event LogHTLCLocked(
         bytes32 indexed contractId,
         address indexed sender,
         address indexed receiver,
-        address token,
-        uint256 amount,
         bytes32 hashLock,
-        uint256 timeLock
+        uint256 timeLock,
+        bytes32 zetoLockRef
     );
 
-    /// @notice Emitted when the correct secret is provided and funds are transferred to the receiver.
+    /// @notice Emitted when the correct secret is provided and the lock is settled.
     event LogHTLCClaimed(bytes32 indexed contractId, bytes32 secret);
 
-    /// @notice Emitted when the time-lock expires and funds are returned to the sender.
+    /// @notice Emitted when the time-lock expires and the lock is refunded.
     event LogHTLCRefunded(bytes32 indexed contractId);
 
     /// @dev Custom errors for gas-efficient HTLC failure paths.
@@ -30,31 +30,28 @@ interface IHashTimeLockedContract {
     error HTLC__InvalidSecret();
     error HTLC__TimeLockNotExpired();
     error HTLC__TimeLockExpired();
-    error HTLC__InvalidAmount();
     error HTLC__ParticipantNotVerified(address account);
 
-    /// @notice Locks the specified amount of tCeBm tokens into the contract.
+    /// @notice Records a lock coordination entry linked to a private Zeto lock.
     /// @param contractId Unique identifier for the agreement.
     /// @param receiver The address of the beneficiary.
-    /// @param token The address of the tCeBm ERC20 token.
-    /// @param amount The amount of tokens to lock.
     /// @param hashLock The SHA-256 hash of the secret.
-    /// @param timeLock The Unix timestamp after which the funds can be refunded.
+    /// @param timeLock The Unix timestamp after which the lock can be refunded.
+    /// @param zetoLockRef Reference to the private Zeto lock transaction.
     function lock(
         bytes32 contractId,
         address receiver,
-        address token,
-        uint256 amount,
         bytes32 hashLock,
-        uint256 timeLock
+        uint256 timeLock,
+        bytes32 zetoLockRef
     ) external;
 
     /// @notice Settles the HTLC by providing the secret preimage.
     /// @param contractId The unique identifier of the locked contract.
-    /// @param secret The plaintext string/bytes that hashes to the hashLock.
+    /// @param secret The plaintext bytes that hash to the hashLock.
     function settle(bytes32 contractId, bytes32 secret) external;
 
-    /// @notice Refunds the locked tokens to the sender if the timeLock has expired.
+    /// @notice Marks the lock as refunded after the timeLock has expired.
     /// @param contractId The unique identifier of the locked contract.
     function refund(bytes32 contractId) external;
 
