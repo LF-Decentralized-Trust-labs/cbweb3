@@ -92,9 +92,15 @@ func (b *BesuClient) transactOpts(ctx context.Context) (*bind.TransactOpts, erro
 	chainID := big.NewInt(b.cfg.ChainID)
 	signer := b.signer
 
+	gasPrice, err := b.client.SuggestGasPrice(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("registry: fetching gas price: %w", err)
+	}
+
 	return &bind.TransactOpts{
-		Context: ctx,
-		From:    common.HexToAddress(signerAddr),
+		Context:  ctx,
+		From:     common.HexToAddress(signerAddr),
+		GasPrice: gasPrice,
 		Signer: func(_ common.Address, tx *types.Transaction) (*types.Transaction, error) {
 			return signer.SignTx(ctx, tx, chainID)
 		},

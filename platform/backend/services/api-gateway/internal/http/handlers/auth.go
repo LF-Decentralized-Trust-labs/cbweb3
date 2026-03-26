@@ -148,12 +148,14 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 			return c.Status(fiber.StatusOK).JSON(fiber.Map{"nonce": nonce})
 		}
 		// Determine whether to fall through or reject hard.
-		if st, ok := status.FromError(err); ok {
-			msg := st.Message()
-			if msg != "participant not found" && msg != "PKI_NOT_REQUIRED" {
-				// Auth failure (invalid credentials, internal error) — reject.
-				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
-			}
+		st, ok := status.FromError(err)
+		if !ok {
+			// Non-gRPC error (network, timeout, context cancelled) — reject.
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable"})
+		}
+		msg := st.Message()
+		if msg != "participant not found" && msg != "PKI_NOT_REQUIRED" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
 		}
 		// participant not found or PKI not required → fall through to direct login.
 	}
