@@ -4,7 +4,7 @@ set -euo pipefail
 APP_NAME="${1:-}"
 
 if [[ -z "$APP_NAME" ]]; then
-  echo "Usage: ./create-frontend-app.sh <app-name>"
+  echo "Usage: ./scripts/create-frontend-app.sh <app-name>"
   exit 1
 fi
 
@@ -14,7 +14,7 @@ if [[ ! "$APP_NAME" =~ ^[a-z0-9-]+$ ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FRONTEND_DIR="$SCRIPT_DIR"
+FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 APP_DIR="$FRONTEND_DIR/apps/$APP_NAME"
 
 if [[ -d "$APP_DIR" ]]; then

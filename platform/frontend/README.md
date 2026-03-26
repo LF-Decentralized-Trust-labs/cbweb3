@@ -9,10 +9,11 @@ frontend/
 ├─ apps/
 │  ├─ bank/          # Main bank portal
 │  └─ supervisor/    # Supervisor portal
+├─ scripts/
+│  └─ create-frontend-app.sh
 ├─ packages/
 │  ├─ ui/            # Shared UI components + global styles
 │  └─ config/        # Shared TS/ESLint/Tailwind preset config
-└─ create-frontend-app.sh
 ```
 
 ## Stack
@@ -102,14 +103,14 @@ npm run type-check --workspace=bank
 - PostCSS plugin is `@tailwindcss/postcss`.
 - Shared global stylesheet lives in `packages/ui/src/styles.css`.
 - Tailwind class detection is defined with `@source` directives in that file.
-- New apps scaffolded with `create-frontend-app.sh` are generated with Tailwind v4-compatible setup.
+- New apps scaffolded with `scripts/create-frontend-app.sh` are generated with Tailwind v4-compatible setup.
 
 ## Creating a New Frontend App
 
 From `frontend`:
 
 ```bash
-./create-frontend-app.sh my-new-app
+./scripts/create-frontend-app.sh my-new-app
 ```
 
 Then run:
@@ -161,4 +162,4 @@ npm install
 - `apps/supervisor/src/main.tsx`
 - `packages/ui/src/index.ts`
 - `packages/ui/src/styles.css`
-- `create-frontend-app.sh`
+- `scripts/create-frontend-app.sh`
