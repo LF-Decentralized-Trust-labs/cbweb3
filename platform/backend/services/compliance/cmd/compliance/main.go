@@ -6,13 +6,14 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/bootstrap"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/grpc/server"
 	compliancepki "github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/pki"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/repository"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/grpc/server"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 )
 
@@ -45,6 +46,21 @@ func main() {
 	}
 
 	bc := newBlockchainClient()
+
+	// Bootstrap PKI files for commercial banks (idempotent).
+	if bankCode := os.Getenv("BANK_CODE"); bankCode != "" {
+		pkiDir := getEnv("PKI_DIR", "")
+		if pkiDir == "" {
+			if v := os.Getenv("CA_CERT_FILE"); v != "" {
+				pkiDir = filepath.Dir(v)
+			}
+		}
+		if pkiDir != "" {
+			if err := bootstrap.EnsurePKIFiles(pkiDir, bankCode, "", "", ""); err != nil {
+				log.Printf("WARN: PKI bootstrap failed: %v", err)
+			}
+		}
+	}
 
 	if ca != nil {
 		ctx := context.Background()

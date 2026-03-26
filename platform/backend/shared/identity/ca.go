@@ -180,6 +180,40 @@ func SignCSR(caCertPEM, caKeyPEM, csrPEM string, validYears int, opts ...SignCSR
 	return IssuedCert{CertPEM: certPEM, PrivKeyPEM: ""}, nil
 }
 
+// GenerateCSR creates a new PKCS#10 Certificate Signing Request with a P-256
+// key. Returns the PEM-encoded CSR and the PEM-encoded private key.
+// The caller is responsible for persisting both securely.
+func GenerateCSR(cn, org, ou, country string) (csrPEM, keyPEM string, err error) {
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", fmt.Errorf("pki: generate CSR key: %w", err)
+	}
+
+	template := &x509.CertificateRequest{
+		Subject: pkix.Name{
+			CommonName:         cn,
+			Organization:       []string{org},
+			OrganizationalUnit: []string{ou},
+			Country:            []string{country},
+		},
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, template, privKey)
+	if err != nil {
+		return "", "", fmt.Errorf("pki: create CSR: %w", err)
+	}
+
+	csrPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}))
+
+	keyDER, err := x509.MarshalECPrivateKey(privKey)
+	if err != nil {
+		return "", "", fmt.Errorf("pki: marshal CSR key: %w", err)
+	}
+	keyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
+
+	return csrPEM, keyPEM, nil
+}
+
 // GenerateSelfSignedCA creates a new self-signed CA certificate and key pair.
 // Intended for the Central Bank's root CA bootstrap and for testing.
 func GenerateSelfSignedCA(commonName, org string, validYears int) (certPEM, keyPEM string, err error) {

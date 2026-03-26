@@ -137,3 +137,14 @@ type OnboardingManager interface {
 	GetOnboardingStatus(ctx context.Context, requestID string) (OnboardingStatus, error)
 	CompleteOnboarding(ctx context.Context, req CompleteOnboardingRequest) (CompleteOnboardingResult, error)
 }
+
+// OnboardingKeyManager provides KMS operations for the commercial bank proxy.
+// The proxy uses these to generate blockchain keys and sign PoP nonces
+// internally, removing the burden from the frontend.
+type OnboardingKeyManager interface {
+	// CreateOnboardingKey generates (or retrieves) a secp256k1 key for bankCode.
+	CreateOnboardingKey(ctx context.Context, bankCode string) (pubKeyHex, address string, err error)
+	// SignOnboardingPoP signs the PoP nonce with the KMS key for keyID.
+	// Returns the signature (V=0/1) and the public key hex.
+	SignOnboardingPoP(ctx context.Context, keyID, nonceHex string) (signatureHex, pubKeyHex string, err error)
+}

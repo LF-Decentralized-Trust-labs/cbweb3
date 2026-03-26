@@ -20,11 +20,24 @@ tags:
       `resolve-challenge` (development only — signs nonce from a PEM file under PKI_DIR).
   - name: Compliance
     description: KYC credential issuance, verification, AML screening, and governance
+  - name: Onboarding
+    description: >
+      3-phase PKI + Blockchain participant onboarding.
+
+      **Central Bank mode** (public endpoints at /api/v1/onboarding/):
+      Phase 1: Commercial bank submits CSR + blockchain public key.
+      Phase 2.5: Poll for KYC approval and PoP nonce.
+      Phase 3: Sign PoP nonce to prove wallet ownership, receive certificate and clientSecret.
+
+      **Commercial Bank proxy mode** (protected endpoints at /api/v1/onboarding/):
+      The commercial bank gateway proxies requests to the Central Bank.
+      In smart mode (KMS + PKI configured), the proxy injects CSR, blockchain key,
+      and PoP signature automatically — the frontend only sends metadata.
   - name: Governance
     description: >
       Governance Portal — endpoints exclusive to the Central Bank (ROLE_GOVERNANCE).
       Participant registration, PKI certificate management, account control,
-      circuit breaker, global parameters, and audit logs.
+      circuit breaker, global parameters, audit logs, and user management.
 paths:
   /healthz:
     get:
@@ -296,6 +309,46 @@ paths:
                 bankId: "341"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/pki-login:
+    post:
+      tags: [Authentication]
+      summary: PKI re-login after onboarding (Commercial Bank proxy mode)
+      description: >
+        Available only on Commercial Bank gateways with a proxy handler.
+        Reads the saved participant certificate from `PKI_DIR/{bankCode}-participant.crt`,
+        then executes the two-step PKI login against the Central Bank:
+        1. POST /auth/login with user_id + client_secret → nonce
+        2. Sign nonce with P-256 key → POST /auth/wallet/bind → accessToken
+
+        Returns the access token on success. Requires the participant to have
+        completed onboarding (POST /onboarding/complete) so the certificate is on disk.
+      operationId: pkiLogin
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PKILoginRequest"
+      responses:
+        "200":
+          description: PKI login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PKILoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: PKI login failed (invalid credentials or signature)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
 
   /api/v1/auth/client-secret/change:
     post:
@@ -609,9 +662,150 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalError"
+
+  # ---------------------------------------------------------------------------
+  # Onboarding — 3-phase PKI + Blockchain
+  # ---------------------------------------------------------------------------
+
+  /api/v1/onboarding/credential-request:
+    post:
+      tags: [Onboarding]
+      summary: "Phase 1: Submit CSR and blockchain public key for credentialing"
+      description: >
+        Central Bank mode — public endpoint.
+        A commercial bank submits its PKCS#10 CSR and secp256k1 blockchain public
+        key to initiate the onboarding process. The Central Bank's identity service
+        creates a Keycloak user and stores the credential request.
+        Poll GET /api/v1/onboarding/status/{requestId} until KYC is approved.
+      operationId: submitCredentialRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialRequestBody"
+      responses:
+        "201":
+          description: Credential request accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialRequestResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/onboarding/status/{requestId}:
+    get:
+      tags: [Onboarding]
+      summary: "Phase 2.5: Poll onboarding status and retrieve PoP nonce"
+      description: >
+        Central Bank mode — public endpoint.
+        The commercial bank polls this endpoint to discover when KYC approval
+        has been granted. When approved, the response includes `pop_nonce` — a
+        hex-encoded challenge that must be signed to prove wallet ownership
+        (Phase 3).
+      operationId: getOnboardingStatus
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Request ID returned by Phase 1 (POST /onboarding/credential-request)
+      responses:
+        "200":
+          description: Current onboarding status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/onboarding/complete:
+    post:
+      tags: [Onboarding]
+      summary: "Phase 3: Complete onboarding with PoP signature"
+      description: >
+        Central Bank mode — public endpoint.
+        The commercial bank signs the `pop_nonce` from Phase 2.5 with its
+        secp256k1 private key and submits the signature. On success the CA
+        issues an X.509 certificate and a one-time `client_secret` for future
+        authentication. **Store the client_secret securely — it is not recoverable.**
+      operationId: completeOnboarding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteOnboardingRequest"
+      responses:
+        "200":
+          description: Onboarding completed — certificate and credentials issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompleteOnboardingResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/onboarding/initiate:
+    post:
+      tags: [Onboarding]
+      summary: "Proxy: Initiate onboarding from Commercial Bank gateway"
+      description: >
+        Commercial Bank proxy mode — requires access_token cookie.
+        Forwards the request to the Central Bank's POST /onboarding/credential-request.
+
+        In **smart mode** (KMS + PKI_DIR configured), the proxy automatically:
+        1. Reads the CSR from `PKI_DIR/{bankCode}.csr`
+        2. Creates/retrieves a secp256k1 key pair via KMS
+        3. Injects `csr_pem` and `blockchain_pub_key_hex` into the payload
+
+        The frontend only needs to send institution metadata.
+      operationId: proxyInitiateOnboarding
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingInitiateRequest"
+      responses:
+        "201":
+          description: Credential request accepted by Central Bank
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialRequestResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          description: Central Bank API unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   # ---------------------------------------------------------------------------
   # Governance Portal — ROLE_GOVERNANCE only
@@ -953,6 +1147,89 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "500": { $ref: "#/components/responses/InternalError" }
 
+  # ---------------------------------------------------------------------------
+  # Governance — User Management
+  # ---------------------------------------------------------------------------
+
+  /api/v1/governance/users:
+    get:
+      tags: [Governance]
+      summary: List registered participants (user management)
+      description: >
+        Returns a paginated list of participants registered in the identity service
+        (Keycloak). Supports filtering by role and status. Optional fields in each
+        entry (institutionName, walletAddress, country, bankCode) are only present
+        when populated.
+      operationId: govListUsers
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [ROLE_COMMERCIAL_BANK, ROLE_TREASURY, ROLE_NOC, ROLE_SUPERVISOR, ROLE_GOVERNANCE_OFFICER]
+          description: Filter by participant role
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, ACTIVE, FROZEN, REVOKED]
+          description: Filter by participant status
+      responses:
+        "200":
+          description: List of participants
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListUsersResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "501":
+          description: User management not available in this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/users/{userId}:
+    get:
+      tags: [Governance]
+      summary: Get a specific participant profile
+      description: >
+        Returns the full profile of a single registered participant by their
+        Keycloak UUID. Optional fields (email, institutionName, walletAddress,
+        country, bankCode) are only present when populated.
+      operationId: govGetUser
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Keycloak UUID of the participant
+      responses:
+        "200":
+          description: Participant profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetail"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501":
+          description: User management not available in this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500": { $ref: "#/components/responses/InternalError" }
+
 components:
   securitySchemes:
     CookieAuth:
@@ -987,6 +1264,30 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
           example:
             error: "insufficient permissions"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "not found"
+    Conflict:
+      description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "already exists"
+    PreconditionFailed:
+      description: Precondition not met (e.g. certificate not found on disk)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "participant certificate not found; complete onboarding first"
     InternalError:
       description: Internal server error
       content:
@@ -1367,3 +1668,256 @@ components:
         details:
           type: object
           additionalProperties: true
+
+    # --- Onboarding schemas ---
+
+    CredentialRequestBody:
+      type: object
+      required: [csr_pem, blockchain_pub_key_hex, role, username, email, institution_name]
+      properties:
+        csr_pem:
+          type: string
+          description: >
+            PEM content of the PKCS#10 CSR generated by the commercial bank.
+          example: "-----BEGIN CERTIFICATE REQUEST-----\nMIIB...-----END CERTIFICATE REQUEST-----"
+        blockchain_pub_key_hex:
+          type: string
+          description: Uncompressed secp256k1 public key in hex (130 chars, 04-prefix)
+          example: "04a1b2c3..."
+        institution_name:
+          type: string
+          example: "Banco do Brasil S.A."
+        cnpj:
+          type: string
+          description: Brazilian CNPJ (optional)
+          example: "00.000.000/0001-91"
+        bank_code:
+          type: string
+          example: "001"
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+          example: "BR"
+        role:
+          type: string
+          enum: [ROLE_COMMERCIAL_BANK, ROLE_TREASURY]
+          example: "ROLE_COMMERCIAL_BANK"
+        email:
+          type: string
+          format: email
+          example: "admin@bancodobrasil.com.br"
+        username:
+          type: string
+          example: "banco-brasil-admin"
+
+    CredentialRequestResponse:
+      type: object
+      required: [request_id, user_id, status]
+      properties:
+        request_id:
+          type: string
+          description: Unique onboarding request identifier (use for polling Phase 2.5)
+          example: "cr-a1b2c3d4"
+        user_id:
+          type: string
+          description: Keycloak UUID of the newly created user
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        wallet_address:
+          type: string
+          description: EVM wallet address derived from blockchain public key
+          example: "0xAbCd..."
+        status:
+          type: string
+          example: "PENDING"
+
+    OnboardingStatusResponse:
+      type: object
+      required: [request_id, user_id, status]
+      properties:
+        request_id:
+          type: string
+          example: "cr-a1b2c3d4"
+        user_id:
+          type: string
+        status:
+          type: string
+          description: >
+            Current status: PENDING (awaiting KYC), APPROVED (ready for PoP),
+            COMPLETED, or REJECTED.
+          enum: [PENDING, APPROVED, COMPLETED, REJECTED]
+          example: "APPROVED"
+        wallet_address:
+          type: string
+        pop_nonce:
+          type: string
+          description: >
+            Hex-encoded PoP challenge nonce. Only present when status is APPROVED.
+            Sign this nonce with the secp256k1 private key and submit via Phase 3.
+          example: "a1b2c3d4e5f6..."
+
+    CompleteOnboardingRequest:
+      type: object
+      required: [user_id, pop_signature_hex, blockchain_pub_key_hex]
+      properties:
+        request_id:
+          type: string
+          description: Onboarding request ID (from Phase 1)
+        user_id:
+          type: string
+          description: Keycloak UUID
+        pop_signature_hex:
+          type: string
+          description: Hex-encoded secp256k1 signature of the PoP nonce (V=0/1)
+        blockchain_pub_key_hex:
+          type: string
+          description: Uncompressed secp256k1 public key in hex
+
+    CompleteOnboardingResponse:
+      type: object
+      required: [user_id, status]
+      properties:
+        user_id:
+          type: string
+        wallet_address:
+          type: string
+        cert_pem:
+          type: string
+          description: X.509 certificate signed by the Central Bank CA
+        tx_hash:
+          type: string
+          description: On-chain transaction hash from ParticipantRegistry
+        client_secret:
+          type: string
+          description: >
+            One-time clientSecret for future PKI login. **Store securely —
+            it is not recoverable after this response.**
+        status:
+          type: string
+          example: "COMPLETED"
+
+    OnboardingInitiateRequest:
+      type: object
+      description: >
+        Simplified payload for the Commercial Bank proxy mode. In smart mode,
+        the proxy injects csr_pem and blockchain_pub_key_hex from local PKI/KMS.
+      properties:
+        institution_name:
+          type: string
+          example: "Banco do Brasil S.A."
+        bank_code:
+          type: string
+          example: "001"
+        country:
+          type: string
+          example: "BR"
+        role:
+          type: string
+          enum: [ROLE_COMMERCIAL_BANK, ROLE_TREASURY]
+          example: "ROLE_COMMERCIAL_BANK"
+        email:
+          type: string
+          format: email
+        username:
+          type: string
+
+    # --- PKI Login schemas ---
+
+    PKILoginRequest:
+      type: object
+      required: [user_id, client_secret]
+      properties:
+        user_id:
+          type: string
+          description: Keycloak UUID of the participant
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        client_secret:
+          type: string
+          description: clientSecret obtained during onboarding (Phase 3 response)
+          format: password
+
+    PKILoginResponse:
+      type: object
+      required: [accessToken]
+      properties:
+        accessToken:
+          type: string
+          description: JWT access token
+
+    # --- User Management schemas ---
+
+    UserSummary:
+      type: object
+      required: [userId, role, status]
+      properties:
+        userId:
+          type: string
+          description: Keycloak UUID
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        role:
+          type: string
+          example: "ROLE_COMMERCIAL_BANK"
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, FROZEN, REVOKED]
+          example: "ACTIVE"
+        institutionName:
+          type: string
+          description: Present when populated
+          example: "Banco do Brasil S.A."
+        walletAddress:
+          type: string
+          description: EVM address (present when bound)
+          example: "0xAbCd..."
+        country:
+          type: string
+          example: "BR"
+        bankCode:
+          type: string
+          example: "001"
+
+    UserDetail:
+      type: object
+      required: [userId, username, role, status]
+      properties:
+        userId:
+          type: string
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        username:
+          type: string
+          example: "banco-brasil-admin"
+        role:
+          type: string
+          example: "ROLE_COMMERCIAL_BANK"
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, FROZEN, REVOKED]
+          example: "ACTIVE"
+        email:
+          type: string
+          format: email
+          example: "admin@bancodobrasil.com.br"
+        institutionName:
+          type: string
+          example: "Banco do Brasil S.A."
+        walletAddress:
+          type: string
+          example: "0xAbCd..."
+        country:
+          type: string
+          example: "BR"
+        bankCode:
+          type: string
+          example: "001"
+
+    ListUsersResponse:
+      type: object
+      required: [users, total]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserSummary"
+        total:
+          type: integer
+          description: Total number of users matching the filter
+          example: 12

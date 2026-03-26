@@ -36,6 +36,9 @@ const (
 	AuthService_SubmitCredentialRequest_FullMethodName = "/auth.v1.AuthService/SubmitCredentialRequest"
 	AuthService_GetOnboardingStatus_FullMethodName     = "/auth.v1.AuthService/GetOnboardingStatus"
 	AuthService_CompleteOnboarding_FullMethodName      = "/auth.v1.AuthService/CompleteOnboarding"
+	AuthService_CreateOnboardingKey_FullMethodName     = "/auth.v1.AuthService/CreateOnboardingKey"
+	AuthService_SignOnboardingPoP_FullMethodName       = "/auth.v1.AuthService/SignOnboardingPoP"
+	AuthService_GetOnboardingKey_FullMethodName        = "/auth.v1.AuthService/GetOnboardingKey"
 )
 
 // AuthServiceClient is the client API for AuthService service.
@@ -61,6 +64,10 @@ type AuthServiceClient interface {
 	SubmitCredentialRequest(ctx context.Context, in *SubmitCredentialRequestReq, opts ...grpc.CallOption) (*SubmitCredentialRequestResp, error)
 	GetOnboardingStatus(ctx context.Context, in *GetOnboardingStatusRequest, opts ...grpc.CallOption) (*GetOnboardingStatusResponse, error)
 	CompleteOnboarding(ctx context.Context, in *CompleteOnboardingRequest, opts ...grpc.CallOption) (*CompleteOnboardingResponse, error)
+	// KMS onboarding helpers (Commercial Bank gateway → local auth service)
+	CreateOnboardingKey(ctx context.Context, in *CreateOnboardingKeyRequest, opts ...grpc.CallOption) (*CreateOnboardingKeyResponse, error)
+	SignOnboardingPoP(ctx context.Context, in *SignOnboardingPoPRequest, opts ...grpc.CallOption) (*SignOnboardingPoPResponse, error)
+	GetOnboardingKey(ctx context.Context, in *GetOnboardingKeyRequest, opts ...grpc.CallOption) (*GetOnboardingKeyResponse, error)
 }
 
 type authServiceClient struct {
@@ -241,6 +248,36 @@ func (c *authServiceClient) CompleteOnboarding(ctx context.Context, in *Complete
 	return out, nil
 }
 
+func (c *authServiceClient) CreateOnboardingKey(ctx context.Context, in *CreateOnboardingKeyRequest, opts ...grpc.CallOption) (*CreateOnboardingKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateOnboardingKeyResponse)
+	err := c.cc.Invoke(ctx, AuthService_CreateOnboardingKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) SignOnboardingPoP(ctx context.Context, in *SignOnboardingPoPRequest, opts ...grpc.CallOption) (*SignOnboardingPoPResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SignOnboardingPoPResponse)
+	err := c.cc.Invoke(ctx, AuthService_SignOnboardingPoP_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) GetOnboardingKey(ctx context.Context, in *GetOnboardingKeyRequest, opts ...grpc.CallOption) (*GetOnboardingKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOnboardingKeyResponse)
+	err := c.cc.Invoke(ctx, AuthService_GetOnboardingKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthServiceServer is the server API for AuthService service.
 // All implementations should embed UnimplementedAuthServiceServer
 // for forward compatibility.
@@ -264,6 +301,10 @@ type AuthServiceServer interface {
 	SubmitCredentialRequest(context.Context, *SubmitCredentialRequestReq) (*SubmitCredentialRequestResp, error)
 	GetOnboardingStatus(context.Context, *GetOnboardingStatusRequest) (*GetOnboardingStatusResponse, error)
 	CompleteOnboarding(context.Context, *CompleteOnboardingRequest) (*CompleteOnboardingResponse, error)
+	// KMS onboarding helpers (Commercial Bank gateway → local auth service)
+	CreateOnboardingKey(context.Context, *CreateOnboardingKeyRequest) (*CreateOnboardingKeyResponse, error)
+	SignOnboardingPoP(context.Context, *SignOnboardingPoPRequest) (*SignOnboardingPoPResponse, error)
+	GetOnboardingKey(context.Context, *GetOnboardingKeyRequest) (*GetOnboardingKeyResponse, error)
 }
 
 // UnimplementedAuthServiceServer should be embedded to have
@@ -323,6 +364,15 @@ func (UnimplementedAuthServiceServer) GetOnboardingStatus(context.Context, *GetO
 }
 func (UnimplementedAuthServiceServer) CompleteOnboarding(context.Context, *CompleteOnboardingRequest) (*CompleteOnboardingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CompleteOnboarding not implemented")
+}
+func (UnimplementedAuthServiceServer) CreateOnboardingKey(context.Context, *CreateOnboardingKeyRequest) (*CreateOnboardingKeyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateOnboardingKey not implemented")
+}
+func (UnimplementedAuthServiceServer) SignOnboardingPoP(context.Context, *SignOnboardingPoPRequest) (*SignOnboardingPoPResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SignOnboardingPoP not implemented")
+}
+func (UnimplementedAuthServiceServer) GetOnboardingKey(context.Context, *GetOnboardingKeyRequest) (*GetOnboardingKeyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetOnboardingKey not implemented")
 }
 func (UnimplementedAuthServiceServer) testEmbeddedByValue() {}
 
@@ -650,6 +700,60 @@ func _AuthService_CompleteOnboarding_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_CreateOnboardingKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateOnboardingKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).CreateOnboardingKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_CreateOnboardingKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).CreateOnboardingKey(ctx, req.(*CreateOnboardingKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_SignOnboardingPoP_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SignOnboardingPoPRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).SignOnboardingPoP(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_SignOnboardingPoP_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).SignOnboardingPoP(ctx, req.(*SignOnboardingPoPRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_GetOnboardingKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOnboardingKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).GetOnboardingKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_GetOnboardingKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).GetOnboardingKey(ctx, req.(*GetOnboardingKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AuthService_ServiceDesc is the grpc.ServiceDesc for AuthService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -724,6 +828,18 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CompleteOnboarding",
 			Handler:    _AuthService_CompleteOnboarding_Handler,
+		},
+		{
+			MethodName: "CreateOnboardingKey",
+			Handler:    _AuthService_CreateOnboardingKey_Handler,
+		},
+		{
+			MethodName: "SignOnboardingPoP",
+			Handler:    _AuthService_SignOnboardingPoP_Handler,
+		},
+		{
+			MethodName: "GetOnboardingKey",
+			Handler:    _AuthService_GetOnboardingKey_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

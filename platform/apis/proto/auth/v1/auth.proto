@@ -258,6 +258,44 @@ message CompleteOnboardingResponse {
   string status = 6; // ACTIVE
 }
 
+// ─── KMS onboarding keys (Commercial Bank → local auth service) ───────────
+
+message CreateOnboardingKeyRequest {
+  // bank_code is used as the KMS key identifier (e.g. "bank-a").
+  string bank_code = 1;
+}
+
+message CreateOnboardingKeyResponse {
+  // Hex-encoded uncompressed secp256k1 public key (04‖X‖Y, 65 bytes).
+  string pub_key_hex = 1;
+  // EVM address derived from the public key ("0x...").
+  string address = 2;
+}
+
+message SignOnboardingPoPRequest {
+  // user_id (or bank_code) used as KMS key identifier.
+  string key_id = 1;
+  // Hex-encoded PoP nonce (32 bytes) issued by the Central Bank.
+  string nonce_hex = 2;
+}
+
+message SignOnboardingPoPResponse {
+  // Hex-encoded 65-byte recoverable secp256k1 signature with V=0/1.
+  string signature_hex = 1;
+  // Hex-encoded uncompressed secp256k1 public key.
+  string pub_key_hex = 2;
+}
+
+message GetOnboardingKeyRequest {
+  // bank_code or user_id used as KMS key identifier.
+  string key_id = 1;
+}
+
+message GetOnboardingKeyResponse {
+  string pub_key_hex = 1;
+  string address = 2;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────
 
 service AuthService {
@@ -281,4 +319,9 @@ service AuthService {
   rpc SubmitCredentialRequest(SubmitCredentialRequestReq) returns (SubmitCredentialRequestResp);
   rpc GetOnboardingStatus(GetOnboardingStatusRequest) returns (GetOnboardingStatusResponse);
   rpc CompleteOnboarding(CompleteOnboardingRequest) returns (CompleteOnboardingResponse);
+
+  // KMS onboarding helpers (Commercial Bank gateway → local auth service)
+  rpc CreateOnboardingKey(CreateOnboardingKeyRequest) returns (CreateOnboardingKeyResponse);
+  rpc SignOnboardingPoP(SignOnboardingPoPRequest) returns (SignOnboardingPoPResponse);
+  rpc GetOnboardingKey(GetOnboardingKeyRequest) returns (GetOnboardingKeyResponse);
 }

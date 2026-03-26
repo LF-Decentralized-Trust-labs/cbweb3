@@ -20,31 +20,31 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func TestIdentityAndDataAccessE2E(t *testing.T) {
+func TestIdentityAndComplianceE2E(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	dataAccessPort := mustFreePort(t)
+	compliancePort := mustFreePort(t)
 	identityPort := mustFreePort(t)
-	dataAccessAddr := "127.0.0.1:" + dataAccessPort
+	complianceAddr := "127.0.0.1:" + compliancePort
 	identityAddr := "127.0.0.1:" + identityPort
 
 	repoRoot := mustRepoRoot(t)
-	dataAccessDir := filepath.Join(repoRoot, "backend/services/data-access")
+	complianceDir := filepath.Join(repoRoot, "backend/services/compliance")
 	authDir := filepath.Join(repoRoot, "backend/services/auth")
 
-	startService(t, ctx, dataAccessDir, map[string]string{
-		"DATA_ACCESS_GRPC_PORT": dataAccessPort,
+	startService(t, ctx, complianceDir, map[string]string{
+		"COMPLIANCE_GRPC_PORT": compliancePort,
 	})
-	waitForTCP(t, dataAccessAddr, 20*time.Second)
+	waitForTCP(t, complianceAddr, 20*time.Second)
 
 	// INTERNAL_JWT_SECRET matches AUTH_JWT_SECRET so login token can be used
 	// by provider.ValidateToken during RegisterParticipant in this E2E flow.
 	startService(t, ctx, authDir, map[string]string{
 		"AUTH_GRPC_PORT":                 identityPort,
-		"COMPLIANCE_GRPC_ADDR":           dataAccessAddr,
+		"COMPLIANCE_GRPC_ADDR":           complianceAddr,
 		"COMPLIANCE_REQUEST_TIMEOUT_SEC": "5",
 	})
 	waitForTCP(t, identityAddr, 20*time.Second)
@@ -104,29 +104,29 @@ func TestIdentityAndDataAccessE2E(t *testing.T) {
 	}
 }
 
-func TestIdentityAndDataAccessE2ENegativeScenarios(t *testing.T) {
+func TestIdentityAndComplianceE2ENegativeScenarios(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	dataAccessPort := mustFreePort(t)
+	compliancePort := mustFreePort(t)
 	identityPort := mustFreePort(t)
-	dataAccessAddr := "127.0.0.1:" + dataAccessPort
+	complianceAddr := "127.0.0.1:" + compliancePort
 	identityAddr := "127.0.0.1:" + identityPort
 
 	repoRoot := mustRepoRoot(t)
-	dataAccessDir := filepath.Join(repoRoot, "backend/services/compliance")
+	complianceDir := filepath.Join(repoRoot, "backend/services/compliance")
 	authDir := filepath.Join(repoRoot, "backend/services/auth")
 
-	startService(t, ctx, dataAccessDir, map[string]string{
-		"COMPLIANCE_GRPC_PORT": dataAccessPort,
+	startService(t, ctx, complianceDir, map[string]string{
+		"COMPLIANCE_GRPC_PORT": compliancePort,
 	})
-	waitForTCP(t, dataAccessAddr, 20*time.Second)
+	waitForTCP(t, complianceAddr, 20*time.Second)
 
 	startService(t, ctx, authDir, map[string]string{
 		"AUTH_GRPC_PORT":                 identityPort,
-		"COMPLIANCE_GRPC_ADDR":           dataAccessAddr,
+		"COMPLIANCE_GRPC_ADDR":           complianceAddr,
 		"COMPLIANCE_REQUEST_TIMEOUT_SEC": "5",
 	})
 	waitForTCP(t, identityAddr, 20*time.Second)

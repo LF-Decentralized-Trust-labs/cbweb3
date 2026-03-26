@@ -17,10 +17,9 @@
 #
 # Prerequisites:
 #   - Both stacks running: make dev.up (or dev.up-bank-b + dev.up-central-bank-b)
-#   - curl, jq, openssl, xxd, cast (Foundry)
+#   - curl, jq
 #   - backend/config/.env.infra.bank-b    with KC_CLIENT_SECRET
 #   - backend/config/.env.infra.central-bank-b with KC_CLIENT_SECRET
-#   - backend/config/pki/bank-b.{csr,key}
 #
 # Usage:
 #   ./tryout-spoke-b-bank-b.sh
@@ -51,21 +50,17 @@ REQUEST_ID=""
 BANK_USER_ID=""
 WALLET_ADDRESS=""
 POP_NONCE=""
-SECP256K1_PRIV_KEY=""
-SECP256K1_PUB_KEY=""
-SECP256K1_ADDRESS=""
-POP_SIGNATURE_HEX=""
-ISSUED_CERT_PEM=""
 CLIENT_SECRET=""
 TX_HASH=""
 BANK_TOKEN=""
+PKI_LOGIN_ERROR=""
 
 # ---------------------------------------------------------------------------
 # Dependency checks
 # ---------------------------------------------------------------------------
 
 require_cmds() {
-  for cmd in curl jq openssl xxd cast; do
+  for cmd in curl jq; do
     if ! command -v "$cmd" &>/dev/null; then
       echo "ERROR: '$cmd' not found. Install it before continuing." >&2
       exit 1
@@ -84,13 +79,6 @@ require_env_files() {
   fi
 }
 
-require_pki_bank_b() {
-  if [ ! -f "$PKI_DIR/bank-b.csr" ] || [ ! -f "$PKI_DIR/bank-b.key" ]; then
-    echo "ERROR: PKI files not found at $PKI_DIR/bank-b.{csr,key}." >&2
-    echo "       Run 'make pki.gen-bank-b pki.gen-commercial-banks' first." >&2
-    exit 1
-  fi
-}
 
 read_kc_secret() {
   local env_file=$1
@@ -129,25 +117,13 @@ bank_operator_login() {
 # public /onboarding/credential-request endpoint.
 # ---------------------------------------------------------------------------
 
-generate_secp256k1_keypair() {
-  local wallet_json raw_pub
-  wallet_json=$(cast wallet new --json 2>/dev/null)
-  SECP256K1_PRIV_KEY=$(echo "$wallet_json" | jq -r '.[0].private_key')
-  SECP256K1_ADDRESS=$(echo "$wallet_json" | jq -r '.[0].address')
-  raw_pub=$(cast wallet public-key --private-key "$SECP256K1_PRIV_KEY" 2>/dev/null)
-  SECP256K1_PUB_KEY="04${raw_pub#0x}"
-}
-
 submit_credential_request() {
-  local csr_pem tmp code body
-  csr_pem=$(cat "$PKI_DIR/bank-b.csr")
+  local tmp code body
   tmp=$(mktemp)
   code=$(curl -sS -X POST "$BANK_URL/onboarding/initiate" \
     --cookie "access_token=$BANK_OPERATOR_TOKEN" \
     -H "Content-Type: application/json" \
     --data "$(jq -n \
-      --arg csr "$csr_pem" \
-      --arg pub "$SECP256K1_PUB_KEY" \
       --arg inst "Bank B S.A." \
       --arg bank "b" \
       --arg country "BR" \
@@ -155,8 +131,6 @@ submit_credential_request() {
       --arg email "ops@bank-b.com.br" \
       --arg user "bank-b" \
       '{
-        csr_pem: $csr,
-        blockchain_pub_key_hex: $pub,
         institution_name: $inst,
         bank_code: $bank,
         country: $country,
@@ -247,22 +221,9 @@ poll_onboarding_status() {
 
 # ---------------------------------------------------------------------------
 # Step 6 — Phase 3: Complete Onboarding (actor: Bank-B operator)
-# Calls Bank-B's protected proxy route. Signs the PoP nonce with secp256k1
-# to prove wallet ownership.
+# Calls Bank-B's protected proxy route. The backend signs the PoP nonce
+# with secp256k1 to prove wallet ownership.
 # ---------------------------------------------------------------------------
-
-sign_pop_nonce() {
-  local digest raw_sig sig_no_prefix sig_body v_byte v_adj
-  digest=$(echo -n "$POP_NONCE" | xxd -r -p | sha256sum | cut -d' ' -f1)
-  raw_sig=$(cast wallet sign --no-hash "0x$digest" --private-key "$SECP256K1_PRIV_KEY" 2>/dev/null)
-  sig_no_prefix="${raw_sig#0x}"
-  sig_body="${sig_no_prefix:0:128}"
-  v_byte="${sig_no_prefix:128:2}"
-  if [ "$v_byte" = "1b" ]; then v_adj="00"
-  elif [ "$v_byte" = "1c" ]; then v_adj="01"
-  else v_adj="$v_byte"; fi
-  POP_SIGNATURE_HEX="${sig_body}${v_adj}"
-}
 
 complete_onboarding() {
   local tmp code body
@@ -273,13 +234,9 @@ complete_onboarding() {
     --data "$(jq -n \
       --arg rid "$REQUEST_ID" \
       --arg uid "$BANK_USER_ID" \
-      --arg sig "$POP_SIGNATURE_HEX" \
-      --arg pub "$SECP256K1_PUB_KEY" \
       '{
         request_id: $rid,
-        user_id: $uid,
-        pop_signature_hex: $sig,
-        blockchain_pub_key_hex: $pub
+        user_id: $uid
       }')" \
     -o "$tmp" -w "%{http_code}")
   body=$(cat "$tmp"); rm -f "$tmp"
@@ -288,55 +245,17 @@ complete_onboarding() {
     echo "Response: $body" >&2
     exit 1
   fi
-  ISSUED_CERT_PEM=$(echo "$body" | jq -r '.cert_pem // empty')
   CLIENT_SECRET=$(echo "$body" | jq -r '.client_secret // empty')
   TX_HASH=$(echo "$body" | jq -r '.tx_hash // empty')
   WALLET_ADDRESS=$(echo "$body" | jq -r '.wallet_address // empty')
-  if [ -z "$ISSUED_CERT_PEM" ] || [ -z "$CLIENT_SECRET" ]; then
+  BANK_TOKEN=$(echo "$body" | jq -r '.access_token // empty')
+  PKI_LOGIN_ERROR=$(echo "$body" | jq -r '.pki_login_error // empty')
+  if [ -z "$CLIENT_SECRET" ]; then
     echo "ERROR: incomplete response from complete onboarding." >&2
     echo "Response: $body" >&2
     exit 1
   fi
-  echo "$body" | jq '{user_id, wallet_address, tx_hash, status}'
-}
-
-# ---------------------------------------------------------------------------
-# Step 7 — PKI Login (actor: Commercial Bank participant)
-# Authenticates directly against the Central Bank using the issued
-# certificate and the client_secret generated during onboarding.
-# ---------------------------------------------------------------------------
-
-pki_login() {
-  local nonce_resp nonce nonce_sig bind_resp
-  nonce_resp=$(curl -s -X POST "$CB_URL/auth/login" \
-    -H "Content-Type: application/json" \
-    --data "$(jq -n --arg cid "$BANK_USER_ID" --arg sec "$CLIENT_SECRET" \
-      '{clientId: $cid, clientSecret: $sec}')")
-  nonce=$(echo "$nonce_resp" | jq -r '.nonce // empty')
-  if [ -z "$nonce" ]; then
-    echo "ERROR: PKI login step 1 failed — no nonce returned." >&2
-    echo "Response: $nonce_resp" >&2
-    exit 1
-  fi
-  echo "  Nonce received: ${nonce:0:32}..."
-
-  nonce_sig=$(echo -n "$nonce" | xxd -r -p \
-    | openssl dgst -sha256 -sign "$PKI_DIR/bank-b.key" \
-    | xxd -p | tr -d '\n')
-
-  bind_resp=$(curl -s -X POST "$CB_URL/auth/wallet/bind" \
-    -H "Content-Type: application/json" \
-    --data "$(jq -n \
-      --arg uid "$BANK_USER_ID" \
-      --arg sig "$nonce_sig" \
-      --arg cert "$ISSUED_CERT_PEM" \
-      '{user_id: $uid, nonce_signature_hex: $sig, cert_pem: $cert}')")
-  BANK_TOKEN=$(echo "$bind_resp" | jq -r '.accessToken // empty')
-  if [ -z "$BANK_TOKEN" ]; then
-    echo "ERROR: PKI login step 2 (wallet/bind) failed." >&2
-    echo "Response: $bind_resp" >&2
-    exit 1
-  fi
+  echo "$body" | jq '{user_id, wallet_address, tx_hash, status, access_token: (.access_token // null | if . then "(present)" else null end), pki_login_error}'
 }
 
 # ---------------------------------------------------------------------------
@@ -346,7 +265,6 @@ pki_login() {
 main() {
   require_cmds
   require_env_files
-  require_pki_bank_b
 
   echo ""
   echo "======================================================"
@@ -363,10 +281,7 @@ main() {
 
   echo ""
   echo "=== [2/7] Phase 1 — Credential Request (via Bank-B proxy) ==="
-  echo "  Generating secp256k1 keypair..."
-  generate_secp256k1_keypair
-  echo "  secp256k1 address: $SECP256K1_ADDRESS"
-  echo "  Submitting CSR + blockchain public key..."
+  echo "  Submitting credential request (CSR + blockchain key handled by backend)..."
   submit_credential_request
   echo "  request_id:     $REQUEST_ID"
   echo "  user_id:        $BANK_USER_ID"
@@ -393,23 +308,22 @@ main() {
 
   echo ""
   echo "=== [6/7] Phase 3 — Complete Onboarding (via Bank-B proxy) ==="
-  echo "  Signing PoP nonce with secp256k1..."
-  sign_pop_nonce
-  echo "  PoP signature: ${POP_SIGNATURE_HEX:0:32}..."
-  echo "  Submitting to /onboarding/complete..."
+  echo "  Submitting to /onboarding/complete (PoP signing handled by backend)..."
   complete_onboarding
-  echo "  cert_pem:      (issued)"
   echo "  client_secret: $CLIENT_SECRET"
   echo "  tx_hash:       ${TX_HASH:-"(noop)"}"
   echo "  status:        ACTIVE"
 
   echo ""
   echo "--- Actor: COMMERCIAL BANK PARTICIPANT ---"
-  echo "=== [7/7] PKI Login — Validation (direct to CB) ==="
-  echo "  Step 1: requesting nonce with userId + clientSecret..."
-  pki_login
-  echo "  Step 2: wallet/bind succeeded"
-  echo "  BANK_TOKEN: ${BANK_TOKEN:0:60}..."
+  echo "=== [7/7] PKI Login — Validation ==="
+  if [ -n "$BANK_TOKEN" ]; then
+    echo "  PKI login succeeded (chained in complete onboarding)"
+    echo "  BANK_TOKEN: ${BANK_TOKEN:0:60}..."
+  else
+    echo "  WARNING: PKI login was not completed during onboarding."
+    echo "  pki_login_error: $PKI_LOGIN_ERROR"
+  fi
 
   echo ""
   echo "======================================================"
@@ -418,7 +332,6 @@ main() {
   echo ""
   echo "  BANK_USER_ID     : $BANK_USER_ID"
   echo "  WALLET_ADDRESS   : $WALLET_ADDRESS"
-  echo "  SECP256K1_ADDRESS: $SECP256K1_ADDRESS"
   echo "  TX_HASH          : ${TX_HASH:-"(noop)"}"
   echo "  CLIENT_SECRET    : $CLIENT_SECRET"
   echo ""
@@ -427,8 +340,7 @@ main() {
   echo "    CB_TOKEN           : ${CB_TOKEN:0:60}..."
   echo "    BANK_TOKEN (PKI)   : ${BANK_TOKEN:0:60}..."
   echo ""
-  echo "  >>> Save CLIENT_SECRET and SECP256K1_PRIV_KEY — shown only once. <<<"
-  echo "  SECP256K1_PRIV_KEY: $SECP256K1_PRIV_KEY"
+  echo "  >>> Save CLIENT_SECRET — shown only once. <<<"
   echo ""
 }
 

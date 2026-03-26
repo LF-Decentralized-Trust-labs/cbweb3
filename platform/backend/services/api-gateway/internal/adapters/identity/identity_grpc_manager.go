@@ -199,3 +199,23 @@ func (m *IdentityGRPCManager) GetUser(ctx context.Context, userID string) (inter
 		BankCode:        out.BankCode,
 	}, nil
 }
+
+// --- OnboardingKeyManager (KMS operations for commercial bank proxy) ---
+
+// CreateOnboardingKey delegates to the auth service's CreateOnboardingKey RPC.
+func (m *IdentityGRPCManager) CreateOnboardingKey(ctx context.Context, bankCode string) (string, string, error) {
+	out, err := m.cc.CreateOnboardingKey(ctx, &authv1.CreateOnboardingKeyRequest{BankCode: bankCode})
+	if err != nil {
+		return "", "", fmt.Errorf("create onboarding key: %w", err)
+	}
+	return out.PubKeyHex, out.Address, nil
+}
+
+// SignOnboardingPoP delegates to the auth service's SignOnboardingPoP RPC.
+func (m *IdentityGRPCManager) SignOnboardingPoP(ctx context.Context, keyID, nonceHex string) (string, string, error) {
+	out, err := m.cc.SignOnboardingPoP(ctx, &authv1.SignOnboardingPoPRequest{KeyId: keyID, NonceHex: nonceHex})
+	if err != nil {
+		return "", "", fmt.Errorf("sign onboarding pop: %w", err)
+	}
+	return out.SignatureHex, out.PubKeyHex, nil
+}

@@ -15,7 +15,7 @@ type Dependencies struct {
 	ComplianceHandler      *handlers.ComplianceHandler
 	GovernanceHandler      *handlers.GovernanceHandler
 	OnboardingHandler      *handlers.OnboardingHandler      // Central Bank: processes onboarding locally
-	OnboardingProxyHandler *handlers.OnboardingProxyHandler  // Commercial Bank: proxies onboarding to CB
+	OnboardingProxyHandler *handlers.OnboardingProxyHandler // Commercial Bank: proxies onboarding to CB
 	AuthProvider           interfaces.IAuthProvider
 }
 
@@ -49,6 +49,9 @@ func Setup(app *fiber.App, deps Dependencies) {
 		g.Post("/initiate", deps.OnboardingProxyHandler.InitiateCredentialRequest)
 		g.Get("/status/:requestId", deps.OnboardingProxyHandler.GetOnboardingStatus)
 		g.Post("/complete", deps.OnboardingProxyHandler.CompleteOnboarding)
+
+		// PKI re-login: authenticates the commercial bank against the CB.
+		authGroup.Post("/pki-login", middleware.RequireCookieAuth(deps.AuthProvider), deps.OnboardingProxyHandler.PKILogin)
 	} else if deps.OnboardingHandler != nil {
 		// Central Bank: public endpoints that process onboarding requests.
 		g := app.Group("/api/v1/onboarding")

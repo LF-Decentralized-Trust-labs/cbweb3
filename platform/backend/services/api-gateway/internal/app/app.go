@@ -47,7 +47,12 @@ func New(cfg config.Config) (*fiber.App, error) {
 	}
 
 	if cfg.CentralBankAPIURL != "" {
-		deps.OnboardingProxyHandler = handlers.NewOnboardingProxyHandler(cfg.CentralBankAPIURL)
+		deps.OnboardingProxyHandler = handlers.NewOnboardingProxyHandler(
+			cfg.CentralBankAPIURL,
+			cfg.PKIDir,
+			cfg.BankCode,
+			identityManager, // implements OnboardingKeyManager
+		)
 	} else {
 		deps.OnboardingHandler = handlers.NewOnboardingHandler(identityManager)
 	}
