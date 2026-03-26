@@ -12,22 +12,9 @@ set -euo pipefail
 SPOKE="${SPOKE:-spoke-a}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-declare -A NODES
 case "$SPOKE" in
-  spoke-a)
-    NODES=(
-      ["central-bank"]="paladin-spoke-a-cb"
-      ["bank-a"]="paladin-spoke-a-bank-a"
-      ["bank-c"]="paladin-spoke-a-bank-c"
-    )
-    ;;
-  spoke-b)
-    NODES=(
-      ["central-bank"]="paladin-spoke-b-cb"
-      ["bank-b"]="paladin-spoke-b-bank-b"
-      ["bank-d"]="paladin-spoke-b-bank-d"
-    )
-    ;;
+  spoke-a) NODE_PAIRS="central-bank:paladin-spoke-a-cb bank-a:paladin-spoke-a-bank-a bank-c:paladin-spoke-a-bank-c" ;;
+  spoke-b) NODE_PAIRS="central-bank:paladin-spoke-b-cb bank-b:paladin-spoke-b-bank-b bank-d:paladin-spoke-b-bank-d" ;;
   *)
     echo "ERROR: SPOKE must be 'spoke-a' or 'spoke-b'" >&2
     exit 1
