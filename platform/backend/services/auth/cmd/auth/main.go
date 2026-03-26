@@ -87,7 +87,9 @@ type blockchainRegistryClient interface {
 // When set to "besu", two modes are supported:
 //   - Central Bank: CB_PRIVATE_KEY is set → uses StaticKeySigner for on-chain writes.
 //   - Commercial Bank: CB_PRIVATE_KEY absent → uses KMSSigner backed by the
-//     participant's key in the KMS (created during onboarding).
+//     participant's key in the KMS (created during onboarding). The signer
+//     user ID is resolved per-request from the context; callers must set it
+//     with blockchain.WithSignerUserID before invoking write operations.
 func newBlockchainClient(kmsProvider kms.Provider) blockchainRegistryClient {
 	switch getEnv("BLOCKCHAIN_CLIENT", "noop") {
 	case "besu":
@@ -108,12 +110,8 @@ func newBlockchainClient(kmsProvider kms.Provider) blockchainRegistryClient {
 			signer = s
 			log.Println("blockchain: central bank mode (static key signer)")
 		} else {
-			userID := getEnv("GOVERNANCE_USER_ID", "")
-			if userID == "" {
-				log.Println("blockchain: WARN — GOVERNANCE_USER_ID not set; on-chain writes will fail until KMS key is provisioned")
-			}
-			signer = &blockchain.KMSSigner{KMS: kmsProvider, UserID: userID}
-			log.Printf("blockchain: commercial bank mode (KMS signer, userID=%s)", userID)
+			signer = &blockchain.KMSSigner{KMS: kmsProvider}
+			log.Println("blockchain: commercial bank mode (KMS signer, per-request user ID from context)")
 		}
 
 		bc, err := registry.NewBesuClient(cfg, signer)

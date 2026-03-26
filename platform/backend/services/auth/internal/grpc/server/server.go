@@ -284,6 +284,9 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *authv1.On
 	}
 
 	// 4. Optionally register on-chain.
+	// Only the Central Bank calls OnboardParticipant — signing uses the
+	// static CB_PRIVATE_KEY (StaticKeySigner). Commercial banks do NOT
+	// perform on-chain registration directly; they proxy via CENTRAL_BANK_API_URL.
 	if domain.RequiresOnChain(req.Role) && resp.WalletAddress != "" {
 		txHash, chainErr := s.blockchainClient.RegisterParticipant(ctx, resp.WalletAddress, displayName, req.Role, [32]byte{})
 		if chainErr != nil {

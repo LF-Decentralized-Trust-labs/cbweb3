@@ -188,6 +188,8 @@ func (s *identityService) CompleteOnboarding(ctx context.Context, req *authv1.Co
 	}
 
 	// 6. Register on-chain.
+	// Only the Central Bank executes CompleteOnboarding — commercial banks
+	// proxy via CENTRAL_BANK_API_URL. Signing uses the static CB_PRIVATE_KEY.
 	var txHash string
 	if domain.RequiresOnChain(participant.Role) && participant.WalletAddress != "" {
 		hash, chainErr := s.blockchainClient.RegisterParticipant(ctx, participant.WalletAddress, participant.InstitutionName, participant.Role, [32]byte{})
@@ -240,4 +242,3 @@ func (s *identityService) CompleteOnboarding(ctx context.Context, req *authv1.Co
 		Status:        string(domain.ParticipantStatusActive),
 	}, nil
 }
-

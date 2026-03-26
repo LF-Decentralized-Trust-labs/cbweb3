@@ -168,7 +168,12 @@ create_realm_and_client() {
   set_env_var "$domain_env_file" "KC_REALM" "$realm_name"
   set_env_var "$domain_env_file" "KC_CLIENT_ID" "$client_id"
   set_env_var "$domain_env_file" "KC_CLIENT_SECRET" "$client_secret"
-  set_env_var "$domain_env_file" "GOVERNANCE_USER_ID" "service-account-${client_id}"
+
+  # GOVERNANCE_USER_ID is only needed by central banks (compliance governance bootstrap).
+  # Commercial bank .env templates do not define it; only write when present.
+  if grep -Eq "^#?GOVERNANCE_USER_ID=" "$domain_env_file"; then
+    set_env_var "$domain_env_file" "GOVERNANCE_USER_ID" "service-account-${client_id}"
+  fi
 }
 
 create_platform_roles() {
