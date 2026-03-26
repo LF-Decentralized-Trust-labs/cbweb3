@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"strings"
 	"time"
@@ -108,6 +109,7 @@ func (b *BesuClient) transactOpts(ctx context.Context) (*bind.TransactOpts, erro
 }
 
 // RegisterParticipant registers a new participant on the IdentityRegistry contract.
+// Blocks until the transaction is mined or the context is cancelled.
 func (b *BesuClient) RegisterParticipant(ctx context.Context, wallet, name, role string, zkPointer [32]byte) (string, error) {
 	opts, err := b.transactOpts(ctx)
 	if err != nil {
@@ -121,10 +123,14 @@ func (b *BesuClient) RegisterParticipant(ctx context.Context, wallet, name, role
 	if err != nil {
 		return "", fmt.Errorf("registry: registerParticipant tx: %w", err)
 	}
+	if err := b.waitMined(ctx, tx); err != nil {
+		return tx.Hash().Hex(), fmt.Errorf("registry: registerParticipant wait: %w", err)
+	}
 	return tx.Hash().Hex(), nil
 }
 
 // UpdateStatus changes the KYC status of a participant on-chain.
+// Blocks until the transaction is mined or the context is cancelled.
 func (b *BesuClient) UpdateStatus(ctx context.Context, wallet string, status uint8) (string, error) {
 	opts, err := b.transactOpts(ctx)
 	if err != nil {
@@ -136,10 +142,14 @@ func (b *BesuClient) UpdateStatus(ctx context.Context, wallet string, status uin
 	if err != nil {
 		return "", fmt.Errorf("registry: updateStatus tx: %w", err)
 	}
+	if err := b.waitMined(ctx, tx); err != nil {
+		return tx.Hash().Hex(), fmt.Errorf("registry: updateStatus wait: %w", err)
+	}
 	return tx.Hash().Hex(), nil
 }
 
 // SetCertFingerprint stores a certificate fingerprint on-chain.
+// Blocks until the transaction is mined or the context is cancelled.
 func (b *BesuClient) SetCertFingerprint(ctx context.Context, wallet string, fingerprint [32]byte) (string, error) {
 	opts, err := b.transactOpts(ctx)
 	if err != nil {
@@ -151,7 +161,25 @@ func (b *BesuClient) SetCertFingerprint(ctx context.Context, wallet string, fing
 	if err != nil {
 		return "", fmt.Errorf("registry: setCertFingerprint tx: %w", err)
 	}
+	if err := b.waitMined(ctx, tx); err != nil {
+		return tx.Hash().Hex(), fmt.Errorf("registry: setCertFingerprint wait: %w", err)
+	}
 	return tx.Hash().Hex(), nil
+}
+
+// waitMined blocks until the transaction is included in a block. Returns an
+// error if the transaction reverted (receipt status != 1) or the context
+// expires before the tx is mined.
+func (b *BesuClient) waitMined(ctx context.Context, tx *types.Transaction) error {
+	receipt, err := bind.WaitMined(ctx, b.client, tx)
+	if err != nil {
+		return fmt.Errorf("waiting for tx %s: %w", tx.Hash().Hex(), err)
+	}
+	if receipt.Status == 0 {
+		return fmt.Errorf("tx %s reverted (status=0)", tx.Hash().Hex())
+	}
+	log.Printf("registry: tx %s mined in block %s (gas=%d)", tx.Hash().Hex(), receipt.BlockNumber, receipt.GasUsed)
+	return nil
 }
 
 // CanTransact returns true if the address is Verified and has a non-NONE role.
