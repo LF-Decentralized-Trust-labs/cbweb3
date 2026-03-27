@@ -80,7 +80,7 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 
 	mgr := fullKYCManagerStub{}
 	authHandler := handlers.NewAuthHandler(authProviderStub{}, mgr, false)
-	complianceHandler := handlers.NewComplianceHandler(mgr)
+	complianceHandler := handlers.NewComplianceHandler(mgr, nil)
 	app := fiber.New()
 	// Validator always returns COMMERCIAL_BANK role — never ROLE_GOVERNANCE.
 	authProvider := roleAuthProviderStub{roles: []string{domain.RoleCommercialBank}}
@@ -94,6 +94,7 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 		method string
 		path   string
 	}{
+		{http.MethodGet, "/api/v1/compliance/participants"},
 		{http.MethodPost, "/api/v1/compliance/kyc/issue-credential"},
 		{http.MethodPost, "/api/v1/compliance/participants/provision"},
 		{http.MethodPost, "/api/v1/compliance/accounts/freeze"},
@@ -118,7 +119,7 @@ func TestSetupRegistersRoutes(t *testing.T) {
 	t.Parallel()
 
 	authHandler := handlers.NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false)
-	complianceHandler := handlers.NewComplianceHandler(kycCheckerStub{})
+	complianceHandler := handlers.NewComplianceHandler(kycCheckerStub{}, nil)
 	app := fiber.New()
 	Setup(app, Dependencies{
 		AuthHandler:       authHandler,
@@ -155,7 +156,7 @@ func TestMeRouteRequiresToken(t *testing.T) {
 	t.Parallel()
 
 	authHandler := handlers.NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false)
-	complianceHandler := handlers.NewComplianceHandler(kycCheckerStub{})
+	complianceHandler := handlers.NewComplianceHandler(kycCheckerStub{}, nil)
 	app := fiber.New()
 	Setup(app, Dependencies{
 		AuthHandler:       authHandler,
@@ -189,7 +190,7 @@ func TestGovernanceUsersRoutesRequireRole(t *testing.T) {
 
 	mgr := fullKYCManagerStub{}
 	authHandler := handlers.NewAuthHandler(authProviderStub{}, mgr, false)
-	complianceHandler := handlers.NewComplianceHandler(mgr)
+	complianceHandler := handlers.NewComplianceHandler(mgr, nil)
 	app := fiber.New()
 	// ROLE_COMMERCIAL_BANK → must be blocked from governance routes.
 	authProvider := roleAuthProviderStub{roles: []string{domain.RoleCommercialBank}}

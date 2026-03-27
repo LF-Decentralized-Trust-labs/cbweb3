@@ -66,6 +66,7 @@ func Setup(app *fiber.App, deps Dependencies) {
 	complianceGroup.Post("/aml/screen", deps.ComplianceHandler.AMLScreen)
 
 	centralBankRoutes := complianceGroup.Group("", middleware.RequireRole(domain.RoleGovernance))
+	centralBankRoutes.Get("/participants", deps.ComplianceHandler.ListParticipants)
 	centralBankRoutes.Post("/approve-kyc", deps.GovernanceHandler.ApproveKYC)
 	centralBankRoutes.Post("/participants/provision", deps.ComplianceHandler.ProvisionParticipant)
 	centralBankRoutes.Post("/accounts/freeze", deps.ComplianceHandler.FreezeAccount)

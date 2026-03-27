@@ -39,7 +39,7 @@ func New(cfg config.Config) (*fiber.App, error) {
 	governanceHandler := handlers.NewGovernanceHandler(complianceGRPC)
 
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure)
-	complianceHandler := handlers.NewComplianceHandler(identityManager)
+	complianceHandler := handlers.NewComplianceHandler(identityManager, complianceGRPC)
 
 	deps := router.Dependencies{
 		AuthHandler:       authHandler,
