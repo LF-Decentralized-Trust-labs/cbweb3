@@ -249,15 +249,32 @@ func TestAuthHandlerRefreshMissingBody(t *testing.T) {
 	app := fiber.New()
 	app.Post("/auth/refresh", handler.Refresh)
 
-	body, _ := json.Marshal(map[string]string{})
-	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestAuthHandlerRefreshViaCookie(t *testing.T) {
+	t.Parallel()
+	handler := NewAuthHandler(authProviderStub{
+		token: domain.AuthToken{AccessToken: "new-token", RefreshToken: "new-rt", ExpiresIn: 3600, TokenType: "Bearer"},
+	}, kycCheckerStub{}, false)
+	app := fiber.New()
+	app.Post("/auth/refresh", handler.Refresh)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
+	req.AddCookie(&http.Cookie{Name: "refresh_token", Value: "old-rt"})
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }
 
@@ -269,6 +286,7 @@ func TestAuthHandlerLogoutSuccess(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
 	req.AddCookie(&http.Cookie{Name: "access_token", Value: "some-token"})
+	req.AddCookie(&http.Cookie{Name: "refresh_token", Value: "some-rt"})
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

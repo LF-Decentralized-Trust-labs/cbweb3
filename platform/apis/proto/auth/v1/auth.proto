@@ -16,6 +16,7 @@ message LoginResponse {
   string refresh_token = 2;
   string token_type = 3;
   int32 expires_in = 4;
+  int32 refresh_expires_in = 5;
 }
 
 message RefreshTokenRequest {
@@ -27,11 +28,14 @@ message RefreshTokenResponse {
   string refresh_token = 2;
   string token_type = 3;
   int32 expires_in = 4;
+  int32 refresh_expires_in = 5;
 }
 
 message RevokeTokenRequest {
-  // In practice callers send the refresh_token here (Keycloak logout requires it).
+  // Deprecated: use refresh_token instead. Kept for backward compatibility.
   string access_token = 1;
+  // Keycloak logout requires the refresh_token for proper session revocation.
+  string refresh_token = 2;
 }
 
 message RevokeTokenResponse {
@@ -150,6 +154,7 @@ message VerifyPKILoginResponse {
   string refresh_token = 2;
   string token_type = 3;
   int32 expires_in = 4;
+  int32 refresh_expires_in = 5;
 }
 
 // ─── User management ──────────────────────────────────────────────────────

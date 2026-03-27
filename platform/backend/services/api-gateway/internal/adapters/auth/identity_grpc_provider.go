@@ -38,10 +38,11 @@ func (p *IdentityGRPCAuthProvider) Authenticate(ctx context.Context, clientID, c
 		return domain.AuthToken{}, domain.ErrInvalidCredentials
 	}
 	return domain.AuthToken{
-		AccessToken:  out.AccessToken,
-		RefreshToken: out.RefreshToken,
-		TokenType:    out.TokenType,
-		ExpiresIn:    int(out.ExpiresIn),
+		AccessToken:      out.AccessToken,
+		RefreshToken:     out.RefreshToken,
+		TokenType:        out.TokenType,
+		ExpiresIn:        int(out.ExpiresIn),
+		RefreshExpiresIn: int(out.RefreshExpiresIn),
 	}, nil
 }
 
@@ -52,20 +53,18 @@ func (p *IdentityGRPCAuthProvider) RefreshToken(ctx context.Context, refreshToke
 		return domain.AuthToken{}, domain.ErrInvalidToken
 	}
 	return domain.AuthToken{
-		AccessToken:  out.AccessToken,
-		RefreshToken: out.RefreshToken,
-		TokenType:    out.TokenType,
-		ExpiresIn:    int(out.ExpiresIn),
+		AccessToken:      out.AccessToken,
+		RefreshToken:     out.RefreshToken,
+		TokenType:        out.TokenType,
+		ExpiresIn:        int(out.ExpiresIn),
+		RefreshExpiresIn: int(out.RefreshExpiresIn),
 	}, nil
 }
 
-// Logout revokes the access token via identity gRPC.
-func (p *IdentityGRPCAuthProvider) Logout(ctx context.Context, accessToken string) error {
-	out, err := p.cc.RevokeToken(ctx, &authv1.RevokeTokenRequest{AccessToken: accessToken})
+// Logout revokes the session by sending the refresh token to the identity service.
+func (p *IdentityGRPCAuthProvider) Logout(ctx context.Context, refreshToken string) error {
+	_, err := p.cc.RevokeToken(ctx, &authv1.RevokeTokenRequest{RefreshToken: refreshToken})
 	if err != nil {
-		return domain.ErrInvalidToken
-	}
-	if !out.Success {
 		return domain.ErrInvalidToken
 	}
 	return nil
@@ -118,9 +117,10 @@ func (p *IdentityGRPCAuthProvider) VerifyPKILogin(ctx context.Context, userID, n
 		return domain.AuthToken{}, err
 	}
 	return domain.AuthToken{
-		AccessToken:  out.AccessToken,
-		RefreshToken: out.RefreshToken,
-		TokenType:    out.TokenType,
-		ExpiresIn:    int(out.ExpiresIn),
+		AccessToken:      out.AccessToken,
+		RefreshToken:     out.RefreshToken,
+		TokenType:        out.TokenType,
+		ExpiresIn:        int(out.ExpiresIn),
+		RefreshExpiresIn: int(out.RefreshExpiresIn),
 	}, nil
 }

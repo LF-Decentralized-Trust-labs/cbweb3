@@ -68,9 +68,10 @@ func NewAuthHandler(
 }
 
 // setAuthCookies injects HttpOnly auth cookies for the access and refresh tokens.
-// Both cookies share the same security attributes; refresh cookie is only set when
-// the token is non-empty.
-func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string, expiresIn int, secure bool) {
+// The refresh cookie uses its own MaxAge (refreshExpiresIn) so it outlives the
+// access token, enabling silent refresh. When refreshExpiresIn is 0 the access
+// token lifetime is used as fallback.
+func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string, expiresIn, refreshExpiresIn int, secure bool) {
 	c.Cookie(&fiber.Cookie{
 		Name:     "access_token",
 		Value:    accessToken,
@@ -81,11 +82,15 @@ func setAuthCookies(c *fiber.Ctx, accessToken, refreshToken string, expiresIn in
 		SameSite: "Strict",
 	})
 	if refreshToken != "" {
+		refMaxAge := refreshExpiresIn
+		if refMaxAge <= 0 {
+			refMaxAge = expiresIn
+		}
 		c.Cookie(&fiber.Cookie{
 			Name:     "refresh_token",
 			Value:    refreshToken,
 			Path:     "/",
-			MaxAge:   expiresIn,
+			MaxAge:   refMaxAge,
 			HTTPOnly: true,
 			Secure:   secure,
 			SameSite: "Strict",
@@ -168,7 +173,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
 	}
-	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, h.cookieSecure)
+	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
 	resp := fiber.Map{
 		"accessToken": token.AccessToken,
 		"expiresIn":   token.ExpiresIn,
@@ -181,22 +186,27 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 }
 
 // Refresh issues a new access token from a valid refresh token.
+// The refresh token can be supplied in the JSON body or read from the
+// HttpOnly refresh_token cookie (preferred for browser clients).
 func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 	var body struct {
 		RefreshToken string `json:"refreshToken"`
 	}
-	if err := c.BodyParser(&body); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
+	_ = c.BodyParser(&body)
+
+	rt := body.RefreshToken
+	if rt == "" {
+		rt = c.Cookies("refresh_token")
 	}
-	if body.RefreshToken == "" {
+	if rt == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "refreshToken is required"})
 	}
 
-	token, err := h.authProvider.RefreshToken(c.UserContext(), body.RefreshToken)
+	token, err := h.authProvider.RefreshToken(c.UserContext(), rt)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired refresh token"})
 	}
-	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, h.cookieSecure)
+	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"accessToken":  token.AccessToken,
 		"refreshToken": token.RefreshToken,
@@ -205,15 +215,18 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 	})
 }
 
-// Logout revokes the current access token. The token is read from the
-// access_token HttpOnly cookie set by login/refresh endpoints.
-// On success the auth cookies are cleared.
+// Logout revokes the current session. The refresh_token HttpOnly cookie is
+// sent to Keycloak for proper session revocation. Falls back to access_token
+// for backward compatibility.
 func (h *AuthHandler) Logout(c *fiber.Ctx) error {
-	rawToken := c.Cookies("access_token")
-	if rawToken == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "access_token cookie is required"})
+	revokeToken := c.Cookies("refresh_token")
+	if revokeToken == "" {
+		revokeToken = c.Cookies("access_token")
 	}
-	if err := h.authProvider.Logout(c.UserContext(), rawToken); err != nil {
+	if revokeToken == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "auth cookie is required"})
+	}
+	if err := h.authProvider.Logout(c.UserContext(), revokeToken); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "logout failed"})
 	}
 	clearAuthCookies(c, h.cookieSecure)
@@ -265,7 +278,7 @@ func (h *AuthHandler) WalletBind(c *fiber.Ctx) error {
 		return c.Status(httpStatus).JSON(fiber.Map{"error": errMsg})
 	}
 
-	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, h.cookieSecure)
+	setAuthCookies(c, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.RefreshExpiresIn, h.cookieSecure)
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"accessToken":  token.AccessToken,
 		"refreshToken": token.RefreshToken,

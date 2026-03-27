@@ -68,10 +68,11 @@ func (s *identityService) Login(ctx context.Context, req *authv1.LoginRequest) (
 	}
 	s.emitAudit(ctx, "LOGIN", "", "", "", correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS")
 	return &authv1.LoginResponse{
-		AccessToken:  tr.AccessToken,
-		RefreshToken: tr.RefreshToken,
-		TokenType:    tr.TokenType,
-		ExpiresIn:    int32(tr.ExpiresIn),
+		AccessToken:      tr.AccessToken,
+		RefreshToken:     tr.RefreshToken,
+		TokenType:        tr.TokenType,
+		ExpiresIn:        int32(tr.ExpiresIn),
+		RefreshExpiresIn: int32(tr.RefreshExpiresIn),
 	}, nil
 }
 
@@ -81,18 +82,22 @@ func (s *identityService) RefreshToken(ctx context.Context, req *authv1.RefreshT
 		return nil, status.Error(codes.Unauthenticated, err.Error())
 	}
 	return &authv1.RefreshTokenResponse{
-		AccessToken:  tr.AccessToken,
-		RefreshToken: tr.RefreshToken,
-		TokenType:    tr.TokenType,
-		ExpiresIn:    int32(tr.ExpiresIn),
+		AccessToken:      tr.AccessToken,
+		RefreshToken:     tr.RefreshToken,
+		TokenType:        tr.TokenType,
+		ExpiresIn:        int32(tr.ExpiresIn),
+		RefreshExpiresIn: int32(tr.RefreshExpiresIn),
 	}, nil
 }
 
 func (s *identityService) RevokeToken(ctx context.Context, req *authv1.RevokeTokenRequest) (*authv1.RevokeTokenResponse, error) {
-	// NOTE: Keycloak's logout endpoint requires the refresh_token, but this
-	// gRPC method only receives an access_token field. Callers should send
-	// the refresh_token in the AccessToken field until this is reconciled.
-	if err := s.keycloak.Logout(ctx, req.AccessToken); err != nil {
+	// Keycloak logout requires the refresh_token. Prefer the dedicated field;
+	// fall back to access_token for backward compatibility with older callers.
+	token := req.RefreshToken
+	if token == "" {
+		token = req.AccessToken
+	}
+	if err := s.keycloak.Logout(ctx, token); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	s.emitAudit(ctx, "REVOKE_TOKEN", "", "", "", correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS")
@@ -531,9 +536,11 @@ func (s *identityService) VerifyPKILogin(ctx context.Context, req *authv1.Verify
 	s.emitAudit(ctx, "PKI_LOGIN", req.UserId, "", "", correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS")
 
 	return &authv1.VerifyPKILoginResponse{
-		AccessToken:  tr.AccessToken,
-		RefreshToken: tr.RefreshToken,
-		TokenType:    "Bearer",
+		AccessToken:      tr.AccessToken,
+		RefreshToken:     tr.RefreshToken,
+		TokenType:        "Bearer",
+		ExpiresIn:        int32(tr.ExpiresIn),
+		RefreshExpiresIn: int32(tr.RefreshExpiresIn),
 	}, nil
 }
 
