@@ -69,7 +69,8 @@ type ApproveKYCResult struct {
 
 // GRPCAdapter is the api-gateway adapter for the compliance-orchestrator gRPC service.
 type GRPCAdapter struct {
-	cc compliancv1.ComplianceServiceClient
+	conn *grpc.ClientConn
+	cc   compliancv1.ComplianceServiceClient
 }
 
 // NewGRPCAdapter connects to the compliance-orchestrator and returns a GRPCAdapter.
@@ -86,7 +87,15 @@ func NewGRPCAdapter(address string, timeout time.Duration) (*GRPCAdapter, error)
 	if err != nil {
 		return nil, err
 	}
-	return &GRPCAdapter{cc: compliancv1.NewComplianceServiceClient(conn)}, nil
+	return &GRPCAdapter{conn: conn, cc: compliancv1.NewComplianceServiceClient(conn)}, nil
+}
+
+// Close releases the underlying gRPC connection.
+func (a *GRPCAdapter) Close() error {
+	if a.conn != nil {
+		return a.conn.Close()
+	}
+	return nil
 }
 
 func (a *GRPCAdapter) ListParticipants(ctx context.Context, statusFilter, search string) ([]Participant, error) {

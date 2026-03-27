@@ -12,10 +12,11 @@ import (
 
 // IdentityGRPCAuthProvider authenticates users via identity gRPC service.
 type IdentityGRPCAuthProvider struct {
-	cc authv1.AuthServiceClient
+	conn *grpc.ClientConn
+	cc   authv1.AuthServiceClient
 }
 
-// NewIdentityGRPCAuthProvider builds a gRPC-backed auth provider + token validator.
+// NewIdentityGRPCAuthProvider dials a new gRPC connection and returns a provider.
 func NewIdentityGRPCAuthProvider(address string, timeout time.Duration) (*IdentityGRPCAuthProvider, error) {
 	dialCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -28,7 +29,21 @@ func NewIdentityGRPCAuthProvider(address string, timeout time.Duration) (*Identi
 	if err != nil {
 		return nil, err
 	}
-	return &IdentityGRPCAuthProvider{cc: authv1.NewAuthServiceClient(conn)}, nil
+	return NewIdentityGRPCAuthProviderFromConn(conn), nil
+}
+
+// NewIdentityGRPCAuthProviderFromConn wraps an existing gRPC connection.
+// The caller retains ownership of conn lifecycle when using this constructor.
+func NewIdentityGRPCAuthProviderFromConn(conn *grpc.ClientConn) *IdentityGRPCAuthProvider {
+	return &IdentityGRPCAuthProvider{conn: conn, cc: authv1.NewAuthServiceClient(conn)}
+}
+
+// Close releases the underlying gRPC connection.
+func (p *IdentityGRPCAuthProvider) Close() error {
+	if p.conn != nil {
+		return p.conn.Close()
+	}
+	return nil
 }
 
 // Authenticate delegates login to identity gRPC.

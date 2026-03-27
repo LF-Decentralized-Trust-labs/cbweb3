@@ -12,7 +12,8 @@ import (
 
 // GRPCAdapter is the api-gateway adapter for the payment-orchestrator gRPC service.
 type GRPCAdapter struct {
-	cc pb.PaymentOrchestratorServiceClient
+	conn *grpc.ClientConn
+	cc   pb.PaymentOrchestratorServiceClient
 }
 
 // NewGRPCAdapter connects to the payment-orchestrator and returns a GRPCAdapter.
@@ -29,7 +30,15 @@ func NewGRPCAdapter(address string, timeout time.Duration) (*GRPCAdapter, error)
 	if err != nil {
 		return nil, err
 	}
-	return &GRPCAdapter{cc: pb.NewPaymentOrchestratorServiceClient(conn)}, nil
+	return &GRPCAdapter{conn: conn, cc: pb.NewPaymentOrchestratorServiceClient(conn)}, nil
+}
+
+// Close releases the underlying gRPC connection.
+func (a *GRPCAdapter) Close() error {
+	if a.conn != nil {
+		return a.conn.Close()
+	}
+	return nil
 }
 
 // --- HTLC ---
