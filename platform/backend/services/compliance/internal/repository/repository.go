@@ -44,12 +44,12 @@ type AuditEntry struct {
 }
 
 type AuditFilter struct {
-	Category  string
-	Severity  string
-	FromDate  time.Time
-	ToDate    time.Time
-	Page      int
-	Limit     int
+	Category string
+	Severity string
+	FromDate time.Time
+	ToDate   time.Time
+	Page     int
+	Limit    int
 }
 
 type AuditRecord struct {
@@ -68,8 +68,9 @@ type AuditRecord struct {
 }
 
 type ParticipantFilter struct {
-	Status string
-	Search string
+	Status   string
+	Search   string
+	BankCode string // exact match filter (takes precedence over Search when set)
 }
 
 type SystemParameter struct {
@@ -93,7 +94,7 @@ type Repository interface {
 // --- In-memory implementation (dev / testing) ---
 
 type memoryRepository struct {
-	mu         sync.RWMutex
+	mu           sync.RWMutex
 	participants map[string]Participant
 	auditLogs    []AuditRecord
 	params       map[string]SystemParameter
@@ -129,6 +130,9 @@ func (r *memoryRepository) ListParticipants(_ context.Context, f ParticipantFilt
 	var result []Participant
 	for _, p := range r.participants {
 		if f.Status != "" && p.Status != f.Status {
+			continue
+		}
+		if f.BankCode != "" && p.BankCode != f.BankCode {
 			continue
 		}
 		result = append(result, p)
@@ -253,7 +257,9 @@ func (r *gormRepository) ListParticipants(ctx context.Context, f ParticipantFilt
 	if f.Status != "" {
 		q = q.Where("status = ?", f.Status)
 	}
-	if f.Search != "" {
+	if f.BankCode != "" {
+		q = q.Where("bank_code = ?", f.BankCode)
+	} else if f.Search != "" {
 		like := "%" + f.Search + "%"
 		q = q.Where("institution_name ILIKE ? OR cnpj ILIKE ?", like, like)
 	}

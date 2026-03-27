@@ -55,8 +55,9 @@ type IssuedCertificate struct {
 
 // ParticipantFilter holds optional filters for ListParticipants.
 type ParticipantFilter struct {
-	Role   string
-	Status string
+	Role     string
+	Status   string
+	BankCode string // exact match; passed via the Search proto field with "bank_code:" prefix
 }
 
 // SignedCSR contains the certificate produced by signing a participant's CSR.
@@ -192,9 +193,11 @@ func (c *grpcClient) IssueParticipantCertificate(ctx context.Context, userID, ro
 }
 
 func (c *grpcClient) ListParticipants(ctx context.Context, filter ParticipantFilter) ([]Participant, error) {
-	resp, err := c.cc.ListParticipants(ctx, &compliancv1.ListParticipantsRequest{
-		Status: filter.Status,
-	})
+	req := &compliancv1.ListParticipantsRequest{Status: filter.Status}
+	if filter.BankCode != "" {
+		req.Search = "bank_code:" + filter.BankCode
+	}
+	resp, err := c.cc.ListParticipants(ctx, req)
 	if err != nil {
 		return nil, err
 	}

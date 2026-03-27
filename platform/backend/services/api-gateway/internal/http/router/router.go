@@ -48,6 +48,8 @@ func Setup(app *fiber.App, deps Dependencies) {
 		g := app.Group("/api/v1/onboarding", middleware.RequireCookieAuth(deps.AuthProvider))
 		g.Post("/initiate", deps.OnboardingProxyHandler.InitiateCredentialRequest)
 		g.Get("/status/:requestId", deps.OnboardingProxyHandler.GetOnboardingStatus)
+		// Recovers status without the original request_id (e.g. after a page reload).
+		g.Get("/my-status", deps.OnboardingProxyHandler.GetMyOnboardingStatus)
 		g.Post("/complete", deps.OnboardingProxyHandler.CompleteOnboarding)
 
 		// PKI re-login: authenticates the commercial bank against the CB.
@@ -57,6 +59,8 @@ func Setup(app *fiber.App, deps Dependencies) {
 		g := app.Group("/api/v1/onboarding")
 		g.Post("/credential-request", deps.OnboardingHandler.SubmitCredentialRequest)
 		g.Get("/status/:requestId", deps.OnboardingHandler.GetOnboardingStatus)
+		// Lookup by bank_code for frontends that lost the original request_id.
+		g.Get("/my-status", deps.OnboardingHandler.GetMyOnboardingStatus)
 		g.Post("/complete", deps.OnboardingHandler.CompleteOnboarding)
 	}
 

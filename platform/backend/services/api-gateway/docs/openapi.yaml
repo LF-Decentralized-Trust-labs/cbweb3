@@ -28,11 +28,15 @@ tags:
       Phase 1: Commercial bank submits CSR + blockchain public key.
       Phase 2.5: Poll for KYC approval and PoP nonce.
       Phase 3: Sign PoP nonce to prove wallet ownership, receive certificate and clientSecret.
+      Recovery: GET /api/v1/onboarding/my-status?bank_code=<code> — look up status
+      without the original request_id (e.g. after a page reload).
 
       **Commercial Bank proxy mode** (protected endpoints at /api/v1/onboarding/):
       The commercial bank gateway proxies requests to the Central Bank.
       In smart mode (KMS + PKI configured), the proxy injects CSR, blockchain key,
       and PoP signature automatically — the frontend only sends metadata.
+      GET /api/v1/onboarding/my-status with cookie — the proxy injects the bank_code
+      automatically; the frontend needs no parameters.
   - name: Governance
     description: >
       Governance Portal — endpoints exclusive to the Central Bank (ROLE_GOVERNANCE).
@@ -803,6 +807,91 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalError"
+
+  /api/v1/onboarding/my-status:
+    get:
+      tags: [Onboarding]
+      summary: "Recover onboarding status by bank_code (no request_id required)"
+      description: >
+        **Central Bank mode** — public endpoint (no authentication required).
+        Allows a commercial bank to recover its onboarding status after a page
+        reload or session loss, without needing to retain the original
+        `request_id` returned by Phase 1.
+
+        The lookup is performed by `bank_code` (exact match). Because a bank
+        can only have one active onboarding record, this always returns at most
+        one result.
+
+        **Commercial Bank proxy mode** — requires `access_token` cookie.
+        The commercial bank's gateway proxies this request to the Central Bank,
+        automatically injecting its own configured `bank_code`. The frontend
+        does not need to supply any parameters.
+
+        Returns `request_id`, `user_id`, and `status`. Sensitive fields
+        such as `wallet_address` and `pop_nonce` are intentionally omitted
+        from this recovery endpoint.
+      operationId: getMyOnboardingStatus
+      security:
+        - {}          # Central Bank mode: unauthenticated (bank_code supplied)
+        - CookieAuth: []   # Commercial Bank proxy mode: cookie required
+      parameters:
+        - name: bank_code
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "a"
+          description: >
+            Required on the Central Bank endpoint. Omit when calling the
+            Commercial Bank proxy (the proxy supplies its own bank_code).
+      responses:
+        "200":
+          description: Current onboarding status for the bank
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingStatusResponse"
+              examples:
+                pending:
+                  summary: Request submitted, awaiting KYC review
+                  value:
+                    request_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    status: "CREDENTIAL_REQUESTED"
+                approved:
+                  summary: KYC approved — bank may proceed to Phase 3
+                  value:
+                    request_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    status: "KYC_APPROVED"
+                active:
+                  summary: Onboarding already completed
+                  value:
+                    request_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    status: "ACTIVE"
+        "400":
+          description: Missing bank_code query parameter (Central Bank mode only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No onboarding request found for the given bank_code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          description: Central Bank API unreachable (Commercial Bank proxy mode)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/onboarding/initiate:
     post:
@@ -1788,14 +1877,6 @@ components:
             COMPLETED, or REJECTED.
           enum: [PENDING, APPROVED, COMPLETED, REJECTED]
           example: "APPROVED"
-        wallet_address:
-          type: string
-        pop_nonce:
-          type: string
-          description: >
-            Hex-encoded PoP challenge nonce. Only present when status is APPROVED.
-            Sign this nonce with the secp256k1 private key and submit via Phase 3.
-          example: "a1b2c3d4e5f6..."
 
     CompleteOnboardingRequest:
       type: object
