@@ -28,15 +28,15 @@ tags:
       Phase 1: Commercial bank submits CSR + blockchain public key.
       Phase 2.5: Poll for KYC approval and PoP nonce.
       Phase 3: Sign PoP nonce to prove wallet ownership, receive certificate and clientSecret.
-      Recovery: GET /api/v1/onboarding/my-status?bank_code=<code> — look up status
-      without the original request_id (e.g. after a page reload).
+      Recovery: GET /api/v1/onboarding/my-status — look up status from the JWT
+      session (BankID claim); no request_id or query parameters needed.
 
       **Commercial Bank proxy mode** (protected endpoints at /api/v1/onboarding/):
       The commercial bank gateway proxies requests to the Central Bank.
       In smart mode (KMS + PKI configured), the proxy injects CSR, blockchain key,
       and PoP signature automatically — the frontend only sends metadata.
-      GET /api/v1/onboarding/my-status with cookie — the proxy injects the bank_code
-      automatically; the frontend needs no parameters.
+      GET /api/v1/onboarding/my-status with cookie — the proxy resolves the bank
+      identity from the JWT BankID claim; the frontend sends no parameters.
   - name: Governance
     description: >
       Governance Portal — endpoints exclusive to the Central Bank (ROLE_GOVERNANCE).
@@ -811,29 +811,30 @@ paths:
   /api/v1/onboarding/my-status:
     get:
       tags: [Onboarding]
-      summary: "Recover onboarding status by bank_code (no request_id required)"
+      summary: "Recover onboarding status from JWT session (no parameters needed)"
       description: >
-        **Central Bank mode** — public endpoint (no authentication required).
-        Allows a commercial bank to recover its onboarding status after a page
-        reload or session loss, without needing to retain the original
-        `request_id` returned by Phase 1.
+        **Commercial Bank mode (primary use case)** — requires `access_token` cookie.
 
-        The lookup is performed by `bank_code` (exact match). Because a bank
-        can only have one active onboarding record, this always returns at most
-        one result.
+        The frontend simply calls `GET /onboarding/my-status` with the session
+        cookie. The backend resolves the bank identity from the JWT `BankID`
+        claim (enriched during token validation from the compliance participant
+        record) and proxies the lookup to the Central Bank. No query parameters
+        are needed.
 
-        **Commercial Bank proxy mode** — requires `access_token` cookie.
-        The commercial bank's gateway proxies this request to the Central Bank,
-        automatically injecting its own configured `bank_code`. The frontend
-        does not need to supply any parameters.
+        **Central Bank mode** — public endpoint that accepts `bank_code` as a
+        query parameter. Used internally by the proxy and by the governance
+        portal when looking up a specific bank.
+
+        If `bank_code` is omitted on the Central Bank, the handler falls back
+        to the JWT `BankID` claim (if the caller is authenticated).
 
         Returns `request_id`, `user_id`, and `status`. Sensitive fields
         such as `wallet_address` and `pop_nonce` are intentionally omitted
         from this recovery endpoint.
       operationId: getMyOnboardingStatus
       security:
-        - {}          # Central Bank mode: unauthenticated (bank_code supplied)
-        - CookieAuth: []   # Commercial Bank proxy mode: cookie required
+        - CookieAuth: []   # Commercial Bank: session cookie (BankID resolved from JWT)
+        - {}               # Central Bank: unauthenticated with bank_code param
       parameters:
         - name: bank_code
           in: query
@@ -842,8 +843,10 @@ paths:
             type: string
             example: "a"
           description: >
-            Required on the Central Bank endpoint. Omit when calling the
-            Commercial Bank proxy (the proxy supplies its own bank_code).
+            Optional. Only required when calling the Central Bank endpoint
+            directly (e.g. governance portal). On the Commercial Bank proxy,
+            the bank identity is resolved from the JWT session — omit this
+            parameter entirely.
       responses:
         "200":
           description: Current onboarding status for the bank
@@ -871,13 +874,16 @@ paths:
                     user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
                     status: "ACTIVE"
         "400":
-          description: Missing bank_code query parameter (Central Bank mode only)
+          description: >
+            Unable to determine bank identity. Either supply `bank_code` as a
+            query parameter or authenticate with a session whose JWT contains
+            a `BankID` claim.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: No onboarding request found for the given bank_code
+          description: No onboarding request found for the resolved bank
           content:
             application/json:
               schema:
