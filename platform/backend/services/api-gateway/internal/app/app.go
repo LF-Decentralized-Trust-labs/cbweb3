@@ -8,6 +8,7 @@ import (
 	authadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
+	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
@@ -46,6 +47,15 @@ func New(cfg config.Config) (*fiber.App, error) {
 		ComplianceHandler: complianceHandler,
 		GovernanceHandler: governanceHandler,
 		AuthProvider:      identityGRPCProvider,
+	}
+
+	// Payment orchestrator gRPC adapter (optional; enables HTLC + token endpoints).
+	if cfg.PaymentGRPCAddr != "" {
+		paymentGRPC, err := paymentadapter.NewGRPCAdapter(cfg.PaymentGRPCAddr, cfg.RequestTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("payment gRPC unavailable at %s: %w", cfg.PaymentGRPCAddr, err)
+		}
+		deps.PaymentHandler = handlers.NewPaymentHandler(paymentGRPC)
 	}
 
 	if cfg.CentralBankAPIURL != "" {

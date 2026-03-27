@@ -17,6 +17,7 @@ type Config struct {
 	RequestTimeout     time.Duration
 	AuthGRPCAddr       string
 	ComplianceGRPCAddr string // compliance-orchestrator address (optional; enables governance endpoints)
+	PaymentGRPCAddr    string // payment-orchestrator address (optional; enables HTLC + token endpoints)
 	CookieSecure       bool   // true for HTTPS (Secure flag); false for plain HTTP
 	CentralBankAPIURL  string // when set, this gateway acts as a commercial bank and proxies onboarding calls to the CB
 	BankCode           string // commercial bank identifier (e.g. "bank-a"); required when CentralBankAPIURL is set
@@ -35,6 +36,7 @@ func Load() Config {
 		RequestTimeout:     time.Duration(getEnvInt("REQUEST_TIMEOUT_SEC", 5)) * time.Second,
 		AuthGRPCAddr:       getEnv("AUTH_GRPC_ADDR", "localhost:9091"),
 		ComplianceGRPCAddr: getEnv("COMPLIANCE_GRPC_ADDR", "localhost:9093"),
+		PaymentGRPCAddr:    getEnv("PAYMENT_GRPC_ADDR", ""),
 		CookieSecure:       getEnvBool("COOKIE_SECURE", false),
 		CentralBankAPIURL:  getEnv("CENTRAL_BANK_API_URL", ""),
 		BankCode:           getEnv("BANK_CODE", ""),
