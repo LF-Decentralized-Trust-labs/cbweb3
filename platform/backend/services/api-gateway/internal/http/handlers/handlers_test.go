@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
@@ -171,7 +172,7 @@ func TestAuthHandlerLoginInvalidCases(t *testing.T) {
 
 func TestComplianceHandlerStatus(t *testing.T) {
 	t.Parallel()
-	handler := NewComplianceHandler(kycCheckerStub{status: domain.KYCApproved})
+	handler := NewComplianceHandler(kycCheckerStub{status: domain.KYCApproved}, nil)
 	app := fiber.New()
 	app.Get("/compliance/kyc/status/:subject", handler.GetKYCStatus)
 
@@ -188,7 +189,7 @@ func TestComplianceHandlerStatus(t *testing.T) {
 func TestComplianceHandlerMissingSubject(t *testing.T) {
 	t.Parallel()
 
-	handler := NewComplianceHandler(kycCheckerStub{status: domain.KYCApproved})
+	handler := NewComplianceHandler(kycCheckerStub{status: domain.KYCApproved}, nil)
 	app := fiber.New()
 	app.Get("/compliance/kyc/status", handler.GetKYCStatus)
 
@@ -328,7 +329,7 @@ func TestOpenAPIWalletBindEndpointIsActive(t *testing.T) {
 func TestAMLScreenApproved(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{status: domain.KYCApproved}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/aml/screen", handler.AMLScreen)
 
@@ -347,7 +348,7 @@ func TestAMLScreenApproved(t *testing.T) {
 func TestAMLScreenFrozenSanctioned(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{status: domain.KYCFrozen}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/aml/screen", handler.AMLScreen)
 
@@ -366,7 +367,7 @@ func TestAMLScreenFrozenSanctioned(t *testing.T) {
 func TestAMLScreenRevokedSanctioned(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{status: domain.KYCRevoked}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/aml/screen", handler.AMLScreen)
 
@@ -385,7 +386,7 @@ func TestAMLScreenRevokedSanctioned(t *testing.T) {
 func TestAMLScreenMissingSubject(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/aml/screen", handler.AMLScreen)
 
@@ -404,7 +405,7 @@ func TestAMLScreenMissingSubject(t *testing.T) {
 func TestProvisionParticipantSuccess(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/participants/provision", handler.ProvisionParticipant)
 
@@ -423,7 +424,7 @@ func TestProvisionParticipantSuccess(t *testing.T) {
 func TestProvisionParticipantMissingFields(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/participants/provision", handler.ProvisionParticipant)
 
@@ -442,7 +443,7 @@ func TestProvisionParticipantMissingFields(t *testing.T) {
 func TestFreezeAccountSuccess(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/accounts/freeze", handler.FreezeAccount)
 
@@ -461,7 +462,7 @@ func TestFreezeAccountSuccess(t *testing.T) {
 func TestUnfreezeAccountSuccess(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/accounts/unfreeze", handler.UnfreezeAccount)
 
@@ -480,7 +481,7 @@ func TestUnfreezeAccountSuccess(t *testing.T) {
 func TestFreezeAccountError(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{err: errors.New("db error")}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/accounts/freeze", handler.FreezeAccount)
 
@@ -506,7 +507,7 @@ func TestRegisterParticipantSuccess(t *testing.T) {
 			TxHash:        "0xtx",
 		},
 	}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/register", handler.RegisterParticipant)
 
@@ -529,7 +530,7 @@ func TestRegisterParticipantSuccess(t *testing.T) {
 func TestRegisterParticipantMissingFields(t *testing.T) {
 	t.Parallel()
 	stub := participantOnboarderStub{}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/register", handler.RegisterParticipant)
 
@@ -548,7 +549,7 @@ func TestRegisterParticipantMissingFields(t *testing.T) {
 func TestRegisterParticipantConflict(t *testing.T) {
 	t.Parallel()
 	stub := participantOnboarderStub{err: errors.New("already exists: user already registered")}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/register", handler.RegisterParticipant)
 
@@ -571,7 +572,7 @@ func TestRegisterParticipantConflict(t *testing.T) {
 func TestRegisterParticipantNotAvailable(t *testing.T) {
 	t.Parallel()
 	// kycManagerStub does NOT implement ParticipantOnboarder
-	handler := NewComplianceHandler(kycManagerStub{})
+	handler := NewComplianceHandler(kycManagerStub{}, nil)
 	app := fiber.New()
 	app.Post("/compliance/register", handler.RegisterParticipant)
 
@@ -594,7 +595,7 @@ func TestRegisterParticipantNotAvailable(t *testing.T) {
 func TestGetKYCStatusViaManager(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{status: domain.KYCApproved}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Get("/compliance/kyc/status/:subject", handler.GetKYCStatus)
 
@@ -680,7 +681,7 @@ func TestRegisterParticipantInvalidRole(t *testing.T) {
 	stub := participantOnboarderStub{
 		result: interfaces.OnboardParticipantResult{UserID: "uid"},
 	}
-	handler := NewComplianceHandler(stub)
+	handler := NewComplianceHandler(stub, nil)
 	app := fiber.New()
 	app.Post("/compliance/register", handler.RegisterParticipant)
 
@@ -845,5 +846,160 @@ func TestGetUserNotAvailable(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusNotImplemented {
 		t.Fatalf("expected 501, got %d", resp.StatusCode)
+	}
+}
+
+// ---------- GET /compliance/participants tests ----------
+
+// participantListerStub implements ComplianceParticipantLister for tests.
+type participantListerStub struct {
+	participants []complianceadapter.Participant
+	err          error
+	lastStatus   string
+	lastSearch   string
+}
+
+func (s *participantListerStub) ListParticipants(_ context.Context, statusFilter, search string) ([]complianceadapter.Participant, error) {
+	s.lastStatus = statusFilter
+	s.lastSearch = search
+	return s.participants, s.err
+}
+
+func TestListParticipantsNoFilter(t *testing.T) {
+	t.Parallel()
+	lister := &participantListerStub{
+		participants: []complianceadapter.Participant{
+			{UserID: "u1", InstitutionName: "Bank A", Role: "ROLE_COMMERCIAL_BANK", Status: "ACTIVE"},
+			{UserID: "u2", InstitutionName: "Bank B", Role: "ROLE_COMMERCIAL_BANK", Status: "PENDING"},
+		},
+	}
+	handler := NewComplianceHandler(kycCheckerStub{status: domain.KYCApproved}, lister)
+	app := fiber.New()
+	app.Get("/compliance/participants", handler.ListParticipants)
+
+	req := httptest.NewRequest(http.MethodGet, "/compliance/participants", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	participants, ok := body["participants"].([]any)
+	if !ok {
+		t.Fatalf("expected participants array in response")
+	}
+	if len(participants) != 2 {
+		t.Fatalf("expected 2 participants, got %d", len(participants))
+	}
+	if lister.lastStatus != "" {
+		t.Errorf("expected empty status filter, got %q", lister.lastStatus)
+	}
+	if lister.lastSearch != "" {
+		t.Errorf("expected empty search filter, got %q", lister.lastSearch)
+	}
+}
+
+func TestListParticipantsWithStatusFilter(t *testing.T) {
+	t.Parallel()
+	lister := &participantListerStub{
+		participants: []complianceadapter.Participant{
+			{UserID: "u1", Status: "ACTIVE"},
+		},
+	}
+	handler := NewComplianceHandler(kycCheckerStub{status: domain.KYCApproved}, lister)
+	app := fiber.New()
+	app.Get("/compliance/participants", handler.ListParticipants)
+
+	req := httptest.NewRequest(http.MethodGet, "/compliance/participants?status=ACTIVE", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if lister.lastStatus != "ACTIVE" {
+		t.Errorf("expected status filter ACTIVE, got %q", lister.lastStatus)
+	}
+}
+
+func TestListParticipantsWithSearchFilter(t *testing.T) {
+	t.Parallel()
+	lister := &participantListerStub{
+		participants: []complianceadapter.Participant{},
+	}
+	handler := NewComplianceHandler(kycCheckerStub{status: domain.KYCApproved}, lister)
+	app := fiber.New()
+	app.Get("/compliance/participants", handler.ListParticipants)
+
+	req := httptest.NewRequest(http.MethodGet, "/compliance/participants?status=ACTIVE&search=Itau", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if lister.lastStatus != "ACTIVE" {
+		t.Errorf("expected status filter ACTIVE, got %q", lister.lastStatus)
+	}
+	if lister.lastSearch != "Itau" {
+		t.Errorf("expected search filter Itau, got %q", lister.lastSearch)
+	}
+}
+
+func TestListParticipantsInvalidStatus(t *testing.T) {
+	t.Parallel()
+	lister := &participantListerStub{
+		participants: []complianceadapter.Participant{},
+	}
+	handler := NewComplianceHandler(kycCheckerStub{status: domain.KYCApproved}, lister)
+	app := fiber.New()
+	app.Get("/compliance/participants", handler.ListParticipants)
+
+	req := httptest.NewRequest(http.MethodGet, "/compliance/participants?status=XPTO", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 (pass-through), got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	participants, ok := body["participants"].([]any)
+	if !ok {
+		t.Fatalf("expected participants array in response")
+	}
+	if len(participants) != 0 {
+		t.Fatalf("expected 0 participants for invalid status, got %d", len(participants))
+	}
+}
+
+func TestListParticipantsGRPCError(t *testing.T) {
+	t.Parallel()
+	lister := &participantListerStub{
+		err: errors.New("compliance service unavailable"),
+	}
+	handler := NewComplianceHandler(kycCheckerStub{status: domain.KYCApproved}, lister)
+	app := fiber.New()
+	app.Get("/compliance/participants", handler.ListParticipants)
+
+	req := httptest.NewRequest(http.MethodGet, "/compliance/participants", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", resp.StatusCode)
 	}
 }
