@@ -98,6 +98,34 @@ Type-check a specific app:
 npm run type-check --workspace=bank
 ```
 
+## Docker Spoke Stacks
+
+From the repository root, you can bring up frontend stacks with `make`:
+
+```bash
+make frontend-spoke-a
+make frontend-spoke-b
+make frontend-spoke-all
+```
+
+Available variants:
+
+```bash
+make frontend-spoke-a-down
+make frontend-spoke-b-down
+make frontend-spoke-all-down
+
+make frontend-spoke-a-logs
+make frontend-spoke-b-logs
+make frontend-spoke-all-logs
+```
+
+Stack composition:
+
+- `spoke-a`: Bank A, Bank C, Central Bank A
+- `spoke-b`: Bank B, Bank D, Central Bank B
+- `spoke-all`: Bank A, Bank B, Bank C, Bank D, Central Bank A, Central Bank B
+
 ## Tailwind v4 Setup Notes
 
 - PostCSS plugin is `@tailwindcss/postcss`.
