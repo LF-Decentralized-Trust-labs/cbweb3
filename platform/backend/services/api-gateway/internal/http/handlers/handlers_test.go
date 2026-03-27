@@ -1003,3 +1003,168 @@ func TestListParticipantsGRPCError(t *testing.T) {
 		t.Fatalf("expected 500, got %d", resp.StatusCode)
 	}
 }
+
+// ---------- OnboardingHandler.GetMyOnboardingStatus tests ----------
+
+// onboardingManagerStub implements interfaces.OnboardingManager for handler tests.
+type onboardingManagerStub struct {
+	statusResult interfaces.OnboardingStatus
+	statusErr    error
+	byBankResult interfaces.OnboardingStatus
+	byBankErr    error
+}
+
+func (s onboardingManagerStub) SubmitCredentialRequest(_ context.Context, _ interfaces.CredentialRequest) (interfaces.CredentialRequestResult, error) {
+	return interfaces.CredentialRequestResult{}, nil
+}
+
+func (s onboardingManagerStub) GetOnboardingStatus(_ context.Context, _ string) (interfaces.OnboardingStatus, error) {
+	return s.statusResult, s.statusErr
+}
+
+func (s onboardingManagerStub) GetOnboardingStatusByBankCode(_ context.Context, _ string) (interfaces.OnboardingStatus, error) {
+	return s.byBankResult, s.byBankErr
+}
+
+func (s onboardingManagerStub) CompleteOnboarding(_ context.Context, _ interfaces.CompleteOnboardingRequest) (interfaces.CompleteOnboardingResult, error) {
+	return interfaces.CompleteOnboardingResult{}, nil
+}
+
+func TestGetMyOnboardingStatusSuccess(t *testing.T) {
+	t.Parallel()
+	stub := onboardingManagerStub{
+		byBankResult: interfaces.OnboardingStatus{
+			RequestID: "req-uuid-001",
+			UserID:    "user-uuid-001",
+			Status:    "KYC_APPROVED",
+		},
+	}
+	handler := NewOnboardingHandler(stub)
+	app := fiber.New()
+	app.Get("/onboarding/my-status", handler.GetMyOnboardingStatus)
+
+	req := httptest.NewRequest(http.MethodGet, "/onboarding/my-status?bank_code=a", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if body["request_id"] != "req-uuid-001" {
+		t.Errorf("expected request_id req-uuid-001, got %v", body["request_id"])
+	}
+	if body["status"] != "KYC_APPROVED" {
+		t.Errorf("expected status KYC_APPROVED, got %v", body["status"])
+	}
+	// wallet_address and pop_nonce are not included in this endpoint's response.
+	if _, exists := body["wallet_address"]; exists {
+		t.Errorf("wallet_address must be absent from my-status response, but it was present")
+	}
+	if _, exists := body["pop_nonce"]; exists {
+		t.Errorf("pop_nonce must be absent from my-status response, but it was present")
+	}
+}
+
+func TestGetMyOnboardingStatusMissingBankCode(t *testing.T) {
+	t.Parallel()
+	stub := onboardingManagerStub{}
+	handler := NewOnboardingHandler(stub)
+	app := fiber.New()
+	app.Get("/onboarding/my-status", handler.GetMyOnboardingStatus)
+
+	req := httptest.NewRequest(http.MethodGet, "/onboarding/my-status", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestGetMyOnboardingStatusNotFound(t *testing.T) {
+	t.Parallel()
+	stub := onboardingManagerStub{
+		byBankErr: errors.New("not found: no request for this bank"),
+	}
+	handler := NewOnboardingHandler(stub)
+	app := fiber.New()
+	app.Get("/onboarding/my-status", handler.GetMyOnboardingStatus)
+
+	req := httptest.NewRequest(http.MethodGet, "/onboarding/my-status?bank_code=x", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestGetMyOnboardingStatusInternalError(t *testing.T) {
+	t.Parallel()
+	stub := onboardingManagerStub{
+		byBankErr: errors.New("database connection refused"),
+	}
+	handler := NewOnboardingHandler(stub)
+	app := fiber.New()
+	app.Get("/onboarding/my-status", handler.GetMyOnboardingStatus)
+
+	req := httptest.NewRequest(http.MethodGet, "/onboarding/my-status?bank_code=a", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", resp.StatusCode)
+	}
+}
+
+func TestGetMyOnboardingStatusResponseShape(t *testing.T) {
+	t.Parallel()
+	stub := onboardingManagerStub{
+		byBankResult: interfaces.OnboardingStatus{
+			RequestID: "req-uuid-002",
+			UserID:    "user-uuid-002",
+			Status:    "CREDENTIAL_REQUESTED",
+		},
+	}
+	handler := NewOnboardingHandler(stub)
+	app := fiber.New()
+	app.Get("/onboarding/my-status", handler.GetMyOnboardingStatus)
+
+	req := httptest.NewRequest(http.MethodGet, "/onboarding/my-status?bank_code=b", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	// Only request_id, user_id, status are returned.
+	for _, absent := range []string{"pop_nonce", "wallet_address"} {
+		if _, exists := body[absent]; exists {
+			t.Errorf("%s must be absent from my-status response, but it was present", absent)
+		}
+	}
+	if body["status"] != "CREDENTIAL_REQUESTED" {
+		t.Errorf("expected status CREDENTIAL_REQUESTED, got %v", body["status"])
+	}
+	if body["request_id"] != "req-uuid-002" {
+		t.Errorf("expected request_id req-uuid-002, got %v", body["request_id"])
+	}
+	if body["user_id"] != "user-uuid-002" {
+		t.Errorf("expected user_id user-uuid-002, got %v", body["user_id"])
+	}
+}

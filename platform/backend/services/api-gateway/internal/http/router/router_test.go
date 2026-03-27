@@ -215,3 +215,88 @@ func TestGovernanceUsersRoutesRequireRole(t *testing.T) {
 		}
 	}
 }
+
+// onboardingManagerStub is a minimal interfaces.OnboardingManager for router wiring tests.
+type onboardingManagerStub struct {
+	result interfaces.OnboardingStatus
+	err    error
+}
+
+func (s onboardingManagerStub) SubmitCredentialRequest(_ context.Context, _ interfaces.CredentialRequest) (interfaces.CredentialRequestResult, error) {
+	return interfaces.CredentialRequestResult{}, nil
+}
+
+func (s onboardingManagerStub) GetOnboardingStatus(_ context.Context, _ string) (interfaces.OnboardingStatus, error) {
+	return s.result, s.err
+}
+
+func (s onboardingManagerStub) GetOnboardingStatusByBankCode(_ context.Context, _ string) (interfaces.OnboardingStatus, error) {
+	return s.result, s.err
+}
+
+func (s onboardingManagerStub) CompleteOnboarding(_ context.Context, _ interfaces.CompleteOnboardingRequest) (interfaces.CompleteOnboardingResult, error) {
+	return interfaces.CompleteOnboardingResult{}, nil
+}
+
+// TestCBMyStatusRouteIsRegistered verifies that GET /api/v1/onboarding/my-status
+// is registered on a Central Bank gateway (OnboardingHandler mode) and is
+// accessible without authentication (public endpoint).
+func TestCBMyStatusRouteIsRegistered(t *testing.T) {
+	t.Parallel()
+
+	mgr := onboardingManagerStub{
+		result: interfaces.OnboardingStatus{
+			RequestID: "req-abc",
+			UserID:    "user-abc",
+			Status:    "CREDENTIAL_REQUESTED",
+		},
+	}
+	app := fiber.New()
+	Setup(app, Dependencies{
+		AuthHandler:       handlers.NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false),
+		ComplianceHandler: handlers.NewComplianceHandler(kycCheckerStub{}, nil),
+		OnboardingHandler: handlers.NewOnboardingHandler(mgr),
+		AuthProvider:      authProviderStub{},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/onboarding/my-status?bank_code=a", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Returns 200 (stub returns a valid result) or at worst 400/404; should NOT be 404 router-wise.
+	if resp.StatusCode == http.StatusMethodNotAllowed {
+		t.Fatalf("route not registered (405 Method Not Allowed)")
+	}
+	// bank_code=a has a result → expect 200
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from CB my-status route, got %d", resp.StatusCode)
+	}
+}
+
+// TestBankMyStatusRouteRequiresAuth verifies that GET /api/v1/onboarding/my-status
+// on a Commercial Bank gateway (OnboardingProxyHandler mode) is protected by
+// RequireCookieAuth — unauthenticated requests must return 401.
+func TestBankMyStatusRouteRequiresAuth(t *testing.T) {
+	t.Parallel()
+
+	// OnboardingProxyHandler with no live CB — the auth middleware fires first.
+	proxyHandler := handlers.NewOnboardingProxyHandler("http://localhost:19999", "", "a", nil)
+	app := fiber.New()
+	Setup(app, Dependencies{
+		AuthHandler:            handlers.NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false),
+		ComplianceHandler:      handlers.NewComplianceHandler(kycCheckerStub{}, nil),
+		OnboardingProxyHandler: proxyHandler,
+		AuthProvider:           authProviderStub{},
+	})
+
+	// No cookie → middleware rejects before the handler runs.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/onboarding/my-status", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without auth cookie, got %d", resp.StatusCode)
+	}
+}
