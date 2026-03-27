@@ -52,6 +52,26 @@ services:
       - cbweb3_backend_bank_b
       - cbweb3_network
 
+  payment-orchestrator-bank-b:
+    build:
+      context: .
+      dockerfile: services/payment-orchestrator/Dockerfile
+    image: cbweb3/payment-orchestrator:local
+    pull_policy: build
+    container_name: "backend-payment-orchestrator-bank-b"
+    env_file:
+      - path: ./config/.env.infra.bank-b
+        required: true
+    environment:
+      PAYMENT_GRPC_PORT: "9094"
+      PALADIN_URL: "http://host.docker.internal:8648"
+      PALADIN_IDENTITY: "funded_operator@spoke-b-cb"
+    ports:
+      - "29094:9094"
+    networks:
+      - cbweb3_backend_bank_b
+      - cbweb3_network
+
   api-gateway-bank-b:
     build:
       context: .
@@ -67,6 +87,7 @@ services:
       REQUEST_TIMEOUT_SEC: "30"
       AUTH_GRPC_ADDR: auth-bank-b:9091
       COMPLIANCE_GRPC_ADDR: compliance-bank-b:9093
+      PAYMENT_GRPC_ADDR: payment-orchestrator-bank-b:9094
       PKI_DIR: /workspace/backend/config/pki
       BANK_CODE: "bank-b"
       CENTRAL_BANK_API_URL: "http://api-gateway-central-bank-b:8080"
@@ -77,6 +98,7 @@ services:
     depends_on:
       - auth-bank-b
       - compliance-bank-b
+      - payment-orchestrator-bank-b
     networks:
       - cbweb3_backend_bank_b
       - cbweb3_network
