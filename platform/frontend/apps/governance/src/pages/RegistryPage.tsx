@@ -28,24 +28,14 @@ const statusVariant = {
 } as const;
 
 export function RegistryPage() {
-  const {
-    participants,
-    pendingKyc,
-    fetch,
-    fetchPendingKyc,
-    approveKyc,
-    kycStatus,
-    error,
-  } = useRegistry();
+  const { participants, pendingKyc, fetch, fetchPendingKyc, approveKyc, kycStatus, error } = useRegistry();
   const [search, setSearch] = useState("");
   // const [entityName, setEntityName] = useState("");
   // const [cnpj, setCnpj] = useState("");
   // const [scopes, setScopes] = useState("DEPOSIT,TRANSFER,SWAP");
   // const [reason, setReason] = useState("");
   // const [confirming, setConfirming] = useState(false);
-  const [approvalReasonBySubject, setApprovalReasonBySubject] = useState<
-    Record<string, string>
-  >({});
+  const [approvalReasonBySubject, setApprovalReasonBySubject] = useState<Record<string, string>>({});
 
   useEffect(() => {
     void fetch();
@@ -63,9 +53,7 @@ export function RegistryPage() {
     const term = search.toLowerCase().trim();
     if (!term) return participants;
     return participants.filter(
-      (participant) =>
-        participant.name.toLowerCase().includes(term) ||
-        participant.status.toLowerCase().includes(term),
+      (participant) => participant.name.toLowerCase().includes(term) || participant.status.toLowerCase().includes(term),
     );
   }, [participants, search]);
 
@@ -106,16 +94,10 @@ export function RegistryPage() {
       <Card>
         <CardHeader>
           <CardTitle>Compliance Registry</CardTitle>
-          <CardDescription>
-            Authorize institutions and manage safelist status.
-          </CardDescription>
+          <CardDescription>Authorize institutions and manage safelist status.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Input
-            placeholder="Search participant or status"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
+          <Input placeholder="Search participant or status" value={search} onChange={(event) => setSearch(event.target.value)} />
           <Table>
             <TableHeader>
               <TableRow>
@@ -129,23 +111,13 @@ export function RegistryPage() {
             <TableBody>
               {filtered.map((participant) => (
                 <TableRow key={participant.id}>
-                  <TableCell className="font-medium">
-                    {participant.name}
-                  </TableCell>
+                  <TableCell className="font-medium">{participant.name}</TableCell>
                   <TableCell>{participant.cnpj}</TableCell>
                   <TableCell>
-                    <Badge variant={statusVariant[participant.status]}>
-                      {participant.status}
-                    </Badge>
+                    <Badge variant={statusVariant[participant.status]}>{participant.status}</Badge>
                   </TableCell>
                   <TableCell>{participant.credentialId ?? "—"}</TableCell>
-                  <TableCell>
-                    {participant.credentialExpiry
-                      ? new Date(
-                          participant.credentialExpiry,
-                        ).toLocaleDateString()
-                      : "—"}
-                  </TableCell>
+                  <TableCell>{participant.credentialExpiry ? new Date(participant.credentialExpiry).toLocaleDateString() : "—"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -204,16 +176,9 @@ export function RegistryPage() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <CardTitle>Pending KYC Approvals</CardTitle>
-              <CardDescription>
-                Approve commercial banks that are waiting for Central Bank
-                validation.
-              </CardDescription>
+              <CardDescription>Approve commercial banks that are waiting for Central Bank validation.</CardDescription>
             </div>
-            <Button
-              variant="outline"
-              onClick={() => void fetchPendingKyc()}
-              disabled={kycStatus === "loading"}
-            >
+            <Button variant="outline" onClick={() => void fetchPendingKyc()} disabled={kycStatus === "loading"}>
               {kycStatus === "loading" ? "Refreshing..." : "Refresh"}
             </Button>
           </div>
@@ -233,18 +198,12 @@ export function RegistryPage() {
             <TableBody>
               {pendingKyc.map((entry) => (
                 <TableRow key={entry.subject}>
-                  <TableCell
-                    className="max-w-56 truncate font-medium"
-                    title={entry.subject}
-                  >
+                  <TableCell className="max-w-56 truncate font-medium" title={entry.subject}>
                     {entry.subject}
                   </TableCell>
                   <TableCell>{entry.bank_code ?? "—"}</TableCell>
                   <TableCell>{entry.institution_name ?? "—"}</TableCell>
-                  <TableCell
-                    className="max-w-48 truncate"
-                    title={entry.wallet_address}
-                  >
+                  <TableCell className="max-w-48 truncate" title={entry.wallet_address}>
                     {entry.wallet_address ?? "—"}
                   </TableCell>
                   <TableCell>
@@ -260,11 +219,7 @@ export function RegistryPage() {
                     />
                   </TableCell>
                   <TableCell>
-                    <Button
-                      size="sm"
-                      onClick={() => void onApproveKyc(entry.subject)}
-                      disabled={kycStatus === "loading"}
-                    >
+                    <Button size="sm" onClick={() => void onApproveKyc(entry.subject)} disabled={kycStatus === "loading"}>
                       Approve KYC
                     </Button>
                   </TableCell>
@@ -272,10 +227,7 @@ export function RegistryPage() {
               ))}
               {!pendingKyc.length ? (
                 <TableRow>
-                  <TableCell
-                    colSpan={6}
-                    className="text-center text-sm text-muted-foreground"
-                  >
+                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
                     No pending KYC requests.
                   </TableCell>
                 </TableRow>
@@ -283,9 +235,7 @@ export function RegistryPage() {
             </TableBody>
           </Table>
 
-          {error ? (
-            <p className="mt-3 text-sm text-destructive">{error}</p>
-          ) : null}
+          {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
         </CardContent>
       </Card>
     </div>

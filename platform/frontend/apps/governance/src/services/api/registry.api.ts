@@ -4,6 +4,7 @@ import type {
   CredentialIssuanceResult,
   IssueCredentialPayload,
   KycStatusEntry,
+  PendingKycApiResponse,
   Participant,
 } from "../../types";
 import { mockDb } from "../mocks/mock-db";
@@ -14,38 +15,58 @@ export const registryApi = {
     if (useMocks) {
       return mockDb.listParticipants();
     }
-    const response = await httpClient.get<Participant[]>("/compliance/registry");
+    const response = await httpClient.get<Participant[]>(
+      "/compliance/registry",
+    );
     return response.data;
   },
-  issueCredential: async (payload: IssueCredentialPayload): Promise<CredentialIssuanceResult> => {
+  issueCredential: async (
+    payload: IssueCredentialPayload,
+  ): Promise<CredentialIssuanceResult> => {
     if (useMocks) {
       return mockDb.issueCredential(payload);
     }
-    const response = await httpClient.post<CredentialIssuanceResult>("/compliance/kyc/issue-credential", payload);
+    const response = await httpClient.post<CredentialIssuanceResult>(
+      "/compliance/kyc/issue-credential",
+      payload,
+    );
     return response.data;
   },
   listPendingKyc: async (): Promise<KycStatusEntry[]> => {
-    if (useMocks) {
-      return mockDb.listPendingKyc();
-    }
+    const response = await httpClient.get<PendingKycApiResponse>(
+      "/compliance/participants",
+    );
 
-    const response = await httpClient.get<KycStatusEntry[]>("/compliance/participants");
-    return response.data.filter((entry) => entry.status === "CREDENTIAL_REQUESTED");
+    const participants = response.data.participants ?? [];
+
+    return participants
+      .filter((entry) => entry.status === "CREDENTIAL_REQUESTED")
+      .map((entry) => ({
+        subject: entry.user_id,
+        status: entry.status,
+        institution_name: entry.institution_name,
+        bank_code: entry.bank_code,
+        country: entry.country_code,
+        wallet_address: entry.wallet_address,
+      }));
   },
   getKycStatus: async (subject: string): Promise<KycStatusEntry> => {
     if (useMocks) {
       return mockDb.getKycStatus(subject);
     }
 
-    const response = await httpClient.get<KycStatusEntry>(`/compliance/kyc/status/${subject}`);
+    const response = await httpClient.get<KycStatusEntry>(
+      `/compliance/kyc/status/${subject}`,
+    );
     return response.data;
   },
-  approveKyc: async (payload: ApproveKycPayload): Promise<ApproveKycResponse> => {
-    if (useMocks) {
-      return mockDb.approveKyc(payload);
-    }
-
-    const response = await httpClient.post<ApproveKycResponse>("/compliance/approve-kyc", payload);
+  approveKyc: async (
+    payload: ApproveKycPayload,
+  ): Promise<ApproveKycResponse> => {
+    const response = await httpClient.post<ApproveKycResponse>(
+      "/compliance/approve-kyc",
+      payload,
+    );
     return response.data;
   },
 };

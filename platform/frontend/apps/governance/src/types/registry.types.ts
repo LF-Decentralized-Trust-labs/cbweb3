@@ -35,6 +35,21 @@ export type KycStatusEntry = {
   created_at?: string;
 };
 
+export type PendingKycParticipantApi = {
+  user_id: string;
+  institution_name?: string;
+  cnpj?: string;
+  bank_code?: string;
+  country_code?: string;
+  role?: string;
+  wallet_address?: string;
+  status: KycRequestStatus;
+};
+
+export type PendingKycApiResponse = {
+  participants: PendingKycParticipantApi[];
+};
+
 export type ApproveKycPayload = {
   subject: string;
   reason: string;

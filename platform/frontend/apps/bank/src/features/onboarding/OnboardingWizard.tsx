@@ -9,6 +9,8 @@ import { Step1OperatorConfirmation } from "./steps/Step1OperatorConfirmation";
 import { Step2InstitutionForm } from "./steps/Step2InstitutionForm";
 import { Step3KycPending } from "./steps/Step3KycPending";
 import { Step4Complete } from "./steps/Step4Complete";
+import { Step4Revoked } from "./steps/Step4Revoked";
+import { Step4Success } from "./steps/Step4Success";
 
 const stepTitles = ["Operator", "Institution", "KYC", "Complete"];
 
@@ -32,6 +34,7 @@ export function OnboardingWizard() {
     pkiLoginError,
     start,
     initiate,
+    syncMyStatus,
     complete,
     reset,
   } = useOnboardingStore();
@@ -40,19 +43,30 @@ export function OnboardingWizard() {
   const { pollingStatus, elapsedSeconds, refresh, stopPolling } = useOnboardingPolling(currentStep === 3 && Boolean(requestId));
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+    void syncMyStatus();
+  }, [isAuthenticated, syncMyStatus]);
+
+  useEffect(() => {
     if (currentStep !== 4) {
       completionTriggered.current = false;
       return;
     }
 
-    if (completionTriggered.current || !requestId || !userId || clientSecret) {
+    if (
+      completionTriggered.current ||
+      !requestId ||
+      !userId ||
+      clientSecret ||
+      (requestStatus !== "APPROVED" && requestStatus !== "KYC_APPROVED")
+    ) {
       return;
     }
 
     completionTriggered.current = true;
     stopPolling();
     void complete();
-  }, [clientSecret, complete, currentStep, requestId, stopPolling, userId]);
+  }, [clientSecret, complete, currentStep, requestId, requestStatus, stopPolling, userId]);
 
   const onSubmitInstitution = async (values: InstitutionFormValues) => {
     await initiate(values);
@@ -69,6 +83,8 @@ export function OnboardingWizard() {
 
   const operatorId = profile?.bankId ?? profile?.subject ?? "unknown-operator";
   const progress = (currentStep / 4) * 100;
+  const isActiveStatus = requestStatus === "ACTIVE";
+  const isRevokedStatus = requestStatus === "REVOKED" || requestStatus === "REJECTED" || requestStatus === "FROZEN";
 
   return (
     <div className="space-y-4">
@@ -101,7 +117,7 @@ export function OnboardingWizard() {
         />
       ) : null}
 
-      {currentStep === 3 && requestId && walletAddress ? (
+      {currentStep === 3 && requestId ? (
         <Step3KycPending
           requestId={requestId}
           walletAddress={walletAddress}
@@ -114,16 +130,21 @@ export function OnboardingWizard() {
       ) : null}
 
       {currentStep === 4 ? (
-        <Step4Complete
-          completionStatus={completionStatus}
-          error={error}
-          clientSecret={clientSecret}
-          walletAddress={walletAddress}
-          txHash={txHash}
-          accessToken={accessToken}
-          pkiLoginError={pkiLoginError}
-          onGoDashboard={onGoDashboard}
-        />
+        isRevokedStatus && requestStatus ? (
+          <Step4Revoked status={requestStatus} onGoDashboard={onGoDashboard} />
+        ) : isActiveStatus ? (
+          <Step4Success walletAddress={walletAddress} onGoDashboard={onGoDashboard} />
+        ) : (
+          <Step4Complete
+            completionStatus={completionStatus}
+            error={error}
+            walletAddress={walletAddress}
+            txHash={txHash}
+            accessToken={accessToken}
+            pkiLoginError={pkiLoginError}
+            onGoDashboard={onGoDashboard}
+          />
+        )
       ) : null}
     </div>
   );

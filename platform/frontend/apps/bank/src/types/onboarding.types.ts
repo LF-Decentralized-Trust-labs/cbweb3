@@ -1,6 +1,15 @@
 export type OnboardingRole = "ROLE_COMMERCIAL_BANK" | "ROLE_TREASURY_BANK";
 
-export type OnboardingRequestStatus = "CREDENTIAL_REQUESTED" | "KYC_APPROVED" | "ACTIVE" | "REVOKED";
+export type OnboardingRequestStatus =
+  | "NONE"
+  | "PENDING"
+  | "APPROVED"
+  | "ACTIVE"
+  | "FROZEN"
+  | "REVOKED"
+  | "REJECTED"
+  | "CREDENTIAL_REQUESTED"
+  | "KYC_APPROVED";
 
 export type InitiateOnboardingPayload = {
   institution_name: string;
@@ -21,6 +30,12 @@ export type InitiateOnboardingResponse = {
 export type OnboardingStatusResponse = {
   status: OnboardingRequestStatus;
   pop_nonce?: string;
+};
+
+export type OnboardingMyStatusResponse = {
+  request_id: string;
+  user_id: string;
+  status: OnboardingRequestStatus;
 };
 
 export type CompleteOnboardingPayload = {

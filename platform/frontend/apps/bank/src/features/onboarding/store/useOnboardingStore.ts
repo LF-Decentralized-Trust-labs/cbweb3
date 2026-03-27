@@ -1,14 +1,27 @@
+import axios from "axios";
 import { create } from "zustand";
 import { onboardingApi } from "../../../services/api";
 import type {
   AsyncStatus,
   CompleteOnboardingResponse,
   InitiateOnboardingPayload,
+  OnboardingMyStatusResponse,
   OnboardingRequestStatus,
   OnboardingStatusResponse,
 } from "../../../types";
 
 type Step = 1 | 2 | 3 | 4;
+
+const pendingStatuses: OnboardingRequestStatus[] = ["PENDING", "CREDENTIAL_REQUESTED"];
+
+const isPendingStatus = (status: OnboardingRequestStatus | null): status is OnboardingRequestStatus =>
+  status !== null && pendingStatuses.includes(status);
+
+const resolveStepFromStatus = (status: OnboardingRequestStatus): Step => {
+  if (status === "NONE") return 1;
+  if (isPendingStatus(status)) return 3;
+  return 4;
+};
 
 type OnboardingState = {
   currentStep: Step;
@@ -28,6 +41,7 @@ type OnboardingState = {
   setCurrentStep: (step: Step) => void;
   start: () => void;
   initiate: (payload: InitiateOnboardingPayload) => Promise<boolean>;
+  syncMyStatus: () => Promise<OnboardingMyStatusResponse | null>;
   fetchStatus: () => Promise<OnboardingStatusResponse | null>;
   complete: () => Promise<CompleteOnboardingResponse | null>;
   reset: () => void;
@@ -82,16 +96,83 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
       return false;
     }
   },
+  syncMyStatus: async () => {
+    set({ status: "loading", error: null });
+
+    try {
+      const response = await onboardingApi.getMyStatus();
+
+      if (response.status === "NONE") {
+        set({
+          requestId: null,
+          userId: null,
+          walletAddress: null,
+          requestStatus: "NONE",
+          popNonce: null,
+          clientSecret: null,
+          txHash: null,
+          accessToken: null,
+          pkiLoginError: null,
+          startedAt: null,
+          currentStep: 1,
+          status: "idle",
+          error: null,
+        });
+        return response;
+      }
+
+      set({
+        requestId: response.request_id || null,
+        userId: response.user_id || null,
+        requestStatus: response.status,
+        currentStep: resolveStepFromStatus(response.status),
+        popNonce: null,
+        error: null,
+        startedAt: isPendingStatus(response.status) ? get().startedAt ?? Date.now() : null,
+        status: "idle",
+      });
+
+      return response;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        set({
+          requestId: null,
+          userId: null,
+          walletAddress: null,
+          requestStatus: null,
+          popNonce: null,
+          clientSecret: null,
+          txHash: null,
+          accessToken: null,
+          pkiLoginError: null,
+          startedAt: null,
+          currentStep: 1,
+          status: "idle",
+          error: null,
+        });
+        return null;
+      }
+
+      set({
+        status: "error",
+        error: error instanceof Error ? error.message : "Unable to fetch onboarding status",
+      });
+      return null;
+    }
+  },
   fetchStatus: async () => {
     const requestId = get().requestId;
     if (!requestId) return null;
 
     try {
       const response = await onboardingApi.getStatus(requestId);
+      const nextStep = resolveStepFromStatus(response.status);
+
       set({
         requestStatus: response.status,
         popNonce: response.pop_nonce ?? null,
-        currentStep: response.status === "KYC_APPROVED" ? 4 : get().currentStep,
+        currentStep: nextStep,
+        startedAt: isPendingStatus(response.status) ? get().startedAt ?? Date.now() : null,
         error: null,
       });
       return response;

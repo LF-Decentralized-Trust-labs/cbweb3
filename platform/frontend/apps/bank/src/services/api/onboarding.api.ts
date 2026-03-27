@@ -3,6 +3,7 @@ import type {
   CompleteOnboardingResponse,
   InitiateOnboardingPayload,
   InitiateOnboardingResponse,
+  OnboardingMyStatusResponse,
   OnboardingStatusResponse,
 } from "../../types";
 import { httpClient } from "./http-client";
@@ -14,6 +15,10 @@ export const onboardingApi = {
   },
   getStatus: async (requestId: string): Promise<OnboardingStatusResponse> => {
     const response = await httpClient.get<OnboardingStatusResponse>(`/onboarding/status/${requestId}`);
+    return response.data;
+  },
+  getMyStatus: async (): Promise<OnboardingMyStatusResponse> => {
+    const response = await httpClient.get<OnboardingMyStatusResponse>("/onboarding/my-status");
     return response.data;
   },
   complete: async (payload: CompleteOnboardingPayload): Promise<CompleteOnboardingResponse> => {

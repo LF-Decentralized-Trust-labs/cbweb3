@@ -18,7 +18,7 @@ export function useOnboardingPolling(enabled: boolean): UseOnboardingPollingResu
   const [now, setNow] = useState(() => Date.now());
   const [active, setActive] = useState(true);
 
-  const canPoll = enabled && active && requestStatus !== "KYC_APPROVED";
+  const canPoll = enabled && active && (requestStatus === "PENDING" || requestStatus === "CREDENTIAL_REQUESTED");
   const elapsedSeconds = canPoll && startedAt ? Math.floor((now - startedAt) / 1000) : 0;
 
   const refresh = useCallback(async () => {

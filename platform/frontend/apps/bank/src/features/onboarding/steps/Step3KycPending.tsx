@@ -3,7 +3,7 @@ import type { AsyncStatus, OnboardingRequestStatus } from "../../../types";
 
 type Step3KycPendingProps = {
   requestId: string;
-  walletAddress: string;
+  walletAddress: string | null;
   requestStatus: OnboardingRequestStatus | null;
   pollingStatus: AsyncStatus;
   elapsedSeconds: number;
@@ -12,10 +12,15 @@ type Step3KycPendingProps = {
 };
 
 const statusProgress: Record<OnboardingRequestStatus, number> = {
+  NONE: 0,
+  PENDING: 34,
+  APPROVED: 67,
   CREDENTIAL_REQUESTED: 34,
   KYC_APPROVED: 67,
   ACTIVE: 100,
+  FROZEN: 100,
   REVOKED: 100,
+  REJECTED: 100,
 };
 
 export function Step3KycPending({
@@ -27,8 +32,8 @@ export function Step3KycPending({
   error,
   onRefresh,
 }: Step3KycPendingProps) {
-  const status = requestStatus ?? "CREDENTIAL_REQUESTED";
-  const waiting = status === "CREDENTIAL_REQUESTED";
+  const status = requestStatus ?? "PENDING";
+  const waiting = status === "PENDING" || status === "CREDENTIAL_REQUESTED";
 
   return (
     <Card>
@@ -43,7 +48,7 @@ export function Step3KycPending({
             <Badge variant={waiting ? "warning" : "default"}>{status}</Badge>
           </div>
           <Progress value={statusProgress[status]} />
-          <p className="text-xs text-muted-foreground">CREDENTIAL_REQUESTED → KYC_APPROVED → ACTIVE</p>
+          <p className="text-xs text-muted-foreground">PENDING → APPROVED → ACTIVE</p>
         </div>
 
         <div className="rounded-md border border-border p-3 text-sm">
@@ -51,7 +56,7 @@ export function Step3KycPending({
             <span className="font-medium">Request ID:</span> {requestId}
           </p>
           <p>
-            <span className="font-medium">Wallet:</span> {walletAddress}
+            <span className="font-medium">Wallet:</span> {walletAddress ?? "—"}
           </p>
           <p>
             <span className="font-medium">Elapsed:</span> {elapsedSeconds}s
