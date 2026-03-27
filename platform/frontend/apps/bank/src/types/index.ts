@@ -5,3 +5,4 @@ export * from "./htlc.types";
 export * from "./amm.types";
 export * from "./compliance.types";
 export * from "./events.types";
+export * from "./onboarding.types";

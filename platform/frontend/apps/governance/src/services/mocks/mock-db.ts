@@ -1,5 +1,7 @@
 import type {
   AccountEntry,
+  ApproveKycPayload,
+  ApproveKycResponse,
   AuditFilter,
   CircuitBreakerPayload,
   CircuitBreakerState,
@@ -7,6 +9,7 @@ import type {
   GovernanceAuditEntry,
   GovernanceParameters,
   IssueCredentialPayload,
+  KycStatusEntry,
   Participant,
   UpdateParametersPayload,
 } from "../../types";
@@ -18,6 +21,26 @@ import {
 } from "./data-generators";
 
 let participants: Participant[] = generateParticipants();
+let pendingKyc: KycStatusEntry[] = [
+  {
+    subject: "2f3a37ba-f2a7-4d8e-9ca9-f9052f5df151",
+    status: "CREDENTIAL_REQUESTED",
+    institution_name: "Banco Horizonte S.A.",
+    bank_code: "horizonte",
+    country: "BR",
+    wallet_address: "0x2AbF9Cde14ea1e39f6Aa9f7b4fA5AfA01B86bF7a",
+    created_at: new Date(Date.now() - 20 * 60_000).toISOString(),
+  },
+  {
+    subject: "1300d183-5b6e-4a4d-b26a-88bd8576e4bb",
+    status: "CREDENTIAL_REQUESTED",
+    institution_name: "Banco Nascente S.A.",
+    bank_code: "nascente",
+    country: "BR",
+    wallet_address: "0xB3197e08F8fA9F0Aaf1A73a0f6Da957d1D8f8695",
+    created_at: new Date(Date.now() - 8 * 60_000).toISOString(),
+  },
+];
 let accounts: AccountEntry[] = generateAccounts();
 let parameters: GovernanceParameters = generateParameters();
 let circuitBreaker: CircuitBreakerState = {
@@ -92,6 +115,49 @@ export const mockDb = {
       participantId,
       credentialId: created.credentialId!,
       credentialExpiry: created.credentialExpiry!,
+    };
+  },
+  listPendingKyc: async () => {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return pendingKyc.filter((entry) => entry.status === "CREDENTIAL_REQUESTED");
+  },
+  getKycStatus: async (subject: string) => {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const found = pendingKyc.find((entry) => entry.subject === subject);
+    if (!found) {
+      throw new Error("KYC request not found");
+    }
+    return found;
+  },
+  approveKyc: async (payload: ApproveKycPayload): Promise<ApproveKycResponse> => {
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    const found = pendingKyc.find((entry) => entry.subject === payload.subject);
+    if (!found) {
+      throw new Error("KYC request not found");
+    }
+
+    const popNonce = Math.random().toString(16).slice(2).padEnd(64, "0").slice(0, 64);
+    pendingKyc = pendingKyc.map((entry) =>
+      entry.subject === payload.subject
+        ? {
+            ...entry,
+            status: "KYC_APPROVED",
+          }
+        : entry,
+    );
+
+    appendAudit({
+      actor: "governance.admin",
+      action: "KYC approved",
+      category: "REGISTRY",
+      severity: "INFO",
+      outcome: "SUCCESS",
+      metadata: JSON.stringify({ subject: payload.subject, reason: payload.reason }),
+    });
+
+    return {
+      status: "KYC_APPROVED",
+      pop_nonce: popNonce,
     };
   },
   getCircuitBreaker: async () => {

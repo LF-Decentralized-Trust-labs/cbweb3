@@ -8,6 +8,7 @@ import { DashboardPage } from "../pages/DashboardPage";
 import { HTLCTradingPage } from "../pages/HTLCTradingPage";
 import { LiquidityTransfersPage } from "../pages/LiquidityTransfersPage";
 import { LoginPage } from "../pages/LoginPage";
+import { OnboardingPage } from "../pages/OnboardingPage";
 import { SettingsPage } from "../pages/SettingsPage";
 
 export const routes: RouteObject[] = [
@@ -27,6 +28,7 @@ export const routes: RouteObject[] = [
           { path: "htlc", element: <HTLCTradingPage /> },
           { path: "amm", element: <AMMTradingPage /> },
           { path: "compliance", element: <ComplianceCenterPage /> },
+          { path: "onboarding", element: <OnboardingPage /> },
           { path: "settings", element: <SettingsPage /> },
         ],
       },

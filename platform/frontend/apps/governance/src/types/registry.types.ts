@@ -1,4 +1,4 @@
-export type ParticipantStatus = "ACTIVE" | "PENDING" | "REVOKED" | "FROZEN";
+export type ParticipantStatus = "ACTIVE" | "PENDING" | "CREDENTIAL_REQUESTED" | "KYC_APPROVED" | "REVOKED" | "FROZEN";
 
 export type Participant = {
   id: string;
@@ -21,4 +21,26 @@ export type CredentialIssuanceResult = {
   participantId: string;
   credentialId: string;
   credentialExpiry: string;
+};
+
+export type KycRequestStatus = "CREDENTIAL_REQUESTED" | "KYC_APPROVED" | "ACTIVE" | "REVOKED";
+
+export type KycStatusEntry = {
+  subject: string;
+  status: KycRequestStatus;
+  institution_name?: string;
+  bank_code?: string;
+  country?: string;
+  wallet_address?: string;
+  created_at?: string;
+};
+
+export type ApproveKycPayload = {
+  subject: string;
+  reason: string;
+};
+
+export type ApproveKycResponse = {
+  status: string;
+  pop_nonce: string;
 };

@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { ArrowRightLeft, Coins, LayoutDashboard, Scale, Settings, ShieldCheck } from "lucide-react";
+import { ArrowRightLeft, ClipboardList, Coins, LayoutDashboard, Scale, Settings, ShieldCheck } from "lucide-react";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -7,6 +7,7 @@ const links = [
   { to: "/htlc", label: "HTLC Trading", icon: ArrowRightLeft },
   { to: "/amm", label: "AMM Trading", icon: Scale },
   { to: "/compliance", label: "Compliance", icon: ShieldCheck },
+  { to: "/onboarding", label: "Onboarding", icon: ClipboardList },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
