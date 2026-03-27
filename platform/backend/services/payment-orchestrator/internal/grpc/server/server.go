@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -84,7 +85,7 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 		HashLock:    hashLock,
 		TimeLock:    req.TimeLock,
 		Secret:      secret,
-		ZetoLockRef: lockResult.ZetoLockRef,
+		ZetoLockRef: strings.Join(lockResult.LockedStateIDs, ","),
 		State:       domain.HTLCStateLocked,
 		ZetoTxHash:  lockResult.TxHash,
 		CreatedAt:   time.Now().UTC(),
@@ -143,7 +144,7 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 	s.mu.Unlock()
 
 	// Transfer locked Zeto tokens to receiver
-	zetoTxHash, err := s.zeto.TransferLocked(ctx, record.ZetoLockRef, record.Receiver, req.Secret)
+	zetoTxHash, err := s.zeto.TransferLocked(ctx, record.ZetoLockRef, record.Receiver, record.Amount)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "zeto transferLocked: %v", err)
 	}

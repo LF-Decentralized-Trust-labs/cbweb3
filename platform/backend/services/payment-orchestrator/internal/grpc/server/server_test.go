@@ -36,7 +36,7 @@ func (m *mockZeto) Transfer(_ context.Context, _, _ string) (string, error) {
 }
 func (m *mockZeto) Lock(_ context.Context, _, _ string) (*ports.ZetoLockResult, error) {
 	m.lockCalled++
-	return &ports.ZetoLockResult{TxHash: "mock-lock-tx", ZetoLockRef: "mock-lock-ref-001"}, nil
+	return &ports.ZetoLockResult{TxHash: "mock-lock-tx", ZetoLockRef: "mock-lock-ref-001", LockedStateIDs: []string{"0xabc123"}}, nil
 }
 func (m *mockZeto) Unlock(_ context.Context, _ string) (string, error) {
 	m.unlockCalled++

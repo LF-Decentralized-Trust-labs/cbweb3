@@ -28,10 +28,10 @@ type ptxSendRequest struct {
 }
 
 type ptxSendResponse struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      int         `json:"id"`
-	Result  string      `json:"result,omitempty"`
-	Error   *rpcError   `json:"error,omitempty"`
+	JSONRPC string    `json:"jsonrpc"`
+	ID      int       `json:"id"`
+	Result  string    `json:"result,omitempty"`
+	Error   *rpcError `json:"error,omitempty"`
 }
 
 type rpcError struct {
@@ -39,17 +39,28 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
+type abiParam struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+type abiEntry struct {
+	Type   string     `json:"type"`
+	Inputs []abiParam `json:"inputs"`
+}
+
 type paladinTx struct {
-	Type            string      `json:"type"`
-	Domain          string      `json:"domain"`
-	From            string      `json:"from"`
-	To              interface{} `json:"to"`
-	Data            interface{} `json:"data"`
+	Type     string      `json:"type"`
+	Domain   string      `json:"domain,omitempty"`
+	From     string      `json:"from"`
+	To       interface{} `json:"to"`
+	ABI      []abiEntry  `json:"abi,omitempty"`
+	Function string      `json:"function"`
+	Data     interface{} `json:"data"`
 }
 
 type zetoConstructorData struct {
-	TokenName      string `json:"tokenName"`
-	Implementation string `json:"implementation"`
+	TokenName string `json:"tokenName"`
 }
 
 type ptxGetTxRequest struct {
@@ -68,6 +79,7 @@ type txReceipt struct {
 	Domain          string `json:"domain"`
 	ContractAddress string `json:"contractAddress"`
 	Success         bool   `json:"success"`
+	FailureMessage  string `json:"failureMessage,omitempty"`
 }
 
 type ptxGetTxResponse struct {
@@ -85,18 +97,24 @@ type ptxGetTxResponse struct {
 //
 // Run:
 //
-//	SPOKE=spoke-a PALADIN_CB_URL=http://127.0.0.1:8548 go test ./scripts/ -run TestCreateZetoTokenInstance -v -count=1
+//	SPOKE=spoke-a PALADIN_CB_URL=http://127.0.0.1:31648 go test ./scripts/ -run TestCreateZetoTokenInstance -v -count=1
 func TestCreateZetoTokenInstance(t *testing.T) {
-	url := paladinCBURL() + "/api/v1"
+	url := paladinCBURL()
+
+	identity := fmt.Sprintf("funded_operator@%s-cb", spokeName())
 
 	tx := paladinTx{
 		Type:   "private",
 		Domain: "zeto",
-		From:   "funded_operator@spoke-a-cb",
+		From:   identity,
 		To:     nil,
+		ABI: []abiEntry{{
+			Type:   "constructor",
+			Inputs: []abiParam{{Name: "tokenName", Type: "string"}},
+		}},
+		Function: "",
 		Data: zetoConstructorData{
-			TokenName:      "tCeBM",
-			Implementation: "Zeto_AnonNullifier",
+			TokenName: "Zeto_AnonNullifier",
 		},
 	}
 
@@ -142,7 +160,7 @@ func TestCreateZetoTokenInstance(t *testing.T) {
 		getTxBody, _ := json.Marshal(ptxGetTxRequest{
 			JSONRPC: "2.0",
 			ID:      2,
-			Method:  "ptx_getTransaction",
+			Method:  "ptx_getTransactionFull",
 			Params:  []string{txID},
 		})
 		getResp, err := http.Post(url, "application/json", bytes.NewReader(getTxBody))
@@ -159,7 +177,7 @@ func TestCreateZetoTokenInstance(t *testing.T) {
 		}
 		if txResp.Result != nil && txResp.Result.Receipt != nil {
 			if !txResp.Result.Receipt.Success {
-				t.Fatalf("token creation transaction failed")
+				t.Fatalf("token creation transaction failed: %s", txResp.Result.Receipt.FailureMessage)
 			}
 			contractAddr = txResp.Result.Receipt.ContractAddress
 			break

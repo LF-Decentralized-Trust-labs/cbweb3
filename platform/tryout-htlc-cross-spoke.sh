@@ -323,8 +323,8 @@ verify_lock_status_bank_a() {
   local resp state_val
   resp=$(http_get "$BANK_A_URL/htlc/status/$CONTRACT_ID_A" \
     "$BANK_A_TOKEN" "200")
-  state_val=$(echo "$resp" | jq -r '.lock.state // empty')
-  SECRET_A=$(echo "$resp" | jq -r '.lock.secret // empty')
+  state_val=$(echo "$resp" | jq -r '.state // empty')
+  SECRET_A=$(echo "$resp" | jq -r '.secret // empty')
   if [ "$state_val" != "HTLC_STATE_LOCKED" ]; then
     echo "ERROR: Expected state HTLC_STATE_LOCKED, got '$state_val'." >&2
     echo "Response: $resp" >&2
@@ -368,7 +368,7 @@ verify_settled_status_bank_a() {
   local resp state_val
   resp=$(http_get "$BANK_A_URL/htlc/status/$CONTRACT_ID_A" \
     "$BANK_A_TOKEN" "200")
-  state_val=$(echo "$resp" | jq -r '.lock.state // empty')
+  state_val=$(echo "$resp" | jq -r '.state // empty')
   if [ "$state_val" != "HTLC_STATE_SETTLED" ]; then
     echo "ERROR: Expected state HTLC_STATE_SETTLED, got '$state_val'." >&2
     echo "Response: $resp" >&2
@@ -439,7 +439,7 @@ verify_refunded_status_bank_b() {
   local resp state_val
   resp=$(http_get "$BANK_B_URL/htlc/status/$CONTRACT_ID_B" \
     "$BANK_B_TOKEN" "200")
-  state_val=$(echo "$resp" | jq -r '.lock.state // empty')
+  state_val=$(echo "$resp" | jq -r '.state // empty')
   if [ "$state_val" != "HTLC_STATE_REFUNDED" ]; then
     echo "ERROR: Expected state HTLC_STATE_REFUNDED, got '$state_val'." >&2
     echo "Response: $resp" >&2

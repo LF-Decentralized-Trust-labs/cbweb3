@@ -4,8 +4,9 @@ import "context"
 
 // ZetoLockResult holds the outputs from a Zeto lock operation.
 type ZetoLockResult struct {
-	TxHash      string `json:"tx_hash"`
-	ZetoLockRef string `json:"zeto_lock_ref"`
+	TxHash         string   `json:"tx_hash"`
+	ZetoLockRef    string   `json:"zeto_lock_ref"`
+	LockedStateIDs []string `json:"locked_state_ids"`
 }
 
 // ZetoOperator abstracts Zeto token operations via the Paladin sidecar HTTP API.
@@ -27,7 +28,7 @@ type ZetoOperator interface {
 
 	// TransferLocked transfers locked tokens to the receiver (settle path).
 	// This is called when the HTLC secret is revealed on-chain.
-	TransferLocked(ctx context.Context, zetoLockRef string, to string, secret string) (txHash string, err error)
+	TransferLocked(ctx context.Context, zetoLockRef string, to string, amount string) (txHash string, err error)
 
 	// Balance returns the Zeto token balance for an identity.
 	Balance(ctx context.Context, identity string) (string, error)

@@ -62,12 +62,16 @@ services:
     env_file:
       - path: ./config/.env.infra.bank-c
         required: true
+      - path: ../deploy/local/paladin/spoke-a/.deployed-addrs.env
+        required: false
     environment:
       PAYMENT_GRPC_PORT: "9094"
-      PALADIN_URL: "http://host.docker.internal:8548"
+      PALADIN_URL: "http://host.docker.internal:31648"
       PALADIN_IDENTITY: "funded_operator@spoke-a-cb"
     ports:
       - "49094:9094"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - cbweb3_backend_bank_c
       - cbweb3_network

@@ -24,11 +24,16 @@ func main() {
 	var zeto ports.ZetoOperator
 	if paladinURL := os.Getenv("PALADIN_URL"); paladinURL != "" {
 		identity := getEnv("PALADIN_IDENTITY", "funded_operator@spoke-a-cb")
+		zetoAddr := os.Getenv("ZETO_TOKEN_ADDRESS")
+		if zetoAddr == "" {
+			log.Fatal("FATAL: ZETO_TOKEN_ADDRESS is required when PALADIN_URL is set")
+		}
 		zeto = paladinAdapter.NewClient(paladinAdapter.ClientConfig{
-			BaseURL:  paladinURL,
-			Identity: identity,
+			BaseURL:          paladinURL,
+			Identity:         identity,
+			ZetoTokenAddress: zetoAddr,
 		}, logger)
-		logger.Info("paladin client configured", "url", paladinURL, "identity", identity)
+		logger.Info("paladin client configured", "url", paladinURL, "identity", identity, "zetoToken", zetoAddr)
 	} else {
 		log.Println("WARN: PALADIN_URL not set — Zeto operations will fail (dev placeholder)")
 		zeto = noopZeto{}

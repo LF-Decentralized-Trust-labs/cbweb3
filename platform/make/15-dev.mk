@@ -3,31 +3,37 @@
 
 # ── Spoke-level targets (full stack) ─────────────────────────────────────────
 
-spoke-a: pki.gen-central-bank-a pki.gen-bank-a pki.gen-bank-c pki.gen-commercial-banks \
-         deploy.up-infra deploy.up-spoke-a \
-         contracts.setup contracts.deploy-spoke-a contracts.sync-addresses \
-         paladin.deploy-contracts-spoke-a \
-         paladin.generate-certs-spoke-a \
-         paladin.render-configs-spoke-a \
-         paladin.register-nodes-spoke-a \
-         paladin.stop-spoke-a \
-         paladin.start-spoke-a \
-         deploy.up-backend-spoke-a
+spoke-a: pki.gen-central-bank-a pki.gen-bank-a pki.gen-bank-c pki.gen-commercial-banks
+	$(MAKE) deploy.up-infra deploy.up-spoke-a
+	$(MAKE) contracts.setup contracts.deploy-spoke-a contracts.sync-addresses
+	$(MAKE) paladin.deploy-contracts-spoke-a
+	$(MAKE) paladin.generate-certs-spoke-a
+	$(MAKE) paladin.render-configs-spoke-a
+	$(MAKE) paladin.register-nodes-spoke-a
+	$(MAKE) paladin.stop-spoke-a
+	$(MAKE) paladin.start-spoke-a
+	@echo "Waiting for Paladin spoke-a to be ready ($(PALADIN_READY_WAIT)s)..."
+	@sleep $(PALADIN_READY_WAIT)
+	$(MAKE) paladin.create-zeto-token-spoke-a
+	$(MAKE) deploy.up-backend-spoke-a
 	@echo "Spoke-A stack is up (with Paladin)."
 
 spoke-a-down: deploy.down-backend-spoke-a paladin.stop-spoke-a deploy.down-spoke-a
 	@echo "Spoke-A stack is down (shared infra left running)."
 
-spoke-b: pki.gen-central-bank-b pki.gen-bank-b pki.gen-bank-d pki.gen-commercial-banks \
-         deploy.up-infra deploy.up-spoke-b \
-         contracts.setup contracts.deploy-spoke-b contracts.sync-addresses \
-         paladin.deploy-contracts-spoke-b \
-         paladin.generate-certs-spoke-b \
-         paladin.render-configs-spoke-b \
-         paladin.register-nodes-spoke-b \
-         paladin.stop-spoke-b \
-         paladin.start-spoke-b \
-         deploy.up-backend-spoke-b
+spoke-b: pki.gen-central-bank-b pki.gen-bank-b pki.gen-bank-d pki.gen-commercial-banks
+	$(MAKE) deploy.up-infra deploy.up-spoke-b
+	$(MAKE) contracts.setup contracts.deploy-spoke-b contracts.sync-addresses
+	$(MAKE) paladin.deploy-contracts-spoke-b
+	$(MAKE) paladin.generate-certs-spoke-b
+	$(MAKE) paladin.render-configs-spoke-b
+	$(MAKE) paladin.register-nodes-spoke-b
+	$(MAKE) paladin.stop-spoke-b
+	$(MAKE) paladin.start-spoke-b
+	@echo "Waiting for Paladin spoke-b to be ready ($(PALADIN_READY_WAIT)s)..."
+	@sleep $(PALADIN_READY_WAIT)
+	$(MAKE) paladin.create-zeto-token-spoke-b
+	$(MAKE) deploy.up-backend-spoke-b
 	@echo "Spoke-B stack is up (with Paladin)."
 
 spoke-b-down: deploy.down-backend-spoke-b paladin.stop-spoke-b deploy.down-spoke-b

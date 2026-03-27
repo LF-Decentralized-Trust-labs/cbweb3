@@ -41,13 +41,13 @@ paladin.deploy-contracts-spoke-b: paladin.deploy-registry-spoke-b paladin.deploy
 paladin.create-zeto-token-spoke-a:
 	@echo "Creating Zeto tCeBM token instance on spoke-a via Paladin API..."
 	@cd $(PALADIN_SCRIPTS) && \
-		SPOKE=spoke-a PALADIN_CB_URL=http://127.0.0.1:8548 \
+		SPOKE=spoke-a PALADIN_CB_URL=http://127.0.0.1:31648 \
 		go test ./... -run TestCreateZetoTokenInstance -v -count=1 -timeout $(PALADIN_TIMEOUT)
 
 paladin.create-zeto-token-spoke-b:
 	@echo "Creating Zeto tCeBM token instance on spoke-b via Paladin API..."
 	@cd $(PALADIN_SCRIPTS) && \
-		SPOKE=spoke-b PALADIN_CB_URL=http://127.0.0.1:8648 \
+		SPOKE=spoke-b PALADIN_CB_URL=http://127.0.0.1:31748 \
 		go test ./... -run TestCreateZetoTokenInstance -v -count=1 -timeout $(PALADIN_TIMEOUT)
 
 # ── node registration ────────────────────────────────────────────────────────
