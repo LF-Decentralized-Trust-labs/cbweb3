@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # tryout-my-onboarding-status.sh — Test GET /api/v1/onboarding/my-status
 #
-# Exercises the "recover onboarding status by bank_code" endpoint in
-# six scenarios, covering both the Central Bank public endpoint and the
-# Commercial Bank authenticated proxy endpoint.
+# Exercises the "recover onboarding status" endpoint in six scenarios,
+# covering both the Central Bank public endpoint and the Commercial Bank
+# authenticated proxy endpoint.
+#
+# The Commercial Bank proxy resolves the bank identity from the JWT session
+# (BankID claim) — the frontend sends no query parameters, only the cookie.
+# The Central Bank endpoint accepts an optional bank_code query parameter
+# (used by the proxy and the governance portal).
 #
 # Scenarios:
 #
@@ -14,7 +19,7 @@
 #   Scenario 3  CB public endpoint — unknown bank_code → 404
 #   Scenario 4  CB public endpoint — missing bank_code query param → 400
 #   Scenario 5  Bank proxy endpoint — unauthenticated (no cookie) → 401
-#   Scenario 6  Bank proxy endpoint — authenticated → proxied status returned
+#   Scenario 6  Bank proxy endpoint — authenticated (JWT BankID) → status returned
 #
 # Prerequisites:
 #   - Stacks running: make dev.up (or at least dev.up-central-bank-a + dev.up-bank-a)
@@ -344,14 +349,16 @@ scenario_5_bank_proxy_unauthenticated() {
 }
 
 # ---------------------------------------------------------------------------
-# Scenario 6 — Bank proxy endpoint: authenticated → proxied status returned
-# The proxy injects bank_code="a" automatically via the configured BANK_CODE.
+# Scenario 6 — Bank proxy endpoint: authenticated → status resolved from JWT
+# The proxy extracts BankID from the JWT claims (enriched by ValidateToken)
+# and forwards the request to the CB with bank_code=<BankID>.
+# The frontend sends no query parameters — only the session cookie.
 # ---------------------------------------------------------------------------
 
 scenario_6_bank_proxy_authenticated() {
   echo ""
-  echo "Scenario 6 — Bank proxy: authenticated → proxied status for bank_code=$BANK_CODE"
-  echo "  GET $BANK_URL/onboarding/my-status  (cookie: access_token)"
+  echo "Scenario 6 — Bank proxy: authenticated (JWT BankID) → status for bank_code=$BANK_CODE"
+  echo "  GET $BANK_URL/onboarding/my-status  (cookie: access_token, no params)"
 
   local result code body
   result=$(get_request "$BANK_URL/onboarding/my-status" "$BANK_TOKEN")

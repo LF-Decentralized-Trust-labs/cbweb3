@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 )
@@ -476,14 +477,18 @@ func (h *OnboardingProxyHandler) PKILogin(c *fiber.Ctx) error {
 }
 
 // GetMyOnboardingStatus handles GET /api/v1/onboarding/my-status.
-// Proxies to the Central Bank's /api/v1/onboarding/my-status?bank_code=<h.bankCode>
-// so that the frontend can recover the onboarding status after a page reload
-// without needing to persist the original request_id.
+// Resolves the bank identity from the JWT session (BankID claim) and proxies
+// to the Central Bank's /api/v1/onboarding/my-status?bank_code=<resolved>.
+// Falls back to the configured bankCode when BankID is absent from the token.
 func (h *OnboardingProxyHandler) GetMyOnboardingStatus(c *fiber.Ctx) error {
-	if h.bankCode == "" {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "bank_code not configured on this gateway",
+	bankCode := h.bankCode
+	if claims, ok := c.Locals("claims").(domain.TokenClaims); ok && claims.BankID != "" {
+		bankCode = claims.BankID
+	}
+	if bankCode == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "unable to determine bank identity from session",
 		})
 	}
-	return h.proxy(c, http.MethodGet, "/api/v1/onboarding/my-status?bank_code="+h.bankCode, nil)
+	return h.proxy(c, http.MethodGet, "/api/v1/onboarding/my-status?bank_code="+bankCode, nil)
 }

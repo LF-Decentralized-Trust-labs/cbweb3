@@ -3,6 +3,7 @@ package handlers
 import (
 	"strings"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 )
@@ -139,6 +140,11 @@ func (h *OnboardingHandler) CompleteOnboarding(c *fiber.Ctx) error {
 // a page reload without needing to persist the original request_id.
 func (h *OnboardingHandler) GetMyOnboardingStatus(c *fiber.Ctx) error {
 	bankCode := c.Query("bank_code")
+	if bankCode == "" {
+		if claims, ok := c.Locals("claims").(domain.TokenClaims); ok && claims.BankID != "" {
+			bankCode = claims.BankID
+		}
+	}
 	if bankCode == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bank_code query parameter is required"})
 	}

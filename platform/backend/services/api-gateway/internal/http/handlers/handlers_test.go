@@ -1168,3 +1168,43 @@ func TestGetMyOnboardingStatusResponseShape(t *testing.T) {
 		t.Errorf("expected user_id user-uuid-002, got %v", body["user_id"])
 	}
 }
+
+func TestGetMyOnboardingStatusFromJWT(t *testing.T) {
+	t.Parallel()
+	stub := onboardingManagerStub{
+		byBankResult: interfaces.OnboardingStatus{
+			RequestID: "req-uuid-jwt",
+			UserID:    "user-uuid-jwt",
+			Status:    "ACTIVE",
+		},
+	}
+	handler := NewOnboardingHandler(stub)
+	app := fiber.New()
+	// Simulate auth middleware injecting claims with BankID.
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals("claims", domain.TokenClaims{Subject: "user-uuid-jwt", BankID: "a"})
+		return c.Next()
+	})
+	app.Get("/onboarding/my-status", handler.GetMyOnboardingStatus)
+
+	// No bank_code param — resolved from JWT.
+	req := httptest.NewRequest(http.MethodGet, "/onboarding/my-status", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if body["request_id"] != "req-uuid-jwt" {
+		t.Errorf("expected request_id req-uuid-jwt, got %v", body["request_id"])
+	}
+	if body["status"] != "ACTIVE" {
+		t.Errorf("expected status ACTIVE, got %v", body["status"])
+	}
+}
