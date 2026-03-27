@@ -135,6 +135,10 @@ type CompleteOnboardingResult struct {
 type OnboardingManager interface {
 	SubmitCredentialRequest(ctx context.Context, req CredentialRequest) (CredentialRequestResult, error)
 	GetOnboardingStatus(ctx context.Context, requestID string) (OnboardingStatus, error)
+	// GetOnboardingStatusByBankCode looks up the pending onboarding request for
+	// the given bank code. This allows the frontend to recover status after a
+	// page reload, without having to remember the original request_id.
+	GetOnboardingStatusByBankCode(ctx context.Context, bankCode string) (OnboardingStatus, error)
 	CompleteOnboarding(ctx context.Context, req CompleteOnboardingRequest) (CompleteOnboardingResult, error)
 }
 

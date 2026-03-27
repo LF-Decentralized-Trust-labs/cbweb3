@@ -474,3 +474,16 @@ func (h *OnboardingProxyHandler) PKILogin(c *fiber.Ctx) error {
 		"accessToken": accessToken,
 	})
 }
+
+// GetMyOnboardingStatus handles GET /api/v1/onboarding/my-status.
+// Proxies to the Central Bank's /api/v1/onboarding/my-status?bank_code=<h.bankCode>
+// so that the frontend can recover the onboarding status after a page reload
+// without needing to persist the original request_id.
+func (h *OnboardingProxyHandler) GetMyOnboardingStatus(c *fiber.Ctx) error {
+	if h.bankCode == "" {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "bank_code not configured on this gateway",
+		})
+	}
+	return h.proxy(c, http.MethodGet, "/api/v1/onboarding/my-status?bank_code="+h.bankCode, nil)
+}

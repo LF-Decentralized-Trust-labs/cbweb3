@@ -107,17 +107,43 @@ func (s *identityService) SubmitCredentialRequest(ctx context.Context, req *auth
 
 // GetOnboardingStatus handles Phase 2.5 — the commercial bank polls this endpoint
 // to discover when KYC has been approved and to retrieve the PoP nonce.
+//
+// request_id may be:
+//   - A Keycloak user UUID (normal case): looks up the participant directly.
+//   - The prefix "bank_code:<code>": looks up the most recent participant for
+//     that bank code, allowing the frontend to recover status without storing
+//     the original request_id.
 func (s *identityService) GetOnboardingStatus(ctx context.Context, req *authv1.GetOnboardingStatusRequest) (*authv1.GetOnboardingStatusResponse, error) {
 	if req.RequestId == "" {
 		return nil, status.Error(codes.InvalidArgument, "request_id is required")
 	}
 
-	participant, found, err := s.compliance.GetParticipantByUser(ctx, req.RequestId)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "onboarding status: %v", err)
-	}
-	if !found {
-		return nil, status.Error(codes.NotFound, "onboarding request not found")
+	var participant complianceclient.Participant
+	var found bool
+	var err error
+
+	if strings.HasPrefix(req.RequestId, "bank_code:") {
+		bankCode := strings.TrimPrefix(req.RequestId, "bank_code:")
+		if bankCode == "" {
+			return nil, status.Error(codes.InvalidArgument, "bank_code must not be empty")
+		}
+		list, listErr := s.compliance.ListParticipants(ctx, complianceclient.ParticipantFilter{BankCode: bankCode})
+		if listErr != nil {
+			return nil, status.Errorf(codes.Internal, "onboarding status by bank_code: %v", listErr)
+		}
+		if len(list) == 0 {
+			return nil, status.Error(codes.NotFound, "no onboarding request found for this bank")
+		}
+		participant = list[0]
+		found = true
+	} else {
+		participant, found, err = s.compliance.GetParticipantByUser(ctx, req.RequestId)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "onboarding status: %v", err)
+		}
+		if !found {
+			return nil, status.Error(codes.NotFound, "onboarding request not found")
+		}
 	}
 
 	resp := &authv1.GetOnboardingStatusResponse{

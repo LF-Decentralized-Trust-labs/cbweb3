@@ -158,6 +158,12 @@ func (m *IdentityGRPCManager) GetOnboardingStatus(ctx context.Context, requestID
 	}, nil
 }
 
+// GetOnboardingStatusByBankCode resolves a bank's onboarding status without
+// requiring the caller to supply the original request_id.
+func (m *IdentityGRPCManager) GetOnboardingStatusByBankCode(ctx context.Context, bankCode string) (interfaces.OnboardingStatus, error) {
+	return m.GetOnboardingStatus(ctx, "bank_code:"+bankCode)
+}
+
 func (m *IdentityGRPCManager) CompleteOnboarding(ctx context.Context, req interfaces.CompleteOnboardingRequest) (interfaces.CompleteOnboardingResult, error) {
 	out, err := m.cc.CompleteOnboarding(ctx, &authv1.CompleteOnboardingRequest{
 		RequestId:           req.RequestID,

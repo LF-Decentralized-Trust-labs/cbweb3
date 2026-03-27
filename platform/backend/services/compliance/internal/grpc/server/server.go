@@ -102,10 +102,15 @@ func (s *complianceService) GetParticipantByUser(ctx context.Context, req *compl
 }
 
 func (s *complianceService) ListParticipants(ctx context.Context, req *compliancv1.ListParticipantsRequest) (*compliancv1.ListParticipantsResponse, error) {
-	list, err := s.repo.ListParticipants(ctx, repository.ParticipantFilter{
-		Status: req.Status,
-		Search: req.Search,
-	})
+	filter := repository.ParticipantFilter{Status: req.Status}
+	// Callers may pass "bank_code:<code>" in the Search field to request an
+	// exact bank_code match without requiring a new proto field.
+	if strings.HasPrefix(req.Search, "bank_code:") {
+		filter.BankCode = strings.TrimPrefix(req.Search, "bank_code:")
+	} else {
+		filter.Search = req.Search
+	}
+	list, err := s.repo.ListParticipants(ctx, filter)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}

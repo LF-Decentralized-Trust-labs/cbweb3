@@ -132,3 +132,30 @@ func (h *OnboardingHandler) CompleteOnboarding(c *fiber.Ctx) error {
 		"status":         result.Status,
 	})
 }
+
+// GetMyOnboardingStatus handles GET /api/v1/onboarding/my-status?bank_code=<code>.
+// Allows the Central Bank to serve a status query keyed on bank_code instead of
+// request_id, so that commercial banks can recover their onboarding state after
+// a page reload without needing to persist the original request_id.
+func (h *OnboardingHandler) GetMyOnboardingStatus(c *fiber.Ctx) error {
+	bankCode := c.Query("bank_code")
+	if bankCode == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bank_code query parameter is required"})
+	}
+
+	result, err := h.mgr.GetOnboardingStatusByBankCode(c.UserContext(), bankCode)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "no onboarding request found for this bank"})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	resp := fiber.Map{
+		"request_id": result.RequestID,
+		"user_id":    result.UserID,
+		"status":     result.Status,
+	}
+
+	return c.Status(fiber.StatusOK).JSON(resp)
+}
