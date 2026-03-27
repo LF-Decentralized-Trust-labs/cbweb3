@@ -3,22 +3,31 @@
 package handlers
 
 import (
+	"context"
 	"strings"
 
+	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 )
 
+// ComplianceParticipantLister defines the participant listing capability
+// used by the compliance handler. Satisfied by the compliance GRPCAdapter.
+type ComplianceParticipantLister interface {
+	ListParticipants(ctx context.Context, statusFilter, search string) ([]complianceadapter.Participant, error)
+}
+
 // ComplianceHandler exposes compliance-related HTTP endpoints.
 type ComplianceHandler struct {
-	kyc        interfaces.KYCChecker
-	kycMgr     interfaces.KYCManager
-	onboarder  interfaces.ParticipantOnboarder
+	kyc       interfaces.KYCChecker
+	kycMgr    interfaces.KYCManager
+	onboarder interfaces.ParticipantOnboarder
+	lister    ComplianceParticipantLister
 }
 
 // NewComplianceHandler builds a ComplianceHandler.
-func NewComplianceHandler(kyc interfaces.KYCChecker) *ComplianceHandler {
+func NewComplianceHandler(kyc interfaces.KYCChecker, lister ComplianceParticipantLister) *ComplianceHandler {
 	var kycMgr interfaces.KYCManager
 	if mgr, ok := kyc.(interfaces.KYCManager); ok {
 		kycMgr = mgr
@@ -27,7 +36,20 @@ func NewComplianceHandler(kyc interfaces.KYCChecker) *ComplianceHandler {
 	if ob, ok := kyc.(interfaces.ParticipantOnboarder); ok {
 		onboarder = ob
 	}
-	return &ComplianceHandler{kyc: kyc, kycMgr: kycMgr, onboarder: onboarder}
+	return &ComplianceHandler{kyc: kyc, kycMgr: kycMgr, onboarder: onboarder, lister: lister}
+}
+
+// ListParticipants handles GET /api/v1/compliance/participants.
+// Returns registered participants, optionally filtered by status or search term.
+func (h *ComplianceHandler) ListParticipants(c *fiber.Ctx) error {
+	statusFilter := c.Query("status")
+	search := c.Query("search")
+
+	participants, err := h.lister.ListParticipants(c.UserContext(), statusFilter, search)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"participants": participants})
 }
 
 // GetKYCStatus returns the KYC lifecycle status for the requested subject.
