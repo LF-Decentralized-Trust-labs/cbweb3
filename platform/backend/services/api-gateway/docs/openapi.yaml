@@ -6,7 +6,7 @@ info:
     OpenAPI specification for the CBWeb3 platform API Gateway.
     Implements authentication, participant onboarding, KYC/AML compliance,
     and governance operations over the identity service (Keycloak + KMS).
-    
+
     Security note: All /compliance write endpoints require CENTRAL_BANK role.
 servers:
   - url: http://localhost:8080
@@ -625,6 +625,48 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+
+  /api/v1/compliance/participants:
+    get:
+      tags: [Compliance]
+      summary: List registered participants (GOVERNANCE only)
+      description: >
+        Returns all participants registered in the compliance-orchestrator database.
+        Supports optional filtering by onboarding status and free-text search
+        (institution name or CNPJ, case-insensitive). Requires ROLE_GOVERNANCE.
+      operationId: listParticipants
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          description: >
+            Filter by participant onboarding status. If omitted, all statuses are returned.
+            Invalid values return an empty list (no validation error).
+          schema:
+            type: string
+            enum: [PENDING, CREDENTIAL_REQUESTED, KYC_APPROVED, ACTIVE, FROZEN, REVOKED]
+        - name: search
+          in: query
+          description: Free-text search across institution_name and CNPJ (case-insensitive ILIKE)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of participants (may be empty if no matches)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [participants]
+                properties:
+                  participants:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ParticipantRecord"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /api/v1/compliance/register:
     post:
