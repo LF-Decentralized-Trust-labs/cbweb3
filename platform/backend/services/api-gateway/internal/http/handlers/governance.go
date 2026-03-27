@@ -140,6 +140,9 @@ func (h *GovernanceHandler) ApproveKYC(c *fiber.Ctx) error {
 	if result.TxHash != "" {
 		resp["tx_hash"] = result.TxHash
 	}
+	if result.PopNonce != "" {
+		resp["pop_nonce"] = result.PopNonce
+	}
 	return c.Status(fiber.StatusOK).JSON(resp)
 }
 

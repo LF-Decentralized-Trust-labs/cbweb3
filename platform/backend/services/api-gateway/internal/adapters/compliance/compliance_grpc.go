@@ -62,9 +62,10 @@ type SignedCSRResult struct {
 
 // ApproveKYCResult holds the result of an ApproveKYC call.
 type ApproveKYCResult struct {
-	Subject string
-	Status  string
-	TxHash  string
+	Subject  string
+	Status   string
+	TxHash   string
+	PopNonce string
 }
 
 // GRPCAdapter is the api-gateway adapter for the compliance-orchestrator gRPC service.
@@ -172,7 +173,7 @@ func (a *GRPCAdapter) ApproveKYC(ctx context.Context, subject, actorSubject, rea
 	if err != nil {
 		return ApproveKYCResult{}, err
 	}
-	return ApproveKYCResult{Subject: resp.Subject, Status: resp.Status, TxHash: resp.TxHash}, nil
+	return ApproveKYCResult{Subject: resp.Subject, Status: resp.Status, TxHash: resp.TxHash, PopNonce: resp.PopNonce}, nil
 }
 
 func (a *GRPCAdapter) ManageParticipantStatus(ctx context.Context, subject, statusVal, reason string) error {
