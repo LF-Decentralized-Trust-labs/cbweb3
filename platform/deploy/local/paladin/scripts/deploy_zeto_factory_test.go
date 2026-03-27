@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -161,6 +162,29 @@ func TestDeployZetoFactory(t *testing.T) {
 	}
 
 	zero := common.HexToAddress("0x0000000000000000000000000000000000000000")
+
+	// Lock verifiers: deploy from artifacts when available, otherwise use zero.
+	// The lock/transferLocked operations require on-chain Groth16 verifiers
+	// compiled from the Zeto ZKP circuits. When the artifact YAML files
+	// are provided, deploy them here. Until then, lock operations will revert.
+	lockVerifier := zero
+	batchLockVerifier := zero
+	lockArtifactPath := adir + "/core_v1alpha1_smartcontractdeployment_zeto_g16_lock.yaml"
+	if _, err := os.Stat(lockArtifactPath); err == nil {
+		lockBytecode, _ := readArtifact(t, lockArtifactPath)
+		lockVerifier = deployContract("G16_Lock", lockBytecode)
+	} else {
+		t.Log("WARN: G16_Lock artifact not found — LockVerifier set to zero address. " +
+			"Zeto lock operations will NOT work until the artifact is provided.")
+	}
+	batchLockArtifactPath := adir + "/core_v1alpha1_smartcontractdeployment_zeto_g16_lock_batch.yaml"
+	if _, err := os.Stat(batchLockArtifactPath); err == nil {
+		batchLockBytecode, _ := readArtifact(t, batchLockArtifactPath)
+		batchLockVerifier = deployContract("G16_BatchLock", batchLockBytecode)
+	} else {
+		t.Log("WARN: G16_BatchLock artifact not found — BatchLockVerifier set to zero address.")
+	}
+
 	calldata, err := parsedABI.Pack("registerImplementation",
 		"Zeto_AnonNullifier",
 		struct {
@@ -192,11 +216,11 @@ func TestDeployZetoFactory(t *testing.T) {
 				Verifier:              g16AntAddr,
 				DepositVerifier:       g16DepositAddr,
 				WithdrawVerifier:      g16WnAddr,
-				LockVerifier:          zero,
+				LockVerifier:          lockVerifier,
 				BurnVerifier:          zero,
 				BatchVerifier:         g16AntBatchAddr,
 				BatchWithdrawVerifier: g16WnBatchAddr,
-				BatchLockVerifier:     zero,
+				BatchLockVerifier:     batchLockVerifier,
 				BatchBurnVerifier:     zero,
 			},
 		},

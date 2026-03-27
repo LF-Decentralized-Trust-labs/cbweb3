@@ -36,6 +36,20 @@ paladin.deploy-contracts-spoke-a: paladin.deploy-registry-spoke-a paladin.deploy
 
 paladin.deploy-contracts-spoke-b: paladin.deploy-registry-spoke-b paladin.deploy-zeto-spoke-b
 
+# ── Zeto token instance creation (requires Paladin nodes running) ────────
+
+paladin.create-zeto-token-spoke-a:
+	@echo "Creating Zeto tCeBM token instance on spoke-a via Paladin API..."
+	@cd $(PALADIN_SCRIPTS) && \
+		SPOKE=spoke-a PALADIN_CB_URL=http://127.0.0.1:8548 \
+		go test ./... -run TestCreateZetoTokenInstance -v -count=1 -timeout $(PALADIN_TIMEOUT)
+
+paladin.create-zeto-token-spoke-b:
+	@echo "Creating Zeto tCeBM token instance on spoke-b via Paladin API..."
+	@cd $(PALADIN_SCRIPTS) && \
+		SPOKE=spoke-b PALADIN_CB_URL=http://127.0.0.1:8648 \
+		go test ./... -run TestCreateZetoTokenInstance -v -count=1 -timeout $(PALADIN_TIMEOUT)
+
 # ── node registration ────────────────────────────────────────────────────────
 
 paladin.register-nodes-spoke-a:
@@ -100,6 +114,7 @@ setup-spoke-a: deploy.up-spoke-a
 	@$(MAKE) paladin.start-spoke-a
 	@echo "Waiting for Paladin spoke-a nodes to be ready ($(PALADIN_READY_WAIT)s)..."
 	@sleep $(PALADIN_READY_WAIT)
+	@$(MAKE) paladin.create-zeto-token-spoke-a
 	@echo "Spoke-a setup complete."
 
 setup-spoke-b: deploy.up-spoke-b
@@ -113,6 +128,7 @@ setup-spoke-b: deploy.up-spoke-b
 	@$(MAKE) paladin.start-spoke-b
 	@echo "Waiting for Paladin spoke-b nodes to be ready ($(PALADIN_READY_WAIT)s)..."
 	@sleep $(PALADIN_READY_WAIT)
+	@$(MAKE) paladin.create-zeto-token-spoke-b
 	@echo "Spoke-b setup complete."
 
 setup-spoke-uc: setup-spoke-a setup-spoke-b
@@ -127,4 +143,5 @@ setup-spoke-uc: setup-spoke-a setup-spoke-b
 	paladin.render-configs-spoke-a paladin.render-configs-spoke-b \
 	paladin.start-spoke-a paladin.stop-spoke-a \
 	paladin.start-spoke-b paladin.stop-spoke-b \
+	paladin.create-zeto-token-spoke-a paladin.create-zeto-token-spoke-b \
 	setup-spoke-a setup-spoke-b setup-spoke-uc
