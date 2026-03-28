@@ -62,14 +62,16 @@ type SignedCSRResult struct {
 
 // ApproveKYCResult holds the result of an ApproveKYC call.
 type ApproveKYCResult struct {
-	Subject string
-	Status  string
-	TxHash  string
+	Subject  string
+	Status   string
+	TxHash   string
+	PopNonce string
 }
 
 // GRPCAdapter is the api-gateway adapter for the compliance-orchestrator gRPC service.
 type GRPCAdapter struct {
-	cc compliancv1.ComplianceServiceClient
+	conn *grpc.ClientConn
+	cc   compliancv1.ComplianceServiceClient
 }
 
 // NewGRPCAdapter connects to the compliance-orchestrator and returns a GRPCAdapter.
@@ -86,7 +88,15 @@ func NewGRPCAdapter(address string, timeout time.Duration) (*GRPCAdapter, error)
 	if err != nil {
 		return nil, err
 	}
-	return &GRPCAdapter{cc: compliancv1.NewComplianceServiceClient(conn)}, nil
+	return &GRPCAdapter{conn: conn, cc: compliancv1.NewComplianceServiceClient(conn)}, nil
+}
+
+// Close releases the underlying gRPC connection.
+func (a *GRPCAdapter) Close() error {
+	if a.conn != nil {
+		return a.conn.Close()
+	}
+	return nil
 }
 
 func (a *GRPCAdapter) ListParticipants(ctx context.Context, statusFilter, search string) ([]Participant, error) {
@@ -163,7 +173,7 @@ func (a *GRPCAdapter) ApproveKYC(ctx context.Context, subject, actorSubject, rea
 	if err != nil {
 		return ApproveKYCResult{}, err
 	}
-	return ApproveKYCResult{Subject: resp.Subject, Status: resp.Status, TxHash: resp.TxHash}, nil
+	return ApproveKYCResult{Subject: resp.Subject, Status: resp.Status, TxHash: resp.TxHash, PopNonce: resp.PopNonce}, nil
 }
 
 func (a *GRPCAdapter) ManageParticipantStatus(ctx context.Context, subject, statusVal, reason string) error {

@@ -1,0 +1,240 @@
+syntax = "proto3";
+
+package payment_orchestrator.v1;
+
+option go_package = "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1;paymentorchestratorv1";
+
+// ─── Enums ───────────────────────────────────────────────────────────────
+
+enum FXAgreementState {
+  FX_STATE_INVALID = 0;
+  FX_STATE_PROPOSED = 1;
+  FX_STATE_ACCEPTED = 2;
+  FX_STATE_REJECTED = 3;
+  FX_STATE_CANCELLED = 4;
+  FX_STATE_SETTLED = 5;
+}
+
+enum HTLCState {
+  HTLC_STATE_INVALID = 0;
+  HTLC_STATE_PENDING = 1;
+  HTLC_STATE_LOCKED = 2;
+  HTLC_STATE_SETTLED = 3;
+  HTLC_STATE_REFUNDED = 4;
+}
+
+// ─── FX Agreement Messages ───────────────────────────────────────────────
+
+message FXAgreement {
+  string trade_id = 1;
+  string counterparty_a = 2;
+  string counterparty_b = 3;
+  string base_token = 4;
+  string quote_token = 5;
+  string notional = 6;
+  string rate = 7;
+  uint64 expiry_date = 8;
+  FXAgreementState state = 9;
+}
+
+message ProposeFXAgreementRequest {
+  string trade_id = 1;
+  string counterparty_b = 2;
+  string base_token = 3;
+  string quote_token = 4;
+  string notional = 5;
+  string rate = 6;
+  uint64 expiry_date = 7;
+}
+
+message ProposeFXAgreementResponse {
+  string tx_hash = 1;
+  string trade_id = 2;
+}
+
+message AcceptFXAgreementRequest {
+  string trade_id = 1;
+}
+
+message AcceptFXAgreementResponse {
+  string tx_hash = 1;
+}
+
+message RejectFXAgreementRequest {
+  string trade_id = 1;
+}
+
+message RejectFXAgreementResponse {
+  string tx_hash = 1;
+}
+
+message CancelFXAgreementRequest {
+  string trade_id = 1;
+}
+
+message CancelFXAgreementResponse {
+  string tx_hash = 1;
+}
+
+message SettleFXAgreementRequest {
+  string trade_id = 1;
+}
+
+message SettleFXAgreementResponse {
+  string tx_hash = 1;
+}
+
+message GetFXAgreementRequest {
+  string trade_id = 1;
+}
+
+message GetFXAgreementResponse {
+  FXAgreement agreement = 1;
+}
+
+message ListFXAgreementsRequest {
+  string counterparty = 1;
+  string state = 2;
+}
+
+message ListFXAgreementsResponse {
+  repeated FXAgreement agreements = 1;
+}
+
+// ─── HTLC Messages ──────────────────────────────────────────────────────
+
+message HTLCLock {
+  string contract_id = 1;
+  string sender = 2;
+  string receiver = 3;
+  string hash_lock = 4;
+  uint64 time_lock = 5;
+  string secret = 6;
+  string zeto_lock_ref = 7;
+  HTLCState state = 8;
+}
+
+message LockHTLCRequest {
+  string agreement_id = 1;
+  string receiver = 2;
+  string amount = 3;
+  uint64 time_lock = 4;
+}
+
+message LockHTLCResponse {
+  string contract_id = 1;
+  string hash_lock = 2;
+  string htlc_tx_hash = 3;
+  string zeto_tx_hash = 4;
+}
+
+// LockHTLCWithHashLock creates an HTLC lock using an externally provided
+// hashLock (no secret is generated). Used by the responder spoke in a
+// cross-spoke atomic swap: the initiator generates the secret and shares
+// only the hashLock with the responder.
+message LockHTLCWithHashLockRequest {
+  string agreement_id = 1;
+  string receiver = 2;
+  string amount = 3;
+  uint64 time_lock = 4;
+  string hash_lock = 5; // Hex-encoded SHA-256 hash (from the initiator)
+}
+
+message LockHTLCWithHashLockResponse {
+  string contract_id = 1;
+  string hash_lock = 2;
+  string htlc_tx_hash = 3;
+  string zeto_tx_hash = 4;
+}
+
+message SettleHTLCRequest {
+  string contract_id = 1;
+  string secret = 2;
+}
+
+message SettleHTLCResponse {
+  string htlc_tx_hash = 1;
+  string zeto_tx_hash = 2;
+}
+
+message RefundHTLCRequest {
+  string contract_id = 1;
+}
+
+message RefundHTLCResponse {
+  string htlc_tx_hash = 1;
+  string zeto_tx_hash = 2;
+}
+
+message GetHTLCStatusRequest {
+  string contract_id = 1;
+}
+
+message GetHTLCStatusResponse {
+  HTLCLock lock = 1;
+}
+
+message SearchHTLCRequest {
+  string agreement_id = 1;
+  string sender = 2;
+  string receiver = 3;
+  string state = 4;
+}
+
+message SearchHTLCResponse {
+  repeated HTLCLock locks = 1;
+}
+
+// ─── Token Messages (Zeto via Paladin) ───────────────────────────────────
+
+message MintTokenRequest {
+  string to = 1;
+  string amount = 2;
+}
+
+message MintTokenResponse {
+  string tx_hash = 1;
+}
+
+message TransferTokenRequest {
+  string to = 1;
+  string amount = 2;
+}
+
+message TransferTokenResponse {
+  string tx_hash = 1;
+}
+
+message GetBalanceRequest {
+  string identity = 1;
+}
+
+message GetBalanceResponse {
+  string balance = 1;
+}
+
+// ─── Service ─────────────────────────────────────────────────────────────
+
+service PaymentOrchestratorService {
+  // FX Agreement lifecycle (mirrors FXAgreement.sol on Besu)
+  rpc ProposeFXAgreement(ProposeFXAgreementRequest) returns (ProposeFXAgreementResponse);
+  rpc AcceptFXAgreement(AcceptFXAgreementRequest) returns (AcceptFXAgreementResponse);
+  rpc RejectFXAgreement(RejectFXAgreementRequest) returns (RejectFXAgreementResponse);
+  rpc CancelFXAgreement(CancelFXAgreementRequest) returns (CancelFXAgreementResponse);
+  rpc SettleFXAgreement(SettleFXAgreementRequest) returns (SettleFXAgreementResponse);
+  rpc GetFXAgreement(GetFXAgreementRequest) returns (GetFXAgreementResponse);
+  rpc ListFXAgreements(ListFXAgreementsRequest) returns (ListFXAgreementsResponse);
+
+  // HTLC dual-layer operations (public coordination + private Zeto lock)
+  rpc LockHTLC(LockHTLCRequest) returns (LockHTLCResponse);
+  rpc LockHTLCWithHashLock(LockHTLCWithHashLockRequest) returns (LockHTLCWithHashLockResponse);
+  rpc SettleHTLC(SettleHTLCRequest) returns (SettleHTLCResponse);
+  rpc RefundHTLC(RefundHTLCRequest) returns (RefundHTLCResponse);
+  rpc GetHTLCStatus(GetHTLCStatusRequest) returns (GetHTLCStatusResponse);
+  rpc SearchHTLC(SearchHTLCRequest) returns (SearchHTLCResponse);
+
+  // Token operations (Zeto via Paladin sidecar)
+  rpc MintToken(MintTokenRequest) returns (MintTokenResponse);
+  rpc TransferToken(TransferTokenRequest) returns (TransferTokenResponse);
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+}

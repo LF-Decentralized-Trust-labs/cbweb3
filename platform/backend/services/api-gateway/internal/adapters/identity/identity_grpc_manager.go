@@ -17,7 +17,8 @@ import (
 // IdentityGRPCManager delegates identity and KYC operations to the identity service.
 // It implements KYCChecker, KYCManager, and ParticipantOnboarder.
 type IdentityGRPCManager struct {
-	cc authv1.AuthServiceClient
+	conn *grpc.ClientConn
+	cc   authv1.AuthServiceClient
 }
 
 func NewIdentityGRPCManager(address string, timeout time.Duration) (*IdentityGRPCManager, error) {
@@ -32,7 +33,21 @@ func NewIdentityGRPCManager(address string, timeout time.Duration) (*IdentityGRP
 	if err != nil {
 		return nil, err
 	}
-	return &IdentityGRPCManager{cc: authv1.NewAuthServiceClient(conn)}, nil
+	return NewIdentityGRPCManagerFromConn(conn), nil
+}
+
+// NewIdentityGRPCManagerFromConn wraps an existing gRPC connection.
+// The caller retains ownership of conn lifecycle when using this constructor.
+func NewIdentityGRPCManagerFromConn(conn *grpc.ClientConn) *IdentityGRPCManager {
+	return &IdentityGRPCManager{conn: conn, cc: authv1.NewAuthServiceClient(conn)}
+}
+
+// Close releases the underlying gRPC connection.
+func (m *IdentityGRPCManager) Close() error {
+	if m.conn != nil {
+		return m.conn.Close()
+	}
+	return nil
 }
 
 // --- KYCManager ---

@@ -5,41 +5,36 @@ import {Test} from "forge-std/Test.sol";
 import {HashTimeLockedContract} from "../src/HashTimeLockedContract.sol";
 import {IHashTimeLockedContract} from "../src/interfaces/IHashTimeLockedContract.sol";
 import {HashTimeLockedContractLibrary} from "../src/libraries/HashTimeLockedContractLibrary.sol";
-import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryLibrary} from "../src/libraries/IdentityRegistryLibrary.sol";
 import {DeployHTLC} from "../script/HashTimeLockedContract.s.sol";
 
 contract HashTimeLockedContractTest is Test {
-    /// @notice HTLC contract under test
-    HashTimeLockedContract public htlc;
+    event LogHTLCLocked(
+        bytes32 indexed contractId,
+        address indexed sender,
+        address indexed receiver,
+        bytes32 hashLock,
+        uint256 timeLock,
+        bytes32 zetoLockRef
+    );
+    event LogHTLCClaimed(bytes32 indexed contractId, bytes32 secret);
+    event LogHTLCRefunded(bytes32 indexed contractId);
 
-    /// @notice Identity Registry for clearance gate tests
+    HashTimeLockedContract public htlc;
     IdentityRegistry public identityRegistry;
 
-    /// @notice Mock token used as escrowed asset in tests
-    TokenizedCentralBankMoney public tCeBm;
-
-    /// @notice Test accounts
     address public admin = makeAddr("admin");
-    address public centralBank = makeAddr("centralBank");
     address public sender = makeAddr("sender");
     address public receiver = makeAddr("receiver");
 
-    /// @notice HTLC test variables
     bytes32 public contractId = keccak256("FX_AGREEMENT_001");
-    uint256 public lockAmount = 100 * 10 ** 18;
     bytes32 public secret = "super_secure_secret_preimage";
     bytes32 public hashLock = sha256(abi.encodePacked(secret));
+    bytes32 public zetoLockRef = keccak256("ZETO_LOCK_TX_001");
     uint256 public timeLock;
 
-    /// @notice Deploys and configures test fixtures for HTLC flows.
-    /// @dev Mints tokens to sender and sets allowance for the escrow contract.
     function setUp() public {
-        /// @dev 1. Deploy the tCeBm mock asset
-        tCeBm = new TokenizedCentralBankMoney("Tokenized BRL", "tCeBM_BRL", admin, centralBank);
-
-        /// @dev 2. Deploy IdentityRegistry and register test participants
         identityRegistry = new IdentityRegistry(admin);
         vm.startPrank(admin);
         identityRegistry.registerParticipant(
@@ -50,106 +45,102 @@ contract HashTimeLockedContractTest is Test {
         );
         vm.stopPrank();
 
-        /// @dev 3. Deploy the HTLC Escrow
         htlc = new HashTimeLockedContract(address(identityRegistry));
-
-        /// @dev 3. Mint tokens to the sender and approve the HTLC to spend them
-        vm.startPrank(centralBank);
-        tCeBm.mint(sender, lockAmount);
-        vm.stopPrank();
-
-        vm.prank(sender);
-        tCeBm.approve(address(htlc), lockAmount);
-
-        /// @dev Set the timeLock to 1 hour from the current block timestamp
         timeLock = block.timestamp + 1 hours;
     }
 
-    /// @dev Test that `lock` succeeds and funds are escrowed with state set to `LOCKED`.
     function test_Lock_Success() public {
         vm.prank(sender);
-        htlc.lock(contractId, receiver, address(tCeBm), lockAmount, hashLock, timeLock);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
 
         HashTimeLockedContractLibrary.LockDetails memory details = htlc.getLockDetails(contractId);
 
-        /// @dev Verify state and balances
         assertEq(uint256(details.state), uint256(HashTimeLockedContractLibrary.HTLCState.LOCKED));
-        assertEq(tCeBm.balanceOf(address(htlc)), lockAmount);
-        assertEq(tCeBm.balanceOf(sender), 0);
+        assertEq(details.sender, sender);
+        assertEq(details.receiver, receiver);
+        assertEq(details.hashLock, hashLock);
+        assertEq(details.timeLock, timeLock);
+        assertEq(details.zetoLockRef, zetoLockRef);
     }
 
-    /// @dev Test that `settle` succeeds with the correct secret preimage.
-    function test_Settle_Success() public {
-        /// @dev Setup: lock the funds
-        vm.prank(sender);
-        htlc.lock(contractId, receiver, address(tCeBm), lockAmount, hashLock, timeLock);
+    function test_Lock_EmitsEvent() public {
+        vm.expectEmit(true, true, true, true);
+        emit LogHTLCLocked(contractId, sender, receiver, hashLock, timeLock, zetoLockRef);
 
-        /// @dev Act: receiver (or anyone) settles with the valid secret
+        vm.prank(sender);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+    }
+
+    function test_Settle_Success() public {
+        vm.prank(sender);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+
         htlc.settle(contractId, secret);
 
         HashTimeLockedContractLibrary.LockDetails memory details = htlc.getLockDetails(contractId);
 
-        /// @dev Verify state and balances
         assertEq(uint256(details.state), uint256(HashTimeLockedContractLibrary.HTLCState.SETTLED));
         assertEq(details.secret, secret);
-        assertEq(tCeBm.balanceOf(address(htlc)), 0);
-        assertEq(tCeBm.balanceOf(receiver), lockAmount);
     }
 
-    /// @dev Test that `refund` succeeds only after `timeLock` expiry.
-    function test_Refund_Success() public {
-        /// @dev Setup: lock the funds
+    function test_Settle_EmitsEvent() public {
         vm.prank(sender);
-        htlc.lock(contractId, receiver, address(tCeBm), lockAmount, hashLock, timeLock);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
 
-        /// @dev Act: fast-forward chain time beyond `timeLock`
+        vm.expectEmit(true, true, true, true);
+        emit LogHTLCClaimed(contractId, secret);
+
+        htlc.settle(contractId, secret);
+    }
+
+    function test_Refund_Success() public {
+        vm.prank(sender);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+
         vm.warp(timeLock + 1 seconds);
 
-        /// @dev Sender executes the refund
         vm.prank(sender);
         htlc.refund(contractId);
 
         HashTimeLockedContractLibrary.LockDetails memory details = htlc.getLockDetails(contractId);
 
-        /// @dev Verify state and balances
         assertEq(uint256(details.state), uint256(HashTimeLockedContractLibrary.HTLCState.REFUNDED));
-        assertEq(tCeBm.balanceOf(address(htlc)), 0);
-        assertEq(tCeBm.balanceOf(sender), lockAmount);
     }
 
-    /// @dev Test that `lock` reverts when attempting to reuse an existing `contractId`.
+    function test_Refund_EmitsEvent() public {
+        vm.prank(sender);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+
+        vm.warp(timeLock + 1 seconds);
+
+        vm.expectEmit(true, true, true, true);
+        emit LogHTLCRefunded(contractId);
+
+        vm.prank(sender);
+        htlc.refund(contractId);
+    }
+
     function test_Revert_Lock_AlreadyExists() public {
         vm.startPrank(sender);
-        htlc.lock(contractId, receiver, address(tCeBm), lockAmount, hashLock, timeLock);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
 
         vm.expectRevert(IHashTimeLockedContract.HTLC__ContractAlreadyExists.selector);
-        htlc.lock(contractId, receiver, address(tCeBm), lockAmount, hashLock, timeLock);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
         vm.stopPrank();
     }
 
-    /// @dev Test that `lock` reverts when `amount` is zero.
-    function test_Revert_Lock_InvalidAmount() public {
-        bytes32 newContractId = keccak256("FX_AGREEMENT_INVALID_AMOUNT");
-
-        vm.prank(sender);
-        vm.expectRevert(IHashTimeLockedContract.HTLC__InvalidAmount.selector);
-        htlc.lock(newContractId, receiver, address(tCeBm), 0, hashLock, timeLock);
-    }
-
-    /// @dev Test that `lock` reverts when `timeLock` is already expired.
     function test_Revert_Lock_TimeLockExpired() public {
         bytes32 newContractId = keccak256("FX_AGREEMENT_EXPIRED_TIMELOCK");
         uint256 expiredTimeLock = block.timestamp;
 
         vm.prank(sender);
         vm.expectRevert(IHashTimeLockedContract.HTLC__TimeLockExpired.selector);
-        htlc.lock(newContractId, receiver, address(tCeBm), lockAmount, hashLock, expiredTimeLock);
+        htlc.lock(newContractId, receiver, hashLock, expiredTimeLock, zetoLockRef);
     }
 
-    /// @dev Test that `settle` reverts when the provided secret does not match `hashLock`.
     function test_Revert_Settle_InvalidSecret() public {
         vm.prank(sender);
-        htlc.lock(contractId, receiver, address(tCeBm), lockAmount, hashLock, timeLock);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
 
         bytes32 wrongSecret = "wrong_secret";
 
@@ -157,7 +148,6 @@ contract HashTimeLockedContractTest is Test {
         htlc.settle(contractId, wrongSecret);
     }
 
-    /// @dev Test that `settle` reverts when the contract is not in `LOCKED` state.
     function test_Revert_Settle_ContractNotLocked() public {
         bytes32 nonExistingContractId = keccak256("FX_AGREEMENT_NON_EXISTING_SETTLE");
 
@@ -165,17 +155,14 @@ contract HashTimeLockedContractTest is Test {
         htlc.settle(nonExistingContractId, secret);
     }
 
-    /// @dev Test that `refund` reverts before `timeLock` expiry.
     function test_Revert_Refund_TimeLockNotExpired() public {
         vm.prank(sender);
-        htlc.lock(contractId, receiver, address(tCeBm), lockAmount, hashLock, timeLock);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
 
-        /// @dev Attempt to refund immediately (before `vm.warp`)
         vm.expectRevert(IHashTimeLockedContract.HTLC__TimeLockNotExpired.selector);
         htlc.refund(contractId);
     }
 
-    /// @dev Test that `refund` reverts when the contract is not in `LOCKED` state.
     function test_Revert_Refund_ContractNotLocked() public {
         bytes32 nonExistingContractId = keccak256("FX_AGREEMENT_NON_EXISTING_REFUND");
 
@@ -183,24 +170,17 @@ contract HashTimeLockedContractTest is Test {
         htlc.refund(nonExistingContractId);
     }
 
-    /// @dev Test that lock reverts when caller is not verified in the IdentityRegistry.
     function test_Revert_Lock_UnverifiedSender() public {
         address unverified = makeAddr("unverifiedSender");
-        vm.startPrank(centralBank);
-        tCeBm.mint(unverified, lockAmount);
-        vm.stopPrank();
-
-        vm.startPrank(unverified);
-        tCeBm.approve(address(htlc), lockAmount);
         bytes32 newContractId = keccak256("FX_AGREEMENT_UNVERIFIED_SENDER");
+
+        vm.prank(unverified);
         vm.expectRevert(
             abi.encodeWithSelector(IHashTimeLockedContract.HTLC__ParticipantNotVerified.selector, unverified)
         );
-        htlc.lock(newContractId, receiver, address(tCeBm), lockAmount, hashLock, timeLock);
-        vm.stopPrank();
+        htlc.lock(newContractId, receiver, hashLock, timeLock, zetoLockRef);
     }
 
-    /// @dev Test that lock reverts when receiver is not verified in the IdentityRegistry.
     function test_Revert_Lock_UnverifiedReceiver() public {
         address unverifiedReceiver = makeAddr("unverifiedReceiver");
         bytes32 newContractId = keccak256("FX_AGREEMENT_UNVERIFIED_RECEIVER");
@@ -209,15 +189,26 @@ contract HashTimeLockedContractTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IHashTimeLockedContract.HTLC__ParticipantNotVerified.selector, unverifiedReceiver)
         );
-        htlc.lock(newContractId, unverifiedReceiver, address(tCeBm), lockAmount, hashLock, timeLock);
+        htlc.lock(newContractId, unverifiedReceiver, hashLock, timeLock, zetoLockRef);
+    }
+
+    function test_GetLockDetails_NonExisting() public view {
+        bytes32 unknownContractId = keccak256("UNKNOWN_CONTRACT_ID");
+        HashTimeLockedContractLibrary.LockDetails memory details = htlc.getLockDetails(unknownContractId);
+
+        assertEq(details.sender, address(0));
+        assertEq(details.receiver, address(0));
+        assertEq(details.hashLock, bytes32(0));
+        assertEq(details.timeLock, 0);
+        assertEq(details.secret, bytes32(0));
+        assertEq(details.zetoLockRef, bytes32(0));
+        assertEq(uint256(details.state), uint256(HashTimeLockedContractLibrary.HTLCState.INVALID));
     }
 }
 
 contract DeployHTLCTest is Test {
-    /// @notice Test deployment of HashTimeLockedContract via script
     DeployHTLC public deployScript;
 
-    /// @dev Deployment configuration
     uint256 private deployerPrivateKey;
     address private expectedDeployer;
 
@@ -228,41 +219,31 @@ contract DeployHTLCTest is Test {
         deployScript = new DeployHTLC();
         deployScript.setUp();
 
-        /// @dev Read script input from .env or use default test value
         deployerPrivateKey = vm.envOr(ENV_DEPLOYER_PRIVATE_KEY, uint256(0x1));
         expectedDeployer = vm.addr(deployerPrivateKey);
 
-        /// @dev Set environment variable for the script if not already set
         vm.setEnv(ENV_DEPLOYER_PRIVATE_KEY, vm.toString(deployerPrivateKey));
         vm.setEnv(ENV_IDENTITY_REGISTRY_ADDRESS, vm.toString(address(0x6789012345678901234567890123456789012345)));
     }
 
-    ///
-    /// @dev The script should successfully deploy the HTLC contract using env vars.
-    ///
     function test_ScriptRun_Success() public {
-        /// @dev Act
         deployScript.run();
         HashTimeLockedContract htlc = deployScript.htlc();
 
-        /// @dev Assert: contract deployment
         assertTrue(address(htlc) != address(0), "Contract was not deployed");
         assertGt(address(htlc).code.length, 0, "Deployed contract has no runtime bytecode");
 
-        /// @dev Assert: default lock details for non-existing contractId
         bytes32 unknownContractId = keccak256("UNKNOWN_CONTRACT_ID");
         HashTimeLockedContractLibrary.LockDetails memory details = htlc.getLockDetails(unknownContractId);
 
         assertEq(details.sender, address(0), "Default sender should be zero address");
         assertEq(details.receiver, address(0), "Default receiver should be zero address");
-        assertEq(details.token, address(0), "Default token should be zero address");
-        assertEq(details.amount, 0, "Default amount should be zero");
         assertEq(details.hashLock, bytes32(0), "Default hashLock should be zero");
         assertEq(details.timeLock, 0, "Default timeLock should be zero");
         assertEq(details.secret, bytes32(0), "Default secret should be zero");
+        assertEq(details.zetoLockRef, bytes32(0), "Default zetoLockRef should be zero");
         assertEq(uint256(details.state), uint256(HashTimeLockedContractLibrary.HTLCState.INVALID));
 
-        /// @dev Assert: ensure env-derived deployer address is valid
         assertTrue(expectedDeployer != address(0), "Expected deployer should not be zero address");
     }
 }

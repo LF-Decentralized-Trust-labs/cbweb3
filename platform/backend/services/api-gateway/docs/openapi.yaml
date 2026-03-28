@@ -1,13 +1,17 @@
 openapi: 3.0.3
 info:
   title: CBWeb3 API Gateway
-  version: 2.0.0
+  version: 2.1.0
   description: >
     OpenAPI specification for the CBWeb3 platform API Gateway.
     Implements authentication, participant onboarding, KYC/AML compliance,
-    and governance operations over the identity service (Keycloak + KMS).
-
+    governance operations over the identity service (Keycloak + KMS),
+    and payment orchestrator operations (HTLC dual-layer + Zeto token management
+    via Paladin sidecar).
+    
     Security note: All /compliance write endpoints require CENTRAL_BANK role.
+    Payment endpoints (HTLC + Token) are only available when the payment
+    orchestrator service is configured.
 servers:
   - url: http://localhost:8080
     description: Local development server
@@ -42,6 +46,21 @@ tags:
       Governance Portal — endpoints exclusive to the Central Bank (ROLE_GOVERNANCE).
       Participant registration, PKI certificate management, account control,
       circuit breaker, global parameters, audit logs, and user management.
+  - name: HTLC
+    description: >
+      Hash Time-Locked Contract (HTLC) dual-layer operations.
+      Coordinates public HTLC state on Hyperledger Besu with private token
+      locking via Zeto/Paladin. Supports lock, settle (happy path), and
+      refund (timeout path) lifecycle.
+      These endpoints are only available when the payment orchestrator
+      service is configured (PaymentHandler != nil).
+  - name: Token
+    description: >
+      Token operations — mint, transfer, and balance queries for tCeBM
+      (tokenized Central Bank Money) via the Zeto privacy-preserving token
+      system on Paladin sidecar.
+      These endpoints are only available when the payment orchestrator
+      service is configured (PaymentHandler != nil).
 paths:
   /healthz:
     get:
@@ -1367,6 +1386,281 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500": { $ref: "#/components/responses/InternalError" }
 
+  # ---------------------------------------------------------------------------
+  # Payment Orchestrator — HTLC (dual-layer: Besu + Zeto/Paladin)
+  # All endpoints below require: access_token cookie
+  # Only available when the payment orchestrator service is configured.
+  # ---------------------------------------------------------------------------
+
+  /api/v1/htlc/lock:
+    post:
+      tags: [HTLC]
+      summary: Create a dual-layer HTLC lock
+      description: >
+        Locks tokens via a Hash Time-Locked Contract. The secret is generated
+        internally; a hash lock is derived from it. On the public layer (Besu)
+        the HTLC coordination contract records the lock metadata, while on the
+        private layer (Zeto/Paladin) the actual token amount is locked.
+      operationId: lockHTLC
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LockHTLCRequest"
+      responses:
+        "201":
+          description: HTLC created and tokens locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LockHTLCResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/settle:
+    post:
+      tags: [HTLC]
+      summary: Settle an HTLC by revealing the secret
+      description: >
+        Happy-path settlement. The caller reveals the pre-image (secret) that
+        hashes to the hash lock. The contract validates SHA-256(secret) == hashLock,
+        then calls Zeto transferLocked() to release the privately locked tokens
+        to the receiver.
+      operationId: settleHTLC
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettleHTLCRequest"
+      responses:
+        "200":
+          description: HTLC settled — tokens released to receiver
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettleHTLCResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/refund:
+    post:
+      tags: [HTLC]
+      summary: Refund an HTLC after timelock expiry
+      description: >
+        Timeout-path refund. If the timelock has expired and the secret was
+        never revealed, the sender can reclaim the locked tokens via
+        Zeto unlock().
+      operationId: refundHTLC
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundHTLCRequest"
+      responses:
+        "200":
+          description: HTLC refunded — tokens returned to sender
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundHTLCResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/status/{contractId}:
+    get:
+      tags: [HTLC]
+      summary: Get the status of a specific HTLC
+      description: >
+        Returns the full HTLC lock record including state, hash lock,
+        time lock, sender, receiver, and optionally the secret (only visible
+        to the lock creator).
+      operationId: getHTLCStatus
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: HTLC contract identifier returned by POST /htlc/lock
+      responses:
+        "200":
+          description: HTLC status returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetHTLCStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/search:
+    get:
+      tags: [HTLC]
+      summary: Search HTLC locks by criteria
+      description: >
+        Returns a list of HTLC lock records matching the provided filters.
+        All query parameters are optional; when none are provided, all locks
+        visible to the caller are returned.
+      operationId: searchHTLC
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: agreement_id
+          in: query
+          schema:
+            type: string
+          description: Filter by FX agreement identifier
+        - name: sender
+          in: query
+          schema:
+            type: string
+          description: Filter by sender identity
+        - name: receiver
+          in: query
+          schema:
+            type: string
+          description: Filter by receiver identity
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [LOCKED, SETTLED, REFUNDED]
+          description: Filter by HTLC state
+      responses:
+        "200":
+          description: Matching HTLC locks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchHTLCResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ---------------------------------------------------------------------------
+  # Payment Orchestrator — Token (Zeto via Paladin)
+  # All endpoints below require: access_token cookie
+  # Only available when the payment orchestrator service is configured.
+  # ---------------------------------------------------------------------------
+
+  /api/v1/token/mint:
+    post:
+      tags: [Token]
+      summary: Mint tCeBM tokens
+      description: >
+        Issues new tCeBM (tokenized Central Bank Money) to the specified
+        Paladin identity via the Zeto privacy-preserving token system.
+      operationId: mintToken
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MintTokenRequest"
+      responses:
+        "201":
+          description: Tokens minted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MintTokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/token/transfer:
+    post:
+      tags: [Token]
+      summary: Transfer tCeBM tokens
+      description: >
+        Transfers tCeBM tokens to the specified Paladin identity via
+        Zeto's privacy-preserving transfer mechanism.
+      operationId: transferToken
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransferTokenRequest"
+      responses:
+        "200":
+          description: Tokens transferred successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransferTokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/token/balance:
+    get:
+      tags: [Token]
+      summary: Get token balance for a Paladin identity
+      description: >
+        Returns the tCeBM balance for the specified Paladin identity.
+      operationId: getTokenBalance
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: identity
+          in: query
+          required: true
+          schema:
+            type: string
+          description: >
+            Paladin identity to query (e.g. "funded_operator@spoke-a-cb")
+      responses:
+        "200":
+          description: Balance returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetBalanceResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   securitySchemes:
     CookieAuth:
@@ -2050,3 +2344,201 @@ components:
           type: integer
           description: Total number of users matching the filter
           example: 12
+
+    # --- HTLC schemas ---
+
+    LockHTLCRequest:
+      type: object
+      required: [agreement_id, receiver, amount, time_lock]
+      properties:
+        agreement_id:
+          type: string
+          description: FX agreement or trade identifier linking this HTLC
+          example: "FX_CROSS_SPOKE_001"
+        receiver:
+          type: string
+          description: Paladin identity of the token receiver
+          example: "funded_operator@spoke-b-cb"
+        amount:
+          type: string
+          description: Token amount to lock (big integer as string)
+          example: "1000000"
+        time_lock:
+          type: integer
+          format: int64
+          description: Unix timestamp (seconds) after which the sender can refund
+          example: 1711500000
+
+    LockHTLCResponse:
+      type: object
+      required: [contract_id, hash_lock]
+      properties:
+        contract_id:
+          type: string
+          description: Unique HTLC contract identifier
+          example: "htlc-a1b2c3d4"
+        hash_lock:
+          type: string
+          description: SHA-256 hash of the secret (hex-encoded)
+          example: "0xabcdef1234567890..."
+        htlc_tx_hash:
+          type: string
+          description: On-chain (Besu) transaction hash for HTLC coordination
+          example: "0x1234..."
+        zeto_tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for private token lock
+          example: "0x5678..."
+
+    SettleHTLCRequest:
+      type: object
+      required: [contract_id, secret]
+      properties:
+        contract_id:
+          type: string
+          description: HTLC contract identifier (from LockHTLCResponse)
+          example: "htlc-a1b2c3d4"
+        secret:
+          type: string
+          description: Pre-image whose SHA-256 hash equals the hash lock
+          example: "deadbeef01234567..."
+
+    SettleHTLCResponse:
+      type: object
+      properties:
+        htlc_tx_hash:
+          type: string
+          description: On-chain (Besu) transaction hash for settle
+          example: "0x1234..."
+        zeto_tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for token release
+          example: "0x5678..."
+
+    RefundHTLCRequest:
+      type: object
+      required: [contract_id]
+      properties:
+        contract_id:
+          type: string
+          description: HTLC contract identifier (from LockHTLCResponse)
+          example: "htlc-a1b2c3d4"
+
+    RefundHTLCResponse:
+      type: object
+      properties:
+        htlc_tx_hash:
+          type: string
+          description: On-chain (Besu) transaction hash for refund
+          example: "0x1234..."
+        zeto_tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for token unlock
+          example: "0x5678..."
+
+    HTLCLock:
+      type: object
+      description: Full HTLC lock record
+      properties:
+        contract_id:
+          type: string
+          description: Unique HTLC contract identifier
+        sender:
+          type: string
+          description: Paladin identity of the token sender/locker
+        receiver:
+          type: string
+          description: Paladin identity of the intended token receiver
+        hash_lock:
+          type: string
+          description: SHA-256 hash of the secret (hex-encoded)
+        time_lock:
+          type: integer
+          format: int64
+          description: Unix timestamp (seconds) after which the sender can refund
+        secret:
+          type: string
+          description: >
+            Pre-image of the hash lock. Only visible to the lock creator;
+            empty for other callers until the HTLC is settled.
+        zeto_lock_ref:
+          type: string
+          description: Reference to the Zeto locked UTXO
+        state:
+          type: string
+          enum:
+            - HTLC_STATE_INVALID
+            - HTLC_STATE_PENDING
+            - HTLC_STATE_LOCKED
+            - HTLC_STATE_SETTLED
+            - HTLC_STATE_REFUNDED
+          description: Current lifecycle state of the HTLC
+
+    GetHTLCStatusResponse:
+      type: object
+      properties:
+        lock:
+          $ref: "#/components/schemas/HTLCLock"
+
+    SearchHTLCResponse:
+      type: object
+      properties:
+        locks:
+          type: array
+          items:
+            $ref: "#/components/schemas/HTLCLock"
+        total:
+          type: integer
+          description: Number of matching HTLC locks
+
+    # --- Token schemas ---
+
+    MintTokenRequest:
+      type: object
+      required: [to, amount]
+      properties:
+        to:
+          type: string
+          description: Paladin identity to receive the minted tokens
+          example: "funded_operator@spoke-a-cb"
+        amount:
+          type: string
+          description: Amount to mint (big integer as string)
+          example: "10000000"
+
+    MintTokenResponse:
+      type: object
+      properties:
+        tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for the mint operation
+          example: "0x1234..."
+
+    TransferTokenRequest:
+      type: object
+      required: [to, amount]
+      properties:
+        to:
+          type: string
+          description: Paladin identity to receive the tokens
+          example: "funded_operator@spoke-b-cb"
+        amount:
+          type: string
+          description: Amount to transfer (big integer as string)
+          example: "500000"
+
+    TransferTokenResponse:
+      type: object
+      properties:
+        tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for the transfer
+          example: "0x5678..."
+
+    GetBalanceResponse:
+      type: object
+      properties:
+        balance:
+          type: string
+          description: Current tCeBM balance (big integer as string)
+          example: "9000000"

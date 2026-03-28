@@ -68,11 +68,12 @@ func mustNewGateway(t *testing.T) *fiber.App {
 		ComplianceGRPCAddr: complianceAddr,
 	}
 
-	server, err := app.New(cfg)
+	application, err := app.New(cfg)
 	if err != nil {
 		t.Fatalf("failed to initialize app: %v", err)
 	}
-	return server
+	t.Cleanup(func() { _ = application.Shutdown() })
+	return application.Fiber
 }
 
 type complianceMockService struct {

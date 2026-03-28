@@ -71,12 +71,30 @@ contracts.deploy-spoke-b:
 
 contracts.deploy-all: contracts.setup contracts.deploy-spoke-a contracts.deploy-spoke-b
 
+contracts.register-participants-spoke-a:
+	@echo "Registering participants in compliance IdentityRegistry on spoke-a..."
+	@REGISTRY=$$(grep PARTICIPANT_REGISTRY_ADDRESS backend/config/.env.infra.bank-a | cut -d= -f2-) && \
+	 cd contracts && ADMIN_PRIVATE_KEY=0xc87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3 \
+		IDENTITY_REGISTRY=$$REGISTRY \
+		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/RegisterParticipants.s.sol:RegisterParticipants \
+		--rpc-url ${SPOKE_A_RPC_URL} --broadcast
+
+contracts.register-participants-spoke-b:
+	@echo "Registering participants in compliance IdentityRegistry on spoke-b..."
+	@REGISTRY=$$(grep PARTICIPANT_REGISTRY_ADDRESS backend/config/.env.infra.bank-b | cut -d= -f2-) && \
+	 cd contracts && ADMIN_PRIVATE_KEY=0xc87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3 \
+		IDENTITY_REGISTRY=$$REGISTRY \
+		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/RegisterParticipants.s.sol:RegisterParticipants \
+		--rpc-url ${SPOKE_B_RPC_URL} --broadcast
+
+contracts.register-participants: contracts.register-participants-spoke-a contracts.register-participants-spoke-b
+
 contracts.deploy-cbweb3-besu: contracts.deploy-hub
 
 contracts.sync-addresses:
 	@./deploy/local/tools/sync-contracts.sh
 
-contracts.deploy-all-with-sync: contracts.deploy-all contracts.sync-addresses
+contracts.deploy-all-with-sync: contracts.deploy-all contracts.sync-addresses contracts.register-participants
 
 contracts.deploy-cbweb3-with-sync: contracts.deploy-all-with-sync
 
@@ -101,4 +119,4 @@ contracts.abigen: contracts.build
 	@rm -f /tmp/IdentityRegistry.abi
 	@echo "Go bindings generated at $(ABIGEN_OUT_DIR)/identity_registry.go"
 
-.PHONY: contracts.setup contracts.fmt contracts.lint contracts.test contracts.coverage contracts.build contracts.clean contracts.gen-doc contracts.serve-doc contracts.deploy-tcebm-besu contracts.deploy-htlc-besu contracts.deploy-amm-besu contracts.deploy-identity-registry-besu contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b contracts.deploy-all contracts.deploy-cbweb3-besu contracts.sync-addresses contracts.deploy-all-with-sync contracts.deploy-cbweb3-with-sync contracts.slither contracts.full-check contracts.abigen
+.PHONY: contracts.setup contracts.fmt contracts.lint contracts.test contracts.coverage contracts.build contracts.clean contracts.gen-doc contracts.serve-doc contracts.deploy-tcebm-besu contracts.deploy-htlc-besu contracts.deploy-amm-besu contracts.deploy-identity-registry-besu contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b contracts.deploy-all contracts.deploy-cbweb3-besu contracts.sync-addresses contracts.deploy-all-with-sync contracts.deploy-cbweb3-with-sync contracts.slither contracts.full-check contracts.abigen contracts.register-participants contracts.register-participants-spoke-a contracts.register-participants-spoke-b

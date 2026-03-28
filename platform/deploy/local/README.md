@@ -146,7 +146,7 @@ Paladin nodes run on the same Docker network as Besu (`spoke_a_besu_network` / `
 
 #### Setup steps (automated by `make setup-spoke-a` / `make setup-spoke-b`)
 
-1. **Deploy contracts** — deploys a Paladin `IdentityRegistry` and a `ZetoFactory` (with `Zeto_AnonNullifier` implementation) to the spoke's Besu network. Contract addresses are written to `paladin/spoke-{a,b}/.deployed-addrs.env`.
+1. **Deploy contracts** — deploys a Paladin `IdentityRegistry` and a `ZetoFactory` (with `Zeto_Anon` implementation) to the spoke's Besu network. Contract addresses are written to `paladin/spoke-{a,b}/.deployed-addrs.env`.
 2. **Generate TLS certificates** — creates self-signed P-256 certificates for each node's gRPC transport (`paladin/spoke-{a,b}/config/<node>/tls.{crt,key}`).
 3. **Render configs** — substitutes contract addresses from `.deployed-addrs.env` into each node's `config.yaml.tmpl`, producing `config.yaml`.
 4. **Register nodes** — calls `registerIdentity` and `setIdentityProperty(transport.grpc)` on the `IdentityRegistry` for all three nodes.
@@ -162,7 +162,7 @@ paladin/
   scripts/            # Go programs for contract deployment and node registration
     cmd/
       deploy-registry/       # Deploys IdentityRegistry
-      deploy-zeto-factory/   # Deploys ZetoFactory + Zeto_AnonNullifier impl
+      deploy-zeto-factory/   # Deploys ZetoFactory + Zeto_Anon impl
       register-nodes/        # Registers nodes in IdentityRegistry
     helpers.go               # Shared helpers (artifact reading, bytecode linking)
   spoke-a/

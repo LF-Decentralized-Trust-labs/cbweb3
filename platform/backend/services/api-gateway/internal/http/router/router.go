@@ -14,6 +14,7 @@ type Dependencies struct {
 	AuthHandler            *handlers.AuthHandler
 	ComplianceHandler      *handlers.ComplianceHandler
 	GovernanceHandler      *handlers.GovernanceHandler
+	PaymentHandler         *handlers.PaymentHandler         // Payment orchestrator: HTLC + token operations
 	OnboardingHandler      *handlers.OnboardingHandler      // Central Bank: processes onboarding locally
 	OnboardingProxyHandler *handlers.OnboardingProxyHandler // Commercial Bank: proxies onboarding to CB
 	AuthProvider           interfaces.IAuthProvider
@@ -106,4 +107,22 @@ func Setup(app *fiber.App, deps Dependencies) {
 	// User management (list and get registered participants)
 	govGroup.Get("/users", deps.GovernanceHandler.ListUsers)
 	govGroup.Get("/users/:userId", deps.GovernanceHandler.GetUser)
+
+	// --- Payment Orchestrator (HTLC + Token) ---
+	if deps.PaymentHandler != nil {
+		payGroup := app.Group("/api/v1", middleware.RequireCookieAuth(deps.AuthProvider))
+
+		htlcGroup := payGroup.Group("/htlc")
+		htlcGroup.Post("/lock", deps.PaymentHandler.LockHTLC)
+		htlcGroup.Post("/lock-with-hash", deps.PaymentHandler.LockHTLCWithHashLock)
+		htlcGroup.Post("/settle", deps.PaymentHandler.SettleHTLC)
+		htlcGroup.Post("/refund", deps.PaymentHandler.RefundHTLC)
+		htlcGroup.Get("/status/:contractId", deps.PaymentHandler.GetHTLCStatus)
+		htlcGroup.Get("/search", deps.PaymentHandler.SearchHTLC)
+
+		tokenGroup := payGroup.Group("/token")
+		tokenGroup.Post("/mint", deps.PaymentHandler.MintToken)
+		tokenGroup.Post("/transfer", deps.PaymentHandler.TransferToken)
+		tokenGroup.Get("/balance", deps.PaymentHandler.GetBalance)
+	}
 }

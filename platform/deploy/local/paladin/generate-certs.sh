@@ -13,8 +13,8 @@ SPOKE="${SPOKE:-spoke-a}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 case "$SPOKE" in
-  spoke-a) NODE_PAIRS="central-bank:paladin-spoke-a-cb bank-a:paladin-spoke-a-bank-a bank-c:paladin-spoke-a-bank-c" ;;
-  spoke-b) NODE_PAIRS="central-bank:paladin-spoke-b-cb bank-b:paladin-spoke-b-bank-b bank-d:paladin-spoke-b-bank-d" ;;
+  spoke-a) NODE_PAIRS="central-bank:paladin-spoke-a-cb:spoke-a-cb bank-a:paladin-spoke-a-bank-a:spoke-a-bank-a bank-c:paladin-spoke-a-bank-c:spoke-a-bank-c" ;;
+  spoke-b) NODE_PAIRS="central-bank:paladin-spoke-b-cb:spoke-b-cb bank-b:paladin-spoke-b-bank-b:spoke-b-bank-b bank-d:paladin-spoke-b-bank-d:spoke-b-bank-d" ;;
   *)
     echo "ERROR: SPOKE must be 'spoke-a' or 'spoke-b'" >&2
     exit 1
@@ -22,18 +22,17 @@ case "$SPOKE" in
 esac
 
 for pair in $NODE_PAIRS; do
-  name="${pair%%:*}"
-  hostname="${pair##*:}"
+  IFS=: read -r name hostname nodename <<< "$pair"
   cert_dir="$SCRIPT_DIR/$SPOKE/config/$name"
   mkdir -p "$cert_dir"
 
-  echo "Generating TLS cert for '$name' (hostname: $hostname) ..."
+  echo "Generating TLS cert for '$nodename' (hostname: $hostname) ..."
   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
     -days 3650 -nodes \
     -keyout "$cert_dir/tls.key" \
     -out  "$cert_dir/tls.crt" \
-    -subj "/CN=$name" \
-    -addext "subjectAltName=DNS:$hostname,DNS:$name,DNS:localhost" \
+    -subj "/CN=$nodename" \
+    -addext "subjectAltName=DNS:$hostname,DNS:$nodename,DNS:$name,DNS:localhost" \
     2>/dev/null
 
   chmod 644 "$cert_dir/tls.crt"
