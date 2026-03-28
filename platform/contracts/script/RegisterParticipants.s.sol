@@ -5,14 +5,49 @@ import {Script, console} from "forge-std/Script.sol";
 import {IIdentityRegistry} from "../src/interfaces/IIdentityRegistry.sol";
 import {IdentityRegistryLibrary} from "../src/libraries/IdentityRegistryLibrary.sol";
 
-/// @title RegisterParticipants
-/// @notice Registers bank operator addresses as verified participants in the
-///         compliance IdentityRegistry so that on-chain HTLC calls pass the
-///         `onlyVerified` modifier.
-/// @dev Run per spoke after contract deployment:
-///   IDENTITY_REGISTRY=0x42699A7612A82f1d9C36148af9C77354759b210b \
-///   forge script script/RegisterParticipants.s.sol:RegisterParticipants \
-///     --rpc-url $SPOKE_RPC_URL --broadcast
+/// @title RegisterParticipants — Local Dev Convenience Script
+/// @notice Registers hardcoded Besu genesis addresses as verified participants
+///         in the compliance IdentityRegistry so that the on-chain HTLC
+///         coordination contract's `onlyVerified` modifier does not revert.
+///
+/// @dev **Purpose**
+///      This script exists solely to make the happy-path testing of the
+///      cross-spoke atomic swap easier when running the tryout scripts
+///      (e.g. `./tryout-htlc-cross-spoke.sh`).
+///
+///      In production the participant registration is handled by the full
+///      3-phase onboarding flow (credential request → KYC approval → PoP),
+///      which is exercised by `./tryout-spoke-a-bank-a.sh`.
+///      This script bypasses that flow by writing directly to the on-chain
+///      IdentityRegistry with the governance key.
+///
+///      **When is it run?**
+///      Automatically as part of:
+///        • `make spoke-all`  (via `contracts.register-participants-spoke-{a,b}`)
+///        • `make dev.up`     (via `contracts.deploy-all-with-sync`)
+///      Or manually:
+///        • `make contracts.register-participants`
+///
+///      **What it registers**
+///      Three Besu genesis accounts used by the local dev payment-orchestrator
+///      containers (configured via BESU_OPERATOR_KEY in docker-compose):
+///
+///        | Address                                    | Role            | Key (BESU_OPERATOR_KEY)   |
+///        |--------------------------------------------|-----------------|---------------------------|
+///        | 0x627306090abaB3A6e1400e9345bC60c78a8BEf57 | CENTRAL_BANK    | c87509a1… (CB)            |
+///        | 0xf17f52151EbEF6C7334FAD080c5704D77216b732 | COMMERCIAL_BANK | ae6ae8e5… (Bank-A/B)      |
+///        | 0xe4add986E80022C0741874841d4ac231B1d7d254 | COMMERCIAL_BANK | 5b02fc9a… (Bank-C/D)      |
+///
+///      The script is idempotent — it skips addresses that are already registered.
+///
+///      **Environment variables**
+///        ADMIN_PRIVATE_KEY  — Private key with GOVERNANCE_ROLE (CB key in local dev)
+///        IDENTITY_REGISTRY  — Address of the compliance IdentityRegistry contract
+///
+///      **Example (standalone)**
+///        ADMIN_PRIVATE_KEY=0xc87509a1… IDENTITY_REGISTRY=0x42699A76… \
+///          forge script script/RegisterParticipants.s.sol:RegisterParticipants \
+///          --rpc-url http://127.0.0.1:8645 --broadcast
 contract RegisterParticipants is Script {
     struct Participant {
         address account;
