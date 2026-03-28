@@ -57,6 +57,13 @@ Security is a primary directive in this repository. The codebase strictly enforc
 - [Docker](https://www.docker.com/) (Required for running the Slither static analysis suite)
 - [Make](https://www.gnu.org/software/make/) (For executing Makefile commands)
 
+### Installing Foundry
+
+```bash
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+```
+
 ## 🚀 Getting Started
 
 ### 1. Installation
