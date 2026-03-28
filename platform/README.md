@@ -28,8 +28,6 @@ This repository proposes a **reference structure** for the CBWeb3 platform codeb
 /frontend                  (operator consoles, dashboards)
   apps/console/
   packages/ui/
-  public/
-  src/
 
 /apis
   openapi/                 (YAML contracts per domain)

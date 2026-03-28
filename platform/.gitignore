@@ -26,6 +26,10 @@ artifacts/
 
 # OS
 .DS_Store
+AGENTS.md
+.github/agents/
+.github/copilot-instructions.md.agent/
+.agent/
 
 # Custom agent assets
 .github/assets/*
