@@ -50,19 +50,16 @@ domains:
     config:
       domainContracts:
         implementations:
-          - name: "Zeto_AnonNullifier"
+          - name: "Zeto_Anon"
             circuits:
               deposit:
                 name: "deposit"
               withdraw:
-                name: "withdraw_nullifier"
-                usesNullifiers: true
+                name: "withdraw"
               transfer:
-                name: "anon_nullifier_transfer"
-                usesNullifiers: true
+                name: "anon"
               transferLocked:
-                name: "anon_nullifier_transferLocked"
-                usesNullifiers: true
+                name: "anon"
       snarkProver:
         circuitsDir: "/app/domains/zeto/zkp"
         provingKeysDir: "/app/domains/zeto/zkp"
