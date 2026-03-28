@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -127,19 +126,16 @@ func TestRegisterPaladinNodes(t *testing.T) {
 	registry := registryAddressFromEnv(t)
 	t.Logf("IdentityRegistry: %s", registry.Hex())
 
-	identityRegisteredEvent := parsedABI.Events["IdentityRegistered"]
-	logs, err := client.FilterLogs(ctx, ethereum.FilterQuery{
-		FromBlock: big.NewInt(0),
-		ToBlock:   big.NewInt(10),
-		Addresses: []common.Address{registry},
-		Topics:    [][]common.Hash{{identityRegisteredEvent.ID}},
-	})
+	// Validate registry contract exists by checking bytecode
+	code, err := client.CodeAt(ctx, registry, nil)
 	if err != nil {
-		t.Fatalf("filter logs: %v", err)
+		t.Fatalf("failed to get contract code: %v", err)
 	}
-	if len(logs) == 0 {
-		t.Fatal("no IdentityRegistered events found — was the registry deployed?")
+	if len(code) == 0 {
+		t.Fatal("registry contract not deployed at specified address")
 	}
+
+	identityRegisteredEvent := parsedABI.Events["IdentityRegistered"]
 
 	sendTx := func(label string, privKey *ecdsa.PrivateKey, nonce *uint64, to common.Address, calldata []byte) *types.Receipt {
 		t.Helper()

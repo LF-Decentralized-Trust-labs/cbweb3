@@ -87,7 +87,7 @@ type ptxGetTxResponse struct {
 	Error  *rpcError     `json:"error,omitempty"`
 }
 
-// TestCreateZetoTokenInstance creates a Zeto_AnonNullifier token instance via
+// TestCreateZetoTokenInstance creates a Zeto_Anon token instance via
 // the Paladin API. This is required before any mint/transfer/lock operations.
 // The token contract address is written to .deployed-addrs.env as ZETO_TOKEN_ADDRESS.
 //
@@ -114,7 +114,7 @@ func TestCreateZetoTokenInstance(t *testing.T) {
 		}},
 		Function: "",
 		Data: zetoConstructorData{
-			TokenName: "Zeto_AnonNullifier",
+			TokenName: "Zeto_Anon",
 		},
 	}
 

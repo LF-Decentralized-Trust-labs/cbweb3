@@ -6,6 +6,7 @@
 spoke-a: pki.gen-central-bank-a pki.gen-bank-a pki.gen-bank-c pki.gen-commercial-banks
 	$(MAKE) deploy.up-infra deploy.up-spoke-a
 	$(MAKE) contracts.setup contracts.deploy-spoke-a contracts.sync-addresses
+	$(MAKE) contracts.register-participants-spoke-a
 	$(MAKE) paladin.deploy-contracts-spoke-a
 	$(MAKE) paladin.generate-certs-spoke-a
 	$(MAKE) paladin.render-configs-spoke-a
@@ -24,6 +25,7 @@ spoke-a-down: deploy.down-backend-spoke-a paladin.stop-spoke-a deploy.down-spoke
 spoke-b: pki.gen-central-bank-b pki.gen-bank-b pki.gen-bank-d pki.gen-commercial-banks
 	$(MAKE) deploy.up-infra deploy.up-spoke-b
 	$(MAKE) contracts.setup contracts.deploy-spoke-b contracts.sync-addresses
+	$(MAKE) contracts.register-participants-spoke-b
 	$(MAKE) paladin.deploy-contracts-spoke-b
 	$(MAKE) paladin.generate-certs-spoke-b
 	$(MAKE) paladin.render-configs-spoke-b
@@ -39,12 +41,22 @@ spoke-b: pki.gen-central-bank-b pki.gen-bank-b pki.gen-bank-d pki.gen-commercial
 spoke-b-down: deploy.down-backend-spoke-b paladin.stop-spoke-b deploy.down-spoke-b
 	@echo "Spoke-B stack is down (shared infra left running)."
 
+relay-up:
+	@echo "Starting HTLC cross-spoke relay..."
+	@docker compose -f interop/hub-and-spoke/relay/docker-compose.yaml up -d --build
+
+relay-down:
+	@echo "Stopping HTLC cross-spoke relay..."
+	@docker compose -f interop/hub-and-spoke/relay/docker-compose.yaml down
+
 spoke-all:
 	$(MAKE) spoke-a
 	$(MAKE) spoke-b
-	@echo "Both Spoke-A and Spoke-B stacks are up."
+	$(MAKE) relay-up
+	@echo "Both Spoke-A and Spoke-B stacks are up (with relay)."
 
 spoke-all-down:
+	$(MAKE) relay-down
 	$(MAKE) spoke-b-down
 	$(MAKE) spoke-a-down
 	@echo "Both Spoke-A and Spoke-B stacks are down (shared infra left running)."
@@ -81,7 +93,7 @@ dev.down-central-bank-a: deploy.down-backend-central-bank-a
 dev.up-central-bank-b: pki.gen-central-bank-b deploy.up-infra deploy.up-spoke-b deploy.up-backend-central-bank-b
 dev.down-central-bank-b: deploy.down-backend-central-bank-b
 
-.PHONY: spoke-a spoke-a-down spoke-b spoke-b-down spoke-all spoke-all-down \
+.PHONY: spoke-a spoke-a-down spoke-b spoke-b-down spoke-all spoke-all-down relay-up relay-down \
 	dev.up dev.down \
 	dev.up-bank-a dev.down-bank-a dev.up-bank-b dev.down-bank-b \
 	dev.up-bank-c dev.down-bank-c dev.up-bank-d dev.down-bank-d \

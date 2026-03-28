@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -18,9 +17,9 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-// TestDeployZetoFactory deploys the full Zeto_AnonNullifier infrastructure
-// (PoseidonUnits, verifiers, SmtLib, impl, factory) and registers the
-// implementation. Writes ZETO_FACTORY_ADDRESS to the spoke's .deployed-addrs.env.
+// TestDeployZetoFactory deploys the Zeto_Anon infrastructure
+// (verifiers, impl, factory) and registers the implementation.
+// Writes ZETO_FACTORY_ADDRESS to the spoke's .deployed-addrs.env.
 //
 // Run:
 //
@@ -119,40 +118,24 @@ func TestDeployZetoFactory(t *testing.T) {
 		t.Fatalf("timeout waiting for receipt of %s call", name)
 	}
 
-	// Tier 1 — no library deps
-	poseidon2lBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_poseidon_unit2l.yaml")
-	poseidon3lBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_poseidon_unit3l.yaml")
+	// Deploy verifiers + factory (no library deps needed for Zeto_Anon)
 	g16DepositBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_g16_deposit.yaml")
-	g16WnBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_g16_withdraw_nullifier.yaml")
-	g16WnBatchBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_g16_withdraw_nullifier_batch.yaml")
-	g16AntBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_g16_anon_nullifier_transfer.yaml")
-	g16AntBatchBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_g16_anon_nullifier_transfer_batch.yaml")
+	g16WithdrawBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_g16_withdraw.yaml")
+	g16WithdrawBatchBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_g16_withdraw_batch.yaml")
+	g16AnonBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_g16_anon.yaml")
+	g16AnonBatchBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_g16_anon_batch.yaml")
 	factoryBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_factory.yaml")
 
-	poseidon2lAddr := deployContract("PoseidonUnit2L", poseidon2lBytecode)
-	poseidon3lAddr := deployContract("PoseidonUnit3L", poseidon3lBytecode)
 	g16DepositAddr := deployContract("G16_Deposit", g16DepositBytecode)
-	g16WnAddr := deployContract("G16_WithdrawNullifier", g16WnBytecode)
-	g16WnBatchAddr := deployContract("G16_WithdrawNullifierBatch", g16WnBatchBytecode)
-	g16AntAddr := deployContract("G16_AnonNullifierTransfer", g16AntBytecode)
-	g16AntBatchAddr := deployContract("G16_AnonNullifierTransferBatch", g16AntBatchBytecode)
+	g16WithdrawAddr := deployContract("G16_Withdraw", g16WithdrawBytecode)
+	g16WithdrawBatchAddr := deployContract("G16_WithdrawBatch", g16WithdrawBatchBytecode)
+	g16AnonAddr := deployContract("G16_Anon", g16AnonBytecode)
+	g16AnonBatchAddr := deployContract("G16_AnonBatch", g16AnonBatchBytecode)
 	factoryAddr := deployContract("ZetoFactory", factoryBytecode)
 
-	// Tier 2 — SmtLib needs Poseidon2L + Poseidon3L
-	smtlibBytecode, smtlibRefs := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_smt_lib.yaml")
-	smtlibLinked := linkBytecode(t, smtlibBytecode, smtlibRefs, map[string]common.Address{
-		"PoseidonUnit2L": poseidon2lAddr,
-		"PoseidonUnit3L": poseidon3lAddr,
-	})
-	smtlibAddr := deployContract("SmtLib", smtlibLinked)
-
-	// Tier 3 — AnonNullifier impl needs Poseidon3L + SmtLib
-	implBytecode, implRefs := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_impl_anon_nullifier.yaml")
-	implLinked := linkBytecode(t, implBytecode, implRefs, map[string]common.Address{
-		"PoseidonUnit3L": poseidon3lAddr,
-		"SmtLib":         smtlibAddr,
-	})
-	implAddr := deployContract("Zeto_AnonNullifier_Impl", implLinked)
+	// Zeto_Anon impl — no library linking required
+	implBytecode, _ := readArtifact(t, adir+"/core_v1alpha1_smartcontractdeployment_zeto_impl_anon.yaml")
+	implAddr := deployContract("Zeto_Anon_Impl", implBytecode)
 
 	const registerImplABIJSON = `[{"inputs":[{"internalType":"string","name":"name","type":"string"},{"components":[{"internalType":"address","name":"implementation","type":"address"},{"components":[{"internalType":"address","name":"verifier","type":"address"},{"internalType":"address","name":"depositVerifier","type":"address"},{"internalType":"address","name":"withdrawVerifier","type":"address"},{"internalType":"address","name":"lockVerifier","type":"address"},{"internalType":"address","name":"burnVerifier","type":"address"},{"internalType":"address","name":"batchVerifier","type":"address"},{"internalType":"address","name":"batchWithdrawVerifier","type":"address"},{"internalType":"address","name":"batchLockVerifier","type":"address"},{"internalType":"address","name":"batchBurnVerifier","type":"address"}],"internalType":"struct ZetoTokenFactory.Verifiers","name":"verifiers","type":"tuple"}],"internalType":"struct ZetoTokenFactory.ImplementationInfo","name":"implementation","type":"tuple"}],"name":"registerImplementation","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
 
@@ -163,30 +146,8 @@ func TestDeployZetoFactory(t *testing.T) {
 
 	zero := common.HexToAddress("0x0000000000000000000000000000000000000000")
 
-	// Lock verifiers: deploy from artifacts when available, otherwise use zero.
-	// The lock/transferLocked operations require on-chain Groth16 verifiers
-	// compiled from the Zeto ZKP circuits. When the artifact YAML files
-	// are provided, deploy them here. Until then, lock operations will revert.
-	lockVerifier := zero
-	batchLockVerifier := zero
-	lockArtifactPath := adir + "/core_v1alpha1_smartcontractdeployment_zeto_g16_lock.yaml"
-	if _, err := os.Stat(lockArtifactPath); err == nil {
-		lockBytecode, _ := readArtifact(t, lockArtifactPath)
-		lockVerifier = deployContract("G16_Lock", lockBytecode)
-	} else {
-		t.Log("WARN: G16_Lock artifact not found — LockVerifier set to zero address. " +
-			"Zeto lock operations will NOT work until the artifact is provided.")
-	}
-	batchLockArtifactPath := adir + "/core_v1alpha1_smartcontractdeployment_zeto_g16_lock_batch.yaml"
-	if _, err := os.Stat(batchLockArtifactPath); err == nil {
-		batchLockBytecode, _ := readArtifact(t, batchLockArtifactPath)
-		batchLockVerifier = deployContract("G16_BatchLock", batchLockBytecode)
-	} else {
-		t.Log("WARN: G16_BatchLock artifact not found — BatchLockVerifier set to zero address.")
-	}
-
 	calldata, err := parsedABI.Pack("registerImplementation",
-		"Zeto_AnonNullifier",
+		"Zeto_Anon",
 		struct {
 			Implementation common.Address
 			Verifiers      struct {
@@ -213,14 +174,14 @@ func TestDeployZetoFactory(t *testing.T) {
 				BatchLockVerifier     common.Address
 				BatchBurnVerifier     common.Address
 			}{
-				Verifier:              g16AntAddr,
+				Verifier:              g16AnonAddr,
 				DepositVerifier:       g16DepositAddr,
-				WithdrawVerifier:      g16WnAddr,
-				LockVerifier:          lockVerifier,
+				WithdrawVerifier:      g16WithdrawAddr,
+				LockVerifier:          zero,
 				BurnVerifier:          zero,
-				BatchVerifier:         g16AntBatchAddr,
-				BatchWithdrawVerifier: g16WnBatchAddr,
-				BatchLockVerifier:     batchLockVerifier,
+				BatchVerifier:         g16AnonBatchAddr,
+				BatchWithdrawVerifier: g16WithdrawBatchAddr,
+				BatchLockVerifier:     zero,
 				BatchBurnVerifier:     zero,
 			},
 		},
@@ -228,7 +189,7 @@ func TestDeployZetoFactory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode registerImplementation: %v", err)
 	}
-	callContract("registerImplementation(Zeto_AnonNullifier)", factoryAddr, calldata)
+	callContract("registerImplementation(Zeto_Anon)", factoryAddr, calldata)
 
 	fmt.Printf("\nZETO_FACTORY_ADDRESS=%s\n", factoryAddr.Hex())
 	t.Logf("Zeto factory at: %s", factoryAddr.Hex())
