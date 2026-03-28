@@ -152,7 +152,7 @@ func (h *OnboardingHandler) GetMyOnboardingStatus(c *fiber.Ctx) error {
 	result, err := h.mgr.GetOnboardingStatusByBankCode(c.UserContext(), bankCode)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "no onboarding request found for this bank"})
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "NONE"})
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}

@@ -95,6 +95,7 @@ func (h *OnboardingProxyHandler) InitiateCredentialRequest(c *fiber.Ctx) error {
 
 	body["csr_pem"] = string(csrBytes)
 	body["blockchain_pub_key_hex"] = pubKeyHex
+	body["bank_code"] = h.bankCode
 
 	enriched, err := json.Marshal(body)
 	if err != nil {

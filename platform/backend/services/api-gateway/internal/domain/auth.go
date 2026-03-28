@@ -14,10 +14,11 @@ var (
 
 // AuthToken represents the token response returned by auth providers.
 type AuthToken struct {
-	AccessToken  string
-	RefreshToken string
-	ExpiresIn    int
-	TokenType    string
+	AccessToken      string
+	RefreshToken     string
+	ExpiresIn        int
+	RefreshExpiresIn int
+	TokenType        string
 }
 
 // TokenClaims represents enriched token claims used by handlers/middleware (D7 §7.4).

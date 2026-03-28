@@ -1,44 +1,31 @@
 #!/usr/bin/env bash
 # tryout-my-onboarding-status.sh — Test GET /api/v1/onboarding/my-status
 #
-# Exercises the "recover onboarding status" endpoint in six scenarios,
-# covering both the Central Bank public endpoint and the Commercial Bank
-# authenticated proxy endpoint.
+# Self-contained tryout that exercises the onboarding status endpoint via the
+# Commercial Bank proxy — the same flow the frontend uses.
 #
-# The Commercial Bank proxy resolves the bank identity from the JWT session
-# (BankID claim) — the frontend sends no query parameters, only the cookie.
-# The Central Bank endpoint accepts an optional bank_code query parameter
-# (used by the proxy and the governance portal).
+# Sequence:
 #
-# Scenarios:
+#   Step 1  Login — authenticate as Bank-A operator
+#   Step 2  Check status — no pending request → {"status":"NONE"}
+#   Step 3  Submit credential request → creates onboarding record
+#   Step 4  Check status — pending request → status + request_id returned
 #
-#   Scenario 1  CB public endpoint — existing bank — response has request_id,
-#               user_id, status only; wallet_address and pop_nonce are absent
-#   Scenario 2  CB public endpoint — idempotency — two consecutive calls return
-#               the same request_id and status
-#   Scenario 3  CB public endpoint — unknown bank_code → 404
-#   Scenario 4  CB public endpoint — missing bank_code query param → 400
-#   Scenario 5  Bank proxy endpoint — unauthenticated (no cookie) → 401
-#   Scenario 6  Bank proxy endpoint — authenticated (JWT BankID) → status returned
+# The frontend calls the Bank proxy with only the JWT session cookie (no query
+# parameters). The proxy resolves BankID from the JWT and forwards to the
+# Central Bank with bank_code resolved server-side.
 #
 # Prerequisites:
 #   - Stacks running: make dev.up (or at least dev.up-central-bank-a + dev.up-bank-a)
-#   - At least one participant registered:
-#       Run tryout-spoke-a-bank-a.sh first to create the onboarding record.
 #   - curl, jq
-#   - backend/config/.env.infra.bank-a         with KC_CLIENT_SECRET
-#   - backend/config/.env.infra.central-bank-a  with KC_CLIENT_SECRET
+#   - backend/config/.env.infra.bank-a  with KC_CLIENT_SECRET
 #
 # Usage:
 #   ./tryout-my-onboarding-status.sh
 #
 # Environment variables (optional):
-#   BANK_URL          Bank-A API base URL          (default: http://localhost:18080/api/v1)
-#   CB_URL            Central Bank API base URL    (default: http://localhost:38080/api/v1)
-#   BANK_ENV          Bank-A .env file             (default: backend/config/.env.infra.bank-a)
-#   CB_ENV            Central Bank .env file       (default: backend/config/.env.infra.central-bank-a)
-#   BANK_CODE         Bank code under test         (default: a)
-#   UNKNOWN_BANK_CODE A bank_code that has no record (default: zzz-nonexistent)
+#   BANK_URL  Bank-A API base URL  (default: http://localhost:18080/api/v1)
+#   BANK_ENV  Bank-A .env file     (default: backend/config/.env.infra.bank-a)
 
 set -euo pipefail
 
@@ -47,11 +34,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 BANK_URL="${BANK_URL:-http://localhost:18080/api/v1}"
-CB_URL="${CB_URL:-http://localhost:38080/api/v1}"
 BANK_ENV="${BANK_ENV:-backend/config/.env.infra.bank-a}"
-CB_ENV="${CB_ENV:-backend/config/.env.infra.central-bank-a}"
-BANK_CODE="${BANK_CODE:-a}"
-UNKNOWN_BANK_CODE="${UNKNOWN_BANK_CODE:-zzz-nonexistent}"
 
 BANK_TOKEN=""
 PASS=0
@@ -74,10 +57,6 @@ require_cmds() {
 require_env_files() {
   if [ ! -f "$BANK_ENV" ]; then
     echo "ERROR: Bank-A env file '$BANK_ENV' not found." >&2
-    exit 1
-  fi
-  if [ ! -f "$CB_ENV" ]; then
-    echo "ERROR: Central Bank env file '$CB_ENV' not found." >&2
     exit 1
   fi
 }
@@ -143,19 +122,52 @@ assert_json_field_absent() {
     FAIL=$((FAIL + 1))
   fi
 }
-# Returns 0 when the CB already has an onboarding record for BANK_CODE,
-# 1 when it does not. Stores the current status in BANK_REGISTERED_STATUS.
-BANK_REGISTERED_STATUS=""
-check_bank_registered() {
-  local result code body
-  result=$(get_request "$CB_URL/onboarding/my-status?bank_code=$BANK_CODE")
-  code="${result%% *}"
-  body="${result#* }"
-  if [ "$code" = "200" ]; then
-    BANK_REGISTERED_STATUS=$(echo "$body" | jq -r '.status // empty')
-    return 0
+# ---------------------------------------------------------------------------
+# Setup — Submit credential request to create onboarding record
+# Calls Bank-A's protected proxy which forwards to the CB's public
+# /onboarding/credential-request endpoint.
+# After this step the onboarding record is in CREDENTIAL_REQUESTED status.
+# If the bank is already registered (409 Conflict), that's fine — we proceed.
+# ---------------------------------------------------------------------------
+
+setup_credential_request() {
+  echo ""
+  echo "Setup — Submit credential request (via Bank-A proxy)"
+  echo "  POST $BANK_URL/onboarding/initiate"
+
+  local tmp code body
+  tmp=$(mktemp)
+  code=$(curl -sS -X POST "$BANK_URL/onboarding/initiate" \
+    --cookie "access_token=$BANK_TOKEN" \
+    -H "Content-Type: application/json" \
+    --data "$(jq -n \
+      --arg inst "Bank A S.A." \
+      --arg bank "a" \
+      --arg country "BR" \
+      --arg role "ROLE_COMMERCIAL_BANK" \
+      --arg email "ops@bank-a.com.br" \
+      --arg user "bank-a" \
+      '{
+        institution_name: $inst,
+        bank_code: $bank,
+        country: $country,
+        role: $role,
+        email: $email,
+        username: $user
+      }')" \
+    -o "$tmp" -w "%{http_code}")
+  body=$(cat "$tmp"); rm -f "$tmp"
+
+  if [ "$code" = "201" ]; then
+    echo "  ✅ Credential request created (CREDENTIAL_REQUESTED)"
+    echo "  $(echo "$body" | jq -c '{request_id, user_id, status: "CREDENTIAL_REQUESTED"}')"
+  elif [ "$code" = "409" ]; then
+    echo "  ✅ Bank already registered (proceeding with existing record)"
+  else
+    echo "  ❌ ERROR: credential request failed (HTTP $code)." >&2
+    echo "  Response: $body" >&2
+    exit 1
   fi
-  return 1
 }
 get_request() {
   local url=$1
@@ -195,192 +207,70 @@ bank_login() {
 }
 
 # ---------------------------------------------------------------------------
-# Scenario 1 — CB public endpoint: bank found — validates that only the three
-# core fields (request_id, user_id, status) are present and that wallet_address
-# and pop_nonce are absent from this recovery endpoint.
-# Skipped gracefully when bank has not been onboarded yet.
+# Step 2 — Check status before credential request → NONE
 # ---------------------------------------------------------------------------
 
-scenario_1_cb_status_core_fields() {
+step_2_check_status_none() {
   echo ""
-  echo "Scenario 1 — CB public: registered bank — validate core fields only"
-  echo "  GET $CB_URL/onboarding/my-status?bank_code=$BANK_CODE"
-
-  if ! check_bank_registered; then
-    echo "  ⚠️  SKIP — bank_code='$BANK_CODE' has no record on the CB yet."
-    echo "         Run ./tryouts/tryout-spoke-a-bank-a.sh first, then re-run this tryout."
-    SKIP=$((SKIP + 1))
-    return
-  fi
-
-  # Re-fetch to have the raw body for field assertions.
-  local result code body
-  result=$(get_request "$CB_URL/onboarding/my-status?bank_code=$BANK_CODE")
-  code="${result%% *}"
-  body="${result#* }"
-
-  assert_http_code "sc1_http" "200" "$code" "$body"
-
-  if [ "$code" = "200" ]; then
-    local status
-    status=$(echo "$body" | jq -r '.status // empty')
-    echo "  Current status: $status"
-
-    # Core fields must always be present.
-    assert_json_field_present "sc1_request_id" "$body" "request_id"
-    assert_json_field_present "sc1_user_id"    "$body" "user_id"
-    assert_json_field_present "sc1_status"     "$body" "status"
-
-    # Sensitive fields are intentionally omitted from this endpoint.
-    assert_json_field_absent "sc1_no_wallet_address" "$body" "wallet_address"
-    assert_json_field_absent "sc1_no_pop_nonce"      "$body" "pop_nonce"
-  fi
-}
-
-# ---------------------------------------------------------------------------
-# Scenario 2 — CB public endpoint: idempotency — two consecutive calls return
-# the same data for the same bank_code.
-# Skipped gracefully when bank has not been onboarded yet.
-# ---------------------------------------------------------------------------
-
-scenario_2_idempotency() {
-  echo ""
-  echo "Scenario 2 — CB public: two consecutive calls must return identical data"
-  echo "  GET $CB_URL/onboarding/my-status?bank_code=$BANK_CODE (×2)"
-
-  if ! check_bank_registered; then
-    echo "  ⚠️  SKIP — bank_code='$BANK_CODE' has no record on the CB yet."
-    echo "         Run ./tryouts/tryout-spoke-a-bank-a.sh first, then re-run this tryout."
-    SKIP=$((SKIP + 1))
-    return
-  fi
-
-  local r1 r2 c1 c2 b1 b2
-  r1=$(get_request "$CB_URL/onboarding/my-status?bank_code=$BANK_CODE")
-  r2=$(get_request "$CB_URL/onboarding/my-status?bank_code=$BANK_CODE")
-  c1="${r1%% *}"; b1="${r1#* }"
-  c2="${r2%% *}"; b2="${r2#* }"
-
-  assert_http_code "sc2_http_call1" "200" "$c1" "$b1"
-  assert_http_code "sc2_http_call2" "200" "$c2" "$b2"
-
-  if [ "$c1" = "200" ] && [ "$c2" = "200" ]; then
-    local s1 s2 req1 req2
-    s1=$(echo "$b1" | jq -r '.status')
-    s2=$(echo "$b2" | jq -r '.status')
-    req1=$(echo "$b1" | jq -r '.request_id')
-    req2=$(echo "$b2" | jq -r '.request_id')
-
-    if [ "$s1" = "$s2" ]; then
-      echo "  ✅ PASS — status stable across calls: \"$s1\""
-      PASS=$((PASS + 1))
-    else
-      echo "  ❌ FAIL — status changed between calls: \"$s1\" → \"$s2\""
-      FAIL=$((FAIL + 1))
-    fi
-
-    if [ "$req1" = "$req2" ]; then
-      echo "  ✅ PASS — request_id stable: \"$req1\""
-      PASS=$((PASS + 1))
-    else
-      echo "  ❌ FAIL — request_id changed between calls: \"$req1\" → \"$req2\""
-      FAIL=$((FAIL + 1))
-    fi
-  fi
-}
-
-# ---------------------------------------------------------------------------
-# Scenario 3 — CB public endpoint: unknown bank_code → 404
-# ---------------------------------------------------------------------------
-
-scenario_3_cb_not_found() {
-  echo ""
-  echo "Scenario 3 — CB public: unknown bank_code = \"$UNKNOWN_BANK_CODE\" → 404"
-  echo "  GET $CB_URL/onboarding/my-status?bank_code=$UNKNOWN_BANK_CODE"
-
-  local result code body
-  result=$(get_request "$CB_URL/onboarding/my-status?bank_code=$UNKNOWN_BANK_CODE")
-  code="${result%% *}"
-  body="${result#* }"
-
-  assert_http_code "sc3_http" "404" "$code" "$body"
-
-  if [ "$code" = "404" ]; then
-    assert_json_field_present "sc3_error_message" "$body" "error"
-  fi
-}
-
-# ---------------------------------------------------------------------------
-# Scenario 4 — CB public endpoint: missing bank_code param → 400
-# ---------------------------------------------------------------------------
-
-scenario_4_cb_missing_param() {
-  echo ""
-  echo "Scenario 4 — CB public: missing bank_code parameter → 400"
-  echo "  GET $CB_URL/onboarding/my-status"
-
-  local result code body
-  result=$(get_request "$CB_URL/onboarding/my-status")
-  code="${result%% *}"
-  body="${result#* }"
-
-  assert_http_code "sc4_http" "400" "$code" "$body"
-
-  if [ "$code" = "400" ]; then
-    assert_json_field_present "sc4_error_message" "$body" "error"
-  fi
-}
-
-# ---------------------------------------------------------------------------
-# Scenario 5 — Bank proxy endpoint: no cookie → 401
-# ---------------------------------------------------------------------------
-
-scenario_5_bank_proxy_unauthenticated() {
-  echo ""
-  echo "Scenario 5 — Bank proxy: unauthenticated (no cookie) → 401"
-  echo "  GET $BANK_URL/onboarding/my-status"
-
-  local result code body
-  result=$(get_request "$BANK_URL/onboarding/my-status")
-  code="${result%% *}"
-  body="${result#* }"
-
-  assert_http_code "sc5_http" "401" "$code" "$body"
-}
-
-# ---------------------------------------------------------------------------
-# Scenario 6 — Bank proxy endpoint: authenticated → status resolved from JWT
-# The proxy extracts BankID from the JWT claims (enriched by ValidateToken)
-# and forwards the request to the CB with bank_code=<BankID>.
-# The frontend sends no query parameters — only the session cookie.
-# ---------------------------------------------------------------------------
-
-scenario_6_bank_proxy_authenticated() {
-  echo ""
-  echo "Scenario 6 — Bank proxy: authenticated (JWT BankID) → status for bank_code=$BANK_CODE"
-  echo "  GET $BANK_URL/onboarding/my-status  (cookie: access_token, no params)"
+  echo "=== [2/4] Check status — no pending request ==="
+  echo "  GET $BANK_URL/onboarding/my-status  (cookie: access_token)"
 
   local result code body
   result=$(get_request "$BANK_URL/onboarding/my-status" "$BANK_TOKEN")
   code="${result%% *}"
   body="${result#* }"
 
-  # The proxy forwards to the CB; if the CB has the record → 200.
-  # Accept 200 as success; 502 means the CB is down (infrastructure issue, not a code bug).
+  assert_http_code "step2_http" "200" "$code" "$body"
+
   if [ "$code" = "200" ]; then
-    echo "  ✅ PASS — HTTP 200 (proxied successfully)"
-    PASS=$((PASS + 1))
-    assert_json_field_present "sc6_request_id" "$body" "request_id"
-    assert_json_field_present "sc6_status" "$body" "status"
-  elif [ "$code" = "404" ]; then
-    echo "  ✅ PASS — HTTP 404 (bank not yet registered, proxy working correctly)"
-    PASS=$((PASS + 1))
-  elif [ "$code" = "502" ]; then
-    echo "  ⚠️  SKIP — HTTP 502 (Central Bank unreachable — infrastructure issue)"
-  else
-    echo "  ❌ FAIL — HTTP $code (expected 200 or 404)"
-    echo "  Response: $body"
-    FAIL=$((FAIL + 1))
+    assert_json_field "step2_status" "$body" "status" "NONE"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Step 3 — Submit credential request
+# ---------------------------------------------------------------------------
+
+step_3_submit_credential_request() {
+  echo ""
+  echo "=== [3/4] Submit credential request ==="
+  setup_credential_request
+}
+
+# ---------------------------------------------------------------------------
+# Step 4 — Check status after credential request → pending with request_id
+# ---------------------------------------------------------------------------
+
+step_4_check_status_pending() {
+  echo ""
+  echo "=== [4/4] Check status — pending request ==="
+  echo "  GET $BANK_URL/onboarding/my-status  (cookie: access_token)"
+
+  local result code body
+  result=$(get_request "$BANK_URL/onboarding/my-status" "$BANK_TOKEN")
+  code="${result%% *}"
+  body="${result#* }"
+
+  assert_http_code "step4_http" "200" "$code" "$body"
+
+  if [ "$code" = "200" ]; then
+    local status request_id
+    status=$(echo "$body" | jq -r '.status // empty')
+    request_id=$(echo "$body" | jq -r '.request_id // empty')
+    echo "  status:     $status"
+    echo "  request_id: $request_id"
+
+    assert_json_field_present "step4_status"     "$body" "status"
+    assert_json_field_present "step4_request_id" "$body" "request_id"
+
+    # Status must NOT be NONE anymore
+    if [ "$status" = "NONE" ]; then
+      echo "  ❌ FAIL — status is still NONE after credential request"
+      FAIL=$((FAIL + 1))
+    else
+      echo "  ✅ PASS — status is no longer NONE (value: \"$status\")"
+      PASS=$((PASS + 1))
+    fi
   fi
 }
 
@@ -391,14 +281,20 @@ scenario_6_bank_proxy_authenticated() {
 main() {
   require_cmds
   require_env_files
+
+  echo ""
+  echo "======================================================"
+  echo "  Tryout: my-onboarding-status (Bank-A)"
+  echo "  Bank-A Gateway: $BANK_URL"
+  echo "======================================================"
+
+  echo ""
+  echo "=== [1/4] Login — Bank-A operator ==="
   bank_login
 
-  scenario_1_cb_status_core_fields
-  scenario_2_idempotency
-  scenario_3_cb_not_found
-  scenario_4_cb_missing_param
-  scenario_5_bank_proxy_unauthenticated
-  scenario_6_bank_proxy_authenticated
+  step_2_check_status_none
+  step_3_submit_credential_request
+  step_4_check_status_pending
 
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

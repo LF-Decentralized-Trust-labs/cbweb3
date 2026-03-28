@@ -147,7 +147,7 @@ func (s *identityService) GetOnboardingStatus(ctx context.Context, req *authv1.G
 	}
 
 	resp := &authv1.GetOnboardingStatusResponse{
-		RequestId:     req.RequestId,
+		RequestId:     participant.UserID,
 		UserId:        participant.UserID,
 		Status:        participant.Status,
 		WalletAddress: participant.WalletAddress,
