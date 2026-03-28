@@ -22,6 +22,7 @@ import (
 type paymentOrchestratorService struct {
 	pb.UnimplementedPaymentOrchestratorServiceServer
 	zeto   ports.ZetoOperator
+	htlc   ports.HTLCContractPort // on-chain HTLC coordination (may be nil)
 	relay  ports.InteroperabilityPort
 	logger *slog.Logger
 
@@ -32,6 +33,7 @@ type paymentOrchestratorService struct {
 // Config holds the dependencies for the gRPC server.
 type Config struct {
 	Zeto   ports.ZetoOperator
+	HTLC   ports.HTLCContractPort // optional — nil disables on-chain coordination
 	Relay  ports.InteroperabilityPort
 	Logger *slog.Logger
 }
@@ -40,6 +42,7 @@ type Config struct {
 func New(cfg Config) *grpc.Server {
 	svc := &paymentOrchestratorService{
 		zeto:   cfg.Zeto,
+		htlc:   cfg.HTLC,
 		relay:  cfg.Relay,
 		logger: cfg.Logger,
 		htlcs:  make(map[string]*domain.HTLCRecord),
@@ -76,7 +79,27 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 	contractIDBytes := sha256.Sum256([]byte(fmt.Sprintf("%s-%d", req.AgreementId, time.Now().UnixNano())))
 	contractID := hex.EncodeToString(contractIDBytes[:])
 
-	// 4. Store off-chain record
+	// 4. Record on-chain HTLC coordination (if adapter configured)
+	var htlcTxHash string
+	if s.htlc != nil {
+		var zetoRefBytes [32]byte
+		if len(lockResult.LockedStateIDs) > 0 {
+			zetoRefHash := sha256.Sum256([]byte(strings.Join(lockResult.LockedStateIDs, ",")))
+			zetoRefBytes = zetoRefHash
+		}
+		htlcTxHash, err = s.htlc.Lock(ctx, ports.HTLCLockParams{
+			ContractID:  contractIDBytes,
+			Receiver:    req.Receiver,
+			HashLock:    hashLockBytes,
+			TimeLock:    req.TimeLock,
+			ZetoLockRef: zetoRefBytes,
+		})
+		if err != nil {
+			s.logger.Warn("on-chain HTLC lock failed (Zeto lock succeeded)", "error", err)
+		}
+	}
+
+	// 5. Store off-chain record
 	record := &domain.HTLCRecord{
 		ContractID:  contractID,
 		AgreementID: req.AgreementId,
@@ -87,6 +110,7 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 		Secret:      secret,
 		ZetoLockRef: strings.Join(lockResult.LockedStateIDs, ","),
 		State:       domain.HTLCStateLocked,
+		HTLCTxHash:  htlcTxHash,
 		ZetoTxHash:  lockResult.TxHash,
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
@@ -105,6 +129,85 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 	return &pb.LockHTLCResponse{
 		ContractId: contractID,
 		HashLock:   hashLock,
+		HtlcTxHash: htlcTxHash,
+		ZetoTxHash: lockResult.TxHash,
+	}, nil
+}
+
+func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, req *pb.LockHTLCWithHashLockRequest) (*pb.LockHTLCWithHashLockResponse, error) {
+	if req.AgreementId == "" || req.Receiver == "" || req.Amount == "" || req.TimeLock == 0 || req.HashLock == "" {
+		return nil, status.Error(codes.InvalidArgument, "agreement_id, receiver, amount, time_lock, and hash_lock are required")
+	}
+
+	// Decode the externally provided hashLock
+	hashLockBytes, err := hex.DecodeString(req.HashLock)
+	if err != nil || len(hashLockBytes) != 32 {
+		return nil, status.Error(codes.InvalidArgument, "hash_lock must be a 64-char hex string (32 bytes)")
+	}
+
+	// Lock tokens privately via Zeto
+	s.logger.Info("locking Zeto tokens (with external hashLock)", "amount", req.Amount, "receiver", req.Receiver)
+	lockResult, err := s.zeto.Lock(ctx, req.Amount, req.Receiver)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "zeto lock: %v", err)
+	}
+
+	// Generate contractId from agreement + timestamp
+	contractIDBytes := sha256.Sum256([]byte(fmt.Sprintf("%s-%d", req.AgreementId, time.Now().UnixNano())))
+	contractID := hex.EncodeToString(contractIDBytes[:])
+
+	// Record on-chain HTLC coordination (if adapter configured)
+	var htlcTxHash string
+	if s.htlc != nil {
+		var hashLock32 [32]byte
+		copy(hashLock32[:], hashLockBytes)
+		var zetoRefBytes [32]byte
+		if len(lockResult.LockedStateIDs) > 0 {
+			zetoRefHash := sha256.Sum256([]byte(strings.Join(lockResult.LockedStateIDs, ",")))
+			zetoRefBytes = zetoRefHash
+		}
+		htlcTxHash, err = s.htlc.Lock(ctx, ports.HTLCLockParams{
+			ContractID:  contractIDBytes,
+			Receiver:    req.Receiver,
+			HashLock:    hashLock32,
+			TimeLock:    req.TimeLock,
+			ZetoLockRef: zetoRefBytes,
+		})
+		if err != nil {
+			s.logger.Warn("on-chain HTLC lock failed (Zeto lock succeeded)", "error", err)
+		}
+	}
+
+	// Store off-chain record (no secret — only the initiator knows it)
+	record := &domain.HTLCRecord{
+		ContractID:  contractID,
+		AgreementID: req.AgreementId,
+		Receiver:    req.Receiver,
+		Amount:      req.Amount,
+		HashLock:    req.HashLock,
+		TimeLock:    req.TimeLock,
+		ZetoLockRef: strings.Join(lockResult.LockedStateIDs, ","),
+		State:       domain.HTLCStateLocked,
+		HTLCTxHash:  htlcTxHash,
+		ZetoTxHash:  lockResult.TxHash,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+
+	s.mu.Lock()
+	s.htlcs[contractID] = record
+	s.mu.Unlock()
+
+	s.logger.Info("HTLC locked (external hashLock)",
+		"contract_id", contractID,
+		"hash_lock", req.HashLock,
+		"zeto_lock_ref", lockResult.ZetoLockRef,
+	)
+
+	return &pb.LockHTLCWithHashLockResponse{
+		ContractId: contractID,
+		HashLock:   req.HashLock,
+		HtlcTxHash: htlcTxHash,
 		ZetoTxHash: lockResult.TxHash,
 	}, nil
 }
@@ -114,8 +217,27 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		return nil, status.Error(codes.InvalidArgument, "contract_id and secret are required")
 	}
 
+	// Pre-compute hashLock from secret (needed for cross-spoke lookup).
+	secretBytes, err := hex.DecodeString(req.Secret)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid secret hex")
+	}
+	hashBytes := sha256.Sum256(secretBytes)
+	hashLock := hex.EncodeToString(hashBytes[:])
+
 	s.mu.Lock()
 	record, ok := s.htlcs[req.ContractId]
+	if !ok {
+		// Cross-spoke relay: the contract_id is from the other spoke.
+		// Find the local HTLC that shares the same hashLock.
+		for _, r := range s.htlcs {
+			if r.HashLock == hashLock && r.State == domain.HTLCStateLocked {
+				record = r
+				ok = true
+				break
+			}
+		}
+	}
 	if !ok {
 		s.mu.Unlock()
 		return nil, status.Errorf(codes.NotFound, "HTLC %q not found", req.ContractId)
@@ -127,13 +249,7 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 	}
 
 	// Verify secret matches hashLock
-	secretBytes, err := hex.DecodeString(req.Secret)
-	if err != nil {
-		s.mu.Unlock()
-		return nil, status.Error(codes.InvalidArgument, "invalid secret hex")
-	}
-	hashBytes := sha256.Sum256(secretBytes)
-	if hex.EncodeToString(hashBytes[:]) != record.HashLock {
+	if hashLock != record.HashLock {
 		s.mu.Unlock()
 		return nil, status.Error(codes.InvalidArgument, "secret does not match hashLock")
 	}
@@ -143,15 +259,28 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 	record.UpdatedAt = time.Now().UTC()
 	s.mu.Unlock()
 
+	// Settle on-chain HTLC (reveals secret via LogHTLCClaimed event)
+	var htlcTxHash string
+	if s.htlc != nil {
+		var cid, sec [32]byte
+		copy(cid[:], contractIDBytes(record.ContractID))
+		copy(sec[:], secretBytes)
+		htlcTxHash, err = s.htlc.Settle(ctx, cid, sec)
+		if err != nil {
+			s.logger.Warn("on-chain HTLC settle failed", "error", err)
+		}
+	}
+
 	// Transfer locked Zeto tokens to receiver
 	zetoTxHash, err := s.zeto.TransferLocked(ctx, record.ZetoLockRef, record.Receiver, record.Amount)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "zeto transferLocked: %v", err)
 	}
 
-	s.logger.Info("HTLC settled", "contract_id", req.ContractId, "zeto_tx_hash", zetoTxHash)
+	s.logger.Info("HTLC settled", "contract_id", record.ContractID, "zeto_tx_hash", zetoTxHash, "htlc_tx_hash", htlcTxHash)
 
 	return &pb.SettleHTLCResponse{
+		HtlcTxHash: htlcTxHash,
 		ZetoTxHash: zetoTxHash,
 	}, nil
 }
@@ -182,14 +311,27 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 	record.UpdatedAt = time.Now().UTC()
 	s.mu.Unlock()
 
+	// Refund on-chain HTLC coordination
+	var htlcTxHash string
+	if s.htlc != nil {
+		var cid [32]byte
+		copy(cid[:], contractIDBytes(req.ContractId))
+		var htlcErr error
+		htlcTxHash, htlcErr = s.htlc.Refund(ctx, cid)
+		if htlcErr != nil {
+			s.logger.Warn("on-chain HTLC refund failed", "error", htlcErr)
+		}
+	}
+
 	zetoTxHash, err := s.zeto.Unlock(ctx, record.ZetoLockRef)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "zeto unlock: %v", err)
 	}
 
-	s.logger.Info("HTLC refunded", "contract_id", req.ContractId, "zeto_tx_hash", zetoTxHash)
+	s.logger.Info("HTLC refunded", "contract_id", req.ContractId, "zeto_tx_hash", zetoTxHash, "htlc_tx_hash", htlcTxHash)
 
 	return &pb.RefundHTLCResponse{
+		HtlcTxHash: htlcTxHash,
 		ZetoTxHash: zetoTxHash,
 	}, nil
 }
@@ -310,6 +452,15 @@ func (s *paymentOrchestratorService) ListFXAgreements(_ context.Context, _ *pb.L
 }
 
 // --- Helpers ---
+
+// contractIDBytes converts a hex-encoded contract ID string to a 32-byte array.
+func contractIDBytes(hexStr string) []byte {
+	b, _ := hex.DecodeString(hexStr)
+	if len(b) > 32 {
+		b = b[:32]
+	}
+	return b
+}
 
 func recordToProto(r *domain.HTLCRecord) *pb.HTLCLock {
 	stateMap := map[domain.HTLCState]pb.HTLCState{

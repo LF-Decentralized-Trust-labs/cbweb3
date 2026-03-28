@@ -68,6 +68,25 @@ func (a *GRPCAdapter) LockHTLC(ctx context.Context, agreementID, receiver, amoun
 	}, nil
 }
 
+func (a *GRPCAdapter) LockHTLCWithHashLock(ctx context.Context, agreementID, receiver, amount string, timeLock uint64, hashLock string) (*LockHTLCResult, error) {
+	resp, err := a.cc.LockHTLCWithHashLock(ctx, &pb.LockHTLCWithHashLockRequest{
+		AgreementId: agreementID,
+		Receiver:    receiver,
+		Amount:      amount,
+		TimeLock:    timeLock,
+		HashLock:    hashLock,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &LockHTLCResult{
+		ContractID: resp.ContractId,
+		HashLock:   resp.HashLock,
+		HTLCTxHash: resp.HtlcTxHash,
+		ZetoTxHash: resp.ZetoTxHash,
+	}, nil
+}
+
 type SettleHTLCResult struct {
 	HTLCTxHash string `json:"htlc_tx_hash,omitempty"`
 	ZetoTxHash string `json:"zeto_tx_hash,omitempty"`

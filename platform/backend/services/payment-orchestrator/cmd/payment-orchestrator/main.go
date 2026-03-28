@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strconv"
 
+	besuAdapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/besu"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/cacti"
 	paladinAdapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/paladin"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/grpc/server"
@@ -42,8 +44,37 @@ func main() {
 	// Interoperability relay: stub for now, Cacti in future.
 	relay := cacti.NewStubRelay(logger)
 
+	// On-chain HTLC coordination (optional — requires BESU_RPC_URL + HTLC_ADDRESS).
+	var htlc ports.HTLCContractPort
+	if besuRPC := os.Getenv("BESU_RPC_URL"); besuRPC != "" {
+		htlcAddr := os.Getenv("HTLC_ADDRESS")
+		operatorKey := os.Getenv("BESU_OPERATOR_KEY")
+		chainIDStr := getEnv("BESU_CHAIN_ID", "1337")
+		chainID, err := strconv.ParseInt(chainIDStr, 10, 64)
+		if err != nil {
+			log.Fatalf("FATAL: invalid BESU_CHAIN_ID %q: %v", chainIDStr, err)
+		}
+		if htlcAddr == "" || operatorKey == "" {
+			log.Fatal("FATAL: HTLC_ADDRESS and BESU_OPERATOR_KEY are required when BESU_RPC_URL is set")
+		}
+		besuClient, err := besuAdapter.NewClient(besuAdapter.ClientConfig{
+			RPCURL:        besuRPC,
+			ChainID:       chainID,
+			HTLCAddress:   htlcAddr,
+			PrivateKeyHex: operatorKey,
+		}, logger)
+		if err != nil {
+			log.Fatalf("FATAL: besu client: %v", err)
+		}
+		htlc = besuClient
+		logger.Info("besu HTLC client configured", "rpc", besuRPC, "htlcAddress", htlcAddr, "chainID", chainID)
+	} else {
+		logger.Warn("BESU_RPC_URL not set — on-chain HTLC coordination disabled")
+	}
+
 	grpcServer := server.New(server.Config{
 		Zeto:   zeto,
+		HTLC:   htlc,
 		Relay:  relay,
 		Logger: logger,
 	})

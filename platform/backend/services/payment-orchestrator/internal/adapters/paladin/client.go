@@ -118,8 +118,8 @@ var zetoABI = []abiEntry{
 	{
 		Type: "function", Name: "balanceOf",
 		StateMutability: "view",
-		Inputs:  []abiComponent{{Name: "account", Type: "string"}},
-		Outputs: []abiComponent{{Name: "totalStates", Type: "uint256"}, {Name: "totalBalance", Type: "uint256"}, {Name: "overflow", Type: "bool"}},
+		Inputs:          []abiComponent{{Name: "account", Type: "string"}},
+		Outputs:         []abiComponent{{Name: "totalStates", Type: "uint256"}, {Name: "totalBalance", Type: "uint256"}, {Name: "overflow", Type: "bool"}},
 	},
 }
 
@@ -361,6 +361,7 @@ func (c *Client) pollReceipt(ctx context.Context, txID string) (*txReceipt, erro
 func (c *Client) Mint(ctx context.Context, to string, amount string) (string, error) {
 	tx := paladinTx{
 		Type:     "private",
+		Domain:   "zeto",
 		From:     c.identity,
 		To:       c.zetoTokenAddress,
 		ABI:      zetoABI,
@@ -377,6 +378,7 @@ func (c *Client) Mint(ctx context.Context, to string, amount string) (string, er
 func (c *Client) Transfer(ctx context.Context, to string, amount string) (string, error) {
 	tx := paladinTx{
 		Type:     "private",
+		Domain:   "zeto",
 		From:     c.identity,
 		To:       c.zetoTokenAddress,
 		ABI:      zetoABI,
@@ -397,6 +399,7 @@ func (c *Client) Lock(ctx context.Context, amount string, delegate string) (*por
 	}
 	tx := paladinTx{
 		Type:     "private",
+		Domain:   "zeto",
 		From:     c.identity,
 		To:       c.zetoTokenAddress,
 		ABI:      zetoABI,
@@ -426,6 +429,7 @@ func (c *Client) Lock(ctx context.Context, amount string, delegate string) (*por
 func (c *Client) Unlock(ctx context.Context, zetoLockRef string) (string, error) {
 	tx := paladinTx{
 		Type:     "private",
+		Domain:   "zeto",
 		From:     c.identity,
 		To:       c.zetoTokenAddress,
 		ABI:      zetoABI,
@@ -441,6 +445,7 @@ func (c *Client) TransferLocked(ctx context.Context, zetoLockRef string, to stri
 	lockedInputs := strings.Split(zetoLockRef, ",")
 	tx := paladinTx{
 		Type:     "private",
+		Domain:   "zeto",
 		From:     c.identity,
 		To:       c.zetoTokenAddress,
 		ABI:      zetoABI,
@@ -463,6 +468,7 @@ func (c *Client) Balance(ctx context.Context, identity string) (string, error) {
 		Method:  "ptx_call",
 		Params: []interface{}{map[string]interface{}{
 			"type":     "private",
+			"domain":   "zeto",
 			"from":     identity,
 			"to":       c.zetoTokenAddress,
 			"abi":      zetoABI,

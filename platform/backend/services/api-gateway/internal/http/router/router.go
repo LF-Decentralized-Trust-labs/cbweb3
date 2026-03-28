@@ -109,6 +109,7 @@ func Setup(app *fiber.App, deps Dependencies) {
 
 		htlcGroup := payGroup.Group("/htlc")
 		htlcGroup.Post("/lock", deps.PaymentHandler.LockHTLC)
+		htlcGroup.Post("/lock-with-hash", deps.PaymentHandler.LockHTLCWithHashLock)
 		htlcGroup.Post("/settle", deps.PaymentHandler.SettleHTLC)
 		htlcGroup.Post("/refund", deps.PaymentHandler.RefundHTLC)
 		htlcGroup.Get("/status/:contractId", deps.PaymentHandler.GetHTLCStatus)

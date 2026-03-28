@@ -128,6 +128,25 @@ message LockHTLCResponse {
   string zeto_tx_hash = 4;
 }
 
+// LockHTLCWithHashLock creates an HTLC lock using an externally provided
+// hashLock (no secret is generated). Used by the responder spoke in a
+// cross-spoke atomic swap: the initiator generates the secret and shares
+// only the hashLock with the responder.
+message LockHTLCWithHashLockRequest {
+  string agreement_id = 1;
+  string receiver = 2;
+  string amount = 3;
+  uint64 time_lock = 4;
+  string hash_lock = 5; // Hex-encoded SHA-256 hash (from the initiator)
+}
+
+message LockHTLCWithHashLockResponse {
+  string contract_id = 1;
+  string hash_lock = 2;
+  string htlc_tx_hash = 3;
+  string zeto_tx_hash = 4;
+}
+
 message SettleHTLCRequest {
   string contract_id = 1;
   string secret = 2;
@@ -208,6 +227,7 @@ service PaymentOrchestratorService {
 
   // HTLC dual-layer operations (public coordination + private Zeto lock)
   rpc LockHTLC(LockHTLCRequest) returns (LockHTLCResponse);
+  rpc LockHTLCWithHashLock(LockHTLCWithHashLockRequest) returns (LockHTLCWithHashLockResponse);
   rpc SettleHTLC(SettleHTLCRequest) returns (SettleHTLCResponse);
   rpc RefundHTLC(RefundHTLCRequest) returns (RefundHTLCResponse);
   rpc GetHTLCStatus(GetHTLCStatusRequest) returns (GetHTLCStatusResponse);

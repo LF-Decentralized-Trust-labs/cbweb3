@@ -34,6 +34,24 @@ func (h *PaymentHandler) LockHTLC(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(result)
 }
 
+func (h *PaymentHandler) LockHTLCWithHashLock(c *fiber.Ctx) error {
+	var req struct {
+		AgreementID string `json:"agreement_id"`
+		Receiver    string `json:"receiver"`
+		Amount      string `json:"amount"`
+		TimeLock    uint64 `json:"time_lock"`
+		HashLock    string `json:"hash_lock"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	result, err := h.payment.LockHTLCWithHashLock(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock, req.HashLock)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
 func (h *PaymentHandler) SettleHTLC(c *fiber.Ctx) error {
 	var req struct {
 		ContractID string `json:"contract_id"`
@@ -131,4 +149,3 @@ func (h *PaymentHandler) GetBalance(c *fiber.Ctx) error {
 	}
 	return c.JSON(result)
 }
-
