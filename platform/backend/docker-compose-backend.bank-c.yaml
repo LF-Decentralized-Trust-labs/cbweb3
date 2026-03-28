@@ -66,8 +66,9 @@ services:
         required: false
     environment:
       PAYMENT_GRPC_PORT: "9094"
-      PALADIN_URL: "http://host.docker.internal:31648"
-      PALADIN_IDENTITY: "funded_operator@spoke-a-cb"
+      PALADIN_URL: "http://host.docker.internal:31668"
+      PALADIN_IDENTITY: "funded_operator@spoke-a-bank-c"
+      BESU_OPERATOR_KEY: "5b02fc9a38e8e569f0d01313abbb27e1c29fa8baf6f40e155c0da47b67c7879a"
     ports:
       - "49094:9094"
     extra_hosts:
