@@ -154,22 +154,22 @@ else
 fi
 
 # ============================================================
-# CB_PRIVATE_KEY — Propagate deployer key to central bank envs only
+# CB_PRIVATE_KEY — Propagate governance admin key to central bank envs only
 # ============================================================
 CONTRACTS_ENV="${ROOT_DIR}/contracts/.env"
 if [[ -f "${CONTRACTS_ENV}" ]]; then
-  DEPLOYER_KEY=$(grep -E '^DEPLOYER_PRIVATE_KEY=' "${CONTRACTS_ENV}" | head -1 | cut -d= -f2-)
-  DEPLOYER_KEY="${DEPLOYER_KEY#0x}"
-  if [[ -n "${DEPLOYER_KEY}" ]]; then
-    echo "--- CB_PRIVATE_KEY (deployer) ---"
+  ADMIN_KEY=$(grep -E '^ADMIN_PRIVATE_KEY=' "${CONTRACTS_ENV}" | head -1 | cut -d= -f2-)
+  ADMIN_KEY="${ADMIN_KEY#0x}"
+  if [[ -n "${ADMIN_KEY}" ]]; then
+    echo "--- CB_PRIVATE_KEY (governance admin) ---"
     for CB_ENV in "${ENV_CENTRAL_BANK_A}" "${ENV_CENTRAL_BANK_B}"; do
       if [[ -f "${CB_ENV}" ]]; then
-        upsert_env "${CB_ENV}" "CB_PRIVATE_KEY" "${DEPLOYER_KEY}"
+        upsert_env "${CB_ENV}" "CB_PRIVATE_KEY" "${ADMIN_KEY}"
         echo "  Updated CB_PRIVATE_KEY in: ${CB_ENV}"
       fi
     done
   else
-    echo "WARN: DEPLOYER_PRIVATE_KEY is empty in ${CONTRACTS_ENV} — skipping CB_PRIVATE_KEY." >&2
+    echo "WARN: ADMIN_PRIVATE_KEY is empty in ${CONTRACTS_ENV} — skipping CB_PRIVATE_KEY." >&2
   fi
 else
   echo "WARN: ${CONTRACTS_ENV} not found — skipping CB_PRIVATE_KEY propagation." >&2

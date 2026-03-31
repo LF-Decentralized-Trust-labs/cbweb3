@@ -74,7 +74,7 @@ contracts.deploy-all: contracts.setup contracts.deploy-spoke-a contracts.deploy-
 contracts.register-participants-spoke-a:
 	@echo "Registering participants in compliance IdentityRegistry on spoke-a..."
 	@REGISTRY=$$(grep PARTICIPANT_REGISTRY_ADDRESS backend/config/.env.infra.bank-a | cut -d= -f2-) && \
-	 cd contracts && ADMIN_PRIVATE_KEY=0xc87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3 \
+	 cd contracts && ADMIN_PRIVATE_KEY=$(ADMIN_PRIVATE_KEY) \
 		IDENTITY_REGISTRY=$$REGISTRY \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/RegisterParticipants.s.sol:RegisterParticipants \
 		--rpc-url ${SPOKE_A_RPC_URL} --broadcast
@@ -82,7 +82,7 @@ contracts.register-participants-spoke-a:
 contracts.register-participants-spoke-b:
 	@echo "Registering participants in compliance IdentityRegistry on spoke-b..."
 	@REGISTRY=$$(grep PARTICIPANT_REGISTRY_ADDRESS backend/config/.env.infra.bank-b | cut -d= -f2-) && \
-	 cd contracts && ADMIN_PRIVATE_KEY=0xc87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3 \
+	 cd contracts && ADMIN_PRIVATE_KEY=$(ADMIN_PRIVATE_KEY) \
 		IDENTITY_REGISTRY=$$REGISTRY \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/RegisterParticipants.s.sol:RegisterParticipants \
 		--rpc-url ${SPOKE_B_RPC_URL} --broadcast
