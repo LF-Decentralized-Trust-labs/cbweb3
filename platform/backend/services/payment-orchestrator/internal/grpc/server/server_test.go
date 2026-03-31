@@ -8,13 +8,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/cacti"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/grpc/server"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+// noopRelay is a test double that satisfies InteroperabilityPort with no-op
+// behaviour. All subscription, relay, and verify calls succeed silently.
+type noopRelay struct{}
+
+func (noopRelay) SubscribeLockEvents(_ context.Context, _ func(ports.InteroperabilityProof) error) error {
+	return nil
+}
+func (noopRelay) SubscribeSettleEvents(_ context.Context, _ func(ports.InteroperabilityProof) error) error {
+	return nil
+}
+func (noopRelay) RelayProof(_ context.Context, _ ports.InteroperabilityProof) (string, error) {
+	return "", nil
+}
+func (noopRelay) VerifyProof(_ context.Context, _ ports.InteroperabilityProof) (bool, error) {
+	return true, nil
+}
 
 // mockZeto is a test double for ZetoOperator.
 type mockZeto struct {
@@ -54,7 +70,6 @@ func (m *mockZeto) Balance(_ context.Context, _ string) (string, error) {
 type testEnv struct {
 	client pb.PaymentOrchestratorServiceClient
 	zeto   *mockZeto
-	relay  *cacti.StubRelay
 	cancel context.CancelFunc
 }
 
@@ -62,11 +77,10 @@ func setupTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mock := &mockZeto{}
-	relay := cacti.NewStubRelay(logger)
 
 	grpcServer := server.New(server.Config{
 		Zeto:   mock,
-		Relay:  relay,
+		Relay:  noopRelay{},
 		Logger: logger,
 	})
 
@@ -94,7 +108,6 @@ func setupTestEnv(t *testing.T) *testEnv {
 	return &testEnv{
 		client: pb.NewPaymentOrchestratorServiceClient(conn),
 		zeto:   mock,
-		relay:  relay,
 		cancel: cancel,
 	}
 }

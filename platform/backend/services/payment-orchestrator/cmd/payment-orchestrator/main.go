@@ -41,8 +41,13 @@ func main() {
 		zeto = noopZeto{}
 	}
 
-	// Interoperability relay: stub for now, Cacti in future.
-	relay := cacti.NewStubRelay(logger)
+	// Interoperability relay: CactiRelay when CACTI_API_URL is set (required in production).
+	cactiURL := os.Getenv("CACTI_API_URL")
+	if cactiURL == "" {
+		log.Fatal("FATAL: CACTI_API_URL is required — set it to the Cacti HTLC relay REST endpoint (e.g. http://cacti-htlc-relay:4000)")
+	}
+	relay := cacti.NewCactiRelay(cactiURL, logger)
+	logger.Info("cacti relay configured", "url", cactiURL)
 
 	// On-chain HTLC coordination (optional — requires BESU_RPC_URL + HTLC_ADDRESS).
 	var htlc ports.HTLCContractPort
