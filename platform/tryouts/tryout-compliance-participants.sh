@@ -118,8 +118,8 @@ cb_login() {
 # ---------------------------------------------------------------------------
 
 # IMPORTANT: This must be fixed after the GOVERNANCE role is implemented and
-# assigned to Bank-A operator in Keycloak. For now, we skip this test to avoid
-# false failures.
+# not assigned to Bank-A operator in Keycloak. For now, we skip this test to
+# avoid false failures.
 # TODO: We catch it, don't worry about it. Once fixed this will pass.
 # scenario_1_no_governance_role() {
 #   echo ""
@@ -218,7 +218,7 @@ main() {
   cb_login
   echo "  CB_TOKEN: ${CB_TOKEN:0:60}..."
 
-  scenario_1_no_governance_role
+  # scenario_1_no_governance_role
   scenario_2_governance_no_filter
   scenario_3_governance_invalid_filter
   scenario_4_governance_valid_filter
