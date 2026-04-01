@@ -1,5 +1,6 @@
 import {
   Badge,
+  Button,
   Card,
   CardContent,
   CardDescription,
@@ -18,6 +19,7 @@ import {
   TableRow,
 } from "@cbweb3/ui";
 import { useEffect } from "react";
+import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, XAxis, YAxis } from "recharts";
 import { useAmmStore, useHtlcStore, useTokenStore } from "../stores";
 
@@ -37,7 +39,7 @@ export function DashboardPage() {
   const tokenBalance = useTokenStore((state) => state.balance);
   const tokenTransactions = useTokenStore((state) => state.transactions);
 
-  const fetchHtlc = useHtlcStore((state) => state.fetch);
+  const fetchHtlc = useHtlcStore((state) => state.fetchAll);
   const htlcLocks = useHtlcStore((state) => state.locks);
 
   const refreshPool = useAmmStore((state) => state.refreshPool);
@@ -68,6 +70,17 @@ export function DashboardPage() {
     value: { label: "Amount", color: "hsl(var(--primary))" },
     Public: { label: "Public", color: "hsl(var(--primary))" },
     Private: { label: "Private", color: "hsl(var(--chart-2))" },
+  };
+
+  const lockedCount = htlcLocks.filter((lock) => lock.state === "HTLC_STATE_LOCKED").length;
+  const settledCount = htlcLocks.filter((lock) => lock.state === "HTLC_STATE_SETTLED").length;
+  const refundedCount = htlcLocks.filter((lock) => lock.state === "HTLC_STATE_REFUNDED").length;
+
+  const htlcBadgeVariant = (state: string): "warning" | "default" | "success" | "destructive" | "outline" => {
+    if (state === "HTLC_STATE_LOCKED") return "warning";
+    if (state === "HTLC_STATE_SETTLED") return "success";
+    if (state === "HTLC_STATE_REFUNDED") return "destructive";
+    return "outline";
   };
 
   return (
@@ -227,11 +240,33 @@ export function DashboardPage() {
           <CardDescription>Scenario A status</CardDescription>
         </CardHeader>
         <CardContent>
+        <div className="mb-3 grid gap-2 md:grid-cols-3">
+          <div className="rounded border border-border p-3">
+            <p className="text-xs text-muted-foreground">Locked</p>
+            <p className="text-lg font-semibold">{lockedCount}</p>
+          </div>
+          <div className="rounded border border-border p-3">
+            <p className="text-xs text-muted-foreground">Settled</p>
+            <p className="text-lg font-semibold">{settledCount}</p>
+          </div>
+          <div className="rounded border border-border p-3">
+            <p className="text-xs text-muted-foreground">Refunded</p>
+            <p className="text-lg font-semibold">{refundedCount}</p>
+          </div>
+        </div>
+        <div className="mb-3 flex flex-wrap gap-2">
+          <Button asChild size="sm">
+            <Link to="/htlc/new">New HTLC Lock</Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/htlc">View HTLC History</Link>
+          </Button>
+        </div>
         <div className="space-y-2">
           {htlcLocks.slice(0, 5).map((lock) => (
-            <div key={lock.id} className="flex items-center justify-between rounded border border-border px-3 py-2 text-sm">
-              <span>{lock.id} · Agreement {lock.agreementId} · {lock.amount}</span>
-              <Badge variant={statusVariant(lock.status)}>{lock.status}</Badge>
+            <div key={lock.contract_id} className="flex items-center justify-between rounded border border-border px-3 py-2 text-sm">
+              <span>{lock.contract_id} · {lock.receiver}</span>
+              <Badge variant={htlcBadgeVariant(lock.state)}>{lock.state.replace("HTLC_STATE_", "")}</Badge>
             </div>
           ))}
           {!htlcLocks.length ? <p className="text-sm text-muted-foreground">No active locks.</p> : null}

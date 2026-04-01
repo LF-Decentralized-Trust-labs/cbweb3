@@ -18,35 +18,6 @@ export interface HTLCLock {
   state: HTLCState;
 }
 
-export interface LockHTLCRequest {
-  agreement_id: string;
-  receiver: string;
-  amount: string;
-  time_lock: number;
-}
-
-export interface LockHTLCResponse {
-  contract_id: string;
-  hash_lock: string;
-  htlc_tx_hash?: string;
-  zeto_tx_hash?: string;
-}
-
-export interface SettleHTLCRequest {
-  contract_id: string;
-  secret: string;
-}
-
-export interface SettleHTLCResponse {
-  htlc_tx_hash?: string;
-  zeto_tx_hash?: string;
-}
-
-export interface RefundHTLCResponse {
-  htlc_tx_hash?: string;
-  zeto_tx_hash?: string;
-}
-
 export interface SearchHTLCParams {
   state?: HTLCSearchState;
   agreement_id?: string;

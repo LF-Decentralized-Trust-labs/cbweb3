@@ -6,6 +6,7 @@ const navItems = [
   { to: "/", label: "Dashboard" },
   { to: "/registry", label: "Registry" },
   { to: "/circuit-breaker", label: "Circuit Breaker" },
+  { to: "/htlc-monitor", label: "HTLC Monitor" },
   { to: "/accounts", label: "Accounts" },
   { to: "/parameters", label: "Parameters" },
   { to: "/audit", label: "Audit" },

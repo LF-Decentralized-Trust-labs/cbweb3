@@ -16,23 +16,30 @@ import {
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAccounts, useAuditLogs, useCircuitBreaker, useRegistry } from "../hooks";
+import { useHtlcMonitorStore } from "../stores";
 
 export function DashboardPage() {
   const { participants, fetch: fetchRegistry } = useRegistry();
   const { accounts, fetch: fetchAccounts } = useAccounts();
   const { logs, fetch: fetchAudit } = useAuditLogs();
   const { circuitBreaker, fetchState } = useCircuitBreaker();
+  const htlcLocks = useHtlcMonitorStore((state) => state.locks);
+  const fetchHtlc = useHtlcMonitorStore((state) => state.fetch);
 
   useEffect(() => {
     void fetchRegistry();
     void fetchAccounts();
     void fetchAudit();
     void fetchState();
-  }, [fetchRegistry, fetchAccounts, fetchAudit, fetchState]);
+    void fetchHtlc();
+  }, [fetchRegistry, fetchAccounts, fetchAudit, fetchState, fetchHtlc]);
 
   const activeParticipants = participants.filter((item) => item.status === "ACTIVE").length;
   const frozenAccounts = accounts.filter((item) => item.frozen).length;
   const criticalToday = logs.filter((item) => item.severity === "CRITICAL").length;
+  const lockedCount = htlcLocks.filter((item) => item.state === "HTLC_STATE_LOCKED").length;
+  const settledCount = htlcLocks.filter((item) => item.state === "HTLC_STATE_SETTLED").length;
+  const refundedCount = htlcLocks.filter((item) => item.state === "HTLC_STATE_REFUNDED").length;
 
   return (
     <div className="space-y-4">
@@ -82,6 +89,9 @@ export function DashboardPage() {
             <Button asChild variant="outline">
               <Link to="/accounts">Freeze Controls</Link>
             </Button>
+            <Button asChild variant="outline">
+              <Link to="/htlc-monitor">HTLC Monitor</Link>
+            </Button>
           </CardContent>
         </Card>
 
@@ -115,6 +125,27 @@ export function DashboardPage() {
           </CardContent>
         </Card>
       </section>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>HTLC Cross-Spoke Activity</CardTitle>
+          <CardDescription>Operational monitor for inter-spoke atomic settlement contracts.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-2 md:grid-cols-3">
+          <div className="rounded border border-border p-3">
+            <p className="text-xs text-muted-foreground">Active Locks</p>
+            <p className="text-lg font-semibold">{lockedCount}</p>
+          </div>
+          <div className="rounded border border-border p-3">
+            <p className="text-xs text-muted-foreground">Settled</p>
+            <p className="text-lg font-semibold">{settledCount}</p>
+          </div>
+          <div className="rounded border border-border p-3">
+            <p className="text-xs text-muted-foreground">Refunded</p>
+            <p className="text-lg font-semibold">{refundedCount}</p>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

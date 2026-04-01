@@ -3,9 +3,6 @@ import type {
   AMMQuoteRequest,
   AMMQuoteResponse,
   ComplianceCredential,
-  CreateAgreementRequest,
-  FXAgreement,
-  HTLCLock,
   OnRampRequest,
   OnRampRequestPayload,
   TokenBalance,
@@ -55,9 +52,6 @@ let onRampRequests: OnRampRequest[] = [
     createdAt: nowIso(),
   },
 ];
-
-let agreements: FXAgreement[] = [];
-let locks: HTLCLock[] = [];
 
 let pool: AMMPoolStatus = {
   tokenA: "BRL-tCeBM",
@@ -149,45 +143,6 @@ export const mockDb = {
   async getTransactions() {
     await wait(250);
     return tokenTransactions;
-  },
-  async createAgreement(payload: CreateAgreementRequest) {
-    await wait(500);
-    const agreement: FXAgreement = { id: makeId("agr"), ...payload };
-    agreements = [agreement, ...agreements];
-    return agreement;
-  },
-  async getAgreements() {
-    await wait(250);
-    return agreements;
-  },
-  async lockFunds(agreementId: string, hashLock: string) {
-    await wait(600);
-    const agreement = agreements.find((item) => item.id === agreementId);
-    if (!agreement) throw new Error("Agreement not found");
-    const lock: HTLCLock = {
-      id: makeId("lock"),
-      agreementId,
-      hashLock,
-      amount: agreement.notional,
-      status: "LOCKED",
-      expiryAt: agreement.expiryAt,
-    };
-    locks = [lock, ...locks];
-    return lock;
-  },
-  async settle(lockId: string, secret: string) {
-    await wait(500);
-    if (!secret.trim()) {
-      throw new Error("Secret is required");
-    }
-    locks = locks.map((item) => (item.id === lockId ? { ...item, status: "SETTLED" } : item));
-    const settled = locks.find((item) => item.id === lockId);
-    if (!settled) throw new Error("Lock not found");
-    return settled;
-  },
-  async getLocks() {
-    await wait(250);
-    return locks;
   },
   async quoteExactOutput(params: AMMQuoteRequest): Promise<AMMQuoteResponse> {
     await wait(200);
