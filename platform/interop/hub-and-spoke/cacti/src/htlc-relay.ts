@@ -132,6 +132,13 @@ const MAX_EVENTS = 10_000;
 export class HtlcRelay {
   private readonly settleEvents: SettleEvent[] = [];
   private readonly lockEvents: LockEvent[] = [];
+  /**
+   * Tracks secrets that this relay has already forwarded for settlement.
+   * Prevents feedback loops: when the relay settles on Spoke-B, the resulting
+   * on-chain LogHTLCClaimed event would be picked up again and erroneously
+   * forwarded back to Spoke-A (where the HTLC is already settled).
+   */
+  private readonly forwardedSecrets = new Set<string>();
 
   constructor(
     private readonly spokes: SpokeDep[],
@@ -234,12 +241,25 @@ export class HtlcRelay {
           this.log.info(
             `[${spoke.name}] LogHTLCClaimed contractId=${contractId} block=${e.blockNumber} tx=${e.transactionHash}`,
           );
+
+          // Dedup: skip echo events caused by a previous relay-initiated settle.
+          // Without this, the relay would enter a feedback loop:
+          //   Spoke-A settle → relay forwards to Spoke-B → Spoke-B emits event
+          //   → relay tries to forward back to Spoke-A → NOT_FOUND error.
+          if (this.forwardedSecrets.has(secret)) {
+            this.log.info(
+              `[${spoke.name}] skipping echo event for already-forwarded secret contractId=${contractId}`,
+            );
+            continue;
+          }
+
           await this.settleOnCounterpart(
             grpcClient,
             spoke.name,
             contractId,
             secret,
           );
+          this.forwardedSecrets.add(secret);
         }
 
         fromBlock = toBlock + 1;

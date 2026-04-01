@@ -278,6 +278,70 @@ func TestTransferToken_Success(t *testing.T) {
 	}
 }
 
+func TestSettleHTLC_Idempotent(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	// Lock an HTLC
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_IDEMPOTENT",
+		Receiver:    "bank-b",
+		Amount:      "500",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	// Get secret
+	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+	secret := statusResp.Lock.Secret
+
+	// First settle — should succeed
+	resp1, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: lockResp.ContractId,
+		Secret:     secret,
+	})
+	if err != nil {
+		t.Fatalf("SettleHTLC (first): %v", err)
+	}
+
+	// Second settle with same contract_id — should succeed (idempotent)
+	resp2, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: lockResp.ContractId,
+		Secret:     secret,
+	})
+	if err != nil {
+		t.Fatalf("SettleHTLC (idempotent, same contract_id): expected success, got %v", err)
+	}
+	if resp2.ZetoTxHash != resp1.ZetoTxHash {
+		t.Errorf("expected same zeto_tx_hash on idempotent settle, got %q vs %q", resp2.ZetoTxHash, resp1.ZetoTxHash)
+	}
+
+	// Third settle with a foreign contract_id (cross-spoke echo scenario) —
+	// should succeed via hashLock fallback finding the already-settled record.
+	resp3, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: "foreign_contract_id_from_other_spoke",
+		Secret:     secret,
+	})
+	if err != nil {
+		t.Fatalf("SettleHTLC (idempotent, foreign contract_id): expected success, got %v", err)
+	}
+	if resp3.ZetoTxHash != resp1.ZetoTxHash {
+		t.Errorf("expected same zeto_tx_hash on cross-spoke idempotent settle, got %q vs %q", resp3.ZetoTxHash, resp1.ZetoTxHash)
+	}
+
+	// TransferLocked should only have been called once (the first settle)
+	if env.zeto.transferLockedCalled != 1 {
+		t.Errorf("expected zeto.TransferLocked called 1 time, got %d", env.zeto.transferLockedCalled)
+	}
+}
+
 func TestGetBalance_Success(t *testing.T) {
 	env := setupTestEnv(t)
 	ctx := context.Background()
