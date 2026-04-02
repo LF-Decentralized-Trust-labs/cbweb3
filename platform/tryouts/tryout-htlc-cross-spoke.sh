@@ -158,6 +158,7 @@ read_kc_secret() {
 http_post() {
   local url=$1 token=$2 payload=$3 expected=$4
   local tmp code body
+  echo "  → POST $url" >&2
   tmp=$(mktemp)
   code=$(curl -sS -X POST "$url" \
     --cookie "access_token=$token" \
@@ -177,6 +178,7 @@ http_post() {
 http_get() {
   local url=$1 token=$2 expected=$3
   local tmp code body
+  echo "  → GET $url" >&2
   tmp=$(mktemp)
   code=$(curl -sS -X GET "$url" \
     --cookie "access_token=$token" \
@@ -198,6 +200,7 @@ http_get() {
 bank_login() {
   local bank_name=$1 bank_url=$2 env_file=$3 client_id=$4
   local kc_secret login_resp token
+  echo "  → POST $bank_url/auth/login" >&2
   kc_secret=$(read_kc_secret "$env_file")
   login_resp=$(curl -s -X POST "$bank_url/auth/login" \
     -H "Content-Type: application/json" \
