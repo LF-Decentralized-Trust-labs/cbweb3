@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"time"
+
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 // PaymentHandler exposes the payment-orchestrator operations as REST endpoints.
@@ -27,6 +30,16 @@ func (h *PaymentHandler) LockHTLC(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
+	if req.Receiver == "" || req.Amount == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "receiver and amount are required"})
+	}
+	// Apply smart defaults
+	if req.AgreementID == "" {
+		req.AgreementID = uuid.NewString()
+	}
+	if req.TimeLock == 0 {
+		req.TimeLock = uint64(time.Now().Unix()) + 3600 // 1h — initiator must have longer timelock
+	}
 	result, err := h.payment.LockHTLC(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -44,6 +57,16 @@ func (h *PaymentHandler) LockHTLCWithHashLock(c *fiber.Ctx) error {
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if req.HashLock == "" || req.Receiver == "" || req.Amount == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "hash_lock, receiver and amount are required"})
+	}
+	// Apply smart defaults
+	if req.AgreementID == "" {
+		req.AgreementID = uuid.NewString()
+	}
+	if req.TimeLock == 0 {
+		req.TimeLock = uint64(time.Now().Unix()) + 1800 // 30min — responder must have shorter timelock than initiator
 	}
 	result, err := h.payment.LockHTLCWithHashLock(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock, req.HashLock)
 	if err != nil {
