@@ -41,22 +41,22 @@ spoke-b: pki.gen-central-bank-b pki.gen-bank-b pki.gen-bank-d pki.gen-commercial
 spoke-b-down: deploy.down-backend-spoke-b paladin.stop-spoke-b deploy.down-spoke-b
 	@echo "Spoke-B stack is down (shared infra left running)."
 
-relay-up:
-	@echo "Starting HTLC cross-spoke relay..."
-	@docker compose -f interop/hub-and-spoke/relay/docker-compose.yaml up -d --build
+cacti-up:
+	@echo "Starting Cacti HTLC interop..."
+	@docker compose -f interop/hub-and-spoke/cacti/docker-compose.yaml up -d --build
 
-relay-down:
-	@echo "Stopping HTLC cross-spoke relay..."
-	@docker compose -f interop/hub-and-spoke/relay/docker-compose.yaml down
+cacti-down:
+	@echo "Stopping Cacti HTLC interop..."
+	@docker compose -f interop/hub-and-spoke/cacti/docker-compose.yaml down
 
 spoke-all:
 	$(MAKE) spoke-a
 	$(MAKE) spoke-b
-	$(MAKE) relay-up
-	@echo "Both Spoke-A and Spoke-B stacks are up (with relay)."
+	$(MAKE) cacti-up
+	@echo "Both Spoke-A and Spoke-B stacks are up (with Cacti interop)."
 
 spoke-all-down:
-	$(MAKE) relay-down
+	$(MAKE) cacti-down
 	$(MAKE) spoke-b-down
 	$(MAKE) spoke-a-down
 	@echo "Both Spoke-A and Spoke-B stacks are down (shared infra left running)."
@@ -93,7 +93,7 @@ dev.down-central-bank-a: deploy.down-backend-central-bank-a
 dev.up-central-bank-b: pki.gen-central-bank-b deploy.up-infra deploy.up-spoke-b deploy.up-backend-central-bank-b
 dev.down-central-bank-b: deploy.down-backend-central-bank-b
 
-.PHONY: spoke-a spoke-a-down spoke-b spoke-b-down spoke-all spoke-all-down relay-up relay-down \
+.PHONY: spoke-a spoke-a-down spoke-b spoke-b-down spoke-all spoke-all-down cacti-up cacti-down \
 	dev.up dev.down \
 	dev.up-bank-a dev.down-bank-a dev.up-bank-b dev.down-bank-b \
 	dev.up-bank-c dev.down-bank-c dev.up-bank-d dev.down-bank-d \

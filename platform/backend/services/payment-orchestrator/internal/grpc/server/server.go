@@ -231,16 +231,40 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		// Cross-spoke relay: the contract_id is from the other spoke.
 		// Find the local HTLC that shares the same hashLock.
 		for _, r := range s.htlcs {
-			if r.HashLock == hashLock && r.State == domain.HTLCStateLocked {
-				record = r
-				ok = true
-				break
+			if r.HashLock == hashLock {
+				if r.State == domain.HTLCStateLocked {
+					record = r
+					ok = true
+					break
+				}
+				if r.State == domain.HTLCStateSettled {
+					// Already settled (e.g. relay echo) — return idempotent success.
+					s.mu.Unlock()
+					s.logger.Info("SettleHTLC idempotent: already settled via hashLock match",
+						"requested_contract_id", req.ContractId,
+						"local_contract_id", r.ContractID,
+					)
+					return &pb.SettleHTLCResponse{
+						HtlcTxHash: r.HTLCTxHash,
+						ZetoTxHash: r.ZetoTxHash,
+					}, nil
+				}
 			}
 		}
 	}
 	if !ok {
 		s.mu.Unlock()
 		return nil, status.Errorf(codes.NotFound, "HTLC %q not found", req.ContractId)
+	}
+
+	if record.State == domain.HTLCStateSettled {
+		// Direct contract_id match but already settled — return idempotent success.
+		s.mu.Unlock()
+		s.logger.Info("SettleHTLC idempotent: already settled", "contract_id", record.ContractID)
+		return &pb.SettleHTLCResponse{
+			HtlcTxHash: record.HTLCTxHash,
+			ZetoTxHash: record.ZetoTxHash,
+		}, nil
 	}
 
 	if record.State != domain.HTLCStateLocked {
@@ -278,6 +302,12 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 	}
 
 	s.logger.Info("HTLC settled", "contract_id", record.ContractID, "zeto_tx_hash", zetoTxHash, "htlc_tx_hash", htlcTxHash)
+
+	// Update record with settle tx hashes so idempotent re-calls return them.
+	s.mu.Lock()
+	record.HTLCTxHash = htlcTxHash
+	record.ZetoTxHash = zetoTxHash
+	s.mu.Unlock()
 
 	return &pb.SettleHTLCResponse{
 		HtlcTxHash: htlcTxHash,

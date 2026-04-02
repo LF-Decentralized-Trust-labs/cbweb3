@@ -32,7 +32,7 @@
 #
 #   Phase 5 — Settle (secret reveal + relay)
 #     Step 12  Bank-A settles on Spoke-A (reveals secret on-chain)
-#     Step 13  Wait for relay to auto-settle on Spoke-B (or settle manually)
+#     Step 13  Wait for Cacti to auto-settle on Spoke-B (or settle manually)
 #     Step 14  Verify settled status on both spokes
 #
 #   Phase 6 — Verification
@@ -46,7 +46,7 @@
 #     ./tryout-spoke-b-bank-b.sh, ./tryout-spoke-b-bank-d.sh
 #   - Paladin nodes running on both spokes
 #   - Backend stacks running for all 4 banks
-#   - Relay service running (interop/hub-and-spoke/relay)
+#   - Cacti interop service running: make cacti-up  (interop/hub-and-spoke/cacti)
 #   - curl, jq
 #
 # Usage:
@@ -81,7 +81,7 @@ IDENTITY_BANK_B="funded_operator@spoke-b-bank-b"
 IDENTITY_BANK_C="funded_operator@spoke-a-bank-c"
 IDENTITY_BANK_D="funded_operator@spoke-b-bank-d"
 
-# Timeout waiting for relay to auto-settle on Spoke-B
+# Timeout waiting for Cacti to auto-settle on Spoke-B
 RELAY_SETTLE_TIMEOUT="${RELAY_SETTLE_TIMEOUT:-30}"
 
 # Globals populated during execution
@@ -322,7 +322,7 @@ wait_for_relay_settle() {
   # Wait for the relay to auto-settle on Spoke-B by polling the status.
   # Falls back to manual settle if the relay doesn't pick it up in time.
   local i resp state_val
-  echo "  Waiting up to ${RELAY_SETTLE_TIMEOUT}s for relay to settle on Spoke-B..."
+  echo "  Waiting up to ${RELAY_SETTLE_TIMEOUT}s for Cacti to settle on Spoke-B..."
   for (( i=0; i<RELAY_SETTLE_TIMEOUT; i+=3 )); do
     sleep 3
     resp=$(http_get "$BANK_B_URL/htlc/status/$CONTRACT_ID_B" "$BANK_B_TOKEN" "200" 2>/dev/null || true)
@@ -504,7 +504,7 @@ main() {
   echo "  zeto_tx_hash: ${ZETO_TX_SETTLE_A:-"(pending)"}"
 
   echo ""
-  echo "=== [13/17] Wait for relay to auto-settle on Spoke-B ==="
+  echo "=== [13/17] Wait for Cacti to auto-settle on Spoke-B ==="
   wait_for_relay_settle
   echo "  zeto_tx_hash: ${ZETO_TX_SETTLE_B:-"(pending)"}"
 

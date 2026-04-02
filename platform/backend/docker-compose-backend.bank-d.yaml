@@ -69,6 +69,7 @@ services:
       PALADIN_URL: "http://host.docker.internal:31768"
       PALADIN_IDENTITY: "funded_operator@spoke-b-bank-d"
       BESU_OPERATOR_KEY: "5b02fc9a38e8e569f0d01313abbb27e1c29fa8baf6f40e155c0da47b67c7879a"
+      CACTI_API_URL: "http://host.docker.internal:4000"
     ports:
       - "59094:9094"
     extra_hosts:

@@ -2,7 +2,7 @@ PALADIN_DIR        := deploy/local/paladin
 PALADIN_SCRIPTS    := $(PALADIN_DIR)/scripts
 PALADIN_TIMEOUT    ?= 5m
 BESU_READY_WAIT    ?= 60
-PALADIN_READY_WAIT ?= 10
+PALADIN_READY_WAIT ?= 60
 BESU_RPC_URL_A     ?= http://127.0.0.1:8645
 BESU_RPC_URL_B     ?= http://127.0.0.1:8745
 
@@ -86,7 +86,8 @@ paladin.render-configs-spoke-b:
 
 paladin.start-spoke-a:
 	@echo "Starting Paladin nodes for spoke-a..."
-	@docker compose -f $(PALADIN_DIR)/spoke-a/docker-compose.yml up -d
+	@PALADIN_UID=$$(id -u) PALADIN_GID=$$(id -g) \
+		docker compose -f $(PALADIN_DIR)/spoke-a/docker-compose.yml up -d
 
 paladin.stop-spoke-a:
 	@echo "Stopping Paladin nodes for spoke-a..."
@@ -94,7 +95,8 @@ paladin.stop-spoke-a:
 
 paladin.start-spoke-b:
 	@echo "Starting Paladin nodes for spoke-b..."
-	@docker compose -f $(PALADIN_DIR)/spoke-b/docker-compose.yml up -d
+	@PALADIN_UID=$$(id -u) PALADIN_GID=$$(id -g) \
+		docker compose -f $(PALADIN_DIR)/spoke-b/docker-compose.yml up -d
 
 paladin.stop-spoke-b:
 	@echo "Stopping Paladin nodes for spoke-b..."

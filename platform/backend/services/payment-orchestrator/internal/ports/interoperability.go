@@ -24,8 +24,8 @@ type InteroperabilityProof struct {
 //   - Relay cryptographic proofs to trigger settlement or refund on the local spoke.
 //
 // Implementations:
-//   - StubRelay (this package)   — in-memory mock for development and testing.
-//   - CactiRelay (future)        — real Hyperledger Cacti integration.
+//   - CactiRelay (adapters/cacti/relay.go) — real Hyperledger Cacti integration via REST.
+//   - noopRelay  (server_test.go)          — no-op mock used only in tests.
 type InteroperabilityPort interface {
 	// SubscribeLockEvents registers a handler that will be called each time a
 	// LogHTLCLocked event is detected on the counterparty spoke. The handler
