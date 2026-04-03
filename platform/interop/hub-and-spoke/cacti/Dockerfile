@@ -6,11 +6,14 @@ WORKDIR /app
 COPY apis/proto/payment_orchestrator/v1/payment_orchestrator.proto \
      apis/proto/payment_orchestrator/v1/payment_orchestrator.proto
 
+# Build tools required by native addons (bufferutil, utf-8-validate)
+RUN apk add --no-cache python3 make g++
+
 # Install dependencies
 COPY interop/hub-and-spoke/cacti/package.json \
      interop/hub-and-spoke/cacti/tsconfig.json \
      ./
-RUN npm install --frozen-lockfile 2>/dev/null || npm install
+RUN npm install
 
 # Compile TypeScript
 COPY interop/hub-and-spoke/cacti/src/ ./src/
