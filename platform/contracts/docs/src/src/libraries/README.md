@@ -3,6 +3,7 @@
 # Contents
 - [AutomatedMarketMakerLibrary](AutomatedMarketMakerLibrary.sol/library.AutomatedMarketMakerLibrary.md)
 - [FXAgreementLibrary](FXAgreementLibrary.sol/library.FXAgreementLibrary.md)
+- [FiatCentralBankMoneyLibrary](FiatCentralBankMoneyLibrary.sol/library.FiatCentralBankMoneyLibrary.md)
 - [HashTimeLockedContractLibrary](HashTimeLockedContractLibrary.sol/library.HashTimeLockedContractLibrary.md)
 - [IdentityRegistryLibrary](IdentityRegistryLibrary.sol/library.IdentityRegistryLibrary.md)
 - [ManualOracleLibrary](ManualOracleLibrary.sol/library.ManualOracleLibrary.md)

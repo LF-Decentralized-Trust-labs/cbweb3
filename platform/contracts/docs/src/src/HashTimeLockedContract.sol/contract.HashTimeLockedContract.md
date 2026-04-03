@@ -1,23 +1,21 @@
 # HashTimeLockedContract
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/e19c9456a3de8cd6d3345c4656e5c68bf8aefa97/src/HashTimeLockedContract.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/046ef8ae4f22ae07ddd7d371613d585961088c4e/src/HashTimeLockedContract.sol)
 
 **Inherits:**
-[IHashTimeLockedContract](/src/interfaces/IHashTimeLockedContract.sol/interface.IHashTimeLockedContract.md), ReentrancyGuard
+[IHashTimeLockedContract](/src/interfaces/IHashTimeLockedContract.sol/interface.IHashTimeLockedContract.md)
 
 **Title:**
-HashTimeLockedContract (HTLC)
+HashTimeLockedContract (HTLC) — Coordination Layer
 
-This contract locks ERC20 funds, allows settlement with the correct secret preimage,
-and allows refund after expiry. It is protected against re-entrancy on state-changing flows.
-
-Escrow contract for atomic settlement flows using hash-lock and time-lock controls.
+Records hashLock/timeLock state and emits events for cross-chain relay (Cacti).
+Actual token escrow is handled privately via Zeto lock/unlock on the Paladin
+sidecar. This contract is the publicly observable coordination point that
+enables atomic settlement between sovereign spokes.
 
 
 ## State Variables
 ### IDENTITY_REGISTRY
 The Identity Registry used for participant clearance gates.
-
-Utilises SafeERC20 wrappers for secure ERC20 transfers.
 
 
 ```solidity
@@ -58,16 +56,10 @@ Ensures the given account is a verified participant in the IdentityRegistry.
 ```solidity
 modifier onlyVerified(address account) ;
 ```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`account`|`address`|The address to verify.|
-
 
 ### _onlyVerified
 
-Internal check extracted from the modifier to reduce bytecode duplication at call sites.
+Internal check to reduce bytecode duplication at call sites.
 
 
 ```solidity
@@ -76,20 +68,14 @@ function _onlyVerified(address account) internal view;
 
 ### lock
 
-Locks funds in escrow under a hash-lock and time-lock.
-
-Reverts if the lock already exists, amount is zero, or time-lock is already expired.
+Records a lock coordination entry linked to a private Zeto lock.
 
 
 ```solidity
-function lock(
-    bytes32 contractId,
-    address receiver,
-    address token,
-    uint256 amount,
-    bytes32 hashLock,
-    uint256 timeLock
-) external nonReentrant onlyVerified(msg.sender) onlyVerified(receiver);
+function lock(bytes32 contractId, address receiver, bytes32 hashLock, uint256 timeLock, bytes32 zetoLockRef)
+    external
+    onlyVerified(msg.sender)
+    onlyVerified(receiver);
 ```
 **Parameters**
 
@@ -97,39 +83,34 @@ function lock(
 |----|----|-----------|
 |`contractId`|`bytes32`|Unique identifier for the agreement.|
 |`receiver`|`address`|The address of the beneficiary.|
-|`token`|`address`|The address of the tCeBm ERC20 token.|
-|`amount`|`uint256`|The amount of tokens to lock.|
 |`hashLock`|`bytes32`|The SHA-256 hash of the secret.|
-|`timeLock`|`uint256`|The Unix timestamp after which the funds can be refunded.|
+|`timeLock`|`uint256`|The Unix timestamp after which the lock can be refunded.|
+|`zetoLockRef`|`bytes32`|Reference to the private Zeto lock transaction.|
 
 
 ### settle
 
-Settles a lock by revealing a valid secret preimage.
-
-Reverts unless the lock is in `LOCKED` state and the secret hashes to the stored hash-lock.
+Settles the HTLC by providing the secret preimage.
 
 
 ```solidity
-function settle(bytes32 contractId, bytes32 secret) external nonReentrant;
+function settle(bytes32 contractId, bytes32 secret) external;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
 |`contractId`|`bytes32`|The unique identifier of the locked contract.|
-|`secret`|`bytes32`|The plaintext string/bytes that hashes to the hashLock.|
+|`secret`|`bytes32`|The plaintext bytes that hash to the hashLock.|
 
 
 ### refund
 
-Refunds locked funds to the original sender after expiry.
-
-Reverts unless the lock is in `LOCKED` state and the time-lock has expired.
+Marks the lock as refunded after the timeLock has expired.
 
 
 ```solidity
-function refund(bytes32 contractId) external nonReentrant;
+function refund(bytes32 contractId) external;
 ```
 **Parameters**
 
@@ -140,9 +121,7 @@ function refund(bytes32 contractId) external nonReentrant;
 
 ### getLockDetails
 
-Returns the full lock details for a given contract identifier.
-
-Returns zero-initialised values when the lock does not exist.
+Retrieves the full details of a specific lock contract.
 
 
 ```solidity

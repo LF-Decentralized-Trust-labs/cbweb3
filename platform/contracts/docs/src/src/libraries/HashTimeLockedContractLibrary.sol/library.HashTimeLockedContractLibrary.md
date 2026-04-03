@@ -1,26 +1,30 @@
 # HashTimeLockedContractLibrary
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/e19c9456a3de8cd6d3345c4656e5c68bf8aefa97/src/libraries/HashTimeLockedContractLibrary.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/046ef8ae4f22ae07ddd7d371613d585961088c4e/src/libraries/HashTimeLockedContractLibrary.sol)
 
 **Title:**
 HashTimeLockedContractLibrary
 
-Core data structures and custom errors for the Scenario A HTLC logic.
+Core data structures for the Scenario A HTLC coordination layer.
+
+This is a coordination-only contract: actual token movement is handled
+privately via Zeto lock/unlock through Paladin. Values and amounts are
+kept confidential (ZK commitments); only hashLock, timeLock, and events
+are publicly observable for cross-chain atomicity via Cacti.
 
 
 ## Structs
 ### LockDetails
-Data structure holding the state of a specific atomic swap.
+Coordination record linking the public HTLC to a private Zeto lock.
 
 
 ```solidity
 struct LockDetails {
     address sender;
     address receiver;
-    address token;
-    uint256 amount;
     bytes32 hashLock;
     uint256 timeLock;
     bytes32 secret;
+    bytes32 zetoLockRef;
     HTLCState state;
 }
 ```
