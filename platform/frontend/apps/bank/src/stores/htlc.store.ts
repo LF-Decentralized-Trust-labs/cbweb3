@@ -4,6 +4,7 @@ import type {
   HTLCLock,
   LockHTLCRequest,
   LockHTLCResponse,
+  LockWithHashHTLCRequest,
   SearchHTLCParams,
   SearchHTLCResponse,
 } from "../types";
@@ -17,6 +18,7 @@ type HTLCState = {
   search: (params: SearchHTLCParams) => Promise<SearchHTLCResponse>;
   getStatus: (contractId: string) => Promise<HTLCLock>;
   lock: (payload: LockHTLCRequest) => Promise<LockHTLCResponse>;
+  lockWithHash: (payload: LockWithHashHTLCRequest) => Promise<LockHTLCResponse>;
   settle: (contractId: string, secret: string) => Promise<void>;
   refund: (contractId: string) => Promise<void>;
 };
@@ -50,6 +52,18 @@ export const useHtlcStore = create<HTLCState>((set) => ({
       return response;
     } catch (error) {
       set({ status: "error", error: error instanceof Error ? error.message : "Unable to lock funds" });
+      throw error;
+    }
+  },
+  lockWithHash: async (payload) => {
+    set({ status: "loading", error: null });
+    try {
+      const response = await htlcApi.lockWithHash(payload);
+      const searchResponse = await htlcApi.search({});
+      set({ locks: searchResponse.locks, total: searchResponse.total, status: "idle" });
+      return response;
+    } catch (error) {
+      set({ status: "error", error: error instanceof Error ? error.message : "Unable to lock funds with hash" });
       throw error;
     }
   },

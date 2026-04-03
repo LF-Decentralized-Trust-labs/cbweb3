@@ -2,6 +2,7 @@ import type {
   HTLCLock,
   LockHTLCRequest,
   LockHTLCResponse,
+  LockWithHashHTLCRequest,
   RefundHTLCResponse,
   SearchHTLCParams,
   SearchHTLCResponse,
@@ -13,6 +14,10 @@ import { httpClient } from "./http-client";
 export const htlcApi = {
   lock: async (payload: LockHTLCRequest): Promise<LockHTLCResponse> => {
     const response = await httpClient.post<LockHTLCResponse>("/htlc/lock", payload);
+    return response.data;
+  },
+  lockWithHash: async (payload: LockWithHashHTLCRequest): Promise<LockHTLCResponse> => {
+    const response = await httpClient.post<LockHTLCResponse>("/htlc/lock-with-hash", payload);
     return response.data;
   },
   getStatus: async (contractId: string): Promise<HTLCLock> => {

@@ -19,10 +19,16 @@ export interface HTLCLock {
 }
 
 export interface LockHTLCRequest {
-  agreement_id: string;
+  agreement_id?: string;
   receiver: string;
   amount: string;
-  time_lock: number;
+  time_lock?: number;
+}
+
+export interface LockWithHashHTLCRequest {
+  hash_lock: string;
+  receiver: string;
+  amount: string;
 }
 
 export interface LockHTLCResponse {
