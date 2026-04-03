@@ -15,6 +15,7 @@ type Dependencies struct {
 	ComplianceHandler      *handlers.ComplianceHandler
 	GovernanceHandler      *handlers.GovernanceHandler
 	PaymentHandler         *handlers.PaymentHandler         // Payment orchestrator: HTLC + token operations
+	PaymentProxyHandler    *handlers.PaymentProxyHandler    // Commercial Bank: proxies escrow requests to CB
 	OnboardingHandler      *handlers.OnboardingHandler      // Central Bank: processes onboarding locally
 	OnboardingProxyHandler *handlers.OnboardingProxyHandler // Commercial Bank: proxies onboarding to CB
 	AuthProvider           interfaces.IAuthProvider
@@ -124,5 +125,49 @@ func Setup(app *fiber.App, deps Dependencies) {
 		tokenGroup.Post("/mint", deps.PaymentHandler.MintToken)
 		tokenGroup.Post("/transfer", deps.PaymentHandler.TransferToken)
 		tokenGroup.Get("/balance", deps.PaymentHandler.GetBalance)
+
+		// --- Escrow: Deposit / Escrow / Redeem (Central Bank) ---
+		if deps.PaymentProxyHandler == nil {
+			// Internal routes for proxy-receiving (no auth — only reachable within Docker network).
+			intDeposits := app.Group("/internal/v1/payments/deposits")
+			intDeposits.Post("", deps.PaymentHandler.RegisterDeposit)
+			intDeposits.Get("", deps.PaymentHandler.ListDeposits)
+
+			intEscrows := app.Group("/internal/v1/payments/escrows")
+			intEscrows.Post("", deps.PaymentHandler.RequestEscrow)
+			intEscrows.Get("", deps.PaymentHandler.ListEscrows)
+
+			intRedeems := app.Group("/internal/v1/payments/redeems")
+			intRedeems.Post("", deps.PaymentHandler.RequestRedeem)
+			intRedeems.Get("", deps.PaymentHandler.ListRedeems)
+
+			// Governance routes (requires cookie auth + ROLE_GOVERNANCE).
+			depositGroup := payGroup.Group("/payments/deposits")
+			depositGroup.Post("/approve", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.ApproveDeposit)
+			depositGroup.Post("/reject", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.RejectDeposit)
+			depositGroup.Post("/fiat-exchange", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.RequestFiatExchange)
+			depositGroup.Get("", deps.PaymentHandler.ListDeposits)
+
+			escrowGroup := payGroup.Group("/payments/escrows")
+			escrowGroup.Post("/approve", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.ApproveEscrow)
+			escrowGroup.Post("/reject", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.RejectEscrow)
+			escrowGroup.Get("", deps.PaymentHandler.ListEscrows)
+
+			redeemGroup := payGroup.Group("/payments/redeems")
+			redeemGroup.Post("/approve", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.ApproveRedeem)
+			redeemGroup.Post("/reject", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.RejectRedeem)
+			redeemGroup.Get("", deps.PaymentHandler.ListRedeems)
+		}
+	}
+
+	// --- Payment Proxy (Commercial Bank → Central Bank) ---
+	if deps.PaymentProxyHandler != nil {
+		proxyGroup := app.Group("/api/v1/payments", middleware.RequireCookieAuth(deps.AuthProvider))
+		proxyGroup.Post("/deposits", deps.PaymentProxyHandler.RegisterDeposit)
+		proxyGroup.Get("/deposits", deps.PaymentProxyHandler.ListDeposits)
+		proxyGroup.Post("/escrows", deps.PaymentProxyHandler.RequestEscrow)
+		proxyGroup.Get("/escrows", deps.PaymentProxyHandler.ListEscrows)
+		proxyGroup.Post("/redeems", deps.PaymentProxyHandler.RequestRedeem)
+		proxyGroup.Get("/redeems", deps.PaymentProxyHandler.ListRedeems)
 	}
 }

@@ -22,6 +22,9 @@ type Config struct {
 	CentralBankAPIURL  string // when set, this gateway acts as a commercial bank and proxies onboarding calls to the CB
 	BankCode           string // commercial bank identifier (e.g. "bank-a"); required when CentralBankAPIURL is set
 	PKIDir             string // path to PKI files (CSR, keys); used by the smart proxy to load CSR
+	EntityBesuAddress  string // Besu address of this entity; used by the escrow proxy to enrich requests
+	PaladinIdentity    string // Paladin identity for this entity; used for Zeto operations
+	CBPaladinIdentity  string // Central Bank's Paladin identity; receiver for Zeto transfers in redeem flow
 }
 
 // Load reads environment variables and returns a fully populated Config.
@@ -41,6 +44,9 @@ func Load() Config {
 		CentralBankAPIURL:  getEnv("CENTRAL_BANK_API_URL", ""),
 		BankCode:           getEnv("BANK_CODE", ""),
 		PKIDir:             getEnv("PKI_DIR", ""),
+		EntityBesuAddress:  getEnv("ENTITY_BESU_ADDRESS", ""),
+		PaladinIdentity:    getEnv("PALADIN_IDENTITY", ""),
+		CBPaladinIdentity:  getEnv("CB_PALADIN_IDENTITY", ""),
 	}
 }
 
