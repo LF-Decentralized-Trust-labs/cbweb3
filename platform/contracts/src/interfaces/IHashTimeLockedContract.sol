@@ -38,13 +38,8 @@ interface IHashTimeLockedContract {
     /// @param hashLock The SHA-256 hash of the secret.
     /// @param timeLock The Unix timestamp after which the lock can be refunded.
     /// @param zetoLockRef Reference to the private Zeto lock transaction.
-    function lock(
-        bytes32 contractId,
-        address receiver,
-        bytes32 hashLock,
-        uint256 timeLock,
-        bytes32 zetoLockRef
-    ) external;
+    function lock(bytes32 contractId, address receiver, bytes32 hashLock, uint256 timeLock, bytes32 zetoLockRef)
+        external;
 
     /// @notice Settles the HTLC by providing the secret preimage.
     /// @param contractId The unique identifier of the locked contract.
