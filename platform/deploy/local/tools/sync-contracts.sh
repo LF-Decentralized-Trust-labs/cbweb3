@@ -72,6 +72,7 @@ if [[ -f "${SPOKE_A_BROADCAST}" ]]; then
   SA_TOKEN=$(extract_address "${SPOKE_A_BROADCAST}" "TokenizedCentralBankMoney" 1)
   SA_HTLC=$(extract_address "${SPOKE_A_BROADCAST}" "HashTimeLockedContract")
   SA_SPOKE_BRIDGE=$(extract_address "${SPOKE_A_BROADCAST}" "SpokeBridge")
+  SA_FIAT=$(extract_address "${SPOKE_A_BROADCAST}" "FiatCentralBankMoney")
 
   MISSING=()
   [[ -z "${SA_IDENTITY_REGISTRY}" ]] && MISSING+=("IdentityRegistry")
@@ -84,10 +85,13 @@ if [[ -f "${SPOKE_A_BROADCAST}" ]]; then
     exit 1
   fi
 
+  [[ -z "${SA_FIAT}" ]] && echo "  WARN: FiatCentralBankMoney not found in spoke-a broadcast — skipping FIAT_TOKEN_ADDRESS." >&2
+
   echo "  IdentityRegistry : ${SA_IDENTITY_REGISTRY}"
   echo "  Token            : ${SA_TOKEN}"
   echo "  HTLC             : ${SA_HTLC}"
   echo "  Spoke Bridge     : ${SA_SPOKE_BRIDGE}"
+  [[ -n "${SA_FIAT}" ]] && echo "  Fiat Token       : ${SA_FIAT}"
 
   # Write same addresses to all three entity env files
   for ENV_FILE in "${ENV_BANK_A}" "${ENV_BANK_C}" "${ENV_CENTRAL_BANK_A}"; do
@@ -96,6 +100,7 @@ if [[ -f "${SPOKE_A_BROADCAST}" ]]; then
       upsert_env "${ENV_FILE}" "TOKEN_ADDRESS"                "${SA_TOKEN}"
       upsert_env "${ENV_FILE}" "HTLC_ADDRESS"                 "${SA_HTLC}"
       upsert_env "${ENV_FILE}" "SPOKE_BRIDGE_ADDRESS"         "${SA_SPOKE_BRIDGE}"
+      [[ -n "${SA_FIAT}" ]] && upsert_env "${ENV_FILE}" "FIAT_TOKEN_ADDRESS" "${SA_FIAT}"
       UPDATED=$((UPDATED + 1))
       echo "  Updated: ${ENV_FILE}"
     else
@@ -120,6 +125,7 @@ if [[ -f "${SPOKE_B_BROADCAST}" ]]; then
   SB_TOKEN=$(extract_address "${SPOKE_B_BROADCAST}" "TokenizedCentralBankMoney" 1)
   SB_HTLC=$(extract_address "${SPOKE_B_BROADCAST}" "HashTimeLockedContract")
   SB_SPOKE_BRIDGE=$(extract_address "${SPOKE_B_BROADCAST}" "SpokeBridge")
+  SB_FIAT=$(extract_address "${SPOKE_B_BROADCAST}" "FiatCentralBankMoney")
 
   MISSING_B=()
   [[ -z "${SB_IDENTITY_REGISTRY}" ]] && MISSING_B+=("IdentityRegistry")
@@ -132,10 +138,13 @@ if [[ -f "${SPOKE_B_BROADCAST}" ]]; then
     exit 1
   fi
 
+  [[ -z "${SB_FIAT}" ]] && echo "  WARN: FiatCentralBankMoney not found in spoke-b broadcast — skipping FIAT_TOKEN_ADDRESS." >&2
+
   echo "  IdentityRegistry : ${SB_IDENTITY_REGISTRY}"
   echo "  Token            : ${SB_TOKEN}"
   echo "  HTLC             : ${SB_HTLC}"
   echo "  Spoke Bridge     : ${SB_SPOKE_BRIDGE}"
+  [[ -n "${SB_FIAT}" ]] && echo "  Fiat Token       : ${SB_FIAT}"
 
   for ENV_FILE in "${ENV_BANK_B}" "${ENV_BANK_D}" "${ENV_CENTRAL_BANK_B}"; do
     if [[ -f "${ENV_FILE}" ]]; then
@@ -143,6 +152,7 @@ if [[ -f "${SPOKE_B_BROADCAST}" ]]; then
       upsert_env "${ENV_FILE}" "TOKEN_ADDRESS"                "${SB_TOKEN}"
       upsert_env "${ENV_FILE}" "HTLC_ADDRESS"                 "${SB_HTLC}"
       upsert_env "${ENV_FILE}" "SPOKE_BRIDGE_ADDRESS"         "${SB_SPOKE_BRIDGE}"
+      [[ -n "${SB_FIAT}" ]] && upsert_env "${ENV_FILE}" "FIAT_TOKEN_ADDRESS" "${SB_FIAT}"
       UPDATED=$((UPDATED + 1))
       echo "  Updated: ${ENV_FILE}"
     else
