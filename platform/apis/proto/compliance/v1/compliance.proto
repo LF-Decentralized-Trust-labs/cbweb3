@@ -2,6 +2,9 @@ syntax = "proto3";
 
 package compliance.v1;
 
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
 option go_package = "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1;compliancv1";
 
 // ─── Participant ──────────────────────────────────────────────────────────
