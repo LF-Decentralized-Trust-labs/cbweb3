@@ -188,8 +188,8 @@ type BalanceResult struct {
 	Balance string `json:"balance"`
 }
 
-func (a *GRPCAdapter) GetBalance(ctx context.Context, identity string) (*BalanceResult, error) {
-	resp, err := a.cc.GetBalance(ctx, &pb.GetBalanceRequest{Identity: identity})
+func (a *GRPCAdapter) GetBalance(ctx context.Context) (*BalanceResult, error) {
+	resp, err := a.cc.GetBalance(ctx, &pb.GetBalanceRequest{})
 	if err != nil {
 		return nil, err
 	}

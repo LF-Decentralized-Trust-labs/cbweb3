@@ -30,6 +30,6 @@ type ZetoOperator interface {
 	// This is called when the HTLC secret is revealed on-chain.
 	TransferLocked(ctx context.Context, zetoLockRef string, to string, amount string) (txHash string, err error)
 
-	// Balance returns the Zeto token balance for an identity.
-	Balance(ctx context.Context, identity string) (string, error)
+	// Balance returns the Zeto token balance for the identity configured in the service.
+	Balance(ctx context.Context) (string, error)
 }

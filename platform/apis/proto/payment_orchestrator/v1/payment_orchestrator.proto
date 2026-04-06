@@ -206,6 +206,7 @@ message TransferTokenResponse {
 }
 
 message GetBalanceRequest {
+  // Deprecated: ignored by server; identity is resolved internally from PALADIN_IDENTITY env var.
   string identity = 1;
 }
 

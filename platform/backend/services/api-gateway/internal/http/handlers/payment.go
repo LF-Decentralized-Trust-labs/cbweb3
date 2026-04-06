@@ -162,11 +162,7 @@ func (h *PaymentHandler) TransferToken(c *fiber.Ctx) error {
 }
 
 func (h *PaymentHandler) GetBalance(c *fiber.Ctx) error {
-	identity := c.Query("identity")
-	if identity == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "identity query parameter is required"})
-	}
-	result, err := h.payment.GetBalance(c.Context(), identity)
+	result, err := h.payment.GetBalance(c.Context())
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}

@@ -462,12 +462,8 @@ func (s *paymentOrchestratorService) TransferToken(ctx context.Context, req *pb.
 	return &pb.TransferTokenResponse{TxHash: txHash}, nil
 }
 
-func (s *paymentOrchestratorService) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*pb.GetBalanceResponse, error) {
-	if req.Identity == "" {
-		return nil, status.Error(codes.InvalidArgument, "identity is required")
-	}
-
-	balance, err := s.zeto.Balance(ctx, req.Identity)
+func (s *paymentOrchestratorService) GetBalance(ctx context.Context, _ *pb.GetBalanceRequest) (*pb.GetBalanceResponse, error) {
+	balance, err := s.zeto.Balance(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "zeto balance: %v", err)
 	}

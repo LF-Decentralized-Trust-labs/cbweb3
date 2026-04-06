@@ -1641,20 +1641,14 @@ paths:
   /api/v1/token/balance:
     get:
       tags: [Token]
-      summary: Get token balance for a Paladin identity
+      summary: Get token balance for the authenticated bank's Paladin identity
       description: >
-        Returns the tCeBM balance for the specified Paladin identity.
+        Returns the tCeBM balance for the Paladin identity configured internally
+        in the payment-orchestrator of the calling bank. No identity parameter
+        is required or accepted.
       operationId: getTokenBalance
       security:
         - CookieAuth: []
-      parameters:
-        - name: identity
-          in: query
-          required: true
-          schema:
-            type: string
-          description: >
-            Paladin identity to query (e.g. "funded_operator@spoke-a-cb")
       responses:
         "200":
           description: Balance returned

@@ -77,3 +77,7 @@ deploy/local/hub-besu/tmpFiles/
 # Go Workspace files
 */**/go.work
 */**/go.work.sum
+
+openspec/
+.github/prompts/
+.github/skills/

@@ -240,9 +240,9 @@ mint_tokens() {
 }
 
 check_balance() {
-  local bank_url=$1 token=$2 identity=$3
+  local bank_url=$1 token=$2
   local resp
-  resp=$(http_get "$bank_url/token/balance?identity=$identity" "$token" "200")
+  resp=$(http_get "$bank_url/token/balance" "$token" "200")
   echo "$resp" | jq -r '.balance // "0"'
 }
 
@@ -456,10 +456,10 @@ main() {
 
   echo ""
   echo "=== [7/17] Check initial balances ==="
-  BALANCE_A_BEFORE=$(check_balance "$BANK_A_URL" "$BANK_A_TOKEN" "$IDENTITY_BANK_A")
-  BALANCE_B_BEFORE=$(check_balance "$BANK_B_URL" "$BANK_B_TOKEN" "$IDENTITY_BANK_B")
-  BALANCE_C_BEFORE=$(check_balance "$BANK_C_URL" "$BANK_C_TOKEN" "$IDENTITY_BANK_C")
-  BALANCE_D_BEFORE=$(check_balance "$BANK_D_URL" "$BANK_D_TOKEN" "$IDENTITY_BANK_D")
+  BALANCE_A_BEFORE=$(check_balance "$BANK_A_URL" "$BANK_A_TOKEN")
+  BALANCE_B_BEFORE=$(check_balance "$BANK_B_URL" "$BANK_B_TOKEN")
+  BALANCE_C_BEFORE=$(check_balance "$BANK_C_URL" "$BANK_C_TOKEN")
+  BALANCE_D_BEFORE=$(check_balance "$BANK_D_URL" "$BANK_D_TOKEN")
   echo "  Bank-A: $BALANCE_A_BEFORE"
   echo "  Bank-B: $BALANCE_B_BEFORE"
   echo "  Bank-C: $BALANCE_C_BEFORE"
@@ -532,10 +532,10 @@ main() {
 
   echo ""
   echo "=== [15/17] Check final balances ==="
-  BALANCE_A_AFTER=$(check_balance "$BANK_A_URL" "$BANK_A_TOKEN" "$IDENTITY_BANK_A")
-  BALANCE_B_AFTER=$(check_balance "$BANK_B_URL" "$BANK_B_TOKEN" "$IDENTITY_BANK_B")
-  BALANCE_C_AFTER=$(check_balance "$BANK_C_URL" "$BANK_C_TOKEN" "$IDENTITY_BANK_C")
-  BALANCE_D_AFTER=$(check_balance "$BANK_D_URL" "$BANK_D_TOKEN" "$IDENTITY_BANK_D")
+  BALANCE_A_AFTER=$(check_balance "$BANK_A_URL" "$BANK_A_TOKEN")
+  BALANCE_B_AFTER=$(check_balance "$BANK_B_URL" "$BANK_B_TOKEN")
+  BALANCE_C_AFTER=$(check_balance "$BANK_C_URL" "$BANK_C_TOKEN")
+  BALANCE_D_AFTER=$(check_balance "$BANK_D_URL" "$BANK_D_TOKEN")
   echo "  Bank-A: $BALANCE_A_BEFORE → $BALANCE_A_AFTER (locked $LOCK_AMOUNT)"
   echo "  Bank-B: $BALANCE_B_BEFORE → $BALANCE_B_AFTER (locked $LOCK_AMOUNT)"
   echo "  Bank-C: $BALANCE_C_BEFORE → $BALANCE_C_AFTER (received $LOCK_AMOUNT)"

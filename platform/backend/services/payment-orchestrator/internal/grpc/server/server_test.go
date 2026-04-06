@@ -62,7 +62,7 @@ func (m *mockZeto) TransferLocked(_ context.Context, _, _, _ string) (string, er
 	m.transferLockedCalled++
 	return "mock-transfer-locked-tx", nil
 }
-func (m *mockZeto) Balance(_ context.Context, _ string) (string, error) {
+func (m *mockZeto) Balance(_ context.Context) (string, error) {
 	m.balanceCalled++
 	return "1000000", nil
 }
@@ -346,9 +346,7 @@ func TestGetBalance_Success(t *testing.T) {
 	env := setupTestEnv(t)
 	ctx := context.Background()
 
-	resp, err := env.client.GetBalance(ctx, &pb.GetBalanceRequest{
-		Identity: "funded_operator@spoke-a-cb",
-	})
+	resp, err := env.client.GetBalance(ctx, &pb.GetBalanceRequest{})
 	if err != nil {
 		t.Fatalf("GetBalance: %v", err)
 	}
