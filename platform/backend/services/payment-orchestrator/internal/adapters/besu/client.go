@@ -115,17 +115,15 @@ func (c *Client) sendTx(ctx context.Context, data []byte, method string) (string
 		return "", fmt.Errorf("get nonce: %w", err)
 	}
 
-	gasPrice, err := c.ethClient.SuggestGasPrice(ctx)
-	if err != nil {
-		return "", fmt.Errorf("suggest gas price: %w", err)
-	}
-
 	auth, err := bind.NewKeyedTransactorWithChainID(c.privateKey, c.chainID)
 	if err != nil {
 		return "", fmt.Errorf("create transactor: %w", err)
 	}
 	auth.Nonce = new(big.Int).SetUint64(nonce)
-	auth.GasPrice = gasPrice
+	// The Besu network runs with --min-gas-price=0 (zero-fee private QBFT).
+	// Force gasPrice=0 so operators with zero ETH balance can send transactions
+	// without needing a pre-funded genesis entry.
+	auth.GasPrice = big.NewInt(0)
 	auth.GasLimit = 500_000
 	auth.Context = ctx
 

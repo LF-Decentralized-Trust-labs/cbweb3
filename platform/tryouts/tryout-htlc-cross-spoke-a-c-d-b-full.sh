@@ -250,58 +250,6 @@ mint_tokens() {
 }
 
 # ---------------------------------------------------------------------------
-# Besu operator funding check (Spoke-B)
-#
-# Bank-D operator key shares address 0xe4add986... which is not funded in
-# the Spoke-B genesis. This function transfers ETH from Bank-B's operator
-# (funded, same key as Bank-A: 0xf17f52151...) to Bank-D's operator so
-# the on-chain HTLC lock transaction can pay for gas.
-# ---------------------------------------------------------------------------
-
-SPOKE_B_RPC="${SPOKE_B_RPC:-http://localhost:8747}"
-FUND_ETH_AMOUNT_WEI="${FUND_ETH_AMOUNT_WEI:-5000000000000000000}"  # 5 ETH
-
-fund_bank_d_besu_operator() {
-  local bank_b_key bank_d_addr bal_hex bal
-
-  bank_b_key=$(docker exec backend-payment-orchestrator-bank-b env 2>/dev/null | grep BESU_OPERATOR_KEY | cut -d= -f2)
-  if [ -z "$bank_b_key" ]; then
-    echo "  WARN: Could not get Bank-B operator key — skipping fund step." >&2
-    return 0
-  fi
-
-  bank_d_addr=$(cast wallet address --private-key "0x$(docker exec backend-payment-orchestrator-bank-d env 2>/dev/null | grep BESU_OPERATOR_KEY | cut -d= -f2)" 2>/dev/null)
-  if [ -z "$bank_d_addr" ]; then
-    echo "  WARN: Could not derive Bank-D operator address — skipping fund step." >&2
-    return 0
-  fi
-
-  bal_hex=$(curl -sS -X POST "$SPOKE_B_RPC" -H "Content-Type: application/json" \
-    -d "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"$bank_d_addr\",\"latest\"],\"id\":1}" | \
-    jq -r '.result // "0x0"')
-  bal=$(python3 -c "print(int('$bal_hex', 16))" 2>/dev/null || echo 0)
-
-  echo "  Bank-D operator: $bank_d_addr" >&2
-  echo "  Current ETH balance: $bal wei" >&2
-
-  if python3 -c "import sys; sys.exit(0 if int('$bal') >= $FUND_ETH_AMOUNT_WEI else 1)" 2>/dev/null; then
-    echo "  Already funded — skipping." >&2
-    return 0
-  fi
-
-  echo "  Funding Bank-D operator with ETH from Bank-B operator (Spoke-B)..." >&2
-  cast send \
-    --rpc-url "$SPOKE_B_RPC" \
-    --private-key "0x$bank_b_key" \
-    --value "${FUND_ETH_AMOUNT_WEI}wei" \
-    "$bank_d_addr" >&2 || {
-    echo "  WARN: cast send failed — Bank-D may still have insufficient ETH." >&2
-    return 0
-  }
-  echo "  Funded Bank-D operator  ✓" >&2
-}
-
-# ---------------------------------------------------------------------------
 # Phase 0 - Onboarding
 # ---------------------------------------------------------------------------
 
@@ -618,8 +566,6 @@ main() {
 
   echo ""
   echo "=== Phase 4 - Lock on Spoke-B (Bank-D -> Bank-B) ==="
-  echo "--- Ensure Bank-D Besu operator is funded for gas ---"
-  fund_bank_d_besu_operator
   echo "  same hash_lock from Spoke-A: ${HASH_LOCK_A:0:32}..."
   echo "  receiver: $IDENTITY_BANK_B"
   lock_htlc_spoke_b
