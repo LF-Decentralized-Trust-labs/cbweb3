@@ -6,6 +6,7 @@ import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
 import {HashTimeLockedContract} from "../src/HashTimeLockedContract.sol";
 import {SpokeBridge} from "../src/SpokeBridge.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
+import {FiatCentralBankMoney} from "../src/FiatCentralBankMoney.sol";
 
 /// @title DeployCBWeb3Spoke
 /// @notice Spoke deployment script — deploys the contracts required for a regional spoke ledger.
@@ -26,6 +27,9 @@ contract DeployCBWeb3Spoke is Script {
     /// @notice Lock-and-Mint bridge for Scenario B AMM participation
     SpokeBridge public spokeBridge;
 
+    /// @notice Fiat Central Bank Money ERC-20 for the escrow flow (deposit/escrow/redeem)
+    FiatCentralBankMoney public fiatToken;
+
     /// @notice Admin address used during deployment (for test assertions)
     address public adminAddress;
 
@@ -41,6 +45,7 @@ contract DeployCBWeb3Spoke is Script {
     ///      2. Tokenised Central Bank Money (domestic currency, e.g., tCeBM_BRL or tCeBM_EUR)
     ///      3. HTLC (domestic settlement leg for Scenario A cross-border flows)
     ///      4. SpokeBridge (lock-and-mint bridge for Scenario B)
+    ///      5. FiatCentralBankMoney (fCeBM — fiat ERC-20 for deposit/escrow/redeem flow)
     function run() public {
         /// @dev Load environment variables
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -48,6 +53,8 @@ contract DeployCBWeb3Spoke is Script {
         centralBankAddress = vm.envAddress("CENTRAL_BANK_ADDRESS");
         string memory tokenName = vm.envString("TOKEN_NAME");
         string memory tokenSymbol = vm.envString("TOKEN_SYMBOL");
+        string memory fiatTokenName = vm.envString("FIAT_TOKEN_NAME");
+        string memory fiatTokenSymbol = vm.envString("FIAT_TOKEN_SYMBOL");
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -63,6 +70,9 @@ contract DeployCBWeb3Spoke is Script {
         /// @dev 4: Deploy SpokeBridge (Scenario B — lock-and-mint)
         spokeBridge = new SpokeBridge(address(identityRegistry), adminAddress);
 
+        /// @dev 5: Deploy FiatCentralBankMoney (fCeBM — escrow flow: deposit/escrow/redeem)
+        fiatToken = new FiatCentralBankMoney(fiatTokenName, fiatTokenSymbol, adminAddress, centralBankAddress);
+
         vm.stopBroadcast();
 
         // OUTPUT LOGS
@@ -73,6 +83,7 @@ contract DeployCBWeb3Spoke is Script {
         console.log("Token (%s):       ", tokenSymbol, address(token));
         console.log("HTLC Address:      ", address(htlc));
         console.log("Spoke Bridge:      ", address(spokeBridge));
+        console.log("Fiat Token (%s):  ", fiatTokenSymbol, address(fiatToken));
         console.log("===============================================\n");
     }
 }

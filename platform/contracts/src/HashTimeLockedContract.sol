@@ -37,13 +37,11 @@ contract HashTimeLockedContract is IHashTimeLockedContract {
     }
 
     /// @inheritdoc IHashTimeLockedContract
-    function lock(
-        bytes32 contractId,
-        address receiver,
-        bytes32 hashLock,
-        uint256 timeLock,
-        bytes32 zetoLockRef
-    ) external onlyVerified(msg.sender) onlyVerified(receiver) {
+    function lock(bytes32 contractId, address receiver, bytes32 hashLock, uint256 timeLock, bytes32 zetoLockRef)
+        external
+        onlyVerified(msg.sender)
+        onlyVerified(receiver)
+    {
         if (_locks[contractId].state != HashTimeLockedContractLibrary.HTLCState.INVALID) {
             revert HTLC__ContractAlreadyExists();
         }

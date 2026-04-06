@@ -211,3 +211,236 @@ func lockToStatus(l *pb.HTLCLock) *HTLCStatus {
 		State:       l.State.String(),
 	}
 }
+
+// --- Escrow: Deposits ---
+
+type RegisterDepositResult struct {
+	DepositID string `json:"deposit_id"`
+}
+
+func (a *GRPCAdapter) RegisterDeposit(ctx context.Context, besuAddr, paladinIdentity, amount string) (*RegisterDepositResult, error) {
+	resp, err := a.cc.RegisterDeposit(ctx, &pb.RegisterDepositRequest{
+		RequesterBesuAddress:     besuAddr,
+		RequesterPaladinIdentity: paladinIdentity,
+		Amount:                   amount,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &RegisterDepositResult{DepositID: resp.DepositId}, nil
+}
+
+func (a *GRPCAdapter) ApproveDeposit(ctx context.Context, depositID string) error {
+	_, err := a.cc.ApproveDeposit(ctx, &pb.ApproveDepositRequest{DepositId: depositID})
+	return err
+}
+
+func (a *GRPCAdapter) RejectDeposit(ctx context.Context, depositID, reason string) error {
+	_, err := a.cc.RejectDeposit(ctx, &pb.RejectDepositRequest{DepositId: depositID, Reason: reason})
+	return err
+}
+
+type FiatExchangeResult struct {
+	MintTxHash string `json:"mint_tx_hash"`
+}
+
+func (a *GRPCAdapter) RequestFiatExchange(ctx context.Context, depositID string) (*FiatExchangeResult, error) {
+	resp, err := a.cc.RequestFiatExchange(ctx, &pb.RequestFiatExchangeRequest{DepositId: depositID})
+	if err != nil {
+		return nil, err
+	}
+	return &FiatExchangeResult{MintTxHash: resp.MintTxHash}, nil
+}
+
+type DepositRecord struct {
+	ID                       string `json:"id"`
+	RequesterID              string `json:"requester_id"`
+	RequesterBesuAddress     string `json:"requester_besu_address"`
+	RequesterPaladinIdentity string `json:"requester_paladin_identity"`
+	Amount                   string `json:"amount"`
+	Status                   string `json:"status"`
+	MintTxHash               string `json:"mint_tx_hash,omitempty"`
+	RejectionReason          string `json:"rejection_reason,omitempty"`
+	CreatedAt                string `json:"created_at"`
+}
+
+func (a *GRPCAdapter) ListDeposits(ctx context.Context, requesterID string) ([]DepositRecord, error) {
+	resp, err := a.cc.ListDeposits(ctx, &pb.ListDepositsRequest{RequesterId: requesterID})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]DepositRecord, 0, len(resp.Deposits))
+	for _, d := range resp.Deposits {
+		result = append(result, DepositRecord{
+			ID:                       d.Id,
+			RequesterID:              d.RequesterId,
+			RequesterBesuAddress:     d.RequesterBesuAddress,
+			RequesterPaladinIdentity: d.RequesterPaladinIdentity,
+			Amount:                   d.Amount,
+			Status:                   d.Status.String(),
+			MintTxHash:               d.MintTxHash,
+			RejectionReason:          d.RejectionReason,
+			CreatedAt:                d.CreatedAt,
+		})
+	}
+	return result, nil
+}
+
+// --- Escrow: Tokenization ---
+
+type RequestEscrowResult struct {
+	EscrowID string `json:"escrow_id"`
+}
+
+func (a *GRPCAdapter) RequestEscrow(ctx context.Context, besuAddr, paladinIdentity, amount string) (*RequestEscrowResult, error) {
+	resp, err := a.cc.RequestEscrow(ctx, &pb.RequestEscrowRequest{
+		RequesterBesuAddress:     besuAddr,
+		RequesterPaladinIdentity: paladinIdentity,
+		Amount:                   amount,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &RequestEscrowResult{EscrowID: resp.EscrowId}, nil
+}
+
+type ApproveEscrowResult struct {
+	BurnTxHash string `json:"burn_tx_hash"`
+	MintTxHash string `json:"mint_tx_hash"`
+}
+
+func (a *GRPCAdapter) ApproveEscrow(ctx context.Context, escrowID string) (*ApproveEscrowResult, error) {
+	resp, err := a.cc.ApproveEscrow(ctx, &pb.ApproveEscrowRequest{EscrowId: escrowID})
+	if err != nil {
+		return nil, err
+	}
+	return &ApproveEscrowResult{BurnTxHash: resp.BurnTxHash, MintTxHash: resp.MintTxHash}, nil
+}
+
+func (a *GRPCAdapter) RejectEscrow(ctx context.Context, escrowID, reason string) error {
+	_, err := a.cc.RejectEscrow(ctx, &pb.RejectEscrowRequest{EscrowId: escrowID, Reason: reason})
+	return err
+}
+
+type EscrowRecord struct {
+	ID                       string `json:"id"`
+	RequesterID              string `json:"requester_id"`
+	RequesterBesuAddress     string `json:"requester_besu_address"`
+	RequesterPaladinIdentity string `json:"requester_paladin_identity"`
+	Amount                   string `json:"amount"`
+	Status                   string `json:"status"`
+	BurnTxHash               string `json:"burn_tx_hash,omitempty"`
+	MintTxHash               string `json:"mint_tx_hash,omitempty"`
+	RejectionReason          string `json:"rejection_reason,omitempty"`
+	CreatedAt                string `json:"created_at"`
+}
+
+func (a *GRPCAdapter) ListEscrows(ctx context.Context, requesterID string) ([]EscrowRecord, error) {
+	resp, err := a.cc.ListEscrows(ctx, &pb.ListEscrowsRequest{RequesterId: requesterID})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]EscrowRecord, 0, len(resp.Escrows))
+	for _, e := range resp.Escrows {
+		result = append(result, EscrowRecord{
+			ID:                       e.Id,
+			RequesterID:              e.RequesterId,
+			RequesterBesuAddress:     e.RequesterBesuAddress,
+			RequesterPaladinIdentity: e.RequesterPaladinIdentity,
+			Amount:                   e.Amount,
+			Status:                   e.Status.String(),
+			BurnTxHash:               e.BurnTxHash,
+			MintTxHash:               e.MintTxHash,
+			RejectionReason:          e.RejectionReason,
+			CreatedAt:                e.CreatedAt,
+		})
+	}
+	return result, nil
+}
+
+// --- Escrow: Redeem ---
+
+type InitiateZetoTransferResult struct {
+	TxHash string `json:"tx_hash"`
+}
+
+func (a *GRPCAdapter) InitiateZetoTransfer(ctx context.Context, toIdentity, amount string) (*InitiateZetoTransferResult, error) {
+	resp, err := a.cc.InitiateZetoTransfer(ctx, &pb.InitiateZetoTransferRequest{
+		ToIdentity: toIdentity,
+		Amount:     amount,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &InitiateZetoTransferResult{TxHash: resp.TxHash}, nil
+}
+
+type RequestRedeemResult struct {
+	RedeemID string `json:"redeem_id"`
+}
+
+func (a *GRPCAdapter) RequestRedeem(ctx context.Context, besuAddr, paladinIdentity, amount, zetoTxHash string) (*RequestRedeemResult, error) {
+	resp, err := a.cc.RequestRedeem(ctx, &pb.RequestRedeemRequest{
+		RequesterBesuAddress:     besuAddr,
+		RequesterPaladinIdentity: paladinIdentity,
+		Amount:                   amount,
+		ZetoTransferTxHash:       zetoTxHash,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &RequestRedeemResult{RedeemID: resp.RedeemId}, nil
+}
+
+type ApproveRedeemResult struct {
+	FiatMintTxHash string `json:"fiat_mint_tx_hash"`
+}
+
+func (a *GRPCAdapter) ApproveRedeem(ctx context.Context, redeemID string) (*ApproveRedeemResult, error) {
+	resp, err := a.cc.ApproveRedeem(ctx, &pb.ApproveRedeemRequest{RedeemId: redeemID})
+	if err != nil {
+		return nil, err
+	}
+	return &ApproveRedeemResult{FiatMintTxHash: resp.FiatMintTxHash}, nil
+}
+
+func (a *GRPCAdapter) RejectRedeem(ctx context.Context, redeemID, reason string) error {
+	_, err := a.cc.RejectRedeem(ctx, &pb.RejectRedeemRequest{RedeemId: redeemID, Reason: reason})
+	return err
+}
+
+type RedeemRecord struct {
+	ID                       string `json:"id"`
+	RequesterID              string `json:"requester_id"`
+	RequesterBesuAddress     string `json:"requester_besu_address"`
+	RequesterPaladinIdentity string `json:"requester_paladin_identity"`
+	Amount                   string `json:"amount"`
+	Status                   string `json:"status"`
+	ZetoTransferTxHash       string `json:"zeto_transfer_tx_hash,omitempty"`
+	FiatMintTxHash           string `json:"fiat_mint_tx_hash,omitempty"`
+	RejectionReason          string `json:"rejection_reason,omitempty"`
+	CreatedAt                string `json:"created_at"`
+}
+
+func (a *GRPCAdapter) ListRedeems(ctx context.Context, requesterID string) ([]RedeemRecord, error) {
+	resp, err := a.cc.ListRedeems(ctx, &pb.ListRedeemsRequest{RequesterId: requesterID})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]RedeemRecord, 0, len(resp.Redeems))
+	for _, r := range resp.Redeems {
+		result = append(result, RedeemRecord{
+			ID:                       r.Id,
+			RequesterID:              r.RequesterId,
+			RequesterBesuAddress:     r.RequesterBesuAddress,
+			RequesterPaladinIdentity: r.RequesterPaladinIdentity,
+			Amount:                   r.Amount,
+			Status:                   r.Status.String(),
+			ZetoTransferTxHash:       r.ZetoTransferTxHash,
+			FiatMintTxHash:           r.FiatMintTxHash,
+			RejectionReason:          r.RejectionReason,
+			CreatedAt:                r.CreatedAt,
+		})
+	}
+	return result, nil
+}

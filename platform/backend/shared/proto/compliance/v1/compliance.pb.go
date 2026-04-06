@@ -1769,7 +1769,7 @@ var File_compliance_v1_compliance_proto protoreflect.FileDescriptor
 
 const file_compliance_v1_compliance_proto_rawDesc = "" +
 	"\n" +
-	"\x1ecompliance/v1/compliance.proto\x12\rcompliance.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe0\x04\n" +
+	"\x1ecompliance/v1/compliance.proto\x12\rcompliance.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bgoogle/protobuf/empty.proto\"\xe0\x04\n" +
 	"\vParticipant\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12)\n" +
 	"\x10institution_name\x18\x02 \x01(\tR\x0finstitutionName\x12\x12\n" +

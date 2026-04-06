@@ -96,6 +96,17 @@ func New(cfg config.Config) (*App, error) {
 		}
 		closers = append(closers, paymentGRPC)
 		deps.PaymentHandler = handlers.NewPaymentHandler(paymentGRPC)
+
+		// Commercial bank: wire escrow proxy that forwards to the Central Bank.
+		if cfg.CentralBankAPIURL != "" {
+			deps.PaymentProxyHandler = handlers.NewPaymentProxyHandler(
+				cfg.CentralBankAPIURL,
+				paymentGRPC,
+				cfg.EntityBesuAddress,
+				cfg.PaladinIdentity,
+				cfg.CBPaladinIdentity,
+			)
+		}
 	}
 
 	if cfg.CentralBankAPIURL != "" {

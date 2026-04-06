@@ -14,6 +14,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -21,10 +22,12 @@ import (
 
 type paymentOrchestratorService struct {
 	pb.UnimplementedPaymentOrchestratorServiceServer
-	zeto   ports.ZetoOperator
-	htlc   ports.HTLCContractPort // on-chain HTLC coordination (may be nil)
-	relay  ports.InteroperabilityPort
-	logger *slog.Logger
+	zeto       ports.ZetoOperator
+	htlc       ports.HTLCContractPort // on-chain HTLC coordination (may be nil)
+	relay      ports.InteroperabilityPort
+	fiat       ports.FiatTokenPort    // on-chain fCeBM operations (may be nil)
+	escrowRepo ports.EscrowRepository // escrow flow persistence
+	logger     *slog.Logger
 
 	mu    sync.RWMutex
 	htlcs map[string]*domain.HTLCRecord
@@ -32,24 +35,33 @@ type paymentOrchestratorService struct {
 
 // Config holds the dependencies for the gRPC server.
 type Config struct {
-	Zeto   ports.ZetoOperator
-	HTLC   ports.HTLCContractPort // optional — nil disables on-chain coordination
-	Relay  ports.InteroperabilityPort
-	Logger *slog.Logger
+	Zeto       ports.ZetoOperator
+	HTLC       ports.HTLCContractPort // optional — nil disables on-chain coordination
+	Relay      ports.InteroperabilityPort
+	Fiat       ports.FiatTokenPort    // optional — nil disables fCeBM operations
+	EscrowRepo ports.EscrowRepository // optional — nil disables escrow flow
+	Logger     *slog.Logger
 }
 
 // New builds a configured gRPC server with all payment-orchestrator handlers.
 func New(cfg Config) *grpc.Server {
 	svc := &paymentOrchestratorService{
-		zeto:   cfg.Zeto,
-		htlc:   cfg.HTLC,
-		relay:  cfg.Relay,
-		logger: cfg.Logger,
-		htlcs:  make(map[string]*domain.HTLCRecord),
+		zeto:       cfg.Zeto,
+		htlc:       cfg.HTLC,
+		relay:      cfg.Relay,
+		fiat:       cfg.Fiat,
+		escrowRepo: cfg.EscrowRepo,
+		logger:     cfg.Logger,
+		htlcs:      make(map[string]*domain.HTLCRecord),
 	}
 	grpcServer := grpc.NewServer()
 	pb.RegisterPaymentOrchestratorServiceServer(grpcServer, svc)
 	return grpcServer
+}
+
+// generateID returns a new UUID v4 string for record IDs.
+func generateID() string {
+	return uuid.New().String()
 }
 
 // --- HTLC Dual-Layer Operations ---

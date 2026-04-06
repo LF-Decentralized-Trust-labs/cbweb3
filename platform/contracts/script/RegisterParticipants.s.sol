@@ -68,9 +68,21 @@ contract RegisterParticipants is Script {
         // Bank-C / Bank-D share key 5b02fc9a… → 0xe4add9…
         // Central Bank key c87509a1… → 0x627306…
         Participant[3] memory participants = [
-            Participant(0x627306090abaB3A6e1400e9345bC60c78a8BEf57, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK),
-            Participant(0xf17f52151EbEF6C7334FAD080c5704D77216b732, "Commercial Bank A/B", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK),
-            Participant(0xe4add986E80022C0741874841d4ac231B1d7d254, "Commercial Bank C/D", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK)
+            Participant(
+                0x627306090abaB3A6e1400e9345bC60c78a8BEf57,
+                "Central Bank",
+                IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
+            ),
+            Participant(
+                0xf17f52151EbEF6C7334FAD080c5704D77216b732,
+                "Commercial Bank A/B",
+                IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK
+            ),
+            Participant(
+                0xe4add986E80022C0741874841d4ac231B1d7d254,
+                "Commercial Bank C/D",
+                IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK
+            )
         ];
 
         vm.startBroadcast(adminKey);

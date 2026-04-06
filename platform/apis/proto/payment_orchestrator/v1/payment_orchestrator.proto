@@ -213,6 +213,212 @@ message GetBalanceResponse {
   string balance = 1;
 }
 
+// ─── Escrow Enums ────────────────────────────────────────────────────────
+
+// Status of a fiat deposit request (commercial bank → central bank).
+enum DepositStatus {
+  DEPOSIT_STATUS_PENDING  = 0;
+  DEPOSIT_STATUS_APPROVED = 1;
+  DEPOSIT_STATUS_REJECTED = 2;
+}
+
+// Status of a fCeBM → tCeBM escrow (tokenization) request.
+enum EscrowStatus {
+  ESCROW_STATUS_PENDING  = 0;
+  ESCROW_STATUS_APPROVED = 1;
+  ESCROW_STATUS_REJECTED = 2;
+}
+
+// Status of a tCeBM → fCeBM redeem (de-tokenization) request.
+enum RedeemStatus {
+  REDEEM_STATUS_PENDING  = 0;
+  REDEEM_STATUS_APPROVED = 1;
+  REDEEM_STATUS_REJECTED = 2;
+}
+
+// ─── Escrow Record Messages ─────────────────────────────────────────────
+
+// Persistent record for a fiat deposit request.
+message DepositRecord {
+  string id                         = 1;
+  string requester_id               = 2;
+  string requester_besu_address     = 3;
+  string requester_paladin_identity = 4;
+  string amount                     = 5;
+  DepositStatus status              = 6;
+  string mint_tx_hash               = 7;
+  string rejection_reason           = 8;
+  string created_at                 = 9;
+}
+
+// Persistent record for an escrow (tokenization) request.
+message EscrowRecord {
+  string id                         = 1;
+  string requester_id               = 2;
+  string requester_besu_address     = 3;
+  string requester_paladin_identity = 4;
+  string amount                     = 5;
+  EscrowStatus status               = 6;
+  string burn_tx_hash               = 7;
+  string mint_tx_hash               = 8;
+  string rejection_reason           = 9;
+  string created_at                 = 10;
+}
+
+// Persistent record for a redeem (de-tokenization) request.
+message RedeemRecord {
+  string id                         = 1;
+  string requester_id               = 2;
+  string requester_besu_address     = 3;
+  string requester_paladin_identity = 4;
+  string amount                     = 5;
+  RedeemStatus status               = 6;
+  string zeto_transfer_tx_hash      = 7;
+  string fiat_mint_tx_hash          = 8;
+  string rejection_reason           = 9;
+  string created_at                 = 10;
+}
+
+// ─── Deposit Messages ───────────────────────────────────────────────────
+
+// Commercial bank registers a new fiat deposit request with the central bank.
+message RegisterDepositRequest {
+  string requester_besu_address     = 1;
+  string requester_paladin_identity = 2;
+  string amount                     = 3;
+}
+
+message RegisterDepositResponse {
+  string deposit_id = 1;
+}
+
+// Central bank approves a pending deposit request.
+message ApproveDepositRequest {
+  string deposit_id = 1;
+}
+
+message ApproveDepositResponse {}
+
+// Central bank rejects a pending deposit request.
+message RejectDepositRequest {
+  string deposit_id = 1;
+  string reason     = 2;
+}
+
+message RejectDepositResponse {}
+
+// Central bank mints fCeBM to the commercial bank after deposit approval.
+message RequestFiatExchangeRequest {
+  string deposit_id = 1;
+}
+
+message RequestFiatExchangeResponse {
+  string mint_tx_hash = 1;
+}
+
+// List deposit records (filtered by requester_id when non-empty).
+message ListDepositsRequest {
+  string requester_id = 1;
+}
+
+message ListDepositsResponse {
+  repeated DepositRecord deposits = 1;
+}
+
+// ─── Escrow Messages ────────────────────────────────────────────────────
+
+// Commercial bank requests tokenization of fCeBM into tCeBM (Zeto).
+message RequestEscrowRequest {
+  string requester_besu_address     = 1;
+  string requester_paladin_identity = 2;
+  string amount                     = 3;
+}
+
+message RequestEscrowResponse {
+  string escrow_id = 1;
+}
+
+// Central bank approves escrow: burns fCeBM, mints tCeBM via Zeto.
+message ApproveEscrowRequest {
+  string escrow_id = 1;
+}
+
+message ApproveEscrowResponse {
+  string burn_tx_hash = 1;
+  string mint_tx_hash = 2;
+}
+
+// Central bank rejects an escrow request.
+message RejectEscrowRequest {
+  string escrow_id = 1;
+  string reason    = 2;
+}
+
+message RejectEscrowResponse {}
+
+// List escrow records (filtered by requester_id when non-empty).
+message ListEscrowsRequest {
+  string requester_id = 1;
+}
+
+message ListEscrowsResponse {
+  repeated EscrowRecord escrows = 1;
+}
+
+// ─── Redeem Messages ────────────────────────────────────────────────────
+
+// Commercial bank requests redemption of tCeBM back into fCeBM.
+// The zeto_transfer_tx_hash proves that the commercial bank has already
+// transferred Zeto tokens to the central bank's Paladin identity.
+message RequestRedeemRequest {
+  string requester_besu_address     = 1;
+  string requester_paladin_identity = 2;
+  string amount                     = 3;
+  string zeto_transfer_tx_hash      = 4;
+}
+
+message RequestRedeemResponse {
+  string redeem_id = 1;
+}
+
+// Central bank approves redeem: mints fCeBM to the commercial bank.
+message ApproveRedeemRequest {
+  string redeem_id = 1;
+}
+
+message ApproveRedeemResponse {
+  string fiat_mint_tx_hash = 1;
+}
+
+// Central bank rejects a redeem request (returns Zeto to commercial bank).
+message RejectRedeemRequest {
+  string redeem_id = 1;
+  string reason    = 2;
+}
+
+message RejectRedeemResponse {}
+
+// List redeem records (filtered by requester_id when non-empty).
+message ListRedeemsRequest {
+  string requester_id = 1;
+}
+
+message ListRedeemsResponse {
+  repeated RedeemRecord redeems = 1;
+}
+
+// ─── Zeto Transfer (used by commercial bank proxy before RequestRedeem) ──
+
+// Initiates a Zeto token transfer from the caller to a target identity.
+message InitiateZetoTransferRequest {
+  string to_identity = 1;
+  string amount      = 2;
+}
+
+message InitiateZetoTransferResponse {
+  string tx_hash = 1;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────
 
 service PaymentOrchestratorService {
@@ -237,4 +443,28 @@ service PaymentOrchestratorService {
   rpc MintToken(MintTokenRequest) returns (MintTokenResponse);
   rpc TransferToken(TransferTokenRequest) returns (TransferTokenResponse);
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+
+  // ─── Escrow flow: Deposit → Escrow → Redeem ───────────────────────────
+
+  // Deposit lifecycle (fiat deposit from commercial bank)
+  rpc RegisterDeposit(RegisterDepositRequest) returns (RegisterDepositResponse);
+  rpc ApproveDeposit(ApproveDepositRequest) returns (ApproveDepositResponse);
+  rpc RejectDeposit(RejectDepositRequest) returns (RejectDepositResponse);
+  rpc RequestFiatExchange(RequestFiatExchangeRequest) returns (RequestFiatExchangeResponse);
+  rpc ListDeposits(ListDepositsRequest) returns (ListDepositsResponse);
+
+  // Escrow lifecycle (fCeBM → tCeBM tokenization)
+  rpc RequestEscrow(RequestEscrowRequest) returns (RequestEscrowResponse);
+  rpc ApproveEscrow(ApproveEscrowRequest) returns (ApproveEscrowResponse);
+  rpc RejectEscrow(RejectEscrowRequest) returns (RejectEscrowResponse);
+  rpc ListEscrows(ListEscrowsRequest) returns (ListEscrowsResponse);
+
+  // Redeem lifecycle (tCeBM → fCeBM de-tokenization)
+  rpc RequestRedeem(RequestRedeemRequest) returns (RequestRedeemResponse);
+  rpc ApproveRedeem(ApproveRedeemRequest) returns (ApproveRedeemResponse);
+  rpc RejectRedeem(RejectRedeemRequest) returns (RejectRedeemResponse);
+  rpc ListRedeems(ListRedeemsRequest) returns (ListRedeemsResponse);
+
+  // Zeto transfer (used by commercial bank before RequestRedeem)
+  rpc InitiateZetoTransfer(InitiateZetoTransferRequest) returns (InitiateZetoTransferResponse);
 }

@@ -1,5 +1,5 @@
 # IIdentityRegistry
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/e19c9456a3de8cd6d3345c4656e5c68bf8aefa97/src/interfaces/IIdentityRegistry.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/046ef8ae4f22ae07ddd7d371613d585961088c4e/src/interfaces/IIdentityRegistry.sol)
 
 **Title:**
 IIdentityRegistry
@@ -133,6 +133,43 @@ function updateStatus(address account, IdentityRegistryLibrary.KycStatus newStat
 |`newStatus`|`IdentityRegistryLibrary.KycStatus`|The target KycStatus.|
 
 
+### setCertFingerprint
+
+Registers or updates the X.509 certificate fingerprint for a participant.
+
+
+```solidity
+function setCertFingerprint(address account, bytes32 fingerprint) external;
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`account`|`address`|The wallet address whose certificate is being bound.|
+|`fingerprint`|`bytes32`|SHA-256 hash of the DER-encoded X.509 certificate.|
+
+
+### getCertFingerprint
+
+Returns the certificate fingerprint for a participant.
+
+
+```solidity
+function getCertFingerprint(address account) external view returns (bytes32);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`account`|`address`|The wallet address to query.|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`bytes32`|The SHA-256 fingerprint, or bytes32(0) if not set.|
+
+
 ## Events
 ### ParticipantRegistered
 Emitted when a new institution is onboarded to the network.
@@ -152,6 +189,14 @@ event IdentityUpdated(
     IdentityRegistryLibrary.KycStatus oldStatus,
     IdentityRegistryLibrary.KycStatus newStatus
 );
+```
+
+### CertificateRegistered
+Emitted when a certificate fingerprint is registered or updated.
+
+
+```solidity
+event CertificateRegistered(address indexed account, bytes32 certFingerprint);
 ```
 
 ## Errors

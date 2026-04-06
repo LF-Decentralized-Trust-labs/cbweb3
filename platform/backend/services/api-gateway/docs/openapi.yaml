@@ -1,14 +1,14 @@
 openapi: 3.0.3
 info:
   title: CBWeb3 API Gateway
-  version: 2.1.0
+  version: 2.2.0
   description: >
     OpenAPI specification for the CBWeb3 platform API Gateway.
     Implements authentication, participant onboarding, KYC/AML compliance,
     governance operations over the identity service (Keycloak + KMS),
     and payment orchestrator operations (HTLC dual-layer + Zeto token management
-    via Paladin sidecar).
-    
+    via Paladin sidecar + escrow deposit/tokenization/redeem lifecycle).
+
     Security note: All /compliance write endpoints require CENTRAL_BANK role.
     Payment endpoints (HTLC + Token) are only available when the payment
     orchestrator service is configured.
@@ -61,6 +61,14 @@ tags:
       system on Paladin sidecar.
       These endpoints are only available when the payment orchestrator
       service is configured (PaymentHandler != nil).
+  - name: Escrow
+    description: >
+      Escrow lifecycle — deposit, tokenization (fCeBM → tCeBM), and
+      redeem (tCeBM → fCeBM) operations. Covers the full lifecycle of
+      converting fiat central bank money (ERC-20) to tokenized central bank
+      money (Zeto privacy token) and back. Central Bank nodes process approve/
+      reject and fiat-exchange actions; commercial bank nodes proxy deposit,
+      escrow, and redeem requests to the Central Bank.
 paths:
   /healthz:
     get:
@@ -1661,6 +1669,424 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ---------------------------------------------------------------------------
+  # Payment Orchestrator — Escrow (Deposit / Tokenization / Redeem)
+  # Central Bank: local processing + approve/reject
+  # Commercial Bank: proxy to Central Bank
+  # ---------------------------------------------------------------------------
+
+  /api/v1/payments/deposits:
+    post:
+      tags: [Escrow]
+      summary: Register a fiat deposit request
+      description: >
+        Commercial bank registers intent to deposit fiat funds. The Central
+        Bank creates a pending deposit record and returns a deposit ID.
+      operationId: registerDeposit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDepositRequest"
+      responses:
+        "201":
+          description: Deposit registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterDepositResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      tags: [Escrow]
+      summary: List deposits
+      description: Returns all deposits, optionally filtered by requester_id.
+      operationId: listDeposits
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          schema:
+            type: string
+          description: Filter by requester Besu address
+      responses:
+        "200":
+          description: Deposits listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListDepositsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/deposits/approve:
+    post:
+      tags: [Escrow]
+      summary: Approve a pending deposit (Central Bank only)
+      operationId: approveDeposit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deposit_id]
+              properties:
+                deposit_id:
+                  type: string
+      responses:
+        "201":
+          description: Deposit approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: approved
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/deposits/reject:
+    post:
+      tags: [Escrow]
+      summary: Reject a pending deposit (Central Bank only)
+      operationId: rejectDeposit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deposit_id]
+              properties:
+                deposit_id:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "422":
+          description: Deposit rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reason:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/deposits/fiat-exchange:
+    post:
+      tags: [Escrow]
+      summary: Execute fiat exchange — mint fCeBM (Central Bank only)
+      description: >
+        After approving a deposit, the Central Bank triggers the fiat exchange:
+        mints fCeBM (ERC-20) to the requester's Besu address on-chain.
+      operationId: requestFiatExchange
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deposit_id]
+              properties:
+                deposit_id:
+                  type: string
+      responses:
+        "201":
+          description: Fiat exchange completed — fCeBM minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatExchangeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/escrows:
+    post:
+      tags: [Escrow]
+      summary: Request tokenization escrow (fCeBM → tCeBM)
+      description: >
+        Request to convert fCeBM (fiat token, ERC-20 on Besu) into tCeBM
+        (tokenized central bank money, Zeto privacy token on Paladin).
+        The Central Bank will burn fCeBM and mint equivalent tCeBM.
+      operationId: requestEscrow
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestEscrowRequest"
+      responses:
+        "201":
+          description: Escrow request registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestEscrowResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      tags: [Escrow]
+      summary: List escrow requests
+      description: Returns all escrow requests, optionally filtered by requester_id.
+      operationId: listEscrows
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          schema:
+            type: string
+          description: Filter by requester Besu address
+      responses:
+        "200":
+          description: Escrows listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListEscrowsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/escrows/approve:
+    post:
+      tags: [Escrow]
+      summary: Approve escrow — burn fCeBM + mint tCeBM (Central Bank only)
+      description: >
+        Burns the requester's fCeBM on Besu and mints equivalent tCeBM via
+        Zeto/Paladin to the requester's Paladin identity.
+      operationId: approveEscrow
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [escrow_id]
+              properties:
+                escrow_id:
+                  type: string
+      responses:
+        "201":
+          description: Escrow approved — fCeBM burned, tCeBM minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApproveEscrowResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/escrows/reject:
+    post:
+      tags: [Escrow]
+      summary: Reject an escrow request (Central Bank only)
+      operationId: rejectEscrow
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [escrow_id]
+              properties:
+                escrow_id:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "422":
+          description: Escrow rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reason:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/redeems:
+    post:
+      tags: [Escrow]
+      summary: Request redemption (tCeBM → fCeBM)
+      description: >
+        Request to redeem tCeBM back into fCeBM. Commercial bank nodes first
+        initiate a Zeto transfer of tCeBM to the Central Bank, then proxy the
+        request with the transfer tx hash.
+      operationId: requestRedeem
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestRedeemRequest"
+      responses:
+        "201":
+          description: Redeem request registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestRedeemResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      tags: [Escrow]
+      summary: List redeem requests
+      description: Returns all redeem requests, optionally filtered by requester_id.
+      operationId: listRedeems
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          schema:
+            type: string
+          description: Filter by requester Besu address
+      responses:
+        "200":
+          description: Redeems listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListRedeemsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/redeems/approve:
+    post:
+      tags: [Escrow]
+      summary: Approve redeem — mint fCeBM to requester (Central Bank only)
+      description: >
+        The Central Bank verifies the Zeto transfer was received, then mints
+        equivalent fCeBM (ERC-20) to the requester's Besu address.
+      operationId: approveRedeem
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [redeem_id]
+              properties:
+                redeem_id:
+                  type: string
+      responses:
+        "201":
+          description: Redeem approved — fCeBM minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApproveRedeemResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/redeems/reject:
+    post:
+      tags: [Escrow]
+      summary: Reject a redeem request — return tCeBM (Central Bank only)
+      description: >
+        Rejects the redeem request and transfers the tCeBM back to the
+        requester's Paladin identity via Zeto.
+      operationId: rejectRedeem
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [redeem_id]
+              properties:
+                redeem_id:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "422":
+          description: Redeem rejected — tCeBM returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reason:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   securitySchemes:
     CookieAuth:
@@ -2542,3 +2968,222 @@ components:
           type: string
           description: Current tCeBM balance (big integer as string)
           example: "9000000"
+
+    # --- Escrow schemas ---
+
+    RegisterDepositRequest:
+      type: object
+      required: [amount]
+      properties:
+        requester_besu_address:
+          type: string
+          description: Besu address of the depositor (injected by proxy for commercial banks)
+          example: "0x1234abcd..."
+        requester_paladin_identity:
+          type: string
+          description: Paladin identity of the depositor
+          example: "funded_operator@spoke-a-bank-a"
+        amount:
+          type: string
+          description: Fiat amount to deposit (big integer as string)
+          example: "10000000"
+
+    RegisterDepositResponse:
+      type: object
+      properties:
+        deposit_id:
+          type: string
+          description: Unique deposit identifier
+          example: "dep-a1b2c3d4"
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+          example: PENDING
+
+    FiatExchangeResponse:
+      type: object
+      properties:
+        tx_hash:
+          type: string
+          description: Besu transaction hash of the fCeBM mint
+          example: "0x1234..."
+
+    DepositRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        requester_besu_address:
+          type: string
+        requester_paladin_identity:
+          type: string
+        amount:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+        rejection_reason:
+          type: string
+        fiat_mint_tx_hash:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ListDepositsResponse:
+      type: object
+      properties:
+        deposits:
+          type: array
+          items:
+            $ref: "#/components/schemas/DepositRecord"
+        total:
+          type: integer
+
+    RequestEscrowRequest:
+      type: object
+      required: [amount]
+      properties:
+        requester_besu_address:
+          type: string
+          description: Besu address of the requester
+          example: "0x1234abcd..."
+        requester_paladin_identity:
+          type: string
+          description: Paladin identity of the requester
+          example: "funded_operator@spoke-a-bank-a"
+        amount:
+          type: string
+          description: Amount of fCeBM to convert into tCeBM (big integer as string)
+          example: "5000000"
+
+    RequestEscrowResponse:
+      type: object
+      properties:
+        escrow_id:
+          type: string
+          example: "esc-a1b2c3d4"
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+          example: PENDING
+
+    ApproveEscrowResponse:
+      type: object
+      properties:
+        burn_tx_hash:
+          type: string
+          description: Besu transaction hash for fCeBM burn
+          example: "0x1234..."
+        zeto_mint_tx_hash:
+          type: string
+          description: Paladin transaction hash for tCeBM mint
+          example: "0x5678..."
+
+    EscrowRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        requester_besu_address:
+          type: string
+        requester_paladin_identity:
+          type: string
+        amount:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+        rejection_reason:
+          type: string
+        burn_tx_hash:
+          type: string
+        zeto_mint_tx_hash:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ListEscrowsResponse:
+      type: object
+      properties:
+        escrows:
+          type: array
+          items:
+            $ref: "#/components/schemas/EscrowRecord"
+        total:
+          type: integer
+
+    RequestRedeemRequest:
+      type: object
+      required: [amount, zeto_transfer_tx_hash]
+      properties:
+        requester_besu_address:
+          type: string
+          description: Besu address to receive minted fCeBM
+          example: "0x1234abcd..."
+        requester_paladin_identity:
+          type: string
+          description: Paladin identity that transferred tCeBM to the Central Bank
+          example: "funded_operator@spoke-a-bank-a"
+        amount:
+          type: string
+          description: Amount of tCeBM to redeem (big integer as string)
+          example: "5000000"
+        zeto_transfer_tx_hash:
+          type: string
+          description: Paladin tx hash proving tCeBM was transferred to the Central Bank
+          example: "0xabcd..."
+
+    RequestRedeemResponse:
+      type: object
+      properties:
+        redeem_id:
+          type: string
+          example: "red-a1b2c3d4"
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+          example: PENDING
+
+    ApproveRedeemResponse:
+      type: object
+      properties:
+        fiat_mint_tx_hash:
+          type: string
+          description: Besu transaction hash of the fCeBM mint to requester
+          example: "0x1234..."
+
+    RedeemRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        requester_besu_address:
+          type: string
+        requester_paladin_identity:
+          type: string
+        amount:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+        rejection_reason:
+          type: string
+        zeto_transfer_tx_hash:
+          type: string
+        fiat_mint_tx_hash:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ListRedeemsResponse:
+      type: object
+      properties:
+        redeems:
+          type: array
+          items:
+            $ref: "#/components/schemas/RedeemRecord"
+        total:
+          type: integer
