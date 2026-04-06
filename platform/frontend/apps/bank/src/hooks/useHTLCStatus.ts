@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import type { HTLCLock } from "../types";
 import { htlcApi } from "../services/api";
 
+const normalizeState = (state: string) => state.replace("HTLC_STATE_", "");
+
 export function useHTLCStatus(contractId: string, intervalMs = 5000) {
   const [htlc, setHtlc] = useState<HTLCLock | null>(null);
   const [loading, setLoading] = useState(true);
@@ -22,7 +24,7 @@ export function useHTLCStatus(contractId: string, intervalMs = 5000) {
         setHtlc(data);
         setLoading(false);
 
-        if (data.state === "HTLC_STATE_SETTLED" || data.state === "HTLC_STATE_REFUNDED") {
+        if (normalizeState(data.state) === "SETTLED" || normalizeState(data.state) === "REFUNDED") {
           return;
         }
       } catch {

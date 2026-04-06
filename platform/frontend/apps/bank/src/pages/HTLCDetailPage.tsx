@@ -14,10 +14,16 @@ import { useHTLCStatus } from "../hooks/useHTLCStatus";
 import { useTimelockCountdown } from "../hooks/useTimelockCountdown";
 import { useHtlcStore } from "../stores";
 
+const normalizeState = (state: string) => state.replace("HTLC_STATE_", "");
+
+const isLockedState = (state: string) => normalizeState(state) === "LOCKED";
+const isSettledState = (state: string) => normalizeState(state) === "SETTLED";
+const isRefundedState = (state: string) => normalizeState(state) === "REFUNDED";
+
 const statusVariant = (state: string): "warning" | "default" | "success" | "destructive" | "outline" => {
-  if (state === "HTLC_STATE_LOCKED") return "warning";
-  if (state === "HTLC_STATE_SETTLED") return "success";
-  if (state === "HTLC_STATE_REFUNDED") return "destructive";
+  if (isLockedState(state)) return "warning";
+  if (isSettledState(state)) return "success";
+  if (isRefundedState(state)) return "destructive";
   return "outline";
 };
 
@@ -27,6 +33,7 @@ export function HTLCDetailPage() {
   const safeContractId = contractId ?? "";
   const settle = useHtlcStore((state) => state.settle);
   const refund = useHtlcStore((state) => state.refund);
+  const getStatus = useHtlcStore((state) => state.getStatus);
   const storeStatus = useHtlcStore((state) => state.status);
 
   const [confirmSettle, setConfirmSettle] = useState(false);
@@ -39,8 +46,21 @@ export function HTLCDetailPage() {
     return <Navigate to="/htlc" replace />;
   }
 
-  const canSettle = Boolean(htlc && htlc.state === "HTLC_STATE_LOCKED" && htlc.secret);
-  const canRefund = Boolean(htlc && htlc.state === "HTLC_STATE_LOCKED" && countdown.isExpired);
+  const canSettle = Boolean(htlc && isLockedState(htlc.state) && htlc.secret);
+  const canRefund = Boolean(htlc && isLockedState(htlc.state) && countdown.isExpired);
+  const isFinalState = Boolean(htlc && (isSettledState(htlc.state) || isRefundedState(htlc.state)));
+
+  const waitForState = async (targetState: "HTLC_STATE_SETTLED" | "HTLC_STATE_REFUNDED", timeoutMs = 30_000, stepMs = 2_000) => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const latest = await getStatus(contractId);
+      if (normalizeState(latest.state) === normalizeState(targetState)) {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, stepMs));
+    }
+    return false;
+  };
 
   const onSettle = async () => {
     if (!htlc?.secret) {
@@ -52,6 +72,19 @@ export function HTLCDetailPage() {
       toast.success("HTLC settled successfully.");
       setConfirmSettle(false);
     } catch (error) {
+      const isTimeout = error instanceof Error && /timeout|ECONNABORTED/i.test(error.message);
+      if (isTimeout) {
+        try {
+          const settled = await waitForState("HTLC_STATE_SETTLED");
+          if (settled) {
+            toast.success("HTLC settled successfully.");
+            setConfirmSettle(false);
+            return;
+          }
+        } catch {
+          // Fall through to user-facing error below.
+        }
+      }
       toast.error(error instanceof Error ? error.message : "Unable to settle HTLC.");
     }
   };
@@ -98,7 +131,7 @@ export function HTLCDetailPage() {
             </CardContent>
           </Card>
 
-          {htlc.state === "HTLC_STATE_LOCKED" ? (
+          {isLockedState(htlc.state) ? (
             <Card>
               <CardHeader>
                 <CardTitle>Timelock Countdown</CardTitle>
@@ -126,7 +159,7 @@ export function HTLCDetailPage() {
             </CardContent>
           </Card>
 
-          {confirmSettle ? (
+          {confirmSettle && !isFinalState ? (
             <Card>
               <CardHeader>
                 <CardTitle>Confirm Settle</CardTitle>
@@ -145,7 +178,7 @@ export function HTLCDetailPage() {
             </Card>
           ) : null}
 
-          {confirmRefund ? (
+          {confirmRefund && !isFinalState ? (
             <Card>
               <CardHeader>
                 <CardTitle>Confirm Refund</CardTitle>

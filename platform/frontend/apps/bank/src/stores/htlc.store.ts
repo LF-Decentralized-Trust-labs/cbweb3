@@ -71,8 +71,12 @@ export const useHtlcStore = create<HTLCState>((set) => ({
     set({ status: "loading", error: null });
     try {
       await htlcApi.settle({ contract_id: contractId, secret });
-      const response = await htlcApi.search({});
-      set({ locks: response.locks, total: response.total, status: "idle" });
+      try {
+        const response = await htlcApi.search({});
+        set({ locks: response.locks, total: response.total, status: "idle" });
+      } catch {
+        set({ status: "idle" });
+      }
     } catch (error) {
       set({ status: "error", error: error instanceof Error ? error.message : "Unable to settle lock" });
       throw error;
@@ -82,8 +86,12 @@ export const useHtlcStore = create<HTLCState>((set) => ({
     set({ status: "loading", error: null });
     try {
       await htlcApi.refund(contractId);
-      const response = await htlcApi.search({});
-      set({ locks: response.locks, total: response.total, status: "idle" });
+      try {
+        const response = await htlcApi.search({});
+        set({ locks: response.locks, total: response.total, status: "idle" });
+      } catch {
+        set({ status: "idle" });
+      }
     } catch (error) {
       set({ status: "error", error: error instanceof Error ? error.message : "Unable to refund lock" });
       throw error;
