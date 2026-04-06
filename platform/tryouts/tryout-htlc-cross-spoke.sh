@@ -158,6 +158,9 @@ read_kc_secret() {
 http_post() {
   local url=$1 token=$2 payload=$3 expected=$4
   local tmp code body
+  echo "  Payload:" >&2
+  echo "$payload" | jq . >&2
+  echo "  → POST $url" >&2
   tmp=$(mktemp)
   code=$(curl -sS -X POST "$url" \
     --cookie "access_token=$token" \
@@ -170,6 +173,8 @@ http_post() {
     echo "Response: $body" >&2
     exit 1
   fi
+  echo "  Response:" >&2
+  echo "$body" | jq . >&2
   echo "$body"
 }
 
@@ -177,6 +182,7 @@ http_post() {
 http_get() {
   local url=$1 token=$2 expected=$3
   local tmp code body
+  echo "  → GET $url" >&2
   tmp=$(mktemp)
   code=$(curl -sS -X GET "$url" \
     --cookie "access_token=$token" \
@@ -188,6 +194,8 @@ http_get() {
     echo "Response: $body" >&2
     exit 1
   fi
+  echo "  Response:" >&2
+  echo "$body" | jq . >&2
   echo "$body"
 }
 
@@ -197,17 +205,23 @@ http_get() {
 
 bank_login() {
   local bank_name=$1 bank_url=$2 env_file=$3 client_id=$4
-  local kc_secret login_resp token
+  local kc_secret login_resp token payload
   kc_secret=$(read_kc_secret "$env_file")
+  payload="{\"clientId\": \"$client_id\", \"clientSecret\": \"$kc_secret\"}"
+  echo "  Payload:" >&2
+  echo "$payload" | jq . >&2
+  echo "  → POST $bank_url/auth/login" >&2
   login_resp=$(curl -s -X POST "$bank_url/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"clientId\": \"$client_id\", \"clientSecret\": \"$kc_secret\"}")
+    -d "$payload")
   token=$(echo "$login_resp" | jq -r '.accessToken // empty')
   if [ -z "$token" ]; then
     echo "ERROR: $bank_name operator login failed." >&2
     echo "Response: $login_resp" >&2
     exit 1
   fi
+  echo "  Response:" >&2
+  echo "$login_resp" | jq . >&2
   echo "$token"
 }
 
@@ -274,18 +288,17 @@ verify_lock_status_spoke_a() {
 # ═══════════════════════════════════════════════════════════════════════════
 
 lock_htlc_responder() {
-  local time_lock resp
+  local time_lock resp payload
   # Responder timeLock MUST be shorter than initiator's
   time_lock=$(( $(date +%s) + 1800 ))
-  resp=$(http_post "$BANK_B_URL/htlc/lock-with-hash" "$BANK_B_TOKEN" \
-    "$(jq -n \
-      --arg aid "FX_CROSS_SPOKE_001" \
-      --arg rcv "$IDENTITY_BANK_D" \
-      --arg amt "$LOCK_AMOUNT" \
-      --argjson tl "$time_lock" \
-      --arg hl "$HASH_LOCK_A" \
-      '{agreement_id: $aid, receiver: $rcv, amount: $amt, time_lock: $tl, hash_lock: $hl}')" \
-    "201")
+  payload=$(jq -n \
+    --arg aid "FX_CROSS_SPOKE_001" \
+    --arg rcv "$IDENTITY_BANK_D" \
+    --arg amt "$LOCK_AMOUNT" \
+    --argjson tl "$time_lock" \
+    --arg hl "$HASH_LOCK_A" \
+    '{agreement_id: $aid, receiver: $rcv, amount: $amt, time_lock: $tl, hash_lock: $hl}')
+  resp=$(http_post "$BANK_B_URL/htlc/lock-with-hash" "$BANK_B_TOKEN" "$payload" "201")
   CONTRACT_ID_B=$(echo "$resp" | jq -r '.contract_id')
   ZETO_TX_LOCK_B=$(echo "$resp" | jq -r '.zeto_tx_hash // empty')
   echo "$resp" | jq .

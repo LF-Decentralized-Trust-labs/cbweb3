@@ -67,8 +67,15 @@ func generateID() string {
 // --- HTLC Dual-Layer Operations ---
 
 func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockHTLCRequest) (*pb.LockHTLCResponse, error) {
-	if req.AgreementId == "" || req.Receiver == "" || req.Amount == "" || req.TimeLock == 0 {
-		return nil, status.Error(codes.InvalidArgument, "agreement_id, receiver, amount, and time_lock are required")
+	if req.Receiver == "" || req.Amount == "" {
+		return nil, status.Error(codes.InvalidArgument, "receiver and amount are required")
+	}
+	// Apply smart defaults
+	if req.AgreementId == "" {
+		req.AgreementId = newUUID()
+	}
+	if req.TimeLock == 0 {
+		req.TimeLock = uint64(time.Now().Unix()) + 3600 // 1h — initiator must have longer timelock
 	}
 
 	// 1. Generate secret and hashLock
@@ -147,8 +154,15 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 }
 
 func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, req *pb.LockHTLCWithHashLockRequest) (*pb.LockHTLCWithHashLockResponse, error) {
-	if req.AgreementId == "" || req.Receiver == "" || req.Amount == "" || req.TimeLock == 0 || req.HashLock == "" {
-		return nil, status.Error(codes.InvalidArgument, "agreement_id, receiver, amount, time_lock, and hash_lock are required")
+	if req.Receiver == "" || req.Amount == "" || req.HashLock == "" {
+		return nil, status.Error(codes.InvalidArgument, "receiver, amount, and hash_lock are required")
+	}
+	// Apply smart defaults
+	if req.AgreementId == "" {
+		req.AgreementId = newUUID()
+	}
+	if req.TimeLock == 0 {
+		req.TimeLock = uint64(time.Now().Unix()) + 1800 // 30min — responder must have shorter timelock than initiator
 	}
 
 	// Decode the externally provided hashLock
@@ -494,6 +508,11 @@ func (s *paymentOrchestratorService) ListFXAgreements(_ context.Context, _ *pb.L
 }
 
 // --- Helpers ---
+
+// newUUID returns a new random UUID string.
+func newUUID() string {
+	return uuid.NewString()
+}
 
 // contractIDBytes converts a hex-encoded contract ID string to a 32-byte array.
 func contractIDBytes(hexStr string) []byte {

@@ -115,10 +115,10 @@ message HTLCLock {
 }
 
 message LockHTLCRequest {
-  string agreement_id = 1;
-  string receiver = 2;
-  string amount = 3;
-  uint64 time_lock = 4;
+  string agreement_id = 1; // Optional: auto-generated UUID if empty
+  string receiver = 2;     // Required: Paladin identity of the token recipient
+  string amount = 3;       // Required
+  uint64 time_lock = 4;    // Optional: defaults to now+3600s (1h) — initiator must have longer timelock than responder
 }
 
 message LockHTLCResponse {
@@ -133,11 +133,11 @@ message LockHTLCResponse {
 // cross-spoke atomic swap: the initiator generates the secret and shares
 // only the hashLock with the responder.
 message LockHTLCWithHashLockRequest {
-  string agreement_id = 1;
-  string receiver = 2;
-  string amount = 3;
-  uint64 time_lock = 4;
-  string hash_lock = 5; // Hex-encoded SHA-256 hash (from the initiator)
+  string agreement_id = 1; // Optional: auto-generated UUID if empty
+  string receiver = 2;     // Required: Paladin identity of the token recipient
+  string amount = 3;       // Required
+  uint64 time_lock = 4;    // Optional: defaults to now+1800s (30min) — responder must have shorter timelock than initiator
+  string hash_lock = 5;    // Required: hex-encoded SHA-256 hash received from the initiator
 }
 
 message LockHTLCWithHashLockResponse {
