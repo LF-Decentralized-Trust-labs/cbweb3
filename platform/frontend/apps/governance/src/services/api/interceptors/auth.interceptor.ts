@@ -29,7 +29,6 @@ export function attachAuthInterceptor(httpClient: AxiosInstance) {
           {},
           {
             baseURL: httpClient.defaults.baseURL,
-            timeout: httpClient.defaults.timeout,
             withCredentials: true,
           },
         );
