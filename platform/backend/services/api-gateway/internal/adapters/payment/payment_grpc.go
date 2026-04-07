@@ -196,6 +196,18 @@ func (a *GRPCAdapter) GetBalance(ctx context.Context) (*BalanceResult, error) {
 	return &BalanceResult{Balance: resp.Balance}, nil
 }
 
+type FiatBalanceResult struct {
+	Balance string `json:"balance"`
+}
+
+func (a *GRPCAdapter) GetFiatBalance(ctx context.Context) (*FiatBalanceResult, error) {
+	resp, err := a.cc.GetFiatBalance(ctx, &pb.GetFiatBalanceRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return &FiatBalanceResult{Balance: resp.Balance}, nil
+}
+
 func lockToStatus(l *pb.HTLCLock) *HTLCStatus {
 	if l == nil {
 		return &HTLCStatus{}

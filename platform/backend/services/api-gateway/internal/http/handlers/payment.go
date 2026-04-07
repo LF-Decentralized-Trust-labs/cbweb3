@@ -6,6 +6,8 @@ import (
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // PaymentHandler exposes the payment-orchestrator operations as REST endpoints.
@@ -164,6 +166,17 @@ func (h *PaymentHandler) TransferToken(c *fiber.Ctx) error {
 func (h *PaymentHandler) GetBalance(c *fiber.Ctx) error {
 	result, err := h.payment.GetBalance(c.Context())
 	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(result)
+}
+
+func (h *PaymentHandler) GetFiatBalance(c *fiber.Ctx) error {
+	result, err := h.payment.GetFiatBalance(c.Context())
+	if err != nil {
+		if status.Code(err) == codes.Unavailable {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(result)

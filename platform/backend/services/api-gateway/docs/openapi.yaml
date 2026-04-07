@@ -1663,6 +1663,35 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/token/fiat-balance:
+    get:
+      tags: [Token]
+      summary: Get fiat token balance for the authenticated bank's Besu operator
+      description: >
+        Returns the fCeBM balance for the Besu operator address configured
+        internally in the payment-orchestrator of the calling bank. No address
+        parameter is required or accepted.
+      operationId: getFiatBalance
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Fiat balance returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetFiatBalanceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Fiat token adapter unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   # ---------------------------------------------------------------------------
   # Payment Orchestrator — Escrow (Deposit / Tokenization / Redeem)
   # Central Bank: local processing + approve/reject
@@ -2962,6 +2991,14 @@ components:
           type: string
           description: Current tCeBM balance (big integer as string)
           example: "9000000"
+
+    GetFiatBalanceResponse:
+      type: object
+      properties:
+        balance:
+          type: string
+          description: Current fCeBM balance (big integer as string)
+          example: "1250000"
 
     # --- Escrow schemas ---
 

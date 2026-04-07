@@ -125,6 +125,7 @@ func Setup(app *fiber.App, deps Dependencies) {
 		tokenGroup.Post("/mint", deps.PaymentHandler.MintToken)
 		tokenGroup.Post("/transfer", deps.PaymentHandler.TransferToken)
 		tokenGroup.Get("/balance", deps.PaymentHandler.GetBalance)
+		tokenGroup.Get("/fiat-balance", deps.PaymentHandler.GetFiatBalance)
 
 		// --- Escrow: Deposit / Escrow / Redeem (Central Bank) ---
 		if deps.PaymentProxyHandler == nil {

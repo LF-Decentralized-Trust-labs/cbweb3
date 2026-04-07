@@ -8,4 +8,5 @@ type FiatTokenPort interface {
 	Mint(ctx context.Context, toAddress string, amount string) (txHash string, err error)
 	Burn(ctx context.Context, fromAddress string, amount string) (txHash string, err error)
 	BalanceOf(ctx context.Context, address string) (string, error)
+	GetFiatBalance(ctx context.Context) (string, error)
 }

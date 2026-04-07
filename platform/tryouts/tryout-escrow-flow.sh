@@ -12,14 +12,14 @@
 #   Step  3  Register deposit (Bank-A → CB proxy)
 #   Step  4  List deposits (Bank-A)
 #   Step  5  Approve deposit (CB governance)
-#   Step  6  Fiat exchange — mint fCeBM (CB governance)
+#   Step  6  Fiat exchange — mint fCeBM (CB governance) + show Bank-A fiat balance
 #   Step  7  Request escrow fCeBM→tCeBM (Bank-A → CB proxy)
 #   Step  8  List escrows (Bank-A)
 #   Step  9  Approve escrow — burn fCeBM + mint tCeBM (CB governance)
-#   Step 10  Check tCeBM balance (Bank-A)
+#   Step 10  Check commercial bank balances (fCeBM + tCeBM)
 #   Step 11  Request redeem tCeBM→fCeBM (Bank-A → CB proxy — includes Zeto transfer)
 #   Step 12  List redeems (Bank-A)
-#   Step 13  Approve redeem — mint fCeBM (CB governance)
+#   Step 13  Approve redeem — mint fCeBM (CB governance) + show Bank-A fiat balance
 #   Step 14  List deposits (CB — final state)
 #   Step 15  List escrows + redeems (CB — final state)
 #
@@ -129,6 +129,22 @@ http_get() {
   echo "$body"
 }
 
+show_bank_fiat_balance() {
+  local resp balance
+  resp=$(http_get "$BANK_URL/token/fiat-balance" "$BANK_TOKEN" "200")
+  balance=$(echo "$resp" | jq -r '.balance')
+  echo "  Bank-A fCeBM balance=$balance"
+  echo "$resp" | jq .
+}
+
+show_bank_tcebm_balance() {
+  local resp balance
+  resp=$(http_get "$BANK_URL/token/balance" "$BANK_TOKEN" "200")
+  balance=$(echo "$resp" | jq -r '.balance')
+  echo "  Bank-A tCeBM balance=$balance"
+  echo "$resp" | jq .
+}
+
 # ---------------------------------------------------------------------------
 # Step 1 — Bank-A operator login
 # ---------------------------------------------------------------------------
@@ -205,8 +221,10 @@ step_06_fiat_exchange() {
   local resp
   resp=$(http_post "$CB_URL/payments/deposits/fiat-exchange" "$CB_TOKEN" \
     "{\"deposit_id\": \"$DEPOSIT_ID\"}" "201")
-  echo "  fCeBM minted. tx_hash=$(echo "$resp" | jq -r '.tx_hash')"
+  echo "  fCeBM minted. mint_tx_hash=$(echo "$resp" | jq -r '.mint_tx_hash')"
   echo "$resp" | jq .
+  echo "  Commercial bank fiat balance after mint:"
+  show_bank_fiat_balance
 }
 
 # ---------------------------------------------------------------------------
@@ -246,14 +264,14 @@ step_09_approve_escrow() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 10 — Check tCeBM balance (Bank-A)
+# Step 10 — Check commercial bank balances (Bank-A)
 # ---------------------------------------------------------------------------
 step_10_check_balance() {
-  echo "=== Step 10: Check tCeBM balance (Bank-A) ==="
-  local resp
-  resp=$(http_get "$BANK_URL/token/balance" "$BANK_TOKEN" "200")
-  echo "  tCeBM balance=$(echo "$resp" | jq -r '.balance')"
-  echo "$resp" | jq .
+  echo "=== Step 10: Check commercial bank balances (Bank-A) ==="
+  echo "  Fiat balance:"
+  show_bank_fiat_balance
+  echo "  Tokenized balance:"
+  show_bank_tcebm_balance
 }
 
 # ---------------------------------------------------------------------------
@@ -289,6 +307,8 @@ step_13_approve_redeem() {
     "{\"redeem_id\": \"$REDEEM_ID\"}" "201")
   echo "  fiat_mint_tx_hash=$(echo "$resp" | jq -r '.fiat_mint_tx_hash')"
   echo "$resp" | jq .
+  echo "  Commercial bank fiat balance after redeem approval:"
+  show_bank_fiat_balance
 }
 
 # ---------------------------------------------------------------------------
