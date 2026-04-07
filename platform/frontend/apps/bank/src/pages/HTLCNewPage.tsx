@@ -14,9 +14,10 @@ import {
   SelectValue,
   toast,
 } from "@cbweb3/ui";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useHtlcStore } from "../stores";
+import { BalanceWidget } from "../components/common/BalanceWidget";
+import { useHtlcStore, usePaymentStore } from "../stores";
 
 type DurationOption = "none" | "1h" | "6h" | "24h" | "custom";
 type FormMode = "lock" | "lockWithHash";
@@ -28,6 +29,9 @@ export function HTLCNewPage() {
   const lock = useHtlcStore((state) => state.lock);
   const lockWithHash = useHtlcStore((state) => state.lockWithHash);
   const status = useHtlcStore((state) => state.status);
+  const fetchPayments = usePaymentStore((state) => state.fetchAll);
+  const balance = usePaymentStore((state) => state.balance);
+  const paymentStatus = usePaymentStore((state) => state.status);
 
   const [mode, setMode] = useState<FormMode>("lock");
 
@@ -42,6 +46,10 @@ export function HTLCNewPage() {
   const [hashReceiver, setHashReceiver] = useState("");
   const [hashAmount, setHashAmount] = useState("");
   const [showLockWithHashConfirm, setShowLockWithHashConfirm] = useState(false);
+
+  useEffect(() => {
+    void fetchPayments();
+  }, [fetchPayments]);
 
   const timeLock = useMemo(() => {
     const now = nowUnix();
@@ -143,6 +151,8 @@ export function HTLCNewPage() {
           <Link to="/htlc">Back to history</Link>
         </Button>
       </div>
+
+      <BalanceWidget balance={balance} loading={paymentStatus === "loading" && balance === null} />
 
       <Card>
         <CardHeader>

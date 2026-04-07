@@ -1,16 +1,31 @@
 import { Badge } from "@cbweb3/ui";
+import {
+  ClipboardCheck,
+  Gauge,
+  LayoutDashboard,
+  ListChecks,
+  Lock,
+  Scale,
+  Settings,
+  ShieldAlert,
+  Users,
+  Wallet,
+} from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useCircuitBreaker } from "../../hooks";
 
 const navItems = [
-  { to: "/", label: "Dashboard" },
-  { to: "/registry", label: "Registry" },
-  { to: "/circuit-breaker", label: "Circuit Breaker" },
-  { to: "/htlc-monitor", label: "HTLC Monitor" },
-  { to: "/accounts", label: "Accounts" },
-  { to: "/parameters", label: "Parameters" },
-  { to: "/audit", label: "Audit" },
-  { to: "/settings", label: "Settings" },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/registry", label: "Registry", icon: ClipboardCheck },
+  { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
+  { to: "/htlc-monitor", label: "HTLC Monitor", icon: Lock },
+  { to: "/accounts", label: "Accounts", icon: Users },
+  { to: "/parameters", label: "Parameters", icon: Scale },
+  { to: "/deposits-approval", label: "Deposit Approvals", icon: Wallet },
+  { to: "/escrows-approval", label: "Escrow Approvals", icon: ListChecks },
+  { to: "/redeems-approval", label: "Redeem Approvals", icon: Gauge },
+  { to: "/audit", label: "Audit", icon: ClipboardCheck },
+  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Sidebar() {
@@ -35,6 +50,7 @@ export function Sidebar() {
               }`
             }
           >
+            <item.icon className="h-4 w-4" />
             {item.label}
           </NavLink>
         ))}

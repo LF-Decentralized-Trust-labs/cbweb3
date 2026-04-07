@@ -8,11 +8,12 @@ import {
   CardTitle,
   toast,
 } from "@cbweb3/ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
+import { BalanceWidget } from "../components/common/BalanceWidget";
 import { useHTLCStatus } from "../hooks/useHTLCStatus";
 import { useTimelockCountdown } from "../hooks/useTimelockCountdown";
-import { useHtlcStore } from "../stores";
+import { useHtlcStore, usePaymentStore } from "../stores";
 
 const normalizeState = (state: string) => state.replace("HTLC_STATE_", "");
 
@@ -35,12 +36,19 @@ export function HTLCDetailPage() {
   const refund = useHtlcStore((state) => state.refund);
   const getStatus = useHtlcStore((state) => state.getStatus);
   const storeStatus = useHtlcStore((state) => state.status);
+  const fetchPayments = usePaymentStore((state) => state.fetchAll);
+  const balance = usePaymentStore((state) => state.balance);
+  const paymentStatus = usePaymentStore((state) => state.status);
 
   const [confirmSettle, setConfirmSettle] = useState(false);
   const [confirmRefund, setConfirmRefund] = useState(false);
 
   const { htlc, loading } = useHTLCStatus(safeContractId);
   const countdown = useTimelockCountdown(htlc?.time_lock ?? 0);
+
+  useEffect(() => {
+    void fetchPayments();
+  }, [fetchPayments]);
 
   if (!contractId) {
     return <Navigate to="/htlc" replace />;
@@ -110,6 +118,8 @@ export function HTLCDetailPage() {
           <Link to="/htlc">Back to history</Link>
         </Button>
       </div>
+
+      <BalanceWidget balance={balance} loading={paymentStatus === "loading" && balance === null} />
 
       {loading ? <p className="text-sm text-muted-foreground">Loading contract details...</p> : null}
 

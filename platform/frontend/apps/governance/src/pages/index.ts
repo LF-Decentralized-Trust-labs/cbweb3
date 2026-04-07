@@ -5,5 +5,8 @@ export * from "./DashboardPage";
 export * from "./HTLCMonitorPage";
 export * from "./LoginPage";
 export * from "./ParametersPage";
+export * from "./DepositsApprovalPage";
+export * from "./EscrowsApprovalPage";
+export * from "./RedeemsApprovalPage";
 export * from "./RegistryPage";
 export * from "./SettingsPage";

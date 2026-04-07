@@ -22,8 +22,9 @@ import {
 } from "@cbweb3/ui";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { BalanceWidget } from "../components/common/BalanceWidget";
 import type { HTLCLock, HTLCSearchState } from "../types";
-import { useHtlcStore } from "../stores";
+import { useHtlcStore, usePaymentStore } from "../stores";
 
 type FilterState = "ALL" | HTLCSearchState;
 
@@ -39,6 +40,9 @@ const statusVariant = (state: string): "warning" | "default" | "success" | "dest
 export function HTLCHistoryPage() {
   const navigate = useNavigate();
   const search = useHtlcStore((state) => state.search);
+  const fetchPayments = usePaymentStore((state) => state.fetchAll);
+  const balance = usePaymentStore((state) => state.balance);
+  const paymentStatus = usePaymentStore((state) => state.status);
 
   const [stateFilter, setStateFilter] = useState<FilterState>("ALL");
   const [agreementIdFilter, setAgreementIdFilter] = useState("");
@@ -67,6 +71,10 @@ export function HTLCHistoryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    void fetchPayments();
+  }, [fetchPayments]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -78,6 +86,8 @@ export function HTLCHistoryPage() {
           <Link to="/htlc/new">New HTLC Lock</Link>
         </Button>
       </div>
+
+      <BalanceWidget balance={balance} loading={paymentStatus === "loading" && balance === null} />
 
       <Card>
         <CardHeader>
