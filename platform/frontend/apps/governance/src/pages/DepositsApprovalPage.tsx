@@ -40,7 +40,6 @@ export function DepositsApprovalPage() {
 
   const [requesterFilter, setRequesterFilter] = useState("");
   const [approveTargetId, setApproveTargetId] = useState<string | null>(null);
-  const [exchangeTargetId, setExchangeTargetId] = useState<string | null>(null);
   const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
   const [reason, setReason] = useState("");
 
@@ -64,24 +63,11 @@ export function DepositsApprovalPage() {
 
     try {
       await approveDeposit(approveTargetId);
-      toast.success("Deposit approved.");
+      const exchangeResult = await requestFiatExchange(approveTargetId);
+      toast.success(`Deposit approved and fiat exchanged. Tx: ${shortHash(exchangeResult.tx_hash)}`);
       setApproveTargetId(null);
     } catch (approveError) {
-      toast.error(approveError instanceof Error ? approveError.message : "Unable to approve deposit");
-    }
-  };
-
-  const onExchangeFiat = async () => {
-    if (!exchangeTargetId) {
-      return;
-    }
-
-    try {
-      const exchangeResult = await requestFiatExchange(exchangeTargetId);
-      toast.success(`Fiat exchange executed. Tx: ${shortHash(exchangeResult.tx_hash)}`);
-      setExchangeTargetId(null);
-    } catch (exchangeError) {
-      toast.error(exchangeError instanceof Error ? exchangeError.message : "Unable to execute fiat exchange");
+      toast.error(approveError instanceof Error ? approveError.message : "Unable to approve and exchange deposit");
     }
   };
 
@@ -194,7 +180,6 @@ export function DepositsApprovalPage() {
                           size="sm"
                           onClick={() => {
                             setApproveTargetId(deposit.id);
-                            setExchangeTargetId(null);
                             setRejectTargetId(null);
                           }}
                           disabled={status === "loading"}
@@ -207,25 +192,10 @@ export function DepositsApprovalPage() {
                           onClick={() => {
                             setRejectTargetId(deposit.id);
                             setApproveTargetId(null);
-                            setExchangeTargetId(null);
                             setReason("");
                           }}
                         >
                           Reject
-                        </Button>
-                      </div>
-                    ) : normalizePaymentStatus(deposit.status) === PaymentStatus.APPROVED ? (
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setExchangeTargetId(deposit.id);
-                            setApproveTargetId(null);
-                            setRejectTargetId(null);
-                          }}
-                          disabled={status === "loading"}
-                        >
-                          Exchange Fiat
                         </Button>
                       </div>
                     ) : (
@@ -243,31 +213,14 @@ export function DepositsApprovalPage() {
       {approveTargetId ? (
         <Card>
           <CardHeader>
-            <CardTitle>Confirm Deposit Approval</CardTitle>
+            <CardTitle>Confirm Deposit Approval + Fiat Exchange</CardTitle>
             <CardDescription>Deposit ID: {approveTargetId}</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onApproveDeposit()} disabled={status === "loading"}>
-              {status === "loading" ? "Submitting..." : "Confirm Approve Deposit"}
+              {status === "loading" ? "Submitting..." : "Confirm Action"}
             </Button>
             <Button variant="outline" onClick={() => setApproveTargetId(null)}>
-              Cancel
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {exchangeTargetId ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Confirm Fiat Exchange</CardTitle>
-            <CardDescription>Deposit ID: {exchangeTargetId}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex gap-2">
-            <Button onClick={() => void onExchangeFiat()} disabled={status === "loading"}>
-              {status === "loading" ? "Submitting..." : "Confirm Exchange Fiat"}
-            </Button>
-            <Button variant="outline" onClick={() => setExchangeTargetId(null)}>
               Cancel
             </Button>
           </CardContent>

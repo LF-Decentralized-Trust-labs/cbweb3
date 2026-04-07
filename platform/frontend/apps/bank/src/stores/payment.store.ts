@@ -7,6 +7,7 @@ type PaymentState = {
   escrows: EscrowRecord[];
   redeems: RedeemRecord[];
   balance: string | null;
+  fiatBalance: string | null;
   status: AsyncStatus;
   error: string | null;
   fetchAll: () => Promise<void>;
@@ -22,16 +23,18 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
   escrows: [],
   redeems: [],
   balance: null,
+  fiatBalance: null,
   status: "idle",
   error: null,
   fetchAll: async () => {
     set({ status: "loading", error: null });
     try {
-      const [depositsResponse, escrowsResponse, redeemsResponse, balanceResponse] = await Promise.all([
+      const [depositsResponse, escrowsResponse, redeemsResponse, balanceResponse, fiatBalanceResponse] = await Promise.all([
         paymentApi.listDeposits(),
         paymentApi.listEscrows(),
         paymentApi.listRedeems(),
         paymentApi.getBalance(),
+        paymentApi.getFiatBalance(),
       ]);
 
       set({
@@ -39,6 +42,7 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
         escrows: escrowsResponse.escrows,
         redeems: redeemsResponse.redeems,
         balance: balanceResponse.balance,
+        fiatBalance: fiatBalanceResponse.balance,
         status: "idle",
       });
     } catch (error) {

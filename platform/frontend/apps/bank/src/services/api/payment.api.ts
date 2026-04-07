@@ -39,4 +39,8 @@ export const paymentApi = {
     const response = await httpClient.get<BalanceResponse>("/token/balance");
     return response.data;
   },
+  getFiatBalance: async (): Promise<BalanceResponse> => {
+    const response = await httpClient.get<BalanceResponse>("/token/fiat-balance");
+    return response.data;
+  },
 };

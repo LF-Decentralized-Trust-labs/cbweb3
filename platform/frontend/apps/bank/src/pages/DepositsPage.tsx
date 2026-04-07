@@ -34,6 +34,7 @@ export function DepositsPage() {
   const registerDeposit = usePaymentStore((state) => state.registerDeposit);
   const deposits = usePaymentStore((state) => state.deposits);
   const balance = usePaymentStore((state) => state.balance);
+  const fiatBalance = usePaymentStore((state) => state.fiatBalance);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
 
@@ -75,8 +76,17 @@ export function DepositsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         <BalanceWidget balance={balance} loading={status === "loading" && balance === null} />
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Fiat Reserve Balance</CardDescription>
+            <CardTitle>{status === "loading" && fiatBalance === null ? "Loading..." : formatFiatUnits(fiatBalance ?? "0")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Badge variant="outline">Mirrors commercial bank fiat reserves</Badge>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Pending Deposits</CardDescription>

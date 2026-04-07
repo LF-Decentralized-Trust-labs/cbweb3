@@ -31,7 +31,7 @@ import {
   usePaymentStore,
   useTokenStore,
 } from "../stores";
-import { PaymentStatus, normalizePaymentStatus } from "../types";
+import { PaymentStatus, formatFiatUnits, normalizePaymentStatus } from "../types";
 
 // const statusVariant = (status: string): "warning" | "default" | "success" | "destructive" | "outline" => {
 //   const variants: Record<string, "warning" | "default" | "success" | "destructive"> = {
@@ -57,6 +57,7 @@ export function DashboardPage() {
 
   const fetchPayments = usePaymentStore((state) => state.fetchAll);
   const paymentBalance = usePaymentStore((state) => state.balance);
+  const fiatBalance = usePaymentStore((state) => state.fiatBalance);
   const paymentStatus = usePaymentStore((state) => state.status);
   const deposits = usePaymentStore((state) => state.deposits);
   const escrows = usePaymentStore((state) => state.escrows);
@@ -120,11 +121,24 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <BalanceWidget
           balance={paymentBalance}
           loading={paymentStatus === "loading" && paymentBalance === null}
         />
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Fiat Reserve Balance</CardDescription>
+            <CardTitle>
+              {paymentStatus === "loading" && fiatBalance === null
+                ? "Loading..."
+                : formatFiatUnits(fiatBalance ?? "0")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Badge variant="outline">Mirrors commercial bank fiat reserves</Badge>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Pending Deposits</CardDescription>

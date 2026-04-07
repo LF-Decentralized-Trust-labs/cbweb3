@@ -19,7 +19,14 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
-import { PaymentStatus, formatCeBM, getPaymentStatusLabel, getPaymentStatusVariant, normalizePaymentStatus } from "../types";
+import {
+  PaymentStatus,
+  formatCeBM,
+  formatFiatUnits,
+  getPaymentStatusLabel,
+  getPaymentStatusVariant,
+  normalizePaymentStatus,
+} from "../types";
 
 const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.slice(-8)}` : "-");
 
@@ -28,6 +35,7 @@ export function RedeemsPage() {
   const requestRedeem = usePaymentStore((state) => state.requestRedeem);
   const redeems = usePaymentStore((state) => state.redeems);
   const balance = usePaymentStore((state) => state.balance);
+  const fiatBalance = usePaymentStore((state) => state.fiatBalance);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
 
@@ -69,8 +77,17 @@ export function RedeemsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         <BalanceWidget balance={balance} loading={status === "loading" && balance === null} />
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Fiat Reserve Balance</CardDescription>
+            <CardTitle>{status === "loading" && fiatBalance === null ? "Loading..." : formatFiatUnits(fiatBalance ?? "0")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Badge variant="outline">Mirrors commercial bank fiat reserves</Badge>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Pending Redeems</CardDescription>
