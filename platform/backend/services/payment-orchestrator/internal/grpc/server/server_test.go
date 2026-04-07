@@ -8,13 +8,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/cacti"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/grpc/server"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+// noopRelay is a test double that satisfies InteroperabilityPort with no-op
+// behaviour. All subscription, relay, and verify calls succeed silently.
+type noopRelay struct{}
+
+func (noopRelay) SubscribeLockEvents(_ context.Context, _ func(ports.InteroperabilityProof) error) error {
+	return nil
+}
+func (noopRelay) SubscribeSettleEvents(_ context.Context, _ func(ports.InteroperabilityProof) error) error {
+	return nil
+}
+func (noopRelay) RelayProof(_ context.Context, _ ports.InteroperabilityProof) (string, error) {
+	return "", nil
+}
+func (noopRelay) VerifyProof(_ context.Context, _ ports.InteroperabilityProof) (bool, error) {
+	return true, nil
+}
 
 // mockZeto is a test double for ZetoOperator.
 type mockZeto struct {
@@ -46,7 +62,7 @@ func (m *mockZeto) TransferLocked(_ context.Context, _, _, _ string) (string, er
 	m.transferLockedCalled++
 	return "mock-transfer-locked-tx", nil
 }
-func (m *mockZeto) Balance(_ context.Context, _ string) (string, error) {
+func (m *mockZeto) Balance(_ context.Context) (string, error) {
 	m.balanceCalled++
 	return "1000000", nil
 }
@@ -54,7 +70,6 @@ func (m *mockZeto) Balance(_ context.Context, _ string) (string, error) {
 type testEnv struct {
 	client pb.PaymentOrchestratorServiceClient
 	zeto   *mockZeto
-	relay  *cacti.StubRelay
 	cancel context.CancelFunc
 }
 
@@ -62,11 +77,10 @@ func setupTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mock := &mockZeto{}
-	relay := cacti.NewStubRelay(logger)
 
 	grpcServer := server.New(server.Config{
 		Zeto:   mock,
-		Relay:  relay,
+		Relay:  noopRelay{},
 		Logger: logger,
 	})
 
@@ -94,7 +108,6 @@ func setupTestEnv(t *testing.T) *testEnv {
 	return &testEnv{
 		client: pb.NewPaymentOrchestratorServiceClient(conn),
 		zeto:   mock,
-		relay:  relay,
 		cancel: cancel,
 	}
 }
@@ -265,13 +278,75 @@ func TestTransferToken_Success(t *testing.T) {
 	}
 }
 
+func TestSettleHTLC_Idempotent(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	// Lock an HTLC
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_IDEMPOTENT",
+		Receiver:    "bank-b",
+		Amount:      "500",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	// Get secret
+	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+	secret := statusResp.Lock.Secret
+
+	// First settle — should succeed
+	resp1, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: lockResp.ContractId,
+		Secret:     secret,
+	})
+	if err != nil {
+		t.Fatalf("SettleHTLC (first): %v", err)
+	}
+
+	// Second settle with same contract_id — should succeed (idempotent)
+	resp2, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: lockResp.ContractId,
+		Secret:     secret,
+	})
+	if err != nil {
+		t.Fatalf("SettleHTLC (idempotent, same contract_id): expected success, got %v", err)
+	}
+	if resp2.ZetoTxHash != resp1.ZetoTxHash {
+		t.Errorf("expected same zeto_tx_hash on idempotent settle, got %q vs %q", resp2.ZetoTxHash, resp1.ZetoTxHash)
+	}
+
+	// Third settle with a foreign contract_id (cross-spoke echo scenario) —
+	// should succeed via hashLock fallback finding the already-settled record.
+	resp3, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: "foreign_contract_id_from_other_spoke",
+		Secret:     secret,
+	})
+	if err != nil {
+		t.Fatalf("SettleHTLC (idempotent, foreign contract_id): expected success, got %v", err)
+	}
+	if resp3.ZetoTxHash != resp1.ZetoTxHash {
+		t.Errorf("expected same zeto_tx_hash on cross-spoke idempotent settle, got %q vs %q", resp3.ZetoTxHash, resp1.ZetoTxHash)
+	}
+
+	// TransferLocked should only have been called once (the first settle)
+	if env.zeto.transferLockedCalled != 1 {
+		t.Errorf("expected zeto.TransferLocked called 1 time, got %d", env.zeto.transferLockedCalled)
+	}
+}
+
 func TestGetBalance_Success(t *testing.T) {
 	env := setupTestEnv(t)
 	ctx := context.Background()
 
-	resp, err := env.client.GetBalance(ctx, &pb.GetBalanceRequest{
-		Identity: "funded_operator@spoke-a-cb",
-	})
+	resp, err := env.client.GetBalance(ctx, &pb.GetBalanceRequest{})
 	if err != nil {
 		t.Fatalf("GetBalance: %v", err)
 	}

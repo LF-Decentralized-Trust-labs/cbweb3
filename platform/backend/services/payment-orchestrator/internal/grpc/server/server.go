@@ -14,6 +14,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -21,10 +22,12 @@ import (
 
 type paymentOrchestratorService struct {
 	pb.UnimplementedPaymentOrchestratorServiceServer
-	zeto   ports.ZetoOperator
-	htlc   ports.HTLCContractPort // on-chain HTLC coordination (may be nil)
-	relay  ports.InteroperabilityPort
-	logger *slog.Logger
+	zeto       ports.ZetoOperator
+	htlc       ports.HTLCContractPort // on-chain HTLC coordination (may be nil)
+	relay      ports.InteroperabilityPort
+	fiat       ports.FiatTokenPort    // on-chain fCeBM operations (may be nil)
+	escrowRepo ports.EscrowRepository // escrow flow persistence
+	logger     *slog.Logger
 
 	mu    sync.RWMutex
 	htlcs map[string]*domain.HTLCRecord
@@ -32,31 +35,47 @@ type paymentOrchestratorService struct {
 
 // Config holds the dependencies for the gRPC server.
 type Config struct {
-	Zeto   ports.ZetoOperator
-	HTLC   ports.HTLCContractPort // optional — nil disables on-chain coordination
-	Relay  ports.InteroperabilityPort
-	Logger *slog.Logger
+	Zeto       ports.ZetoOperator
+	HTLC       ports.HTLCContractPort // optional — nil disables on-chain coordination
+	Relay      ports.InteroperabilityPort
+	Fiat       ports.FiatTokenPort    // optional — nil disables fCeBM operations
+	EscrowRepo ports.EscrowRepository // optional — nil disables escrow flow
+	Logger     *slog.Logger
 }
 
 // New builds a configured gRPC server with all payment-orchestrator handlers.
 func New(cfg Config) *grpc.Server {
 	svc := &paymentOrchestratorService{
-		zeto:   cfg.Zeto,
-		htlc:   cfg.HTLC,
-		relay:  cfg.Relay,
-		logger: cfg.Logger,
-		htlcs:  make(map[string]*domain.HTLCRecord),
+		zeto:       cfg.Zeto,
+		htlc:       cfg.HTLC,
+		relay:      cfg.Relay,
+		fiat:       cfg.Fiat,
+		escrowRepo: cfg.EscrowRepo,
+		logger:     cfg.Logger,
+		htlcs:      make(map[string]*domain.HTLCRecord),
 	}
 	grpcServer := grpc.NewServer()
 	pb.RegisterPaymentOrchestratorServiceServer(grpcServer, svc)
 	return grpcServer
 }
 
+// generateID returns a new UUID v4 string for record IDs.
+func generateID() string {
+	return uuid.New().String()
+}
+
 // --- HTLC Dual-Layer Operations ---
 
 func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockHTLCRequest) (*pb.LockHTLCResponse, error) {
-	if req.AgreementId == "" || req.Receiver == "" || req.Amount == "" || req.TimeLock == 0 {
-		return nil, status.Error(codes.InvalidArgument, "agreement_id, receiver, amount, and time_lock are required")
+	if req.Receiver == "" || req.Amount == "" {
+		return nil, status.Error(codes.InvalidArgument, "receiver and amount are required")
+	}
+	// Apply smart defaults
+	if req.AgreementId == "" {
+		req.AgreementId = newUUID()
+	}
+	if req.TimeLock == 0 {
+		req.TimeLock = uint64(time.Now().Unix()) + 3600 // 1h — initiator must have longer timelock
 	}
 
 	// 1. Generate secret and hashLock
@@ -135,8 +154,15 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 }
 
 func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, req *pb.LockHTLCWithHashLockRequest) (*pb.LockHTLCWithHashLockResponse, error) {
-	if req.AgreementId == "" || req.Receiver == "" || req.Amount == "" || req.TimeLock == 0 || req.HashLock == "" {
-		return nil, status.Error(codes.InvalidArgument, "agreement_id, receiver, amount, time_lock, and hash_lock are required")
+	if req.Receiver == "" || req.Amount == "" || req.HashLock == "" {
+		return nil, status.Error(codes.InvalidArgument, "receiver, amount, and hash_lock are required")
+	}
+	// Apply smart defaults
+	if req.AgreementId == "" {
+		req.AgreementId = newUUID()
+	}
+	if req.TimeLock == 0 {
+		req.TimeLock = uint64(time.Now().Unix()) + 1800 // 30min — responder must have shorter timelock than initiator
 	}
 
 	// Decode the externally provided hashLock
@@ -231,16 +257,40 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		// Cross-spoke relay: the contract_id is from the other spoke.
 		// Find the local HTLC that shares the same hashLock.
 		for _, r := range s.htlcs {
-			if r.HashLock == hashLock && r.State == domain.HTLCStateLocked {
-				record = r
-				ok = true
-				break
+			if r.HashLock == hashLock {
+				if r.State == domain.HTLCStateLocked {
+					record = r
+					ok = true
+					break
+				}
+				if r.State == domain.HTLCStateSettled {
+					// Already settled (e.g. relay echo) — return idempotent success.
+					s.mu.Unlock()
+					s.logger.Info("SettleHTLC idempotent: already settled via hashLock match",
+						"requested_contract_id", req.ContractId,
+						"local_contract_id", r.ContractID,
+					)
+					return &pb.SettleHTLCResponse{
+						HtlcTxHash: r.HTLCTxHash,
+						ZetoTxHash: r.ZetoTxHash,
+					}, nil
+				}
 			}
 		}
 	}
 	if !ok {
 		s.mu.Unlock()
 		return nil, status.Errorf(codes.NotFound, "HTLC %q not found", req.ContractId)
+	}
+
+	if record.State == domain.HTLCStateSettled {
+		// Direct contract_id match but already settled — return idempotent success.
+		s.mu.Unlock()
+		s.logger.Info("SettleHTLC idempotent: already settled", "contract_id", record.ContractID)
+		return &pb.SettleHTLCResponse{
+			HtlcTxHash: record.HTLCTxHash,
+			ZetoTxHash: record.ZetoTxHash,
+		}, nil
 	}
 
 	if record.State != domain.HTLCStateLocked {
@@ -278,6 +328,12 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 	}
 
 	s.logger.Info("HTLC settled", "contract_id", record.ContractID, "zeto_tx_hash", zetoTxHash, "htlc_tx_hash", htlcTxHash)
+
+	// Update record with settle tx hashes so idempotent re-calls return them.
+	s.mu.Lock()
+	record.HTLCTxHash = htlcTxHash
+	record.ZetoTxHash = zetoTxHash
+	s.mu.Unlock()
 
 	return &pb.SettleHTLCResponse{
 		HtlcTxHash: htlcTxHash,
@@ -406,12 +462,8 @@ func (s *paymentOrchestratorService) TransferToken(ctx context.Context, req *pb.
 	return &pb.TransferTokenResponse{TxHash: txHash}, nil
 }
 
-func (s *paymentOrchestratorService) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*pb.GetBalanceResponse, error) {
-	if req.Identity == "" {
-		return nil, status.Error(codes.InvalidArgument, "identity is required")
-	}
-
-	balance, err := s.zeto.Balance(ctx, req.Identity)
+func (s *paymentOrchestratorService) GetBalance(ctx context.Context, _ *pb.GetBalanceRequest) (*pb.GetBalanceResponse, error) {
+	balance, err := s.zeto.Balance(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "zeto balance: %v", err)
 	}
@@ -452,6 +504,11 @@ func (s *paymentOrchestratorService) ListFXAgreements(_ context.Context, _ *pb.L
 }
 
 // --- Helpers ---
+
+// newUUID returns a new random UUID string.
+func newUUID() string {
+	return uuid.NewString()
+}
 
 // contractIDBytes converts a hex-encoded contract ID string to a 32-byte array.
 func contractIDBytes(hexStr string) []byte {

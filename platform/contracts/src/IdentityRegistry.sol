@@ -93,11 +93,7 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
 
     /// @inheritdoc IIdentityRegistry
     /// @dev Binds an X.509 certificate to a participant's on-chain identity.
-    function setCertFingerprint(address account, bytes32 fingerprint)
-        external
-        override
-        onlyRole(GOVERNANCE_ROLE)
-    {
+    function setCertFingerprint(address account, bytes32 fingerprint) external override onlyRole(GOVERNANCE_ROLE) {
         _participants[account].certFingerprint = fingerprint;
         _participants[account].lastUpdate = block.timestamp;
 

@@ -120,11 +120,12 @@ contract DeployTCeBMTest is Test {
         deployScript = new DeployTCeBM();
         deployScript.setUp();
 
-        /// @dev Always set explicit defaults to avoid env contamination from other test suites
-        deployerPrivateKey = uint256(0x1);
-        expectedAdmin = address(0x1234567890123456789012345678901234567890);
-        expectedCentralBank = address(0x2345678901234567890123456789012345678901);
+        /// @dev Use makeAddr for deterministic addresses shared across all deploy tests,
+        ///      so parallel vm.setEnv calls converge to the same values and avoid races.
+        deployerPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
         expectedDeployer = vm.addr(deployerPrivateKey);
+        expectedAdmin = makeAddr("admin");
+        expectedCentralBank = makeAddr("centralBank");
 
         vm.setEnv(ENV_DEPLOYER_PRIVATE_KEY, vm.toString(deployerPrivateKey));
         vm.setEnv(ENV_ADMIN_ADDRESS, vm.toString(expectedAdmin));

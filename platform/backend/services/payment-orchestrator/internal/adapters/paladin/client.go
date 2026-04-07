@@ -461,7 +461,7 @@ func (c *Client) TransferLocked(ctx context.Context, zetoLockRef string, to stri
 	return c.sendTx(ctx, tx)
 }
 
-func (c *Client) Balance(ctx context.Context, identity string) (string, error) {
+func (c *Client) Balance(ctx context.Context) (string, error) {
 	reqBody := jsonRPCRequest{
 		JSONRPC: "2.0",
 		ID:      3,
@@ -469,11 +469,11 @@ func (c *Client) Balance(ctx context.Context, identity string) (string, error) {
 		Params: []interface{}{map[string]interface{}{
 			"type":     "private",
 			"domain":   "zeto",
-			"from":     identity,
+			"from":     c.identity,
 			"to":       c.zetoTokenAddress,
 			"abi":      zetoABI,
 			"function": "balanceOf",
-			"data":     map[string]interface{}{"account": identity},
+			"data":     map[string]interface{}{"account": c.identity},
 		}},
 	}
 

@@ -5,6 +5,7 @@ services:
   paladin-spoke-b-cb:
     image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
     container_name: paladin-spoke-b-cb
+    user: "${PALADIN_UID}:${PALADIN_GID}"
     ports:
       - "31748:8548"  # HTTP RPC
       - "31749:8549"  # WebSocket RPC
@@ -28,6 +29,7 @@ services:
   paladin-spoke-b-bank-b:
     image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
     container_name: paladin-spoke-b-bank-b
+    user: "${PALADIN_UID}:${PALADIN_GID}"
     ports:
       - "31758:8548"  # HTTP RPC
       - "31759:8549"  # WebSocket RPC
@@ -51,6 +53,7 @@ services:
   paladin-spoke-b-bank-d:
     image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
     container_name: paladin-spoke-b-bank-d
+    user: "${PALADIN_UID}:${PALADIN_GID}"
     ports:
       - "31768:8548"  # HTTP RPC
       - "31769:8549"  # WebSocket RPC

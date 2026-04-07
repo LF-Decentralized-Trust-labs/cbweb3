@@ -1,29 +1,24 @@
 # IHashTimeLockedContract
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/e19c9456a3de8cd6d3345c4656e5c68bf8aefa97/src/interfaces/IHashTimeLockedContract.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/046ef8ae4f22ae07ddd7d371613d585961088c4e/src/interfaces/IHashTimeLockedContract.sol)
 
 **Title:**
 IHashTimeLockedContract
 
-Interface for the Hash Time-Lock Contract (Scenario A: Enhanced Correspondent Banking).
+Coordination-only interface for the Hash Time-Lock Contract (Scenario A).
 
-Orchestrates the cross-border atomic settlement via cryptographic escrows.
+Records hashLock/timeLock and emits events for cross-chain relay (Cacti).
+Actual token movement is handled by Zeto lock/unlock via Paladin sidecar.
 
 
 ## Functions
 ### lock
 
-Locks the specified amount of tCeBm tokens into the contract.
+Records a lock coordination entry linked to a private Zeto lock.
 
 
 ```solidity
-function lock(
-    bytes32 contractId,
-    address receiver,
-    address token,
-    uint256 amount,
-    bytes32 hashLock,
-    uint256 timeLock
-) external;
+function lock(bytes32 contractId, address receiver, bytes32 hashLock, uint256 timeLock, bytes32 zetoLockRef)
+    external;
 ```
 **Parameters**
 
@@ -31,10 +26,9 @@ function lock(
 |----|----|-----------|
 |`contractId`|`bytes32`|Unique identifier for the agreement.|
 |`receiver`|`address`|The address of the beneficiary.|
-|`token`|`address`|The address of the tCeBm ERC20 token.|
-|`amount`|`uint256`|The amount of tokens to lock.|
 |`hashLock`|`bytes32`|The SHA-256 hash of the secret.|
-|`timeLock`|`uint256`|The Unix timestamp after which the funds can be refunded.|
+|`timeLock`|`uint256`|The Unix timestamp after which the lock can be refunded.|
+|`zetoLockRef`|`bytes32`|Reference to the private Zeto lock transaction.|
 
 
 ### settle
@@ -50,12 +44,12 @@ function settle(bytes32 contractId, bytes32 secret) external;
 |Name|Type|Description|
 |----|----|-----------|
 |`contractId`|`bytes32`|The unique identifier of the locked contract.|
-|`secret`|`bytes32`|The plaintext string/bytes that hashes to the hashLock.|
+|`secret`|`bytes32`|The plaintext bytes that hash to the hashLock.|
 
 
 ### refund
 
-Refunds the locked tokens to the sender if the timeLock has expired.
+Marks the lock as refunded after the timeLock has expired.
 
 
 ```solidity
@@ -91,7 +85,7 @@ function getLockDetails(bytes32 contractId) external view returns (HashTimeLocke
 
 ## Events
 ### LogHTLCLocked
-Emitted when funds are successfully locked in escrow.
+Emitted when a lock coordination record is created.
 
 
 ```solidity
@@ -99,15 +93,14 @@ event LogHTLCLocked(
     bytes32 indexed contractId,
     address indexed sender,
     address indexed receiver,
-    address token,
-    uint256 amount,
     bytes32 hashLock,
-    uint256 timeLock
+    uint256 timeLock,
+    bytes32 zetoLockRef
 );
 ```
 
 ### LogHTLCClaimed
-Emitted when the correct secret is provided and funds are transferred to the receiver.
+Emitted when the correct secret is provided and the lock is settled.
 
 
 ```solidity
@@ -115,7 +108,7 @@ event LogHTLCClaimed(bytes32 indexed contractId, bytes32 secret);
 ```
 
 ### LogHTLCRefunded
-Emitted when the time-lock expires and funds are returned to the sender.
+Emitted when the time-lock expires and the lock is refunded.
 
 
 ```solidity
@@ -153,12 +146,6 @@ error HTLC__TimeLockNotExpired();
 
 ```solidity
 error HTLC__TimeLockExpired();
-```
-
-### HTLC__InvalidAmount
-
-```solidity
-error HTLC__InvalidAmount();
 ```
 
 ### HTLC__ParticipantNotVerified

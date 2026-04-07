@@ -1,5 +1,5 @@
 # IdentityRegistry
-[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/e19c9456a3de8cd6d3345c4656e5c68bf8aefa97/src/IdentityRegistry.sol)
+[Git Source](https://github.com/LACNetNetworks/cbweb3-platform/blob/046ef8ae4f22ae07ddd7d371613d585961088c4e/src/IdentityRegistry.sol)
 
 **Inherits:**
 [IIdentityRegistry](/src/interfaces/IIdentityRegistry.sol/interface.IIdentityRegistry.md), AccessControl
@@ -181,5 +181,44 @@ function updateStatus(address account, IdentityRegistryLibrary.KycStatus newStat
 |----|----|-----------|
 |`account`|`address`|The address to be updated.|
 |`newStatus`|`IdentityRegistryLibrary.KycStatus`|The target KycStatus.|
+
+
+### setCertFingerprint
+
+Registers or updates the X.509 certificate fingerprint for a participant.
+
+Binds an X.509 certificate to a participant's on-chain identity.
+
+
+```solidity
+function setCertFingerprint(address account, bytes32 fingerprint) external override onlyRole(GOVERNANCE_ROLE);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`account`|`address`|The wallet address whose certificate is being bound.|
+|`fingerprint`|`bytes32`|SHA-256 hash of the DER-encoded X.509 certificate.|
+
+
+### getCertFingerprint
+
+Returns the certificate fingerprint for a participant.
+
+
+```solidity
+function getCertFingerprint(address account) external view override returns (bytes32);
+```
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`account`|`address`|The wallet address to query.|
+
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`<none>`|`bytes32`|The SHA-256 fingerprint, or bytes32(0) if not set.|
 
 

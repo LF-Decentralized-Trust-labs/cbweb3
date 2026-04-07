@@ -1,0 +1,37 @@
+services:
+  cacti-htlc-relay:
+    build:
+      context: ../../..
+      dockerfile: interop/hub-and-spoke/cacti/Dockerfile
+    image: cbweb3/cacti-htlc-relay:local
+    pull_policy: build
+    container_name: "cbweb3-cacti-relay"
+    env_file:
+      - path: .env
+        required: false  # populated by contracts.sync-addresses; uses inline defaults until then
+    environment:
+      # Spoke-A: Besu RPC + HTLC contract address
+      SPOKE_A_BESU_RPC: "http://host.docker.internal:8645"
+      SPOKE_A_HTLC_ADDRESS: "${SPOKE_A_HTLC_ADDRESS:-0x9a3dbca554e9f6b9257aaa24010da8377c57c17e}"
+      # Spoke-B: Besu RPC + HTLC contract address
+      SPOKE_B_BESU_RPC: "http://host.docker.internal:8745"
+      SPOKE_B_HTLC_ADDRESS: "${SPOKE_B_HTLC_ADDRESS:-0x9a3dbca554e9f6b9257aaa24010da8377c57c17e}"
+      # gRPC endpoints for payment-orchestrator (each spoke targets the OTHER spoke's SENDER orchestrator)
+      # Spoke-A sender = Bank-A (19094), Spoke-B sender = Bank-D (59094)
+      SPOKE_A_PAYMENT_GRPC: "host.docker.internal:19094"
+      SPOKE_B_PAYMENT_GRPC: "host.docker.internal:59094"
+      # Cacti REST API port (consumed by CactiRelay Go adapter)
+      CACTI_API_PORT: "${CACTI_API_PORT:-4000}"
+      # Poll interval in milliseconds
+      POLL_INTERVAL_MS: "${POLL_INTERVAL_MS:-3000}"
+    ports:
+      - "${CACTI_API_PORT:-4000}:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s

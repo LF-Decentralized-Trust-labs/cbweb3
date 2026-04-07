@@ -13,6 +13,7 @@ import (
 	paladinAdapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/paladin"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/grpc/server"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/repository"
 )
 
 func main() {
@@ -41,8 +42,13 @@ func main() {
 		zeto = noopZeto{}
 	}
 
-	// Interoperability relay: stub for now, Cacti in future.
-	relay := cacti.NewStubRelay(logger)
+	// Interoperability relay: CactiRelay when CACTI_API_URL is set (required in production).
+	cactiURL := os.Getenv("CACTI_API_URL")
+	if cactiURL == "" {
+		log.Fatal("FATAL: CACTI_API_URL is required — set it to the Cacti HTLC relay REST endpoint (e.g. http://cacti-htlc-relay:4000)")
+	}
+	relay := cacti.NewCactiRelay(cactiURL, logger)
+	logger.Info("cacti relay configured", "url", cactiURL)
 
 	// On-chain HTLC coordination (optional — requires BESU_RPC_URL + HTLC_ADDRESS).
 	var htlc ports.HTLCContractPort
@@ -72,11 +78,45 @@ func main() {
 		logger.Warn("BESU_RPC_URL not set — on-chain HTLC coordination disabled")
 	}
 
+	// Fiat token client: real Besu adapter when FIAT_TOKEN_ADDRESS is set.
+	var fiat ports.FiatTokenPort
+	if fiatAddr := os.Getenv("FIAT_TOKEN_ADDRESS"); fiatAddr != "" {
+		besuRPC := getEnv("BESU_RPC_URL", "")
+		operatorKey := os.Getenv("BESU_OPERATOR_KEY")
+		chainIDStr := getEnv("BESU_CHAIN_ID", "1337")
+		chainID, err := strconv.ParseInt(chainIDStr, 10, 64)
+		if err != nil {
+			log.Fatalf("FATAL: invalid BESU_CHAIN_ID %q: %v", chainIDStr, err)
+		}
+		if besuRPC == "" || operatorKey == "" {
+			log.Fatal("FATAL: BESU_RPC_URL and BESU_OPERATOR_KEY are required when FIAT_TOKEN_ADDRESS is set")
+		}
+		fiatClient, err := besuAdapter.NewFiatClient(besuAdapter.FiatClientConfig{
+			RPCURL:           besuRPC,
+			ChainID:          chainID,
+			FiatTokenAddress: fiatAddr,
+			PrivateKeyHex:    operatorKey,
+		}, logger)
+		if err != nil {
+			log.Fatalf("FATAL: fiat client: %v", err)
+		}
+		fiat = fiatClient
+		logger.Info("fiat token client configured", "address", fiatAddr)
+	} else {
+		logger.Warn("FIAT_TOKEN_ADDRESS not set — fCeBM operations disabled")
+	}
+
+	// Escrow repository: in-memory for now (production: GORM + PostgreSQL).
+	escrowRepo := repository.NewMemoryEscrowRepository()
+	logger.Info("escrow repository configured (in-memory)")
+
 	grpcServer := server.New(server.Config{
-		Zeto:   zeto,
-		HTLC:   htlc,
-		Relay:  relay,
-		Logger: logger,
+		Zeto:       zeto,
+		HTLC:       htlc,
+		Relay:      relay,
+		Fiat:       fiat,
+		EscrowRepo: escrowRepo,
+		Logger:     logger,
 	})
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))

@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"time"
+
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 // PaymentHandler exposes the payment-orchestrator operations as REST endpoints.
@@ -27,6 +30,16 @@ func (h *PaymentHandler) LockHTLC(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
+	if req.Receiver == "" || req.Amount == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "receiver and amount are required"})
+	}
+	// Apply smart defaults
+	if req.AgreementID == "" {
+		req.AgreementID = uuid.NewString()
+	}
+	if req.TimeLock == 0 {
+		req.TimeLock = uint64(time.Now().Unix()) + 3600 // 1h — initiator must have longer timelock
+	}
 	result, err := h.payment.LockHTLC(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -44,6 +57,16 @@ func (h *PaymentHandler) LockHTLCWithHashLock(c *fiber.Ctx) error {
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if req.HashLock == "" || req.Receiver == "" || req.Amount == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "hash_lock, receiver and amount are required"})
+	}
+	// Apply smart defaults
+	if req.AgreementID == "" {
+		req.AgreementID = uuid.NewString()
+	}
+	if req.TimeLock == 0 {
+		req.TimeLock = uint64(time.Now().Unix()) + 1800 // 30min — responder must have shorter timelock than initiator
 	}
 	result, err := h.payment.LockHTLCWithHashLock(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock, req.HashLock)
 	if err != nil {
@@ -139,13 +162,188 @@ func (h *PaymentHandler) TransferToken(c *fiber.Ctx) error {
 }
 
 func (h *PaymentHandler) GetBalance(c *fiber.Ctx) error {
-	identity := c.Query("identity")
-	if identity == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "identity query parameter is required"})
-	}
-	result, err := h.payment.GetBalance(c.Context(), identity)
+	result, err := h.payment.GetBalance(c.Context())
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(result)
+}
+
+// --- Escrow: Deposit endpoints ---
+
+func (h *PaymentHandler) RegisterDeposit(c *fiber.Ctx) error {
+	var req struct {
+		RequesterBesuAddress     string `json:"requester_besu_address"`
+		RequesterPaladinIdentity string `json:"requester_paladin_identity"`
+		Amount                   string `json:"amount"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	result, err := h.payment.RegisterDeposit(c.Context(), req.RequesterBesuAddress, req.RequesterPaladinIdentity, req.Amount)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
+func (h *PaymentHandler) ApproveDeposit(c *fiber.Ctx) error {
+	var req struct {
+		DepositID string `json:"deposit_id"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if err := h.payment.ApproveDeposit(c.Context(), req.DepositID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "approved"})
+}
+
+func (h *PaymentHandler) RejectDeposit(c *fiber.Ctx) error {
+	var req struct {
+		DepositID string `json:"deposit_id"`
+		Reason    string `json:"reason"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if err := h.payment.RejectDeposit(c.Context(), req.DepositID, req.Reason); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"reason": req.Reason})
+}
+
+func (h *PaymentHandler) RequestFiatExchange(c *fiber.Ctx) error {
+	var req struct {
+		DepositID string `json:"deposit_id"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	result, err := h.payment.RequestFiatExchange(c.Context(), req.DepositID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
+func (h *PaymentHandler) ListDeposits(c *fiber.Ctx) error {
+	requesterID := c.Query("requester_id")
+	deposits, err := h.payment.ListDeposits(c.Context(), requesterID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"deposits": deposits, "total": len(deposits)})
+}
+
+// --- Escrow: Tokenization endpoints ---
+
+func (h *PaymentHandler) RequestEscrow(c *fiber.Ctx) error {
+	var req struct {
+		RequesterBesuAddress     string `json:"requester_besu_address"`
+		RequesterPaladinIdentity string `json:"requester_paladin_identity"`
+		Amount                   string `json:"amount"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	result, err := h.payment.RequestEscrow(c.Context(), req.RequesterBesuAddress, req.RequesterPaladinIdentity, req.Amount)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
+func (h *PaymentHandler) ApproveEscrow(c *fiber.Ctx) error {
+	var req struct {
+		EscrowID string `json:"escrow_id"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	result, err := h.payment.ApproveEscrow(c.Context(), req.EscrowID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
+func (h *PaymentHandler) RejectEscrow(c *fiber.Ctx) error {
+	var req struct {
+		EscrowID string `json:"escrow_id"`
+		Reason   string `json:"reason"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if err := h.payment.RejectEscrow(c.Context(), req.EscrowID, req.Reason); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"reason": req.Reason})
+}
+
+func (h *PaymentHandler) ListEscrows(c *fiber.Ctx) error {
+	requesterID := c.Query("requester_id")
+	escrows, err := h.payment.ListEscrows(c.Context(), requesterID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"escrows": escrows, "total": len(escrows)})
+}
+
+// --- Escrow: Redeem endpoints ---
+
+func (h *PaymentHandler) RequestRedeem(c *fiber.Ctx) error {
+	var req struct {
+		RequesterBesuAddress     string `json:"requester_besu_address"`
+		RequesterPaladinIdentity string `json:"requester_paladin_identity"`
+		Amount                   string `json:"amount"`
+		ZetoTransferTxHash       string `json:"zeto_transfer_tx_hash"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	result, err := h.payment.RequestRedeem(c.Context(), req.RequesterBesuAddress, req.RequesterPaladinIdentity, req.Amount, req.ZetoTransferTxHash)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
+func (h *PaymentHandler) ApproveRedeem(c *fiber.Ctx) error {
+	var req struct {
+		RedeemID string `json:"redeem_id"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	result, err := h.payment.ApproveRedeem(c.Context(), req.RedeemID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
+func (h *PaymentHandler) RejectRedeem(c *fiber.Ctx) error {
+	var req struct {
+		RedeemID string `json:"redeem_id"`
+		Reason   string `json:"reason"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if err := h.payment.RejectRedeem(c.Context(), req.RedeemID, req.Reason); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"reason": req.Reason})
+}
+
+func (h *PaymentHandler) ListRedeems(c *fiber.Ctx) error {
+	requesterID := c.Query("requester_id")
+	redeems, err := h.payment.ListRedeems(c.Context(), requesterID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"redeems": redeems, "total": len(redeems)})
 }

@@ -62,11 +62,13 @@ contracts.deploy-hub:
 contracts.deploy-spoke-a:
 	@echo "Deploying CBWeb3 spoke-a contracts to chain 1338 (bank-a, bank-c, central-bank-a)..."
 	@cd contracts && TOKEN_NAME="Tokenized BRL" TOKEN_SYMBOL="tCeBM_BRL" \
+		FIAT_TOKEN_NAME="Fiat BRL" FIAT_TOKEN_SYMBOL="fCeBM_BRL" \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_A_RPC_URL} --broadcast
 
 contracts.deploy-spoke-b:
 	@echo "Deploying CBWeb3 spoke-b contracts (bank-b, bank-d, central-bank-b)..."
 	@cd contracts && TOKEN_NAME="Tokenized BRL" TOKEN_SYMBOL="tCeBM_BRL" \
+		FIAT_TOKEN_NAME="Fiat BRL" FIAT_TOKEN_SYMBOL="fCeBM_BRL" \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_B_RPC_URL} --broadcast
 
 contracts.deploy-all: contracts.setup contracts.deploy-spoke-a contracts.deploy-spoke-b
