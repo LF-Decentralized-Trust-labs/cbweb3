@@ -251,7 +251,7 @@ step_09_approve_escrow() {
 step_10_check_balance() {
   echo "=== Step 10: Check tCeBM balance (Bank-A) ==="
   local resp
-  resp=$(http_get "$BANK_URL/token/balance?identity=funded_operator@spoke-a-bank-a" "$BANK_TOKEN" "200")
+  resp=$(http_get "$BANK_URL/token/balance" "$BANK_TOKEN" "200")
   echo "  tCeBM balance=$(echo "$resp" | jq -r '.balance')"
   echo "$resp" | jq .
 }

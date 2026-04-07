@@ -253,10 +253,19 @@ export class HtlcRelay {
             continue;
           }
 
+          // Resolve the counterpart spoke's contractId via hashLock.
+          // Each spoke has its own contractId for the same HTLC; the shared
+          // link between them is the hashLock. Sending the source contractId
+          // to the counterpart payment orchestrator yields NOT_FOUND.
+          const counterpartId = this.resolveCounterpartContractId(
+            spoke.name,
+            contractId,
+          );
+
           await this.settleOnCounterpart(
             grpcClient,
             spoke.name,
-            contractId,
+            counterpartId,
             secret,
           );
           this.forwardedSecrets.add(secret);
@@ -270,6 +279,53 @@ export class HtlcRelay {
 
     grpcClient.close();
     this.log.info(`[${spoke.name}] relay stopped`);
+  }
+
+  /**
+   * Given a source spoke name and contractId, find the corresponding lock on
+   * the counterpart spoke by matching the hashLock field.
+   * Falls back to the source contractId (with a warning) when no matching
+   * counterpart lock is in the ring buffer yet.
+   */
+  private resolveCounterpartContractId(
+    spokeName: string,
+    contractId: string,
+  ): string {
+    // Walk backwards so we pick the most recent matching event.
+    let sourceLock: LockEvent | undefined;
+    for (let i = this.lockEvents.length - 1; i >= 0; i--) {
+      const l = this.lockEvents[i];
+      if (l.spoke === spokeName && l.contractId === contractId) {
+        sourceLock = l;
+        break;
+      }
+    }
+    if (!sourceLock) {
+      this.log.warn(
+        `[${spokeName}] resolveCounterpart: source lock not found for contractId=${contractId}, forwarding as-is`,
+      );
+      return contractId;
+    }
+
+    let counterpartLock: LockEvent | undefined;
+    for (let i = this.lockEvents.length - 1; i >= 0; i--) {
+      const l = this.lockEvents[i];
+      if (l.spoke !== spokeName && l.hashLock === sourceLock.hashLock) {
+        counterpartLock = l;
+        break;
+      }
+    }
+    if (!counterpartLock) {
+      this.log.warn(
+        `[${spokeName}] resolveCounterpart: no counterpart lock found for hashLock=${sourceLock.hashLock}, forwarding source contractId`,
+      );
+      return contractId;
+    }
+
+    this.log.info(
+      `[${spokeName}] resolveCounterpart: ${contractId} → ${counterpartLock.contractId} (spoke=${counterpartLock.spoke})`,
+    );
+    return counterpartLock.contractId;
   }
 
   private settleOnCounterpart(
