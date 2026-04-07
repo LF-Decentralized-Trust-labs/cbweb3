@@ -19,7 +19,8 @@
         "blockperiodseconds": 2,
         "epochlength": 30000,
         "requesttimeoutseconds": 4
-      }
+      },
+      "zeroBaseFee": true
     },
     "nonce": "0x0",
     "timestamp": "0x58ee40ba",
