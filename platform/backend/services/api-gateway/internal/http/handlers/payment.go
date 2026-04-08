@@ -224,7 +224,7 @@ func (h *PaymentHandler) RejectDeposit(c *fiber.Ctx) error {
 	if err := h.payment.RejectDeposit(c.Context(), req.DepositID, req.Reason); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"reason": req.Reason})
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"reason": req.Reason})
 }
 
 func (h *PaymentHandler) RequestFiatExchange(c *fiber.Ctx) error {
@@ -293,7 +293,7 @@ func (h *PaymentHandler) RejectEscrow(c *fiber.Ctx) error {
 	if err := h.payment.RejectEscrow(c.Context(), req.EscrowID, req.Reason); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"reason": req.Reason})
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"reason": req.Reason})
 }
 
 func (h *PaymentHandler) ListEscrows(c *fiber.Ctx) error {
@@ -349,7 +349,7 @@ func (h *PaymentHandler) RejectRedeem(c *fiber.Ctx) error {
 	if err := h.payment.RejectRedeem(c.Context(), req.RedeemID, req.Reason); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"reason": req.Reason})
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"reason": req.Reason})
 }
 
 func (h *PaymentHandler) ListRedeems(c *fiber.Ctx) error {

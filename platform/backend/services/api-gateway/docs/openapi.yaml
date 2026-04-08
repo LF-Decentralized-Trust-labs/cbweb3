@@ -1807,7 +1807,7 @@ paths:
                 reason:
                   type: string
       responses:
-        "422":
+        "200":
           description: Deposit rejected
           content:
             application/json:
@@ -1966,7 +1966,7 @@ paths:
                 reason:
                   type: string
       responses:
-        "422":
+        "200":
           description: Escrow rejected
           content:
             application/json:
@@ -2094,7 +2094,7 @@ paths:
                 reason:
                   type: string
       responses:
-        "422":
+        "200":
           description: Redeem rejected — tCeBM returned
           content:
             application/json:
