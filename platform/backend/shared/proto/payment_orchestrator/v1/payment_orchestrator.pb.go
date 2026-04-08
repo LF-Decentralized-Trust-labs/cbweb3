@@ -1174,10 +1174,10 @@ func (x *HTLCLock) GetState() HTLCState {
 
 type LockHTLCRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgreementId   string                 `protobuf:"bytes,1,opt,name=agreement_id,json=agreementId,proto3" json:"agreement_id,omitempty"`
-	Receiver      string                 `protobuf:"bytes,2,opt,name=receiver,proto3" json:"receiver,omitempty"`
-	Amount        string                 `protobuf:"bytes,3,opt,name=amount,proto3" json:"amount,omitempty"`
-	TimeLock      uint64                 `protobuf:"varint,4,opt,name=time_lock,json=timeLock,proto3" json:"time_lock,omitempty"`
+	AgreementId   string                 `protobuf:"bytes,1,opt,name=agreement_id,json=agreementId,proto3" json:"agreement_id,omitempty"` // Optional: auto-generated UUID if empty
+	Receiver      string                 `protobuf:"bytes,2,opt,name=receiver,proto3" json:"receiver,omitempty"`                          // Required: Paladin identity of the token recipient
+	Amount        string                 `protobuf:"bytes,3,opt,name=amount,proto3" json:"amount,omitempty"`                              // Required
+	TimeLock      uint64                 `protobuf:"varint,4,opt,name=time_lock,json=timeLock,proto3" json:"time_lock,omitempty"`         // Optional: defaults to now+3600s (1h) — initiator must have longer timelock than responder
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1314,11 +1314,11 @@ func (x *LockHTLCResponse) GetZetoTxHash() string {
 // only the hashLock with the responder.
 type LockHTLCWithHashLockRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgreementId   string                 `protobuf:"bytes,1,opt,name=agreement_id,json=agreementId,proto3" json:"agreement_id,omitempty"`
-	Receiver      string                 `protobuf:"bytes,2,opt,name=receiver,proto3" json:"receiver,omitempty"`
-	Amount        string                 `protobuf:"bytes,3,opt,name=amount,proto3" json:"amount,omitempty"`
-	TimeLock      uint64                 `protobuf:"varint,4,opt,name=time_lock,json=timeLock,proto3" json:"time_lock,omitempty"`
-	HashLock      string                 `protobuf:"bytes,5,opt,name=hash_lock,json=hashLock,proto3" json:"hash_lock,omitempty"` // Hex-encoded SHA-256 hash (from the initiator)
+	AgreementId   string                 `protobuf:"bytes,1,opt,name=agreement_id,json=agreementId,proto3" json:"agreement_id,omitempty"` // Optional: auto-generated UUID if empty
+	Receiver      string                 `protobuf:"bytes,2,opt,name=receiver,proto3" json:"receiver,omitempty"`                          // Required: Paladin identity of the token recipient
+	Amount        string                 `protobuf:"bytes,3,opt,name=amount,proto3" json:"amount,omitempty"`                              // Required
+	TimeLock      uint64                 `protobuf:"varint,4,opt,name=time_lock,json=timeLock,proto3" json:"time_lock,omitempty"`         // Optional: defaults to now+1800s (30min) — responder must have shorter timelock than initiator
+	HashLock      string                 `protobuf:"bytes,5,opt,name=hash_lock,json=hashLock,proto3" json:"hash_lock,omitempty"`          // Required: hex-encoded SHA-256 hash received from the initiator
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2049,8 +2049,9 @@ func (x *TransferTokenResponse) GetTxHash() string {
 }
 
 type GetBalanceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Identity      string                 `protobuf:"bytes,1,opt,name=identity,proto3" json:"identity,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: ignored by server; identity is resolved internally from PALADIN_IDENTITY env var.
+	Identity      string `protobuf:"bytes,1,opt,name=identity,proto3" json:"identity,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2136,6 +2137,86 @@ func (x *GetBalanceResponse) GetBalance() string {
 	return ""
 }
 
+type GetFiatBalanceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFiatBalanceRequest) Reset() {
+	*x = GetFiatBalanceRequest{}
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFiatBalanceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFiatBalanceRequest) ProtoMessage() {}
+
+func (x *GetFiatBalanceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFiatBalanceRequest.ProtoReflect.Descriptor instead.
+func (*GetFiatBalanceRequest) Descriptor() ([]byte, []int) {
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{34}
+}
+
+type GetFiatBalanceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Balance       string                 `protobuf:"bytes,1,opt,name=balance,proto3" json:"balance,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFiatBalanceResponse) Reset() {
+	*x = GetFiatBalanceResponse{}
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFiatBalanceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFiatBalanceResponse) ProtoMessage() {}
+
+func (x *GetFiatBalanceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFiatBalanceResponse.ProtoReflect.Descriptor instead.
+func (*GetFiatBalanceResponse) Descriptor() ([]byte, []int) {
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *GetFiatBalanceResponse) GetBalance() string {
+	if x != nil {
+		return x.Balance
+	}
+	return ""
+}
+
 // Persistent record for a fiat deposit request.
 type DepositRecord struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
@@ -2154,7 +2235,7 @@ type DepositRecord struct {
 
 func (x *DepositRecord) Reset() {
 	*x = DepositRecord{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[34]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2166,7 +2247,7 @@ func (x *DepositRecord) String() string {
 func (*DepositRecord) ProtoMessage() {}
 
 func (x *DepositRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[34]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2179,7 +2260,7 @@ func (x *DepositRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DepositRecord.ProtoReflect.Descriptor instead.
 func (*DepositRecord) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{34}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *DepositRecord) GetId() string {
@@ -2264,7 +2345,7 @@ type EscrowRecord struct {
 
 func (x *EscrowRecord) Reset() {
 	*x = EscrowRecord{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[35]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2276,7 +2357,7 @@ func (x *EscrowRecord) String() string {
 func (*EscrowRecord) ProtoMessage() {}
 
 func (x *EscrowRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[35]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2289,7 +2370,7 @@ func (x *EscrowRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EscrowRecord.ProtoReflect.Descriptor instead.
 func (*EscrowRecord) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{35}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *EscrowRecord) GetId() string {
@@ -2381,7 +2462,7 @@ type RedeemRecord struct {
 
 func (x *RedeemRecord) Reset() {
 	*x = RedeemRecord{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[36]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2393,7 +2474,7 @@ func (x *RedeemRecord) String() string {
 func (*RedeemRecord) ProtoMessage() {}
 
 func (x *RedeemRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[36]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2406,7 +2487,7 @@ func (x *RedeemRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedeemRecord.ProtoReflect.Descriptor instead.
 func (*RedeemRecord) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{36}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *RedeemRecord) GetId() string {
@@ -2491,7 +2572,7 @@ type RegisterDepositRequest struct {
 
 func (x *RegisterDepositRequest) Reset() {
 	*x = RegisterDepositRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[37]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2503,7 +2584,7 @@ func (x *RegisterDepositRequest) String() string {
 func (*RegisterDepositRequest) ProtoMessage() {}
 
 func (x *RegisterDepositRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[37]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2516,7 +2597,7 @@ func (x *RegisterDepositRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterDepositRequest.ProtoReflect.Descriptor instead.
 func (*RegisterDepositRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{37}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *RegisterDepositRequest) GetRequesterBesuAddress() string {
@@ -2549,7 +2630,7 @@ type RegisterDepositResponse struct {
 
 func (x *RegisterDepositResponse) Reset() {
 	*x = RegisterDepositResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[38]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2561,7 +2642,7 @@ func (x *RegisterDepositResponse) String() string {
 func (*RegisterDepositResponse) ProtoMessage() {}
 
 func (x *RegisterDepositResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[38]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2574,7 +2655,7 @@ func (x *RegisterDepositResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterDepositResponse.ProtoReflect.Descriptor instead.
 func (*RegisterDepositResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{38}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *RegisterDepositResponse) GetDepositId() string {
@@ -2594,7 +2675,7 @@ type ApproveDepositRequest struct {
 
 func (x *ApproveDepositRequest) Reset() {
 	*x = ApproveDepositRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[39]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2606,7 +2687,7 @@ func (x *ApproveDepositRequest) String() string {
 func (*ApproveDepositRequest) ProtoMessage() {}
 
 func (x *ApproveDepositRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[39]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2619,7 +2700,7 @@ func (x *ApproveDepositRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveDepositRequest.ProtoReflect.Descriptor instead.
 func (*ApproveDepositRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{39}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ApproveDepositRequest) GetDepositId() string {
@@ -2637,7 +2718,7 @@ type ApproveDepositResponse struct {
 
 func (x *ApproveDepositResponse) Reset() {
 	*x = ApproveDepositResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[40]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2649,7 +2730,7 @@ func (x *ApproveDepositResponse) String() string {
 func (*ApproveDepositResponse) ProtoMessage() {}
 
 func (x *ApproveDepositResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[40]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2662,7 +2743,7 @@ func (x *ApproveDepositResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveDepositResponse.ProtoReflect.Descriptor instead.
 func (*ApproveDepositResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{40}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{42}
 }
 
 // Central bank rejects a pending deposit request.
@@ -2676,7 +2757,7 @@ type RejectDepositRequest struct {
 
 func (x *RejectDepositRequest) Reset() {
 	*x = RejectDepositRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[41]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2688,7 +2769,7 @@ func (x *RejectDepositRequest) String() string {
 func (*RejectDepositRequest) ProtoMessage() {}
 
 func (x *RejectDepositRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[41]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2701,7 +2782,7 @@ func (x *RejectDepositRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RejectDepositRequest.ProtoReflect.Descriptor instead.
 func (*RejectDepositRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{41}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *RejectDepositRequest) GetDepositId() string {
@@ -2726,7 +2807,7 @@ type RejectDepositResponse struct {
 
 func (x *RejectDepositResponse) Reset() {
 	*x = RejectDepositResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[42]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2738,7 +2819,7 @@ func (x *RejectDepositResponse) String() string {
 func (*RejectDepositResponse) ProtoMessage() {}
 
 func (x *RejectDepositResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[42]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2751,7 +2832,7 @@ func (x *RejectDepositResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RejectDepositResponse.ProtoReflect.Descriptor instead.
 func (*RejectDepositResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{42}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{44}
 }
 
 // Central bank mints fCeBM to the commercial bank after deposit approval.
@@ -2764,7 +2845,7 @@ type RequestFiatExchangeRequest struct {
 
 func (x *RequestFiatExchangeRequest) Reset() {
 	*x = RequestFiatExchangeRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[43]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2776,7 +2857,7 @@ func (x *RequestFiatExchangeRequest) String() string {
 func (*RequestFiatExchangeRequest) ProtoMessage() {}
 
 func (x *RequestFiatExchangeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[43]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2789,7 +2870,7 @@ func (x *RequestFiatExchangeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestFiatExchangeRequest.ProtoReflect.Descriptor instead.
 func (*RequestFiatExchangeRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{43}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *RequestFiatExchangeRequest) GetDepositId() string {
@@ -2808,7 +2889,7 @@ type RequestFiatExchangeResponse struct {
 
 func (x *RequestFiatExchangeResponse) Reset() {
 	*x = RequestFiatExchangeResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[44]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2820,7 +2901,7 @@ func (x *RequestFiatExchangeResponse) String() string {
 func (*RequestFiatExchangeResponse) ProtoMessage() {}
 
 func (x *RequestFiatExchangeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[44]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2833,7 +2914,7 @@ func (x *RequestFiatExchangeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestFiatExchangeResponse.ProtoReflect.Descriptor instead.
 func (*RequestFiatExchangeResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{44}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *RequestFiatExchangeResponse) GetMintTxHash() string {
@@ -2853,7 +2934,7 @@ type ListDepositsRequest struct {
 
 func (x *ListDepositsRequest) Reset() {
 	*x = ListDepositsRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[45]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2865,7 +2946,7 @@ func (x *ListDepositsRequest) String() string {
 func (*ListDepositsRequest) ProtoMessage() {}
 
 func (x *ListDepositsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[45]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2878,7 +2959,7 @@ func (x *ListDepositsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDepositsRequest.ProtoReflect.Descriptor instead.
 func (*ListDepositsRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{45}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ListDepositsRequest) GetRequesterId() string {
@@ -2897,7 +2978,7 @@ type ListDepositsResponse struct {
 
 func (x *ListDepositsResponse) Reset() {
 	*x = ListDepositsResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[46]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2909,7 +2990,7 @@ func (x *ListDepositsResponse) String() string {
 func (*ListDepositsResponse) ProtoMessage() {}
 
 func (x *ListDepositsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[46]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2922,7 +3003,7 @@ func (x *ListDepositsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDepositsResponse.ProtoReflect.Descriptor instead.
 func (*ListDepositsResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{46}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ListDepositsResponse) GetDeposits() []*DepositRecord {
@@ -2944,7 +3025,7 @@ type RequestEscrowRequest struct {
 
 func (x *RequestEscrowRequest) Reset() {
 	*x = RequestEscrowRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[47]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2956,7 +3037,7 @@ func (x *RequestEscrowRequest) String() string {
 func (*RequestEscrowRequest) ProtoMessage() {}
 
 func (x *RequestEscrowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[47]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2969,7 +3050,7 @@ func (x *RequestEscrowRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestEscrowRequest.ProtoReflect.Descriptor instead.
 func (*RequestEscrowRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{47}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *RequestEscrowRequest) GetRequesterBesuAddress() string {
@@ -3002,7 +3083,7 @@ type RequestEscrowResponse struct {
 
 func (x *RequestEscrowResponse) Reset() {
 	*x = RequestEscrowResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[48]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3014,7 +3095,7 @@ func (x *RequestEscrowResponse) String() string {
 func (*RequestEscrowResponse) ProtoMessage() {}
 
 func (x *RequestEscrowResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[48]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3027,7 +3108,7 @@ func (x *RequestEscrowResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestEscrowResponse.ProtoReflect.Descriptor instead.
 func (*RequestEscrowResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{48}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *RequestEscrowResponse) GetEscrowId() string {
@@ -3047,7 +3128,7 @@ type ApproveEscrowRequest struct {
 
 func (x *ApproveEscrowRequest) Reset() {
 	*x = ApproveEscrowRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[49]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3059,7 +3140,7 @@ func (x *ApproveEscrowRequest) String() string {
 func (*ApproveEscrowRequest) ProtoMessage() {}
 
 func (x *ApproveEscrowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[49]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3072,7 +3153,7 @@ func (x *ApproveEscrowRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveEscrowRequest.ProtoReflect.Descriptor instead.
 func (*ApproveEscrowRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{49}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ApproveEscrowRequest) GetEscrowId() string {
@@ -3092,7 +3173,7 @@ type ApproveEscrowResponse struct {
 
 func (x *ApproveEscrowResponse) Reset() {
 	*x = ApproveEscrowResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[50]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3104,7 +3185,7 @@ func (x *ApproveEscrowResponse) String() string {
 func (*ApproveEscrowResponse) ProtoMessage() {}
 
 func (x *ApproveEscrowResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[50]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3117,7 +3198,7 @@ func (x *ApproveEscrowResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveEscrowResponse.ProtoReflect.Descriptor instead.
 func (*ApproveEscrowResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{50}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ApproveEscrowResponse) GetBurnTxHash() string {
@@ -3145,7 +3226,7 @@ type RejectEscrowRequest struct {
 
 func (x *RejectEscrowRequest) Reset() {
 	*x = RejectEscrowRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[51]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3157,7 +3238,7 @@ func (x *RejectEscrowRequest) String() string {
 func (*RejectEscrowRequest) ProtoMessage() {}
 
 func (x *RejectEscrowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[51]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3170,7 +3251,7 @@ func (x *RejectEscrowRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RejectEscrowRequest.ProtoReflect.Descriptor instead.
 func (*RejectEscrowRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{51}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *RejectEscrowRequest) GetEscrowId() string {
@@ -3195,7 +3276,7 @@ type RejectEscrowResponse struct {
 
 func (x *RejectEscrowResponse) Reset() {
 	*x = RejectEscrowResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[52]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3207,7 +3288,7 @@ func (x *RejectEscrowResponse) String() string {
 func (*RejectEscrowResponse) ProtoMessage() {}
 
 func (x *RejectEscrowResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[52]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3220,7 +3301,7 @@ func (x *RejectEscrowResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RejectEscrowResponse.ProtoReflect.Descriptor instead.
 func (*RejectEscrowResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{52}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{54}
 }
 
 // List escrow records (filtered by requester_id when non-empty).
@@ -3233,7 +3314,7 @@ type ListEscrowsRequest struct {
 
 func (x *ListEscrowsRequest) Reset() {
 	*x = ListEscrowsRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[53]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3245,7 +3326,7 @@ func (x *ListEscrowsRequest) String() string {
 func (*ListEscrowsRequest) ProtoMessage() {}
 
 func (x *ListEscrowsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[53]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3258,7 +3339,7 @@ func (x *ListEscrowsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEscrowsRequest.ProtoReflect.Descriptor instead.
 func (*ListEscrowsRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{53}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *ListEscrowsRequest) GetRequesterId() string {
@@ -3277,7 +3358,7 @@ type ListEscrowsResponse struct {
 
 func (x *ListEscrowsResponse) Reset() {
 	*x = ListEscrowsResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[54]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3289,7 +3370,7 @@ func (x *ListEscrowsResponse) String() string {
 func (*ListEscrowsResponse) ProtoMessage() {}
 
 func (x *ListEscrowsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[54]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3302,7 +3383,7 @@ func (x *ListEscrowsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEscrowsResponse.ProtoReflect.Descriptor instead.
 func (*ListEscrowsResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{54}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *ListEscrowsResponse) GetEscrows() []*EscrowRecord {
@@ -3327,7 +3408,7 @@ type RequestRedeemRequest struct {
 
 func (x *RequestRedeemRequest) Reset() {
 	*x = RequestRedeemRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[55]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3339,7 +3420,7 @@ func (x *RequestRedeemRequest) String() string {
 func (*RequestRedeemRequest) ProtoMessage() {}
 
 func (x *RequestRedeemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[55]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3352,7 +3433,7 @@ func (x *RequestRedeemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestRedeemRequest.ProtoReflect.Descriptor instead.
 func (*RequestRedeemRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{55}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *RequestRedeemRequest) GetRequesterBesuAddress() string {
@@ -3392,7 +3473,7 @@ type RequestRedeemResponse struct {
 
 func (x *RequestRedeemResponse) Reset() {
 	*x = RequestRedeemResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[56]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3404,7 +3485,7 @@ func (x *RequestRedeemResponse) String() string {
 func (*RequestRedeemResponse) ProtoMessage() {}
 
 func (x *RequestRedeemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[56]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3417,7 +3498,7 @@ func (x *RequestRedeemResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestRedeemResponse.ProtoReflect.Descriptor instead.
 func (*RequestRedeemResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{56}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *RequestRedeemResponse) GetRedeemId() string {
@@ -3437,7 +3518,7 @@ type ApproveRedeemRequest struct {
 
 func (x *ApproveRedeemRequest) Reset() {
 	*x = ApproveRedeemRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[57]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3449,7 +3530,7 @@ func (x *ApproveRedeemRequest) String() string {
 func (*ApproveRedeemRequest) ProtoMessage() {}
 
 func (x *ApproveRedeemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[57]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3462,7 +3543,7 @@ func (x *ApproveRedeemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveRedeemRequest.ProtoReflect.Descriptor instead.
 func (*ApproveRedeemRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{57}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *ApproveRedeemRequest) GetRedeemId() string {
@@ -3481,7 +3562,7 @@ type ApproveRedeemResponse struct {
 
 func (x *ApproveRedeemResponse) Reset() {
 	*x = ApproveRedeemResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[58]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3493,7 +3574,7 @@ func (x *ApproveRedeemResponse) String() string {
 func (*ApproveRedeemResponse) ProtoMessage() {}
 
 func (x *ApproveRedeemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[58]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3506,7 +3587,7 @@ func (x *ApproveRedeemResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveRedeemResponse.ProtoReflect.Descriptor instead.
 func (*ApproveRedeemResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{58}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *ApproveRedeemResponse) GetFiatMintTxHash() string {
@@ -3527,7 +3608,7 @@ type RejectRedeemRequest struct {
 
 func (x *RejectRedeemRequest) Reset() {
 	*x = RejectRedeemRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[59]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3539,7 +3620,7 @@ func (x *RejectRedeemRequest) String() string {
 func (*RejectRedeemRequest) ProtoMessage() {}
 
 func (x *RejectRedeemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[59]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3552,7 +3633,7 @@ func (x *RejectRedeemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RejectRedeemRequest.ProtoReflect.Descriptor instead.
 func (*RejectRedeemRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{59}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *RejectRedeemRequest) GetRedeemId() string {
@@ -3577,7 +3658,7 @@ type RejectRedeemResponse struct {
 
 func (x *RejectRedeemResponse) Reset() {
 	*x = RejectRedeemResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[60]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3589,7 +3670,7 @@ func (x *RejectRedeemResponse) String() string {
 func (*RejectRedeemResponse) ProtoMessage() {}
 
 func (x *RejectRedeemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[60]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3602,7 +3683,7 @@ func (x *RejectRedeemResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RejectRedeemResponse.ProtoReflect.Descriptor instead.
 func (*RejectRedeemResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{60}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{62}
 }
 
 // List redeem records (filtered by requester_id when non-empty).
@@ -3615,7 +3696,7 @@ type ListRedeemsRequest struct {
 
 func (x *ListRedeemsRequest) Reset() {
 	*x = ListRedeemsRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[61]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3627,7 +3708,7 @@ func (x *ListRedeemsRequest) String() string {
 func (*ListRedeemsRequest) ProtoMessage() {}
 
 func (x *ListRedeemsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[61]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3640,7 +3721,7 @@ func (x *ListRedeemsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRedeemsRequest.ProtoReflect.Descriptor instead.
 func (*ListRedeemsRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{61}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *ListRedeemsRequest) GetRequesterId() string {
@@ -3659,7 +3740,7 @@ type ListRedeemsResponse struct {
 
 func (x *ListRedeemsResponse) Reset() {
 	*x = ListRedeemsResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[62]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3671,7 +3752,7 @@ func (x *ListRedeemsResponse) String() string {
 func (*ListRedeemsResponse) ProtoMessage() {}
 
 func (x *ListRedeemsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[62]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3684,7 +3765,7 @@ func (x *ListRedeemsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRedeemsResponse.ProtoReflect.Descriptor instead.
 func (*ListRedeemsResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{62}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *ListRedeemsResponse) GetRedeems() []*RedeemRecord {
@@ -3705,7 +3786,7 @@ type InitiateZetoTransferRequest struct {
 
 func (x *InitiateZetoTransferRequest) Reset() {
 	*x = InitiateZetoTransferRequest{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[63]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3717,7 +3798,7 @@ func (x *InitiateZetoTransferRequest) String() string {
 func (*InitiateZetoTransferRequest) ProtoMessage() {}
 
 func (x *InitiateZetoTransferRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[63]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3730,7 +3811,7 @@ func (x *InitiateZetoTransferRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitiateZetoTransferRequest.ProtoReflect.Descriptor instead.
 func (*InitiateZetoTransferRequest) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{63}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *InitiateZetoTransferRequest) GetToIdentity() string {
@@ -3756,7 +3837,7 @@ type InitiateZetoTransferResponse struct {
 
 func (x *InitiateZetoTransferResponse) Reset() {
 	*x = InitiateZetoTransferResponse{}
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[64]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3768,7 +3849,7 @@ func (x *InitiateZetoTransferResponse) String() string {
 func (*InitiateZetoTransferResponse) ProtoMessage() {}
 
 func (x *InitiateZetoTransferResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[64]
+	mi := &file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3781,7 +3862,7 @@ func (x *InitiateZetoTransferResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitiateZetoTransferResponse.ProtoReflect.Descriptor instead.
 func (*InitiateZetoTransferResponse) Descriptor() ([]byte, []int) {
-	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{64}
+	return file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *InitiateZetoTransferResponse) GetTxHash() string {
@@ -3929,6 +4010,9 @@ const file_payment_orchestrator_v1_payment_orchestrator_proto_rawDesc = "" +
 	"\x11GetBalanceRequest\x12\x1a\n" +
 	"\bidentity\x18\x01 \x01(\tR\bidentity\".\n" +
 	"\x12GetBalanceResponse\x12\x18\n" +
+	"\abalance\x18\x01 \x01(\tR\abalance\"\x17\n" +
+	"\x15GetFiatBalanceRequest\"2\n" +
+	"\x16GetFiatBalanceResponse\x12\x18\n" +
 	"\abalance\x18\x01 \x01(\tR\abalance\"\xfa\x02\n" +
 	"\rDepositRecord\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
@@ -4066,7 +4150,7 @@ const file_payment_orchestrator_v1_payment_orchestrator_proto_rawDesc = "" +
 	"\fRedeemStatus\x12\x19\n" +
 	"\x15REDEEM_STATUS_PENDING\x10\x00\x12\x1a\n" +
 	"\x16REDEEM_STATUS_APPROVED\x10\x01\x12\x1a\n" +
-	"\x16REDEEM_STATUS_REJECTED\x10\x022\xfb\x1a\n" +
+	"\x16REDEEM_STATUS_REJECTED\x10\x022\xee\x1b\n" +
 	"\x1aPaymentOrchestratorService\x12}\n" +
 	"\x12ProposeFXAgreement\x122.payment_orchestrator.v1.ProposeFXAgreementRequest\x1a3.payment_orchestrator.v1.ProposeFXAgreementResponse\x12z\n" +
 	"\x11AcceptFXAgreement\x121.payment_orchestrator.v1.AcceptFXAgreementRequest\x1a2.payment_orchestrator.v1.AcceptFXAgreementResponse\x12z\n" +
@@ -4087,7 +4171,8 @@ const file_payment_orchestrator_v1_payment_orchestrator_proto_rawDesc = "" +
 	"\tMintToken\x12).payment_orchestrator.v1.MintTokenRequest\x1a*.payment_orchestrator.v1.MintTokenResponse\x12n\n" +
 	"\rTransferToken\x12-.payment_orchestrator.v1.TransferTokenRequest\x1a..payment_orchestrator.v1.TransferTokenResponse\x12e\n" +
 	"\n" +
-	"GetBalance\x12*.payment_orchestrator.v1.GetBalanceRequest\x1a+.payment_orchestrator.v1.GetBalanceResponse\x12t\n" +
+	"GetBalance\x12*.payment_orchestrator.v1.GetBalanceRequest\x1a+.payment_orchestrator.v1.GetBalanceResponse\x12q\n" +
+	"\x0eGetFiatBalance\x12..payment_orchestrator.v1.GetFiatBalanceRequest\x1a/.payment_orchestrator.v1.GetFiatBalanceResponse\x12t\n" +
 	"\x0fRegisterDeposit\x12/.payment_orchestrator.v1.RegisterDepositRequest\x1a0.payment_orchestrator.v1.RegisterDepositResponse\x12q\n" +
 	"\x0eApproveDeposit\x12..payment_orchestrator.v1.ApproveDepositRequest\x1a/.payment_orchestrator.v1.ApproveDepositResponse\x12n\n" +
 	"\rRejectDeposit\x12-.payment_orchestrator.v1.RejectDepositRequest\x1a..payment_orchestrator.v1.RejectDepositResponse\x12\x80\x01\n" +
@@ -4116,7 +4201,7 @@ func file_payment_orchestrator_v1_payment_orchestrator_proto_rawDescGZIP() []byt
 }
 
 var file_payment_orchestrator_v1_payment_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 65)
+var file_payment_orchestrator_v1_payment_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 67)
 var file_payment_orchestrator_v1_payment_orchestrator_proto_goTypes = []any{
 	(FXAgreementState)(0),                // 0: payment_orchestrator.v1.FXAgreementState
 	(HTLCState)(0),                       // 1: payment_orchestrator.v1.HTLCState
@@ -4157,37 +4242,39 @@ var file_payment_orchestrator_v1_payment_orchestrator_proto_goTypes = []any{
 	(*TransferTokenResponse)(nil),        // 36: payment_orchestrator.v1.TransferTokenResponse
 	(*GetBalanceRequest)(nil),            // 37: payment_orchestrator.v1.GetBalanceRequest
 	(*GetBalanceResponse)(nil),           // 38: payment_orchestrator.v1.GetBalanceResponse
-	(*DepositRecord)(nil),                // 39: payment_orchestrator.v1.DepositRecord
-	(*EscrowRecord)(nil),                 // 40: payment_orchestrator.v1.EscrowRecord
-	(*RedeemRecord)(nil),                 // 41: payment_orchestrator.v1.RedeemRecord
-	(*RegisterDepositRequest)(nil),       // 42: payment_orchestrator.v1.RegisterDepositRequest
-	(*RegisterDepositResponse)(nil),      // 43: payment_orchestrator.v1.RegisterDepositResponse
-	(*ApproveDepositRequest)(nil),        // 44: payment_orchestrator.v1.ApproveDepositRequest
-	(*ApproveDepositResponse)(nil),       // 45: payment_orchestrator.v1.ApproveDepositResponse
-	(*RejectDepositRequest)(nil),         // 46: payment_orchestrator.v1.RejectDepositRequest
-	(*RejectDepositResponse)(nil),        // 47: payment_orchestrator.v1.RejectDepositResponse
-	(*RequestFiatExchangeRequest)(nil),   // 48: payment_orchestrator.v1.RequestFiatExchangeRequest
-	(*RequestFiatExchangeResponse)(nil),  // 49: payment_orchestrator.v1.RequestFiatExchangeResponse
-	(*ListDepositsRequest)(nil),          // 50: payment_orchestrator.v1.ListDepositsRequest
-	(*ListDepositsResponse)(nil),         // 51: payment_orchestrator.v1.ListDepositsResponse
-	(*RequestEscrowRequest)(nil),         // 52: payment_orchestrator.v1.RequestEscrowRequest
-	(*RequestEscrowResponse)(nil),        // 53: payment_orchestrator.v1.RequestEscrowResponse
-	(*ApproveEscrowRequest)(nil),         // 54: payment_orchestrator.v1.ApproveEscrowRequest
-	(*ApproveEscrowResponse)(nil),        // 55: payment_orchestrator.v1.ApproveEscrowResponse
-	(*RejectEscrowRequest)(nil),          // 56: payment_orchestrator.v1.RejectEscrowRequest
-	(*RejectEscrowResponse)(nil),         // 57: payment_orchestrator.v1.RejectEscrowResponse
-	(*ListEscrowsRequest)(nil),           // 58: payment_orchestrator.v1.ListEscrowsRequest
-	(*ListEscrowsResponse)(nil),          // 59: payment_orchestrator.v1.ListEscrowsResponse
-	(*RequestRedeemRequest)(nil),         // 60: payment_orchestrator.v1.RequestRedeemRequest
-	(*RequestRedeemResponse)(nil),        // 61: payment_orchestrator.v1.RequestRedeemResponse
-	(*ApproveRedeemRequest)(nil),         // 62: payment_orchestrator.v1.ApproveRedeemRequest
-	(*ApproveRedeemResponse)(nil),        // 63: payment_orchestrator.v1.ApproveRedeemResponse
-	(*RejectRedeemRequest)(nil),          // 64: payment_orchestrator.v1.RejectRedeemRequest
-	(*RejectRedeemResponse)(nil),         // 65: payment_orchestrator.v1.RejectRedeemResponse
-	(*ListRedeemsRequest)(nil),           // 66: payment_orchestrator.v1.ListRedeemsRequest
-	(*ListRedeemsResponse)(nil),          // 67: payment_orchestrator.v1.ListRedeemsResponse
-	(*InitiateZetoTransferRequest)(nil),  // 68: payment_orchestrator.v1.InitiateZetoTransferRequest
-	(*InitiateZetoTransferResponse)(nil), // 69: payment_orchestrator.v1.InitiateZetoTransferResponse
+	(*GetFiatBalanceRequest)(nil),        // 39: payment_orchestrator.v1.GetFiatBalanceRequest
+	(*GetFiatBalanceResponse)(nil),       // 40: payment_orchestrator.v1.GetFiatBalanceResponse
+	(*DepositRecord)(nil),                // 41: payment_orchestrator.v1.DepositRecord
+	(*EscrowRecord)(nil),                 // 42: payment_orchestrator.v1.EscrowRecord
+	(*RedeemRecord)(nil),                 // 43: payment_orchestrator.v1.RedeemRecord
+	(*RegisterDepositRequest)(nil),       // 44: payment_orchestrator.v1.RegisterDepositRequest
+	(*RegisterDepositResponse)(nil),      // 45: payment_orchestrator.v1.RegisterDepositResponse
+	(*ApproveDepositRequest)(nil),        // 46: payment_orchestrator.v1.ApproveDepositRequest
+	(*ApproveDepositResponse)(nil),       // 47: payment_orchestrator.v1.ApproveDepositResponse
+	(*RejectDepositRequest)(nil),         // 48: payment_orchestrator.v1.RejectDepositRequest
+	(*RejectDepositResponse)(nil),        // 49: payment_orchestrator.v1.RejectDepositResponse
+	(*RequestFiatExchangeRequest)(nil),   // 50: payment_orchestrator.v1.RequestFiatExchangeRequest
+	(*RequestFiatExchangeResponse)(nil),  // 51: payment_orchestrator.v1.RequestFiatExchangeResponse
+	(*ListDepositsRequest)(nil),          // 52: payment_orchestrator.v1.ListDepositsRequest
+	(*ListDepositsResponse)(nil),         // 53: payment_orchestrator.v1.ListDepositsResponse
+	(*RequestEscrowRequest)(nil),         // 54: payment_orchestrator.v1.RequestEscrowRequest
+	(*RequestEscrowResponse)(nil),        // 55: payment_orchestrator.v1.RequestEscrowResponse
+	(*ApproveEscrowRequest)(nil),         // 56: payment_orchestrator.v1.ApproveEscrowRequest
+	(*ApproveEscrowResponse)(nil),        // 57: payment_orchestrator.v1.ApproveEscrowResponse
+	(*RejectEscrowRequest)(nil),          // 58: payment_orchestrator.v1.RejectEscrowRequest
+	(*RejectEscrowResponse)(nil),         // 59: payment_orchestrator.v1.RejectEscrowResponse
+	(*ListEscrowsRequest)(nil),           // 60: payment_orchestrator.v1.ListEscrowsRequest
+	(*ListEscrowsResponse)(nil),          // 61: payment_orchestrator.v1.ListEscrowsResponse
+	(*RequestRedeemRequest)(nil),         // 62: payment_orchestrator.v1.RequestRedeemRequest
+	(*RequestRedeemResponse)(nil),        // 63: payment_orchestrator.v1.RequestRedeemResponse
+	(*ApproveRedeemRequest)(nil),         // 64: payment_orchestrator.v1.ApproveRedeemRequest
+	(*ApproveRedeemResponse)(nil),        // 65: payment_orchestrator.v1.ApproveRedeemResponse
+	(*RejectRedeemRequest)(nil),          // 66: payment_orchestrator.v1.RejectRedeemRequest
+	(*RejectRedeemResponse)(nil),         // 67: payment_orchestrator.v1.RejectRedeemResponse
+	(*ListRedeemsRequest)(nil),           // 68: payment_orchestrator.v1.ListRedeemsRequest
+	(*ListRedeemsResponse)(nil),          // 69: payment_orchestrator.v1.ListRedeemsResponse
+	(*InitiateZetoTransferRequest)(nil),  // 70: payment_orchestrator.v1.InitiateZetoTransferRequest
+	(*InitiateZetoTransferResponse)(nil), // 71: payment_orchestrator.v1.InitiateZetoTransferResponse
 }
 var file_payment_orchestrator_v1_payment_orchestrator_proto_depIdxs = []int32{
 	0,  // 0: payment_orchestrator.v1.FXAgreement.state:type_name -> payment_orchestrator.v1.FXAgreementState
@@ -4199,9 +4286,9 @@ var file_payment_orchestrator_v1_payment_orchestrator_proto_depIdxs = []int32{
 	2,  // 6: payment_orchestrator.v1.DepositRecord.status:type_name -> payment_orchestrator.v1.DepositStatus
 	3,  // 7: payment_orchestrator.v1.EscrowRecord.status:type_name -> payment_orchestrator.v1.EscrowStatus
 	4,  // 8: payment_orchestrator.v1.RedeemRecord.status:type_name -> payment_orchestrator.v1.RedeemStatus
-	39, // 9: payment_orchestrator.v1.ListDepositsResponse.deposits:type_name -> payment_orchestrator.v1.DepositRecord
-	40, // 10: payment_orchestrator.v1.ListEscrowsResponse.escrows:type_name -> payment_orchestrator.v1.EscrowRecord
-	41, // 11: payment_orchestrator.v1.ListRedeemsResponse.redeems:type_name -> payment_orchestrator.v1.RedeemRecord
+	41, // 9: payment_orchestrator.v1.ListDepositsResponse.deposits:type_name -> payment_orchestrator.v1.DepositRecord
+	42, // 10: payment_orchestrator.v1.ListEscrowsResponse.escrows:type_name -> payment_orchestrator.v1.EscrowRecord
+	43, // 11: payment_orchestrator.v1.ListRedeemsResponse.redeems:type_name -> payment_orchestrator.v1.RedeemRecord
 	6,  // 12: payment_orchestrator.v1.PaymentOrchestratorService.ProposeFXAgreement:input_type -> payment_orchestrator.v1.ProposeFXAgreementRequest
 	8,  // 13: payment_orchestrator.v1.PaymentOrchestratorService.AcceptFXAgreement:input_type -> payment_orchestrator.v1.AcceptFXAgreementRequest
 	10, // 14: payment_orchestrator.v1.PaymentOrchestratorService.RejectFXAgreement:input_type -> payment_orchestrator.v1.RejectFXAgreementRequest
@@ -4218,52 +4305,54 @@ var file_payment_orchestrator_v1_payment_orchestrator_proto_depIdxs = []int32{
 	33, // 25: payment_orchestrator.v1.PaymentOrchestratorService.MintToken:input_type -> payment_orchestrator.v1.MintTokenRequest
 	35, // 26: payment_orchestrator.v1.PaymentOrchestratorService.TransferToken:input_type -> payment_orchestrator.v1.TransferTokenRequest
 	37, // 27: payment_orchestrator.v1.PaymentOrchestratorService.GetBalance:input_type -> payment_orchestrator.v1.GetBalanceRequest
-	42, // 28: payment_orchestrator.v1.PaymentOrchestratorService.RegisterDeposit:input_type -> payment_orchestrator.v1.RegisterDepositRequest
-	44, // 29: payment_orchestrator.v1.PaymentOrchestratorService.ApproveDeposit:input_type -> payment_orchestrator.v1.ApproveDepositRequest
-	46, // 30: payment_orchestrator.v1.PaymentOrchestratorService.RejectDeposit:input_type -> payment_orchestrator.v1.RejectDepositRequest
-	48, // 31: payment_orchestrator.v1.PaymentOrchestratorService.RequestFiatExchange:input_type -> payment_orchestrator.v1.RequestFiatExchangeRequest
-	50, // 32: payment_orchestrator.v1.PaymentOrchestratorService.ListDeposits:input_type -> payment_orchestrator.v1.ListDepositsRequest
-	52, // 33: payment_orchestrator.v1.PaymentOrchestratorService.RequestEscrow:input_type -> payment_orchestrator.v1.RequestEscrowRequest
-	54, // 34: payment_orchestrator.v1.PaymentOrchestratorService.ApproveEscrow:input_type -> payment_orchestrator.v1.ApproveEscrowRequest
-	56, // 35: payment_orchestrator.v1.PaymentOrchestratorService.RejectEscrow:input_type -> payment_orchestrator.v1.RejectEscrowRequest
-	58, // 36: payment_orchestrator.v1.PaymentOrchestratorService.ListEscrows:input_type -> payment_orchestrator.v1.ListEscrowsRequest
-	60, // 37: payment_orchestrator.v1.PaymentOrchestratorService.RequestRedeem:input_type -> payment_orchestrator.v1.RequestRedeemRequest
-	62, // 38: payment_orchestrator.v1.PaymentOrchestratorService.ApproveRedeem:input_type -> payment_orchestrator.v1.ApproveRedeemRequest
-	64, // 39: payment_orchestrator.v1.PaymentOrchestratorService.RejectRedeem:input_type -> payment_orchestrator.v1.RejectRedeemRequest
-	66, // 40: payment_orchestrator.v1.PaymentOrchestratorService.ListRedeems:input_type -> payment_orchestrator.v1.ListRedeemsRequest
-	68, // 41: payment_orchestrator.v1.PaymentOrchestratorService.InitiateZetoTransfer:input_type -> payment_orchestrator.v1.InitiateZetoTransferRequest
-	7,  // 42: payment_orchestrator.v1.PaymentOrchestratorService.ProposeFXAgreement:output_type -> payment_orchestrator.v1.ProposeFXAgreementResponse
-	9,  // 43: payment_orchestrator.v1.PaymentOrchestratorService.AcceptFXAgreement:output_type -> payment_orchestrator.v1.AcceptFXAgreementResponse
-	11, // 44: payment_orchestrator.v1.PaymentOrchestratorService.RejectFXAgreement:output_type -> payment_orchestrator.v1.RejectFXAgreementResponse
-	13, // 45: payment_orchestrator.v1.PaymentOrchestratorService.CancelFXAgreement:output_type -> payment_orchestrator.v1.CancelFXAgreementResponse
-	15, // 46: payment_orchestrator.v1.PaymentOrchestratorService.SettleFXAgreement:output_type -> payment_orchestrator.v1.SettleFXAgreementResponse
-	17, // 47: payment_orchestrator.v1.PaymentOrchestratorService.GetFXAgreement:output_type -> payment_orchestrator.v1.GetFXAgreementResponse
-	19, // 48: payment_orchestrator.v1.PaymentOrchestratorService.ListFXAgreements:output_type -> payment_orchestrator.v1.ListFXAgreementsResponse
-	22, // 49: payment_orchestrator.v1.PaymentOrchestratorService.LockHTLC:output_type -> payment_orchestrator.v1.LockHTLCResponse
-	24, // 50: payment_orchestrator.v1.PaymentOrchestratorService.LockHTLCWithHashLock:output_type -> payment_orchestrator.v1.LockHTLCWithHashLockResponse
-	26, // 51: payment_orchestrator.v1.PaymentOrchestratorService.SettleHTLC:output_type -> payment_orchestrator.v1.SettleHTLCResponse
-	28, // 52: payment_orchestrator.v1.PaymentOrchestratorService.RefundHTLC:output_type -> payment_orchestrator.v1.RefundHTLCResponse
-	30, // 53: payment_orchestrator.v1.PaymentOrchestratorService.GetHTLCStatus:output_type -> payment_orchestrator.v1.GetHTLCStatusResponse
-	32, // 54: payment_orchestrator.v1.PaymentOrchestratorService.SearchHTLC:output_type -> payment_orchestrator.v1.SearchHTLCResponse
-	34, // 55: payment_orchestrator.v1.PaymentOrchestratorService.MintToken:output_type -> payment_orchestrator.v1.MintTokenResponse
-	36, // 56: payment_orchestrator.v1.PaymentOrchestratorService.TransferToken:output_type -> payment_orchestrator.v1.TransferTokenResponse
-	38, // 57: payment_orchestrator.v1.PaymentOrchestratorService.GetBalance:output_type -> payment_orchestrator.v1.GetBalanceResponse
-	43, // 58: payment_orchestrator.v1.PaymentOrchestratorService.RegisterDeposit:output_type -> payment_orchestrator.v1.RegisterDepositResponse
-	45, // 59: payment_orchestrator.v1.PaymentOrchestratorService.ApproveDeposit:output_type -> payment_orchestrator.v1.ApproveDepositResponse
-	47, // 60: payment_orchestrator.v1.PaymentOrchestratorService.RejectDeposit:output_type -> payment_orchestrator.v1.RejectDepositResponse
-	49, // 61: payment_orchestrator.v1.PaymentOrchestratorService.RequestFiatExchange:output_type -> payment_orchestrator.v1.RequestFiatExchangeResponse
-	51, // 62: payment_orchestrator.v1.PaymentOrchestratorService.ListDeposits:output_type -> payment_orchestrator.v1.ListDepositsResponse
-	53, // 63: payment_orchestrator.v1.PaymentOrchestratorService.RequestEscrow:output_type -> payment_orchestrator.v1.RequestEscrowResponse
-	55, // 64: payment_orchestrator.v1.PaymentOrchestratorService.ApproveEscrow:output_type -> payment_orchestrator.v1.ApproveEscrowResponse
-	57, // 65: payment_orchestrator.v1.PaymentOrchestratorService.RejectEscrow:output_type -> payment_orchestrator.v1.RejectEscrowResponse
-	59, // 66: payment_orchestrator.v1.PaymentOrchestratorService.ListEscrows:output_type -> payment_orchestrator.v1.ListEscrowsResponse
-	61, // 67: payment_orchestrator.v1.PaymentOrchestratorService.RequestRedeem:output_type -> payment_orchestrator.v1.RequestRedeemResponse
-	63, // 68: payment_orchestrator.v1.PaymentOrchestratorService.ApproveRedeem:output_type -> payment_orchestrator.v1.ApproveRedeemResponse
-	65, // 69: payment_orchestrator.v1.PaymentOrchestratorService.RejectRedeem:output_type -> payment_orchestrator.v1.RejectRedeemResponse
-	67, // 70: payment_orchestrator.v1.PaymentOrchestratorService.ListRedeems:output_type -> payment_orchestrator.v1.ListRedeemsResponse
-	69, // 71: payment_orchestrator.v1.PaymentOrchestratorService.InitiateZetoTransfer:output_type -> payment_orchestrator.v1.InitiateZetoTransferResponse
-	42, // [42:72] is the sub-list for method output_type
-	12, // [12:42] is the sub-list for method input_type
+	39, // 28: payment_orchestrator.v1.PaymentOrchestratorService.GetFiatBalance:input_type -> payment_orchestrator.v1.GetFiatBalanceRequest
+	44, // 29: payment_orchestrator.v1.PaymentOrchestratorService.RegisterDeposit:input_type -> payment_orchestrator.v1.RegisterDepositRequest
+	46, // 30: payment_orchestrator.v1.PaymentOrchestratorService.ApproveDeposit:input_type -> payment_orchestrator.v1.ApproveDepositRequest
+	48, // 31: payment_orchestrator.v1.PaymentOrchestratorService.RejectDeposit:input_type -> payment_orchestrator.v1.RejectDepositRequest
+	50, // 32: payment_orchestrator.v1.PaymentOrchestratorService.RequestFiatExchange:input_type -> payment_orchestrator.v1.RequestFiatExchangeRequest
+	52, // 33: payment_orchestrator.v1.PaymentOrchestratorService.ListDeposits:input_type -> payment_orchestrator.v1.ListDepositsRequest
+	54, // 34: payment_orchestrator.v1.PaymentOrchestratorService.RequestEscrow:input_type -> payment_orchestrator.v1.RequestEscrowRequest
+	56, // 35: payment_orchestrator.v1.PaymentOrchestratorService.ApproveEscrow:input_type -> payment_orchestrator.v1.ApproveEscrowRequest
+	58, // 36: payment_orchestrator.v1.PaymentOrchestratorService.RejectEscrow:input_type -> payment_orchestrator.v1.RejectEscrowRequest
+	60, // 37: payment_orchestrator.v1.PaymentOrchestratorService.ListEscrows:input_type -> payment_orchestrator.v1.ListEscrowsRequest
+	62, // 38: payment_orchestrator.v1.PaymentOrchestratorService.RequestRedeem:input_type -> payment_orchestrator.v1.RequestRedeemRequest
+	64, // 39: payment_orchestrator.v1.PaymentOrchestratorService.ApproveRedeem:input_type -> payment_orchestrator.v1.ApproveRedeemRequest
+	66, // 40: payment_orchestrator.v1.PaymentOrchestratorService.RejectRedeem:input_type -> payment_orchestrator.v1.RejectRedeemRequest
+	68, // 41: payment_orchestrator.v1.PaymentOrchestratorService.ListRedeems:input_type -> payment_orchestrator.v1.ListRedeemsRequest
+	70, // 42: payment_orchestrator.v1.PaymentOrchestratorService.InitiateZetoTransfer:input_type -> payment_orchestrator.v1.InitiateZetoTransferRequest
+	7,  // 43: payment_orchestrator.v1.PaymentOrchestratorService.ProposeFXAgreement:output_type -> payment_orchestrator.v1.ProposeFXAgreementResponse
+	9,  // 44: payment_orchestrator.v1.PaymentOrchestratorService.AcceptFXAgreement:output_type -> payment_orchestrator.v1.AcceptFXAgreementResponse
+	11, // 45: payment_orchestrator.v1.PaymentOrchestratorService.RejectFXAgreement:output_type -> payment_orchestrator.v1.RejectFXAgreementResponse
+	13, // 46: payment_orchestrator.v1.PaymentOrchestratorService.CancelFXAgreement:output_type -> payment_orchestrator.v1.CancelFXAgreementResponse
+	15, // 47: payment_orchestrator.v1.PaymentOrchestratorService.SettleFXAgreement:output_type -> payment_orchestrator.v1.SettleFXAgreementResponse
+	17, // 48: payment_orchestrator.v1.PaymentOrchestratorService.GetFXAgreement:output_type -> payment_orchestrator.v1.GetFXAgreementResponse
+	19, // 49: payment_orchestrator.v1.PaymentOrchestratorService.ListFXAgreements:output_type -> payment_orchestrator.v1.ListFXAgreementsResponse
+	22, // 50: payment_orchestrator.v1.PaymentOrchestratorService.LockHTLC:output_type -> payment_orchestrator.v1.LockHTLCResponse
+	24, // 51: payment_orchestrator.v1.PaymentOrchestratorService.LockHTLCWithHashLock:output_type -> payment_orchestrator.v1.LockHTLCWithHashLockResponse
+	26, // 52: payment_orchestrator.v1.PaymentOrchestratorService.SettleHTLC:output_type -> payment_orchestrator.v1.SettleHTLCResponse
+	28, // 53: payment_orchestrator.v1.PaymentOrchestratorService.RefundHTLC:output_type -> payment_orchestrator.v1.RefundHTLCResponse
+	30, // 54: payment_orchestrator.v1.PaymentOrchestratorService.GetHTLCStatus:output_type -> payment_orchestrator.v1.GetHTLCStatusResponse
+	32, // 55: payment_orchestrator.v1.PaymentOrchestratorService.SearchHTLC:output_type -> payment_orchestrator.v1.SearchHTLCResponse
+	34, // 56: payment_orchestrator.v1.PaymentOrchestratorService.MintToken:output_type -> payment_orchestrator.v1.MintTokenResponse
+	36, // 57: payment_orchestrator.v1.PaymentOrchestratorService.TransferToken:output_type -> payment_orchestrator.v1.TransferTokenResponse
+	38, // 58: payment_orchestrator.v1.PaymentOrchestratorService.GetBalance:output_type -> payment_orchestrator.v1.GetBalanceResponse
+	40, // 59: payment_orchestrator.v1.PaymentOrchestratorService.GetFiatBalance:output_type -> payment_orchestrator.v1.GetFiatBalanceResponse
+	45, // 60: payment_orchestrator.v1.PaymentOrchestratorService.RegisterDeposit:output_type -> payment_orchestrator.v1.RegisterDepositResponse
+	47, // 61: payment_orchestrator.v1.PaymentOrchestratorService.ApproveDeposit:output_type -> payment_orchestrator.v1.ApproveDepositResponse
+	49, // 62: payment_orchestrator.v1.PaymentOrchestratorService.RejectDeposit:output_type -> payment_orchestrator.v1.RejectDepositResponse
+	51, // 63: payment_orchestrator.v1.PaymentOrchestratorService.RequestFiatExchange:output_type -> payment_orchestrator.v1.RequestFiatExchangeResponse
+	53, // 64: payment_orchestrator.v1.PaymentOrchestratorService.ListDeposits:output_type -> payment_orchestrator.v1.ListDepositsResponse
+	55, // 65: payment_orchestrator.v1.PaymentOrchestratorService.RequestEscrow:output_type -> payment_orchestrator.v1.RequestEscrowResponse
+	57, // 66: payment_orchestrator.v1.PaymentOrchestratorService.ApproveEscrow:output_type -> payment_orchestrator.v1.ApproveEscrowResponse
+	59, // 67: payment_orchestrator.v1.PaymentOrchestratorService.RejectEscrow:output_type -> payment_orchestrator.v1.RejectEscrowResponse
+	61, // 68: payment_orchestrator.v1.PaymentOrchestratorService.ListEscrows:output_type -> payment_orchestrator.v1.ListEscrowsResponse
+	63, // 69: payment_orchestrator.v1.PaymentOrchestratorService.RequestRedeem:output_type -> payment_orchestrator.v1.RequestRedeemResponse
+	65, // 70: payment_orchestrator.v1.PaymentOrchestratorService.ApproveRedeem:output_type -> payment_orchestrator.v1.ApproveRedeemResponse
+	67, // 71: payment_orchestrator.v1.PaymentOrchestratorService.RejectRedeem:output_type -> payment_orchestrator.v1.RejectRedeemResponse
+	69, // 72: payment_orchestrator.v1.PaymentOrchestratorService.ListRedeems:output_type -> payment_orchestrator.v1.ListRedeemsResponse
+	71, // 73: payment_orchestrator.v1.PaymentOrchestratorService.InitiateZetoTransfer:output_type -> payment_orchestrator.v1.InitiateZetoTransferResponse
+	43, // [43:74] is the sub-list for method output_type
+	12, // [12:43] is the sub-list for method input_type
 	12, // [12:12] is the sub-list for extension type_name
 	12, // [12:12] is the sub-list for extension extendee
 	0,  // [0:12] is the sub-list for field type_name
@@ -4280,7 +4369,7 @@ func file_payment_orchestrator_v1_payment_orchestrator_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_payment_orchestrator_v1_payment_orchestrator_proto_rawDesc), len(file_payment_orchestrator_v1_payment_orchestrator_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   65,
+			NumMessages:   67,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

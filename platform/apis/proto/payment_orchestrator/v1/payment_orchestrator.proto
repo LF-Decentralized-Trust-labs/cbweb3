@@ -214,6 +214,12 @@ message GetBalanceResponse {
   string balance = 1;
 }
 
+message GetFiatBalanceRequest {}
+
+message GetFiatBalanceResponse {
+  string balance = 1;
+}
+
 // ─── Escrow Enums ────────────────────────────────────────────────────────
 
 // Status of a fiat deposit request (commercial bank → central bank).
@@ -444,6 +450,7 @@ service PaymentOrchestratorService {
   rpc MintToken(MintTokenRequest) returns (MintTokenResponse);
   rpc TransferToken(TransferTokenRequest) returns (TransferTokenResponse);
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+  rpc GetFiatBalance(GetFiatBalanceRequest) returns (GetFiatBalanceResponse);
 
   // ─── Escrow flow: Deposit → Escrow → Redeem ───────────────────────────
 

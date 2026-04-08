@@ -35,6 +35,7 @@ const (
 	PaymentOrchestratorService_MintToken_FullMethodName            = "/payment_orchestrator.v1.PaymentOrchestratorService/MintToken"
 	PaymentOrchestratorService_TransferToken_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/TransferToken"
 	PaymentOrchestratorService_GetBalance_FullMethodName           = "/payment_orchestrator.v1.PaymentOrchestratorService/GetBalance"
+	PaymentOrchestratorService_GetFiatBalance_FullMethodName       = "/payment_orchestrator.v1.PaymentOrchestratorService/GetFiatBalance"
 	PaymentOrchestratorService_RegisterDeposit_FullMethodName      = "/payment_orchestrator.v1.PaymentOrchestratorService/RegisterDeposit"
 	PaymentOrchestratorService_ApproveDeposit_FullMethodName       = "/payment_orchestrator.v1.PaymentOrchestratorService/ApproveDeposit"
 	PaymentOrchestratorService_RejectDeposit_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/RejectDeposit"
@@ -74,6 +75,7 @@ type PaymentOrchestratorServiceClient interface {
 	MintToken(ctx context.Context, in *MintTokenRequest, opts ...grpc.CallOption) (*MintTokenResponse, error)
 	TransferToken(ctx context.Context, in *TransferTokenRequest, opts ...grpc.CallOption) (*TransferTokenResponse, error)
 	GetBalance(ctx context.Context, in *GetBalanceRequest, opts ...grpc.CallOption) (*GetBalanceResponse, error)
+	GetFiatBalance(ctx context.Context, in *GetFiatBalanceRequest, opts ...grpc.CallOption) (*GetFiatBalanceResponse, error)
 	// Deposit lifecycle (fiat deposit from commercial bank)
 	RegisterDeposit(ctx context.Context, in *RegisterDepositRequest, opts ...grpc.CallOption) (*RegisterDepositResponse, error)
 	ApproveDeposit(ctx context.Context, in *ApproveDepositRequest, opts ...grpc.CallOption) (*ApproveDepositResponse, error)
@@ -262,6 +264,16 @@ func (c *paymentOrchestratorServiceClient) GetBalance(ctx context.Context, in *G
 	return out, nil
 }
 
+func (c *paymentOrchestratorServiceClient) GetFiatBalance(ctx context.Context, in *GetFiatBalanceRequest, opts ...grpc.CallOption) (*GetFiatBalanceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetFiatBalanceResponse)
+	err := c.cc.Invoke(ctx, PaymentOrchestratorService_GetFiatBalance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *paymentOrchestratorServiceClient) RegisterDeposit(ctx context.Context, in *RegisterDepositRequest, opts ...grpc.CallOption) (*RegisterDepositResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RegisterDepositResponse)
@@ -425,6 +437,7 @@ type PaymentOrchestratorServiceServer interface {
 	MintToken(context.Context, *MintTokenRequest) (*MintTokenResponse, error)
 	TransferToken(context.Context, *TransferTokenRequest) (*TransferTokenResponse, error)
 	GetBalance(context.Context, *GetBalanceRequest) (*GetBalanceResponse, error)
+	GetFiatBalance(context.Context, *GetFiatBalanceRequest) (*GetFiatBalanceResponse, error)
 	// Deposit lifecycle (fiat deposit from commercial bank)
 	RegisterDeposit(context.Context, *RegisterDepositRequest) (*RegisterDepositResponse, error)
 	ApproveDeposit(context.Context, *ApproveDepositRequest) (*ApproveDepositResponse, error)
@@ -499,6 +512,9 @@ func (UnimplementedPaymentOrchestratorServiceServer) TransferToken(context.Conte
 }
 func (UnimplementedPaymentOrchestratorServiceServer) GetBalance(context.Context, *GetBalanceRequest) (*GetBalanceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetBalance not implemented")
+}
+func (UnimplementedPaymentOrchestratorServiceServer) GetFiatBalance(context.Context, *GetFiatBalanceRequest) (*GetFiatBalanceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetFiatBalance not implemented")
 }
 func (UnimplementedPaymentOrchestratorServiceServer) RegisterDeposit(context.Context, *RegisterDepositRequest) (*RegisterDepositResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RegisterDeposit not implemented")
@@ -850,6 +866,24 @@ func _PaymentOrchestratorService_GetBalance_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PaymentOrchestratorService_GetFiatBalance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetFiatBalanceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaymentOrchestratorServiceServer).GetFiatBalance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PaymentOrchestratorService_GetFiatBalance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaymentOrchestratorServiceServer).GetFiatBalance(ctx, req.(*GetFiatBalanceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _PaymentOrchestratorService_RegisterDeposit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RegisterDepositRequest)
 	if err := dec(in); err != nil {
@@ -1172,6 +1206,10 @@ var PaymentOrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetBalance",
 			Handler:    _PaymentOrchestratorService_GetBalance_Handler,
+		},
+		{
+			MethodName: "GetFiatBalance",
+			Handler:    _PaymentOrchestratorService_GetFiatBalance_Handler,
 		},
 		{
 			MethodName: "RegisterDeposit",

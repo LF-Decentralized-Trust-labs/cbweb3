@@ -129,6 +129,11 @@ func (c *FiatClient) BalanceOf(ctx context.Context, address string) (string, err
 	return balance.String(), nil
 }
 
+// GetFiatBalance returns the fCeBM balance for the configured operator address.
+func (c *FiatClient) GetFiatBalance(ctx context.Context) (string, error) {
+	return c.BalanceOf(ctx, c.fromAddress.Hex())
+}
+
 // sendTx signs and sends a transaction to the fCeBM contract, waiting for the receipt.
 func (c *FiatClient) sendTx(ctx context.Context, data []byte, method string) (string, error) {
 	nonce, err := c.ethClient.PendingNonceAt(ctx, c.fromAddress)

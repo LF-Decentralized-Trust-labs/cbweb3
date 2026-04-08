@@ -471,6 +471,19 @@ func (s *paymentOrchestratorService) GetBalance(ctx context.Context, _ *pb.GetBa
 	return &pb.GetBalanceResponse{Balance: balance}, nil
 }
 
+func (s *paymentOrchestratorService) GetFiatBalance(ctx context.Context, _ *pb.GetFiatBalanceRequest) (*pb.GetFiatBalanceResponse, error) {
+	if s.fiat == nil {
+		return nil, status.Error(codes.Unavailable, "fiat token adapter not configured")
+	}
+
+	balance, err := s.fiat.GetFiatBalance(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "fiat balance: %v", err)
+	}
+
+	return &pb.GetFiatBalanceResponse{Balance: balance}, nil
+}
+
 // --- FX Agreement Operations ---
 // These will call the FXAgreement.sol Besu contract via the blockchain client.
 // For now, they are stubs that return unimplemented.

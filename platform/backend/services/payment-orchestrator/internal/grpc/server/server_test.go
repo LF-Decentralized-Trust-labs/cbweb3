@@ -12,7 +12,9 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // noopRelay is a test double that satisfies InteroperabilityPort with no-op
@@ -67,20 +69,60 @@ func (m *mockZeto) Balance(_ context.Context) (string, error) {
 	return "1000000", nil
 }
 
+type mockFiat struct {
+	balanceCalled int
+	balance       string
+	err           error
+}
+
+func (m *mockFiat) Mint(_ context.Context, _, _ string) (string, error) {
+	return "mock-fiat-mint-tx", nil
+}
+
+func (m *mockFiat) Burn(_ context.Context, _, _ string) (string, error) {
+	return "mock-fiat-burn-tx", nil
+}
+
+func (m *mockFiat) BalanceOf(_ context.Context, _ string) (string, error) {
+	return m.balance, m.err
+}
+
+func (m *mockFiat) GetFiatBalance(_ context.Context) (string, error) {
+	m.balanceCalled++
+	if m.err != nil {
+		return "", m.err
+	}
+	if m.balance == "" {
+		return "0", nil
+	}
+	return m.balance, nil
+}
+
 type testEnv struct {
 	client pb.PaymentOrchestratorServiceClient
 	zeto   *mockZeto
+	fiat   *mockFiat
 	cancel context.CancelFunc
 }
 
 func setupTestEnv(t *testing.T) *testEnv {
 	t.Helper()
+	return setupTestEnvWithFiat(t, nil)
+}
+
+func setupTestEnvWithFiat(t *testing.T, fiat *mockFiat) *testEnv {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mock := &mockZeto{}
+	var fiatPort ports.FiatTokenPort
+	if fiat != nil {
+		fiatPort = fiat
+	}
 
 	grpcServer := server.New(server.Config{
 		Zeto:   mock,
 		Relay:  noopRelay{},
+		Fiat:   fiatPort,
 		Logger: logger,
 	})
 
@@ -108,6 +150,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	return &testEnv{
 		client: pb.NewPaymentOrchestratorServiceClient(conn),
 		zeto:   mock,
+		fiat:   fiat,
 		cancel: cancel,
 	}
 }
@@ -352,5 +395,34 @@ func TestGetBalance_Success(t *testing.T) {
 	}
 	if resp.Balance != "1000000" {
 		t.Errorf("expected 1000000, got %s", resp.Balance)
+	}
+}
+
+func TestGetFiatBalance_Success(t *testing.T) {
+	env := setupTestEnvWithFiat(t, &mockFiat{balance: "1250000"})
+	ctx := context.Background()
+
+	resp, err := env.client.GetFiatBalance(ctx, &pb.GetFiatBalanceRequest{})
+	if err != nil {
+		t.Fatalf("GetFiatBalance: %v", err)
+	}
+	if resp.Balance != "1250000" {
+		t.Errorf("expected 1250000, got %s", resp.Balance)
+	}
+	if env.fiat.balanceCalled != 1 {
+		t.Errorf("expected fiat.GetFiatBalance called 1 time, got %d", env.fiat.balanceCalled)
+	}
+}
+
+func TestGetFiatBalance_FiatNil(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	_, err := env.client.GetFiatBalance(ctx, &pb.GetFiatBalanceRequest{})
+	if err == nil {
+		t.Fatal("expected error when fiat adapter is nil")
+	}
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("expected codes.Unavailable, got %s", status.Code(err))
 	}
 }
