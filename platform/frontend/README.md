@@ -126,6 +126,32 @@ Stack composition:
 - `spoke-b`: Bank B, Bank D, Central Bank B
 - `spoke-all`: Bank A, Bank B, Bank C, Bank D, Central Bank A, Central Bank B
 
+## Portal Ports
+
+Default exposed frontend ports (from `frontend/.env` and `frontend/.env.example`):
+
+| Portal | URL | Env var |
+| --- | --- | --- |
+| Bank A | http://localhost:5173 | `BANK_A_FRONTEND_PORT` |
+| Bank B | http://localhost:5174 | `BANK_B_FRONTEND_PORT` |
+| Bank C | http://localhost:5175 | `BANK_C_FRONTEND_PORT` |
+| Bank D | http://localhost:5176 | `BANK_D_FRONTEND_PORT` |
+| Central Bank A | http://localhost:5177 | `CENTRAL_BANK_A_FRONTEND_PORT` |
+| Central Bank B | http://localhost:5178 | `CENTRAL_BANK_B_FRONTEND_PORT` |
+
+Notes:
+
+- These ports are used by the Docker spoke stacks (`make frontend-spoke-*`).
+- You can change any portal port by editing `frontend/.env` before running the stack.
+- Local Vite dev servers do not hardcode a fixed port in app config; Vite picks an available one unless you pass `--port`.
+
+Example for fixed local dev ports:
+
+```bash
+npm run dev:bank -- --port 5173
+npm run dev:governance -- --port 5177
+```
+
 ## Tailwind v4 Setup Notes
 
 - PostCSS plugin is `@tailwindcss/postcss`.
