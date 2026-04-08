@@ -2,12 +2,12 @@ FROM node:22-alpine AS builder
 
 WORKDIR /workspace/frontend
 
-COPY package.json package-lock.json ./
+COPY package*.json ./
 COPY apps/governance/package.json apps/governance/package.json
 COPY packages/config/package.json packages/config/package.json
 COPY packages/ui/package.json packages/ui/package.json
 
-RUN npm ci
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 COPY . .
 

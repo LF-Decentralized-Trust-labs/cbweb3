@@ -132,11 +132,11 @@ export function getPaymentStatusVariant(status: unknown): "warning" | "success" 
 
 export function formatCeBM(rawAmount: string): string {
   if (!rawAmount || rawAmount === "0") {
-    return "0 CeBM";
+    return "0 tCeBM";
   }
 
   const value = BigInt(rawAmount);
-  return `${value.toLocaleString("en-US")} CeBM`;
+  return `${value.toLocaleString("en-US")} tCeBM`;
 }
 
 export function formatFiatUnits(rawAmount: string): string {

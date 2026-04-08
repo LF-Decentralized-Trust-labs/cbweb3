@@ -101,12 +101,12 @@ export function RedeemsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Request Redeem (tCeBM to fCeBM)</CardTitle>
+          <CardTitle>Request Redeem (tCeBM to fiat units)</CardTitle>
           <CardDescription>The proxy executes Zeto transfer automatically before forwarding redeem request.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="redeem-amount">Amount (CeBM units)</Label>
+            <Label htmlFor="redeem-amount">Amount (tCeBM units)</Label>
             <Input
               id="redeem-amount"
               type="number"

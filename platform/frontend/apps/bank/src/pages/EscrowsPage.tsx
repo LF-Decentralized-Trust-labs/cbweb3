@@ -101,12 +101,12 @@ export function EscrowsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Request Escrow (fCeBM to tCeBM)</CardTitle>
+          <CardTitle>Request Escrow (fiat units to tCeBM)</CardTitle>
           <CardDescription>Create escrow requests after deposit approval and fiat exchange.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="escrow-amount">Amount (CeBM units)</Label>
+            <Label htmlFor="escrow-amount">Amount (tCeBM units)</Label>
             <Input
               id="escrow-amount"
               type="number"
