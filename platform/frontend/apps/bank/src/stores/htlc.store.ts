@@ -1,68 +1,100 @@
-import CryptoJS from "crypto-js";
 import { create } from "zustand";
 import { htlcApi } from "../services/api";
-import type { CreateAgreementRequest, FXAgreement, HTLCLock } from "../types";
+import type {
+  HTLCLock,
+  LockHTLCRequest,
+  LockHTLCResponse,
+  LockWithHashHTLCRequest,
+  SearchHTLCParams,
+  SearchHTLCResponse,
+} from "../types";
 
 type HTLCState = {
-  agreements: FXAgreement[];
   locks: HTLCLock[];
+  total: number;
   status: "idle" | "loading" | "error";
   error: string | null;
-  fetch: () => Promise<void>;
-  createAgreement: (payload: CreateAgreementRequest) => Promise<string | null>;
-  lockFunds: (agreementId: string, secret: string) => Promise<string>;
-  settle: (lockId: string, secret: string) => Promise<void>;
+  fetchAll: () => Promise<void>;
+  search: (params: SearchHTLCParams) => Promise<SearchHTLCResponse>;
+  getStatus: (contractId: string) => Promise<HTLCLock>;
+  lock: (payload: LockHTLCRequest) => Promise<LockHTLCResponse>;
+  lockWithHash: (payload: LockWithHashHTLCRequest) => Promise<LockHTLCResponse>;
+  settle: (contractId: string, secret: string) => Promise<void>;
+  refund: (contractId: string) => Promise<void>;
 };
 
-const hashSecret = (secret: string) => CryptoJS.SHA256(secret).toString();
-
 export const useHtlcStore = create<HTLCState>((set) => ({
-  agreements: [],
   locks: [],
+  total: 0,
   status: "idle",
   error: null,
-  fetch: async () => {
+  fetchAll: async () => {
     set({ status: "loading", error: null });
     try {
-      const [agreements, locks] = await Promise.all([htlcApi.getAgreements(), htlcApi.getLocks()]);
-      set({ agreements, locks, status: "idle" });
+      const response = await htlcApi.search({});
+      set({ locks: response.locks, total: response.total, status: "idle" });
     } catch (error) {
       set({ status: "error", error: error instanceof Error ? error.message : "Unable to load HTLC data" });
     }
   },
-  createAgreement: async (payload) => {
-    set({ status: "loading", error: null });
-    try {
-      const created = await htlcApi.createAgreement(payload);
-      const agreements = await htlcApi.getAgreements();
-      set({ agreements, status: "idle" });
-      return created.id;
-    } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to create agreement" });
-      return null;
-    }
+  search: async (params) => {
+    return htlcApi.search(params);
   },
-  lockFunds: async (agreementId, secret) => {
+  getStatus: async (contractId) => {
+    return htlcApi.getStatus(contractId);
+  },
+  lock: async (payload) => {
     set({ status: "loading", error: null });
     try {
-      const hashLock = hashSecret(secret);
-      await htlcApi.lockFunds(agreementId, hashLock);
-      const locks = await htlcApi.getLocks();
-      set({ locks, status: "idle" });
-      return hashLock;
+      const response = await htlcApi.lock(payload);
+      const searchResponse = await htlcApi.search({});
+      set({ locks: searchResponse.locks, total: searchResponse.total, status: "idle" });
+      return response;
     } catch (error) {
       set({ status: "error", error: error instanceof Error ? error.message : "Unable to lock funds" });
-      return "";
+      throw error;
     }
   },
-  settle: async (lockId, secret) => {
+  lockWithHash: async (payload) => {
     set({ status: "loading", error: null });
     try {
-      await htlcApi.settle(lockId, secret);
-      const locks = await htlcApi.getLocks();
-      set({ locks, status: "idle" });
+      const response = await htlcApi.lockWithHash(payload);
+      const searchResponse = await htlcApi.search({});
+      set({ locks: searchResponse.locks, total: searchResponse.total, status: "idle" });
+      return response;
+    } catch (error) {
+      set({ status: "error", error: error instanceof Error ? error.message : "Unable to lock funds with hash" });
+      throw error;
+    }
+  },
+  settle: async (contractId, secret) => {
+    set({ status: "loading", error: null });
+    try {
+      await htlcApi.settle({ contract_id: contractId, secret });
+      try {
+        const response = await htlcApi.search({});
+        set({ locks: response.locks, total: response.total, status: "idle" });
+      } catch {
+        set({ status: "idle" });
+      }
     } catch (error) {
       set({ status: "error", error: error instanceof Error ? error.message : "Unable to settle lock" });
+      throw error;
+    }
+  },
+  refund: async (contractId) => {
+    set({ status: "loading", error: null });
+    try {
+      await htlcApi.refund(contractId);
+      try {
+        const response = await htlcApi.search({});
+        set({ locks: response.locks, total: response.total, status: "idle" });
+      } catch {
+        set({ status: "idle" });
+      }
+    } catch (error) {
+      set({ status: "error", error: error instanceof Error ? error.message : "Unable to refund lock" });
+      throw error;
     }
   },
 }));

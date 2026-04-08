@@ -5,10 +5,15 @@ import { AppLayout } from "../components/layout/AppLayout";
 import { AMMTradingPage } from "../pages/AMMTradingPage";
 import { ComplianceCenterPage } from "../pages/ComplianceCenterPage";
 import { DashboardPage } from "../pages/DashboardPage";
-import { HTLCTradingPage } from "../pages/HTLCTradingPage";
+import { DepositsPage } from "../pages/DepositsPage";
+import { EscrowsPage } from "../pages/EscrowsPage";
+import { HTLCDetailPage } from "../pages/HTLCDetailPage";
+import { HTLCHistoryPage } from "../pages/HTLCHistoryPage";
+import { HTLCNewPage } from "../pages/HTLCNewPage";
 import { LiquidityTransfersPage } from "../pages/LiquidityTransfersPage";
 import { LoginPage } from "../pages/LoginPage";
 import { OnboardingPage } from "../pages/OnboardingPage";
+import { RedeemsPage } from "../pages/RedeemsPage";
 import { SettingsPage } from "../pages/SettingsPage";
 
 export const routes: RouteObject[] = [
@@ -25,7 +30,17 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, element: <DashboardPage /> },
           { path: "liquidity", element: <LiquidityTransfersPage /> },
-          { path: "htlc", element: <HTLCTradingPage /> },
+          { path: "deposits", element: <DepositsPage /> },
+          { path: "escrows", element: <EscrowsPage /> },
+          { path: "redeems", element: <RedeemsPage /> },
+          {
+            path: "htlc",
+            children: [
+              { index: true, element: <HTLCHistoryPage /> },
+              { path: "new", element: <HTLCNewPage /> },
+              { path: ":contractId", element: <HTLCDetailPage /> },
+            ],
+          },
           { path: "amm", element: <AMMTradingPage /> },
           { path: "compliance", element: <ComplianceCenterPage /> },
           { path: "onboarding", element: <OnboardingPage /> },

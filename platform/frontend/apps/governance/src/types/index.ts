@@ -4,5 +4,7 @@ export * from "./auth.types";
 export * from "./circuit-breaker.types";
 export * from "./common.types";
 export * from "./events.types";
+export * from "./htlc.types";
 export * from "./parameters.types";
 export * from "./registry.types";
+export * from "./payment.types";

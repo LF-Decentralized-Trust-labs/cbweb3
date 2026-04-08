@@ -1,9 +1,23 @@
 import { NavLink } from "react-router-dom";
-import { ArrowRightLeft, ClipboardList, Coins, LayoutDashboard, Scale, Settings, ShieldCheck } from "lucide-react";
+import {
+  ArrowDownToLine,
+  ArrowRightLeft,
+  ArrowUpFromLine,
+  ClipboardList,
+  Coins,
+  LayoutDashboard,
+  Lock,
+  Scale,
+  Settings,
+  ShieldCheck,
+} from "lucide-react";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/liquidity", label: "Liquidity & Transfers", icon: Coins },
+  { to: "/deposits", label: "Deposits", icon: ArrowDownToLine },
+  { to: "/escrows", label: "Escrows", icon: Lock },
+  { to: "/redeems", label: "Redeems", icon: ArrowUpFromLine },
   { to: "/htlc", label: "HTLC Trading", icon: ArrowRightLeft },
   { to: "/amm", label: "AMM Trading", icon: Scale },
   { to: "/compliance", label: "Compliance", icon: ShieldCheck },
