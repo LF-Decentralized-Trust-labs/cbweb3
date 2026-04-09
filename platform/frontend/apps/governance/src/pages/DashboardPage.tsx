@@ -67,7 +67,7 @@ export function DashboardPage() {
   const pendingDeposits = deposits.filter(
     (item) => normalizePaymentStatus(item.status) === PaymentStatus.PENDING,
   ).length;
-  const pendingEscrows = escrows.filter(
+  const pendingPledges = escrows.filter(
     (item) => normalizePaymentStatus(item.status) === PaymentStatus.PENDING,
   ).length;
   const pendingRedeems = redeems.filter(
@@ -123,7 +123,7 @@ export function DashboardPage() {
               <Link to="/accounts">Freeze Controls</Link>
             </Button>
             <Button asChild variant="outline">
-              <Link to="/htlc-monitor">HTLC Monitor</Link>
+              <Link to="/htlc-monitor">PvP Settlement</Link>
             </Button>
           </CardContent>
         </Card>
@@ -183,12 +183,12 @@ export function DashboardPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Pending Escrows</CardDescription>
-            <CardTitle>{pendingEscrows}</CardTitle>
+            <CardDescription>Pending Pledges</CardDescription>
+            <CardTitle>{pendingPledges}</CardTitle>
           </CardHeader>
           <CardContent>
             <Button asChild size="sm">
-              <Link to="/escrows-approval">Review Escrows</Link>
+              <Link to="/escrows-approval">Review Pledges</Link>
             </Button>
           </CardContent>
         </Card>

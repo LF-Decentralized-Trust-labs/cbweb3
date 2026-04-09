@@ -4,6 +4,8 @@ export const PaymentStatus = {
   REJECTED: 2,
 } as const;
 
+export const fiatUnitLabel = (import.meta.env.VITE_FIAT_SYMBOL ?? "fiat units").trim() || "fiat units";
+
 export type PaymentStatus = (typeof PaymentStatus)[keyof typeof PaymentStatus];
 
 export interface DepositRecord {
@@ -141,9 +143,9 @@ export function formatCeBM(rawAmount: string): string {
 
 export function formatFiatUnits(rawAmount: string): string {
   if (!rawAmount || rawAmount === "0") {
-    return "0 fiat units";
+    return `0 ${fiatUnitLabel}`;
   }
 
   const value = BigInt(rawAmount);
-  return `${value.toLocaleString("en-US")} fiat units`;
+  return `${value.toLocaleString("en-US")} ${fiatUnitLabel}`;
 }

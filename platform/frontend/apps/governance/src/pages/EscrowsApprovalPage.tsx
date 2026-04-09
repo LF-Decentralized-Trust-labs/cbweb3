@@ -49,10 +49,10 @@ export function EscrowsApprovalPage() {
 
     try {
       const result = await approveEscrow(approveTargetId);
-      toast.success(`Escrow approved. Burn: ${shortHash(result.burn_tx_hash)}, Mint: ${shortHash(result.mint_tx_hash)}`);
+      toast.success(`Pledge approved. Redemption: ${shortHash(result.burn_tx_hash)}, Issuance: ${shortHash(result.mint_tx_hash)}`);
       setApproveTargetId(null);
     } catch (approveError) {
-      toast.error(approveError instanceof Error ? approveError.message : "Unable to approve escrow");
+      toast.error(approveError instanceof Error ? approveError.message : "Unable to approve pledge");
     }
   };
 
@@ -68,11 +68,11 @@ export function EscrowsApprovalPage() {
 
     try {
       await rejectEscrow(rejectTargetId, reason.trim());
-      toast.success("Escrow rejected.");
+      toast.success("Pledge rejected.");
       setRejectTargetId(null);
       setReason("");
     } catch (rejectError) {
-      toast.error(rejectError instanceof Error ? rejectError.message : "Unable to reject escrow");
+      toast.error(rejectError instanceof Error ? rejectError.message : "Unable to reject pledge");
     }
   };
 
@@ -81,25 +81,22 @@ export function EscrowsApprovalPage() {
       <section className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Total Escrows</CardDescription>
+            <CardDescription>Total Pledges</CardDescription>
             <CardTitle>{escrows.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Pending Escrows</CardDescription>
+            <CardDescription>Pending Pledges</CardDescription>
             <CardTitle>{pendingCount}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="warning">Governance action required</Badge>
-          </CardContent>
         </Card>
       </section>
 
       <Card>
         <CardHeader>
-          <CardTitle>Escrow Queue</CardTitle>
-          <CardDescription>Approve burn+mint or reject with reason.</CardDescription>
+          <CardTitle>Pledge Queue</CardTitle>
+          <CardDescription>Approve tCeBM allocation or reject with reason.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="mb-3">
@@ -114,8 +111,8 @@ export function EscrowsApprovalPage() {
                 <TableHead>Requester</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Burn Tx Hash</TableHead>
-                <TableHead>Mint Tx Hash</TableHead>
+                <TableHead>Redemption ID</TableHead>
+                <TableHead>Issuance Ref</TableHead>
                 <TableHead>Created At</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
@@ -166,7 +163,7 @@ export function EscrowsApprovalPage() {
               ))}
             </TableBody>
           </Table>
-          {!escrows.length ? <p className="pt-3 text-sm text-muted-foreground">No escrows found.</p> : null}
+          {!escrows.length ? <p className="pt-3 text-sm text-muted-foreground">No pledges found.</p> : null}
           {error ? <p className="pt-3 text-sm text-destructive">{error}</p> : null}
         </CardContent>
       </Card>
@@ -174,8 +171,8 @@ export function EscrowsApprovalPage() {
       {approveTargetId ? (
         <Card>
           <CardHeader>
-            <CardTitle>Confirm Escrow Approval</CardTitle>
-            <CardDescription>Escrow ID: {approveTargetId}</CardDescription>
+            <CardTitle>Confirm Pledge Approval</CardTitle>
+            <CardDescription>Pledge ID: {approveTargetId}</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onApprove()} disabled={status === "loading"}>
@@ -191,8 +188,8 @@ export function EscrowsApprovalPage() {
       {rejectTargetId ? (
         <Card>
           <CardHeader>
-            <CardTitle>Reject Escrow</CardTitle>
-            <CardDescription>Escrow ID: {rejectTargetId}</CardDescription>
+            <CardTitle>Reject Pledge</CardTitle>
+            <CardDescription>Pledge ID: {rejectTargetId}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Textarea value={reason} onChange={(event) => setReason(event.target.value)} />

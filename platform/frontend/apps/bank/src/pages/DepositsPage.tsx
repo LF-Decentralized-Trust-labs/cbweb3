@@ -21,6 +21,7 @@ import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
 import {
   PaymentStatus,
+  fiatUnitLabel,
   formatFiatUnits,
   getPaymentStatusLabel,
   getPaymentStatusVariant,
@@ -92,9 +93,6 @@ export function DepositsPage() {
             <CardDescription>Pending Deposits</CardDescription>
             <CardTitle>{pendingCount}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="warning">Awaiting central bank approval</Badge>
-          </CardContent>
         </Card>
       </div>
 
@@ -105,7 +103,7 @@ export function DepositsPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="deposit-amount">Amount (fiat units)</Label>
+            <Label htmlFor="deposit-amount">Amount ({fiatUnitLabel})</Label>
             <Input
               id="deposit-amount"
               type="number"
@@ -156,7 +154,7 @@ export function DepositsPage() {
                 <TableHead>ID</TableHead>
                 <TableHead>Fiat Amount</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Mint Tx Hash</TableHead>
+                <TableHead>Issuance Reference</TableHead>
                 <TableHead>Rejection Reason</TableHead>
                 <TableHead>Created At</TableHead>
               </TableRow>

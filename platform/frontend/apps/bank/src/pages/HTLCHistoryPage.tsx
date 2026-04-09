@@ -79,11 +79,11 @@ export function HTLCHistoryPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">HTLC History</h1>
-          <p className="text-sm text-muted-foreground">Search and inspect cross-spoke HTLC contracts.</p>
+          <h1 className="text-xl font-semibold">PvP Settlement History</h1>
+          <p className="text-sm text-muted-foreground">Search and inspect cross-spoke PvP settlement contracts.</p>
         </div>
         <Button asChild>
-          <Link to="/htlc/new">New HTLC Lock</Link>
+          <Link to="/htlc/new">Initiate PvP Transfer</Link>
         </Button>
       </div>
 
@@ -153,7 +153,7 @@ export function HTLCHistoryPage() {
               ))}
             </TableBody>
           </Table>
-          {!locks.length ? <p className="pt-3 text-sm text-muted-foreground">No HTLCs found.</p> : null}
+          {!locks.length ? <p className="pt-3 text-sm text-muted-foreground">No PvP transfers found.</p> : null}
         </CardContent>
       </Card>
     </div>

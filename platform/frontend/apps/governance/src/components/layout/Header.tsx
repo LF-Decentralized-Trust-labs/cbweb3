@@ -6,6 +6,7 @@ export function Header() {
   const navigate = useNavigate();
   const { profile, logout } = useAuth();
   const { circuitBreaker } = useCircuitBreaker();
+  const portalOwner = (import.meta.env.VITE_PORTAL_OWNER ?? "UNSET_OWNER").trim() || "UNSET_OWNER";
 
   const isHalted = circuitBreaker?.state === "HALTED";
 
@@ -20,6 +21,7 @@ export function Header() {
         <div>
           <h1 className="text-lg font-semibold">Governance Portal</h1>
           <p className="text-xs text-muted-foreground">Central Bank control plane</p>
+          <p className="text-xs text-muted-foreground">{portalOwner}</p>
         </div>
         <div className="flex items-center gap-3">
           <Badge variant={isHalted ? "destructive" : "default"}>

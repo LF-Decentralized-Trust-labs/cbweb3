@@ -56,8 +56,8 @@ export function AMMTradingPage() {
       <div className="grid gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle>AMM Desk</CardTitle>
-          <CardDescription>Exact-output swap workflow</CardDescription>
+          <CardTitle>Automated FX Desk</CardTitle>
+          <CardDescription>Liquidity pool-based FX workflow</CardDescription>
         </CardHeader>
         <CardContent>
         <Tabs defaultValue="quote">

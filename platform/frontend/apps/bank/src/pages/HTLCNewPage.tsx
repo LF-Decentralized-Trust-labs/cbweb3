@@ -119,10 +119,10 @@ export function HTLCNewPage() {
         ...(agreementId.trim() ? { agreement_id: agreementId.trim() } : {}),
         ...(timeLock !== undefined ? { time_lock: timeLock } : {}),
       });
-      toast.success("HTLC lock created successfully.");
+      toast.success("PvP transfer initiated successfully.");
       navigate(`/htlc/${result.contract_id}`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to create HTLC lock.");
+      toast.error(error instanceof Error ? error.message : "Unable to initiate PvP transfer.");
     }
   };
 
@@ -133,10 +133,10 @@ export function HTLCNewPage() {
         receiver: hashReceiver,
         amount: hashAmount,
       });
-      toast.success("HTLC lock with hash created successfully.");
+      toast.success("PvP transfer continuation submitted successfully.");
       navigate(`/htlc/${result.contract_id}`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to create HTLC lock.");
+      toast.error(error instanceof Error ? error.message : "Unable to continue PvP transfer.");
     }
   };
 
@@ -144,7 +144,7 @@ export function HTLCNewPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">HTLC Trading</h1>
+          <h1 className="text-xl font-semibold">PvP Settlement</h1>
           <p className="text-sm text-muted-foreground">Use one form to start the process and another to continue with an existing hash lock.</p>
         </div>
         <Button asChild variant="outline">
@@ -156,15 +156,15 @@ export function HTLCNewPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Choose HTLC Action</CardTitle>
+          <CardTitle>Choose PvP Action</CardTitle>
           <CardDescription>Each action has its own dedicated form to avoid confusion.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           <Button variant={mode === "lock" ? "default" : "outline"} onClick={() => setMode("lock")}>
-            Initial HTLC Lock
+            Initiate PvP Transfer
           </Button>
           <Button variant={mode === "lockWithHash" ? "default" : "outline"} onClick={() => setMode("lockWithHash")}>
-            HTLC Lock With Hashlock
+            Continue PvP Transfer
           </Button>
         </CardContent>
       </Card>
@@ -172,8 +172,8 @@ export function HTLCNewPage() {
       {mode === "lock" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Initial HTLC Lock</CardTitle>
-            <CardDescription>Start the HTLC process. Receiver and amount are required.</CardDescription>
+            <CardTitle>Initiate PvP Transfer</CardTitle>
+            <CardDescription>Start the PvP settlement process. Receiver and amount are required.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -247,14 +247,14 @@ export function HTLCNewPage() {
             </p>
 
             <Button onClick={onPrepareLock} disabled={status === "loading"}>
-              {status === "loading" ? "Submitting..." : "Review Initial Lock"}
+              {status === "loading" ? "Submitting..." : "Review PvP Transfer"}
             </Button>
           </CardContent>
         </Card>
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle>HTLC Lock With Hashlock</CardTitle>
+            <CardTitle>Continue PvP Transfer</CardTitle>
             <CardDescription>Continue the flow from the receiver side using an existing hash lock.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -291,7 +291,7 @@ export function HTLCNewPage() {
             </div>
 
             <Button onClick={onPrepareLockWithHash} disabled={status === "loading"}>
-              {status === "loading" ? "Submitting..." : "Review Lock With Hashlock"}
+              {status === "loading" ? "Submitting..." : "Review PvP Continuation"}
             </Button>
           </CardContent>
         </Card>
@@ -300,8 +300,8 @@ export function HTLCNewPage() {
       {showLockConfirm ? (
         <Card>
           <CardHeader>
-            <CardTitle>Confirm Initial HTLC Lock</CardTitle>
-            <CardDescription>This action starts the HTLC process.</CardDescription>
+            <CardTitle>Confirm PvP Transfer</CardTitle>
+            <CardDescription>This action starts the PvP settlement process.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm">Agreement ID: {agreementId || "(auto)"}</p>
@@ -310,7 +310,7 @@ export function HTLCNewPage() {
             <p className="text-sm">Timelock: {timeLock ?? "(backend default)"}</p>
             <div className="flex gap-2">
               <Button onClick={() => void onConfirmLock()} disabled={status === "loading"}>
-                {status === "loading" ? "Creating lock..." : "Confirm Initial Lock"}
+                {status === "loading" ? "Creating lock..." : "Confirm PvP Transfer"}
               </Button>
               <Button variant="outline" onClick={() => setShowLockConfirm(false)}>
                 Cancel
@@ -323,8 +323,8 @@ export function HTLCNewPage() {
       {showLockWithHashConfirm ? (
         <Card>
           <CardHeader>
-            <CardTitle>Confirm HTLC Lock With Hashlock</CardTitle>
-            <CardDescription>This action continues the HTLC flow from the receiver side.</CardDescription>
+            <CardTitle>Confirm PvP Continuation</CardTitle>
+            <CardDescription>This action continues the PvP flow from the receiver side.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm">Hash lock: {hashLock}</p>
@@ -332,7 +332,7 @@ export function HTLCNewPage() {
             <p className="text-sm">Amount: {hashAmount} tCeBM</p>
             <div className="flex gap-2">
               <Button onClick={() => void onConfirmLockWithHash()} disabled={status === "loading"}>
-                {status === "loading" ? "Creating lock..." : "Confirm Lock With Hashlock"}
+                {status === "loading" ? "Creating lock..." : "Confirm PvP Continuation"}
               </Button>
               <Button variant="outline" onClick={() => setShowLockWithHashConfirm(false)}>
                 Cancel
