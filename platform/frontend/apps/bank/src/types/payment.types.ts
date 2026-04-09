@@ -2,6 +2,7 @@ export const PaymentStatus = {
   PENDING: 0,
   APPROVED: 1,
   REJECTED: 2,
+  MINT_FAILED: 3,
 } as const;
 
 export type PaymentStatus = (typeof PaymentStatus)[keyof typeof PaymentStatus];
@@ -83,17 +84,24 @@ export const paymentStatusLabel: Record<PaymentStatus, string> = {
   [PaymentStatus.PENDING]: "PENDING",
   [PaymentStatus.APPROVED]: "APPROVED",
   [PaymentStatus.REJECTED]: "REJECTED",
+  [PaymentStatus.MINT_FAILED]: "MINT FAILED",
 };
 
-export const paymentStatusVariant: Record<PaymentStatus, "warning" | "success" | "destructive"> = {
+export const paymentStatusVariant: Record<PaymentStatus, "warning" | "success" | "destructive" | "outline"> = {
   [PaymentStatus.PENDING]: "warning",
   [PaymentStatus.APPROVED]: "success",
   [PaymentStatus.REJECTED]: "destructive",
+  [PaymentStatus.MINT_FAILED]: "destructive",
 };
 
 export function normalizePaymentStatus(status: unknown): PaymentStatus | null {
   if (typeof status === "number") {
-    if (status === PaymentStatus.PENDING || status === PaymentStatus.APPROVED || status === PaymentStatus.REJECTED) {
+    if (
+      status === PaymentStatus.PENDING ||
+      status === PaymentStatus.APPROVED ||
+      status === PaymentStatus.REJECTED ||
+      status === PaymentStatus.MINT_FAILED
+    ) {
       return status;
     }
     return null;
@@ -115,6 +123,7 @@ export function normalizePaymentStatus(status: unknown): PaymentStatus | null {
     if (normalized === "PENDING") return PaymentStatus.PENDING;
     if (normalized === "APPROVED") return PaymentStatus.APPROVED;
     if (normalized === "REJECTED") return PaymentStatus.REJECTED;
+    if (normalized === "MINT_FAILED") return PaymentStatus.MINT_FAILED;
   }
 
   return null;

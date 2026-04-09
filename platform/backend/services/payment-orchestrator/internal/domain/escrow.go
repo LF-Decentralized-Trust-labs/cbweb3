@@ -7,9 +7,10 @@ import "time"
 type DepositStatus string
 
 const (
-	DepositStatusPending  DepositStatus = "PENDING"
-	DepositStatusApproved DepositStatus = "APPROVED"
-	DepositStatusRejected DepositStatus = "REJECTED"
+	DepositStatusPending    DepositStatus = "PENDING"
+	DepositStatusApproved   DepositStatus = "APPROVED"
+	DepositStatusRejected   DepositStatus = "REJECTED"
+	DepositStatusMintFailed DepositStatus = "MINT_FAILED"
 )
 
 // EscrowStatus represents the lifecycle state of an escrow (tokenization) request.

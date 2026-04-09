@@ -168,7 +168,7 @@ fi
 # ============================================================
 CONTRACTS_ENV="${ROOT_DIR}/contracts/.env"
 if [[ -f "${CONTRACTS_ENV}" ]]; then
-  ADMIN_KEY=$(grep -E '^ADMIN_PRIVATE_KEY=' "${CONTRACTS_ENV}" | head -1 | cut -d= -f2-)
+  ADMIN_KEY=$(grep -E '^ADMIN_PRIVATE_KEY=' "${CONTRACTS_ENV}" 2>/dev/null | head -1 | cut -d= -f2- || true)
   ADMIN_KEY="${ADMIN_KEY#0x}"
   if [[ -n "${ADMIN_KEY}" ]]; then
     echo "--- CB_PRIVATE_KEY (governance admin) ---"

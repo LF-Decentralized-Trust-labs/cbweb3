@@ -224,9 +224,10 @@ message GetFiatBalanceResponse {
 
 // Status of a fiat deposit request (commercial bank → central bank).
 enum DepositStatus {
-  DEPOSIT_STATUS_PENDING  = 0;
-  DEPOSIT_STATUS_APPROVED = 1;
-  DEPOSIT_STATUS_REJECTED = 2;
+  DEPOSIT_STATUS_PENDING     = 0;
+  DEPOSIT_STATUS_APPROVED    = 1;
+  DEPOSIT_STATUS_REJECTED    = 2;
+  DEPOSIT_STATUS_MINT_FAILED = 3;
 }
 
 // Status of a fCeBM → tCeBM escrow (tokenization) request.

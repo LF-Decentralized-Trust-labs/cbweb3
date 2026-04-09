@@ -130,14 +130,14 @@ Stack composition:
 
 Default exposed frontend ports (from `frontend/.env` and `frontend/.env.example`):
 
-| Portal | URL | Env var |
-| --- | --- | --- |
-| Bank A | http://localhost:5173 | `BANK_A_FRONTEND_PORT` |
-| Bank B | http://localhost:5174 | `BANK_B_FRONTEND_PORT` |
-| Bank C | http://localhost:5175 | `BANK_C_FRONTEND_PORT` |
-| Bank D | http://localhost:5176 | `BANK_D_FRONTEND_PORT` |
-| Central Bank A | http://localhost:5177 | `CENTRAL_BANK_A_FRONTEND_PORT` |
-| Central Bank B | http://localhost:5178 | `CENTRAL_BANK_B_FRONTEND_PORT` |
+| Portal | App | Local URL | Backend API |
+| --- | --- | --- | --- |
+| Bank A | `bank` | http://localhost:5173 | http://localhost:18080/api/v1/ |
+| Bank B | `bank` | http://localhost:5174 | http://localhost:28080/api/v1/ |
+| Bank C | `bank` | http://localhost:5175 | http://localhost:48080/api/v1/ |
+| Bank D | `bank` | http://localhost:5176 | http://localhost:58080/api/v1/ |
+| Central Bank A | `governance` | http://localhost:5177 | http://localhost:38080/api/v1/ |
+| Central Bank B | `governance` | http://localhost:5178 | http://localhost:60080/api/v1/ |
 
 Notes:
 

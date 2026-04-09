@@ -33,10 +33,10 @@ import {IdentityRegistryLibrary} from "../src/libraries/IdentityRegistryLibrary.
 ///      containers (configured via BESU_OPERATOR_KEY in docker-compose):
 ///
 ///        | Address                                    | Role            | Key (BESU_OPERATOR_KEY)   |
-///        |--------------------------------------------|-----------------|---------------------------|
+///        |--------------------------------------------|-----------------|--------------------------|
 ///        | 0x627306090abaB3A6e1400e9345bC60c78a8BEf57 | CENTRAL_BANK    | c87509a1… (CB)            |
-///        | 0xf17f52151EbEF6C7334FAD080c5704D77216b732 | COMMERCIAL_BANK | ae6ae8e5… (Bank-A/B)      |
-///        | 0xe4add986E80022C0741874841d4ac231B1d7d254 | COMMERCIAL_BANK | 5b02fc9a… (Bank-C/D)      |
+///        | 0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef | COMMERCIAL_BANK | 0dbbe8e4… (Bank-A/B)      |
+///        | 0x821aEa9a577a9b44299B9c15c88cf3087F3b5544 | COMMERCIAL_BANK | c88b703f… (Bank-C/D)      |
 ///
 ///      The script is idempotent — it skips addresses that are already registered.
 ///
@@ -64,8 +64,8 @@ contract RegisterParticipants is Script {
         IIdentityRegistry registry = IIdentityRegistry(registryAddr);
 
         // Spoke operator addresses (Besu genesis accounts used in local dev).
-        // Bank-A / Bank-B share key ae6ae8e5… → 0xf17f52…
-        // Bank-C / Bank-D share key 5b02fc9a… → 0xe4add9…
+        // Bank-A / Bank-B share key 0dbbe8e4… → 0xC5fdf4…
+        // Bank-C / Bank-D share key c88b703f… → 0x821aEa…
         // Central Bank key c87509a1… → 0x627306…
         Participant[3] memory participants = [
             Participant(
@@ -74,12 +74,12 @@ contract RegisterParticipants is Script {
                 IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
             ),
             Participant(
-                0xf17f52151EbEF6C7334FAD080c5704D77216b732,
+                0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef,
                 "Commercial Bank A/B",
                 IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK
             ),
             Participant(
-                0xe4add986E80022C0741874841d4ac231B1d7d254,
+                0x821aEa9a577a9b44299B9c15c88cf3087F3b5544,
                 "Commercial Bank C/D",
                 IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK
             )

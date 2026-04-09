@@ -71,6 +71,15 @@ export function DepositsApprovalPage() {
     }
   };
 
+  const onRetryFiatExchange = async (depositId: string) => {
+    try {
+      const exchangeResult = await requestFiatExchange(depositId);
+      toast.success(`Fiat exchange retried successfully. Tx: ${shortHash(exchangeResult.tx_hash)}`);
+    } catch (retryError) {
+      toast.error(retryError instanceof Error ? retryError.message : "Unable to retry fiat exchange");
+    }
+  };
+
   const onReject = async () => {
     if (!rejectTargetId) {
       return;
@@ -198,6 +207,15 @@ export function DepositsApprovalPage() {
                           Reject
                         </Button>
                       </div>
+                    ) : normalizePaymentStatus(deposit.status) === PaymentStatus.MINT_FAILED ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void onRetryFiatExchange(deposit.id)}
+                        disabled={status === "loading"}
+                      >
+                        Retry Mint
+                      </Button>
                     ) : (
                       <span className="text-xs text-muted-foreground">No action</span>
                     )}

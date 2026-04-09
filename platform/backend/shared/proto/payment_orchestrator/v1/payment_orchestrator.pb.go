@@ -7,11 +7,12 @@
 package paymentorchestratorv1
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -138,9 +139,10 @@ func (HTLCState) EnumDescriptor() ([]byte, []int) {
 type DepositStatus int32
 
 const (
-	DepositStatus_DEPOSIT_STATUS_PENDING  DepositStatus = 0
-	DepositStatus_DEPOSIT_STATUS_APPROVED DepositStatus = 1
-	DepositStatus_DEPOSIT_STATUS_REJECTED DepositStatus = 2
+	DepositStatus_DEPOSIT_STATUS_PENDING     DepositStatus = 0
+	DepositStatus_DEPOSIT_STATUS_APPROVED    DepositStatus = 1
+	DepositStatus_DEPOSIT_STATUS_REJECTED    DepositStatus = 2
+	DepositStatus_DEPOSIT_STATUS_MINT_FAILED DepositStatus = 3
 )
 
 // Enum value maps for DepositStatus.
@@ -149,11 +151,13 @@ var (
 		0: "DEPOSIT_STATUS_PENDING",
 		1: "DEPOSIT_STATUS_APPROVED",
 		2: "DEPOSIT_STATUS_REJECTED",
+		3: "DEPOSIT_STATUS_MINT_FAILED",
 	}
 	DepositStatus_value = map[string]int32{
-		"DEPOSIT_STATUS_PENDING":  0,
-		"DEPOSIT_STATUS_APPROVED": 1,
-		"DEPOSIT_STATUS_REJECTED": 2,
+		"DEPOSIT_STATUS_PENDING":     0,
+		"DEPOSIT_STATUS_APPROVED":    1,
+		"DEPOSIT_STATUS_REJECTED":    2,
+		"DEPOSIT_STATUS_MINT_FAILED": 3,
 	}
 )
 

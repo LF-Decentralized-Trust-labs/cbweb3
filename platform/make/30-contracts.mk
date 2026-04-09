@@ -60,15 +60,19 @@ contracts.deploy-hub:
 	@exit 1
 
 contracts.deploy-spoke-a:
+	@test -n "$(CENTRAL_BANK_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_ADDRESS is not set — check contracts/.env"; exit 1)
 	@echo "Deploying CBWeb3 spoke-a contracts to chain 1338 (bank-a, bank-c, central-bank-a)..."
 	@cd contracts && TOKEN_NAME="Tokenized BRL" TOKEN_SYMBOL="tCeBM_BRL" \
 		FIAT_TOKEN_NAME="Fiat BRL" FIAT_TOKEN_SYMBOL="fCeBM_BRL" \
+		CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_ADDRESS) \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_A_RPC_URL} --broadcast
 
 contracts.deploy-spoke-b:
+	@test -n "$(CENTRAL_BANK_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_ADDRESS is not set — check contracts/.env"; exit 1)
 	@echo "Deploying CBWeb3 spoke-b contracts (bank-b, bank-d, central-bank-b)..."
 	@cd contracts && TOKEN_NAME="Tokenized BRL" TOKEN_SYMBOL="tCeBM_BRL" \
 		FIAT_TOKEN_NAME="Fiat BRL" FIAT_TOKEN_SYMBOL="fCeBM_BRL" \
+		CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_ADDRESS) \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_B_RPC_URL} --broadcast
 
 contracts.deploy-all: contracts.setup contracts.deploy-spoke-a contracts.deploy-spoke-b
