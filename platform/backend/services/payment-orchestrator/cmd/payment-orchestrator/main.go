@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 
 	besuAdapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/besu"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/cacti"
@@ -110,13 +111,23 @@ func main() {
 	escrowRepo := repository.NewMemoryEscrowRepository()
 	logger.Info("escrow repository configured (in-memory)")
 
+	// Extract spoke prefix from PALADIN_IDENTITY for receiver validation.
+	// e.g. "funded_operator@spoke-a-bank-a" → "spoke-a"
+	spokePrefix := extractSpokePrefix(getEnv("PALADIN_IDENTITY", ""))
+	if spokePrefix != "" {
+		logger.Info("spoke prefix configured for receiver validation", "spokePrefix", spokePrefix)
+	} else {
+		logger.Warn("could not extract spoke prefix from PALADIN_IDENTITY — receiver locality check disabled")
+	}
+
 	grpcServer := server.New(server.Config{
-		Zeto:       zeto,
-		HTLC:       htlc,
-		Relay:      relay,
-		Fiat:       fiat,
-		EscrowRepo: escrowRepo,
-		Logger:     logger,
+		Zeto:        zeto,
+		HTLC:        htlc,
+		Relay:       relay,
+		Fiat:        fiat,
+		EscrowRepo:  escrowRepo,
+		SpokePrefix: spokePrefix,
+		Logger:      logger,
 	})
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
@@ -135,4 +146,18 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// extractSpokePrefix extracts the spoke identifier from a Paladin identity.
+// e.g. "funded_operator@spoke-a-bank-a" → "spoke-a"
+func extractSpokePrefix(identity string) string {
+	parts := strings.SplitN(identity, "@", 2)
+	if len(parts) < 2 {
+		return ""
+	}
+	segs := strings.SplitN(parts[1], "-", 3)
+	if len(segs) < 2 {
+		return ""
+	}
+	return segs[0] + "-" + segs[1]
 }
