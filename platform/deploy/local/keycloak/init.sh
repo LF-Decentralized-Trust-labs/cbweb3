@@ -101,6 +101,10 @@ create_realm_and_client() {
     /opt/keycloak/bin/kcadm.sh create realms -s "realm=${realm_name}" -s enabled=true
   fi
 
+  local token_lifespan="${KC_ACCESS_TOKEN_LIFESPAN:-21600}"
+  /opt/keycloak/bin/kcadm.sh update "realms/${realm_name}" \
+    -s "accessTokenLifespan=${token_lifespan}"
+
   if ! /opt/keycloak/bin/kcadm.sh get clients -r "$realm_name" --fields clientId | jq -e ".[] | select(.clientId==\"${client_id}\")" > /dev/null 2>&1; then
     /opt/keycloak/bin/kcadm.sh create clients -r "$realm_name" \
       -s "clientId=${client_id}" \
@@ -144,6 +148,15 @@ create_realm_and_client() {
       --uusername "$service_username" \
       --cclientid realm-management \
       -r "$realm_name" || true
+  fi
+
+  # If the .example (or .env) file defines KC_CLIENT_SECRET, push it into Keycloak
+  # so the secret stays stable across re-deployments. Otherwise read the generated one.
+  local desired_secret="${KC_CLIENT_SECRET:-}"
+  if [[ -n "$desired_secret" ]]; then
+    /opt/keycloak/bin/kcadm.sh update "clients/${client_uuid}" -r "$realm_name" \
+      -s "secret=${desired_secret}"
+    echo "  Using fixed client secret for ${client_id}."
   fi
 
   local client_secret
