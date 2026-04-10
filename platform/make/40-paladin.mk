@@ -93,6 +93,16 @@ paladin.stop-spoke-a:
 	@echo "Stopping Paladin nodes for spoke-a..."
 	@docker compose -f $(PALADIN_DIR)/spoke-a/docker-compose.yml down
 
+# Remove all spoke-a Paladin data volumes (SQLite + LevelDB state).
+# Must be called whenever Besu is regenerated from scratch so Paladin's
+# persisted block-indexer state does not fall out of sync with the new chain.
+paladin.clean-volumes-spoke-a:
+	@echo "Removing Paladin data volumes for spoke-a..."
+	@docker volume rm -f \
+		spoke-a_paladin_spoke_a_cb_data \
+		spoke-a_paladin_spoke_a_bank_a_data \
+		spoke-a_paladin_spoke_a_bank_c_data || true
+
 paladin.start-spoke-b:
 	@echo "Starting Paladin nodes for spoke-b..."
 	@PALADIN_UID=$$(id -u) PALADIN_GID=$$(id -g) \
@@ -101,6 +111,14 @@ paladin.start-spoke-b:
 paladin.stop-spoke-b:
 	@echo "Stopping Paladin nodes for spoke-b..."
 	@docker compose -f $(PALADIN_DIR)/spoke-b/docker-compose.yml down
+
+# Remove all spoke-b Paladin data volumes (SQLite + LevelDB state).
+paladin.clean-volumes-spoke-b:
+	@echo "Removing Paladin data volumes for spoke-b..."
+	@docker volume rm -f \
+		spoke-b_paladin_spoke_b_cb_data \
+		spoke-b_paladin_spoke_b_bank_b_data \
+		spoke-b_paladin_spoke_b_bank_d_data || true
 
 # ── full spoke setup ─────────────────────────────────────────────────────────
 # Expects the corresponding Besu network to already be running.
@@ -113,6 +131,7 @@ setup-spoke-a: deploy.up-spoke-a
 	@$(MAKE) paladin.render-configs-spoke-a
 	@$(MAKE) paladin.register-nodes-spoke-a
 	@$(MAKE) paladin.stop-spoke-a
+	@$(MAKE) paladin.clean-volumes-spoke-a
 	@$(MAKE) paladin.start-spoke-a
 	@echo "Waiting for Paladin spoke-a nodes to be ready ($(PALADIN_READY_WAIT)s)..."
 	@sleep $(PALADIN_READY_WAIT)
@@ -127,6 +146,7 @@ setup-spoke-b: deploy.up-spoke-b
 	@$(MAKE) paladin.render-configs-spoke-b
 	@$(MAKE) paladin.register-nodes-spoke-b
 	@$(MAKE) paladin.stop-spoke-b
+	@$(MAKE) paladin.clean-volumes-spoke-b
 	@$(MAKE) paladin.start-spoke-b
 	@echo "Waiting for Paladin spoke-b nodes to be ready ($(PALADIN_READY_WAIT)s)..."
 	@sleep $(PALADIN_READY_WAIT)
@@ -143,7 +163,7 @@ setup-spoke-uc: setup-spoke-a setup-spoke-b
 	paladin.register-nodes-spoke-a paladin.register-nodes-spoke-b \
 	paladin.generate-certs-spoke-a paladin.generate-certs-spoke-b \
 	paladin.render-configs-spoke-a paladin.render-configs-spoke-b \
-	paladin.start-spoke-a paladin.stop-spoke-a \
-	paladin.start-spoke-b paladin.stop-spoke-b \
+	paladin.start-spoke-a paladin.stop-spoke-a paladin.clean-volumes-spoke-a \
+	paladin.start-spoke-b paladin.stop-spoke-b paladin.clean-volumes-spoke-b \
 	paladin.create-zeto-token-spoke-a paladin.create-zeto-token-spoke-b \
 	setup-spoke-a setup-spoke-b setup-spoke-uc

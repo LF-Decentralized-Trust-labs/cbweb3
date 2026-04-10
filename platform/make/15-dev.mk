@@ -12,6 +12,7 @@ spoke-a: pki.gen-central-bank-a pki.gen-bank-a pki.gen-bank-c pki.gen-commercial
 	$(MAKE) paladin.render-configs-spoke-a
 	$(MAKE) paladin.register-nodes-spoke-a
 	$(MAKE) paladin.stop-spoke-a
+	$(MAKE) paladin.clean-volumes-spoke-a
 	$(MAKE) paladin.start-spoke-a
 	@echo "Waiting for Paladin spoke-a to be ready ($(PALADIN_READY_WAIT)s)..."
 	@sleep $(PALADIN_READY_WAIT)
@@ -31,6 +32,7 @@ spoke-b: pki.gen-central-bank-b pki.gen-bank-b pki.gen-bank-d pki.gen-commercial
 	$(MAKE) paladin.render-configs-spoke-b
 	$(MAKE) paladin.register-nodes-spoke-b
 	$(MAKE) paladin.stop-spoke-b
+	$(MAKE) paladin.clean-volumes-spoke-b
 	$(MAKE) paladin.start-spoke-b
 	@echo "Waiting for Paladin spoke-b to be ready ($(PALADIN_READY_WAIT)s)..."
 	@sleep $(PALADIN_READY_WAIT)
