@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/identity"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"github.com/google/uuid"
@@ -67,31 +68,16 @@ func generateID() string {
 	return uuid.New().String()
 }
 
-// spokeFromIdentity extracts the spoke prefix from a Paladin identity string.
-// e.g. "funded_operator@spoke-a-bank-a" → "spoke-a"
-// Returns empty string if the format is unexpected.
-func spokeFromIdentity(identity string) string {
-	parts := strings.SplitN(identity, "@", 2)
-	if len(parts) < 2 {
-		return ""
-	}
-	// After @: "spoke-a-bank-a" — extract first two segments: "spoke-a"
-	segs := strings.SplitN(parts[1], "-", 3)
-	if len(segs) < 2 {
-		return ""
-	}
-	return segs[0] + "-" + segs[1] // e.g. "spoke-a"
-}
-
 // isLocalReceiver checks whether the receiver identity belongs to the same spoke
 // as this service instance. If spokePrefix is empty, validation is skipped (permissive).
+// When spokePrefix is set (production), unparseable identities are rejected (fail closed).
 func (s *paymentOrchestratorService) isLocalReceiver(receiver string) bool {
 	if s.spokePrefix == "" {
 		return true // no spoke configured — skip validation (dev mode)
 	}
-	receiverSpoke := spokeFromIdentity(receiver)
+	receiverSpoke := identity.SpokePrefix(receiver)
 	if receiverSpoke == "" {
-		return true // unknown format — skip validation
+		return false // unknown format — reject in production (fail closed)
 	}
 	return receiverSpoke == s.spokePrefix
 }
@@ -310,7 +296,7 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		// Find the local HTLC that shares the same hashLock.
 		for _, r := range s.htlcs {
 			if r.HashLock == hashLock {
-				if r.State == domain.HTLCStateLocked {
+				if r.State == domain.HTLCStateLocked || r.State == domain.HTLCStateSettling {
 					record = r
 					ok = true
 					break
@@ -345,41 +331,60 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		}, nil
 	}
 
-	if record.State != domain.HTLCStateLocked {
-		s.mu.Unlock()
-		return nil, status.Errorf(codes.FailedPrecondition, "HTLC %q is in state %s, expected LOCKED", req.ContractId, record.State)
-	}
-
 	// Verify secret matches hashLock
 	if hashLock != record.HashLock {
 		s.mu.Unlock()
 		return nil, status.Error(codes.InvalidArgument, "secret does not match hashLock")
 	}
 
-	// Keep record reference for post-operation update; do NOT mark SETTLED yet.
-	// State will only transition to SETTLED after both on-chain and Zeto succeed.
-	record.Secret = req.Secret
+	// Determine whether this is a fresh attempt (LOCKED) or a retry (SETTLING).
+	isRetry := record.State == domain.HTLCStateSettling
+
+	if !isRetry {
+		if record.State != domain.HTLCStateLocked {
+			s.mu.Unlock()
+			return nil, status.Errorf(codes.FailedPrecondition, "HTLC %q is in state %s, expected LOCKED", req.ContractId, record.State)
+		}
+		// Transition to SETTLING under the lock to prevent concurrent settle attempts.
+		record.State = domain.HTLCStateSettling
+		record.Secret = req.Secret
+		record.UpdatedAt = time.Now().UTC()
+	}
 	s.mu.Unlock()
 
 	// Settle on-chain HTLC (reveals secret via LogHTLCClaimed event).
 	// When the on-chain adapter is configured, a failure here MUST block the
 	// Zeto transfer — otherwise tokens move without coordination-layer approval.
+	// On retry (SETTLING), the on-chain settle already succeeded — skip it.
 	var htlcTxHash string
-	if s.htlc != nil {
+	if s.htlc != nil && !isRetry {
 		var cid, sec [32]byte
 		copy(cid[:], contractIDBytes(record.ContractID))
 		copy(sec[:], secretBytes)
 		htlcTxHash, err = s.htlc.Settle(ctx, cid, sec)
 		if err != nil {
-			s.logger.Error("on-chain HTLC settle failed — aborting token transfer", "contract_id", record.ContractID, "error", err)
+			s.logger.Error("on-chain HTLC settle failed — rolling back to LOCKED", "contract_id", record.ContractID, "error", err)
+			// On-chain settle failed — secret is NOT public. Roll back to LOCKED.
+			s.mu.Lock()
+			record.State = domain.HTLCStateLocked
+			record.UpdatedAt = time.Now().UTC()
+			s.mu.Unlock()
 			return nil, status.Errorf(codes.Internal, "on-chain HTLC settle failed: %v", err)
 		}
+		// Store htlcTxHash immediately so a retry can find it.
+		s.mu.Lock()
+		record.HTLCTxHash = htlcTxHash
+		s.mu.Unlock()
+	} else if isRetry {
+		htlcTxHash = record.HTLCTxHash
 	}
 
 	// Transfer locked Zeto tokens to receiver
 	zetoTxHash, err := s.zeto.TransferLocked(ctx, record.ZetoLockRef, record.Receiver, record.Amount)
 	if err != nil {
-		s.logger.Error("zeto transferLocked failed after on-chain settle", "contract_id", record.ContractID, "error", err)
+		// On-chain settle already succeeded (secret is public) — stay in SETTLING for retry.
+		s.logger.Error("zeto transferLocked failed after on-chain settle — record stays SETTLING for retry",
+			"contract_id", record.ContractID, "error", err)
 		return nil, status.Errorf(codes.Internal, "zeto transferLocked: %v", err)
 	}
 
@@ -411,23 +416,38 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 		return nil, status.Errorf(codes.NotFound, "HTLC %q not found", req.ContractId)
 	}
 
-	if record.State != domain.HTLCStateLocked {
+	if record.State == domain.HTLCStateRefunded {
+		// Already refunded — idempotent success.
 		s.mu.Unlock()
-		return nil, status.Errorf(codes.FailedPrecondition, "HTLC %q is in state %s, expected LOCKED", req.ContractId, record.State)
+		return &pb.RefundHTLCResponse{
+			HtlcTxHash: record.HTLCTxHash,
+			ZetoTxHash: record.ZetoTxHash,
+		}, nil
 	}
 
-	if uint64(time.Now().Unix()) < record.TimeLock {
-		s.mu.Unlock()
-		return nil, status.Error(codes.FailedPrecondition, "time lock has not expired yet")
-	}
+	// Determine whether this is a retry (REFUNDING) or a fresh attempt (LOCKED).
+	isRetry := record.State == domain.HTLCStateRefunding
 
-	record.State = domain.HTLCStateRefunded
-	record.UpdatedAt = time.Now().UTC()
+	if !isRetry {
+		if record.State != domain.HTLCStateLocked {
+			s.mu.Unlock()
+			return nil, status.Errorf(codes.FailedPrecondition, "HTLC %q is in state %s, expected LOCKED", req.ContractId, record.State)
+		}
+
+		if uint64(time.Now().Unix()) < record.TimeLock {
+			s.mu.Unlock()
+			return nil, status.Error(codes.FailedPrecondition, "time lock has not expired yet")
+		}
+
+		// Transition to REFUNDING under the lock to prevent concurrent refund attempts.
+		record.State = domain.HTLCStateRefunding
+		record.UpdatedAt = time.Now().UTC()
+	}
 	s.mu.Unlock()
 
 	// Refund on-chain HTLC coordination
 	var htlcTxHash string
-	if s.htlc != nil {
+	if s.htlc != nil && !isRetry {
 		var cid [32]byte
 		copy(cid[:], contractIDBytes(req.ContractId))
 		var htlcErr error
@@ -435,12 +455,29 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 		if htlcErr != nil {
 			s.logger.Warn("on-chain HTLC refund failed", "error", htlcErr)
 		}
+		// Store htlcTxHash even if empty so retry path has it.
+		s.mu.Lock()
+		record.HTLCTxHash = htlcTxHash
+		s.mu.Unlock()
+	} else if isRetry {
+		htlcTxHash = record.HTLCTxHash
 	}
 
 	zetoTxHash, err := s.zeto.Unlock(ctx, record.ZetoLockRef)
 	if err != nil {
+		// Stay in REFUNDING for retry.
+		s.logger.Error("zeto unlock failed — record stays REFUNDING for retry",
+			"contract_id", req.ContractId, "error", err)
 		return nil, status.Errorf(codes.Internal, "zeto unlock: %v", err)
 	}
+
+	// Both operations succeeded — mark REFUNDED.
+	s.mu.Lock()
+	record.State = domain.HTLCStateRefunded
+	record.UpdatedAt = time.Now().UTC()
+	record.HTLCTxHash = htlcTxHash
+	record.ZetoTxHash = zetoTxHash
+	s.mu.Unlock()
 
 	s.logger.Info("HTLC refunded", "contract_id", req.ContractId, "zeto_tx_hash", zetoTxHash, "htlc_tx_hash", htlcTxHash)
 
@@ -592,11 +629,13 @@ func contractIDBytes(hexStr string) []byte {
 
 func recordToProto(r *domain.HTLCRecord) *pb.HTLCLock {
 	stateMap := map[domain.HTLCState]pb.HTLCState{
-		domain.HTLCStateInvalid:  pb.HTLCState_HTLC_STATE_INVALID,
-		domain.HTLCStatePending:  pb.HTLCState_HTLC_STATE_PENDING,
-		domain.HTLCStateLocked:   pb.HTLCState_HTLC_STATE_LOCKED,
-		domain.HTLCStateSettled:  pb.HTLCState_HTLC_STATE_SETTLED,
-		domain.HTLCStateRefunded: pb.HTLCState_HTLC_STATE_REFUNDED,
+		domain.HTLCStateInvalid:   pb.HTLCState_HTLC_STATE_INVALID,
+		domain.HTLCStatePending:   pb.HTLCState_HTLC_STATE_PENDING,
+		domain.HTLCStateLocked:    pb.HTLCState_HTLC_STATE_LOCKED,
+		domain.HTLCStateSettled:   pb.HTLCState_HTLC_STATE_SETTLED,
+		domain.HTLCStateRefunded:  pb.HTLCState_HTLC_STATE_REFUNDED,
+		domain.HTLCStateSettling:  pb.HTLCState_HTLC_STATE_SETTLING,
+		domain.HTLCStateRefunding: pb.HTLCState_HTLC_STATE_REFUNDING,
 	}
 	return &pb.HTLCLock{
 		ContractId:  r.ContractID,

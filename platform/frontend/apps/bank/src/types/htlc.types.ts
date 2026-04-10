@@ -3,9 +3,11 @@ export type HTLCState =
   | "HTLC_STATE_PENDING"
   | "HTLC_STATE_LOCKED"
   | "HTLC_STATE_SETTLED"
-  | "HTLC_STATE_REFUNDED";
+  | "HTLC_STATE_REFUNDED"
+  | "HTLC_STATE_SETTLING"
+  | "HTLC_STATE_REFUNDING";
 
-export type HTLCSearchState = "LOCKED" | "SETTLED" | "REFUNDED";
+export type HTLCSearchState = "LOCKED" | "SETTLED" | "REFUNDED" | "SETTLING" | "REFUNDING";
 
 export interface HTLCLock {
   contract_id: string;

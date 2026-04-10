@@ -20,11 +20,14 @@ const normalizeState = (state: string) => state.replace("HTLC_STATE_", "");
 const isLockedState = (state: string) => normalizeState(state) === "LOCKED";
 const isSettledState = (state: string) => normalizeState(state) === "SETTLED";
 const isRefundedState = (state: string) => normalizeState(state) === "REFUNDED";
+const isInProgressState = (state: string) =>
+  normalizeState(state) === "SETTLING" || normalizeState(state) === "REFUNDING";
 
 const statusVariant = (state: string): "warning" | "default" | "success" | "destructive" | "outline" => {
   if (isLockedState(state)) return "warning";
   if (isSettledState(state)) return "success";
   if (isRefundedState(state)) return "destructive";
+  if (isInProgressState(state)) return "default";
   return "outline";
 };
 
@@ -150,6 +153,21 @@ export function HTLCDetailPage() {
                 <p className="text-lg font-semibold">{countdown.display}</p>
                 <p className="text-xs text-muted-foreground">
                   {countdown.isExpired ? "Lock expired. Refund is available." : "Lock active. Await settle or expiration."}
+                </p>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {isInProgressState(htlc.state) ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Operation In Progress</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  {normalizeState(htlc.state) === "SETTLING"
+                    ? "Settlement is being processed. The page will update automatically."
+                    : "Refund is being processed. The page will update automatically."}
                 </p>
               </CardContent>
             </Card>

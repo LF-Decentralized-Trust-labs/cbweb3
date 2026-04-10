@@ -34,6 +34,7 @@ const statusVariant = (state: string): "warning" | "default" | "success" | "dest
   if (state === "HTLC_STATE_LOCKED") return "warning";
   if (state === "HTLC_STATE_SETTLED") return "success";
   if (state === "HTLC_STATE_REFUNDED") return "destructive";
+  if (state === "HTLC_STATE_SETTLING" || state === "HTLC_STATE_REFUNDING") return "default";
   return "outline";
 };
 
@@ -102,7 +103,9 @@ export function HTLCHistoryPage() {
             <SelectContent>
               <SelectItem value="ALL">All</SelectItem>
               <SelectItem value="LOCKED">LOCKED</SelectItem>
+              <SelectItem value="SETTLING">SETTLING</SelectItem>
               <SelectItem value="SETTLED">SETTLED</SelectItem>
+              <SelectItem value="REFUNDING">REFUNDING</SelectItem>
               <SelectItem value="REFUNDED">REFUNDED</SelectItem>
             </SelectContent>
           </Select>

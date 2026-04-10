@@ -21,6 +21,8 @@ enum HTLCState {
   HTLC_STATE_LOCKED = 2;
   HTLC_STATE_SETTLED = 3;
   HTLC_STATE_REFUNDED = 4;
+  HTLC_STATE_SETTLING = 5;  // transient: on-chain settle in progress
+  HTLC_STATE_REFUNDING = 6; // transient: on-chain refund in progress
 }
 
 // ─── FX Agreement Messages ───────────────────────────────────────────────

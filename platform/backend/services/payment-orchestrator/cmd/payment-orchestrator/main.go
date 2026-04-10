@@ -7,12 +7,12 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"strings"
 
 	besuAdapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/besu"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/cacti"
 	paladinAdapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/paladin"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/grpc/server"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/identity"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/repository"
 )
@@ -113,7 +113,7 @@ func main() {
 
 	// Extract spoke prefix from PALADIN_IDENTITY for receiver validation.
 	// e.g. "funded_operator@spoke-a-bank-a" → "spoke-a"
-	spokePrefix := extractSpokePrefix(getEnv("PALADIN_IDENTITY", ""))
+	spokePrefix := identity.SpokePrefix(getEnv("PALADIN_IDENTITY", ""))
 	if spokePrefix != "" {
 		logger.Info("spoke prefix configured for receiver validation", "spokePrefix", spokePrefix)
 	} else {
@@ -146,18 +146,4 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-// extractSpokePrefix extracts the spoke identifier from a Paladin identity.
-// e.g. "funded_operator@spoke-a-bank-a" → "spoke-a"
-func extractSpokePrefix(identity string) string {
-	parts := strings.SplitN(identity, "@", 2)
-	if len(parts) < 2 {
-		return ""
-	}
-	segs := strings.SplitN(parts[1], "-", 3)
-	if len(segs) < 2 {
-		return ""
-	}
-	return segs[0] + "-" + segs[1]
 }

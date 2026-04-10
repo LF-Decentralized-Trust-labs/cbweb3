@@ -94,6 +94,9 @@ export function DashboardPage() {
   const lockedCount = htlcLocks.filter(
     (lock) => lock.state === "HTLC_STATE_LOCKED",
   ).length;
+  const processingCount = htlcLocks.filter(
+    (lock) => lock.state === "HTLC_STATE_SETTLING" || lock.state === "HTLC_STATE_REFUNDING",
+  ).length;
   const settledCount = htlcLocks.filter(
     (lock) => lock.state === "HTLC_STATE_SETTLED",
   ).length;
@@ -116,6 +119,7 @@ export function DashboardPage() {
     if (state === "HTLC_STATE_LOCKED") return "warning";
     if (state === "HTLC_STATE_SETTLED") return "success";
     if (state === "HTLC_STATE_REFUNDED") return "destructive";
+    if (state === "HTLC_STATE_SETTLING" || state === "HTLC_STATE_REFUNDING") return "default";
     return "outline";
   };
 
@@ -343,10 +347,14 @@ export function DashboardPage() {
           <CardDescription>Scenario A status</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="mb-3 grid gap-2 md:grid-cols-3">
+          <div className="mb-3 grid gap-2 md:grid-cols-4">
             <div className="rounded border border-border p-3">
               <p className="text-xs text-muted-foreground">Locked</p>
               <p className="text-lg font-semibold">{lockedCount}</p>
+            </div>
+            <div className="rounded border border-border p-3">
+              <p className="text-xs text-muted-foreground">Processing</p>
+              <p className="text-lg font-semibold">{processingCount}</p>
             </div>
             <div className="rounded border border-border p-3">
               <p className="text-xs text-muted-foreground">Settled</p>
