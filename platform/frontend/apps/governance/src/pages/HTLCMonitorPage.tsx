@@ -66,7 +66,7 @@ export function HTLCMonitorPage() {
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-semibold">PvP Settlement Monitor</h1>
-        <p className="text-sm text-muted-foreground">Read-only oversight for lock, settle, and refund lifecycle events.</p>
+        <p className="text-sm text-muted-foreground">Read-only oversight of cross-border PvP settlement lifecycle events.</p>
       </div>
 
       <Card>
@@ -81,11 +81,11 @@ export function HTLCMonitorPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All</SelectItem>
-              <SelectItem value="LOCKED">LOCKED</SelectItem>
-              <SelectItem value="SETTLING">SETTLING</SelectItem>
-              <SelectItem value="SETTLED">SETTLED</SelectItem>
-              <SelectItem value="REFUNDING">REFUNDING</SelectItem>
-              <SelectItem value="REFUNDED">REFUNDED</SelectItem>
+              <SelectItem value="LOCKED">Pending Settlement</SelectItem>
+              <SelectItem value="SETTLING">Processing</SelectItem>
+              <SelectItem value="SETTLED">Settled</SelectItem>
+              <SelectItem value="REFUNDING">Revoking</SelectItem>
+              <SelectItem value="REFUNDED">Revoked</SelectItem>
             </SelectContent>
           </Select>
           <Input
@@ -112,7 +112,7 @@ export function HTLCMonitorPage() {
                 <TableHead>Sender</TableHead>
                 <TableHead>Receiver</TableHead>
                 <TableHead>State</TableHead>
-                <TableHead>Time Lock</TableHead>
+                <TableHead>Expiry</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -123,7 +123,17 @@ export function HTLCMonitorPage() {
                   <TableCell>{lock.sender}</TableCell>
                   <TableCell>{lock.receiver}</TableCell>
                   <TableCell>
-                    <Badge variant={statusVariant(lock.state)}>{lock.state.replace("HTLC_STATE_", "")}</Badge>
+                    <Badge variant={statusVariant(lock.state)}>
+                      {(() => {
+                        const s = lock.state.replace("HTLC_STATE_", "");
+                        if (s === "LOCKED") return "Pending Settlement";
+                        if (s === "SETTLING") return "Processing";
+                        if (s === "SETTLED") return "Settled";
+                        if (s === "REFUNDING") return "Revoking";
+                        if (s === "REFUNDED") return "Revoked";
+                        return s;
+                      })()}
+                    </Badge>
                   </TableCell>
                   <TableCell>{new Date(lock.time_lock * 1000).toLocaleString()}</TableCell>
                   <TableCell className="text-right">
@@ -149,11 +159,11 @@ export function HTLCMonitorPage() {
           <CardContent className="space-y-2">
             <p className="text-sm">Sender: {detail.sender}</p>
             <p className="text-sm">Receiver: {detail.receiver}</p>
-            <p className="text-sm">Hash lock: {detail.hash_lock}</p>
-            <p className="text-sm">Time lock: {new Date(detail.time_lock * 1000).toLocaleString()}</p>
-            <p className="text-sm">State: {detail.state.replace("HTLC_STATE_", "")}</p>
-            <p className="text-sm">Zeto lock ref: {detail.zeto_lock_ref || "-"}</p>
-            <p className="text-sm">Secret: {detail.secret ? "[hidden by policy]" : "-"}</p>
+            <p className="text-sm">Settlement Code: {detail.hash_lock}</p>
+            <p className="text-sm">Settlement Expiry: {new Date(detail.time_lock * 1000).toLocaleString()}</p>
+            <p className="text-sm">State: {(() => { const s = detail.state.replace("HTLC_STATE_", ""); if (s === "LOCKED") return "Pending Settlement"; if (s === "SETTLING") return "Processing"; if (s === "SETTLED") return "Settled"; if (s === "REFUNDING") return "Revoking"; if (s === "REFUNDED") return "Revoked"; return s; })()}</p>
+            <p className="text-sm">Settlement Reference: {detail.zeto_lock_ref || "-"}</p>
+            <p className="text-sm">Completion Code: {detail.secret ? "[restricted]" : "-"}</p>
             <Button variant="outline" onClick={() => setDetail(null)}>
               Close
             </Button>

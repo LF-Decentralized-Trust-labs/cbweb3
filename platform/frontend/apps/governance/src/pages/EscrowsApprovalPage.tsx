@@ -49,10 +49,10 @@ export function EscrowsApprovalPage() {
 
     try {
       const result = await approveEscrow(approveTargetId);
-      toast.success(`Pledge approved. Redemption: ${shortHash(result.burn_tx_hash)}, Issuance: ${shortHash(result.mint_tx_hash)}`);
+      toast.success(`Tokenisation approved. Redemption: ${shortHash(result.burn_tx_hash)}, Issuance: ${shortHash(result.mint_tx_hash)}`);
       setApproveTargetId(null);
     } catch (approveError) {
-      toast.error(approveError instanceof Error ? approveError.message : "Unable to approve pledge");
+      toast.error(approveError instanceof Error ? approveError.message : "Unable to approve tokenisation request");
     }
   };
 
@@ -68,11 +68,11 @@ export function EscrowsApprovalPage() {
 
     try {
       await rejectEscrow(rejectTargetId, reason.trim());
-      toast.success("Pledge rejected.");
+      toast.success("Tokenisation request rejected.");
       setRejectTargetId(null);
       setReason("");
     } catch (rejectError) {
-      toast.error(rejectError instanceof Error ? rejectError.message : "Unable to reject pledge");
+      toast.error(rejectError instanceof Error ? rejectError.message : "Unable to reject tokenisation request");
     }
   };
 
@@ -81,13 +81,13 @@ export function EscrowsApprovalPage() {
       <section className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Total Pledges</CardDescription>
+            <CardDescription>Total Tokenisation Requests</CardDescription>
             <CardTitle>{escrows.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Pending Pledges</CardDescription>
+            <CardDescription>Pending Tokenisation Requests</CardDescription>
             <CardTitle>{pendingCount}</CardTitle>
           </CardHeader>
         </Card>
@@ -95,8 +95,8 @@ export function EscrowsApprovalPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Pledge Queue</CardTitle>
-          <CardDescription>Approve tCeBM allocation or reject with reason.</CardDescription>
+          <CardTitle>Tokenisation Request Queue</CardTitle>
+          <CardDescription>Approve tCeBM issuance or reject with reason.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="mb-3">
@@ -163,7 +163,7 @@ export function EscrowsApprovalPage() {
               ))}
             </TableBody>
           </Table>
-          {!escrows.length ? <p className="pt-3 text-sm text-muted-foreground">No pledges found.</p> : null}
+          {!escrows.length ? <p className="pt-3 text-sm text-muted-foreground">No tokenisation requests found.</p> : null}
           {error ? <p className="pt-3 text-sm text-destructive">{error}</p> : null}
         </CardContent>
       </Card>
@@ -171,8 +171,8 @@ export function EscrowsApprovalPage() {
       {approveTargetId ? (
         <Card>
           <CardHeader>
-            <CardTitle>Confirm Pledge Approval</CardTitle>
-            <CardDescription>Pledge ID: {approveTargetId}</CardDescription>
+            <CardTitle>Confirm Tokenisation Approval</CardTitle>
+            <CardDescription>Request ID: {approveTargetId}</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onApprove()} disabled={status === "loading"}>
@@ -188,8 +188,8 @@ export function EscrowsApprovalPage() {
       {rejectTargetId ? (
         <Card>
           <CardHeader>
-            <CardTitle>Reject Pledge</CardTitle>
-            <CardDescription>Pledge ID: {rejectTargetId}</CardDescription>
+            <CardTitle>Reject Tokenisation Request</CardTitle>
+            <CardDescription>Request ID: {rejectTargetId}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Textarea value={reason} onChange={(event) => setReason(event.target.value)} />

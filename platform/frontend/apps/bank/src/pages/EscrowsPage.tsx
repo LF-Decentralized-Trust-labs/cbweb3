@@ -59,11 +59,11 @@ export function EscrowsPage() {
 
     try {
       const escrowId = await requestEscrow(amount);
-      toast.success(`Pledge request submitted: ${escrowId}`);
+      toast.success(`Reserve tokenisation request submitted: ${escrowId}`);
       setAmount("0");
       setConfirmRequest(false);
     } catch (submitError) {
-      toast.error(submitError instanceof Error ? submitError.message : "Unable to request pledge");
+      toast.error(submitError instanceof Error ? submitError.message : "Unable to submit reserve tokenisation request");
     }
   };
 
@@ -87,7 +87,7 @@ export function EscrowsPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Pending Pledges</CardDescription>
+            <CardDescription>Pending Tokenisations</CardDescription>
             <CardTitle>{pendingCount}</CardTitle>
           </CardHeader>
         </Card>
@@ -95,8 +95,8 @@ export function EscrowsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Request Pledge</CardTitle>
-          <CardDescription>Create pledge requests after deposit approval and fiat exchange.</CardDescription>
+          <CardTitle>Reserve Tokenisation</CardTitle>
+          <CardDescription>Create tokenisation requests after issuance approval to receive tCeBM.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
@@ -110,10 +110,10 @@ export function EscrowsPage() {
               onChange={(event) => setAmount(event.target.value)}
             />
           </div>
-          <p className="text-xs text-muted-foreground">Only approved deposits should proceed through this allocation workflow.</p>
+          <p className="text-xs text-muted-foreground">Only approved issuance requests should proceed through this tokenisation workflow.</p>
           <div className="flex flex-wrap gap-2">
             <Button onClick={onPrepareSubmit} disabled={status === "loading"}>
-              Review Pledge Request
+              Review Tokenisation Request
             </Button>
             <Button variant="outline" onClick={() => void fetchAll()} disabled={status === "loading"}>
               Refresh
@@ -126,7 +126,7 @@ export function EscrowsPage() {
       {confirmRequest ? (
         <Card>
           <CardHeader>
-            <CardTitle>Confirm Pledge Request</CardTitle>
+            <CardTitle>Confirm Reserve Tokenisation</CardTitle>
             <CardDescription>{formatCeBM(amount)} will be submitted for central bank tCeBM issuance.</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
@@ -142,7 +142,7 @@ export function EscrowsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Pledge Requests</CardTitle>
+          <CardTitle>Reserve Tokenisation Requests</CardTitle>
           <CardDescription>Total records: {escrows.length}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -174,7 +174,7 @@ export function EscrowsPage() {
               ))}
             </TableBody>
           </Table>
-          {!escrows.length ? <p className="pt-3 text-sm text-muted-foreground">No pledges found.</p> : null}
+          {!escrows.length ? <p className="pt-3 text-sm text-muted-foreground">No tokenisation requests found.</p> : null}
         </CardContent>
       </Card>
     </div>

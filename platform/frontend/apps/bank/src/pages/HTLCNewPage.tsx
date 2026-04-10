@@ -91,7 +91,7 @@ export function HTLCNewPage() {
       return false;
     }
     if (!/^([A-Fa-f0-9]{64}|0x[A-Fa-f0-9]{64})$/.test(hashLock.trim())) {
-      toast.error("Hash lock must be a valid 64-character hex string.");
+      toast.error("Settlement Code must be a valid 64-character hex string.");
       return false;
     }
     return true;
@@ -145,7 +145,7 @@ export function HTLCNewPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">PvP Settlement</h1>
-          <p className="text-sm text-muted-foreground">Use one form to start the process and another to continue with an existing hash lock.</p>
+          <p className="text-sm text-muted-foreground">Use one form to initiate a new transfer or continue with an existing settlement reference.</p>
         </div>
         <Button asChild variant="outline">
           <Link to="/htlc">Back to history</Link>
@@ -255,11 +255,11 @@ export function HTLCNewPage() {
         <Card>
           <CardHeader>
             <CardTitle>Continue PvP Transfer</CardTitle>
-            <CardDescription>Continue the flow from the receiver side using an existing hash lock.</CardDescription>
+            <CardDescription>Continue the flow from the receiver side using an existing settlement reference.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-2">
-              <Label htmlFor="hash-lock">Hash Lock</Label>
+              <Label htmlFor="hash-lock">Settlement Code</Label>
               <Input
                 id="hash-lock"
                 placeholder="c50b6abba36bfcab4508b61b080e2163736bbb145fd1adb4b396273765cbbad5"
@@ -327,7 +327,7 @@ export function HTLCNewPage() {
             <CardDescription>This action continues the PvP flow from the receiver side.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm">Hash lock: {hashLock}</p>
+            <p className="text-sm">Settlement Code: {hashLock}</p>
             <p className="text-sm">Receiver: {hashReceiver}</p>
             <p className="text-sm">Amount: {hashAmount} tCeBM</p>
             <div className="flex gap-2">

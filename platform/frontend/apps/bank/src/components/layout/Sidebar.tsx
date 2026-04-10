@@ -15,8 +15,8 @@ import {
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/liquidity", label: "Liquidity & Transfers", icon: Coins },
-  { to: "/deposits", label: "Deposits", icon: ArrowDownToLine },
-  { to: "/escrows", label: "Pledges", icon: Lock },
+  { to: "/deposits", label: "Issuance Requests", icon: ArrowDownToLine },
+  { to: "/escrows", label: "Reserve Tokenisation", icon: Lock },
   { to: "/redeems", label: "Redeems", icon: ArrowUpFromLine },
   { to: "/htlc", label: "PvP Settlement", icon: ArrowRightLeft },
   { to: "/amm", label: "Automated FX Trading", icon: Scale },

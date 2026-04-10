@@ -55,7 +55,7 @@ let onRampRequests: OnRampRequest[] = [
 
 let pool: AMMPoolStatus = {
   tokenA: "BRL-tCeBM",
-  tokenB: "USD-tCeBM",
+  tokenB: "ARS-tCeBM",
   reserveA: "700000",
   reserveB: "300000",
   imbalanceFlag: false,

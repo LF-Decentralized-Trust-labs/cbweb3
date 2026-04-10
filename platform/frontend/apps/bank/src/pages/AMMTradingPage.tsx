@@ -20,7 +20,7 @@ import { useAmmStore } from "../stores";
 export function AMMTradingPage() {
   const { pool, quote, refreshPool, getQuote, swap, status, error } = useAmmStore();
   const [tokenIn, setTokenIn] = useState("BRL-tCeBM");
-  const [tokenOut, setTokenOut] = useState("USD-tCeBM");
+  const [tokenOut, setTokenOut] = useState("ARS-tCeBM");
   const [exactOutputAmount, setExactOutputAmount] = useState("1000");
 
   useEffect(() => {
