@@ -48,7 +48,7 @@ export function LoginPage() {
           </Badge>
           <h1 className="text-3xl font-semibold tracking-tight">Regional CBDC Bank Portal</h1>
           <p className="mt-3 max-w-md text-sm text-muted-foreground">
-            Execute domestic liquidity operations, HTLC settlements, and AMM trading flows in a privacy-preserving environment.
+            Execute domestic liquidity operations, PvP settlements, and automated FX flows in a privacy-preserving environment.
           </p>
 
           <div className="mt-8 grid gap-4">

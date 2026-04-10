@@ -59,11 +59,11 @@ export function EscrowsPage() {
 
     try {
       const escrowId = await requestEscrow(amount);
-      toast.success(`Escrow request submitted: ${escrowId}`);
+      toast.success(`Pledge request submitted: ${escrowId}`);
       setAmount("0");
       setConfirmRequest(false);
     } catch (submitError) {
-      toast.error(submitError instanceof Error ? submitError.message : "Unable to request escrow");
+      toast.error(submitError instanceof Error ? submitError.message : "Unable to request pledge");
     }
   };
 
@@ -84,29 +84,23 @@ export function EscrowsPage() {
             <CardDescription>Fiat Reserve Balance</CardDescription>
             <CardTitle>{status === "loading" && fiatBalance === null ? "Loading..." : formatFiatUnits(fiatBalance ?? "0")}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="outline">Mirrors commercial bank fiat reserves</Badge>
-          </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Pending Escrows</CardDescription>
+            <CardDescription>Pending Pledges</CardDescription>
             <CardTitle>{pendingCount}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="warning">Awaiting central bank tokenization</Badge>
-          </CardContent>
         </Card>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Request Escrow (fiat units to tCeBM)</CardTitle>
-          <CardDescription>Create escrow requests after deposit approval and fiat exchange.</CardDescription>
+          <CardTitle>Request Pledge</CardTitle>
+          <CardDescription>Create pledge requests after deposit approval and fiat exchange.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="escrow-amount">Amount (tCeBM units)</Label>
+            <Label htmlFor="escrow-amount">Amount (tCeBM)</Label>
             <Input
               id="escrow-amount"
               type="number"
@@ -116,10 +110,10 @@ export function EscrowsPage() {
               onChange={(event) => setAmount(event.target.value)}
             />
           </div>
-          <p className="text-xs text-muted-foreground">Only approved deposits should be tokenized through this operation.</p>
+          <p className="text-xs text-muted-foreground">Only approved deposits should proceed through this allocation workflow.</p>
           <div className="flex flex-wrap gap-2">
             <Button onClick={onPrepareSubmit} disabled={status === "loading"}>
-              Review Escrow Request
+              Review Pledge Request
             </Button>
             <Button variant="outline" onClick={() => void fetchAll()} disabled={status === "loading"}>
               Refresh
@@ -132,8 +126,8 @@ export function EscrowsPage() {
       {confirmRequest ? (
         <Card>
           <CardHeader>
-            <CardTitle>Confirm Escrow Request</CardTitle>
-            <CardDescription>{formatCeBM(amount)} will be submitted for central bank tokenization approval.</CardDescription>
+            <CardTitle>Confirm Pledge Request</CardTitle>
+            <CardDescription>{formatCeBM(amount)} will be submitted for central bank tCeBM issuance.</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onSubmit()} disabled={status === "loading"}>
@@ -148,7 +142,7 @@ export function EscrowsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Escrow Requests</CardTitle>
+          <CardTitle>Pledge Requests</CardTitle>
           <CardDescription>Total records: {escrows.length}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -158,8 +152,8 @@ export function EscrowsPage() {
                 <TableHead>ID</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Burn Tx Hash</TableHead>
-                <TableHead>Mint Tx Hash</TableHead>
+                <TableHead>Redemption ID</TableHead>
+                <TableHead>Issuance Ref</TableHead>
                 <TableHead>Rejection Reason</TableHead>
                 <TableHead>Created At</TableHead>
               </TableRow>
@@ -180,7 +174,7 @@ export function EscrowsPage() {
               ))}
             </TableBody>
           </Table>
-          {!escrows.length ? <p className="pt-3 text-sm text-muted-foreground">No escrows found.</p> : null}
+          {!escrows.length ? <p className="pt-3 text-sm text-muted-foreground">No pledges found.</p> : null}
         </CardContent>
       </Card>
     </div>

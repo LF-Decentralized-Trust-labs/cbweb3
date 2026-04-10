@@ -106,7 +106,7 @@ export function DashboardPage() {
   const pendingDeposits = deposits.filter(
     (item) => normalizePaymentStatus(item.status) === PaymentStatus.PENDING,
   ).length;
-  const pendingEscrows = escrows.filter(
+  const pendingPledges = escrows.filter(
     (item) => normalizePaymentStatus(item.status) === PaymentStatus.PENDING,
   ).length;
   const pendingRedeems = redeems.filter(
@@ -139,36 +139,24 @@ export function DashboardPage() {
                 : formatFiatUnits(fiatBalance ?? "0")}
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="outline">Mirrors commercial bank fiat reserves</Badge>
-          </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Pending Deposits</CardDescription>
             <CardTitle>{pendingDeposits}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="warning">Awaiting central bank approval</Badge>
-          </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Pending Escrows</CardDescription>
-            <CardTitle>{pendingEscrows}</CardTitle>
+            <CardDescription>Pending Pledges</CardDescription>
+            <CardTitle>{pendingPledges}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="warning">Awaiting tokenization approval</Badge>
-          </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Pending Redeems</CardDescription>
             <CardTitle>{pendingRedeems}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="warning">Awaiting fiat reserve mint</Badge>
-          </CardContent>
         </Card>
       </section>
 
@@ -367,10 +355,10 @@ export function DashboardPage() {
           </div>
           <div className="mb-3 flex flex-wrap gap-2">
             <Button asChild size="sm">
-              <Link to="/htlc/new">New HTLC Lock</Link>
+              <Link to="/htlc/new">Initiate PvP Transfer</Link>
             </Button>
             <Button asChild size="sm" variant="outline">
-              <Link to="/htlc">View HTLC History</Link>
+              <Link to="/htlc">View PvP Transfers</Link>
             </Button>
           </div>
           <div className="space-y-2">

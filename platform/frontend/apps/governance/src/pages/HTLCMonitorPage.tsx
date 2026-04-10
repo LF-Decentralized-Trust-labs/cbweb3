@@ -58,14 +58,14 @@ export function HTLCMonitorPage() {
       const data = await getDetail(contractId);
       setDetail(data);
     } catch (fetchError) {
-      toast.error(fetchError instanceof Error ? fetchError.message : "Unable to load HTLC details.");
+      toast.error(fetchError instanceof Error ? fetchError.message : "Unable to load PvP settlement details.");
     }
   };
 
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">HTLC Cross-Spoke Monitor</h1>
+        <h1 className="text-xl font-semibold">PvP Settlement Monitor</h1>
         <p className="text-sm text-muted-foreground">Read-only oversight for lock, settle, and refund lifecycle events.</p>
       </div>
 
@@ -135,7 +135,7 @@ export function HTLCMonitorPage() {
               ))}
             </TableBody>
           </Table>
-          {!locks.length ? <p className="pt-3 text-sm text-muted-foreground">No HTLC records found.</p> : null}
+          {!locks.length ? <p className="pt-3 text-sm text-muted-foreground">No PvP settlement records found.</p> : null}
           {error ? <p className="pt-3 text-sm text-destructive">{error}</p> : null}
         </CardContent>
       </Card>

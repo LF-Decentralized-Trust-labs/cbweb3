@@ -7,12 +7,18 @@ COPY apps/governance/package.json apps/governance/package.json
 COPY packages/config/package.json packages/config/package.json
 COPY packages/ui/package.json packages/ui/package.json
 
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+RUN npm ci
 
 COPY . .
 
 ARG VITE_API_URL
 ENV VITE_API_URL=${VITE_API_URL}
+
+ARG VITE_PORTAL_OWNER
+ENV VITE_PORTAL_OWNER=${VITE_PORTAL_OWNER}
+
+ARG VITE_FIAT_SYMBOL
+ENV VITE_FIAT_SYMBOL=${VITE_FIAT_SYMBOL}
 
 RUN npm run build --workspace=governance
 

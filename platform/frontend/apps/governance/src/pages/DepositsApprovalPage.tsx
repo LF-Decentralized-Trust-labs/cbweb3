@@ -114,9 +114,6 @@ export function DepositsApprovalPage() {
             <CardDescription>Pending Deposits</CardDescription>
             <CardTitle>{pendingCount}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="warning">Governance action required</Badge>
-          </CardContent>
         </Card>
       </section>
 
@@ -166,7 +163,7 @@ export function DepositsApprovalPage() {
                 <TableHead>Requester</TableHead>
                 <TableHead>Fiat Amount</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Mint Tx Hash</TableHead>
+                <TableHead>Issuance Reference</TableHead>
                 <TableHead>Created At</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>

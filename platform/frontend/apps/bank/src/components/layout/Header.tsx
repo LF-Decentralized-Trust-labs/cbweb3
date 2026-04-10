@@ -8,6 +8,7 @@ export function Header() {
   const { profile, logout } = useAuth();
   const connected = useWebsocketStore((state) => state.connected);
   const events = useWebsocketStore((state) => state.events);
+  const portalOwner = (import.meta.env.VITE_PORTAL_OWNER ?? "UNSET_OWNER").trim() || "UNSET_OWNER";
 
   const onLogout = async () => {
     await logout();
@@ -19,6 +20,7 @@ export function Header() {
       <div>
         <h1 className="text-lg font-semibold">CBWeb3 Bank Portal</h1>
         <p className="text-xs text-muted-foreground">Institution: {profile?.bankId ?? profile?.subject ?? "-"}</p>
+        <p className="text-xs text-muted-foreground">{portalOwner}</p>
       </div>
 
       <div className="flex items-center gap-3">

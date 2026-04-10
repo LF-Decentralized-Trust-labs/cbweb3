@@ -88,7 +88,7 @@ export function LiquidityTransfersPage() {
         <CardHeader>
           <CardTitle>Bank Scope Notice</CardTitle>
           <CardDescription>
-            Treasury controls token minting. Bank Portal supports transfers and liquidity adjustment requests.
+            Treasury controls tCeBM issuance. Bank Portal supports transfers and liquidity adjustment requests.
           </CardDescription>
         </CardHeader>
       </Card>
