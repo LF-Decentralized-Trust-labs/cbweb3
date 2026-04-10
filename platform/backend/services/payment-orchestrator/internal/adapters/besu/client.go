@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"math/big"
 	"strings"
+	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -129,6 +131,19 @@ func (c *Client) sendTx(ctx context.Context, data []byte, method string) (string
 	auth.GasLimit = 500_000
 	auth.Context = ctx
 
+	// Estimate gas first to detect contract reverts before submitting the tx.
+	msg := ethereum.CallMsg{
+		From:     c.fromAddress,
+		To:       &c.htlcAddress,
+		GasPrice: gasPrice,
+		Data:     data,
+	}
+	if estimatedGas, estErr := c.ethClient.EstimateGas(ctx, msg); estErr != nil {
+		return "", fmt.Errorf("%s call would revert: %w", method, estErr)
+	} else {
+		auth.GasLimit = estimatedGas * 120 / 100 // 20% headroom
+	}
+
 	boundContract := bind.NewBoundContract(c.htlcAddress, c.htlcABI, c.ethClient, c.ethClient, c.ethClient)
 
 	signedTx, err := boundContract.RawTransact(auth, data)
@@ -136,7 +151,10 @@ func (c *Client) sendTx(ctx context.Context, data []byte, method string) (string
 		return "", fmt.Errorf("send %s tx: %w", method, err)
 	}
 
-	receipt, err := bind.WaitMined(ctx, c.ethClient, signedTx)
+	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	receipt, err := bind.WaitMined(waitCtx, c.ethClient, signedTx)
 	if err != nil {
 		return "", fmt.Errorf("wait %s receipt: %w", method, err)
 	}

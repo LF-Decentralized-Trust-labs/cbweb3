@@ -65,7 +65,7 @@ contract RegisterParticipants is Script {
 
         // Spoke operator addresses (Besu genesis accounts used in local dev).
         // Bank-A / Bank-B share key 0dbbe8e4… → 0xC5fdf4…
-        // Bank-C / Bank-D share key c88b703f… → 0x821aEa…
+        // Bank-C / Bank-D share key c88b703f… → 0xc110…
         // Central Bank key c87509a1… → 0x627306…
         Participant[3] memory participants = [
             Participant(
@@ -79,7 +79,7 @@ contract RegisterParticipants is Script {
                 IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK
             ),
             Participant(
-                0x821aEa9a577a9b44299B9c15c88cf3087F3b5544,
+                0xc110089385bad5026E5083443C3b443806DA42Df,
                 "Commercial Bank C/D",
                 IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK
             )
