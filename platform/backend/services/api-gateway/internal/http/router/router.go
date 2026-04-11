@@ -143,6 +143,18 @@ func Setup(app *fiber.App, deps Dependencies) {
 
 		// --- Escrow: Deposit / Escrow / Redeem (Central Bank) ---
 		if deps.PaymentProxyHandler == nil {
+			// Internal routes for proxy-receiving (no auth — only reachable within Docker network).
+			intDeposits := app.Group("/internal/v1/payments/deposits")
+			intDeposits.Post("", deps.PaymentHandler.RegisterDeposit)
+			intDeposits.Get("", deps.PaymentHandler.ListDeposits)
+
+			intEscrows := app.Group("/internal/v1/payments/escrows")
+			intEscrows.Post("", deps.PaymentHandler.RequestEscrow)
+			intEscrows.Get("", deps.PaymentHandler.ListEscrows)
+
+			intRedeems := app.Group("/internal/v1/payments/redeems")
+			intRedeems.Post("", deps.PaymentHandler.RequestRedeem)
+			intRedeems.Get("", deps.PaymentHandler.ListRedeems)
 
 			// Governance routes (requires cookie auth + ROLE_GOVERNANCE).
 			depositGroup := payGroup.Group("/payments/deposits")
