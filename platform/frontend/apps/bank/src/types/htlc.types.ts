@@ -31,6 +31,7 @@ export interface LockWithHashHTLCRequest {
   hash_lock: string;
   receiver: string;
   amount: string;
+  agreement_id?: string;
 }
 
 export interface LockHTLCResponse {

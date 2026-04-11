@@ -32,4 +32,8 @@ type ZetoOperator interface {
 
 	// Balance returns the Zeto token balance for the identity configured in the service.
 	Balance(ctx context.Context) (string, error)
+
+	// ResolveIdentity resolves a Paladin identity string (e.g. "funded_operator@spoke-a-bank-c")
+	// to its EVM address (e.g. "0xc110...") via ptx_resolveVerifier.
+	ResolveIdentity(ctx context.Context, identity string) (string, error)
 }

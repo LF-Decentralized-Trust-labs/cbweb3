@@ -7,6 +7,9 @@ import {IHashTimeLockedContract} from "../src/interfaces/IHashTimeLockedContract
 import {HashTimeLockedContractLibrary} from "../src/libraries/HashTimeLockedContractLibrary.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryLibrary} from "../src/libraries/IdentityRegistryLibrary.sol";
+import {FXAgreement} from "../src/FXAgreement.sol";
+import {IFXAgreement} from "../src/interfaces/IFXAgreement.sol";
+import {FXAgreementLibrary} from "../src/libraries/FXAgreementLibrary.sol";
 import {DeployHTLC} from "../script/HashTimeLockedContract.s.sol";
 
 contract HashTimeLockedContractTest is Test {
@@ -23,6 +26,7 @@ contract HashTimeLockedContractTest is Test {
 
     HashTimeLockedContract public htlc;
     IdentityRegistry public identityRegistry;
+    FXAgreement public fxAgreement;
 
     address public admin = makeAddr("admin");
     address public sender = makeAddr("sender");
@@ -45,13 +49,14 @@ contract HashTimeLockedContractTest is Test {
         );
         vm.stopPrank();
 
-        htlc = new HashTimeLockedContract(address(identityRegistry));
+        fxAgreement = new FXAgreement(address(identityRegistry));
+        htlc = new HashTimeLockedContract(address(identityRegistry), address(fxAgreement));
         timeLock = block.timestamp + 1 hours;
     }
 
     function test_Lock_Success() public {
         vm.prank(sender);
-        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
 
         HashTimeLockedContractLibrary.LockDetails memory details = htlc.getLockDetails(contractId);
 
@@ -68,12 +73,12 @@ contract HashTimeLockedContractTest is Test {
         emit LogHTLCLocked(contractId, sender, receiver, hashLock, timeLock, zetoLockRef);
 
         vm.prank(sender);
-        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
     }
 
     function test_Settle_Success() public {
         vm.prank(sender);
-        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
 
         htlc.settle(contractId, secret);
 
@@ -85,7 +90,7 @@ contract HashTimeLockedContractTest is Test {
 
     function test_Settle_EmitsEvent() public {
         vm.prank(sender);
-        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
 
         vm.expectEmit(true, true, true, true);
         emit LogHTLCClaimed(contractId, secret);
@@ -95,7 +100,7 @@ contract HashTimeLockedContractTest is Test {
 
     function test_Refund_Success() public {
         vm.prank(sender);
-        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
 
         vm.warp(timeLock + 1 seconds);
 
@@ -109,7 +114,7 @@ contract HashTimeLockedContractTest is Test {
 
     function test_Refund_EmitsEvent() public {
         vm.prank(sender);
-        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
 
         vm.warp(timeLock + 1 seconds);
 
@@ -122,10 +127,10 @@ contract HashTimeLockedContractTest is Test {
 
     function test_Revert_Lock_AlreadyExists() public {
         vm.startPrank(sender);
-        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
 
         vm.expectRevert(IHashTimeLockedContract.HTLC__ContractAlreadyExists.selector);
-        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
         vm.stopPrank();
     }
 
@@ -135,12 +140,12 @@ contract HashTimeLockedContractTest is Test {
 
         vm.prank(sender);
         vm.expectRevert(IHashTimeLockedContract.HTLC__TimeLockExpired.selector);
-        htlc.lock(newContractId, receiver, hashLock, expiredTimeLock, zetoLockRef);
+        htlc.lock(newContractId, receiver, hashLock, expiredTimeLock, zetoLockRef, bytes32(0));
     }
 
     function test_Revert_Settle_InvalidSecret() public {
         vm.prank(sender);
-        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
 
         bytes32 wrongSecret = "wrong_secret";
 
@@ -157,7 +162,7 @@ contract HashTimeLockedContractTest is Test {
 
     function test_Revert_Refund_TimeLockNotExpired() public {
         vm.prank(sender);
-        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
 
         vm.expectRevert(IHashTimeLockedContract.HTLC__TimeLockNotExpired.selector);
         htlc.refund(contractId);
@@ -178,7 +183,7 @@ contract HashTimeLockedContractTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IHashTimeLockedContract.HTLC__ParticipantNotVerified.selector, unverified)
         );
-        htlc.lock(newContractId, receiver, hashLock, timeLock, zetoLockRef);
+        htlc.lock(newContractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
     }
 
     function test_Revert_Lock_UnverifiedReceiver() public {
@@ -189,7 +194,7 @@ contract HashTimeLockedContractTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IHashTimeLockedContract.HTLC__ParticipantNotVerified.selector, unverifiedReceiver)
         );
-        htlc.lock(newContractId, unverifiedReceiver, hashLock, timeLock, zetoLockRef);
+        htlc.lock(newContractId, unverifiedReceiver, hashLock, timeLock, zetoLockRef, bytes32(0));
     }
 
     function test_GetLockDetails_NonExisting() public view {
@@ -203,6 +208,79 @@ contract HashTimeLockedContractTest is Test {
         assertEq(details.secret, bytes32(0));
         assertEq(details.zetoLockRef, bytes32(0));
         assertEq(uint256(details.state), uint256(HashTimeLockedContractLibrary.HTLCState.INVALID));
+    }
+
+    function test_Lock_WithAcceptedAgreement_Success() public {
+        // Register sender as centralBank role to allow governance for proposeOnBehalf
+        // Instead, have sender propose directly and counterpartyB accept
+        bytes32 fxTradeId = keccak256("FX_HTLC_TEST_001");
+        uint256 fxExpiry = block.timestamp + 1 days;
+
+        vm.prank(sender);
+        fxAgreement.propose(fxTradeId, receiver, address(0), address(0), address(0), 1e18, 1e18, bytes32("BRL"), bytes32("EUR"), 5e18, fxExpiry);
+
+        vm.prank(receiver);
+        fxAgreement.accept(fxTradeId);
+
+        vm.prank(sender);
+        bytes32 newContractId = keccak256("HTLC_WITH_FX_001");
+        htlc.lock(newContractId, receiver, hashLock, timeLock, zetoLockRef, fxTradeId);
+
+        HashTimeLockedContractLibrary.LockDetails memory details = htlc.getLockDetails(newContractId);
+        assertEq(uint256(details.state), uint256(HashTimeLockedContractLibrary.HTLCState.LOCKED));
+    }
+
+    function test_Revert_Lock_AgreementNotAccepted() public {
+        bytes32 fxTradeId = keccak256("FX_HTLC_TEST_002");
+        uint256 fxExpiry = block.timestamp + 1 days;
+
+        vm.prank(sender);
+        fxAgreement.propose(fxTradeId, receiver, address(0), address(0), address(0), 1e18, 1e18, bytes32("BRL"), bytes32("EUR"), 5e18, fxExpiry);
+
+        vm.prank(sender);
+        bytes32 newContractId = keccak256("HTLC_WITH_FX_002");
+        vm.expectRevert(IHashTimeLockedContract.HTLC__AgreementNotAccepted.selector);
+        htlc.lock(newContractId, receiver, hashLock, timeLock, zetoLockRef, fxTradeId);
+    }
+
+    function test_Revert_Lock_AgreementExpired() public {
+        bytes32 fxTradeId = keccak256("FX_HTLC_TEST_003");
+        uint256 fxExpiry = block.timestamp + 1 hours;
+
+        vm.prank(sender);
+        fxAgreement.propose(fxTradeId, receiver, address(0), address(0), address(0), 1e18, 1e18, bytes32("BRL"), bytes32("EUR"), 5e18, fxExpiry);
+
+        vm.prank(receiver);
+        fxAgreement.accept(fxTradeId);
+
+        // Warp past FX agreement expiry but keep HTLC timeLock valid
+        vm.warp(fxExpiry + 1);
+        uint256 newTimeLock = block.timestamp + 1 hours;
+
+        vm.prank(sender);
+        bytes32 newContractId = keccak256("HTLC_WITH_FX_003");
+        vm.expectRevert(IHashTimeLockedContract.HTLC__AgreementExpired.selector);
+        htlc.lock(newContractId, receiver, hashLock, newTimeLock, zetoLockRef, fxTradeId);
+    }
+
+    function test_Lock_ZeroAgreementId_Success() public {
+        vm.prank(sender);
+        bytes32 newContractId = keccak256("HTLC_ZERO_AGREEMENT");
+        htlc.lock(newContractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
+
+        HashTimeLockedContractLibrary.LockDetails memory details = htlc.getLockDetails(newContractId);
+        assertEq(uint256(details.state), uint256(HashTimeLockedContractLibrary.HTLCState.LOCKED));
+    }
+
+    function test_Lock_NoFXAgreement_Success() public {
+        HashTimeLockedContract htlcNoFx = new HashTimeLockedContract(address(identityRegistry), address(0));
+
+        vm.prank(sender);
+        bytes32 newContractId = keccak256("HTLC_NO_FX");
+        htlcNoFx.lock(newContractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
+
+        HashTimeLockedContractLibrary.LockDetails memory details = htlcNoFx.getLockDetails(newContractId);
+        assertEq(uint256(details.state), uint256(HashTimeLockedContractLibrary.HTLCState.LOCKED));
     }
 }
 

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
+	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -359,4 +360,142 @@ func (h *PaymentHandler) ListRedeems(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"redeems": redeems, "total": len(redeems)})
+}
+
+// --- FX Agreement endpoints ---
+
+func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
+	var req struct {
+		TradeID         string `json:"trade_id"`
+		CounterpartyB   string `json:"counterparty_b"`
+		Originator      string `json:"originator"`
+		SettlementAgent string `json:"settlement_agent"`
+		Custodian       string `json:"custodian"`
+		Beneficiary     string `json:"beneficiary"`
+		OriginAmount    string `json:"origin_amount"`
+		CounterAmount   string `json:"counter_amount"`
+		OriginCurrency  string `json:"origin_currency"`
+		CounterCurrency string `json:"counter_currency"`
+		Rate            string `json:"rate"`
+		ExpiryDate      uint64 `json:"expiry_date"`
+		OnBehalf        bool   `json:"on_behalf"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if req.CounterpartyB == "" || req.OriginAmount == "" || req.CounterAmount == "" ||
+		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "counterparty_b, origin_amount, counter_amount, origin_currency, counter_currency, rate, and expiry_date are required"})
+	}
+	result, err := h.payment.ProposeFXAgreement(c.Context(), &pb.ProposeFXAgreementRequest{
+		TradeId:         req.TradeID,
+		CounterpartyB:   req.CounterpartyB,
+		Originator:      req.Originator,
+		SettlementAgent: req.SettlementAgent,
+		Custodian:       req.Custodian,
+		Beneficiary:     req.Beneficiary,
+		OriginAmount:    req.OriginAmount,
+		CounterAmount:   req.CounterAmount,
+		OriginCurrency:  req.OriginCurrency,
+		CounterCurrency: req.CounterCurrency,
+		Rate:            req.Rate,
+		ExpiryDate:      req.ExpiryDate,
+		OnBehalf:        req.OnBehalf,
+	})
+	if err != nil {
+		return grpcErrorToHTTP(c, err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
+func (h *PaymentHandler) AcceptFXAgreement(c *fiber.Ctx) error {
+	tradeID := c.Params("tradeId")
+	if tradeID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tradeId is required"})
+	}
+	var req struct {
+		OnBehalf bool `json:"on_behalf"`
+	}
+	_ = c.BodyParser(&req)
+	result, err := h.payment.AcceptFXAgreement(c.Context(), tradeID, req.OnBehalf)
+	if err != nil {
+		return grpcErrorToHTTP(c, err)
+	}
+	return c.JSON(result)
+}
+
+func (h *PaymentHandler) RejectFXAgreement(c *fiber.Ctx) error {
+	tradeID := c.Params("tradeId")
+	if tradeID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tradeId is required"})
+	}
+	var req struct {
+		OnBehalf bool `json:"on_behalf"`
+	}
+	_ = c.BodyParser(&req)
+	result, err := h.payment.RejectFXAgreement(c.Context(), tradeID, req.OnBehalf)
+	if err != nil {
+		return grpcErrorToHTTP(c, err)
+	}
+	return c.JSON(result)
+}
+
+func (h *PaymentHandler) CancelFXAgreement(c *fiber.Ctx) error {
+	tradeID := c.Params("tradeId")
+	if tradeID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tradeId is required"})
+	}
+	result, err := h.payment.CancelFXAgreement(c.Context(), tradeID)
+	if err != nil {
+		return grpcErrorToHTTP(c, err)
+	}
+	return c.JSON(result)
+}
+
+func (h *PaymentHandler) SettleFXAgreement(c *fiber.Ctx) error {
+	tradeID := c.Params("tradeId")
+	if tradeID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tradeId is required"})
+	}
+	result, err := h.payment.SettleFXAgreement(c.Context(), tradeID)
+	if err != nil {
+		return grpcErrorToHTTP(c, err)
+	}
+	return c.JSON(result)
+}
+
+func (h *PaymentHandler) GetFXAgreement(c *fiber.Ctx) error {
+	tradeID := c.Params("tradeId")
+	if tradeID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tradeId is required"})
+	}
+	result, err := h.payment.GetFXAgreement(c.Context(), tradeID)
+	if err != nil {
+		return grpcErrorToHTTP(c, err)
+	}
+	return c.JSON(fiber.Map{"agreement": result})
+}
+
+func (h *PaymentHandler) ListFXAgreements(c *fiber.Ctx) error {
+	results, err := h.payment.ListFXAgreements(c.Context(), c.Query("counterparty"), c.Query("state"))
+	if err != nil {
+		return grpcErrorToHTTP(c, err)
+	}
+	return c.JSON(fiber.Map{"agreements": results, "total": len(results)})
+}
+
+// grpcErrorToHTTP maps gRPC status codes to appropriate HTTP responses.
+func grpcErrorToHTTP(c *fiber.Ctx, err error) error {
+	switch status.Code(err) {
+	case codes.NotFound:
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+	case codes.InvalidArgument:
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	case codes.FailedPrecondition:
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+	case codes.Unavailable:
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
+	default:
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
 }

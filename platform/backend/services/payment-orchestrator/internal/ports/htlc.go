@@ -27,4 +27,5 @@ type HTLCLockParams struct {
 	HashLock    [32]byte
 	TimeLock    uint64
 	ZetoLockRef [32]byte
+	AgreementID [32]byte // FX agreement trade ID (bytes32(0) skips on-chain gate)
 }

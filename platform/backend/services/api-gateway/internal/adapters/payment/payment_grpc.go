@@ -456,3 +456,103 @@ func (a *GRPCAdapter) ListRedeems(ctx context.Context, requesterID string) ([]Re
 	}
 	return result, nil
 }
+
+// --- FX Agreement ---
+
+type FXAgreementResult struct {
+	TradeID         string `json:"trade_id"`
+	TxHash          string `json:"tx_hash,omitempty"`
+	Originator      string `json:"originator,omitempty"`
+	CounterpartyB   string `json:"counterparty_b,omitempty"`
+	SettlementAgent string `json:"settlement_agent,omitempty"`
+	Custodian       string `json:"custodian,omitempty"`
+	Beneficiary     string `json:"beneficiary,omitempty"`
+	OriginAmount    string `json:"origin_amount,omitempty"`
+	CounterAmount   string `json:"counter_amount,omitempty"`
+	OriginCurrency  string `json:"origin_currency,omitempty"`
+	CounterCurrency string `json:"counter_currency,omitempty"`
+	Rate            string `json:"rate,omitempty"`
+	ExpiryDate      uint64 `json:"expiry_date,omitempty"`
+	State           string `json:"state,omitempty"`
+}
+
+func (a *GRPCAdapter) ProposeFXAgreement(ctx context.Context, req *pb.ProposeFXAgreementRequest) (*FXAgreementResult, error) {
+	resp, err := a.cc.ProposeFXAgreement(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &FXAgreementResult{TradeID: resp.TradeId, TxHash: resp.TxHash}, nil
+}
+
+func (a *GRPCAdapter) AcceptFXAgreement(ctx context.Context, tradeID string, onBehalf bool) (*FXAgreementResult, error) {
+	resp, err := a.cc.AcceptFXAgreement(ctx, &pb.AcceptFXAgreementRequest{TradeId: tradeID, OnBehalf: onBehalf})
+	if err != nil {
+		return nil, err
+	}
+	return &FXAgreementResult{TradeID: tradeID, TxHash: resp.TxHash}, nil
+}
+
+func (a *GRPCAdapter) RejectFXAgreement(ctx context.Context, tradeID string, onBehalf bool) (*FXAgreementResult, error) {
+	resp, err := a.cc.RejectFXAgreement(ctx, &pb.RejectFXAgreementRequest{TradeId: tradeID, OnBehalf: onBehalf})
+	if err != nil {
+		return nil, err
+	}
+	return &FXAgreementResult{TradeID: tradeID, TxHash: resp.TxHash}, nil
+}
+
+func (a *GRPCAdapter) CancelFXAgreement(ctx context.Context, tradeID string) (*FXAgreementResult, error) {
+	resp, err := a.cc.CancelFXAgreement(ctx, &pb.CancelFXAgreementRequest{TradeId: tradeID})
+	if err != nil {
+		return nil, err
+	}
+	return &FXAgreementResult{TradeID: tradeID, TxHash: resp.TxHash}, nil
+}
+
+func (a *GRPCAdapter) SettleFXAgreement(ctx context.Context, tradeID string) (*FXAgreementResult, error) {
+	resp, err := a.cc.SettleFXAgreement(ctx, &pb.SettleFXAgreementRequest{TradeId: tradeID})
+	if err != nil {
+		return nil, err
+	}
+	return &FXAgreementResult{TradeID: tradeID, TxHash: resp.TxHash}, nil
+}
+
+func (a *GRPCAdapter) GetFXAgreement(ctx context.Context, tradeID string) (*FXAgreementResult, error) {
+	resp, err := a.cc.GetFXAgreement(ctx, &pb.GetFXAgreementRequest{TradeId: tradeID})
+	if err != nil {
+		return nil, err
+	}
+	return fxAgreementToResult(resp.Agreement), nil
+}
+
+func (a *GRPCAdapter) ListFXAgreements(ctx context.Context, counterparty, state string) ([]FXAgreementResult, error) {
+	resp, err := a.cc.ListFXAgreements(ctx, &pb.ListFXAgreementsRequest{Counterparty: counterparty, State: state})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]FXAgreementResult, 0, len(resp.Agreements))
+	for _, ag := range resp.Agreements {
+		result = append(result, *fxAgreementToResult(ag))
+	}
+	return result, nil
+}
+
+func fxAgreementToResult(ag *pb.FXAgreement) *FXAgreementResult {
+	if ag == nil {
+		return &FXAgreementResult{}
+	}
+	return &FXAgreementResult{
+		TradeID:         ag.TradeId,
+		Originator:      ag.Originator,
+		CounterpartyB:   ag.CounterpartyB,
+		SettlementAgent: ag.SettlementAgent,
+		Custodian:       ag.Custodian,
+		Beneficiary:     ag.Beneficiary,
+		OriginAmount:    ag.OriginAmount,
+		CounterAmount:   ag.CounterAmount,
+		OriginCurrency:  ag.OriginCurrency,
+		CounterCurrency: ag.CounterCurrency,
+		Rate:            ag.Rate,
+		ExpiryDate:      ag.ExpiryDate,
+		State:           ag.State.String(),
+	}
+}

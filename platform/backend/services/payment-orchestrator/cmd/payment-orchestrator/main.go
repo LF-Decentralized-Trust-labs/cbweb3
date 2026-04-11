@@ -51,18 +51,28 @@ func main() {
 	relay := cacti.NewCactiRelay(cactiURL, logger)
 	logger.Info("cacti relay configured", "url", cactiURL)
 
-	// On-chain HTLC coordination (optional — requires BESU_RPC_URL + HTLC_ADDRESS).
-	var htlc ports.HTLCContractPort
-	if besuRPC := os.Getenv("BESU_RPC_URL"); besuRPC != "" {
-		htlcAddr := os.Getenv("HTLC_ADDRESS")
-		operatorKey := os.Getenv("BESU_OPERATOR_KEY")
-		chainIDStr := getEnv("BESU_CHAIN_ID", "1337")
-		chainID, err := strconv.ParseInt(chainIDStr, 10, 64)
+	// Shared Besu config — used by HTLC, FiatToken, and FXAgreement adapters.
+	besuRPC := os.Getenv("BESU_RPC_URL")
+	operatorKey := os.Getenv("BESU_OPERATOR_KEY")
+	chainIDStr := getEnv("BESU_CHAIN_ID", "1337")
+	var chainID int64
+	if besuRPC != "" {
+		var err error
+		chainID, err = strconv.ParseInt(chainIDStr, 10, 64)
 		if err != nil {
 			log.Fatalf("FATAL: invalid BESU_CHAIN_ID %q: %v", chainIDStr, err)
 		}
-		if htlcAddr == "" || operatorKey == "" {
-			log.Fatal("FATAL: HTLC_ADDRESS and BESU_OPERATOR_KEY are required when BESU_RPC_URL is set")
+		if operatorKey == "" {
+			log.Fatal("FATAL: BESU_OPERATOR_KEY is required when BESU_RPC_URL is set")
+		}
+	}
+
+	// On-chain HTLC coordination (optional — requires BESU_RPC_URL + HTLC_ADDRESS).
+	var htlc ports.HTLCContractPort
+	if besuRPC != "" {
+		htlcAddr := os.Getenv("HTLC_ADDRESS")
+		if htlcAddr == "" {
+			log.Fatal("FATAL: HTLC_ADDRESS is required when BESU_RPC_URL is set")
 		}
 		besuClient, err := besuAdapter.NewClient(besuAdapter.ClientConfig{
 			RPCURL:        besuRPC,
@@ -79,18 +89,29 @@ func main() {
 		logger.Warn("BESU_RPC_URL not set — on-chain HTLC coordination disabled")
 	}
 
+	// On-chain FXAgreement coordination (optional — requires BESU_RPC_URL + FX_AGREEMENT_ADDRESS).
+	var fxAgreement ports.FXAgreementContractPort
+	if fxAddr := os.Getenv("FX_AGREEMENT_ADDRESS"); fxAddr != "" && besuRPC != "" {
+		fxClient, err := besuAdapter.NewFXAgreementClient(besuAdapter.FXAgreementClientConfig{
+			RPCURL:             besuRPC,
+			ChainID:            chainID,
+			FXAgreementAddress: fxAddr,
+			PrivateKeyHex:      operatorKey,
+		}, logger)
+		if err != nil {
+			log.Fatalf("FATAL: fx agreement client: %v", err)
+		}
+		fxAgreement = fxClient
+		logger.Info("FXAgreement client configured", "address", fxAddr)
+	} else {
+		logger.Warn("FX_AGREEMENT_ADDRESS not set — FX agreement operations disabled")
+	}
+
 	// Fiat token client: real Besu adapter when FIAT_TOKEN_ADDRESS is set.
 	var fiat ports.FiatTokenPort
 	if fiatAddr := os.Getenv("FIAT_TOKEN_ADDRESS"); fiatAddr != "" {
-		besuRPC := getEnv("BESU_RPC_URL", "")
-		operatorKey := os.Getenv("BESU_OPERATOR_KEY")
-		chainIDStr := getEnv("BESU_CHAIN_ID", "1337")
-		chainID, err := strconv.ParseInt(chainIDStr, 10, 64)
-		if err != nil {
-			log.Fatalf("FATAL: invalid BESU_CHAIN_ID %q: %v", chainIDStr, err)
-		}
-		if besuRPC == "" || operatorKey == "" {
-			log.Fatal("FATAL: BESU_RPC_URL and BESU_OPERATOR_KEY are required when FIAT_TOKEN_ADDRESS is set")
+		if besuRPC == "" {
+			log.Fatal("FATAL: BESU_RPC_URL is required when FIAT_TOKEN_ADDRESS is set")
 		}
 		fiatClient, err := besuAdapter.NewFiatClient(besuAdapter.FiatClientConfig{
 			RPCURL:           besuRPC,
@@ -126,6 +147,7 @@ func main() {
 		Relay:       relay,
 		Fiat:        fiat,
 		EscrowRepo:  escrowRepo,
+		FXAgreement: fxAgreement,
 		SpokePrefix: spokePrefix,
 		Logger:      logger,
 	})

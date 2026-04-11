@@ -180,6 +180,11 @@ func (c *Client) resolveVerifier(ctx context.Context, identity string) (string, 
 	return addr, nil
 }
 
+// ResolveIdentity implements ports.ZetoOperator — public wrapper around resolveVerifier.
+func (c *Client) ResolveIdentity(ctx context.Context, identity string) (string, error) {
+	return c.resolveVerifier(ctx, identity)
+}
+
 func (c *Client) getLockedStateIDs(ctx context.Context, txID string) ([]string, error) {
 	reqBody := jsonRPCRequest{
 		JSONRPC: "2.0",

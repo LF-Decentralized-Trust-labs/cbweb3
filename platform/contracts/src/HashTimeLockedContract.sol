@@ -3,6 +3,8 @@ pragma solidity ^0.8.20;
 
 import {IHashTimeLockedContract} from "./interfaces/IHashTimeLockedContract.sol";
 import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
+import {IFXAgreement} from "./interfaces/IFXAgreement.sol";
+import {FXAgreementLibrary} from "./libraries/FXAgreementLibrary.sol";
 import {HashTimeLockedContractLibrary} from "./libraries/HashTimeLockedContractLibrary.sol";
 
 /// @title HashTimeLockedContract (HTLC) — Coordination Layer
@@ -14,13 +16,18 @@ contract HashTimeLockedContract is IHashTimeLockedContract {
     /// @notice The Identity Registry used for participant clearance gates.
     IIdentityRegistry public immutable IDENTITY_REGISTRY;
 
+    /// @notice The FXAgreement contract used for agreement gating (optional).
+    IFXAgreement public immutable FX_AGREEMENT;
+
     /// @dev Stores lock records indexed by `contractId`.
     mapping(bytes32 => HashTimeLockedContractLibrary.LockDetails) private _locks;
 
     /// @notice Initializes the HTLC with the IdentityRegistry for clearance gates.
     /// @param _identityRegistry Address of the IdentityRegistry contract.
-    constructor(address _identityRegistry) {
+    /// @param _fxAgreement Address of the FXAgreement contract (address(0) to disable gate).
+    constructor(address _identityRegistry, address _fxAgreement) {
         IDENTITY_REGISTRY = IIdentityRegistry(_identityRegistry);
+        FX_AGREEMENT = IFXAgreement(_fxAgreement);
     }
 
     /// @notice Ensures the given account is a verified participant in the IdentityRegistry.
@@ -37,7 +44,7 @@ contract HashTimeLockedContract is IHashTimeLockedContract {
     }
 
     /// @inheritdoc IHashTimeLockedContract
-    function lock(bytes32 contractId, address receiver, bytes32 hashLock, uint256 timeLock, bytes32 zetoLockRef)
+    function lock(bytes32 contractId, address receiver, bytes32 hashLock, uint256 timeLock, bytes32 zetoLockRef, bytes32 agreementId)
         external
         onlyVerified(msg.sender)
         onlyVerified(receiver)
@@ -47,6 +54,17 @@ contract HashTimeLockedContract is IHashTimeLockedContract {
         }
         if (timeLock <= block.timestamp) {
             revert HTLC__TimeLockExpired();
+        }
+
+        // FX Agreement gate
+        if (address(FX_AGREEMENT) != address(0) && agreementId != bytes32(0)) {
+            FXAgreementLibrary.FxAgreement memory agreement = FX_AGREEMENT.getAgreement(agreementId);
+            if (agreement.state != FXAgreementLibrary.AgreementState.ACCEPTED) {
+                revert HTLC__AgreementNotAccepted();
+            }
+            if (agreement.expiryDate > 0 && block.timestamp > agreement.expiryDate) {
+                revert HTLC__AgreementExpired();
+            }
         }
 
         _locks[contractId] = HashTimeLockedContractLibrary.LockDetails({

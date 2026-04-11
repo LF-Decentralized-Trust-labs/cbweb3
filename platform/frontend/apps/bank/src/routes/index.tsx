@@ -2,6 +2,9 @@ import type { RouteObject } from "react-router-dom";
 import { Navigate } from "react-router-dom";
 import { ProtectedRoute } from "../components/auth/ProtectedRoute";
 import { AppLayout } from "../components/layout/AppLayout";
+import { AgreementDetailPage } from "../pages/AgreementDetailPage";
+import { AgreementInboxPage } from "../pages/AgreementInboxPage";
+import { AgreementProposalPage } from "../pages/AgreementProposalPage";
 import { AMMTradingPage } from "../pages/AMMTradingPage";
 import { ComplianceCenterPage } from "../pages/ComplianceCenterPage";
 import { DashboardPage } from "../pages/DashboardPage";
@@ -33,6 +36,14 @@ export const routes: RouteObject[] = [
           { path: "deposits", element: <DepositsPage /> },
           { path: "escrows", element: <EscrowsPage /> },
           { path: "redeems", element: <RedeemsPage /> },
+          {
+            path: "agreements",
+            children: [
+              { index: true, element: <AgreementInboxPage /> },
+              { path: "new", element: <AgreementProposalPage /> },
+              { path: ":tradeId", element: <AgreementDetailPage /> },
+            ],
+          },
           {
             path: "htlc",
             children: [

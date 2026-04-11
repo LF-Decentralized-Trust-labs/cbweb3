@@ -55,11 +55,17 @@ HTTP_CONNECT_TIMEOUT_SECONDS="${HTTP_CONNECT_TIMEOUT_SECONDS:-10}"
 HTTP_TIMEOUT_SECONDS="${HTTP_TIMEOUT_SECONDS:-120}"
 LOCK_WITH_HASH_TIMEOUT_SECONDS="${LOCK_WITH_HASH_TIMEOUT_SECONDS:-420}"
 
+# FX agreement defaults
+SEND_AMOUNT="${SEND_AMOUNT:-1000}"
+RECEIVE_AMOUNT="${RECEIVE_AMOUNT:-5500}"
+
 # Paladin identities (intra-spoke)
 IDENTITY_BANK_A="funded_operator@spoke-a-bank-a"
 IDENTITY_BANK_B="funded_operator@spoke-b-bank-b"
 IDENTITY_BANK_C="funded_operator@spoke-a-bank-c"
 IDENTITY_BANK_D="funded_operator@spoke-b-bank-d"
+IDENTITY_CB_A="funded_operator@spoke-a-cb"
+IDENTITY_CB_B="funded_operator@spoke-b-cb"
 
 # Timeout waiting for Cacti to auto-settle on Spoke-B
 RELAY_SETTLE_TIMEOUT="${RELAY_SETTLE_TIMEOUT:-30}"
@@ -102,6 +108,11 @@ BALANCE_A_AFTER=""
 BALANCE_B_AFTER=""
 BALANCE_C_AFTER=""
 BALANCE_D_AFTER=""
+
+# FX Agreement
+TRADE_ID=""
+FX_SA_STATE=""
+FX_SB_STATE=""
 
 # ---------------------------------------------------------------------------
 # Dependency checks
@@ -285,6 +296,60 @@ phase_0_onboarding() {
 }
 
 # ---------------------------------------------------------------------------
+# Phase 2b - FX Agreement
+# ---------------------------------------------------------------------------
+
+propose_fx_agreement() {
+  local expiry resp
+  expiry=$(( $(date +%s) + 86400 ))
+  resp=$(http_post "$BANK_A_URL/payments/fx/agreements" "$BANK_A_TOKEN" \
+    "$(jq -n \
+      --arg cb "${IDENTITY_BANK_D}" \
+      --arg sa "${IDENTITY_CB_A}" \
+      --arg cu "${IDENTITY_BANK_D}" \
+      --arg bf "${IDENTITY_BANK_B}" \
+      --arg sar "${IDENTITY_BANK_C}" \
+      --arg sbr "${IDENTITY_BANK_B}" \
+      --arg oa "$SEND_AMOUNT" \
+      --arg ca "$RECEIVE_AMOUNT" \
+      --arg rate "5500000000000000000" \
+      --argjson exp "$expiry" \
+      '{
+        counterparty_b: $cb,
+        settlement_agent: $sa,
+        custodian: $cu,
+        beneficiary: $bf,
+        spoke_a_receiver: $sar,
+        spoke_b_receiver: $sbr,
+        origin_amount: $oa,
+        counter_amount: $ca,
+        origin_currency: "BRL",
+        counter_currency: "EUR",
+        rate: $rate,
+        expiry_date: $exp
+      }')" \
+    "201")
+  TRADE_ID=$(echo "$resp" | jq -r '.trade_id')
+  echo "$resp" | jq .
+}
+
+accept_fx_agreement() {
+  local resp
+  resp=$(http_post "$BANK_D_URL/payments/fx/agreements/${TRADE_ID}/accept" "$BANK_D_TOKEN" \
+    '{}' \
+    "200")
+  echo "$resp" | jq .
+}
+
+verify_fx_agreement() {
+  local sa_resp sb_resp
+  sa_resp=$(http_get "$BANK_A_URL/payments/fx/agreements/${TRADE_ID}" "$BANK_A_TOKEN" "200")
+  FX_SA_STATE=$(echo "$sa_resp" | jq -r '.agreement.state')
+  sb_resp=$(http_get "$BANK_D_URL/payments/fx/agreements/${TRADE_ID}" "$BANK_D_TOKEN" "200")
+  FX_SB_STATE=$(echo "$sb_resp" | jq -r '.agreement.state')
+}
+
+# ---------------------------------------------------------------------------
 # Phase 3 - Lock on Spoke-A (A -> C)
 # ---------------------------------------------------------------------------
 
@@ -293,7 +358,7 @@ lock_htlc_spoke_a() {
   time_lock=$(( $(date +%s) + 3600 ))
   resp=$(http_post "$BANK_A_URL/htlc/lock" "$BANK_A_TOKEN" \
     "$(jq -n \
-      --arg aid "FX_CROSS_SPOKE_A_C_D_B_001" \
+      --arg aid "${TRADE_ID:-FX_CROSS_SPOKE_A_C_D_B_001}" \
       --arg rcv "$IDENTITY_BANK_C" \
       --arg amt "$LOCK_AMOUNT" \
       --argjson tl "$time_lock" \
@@ -332,7 +397,7 @@ lock_htlc_spoke_b() {
   local time_lock resp payload tmp code body
   time_lock=$(( $(date +%s) + 1800 ))
   payload=$(jq -n \
-    --arg aid "FX_CROSS_SPOKE_A_C_D_B_001" \
+    --arg aid "${TRADE_ID:-FX_CROSS_SPOKE_A_C_D_B_001}" \
     --arg rcv "$IDENTITY_BANK_B" \
     --arg amt "$LOCK_AMOUNT" \
     --argjson tl "$time_lock" \
@@ -359,7 +424,7 @@ lock_htlc_spoke_b() {
 
     # Recovery path: request may have been processed even if client timed out.
     # Search by agreement_id + receiver and pick the latest locked contract.
-    resp=$(http_get "$BANK_D_URL/htlc/search?agreement_id=FX_CROSS_SPOKE_A_C_D_B_001&receiver=$IDENTITY_BANK_B&state=LOCKED" "$BANK_D_TOKEN" "200")
+    resp=$(http_get "$BANK_D_URL/htlc/search?agreement_id=${TRADE_ID:-FX_CROSS_SPOKE_A_C_D_B_001}&receiver=$IDENTITY_BANK_B&state=LOCKED" "$BANK_D_TOKEN" "200")
     CONTRACT_ID_D=$(echo "$resp" | jq -r '.locks[-1].contract_id // empty')
     ZETO_TX_LOCK_D=$(echo "$resp" | jq -r '.locks[-1].zeto_tx_hash // empty')
     if [ -z "$CONTRACT_ID_D" ]; then
@@ -550,8 +615,31 @@ main() {
   echo "  Bank-D: $BALANCE_D_BEFORE"
 
   echo ""
+  echo "=== Phase 2b - FX Agreement ==="
+
+  echo ""
+  echo "--- [1/4] Bank A proposes FX agreement on Spoke-A ---"
+  propose_fx_agreement
+  echo "  Trade ID: $TRADE_ID"
+
+  echo ""
+  echo "--- [2/4] Waiting for relay to forward to Spoke-B ---"
+  sleep 10
+
+  echo ""
+  echo "--- [3/4] Bank D accepts FX agreement on Spoke-B ---"
+  accept_fx_agreement
+
+  echo ""
+  echo "--- [4/4] Waiting for relay + verifying agreement status ---"
+  sleep 10
+  verify_fx_agreement
+  echo "  Spoke-A state: $FX_SA_STATE"
+  echo "  Spoke-B state: $FX_SB_STATE"
+
+  echo ""
   echo "=== Phase 3 - Lock on Spoke-A (Bank-A -> Bank-C) ==="
-  echo "  agreement: FX_CROSS_SPOKE_A_C_D_B_001"
+  echo "  agreement: ${TRADE_ID:-FX_CROSS_SPOKE_A_C_D_B_001}"
   echo "  receiver : $IDENTITY_BANK_C"
   lock_htlc_spoke_a
   echo "  contract_id : $CONTRACT_ID_A"

@@ -21,7 +21,7 @@ contract DeployHTLC is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        htlc = new HashTimeLockedContract(identityRegistryAddress);
+        htlc = new HashTimeLockedContract(identityRegistryAddress, address(0));
 
         vm.stopBroadcast();
     }

@@ -7,3 +7,4 @@ export * from "./compliance.types";
 export * from "./events.types";
 export * from "./onboarding.types";
 export * from "./payment.types";
+export * from "./fx-agreement.types";

@@ -11,6 +11,8 @@ export interface SpokeConfig {
   besuRpc: string;
   /** Deployed HTLC contract address on this spoke (0x-prefixed). */
   htlcAddress: string;
+  /** Internal api-gateway URL for polling FX agreements (e.g. "http://host:18080"). */
+  internalApiUrl: string;
   /** gRPC target for the counterpart spoke's payment-orchestrator (e.g. "host:29094"). */
   counterpartGrpc: string;
 }
@@ -32,6 +34,7 @@ export const config = {
     name: "spoke-a",
     besuRpc: requireEnv("SPOKE_A_BESU_RPC"),
     htlcAddress: requireEnv("SPOKE_A_HTLC_ADDRESS"),
+    internalApiUrl: requireEnv("SPOKE_A_INTERNAL_API"),
     counterpartGrpc: requireEnv("SPOKE_B_PAYMENT_GRPC"),
   } satisfies SpokeConfig,
 
@@ -39,6 +42,7 @@ export const config = {
     name: "spoke-b",
     besuRpc: requireEnv("SPOKE_B_BESU_RPC"),
     htlcAddress: requireEnv("SPOKE_B_HTLC_ADDRESS"),
+    internalApiUrl: requireEnv("SPOKE_B_INTERNAL_API"),
     counterpartGrpc: requireEnv("SPOKE_A_PAYMENT_GRPC"),
   } satisfies SpokeConfig,
 

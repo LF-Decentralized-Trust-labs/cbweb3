@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/identity"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -26,13 +28,15 @@ type paymentOrchestratorService struct {
 	zeto        ports.ZetoOperator
 	htlc        ports.HTLCContractPort // on-chain HTLC coordination (may be nil)
 	relay       ports.InteroperabilityPort
-	fiat        ports.FiatTokenPort    // on-chain fCeBM operations (may be nil)
-	escrowRepo  ports.EscrowRepository // escrow flow persistence
-	spokePrefix string                 // e.g. "spoke-a" — extracted from PALADIN_IDENTITY; empty disables validation
+	fiat        ports.FiatTokenPort           // on-chain fCeBM operations (may be nil)
+	escrowRepo  ports.EscrowRepository        // escrow flow persistence
+	fxAgreement ports.FXAgreementContractPort // on-chain FX agreement (may be nil)
+	spokePrefix string                        // e.g. "spoke-a" — extracted from PALADIN_IDENTITY; empty disables validation
 	logger      *slog.Logger
 
-	mu    sync.RWMutex
-	htlcs map[string]*domain.HTLCRecord
+	mu           sync.RWMutex
+	htlcs        map[string]*domain.HTLCRecord
+	fxAgreements map[string]*domain.FXAgreementRecord
 }
 
 // Config holds the dependencies for the gRPC server.
@@ -40,23 +44,26 @@ type Config struct {
 	Zeto        ports.ZetoOperator
 	HTLC        ports.HTLCContractPort // optional — nil disables on-chain coordination
 	Relay       ports.InteroperabilityPort
-	Fiat        ports.FiatTokenPort    // optional — nil disables fCeBM operations
-	EscrowRepo  ports.EscrowRepository // optional — nil disables escrow flow
-	SpokePrefix string                 // e.g. "spoke-a" — empty disables receiver locality check
+	Fiat        ports.FiatTokenPort           // optional — nil disables fCeBM operations
+	EscrowRepo  ports.EscrowRepository        // optional — nil disables escrow flow
+	FXAgreement ports.FXAgreementContractPort // optional — nil disables FX agreement
+	SpokePrefix string                        // e.g. "spoke-a" — empty disables receiver locality check
 	Logger      *slog.Logger
 }
 
 // New builds a configured gRPC server with all payment-orchestrator handlers.
 func New(cfg Config) *grpc.Server {
 	svc := &paymentOrchestratorService{
-		zeto:        cfg.Zeto,
-		htlc:        cfg.HTLC,
-		relay:       cfg.Relay,
-		fiat:        cfg.Fiat,
-		escrowRepo:  cfg.EscrowRepo,
-		spokePrefix: cfg.SpokePrefix,
-		logger:      cfg.Logger,
-		htlcs:       make(map[string]*domain.HTLCRecord),
+		zeto:         cfg.Zeto,
+		htlc:         cfg.HTLC,
+		relay:        cfg.Relay,
+		fiat:         cfg.Fiat,
+		escrowRepo:   cfg.EscrowRepo,
+		fxAgreement:  cfg.FXAgreement,
+		spokePrefix:  cfg.SpokePrefix,
+		logger:       cfg.Logger,
+		htlcs:        make(map[string]*domain.HTLCRecord),
+		fxAgreements: make(map[string]*domain.FXAgreementRecord),
 	}
 	grpcServer := grpc.NewServer()
 	pb.RegisterPaymentOrchestratorServiceServer(grpcServer, svc)
@@ -101,6 +108,30 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 		req.TimeLock = uint64(time.Now().Unix()) + 3600 // 1h — initiator must have longer timelock
 	}
 
+	// FX Agreement gate: if an agreement_id references a known FX agreement, verify it's accepted
+	// and that the HTLC terms (receiver + amount) match the agreed values for this spoke leg.
+	var agreementIDBytes [32]byte
+	if req.AgreementId != "" {
+		s.mu.RLock()
+		if fxRecord, fxOK := s.fxAgreements[req.AgreementId]; fxOK {
+			if fxRecord.State != domain.FXStateAccepted {
+				s.mu.RUnlock()
+				return nil, status.Error(codes.FailedPrecondition, "FX agreement must be accepted before locking HTLC")
+			}
+			if fxRecord.ExpiryDate > 0 && uint64(time.Now().Unix()) > fxRecord.ExpiryDate {
+				s.mu.RUnlock()
+				return nil, status.Error(codes.FailedPrecondition, "FX agreement has expired")
+			}
+			// Enforce receiver and amount match the agreed terms for this spoke leg.
+			if err := s.validateHTLCTermsAgainstAgreement(req.Receiver, req.Amount, fxRecord); err != nil {
+				s.mu.RUnlock()
+				return nil, err
+			}
+			// agreementIDBytes stays zero — on-chain gate bypassed (FX agreement is service-layer only).
+		}
+		s.mu.RUnlock()
+	}
+
 	// 1. Generate secret and hashLock
 	secretBytes := make([]byte, 32)
 	if _, err := rand.Read(secretBytes); err != nil {
@@ -136,6 +167,7 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 			HashLock:    hashLockBytes,
 			TimeLock:    req.TimeLock,
 			ZetoLockRef: zetoRefBytes,
+			AgreementID: agreementIDBytes,
 		})
 		if err != nil {
 			s.logger.Error("on-chain HTLC lock failed — rolling back Zeto lock", "error", err)
@@ -198,6 +230,30 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 		req.TimeLock = uint64(time.Now().Unix()) + 1800 // 30min — responder must have shorter timelock than initiator
 	}
 
+	// FX Agreement gate: if an agreement_id references a known FX agreement, verify it's accepted
+	// and that the HTLC terms (receiver + amount) match the agreed values for this spoke leg.
+	var agreementIDBytes2 [32]byte
+	if req.AgreementId != "" {
+		s.mu.RLock()
+		if fxRecord, fxOK := s.fxAgreements[req.AgreementId]; fxOK {
+			if fxRecord.State != domain.FXStateAccepted {
+				s.mu.RUnlock()
+				return nil, status.Error(codes.FailedPrecondition, "FX agreement must be accepted before locking HTLC")
+			}
+			if fxRecord.ExpiryDate > 0 && uint64(time.Now().Unix()) > fxRecord.ExpiryDate {
+				s.mu.RUnlock()
+				return nil, status.Error(codes.FailedPrecondition, "FX agreement has expired")
+			}
+			// Enforce receiver and amount match the agreed terms for this spoke leg.
+			if err := s.validateHTLCTermsAgainstAgreement(req.Receiver, req.Amount, fxRecord); err != nil {
+				s.mu.RUnlock()
+				return nil, err
+			}
+			// agreementIDBytes2 stays zero — on-chain gate bypassed (FX agreement is service-layer only).
+		}
+		s.mu.RUnlock()
+	}
+
 	// Decode the externally provided hashLock
 	hashLockBytes, err := hex.DecodeString(req.HashLock)
 	if err != nil || len(hashLockBytes) != 32 {
@@ -232,6 +288,7 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 			HashLock:    hashLock32,
 			TimeLock:    req.TimeLock,
 			ZetoLockRef: zetoRefBytes,
+			AgreementID: agreementIDBytes2,
 		})
 		if err != nil {
 			s.logger.Error("on-chain HTLC lock failed — rolling back Zeto lock", "error", err)
@@ -580,35 +637,269 @@ func (s *paymentOrchestratorService) GetFiatBalance(ctx context.Context, _ *pb.G
 }
 
 // --- FX Agreement Operations ---
-// These will call the FXAgreement.sol Besu contract via the blockchain client.
-// For now, they are stubs that return unimplemented.
 
-func (s *paymentOrchestratorService) ProposeFXAgreement(_ context.Context, _ *pb.ProposeFXAgreementRequest) (*pb.ProposeFXAgreementResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "FX agreement operations require Besu contract integration — coming in next sprint")
+func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req *pb.ProposeFXAgreementRequest) (*pb.ProposeFXAgreementResponse, error) {
+	if req.CounterpartyB == "" || req.OriginAmount == "" || req.CounterAmount == "" ||
+		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
+		return nil, status.Error(codes.InvalidArgument, "counterparty_b, origin_amount, counter_amount, origin_currency, counter_currency, rate, and expiry_date are required")
+	}
+
+	tradeID := req.TradeId
+	if tradeID == "" {
+		tradeID = newUUID()
+	}
+
+	// FX Agreement is a service-layer-only record — no on-chain submission.
+	// Party fields are stored as Paladin identities; no EVM address resolution needed.
+	var txHash string
+	if false { // kept for future optional on-chain audit path
+		params, err := buildFXProposalParams(tradeID, req)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid FX proposal params: %v", err)
+		}
+		if req.OnBehalf {
+			txHash, err = s.fxAgreement.ProposeOnBehalf(ctx, params)
+		} else {
+			txHash, err = s.fxAgreement.Propose(ctx, params)
+		}
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "on-chain FX propose: %v", err)
+		}
+	}
+
+	record := &domain.FXAgreementRecord{
+		TradeID:         tradeID,
+		Originator:      req.Originator,
+		CounterpartyB:   req.CounterpartyB,
+		SettlementAgent: req.SettlementAgent,
+		Custodian:       req.Custodian,
+		Beneficiary:     req.Beneficiary,
+		OriginAmount:    req.OriginAmount,
+		CounterAmount:   req.CounterAmount,
+		OriginCurrency:  req.OriginCurrency,
+		CounterCurrency: req.CounterCurrency,
+		Rate:            req.Rate,
+		SpokeAReceiver:  req.SpokeAReceiver,
+		SpokeBReceiver:  req.SpokeBReceiver,
+		ExpiryDate:      req.ExpiryDate,
+		State:           domain.FXStateProposed,
+		OnChainTxHash:   txHash,
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+	}
+
+	s.mu.Lock()
+	s.fxAgreements[tradeID] = record
+	s.mu.Unlock()
+
+	s.logger.Info("FX agreement proposed", "trade_id", tradeID, "on_behalf", req.OnBehalf)
+
+	return &pb.ProposeFXAgreementResponse{
+		TradeId: tradeID,
+		TxHash:  txHash,
+	}, nil
 }
 
-func (s *paymentOrchestratorService) AcceptFXAgreement(_ context.Context, _ *pb.AcceptFXAgreementRequest) (*pb.AcceptFXAgreementResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "not yet implemented")
+func (s *paymentOrchestratorService) AcceptFXAgreement(ctx context.Context, req *pb.AcceptFXAgreementRequest) (*pb.AcceptFXAgreementResponse, error) {
+	if req.TradeId == "" {
+		return nil, status.Error(codes.InvalidArgument, "trade_id is required")
+	}
+
+	s.mu.Lock()
+	record, ok := s.fxAgreements[req.TradeId]
+	if !ok {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.NotFound, "FX agreement %q not found", req.TradeId)
+	}
+	if record.State != domain.FXStateProposed {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.FailedPrecondition, "FX agreement %q is in state %s, expected PROPOSED", req.TradeId, record.State)
+	}
+	s.mu.Unlock()
+
+	var txHash string
+	if s.fxAgreement != nil {
+		var tradeIDBytes [32]byte
+		copy(tradeIDBytes[:], tradeIDBytes32(req.TradeId))
+		var err error
+		if req.OnBehalf {
+			txHash, err = s.fxAgreement.AcceptOnBehalf(ctx, tradeIDBytes)
+		} else {
+			txHash, err = s.fxAgreement.Accept(ctx, tradeIDBytes)
+		}
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "on-chain FX accept: %v", err)
+		}
+	}
+
+	s.mu.Lock()
+	record.State = domain.FXStateAccepted
+	record.OnChainTxHash = txHash
+	record.UpdatedAt = time.Now().UTC()
+	s.mu.Unlock()
+
+	s.logger.Info("FX agreement accepted", "trade_id", req.TradeId, "on_behalf", req.OnBehalf)
+
+	return &pb.AcceptFXAgreementResponse{TxHash: txHash}, nil
 }
 
-func (s *paymentOrchestratorService) RejectFXAgreement(_ context.Context, _ *pb.RejectFXAgreementRequest) (*pb.RejectFXAgreementResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "not yet implemented")
+func (s *paymentOrchestratorService) RejectFXAgreement(ctx context.Context, req *pb.RejectFXAgreementRequest) (*pb.RejectFXAgreementResponse, error) {
+	if req.TradeId == "" {
+		return nil, status.Error(codes.InvalidArgument, "trade_id is required")
+	}
+
+	s.mu.Lock()
+	record, ok := s.fxAgreements[req.TradeId]
+	if !ok {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.NotFound, "FX agreement %q not found", req.TradeId)
+	}
+	if record.State != domain.FXStateProposed {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.FailedPrecondition, "FX agreement %q is in state %s, expected PROPOSED", req.TradeId, record.State)
+	}
+	s.mu.Unlock()
+
+	var txHash string
+	if s.fxAgreement != nil {
+		var tradeIDBytes [32]byte
+		copy(tradeIDBytes[:], tradeIDBytes32(req.TradeId))
+		var err error
+		if req.OnBehalf {
+			txHash, err = s.fxAgreement.RejectOnBehalf(ctx, tradeIDBytes)
+		} else {
+			txHash, err = s.fxAgreement.Reject(ctx, tradeIDBytes)
+		}
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "on-chain FX reject: %v", err)
+		}
+	}
+
+	s.mu.Lock()
+	record.State = domain.FXStateRejected
+	record.OnChainTxHash = txHash
+	record.UpdatedAt = time.Now().UTC()
+	s.mu.Unlock()
+
+	s.logger.Info("FX agreement rejected", "trade_id", req.TradeId, "on_behalf", req.OnBehalf)
+
+	return &pb.RejectFXAgreementResponse{TxHash: txHash}, nil
 }
 
-func (s *paymentOrchestratorService) CancelFXAgreement(_ context.Context, _ *pb.CancelFXAgreementRequest) (*pb.CancelFXAgreementResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "not yet implemented")
+func (s *paymentOrchestratorService) CancelFXAgreement(ctx context.Context, req *pb.CancelFXAgreementRequest) (*pb.CancelFXAgreementResponse, error) {
+	if req.TradeId == "" {
+		return nil, status.Error(codes.InvalidArgument, "trade_id is required")
+	}
+
+	s.mu.Lock()
+	record, ok := s.fxAgreements[req.TradeId]
+	if !ok {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.NotFound, "FX agreement %q not found", req.TradeId)
+	}
+	if record.State != domain.FXStateProposed {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.FailedPrecondition, "FX agreement %q is in state %s, expected PROPOSED", req.TradeId, record.State)
+	}
+	s.mu.Unlock()
+
+	var txHash string
+	if s.fxAgreement != nil {
+		var tradeIDBytes [32]byte
+		copy(tradeIDBytes[:], tradeIDBytes32(req.TradeId))
+		var err error
+		txHash, err = s.fxAgreement.Cancel(ctx, tradeIDBytes)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "on-chain FX cancel: %v", err)
+		}
+	}
+
+	s.mu.Lock()
+	record.State = domain.FXStateCancelled
+	record.OnChainTxHash = txHash
+	record.UpdatedAt = time.Now().UTC()
+	s.mu.Unlock()
+
+	s.logger.Info("FX agreement cancelled", "trade_id", req.TradeId)
+
+	return &pb.CancelFXAgreementResponse{TxHash: txHash}, nil
 }
 
-func (s *paymentOrchestratorService) SettleFXAgreement(_ context.Context, _ *pb.SettleFXAgreementRequest) (*pb.SettleFXAgreementResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "not yet implemented")
+func (s *paymentOrchestratorService) SettleFXAgreement(ctx context.Context, req *pb.SettleFXAgreementRequest) (*pb.SettleFXAgreementResponse, error) {
+	if req.TradeId == "" {
+		return nil, status.Error(codes.InvalidArgument, "trade_id is required")
+	}
+
+	s.mu.Lock()
+	record, ok := s.fxAgreements[req.TradeId]
+	if !ok {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.NotFound, "FX agreement %q not found", req.TradeId)
+	}
+	if record.State != domain.FXStateAccepted {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.FailedPrecondition, "FX agreement %q is in state %s, expected ACCEPTED", req.TradeId, record.State)
+	}
+	s.mu.Unlock()
+
+	var txHash string
+	if s.fxAgreement != nil {
+		var tradeIDBytes [32]byte
+		copy(tradeIDBytes[:], tradeIDBytes32(req.TradeId))
+		var err error
+		txHash, err = s.fxAgreement.Settle(ctx, tradeIDBytes)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "on-chain FX settle: %v", err)
+		}
+	}
+
+	s.mu.Lock()
+	record.State = domain.FXStateSettled
+	record.OnChainTxHash = txHash
+	record.UpdatedAt = time.Now().UTC()
+	s.mu.Unlock()
+
+	s.logger.Info("FX agreement settled", "trade_id", req.TradeId)
+
+	return &pb.SettleFXAgreementResponse{TxHash: txHash}, nil
 }
 
-func (s *paymentOrchestratorService) GetFXAgreement(_ context.Context, _ *pb.GetFXAgreementRequest) (*pb.GetFXAgreementResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "not yet implemented")
+func (s *paymentOrchestratorService) GetFXAgreement(_ context.Context, req *pb.GetFXAgreementRequest) (*pb.GetFXAgreementResponse, error) {
+	if req.TradeId == "" {
+		return nil, status.Error(codes.InvalidArgument, "trade_id is required")
+	}
+
+	s.mu.RLock()
+	record, ok := s.fxAgreements[req.TradeId]
+	s.mu.RUnlock()
+
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "FX agreement %q not found", req.TradeId)
+	}
+
+	return &pb.GetFXAgreementResponse{
+		Agreement: fxRecordToProto(record),
+	}, nil
 }
 
-func (s *paymentOrchestratorService) ListFXAgreements(_ context.Context, _ *pb.ListFXAgreementsRequest) (*pb.ListFXAgreementsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "not yet implemented")
+func (s *paymentOrchestratorService) ListFXAgreements(_ context.Context, req *pb.ListFXAgreementsRequest) (*pb.ListFXAgreementsResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var results []*pb.FXAgreement
+	// Accept both "FX_STATE_ACCEPTED" (proto-style) and "ACCEPTED" (domain-style) filters.
+	stateFilter := strings.TrimPrefix(req.State, "FX_STATE_")
+	for _, r := range s.fxAgreements {
+		if req.Counterparty != "" && r.CounterpartyB != req.Counterparty && r.Originator != req.Counterparty {
+			continue
+		}
+		if stateFilter != "" && string(r.State) != stateFilter {
+			continue
+		}
+		results = append(results, fxRecordToProto(r))
+	}
+
+	return &pb.ListFXAgreementsResponse{Agreements: results}, nil
 }
 
 // --- Helpers ---
@@ -647,4 +938,157 @@ func recordToProto(r *domain.HTLCRecord) *pb.HTLCLock {
 		ZetoLockRef: r.ZetoLockRef,
 		State:       stateMap[r.State],
 	}
+}
+
+func fxRecordToProto(r *domain.FXAgreementRecord) *pb.FXAgreement {
+	stateMap := map[domain.FXState]pb.FXAgreementState{
+		domain.FXStateInvalid:   pb.FXAgreementState_FX_STATE_INVALID,
+		domain.FXStateProposed:  pb.FXAgreementState_FX_STATE_PROPOSED,
+		domain.FXStateAccepted:  pb.FXAgreementState_FX_STATE_ACCEPTED,
+		domain.FXStateRejected:  pb.FXAgreementState_FX_STATE_REJECTED,
+		domain.FXStateCancelled: pb.FXAgreementState_FX_STATE_CANCELLED,
+		domain.FXStateSettled:   pb.FXAgreementState_FX_STATE_SETTLED,
+	}
+	return &pb.FXAgreement{
+		TradeId:         r.TradeID,
+		Originator:      r.Originator,
+		CounterpartyB:   r.CounterpartyB,
+		SettlementAgent: r.SettlementAgent,
+		Custodian:       r.Custodian,
+		Beneficiary:     r.Beneficiary,
+		OriginAmount:    r.OriginAmount,
+		CounterAmount:   r.CounterAmount,
+		OriginCurrency:  r.OriginCurrency,
+		CounterCurrency: r.CounterCurrency,
+		Rate:            r.Rate,
+		ExpiryDate:      r.ExpiryDate,
+		State:           stateMap[r.State],
+	}
+}
+
+// tradeIDBytes32 converts a trade ID string to bytes for the on-chain [32]byte parameter.
+// If hex-decodable, uses the hex bytes; otherwise hashes the string.
+func tradeIDBytes32(tradeID string) []byte {
+	b, err := hex.DecodeString(tradeID)
+	if err == nil && len(b) == 32 {
+		return b
+	}
+	h := sha256.Sum256([]byte(tradeID))
+	return h[:]
+}
+
+// tradeIDBytes is an alias used in the FX agreement gate for HTLC lock.
+func tradeIDBytes(tradeID string) []byte {
+	return tradeIDBytes32(tradeID)
+}
+
+// validateHTLCTermsAgainstAgreement checks that the HTLC receiver and amount match
+// the FX agreement terms for the current spoke leg. It is called while s.mu is held for read,
+// so it must not acquire the lock itself.
+//
+// Spoke-A leg  → receiver must be SpokeAReceiver, amount must be OriginAmount.
+// Spoke-B leg  → receiver must be SpokeBReceiver, amount must be CounterAmount.
+// If SpokePrefix is empty (dev mode) or the agreement has no receivers set, the check is skipped.
+func (s *paymentOrchestratorService) validateHTLCTermsAgainstAgreement(
+	receiver, amount string,
+	fx *domain.FXAgreementRecord,
+) error {
+	if s.spokePrefix == "" {
+		return nil // dev mode — skip enforcement
+	}
+
+	var expectedReceiver, expectedAmount string
+	if strings.HasPrefix(s.spokePrefix, "spoke-a") {
+		expectedReceiver = fx.SpokeAReceiver
+		expectedAmount = fx.OriginAmount
+	} else {
+		expectedReceiver = fx.SpokeBReceiver
+		expectedAmount = fx.CounterAmount
+	}
+
+	if expectedReceiver != "" && receiver != expectedReceiver {
+		return status.Errorf(codes.FailedPrecondition,
+			"HTLC receiver %q does not match FX agreement receiver %q for %s",
+			receiver, expectedReceiver, s.spokePrefix)
+	}
+	if expectedAmount != "" && amount != expectedAmount {
+		return status.Errorf(codes.FailedPrecondition,
+			"HTLC amount %q does not match FX agreement amount %q for %s",
+			amount, expectedAmount, s.spokePrefix)
+	}
+	return nil
+}
+
+// resolveFXPartyAddresses resolves any Paladin identity strings in the proposal request
+// to their EVM addresses using ptx_resolveVerifier. Fields that are already 0x-prefixed
+// addresses are left unchanged. This allows callers (and the frontend) to use Paladin
+// identities (e.g. "funded_operator@spoke-a-bank-c") for all party fields.
+func resolveFXPartyAddresses(ctx context.Context, req *pb.ProposeFXAgreementRequest, zeto ports.ZetoOperator) (*pb.ProposeFXAgreementRequest, error) {
+	if zeto == nil {
+		return req, nil // no Paladin configured — pass through (dev/test mode)
+	}
+	resolved := *req // shallow copy — safe since we only replace string scalars
+
+	resolve := func(field string) (string, error) {
+		if field == "" || strings.HasPrefix(field, "0x") || strings.HasPrefix(field, "0X") {
+			return field, nil // already an address or empty — skip
+		}
+		return zeto.ResolveIdentity(ctx, field)
+	}
+
+	var err error
+	if resolved.Originator, err = resolve(req.Originator); err != nil {
+		return nil, fmt.Errorf("originator: %w", err)
+	}
+	if resolved.CounterpartyB, err = resolve(req.CounterpartyB); err != nil {
+		return nil, fmt.Errorf("counterparty_b: %w", err)
+	}
+	if resolved.SettlementAgent, err = resolve(req.SettlementAgent); err != nil {
+		return nil, fmt.Errorf("settlement_agent: %w", err)
+	}
+	if resolved.Custodian, err = resolve(req.Custodian); err != nil {
+		return nil, fmt.Errorf("custodian: %w", err)
+	}
+	if resolved.Beneficiary, err = resolve(req.Beneficiary); err != nil {
+		return nil, fmt.Errorf("beneficiary: %w", err)
+	}
+	return &resolved, nil
+}
+
+// buildFXProposalParams converts gRPC request fields to the on-chain proposal params.
+func buildFXProposalParams(tradeID string, req *pb.ProposeFXAgreementRequest) (ports.FXProposalParams, error) {
+	var tid [32]byte
+	copy(tid[:], tradeIDBytes32(tradeID))
+
+	originAmount, ok := new(big.Int).SetString(req.OriginAmount, 10)
+	if !ok {
+		return ports.FXProposalParams{}, fmt.Errorf("invalid origin_amount: %s", req.OriginAmount)
+	}
+	counterAmount, ok := new(big.Int).SetString(req.CounterAmount, 10)
+	if !ok {
+		return ports.FXProposalParams{}, fmt.Errorf("invalid counter_amount: %s", req.CounterAmount)
+	}
+	rate, ok := new(big.Int).SetString(req.Rate, 10)
+	if !ok {
+		return ports.FXProposalParams{}, fmt.Errorf("invalid rate: %s", req.Rate)
+	}
+
+	var originCurrency, counterCurrency [32]byte
+	copy(originCurrency[:], []byte(req.OriginCurrency))
+	copy(counterCurrency[:], []byte(req.CounterCurrency))
+
+	return ports.FXProposalParams{
+		TradeID:         tid,
+		Originator:      common.HexToAddress(req.Originator),
+		CounterpartyB:   common.HexToAddress(req.CounterpartyB),
+		SettlementAgent: common.HexToAddress(req.SettlementAgent),
+		Custodian:       common.HexToAddress(req.Custodian),
+		Beneficiary:     common.HexToAddress(req.Beneficiary),
+		OriginAmount:    originAmount,
+		CounterAmount:   counterAmount,
+		OriginCurrency:  originCurrency,
+		CounterCurrency: counterCurrency,
+		Rate:            rate,
+		ExpiryDate:      new(big.Int).SetUint64(req.ExpiryDate),
+	}, nil
 }

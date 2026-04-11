@@ -9,7 +9,18 @@ import {FXAgreementLibrary} from "../libraries/FXAgreementLibrary.sol";
 interface IFXAgreement {
     /// @notice Emitted when a new FX agreement is proposed.
     event AgreementProposed(
-        bytes32 indexed tradeId, address indexed counterpartyA, address indexed counterpartyB, uint256 notional
+        bytes32 indexed tradeId,
+        address indexed originator,
+        address indexed counterpartyB,
+        address settlementAgent,
+        address custodian,
+        address beneficiary,
+        uint256 originAmount,
+        uint256 counterAmount,
+        bytes32 originCurrency,
+        bytes32 counterCurrency,
+        uint256 rate,
+        uint256 expiryDate
     );
 
     /// @notice Emitted when the counterparty accepts the agreement.
@@ -48,20 +59,64 @@ interface IFXAgreement {
     /// @notice Creates a new FX agreement proposal.
     /// @param tradeId Unique identifier for the deal.
     /// @param counterpartyB The address of the accepting party.
-    /// @param baseToken Token address of the base currency.
-    /// @param quoteToken Token address of the quote currency.
-    /// @param notional Notional amount of the deal.
+    /// @param settlementAgent The address of the settlement agent.
+    /// @param custodian The address of the custodian.
+    /// @param beneficiary The address of the beneficiary.
+    /// @param originAmount Amount in the origin currency.
+    /// @param counterAmount Amount in the counter currency.
+    /// @param originCurrency ISO 4217 code for the origin currency.
+    /// @param counterCurrency ISO 4217 code for the counter currency.
     /// @param rate Agreed exchange rate (scaled by 1e18).
     /// @param expiryDate Unix timestamp after which the proposal expires.
     function propose(
         bytes32 tradeId,
         address counterpartyB,
-        address baseToken,
-        address quoteToken,
-        uint256 notional,
+        address settlementAgent,
+        address custodian,
+        address beneficiary,
+        uint256 originAmount,
+        uint256 counterAmount,
+        bytes32 originCurrency,
+        bytes32 counterCurrency,
         uint256 rate,
         uint256 expiryDate
     ) external;
+
+    /// @notice Creates a new FX agreement proposal on behalf of a remote originator (governance only).
+    /// @param tradeId Unique identifier for the deal.
+    /// @param originator The address of the deal initiator (remote party).
+    /// @param counterpartyB The address of the accepting party.
+    /// @param settlementAgent The address of the settlement agent.
+    /// @param custodian The address of the custodian.
+    /// @param beneficiary The address of the beneficiary.
+    /// @param originAmount Amount in the origin currency.
+    /// @param counterAmount Amount in the counter currency.
+    /// @param originCurrency ISO 4217 code for the origin currency.
+    /// @param counterCurrency ISO 4217 code for the counter currency.
+    /// @param rate Agreed exchange rate (scaled by 1e18).
+    /// @param expiryDate Unix timestamp after which the proposal expires.
+    function proposeOnBehalf(
+        bytes32 tradeId,
+        address originator,
+        address counterpartyB,
+        address settlementAgent,
+        address custodian,
+        address beneficiary,
+        uint256 originAmount,
+        uint256 counterAmount,
+        bytes32 originCurrency,
+        bytes32 counterCurrency,
+        uint256 rate,
+        uint256 expiryDate
+    ) external;
+
+    /// @notice Governance accepts the proposed agreement on behalf of counterpartyB.
+    /// @param tradeId The trade to accept.
+    function acceptOnBehalf(bytes32 tradeId) external;
+
+    /// @notice Governance rejects the proposed agreement on behalf of counterpartyB.
+    /// @param tradeId The trade to reject.
+    function rejectOnBehalf(bytes32 tradeId) external;
 
     /// @notice Counterparty accepts the proposed agreement.
     /// @param tradeId The trade to accept.

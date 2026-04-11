@@ -29,11 +29,17 @@ enum HTLCState {
 
 message FXAgreement {
   string trade_id = 1;
-  string counterparty_a = 2;
-  string counterparty_b = 3;
-  string base_token = 4;
-  string quote_token = 5;
-  string notional = 6;
+  string originator = 2;           // was counterparty_a — Bank A
+  string counterparty_b = 3;       // acceptance authority — Bank D locally
+  string settlement_agent = 10;    // Bank C
+  string custodian = 11;           // Bank D
+  string beneficiary = 12;         // Bank B
+  string origin_amount = 13;       // was notional
+  string counter_amount = 14;
+  string origin_currency = 15;     // ISO 4217
+  string counter_currency = 16;    // ISO 4217
+  string spoke_a_receiver = 17;   // Paladin identity receiving lock on Spoke-A (e.g. funded_operator@spoke-a-bank-c)
+  string spoke_b_receiver = 18;   // Paladin identity receiving lock on Spoke-B (e.g. funded_operator@spoke-b-bank-b)
   string rate = 7;
   uint64 expiry_date = 8;
   FXAgreementState state = 9;
@@ -42,11 +48,19 @@ message FXAgreement {
 message ProposeFXAgreementRequest {
   string trade_id = 1;
   string counterparty_b = 2;
-  string base_token = 3;
-  string quote_token = 4;
-  string notional = 5;
-  string rate = 6;
-  uint64 expiry_date = 7;
+  string originator = 10;          // explicit originator for on_behalf calls
+  string settlement_agent = 3;
+  string custodian = 4;
+  string beneficiary = 5;
+  string origin_amount = 6;
+  string counter_amount = 7;
+  string origin_currency = 8;
+  string counter_currency = 9;
+  string rate = 11;
+  uint64 expiry_date = 12;
+  bool on_behalf = 13;             // when true, calls proposeOnBehalf() via governance
+  string spoke_a_receiver = 14;   // Paladin identity receiving lock on Spoke-A
+  string spoke_b_receiver = 15;   // Paladin identity receiving lock on Spoke-B
 }
 
 message ProposeFXAgreementResponse {
@@ -56,6 +70,7 @@ message ProposeFXAgreementResponse {
 
 message AcceptFXAgreementRequest {
   string trade_id = 1;
+  bool on_behalf = 2;   // when true, calls acceptOnBehalf() via governance
 }
 
 message AcceptFXAgreementResponse {
@@ -64,6 +79,7 @@ message AcceptFXAgreementResponse {
 
 message RejectFXAgreementRequest {
   string trade_id = 1;
+  bool on_behalf = 2;   // when true, calls rejectOnBehalf() via governance
 }
 
 message RejectFXAgreementResponse {

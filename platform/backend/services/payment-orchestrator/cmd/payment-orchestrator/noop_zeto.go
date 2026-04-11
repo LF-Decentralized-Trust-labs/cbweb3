@@ -22,3 +22,6 @@ func (noopZeto) TransferLocked(_ context.Context, _, _, _ string) (string, error
 	return "", errNoPaladin
 }
 func (noopZeto) Balance(_ context.Context) (string, error) { return "", errNoPaladin }
+func (noopZeto) ResolveIdentity(_ context.Context, _ string) (string, error) {
+	return "", errNoPaladin
+}

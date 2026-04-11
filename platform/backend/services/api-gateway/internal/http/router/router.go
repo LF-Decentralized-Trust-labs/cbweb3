@@ -127,20 +127,22 @@ func Setup(app *fiber.App, deps Dependencies) {
 		tokenGroup.Get("/balance", deps.PaymentHandler.GetBalance)
 		tokenGroup.Get("/fiat-balance", deps.PaymentHandler.GetFiatBalance)
 
+		// FX Agreement routes
+		fxGroup := payGroup.Group("/payments/fx/agreements")
+		fxGroup.Post("", deps.PaymentHandler.ProposeFXAgreement)
+		fxGroup.Post("/:tradeId/accept", deps.PaymentHandler.AcceptFXAgreement)
+		fxGroup.Post("/:tradeId/reject", deps.PaymentHandler.RejectFXAgreement)
+		fxGroup.Post("/:tradeId/cancel", deps.PaymentHandler.CancelFXAgreement)
+		fxGroup.Post("/:tradeId/settle", deps.PaymentHandler.SettleFXAgreement)
+		fxGroup.Get("/:tradeId", deps.PaymentHandler.GetFXAgreement)
+		fxGroup.Get("", deps.PaymentHandler.ListFXAgreements)
+
+		// Internal FX route for the Cacti relay (no auth — only reachable within Docker network).
+		intFX := app.Group("/internal/v1/payments/fx/agreements")
+		intFX.Get("", deps.PaymentHandler.ListFXAgreements)
+
 		// --- Escrow: Deposit / Escrow / Redeem (Central Bank) ---
 		if deps.PaymentProxyHandler == nil {
-			// Internal routes for proxy-receiving (no auth — only reachable within Docker network).
-			intDeposits := app.Group("/internal/v1/payments/deposits")
-			intDeposits.Post("", deps.PaymentHandler.RegisterDeposit)
-			intDeposits.Get("", deps.PaymentHandler.ListDeposits)
-
-			intEscrows := app.Group("/internal/v1/payments/escrows")
-			intEscrows.Post("", deps.PaymentHandler.RequestEscrow)
-			intEscrows.Get("", deps.PaymentHandler.ListEscrows)
-
-			intRedeems := app.Group("/internal/v1/payments/redeems")
-			intRedeems.Post("", deps.PaymentHandler.RequestRedeem)
-			intRedeems.Get("", deps.PaymentHandler.ListRedeems)
 
 			// Governance routes (requires cookie auth + ROLE_GOVERNANCE).
 			depositGroup := payGroup.Group("/payments/deposits")

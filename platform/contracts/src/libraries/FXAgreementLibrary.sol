@@ -17,21 +17,29 @@ library FXAgreementLibrary {
 
     /// @notice Immutable record of a bilateral FX deal.
     /// @param tradeId Unique identifier for the deal.
-    /// @param counterpartyA Address of the deal initiator.
-    /// @param counterpartyB Address of the accepting party.
-    /// @param baseToken Token address of the base currency.
-    /// @param quoteToken Token address of the quote currency.
-    /// @param notional Notional amount of the base currency.
+    /// @param originator Address of the deal initiator (Bank A).
+    /// @param counterpartyB Address of the acceptance authority (Bank D locally).
+    /// @param settlementAgent Address of the settlement agent (Bank C).
+    /// @param custodian Address of the custodian (Bank D).
+    /// @param beneficiary Address of the beneficiary (Bank B).
+    /// @param originAmount Amount in the origin currency.
+    /// @param counterAmount Amount in the counter currency.
+    /// @param originCurrency ISO 4217 currency code of the origin currency (e.g. bytes32("BRL")).
+    /// @param counterCurrency ISO 4217 currency code of the counter currency (e.g. bytes32("EUR")).
     /// @param rate Agreed exchange rate scaled by 1e18.
     /// @param expiryDate Unix timestamp after which the proposal expires.
     /// @param state Current lifecycle state of the agreement.
     struct FxAgreement {
         bytes32 tradeId;
-        address counterpartyA;
+        address originator;
         address counterpartyB;
-        address baseToken;
-        address quoteToken;
-        uint256 notional;
+        address settlementAgent;
+        address custodian;
+        address beneficiary;
+        uint256 originAmount;
+        uint256 counterAmount;
+        bytes32 originCurrency;
+        bytes32 counterCurrency;
         uint256 rate;
         uint256 expiryDate;
         AgreementState state;
