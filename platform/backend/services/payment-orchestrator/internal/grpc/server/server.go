@@ -22,12 +22,13 @@ import (
 
 type paymentOrchestratorService struct {
 	pb.UnimplementedPaymentOrchestratorServiceServer
-	zeto       ports.ZetoOperator
-	htlc       ports.HTLCContractPort // on-chain HTLC coordination (may be nil)
-	relay      ports.InteroperabilityPort
-	fiat       ports.FiatTokenPort    // on-chain fCeBM operations (may be nil)
-	escrowRepo ports.EscrowRepository // escrow flow persistence
-	logger     *slog.Logger
+	zeto        ports.ZetoOperator
+	htlc        ports.HTLCContractPort // on-chain HTLC coordination (may be nil)
+	relay       ports.InteroperabilityPort
+	fiat        ports.FiatTokenPort    // on-chain fCeBM operations (may be nil)
+	escrowRepo  ports.EscrowRepository // escrow flow persistence
+	spokePrefix string                 // e.g. "spoke-a" — extracted from PALADIN_IDENTITY; empty disables validation
+	logger      *slog.Logger
 
 	mu    sync.RWMutex
 	htlcs map[string]*domain.HTLCRecord
@@ -35,24 +36,26 @@ type paymentOrchestratorService struct {
 
 // Config holds the dependencies for the gRPC server.
 type Config struct {
-	Zeto       ports.ZetoOperator
-	HTLC       ports.HTLCContractPort // optional — nil disables on-chain coordination
-	Relay      ports.InteroperabilityPort
-	Fiat       ports.FiatTokenPort    // optional — nil disables fCeBM operations
-	EscrowRepo ports.EscrowRepository // optional — nil disables escrow flow
-	Logger     *slog.Logger
+	Zeto        ports.ZetoOperator
+	HTLC        ports.HTLCContractPort // optional — nil disables on-chain coordination
+	Relay       ports.InteroperabilityPort
+	Fiat        ports.FiatTokenPort    // optional — nil disables fCeBM operations
+	EscrowRepo  ports.EscrowRepository // optional — nil disables escrow flow
+	SpokePrefix string                 // e.g. "spoke-a" — empty disables receiver locality check
+	Logger      *slog.Logger
 }
 
 // New builds a configured gRPC server with all payment-orchestrator handlers.
 func New(cfg Config) *grpc.Server {
 	svc := &paymentOrchestratorService{
-		zeto:       cfg.Zeto,
-		htlc:       cfg.HTLC,
-		relay:      cfg.Relay,
-		fiat:       cfg.Fiat,
-		escrowRepo: cfg.EscrowRepo,
-		logger:     cfg.Logger,
-		htlcs:      make(map[string]*domain.HTLCRecord),
+		zeto:        cfg.Zeto,
+		htlc:        cfg.HTLC,
+		relay:       cfg.Relay,
+		fiat:        cfg.Fiat,
+		escrowRepo:  cfg.EscrowRepo,
+		spokePrefix: cfg.SpokePrefix,
+		logger:      cfg.Logger,
+		htlcs:       make(map[string]*domain.HTLCRecord),
 	}
 	grpcServer := grpc.NewServer()
 	pb.RegisterPaymentOrchestratorServiceServer(grpcServer, svc)
@@ -64,11 +67,45 @@ func generateID() string {
 	return uuid.New().String()
 }
 
+// spokeFromIdentity extracts the spoke prefix from a Paladin identity string.
+// e.g. "funded_operator@spoke-a-bank-a" → "spoke-a"
+// Returns empty string if the format is unexpected.
+func spokeFromIdentity(identity string) string {
+	parts := strings.SplitN(identity, "@", 2)
+	if len(parts) < 2 {
+		return ""
+	}
+	// After @: "spoke-a-bank-a" — extract first two segments: "spoke-a"
+	segs := strings.SplitN(parts[1], "-", 3)
+	if len(segs) < 2 {
+		return ""
+	}
+	return segs[0] + "-" + segs[1] // e.g. "spoke-a"
+}
+
+// isLocalReceiver checks whether the receiver identity belongs to the same spoke
+// as this service instance. If spokePrefix is empty, validation is skipped (permissive).
+func (s *paymentOrchestratorService) isLocalReceiver(receiver string) bool {
+	if s.spokePrefix == "" {
+		return true // no spoke configured — skip validation (dev mode)
+	}
+	receiverSpoke := spokeFromIdentity(receiver)
+	if receiverSpoke == "" {
+		return true // unknown format — skip validation
+	}
+	return receiverSpoke == s.spokePrefix
+}
+
 // --- HTLC Dual-Layer Operations ---
 
 func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockHTLCRequest) (*pb.LockHTLCResponse, error) {
 	if req.Receiver == "" || req.Amount == "" {
 		return nil, status.Error(codes.InvalidArgument, "receiver and amount are required")
+	}
+	if !s.isLocalReceiver(req.Receiver) {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"receiver %q does not belong to the local spoke %q — use a local receiver for HTLC lock",
+			req.Receiver, s.spokePrefix)
 	}
 	// Apply smart defaults
 	if req.AgreementId == "" {
@@ -98,7 +135,8 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 	contractIDBytes := sha256.Sum256([]byte(fmt.Sprintf("%s-%d", req.AgreementId, time.Now().UnixNano())))
 	contractID := hex.EncodeToString(contractIDBytes[:])
 
-	// 4. Record on-chain HTLC coordination (if adapter configured)
+	// 4. Record on-chain HTLC coordination (if adapter configured).
+	// If the on-chain lock fails, roll back the Zeto lock to avoid stranded tokens.
 	var htlcTxHash string
 	if s.htlc != nil {
 		var zetoRefBytes [32]byte
@@ -114,7 +152,11 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 			ZetoLockRef: zetoRefBytes,
 		})
 		if err != nil {
-			s.logger.Warn("on-chain HTLC lock failed (Zeto lock succeeded)", "error", err)
+			s.logger.Error("on-chain HTLC lock failed — rolling back Zeto lock", "error", err)
+			if _, unlockErr := s.zeto.Unlock(ctx, strings.Join(lockResult.LockedStateIDs, ",")); unlockErr != nil {
+				s.logger.Error("zeto unlock rollback also failed", "error", unlockErr)
+			}
+			return nil, status.Errorf(codes.Internal, "on-chain HTLC lock failed: %v", err)
 		}
 	}
 
@@ -157,6 +199,11 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 	if req.Receiver == "" || req.Amount == "" || req.HashLock == "" {
 		return nil, status.Error(codes.InvalidArgument, "receiver, amount, and hash_lock are required")
 	}
+	if !s.isLocalReceiver(req.Receiver) {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"receiver %q does not belong to the local spoke %q — use a local receiver for HTLC lock",
+			req.Receiver, s.spokePrefix)
+	}
 	// Apply smart defaults
 	if req.AgreementId == "" {
 		req.AgreementId = newUUID()
@@ -182,7 +229,8 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 	contractIDBytes := sha256.Sum256([]byte(fmt.Sprintf("%s-%d", req.AgreementId, time.Now().UnixNano())))
 	contractID := hex.EncodeToString(contractIDBytes[:])
 
-	// Record on-chain HTLC coordination (if adapter configured)
+	// Record on-chain HTLC coordination (if adapter configured).
+	// If the on-chain lock fails, roll back the Zeto lock to avoid stranded tokens.
 	var htlcTxHash string
 	if s.htlc != nil {
 		var hashLock32 [32]byte
@@ -200,7 +248,11 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 			ZetoLockRef: zetoRefBytes,
 		})
 		if err != nil {
-			s.logger.Warn("on-chain HTLC lock failed (Zeto lock succeeded)", "error", err)
+			s.logger.Error("on-chain HTLC lock failed — rolling back Zeto lock", "error", err)
+			if _, unlockErr := s.zeto.Unlock(ctx, strings.Join(lockResult.LockedStateIDs, ",")); unlockErr != nil {
+				s.logger.Error("zeto unlock rollback also failed", "error", unlockErr)
+			}
+			return nil, status.Errorf(codes.Internal, "on-chain HTLC lock failed: %v", err)
 		}
 	}
 
@@ -304,12 +356,14 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		return nil, status.Error(codes.InvalidArgument, "secret does not match hashLock")
 	}
 
-	record.State = domain.HTLCStateSettled
+	// Keep record reference for post-operation update; do NOT mark SETTLED yet.
+	// State will only transition to SETTLED after both on-chain and Zeto succeed.
 	record.Secret = req.Secret
-	record.UpdatedAt = time.Now().UTC()
 	s.mu.Unlock()
 
-	// Settle on-chain HTLC (reveals secret via LogHTLCClaimed event)
+	// Settle on-chain HTLC (reveals secret via LogHTLCClaimed event).
+	// When the on-chain adapter is configured, a failure here MUST block the
+	// Zeto transfer — otherwise tokens move without coordination-layer approval.
 	var htlcTxHash string
 	if s.htlc != nil {
 		var cid, sec [32]byte
@@ -317,23 +371,27 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		copy(sec[:], secretBytes)
 		htlcTxHash, err = s.htlc.Settle(ctx, cid, sec)
 		if err != nil {
-			s.logger.Warn("on-chain HTLC settle failed", "error", err)
+			s.logger.Error("on-chain HTLC settle failed — aborting token transfer", "contract_id", record.ContractID, "error", err)
+			return nil, status.Errorf(codes.Internal, "on-chain HTLC settle failed: %v", err)
 		}
 	}
 
 	// Transfer locked Zeto tokens to receiver
 	zetoTxHash, err := s.zeto.TransferLocked(ctx, record.ZetoLockRef, record.Receiver, record.Amount)
 	if err != nil {
+		s.logger.Error("zeto transferLocked failed after on-chain settle", "contract_id", record.ContractID, "error", err)
 		return nil, status.Errorf(codes.Internal, "zeto transferLocked: %v", err)
 	}
 
-	s.logger.Info("HTLC settled", "contract_id", record.ContractID, "zeto_tx_hash", zetoTxHash, "htlc_tx_hash", htlcTxHash)
-
-	// Update record with settle tx hashes so idempotent re-calls return them.
+	// Both operations succeeded — now mark SETTLED (pessimistic update).
 	s.mu.Lock()
+	record.State = domain.HTLCStateSettled
+	record.UpdatedAt = time.Now().UTC()
 	record.HTLCTxHash = htlcTxHash
 	record.ZetoTxHash = zetoTxHash
 	s.mu.Unlock()
+
+	s.logger.Info("HTLC settled", "contract_id", record.ContractID, "zeto_tx_hash", zetoTxHash, "htlc_tx_hash", htlcTxHash)
 
 	return &pb.SettleHTLCResponse{
 		HtlcTxHash: htlcTxHash,
