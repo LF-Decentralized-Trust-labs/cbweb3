@@ -27,7 +27,9 @@ artifacts/
 # OS
 .DS_Store
 AGENTS.md
-.github/agents/
+# GitHub Copilot / agent files — versionar apenas Spec Kit (demais agentes ignorados)
+.github/agents/*
+!.github/agents/speckit*.agent.md
 .github/copilot-instructions.md.agent/
 .agent/
 
@@ -54,7 +56,11 @@ contracts/*.flattened.*
 contracts/dependencies
 
 # IDEs
-.cursor/
+# Cursor: ignorar .cursor/ exceto skills do Spec Kit (partilha com a equipa)
+.cursor/*
+!.cursor/skills/
+.cursor/skills/*
+!.cursor/skills/speckit-*/
 .vscode/
 .idea/
 
@@ -80,5 +86,7 @@ deploy/local/hub-besu/tmpFiles/
 .agent/
 
 openspec/
-.github/prompts/
+# Prompts do Copilot — versionar apenas Spec Kit
+.github/prompts/*
+!.github/prompts/speckit*.prompt.md
 .github/skills/
