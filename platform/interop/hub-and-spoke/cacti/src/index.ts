@@ -20,6 +20,7 @@ import express, { Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { config } from "./config";
 import { HtlcRelay } from "./htlc-relay";
+import { RelayStore } from "./relay-store";
 
 // ---------------------------------------------------------------------------
 // In-memory proof store (RelayProof / VerifyProof for InteroperabilityPort)
@@ -63,14 +64,19 @@ async function main(): Promise<void> {
   console.log(`  Spoke-B API  : ${config.spokeB.internalApiUrl}`);
   console.log(`  Poll interval: ${config.pollIntervalMs} ms`);
   console.log(`  API port     : ${config.apiPort}`);
+  console.log(`  Store path   : ${config.relayStorePath}`);
 
   // ── Start HTLC relay ────────────────────────────────────────────────────
   const abortController = new AbortController();
+  const relayStore = new RelayStore(config.relayStorePath);
+  await relayStore.init();
 
   const relay = new HtlcRelay(
     [config.spokeA, config.spokeB],
     config.protoPath,
     config.pollIntervalMs,
+    config.relayAuthSecret,
+    relayStore,
   );
   relay.start(abortController.signal);
 
@@ -128,6 +134,24 @@ async function main(): Promise<void> {
   app.get("/api/v1/relay/events/fx-rejected", (req: Request, res: Response) => {
     const since = parseInt(String(req.query["since"] ?? "0"), 10);
     res.json(relay.getFXRejectionEvents(since));
+  });
+
+  /**
+   * GET /api/v1/relay/events/fx-cancelled?since=<unix_ms>
+   * Returns FX agreement cancellation events observed since the given timestamp.
+   */
+  app.get("/api/v1/relay/events/fx-cancelled", (req: Request, res: Response) => {
+    const since = parseInt(String(req.query["since"] ?? "0"), 10);
+    res.json(relay.getFXCancellationEvents(since));
+  });
+
+  /**
+   * GET /api/v1/relay/events/fx-settled?since=<unix_ms>
+   * Returns FX agreement settlement events observed since the given timestamp.
+   */
+  app.get("/api/v1/relay/events/fx-settled", (req: Request, res: Response) => {
+    const since = parseInt(String(req.query["since"] ?? "0"), 10);
+    res.json(relay.getFXSettlementEvents(since));
   });
 
   /**

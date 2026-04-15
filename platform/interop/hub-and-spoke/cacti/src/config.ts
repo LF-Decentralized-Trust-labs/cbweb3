@@ -52,6 +52,12 @@ export const config = {
   /** How often to poll each Besu node for new HTLC events (default: 3000 ms). */
   pollIntervalMs: parseInt(optionalEnv("POLL_INTERVAL_MS", "3000"), 10),
 
+  /** Shared secret sent to internal FX endpoints via X-Relay-Auth header. */
+  relayAuthSecret: requireEnv("INTERNAL_RELAY_AUTH_SECRET"),
+
+  /** JSON file path used to persist relay dedup/retry state across restarts. */
+  relayStorePath: optionalEnv("RELAY_STORE_PATH", "/tmp/cacti-relay-store.json"),
+
   /**
    * Absolute path to the payment-orchestrator proto file.
    * In the Docker image this is copied to /app/apis/proto/…
