@@ -34,9 +34,21 @@ paladin.deploy-zeto-spoke-b:
 		SPOKE=spoke-b BESU_RPC_URL=$(BESU_RPC_URL_B) \
 		go test ./... -run TestDeployZetoFactory -v -count=1 -timeout $(PALADIN_TIMEOUT)
 
-paladin.deploy-contracts-spoke-a: paladin.deploy-registry-spoke-a paladin.deploy-zeto-spoke-a
+paladin.deploy-pente-factory-spoke-a:
+	@echo "Deploying PenteFactory on spoke-a..."
+	@cd $(PALADIN_SCRIPTS) && \
+		SPOKE=spoke-a BESU_RPC_URL=$(BESU_RPC_URL_A) \
+		go test ./... -run TestDeployPenteFactory -v -count=1 -timeout $(PALADIN_TIMEOUT)
 
-paladin.deploy-contracts-spoke-b: paladin.deploy-registry-spoke-b paladin.deploy-zeto-spoke-b
+paladin.deploy-pente-factory-spoke-b:
+	@echo "Deploying PenteFactory on spoke-b..."
+	@cd $(PALADIN_SCRIPTS) && \
+		SPOKE=spoke-b BESU_RPC_URL=$(BESU_RPC_URL_B) \
+		go test ./... -run TestDeployPenteFactory -v -count=1 -timeout $(PALADIN_TIMEOUT)
+
+paladin.deploy-contracts-spoke-a: paladin.deploy-registry-spoke-a paladin.deploy-zeto-spoke-a paladin.deploy-pente-factory-spoke-a
+
+paladin.deploy-contracts-spoke-b: paladin.deploy-registry-spoke-b paladin.deploy-zeto-spoke-b paladin.deploy-pente-factory-spoke-b
 
 # ── Zeto token instance creation (requires Paladin nodes running) ────────
 
@@ -69,25 +81,39 @@ paladin.create-pente-context-spoke-b:
 paladin.deploy-fxagreement-pente-spoke-a: .ensure-registry-addr contracts.build
 	@echo "Deploying FXAgreement contract in Pente context on spoke-a..."
 	@cd $(PALADIN_SCRIPTS) && \
-		SPOKE=spoke-a REGISTRY_CONTRACT_ADDRESS=$$(bash source_deployed_addrs.sh --file ../spoke-a/.deployed-addrs.env --key REGISTRY_CONTRACT_ADDRESS --raw) PALADIN_CB_URL=http://127.0.0.1:31648 \
+		SPOKE=spoke-a \
+		REGISTRY_CONTRACT_ADDRESS=$$(bash source_deployed_addrs.sh --file ../spoke-a/.deployed-addrs.env --key REGISTRY_CONTRACT_ADDRESS --raw) \
+		PENTE_CONTEXT_GROUP_ID=$$(bash source_deployed_addrs.sh --file ../spoke-a/.deployed-addrs.env --key PENTE_CONTEXT_GROUP_ID --raw) \
+		PALADIN_CB_URL=http://127.0.0.1:31648 \
 		go test ./... -run TestDeployFXAgreementPente -v -count=1 -timeout $(PALADIN_TIMEOUT)
 
 paladin.deploy-fxagreement-pente-spoke-b: .ensure-registry-addr contracts.build
 	@echo "Deploying FXAgreement contract in Pente context on spoke-b..."
 	@cd $(PALADIN_SCRIPTS) && \
-		SPOKE=spoke-b REGISTRY_CONTRACT_ADDRESS=$$(bash source_deployed_addrs.sh --file ../spoke-b/.deployed-addrs.env --key REGISTRY_CONTRACT_ADDRESS --raw) PALADIN_CB_URL=http://127.0.0.1:31748 \
+		SPOKE=spoke-b \
+		REGISTRY_CONTRACT_ADDRESS=$$(bash source_deployed_addrs.sh --file ../spoke-b/.deployed-addrs.env --key REGISTRY_CONTRACT_ADDRESS --raw) \
+		PENTE_CONTEXT_GROUP_ID=$$(bash source_deployed_addrs.sh --file ../spoke-b/.deployed-addrs.env --key PENTE_CONTEXT_GROUP_ID --raw) \
+		PALADIN_CB_URL=http://127.0.0.1:31748 \
 		go test ./... -run TestDeployFXAgreementPente -v -count=1 -timeout $(PALADIN_TIMEOUT)
 
 paladin.verify-fxagreement-pente-spoke-a: .ensure-fxa-addr
 	@echo "Verifying FXAgreement deployment on spoke-a..."
 	@cd $(PALADIN_SCRIPTS) && \
-		SPOKE=spoke-a FX_AGREEMENT_ADDRESS=$$(bash source_deployed_addrs.sh --file ../spoke-a/.deployed-addrs.env --key FX_AGREEMENT_ADDRESS --raw) PALADIN_CB_URL=http://127.0.0.1:31648 \
+		SPOKE=spoke-a \
+		FX_AGREEMENT_ADDRESS=$$(bash source_deployed_addrs.sh --file ../spoke-a/.deployed-addrs.env --key FX_AGREEMENT_ADDRESS --raw 2>/dev/null || true) \
+		FX_AGREEMENT_DEPLOYED_AT=$$(bash source_deployed_addrs.sh --file ../spoke-a/.deployed-addrs.env --key FX_AGREEMENT_DEPLOYED_AT --raw) \
+		PENTE_CONTEXT_GROUP_ID=$$(bash source_deployed_addrs.sh --file ../spoke-a/.deployed-addrs.env --key PENTE_CONTEXT_GROUP_ID --raw) \
+		PALADIN_CB_URL=http://127.0.0.1:31648 \
 		go test ./... -run TestVerifyFXAgreementPenteDeploy -v -count=1 -timeout $(PALADIN_TIMEOUT)
 
 paladin.verify-fxagreement-pente-spoke-b: .ensure-fxa-addr
 	@echo "Verifying FXAgreement deployment on spoke-b..."
 	@cd $(PALADIN_SCRIPTS) && \
-		SPOKE=spoke-b FX_AGREEMENT_ADDRESS=$$(bash source_deployed_addrs.sh --file ../spoke-b/.deployed-addrs.env --key FX_AGREEMENT_ADDRESS --raw) PALADIN_CB_URL=http://127.0.0.1:31748 \
+		SPOKE=spoke-b \
+		FX_AGREEMENT_ADDRESS=$$(bash source_deployed_addrs.sh --file ../spoke-b/.deployed-addrs.env --key FX_AGREEMENT_ADDRESS --raw 2>/dev/null || true) \
+		FX_AGREEMENT_DEPLOYED_AT=$$(bash source_deployed_addrs.sh --file ../spoke-b/.deployed-addrs.env --key FX_AGREEMENT_DEPLOYED_AT --raw) \
+		PENTE_CONTEXT_GROUP_ID=$$(bash source_deployed_addrs.sh --file ../spoke-b/.deployed-addrs.env --key PENTE_CONTEXT_GROUP_ID --raw) \
+		PALADIN_CB_URL=http://127.0.0.1:31748 \
 		go test ./... -run TestVerifyFXAgreementPenteDeploy -v -count=1 -timeout $(PALADIN_TIMEOUT)
 
 # Helper targets to extract addresses from .deployed-addrs.env
@@ -95,7 +121,7 @@ paladin.verify-fxagreement-pente-spoke-b: .ensure-fxa-addr
 	@cd $(PALADIN_SCRIPTS) && bash source_deployed_addrs.sh --file ../$${SPOKE:-spoke-a}/.deployed-addrs.env --key REGISTRY_CONTRACT_ADDRESS --raw >/dev/null
 
 .ensure-fxa-addr:
-	@cd $(PALADIN_SCRIPTS) && bash source_deployed_addrs.sh --file ../$${SPOKE:-spoke-a}/.deployed-addrs.env --key FX_AGREEMENT_ADDRESS --raw >/dev/null
+	@cd $(PALADIN_SCRIPTS) && bash source_deployed_addrs.sh --file ../$${SPOKE:-spoke-a}/.deployed-addrs.env --key FX_AGREEMENT_DEPLOYED_AT --raw >/dev/null
 
 # ── node registration ────────────────────────────────────────────────────────
 
@@ -140,11 +166,14 @@ paladin.wait-spoke-a:
 	@echo "Waiting for Paladin RPC on spoke-a (http://127.0.0.1:31648)..."
 	@attempt=1; \
 	while [ $$attempt -le $(PALADIN_READY_ATTEMPTS) ]; do \
-		if bash -lc 'exec 3<>/dev/tcp/127.0.0.1/31648' >/dev/null 2>&1; then \
+		if curl -sS --max-time 2 \
+			-H 'Content-Type: application/json' \
+			-d '{"jsonrpc":"2.0","id":1,"method":"ptx_getTransaction","params":["dummy"]}' \
+			http://127.0.0.1:31648 | grep -q 'PD020704'; then \
 			echo "Paladin RPC on spoke-a is ready."; \
 			exit 0; \
 		fi; \
-		echo "  attempt $$attempt/$(PALADIN_READY_ATTEMPTS): RPC not ready yet"; \
+		echo "  attempt $$attempt/$(PALADIN_READY_ATTEMPTS): JSON-RPC not ready yet"; \
 		sleep $(PALADIN_READY_INTERVAL); \
 		attempt=$$((attempt + 1)); \
 	done; \
@@ -176,11 +205,14 @@ paladin.wait-spoke-b:
 	@echo "Waiting for Paladin RPC on spoke-b (http://127.0.0.1:31748)..."
 	@attempt=1; \
 	while [ $$attempt -le $(PALADIN_READY_ATTEMPTS) ]; do \
-		if bash -lc 'exec 3<>/dev/tcp/127.0.0.1/31748' >/dev/null 2>&1; then \
+		if curl -sS --max-time 2 \
+			-H 'Content-Type: application/json' \
+			-d '{"jsonrpc":"2.0","id":1,"method":"ptx_getTransaction","params":["dummy"]}' \
+			http://127.0.0.1:31748 | grep -q 'PD020704'; then \
 			echo "Paladin RPC on spoke-b is ready."; \
 			exit 0; \
 		fi; \
-		echo "  attempt $$attempt/$(PALADIN_READY_ATTEMPTS): RPC not ready yet"; \
+		echo "  attempt $$attempt/$(PALADIN_READY_ATTEMPTS): JSON-RPC not ready yet"; \
 		sleep $(PALADIN_READY_INTERVAL); \
 		attempt=$$((attempt + 1)); \
 	done; \

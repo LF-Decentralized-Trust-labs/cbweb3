@@ -64,12 +64,13 @@ domains:
         circuitsDir: "/app/domains/zeto/zkp"
         provingKeysDir: "/app/domains/zeto/zkp"
   pente:
-    registryAddress: "${REGISTRY_CONTRACT_ADDRESS}"
+    registryAddress: "${PENTE_FACTORY_ADDRESS}"
     allowSigning: true
     fixedSigningIdentity: "funded_operator"
     plugin:
-      type: "c-shared"
-      library: "/app/domains/libpente.so"
+      type: "jar"
+      library: "/app/domains/pente.jar"
+      class: "io.kaleido.paladin.pente.domain.PenteDomainFactory"
     config:
       enabled: true
       privateMTX: true
