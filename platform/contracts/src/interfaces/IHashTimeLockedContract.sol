@@ -33,6 +33,7 @@ interface IHashTimeLockedContract {
     error HTLC__ParticipantNotVerified(address account);
     error HTLC__AgreementNotAccepted();
     error HTLC__AgreementExpired();
+    error HTLC__CommitmentNotAccepted();
 
     /// @notice Records a lock coordination entry linked to a private Zeto lock.
     /// @param contractId Unique identifier for the agreement.

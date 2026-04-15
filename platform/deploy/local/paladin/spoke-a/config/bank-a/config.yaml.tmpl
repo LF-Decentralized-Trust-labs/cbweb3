@@ -63,6 +63,19 @@ domains:
       snarkProver:
         circuitsDir: "/app/domains/zeto/zkp"
         provingKeysDir: "/app/domains/zeto/zkp"
+  pente:
+    registryAddress: "${REGISTRY_CONTRACT_ADDRESS}"
+    allowSigning: true
+    fixedSigningIdentity: "funded_operator"
+    plugin:
+      type: "c-shared"
+      library: "/app/domains/libpente.so"
+    config:
+      # Pente configuration for bilateral private contexts (FX Agreement)
+      enabled: true
+      privateMTX: true
+      # Group ID and contract address for FXAgreement are set at deployment time
+      # and injected via environment variables (PENTE_CONTEXT_GROUP_ID, FX_AGREEMENT_ADDRESS)
 
 registries:
   evm-registry:

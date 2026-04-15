@@ -26,14 +26,6 @@ func besuRPCURL() string {
 	return "http://127.0.0.1:8645"
 }
 
-// spokeName returns which spoke is being set up (spoke-a or spoke-b).
-func spokeName() string {
-	if s := os.Getenv("SPOKE"); s != "" {
-		return s
-	}
-	return "spoke-a"
-}
-
 // addrsEnvFile returns the path to the .deployed-addrs.env for the spoke.
 func addrsEnvFile() string {
 	return "../" + spokeName() + "/.deployed-addrs.env"

@@ -50,7 +50,7 @@ contract HashTimeLockedContractTest is Test {
         vm.stopPrank();
 
         fxAgreement = new FXAgreement(address(identityRegistry));
-        htlc = new HashTimeLockedContract(address(identityRegistry), address(fxAgreement));
+        htlc = new HashTimeLockedContract(address(identityRegistry), address(fxAgreement), address(0));
         timeLock = block.timestamp + 1 hours;
     }
 
@@ -273,7 +273,7 @@ contract HashTimeLockedContractTest is Test {
     }
 
     function test_Lock_NoFXAgreement_Success() public {
-        HashTimeLockedContract htlcNoFx = new HashTimeLockedContract(address(identityRegistry), address(0));
+        HashTimeLockedContract htlcNoFx = new HashTimeLockedContract(address(identityRegistry), address(0), address(0));
 
         vm.prank(sender);
         bytes32 newContractId = keccak256("HTLC_NO_FX");
@@ -292,6 +292,7 @@ contract DeployHTLCTest is Test {
 
     string private constant ENV_DEPLOYER_PRIVATE_KEY = "DEPLOYER_PRIVATE_KEY";
     string private constant ENV_IDENTITY_REGISTRY_ADDRESS = "IDENTITY_REGISTRY_ADDRESS";
+    string private constant ENV_COMMITMENT_HASH_REGISTRY_ADDRESS = "COMMITMENT_HASH_REGISTRY_ADDRESS";
 
     function setUp() public {
         deployScript = new DeployHTLC();
@@ -302,6 +303,7 @@ contract DeployHTLCTest is Test {
 
         vm.setEnv(ENV_DEPLOYER_PRIVATE_KEY, vm.toString(deployerPrivateKey));
         vm.setEnv(ENV_IDENTITY_REGISTRY_ADDRESS, vm.toString(address(0x6789012345678901234567890123456789012345)));
+        vm.setEnv(ENV_COMMITMENT_HASH_REGISTRY_ADDRESS, vm.toString(address(0x1234567890123456789012345678901234567890)));
     }
 
     function test_ScriptRun_Success() public {

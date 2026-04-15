@@ -63,6 +63,16 @@ domains:
       snarkProver:
         circuitsDir: "/app/domains/zeto/zkp"
         provingKeysDir: "/app/domains/zeto/zkp"
+  pente:
+    registryAddress: "${REGISTRY_CONTRACT_ADDRESS}"
+    allowSigning: true
+    fixedSigningIdentity: "funded_operator"
+    plugin:
+      type: "c-shared"
+      library: "/app/domains/libpente.so"
+    config:
+      enabled: true
+      privateMTX: true
 
 registries:
   evm-registry:

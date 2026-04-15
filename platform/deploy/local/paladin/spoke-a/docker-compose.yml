@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Init container: ensures all data volumes are writable by the Paladin user.
   # Named volumes are created owned by root (0755); this service runs as root

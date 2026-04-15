@@ -14,11 +14,14 @@ spoke-a: pki.gen-central-bank-a pki.gen-bank-a pki.gen-bank-c pki.gen-commercial
 	$(MAKE) paladin.stop-spoke-a
 	$(MAKE) paladin.clean-volumes-spoke-a
 	$(MAKE) paladin.start-spoke-a
-	@echo "Waiting for Paladin spoke-a to be ready ($(PALADIN_READY_WAIT)s)..."
-	@sleep $(PALADIN_READY_WAIT)
+	$(MAKE) paladin.wait-spoke-a
 	$(MAKE) paladin.create-zeto-token-spoke-a
+	@echo "Setting up Pente bilateral context for FX Agreement..."
+	$(MAKE) paladin.create-pente-context-spoke-a
+	$(MAKE) paladin.deploy-fxagreement-pente-spoke-a
+	$(MAKE) paladin.verify-fxagreement-pente-spoke-a
 	$(MAKE) deploy.up-backend-spoke-a
-	@echo "Spoke-A stack is up (with Paladin)."
+	@echo "Spoke-A stack is up (Zeto + Pente BOTH OPERATIONAL)."
 
 spoke-a-down: deploy.down-backend-spoke-a paladin.stop-spoke-a deploy.down-spoke-a
 	@echo "Spoke-A stack is down (shared infra left running)."
@@ -34,11 +37,14 @@ spoke-b: pki.gen-central-bank-b pki.gen-bank-b pki.gen-bank-d pki.gen-commercial
 	$(MAKE) paladin.stop-spoke-b
 	$(MAKE) paladin.clean-volumes-spoke-b
 	$(MAKE) paladin.start-spoke-b
-	@echo "Waiting for Paladin spoke-b to be ready ($(PALADIN_READY_WAIT)s)..."
-	@sleep $(PALADIN_READY_WAIT)
+	$(MAKE) paladin.wait-spoke-b
 	$(MAKE) paladin.create-zeto-token-spoke-b
+	@echo "Setting up Pente bilateral context for FX Agreement..."
+	$(MAKE) paladin.create-pente-context-spoke-b
+	$(MAKE) paladin.deploy-fxagreement-pente-spoke-b
+	$(MAKE) paladin.verify-fxagreement-pente-spoke-b
 	$(MAKE) deploy.up-backend-spoke-b
-	@echo "Spoke-B stack is up (with Paladin)."
+	@echo "Spoke-B stack is up (Zeto + Pente BOTH OPERATIONAL)."
 
 spoke-b-down: deploy.down-backend-spoke-b paladin.stop-spoke-b deploy.down-spoke-b
 	@echo "Spoke-B stack is down (shared infra left running)."

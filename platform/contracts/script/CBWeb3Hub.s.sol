@@ -71,7 +71,7 @@ contract DeployCBWeb3Hub is Script {
         fxAgreement = new FXAgreement(address(identityRegistry));
 
         /// @dev 4: Deploy HTLC (Scenario A - Correspondent Banking, with FX Agreement gate)
-        htlc = new HashTimeLockedContract(address(identityRegistry), address(fxAgreement));
+        htlc = new HashTimeLockedContract(address(identityRegistry), address(fxAgreement), address(0));
 
         /// @dev 5: Deploy AMM (Scenario B - Liquidity Pool)
         amm = new AutomatedMarketMaker(address(tokenBrl), address(tokenEur), address(identityRegistry));

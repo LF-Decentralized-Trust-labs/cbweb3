@@ -68,7 +68,7 @@ contract DeployCBWeb3Spoke is Script {
         /// FXAgreement is intentionally NOT deployed on-chain — bilateral FX negotiation
         /// is a service-layer concern (Paladin privacy layer). address(0) disables the
         /// on-chain agreement gate in the HTLC contract; enforcement is in the Go service.
-        htlc = new HashTimeLockedContract(address(identityRegistry), address(0));
+        htlc = new HashTimeLockedContract(address(identityRegistry), address(0), address(0));
 
         /// @dev 5: Deploy SpokeBridge (Scenario B — lock-and-mint)
         spokeBridge = new SpokeBridge(address(identityRegistry), adminAddress);
