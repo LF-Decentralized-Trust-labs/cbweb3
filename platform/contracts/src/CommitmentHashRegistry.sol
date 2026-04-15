@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
-import {AccessControl} from "@openzeppelin-contracts-5.0.2/access/AccessControl.sol";
+import {AccessControl} from "@openzeppelin-contracts/access/AccessControl.sol";
 
 /// @title CommitmentHashRegistry
 /// @notice Registry of FX agreement commitment hashes for HTLC gates when Pente is not available.
