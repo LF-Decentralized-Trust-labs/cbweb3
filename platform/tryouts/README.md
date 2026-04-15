@@ -78,6 +78,132 @@ This script is **assertion-based**: each scenario prints `PASS` or `FAIL` with t
 
 ---
 
+### FX Agreement End-to-End Tryout
+
+**`tryout-fx-agreement-e2e.sh`** — Complete validation of feature 001-harden-fx-agreement (FX Agreement hardening for production). Tests the full lifecycle from onboarding through HTLC settlement, exercising all five design decisions:
+
+1. **Hybrid Besu/Pente Architecture** — FX Agreement stored in private Pente context, with commitment validation on public Besu chain
+2. **Two-Phase Enforcement** — Phase A: CommitmentHashRegistry for immediate deployment; Phase B: Pente externalCalls (future)
+3. **Idempotent Relay** — Cross-spoke deduplication and persistent tracking with exponential backoff retry
+4. **Service-Layer Gate** — HTLC validation at application level before on-chain attempt (fail-closed)
+5. **Append-Only Audit Trail** — Complete event history for each FX Agreement with actor, timestamp, state changes
+
+#### Test Flow (12 Steps)
+
+```
+Step 1  [Optional] Bank-A onboarding          → Keycloak + PKI phases
+Step 2  [Optional] Bank-B onboarding          → Keycloak + PKI phases
+Step 3  [Optional] Central Bank governance approvals → KYC approval
+Step 4  Get Bank-A & Bank-B operator tokens  → Keycloak authentication
+Step 5  Bank-A proposes FX agreement          → POST /fx/agreements {tradeId, originator, counterparty, amounts, rate}
+Step 6  Validate persistence                  → GET /fx/agreements/{trade_id} → state=PROPOSED
+Step 7  Validate audit trail                  → GET /fx/agreements/{trade_id}/events → append-only events
+Step 8  Bank-B accepts FX agreement           → POST /fx/agreements/{trade_id}/accept (cross-spoke)
+Step 9  Validate cross-spoke synchronization  → Confirm acceptance propagated via relay within timeout
+Step 10 Lock HTLC with commitment             → POST /htlc/lock-with-hash (CommitmentHashRegistry validation)
+Step 11 Settle HTLC                           → POST /htlc/settle {contract_id, secret}
+Step 12 Verify automatic expiration           → Create stale proposal → background worker expires it
+```
+
+**Key validations:**
+- **Durability (SC-001)**: FX Agreement state persists after service restart
+- **Auditability (SC-002)**: Every state transition recorded with actor, timestamp, change details
+- **Relay reliability (SC-003)**: Cross-spoke events delivered in ≤2 minutes with idempotent deduplication
+- **Expiration (SC-007)**: Stale proposals automatically marked EXPIRED by background job
+- **On-chain enforcement (SC-006)**: CommitmentHashRegistry hash present and verified before HTLC lock
+- **Private bilateral context (SC-010)**: Pente GroupID + ContractAddress persisted (optional if --no-pente)
+
+**Actors simulated within the same script:**
+- **Bank-A operator** — initiates FX proposal and monitors acceptance
+- **Bank-B operator** — accepts the FX agreement on counterparty side
+- **Cacti relay daemon** — automatically propagates acceptance across spokes
+
+#### Usage
+
+```bash
+# Full end-to-end test with onboarding:
+./tryout-fx-agreement-e2e.sh
+
+# Skip onboarding (assuming banks already onboarded):
+./tryout-fx-agreement-e2e.sh --skip-onboarding
+
+# Run without Pente (CommitmentHashRegistry only):
+./tryout-fx-agreement-e2e.sh --skip-onboarding --no-pente
+
+# Enable verbose output for debugging:
+./tryout-fx-agreement-e2e.sh --skip-onboarding --verbose
+```
+
+#### Environment Variables
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `BANK_A_URL` | Bank-A API Gateway base URL | `http://localhost:18080/api/v1` |
+| `BANK_B_URL` | Bank-B API Gateway base URL | `http://localhost:28080/api/v1` |
+| `CB_A_URL` | Central Bank-A API Gateway base URL | `http://localhost:38080/api/v1` |
+| `CB_B_URL` | Central Bank-B API Gateway base URL | `http://localhost:60080/api/v1` |
+| `PORCH_URL` | Paladin Porch HTTP endpoint | `http://localhost:6969/api/v1` |
+| `BANK_A_ENV` | Path to bank-a's `.env.infra` file | `backend/config/.env.infra.bank-a` |
+| `BANK_B_ENV` | Path to bank-b's `.env.infra` file | `backend/config/.env.infra.bank-b` |
+| `CB_A_ENV` | Path to central-bank-a's `.env.infra` file | `backend/config/.env.infra.central-bank-a` |
+| `CB_B_ENV` | Path to central-bank-b's `.env.infra` file | `backend/config/.env.infra.central-bank-b` |
+| `RELAY_SYNC_TIMEOUT` | Timeout for cross-spoke relay sync (seconds) | `30` |
+| `HTTP_TIMEOUT` | HTTP request timeout (seconds) | `120` |
+| `SKIP_ONBOARDING` | Skip onboarding phase (boolean) | `false` |
+| `NO_PENTE` | Disable Pente validation (CommitmentHashRegistry only) | `false` |
+| `VERBOSE` | Enable debug output | `false` |
+
+#### Expected Output
+
+```
+════════════════════════════════════════════════════════════
+  STEP: Step 5: Propose FX Agreement
+════════════════════════════════════════════════════════════
+✅ FX Agreement proposed: TRADE-1713180846123
+
+════════════════════════════════════════════════════════════
+  STEP: Step 6: Validate Persistence
+════════════════════════════════════════════════════════════
+✅ Agreement persisted with state: PROPOSED
+
+════════════════════════════════════════════════════════════
+  STEP: Step 7: Validate Audit Trail
+════════════════════════════════════════════════════════════
+✅ Audit trail contains 1 events
+
+════════════════════════════════════════════════════════════
+  STEP: Step 9: Validate Cross-Spoke Synchronization
+════════════════════════════════════════════════════════════
+✅ Cross-spoke synchronization complete
+
+════════════════════════════════════════════════════════════
+  STEP: SUMMARY
+════════════════════════════════════════════════════════════
+✅ End-to-End FX Agreement + HTLC Test Completed Successfully ✅
+
+Key Results:
+  Trade ID:        TRADE-1713180846123
+  Commitment Hash: 0x4d967...
+  Contract ID:     0xabcd...
+
+All validation steps passed:
+  ✅ FX Agreement proposal
+  ✅ Persistent storage
+  ✅ Audit trail
+  ✅ Cross-spoke relay sync
+  ✅ HTLC locking with commitment
+  ✅ HTLC settlement
+  ✅ Expiration handling
+```
+
+**Prerequisites for this tryout:**
+- All four banks onboarded (or use `--skip-onboarding` if already done)
+- Cacti relay running (daemon) for cross-spoke event propagation
+- PostgreSQL with FX Agreement tables created (migrations applied)
+- Besu nodes running with CommitmentHashRegistry deployed
+
+---
+
 ## Prerequisites
 
 For all scripts:
