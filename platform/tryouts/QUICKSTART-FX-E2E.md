@@ -41,8 +41,7 @@ which curl jq
 ### Option 1: Full test with onboarding (first run)
 
 ```bash
-cd tryouts
-./tryout-fx-agreement-e2e.sh
+./tryout/tryout-fx-agreement-e2e.sh
 ```
 
 **Expected runtime**: 3-5 minutes (includes onboarding phases)
@@ -52,8 +51,7 @@ cd tryouts
 If you've already onboarded the banks:
 
 ```bash
-cd tryouts
-./tryout-fx-agreement-e2e.sh --skip-onboarding
+./tryout/tryout-fx-agreement-e2e.sh --skip-onboarding
 ```
 
 **Expected runtime**: 1-2 minutes
@@ -63,8 +61,7 @@ cd tryouts
 Enable verbose output:
 
 ```bash
-cd tryouts
-VERBOSE=true ./tryout-fx-agreement-e2e.sh --skip-onboarding
+VERBOSE=true ./tryout/tryout-fx-agreement-e2e.sh --skip-onboarding
 ```
 
 ### Option 4: Non-Pente mode
@@ -72,8 +69,7 @@ VERBOSE=true ./tryout-fx-agreement-e2e.sh --skip-onboarding
 If Pente is not available, test CommitmentHashRegistry only:
 
 ```bash
-cd tryouts
-./tryout-fx-agreement-e2e.sh --skip-onboarding --no-pente
+./tryout/tryout-fx-agreement-e2e.sh --skip-onboarding --no-pente
 ```
 
 ## What the Test Validates
@@ -186,7 +182,7 @@ make dev.down && make dev.up-bank-a
 **Fix**:
 ```bash
 # Increase timeout
-HTTP_TIMEOUT=300 ./tryout-fx-agreement-e2e.sh --skip-onboarding
+HTTP_TIMEOUT=300 ./tryout/tryout-fx-agreement-e2e.sh --skip-onboarding
 ```
 
 ### "Cross-spoke synchronization timed out"
@@ -200,7 +196,7 @@ ps aux | grep cacti
 # Restart if needed
 make cacti-down && make cacti-up
 # Increase timeout
-RELAY_SYNC_TIMEOUT=60 ./tryout-fx-agreement-e2e.sh --skip-onboarding
+RELAY_SYNC_TIMEOUT=60 ./tryout/tryout-fx-agreement-e2e.sh --skip-onboarding
 ```
 
 ## Validating Results in Database
