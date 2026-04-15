@@ -23,7 +23,7 @@ import (
 
 var _ ports.HTLCContractPort = (*Client)(nil)
 
-const htlcABIJSON = `[{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"receiver","type":"address"},{"name":"hashLock","type":"bytes32"},{"name":"timeLock","type":"uint256"},{"name":"zetoLockRef","type":"bytes32"},{"name":"agreementId","type":"bytes32"}],"name":"lock","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"secret","type":"bytes32"}],"name":"settle","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"}],"name":"refund","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
+const htlcABIJSON = `[{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"receiver","type":"address"},{"name":"hashLock","type":"bytes32"},{"name":"timeLock","type":"uint256"},{"name":"zetoLockRef","type":"bytes32"},{"name":"agreementId","type":"bytes32"}],"name":"lock","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"secret","type":"bytes32"}],"name":"settle","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"}],"name":"refund","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"commitment","type":"bytes32"}],"name":"registerAgreementCommitment","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
 
 // ClientConfig holds the configuration for the Besu HTLC client.
 type ClientConfig struct {
@@ -110,6 +110,14 @@ func (c *Client) Refund(ctx context.Context, contractID [32]byte) (string, error
 		return "", fmt.Errorf("pack refund: %w", err)
 	}
 	return c.sendTx(ctx, data, "refund")
+}
+
+func (c *Client) RegisterAgreementCommitment(ctx context.Context, commitment [32]byte) (string, error) {
+	data, err := c.htlcABI.Pack("registerAgreementCommitment", commitment)
+	if err != nil {
+		return "", fmt.Errorf("pack registerAgreementCommitment: %w", err)
+	}
+	return c.sendTx(ctx, data, "registerAgreementCommitment")
 }
 
 func (c *Client) sendTx(ctx context.Context, data []byte, method string) (string, error) {

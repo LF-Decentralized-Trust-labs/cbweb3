@@ -484,6 +484,18 @@ func (h *PaymentHandler) ListFXAgreements(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"agreements": results, "total": len(results)})
 }
 
+func (h *PaymentHandler) ListFXAgreementEvents(c *fiber.Ctx) error {
+	tradeID := c.Params("tradeId")
+	if tradeID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tradeId is required"})
+	}
+	results, err := h.payment.ListFXAgreementEvents(c.Context(), tradeID)
+	if err != nil {
+		return grpcErrorToHTTP(c, err)
+	}
+	return c.JSON(fiber.Map{"events": results, "total": len(results)})
+}
+
 // grpcErrorToHTTP maps gRPC status codes to appropriate HTTP responses.
 func grpcErrorToHTTP(c *fiber.Ctx, err error) error {
 	switch status.Code(err) {

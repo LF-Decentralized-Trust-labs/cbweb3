@@ -66,7 +66,6 @@ services:
       PAYMENT_GRPC_PORT: "9094"
       PALADIN_URL: "http://host.docker.internal:31748"
       PALADIN_IDENTITY: "funded_operator@spoke-b-cb"
-      BESU_OPERATOR_KEY: "${CB_PRIVATE_KEY:-}"
       CACTI_API_URL: "http://host.docker.internal:4000"
     ports:
       - "60094:9094"

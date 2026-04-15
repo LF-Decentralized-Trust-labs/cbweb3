@@ -15,6 +15,13 @@ enum FXAgreementState {
   FX_STATE_SETTLED = 5;
 }
 
+enum FXAgreementEventSource {
+  FX_EVENT_SOURCE_LOCAL_API = 0;
+  FX_EVENT_SOURCE_RELAY = 1;
+  FX_EVENT_SOURCE_SYSTEM_JOB = 2;
+  FX_EVENT_SOURCE_ON_BEHALF = 3;
+}
+
 enum HTLCState {
   HTLC_STATE_INVALID = 0;
   HTLC_STATE_PENDING = 1;
@@ -43,6 +50,8 @@ message FXAgreement {
   string rate = 7;
   uint64 expiry_date = 8;
   FXAgreementState state = 9;
+  string group_id = 19;
+  string contract_address = 20;
 }
 
 message ProposeFXAgreementRequest {
@@ -117,6 +126,27 @@ message ListFXAgreementsRequest {
 
 message ListFXAgreementsResponse {
   repeated FXAgreement agreements = 1;
+}
+
+// FXAgreementEvent represents an immutable audit trail entry.
+message FXAgreementEvent {
+  int64 id = 1;                              // bigserial auto-increment ID
+  string trade_id = 2;                       // FK: agreements(trade_id)
+  FXAgreementState from_state = 3;           // State before transition
+  FXAgreementState to_state = 4;             // State after transition
+  string actor = 5;                          // User/service identity that triggered the transition
+  int64 occurred_at_unix = 6;                // Timestamp (seconds since epoch)
+  string notes = 7;                          // Optional human-readable detail
+  string tx_hash = 8;                        // Optional on-chain tx reference
+  FXAgreementEventSource source = 9;         // Origin: LOCAL_API, RELAY, SYSTEM_JOB, ON_BEHALF
+}
+
+message ListFXAgreementEventsRequest {
+  string trade_id = 1;   // Required: trade_id to query audit trail for
+}
+
+message ListFXAgreementEventsResponse {
+  repeated FXAgreementEvent events = 1;    // Ordered by occurred_at_unix ASC
 }
 
 // ─── HTLC Messages ──────────────────────────────────────────────────────
@@ -456,6 +486,7 @@ service PaymentOrchestratorService {
   rpc SettleFXAgreement(SettleFXAgreementRequest) returns (SettleFXAgreementResponse);
   rpc GetFXAgreement(GetFXAgreementRequest) returns (GetFXAgreementResponse);
   rpc ListFXAgreements(ListFXAgreementsRequest) returns (ListFXAgreementsResponse);
+  rpc ListFXAgreementEvents(ListFXAgreementEventsRequest) returns (ListFXAgreementEventsResponse);
 
   // HTLC dual-layer operations (public coordination + private Zeto lock)
   rpc LockHTLC(LockHTLCRequest) returns (LockHTLCResponse);

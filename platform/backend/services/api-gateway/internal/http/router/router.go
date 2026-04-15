@@ -2,6 +2,8 @@
 package router
 
 import (
+	"os"
+
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
@@ -135,10 +137,13 @@ func Setup(app *fiber.App, deps Dependencies) {
 		fxGroup.Post("/:tradeId/cancel", deps.PaymentHandler.CancelFXAgreement)
 		fxGroup.Post("/:tradeId/settle", deps.PaymentHandler.SettleFXAgreement)
 		fxGroup.Get("/:tradeId", deps.PaymentHandler.GetFXAgreement)
+		fxGroup.Get("/:tradeId/audit", deps.PaymentHandler.ListFXAgreementEvents)
 		fxGroup.Get("", deps.PaymentHandler.ListFXAgreements)
 
-		// Internal FX route for the Cacti relay (no auth — only reachable within Docker network).
-		intFX := app.Group("/internal/v1/payments/fx/agreements")
+		// Internal FX route for the Cacti relay — protected by X-Relay-Auth service-to-service secret.
+		// INTERNAL_RELAY_AUTH_SECRET must be set in the API Gateway environment.
+		relayAuthSecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
+		intFX := app.Group("/internal/v1/payments/fx/agreements", middleware.RequireRelayAuth(relayAuthSecret))
 		intFX.Get("", deps.PaymentHandler.ListFXAgreements)
 
 		// --- Escrow: Deposit / Escrow / Redeem (Central Bank) ---

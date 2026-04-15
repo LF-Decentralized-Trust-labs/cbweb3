@@ -84,6 +84,14 @@ func (m *mockZeto) Balance(_ context.Context) (string, error) {
 	return "1000000", nil
 }
 
+func (m *mockZeto) ResolveIdentity(_ context.Context, identity string) (string, error) {
+	// Deterministic fake EVM address for tests.
+	if identity == "" {
+		return "", nil
+	}
+	return "0x1111111111111111111111111111111111111111", nil
+}
+
 type mockFiat struct {
 	balanceCalled int
 	balance       string
@@ -126,10 +134,12 @@ type mockHTLC struct {
 	lockCalled   int
 	settleCalled int
 	refundCalled int
+	commitCalled int
 
 	lockErr   error
 	settleErr error
 	refundErr error
+	commitErr error
 }
 
 func (m *mockHTLC) Lock(_ context.Context, _ ports.HTLCLockParams) (string, error) {
@@ -152,6 +162,13 @@ func (m *mockHTLC) Refund(_ context.Context, _ [32]byte) (string, error) {
 		return "", m.refundErr
 	}
 	return "mock-htlc-refund-tx", nil
+}
+func (m *mockHTLC) RegisterAgreementCommitment(_ context.Context, _ [32]byte) (string, error) {
+	m.commitCalled++
+	if m.commitErr != nil {
+		return "", m.commitErr
+	}
+	return "mock-htlc-commit-tx", nil
 }
 
 func setupTestEnv(t *testing.T) *testEnv {

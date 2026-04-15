@@ -18,6 +18,10 @@ type HTLCContractPort interface {
 
 	// Refund marks the on-chain HTLC as refunded after the timeLock expires.
 	Refund(ctx context.Context, contractID [32]byte) (txHash string, err error)
+
+	// RegisterAgreementCommitment records an accepted agreement commitment hash
+	// for fallback on-chain gating when FX_AGREEMENT integration is unavailable.
+	RegisterAgreementCommitment(ctx context.Context, commitment [32]byte) (txHash string, err error)
 }
 
 // HTLCLockParams contains the parameters for recording an HTLC lock on-chain.
@@ -27,5 +31,5 @@ type HTLCLockParams struct {
 	HashLock    [32]byte
 	TimeLock    uint64
 	ZetoLockRef [32]byte
-	AgreementID [32]byte // FX agreement trade ID (bytes32(0) skips on-chain gate)
+	AgreementID [32]byte // FX trade ID (when FX_AGREEMENT active) or commitment hash fallback
 }

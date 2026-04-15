@@ -127,12 +127,16 @@ func New(cfg config.Config) (*App, error) {
 		},
 	)
 
-	fiberApp.Use(cors.New(cors.Config{
-		AllowOrigins:     os.Getenv("CORS_ALLOW_ORIGINS"),
-		AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept",
-		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
-		AllowCredentials: true,
-	}))
+	// CORS middleware: only enable if explicitly configured to avoid security issues.
+	// AllowCredentials=true is incompatible with AllowOrigins="*" per RFC 6749.
+	if corsOrigins := os.Getenv("CORS_ALLOW_ORIGINS"); corsOrigins != "" {
+		fiberApp.Use(cors.New(cors.Config{
+			AllowOrigins:     corsOrigins,
+			AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept",
+			AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
+			AllowCredentials: true,
+		}))
+	}
 
 	router.Setup(fiberApp, deps)
 

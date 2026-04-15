@@ -474,6 +474,20 @@ type FXAgreementResult struct {
 	Rate            string `json:"rate,omitempty"`
 	ExpiryDate      uint64 `json:"expiry_date,omitempty"`
 	State           string `json:"state,omitempty"`
+	GroupID         string `json:"group_id,omitempty"`
+	ContractAddress string `json:"contract_address,omitempty"`
+}
+
+type FXAgreementEventResult struct {
+	ID             int64  `json:"id"`
+	TradeID        string `json:"trade_id"`
+	FromState      string `json:"from_state"`
+	ToState        string `json:"to_state"`
+	Actor          string `json:"actor"`
+	OccurredAtUnix int64  `json:"occurred_at_unix"`
+	Notes          string `json:"notes,omitempty"`
+	TxHash         string `json:"tx_hash,omitempty"`
+	Source         string `json:"source"`
 }
 
 func (a *GRPCAdapter) ProposeFXAgreement(ctx context.Context, req *pb.ProposeFXAgreementRequest) (*FXAgreementResult, error) {
@@ -536,6 +550,18 @@ func (a *GRPCAdapter) ListFXAgreements(ctx context.Context, counterparty, state 
 	return result, nil
 }
 
+func (a *GRPCAdapter) ListFXAgreementEvents(ctx context.Context, tradeID string) ([]FXAgreementEventResult, error) {
+	resp, err := a.cc.ListFXAgreementEvents(ctx, &pb.ListFXAgreementEventsRequest{TradeId: tradeID})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]FXAgreementEventResult, 0, len(resp.Events))
+	for _, ev := range resp.Events {
+		result = append(result, *fxAgreementEventToResult(ev))
+	}
+	return result, nil
+}
+
 func fxAgreementToResult(ag *pb.FXAgreement) *FXAgreementResult {
 	if ag == nil {
 		return &FXAgreementResult{}
@@ -554,5 +580,24 @@ func fxAgreementToResult(ag *pb.FXAgreement) *FXAgreementResult {
 		Rate:            ag.Rate,
 		ExpiryDate:      ag.ExpiryDate,
 		State:           ag.State.String(),
+		GroupID:         ag.GroupId,
+		ContractAddress: ag.ContractAddress,
+	}
+}
+
+func fxAgreementEventToResult(ev *pb.FXAgreementEvent) *FXAgreementEventResult {
+	if ev == nil {
+		return &FXAgreementEventResult{}
+	}
+	return &FXAgreementEventResult{
+		ID:             ev.Id,
+		TradeID:        ev.TradeId,
+		FromState:      ev.FromState.String(),
+		ToState:        ev.ToState.String(),
+		Actor:          ev.Actor,
+		OccurredAtUnix: ev.OccurredAtUnix,
+		Notes:          ev.Notes,
+		TxHash:         ev.TxHash,
+		Source:         ev.Source.String(),
 	}
 }
