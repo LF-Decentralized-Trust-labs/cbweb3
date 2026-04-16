@@ -12,6 +12,13 @@ import (
 	"time"
 )
 
+const rpcHTTPTimeout = 15 * time.Second
+
+func postJSON(url string, body []byte) (*http.Response, error) {
+	client := &http.Client{Timeout: rpcHTTPTimeout}
+	return client.Post(url, "application/json", bytes.NewReader(body))
+}
+
 // pentePrivacyGroupInput is the input payload for pgroup_createGroup.
 type pentePrivacyGroupInput struct {
 	Domain        string                 `json:"domain"`
@@ -76,7 +83,7 @@ func pollPenteGroupContractAddress(paladinURL, domain, groupIDHex string) (strin
 		}
 
 		body, _ := json.Marshal(reqBody)
-		resp, err := http.Post(paladinURL, "application/json", bytes.NewReader(body))
+		resp, err := postJSON(paladinURL, body)
 		if err != nil {
 			return "", fmt.Errorf("pgroup_getGroupById: %w", err)
 		}
@@ -195,7 +202,7 @@ func createPenteGroup(url, groupName string, members []string) (*pGroupCreateRes
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := postJSON(url, body)
 	if err != nil {
 		return nil, fmt.Errorf("POST %s: %w", url, err)
 	}
@@ -258,7 +265,7 @@ func pollTxReceipt(paladinURL, txId string) (string, error) {
 		}
 
 		body, _ := json.Marshal(reqBody)
-		resp, err := http.Post(paladinURL, "application/json", bytes.NewReader(body))
+		resp, err := postJSON(paladinURL, body)
 		if err != nil {
 			return "", fmt.Errorf("ptx_getTransactionFull: %w", err)
 		}

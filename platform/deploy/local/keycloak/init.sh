@@ -170,8 +170,12 @@ create_realm_and_client() {
     exit 1
   fi
 
-  echo "Recreating ${domain_env_file} from template and injecting Keycloak values..."
-  copy_example_to_env "$domain_env_file_example" "$domain_env_file"
+  if [[ ! -f "$domain_env_file" ]]; then
+    echo "Creating ${domain_env_file} from template and injecting Keycloak values..."
+    copy_example_to_env "$domain_env_file_example" "$domain_env_file"
+  else
+    echo "Updating Keycloak values in existing ${domain_env_file} (preserving non-Keycloak settings)..."
+  fi
   set_env_var "$domain_env_file" "KEYCLOAK_CONTAINER_NAME" "${KEYCLOAK_CONTAINER_NAME:-cbweb3-keycloak}"
   set_env_var "$domain_env_file" "KEYCLOAK_PORT" "${KEYCLOAK_PORT:-8081}"
   set_env_var "$domain_env_file" "KEYCLOAK_ENV_OUTPUT_DIR" "${KEYCLOAK_ENV_OUTPUT_DIR:-$CONFIG_DIR}"

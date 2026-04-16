@@ -60,6 +60,12 @@ func main() {
 	// Shared Besu config — used by HTLC, FiatToken, and FXAgreement adapters.
 	besuRPC := os.Getenv("BESU_RPC_URL")
 	operatorKey := os.Getenv("BESU_OPERATOR_KEY")
+	if operatorKey == "" {
+		if cbKey := os.Getenv("CB_PRIVATE_KEY"); cbKey != "" {
+			operatorKey = cbKey
+			logger.Warn("BESU_OPERATOR_KEY not set; falling back to CB_PRIVATE_KEY")
+		}
+	}
 	chainIDStr := getEnv("BESU_CHAIN_ID", "1337")
 	var chainID int64
 	if besuRPC != "" {
