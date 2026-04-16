@@ -25,6 +25,7 @@ type Config struct {
 	EntityBesuAddress  string // Besu address of this entity; used by the escrow proxy to enrich requests
 	PaladinIdentity    string // Paladin identity for this entity; used for Zeto operations
 	CBPaladinIdentity  string // Central Bank's Paladin identity; receiver for Zeto transfers in redeem flow
+	RelayAuthSecret    string // shared secret for X-Relay-Auth header on internal service-to-service endpoints
 }
 
 // Load reads environment variables and returns a fully populated Config.
@@ -47,6 +48,7 @@ func Load() Config {
 		EntityBesuAddress:  getEnv("ENTITY_BESU_ADDRESS", ""),
 		PaladinIdentity:    getEnv("PALADIN_IDENTITY", ""),
 		CBPaladinIdentity:  getEnv("CB_PALADIN_IDENTITY", ""),
+		RelayAuthSecret:    getEnv("INTERNAL_RELAY_AUTH_SECRET", ""),
 	}
 }
 

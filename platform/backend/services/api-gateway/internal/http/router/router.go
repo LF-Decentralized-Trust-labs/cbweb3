@@ -148,16 +148,16 @@ func Setup(app *fiber.App, deps Dependencies) {
 
 		// --- Escrow: Deposit / Escrow / Redeem (Central Bank) ---
 		if deps.PaymentProxyHandler == nil {
-			// Internal routes for proxy-receiving (no auth — only reachable within Docker network).
-			intDeposits := app.Group("/internal/v1/payments/deposits")
+			// Internal routes for proxy-receiving — protected by X-Relay-Auth shared secret.
+			intDeposits := app.Group("/internal/v1/payments/deposits", middleware.RequireRelayAuth(relayAuthSecret))
 			intDeposits.Post("", deps.PaymentHandler.RegisterDeposit)
 			intDeposits.Get("", deps.PaymentHandler.ListDeposits)
 
-			intEscrows := app.Group("/internal/v1/payments/escrows")
+			intEscrows := app.Group("/internal/v1/payments/escrows", middleware.RequireRelayAuth(relayAuthSecret))
 			intEscrows.Post("", deps.PaymentHandler.RequestEscrow)
 			intEscrows.Get("", deps.PaymentHandler.ListEscrows)
 
-			intRedeems := app.Group("/internal/v1/payments/redeems")
+			intRedeems := app.Group("/internal/v1/payments/redeems", middleware.RequireRelayAuth(relayAuthSecret))
 			intRedeems.Post("", deps.PaymentHandler.RequestRedeem)
 			intRedeems.Get("", deps.PaymentHandler.ListRedeems)
 

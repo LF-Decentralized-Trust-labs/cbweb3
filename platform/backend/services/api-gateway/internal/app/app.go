@@ -105,6 +105,7 @@ func New(cfg config.Config) (*App, error) {
 				cfg.EntityBesuAddress,
 				cfg.PaladinIdentity,
 				cfg.CBPaladinIdentity,
+				cfg.RelayAuthSecret,
 			)
 		}
 	}
