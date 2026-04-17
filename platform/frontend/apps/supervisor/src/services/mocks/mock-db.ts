@@ -61,7 +61,7 @@ const participants: Participant[] = [
 
 const pools: PoolStatus[] = [
   {
-    pair: "BRL/USD",
+    pair: "BRL/ARS",
     reserveA: 710_000,
     reserveB: 290_000,
     ratioA: 71,
@@ -70,7 +70,7 @@ const pools: PoolStatus[] = [
     updatedAt: nowIso(),
   },
   {
-    pair: "COP/USD",
+    pair: "COP/ARS",
     reserveA: 510_000,
     reserveB: 490_000,
     ratioA: 51,
@@ -85,7 +85,7 @@ let auditLogs: AuditLogEntry[] = [
     id: "audit_001",
     actor: "supervisor@centralbank.gov",
     action: "POOL_STATUS_VIEW",
-    target: "BRL/USD",
+    target: "BRL/ARS",
     timestamp: nowIso(),
     status: "SUCCESS",
   },

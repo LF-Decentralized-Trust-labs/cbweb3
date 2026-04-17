@@ -26,6 +26,10 @@ ACTION="${1:-up}"
 
 case "${ACTION}" in
   up)
+    (
+      cd "${ROOT_DIR}/frontend"
+      npm install
+    )
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up --build -d
     ;;
   down)

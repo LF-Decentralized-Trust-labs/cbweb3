@@ -31,6 +31,9 @@ interface IHashTimeLockedContract {
     error HTLC__TimeLockNotExpired();
     error HTLC__TimeLockExpired();
     error HTLC__ParticipantNotVerified(address account);
+    error HTLC__AgreementNotAccepted();
+    error HTLC__AgreementExpired();
+    error HTLC__CommitmentNotAccepted();
 
     /// @notice Records a lock coordination entry linked to a private Zeto lock.
     /// @param contractId Unique identifier for the agreement.
@@ -38,7 +41,8 @@ interface IHashTimeLockedContract {
     /// @param hashLock The SHA-256 hash of the secret.
     /// @param timeLock The Unix timestamp after which the lock can be refunded.
     /// @param zetoLockRef Reference to the private Zeto lock transaction.
-    function lock(bytes32 contractId, address receiver, bytes32 hashLock, uint256 timeLock, bytes32 zetoLockRef)
+    /// @param agreementId The FX agreement ID to gate against (bytes32(0) to skip).
+    function lock(bytes32 contractId, address receiver, bytes32 hashLock, uint256 timeLock, bytes32 zetoLockRef, bytes32 agreementId)
         external;
 
     /// @notice Settles the HTLC by providing the secret preimage.

@@ -5,7 +5,7 @@ log:
 
 db:
   sqlite:
-    dsn: ":memory:"
+    dsn: "/data/paladin.db"
     autoMigrate: true
     migrationsDir: "./db/migrations/sqlite"
     debugQueries: false
@@ -63,6 +63,20 @@ domains:
       snarkProver:
         circuitsDir: "/app/domains/zeto/zkp"
         provingKeysDir: "/app/domains/zeto/zkp"
+  pente:
+    registryAddress: "${PENTE_FACTORY_ADDRESS}"
+    allowSigning: true
+    fixedSigningIdentity: "funded_operator"
+    plugin:
+      type: "jar"
+      library: "/app/domains/pente.jar"
+      class: "io.kaleido.paladin.pente.domain.PenteDomainFactory"
+    config:
+      # Pente configuration for bilateral private contexts (FX Agreement)
+      enabled: true
+      privateMTX: true
+      # Group ID and contract address for FXAgreement are set at deployment time
+      # and injected via environment variables (PENTE_CONTEXT_GROUP_ID, FX_AGREEMENT_ADDRESS)
 
 registries:
   evm-registry:

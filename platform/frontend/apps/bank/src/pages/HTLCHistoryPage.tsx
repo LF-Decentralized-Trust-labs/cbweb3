@@ -28,12 +28,21 @@ import { useHtlcStore, usePaymentStore } from "../stores";
 
 type FilterState = "ALL" | HTLCSearchState;
 
-const shortState = (value: string) => value.replace("HTLC_STATE_", "");
+const shortState = (value: string) => {
+  const s = value.replace("HTLC_STATE_", "");
+  if (s === "LOCKED") return "Pending Settlement";
+  if (s === "SETTLING") return "Processing";
+  if (s === "SETTLED") return "Settled";
+  if (s === "REFUNDING") return "Revoking";
+  if (s === "REFUNDED") return "Revoked";
+  return s;
+};
 
 const statusVariant = (state: string): "warning" | "default" | "success" | "destructive" | "outline" => {
   if (state === "HTLC_STATE_LOCKED") return "warning";
   if (state === "HTLC_STATE_SETTLED") return "success";
   if (state === "HTLC_STATE_REFUNDED") return "destructive";
+  if (state === "HTLC_STATE_SETTLING" || state === "HTLC_STATE_REFUNDING") return "default";
   return "outline";
 };
 
@@ -60,7 +69,7 @@ export function HTLCHistoryPage() {
       setLocks(response.locks);
       setTotal(response.total);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to load HTLC history.");
+      toast.error(error instanceof Error ? error.message : "Unable to load settlement history.");
     } finally {
       setLoading(false);
     }
@@ -79,11 +88,11 @@ export function HTLCHistoryPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">HTLC History</h1>
-          <p className="text-sm text-muted-foreground">Search and inspect cross-spoke HTLC contracts.</p>
+          <h1 className="text-xl font-semibold">PvP Settlement History</h1>
+          <p className="text-sm text-muted-foreground">Search and inspect cross-border PvP settlement records.</p>
         </div>
         <Button asChild>
-          <Link to="/htlc/new">New HTLC Lock</Link>
+          <Link to="/htlc/new">Initiate PvP Transfer</Link>
         </Button>
       </div>
 
@@ -101,9 +110,11 @@ export function HTLCHistoryPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All</SelectItem>
-              <SelectItem value="LOCKED">LOCKED</SelectItem>
-              <SelectItem value="SETTLED">SETTLED</SelectItem>
-              <SelectItem value="REFUNDED">REFUNDED</SelectItem>
+              <SelectItem value="LOCKED">Pending Settlement</SelectItem>
+              <SelectItem value="SETTLING">Processing</SelectItem>
+              <SelectItem value="SETTLED">Settled</SelectItem>
+              <SelectItem value="REFUNDING">Revoking</SelectItem>
+              <SelectItem value="REFUNDED">Revoked</SelectItem>
             </SelectContent>
           </Select>
           <Input
@@ -130,7 +141,7 @@ export function HTLCHistoryPage() {
                 <TableHead>Sender</TableHead>
                 <TableHead>Receiver</TableHead>
                 <TableHead>State</TableHead>
-                <TableHead>Time Lock</TableHead>
+                <TableHead>Expiry</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -153,7 +164,7 @@ export function HTLCHistoryPage() {
               ))}
             </TableBody>
           </Table>
-          {!locks.length ? <p className="pt-3 text-sm text-muted-foreground">No HTLCs found.</p> : null}
+          {!locks.length ? <p className="pt-3 text-sm text-muted-foreground">No PvP transfers found.</p> : null}
         </CardContent>
       </Card>
     </div>

@@ -1,6 +1,17 @@
-version: '3.8'
-
 services:
+  # Init container: ensures all data volumes are writable by the Paladin user.
+  # Named volumes are created owned by root (0755); this service runs as root
+  # and makes them world-writable before the Paladin nodes start.
+  paladin-data-init:
+    image: alpine:3.20
+    user: "0:0"
+    volumes:
+      - paladin_spoke_b_cb_data:/data/cb
+      - paladin_spoke_b_bank_b_data:/data/bank-b
+      - paladin_spoke_b_bank_d_data:/data/bank-d
+    command: ["sh", "-c", "chmod 777 /data/cb /data/bank-b /data/bank-d"]
+    restart: "no"
+
   # Paladin Central Bank Node — wired to Besu bootnode (RPC :8745, WS :8755)
   paladin-spoke-b-cb:
     image: docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
@@ -23,6 +34,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    depends_on:
+      paladin-data-init:
+        condition: service_completed_successfully
     command: ["/etc/paladin/config.yaml", "engine"]
 
   # Paladin Bank B Node — wired to Besu node-1 (RPC :8747, WS :8757)
@@ -47,6 +61,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    depends_on:
+      paladin-data-init:
+        condition: service_completed_successfully
     command: ["/etc/paladin/config.yaml", "engine"]
 
   # Paladin Bank D Node — wired to Besu node-2 (RPC :8748, WS :8758)
@@ -71,6 +88,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    depends_on:
+      paladin-data-init:
+        condition: service_completed_successfully
     command: ["/etc/paladin/config.yaml", "engine"]
 
 volumes:

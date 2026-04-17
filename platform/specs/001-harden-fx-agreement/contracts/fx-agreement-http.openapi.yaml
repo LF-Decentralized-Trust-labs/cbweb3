@@ -1,0 +1,236 @@
+openapi: 3.0.3
+info:
+  title: FX Agreement API Evolution Contract
+  version: 0.1.0
+  description: Contract for production hardening of FX Agreement lifecycle endpoints.
+servers:
+  - url: /api/v1
+paths:
+  /payments/fx/agreements:
+    post:
+      summary: Propose a new FX agreement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FXAgreementProposalRequest'
+      responses:
+        '201':
+          description: Agreement created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FXAgreementResponse'
+    get:
+      summary: List FX agreements
+      parameters:
+        - name: counterparty
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            $ref: '#/components/schemas/FXAgreementState'
+      responses:
+        '200':
+          description: Agreement list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agreements:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FXAgreement'
+  /payments/fx/agreements/{tradeId}:
+    get:
+      summary: Get a single FX agreement
+      parameters:
+        - name: tradeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agreement payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FXAgreementResponse'
+  /payments/fx/agreements/{tradeId}/accept:
+    post:
+      summary: Accept FX agreement
+      parameters:
+        - name: tradeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Accepted
+  /payments/fx/agreements/{tradeId}/reject:
+    post:
+      summary: Reject FX agreement
+      parameters:
+        - name: tradeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rejected
+  /payments/fx/agreements/{tradeId}/cancel:
+    post:
+      summary: Cancel FX agreement
+      parameters:
+        - name: tradeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cancelled
+  /payments/fx/agreements/{tradeId}/settle:
+    post:
+      summary: Settle FX agreement
+      parameters:
+        - name: tradeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Settled
+  /internal/v1/payments/fx/agreements:
+    get:
+      summary: Internal relay list endpoint
+      description: Must be protected by service-to-service authentication in production.
+      parameters:
+        - name: state
+          in: query
+          schema:
+            $ref: '#/components/schemas/FXAgreementState'
+      responses:
+        '200':
+          description: Internal list
+      security:
+        - InternalRelayAuth: []
+components:
+  securitySchemes:
+    InternalRelayAuth:
+      type: apiKey
+      in: header
+      name: X-Relay-Auth
+  schemas:
+    FXAgreementState:
+      type: string
+      enum:
+        - PROPOSED
+        - ACCEPTED
+        - REJECTED
+        - CANCELLED
+        - SETTLED
+    FXAgreement:
+      type: object
+      required:
+        - trade_id
+        - originator
+        - counterparty_b
+        - origin_amount
+        - counter_amount
+        - origin_currency
+        - counter_currency
+        - rate
+        - expiry_date
+        - state
+      properties:
+        trade_id:
+          type: string
+        originator:
+          type: string
+        counterparty_b:
+          type: string
+        settlement_agent:
+          type: string
+        custodian:
+          type: string
+        beneficiary:
+          type: string
+        origin_amount:
+          type: string
+        counter_amount:
+          type: string
+        origin_currency:
+          type: string
+        counter_currency:
+          type: string
+        rate:
+          type: string
+        expiry_date:
+          type: integer
+          format: int64
+        state:
+          $ref: '#/components/schemas/FXAgreementState'
+        spoke_a_receiver:
+          type: string
+        spoke_b_receiver:
+          type: string
+        group_id:
+          type: string
+          nullable: true
+        contract_address:
+          type: string
+          nullable: true
+    FXAgreementProposalRequest:
+      type: object
+      required:
+        - counterparty_b
+        - origin_amount
+        - counter_amount
+        - origin_currency
+        - counter_currency
+        - rate
+        - expiry_date
+      properties:
+        trade_id:
+          type: string
+        originator:
+          type: string
+        counterparty_b:
+          type: string
+        settlement_agent:
+          type: string
+        custodian:
+          type: string
+        beneficiary:
+          type: string
+        origin_amount:
+          type: string
+        counter_amount:
+          type: string
+        origin_currency:
+          type: string
+        counter_currency:
+          type: string
+        rate:
+          type: string
+        expiry_date:
+          type: integer
+          format: int64
+        spoke_a_receiver:
+          type: string
+        spoke_b_receiver:
+          type: string
+    FXAgreementResponse:
+      type: object
+      properties:
+        agreement:
+          $ref: '#/components/schemas/FXAgreement'

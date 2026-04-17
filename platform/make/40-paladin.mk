@@ -3,6 +3,8 @@ PALADIN_SCRIPTS    := $(PALADIN_DIR)/scripts
 PALADIN_TIMEOUT    ?= 5m
 BESU_READY_WAIT    ?= 60
 PALADIN_READY_WAIT ?= 60
+PALADIN_READY_INTERVAL ?= 2
+PALADIN_READY_ATTEMPTS ?= 90
 BESU_RPC_URL_A     ?= http://127.0.0.1:8645
 BESU_RPC_URL_B     ?= http://127.0.0.1:8745
 
@@ -32,9 +34,21 @@ paladin.deploy-zeto-spoke-b:
 		SPOKE=spoke-b BESU_RPC_URL=$(BESU_RPC_URL_B) \
 		go test ./... -run TestDeployZetoFactory -v -count=1 -timeout $(PALADIN_TIMEOUT)
 
-paladin.deploy-contracts-spoke-a: paladin.deploy-registry-spoke-a paladin.deploy-zeto-spoke-a
+paladin.deploy-pente-factory-spoke-a:
+	@echo "Deploying PenteFactory on spoke-a..."
+	@cd $(PALADIN_SCRIPTS) && \
+		SPOKE=spoke-a BESU_RPC_URL=$(BESU_RPC_URL_A) \
+		go test ./... -run TestDeployPenteFactory -v -count=1 -timeout $(PALADIN_TIMEOUT)
 
-paladin.deploy-contracts-spoke-b: paladin.deploy-registry-spoke-b paladin.deploy-zeto-spoke-b
+paladin.deploy-pente-factory-spoke-b:
+	@echo "Deploying PenteFactory on spoke-b..."
+	@cd $(PALADIN_SCRIPTS) && \
+		SPOKE=spoke-b BESU_RPC_URL=$(BESU_RPC_URL_B) \
+		go test ./... -run TestDeployPenteFactory -v -count=1 -timeout $(PALADIN_TIMEOUT)
+
+paladin.deploy-contracts-spoke-a: paladin.deploy-registry-spoke-a paladin.deploy-zeto-spoke-a paladin.deploy-pente-factory-spoke-a
+
+paladin.deploy-contracts-spoke-b: paladin.deploy-registry-spoke-b paladin.deploy-zeto-spoke-b paladin.deploy-pente-factory-spoke-b
 
 # ── Zeto token instance creation (requires Paladin nodes running) ────────
 
@@ -49,6 +63,65 @@ paladin.create-zeto-token-spoke-b:
 	@cd $(PALADIN_SCRIPTS) && \
 		SPOKE=spoke-b PALADIN_CB_URL=http://127.0.0.1:31748 \
 		go test ./... -run TestCreateZetoTokenInstance -v -count=1 -timeout $(PALADIN_TIMEOUT)
+
+# ── Pente bilateral context & FXAgreement deployment (REQUIRED for local operation) ────
+
+paladin.create-pente-context-spoke-a:
+	@echo "Creating Pente bilateral context on spoke-a..."
+	@cd $(PALADIN_SCRIPTS) && \
+		SPOKE=spoke-a PALADIN_CB_URL=http://127.0.0.1:31648 \
+		go test ./... -run TestCreatePenteContextBilateral -v -count=1 -timeout $(PALADIN_TIMEOUT)
+
+paladin.create-pente-context-spoke-b:
+	@echo "Creating Pente bilateral context on spoke-b..."
+	@cd $(PALADIN_SCRIPTS) && \
+		SPOKE=spoke-b PALADIN_CB_URL=http://127.0.0.1:31748 \
+		go test ./... -run TestCreatePenteContextBilateral -v -count=1 -timeout $(PALADIN_TIMEOUT)
+
+paladin.deploy-fxagreement-pente-spoke-a: .ensure-registry-addr contracts.build
+	@echo "Deploying FXAgreement contract in Pente context on spoke-a..."
+	@cd $(PALADIN_SCRIPTS) && \
+		SPOKE=spoke-a \
+		REGISTRY_CONTRACT_ADDRESS=$$(bash source_deployed_addrs.sh --file ../spoke-a/.deployed-addrs.env --key REGISTRY_CONTRACT_ADDRESS --raw) \
+		PENTE_CONTEXT_GROUP_ID=$$(bash source_deployed_addrs.sh --file ../spoke-a/.deployed-addrs.env --key PENTE_CONTEXT_GROUP_ID --raw) \
+		PALADIN_CB_URL=http://127.0.0.1:31648 \
+		go test ./... -run TestDeployFXAgreementPente -v -count=1 -timeout $(PALADIN_TIMEOUT)
+
+paladin.deploy-fxagreement-pente-spoke-b: .ensure-registry-addr contracts.build
+	@echo "Deploying FXAgreement contract in Pente context on spoke-b..."
+	@cd $(PALADIN_SCRIPTS) && \
+		SPOKE=spoke-b \
+		REGISTRY_CONTRACT_ADDRESS=$$(bash source_deployed_addrs.sh --file ../spoke-b/.deployed-addrs.env --key REGISTRY_CONTRACT_ADDRESS --raw) \
+		PENTE_CONTEXT_GROUP_ID=$$(bash source_deployed_addrs.sh --file ../spoke-b/.deployed-addrs.env --key PENTE_CONTEXT_GROUP_ID --raw) \
+		PALADIN_CB_URL=http://127.0.0.1:31748 \
+		go test ./... -run TestDeployFXAgreementPente -v -count=1 -timeout $(PALADIN_TIMEOUT)
+
+paladin.verify-fxagreement-pente-spoke-a: .ensure-fxa-addr
+	@echo "Verifying FXAgreement deployment on spoke-a..."
+	@cd $(PALADIN_SCRIPTS) && \
+		SPOKE=spoke-a \
+		FX_AGREEMENT_ADDRESS=$$(bash source_deployed_addrs.sh --file ../spoke-a/.deployed-addrs.env --key FX_AGREEMENT_ADDRESS --raw 2>/dev/null || true) \
+		FX_AGREEMENT_DEPLOYED_AT=$$(bash source_deployed_addrs.sh --file ../spoke-a/.deployed-addrs.env --key FX_AGREEMENT_DEPLOYED_AT --raw) \
+		PENTE_CONTEXT_GROUP_ID=$$(bash source_deployed_addrs.sh --file ../spoke-a/.deployed-addrs.env --key PENTE_CONTEXT_GROUP_ID --raw) \
+		PALADIN_CB_URL=http://127.0.0.1:31648 \
+		go test ./... -run TestVerifyFXAgreementPenteDeploy -v -count=1 -timeout $(PALADIN_TIMEOUT)
+
+paladin.verify-fxagreement-pente-spoke-b: .ensure-fxa-addr
+	@echo "Verifying FXAgreement deployment on spoke-b..."
+	@cd $(PALADIN_SCRIPTS) && \
+		SPOKE=spoke-b \
+		FX_AGREEMENT_ADDRESS=$$(bash source_deployed_addrs.sh --file ../spoke-b/.deployed-addrs.env --key FX_AGREEMENT_ADDRESS --raw 2>/dev/null || true) \
+		FX_AGREEMENT_DEPLOYED_AT=$$(bash source_deployed_addrs.sh --file ../spoke-b/.deployed-addrs.env --key FX_AGREEMENT_DEPLOYED_AT --raw) \
+		PENTE_CONTEXT_GROUP_ID=$$(bash source_deployed_addrs.sh --file ../spoke-b/.deployed-addrs.env --key PENTE_CONTEXT_GROUP_ID --raw) \
+		PALADIN_CB_URL=http://127.0.0.1:31748 \
+		go test ./... -run TestVerifyFXAgreementPenteDeploy -v -count=1 -timeout $(PALADIN_TIMEOUT)
+
+# Helper targets to extract addresses from .deployed-addrs.env
+.ensure-registry-addr:
+	@cd $(PALADIN_SCRIPTS) && bash source_deployed_addrs.sh --file ../$${SPOKE:-spoke-a}/.deployed-addrs.env --key REGISTRY_CONTRACT_ADDRESS --raw >/dev/null
+
+.ensure-fxa-addr:
+	@cd $(PALADIN_SCRIPTS) && bash source_deployed_addrs.sh --file ../$${SPOKE:-spoke-a}/.deployed-addrs.env --key FX_AGREEMENT_DEPLOYED_AT --raw >/dev/null
 
 # ── node registration ────────────────────────────────────────────────────────
 
@@ -89,18 +162,76 @@ paladin.start-spoke-a:
 	@PALADIN_UID=$$(id -u) PALADIN_GID=$$(id -g) \
 		docker compose -f $(PALADIN_DIR)/spoke-a/docker-compose.yml up -d
 
+paladin.wait-spoke-a:
+	@echo "Waiting for Paladin RPC on spoke-a (http://127.0.0.1:31648)..."
+	@attempt=1; \
+	while [ $$attempt -le $(PALADIN_READY_ATTEMPTS) ]; do \
+		if curl -sS --max-time 2 \
+			-H 'Content-Type: application/json' \
+			-d '{"jsonrpc":"2.0","id":1,"method":"ptx_getTransaction","params":["dummy"]}' \
+			http://127.0.0.1:31648 | grep -q 'PD020704'; then \
+			echo "Paladin RPC on spoke-a is ready."; \
+			exit 0; \
+		fi; \
+		echo "  attempt $$attempt/$(PALADIN_READY_ATTEMPTS): JSON-RPC not ready yet"; \
+		sleep $(PALADIN_READY_INTERVAL); \
+		attempt=$$((attempt + 1)); \
+	done; \
+	echo "Paladin RPC on spoke-a did not become ready in time."; \
+	docker compose -f $(PALADIN_DIR)/spoke-a/docker-compose.yml ps; \
+	docker compose -f $(PALADIN_DIR)/spoke-a/docker-compose.yml logs --tail=50; \
+	exit 1
+
 paladin.stop-spoke-a:
 	@echo "Stopping Paladin nodes for spoke-a..."
 	@docker compose -f $(PALADIN_DIR)/spoke-a/docker-compose.yml down
+
+# Remove all spoke-a Paladin data volumes (SQLite + LevelDB state).
+# Must be called whenever Besu is regenerated from scratch so Paladin's
+# persisted block-indexer state does not fall out of sync with the new chain.
+paladin.clean-volumes-spoke-a:
+	@echo "Removing Paladin data volumes for spoke-a..."
+	@docker volume rm -f \
+		spoke-a_paladin_spoke_a_cb_data \
+		spoke-a_paladin_spoke_a_bank_a_data \
+		spoke-a_paladin_spoke_a_bank_c_data || true
 
 paladin.start-spoke-b:
 	@echo "Starting Paladin nodes for spoke-b..."
 	@PALADIN_UID=$$(id -u) PALADIN_GID=$$(id -g) \
 		docker compose -f $(PALADIN_DIR)/spoke-b/docker-compose.yml up -d
 
+paladin.wait-spoke-b:
+	@echo "Waiting for Paladin RPC on spoke-b (http://127.0.0.1:31748)..."
+	@attempt=1; \
+	while [ $$attempt -le $(PALADIN_READY_ATTEMPTS) ]; do \
+		if curl -sS --max-time 2 \
+			-H 'Content-Type: application/json' \
+			-d '{"jsonrpc":"2.0","id":1,"method":"ptx_getTransaction","params":["dummy"]}' \
+			http://127.0.0.1:31748 | grep -q 'PD020704'; then \
+			echo "Paladin RPC on spoke-b is ready."; \
+			exit 0; \
+		fi; \
+		echo "  attempt $$attempt/$(PALADIN_READY_ATTEMPTS): JSON-RPC not ready yet"; \
+		sleep $(PALADIN_READY_INTERVAL); \
+		attempt=$$((attempt + 1)); \
+	done; \
+	echo "Paladin RPC on spoke-b did not become ready in time."; \
+	docker compose -f $(PALADIN_DIR)/spoke-b/docker-compose.yml ps; \
+	docker compose -f $(PALADIN_DIR)/spoke-b/docker-compose.yml logs --tail=50; \
+	exit 1
+
 paladin.stop-spoke-b:
 	@echo "Stopping Paladin nodes for spoke-b..."
 	@docker compose -f $(PALADIN_DIR)/spoke-b/docker-compose.yml down
+
+# Remove all spoke-b Paladin data volumes (SQLite + LevelDB state).
+paladin.clean-volumes-spoke-b:
+	@echo "Removing Paladin data volumes for spoke-b..."
+	@docker volume rm -f \
+		spoke-b_paladin_spoke_b_cb_data \
+		spoke-b_paladin_spoke_b_bank_b_data \
+		spoke-b_paladin_spoke_b_bank_d_data || true
 
 # ── full spoke setup ─────────────────────────────────────────────────────────
 # Expects the corresponding Besu network to already be running.
@@ -113,11 +244,18 @@ setup-spoke-a: deploy.up-spoke-a
 	@$(MAKE) paladin.render-configs-spoke-a
 	@$(MAKE) paladin.register-nodes-spoke-a
 	@$(MAKE) paladin.stop-spoke-a
+	@$(MAKE) paladin.clean-volumes-spoke-a
 	@$(MAKE) paladin.start-spoke-a
-	@echo "Waiting for Paladin spoke-a nodes to be ready ($(PALADIN_READY_WAIT)s)..."
-	@sleep $(PALADIN_READY_WAIT)
+	@$(MAKE) paladin.wait-spoke-a
 	@$(MAKE) paladin.create-zeto-token-spoke-a
-	@echo "Spoke-a setup complete."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "REQUIRED: Setting up Pente bilateral context for FX Agreement..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(MAKE) paladin.create-pente-context-spoke-a
+	@$(MAKE) paladin.deploy-fxagreement-pente-spoke-a
+	@$(MAKE) paladin.verify-fxagreement-pente-spoke-a
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "Spoke-a setup complete (Zeto + Pente BOTH OPERATIONAL)"
 
 setup-spoke-b: deploy.up-spoke-b
 	@echo "Waiting for Besu spoke-b to be ready ($(BESU_READY_WAIT)s)..."
@@ -127,11 +265,18 @@ setup-spoke-b: deploy.up-spoke-b
 	@$(MAKE) paladin.render-configs-spoke-b
 	@$(MAKE) paladin.register-nodes-spoke-b
 	@$(MAKE) paladin.stop-spoke-b
+	@$(MAKE) paladin.clean-volumes-spoke-b
 	@$(MAKE) paladin.start-spoke-b
-	@echo "Waiting for Paladin spoke-b nodes to be ready ($(PALADIN_READY_WAIT)s)..."
-	@sleep $(PALADIN_READY_WAIT)
+	@$(MAKE) paladin.wait-spoke-b
 	@$(MAKE) paladin.create-zeto-token-spoke-b
-	@echo "Spoke-b setup complete."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "REQUIRED: Setting up Pente bilateral context for FX Agreement..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(MAKE) paladin.create-pente-context-spoke-b
+	@$(MAKE) paladin.deploy-fxagreement-pente-spoke-b
+	@$(MAKE) paladin.verify-fxagreement-pente-spoke-b
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "Spoke-b setup complete (Zeto + Pente BOTH OPERATIONAL)"
 
 setup-spoke-uc: setup-spoke-a setup-spoke-b
 	@echo "Full UC scope setup complete (spoke-a + spoke-b)."
@@ -143,7 +288,7 @@ setup-spoke-uc: setup-spoke-a setup-spoke-b
 	paladin.register-nodes-spoke-a paladin.register-nodes-spoke-b \
 	paladin.generate-certs-spoke-a paladin.generate-certs-spoke-b \
 	paladin.render-configs-spoke-a paladin.render-configs-spoke-b \
-	paladin.start-spoke-a paladin.stop-spoke-a \
-	paladin.start-spoke-b paladin.stop-spoke-b \
+	paladin.start-spoke-a paladin.wait-spoke-a paladin.stop-spoke-a paladin.clean-volumes-spoke-a \
+	paladin.start-spoke-b paladin.wait-spoke-b paladin.stop-spoke-b paladin.clean-volumes-spoke-b \
 	paladin.create-zeto-token-spoke-a paladin.create-zeto-token-spoke-b \
 	setup-spoke-a setup-spoke-b setup-spoke-uc

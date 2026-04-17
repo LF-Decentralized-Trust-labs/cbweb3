@@ -5,7 +5,7 @@
 #   SPOKE=spoke-a bash render-configs.sh
 #   SPOKE=spoke-b bash render-configs.sh
 #
-# Reads REGISTRY_CONTRACT_ADDRESS and ZETO_FACTORY_ADDRESS from
+# Reads REGISTRY_CONTRACT_ADDRESS, ZETO_FACTORY_ADDRESS and PENTE_FACTORY_ADDRESS from
 #   deploy/local/paladin/<spoke>/.deployed-addrs.env
 # and uses envsubst to produce config.yaml from each config.yaml.tmpl.
 set -euo pipefail
@@ -26,10 +26,12 @@ set +a
 
 : "${REGISTRY_CONTRACT_ADDRESS:?REGISTRY_CONTRACT_ADDRESS not set in $ADDRS_FILE}"
 : "${ZETO_FACTORY_ADDRESS:?ZETO_FACTORY_ADDRESS not set in $ADDRS_FILE}"
+: "${PENTE_FACTORY_ADDRESS:?PENTE_FACTORY_ADDRESS not set in $ADDRS_FILE}"
 
 echo "Rendering Paladin configs for $SPOKE ..."
 echo "  REGISTRY_CONTRACT_ADDRESS = $REGISTRY_CONTRACT_ADDRESS"
 echo "  ZETO_FACTORY_ADDRESS      = $ZETO_FACTORY_ADDRESS"
+echo "  PENTE_FACTORY_ADDRESS     = $PENTE_FACTORY_ADDRESS"
 
 case "$SPOKE" in
   spoke-b) NODES="central-bank bank-b bank-d" ;;
@@ -43,7 +45,7 @@ for node in $NODES; do
         echo "WARNING: template not found: $tmpl" >&2
         continue
     fi
-    envsubst '${REGISTRY_CONTRACT_ADDRESS} ${ZETO_FACTORY_ADDRESS}' < "$tmpl" > "$out"
+    envsubst '${REGISTRY_CONTRACT_ADDRESS} ${ZETO_FACTORY_ADDRESS} ${PENTE_FACTORY_ADDRESS}' < "$tmpl" > "$out"
     echo "  -> $out"
 done
 

@@ -49,7 +49,7 @@ export function RedeemsApprovalPage() {
 
     try {
       const result = await approveRedeem(approveTargetId);
-      toast.success(`Redeem approved. Fiat mint tx: ${shortHash(result.fiat_mint_tx_hash)}`);
+      toast.success(`Redeem approved. Redemption ID: ${shortHash(result.fiat_mint_tx_hash)}`);
       setApproveTargetId(null);
     } catch (approveError) {
       toast.error(approveError instanceof Error ? approveError.message : "Unable to approve redeem");
@@ -90,16 +90,13 @@ export function RedeemsApprovalPage() {
             <CardDescription>Pending Redeems</CardDescription>
             <CardTitle>{pendingCount}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="warning">Governance action required</Badge>
-          </CardContent>
         </Card>
       </section>
 
       <Card>
         <CardHeader>
           <CardTitle>Redeem Queue</CardTitle>
-          <CardDescription>Approve fiat reserve mint or reject with reason.</CardDescription>
+          <CardDescription>Approve fiat reserve release or reject with reason.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="mb-3">
@@ -115,7 +112,7 @@ export function RedeemsApprovalPage() {
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Zeto Transfer Tx Hash</TableHead>
-                <TableHead>Fiat Mint Tx Hash</TableHead>
+                <TableHead>Redemption ID</TableHead>
                 <TableHead>Created At</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>

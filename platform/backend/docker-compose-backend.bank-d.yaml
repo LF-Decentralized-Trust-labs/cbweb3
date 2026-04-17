@@ -68,7 +68,7 @@ services:
       PAYMENT_GRPC_PORT: "9094"
       PALADIN_URL: "http://host.docker.internal:31768"
       PALADIN_IDENTITY: "funded_operator@spoke-b-bank-d"
-      BESU_OPERATOR_KEY: "5b02fc9b19facc6de72b514a03db7f7fbd9f46b6ad6ffb24b8df575593ae87f1"
+      BESU_OPERATOR_KEY: "c88b703fb08cbea894b6aeff5a544fb92e78a18e19814cd85da83b71f772aa6f"
       CACTI_API_URL: "http://host.docker.internal:4000"
     ports:
       - "59094:9094"
@@ -97,7 +97,7 @@ services:
       PKI_DIR: /workspace/backend/config/pki
       BANK_CODE: "bank-d"
       CENTRAL_BANK_API_URL: "http://api-gateway-central-bank-b:8080"
-      ENTITY_BESU_ADDRESS: "0xA2ef7fAd3FB7705424b7Cc27d21526828dc08aE8"
+      ENTITY_BESU_ADDRESS: "0xc110089385bad5026E5083443C3b443806DA42Df"
       PALADIN_IDENTITY: "funded_operator@spoke-b-bank-d"
       CB_PALADIN_IDENTITY: "funded_operator@spoke-b-cb"
     volumes:

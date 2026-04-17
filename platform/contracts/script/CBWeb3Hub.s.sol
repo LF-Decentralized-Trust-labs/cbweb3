@@ -67,14 +67,14 @@ contract DeployCBWeb3Hub is Script {
         tokenBrl = new TokenizedCentralBankMoney("Tokenized BRL", "tCeBM_BRL", adminAddress, centralBankAddress);
         tokenEur = new TokenizedCentralBankMoney("Tokenized EUR", "tCeBM_EUR", adminAddress, centralBankAddress);
 
-        /// @dev 3: Deploy HTLC (Scenario A - Correspondent Banking)
-        htlc = new HashTimeLockedContract(address(identityRegistry));
-
-        /// @dev 4: Deploy AMM (Scenario B - Liquidity Pool)
-        amm = new AutomatedMarketMaker(address(tokenBrl), address(tokenEur), address(identityRegistry));
-
-        /// @dev 5: Deploy FX Agreement Registry (REQ-FX-001)
+        /// @dev 3: Deploy FX Agreement Registry (REQ-FX-001)
         fxAgreement = new FXAgreement(address(identityRegistry));
+
+        /// @dev 4: Deploy HTLC (Scenario A - Correspondent Banking, with FX Agreement gate)
+        htlc = new HashTimeLockedContract(address(identityRegistry), address(fxAgreement), address(0));
+
+        /// @dev 5: Deploy AMM (Scenario B - Liquidity Pool)
+        amm = new AutomatedMarketMaker(address(tokenBrl), address(tokenEur), address(identityRegistry));
 
         /// @dev 6: Deploy Manual FX Oracle (REQ-FX-002)
         oracle = new ManualOracle(adminAddress, centralBankAddress);

@@ -6,6 +6,7 @@ export function Header() {
   const navigate = useNavigate();
   const { profile, logout } = useAuth();
   const { circuitBreaker } = useCircuitBreaker();
+  const institutionName = (import.meta.env.VITE_INSTITUTION_NAME ?? "Central Bank Portal").trim() || "Central Bank Portal";
 
   const isHalted = circuitBreaker?.state === "HALTED";
 
@@ -18,7 +19,7 @@ export function Header() {
     <header className="border-b border-border bg-background/95 px-4 py-3 backdrop-blur">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4">
         <div>
-          <h1 className="text-lg font-semibold">Governance Portal</h1>
+          <h1 className="text-lg font-semibold">{institutionName} Portal</h1>
           <p className="text-xs text-muted-foreground">Central Bank control plane</p>
         </div>
         <div className="flex items-center gap-3">

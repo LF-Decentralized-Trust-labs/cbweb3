@@ -35,7 +35,7 @@ const relays: RelayStatus[] = [
 ];
 
 const pools: PoolStatus[] = [
-  { pair: "BRL-tCeBM/USD-tCeBM", reserveA: "720000", reserveB: "280000", ratioA: 72, ratioB: 28, breached7030: true, severity: "CRITICAL", updatedAt: nowIso() },
+  { pair: "BRL-tCeBM/ARS-tCeBM", reserveA: "720000", reserveB: "280000", ratioA: 72, ratioB: 28, breached7030: true, severity: "CRITICAL", updatedAt: nowIso() },
   { pair: "BRL-tCeBM/EUR-tCeBM", reserveA: "580000", reserveB: "420000", ratioA: 58, ratioB: 42, breached7030: false, severity: "INFO", updatedAt: nowIso() },
 ];
 

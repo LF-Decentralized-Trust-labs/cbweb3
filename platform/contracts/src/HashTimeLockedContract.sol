@@ -3,6 +3,9 @@ pragma solidity ^0.8.20;
 
 import {IHashTimeLockedContract} from "./interfaces/IHashTimeLockedContract.sol";
 import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
+import {IFXAgreement} from "./interfaces/IFXAgreement.sol";
+import {CommitmentHashRegistry} from "./CommitmentHashRegistry.sol";
+import {FXAgreementLibrary} from "./libraries/FXAgreementLibrary.sol";
 import {HashTimeLockedContractLibrary} from "./libraries/HashTimeLockedContractLibrary.sol";
 
 /// @title HashTimeLockedContract (HTLC) — Coordination Layer
@@ -14,13 +17,32 @@ contract HashTimeLockedContract is IHashTimeLockedContract {
     /// @notice The Identity Registry used for participant clearance gates.
     IIdentityRegistry public immutable IDENTITY_REGISTRY;
 
+    /// @notice The FXAgreement contract used for agreement gating (optional).
+    IFXAgreement public immutable FX_AGREEMENT;
+
+    /// @notice The CommitmentHashRegistry for fallback FX gating (optional).
+    CommitmentHashRegistry public COMMITMENT_HASH_REGISTRY;
+
     /// @dev Stores lock records indexed by `contractId`.
     mapping(bytes32 => HashTimeLockedContractLibrary.LockDetails) private _locks;
 
-    /// @notice Initializes the HTLC with the IdentityRegistry for clearance gates.
+    /// @notice Initializes the HTLC with dependencies for clearance and agreement gating.
     /// @param _identityRegistry Address of the IdentityRegistry contract.
-    constructor(address _identityRegistry) {
+    /// @param _fxAgreement Address of the FXAgreement contract (address(0) to disable).
+    /// @param _commitmentHashRegistry Address of the CommitmentHashRegistry for fallback gating (address(0) to disable).
+    constructor(address _identityRegistry, address _fxAgreement, address _commitmentHashRegistry) {
         IDENTITY_REGISTRY = IIdentityRegistry(_identityRegistry);
+        FX_AGREEMENT = IFXAgreement(_fxAgreement);
+        COMMITMENT_HASH_REGISTRY = CommitmentHashRegistry(_commitmentHashRegistry);
+    }
+
+    /// @notice Updates the CommitmentHashRegistry address (for deployment flexibility)
+    /// @param _newRegistry The new CommitmentHashRegistry address
+    function setCommitmentHashRegistry(address _newRegistry) external {
+        if (!IDENTITY_REGISTRY.canGovern(msg.sender)) {
+            revert HTLC__ParticipantNotVerified(msg.sender);
+        }
+        COMMITMENT_HASH_REGISTRY = CommitmentHashRegistry(_newRegistry);
     }
 
     /// @notice Ensures the given account is a verified participant in the IdentityRegistry.
@@ -37,7 +59,7 @@ contract HashTimeLockedContract is IHashTimeLockedContract {
     }
 
     /// @inheritdoc IHashTimeLockedContract
-    function lock(bytes32 contractId, address receiver, bytes32 hashLock, uint256 timeLock, bytes32 zetoLockRef)
+    function lock(bytes32 contractId, address receiver, bytes32 hashLock, uint256 timeLock, bytes32 zetoLockRef, bytes32 agreementId)
         external
         onlyVerified(msg.sender)
         onlyVerified(receiver)
@@ -47,6 +69,23 @@ contract HashTimeLockedContract is IHashTimeLockedContract {
         }
         if (timeLock <= block.timestamp) {
             revert HTLC__TimeLockExpired();
+        }
+
+        // FX Agreement gate (Primary: Pente FXAgreement on-chain)
+        if (address(FX_AGREEMENT) != address(0) && agreementId != bytes32(0)) {
+            FXAgreementLibrary.FxAgreement memory agreement = FX_AGREEMENT.getAgreement(agreementId);
+            if (agreement.state != FXAgreementLibrary.AgreementState.ACCEPTED) {
+                revert HTLC__AgreementNotAccepted();
+            }
+            if (agreement.expiryDate > 0 && block.timestamp > agreement.expiryDate) {
+                revert HTLC__AgreementExpired();
+            }
+        } 
+        // Fallback: CommitmentHashRegistry (for when FXAgreement unavailable)
+        else if (address(COMMITMENT_HASH_REGISTRY) != address(0) && agreementId != bytes32(0)) {
+            if (!COMMITMENT_HASH_REGISTRY.isAccepted(agreementId)) {
+                revert HTLC__CommitmentNotAccepted();
+            }
         }
 
         _locks[contractId] = HashTimeLockedContractLibrary.LockDetails({

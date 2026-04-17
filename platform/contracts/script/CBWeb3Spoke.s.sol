@@ -65,12 +65,15 @@ contract DeployCBWeb3Spoke is Script {
         token = new TokenizedCentralBankMoney(tokenName, tokenSymbol, adminAddress, centralBankAddress);
 
         /// @dev 3: Deploy HTLC (Scenario A — domestic settlement leg)
-        htlc = new HashTimeLockedContract(address(identityRegistry));
+        /// FXAgreement is intentionally NOT deployed on-chain — bilateral FX negotiation
+        /// is a service-layer concern (Paladin privacy layer). address(0) disables the
+        /// on-chain agreement gate in the HTLC contract; enforcement is in the Go service.
+        htlc = new HashTimeLockedContract(address(identityRegistry), address(0), address(0));
 
-        /// @dev 4: Deploy SpokeBridge (Scenario B — lock-and-mint)
+        /// @dev 5: Deploy SpokeBridge (Scenario B — lock-and-mint)
         spokeBridge = new SpokeBridge(address(identityRegistry), adminAddress);
 
-        /// @dev 5: Deploy FiatCentralBankMoney (fCeBM — escrow flow: deposit/escrow/redeem)
+        /// @dev 6: Deploy FiatCentralBankMoney (fCeBM — escrow flow: deposit/escrow/redeem)
         fiatToken = new FiatCentralBankMoney(fiatTokenName, fiatTokenSymbol, adminAddress, centralBankAddress);
 
         vm.stopBroadcast();

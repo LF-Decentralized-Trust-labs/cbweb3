@@ -7,11 +7,13 @@ import "time"
 type HTLCState string
 
 const (
-	HTLCStateInvalid  HTLCState = "INVALID"
-	HTLCStatePending  HTLCState = "PENDING"
-	HTLCStateLocked   HTLCState = "LOCKED"
-	HTLCStateSettled  HTLCState = "SETTLED"
-	HTLCStateRefunded HTLCState = "REFUNDED"
+	HTLCStateInvalid   HTLCState = "INVALID"
+	HTLCStatePending   HTLCState = "PENDING"
+	HTLCStateLocked    HTLCState = "LOCKED"
+	HTLCStateSettled   HTLCState = "SETTLED"
+	HTLCStateRefunded  HTLCState = "REFUNDED"
+	HTLCStateSettling  HTLCState = "SETTLING"  // transient: on-chain settle in progress
+	HTLCStateRefunding HTLCState = "REFUNDING" // transient: on-chain refund in progress
 )
 
 // HTLCRecord is the off-chain representation of an HTLC lock, enriching the

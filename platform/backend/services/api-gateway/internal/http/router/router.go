@@ -2,6 +2,8 @@
 package router
 
 import (
+	"os"
+
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
@@ -127,18 +129,35 @@ func Setup(app *fiber.App, deps Dependencies) {
 		tokenGroup.Get("/balance", deps.PaymentHandler.GetBalance)
 		tokenGroup.Get("/fiat-balance", deps.PaymentHandler.GetFiatBalance)
 
+		// FX Agreement routes
+		fxGroup := payGroup.Group("/payments/fx/agreements")
+		fxGroup.Post("", deps.PaymentHandler.ProposeFXAgreement)
+		fxGroup.Post("/:tradeId/accept", deps.PaymentHandler.AcceptFXAgreement)
+		fxGroup.Post("/:tradeId/reject", deps.PaymentHandler.RejectFXAgreement)
+		fxGroup.Post("/:tradeId/cancel", deps.PaymentHandler.CancelFXAgreement)
+		fxGroup.Post("/:tradeId/settle", deps.PaymentHandler.SettleFXAgreement)
+		fxGroup.Get("/:tradeId", deps.PaymentHandler.GetFXAgreement)
+		fxGroup.Get("/:tradeId/audit", deps.PaymentHandler.ListFXAgreementEvents)
+		fxGroup.Get("", deps.PaymentHandler.ListFXAgreements)
+
+		// Internal FX route for the Cacti relay — protected by X-Relay-Auth service-to-service secret.
+		// INTERNAL_RELAY_AUTH_SECRET must be set in the API Gateway environment.
+		relayAuthSecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
+		intFX := app.Group("/internal/v1/payments/fx/agreements", middleware.RequireRelayAuth(relayAuthSecret))
+		intFX.Get("", deps.PaymentHandler.ListFXAgreements)
+
 		// --- Escrow: Deposit / Escrow / Redeem (Central Bank) ---
 		if deps.PaymentProxyHandler == nil {
-			// Internal routes for proxy-receiving (no auth — only reachable within Docker network).
-			intDeposits := app.Group("/internal/v1/payments/deposits")
+			// Internal routes for proxy-receiving — protected by X-Relay-Auth shared secret.
+			intDeposits := app.Group("/internal/v1/payments/deposits", middleware.RequireRelayAuth(relayAuthSecret))
 			intDeposits.Post("", deps.PaymentHandler.RegisterDeposit)
 			intDeposits.Get("", deps.PaymentHandler.ListDeposits)
 
-			intEscrows := app.Group("/internal/v1/payments/escrows")
+			intEscrows := app.Group("/internal/v1/payments/escrows", middleware.RequireRelayAuth(relayAuthSecret))
 			intEscrows.Post("", deps.PaymentHandler.RequestEscrow)
 			intEscrows.Get("", deps.PaymentHandler.ListEscrows)
 
-			intRedeems := app.Group("/internal/v1/payments/redeems")
+			intRedeems := app.Group("/internal/v1/payments/redeems", middleware.RequireRelayAuth(relayAuthSecret))
 			intRedeems.Post("", deps.PaymentHandler.RequestRedeem)
 			intRedeems.Get("", deps.PaymentHandler.ListRedeems)
 

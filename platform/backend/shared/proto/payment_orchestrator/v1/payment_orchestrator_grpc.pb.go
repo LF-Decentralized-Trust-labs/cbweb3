@@ -19,37 +19,38 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	PaymentOrchestratorService_ProposeFXAgreement_FullMethodName   = "/payment_orchestrator.v1.PaymentOrchestratorService/ProposeFXAgreement"
-	PaymentOrchestratorService_AcceptFXAgreement_FullMethodName    = "/payment_orchestrator.v1.PaymentOrchestratorService/AcceptFXAgreement"
-	PaymentOrchestratorService_RejectFXAgreement_FullMethodName    = "/payment_orchestrator.v1.PaymentOrchestratorService/RejectFXAgreement"
-	PaymentOrchestratorService_CancelFXAgreement_FullMethodName    = "/payment_orchestrator.v1.PaymentOrchestratorService/CancelFXAgreement"
-	PaymentOrchestratorService_SettleFXAgreement_FullMethodName    = "/payment_orchestrator.v1.PaymentOrchestratorService/SettleFXAgreement"
-	PaymentOrchestratorService_GetFXAgreement_FullMethodName       = "/payment_orchestrator.v1.PaymentOrchestratorService/GetFXAgreement"
-	PaymentOrchestratorService_ListFXAgreements_FullMethodName     = "/payment_orchestrator.v1.PaymentOrchestratorService/ListFXAgreements"
-	PaymentOrchestratorService_LockHTLC_FullMethodName             = "/payment_orchestrator.v1.PaymentOrchestratorService/LockHTLC"
-	PaymentOrchestratorService_LockHTLCWithHashLock_FullMethodName = "/payment_orchestrator.v1.PaymentOrchestratorService/LockHTLCWithHashLock"
-	PaymentOrchestratorService_SettleHTLC_FullMethodName           = "/payment_orchestrator.v1.PaymentOrchestratorService/SettleHTLC"
-	PaymentOrchestratorService_RefundHTLC_FullMethodName           = "/payment_orchestrator.v1.PaymentOrchestratorService/RefundHTLC"
-	PaymentOrchestratorService_GetHTLCStatus_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/GetHTLCStatus"
-	PaymentOrchestratorService_SearchHTLC_FullMethodName           = "/payment_orchestrator.v1.PaymentOrchestratorService/SearchHTLC"
-	PaymentOrchestratorService_MintToken_FullMethodName            = "/payment_orchestrator.v1.PaymentOrchestratorService/MintToken"
-	PaymentOrchestratorService_TransferToken_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/TransferToken"
-	PaymentOrchestratorService_GetBalance_FullMethodName           = "/payment_orchestrator.v1.PaymentOrchestratorService/GetBalance"
-	PaymentOrchestratorService_GetFiatBalance_FullMethodName       = "/payment_orchestrator.v1.PaymentOrchestratorService/GetFiatBalance"
-	PaymentOrchestratorService_RegisterDeposit_FullMethodName      = "/payment_orchestrator.v1.PaymentOrchestratorService/RegisterDeposit"
-	PaymentOrchestratorService_ApproveDeposit_FullMethodName       = "/payment_orchestrator.v1.PaymentOrchestratorService/ApproveDeposit"
-	PaymentOrchestratorService_RejectDeposit_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/RejectDeposit"
-	PaymentOrchestratorService_RequestFiatExchange_FullMethodName  = "/payment_orchestrator.v1.PaymentOrchestratorService/RequestFiatExchange"
-	PaymentOrchestratorService_ListDeposits_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/ListDeposits"
-	PaymentOrchestratorService_RequestEscrow_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/RequestEscrow"
-	PaymentOrchestratorService_ApproveEscrow_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/ApproveEscrow"
-	PaymentOrchestratorService_RejectEscrow_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/RejectEscrow"
-	PaymentOrchestratorService_ListEscrows_FullMethodName          = "/payment_orchestrator.v1.PaymentOrchestratorService/ListEscrows"
-	PaymentOrchestratorService_RequestRedeem_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/RequestRedeem"
-	PaymentOrchestratorService_ApproveRedeem_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/ApproveRedeem"
-	PaymentOrchestratorService_RejectRedeem_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/RejectRedeem"
-	PaymentOrchestratorService_ListRedeems_FullMethodName          = "/payment_orchestrator.v1.PaymentOrchestratorService/ListRedeems"
-	PaymentOrchestratorService_InitiateZetoTransfer_FullMethodName = "/payment_orchestrator.v1.PaymentOrchestratorService/InitiateZetoTransfer"
+	PaymentOrchestratorService_ProposeFXAgreement_FullMethodName    = "/payment_orchestrator.v1.PaymentOrchestratorService/ProposeFXAgreement"
+	PaymentOrchestratorService_AcceptFXAgreement_FullMethodName     = "/payment_orchestrator.v1.PaymentOrchestratorService/AcceptFXAgreement"
+	PaymentOrchestratorService_RejectFXAgreement_FullMethodName     = "/payment_orchestrator.v1.PaymentOrchestratorService/RejectFXAgreement"
+	PaymentOrchestratorService_CancelFXAgreement_FullMethodName     = "/payment_orchestrator.v1.PaymentOrchestratorService/CancelFXAgreement"
+	PaymentOrchestratorService_SettleFXAgreement_FullMethodName     = "/payment_orchestrator.v1.PaymentOrchestratorService/SettleFXAgreement"
+	PaymentOrchestratorService_GetFXAgreement_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/GetFXAgreement"
+	PaymentOrchestratorService_ListFXAgreements_FullMethodName      = "/payment_orchestrator.v1.PaymentOrchestratorService/ListFXAgreements"
+	PaymentOrchestratorService_ListFXAgreementEvents_FullMethodName = "/payment_orchestrator.v1.PaymentOrchestratorService/ListFXAgreementEvents"
+	PaymentOrchestratorService_LockHTLC_FullMethodName              = "/payment_orchestrator.v1.PaymentOrchestratorService/LockHTLC"
+	PaymentOrchestratorService_LockHTLCWithHashLock_FullMethodName  = "/payment_orchestrator.v1.PaymentOrchestratorService/LockHTLCWithHashLock"
+	PaymentOrchestratorService_SettleHTLC_FullMethodName            = "/payment_orchestrator.v1.PaymentOrchestratorService/SettleHTLC"
+	PaymentOrchestratorService_RefundHTLC_FullMethodName            = "/payment_orchestrator.v1.PaymentOrchestratorService/RefundHTLC"
+	PaymentOrchestratorService_GetHTLCStatus_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/GetHTLCStatus"
+	PaymentOrchestratorService_SearchHTLC_FullMethodName            = "/payment_orchestrator.v1.PaymentOrchestratorService/SearchHTLC"
+	PaymentOrchestratorService_MintToken_FullMethodName             = "/payment_orchestrator.v1.PaymentOrchestratorService/MintToken"
+	PaymentOrchestratorService_TransferToken_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/TransferToken"
+	PaymentOrchestratorService_GetBalance_FullMethodName            = "/payment_orchestrator.v1.PaymentOrchestratorService/GetBalance"
+	PaymentOrchestratorService_GetFiatBalance_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/GetFiatBalance"
+	PaymentOrchestratorService_RegisterDeposit_FullMethodName       = "/payment_orchestrator.v1.PaymentOrchestratorService/RegisterDeposit"
+	PaymentOrchestratorService_ApproveDeposit_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/ApproveDeposit"
+	PaymentOrchestratorService_RejectDeposit_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/RejectDeposit"
+	PaymentOrchestratorService_RequestFiatExchange_FullMethodName   = "/payment_orchestrator.v1.PaymentOrchestratorService/RequestFiatExchange"
+	PaymentOrchestratorService_ListDeposits_FullMethodName          = "/payment_orchestrator.v1.PaymentOrchestratorService/ListDeposits"
+	PaymentOrchestratorService_RequestEscrow_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/RequestEscrow"
+	PaymentOrchestratorService_ApproveEscrow_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/ApproveEscrow"
+	PaymentOrchestratorService_RejectEscrow_FullMethodName          = "/payment_orchestrator.v1.PaymentOrchestratorService/RejectEscrow"
+	PaymentOrchestratorService_ListEscrows_FullMethodName           = "/payment_orchestrator.v1.PaymentOrchestratorService/ListEscrows"
+	PaymentOrchestratorService_RequestRedeem_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/RequestRedeem"
+	PaymentOrchestratorService_ApproveRedeem_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/ApproveRedeem"
+	PaymentOrchestratorService_RejectRedeem_FullMethodName          = "/payment_orchestrator.v1.PaymentOrchestratorService/RejectRedeem"
+	PaymentOrchestratorService_ListRedeems_FullMethodName           = "/payment_orchestrator.v1.PaymentOrchestratorService/ListRedeems"
+	PaymentOrchestratorService_InitiateZetoTransfer_FullMethodName  = "/payment_orchestrator.v1.PaymentOrchestratorService/InitiateZetoTransfer"
 )
 
 // PaymentOrchestratorServiceClient is the client API for PaymentOrchestratorService service.
@@ -64,6 +65,7 @@ type PaymentOrchestratorServiceClient interface {
 	SettleFXAgreement(ctx context.Context, in *SettleFXAgreementRequest, opts ...grpc.CallOption) (*SettleFXAgreementResponse, error)
 	GetFXAgreement(ctx context.Context, in *GetFXAgreementRequest, opts ...grpc.CallOption) (*GetFXAgreementResponse, error)
 	ListFXAgreements(ctx context.Context, in *ListFXAgreementsRequest, opts ...grpc.CallOption) (*ListFXAgreementsResponse, error)
+	ListFXAgreementEvents(ctx context.Context, in *ListFXAgreementEventsRequest, opts ...grpc.CallOption) (*ListFXAgreementEventsResponse, error)
 	// HTLC dual-layer operations (public coordination + private Zeto lock)
 	LockHTLC(ctx context.Context, in *LockHTLCRequest, opts ...grpc.CallOption) (*LockHTLCResponse, error)
 	LockHTLCWithHashLock(ctx context.Context, in *LockHTLCWithHashLockRequest, opts ...grpc.CallOption) (*LockHTLCWithHashLockResponse, error)
@@ -168,6 +170,16 @@ func (c *paymentOrchestratorServiceClient) ListFXAgreements(ctx context.Context,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListFXAgreementsResponse)
 	err := c.cc.Invoke(ctx, PaymentOrchestratorService_ListFXAgreements_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *paymentOrchestratorServiceClient) ListFXAgreementEvents(ctx context.Context, in *ListFXAgreementEventsRequest, opts ...grpc.CallOption) (*ListFXAgreementEventsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListFXAgreementEventsResponse)
+	err := c.cc.Invoke(ctx, PaymentOrchestratorService_ListFXAgreementEvents_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -426,6 +438,7 @@ type PaymentOrchestratorServiceServer interface {
 	SettleFXAgreement(context.Context, *SettleFXAgreementRequest) (*SettleFXAgreementResponse, error)
 	GetFXAgreement(context.Context, *GetFXAgreementRequest) (*GetFXAgreementResponse, error)
 	ListFXAgreements(context.Context, *ListFXAgreementsRequest) (*ListFXAgreementsResponse, error)
+	ListFXAgreementEvents(context.Context, *ListFXAgreementEventsRequest) (*ListFXAgreementEventsResponse, error)
 	// HTLC dual-layer operations (public coordination + private Zeto lock)
 	LockHTLC(context.Context, *LockHTLCRequest) (*LockHTLCResponse, error)
 	LockHTLCWithHashLock(context.Context, *LockHTLCWithHashLockRequest) (*LockHTLCWithHashLockResponse, error)
@@ -485,6 +498,9 @@ func (UnimplementedPaymentOrchestratorServiceServer) GetFXAgreement(context.Cont
 }
 func (UnimplementedPaymentOrchestratorServiceServer) ListFXAgreements(context.Context, *ListFXAgreementsRequest) (*ListFXAgreementsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListFXAgreements not implemented")
+}
+func (UnimplementedPaymentOrchestratorServiceServer) ListFXAgreementEvents(context.Context, *ListFXAgreementEventsRequest) (*ListFXAgreementEventsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListFXAgreementEvents not implemented")
 }
 func (UnimplementedPaymentOrchestratorServiceServer) LockHTLC(context.Context, *LockHTLCRequest) (*LockHTLCResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method LockHTLC not implemented")
@@ -700,6 +716,24 @@ func _PaymentOrchestratorService_ListFXAgreements_Handler(srv interface{}, ctx c
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(PaymentOrchestratorServiceServer).ListFXAgreements(ctx, req.(*ListFXAgreementsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PaymentOrchestratorService_ListFXAgreementEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListFXAgreementEventsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaymentOrchestratorServiceServer).ListFXAgreementEvents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PaymentOrchestratorService_ListFXAgreementEvents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaymentOrchestratorServiceServer).ListFXAgreementEvents(ctx, req.(*ListFXAgreementEventsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1170,6 +1204,10 @@ var PaymentOrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListFXAgreements",
 			Handler:    _PaymentOrchestratorService_ListFXAgreements_Handler,
+		},
+		{
+			MethodName: "ListFXAgreementEvents",
+			Handler:    _PaymentOrchestratorService_ListFXAgreementEvents_Handler,
 		},
 		{
 			MethodName: "LockHTLC",

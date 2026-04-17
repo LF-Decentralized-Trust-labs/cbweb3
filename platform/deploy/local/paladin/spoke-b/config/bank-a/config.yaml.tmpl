@@ -5,7 +5,7 @@ log:
 
 db:
   sqlite:
-    dsn: ":memory:"
+    dsn: "/data/paladin.db"
     autoMigrate: true
     migrationsDir: "./db/migrations/sqlite"
     debugQueries: false
@@ -63,6 +63,17 @@ domains:
       snarkProver:
         circuitsDir: "/app/domains/zeto/zkp"
         provingKeysDir: "/app/domains/zeto/zkp"
+  pente:
+    registryAddress: "${PENTE_FACTORY_ADDRESS}"
+    allowSigning: true
+    fixedSigningIdentity: "funded_operator"
+    plugin:
+      type: "jar"
+      library: "/app/domains/pente.jar"
+      class: "io.kaleido.paladin.pente.domain.PenteDomainFactory"
+    config:
+      enabled: true
+      privateMTX: true
 
 registries:
   evm-registry:

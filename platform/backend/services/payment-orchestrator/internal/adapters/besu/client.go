@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"math/big"
 	"strings"
+	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -21,7 +23,7 @@ import (
 
 var _ ports.HTLCContractPort = (*Client)(nil)
 
-const htlcABIJSON = `[{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"receiver","type":"address"},{"name":"hashLock","type":"bytes32"},{"name":"timeLock","type":"uint256"},{"name":"zetoLockRef","type":"bytes32"}],"name":"lock","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"secret","type":"bytes32"}],"name":"settle","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"}],"name":"refund","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
+const htlcABIJSON = `[{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"receiver","type":"address"},{"name":"hashLock","type":"bytes32"},{"name":"timeLock","type":"uint256"},{"name":"zetoLockRef","type":"bytes32"},{"name":"agreementId","type":"bytes32"}],"name":"lock","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"secret","type":"bytes32"}],"name":"settle","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"}],"name":"refund","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"commitment","type":"bytes32"}],"name":"registerAgreementCommitment","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
 
 // ClientConfig holds the configuration for the Besu HTLC client.
 type ClientConfig struct {
@@ -86,6 +88,7 @@ func (c *Client) Lock(ctx context.Context, params ports.HTLCLockParams) (string,
 		params.HashLock,
 		new(big.Int).SetUint64(params.TimeLock),
 		params.ZetoLockRef,
+		params.AgreementID,
 	)
 	if err != nil {
 		return "", fmt.Errorf("pack lock: %w", err)
@@ -109,6 +112,14 @@ func (c *Client) Refund(ctx context.Context, contractID [32]byte) (string, error
 	return c.sendTx(ctx, data, "refund")
 }
 
+func (c *Client) RegisterAgreementCommitment(ctx context.Context, commitment [32]byte) (string, error) {
+	data, err := c.htlcABI.Pack("registerAgreementCommitment", commitment)
+	if err != nil {
+		return "", fmt.Errorf("pack registerAgreementCommitment: %w", err)
+	}
+	return c.sendTx(ctx, data, "registerAgreementCommitment")
+}
+
 func (c *Client) sendTx(ctx context.Context, data []byte, method string) (string, error) {
 	nonce, err := c.ethClient.PendingNonceAt(ctx, c.fromAddress)
 	if err != nil {
@@ -129,6 +140,19 @@ func (c *Client) sendTx(ctx context.Context, data []byte, method string) (string
 	auth.GasLimit = 500_000
 	auth.Context = ctx
 
+	// Estimate gas first to detect contract reverts before submitting the tx.
+	msg := ethereum.CallMsg{
+		From:     c.fromAddress,
+		To:       &c.htlcAddress,
+		GasPrice: gasPrice,
+		Data:     data,
+	}
+	if estimatedGas, estErr := c.ethClient.EstimateGas(ctx, msg); estErr != nil {
+		return "", fmt.Errorf("%s call would revert: %w", method, estErr)
+	} else {
+		auth.GasLimit = estimatedGas * 120 / 100 // 20% headroom
+	}
+
 	boundContract := bind.NewBoundContract(c.htlcAddress, c.htlcABI, c.ethClient, c.ethClient, c.ethClient)
 
 	signedTx, err := boundContract.RawTransact(auth, data)
@@ -136,7 +160,10 @@ func (c *Client) sendTx(ctx context.Context, data []byte, method string) (string
 		return "", fmt.Errorf("send %s tx: %w", method, err)
 	}
 
-	receipt, err := bind.WaitMined(ctx, c.ethClient, signedTx)
+	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	receipt, err := bind.WaitMined(waitCtx, c.ethClient, signedTx)
 	if err != nil {
 		return "", fmt.Errorf("wait %s receipt: %w", method, err)
 	}

@@ -24,6 +24,7 @@ type PaymentProxyHandler struct {
 	entityBesuAddress string // this entity's Besu address
 	paladinIdentity   string // this entity's Paladin identity
 	cbPaladinIdentity string // Central Bank's Paladin identity (Zeto transfer receiver)
+	relayAuthSecret   string // shared secret for X-Relay-Auth header on internal endpoints
 }
 
 // NewPaymentProxyHandler creates a proxy handler targeting the given Central
@@ -31,7 +32,7 @@ type PaymentProxyHandler struct {
 func NewPaymentProxyHandler(
 	centralBankURL string,
 	payment *paymentadapter.GRPCAdapter,
-	entityBesuAddress, paladinIdentity, cbPaladinIdentity string,
+	entityBesuAddress, paladinIdentity, cbPaladinIdentity, relayAuthSecret string,
 ) *PaymentProxyHandler {
 	return &PaymentProxyHandler{
 		client:            &http.Client{Timeout: 30 * time.Second},
@@ -40,6 +41,7 @@ func NewPaymentProxyHandler(
 		entityBesuAddress: entityBesuAddress,
 		paladinIdentity:   paladinIdentity,
 		cbPaladinIdentity: cbPaladinIdentity,
+		relayAuthSecret:   relayAuthSecret,
 	}
 }
 
@@ -157,6 +159,9 @@ func (h *PaymentProxyHandler) proxy(c *fiber.Ctx, method, path string, body []by
 	}
 	if corrID := c.Get("X-Correlation-Id"); corrID != "" {
 		req.Header.Set("X-Correlation-Id", corrID)
+	}
+	if h.relayAuthSecret != "" {
+		req.Header.Set("X-Relay-Auth", h.relayAuthSecret)
 	}
 
 	resp, err := h.client.Do(req)

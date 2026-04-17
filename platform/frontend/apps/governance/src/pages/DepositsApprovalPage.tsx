@@ -64,10 +64,19 @@ export function DepositsApprovalPage() {
     try {
       await approveDeposit(approveTargetId);
       const exchangeResult = await requestFiatExchange(approveTargetId);
-      toast.success(`Deposit approved and fiat exchanged. Tx: ${shortHash(exchangeResult.tx_hash)}`);
+      toast.success(`Issuance request approved and fiat exchanged. Tx: ${shortHash(exchangeResult.tx_hash)}`);
       setApproveTargetId(null);
     } catch (approveError) {
-      toast.error(approveError instanceof Error ? approveError.message : "Unable to approve and exchange deposit");
+      toast.error(approveError instanceof Error ? approveError.message : "Unable to approve and exchange issuance request");
+    }
+  };
+
+  const onRetryFiatExchange = async (depositId: string) => {
+    try {
+      const exchangeResult = await requestFiatExchange(depositId);
+      toast.success(`Fiat exchange retried successfully. Tx: ${shortHash(exchangeResult.tx_hash)}`);
+    } catch (retryError) {
+      toast.error(retryError instanceof Error ? retryError.message : "Unable to retry fiat exchange");
     }
   };
 
@@ -83,11 +92,11 @@ export function DepositsApprovalPage() {
 
     try {
       await rejectDeposit(rejectTargetId, reason.trim());
-      toast.success("Deposit rejected.");
+      toast.success("Issuance request rejected.");
       setRejectTargetId(null);
       setReason("");
     } catch (rejectError) {
-      toast.error(rejectError instanceof Error ? rejectError.message : "Unable to reject deposit");
+      toast.error(rejectError instanceof Error ? rejectError.message : "Unable to reject issuance request");
     }
   };
 
@@ -96,24 +105,21 @@ export function DepositsApprovalPage() {
       <section className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Total Deposits</CardDescription>
+            <CardDescription>Total Issuance Requests</CardDescription>
             <CardTitle>{deposits.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Pending Deposits</CardDescription>
+            <CardDescription>Pending Issuance Requests</CardDescription>
             <CardTitle>{pendingCount}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="warning">Governance action required</Badge>
-          </CardContent>
         </Card>
       </section>
 
       <Card>
         <CardHeader>
-          <CardTitle>Filter Deposits</CardTitle>
+          <CardTitle>Filter Issuance Requests</CardTitle>
           <CardDescription>Optional filter by requester_id.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -147,7 +153,7 @@ export function DepositsApprovalPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Deposit Queue</CardTitle>
+          <CardTitle>Issuance Request Queue</CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
@@ -157,7 +163,7 @@ export function DepositsApprovalPage() {
                 <TableHead>Requester</TableHead>
                 <TableHead>Fiat Amount</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Mint Tx Hash</TableHead>
+                <TableHead>Issuance Reference</TableHead>
                 <TableHead>Created At</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
@@ -184,7 +190,7 @@ export function DepositsApprovalPage() {
                           }}
                           disabled={status === "loading"}
                         >
-                          Approve Deposit
+                          Approve Issuance
                         </Button>
                         <Button
                           size="sm"
@@ -198,6 +204,15 @@ export function DepositsApprovalPage() {
                           Reject
                         </Button>
                       </div>
+                    ) : normalizePaymentStatus(deposit.status) === PaymentStatus.MINT_FAILED ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void onRetryFiatExchange(deposit.id)}
+                        disabled={status === "loading"}
+                      >
+                        Retry Mint
+                      </Button>
                     ) : (
                       <span className="text-xs text-muted-foreground">No action</span>
                     )}
@@ -206,15 +221,15 @@ export function DepositsApprovalPage() {
               ))}
             </TableBody>
           </Table>
-          {!deposits.length ? <p className="pt-3 text-sm text-muted-foreground">No deposits found.</p> : null}
+          {!deposits.length ? <p className="pt-3 text-sm text-muted-foreground">No issuance requests found.</p> : null}
         </CardContent>
       </Card>
 
       {approveTargetId ? (
         <Card>
           <CardHeader>
-            <CardTitle>Confirm Deposit Approval + Fiat Exchange</CardTitle>
-            <CardDescription>Deposit ID: {approveTargetId}</CardDescription>
+            <CardTitle>Confirm Issuance Approval + Fiat Exchange</CardTitle>
+            <CardDescription>Request ID: {approveTargetId}</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onApproveDeposit()} disabled={status === "loading"}>
@@ -230,8 +245,8 @@ export function DepositsApprovalPage() {
       {rejectTargetId ? (
         <Card>
           <CardHeader>
-            <CardTitle>Reject Deposit</CardTitle>
-            <CardDescription>Deposit ID: {rejectTargetId}</CardDescription>
+            <CardTitle>Reject Issuance Request</CardTitle>
+            <CardDescription>Request ID: {rejectTargetId}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-2">

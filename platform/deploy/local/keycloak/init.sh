@@ -101,6 +101,10 @@ create_realm_and_client() {
     /opt/keycloak/bin/kcadm.sh create realms -s "realm=${realm_name}" -s enabled=true
   fi
 
+  local token_lifespan="${KC_ACCESS_TOKEN_LIFESPAN:-21600}"
+  /opt/keycloak/bin/kcadm.sh update "realms/${realm_name}" \
+    -s "accessTokenLifespan=${token_lifespan}"
+
   if ! /opt/keycloak/bin/kcadm.sh get clients -r "$realm_name" --fields clientId | jq -e ".[] | select(.clientId==\"${client_id}\")" > /dev/null 2>&1; then
     /opt/keycloak/bin/kcadm.sh create clients -r "$realm_name" \
       -s "clientId=${client_id}" \
@@ -146,6 +150,15 @@ create_realm_and_client() {
       -r "$realm_name" || true
   fi
 
+  # If the .example (or .env) file defines KC_CLIENT_SECRET, push it into Keycloak
+  # so the secret stays stable across re-deployments. Otherwise read the generated one.
+  local desired_secret="${KC_CLIENT_SECRET:-}"
+  if [[ -n "$desired_secret" ]]; then
+    /opt/keycloak/bin/kcadm.sh update "clients/${client_uuid}" -r "$realm_name" \
+      -s "secret=${desired_secret}"
+    echo "  Using fixed client secret for ${client_id}."
+  fi
+
   local client_secret
   client_secret=$(
     /opt/keycloak/bin/kcadm.sh get "clients/${client_uuid}/client-secret" -r "$realm_name" \
@@ -157,8 +170,12 @@ create_realm_and_client() {
     exit 1
   fi
 
-  echo "Recreating ${domain_env_file} from template and injecting Keycloak values..."
-  copy_example_to_env "$domain_env_file_example" "$domain_env_file"
+  if [[ ! -f "$domain_env_file" ]]; then
+    echo "Creating ${domain_env_file} from template and injecting Keycloak values..."
+    copy_example_to_env "$domain_env_file_example" "$domain_env_file"
+  else
+    echo "Updating Keycloak values in existing ${domain_env_file} (preserving non-Keycloak settings)..."
+  fi
   set_env_var "$domain_env_file" "KEYCLOAK_CONTAINER_NAME" "${KEYCLOAK_CONTAINER_NAME:-cbweb3-keycloak}"
   set_env_var "$domain_env_file" "KEYCLOAK_PORT" "${KEYCLOAK_PORT:-8081}"
   set_env_var "$domain_env_file" "KEYCLOAK_ENV_OUTPUT_DIR" "${KEYCLOAK_ENV_OUTPUT_DIR:-$CONFIG_DIR}"

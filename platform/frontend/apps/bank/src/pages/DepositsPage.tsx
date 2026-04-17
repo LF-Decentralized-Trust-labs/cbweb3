@@ -21,6 +21,7 @@ import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
 import {
   PaymentStatus,
+  fiatUnitLabel,
   formatFiatUnits,
   getPaymentStatusLabel,
   getPaymentStatusVariant,
@@ -58,11 +59,11 @@ export function DepositsPage() {
 
     try {
       const depositId = await registerDeposit(amount);
-      toast.success(`Deposit request registered: ${depositId}`);
+      toast.success(`Issuance request submitted: ${depositId}`);
       setAmount("0");
       setConfirmRequest(false);
     } catch (submitError) {
-      toast.error(submitError instanceof Error ? submitError.message : "Unable to register deposit");
+      toast.error(submitError instanceof Error ? submitError.message : "Unable to submit issuance request");
     }
   };
 
@@ -89,23 +90,20 @@ export function DepositsPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Pending Deposits</CardDescription>
+            <CardDescription>Pending Issuance Requests</CardDescription>
             <CardTitle>{pendingCount}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="warning">Awaiting central bank approval</Badge>
-          </CardContent>
         </Card>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Register Fiat Deposit</CardTitle>
-          <CardDescription>Create a deposit request to be approved by central bank governance.</CardDescription>
+          <CardTitle>Request Token Issuance</CardTitle>
+          <CardDescription>Submit fiat collateral proof to request tCeBM issuance by the central bank.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="deposit-amount">Amount (fiat units)</Label>
+            <Label htmlFor="deposit-amount">Amount ({fiatUnitLabel})</Label>
             <Input
               id="deposit-amount"
               type="number"
@@ -117,7 +115,7 @@ export function DepositsPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button onClick={onPrepareSubmit} disabled={status === "loading"}>
-              Review Deposit Request
+              Review Issuance Request
             </Button>
             <Button variant="outline" onClick={() => void fetchAll()} disabled={status === "loading"}>
               Refresh
@@ -130,7 +128,7 @@ export function DepositsPage() {
       {confirmRequest ? (
         <Card>
           <CardHeader>
-            <CardTitle>Confirm Deposit Request</CardTitle>
+            <CardTitle>Confirm Issuance Request</CardTitle>
             <CardDescription>{formatFiatUnits(amount)} will be submitted for central bank approval.</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
@@ -146,7 +144,7 @@ export function DepositsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Deposit Requests</CardTitle>
+          <CardTitle>Issuance Requests</CardTitle>
           <CardDescription>Total records: {deposits.length}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -156,7 +154,7 @@ export function DepositsPage() {
                 <TableHead>ID</TableHead>
                 <TableHead>Fiat Amount</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Mint Tx Hash</TableHead>
+                <TableHead>Issuance Reference</TableHead>
                 <TableHead>Rejection Reason</TableHead>
                 <TableHead>Created At</TableHead>
               </TableRow>
@@ -176,7 +174,7 @@ export function DepositsPage() {
               ))}
             </TableBody>
           </Table>
-          {!deposits.length ? <p className="pt-3 text-sm text-muted-foreground">No deposits found.</p> : null}
+          {!deposits.length ? <p className="pt-3 text-sm text-muted-foreground">No issuance requests found.</p> : null}
         </CardContent>
       </Card>
     </div>

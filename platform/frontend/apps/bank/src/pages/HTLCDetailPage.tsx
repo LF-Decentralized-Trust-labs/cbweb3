@@ -20,11 +20,14 @@ const normalizeState = (state: string) => state.replace("HTLC_STATE_", "");
 const isLockedState = (state: string) => normalizeState(state) === "LOCKED";
 const isSettledState = (state: string) => normalizeState(state) === "SETTLED";
 const isRefundedState = (state: string) => normalizeState(state) === "REFUNDED";
+const isInProgressState = (state: string) =>
+  normalizeState(state) === "SETTLING" || normalizeState(state) === "REFUNDING";
 
 const statusVariant = (state: string): "warning" | "default" | "success" | "destructive" | "outline" => {
   if (isLockedState(state)) return "warning";
   if (isSettledState(state)) return "success";
   if (isRefundedState(state)) return "destructive";
+  if (isInProgressState(state)) return "default";
   return "outline";
 };
 
@@ -72,12 +75,12 @@ export function HTLCDetailPage() {
 
   const onSettle = async () => {
     if (!htlc?.secret) {
-      toast.error("Secret not available for settle.");
+      toast.error("Completion code unavailable. Settlement cannot be finalized.");
       return;
     }
     try {
       await settle(contractId, htlc.secret);
-      toast.success("HTLC settled successfully.");
+      toast.success("Settlement completed successfully.");
       setConfirmSettle(false);
     } catch (error) {
       const isTimeout = error instanceof Error && /timeout|ECONNABORTED/i.test(error.message);
@@ -85,7 +88,7 @@ export function HTLCDetailPage() {
         try {
           const settled = await waitForState("HTLC_STATE_SETTLED");
           if (settled) {
-            toast.success("HTLC settled successfully.");
+            toast.success("Settlement completed successfully.");
             setConfirmSettle(false);
             return;
           }
@@ -93,17 +96,17 @@ export function HTLCDetailPage() {
           // Fall through to user-facing error below.
         }
       }
-      toast.error(error instanceof Error ? error.message : "Unable to settle HTLC.");
+      toast.error(error instanceof Error ? error.message : "Unable to complete settlement.");
     }
   };
 
   const onRefund = async () => {
     try {
       await refund(contractId);
-      toast.success("HTLC refunded successfully.");
+      toast.success("Settlement revoked. Funds returned.");
       setConfirmRefund(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to refund HTLC.");
+      toast.error(error instanceof Error ? error.message : "Unable to revoke settlement.");
     }
   };
 
@@ -111,7 +114,7 @@ export function HTLCDetailPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">HTLC Details</h1>
+          <h1 className="text-xl font-semibold">Settlement Details</h1>
           <p className="text-sm text-muted-foreground">Contract {contractId}</p>
         </div>
         <Button asChild variant="outline">
@@ -127,29 +130,54 @@ export function HTLCDetailPage() {
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Contract State</CardTitle>
-              <CardDescription>Current lock lifecycle and metadata.</CardDescription>
+              <CardTitle>Settlement State</CardTitle>
+              <CardDescription>Current settlement lifecycle and metadata.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Badge variant={statusVariant(htlc.state)}>{htlc.state.replace("HTLC_STATE_", "")}</Badge>
+              <Badge variant={statusVariant(htlc.state)}>
+                {(() => {
+                  const s = normalizeState(htlc.state);
+                  if (s === "LOCKED") return "Pending Settlement";
+                  if (s === "SETTLING") return "Processing";
+                  if (s === "SETTLED") return "Settled";
+                  if (s === "REFUNDING") return "Revoking";
+                  if (s === "REFUNDED") return "Revoked";
+                  return s;
+                })()}
+              </Badge>
               <p className="text-sm">Sender: {htlc.sender}</p>
               <p className="text-sm">Receiver: {htlc.receiver}</p>
-              <p className="text-sm">Hash lock: {htlc.hash_lock}</p>
-              <p className="text-sm">Time lock: {new Date(htlc.time_lock * 1000).toLocaleString()}</p>
-              <p className="text-sm">Zeto lock ref: {htlc.zeto_lock_ref || "-"}</p>
-              <p className="text-sm">Secret: {htlc.secret ? `${htlc.secret.slice(0, 8)}...` : "not available"}</p>
+              <p className="text-sm">Settlement Code: {htlc.hash_lock}</p>
+              <p className="text-sm">Settlement Expiry: {new Date(htlc.time_lock * 1000).toLocaleString()}</p>
+              <p className="text-sm">Settlement Reference: {htlc.zeto_lock_ref || "-"}</p>
+              <p className="text-sm">Completion Code: {htlc.secret ? `${htlc.secret.slice(0, 8)}...` : "not available"}</p>
             </CardContent>
           </Card>
 
           {isLockedState(htlc.state) ? (
             <Card>
               <CardHeader>
-                <CardTitle>Timelock Countdown</CardTitle>
+                <CardTitle>Settlement Window</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-lg font-semibold">{countdown.display}</p>
                 <p className="text-xs text-muted-foreground">
-                  {countdown.isExpired ? "Lock expired. Refund is available." : "Lock active. Await settle or expiration."}
+                  {countdown.isExpired ? "Settlement window has expired. Revocation is available." : "Settlement window is active."}
+                </p>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {isInProgressState(htlc.state) ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Operation In Progress</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  {normalizeState(htlc.state) === "SETTLING"
+                    ? "Settlement is being processed. The page will update automatically."
+                    : "Revocation is being processed. The page will update automatically."}
                 </p>
               </CardContent>
             </Card>
@@ -161,10 +189,10 @@ export function HTLCDetailPage() {
             </CardHeader>
             <CardContent className="flex flex-wrap gap-2">
               <Button disabled={!canSettle} onClick={() => setConfirmSettle(true)}>
-                Settle HTLC
+                Complete Settlement
               </Button>
               <Button variant="outline" disabled={!canRefund} onClick={() => setConfirmRefund(true)}>
-                Refund HTLC
+                Revoke Settlement
               </Button>
             </CardContent>
           </Card>
@@ -172,13 +200,13 @@ export function HTLCDetailPage() {
           {confirmSettle && !isFinalState ? (
             <Card>
               <CardHeader>
-                <CardTitle>Confirm Settle</CardTitle>
+                <CardTitle>Confirm Settlement Completion</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <p className="text-sm">This action is irreversible and reveals the secret.</p>
+                <p className="text-sm">This will finalize the cross-border transfer. This action is irreversible.</p>
                 <div className="flex gap-2">
                   <Button onClick={() => void onSettle()} disabled={storeStatus === "loading"}>
-                    {storeStatus === "loading" ? "Submitting..." : "Confirm Settle"}
+                    {storeStatus === "loading" ? "Submitting..." : "Confirm Settlement"}
                   </Button>
                   <Button variant="outline" onClick={() => setConfirmSettle(false)}>
                     Cancel
@@ -191,13 +219,13 @@ export function HTLCDetailPage() {
           {confirmRefund && !isFinalState ? (
             <Card>
               <CardHeader>
-                <CardTitle>Confirm Refund</CardTitle>
+                <CardTitle>Confirm Revocation</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <p className="text-sm">This will return the locked funds to the original sender.</p>
+                <p className="text-sm">This will return the reserved funds to the originating account.</p>
                 <div className="flex gap-2">
                   <Button onClick={() => void onRefund()} disabled={storeStatus === "loading"}>
-                    {storeStatus === "loading" ? "Submitting..." : "Confirm Refund"}
+                    {storeStatus === "loading" ? "Submitting..." : "Confirm Revocation"}
                   </Button>
                   <Button variant="outline" onClick={() => setConfirmRefund(false)}>
                     Cancel

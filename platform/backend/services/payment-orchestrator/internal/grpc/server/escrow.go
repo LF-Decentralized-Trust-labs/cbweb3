@@ -103,7 +103,7 @@ func (s *paymentOrchestratorService) RequestFiatExchange(ctx context.Context, re
 	if !found {
 		return nil, status.Error(codes.NotFound, "deposit not found")
 	}
-	if record.Status != domain.DepositStatusApproved {
+	if record.Status != domain.DepositStatusApproved && record.Status != domain.DepositStatusMintFailed {
 		return nil, status.Errorf(codes.FailedPrecondition, "deposit is %s, not APPROVED", record.Status)
 	}
 	if record.MintTxHash != "" {
@@ -117,6 +117,10 @@ func (s *paymentOrchestratorService) RequestFiatExchange(ctx context.Context, re
 	s.logger.Info("minting fCeBM", "to", record.RequesterBesuAddress, "amount", record.Amount)
 	txHash, err := s.fiat.Mint(ctx, record.RequesterBesuAddress, record.Amount)
 	if err != nil {
+		record.Status = domain.DepositStatusMintFailed
+		if updateErr := s.escrowRepo.UpdateDeposit(ctx, record); updateErr != nil {
+			s.logger.Error("failed to persist MINT_FAILED status", "deposit_id", req.DepositId, "err", updateErr)
+		}
 		return nil, status.Errorf(codes.Internal, "fiat mint: %v", err)
 	}
 
@@ -436,6 +440,8 @@ func depositStatusToProto(s domain.DepositStatus) pb.DepositStatus {
 		return pb.DepositStatus_DEPOSIT_STATUS_APPROVED
 	case domain.DepositStatusRejected:
 		return pb.DepositStatus_DEPOSIT_STATUS_REJECTED
+	case domain.DepositStatusMintFailed:
+		return pb.DepositStatus_DEPOSIT_STATUS_MINT_FAILED
 	default:
 		return pb.DepositStatus_DEPOSIT_STATUS_PENDING
 	}

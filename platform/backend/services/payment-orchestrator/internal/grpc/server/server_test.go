@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,6 +84,14 @@ func (m *mockZeto) Balance(_ context.Context) (string, error) {
 	return "1000000", nil
 }
 
+func (m *mockZeto) ResolveIdentity(_ context.Context, identity string) (string, error) {
+	// Deterministic fake EVM address for tests.
+	if identity == "" {
+		return "", nil
+	}
+	return "0x1111111111111111111111111111111111111111", nil
+}
+
 type mockFiat struct {
 	balanceCalled int
 	balance       string
@@ -125,10 +134,12 @@ type mockHTLC struct {
 	lockCalled   int
 	settleCalled int
 	refundCalled int
+	commitCalled int
 
 	lockErr   error
 	settleErr error
 	refundErr error
+	commitErr error
 }
 
 func (m *mockHTLC) Lock(_ context.Context, _ ports.HTLCLockParams) (string, error) {
@@ -151,6 +162,13 @@ func (m *mockHTLC) Refund(_ context.Context, _ [32]byte) (string, error) {
 		return "", m.refundErr
 	}
 	return "mock-htlc-refund-tx", nil
+}
+func (m *mockHTLC) RegisterAgreementCommitment(_ context.Context, _ [32]byte) (string, error) {
+	m.commitCalled++
+	if m.commitErr != nil {
+		return "", m.commitErr
+	}
+	return "mock-htlc-commit-tx", nil
 }
 
 func setupTestEnv(t *testing.T) *testEnv {
@@ -573,15 +591,15 @@ func TestSettleHTLC_ZetoTransferFails_StateRemainsLocked(t *testing.T) {
 		t.Fatal("expected error when zeto transferLocked fails")
 	}
 
-	// Record should still be LOCKED (pessimistic state update)
+	// Record should be in SETTLING (on-chain succeeded, zeto failed — secret is public)
 	statusResp2, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
 		ContractId: lockResp.ContractId,
 	})
 	if err != nil {
 		t.Fatalf("GetHTLCStatus: %v", err)
 	}
-	if statusResp2.Lock.State != pb.HTLCState_HTLC_STATE_LOCKED {
-		t.Errorf("expected state LOCKED after failed zeto transfer, got %s", statusResp2.Lock.State)
+	if statusResp2.Lock.State != pb.HTLCState_HTLC_STATE_SETTLING {
+		t.Errorf("expected state SETTLING after failed zeto transfer, got %s", statusResp2.Lock.State)
 	}
 }
 
@@ -706,40 +724,52 @@ func TestSettleHTLC_CrossSpoke_OnChainFails_BlocksTransfer(t *testing.T) {
 	env := setupTestEnvFull(t, htlcMock, nil, "")
 	ctx := context.Background()
 
-	// Lock with external hashLock (simulates responder spoke)
-	hashLock := "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a7b8c9d0e1f2a3b4c5d6a7b8c9d0e1f2"
-	lockResp, err := env.client.LockHTLCWithHashLock(ctx, &pb.LockHTLCWithHashLockRequest{
+	// Use LockHTLC (generates the real secret) so we can settle with the correct secret.
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
 		AgreementId: "FX_CROSS_SPOKE",
 		Receiver:    "bank-d",
 		Amount:      "1000",
-		HashLock:    hashLock,
 		TimeLock:    uint64(time.Now().Unix()) + 1800,
 	})
 	if err != nil {
-		t.Fatalf("LockHTLCWithHashLock: %v", err)
+		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	// Simulate cross-spoke settle with foreign contract_id but matching hashLock.
-	// This uses a secret that hashes to a1b2c3... — we need the actual preimage.
-	// Since we don't have the preimage for our fixed hashLock, try with the real contract_id.
-	// The point is: on-chain settle fails → no token transfer.
-	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+	// Get the generated secret
+	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
 		ContractId: lockResp.ContractId,
-		// We need a secret that sha256-hashes to hashLock.
-		// Since we can't invert SHA-256, use an approach where we know the secret:
-		// For this test, the on-chain settle failure is what matters, not the hashLock match.
-		// But SettleHTLC validates secret vs hashLock, so this will fail with InvalidArgument.
-		// Let's instead just verify the contract_id path (not cross-spoke).
-		Secret: "0000000000000000000000000000000000000000000000000000000000000001",
 	})
-	// This should fail because secret doesn't match hashLock
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+
+	// Simulate cross-spoke settle: use a foreign contract_id but the real secret.
+	// The server will find the local record via hashLock match.
+	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: "foreign_contract_id_from_other_spoke",
+		Secret:     statusResp.Lock.Secret,
+	})
 	if err == nil {
-		t.Fatal("expected error for mismatched secret")
+		t.Fatal("expected error when on-chain HTLC settle fails")
+	}
+	if status.Code(err) != codes.Internal {
+		t.Errorf("expected codes.Internal, got %s", status.Code(err))
 	}
 
 	// Tokens must NOT have been transferred
 	if env.zeto.transferLockedCalled != 0 {
 		t.Errorf("expected zeto.TransferLocked NOT called, got %d", env.zeto.transferLockedCalled)
+	}
+
+	// Record should be LOCKED (on-chain settle failed, so rollback occurred)
+	statusResp2, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+	if statusResp2.Lock.State != pb.HTLCState_HTLC_STATE_LOCKED {
+		t.Errorf("expected state LOCKED after on-chain settle failure, got %s", statusResp2.Lock.State)
 	}
 }
 
@@ -849,5 +879,225 @@ func TestLockHTLC_NoSpokePrefixSkipsValidation(t *testing.T) {
 	}
 	if resp.ContractId == "" {
 		t.Error("expected non-empty contract_id")
+	}
+}
+
+// --- Tests for SETTLING intermediate state and retry ---
+
+func TestSettleHTLC_ConcurrentCallsOnlyOneSucceeds(t *testing.T) {
+	htlcMock := &mockHTLC{}
+	env := setupTestEnvFull(t, htlcMock, nil, "")
+	ctx := context.Background()
+
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_CONCURRENT",
+		Receiver:    "bank-b",
+		Amount:      "1000",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+				ContractId: lockResp.ContractId,
+				Secret:     statusResp.Lock.Secret,
+			})
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	var successes, failures int
+	for err := range results {
+		if err == nil {
+			successes++
+		} else {
+			failures++
+		}
+	}
+	// At least one must succeed; the concurrent loser may get FailedPrecondition
+	// or may also succeed (idempotent) if the first completed before the second started.
+	if successes < 1 {
+		t.Errorf("expected at least 1 success, got %d successes and %d failures", successes, failures)
+	}
+	// Token transfer should only happen once
+	if env.zeto.transferLockedCalled != 1 {
+		t.Errorf("expected zeto.TransferLocked called exactly 1 time, got %d", env.zeto.transferLockedCalled)
+	}
+}
+
+func TestSettleHTLC_RetryAfterZetoTransferFails(t *testing.T) {
+	htlcMock := &mockHTLC{}
+	env := setupTestEnvFull(t, htlcMock, nil, "")
+	env.zeto.transferLockedErr = errors.New("zeto transfer failed")
+	ctx := context.Background()
+
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_RETRY",
+		Receiver:    "bank-b",
+		Amount:      "1000",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+
+	// First settle: on-chain succeeds, zeto fails → state should be SETTLING
+	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: lockResp.ContractId,
+		Secret:     statusResp.Lock.Secret,
+	})
+	if err == nil {
+		t.Fatal("expected error when zeto transfer fails")
+	}
+
+	// Verify state is SETTLING
+	statusResp2, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+	if statusResp2.Lock.State != pb.HTLCState_HTLC_STATE_SETTLING {
+		t.Fatalf("expected state SETTLING, got %s", statusResp2.Lock.State)
+	}
+
+	// On-chain settle should have been called once
+	if htlcMock.settleCalled != 1 {
+		t.Errorf("expected htlc.Settle called 1 time, got %d", htlcMock.settleCalled)
+	}
+
+	// Fix the zeto mock and retry
+	env.zeto.transferLockedErr = nil
+
+	resp, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: lockResp.ContractId,
+		Secret:     statusResp.Lock.Secret,
+	})
+	if err != nil {
+		t.Fatalf("SettleHTLC retry: %v", err)
+	}
+	if resp.ZetoTxHash == "" {
+		t.Error("expected non-empty zeto_tx_hash")
+	}
+
+	// On-chain settle should NOT have been called again (already succeeded)
+	if htlcMock.settleCalled != 1 {
+		t.Errorf("expected htlc.Settle still called 1 time (not retried), got %d", htlcMock.settleCalled)
+	}
+
+	// Verify state is SETTLED
+	statusResp3, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+	if statusResp3.Lock.State != pb.HTLCState_HTLC_STATE_SETTLED {
+		t.Errorf("expected state SETTLED after retry, got %s", statusResp3.Lock.State)
+	}
+}
+
+func TestRefundHTLC_RetryAfterZetoUnlockFails(t *testing.T) {
+	env := setupTestEnvFull(t, nil, nil, "")
+	env.zeto.unlockErr = errors.New("zeto unlock failed")
+	ctx := context.Background()
+
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_REFUND_RETRY",
+		Receiver:    "bank-b",
+		Amount:      "1000",
+		TimeLock:    uint64(time.Now().Unix()) - 10, // already expired
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	// First refund: zeto unlock fails → state should be REFUNDING
+	_, err = env.client.RefundHTLC(ctx, &pb.RefundHTLCRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err == nil {
+		t.Fatal("expected error when zeto unlock fails")
+	}
+
+	// Verify state is REFUNDING
+	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+	if statusResp.Lock.State != pb.HTLCState_HTLC_STATE_REFUNDING {
+		t.Fatalf("expected state REFUNDING, got %s", statusResp.Lock.State)
+	}
+
+	// Fix the zeto mock and retry
+	env.zeto.unlockErr = nil
+
+	resp, err := env.client.RefundHTLC(ctx, &pb.RefundHTLCRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err != nil {
+		t.Fatalf("RefundHTLC retry: %v", err)
+	}
+	if resp.ZetoTxHash == "" {
+		t.Error("expected non-empty zeto_tx_hash")
+	}
+
+	// Verify state is REFUNDED
+	statusResp2, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+	if statusResp2.Lock.State != pb.HTLCState_HTLC_STATE_REFUNDED {
+		t.Errorf("expected state REFUNDED after retry, got %s", statusResp2.Lock.State)
+	}
+}
+
+func TestLockHTLC_RejectsUnparseableReceiverWhenSpokePrefixSet(t *testing.T) {
+	// When spokePrefix is set, bare names like "bank-b" (no @spoke-X-...) should be rejected
+	env := setupTestEnvFull(t, nil, nil, "spoke-a")
+	ctx := context.Background()
+
+	_, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_UNPARSEABLE",
+		Receiver:    "bank-b",
+		Amount:      "1000",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err == nil {
+		t.Fatal("expected error for unparseable receiver when spokePrefix is set")
+	}
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("expected codes.InvalidArgument, got %s", status.Code(err))
+	}
+	if env.zeto.lockCalled != 0 {
+		t.Errorf("expected zeto.Lock NOT called, got %d", env.zeto.lockCalled)
 	}
 }

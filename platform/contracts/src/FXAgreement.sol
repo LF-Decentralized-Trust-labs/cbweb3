@@ -43,19 +43,29 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
     function propose(
         bytes32 tradeId,
         address counterpartyB,
-        address baseToken,
-        address quoteToken,
-        uint256 notional,
+        address settlementAgent,
+        address custodian,
+        address beneficiary,
+        uint256 originAmount,
+        uint256 counterAmount,
+        bytes32 originCurrency,
+        bytes32 counterCurrency,
         uint256 rate,
         uint256 expiryDate
-    ) external onlyVerified(msg.sender) onlyVerified(counterpartyB) {
+    ) external onlyVerified(msg.sender) {
         if (_agreements[tradeId].state != FXAgreementLibrary.AgreementState.INVALID) {
             revert FXA__TradeAlreadyExists();
         }
-        if (counterpartyB == address(0) || baseToken == address(0) || quoteToken == address(0)) {
+        if (counterpartyB == address(0)) {
             revert FXA__InvalidParameters();
         }
-        if (notional == 0 || rate == 0) {
+        if (originAmount == 0 || counterAmount == 0) {
+            revert FXA__InvalidParameters();
+        }
+        if (originCurrency == bytes32(0) || counterCurrency == bytes32(0)) {
+            revert FXA__InvalidParameters();
+        }
+        if (rate == 0) {
             revert FXA__InvalidParameters();
         }
         if (expiryDate <= block.timestamp) {
@@ -64,17 +74,121 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
 
         _agreements[tradeId] = FXAgreementLibrary.FxAgreement({
             tradeId: tradeId,
-            counterpartyA: msg.sender,
+            originator: msg.sender,
             counterpartyB: counterpartyB,
-            baseToken: baseToken,
-            quoteToken: quoteToken,
-            notional: notional,
+            settlementAgent: settlementAgent,
+            custodian: custodian,
+            beneficiary: beneficiary,
+            originAmount: originAmount,
+            counterAmount: counterAmount,
+            originCurrency: originCurrency,
+            counterCurrency: counterCurrency,
             rate: rate,
             expiryDate: expiryDate,
             state: FXAgreementLibrary.AgreementState.PROPOSED
         });
 
-        emit AgreementProposed(tradeId, msg.sender, counterpartyB, notional);
+        emit AgreementProposed(
+            tradeId, msg.sender, counterpartyB, settlementAgent, custodian, beneficiary,
+            originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate
+        );
+    }
+
+    /// @inheritdoc IFXAgreement
+    /// @dev Only callable by governance. Does NOT verify originator via canTransact (remote party).
+    function proposeOnBehalf(
+        bytes32 tradeId,
+        address originator,
+        address counterpartyB,
+        address settlementAgent,
+        address custodian,
+        address beneficiary,
+        uint256 originAmount,
+        uint256 counterAmount,
+        bytes32 originCurrency,
+        bytes32 counterCurrency,
+        uint256 rate,
+        uint256 expiryDate
+    ) external {
+        if (!IDENTITY_REGISTRY.canGovern(msg.sender)) {
+            revert FXA__Unauthorized();
+        }
+        if (_agreements[tradeId].state != FXAgreementLibrary.AgreementState.INVALID) {
+            revert FXA__TradeAlreadyExists();
+        }
+        if (counterpartyB == address(0) || originator == address(0)) {
+            revert FXA__InvalidParameters();
+        }
+        if (originAmount == 0 || counterAmount == 0) {
+            revert FXA__InvalidParameters();
+        }
+        if (originCurrency == bytes32(0) || counterCurrency == bytes32(0)) {
+            revert FXA__InvalidParameters();
+        }
+        if (rate == 0) {
+            revert FXA__InvalidParameters();
+        }
+        if (expiryDate <= block.timestamp) {
+            revert FXA__AgreementExpired();
+        }
+
+        _agreements[tradeId] = FXAgreementLibrary.FxAgreement({
+            tradeId: tradeId,
+            originator: originator,
+            counterpartyB: counterpartyB,
+            settlementAgent: settlementAgent,
+            custodian: custodian,
+            beneficiary: beneficiary,
+            originAmount: originAmount,
+            counterAmount: counterAmount,
+            originCurrency: originCurrency,
+            counterCurrency: counterCurrency,
+            rate: rate,
+            expiryDate: expiryDate,
+            state: FXAgreementLibrary.AgreementState.PROPOSED
+        });
+
+        emit AgreementProposed(
+            tradeId, originator, counterpartyB, settlementAgent, custodian, beneficiary,
+            originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate
+        );
+    }
+
+    /// @inheritdoc IFXAgreement
+    /// @dev Only callable by governance. Transitions PROPOSED → ACCEPTED without checking msg.sender == counterpartyB.
+    function acceptOnBehalf(bytes32 tradeId) external {
+        if (!IDENTITY_REGISTRY.canGovern(msg.sender)) {
+            revert FXA__Unauthorized();
+        }
+
+        FXAgreementLibrary.FxAgreement storage agreement = _agreements[tradeId];
+        if (agreement.state != FXAgreementLibrary.AgreementState.PROPOSED) {
+            revert FXA__InvalidStateTransition();
+        }
+        if (agreement.expiryDate > 0 && block.timestamp > agreement.expiryDate) {
+            revert FXA__AgreementExpired();
+        }
+
+        agreement.state = FXAgreementLibrary.AgreementState.ACCEPTED;
+
+        emit AgreementAccepted(tradeId);
+    }
+
+    /// @inheritdoc IFXAgreement
+    /// @dev Only callable by governance. Transitions PROPOSED → REJECTED.
+    function rejectOnBehalf(bytes32 tradeId) external {
+        if (!IDENTITY_REGISTRY.canGovern(msg.sender)) {
+            revert FXA__Unauthorized();
+        }
+
+        FXAgreementLibrary.FxAgreement storage agreement = _agreements[tradeId];
+        if (agreement.state != FXAgreementLibrary.AgreementState.PROPOSED) {
+            revert FXA__InvalidStateTransition();
+        }
+
+        agreement.state = FXAgreementLibrary.AgreementState.REJECTED;
+
+        emit AgreementRejected(tradeId);
     }
 
     /// @inheritdoc IFXAgreement
@@ -119,7 +233,7 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
         if (agreement.state != FXAgreementLibrary.AgreementState.PROPOSED) {
             revert FXA__InvalidStateTransition();
         }
-        if (msg.sender != agreement.counterpartyA) {
+        if (msg.sender != agreement.originator) {
             revert FXA__Unauthorized();
         }
 
