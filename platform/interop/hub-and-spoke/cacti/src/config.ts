@@ -9,6 +9,8 @@ export interface SpokeConfig {
   name: string;
   /** HTTP JSON-RPC URL for the Besu node (e.g. "http://host:8645"). */
   besuRpc: string;
+  /** WebSocket JSON-RPC URL for the Besu node (e.g. "ws://host:8655"). */
+  besuWs: string;
   /** Deployed HTLC contract address on this spoke (0x-prefixed). */
   htlcAddress: string;
   /** Internal api-gateway URL for polling FX agreements (e.g. "http://host:18080"). */
@@ -33,6 +35,7 @@ export const config = {
   spokeA: {
     name: "spoke-a",
     besuRpc: requireEnv("SPOKE_A_BESU_RPC"),
+    besuWs: optionalEnv("SPOKE_A_BESU_WS", "ws://localhost:8655"),
     htlcAddress: requireEnv("SPOKE_A_HTLC_ADDRESS"),
     internalApiUrl: requireEnv("SPOKE_A_INTERNAL_API"),
     counterpartGrpc: requireEnv("SPOKE_B_PAYMENT_GRPC"),
@@ -41,6 +44,7 @@ export const config = {
   spokeB: {
     name: "spoke-b",
     besuRpc: requireEnv("SPOKE_B_BESU_RPC"),
+    besuWs: optionalEnv("SPOKE_B_BESU_WS", "ws://localhost:8755"),
     htlcAddress: requireEnv("SPOKE_B_HTLC_ADDRESS"),
     internalApiUrl: requireEnv("SPOKE_B_INTERNAL_API"),
     counterpartGrpc: requireEnv("SPOKE_A_PAYMENT_GRPC"),

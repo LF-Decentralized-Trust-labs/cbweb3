@@ -14,10 +14,12 @@ services:
       SPOKE_A_BESU_RPC: "${SPOKE_A_BESU_RPC:-http://host.docker.internal:8645}"
       SPOKE_A_HTLC_ADDRESS: "${SPOKE_A_HTLC_ADDRESS:-0x9a3dbca554e9f6b9257aaa24010da8377c57c17e}"
       SPOKE_A_INTERNAL_API: "${SPOKE_A_INTERNAL_API:-http://host.docker.internal:18080}"
+      SPOKE_A_BESU_WS: "${SPOKE_A_BESU_WS:-ws://host.docker.internal:8655}"
       # Spoke-B: Besu RPC + HTLC contract address
       SPOKE_B_BESU_RPC: "${SPOKE_B_BESU_RPC:-http://host.docker.internal:8745}"
       SPOKE_B_HTLC_ADDRESS: "${SPOKE_B_HTLC_ADDRESS:-0x9a3dbca554e9f6b9257aaa24010da8377c57c17e}"
       SPOKE_B_INTERNAL_API: "${SPOKE_B_INTERNAL_API:-http://host.docker.internal:28080}"
+      SPOKE_B_BESU_WS: "${SPOKE_B_BESU_WS:-ws://host.docker.internal:8755}"
       # gRPC endpoints for payment-orchestrator (each spoke targets the OTHER spoke's SENDER orchestrator)
       # Spoke-A sender = Bank-A (19094), Spoke-B sender = Bank-B (29094)
       SPOKE_A_PAYMENT_GRPC: "${SPOKE_A_PAYMENT_GRPC:-host.docker.internal:19094}"

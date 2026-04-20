@@ -2,20 +2,22 @@
  * HtlcRelay — core interoperability logic for the Cacti HTLC cross-spoke relay.
  *
  * Responsibilities:
- *   1. Poll each Besu spoke for LogHTLCClaimed and LogHTLCLocked events.
+ *   1. Use Cacti PluginLedgerConnectorBesu.getPastLogs to fetch HTLC events
+ *      from each Besu spoke, with ethers.js Interface for ABI decoding.
  *   2. On LogHTLCClaimed: call SettleHTLC on the counterpart spoke's
  *      payment-orchestrator via gRPC, propagating the revealed secret.
  *   3. Store all observed events in an in-memory ring buffer so the REST API
  *      (consumed by the CactiRelay Go adapter) can poll them by timestamp.
  *
- * This module uses ethers.js JsonRpcProvider for HTTP-based log polling
- * (matching the approach of the previous Go relay) and @grpc/grpc-js for
- * the payment-orchestrator client.
+ * The Cacti connector's getPastLogs replaces direct ethers.js JsonRpcProvider
+ * log polling, making Cacti the actual ledger abstraction layer. ethers.js is
+ * retained only for ABI decoding of the raw EvmLog topics/data fields.
  */
 
 import { ethers } from "ethers";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
+import type { PluginLedgerConnectorBesu } from "@hyperledger/cactus-plugin-ledger-connector-besu";
 import { FXAction, RelayRetryItem, RelayStore } from "./relay-store";
 
 // ---------------------------------------------------------------------------
@@ -235,6 +237,7 @@ function createGrpcClient(
 export interface SpokeDep {
   name: string;
   besuRpc: string;
+  besuWs: string;
   htlcAddress: string;
   internalApiUrl: string;
   counterpartGrpc: string;
@@ -271,6 +274,7 @@ export class HtlcRelay {
     private readonly pollIntervalMs: number,
     private readonly relayAuthSecret: string,
     private readonly relayStore: RelayStore,
+    private readonly cactiConnectors: Map<string, PluginLedgerConnectorBesu>,
     private readonly log: Pick<Console, "info" | "warn" | "error"> = console,
   ) {}
 
@@ -324,98 +328,130 @@ export class HtlcRelay {
     spoke: SpokeDep,
     signal: AbortSignal,
   ): Promise<void> {
-    const provider = new ethers.JsonRpcProvider(spoke.besuRpc);
-    const contract = new ethers.Contract(spoke.htlcAddress, HTLC_ABI, provider);
+    const connector = this.cactiConnectors.get(spoke.name);
+    if (!connector) {
+      this.log.error(`[${spoke.name}] no Cacti connector registered — cannot poll`);
+      return;
+    }
+
+    // ethers Interface used only for ABI decoding of raw EvmLog topics/data.
+    const iface = new ethers.Interface(HTLC_ABI);
     const grpcClient = createGrpcClient(spoke.counterpartGrpc, this.protoPath);
 
+    // Compute event topic hashes for log filtering via Cacti getPastLogs.
+    const topicLocked = ethers.id("LogHTLCLocked(bytes32,address,address,bytes32,uint256,bytes32)");
+    const topicClaimed = ethers.id("LogHTLCClaimed(bytes32,bytes32)");
+
+    // Determine the starting block via the Cacti connector's getBlock.
     let fromBlock: number;
     try {
-      fromBlock = await provider.getBlockNumber();
+      const blockResp = await connector.getBlock({ blockHashOrBlockNumber: "latest" });
+      fromBlock = typeof blockResp.block === "object" && blockResp.block !== null
+        ? Number((blockResp.block as Record<string, unknown>)["number"] ?? 0)
+        : 0;
     } catch (err) {
-      this.log.error(
-        `[${spoke.name}] cannot get current block: ${String(err)}`,
-      );
+      this.log.error(`[${spoke.name}] cannot get current block via Cacti: ${String(err)}`);
       fromBlock = 0;
     }
-    this.log.info(`[${spoke.name}] relay started at block ${fromBlock}`);
+    this.log.info(`[${spoke.name}] relay started at block ${fromBlock} (via Cacti connector)`);
 
     while (!signal.aborted) {
       await sleep(this.pollIntervalMs);
       if (signal.aborted) break;
 
       try {
-        const toBlock = await provider.getBlockNumber();
+        // Get latest block number via Cacti connector.
+        const latestResp = await connector.getBlock({ blockHashOrBlockNumber: "latest" });
+        const toBlock = typeof latestResp.block === "object" && latestResp.block !== null
+          ? Number((latestResp.block as Record<string, unknown>)["number"] ?? 0)
+          : 0;
         if (toBlock < fromBlock) continue;
 
-        const [claimedLogs, lockedLogs] = await Promise.all([
-          contract.queryFilter(contract.filters["LogHTLCClaimed"](), fromBlock, toBlock),
-          contract.queryFilter(contract.filters["LogHTLCLocked"](), fromBlock, toBlock),
+        // Fetch logs via Cacti PluginLedgerConnectorBesu.getPastLogs — the
+        // core integration point that replaces direct ethers.js provider usage.
+        const [lockedResp, claimedResp] = await Promise.all([
+          connector.getPastLogs({
+            address: spoke.htlcAddress,
+            fromBlock,
+            toBlock,
+            topics: [[topicLocked]],
+          }),
+          connector.getPastLogs({
+            address: spoke.htlcAddress,
+            fromBlock,
+            toBlock,
+            topics: [[topicClaimed]],
+          }),
         ]);
 
-        for (const log of lockedLogs) {
-          const e = log as ethers.EventLog;
-          const evt: LockEvent = {
-            spoke: spoke.name,
-            contractId: strip0x(e.args[0] as string),
-            sender: e.args[1] as string,
-            receiver: e.args[2] as string,
-            hashLock: strip0x(e.args[3] as string),
-            timeLock: Number(e.args[4]),
-            zetoLockRef: strip0x(e.args[5] as string),
-            blockNumber: e.blockNumber,
-            txHash: e.transactionHash,
-            timestamp: Date.now(),
-          };
-          pushRing(this.lockEvents, evt, MAX_EVENTS);
-          this.log.info(
-            `[${spoke.name}] LogHTLCLocked contractId=${evt.contractId} block=${evt.blockNumber}`,
-          );
+        // Process LogHTLCLocked events — decode via ethers Interface.
+        for (const raw of lockedResp.logs) {
+          try {
+            const parsed = iface.parseLog({ topics: raw.topics, data: raw.data });
+            if (!parsed) continue;
+            const evt: LockEvent = {
+              spoke: spoke.name,
+              contractId: strip0x(parsed.args[0] as string),
+              sender: parsed.args[1] as string,
+              receiver: parsed.args[2] as string,
+              hashLock: strip0x(parsed.args[3] as string),
+              timeLock: Number(parsed.args[4]),
+              zetoLockRef: strip0x(parsed.args[5] as string),
+              blockNumber: raw.blockNumber,
+              txHash: raw.transactionHash,
+              timestamp: Date.now(),
+            };
+            pushRing(this.lockEvents, evt, MAX_EVENTS);
+            this.log.info(
+              `[${spoke.name}] LogHTLCLocked contractId=${evt.contractId} block=${evt.blockNumber}`,
+            );
+          } catch (decodeErr) {
+            this.log.warn(`[${spoke.name}] failed to decode LogHTLCLocked: ${String(decodeErr)}`);
+          }
         }
 
-        for (const log of claimedLogs) {
-          const e = log as ethers.EventLog;
-          const contractId = strip0x(e.args[0] as string);
-          const secret = strip0x(e.args[1] as string);
-          const evt: SettleEvent = {
-            spoke: spoke.name,
-            contractId,
-            secret,
-            blockNumber: e.blockNumber,
-            txHash: e.transactionHash,
-            timestamp: Date.now(),
-          };
-          pushRing(this.settleEvents, evt, MAX_EVENTS);
-          this.log.info(
-            `[${spoke.name}] LogHTLCClaimed contractId=${contractId} block=${e.blockNumber} tx=${e.transactionHash}`,
-          );
-
-          // Dedup: skip echo events caused by a previous relay-initiated settle.
-          // Without this, the relay would enter a feedback loop:
-          //   Spoke-A settle → relay forwards to Spoke-B → Spoke-B emits event
-          //   → relay tries to forward back to Spoke-A → NOT_FOUND error.
-          if (this.forwardedSecrets.has(secret)) {
+        // Process LogHTLCClaimed events — decode and forward settlement.
+        for (const raw of claimedResp.logs) {
+          try {
+            const parsed = iface.parseLog({ topics: raw.topics, data: raw.data });
+            if (!parsed) continue;
+            const contractId = strip0x(parsed.args[0] as string);
+            const secret = strip0x(parsed.args[1] as string);
+            const evt: SettleEvent = {
+              spoke: spoke.name,
+              contractId,
+              secret,
+              blockNumber: raw.blockNumber,
+              txHash: raw.transactionHash,
+              timestamp: Date.now(),
+            };
+            pushRing(this.settleEvents, evt, MAX_EVENTS);
             this.log.info(
-              `[${spoke.name}] skipping echo event for already-forwarded secret contractId=${contractId}`,
+              `[${spoke.name}] LogHTLCClaimed contractId=${contractId} block=${raw.blockNumber} tx=${raw.transactionHash}`,
             );
-            continue;
+
+            if (this.forwardedSecrets.has(secret)) {
+              this.log.info(
+                `[${spoke.name}] skipping echo event for already-forwarded secret contractId=${contractId}`,
+              );
+              continue;
+            }
+
+            const counterpartId = this.resolveCounterpartContractId(
+              spoke.name,
+              contractId,
+            );
+
+            await this.settleOnCounterpart(
+              grpcClient,
+              spoke.name,
+              counterpartId,
+              secret,
+            );
+            this.forwardedSecrets.add(secret);
+          } catch (decodeErr) {
+            this.log.warn(`[${spoke.name}] failed to decode LogHTLCClaimed: ${String(decodeErr)}`);
           }
-
-          // Resolve the counterpart spoke's contractId via hashLock.
-          // Each spoke has its own contractId for the same HTLC; the shared
-          // link between them is the hashLock. Sending the source contractId
-          // to the counterpart payment orchestrator yields NOT_FOUND.
-          const counterpartId = this.resolveCounterpartContractId(
-            spoke.name,
-            contractId,
-          );
-
-          await this.settleOnCounterpart(
-            grpcClient,
-            spoke.name,
-            counterpartId,
-            secret,
-          );
-          this.forwardedSecrets.add(secret);
         }
 
         // ── FX Agreement polling (REST-based, no on-chain contract) ─────

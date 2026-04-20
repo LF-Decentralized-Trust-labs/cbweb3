@@ -12,12 +12,17 @@
  *   GET  /api/v1/health                                — liveness probe
  *
  * The @hyperledger/cactus-plugin-ledger-connector-besu plugin is initialised
- * here and attached to Express as a mounted sub-router, making all standard
- * Cacti BesuConnector endpoints available at /api/v1/plugins/besu/<spoke>.
+ * here and attached to Express via registerWebServices, making standard
+ * Cacti BesuConnector endpoints available (getPastLogs, getBlock, etc.)
+ * and enabling watchBlocksV1 event streaming via Socket.IO.
  */
 
+import http from "http";
 import express, { Request, Response } from "express";
 import { randomUUID } from "crypto";
+import { Server as SocketIoServer } from "socket.io";
+import { PluginRegistry } from "@hyperledger/cactus-core";
+import { PluginLedgerConnectorBesu } from "@hyperledger/cactus-plugin-ledger-connector-besu";
 import { config } from "./config";
 import { HtlcRelay } from "./htlc-relay";
 import { RelayStore } from "./relay-store";
@@ -57,19 +62,50 @@ function pruneProofs(): void {
 async function main(): Promise<void> {
   console.log("Cacti HTLC relay starting…");
   console.log(`  Spoke-A RPC  : ${config.spokeA.besuRpc}`);
+  console.log(`  Spoke-A WS   : ${config.spokeA.besuWs}`);
   console.log(`  Spoke-A HTLC : ${config.spokeA.htlcAddress}`);
   console.log(`  Spoke-A API  : ${config.spokeA.internalApiUrl}`);
   console.log(`  Spoke-B RPC  : ${config.spokeB.besuRpc}`);
+  console.log(`  Spoke-B WS   : ${config.spokeB.besuWs}`);
   console.log(`  Spoke-B HTLC : ${config.spokeB.htlcAddress}`);
   console.log(`  Spoke-B API  : ${config.spokeB.internalApiUrl}`);
   console.log(`  Poll interval: ${config.pollIntervalMs} ms`);
   console.log(`  API port     : ${config.apiPort}`);
   console.log(`  Store path   : ${config.relayStorePath}`);
 
+  // ── Cacti PluginRegistry + Besu connectors ──────────────────────────────
+  const pluginRegistry = new PluginRegistry();
+
+  const connectorSpokeA = new PluginLedgerConnectorBesu({
+    instanceId: `besu-connector-spoke-a-${randomUUID()}`,
+    rpcApiHttpHost: config.spokeA.besuRpc,
+    rpcApiWsHost: config.spokeA.besuWs,
+    pluginRegistry,
+    logLevel: "INFO",
+  });
+
+  const connectorSpokeB = new PluginLedgerConnectorBesu({
+    instanceId: `besu-connector-spoke-b-${randomUUID()}`,
+    rpcApiHttpHost: config.spokeB.besuRpc,
+    rpcApiWsHost: config.spokeB.besuWs,
+    pluginRegistry,
+    logLevel: "INFO",
+  });
+
+  await connectorSpokeA.onPluginInit();
+  console.log(`[cacti] PluginLedgerConnectorBesu spoke-a initialized (${connectorSpokeA.getInstanceId()})`);
+
+  await connectorSpokeB.onPluginInit();
+  console.log(`[cacti] PluginLedgerConnectorBesu spoke-b initialized (${connectorSpokeB.getInstanceId()})`);
+
   // ── Start HTLC relay ────────────────────────────────────────────────────
   const abortController = new AbortController();
   const relayStore = new RelayStore(config.relayStorePath);
   await relayStore.init();
+
+  const connectors = new Map<string, PluginLedgerConnectorBesu>();
+  connectors.set("spoke-a", connectorSpokeA);
+  connectors.set("spoke-b", connectorSpokeB);
 
   const relay = new HtlcRelay(
     [config.spokeA, config.spokeB],
@@ -77,6 +113,7 @@ async function main(): Promise<void> {
     config.pollIntervalMs,
     config.relayAuthSecret,
     relayStore,
+    connectors,
   );
   relay.start(abortController.signal);
 
@@ -200,7 +237,19 @@ async function main(): Promise<void> {
   });
 
   // ── HTTP server ─────────────────────────────────────────────────────────
-  const server = app.listen(config.apiPort, () => {
+  const httpServer = http.createServer(app);
+  const ioServer = new SocketIoServer(httpServer, {
+    cors: { origin: "*" },
+    path: "/api/v1/plugins/socket.io/",
+  });
+
+  // Register Cacti connector web services (REST + watchBlocksV1 Socket.IO)
+  const endpointsA = await connectorSpokeA.registerWebServices(app, ioServer);
+  console.log(`[cacti] spoke-a registered ${endpointsA.length} web service endpoint(s)`);
+  const endpointsB = await connectorSpokeB.registerWebServices(app, ioServer);
+  console.log(`[cacti] spoke-b registered ${endpointsB.length} web service endpoint(s)`);
+
+  httpServer.listen(config.apiPort, () => {
     console.log(`Cacti HTLC relay API listening on :${config.apiPort}`);
   });
 
@@ -208,7 +257,10 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     console.log("Shutting down…");
     abortController.abort();
-    server.close(() => process.exit(0));
+    connectorSpokeA.shutdown().catch(() => {});
+    connectorSpokeB.shutdown().catch(() => {});
+    ioServer.close();
+    httpServer.close(() => process.exit(0));
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
