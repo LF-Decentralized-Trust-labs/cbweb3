@@ -1,4 +1,4 @@
-import { Badge, Button } from "@cbweb3/ui";
+import { Badge, Button, PlatformLogo } from "@cbweb3/ui";
 import { useNavigate } from "react-router-dom";
 import { useAuth, useCircuitBreaker } from "../../hooks";
 
@@ -16,18 +16,21 @@ export function Header() {
   };
 
   return (
-    <header className="border-b border-border bg-background/95 px-4 py-3 backdrop-blur">
+    <header className="app-root-header px-4 py-3 backdrop-blur">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-semibold">{institutionName} Portal</h1>
-          <p className="text-xs text-muted-foreground">Central Bank control plane</p>
+        <div className="flex items-center gap-3">
+          <PlatformLogo imageClassName="h-8" />
+          <div>
+            <h1 className="text-lg font-semibold">{institutionName} Portal</h1>
+            <p className="text-xs text-muted-foreground">Central Bank control plane</p>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <Badge variant={isHalted ? "destructive" : "default"}>
             Circuit Breaker: {circuitBreaker?.state ?? "LIVE"}
           </Badge>
           <span className="text-xs text-muted-foreground">{profile?.subject ?? "Unknown operator"}</span>
-          <Button variant="outline" size="sm" onClick={() => void onLogout()}>
+          <Button variant="ghost" size="sm" onClick={() => void onLogout()}>
             Sign out
           </Button>
         </div>

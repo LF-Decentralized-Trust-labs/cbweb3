@@ -1,4 +1,4 @@
-import { Button } from "@cbweb3/ui";
+import { Button, PlatformLogo } from "@cbweb3/ui";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { useWebsocketStore } from "../../stores";
@@ -16,10 +16,13 @@ export function Header() {
   };
 
   return (
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-      <div>
-        <h1 className="text-lg font-semibold">{institutionName} Portal</h1>
-        <p className="text-xs text-muted-foreground">Institution: {profile?.bankId ?? profile?.subject ?? "-"}</p>
+    <header className="app-root-header flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+      <div className="flex items-center gap-3">
+        <PlatformLogo imageClassName="h-8" />
+        <div>
+          <h1 className="text-lg font-semibold">{institutionName} Portal</h1>
+          <p className="text-xs text-muted-foreground">Institution: {profile?.bankId ?? profile?.subject ?? "-"}</p>
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
@@ -27,7 +30,7 @@ export function Header() {
           {connected ? "WS Connected" : "WS Disconnected"}
         </span>
         <span className="text-xs text-muted-foreground">Events: {events.length}</span>
-        <Button variant="outline" onClick={() => void onLogout()}>
+        <Button variant="ghost" onClick={() => void onLogout()}>
           Logout
         </Button>
       </div>

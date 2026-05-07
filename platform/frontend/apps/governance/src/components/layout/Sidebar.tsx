@@ -1,4 +1,4 @@
-import { Badge } from "@cbweb3/ui";
+import { Badge, PlatformLogo } from "@cbweb3/ui";
 import {
   ClipboardCheck,
   Gauge,
@@ -34,9 +34,12 @@ export function Sidebar() {
 
   return (
     <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:border-b-0 md:border-r">
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">System State</span>
-        <Badge variant={isHalted ? "destructive" : "default"}>{circuitBreaker?.state ?? "LIVE"}</Badge>
+      <div className="mb-3 space-y-2">
+        <PlatformLogo imageClassName="h-7" />
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-muted-foreground">System State</span>
+          <Badge variant={isHalted ? "destructive" : "default"}>{circuitBreaker?.state ?? "LIVE"}</Badge>
+        </div>
       </div>
       <nav className="grid gap-1">
         {navItems.map((item) => (

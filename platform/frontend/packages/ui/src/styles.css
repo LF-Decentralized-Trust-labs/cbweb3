@@ -95,3 +95,13 @@ body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
 }
+
+.app-root-header {
+  background-color: hsl(220 18% 10% / 0.98);
+  border-bottom: 1px solid hsl(220 16% 24%);
+  color: hsl(0 0% 98%);
+}
+
+.app-root-header .text-muted-foreground {
+  color: hsl(220 8% 76%);
+}

@@ -19,7 +19,7 @@ const supervisorUser: SupervisorUser = {
   id: "sup_001",
   username: "supervisor@centralbank.gov",
   role: SupervisorRole.SUPERVISOR_ROLE,
-  institutionId: "cb_lacnet",
+  institutionId: "cb_lnet",
   institutionName: "LAC Regional Central Bank",
   walletAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0",
   permissions: [
