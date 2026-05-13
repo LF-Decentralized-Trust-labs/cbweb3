@@ -12,6 +12,7 @@ import {
   Settings,
   ShieldCheck,
 } from "lucide-react";
+import { PlatformLogo } from "@cbweb3/ui";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -30,8 +31,11 @@ const links = [
 export function Sidebar() {
   return (
     <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:border-b-0 md:border-r">
-      <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">LACnet</p>
-      <p className="mb-3 text-sm font-semibold">Bank Portal</p>
+      <div className="mb-3 space-y-1">
+        <PlatformLogo imageClassName="h-7" />
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">LNET</p>
+        <p className="text-sm font-semibold">Bank Portal</p>
+      </div>
       <nav className="grid gap-1">
         {links.map((link) => (
           <NavLink
