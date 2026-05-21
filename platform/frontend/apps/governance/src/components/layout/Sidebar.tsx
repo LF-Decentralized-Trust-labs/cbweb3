@@ -5,10 +5,10 @@ import {
   LayoutDashboard,
   ListChecks,
   Lock,
-  Scale,
-  Settings,
-  ShieldAlert,
-  Users,
+  // Scale,
+  // Settings,
+  // ShieldAlert,
+  // Users,
   Wallet,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -17,15 +17,15 @@ import { useCircuitBreaker } from "../../hooks";
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/registry", label: "Registry", icon: ClipboardCheck },
-  { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
+  // { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
   { to: "/htlc-monitor", label: "PvP Settlement", icon: Lock },
-  { to: "/accounts", label: "Accounts", icon: Users },
-  { to: "/parameters", label: "Parameters", icon: Scale },
+  // { to: "/accounts", label: "Accounts", icon: Users },
+  // { to: "/parameters", label: "Parameters", icon: Scale },
   { to: "/deposits-approval", label: "Issuance Approvals", icon: Wallet },
   { to: "/escrows-approval", label: "Tokenisation Approvals", icon: ListChecks },
   { to: "/redeems-approval", label: "Redeem Approvals", icon: Gauge },
-  { to: "/audit", label: "Audit", icon: ClipboardCheck },
-  { to: "/settings", label: "Settings", icon: Settings },
+  // { to: "/audit", label: "Audit", icon: ClipboardCheck },
+  // { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Sidebar() {
