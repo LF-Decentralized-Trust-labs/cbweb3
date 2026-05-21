@@ -30,6 +30,10 @@ services:
       INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-cbweb3-relay-shared-secret}"
       # Poll interval in milliseconds
       POLL_INTERVAL_MS: "${POLL_INTERVAL_MS:-3000}"
+      # Persistent store path — backed by a named volume so state survives container restarts
+      RELAY_STORE_PATH: "/data/cacti-relay-store.json"
+    volumes:
+      - cacti-relay-data:/data
     ports:
       - "${CACTI_API_PORT:-4000}:4000"
     extra_hosts:
@@ -41,3 +45,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+
+volumes:
+  cacti-relay-data:
