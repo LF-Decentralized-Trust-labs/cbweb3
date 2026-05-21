@@ -3,18 +3,13 @@ import { Navigate } from "react-router-dom";
 import { ProtectedRoute } from "../components/auth/ProtectedRoute";
 import { AppLayout } from "../components/layout/AppLayout";
 import {
-  AccountsPage,
-  AuditPage,
-  CircuitBreakerPage,
   DashboardPage,
   DepositsApprovalPage,
   EscrowsApprovalPage,
   HTLCMonitorPage,
   LoginPage,
-  ParametersPage,
   RedeemsApprovalPage,
   RegistryPage,
-  SettingsPage,
 } from "../pages";
 
 export const routes: RouteObject[] = [
@@ -31,15 +26,15 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, element: <DashboardPage /> },
           { path: "registry", element: <RegistryPage /> },
-          { path: "circuit-breaker", element: <CircuitBreakerPage /> },
+          // { path: "circuit-breaker", element: <CircuitBreakerPage /> },
           { path: "htlc-monitor", element: <HTLCMonitorPage /> },
-          { path: "accounts", element: <AccountsPage /> },
-          { path: "parameters", element: <ParametersPage /> },
+          // { path: "accounts", element: <AccountsPage /> },
+          // { path: "parameters", element: <ParametersPage /> },
           { path: "deposits-approval", element: <DepositsApprovalPage /> },
           { path: "escrows-approval", element: <EscrowsApprovalPage /> },
           { path: "redeems-approval", element: <RedeemsApprovalPage /> },
-          { path: "audit", element: <AuditPage /> },
-          { path: "settings", element: <SettingsPage /> },
+          // { path: "audit", element: <AuditPage /> },
+          // { path: "settings", element: <SettingsPage /> },
         ],
       },
     ],

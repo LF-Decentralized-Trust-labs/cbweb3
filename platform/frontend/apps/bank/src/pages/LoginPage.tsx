@@ -44,7 +44,7 @@ export function LoginPage() {
       <div className="mx-auto grid min-h-screen max-w-6xl gap-8 px-4 py-8 lg:grid-cols-2 lg:items-center">
         <section className="hidden rounded-2xl border border-border/70 bg-card/70 p-8 backdrop-blur lg:block">
           <Badge variant="secondary" className="mb-4 w-fit">
-            LACnet · CBWeb3
+            LNET · CBWeb3
           </Badge>
           <h1 className="text-3xl font-semibold tracking-tight">Regional CBDC Bank Portal</h1>
           <p className="mt-3 max-w-md text-sm text-muted-foreground">
