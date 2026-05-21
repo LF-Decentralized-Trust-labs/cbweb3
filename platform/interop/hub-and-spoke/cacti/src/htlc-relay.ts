@@ -750,10 +750,17 @@ export class HtlcRelay {
         { deadline },
         (err: grpc.ServiceError | null, resp: ProposeFXAgreementGrpcResponse) => {
           if (err) {
-            this.log.error(
-              `[${spokeName}] ProposeFXAgreement gRPC failed tradeId=${event.tradeId}: ${err.message}`,
-            );
-            resolve(false);
+            if (isFXAlreadyInState(err, "PROPOSED", "ACCEPTED", "SETTLED")) {
+              this.log.warn(
+                `[${spokeName}] ProposeFXAgreement already proposed tradeId=${event.tradeId}, skipping`,
+              );
+              resolve(true);
+            } else {
+              this.log.error(
+                `[${spokeName}] ProposeFXAgreement gRPC failed tradeId=${event.tradeId}: ${err.message}`,
+              );
+              resolve(false);
+            }
           } else {
             this.log.info(
               `[${spokeName}] counterpart proposed tradeId=${event.tradeId} tx=${resp?.tx_hash}`,
@@ -778,10 +785,17 @@ export class HtlcRelay {
         { deadline },
         (err: grpc.ServiceError | null, resp: AcceptFXAgreementGrpcResponse) => {
           if (err) {
-            this.log.error(
-              `[${spokeName}] AcceptFXAgreement gRPC failed tradeId=${tradeId}: ${err.message}`,
-            );
-            resolve(false);
+            if (isFXAlreadyInState(err, "ACCEPTED")) {
+              this.log.warn(
+                `[${spokeName}] AcceptFXAgreement already accepted tradeId=${tradeId}, skipping`,
+              );
+              resolve(true);
+            } else {
+              this.log.error(
+                `[${spokeName}] AcceptFXAgreement gRPC failed tradeId=${tradeId}: ${err.message}`,
+              );
+              resolve(false);
+            }
           } else {
             this.log.info(
               `[${spokeName}] counterpart accepted tradeId=${tradeId} tx=${resp?.tx_hash}`,
@@ -806,10 +820,17 @@ export class HtlcRelay {
         { deadline },
         (err: grpc.ServiceError | null, resp: RejectFXAgreementGrpcResponse) => {
           if (err) {
-            this.log.error(
-              `[${spokeName}] RejectFXAgreement gRPC failed tradeId=${tradeId}: ${err.message}`,
-            );
-            resolve(false);
+            if (isFXAlreadyInState(err, "REJECTED", "CANCELLED")) {
+              this.log.warn(
+                `[${spokeName}] RejectFXAgreement already rejected tradeId=${tradeId}, skipping`,
+              );
+              resolve(true);
+            } else {
+              this.log.error(
+                `[${spokeName}] RejectFXAgreement gRPC failed tradeId=${tradeId}: ${err.message}`,
+              );
+              resolve(false);
+            }
           } else {
             this.log.info(
               `[${spokeName}] counterpart rejected tradeId=${tradeId} tx=${resp?.tx_hash}`,
@@ -834,10 +855,17 @@ export class HtlcRelay {
         { deadline },
         (err: grpc.ServiceError | null, resp: CancelFXAgreementGrpcResponse) => {
           if (err) {
-            this.log.error(
-              `[${spokeName}] CancelFXAgreement gRPC failed tradeId=${tradeId}: ${err.message}`,
-            );
-            resolve(false);
+            if (isFXAlreadyInState(err, "CANCELLED", "REJECTED")) {
+              this.log.warn(
+                `[${spokeName}] CancelFXAgreement already cancelled tradeId=${tradeId}, skipping`,
+              );
+              resolve(true);
+            } else {
+              this.log.error(
+                `[${spokeName}] CancelFXAgreement gRPC failed tradeId=${tradeId}: ${err.message}`,
+              );
+              resolve(false);
+            }
           } else {
             this.log.info(
               `[${spokeName}] counterpart cancelled tradeId=${tradeId} tx=${resp?.tx_hash}`,
@@ -862,10 +890,17 @@ export class HtlcRelay {
         { deadline },
         (err: grpc.ServiceError | null, resp: SettleFXAgreementGrpcResponse) => {
           if (err) {
-            this.log.error(
-              `[${spokeName}] SettleFXAgreement gRPC failed tradeId=${tradeId}: ${err.message}`,
-            );
-            resolve(false);
+            if (isFXAlreadyInState(err, "SETTLED", "FINALIZED")) {
+              this.log.warn(
+                `[${spokeName}] SettleFXAgreement already settled tradeId=${tradeId}, skipping`,
+              );
+              resolve(true);
+            } else {
+              this.log.error(
+                `[${spokeName}] SettleFXAgreement gRPC failed tradeId=${tradeId}: ${err.message}`,
+              );
+              resolve(false);
+            }
           } else {
             this.log.info(
               `[${spokeName}] counterpart settled tradeId=${tradeId} tx=${resp?.tx_hash}`,
@@ -881,6 +916,17 @@ export class HtlcRelay {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Returns true when a gRPC FAILED_PRECONDITION error indicates the FX agreement
+ * is already in one of the given terminal states — meaning the action was already
+ * applied and retrying it would always fail. Callers should treat this as success.
+ */
+function isFXAlreadyInState(err: grpc.ServiceError, ...states: string[]): boolean {
+  if (err.code !== grpc.status.FAILED_PRECONDITION) return false;
+  const upper = err.message.toUpperCase();
+  return states.some((s) => upper.includes(`IS IN STATE ${s.toUpperCase()}`));
+}
 
 function strip0x(hex: string): string {
   return hex.startsWith("0x") ? hex.slice(2) : hex;
