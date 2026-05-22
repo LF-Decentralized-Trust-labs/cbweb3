@@ -71,6 +71,10 @@ deploy.up-infra: deploy.create-shared-network
 	docker logs --tail 50 cbweb3-keycloak 2>&1 || true; \
 	exit 1
 
+noc.setup-keycloak:
+	@echo "Setting up NOC realm in Keycloak..."
+	@bash $(DEPLOY_DIR)/keycloak/setup-noc-realm.sh
+
 deploy.down-infra:
 	@echo "Stopping Compose Services..."
 	@docker compose -f $(DEPLOY_DIR)/compose.yml down -v
@@ -135,4 +139,5 @@ deploy.ci-local: deploy.build-ci-runner
 	deploy.up-backend-spoke-a deploy.down-backend-spoke-a \
 	deploy.up-backend-spoke-b deploy.down-backend-spoke-b \
 	deploy.up-backend-entities deploy.down-backend-entities deploy.validate-backend-entities \
-	deploy.build-ci-runner deploy.ci-local
+	deploy.build-ci-runner deploy.ci-local \
+	noc.setup-keycloak
