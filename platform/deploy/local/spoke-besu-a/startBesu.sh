@@ -135,8 +135,11 @@ docker network create --driver bridge "${NETWORK_NAME}" && \
 docker network inspect cbweb3_network >/dev/null 2>&1 || docker network create cbweb3_network
 
 # ─── Start central-bank-a node (bootnode) ─────────────────────────────────────
-echo -e "${BLUE}Starting central-bank-a node (bootnode)...${NC}"
-docker run -d \
+# macOS fix: create container, connect to both networks, THEN start — so port
+# bindings are established with all networks already attached (avoids userspace
+# proxy race condition on Docker Desktop for Mac).
+echo -e "${BLUE}Creating central-bank-a node (bootnode)...${NC}"
+docker create \
     --name "${NODE_CENTRAL_BANK}" \
     --user root \
     -v "$(pwd)/nodes/central-bank-a/data:/opt/besu/data" \
@@ -155,6 +158,8 @@ docker run -d \
     --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' \
     --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
 
+docker network connect cbweb3_network "${NODE_CENTRAL_BANK}" 2>/dev/null || true
+docker start "${NODE_CENTRAL_BANK}"
 echo -e "${GREEN}central-bank-a node started.${NC}"
 echo -e "${YELLOW}Waiting 5 seconds for central-bank-a node to be ready...${NC}"
 sleep 5
@@ -193,12 +198,9 @@ CENTRAL_BANK_IP=$(docker inspect \
 ENODE_INTERNAL=$(echo "$ENODE" | sed -e "s/127.0.0.1/${CENTRAL_BANK_IP}/g")
 echo -e "${BLUE}ENODE (internal): $ENODE_INTERNAL${NC}\n"
 
-# Now connect central-bank-a to shared network (after IP/ENODE capture to avoid multi-IP issue)
-docker network connect cbweb3_network "${NODE_CENTRAL_BANK}" 2>/dev/null || true
-
 # ─── Start bank-a node ───────────────────────────────────────────────────────
-echo -e "${BLUE}Starting bank-a node...${NC}"
-docker run -d \
+echo -e "${BLUE}Creating bank-a node...${NC}"
+docker create \
     --name "${NODE_BANK_A}" \
     --user root \
     -v "$(pwd)/nodes/bank-a/data:/opt/besu/data" \
@@ -219,11 +221,12 @@ docker run -d \
     --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
 
 docker network connect cbweb3_network "${NODE_BANK_A}" 2>/dev/null || true
+docker start "${NODE_BANK_A}"
 echo -e "${GREEN}bank-a node started.${NC}\n"
 
 # ─── Start bank-c node ───────────────────────────────────────────────────────
-echo -e "${BLUE}Starting bank-c node...${NC}"
-docker run -d \
+echo -e "${BLUE}Creating bank-c node...${NC}"
+docker create \
     --name "${NODE_BANK_C}" \
     --user root \
     -v "$(pwd)/nodes/bank-c/data:/opt/besu/data" \
@@ -244,6 +247,7 @@ docker run -d \
     --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
 
 docker network connect cbweb3_network "${NODE_BANK_C}" 2>/dev/null || true
+docker start "${NODE_BANK_C}"
 echo -e "${GREEN}bank-c node started.${NC}\n"
 
 echo -e "${YELLOW}Creating network tracker file...${NC}"
