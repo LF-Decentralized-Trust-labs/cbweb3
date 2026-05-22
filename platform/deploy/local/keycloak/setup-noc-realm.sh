@@ -64,6 +64,7 @@ else
     -s "realm=${NOC_REALM}" \
     -s enabled=true \
     -s "displayName=CBweb3 NOC" \
+    -s sslRequired=none \
     -s accessTokenLifespan=86400
   echo -e "${GREEN}  Realm '${NOC_REALM}' created.${NC}"
 fi
@@ -109,6 +110,8 @@ else
   ${KCADM} create users -r "${NOC_REALM}" \
     -s "username=${NOC_USER}" \
     -s enabled=true \
+    -s "email=${NOC_USER}@local.dev" \
+    -s emailVerified=true \
     -s "firstName=NOC" \
     -s "lastName=Admin"
   ${KCADM} set-password -r "${NOC_REALM}" \
