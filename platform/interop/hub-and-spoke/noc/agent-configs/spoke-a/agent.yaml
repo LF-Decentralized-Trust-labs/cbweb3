@@ -1,0 +1,28 @@
+# NOC Agent Configuration — Spoke A
+# This file is mounted into the noc-agent container at /etc/noc-agent/agent.yaml
+
+spoke_id: "spoke-a"
+noc_backend_url: "http://noc-backend:8090"
+api_key: "REPLACE_WITH_PROVISIONED_KEY"
+push_interval_seconds: 15
+
+components:
+  - name: "besu-node"
+    type: "BESU"
+    endpoint: "http://besu-spoke-a:8545"
+    container_name: "besu-spoke-a"
+
+  - name: "cacti-relay"
+    type: "CACTI_RELAY"
+    endpoint: "http://cacti-spoke-a:4000"
+    container_name: "cacti-spoke-a"
+
+  - name: "paladin"
+    type: "PALADIN"
+    endpoint: "http://paladin-spoke-a:8548"
+    container_name: "paladin-spoke-a"
+
+  - name: "payment-orchestrator"
+    type: "PAYMENT_ORCHESTRATOR"
+    endpoint: ""
+    container_name: "payment-orchestrator-spoke-a"

@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  noc-backend:
+    build:
+      context: ../../../backend/services/noc-backend
+      dockerfile: Dockerfile
+    image: cbweb3/noc-backend:local
+    container_name: noc-backend
+    restart: unless-stopped
+    ports:
+      - "${NOC_BACKEND_PORT:-8090}:8090"
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-noc}:${POSTGRES_PASSWORD:-noc}@noc-db:5432/${POSTGRES_DB:-nocdb}?sslmode=disable"
+      NOC_BACKEND_PORT: "8090"
+      KEYCLOAK_URL: "${KEYCLOAK_URL:-http://keycloak:8080}"
+      KEYCLOAK_REALM: "${KEYCLOAK_REALM:-cbweb3}"
+      KEYCLOAK_CLIENT_ID: "${KEYCLOAK_CLIENT_ID:-noc-portal}"
+      KEYCLOAK_CLIENT_SECRET: "${KEYCLOAK_CLIENT_SECRET:-}"
+      AGENT_GRACE_MULTIPLIER: "${AGENT_GRACE_MULTIPLIER:-3}"
+      NOC_FRONTEND_ORIGIN: "${NOC_FRONTEND_ORIGIN:-http://localhost:5173}"
+    depends_on:
+      noc-db:
+        condition: service_healthy
+    networks:
+      - noc-net
+
+  noc-db:
+    image: postgres:15-alpine
+    container_name: noc-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-noc}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-noc}"
+      POSTGRES_DB: "${POSTGRES_DB:-nocdb}"
+    volumes:
+      - noc-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-noc} -d ${POSTGRES_DB:-nocdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - noc-net
+
+volumes:
+  noc-db-data:
+
+networks:
+  noc-net:
+    driver: bridge

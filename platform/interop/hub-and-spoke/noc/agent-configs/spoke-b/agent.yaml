@@ -1,0 +1,26 @@
+# NOC Agent Configuration — Spoke B
+spoke_id: "spoke-b"
+noc_backend_url: "http://noc-backend:8090"
+api_key: "REPLACE_WITH_PROVISIONED_KEY"
+push_interval_seconds: 15
+
+components:
+  - name: "besu-node"
+    type: "BESU"
+    endpoint: "http://besu-spoke-b:8545"
+    container_name: "besu-spoke-b"
+
+  - name: "cacti-relay"
+    type: "CACTI_RELAY"
+    endpoint: "http://cacti-spoke-b:4000"
+    container_name: "cacti-spoke-b"
+
+  - name: "paladin"
+    type: "PALADIN"
+    endpoint: "http://paladin-spoke-b:8548"
+    container_name: "paladin-spoke-b"
+
+  - name: "payment-orchestrator"
+    type: "PAYMENT_ORCHESTRATOR"
+    endpoint: ""
+    container_name: "payment-orchestrator-spoke-b"
