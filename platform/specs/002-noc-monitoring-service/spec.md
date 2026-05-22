@@ -172,7 +172,14 @@ An L2 support engineer is investigating a disputed cross-border transaction. The
 #### NOC Agent Configuration
 
 - **FR-029**: Each NOC Agent MUST be configured via a static `agent.yaml` file that declares: `spoke_id`, `noc_backend_url`, `api_key`, `push_interval_seconds`, and a list of components each with a `name`, `type`, and `endpoint`.
-- **FR-030**: The NOC Agent MUST support the following component types, each with a distinct health-check strategy: `BESU` (calls `eth_blockNumber` via JSON-RPC and validates block progression), `CACTI_RELAY` (calls `GET /api/v1/health` and validates HTTP 200), `PALADIN` (calls `GET /health` and validates HTTP 200 with healthy status in response body).
+- **FR-030**: The NOC Agent MUST support the following component types, each with a distinct health-check strategy: `BESU` (calls `eth_blockNumber` via JSON-RPC and validates block progression), `CACTI_RELAY` (calls `GET /api/v1/health`, validates HTTP 200 and `{"status":"ok"}` in response body), `PALADIN` (posts `{"jsonrpc":"2.0","id":1,"method":"ptx_getTransaction","params":["dummy"]}` to HTTP RPC endpoint on port 8548, validates that response contains error code `PD020704` indicating JSON-RPC server is ready).
+
+#### Container Log Visibility
+
+- **FR-031**: The NOC Agent MUST collect the most recent log lines from each monitored Docker container via the Docker socket (`/var/run/docker.sock`) and include them in each push payload to the NOC Backend (default: last 200 lines per component per push cycle).
+- **FR-032**: The NOC Backend MUST persist received container logs in a rolling buffer per component (default retention: last 1,000 lines per component), overwriting the oldest entries when the buffer is full.
+- **FR-033**: NOC operators (role `noc-viewer` or above) MUST be able to retrieve the most recent log lines for any monitored component via the API, with optional filtering by keyword and time range.
+- **FR-034**: When a component transitions to `OFFLINE` or `UNKNOWN`, the NOC Backend MUST preserve a snapshot of the last 500 log lines from that component at the time of the state change, retained for 90 days independently of the rolling buffer.
 
 #### Spoke-Agnostic Architecture
 
