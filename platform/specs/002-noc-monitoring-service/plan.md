@@ -82,17 +82,18 @@ backend/services/noc-backend/
 │   │   └── push.go                   ← POST /internal/v1/push
 │   ├── repository/                   ← GORM-based data access
 │   ├── service/
-│   │   ├── alert_engine.go           ← dedup + severity
+│   │   ├── alert_engine.go           ← dedup + severity (fixed rules by type+state)
 │   │   ├── slo_worker.go             ← background SLO recompute (5 min)
 │   │   ├── log_buffer.go             ← rolling trim + snapshot capture
-│   │   └── agent_watchdog.go         ← stale agent → UNKNOWN transition
+│   │   ├── retention_worker.go       ← purge noc_health_events + noc_container_logs > 90 days
+│   │   └── agent_watchdog.go         ← stale agent → UNKNOWN (runs every push_interval; grace = 3×)
 │   └── keycloak/client.go            ← adapted from backend/services/auth/
 ├── migrations/001_initial_schema.sql
 ├── go.mod
 └── Dockerfile
 
 interop/hub-and-spoke/noc/
-├── docker-compose.yaml               ← noc-backend + noc-db
+├── docker-compose.yaml               ← noc-backend (port 8090) + noc-db
 ├── .env.example
 └── agent-configs/
     ├── spoke-a/agent.yaml
@@ -108,6 +109,11 @@ interop/hub-and-spoke/noc/
 |----------|-----------|
 | Two separate Go modules | Agent and backend have incompatible deps (Docker SDK vs Fiber/GORM); keeps agent binary lean |
 | Dedicated `noc-db` | Metric write load must not affect transactional banking DBs |
-| Fiber REST API | NOC Frontend consumes REST; Fiber is the established HTTP framework (api-gateway) |
+| Fiber REST API | NOC Frontend consumes REST; Fiber is the established HTTP framework (api-gateway). Enable Fiber CORS middleware allowing NOC frontend origin. |
 | Rolling log buffer in PostgreSQL | Avoids Elasticsearch/Loki for v1; 1,000 lines per component sufficient for diagnosis |
 | Reuse `auth` keycloak client | JWKS+RS256+role extraction already battle-tested in the platform |
+| GORM AutoMigrate | Consistent with payment-orchestrator; no SQL migration files in this codebase |
+| Agent auto-registration | First push with a pre-provisioned key hash creates agent + component records; reduces operational friction |
+| Fixed alert severity rules | BESU/PALADIN OFFLINE=CRITICAL, CACTI OFFLINE or agent unreachable=HIGH, DEGRADED=WARNING, recovery=INFO |
+| `last_block_number` in noc_components | Enables BESU chain-stall detection across consecutive push cycles without external state |
+| Agent watchdog interval | Runs every 15 s (same as default push_interval); stale threshold = 3× push_interval |

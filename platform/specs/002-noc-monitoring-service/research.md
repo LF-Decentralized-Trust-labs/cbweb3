@@ -113,6 +113,6 @@ Both services integrated into `interop/hub-and-spoke/cacti/docker-compose.yaml` 
 
 ## R-008: Database Migrations
 
-**Decision**: Use `golang-migrate/migrate` with SQL migration files, consistent with the pattern used in `payment-orchestrator` (which uses GORM AutoMigrate for dev but SQL files for production).
+**Decision**: GORM `AutoMigrate` — consistent with `payment-orchestrator` which uses `db.AutoMigrate(...)` at service startup (confirmed: `backend/services/payment-orchestrator/internal/repository/fx_agreement_gorm.go` line 26). No separate SQL migration files are used in this codebase.
 
-Check `backend/services/payment-orchestrator` for migration tooling to confirm — if GORM AutoMigrate is used, follow the same pattern for NOC Backend.
+**Implication**: NOC Backend runs `db.AutoMigrate(...)` on all 9 `noc_*` GORM models at startup. Schema diffs are applied automatically. For production rollbacks, GORM AutoMigrate is additive only (safe for adds; column removals require manual DDL).

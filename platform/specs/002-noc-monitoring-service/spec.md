@@ -29,6 +29,10 @@ The system follows a **two-component architecture**:
 - Q: What is the NOC portal operator UX navigation model? → A: Global overview first, drill-down on demand — operator lands on a network-wide dashboard showing all spokes/hub with traffic-light status; clicks into a spoke for component detail; clicks into a component for history, alerts, and logs. No upfront spoke selection required.
 - Q: How is the NOC Agent configured to know which components to monitor? → A: Static `agent.yaml` file co-deployed with each spoke — declares `spoke_id`, `noc_backend_url`, `api_key`, and a list of components each with a `name`, `type` (BESU / CACTI_RELAY / PALADIN), and `endpoint`. Each type uses a distinct health-check strategy (Besu: `eth_blockNumber` JSON-RPC; Cacti: `GET /api/v1/health`; Paladin: `GET /health`).
 - Q: How are NOC portal users authenticated and managed? → A: Keycloak integration with NOC-specific roles — the NOC portal is a Keycloak client; users are managed in Keycloak (not in the NOC service itself); three roles: `noc-viewer` (read-only), `noc-operator` (can acknowledge/resolve alerts), `noc-admin` (can register/remove spokes).
+- Q: How does the NOC service ingest transaction lifecycle events (for SLO latency and audit)? → A: The NOC Agent parses structured log output from the payment-orchestrator Docker container via the Docker socket and extracts transaction lifecycle events (INITIATED, HTLC_LOCKED, RELAYED, SETTLED, FAILED) from structured log lines; these are included in each push payload to the NOC Backend alongside health data.
+- Q: How are NOC Agents and their components registered in the NOC Backend database? → A: Auto-registration on first push — if the `X-Agent-Key` is valid (pre-provisioned as a known key hash in the DB by a noc-admin) but no `noc_agents` record exists yet, the backend creates the agent record and all declared components from the push payload automatically on the first accepted push.
+- Q: What are the precise trigger conditions for `DEGRADED` vs `OFFLINE` health status per component type? → A: `OFFLINE` = connection failure (timeout, connection refused, HTTP 5xx, no response). `DEGRADED` = connection succeeded but anomaly detected: for BESU — block number has not advanced in ≥2 consecutive push cycles; for CACTI_RELAY — HTTP 200 received but response latency > 5 s; for PALADIN — connected but response does not contain `PD020704`.
+- Q: What are the alert severity classification rules for the alert engine? → A: Fixed severity by component type + state: `CRITICAL` = BESU or PALADIN transitions to OFFLINE; `HIGH` = CACTI_RELAY transitions to OFFLINE, or any component remains OFFLINE for > 5 min, or agent becomes unreachable; `WARNING` = any component transitions to DEGRADED; `INFO` = any component transitions to HEALTHY (recovery event).
 
 ---
 
@@ -131,12 +135,16 @@ An L2 support engineer is investigating a disputed cross-border transaction. The
 - **FR-002**: The NOC Backend MUST expose a unified health status model for any registered spoke, hub, node, or relay component — without requiring spoke-specific code.
 - **FR-003**: The NOC Backend MUST detect when a NOC Agent stops sending data. After a configurable grace period (default: 3× the agent's push interval), all components associated with that agent MUST transition to `UNKNOWN` status and a `HIGH`-severity "agent unreachable" alert MUST be generated.
 - **FR-004**: The service MUST automatically re-evaluate component health and update status when a previously offline or UNKNOWN component becomes reachable again.
-- **FR-005**: The service MUST support dynamic registration of new spokes and their components without requiring a service restart.
+- **FR-005**: The service MUST support dynamic registration of new spokes and their components without requiring a service restart. On the first push received from a new NOC Agent whose `X-Agent-Key` is pre-provisioned (key hash stored in DB by a `noc-admin`) but whose agent record does not yet exist, the NOC Backend MUST auto-create the `noc_agents` record and all declared `noc_components` from the push payload. Subsequent pushes from the same agent MUST update existing records (upsert by `(agent_id, component_name)`).
 
 #### Alert and Incident Management
 
 - **FR-006**: The service MUST generate an alert when any monitored component transitions to a degraded or offline state, including: spoke nodes, Cacti relayers, and the Paladin privacy service.
-- **FR-007**: The service MUST classify alerts by severity: `INFO`, `WARNING`, `HIGH`, and `CRITICAL`, based on configurable rules tied to the type and duration of the failure.
+- **FR-007**: The service MUST classify alerts by severity using fixed rules based on component type and health state transition:
+  - `CRITICAL`: BESU or PALADIN component transitions to `OFFLINE`.
+  - `HIGH`: CACTI_RELAY component transitions to `OFFLINE`; or any component remains `OFFLINE` for > 5 minutes; or an agent becomes unreachable (transitions to `UNKNOWN` after grace period).
+  - `WARNING`: any component transitions to `DEGRADED`.
+  - `INFO`: any component transitions back to `HEALTHY` (recovery event).
 - **FR-008**: The service MUST group alerts sharing the same root cause signature into a single incident to prevent duplicate notifications.
 - **FR-009**: The service MUST automatically resolve an alert and record a resolution timestamp when the underlying failure condition clears.
 - **FR-010**: The service MUST retain a historical record of all alerts and incidents, including state transitions and resolution notes, for a minimum of 90 days.
@@ -151,7 +159,7 @@ An L2 support engineer is investigating a disputed cross-border transaction. The
 
 #### Audit Log and Transaction Visibility
 
-- **FR-016**: The service MUST ingest and store transaction lifecycle events from all registered spoke networks, including initiation, HTLC locking, cross-spoke relay, and settlement events.
+- **FR-016**: The service MUST ingest and store transaction lifecycle events from all registered spoke networks. The NOC Agent MUST extract these events from the payment-orchestrator Docker container logs by parsing structured log lines for the event types: `INITIATED`, `HTLC_LOCKED`, `RELAYED`, `SETTLED`, and `FAILED`. Extracted events MUST be included in each push payload to the NOC Backend alongside health and container log data.
 - **FR-017**: Users MUST be able to search transaction events by transaction identifier, returning all associated events in ascending chronological order.
 - **FR-018**: Users MUST be able to filter transaction events by time range, participant, spoke, and event type.
 - **FR-019**: The service MUST expose audit records in a structured, exportable format suitable for regulatory reporting.
@@ -172,7 +180,10 @@ An L2 support engineer is investigating a disputed cross-border transaction. The
 #### NOC Agent Configuration
 
 - **FR-029**: Each NOC Agent MUST be configured via a static `agent.yaml` file that declares: `spoke_id`, `noc_backend_url`, `api_key`, `push_interval_seconds`, and a list of components each with a `name`, `type`, and `endpoint`.
-- **FR-030**: The NOC Agent MUST support the following component types, each with a distinct health-check strategy: `BESU` (calls `eth_blockNumber` via JSON-RPC and validates block progression), `CACTI_RELAY` (calls `GET /api/v1/health`, validates HTTP 200 and `{"status":"ok"}` in response body), `PALADIN` (posts `{"jsonrpc":"2.0","id":1,"method":"ptx_getTransaction","params":["dummy"]}` to HTTP RPC endpoint on port 8548, validates that response contains error code `PD020704` indicating JSON-RPC server is ready).
+- **FR-030**: The NOC Agent MUST support the following component types, each with a distinct health-check strategy:
+  - `BESU`: calls `eth_blockNumber` via JSON-RPC; `HEALTHY` if block advances between consecutive checks; `DEGRADED` if block number has not advanced for ≥2 consecutive push cycles (chain stall); `OFFLINE` if connection is refused, times out, or returns HTTP 5xx.
+  - `CACTI_RELAY`: calls `GET /api/v1/health`; `HEALTHY` if HTTP 200 and response body contains `{"status":"ok"}` within 5 s; `DEGRADED` if HTTP 200 received but response latency > 5 s; `OFFLINE` if connection is refused, times out, or returns non-200.
+  - `PALADIN`: posts `{"jsonrpc":"2.0","id":1,"method":"ptx_getTransaction","params":["dummy"]}` to the HTTP RPC endpoint on port 8548; `HEALTHY` if response body contains error code `PD020704` (transaction not found = RPC server ready); `DEGRADED` if connection succeeds but response does not contain `PD020704`; `OFFLINE` if connection is refused or times out.
 
 #### Container Log Visibility
 

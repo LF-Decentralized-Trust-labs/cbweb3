@@ -1,6 +1,6 @@
 # API Contracts: NOC Backend REST API
 
-**Service**: `noc-backend` | **Base URL**: `http://noc-backend:8080`  
+**Service**: `noc-backend` | **Base URL**: `http://noc-backend:8090`  
 **Auth**: Bearer JWT (Keycloak) for frontend-facing routes; `X-Agent-Key` header for agent push routes.  
 **Format**: JSON request/response bodies. Errors follow `{"error": "<message>", "code": "<code>"}`.
 
@@ -332,6 +332,33 @@ Deregister (soft-delete) a spoke.
 
 ---
 
+## Agent Key Provisioning (Admin)
+
+### `POST /api/v1/admin/agents/provision-key`
+Pre-provision a raw API key for an agent, binding it to a specific spoke before its first push. Backend stores only the SHA-256 hash. On the agent's first push, the backend validates that the push payload's `spoke_id` matches the provisioned binding; if they differ, the push is rejected with HTTP 403.  
+**Auth**: `noc-admin`
+
+**Body**:
+```json
+{
+  "raw_key": "sk-live-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "spoke_id": "uuid-of-spoke-a",
+  "hint": "agent-spoke-a"
+}
+```
+
+**Response 201**:
+```json
+{ "key_hash": "sha256:...", "spoke_id": "uuid-of-spoke-a", "hint": "agent-spoke-a", "created_at": "..." }
+```
+
+**Response 409** (key hash already exists):
+```json
+{ "error": "key already provisioned", "code": "KEY_EXISTS" }
+```
+
+---
+
 ## Agent Push (Internal)
 
 ### `POST /internal/v1/push`
@@ -360,6 +387,16 @@ Receive health metrics and log lines from a NOC Agent.
       "lines": [
         { "stream": "stdout", "line": "[relay] poll ok", "ts": "2026-05-22T14:00:00Z" }
       ]
+    }
+  ],
+  "transaction_events": [
+    {
+      "tx_id": "33581ea8-55c2-4a6d-b8ae-4f6357363e38",
+      "event_type": "HTLC_LOCKED",
+      "occurred_at": "2026-05-22T14:00:01Z",
+      "participant_id": "bank-a",
+      "contract_id": "0xabc...",
+      "error_code": null
     }
   ]
 }

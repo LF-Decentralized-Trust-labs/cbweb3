@@ -43,6 +43,8 @@ One NOC Agent process per spoke/hub.
 
 **Index**: `api_key_hash` (for fast auth lookup on every push)
 
+> **Key provisioning flow**: A `noc-admin` calls `POST /api/v1/admin/agents/provision-key` specifying the raw API key **and the target `spoke_id`** (backend stores only the SHA-256 hash + spoke binding). When the NOC Agent's first push arrives with that key, the backend validates that the push payload's declared `spoke_id` matches the provisioned spoke binding — mismatches are rejected with HTTP 403. On success, the backend auto-creates the `noc_agents` record (using the `spoke_id` from the provisioned key, not the payload) and all declared components. Subsequent pushes upsert component records.
+
 ---
 
 ### `noc_components`
@@ -59,6 +61,7 @@ Monitorable infrastructure elements within a spoke.
 | `endpoint` | TEXT | NOT NULL | Health check endpoint URL |
 | `health_status` | TEXT | NOT NULL | `HEALTHY` \| `DEGRADED` \| `OFFLINE` \| `UNKNOWN` |
 | `last_checked_at` | TIMESTAMPTZ | NULLABLE | |
+| `last_block_number` | BIGINT | NULLABLE | BESU only — last observed block; used to detect chain stall across consecutive push cycles |
 | `created_at` | TIMESTAMPTZ | NOT NULL, DEFAULT now() | |
 
 **Unique**: `(agent_id, name)`
