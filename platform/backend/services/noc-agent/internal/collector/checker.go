@@ -94,7 +94,7 @@ func (ch *Checker) checkBesu(ctx context.Context, comp config.ComponentConfig, p
 
 func (ch *Checker) checkCactiRelay(ctx context.Context, comp config.ComponentConfig, r CheckResult) CheckResult {
 	start := time.Now()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, comp.Endpoint+"/api/v1/plugins/@hyperledger/cactus-plugin-ledger-connector-besu/get-block", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, comp.Endpoint+"/api/v1/health", nil)
 	if err != nil {
 		r.Status = "OFFLINE"
 		return r
@@ -126,11 +126,16 @@ func (ch *Checker) checkCactiRelay(ctx context.Context, comp config.ComponentCon
 }
 
 func (ch *Checker) checkPaladin(ctx context.Context, comp config.ComponentConfig, r CheckResult) CheckResult {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, comp.Endpoint+"/api/v1/status", nil)
+	// Paladin exposes a JSON-RPC API. bidx_getBlockByNumber is a lightweight
+	// call that succeeds when the node's block indexer is running.
+	body := `{"jsonrpc":"2.0","id":"1","method":"bidx_getBlockByNumber","params":[0]}`
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, comp.Endpoint, strings.NewReader(body))
 	if err != nil {
 		r.Status = "OFFLINE"
 		return r
 	}
+	req.Header.Set("Content-Type", "application/json")
+
 	resp, err := ch.httpClient.Do(req)
 	if err != nil {
 		r.Status = "OFFLINE"
@@ -140,7 +145,7 @@ func (ch *Checker) checkPaladin(ctx context.Context, comp config.ComponentConfig
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
 		r.Status = "OFFLINE"
 		diag := fmt.Sprintf("HTTP %d", resp.StatusCode)
@@ -148,14 +153,27 @@ func (ch *Checker) checkPaladin(ctx context.Context, comp config.ComponentConfig
 		return r
 	}
 
-	// Check for PD020704 in response (Paladin healthy indicator)
-	if !strings.Contains(string(body), "PD020704") {
-		r.Status = "DEGRADED"
-		diag := "PD020704 not found in response"
-		r.Diagnostic = &diag
-	} else {
-		r.Status = "HEALTHY"
+	// A healthy Paladin returns {"result": {...}} without an "error" field.
+	var rpcResp struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Result interface{} `json:"result"`
 	}
+	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+		r.Status = "DEGRADED"
+		diag := "unparseable JSON-RPC response"
+		r.Diagnostic = &diag
+		return r
+	}
+	if rpcResp.Error != nil {
+		r.Status = "OFFLINE"
+		diag := rpcResp.Error.Message
+		r.Diagnostic = &diag
+		return r
+	}
+
+	r.Status = "HEALTHY"
 	return r
 }
 
