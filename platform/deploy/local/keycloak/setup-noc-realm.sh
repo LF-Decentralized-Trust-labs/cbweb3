@@ -113,8 +113,7 @@ else
     -s "lastName=Admin"
   ${KCADM} set-password -r "${NOC_REALM}" \
     --username "${NOC_USER}" \
-    --new-password "${NOC_PASSWORD}" \
-    --temporary false
+    --new-password "${NOC_PASSWORD}"
   echo -e "${GREEN}  User '${NOC_USER}' created.${NC}"
 fi
 
