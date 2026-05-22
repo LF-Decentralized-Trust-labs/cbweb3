@@ -2,9 +2,9 @@
 # Monitors: Central Bank B, Bank B, Bank D
 # spoke_id and api_key must be filled after provisioning via the admin API.
 
-spoke_id: "REPLACE_WITH_SPOKE_UUID"
+spoke_id: "b6388c0e-3770-427e-9359-2b1b6a500ac6"
 noc_backend_url: "http://noc-backend:8090"
-api_key: "REPLACE_WITH_PROVISIONED_KEY"
+api_key: "noc-agent-spoke-b-key-local"
 push_interval_seconds: 15
 
 components:
