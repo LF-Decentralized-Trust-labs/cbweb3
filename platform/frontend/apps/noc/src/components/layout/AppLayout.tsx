@@ -4,7 +4,6 @@ import { useWebsocketStore } from "../../stores";
 import { StaleDataBanner } from "../common/StaleDataBanner";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
-import { TopStatusBar } from "./TopStatusBar";
 
 export function AppLayout() {
   const connect = useWebsocketStore((state) => state.connect);
@@ -18,7 +17,6 @@ export function AppLayout() {
 
   return (
     <div className="flex min-h-screen flex-col bg-muted/30">
-      <TopStatusBar />
       <Header />
       <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col md:flex-row">
         <Sidebar />

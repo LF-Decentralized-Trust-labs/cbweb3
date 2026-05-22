@@ -32,8 +32,8 @@ export function LoginPage() {
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
     defaultValues: {
-      username: "noc.admin",
-      password: "NOCAdmin2026!",
+      username: "noc-admin",
+      password: "noc-admin",
     },
   });
 
