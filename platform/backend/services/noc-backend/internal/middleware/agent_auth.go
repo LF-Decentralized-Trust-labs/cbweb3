@@ -9,13 +9,17 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/repository"
 )
 
 const agentKey = "noc_agent"
 
 // AgentAuth validates the X-Agent-Key header against provisioned key hashes.
-// On success it stores the NocAgent record in Locals.
+// On first push the agent record does not yet exist in noc_agents; in that case
+// the middleware looks up noc_provisioned_keys and auto-creates the NocAgent.
 func AgentAuth(db *gorm.DB) fiber.Handler {
+	agents := repository.NewAgentsRepository(db)
+
 	return func(c *fiber.Ctx) error {
 		rawKey := c.Get("X-Agent-Key")
 		if rawKey == "" {
@@ -27,15 +31,34 @@ func AgentAuth(db *gorm.DB) fiber.Handler {
 
 		hash := hashKey(rawKey)
 
+		// Fast path: agent already registered
 		var agent domain.NocAgent
-		if err := db.Where("api_key_hash = ?", hash).First(&agent).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid agent key"})
-			}
+		err := db.Where("api_key_hash = ?", hash).First(&agent).Error
+		if err == nil {
+			c.Locals(agentKey, agent)
+			return c.Next()
+		}
+		if err != gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
 		}
 
-		c.Locals(agentKey, agent)
+		// First-push path: look up provisioned key and auto-create the agent
+		pk, err := agents.FindProvisionedKey(rawKey)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid agent key"})
+		}
+
+		hint := pk.Hint
+		if hint == "" {
+			hint = pk.ID.String()
+		}
+		newAgent, err := agents.FindOrCreateAgent(rawKey, pk.SpokeID, "noc-agent-"+hint, 15)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "agent auto-registration failed"})
+		}
+		_ = agents.MarkKeyUsed(pk.ID)
+
+		c.Locals(agentKey, *newAgent)
 		return c.Next()
 	}
 }
