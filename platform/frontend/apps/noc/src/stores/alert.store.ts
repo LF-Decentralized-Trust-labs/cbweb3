@@ -1,24 +1,25 @@
 import { create } from "zustand";
-import type { NocAlert } from "../types";
+import { nocBackendApi } from "../services/api";
+import type { AsyncStatus, NocAlert } from "../types";
 
 type AlertState = {
   alerts: NocAlert[];
-  acknowledged: string[];
-  addAlert: (alert: NocAlert) => void;
-  acknowledge: (alertId: string) => void;
-  clearAll: () => void;
+  status: AsyncStatus;
+  error: string | null;
+  fetchAlerts: (spokeId?: string) => Promise<void>;
 };
 
-export const useAlertStore = create<AlertState>((set, get) => ({
+export const useAlertStore = create<AlertState>((set) => ({
   alerts: [],
-  acknowledged: [],
-  addAlert: (alert) => {
-    const exists = get().alerts.some((item) => item.message === alert.message && item.severity === alert.severity);
-    if (exists) {
-      return;
+  status: "idle",
+  error: null,
+  fetchAlerts: async (spokeId?: string) => {
+    set({ status: "loading", error: null });
+    try {
+      const alerts = await nocBackendApi.getAlerts(spokeId);
+      set({ alerts, status: "idle" });
+    } catch (err) {
+      set({ status: "error", error: err instanceof Error ? err.message : "Failed to load alerts" });
     }
-    set((state) => ({ alerts: [alert, ...state.alerts].slice(0, 80) }));
   },
-  acknowledge: (alertId) => set((state) => ({ acknowledged: [alertId, ...state.acknowledged] })),
-  clearAll: () => set({ alerts: [], acknowledged: [] }),
 }));

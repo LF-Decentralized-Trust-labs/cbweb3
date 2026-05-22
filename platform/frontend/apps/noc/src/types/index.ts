@@ -5,6 +5,9 @@ export type { InfrastructureNode, NodeHealthStatus } from "./infrastructure.type
 export type { RelayStatus } from "./relay.types";
 export type { PoolStatus, PoolSeverity } from "./pool.types";
 export type { TopologyNode, TopologyEdge } from "./topology.types";
-export type { NocAlert, AlertSeverity } from "./alert.types";
+export type { NocAlert, AlertSeverity, AlertState, LegacyNocAlert } from "./alert.types";
 export type { AuditLogEntry, AuditFilter } from "./audit.types";
 export type { NocEvent, NocEventType } from "./events.types";
+export type { NocSpoke } from "./spoke.types";
+export type { NocComponent, NocHealthEvent, ComponentHealthStatus, ComponentType } from "./noc-component.types";
+export type { NocContainerLog } from "./log.types";

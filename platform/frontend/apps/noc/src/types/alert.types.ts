@@ -1,6 +1,21 @@
-export type AlertSeverity = "INFO" | "WARNING" | "CRITICAL";
+export type AlertSeverity = "INFO" | "WARNING" | "HIGH" | "CRITICAL";
+export type AlertState = "ACTIVE" | "RESOLVED";
 
 export type NocAlert = {
+  id: string;
+  component_id: string;
+  incident_id?: string;
+  severity: AlertSeverity;
+  state: AlertState;
+  title: string;
+  root_cause_sig: string;
+  created_at: string;
+  resolved_at?: string;
+  acknowledged_by?: string;
+};
+
+/** Legacy alert shape retained for mock-backed stores */
+export type LegacyNocAlert = {
   id: string;
   source: "INFRASTRUCTURE" | "RELAY" | "POOL" | "TELEMETRY";
   message: string;
