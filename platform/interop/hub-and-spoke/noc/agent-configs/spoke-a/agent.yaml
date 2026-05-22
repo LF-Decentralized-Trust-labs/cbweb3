@@ -1,5 +1,6 @@
 # NOC Agent Configuration — Spoke A
-# spoke_id and api_key must be filled after provisioning via the admin API.
+# Monitors: Central Bank A, Bank A, Bank C
+# spoke_id and api_key are provisioned values for local dev.
 
 spoke_id: "447192c8-a6cc-420d-a01b-4147f4b79103"
 noc_backend_url: "http://noc-backend:8090"
@@ -7,17 +8,40 @@ api_key: "noc-agent-spoke-a-key-local"
 push_interval_seconds: 15
 
 components:
+  # Besu nodes (spoke_a_besu_network)
   - name: "besu-central-bank-a"
     type: "BESU"
     endpoint: "http://cbweb3-spoke-a-besu.central-bank-a:8545"
     container_name: "cbweb3-spoke-a-besu.central-bank-a"
 
+  - name: "besu-bank-a"
+    type: "BESU"
+    endpoint: "http://cbweb3-spoke-a-besu.bank-a:8545"
+    container_name: "cbweb3-spoke-a-besu.bank-a"
+
+  - name: "besu-bank-c"
+    type: "BESU"
+    endpoint: "http://cbweb3-spoke-a-besu.bank-c:8545"
+    container_name: "cbweb3-spoke-a-besu.bank-c"
+
+  # Paladin nodes (spoke_a_besu_network)
+  - name: "paladin-central-bank-a"
+    type: "PALADIN"
+    endpoint: "http://paladin-spoke-a-cb:8548"
+    container_name: "paladin-spoke-a-cb"
+
+  - name: "paladin-bank-a"
+    type: "PALADIN"
+    endpoint: "http://paladin-spoke-a-bank-a:8548"
+    container_name: "paladin-spoke-a-bank-a"
+
+  - name: "paladin-bank-c"
+    type: "PALADIN"
+    endpoint: "http://paladin-spoke-a-bank-c:8548"
+    container_name: "paladin-spoke-a-bank-c"
+
+  # Cacti relay — shared across spokes (cacti_default network)
   - name: "cacti-relay"
     type: "CACTI_RELAY"
     endpoint: "http://cbweb3-cacti-relay:4000"
     container_name: "cbweb3-cacti-relay"
-
-  - name: "paladin-cb"
-    type: "PALADIN"
-    endpoint: "http://paladin-spoke-a-cb:8548"
-    container_name: "paladin-spoke-a-cb"
