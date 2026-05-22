@@ -44,9 +44,47 @@ services:
     networks:
       - noc-net
 
+  noc-agent-spoke-a:
+    build:
+      context: ../../../backend/services/noc-agent
+      dockerfile: Dockerfile
+    image: cbweb3/noc-agent:local
+    container_name: noc-agent-spoke-a
+    restart: unless-stopped
+    volumes:
+      - ./agent-configs/spoke-a/agent.yaml:/etc/noc-agent/agent.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - noc-backend
+    networks:
+      - noc-net
+      - spoke_a_besu_network
+      - cacti_default
+
+  noc-agent-spoke-b:
+    image: cbweb3/noc-agent:local
+    container_name: noc-agent-spoke-b
+    restart: unless-stopped
+    volumes:
+      - ./agent-configs/spoke-b/agent.yaml:/etc/noc-agent/agent.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - noc-agent-spoke-a   # ensures image is built before spoke-b starts
+      - noc-backend
+    networks:
+      - noc-net
+      - spoke_b_besu_network
+      - cacti_default
+
 volumes:
   noc-db-data:
 
 networks:
   noc-net:
     driver: bridge
+  spoke_a_besu_network:
+    external: true
+  spoke_b_besu_network:
+    external: true
+  cacti_default:
+    external: true

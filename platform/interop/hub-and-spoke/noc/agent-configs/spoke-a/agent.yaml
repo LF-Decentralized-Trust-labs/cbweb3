@@ -1,28 +1,23 @@
 # NOC Agent Configuration — Spoke A
-# This file is mounted into the noc-agent container at /etc/noc-agent/agent.yaml
+# spoke_id and api_key must be filled after provisioning via the admin API.
 
-spoke_id: "spoke-a"
+spoke_id: "447192c8-a6cc-420d-a01b-4147f4b79103"
 noc_backend_url: "http://noc-backend:8090"
-api_key: "REPLACE_WITH_PROVISIONED_KEY"
+api_key: "noc-agent-spoke-a-key-local"
 push_interval_seconds: 15
 
 components:
-  - name: "besu-node"
+  - name: "besu-central-bank-a"
     type: "BESU"
-    endpoint: "http://besu-spoke-a:8545"
-    container_name: "besu-spoke-a"
+    endpoint: "http://cbweb3-spoke-a-besu.central-bank-a:8545"
+    container_name: "cbweb3-spoke-a-besu.central-bank-a"
 
   - name: "cacti-relay"
     type: "CACTI_RELAY"
-    endpoint: "http://cacti-spoke-a:4000"
-    container_name: "cacti-spoke-a"
+    endpoint: "http://cbweb3-cacti-relay:4000"
+    container_name: "cbweb3-cacti-relay"
 
-  - name: "paladin"
+  - name: "paladin-cb"
     type: "PALADIN"
-    endpoint: "http://paladin-spoke-a:8548"
-    container_name: "paladin-spoke-a"
-
-  - name: "payment-orchestrator"
-    type: "PAYMENT_ORCHESTRATOR"
-    endpoint: ""
-    container_name: "payment-orchestrator-spoke-a"
+    endpoint: "http://paladin-spoke-a-cb:8548"
+    container_name: "paladin-spoke-a-cb"
