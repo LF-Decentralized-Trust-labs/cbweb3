@@ -215,3 +215,20 @@ func extractRealmRoles(claims jwt.MapClaims) []string {
 	}
 	return roles
 }
+
+// noOpClient is a no-op Keycloak client for local development (NOC_SKIP_AUTH=true).
+// It accepts any token string and returns a super-admin claim set.
+type noOpClient struct{}
+
+// NewNoOp returns a Client that always approves any token with all NOC roles.
+// ONLY for local development — never use in production.
+func NewNoOp() Client {
+	return &noOpClient{}
+}
+
+func (n *noOpClient) ValidateToken(_ context.Context, _ string) (TokenClaims, error) {
+	return TokenClaims{
+		Subject: "dev-user",
+		Roles:   []string{"noc-admin", "noc-operator", "noc-viewer"},
+	}, nil
+}

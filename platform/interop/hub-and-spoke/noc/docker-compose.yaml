@@ -19,6 +19,7 @@ services:
       KEYCLOAK_CLIENT_SECRET: "${KEYCLOAK_CLIENT_SECRET:-}"
       AGENT_GRACE_MULTIPLIER: "${AGENT_GRACE_MULTIPLIER:-3}"
       NOC_FRONTEND_ORIGIN: "${NOC_FRONTEND_ORIGIN:-http://localhost:5173}"
+      NOC_SKIP_AUTH: "${NOC_SKIP_AUTH:-false}"
     depends_on:
       noc-db:
         condition: service_healthy

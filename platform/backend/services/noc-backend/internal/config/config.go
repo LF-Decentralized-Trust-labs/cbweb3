@@ -18,6 +18,9 @@ type Config struct {
 	JWKSCacheTTL         time.Duration
 	AgentGraceMultiplier int
 	FrontendOrigin       string
+	// SkipAuth disables Keycloak JWT validation for local development.
+	// Set NOC_SKIP_AUTH=true — NEVER use in production.
+	SkipAuth bool
 }
 
 // Load reads configuration from environment variables.
@@ -31,6 +34,7 @@ func Load() (*Config, error) {
 		KeycloakClientSecret: getEnv("KEYCLOAK_CLIENT_SECRET", ""),
 		JWKSCacheTTL:         5 * time.Minute,
 		FrontendOrigin:       getEnv("NOC_FRONTEND_ORIGIN", "http://localhost:5173"),
+		SkipAuth:             getEnv("NOC_SKIP_AUTH", "") == "true",
 	}
 
 	if cfg.DatabaseURL == "" {

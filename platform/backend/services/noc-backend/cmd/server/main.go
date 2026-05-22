@@ -36,13 +36,19 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 
-	kc, err := keycloak.New(keycloak.Config{
-		BaseURL:      cfg.KeycloakURL,
-		Realm:        cfg.KeycloakRealm,
-		JWKSCacheTTL: cfg.JWKSCacheTTL,
-	})
-	if err != nil {
-		log.Fatalf("keycloak: %v", err)
+	var kc keycloak.Client
+	if cfg.SkipAuth {
+		log.Println("WARNING: NOC_SKIP_AUTH=true — Keycloak auth is DISABLED. Do not use in production.")
+		kc = keycloak.NewNoOp()
+	} else {
+		kc, err = keycloak.New(keycloak.Config{
+			BaseURL:      cfg.KeycloakURL,
+			Realm:        cfg.KeycloakRealm,
+			JWKSCacheTTL: cfg.JWKSCacheTTL,
+		})
+		if err != nil {
+			log.Fatalf("keycloak: %v", err)
+		}
 	}
 
 	app := fiber.New(fiber.Config{
