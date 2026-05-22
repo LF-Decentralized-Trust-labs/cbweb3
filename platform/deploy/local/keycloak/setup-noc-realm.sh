@@ -95,8 +95,8 @@ else
     -s publicClient=true \
     -s directAccessGrantsEnabled=true \
     -s standardFlowEnabled=false \
-    -s "redirectUris=[\"http://localhost:5173/*\",\"http://localhost:5174/*\"]" \
-    -s "webOrigins=[\"http://localhost:5173\",\"http://localhost:5174\",\"+\"]"
+    -s "redirectUris=[\"http://localhost:5173/*\",\"http://localhost:5174/*\",\"http://localhost:5175/*\",\"http://localhost:5176/*\",\"http://localhost:5177/*\",\"http://localhost:5178/*\",\"http://localhost:5180/*\"]" \
+    -s "webOrigins=[\"http://localhost:5173\",\"http://localhost:5174\",\"http://localhost:5175\",\"http://localhost:5176\",\"http://localhost:5177\",\"http://localhost:5178\",\"http://localhost:5180\"]"
   echo -e "${GREEN}  Client '${NOC_CLIENT_ID}' created (public, ROPC enabled).${NC}"
 fi
 
