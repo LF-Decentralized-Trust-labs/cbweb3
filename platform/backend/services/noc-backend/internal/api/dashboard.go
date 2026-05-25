@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/repository"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/noc-backend/internal/service"
 )
@@ -41,6 +42,9 @@ func (h *DashboardHandler) Register(g fiber.Router) {
 	g.Get("/components/:id/health", h.componentHealth)
 	g.Get("/components/:id/logs", h.componentLogs)
 	g.Get("/alerts", h.listAlerts)
+	g.Get("/alerts/:id", h.getAlert)
+	g.Post("/alerts/:id/acknowledge", h.acknowledgeAlert)
+	g.Post("/alerts/:id/dismiss", h.dismissAlert)
 }
 
 func (h *DashboardHandler) listSpokes(c *fiber.Ctx) error {
@@ -122,4 +126,31 @@ func (h *DashboardHandler) listAlerts(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"data": alerts})
+}
+
+func (h *DashboardHandler) getAlert(c *fiber.Ctx) error {
+	detail, err := h.alerts.GetAlertDetail(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"data": detail})
+}
+
+func (h *DashboardHandler) acknowledgeAlert(c *fiber.Ctx) error {
+	claims, _ := middleware.GetClaims(c)
+	username := claims.Subject
+	if username == "" {
+		username = "unknown"
+	}
+	if err := h.alerts.AcknowledgeAlert(c.Params("id"), username); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+func (h *DashboardHandler) dismissAlert(c *fiber.Ctx) error {
+	if err := h.alerts.DismissAlert(c.Params("id")); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"ok": true})
 }

@@ -14,6 +14,19 @@ export type NocAlert = {
   acknowledged_by?: string;
 };
 
+export type NocAlertDetail = NocAlert & {
+  component: {
+    id: string;
+    name: string;
+    type: string;
+    endpoint: string;
+    health_status: string;
+    spoke_id: string;
+    last_checked_at?: string;
+    last_block_number?: number;
+  };
+};
+
 /** Legacy alert shape retained for mock-backed stores */
 export type LegacyNocAlert = {
   id: string;

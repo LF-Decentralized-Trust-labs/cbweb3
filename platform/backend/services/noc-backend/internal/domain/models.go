@@ -82,6 +82,12 @@ type NocAlert struct {
 	AcknowledgedBy  *string    `gorm:"type:text"                                          json:"acknowledged_by,omitempty"`
 }
 
+// NocAlertDetail embeds an alert with its associated component for detail views.
+type NocAlertDetail struct {
+	NocAlert
+	Component NocComponent `json:"component"`
+}
+
 // NocIncident groups related alerts by root cause.
 type NocIncident struct {
 	ID           uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`

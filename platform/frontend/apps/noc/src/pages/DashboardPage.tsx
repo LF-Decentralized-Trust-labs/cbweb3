@@ -1,10 +1,16 @@
 import {
   Badge,
+  Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   CardDescription,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Table,
   TableBody,
   TableCell,
@@ -12,7 +18,9 @@ import {
   TableHeader,
   TableRow,
 } from "@cbweb3/ui";
-import { useEffect } from "react";
+import { XCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AlertDetailModal } from "../components/alerts/AlertDetailModal";
 import { useAlertStore, useInfrastructureStore, useSpokeStore } from "../stores";
 
 const severityVariant: Record<string, "default" | "secondary" | "warning" | "destructive"> = {
@@ -30,9 +38,10 @@ const healthVariant: Record<string, "default" | "secondary" | "warning" | "destr
 };
 
 export function DashboardPage() {
-  const { spokes, selectedSpokeId, fetchSpokes } = useSpokeStore();
+  const { spokes, selectedSpokeId, fetchSpokes, selectSpoke } = useSpokeStore();
   const { components, fetchComponents } = useInfrastructureStore();
-  const { alerts, fetchAlerts } = useAlertStore();
+  const { alerts, fetchAlerts, dismissAlert, clearSelectedAlert } = useAlertStore();
+  const [openAlertId, setOpenAlertId] = useState<string | null>(null);
 
   useEffect(() => {
     void fetchSpokes();
@@ -50,15 +59,35 @@ export function DashboardPage() {
   const critical = alerts.filter((a) => a.severity === "CRITICAL" || a.severity === "HIGH").length;
   const degraded = components.filter((c) => c.health_status !== "HEALTHY").length;
   const offline = components.filter((c) => c.health_status === "OFFLINE").length;
-  const selectedSpoke = spokes.find((s) => s.id === selectedSpokeId);
+
+  function handleSelectSpoke(value: string) {
+    selectSpoke(value === "all" ? null : value);
+  }
+
+  function handleCloseModal() {
+    setOpenAlertId(null);
+    clearSelectedAlert();
+  }
 
   return (
     <div className="space-y-4">
-      {selectedSpoke && (
-        <p className="text-sm text-muted-foreground">
-          Viewing: <span className="font-medium text-foreground">{selectedSpoke.name}</span> ({selectedSpoke.currency_code})
-        </p>
-      )}
+      {/* Spoke selector */}
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-muted-foreground shrink-0">Viewing spoke:</span>
+        <Select value={selectedSpokeId ?? "all"} onValueChange={handleSelectSpoke}>
+          <SelectTrigger className="w-56">
+            <SelectValue placeholder="All Spokes" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Spokes</SelectItem>
+            {spokes.filter((s) => s.active).map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name} ({s.currency_code})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
@@ -130,12 +159,34 @@ export function DashboardPage() {
               <p className="py-4 text-center text-sm text-muted-foreground">No active alerts</p>
             )}
             {alerts.slice(0, 8).map((alert) => (
-              <div key={alert.id} className="rounded-md border border-border p-2 text-sm">
+              <div
+                key={alert.id}
+                className="rounded-md border border-border p-2 text-sm cursor-pointer hover:bg-accent transition-colors"
+                onClick={() => setOpenAlertId(alert.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === "Enter" && setOpenAlertId(alert.id)}
+              >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium truncate">{alert.title}</span>
+                  <span className="font-medium truncate flex-1">{alert.title}</span>
                   <Badge variant={severityVariant[alert.severity] ?? "secondary"}>
                     {alert.severity}
                   </Badge>
+                  {alert.acknowledged_by && (
+                    <Badge variant="secondary" className="shrink-0">ACK</Badge>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0 shrink-0 text-muted-foreground hover:text-destructive"
+                    title="Dismiss alert"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void dismissAlert(alert.id);
+                    }}
+                  >
+                    <XCircle className="h-4 w-4" />
+                  </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">{new Date(alert.created_at).toLocaleString()}</p>
               </div>
@@ -143,6 +194,8 @@ export function DashboardPage() {
           </CardContent>
         </Card>
       </section>
+
+      <AlertDetailModal alertId={openAlertId} onClose={handleCloseModal} />
     </div>
   );
 }

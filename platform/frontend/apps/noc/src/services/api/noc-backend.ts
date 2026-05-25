@@ -1,4 +1,4 @@
-import type { NocAlert, NocComponent, NocContainerLog, NocHealthEvent, NocSpoke } from "../../types";
+import type { NocAlert, NocAlertDetail, NocComponent, NocContainerLog, NocHealthEvent, NocSpoke } from "../../types";
 import { httpClient } from "./http-client";
 
 type DataEnvelope<T> = { data: T };
@@ -36,5 +36,18 @@ export const nocBackendApi = {
     const params = spokeId ? `?spoke_id=${spokeId}` : "";
     const res = await httpClient.get<DataEnvelope<NocAlert[]>>(`/alerts${params}`);
     return res.data.data;
+  },
+
+  getAlert: async (id: string): Promise<NocAlertDetail> => {
+    const res = await httpClient.get<DataEnvelope<NocAlertDetail>>(`/alerts/${id}`);
+    return res.data.data;
+  },
+
+  acknowledgeAlert: async (id: string): Promise<void> => {
+    await httpClient.post(`/alerts/${id}/acknowledge`);
+  },
+
+  dismissAlert: async (id: string): Promise<void> => {
+    await httpClient.post(`/alerts/${id}/dismiss`);
   },
 };

@@ -38,3 +38,15 @@ export {
 	SelectScrollDownButton,
 } from "./components/select";
 export { cn } from "./lib/utils";
+export {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogOverlay,
+  DialogPortal,
+  DialogTitle,
+  DialogTrigger,
+} from "./components/dialog";

@@ -103,11 +103,56 @@ func rootCauseSig(componentID, status string) string {
 
 // ActiveAlerts returns currently ACTIVE alerts, optionally filtered by spoke.
 func (s *AlertService) ActiveAlerts(spokeID *string) ([]domain.NocAlert, error) {
-	q := s.db.Model(&domain.NocAlert{}).Where("state = 'ACTIVE'").Order("created_at DESC")
-	// TODO: join on component spoke_id if spokeID filter provided
+	q := s.db.Model(&domain.NocAlert{}).Where("noc_alerts.state = 'ACTIVE'").Order("noc_alerts.created_at DESC")
+	if spokeID != nil && *spokeID != "" {
+		q = q.Joins("JOIN noc_components ON noc_components.id = noc_alerts.component_id").
+			Where("noc_components.spoke_id = ?", *spokeID)
+	}
 	var alerts []domain.NocAlert
 	if err := q.Find(&alerts).Error; err != nil {
 		return nil, err
 	}
 	return alerts, nil
+}
+
+// GetAlertDetail returns a single alert with its associated component.
+func (s *AlertService) GetAlertDetail(id string) (*domain.NocAlertDetail, error) {
+	var alert domain.NocAlert
+	if err := s.db.Where("id = ?", id).First(&alert).Error; err != nil {
+		return nil, err
+	}
+	var comp domain.NocComponent
+	if err := s.db.Where("id = ?", alert.ComponentID).First(&comp).Error; err != nil {
+		return nil, err
+	}
+	return &domain.NocAlertDetail{NocAlert: alert, Component: comp}, nil
+}
+
+// AcknowledgeAlert marks an alert as acknowledged by the given username.
+func (s *AlertService) AcknowledgeAlert(id, username string) error {
+	result := s.db.Model(&domain.NocAlert{}).
+		Where("id = ? AND state = 'ACTIVE'", id).
+		Update("acknowledged_by", username)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("alert not found or already resolved")
+	}
+	return nil
+}
+
+// DismissAlert force-resolves an alert regardless of component state.
+func (s *AlertService) DismissAlert(id string) error {
+	now := time.Now()
+	result := s.db.Model(&domain.NocAlert{}).
+		Where("id = ?", id).
+		Updates(map[string]any{"state": "RESOLVED", "resolved_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("alert not found")
+	}
+	return nil
 }
