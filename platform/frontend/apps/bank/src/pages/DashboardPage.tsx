@@ -6,24 +6,24 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartTooltip,
-  ChartTooltipContent,
+  // ChartContainer,
+  // ChartLegend,
+  // ChartLegendContent,
+  // ChartTooltip,
+  // ChartTooltipContent,
 } from "@cbweb3/ui";
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
-  XAxis,
-  YAxis,
-} from "recharts";
+// import {
+//   Bar,
+//   BarChart,
+//   CartesianGrid,
+//   Cell,
+//   Pie,
+//   PieChart,
+//   XAxis,
+//   YAxis,
+// } from "recharts";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import {
   useAmmStore,
@@ -46,14 +46,14 @@ import { PaymentStatus, formatFiatUnits, normalizePaymentStatus } from "../types
 
 export function DashboardPage() {
   const fetchToken = useTokenStore((state) => state.fetch);
-  const tokenBalance = useTokenStore((state) => state.balance);
-  const tokenTransactions = useTokenStore((state) => state.transactions);
+  // const tokenBalance = useTokenStore((state) => state.balance);
+  // const tokenTransactions = useTokenStore((state) => state.transactions);
 
   const fetchHtlc = useHtlcStore((state) => state.fetchAll);
   const htlcLocks = useHtlcStore((state) => state.locks);
 
   const refreshPool = useAmmStore((state) => state.refreshPool);
-  const pool = useAmmStore((state) => state.pool);
+  // const pool = useAmmStore((state) => state.pool);
 
   const fetchPayments = usePaymentStore((state) => state.fetchAll);
   const paymentBalance = usePaymentStore((state) => state.balance);
@@ -70,26 +70,26 @@ export function DashboardPage() {
     void fetchPayments();
   }, [fetchToken, fetchHtlc, refreshPool, fetchPayments]);
 
-  const liquidityData = [
-    { name: "Public", value: Number(tokenBalance?.publicBalance ?? 0) },
-    { name: "Private", value: Number(tokenBalance?.privateBalance ?? 0) },
-  ];
+  // const liquidityData = [
+  //   { name: "Public", value: Number(tokenBalance?.publicBalance ?? 0) },
+  //   { name: "Private", value: Number(tokenBalance?.privateBalance ?? 0) },
+  // ];
 
-  const txData = tokenTransactions.slice(0, 7).map((tx, index) => ({
-    name: `${tx.kind}-${index + 1}`,
-    amount: Number(tx.amount),
-  }));
+  // const txData = tokenTransactions.slice(0, 7).map((tx, index) => ({
+  //   name: `${tx.kind}-${index + 1}`,
+  //   amount: Number(tx.amount),
+  // }));
 
-  const poolData = [
-    { name: pool?.tokenA ?? "Token A", value: Number(pool?.reserveA ?? 0) },
-    { name: pool?.tokenB ?? "Token B", value: Number(pool?.reserveB ?? 0) },
-  ];
+  // const poolData = [
+  //   { name: pool?.tokenA ?? "Token A", value: Number(pool?.reserveA ?? 0) },
+  //   { name: pool?.tokenB ?? "Token B", value: Number(pool?.reserveB ?? 0) },
+  // ];
 
-  const chartConfig = {
-    value: { label: "Amount", color: "hsl(var(--primary))" },
-    Public: { label: "Public", color: "hsl(var(--primary))" },
-    Private: { label: "Private", color: "hsl(var(--chart-2))" },
-  };
+  // const chartConfig = {
+  //   value: { label: "Amount", color: "hsl(var(--primary))" },
+  //   Public: { label: "Public", color: "hsl(var(--primary))" },
+  //   Private: { label: "Private", color: "hsl(var(--chart-2))" },
+  // };
 
   const lockedCount = htlcLocks.filter(
     (lock) => lock.state === "HTLC_STATE_LOCKED",
@@ -221,7 +221,7 @@ export function DashboardPage() {
       </Card>
       </section> */}
 
-      <section className="grid gap-4 lg:grid-cols-3">
+      {/* <section className="grid gap-4 lg:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Liquidity Mix</CardTitle>
@@ -297,7 +297,7 @@ export function DashboardPage() {
             </ChartContainer>
           </CardContent>
         </Card>
-      </section>
+      </section> */}
 
       {/* <Card className="md:col-span-2">
         <CardHeader>
