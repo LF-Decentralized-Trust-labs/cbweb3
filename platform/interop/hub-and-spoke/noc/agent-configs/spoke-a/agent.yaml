@@ -2,7 +2,7 @@
 # Monitors: Central Bank A, Bank A, Bank C
 # spoke_id and api_key are provisioned values for local dev.
 
-spoke_id: "447192c8-a6cc-420d-a01b-4147f4b79103"
+spoke_id: "4bdea728-44b7-4434-a8df-329c8ebf7af7"
 noc_backend_url: "http://noc-backend:8090"
 api_key: "noc-agent-spoke-a-key-local"
 push_interval_seconds: 15
