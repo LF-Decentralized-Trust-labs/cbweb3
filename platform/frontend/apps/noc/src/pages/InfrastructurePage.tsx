@@ -33,13 +33,21 @@ const healthVariant: Record<string, "default" | "secondary" | "warning" | "destr
 
 export function InfrastructurePage() {
   const { spokes, selectedSpokeId, fetchSpokes, selectSpoke } = useSpokeStore();
-  const { components, status, fetchComponents } = useInfrastructureStore();
+  const { components, status, fetchComponents, clearComponents } = useInfrastructureStore();
   const { fallbackPollingSeconds } = useUiStore();
   const navigate = useNavigate();
 
   useEffect(() => {
     void fetchSpokes();
   }, [fetchSpokes]);
+
+  // Immediately re-fetch (and clear stale data) when the selected spoke changes
+  useEffect(() => {
+    if (selectedSpokeId) {
+      clearComponents();
+      void fetchComponents(selectedSpokeId);
+    }
+  }, [selectedSpokeId, fetchComponents, clearComponents]);
 
   usePolling(() => {
     if (selectedSpokeId) {

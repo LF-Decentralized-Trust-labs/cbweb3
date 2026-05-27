@@ -49,6 +49,16 @@ export function DashboardPage() {
     void fetchSpokes();
   }, [fetchSpokes]);
 
+  // Immediately re-fetch when the selected spoke changes
+  useEffect(() => {
+    if (selectedSpokeId) {
+      void fetchComponents(selectedSpokeId);
+      void fetchAlerts(selectedSpokeId);
+    } else {
+      void fetchAlerts();
+    }
+  }, [selectedSpokeId, fetchComponents, fetchAlerts]);
+
   usePolling(() => {
     if (selectedSpokeId) {
       void fetchComponents(selectedSpokeId);

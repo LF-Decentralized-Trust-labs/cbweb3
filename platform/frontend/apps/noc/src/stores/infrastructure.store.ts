@@ -7,12 +7,14 @@ type ComponentState = {
   status: AsyncStatus;
   error: string | null;
   fetchComponents: (spokeId: string) => Promise<void>;
+  clearComponents: () => void;
 };
 
 export const useInfrastructureStore = create<ComponentState>((set) => ({
   components: [],
   status: "idle",
   error: null,
+  clearComponents: () => set({ components: [] }),
   fetchComponents: async (spokeId: string) => {
     set({ status: "loading", error: null });
     try {
