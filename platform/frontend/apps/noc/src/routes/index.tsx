@@ -6,7 +6,7 @@ import { AuditPage } from "../pages/AuditPage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { InfrastructurePage } from "../pages/InfrastructurePage";
 import { LoginPage } from "../pages/LoginPage";
-import { PoolStabilityPage } from "../pages/PoolStabilityPage";
+import { LogViewerPage } from "../pages/LogViewerPage";
 import { RelayStatusPage } from "../pages/RelayStatusPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { TopologyPage } from "../pages/TopologyPage";
@@ -25,8 +25,8 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, element: <DashboardPage /> },
           { path: "infrastructure", element: <InfrastructurePage /> },
+          { path: "logs/:componentId", element: <LogViewerPage /> },
           { path: "relays", element: <RelayStatusPage /> },
-          { path: "pool-stability", element: <PoolStabilityPage /> },
           { path: "topology", element: <TopologyPage /> },
           { path: "audit", element: <AuditPage /> },
           { path: "settings", element: <SettingsPage /> },
@@ -39,3 +39,4 @@ export const routes: RouteObject[] = [
     element: <Navigate to="/" replace />,
   },
 ];
+

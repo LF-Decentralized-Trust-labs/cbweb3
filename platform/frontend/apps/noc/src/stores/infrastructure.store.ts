@@ -1,25 +1,28 @@
 import { create } from "zustand";
-import { healthApi } from "../services/api";
-import type { AsyncStatus, InfrastructureNode } from "../types";
+import { nocBackendApi } from "../services/api";
+import type { AsyncStatus, NocComponent } from "../types";
 
-type InfrastructureState = {
-  nodes: InfrastructureNode[];
+type ComponentState = {
+  components: NocComponent[];
   status: AsyncStatus;
   error: string | null;
-  fetch: () => Promise<void>;
+  fetchComponents: (spokeId: string) => Promise<void>;
+  clearComponents: () => void;
 };
 
-export const useInfrastructureStore = create<InfrastructureState>((set) => ({
-  nodes: [],
+export const useInfrastructureStore = create<ComponentState>((set) => ({
+  components: [],
   status: "idle",
   error: null,
-  fetch: async () => {
+  clearComponents: () => set({ components: [] }),
+  fetchComponents: async (spokeId: string) => {
     set({ status: "loading", error: null });
     try {
-      const nodes = await healthApi.getInfrastructure();
-      set({ nodes, status: "idle" });
-    } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to load infrastructure" });
+      const components = await nocBackendApi.getComponents(spokeId);
+      set({ components, status: "idle" });
+    } catch (err) {
+      set({ status: "error", error: err instanceof Error ? err.message : "Failed to load components" });
     }
   },
 }));
+

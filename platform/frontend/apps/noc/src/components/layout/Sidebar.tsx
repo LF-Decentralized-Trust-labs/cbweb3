@@ -1,12 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Server, Shuffle, TriangleAlert, Network, ScrollText, Settings } from "lucide-react";
-import { PlatformLogo } from "@cbweb3/ui";
+import { LayoutDashboard, Server, Shuffle, Network, ScrollText, Settings } from "lucide-react";
+// import { PlatformLogo } from "@cbweb3/ui";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/infrastructure", label: "Infrastructure", icon: Server },
   { to: "/relays", label: "Relays", icon: Shuffle },
-  { to: "/pool-stability", label: "Pool Stability", icon: TriangleAlert },
   { to: "/topology", label: "Topology", icon: Network },
   { to: "/audit", label: "Audit", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: Settings },
@@ -16,7 +15,7 @@ export function Sidebar() {
   return (
     <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:border-b-0 md:border-r">
       <div className="mb-3 space-y-1">
-        <PlatformLogo imageClassName="h-7" />
+        {/* <PlatformLogo imageClassName="h-7" /> */}
         <p className="text-xs uppercase tracking-wide text-muted-foreground">Operations</p>
         <p className="text-sm font-semibold">NOC Command Center</p>
       </div>

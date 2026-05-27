@@ -1,0 +1,20 @@
+name: noc-agent
+
+services:
+  noc-agent:
+    container_name: "${NOC_AGENT_CONTAINER_NAME:-cbweb3-noc-agent}"
+    build:
+      context: ../../backend/services/noc-agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      # Agent configuration file — copy noc-agent.yaml.example and fill in your values
+      - ${NOC_AGENT_CONFIG_PATH:-./noc-agent.yaml}:/etc/noc-agent/agent.yaml:ro
+      # Docker socket (read-only) for container log collection
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - cbweb3_network
+
+networks:
+  cbweb3_network:
+    external: true
