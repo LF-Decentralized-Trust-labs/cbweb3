@@ -1,5 +1,4 @@
 import {
-  Badge,
   Button,
   Card,
   CardContent,
@@ -15,21 +14,21 @@ import {
   TableRow,
   toast,
 } from "@cbweb3/ui";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRegistry } from "../hooks";
 
-const statusVariant = {
-  ACTIVE: "default",
-  PENDING: "warning",
-  CREDENTIAL_REQUESTED: "warning",
-  KYC_APPROVED: "default",
-  REVOKED: "destructive",
-  FROZEN: "secondary",
-} as const;
+// const statusVariant = {
+//   ACTIVE: "default",
+//   PENDING: "warning",
+//   CREDENTIAL_REQUESTED: "warning",
+//   KYC_APPROVED: "default",
+//   REVOKED: "destructive",
+//   FROZEN: "secondary",
+// } as const;
 
 export function RegistryPage() {
-  const { participants, pendingKyc, fetch, fetchPendingKyc, approveKyc, kycStatus, error } = useRegistry();
-  const [search, setSearch] = useState("");
+  const {pendingKyc, fetch, fetchPendingKyc, approveKyc, kycStatus, error } = useRegistry();
+  // const [search, setSearch] = useState("");
   // const [entityName, setEntityName] = useState("");
   // const [cnpj, setCnpj] = useState("");
   // const [scopes, setScopes] = useState("DEPOSIT,TRANSFER,SWAP");
@@ -49,13 +48,13 @@ export function RegistryPage() {
     return () => window.clearInterval(interval);
   }, [fetchPendingKyc]);
 
-  const filtered = useMemo(() => {
-    const term = search.toLowerCase().trim();
-    if (!term) return participants;
-    return participants.filter(
-      (participant) => participant.name.toLowerCase().includes(term) || participant.status.toLowerCase().includes(term),
-    );
-  }, [participants, search]);
+  // const filtered = useMemo(() => {
+  //   const term = search.toLowerCase().trim();
+  //   if (!term) return participants;
+  //   return participants.filter(
+  //     (participant) => participant.name.toLowerCase().includes(term) || participant.status.toLowerCase().includes(term),
+  //   );
+  // }, [participants, search]);
 
   // const onIssue = async () => {
   //   if (!entityName || !cnpj || !reason || reason.length < 10) {
@@ -91,7 +90,7 @@ export function RegistryPage() {
 
   return (
     <div className="space-y-4">
-      <Card>
+      {/* <Card>
         <CardHeader>
           <CardTitle>Compliance Registry</CardTitle>
           <CardDescription>Authorize institutions and manage safelist status.</CardDescription>
@@ -123,7 +122,7 @@ export function RegistryPage() {
             </TableBody>
           </Table>
         </CardContent>
-      </Card>
+      </Card> */}
 
       {/* <Card>
         <CardHeader>
