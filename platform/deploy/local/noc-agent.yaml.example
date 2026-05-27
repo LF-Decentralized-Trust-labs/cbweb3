@@ -1,0 +1,35 @@
+# NOC Agent — Configuration File
+# Copy this file to noc-agent.yaml (or any path) and fill in your values.
+# Pass the path via the compose env var: NOC_AGENT_CONFIG_PATH=./noc-agent.yaml
+
+# Unique identifier for this spoke — must match the spoke registered in noc-backend
+spoke_id: spoke-a
+
+# URL of the noc-backend (reachable from this host)
+noc_backend_url: http://cbweb3-noc-backend:8090
+
+# API key for authenticating with noc-backend
+api_key: change_me
+
+# How often (in seconds) the agent pushes health data to the backend (default: 15)
+push_interval_seconds: 15
+
+# List of components to monitor on this spoke
+components:
+  - name: Besu Node A
+    type: BESU
+    endpoint: http://cbweb3-besu-a:8545
+    container_name: cbweb3-besu-a
+
+  - name: Cacti Relay A
+    type: CACTI_RELAY
+    endpoint: http://cbweb3-cacti-relay-a:3000
+    container_name: cbweb3-cacti-relay-a
+
+  - name: Payment Orchestrator A
+    type: PAYMENT_ORCHESTRATOR
+    endpoint: http://cbweb3-payment-orchestrator-a:8080
+    container_name: cbweb3-payment-orchestrator-a
+
+# Component types supported: BESU | CACTI_RELAY | PALADIN | PAYMENT_ORCHESTRATOR
+# container_name: Docker container name used for log collection (must be on the same Docker host)
