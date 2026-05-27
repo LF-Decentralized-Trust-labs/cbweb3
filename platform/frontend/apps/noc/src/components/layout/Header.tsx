@@ -1,14 +1,13 @@
 import { Badge, Button, PlatformLogo } from "@cbweb3/ui";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
-import { useAlertStore, useWebsocketStore } from "../../stores";
+import { useAlertStore, useUiStore } from "../../stores";
 
 export function Header() {
   const navigate = useNavigate();
   const { user, logout, status } = useAuth();
-  const isConnected = useWebsocketStore((state) => state.isConnected);
-  const stale = useWebsocketStore((state) => state.stale);
   const criticalCount = useAlertStore((state) => state.alerts.filter((a) => a.severity === "CRITICAL").length);
+  const { fallbackPollingSeconds } = useUiStore();
 
   const onLogout = async () => {
     await logout();
@@ -27,12 +26,8 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Badge variant={isConnected ? "success" : "destructive"} className="hidden sm:inline-flex">
-            {isConnected ? "WS" : "WS OFF"}
-          </Badge>
-          <Badge variant={stale ? "warning" : "secondary"} className="hidden sm:inline-flex">
-            {stale ? "STALE" : "LIVE"}
-          </Badge>
+          <Badge variant="secondary" className="hidden sm:inline-flex">POLLING {fallbackPollingSeconds}s</Badge>
+          <Badge variant="default" className="hidden sm:inline-flex">LIVE</Badge>
           {criticalCount > 0 && (
             <Badge variant="destructive">{criticalCount} CRITICAL</Badge>
           )}

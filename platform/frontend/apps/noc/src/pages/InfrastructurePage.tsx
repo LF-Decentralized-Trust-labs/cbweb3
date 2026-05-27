@@ -21,7 +21,8 @@ import {
 import { ScrollText } from "lucide-react";
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useInfrastructureStore, useSpokeStore } from "../stores";
+import { usePolling } from "../hooks";
+import { useInfrastructureStore, useSpokeStore, useUiStore } from "../stores";
 
 const healthVariant: Record<string, "default" | "secondary" | "warning" | "destructive"> = {
   HEALTHY: "default",
@@ -33,17 +34,18 @@ const healthVariant: Record<string, "default" | "secondary" | "warning" | "destr
 export function InfrastructurePage() {
   const { spokes, selectedSpokeId, fetchSpokes, selectSpoke } = useSpokeStore();
   const { components, status, fetchComponents } = useInfrastructureStore();
+  const { fallbackPollingSeconds } = useUiStore();
   const navigate = useNavigate();
 
   useEffect(() => {
     void fetchSpokes();
   }, [fetchSpokes]);
 
-  useEffect(() => {
+  usePolling(() => {
     if (selectedSpokeId) {
       void fetchComponents(selectedSpokeId);
     }
-  }, [selectedSpokeId, fetchComponents]);
+  }, fallbackPollingSeconds);
 
   return (
     <Card>
@@ -75,7 +77,7 @@ export function InfrastructurePage() {
         </div>
       </CardHeader>
       <CardContent>
-        {components.length === 0 && status !== "loading" ? (
+        {components.filter((c) => c.type !== "CACTI_RELAY").length === 0 && status !== "loading" ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             {selectedSpokeId ? "No components found for this spoke." : "Select a spoke to view components."}
           </p>
@@ -93,7 +95,7 @@ export function InfrastructurePage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {components.map((c) => (
+              {components.filter((c) => c.type !== "CACTI_RELAY").map((c) => (
                 <TableRow key={c.id}>
                   <TableCell className="font-medium">{c.name}</TableCell>
                   <TableCell>{c.type}</TableCell>

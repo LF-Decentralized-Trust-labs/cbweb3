@@ -12,13 +12,18 @@ import {
   toast,
 } from "@cbweb3/ui";
 import { useState } from "react";
+import { useUiStore } from "../stores";
 
 export function SettingsPage() {
+  const { muteAlerts, fallbackPollingSeconds, setMuteAlerts, setFallbackPollingSeconds } = useUiStore();
   const [email, setEmail] = useState("noc-ops@cbweb3.local");
-  const [criticalOnly, setCriticalOnly] = useState(true);
-  const [refreshSeconds, setRefreshSeconds] = useState("5");
+  const [localInterval, setLocalInterval] = useState(String(fallbackPollingSeconds));
 
   const handleSave = () => {
+    const parsed = parseInt(localInterval, 10);
+    if (!isNaN(parsed) && parsed >= 5) {
+      setFallbackPollingSeconds(parsed);
+    }
     toast.success("NOC settings updated");
   };
 
@@ -38,17 +43,18 @@ export function SettingsPage() {
             <p className="text-sm font-medium">Critical Alerts Only</p>
             <p className="text-xs text-muted-foreground">Send notifications only for CRITICAL incidents.</p>
           </div>
-          <Checkbox checked={criticalOnly} onCheckedChange={(value) => setCriticalOnly(value === true)} />
+          <Checkbox checked={muteAlerts} onCheckedChange={(value) => setMuteAlerts(value === true)} />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="poll-interval">Polling Interval (seconds)</Label>
+          <Label htmlFor="poll-interval">Polling Interval (seconds, min 5)</Label>
           <Input
             id="poll-interval"
             type="number"
-            min={1}
-            value={refreshSeconds}
-            onChange={(event) => setRefreshSeconds(event.target.value)}
+            min={5}
+            value={localInterval}
+            onChange={(event) => setLocalInterval(event.target.value)}
           />
+          <p className="text-xs text-muted-foreground">Current active interval: {fallbackPollingSeconds}s</p>
         </div>
       </CardContent>
       <CardFooter>

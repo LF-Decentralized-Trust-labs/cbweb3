@@ -21,7 +21,8 @@ import {
 import { XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AlertDetailModal } from "../components/alerts/AlertDetailModal";
-import { useAlertStore, useInfrastructureStore, useSpokeStore } from "../stores";
+import { usePolling } from "../hooks";
+import { useAlertStore, useInfrastructureStore, useSpokeStore, useUiStore } from "../stores";
 
 const severityVariant: Record<string, "default" | "secondary" | "warning" | "destructive"> = {
   INFO: "secondary",
@@ -41,24 +42,27 @@ export function DashboardPage() {
   const { spokes, selectedSpokeId, fetchSpokes, selectSpoke } = useSpokeStore();
   const { components, fetchComponents } = useInfrastructureStore();
   const { alerts, fetchAlerts, dismissAlert, clearSelectedAlert } = useAlertStore();
+  const { fallbackPollingSeconds } = useUiStore();
   const [openAlertId, setOpenAlertId] = useState<string | null>(null);
 
   useEffect(() => {
     void fetchSpokes();
   }, [fetchSpokes]);
 
-  useEffect(() => {
+  usePolling(() => {
     if (selectedSpokeId) {
       void fetchComponents(selectedSpokeId);
       void fetchAlerts(selectedSpokeId);
     } else {
       void fetchAlerts();
     }
-  }, [selectedSpokeId, fetchComponents, fetchAlerts]);
+  }, fallbackPollingSeconds);
 
-  const critical = alerts.filter((a) => a.severity === "CRITICAL" || a.severity === "HIGH").length;
+  const critical = alerts.filter((a) => a.state === "ACTIVE" && (a.severity === "CRITICAL" || a.severity === "HIGH")).length;
   const degraded = components.filter((c) => c.health_status !== "HEALTHY").length;
   const offline = components.filter((c) => c.health_status === "OFFLINE").length;
+
+  const activeAlerts = alerts.filter((a) => a.state === "ACTIVE");
 
   function handleSelectSpoke(value: string) {
     selectSpoke(value === "all" ? null : value);
@@ -79,10 +83,9 @@ export function DashboardPage() {
             <SelectValue placeholder="All Spokes" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Spokes</SelectItem>
             {spokes.filter((s) => s.active).map((s) => (
               <SelectItem key={s.id} value={s.id}>
-                {s.name} ({s.currency_code})
+                {s.name}
               </SelectItem>
             ))}
           </SelectContent>
@@ -155,10 +158,10 @@ export function DashboardPage() {
             <CardTitle>Active Alert Feed</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {alerts.length === 0 && (
+            {activeAlerts.length === 0 && (
               <p className="py-4 text-center text-sm text-muted-foreground">No active alerts</p>
             )}
-            {alerts.slice(0, 8).map((alert) => (
+            {activeAlerts.slice(0, 8).map((alert) => (
               <div
                 key={alert.id}
                 className="rounded-md border border-border p-2 text-sm cursor-pointer hover:bg-accent transition-colors"
