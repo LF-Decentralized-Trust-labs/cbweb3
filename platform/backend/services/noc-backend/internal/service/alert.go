@@ -103,7 +103,16 @@ func rootCauseSig(componentID, status string) string {
 
 // ActiveAlerts returns currently ACTIVE alerts, optionally filtered by spoke.
 func (s *AlertService) ActiveAlerts(spokeID *string) ([]domain.NocAlert, error) {
-	q := s.db.Model(&domain.NocAlert{}).Where("noc_alerts.state = 'ACTIVE'").Order("noc_alerts.created_at DESC")
+	return s.alertsByState("ACTIVE", spokeID)
+}
+
+// ResolvedAlerts returns RESOLVED alerts, optionally filtered by spoke.
+func (s *AlertService) ResolvedAlerts(spokeID *string) ([]domain.NocAlert, error) {
+	return s.alertsByState("RESOLVED", spokeID)
+}
+
+func (s *AlertService) alertsByState(state string, spokeID *string) ([]domain.NocAlert, error) {
+	q := s.db.Model(&domain.NocAlert{}).Where("noc_alerts.state = ?", state).Order("noc_alerts.created_at DESC")
 	if spokeID != nil && *spokeID != "" {
 		q = q.Joins("JOIN noc_components ON noc_components.id = noc_alerts.component_id").
 			Where("noc_components.spoke_id = ?", *spokeID)
@@ -130,29 +139,41 @@ func (s *AlertService) GetAlertDetail(id string) (*domain.NocAlertDetail, error)
 
 // AcknowledgeAlert marks an alert as acknowledged by the given username.
 func (s *AlertService) AcknowledgeAlert(id, username string) error {
-	result := s.db.Model(&domain.NocAlert{}).
-		Where("id = ? AND state = 'ACTIVE'", id).
-		Update("acknowledged_by", username)
+	var alert domain.NocAlert
+	if err := s.db.Where("id = ? AND state = 'ACTIVE'", id).First(&alert).Error; err != nil {
+		return fmt.Errorf("alert not found or already resolved")
+	}
+	result := s.db.Model(&alert).Update("acknowledged_by", username)
 	if result.Error != nil {
 		return result.Error
 	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("alert not found or already resolved")
-	}
+	s.db.Create(&domain.NocAuditEntry{
+		Actor:      username,
+		Action:     "ACKNOWLEDGE_ALERT",
+		TargetID:   id,
+		TargetType: "ALERT",
+		Detail:     alert.Title,
+	})
 	return nil
 }
 
 // DismissAlert force-resolves an alert regardless of component state.
-func (s *AlertService) DismissAlert(id string) error {
+func (s *AlertService) DismissAlert(id, actor string) error {
+	var alert domain.NocAlert
+	if err := s.db.Where("id = ?", id).First(&alert).Error; err != nil {
+		return fmt.Errorf("alert not found")
+	}
 	now := time.Now()
-	result := s.db.Model(&domain.NocAlert{}).
-		Where("id = ?", id).
-		Updates(map[string]any{"state": "RESOLVED", "resolved_at": now})
+	result := s.db.Model(&alert).Updates(map[string]any{"state": "RESOLVED", "resolved_at": now})
 	if result.Error != nil {
 		return result.Error
 	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("alert not found")
-	}
+	s.db.Create(&domain.NocAuditEntry{
+		Actor:      actor,
+		Action:     "DISMISS_ALERT",
+		TargetID:   id,
+		TargetType: "ALERT",
+		Detail:     alert.Title,
+	})
 	return nil
 }

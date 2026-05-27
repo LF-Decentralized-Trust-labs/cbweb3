@@ -28,6 +28,7 @@ func Connect(dsn string) (*gorm.DB, error) {
 		&domain.NocTransactionEvent{},
 		&domain.NocContainerLog{},
 		&domain.NocLogSnapshot{},
+		&domain.NocAuditEntry{},
 	); err != nil {
 		return nil, fmt.Errorf("repository: auto-migrate: %w", err)
 	}

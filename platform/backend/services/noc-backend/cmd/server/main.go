@@ -76,6 +76,7 @@ func main() {
 
 	// Services
 	alertSvc := service.NewAlertService(db)
+	relayMetricsSvc := service.NewRelayMetricsService(db)
 	watchdog := service.NewWatchdogService(agentsRepo, componentsRepo, db, cfg.AgentGraceMultiplier)
 	retention := service.NewRetentionWorker(db)
 
@@ -89,7 +90,7 @@ func main() {
 	spokesHandler := api.NewSpokesHandler(spokesRepo)
 	keysHandler := api.NewKeysHandler(agentsRepo, spokesRepo)
 	pushHandler := api.NewPushHandler(db, agentsRepo, componentsRepo, alertSvc)
-	dashHandler := api.NewDashboardHandler(spokesRepo, agentsRepo, componentsRepo, alertSvc)
+	dashHandler := api.NewDashboardHandler(db, spokesRepo, agentsRepo, componentsRepo, alertSvc, relayMetricsSvc)
 
 	// Routes — agent push (API key auth, no Keycloak)
 	pushHandler.Register(app)

@@ -138,6 +138,28 @@ type NocContainerLog struct {
 	ReceivedAt  time.Time `gorm:"not null;autoCreateTime"                         json:"received_at"`
 }
 
+// NocAuditEntry records an operator action for immutable audit trail.
+type NocAuditEntry struct {
+	ID         uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	Actor      string    `gorm:"type:text;not null"                            json:"actor"`       // username from JWT
+	Action     string    `gorm:"type:text;not null"                            json:"action"`      // ACKNOWLEDGE_ALERT | DISMISS_ALERT
+	TargetID   string    `gorm:"type:text;not null"                            json:"target_id"`   // alert ID
+	TargetType string    `gorm:"type:text;not null;default:'ALERT'"            json:"target_type"`
+	Detail     string    `gorm:"type:text"                                     json:"detail"`      // alert title
+	CreatedAt  time.Time `gorm:"not null;autoCreateTime;index"                 json:"created_at"`
+}
+
+// NocRelayMetric is a computed (non-persisted) relay health summary derived from transaction events.
+type NocRelayMetric struct {
+	ID                  string    `json:"id"`                    // spoke_id
+	Route               string    `json:"route"`                 // "{SpokeName} ↔ Hub"
+	LatencyP50Ms        *float64  `json:"latency_p50_ms"`        // nil when no data
+	LatencyP95Ms        *float64  `json:"latency_p95_ms"`        // nil when no data
+	ProofSuccessRatePct float64   `json:"proof_success_rate_pct"` // 0–100
+	Status              string    `json:"status"`                // HEALTHY | DEGRADED | DOWN
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
 // NocLogSnapshot holds a frozen snapshot of logs captured at OFFLINE/UNKNOWN transitions.
 type NocLogSnapshot struct {
 	ID            uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
