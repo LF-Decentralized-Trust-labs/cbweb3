@@ -1,12 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Server, Shuffle, TriangleAlert, Network, ScrollText, Settings } from "lucide-react";
+import { LayoutDashboard, Server, Shuffle, Network, ScrollText, Settings } from "lucide-react";
 import { PlatformLogo } from "@cbweb3/ui";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/infrastructure", label: "Infrastructure", icon: Server },
   { to: "/relays", label: "Relays", icon: Shuffle },
-  { to: "/pool-stability", label: "Pool Stability", icon: TriangleAlert },
   { to: "/topology", label: "Topology", icon: Network },
   { to: "/audit", label: "Audit", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: Settings },
