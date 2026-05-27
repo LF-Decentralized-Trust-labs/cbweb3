@@ -1,17 +1,10 @@
 import {
-  Badge,
   Button,
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
 } from "@cbweb3/ui";
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
@@ -27,7 +20,7 @@ import { PaymentStatus, normalizePaymentStatus } from "../types";
 export function DashboardPage() {
   const { fetch: fetchRegistry } = useRegistry();
   const { fetch: fetchAccounts } = useAccounts();
-  const { logs, fetch: fetchAudit } = useAuditLogs();
+  const { fetch: fetchAudit } = useAuditLogs();
   const { fetchState } = useCircuitBreaker();
   const htlcLocks = useHtlcMonitorStore((state) => state.locks);
   const fetchHtlc = useHtlcMonitorStore((state) => state.fetch);
@@ -128,7 +121,7 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        {/* <Card>
           <CardHeader>
             <CardTitle>Recent Governance Events</CardTitle>
           </CardHeader>
@@ -166,7 +159,7 @@ export function DashboardPage() {
               </TableBody>
             </Table>
           </CardContent>
-        </Card>
+        </Card> */}
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">
