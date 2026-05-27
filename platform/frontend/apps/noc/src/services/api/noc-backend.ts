@@ -32,9 +32,12 @@ export const nocBackendApi = {
   },
 
   // ── Alerts ──────────────────────────────────────────────────────────────
-  getAlerts: async (spokeId?: string): Promise<NocAlert[]> => {
-    const params = spokeId ? `?spoke_id=${spokeId}` : "";
-    const res = await httpClient.get<DataEnvelope<NocAlert[]>>(`/alerts${params}`);
+  getAlerts: async (spokeId?: string, state?: string): Promise<NocAlert[]> => {
+    const params = new URLSearchParams();
+    if (spokeId) params.set("spoke_id", spokeId);
+    if (state) params.set("state", state);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const res = await httpClient.get<DataEnvelope<NocAlert[]>>(`/alerts${query}`);
     return res.data.data;
   },
 
