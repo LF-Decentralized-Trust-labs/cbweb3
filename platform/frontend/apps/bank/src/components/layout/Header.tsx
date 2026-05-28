@@ -8,7 +8,7 @@ export function Header() {
   const { profile, logout } = useAuth();
   const connected = useWebsocketStore((state) => state.connected);
   const events = useWebsocketStore((state) => state.events);
-  const institutionName = (import.meta.env.VITE_INSTITUTION_NAME ?? "Bank Portal").trim() || "Bank Portal";
+  const institutionName = (import.meta.env.VITE_INSTITUTION_NAME ?? "Bank").trim() || "Bank";
 
   const onLogout = async () => {
     await logout();

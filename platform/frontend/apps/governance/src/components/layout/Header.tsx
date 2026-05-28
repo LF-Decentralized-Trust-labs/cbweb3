@@ -6,7 +6,7 @@ export function Header() {
   const navigate = useNavigate();
   const { profile, logout } = useAuth();
   const { circuitBreaker } = useCircuitBreaker();
-  const institutionName = (import.meta.env.VITE_INSTITUTION_NAME ?? "Central Bank Portal").trim() || "Central Bank Portal";
+  const institutionName = (import.meta.env.VITE_INSTITUTION_NAME ?? "Central Bank").trim() || "Central Bank";
 
   const isHalted = circuitBreaker?.state === "HALTED";
 
