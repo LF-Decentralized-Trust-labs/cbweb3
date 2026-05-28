@@ -78,3 +78,18 @@ services:
         VITE_INSTITUTION_NAME: ${CENTRAL_BANK_B_INSTITUTION_NAME}
     ports:
       - "${CENTRAL_BANK_B_FRONTEND_PORT}:80"
+
+  dispatcher-frontend:
+    container_name: cbweb3-dispatcher
+    build:
+      context: .
+      dockerfile: apps/dispatcher/Dockerfile
+      args:
+        VITE_BANK_A_PORTAL_URL: http://localhost:${BANK_A_FRONTEND_PORT}
+        VITE_BANK_B_PORTAL_URL: http://localhost:${BANK_B_FRONTEND_PORT}
+        VITE_BANK_C_PORTAL_URL: http://localhost:${BANK_C_FRONTEND_PORT}
+        VITE_BANK_D_PORTAL_URL: http://localhost:${BANK_D_FRONTEND_PORT}
+        VITE_CENTRAL_BANK_A_PORTAL_URL: http://localhost:${CENTRAL_BANK_A_FRONTEND_PORT}
+        VITE_CENTRAL_BANK_B_PORTAL_URL: http://localhost:${CENTRAL_BANK_B_FRONTEND_PORT}
+    ports:
+      - "${DISPATCHER_PORT}:80"

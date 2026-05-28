@@ -9,50 +9,34 @@ import {
   Input,
   Label,
   Separator,
-  toast,
 } from "@cbweb3/ui";
-import { Building2, LockKeyhole, ShieldCheck, Siren } from "lucide-react";
-import { useEffect } from "react";
+import { ArrowRight, Building2, Globe, LockKeyhole, ShieldCheck } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAuthStore } from "../stores";
-import { hasGovernanceAccess } from "../auth/authorization";
+import { resolvePortal } from "../utils/routing";
 
 const schema = z.object({
   clientId: z.string().min(3, "Client ID must be at least 3 characters"),
-  clientSecret: z
-    .string()
-    .min(6, "Client Secret must be at least 6 characters"),
 });
 
-type LoginForm = z.infer<typeof schema>;
+type DispatcherForm = z.infer<typeof schema>;
 
-export function LoginPage() {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const { login, status, error, isAuthenticated, profile } = useAuthStore();
-
-  const form = useForm<LoginForm>({
+export function DispatcherPage() {
+  const form = useForm<DispatcherForm>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      clientId: searchParams.get("username") ?? "",
-      clientSecret: "",
-    },
+    defaultValues: { clientId: "" },
   });
 
-  useEffect(() => {
-    if (isAuthenticated && hasGovernanceAccess(profile)) {
-      toast("Signed in", {
-        description: "Welcome to the Governance Portal.",
+  const onSubmit = form.handleSubmit((values) => {
+    const portal = resolvePortal(values.clientId);
+    if (!portal) {
+      form.setError("clientId", {
+        message: "Institution not identified. Please check your Client ID.",
       });
-      navigate("/", { replace: true });
+      return;
     }
-  }, [isAuthenticated, navigate, profile]);
-
-  const onSubmit = form.handleSubmit(async (values) => {
-    await login(values.clientId, values.clientSecret);
+    window.location.href = `${portal.portalUrl}/login?username=${encodeURIComponent(values.clientId)}`;
   });
 
   return (
@@ -60,42 +44,41 @@ export function LoginPage() {
       <div className="mx-auto grid min-h-screen max-w-6xl gap-8 px-4 py-8 lg:grid-cols-2 lg:items-center">
         <section className="hidden rounded-2xl border border-border/70 bg-card/70 p-8 backdrop-blur lg:block">
           <Badge variant="secondary" className="mb-4 w-fit">
-            LNET · Governance
+            LNET · CBWeb3
           </Badge>
           <h1 className="text-3xl font-semibold tracking-tight">
-            Central Bank Governance Portal
+            Unified Portal Access
           </h1>
           <p className="mt-3 max-w-md text-sm text-muted-foreground">
-            Execute sovereign controls for participant admission, emergency
-            interventions, and policy parameters.
+            Enter your Client ID to be directed to the correct institutional portal
+            for your organization.
           </p>
 
           <div className="mt-8 grid gap-4">
             <div className="flex items-start gap-3 rounded-lg border border-border/80 bg-background/80 p-4">
-              <ShieldCheck className="mt-0.5 h-5 w-5 text-primary" />
+              <Globe className="mt-0.5 h-5 w-5 text-primary" />
               <div>
-                <p className="text-sm font-medium">Highest RBAC tier</p>
+                <p className="text-sm font-medium">Single entry point</p>
                 <p className="text-xs text-muted-foreground">
-                  Access restricted to ROLE_GOVERNANCE operators.
+                  One URL for all institutions — automatically routed to your portal.
                 </p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-lg border border-border/80 bg-background/80 p-4">
-              <Siren className="mt-0.5 h-5 w-5 text-primary" />
+              <ShieldCheck className="mt-0.5 h-5 w-5 text-primary" />
               <div>
-                <p className="text-sm font-medium">Emergency controls</p>
+                <p className="text-sm font-medium">Institution-bound access</p>
                 <p className="text-xs text-muted-foreground">
-                  Circuit breaker and account freeze actions are
-                  confirmation-gated.
+                  Credentials are verified against your institution's auth service.
                 </p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-lg border border-border/80 bg-background/80 p-4">
               <LockKeyhole className="mt-0.5 h-5 w-5 text-primary" />
               <div>
-                <p className="text-sm font-medium">Immutable accountability</p>
+                <p className="text-sm font-medium">Secure by design</p>
                 <p className="text-xs text-muted-foreground">
-                  Every governance action is recorded in auditable logs.
+                  Authentication happens on your institution's dedicated portal.
                 </p>
               </div>
             </div>
@@ -107,9 +90,9 @@ export function LoginPage() {
             <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Building2 className="h-5 w-5" />
             </div>
-            <CardTitle>Sign in to Governance Portal</CardTitle>
+            <CardTitle>Access your portal</CardTitle>
             <CardDescription>
-              Use institutional credentials to access sovereign controls.
+              Enter your Client ID to be redirected to your institution's login page.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -120,6 +103,7 @@ export function LoginPage() {
                   id="clientId"
                   {...form.register("clientId")}
                   autoComplete="username"
+                  placeholder="e.g. bank-a-client"
                 />
                 {form.formState.errors.clientId ? (
                   <p className="text-xs text-destructive">
@@ -128,38 +112,16 @@ export function LoginPage() {
                 ) : null}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="clientSecret">Client Secret</Label>
-                <Input
-                  id="clientSecret"
-                  type="password"
-                  {...form.register("clientSecret")}
-                  autoComplete="current-password"
-                />
-                {form.formState.errors.clientSecret ? (
-                  <p className="text-xs text-destructive">
-                    {form.formState.errors.clientSecret.message}
-                  </p>
-                ) : null}
-              </div>
-
-              {error ? (
-                <p className="text-sm text-destructive">{error}</p>
-              ) : null}
-
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={status === "loading"}
-              >
-                {status === "loading" ? "Signing in..." : "Sign in"}
+              <Button type="submit" className="w-full">
+                Continue
+                <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </form>
 
             <Separator className="my-4" />
 
             <p className="text-center text-xs text-muted-foreground">
-              Privileged environment · Governance-only operations
+              LACNet · CBWeb3 · Cross-border CBDC infrastructure
             </p>
           </CardContent>
         </Card>
