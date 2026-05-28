@@ -454,8 +454,6 @@ After filling all fields:
 
 Click **View** on any row in the Settlement History to open the contract detail page.
 
-> ![HTLC Settlement Detail](./screenshots/bank/13-htlc-detail.png)
-
 #### State Section
 
 | Field | Description |
