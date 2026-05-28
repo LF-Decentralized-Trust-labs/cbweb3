@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "../stores";
 import { toast } from "@cbweb3/ui";
 import { hasBankAccess } from "../auth/authorization";
@@ -18,10 +18,11 @@ type LoginForm = z.infer<typeof schema>;
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login, status, error, isAuthenticated, profile } = useAuthStore();
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
-    defaultValues: { clientId: "", clientSecret: "" },
+    defaultValues: { clientId: searchParams.get("username") ?? "", clientSecret: "" },
   });
 
   useEffect(() => {
