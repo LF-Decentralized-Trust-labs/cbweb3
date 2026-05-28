@@ -38,9 +38,18 @@ NONE → PENDING → CREDENTIAL_REQUESTED → ONBOARDING_APPROVED → ACTIVE
 ### Currency Flow
 
 ```
-Fiat Deposit Request → Issuance Approval → Reserve Tokenisation Approval → tCeBM in circulation
-tCeBM Redemption Request → Redeem Approval → Fiat released
+Fiat Deposit Request → Issuance Approval (mint tokenized fiat) → Tokenisation Approval (burn tokenized fiat → mint tCeBM) → tCeBM in circulation
+tCeBM Redemption Request → Redeem Approval → tCeBM burned → Fiat released
 ```
+
+> **Design note — Burn-to-Mint simulation model**
+>
+> CBWeb3 operates in a **simulation environment** where real fiat currency does not exist on-chain. To faithfully replicate a real CBDC lifecycle, the platform uses a two-token model:
+>
+> 1. **Tokenized fiat** is minted by the Central Bank upon an issuance request. It represents fiat collateral within the simulation — a stand-in for the real-world deposit that a commercial bank would make with the Central Bank.
+> 2. **tCeBM (tokenized Central Bank Money)** is the actual CBDC token. It is only ever created by **burning** the tokenized fiat in a single atomic operation, ensuring a 1:1 backing ratio is maintained at all times.
+>
+> This burn-to-mint design was adopted at project inception to make the simulation as faithful as possible to a real issuance flow, without requiring actual fiat settlement infrastructure.
 
 ---
 
@@ -87,8 +96,8 @@ Three cards display the count of pending requests awaiting your attention:
 
 | Card | Description | Action |
 |---|---|---|
-| **Pending Deposits** | Number of issuance requests submitted by commercial banks and awaiting approval. | Click **Review Deposits** to go to the Issuance Approvals page. |
-| **Pending Pledges** | Number of reserve tokenisation requests awaiting approval. | Click **Review Pledges** to go to the Tokenisation Approvals page. |
+| **Pending Deposits** | Number of tokenized fiat issuance requests submitted by commercial banks and awaiting approval. | Click **Review Deposits** to go to the Issuance Approvals page. |
+| **Pending Pledges** | Number of burn-to-mint (tokenisation) requests awaiting approval. | Click **Review Pledges** to go to the Tokenisation Approvals page. |
 | **Pending Redeems** | Number of redemption requests awaiting approval. | Click **Review Redeems** to go to the Redeem Approvals page. |
 
 > A non-zero count on any card indicates pending work. Requests should be reviewed promptly.
@@ -118,30 +127,9 @@ A set of direct navigation links to the most frequently used sections:
 
 **Route:** `/registry`
 
-The Registry page has two sections: the **Compliance Registry** (all participants) and the **Pending Onboarding Approvals** queue.
+The Registry page displays the **Pending Onboarding Approvals** queue — commercial banks that have submitted an onboarding request and are waiting for Central Bank validation.
 
-> ![Registry Page Overview](./screenshots/treasury/03-registry-overview.png)
-
-### Compliance Registry
-
-A searchable table listing all participants registered in this spoke.
-
-| Column | Description |
-|---|---|
-| **Participant** | The institution name and bank code. |
-| **Status** | Current lifecycle status badge (e.g., `ACTIVE`, `FROZEN`). |
-| **Credential** | Whether a PKI credential has been issued. |
-| **Expiry** | The credential expiry date, if applicable. |
-
-Use the search input at the top of the table to filter participants by name or bank code.
-
----
-
-### Pending Onboarding Approvals
-
-A live table listing commercial banks that have submitted an onboarding request and are waiting for Central Bank validation.
-
-> ![Pending Onboarding Approvals Table](./screenshots/treasury/04-pending-onboarding-table.png)
+> ![Pending Onboarding Approvals Table](./screenshots/treasury/03-pending-onboarding-table.png)
 
 | Column | Description |
 |---|---|
@@ -160,7 +148,7 @@ The table auto-refreshes every **15 seconds**. Click **Refresh** at any time to 
 2. In the **Reason** column, type the approval justification. The reason must be **at least 10 characters** long.
 3. Click **Approve Onboarding**.
 
-On success, the row disappears from the pending table and the participant's status in the Compliance Registry transitions to `ACTIVE`.
+On success, the row disappears from the pending table and the participant becomes `ACTIVE` in the system.
 
 > If the **Reason** field is left blank or is too short, the button click will be rejected with an inline validation error. Provide a valid reason and retry.
 
@@ -170,9 +158,9 @@ On success, the row disappears from the pending table and the participant's stat
 
 **Route:** `/deposits-approval`
 
-Commercial banks submit issuance requests when they want the Central Bank to issue tCeBM (tokenized Central Bank Money) in exchange for fiat collateral. This page is where those requests are reviewed.
+Commercial banks submit issuance requests when they need the Central Bank to mint **tokenized fiat** — a simulated fiat currency used as collateral within the platform. This is the first step in the burn-to-mint model: tokenized fiat is not yet CBDC; it will later be burned to generate tCeBM. This page is where those requests are reviewed and approved.
 
-> ![Issuance Approvals Page](./screenshots/treasury/05-deposits-approval.png)
+> ![Issuance Approvals Page](./screenshots/treasury/04-deposits-approval.png)
 
 ### Summary Cards
 
@@ -207,7 +195,7 @@ Available for rows with status `PENDING`.
 2. A confirmation modal appears showing the Request ID. Verify the details.
 3. Click **Confirm** to proceed.
 
-> ![Approval Confirmation Modal](./screenshots/treasury/06-approve-modal.png)
+> ![Approval Confirmation Modal](./screenshots/treasury/05-approve-modal.png)
 
 On success, the status changes to `APPROVED` and the **Issuance Ref** column is populated with the on-chain mint transaction hash.
 
@@ -219,7 +207,7 @@ Available for rows with status `PENDING`.
 2. A rejection modal appears. Type a reason in the text area (minimum 3 characters).
 3. Click **Confirm Rejection**.
 
-> ![Rejection Modal](./screenshots/treasury/07-reject-modal.png)
+> ![Rejection Modal](./screenshots/treasury/06-reject-modal.png)
 
 On success, the status changes to `REJECTED`.
 
@@ -236,9 +224,9 @@ Available for rows with status `MINT_FAILED`. This re-attempts the on-chain toke
 
 **Route:** `/escrows-approval`
 
-After a deposit (issuance request) is approved, the commercial bank submits a **tokenisation request** (also called a pledge) to convert that approved fiat deposit into actual tCeBM tokens. This page manages those requests.
+After an issuance request is approved (tokenized fiat minted), the commercial bank submits a **tokenisation request** (also called a pledge) to execute the **burn-to-mint** operation: the tokenized fiat is burned and tCeBM (CBDC) is minted to the bank's wallet in its place. This page manages those requests.
 
-> ![Tokenisation Approvals Page](./screenshots/treasury/08-escrows-approval.png)
+> ![Tokenisation Approvals Page](./screenshots/treasury/07-escrows-approval.png)
 
 ### Summary Cards
 
@@ -264,7 +252,7 @@ After a deposit (issuance request) is approved, the commercial bank submits a **
 
 #### Approve
 
-Triggers a **burn-and-mint** operation: the existing fiat-backed tokens are burned and new tCeBM tokens are minted to the commercial bank's wallet.
+Triggers the **burn-to-mint** operation: the tokenized fiat held in escrow is burned and an equivalent amount of tCeBM (CBDC) is minted to the commercial bank's wallet.
 
 1. Click **Approve** for the target request.
 2. Confirm in the approval modal.
@@ -283,7 +271,7 @@ Triggers a **burn-and-mint** operation: the existing fiat-backed tokens are burn
 
 When a commercial bank wants to convert tCeBM back to fiat reserves, it submits a redemption request. This page is where those requests are reviewed and the fiat release is authorized.
 
-> ![Redeem Approvals Page](./screenshots/treasury/09-redeems-approval.png)
+> ![Redeem Approvals Page](./screenshots/treasury/08-redeems-approval.png)
 
 ### Summary Cards
 
@@ -328,7 +316,7 @@ Authorises the fiat release and completes the redemption cycle.
 
 This page provides a **read-only** view of all cross-border atomic settlement contracts (Hash Time Lock Contracts — HTLCs) currently tracked by the system. No approval actions are available here; it is used for monitoring and auditing purposes.
 
-> ![PvP Settlement Monitor](./screenshots/treasury/10-htlc-monitor.png)
+> ![PvP Settlement Monitor](./screenshots/treasury/09-htlc-monitor.png)
 
 ### Filters
 
@@ -354,7 +342,7 @@ Click **Search** to apply filters.
 
 Click **View details** on any row to open the detail modal.
 
-> ![Contract Detail Modal](./screenshots/treasury/11-htlc-detail-modal.png)
+> ![Contract Detail Modal](./screenshots/treasury/10-htlc-detail-modal.png)
 
 | Field | Description |
 |---|---|
