@@ -271,6 +271,27 @@ Click **New Agreement** to propose a new trade.
 
 Fill in the agreement form in two sections:
 
+> **Paladin Identity format**
+>
+> Several fields in this form expect a **Paladin Identity** — the network-level identifier for a participant node. Paladin Identities follow the format:
+>
+> ```
+> funded_operator@<spoke>-<entity>
+> ```
+>
+> Examples for the test environment:
+>
+> | Institution | Paladin Identity |
+> |---|---|
+> | Central Bank — Spoke A | `funded_operator@spoke-a-cb` |
+> | Commercial Bank A — Spoke A | `funded_operator@spoke-a-bank-a` |
+> | Financial Correspondent — Spoke A | `funded_operator@spoke-a-bank-c` |
+> | Central Bank — Spoke B | `funded_operator@spoke-b-cb` |
+> | Commercial Bank B — Spoke B | `funded_operator@spoke-b-bank-b` |
+> | Financial Correspondent — Spoke B | `funded_operator@spoke-b-bank-d` |
+>
+> The Paladin Identity is **not** an Ethereum address. It is resolved to an on-chain address at runtime by the Paladin node. Contact your system administrator if you are unsure of the correct identity for a counterparty.
+
 #### Parties
 
 | Field | Description |
@@ -389,7 +410,7 @@ Select an accepted FX agreement from the dropdown and choose your role (**Origin
 | Field | Description |
 |---|---|
 | **Agreement ID** | (Optional) The FX trade agreement ID this settlement is linked to. |
-| **Receiver** | The Paladin identity of the receiving institution. |
+| **Receiver** | The Paladin identity of the receiving institution (e.g., `funded_operator@spoke-b-bank-b`). See the [Paladin Identity format note](#creating-a-new-trade-agreement) in the Trade Agreements section. |
 | **Amount (tCeBM)** | The amount of tCeBM to lock in the HTLC. |
 | **Timelock Duration** | How long the receiver has to claim the funds: No timelock, 1 hour, 6 hours, 24 hours, or a custom datetime. |
 
