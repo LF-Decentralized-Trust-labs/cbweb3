@@ -30,10 +30,12 @@ func main() {
 		Level: slog.LevelDebug,
 	}))
 
+	paladinIdentity := getEnv("PALADIN_IDENTITY", "funded_operator@spoke-a-cb")
+
 	// Zeto operator: real Paladin client or no-op based on config.
 	var zeto ports.ZetoOperator
 	if paladinURL := os.Getenv("PALADIN_URL"); paladinURL != "" {
-		identity := getEnv("PALADIN_IDENTITY", "funded_operator@spoke-a-cb")
+		identity := paladinIdentity
 		zetoAddr := os.Getenv("ZETO_TOKEN_ADDRESS")
 		if zetoAddr == "" {
 			log.Fatal("FATAL: ZETO_TOKEN_ADDRESS is required when PALADIN_URL is set")
@@ -196,7 +198,7 @@ func main() {
 
 	// Extract spoke prefix from PALADIN_IDENTITY for receiver validation.
 	// e.g. "funded_operator@spoke-a-bank-a" → "spoke-a"
-	spokePrefix := identity.SpokePrefix(getEnv("PALADIN_IDENTITY", ""))
+	spokePrefix := identity.SpokePrefix(paladinIdentity)
 	if spokePrefix != "" {
 		logger.Info("spoke prefix configured for receiver validation", "spokePrefix", spokePrefix)
 	} else {
@@ -216,6 +218,7 @@ func main() {
 		RateTolPct:       rateTolPct,
 		StrictHTLC:       strictHTLC,
 		SpokePrefix:      spokePrefix,
+		PaladinIdentity:  paladinIdentity,
 		Logger:           logger,
 	})
 
