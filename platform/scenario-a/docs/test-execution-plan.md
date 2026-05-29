@@ -582,17 +582,34 @@ This bundle is stored as a CI artifact and retained for technical validation by 
 
 ---
 
-## Scenario B — Planned Extensions
+## Scenario B — Extensions
 
-> **Status:** Smart contracts implemented (`AutomatedMarketMaker.sol`, `ManualOracle.sol`, `FXAgreement.sol`); hub deployment and end-to-end flows pending.
+> **Status: Implemented — work in progress.** Scenario B is functional but not 100% complete. The dedicated test documentation lives in [`scenario-b/docs/test-execution-plan.md`](../../../scenario-b/docs/test-execution-plan.md) and [`scenario-b/tests/TEST-CATALOG.md`](../../../scenario-b/tests/TEST-CATALOG.md).
 
-When Scenario B (AMM hub, chain 1337) is deployed, this plan will be extended with:
+Scenario B (AMM hub, cooperative liquidity, SpokeBridge) has been implemented. The test suite in `scenario-b/contracts/test/` covers 22 Foundry test files. Key additions relative to Scenario A:
 
-| Addition | Description |
-|----------|-------------|
-| Hub topology assumptions | International Hub with 4+ validator nodes (consortium of Central Banks) |
-| AMM unit tests | Constant-product pricing, slippage protection, LP token mechanics, circuit breaker (tests already exist in `contracts/test/AutomatedMarketMaker.t.sol`) |
-| AMM integration tests | Quote service, liquidity addition approval (multi-step ERC-20 allowance), swap execution with ZK-Pointers, pool imbalance detection |
-| E2E-B flows | Exact-Output Swap (happy path), Slippage Protection (volatility test), Governance Circuit Breaker (emergency stop), Liquidity Imbalance Alert |
-| Performance Scenario B | Additional k6/Caliper profiles for AMM swap throughput and LP operations |
-| Hub readiness checklist | Liquidity provisioned (AMM pool > 0 for both assets), ManualOracle price feed active |
+| Addition | Status | Description |
+|----------|--------|-------------|
+| AMM unit tests | Implemented | Constant-product pricing, slippage protection, liquidity add/remove, circuit breaker pause/resume quorum (`AutomatedMarketMaker.t.sol`) |
+| LiquidityCommitRegistry tests | Implemented | Commit-reveal protocol, 72 h TTL, `CommitMatched` event, cancel/expire (`LiquidityCommitRegistry.t.sol`) |
+| PairRegistry + CurrencyRegistry tests | Implemented | Bilateral CB pair approval, currency discovery |
+| SpokeBridge tests | Implemented | Lock&Mint / Burn&Unlock authorization |
+| Hub deployment validation | Implemented | `CBWeb3Hub.t.sol` validates all hub contracts deployed with correct roles |
+| E2E-B flows (US1–US6) | Implemented (US3 partial) | Cooperative liquidity, MLP bilateral, commercial swap, FX agreement, pair approval, bridge roundtrip |
+| Performance baseline | Partial | k6 script exists (`tests/performance/scenario-b-perf.js`); baseline numbers not yet established |
+| Hub network isolation | Pending | Hub currently shares Spoke-A Besu node in local dev |
+| Commercial bank swap path (US3) | Partial | Governance path works; commercial bank routing incomplete |
+
+Run Scenario B tests:
+
+```bash
+# Smart contract tests
+cd scenario-b/contracts && forge test -vv
+
+# Go unit tests
+cd scenario-b/backend && go test ./...
+
+# Full E2E
+cd scenario-b && make scenario-b.up
+bash tryouts/tryout-scenario-b-e2e.sh all
+```

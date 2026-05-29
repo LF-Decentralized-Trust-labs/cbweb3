@@ -144,20 +144,22 @@ Per-module documentation maintained alongside source code.
 
 ---
 
-## Scenario B — Planned Extensions
+## Scenario B — International Hub with AMM
 
-Scenario B (International Hub with AMM, chain 1337) is currently in partial implementation. Smart contracts are deployed; hub network and backend services are pending.
+> **Status: Implemented — work in progress.** Not 100% complete; adjustments ongoing.
 
-| Extension | Status |
-|-----------|--------|
-| `AutomatedMarketMaker.sol` | Implemented (Foundry tests passing) |
-| `ManualOracle.sol` | Implemented |
-| Hub Docker Compose profile | Pending |
-| Hub backend services (api-gateway, payment-orchestrator) | Pending |
-| AMM E2E flows (swap, slippage, circuit breaker, LP operations) | Planned |
-| Updated architecture diagrams with hub topology | Planned |
+Scenario B has its own complete documentation set under `scenario-b/docs/`.
 
-All D9–D12 documents include a **Scenario B — Planned Extensions** section that specifies what will be added when the hub is deployed.
+| Document | Description |
+|----------|-------------|
+| [`scenario-b/docs/INDEX.md`](../../../scenario-b/docs/INDEX.md) | Master documentation index for Scenario B |
+| [`scenario-b/docs/architecture/architecture-overview.md`](../../../scenario-b/docs/architecture/architecture-overview.md) | Architecture narrative — hub topology, AMM, commit-reveal, SpokeBridge, Cacti relay |
+| [`scenario-b/docs/runbooks/deployment-runbook.md`](../../../scenario-b/docs/runbooks/deployment-runbook.md) | Step-by-step deployment guide (`make scenario-b.up`) |
+| [`scenario-b/docs/runbooks/environment-setup.md`](../../../scenario-b/docs/runbooks/environment-setup.md) | Prerequisites and port reference |
+| [`scenario-b/docs/runbooks/configuration-reference.md`](../../../scenario-b/docs/runbooks/configuration-reference.md) | Full environment variable reference including hub/AMM vars |
+| [`scenario-b/docs/runbooks/contract-configuration.md`](../../../scenario-b/docs/runbooks/contract-configuration.md) | Hub contract parameters, on-chain roles, PairRegistry, circuit breaker |
+| [`scenario-b/docs/test-execution-plan.md`](../../../scenario-b/docs/test-execution-plan.md) | Test execution plan — AMM/bridge flows, RACI, performance targets |
+| [`scenario-b/tests/TEST-CATALOG.md`](../../../scenario-b/tests/TEST-CATALOG.md) | Test catalog — 22 Foundry test files, Go unit tests, E2E (US1–US6) |
 
 ---
 

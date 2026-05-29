@@ -264,20 +264,28 @@ No component communicates directly with a Besu node or Paladin on a different sp
 
 ---
 
-## Scenario B — International Hub with AMM (Planned)
+## Scenario B — International Hub with AMM
 
-Scenario B extends the platform with an international settlement hub (chain 1337) that introduces automated market-making (AMM) liquidity pools for multi-currency FX.
+> **Status: Implemented — work in progress.** Scenario B is functional but not 100% complete; adjustments are ongoing. See [`scenario-b/docs/architecture/architecture-overview.md`](../../../scenario-b/docs/architecture/architecture-overview.md) for the full Scenario B architecture narrative.
+
+Scenario B extends the platform with an international settlement hub that introduces automated market-making (AMM) liquidity pools for multi-currency FX, cooperative sovereign liquidity via a commit-reveal protocol, and a SpokeBridge for cross-spoke asset bridging.
 
 | Component | Status | Description |
 |-----------|--------|-------------|
-| `AutomatedMarketMaker.sol` | Smart contract implemented | Constant-product AMM (`x · y = k`), `swapExactOutput`, slippage protection, circuit breaker |
-| `ManualOracle.sol` | Smart contract implemented | GOVERNANCE-gated FX price oracle |
-| `FXAgreement.sol` (hub) | Smart contract implemented | Hub-side FX agreement lifecycle |
-| Hub network deployment | Pending | 4+ validator consortium (central banks); Docker Compose profile reserved |
-| Backend hub services | Pending | Hub api-gateway and payment-orchestrator stacks |
-| AMM E2E flows | Planned | Exact-output swap, slippage protection, governance circuit breaker, LP operations |
+| `AutomatedMarketMaker.sol` | Implemented | Constant-product AMM (`x · y = k`), `swapExactOutput`, slippage protection, asymmetric circuit breaker (pause 1-of-N / resume 2-of-N CBs) |
+| `ManualOracle.sol` | Implemented | GOVERNANCE-gated FX price oracle; `setRate(token0, token1, rate)` |
+| `LiquidityCommitRegistry.sol` | Implemented | Sovereign CB commit-reveal protocol; 72 h TTL; emits `CommitMatched` event |
+| `PairRegistry.sol` | Implemented | Bilateral CB approval for new currency pairs |
+| `CurrencyRegistry.sol` | Implemented | Hub currency discovery |
+| `FXAgreement.sol` (hub) | Implemented | Hub-side FX agreement lifecycle with `proposeOnBehalf` / `acceptOnBehalf` |
+| `SpokeBridge.sol` | Implemented | Lock&Mint / Burn&Unlock for cross-spoke asset bridging |
+| Hub backend services | Implemented | Full 4-service stack per entity + optional MLP (opt-in via `ENABLE_MLP=true`) |
+| Cacti relay (Scenario B) | Implemented | `LiquidityCommitWatcher` — detects `CommitMatched` events and triggers sovereign liquidity execution |
+| Hub network (local dev) | Partial | Hub shares Spoke-A Besu node (chain 1338, RPC :8645); dedicated hub network is a planned next step |
+| Commercial bank swap (US3) | Partial | Governance path works; commercial bank routing incomplete |
+| Sovereign liquidity reconciliation | Partial | `ExecuteMatchedCommit` lacks automatic recovery for failed commits |
 
-When Scenario B is deployed, the Cacti relay will be extended to bridge Spoke-A and Spoke-B through the Hub, replacing direct bilateral spoke-to-spoke coordination with hub-mediated multi-currency settlement.
+Full Scenario B documentation: [`scenario-b/docs/`](../../../scenario-b/docs/)
 
 ---
 
