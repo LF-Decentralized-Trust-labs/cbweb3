@@ -40,7 +40,7 @@ Monitoring runs as a separate plane:
 |---------|----------|------|--------|-------------|
 | [api-gateway](services/api-gateway/README.md) | REST | 8080 | Implemented | HTTP entry point; routes to gRPC backends |
 | [auth](services/auth/README.md) | gRPC | 9091 | Implemented | Identity, login, wallet, PKI |
-| [compliance](services/compliance/README.md) | gRPC | 9093 | Implemented | KYC/AML, participant registry, governance |
+| [compliance](services/compliance/README.md) | gRPC | 9093 | Implemented | Onboarding/AML, participant registry, governance |
 | [payment-orchestrator](services/payment-orchestrator/README.md) | gRPC | 9094 | Implemented | HTLC, FX, Zeto transfers, escrow |
 | [noc-agent](services/noc-agent/README.md) | HTTP push | — | Implemented | Monitoring agent (Docker, Besu metrics) |
 | [noc-backend](services/noc-backend/README.md) | REST | 8000 | Implemented | NOC dashboard and telemetry store |

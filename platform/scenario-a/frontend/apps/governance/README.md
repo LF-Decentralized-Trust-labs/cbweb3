@@ -33,7 +33,7 @@ Central bank operators — governors, compliance officers, registry administrato
 - **Participant registry** — Register, view, and manage commercial banks and other participants on the spoke's `IdentityRegistry` contract.
 - **CBDC issuance** — Mint and burn tCeBM tokens, enforcing the central bank's exclusive monetary authority.
 - **Governance certificates** — Issue PKI certificates that attest to a participant's governance role.
-- **Compliance overview** — Monitor KYC status, compliance flags, and transaction activity across all spoke participants.
+- **Compliance overview** — Monitor Onboarding status, compliance flags, and transaction activity across all spoke participants.
 - **Policy controls** — Configure CBDC transfer limits, circuit breakers, and other governance parameters.
 
 ---

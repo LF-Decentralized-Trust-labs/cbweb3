@@ -42,7 +42,7 @@ All four onboarding scripts share the same **dual-entity 3-phase PKI + Blockchai
 Step 1  Bank operator login          → Keycloak (bank realm)        → operator access token
 Step 2  Credential Request (Phase 1) → Bank proxy → CB public API   → request_id, user_id, wallet_address
 Step 3  CB governance login          → Keycloak (CB realm)          → governance access token
-Step 4  Approve KYC (Phase 2)        → CB API /onboarding/approve   → KYC approved, pop_nonce issued
+Step 4  Approve Onboarding (Phase 2)        → CB API /onboarding/approve   → Onboarding approved, pop_nonce issued
 Step 5  Polling (bank side)          → Bank proxy /onboarding/status → discovers pop_nonce
 Step 6  Complete Onboarding (Phase 3)→ Bank proxy (PoP + wallet bind)→ blockchain TX hash, Keycloak user provisioned
 Step 7  PKI Login (validation)       → CB API /auth/pki-login        → verifies certificate-based auth works
@@ -50,7 +50,7 @@ Step 7  PKI Login (validation)       → CB API /auth/pki-login        → verif
 
 **Actors simulated within the same script:**
 - **Bank operator** — authenticates via the bank's own Keycloak and calls the bank's API Gateway, which proxies sensitive requests to the central bank.
-- **CB governance** — authenticates via the central bank's Keycloak and performs KYC approval through the CB's API Gateway directly.
+- **CB governance** — authenticates via the central bank's Keycloak and performs Onboarding approval through the CB's API Gateway directly.
 
 This dual-actor simulation means a single script exercises both sides of the trust boundary, making it easy to reproduce the full handshake without requiring two separate terminal sessions or human coordination.
 
@@ -93,7 +93,7 @@ This script is **assertion-based**: each scenario prints `PASS` or `FAIL` with t
 ```
 Step 1  [Optional] Bank-A onboarding          → Keycloak + PKI phases
 Step 2  [Optional] Bank-B onboarding          → Keycloak + PKI phases
-Step 3  [Optional] Central Bank governance approvals → KYC approval
+Step 3  [Optional] Central Bank governance approvals → Onboarding approval
 Step 4  Get Bank-A & Bank-B operator tokens  → Keycloak authentication
 Step 5  Bank-A proposes FX agreement          → POST /fx/agreements {tradeId, originator, counterparty, amounts, rate}
 Step 6  Validate persistence                  → GET /fx/agreements/{trade_id} → state=PROPOSED

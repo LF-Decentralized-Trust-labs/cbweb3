@@ -33,7 +33,7 @@ Central bank supervisors, financial regulators, and auditors.
 - **Transaction monitoring** — View payment and settlement activity across the spoke with selective disclosure based on the supervisor's authorization level.
 - **ZK proof verification** — Access Paladin-generated zero-knowledge proofs to verify transaction correctness without decrypting confidential amounts.
 - **Compliance reports** — Generate regulatory reports on transaction volumes, HTLC states, and participant activity.
-- **KYC/AML status** — Review participant compliance flags and identity verification status.
+- **Onboarding/AML status** — Review participant compliance flags and identity verification status.
 - **Audit data export** — Export transaction datasets for external audit workflows.
 
 ---
@@ -62,5 +62,5 @@ npm run dev:supervisor
 ## Related
 
 - [frontend workspace](../../README.md) — monorepo setup and npm scripts
-- [compliance service](../../../backend/services/compliance/README.md) — KYC/AML data source
+- [compliance service](../../../backend/services/compliance/README.md) — Onboarding/AML data source
 - [governance portal](../governance/README.md) — central bank counterpart (write access)

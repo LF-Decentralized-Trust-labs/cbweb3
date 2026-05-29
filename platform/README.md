@@ -37,7 +37,7 @@ A correspondent banking model where two independent blockchain networks (**Spoke
 - Two Besu QBFT networks (chain 1338 and 1339), each with its own central bank and commercial banks
 - Privacy-preserving transfers via Paladin/Zeto (zero-knowledge proofs)
 - Cross-spoke atomic swaps with automatic relay settlement
-- On-chain identity registry, KYC/AML compliance, and Keycloak OIDC
+- On-chain identity registry, Onboarding/AML compliance, and Keycloak OIDC
 
 **Quick start:** `cd scenario-a && make spoke-all`
 

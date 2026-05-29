@@ -2,7 +2,7 @@
 
 > [scenario-a](../../../README.md) › [backend](../../README.md) › compliance
 
-The **compliance** service is the governance and identity backbone of the platform. It manages on-chain participant registration, issues governance certificates, and runs KYC/AML checks for all entities on a given spoke.
+The **compliance** service is the governance and identity backbone of the platform. It manages on-chain participant registration, issues governance certificates, and runs Onboarding/AML checks for all entities on a given spoke.
 
 ---
 
@@ -29,7 +29,7 @@ The compliance service operates in two modes depending on the entity type:
 ## Responsibilities
 
 - **Participant registry** — Maintains an off-chain mirror of registered participants (PostgreSQL) and syncs writes to the on-chain `IdentityRegistry` contract.
-- **KYC/AML checks** — Evaluates whether a given subject is cleared for a transaction by checking on-chain registration status and compliance flags.
+- **Onboarding/AML checks** — Evaluates whether a given subject is cleared for a transaction by checking on-chain registration status and compliance flags.
 - **Governance certificates** — Issues PKI-signed certificates that attest to a participant's governance role (Central Bank, Commercial Bank, etc.).
 - **Role management** — Resolves RBAC roles from on-chain data for use by other services.
 
@@ -51,7 +51,7 @@ The compliance service operates in two modes depending on the entity type:
 | `GetParticipant` | Look up a participant's profile and compliance status |
 | `ListParticipants` | Enumerate all registered participants for a spoke |
 | `IssueGovernanceCertificate` | Issue a PKI certificate attesting to a participant's governance role |
-| `CheckKYC` | Validate KYC clearance for a given subject |
+| `CheckOnboarding` | Validate Onboarding clearance for a given subject |
 
 ### Environment Variables
 
@@ -84,6 +84,6 @@ compliance/
 
 ## Related
 
-- [api-gateway](../api-gateway/README.md) — calls this service for KYC checks and governance operations
+- [api-gateway](../api-gateway/README.md) — calls this service for Onboarding checks and governance operations
 - [auth](../auth/README.md) — calls this service to resolve participant roles during token validation
 - [contracts › IdentityRegistry](../../../contracts/README.md) — the on-chain registry this service writes to

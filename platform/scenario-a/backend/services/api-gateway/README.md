@@ -15,7 +15,7 @@ Frontend / External Client
    [api-gateway]   REST :8080
          │
          ├──► [auth]          gRPC — token validation, login, wallet ops
-         ├──► [compliance]    gRPC — KYC/AML, governance participant management
+         ├──► [compliance]    gRPC — Onboarding/AML, governance participant management
          └──► [payment-orchestrator] gRPC — HTLC, FX, token transfers, escrow
 ```
 
@@ -27,7 +27,7 @@ For commercial banks, some operations are proxied to the Central Bank's own `api
 
 - **Authentication** — Delegates login and token validation to the auth service; attaches identity context to downstream calls.
 - **Wallet binding** — Handles the association of a Keycloak user to an on-chain wallet address.
-- **KYC routing** — Exposes KYC status lookups backed by the compliance service.
+- **Onboarding routing** — Exposes Onboarding status lookups backed by the compliance service.
 - **Governance proxy** — Forwards participant registration and governance certificate requests to the compliance service.
 - **Payment routing** — Exposes HTLC lock/release, FX agreement lifecycle, Zeto transfers, and escrow operations backed by the payment orchestrator.
 
@@ -49,7 +49,7 @@ For commercial banks, some operations are proxied to the Central Bank's own `api
 | `GET` | `/healthz` | — | Health check |
 | `POST` | `/auth/login` | — | Authenticate via Keycloak |
 | `POST` | `/auth/wallet/bind` | Bearer | Bind wallet address to user |
-| `GET` | `/compliance/kyc/status/:subject` | Bearer | KYC status lookup |
+| `GET` | `/compliance/kyc/status/:subject` | Bearer | Onboarding status lookup |
 
 ### API Documentation
 
@@ -107,6 +107,6 @@ api-gateway/
 ## Related
 
 - [auth service](../auth/README.md) — handles identity operations this gateway calls
-- [compliance service](../compliance/README.md) — handles KYC and governance operations
+- [compliance service](../compliance/README.md) — handles Onboarding and governance operations
 - [payment-orchestrator](../payment-orchestrator/README.md) — handles all payment flows
 - [apis › openapi](../../../apis/README.md) — versioned OpenAPI specs

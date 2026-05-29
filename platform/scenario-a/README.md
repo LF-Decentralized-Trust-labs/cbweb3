@@ -33,7 +33,7 @@ Each module has its own README with purpose, architecture placement, key details
 | Backend | [backend/README.md](backend/README.md) | Go microservices overview |
 | — api-gateway | [backend/services/api-gateway/README.md](backend/services/api-gateway/README.md) | REST entry point |
 | — auth | [backend/services/auth/README.md](backend/services/auth/README.md) | Identity, login, wallet, PKI |
-| — compliance | [backend/services/compliance/README.md](backend/services/compliance/README.md) | KYC/AML, participant registry |
+| — compliance | [backend/services/compliance/README.md](backend/services/compliance/README.md) | Onboarding/AML, participant registry |
 | — payment-orchestrator | [backend/services/payment-orchestrator/README.md](backend/services/payment-orchestrator/README.md) | HTLC, FX, Zeto, escrow |
 | — noc-agent | [backend/services/noc-agent/README.md](backend/services/noc-agent/README.md) | Monitoring daemon |
 | — noc-backend | [backend/services/noc-backend/README.md](backend/services/noc-backend/README.md) | NOC dashboard API |
@@ -75,7 +75,7 @@ Each spoke runs its own Besu QBFT network, Paladin privacy nodes, and a full bac
 - **Tokenized Central Bank Money (tCeBM)** — ERC-20 CBDC tokens minted exclusively by central banks
 - **Privacy-preserving transfers** — Zeto ZKP tokens via Paladin for confidential intra-spoke payments
 - **Cross-spoke atomic swaps** — Hash Time-Locked Contracts with automatic relay settlement
-- **Identity & compliance** — On-chain IdentityRegistry, PKI certificates, Keycloak OIDC, KYC/AML checks
+- **Identity & compliance** — On-chain IdentityRegistry, PKI certificates, Keycloak OIDC, Onboarding/AML checks
 
 ---
 
@@ -231,7 +231,7 @@ scenario-a/
 │   ├── services/           Go microservices
 │   │   ├── api-gateway/    REST gateway (per entity)
 │   │   ├── auth/           gRPC auth service (Keycloak OIDC)
-│   │   ├── compliance/     gRPC compliance (KYC/AML)
+│   │   ├── compliance/     gRPC compliance (Onboarding/AML)
 │   │   ├── payment-orchestrator/  gRPC payment & HTLC orchestration
 │   │   ├── payments/       Payment domain logic
 │   │   ├── fx/             FX pricing & settlement
@@ -304,7 +304,7 @@ All services are written in **Go** and communicate via **gRPC** internally, with
 |---------|----------|-------------|
 | **api-gateway** | REST | External entry point, routes to gRPC services |
 | **auth** | gRPC | OIDC/JWT validation, Keycloak integration, RBAC, nonce management |
-| **compliance** | gRPC | KYC/AML checks, on-chain IdentityRegistry queries, audit logging |
+| **compliance** | gRPC | Onboarding/AML checks, on-chain IdentityRegistry queries, audit logging |
 | **payment-orchestrator** | gRPC | Payment coordination, Paladin integration, HTLC flow management |
 
 Each entity (bank-a, bank-b, bank-c, bank-d, central-bank-a, central-bank-b) runs its own isolated instance of every service with dedicated Docker networks.

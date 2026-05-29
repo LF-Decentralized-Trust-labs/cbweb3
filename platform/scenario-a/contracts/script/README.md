@@ -10,7 +10,7 @@ as verified participants in the compliance `IdentityRegistry` contract.
 The on-chain `HashTimeLockedContract` gates every `lock()` call with an
 `onlyVerified(msg.sender)` modifier that checks `IdentityRegistry.canTransact()`.
 In production, participants are registered through the full 3-phase onboarding
-flow (credential request → KYC approval → PoP), exercised by
+flow (credential request → Onboarding approval → PoP), exercised by
 `./tryout-spoke-a-bank-a.sh`.
 
 This script **bypasses** that flow so the cross-spoke atomic-swap tryout
