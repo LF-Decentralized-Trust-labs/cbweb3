@@ -1,0 +1,91 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Node/JavaScript
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-store/
+dist/
+build/
+coverage/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+
+# Go
+*.exe
+*.test
+vendor/
+*.out
+
+# IDEs & Editors
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Build artifacts
+artifacts/
+dist/
+build/
+
+# Terraform
+.terraform/
+terraform.tfstate*
+*.tfvars
+
+# Foundry
+contracts/cache/
+contracts/out/
+contracts/broadcast/*/1337/
+contracts/broadcast/*/1338/
+contracts/broadcast/*/1339/
+contracts/broadcast/*/31337/
+
+# Docs (usually not needed in containers)
+docs/
+docs-reference/
+*.md
+README*
+
+# Spec Kit (development only)
+.specify/
+specs/
+.github/
+
+# CI/CD
+.github/
+.circleci/
+.gitlab-ci.yml
+
+# Test files (can be run separately)
+tests/
+*_test.go
+*.test.ts
+*.test.js
+
+# Misc
+.dockerignore
+docker-compose*.yml
+Makefile
+Dockerfile*

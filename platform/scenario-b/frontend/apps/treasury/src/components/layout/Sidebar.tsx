@@ -1,0 +1,43 @@
+import { NavLink } from "react-router-dom";
+import { LayoutDashboard, HandCoins, Coins, Flame, ShieldAlert, ScrollText, BadgeCheck, Settings } from "lucide-react";
+import { PlatformLogo } from "@cbweb3/ui";
+
+const links = [
+  { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/funding-requests", label: "Funding Requests", icon: HandCoins },
+  { to: "/issuance", label: "Issuance", icon: Coins },
+  { to: "/redemption", label: "Redemption", icon: Flame },
+  { to: "/reconciliation", label: "Reconciliation", icon: ShieldAlert },
+  { to: "/audit", label: "Audit", icon: ScrollText },
+  { to: "/kyc", label: "KYC", icon: BadgeCheck },
+  { to: "/settings", label: "Settings", icon: Settings },
+];
+
+export function Sidebar() {
+  return (
+    <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:border-b-0 md:border-r">
+      <div className="mb-3 space-y-1">
+        <PlatformLogo imageClassName="h-7" />
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">Central Bank</p>
+        <p className="text-sm font-semibold">Treasury Operations</p>
+      </div>
+      <nav className="grid gap-1">
+        {links.map((link) => (
+          <NavLink
+            key={link.to}
+            to={link.to}
+            end={link.to === "/"}
+            className={({ isActive }) =>
+              `flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
+                isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              }`
+            }
+          >
+            <link.icon className="h-4 w-4" />
+            {link.label}
+          </NavLink>
+        ))}
+      </nav>
+    </aside>
+  );
+}

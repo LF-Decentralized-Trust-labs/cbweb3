@@ -1,0 +1,359 @@
+package contract
+
+import (
+	"context"
+
+	"google.golang.org/grpc"
+)
+
+const (
+	ServiceName = "auth.v1.AuthService"
+
+	LoginMethod                = "/auth.v1.AuthService/Login"
+	RefreshTokenMethod         = "/auth.v1.AuthService/RefreshToken"
+	RevokeTokenMethod          = "/auth.v1.AuthService/RevokeToken"
+	ValidateTokenMethod        = "/auth.v1.AuthService/ValidateToken"
+	RegisterParticipantMethod  = "/auth.v1.AuthService/RegisterParticipant"
+	SignTransactionMethod      = "/auth.v1.AuthService/SignTransaction"
+	GetKYCStatusMethod         = "/auth.v1.AuthService/GetKYCStatus"
+	ProvisionParticipantMethod = "/auth.v1.AuthService/ProvisionParticipant"
+	OnboardParticipantMethod   = "/auth.v1.AuthService/OnboardParticipant"
+	ListUsersMethod            = "/auth.v1.AuthService/ListUsers"
+	GetUserMethod              = "/auth.v1.AuthService/GetUser"
+
+	// PKI 2FA methods
+	IssueLoginNonceMethod = "/auth.v1.AuthService/IssueLoginNonce"
+	VerifyPKILoginMethod  = "/auth.v1.AuthService/VerifyPKILogin"
+
+	// Client secret management
+	ChangeClientSecretMethod = "/auth.v1.AuthService/ChangeClientSecret"
+)
+
+// --- Auth ---
+
+type LoginRequest struct {
+	User     string `json:"user"`
+	Password string `json:"password"`
+}
+
+type LoginResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int32  `json:"expires_in"`
+}
+
+type RefreshTokenRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+type RefreshTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int32  `json:"expires_in"`
+}
+
+type RevokeTokenRequest struct {
+	// AccessToken carries the token to revoke. In practice, callers should send
+	// the refresh_token here, since Keycloak's logout endpoint requires a
+	// refresh_token. This will be reconciled in a future iteration.
+	AccessToken string `json:"access_token"`
+}
+
+type RevokeTokenResponse struct {
+	Success bool `json:"success"`
+}
+
+// --- Token Validation ---
+
+type ValidateTokenRequest struct {
+	AccessToken string `json:"access_token"`
+}
+
+// ValidateTokenResponse carries enriched claims from the JWT (D7 §7.4).
+type ValidateTokenResponse struct {
+	Subject      string   `json:"subject"`
+	Issuer       string   `json:"issuer"`
+	Roles        []string `json:"roles"`
+	Wallet       string   `json:"wallet,omitempty"`
+	Country      string   `json:"country,omitempty"`
+	BankID       string   `json:"bank_id,omitempty"`
+	PrivacyGroup string   `json:"privacy_group,omitempty"`
+}
+
+// --- Participant Registration ---
+
+type RegisterParticipantRequest struct {
+	AccessToken     string `json:"access_token"`
+	Country         string `json:"country"`
+	BankCode        string `json:"bank_code"`
+	Role            string `json:"role"`
+	InstitutionName string `json:"institution_name"`
+}
+
+type RegisterParticipantResponse struct {
+	UserID        string `json:"user_id"`
+	WalletAddress string `json:"wallet_address"`
+}
+
+// --- Signing ---
+
+type SignTransactionRequest struct {
+	UserID string `json:"user_id"`
+	Digest string `json:"digest"`
+}
+
+type SignTransactionResponse struct {
+	UserID    string `json:"user_id"`
+	Address   string `json:"address"`
+	Signature string `json:"signature"`
+}
+
+// --- KYC Status ---
+
+type GetKYCStatusRequest struct {
+	Subject string `json:"subject"`
+}
+
+type GetKYCStatusResponse struct {
+	Subject string `json:"subject"`
+	Status  string `json:"status"`
+}
+
+type ProvisionParticipantRequest struct {
+	Subject string `json:"subject"`
+	Status  string `json:"status"` // PENDING, APPROVED, FROZEN, REVOKED
+}
+
+type ProvisionParticipantResponse struct {
+	Subject string `json:"subject"`
+	Status  string `json:"status"`
+}
+
+// --- Administrative Participant Onboarding ---
+
+// OnboardParticipantRequest carries the data required for the Central Bank
+// to register a new Commercial Bank or Treasury user (POST /compliance/register).
+type OnboardParticipantRequest struct {
+	// Username is the Keycloak username / login identifier for the new user.
+	Username string `json:"username"`
+	// Email is the email address of the new user (required by Keycloak).
+	Email string `json:"email"`
+	// Role is the prefixed role to assign (e.g. ROLE_COMMERCIAL_BANK, ROLE_TREASURY).
+	Role string `json:"role"`
+	// InstitutionName is the human-readable name of the bank or institution.
+	InstitutionName string `json:"institution_name,omitempty"`
+	// Country is the ISO-3166-1 alpha-2 country code.
+	Country string `json:"country,omitempty"`
+	// BankCode is an optional regulatory/internal bank identifier.
+	BankCode string `json:"bank_code,omitempty"`
+}
+
+// OnboardParticipantResponse carries the result of a successful onboarding.
+type OnboardParticipantResponse struct {
+	// UserID is the Keycloak user UUID for the newly created user.
+	UserID string `json:"user_id"`
+	// WalletAddress is the EVM address generated by the KMS (only set for roles
+	// that require KMS key generation, e.g. ROLE_COMMERCIAL_BANK).
+	WalletAddress string `json:"wallet_address,omitempty"`
+	// CertPEM is the X.509 certificate PEM issued by the Central Bank CA for PKI
+	// roles (ROLE_COMMERCIAL_BANK, ROLE_TREASURY). Empty for non-PKI roles.
+	CertPEM string `json:"cert_pem,omitempty"`
+	// TxHash is the on-chain transaction hash from ParticipantRegistry.registerMember
+	// (only set for roles that require on-chain registration).
+	TxHash string `json:"tx_hash,omitempty"`
+	// ClientSecret is the cryptographically secure random secret generated at
+	// onboarding time. It is exposed only once and must be stored by the caller.
+	// The secret is hashed (Keycloak Argon2) and not recoverable after this response.
+	ClientSecret string `json:"client_secret,omitempty"`
+}
+
+// --- PKI 2FA ---
+
+// IssueLoginNonceRequest initiates PKI login step 1 for roles that require X.509.
+type IssueLoginNonceRequest struct {
+	UserID string `json:"user_id"`
+	// ClientSecret is the first-factor credential (obtained at onboarding).
+	// The server validates this before issuing the nonce challenge.
+	ClientSecret string `json:"client_secret"`
+}
+
+// IssueLoginNonceResponse carries a short-lived nonce for the client to sign.
+type IssueLoginNonceResponse struct {
+	// Nonce is a hex-encoded random value valid for 5 minutes.
+	// The client must sign it with its X.509 private key and submit via VerifyPKILogin.
+	Nonce string `json:"nonce"`
+}
+
+// VerifyPKILoginRequest carries the signed nonce and the institution's X.509 cert.
+type VerifyPKILoginRequest struct {
+	UserID       string `json:"user_id"`
+	// NonceSignatureHex is the DER-encoded ECDSA signature of SHA-256(nonce bytes), hex-encoded.
+	NonceSignatureHex string `json:"nonce_signature_hex"`
+	// CertPEM is the institution's X.509 certificate issued by the Central Bank CA.
+	CertPEM string `json:"cert_pem"`
+}
+
+// VerifyPKILoginResponse is returned on successful PKI validation.
+type VerifyPKILoginResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int32  `json:"expires_in"`
+}
+
+// --- User Management ---
+
+// ListUsersRequest carries optional filters for the ListUsers method.
+type ListUsersRequest struct {
+	// Role filters by participant role (e.g. ROLE_COMMERCIAL_BANK). Empty = all roles.
+	Role string `json:"role,omitempty"`
+	// Status filters by lifecycle status (e.g. ACTIVE, PENDING). Empty = all statuses.
+	Status string `json:"status,omitempty"`
+}
+
+// UserSummary is a condensed view of a participant for list responses.
+type UserSummary struct {
+	UserID          string `json:"user_id"`
+	InstitutionName string `json:"institution_name,omitempty"`
+	Role            string `json:"role"`
+	Status          string `json:"status"`
+	WalletAddress   string `json:"wallet_address,omitempty"`
+	Country         string `json:"country,omitempty"`
+	BankCode        string `json:"bank_code,omitempty"`
+}
+
+// ListUsersResponse contains the paginated user list.
+type ListUsersResponse struct {
+	Users []UserSummary `json:"users"`
+	Total int           `json:"total"`
+}
+
+// GetUserRequest identifies a single user to retrieve.
+type GetUserRequest struct {
+	UserID string `json:"user_id"`
+}
+
+// GetUserResponse contains the full profile of a participant.
+type GetUserResponse struct {
+	UserID          string `json:"user_id"`
+	Username        string `json:"username"`
+	Email           string `json:"email"`
+	InstitutionName string `json:"institution_name,omitempty"`
+	Role            string `json:"role"`
+	Status          string `json:"status"`
+	WalletAddress   string `json:"wallet_address,omitempty"`
+	Country         string `json:"country,omitempty"`
+	BankCode        string `json:"bank_code,omitempty"`
+}
+
+// --- Password Management ---
+
+// ChangeClientSecretRequest allows an authenticated user to rotate their clientSecret.
+type ChangeClientSecretRequest struct {
+	UserID               string `json:"user_id"`
+	CurrentClientSecret  string `json:"current_client_secret"`
+	NewClientSecret      string `json:"new_client_secret"`
+}
+
+// ChangeClientSecretResponse is returned on successful secret rotation.
+type ChangeClientSecretResponse struct{}
+
+// --- Client Interface ---
+
+// IdentityServiceClient is the typed client for all identity gRPC methods.
+type IdentityServiceClient interface {
+	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
+	RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*RefreshTokenResponse, error)
+	RevokeToken(ctx context.Context, in *RevokeTokenRequest, opts ...grpc.CallOption) (*RevokeTokenResponse, error)
+	ValidateToken(ctx context.Context, in *ValidateTokenRequest, opts ...grpc.CallOption) (*ValidateTokenResponse, error)
+	RegisterParticipant(ctx context.Context, in *RegisterParticipantRequest, opts ...grpc.CallOption) (*RegisterParticipantResponse, error)
+	SignTransaction(ctx context.Context, in *SignTransactionRequest, opts ...grpc.CallOption) (*SignTransactionResponse, error)
+	GetKYCStatus(ctx context.Context, in *GetKYCStatusRequest, opts ...grpc.CallOption) (*GetKYCStatusResponse, error)
+	ProvisionParticipant(ctx context.Context, in *ProvisionParticipantRequest, opts ...grpc.CallOption) (*ProvisionParticipantResponse, error)
+	OnboardParticipant(ctx context.Context, in *OnboardParticipantRequest, opts ...grpc.CallOption) (*OnboardParticipantResponse, error)
+	ListUsers(ctx context.Context, in *ListUsersRequest, opts ...grpc.CallOption) (*ListUsersResponse, error)
+	GetUser(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*GetUserResponse, error)
+	IssueLoginNonce(ctx context.Context, in *IssueLoginNonceRequest, opts ...grpc.CallOption) (*IssueLoginNonceResponse, error)
+	VerifyPKILogin(ctx context.Context, in *VerifyPKILoginRequest, opts ...grpc.CallOption) (*VerifyPKILoginResponse, error)
+	ChangeClientSecret(ctx context.Context, in *ChangeClientSecretRequest, opts ...grpc.CallOption) (*ChangeClientSecretResponse, error)
+}
+
+type identityServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewIdentityServiceClient(cc grpc.ClientConnInterface) IdentityServiceClient {
+	return &identityServiceClient{cc: cc}
+}
+
+func (c *identityServiceClient) Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error) {
+	out := new(LoginResponse)
+	return out, c.cc.Invoke(ctx, LoginMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*RefreshTokenResponse, error) {
+	out := new(RefreshTokenResponse)
+	return out, c.cc.Invoke(ctx, RefreshTokenMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) RevokeToken(ctx context.Context, in *RevokeTokenRequest, opts ...grpc.CallOption) (*RevokeTokenResponse, error) {
+	out := new(RevokeTokenResponse)
+	return out, c.cc.Invoke(ctx, RevokeTokenMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) ValidateToken(ctx context.Context, in *ValidateTokenRequest, opts ...grpc.CallOption) (*ValidateTokenResponse, error) {
+	out := new(ValidateTokenResponse)
+	return out, c.cc.Invoke(ctx, ValidateTokenMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) RegisterParticipant(ctx context.Context, in *RegisterParticipantRequest, opts ...grpc.CallOption) (*RegisterParticipantResponse, error) {
+	out := new(RegisterParticipantResponse)
+	return out, c.cc.Invoke(ctx, RegisterParticipantMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) SignTransaction(ctx context.Context, in *SignTransactionRequest, opts ...grpc.CallOption) (*SignTransactionResponse, error) {
+	out := new(SignTransactionResponse)
+	return out, c.cc.Invoke(ctx, SignTransactionMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) GetKYCStatus(ctx context.Context, in *GetKYCStatusRequest, opts ...grpc.CallOption) (*GetKYCStatusResponse, error) {
+	out := new(GetKYCStatusResponse)
+	return out, c.cc.Invoke(ctx, GetKYCStatusMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) ProvisionParticipant(ctx context.Context, in *ProvisionParticipantRequest, opts ...grpc.CallOption) (*ProvisionParticipantResponse, error) {
+	out := new(ProvisionParticipantResponse)
+	return out, c.cc.Invoke(ctx, ProvisionParticipantMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) OnboardParticipant(ctx context.Context, in *OnboardParticipantRequest, opts ...grpc.CallOption) (*OnboardParticipantResponse, error) {
+	out := new(OnboardParticipantResponse)
+	return out, c.cc.Invoke(ctx, OnboardParticipantMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) ListUsers(ctx context.Context, in *ListUsersRequest, opts ...grpc.CallOption) (*ListUsersResponse, error) {
+	out := new(ListUsersResponse)
+	return out, c.cc.Invoke(ctx, ListUsersMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) GetUser(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*GetUserResponse, error) {
+	out := new(GetUserResponse)
+	return out, c.cc.Invoke(ctx, GetUserMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) IssueLoginNonce(ctx context.Context, in *IssueLoginNonceRequest, opts ...grpc.CallOption) (*IssueLoginNonceResponse, error) {
+	out := new(IssueLoginNonceResponse)
+	return out, c.cc.Invoke(ctx, IssueLoginNonceMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) VerifyPKILogin(ctx context.Context, in *VerifyPKILoginRequest, opts ...grpc.CallOption) (*VerifyPKILoginResponse, error) {
+	out := new(VerifyPKILoginResponse)
+	return out, c.cc.Invoke(ctx, VerifyPKILoginMethod, in, out, opts...)
+}
+
+func (c *identityServiceClient) ChangeClientSecret(ctx context.Context, in *ChangeClientSecretRequest, opts ...grpc.CallOption) (*ChangeClientSecretResponse, error) {
+	out := new(ChangeClientSecretResponse)
+	return out, c.cc.Invoke(ctx, ChangeClientSecretMethod, in, out, opts...)
+}

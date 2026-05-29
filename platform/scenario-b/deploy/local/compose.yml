@@ -1,0 +1,72 @@
+services:
+  keycloak:
+    build:
+      context: ./keycloak
+      dockerfile: Dockerfile
+    container_name: "${KEYCLOAK_CONTAINER_NAME:-cbweb3-keycloak}"
+    user: "0:0"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: "${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
+      KEYCLOAK_ENV_OUTPUT_DIR: "${KEYCLOAK_ENV_OUTPUT_DIR:-/opt/keycloak/host/backend/config}"
+      KEYCLOAK_PORT: "${KEYCLOAK_PORT:-8081}"
+      KC_DB: postgres
+      KC_DB_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB_KEYCLOAK:-cbweb3_keycloak}"
+      KC_DB_USERNAME: "${POSTGRES_USER:-default}"
+      KC_DB_PASSWORD: "${POSTGRES_PASSWORD:-default}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./keycloak/init.sh:/opt/keycloak/init.sh
+      - ../../:/opt/keycloak/host
+    entrypoint: ["bash", "/opt/keycloak/init.sh"]
+    networks:
+      - cbweb3_network
+    ports:
+      - "${KEYCLOAK_PORT:-8081}:8080"
+
+  postgres:
+    image: "postgres:${POSTGRES_IMAGE_TAG:-17-alpine}"
+    container_name: "${POSTGRES_CONTAINER_NAME:-cbweb3-postgres}"
+    restart: always
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-default}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-default}"
+      POSTGRES_DB: "${POSTGRES_DB:-postgres}"
+      POSTGRES_DB_BANK_A: "${POSTGRES_DB_BANK_A:-cbweb3_bank_a}"
+      POSTGRES_DB_BANK_B: "${POSTGRES_DB_BANK_B:-cbweb3_bank_b}"
+      POSTGRES_DB_BANK_C: "${POSTGRES_DB_BANK_C:-cbweb3_bank_c}"
+      POSTGRES_DB_BANK_D: "${POSTGRES_DB_BANK_D:-cbweb3_bank_d}"
+      POSTGRES_DB_CENTRAL_BANK_A: "${POSTGRES_DB_CENTRAL_BANK_A:-cbweb3_central_bank_a}"
+      POSTGRES_DB_CENTRAL_BANK_B: "${POSTGRES_DB_CENTRAL_BANK_B:-cbweb3_central_bank_b}"
+      POSTGRES_DB_MLP: "${POSTGRES_DB_MLP:-cbweb3_mlp}"
+      POSTGRES_DB_KEYCLOAK: "${POSTGRES_DB_KEYCLOAK:-cbweb3_keycloak}"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init-multi-db.sh:/docker-entrypoint-initdb.d/01-init-multi-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-default}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - cbweb3_network
+
+  redis:
+    image: "redis:${REDIS_IMAGE_TAG:-7-alpine}"
+    container_name: "${REDIS_CONTAINER_NAME:-cbweb3-redis}"
+    restart: always
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - cbweb3_network
+
+volumes:
+  postgres_data:
+
+networks:
+  cbweb3_network:
+    external: true

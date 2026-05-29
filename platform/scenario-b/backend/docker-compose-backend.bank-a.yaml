@@ -1,0 +1,131 @@
+services:
+  compliance-bank-a:
+    image: cbweb3/compliance:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-compliance-bank-a"
+    env_file:
+      - path: ./config/.env.infra.bank-a
+        required: true
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+      BANK_CODE: "bank-a"
+      PKI_DIR: /workspace/backend/config/pki
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_bank_a}?sslmode=disable"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "19093:9093"
+    networks:
+      - cbweb3_backend_bank_a
+      - cbweb3_network
+
+  auth-bank-a:
+    image: cbweb3/auth:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-auth-bank-a"
+    env_file:
+      - path: ./config/.env.infra.bank-a
+        required: true
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      KEYCLOAK_BASE_URL: "${KEYCLOAK_BASE_URL:-http://keycloak:8080}"
+      KEYCLOAK_REALM: "${KC_REALM:-bank-a}"
+      KEYCLOAK_CLIENT_ID: "${KC_CLIENT_ID:-bank-a-client}"
+      KEYCLOAK_CLIENT_SECRET: "${KC_CLIENT_SECRET:-change-me}"
+      KEYCLOAK_JWKS_CACHE_TTL_SEC: "3000"
+      KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
+      COMPLIANCE_GRPC_ADDR: compliance-bank-a:9093
+      COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
+      REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
+      REDIS_DB: "0"
+    ports:
+      - "19091:9091"
+    depends_on:
+      - compliance-bank-a
+    networks:
+      - cbweb3_backend_bank_a
+      - cbweb3_network
+
+  payment-orchestrator-bank-a:
+    image: cbweb3/payment-orchestrator:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-payment-orchestrator-bank-a"
+    env_file:
+      - path: ./config/.env.infra.bank-a
+        required: true
+      - path: ../deploy/local/paladin/spoke-a/.deployed-addrs.env
+        required: false
+    environment:
+      PAYMENT_GRPC_PORT: "9094"
+      BESU_OPERATOR_KEY: "0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1"
+      CACTI_API_URL: "http://host.docker.internal:4000"
+      FX_POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_bank_a}?sslmode=disable"
+      # BesuRelayerExecutor: CB hub key mints W-tCeBM; commercial bank wallet receives (ENTITY_BESU_ADDRESS).
+      HUB_BESU_RPC_URL: "http://host.docker.internal:8645"
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1338}"
+      SIGNER_PRIVATE_KEY: "${CB_HUB_SIGNER_PRIVATE_KEY:-c87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3}"
+      HUB_MINT_RECIPIENT: "${ENTITY_BESU_ADDRESS:-0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef}"
+      ENTITY_BESU_ADDRESS: "0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef"
+      SPOKE_BESU_RPC_URL: "http://cbweb3-spoke-a-besu.bank-a:8545"
+      SPOKE_CHAIN_ID: "${BESU_CHAIN_ID:-1338}"
+      SPOKE_SIGNER_KEY: "${SIGNER_PRIVATE_KEY:-0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1}"
+      # Local dev: commercial bank may lack spoke fiat balance — mint W-BRL on Hub only.
+      BRIDGE_SKIP_SPOKE_LOCK: "${BRIDGE_SKIP_SPOKE_LOCK:-true}"
+    ports:
+      - "19094:9094"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cbweb3_backend_bank_a
+      - cbweb3_network
+
+  api-gateway-bank-a:
+    image: cbweb3/api-gateway:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-api-gateway-bank-a"
+    env_file:
+      - path: ./config/.env.infra.bank-a
+        required: true
+    environment:
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "30"
+      AUTH_GRPC_ADDR: auth-bank-a:9091
+      COMPLIANCE_GRPC_ADDR: compliance-bank-a:9093
+      PAYMENT_GRPC_ADDR: payment-orchestrator-bank-a:9094
+      PKI_DIR: /workspace/backend/config/pki
+      BANK_CODE: "bank-a"
+      CENTRAL_BANK_API_URL: "http://api-gateway-central-bank-a:8080"
+      ENTITY_BESU_ADDRESS: "0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef"
+      CB_TOKEN_RECIPIENT_ADDRESS: "${CB_TOKEN_RECIPIENT_ADDRESS:-0x627306090abaB3A6e1400e9345bC60c78a8BEf57}"
+      # Hub AMM (Scenario B v2) — Spoke-A plays Hub role in local dev
+      HUB_BESU_RPC_URL: "http://host.docker.internal:8645"
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1338}"
+      SIGNER_PRIVATE_KEY: "${SIGNER_PRIVATE_KEY:-0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1}"
+      # 007-bridge-based-cb-liquidity — Sovereign CB Liquidity (set after make contracts.seed-sovereign-pair)
+      LIQUIDITY_COMMIT_REGISTRY_ADDRESS: "${LIQUIDITY_COMMIT_REGISTRY_ADDRESS:-}"
+      SOVEREIGN_PAIR_AMM_MAP: "${SOVEREIGN_PAIR_AMM_MAP:-{}}"
+      SOVEREIGN_PAIR_IDS: "${SOVEREIGN_PAIR_IDS:-}"
+      W_TOKEN_BRL_ADDRESS: "${W_TOKEN_BRL_ADDRESS:-}"
+      W_TOKEN_ARS_ADDRESS: "${W_TOKEN_ARS_ADDRESS:-}"
+      LOCAL_CB_HUB_SIGNER: "${LOCAL_CB_HUB_SIGNER:-}"
+      INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-}"
+      # 009: Cacti relay for sovereign bridge-out (CB-B executes burn+release via Cacti)
+      CACTI_API_URL: "${CACTI_API_URL:-http://host.docker.internal:4000}"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "18080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - auth-bank-a
+      - compliance-bank-a
+      - payment-orchestrator-bank-a
+    networks:
+      - cbweb3_backend_bank_a
+      - cbweb3_network
+
+networks:
+  cbweb3_backend_bank_a:
+  cbweb3_network:
+    external: true

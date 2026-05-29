@@ -1,0 +1,106 @@
+services:
+  compliance-central-bank-a:
+    image: cbweb3/compliance:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-compliance-central-bank-a"
+    env_file:
+      - path: ./config/.env.infra.central-bank-a
+        required: true
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_central_bank_a}?sslmode=disable"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "39093:9093"
+    networks:
+      - cbweb3_backend_central_bank_a
+      - cbweb3_network
+
+  auth-central-bank-a:
+    image: cbweb3/auth:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-auth-central-bank-a"
+    env_file:
+      - path: ./config/.env.infra.central-bank-a
+        required: true
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      KEYCLOAK_BASE_URL: "${KEYCLOAK_BASE_URL:-http://keycloak:8080}"
+      KEYCLOAK_REALM: "${KC_REALM:-central-bank-a}"
+      KEYCLOAK_CLIENT_ID: "${KC_CLIENT_ID:-central-bank-a-client}"
+      KEYCLOAK_CLIENT_SECRET: "${KC_CLIENT_SECRET:-change-me}"
+      KEYCLOAK_JWKS_CACHE_TTL_SEC: "3000"
+      KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
+      COMPLIANCE_GRPC_ADDR: compliance-central-bank-a:9093
+      COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
+      REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
+      REDIS_DB: "2"
+    ports:
+      - "39091:9091"
+    depends_on:
+      - compliance-central-bank-a
+    networks:
+      - cbweb3_backend_central_bank_a
+      - cbweb3_network
+
+  payment-orchestrator-central-bank-a:
+    image: cbweb3/payment-orchestrator:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-payment-orchestrator-central-bank-a"
+    env_file:
+      - path: ./config/.env.infra.central-bank-a
+        required: true
+      - path: ../deploy/local/paladin/spoke-a/.deployed-addrs.env
+        required: false
+    environment:
+      PAYMENT_GRPC_PORT: "9094"
+      CACTI_API_URL: "http://host.docker.internal:4000"
+      # BesuRelayerExecutor: Hub chain config for W-tCeBM mint/burn on-chain.
+      HUB_BESU_RPC_URL: "http://host.docker.internal:8645"
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1338}"
+      SIGNER_PRIVATE_KEY: "${SIGNER_PRIVATE_KEY:-c87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3}"
+    ports:
+      - "39094:9094"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cbweb3_backend_central_bank_a
+      - cbweb3_network
+
+  api-gateway-central-bank-a:
+    image: cbweb3/api-gateway:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-api-gateway-central-bank-a"
+    env_file:
+      - path: ./config/.env.infra.central-bank-a
+        required: true
+    environment:
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "30"
+      AUTH_GRPC_ADDR: auth-central-bank-a:9091
+      COMPLIANCE_GRPC_ADDR: compliance-central-bank-a:9093
+      PAYMENT_GRPC_ADDR: payment-orchestrator-central-bank-a:9094
+      PKI_DIR: /workspace/backend/config/pki
+      # Hub AMM (Scenario B v2) — Spoke-A plays Hub role in local dev
+      HUB_BESU_RPC_URL: "http://host.docker.internal:8645"
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1338}"
+      SIGNER_PRIVATE_KEY: "${SIGNER_PRIVATE_KEY:-c87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3}"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "38080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - auth-central-bank-a
+      - compliance-central-bank-a
+      - payment-orchestrator-central-bank-a
+    networks:
+      - cbweb3_backend_central_bank_a
+      - cbweb3_network
+
+networks:
+  cbweb3_backend_central_bank_a:
+  cbweb3_network:
+    external: true

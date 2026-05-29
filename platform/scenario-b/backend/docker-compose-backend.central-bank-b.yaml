@@ -1,0 +1,117 @@
+services:
+  compliance-central-bank-b:
+    image: cbweb3/compliance:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-compliance-central-bank-b"
+    env_file:
+      - path: ./config/.env.infra.central-bank-b
+        required: true
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_central_bank_b}?sslmode=disable"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "60093:9093"
+    networks:
+      - cbweb3_backend_central_bank_b
+      - cbweb3_network
+
+  auth-central-bank-b:
+    image: cbweb3/auth:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-auth-central-bank-b"
+    env_file:
+      - path: ./config/.env.infra.central-bank-b
+        required: true
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      KEYCLOAK_BASE_URL: "${KEYCLOAK_BASE_URL:-http://keycloak:8080}"
+      KEYCLOAK_REALM: "${KC_REALM:-central-bank-b}"
+      KEYCLOAK_CLIENT_ID: "${KC_CLIENT_ID:-central-bank-b-client}"
+      KEYCLOAK_CLIENT_SECRET: "${KC_CLIENT_SECRET:-change-me}"
+      KEYCLOAK_JWKS_CACHE_TTL_SEC: "3000"
+      KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
+      COMPLIANCE_GRPC_ADDR: compliance-central-bank-b:9093
+      COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
+      REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
+      REDIS_DB: "5"
+    ports:
+      - "60091:9091"
+    depends_on:
+      - compliance-central-bank-b
+    networks:
+      - cbweb3_backend_central_bank_b
+      - cbweb3_network
+
+  payment-orchestrator-central-bank-b:
+    image: cbweb3/payment-orchestrator:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-payment-orchestrator-central-bank-b"
+    env_file:
+      - path: ./config/.env.infra.central-bank-b
+        required: true
+      - path: ../deploy/local/paladin/spoke-b/.deployed-addrs.env
+        required: false
+    environment:
+      PAYMENT_GRPC_PORT: "9094"
+      CACTI_API_URL: "http://host.docker.internal:4000"
+      # BesuRelayerExecutor: Hub chain config for W-tCeBM mint/burn on-chain.
+      HUB_BESU_RPC_URL: "http://host.docker.internal:8645"
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1338}"
+      SIGNER_PRIVATE_KEY: "${SIGNER_PRIVATE_KEY:-c87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3}"
+      # HUB_MINT_RECIPIENT must match LOCAL_CB_HUB_SIGNER (the address the api-gateway
+      # pre-flight checks for W-tCeBM balance before committing to the sovereign pool).
+      HUB_MINT_RECIPIENT: "${HUB_MINT_RECIPIENT:-0xf17f52151EbEF6C7334FAD080c5704D77216b732}"
+      # Spoke-B config: enables spoke release (tCeBM-ARS minted to Bank-B on Spoke-B)
+      # after W-ARS burn on Hub. SIGNER (0x627306) has GOVERNANCE_ROLE on SpokeBridge-B.
+      # SPOKE_BRIDGE_ADDRESS comes from env_file (.env.infra.central-bank-b).
+      SPOKE_BESU_RPC_URL: "http://host.docker.internal:8745"
+      SPOKE_CHAIN_ID: "${SPOKE_B_CHAIN_ID:-1339}"
+    ports:
+      - "60094:9094"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cbweb3_backend_central_bank_b
+      - cbweb3_network
+
+  api-gateway-central-bank-b:
+    image: cbweb3/api-gateway:${TAG:-local}-${VERSION:-latest}
+    pull_policy: build
+    container_name: "backend-api-gateway-central-bank-b"
+    env_file:
+      - path: ./config/.env.infra.central-bank-b
+        required: true
+    environment:
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "30"
+      AUTH_GRPC_ADDR: auth-central-bank-b:9091
+      COMPLIANCE_GRPC_ADDR: compliance-central-bank-b:9093
+      PAYMENT_GRPC_ADDR: payment-orchestrator-central-bank-b:9094
+      PKI_DIR: /workspace/backend/config/pki
+      HUB_BESU_RPC_URL: "http://host.docker.internal:8645"
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1338}"
+      # CB-B hub identity key (0xf17f52...) — registered in IdentityRegistry as the CB of CB-B's
+      # sovereign W-tCeBM tokens. All hub-level operations (registerCommit, proposePair,
+      # registerCurrency) require msg.sender == getCentralBankOf(token), which is this address.
+      # MUST differ from payment-orchestrator's SIGNER_PRIVATE_KEY (0x627306..., spoke signer).
+      SIGNER_PRIVATE_KEY: "${CENTRAL_BANK_B_PRIVATE_KEY:-ae6ae8e5ccbfb04590405997ee2d52d2b330726137b875053c36d94e974d162f}"
+    volumes:
+      - ./config/pki:/workspace/backend/config/pki
+    ports:
+      - "60080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - auth-central-bank-b
+      - compliance-central-bank-b
+      - payment-orchestrator-central-bank-b
+    networks:
+      - cbweb3_backend_central_bank_b
+      - cbweb3_network
+
+networks:
+  cbweb3_backend_central_bank_b:
+  cbweb3_network:
+    external: true

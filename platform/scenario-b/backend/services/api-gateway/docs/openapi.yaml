@@ -1,0 +1,3220 @@
+openapi: 3.0.3
+info:
+  title: CBWeb3 API Gateway
+  version: 2.2.0
+  description: >
+    OpenAPI specification for the CBWeb3 platform API Gateway.
+    Implements authentication, participant onboarding, KYC/AML compliance,
+    governance operations over the identity service (Keycloak + KMS),
+    and payment orchestrator operations (HTLC dual-layer + Zeto token management
+    via Paladin sidecar + escrow deposit/tokenization/redeem lifecycle).
+
+    Security note: All /compliance write endpoints require CENTRAL_BANK role.
+    Payment endpoints (HTLC + Token) are only available when the payment
+    orchestrator service is configured.
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+tags:
+  - name: Health
+    description: Service health endpoint
+  - name: Authentication
+    description: >
+      Login, refresh, logout, PKI wallet bind, and optional MVP helper
+      `resolve-challenge` (development only — signs nonce from a PEM file under PKI_DIR).
+  - name: Compliance
+    description: KYC credential issuance, verification, AML screening, and governance
+  - name: Onboarding
+    description: >
+      3-phase PKI + Blockchain participant onboarding.
+
+      **Central Bank mode** (public endpoints at /api/v1/onboarding/):
+      Phase 1: Commercial bank submits CSR + blockchain public key.
+      Phase 2.5: Poll for KYC approval and PoP nonce.
+      Phase 3: Sign PoP nonce to prove wallet ownership, receive certificate and clientSecret.
+      Recovery: GET /api/v1/onboarding/my-status — look up status from the JWT
+      session (BankID claim); no request_id or query parameters needed.
+
+      **Commercial Bank proxy mode** (protected endpoints at /api/v1/onboarding/):
+      The commercial bank gateway proxies requests to the Central Bank.
+      In smart mode (KMS + PKI configured), the proxy injects CSR, blockchain key,
+      and PoP signature automatically — the frontend only sends metadata.
+      GET /api/v1/onboarding/my-status with cookie — the proxy resolves the bank
+      identity from the JWT BankID claim; the frontend sends no parameters.
+  - name: Governance
+    description: >
+      Governance Portal — endpoints exclusive to the Central Bank (ROLE_GOVERNANCE).
+      Participant registration, PKI certificate management, account control,
+      circuit breaker, global parameters, audit logs, and user management.
+  - name: HTLC
+    description: >
+      Hash Time-Locked Contract (HTLC) dual-layer operations.
+      Coordinates public HTLC state on Hyperledger Besu with private token
+      locking via Zeto/Paladin. Supports lock, settle (happy path), and
+      refund (timeout path) lifecycle.
+      These endpoints are only available when the payment orchestrator
+      service is configured (PaymentHandler != nil).
+  - name: Token
+    description: >
+      Token operations — mint, transfer, and balance queries for tCeBM
+      (tokenized Central Bank Money) via the Zeto privacy-preserving token
+      system on Paladin sidecar.
+      These endpoints are only available when the payment orchestrator
+      service is configured (PaymentHandler != nil).
+  - name: Escrow
+    description: >
+      Escrow lifecycle — deposit, tokenization (tCeBM → tCeBM), and
+      redeem (tCeBM → tCeBM) operations. Covers the full lifecycle of
+      converting fiat central bank money (ERC-20) to tokenized central bank
+      money (Zeto privacy token) and back. Central Bank nodes process approve/
+      reject and fiat-exchange actions; commercial bank nodes proxy deposit,
+      escrow, and redeem requests to the Central Bank.
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate client credentials and obtain access + refresh tokens
+      description: >
+        Two authentication flows depending on the participant role:
+
+        **Direct login** (ROLE_GOVERNANCE, ROLE_SUPERVISOR, ROLE_NOC, etc.):
+        Returns accessToken + optional refreshToken in the JSON body.
+        Also sets HttpOnly cookies access_token and refresh_token automatically.
+
+        **PKI nonce flow** (ROLE_COMMERCIAL_BANK, ROLE_TREASURY):
+        Returns { "nonce": "<hex>" } only — no tokens, no cookies.
+        The client must sign the nonce and complete login via POST /auth/wallet/bind.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: >
+            Login successful. For direct flows the response body contains tokens
+            and the Set-Cookie headers inject HttpOnly cookies. For PKI flows
+            only a nonce is returned (no cookies).
+          headers:
+            Set-Cookie:
+              description: >
+                HttpOnly auth cookies set for direct login flows only.
+                Two cookies are emitted: access_token and refresh_token (when present).
+              schema:
+                type: string
+                example: "access_token=eyJ...; Path=/; HttpOnly; SameSite=Strict; Max-Age=300"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Issue a new access token from a valid refresh token
+      description: >
+        Exchanges a valid refresh token for new access and refresh tokens.
+        The response also renews the access_token and refresh_token HttpOnly cookies.
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: New access token issued and cookies renewed
+          headers:
+            Set-Cookie:
+              description: >
+                Renewed access_token and refresh_token HttpOnly cookies.
+              schema:
+                type: string
+                example: "access_token=eyJ...; Path=/; HttpOnly; SameSite=Strict; Max-Age=3600"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "invalid or expired refresh token"
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke the current access token and clear auth cookies
+      description: >
+        Revokes the access token at the identity provider (Keycloak).
+        The token is read from the access_token HttpOnly cookie.
+        On success, both access_token and refresh_token cookies are expired (MaxAge=-1).
+      operationId: logout
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Logged out successfully; auth cookies expired
+          headers:
+            Set-Cookie:
+              description: >
+                access_token and refresh_token cookies are expired (MaxAge=-1).
+              schema:
+                type: string
+                example: "access_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=-1"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "logged out successfully"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/wallet/bind:
+    post:
+      tags: [Authentication]
+      summary: Verify PKI login challenge and issue tokens
+      description: >
+        Step 2 of the PKI authentication flow (public endpoint — no authentication required).
+        The client submits the user_id, the DER-encoded ECDSA signature (hex) of the
+        login nonce obtained from POST /auth/login, and the participant X.509
+        certificate PEM issued by the Central Bank CA.
+        On success, access_token and refresh_token HttpOnly cookies are set in addition
+        to the JSON response body.
+      operationId: walletBind
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, nonce_signature_hex, cert_pem]
+              properties:
+                user_id:
+                  type: string
+                nonce_signature_hex:
+                  type: string
+                  description: DER-encoded ECDSA signature in hex format
+                cert_pem:
+                  type: string
+                  description: PEM-encoded participant certificate
+      responses:
+        "200":
+          description: PKI verification successful; tokens issued and cookies set
+          headers:
+            Set-Cookie:
+              description: >
+                access_token and refresh_token HttpOnly cookies set on successful PKI login.
+              schema:
+                type: string
+                example: "access_token=eyJ...; Path=/; HttpOnly; SameSite=Strict; Max-Age=900"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: PKI verification failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                pkiFailed:
+                  value:
+                    error: "PKI verification failed"
+                invalidChain:
+                  value:
+                    error: "INVALID_CERTIFICATE_CHAIN"
+                nonceMismatch:
+                  value:
+                    error: "NONCE_SIGNATURE_MISMATCH"
+        "501":
+          description: PKI authentication not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "PKI authentication not configured"
+
+  /api/v1/auth/resolve-challenge:
+    post:
+      tags: [Authentication]
+      summary: "[MVP] Sign PKI login nonce from a local PEM file"
+      description: >
+        Development-only helper. Reads a combined PEM file from the directory
+        set by environment variable PKI_DIR (default `./config/pki`).
+        The file must contain both a CERTIFICATE block and an EC PRIVATE KEY block.
+        Returns the DER ECDSA signature (hex) and certificate PEM for use with
+        POST /api/v1/auth/wallet/bind. Do not expose in production.
+      operationId: resolveChallenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveChallengeRequest"
+      responses:
+        "200":
+          description: Nonce signed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolveChallengeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          description: PEM file missing, invalid, or not found under PKI_DIR
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                notFound:
+                  value:
+                    error: "cert file not found: bank.pem"
+                badPem:
+                  value:
+                    error: "CERTIFICATE block not found in bank.pem"
+
+  /api/v1/auth/me:
+    get:
+      tags: [Authentication]
+      summary: Return the authenticated caller's token claims
+      description: >
+        Validates the bearer token (or access_token cookie) and returns the
+        enriched claims embedded in the JWT by the identity service.
+        Optional fields (wallet, country, bankId, privacyGroup) are only present
+        when populated in the token.
+      operationId: getMe
+      security:
+        - CookieAuth: []
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Token claims for the authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+              example:
+                subject: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                issuer: "http://keycloak:8080/realms/cbweb3-spoke-a"
+                roles: ["ROLE_COMMERCIAL_BANK"]
+                wallet: "0x4a3b..."
+                country: "BR"
+                bankId: "341"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/pki-login:
+    post:
+      tags: [Authentication]
+      summary: PKI re-login after onboarding (Commercial Bank proxy mode)
+      description: >
+        Available only on Commercial Bank gateways with a proxy handler.
+        Reads the saved participant certificate from `PKI_DIR/{bankCode}-participant.crt`,
+        then executes the two-step PKI login against the Central Bank:
+        1. POST /auth/login with user_id + client_secret → nonce
+        2. Sign nonce with P-256 key → POST /auth/wallet/bind → accessToken
+
+        Returns the access token on success. Requires the participant to have
+        completed onboarding (POST /onboarding/complete) so the certificate is on disk.
+      operationId: pkiLogin
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PKILoginRequest"
+      responses:
+        "200":
+          description: PKI login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PKILoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: PKI login failed (invalid credentials or signature)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+
+  /api/v1/auth/client-secret/change:
+    post:
+      tags: [Authentication]
+      summary: Rotate the clientSecret for the authenticated participant
+      description: >
+        Allows an authenticated participant (ROLE_COMMERCIAL_BANK, ROLE_TREASURY) to
+        rotate their own clientSecret. Requires a valid access_token cookie and
+        knowledge of the current secret.
+        After rotation the old clientSecret is immediately invalidated.
+      operationId: changeClientSecret
+      security:
+        - CookieAuth: []
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeClientSecretRequest"
+      responses:
+        "200":
+          description: Client secret rotated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "client secret changed successfully"
+        "400":
+          description: Missing current_client_secret or new_client_secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "current_client_secret and new_client_secret are required"
+        "401":
+          description: Invalid bearer token or current_client_secret is incorrect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "invalid current client secret"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "501":
+          description: Client secret rotation not available in this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "client secret rotation not available"
+
+  /api/v1/compliance/kyc/status/{subject}:
+    get:
+      tags: [Compliance]
+      summary: Get KYC lifecycle status for a subject
+      operationId: getKycStatus
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: subject
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The userID or participant identifier
+      responses:
+        "200":
+          description: KYC status returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KYCStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/compliance/approve-kyc:
+    post:
+      tags: [Compliance]
+      summary: >
+        Approve KYC for a participant (GOVERNANCE only).
+        Sets status to ACTIVE in PostgreSQL and calls setParticipant(wallet, role, true)
+        on the ParticipantRegistry contract (Hyperledger Besu).
+      operationId: approveKyc
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject:
+                  type: string
+                  description: Keycloak user ID of the participant to approve
+                reason:
+                  type: string
+                  description: Optional reason for audit log
+      responses:
+        "200":
+          description: Participant approved — ACTIVE on-chain and off-chain
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subject, status]
+                properties:
+                  subject:
+                    type: string
+                  status:
+                    type: string
+                    example: ACTIVE
+                  tx_hash:
+                    type: string
+                    description: On-chain transaction hash (absent if Besu unavailable)
+                    example: "0x1234..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Participant not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/compliance/aml/screen:
+    post:
+      tags: [Compliance]
+      summary: >
+        AML/CFT screening gate — checks if a subject is sanctioned.
+        Returns 403 if FROZEN, REVOKED, or REJECTED (REQ-COM-007).
+      operationId: amlScreen
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject:
+                  type: string
+      responses:
+        "200":
+          description: Subject is not sanctioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AMLScreenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Subject is sanctioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AMLScreenResponse"
+
+  /api/v1/compliance/participants/provision:
+    post:
+      tags: [Compliance]
+      summary: >
+        Set KYC status for a participant (CENTRAL_BANK only).
+        Used for initial approval, freeze, unfreeze, and revocation.
+      operationId: provisionParticipant
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisionRequest"
+      responses:
+        "200":
+          description: Participant provisioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/compliance/accounts/freeze:
+    post:
+      tags: [Compliance]
+      summary: >
+        Freeze an account (CENTRAL_BANK only — REQ-COM-003, UT-API-16).
+        Sets KYC status to FROZEN — all operations are suspended.
+      operationId: freezeAccount
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject:
+                  type: string
+      responses:
+        "200":
+          description: Account frozen
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/compliance/accounts/unfreeze:
+    post:
+      tags: [Compliance]
+      summary: Restore a frozen account to APPROVED status (CENTRAL_BANK only)
+      operationId: unfreezeAccount
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject:
+                  type: string
+      responses:
+        "200":
+          description: Account unfrozen
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/compliance/participants:
+    get:
+      tags: [Compliance]
+      summary: List registered participants (GOVERNANCE only)
+      description: >
+        Returns all participants registered in the compliance-orchestrator database.
+        Supports optional filtering by onboarding status and free-text search
+        (institution name or CNPJ, case-insensitive). Requires ROLE_GOVERNANCE.
+      operationId: listParticipants
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          description: >
+            Filter by participant onboarding status. If omitted, all statuses are returned.
+            Invalid values return an empty list (no validation error).
+          schema:
+            type: string
+            enum: [PENDING, CREDENTIAL_REQUESTED, KYC_APPROVED, ACTIVE, FROZEN, REVOKED]
+        - name: search
+          in: query
+          description: Free-text search across institution_name and CNPJ (case-insensitive ILIKE)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of participants (may be empty if no matches)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [participants]
+                properties:
+                  participants:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ParticipantRecord"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/compliance/register:
+    post:
+      tags: [Compliance]
+      summary: Register a new participant (Commercial Bank or Treasury user) — CENTRAL_BANK only
+      description: >
+        Called by Central Bank administrators to onboard new Commercial Banks and
+        Treasury users. The identity service creates a Keycloak user, optionally
+        generates a KMS key pair, and optionally registers the wallet address
+        on-chain in the ParticipantRegistry smart contract (signed with CB_PRIVATE_KEY).
+      operationId: registerParticipant
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterParticipantRequest"
+      responses:
+        "201":
+          description: Participant successfully registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterParticipantResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Participant already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ---------------------------------------------------------------------------
+  # Onboarding — 3-phase PKI + Blockchain
+  # ---------------------------------------------------------------------------
+
+  /api/v1/onboarding/credential-request:
+    post:
+      tags: [Onboarding]
+      summary: "Phase 1: Submit CSR and blockchain public key for credentialing"
+      description: >
+        Central Bank mode — public endpoint.
+        A commercial bank submits its PKCS#10 CSR and secp256k1 blockchain public
+        key to initiate the onboarding process. The Central Bank's identity service
+        creates a Keycloak user and stores the credential request.
+        Poll GET /api/v1/onboarding/status/{requestId} until KYC is approved.
+      operationId: submitCredentialRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialRequestBody"
+      responses:
+        "201":
+          description: Credential request accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialRequestResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/onboarding/status/{requestId}:
+    get:
+      tags: [Onboarding]
+      summary: "Phase 2.5: Poll onboarding status and retrieve PoP nonce"
+      description: >
+        Central Bank mode — public endpoint.
+        The commercial bank polls this endpoint to discover when KYC approval
+        has been granted. When approved, the response includes `pop_nonce` — a
+        hex-encoded challenge that must be signed to prove wallet ownership
+        (Phase 3).
+      operationId: getOnboardingStatus
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Request ID returned by Phase 1 (POST /onboarding/credential-request)
+      responses:
+        "200":
+          description: Current onboarding status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/onboarding/complete:
+    post:
+      tags: [Onboarding]
+      summary: "Phase 3: Complete onboarding with PoP signature"
+      description: >
+        Central Bank mode — public endpoint.
+        The commercial bank signs the `pop_nonce` from Phase 2.5 with its
+        secp256k1 private key and submits the signature. On success the CA
+        issues an X.509 certificate and a one-time `client_secret` for future
+        authentication. **Store the client_secret securely — it is not recoverable.**
+      operationId: completeOnboarding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteOnboardingRequest"
+      responses:
+        "200":
+          description: Onboarding completed — certificate and credentials issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompleteOnboardingResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/onboarding/my-status:
+    get:
+      tags: [Onboarding]
+      summary: "Recover onboarding status from JWT session (no parameters needed)"
+      description: >
+        **Commercial Bank mode (primary use case)** — requires `access_token` cookie.
+
+        The frontend simply calls `GET /onboarding/my-status` with the session
+        cookie. The backend resolves the bank identity from the JWT `BankID`
+        claim (enriched during token validation from the compliance participant
+        record) and proxies the lookup to the Central Bank. No query parameters
+        are needed.
+
+        **Central Bank mode** — public endpoint that accepts `bank_code` as a
+        query parameter. Used internally by the proxy and by the governance
+        portal when looking up a specific bank.
+
+        If `bank_code` is omitted on the Central Bank, the handler falls back
+        to the JWT `BankID` claim (if the caller is authenticated).
+
+        Returns `request_id`, `user_id`, and `status`. Sensitive fields
+        such as `wallet_address` and `pop_nonce` are intentionally omitted
+        from this recovery endpoint.
+      operationId: getMyOnboardingStatus
+      security:
+        - CookieAuth: []   # Commercial Bank: session cookie (BankID resolved from JWT)
+        - {}               # Central Bank: unauthenticated with bank_code param
+      parameters:
+        - name: bank_code
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "a"
+          description: >
+            Optional. Only required when calling the Central Bank endpoint
+            directly (e.g. governance portal). On the Commercial Bank proxy,
+            the bank identity is resolved from the JWT session — omit this
+            parameter entirely.
+      responses:
+        "200":
+          description: Current onboarding status for the bank
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingStatusResponse"
+              examples:
+                pending:
+                  summary: Request submitted, awaiting KYC review
+                  value:
+                    request_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    status: "CREDENTIAL_REQUESTED"
+                approved:
+                  summary: KYC approved — bank may proceed to Phase 3
+                  value:
+                    request_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    status: "KYC_APPROVED"
+                active:
+                  summary: Onboarding already completed
+                  value:
+                    request_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                    status: "ACTIVE"
+        "400":
+          description: >
+            Unable to determine bank identity. Either supply `bank_code` as a
+            query parameter or authenticate with a session whose JWT contains
+            a `BankID` claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No onboarding request found for the resolved bank
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          description: Central Bank API unreachable (Commercial Bank proxy mode)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/onboarding/initiate:
+    post:
+      tags: [Onboarding]
+      summary: "Proxy: Initiate onboarding from Commercial Bank gateway"
+      description: >
+        Commercial Bank proxy mode — requires access_token cookie.
+        Forwards the request to the Central Bank's POST /onboarding/credential-request.
+
+        In **smart mode** (KMS + PKI_DIR configured), the proxy automatically:
+        1. Reads the CSR from `PKI_DIR/{bankCode}.csr`
+        2. Creates/retrieves a secp256k1 key pair via KMS
+        3. Injects `csr_pem` and `blockchain_pub_key_hex` into the payload
+
+        The frontend only needs to send institution metadata.
+      operationId: proxyInitiateOnboarding
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingInitiateRequest"
+      responses:
+        "201":
+          description: Credential request accepted by Central Bank
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialRequestResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          description: Central Bank API unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ---------------------------------------------------------------------------
+  # Governance Portal — ROLE_GOVERNANCE only
+  # All endpoints below require: access_token cookie (ROLE_GOVERNANCE)
+  # ---------------------------------------------------------------------------
+
+  /api/v1/governance/participants:
+    post:
+      tags: [Governance]
+      summary: Register a participant in the registry (without CSR)
+      description: >
+        Inserts a participant directly into the compliance-orchestrator database.
+        Does not create a Keycloak user — use this endpoint when the Keycloak user
+        already exists and you only want to insert/update the compliance record.
+        To create the Keycloak user and register, use POST /api/v1/compliance/register.
+      operationId: govRegisterParticipant
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovParticipantRequest"
+      responses:
+        "201":
+          description: Participant registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string }
+                  status:  { type: string, example: PENDING }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/registry:
+    get:
+      tags: [Governance]
+      summary: List registered participants
+      operationId: govGetRegistry
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [PENDING, ACTIVE, FROZEN, REVOKED] }
+          description: Filter by status
+        - name: search
+          in: query
+          schema: { type: string }
+          description: Search by name, CNPJ, or user_id
+      responses:
+        "200":
+          description: List of participants
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  participants:
+                    type: array
+                    items: { $ref: "#/components/schemas/ParticipantRecord" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/registry/csr:
+    post:
+      tags: [Governance]
+      summary: Sign a PKCS#10 CSR submitted by the participant (preferred flow)
+      description: >
+        The participant generates their own ECDSA-P256 key pair locally,
+        creates a PKCS#10 CSR, and delivers it to the Central Bank out-of-band.
+        The Central Bank submits the CSR via this endpoint; the CA signs the certificate
+        without ever seeing the participant's private key.
+        The participant is registered with status PENDING until KYC approval
+        (POST /api/v1/compliance/approve-kyc).
+
+        Prerequisite: the participant's Keycloak user must already exist
+        (created via POST /api/v1/compliance/register). The user_id in the payload
+        is the UUID returned by that endpoint.
+      operationId: govSubmitCSR
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitCSRRequest"
+            example:
+              csr_pem: "-----BEGIN CERTIFICATE REQUEST-----\nMIIB...-----END CERTIFICATE REQUEST-----"
+              user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+              role: "ROLE_COMMERCIAL_BANK"
+              institution_name: "Banco Itau S.A."
+              cnpj: "60.701.190/0001-04"
+      responses:
+        "201":
+          description: CSR signed — X.509 certificate issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitCSRResponse"
+        "400":
+          description: Missing required field or invalid CSR signature
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500":
+          description: CA_CERT_FILE not configured or internal error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v1/governance/accounts:
+    get:
+      tags: [Governance]
+      summary: List accounts with operational status
+      operationId: govGetAccounts
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items: { $ref: "#/components/schemas/ParticipantRecord" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/accounts/freeze:
+    post:
+      tags: [Governance]
+      summary: Freeze a participant account
+      operationId: govFreezeAccount
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubjectReasonRequest" }
+      responses:
+        "200":
+          description: Account frozen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subject: { type: string }
+                  status:  { type: string, example: FROZEN }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/accounts/unfreeze:
+    post:
+      tags: [Governance]
+      summary: Unfreeze a participant account
+      operationId: govUnfreezeAccount
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubjectReasonRequest" }
+      responses:
+        "200":
+          description: Account unfrozen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subject: { type: string }
+                  status:  { type: string, example: ACTIVE }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/circuit-breaker/status:
+    get:
+      tags: [Governance]
+      summary: Get global circuit breaker status
+      operationId: govGetCircuitBreakerStatus
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Current circuit breaker status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CircuitBreakerStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/circuit-breaker/toggle:
+    post:
+      tags: [Governance]
+      summary: Enable or disable the global circuit breaker
+      operationId: govToggleCircuitBreaker
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pause, reason]
+              properties:
+                pause:
+                  type: boolean
+                  description: true to pause, false to resume
+                reason:
+                  type: string
+                  example: "emergency maintenance"
+      responses:
+        "200":
+          description: State changed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_paused: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/parameters:
+    get:
+      tags: [Governance]
+      summary: Get global system parameters
+      operationId: govGetParameters
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Current parameters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SystemParameters" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    put:
+      tags: [Governance]
+      summary: Update global system parameters
+      description: The `reason` field is required — returns 400 if absent.
+      operationId: govUpdateParameters
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/SystemParameters"
+                - type: object
+                  required: [reason]
+                  properties:
+                    reason:
+                      type: string
+                      example: "quarterly operational adjustment"
+      responses:
+        "200":
+          description: Parameters updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/audit/logs:
+    get:
+      tags: [Governance]
+      summary: Get audit logs
+      operationId: govGetAuditLogs
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [SESSION, CREDENTIAL, FREEZE, CIRCUIT_BREAKER, PARAMETER, PARTICIPANT]
+        - name: severity
+          in: query
+          schema: { type: string, enum: [INFO, WARNING, CRITICAL] }
+        - name: from_date
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to_date
+          in: query
+          schema: { type: string, format: date-time }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditRecord" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------------------
+  # Governance — User Management
+  # ---------------------------------------------------------------------------
+
+  /api/v1/governance/users:
+    get:
+      tags: [Governance]
+      summary: List registered participants (user management)
+      description: >
+        Returns a paginated list of participants registered in the identity service
+        (Keycloak). Supports filtering by role and status. Optional fields in each
+        entry (institutionName, walletAddress, country, bankCode) are only present
+        when populated.
+      operationId: govListUsers
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [ROLE_COMMERCIAL_BANK, ROLE_TREASURY, ROLE_NOC, ROLE_SUPERVISOR, ROLE_GOVERNANCE_OFFICER]
+          description: Filter by participant role
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, ACTIVE, FROZEN, REVOKED]
+          description: Filter by participant status
+      responses:
+        "200":
+          description: List of participants
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListUsersResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "501":
+          description: User management not available in this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/governance/users/{userId}:
+    get:
+      tags: [Governance]
+      summary: Get a specific participant profile
+      description: >
+        Returns the full profile of a single registered participant by their
+        Keycloak UUID. Optional fields (email, institutionName, walletAddress,
+        country, bankCode) are only present when populated.
+      operationId: govGetUser
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Keycloak UUID of the participant
+      responses:
+        "200":
+          description: Participant profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetail"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501":
+          description: User management not available in this deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------------------
+  # Payment Orchestrator — HTLC (dual-layer: Besu + Zeto/Paladin)
+  # All endpoints below require: access_token cookie
+  # Only available when the payment orchestrator service is configured.
+  # ---------------------------------------------------------------------------
+
+  /api/v1/htlc/lock:
+    post:
+      tags: [HTLC]
+      summary: Create a dual-layer HTLC lock
+      description: >
+        Locks tokens via a Hash Time-Locked Contract. The secret is generated
+        internally; a hash lock is derived from it. On the public layer (Besu)
+        the HTLC coordination contract records the lock metadata, while on the
+        private layer (Zeto/Paladin) the actual token amount is locked.
+      operationId: lockHTLC
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LockHTLCRequest"
+      responses:
+        "201":
+          description: HTLC created and tokens locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LockHTLCResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/settle:
+    post:
+      tags: [HTLC]
+      summary: Settle an HTLC by revealing the secret
+      description: >
+        Happy-path settlement. The caller reveals the pre-image (secret) that
+        hashes to the hash lock. The contract validates SHA-256(secret) == hashLock,
+        then calls Zeto transferLocked() to release the privately locked tokens
+        to the receiver.
+      operationId: settleHTLC
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettleHTLCRequest"
+      responses:
+        "200":
+          description: HTLC settled — tokens released to receiver
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettleHTLCResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/refund:
+    post:
+      tags: [HTLC]
+      summary: Refund an HTLC after timelock expiry
+      description: >
+        Timeout-path refund. If the timelock has expired and the secret was
+        never revealed, the sender can reclaim the locked tokens via
+        Zeto unlock().
+      operationId: refundHTLC
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundHTLCRequest"
+      responses:
+        "200":
+          description: HTLC refunded — tokens returned to sender
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundHTLCResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/status/{contractId}:
+    get:
+      tags: [HTLC]
+      summary: Get the status of a specific HTLC
+      description: >
+        Returns the full HTLC lock record including state, hash lock,
+        time lock, sender, receiver, and optionally the secret (only visible
+        to the lock creator).
+      operationId: getHTLCStatus
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: HTLC contract identifier returned by POST /htlc/lock
+      responses:
+        "200":
+          description: HTLC status returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetHTLCStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/search:
+    get:
+      tags: [HTLC]
+      summary: Search HTLC locks by criteria
+      description: >
+        Returns a list of HTLC lock records matching the provided filters.
+        All query parameters are optional; when none are provided, all locks
+        visible to the caller are returned.
+      operationId: searchHTLC
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: agreement_id
+          in: query
+          schema:
+            type: string
+          description: Filter by FX agreement identifier
+        - name: sender
+          in: query
+          schema:
+            type: string
+          description: Filter by sender identity
+        - name: receiver
+          in: query
+          schema:
+            type: string
+          description: Filter by receiver identity
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [LOCKED, SETTLED, REFUNDED]
+          description: Filter by HTLC state
+      responses:
+        "200":
+          description: Matching HTLC locks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchHTLCResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ---------------------------------------------------------------------------
+  # Payment Orchestrator — Token (Zeto via Paladin)
+  # All endpoints below require: access_token cookie
+  # Only available when the payment orchestrator service is configured.
+  # ---------------------------------------------------------------------------
+
+  /api/v1/token/mint:
+    post:
+      tags: [Token]
+      summary: Mint tCeBM tokens
+      description: >
+        Issues new tCeBM (tokenized Central Bank Money) to the specified
+        Paladin identity via the Zeto privacy-preserving token system.
+      operationId: mintToken
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MintTokenRequest"
+      responses:
+        "201":
+          description: Tokens minted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MintTokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/token/transfer:
+    post:
+      tags: [Token]
+      summary: Transfer tCeBM tokens
+      description: >
+        Transfers tCeBM tokens to the specified Paladin identity via
+        Zeto's privacy-preserving transfer mechanism.
+      operationId: transferToken
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransferTokenRequest"
+      responses:
+        "200":
+          description: Tokens transferred successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransferTokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/token/balance:
+    get:
+      tags: [Token]
+      summary: Get token balance for the authenticated bank's Paladin identity
+      description: >
+        Returns the tCeBM balance for the Paladin identity configured internally
+        in the payment-orchestrator of the calling bank. No identity parameter
+        is required or accepted.
+      operationId: getTokenBalance
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Balance returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetBalanceResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/token/fiat-balance:
+    get:
+      tags: [Token]
+      summary: Get fiat token balance for the authenticated bank's Besu operator
+      description: >
+        Returns the tCeBM balance for the Besu operator address configured
+        internally in the payment-orchestrator of the calling bank. No address
+        parameter is required or accepted.
+      operationId: getFiatBalance
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Fiat balance returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetFiatBalanceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Fiat token adapter unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ---------------------------------------------------------------------------
+  # Payment Orchestrator — Escrow (Deposit / Tokenization / Redeem)
+  # Central Bank: local processing + approve/reject
+  # Commercial Bank: proxy to Central Bank
+  # ---------------------------------------------------------------------------
+
+  /api/v1/payments/deposits:
+    post:
+      tags: [Escrow]
+      summary: Register a fiat deposit request
+      description: >
+        Commercial bank registers intent to deposit fiat funds. The Central
+        Bank creates a pending deposit record and returns a deposit ID.
+      operationId: registerDeposit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDepositRequest"
+      responses:
+        "201":
+          description: Deposit registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterDepositResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      tags: [Escrow]
+      summary: List deposits
+      description: Returns all deposits, optionally filtered by requester_id.
+      operationId: listDeposits
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          schema:
+            type: string
+          description: Filter by requester Besu address
+      responses:
+        "200":
+          description: Deposits listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListDepositsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/deposits/approve:
+    post:
+      tags: [Escrow]
+      summary: Approve a pending deposit (Central Bank only)
+      operationId: approveDeposit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deposit_id]
+              properties:
+                deposit_id:
+                  type: string
+      responses:
+        "201":
+          description: Deposit approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: approved
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/deposits/reject:
+    post:
+      tags: [Escrow]
+      summary: Reject a pending deposit (Central Bank only)
+      operationId: rejectDeposit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deposit_id]
+              properties:
+                deposit_id:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Deposit rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reason:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/deposits/fiat-exchange:
+    post:
+      tags: [Escrow]
+      summary: Execute fiat exchange — mint tCeBM (Central Bank only)
+      description: >
+        After approving a deposit, the Central Bank triggers the fiat exchange:
+        mints tCeBM (ERC-20) to the requester's Besu address on-chain.
+      operationId: requestFiatExchange
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deposit_id]
+              properties:
+                deposit_id:
+                  type: string
+      responses:
+        "201":
+          description: Fiat exchange completed — tCeBM minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatExchangeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/escrows:
+    post:
+      tags: [Escrow]
+      summary: Request tokenization escrow (tCeBM → tCeBM)
+      description: >
+        Request to convert tCeBM (fiat token, ERC-20 on Besu) into tCeBM
+        (tokenized central bank money, Zeto privacy token on Paladin).
+        The Central Bank will burn tCeBM and mint equivalent tCeBM.
+      operationId: requestEscrow
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestEscrowRequest"
+      responses:
+        "201":
+          description: Escrow request registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestEscrowResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      tags: [Escrow]
+      summary: List escrow requests
+      description: Returns all escrow requests, optionally filtered by requester_id.
+      operationId: listEscrows
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          schema:
+            type: string
+          description: Filter by requester Besu address
+      responses:
+        "200":
+          description: Escrows listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListEscrowsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/escrows/approve:
+    post:
+      tags: [Escrow]
+      summary: Approve escrow — burn tCeBM + mint tCeBM (Central Bank only)
+      description: >
+        Burns the requester's tCeBM on Besu and mints equivalent tCeBM via
+        Zeto/Paladin to the requester's Paladin identity.
+      operationId: approveEscrow
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [escrow_id]
+              properties:
+                escrow_id:
+                  type: string
+      responses:
+        "201":
+          description: Escrow approved — tCeBM burned, tCeBM minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApproveEscrowResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/escrows/reject:
+    post:
+      tags: [Escrow]
+      summary: Reject an escrow request (Central Bank only)
+      operationId: rejectEscrow
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [escrow_id]
+              properties:
+                escrow_id:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Escrow rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reason:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/redeems:
+    post:
+      tags: [Escrow]
+      summary: Request redemption (tCeBM → tCeBM)
+      description: >
+        Request to redeem tCeBM back into tCeBM. Commercial bank nodes first
+        initiate a Zeto transfer of tCeBM to the Central Bank, then proxy the
+        request with the transfer tx hash.
+      operationId: requestRedeem
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestRedeemRequest"
+      responses:
+        "201":
+          description: Redeem request registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestRedeemResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      tags: [Escrow]
+      summary: List redeem requests
+      description: Returns all redeem requests, optionally filtered by requester_id.
+      operationId: listRedeems
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          schema:
+            type: string
+          description: Filter by requester Besu address
+      responses:
+        "200":
+          description: Redeems listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListRedeemsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/redeems/approve:
+    post:
+      tags: [Escrow]
+      summary: Approve redeem — mint tCeBM to requester (Central Bank only)
+      description: >
+        The Central Bank verifies the Zeto transfer was received, then mints
+        equivalent tCeBM (ERC-20) to the requester's Besu address.
+      operationId: approveRedeem
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [redeem_id]
+              properties:
+                redeem_id:
+                  type: string
+      responses:
+        "201":
+          description: Redeem approved — tCeBM minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApproveRedeemResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/redeems/reject:
+    post:
+      tags: [Escrow]
+      summary: Reject a redeem request — return tCeBM (Central Bank only)
+      description: >
+        Rejects the redeem request and transfers the tCeBM back to the
+        requester's Paladin identity via Zeto.
+      operationId: rejectRedeem
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [redeem_id]
+              properties:
+                redeem_id:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Redeem rejected — tCeBM returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reason:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: >
+        HttpOnly cookie set automatically by POST /auth/login (direct flow),
+        POST /auth/wallet/bind, and POST /auth/refresh.
+        All protected endpoints require this cookie to be present.
+        Attributes: HttpOnly, SameSite=Strict, Path=/; Secure flag depends on
+        the COOKIE_SECURE environment variable (true for HTTPS, false for HTTP).
+
+  responses:
+    BadRequest:
+      description: Invalid body or missing required fields
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Missing or invalid access_token cookie
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Insufficient permissions (requires CENTRAL_BANK role)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "insufficient permissions"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "not found"
+    Conflict:
+      description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "already exists"
+    PreconditionFailed:
+      description: Precondition not met (e.g. certificate not found on disk)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "participant certificate not found; complete onboarding first"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    ErrorCodeResponse:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    LoginRequest:
+      type: object
+      required: [clientId, clientSecret]
+      properties:
+        clientId:
+          type: string
+          example: bank-a
+        clientSecret:
+          type: string
+          format: password
+          example: secret-a
+
+    RefreshTokenRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+
+    ResolveChallengeRequest:
+      type: object
+      required: [nonce, cert_file]
+      properties:
+        nonce:
+          type: string
+          description: Hex-encoded login nonce from POST /auth/login (32 bytes as 64 hex chars)
+          example: "a1b2c3d4e5f6789012345678901234567890abcdef0123456789abcdef0123"
+        cert_file:
+          type: string
+          description: >
+            Filename only (no path segments). Resolved as PKI_DIR/cert_file.
+          example: "banco_itau_bundle.pem"
+
+    ResolveChallengeResponse:
+      type: object
+      required: [nonce_signature_hex, cert_pem]
+      properties:
+        nonce_signature_hex:
+          type: string
+          description: DER-encoded ECDSA signature (hex) of SHA-256(nonce bytes)
+        cert_pem:
+          type: string
+          description: PEM-encoded participant certificate extracted from the file
+
+    AuthResponse:
+      type: object
+      required: [accessToken, expiresIn, tokenType]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        expiresIn:
+          type: integer
+          example: 3600
+        tokenType:
+          type: string
+          example: Bearer
+
+    MeResponse:
+      type: object
+      required: [subject, issuer, roles]
+      properties:
+        subject:
+          type: string
+          description: Keycloak user UUID
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        issuer:
+          type: string
+          description: Token issuer (Keycloak realm URL)
+          example: "http://keycloak:8080/realms/cbweb3-spoke-a"
+        roles:
+          type: array
+          items:
+            type: string
+          example: ["ROLE_COMMERCIAL_BANK"]
+        wallet:
+          type: string
+          description: EVM wallet address (present when bound)
+          example: "0x4a3b..."
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code (present when set)
+          example: "BR"
+        bankId:
+          type: string
+          description: Regulatory bank identifier (present when set)
+          example: "341"
+        privacyGroup:
+          type: string
+          description: Besu privacy group ID (present when set)
+
+    ChangeClientSecretRequest:
+      type: object
+      required: [current_client_secret, new_client_secret]
+      properties:
+        current_client_secret:
+          type: string
+          description: The participant's current clientSecret (first factor for PKI login)
+          example: "X5Kp2mN8vQzR1tYwLjHdGfAeNcUoBs7p3I4xV6yKE0Z="
+        new_client_secret:
+          type: string
+          description: >
+            The new clientSecret to set. Must be a strong random value (256-bit base64 recommended).
+            Store securely — it is not recoverable after this call.
+          example: "NovoSegredoBase64ForteGeradoLocalmente=="
+
+    KYCStatusResponse:
+      type: object
+      required: [subject, status]
+      properties:
+        subject:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, FROZEN, REVOKED, REJECTED]
+
+    AMLScreenResponse:
+      type: object
+      required: [subject, status, sanctioned]
+      properties:
+        subject:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, FROZEN, REVOKED, REJECTED]
+        sanctioned:
+          type: boolean
+
+    ProvisionRequest:
+      type: object
+      required: [subject, status]
+      properties:
+        subject:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, FROZEN, REVOKED]
+
+    ProvisionResponse:
+      type: object
+      required: [subject, status]
+      properties:
+        subject:
+          type: string
+        status:
+          type: string
+
+    RegisterParticipantRequest:
+      type: object
+      required: [username, email, role]
+      properties:
+        username:
+          type: string
+          description: Keycloak username / login identifier for the new participant
+          example: "banco-brasil-admin"
+        email:
+          type: string
+          format: email
+          description: Email address of the new participant
+          example: "admin@bancodobrasil.com.br"
+        role:
+          type: string
+          description: >
+            Prefixed role to assign. One of: ROLE_COMMERCIAL_BANK, ROLE_NOC,
+            ROLE_SUPERVISOR, ROLE_TREASURY, ROLE_GOVERNANCE.
+          enum:
+            - ROLE_COMMERCIAL_BANK
+            - ROLE_NOC
+            - ROLE_SUPERVISOR
+            - ROLE_TREASURY
+            - ROLE_GOVERNANCE
+          example: "ROLE_COMMERCIAL_BANK"
+        institution_name:
+          type: string
+          description: Human-readable institution name
+          example: "Banco do Brasil S.A."
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+          example: "BR"
+        bank_code:
+          type: string
+          description: Optional regulatory or internal bank identifier
+          example: "001"
+
+    RegisterParticipantResponse:
+      type: object
+      required: [userId, role, status]
+      properties:
+        userId:
+          type: string
+          description: Keycloak UUID of the newly created user
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        role:
+          type: string
+          example: "ROLE_COMMERCIAL_BANK"
+        status:
+          type: string
+          description: >
+            Initial lifecycle status. Always PENDING — the participant must
+            submit a CSR via POST /governance/registry/csr,
+            and then be approved via POST /compliance/approve-kyc.
+          example: "PENDING"
+        walletAddress:
+          type: string
+          description: EVM address generated by the KMS (present for ROLE_COMMERCIAL_BANK)
+          example: "0xAbCd..."
+        txHash:
+          type: string
+          description: On-chain transaction hash from ParticipantRegistry.registerMember
+          example: "0x1234..."
+
+    # --- Governance schemas ---
+
+    GovParticipantRequest:
+      type: object
+      required: [user_id, role]
+      properties:
+        user_id:
+          type: string
+          description: Keycloak UUID of the participant (obtained from POST /api/v1/compliance/register)
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        role:
+          type: string
+          enum: [ROLE_COMMERCIAL_BANK, ROLE_TREASURY, ROLE_NOC, ROLE_SUPERVISOR, ROLE_GOVERNANCE_OFFICER]
+          example: ROLE_COMMERCIAL_BANK
+        institution_name:
+          type: string
+          example: "Banco Itau S.A."
+        cnpj:
+          type: string
+          example: "60.701.190/0001-04"
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, FROZEN, REVOKED]
+          default: PENDING
+
+    ParticipantRecord:
+      type: object
+      properties:
+        user_id:         { type: string }
+        institution_name: { type: string }
+        cnpj:            { type: string }
+        role:            { type: string }
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, FROZEN, REVOKED]
+        wallet_address:  { type: string }
+        cert_expiry:     { type: string, format: date-time }
+
+    SubmitCSRRequest:
+      type: object
+      required: [csr_pem, user_id, role, institution_name]
+      properties:
+        csr_pem:
+          type: string
+          description: >
+            PEM content of the PKCS#10 CSR generated by the participant via
+            `openssl req -new -key ec_key.pem -out bank.csr -subj "/CN=<user_id>/O=<institution>/OU=<role>/C=BR"`
+          example: "-----BEGIN CERTIFICATE REQUEST-----\nMIIB...-----END CERTIFICATE REQUEST-----"
+        user_id:
+          type: string
+          description: >
+            Keycloak UUID of the commercial bank. Obtained from the response of
+            POST /api/v1/compliance/register (field userId).
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        role:
+          type: string
+          enum: [ROLE_COMMERCIAL_BANK, ROLE_TREASURY]
+          example: ROLE_COMMERCIAL_BANK
+        institution_name:
+          type: string
+          example: "Banco Itau S.A."
+        cnpj:
+          type: string
+          example: "60.701.190/0001-04"
+
+    SubmitCSRResponse:
+      type: object
+      properties:
+        user_id:
+          type: string
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        cert_pem:
+          type: string
+          description: X.509 certificate signed by the Central Bank CA. Deliver to the participant.
+        expires_at:
+          type: string
+          format: date-time
+          example: "2027-03-20T00:00:00Z"
+
+    SubjectReasonRequest:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+          description: Keycloak UUID of the target participant
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        reason:
+          type: string
+          example: "suspected fraud"
+
+    CircuitBreakerStatus:
+      type: object
+      properties:
+        is_paused:  { type: boolean }
+        reason:     { type: string }
+        updated_at: { type: string, format: date-time }
+
+    SystemParameters:
+      type: object
+      properties:
+        transaction_minimum:
+          type: string
+          example: "10"
+        transaction_maximum:
+          type: string
+          example: "1000000"
+        slippage_tolerance:
+          type: number
+          format: float
+          example: 0.01
+        settlement_window:
+          type: integer
+          example: 60
+
+    AuditRecord:
+      type: object
+      properties:
+        log_id:          { type: string }
+        timestamp:       { type: string, format: date-time }
+        actor_subject:   { type: string }
+        actor_address:   { type: string }
+        action_type:     { type: string }
+        target_subject:  { type: string }
+        correlation_id:  { type: string }
+        ip_address:      { type: string }
+        result:          { type: string }
+        category:
+          type: string
+          enum: [SESSION, CREDENTIAL, FREEZE, CIRCUIT_BREAKER, PARAMETER, PARTICIPANT]
+        severity:
+          type: string
+          enum: [INFO, WARNING, CRITICAL]
+        details:
+          type: object
+          additionalProperties: true
+
+    # --- Onboarding schemas ---
+
+    CredentialRequestBody:
+      type: object
+      required: [csr_pem, blockchain_pub_key_hex, role, username, email, institution_name]
+      properties:
+        csr_pem:
+          type: string
+          description: >
+            PEM content of the PKCS#10 CSR generated by the commercial bank.
+          example: "-----BEGIN CERTIFICATE REQUEST-----\nMIIB...-----END CERTIFICATE REQUEST-----"
+        blockchain_pub_key_hex:
+          type: string
+          description: Uncompressed secp256k1 public key in hex (130 chars, 04-prefix)
+          example: "04a1b2c3..."
+        institution_name:
+          type: string
+          example: "Banco do Brasil S.A."
+        cnpj:
+          type: string
+          description: Brazilian CNPJ (optional)
+          example: "00.000.000/0001-91"
+        bank_code:
+          type: string
+          example: "001"
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+          example: "BR"
+        role:
+          type: string
+          enum: [ROLE_COMMERCIAL_BANK, ROLE_TREASURY]
+          example: "ROLE_COMMERCIAL_BANK"
+        email:
+          type: string
+          format: email
+          example: "admin@bancodobrasil.com.br"
+        username:
+          type: string
+          example: "banco-brasil-admin"
+
+    CredentialRequestResponse:
+      type: object
+      required: [request_id, user_id, status]
+      properties:
+        request_id:
+          type: string
+          description: Unique onboarding request identifier (use for polling Phase 2.5)
+          example: "cr-a1b2c3d4"
+        user_id:
+          type: string
+          description: Keycloak UUID of the newly created user
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        wallet_address:
+          type: string
+          description: EVM wallet address derived from blockchain public key
+          example: "0xAbCd..."
+        status:
+          type: string
+          example: "PENDING"
+
+    OnboardingStatusResponse:
+      type: object
+      required: [request_id, user_id, status]
+      properties:
+        request_id:
+          type: string
+          example: "cr-a1b2c3d4"
+        user_id:
+          type: string
+        status:
+          type: string
+          description: >
+            Current status: PENDING (awaiting KYC), APPROVED (ready for PoP),
+            COMPLETED, or REJECTED.
+          enum: [PENDING, APPROVED, COMPLETED, REJECTED]
+          example: "APPROVED"
+
+    CompleteOnboardingRequest:
+      type: object
+      required: [user_id, pop_signature_hex, blockchain_pub_key_hex]
+      properties:
+        request_id:
+          type: string
+          description: Onboarding request ID (from Phase 1)
+        user_id:
+          type: string
+          description: Keycloak UUID
+        pop_signature_hex:
+          type: string
+          description: Hex-encoded secp256k1 signature of the PoP nonce (V=0/1)
+        blockchain_pub_key_hex:
+          type: string
+          description: Uncompressed secp256k1 public key in hex
+
+    CompleteOnboardingResponse:
+      type: object
+      required: [user_id, status]
+      properties:
+        user_id:
+          type: string
+        wallet_address:
+          type: string
+        cert_pem:
+          type: string
+          description: X.509 certificate signed by the Central Bank CA
+        tx_hash:
+          type: string
+          description: On-chain transaction hash from ParticipantRegistry
+        client_secret:
+          type: string
+          description: >
+            One-time clientSecret for future PKI login. **Store securely —
+            it is not recoverable after this response.**
+        status:
+          type: string
+          example: "COMPLETED"
+
+    OnboardingInitiateRequest:
+      type: object
+      description: >
+        Simplified payload for the Commercial Bank proxy mode. In smart mode,
+        the proxy injects csr_pem and blockchain_pub_key_hex from local PKI/KMS.
+      properties:
+        institution_name:
+          type: string
+          example: "Banco do Brasil S.A."
+        bank_code:
+          type: string
+          example: "001"
+        country:
+          type: string
+          example: "BR"
+        role:
+          type: string
+          enum: [ROLE_COMMERCIAL_BANK, ROLE_TREASURY]
+          example: "ROLE_COMMERCIAL_BANK"
+        email:
+          type: string
+          format: email
+        username:
+          type: string
+
+    # --- PKI Login schemas ---
+
+    PKILoginRequest:
+      type: object
+      required: [user_id, client_secret]
+      properties:
+        user_id:
+          type: string
+          description: Keycloak UUID of the participant
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        client_secret:
+          type: string
+          description: clientSecret obtained during onboarding (Phase 3 response)
+          format: password
+
+    PKILoginResponse:
+      type: object
+      required: [accessToken]
+      properties:
+        accessToken:
+          type: string
+          description: JWT access token
+
+    # --- User Management schemas ---
+
+    UserSummary:
+      type: object
+      required: [userId, role, status]
+      properties:
+        userId:
+          type: string
+          description: Keycloak UUID
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        role:
+          type: string
+          example: "ROLE_COMMERCIAL_BANK"
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, FROZEN, REVOKED]
+          example: "ACTIVE"
+        institutionName:
+          type: string
+          description: Present when populated
+          example: "Banco do Brasil S.A."
+        walletAddress:
+          type: string
+          description: EVM address (present when bound)
+          example: "0xAbCd..."
+        country:
+          type: string
+          example: "BR"
+        bankCode:
+          type: string
+          example: "001"
+
+    UserDetail:
+      type: object
+      required: [userId, username, role, status]
+      properties:
+        userId:
+          type: string
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        username:
+          type: string
+          example: "banco-brasil-admin"
+        role:
+          type: string
+          example: "ROLE_COMMERCIAL_BANK"
+        status:
+          type: string
+          enum: [PENDING, ACTIVE, FROZEN, REVOKED]
+          example: "ACTIVE"
+        email:
+          type: string
+          format: email
+          example: "admin@bancodobrasil.com.br"
+        institutionName:
+          type: string
+          example: "Banco do Brasil S.A."
+        walletAddress:
+          type: string
+          example: "0xAbCd..."
+        country:
+          type: string
+          example: "BR"
+        bankCode:
+          type: string
+          example: "001"
+
+    ListUsersResponse:
+      type: object
+      required: [users, total]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserSummary"
+        total:
+          type: integer
+          description: Total number of users matching the filter
+          example: 12
+
+    # --- HTLC schemas ---
+
+    LockHTLCRequest:
+      type: object
+      required: [agreement_id, receiver, amount, time_lock]
+      properties:
+        agreement_id:
+          type: string
+          description: FX agreement or trade identifier linking this HTLC
+          example: "FX_CROSS_SPOKE_001"
+        receiver:
+          type: string
+          description: Paladin identity of the token receiver
+          example: "funded_operator@spoke-b-cb"
+        amount:
+          type: string
+          description: Token amount to lock (big integer as string)
+          example: "1000000"
+        time_lock:
+          type: integer
+          format: int64
+          description: Unix timestamp (seconds) after which the sender can refund
+          example: 1711500000
+
+    LockHTLCResponse:
+      type: object
+      required: [contract_id, hash_lock]
+      properties:
+        contract_id:
+          type: string
+          description: Unique HTLC contract identifier
+          example: "htlc-a1b2c3d4"
+        hash_lock:
+          type: string
+          description: SHA-256 hash of the secret (hex-encoded)
+          example: "0xabcdef1234567890..."
+        htlc_tx_hash:
+          type: string
+          description: On-chain (Besu) transaction hash for HTLC coordination
+          example: "0x1234..."
+        tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for private token lock
+          example: "0x5678..."
+
+    SettleHTLCRequest:
+      type: object
+      required: [contract_id, secret]
+      properties:
+        contract_id:
+          type: string
+          description: HTLC contract identifier (from LockHTLCResponse)
+          example: "htlc-a1b2c3d4"
+        secret:
+          type: string
+          description: Pre-image whose SHA-256 hash equals the hash lock
+          example: "deadbeef01234567..."
+
+    SettleHTLCResponse:
+      type: object
+      properties:
+        htlc_tx_hash:
+          type: string
+          description: On-chain (Besu) transaction hash for settle
+          example: "0x1234..."
+        tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for token release
+          example: "0x5678..."
+
+    RefundHTLCRequest:
+      type: object
+      required: [contract_id]
+      properties:
+        contract_id:
+          type: string
+          description: HTLC contract identifier (from LockHTLCResponse)
+          example: "htlc-a1b2c3d4"
+
+    RefundHTLCResponse:
+      type: object
+      properties:
+        htlc_tx_hash:
+          type: string
+          description: On-chain (Besu) transaction hash for refund
+          example: "0x1234..."
+        tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for token unlock
+          example: "0x5678..."
+
+    HTLCLock:
+      type: object
+      description: Full HTLC lock record
+      properties:
+        contract_id:
+          type: string
+          description: Unique HTLC contract identifier
+        sender:
+          type: string
+          description: Paladin identity of the token sender/locker
+        receiver:
+          type: string
+          description: Paladin identity of the intended token receiver
+        hash_lock:
+          type: string
+          description: SHA-256 hash of the secret (hex-encoded)
+        time_lock:
+          type: integer
+          format: int64
+          description: Unix timestamp (seconds) after which the sender can refund
+        secret:
+          type: string
+          description: >
+            Pre-image of the hash lock. Only visible to the lock creator;
+            empty for other callers until the HTLC is settled.
+        lock_ref:
+          type: string
+          description: Reference to the Zeto locked UTXO
+        state:
+          type: string
+          enum:
+            - HTLC_STATE_INVALID
+            - HTLC_STATE_PENDING
+            - HTLC_STATE_LOCKED
+            - HTLC_STATE_SETTLED
+            - HTLC_STATE_REFUNDED
+          description: Current lifecycle state of the HTLC
+
+    GetHTLCStatusResponse:
+      type: object
+      properties:
+        lock:
+          $ref: "#/components/schemas/HTLCLock"
+
+    SearchHTLCResponse:
+      type: object
+      properties:
+        locks:
+          type: array
+          items:
+            $ref: "#/components/schemas/HTLCLock"
+        total:
+          type: integer
+          description: Number of matching HTLC locks
+
+    # --- Token schemas ---
+
+    MintTokenRequest:
+      type: object
+      required: [to, amount]
+      properties:
+        to:
+          type: string
+          description: Paladin identity to receive the minted tokens
+          example: "funded_operator@spoke-a-cb"
+        amount:
+          type: string
+          description: Amount to mint (big integer as string)
+          example: "10000000"
+
+    MintTokenResponse:
+      type: object
+      properties:
+        tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for the mint operation
+          example: "0x1234..."
+
+    TransferTokenRequest:
+      type: object
+      required: [to, amount]
+      properties:
+        to:
+          type: string
+          description: Paladin identity to receive the tokens
+          example: "funded_operator@spoke-b-cb"
+        amount:
+          type: string
+          description: Amount to transfer (big integer as string)
+          example: "500000"
+
+    TransferTokenResponse:
+      type: object
+      properties:
+        tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for the transfer
+          example: "0x5678..."
+
+    GetBalanceResponse:
+      type: object
+      properties:
+        balance:
+          type: string
+          description: Current tCeBM balance (big integer as string)
+          example: "9000000"
+
+    GetFiatBalanceResponse:
+      type: object
+      properties:
+        balance:
+          type: string
+          description: Current tCeBM balance (big integer as string)
+          example: "1250000"
+
+    # --- Escrow schemas ---
+
+    RegisterDepositRequest:
+      type: object
+      required: [amount]
+      properties:
+        requester_besu_address:
+          type: string
+          description: Besu address of the depositor (injected by proxy for commercial banks)
+          example: "0x1234abcd..."
+        requester_besu_address:
+          type: string
+          description: Paladin identity of the depositor
+          example: "funded_operator@spoke-a-bank-a"
+        amount:
+          type: string
+          description: Fiat amount to deposit (big integer as string)
+          example: "10000000"
+
+    RegisterDepositResponse:
+      type: object
+      properties:
+        deposit_id:
+          type: string
+          description: Unique deposit identifier
+          example: "dep-a1b2c3d4"
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+          example: PENDING
+
+    FiatExchangeResponse:
+      type: object
+      properties:
+        tx_hash:
+          type: string
+          description: Besu transaction hash of the tCeBM mint
+          example: "0x1234..."
+
+    DepositRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        requester_besu_address:
+          type: string
+        requester_besu_address:
+          type: string
+        amount:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+        rejection_reason:
+          type: string
+        fiat_mint_tx_hash:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ListDepositsResponse:
+      type: object
+      properties:
+        deposits:
+          type: array
+          items:
+            $ref: "#/components/schemas/DepositRecord"
+        total:
+          type: integer
+
+    RequestEscrowRequest:
+      type: object
+      required: [amount]
+      properties:
+        requester_besu_address:
+          type: string
+          description: Besu address of the requester
+          example: "0x1234abcd..."
+        requester_besu_address:
+          type: string
+          description: Paladin identity of the requester
+          example: "funded_operator@spoke-a-bank-a"
+        amount:
+          type: string
+          description: Amount of tCeBM to convert into tCeBM (big integer as string)
+          example: "5000000"
+
+    RequestEscrowResponse:
+      type: object
+      properties:
+        escrow_id:
+          type: string
+          example: "esc-a1b2c3d4"
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+          example: PENDING
+
+    ApproveEscrowResponse:
+      type: object
+      properties:
+        burn_tx_hash:
+          type: string
+          description: Besu transaction hash for tCeBM burn
+          example: "0x1234..."
+        mint_tx_hash:
+          type: string
+          description: Paladin transaction hash for tCeBM mint
+          example: "0x5678..."
+
+    EscrowRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        requester_besu_address:
+          type: string
+        requester_besu_address:
+          type: string
+        amount:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+        rejection_reason:
+          type: string
+        burn_tx_hash:
+          type: string
+        mint_tx_hash:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ListEscrowsResponse:
+      type: object
+      properties:
+        escrows:
+          type: array
+          items:
+            $ref: "#/components/schemas/EscrowRecord"
+        total:
+          type: integer
+
+    RequestRedeemRequest:
+      type: object
+      required: [amount, zeto_transfer_tx_hash]
+      properties:
+        requester_besu_address:
+          type: string
+          description: Besu address to receive minted tCeBM
+          example: "0x1234abcd..."
+        requester_besu_address:
+          type: string
+          description: Paladin identity that transferred tCeBM to the Central Bank
+          example: "funded_operator@spoke-a-bank-a"
+        amount:
+          type: string
+          description: Amount of tCeBM to redeem (big integer as string)
+          example: "5000000"
+        zeto_transfer_tx_hash:
+          type: string
+          description: Paladin tx hash proving tCeBM was transferred to the Central Bank
+          example: "0xabcd..."
+
+    RequestRedeemResponse:
+      type: object
+      properties:
+        redeem_id:
+          type: string
+          example: "red-a1b2c3d4"
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+          example: PENDING
+
+    ApproveRedeemResponse:
+      type: object
+      properties:
+        fiat_mint_tx_hash:
+          type: string
+          description: Besu transaction hash of the tCeBM mint to requester
+          example: "0x1234..."
+
+    RedeemRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        requester_besu_address:
+          type: string
+        requester_besu_address:
+          type: string
+        amount:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+        rejection_reason:
+          type: string
+        zeto_transfer_tx_hash:
+          type: string
+        fiat_mint_tx_hash:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ListRedeemsResponse:
+      type: object
+      properties:
+        redeems:
+          type: array
+          items:
+            $ref: "#/components/schemas/RedeemRecord"
+        total:
+          type: integer

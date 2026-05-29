@@ -1,0 +1,41 @@
+# Infrastructure Reuse Register — Scenario B
+# FR-017 / Decision 2
+# Records transversal infrastructure components reused from Scenario A setup.
+
+components:
+
+  - component_id: INFRA-001
+    component_name: Keycloak
+    layer: IDENTITY
+    reuse_mode: RECONFIGURED
+    legacy_dependency_check: true
+    notes: >
+      Realm reconfigured for Scenario B roles (central_bank, commercial_bank, hub_operator).
+      Old realm clients for Scenario A HTLC flows are removed.
+
+  - component_id: INFRA-002
+    component_name: PostgreSQL
+    layer: DATASTORE
+    reuse_mode: AS_IS
+    legacy_dependency_check: true
+    notes: >
+      Same Postgres instance reused. Scenario A schemas dropped via cleanup_scenarioa.go.
+      Scenario B schemas created via GORM AutoMigrate + db.Exec partitions/triggers.
+
+  - component_id: INFRA-003
+    component_name: Redis
+    layer: CACHE
+    reuse_mode: AS_IS
+    legacy_dependency_check: true
+    notes: >
+      Redis reused as quote/pool-state cache accelerator. Not the source of truth.
+      No Scenario A cache keys expected to conflict; namespaced with scenario-b prefix.
+
+  - component_id: INFRA-004
+    component_name: Docker Compose
+    layer: RUNTIME
+    reuse_mode: RECONFIGURED
+    legacy_dependency_check: true
+    notes: >
+      Docker Compose files reused as runtime orchestrator. Extended with Hub Besu,
+      Spoke A/B Besu, Paladin mock, and Cacti Relayer containers for Scenario B.

@@ -1,0 +1,483 @@
+syntax = "proto3";
+
+package payment_orchestrator.v1;
+
+option go_package = "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1;paymentorchestratorv1";
+
+// ─── Enums ───────────────────────────────────────────────────────────────
+
+enum FXAgreementState {
+  FX_STATE_INVALID = 0;
+  FX_STATE_PROPOSED = 1;
+  FX_STATE_ACCEPTED = 2;
+  FX_STATE_REJECTED = 3;
+  FX_STATE_CANCELLED = 4;
+  FX_STATE_SETTLED = 5;
+}
+
+enum FXAgreementEventSource {
+  FX_EVENT_SOURCE_LOCAL_API = 0;
+  FX_EVENT_SOURCE_RELAY = 1;
+  FX_EVENT_SOURCE_SYSTEM_JOB = 2;
+  FX_EVENT_SOURCE_ON_BEHALF = 3;
+}
+
+enum HTLCState {
+  HTLC_STATE_INVALID = 0;
+  HTLC_STATE_PENDING = 1;
+  HTLC_STATE_LOCKED = 2;
+  HTLC_STATE_SETTLED = 3;
+  HTLC_STATE_REFUNDED = 4;
+  HTLC_STATE_SETTLING = 5;  // transient: on-chain settle in progress
+  HTLC_STATE_REFUNDING = 6; // transient: on-chain refund in progress
+}
+
+// ─── FX Agreement Messages ───────────────────────────────────────────────
+
+message FXAgreement {
+  string trade_id = 1;
+  string originator = 2;
+  string counterparty_b = 3;
+  string settlement_agent = 10;
+  string custodian = 11;
+  string beneficiary = 12;
+  string origin_amount = 13;
+  string counter_amount = 14;
+  string origin_currency = 15;  // ISO 4217
+  string counter_currency = 16; // ISO 4217
+  string spoke_a_receiver = 17; // Besu address receiving lock on Spoke-A
+  string spoke_b_receiver = 18; // Besu address receiving lock on Spoke-B
+  string rate = 7;
+  uint64 expiry_date = 8;
+  FXAgreementState state = 9;
+  string group_id = 19;
+  string contract_address = 20;
+}
+
+message ProposeFXAgreementRequest {
+  string trade_id = 1;
+  string counterparty_b = 2;
+  string originator = 10;
+  string settlement_agent = 3;
+  string custodian = 4;
+  string beneficiary = 5;
+  string origin_amount = 6;
+  string counter_amount = 7;
+  string origin_currency = 8;
+  string counter_currency = 9;
+  string rate = 11;
+  uint64 expiry_date = 12;
+  bool on_behalf = 13;
+  string spoke_a_receiver = 14;
+  string spoke_b_receiver = 15;
+}
+
+message ProposeFXAgreementResponse {
+  string tx_hash = 1;
+  string trade_id = 2;
+}
+
+message AcceptFXAgreementRequest {
+  string trade_id = 1;
+  bool on_behalf = 2;
+}
+
+message AcceptFXAgreementResponse {
+  string tx_hash = 1;
+}
+
+message RejectFXAgreementRequest {
+  string trade_id = 1;
+  bool on_behalf = 2;
+}
+
+message RejectFXAgreementResponse {
+  string tx_hash = 1;
+}
+
+message CancelFXAgreementRequest {
+  string trade_id = 1;
+}
+
+message CancelFXAgreementResponse {
+  string tx_hash = 1;
+}
+
+message SettleFXAgreementRequest {
+  string trade_id = 1;
+}
+
+message SettleFXAgreementResponse {
+  string tx_hash = 1;
+}
+
+message GetFXAgreementRequest {
+  string trade_id = 1;
+}
+
+message GetFXAgreementResponse {
+  FXAgreement agreement = 1;
+}
+
+message ListFXAgreementsRequest {
+  string counterparty = 1;
+  string state = 2;
+}
+
+message ListFXAgreementsResponse {
+  repeated FXAgreement agreements = 1;
+}
+
+// FXAgreementEvent represents an immutable audit trail entry.
+message FXAgreementEvent {
+  int64 id = 1;
+  string trade_id = 2;
+  FXAgreementState from_state = 3;
+  FXAgreementState to_state = 4;
+  string actor = 5;
+  int64 occurred_at_unix = 6;
+  string notes = 7;
+  string tx_hash = 8;
+  FXAgreementEventSource source = 9;
+}
+
+message ListFXAgreementEventsRequest {
+  string trade_id = 1;
+}
+
+message ListFXAgreementEventsResponse {
+  repeated FXAgreementEvent events = 1;
+}
+
+// ─── HTLC Messages ──────────────────────────────────────────────────────
+
+message HTLCLock {
+  string contract_id = 1;
+  string sender = 2;
+  string receiver = 3;
+  string hash_lock = 4;
+  uint64 time_lock = 5;
+  string secret = 6;
+  HTLCState state = 8;
+}
+
+message LockHTLCRequest {
+  string agreement_id = 1;
+  string receiver = 2;  // Required: Besu address of the token recipient
+  string amount = 3;    // Required
+  uint64 time_lock = 4; // Optional: defaults to now+3600s (1h)
+}
+
+message LockHTLCResponse {
+  string contract_id = 1;
+  string hash_lock = 2;
+  string htlc_tx_hash = 3;
+}
+
+// LockHTLCWithHashLock creates an HTLC lock using an externally provided
+// hashLock (no secret is generated). Used by the responder spoke.
+message LockHTLCWithHashLockRequest {
+  string agreement_id = 1;
+  string receiver = 2;  // Required: Besu address of the token recipient
+  string amount = 3;    // Required
+  uint64 time_lock = 4; // Optional: defaults to now+1800s (30min)
+  string hash_lock = 5; // Required: hex-encoded SHA-256 hash from initiator
+}
+
+message LockHTLCWithHashLockResponse {
+  string contract_id = 1;
+  string hash_lock = 2;
+  string htlc_tx_hash = 3;
+}
+
+message SettleHTLCRequest {
+  string contract_id = 1;
+  string secret = 2;
+}
+
+message SettleHTLCResponse {
+  string htlc_tx_hash = 1;
+}
+
+message RefundHTLCRequest {
+  string contract_id = 1;
+}
+
+message RefundHTLCResponse {
+  string htlc_tx_hash = 1;
+}
+
+message GetHTLCStatusRequest {
+  string contract_id = 1;
+}
+
+message GetHTLCStatusResponse {
+  HTLCLock lock = 1;
+}
+
+message SearchHTLCRequest {
+  string agreement_id = 1;
+  string sender = 2;
+  string receiver = 3;
+  string state = 4;
+}
+
+message SearchHTLCResponse {
+  repeated HTLCLock locks = 1;
+}
+
+// ─── Token Balance ────────────────────────────────────────────────────────
+
+message GetBalanceRequest {
+  string address = 1; // Optional: Besu address to query; defaults to operator address
+}
+
+message GetBalanceResponse {
+  string balance = 1;
+}
+
+// GetFiatBalance queries the fCeBM balance.
+message GetFiatBalanceRequest {
+  string address = 1; // Optional: Besu address to query; defaults to operator address
+}
+
+message GetFiatBalanceResponse {
+  string balance = 1;
+}
+
+// ─── Escrow Enums ────────────────────────────────────────────────────────
+
+// Status of a fiat deposit request (commercial bank → central bank).
+enum DepositStatus {
+  DEPOSIT_STATUS_PENDING     = 0;
+  DEPOSIT_STATUS_APPROVED    = 1;
+  DEPOSIT_STATUS_REJECTED    = 2;
+  DEPOSIT_STATUS_MINT_FAILED = 3;
+}
+
+// Status of a tCeBM redeem (de-tokenization) request.
+enum RedeemStatus {
+  REDEEM_STATUS_PENDING  = 0;
+  REDEEM_STATUS_APPROVED = 1;
+  REDEEM_STATUS_REJECTED = 2;
+}
+
+// Status of an escrow (tokenization) request: fCeBM → tCeBM.
+enum EscrowStatus {
+  ESCROW_STATUS_PENDING  = 0;
+  ESCROW_STATUS_APPROVED = 1;
+  ESCROW_STATUS_REJECTED = 2;
+}
+
+// ─── Deposit Record Messages ─────────────────────────────────────────────
+
+// Persistent record for a fiat deposit request.
+// On approval, fCeBM is minted to the bank's Besu address (fiat_mint_tx_hash).
+message DepositRecord {
+  string id                     = 1;
+  string requester_id           = 2;
+  string requester_besu_address = 3;
+  string amount                 = 5;
+  DepositStatus status          = 6;
+  string fiat_mint_tx_hash      = 7; // tx hash of fCeBM mint on approval
+  string rejection_reason       = 8;
+  string created_at             = 9;
+}
+
+// Persistent record for an escrow (tokenization) request: fCeBM → tCeBM.
+message EscrowRecord {
+  string id               = 1;
+  string requester_id     = 2;
+  string besu_address     = 3;
+  string deposit_id       = 4;
+  string amount           = 5;
+  EscrowStatus status     = 6;
+  string burn_tx_hash     = 7; // fCeBM burn tx
+  string mint_tx_hash     = 8; // tCeBM mint tx
+  string rejection_reason = 9;
+  string created_at       = 10;
+}
+
+// Persistent record for a redeem (de-tokenization) request.
+message RedeemRecord {
+  string id                     = 1;
+  string requester_id           = 2;
+  string requester_besu_address = 3;
+  string amount                 = 5;
+  RedeemStatus status           = 6;
+  string mint_tx_hash           = 8;
+  string rejection_reason       = 9;
+  string created_at             = 10;
+}
+
+// ─── Deposit Messages ───────────────────────────────────────────────────
+
+// Commercial bank registers a new fiat deposit request with the central bank.
+message RegisterDepositRequest {
+  string requester_besu_address = 1;
+  string amount                 = 3;
+}
+
+message RegisterDepositResponse {
+  string deposit_id = 1;
+}
+
+// Central bank approves a pending deposit request.
+message ApproveDepositRequest {
+  string deposit_id = 1;
+}
+
+message ApproveDepositResponse {
+  string fiat_mint_tx_hash = 1; // tx hash of fCeBM minted on approval
+}
+
+// Central bank rejects a pending deposit request.
+message RejectDepositRequest {
+  string deposit_id = 1;
+  string reason     = 2;
+}
+
+message RejectDepositResponse {}
+
+// Central bank mints tCeBM to the commercial bank after deposit approval.
+message RequestFiatExchangeRequest {
+  string deposit_id = 1;
+}
+
+message RequestFiatExchangeResponse {
+  string mint_tx_hash = 1;
+}
+
+// List deposit records (filtered by requester_id when non-empty).
+message ListDepositsRequest {
+  string requester_id = 1;
+}
+
+message ListDepositsResponse {
+  repeated DepositRecord deposits = 1;
+}
+
+// ─── Redeem Messages ────────────────────────────────────────────────────
+
+// Commercial bank requests redemption of tCeBM (burn tCeBM, mint tCeBM back to bank).
+message RequestRedeemRequest {
+  string requester_besu_address = 1;
+  string amount                 = 3;
+}
+
+message RequestRedeemResponse {
+  string redeem_id = 1;
+}
+
+// Central bank approves redeem: mints tCeBM to the commercial bank.
+message ApproveRedeemRequest {
+  string redeem_id = 1;
+}
+
+message ApproveRedeemResponse {
+  string mint_tx_hash = 1;
+}
+
+// Central bank rejects a redeem request.
+message RejectRedeemRequest {
+  string redeem_id = 1;
+  string reason    = 2;
+}
+
+message RejectRedeemResponse {}
+
+// List redeem records (filtered by requester_id when non-empty).
+message ListRedeemsRequest {
+  string requester_id = 1;
+}
+
+message ListRedeemsResponse {
+  repeated RedeemRecord redeems = 1;
+}
+
+// ─── Escrow (Tokenization) Messages ─────────────────────────────────────
+
+// Commercial bank requests conversion of fCeBM into tCeBM.
+message RequestEscrowRequest {
+  string requester_besu_address = 1;
+  string deposit_id             = 2;
+  string amount                 = 3;
+}
+
+message RequestEscrowResponse {
+  string escrow_id = 1;
+}
+
+// Central bank approves escrow: burns fCeBM and mints tCeBM.
+message ApproveEscrowRequest {
+  string escrow_id = 1;
+}
+
+message ApproveEscrowResponse {
+  string burn_tx_hash = 1; // fCeBM burn tx
+  string mint_tx_hash = 2; // tCeBM mint tx
+}
+
+// Central bank rejects an escrow (tokenization) request.
+message RejectEscrowRequest {
+  string escrow_id = 1;
+  string reason    = 2;
+}
+
+message RejectEscrowResponse {}
+
+// List escrow records (filtered by requester_id when non-empty).
+message ListEscrowsRequest {
+  string requester_id = 1;
+}
+
+message ListEscrowsResponse {
+  repeated EscrowRecord escrows = 1;
+}
+
+// ─── Service ─────────────────────────────────────────────────────────────
+
+service PaymentOrchestratorService {
+  // FX Agreement lifecycle
+  rpc ProposeFXAgreement(ProposeFXAgreementRequest) returns (ProposeFXAgreementResponse);
+  rpc AcceptFXAgreement(AcceptFXAgreementRequest) returns (AcceptFXAgreementResponse);
+  rpc RejectFXAgreement(RejectFXAgreementRequest) returns (RejectFXAgreementResponse);
+  rpc CancelFXAgreement(CancelFXAgreementRequest) returns (CancelFXAgreementResponse);
+  rpc SettleFXAgreement(SettleFXAgreementRequest) returns (SettleFXAgreementResponse);
+  rpc GetFXAgreement(GetFXAgreementRequest) returns (GetFXAgreementResponse);
+  rpc ListFXAgreements(ListFXAgreementsRequest) returns (ListFXAgreementsResponse);
+  rpc ListFXAgreementEvents(ListFXAgreementEventsRequest) returns (ListFXAgreementEventsResponse);
+
+  // HTLC operations (on-chain Besu coordination)
+  rpc LockHTLC(LockHTLCRequest) returns (LockHTLCResponse);
+  rpc LockHTLCWithHashLock(LockHTLCWithHashLockRequest) returns (LockHTLCWithHashLockResponse);
+  rpc SettleHTLC(SettleHTLCRequest) returns (SettleHTLCResponse);
+  rpc RefundHTLC(RefundHTLCRequest) returns (RefundHTLCResponse);
+  rpc GetHTLCStatus(GetHTLCStatusRequest) returns (GetHTLCStatusResponse);
+  rpc SearchHTLC(SearchHTLCRequest) returns (SearchHTLCResponse);
+
+  // tCeBM balance query
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+
+  // fCeBM balance query
+  rpc GetFiatBalance(GetFiatBalanceRequest) returns (GetFiatBalanceResponse);
+
+  // Deposit lifecycle (fiat deposit from commercial bank → fCeBM mint)
+  rpc RegisterDeposit(RegisterDepositRequest) returns (RegisterDepositResponse);
+  rpc ApproveDeposit(ApproveDepositRequest) returns (ApproveDepositResponse);
+  rpc RejectDeposit(RejectDepositRequest) returns (RejectDepositResponse);
+  rpc RequestFiatExchange(RequestFiatExchangeRequest) returns (RequestFiatExchangeResponse);
+  rpc ListDeposits(ListDepositsRequest) returns (ListDepositsResponse);
+
+  // Escrow lifecycle (tokenization: fCeBM → tCeBM)
+  rpc RequestEscrow(RequestEscrowRequest) returns (RequestEscrowResponse);
+  rpc ApproveEscrow(ApproveEscrowRequest) returns (ApproveEscrowResponse);
+  rpc RejectEscrow(RejectEscrowRequest) returns (RejectEscrowResponse);
+  rpc ListEscrows(ListEscrowsRequest) returns (ListEscrowsResponse);
+
+  // Redeem lifecycle (tCeBM → fiat)
+  rpc RequestRedeem(RequestRedeemRequest) returns (RequestRedeemResponse);
+  rpc ApproveRedeem(ApproveRedeemRequest) returns (ApproveRedeemResponse);
+  rpc RejectRedeem(RejectRedeemRequest) returns (RejectRedeemResponse);
+  rpc ListRedeems(ListRedeemsRequest) returns (ListRedeemsResponse);
+}
