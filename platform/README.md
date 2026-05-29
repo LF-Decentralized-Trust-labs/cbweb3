@@ -76,6 +76,8 @@ The platform is organized in layers common to all scenarios:
 
 Each entity (central bank or commercial bank) runs its own isolated instance of every service layer, communicating intra-entity via gRPC and cross-entity via on-chain contracts and the relay.
 
+For Scenario A's full system topology, component-level documentation, and flow diagrams, see [`scenario-a/README.md § Architecture`](scenario-a/README.md#architecture).
+
 ---
 
 ## Repository Structure

@@ -92,6 +92,17 @@ Each spoke runs its own Besu QBFT network, Paladin privacy nodes, and a full bac
 
 Each entity runs its own isolated service stack (api-gateway, auth, compliance, payment-orchestrator) in dedicated Docker networks.
 
+### Diagrams
+
+![System Component Diagram](docs/architecture/CBWeb3-ComponentDiagram.png)
+
+| Diagram | Description |
+|---------|-------------|
+| [System Component Diagram](docs/architecture/CBWeb3-ComponentDiagram.png) | Full system topology: frontend, services, Paladin nodes, Besu networks, relay |
+| [Architecture Chart](docs/charts/scenario-a/architecture.md) | Mermaid graph of all components and their connections |
+| [Transfer Flow](docs/charts/scenario-a/transfer.md) | Sequence diagram for intra-spoke Zeto token transfers |
+| [Escrow Flow](docs/charts/scenario-a/escrow.md) | Sequence diagram for the HTLC cross-spoke atomic swap |
+
 ---
 
 ## Prerequisites
