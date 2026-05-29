@@ -1,0 +1,16 @@
+# NOC Agent Configuration — Hub
+spoke_id: "hub"
+noc_backend_url: "http://noc-backend:8090"
+api_key: "REPLACE_WITH_PROVISIONED_KEY"
+push_interval_seconds: 15
+
+components:
+  - name: "besu-node"
+    type: "BESU"
+    endpoint: "http://besu-hub:8545"
+    container_name: "besu-hub"
+
+  - name: "paladin"
+    type: "PALADIN"
+    endpoint: "http://paladin-hub:8548"
+    container_name: "paladin-hub"
