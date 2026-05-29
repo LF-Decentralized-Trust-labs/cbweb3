@@ -181,6 +181,8 @@ func setupTestEnvWithFiat(t *testing.T, fiat *mockFiat) *testEnv {
 	return setupTestEnvFull(t, nil, fiat, "")
 }
 
+const testPaladinIdentity = "funded_operator@spoke-a-bank-a"
+
 func setupTestEnvFull(t *testing.T, htlc *mockHTLC, fiat *mockFiat, spokePrefix string) *testEnv {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -195,12 +197,13 @@ func setupTestEnvFull(t *testing.T, htlc *mockHTLC, fiat *mockFiat, spokePrefix 
 	}
 
 	grpcServer := server.New(server.Config{
-		Zeto:        mock,
-		HTLC:        htlcPort,
-		Relay:       noopRelay{},
-		Fiat:        fiatPort,
-		SpokePrefix: spokePrefix,
-		Logger:      logger,
+		Zeto:            mock,
+		HTLC:            htlcPort,
+		Relay:           noopRelay{},
+		Fiat:            fiatPort,
+		SpokePrefix:     spokePrefix,
+		PaladinIdentity: testPaladinIdentity,
+		Logger:          logger,
 	})
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -254,6 +257,57 @@ func TestLockHTLC_Success(t *testing.T) {
 	}
 	if env.zeto.lockCalled != 1 {
 		t.Errorf("expected zeto.Lock called 1 time, got %d", env.zeto.lockCalled)
+	}
+
+	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{ContractId: resp.ContractId})
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+	if statusResp.Lock.Sender != testPaladinIdentity {
+		t.Errorf("expected sender %q, got %q", testPaladinIdentity, statusResp.Lock.Sender)
+	}
+}
+
+func TestSearchHTLC_BySender(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	resp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_SENDER_TEST",
+		Receiver:    "bank-b",
+		Amount:      "500",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	searchResp, err := env.client.SearchHTLC(ctx, &pb.SearchHTLCRequest{Sender: testPaladinIdentity})
+	if err != nil {
+		t.Fatalf("SearchHTLC: %v", err)
+	}
+	found := false
+	for _, lock := range searchResp.Locks {
+		if lock.ContractId == resp.ContractId {
+			found = true
+			if lock.Sender != testPaladinIdentity {
+				t.Errorf("expected sender %q, got %q", testPaladinIdentity, lock.Sender)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("SearchHTLC by sender did not return the locked contract %q", resp.ContractId)
+	}
+
+	// A search with a different sender should not return the contract.
+	otherResp, err := env.client.SearchHTLC(ctx, &pb.SearchHTLCRequest{Sender: "funded_operator@spoke-b-bank-b"})
+	if err != nil {
+		t.Fatalf("SearchHTLC (other sender): %v", err)
+	}
+	for _, lock := range otherResp.Locks {
+		if lock.ContractId == resp.ContractId {
+			t.Error("SearchHTLC with wrong sender should not return the contract")
+		}
 	}
 }
 

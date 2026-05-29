@@ -38,6 +38,7 @@ type paymentOrchestratorService struct {
 	rateTolPct       float64                       // rate tolerance fraction (e.g. 0.001 for 0.1%)
 	strictHTLC       bool                          // when true, lock operations require verifiable agreement linkage
 	spokePrefix      string                        // e.g. "spoke-a" — extracted from PALADIN_IDENTITY
+	paladinIdentity  string                        // full identity, e.g. "funded_operator@spoke-a-bank-a"
 	logger           *slog.Logger
 
 	mu           sync.RWMutex
@@ -59,6 +60,7 @@ type Config struct {
 	RateTolPct       float64                       // rate tolerance fraction, default 0.001 (0.1%)
 	StrictHTLC       bool                          // strict Agreement-HTLC enforcement mode
 	SpokePrefix      string                        // e.g. "spoke-a" — empty disables receiver locality check
+	PaladinIdentity  string                        // full identity, e.g. "funded_operator@spoke-a-bank-a"
 	Logger           *slog.Logger
 }
 
@@ -81,6 +83,7 @@ func New(cfg Config) *grpc.Server {
 		rateTolPct:       rateTol,
 		strictHTLC:       cfg.StrictHTLC,
 		spokePrefix:      cfg.SpokePrefix,
+		paladinIdentity:  cfg.PaladinIdentity,
 		logger:           cfg.Logger,
 		htlcs:            make(map[string]*domain.HTLCRecord),
 		fxAgreements:     make(map[string]*domain.FXAgreementRecord),
@@ -212,6 +215,7 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 	record := &domain.HTLCRecord{
 		ContractID:  contractID,
 		AgreementID: req.AgreementId,
+		Sender:      s.paladinIdentity,
 		Receiver:    req.Receiver,
 		Amount:      req.Amount,
 		HashLock:    hashLock,
@@ -343,6 +347,7 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 	record := &domain.HTLCRecord{
 		ContractID:  contractID,
 		AgreementID: req.AgreementId,
+		Sender:      s.paladinIdentity,
 		Receiver:    req.Receiver,
 		Amount:      req.Amount,
 		HashLock:    req.HashLock,
