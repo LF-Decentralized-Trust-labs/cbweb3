@@ -1,31 +1,31 @@
 import { NavLink } from "react-router-dom";
 import {
-  Coins,
-  Flame,
+  // Coins,
+  // Flame,
   Gauge,
-  HandCoins,
+  // HandCoins,
   LayoutDashboard,
   ListChecks,
   Lock,
-  ScrollText,
-  Settings,
-  ShieldAlert,
+  // ScrollText,
+  // Settings,
+  // ShieldAlert,
   Wallet,
 } from "lucide-react";
 import { PlatformLogo } from "@cbweb3/ui";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/funding-requests", label: "Funding Requests", icon: HandCoins },
-  { to: "/issuance", label: "Issuance", icon: Coins },
-  { to: "/redemption", label: "Redemption", icon: Flame },
+  // { to: "/funding-requests", label: "Funding Requests", icon: HandCoins },
+  // { to: "/issuance", label: "Issuance", icon: Coins },
+  // { to: "/redemption", label: "Redemption", icon: Flame },
   { to: "/deposits-approval", label: "Issuance Approvals", icon: Wallet },
   { to: "/escrows-approval", label: "Tokenisation Approvals", icon: ListChecks },
   { to: "/redeems-approval", label: "Redeem Approvals", icon: Gauge },
   { to: "/htlc-monitor", label: "PvP Settlement", icon: Lock },
-  { to: "/reconciliation", label: "Reconciliation", icon: ShieldAlert },
-  { to: "/audit", label: "Audit", icon: ScrollText },
-  { to: "/settings", label: "Settings", icon: Settings },
+  // { to: "/reconciliation", label: "Reconciliation", icon: ShieldAlert },
+  // { to: "/audit", label: "Audit", icon: ScrollText },
+  // { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Sidebar() {
