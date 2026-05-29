@@ -6,21 +6,21 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  // Table,
+  // TableBody,
+  // TableCell,
+  // TableHead,
+  // TableHeader,
+  // TableRow,
 } from "@cbweb3/ui";
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAccounts, useAuditLogs, useCircuitBreaker, useRegistry } from "../hooks";
 
 export function DashboardPage() {
-  const { participants, pendingKyc, fetch: fetchRegistry } = useRegistry();
-  const { accounts, fetch: fetchAccounts } = useAccounts();
-  const { logs, fetch: fetchAudit } = useAuditLogs();
+  const { /*participants,*/ pendingKyc, fetch: fetchRegistry } = useRegistry();
+  const { /*accounts,*/ fetch: fetchAccounts } = useAccounts();
+  const { /*logs,*/ fetch: fetchAudit } = useAuditLogs();
   const { circuitBreaker, fetchState } = useCircuitBreaker();
 
   useEffect(() => {
@@ -30,14 +30,14 @@ export function DashboardPage() {
     void fetchState();
   }, [fetchRegistry, fetchAccounts, fetchAudit, fetchState]);
 
-  const activeParticipants = participants.filter((item) => item.status === "ACTIVE").length;
-  const frozenAccounts = accounts.filter((item) => item.frozen).length;
+  // const activeParticipants = participants.filter((item) => item.status === "ACTIVE").length;
+  // const frozenAccounts = accounts.filter((item) => item.frozen).length;
   const pendingKycCount = pendingKyc.length;
-  const criticalToday = logs.filter((item) => item.severity === "CRITICAL").length;
+  // const criticalToday = logs.filter((item) => item.severity === "CRITICAL").length;
 
   return (
     <div className="space-y-4">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-1 xl:grid-cols-1">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Circuit Breaker</CardDescription>
@@ -48,7 +48,7 @@ export function DashboardPage() {
             </CardTitle>
           </CardHeader>
         </Card>
-        <Card>
+        {/* <Card>
           <CardHeader className="pb-2">
             <CardDescription>Active Participants</CardDescription>
             <CardTitle>{activeParticipants}</CardTitle>
@@ -65,10 +65,10 @@ export function DashboardPage() {
             <CardDescription>Critical Audit Events</CardDescription>
             <CardTitle>{criticalToday}</CardTitle>
           </CardHeader>
-        </Card>
+        </Card> */}
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
+      <section className="grid gap-4 lg:grid-cols-1">
         <Card>
           <CardHeader>
             <CardTitle>Quick Actions</CardTitle>
@@ -77,7 +77,7 @@ export function DashboardPage() {
             <Button asChild>
               <Link to="/registry">Review Registry ({pendingKycCount})</Link>
             </Button>
-            <Button asChild variant="outline">
+            {/* <Button asChild variant="outline">
               <Link to="/accounts">Account Controls</Link>
             </Button>
             <Button asChild variant="outline">
@@ -85,11 +85,11 @@ export function DashboardPage() {
             </Button>
             <Button asChild variant="outline">
               <Link to="/parameters">Global Parameters</Link>
-            </Button>
+            </Button> */}
           </CardContent>
         </Card>
 
-        <Card>
+        {/* <Card>
           <CardHeader>
             <CardTitle>Recent Governance Events</CardTitle>
           </CardHeader>
@@ -125,7 +125,7 @@ export function DashboardPage() {
               </TableBody>
             </Table>
           </CardContent>
-        </Card>
+        </Card> */}
       </section>
     </div>
   );

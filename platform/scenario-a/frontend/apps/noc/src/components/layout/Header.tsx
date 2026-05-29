@@ -18,7 +18,7 @@ export function Header() {
     <header className="app-root-header">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
         <div className="flex items-center gap-3">
-          {/* <PlatformLogo imageClassName="h-7" /> */}
+          <PlatformLogo imageClassName="h-7" />
           <div>
             <p className="text-xs uppercase tracking-wide text-muted-foreground">LNET</p>
             <h1 className="text-sm font-semibold">NOC Portal</h1>
