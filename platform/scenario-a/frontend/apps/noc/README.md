@@ -1,73 +1,68 @@
-# React + TypeScript + Vite
+# noc portal (Network Operations Center)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+> [scenario-a](../../../README.md) › [frontend](../../README.md) › noc
 
-Currently, two official plugins are available:
+The **NOC portal** is a real-time operational monitoring dashboard for network engineers and operations staff. It visualises the platform's infrastructure topology — Besu nodes, services, and inter-spoke relay connections — and provides live health metrics, alerts, and message tracing.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## React Compiler
+## Architecture Placement
 
-The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+Browser (NOC Operator)
+         │
+         ▼
+  [noc portal]
+         │
+         ▼
+  [noc-backend]   REST :8000
+         │
+         ▼
+  [noc-agent(s)] ──► Docker metrics, Besu RPC
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+---
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Users
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Network operations engineers, infrastructure administrators, and on-call engineers.
+
+---
+
+## Key Features
+
+- **Network topology graph** — Interactive visualization of the platform's nodes and connections, built with [Xyflow](https://xyflow.com/) (React Flow). Shows Besu nodes, services, and relay links per spoke.
+- **Real-time health panel** — Container status, block heights, and service availability updated live.
+- **Alert management** — Active and resolved alerts with severity levels and resolution timestamps.
+- **Message tracing** — Track inter-spoke relay messages through their lifecycle (pending → settled / failed).
+- **Latency & throughput** — Per-service and per-spoke performance metrics.
+- **Log viewer** — Recent log output from monitored containers.
+
+---
+
+## Key Details
+
+| Property | Value |
+|----------|-------|
+| Framework | React 19 + TypeScript |
+| Build tool | Vite 7 |
+| Styling | Tailwind CSS v4 + `@cbweb3/ui` |
+| State | Zustand + React Query |
+| Routing | react-router-dom |
+| Graph | Xyflow (React Flow) |
+| API | Axios → noc-backend REST |
+
+### Dev
+
+```bash
+cd frontend
+npm run dev:noc
 ```
+
+---
+
+## Related
+
+- [frontend workspace](../../README.md) — monorepo setup and npm scripts
+- [noc-backend](../../../backend/services/noc-backend/README.md) — the API this portal consumes
+- [noc-agent](../../../backend/services/noc-agent/README.md) — collects the metrics displayed here

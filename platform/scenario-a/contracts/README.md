@@ -1,3 +1,5 @@
+> [scenario-a](../README.md) › contracts
+
 <div align="center">
 
 # CBWeb3 Platform - Core Smart Contracts
@@ -133,3 +135,11 @@ make contracts.deploy-all-with-sync
 ## 📝 Upgradability Note
 
 _Per the D1 specifications, upgradable proxies (UUPS/Transparent) are deferred and will be introduced in a subsequent architectural phase._
+
+---
+
+## Related
+
+- [payment-orchestrator](../backend/services/payment-orchestrator/README.md) — manages HTLC and FX agreement contract interactions
+- [compliance](../backend/services/compliance/README.md) — reads and writes to IdentityRegistry
+- [interop › relay](../interop/README.md) — bridges HTLC secrets across spokes

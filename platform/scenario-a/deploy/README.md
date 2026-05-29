@@ -1,4 +1,6 @@
-# Deploy Directory
+# deploy
+
+> [scenario-a](../README.md) › deploy
 
 This directory centralizes deployment assets for the CBWeb3 platform.
 

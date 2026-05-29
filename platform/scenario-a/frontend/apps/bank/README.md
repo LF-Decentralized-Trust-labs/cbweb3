@@ -1,73 +1,74 @@
-# React + TypeScript + Vite
+# bank portal
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+> [scenario-a](../../../README.md) › [frontend](../../README.md) › bank
 
-Currently, two official plugins are available:
+The **bank portal** is the primary web interface for commercial bank operators. It provides the full day-to-day banking workflow: managing balances, initiating intra-spoke payments, participating in cross-spoke HTLC swaps, and engaging in FX trades with counterparty banks.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## React Compiler
+## Architecture Placement
 
-The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+Browser (Commercial Bank Operator)
+         │
+         ▼
+  [bank portal]   :5173 / :5174 / :5175 / :5176
+         │
+         ▼
+  [api-gateway]   REST :18080 / :28080 / :48080 / :58080
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+One instance is deployed per commercial bank entity (Bank-A, Bank-B, Bank-C, Bank-D), each pointing to its own api-gateway.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+---
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Users
+
+Commercial bank operators — traders, payment officers, and settlement teams.
+
+---
+
+## Key Features
+
+- **Balance dashboard** — Real-time tCeBM balance overview for the bank's wallet.
+- **Intra-spoke transfers** — Send tCeBM to other banks on the same spoke (standard ERC-20 or privacy-preserving Zeto transfer).
+- **HTLC management** — Initiate and respond to cross-spoke atomic swaps: lock funds, monitor counterparty lock, claim on settlement.
+- **FX agreements** — Propose, accept, and settle bilateral FX trades with counterparty banks on other spokes.
+- **Transaction history** — Full audit trail of payments, locks, and settlements.
+
+---
+
+## Key Details
+
+| Property | Value |
+|----------|-------|
+| Framework | React 19 + TypeScript |
+| Build tool | Vite 7 |
+| Styling | Tailwind CSS v4 + `@cbweb3/ui` |
+| State | Zustand + React Query |
+| Routing | react-router-dom |
+| API | Axios → api-gateway REST |
+
+### Port Assignments
+
+| Entity | URL |
+|--------|-----|
+| Bank-A | http://localhost:5173 |
+| Bank-B | http://localhost:5174 |
+| Bank-C | http://localhost:5175 |
+| Bank-D | http://localhost:5176 |
+
+### Dev
+
+```bash
+cd frontend
+npm run dev:bank -- --port 5173
 ```
+
+---
+
+## Related
+
+- [frontend workspace](../../README.md) — monorepo setup, npm scripts, Docker stacks
+- [api-gateway](../../../backend/services/api-gateway/README.md) — backend this portal calls
+- [governance portal](../governance/README.md) — central bank counterpart

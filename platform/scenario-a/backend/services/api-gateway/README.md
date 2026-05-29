@@ -1,59 +1,112 @@
-# API Gateway (CBWeb3)
+# api-gateway
 
-This service is a Go + Fiber API gateway that handles:
-- client authentication (`/auth/login`);
-- bearer token validation for protected endpoints;
-- wallet-to-user binding with Ethereum signature verification;
-- simple KYC status lookup for compliance checks.
+> [scenario-a](../../../README.md) › [backend](../../README.md) › api-gateway
 
-## How the code works
+The **API Gateway** is the single external entry point for all client interactions. It exposes a REST API (built with [Fiber](https://gofiber.io/)) and acts as an orchestration layer — authenticating requests, enforcing authorization, and proxying operations to the internal gRPC microservices.
 
-- The entry point in `cmd/api-gateway/main.go` loads environment configuration and starts the HTTP server.
-- The app wiring in `internal/app/app.go` delegates authentication and token validation to `identity` via gRPC.
-- Route registration in `internal/http/router/router.go` exposes health, auth, wallet binding, and compliance endpoints.
-- Auth middleware in `internal/http/middleware/auth.go` validates bearer tokens and injects token claims into the request context.
-- Auth and compliance handlers orchestrate login, wallet binding, and KYC queries.
+---
 
-Detailed architecture and runtime flows are documented in `architecture-and-flows.md`.
+## Architecture Placement
 
-## Run locally
+```
+Frontend / External Client
+         │
+         ▼
+   [api-gateway]   REST :8080
+         │
+         ├──► [auth]          gRPC — token validation, login, wallet ops
+         ├──► [compliance]    gRPC — KYC/AML, governance participant management
+         └──► [payment-orchestrator] gRPC — HTLC, FX, token transfers, escrow
+```
 
-1. Copy `.env.example` to `.env` and adjust variables as needed.
-2. Start the local dependencies in `deploy/local` when available (`identity` + optional Postgres).
-3. Run the gateway:
+For commercial banks, some operations are proxied to the Central Bank's own `api-gateway` endpoint (`CENTRAL_BANK_API_URL`) to request governance actions the bank cannot perform itself.
+
+---
+
+## Responsibilities
+
+- **Authentication** — Delegates login and token validation to the auth service; attaches identity context to downstream calls.
+- **Wallet binding** — Handles the association of a Keycloak user to an on-chain wallet address.
+- **KYC routing** — Exposes KYC status lookups backed by the compliance service.
+- **Governance proxy** — Forwards participant registration and governance certificate requests to the compliance service.
+- **Payment routing** — Exposes HTLC lock/release, FX agreement lifecycle, Zeto transfers, and escrow operations backed by the payment orchestrator.
+
+---
+
+## Key Details
+
+| Property | Value |
+|----------|-------|
+| Protocol | REST (HTTP/1.1) |
+| Port | `8080` (per-entity offset in compose — e.g., Bank-A: 18080) |
+| Framework | [Fiber v2](https://gofiber.io/) |
+| Auth model | Bearer JWT validated via the auth gRPC service |
+
+### Current Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/healthz` | — | Health check |
+| `POST` | `/auth/login` | — | Authenticate via Keycloak |
+| `POST` | `/auth/wallet/bind` | Bearer | Bind wallet address to user |
+| `GET` | `/compliance/kyc/status/:subject` | Bearer | KYC status lookup |
+
+### API Documentation
+
+The service exposes its OpenAPI spec at runtime:
 
 ```bash
+# YAML spec
+curl http://localhost:8080/openapi.yaml
+
+# Swagger UI
+open http://localhost:8080/swagger
+```
+
+The spec file is versioned in `docs/openapi.yaml`.
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PORT` | HTTP listen port (default: 8080) |
+| `AUTH_GRPC_ADDR` | auth service address (e.g., `auth:9091`) |
+| `COMPLIANCE_GRPC_ADDR` | compliance service address |
+| `PAYMENT_GRPC_ADDR` | payment-orchestrator address |
+| `CENTRAL_BANK_API_URL` | Central bank gateway URL (commercial banks only) |
+| `REQUEST_TIMEOUT_SEC` | gRPC call timeout |
+
+---
+
+## Run Locally
+
+```bash
+cp .env.example .env
+# edit .env with local service addresses
 go run ./cmd/api-gateway
 ```
 
-## Current endpoints
+---
 
-- `GET /healthz`
-- `POST /auth/login`
-- `POST /auth/wallet/bind` (requires `Authorization: Bearer <token>`)
-- `GET /compliance/kyc/status/:subject`
+## Internal Structure
 
-## API documentation (Swagger/OpenAPI)
+```
+api-gateway/
+├── cmd/api-gateway/main.go    Entrypoint — loads config, starts Fiber
+├── internal/
+│   ├── app/app.go             App wiring, gRPC client setup
+│   ├── http/
+│   │   ├── router/router.go   Route registration
+│   │   └── middleware/auth.go Bearer token extraction and validation
+│   └── handler/               HTTP handlers per domain area
+└── docs/openapi.yaml          OpenAPI specification
+```
 
-- OpenAPI YAML: `GET /openapi.yaml`
-- Swagger UI: `GET /swagger`
+---
 
-The specification file is versioned in `docs/openapi.yaml` and documents only the endpoints currently implemented in this service.
+## Related
 
-To open Swagger UI locally after starting the service, access:
-
-- `http://localhost:8080/swagger`
-
-To get the OpenAPI document in JSON format:
-
-- Fetch YAML from the service:
-  - `curl -s http://localhost:8080/openapi.yaml > openapi.yaml`
-- Convert to JSON (with `yq` v4 installed):
-  - `yq -o=json '.' openapi.yaml > openapi.json`
-
-## Main integration variables
-
-- `AUTH_GRPC_ADDR`
-- `COMPLIANCE_GRPC_ADDR`
-- `REQUEST_TIMEOUT_SEC`
-
+- [auth service](../auth/README.md) — handles identity operations this gateway calls
+- [compliance service](../compliance/README.md) — handles KYC and governance operations
+- [payment-orchestrator](../payment-orchestrator/README.md) — handles all payment flows
+- [apis › openapi](../../../apis/README.md) — versioned OpenAPI specs

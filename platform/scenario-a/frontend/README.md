@@ -1,6 +1,34 @@
-# CBWeb3 Frontend Workspace
+# frontend
 
-This folder contains the frontend monorepo, managed with npm workspaces.
+> [scenario-a](../README.md) › frontend
+
+The **frontend workspace** is an npm monorepo containing all web portals for the CBWeb3 platform. Each portal targets a specific user type and entity, sharing a common design system and configuration.
+
+---
+
+## Apps
+
+| App | Path | Users | Description |
+|-----|------|-------|-------------|
+| [bank](apps/bank/README.md) | `apps/bank/` | Commercial bank operators | Transfers, HTLC swaps, FX trading |
+| [governance](apps/governance/README.md) | `apps/governance/` | Central bank operators | Participant registry, CBDC issuance, governance |
+| [supervisor](apps/supervisor/README.md) | `apps/supervisor/` | Supervisors / Regulators | Read-only monitoring, ZK proof verification |
+| [treasury](apps/treasury/README.md) | `apps/treasury/` | Treasury operators | Settlement tracking, liquidity, multi-sig approvals |
+| [noc](apps/noc/README.md) | `apps/noc/` | Network ops engineers | Infrastructure topology, health monitoring |
+| [dispatcher](apps/dispatcher/README.md) | `apps/dispatcher/` | Developers / Ops | Manual event dispatch and settlement tooling |
+
+---
+
+## Shared Packages
+
+| Package | Path | Description |
+|---------|------|-------------|
+| `@cbweb3/ui` | `packages/ui/` | shadcn-based component library and global styles |
+| `@cbweb3/config` | `packages/config/` | Shared TypeScript, ESLint, and Tailwind presets |
+
+---
+
+## Original Workspace Documentation
 
 ## Workspace Structure
 

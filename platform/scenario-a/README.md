@@ -7,6 +7,7 @@ A cross-spoke wholesale CBDC platform implementing atomic settlement between two
 ## Table of Contents
 
 - [Overview](#overview)
+- [Component Documentation](#component-documentation)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
@@ -20,6 +21,36 @@ A cross-spoke wholesale CBDC platform implementing atomic settlement between two
 - [Testing](#testing)
 - [Teardown](#teardown)
 - [Additional Make Targets](#additional-make-targets)
+
+---
+
+## Component Documentation
+
+Each module has its own README with purpose, architecture placement, key details, and cross-links.
+
+| Module | README | Description |
+|--------|--------|-------------|
+| Backend | [backend/README.md](backend/README.md) | Go microservices overview |
+| — api-gateway | [backend/services/api-gateway/README.md](backend/services/api-gateway/README.md) | REST entry point |
+| — auth | [backend/services/auth/README.md](backend/services/auth/README.md) | Identity, login, wallet, PKI |
+| — compliance | [backend/services/compliance/README.md](backend/services/compliance/README.md) | KYC/AML, participant registry |
+| — payment-orchestrator | [backend/services/payment-orchestrator/README.md](backend/services/payment-orchestrator/README.md) | HTLC, FX, Zeto, escrow |
+| — noc-agent | [backend/services/noc-agent/README.md](backend/services/noc-agent/README.md) | Monitoring daemon |
+| — noc-backend | [backend/services/noc-backend/README.md](backend/services/noc-backend/README.md) | NOC dashboard API |
+| — fx | [backend/services/fx/README.md](backend/services/fx/README.md) | FX pricing service *(planned)* |
+| — ledger-gateway | [backend/services/ledger-gateway/README.md](backend/services/ledger-gateway/README.md) | Blockchain RPC abstraction *(planned)* |
+| — payments | [backend/services/payments/README.md](backend/services/payments/README.md) | Payment domain service *(planned)* |
+| Contracts | [contracts/README.md](contracts/README.md) | Solidity smart contracts (Foundry) |
+| Frontend | [frontend/README.md](frontend/README.md) | React monorepo overview |
+| — bank | [frontend/apps/bank/README.md](frontend/apps/bank/README.md) | Commercial bank portal |
+| — governance | [frontend/apps/governance/README.md](frontend/apps/governance/README.md) | Central bank governance portal |
+| — supervisor | [frontend/apps/supervisor/README.md](frontend/apps/supervisor/README.md) | Regulatory oversight portal |
+| — treasury | [frontend/apps/treasury/README.md](frontend/apps/treasury/README.md) | Treasury management portal |
+| — noc | [frontend/apps/noc/README.md](frontend/apps/noc/README.md) | Network Operations Center dashboard |
+| — dispatcher | [frontend/apps/dispatcher/README.md](frontend/apps/dispatcher/README.md) | Manual event dispatch tool |
+| Infrastructure | [deploy/README.md](deploy/README.md) | Docker Compose deployment |
+| Interoperability | [interop/README.md](interop/README.md) | Cross-spoke relay and bridge |
+| APIs | [apis/README.md](apis/README.md) | OpenAPI specs, proto, SDKs |
 
 ---
 
