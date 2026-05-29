@@ -151,6 +151,7 @@ export function DepositsApprovalPage() {
           <CardTitle>Issuance Request Queue</CardTitle>
         </CardHeader>
         <CardContent>
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -166,8 +167,8 @@ export function DepositsApprovalPage() {
             <TableBody>
               {deposits.map((deposit) => (
                 <TableRow key={deposit.id}>
-                  <TableCell className="font-medium">{deposit.id}</TableCell>
-                  <TableCell>{deposit.requester_id}</TableCell>
+                  <TableCell className="font-mono font-medium" title={deposit.id}>{shortHash(deposit.id)}</TableCell>
+                  <TableCell className="font-mono" title={deposit.requester_id}>{shortHash(deposit.requester_id)}</TableCell>
                   <TableCell>{formatFiatUnits(deposit.amount)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(deposit.status)}>{getPaymentStatusLabel(deposit.status)}</Badge>
@@ -217,6 +218,7 @@ export function DepositsApprovalPage() {
             </TableBody>
           </Table>
           {!deposits.length ? <p className="pt-3 text-sm text-muted-foreground">No issuance requests found.</p> : null}
+          </div>
         </CardContent>
       </Card>
 

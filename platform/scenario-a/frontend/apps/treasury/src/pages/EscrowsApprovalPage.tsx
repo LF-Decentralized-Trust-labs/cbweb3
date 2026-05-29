@@ -99,6 +99,7 @@ export function EscrowsApprovalPage() {
               Refresh
             </Button>
           </div>
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -115,8 +116,8 @@ export function EscrowsApprovalPage() {
             <TableBody>
               {escrows.map((escrow) => (
                 <TableRow key={escrow.id}>
-                  <TableCell className="font-medium">{escrow.id}</TableCell>
-                  <TableCell>{escrow.requester_id}</TableCell>
+                  <TableCell className="font-mono font-medium" title={escrow.id}>{shortHash(escrow.id)}</TableCell>
+                  <TableCell className="font-mono" title={escrow.requester_id}>{shortHash(escrow.requester_id)}</TableCell>
                   <TableCell>{formatCeBM(escrow.amount)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(escrow.status)}>{getPaymentStatusLabel(escrow.status)}</Badge>
@@ -160,6 +161,7 @@ export function EscrowsApprovalPage() {
           </Table>
           {!escrows.length ? <p className="pt-3 text-sm text-muted-foreground">No tokenisation requests found.</p> : null}
           {error ? <p className="pt-3 text-sm text-destructive">{error}</p> : null}
+          </div>
         </CardContent>
       </Card>
 

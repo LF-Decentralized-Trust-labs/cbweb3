@@ -1,4 +1,4 @@
-import { Badge, PlatformLogo } from "@cbweb3/ui";
+import { Badge } from "@cbweb3/ui";
 import { ClipboardCheck, LayoutDashboard, /* Scale, Settings, ShieldAlert, Users */ } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useCircuitBreaker } from "../../hooks";
@@ -20,7 +20,7 @@ export function Sidebar() {
   return (
     <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:border-b-0 md:border-r">
       <div className="mb-3 space-y-2">
-        <PlatformLogo imageClassName="h-7" />
+        {/* <PlatformLogo imageClassName="h-7" /> */}
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-muted-foreground">System State</span>
           <Badge variant={isHalted ? "destructive" : "default"}>{circuitBreaker?.state ?? "LIVE"}</Badge>

@@ -1,4 +1,4 @@
-import { Badge, Button, PlatformLogo } from "@cbweb3/ui";
+import { Badge, Button } from "@cbweb3/ui";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 
@@ -16,7 +16,7 @@ export function Header() {
     <header className="app-root-header">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
         <div className="flex items-center gap-3">
-          <PlatformLogo imageClassName="h-7" />
+          {/* <PlatformLogo imageClassName="h-7" /> */}
           <div>
             <p className="text-xs uppercase tracking-wide text-muted-foreground">{institutionName}</p>
             <h1 className="text-sm font-semibold">Treasury Portal</h1>

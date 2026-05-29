@@ -99,6 +99,7 @@ export function RedeemsApprovalPage() {
               Refresh
             </Button>
           </div>
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -115,8 +116,8 @@ export function RedeemsApprovalPage() {
             <TableBody>
               {redeems.map((redeem) => (
                 <TableRow key={redeem.id}>
-                  <TableCell className="font-medium">{redeem.id}</TableCell>
-                  <TableCell>{redeem.requester_id}</TableCell>
+                  <TableCell className="font-mono font-medium" title={redeem.id}>{shortHash(redeem.id)}</TableCell>
+                  <TableCell className="font-mono" title={redeem.requester_id}>{shortHash(redeem.requester_id)}</TableCell>
                   <TableCell>{formatCeBM(redeem.amount)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(redeem.status)}>{getPaymentStatusLabel(redeem.status)}</Badge>
@@ -160,6 +161,7 @@ export function RedeemsApprovalPage() {
           </Table>
           {!redeems.length ? <p className="pt-3 text-sm text-muted-foreground">No redeems found.</p> : null}
           {error ? <p className="pt-3 text-sm text-destructive">{error}</p> : null}
+          </div>
         </CardContent>
       </Card>
 

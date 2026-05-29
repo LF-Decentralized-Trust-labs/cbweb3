@@ -12,8 +12,6 @@ import {
   // ShieldAlert,
   Wallet,
 } from "lucide-react";
-import { PlatformLogo } from "@cbweb3/ui";
-
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   // { to: "/funding-requests", label: "Funding Requests", icon: HandCoins },
@@ -32,7 +30,7 @@ export function Sidebar() {
   return (
     <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:border-b-0 md:border-r">
       <div className="mb-3 space-y-1">
-        <PlatformLogo imageClassName="h-7" />
+        {/* <PlatformLogo imageClassName="h-7" /> */}
         <p className="text-xs uppercase tracking-wide text-muted-foreground">Central Bank</p>
         <p className="text-sm font-semibold">Treasury Operations</p>
       </div>
