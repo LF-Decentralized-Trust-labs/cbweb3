@@ -11,43 +11,46 @@ import {
   Separator,
   toast,
 } from "@cbweb3/ui";
-import { Building2, LockKeyhole, ShieldCheck, Coins } from "lucide-react";
+import { Building2, Coins, LockKeyhole, ShieldCheck } from "lucide-react";
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "../stores";
+import { hasTreasuryAccess } from "../auth/authorization";
 
 const schema = z.object({
-  username: z.string().min(3),
-  password: z.string().min(6),
+  clientId: z.string().min(3, "Client ID must be at least 3 characters"),
+  clientSecret: z.string().min(6, "Client Secret must be at least 6 characters"),
 });
 
 type LoginForm = z.infer<typeof schema>;
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { login, status, error, isAuthenticated } = useAuthStore();
+  const [searchParams] = useSearchParams();
+  const { login, status, error, isAuthenticated, profile } = useAuthStore();
+
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
     defaultValues: {
-      username: "treasury.operator",
-      password: "ChangeMe123!",
+      clientId: searchParams.get("username") ?? "",
+      clientSecret: "",
     },
   });
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && hasTreasuryAccess(profile)) {
       toast("Signed in", {
         description: "Welcome to the Treasury Portal.",
       });
       navigate("/", { replace: true });
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigate, profile]);
 
   const onSubmit = form.handleSubmit(async (values) => {
-    await login(values.username, values.password);
+    await login(values.clientId, values.clientSecret);
   });
 
   return (
@@ -59,7 +62,7 @@ export function LoginPage() {
           </Badge>
           <h1 className="text-3xl font-semibold tracking-tight">Central Bank Treasury Portal</h1>
           <p className="mt-3 max-w-md text-sm text-muted-foreground">
-            Manage tCeBM issuance, redemption, funding approvals, and reserve reconciliation with strict policy controls.
+            Manage tCeBM issuance, redemption, escrow approvals, HTLC settlement, and reserve reconciliation.
           </p>
 
           <div className="mt-8 grid gap-4">
@@ -67,14 +70,14 @@ export function LoginPage() {
               <ShieldCheck className="mt-0.5 h-5 w-5 text-primary" />
               <div>
                 <p className="text-sm font-medium">Privileged operations</p>
-                <p className="text-xs text-muted-foreground">Supply-changing actions are restricted to Treasury role claims.</p>
+                <p className="text-xs text-muted-foreground">Supply-changing actions are restricted to ROLE_TREASURY.</p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-lg border border-border/80 bg-background/80 p-4">
               <Coins className="mt-0.5 h-5 w-5 text-primary" />
               <div>
-                <p className="text-sm font-medium">Burn-to-mint enforcement</p>
-                <p className="text-xs text-muted-foreground">Minting requires approved requests and validated reserve backing.</p>
+                <p className="text-sm font-medium">Reserve-backed issuance</p>
+                <p className="text-xs text-muted-foreground">Minting requires approved deposits and validated reserve backing.</p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-lg border border-border/80 bg-background/80 p-4">
@@ -98,19 +101,30 @@ export function LoginPage() {
           <CardContent>
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
-                <Input id="username" {...form.register("username")} autoComplete="username" />
-                {form.formState.errors.username ? <p className="text-xs text-destructive">{form.formState.errors.username.message}</p> : null}
+                <Label htmlFor="clientId">Client ID</Label>
+                <Input
+                  id="clientId"
+                  placeholder="central-bank-a-treasury-client"
+                  {...form.register("clientId")}
+                  autoComplete="username"
+                />
+                {form.formState.errors.clientId ? (
+                  <p className="text-xs text-destructive">{form.formState.errors.clientId.message}</p>
+                ) : null}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input id="password" type="password" {...form.register("password")} autoComplete="current-password" />
-                {form.formState.errors.password ? <p className="text-xs text-destructive">{form.formState.errors.password.message}</p> : null}
-              </div>
-
-              <div className="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-                Demo credentials are prefilled for local structural testing.
+                <Label htmlFor="clientSecret">Client Secret</Label>
+                <Input
+                  id="clientSecret"
+                  type="password"
+                  placeholder="Treasury client secret"
+                  {...form.register("clientSecret")}
+                  autoComplete="current-password"
+                />
+                {form.formState.errors.clientSecret ? (
+                  <p className="text-xs text-destructive">{form.formState.errors.clientSecret.message}</p>
+                ) : null}
               </div>
 
               {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -122,7 +136,7 @@ export function LoginPage() {
 
             <Separator className="my-4" />
 
-            <p className="text-center text-xs text-muted-foreground">Protected environment · RBAC enforced · Treasury-grade controls</p>
+            <p className="text-center text-xs text-muted-foreground">Privileged environment · Treasury-only operations</p>
           </CardContent>
         </Card>
       </div>

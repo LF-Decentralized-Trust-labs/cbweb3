@@ -16,6 +16,10 @@ type ZetoOperator interface {
 	// The underlying flow: ERC-20 mint -> approve -> Zeto.deposit().
 	Mint(ctx context.Context, to string, amount string) (txHash string, err error)
 
+	// Burn destroys Zeto tokens previously held by the caller (Central Bank only).
+	// Underlying flow: Zeto.withdraw(amount) -> ERC-20 returned -> ERC-20.burn().
+	Burn(ctx context.Context, from string, amount string) (txHash string, err error)
+
 	// Transfer moves Zeto tokens between identities using ZK proofs.
 	Transfer(ctx context.Context, to string, amount string) (txHash string, err error)
 

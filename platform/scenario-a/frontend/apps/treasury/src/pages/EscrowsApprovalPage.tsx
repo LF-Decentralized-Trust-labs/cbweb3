@@ -43,9 +43,7 @@ export function EscrowsApprovalPage() {
   );
 
   const onApprove = async () => {
-    if (!approveTargetId) {
-      return;
-    }
+    if (!approveTargetId) return;
 
     try {
       const result = await approveEscrow(approveTargetId);
@@ -57,10 +55,7 @@ export function EscrowsApprovalPage() {
   };
 
   const onReject = async () => {
-    if (!rejectTargetId) {
-      return;
-    }
-
+    if (!rejectTargetId) return;
     if (reason.trim().length < 3) {
       toast.error("Please provide a rejection reason.");
       return;

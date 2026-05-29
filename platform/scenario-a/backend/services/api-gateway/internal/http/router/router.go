@@ -81,35 +81,37 @@ func Setup(app *fiber.App, deps Dependencies) {
 	centralBankRoutes.Post("/accounts/unfreeze", deps.ComplianceHandler.UnfreezeAccount)
 	centralBankRoutes.Post("/register", deps.ComplianceHandler.RegisterParticipant)
 
-	// --- Governance Portal (PKI / ROLE_GOVERNANCE only) ---
-	govGroup := app.Group("/api/v1/governance",
-		middleware.RequireCookieAuth(deps.AuthProvider),
-		middleware.RequireRole(domain.RoleGovernance),
-	)
-	// Participant registration and registry
-	govGroup.Post("/participants", deps.GovernanceHandler.RegisterParticipant)
-	govGroup.Get("/registry", deps.GovernanceHandler.GetRegistry)
-	govGroup.Post("/registry/csr", deps.GovernanceHandler.SubmitCSR)
+	// --- Governance Portal (Central Bank only — ROLE_GOVERNANCE) ---
+	// Only registered when running as a central bank gateway (no proxy handler).
+	// Scope: KYC/onboarding/registry, account control (freeze/unfreeze),
+	// circuit breaker, system parameters, and audit logs. Operational actions
+	// (mint/burn, deposit/escrow/redeem approvals) live under ROLE_TREASURY.
+	if deps.PaymentProxyHandler == nil && deps.GovernanceHandler != nil {
+		govGroup := app.Group("/api/v1/governance",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			middleware.RequireRole(domain.RoleGovernance),
+		)
+		govGroup.Post("/approve-kyc", deps.GovernanceHandler.ApproveKYC)
 
-	// Account management
-	govGroup.Get("/accounts", deps.GovernanceHandler.GetAccounts)
-	govGroup.Post("/accounts/freeze", deps.GovernanceHandler.FreezeAccount)
-	govGroup.Post("/accounts/unfreeze", deps.GovernanceHandler.UnfreezeAccount)
+		govGroup.Get("/registry", deps.GovernanceHandler.GetRegistry)
+		govGroup.Post("/registry/csr", deps.GovernanceHandler.SubmitCSR)
+		govGroup.Post("/participants", deps.GovernanceHandler.RegisterParticipant)
 
-	// Circuit breaker
-	govGroup.Get("/circuit-breaker/status", deps.GovernanceHandler.GetCircuitBreakerStatus)
-	govGroup.Post("/circuit-breaker/toggle", deps.GovernanceHandler.ToggleCircuitBreaker)
+		govGroup.Get("/accounts", deps.GovernanceHandler.GetAccounts)
+		govGroup.Post("/accounts/freeze", deps.GovernanceHandler.FreezeAccount)
+		govGroup.Post("/accounts/unfreeze", deps.GovernanceHandler.UnfreezeAccount)
 
-	// Global parameters
-	govGroup.Get("/parameters", deps.GovernanceHandler.GetParameters)
-	govGroup.Put("/parameters", deps.GovernanceHandler.UpdateParameters)
+		govGroup.Get("/circuit-breaker/status", deps.GovernanceHandler.GetCircuitBreakerStatus)
+		govGroup.Post("/circuit-breaker/toggle", deps.GovernanceHandler.ToggleCircuitBreaker)
 
-	// Audit logs
-	govGroup.Get("/audit/logs", deps.GovernanceHandler.GetAuditLogs)
+		govGroup.Get("/parameters", deps.GovernanceHandler.GetParameters)
+		govGroup.Put("/parameters", deps.GovernanceHandler.UpdateParameters)
 
-	// User management (list and get registered participants)
-	govGroup.Get("/users", deps.GovernanceHandler.ListUsers)
-	govGroup.Get("/users/:userId", deps.GovernanceHandler.GetUser)
+		govGroup.Get("/audit/logs", deps.GovernanceHandler.GetAuditLogs)
+
+		govGroup.Get("/users", deps.GovernanceHandler.ListUsers)
+		govGroup.Get("/users/:userId", deps.GovernanceHandler.GetUser)
+	}
 
 	// --- Payment Orchestrator (HTLC + Token) ---
 	if deps.PaymentHandler != nil {
@@ -124,10 +126,15 @@ func Setup(app *fiber.App, deps Dependencies) {
 		htlcGroup.Get("/search", deps.PaymentHandler.SearchHTLC)
 
 		tokenGroup := payGroup.Group("/token")
-		tokenGroup.Post("/mint", deps.PaymentHandler.MintToken)
 		tokenGroup.Post("/transfer", deps.PaymentHandler.TransferToken)
 		tokenGroup.Get("/balance", deps.PaymentHandler.GetBalance)
 		tokenGroup.Get("/fiat-balance", deps.PaymentHandler.GetFiatBalance)
+		// Sovereign mint is a treasury operation; restrict at the central bank gateway only.
+		if deps.PaymentProxyHandler == nil {
+			tokenGroup.Post("/mint", middleware.RequireRole(domain.RoleTreasury), deps.PaymentHandler.MintToken)
+		} else {
+			tokenGroup.Post("/mint", deps.PaymentHandler.MintToken)
+		}
 
 		// FX Agreement routes
 		fxGroup := payGroup.Group("/payments/fx/agreements")
@@ -148,6 +155,9 @@ func Setup(app *fiber.App, deps Dependencies) {
 
 		// --- Escrow: Deposit / Escrow / Redeem (Central Bank) ---
 		if deps.PaymentProxyHandler == nil {
+			// Sovereign token burn — treasury-only, central bank gateway only.
+			tokenGroup.Post("/burn", middleware.RequireRole(domain.RoleTreasury), deps.PaymentHandler.BurnToken)
+
 			// Internal routes for proxy-receiving — protected by X-Relay-Auth shared secret.
 			intDeposits := app.Group("/internal/v1/payments/deposits", middleware.RequireRelayAuth(relayAuthSecret))
 			intDeposits.Post("", deps.PaymentHandler.RegisterDeposit)
@@ -161,21 +171,21 @@ func Setup(app *fiber.App, deps Dependencies) {
 			intRedeems.Post("", deps.PaymentHandler.RequestRedeem)
 			intRedeems.Get("", deps.PaymentHandler.ListRedeems)
 
-			// Governance routes (requires cookie auth + ROLE_GOVERNANCE).
+			// Operational approvals — ROLE_TREASURY (treasury portal).
 			depositGroup := payGroup.Group("/payments/deposits")
-			depositGroup.Post("/approve", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.ApproveDeposit)
-			depositGroup.Post("/reject", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.RejectDeposit)
-			depositGroup.Post("/fiat-exchange", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.RequestFiatExchange)
+			depositGroup.Post("/approve", middleware.RequireRole(domain.RoleTreasury), deps.PaymentHandler.ApproveDeposit)
+			depositGroup.Post("/reject", middleware.RequireRole(domain.RoleTreasury), deps.PaymentHandler.RejectDeposit)
+			depositGroup.Post("/fiat-exchange", middleware.RequireRole(domain.RoleTreasury), deps.PaymentHandler.RequestFiatExchange)
 			depositGroup.Get("", deps.PaymentHandler.ListDeposits)
 
 			escrowGroup := payGroup.Group("/payments/escrows")
-			escrowGroup.Post("/approve", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.ApproveEscrow)
-			escrowGroup.Post("/reject", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.RejectEscrow)
+			escrowGroup.Post("/approve", middleware.RequireRole(domain.RoleTreasury), deps.PaymentHandler.ApproveEscrow)
+			escrowGroup.Post("/reject", middleware.RequireRole(domain.RoleTreasury), deps.PaymentHandler.RejectEscrow)
 			escrowGroup.Get("", deps.PaymentHandler.ListEscrows)
 
 			redeemGroup := payGroup.Group("/payments/redeems")
-			redeemGroup.Post("/approve", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.ApproveRedeem)
-			redeemGroup.Post("/reject", middleware.RequireRole(domain.RoleGovernance), deps.PaymentHandler.RejectRedeem)
+			redeemGroup.Post("/approve", middleware.RequireRole(domain.RoleTreasury), deps.PaymentHandler.ApproveRedeem)
+			redeemGroup.Post("/reject", middleware.RequireRole(domain.RoleTreasury), deps.PaymentHandler.RejectRedeem)
 			redeemGroup.Get("", deps.PaymentHandler.ListRedeems)
 		}
 	}

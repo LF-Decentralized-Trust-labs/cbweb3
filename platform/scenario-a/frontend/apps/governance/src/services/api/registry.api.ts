@@ -1,8 +1,6 @@
 import type {
   ApproveKycPayload,
   ApproveKycResponse,
-  CredentialIssuanceResult,
-  IssueCredentialPayload,
   KycStatusEntry,
   PendingKycApiResponse,
   Participant,
@@ -15,26 +13,15 @@ export const registryApi = {
     if (useMocks) {
       return mockDb.listParticipants();
     }
-    const response = await httpClient.get<Participant[]>(
-      "/compliance/registry",
+    const response = await httpClient.get<{ participants: Participant[] }>(
+      "/governance/registry",
     );
-    return response.data;
-  },
-  issueCredential: async (
-    payload: IssueCredentialPayload,
-  ): Promise<CredentialIssuanceResult> => {
-    if (useMocks) {
-      return mockDb.issueCredential(payload);
-    }
-    const response = await httpClient.post<CredentialIssuanceResult>(
-      "/compliance/kyc/issue-credential",
-      payload,
-    );
-    return response.data;
+    return response.data.participants ?? [];
   },
   listPendingKyc: async (): Promise<KycStatusEntry[]> => {
     const response = await httpClient.get<PendingKycApiResponse>(
-      "/compliance/participants",
+      "/governance/registry",
+      { params: { status: "CREDENTIAL_REQUESTED" } },
     );
 
     const participants = response.data.participants ?? [];
@@ -64,7 +51,7 @@ export const registryApi = {
     payload: ApproveKycPayload,
   ): Promise<ApproveKycResponse> => {
     const response = await httpClient.post<ApproveKycResponse>(
-      "/compliance/approve-kyc",
+      "/governance/approve-kyc",
       payload,
     );
     return response.data;

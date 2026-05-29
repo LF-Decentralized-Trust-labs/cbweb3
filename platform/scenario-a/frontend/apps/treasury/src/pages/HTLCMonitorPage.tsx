@@ -34,6 +34,16 @@ const statusVariant = (state: string): "warning" | "default" | "success" | "dest
   return "outline";
 };
 
+const stateLabel = (state: string): string => {
+  const s = state.replace("HTLC_STATE_", "");
+  if (s === "LOCKED") return "Pending Settlement";
+  if (s === "SETTLING") return "Processing";
+  if (s === "SETTLED") return "Settled";
+  if (s === "REFUNDING") return "Revoking";
+  if (s === "REFUNDED") return "Revoked";
+  return s;
+};
+
 export function HTLCMonitorPage() {
   const { locks, total, status, error, fetch, getDetail } = useHtlcMonitorStore();
 
@@ -66,7 +76,7 @@ export function HTLCMonitorPage() {
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-semibold">PvP Settlement Monitor</h1>
-        <p className="text-sm text-muted-foreground">Read-only oversight of cross-border PvP settlement lifecycle events.</p>
+        <p className="text-sm text-muted-foreground">Operational oversight of cross-border PvP settlement lifecycle events.</p>
       </div>
 
       <Card>
@@ -123,17 +133,7 @@ export function HTLCMonitorPage() {
                   <TableCell>{lock.sender}</TableCell>
                   <TableCell>{lock.receiver}</TableCell>
                   <TableCell>
-                    <Badge variant={statusVariant(lock.state)}>
-                      {(() => {
-                        const s = lock.state.replace("HTLC_STATE_", "");
-                        if (s === "LOCKED") return "Pending Settlement";
-                        if (s === "SETTLING") return "Processing";
-                        if (s === "SETTLED") return "Settled";
-                        if (s === "REFUNDING") return "Revoking";
-                        if (s === "REFUNDED") return "Revoked";
-                        return s;
-                      })()}
-                    </Badge>
+                    <Badge variant={statusVariant(lock.state)}>{stateLabel(lock.state)}</Badge>
                   </TableCell>
                   <TableCell>{new Date(lock.time_lock * 1000).toLocaleString()}</TableCell>
                   <TableCell className="text-right">
@@ -154,14 +154,14 @@ export function HTLCMonitorPage() {
         <Card>
           <CardHeader>
             <CardTitle>Contract Detail: {detail.contract_id}</CardTitle>
-            <CardDescription>Governance read-only detail view.</CardDescription>
+            <CardDescription>Treasury read-only detail view.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             <p className="text-sm">Sender: {detail.sender}</p>
             <p className="text-sm">Receiver: {detail.receiver}</p>
             <p className="text-sm">Settlement Code: {detail.hash_lock}</p>
             <p className="text-sm">Settlement Expiry: {new Date(detail.time_lock * 1000).toLocaleString()}</p>
-            <p className="text-sm">State: {(() => { const s = detail.state.replace("HTLC_STATE_", ""); if (s === "LOCKED") return "Pending Settlement"; if (s === "SETTLING") return "Processing"; if (s === "SETTLED") return "Settled"; if (s === "REFUNDING") return "Revoking"; if (s === "REFUNDED") return "Revoked"; return s; })()}</p>
+            <p className="text-sm">State: {stateLabel(detail.state)}</p>
             <p className="text-sm">Settlement Reference: {detail.zeto_lock_ref || "-"}</p>
             <p className="text-sm">Completion Code: {detail.secret ? "[restricted]" : "-"}</p>
             <Button variant="outline" onClick={() => setDetail(null)}>

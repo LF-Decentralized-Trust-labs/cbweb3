@@ -39,6 +39,7 @@ func (noopRelay) VerifyProof(_ context.Context, _ ports.InteroperabilityProof) (
 // mockZeto is a test double for ZetoOperator.
 type mockZeto struct {
 	mintCalled           int
+	burnCalled           int
 	transferCalled       int
 	lockCalled           int
 	unlockCalled         int
@@ -53,6 +54,10 @@ type mockZeto struct {
 func (m *mockZeto) Mint(_ context.Context, _, _ string) (string, error) {
 	m.mintCalled++
 	return "mock-mint-tx", nil
+}
+func (m *mockZeto) Burn(_ context.Context, _, _ string) (string, error) {
+	m.burnCalled++
+	return "mock-burn-tx", nil
 }
 func (m *mockZeto) Transfer(_ context.Context, _, _ string) (string, error) {
 	m.transferCalled++

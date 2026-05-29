@@ -185,14 +185,14 @@ func TestMeRouteRequiresToken(t *testing.T) {
 	}
 }
 
-func TestGovernanceUsersRoutesRequireRole(t *testing.T) {
+func TestGovernanceRoutesNotRegisteredWithoutHandler(t *testing.T) {
 	t.Parallel()
 
 	mgr := fullKYCManagerStub{}
 	authHandler := handlers.NewAuthHandler(authProviderStub{}, mgr, false)
 	complianceHandler := handlers.NewComplianceHandler(mgr, nil)
 	app := fiber.New()
-	// ROLE_COMMERCIAL_BANK → must be blocked from governance routes.
+	// Router only exposes /governance routes when GovernanceHandler is wired.
 	authProvider := roleAuthProviderStub{roles: []string{domain.RoleCommercialBank}}
 	Setup(app, Dependencies{
 		AuthHandler:       authHandler,
@@ -201,17 +201,18 @@ func TestGovernanceUsersRoutesRequireRole(t *testing.T) {
 	})
 
 	for _, path := range []string{
-		"/api/v1/governance/users",
-		"/api/v1/governance/users/some-id",
+		"/api/v1/governance/approve-kyc",
+		"/api/v1/governance/registry",
 	} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
 		req.AddCookie(&http.Cookie{Name: "access_token", Value: "fake-token"})
+		req.Header.Set("Content-Type", "application/json")
 		resp, err := app.Test(req)
 		if err != nil {
-			t.Fatalf("GET %s: unexpected error: %v", path, err)
+			t.Fatalf("POST %s: unexpected error: %v", path, err)
 		}
-		if resp.StatusCode != http.StatusForbidden {
-			t.Errorf("GET %s: expected 403, got %d", path, resp.StatusCode)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("POST %s: expected 404, got %d", path, resp.StatusCode)
 		}
 	}
 }

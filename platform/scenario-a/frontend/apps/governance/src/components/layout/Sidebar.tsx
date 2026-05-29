@@ -1,31 +1,16 @@
-import { Badge } from "@cbweb3/ui";
-import {
-  ClipboardCheck,
-  Gauge,
-  LayoutDashboard,
-  ListChecks,
-  Lock,
-  // Scale,
-  // Settings,
-  // ShieldAlert,
-  // Users,
-  Wallet,
-} from "lucide-react";
+import { Badge, PlatformLogo } from "@cbweb3/ui";
+import { ClipboardCheck, LayoutDashboard, Scale, Settings, ShieldAlert, Users } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useCircuitBreaker } from "../../hooks";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/registry", label: "Registry", icon: ClipboardCheck },
-  // { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
-  { to: "/htlc-monitor", label: "PvP Settlement", icon: Lock },
-  // { to: "/accounts", label: "Accounts", icon: Users },
-  // { to: "/parameters", label: "Parameters", icon: Scale },
-  { to: "/deposits-approval", label: "Issuance Approvals", icon: Wallet },
-  { to: "/escrows-approval", label: "Tokenisation Approvals", icon: ListChecks },
-  { to: "/redeems-approval", label: "Redeem Approvals", icon: Gauge },
-  // { to: "/audit", label: "Audit", icon: ClipboardCheck },
-  // { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/accounts", label: "Accounts", icon: Users },
+  { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
+  { to: "/parameters", label: "Parameters", icon: Scale },
+  { to: "/audit", label: "Audit", icon: ClipboardCheck },
+  { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Sidebar() {
@@ -35,7 +20,7 @@ export function Sidebar() {
   return (
     <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:border-b-0 md:border-r">
       <div className="mb-3 space-y-2">
-        {/* <PlatformLogo imageClassName="h-7" /> */}
+        <PlatformLogo imageClassName="h-7" />
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-muted-foreground">System State</span>
           <Badge variant={isHalted ? "destructive" : "default"}>{circuitBreaker?.state ?? "LIVE"}</Badge>

@@ -57,9 +57,7 @@ export function DepositsApprovalPage() {
   };
 
   const onApproveDeposit = async () => {
-    if (!approveTargetId) {
-      return;
-    }
+    if (!approveTargetId) return;
 
     try {
       await approveDeposit(approveTargetId);
@@ -81,10 +79,7 @@ export function DepositsApprovalPage() {
   };
 
   const onReject = async () => {
-    if (!rejectTargetId) {
-      return;
-    }
-
+    if (!rejectTargetId) return;
     if (reason.trim().length < 3) {
       toast.error("Please provide a rejection reason.");
       return;

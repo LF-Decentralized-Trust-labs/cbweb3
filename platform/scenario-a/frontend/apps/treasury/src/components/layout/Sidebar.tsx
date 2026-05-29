@@ -1,5 +1,17 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, HandCoins, Coins, Flame, ShieldAlert, ScrollText, BadgeCheck, Settings } from "lucide-react";
+import {
+  Coins,
+  Flame,
+  Gauge,
+  HandCoins,
+  LayoutDashboard,
+  ListChecks,
+  Lock,
+  ScrollText,
+  Settings,
+  ShieldAlert,
+  Wallet,
+} from "lucide-react";
 import { PlatformLogo } from "@cbweb3/ui";
 
 const links = [
@@ -7,9 +19,12 @@ const links = [
   { to: "/funding-requests", label: "Funding Requests", icon: HandCoins },
   { to: "/issuance", label: "Issuance", icon: Coins },
   { to: "/redemption", label: "Redemption", icon: Flame },
+  { to: "/deposits-approval", label: "Issuance Approvals", icon: Wallet },
+  { to: "/escrows-approval", label: "Tokenisation Approvals", icon: ListChecks },
+  { to: "/redeems-approval", label: "Redeem Approvals", icon: Gauge },
+  { to: "/htlc-monitor", label: "PvP Settlement", icon: Lock },
   { to: "/reconciliation", label: "Reconciliation", icon: ShieldAlert },
   { to: "/audit", label: "Audit", icon: ScrollText },
-  { to: "/kyc", label: "KYC", icon: BadgeCheck },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
