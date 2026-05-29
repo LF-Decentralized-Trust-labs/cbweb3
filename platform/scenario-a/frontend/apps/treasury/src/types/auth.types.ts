@@ -1,19 +1,27 @@
-export type Role = "TREASURY";
-
-export type TreasuryUser = {
-  id: string;
-  name: string;
-  institutionId: string;
-  role: Role;
-  walletAddress: string;
-  authorizedIssuer: boolean;
-};
-
 export type LoginRequest = {
-  username: string;
-  password: string;
+  clientId: string;
+  clientSecret: string;
 };
 
-export type LoginResponse = {
-  user: TreasuryUser;
+export type TokenResponse = {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+};
+
+export type PkiChallengeResponse = {
+  nonce: string;
+};
+
+export type LoginResponse = TokenResponse | PkiChallengeResponse;
+
+export type UserProfile = {
+  subject: string;
+  issuer: string;
+  roles: string[];
+  wallet?: string;
+  country?: string;
+  bankId?: string;
+  privacyGroup?: string;
 };

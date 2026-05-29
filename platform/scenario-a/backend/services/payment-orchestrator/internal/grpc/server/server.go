@@ -646,6 +646,19 @@ func (s *paymentOrchestratorService) MintToken(ctx context.Context, req *pb.Mint
 	return &pb.MintTokenResponse{TxHash: txHash}, nil
 }
 
+func (s *paymentOrchestratorService) BurnToken(ctx context.Context, req *pb.BurnTokenRequest) (*pb.BurnTokenResponse, error) {
+	if req.From == "" || req.Amount == "" {
+		return nil, status.Error(codes.InvalidArgument, "from and amount are required")
+	}
+
+	txHash, err := s.zeto.Burn(ctx, req.From, req.Amount)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "zeto burn: %v", err)
+	}
+
+	return &pb.BurnTokenResponse{TxHash: txHash}, nil
+}
+
 func (s *paymentOrchestratorService) TransferToken(ctx context.Context, req *pb.TransferTokenRequest) (*pb.TransferTokenResponse, error) {
 	if req.To == "" || req.Amount == "" {
 		return nil, status.Error(codes.InvalidArgument, "to and amount are required")

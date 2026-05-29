@@ -1608,6 +1608,38 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/token/burn:
+    post:
+      tags: [Token]
+      summary: Burn tCeBM tokens (Treasury only)
+      description: >
+        Destroys tCeBM tokens via the Zeto withdraw flow. Restricted to
+        ROLE_TREASURY on the Central Bank gateway.
+      operationId: burnToken
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BurnTokenRequest"
+      responses:
+        "201":
+          description: Tokens burned successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BurnTokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/token/transfer:
     post:
       tags: [Token]
@@ -2961,6 +2993,27 @@ components:
         tx_hash:
           type: string
           description: Zeto/Paladin transaction hash for the mint operation
+          example: "0x1234..."
+
+    BurnTokenRequest:
+      type: object
+      required: [from, amount]
+      properties:
+        from:
+          type: string
+          description: Paladin identity whose tokens will be burned
+          example: "funded_operator@spoke-a-cb"
+        amount:
+          type: string
+          description: Amount to burn (big integer as string)
+          example: "10000000"
+
+    BurnTokenResponse:
+      type: object
+      properties:
+        tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for the burn operation
           example: "0x1234..."
 
     TransferTokenRequest:

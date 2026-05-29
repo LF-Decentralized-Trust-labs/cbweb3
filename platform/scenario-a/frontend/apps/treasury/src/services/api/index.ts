@@ -3,4 +3,5 @@ export { fundingApi } from "./funding.api";
 export { treasuryApi } from "./treasury.api";
 export { reconciliationApi } from "./reconciliation.api";
 export { auditApi } from "./audit.api";
-export { kycApi } from "./kyc.api";
+export { paymentApi } from "./payment.api";
+export { htlcApi } from "./htlc.api";

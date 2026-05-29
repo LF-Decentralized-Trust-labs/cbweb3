@@ -118,6 +118,7 @@ export function LoginPage() {
                 <Label htmlFor="clientId">Client ID</Label>
                 <Input
                   id="clientId"
+                  placeholder="central-bank-a-client"
                   {...form.register("clientId")}
                   autoComplete="username"
                 />
@@ -133,6 +134,7 @@ export function LoginPage() {
                 <Input
                   id="clientSecret"
                   type="password"
+                  placeholder="Governance client secret"
                   {...form.register("clientSecret")}
                   autoComplete="current-password"
                 />

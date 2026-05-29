@@ -149,6 +149,24 @@ func (h *PaymentHandler) MintToken(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(result)
 }
 
+func (h *PaymentHandler) BurnToken(c *fiber.Ctx) error {
+	var req struct {
+		From   string `json:"from"`
+		Amount string `json:"amount"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if req.From == "" || req.Amount == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "from and amount are required"})
+	}
+	result, err := h.payment.BurnToken(c.Context(), req.From, req.Amount)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
 func (h *PaymentHandler) TransferToken(c *fiber.Ctx) error {
 	var req struct {
 		To     string `json:"to"`

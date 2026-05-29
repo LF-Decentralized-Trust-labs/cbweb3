@@ -1,29 +1,14 @@
 import { Badge } from "@cbweb3/ui";
-import {
-  ClipboardCheck,
-  Gauge,
-  LayoutDashboard,
-  ListChecks,
-  Lock,
-  // Scale,
-  // Settings,
-  // ShieldAlert,
-  // Users,
-  Wallet,
-} from "lucide-react";
+import { ClipboardCheck, LayoutDashboard, /* Scale, Settings, ShieldAlert, Users */ } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useCircuitBreaker } from "../../hooks";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/registry", label: "Registry", icon: ClipboardCheck },
-  // { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
-  { to: "/htlc-monitor", label: "PvP Settlement", icon: Lock },
   // { to: "/accounts", label: "Accounts", icon: Users },
+  // { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
   // { to: "/parameters", label: "Parameters", icon: Scale },
-  { to: "/deposits-approval", label: "Issuance Approvals", icon: Wallet },
-  { to: "/escrows-approval", label: "Tokenisation Approvals", icon: ListChecks },
-  { to: "/redeems-approval", label: "Redeem Approvals", icon: Gauge },
   // { to: "/audit", label: "Audit", icon: ClipboardCheck },
   // { to: "/settings", label: "Settings", icon: Settings },
 ];

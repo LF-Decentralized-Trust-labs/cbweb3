@@ -21,58 +21,53 @@ import { PaymentStatus, formatCeBM, getPaymentStatusLabel, getPaymentStatusVaria
 
 const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.slice(-8)}` : "-");
 
-export function RedeemsApprovalPage() {
-  const redeems = usePaymentStore((state) => state.redeems);
+export function EscrowsApprovalPage() {
+  const escrows = usePaymentStore((state) => state.escrows);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
-  const fetchRedeems = usePaymentStore((state) => state.fetchRedeems);
-  const approveRedeem = usePaymentStore((state) => state.approveRedeem);
-  const rejectRedeem = usePaymentStore((state) => state.rejectRedeem);
+  const fetchEscrows = usePaymentStore((state) => state.fetchEscrows);
+  const approveEscrow = usePaymentStore((state) => state.approveEscrow);
+  const rejectEscrow = usePaymentStore((state) => state.rejectEscrow);
 
   const [approveTargetId, setApproveTargetId] = useState<string | null>(null);
   const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
   const [reason, setReason] = useState("");
 
   useEffect(() => {
-    void fetchRedeems();
-  }, [fetchRedeems]);
+    void fetchEscrows();
+  }, [fetchEscrows]);
 
   const pendingCount = useMemo(
-    () => redeems.filter((item) => normalizePaymentStatus(item.status) === PaymentStatus.PENDING).length,
-    [redeems],
+    () => escrows.filter((item) => normalizePaymentStatus(item.status) === PaymentStatus.PENDING).length,
+    [escrows],
   );
 
   const onApprove = async () => {
-    if (!approveTargetId) {
-      return;
-    }
+    if (!approveTargetId) return;
 
     try {
-      const result = await approveRedeem(approveTargetId);
-      toast.success(`Redeem approved. Redemption ID: ${shortHash(result.fiat_mint_tx_hash)}`);
+      const result = await approveEscrow(approveTargetId);
+      toast.success(`Tokenisation approved. Redemption: ${shortHash(result.burn_tx_hash)}, Issuance: ${shortHash(result.mint_tx_hash)}`);
       setApproveTargetId(null);
     } catch (approveError) {
-      toast.error(approveError instanceof Error ? approveError.message : "Unable to approve redeem");
+      toast.error(approveError instanceof Error ? approveError.message : "Unable to approve tokenisation request");
     }
   };
 
   const onReject = async () => {
-    if (!rejectTargetId) {
-      return;
-    }
-
+    if (!rejectTargetId) return;
     if (reason.trim().length < 3) {
       toast.error("Please provide a rejection reason.");
       return;
     }
 
     try {
-      await rejectRedeem(rejectTargetId, reason.trim());
-      toast.success("Redeem rejected.");
+      await rejectEscrow(rejectTargetId, reason.trim());
+      toast.success("Tokenisation request rejected.");
       setRejectTargetId(null);
       setReason("");
     } catch (rejectError) {
-      toast.error(rejectError instanceof Error ? rejectError.message : "Unable to reject redeem");
+      toast.error(rejectError instanceof Error ? rejectError.message : "Unable to reject tokenisation request");
     }
   };
 
@@ -81,13 +76,13 @@ export function RedeemsApprovalPage() {
       <section className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Total Redeems</CardDescription>
-            <CardTitle>{redeems.length}</CardTitle>
+            <CardDescription>Total Tokenisation Requests</CardDescription>
+            <CardTitle>{escrows.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Pending Redeems</CardDescription>
+            <CardDescription>Pending Tokenisation Requests</CardDescription>
             <CardTitle>{pendingCount}</CardTitle>
           </CardHeader>
         </Card>
@@ -95,15 +90,16 @@ export function RedeemsApprovalPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Redeem Queue</CardTitle>
-          <CardDescription>Approve fiat reserve release or reject with reason.</CardDescription>
+          <CardTitle>Tokenisation Request Queue</CardTitle>
+          <CardDescription>Approve tCeBM issuance or reject with reason.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="mb-3">
-            <Button variant="outline" onClick={() => void fetchRedeems()} disabled={status === "loading"}>
+            <Button variant="outline" onClick={() => void fetchEscrows()} disabled={status === "loading"}>
               Refresh
             </Button>
           </div>
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -111,31 +107,31 @@ export function RedeemsApprovalPage() {
                 <TableHead>Requester</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Zeto Transfer Tx Hash</TableHead>
                 <TableHead>Redemption ID</TableHead>
+                <TableHead>Issuance Ref</TableHead>
                 <TableHead>Created At</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {redeems.map((redeem) => (
-                <TableRow key={redeem.id}>
-                  <TableCell className="font-medium">{redeem.id}</TableCell>
-                  <TableCell>{redeem.requester_id}</TableCell>
-                  <TableCell>{formatCeBM(redeem.amount)}</TableCell>
+              {escrows.map((escrow) => (
+                <TableRow key={escrow.id}>
+                  <TableCell className="font-mono font-medium" title={escrow.id}>{shortHash(escrow.id)}</TableCell>
+                  <TableCell className="font-mono" title={escrow.requester_id}>{shortHash(escrow.requester_id)}</TableCell>
+                  <TableCell>{formatCeBM(escrow.amount)}</TableCell>
                   <TableCell>
-                    <Badge variant={getPaymentStatusVariant(redeem.status)}>{getPaymentStatusLabel(redeem.status)}</Badge>
+                    <Badge variant={getPaymentStatusVariant(escrow.status)}>{getPaymentStatusLabel(escrow.status)}</Badge>
                   </TableCell>
-                  <TableCell title={redeem.zeto_transfer_tx_hash}>{shortHash(redeem.zeto_transfer_tx_hash)}</TableCell>
-                  <TableCell title={redeem.fiat_mint_tx_hash}>{shortHash(redeem.fiat_mint_tx_hash)}</TableCell>
-                  <TableCell>{new Date(redeem.created_at).toLocaleString()}</TableCell>
+                  <TableCell title={escrow.burn_tx_hash}>{shortHash(escrow.burn_tx_hash)}</TableCell>
+                  <TableCell title={escrow.mint_tx_hash}>{shortHash(escrow.mint_tx_hash)}</TableCell>
+                  <TableCell>{new Date(escrow.created_at).toLocaleString()}</TableCell>
                   <TableCell className="text-right">
-                    {normalizePaymentStatus(redeem.status) === PaymentStatus.PENDING ? (
+                    {normalizePaymentStatus(escrow.status) === PaymentStatus.PENDING ? (
                       <div className="flex justify-end gap-2">
                         <Button
                           size="sm"
                           onClick={() => {
-                            setApproveTargetId(redeem.id);
+                            setApproveTargetId(escrow.id);
                             setRejectTargetId(null);
                             setReason("");
                           }}
@@ -147,7 +143,7 @@ export function RedeemsApprovalPage() {
                           size="sm"
                           variant="outline"
                           onClick={() => {
-                            setRejectTargetId(redeem.id);
+                            setRejectTargetId(escrow.id);
                             setApproveTargetId(null);
                             setReason("");
                           }}
@@ -163,16 +159,17 @@ export function RedeemsApprovalPage() {
               ))}
             </TableBody>
           </Table>
-          {!redeems.length ? <p className="pt-3 text-sm text-muted-foreground">No redeems found.</p> : null}
+          {!escrows.length ? <p className="pt-3 text-sm text-muted-foreground">No tokenisation requests found.</p> : null}
           {error ? <p className="pt-3 text-sm text-destructive">{error}</p> : null}
+          </div>
         </CardContent>
       </Card>
 
       {approveTargetId ? (
         <Card>
           <CardHeader>
-            <CardTitle>Confirm Redeem Approval</CardTitle>
-            <CardDescription>Redeem ID: {approveTargetId}</CardDescription>
+            <CardTitle>Confirm Tokenisation Approval</CardTitle>
+            <CardDescription>Request ID: {approveTargetId}</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onApprove()} disabled={status === "loading"}>
@@ -188,8 +185,8 @@ export function RedeemsApprovalPage() {
       {rejectTargetId ? (
         <Card>
           <CardHeader>
-            <CardTitle>Reject Redeem</CardTitle>
-            <CardDescription>Redeem ID: {rejectTargetId}</CardDescription>
+            <CardTitle>Reject Tokenisation Request</CardTitle>
+            <CardDescription>Request ID: {rejectTargetId}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Textarea value={reason} onChange={(event) => setReason(event.target.value)} />

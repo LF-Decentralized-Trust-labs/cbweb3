@@ -233,10 +233,15 @@ add_attribute_mappers() {
   done
 }
 
-assign_governance_role_to_service_account() {
+assign_roles_to_service_account() {
   local realm_name="$1"
   local client_id="$2"
-  echo "  Assigning ROLE_GOVERNANCE to service account of '${client_id}' in realm '${realm_name}'..."
+  shift 2
+  local roles=("$@")
+  if [[ ${#roles[@]} -eq 0 ]]; then
+    return 0
+  fi
+  echo "  Assigning roles [${roles[*]}] to service account of '${client_id}' in realm '${realm_name}'..."
   local client_uuid
   client_uuid=$(
     /opt/keycloak/bin/kcadm.sh get clients -r "$realm_name" --fields id,clientId \
@@ -251,15 +256,73 @@ assign_governance_role_to_service_account() {
     /opt/keycloak/bin/kcadm.sh get "clients/${client_uuid}/service-account-user" -r "$realm_name" \
       | jq -r '.username'
   )
-  if [[ -n "$service_username" && "$service_username" != "null" ]]; then
+  if [[ -z "$service_username" || "$service_username" == "null" ]]; then
+    echo "  Warning: service account for '${client_id}' not found, skipping"
+    return 0
+  fi
+  for role in "${roles[@]}"; do
     /opt/keycloak/bin/kcadm.sh add-roles \
-      --rolename ROLE_GOVERNANCE \
+      --rolename "$role" \
       --uusername "$service_username" \
       -r "$realm_name" || true
-    echo "  Assigned ROLE_GOVERNANCE to ${service_username}"
-  else
-    echo "  Warning: service account for '${client_id}' not found, skipping"
+    echo "  Assigned ${role} to ${service_username}"
+  done
+}
+
+# Backward-compat wrapper kept for any external callers.
+assign_governance_role_to_service_account() {
+  assign_roles_to_service_account "$1" "$2" ROLE_GOVERNANCE
+}
+
+# Create an additional client in an existing realm, used to give each
+# Central Bank portal (governance vs treasury) its own credential pair.
+# Unlike create_realm_and_client, this one does NOT touch the entity .env file:
+# the secret is logged so operators can copy it (or pass a fixed one via the
+# 3rd argument).
+create_extra_client_in_realm() {
+  local realm_name="$1"
+  local client_id="$2"
+  local desired_secret="${3:-}"
+
+  echo -e "\n=== Provisioning extra client '${client_id}' in realm '${realm_name}' ==="
+
+  if ! /opt/keycloak/bin/kcadm.sh get clients -r "$realm_name" --fields clientId \
+      | jq -e ".[] | select(.clientId==\"${client_id}\")" > /dev/null 2>&1; then
+    /opt/keycloak/bin/kcadm.sh create clients -r "$realm_name" \
+      -s "clientId=${client_id}" \
+      -s "name=${client_id}" \
+      -s enabled=true \
+      -s alwaysDisplayInConsole=true \
+      -s serviceAccountsEnabled=true \
+      -s authorizationServicesEnabled=true \
+      -s standardFlowEnabled=true \
+      -s directAccessGrantsEnabled=true
   fi
+
+  local client_uuid
+  client_uuid=$(
+    /opt/keycloak/bin/kcadm.sh get clients -r "$realm_name" --fields id,clientId \
+      | jq -r ".[] | select(.clientId==\"${client_id}\") | .id"
+  )
+  if [[ -z "$client_uuid" ]]; then
+    echo "Error: unable to resolve internal client ID for ${client_id} in realm ${realm_name}"
+    return 1
+  fi
+
+  add_attribute_mappers "$realm_name" "$client_uuid"
+
+  if [[ -n "$desired_secret" ]]; then
+    /opt/keycloak/bin/kcadm.sh update "clients/${client_uuid}" -r "$realm_name" \
+      -s "secret=${desired_secret}"
+    echo "  Using fixed client secret for ${client_id}."
+  fi
+
+  local client_secret
+  client_secret=$(
+    /opt/keycloak/bin/kcadm.sh get "clients/${client_uuid}/client-secret" -r "$realm_name" \
+      | jq -r '.value'
+  )
+  echo "  Client secret for ${client_id}: ${client_secret}"
 }
 
 # Roles for commercial banks (bank-a and bank-b)
@@ -274,7 +337,7 @@ create_realm_and_client \
   "$INFRA_ENV_BANK_A" \
   "$INFRA_ENV_BANK_A_EXAMPLE"
 create_platform_roles "bank-a" "${BANK_ROLES[@]}"
-assign_governance_role_to_service_account "bank-a" "bank-a-client"
+assign_roles_to_service_account "bank-a" "bank-a-client" ROLE_GOVERNANCE
 
 create_realm_and_client \
   "bank-b" \
@@ -282,7 +345,7 @@ create_realm_and_client \
   "$INFRA_ENV_BANK_B" \
   "$INFRA_ENV_BANK_B_EXAMPLE"
 create_platform_roles "bank-b" "${BANK_ROLES[@]}"
-assign_governance_role_to_service_account "bank-b" "bank-b-client"
+assign_roles_to_service_account "bank-b" "bank-b-client" ROLE_GOVERNANCE
 
 create_realm_and_client \
   "central-bank-a" \
@@ -290,7 +353,11 @@ create_realm_and_client \
   "$INFRA_ENV_CENTRAL_BANK_A" \
   "$INFRA_ENV_CENTRAL_BANK_A_EXAMPLE"
 create_platform_roles "central-bank-a" "${CENTRAL_BANK_ROLES[@]}"
-assign_governance_role_to_service_account "central-bank-a" "central-bank-a-client"
+# Governance portal: existing main client → ROLE_GOVERNANCE only.
+assign_roles_to_service_account "central-bank-a" "central-bank-a-client" ROLE_GOVERNANCE
+# Treasury portal: dedicated client with its own credentials → ROLE_TREASURY only.
+create_extra_client_in_realm "central-bank-a" "central-bank-a-treasury-client" "central-bank-a-treasury-local-secret"
+assign_roles_to_service_account "central-bank-a" "central-bank-a-treasury-client" ROLE_TREASURY
 
 create_realm_and_client \
   "bank-c" \
@@ -298,7 +365,7 @@ create_realm_and_client \
   "$INFRA_ENV_BANK_C" \
   "$INFRA_ENV_BANK_C_EXAMPLE"
 create_platform_roles "bank-c" "${BANK_ROLES[@]}"
-assign_governance_role_to_service_account "bank-c" "bank-c-client"
+assign_roles_to_service_account "bank-c" "bank-c-client" ROLE_GOVERNANCE
 
 create_realm_and_client \
   "bank-d" \
@@ -306,7 +373,7 @@ create_realm_and_client \
   "$INFRA_ENV_BANK_D" \
   "$INFRA_ENV_BANK_D_EXAMPLE"
 create_platform_roles "bank-d" "${BANK_ROLES[@]}"
-assign_governance_role_to_service_account "bank-d" "bank-d-client"
+assign_roles_to_service_account "bank-d" "bank-d-client" ROLE_GOVERNANCE
 
 create_realm_and_client \
   "central-bank-b" \
@@ -314,7 +381,11 @@ create_realm_and_client \
   "$INFRA_ENV_CENTRAL_BANK_B" \
   "$INFRA_ENV_CENTRAL_BANK_B_EXAMPLE"
 create_platform_roles "central-bank-b" "${CENTRAL_BANK_ROLES[@]}"
-assign_governance_role_to_service_account "central-bank-b" "central-bank-b-client"
+# Governance portal: existing main client → ROLE_GOVERNANCE only.
+assign_roles_to_service_account "central-bank-b" "central-bank-b-client" ROLE_GOVERNANCE
+# Treasury portal: dedicated client with its own credentials → ROLE_TREASURY only.
+create_extra_client_in_realm "central-bank-b" "central-bank-b-treasury-client" "central-bank-b-treasury-local-secret"
+assign_roles_to_service_account "central-bank-b" "central-bank-b-treasury-client" ROLE_TREASURY
 
 echo "KEYCLOAK_INIT_DONE"
 echo -e "\nConfiguração concluída. Keycloak está em execução."

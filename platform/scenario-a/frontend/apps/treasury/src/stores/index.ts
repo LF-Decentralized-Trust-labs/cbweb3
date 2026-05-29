@@ -3,6 +3,7 @@ export { useFundingStore } from "./funding.store";
 export { useTreasuryStore } from "./treasury.store";
 export { useReconciliationStore } from "./reconciliation.store";
 export { useAuditStore } from "./audit.store";
-export { useKycStore } from "./kyc.store";
+export { usePaymentStore } from "./payment.store";
+export { useHtlcMonitorStore } from "./htlc.store";
 export { useWebsocketStore } from "./websocket.store";
 export { useUiStore } from "./ui.store";

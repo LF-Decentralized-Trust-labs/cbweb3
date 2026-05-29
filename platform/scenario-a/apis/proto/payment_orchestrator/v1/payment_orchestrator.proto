@@ -244,6 +244,15 @@ message MintTokenResponse {
   string tx_hash = 1;
 }
 
+message BurnTokenRequest {
+  string from = 1;
+  string amount = 2;
+}
+
+message BurnTokenResponse {
+  string tx_hash = 1;
+}
+
 message TransferTokenRequest {
   string to = 1;
   string amount = 2;
@@ -498,6 +507,7 @@ service PaymentOrchestratorService {
 
   // Token operations (Zeto via Paladin sidecar)
   rpc MintToken(MintTokenRequest) returns (MintTokenResponse);
+  rpc BurnToken(BurnTokenRequest) returns (BurnTokenResponse);
   rpc TransferToken(TransferTokenRequest) returns (TransferTokenResponse);
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
   rpc GetFiatBalance(GetFiatBalanceRequest) returns (GetFiatBalanceResponse);

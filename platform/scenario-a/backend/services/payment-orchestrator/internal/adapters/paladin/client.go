@@ -97,6 +97,10 @@ var zetoABI = []abiEntry{
 		Inputs: []abiComponent{{Name: "mints", Type: "tuple[]", InternalType: "struct TransferParam[]", Components: transferParamComponents}},
 	},
 	{
+		Type: "function", Name: "withdraw",
+		Inputs: []abiComponent{{Name: "amount", Type: "uint256"}},
+	},
+	{
 		Type: "function", Name: "transfer",
 		Inputs: []abiComponent{{Name: "transfers", Type: "tuple[]", InternalType: "struct TransferParam[]", Components: transferParamComponents}},
 	},
@@ -375,6 +379,25 @@ func (c *Client) Mint(ctx context.Context, to string, amount string) (string, er
 			"mints": []map[string]interface{}{
 				{"to": to, "amount": amount, "data": "0x"},
 			},
+		},
+	}
+	return c.sendTx(ctx, tx)
+}
+
+// Burn removes Zeto tokens from circulation via Zeto.withdraw, which converts
+// Zeto private states back into the underlying ERC-20 and burns them. The
+// from parameter is currently informational; the on-chain caller is the
+// configured Paladin identity.
+func (c *Client) Burn(ctx context.Context, _ string, amount string) (string, error) {
+	tx := paladinTx{
+		Type:     "private",
+		Domain:   "zeto",
+		From:     c.identity,
+		To:       c.zetoTokenAddress,
+		ABI:      zetoABI,
+		Function: "withdraw",
+		Data: map[string]interface{}{
+			"amount": amount,
 		},
 	}
 	return c.sendTx(ctx, tx)

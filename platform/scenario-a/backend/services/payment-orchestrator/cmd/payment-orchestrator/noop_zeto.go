@@ -13,6 +13,7 @@ var errNoPaladin = errors.New("PALADIN_URL not configured — set it to enable Z
 type noopZeto struct{}
 
 func (noopZeto) Mint(_ context.Context, _, _ string) (string, error)     { return "", errNoPaladin }
+func (noopZeto) Burn(_ context.Context, _, _ string) (string, error)     { return "", errNoPaladin }
 func (noopZeto) Transfer(_ context.Context, _, _ string) (string, error) { return "", errNoPaladin }
 func (noopZeto) Lock(_ context.Context, _, _ string) (*ports.ZetoLockResult, error) {
 	return nil, errNoPaladin

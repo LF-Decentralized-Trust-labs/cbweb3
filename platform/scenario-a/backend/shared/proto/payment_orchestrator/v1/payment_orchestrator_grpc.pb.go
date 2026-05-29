@@ -34,6 +34,7 @@ const (
 	PaymentOrchestratorService_GetHTLCStatus_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/GetHTLCStatus"
 	PaymentOrchestratorService_SearchHTLC_FullMethodName            = "/payment_orchestrator.v1.PaymentOrchestratorService/SearchHTLC"
 	PaymentOrchestratorService_MintToken_FullMethodName             = "/payment_orchestrator.v1.PaymentOrchestratorService/MintToken"
+	PaymentOrchestratorService_BurnToken_FullMethodName             = "/payment_orchestrator.v1.PaymentOrchestratorService/BurnToken"
 	PaymentOrchestratorService_TransferToken_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/TransferToken"
 	PaymentOrchestratorService_GetBalance_FullMethodName            = "/payment_orchestrator.v1.PaymentOrchestratorService/GetBalance"
 	PaymentOrchestratorService_GetFiatBalance_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/GetFiatBalance"
@@ -75,6 +76,7 @@ type PaymentOrchestratorServiceClient interface {
 	SearchHTLC(ctx context.Context, in *SearchHTLCRequest, opts ...grpc.CallOption) (*SearchHTLCResponse, error)
 	// Token operations (Zeto via Paladin sidecar)
 	MintToken(ctx context.Context, in *MintTokenRequest, opts ...grpc.CallOption) (*MintTokenResponse, error)
+	BurnToken(ctx context.Context, in *BurnTokenRequest, opts ...grpc.CallOption) (*BurnTokenResponse, error)
 	TransferToken(ctx context.Context, in *TransferTokenRequest, opts ...grpc.CallOption) (*TransferTokenResponse, error)
 	GetBalance(ctx context.Context, in *GetBalanceRequest, opts ...grpc.CallOption) (*GetBalanceResponse, error)
 	GetFiatBalance(ctx context.Context, in *GetFiatBalanceRequest, opts ...grpc.CallOption) (*GetFiatBalanceResponse, error)
@@ -250,6 +252,16 @@ func (c *paymentOrchestratorServiceClient) MintToken(ctx context.Context, in *Mi
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MintTokenResponse)
 	err := c.cc.Invoke(ctx, PaymentOrchestratorService_MintToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *paymentOrchestratorServiceClient) BurnToken(ctx context.Context, in *BurnTokenRequest, opts ...grpc.CallOption) (*BurnTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BurnTokenResponse)
+	err := c.cc.Invoke(ctx, PaymentOrchestratorService_BurnToken_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -448,6 +460,7 @@ type PaymentOrchestratorServiceServer interface {
 	SearchHTLC(context.Context, *SearchHTLCRequest) (*SearchHTLCResponse, error)
 	// Token operations (Zeto via Paladin sidecar)
 	MintToken(context.Context, *MintTokenRequest) (*MintTokenResponse, error)
+	BurnToken(context.Context, *BurnTokenRequest) (*BurnTokenResponse, error)
 	TransferToken(context.Context, *TransferTokenRequest) (*TransferTokenResponse, error)
 	GetBalance(context.Context, *GetBalanceRequest) (*GetBalanceResponse, error)
 	GetFiatBalance(context.Context, *GetFiatBalanceRequest) (*GetFiatBalanceResponse, error)
@@ -522,6 +535,9 @@ func (UnimplementedPaymentOrchestratorServiceServer) SearchHTLC(context.Context,
 }
 func (UnimplementedPaymentOrchestratorServiceServer) MintToken(context.Context, *MintTokenRequest) (*MintTokenResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method MintToken not implemented")
+}
+func (UnimplementedPaymentOrchestratorServiceServer) BurnToken(context.Context, *BurnTokenRequest) (*BurnTokenResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method BurnToken not implemented")
 }
 func (UnimplementedPaymentOrchestratorServiceServer) TransferToken(context.Context, *TransferTokenRequest) (*TransferTokenResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TransferToken not implemented")
@@ -860,6 +876,24 @@ func _PaymentOrchestratorService_MintToken_Handler(srv interface{}, ctx context.
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(PaymentOrchestratorServiceServer).MintToken(ctx, req.(*MintTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PaymentOrchestratorService_BurnToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BurnTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PaymentOrchestratorServiceServer).BurnToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PaymentOrchestratorService_BurnToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PaymentOrchestratorServiceServer).BurnToken(ctx, req.(*BurnTokenRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1236,6 +1270,10 @@ var PaymentOrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MintToken",
 			Handler:    _PaymentOrchestratorService_MintToken_Handler,
+		},
+		{
+			MethodName: "BurnToken",
+			Handler:    _PaymentOrchestratorService_BurnToken_Handler,
 		},
 		{
 			MethodName: "TransferToken",

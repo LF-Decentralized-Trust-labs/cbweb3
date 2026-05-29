@@ -176,6 +176,14 @@ func (a *GRPCAdapter) MintToken(ctx context.Context, to, amount string) (*TokenR
 	return &TokenResult{TxHash: resp.TxHash}, nil
 }
 
+func (a *GRPCAdapter) BurnToken(ctx context.Context, from, amount string) (*TokenResult, error) {
+	resp, err := a.cc.BurnToken(ctx, &pb.BurnTokenRequest{From: from, Amount: amount})
+	if err != nil {
+		return nil, err
+	}
+	return &TokenResult{TxHash: resp.TxHash}, nil
+}
+
 func (a *GRPCAdapter) TransferToken(ctx context.Context, to, amount string) (*TokenResult, error) {
 	resp, err := a.cc.TransferToken(ctx, &pb.TransferTokenRequest{To: to, Amount: amount})
 	if err != nil {
