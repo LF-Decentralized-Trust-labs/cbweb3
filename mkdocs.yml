@@ -82,6 +82,8 @@ extra:
     provider: mike
 nav:
   - Introduction: index.md
+  - Knowledge Products:
+    - KP1 — Tokenized Central Bank Money in LAC: knowledge-products/kp1-tokenized-central-bank-money-lac.md
   # - Overview:
   #   - What is CBWeb3?: overview/what-is-cbweb3.md
   #   - Features: overview/features.md
