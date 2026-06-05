@@ -59,6 +59,9 @@ export const config = {
   /** Shared secret sent to internal FX endpoints via X-Relay-Auth header. */
   relayAuthSecret: requireEnv("INTERNAL_RELAY_AUTH_SECRET"),
 
+  /** Comma-separated allowed origins for Socket.IO browser connections. Empty = block all browser cross-origin requests. */
+  socketIoAllowedOrigins: optionalEnv("SOCKET_IO_ALLOWED_ORIGINS", "").split(",").filter(Boolean),
+
   /** JSON file path used to persist relay dedup/retry state across restarts. */
   relayStorePath: optionalEnv("RELAY_STORE_PATH", "/tmp/cacti-relay-store.json"),
 
