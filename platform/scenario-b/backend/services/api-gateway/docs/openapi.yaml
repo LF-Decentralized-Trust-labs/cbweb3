@@ -19,9 +19,7 @@ tags:
   - name: Health
     description: Service health endpoint
   - name: Authentication
-    description: >
-      Login, refresh, logout, PKI wallet bind, and optional MVP helper
-      `resolve-challenge` (development only — signs nonce from a PEM file under PKI_DIR).
+    description: Login, refresh, logout, and PKI wallet bind.
   - name: Compliance
     description: KYC credential issuance, verification, AML screening, and governance
   - name: Onboarding
@@ -270,46 +268,6 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: "PKI authentication not configured"
-
-  /api/v1/auth/resolve-challenge:
-    post:
-      tags: [Authentication]
-      summary: "[MVP] Sign PKI login nonce from a local PEM file"
-      description: >
-        Development-only helper. Reads a combined PEM file from the directory
-        set by environment variable PKI_DIR (default `./config/pki`).
-        The file must contain both a CERTIFICATE block and an EC PRIVATE KEY block.
-        Returns the DER ECDSA signature (hex) and certificate PEM for use with
-        POST /api/v1/auth/wallet/bind. Do not expose in production.
-      operationId: resolveChallenge
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ResolveChallengeRequest"
-      responses:
-        "200":
-          description: Nonce signed successfully
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ResolveChallengeResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "422":
-          description: PEM file missing, invalid, or not found under PKI_DIR
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                notFound:
-                  value:
-                    error: "cert file not found: bank.pem"
-                badPem:
-                  value:
-                    error: "CERTIFICATE block not found in bank.pem"
 
   /api/v1/auth/me:
     get:
@@ -2217,31 +2175,6 @@ components:
       properties:
         refreshToken:
           type: string
-
-    ResolveChallengeRequest:
-      type: object
-      required: [nonce, cert_file]
-      properties:
-        nonce:
-          type: string
-          description: Hex-encoded login nonce from POST /auth/login (32 bytes as 64 hex chars)
-          example: "a1b2c3d4e5f6789012345678901234567890abcdef0123456789abcdef0123"
-        cert_file:
-          type: string
-          description: >
-            Filename only (no path segments). Resolved as PKI_DIR/cert_file.
-          example: "banco_itau_bundle.pem"
-
-    ResolveChallengeResponse:
-      type: object
-      required: [nonce_signature_hex, cert_pem]
-      properties:
-        nonce_signature_hex:
-          type: string
-          description: DER-encoded ECDSA signature (hex) of SHA-256(nonce bytes)
-        cert_pem:
-          type: string
-          description: PEM-encoded participant certificate extracted from the file
 
     AuthResponse:
       type: object
