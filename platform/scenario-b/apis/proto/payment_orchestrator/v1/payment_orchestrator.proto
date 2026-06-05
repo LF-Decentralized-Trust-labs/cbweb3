@@ -22,16 +22,6 @@ enum FXAgreementEventSource {
   FX_EVENT_SOURCE_ON_BEHALF = 3;
 }
 
-enum HTLCState {
-  HTLC_STATE_INVALID = 0;
-  HTLC_STATE_PENDING = 1;
-  HTLC_STATE_LOCKED = 2;
-  HTLC_STATE_SETTLED = 3;
-  HTLC_STATE_REFUNDED = 4;
-  HTLC_STATE_SETTLING = 5;  // transient: on-chain settle in progress
-  HTLC_STATE_REFUNDING = 6; // transient: on-chain refund in progress
-}
-
 // ─── FX Agreement Messages ───────────────────────────────────────────────
 
 message FXAgreement {
@@ -149,84 +139,6 @@ message ListFXAgreementEventsResponse {
   repeated FXAgreementEvent events = 1;
 }
 
-// ─── HTLC Messages ──────────────────────────────────────────────────────
-
-message HTLCLock {
-  string contract_id = 1;
-  string sender = 2;
-  string receiver = 3;
-  string hash_lock = 4;
-  uint64 time_lock = 5;
-  reserved 6;
-  reserved "secret";
-  HTLCState state = 8;
-}
-
-message LockHTLCRequest {
-  string agreement_id = 1;
-  string receiver = 2;  // Required: Besu address of the token recipient
-  string amount = 3;    // Required
-  uint64 time_lock = 4; // Optional: defaults to now+3600s (1h)
-}
-
-message LockHTLCResponse {
-  string contract_id = 1;
-  string hash_lock = 2;
-  string htlc_tx_hash = 3;
-  string secret = 4; // one-time disclosure to the HTLC creator; store securely and never re-expose
-}
-
-// LockHTLCWithHashLock creates an HTLC lock using an externally provided
-// hashLock (no secret is generated). Used by the responder spoke.
-message LockHTLCWithHashLockRequest {
-  string agreement_id = 1;
-  string receiver = 2;  // Required: Besu address of the token recipient
-  string amount = 3;    // Required
-  uint64 time_lock = 4; // Optional: defaults to now+1800s (30min)
-  string hash_lock = 5; // Required: hex-encoded SHA-256 hash from initiator
-}
-
-message LockHTLCWithHashLockResponse {
-  string contract_id = 1;
-  string hash_lock = 2;
-  string htlc_tx_hash = 3;
-}
-
-message SettleHTLCRequest {
-  string contract_id = 1;
-  string secret = 2;
-}
-
-message SettleHTLCResponse {
-  string htlc_tx_hash = 1;
-}
-
-message RefundHTLCRequest {
-  string contract_id = 1;
-}
-
-message RefundHTLCResponse {
-  string htlc_tx_hash = 1;
-}
-
-message GetHTLCStatusRequest {
-  string contract_id = 1;
-}
-
-message GetHTLCStatusResponse {
-  HTLCLock lock = 1;
-}
-
-message SearchHTLCRequest {
-  string agreement_id = 1;
-  string sender = 2;
-  string receiver = 3;
-  string state = 4;
-}
-
-message SearchHTLCResponse {
-  repeated HTLCLock locks = 1;
-}
 
 // ─── Token Balance ────────────────────────────────────────────────────────
 
@@ -449,14 +361,6 @@ service PaymentOrchestratorService {
   rpc GetFXAgreement(GetFXAgreementRequest) returns (GetFXAgreementResponse);
   rpc ListFXAgreements(ListFXAgreementsRequest) returns (ListFXAgreementsResponse);
   rpc ListFXAgreementEvents(ListFXAgreementEventsRequest) returns (ListFXAgreementEventsResponse);
-
-  // HTLC operations (on-chain Besu coordination)
-  rpc LockHTLC(LockHTLCRequest) returns (LockHTLCResponse);
-  rpc LockHTLCWithHashLock(LockHTLCWithHashLockRequest) returns (LockHTLCWithHashLockResponse);
-  rpc SettleHTLC(SettleHTLCRequest) returns (SettleHTLCResponse);
-  rpc RefundHTLC(RefundHTLCRequest) returns (RefundHTLCResponse);
-  rpc GetHTLCStatus(GetHTLCStatusRequest) returns (GetHTLCStatusResponse);
-  rpc SearchHTLC(SearchHTLCRequest) returns (SearchHTLCResponse);
 
   // tCeBM balance query
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
