@@ -340,14 +340,11 @@ func TestSettleHTLC_Success(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	// Get secret from status (stored in off-chain record)
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
+	// Secret is returned once in the LockHTLC response (not via GetHTLCStatus).
+	secret := lockResp.Secret
+	if secret == "" {
+		t.Fatal("LockHTLC response must include the secret for the creator")
 	}
-	secret := statusResp.Lock.Secret
 
 	settleResp, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: lockResp.ContractId,
@@ -473,14 +470,8 @@ func TestSettleHTLC_Idempotent(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	// Get secret
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-	secret := statusResp.Lock.Secret
+	// Secret is returned once in the LockHTLC response.
+	secret := lockResp.Secret
 
 	// First settle — should succeed
 	resp1, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
@@ -582,18 +573,10 @@ func TestSettleHTLC_OnChainSettleFails_BlocksZetoTransfer(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	// Get the secret
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-
 	// Settle — on-chain settle will fail → should return error
 	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: lockResp.ContractId,
-		Secret:     statusResp.Lock.Secret,
+		Secret:     lockResp.Secret,
 	})
 	if err == nil {
 		t.Fatal("expected error when on-chain HTLC settle fails")
@@ -635,16 +618,9 @@ func TestSettleHTLC_ZetoTransferFails_StateRemainsLocked(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-
 	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: lockResp.ContractId,
-		Secret:     statusResp.Lock.Secret,
+		Secret:     lockResp.Secret,
 	})
 	if err == nil {
 		t.Fatal("expected error when zeto transferLocked fails")
@@ -677,16 +653,9 @@ func TestSettleHTLC_BothSucceed_StateSettled(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-
 	resp, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: lockResp.ContractId,
-		Secret:     statusResp.Lock.Secret,
+		Secret:     lockResp.Secret,
 	})
 	if err != nil {
 		t.Fatalf("SettleHTLC: %v", err)
@@ -794,19 +763,11 @@ func TestSettleHTLC_CrossSpoke_OnChainFails_BlocksTransfer(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	// Get the generated secret
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-
 	// Simulate cross-spoke settle: use a foreign contract_id but the real secret.
 	// The server will find the local record via hashLock match.
 	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: "foreign_contract_id_from_other_spoke",
-		Secret:     statusResp.Lock.Secret,
+		Secret:     lockResp.Secret,
 	})
 	if err == nil {
 		t.Fatal("expected error when on-chain HTLC settle fails")
@@ -958,13 +919,6 @@ func TestSettleHTLC_ConcurrentCallsOnlyOneSucceeds(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-
 	var wg sync.WaitGroup
 	results := make(chan error, 2)
 
@@ -974,7 +928,7 @@ func TestSettleHTLC_ConcurrentCallsOnlyOneSucceeds(t *testing.T) {
 			defer wg.Done()
 			_, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 				ContractId: lockResp.ContractId,
-				Secret:     statusResp.Lock.Secret,
+				Secret:     lockResp.Secret,
 			})
 			results <- err
 		}()
@@ -1017,17 +971,10 @@ func TestSettleHTLC_RetryAfterZetoTransferFails(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-
 	// First settle: on-chain succeeds, zeto fails → state should be SETTLING
 	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: lockResp.ContractId,
-		Secret:     statusResp.Lock.Secret,
+		Secret:     lockResp.Secret,
 	})
 	if err == nil {
 		t.Fatal("expected error when zeto transfer fails")
@@ -1054,7 +1001,7 @@ func TestSettleHTLC_RetryAfterZetoTransferFails(t *testing.T) {
 
 	resp, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: lockResp.ContractId,
-		Secret:     statusResp.Lock.Secret,
+		Secret:     lockResp.Secret,
 	})
 	if err != nil {
 		t.Fatalf("SettleHTLC retry: %v", err)
@@ -1158,5 +1105,64 @@ func TestLockHTLC_RejectsUnparseableReceiverWhenSpokePrefixSet(t *testing.T) {
 	}
 	if env.zeto.lockCalled != 0 {
 		t.Errorf("expected zeto.Lock NOT called, got %d", env.zeto.lockCalled)
+	}
+}
+
+// --- Security: preimage must never appear in read responses ---
+
+func TestGetHTLCStatus_SecretNotExposed(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_SEC_001",
+		Receiver:    "bank-b",
+		Amount:      "100",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+	if lockResp.Secret == "" {
+		t.Fatal("LockHTLC must return the secret to the creator")
+	}
+
+	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+	if statusResp.Lock == nil {
+		t.Fatal("expected non-nil lock in response")
+	}
+	// Compile-time proof: HTLCLock has no Secret field (field 6 is reserved in the proto).
+	// The test exercises the endpoint to confirm it returns a valid response.
+}
+
+func TestSearchHTLC_SecretNotExposed(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	_, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_SEC_002",
+		Receiver:    "bank-b",
+		Amount:      "100",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	searchResp, err := env.client.SearchHTLC(ctx, &pb.SearchHTLCRequest{
+		Sender: testPaladinIdentity,
+	})
+	if err != nil {
+		t.Fatalf("SearchHTLC: %v", err)
+	}
+	// Compile-time proof: HTLCLock has no Secret field (field 6 is reserved in the proto).
+	// Verify results contain the locked HTLC with no secret-carrying fields.
+	if len(searchResp.Locks) == 0 {
+		t.Error("expected at least one result for the locked HTLC")
 	}
 }

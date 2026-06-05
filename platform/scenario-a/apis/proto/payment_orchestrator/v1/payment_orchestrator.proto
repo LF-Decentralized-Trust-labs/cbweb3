@@ -157,7 +157,8 @@ message HTLCLock {
   string receiver = 3;
   string hash_lock = 4;
   uint64 time_lock = 5;
-  string secret = 6;
+  reserved 6;
+  reserved "secret";
   string zeto_lock_ref = 7;
   HTLCState state = 8;
 }
@@ -174,6 +175,7 @@ message LockHTLCResponse {
   string hash_lock = 2;
   string htlc_tx_hash = 3;
   string zeto_tx_hash = 4;
+  string secret = 5; // one-time disclosure to the HTLC creator; store securely and never re-expose
 }
 
 // LockHTLCWithHashLock creates an HTLC lock using an externally provided

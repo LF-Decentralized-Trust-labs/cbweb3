@@ -47,6 +47,7 @@ type LockHTLCResult struct {
 	ContractID string `json:"contract_id"`
 	HashLock   string `json:"hash_lock"`
 	HTLCTxHash string `json:"htlc_tx_hash,omitempty"`
+	Secret     string `json:"secret,omitempty"` // one-time; store securely — never re-exposed after this response
 }
 
 func (a *GRPCAdapter) LockHTLC(ctx context.Context, agreementID, receiver, amount string, timeLock uint64) (*LockHTLCResult, error) {
@@ -63,6 +64,7 @@ func (a *GRPCAdapter) LockHTLC(ctx context.Context, agreementID, receiver, amoun
 		ContractID: resp.ContractId,
 		HashLock:   resp.HashLock,
 		HTLCTxHash: resp.HtlcTxHash,
+		Secret:     resp.Secret,
 	}, nil
 }
 
@@ -119,7 +121,6 @@ type HTLCStatus struct {
 	Receiver   string `json:"receiver"`
 	HashLock   string `json:"hash_lock"`
 	TimeLock   uint64 `json:"time_lock"`
-	Secret     string `json:"secret,omitempty"`
 	State      string `json:"state"`
 }
 
@@ -174,7 +175,6 @@ func lockToStatus(l *pb.HTLCLock) *HTLCStatus {
 		Receiver:   l.Receiver,
 		HashLock:   l.HashLock,
 		TimeLock:   l.TimeLock,
-		Secret:     l.Secret,
 		State:      l.State.String(),
 	}
 }

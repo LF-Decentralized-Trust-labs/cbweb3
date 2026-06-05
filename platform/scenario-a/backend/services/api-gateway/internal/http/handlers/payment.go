@@ -1,13 +1,16 @@
 package handlers
 
 import (
+	"strings"
 	"time"
 
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -112,15 +115,36 @@ func (h *PaymentHandler) GetHTLCStatus(c *fiber.Ctx) error {
 	if contractID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "contractId is required"})
 	}
-	result, err := h.payment.GetHTLCStatus(c.Context(), contractID)
+
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok || claims.Subject == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
+	}
+
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", claims.Subject)
+	result, err := h.payment.GetHTLCStatus(ctx, contractID)
 	if err != nil {
+		if st, ok2 := status.FromError(err); ok2 && st.Code() == codes.PermissionDenied {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "not a counterparty of this HTLC"})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
+
+	if !isHTLCCounterparty(result.Sender, result.Receiver, claims.BankID) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "not a counterparty of this HTLC"})
+	}
+
 	return c.JSON(result)
 }
 
 func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
-	results, err := h.payment.SearchHTLC(c.Context(),
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok || claims.Subject == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
+	}
+
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", claims.Subject)
+	results, err := h.payment.SearchHTLC(ctx,
 		c.Query("agreement_id"),
 		c.Query("sender"),
 		c.Query("receiver"),
@@ -129,7 +153,25 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.JSON(fiber.Map{"locks": results, "total": len(results)})
+
+	// Keep only records where the caller's institution is a counterparty.
+	filtered := results[:0]
+	for _, r := range results {
+		if isHTLCCounterparty(r.Sender, r.Receiver, claims.BankID) {
+			filtered = append(filtered, r)
+		}
+	}
+
+	return c.JSON(fiber.Map{"locks": filtered, "total": len(filtered)})
+}
+
+// isHTLCCounterparty reports whether bankID (from JWT claims) matches the
+// institution embedded in either Paladin identity (format: name@spoke-{prefix}-{bankID}).
+func isHTLCCounterparty(sender, receiver, bankID string) bool {
+	if bankID == "" {
+		return false
+	}
+	return strings.Contains(sender, bankID) || strings.Contains(receiver, bankID)
 }
 
 // --- Token endpoints ---

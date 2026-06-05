@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -181,6 +182,7 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 		ContractId: contractID,
 		HashLock:   hashLock,
 		HtlcTxHash: htlcTxHash,
+		Secret:     secret,
 	}, nil
 }
 
@@ -429,7 +431,7 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 	return &pb.RefundHTLCResponse{HtlcTxHash: htlcTxHash}, nil
 }
 
-func (s *paymentOrchestratorService) GetHTLCStatus(_ context.Context, req *pb.GetHTLCStatusRequest) (*pb.GetHTLCStatusResponse, error) {
+func (s *paymentOrchestratorService) GetHTLCStatus(ctx context.Context, req *pb.GetHTLCStatusRequest) (*pb.GetHTLCStatusResponse, error) {
 	if req.ContractId == "" {
 		return nil, status.Error(codes.InvalidArgument, "contract_id is required")
 	}
@@ -442,10 +444,16 @@ func (s *paymentOrchestratorService) GetHTLCStatus(_ context.Context, req *pb.Ge
 		return nil, status.Errorf(codes.NotFound, "HTLC %q not found", req.ContractId)
 	}
 
+	if err := s.checkHTLCCounterparty(ctx, record.Sender, record.Receiver); err != nil {
+		return nil, err
+	}
+
 	return &pb.GetHTLCStatusResponse{Lock: recordToProto(record)}, nil
 }
 
-func (s *paymentOrchestratorService) SearchHTLC(_ context.Context, req *pb.SearchHTLCRequest) (*pb.SearchHTLCResponse, error) {
+func (s *paymentOrchestratorService) SearchHTLC(ctx context.Context, req *pb.SearchHTLCRequest) (*pb.SearchHTLCResponse, error) {
+	callerIdentity := callerIdentityFromContext(ctx)
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -463,10 +471,42 @@ func (s *paymentOrchestratorService) SearchHTLC(_ context.Context, req *pb.Searc
 		if req.State != "" && string(r.State) != req.State {
 			continue
 		}
+		// When the caller provides their identity, only return records they are party to.
+		if callerIdentity != "" && r.Sender != callerIdentity && r.Receiver != callerIdentity {
+			continue
+		}
 		results = append(results, recordToProto(r))
 	}
 
 	return &pb.SearchHTLCResponse{Locks: results}, nil
+}
+
+// checkHTLCCounterparty returns PermissionDenied when the caller has identified
+// themselves (via x-caller-identity metadata) but is not a party to the HTLC.
+// When no identity is provided the check is skipped (permissive for dev/internal callers).
+func (s *paymentOrchestratorService) checkHTLCCounterparty(ctx context.Context, sender, receiver string) error {
+	callerIdentity := callerIdentityFromContext(ctx)
+	if callerIdentity == "" {
+		return nil
+	}
+	if callerIdentity == sender || callerIdentity == receiver {
+		return nil
+	}
+	return status.Errorf(codes.PermissionDenied, "caller is not a counterparty of this HTLC")
+}
+
+// callerIdentityFromContext extracts the Paladin identity forwarded by the API
+// gateway in the x-caller-identity gRPC metadata header.
+func callerIdentityFromContext(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	vals := md.Get("x-caller-identity")
+	if len(vals) == 0 {
+		return ""
+	}
+	return vals[0]
 }
 
 // --- Token Balance ---
@@ -843,7 +883,6 @@ func recordToProto(r *domain.HTLCRecord) *pb.HTLCLock {
 		Receiver:   r.Receiver,
 		HashLock:   r.HashLock,
 		TimeLock:   r.TimeLock,
-		Secret:     r.Secret,
 		State:      stateMap[r.State],
 	}
 }
