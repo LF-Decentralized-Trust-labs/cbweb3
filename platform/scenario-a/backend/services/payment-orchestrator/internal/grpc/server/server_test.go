@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -1164,5 +1165,78 @@ func TestSearchHTLC_SecretNotExposed(t *testing.T) {
 	// Verify results contain the locked HTLC with no secret-carrying fields.
 	if len(searchResp.Locks) == 0 {
 		t.Error("expected at least one result for the locked HTLC")
+	}
+}
+
+func TestSearchHTLC_BankIDFilterVisible(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	_, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_VIS_001",
+		Receiver:    "counterparty@spoke-b-bank-b",
+		Amount:      "500",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	// Sender is testPaladinIdentity ("funded_operator@spoke-a-bank-a").
+	// Passing BankID "bank-a" via x-caller-identity should match the sender and return results.
+	mdCtx := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-a")
+
+	searchResp, err := env.client.SearchHTLC(mdCtx, &pb.SearchHTLCRequest{})
+	if err != nil {
+		t.Fatalf("SearchHTLC with bank-a identity: %v", err)
+	}
+	if len(searchResp.Locks) == 0 {
+		t.Error("bank-a should see the HTLC it created as sender")
+	}
+
+	// "bank-c" is not a counterparty — should get empty results.
+	mdCtxOther := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-c")
+	searchRespOther, err := env.client.SearchHTLC(mdCtxOther, &pb.SearchHTLCRequest{})
+	if err != nil {
+		t.Fatalf("SearchHTLC with bank-c identity: %v", err)
+	}
+	if len(searchRespOther.Locks) != 0 {
+		t.Errorf("bank-c should not see HTLCs where it is not a counterparty, got %d", len(searchRespOther.Locks))
+	}
+}
+
+func TestGetHTLCStatus_BankIDFilterCounterparty(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_VIS_002",
+		Receiver:    "counterparty@spoke-b-bank-b",
+		Amount:      "500",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	// Sender is "bank-a" — should be allowed.
+	mdCtx := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-a")
+	_, err = env.client.GetHTLCStatus(mdCtx, &pb.GetHTLCStatusRequest{ContractId: lockResp.ContractId})
+	if err != nil {
+		t.Errorf("bank-a (sender) should be able to view the HTLC: %v", err)
+	}
+
+	// Receiver is "bank-b" — should be allowed.
+	mdCtxB := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-b")
+	_, err = env.client.GetHTLCStatus(mdCtxB, &pb.GetHTLCStatusRequest{ContractId: lockResp.ContractId})
+	if err != nil {
+		t.Errorf("bank-b (receiver) should be able to view the HTLC: %v", err)
+	}
+
+	// "bank-c" is not a counterparty — should get PermissionDenied.
+	mdCtxC := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-c")
+	_, err = env.client.GetHTLCStatus(mdCtxC, &pb.GetHTLCStatusRequest{ContractId: lockResp.ContractId})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Errorf("bank-c should get PermissionDenied, got: %v", err)
 	}
 }

@@ -633,8 +633,8 @@ func (s *paymentOrchestratorService) SearchHTLC(ctx context.Context, req *pb.Sea
 		if req.State != "" && string(r.State) != req.State {
 			continue
 		}
-		// When the caller provides their identity, only return records they are party to.
-		if callerIdentity != "" && r.Sender != callerIdentity && r.Receiver != callerIdentity {
+		// When the caller provides their BankID, only return records their institution is party to.
+		if callerIdentity != "" && !strings.Contains(r.Sender, callerIdentity) && !strings.Contains(r.Receiver, callerIdentity) {
 			continue
 		}
 		results = append(results, recordToProto(r))
@@ -651,7 +651,7 @@ func (s *paymentOrchestratorService) checkHTLCCounterparty(ctx context.Context, 
 	if callerIdentity == "" {
 		return nil
 	}
-	if callerIdentity == sender || callerIdentity == receiver {
+	if strings.Contains(sender, callerIdentity) || strings.Contains(receiver, callerIdentity) {
 		return nil
 	}
 	return status.Errorf(codes.PermissionDenied, "caller is not a counterparty of this HTLC")

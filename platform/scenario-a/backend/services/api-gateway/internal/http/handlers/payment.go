@@ -121,7 +121,7 @@ func (h *PaymentHandler) GetHTLCStatus(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
 	}
 
-	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", claims.Subject)
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", claims.BankID)
 	result, err := h.payment.GetHTLCStatus(ctx, contractID)
 	if err != nil {
 		if st, ok2 := status.FromError(err); ok2 && st.Code() == codes.PermissionDenied {
@@ -143,7 +143,7 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
 	}
 
-	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", claims.Subject)
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", claims.BankID)
 	results, err := h.payment.SearchHTLC(ctx,
 		c.Query("agreement_id"),
 		c.Query("sender"),
