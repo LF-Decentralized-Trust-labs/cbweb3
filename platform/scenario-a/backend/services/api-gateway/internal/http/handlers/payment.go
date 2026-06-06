@@ -16,12 +16,13 @@ import (
 
 // PaymentHandler exposes the payment-orchestrator operations as REST endpoints.
 type PaymentHandler struct {
-	payment *paymentadapter.GRPCAdapter
+	payment  *paymentadapter.GRPCAdapter
+	bankCode string // institution fallback when JWT lacks BankID (e.g. user not yet registered in compliance)
 }
 
 // NewPaymentHandler creates a new PaymentHandler.
-func NewPaymentHandler(payment *paymentadapter.GRPCAdapter) *PaymentHandler {
-	return &PaymentHandler{payment: payment}
+func NewPaymentHandler(payment *paymentadapter.GRPCAdapter, bankCode string) *PaymentHandler {
+	return &PaymentHandler{payment: payment, bankCode: bankCode}
 }
 
 // --- HTLC endpoints ---
@@ -121,7 +122,12 @@ func (h *PaymentHandler) GetHTLCStatus(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
 	}
 
-	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", claims.BankID)
+	callerBankID := claims.BankID
+	if callerBankID == "" {
+		callerBankID = h.bankCode
+	}
+
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
 	result, err := h.payment.GetHTLCStatus(ctx, contractID)
 	if err != nil {
 		if st, ok2 := status.FromError(err); ok2 && st.Code() == codes.PermissionDenied {
@@ -130,7 +136,7 @@ func (h *PaymentHandler) GetHTLCStatus(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	if !isHTLCCounterparty(result.Sender, result.Receiver, claims.BankID) {
+	if !isHTLCCounterparty(result.Sender, result.Receiver, callerBankID) {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "not a counterparty of this HTLC"})
 	}
 
@@ -143,7 +149,12 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
 	}
 
-	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", claims.BankID)
+	callerBankID := claims.BankID
+	if callerBankID == "" {
+		callerBankID = h.bankCode
+	}
+
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
 	results, err := h.payment.SearchHTLC(ctx,
 		c.Query("agreement_id"),
 		c.Query("sender"),
@@ -157,7 +168,7 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 	// Keep only records where the caller's institution is a counterparty.
 	filtered := results[:0]
 	for _, r := range results {
-		if isHTLCCounterparty(r.Sender, r.Receiver, claims.BankID) {
+		if isHTLCCounterparty(r.Sender, r.Receiver, callerBankID) {
 			filtered = append(filtered, r)
 		}
 	}
