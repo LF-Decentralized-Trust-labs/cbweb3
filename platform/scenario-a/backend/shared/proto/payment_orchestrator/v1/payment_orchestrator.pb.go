@@ -1475,16 +1475,17 @@ func (x *ListFXAgreementEventsResponse) GetEvents() []*FXAgreementEvent {
 }
 
 type HTLCLock struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ContractId    string                 `protobuf:"bytes,1,opt,name=contract_id,json=contractId,proto3" json:"contract_id,omitempty"`
-	Sender        string                 `protobuf:"bytes,2,opt,name=sender,proto3" json:"sender,omitempty"`
-	Receiver      string                 `protobuf:"bytes,3,opt,name=receiver,proto3" json:"receiver,omitempty"`
-	HashLock      string                 `protobuf:"bytes,4,opt,name=hash_lock,json=hashLock,proto3" json:"hash_lock,omitempty"`
-	TimeLock      uint64                 `protobuf:"varint,5,opt,name=time_lock,json=timeLock,proto3" json:"time_lock,omitempty"`
-	ZetoLockRef   string                 `protobuf:"bytes,7,opt,name=zeto_lock_ref,json=zetoLockRef,proto3" json:"zeto_lock_ref,omitempty"`
-	State         HTLCState              `protobuf:"varint,8,opt,name=state,proto3,enum=payment_orchestrator.v1.HTLCState" json:"state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	ContractId         string                 `protobuf:"bytes,1,opt,name=contract_id,json=contractId,proto3" json:"contract_id,omitempty"`
+	Sender             string                 `protobuf:"bytes,2,opt,name=sender,proto3" json:"sender,omitempty"`
+	Receiver           string                 `protobuf:"bytes,3,opt,name=receiver,proto3" json:"receiver,omitempty"`
+	HashLock           string                 `protobuf:"bytes,4,opt,name=hash_lock,json=hashLock,proto3" json:"hash_lock,omitempty"`
+	TimeLock           uint64                 `protobuf:"varint,5,opt,name=time_lock,json=timeLock,proto3" json:"time_lock,omitempty"`
+	ZetoLockRef        string                 `protobuf:"bytes,7,opt,name=zeto_lock_ref,json=zetoLockRef,proto3" json:"zeto_lock_ref,omitempty"`
+	State              HTLCState              `protobuf:"varint,8,opt,name=state,proto3,enum=payment_orchestrator.v1.HTLCState" json:"state,omitempty"`
+	CounterpartyLocked bool                   `protobuf:"varint,9,opt,name=counterparty_locked,json=counterpartyLocked,proto3" json:"counterparty_locked,omitempty"` // true once the relay confirms the counterparty spoke has locked its matching leg
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *HTLCLock) Reset() {
@@ -1564,6 +1565,13 @@ func (x *HTLCLock) GetState() HTLCState {
 		return x.State
 	}
 	return HTLCState_HTLC_STATE_INVALID
+}
+
+func (x *HTLCLock) GetCounterpartyLocked() bool {
+	if x != nil {
+		return x.CounterpartyLocked
+	}
+	return false
 }
 
 type LockHTLCRequest struct {
@@ -4463,7 +4471,7 @@ const file_payment_orchestrator_v1_payment_orchestrator_proto_rawDesc = "" +
 	"\x1cListFXAgreementEventsRequest\x12\x19\n" +
 	"\btrade_id\x18\x01 \x01(\tR\atradeId\"b\n" +
 	"\x1dListFXAgreementEventsResponse\x12A\n" +
-	"\x06events\x18\x01 \x03(\v2).payment_orchestrator.v1.FXAgreementEventR\x06events\"\x85\x02\n" +
+	"\x06events\x18\x01 \x03(\v2).payment_orchestrator.v1.FXAgreementEventR\x06events\"\xb6\x02\n" +
 	"\bHTLCLock\x12\x1f\n" +
 	"\vcontract_id\x18\x01 \x01(\tR\n" +
 	"contractId\x12\x16\n" +
@@ -4472,7 +4480,8 @@ const file_payment_orchestrator_v1_payment_orchestrator_proto_rawDesc = "" +
 	"\thash_lock\x18\x04 \x01(\tR\bhashLock\x12\x1b\n" +
 	"\ttime_lock\x18\x05 \x01(\x04R\btimeLock\x12\"\n" +
 	"\rzeto_lock_ref\x18\a \x01(\tR\vzetoLockRef\x128\n" +
-	"\x05state\x18\b \x01(\x0e2\".payment_orchestrator.v1.HTLCStateR\x05stateJ\x04\b\x06\x10\aR\x06secret\"\x85\x01\n" +
+	"\x05state\x18\b \x01(\x0e2\".payment_orchestrator.v1.HTLCStateR\x05state\x12/\n" +
+	"\x13counterparty_locked\x18\t \x01(\bR\x12counterpartyLockedJ\x04\b\x06\x10\aR\x06secret\"\x85\x01\n" +
 	"\x0fLockHTLCRequest\x12!\n" +
 	"\fagreement_id\x18\x01 \x01(\tR\vagreementId\x12\x1a\n" +
 	"\breceiver\x18\x02 \x01(\tR\breceiver\x12\x16\n" +

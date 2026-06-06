@@ -127,13 +127,14 @@ func (a *GRPCAdapter) RefundHTLC(ctx context.Context, contractID string) (*Refun
 }
 
 type HTLCStatus struct {
-	ContractID  string `json:"contract_id"`
-	Sender      string `json:"sender"`
-	Receiver    string `json:"receiver"`
-	HashLock    string `json:"hash_lock"`
-	TimeLock    uint64 `json:"time_lock"`
-	ZetoLockRef string `json:"zeto_lock_ref"`
-	State       string `json:"state"`
+	ContractID         string `json:"contract_id"`
+	Sender             string `json:"sender"`
+	Receiver           string `json:"receiver"`
+	HashLock           string `json:"hash_lock"`
+	TimeLock           uint64 `json:"time_lock"`
+	ZetoLockRef        string `json:"zeto_lock_ref"`
+	State              string `json:"state"`
+	CounterpartyLocked bool   `json:"counterparty_locked"`
 }
 
 func (a *GRPCAdapter) GetHTLCStatus(ctx context.Context, contractID string) (*HTLCStatus, error) {
@@ -222,13 +223,14 @@ func lockToStatus(l *pb.HTLCLock) *HTLCStatus {
 		return &HTLCStatus{}
 	}
 	return &HTLCStatus{
-		ContractID:  l.ContractId,
-		Sender:      l.Sender,
-		Receiver:    l.Receiver,
-		HashLock:    l.HashLock,
-		TimeLock:    l.TimeLock,
-		ZetoLockRef: l.ZetoLockRef,
-		State:       l.State.String(),
+		ContractID:         l.ContractId,
+		Sender:             l.Sender,
+		Receiver:           l.Receiver,
+		HashLock:           l.HashLock,
+		TimeLock:           l.TimeLock,
+		ZetoLockRef:        l.ZetoLockRef,
+		State:              l.State.String(),
+		CounterpartyLocked: l.CounterpartyLocked,
 	}
 }
 
