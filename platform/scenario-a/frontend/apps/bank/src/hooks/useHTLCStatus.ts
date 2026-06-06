@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { HTLCLock } from "../types";
 import { htlcApi } from "../services/api";
+import { getSecret } from "../services/htlc-secrets";
 
 const normalizeState = (state: string) => state.replace("HTLC_STATE_", "");
 
@@ -21,7 +22,8 @@ export function useHTLCStatus(contractId: string, intervalMs = 5000) {
         if (!active) {
           return;
         }
-        setHtlc(data);
+        const stored = getSecret(contractId);
+        setHtlc(stored && !data.secret ? { ...data, secret: stored } : data);
         setLoading(false);
 
         if (normalizeState(data.state) === "SETTLED" || normalizeState(data.state) === "REFUNDED") {
