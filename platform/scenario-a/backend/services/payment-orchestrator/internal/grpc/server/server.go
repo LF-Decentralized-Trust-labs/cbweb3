@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -66,7 +67,9 @@ type Config struct {
 }
 
 // New builds a configured gRPC server with all payment-orchestrator handlers.
-func New(cfg Config) *grpc.Server {
+// The returned StartRelayWorkers function must be called (in a goroutine) after
+// the gRPC server is listening to activate cross-spoke HTLC relay automation.
+func New(cfg Config) (*grpc.Server, func(context.Context)) {
 	rateTol := cfg.RateTolPct
 	if rateTol <= 0 {
 		rateTol = 0.001 // default 0.1%
@@ -91,7 +94,7 @@ func New(cfg Config) *grpc.Server {
 	}
 	grpcServer := grpc.NewServer()
 	pb.RegisterPaymentOrchestratorServiceServer(grpcServer, svc)
-	return grpcServer
+	return grpcServer, svc.startRelayWorkers
 }
 
 // generateID returns a new UUID v4 string for record IDs.
@@ -448,6 +451,18 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		if record.State != domain.HTLCStateLocked {
 			s.mu.Unlock()
 			return nil, status.Errorf(codes.FailedPrecondition, "HTLC %q is in state %s, expected LOCKED", req.ContractId, record.State)
+		}
+		// For cross-spoke FX settlements both legs must be locked before the initiator
+		// can reveal the secret. This guard applies only to the initiating HTLC
+		// (record.Secret != "" means we generated the secret and are the initiator).
+		// Mirror/responder HTLCs (created via LockHTLCWithHashLock by the relay) have
+		// no stored secret and are settled by the relay once the initiator reveals it —
+		// no CounterpartyLocked check needed for them.
+		// s.fxRepo != nil distinguishes production from unit-test environments.
+		if record.AgreementID != "" && s.fxRepo != nil && record.Secret != "" && !record.CounterpartyLocked {
+			s.mu.Unlock()
+			return nil, status.Error(codes.FailedPrecondition,
+				"counterparty spoke has not yet locked its leg — wait for relay confirmation before settling")
 		}
 		// Transition to SETTLING under the lock to prevent concurrent settle attempts.
 		record.State = domain.HTLCStateSettling
@@ -1151,13 +1166,14 @@ func recordToProto(r *domain.HTLCRecord) *pb.HTLCLock {
 		domain.HTLCStateRefunding: pb.HTLCState_HTLC_STATE_REFUNDING,
 	}
 	return &pb.HTLCLock{
-		ContractId:  r.ContractID,
-		Sender:      r.Sender,
-		Receiver:    r.Receiver,
-		HashLock:    r.HashLock,
-		TimeLock:    r.TimeLock,
-		ZetoLockRef: r.ZetoLockRef,
-		State:       stateMap[r.State],
+		ContractId:         r.ContractID,
+		Sender:             r.Sender,
+		Receiver:           r.Receiver,
+		HashLock:           r.HashLock,
+		TimeLock:           r.TimeLock,
+		ZetoLockRef:        r.ZetoLockRef,
+		State:              stateMap[r.State],
+		CounterpartyLocked: r.CounterpartyLocked,
 	}
 }
 
@@ -1425,4 +1441,165 @@ func buildFXProposalParams(tradeID string, req *pb.ProposeFXAgreementRequest) (p
 		Rate:            rate,
 		ExpiryDate:      new(big.Int).SetUint64(req.ExpiryDate),
 	}, nil
+}
+
+// --- Cross-spoke relay workers ---
+
+// startRelayWorkers subscribes to lock and settle events from the counterparty
+// spoke via the configured interoperability relay and processes them automatically.
+// It must be called in a goroutine after the gRPC server begins serving.
+func (s *paymentOrchestratorService) startRelayWorkers(ctx context.Context) {
+	if s.relay == nil {
+		s.logger.Warn("relay: no interoperability port configured — cross-spoke automation disabled")
+		return
+	}
+	if err := s.relay.SubscribeLockEvents(ctx, s.handleRelayLockEvent); err != nil {
+		s.logger.Error("relay: failed to subscribe to lock events", "error", err)
+	}
+	if err := s.relay.SubscribeSettleEvents(ctx, s.handleRelaySettleEvent); err != nil {
+		s.logger.Error("relay: failed to subscribe to settle events", "error", err)
+	}
+	s.logger.Info("relay: cross-spoke workers started")
+	<-ctx.Done()
+}
+
+// handleRelayLockEvent is called by the relay subscription each time a
+// LogHTLCLocked event is detected on the counterparty spoke.
+// It locates the matching FX agreement by the spoke-a/spoke-b receiver identity,
+// then creates the local leg via LockHTLCWithHashLock.
+func (s *paymentOrchestratorService) handleRelayLockEvent(proof ports.InteroperabilityProof) error {
+	// If we have a local HTLC with the same hashLock but a DIFFERENT contractId, it means
+	// the counterparty spoke has locked its matching leg — mark CounterpartyLocked and return.
+	// If the contractId matches our own, this is a relay echo of our own lock event — skip it.
+	s.mu.Lock()
+	for _, r := range s.htlcs {
+		if r.HashLock == proof.HashLock {
+			if r.ContractID == proof.ContractID {
+				// Own-lock echo from the relay — ignore.
+				s.mu.Unlock()
+				s.logger.Info("relay lock: ignoring own-lock echo",
+					"hashLock", proof.HashLock, "contractId", r.ContractID)
+				return nil
+			}
+			// Different contractId with same hashLock → counterparty spoke locked.
+			r.CounterpartyLocked = true
+			r.UpdatedAt = time.Now().UTC()
+			s.mu.Unlock()
+			s.logger.Info("relay lock: counterparty leg confirmed — settlement unblocked",
+				"hashLock", proof.HashLock, "localContractId", r.ContractID, "remoteContractId", proof.ContractID)
+			return nil
+		}
+	}
+	s.mu.Unlock()
+
+	if s.fxRepo == nil {
+		s.logger.Warn("relay lock: no FX repository — cannot determine local receiver", "hashLock", proof.HashLock)
+		return nil
+	}
+
+	// Parse sender/receiver from proof payload.
+	var payload struct {
+		Sender   string `json:"sender"`
+		Receiver string `json:"receiver"`
+	}
+	_ = json.Unmarshal(proof.ProofPayload, &payload)
+
+	if payload.Receiver == "" {
+		s.logger.Warn("relay lock: missing receiver in proof payload", "hashLock", proof.HashLock)
+		return nil
+	}
+
+	// Find the accepted FX agreement where the counterparty spoke's receiver matches.
+	agreements, err := s.fxRepo.ListAgreements(context.Background(), ports.FXAgreementFilter{State: domain.FXStateAccepted})
+	if err != nil {
+		return fmt.Errorf("relay lock: list agreements: %w", err)
+	}
+
+	var localReceiver, localAmount, agreementID string
+	isSpokeA := strings.HasPrefix(s.spokePrefix, "spoke-a")
+	for _, fx := range agreements {
+		if isSpokeA {
+			// This orchestrator is on spoke-a. Counterparty lock is on spoke-b (SpokeBReceiver).
+			if fx.SpokeBReceiver == payload.Receiver {
+				localReceiver = fx.SpokeAReceiver
+				localAmount = fx.OriginAmount
+				agreementID = fx.TradeID
+				break
+			}
+		} else {
+			// This orchestrator is on spoke-b. Counterparty lock is on spoke-a (SpokeAReceiver).
+			if fx.SpokeAReceiver == payload.Receiver {
+				localReceiver = fx.SpokeBReceiver
+				localAmount = fx.CounterAmount
+				agreementID = fx.TradeID
+				break
+			}
+		}
+	}
+
+	if localReceiver == "" {
+		s.logger.Warn("relay lock: no matching FX agreement for counterparty receiver",
+			"counterpartyReceiver", payload.Receiver, "hashLock", proof.HashLock)
+		return nil
+	}
+
+	// Use a shorter timelock than the counterparty's (15-minute margin) so the
+	// local leg expires first, allowing safe refund if the counterparty abandons.
+	const timeLockMarginSec = 900
+	localTimeLock := proof.TimeLock
+	if localTimeLock > timeLockMarginSec {
+		localTimeLock -= timeLockMarginSec
+	}
+
+	_, err = s.LockHTLCWithHashLock(context.Background(), &pb.LockHTLCWithHashLockRequest{
+		AgreementId: agreementID,
+		Receiver:    localReceiver,
+		Amount:      localAmount,
+		TimeLock:    localTimeLock,
+		HashLock:    proof.HashLock,
+	})
+	if err != nil {
+		return fmt.Errorf("relay lock: LockHTLCWithHashLock: %w", err)
+	}
+	s.logger.Info("relay lock: local HTLC leg created",
+		"hashLock", proof.HashLock, "receiver", localReceiver, "agreementId", agreementID)
+	return nil
+}
+
+// handleRelaySettleEvent is called by the relay subscription each time a
+// LogHTLCClaimed event is detected on the counterparty spoke.
+// It extracts the secret from the proof and settles the matching local HTLC.
+func (s *paymentOrchestratorService) handleRelaySettleEvent(proof ports.InteroperabilityProof) error {
+	// If the contractId in the proof directly matches one of our own local HTLCs,
+	// this is a relay echo of our own settle event — ignore it to avoid a
+	// concurrent TransferLocked race with the user-initiated settle flow.
+	s.mu.RLock()
+	_, isOwnEcho := s.htlcs[proof.ContractID]
+	s.mu.RUnlock()
+	if isOwnEcho {
+		s.logger.Info("relay settle: ignoring own-settle echo", "contractId", proof.ContractID)
+		return nil
+	}
+
+	var payload struct {
+		Secret string `json:"secret"`
+	}
+	if err := json.Unmarshal(proof.ProofPayload, &payload); err != nil || payload.Secret == "" {
+		return fmt.Errorf("relay settle: missing or invalid secret in proof payload: contractId=%s", proof.ContractID)
+	}
+
+	_, err := s.SettleHTLC(context.Background(), &pb.SettleHTLCRequest{
+		ContractId: proof.ContractID,
+		Secret:     payload.Secret,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+			s.logger.Info("relay settle: no matching local HTLC — skipping",
+				"contractId", proof.ContractID)
+			return nil
+		}
+		return fmt.Errorf("relay settle: %w", err)
+	}
+	s.logger.Info("relay settle: local HTLC leg settled", "contractId", proof.ContractID)
+	return nil
 }

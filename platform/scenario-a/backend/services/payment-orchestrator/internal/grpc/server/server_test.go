@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/grpc/server"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
@@ -202,7 +203,7 @@ func setupTestEnvFull(t *testing.T, htlc *mockHTLC, fiat *mockFiat, spokePrefix 
 		htlcPort = htlc
 	}
 
-	grpcServer := server.New(server.Config{
+	grpcServer, _ := server.New(server.Config{
 		Zeto:            mock,
 		HTLC:            htlcPort,
 		Relay:           noopRelay{},
@@ -1238,5 +1239,98 @@ func TestGetHTLCStatus_BankIDFilterCounterparty(t *testing.T) {
 	_, err = env.client.GetHTLCStatus(mdCtxC, &pb.GetHTLCStatusRequest{ContractId: lockResp.ContractId})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Errorf("bank-c should get PermissionDenied, got: %v", err)
+	}
+}
+
+// mockFXRepo is a no-op FXAgreementRepository used to enable the
+// CounterpartyLocked guard (which only applies when fxRepo != nil).
+type mockFXRepo struct{}
+
+func (mockFXRepo) CreateAgreement(_ context.Context, _ *domain.FXAgreementRecord) error {
+	return nil
+}
+func (mockFXRepo) GetAgreement(_ context.Context, _ string) (*domain.FXAgreementRecord, error) {
+	return nil, nil
+}
+func (mockFXRepo) UpdateAgreement(_ context.Context, _ *domain.FXAgreementRecord) error {
+	return nil
+}
+func (mockFXRepo) ListAgreements(_ context.Context, _ ports.FXAgreementFilter) ([]*domain.FXAgreementRecord, error) {
+	return nil, nil
+}
+func (mockFXRepo) CreateAuditEvent(_ context.Context, _ *domain.FXAgreementEvent) error {
+	return nil
+}
+func (mockFXRepo) ListAuditEvents(_ context.Context, _ string) ([]*domain.FXAgreementEvent, error) {
+	return nil, nil
+}
+func (mockFXRepo) ListExpiredNonTerminal(_ context.Context, _ int64) ([]*domain.FXAgreementRecord, error) {
+	return nil, nil
+}
+
+func setupTestEnvWithFXRepo(t *testing.T) *testEnv {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	mock := &mockZeto{}
+
+	grpcServer, _ := server.New(server.Config{
+		Zeto:            mock,
+		Relay:           noopRelay{},
+		FXRepo:          mockFXRepo{},
+		PaladinIdentity: testPaladinIdentity,
+		Logger:          logger,
+	})
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	go func() { _ = grpcServer.Serve(lis) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	//nolint:staticcheck
+	conn, err := grpc.DialContext(ctx, lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		cancel()
+		grpcServer.Stop()
+		t.Fatalf("dial: %v", err)
+	}
+
+	t.Cleanup(func() {
+		conn.Close()
+		grpcServer.Stop()
+	})
+
+	return &testEnv{
+		client: pb.NewPaymentOrchestratorServiceClient(conn),
+		zeto:   mock,
+		cancel: cancel,
+	}
+}
+
+// TestSettleHTLC_BlockedUntilCounterpartyLocked verifies that a cross-spoke
+// HTLC (one created on a server that has an FX repo wired) cannot be settled
+// before the relay has confirmed the counterparty leg is locked.
+func TestSettleHTLC_BlockedUntilCounterpartyLocked(t *testing.T) {
+	env := setupTestEnvWithFXRepo(t)
+	ctx := context.Background()
+
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_CROSS_001",
+		Receiver:    "bank-b",
+		Amount:      "1000",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: lockResp.ContractId,
+		Secret:     lockResp.Secret,
+	})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("expected FailedPrecondition before counterparty locks, got: %v", err)
 	}
 }
