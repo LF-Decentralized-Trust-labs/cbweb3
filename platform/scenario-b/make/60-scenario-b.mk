@@ -53,8 +53,8 @@ scenario-b.down-relayer: cacti-down
 
 # ── Contracts (AMM on Hub, SpokeBridge on each Spoke) ────────────────────────
 
-scenario-b.deploy-contracts: contracts.setup contracts.build contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b contracts.sync-addresses contracts.register-participants scenario-b.seed-sovereign-pair
-	@echo "[scenario-b] deployed Hub (IdentityRegistry + Tokens + AMM) + Spokes + Participants + LiquidityCommitRegistry"
+scenario-b.deploy-contracts: contracts.setup contracts.build contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b contracts.sync-addresses contracts.register-participants scenario-b.seed-sovereign-pair contracts.grant-liquidity-providers
+	@echo "[scenario-b] deployed Hub (IdentityRegistry + Tokens + AMM) + Spokes + Participants + LiquidityCommitRegistry + LP grants"
 	@# contracts.seed-hub removido: pool seeding é feito via commit-reveal cooperativo (step4b)
 
 # ── Backend services (Scenario B v2 API) ────────────────────────────────────
@@ -75,7 +75,7 @@ SOVEREIGN_PAIR_ID ?= W-BRL-ARS
 scenario-b.seed-sovereign-pair:
 	@echo "[scenario-b] Seeding sovereign pair $(SOVEREIGN_PAIR_ID) on Hub..."
 	@test -n "$(ADMIN_PRIVATE_KEY)"          || (echo "ERROR: ADMIN_PRIVATE_KEY not set — check contracts/.env"; exit 1)
-	@test -n "$(CENTRAL_BANK_PRIVATE_KEY)"   || (echo "ERROR: CENTRAL_BANK_PRIVATE_KEY not set — check contracts/.env"; exit 1)
+	@test -n "$(CENTRAL_BANK_A_PRIVATE_KEY)" || (echo "ERROR: CENTRAL_BANK_A_PRIVATE_KEY not set — check contracts/.env"; exit 1)
 	@test -n "$(CENTRAL_BANK_B_PRIVATE_KEY)" || (echo "ERROR: CENTRAL_BANK_B_PRIVATE_KEY not set — check contracts/.env"; exit 1)
 	@test -n "$(ADMIN_ADDRESS)"              || (echo "ERROR: ADMIN_ADDRESS not set — check contracts/.env"; exit 1)
 	@HUB_IR=$$(grep '^HUB_IDENTITY_REGISTRY_ADDRESS=' backend/config/.env.infra.central-bank-a 2>/dev/null | cut -d= -f2-) && \
@@ -86,7 +86,7 @@ scenario-b.seed-sovereign-pair:
 	   TOKEN_SYMBOL_A=$(SOVEREIGN_TOKEN_A) \
 	   TOKEN_SYMBOL_B=$(SOVEREIGN_TOKEN_B) \
 	   PAIR_ID=$(SOVEREIGN_PAIR_ID) \
-	   CB_A_HUB_PRIVATE_KEY=$(CENTRAL_BANK_PRIVATE_KEY) \
+	   CB_A_HUB_PRIVATE_KEY=$(CENTRAL_BANK_A_PRIVATE_KEY) \
 	   CB_B_HUB_PRIVATE_KEY=$(CENTRAL_BANK_B_PRIVATE_KEY) \
 	   ADMIN_PRIVATE_KEY=$(ADMIN_PRIVATE_KEY) \
 	   ADMIN_ADDRESS=$(ADMIN_ADDRESS) \
@@ -127,6 +127,27 @@ scenario-b.down: scenario-b.down-backend scenario-b.down-relayer scenario-b.down
 	@echo "[scenario-b] full stack down"
 
 scenario-b.restart: scenario-b.down scenario-b.up
+
+# ── Full wipe ────────────────────────────────────────────────────────────────
+# scenario-b.nuke — best-effort total teardown for a guaranteed clean slate.
+# Unlike `scenario-b.down`, this also removes the frontend dev-server containers
+# and force-clears anything a partial/failed down may have left behind, including
+# the `local_postgres_data` Postgres volume (the one a bare re-`up` never drops,
+# which otherwise keeps stale pool_commits / bridged_asset_positions across deploys).
+# All steps are best-effort (errors ignored) so it always reaches the force-clean.
+scenario-b.nuke:
+	@echo "[scenario-b] NUKE — tearing down the entire stack + volumes..."
+	-@$(MAKE) scenario-b.down
+	-@$(MAKE) frontend-scenario-b-down
+	@echo "[scenario-b] force-removing any leftover containers..."
+	-@docker rm -f $$(docker ps -aq --filter name=cbweb3 --filter name=backend-) 2>/dev/null || true
+	@echo "[scenario-b] removing Postgres volume (local_postgres_data)..."
+	-@docker volume rm local_postgres_data 2>/dev/null || true
+	@echo "[scenario-b] verifying clean state..."
+	@docker ps -a --format '{{.Names}}' | grep -E 'cbweb3|backend-' && echo "  WARN: containers still present (see above)" || echo "  OK: no cbweb3 containers"
+	@docker volume ls --format '{{.Name}}' | grep -E 'local_postgres_data' && echo "  WARN: postgres volume still present" || echo "  OK: no postgres volume"
+	@ls -d deploy/local/*/nodes/*/data 2>/dev/null && echo "  WARN: besu chain data still present" || echo "  OK: no besu chain data"
+	@echo "[scenario-b] nuke complete — run 'make scenario-b.up' for a fresh stack"
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -179,7 +200,7 @@ scenario-b.validate-openapi:
 	scenario-b.build-backend-images \
 	scenario-b.up-backend scenario-b.down-backend \
 	scenario-b.up-backend-mlp scenario-b.down-backend-mlp scenario-b.tryout-us2-mlp \
-	scenario-b.up scenario-b.down scenario-b.restart \
+	scenario-b.up scenario-b.down scenario-b.restart scenario-b.nuke \
 	scenario-b.test-contracts scenario-b.test-backend scenario-b.test \
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
 	scenario-b.perf-baseline scenario-b.validate-openapi

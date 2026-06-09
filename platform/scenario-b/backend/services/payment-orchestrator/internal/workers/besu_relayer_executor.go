@@ -29,11 +29,12 @@ import (
 )
 
 // wcebmABI is the minimal ABI for FiatCentralBankMoney / W-tCeBM tokens.
-// Covers mint(), burn() (CENTRAL_BANK_ROLE) and balanceOf() (ERC-20 standard).
+// Covers mint(), burn() (CENTRAL_BANK_ROLE), balanceOf() and approve() (ERC-20 standard).
 const wcebmABI = `[
 {"type":"function","name":"mint","stateMutability":"nonpayable","inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[]},
 {"type":"function","name":"burn","stateMutability":"nonpayable","inputs":[{"name":"from","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[]},
-{"type":"function","name":"balanceOf","stateMutability":"view","inputs":[{"name":"account","type":"address"}],"outputs":[{"name":"","type":"uint256"}]}
+{"type":"function","name":"balanceOf","stateMutability":"view","inputs":[{"name":"account","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},
+{"type":"function","name":"approve","stateMutability":"nonpayable","inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]}
 ]`
 
 // spokeBridgeRelayerABI is the minimal ABI for SpokeBridge.sol used by the executor.
@@ -162,6 +163,14 @@ func (e *BesuRelayerExecutor) SubmitLockEvent(ctx context.Context, _ /*idempoten
 
 	// Spoke lock (optional — skipped when spoke is not configured, native asset unset, or SkipSpokeLock).
 	if e.spokeEC != nil && pos.NativeAsset != "" && !e.cfg.SkipSpokeLock {
+		// Auto-fund the spoke signer so SpokeBridge.lock's safeTransferFrom succeeds.
+		// The CB hub/spoke signer holds CENTRAL_BANK_ROLE on the native tCeBM token,
+		// so it can mint the liquidity it is about to bridge to the Hub. Idempotent:
+		// mint/approve are skipped when the signer already holds/approved enough.
+		if fundErr := e.ensureSpokeFunds(ctx, pos.NativeAsset, amount); fundErr != nil {
+			return fmt.Errorf("spoke auto-fund (position=%s): %w", positionID, fundErr)
+		}
+
 		txID := deriveSpokeTxID(positionID)
 		if lockErr := e.spokeLock(ctx, pos.NativeAsset, amount, txID); lockErr != nil {
 			return fmt.Errorf("spoke lock (position=%s): %w", positionID, lockErr)
@@ -278,6 +287,50 @@ func (e *BesuRelayerExecutor) spokeMint(ctx context.Context, to, nativeAssetAddr
 		return fmt.Errorf("tCeBM.mint(to=%s token=%s amount=%s): %w", to, nativeAssetAddr, amount.String(), err)
 	}
 	log.Printf("[BesuRelayerExecutor] spoke mint ok — to=%s token=%s amount=%s", to, nativeAssetAddr, amount.String())
+	return nil
+}
+
+// ensureSpokeFunds guarantees the spoke signer holds at least `amount` of the native
+// tCeBM token and has approved the SpokeBridge to spend it, so SpokeBridge.lock's
+// safeTransferFrom(signer → bridge) cannot revert for insufficient balance/allowance.
+//
+// Both steps are idempotent: minting is skipped when the signer balance already covers
+// the amount, and approval is set to the exact amount (SpokeBridge.lock pulls it in full).
+// The signer must hold CENTRAL_BANK_ROLE on the native token (true for the CB hub/spoke
+// signer in Scenario B).
+func (e *BesuRelayerExecutor) ensureSpokeFunds(ctx context.Context, nativeAsset string, amount *big.Int) error {
+	tokenAddr := common.HexToAddress(nativeAsset)
+	if tokenAddr == (common.Address{}) {
+		return fmt.Errorf("invalid native_asset %q (expected ERC-20 address)", nativeAsset)
+	}
+	signer := e.spokeSigner
+
+	// Mint up to `amount` if the signer is short on balance.
+	var bal big.Int
+	if balErr := evm.Call(ctx, e.spokeEC, tokenAddr, e.hubABI, "balanceOf",
+		[]interface{}{signer.Address()}, &bal,
+	); balErr != nil {
+		return fmt.Errorf("read native balance (token=%s): %w", nativeAsset, balErr)
+	}
+	if bal.Cmp(amount) < 0 {
+		if _, mintErr := evm.SubmitTx(ctx, e.spokeEC, signer, tokenAddr, e.hubABI,
+			"mint", signer.Address(), amount,
+		); mintErr != nil {
+			return fmt.Errorf("native mint (token=%s to=%s amount=%s): %w",
+				nativeAsset, signer.Address().Hex(), amount.String(), mintErr)
+		}
+		log.Printf("[BesuRelayerExecutor] auto-mint ok — token=%s to=%s amount=%s",
+			nativeAsset, signer.Address().Hex(), amount.String())
+	}
+
+	// Approve the SpokeBridge to pull `amount` for the upcoming lock.
+	bridgeAddr := common.HexToAddress(e.cfg.SpokeBridgeAddr)
+	if _, approveErr := evm.SubmitTx(ctx, e.spokeEC, signer, tokenAddr, e.hubABI,
+		"approve", bridgeAddr, amount,
+	); approveErr != nil {
+		return fmt.Errorf("native approve (token=%s spender=%s amount=%s): %w",
+			nativeAsset, bridgeAddr.Hex(), amount.String(), approveErr)
+	}
 	return nil
 }
 

@@ -202,7 +202,7 @@ func main() {
 		if hubRPC == "" || hubKey == "" {
 			logger.Warn("bridge relayer worker disabled — set HUB_BESU_RPC_URL and SIGNER_PRIVATE_KEY to enable")
 		} else {
-			hubChainID, _ := strconv.ParseInt(getEnv("HUB_CHAIN_ID", "1338"), 10, 64)
+			hubChainID := resolveHubChainID(logger)
 			spokeChainID, _ := strconv.ParseInt(getEnv("SPOKE_CHAIN_ID", "1337"), 10, 64)
 			dialCtx, dialCancel := context.WithTimeout(ctx, 15*time.Second)
 			hubMintRecipient := getEnv("HUB_MINT_RECIPIENT", "")
@@ -258,6 +258,30 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// resolveHubChainID reads HUB_CHAIN_ID from the environment, defaulting to 1337.
+// When the variable is absent, it emits a structured warning so operators can
+// detect misconfigured environments without a service failure (FR-009 / Constitution VI).
+func resolveHubChainID(logger *slog.Logger) int64 {
+	raw := os.Getenv("HUB_CHAIN_ID")
+	if raw == "" {
+		logger.Warn("HUB_CHAIN_ID not set; defaulting to 1337",
+			"variable", "HUB_CHAIN_ID",
+			"default", "1337",
+		)
+		return 1337
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		logger.Warn("HUB_CHAIN_ID invalid; defaulting to 1337",
+			"variable", "HUB_CHAIN_ID",
+			"value", raw,
+			"default", "1337",
+		)
+		return 1337
+	}
+	return id
 }
 
 func parseBoolEnv(key string, fallback bool) bool {

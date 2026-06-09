@@ -62,10 +62,10 @@ async function main(): Promise<void> {
   console.log(`[cacti] PluginLedgerConnectorBesu spoke-b initialized (${connectorSpokeB.getInstanceId()})`);
 
   // ── Start LiquidityCommitWatcher (007-bridge-based-cb-liquidity) ────────
-  // Uses connectorSpokeA as the Hub connector if HUB_BESU_RPC is not set,
-  // or falls back to a direct ethers JsonRpcProvider if set.
+  // The Hub is now an independent network (chain 1337) — always use the
+  // HUB_BESU_RPC ethers provider, never Spoke-A's connector.
   const abortController = new AbortController();
-  const lcrWatcher = createLiquidityCommitWatcherFromEnv(connectorSpokeA);
+  const lcrWatcher = createLiquidityCommitWatcherFromEnv();
   if (lcrWatcher) {
     lcrWatcher.start(abortController.signal);
     console.log("[cacti] LiquidityCommitWatcher started");

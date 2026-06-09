@@ -181,6 +181,17 @@ func New(cfg config.Config) (*App, error) {
 	return &App{Fiber: fiberApp, closers: closers}, nil
 }
 
+// resolveHubChainIDStr reads HUB_CHAIN_ID from the environment, defaulting to "1337".
+// Emits a warning via warnLogger when the variable is absent so operators can detect
+// misconfigured environments without a service failure (FR-009 / Constitution VI).
+func resolveHubChainIDStr(warnLogger *log.Logger) string {
+	if v := os.Getenv("HUB_CHAIN_ID"); v != "" {
+		return v
+	}
+	warnLogger.Printf("warning: HUB_CHAIN_ID not set; defaulting to 1337 (set HUB_CHAIN_ID to suppress this warning)")
+	return "1337"
+}
+
 func closeAll(closers []io.Closer) {
 	for _, c := range closers {
 		if err := c.Close(); err != nil {
@@ -231,7 +242,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	}
 	hubRPC := os.Getenv("HUB_BESU_RPC_URL")
 	signerKey := os.Getenv("SIGNER_PRIVATE_KEY")
-	chainIDStr := os.Getenv("HUB_CHAIN_ID")
+	chainIDStr := resolveHubChainIDStr(log.New(os.Stderr, "", 0))
 	// When SOVEREIGN_HUB_TOKEN_A/B_ADDRESS is set, use it for the token preparer
 	// (mint+approve). Falls back to HUB_TOKEN_A/B_ADDRESS for regular pairs.
 	hubTokenAAddr := os.Getenv("HUB_TOKEN_A_ADDRESS")

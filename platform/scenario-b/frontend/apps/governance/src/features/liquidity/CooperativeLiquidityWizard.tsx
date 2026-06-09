@@ -259,6 +259,12 @@ export function CooperativeLiquidityWizard({
         {currentStep === 1 ? (
           <form className="space-y-3" onSubmit={handleLockMint}>
             <h3 className="text-sm font-medium">Step 1: Bridge Lock-Mint</h3>
+            <div className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-800">
+              <strong>Note:</strong> If your spoke wallet does not already hold enough native tCeBM, this step will{" "}
+              <strong>auto-mint</strong> the required amount on your spoke chain, lock it in the SpokeBridge, and mint
+              the wrapped equivalent on the Hub. Minting issues new sovereign central-bank money — only proceed with an
+              amount you intend to back.
+            </div>
             <div className="space-y-1">
               <Label htmlFor="wizard_amount">Amount</Label>
               <Input

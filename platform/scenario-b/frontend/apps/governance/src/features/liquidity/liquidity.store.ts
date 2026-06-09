@@ -111,13 +111,13 @@ export const useLiquidityStore = create<LiquidityStore>((set, get) => ({
       set({
         bridgeLockMintResult: response,
         currentBankId: bankId,
-        status: "idle",
         sovereignPhase: SOVEREIGN_FLOW_PHASE.BRIDGE_ACTIVE_WAIT,
         operationalHint: "Waiting for bridge position to become ACTIVE.",
       });
 
       const ready = await liquidityApi.waitForBridgeActive();
       set({
+        status: "idle",
         sovereignPhase: ready ? SOVEREIGN_FLOW_PHASE.COMMIT_PENDING : SOVEREIGN_FLOW_PHASE.TIMEOUT,
         operationalHint: ready ? null : "Bridge position did not become ACTIVE within 120s.",
       });

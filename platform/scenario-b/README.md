@@ -38,7 +38,7 @@ Each spoke runs its own Besu QBFT network, Paladin privacy nodes, and a full bac
 The platform is designed around two interoperability scenarios:
 
 - **Scenario A — Enhanced Correspondent Banking** — Cross-spoke atomic swaps via dual-layer HTLC. An initiator bank locks funds on one spoke while a responder bank locks on the other; a relay bridges the secret to achieve atomic settlement without a shared ledger.
-- **Scenario B — International Hub with FX Liquidity Pool** — A dedicated international hub network operating an AMM-based liquidity pool for foreign exchange. Spokes settle cross-currency transactions through the hub, which provides continuous FX pricing and pooled liquidity. The smart contracts (`AutomatedMarketMaker.sol`, `ManualOracle.sol`, `FXAgreement.sol`) are already in place; hub deployment, orchestration, and end-to-end flows are not yet implemented.
+- **Scenario B — International Hub with FX Liquidity Pool** — A dedicated international hub network operating an AMM-based liquidity pool for foreign exchange. The Hub runs as an **independent Besu/QBFT network** (chain 1337, port 8845), separate from both spokes. Spokes settle cross-currency transactions through the hub, which provides continuous FX pricing and pooled liquidity. The smart contracts (`AutomatedMarketMaker.sol`, `ManualOracle.sol`, `FXAgreement.sol`) are deployed to the Hub; the full Hub network, contract deployment, service configuration, and end-to-end flows are **fully implemented**.
 
 ### Key Capabilities
 
@@ -61,7 +61,7 @@ The platform is organized in layers:
 | **Microservices** | Auth (gRPC), Compliance (gRPC), Payment Orchestrator (gRPC) |
 | **Interoperability** | HTLC relay, SpokeBridge, AMM, FX Oracle |
 | **Privacy** | Paladin Core, Zeto Domain (ZKP tokens), Noto Domain |
-| **Blockchain** | Besu QBFT networks (spoke-a: chain 1338, spoke-b: chain 1339) |
+| **Blockchain** | Besu QBFT networks (hub: chain 1337, spoke-a: chain 1338, spoke-b: chain 1339) |
 
 ---
 
@@ -290,8 +290,9 @@ The local deployment uses Docker Compose for all infrastructure components.
 
 ### Besu Networks
 
-| Spoke | Chain ID | Nodes | Docker Network |
-|-------|----------|-------|----------------|
+| Network | Chain ID | Nodes | Docker Network |
+|---------|----------|-------|----------------|
+| hub | 1337 | hub-validator (single-validator sandbox) | `hub_besu_network` |
 | spoke-a | 1338 | central-bank-a, bank-a, bank-c | `spoke_a_besu_network` |
 | spoke-b | 1339 | central-bank-b, bank-b, bank-d | `spoke_b_besu_network` |
 
@@ -326,6 +327,7 @@ Each spoke runs 3 Paladin nodes (1:1 mapping with Besu validators), providing Ze
 
 | Node | Host RPC Port |
 |------|---------------|
+| hub-validator (hub) | 8845 |
 | central-bank-a (spoke-a) | 8645 |
 | bank-a (spoke-a) | 8646 |
 | bank-c (spoke-a) | 8647 |
@@ -402,7 +404,8 @@ make pki.clean                 # Remove generated certificates
 
 ```bash
 make deploy.up-infra           # Start Keycloak + PostgreSQL + Redis
-make deploy.up-besu            # Start both Besu networks
+make deploy.up-hub-besu        # Start Hub Besu network only (chain 1337)
+make deploy.up-besu            # Start Hub + both Spoke Besu networks
 make deploy.up                 # Infrastructure + Besu
 ```
 

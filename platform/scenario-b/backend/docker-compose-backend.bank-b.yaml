@@ -62,8 +62,8 @@ services:
       FX_POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_bank_b}?sslmode=disable"
       # BesuRelayerExecutor: Hub relayer para bridge-out de bank-b (burn W-ARS → unlock ARS no Spoke-B).
       # CB-B signer precisa de CENTRAL_BANK_ROLE no token W-ARS.
-      HUB_BESU_RPC_URL: "http://host.docker.internal:8645"
-      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1338}"
+      HUB_BESU_RPC_URL: "http://host.docker.internal:8845"
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
       SIGNER_PRIVATE_KEY: "${CB_HUB_SIGNER_PRIVATE_KEY:-c87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3}"
       HUB_MINT_RECIPIENT: "${ENTITY_BESU_ADDRESS:-0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef}"
       ENTITY_BESU_ADDRESS: "0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef"
@@ -101,8 +101,8 @@ services:
       # Hub AMM (Scenario B v2) — Bank B uses its ENTITY_BESU_ADDRESS as Hub wallet.
       # W-tCeBM is minted to ENTITY_BESU_ADDRESS (0xC5fdf4…) by the payment-orchestrator relayer.
       # SIGNER_PRIVATE_KEY must match ENTITY_BESU_ADDRESS so approve-amm signs for the correct owner.
-      HUB_BESU_RPC_URL: "http://host.docker.internal:8645"
-      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1338}"
+      HUB_BESU_RPC_URL: "http://host.docker.internal:8845"
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
       SIGNER_PRIVATE_KEY: "${SIGNER_PRIVATE_KEY:-0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1}"
     volumes:
       - ./config/pki:/workspace/backend/config/pki

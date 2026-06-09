@@ -46,7 +46,7 @@ graph TB
     subgraph HUB_SPOKE["HUB & SPOKE LAYER (Scenario B)"]
         direction LR
 
-        subgraph HUB["HUB (chain 1338)"]
+        subgraph HUB["HUB (chain 1337)"]
             direction TB
             IR_HUB[IdentityRegistry<br/>Hub Governance]:::hubSpoke
             AMM[AutomatedMarketMaker<br/>Liquidity Pools]:::hubSpoke

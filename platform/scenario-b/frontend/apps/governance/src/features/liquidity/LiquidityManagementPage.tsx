@@ -23,7 +23,7 @@ import type { PendingCommit } from "../../types/liquidity.types";
 import { CooperativeLiquidityWizard } from "./CooperativeLiquidityWizard";
 import { useLiquidityStore } from "./liquidity.store";
 
-const configuredPoolPair = (import.meta.env.VITE_POOL_PAIR ?? "BRL-USD").trim() || "BRL-USD";
+const configuredPoolPair = (import.meta.env.VITE_POOL_PAIR ?? "W-BRL-ARS").trim() || "W-BRL-ARS";
 
 export function LiquidityManagementPage() {
   const poolStatus = useLiquidityStore((state) => state.poolStatus);
