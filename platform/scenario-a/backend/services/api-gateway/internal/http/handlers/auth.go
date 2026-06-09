@@ -2,18 +2,7 @@
 package handlers
 
 import (
-	"crypto/ecdsa"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/asn1"
-	"encoding/hex"
-	"encoding/pem"
 	"log"
-	"math/big"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
@@ -343,121 +332,6 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 		resp["privacyGroup"] = claims.PrivacyGroup
 	}
 	return c.Status(fiber.StatusOK).JSON(resp)
-}
-
-// ResolveChallenger signs a PKI login nonce using the EC private key found in
-// the PKI_DIR directory. Intended for MVP use only —
-// remove this endpoint before deploying to production.
-//
-// cert_file can be:
-//   - a combined .pem file containing both CERTIFICATE and EC PRIVATE KEY blocks
-//   - a .crt file; in this case the matching .key file (same base name) is loaded
-//     automatically from PKI_DIR (e.g. "bank-a.crt" → also reads "bank-a.key")
-//
-// Request: { "nonce": "<64-char hex>", "cert_file": "bank-a.crt" }
-// Response: { "nonce_signature_hex": "<hex DER>", "cert_pem": "<PEM>" }
-func (h *AuthHandler) ResolveChallenger(c *fiber.Ctx) error { // MVP-only
-	var req struct {
-		Nonce    string `json:"nonce"`
-		CertFile string `json:"cert_file"`
-	}
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
-	}
-	if req.Nonce == "" || req.CertFile == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "nonce and cert_file are required"})
-	}
-	// Reject path traversal attempts.
-	if strings.Contains(req.CertFile, "/") || strings.Contains(req.CertFile, "..") {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "cert_file must be a plain filename without path separators"})
-	}
-
-	pkiDir := os.Getenv("PKI_DIR")
-	if pkiDir == "" {
-		pkiDir = "./config/pki"
-	}
-	certPath := filepath.Join(pkiDir, req.CertFile)
-
-	data, err := os.ReadFile(certPath)
-	if err != nil {
-		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "cert file not found: " + req.CertFile})
-	}
-
-	var certPEMBlock, keyPEMBlock *pem.Block
-	remaining := data
-	for {
-		var block *pem.Block
-		block, remaining = pem.Decode(remaining)
-		if block == nil {
-			break
-		}
-		switch block.Type {
-		case "CERTIFICATE":
-			certPEMBlock = block
-		case "EC PRIVATE KEY":
-			keyPEMBlock = block
-		}
-	}
-	if certPEMBlock == nil {
-		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "CERTIFICATE block not found in " + req.CertFile})
-	}
-
-	// If the private key was not found in the cert file, look for a sibling .key
-	// file with the same base name (e.g. "bank-a.crt" → "bank-a.key").
-	// This matches the file layout produced by `make pki.gen-commercial-banks`.
-	if keyPEMBlock == nil {
-		ext := filepath.Ext(req.CertFile)
-		keyFileName := req.CertFile[:len(req.CertFile)-len(ext)] + ".key"
-		keyPath := filepath.Join(pkiDir, keyFileName)
-		keyData, keyErr := os.ReadFile(keyPath)
-		if keyErr != nil {
-			return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
-				"error": "EC PRIVATE KEY not found in " + req.CertFile + " and no matching key file: " + keyFileName,
-			})
-		}
-		rem := keyData
-		for {
-			var block *pem.Block
-			block, rem = pem.Decode(rem)
-			if block == nil {
-				break
-			}
-			if block.Type == "EC PRIVATE KEY" {
-				keyPEMBlock = block
-				break
-			}
-		}
-		if keyPEMBlock == nil {
-			return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "EC PRIVATE KEY block not found in " + keyFileName})
-		}
-	}
-
-	privKey, err := x509.ParseECPrivateKey(keyPEMBlock.Bytes)
-	if err != nil {
-		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "failed to parse EC private key: " + err.Error()})
-	}
-
-	nonceBytes, err := hex.DecodeString(req.Nonce)
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "nonce is not valid hex"})
-	}
-	digest := sha256.Sum256(nonceBytes)
-
-	r, s, err := ecdsa.Sign(rand.Reader, privKey, digest[:])
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "signing failed"})
-	}
-	sigDER, err := asn1.Marshal(struct{ R, S *big.Int }{r, s})
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to encode signature"})
-	}
-
-	certPEM := string(pem.EncodeToMemory(certPEMBlock))
-
-	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"nonce_signature_hex": hex.EncodeToString(sigDER),
-		"cert_pem":            certPEM,
-	})
 }
 
 func containsRole(roles []string, role string) bool {

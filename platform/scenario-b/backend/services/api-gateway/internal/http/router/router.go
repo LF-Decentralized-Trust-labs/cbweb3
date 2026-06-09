@@ -44,7 +44,6 @@ func Setup(app *fiber.App, deps Dependencies) {
 	authGroup.Post("/refresh", deps.AuthHandler.Refresh)
 	authGroup.Post("/logout", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.Logout)
 	authGroup.Post("/wallet/bind", deps.AuthHandler.WalletBind)
-	authGroup.Post("/resolve-challenge", deps.AuthHandler.ResolveChallenger)
 	authGroup.Post("/client-secret/change", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.ChangeClientSecret)
 	authGroup.Get("/me", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.Me)
 

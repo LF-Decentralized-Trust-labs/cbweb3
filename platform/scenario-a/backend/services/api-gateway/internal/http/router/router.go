@@ -39,8 +39,6 @@ func Setup(app *fiber.App, deps Dependencies) {
 	authGroup.Post("/logout", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.Logout)
 	// PKI login step 2: submit signed nonce + X.509 certificate
 	authGroup.Post("/wallet/bind", deps.AuthHandler.WalletBind)
-	// MVP-only: signs a PKI nonce using a .pem file from PKI_DIR; remove before production
-	authGroup.Post("/resolve-challenge", deps.AuthHandler.ResolveChallenger)
 	// Client secret rotation (requires valid access_token cookie)
 	authGroup.Post("/client-secret/change", middleware.RequireCookieAuth(deps.AuthProvider), deps.AuthHandler.ChangeClientSecret)
 	// Self-profile: returns token claims for the authenticated caller
