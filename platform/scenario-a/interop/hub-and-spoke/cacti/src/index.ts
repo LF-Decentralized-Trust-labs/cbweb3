@@ -19,7 +19,7 @@
 
 import http from "http";
 import express, { Request, Response } from "express";
-import { randomUUID } from "crypto";
+import { randomUUID, timingSafeEqual } from "crypto";
 import { Server as SocketIoServer } from "socket.io";
 import { PluginRegistry } from "@hyperledger/cactus-core";
 import { PluginLedgerConnectorBesu } from "@hyperledger/cactus-plugin-ledger-connector-besu";
@@ -120,6 +120,23 @@ async function main(): Promise<void> {
   // ── Express REST API ────────────────────────────────────────────────────
   const app = express();
   app.use(express.json());
+
+  // Guard all relay endpoints with a constant-time X-Relay-Auth header check.
+  // Risk: information disclosure — unauthenticated callers could observe in-flight
+  // and settled cross-chain payment flows (sender, receiver, hashlock, preimage).
+  app.use("/api/v1/relay", (req: Request, res: Response, next) => {
+    const provided = String(req.headers["x-relay-auth"] ?? "");
+    const secret = config.relayAuthSecret;
+    if (
+      provided.length === 0 ||
+      provided.length !== secret.length ||
+      !timingSafeEqual(Buffer.from(provided), Buffer.from(secret))
+    ) {
+      res.status(401).json({ error: "X-Relay-Auth invalid or missing" });
+      return;
+    }
+    next();
+  });
 
   // Liveness / readiness
   app.get("/api/v1/health", (_req: Request, res: Response) => {
@@ -239,7 +256,7 @@ async function main(): Promise<void> {
   // ── HTTP server ─────────────────────────────────────────────────────────
   const httpServer = http.createServer(app);
   const ioServer = new SocketIoServer(httpServer, {
-    cors: { origin: "*" },
+    cors: { origin: config.socketIoAllowedOrigins.length > 0 ? config.socketIoAllowedOrigins : false },
     path: "/api/v1/plugins/socket.io/",
   });
 

@@ -25,16 +25,18 @@ const (
 // service REST API. It is the production replacement for StubRelay.
 type CactiRelay struct {
 	baseURL      string
+	authSecret   string
 	pollInterval time.Duration
 	httpClient   *http.Client
 	logger       *slog.Logger
 }
 
 // NewCactiRelay creates a CactiRelay that calls the Cacti service at baseURL
-// (e.g. "http://localhost:4000").
-func NewCactiRelay(baseURL string, logger *slog.Logger) *CactiRelay {
+// (e.g. "http://localhost:4000"). authSecret is sent as X-Relay-Auth on every request.
+func NewCactiRelay(baseURL string, authSecret string, logger *slog.Logger) *CactiRelay {
 	return &CactiRelay{
 		baseURL:      baseURL,
+		authSecret:   authSecret,
 		pollInterval: defaultPollInterval,
 		httpClient:   &http.Client{Timeout: defaultHTTPTimeout},
 		logger:       logger,
@@ -199,6 +201,7 @@ func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceMs int64
 	if err != nil {
 		return nil, sinceMs, err
 	}
+	req.Header.Set("X-Relay-Auth", c.authSecret)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

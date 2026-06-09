@@ -56,7 +56,11 @@ func main() {
 	if cactiURL == "" {
 		log.Fatal("FATAL: CACTI_API_URL is required — set it to the Cacti HTLC relay REST endpoint (e.g. http://cacti-htlc-relay:4000)")
 	}
-	relay := cacti.NewCactiRelay(cactiURL, logger)
+	cactiAuthSecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
+	if cactiAuthSecret == "" {
+		log.Fatal("FATAL: INTERNAL_RELAY_AUTH_SECRET is required")
+	}
+	relay := cacti.NewCactiRelay(cactiURL, cactiAuthSecret, logger)
 	logger.Info("cacti relay configured", "url", cactiURL)
 
 	// Shared Besu config — used by HTLC, FiatToken, and FXAgreement adapters.
