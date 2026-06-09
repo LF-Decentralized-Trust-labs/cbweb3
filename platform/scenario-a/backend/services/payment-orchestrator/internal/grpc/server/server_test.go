@@ -1242,8 +1242,7 @@ func TestGetHTLCStatus_BankIDFilterCounterparty(t *testing.T) {
 	}
 }
 
-// mockFXRepo is a no-op FXAgreementRepository used to enable the
-// CounterpartyLocked guard (which only applies when fxRepo != nil).
+// mockFXRepo is a no-op FXAgreementRepository used in FX agreement tests.
 type mockFXRepo struct{}
 
 func (mockFXRepo) CreateAgreement(_ context.Context, _ *domain.FXAgreementRecord) error {
@@ -1268,7 +1267,7 @@ func (mockFXRepo) ListExpiredNonTerminal(_ context.Context, _ int64) ([]*domain.
 	return nil, nil
 }
 
-func setupTestEnvWithFXRepo(t *testing.T) *testEnv {
+func setupTestEnvWithCrossSpoke(t *testing.T) *testEnv {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mock := &mockZeto{}
@@ -1276,7 +1275,7 @@ func setupTestEnvWithFXRepo(t *testing.T) *testEnv {
 	grpcServer, _ := server.New(server.Config{
 		Zeto:            mock,
 		Relay:           noopRelay{},
-		FXRepo:          mockFXRepo{},
+		CrossSpokeMode:  true,
 		PaladinIdentity: testPaladinIdentity,
 		Logger:          logger,
 	})
@@ -1313,7 +1312,7 @@ func setupTestEnvWithFXRepo(t *testing.T) *testEnv {
 // HTLC (one created on a server that has an FX repo wired) cannot be settled
 // before the relay has confirmed the counterparty leg is locked.
 func TestSettleHTLC_BlockedUntilCounterpartyLocked(t *testing.T) {
-	env := setupTestEnvWithFXRepo(t)
+	env := setupTestEnvWithCrossSpoke(t)
 	ctx := context.Background()
 
 	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{

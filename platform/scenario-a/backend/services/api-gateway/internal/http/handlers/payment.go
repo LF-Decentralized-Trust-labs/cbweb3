@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -136,7 +137,11 @@ func (h *PaymentHandler) GetHTLCStatus(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	if !isHTLCCounterparty(result.Sender, result.Receiver, callerBankID) {
+	counterparty, parseErr := isHTLCCounterparty(result.Sender, result.Receiver, callerBankID)
+	if parseErr != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "identity format error: " + parseErr.Error()})
+	}
+	if !counterparty {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "not a counterparty of this HTLC"})
 	}
 
@@ -168,7 +173,11 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 	// Keep only records where the caller's institution is a counterparty.
 	filtered := results[:0]
 	for _, r := range results {
-		if isHTLCCounterparty(r.Sender, r.Receiver, callerBankID) {
+		counterparty, parseErr := isHTLCCounterparty(r.Sender, r.Receiver, callerBankID)
+		if parseErr != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "identity format error: " + parseErr.Error()})
+		}
+		if counterparty {
 			filtered = append(filtered, r)
 		}
 	}
@@ -176,13 +185,43 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"locks": filtered, "total": len(filtered)})
 }
 
-// isHTLCCounterparty reports whether bankID (from JWT claims) matches the
-// institution embedded in either Paladin identity (format: name@spoke-{prefix}-{bankID}).
-func isHTLCCounterparty(sender, receiver, bankID string) bool {
+// isHTLCCounterparty reports whether bankID (from JWT claims) exactly matches
+// the institution embedded in either Paladin identity (format: name@spoke-{prefix}-{bankID}).
+// Exact segment matching is required: "bank-a" must not match "bank-abc".
+// Parse errors are returned so callers can log them; on error the check fails closed.
+func isHTLCCounterparty(sender, receiver, bankID string) (bool, error) {
 	if bankID == "" {
-		return false
+		return false, nil
 	}
-	return strings.Contains(sender, bankID) || strings.Contains(receiver, bankID)
+	senderBank, sErr := bankIDFromIdentity(sender)
+	receiverBank, rErr := bankIDFromIdentity(receiver)
+	if sErr != nil {
+		return false, sErr
+	}
+	if rErr != nil {
+		return false, rErr
+	}
+	return senderBank == bankID || receiverBank == bankID, nil
+}
+
+// bankIDFromIdentity extracts the bank identifier from a Paladin identity string.
+// e.g. "funded_operator@spoke-a-bank-a" → "bank-a"
+//
+// The Paladin identity format "{name}@{spoke-word}-{letter}-{bankID}" is structural
+// to this function: the bankID is the third dash-delimited segment after the "@".
+// If Paladin changes this naming convention, this function will return an error and
+// all authorization checks will fail closed until the implementation is updated.
+// Mirrors identity.BankID in the payment-orchestrator; keep both in sync or move to a shared module.
+func bankIDFromIdentity(paladinIdentity string) (string, error) {
+	parts := strings.SplitN(paladinIdentity, "@", 2)
+	if len(parts) < 2 {
+		return "", fmt.Errorf("bankIDFromIdentity: missing '@' in %q — expected format {name}@{spoke-word}-{letter}-{bankID}", paladinIdentity)
+	}
+	segs := strings.SplitN(parts[1], "-", 3)
+	if len(segs) < 3 {
+		return "", fmt.Errorf("bankIDFromIdentity: fewer than three dash-segments in %q — expected format spoke-{letter}-{bankID}", parts[1])
+	}
+	return segs[2], nil
 }
 
 // --- Token endpoints ---

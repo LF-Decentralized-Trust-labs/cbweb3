@@ -216,6 +216,7 @@ func main() {
 		FXRepo:           fxRepo,
 		Pente:            pente,
 		RateTolPct:       rateTolPct,
+		CrossSpokeMode:   true, // relay is always active in production (CACTI_API_URL is required)
 		StrictHTLC:       strictHTLC,
 		SpokePrefix:      spokePrefix,
 		PaladinIdentity:  paladinIdentity,

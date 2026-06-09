@@ -30,3 +30,31 @@ func TestSpokePrefix(t *testing.T) {
 		})
 	}
 }
+
+func TestBankID(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantBank  string
+		wantErr   bool
+	}{
+		{"standard spoke-a", "funded_operator@spoke-a-bank-a", "bank-a", false},
+		{"standard spoke-b", "funded_operator@spoke-b-bank-d", "bank-d", false},
+		{"bank id with hyphen", "user@spoke-a-bank-xyz", "bank-xyz", false},
+		{"no @ separator", "bank-b", "", true},
+		{"empty string", "", "", true},
+		{"only two dash-segments after @", "user@spoke-a", "", true},
+		{"no dash after @", "user@nodash", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := identity.BankID(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("BankID(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+			if got != tt.wantBank {
+				t.Errorf("BankID(%q) = %q, want %q", tt.input, got, tt.wantBank)
+			}
+		})
+	}
+}
