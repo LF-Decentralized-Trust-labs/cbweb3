@@ -9,7 +9,7 @@ import {
   toast,
 } from "@cbweb3/ui";
 import { useEffect, useState } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 import type { FXAgreementState } from "../types";
 
@@ -36,7 +36,6 @@ export function AgreementDetailPage() {
   const params = useParams<{ tradeId: string }>();
   const tradeId = params.tradeId;
 
-  const navigate = useNavigate();
   const getAgreement = useFxAgreementStore((s) => s.getAgreement);
   const currentAgreement = useFxAgreementStore((s) => s.currentAgreement);
   const accept = useFxAgreementStore((s) => s.accept);
@@ -143,16 +142,6 @@ export function AgreementDetailPage() {
                   </Button>
                   <Button variant="outline" onClick={() => setConfirmAction("cancel")}>
                     Cancel
-                  </Button>
-                </>
-              ) : null}
-              {isAccepted ? (
-                <>
-                  <Button onClick={() => navigate("/htlc/new", { state: { agreementId: tradeId, preferredMode: "lock" } })}>
-                    Initiate PvP Transfer
-                  </Button>
-                  <Button variant="outline" onClick={() => navigate("/htlc/new", { state: { agreementId: tradeId, preferredMode: "lockWithHash" } })}>
-                    Continue PvP Transfer
                   </Button>
                 </>
               ) : null}

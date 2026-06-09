@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { htlcApi } from "../services/api";
+import { saveSecret } from "../services/htlc-secrets";
 import type {
   HTLCLock,
   LockHTLCRequest,
@@ -47,6 +48,9 @@ export const useHtlcStore = create<HTLCState>((set) => ({
     set({ status: "loading", error: null });
     try {
       const response = await htlcApi.lock(payload);
+      if (response.secret && response.contract_id) {
+        saveSecret(response.contract_id, response.secret);
+      }
       const searchResponse = await htlcApi.search({});
       set({ locks: searchResponse.locks, total: searchResponse.total, status: "idle" });
       return response;
@@ -59,6 +63,9 @@ export const useHtlcStore = create<HTLCState>((set) => ({
     set({ status: "loading", error: null });
     try {
       const response = await htlcApi.lockWithHash(payload);
+      if (response.secret && response.contract_id) {
+        saveSecret(response.contract_id, response.secret);
+      }
       const searchResponse = await htlcApi.search({});
       set({ locks: searchResponse.locks, total: searchResponse.total, status: "idle" });
       return response;

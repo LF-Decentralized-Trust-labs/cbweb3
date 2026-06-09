@@ -209,7 +209,7 @@ func main() {
 		logger.Warn("could not extract spoke prefix from PALADIN_IDENTITY — receiver locality check disabled")
 	}
 
-	grpcServer := server.New(server.Config{
+	grpcServer, startRelayWorkers := server.New(server.Config{
 		Zeto:             zeto,
 		HTLC:             htlc,
 		Relay:            relay,
@@ -220,6 +220,7 @@ func main() {
 		FXRepo:           fxRepo,
 		Pente:            pente,
 		RateTolPct:       rateTolPct,
+		CrossSpokeMode:   true, // relay is always active in production (CACTI_API_URL is required)
 		StrictHTLC:       strictHTLC,
 		SpokePrefix:      spokePrefix,
 		PaladinIdentity:  paladinIdentity,
@@ -232,6 +233,7 @@ func main() {
 	defer cancel()
 
 	go expiryWorker.Start(ctx)
+	go startRelayWorkers(ctx)
 
 	// Set up graceful shutdown on SIGTERM/SIGINT
 	sigChan := make(chan os.Signal, 1)

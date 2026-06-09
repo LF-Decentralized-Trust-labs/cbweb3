@@ -102,28 +102,6 @@ func main() {
 		logger.Warn("FIAT_TOKEN_ADDRESS not set — fCeBM mint/burn operations disabled")
 	}
 
-	// On-chain HTLC coordination (optional — requires BESU_RPC_URL + HTLC_ADDRESS).
-	var htlc ports.HTLCContractPort
-	if besuRPC != "" {
-		htlcAddr := os.Getenv("HTLC_ADDRESS")
-		if htlcAddr == "" {
-			log.Fatal("FATAL: HTLC_ADDRESS is required when BESU_RPC_URL is set")
-		}
-		besuClient, err := besuAdapter.NewClient(besuAdapter.ClientConfig{
-			RPCURL:        besuRPC,
-			ChainID:       chainID,
-			HTLCAddress:   htlcAddr,
-			PrivateKeyHex: operatorKey,
-		}, logger)
-		if err != nil {
-			log.Fatalf("FATAL: besu client: %v", err)
-		}
-		htlc = besuClient
-		logger.Info("besu HTLC client configured", "rpc", besuRPC, "htlcAddress", htlcAddr, "chainID", chainID)
-	} else {
-		logger.Warn("BESU_RPC_URL not set — on-chain HTLC coordination disabled")
-	}
-
 	// On-chain FXAgreement coordination (optional — Besu only).
 	var fxAgreementBesu ports.FXAgreementContractPort
 	if fxAddr := os.Getenv("FX_AGREEMENT_ADDRESS"); fxAddr != "" && besuRPC != "" {
@@ -164,9 +142,6 @@ func main() {
 	}
 	logger.Info("fx rate tolerance configured", "pct", rateTolPct)
 
-	strictHTLC := parseBoolEnv("FX_AGREEMENT_HTLC_STRICT", true)
-	logger.Info("fx htlc strict mode configured", "strict", strictHTLC)
-
 	fxExpiryCheckIntervalStr := getEnv("FX_EXPIRY_CHECK_INTERVAL_S", "300")
 	fxExpiryCheckIntervalU, err := strconv.ParseUint(fxExpiryCheckIntervalStr, 10, 64)
 	if err != nil || fxExpiryCheckIntervalU == 0 {
@@ -177,13 +152,11 @@ func main() {
 	grpcServer := server.New(server.Config{
 		Token:           token,
 		Fiat:            fiatToken,
-		HTLC:            htlc,
 		Relay:           relay,
 		EscrowRepo:      escrowRepo,
 		FXAgreementBesu: fxAgreementBesu,
 		FXRepo:          fxRepo,
 		RateTolPct:      rateTolPct,
-		StrictHTLC:      strictHTLC,
 		Logger:          logger,
 	})
 

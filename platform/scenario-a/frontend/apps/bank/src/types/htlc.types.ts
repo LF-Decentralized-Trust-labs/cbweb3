@@ -18,6 +18,7 @@ export interface HTLCLock {
   secret?: string;
   zeto_lock_ref: string;
   state: HTLCState;
+  counterparty_locked: boolean;
 }
 
 export interface LockHTLCRequest {
@@ -39,6 +40,7 @@ export interface LockHTLCResponse {
   hash_lock: string;
   htlc_tx_hash?: string;
   zeto_tx_hash?: string;
+  secret?: string;
 }
 
 export interface SettleHTLCRequest {

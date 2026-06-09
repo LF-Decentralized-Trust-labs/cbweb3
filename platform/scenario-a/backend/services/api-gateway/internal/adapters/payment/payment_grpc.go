@@ -48,6 +48,7 @@ type LockHTLCResult struct {
 	HashLock   string `json:"hash_lock"`
 	HTLCTxHash string `json:"htlc_tx_hash,omitempty"`
 	ZetoTxHash string `json:"zeto_tx_hash,omitempty"`
+	Secret     string `json:"secret,omitempty"` // one-time; store securely — never re-exposed after this response
 }
 
 func (a *GRPCAdapter) LockHTLC(ctx context.Context, agreementID, receiver, amount string, timeLock uint64) (*LockHTLCResult, error) {
@@ -65,6 +66,7 @@ func (a *GRPCAdapter) LockHTLC(ctx context.Context, agreementID, receiver, amoun
 		HashLock:   resp.HashLock,
 		HTLCTxHash: resp.HtlcTxHash,
 		ZetoTxHash: resp.ZetoTxHash,
+		Secret:     resp.Secret,
 	}, nil
 }
 
@@ -125,14 +127,14 @@ func (a *GRPCAdapter) RefundHTLC(ctx context.Context, contractID string) (*Refun
 }
 
 type HTLCStatus struct {
-	ContractID  string `json:"contract_id"`
-	Sender      string `json:"sender"`
-	Receiver    string `json:"receiver"`
-	HashLock    string `json:"hash_lock"`
-	TimeLock    uint64 `json:"time_lock"`
-	Secret      string `json:"secret,omitempty"`
-	ZetoLockRef string `json:"zeto_lock_ref"`
-	State       string `json:"state"`
+	ContractID         string `json:"contract_id"`
+	Sender             string `json:"sender"`
+	Receiver           string `json:"receiver"`
+	HashLock           string `json:"hash_lock"`
+	TimeLock           uint64 `json:"time_lock"`
+	ZetoLockRef        string `json:"zeto_lock_ref"`
+	State              string `json:"state"`
+	CounterpartyLocked bool   `json:"counterparty_locked"`
 }
 
 func (a *GRPCAdapter) GetHTLCStatus(ctx context.Context, contractID string) (*HTLCStatus, error) {
@@ -221,14 +223,14 @@ func lockToStatus(l *pb.HTLCLock) *HTLCStatus {
 		return &HTLCStatus{}
 	}
 	return &HTLCStatus{
-		ContractID:  l.ContractId,
-		Sender:      l.Sender,
-		Receiver:    l.Receiver,
-		HashLock:    l.HashLock,
-		TimeLock:    l.TimeLock,
-		Secret:      l.Secret,
-		ZetoLockRef: l.ZetoLockRef,
-		State:       l.State.String(),
+		ContractID:         l.ContractId,
+		Sender:             l.Sender,
+		Receiver:           l.Receiver,
+		HashLock:           l.HashLock,
+		TimeLock:           l.TimeLock,
+		ZetoLockRef:        l.ZetoLockRef,
+		State:              l.State.String(),
+		CounterpartyLocked: l.CounterpartyLocked,
 	}
 }
 

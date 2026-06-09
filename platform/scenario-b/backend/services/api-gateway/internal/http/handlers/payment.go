@@ -1,12 +1,9 @@
 package handlers
 
 import (
-	"time"
-
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -19,115 +16,6 @@ type PaymentHandler struct {
 // NewPaymentHandler creates a new PaymentHandler.
 func NewPaymentHandler(payment *paymentadapter.GRPCAdapter) *PaymentHandler {
 	return &PaymentHandler{payment: payment}
-}
-
-// --- HTLC endpoints ---
-
-func (h *PaymentHandler) LockHTLC(c *fiber.Ctx) error {
-	var req struct {
-		AgreementID string `json:"agreement_id"`
-		Receiver    string `json:"receiver"`
-		Amount      string `json:"amount"`
-		TimeLock    uint64 `json:"time_lock"`
-	}
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
-	}
-	if req.Receiver == "" || req.Amount == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "receiver and amount are required"})
-	}
-	if req.AgreementID == "" {
-		req.AgreementID = uuid.NewString()
-	}
-	if req.TimeLock == 0 {
-		req.TimeLock = uint64(time.Now().Unix()) + 3600
-	}
-	result, err := h.payment.LockHTLC(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-	return c.Status(fiber.StatusCreated).JSON(result)
-}
-
-func (h *PaymentHandler) LockHTLCWithHashLock(c *fiber.Ctx) error {
-	var req struct {
-		AgreementID string `json:"agreement_id"`
-		Receiver    string `json:"receiver"`
-		Amount      string `json:"amount"`
-		TimeLock    uint64 `json:"time_lock"`
-		HashLock    string `json:"hash_lock"`
-	}
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
-	}
-	if req.HashLock == "" || req.Receiver == "" || req.Amount == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "hash_lock, receiver and amount are required"})
-	}
-	if req.AgreementID == "" {
-		req.AgreementID = uuid.NewString()
-	}
-	if req.TimeLock == 0 {
-		req.TimeLock = uint64(time.Now().Unix()) + 1800
-	}
-	result, err := h.payment.LockHTLCWithHashLock(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock, req.HashLock)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-	return c.Status(fiber.StatusCreated).JSON(result)
-}
-
-func (h *PaymentHandler) SettleHTLC(c *fiber.Ctx) error {
-	var req struct {
-		ContractID string `json:"contract_id"`
-		Secret     string `json:"secret"`
-	}
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
-	}
-	result, err := h.payment.SettleHTLC(c.Context(), req.ContractID, req.Secret)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-	return c.JSON(result)
-}
-
-func (h *PaymentHandler) RefundHTLC(c *fiber.Ctx) error {
-	var req struct {
-		ContractID string `json:"contract_id"`
-	}
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
-	}
-	result, err := h.payment.RefundHTLC(c.Context(), req.ContractID)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-	return c.JSON(result)
-}
-
-func (h *PaymentHandler) GetHTLCStatus(c *fiber.Ctx) error {
-	contractID := c.Params("contractId")
-	if contractID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "contractId is required"})
-	}
-	result, err := h.payment.GetHTLCStatus(c.Context(), contractID)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-	return c.JSON(result)
-}
-
-func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
-	results, err := h.payment.SearchHTLC(c.Context(),
-		c.Query("agreement_id"),
-		c.Query("sender"),
-		c.Query("receiver"),
-		c.Query("state"),
-	)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-	return c.JSON(fiber.Map{"locks": results, "total": len(results)})
 }
 
 // --- Token balance endpoint ---

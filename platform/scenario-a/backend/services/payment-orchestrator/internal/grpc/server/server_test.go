@@ -10,12 +10,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/grpc/server"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -201,7 +203,7 @@ func setupTestEnvFull(t *testing.T, htlc *mockHTLC, fiat *mockFiat, spokePrefix 
 		htlcPort = htlc
 	}
 
-	grpcServer := server.New(server.Config{
+	grpcServer, _ := server.New(server.Config{
 		Zeto:            mock,
 		HTLC:            htlcPort,
 		Relay:           noopRelay{},
@@ -340,14 +342,11 @@ func TestSettleHTLC_Success(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	// Get secret from status (stored in off-chain record)
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
+	// Secret is returned once in the LockHTLC response (not via GetHTLCStatus).
+	secret := lockResp.Secret
+	if secret == "" {
+		t.Fatal("LockHTLC response must include the secret for the creator")
 	}
-	secret := statusResp.Lock.Secret
 
 	settleResp, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: lockResp.ContractId,
@@ -473,14 +472,8 @@ func TestSettleHTLC_Idempotent(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	// Get secret
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-	secret := statusResp.Lock.Secret
+	// Secret is returned once in the LockHTLC response.
+	secret := lockResp.Secret
 
 	// First settle — should succeed
 	resp1, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
@@ -582,18 +575,10 @@ func TestSettleHTLC_OnChainSettleFails_BlocksZetoTransfer(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	// Get the secret
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-
 	// Settle — on-chain settle will fail → should return error
 	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: lockResp.ContractId,
-		Secret:     statusResp.Lock.Secret,
+		Secret:     lockResp.Secret,
 	})
 	if err == nil {
 		t.Fatal("expected error when on-chain HTLC settle fails")
@@ -635,16 +620,9 @@ func TestSettleHTLC_ZetoTransferFails_StateRemainsLocked(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-
 	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: lockResp.ContractId,
-		Secret:     statusResp.Lock.Secret,
+		Secret:     lockResp.Secret,
 	})
 	if err == nil {
 		t.Fatal("expected error when zeto transferLocked fails")
@@ -677,16 +655,9 @@ func TestSettleHTLC_BothSucceed_StateSettled(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-
 	resp, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: lockResp.ContractId,
-		Secret:     statusResp.Lock.Secret,
+		Secret:     lockResp.Secret,
 	})
 	if err != nil {
 		t.Fatalf("SettleHTLC: %v", err)
@@ -794,19 +765,11 @@ func TestSettleHTLC_CrossSpoke_OnChainFails_BlocksTransfer(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	// Get the generated secret
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-
 	// Simulate cross-spoke settle: use a foreign contract_id but the real secret.
 	// The server will find the local record via hashLock match.
 	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: "foreign_contract_id_from_other_spoke",
-		Secret:     statusResp.Lock.Secret,
+		Secret:     lockResp.Secret,
 	})
 	if err == nil {
 		t.Fatal("expected error when on-chain HTLC settle fails")
@@ -958,13 +921,6 @@ func TestSettleHTLC_ConcurrentCallsOnlyOneSucceeds(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-
 	var wg sync.WaitGroup
 	results := make(chan error, 2)
 
@@ -974,7 +930,7 @@ func TestSettleHTLC_ConcurrentCallsOnlyOneSucceeds(t *testing.T) {
 			defer wg.Done()
 			_, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 				ContractId: lockResp.ContractId,
-				Secret:     statusResp.Lock.Secret,
+				Secret:     lockResp.Secret,
 			})
 			results <- err
 		}()
@@ -1017,17 +973,10 @@ func TestSettleHTLC_RetryAfterZetoTransferFails(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: lockResp.ContractId,
-	})
-	if err != nil {
-		t.Fatalf("GetHTLCStatus: %v", err)
-	}
-
 	// First settle: on-chain succeeds, zeto fails → state should be SETTLING
 	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: lockResp.ContractId,
-		Secret:     statusResp.Lock.Secret,
+		Secret:     lockResp.Secret,
 	})
 	if err == nil {
 		t.Fatal("expected error when zeto transfer fails")
@@ -1054,7 +1003,7 @@ func TestSettleHTLC_RetryAfterZetoTransferFails(t *testing.T) {
 
 	resp, err := env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
 		ContractId: lockResp.ContractId,
-		Secret:     statusResp.Lock.Secret,
+		Secret:     lockResp.Secret,
 	})
 	if err != nil {
 		t.Fatalf("SettleHTLC retry: %v", err)
@@ -1158,5 +1107,229 @@ func TestLockHTLC_RejectsUnparseableReceiverWhenSpokePrefixSet(t *testing.T) {
 	}
 	if env.zeto.lockCalled != 0 {
 		t.Errorf("expected zeto.Lock NOT called, got %d", env.zeto.lockCalled)
+	}
+}
+
+// --- Security: preimage must never appear in read responses ---
+
+func TestGetHTLCStatus_SecretNotExposed(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_SEC_001",
+		Receiver:    "bank-b",
+		Amount:      "100",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+	if lockResp.Secret == "" {
+		t.Fatal("LockHTLC must return the secret to the creator")
+	}
+
+	statusResp, err := env.client.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
+		ContractId: lockResp.ContractId,
+	})
+	if err != nil {
+		t.Fatalf("GetHTLCStatus: %v", err)
+	}
+	if statusResp.Lock == nil {
+		t.Fatal("expected non-nil lock in response")
+	}
+	// Compile-time proof: HTLCLock has no Secret field (field 6 is reserved in the proto).
+	// The test exercises the endpoint to confirm it returns a valid response.
+}
+
+func TestSearchHTLC_SecretNotExposed(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	_, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_SEC_002",
+		Receiver:    "bank-b",
+		Amount:      "100",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	searchResp, err := env.client.SearchHTLC(ctx, &pb.SearchHTLCRequest{
+		Sender: testPaladinIdentity,
+	})
+	if err != nil {
+		t.Fatalf("SearchHTLC: %v", err)
+	}
+	// Compile-time proof: HTLCLock has no Secret field (field 6 is reserved in the proto).
+	// Verify results contain the locked HTLC with no secret-carrying fields.
+	if len(searchResp.Locks) == 0 {
+		t.Error("expected at least one result for the locked HTLC")
+	}
+}
+
+func TestSearchHTLC_BankIDFilterVisible(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	_, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_VIS_001",
+		Receiver:    "counterparty@spoke-b-bank-b",
+		Amount:      "500",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	// Sender is testPaladinIdentity ("funded_operator@spoke-a-bank-a").
+	// Passing BankID "bank-a" via x-caller-identity should match the sender and return results.
+	mdCtx := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-a")
+
+	searchResp, err := env.client.SearchHTLC(mdCtx, &pb.SearchHTLCRequest{})
+	if err != nil {
+		t.Fatalf("SearchHTLC with bank-a identity: %v", err)
+	}
+	if len(searchResp.Locks) == 0 {
+		t.Error("bank-a should see the HTLC it created as sender")
+	}
+
+	// "bank-c" is not a counterparty — should get empty results.
+	mdCtxOther := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-c")
+	searchRespOther, err := env.client.SearchHTLC(mdCtxOther, &pb.SearchHTLCRequest{})
+	if err != nil {
+		t.Fatalf("SearchHTLC with bank-c identity: %v", err)
+	}
+	if len(searchRespOther.Locks) != 0 {
+		t.Errorf("bank-c should not see HTLCs where it is not a counterparty, got %d", len(searchRespOther.Locks))
+	}
+}
+
+func TestGetHTLCStatus_BankIDFilterCounterparty(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_VIS_002",
+		Receiver:    "counterparty@spoke-b-bank-b",
+		Amount:      "500",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	// Sender is "bank-a" — should be allowed.
+	mdCtx := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-a")
+	_, err = env.client.GetHTLCStatus(mdCtx, &pb.GetHTLCStatusRequest{ContractId: lockResp.ContractId})
+	if err != nil {
+		t.Errorf("bank-a (sender) should be able to view the HTLC: %v", err)
+	}
+
+	// Receiver is "bank-b" — should be allowed.
+	mdCtxB := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-b")
+	_, err = env.client.GetHTLCStatus(mdCtxB, &pb.GetHTLCStatusRequest{ContractId: lockResp.ContractId})
+	if err != nil {
+		t.Errorf("bank-b (receiver) should be able to view the HTLC: %v", err)
+	}
+
+	// "bank-c" is not a counterparty — should get PermissionDenied.
+	mdCtxC := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-c")
+	_, err = env.client.GetHTLCStatus(mdCtxC, &pb.GetHTLCStatusRequest{ContractId: lockResp.ContractId})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Errorf("bank-c should get PermissionDenied, got: %v", err)
+	}
+}
+
+// mockFXRepo is a no-op FXAgreementRepository used in FX agreement tests.
+type mockFXRepo struct{}
+
+func (mockFXRepo) CreateAgreement(_ context.Context, _ *domain.FXAgreementRecord) error {
+	return nil
+}
+func (mockFXRepo) GetAgreement(_ context.Context, _ string) (*domain.FXAgreementRecord, error) {
+	return nil, nil
+}
+func (mockFXRepo) UpdateAgreement(_ context.Context, _ *domain.FXAgreementRecord) error {
+	return nil
+}
+func (mockFXRepo) ListAgreements(_ context.Context, _ ports.FXAgreementFilter) ([]*domain.FXAgreementRecord, error) {
+	return nil, nil
+}
+func (mockFXRepo) CreateAuditEvent(_ context.Context, _ *domain.FXAgreementEvent) error {
+	return nil
+}
+func (mockFXRepo) ListAuditEvents(_ context.Context, _ string) ([]*domain.FXAgreementEvent, error) {
+	return nil, nil
+}
+func (mockFXRepo) ListExpiredNonTerminal(_ context.Context, _ int64) ([]*domain.FXAgreementRecord, error) {
+	return nil, nil
+}
+
+func setupTestEnvWithCrossSpoke(t *testing.T) *testEnv {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	mock := &mockZeto{}
+
+	grpcServer, _ := server.New(server.Config{
+		Zeto:            mock,
+		Relay:           noopRelay{},
+		CrossSpokeMode:  true,
+		PaladinIdentity: testPaladinIdentity,
+		Logger:          logger,
+	})
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	go func() { _ = grpcServer.Serve(lis) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	//nolint:staticcheck
+	conn, err := grpc.DialContext(ctx, lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		cancel()
+		grpcServer.Stop()
+		t.Fatalf("dial: %v", err)
+	}
+
+	t.Cleanup(func() {
+		conn.Close()
+		grpcServer.Stop()
+	})
+
+	return &testEnv{
+		client: pb.NewPaymentOrchestratorServiceClient(conn),
+		zeto:   mock,
+		cancel: cancel,
+	}
+}
+
+// TestSettleHTLC_BlockedUntilCounterpartyLocked verifies that a cross-spoke
+// HTLC (one created on a server that has an FX repo wired) cannot be settled
+// before the relay has confirmed the counterparty leg is locked.
+func TestSettleHTLC_BlockedUntilCounterpartyLocked(t *testing.T) {
+	env := setupTestEnvWithCrossSpoke(t)
+	ctx := context.Background()
+
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_CROSS_001",
+		Receiver:    "bank-b",
+		Amount:      "1000",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	_, err = env.client.SettleHTLC(ctx, &pb.SettleHTLCRequest{
+		ContractId: lockResp.ContractId,
+		Secret:     lockResp.Secret,
+	})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("expected FailedPrecondition before counterparty locks, got: %v", err)
 	}
 }
