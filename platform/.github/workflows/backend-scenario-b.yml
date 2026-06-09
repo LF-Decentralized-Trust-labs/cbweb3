@@ -1,0 +1,37 @@
+name: Backend CI — Scenario B
+
+permissions: {}
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ["scenario-b/backend/**"]
+  pull_request:
+    branches: [main, develop]
+    paths: ["scenario-b/backend/**"]
+  workflow_dispatch:
+
+jobs:
+  api-gateway:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scenario-b/backend/services/api-gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: scenario-b/backend/services/api-gateway/go.mod
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run go vet
+        run: make vet
+
+      - name: Run tests with coverage threshold
+        run: make test-coverage
+
+      - name: Run gosec
+        run: make security

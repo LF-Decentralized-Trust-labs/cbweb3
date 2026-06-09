@@ -1,10 +1,14 @@
-name: Contracts CI
+name: Contracts CI — Scenario B
 
 permissions: {}
 
 on:
   push:
+    branches: [main, develop]
+    paths: ["scenario-b/contracts/**"]
   pull_request:
+    branches: [main, develop]
+    paths: ["scenario-b/contracts/**"]
   workflow_dispatch:
 
 env:
@@ -12,7 +16,7 @@ env:
 
 jobs:
   contracts:
-    name: Foundry Contracts
+    name: Foundry Contracts — Scenario B
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -38,21 +42,21 @@ jobs:
         run: forge --version
 
       - name: Install Soldeer dependencies
-        working-directory: ./contracts
+        working-directory: scenario-b/contracts
         run: forge soldeer install
 
       - name: Run Forge fmt check
-        working-directory: ./contracts
+        working-directory: scenario-b/contracts
         run: forge fmt --check
 
       - name: Run Forge build
-        working-directory: ./contracts
+        working-directory: scenario-b/contracts
         run: forge build --sizes
 
       - name: Run Forge tests
-        working-directory: ./contracts
+        working-directory: scenario-b/contracts
         run: forge test -vvv
 
       - name: Validate code coverage
-        working-directory: ./contracts
+        working-directory: scenario-b/contracts
         run: bash tools/validate-coverage.sh

@@ -1,0 +1,62 @@
+name: Contracts CI — Scenario A
+
+permissions: {}
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ["scenario-a/contracts/**"]
+  pull_request:
+    branches: [main, develop]
+    paths: ["scenario-a/contracts/**"]
+  workflow_dispatch:
+
+env:
+  FOUNDRY_PROFILE: ci
+
+jobs:
+  contracts:
+    name: Foundry Contracts — Scenario A
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Cache Foundry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.foundry
+            ~/.cargo/bin/forge
+            ~/.cargo/bin/cast
+          key: foundry-${{ runner.os }}-${{ github.sha }}
+          restore-keys: foundry-${{ runner.os }}-
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Show Forge version
+        run: forge --version
+
+      - name: Install Soldeer dependencies
+        working-directory: scenario-a/contracts
+        run: forge soldeer install
+
+      - name: Run Forge fmt check
+        working-directory: scenario-a/contracts
+        run: forge fmt --check
+
+      - name: Run Forge build
+        working-directory: scenario-a/contracts
+        run: forge build --sizes
+
+      - name: Run Forge tests
+        working-directory: scenario-a/contracts
+        run: forge test -vvv
+
+      - name: Validate code coverage
+        working-directory: scenario-a/contracts
+        run: bash tools/validate-coverage.sh
