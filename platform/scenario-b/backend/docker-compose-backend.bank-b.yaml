@@ -38,6 +38,10 @@ services:
       COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
       REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"
       REDIS_DB: "1"
+      # Seed the KMS with the operator key so onboarding registers the canonical address.
+      # This ensures bridge-out mints and GetBalance both use the same BESU_OPERATOR_KEY address.
+      KMS_SEED_KEY_ID: "bank-b"
+      KMS_SEED_PRIVATE_KEY: "0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1"
     ports:
       - "29091:9091"
     depends_on:
@@ -60,12 +64,14 @@ services:
       BESU_OPERATOR_KEY: "0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1"
       CACTI_API_URL: "http://host.docker.internal:4000"
       FX_POSTGRES_DSN: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_bank_b}?sslmode=disable"
-      # BesuRelayerExecutor: Hub relayer para bridge-out de bank-b (burn W-ARS → unlock ARS no Spoke-B).
-      # CB-B signer precisa de CENTRAL_BANK_ROLE no token W-ARS.
-      HUB_BESU_RPC_URL: "http://host.docker.internal:8845"
-      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
-      SIGNER_PRIVATE_KEY: "${CB_HUB_SIGNER_PRIVATE_KEY:-c87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3}"
-      HUB_MINT_RECIPIENT: "${ENTITY_BESU_ADDRESS:-0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef}"
+      # Commercial banks do NOT run a Hub mint/burn relayer. Minting W-<source> (bridge-in) and
+      # burning W-<target> (bridge-out) are central-bank-only operations (CENTRAL_BANK_ROLE):
+      #   - bridge-in  → delegated to this bank's spoke CB via CENTRAL_BANK_API_URL
+      #                  (POST /internal/amm/cross-currency-bridge-in)
+      #   - bridge-out → delegated to the beneficiary CB via Cacti
+      # Leaving HUB_BESU_RPC_URL / SIGNER_PRIVATE_KEY unset disables the Hub relayer worker,
+      # which has no work to do here. (Previously this used CB_HUB_SIGNER_PRIVATE_KEY to give the
+      # commercial relayer a hub-minting key — a sovereignty violation; removed.)
       ENTITY_BESU_ADDRESS: "0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef"
       SPOKE_BESU_RPC_URL: "http://cbweb3-spoke-b-besu.bank-b:8545"
       SPOKE_CHAIN_ID: "${BESU_CHAIN_ID:-1339}"
