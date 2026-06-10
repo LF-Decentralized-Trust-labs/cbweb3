@@ -3,8 +3,6 @@ set -eu
 
 POSTGRES_DB_BANK_A="${POSTGRES_DB_BANK_A:-cbweb3_bank_a}"
 POSTGRES_DB_BANK_B="${POSTGRES_DB_BANK_B:-cbweb3_bank_b}"
-POSTGRES_DB_BANK_C="${POSTGRES_DB_BANK_C:-cbweb3_bank_c}"
-POSTGRES_DB_BANK_D="${POSTGRES_DB_BANK_D:-cbweb3_bank_d}"
 POSTGRES_DB_CENTRAL_BANK_A="${POSTGRES_DB_CENTRAL_BANK_A:-cbweb3_central_bank_a}"
 POSTGRES_DB_CENTRAL_BANK_B="${POSTGRES_DB_CENTRAL_BANK_B:-cbweb3_central_bank_b}"
 POSTGRES_DB_MLP="${POSTGRES_DB_MLP:-cbweb3_mlp}"
@@ -27,8 +25,6 @@ create_db_if_missing() {
 
 create_db_if_missing "$POSTGRES_DB_BANK_A"
 create_db_if_missing "$POSTGRES_DB_BANK_B"
-create_db_if_missing "$POSTGRES_DB_BANK_C"
-create_db_if_missing "$POSTGRES_DB_BANK_D"
 create_db_if_missing "$POSTGRES_DB_CENTRAL_BANK_A"
 create_db_if_missing "$POSTGRES_DB_CENTRAL_BANK_B"
 create_db_if_missing "$POSTGRES_DB_MLP"

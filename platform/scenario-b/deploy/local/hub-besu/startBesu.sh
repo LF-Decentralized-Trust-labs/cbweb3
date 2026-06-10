@@ -1,9 +1,12 @@
 #!/bin/bash
 #
-# startBesu.sh — Starts the International Hub Besu network with a single
-# validator/bootnode (sandbox topology — see research.md Decision 3):
+# startBesu.sh — Starts the International Hub Besu network with 5 nodes:
 #
-#   cbweb3-hub-besu.hub-validator  (bootnode / sole validator)  RPC: 8845
+#   cbweb3-hub-besu.hub-validator    (bootnode / sole validator)  RPC: 8845
+#   cbweb3-hub-besu.central-bank-a   (non-validator peer)         RPC: 8846
+#   cbweb3-hub-besu.bank-a           (non-validator peer)         RPC: 8847
+#   cbweb3-hub-besu.central-bank-b   (non-validator peer)         RPC: 8848
+#   cbweb3-hub-besu.bank-b           (non-validator peer)         RPC: 8849
 #
 # This network is topologically independent from Spoke A (chain 1338) and
 # Spoke B (chain 1339): distinct chain ID (1337), distinct Docker network,
@@ -21,12 +24,30 @@ NETWORK_NAME="hub_besu_network"
 CONTAINER_PREFIX="cbweb3-hub-besu"
 
 NODE_HUB="${CONTAINER_PREFIX}.hub-validator"
+NODE_CENTRAL_BANK_A="${CONTAINER_PREFIX}.central-bank-a"
+NODE_BANK_A="${CONTAINER_PREFIX}.bank-a"
+NODE_CENTRAL_BANK_B="${CONTAINER_PREFIX}.central-bank-b"
+NODE_BANK_B="${CONTAINER_PREFIX}.bank-b"
 
 RPC_PORT_HUB=8845
-WS_PORT_HUB=8855
-P2P_PORT_HUB=31503
+RPC_PORT_CENTRAL_BANK_A=8846
+RPC_PORT_BANK_A=8847
+RPC_PORT_CENTRAL_BANK_B=8848
+RPC_PORT_BANK_B=8849
 
-NODES=1
+WS_PORT_HUB=8855
+WS_PORT_CENTRAL_BANK_A=8856
+WS_PORT_BANK_A=8857
+WS_PORT_CENTRAL_BANK_B=8858
+WS_PORT_BANK_B=8859
+
+P2P_PORT_HUB=31503
+P2P_PORT_CENTRAL_BANK_A=31504
+P2P_PORT_BANK_A=31505
+P2P_PORT_CENTRAL_BANK_B=31506
+P2P_PORT_BANK_B=31507
+
+NODES=5
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo -e "${YELLOW}Stopping any existing Besu network...${NC}"
@@ -75,12 +96,13 @@ if ! [ -x "$(command -v ./bin/besu)" ]; then
 fi
 BESU=./bin/besu
 
-echo -e "${YELLOW}Creating qbftConfigFile.json (${NODES} validator)...${NC}"
-jq '.blockchain += {"nodes": {"generate": true, "count": '"$NODES"'}}' \
+echo -e "${YELLOW}Creating qbftConfigFile.json (${NODES} nodes, 1 validator, 4 non-validator peers)...${NC}"
+jq '.blockchain += {"nodes": {"generate": true, "count": 1}}' \
     config/configTemplate.json > config/qbftConfigFile.json
 
 echo -e "${YELLOW}Generating blockchain config and keys...${NC}"
 mkdir -p nodes/hub-validator/data
+mkdir -p nodes/central-bank-a/data nodes/bank-a/data nodes/central-bank-b/data nodes/bank-b/data
 mkdir tmpFiles && cd tmpFiles
 ../$BESU operator generate-blockchain-config \
     --config-file=../config/qbftConfigFile.json \
@@ -179,15 +201,131 @@ echo -e "${BLUE}ENODE (internal): $ENODE_INTERNAL${NC}\n"
 # Now connect hub-validator to shared network (after IP/ENODE capture to avoid multi-IP issue)
 docker network connect cbweb3_network "${NODE_HUB}" 2>/dev/null || true
 
+# ─── Start central-bank-a node (non-validator peer) ──────────────────────────
+echo -e "${BLUE}Starting central-bank-a node (non-validator peer)...${NC}"
+docker run -d \
+    --name "${NODE_CENTRAL_BANK_A}" \
+    --user root \
+    -v "$(pwd)/nodes/central-bank-a/data:/opt/besu/data" \
+    -v "$(pwd)/genesis:/opt/besu/genesis" \
+    -p ${RPC_PORT_CENTRAL_BANK_A}:8545 \
+    -p ${WS_PORT_CENTRAL_BANK_A}:8546 \
+    -p ${P2P_PORT_CENTRAL_BANK_A}:30303 \
+    -p ${P2P_PORT_CENTRAL_BANK_A}:30303/udp \
+    --network "${NETWORK_NAME}" \
+    --restart always \
+    hyperledger/besu:latest \
+    --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 \
+    --bootnodes=${ENODE_INTERNAL} \
+    --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT \
+    --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT \
+    --host-allowlist='*' --rpc-http-cors-origins='all' \
+    --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' \
+    --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
+
+docker network connect cbweb3_network "${NODE_CENTRAL_BANK_A}" 2>/dev/null || true
+echo -e "${GREEN}central-bank-a node started.${NC}\n"
+
+# ─── Start bank-a node (non-validator peer) ───────────────────────────────────
+echo -e "${BLUE}Starting bank-a node (non-validator peer)...${NC}"
+docker run -d \
+    --name "${NODE_BANK_A}" \
+    --user root \
+    -v "$(pwd)/nodes/bank-a/data:/opt/besu/data" \
+    -v "$(pwd)/genesis:/opt/besu/genesis" \
+    -p ${RPC_PORT_BANK_A}:8545 \
+    -p ${WS_PORT_BANK_A}:8546 \
+    -p ${P2P_PORT_BANK_A}:30303 \
+    -p ${P2P_PORT_BANK_A}:30303/udp \
+    --network "${NETWORK_NAME}" \
+    --restart always \
+    hyperledger/besu:latest \
+    --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 \
+    --bootnodes=${ENODE_INTERNAL} \
+    --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT \
+    --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT \
+    --host-allowlist='*' --rpc-http-cors-origins='all' \
+    --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' \
+    --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
+
+docker network connect cbweb3_network "${NODE_BANK_A}" 2>/dev/null || true
+echo -e "${GREEN}bank-a node started.${NC}\n"
+
+# ─── Start central-bank-b node (non-validator peer) ──────────────────────────
+echo -e "${BLUE}Starting central-bank-b node (non-validator peer)...${NC}"
+docker run -d \
+    --name "${NODE_CENTRAL_BANK_B}" \
+    --user root \
+    -v "$(pwd)/nodes/central-bank-b/data:/opt/besu/data" \
+    -v "$(pwd)/genesis:/opt/besu/genesis" \
+    -p ${RPC_PORT_CENTRAL_BANK_B}:8545 \
+    -p ${WS_PORT_CENTRAL_BANK_B}:8546 \
+    -p ${P2P_PORT_CENTRAL_BANK_B}:30303 \
+    -p ${P2P_PORT_CENTRAL_BANK_B}:30303/udp \
+    --network "${NETWORK_NAME}" \
+    --restart always \
+    hyperledger/besu:latest \
+    --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 \
+    --bootnodes=${ENODE_INTERNAL} \
+    --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT \
+    --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT \
+    --host-allowlist='*' --rpc-http-cors-origins='all' \
+    --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' \
+    --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
+
+docker network connect cbweb3_network "${NODE_CENTRAL_BANK_B}" 2>/dev/null || true
+echo -e "${GREEN}central-bank-b node started.${NC}\n"
+
+# ─── Start bank-b node (non-validator peer) ───────────────────────────────────
+echo -e "${BLUE}Starting bank-b node (non-validator peer)...${NC}"
+docker run -d \
+    --name "${NODE_BANK_B}" \
+    --user root \
+    -v "$(pwd)/nodes/bank-b/data:/opt/besu/data" \
+    -v "$(pwd)/genesis:/opt/besu/genesis" \
+    -p ${RPC_PORT_BANK_B}:8545 \
+    -p ${WS_PORT_BANK_B}:8546 \
+    -p ${P2P_PORT_BANK_B}:30303 \
+    -p ${P2P_PORT_BANK_B}:30303/udp \
+    --network "${NETWORK_NAME}" \
+    --restart always \
+    hyperledger/besu:latest \
+    --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 \
+    --bootnodes=${ENODE_INTERNAL} \
+    --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT \
+    --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT \
+    --host-allowlist='*' --rpc-http-cors-origins='all' \
+    --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' \
+    --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
+
+docker network connect cbweb3_network "${NODE_BANK_B}" 2>/dev/null || true
+echo -e "${GREEN}bank-b node started.${NC}\n"
+
 echo -e "${YELLOW}Creating network tracker file...${NC}"
 cat > .env.network <<EOF
 NODES=$NODES
 NETWORK_NAME=$NETWORK_NAME
 CONTAINER_PREFIX=$CONTAINER_PREFIX
 NODE_HUB=$NODE_HUB
+NODE_CENTRAL_BANK_A=$NODE_CENTRAL_BANK_A
+NODE_BANK_A=$NODE_BANK_A
+NODE_CENTRAL_BANK_B=$NODE_CENTRAL_BANK_B
+NODE_BANK_B=$NODE_BANK_B
 RPC_PORT_HUB=$RPC_PORT_HUB
+RPC_PORT_CENTRAL_BANK_A=$RPC_PORT_CENTRAL_BANK_A
+RPC_PORT_BANK_A=$RPC_PORT_BANK_A
+RPC_PORT_CENTRAL_BANK_B=$RPC_PORT_CENTRAL_BANK_B
+RPC_PORT_BANK_B=$RPC_PORT_BANK_B
 WS_PORT_HUB=$WS_PORT_HUB
+WS_PORT_CENTRAL_BANK_A=$WS_PORT_CENTRAL_BANK_A
+WS_PORT_BANK_A=$WS_PORT_BANK_A
+WS_PORT_CENTRAL_BANK_B=$WS_PORT_CENTRAL_BANK_B
+WS_PORT_BANK_B=$WS_PORT_BANK_B
 P2P_PORT_HUB=$P2P_PORT_HUB
+P2P_PORT_CENTRAL_BANK_A=$P2P_PORT_CENTRAL_BANK_A
+P2P_PORT_BANK_A=$P2P_PORT_BANK_A
+P2P_PORT_CENTRAL_BANK_B=$P2P_PORT_CENTRAL_BANK_B
+P2P_PORT_BANK_B=$P2P_PORT_BANK_B
 ENODE=$ENODE_INTERNAL
 EOF
 
@@ -195,13 +333,17 @@ echo -e "${GREEN}============================="
 echo -e "Hub network started successfully!"
 echo -e "=============================${NC}"
 echo ""
-echo -e "  ${BLUE}hub-validator${NC}  RPC: http://localhost:${RPC_PORT_HUB}  (${NODE_HUB})"
+echo -e "  ${BLUE}hub-validator  ${NC}  RPC: http://localhost:${RPC_PORT_HUB}  (${NODE_HUB})"
+echo -e "  ${BLUE}central-bank-a ${NC}  RPC: http://localhost:${RPC_PORT_CENTRAL_BANK_A}  (${NODE_CENTRAL_BANK_A})"
+echo -e "  ${BLUE}bank-a         ${NC}  RPC: http://localhost:${RPC_PORT_BANK_A}  (${NODE_BANK_A})"
+echo -e "  ${BLUE}central-bank-b ${NC}  RPC: http://localhost:${RPC_PORT_CENTRAL_BANK_B}  (${NODE_CENTRAL_BANK_B})"
+echo -e "  ${BLUE}bank-b         ${NC}  RPC: http://localhost:${RPC_PORT_BANK_B}  (${NODE_BANK_B})"
 echo ""
 echo -e "  Network : ${NETWORK_NAME}"
 echo -e "  ChainID : 1337 (0x539)"
 echo -e "  ENODE   : ${ENODE_INTERNAL}"
 echo ""
-echo -e "  ${YELLOW}NOTE: This is a single-validator sandbox topology (research.md Decision 3).${NC}"
+echo -e "  ${YELLOW}NOTE: hub-validator is the sole QBFT validator; the other 4 nodes are non-validator peers.${NC}"
 echo -e "  ${YELLOW}A production deployment requires a multi-validator (n >= 3f+1) QBFT set —${NC}"
 echo -e "  ${YELLOW}see docs/runbooks/deployment-runbook.md 'Validator Configuration'.${NC}"
 echo ""
