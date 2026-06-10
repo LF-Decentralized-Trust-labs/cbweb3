@@ -142,3 +142,29 @@ func (k *KMSLocal) DeleteKey(_ context.Context, userID string) error {
 	k.mu.Unlock()
 	return nil
 }
+
+// SeedKey pre-loads a known private key for userID. Idempotent: if the userID
+// already has a key it is NOT overwritten. Intended for dev/test environments
+// where a pre-configured operator key must be the onboarding identity.
+func (k *KMSLocal) SeedKey(userID, privKeyHex string) error {
+	if userID == "" || privKeyHex == "" {
+		return errors.New("kms: userID and privKeyHex are required")
+	}
+	privKeyHex = strings.TrimPrefix(privKeyHex, "0x")
+	privKeyBytes, err := hex.DecodeString(privKeyHex)
+	if err != nil {
+		return fmt.Errorf("kms: invalid private key hex: %w", err)
+	}
+	privKey, err := gethcrypto.ToECDSA(privKeyBytes)
+	if err != nil {
+		return fmt.Errorf("kms: parse private key: %w", err)
+	}
+	address := gethcrypto.PubkeyToAddress(privKey.PublicKey).Hex()
+
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if _, exists := k.keys[userID]; !exists {
+		k.keys[userID] = localEntry{privKeyHex: privKeyHex, address: address}
+	}
+	return nil
+}
