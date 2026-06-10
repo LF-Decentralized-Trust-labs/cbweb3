@@ -128,6 +128,11 @@ func (c *httpClient) mustPost(t *testing.T, path string, in, out interface{}) {
 // gatewayLogin obtains a Bearer token by calling the entity's API gateway
 // POST /api/v1/auth/login, which routes to Keycloak internally. This avoids
 // the HTTPS requirement on Keycloak's direct token endpoint.
+//
+// Retries on HTTP 503 for up to 60 s: the API gateway health check passes as
+// soon as its HTTP server starts, but the auth service (separate container)
+// needs a few more seconds to establish its Keycloak connection. Until it does,
+// the gateway returns 503. Any other non-200 response fails immediately.
 func gatewayLogin(t *testing.T, gatewayURL, clientID, clientSecret string) string {
 	t.Helper()
 	loginURL := strings.TrimRight(gatewayURL, "/") + "/api/v1/auth/login"
@@ -136,19 +141,31 @@ func gatewayLogin(t *testing.T, gatewayURL, clientID, clientSecret string) strin
 		"clientId":     clientID,
 		"clientSecret": clientSecret,
 	})
-	resp, err := http.Post(loginURL, "application/json", bytes.NewReader(payload)) //nolint:noctx
-	require.NoError(t, err, "gateway login request failed for %s", gatewayURL)
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode,
-		"gateway login returned %d for %s: %s", resp.StatusCode, gatewayURL, string(body))
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		resp, err := http.Post(loginURL, "application/json", bytes.NewReader(payload)) //nolint:noctx
+		require.NoError(t, err, "gateway login request failed for %s", gatewayURL)
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		require.NoError(t, err)
 
-	var result struct {
-		AccessToken string `json:"accessToken"`
+		if resp.StatusCode == http.StatusOK {
+			var result struct {
+				AccessToken string `json:"accessToken"`
+			}
+			require.NoError(t, json.Unmarshal(body, &result), "decode gateway login response")
+			require.NotEmpty(t, result.AccessToken, "empty accessToken from %s", gatewayURL)
+			return result.AccessToken
+		}
+
+		// 503 = auth/compliance service still warming up — retry until deadline.
+		// Any other non-200 (including 401) is a hard credential/config failure.
+		require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode,
+			"gateway login returned %d for %s: %s", resp.StatusCode, gatewayURL, string(body))
+		require.True(t, time.Now().Before(deadline),
+			"gateway login still returning 503 for %s after 60s — auth service not ready", gatewayURL)
+		t.Logf("gateway login: auth service not ready at %s (503), retrying...", gatewayURL)
+		time.Sleep(3 * time.Second)
 	}
-	require.NoError(t, json.Unmarshal(body, &result), "decode gateway login response")
-	require.NotEmpty(t, result.AccessToken, "empty accessToken from %s", gatewayURL)
-	return result.AccessToken
 }
