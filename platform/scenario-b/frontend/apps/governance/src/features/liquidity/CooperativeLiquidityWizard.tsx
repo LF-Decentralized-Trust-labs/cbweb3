@@ -5,6 +5,7 @@ import { useAuthStore } from "../../stores/auth.store";
 import { SOVEREIGN_FLOW_PHASE } from "../../types/liquidity.types";
 import type { CommitResult, PendingCommit } from "../../types/liquidity.types";
 import { usePolling } from "../../hooks/usePolling";
+import { formatRemainingMs } from "./format";
 import { useLiquidityStore } from "./liquidity.store";
 
 const WIZARD_STEPS = [
@@ -19,6 +20,9 @@ type WizardStep = (typeof WIZARD_STEPS)[number]["id"];
 type CooperativeLiquidityWizardProps = {
   initialStep?: WizardStep;
   pendingCommit?: PendingCommit | null;
+  // When set, starts at the Commit step with the pool pair and amount pre-filled
+  // (used to match a counterpart's open commit).
+  prefillCommit?: { pool_pair: string; amount: string } | null;
   onDone?: () => void;
   onSelectLpForRemoval?: (lpId: string, poolPair: string, providerId: string) => void;
 };
@@ -36,20 +40,10 @@ function toActiveCommitFromPending(pendingCommit: PendingCommit): CommitResult {
   };
 }
 
-function formatRemainingMs(ms: number): string {
-  if (ms <= 0) {
-    return "Expired";
-  }
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return `${hours}h ${minutes}m ${seconds}s`;
-}
-
 export function CooperativeLiquidityWizard({
   initialStep = 1,
   pendingCommit = null,
+  prefillCommit = null,
   onDone,
   onSelectLpForRemoval,
 }: CooperativeLiquidityWizardProps) {
@@ -101,6 +95,13 @@ export function CooperativeLiquidityWizard({
   useEffect(() => {
     setCurrentStep(initialStep);
   }, [initialStep]);
+
+  useEffect(() => {
+    if (prefillCommit) {
+      setCommitPoolPair(prefillCommit.pool_pair);
+      setCommitAmount(prefillCommit.amount);
+    }
+  }, [prefillCommit]);
 
   useEffect(() => {
     if (currentStep !== 4 || !profile?.bankId) {

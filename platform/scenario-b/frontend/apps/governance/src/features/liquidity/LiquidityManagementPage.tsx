@@ -16,11 +16,12 @@ import {
   TableRow,
 } from "@cbweb3/ui";
 import type { FormEvent } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePolling } from "../../hooks/usePolling";
 import { useAuthStore } from "../../stores/auth.store";
 import type { PendingCommit } from "../../types/liquidity.types";
 import { CooperativeLiquidityWizard } from "./CooperativeLiquidityWizard";
+import { formatRemainingMs, remainingMsUntil, truncateAddress } from "./format";
 import { useLiquidityStore } from "./liquidity.store";
 
 const configuredPoolPair = (import.meta.env.VITE_POOL_PAIR ?? "W-BRL-ARS").trim() || "W-BRL-ARS";
@@ -44,16 +45,25 @@ export function LiquidityManagementPage() {
   // const [recipient, setRecipient] = useState("");
   // const [showMintApprove, setShowMintApprove] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [wizardStep, setWizardStep] = useState<1 | 3>(1);
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
   const [bannerCommit, setBannerCommit] = useState<PendingCommit | null>(null);
+  const [prefillCommit, setPrefillCommit] = useState<{ pool_pair: string; amount: string } | null>(null);
+
+  // Tick once per second so the coordination countdowns stay live between 5s polls.
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   usePolling(
     () => {
       void fetchPoolStatus(configuredPoolPair);
     },
-    15000,
+    5000,
     true,
   );
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   const handleRemoveLiquidity = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -73,23 +83,40 @@ export function LiquidityManagementPage() {
   // };
 
   const providerId = profile?.bankId ?? "";
-  const providerPendingCommit =
-    poolStatus?.pool_status === "PENDING_COUNTERPART"
-      ? (poolStatus.pending_commits ?? []).find((commit) => commit.provider_id === providerId) ?? null
+  const poolActive = poolStatus?.pool_status === "ACTIVE";
+  // Your own open commit (local DB, keyed by provider) — waiting for a counterpart.
+  const ownPendingCommit =
+    !poolActive
+      ? (poolStatus?.pending_commits ?? []).find((commit) => commit.provider_id === providerId) ?? null
       : null;
+  // A counterpart CB's on-chain commit on the opposite side — waiting for you to match.
+  const counterpartCommit = !poolActive ? poolStatus?.counterpart_commit ?? null : null;
 
   const handleOpenWizard = () => {
     setWizardOpen(true);
     setWizardStep(1);
     setBannerCommit(null);
+    setPrefillCommit(null);
   };
 
   const handleMonitorPendingCommit = () => {
-    if (!providerPendingCommit) {
+    if (!ownPendingCommit) {
       return;
     }
-    setBannerCommit(providerPendingCommit);
+    setBannerCommit(ownPendingCommit);
+    setPrefillCommit(null);
     setWizardStep(3);
+    setWizardOpen(true);
+  };
+
+  const handleMatchCounterpart = () => {
+    if (!counterpartCommit) {
+      return;
+    }
+    // Pre-fill the Commit step with the counterpart's pool pair and a matching amount.
+    setPrefillCommit({ pool_pair: configuredPoolPair, amount: counterpartCommit.amount });
+    setBannerCommit(null);
+    setWizardStep(2);
     setWizardOpen(true);
   };
 
@@ -103,6 +130,7 @@ export function LiquidityManagementPage() {
     setWizardOpen(false);
     setWizardStep(1);
     setBannerCommit(null);
+    setPrefillCommit(null);
   };
 
   const summary = getOperationalSummary();
@@ -161,25 +189,55 @@ export function LiquidityManagementPage() {
         </Card>
       </div>
 
-      {providerPendingCommit ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Pending Commit Detected</CardTitle>
-            <CardDescription>
-              Commit {providerPendingCommit.commit_id} is waiting for the counterpart side.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm">Expires at: {providerPendingCommit.expires_at}</p>
-            <Button onClick={handleMonitorPendingCommit}>Monitor Pending Commit</Button>
-          </CardContent>
-        </Card>
-      ) : null}
+      <Card>
+        <CardHeader>
+          <CardTitle>Liquidity Coordination</CardTitle>
+          <CardDescription>Cross-CB commit state for {configuredPoolPair}, read live from the Hub.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {poolActive ? (
+            <div className="space-y-1">
+              <Badge variant="success">Pool ACTIVE</Badge>
+              <p className="text-sm">Both sides are funded. Reserves A {poolStatus?.reserve_a ?? "-"} / B {poolStatus?.reserve_b ?? "-"}.</p>
+            </div>
+          ) : counterpartCommit ? (
+            <div className="space-y-3 rounded border border-amber-300 bg-amber-50 p-3">
+              <Badge variant="warning">Counterpart waiting on you</Badge>
+              <p className="text-sm">
+                A counterpart central bank committed <strong>{counterpartCommit.amount}</strong> to side{" "}
+                <strong>{counterpartCommit.side}</strong> and is waiting for your matching deposit.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Signer {truncateAddress(counterpartCommit.signer_address)} · Expires in{" "}
+                {formatRemainingMs(remainingMsUntil(counterpartCommit.expires_at, nowMs))}
+              </p>
+              <Button onClick={handleMatchCounterpart}>Match & Activate Pool</Button>
+            </div>
+          ) : ownPendingCommit ? (
+            <div className="space-y-3">
+              <Badge variant="outline">Waiting for counterpart</Badge>
+              <p className="text-sm">
+                Your commit {ownPendingCommit.commit_id} (side {ownPendingCommit.side}) is registered and awaiting a
+                counterpart deposit.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Expires in {formatRemainingMs(remainingMsUntil(ownPendingCommit.expires_at, nowMs))}
+              </p>
+              <Button onClick={handleMonitorPendingCommit}>Monitor Pending Commit</Button>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No open liquidity intents for this pool. Start a commit to seed your side.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {wizardOpen ? (
         <CooperativeLiquidityWizard
           initialStep={wizardStep}
           pendingCommit={bannerCommit}
+          prefillCommit={prefillCommit}
           onDone={handleWizardDone}
           onSelectLpForRemoval={handleSelectLpForRemoval}
         />

@@ -16,6 +16,18 @@ export interface PoolStatus {
   fee_rate_bps?: number;
   total_lp_count?: number;
   pending_commits?: PendingCommit[];
+  counterpart_commit?: CounterpartCommit | null;
+}
+
+// CounterpartCommit is a counterpart central bank's on-chain PENDING commit on the
+// opposite side of this pool, awaiting our matching deposit. Sourced from the Hub
+// LiquidityCommitRegistry; identity is the raw signer address only.
+export interface CounterpartCommit {
+  side: CommitSide;
+  signer_address: string;
+  amount: string;
+  expires_at: string;
+  on_chain_commit_id: string;
 }
 
 export interface LiquidityPosition {

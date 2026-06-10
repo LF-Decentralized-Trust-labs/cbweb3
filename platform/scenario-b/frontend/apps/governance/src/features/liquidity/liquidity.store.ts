@@ -1,4 +1,5 @@
 import axios from "axios";
+import { toast } from "@cbweb3/ui";
 import { create } from "zustand";
 import { liquidityApi } from "../../services/api/liquidity.api";
 import { useAuthStore } from "../../stores/auth.store";
@@ -31,6 +32,8 @@ type LiquidityStore = {
   sovereignPhase: SovereignFlowPhase;
   commitLatencyWarning: boolean;
   operationalHint: string | null;
+  // on_chain_commit_id of the counterpart commit we last toasted, to avoid re-notifying.
+  lastNotifiedCounterpartId: string | null;
   fetchPoolStatus: (pair: string) => Promise<void>;
   removeLiquidity: (payload: RemoveLiquidityRequest) => Promise<void>;
   lockMint: (amount: string) => Promise<void>;
@@ -73,18 +76,38 @@ export const useLiquidityStore = create<LiquidityStore>((set, get) => ({
   sovereignPhase: SOVEREIGN_FLOW_PHASE.LOCK_MINT,
   commitLatencyWarning: false,
   operationalHint: null,
+  lastNotifiedCounterpartId: null,
   fetchPoolStatus: async (pair) => {
     set({ status: "loading", error: null });
     try {
       const poolStatus = await liquidityApi.getPoolStatus(pair);
-      set((state) => ({
-        poolStatus,
-        status: "idle",
-        sovereignPhase:
-          poolStatus.pool_status === "ACTIVE" && state.sovereignPhase === SOVEREIGN_FLOW_PHASE.COMMIT_EXECUTED
-            ? SOVEREIGN_FLOW_PHASE.POOL_ACTIVE
-            : state.sovereignPhase,
-      }));
+      set((state) => {
+        // Fire a one-time toast when a counterpart commit first appears (pool not yet ACTIVE),
+        // deduping by on_chain_commit_id so repeated polls don't re-notify.
+        const counterpart = poolStatus.counterpart_commit ?? null;
+        let lastNotifiedCounterpartId = state.lastNotifiedCounterpartId;
+        if (
+          counterpart &&
+          poolStatus.pool_status !== "ACTIVE" &&
+          counterpart.on_chain_commit_id !== state.lastNotifiedCounterpartId
+        ) {
+          toast.info("Counterpart liquidity is waiting", {
+            description: `A counterpart committed ${counterpart.amount} to side ${counterpart.side}. Match it to activate the pool.`,
+          });
+          lastNotifiedCounterpartId = counterpart.on_chain_commit_id;
+        } else if (!counterpart) {
+          lastNotifiedCounterpartId = null;
+        }
+        return {
+          poolStatus,
+          status: "idle",
+          lastNotifiedCounterpartId,
+          sovereignPhase:
+            poolStatus.pool_status === "ACTIVE" && state.sovereignPhase === SOVEREIGN_FLOW_PHASE.COMMIT_EXECUTED
+              ? SOVEREIGN_FLOW_PHASE.POOL_ACTIVE
+              : state.sovereignPhase,
+        };
+      });
     } catch (error) {
       set({ status: "error", error: extractApiError(error, "Unable to fetch pool status") });
     }

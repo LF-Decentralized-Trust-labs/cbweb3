@@ -328,6 +328,9 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// US1 services: Quote, Swap, Pool Status
 	var swapSvc *services.SwapService
 	var poolGate services.PoolStatusGate
+	// Captured for later attachment of the on-chain counterpart source, which requires
+	// the LiquidityCommitRegistry client constructed further below.
+	var poolStatusSvc *services.PoolStatusService
 	// Commercial banks (CENTRAL_BANK_API_URL set) read pool status from spoke CB (FR-012).
 	if cbPoolClient != nil {
 		deps.PoolStatusService = cbPoolClient
@@ -344,6 +347,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 				poolSvc.WithEnricher(newPoolStatusEnricher(db))
 			}
 			deps.PoolStatusService = poolSvc
+			poolStatusSvc = poolSvc
 			poolGate = services.NewPoolStatusGate(adapter)
 		}
 
@@ -603,6 +607,11 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 				deps.SovereignBridgeChecker = sovereignSvc
 				deps.LCRRegistrar = &lcrHandlerAdapter{c: lcrClient}
 				deps.LPPositionRepo = lpRepo // 008-fix-cb-liquidity: enable GET /liquidity/positions
+			}
+			// Surface a counterpart CB's on-chain PENDING commit on the opposite side
+			// (cross-CB discovery). Only meaningful for CB gateways serving pool status directly.
+			if poolStatusSvc != nil {
+				poolStatusSvc.WithCounterpartSource(newOnChainCounterpartSource(lcrClient, cfg.CommitSide))
 			}
 		}
 	}
