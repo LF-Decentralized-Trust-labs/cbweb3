@@ -21,6 +21,8 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/repository"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/workers"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -167,38 +169,43 @@ func main() {
 		logger.Warn("FIAT_TOKEN_ADDRESS not set — fCeBM operations disabled")
 	}
 
-	// Escrow repository: PostgreSQL-backed (shares DSN with FX agreement).
-	escrowDSN := getEnv("ESCROW_POSTGRES_DSN", getEnv("FX_POSTGRES_DSN", getEnv("DATABASE_URL", "")))
-	if escrowDSN == "" {
-		log.Fatal("FATAL: ESCROW_POSTGRES_DSN, FX_POSTGRES_DSN, or DATABASE_URL is required for escrow persistence")
+	// Open shared Postgres connection for all repositories.
+	dbDSN := getEnv("DATABASE_URL", getEnv("FX_POSTGRES_DSN", ""))
+	if dbDSN == "" {
+		log.Fatal("FATAL: DATABASE_URL or FX_POSTGRES_DSN is required")
 	}
-	escrowRepo, err := repository.NewGormEscrowRepository(escrowDSN)
+	sharedDB, err := gorm.Open(postgres.Open(dbDSN), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("FATAL: escrow repository: %v", err)
+		log.Fatalf("FATAL: database connection: %v", err)
 	}
-	logger.Info("escrow repository configured (postgres)", "dsn_source", "ESCROW_POSTGRES_DSN|FX_POSTGRES_DSN|DATABASE_URL")
+	{
+		sqlDB, err := sharedDB.DB()
+		if err != nil {
+			log.Fatalf("FATAL: get sql.DB: %v", err)
+		}
+		sqlDB.SetMaxOpenConns(25)
+		sqlDB.SetMaxIdleConns(5)
+		sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	}
+	logger.Info("database connection established", "dsn_source", "DATABASE_URL|FX_POSTGRES_DSN")
 
-	// FX Agreement repository: PostgreSQL-backed by default, fallback to in-memory map in server when absent.
-	fxDSN := getEnv("FX_POSTGRES_DSN", getEnv("DATABASE_URL", ""))
-	if fxDSN == "" {
-		log.Fatal("FATAL: FX_POSTGRES_DSN or DATABASE_URL is required for FX agreement persistence")
-	}
-	fxRepo, err := repository.NewGormFXAgreementRepository(fxDSN)
+	fxRepo, err := repository.NewGormFXAgreementRepositoryFromDB(sharedDB)
 	if err != nil {
 		log.Fatalf("FATAL: fx agreement repository: %v", err)
 	}
-	logger.Info("fx agreement repository configured", "dsn_source", "FX_POSTGRES_DSN|DATABASE_URL")
+	logger.Info("fx agreement repository configured")
 
-	// HTLC repository: PostgreSQL-backed for durable HTLC state across restarts.
-	htlcDSN := getEnv("HTLC_POSTGRES_DSN", getEnv("FX_POSTGRES_DSN", getEnv("DATABASE_URL", "")))
-	if htlcDSN == "" {
-		log.Fatal("FATAL: HTLC_POSTGRES_DSN, FX_POSTGRES_DSN, or DATABASE_URL is required for HTLC persistence")
+	escrowRepo, err := repository.NewGormEscrowRepositoryFromDB(sharedDB)
+	if err != nil {
+		log.Fatalf("FATAL: escrow repository: %v", err)
 	}
-	htlcRepo, err := repository.NewGormHTLCRepository(htlcDSN)
+	logger.Info("escrow repository configured (postgres)")
+
+	htlcRepo, err := repository.NewGormHTLCRepositoryFromDB(sharedDB)
 	if err != nil {
 		log.Fatalf("FATAL: htlc repository: %v", err)
 	}
-	logger.Info("htlc repository configured (postgres)", "dsn_source", "HTLC_POSTGRES_DSN|FX_POSTGRES_DSN|DATABASE_URL")
+	logger.Info("htlc repository configured (postgres)")
 
 	rateTolPctStr := getEnv("FX_RATE_TOLERANCE_PCT", "0.001")
 	rateTolPct, err := strconv.ParseFloat(rateTolPctStr, 64)

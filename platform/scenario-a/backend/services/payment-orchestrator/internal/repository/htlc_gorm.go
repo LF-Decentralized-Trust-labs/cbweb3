@@ -29,6 +29,16 @@ func NewGormHTLCRepository(dsn string) (ports.HTLCRepository, error) {
 	return &gormHTLCRepository{db: db}, nil
 }
 
+// NewGormHTLCRepositoryFromDB uses an already-open *gorm.DB, runs AutoMigrate,
+// and returns an HTLCRepository. Use this when sharing a single DB connection
+// across multiple repositories.
+func NewGormHTLCRepositoryFromDB(db *gorm.DB) (ports.HTLCRepository, error) {
+	if err := db.AutoMigrate(&HTLCModel{}); err != nil {
+		return nil, err
+	}
+	return &gormHTLCRepository{db: db}, nil
+}
+
 // CreateHTLC persists a new HTLC record.
 func (r *gormHTLCRepository) CreateHTLC(ctx context.Context, record *domain.HTLCRecord) error {
 	m := htlcToModel(record)

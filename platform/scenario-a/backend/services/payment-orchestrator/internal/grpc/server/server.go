@@ -36,7 +36,7 @@ type paymentOrchestratorService struct {
 	fxAgreementBesu  ports.FXAgreementContractPort // FX agreement on Besu (optional)
 	fxAgreementPente ports.FXAgreementContractPort // FX agreement on Pente private context (optional)
 	fxRepo           ports.FXAgreementRepository   // persistent FX agreement storage (nil = dev in-memory)
-	htlcRepo         ports.HTLCRepository          // optional — nil means CounterpartyLocked is in-memory only
+	htlcRepo         ports.HTLCRepository          // required in production; nil only in unit tests
 	pente            ports.PenteClientPort         // optional bilateral private-context manager
 	rateTolPct       float64                       // rate tolerance fraction (e.g. 0.001 for 0.1%)
 	crossSpokeMode   bool                          // when true, settle is gated on CounterpartyLocked
@@ -60,7 +60,9 @@ type Config struct {
 	FXAgreementBesu  ports.FXAgreementContractPort // optional — nil disables Besu FXAgreement path
 	FXAgreementPente ports.FXAgreementContractPort // optional — nil disables Pente FXAgreement path
 	FXRepo           ports.FXAgreementRepository   // optional — nil falls back to in-memory map (dev)
-	HTLCRepo         ports.HTLCRepository          // optional — nil means CounterpartyLocked is not persisted across restarts
+	// HTLCRepo is required in production for durable HTLC state across restarts.
+	// Pass nil only in unit tests that do not need DB persistence.
+	HTLCRepo ports.HTLCRepository
 	Pente            ports.PenteClientPort         // optional — nil disables bilateral private context integration
 	RateTolPct       float64                       // rate tolerance fraction, default 0.001 (0.1%)
 	// CrossSpokeMode gates SettleHTLC on CounterpartyLocked. Set this to true
@@ -551,7 +553,6 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		record.UpdatedAt = time.Now().UTC()
 	}
 	s.mu.Unlock()
-	s.persistHTLC(ctx, record.ContractID)
 
 	// Settle on-chain HTLC (reveals secret via LogHTLCClaimed event).
 	// When the on-chain adapter is configured, a failure here MUST block the
@@ -577,7 +578,6 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		s.mu.Lock()
 		record.HTLCTxHash = htlcTxHash
 		s.mu.Unlock()
-		s.persistHTLC(ctx, record.ContractID)
 	} else if isRetry {
 		htlcTxHash = record.HTLCTxHash
 	}
@@ -664,7 +664,6 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 		s.mu.Lock()
 		record.HTLCTxHash = htlcTxHash
 		s.mu.Unlock()
-		s.persistHTLC(ctx, record.ContractID)
 	} else if isRetry {
 		htlcTxHash = record.HTLCTxHash
 	}
@@ -703,7 +702,14 @@ func (s *paymentOrchestratorService) GetHTLCStatus(ctx context.Context, req *pb.
 	record, ok := s.htlcs[req.ContractId]
 	s.mu.RUnlock()
 
-	if !ok {
+	if !ok && s.htlcRepo != nil {
+		var err error
+		record, err = s.htlcRepo.GetHTLC(ctx, req.ContractId)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "get HTLC: %v", err)
+		}
+	}
+	if record == nil {
 		return nil, status.Errorf(codes.NotFound, "HTLC %q not found", req.ContractId)
 	}
 
@@ -720,8 +726,6 @@ func (s *paymentOrchestratorService) SearchHTLC(ctx context.Context, req *pb.Sea
 	callerIdentity := callerIdentityFromContext(ctx)
 
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	var results []*pb.HTLCLock
 	for _, r := range s.htlcs {
 		if req.AgreementId != "" && r.AgreementID != req.AgreementId {
@@ -752,6 +756,24 @@ func (s *paymentOrchestratorService) SearchHTLC(ctx context.Context, req *pb.Sea
 			}
 		}
 		results = append(results, recordToProto(r))
+	}
+	s.mu.RUnlock()
+
+	// Fall back to DB when in-memory map is empty and a repository is configured.
+	if len(results) == 0 && s.htlcRepo != nil {
+		filter := ports.HTLCFilter{
+			AgreementID: req.AgreementId,
+			Sender:      req.Sender,
+			Receiver:    req.Receiver,
+			State:       req.State,
+		}
+		recs, err := s.htlcRepo.ListHTLCs(ctx, filter)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "search HTLC: %v", err)
+		}
+		for _, r := range recs {
+			results = append(results, recordToProto(r))
+		}
 	}
 
 	return &pb.SearchHTLCResponse{Locks: results}, nil
@@ -1595,14 +1617,14 @@ func (s *paymentOrchestratorService) handleRelayLockEvent(proof ports.Interopera
 			// its leg. Setting CounterpartyLocked unblocks the SettleHTLC guard above.
 			r.CounterpartyLocked = true
 			r.UpdatedAt = time.Now().UTC()
-			localContractID := r.ContractID
+			snap := *r // snapshot under lock — prevents data race on DB write below
 			s.mu.Unlock()
 			s.logger.Info("relay lock: counterparty leg confirmed — settlement unblocked",
-				"hashLock", proof.HashLock, "localContractId", localContractID, "remoteContractId", proof.ContractID)
+				"hashLock", proof.HashLock, "localContractId", snap.ContractID, "remoteContractId", proof.ContractID)
 			if s.htlcRepo != nil {
-				if err := s.htlcRepo.UpdateHTLC(context.Background(), r); err != nil {
+				if err := s.htlcRepo.UpdateHTLC(context.Background(), &snap); err != nil {
 					s.logger.Warn("relay lock: failed to persist CounterpartyLocked",
-						"contractId", localContractID, "error", err)
+						"contract_id", snap.ContractID, "error", err)
 				}
 			}
 			return nil

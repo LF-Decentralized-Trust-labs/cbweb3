@@ -28,6 +28,16 @@ func NewGormEscrowRepository(dsn string) (ports.EscrowRepository, error) {
 	return &gormEscrowRepository{db: db}, nil
 }
 
+// NewGormEscrowRepositoryFromDB uses an already-open *gorm.DB, runs AutoMigrate,
+// and returns an EscrowRepository. Use this when sharing a single DB connection
+// across multiple repositories.
+func NewGormEscrowRepositoryFromDB(db *gorm.DB) (ports.EscrowRepository, error) {
+	if err := db.AutoMigrate(&DepositModel{}, &EscrowModel{}, &RedeemModel{}); err != nil {
+		return nil, err
+	}
+	return &gormEscrowRepository{db: db}, nil
+}
+
 // --- Deposit methods ---
 
 func (r *gormEscrowRepository) CreateDeposit(ctx context.Context, record domain.DepositRecord) error {
