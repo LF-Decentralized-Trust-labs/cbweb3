@@ -31,7 +31,6 @@ cleanup_path "networkFiles"
 cleanup_path "genesis"
 cleanup_path "nodes/central-bank-a"
 cleanup_path "nodes/bank-a"
-cleanup_path "nodes/bank-c"
 cleanup_path "config/qbftConfigFile.json"
 cleanup_path ".env.network"
 

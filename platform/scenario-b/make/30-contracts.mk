@@ -66,7 +66,7 @@ contracts.deploy-hub:
 
 contracts.deploy-spoke-a:
 	@test -n "$(CENTRAL_BANK_A_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_A_ADDRESS is not set — check contracts/.env"; exit 1)
-	@echo "Deploying CBWeb3 spoke-a contracts to chain 1338 (bank-a, bank-c, central-bank-a)..."
+	@echo "Deploying CBWeb3 spoke-a contracts to chain 1338 (bank-a, central-bank-a)..."
 	@./deploy/local/tools/wait-rpc.sh "${SPOKE_A_RPC_URL}"
 	@cd contracts && TOKEN_NAME="Tokenized BRL" TOKEN_SYMBOL="tCeBM_BRL" \
 		FIAT_TOKEN_NAME="Fiat BRL" FIAT_TOKEN_SYMBOL="fCeBM_BRL" \
@@ -75,7 +75,7 @@ contracts.deploy-spoke-a:
 
 contracts.deploy-spoke-b:
 	@test -n "$(CENTRAL_BANK_B_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_B_ADDRESS is not set — check contracts/.env"; exit 1)
-	@echo "Deploying CBWeb3 spoke-b contracts (bank-b, bank-d, central-bank-b)..."
+	@echo "Deploying CBWeb3 spoke-b contracts (bank-b, central-bank-b)..."
 	@./deploy/local/tools/wait-rpc.sh "${SPOKE_B_RPC_URL}"
 	@cd contracts && TOKEN_NAME="Tokenized ARS" TOKEN_SYMBOL="tCeBM_ARS" \
 		FIAT_TOKEN_NAME="Fiat ARS" FIAT_TOKEN_SYMBOL="fCeBM_ARS" \
