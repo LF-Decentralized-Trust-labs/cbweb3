@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	authadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
@@ -495,6 +496,20 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			}
 		}
 
+		// 009 sovereign model: on commercial gateways (CENTRAL_BANK_API_URL set), delegate the
+		// Step 1 bridge-in lock-mint to the spoke's CB. Minting W-<source> on the Hub requires
+		// CENTRAL_BANK_ROLE, which a commercial bank must not hold — the CB does it instead.
+		if cbURL := cfg.CentralBankAPIURL; cbURL != "" {
+			relaySecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
+			if relaySecret != "" {
+				bridgeInRelay := services.NewCrossCurrencyBridgeInRelay(cbURL, relaySecret)
+				orchestrator = orchestrator.WithBridgeInRelay(bridgeInRelay)
+				log.Printf("[app] CrossCurrencySwapOrchestrator: bridge-in relay wired (CB %s)", cbURL)
+			} else {
+				log.Printf("[app] WARNING: CENTRAL_BANK_API_URL set but INTERNAL_RELAY_AUTH_SECRET empty — bridge-in cannot be delegated to the CB; commercial lock-mint will fail (no CENTRAL_BANK_ROLE)")
+			}
+		}
+
 		// Derive the Hub signer address from SIGNER_PRIVATE_KEY so CB-B knows where
 		// W-ARS landed after the AMM swap.
 		if signerKey != "" {
@@ -611,7 +626,34 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			// Surface a counterpart CB's on-chain PENDING commit on the opposite side
 			// (cross-CB discovery). Only meaningful for CB gateways serving pool status directly.
 			if poolStatusSvc != nil {
-				poolStatusSvc.WithCounterpartSource(newOnChainCounterpartSource(lcrClient, cfg.CommitSide))
+				counterpartSrc := newOnChainCounterpartSource(lcrClient, cfg.CommitSide)
+
+				// Enable FX-suggested match amount via the Hub ManualOracle (optional —
+				// degrades to no suggestion if the oracle is unset/unreachable). ownToken is
+				// this gateway's own W-token; counterpartToken is the opposite side's.
+				if oracleAddr := os.Getenv("ORACLE_ADDRESS"); oracleAddr != "" && hubRPC != "" {
+					tokenA := os.Getenv("SOVEREIGN_HUB_TOKEN_A_ADDRESS")
+					tokenB := os.Getenv("SOVEREIGN_HUB_TOKEN_B_ADDRESS")
+					ownToken, counterpartToken := tokenA, tokenB
+					if cfg.CommitSide == "B" {
+						ownToken, counterpartToken = tokenB, tokenA
+					}
+					if ownToken != "" && counterpartToken != "" {
+						oracleClient, oErr := NewManualOracleClient(context.Background(), ManualOracleConfig{
+							RPCURL:          hubRPC,
+							ContractAddress: oracleAddr,
+							Timeout:         15 * time.Second,
+						})
+						if oErr != nil {
+							log.Printf("warning: ManualOracle client init failed (FX suggestion disabled): %v", oErr)
+						} else {
+							counterpartSrc.withFXSuggestion(oracleClient, common.HexToAddress(ownToken), common.HexToAddress(counterpartToken))
+							log.Printf("[counterpart] FX suggestion enabled via oracle %s (own=%s counterpart=%s)", oracleAddr, ownToken, counterpartToken)
+						}
+					}
+				}
+
+				poolStatusSvc.WithCounterpartSource(counterpartSrc)
 			}
 		}
 	}
@@ -637,6 +679,30 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		// CB-B is the sovereign authority — it knows its member banks' wallet addresses.
 		if db != nil {
 			deps.CrossCurrencyBeneficiaryResolver = services.NewParticipantResolver(db)
+		}
+	}
+
+	// 009 sovereign model: cross-currency bridge-in issuer (CB-A side). Registered only on CB
+	// gateways — a commercial gateway (CENTRAL_BANK_API_URL set) delegates TO a CB and never
+	// receives delegations. The CB performs the W-<source> lock-mint with its own relayer
+	// (which holds CENTRAL_BANK_ROLE) on behalf of the payer bank.
+	if cfg.CentralBankAPIURL == "" && db != nil && bridgeLockMintSvc != nil &&
+		deps.FiatTokenAddress != "" && deps.WTokenAddress != "" {
+		deps.CrossCurrencyLockMintEnqueuer = &bridgeLockMintAdapter{svc: bridgeLockMintSvc}
+		deps.CrossCurrencyBridgeStateReader = services.NewBridgePositionReader(db)
+		// Reserve Tokenisation enforcement: verify the payer bank holds tCeBM before lock-mint.
+		// Requires PAYMENT_GRPC_ADDR (reads tCeBM.balanceOf) and DB (resolves bank wallet).
+		if payGRPCAddr := cfg.PaymentGRPCAddr; payGRPCAddr != "" {
+			bridgeInPayGRPC, payErr := paymentadapter.NewGRPCAdapter(payGRPCAddr, cfg.RequestTimeout)
+			if payErr != nil {
+				log.Printf("warning: payment gRPC for bridge-in balance check unavailable (%s): %v — Reserve Tokenisation enforcement disabled", payGRPCAddr, payErr)
+			} else {
+				deps.CrossCurrencyPayerBalanceChecker = bridgeInPayGRPC
+				deps.CrossCurrencyPayerWalletResolver = services.NewParticipantResolver(db)
+				log.Printf("[app] bridge-in Reserve Tokenisation enforcement enabled (payment gRPC %s)", payGRPCAddr)
+			}
+		} else {
+			log.Printf("[app] WARNING: PAYMENT_GRPC_ADDR not set — Reserve Tokenisation balance enforcement disabled on bridge-in handler")
 		}
 	}
 
@@ -666,8 +732,8 @@ type bridgeLockMintAdapter struct {
 	svc *services.BridgeLockMintService
 }
 
-func (a *bridgeLockMintAdapter) LockAndEnqueue(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string) (*services.BridgePositionResult, error) {
-	return a.svc.LockAndEnqueue(ctx, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID)
+func (a *bridgeLockMintAdapter) LockAndEnqueue(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string, mintToHubAddress ...string) (*services.BridgePositionResult, error) {
+	return a.svc.LockAndEnqueue(ctx, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID, mintToHubAddress...)
 }
 
 // bridgeBurnUnlockAdapter adapts BridgeBurnUnlockService to add correlation_id parameter for orchestrator (009).

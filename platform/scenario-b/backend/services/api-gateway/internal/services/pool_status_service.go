@@ -46,11 +46,16 @@ type CounterpartSource interface {
 // awaiting this gateway's matching deposit. Identity is the raw signer address only
 // (no off-chain name resolution).
 type CounterpartCommit struct {
-	Side            string    `json:"side"`
-	SignerAddress   string    `json:"signer_address"`
-	Amount          string    `json:"amount"`
-	ExpiresAt       time.Time `json:"expires_at"`
-	OnChainCommitID string    `json:"on_chain_commit_id"`
+	Side          string `json:"side"`
+	SignerAddress string `json:"signer_address"`
+	Amount        string `json:"amount"`
+	// SuggestedMatchAmount is the amount this gateway should deposit on its own side to
+	// match the counterpart at the current FX rate (ManualOracle). The two currencies
+	// differ, so this rarely equals Amount. Empty string when no rate is available
+	// (oracle unset/unreachable) — the UI then falls back to free entry.
+	SuggestedMatchAmount string    `json:"suggested_match_amount,omitempty"`
+	ExpiresAt            time.Time `json:"expires_at"`
+	OnChainCommitID      string    `json:"on_chain_commit_id"`
 }
 
 // PoolStatusResponse holds the current state of an AMM liquidity pool (T018 / FR-028).

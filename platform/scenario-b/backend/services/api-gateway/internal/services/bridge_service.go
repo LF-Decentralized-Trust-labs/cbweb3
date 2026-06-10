@@ -25,7 +25,16 @@ func NewBridgeLockMintService(db *gorm.DB) *BridgeLockMintService {
 
 // LockAndEnqueue creates a BridgedAssetPosition in LOCKING state and enqueues a Relayer item.
 // correlationID is optional and used for tracing cross-currency swap flows (009-commercial-cross-currency-swap).
-func (s *BridgeLockMintService) LockAndEnqueue(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string) (*BridgePositionResult, error) {
+//
+// extras is an optional variadic list:
+//   - extras[0] = mintToHubAddress: Hub address that receives the minted W-<source> tokens.
+//     Set for cross-currency bridge-in so the issuing CB mints to the initiating gateway's
+//     swap signer (which executes the AMM swap Step 2), not to the CB itself.
+//   - extras[1] = burnFromSpokeAddress: Spoke address of the payer bank. When set, the relayer
+//     executor burns tCeBM from this address instead of auto-minting new ones (ensureSpokeFunds).
+//     Enforces that the bank must hold tokenized reserves (from Reserve Tokenisation) before the
+//     bridge-in can proceed. The CB MUST NOT create new tCeBM in this path.
+func (s *BridgeLockMintService) LockAndEnqueue(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string, extras ...string) (*BridgePositionResult, error) {
 	if ownerBankID == "" || spokeNetwork == "" || nativeAsset == "" || amount == "" {
 		return nil, fmt.Errorf("owner_bank_id, spoke_network, native_asset, and amount are required")
 	}
@@ -33,23 +42,34 @@ func (s *BridgeLockMintService) LockAndEnqueue(ctx context.Context, ownerBankID,
 	positionID := uuid.NewString()
 	now := time.Now()
 
+	mintTo := ""
+	if len(extras) > 0 {
+		mintTo = extras[0]
+	}
+	burnFromSpoke := ""
+	if len(extras) > 1 {
+		burnFromSpoke = extras[1]
+	}
+
 	logPrefix := ""
 	if correlationID != "" {
 		logPrefix = fmt.Sprintf("[correlation_id=%s] ", correlationID)
 	}
-	fmt.Printf("%sbridge lock-mint initiated: position_id=%s, owner=%s, spoke=%s, asset=%s, amount=%s\n",
-		logPrefix, positionID, ownerBankID, spokeNetwork, nativeAsset, amount)
+	fmt.Printf("%sbridge lock-mint initiated: position_id=%s owner=%s spoke=%s asset=%s amount=%s mint_to=%s burn_from_spoke=%s\n",
+		logPrefix, positionID, ownerBankID, spokeNetwork, nativeAsset, amount, mintTo, burnFromSpoke)
 
 	pos := &domain.BridgedAssetPosition{
-		PositionID:     positionID,
-		OwnerBankID:    ownerBankID,
-		SpokeNetwork:   spokeNetwork,
-		NativeAsset:    nativeAsset,
-		MirroredAsset:  mirroredAsset,
-		MirroredAmount: amount,
-		BridgeState:    domain.BridgeStateLocking,
-		FirstAttemptAt: &now,
-		LastAttemptAt:  &now,
+		PositionID:           positionID,
+		OwnerBankID:          ownerBankID,
+		SpokeNetwork:         spokeNetwork,
+		NativeAsset:          nativeAsset,
+		MirroredAsset:        mirroredAsset,
+		MirroredAmount:       amount,
+		BridgeState:          domain.BridgeStateLocking,
+		MintToHubAddress:     mintTo,
+		BurnFromSpokeAddress: burnFromSpoke,
+		FirstAttemptAt:       &now,
+		LastAttemptAt:        &now,
 	}
 	if err := s.db.WithContext(ctx).Create(pos).Error; err != nil {
 		return nil, fmt.Errorf("persist bridged position failed: %w", err)

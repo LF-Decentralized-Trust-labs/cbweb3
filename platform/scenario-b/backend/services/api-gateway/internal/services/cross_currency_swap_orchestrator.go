@@ -28,8 +28,10 @@ type CrossCurrencySwapRepository interface {
 }
 
 // BridgeLockMintServiceIface handles bridge Spoke-A → Hub (lock native, mint wrapped).
+// mintToHubAddress optionally overrides the Hub mint recipient (used by the CB self-service
+// local path; commercial bridge-in is delegated via the bridge-in relay instead).
 type BridgeLockMintServiceIface interface {
-	LockAndEnqueue(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string) (*BridgePositionResult, error)
+	LockAndEnqueue(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string, mintToHubAddress ...string) (*BridgePositionResult, error)
 }
 
 // BridgeBurnUnlockServiceIface handles bridge Hub → Spoke-B (burn wrapped, unlock native).
@@ -43,6 +45,15 @@ type BridgeBurnUnlockServiceIface interface {
 // calling EnqueueBurnAfterSwap locally (which would be CB-A trying to burn CB-B's tokens).
 type CactiCrossRelayIface interface {
 	NotifyBridgeOut(ctx context.Context, req CactiCrossCurrencyBridgeOutRequest) (string, error)
+}
+
+// BridgeInRelayIface is an optional bridge-in relay that delegates the Step 1 lock-mint to
+// the issuing CB of the initiating bank's spoke (sovereign model). When set, Step 1 uses it
+// instead of LockAndEnqueue locally (which would be a commercial bank trying to mint
+// W-<source> on the Hub — only the issuing CB holds CENTRAL_BANK_ROLE). The CB performs the
+// lock-mint and waits for ACTIVE, so no local poll is needed on this gateway.
+type BridgeInRelayIface interface {
+	NotifyBridgeIn(ctx context.Context, req CrossCurrencyBridgeInRequest) (string, error)
 }
 
 // SwapServiceIface executes swap on Hub AMM.
@@ -110,6 +121,9 @@ type CrossCurrencySwapOrchestrator struct {
 	// cactiRelay is optional: when set, Step 3 delegates bridge-out to CB-B via Cacti
 	// (sovereign model) instead of enqueuing locally on CB-A's relayer.
 	cactiRelay CactiCrossRelayIface
+	// bridgeInRelay is optional: when set, Step 1 delegates bridge-in lock-mint to the
+	// issuing CB of this bank's spoke (sovereign model) instead of enqueuing locally.
+	bridgeInRelay BridgeInRelayIface
 	// hubSignerAddress is the Hub address used by this gateway's signer (SIGNER_PRIVATE_KEY).
 	// After the AMM swap, W-ARS lands on this address; CB-B uses it as burnFrom.
 	hubSignerAddress string
@@ -146,6 +160,14 @@ func NewCrossCurrencySwapOrchestrator(
 // When set, Step 3 delegates to CB-B via Cacti instead of running locally.
 func (o *CrossCurrencySwapOrchestrator) WithCactiRelay(relay CactiCrossRelayIface) *CrossCurrencySwapOrchestrator {
 	o.cactiRelay = relay
+	return o
+}
+
+// WithBridgeInRelay attaches the bridge-in relay for sovereign lock-mint (Step 1).
+// When set, Step 1 delegates the W-<source> mint to the issuing CB instead of enqueuing
+// it on this (commercial) gateway's own relayer, which lacks CENTRAL_BANK_ROLE.
+func (o *CrossCurrencySwapOrchestrator) WithBridgeInRelay(relay BridgeInRelayIface) *CrossCurrencySwapOrchestrator {
+	o.bridgeInRelay = relay
 	return o
 }
 
@@ -250,23 +272,49 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		}
 	}
 
-	bridgeInResult, err := o.bridgeLockMint.LockAndEnqueue(ctx,
-		req.PayerBankID,
-		spokeIn,
-		nativeAsset,
-		mirroredAsset,
-		req.MaxAmountIn, // Use max for bridge (actual amount_in determined after swap)
-		req.CorrelationID)
-	if err != nil {
-		_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("bridge-in failed: %v", err))
-		return nil, fmt.Errorf("bridge-in failed: %w", err)
-	}
+	var bridgeInPositionID string
+	if o.bridgeInRelay != nil {
+		// ── Sovereign bridge-in: delegate the W-<source> mint to the issuing CB ──
+		// Only the issuing CB holds CENTRAL_BANK_ROLE on W-<source>. The CB performs the
+		// lock-mint on its own relayer and blocks until the position is ACTIVE, so the
+		// returned position is already settled — no local poll on this gateway.
+		posID, relayErr := o.bridgeInRelay.NotifyBridgeIn(ctx, CrossCurrencyBridgeInRequest{
+			CorrelationID:  req.CorrelationID,
+			PayerBankID:    req.PayerBankID,
+			SourceCurrency: req.SourceCurrency,
+			Amount:         req.MaxAmountIn, // Use max for bridge (actual amount_in determined after swap)
+			SpokeIn:        spokeIn,
+			// Mint W-<source> to this gateway's swap signer so Step 2 can spend it (and
+			// Step 3 burns from the same address). Mirrors bridge-out's SwapSenderAddress.
+			SwapSenderAddress: o.hubSignerAddress,
+		})
+		if relayErr != nil {
+			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("bridge-in relay failed: %v", relayErr))
+			return nil, fmt.Errorf("bridge-in relay failed: %w", relayErr)
+		}
+		bridgeInPositionID = posID
+	} else {
+		// ── Local bridge-in (CB self-service): enqueue lock-mint on this relayer ──
+		// Valid only when this gateway's signer holds CENTRAL_BANK_ROLE on W-<source>
+		// (i.e. this gateway is the issuing CB itself).
+		bridgeInResult, err := o.bridgeLockMint.LockAndEnqueue(ctx,
+			req.PayerBankID,
+			spokeIn,
+			nativeAsset,
+			mirroredAsset,
+			req.MaxAmountIn, // Use max for bridge (actual amount_in determined after swap)
+			req.CorrelationID)
+		if err != nil {
+			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("bridge-in failed: %v", err))
+			return nil, fmt.Errorf("bridge-in failed: %w", err)
+		}
 
-	// Wait for bridge-in to become ACTIVE (polling with 120s timeout)
-	bridgeInPositionID := bridgeInResult.PositionID
-	if err := o.waitForBridgeActive(ctx, bridgeInPositionID, 120*time.Second); err != nil {
-		_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("bridge-in timeout: %v", err))
-		return nil, fmt.Errorf("bridge-in timeout: %w", err)
+		// Wait for bridge-in to become ACTIVE (polling with 120s timeout)
+		bridgeInPositionID = bridgeInResult.PositionID
+		if err := o.waitForBridgeActive(ctx, bridgeInPositionID, 120*time.Second); err != nil {
+			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("bridge-in timeout: %v", err))
+			return nil, fmt.Errorf("bridge-in timeout: %w", err)
+		}
 	}
 
 	_ = o.swapRepo.UpdateBridgeInPositionID(ctx, req.SwapID, bridgeInPositionID)

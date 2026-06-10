@@ -164,6 +164,17 @@ func (a *GRPCAdapter) GetBalance(ctx context.Context) (*BalanceResult, error) {
 	return &BalanceResult{Balance: resp.Balance}, nil
 }
 
+// GetBalanceOf returns the tCeBM balance for the given Besu address.
+// Used by the bridge-in handler to verify the payer bank holds enough tokenized
+// reserves before the bridge-in is allowed to proceed.
+func (a *GRPCAdapter) GetBalanceOf(ctx context.Context, address string) (string, error) {
+	resp, err := a.cc.GetBalance(ctx, &pb.GetBalanceRequest{Address: address})
+	if err != nil {
+		return "", err
+	}
+	return resp.Balance, nil
+}
+
 func lockToStatus(l *pb.HTLCLock) *HTLCStatus {
 	if l == nil {
 		return &HTLCStatus{}
