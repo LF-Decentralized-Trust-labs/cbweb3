@@ -167,9 +167,16 @@ func main() {
 		logger.Warn("FIAT_TOKEN_ADDRESS not set — fCeBM operations disabled")
 	}
 
-	// Escrow repository: in-memory for now (production: GORM + PostgreSQL).
-	escrowRepo := repository.NewMemoryEscrowRepository()
-	logger.Info("escrow repository configured (in-memory)")
+	// Escrow repository: PostgreSQL-backed (shares DSN with FX agreement).
+	escrowDSN := getEnv("ESCROW_POSTGRES_DSN", getEnv("FX_POSTGRES_DSN", getEnv("DATABASE_URL", "")))
+	if escrowDSN == "" {
+		log.Fatal("FATAL: ESCROW_POSTGRES_DSN, FX_POSTGRES_DSN, or DATABASE_URL is required for escrow persistence")
+	}
+	escrowRepo, err := repository.NewGormEscrowRepository(escrowDSN)
+	if err != nil {
+		log.Fatalf("FATAL: escrow repository: %v", err)
+	}
+	logger.Info("escrow repository configured (postgres)", "dsn_source", "ESCROW_POSTGRES_DSN|FX_POSTGRES_DSN|DATABASE_URL")
 
 	// FX Agreement repository: PostgreSQL-backed by default, fallback to in-memory map in server when absent.
 	fxDSN := getEnv("FX_POSTGRES_DSN", getEnv("DATABASE_URL", ""))
@@ -181,6 +188,17 @@ func main() {
 		log.Fatalf("FATAL: fx agreement repository: %v", err)
 	}
 	logger.Info("fx agreement repository configured", "dsn_source", "FX_POSTGRES_DSN|DATABASE_URL")
+
+	// HTLC repository: PostgreSQL-backed for durable HTLC state across restarts.
+	htlcDSN := getEnv("HTLC_POSTGRES_DSN", getEnv("FX_POSTGRES_DSN", getEnv("DATABASE_URL", "")))
+	if htlcDSN == "" {
+		log.Fatal("FATAL: HTLC_POSTGRES_DSN, FX_POSTGRES_DSN, or DATABASE_URL is required for HTLC persistence")
+	}
+	htlcRepo, err := repository.NewGormHTLCRepository(htlcDSN)
+	if err != nil {
+		log.Fatalf("FATAL: htlc repository: %v", err)
+	}
+	logger.Info("htlc repository configured (postgres)", "dsn_source", "HTLC_POSTGRES_DSN|FX_POSTGRES_DSN|DATABASE_URL")
 
 	rateTolPctStr := getEnv("FX_RATE_TOLERANCE_PCT", "0.001")
 	rateTolPct, err := strconv.ParseFloat(rateTolPctStr, 64)
@@ -209,12 +227,13 @@ func main() {
 		logger.Warn("could not extract spoke prefix from PALADIN_IDENTITY — receiver locality check disabled")
 	}
 
-	grpcServer, startRelayWorkers := server.New(server.Config{
+	grpcServer, startRelayWorkers, err := server.New(server.Config{
 		Zeto:             zeto,
 		HTLC:             htlc,
 		Relay:            relay,
 		Fiat:             fiat,
 		EscrowRepo:       escrowRepo,
+		HTLCRepo:         htlcRepo,
 		FXAgreementBesu:  fxAgreementBesu,
 		FXAgreementPente: fxAgreementPente,
 		FXRepo:           fxRepo,
@@ -226,6 +245,9 @@ func main() {
 		PaladinIdentity:  paladinIdentity,
 		Logger:           logger,
 	})
+	if err != nil {
+		log.Fatalf("FATAL: payment-orchestrator server: %v", err)
+	}
 
 	// Initialize FX expiration worker
 	expiryWorker := workers.NewFXExpirationWorker(fxRepo, time.Duration(fxExpiryCheckIntervalU)*time.Second, logger)

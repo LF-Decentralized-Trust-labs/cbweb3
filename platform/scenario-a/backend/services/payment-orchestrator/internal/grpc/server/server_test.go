@@ -203,7 +203,7 @@ func setupTestEnvFull(t *testing.T, htlc *mockHTLC, fiat *mockFiat, spokePrefix 
 		htlcPort = htlc
 	}
 
-	grpcServer, _ := server.New(server.Config{
+	grpcServer, _, _ := server.New(server.Config{
 		Zeto:            mock,
 		HTLC:            htlcPort,
 		Relay:           noopRelay{},
@@ -1272,7 +1272,7 @@ func setupTestEnvWithCrossSpoke(t *testing.T) *testEnv {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mock := &mockZeto{}
 
-	grpcServer, _ := server.New(server.Config{
+	grpcServer, _, _ := server.New(server.Config{
 		Zeto:            mock,
 		Relay:           noopRelay{},
 		CrossSpokeMode:  true,

@@ -79,7 +79,9 @@ type Config struct {
 // New builds a configured gRPC server with all payment-orchestrator handlers.
 // The returned StartRelayWorkers function must be called (in a goroutine) after
 // the gRPC server is listening to activate cross-spoke HTLC relay automation.
-func New(cfg Config) (*grpc.Server, func(context.Context)) {
+// If HTLCRepo is configured, non-terminal HTLCs are loaded from the database on
+// startup; any error is returned to the caller.
+func New(cfg Config) (*grpc.Server, func(context.Context), error) {
 	rateTol := cfg.RateTolPct
 	if rateTol <= 0 {
 		rateTol = 0.001 // default 0.1%
@@ -104,9 +106,12 @@ func New(cfg Config) (*grpc.Server, func(context.Context)) {
 		htlcs:            make(map[string]*domain.HTLCRecord),
 		fxAgreements:     make(map[string]*domain.FXAgreementRecord),
 	}
+	if err := svc.loadHTLCsFromDB(context.Background()); err != nil {
+		return nil, nil, err
+	}
 	grpcServer := grpc.NewServer()
 	pb.RegisterPaymentOrchestratorServiceServer(grpcServer, svc)
-	return grpcServer, svc.startRelayWorkers
+	return grpcServer, svc.startRelayWorkers, nil
 }
 
 // generateID returns a new UUID v4 string for record IDs.
@@ -126,6 +131,49 @@ func (s *paymentOrchestratorService) isLocalReceiver(receiver string) bool {
 		return false // unknown format — reject in production (fail closed)
 	}
 	return receiverSpoke == s.spokePrefix
+}
+
+// loadHTLCsFromDB pre-populates the in-memory HTLC cache from the database.
+// It is called once during New() when HTLCRepo is configured. Non-terminal records
+// (LOCKED, SETTLING, REFUNDING) are loaded so the service can resume in-flight operations
+// after a restart without losing state.
+func (s *paymentOrchestratorService) loadHTLCsFromDB(ctx context.Context) error {
+	if s.htlcRepo == nil {
+		return nil
+	}
+	records, err := s.htlcRepo.ListNonTerminal(ctx)
+	if err != nil {
+		return fmt.Errorf("load HTLCs from DB: %w", err)
+	}
+	s.mu.Lock()
+	for _, r := range records {
+		s.htlcs[r.ContractID] = r
+	}
+	s.mu.Unlock()
+	s.logger.Info("loaded HTLCs from DB on startup", "count", len(records))
+	return nil
+}
+
+// persistHTLC writes the current in-memory HTLC state to the database.
+// If HTLCRepo is not configured, this is a no-op. Errors are logged but do not
+// fail the caller — the in-memory state is authoritative; the DB is a best-effort
+// write-through cache.
+func (s *paymentOrchestratorService) persistHTLC(ctx context.Context, contractID string) {
+	if s.htlcRepo == nil {
+		return
+	}
+	s.mu.RLock()
+	r, ok := s.htlcs[contractID]
+	if !ok {
+		s.mu.RUnlock()
+		return
+	}
+	snap := *r
+	s.mu.RUnlock()
+	if err := s.htlcRepo.UpdateHTLC(ctx, &snap); err != nil {
+		s.logger.Error("failed to persist HTLC state",
+			"contract_id", contractID, "state", snap.State, "error", err)
+	}
 }
 
 // --- HTLC Dual-Layer Operations ---
@@ -245,6 +293,11 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 		UpdatedAt:   time.Now().UTC(),
 	}
 
+	if s.htlcRepo != nil {
+		if err := s.htlcRepo.CreateHTLC(ctx, record); err != nil {
+			return nil, status.Errorf(codes.Internal, "persist HTLC: %v", err)
+		}
+	}
 	s.mu.Lock()
 	s.htlcs[contractID] = record
 	s.mu.Unlock()
@@ -377,6 +430,11 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 		UpdatedAt:   time.Now().UTC(),
 	}
 
+	if s.htlcRepo != nil {
+		if err := s.htlcRepo.CreateHTLC(ctx, record); err != nil {
+			return nil, status.Errorf(codes.Internal, "persist HTLC: %v", err)
+		}
+	}
 	s.mu.Lock()
 	s.htlcs[contractID] = record
 	s.mu.Unlock()
@@ -493,6 +551,7 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		record.UpdatedAt = time.Now().UTC()
 	}
 	s.mu.Unlock()
+	s.persistHTLC(ctx, record.ContractID)
 
 	// Settle on-chain HTLC (reveals secret via LogHTLCClaimed event).
 	// When the on-chain adapter is configured, a failure here MUST block the
@@ -511,12 +570,14 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 			record.State = domain.HTLCStateLocked
 			record.UpdatedAt = time.Now().UTC()
 			s.mu.Unlock()
+			s.persistHTLC(ctx, record.ContractID)
 			return nil, status.Errorf(codes.Internal, "on-chain HTLC settle failed: %v", err)
 		}
 		// Store htlcTxHash immediately so a retry can find it.
 		s.mu.Lock()
 		record.HTLCTxHash = htlcTxHash
 		s.mu.Unlock()
+		s.persistHTLC(ctx, record.ContractID)
 	} else if isRetry {
 		htlcTxHash = record.HTLCTxHash
 	}
@@ -537,6 +598,7 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 	record.HTLCTxHash = htlcTxHash
 	record.ZetoTxHash = zetoTxHash
 	s.mu.Unlock()
+	s.persistHTLC(ctx, record.ContractID)
 
 	s.logger.Info("HTLC settled", "contract_id", record.ContractID, "zeto_tx_hash", zetoTxHash, "htlc_tx_hash", htlcTxHash)
 
@@ -586,6 +648,7 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 		record.UpdatedAt = time.Now().UTC()
 	}
 	s.mu.Unlock()
+	s.persistHTLC(ctx, record.ContractID)
 
 	// Refund on-chain HTLC coordination
 	var htlcTxHash string
@@ -601,6 +664,7 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 		s.mu.Lock()
 		record.HTLCTxHash = htlcTxHash
 		s.mu.Unlock()
+		s.persistHTLC(ctx, record.ContractID)
 	} else if isRetry {
 		htlcTxHash = record.HTLCTxHash
 	}
@@ -620,6 +684,7 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 	record.HTLCTxHash = htlcTxHash
 	record.ZetoTxHash = zetoTxHash
 	s.mu.Unlock()
+	s.persistHTLC(ctx, record.ContractID)
 
 	s.logger.Info("HTLC refunded", "contract_id", req.ContractId, "zeto_tx_hash", zetoTxHash, "htlc_tx_hash", htlcTxHash)
 
@@ -1535,7 +1600,7 @@ func (s *paymentOrchestratorService) handleRelayLockEvent(proof ports.Interopera
 			s.logger.Info("relay lock: counterparty leg confirmed — settlement unblocked",
 				"hashLock", proof.HashLock, "localContractId", localContractID, "remoteContractId", proof.ContractID)
 			if s.htlcRepo != nil {
-				if err := s.htlcRepo.SetCounterpartyLocked(context.Background(), localContractID); err != nil {
+				if err := s.htlcRepo.UpdateHTLC(context.Background(), r); err != nil {
 					s.logger.Warn("relay lock: failed to persist CounterpartyLocked",
 						"contractId", localContractID, "error", err)
 				}
