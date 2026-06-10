@@ -27,12 +27,6 @@ const (
 	PaymentOrchestratorService_GetFXAgreement_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/GetFXAgreement"
 	PaymentOrchestratorService_ListFXAgreements_FullMethodName      = "/payment_orchestrator.v1.PaymentOrchestratorService/ListFXAgreements"
 	PaymentOrchestratorService_ListFXAgreementEvents_FullMethodName = "/payment_orchestrator.v1.PaymentOrchestratorService/ListFXAgreementEvents"
-	PaymentOrchestratorService_LockHTLC_FullMethodName              = "/payment_orchestrator.v1.PaymentOrchestratorService/LockHTLC"
-	PaymentOrchestratorService_LockHTLCWithHashLock_FullMethodName  = "/payment_orchestrator.v1.PaymentOrchestratorService/LockHTLCWithHashLock"
-	PaymentOrchestratorService_SettleHTLC_FullMethodName            = "/payment_orchestrator.v1.PaymentOrchestratorService/SettleHTLC"
-	PaymentOrchestratorService_RefundHTLC_FullMethodName            = "/payment_orchestrator.v1.PaymentOrchestratorService/RefundHTLC"
-	PaymentOrchestratorService_GetHTLCStatus_FullMethodName         = "/payment_orchestrator.v1.PaymentOrchestratorService/GetHTLCStatus"
-	PaymentOrchestratorService_SearchHTLC_FullMethodName            = "/payment_orchestrator.v1.PaymentOrchestratorService/SearchHTLC"
 	PaymentOrchestratorService_GetBalance_FullMethodName            = "/payment_orchestrator.v1.PaymentOrchestratorService/GetBalance"
 	PaymentOrchestratorService_GetFiatBalance_FullMethodName        = "/payment_orchestrator.v1.PaymentOrchestratorService/GetFiatBalance"
 	PaymentOrchestratorService_RegisterDeposit_FullMethodName       = "/payment_orchestrator.v1.PaymentOrchestratorService/RegisterDeposit"
@@ -63,13 +57,6 @@ type PaymentOrchestratorServiceClient interface {
 	GetFXAgreement(ctx context.Context, in *GetFXAgreementRequest, opts ...grpc.CallOption) (*GetFXAgreementResponse, error)
 	ListFXAgreements(ctx context.Context, in *ListFXAgreementsRequest, opts ...grpc.CallOption) (*ListFXAgreementsResponse, error)
 	ListFXAgreementEvents(ctx context.Context, in *ListFXAgreementEventsRequest, opts ...grpc.CallOption) (*ListFXAgreementEventsResponse, error)
-	// HTLC operations (on-chain Besu coordination)
-	LockHTLC(ctx context.Context, in *LockHTLCRequest, opts ...grpc.CallOption) (*LockHTLCResponse, error)
-	LockHTLCWithHashLock(ctx context.Context, in *LockHTLCWithHashLockRequest, opts ...grpc.CallOption) (*LockHTLCWithHashLockResponse, error)
-	SettleHTLC(ctx context.Context, in *SettleHTLCRequest, opts ...grpc.CallOption) (*SettleHTLCResponse, error)
-	RefundHTLC(ctx context.Context, in *RefundHTLCRequest, opts ...grpc.CallOption) (*RefundHTLCResponse, error)
-	GetHTLCStatus(ctx context.Context, in *GetHTLCStatusRequest, opts ...grpc.CallOption) (*GetHTLCStatusResponse, error)
-	SearchHTLC(ctx context.Context, in *SearchHTLCRequest, opts ...grpc.CallOption) (*SearchHTLCResponse, error)
 	// tCeBM balance query
 	GetBalance(ctx context.Context, in *GetBalanceRequest, opts ...grpc.CallOption) (*GetBalanceResponse, error)
 	// fCeBM balance query
@@ -174,66 +161,6 @@ func (c *paymentOrchestratorServiceClient) ListFXAgreementEvents(ctx context.Con
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListFXAgreementEventsResponse)
 	err := c.cc.Invoke(ctx, PaymentOrchestratorService_ListFXAgreementEvents_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *paymentOrchestratorServiceClient) LockHTLC(ctx context.Context, in *LockHTLCRequest, opts ...grpc.CallOption) (*LockHTLCResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(LockHTLCResponse)
-	err := c.cc.Invoke(ctx, PaymentOrchestratorService_LockHTLC_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *paymentOrchestratorServiceClient) LockHTLCWithHashLock(ctx context.Context, in *LockHTLCWithHashLockRequest, opts ...grpc.CallOption) (*LockHTLCWithHashLockResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(LockHTLCWithHashLockResponse)
-	err := c.cc.Invoke(ctx, PaymentOrchestratorService_LockHTLCWithHashLock_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *paymentOrchestratorServiceClient) SettleHTLC(ctx context.Context, in *SettleHTLCRequest, opts ...grpc.CallOption) (*SettleHTLCResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SettleHTLCResponse)
-	err := c.cc.Invoke(ctx, PaymentOrchestratorService_SettleHTLC_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *paymentOrchestratorServiceClient) RefundHTLC(ctx context.Context, in *RefundHTLCRequest, opts ...grpc.CallOption) (*RefundHTLCResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RefundHTLCResponse)
-	err := c.cc.Invoke(ctx, PaymentOrchestratorService_RefundHTLC_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *paymentOrchestratorServiceClient) GetHTLCStatus(ctx context.Context, in *GetHTLCStatusRequest, opts ...grpc.CallOption) (*GetHTLCStatusResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetHTLCStatusResponse)
-	err := c.cc.Invoke(ctx, PaymentOrchestratorService_GetHTLCStatus_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *paymentOrchestratorServiceClient) SearchHTLC(ctx context.Context, in *SearchHTLCRequest, opts ...grpc.CallOption) (*SearchHTLCResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SearchHTLCResponse)
-	err := c.cc.Invoke(ctx, PaymentOrchestratorService_SearchHTLC_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -403,13 +330,6 @@ type PaymentOrchestratorServiceServer interface {
 	GetFXAgreement(context.Context, *GetFXAgreementRequest) (*GetFXAgreementResponse, error)
 	ListFXAgreements(context.Context, *ListFXAgreementsRequest) (*ListFXAgreementsResponse, error)
 	ListFXAgreementEvents(context.Context, *ListFXAgreementEventsRequest) (*ListFXAgreementEventsResponse, error)
-	// HTLC operations (on-chain Besu coordination)
-	LockHTLC(context.Context, *LockHTLCRequest) (*LockHTLCResponse, error)
-	LockHTLCWithHashLock(context.Context, *LockHTLCWithHashLockRequest) (*LockHTLCWithHashLockResponse, error)
-	SettleHTLC(context.Context, *SettleHTLCRequest) (*SettleHTLCResponse, error)
-	RefundHTLC(context.Context, *RefundHTLCRequest) (*RefundHTLCResponse, error)
-	GetHTLCStatus(context.Context, *GetHTLCStatusRequest) (*GetHTLCStatusResponse, error)
-	SearchHTLC(context.Context, *SearchHTLCRequest) (*SearchHTLCResponse, error)
 	// tCeBM balance query
 	GetBalance(context.Context, *GetBalanceRequest) (*GetBalanceResponse, error)
 	// fCeBM balance query
@@ -459,24 +379,6 @@ func (UnimplementedPaymentOrchestratorServiceServer) ListFXAgreements(context.Co
 }
 func (UnimplementedPaymentOrchestratorServiceServer) ListFXAgreementEvents(context.Context, *ListFXAgreementEventsRequest) (*ListFXAgreementEventsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListFXAgreementEvents not implemented")
-}
-func (UnimplementedPaymentOrchestratorServiceServer) LockHTLC(context.Context, *LockHTLCRequest) (*LockHTLCResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method LockHTLC not implemented")
-}
-func (UnimplementedPaymentOrchestratorServiceServer) LockHTLCWithHashLock(context.Context, *LockHTLCWithHashLockRequest) (*LockHTLCWithHashLockResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method LockHTLCWithHashLock not implemented")
-}
-func (UnimplementedPaymentOrchestratorServiceServer) SettleHTLC(context.Context, *SettleHTLCRequest) (*SettleHTLCResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SettleHTLC not implemented")
-}
-func (UnimplementedPaymentOrchestratorServiceServer) RefundHTLC(context.Context, *RefundHTLCRequest) (*RefundHTLCResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RefundHTLC not implemented")
-}
-func (UnimplementedPaymentOrchestratorServiceServer) GetHTLCStatus(context.Context, *GetHTLCStatusRequest) (*GetHTLCStatusResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetHTLCStatus not implemented")
-}
-func (UnimplementedPaymentOrchestratorServiceServer) SearchHTLC(context.Context, *SearchHTLCRequest) (*SearchHTLCResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SearchHTLC not implemented")
 }
 func (UnimplementedPaymentOrchestratorServiceServer) GetBalance(context.Context, *GetBalanceRequest) (*GetBalanceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetBalance not implemented")
@@ -675,114 +577,6 @@ func _PaymentOrchestratorService_ListFXAgreementEvents_Handler(srv interface{}, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(PaymentOrchestratorServiceServer).ListFXAgreementEvents(ctx, req.(*ListFXAgreementEventsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _PaymentOrchestratorService_LockHTLC_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(LockHTLCRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PaymentOrchestratorServiceServer).LockHTLC(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PaymentOrchestratorService_LockHTLC_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PaymentOrchestratorServiceServer).LockHTLC(ctx, req.(*LockHTLCRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _PaymentOrchestratorService_LockHTLCWithHashLock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(LockHTLCWithHashLockRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PaymentOrchestratorServiceServer).LockHTLCWithHashLock(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PaymentOrchestratorService_LockHTLCWithHashLock_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PaymentOrchestratorServiceServer).LockHTLCWithHashLock(ctx, req.(*LockHTLCWithHashLockRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _PaymentOrchestratorService_SettleHTLC_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SettleHTLCRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PaymentOrchestratorServiceServer).SettleHTLC(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PaymentOrchestratorService_SettleHTLC_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PaymentOrchestratorServiceServer).SettleHTLC(ctx, req.(*SettleHTLCRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _PaymentOrchestratorService_RefundHTLC_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RefundHTLCRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PaymentOrchestratorServiceServer).RefundHTLC(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PaymentOrchestratorService_RefundHTLC_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PaymentOrchestratorServiceServer).RefundHTLC(ctx, req.(*RefundHTLCRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _PaymentOrchestratorService_GetHTLCStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetHTLCStatusRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PaymentOrchestratorServiceServer).GetHTLCStatus(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PaymentOrchestratorService_GetHTLCStatus_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PaymentOrchestratorServiceServer).GetHTLCStatus(ctx, req.(*GetHTLCStatusRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _PaymentOrchestratorService_SearchHTLC_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SearchHTLCRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PaymentOrchestratorServiceServer).SearchHTLC(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PaymentOrchestratorService_SearchHTLC_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PaymentOrchestratorServiceServer).SearchHTLC(ctx, req.(*SearchHTLCRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1095,30 +889,6 @@ var PaymentOrchestratorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListFXAgreementEvents",
 			Handler:    _PaymentOrchestratorService_ListFXAgreementEvents_Handler,
-		},
-		{
-			MethodName: "LockHTLC",
-			Handler:    _PaymentOrchestratorService_LockHTLC_Handler,
-		},
-		{
-			MethodName: "LockHTLCWithHashLock",
-			Handler:    _PaymentOrchestratorService_LockHTLCWithHashLock_Handler,
-		},
-		{
-			MethodName: "SettleHTLC",
-			Handler:    _PaymentOrchestratorService_SettleHTLC_Handler,
-		},
-		{
-			MethodName: "RefundHTLC",
-			Handler:    _PaymentOrchestratorService_RefundHTLC_Handler,
-		},
-		{
-			MethodName: "GetHTLCStatus",
-			Handler:    _PaymentOrchestratorService_GetHTLCStatus_Handler,
-		},
-		{
-			MethodName: "SearchHTLC",
-			Handler:    _PaymentOrchestratorService_SearchHTLC_Handler,
 		},
 		{
 			MethodName: "GetBalance",

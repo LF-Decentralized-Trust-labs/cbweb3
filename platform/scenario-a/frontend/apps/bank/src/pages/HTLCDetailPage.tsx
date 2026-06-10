@@ -57,7 +57,7 @@ export function HTLCDetailPage() {
     return <Navigate to="/htlc" replace />;
   }
 
-  const canSettle = Boolean(htlc && isLockedState(htlc.state) && htlc.secret);
+  const canSettle = Boolean(htlc && isLockedState(htlc.state) && htlc.secret && htlc.counterparty_locked);
   const canRefund = Boolean(htlc && isLockedState(htlc.state) && countdown.isExpired);
   const isFinalState = Boolean(htlc && (isSettledState(htlc.state) || isRefundedState(htlc.state)));
 

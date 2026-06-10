@@ -41,115 +41,6 @@ func (a *GRPCAdapter) Close() error {
 	return nil
 }
 
-// --- HTLC ---
-
-type LockHTLCResult struct {
-	ContractID string `json:"contract_id"`
-	HashLock   string `json:"hash_lock"`
-	HTLCTxHash string `json:"htlc_tx_hash,omitempty"`
-}
-
-func (a *GRPCAdapter) LockHTLC(ctx context.Context, agreementID, receiver, amount string, timeLock uint64) (*LockHTLCResult, error) {
-	resp, err := a.cc.LockHTLC(ctx, &pb.LockHTLCRequest{
-		AgreementId: agreementID,
-		Receiver:    receiver,
-		Amount:      amount,
-		TimeLock:    timeLock,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &LockHTLCResult{
-		ContractID: resp.ContractId,
-		HashLock:   resp.HashLock,
-		HTLCTxHash: resp.HtlcTxHash,
-	}, nil
-}
-
-func (a *GRPCAdapter) LockHTLCWithHashLock(ctx context.Context, agreementID, receiver, amount string, timeLock uint64, hashLock string) (*LockHTLCResult, error) {
-	resp, err := a.cc.LockHTLCWithHashLock(ctx, &pb.LockHTLCWithHashLockRequest{
-		AgreementId: agreementID,
-		Receiver:    receiver,
-		Amount:      amount,
-		TimeLock:    timeLock,
-		HashLock:    hashLock,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &LockHTLCResult{
-		ContractID: resp.ContractId,
-		HashLock:   resp.HashLock,
-		HTLCTxHash: resp.HtlcTxHash,
-	}, nil
-}
-
-type SettleHTLCResult struct {
-	HTLCTxHash string `json:"htlc_tx_hash,omitempty"`
-}
-
-func (a *GRPCAdapter) SettleHTLC(ctx context.Context, contractID, secret string) (*SettleHTLCResult, error) {
-	resp, err := a.cc.SettleHTLC(ctx, &pb.SettleHTLCRequest{
-		ContractId: contractID,
-		Secret:     secret,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &SettleHTLCResult{HTLCTxHash: resp.HtlcTxHash}, nil
-}
-
-type RefundHTLCResult struct {
-	HTLCTxHash string `json:"htlc_tx_hash,omitempty"`
-}
-
-func (a *GRPCAdapter) RefundHTLC(ctx context.Context, contractID string) (*RefundHTLCResult, error) {
-	resp, err := a.cc.RefundHTLC(ctx, &pb.RefundHTLCRequest{
-		ContractId: contractID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &RefundHTLCResult{HTLCTxHash: resp.HtlcTxHash}, nil
-}
-
-type HTLCStatus struct {
-	ContractID string `json:"contract_id"`
-	Sender     string `json:"sender"`
-	Receiver   string `json:"receiver"`
-	HashLock   string `json:"hash_lock"`
-	TimeLock   uint64 `json:"time_lock"`
-	Secret     string `json:"secret,omitempty"`
-	State      string `json:"state"`
-}
-
-func (a *GRPCAdapter) GetHTLCStatus(ctx context.Context, contractID string) (*HTLCStatus, error) {
-	resp, err := a.cc.GetHTLCStatus(ctx, &pb.GetHTLCStatusRequest{
-		ContractId: contractID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return lockToStatus(resp.Lock), nil
-}
-
-func (a *GRPCAdapter) SearchHTLC(ctx context.Context, agreementID, sender, receiver, state string) ([]HTLCStatus, error) {
-	resp, err := a.cc.SearchHTLC(ctx, &pb.SearchHTLCRequest{
-		AgreementId: agreementID,
-		Sender:      sender,
-		Receiver:    receiver,
-		State:       state,
-	})
-	if err != nil {
-		return nil, err
-	}
-	result := make([]HTLCStatus, 0, len(resp.Locks))
-	for _, l := range resp.Locks {
-		result = append(result, *lockToStatus(l))
-	}
-	return result, nil
-}
-
 // --- Token Balance ---
 
 type BalanceResult struct {
@@ -173,21 +64,6 @@ func (a *GRPCAdapter) GetBalanceOf(ctx context.Context, address string) (string,
 		return "", err
 	}
 	return resp.Balance, nil
-}
-
-func lockToStatus(l *pb.HTLCLock) *HTLCStatus {
-	if l == nil {
-		return &HTLCStatus{}
-	}
-	return &HTLCStatus{
-		ContractID: l.ContractId,
-		Sender:     l.Sender,
-		Receiver:   l.Receiver,
-		HashLock:   l.HashLock,
-		TimeLock:   l.TimeLock,
-		Secret:     l.Secret,
-		State:      l.State.String(),
-	}
 }
 
 // --- Escrow: Deposits ---

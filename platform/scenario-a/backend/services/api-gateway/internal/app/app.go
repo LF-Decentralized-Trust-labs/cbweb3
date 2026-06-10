@@ -95,7 +95,7 @@ func New(cfg config.Config) (*App, error) {
 			return nil, fmt.Errorf("payment gRPC unavailable at %s: %w", cfg.PaymentGRPCAddr, err)
 		}
 		closers = append(closers, paymentGRPC)
-		deps.PaymentHandler = handlers.NewPaymentHandler(paymentGRPC)
+		deps.PaymentHandler = handlers.NewPaymentHandler(paymentGRPC, cfg.BankCode)
 
 		// Commercial bank: wire escrow proxy that forwards to the Central Bank.
 		if cfg.CentralBankAPIURL != "" {

@@ -13,9 +13,6 @@ import { ComplianceCenterPage } from "../pages/ComplianceCenterPage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { DepositsPage } from "../pages/DepositsPage";
 import { EscrowsPage } from "../pages/EscrowsPage";
-import { HTLCDetailPage } from "../pages/HTLCDetailPage";
-import { HTLCHistoryPage } from "../pages/HTLCHistoryPage";
-import { HTLCNewPage } from "../pages/HTLCNewPage";
 import { LiquidityTransfersPage } from "../pages/LiquidityTransfersPage";
 import { LoginPage } from "../pages/LoginPage";
 import { OnboardingPage } from "../pages/OnboardingPage";
@@ -35,14 +32,6 @@ const scenarioAChildren: RouteObject[] = [
       { index: true, element: <AgreementInboxPage /> },
       { path: "new", element: <AgreementProposalPage /> },
       { path: ":tradeId", element: <AgreementDetailPage /> },
-    ],
-  },
-  {
-    path: "htlc",
-    children: [
-      { index: true, element: <HTLCHistoryPage /> },
-      { path: "new", element: <HTLCNewPage /> },
-      { path: ":contractId", element: <HTLCDetailPage /> },
     ],
   },
   { path: "amm", element: <AMMTradingPage /> },
