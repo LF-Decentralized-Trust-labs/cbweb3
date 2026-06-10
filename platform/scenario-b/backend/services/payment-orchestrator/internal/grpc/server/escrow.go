@@ -432,7 +432,12 @@ func (s *paymentOrchestratorService) GetFiatBalance(ctx context.Context, req *pb
 		return nil, status.Errorf(codes.Internal, "fCeBM balance: %v", err)
 	}
 
-	return &pb.GetFiatBalanceResponse{Balance: balance}, nil
+	decimals, err := s.fiat.Decimals(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "fCeBM decimals: %v", err)
+	}
+
+	return &pb.GetFiatBalanceResponse{Balance: balance, Decimals: uint32(decimals)}, nil
 }
 
 func escrowRecordToProto(r domain.EscrowRecord) *pb.EscrowRecord {

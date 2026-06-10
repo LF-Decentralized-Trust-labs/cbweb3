@@ -22,8 +22,8 @@ import (
 var _ ports.FiatTokenPort = (*FiatTokenClient)(nil)
 
 // fiatTokenABIJSON is the minimal ABI for the FiatCentralBankMoney (fCeBM) ERC-20 contract.
-// It includes mint(address,uint256), burn(address,uint256), and balanceOf(address).
-const fiatTokenABIJSON = `[{"inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"name":"mint","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"from","type":"address"},{"name":"amount","type":"uint256"}],"name":"burn","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`
+// It includes decimals(), mint(address,uint256), burn(address,uint256), and balanceOf(address).
+const fiatTokenABIJSON = `[{"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"name":"mint","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"from","type":"address"},{"name":"amount","type":"uint256"}],"name":"burn","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`
 
 // FiatTokenClientConfig holds the configuration for the Besu FiatCentralBankMoney client.
 type FiatTokenClientConfig struct {
@@ -73,6 +73,30 @@ func NewFiatTokenClient(cfg FiatTokenClientConfig, logger *slog.Logger) (*FiatTo
 		chainID:      big.NewInt(cfg.ChainID),
 		logger:       logger,
 	}, nil
+}
+
+// Decimals returns the number of decimal places used by this token (e.g. 18 for standard ERC-20).
+func (c *FiatTokenClient) Decimals(ctx context.Context) (uint8, error) {
+	data, err := c.tokenABI.Pack("decimals")
+	if err != nil {
+		return 0, fmt.Errorf("pack decimals: %w", err)
+	}
+	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{From: c.fromAddress, To: &c.tokenAddress, Data: data}, nil)
+	if err != nil {
+		return 0, fmt.Errorf("call decimals: %w", err)
+	}
+	outputs, err := c.tokenABI.Unpack("decimals", result)
+	if err != nil {
+		return 0, fmt.Errorf("unpack decimals: %w", err)
+	}
+	if len(outputs) == 0 {
+		return 0, fmt.Errorf("decimals: empty result")
+	}
+	decimals, ok := outputs[0].(uint8)
+	if !ok {
+		return 0, fmt.Errorf("decimals: unexpected type %T", outputs[0])
+	}
+	return decimals, nil
 }
 
 // Mint issues new fCeBM tokens to the specified Besu address.

@@ -489,7 +489,12 @@ func (s *paymentOrchestratorService) GetBalance(ctx context.Context, req *pb.Get
 		return nil, status.Errorf(codes.Internal, "tCeBM balance: %v", err)
 	}
 
-	return &pb.GetBalanceResponse{Balance: balance}, nil
+	decimals, err := s.token.Decimals(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "tCeBM decimals: %v", err)
+	}
+
+	return &pb.GetBalanceResponse{Balance: balance, Decimals: uint32(decimals)}, nil
 }
 
 // --- FX Agreement Operations ---

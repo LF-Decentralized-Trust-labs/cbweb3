@@ -66,6 +66,7 @@ func (m *mockToken) GetBalance(_ context.Context) (string, error) {
 	}
 	return m.balance, nil
 }
+func (m *mockToken) Decimals(_ context.Context) (uint8, error) { return 18, nil }
 
 // mockFiat is a test double for FiatTokenPort.
 type mockFiat struct {
@@ -96,6 +97,7 @@ func (m *mockFiat) GetFiatBalance(_ context.Context) (string, error) {
 	}
 	return m.balance, nil
 }
+func (m *mockFiat) Decimals(_ context.Context) (uint8, error) { return 18, nil }
 
 // mockHTLC is a test double for HTLCContractPort.
 type mockHTLC struct {
