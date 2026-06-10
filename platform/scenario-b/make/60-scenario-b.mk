@@ -22,6 +22,10 @@ SPOKE_A_RPC  ?= http://localhost:8645
 SPOKE_B_RPC  ?= http://localhost:8745
 KEYCLOAK_URL    ?= http://localhost:8081
 API_GW_URL      ?= http://localhost:3000
+API_GW_BANK_A_URL         ?= http://localhost:18080
+API_GW_BANK_B_URL         ?= http://localhost:28080
+API_GW_CENTRAL_BANK_A_URL ?= http://localhost:38080
+API_GW_CENTRAL_BANK_B_URL ?= http://localhost:60080
 CACTI_RELAYER_URL ?= http://localhost:4000
 
 SCENARIO_B_ENV := \
@@ -118,12 +122,40 @@ scenario-b.down-backend-mlp:
 scenario-b.tryout-us2-mlp:
 	@echo "[scenario-b] E2E tryout — US2 MLP (requires ENABLE_MLP=true and MLP stack running)"
 	@ENABLE_MLP=true $(SCENARIO_B_ENV) bash tryouts/tryout-scenario-b-e2e.sh us2
+# ── Mock FX-rate feeder (system-managed oracle) ──────────────────────────────
+# Pushes a real-life-like, slightly-jittered BRL/ARS rate into the Hub ManualOracle
+# on an interval, standing in for an external price feed. The api-gateway reads this
+# rate to suggest a counterpart match amount during liquidity coordination. Runs as a
+# detached host process (DURATION_SECS=0 = until stopped) so it lives with the stack;
+# launching never blocks or fails `up` (the oracle/cast may not be ready — that's fine).
+FX_FEEDER_PID := /tmp/cbweb3-mock-fx-feeder.pid
+FX_FEEDER_LOG := /tmp/cbweb3-mock-fx-feeder.log
+
+scenario-b.up-fx-feeder:
+	@echo "[scenario-b] starting mock FX-rate feeder (BRL/ARS → Hub ManualOracle)..."
+	@if [ -f $(FX_FEEDER_PID) ] && kill -0 $$(cat $(FX_FEEDER_PID)) 2>/dev/null; then \
+	  echo "  already running (pid $$(cat $(FX_FEEDER_PID)))"; \
+	else \
+	  DURATION_SECS=0 nohup ./deploy/local/tools/mock-fx-feeder.sh > $(FX_FEEDER_LOG) 2>&1 & \
+	  echo $$! > $(FX_FEEDER_PID); \
+	  echo "  started (pid $$(cat $(FX_FEEDER_PID))) — log: $(FX_FEEDER_LOG)"; \
+	fi
+
+scenario-b.down-fx-feeder:
+	@if [ -f $(FX_FEEDER_PID) ]; then \
+	  kill $$(cat $(FX_FEEDER_PID)) 2>/dev/null || true; rm -f $(FX_FEEDER_PID); \
+	  echo "[scenario-b] mock FX-rate feeder stopped"; \
+	fi
+
 # ── Stack targets ────────────────────────────────────────────────────────────
 
-scenario-b.up: scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend
+# down-fx-feeder runs first: the feeder signs setRate with the admin/deployer key, the
+# same account forge uses in deploy-contracts — a stale feeder from a prior `up` would
+# race the deploy's nonce. up-fx-feeder restarts it fresh at the end.
+scenario-b.up: scenario-b.down-fx-feeder scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend scenario-b.up-fx-feeder
 	@echo "[scenario-b] full stack up — ready for tryout (bash tryouts/tryout-scenario-b-e2e.sh)"
 
-scenario-b.down: scenario-b.down-backend scenario-b.down-relayer scenario-b.down-infra
+scenario-b.down: scenario-b.down-fx-feeder scenario-b.down-backend scenario-b.down-relayer scenario-b.down-infra
 	@echo "[scenario-b] full stack down"
 
 scenario-b.restart: scenario-b.down scenario-b.up
@@ -179,6 +211,27 @@ scenario-b.tryout-us2:
 scenario-b.tryout-us3:
 	@$(SCENARIO_B_ENV) bash tryouts/tryout-scenario-b-e2e.sh us3
 
+# ── Integration test (full happy-path API test) ──────────────────────────────
+
+SKIP_UP   ?= 1
+SKIP_DOWN ?= 1
+
+scenario-b.test-integration: ## Run full happy-path API integration test against a live stack
+	@echo "[scenario-b] running integration test (full happy path)..."
+ifeq ($(SKIP_UP),0)
+	@echo "[scenario-b] bringing stack up (SKIP_UP=0)..."
+	@$(MAKE) scenario-b.up
+endif
+	@cd tests/integration && \
+	  SKIP_UP=1 \
+	  SKIP_DOWN=$(SKIP_DOWN) \
+	  KEYCLOAK_URL=$(KEYCLOAK_URL) \
+	  API_GW_BANK_A_URL=$(API_GW_BANK_A_URL) \
+	  API_GW_BANK_B_URL=$(API_GW_BANK_B_URL) \
+	  API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
+	  API_GW_CENTRAL_BANK_B_URL=$(API_GW_CENTRAL_BANK_B_URL) \
+	  go test -v -count=1 -timeout 30m -run TestFullHappyPath ./...
+
 # ── Performance baseline (T105) ──────────────────────────────────────────────
 
 scenario-b.perf-baseline:
@@ -203,4 +256,5 @@ scenario-b.validate-openapi:
 	scenario-b.up scenario-b.down scenario-b.restart scenario-b.nuke \
 	scenario-b.test-contracts scenario-b.test-backend scenario-b.test \
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
+	scenario-b.test-integration \
 	scenario-b.perf-baseline scenario-b.validate-openapi

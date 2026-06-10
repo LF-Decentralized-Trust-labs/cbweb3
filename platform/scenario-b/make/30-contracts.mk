@@ -57,6 +57,7 @@ contracts.deploy-identity-registry-besu:
 contracts.deploy-hub:
 	@test -n "$(CENTRAL_BANK_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_ADDRESS is not set — check contracts/.env"; exit 1)
 	@echo "Deploying Scenario B Hub contracts (IdentityRegistry + Tokens + AMM + HTLC + Oracle) to the independent Hub network (chain 1337)..."
+	@./deploy/local/tools/wait-rpc.sh "$${BESU_HUB_RPC:-http://127.0.0.1:8845}"
 	@BESU_HUB_RPC="$${BESU_HUB_RPC:-http://127.0.0.1:8845}" && \
 	 HUB_CHAIN_ID="$${HUB_CHAIN_ID:-1337}" && \
 	 cd contracts && CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_ADDRESS) FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script \
@@ -66,6 +67,7 @@ contracts.deploy-hub:
 contracts.deploy-spoke-a:
 	@test -n "$(CENTRAL_BANK_A_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_A_ADDRESS is not set — check contracts/.env"; exit 1)
 	@echo "Deploying CBWeb3 spoke-a contracts to chain 1338 (bank-a, bank-c, central-bank-a)..."
+	@./deploy/local/tools/wait-rpc.sh "${SPOKE_A_RPC_URL}"
 	@cd contracts && TOKEN_NAME="Tokenized BRL" TOKEN_SYMBOL="tCeBM_BRL" \
 		FIAT_TOKEN_NAME="Fiat BRL" FIAT_TOKEN_SYMBOL="fCeBM_BRL" \
 		CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_A_ADDRESS) \
@@ -74,6 +76,7 @@ contracts.deploy-spoke-a:
 contracts.deploy-spoke-b:
 	@test -n "$(CENTRAL_BANK_B_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_B_ADDRESS is not set — check contracts/.env"; exit 1)
 	@echo "Deploying CBWeb3 spoke-b contracts (bank-b, bank-d, central-bank-b)..."
+	@./deploy/local/tools/wait-rpc.sh "${SPOKE_B_RPC_URL}"
 	@cd contracts && TOKEN_NAME="Tokenized ARS" TOKEN_SYMBOL="tCeBM_ARS" \
 		FIAT_TOKEN_NAME="Fiat ARS" FIAT_TOKEN_SYMBOL="fCeBM_ARS" \
 		CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_B_ADDRESS) \
