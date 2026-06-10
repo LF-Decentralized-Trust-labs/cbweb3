@@ -19,7 +19,10 @@ import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { usePolling } from "../../hooks/usePolling";
 import { useAuthStore } from "../../stores/auth.store";
+import { usePaymentStore } from "../../stores";
 import type { PendingCommit } from "../../types/liquidity.types";
+import { formatTokenAmount } from "../../types";
+import type { MatchContext } from "./CooperativeLiquidityWizard";
 import { CooperativeLiquidityWizard } from "./CooperativeLiquidityWizard";
 import { formatRemainingMs, remainingMsUntil, truncateAddress } from "./format";
 import { useLiquidityStore } from "./liquidity.store";
@@ -36,6 +39,7 @@ export function LiquidityManagementPage() {
   // const mintAndApprove = useLiquidityStore((state) => state.mintAndApprove);
   const getOperationalSummary = useLiquidityStore((state) => state.getOperationalSummary);
   const profile = useAuthStore((state) => state.profile);
+  const tokenDecimals = usePaymentStore((state) => state.tokenDecimals) ?? 18;
 
   const [removeLpId, setRemoveLpId] = useState("");
   const [removePair, setRemovePair] = useState(configuredPoolPair);
@@ -47,7 +51,7 @@ export function LiquidityManagementPage() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
   const [bannerCommit, setBannerCommit] = useState<PendingCommit | null>(null);
-  const [prefillCommit, setPrefillCommit] = useState<{ pool_pair: string; amount: string } | null>(null);
+  const [matchContext, setMatchContext] = useState<MatchContext | null>(null);
 
   // Tick once per second so the coordination countdowns stay live between 5s polls.
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -96,7 +100,7 @@ export function LiquidityManagementPage() {
     setWizardOpen(true);
     setWizardStep(1);
     setBannerCommit(null);
-    setPrefillCommit(null);
+    setMatchContext(null);
   };
 
   const handleMonitorPendingCommit = () => {
@@ -104,7 +108,7 @@ export function LiquidityManagementPage() {
       return;
     }
     setBannerCommit(ownPendingCommit);
-    setPrefillCommit(null);
+    setMatchContext(null);
     setWizardStep(3);
     setWizardOpen(true);
   };
@@ -113,10 +117,17 @@ export function LiquidityManagementPage() {
     if (!counterpartCommit) {
       return;
     }
-    // Pre-fill the Commit step with the counterpart's pool pair and a matching amount.
-    setPrefillCommit({ pool_pair: configuredPoolPair, amount: counterpartCommit.amount });
+    // Route the matcher through Lock-Mint first — their currency differs, so they must
+    // mint their own side's tokens before committing. Pre-fill the FX-suggested amount
+    // (editable); fall back to free entry when no oracle rate is available.
+    setMatchContext({
+      poolPair: configuredPoolPair,
+      suggestedAmount: counterpartCommit.suggested_match_amount ?? "",
+      counterpartAmount: counterpartCommit.amount,
+      counterpartSide: counterpartCommit.side,
+    });
     setBannerCommit(null);
-    setWizardStep(2);
+    setWizardStep(1);
     setWizardOpen(true);
   };
 
@@ -130,7 +141,7 @@ export function LiquidityManagementPage() {
     setWizardOpen(false);
     setWizardStep(1);
     setBannerCommit(null);
-    setPrefillCommit(null);
+    setMatchContext(null);
   };
 
   const summary = getOperationalSummary();
@@ -148,8 +159,8 @@ export function LiquidityManagementPage() {
           ) : (
             <Badge variant="success">Pool balanced</Badge>
           )}
-          <p className="text-sm">Reserve A: {poolStatus?.reserve_a ?? "-"}</p>
-          <p className="text-sm">Reserve B: {poolStatus?.reserve_b ?? "-"}</p>
+          <p className="text-sm">Reserve A: {poolStatus?.reserve_a ? formatTokenAmount(poolStatus.reserve_a, tokenDecimals) : "-"}</p>
+          <p className="text-sm">Reserve B: {poolStatus?.reserve_b ? formatTokenAmount(poolStatus.reserve_b, tokenDecimals) : "-"}</p>
           <p className="text-sm">Current ratio: {poolStatus?.current_ratio ?? "-"}</p>
           <p className="text-xs text-muted-foreground">Updated at: {poolStatus?.updated_at ?? "-"}</p>
         </CardContent>
@@ -198,15 +209,25 @@ export function LiquidityManagementPage() {
           {poolActive ? (
             <div className="space-y-1">
               <Badge variant="success">Pool ACTIVE</Badge>
-              <p className="text-sm">Both sides are funded. Reserves A {poolStatus?.reserve_a ?? "-"} / B {poolStatus?.reserve_b ?? "-"}.</p>
+              <p className="text-sm">Both sides are funded. Reserves A {poolStatus?.reserve_a ? formatTokenAmount(poolStatus.reserve_a, tokenDecimals) : "-"} / B {poolStatus?.reserve_b ? formatTokenAmount(poolStatus.reserve_b, tokenDecimals) : "-"}.</p>
             </div>
           ) : counterpartCommit ? (
             <div className="space-y-3 rounded border border-amber-300 bg-amber-50 p-3">
               <Badge variant="warning">Counterpart waiting on you</Badge>
               <p className="text-sm">
-                A counterpart central bank committed <strong>{counterpartCommit.amount}</strong> to side{" "}
+                A counterpart central bank committed <strong>{formatTokenAmount(counterpartCommit.amount, tokenDecimals)} tCeBM</strong> to side{" "}
                 <strong>{counterpartCommit.side}</strong> and is waiting for your matching deposit.
               </p>
+              {counterpartCommit.suggested_match_amount ? (
+                <p className="text-sm">
+                  Suggested match on your side (at current FX rate):{" "}
+                  <strong>{formatTokenAmount(counterpartCommit.suggested_match_amount, tokenDecimals)} tCeBM</strong>
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  No FX rate available — you’ll set your own deposit amount.
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">
                 Signer {truncateAddress(counterpartCommit.signer_address)} · Expires in{" "}
                 {formatRemainingMs(remainingMsUntil(counterpartCommit.expires_at, nowMs))}
@@ -237,7 +258,7 @@ export function LiquidityManagementPage() {
         <CooperativeLiquidityWizard
           initialStep={wizardStep}
           pendingCommit={bannerCommit}
-          prefillCommit={prefillCommit}
+          matchContext={matchContext}
           onDone={handleWizardDone}
           onSelectLpForRemoval={handleSelectLpForRemoval}
         />
@@ -332,9 +353,9 @@ export function LiquidityManagementPage() {
                   <TableCell className="font-mono text-xs">{position.lp_id}</TableCell>
                   <TableCell>{position.pool_pair}</TableCell>
                   <TableCell>{position.provider_bank_id}</TableCell>
-                  <TableCell>{position.token_a_contributed}</TableCell>
-                  <TableCell>{position.token_b_contributed}</TableCell>
-                  <TableCell>{position.lp_shares}</TableCell>
+                  <TableCell>{formatTokenAmount(position.token_a_contributed, tokenDecimals)}</TableCell>
+                  <TableCell>{formatTokenAmount(position.token_b_contributed, tokenDecimals)}</TableCell>
+                  <TableCell>{formatTokenAmount(position.lp_shares, tokenDecimals)}</TableCell>
                   <TableCell>
                     <Badge variant={position.status === "ACTIVE" ? "success" : "outline"}>{position.status}</Badge>
                   </TableCell>

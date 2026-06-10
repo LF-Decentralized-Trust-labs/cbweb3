@@ -47,6 +47,11 @@ export interface RedeemRecord {
   created_at: string;
 }
 
+export interface BalanceResponse {
+  balance: string;
+  decimals: number;
+}
+
 export interface ListDepositsResponse {
   deposits: DepositRecord[];
   total: number;
@@ -157,20 +162,53 @@ export function getPaymentStatusVariant(status: unknown): "warning" | "success" 
   return normalized !== null ? paymentStatusVariant[normalized] : "outline";
 }
 
-export function formatCeBM(rawAmount: string): string {
-  if (!rawAmount || rawAmount === "0") {
-    return "0 tCeBM";
-  }
-
-  const value = BigInt(rawAmount);
-  return `${value.toLocaleString("en-US")} tCeBM`;
+// displayToBase converts a human-readable decimal string to raw base-unit wei string.
+// Accepts comma-formatted input (e.g. "1,000.5") as well as plain "1000.5".
+export function displayToBase(displayAmount: string, decimals: number): string {
+  if (!displayAmount || displayAmount === "0") return "0";
+  const clean = displayAmount.replace(/,/g, "");
+  const [whole, frac = ""] = clean.split(".");
+  const fracPadded = frac.padEnd(decimals, "0").slice(0, decimals);
+  const combined = `${whole}${fracPadded}`.replace(/^0+/, "") || "0";
+  return combined;
 }
 
-export function formatFiatUnits(rawAmount: string): string {
-  if (!rawAmount || rawAmount === "0") {
-    return `0 ${fiatUnitLabel}`;
-  }
+// formatAmountInput formats a numeric string with thousand-separator commas for display
+// inside an input field (e.g. "1000000.5" → "1,000,000.5").
+export function formatAmountInput(value: string): string {
+  if (!value) return "";
+  const [whole = "", frac] = value.split(".");
+  const formatted = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return frac !== undefined ? `${formatted}.${frac}` : formatted;
+}
 
-  const value = BigInt(rawAmount);
-  return `${value.toLocaleString("en-US")} ${fiatUnitLabel}`;
+// parseAmountInput strips thousand-separator commas so the result can be passed to displayToBase.
+export function parseAmountInput(value: string): string {
+  return value.replace(/,/g, "");
+}
+
+// formatCeBM converts a raw base-unit amount (wei) to a human-readable tCeBM string.
+export function formatCeBM(rawAmount: string, decimals: number): string {
+  return `${formatTokenAmount(rawAmount, decimals)} tCeBM`;
+}
+
+// formatFiatUnits converts a raw base-unit amount to a human-readable fiat string.
+export function formatFiatUnits(rawAmount: string, decimals: number): string {
+  return `${formatTokenAmount(rawAmount, decimals)} ${fiatUnitLabel}`;
+}
+
+// formatTokenAmount converts a raw base-unit amount string to a display decimal string.
+export function formatTokenAmount(rawAmount: string, decimals: number): string {
+  if (!rawAmount || rawAmount === "0") return "0";
+  try {
+    const divisor = 10n ** BigInt(decimals);
+    const value = BigInt(rawAmount);
+    const whole = value / divisor;
+    const frac = (value % divisor).toString().padStart(decimals, "0").slice(0, 6).replace(/0+$/, "");
+    return frac
+      ? `${whole.toLocaleString("en-US")}.${frac}`
+      : whole.toLocaleString("en-US");
+  } catch {
+    return rawAmount;
+  }
 }

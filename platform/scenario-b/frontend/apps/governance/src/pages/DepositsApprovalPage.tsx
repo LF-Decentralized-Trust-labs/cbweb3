@@ -31,9 +31,11 @@ const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.s
 
 export function DepositsApprovalPage() {
   const deposits = usePaymentStore((state) => state.deposits);
+  const tokenDecimals = usePaymentStore((state) => state.tokenDecimals);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
   const fetchDeposits = usePaymentStore((state) => state.fetchDeposits);
+  const decimals = tokenDecimals ?? 18;
   const approveDeposit = usePaymentStore((state) => state.approveDeposit);
   const rejectDeposit = usePaymentStore((state) => state.rejectDeposit);
 
@@ -162,7 +164,7 @@ export function DepositsApprovalPage() {
                 <TableRow key={deposit.id}>
                   <TableCell className="font-medium">{deposit.id}</TableCell>
                   <TableCell>{deposit.requester_id}</TableCell>
-                  <TableCell>{formatFiatUnits(deposit.amount)}</TableCell>
+                  <TableCell>{formatFiatUnits(deposit.amount, decimals)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(deposit.status)}>{getPaymentStatusLabel(deposit.status)}</Badge>
                   </TableCell>

@@ -26,6 +26,10 @@ export interface CounterpartCommit {
   side: CommitSide;
   signer_address: string;
   amount: string;
+  // Amount this CB should deposit on its own side to match the counterpart at the
+  // current FX rate (ManualOracle). Differs from `amount` since the currencies differ.
+  // Empty/absent when no rate is available — the UI falls back to free entry.
+  suggested_match_amount?: string;
   expires_at: string;
   on_chain_commit_id: string;
 }
@@ -107,7 +111,7 @@ export const SOVEREIGN_FLOW_POLICY = {
 
 export type PoolLifecycleStatus = "EMPTY" | "PENDING_COUNTERPART" | "ACTIVE";
 export type CommitSide = "A" | "B";
-export type CommitStatus = "PENDING" | "EXECUTED" | "CANCELLED";
+export type CommitStatus = "PENDING" | "MATCHED" | "EXECUTED" | "EXPIRED" | "CANCELLED";
 
 export interface PendingCommit {
   commit_id: string;

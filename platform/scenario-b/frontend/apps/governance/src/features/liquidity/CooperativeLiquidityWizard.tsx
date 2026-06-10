@@ -2,8 +2,10 @@ import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitl
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useAuthStore } from "../../stores/auth.store";
+import { usePaymentStore } from "../../stores";
 import { SOVEREIGN_FLOW_PHASE } from "../../types/liquidity.types";
-import type { CommitResult, PendingCommit } from "../../types/liquidity.types";
+import type { CommitResult, CommitSide, PendingCommit } from "../../types/liquidity.types";
+import { displayToBase, formatAmountInput, formatTokenAmount, parseAmountInput } from "../../types";
 import { usePolling } from "../../hooks/usePolling";
 import { formatRemainingMs } from "./format";
 import { useLiquidityStore } from "./liquidity.store";
@@ -17,12 +19,22 @@ const WIZARD_STEPS = [
 
 type WizardStep = (typeof WIZARD_STEPS)[number]["id"];
 
+// MatchContext routes the matcher through Lock-Mint first (their currency differs from
+// the counterpart, so they must mint their own side's amount before committing). The
+// suggested amount is FX-derived and editable; the counterpart figures are reference only.
+export type MatchContext = {
+  poolPair: string;
+  suggestedAmount: string;
+  counterpartAmount: string;
+  counterpartSide: CommitSide;
+};
+
 type CooperativeLiquidityWizardProps = {
   initialStep?: WizardStep;
   pendingCommit?: PendingCommit | null;
-  // When set, starts at the Commit step with the pool pair and amount pre-filled
-  // (used to match a counterpart's open commit).
-  prefillCommit?: { pool_pair: string; amount: string } | null;
+  // When set, starts at Lock-Mint with the FX-suggested amount pre-filled (editable),
+  // showing the counterpart's open commit as reference. Used by "Match & Activate".
+  matchContext?: MatchContext | null;
   onDone?: () => void;
   onSelectLpForRemoval?: (lpId: string, poolPair: string, providerId: string) => void;
 };
@@ -43,11 +55,12 @@ function toActiveCommitFromPending(pendingCommit: PendingCommit): CommitResult {
 export function CooperativeLiquidityWizard({
   initialStep = 1,
   pendingCommit = null,
-  prefillCommit = null,
+  matchContext = null,
   onDone,
   onSelectLpForRemoval,
 }: CooperativeLiquidityWizardProps) {
   const profile = useAuthStore((state) => state.profile);
+  const tokenDecimals = usePaymentStore((state) => state.tokenDecimals) ?? 18;
   const status = useLiquidityStore((state) => state.status);
   const error = useLiquidityStore((state) => state.error);
   const poolStatus = useLiquidityStore((state) => state.poolStatus);
@@ -55,7 +68,6 @@ export function CooperativeLiquidityWizard({
   const commitStatus = useLiquidityStore((state) => state.commitStatus);
   const commitError = useLiquidityStore((state) => state.commitError);
   const sovereignPhase = useLiquidityStore((state) => state.sovereignPhase);
-  const commitLatencyWarning = useLiquidityStore((state) => state.commitLatencyWarning);
   const operationalHint = useLiquidityStore((state) => state.operationalHint);
   const bridgeLockMintResult = useLiquidityStore((state) => state.bridgeLockMintResult);
   const lpPositions = useLiquidityStore((state) => state.lpPositions);
@@ -63,6 +75,7 @@ export function CooperativeLiquidityWizard({
   const fetchPoolStatus = useLiquidityStore((state) => state.fetchPoolStatus);
   const lockMint = useLiquidityStore((state) => state.lockMint);
   const submitCommit = useLiquidityStore((state) => state.submitCommit);
+  const refreshCommitStatus = useLiquidityStore((state) => state.refreshCommitStatus);
   const cancelActiveCommit = useLiquidityStore((state) => state.cancelActiveCommit);
   const fetchLpPositions = useLiquidityStore((state) => state.fetchLpPositions);
   const clearCommit = useLiquidityStore((state) => state.clearCommit);
@@ -97,11 +110,14 @@ export function CooperativeLiquidityWizard({
   }, [initialStep]);
 
   useEffect(() => {
-    if (prefillCommit) {
-      setCommitPoolPair(prefillCommit.pool_pair);
-      setCommitAmount(prefillCommit.amount);
+    if (matchContext) {
+      // Match & Activate: the matcher must lock-mint their OWN side first. Pre-fill the
+      // FX-suggested amount (editable) on the Lock-Mint step; carry the pool pair forward.
+      setCommitPoolPair(matchContext.poolPair);
+      // suggestedAmount arrives as raw wei from the API — convert to display format.
+      setMintAmount(formatAmountInput(formatTokenAmount(matchContext.suggestedAmount, tokenDecimals)));
     }
-  }, [prefillCommit]);
+  }, [matchContext, tokenDecimals]);
 
   useEffect(() => {
     if (currentStep !== 4 || !profile?.bankId) {
@@ -130,21 +146,19 @@ export function CooperativeLiquidityWizard({
     if (currentStep !== 3) {
       return;
     }
-    if (poolStatus?.pool_status === "ACTIVE") {
+    if (poolStatus?.pool_status === "ACTIVE" || activeCommit?.status === "EXECUTED") {
       setCurrentStep(4);
       setPollingError(null);
-      return;
     }
-    if (poolStatus?.pool_status === "EMPTY" && remainingMs <= 0) {
-      setPollingError("Commit expired before counterpart confirmation.");
-    }
-  }, [currentStep, poolStatus?.pool_status, remainingMs]);
+  }, [currentStep, poolStatus?.pool_status, activeCommit?.status]);
 
   usePolling(
     () => {
       if (currentStep !== 3) {
         return;
       }
+      // Reflect server-driven coordination state: pool reserves + this commit's status.
+      // No hard timeout — the commit lifecycle completes server-side regardless of the UI.
       void fetchPoolStatus(monitoringPoolPair)
         .then(() => {
           setPollingError(null);
@@ -152,6 +166,10 @@ export function CooperativeLiquidityWizard({
         .catch((pollError) => {
           setPollingError(pollError instanceof Error ? pollError.message : "Unable to refresh pool status");
         });
+      const monitoredCommitId = commitForDisplay?.commit_id;
+      if (monitoredCommitId) {
+        void refreshCommitStatus(monitoredCommitId);
+      }
     },
     5000,
     currentStep === 3 && sovereignPhase !== SOVEREIGN_FLOW_PHASE.CANCELLED,
@@ -165,9 +183,11 @@ export function CooperativeLiquidityWizard({
 
   const handleLockMint = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await lockMint(mintAmount);
+    await lockMint(displayToBase(parseAmountInput(mintAmount), tokenDecimals));
 
     if (useLiquidityStore.getState().status === "idle") {
+      // Default the commit amount to what was just minted (the user can still adjust it).
+      setCommitAmount(mintAmount);
       setCurrentStep(2);
     }
   };
@@ -176,7 +196,7 @@ export function CooperativeLiquidityWizard({
     event.preventDefault();
     await submitCommit({
       pool_pair: commitPoolPair,
-      amount: commitAmount,
+      amount: displayToBase(parseAmountInput(commitAmount), tokenDecimals),
     });
 
     const latestCommit = useLiquidityStore.getState().activeCommit;
@@ -260,6 +280,15 @@ export function CooperativeLiquidityWizard({
         {currentStep === 1 ? (
           <form className="space-y-3" onSubmit={handleLockMint}>
             <h3 className="text-sm font-medium">Step 1: Bridge Lock-Mint</h3>
+            {matchContext ? (
+              <div className="rounded border border-blue-300 bg-blue-50 p-2 text-sm text-blue-800">
+                <strong>Matching a counterpart.</strong> They committed{" "}
+                <strong>{formatTokenAmount(matchContext.counterpartAmount, tokenDecimals)} tCeBM</strong> to side{" "}
+                <strong>{matchContext.counterpartSide}</strong>. The amount below is the FX-suggested
+                equivalent on <strong>your</strong> side — adjust it if your rate differs, then lock-mint
+                your own tokens before committing.
+              </div>
+            ) : null}
             <div className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-800">
               <strong>Note:</strong> If your spoke wallet does not already hold enough native tCeBM, this step will{" "}
               <strong>auto-mint</strong> the required amount on your spoke chain, lock it in the SpokeBridge, and mint
@@ -271,9 +300,12 @@ export function CooperativeLiquidityWizard({
               <Input
                 id="wizard_amount"
                 value={mintAmount}
-                onChange={(event) => setMintAmount(event.target.value)}
-                inputMode="numeric"
-                pattern="[0-9]+"
+                onChange={(event) => {
+                  const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+                  setMintAmount(formatAmountInput(cleaned));
+                }}
+                inputMode="decimal"
+                placeholder="0.00"
                 required
               />
             </div>
@@ -316,9 +348,12 @@ export function CooperativeLiquidityWizard({
               <Input
                 id="wizard_commit_amount"
                 value={commitAmount}
-                onChange={(event) => setCommitAmount(event.target.value)}
-                inputMode="numeric"
-                pattern="[0-9]+"
+                onChange={(event) => {
+                  const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+                  setCommitAmount(formatAmountInput(cleaned));
+                }}
+                inputMode="decimal"
+                placeholder="0.00"
                 required
               />
             </div>
@@ -340,6 +375,11 @@ export function CooperativeLiquidityWizard({
         {currentStep === 3 ? (
           <div className="space-y-3">
             <h3 className="text-sm font-medium">Step 3: Monitor</h3>
+            <div className="rounded border border-blue-300 bg-blue-50 p-2 text-sm text-blue-800">
+              Your commit is registered and coordination is running server-side. The pool activates
+              automatically once a counterpart matches — this can take a while and need not be synchronous.
+              <strong> You can safely close this page</strong> and re-open “Monitor Pending Commit” later.
+            </div>
             <div className="space-y-1 text-sm">
               <p>Commit ID: {commitForDisplay?.commit_id ?? "-"}</p>
               <p>
@@ -356,14 +396,8 @@ export function CooperativeLiquidityWizard({
               <Badge variant="outline">Phase: {sovereignPhase}</Badge>
             </div>
             {operationalHint ? <p className="text-sm text-muted-foreground">{operationalHint}</p> : null}
-            {commitLatencyWarning ? (
-              <p className="text-sm text-amber-700">Commit still pending after 30s. The watcher may still execute it.</p>
-            ) : null}
             {sovereignPhase === SOVEREIGN_FLOW_PHASE.CANCELLED ? (
               <p className="text-sm text-muted-foreground">Commit was cancelled.</p>
-            ) : null}
-            {sovereignPhase === SOVEREIGN_FLOW_PHASE.TIMEOUT ? (
-              <p className="text-sm text-destructive">Operation timed out after 180 seconds. Verify bridge/commit status and retry.</p>
             ) : null}
             {pollingError ? <p className="text-sm text-destructive">{pollingError}</p> : null}
             {commitError ? <p className="text-sm text-destructive">{commitError}</p> : null}
@@ -384,8 +418,8 @@ export function CooperativeLiquidityWizard({
           <div className="space-y-4">
             <h3 className="text-sm font-medium">Step 4: Pool ACTIVE</h3>
             <div className="space-y-1 text-sm">
-              <p>Reserve A: {poolStatus?.reserve_a ?? "-"}</p>
-              <p>Reserve B: {poolStatus?.reserve_b ?? "-"}</p>
+              <p>Reserve A: {poolStatus?.reserve_a ? formatTokenAmount(poolStatus.reserve_a, tokenDecimals) : "-"}</p>
+              <p>Reserve B: {poolStatus?.reserve_b ? formatTokenAmount(poolStatus.reserve_b, tokenDecimals) : "-"}</p>
               <p>Current ratio: {poolStatus?.current_ratio ?? "-"}</p>
               <p>Fee rate (bps): {poolStatus?.fee_rate_bps ?? "-"}</p>
               <p>Total LP count: {poolStatus?.total_lp_count ?? "-"}</p>
@@ -399,8 +433,8 @@ export function CooperativeLiquidityWizard({
                     <li key={position.lp_id} className="space-y-1 rounded border p-2 text-sm">
                       <p>lp_id: {position.lp_id}</p>
                       <p>deposit_side: {position.deposit_side}</p>
-                      <p>token_a_contributed: {position.token_a_contributed}</p>
-                      <p>token_b_contributed: {position.token_b_contributed}</p>
+                      <p>token_a_contributed: {formatTokenAmount(position.token_a_contributed, tokenDecimals)}</p>
+                      <p>token_b_contributed: {formatTokenAmount(position.token_b_contributed, tokenDecimals)}</p>
                       <p>commit_id: {position.commit_id || "-"}</p>
                       <Button
                         type="button"

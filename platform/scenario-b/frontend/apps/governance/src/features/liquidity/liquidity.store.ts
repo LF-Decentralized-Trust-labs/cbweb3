@@ -39,6 +39,7 @@ type LiquidityStore = {
   lockMint: (amount: string) => Promise<void>;
   approveAmm: (payload: ApproveAmmRequest) => Promise<void>;
   submitCommit: (payload: CommitRequest) => Promise<void>;
+  refreshCommitStatus: (commitId: string) => Promise<void>;
   cancelActiveCommit: (commitId: string) => Promise<void>;
   fetchLpPositions: (poolPair: string, providerBankId: string) => Promise<void>;
   clearCommit: () => void;
@@ -170,46 +171,25 @@ export const useLiquidityStore = create<LiquidityStore>((set, get) => ({
       operationalHint: null,
     });
     try {
+      // Fire-and-forget: registering the commit persists it server-side (DB + on-chain
+      // LiquidityCommitRegistry) and the Cacti watcher drives it to execution once the
+      // counterpart matches. We do NOT block the UI waiting for settlement — the monitor
+      // step polls refreshCommitStatus()/pool status, and the user can safely leave the
+      // page and re-attach later via "Monitor Pending Commit".
       const result = await liquidityApi.commitLiquidity(payload);
-      set({ activeCommit: result, commitStatus: "idle" });
-
-      if (result.status === "PENDING") {
-        const settledCommit = await liquidityApi.waitForCommitSettled(payload.pool_pair, result.commit_id, () => {
-          set({
-            commitLatencyWarning: true,
-            operationalHint: "Commit still pending for over 30s. Waiting for watcher execution.",
-          });
-        });
-
-        if (!settledCommit) {
-          set({
-            sovereignPhase: SOVEREIGN_FLOW_PHASE.TIMEOUT,
-            commitError: "Commit execution timeout after 180s. Track commit status and retry if needed.",
-          });
-          return;
-        }
-
-        if (settledCommit.status === "CANCELLED") {
-          set({
-            activeCommit: settledCommit,
-            sovereignPhase: SOVEREIGN_FLOW_PHASE.CANCELLED,
-            commitLatencyWarning: false,
-            operationalHint: "Commit was cancelled before execution.",
-          });
-          return;
-        }
-
-        const latestPoolStatus = await liquidityApi.getPoolStatus(payload.pool_pair);
-        set({
-          activeCommit: settledCommit,
-          poolStatus: latestPoolStatus,
-          sovereignPhase:
-            latestPoolStatus.pool_status === "ACTIVE"
-              ? SOVEREIGN_FLOW_PHASE.POOL_ACTIVE
-              : SOVEREIGN_FLOW_PHASE.COMMIT_EXECUTED,
-          commitLatencyWarning: false,
-        });
-      }
+      set({
+        activeCommit: result,
+        commitStatus: "idle",
+        sovereignPhase:
+          result.status === "EXECUTED"
+            ? SOVEREIGN_FLOW_PHASE.COMMIT_EXECUTED
+            : SOVEREIGN_FLOW_PHASE.COMMIT_PENDING,
+        commitLatencyWarning: false,
+        operationalHint:
+          result.status === "EXECUTED"
+            ? null
+            : "Commit registered. Coordination continues server-side — you can safely leave this page.",
+      });
     } catch (error) {
       const apiError = extractApiError(error, "Unable to submit commit");
 
@@ -236,6 +216,44 @@ export const useLiquidityStore = create<LiquidityStore>((set, get) => ({
         commitError: apiError,
         sovereignPhase: SOVEREIGN_FLOW_PHASE.FAILED,
       });
+    }
+  },
+  refreshCommitStatus: async (commitId) => {
+    // Non-blocking poll of a single commit's server-side state. Safe to call on an
+    // interval from the monitor step; never throws into the UI.
+    try {
+      const commit = await liquidityApi.getCommit(commitId);
+      if (!commit) {
+        return;
+      }
+      if (commit.status === "EXECUTED") {
+        const latestPoolStatus = await liquidityApi.getPoolStatus(commit.pool_pair);
+        set({
+          activeCommit: commit,
+          poolStatus: latestPoolStatus,
+          sovereignPhase:
+            latestPoolStatus.pool_status === "ACTIVE"
+              ? SOVEREIGN_FLOW_PHASE.POOL_ACTIVE
+              : SOVEREIGN_FLOW_PHASE.COMMIT_EXECUTED,
+          operationalHint: null,
+        });
+        return;
+      }
+      if (commit.status === "CANCELLED" || commit.status === "EXPIRED") {
+        set({
+          activeCommit: commit,
+          sovereignPhase: SOVEREIGN_FLOW_PHASE.CANCELLED,
+          operationalHint:
+            commit.status === "EXPIRED"
+              ? "Commit expired before a counterpart matched. Cancel and retry when ready."
+              : "Commit was cancelled.",
+        });
+        return;
+      }
+      // PENDING or MATCHED — still coordinating.
+      set({ activeCommit: commit });
+    } catch {
+      // Transient read error — leave state as-is; the next poll retries.
     }
   },
   cancelActiveCommit: async (commitId) => {
