@@ -87,8 +87,8 @@ async function main(): Promise<void> {
 
   // Liveness / readiness
   app.get("/api/v1/health", (_req: Request, res: Response) => {
-    res.json({ 
-      status: "ok", 
+    res.json({
+      status: "ok",
       uptime: process.uptime(),
       mode: "scenario-b-liquidity",
       watcher_active: lcrWatcher !== null,
