@@ -42,6 +42,7 @@ export function HTLCDetailPage() {
   const fetchPayments = usePaymentStore((state) => state.fetchAll);
   const balance = usePaymentStore((state) => state.balance);
   const paymentStatus = usePaymentStore((state) => state.status);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
 
   const [confirmSettle, setConfirmSettle] = useState(false);
   const [confirmRefund, setConfirmRefund] = useState(false);
@@ -122,7 +123,7 @@ export function HTLCDetailPage() {
         </Button>
       </div>
 
-      <BalanceWidget balance={balance} loading={paymentStatus === "loading" && balance === null} />
+      <BalanceWidget balance={balance} loading={paymentStatus === "loading" && balance === null} decimals={tCeBMDecimals} />
 
       {loading ? <p className="text-sm text-muted-foreground">Loading contract details...</p> : null}
 

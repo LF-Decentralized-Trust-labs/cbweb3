@@ -10,12 +10,14 @@ describe("cross-currency-swap utils", () => {
     expect(calcMaxAmountIn("1000000000000000000")).toBe("1100000000000000000");
   });
 
-  it("weiToDisplay formats wei with decimals", () => {
-    expect(weiToDisplay("1000000000000000000", 6)).toBe("1.000000");
+  it("weiToDisplay formats wei using tokenDecimals=18 and displayDecimals=6", () => {
+    expect(weiToDisplay("1000000000000000000", 18, 6)).toBe("1");
+    expect(weiToDisplay("1500000000000000000", 18, 6)).toBe("1.5");
+    expect(weiToDisplay("1000000000000000000", 18)).toBe("1");
   });
 
   it("weiToDisplay returns em dash for invalid value", () => {
-    expect(weiToDisplay("")).toBe("—");
-    expect(weiToDisplay("abc")).toBe("—");
+    expect(weiToDisplay("", 18)).toBe("—");
+    expect(weiToDisplay("abc", 18)).toBe("—");
   });
 });

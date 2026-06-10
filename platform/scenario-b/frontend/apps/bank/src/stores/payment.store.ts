@@ -9,6 +9,8 @@ type PaymentState = {
   redeems: RedeemRecord[];
   balance: string | null;
   fiatBalance: string | null;
+  tCeBMDecimals: number | null;
+  fCeBMDecimals: number | null;
   status: AsyncStatus;
   error: string | null;
   fetchAll: () => Promise<void>;
@@ -37,6 +39,8 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
   redeems: [],
   balance: null,
   fiatBalance: null,
+  tCeBMDecimals: null,
+  fCeBMDecimals: null,
   status: "idle",
   error: null,
   fetchAll: async () => {
@@ -56,7 +60,9 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
         escrows: escrowsResponse.status === "fulfilled" ? escrowsResponse.value.escrows : [],
         redeems: redeemsResponse.status === "fulfilled" ? redeemsResponse.value.redeems : [],
         balance: balanceResponse.status === "fulfilled" ? balanceResponse.value.balance : null,
+        tCeBMDecimals: balanceResponse.status === "fulfilled" ? (balanceResponse.value.decimals ?? null) : null,
         fiatBalance: fiatBalanceResponse.status === "fulfilled" ? fiatBalanceResponse.value.balance : null,
+        fCeBMDecimals: fiatBalanceResponse.status === "fulfilled" ? (fiatBalanceResponse.value.decimals ?? null) : null,
         status: "idle",
       });
     } catch (error) {

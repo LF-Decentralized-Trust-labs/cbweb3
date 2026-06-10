@@ -52,16 +52,20 @@ export function calcMaxAmountIn(amountInWei: string, slippageBps = 1100): string
   return ((BigInt(amountInWei) * BigInt(slippageBps)) / 1000n).toString();
 }
 
-export function weiToDisplay(wei: string, decimals = 6): string {
+// weiToDisplay converts a raw base-unit string to a human-readable decimal string.
+// tokenDecimals is the number of decimal places the token uses (read from contract).
+// displayDecimals controls how many fractional digits to show (default 6).
+export function weiToDisplay(wei: string, tokenDecimals: number, displayDecimals = 6): string {
   if (!wei || !/^\d+$/.test(wei)) {
     return "—";
   }
 
-  const whole = BigInt(wei) / 10n ** 18n;
-  const frac = (BigInt(wei) % 10n ** 18n)
+  const divisor = 10n ** BigInt(tokenDecimals);
+  const whole = BigInt(wei) / divisor;
+  const frac = (BigInt(wei) % divisor)
     .toString()
-    .padStart(18, "0")
-    .slice(0, decimals);
+    .padStart(tokenDecimals, "0")
+    .slice(0, displayDecimals);
 
-  return `${whole}.${frac}`;
+  return frac.replace(/0+$/, "") ? `${whole}.${frac.replace(/0+$/, "")}` : whole.toString();
 }

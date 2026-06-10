@@ -24,9 +24,10 @@ import {
   CROSS_CURRENCY_QUOTE_REFRESH_MS,
   weiToDisplay,
 } from "../services/api/cross-currency-swap.api";
-import { useAuthStore } from "../stores";
+import { useAuthStore, usePaymentStore } from "../stores";
 import { SWAP_ERROR } from "../types/amm-v2.types";
 import { CROSS_CURRENCY_SWAP_ERROR } from "../types/cross-currency-swap.types";
+import { displayToBase, formatAmountInput, parseAmountInput } from "../types";
 
 export function AMMTradingPage() {
   return <AMMTradingV2 />;
@@ -47,6 +48,8 @@ function AMMTradingV2() {
   const fetchCircuitBreakerState = useAmmV2Store((state) => state.fetchCircuitBreakerState);
   const approveAmm = useAmmV2Store((state) => state.approveAmm);
   const sessionBankId = useAuthStore((state) => state.profile?.bankId ?? "");
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
+  const tokenDecimals = tCeBMDecimals ?? 18;
 
   const [pair, setPair] = useState("BRL-ARS");
   const [amountOut, setAmountOut] = useState("");
@@ -93,7 +96,7 @@ function AMMTradingV2() {
       if (!amountOut) {
         return;
       }
-      void fetchQuote(pair, amountOut);
+      void fetchQuote(pair, displayToBase(parseAmountInput(amountOut), tokenDecimals));
     },
     QUOTE_REFRESH_INTERVAL_MS,
     Boolean(quote && amountOut),
@@ -101,7 +104,7 @@ function AMMTradingV2() {
 
   const handleGetQuote = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await fetchQuote(pair, amountOut);
+    await fetchQuote(pair, displayToBase(parseAmountInput(amountOut), tokenDecimals));
   };
 
   const handleSwap = async (event: FormEvent<HTMLFormElement>) => {
@@ -112,8 +115,8 @@ function AMMTradingV2() {
 
     await executeSwap({
       pair,
-      amount_out: amountOut,
-      max_amount_in: maxAmountIn,
+      amount_out: displayToBase(parseAmountInput(amountOut), tokenDecimals),
+      max_amount_in: displayToBase(parseAmountInput(maxAmountIn), tokenDecimals),
       payer_id: sessionBankId,
       beneficiary_id: beneficiaryId,
     });
@@ -121,7 +124,7 @@ function AMMTradingV2() {
 
   const handleApproveAmm = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await approveAmm(approveAmount);
+    await approveAmm(displayToBase(parseAmountInput(approveAmount), tokenDecimals));
   };
 
   const swapErrorMessage = useMemo(() => {
@@ -182,7 +185,17 @@ function AMMTradingV2() {
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="amount_out">Amount Out</Label>
-                  <Input id="amount_out" value={amountOut} onChange={(event) => setAmountOut(event.target.value)} inputMode="numeric" pattern="[0-9]+" required />
+                  <Input
+                    id="amount_out"
+                    value={amountOut}
+                    onChange={(event) => {
+                      const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+                      setAmountOut(formatAmountInput(cleaned));
+                    }}
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    required
+                  />
                 </div>
                 <Button type="submit" disabled={status === "loading"}>
                   {status === "loading" ? "Submitting..." : "Get Quote"}
@@ -191,7 +204,7 @@ function AMMTradingV2() {
 
               {quote ? (
                 <div className="mt-4 space-y-1 rounded-md border border-border p-3 text-sm">
-                  <p>Required Input: {quote.required_input}</p>
+                  <p>Required Input: {weiToDisplay(quote.required_input, tokenDecimals)}</p>
                   <p>Price Impact: {(parseFloat(quote.price_impact) * 100).toFixed(2)}%</p>
                   <p>Quote Timestamp: {new Date(quote.quote_timestamp * 1000).toLocaleString()}</p>
                   {isQuoteStale ? (
@@ -220,11 +233,31 @@ function AMMTradingV2() {
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="swap_amount_out">Amount Out</Label>
-                  <Input id="swap_amount_out" value={amountOut} onChange={(event) => setAmountOut(event.target.value)} inputMode="numeric" pattern="[0-9]+" required />
+                  <Input
+                    id="swap_amount_out"
+                    value={amountOut}
+                    onChange={(event) => {
+                      const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+                      setAmountOut(formatAmountInput(cleaned));
+                    }}
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    required
+                  />
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="max_amount_in">Max Amount In</Label>
-                  <Input id="max_amount_in" value={maxAmountIn} onChange={(event) => setMaxAmountIn(event.target.value)} inputMode="numeric" pattern="[0-9]+" required />
+                  <Input
+                    id="max_amount_in"
+                    value={maxAmountIn}
+                    onChange={(event) => {
+                      const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+                      setMaxAmountIn(formatAmountInput(cleaned));
+                    }}
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    required
+                  />
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="payer_id">Payer ID</Label>
@@ -251,7 +284,7 @@ function AMMTradingV2() {
                 <div className="mt-4 space-y-1 rounded-md border border-border p-3 text-sm">
                   <p>Order ID: {swapResult.order_id}</p>
                   <p>Tx Hash: {swapResult.tx_hash}</p>
-                  <p>Amount In: {swapResult.amount_in}</p>
+                  <p>Amount In: {weiToDisplay(swapResult.amount_in, tokenDecimals)}</p>
                   <p>Confirmed At: {swapResult.confirmed_at}</p>
                 </div>
               ) : null}
@@ -276,8 +309,8 @@ function AMMTradingV2() {
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
             <p>Pair: {poolStatus?.pool_pair ?? pair}</p>
-            <p>Reserve A: {poolStatus?.reserve_a ?? "-"}</p>
-            <p>Reserve B: {poolStatus?.reserve_b ?? "-"}</p>
+            <p>Reserve A: {poolStatus?.reserve_a ? weiToDisplay(poolStatus.reserve_a, tokenDecimals) : "-"}</p>
+            <p>Reserve B: {poolStatus?.reserve_b ? weiToDisplay(poolStatus.reserve_b, tokenDecimals) : "-"}</p>
             <p>Current Ratio: {poolStatus?.current_ratio ?? "-"}</p>
             <p>Updated At: {poolStatus?.updated_at ?? "-"}</p>
           </CardContent>
@@ -296,7 +329,17 @@ function AMMTradingV2() {
               <form className="space-y-3" onSubmit={handleApproveAmm}>
                 <div className="space-y-1">
                   <Label htmlFor="approve_amount">Amount</Label>
-                  <Input id="approve_amount" value={approveAmount} onChange={(event) => setApproveAmount(event.target.value)} inputMode="numeric" pattern="[0-9]+" required />
+                  <Input
+                    id="approve_amount"
+                    value={approveAmount}
+                    onChange={(event) => {
+                      const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+                      setApproveAmount(formatAmountInput(cleaned));
+                    }}
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    required
+                  />
                 </div>
                 <Button type="submit" variant="outline" disabled={status === "loading"}>
                   {status === "loading" ? "Submitting..." : "Submit Approve AMM"}
@@ -351,6 +394,8 @@ function CrossCurrencySwapPanel() {
   const acknowledgeSwapError = useCrossCurrencySwapStore((state) => state.acknowledgeSwapError);
   const clearQuoteRefreshedNotice = useCrossCurrencySwapStore((state) => state.clearQuoteRefreshedNotice);
   const reset = useCrossCurrencySwapStore((state) => state.reset);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
+  const tokenDecimals = tCeBMDecimals ?? 18;
 
   const [sourceCurrency, setSourceCurrency] = useState("BRL");
   const [targetCurrency, setTargetCurrency] = useState("ARS");
@@ -375,7 +420,7 @@ function CrossCurrencySwapPanel() {
       if (!amountOut) {
         return;
       }
-      void fetchQuote(sourceCurrency, targetCurrency, amountOut);
+      void fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals));
     },
     CROSS_CURRENCY_QUOTE_REFRESH_MS,
     step === "idle" && quote !== null && amountOut.length > 0,
@@ -397,13 +442,13 @@ function CrossCurrencySwapPanel() {
     }
 
     const timeoutId = window.setTimeout(() => {
-      void fetchQuote(sourceCurrency, targetCurrency, amountOut);
+      void fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals));
     }, 600);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [amountOut, fetchQuote, sourceCurrency, targetCurrency]);
+  }, [amountOut, fetchQuote, sourceCurrency, targetCurrency, tokenDecimals]);
 
   const ttlSeconds = useMemo(() => {
     if (!quoteExpiresAt) {
@@ -427,7 +472,7 @@ function CrossCurrencySwapPanel() {
   const handleGetQuote = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     clearQuoteRefreshedNotice();
-    await fetchQuote(sourceCurrency, targetCurrency, amountOut);
+    await fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals));
   };
 
   const handleExecuteSwap = async (event: FormEvent<HTMLFormElement>) => {
@@ -441,7 +486,7 @@ function CrossCurrencySwapPanel() {
       source_currency: sourceCurrency,
       target_currency: targetCurrency,
       pool_pair: CROSS_CURRENCY_POOL_PAIR,
-      amount_out: amountOut,
+      amount_out: displayToBase(parseAmountInput(amountOut), tokenDecimals),
       max_amount_in: calcMaxAmountIn(quote.amount_in),
       beneficiary_bank_id: beneficiaryBankId,
       quote_id: quote.quote_id,
@@ -507,16 +552,17 @@ function CrossCurrencySwapPanel() {
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="cross_amount_out">Amount Out (wei)</Label>
+                <Label htmlFor="cross_amount_out">Amount Out</Label>
                 <Input
                   id="cross_amount_out"
                   value={amountOut}
                   onChange={(event) => {
                     clearQuoteRefreshedNotice();
-                    setAmountOut(event.target.value);
+                    const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+                    setAmountOut(formatAmountInput(cleaned));
                   }}
-                  inputMode="numeric"
-                  pattern="[0-9]+"
+                  inputMode="decimal"
+                  placeholder="0.00"
                   required
                 />
               </div>
@@ -536,10 +582,10 @@ function CrossCurrencySwapPanel() {
           <CardContent className="space-y-2 text-sm">
             <p>Effective Rate: {quote.effective_rate}</p>
             <p>
-              Amount In: {weiToDisplay(quote.amount_in)} {sourceCurrency}
+              Amount In: {weiToDisplay(quote.amount_in, tokenDecimals)} {sourceCurrency}
             </p>
             <p>
-              Amount Out: {weiToDisplay(quote.amount_out)} {targetCurrency}
+              Amount Out: {weiToDisplay(quote.amount_out, tokenDecimals)} {targetCurrency}
             </p>
             <p>TTL: {ttlSeconds ?? "-"}s</p>
           </CardContent>
@@ -560,7 +606,7 @@ function CrossCurrencySwapPanel() {
               <div className="space-y-1">
                 <Label>Max Amount In (with slippage)</Label>
                 <p className="rounded-md border border-border p-2 text-sm">
-                  {weiToDisplay(maxAmountIn)} {sourceCurrency}
+                  {weiToDisplay(maxAmountIn, tokenDecimals)} {sourceCurrency}
                 </p>
               </div>
               <Button
@@ -606,8 +652,8 @@ function CrossCurrencySwapPanel() {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <p>Swap Tx Hash: {swapResult.swap_tx_hash ?? "-"}</p>
-            <p>Amount In: {weiToDisplay(swapResult.amount_in ?? "")}</p>
-            <p>Amount Out: {weiToDisplay(swapResult.amount_out ?? "")}</p>
+            <p>Amount In: {weiToDisplay(swapResult.amount_in ?? "", tokenDecimals)}</p>
+            <p>Amount Out: {weiToDisplay(swapResult.amount_out ?? "", tokenDecimals)}</p>
             <p>Bridge In Position: {swapResult.bridge_in_position_id ?? "-"}</p>
             <p>Bridge Out Position: {swapResult.bridge_out_position_id ?? "-"}</p>
             <p>Correlation ID: {swapResult.correlation_id ?? "-"}</p>

@@ -37,6 +37,7 @@ export function HTLCNewPage() {
   const fetchPayments = usePaymentStore((state) => state.fetchAll);
   const balance = usePaymentStore((state) => state.balance);
   const paymentStatus = usePaymentStore((state) => state.status);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
 
   const fetchAgreements = useFxAgreementStore((s) => s.fetchAll);
   const agreements = useFxAgreementStore((s) => s.agreements);
@@ -223,7 +224,7 @@ export function HTLCNewPage() {
         </Button>
       </div>
 
-      <BalanceWidget balance={balance} loading={paymentStatus === "loading" && balance === null} />
+      <BalanceWidget balance={balance} loading={paymentStatus === "loading" && balance === null} decimals={tCeBMDecimals} />
 
       {/* ── FX Agreement Picker ──────────────────────────────────────── */}
       <Card>
