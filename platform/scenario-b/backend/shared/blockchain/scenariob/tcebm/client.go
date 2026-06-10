@@ -19,6 +19,7 @@ import (
 
 // ABIJSON is the minimal ABI for TokenizedCentralBankMoney (ERC-20 + RBAC mint/burn).
 const ABIJSON = `[
+{"type":"function","name":"decimals","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"uint8"}]},
 {"type":"function","name":"balanceOf","stateMutability":"view","inputs":[
   {"name":"account","type":"address"}
 ],"outputs":[{"name":"","type":"uint256"}]},
@@ -108,6 +109,15 @@ func (c *Client) SignerAddress() string {
 		return ""
 	}
 	return c.signer.Address().Hex()
+}
+
+// Decimals returns the number of decimal places used by this token (e.g. 18 for standard ERC-20).
+func (c *Client) Decimals(ctx context.Context) (uint8, error) {
+	var result uint8
+	if err := evm.Call(ctx, c.ec, c.contract, c.abi, "decimals", nil, &result); err != nil {
+		return 0, fmt.Errorf("tcebm: decimals: %w", err)
+	}
+	return result, nil
 }
 
 // BalanceOf returns the token balance of an address as a decimal string.
