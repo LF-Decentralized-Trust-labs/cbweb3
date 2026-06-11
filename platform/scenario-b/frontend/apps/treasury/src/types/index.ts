@@ -14,3 +14,4 @@ export type { TvlSnapshot, SpokeHubDelta } from "./reconciliation.types";
 export type { AuditLogEntry, AuditFilter } from "./audit.types";
 export type { IssueCredentialPayload, IssuedCredential } from "./kyc.types";
 export type { EventType, TreasuryEvent } from "./events.types";
+export type { TransferLimit, CreateTransferLimitPayload } from "./transfer-limits.types";

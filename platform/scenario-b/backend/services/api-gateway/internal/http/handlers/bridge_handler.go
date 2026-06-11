@@ -26,6 +26,12 @@ type BridgePositionReaderIface interface {
 	ListPositions(ctx context.Context, stateFilter string) ([]services.BridgePositionResult, error)
 }
 
+// BridgeLimitCheckerIface is the transfer limit interface consumed by BridgeHandler (R1-10.1).
+type BridgeLimitCheckerIface interface {
+	CheckAndDeduct(ctx context.Context, payerBankID, currency, amountHuman string) error
+	Restore(ctx context.Context, payerBankID, currency, amountHuman string)
+}
+
 // BridgeHandler handles Lock&Mint / Burn&Unlock bridge operations.
 type BridgeHandler struct {
 	lockMintSvc   BridgeLockMintServiceIface
@@ -36,6 +42,8 @@ type BridgeHandler struct {
 	nativeAssetSymbol string
 	wTokenAddress     string
 	fallbackBankCode  string
+	// limitChecker enforces configurable CB daily transfer limits (R1-10.1). Optional.
+	limitChecker BridgeLimitCheckerIface
 }
 
 // NewBridgeHandler creates a BridgeHandler (legacy mode - requires full payload).
@@ -66,6 +74,12 @@ func NewBridgeHandlerSimplified(
 // SetFallbackBankCode configures BANK_CODE fallback for owner resolution when JWT claims lack BankID.
 func (h *BridgeHandler) SetFallbackBankCode(bankCode string) *BridgeHandler {
 	h.fallbackBankCode = strings.TrimSpace(bankCode)
+	return h
+}
+
+// WithLimitChecker attaches a transfer limit checker to the bridge handler (R1-10.1).
+func (h *BridgeHandler) WithLimitChecker(checker BridgeLimitCheckerIface) *BridgeHandler {
+	h.limitChecker = checker
 	return h
 }
 
@@ -141,8 +155,21 @@ func (h *BridgeHandler) LockMint(c *fiber.Ctx) error {
 		log.Printf("[DEPRECATED] mirrored_asset in payload - should be derived from server config")
 	}
 
+	// R1-10.1: enforce daily transfer limit before submitting the lock.
+	if h.limitChecker != nil {
+		if err := h.limitChecker.CheckAndDeduct(c.Context(), ownerBankID, nativeAsset, req.Amount); err != nil {
+			return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+				"error":      err.Error(),
+				"error_code": "TRANSFER_LIMIT_EXCEEDED",
+			})
+		}
+	}
+
 	pos, err := h.lockMintSvc.LockAndEnqueue(c.Context(), ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, req.Amount)
 	if err != nil {
+		if h.limitChecker != nil {
+			h.limitChecker.Restore(c.Context(), ownerBankID, nativeAsset, req.Amount)
+		}
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(pos)

@@ -436,6 +436,16 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		deps.OversightService = services.NewOversightService(db)
 	}
 
+	// R1-10.1: Transfer limit checker — created early so orchestrator and bridge handler can use it.
+	var transferLimitChecker *services.TransferLimitChecker
+	if db != nil {
+		limitRepo := newTransferLimitRepository(db)
+		volumeRepo := newTransferVolumeRepository(db)
+		transferLimitChecker = services.NewTransferLimitChecker(limitRepo, volumeRepo)
+		deps.TransferLimitHandler = handlers.NewTransferLimitHandler(limitRepo)
+		deps.TransferLimitChecker = transferLimitChecker
+	}
+
 	// 009-commercial-cross-currency-swap: Wire orchestrator for cross-currency swaps (T014).
 	if db != nil && swapSvc != nil && bridgeLockMintSvc != nil && bridgeBurnUnlockSvc != nil && ammClient != nil {
 		adapter := &ammAdapter{c: ammClient}
@@ -523,6 +533,9 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			}
 		}
 
+		if transferLimitChecker != nil {
+			orchestrator = orchestrator.WithTransferLimitChecker(transferLimitChecker)
+		}
 		deps.CrossCurrencySwapOrchestrator = orchestrator
 
 		// 009-commercial-cross-currency-swap: Wire quote generator with 15s TTL (T030/T031).

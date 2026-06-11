@@ -127,6 +127,8 @@ type CrossCurrencySwapOrchestrator struct {
 	// hubSignerAddress is the Hub address used by this gateway's signer (SIGNER_PRIVATE_KEY).
 	// After the AMM swap, W-ARS lands on this address; CB-B uses it as burnFrom.
 	hubSignerAddress string
+	// transferLimitChecker enforces configurable CB daily transfer limits (R1-10.1).
+	transferLimitChecker TransferLimitCheckerIface
 }
 
 // NewCrossCurrencySwapOrchestrator creates an orchestrator.
@@ -176,6 +178,13 @@ func (o *CrossCurrencySwapOrchestrator) WithBridgeInRelay(relay BridgeInRelayIfa
 // where to burn from (CB-B has CENTRAL_BANK_ROLE = can burn from any address).
 func (o *CrossCurrencySwapOrchestrator) WithHubSignerAddress(addr string) *CrossCurrencySwapOrchestrator {
 	o.hubSignerAddress = addr
+	return o
+}
+
+// WithTransferLimitChecker attaches the CB transfer limit enforcer (R1-10.1).
+// When set, CheckAndDeduct is called before Step 1 (bridge-in) and Restore is called on failure.
+func (o *CrossCurrencySwapOrchestrator) WithTransferLimitChecker(checker TransferLimitCheckerIface) *CrossCurrencySwapOrchestrator {
+	o.transferLimitChecker = checker
 	return o
 }
 
@@ -250,6 +259,25 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			_ = o.failSwap(ctx, req.SwapID, "circuit breaker is HALTED")
 			return nil, fmt.Errorf("pool %s circuit breaker is HALTED", req.PoolPair)
 		}
+	}
+
+	// Pre-condition 3: Daily transfer limit check (R1-10.1).
+	// MaxAmountIn is the worst-case amount the payer will spend; use it for limit accounting.
+	if o.transferLimitChecker != nil {
+		if err := o.transferLimitChecker.CheckAndDeduct(ctx, req.PayerBankID, req.SourceCurrency, req.MaxAmountIn); err != nil {
+			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("transfer limit check failed: %v", err))
+			return nil, err
+		}
+		// Restore quota on any subsequent failure in Steps 1–3.
+		defer func() {
+			// Only restore if the swap ultimately failed (checked via DB status).
+			if recovered := o.swapRepo; recovered != nil {
+				op, fetchErr := recovered.GetByID(ctx, req.SwapID)
+				if fetchErr == nil && op != nil && op.Status == domain.SwapStatusFailed {
+					o.transferLimitChecker.Restore(ctx, req.PayerBankID, req.SourceCurrency, req.MaxAmountIn)
+				}
+			}
+		}()
 	}
 
 	// Step 1: Bridge-In (Spoke-A → Hub)

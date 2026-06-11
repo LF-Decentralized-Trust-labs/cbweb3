@@ -11,6 +11,7 @@ import { LoginPage } from "../pages/LoginPage";
 import { ReconciliationPage } from "../pages/ReconciliationPage";
 import { RedemptionPage } from "../pages/RedemptionPage";
 import { SettingsPage } from "../pages/SettingsPage";
+import { TransferLimitsPage } from "../pages/TransferLimitsPage";
 
 export const routes: RouteObject[] = [
   {
@@ -32,6 +33,7 @@ export const routes: RouteObject[] = [
           { path: "audit", element: <AuditPage /> },
           { path: "kyc", element: <KycPage /> },
           { path: "settings", element: <SettingsPage /> },
+          { path: "transfer-limits", element: <TransferLimitsPage /> },
         ],
       },
     ],

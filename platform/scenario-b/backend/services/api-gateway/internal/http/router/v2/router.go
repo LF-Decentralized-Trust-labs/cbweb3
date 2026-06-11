@@ -43,6 +43,12 @@ type Dependencies struct {
 	// CBChecker enables the anti-G5-cross guard in mint-and-approve (FR-004 / T016).
 	// When nil, the guard is disabled and mint-and-approve behaves as before.
 	CBChecker handlers.CentralBankChecker
+	// TransferLimitHandler manages configurable CB daily transfer limits (R1-10.1).
+	// When nil, transfer limit endpoints are not registered.
+	TransferLimitHandler *handlers.TransferLimitHandler
+	// TransferLimitChecker enforces limits on bridge lock-mint and cross-currency swap (R1-10.1).
+	// When nil, enforcement is skipped (no limits configured).
+	TransferLimitChecker handlers.BridgeLimitCheckerIface
 	// InternalRelayAuthSecret is the shared secret for X-Relay-Auth on internal routes.
 	InternalRelayAuthSecret string
 	// FiatTokenAddress is the tCeBM contract address on this CB's spoke (TOKEN_ADDRESS).
@@ -206,6 +212,10 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 				deps.BridgePositionReader,
 			).SetFallbackBankCode(deps.BankCode)
 		}
+		// R1-10.1: attach transfer limit checker to bridge handler when configured.
+		if deps.TransferLimitChecker != nil {
+			bh = bh.WithLimitChecker(deps.TransferLimitChecker)
+		}
 		if deps.AuthProvider != nil {
 			// spec-007 FR-001: CBs use the same lock-mint/burn-unlock/positions endpoints as
 			// commercial banks. RequireAnyAuth accepts cookie (browser) or Bearer header (M2M/CB
@@ -337,6 +347,24 @@ func registerUS3Routes(app *fiber.App, deps Dependencies) {
 			gh.SignResume,
 		)
 		gov.Get("/circuit-breaker/status", gh.GetCircuitBreakerStatus)
+	}
+
+	if deps.TransferLimitHandler != nil {
+		gov.Post("/transfer-limits",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			middleware.RequireCentralBankRole(),
+			deps.TransferLimitHandler.CreateTransferLimit,
+		)
+		gov.Get("/transfer-limits",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			middleware.RequireCentralBankRole(),
+			deps.TransferLimitHandler.ListTransferLimits,
+		)
+		gov.Delete("/transfer-limits/:id",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			middleware.RequireCentralBankRole(),
+			deps.TransferLimitHandler.DeleteTransferLimit,
+		)
 	}
 
 	oversight := app.Group("/api/v2/oversight")
