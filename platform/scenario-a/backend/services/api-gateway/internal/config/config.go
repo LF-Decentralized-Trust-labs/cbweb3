@@ -26,7 +26,8 @@ type Config struct {
 	PaladinIdentity    string // Paladin identity for this entity; used for Zeto operations
 	CBPaladinIdentity  string // Central Bank's Paladin identity; receiver for Zeto transfers in redeem flow
 	RelayAuthSecret    string // shared secret for X-Relay-Auth header on internal service-to-service endpoints
-	FiatSymbol         string // currency symbol for transfer limit matching (e.g. "BRL", "ARS"); from FIAT_SYMBOL
+	FiatSymbol                   string // currency symbol for transfer limit matching (e.g. "BRL", "ARS"); from FIAT_SYMBOL
+	TransferLimitComplianceAddr  string // when set, limit-enforcement checks are sent to this compliance address instead of ComplianceGRPCAddr; allows commercial-bank gateways to query the central bank's compliance service
 }
 
 // Load reads environment variables and returns a fully populated Config.
@@ -50,7 +51,8 @@ func Load() Config {
 		PaladinIdentity:    getEnv("PALADIN_IDENTITY", ""),
 		CBPaladinIdentity:  getEnv("CB_PALADIN_IDENTITY", ""),
 		RelayAuthSecret:    getEnv("INTERNAL_RELAY_AUTH_SECRET", ""),
-		FiatSymbol:         getEnv("FIAT_SYMBOL", ""),
+		FiatSymbol:                  getEnv("FIAT_SYMBOL", ""),
+		TransferLimitComplianceAddr: getEnv("TRANSFER_LIMIT_COMPLIANCE_ADDR", ""),
 	}
 }
 

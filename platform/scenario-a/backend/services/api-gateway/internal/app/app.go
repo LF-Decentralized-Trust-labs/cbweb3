@@ -102,7 +102,19 @@ func New(cfg config.Config) (*App, error) {
 		closers = append(closers, paymentGRPC)
 		ph := handlers.NewPaymentHandler(paymentGRPC, cfg.BankCode)
 		if cfg.FiatSymbol != "" {
-			ph = ph.WithLimitChecker(complianceGRPC, cfg.FiatSymbol)
+			limitComplianceGRPC := complianceGRPC
+			// Commercial banks point their limit checks at the central bank's compliance service,
+			// since transfer limits are stored there (managed by the CB Treasury portal).
+			if cfg.TransferLimitComplianceAddr != "" {
+				tlConn, err := complianceadapter.NewGRPCAdapter(cfg.TransferLimitComplianceAddr, cfg.RequestTimeout)
+				if err != nil {
+					closeAll(closers)
+					return nil, fmt.Errorf("transfer limit compliance gRPC unavailable at %s: %w", cfg.TransferLimitComplianceAddr, err)
+				}
+				closers = append(closers, tlConn)
+				limitComplianceGRPC = tlConn
+			}
+			ph = ph.WithLimitChecker(limitComplianceGRPC, cfg.FiatSymbol)
 		}
 		deps.PaymentHandler = ph
 

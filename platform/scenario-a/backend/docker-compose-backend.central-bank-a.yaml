@@ -92,6 +92,8 @@ services:
       COMPLIANCE_GRPC_ADDR: compliance-central-bank-a:9093
       PAYMENT_GRPC_ADDR: payment-orchestrator-central-bank-a:9094
       PKI_DIR: /workspace/backend/config/pki
+      BANK_CODE: "central-bank-a"
+      FIAT_SYMBOL: "BRL"
     volumes:
       - ./config/pki:/workspace/backend/config/pki
     ports:
