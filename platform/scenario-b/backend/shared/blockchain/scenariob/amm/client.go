@@ -355,17 +355,31 @@ func (c *Client) AddLiquidity(ctx context.Context, amountA, amountB *big.Int) (s
 // RemoveLiquidity burns `shares` of the configured signer and returns a single home currency
 // (homeIsTokenA selects TOKEN_A vs TOKEN_B) via the zap-out path (decision D1), enforcing
 // `minAmountOut`. The signer must own the shares — withdrawal authority lives with the share
-// owner now that shares are on-chain (decision D4).
-func (c *Client) RemoveLiquidity(ctx context.Context, shares *big.Int, homeIsTokenA bool, minAmountOut *big.Int) (string, error) {
+// owner now that shares are on-chain (decision D4). Returns the realized amountOut decoded from
+// LogLiquidityRemoved, plus the transaction hash.
+func (c *Client) RemoveLiquidity(ctx context.Context, shares *big.Int, homeIsTokenA bool, minAmountOut *big.Int) (amountOut *big.Int, txHash string, err error) {
 	if c.signer == nil {
-		return "", errors.New("amm: removeLiquidity requires a signing key")
+		return nil, "", errors.New("amm: removeLiquidity requires a signing key")
 	}
 	tokenOut := c.tokenB
 	if homeIsTokenA {
 		tokenOut = c.tokenA
 	}
-	return evm.SubmitTx(ctx, c.ec, c.signer, c.contract, c.abi,
+	// keccak256("LogLiquidityRemoved(address,uint256,address,uint256)")
+	eventSig := crypto.Keccak256Hash([]byte("LogLiquidityRemoved(address,uint256,address,uint256)"))
+	receipt, txHash, err := evm.SubmitTxReceipt(ctx, c.ec, c.signer, c.contract, c.abi,
 		"removeLiquidity", shares, tokenOut, minAmountOut)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, lg := range receipt.Logs {
+		// topics = [sig, provider, tokenOut]; data = sharesBurned (32) + amountOut (32).
+		if len(lg.Topics) >= 3 && lg.Topics[0] == eventSig && len(lg.Data) >= 64 {
+			return new(big.Int).SetBytes(lg.Data[32:64]), txHash, nil
+		}
+	}
+	// Burn succeeded but the event was not found (unexpected) — report success without the amount.
+	return nil, txHash, nil
 }
 
 // LPBalanceOf returns the LP-share balance of `holder` on the configured AMM (the on-chain

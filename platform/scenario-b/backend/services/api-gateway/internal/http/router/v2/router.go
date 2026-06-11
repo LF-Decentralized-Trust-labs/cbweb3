@@ -255,8 +255,10 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 			middleware.RequireLiquidityProviderRole(),
 			lh.AddLiquidity,
 		)
+		// D7/013: withdrawal is a sovereign CB operation — RequireAnyAuth so CB M2M
+		// (bearer) clients can withdraw, mirroring /liquidity/commit.
 		amm.Post("/liquidity/remove",
-			middleware.RequireCookieAuth(deps.AuthProvider),
+			middleware.RequireAnyAuth(deps.AuthProvider),
 			middleware.RequireLiquidityProviderRole(),
 			lh.RemoveLiquidity,
 		)

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -530,5 +531,71 @@ func TestFullHappyPath(t *testing.T) {
 		assert.NotEmpty(t, finalBalance.Balance, "Bank B tCeBM balance must be set after bridge-out")
 		assert.NotEqual(t, "0", finalBalance.Balance, "Bank B tCeBM balance must be > 0 after bridge-out")
 		t.Logf("Bank B receipt confirmed: tCeBM balance=%s (swap_id=%s)", finalBalance.Balance, swapID)
+	})
+
+	// Phase 6: LP-share withdrawal (specs/013-amm-lp-shares, decisions D1/D4/D7).
+	// CB-A burns its on-chain CBW3-LP shares and receives a single home-currency amount
+	// (W-BRL) via the zap-out path. Runs LAST: it removes ~half the pool's liquidity.
+	t.Run("phase_6_lp_withdrawal", func(t *testing.T) {
+		t.Log("Step 1: Reading CB-A on-chain LP-share position (lp-balance endpoint)...")
+		var lpBal struct {
+			LPShares        string  `json:"lp_shares"`
+			LPTotalSupply   string  `json:"lp_total_supply"`
+			SharePercentage float64 `json:"share_percentage"`
+		}
+		cbA.mustGet(t, "/api/v2/amm/lp-balance", &lpBal)
+		t.Logf("CB-A lp_shares=%s total_supply=%s share=%.2f%%",
+			lpBal.LPShares, lpBal.LPTotalSupply, lpBal.SharePercentage)
+		require.NotEmpty(t, lpBal.LPShares, "lp_shares must be set")
+		require.NotEqual(t, "0", lpBal.LPShares, "CB-A must hold on-chain LP shares after phase 1")
+
+		t.Log("Step 2: Finding CB-A's ACTIVE liquidity position...")
+		var positions struct {
+			Positions []struct {
+				LPID           string `json:"lp_id"`
+				ProviderBankID string `json:"provider_bank_id"`
+				PoolPair       string `json:"pool_pair"`
+				Status         string `json:"status"`
+				DepositSide    string `json:"deposit_side"`
+			} `json:"positions"`
+		}
+		cbA.mustGet(t, "/api/v2/amm/liquidity/positions?pool_pair="+poolPair, &positions)
+		var lpID, providerID string
+		for _, p := range positions.Positions {
+			if p.Status == "ACTIVE" {
+				lpID, providerID = p.LPID, p.ProviderBankID
+				break
+			}
+		}
+		require.NotEmpty(t, lpID, "CB-A must have an ACTIVE liquidity position")
+		t.Logf("Withdrawing position lp_id=%s provider=%s", lpID, providerID)
+
+		t.Log("Step 3: CB-A withdraws (burn shares -> home currency zap-out)...")
+		var result struct {
+			TokenAAmount   string `json:"token_a_amount"`
+			TokenBAmount   string `json:"token_b_amount"`
+			LPShares       string `json:"lp_shares"`
+			WithdrawalMode string `json:"withdrawal_mode"`
+		}
+		cbA.mustPost(t, "/api/v2/amm/liquidity/remove", map[string]string{
+			"pool_pair":        poolPair,
+			"provider_bank_id": providerID,
+			"lp_id":            lpID,
+		}, &result)
+		t.Logf("Withdrawal: mode=%s shares_burned=%s out_a=%s out_b=%s",
+			result.WithdrawalMode, result.LPShares, result.TokenAAmount, result.TokenBAmount)
+		require.Equal(t, "SHARES_HOME_CURRENCY", result.WithdrawalMode, "must use the on-chain shares path")
+		require.NotEqual(t, "0", result.TokenAAmount, "side-A provider must receive home currency (token A)")
+		require.False(t, strings.HasPrefix(result.TokenAAmount, "0x"),
+			"token_a_amount must be the realized amount, not a tx hash")
+		require.Equal(t, "0", result.TokenBAmount, "single-currency exit must not return token B")
+
+		t.Log("Step 4: Asserting CB-A's on-chain LP balance decreased...")
+		var lpAfter struct {
+			LPShares string `json:"lp_shares"`
+		}
+		cbA.mustGet(t, "/api/v2/amm/lp-balance", &lpAfter)
+		t.Logf("CB-A lp_shares after withdrawal: %s (was %s)", lpAfter.LPShares, lpBal.LPShares)
+		require.NotEqual(t, lpBal.LPShares, lpAfter.LPShares, "on-chain LP shares must decrease after burn")
 	})
 }

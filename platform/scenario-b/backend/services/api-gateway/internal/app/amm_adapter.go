@@ -131,7 +131,15 @@ func (a *ammAdapter) RemoveLiquidityShares(ctx context.Context, shares *big.Int,
 	if minAmountOut == nil {
 		minAmountOut = big.NewInt(0)
 	}
-	return a.c.RemoveLiquidity(ctx, shares, homeIsTokenA, minAmountOut)
+	amountOut, _, err := a.c.RemoveLiquidity(ctx, shares, homeIsTokenA, minAmountOut)
+	if err != nil {
+		return "", err
+	}
+	if amountOut == nil {
+		// Burn succeeded but LogLiquidityRemoved was not decodable — never report a fake amount.
+		return "0", nil
+	}
+	return amountOut.String(), nil
 }
 
 // LPBalanceOf returns the on-chain LP-share balance of holder (the source of truth for ownership).

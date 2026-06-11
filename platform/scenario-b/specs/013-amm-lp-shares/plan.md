@@ -1,6 +1,6 @@
 # Plan: Standard Web3 LP-Share Model for the Scenario B Hub AMM
 
-**Status:** Draft for review
+**Status:** Implemented (Phases 1–6 + D7) — see §0 and tasks.md
 **Scope:** `scenario-b/` only (scenario isolation respected)
 **Subsumes:** P0-Remediation **TASK-12** (LP-share accounting + withdrawal guard + min-liquidity) and **TASK-13** (empty-pool protection + first-deposit min-liquidity burn + ratio-consistent deposits)
 **Base branch:** `001-hub-network-isolation` (merging to `develop`)
@@ -17,13 +17,12 @@
 | 3 — Backend ledger → on-chain shares | ✅ done, service tests green | `c589acf8` |
 | 4 — Sovereign flow (escrow per-side, shared key) | ✅ done | `c589acf8` |
 | 5 — Frontend LP-share label/types | ✅ done (API-compatible; rich price-impact UI = follow-up) | — |
-| 6 — Specs/docs + live integration test | ✅ done — `TestFullHappyPath` PASS (all 7 phases, 64s) | — |
+| 6 — Specs/docs + live integration test | ✅ done — `TestFullHappyPath` PASS incl. `phase_6_lp_withdrawal` (8 phases, fresh stack, 2026-06-11) | — |
 
-**Known follow-ups (flagged, off the happy path):** (a) sovereign withdrawal wiring — persist the
-real `finalizeCommit` share counts on `LiquidityPosition` and resolve the share owner by CB hub
-address so the CB-signed burn runs end-to-end; (b) governance frontend price-impact/slippage quote
-UI for the home-currency zap-out; (c) governance portal must display the CB's on-chain LP-share
-(`CBW3-LP`) balance and its tCeBM balance.
+**Remaining follow-ups (see tasks.md):** governance frontend price-impact/slippage quote UI for
+the home-currency zap-out (T017); perf baseline (T021); tryout-script updates (T022). Withdrawal
+wiring and the governance-portal LP/tCeBM visibility are **done** (commits `42426025`, `03b6b507`,
+`487c6349`; validated live by `phase_6_lp_withdrawal`).
 
 > **Decision D7 (2026-06-11) — Liquidity provision is SOVEREIGN-ONLY.** Commercial banks act
 > exclusively as *users* of the pool (swaps); they never provide liquidity and never hold LP shares.
