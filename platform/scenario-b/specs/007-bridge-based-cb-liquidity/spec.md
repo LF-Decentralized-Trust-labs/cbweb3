@@ -2,8 +2,14 @@
 
 **Feature Branch**: `007-bridge-based-cb-liquidity`
 **Created**: 2026-05-20
-**Status**: Draft
+**Status**: Draft — **on-chain mechanism superseded by [013-amm-lp-shares](../013-amm-lp-shares/plan.md)**
 **Depende de**: `005-cooperative-liquidity`, `002-scenario-b-liquidity`
+
+> **Update (2026-06-10):** Sovereign liquidity injection no longer calls `addSingleSidedLiquidity`.
+> Each CB gateway now escrows its own side via `depositForCommit` against a shared key derived from
+> the matched commit pair, then finalizes (`finalizeCommit`) — preserving sovereignty (each CB
+> deposits its own currency with its own key) while minting on-chain LP shares to the CB's address
+> (decision D4). See 013 for the authoritative design (decisions D1–D6).
 **Substitui (parcialmente)**: padrão G5-cross depreciado de `005-cooperative-liquidity`
 
 ## Contexto e Motivação

@@ -20,7 +20,10 @@ import { useEffect, useState } from "react";
 import { usePolling } from "../../hooks/usePolling";
 import { useAuthStore } from "../../stores/auth.store";
 import { usePaymentStore } from "../../stores";
-import type { PendingCommit } from "../../types/liquidity.types";
+import { liquidityApi } from "../../services/api/liquidity.api";
+import { paymentApi } from "../../services/api";
+import type { LpBalanceResponse, PendingCommit } from "../../types/liquidity.types";
+import type { BalanceResponse } from "../../types/payment.types";
 import { formatTokenAmount } from "../../types";
 import type { MatchContext } from "./CooperativeLiquidityWizard";
 import { CooperativeLiquidityWizard } from "./CooperativeLiquidityWizard";
@@ -67,6 +70,33 @@ export function LiquidityManagementPage() {
   useEffect(() => {
     const intervalId = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(intervalId);
+  }, []);
+
+  // On-chain CB position (013-amm-lp-shares): live CBW3-LP shares + the CB's own tCeBM balance.
+  const [lpBalance, setLpBalance] = useState<LpBalanceResponse | null>(null);
+  const [cbTokenBalance, setCbTokenBalance] = useState<BalanceResponse | null>(null);
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const lp = await liquidityApi.getLpBalance();
+        if (active) setLpBalance(lp);
+      } catch {
+        // endpoint optional (older gateways) — card shows "-"
+      }
+      try {
+        const bal = await paymentApi.getBalance();
+        if (active) setCbTokenBalance(bal);
+      } catch {
+        // payment-orchestrator unavailable — card shows "-"
+      }
+    };
+    void load();
+    const id = window.setInterval(load, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
   }, []);
 
   const handleRemoveLiquidity = async (event: FormEvent<HTMLFormElement>) => {
@@ -163,6 +193,38 @@ export function LiquidityManagementPage() {
           <p className="text-sm">Reserve B: {poolStatus?.reserve_b ? formatTokenAmount(poolStatus.reserve_b, tokenDecimals) : "-"}</p>
           <p className="text-sm">Current ratio: {poolStatus?.current_ratio ?? "-"}</p>
           <p className="text-xs text-muted-foreground">Updated at: {poolStatus?.updated_at ?? "-"}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Central Bank On-Chain Position</CardTitle>
+          <CardDescription>
+            Live from the Hub AMM contract — LP shares (CBW3-LP) are the on-chain source of truth for
+            pool ownership.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-2 sm:grid-cols-3">
+          <div>
+            <p className="text-xs text-muted-foreground">LP shares (CBW3-LP)</p>
+            <p className="text-sm font-medium">
+              {lpBalance ? formatTokenAmount(lpBalance.lp_shares, tokenDecimals) : "-"}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Pool ownership</p>
+            <p className="text-sm font-medium">
+              {lpBalance ? `${lpBalance.share_percentage.toFixed(2)}%` : "-"}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">tCeBM balance</p>
+            <p className="text-sm font-medium">
+              {cbTokenBalance
+                ? formatTokenAmount(cbTokenBalance.balance, cbTokenBalance.decimals ?? tokenDecimals)
+                : "-"}
+            </p>
+          </div>
         </CardContent>
       </Card>
 
@@ -342,7 +404,7 @@ export function LiquidityManagementPage() {
                 <TableHead>Provider</TableHead>
                 <TableHead>Token A</TableHead>
                 <TableHead>Token B</TableHead>
-                <TableHead>LP Shares</TableHead>
+                <TableHead>LP Shares (on-chain)</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Added At</TableHead>
               </TableRow>

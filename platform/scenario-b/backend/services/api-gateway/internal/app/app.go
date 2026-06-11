@@ -415,6 +415,8 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		feeRepo := NewLPFeeEventRepository(db)
 		liquiditySvc := services.NewLiquidityProvisionServiceWithRepos(db, adapter, commitRepo, feeRepo)
 		deps.LiquidityService = liquiditySvc
+		// 013-amm-lp-shares: expose the CB's live on-chain LP-share position to the governance portal.
+		deps.LPBalanceReader = adapter
 		// T058 / FR-006: Wire fee recorder so swap fees are distributed to LPs synchronously.
 		if swapSvc, ok := deps.SwapService.(*services.SwapService); ok {
 			swapSvc.WithFeeRecorder(liquiditySvc)

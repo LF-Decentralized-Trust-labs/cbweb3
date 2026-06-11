@@ -63,27 +63,6 @@ func (r *PoolCommitRepository) UpdateStatus(ctx context.Context, commitID string
 		Update("status", status).Error
 }
 
-// LinkCounterpart sets the counterpart_commit_id on both commits atomically within
-// a transaction and transitions both to MATCHED.
-func (r *PoolCommitRepository) LinkCounterpart(ctx context.Context, commitID, counterpartID string) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&apidomain.PoolCommit{}).
-			Where("commit_id = ?", commitID).
-			Updates(map[string]interface{}{
-				"counterpart_commit_id": counterpartID,
-				"status":                apidomain.CommitStatusMatched,
-			}).Error; err != nil {
-			return err
-		}
-		return tx.Model(&apidomain.PoolCommit{}).
-			Where("commit_id = ?", counterpartID).
-			Updates(map[string]interface{}{
-				"counterpart_commit_id": commitID,
-				"status":                apidomain.CommitStatusMatched,
-			}).Error
-	})
-}
-
 // FindExpiredPending returns all PENDING commits whose expires_at is in the past.
 // Used by PoolCommitExpiryWorker (D6 / FR-013).
 func (r *PoolCommitRepository) FindExpiredPending(ctx context.Context) ([]apidomain.PoolCommit, error) {

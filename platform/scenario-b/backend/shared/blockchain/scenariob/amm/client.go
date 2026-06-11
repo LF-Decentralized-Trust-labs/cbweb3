@@ -36,10 +36,18 @@ const ABIJSON = `[
 {"type":"function","name":"resumeSignatures","stateMutability":"view","inputs":[{"type":"bytes32"}],"outputs":[{"type":"uint256"}]},
 {"type":"function","name":"TOKEN_A","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"address"}]},
 {"type":"function","name":"TOKEN_B","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"address"}]},
+{"type":"function","name":"balanceOf","stateMutability":"view","inputs":[{"name":"account","type":"address"}],"outputs":[{"type":"uint256"}]},
+{"type":"function","name":"totalSupply","stateMutability":"view","inputs":[],"outputs":[{"type":"uint256"}]},
 {"type":"function","name":"getAmountIn","stateMutability":"pure","inputs":[
   {"name":"reserveIn","type":"uint256"},
   {"name":"reserveOut","type":"uint256"},
   {"name":"amountOut","type":"uint256"}
+],"outputs":[{"type":"uint256"}]},
+{"type":"function","name":"getAmountOut","stateMutability":"pure","inputs":[
+  {"name":"amountIn","type":"uint256"},
+  {"name":"reserveIn","type":"uint256"},
+  {"name":"reserveOut","type":"uint256"},
+  {"name":"feeBps_","type":"uint256"}
 ],"outputs":[{"type":"uint256"}]},
 {"type":"function","name":"swapTokensForExactTokens","stateMutability":"nonpayable","inputs":[
   {"name":"tokenIn","type":"address"},
@@ -51,22 +59,44 @@ const ABIJSON = `[
 {"type":"function","name":"addLiquidity","stateMutability":"nonpayable","inputs":[
   {"name":"amountA","type":"uint256"},
   {"name":"amountB","type":"uint256"}
-],"outputs":[]},
+],"outputs":[{"type":"uint256"}]},
 {"type":"function","name":"removeLiquidity","stateMutability":"nonpayable","inputs":[
+  {"name":"shares","type":"uint256"},
+  {"name":"tokenOut","type":"address"},
+  {"name":"minAmountOut","type":"uint256"}
+],"outputs":[{"type":"uint256"}]},
+{"type":"function","name":"removeLiquidityEmergency","stateMutability":"nonpayable","inputs":[
+  {"name":"shares","type":"uint256"}
+],"outputs":[{"type":"uint256"},{"type":"uint256"}]},
+{"type":"function","name":"depositForCommit","stateMutability":"nonpayable","inputs":[
+  {"name":"commitId","type":"bytes32"},
+  {"name":"isTokenA","type":"bool"},
+  {"name":"amount","type":"uint256"},
+  {"name":"shareRecipient","type":"address"}
+],"outputs":[]},
+{"type":"function","name":"finalizeCommit","stateMutability":"nonpayable","inputs":[
+  {"name":"commitId","type":"bytes32"}
+],"outputs":[{"type":"uint256"},{"type":"uint256"}]},
+{"type":"function","name":"cancelCommitDeposit","stateMutability":"nonpayable","inputs":[
+  {"name":"commitId","type":"bytes32"},
+  {"name":"isTokenA","type":"bool"}
+],"outputs":[{"type":"uint256"}]},
+{"type":"function","name":"getEscrow","stateMutability":"view","inputs":[{"name":"commitId","type":"bytes32"}],"outputs":[
+  {"name":"depositorA","type":"address"},
+  {"name":"depositorB","type":"address"},
+  {"name":"recipientA","type":"address"},
+  {"name":"recipientB","type":"address"},
   {"name":"amountA","type":"uint256"},
-  {"name":"amountB","type":"uint256"}
-],"outputs":[]},
-{"type":"function","name":"addSingleSidedLiquidity","stateMutability":"nonpayable","inputs":[
-  {"name":"isTokenA","type":"bool"},
-  {"name":"amount","type":"uint256"}
-],"outputs":[]},
-{"type":"function","name":"removeSingleSidedLiquidity","stateMutability":"nonpayable","inputs":[
-  {"name":"isTokenA","type":"bool"},
-  {"name":"amount","type":"uint256"}
-],"outputs":[]},
+  {"name":"amountB","type":"uint256"},
+  {"name":"finalized","type":"bool"}
+]},
 {"type":"function","name":"feeBps","stateMutability":"view","inputs":[],"outputs":[{"type":"uint256"}]},
+{"type":"function","name":"withdrawalFeeBps","stateMutability":"view","inputs":[],"outputs":[{"type":"uint256"}]},
 {"type":"function","name":"setFeeBps","stateMutability":"nonpayable","inputs":[
   {"name":"newFeeBps","type":"uint256"}
+],"outputs":[]},
+{"type":"function","name":"setWithdrawalFeeBps","stateMutability":"nonpayable","inputs":[
+  {"name":"newWithdrawalFeeBps","type":"uint256"}
 ],"outputs":[]},
 {"type":"function","name":"pause","stateMutability":"nonpayable","inputs":[
   {"name":"reason","type":"string"}
@@ -322,40 +352,120 @@ func (c *Client) AddLiquidity(ctx context.Context, amountA, amountB *big.Int) (s
 	return evm.SubmitTx(ctx, c.ec, c.signer, c.contract, c.abi, "addLiquidity", amountA, amountB)
 }
 
-// RemoveLiquidity submits a removeLiquidity transaction from the configured signer.
-func (c *Client) RemoveLiquidity(ctx context.Context, amountA, amountB *big.Int) (string, error) {
+// RemoveLiquidity burns `shares` of the configured signer and returns a single home currency
+// (homeIsTokenA selects TOKEN_A vs TOKEN_B) via the zap-out path (decision D1), enforcing
+// `minAmountOut`. The signer must own the shares — withdrawal authority lives with the share
+// owner now that shares are on-chain (decision D4). Returns the realized amountOut decoded from
+// LogLiquidityRemoved, plus the transaction hash.
+func (c *Client) RemoveLiquidity(ctx context.Context, shares *big.Int, homeIsTokenA bool, minAmountOut *big.Int) (amountOut *big.Int, txHash string, err error) {
 	if c.signer == nil {
-		return "", errors.New("amm: removeLiquidity requires a signing key")
+		return nil, "", errors.New("amm: removeLiquidity requires a signing key")
 	}
-	return evm.SubmitTx(ctx, c.ec, c.signer, c.contract, c.abi, "removeLiquidity", amountA, amountB)
+	tokenOut := c.tokenB
+	if homeIsTokenA {
+		tokenOut = c.tokenA
+	}
+	// keccak256("LogLiquidityRemoved(address,uint256,address,uint256)")
+	eventSig := crypto.Keccak256Hash([]byte("LogLiquidityRemoved(address,uint256,address,uint256)"))
+	receipt, txHash, err := evm.SubmitTxReceipt(ctx, c.ec, c.signer, c.contract, c.abi,
+		"removeLiquidity", shares, tokenOut, minAmountOut)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, lg := range receipt.Logs {
+		// topics = [sig, provider, tokenOut]; data = sharesBurned (32) + amountOut (32).
+		if len(lg.Topics) >= 3 && lg.Topics[0] == eventSig && len(lg.Data) >= 64 {
+			return new(big.Int).SetBytes(lg.Data[32:64]), txHash, nil
+		}
+	}
+	// Burn succeeded but the event was not found (unexpected) — report success without the amount.
+	return nil, txHash, nil
 }
 
-// AddSingleSidedLiquidity submits an addSingleSidedLiquidity transaction.
-// The caller must hold the Liquidity Provider role on-chain (IdentityRegistry).
-// isTokenA=true deposits TOKEN_A; false deposits TOKEN_B.
-func (c *Client) AddSingleSidedLiquidity(ctx context.Context, isTokenA bool, amount *big.Int) (string, error) {
+// LPBalanceOf returns the LP-share balance of `holder` on the configured AMM (the on-chain
+// source of truth for pool ownership). An empty holder defaults to the configured signer's own
+// address — on a sovereign CB gateway that is the CB itself (decision D4).
+func (c *Client) LPBalanceOf(ctx context.Context, holder string) (*big.Int, error) {
+	addr := c.resolveRecipient(holder)
+	if addr == (common.Address{}) {
+		return nil, errors.New("amm: LPBalanceOf requires a holder address or a configured signer")
+	}
+	out := new(big.Int)
+	if err := evm.Call(ctx, c.ec, c.contract, c.abi, "balanceOf",
+		[]interface{}{addr}, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// LPTotalSupply returns the total LP-share supply on the configured AMM.
+func (c *Client) LPTotalSupply(ctx context.Context) (*big.Int, error) {
+	out := new(big.Int)
+	if err := evm.Call(ctx, c.ec, c.contract, c.abi, "totalSupply", nil, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// WithdrawalFeeBps returns the current withdrawal (zap-out) fee rate in basis points.
+func (c *Client) WithdrawalFeeBps(ctx context.Context) (*big.Int, error) {
+	out := new(big.Int)
+	if err := evm.Call(ctx, c.ec, c.contract, c.abi, "withdrawalFeeBps", nil, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DepositForCommit escrows the signer's single side against `commitID` on the configured AMM,
+// crediting LP shares (on finalize) to `shareRecipient` (escrow-and-finalize, decision D6).
+func (c *Client) DepositForCommit(ctx context.Context, commitID [32]byte, isTokenA bool, amount *big.Int, shareRecipient string) (string, error) {
 	if c.signer == nil {
-		return "", errors.New("amm: addSingleSidedLiquidity requires a signing key")
+		return "", errors.New("amm: depositForCommit requires a signing key")
 	}
 	token := c.tokenB
 	if isTokenA {
 		token = c.tokenA
 	}
 	if err := c.approveToken(ctx, token, amount); err != nil {
-		return "", fmt.Errorf("approve token for single-sided: %w", err)
+		return "", fmt.Errorf("approve token for commit deposit: %w", err)
 	}
-	return evm.SubmitTx(ctx, c.ec, c.signer, c.contract, c.abi, "addSingleSidedLiquidity", isTokenA, amount)
+	return evm.SubmitTx(ctx, c.ec, c.signer, c.contract, c.abi,
+		"depositForCommit", commitID, isTokenA, amount, c.resolveRecipient(shareRecipient))
 }
 
-// AddSingleSidedLiquidityAt calls addSingleSidedLiquidity on an arbitrary AMM contract address
-// (different from the client's configured pool). Used by sovereign CB liquidity flows where the
-// matched commit may target any registered sovereign pair pool.
-func (c *Client) AddSingleSidedLiquidityAt(ctx context.Context, ammAddress string, isTokenA bool, amount *big.Int) error {
+// resolveRecipient returns the recipient address, defaulting an empty string to the signer's own
+// address — the depositing gateway is the intended share owner (sovereign CB per D4; commercial
+// operator interim, with the off-chain ledger mapping shares back to banks).
+func (c *Client) resolveRecipient(shareRecipient string) common.Address {
+	if strings.TrimSpace(shareRecipient) == "" && c.signer != nil {
+		return c.signer.Address()
+	}
+	return common.HexToAddress(shareRecipient)
+}
+
+// FinalizeCommit finalizes a fully-deposited commit on the configured AMM.
+func (c *Client) FinalizeCommit(ctx context.Context, commitID [32]byte) (string, error) {
 	if c.signer == nil {
-		return errors.New("amm: addSingleSidedLiquidityAt requires a signing key")
+		return "", errors.New("amm: finalizeCommit requires a signing key")
+	}
+	return evm.SubmitTx(ctx, c.ec, c.signer, c.contract, c.abi, "finalizeCommit", commitID)
+}
+
+// CancelCommitDeposit reclaims an un-finalized escrowed side (refund/timeout) on the configured AMM.
+func (c *Client) CancelCommitDeposit(ctx context.Context, commitID [32]byte, isTokenA bool) (string, error) {
+	if c.signer == nil {
+		return "", errors.New("amm: cancelCommitDeposit requires a signing key")
+	}
+	return evm.SubmitTx(ctx, c.ec, c.signer, c.contract, c.abi, "cancelCommitDeposit", commitID, isTokenA)
+}
+
+// DepositForCommitAt escrows the signer's single side against `commitID` on an arbitrary AMM
+// (sovereign flow: each CB gateway deposits its own currency to the matched pair's pool).
+func (c *Client) DepositForCommitAt(ctx context.Context, ammAddress string, commitID [32]byte, isTokenA bool, amount *big.Int, shareRecipient string) error {
+	if c.signer == nil {
+		return errors.New("amm: depositForCommitAt requires a signing key")
 	}
 	contract := common.HexToAddress(ammAddress)
-	// Resolve the token address by calling TOKEN_A/TOKEN_B on the target AMM.
 	var token common.Address
 	if isTokenA {
 		_ = evm.Call(ctx, c.ec, contract, c.abi, "TOKEN_A", nil, &token)
@@ -366,12 +476,50 @@ func (c *Client) AddSingleSidedLiquidityAt(ctx context.Context, ammAddress strin
 		return fmt.Errorf("amm: could not resolve token address from AMM %s", ammAddress)
 	}
 	if _, err := evm.SubmitTx(ctx, c.ec, c.signer, token, c.erc20ABI, "approve", contract, amount); err != nil {
-		return fmt.Errorf("approve token for sovereign single-sided: %w", err)
+		return fmt.Errorf("approve token for sovereign commit deposit: %w", err)
 	}
-	if _, err := evm.SubmitTx(ctx, c.ec, c.signer, contract, c.abi, "addSingleSidedLiquidity", isTokenA, amount); err != nil {
-		return fmt.Errorf("addSingleSidedLiquidityAt %s: %w", ammAddress, err)
+	if _, err := evm.SubmitTx(ctx, c.ec, c.signer, contract, c.abi,
+		"depositForCommit", commitID, isTokenA, amount, c.resolveRecipient(shareRecipient)); err != nil {
+		return fmt.Errorf("depositForCommitAt %s: %w", ammAddress, err)
 	}
 	return nil
+}
+
+// FinalizeResult carries the share mint recorded by LogCommitFinalized when a finalize succeeds.
+type FinalizeResult struct {
+	RecipientA common.Address
+	RecipientB common.Address
+	SharesA    *big.Int
+	SharesB    *big.Int
+}
+
+// FinalizeCommitAt finalizes a commit on an arbitrary AMM (sovereign). A revert because the other
+// side is not yet escrowed is surfaced to the caller, which may treat it as "pending finalize".
+// On success it decodes the LogCommitFinalized event so callers can persist the minted shares.
+func (c *Client) FinalizeCommitAt(ctx context.Context, ammAddress string, commitID [32]byte) (*FinalizeResult, error) {
+	if c.signer == nil {
+		return nil, errors.New("amm: finalizeCommitAt requires a signing key")
+	}
+	contract := common.HexToAddress(ammAddress)
+	// keccak256("LogCommitFinalized(bytes32,address,address,uint256,uint256)")
+	eventSig := crypto.Keccak256Hash([]byte("LogCommitFinalized(bytes32,address,address,uint256,uint256)"))
+	receipt, _, err := evm.SubmitTxReceipt(ctx, c.ec, c.signer, contract, c.abi, "finalizeCommit", commitID)
+	if err != nil {
+		return nil, fmt.Errorf("finalizeCommitAt %s: %w", ammAddress, err)
+	}
+	for _, lg := range receipt.Logs {
+		// data = abi(recipientA, recipientB, sharesA, sharesB) — 4 static 32-byte words.
+		if len(lg.Topics) >= 2 && lg.Topics[0] == eventSig && len(lg.Data) >= 128 {
+			return &FinalizeResult{
+				RecipientA: common.BytesToAddress(lg.Data[0:32]),
+				RecipientB: common.BytesToAddress(lg.Data[32:64]),
+				SharesA:    new(big.Int).SetBytes(lg.Data[64:96]),
+				SharesB:    new(big.Int).SetBytes(lg.Data[96:128]),
+			}, nil
+		}
+	}
+	// Finalize succeeded but the event was not found (unexpected) — report success without shares.
+	return &FinalizeResult{}, nil
 }
 
 // TokenBalanceAt reads the ERC-20 balanceOf for the token held by ammAddress (TOKEN_A or TOKEN_B)
@@ -395,15 +543,6 @@ func (c *Client) TokenBalanceAt(ctx context.Context, ammAddress string, isTokenA
 		return nil, fmt.Errorf("amm: balanceOf(%s) on token %s: %w", holderAddr, token.Hex(), err)
 	}
 	return balance, nil
-}
-
-// RemoveSingleSidedLiquidity submits a removeSingleSidedLiquidity transaction.
-// isTokenA=true withdraws TOKEN_A; false withdraws TOKEN_B.
-func (c *Client) RemoveSingleSidedLiquidity(ctx context.Context, isTokenA bool, amount *big.Int) (string, error) {
-	if c.signer == nil {
-		return "", errors.New("amm: removeSingleSidedLiquidity requires a signing key")
-	}
-	return evm.SubmitTx(ctx, c.ec, c.signer, c.contract, c.abi, "removeSingleSidedLiquidity", isTokenA, amount)
 }
 
 // FeeBps returns the current fee rate in basis points from the contract.

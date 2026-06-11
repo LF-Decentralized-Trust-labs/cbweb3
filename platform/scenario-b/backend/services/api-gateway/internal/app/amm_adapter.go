@@ -121,56 +121,58 @@ func (a *ammAdapter) AddLiquidity(ctx context.Context, pair, providerID, tokenAA
 	return lpShares.String(), nil
 }
 
-func (a *ammAdapter) RemoveLiquidity(ctx context.Context, pair, providerID, tokenAAmount, tokenBAmount string) (string, string, error) {
-	amtA, ok := new(big.Int).SetString(tokenAAmount, 10)
-	if !ok {
-		return "", "", fmt.Errorf("invalid token_a_amount for remove: %s", tokenAAmount)
+// RemoveLiquidityShares burns `shares` LP tokens of the configured signer and returns a single
+// (home) currency, zap-swapping the other side (decision D1). The signer must own the shares —
+// withdrawal authority lives with the share owner now that shares are on-chain (D4).
+func (a *ammAdapter) RemoveLiquidityShares(ctx context.Context, shares *big.Int, homeIsTokenA bool, minAmountOut *big.Int) (string, error) {
+	if shares == nil || shares.Sign() <= 0 {
+		return "", fmt.Errorf("shares must be positive")
 	}
-	amtB, ok := new(big.Int).SetString(tokenBAmount, 10)
-	if !ok {
-		return "", "", fmt.Errorf("invalid token_b_amount for remove: %s", tokenBAmount)
+	if minAmountOut == nil {
+		minAmountOut = big.NewInt(0)
 	}
-	if _, err := a.c.RemoveLiquidity(ctx, amtA, amtB); err != nil {
-		return "", "", err
+	amountOut, _, err := a.c.RemoveLiquidity(ctx, shares, homeIsTokenA, minAmountOut)
+	if err != nil {
+		return "", err
 	}
-	return tokenAAmount, tokenBAmount, nil
+	if amountOut == nil {
+		// Burn succeeded but LogLiquidityRemoved was not decodable — never report a fake amount.
+		return "0", nil
+	}
+	return amountOut.String(), nil
 }
 
-// AddSingleSidedLiquidity deposits one token side into the pool (cooperative model).
-// isTokenA=true deposits TOKEN_A; false deposits TOKEN_B.
-func (a *ammAdapter) AddSingleSidedLiquidity(ctx context.Context, isTokenA bool, amount *big.Int) error {
-	if _, err := a.c.AddSingleSidedLiquidity(ctx, isTokenA, amount); err != nil {
-		return fmt.Errorf("addSingleSidedLiquidity: %w", err)
-	}
-	return nil
+// LPBalanceOf returns the on-chain LP-share balance of holder (the source of truth for ownership).
+// An empty holder resolves to the configured signer (the CB itself on a sovereign gateway, D4).
+func (a *ammAdapter) LPBalanceOf(ctx context.Context, holder string) (*big.Int, error) {
+	return a.c.LPBalanceOf(ctx, holder)
 }
 
-// AddSingleSidedLiquidityAt deposits one token side into an arbitrary AMM pool address.
-// Used by sovereign CB liquidity flows where each pair maps to a distinct AMM contract.
-func (a *ammAdapter) AddSingleSidedLiquidityAt(ctx context.Context, ammAddress string, isTokenA bool, amount *big.Int) error {
-	return a.c.AddSingleSidedLiquidityAt(ctx, ammAddress, isTokenA, amount)
+// LPTotalSupply returns the total LP-share supply of the configured AMM pool.
+func (a *ammAdapter) LPTotalSupply(ctx context.Context) (*big.Int, error) {
+	return a.c.LPTotalSupply(ctx)
+}
+
+// DepositForCommitAt escrows one side against a commit on an arbitrary AMM (sovereign flow).
+func (a *ammAdapter) DepositForCommitAt(ctx context.Context, ammAddress string, commitID [32]byte, isTokenA bool, amount *big.Int, shareRecipient string) error {
+	return a.c.DepositForCommitAt(ctx, ammAddress, commitID, isTokenA, amount, shareRecipient)
+}
+
+// FinalizeCommitAt finalizes a commit on an arbitrary AMM (sovereign). Returns the minted share
+// split (sharesA, sharesB) decoded from LogCommitFinalized on success; the error is returned
+// verbatim so callers can distinguish "incomplete" (other side pending) from real failures.
+func (a *ammAdapter) FinalizeCommitAt(ctx context.Context, ammAddress string, commitID [32]byte) (*big.Int, *big.Int, error) {
+	res, err := a.c.FinalizeCommitAt(ctx, ammAddress, commitID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return res.SharesA, res.SharesB, nil
 }
 
 // TokenBalanceAt reads the ERC-20 balance of holderAddr for the token (A or B) of ammAddress.
 // Used by SovereignAddLiquidity pre-flight check (FR-010 / T021).
 func (a *ammAdapter) TokenBalanceAt(ctx context.Context, ammAddress string, isTokenA bool, holderAddr string) (*big.Int, error) {
 	return a.c.TokenBalanceAt(ctx, ammAddress, isTokenA, holderAddr)
-}
-
-// RemoveLiquidityProportional withdraws proportional amounts of both token sides.
-// amountA and amountB are the pre-calculated values (reserveX * shares_pct / 100).
-func (a *ammAdapter) RemoveLiquidityProportional(ctx context.Context, amountA, amountB *big.Int) error {
-	if amountA != nil && amountA.Sign() > 0 {
-		if _, err := a.c.RemoveSingleSidedLiquidity(ctx, true, amountA); err != nil {
-			return fmt.Errorf("removeSingleSidedLiquidity TOKEN_A: %w", err)
-		}
-	}
-	if amountB != nil && amountB.Sign() > 0 {
-		if _, err := a.c.RemoveSingleSidedLiquidity(ctx, false, amountB); err != nil {
-			return fmt.Errorf("removeSingleSidedLiquidity TOKEN_B: %w", err)
-		}
-	}
-	return nil
 }
 
 // --- AMMCircuitBreakerCaller ---

@@ -41,9 +41,14 @@ type SovereignExecuteRequest struct {
 
 // sovereignAMMAdder is the subset of AMM adapter needed by the sovereign service.
 type sovereignAMMAdder interface {
-	// AddSingleSidedLiquidity deposits one token side into the AMM at ammAddress.
-	// isTokenA = true for side A, false for side B.
-	AddSingleSidedLiquidityAt(ctx context.Context, ammAddress string, isTokenA bool, amount *big.Int) error
+	// DepositForCommitAt escrows this gateway's single side against the shared escrow key on the
+	// AMM at ammAddress (escrow-and-finalize, D6). An empty shareRecipient credits this gateway's
+	// own signer (the sovereign CB — decision D4).
+	DepositForCommitAt(ctx context.Context, ammAddress string, commitID [32]byte, isTokenA bool, amount *big.Int, shareRecipient string) error
+	// FinalizeCommitAt finalizes a fully-deposited commit; an "incomplete" error means the other
+	// side has not yet been escrowed (expected for whichever gateway deposits first). On success
+	// it returns the minted share split (sharesA, sharesB) from LogCommitFinalized.
+	FinalizeCommitAt(ctx context.Context, ammAddress string, commitID [32]byte) (sharesA, sharesB *big.Int, err error)
 	// TokenBalanceAt returns the ERC-20 balance of holderAddr for TOKEN_A or TOKEN_B
 	// of the AMM at ammAddress. Used for pre-flight balance checks (FR-010 / T021).
 	TokenBalanceAt(ctx context.Context, ammAddress string, isTokenA bool, holderAddr string) (*big.Int, error)
@@ -251,21 +256,39 @@ func (s *SovereignLiquidityService) ExecuteMatchedCommit(ctx context.Context, re
 	existingCommit, existingErr := s.commitRepo.FindByOnChainCommitID(ctx, commitID)
 	if existingErr == nil && existingCommit.Status == domain.CommitStatusExecuted {
 		// Already executed — create LP position if it doesn't exist yet (idempotent).
-		s.ensureLPPosition(ctx, existingCommit, poolPairName, isTokenA)
+		s.ensureLPPosition(ctx, existingCommit, poolPairName, isTokenA, nil)
 		return nil
 	}
 
-	// Execute addSingleSidedLiquidity with the sovereign signer.
+	// Escrow this gateway's own side against the shared escrow key, then attempt to finalize
+	// (escrow-and-finalize, D6). Shares accrue to this gateway's sovereign signer (D4: the CB
+	// owns the shares it funds). Both gateways derive the same key from the matched commit pair.
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(s.ReconcileTimeoutSec)*time.Second)
 	defer cancel()
 
-	execErr := s.amm.AddSingleSidedLiquidityAt(execCtx, ammAddress, isTokenA, amount)
+	escrowKey := deriveEscrowKey(req.CommitIDA, req.CommitIDB)
+	execErr := s.amm.DepositForCommitAt(execCtx, ammAddress, escrowKey, isTokenA, amount, "")
 	if execErr != nil {
 		// Transition commit to RECONCILIATION_REQUIRED (only for real on-chain commit IDs).
 		if !isSyntheticCommitID(commitID) {
 			_ = s.commitRepo.UpdateStatusByOnChainCommitID(ctx, commitID, domain.CommitStatusReconciliationRequired)
 		}
-		return fmt.Errorf("sovereign liquidity: addSingleSidedLiquidity for commit %s: %w", commitID, execErr)
+		return fmt.Errorf("sovereign liquidity: depositForCommit for commit %s: %w", commitID, execErr)
+	}
+
+	// Best-effort finalize: succeeds once both sides are escrowed. A revert here is expected for
+	// whichever gateway deposited first (other side pending) or if the peer already finalized —
+	// either way the on-chain escrow is safe and the matched commit completes. When OUR finalize
+	// is the one that lands, LogCommitFinalized gives us the minted share split so the position
+	// can record this CB's exact on-chain LP shares (otherwise LPShares stays "0" and withdrawal
+	// falls back to the signer's live on-chain balance).
+	var myShares *big.Int
+	if sharesA, sharesB, finErr := s.amm.FinalizeCommitAt(execCtx, ammAddress, escrowKey); finErr == nil {
+		if isTokenA {
+			myShares = sharesA
+		} else {
+			myShares = sharesB
+		}
 	}
 
 	// Update commit status to EXECUTED.
@@ -284,7 +307,7 @@ func (s *SovereignLiquidityService) ExecuteMatchedCommit(ctx context.Context, re
 		// Non-fatal — the on-chain deposit succeeded; log but continue.
 		return nil
 	}
-	s.ensureLPPosition(ctx, commit, poolPairName, isTokenA)
+	s.ensureLPPosition(ctx, commit, poolPairName, isTokenA, myShares)
 	return nil
 }
 
@@ -301,11 +324,15 @@ func isSyntheticCommitID(id string) bool {
 }
 
 // ensureLPPosition creates a LiquidityPosition record if one doesn't already exist for this commit.
-func (s *SovereignLiquidityService) ensureLPPosition(ctx context.Context, commit *domain.PoolCommit, poolPairName string, isTokenA bool) {
+func (s *SovereignLiquidityService) ensureLPPosition(ctx context.Context, commit *domain.PoolCommit, poolPairName string, isTokenA bool, shares *big.Int) {
 	if s.lpRepo == nil {
 		return
 	}
 	lpID := commit.CommitID + "-sovereign"
+	lpShares := "0"
+	if shares != nil && shares.Sign() > 0 {
+		lpShares = shares.String()
+	}
 	now := time.Now().UTC()
 	tokenA, tokenB := "0", "0"
 	depositSide := domain.DepositSideA
@@ -321,7 +348,7 @@ func (s *SovereignLiquidityService) ensureLPPosition(ctx context.Context, commit
 		PoolPair:          poolPairName,
 		TokenAContributed: tokenA,
 		TokenBContributed: tokenB,
-		LPShares:          "0",
+		LPShares:          lpShares,
 		Status:            domain.LPStatusActive,
 		DepositSide:       depositSide,
 		AddedAt:           now,
@@ -329,6 +356,19 @@ func (s *SovereignLiquidityService) ensureLPPosition(ctx context.Context, commit
 	}
 	// Ignore duplicate key errors (idempotency).
 	_ = s.lpRepo.Create(ctx, pos)
+}
+
+// deriveEscrowKey computes a deterministic, order-independent escrow key from the two matched
+// commit ids. Both sovereign gateways observe the same CommitMatched payload and therefore derive
+// the same key, allowing each to escrow its own side against a shared identifier.
+func deriveEscrowKey(commitIDA, commitIDB string) [32]byte {
+	a := strings.ToLower(strings.TrimPrefix(commitIDA, "0x"))
+	b := strings.ToLower(strings.TrimPrefix(commitIDB, "0x"))
+	lo, hi := a, b
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	return crypto.Keccak256Hash([]byte(lo + "|" + hi))
 }
 
 // parseBig converts a decimal string to *big.Int, returning nil on failure.
