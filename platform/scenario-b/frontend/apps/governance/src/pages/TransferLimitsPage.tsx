@@ -18,6 +18,13 @@ import {
 import { useEffect, useState } from "react";
 import { useTransferLimitsStore } from "../stores";
 
+function formatAmount(amount: string, currency: string): string {
+  const num = parseFloat(amount);
+  if (isNaN(num)) return amount;
+  const formatted = new Intl.NumberFormat("en-US").format(num);
+  return currency ? `${formatted} ${currency}` : formatted;
+}
+
 export function TransferLimitsPage() {
   const { limits, status, error, fetch, create, remove } = useTransferLimitsStore();
 
@@ -115,7 +122,7 @@ export function TransferLimitsPage() {
                 <TableRow>
                   <TableHead>Participant</TableHead>
                   <TableHead>Currency</TableHead>
-                  <TableHead>Daily Max (human)</TableHead>
+                  <TableHead>Daily Max</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead />
                 </TableRow>
@@ -125,7 +132,7 @@ export function TransferLimitsPage() {
                   <TableRow key={limit.limit_id}>
                     <TableCell>{limit.participant_id || <span className="text-muted-foreground">all</span>}</TableCell>
                     <TableCell>{limit.currency || <span className="text-muted-foreground">all</span>}</TableCell>
-                    <TableCell className="font-mono">{limit.max_amount}</TableCell>
+                    <TableCell className="font-mono">{formatAmount(limit.max_amount, limit.currency)}</TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {new Date(limit.created_at).toLocaleDateString()}
                     </TableCell>

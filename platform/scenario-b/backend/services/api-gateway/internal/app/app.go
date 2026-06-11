@@ -436,13 +436,29 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		deps.OversightService = services.NewOversightService(db)
 	}
 
-	// R1-10.1: Transfer limit checker — created early so orchestrator and bridge handler can use it.
-	var transferLimitChecker *services.TransferLimitChecker
-	if db != nil {
-		limitRepo := newTransferLimitRepository(db)
-		volumeRepo := newTransferVolumeRepository(db)
-		transferLimitChecker = services.NewTransferLimitChecker(limitRepo, volumeRepo)
-		deps.TransferLimitHandler = handlers.NewTransferLimitHandler(limitRepo)
+	// R1-10.1: Transfer limit enforcement — wired differently for CB vs commercial bank.
+	// CB (CentralBankAPIURL == ""): local DB checker + internal pre-auth endpoint + governance CRUD.
+	// Commercial bank (CentralBankAPIURL != ""): remote checker delegates to CB; fail-closed.
+	var transferLimitChecker services.TransferLimitCheckerIface
+	if cfg.CentralBankAPIURL == "" {
+		if db != nil {
+			limitRepo := newTransferLimitRepository(db)
+			volumeRepo := newTransferVolumeRepository(db)
+			localChecker := services.NewTransferLimitChecker(limitRepo, volumeRepo)
+			transferLimitChecker = localChecker
+			deps.TransferLimitHandler = handlers.NewTransferLimitHandler(limitRepo)
+			deps.TransferLimitInternalHandler = handlers.NewTransferLimitInternalHandler(localChecker)
+		}
+	} else {
+		relaySecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
+		if relaySecret != "" {
+			transferLimitChecker = services.NewRemoteTransferLimitChecker(cfg.CentralBankAPIURL, relaySecret, cfg.RequestTimeout)
+			log.Printf("[app] transfer limit enforcement: delegating pre-auth to CB at %s", cfg.CentralBankAPIURL)
+		} else {
+			log.Printf("[app] WARNING: CENTRAL_BANK_API_URL set but INTERNAL_RELAY_AUTH_SECRET missing — transfer limit enforcement disabled")
+		}
+	}
+	if transferLimitChecker != nil {
 		deps.TransferLimitChecker = transferLimitChecker
 	}
 

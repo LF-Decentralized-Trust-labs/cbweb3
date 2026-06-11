@@ -46,6 +46,9 @@ type Dependencies struct {
 	// TransferLimitHandler manages configurable CB daily transfer limits (R1-10.1).
 	// When nil, transfer limit endpoints are not registered.
 	TransferLimitHandler *handlers.TransferLimitHandler
+	// TransferLimitInternalHandler serves CB-internal pre-auth endpoints for commercial banks (R1-10.1 Option A).
+	// Registered only on CB gateways (CentralBankAPIURL == ""); nil on commercial banks.
+	TransferLimitInternalHandler *handlers.TransferLimitInternalHandler
 	// TransferLimitChecker enforces limits on bridge lock-mint and cross-currency swap (R1-10.1).
 	// When nil, enforcement is skipped (no limits configured).
 	TransferLimitChecker handlers.BridgeLimitCheckerIface
@@ -137,6 +140,20 @@ func Register(app *fiber.App, deps Dependencies) {
 	registerPairRegistryRoutes(app, deps)
 	registerCurrencyRegistryRoutes(app, deps)
 	registerSovereignRoutes(app, deps)
+	registerTransferLimitInternalRoutes(app, deps)
+}
+
+// registerTransferLimitInternalRoutes registers the CB-internal pre-auth endpoints (R1-10.1 Option A).
+// Only registered on CB gateways (TransferLimitInternalHandler != nil); no-op on commercial banks.
+func registerTransferLimitInternalRoutes(app *fiber.App, deps Dependencies) {
+	if deps.TransferLimitInternalHandler == nil {
+		return
+	}
+	internal := app.Group("/internal/v2/transfer-limits",
+		middleware.RequireRelayAuth(deps.InternalRelayAuthSecret),
+	)
+	internal.Post("/check-and-deduct", deps.TransferLimitInternalHandler.HandleCheckAndDeduct)
+	internal.Post("/restore", deps.TransferLimitInternalHandler.HandleRestore)
 }
 
 // registerUS1Routes registers AMM quote, swap, and pool status routes (T045 / FR-027 / FR-028).
