@@ -65,6 +65,20 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ERC20, ReentrancyGuard {
 
     mapping(bytes32 => ResumeProposal) private _resumeProposals;
 
+    /// @notice One side of a paired deposit escrowed against an off-chain commit id (decision D6).
+    struct Escrow {
+        address depositorA; // funded side A (entitled to refund before finalize)
+        address depositorB;
+        address recipientA; // receives side-A LP shares on finalize
+        address recipientB;
+        uint256 amountA;
+        uint256 amountB;
+        bool finalized;
+    }
+
+    /// @notice Escrowed paired deposits, keyed by the matched-commit id.
+    mapping(bytes32 => Escrow) private _escrows;
+
     /// @notice Initializes the AMM/LP-share token with the pair and IdentityRegistry.
     constructor(address _tokenA, address _tokenB, address _identityRegistry) ERC20("CBWeb3 Hub AMM LP", "CBW3-LP") {
         if (_tokenA == address(0) || _tokenB == address(0) || _identityRegistry == address(0)) {
@@ -201,9 +215,21 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ERC20, ReentrancyGuard {
         TOKEN_A.safeTransferFrom(msg.sender, address(this), amountA);
         TOKEN_B.safeTransferFrom(msg.sender, address(this), amountB);
 
+        shares = _liquidityShares(amountA, amountB);
+
+        reserveA += amountA;
+        reserveB += amountB;
+
+        _mint(msg.sender, shares);
+        emit LogLiquidityAdded(msg.sender, amountA, amountB, shares);
+    }
+
+    /// @dev Computes LP shares for a balanced (amountA, amountB) deposit against the *current*
+    ///      reserves and mints the MINIMUM_LIQUIDITY lock on the very first deposit (TASK-13).
+    ///      MUST be called before `reserveA`/`reserveB` are increased by this deposit.
+    function _liquidityShares(uint256 amountA, uint256 amountB) internal returns (uint256 shares) {
         uint256 supply = totalSupply();
         if (supply == 0) {
-            // First deposit: mint sqrt(k) shares and permanently lock MINIMUM_LIQUIDITY (TASK-13).
             uint256 initial = Math.sqrt(amountA * amountB);
             if (initial <= MINIMUM_LIQUIDITY) revert AMM__InsufficientLiquidity();
             shares = initial - MINIMUM_LIQUIDITY;
@@ -215,12 +241,126 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ERC20, ReentrancyGuard {
             shares = shareA < shareB ? shareA : shareB;
             if (shares == 0) revert AMM__InsufficientLiquidity();
         }
+    }
+
+    // ============================================================================
+    //         ESCROW-AND-FINALIZE PAIRED DEPOSIT (decision D6, Phase 2)
+    // ============================================================================
+
+    /// @inheritdoc IAutomatedMarketMaker
+    function depositForCommit(bytes32 commitId, bool isTokenA, uint256 amount, address shareRecipient)
+        external
+        nonReentrant
+        whenNotPaused
+        onlyVerified(msg.sender)
+    {
+        if (amount == 0) revert AMM__ZeroAmount();
+        if (!IDENTITY_REGISTRY.canTransact(shareRecipient)) revert AMM__ParticipantNotVerified(shareRecipient);
+
+        Escrow storage e = _escrows[commitId];
+        if (e.finalized) revert AMM__CommitAlreadyFinalized(commitId);
+
+        if (isTokenA) {
+            if (e.depositorA != address(0)) revert AMM__SideAlreadyDeposited(commitId, true);
+            TOKEN_A.safeTransferFrom(msg.sender, address(this), amount);
+            e.depositorA = msg.sender;
+            e.recipientA = shareRecipient;
+            e.amountA = amount;
+        } else {
+            if (e.depositorB != address(0)) revert AMM__SideAlreadyDeposited(commitId, false);
+            TOKEN_B.safeTransferFrom(msg.sender, address(this), amount);
+            e.depositorB = msg.sender;
+            e.recipientB = shareRecipient;
+            e.amountB = amount;
+        }
+
+        emit LogCommitDeposit(commitId, msg.sender, shareRecipient, isTokenA, amount);
+    }
+
+    /// @inheritdoc IAutomatedMarketMaker
+    function finalizeCommit(bytes32 commitId)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 sharesA, uint256 sharesB)
+    {
+        Escrow storage e = _escrows[commitId];
+        if (e.finalized) revert AMM__CommitAlreadyFinalized(commitId);
+        if (e.depositorA == address(0) || e.depositorB == address(0)) revert AMM__CommitIncomplete(commitId);
+
+        uint256 amountA = e.amountA;
+        uint256 amountB = e.amountB;
+        address recipientA = e.recipientA;
+        address recipientB = e.recipientB;
+        e.finalized = true;
+
+        // Value of each side in token-A terms (pre-update reserves). First deposit → 50/50 split.
+        uint256 valueA;
+        uint256 valueB;
+        if (reserveA == 0 || reserveB == 0) {
+            valueA = 1;
+            valueB = 1;
+        } else {
+            valueA = amountA;
+            valueB = (amountB * reserveA) / reserveB;
+        }
+
+        uint256 shares = _liquidityShares(amountA, amountB);
 
         reserveA += amountA;
         reserveB += amountB;
 
-        _mint(msg.sender, shares);
-        emit LogLiquidityAdded(msg.sender, amountA, amountB, shares);
+        sharesA = (shares * valueA) / (valueA + valueB);
+        sharesB = shares - sharesA;
+
+        if (sharesA > 0) _mint(recipientA, sharesA);
+        if (sharesB > 0) _mint(recipientB, sharesB);
+
+        emit LogCommitFinalized(commitId, recipientA, recipientB, sharesA, sharesB);
+    }
+
+    /// @inheritdoc IAutomatedMarketMaker
+    function cancelCommitDeposit(bytes32 commitId, bool isTokenA) external nonReentrant returns (uint256 amount) {
+        Escrow storage e = _escrows[commitId];
+        if (e.finalized) revert AMM__CommitAlreadyFinalized(commitId);
+
+        if (isTokenA) {
+            if (e.depositorA != msg.sender) revert AMM__NotDepositor(commitId);
+            amount = e.amountA;
+            if (amount == 0) revert AMM__NothingToRefund(commitId);
+            e.depositorA = address(0);
+            e.recipientA = address(0);
+            e.amountA = 0;
+            TOKEN_A.safeTransfer(msg.sender, amount);
+        } else {
+            if (e.depositorB != msg.sender) revert AMM__NotDepositor(commitId);
+            amount = e.amountB;
+            if (amount == 0) revert AMM__NothingToRefund(commitId);
+            e.depositorB = address(0);
+            e.recipientB = address(0);
+            e.amountB = 0;
+            TOKEN_B.safeTransfer(msg.sender, amount);
+        }
+
+        emit LogCommitRefunded(commitId, msg.sender, isTokenA, amount);
+    }
+
+    /// @notice Reads the escrow state for a commit (recipients, escrowed amounts, finalized flag).
+    function getEscrow(bytes32 commitId)
+        external
+        view
+        returns (
+            address depositorA,
+            address depositorB,
+            address recipientA,
+            address recipientB,
+            uint256 amountA,
+            uint256 amountB,
+            bool finalized
+        )
+    {
+        Escrow storage e = _escrows[commitId];
+        return (e.depositorA, e.depositorB, e.recipientA, e.recipientB, e.amountA, e.amountB, e.finalized);
     }
 
     /// @inheritdoc IAutomatedMarketMaker

@@ -87,6 +87,53 @@ interface IAutomatedMarketMaker {
     /// @return amountA The token A returned. @return amountB The token B returned.
     function removeLiquidityEmergency(uint256 shares) external returns (uint256 amountA, uint256 amountB);
 
+    // ============================================================================
+    //         ESCROW-AND-FINALIZE PAIRED DEPOSIT (decision D6, Phase 2)
+    // ============================================================================
+    // Each provider deposits ONLY its own side, independently, against a shared commit id
+    // (matching the sovereign reality where two central banks deposit from two gateways/keys).
+    // Tokens are escrowed — not yet in reserves — until both sides arrive, at which point
+    // finalizeCommit moves them into reserves and mints proportional shares to each recipient.
+
+    /// @notice Emitted when one side of a paired deposit is escrowed against a commit.
+    event LogCommitDeposit(
+        bytes32 indexed commitId, address indexed depositor, address indexed recipient, bool isTokenA, uint256 amount
+    );
+
+    /// @notice Emitted when both sides are present and the commit is finalized into reserves + shares.
+    event LogCommitFinalized(
+        bytes32 indexed commitId, address recipientA, address recipientB, uint256 sharesA, uint256 sharesB
+    );
+
+    /// @notice Emitted when an un-finalized escrowed side is reclaimed by its depositor (timeout/refund).
+    event LogCommitRefunded(bytes32 indexed commitId, address indexed depositor, bool isTokenA, uint256 amount);
+
+    error AMM__CommitAlreadyFinalized(bytes32 commitId);
+    error AMM__CommitIncomplete(bytes32 commitId);
+    error AMM__SideAlreadyDeposited(bytes32 commitId, bool isTokenA);
+    error AMM__NotDepositor(bytes32 commitId);
+    error AMM__NothingToRefund(bytes32 commitId);
+
+    /// @notice Escrows the caller's single side against `commitId`, crediting LP shares (on finalize)
+    ///         to `shareRecipient`. Tokens are pulled from `msg.sender`; shares accrue to the recipient.
+    /// @param commitId The off-chain matched-commit identifier the two sides share.
+    /// @param isTokenA True if depositing TOKEN_A, false for TOKEN_B.
+    /// @param amount The amount of the chosen side to escrow.
+    /// @param shareRecipient The verified participant that will receive this side's LP shares.
+    function depositForCommit(bytes32 commitId, bool isTokenA, uint256 amount, address shareRecipient) external;
+
+    /// @notice Finalizes a fully-deposited commit: moves both escrowed sides into reserves and mints
+    ///         proportional LP shares to each recorded recipient (split by contributed value).
+    /// @param commitId The commit to finalize (both sides must be present).
+    /// @return sharesA Shares minted to the token-A recipient. @return sharesB Shares minted to B.
+    function finalizeCommit(bytes32 commitId) external returns (uint256 sharesA, uint256 sharesB);
+
+    /// @notice Reclaims an un-finalized escrowed side (timeout/refund). Only that side's depositor may call.
+    /// @param commitId The commit to refund from.
+    /// @param isTokenA Which side to reclaim.
+    /// @return amount The amount refunded to the depositor.
+    function cancelCommitDeposit(bytes32 commitId, bool isTokenA) external returns (uint256 amount);
+
     /// @notice Swaps tokens aiming for an EXACT output amount (Exact-Output pricing).
     function swapTokensForExactTokens(
         address tokenIn,

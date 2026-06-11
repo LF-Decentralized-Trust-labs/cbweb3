@@ -184,6 +184,13 @@ AMM fresh and seed liquidity through the new path. There are **no live positions
   on-chain (consistent with already-public reserves). No privacy layer in this work.
 - **D4 — Sovereign share recipient: THE CB'S OWN ADDRESS.** Sovereign/watcher deposits mint shares
   to the central bank's address, not the operator. (Confirm the exact CB key/address in Phase 0.)
+- **D6 — Paired deposit mechanism: ESCROW-AND-FINALIZE.** The atomic single-tx paired mint conflicts
+  with the sovereign flow (each CB deposits its own side independently from its own gateway/key, two
+  txns). Instead the AMM escrows each side against a commit id (`depositForCommit`) and mints
+  proportional shares to each recipient when both sides are present (`finalizeCommit`); an
+  un-finalized side is refundable (`cancelCommitDeposit`). Unifies the commercial + sovereign flows,
+  preserves sovereignty, keeps shares on-chain per provider, atomic at finalize. Implemented in
+  Phase 2 (contract + tests green).
 
 ---
 
