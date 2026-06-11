@@ -1,6 +1,7 @@
 name: Backend CI — Scenario A
 
-permissions: {}
+permissions:
+  contents: read
 
 on:
   push:
