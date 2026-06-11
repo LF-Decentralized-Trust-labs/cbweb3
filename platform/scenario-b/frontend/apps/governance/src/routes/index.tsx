@@ -19,6 +19,7 @@ import {
   RegistryPage,
   SettingsPage,
   SwapMonitorPage,
+  TransferLimitsPage,
 } from "../pages";
 
 const scenarioAChildren: RouteObject[] = [
@@ -45,6 +46,7 @@ const scenarioBChildren: RouteObject[] = [
   { path: "swap-monitor", element: <SwapMonitorPage /> },
   { path: "circuit-breaker", element: <CircuitBreakerPage /> },
   { path: "oversight", element: <OversightPage /> },
+  { path: "transfer-limits", element: <TransferLimitsPage /> },
   { path: "audit", element: <AuditPage /> },
   { path: "settings", element: <SettingsPage /> },
 ];

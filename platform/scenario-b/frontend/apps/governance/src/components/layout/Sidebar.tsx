@@ -41,6 +41,7 @@ const scenarioBNavItems = [
   { to: "/swap-monitor", label: "Swap Monitor", icon: ListChecks },
   { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
   { to: "/oversight", label: "Oversight", icon: Eye },
+  { to: "/transfer-limits", label: "Transfer Limits", icon: Scale },
   { to: "/audit", label: "Audit", icon: ClipboardCheck },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
