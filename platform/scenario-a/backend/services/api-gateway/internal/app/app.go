@@ -87,6 +87,11 @@ func New(cfg config.Config) (*App, error) {
 		AuthProvider:      identityGRPCProvider,
 	}
 
+	// Transfer Limits (R1-10.1): CB only — commercial banks do not manage limits.
+	if cfg.CentralBankAPIURL == "" {
+		deps.TransferLimitHandler = handlers.NewTransferLimitHandler(complianceGRPC)
+	}
+
 	// Payment orchestrator gRPC adapter (optional; enables HTLC + token endpoints).
 	if cfg.PaymentGRPCAddr != "" {
 		paymentGRPC, err := paymentadapter.NewGRPCAdapter(cfg.PaymentGRPCAddr, cfg.RequestTimeout)
@@ -95,7 +100,11 @@ func New(cfg config.Config) (*App, error) {
 			return nil, fmt.Errorf("payment gRPC unavailable at %s: %w", cfg.PaymentGRPCAddr, err)
 		}
 		closers = append(closers, paymentGRPC)
-		deps.PaymentHandler = handlers.NewPaymentHandler(paymentGRPC, cfg.BankCode)
+		ph := handlers.NewPaymentHandler(paymentGRPC, cfg.BankCode)
+		if cfg.FiatSymbol != "" {
+			ph = ph.WithLimitChecker(complianceGRPC, cfg.FiatSymbol)
+		}
+		deps.PaymentHandler = ph
 
 		// Commercial bank: wire escrow proxy that forwards to the Central Bank.
 		if cfg.CentralBankAPIURL != "" {

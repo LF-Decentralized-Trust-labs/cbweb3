@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -15,15 +16,30 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// TransferLimitChecker gates outgoing HTLC locks against CB-configured daily limits.
+type TransferLimitChecker interface {
+	CheckAndDeductTransferLimit(ctx context.Context, payerBankID, currency, amountHuman string) (allowed bool, errorCode, maxAmount string, err error)
+	RestoreTransferLimit(ctx context.Context, payerBankID, currency, amountHuman string) error
+}
+
 // PaymentHandler exposes the payment-orchestrator operations as REST endpoints.
 type PaymentHandler struct {
-	payment  *paymentadapter.GRPCAdapter
-	bankCode string // institution fallback when JWT lacks BankID (e.g. user not yet registered in compliance)
+	payment      *paymentadapter.GRPCAdapter
+	bankCode     string // institution fallback when JWT lacks BankID (e.g. user not yet registered in compliance)
+	fiatSymbol   string // currency for transfer limit checks (e.g. "BRL", "ARS"); empty = skip check
+	limitChecker TransferLimitChecker
 }
 
 // NewPaymentHandler creates a new PaymentHandler.
 func NewPaymentHandler(payment *paymentadapter.GRPCAdapter, bankCode string) *PaymentHandler {
 	return &PaymentHandler{payment: payment, bankCode: bankCode}
+}
+
+// WithLimitChecker attaches a transfer-limit checker and the fiat currency symbol.
+func (h *PaymentHandler) WithLimitChecker(checker TransferLimitChecker, fiatSymbol string) *PaymentHandler {
+	h.limitChecker = checker
+	h.fiatSymbol = fiatSymbol
+	return h
 }
 
 // --- HTLC endpoints ---
@@ -48,8 +64,12 @@ func (h *PaymentHandler) LockHTLC(c *fiber.Ctx) error {
 	if req.TimeLock == 0 {
 		req.TimeLock = uint64(time.Now().Unix()) + 3600 // 1h — initiator must have longer timelock
 	}
+	if err := h.checkAndDeductLimit(c, req.Amount); err != nil {
+		return err
+	}
 	result, err := h.payment.LockHTLC(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock)
 	if err != nil {
+		h.restoreLimit(c, req.Amount)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(result)
@@ -76,8 +96,12 @@ func (h *PaymentHandler) LockHTLCWithHashLock(c *fiber.Ctx) error {
 	if req.TimeLock == 0 {
 		req.TimeLock = uint64(time.Now().Unix()) + 1800 // 30min — responder must have shorter timelock than initiator
 	}
+	if err := h.checkAndDeductLimit(c, req.Amount); err != nil {
+		return err
+	}
 	result, err := h.payment.LockHTLCWithHashLock(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock, req.HashLock)
 	if err != nil {
+		h.restoreLimit(c, req.Amount)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(result)
@@ -604,6 +628,37 @@ func (h *PaymentHandler) ListFXAgreementEvents(c *fiber.Ctx) error {
 		return grpcErrorToHTTP(c, err)
 	}
 	return c.JSON(fiber.Map{"events": results, "total": len(results)})
+}
+
+// checkAndDeductLimit enforces the CB daily transfer limit before an HTLC lock.
+// Returns nil when no checker is configured (limits disabled) or when the transfer is allowed.
+func (h *PaymentHandler) checkAndDeductLimit(c *fiber.Ctx, amount string) error {
+	if h.limitChecker == nil || h.fiatSymbol == "" {
+		return nil
+	}
+	allowed, errorCode, _, err := h.limitChecker.CheckAndDeductTransferLimit(c.Context(), h.bankCode, h.fiatSymbol, amount)
+	if err != nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error":      "transfer limit service unavailable",
+			"error_code": "LIMIT_SERVICE_UNAVAILABLE",
+		})
+	}
+	if !allowed {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error":              "daily transfer limit exceeded",
+			"error_code":         errorCode,
+			"recommended_action": "Contact your Central Bank to review or increase the daily transfer limit.",
+		})
+	}
+	return nil
+}
+
+// restoreLimit is best-effort: called when an HTLC lock fails after a successful deduction.
+func (h *PaymentHandler) restoreLimit(c *fiber.Ctx, amount string) {
+	if h.limitChecker == nil || h.fiatSymbol == "" {
+		return
+	}
+	_ = h.limitChecker.RestoreTransferLimit(c.Context(), h.bankCode, h.fiatSymbol, amount)
 }
 
 // grpcErrorToHTTP maps gRPC status codes to appropriate HTTP responses.

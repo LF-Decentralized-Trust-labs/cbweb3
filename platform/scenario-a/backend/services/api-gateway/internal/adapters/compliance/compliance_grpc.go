@@ -262,3 +262,89 @@ func (a *GRPCAdapter) UpdateSystemParameters(ctx context.Context, params SystemP
 	})
 	return err
 }
+
+// ── Transfer Limits (R1-10.1) ─────────────────────────────────────────────────
+
+// TransferLimit is the HTTP-layer representation of a configured daily transfer limit.
+type TransferLimit struct {
+	LimitID       string `json:"limit_id"`
+	CentralBankID string `json:"central_bank_id"`
+	ParticipantID string `json:"participant_id"`
+	Currency      string `json:"currency"`
+	MaxAmount     string `json:"max_amount"`
+	IsActive      bool   `json:"is_active"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
+func (a *GRPCAdapter) CreateTransferLimit(ctx context.Context, participantID, currency, maxAmount, actorSubject string) (TransferLimit, error) {
+	resp, err := a.cc.CreateTransferLimit(ctx, &compliancv1.CreateTransferLimitRequest{
+		ParticipantId: participantID,
+		Currency:      currency,
+		MaxAmount:     maxAmount,
+		ActorSubject:  actorSubject,
+	})
+	if err != nil {
+		return TransferLimit{}, err
+	}
+	return protoToTransferLimit(resp.Limit), nil
+}
+
+func (a *GRPCAdapter) ListTransferLimits(ctx context.Context, centralBankID string) ([]TransferLimit, error) {
+	resp, err := a.cc.ListTransferLimits(ctx, &compliancv1.ListTransferLimitsRequest{
+		CentralBankId: centralBankID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]TransferLimit, len(resp.Limits))
+	for i, l := range resp.Limits {
+		result[i] = protoToTransferLimit(l)
+	}
+	return result, nil
+}
+
+func (a *GRPCAdapter) DeleteTransferLimit(ctx context.Context, limitID, actorSubject string) error {
+	_, err := a.cc.DeleteTransferLimit(ctx, &compliancv1.DeleteTransferLimitRequest{
+		LimitId:      limitID,
+		ActorSubject: actorSubject,
+	})
+	return err
+}
+
+func (a *GRPCAdapter) CheckAndDeductTransferLimit(ctx context.Context, payerBankID, currency, amountHuman string) (allowed bool, errorCode, maxAmount string, err error) {
+	resp, err := a.cc.CheckAndDeductTransferLimit(ctx, &compliancv1.CheckAndDeductTransferLimitRequest{
+		PayerBankId: payerBankID,
+		Currency:    currency,
+		AmountHuman: amountHuman,
+	})
+	if err != nil {
+		return false, "", "", err
+	}
+	return resp.Allowed, resp.ErrorCode, resp.MaxAmount, nil
+}
+
+func (a *GRPCAdapter) RestoreTransferLimit(ctx context.Context, payerBankID, currency, amountHuman string) error {
+	_, err := a.cc.RestoreTransferLimit(ctx, &compliancv1.RestoreTransferLimitRequest{
+		PayerBankId: payerBankID,
+		Currency:    currency,
+		AmountHuman: amountHuman,
+	})
+	return err
+}
+
+func protoToTransferLimit(l *compliancv1.TransferLimit) TransferLimit {
+	if l == nil {
+		return TransferLimit{}
+	}
+	return TransferLimit{
+		LimitID:       l.LimitId,
+		CentralBankID: l.CentralBankId,
+		ParticipantID: l.ParticipantId,
+		Currency:      l.Currency,
+		MaxAmount:     l.MaxAmount,
+		IsActive:      l.IsActive,
+		CreatedAt:     l.CreatedAt,
+		UpdatedAt:     l.UpdatedAt,
+	}
+}
