@@ -139,23 +139,6 @@ func (a *ammAdapter) LPBalanceOf(ctx context.Context, holder string) (*big.Int, 
 	return a.c.LPBalanceOf(ctx, holder)
 }
 
-// DepositForCommit escrows one side against a commit on the configured AMM (escrow-and-finalize, D6).
-// An empty shareRecipient credits the signing gateway itself.
-func (a *ammAdapter) DepositForCommit(ctx context.Context, commitID [32]byte, isTokenA bool, amount *big.Int, shareRecipient string) error {
-	if _, err := a.c.DepositForCommit(ctx, commitID, isTokenA, amount, shareRecipient); err != nil {
-		return fmt.Errorf("depositForCommit: %w", err)
-	}
-	return nil
-}
-
-// FinalizeCommit finalizes a fully-deposited commit on the configured AMM.
-func (a *ammAdapter) FinalizeCommit(ctx context.Context, commitID [32]byte) error {
-	if _, err := a.c.FinalizeCommit(ctx, commitID); err != nil {
-		return fmt.Errorf("finalizeCommit: %w", err)
-	}
-	return nil
-}
-
 // DepositForCommitAt escrows one side against a commit on an arbitrary AMM (sovereign flow).
 func (a *ammAdapter) DepositForCommitAt(ctx context.Context, ammAddress string, commitID [32]byte, isTokenA bool, amount *big.Int, shareRecipient string) error {
 	return a.c.DepositForCommitAt(ctx, ammAddress, commitID, isTokenA, amount, shareRecipient)

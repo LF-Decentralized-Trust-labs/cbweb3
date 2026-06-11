@@ -19,9 +19,19 @@
 | 5 — Frontend LP-share label/types | ✅ done (API-compatible; rich price-impact UI = follow-up) | — |
 | 6 — Specs/docs + live integration test | ✅ done — `TestFullHappyPath` PASS (all 7 phases, 64s) | — |
 
-**Known follow-ups (flagged, off the happy path):** (a) commercial multi-bank withdrawal needs the
-owning bank to sign the burn (sovereign CB-signed withdrawal is already correct); (b) governance
-frontend price-impact/slippage quote UI for the home-currency zap-out.
+**Known follow-ups (flagged, off the happy path):** (a) sovereign withdrawal wiring — persist the
+real `finalizeCommit` share counts on `LiquidityPosition` and resolve the share owner by CB hub
+address so the CB-signed burn runs end-to-end; (b) governance frontend price-impact/slippage quote
+UI for the home-currency zap-out; (c) governance portal must display the CB's on-chain LP-share
+(`CBW3-LP`) balance and its tCeBM balance.
+
+> **Decision D7 (2026-06-11) — Liquidity provision is SOVEREIGN-ONLY.** Commercial banks act
+> exclusively as *users* of the pool (swaps); they never provide liquidity and never hold LP shares.
+> All LP provision flows through the sovereign path (each CB escrows its own side, shares mint to
+> the CB's own address per D4). Consequence: the operator-executed commercial cooperative
+> provision path (`executeMatchedCommits` + DB-matched commit branch) is **removed**, which also
+> eliminates the prior "commercial multi-bank withdrawal authority" concern — every LP holder is a
+> CB that owns and signs for its own shares.
 
 ## 1. Goal
 

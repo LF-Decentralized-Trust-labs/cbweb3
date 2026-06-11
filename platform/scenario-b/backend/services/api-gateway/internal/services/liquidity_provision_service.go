@@ -5,9 +5,7 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	"time"
 
@@ -19,10 +17,6 @@ import (
 // AMLiquidityAdder executes add/remove-liquidity transactions on the Hub AMM.
 type AMLiquidityAdder interface {
 	AddLiquidity(ctx context.Context, pair, providerID, tokenAAmount, tokenBAmount string) (lpShares string, err error)
-	// Escrow-and-finalize paired deposit (decision D6): each side is escrowed against a shared
-	// commit key, then finalized once both are present (mints proportional LP shares on-chain).
-	DepositForCommit(ctx context.Context, commitID [32]byte, isTokenA bool, amount *big.Int, shareRecipient string) error
-	FinalizeCommit(ctx context.Context, commitID [32]byte) error
 	// RemoveLiquidityShares burns the share owner's on-chain LP shares and returns a single (home)
 	// currency (decision D1; homeIsTokenA selects the side). The configured signer must own the
 	// shares (decision D4).
@@ -87,7 +81,7 @@ type CommitRequest struct {
 	ProviderID      string
 	Side            apidomain.CommitSide
 	Amount          string
-	OnChainCommitID []byte // nil for cooperative (off-chain match); bytes32 for sovereign (on-chain match)
+	OnChainCommitID []byte // bytes32 commitId from LiquidityCommitRegistry (sovereign on-chain matching, D7)
 }
 
 // PoolCommitRepo is the repository interface consumed by the service.
@@ -96,7 +90,6 @@ type PoolCommitRepo interface {
 	FindActiveByPairAndSide(ctx context.Context, poolPair string, side apidomain.CommitSide) (*apidomain.PoolCommit, error)
 	FindByProviderAndPair(ctx context.Context, providerID, poolPair string) (*apidomain.PoolCommit, error)
 	UpdateStatus(ctx context.Context, commitID string, status apidomain.CommitStatus) error
-	LinkCounterpart(ctx context.Context, commitID, counterpartID string) error
 	FindByID(ctx context.Context, commitID string) (*apidomain.PoolCommit, error)
 	ListByPair(ctx context.Context, poolPair, status string) ([]apidomain.PoolCommit, error)
 	// UpdateStatusByOnChainCommitID transitions a commit identified by its on-chain bytes32 commitId.
@@ -281,9 +274,13 @@ func (s *LiquidityProvisionService) removeShares(ctx context.Context, pos *apido
 //  COMMIT-REVEAL (US1 — cooperative single-sided deposits)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// RegisterCommit records a deposit intent and executes the commit-reveal if both sides are present.
-// Enforces: (1) LP role, (2) unique (pool_pair, side) for PENDING/MATCHED, (3) no same-provider both sides.
-// When a counterpart is found, both on-chain transfers are executed and LiquidityPositions are created (FR-002).
+// RegisterCommit records a sovereign deposit intent (decision D7: liquidity provision is
+// sovereign-only — commercial banks are pool users, never providers).
+// Enforces: (1) unique (pool_pair, side) for PENDING/MATCHED, (2) no same-provider both sides.
+// Matching and execution happen ON-CHAIN: the handler registers the commit in the
+// LiquidityCommitRegistry; when both sides are present the contract emits CommitMatched, the
+// Cacti watcher notifies each CB gateway, and SovereignLiquidityService escrows + finalizes.
+// This service only persists the local PENDING record (flipped to EXECUTED by the sovereign flow).
 func (s *LiquidityProvisionService) RegisterCommit(ctx context.Context, req CommitRequest) (*CommitResult, error) {
 	if req.PoolPair == "" || req.ProviderID == "" || req.Amount == "" {
 		return nil, fmt.Errorf("pool_pair, provider_id, and amount are required")
@@ -335,149 +332,9 @@ func (s *LiquidityProvisionService) RegisterCommit(ctx context.Context, req Comm
 		return nil, fmt.Errorf("create commit: %w", err)
 	}
 
-	// Attempt to find counterpart.
-	counterpart, err := s.commitRepo.FindActiveByPairAndSide(ctx, req.PoolPair, commit.OppositeSide())
-	if errors.Is(err, gorm.ErrRecordNotFound) || counterpart == nil {
-		// No counterpart yet — pool stays PENDING_COUNTERPART.
-		return commitToResult(commit), nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("find counterpart: %w", err)
-	}
-
-	// Counterpart found — link and execute both transfers.
-	if err := s.commitRepo.LinkCounterpart(ctx, commit.CommitID, counterpart.CommitID); err != nil {
-		return nil, fmt.Errorf("link counterpart: %w", err)
-	}
-
-	// Execute on-chain transfers for both sides (FR-002).
-	lpIDs, execErr := s.executeMatchedCommits(ctx, commit, counterpart)
-	if execErr != nil {
-		return nil, execErr
-	}
-
-	commit.Status = apidomain.CommitStatusExecuted
-	result := commitToResult(commit)
-	result.LPIDs = lpIDs
-	return result, nil
-}
-
-// executeMatchedCommits sends both addSingleSidedLiquidity transactions and creates
-// LiquidityPosition records for each provider. Implements FR-014 retry logic.
-// Returns [lpIDA, lpIDB] so RegisterCommit can include them in CommitResult.lp_ids (FR-002).
-func (s *LiquidityProvisionService) executeMatchedCommits(ctx context.Context, c1, c2 *apidomain.PoolCommit) ([]string, error) {
-	// Determine which is side A and which is side B.
-	commitA, commitB := c1, c2
-	if c1.Side == apidomain.CommitSideB {
-		commitA, commitB = c2, c1
-	}
-
-	amtA, _ := new(big.Int).SetString(commitA.Amount, 10)
-	amtB, _ := new(big.Int).SetString(commitB.Amount, 10)
-
-	// Escrow-and-finalize (decision D6): the operator gateway escrows both matched sides against a
-	// shared key, then finalizes (moves escrow → reserves, mints proportional shares). Unlike the
-	// prior two-tx flow, a failure before finalize leaves only escrowed tokens — refundable via
-	// cancelCommitDeposit — never a partial half-funded pool.
-	escrowKey := deriveEscrowKey(commitA.CommitID, commitB.CommitID)
-
-	if err := s.amm.DepositForCommit(ctx, escrowKey, true, amtA, ""); err != nil {
-		_ = s.commitRepo.UpdateStatus(ctx, c1.CommitID, apidomain.CommitStatusReconciliationRequired)
-		_ = s.commitRepo.UpdateStatus(ctx, c2.CommitID, apidomain.CommitStatusReconciliationRequired)
-		return nil, fmt.Errorf("depositForCommit TOKEN_A: %w", err)
-	}
-
-	if err := retryWithBackoff(ctx, 5, func(attempt int) error {
-		return s.amm.DepositForCommit(ctx, escrowKey, false, amtB, "")
-	}); err != nil {
-		_ = s.commitRepo.UpdateStatus(ctx, c1.CommitID, apidomain.CommitStatusReconciliationRequired)
-		_ = s.commitRepo.UpdateStatus(ctx, c2.CommitID, apidomain.CommitStatusReconciliationRequired)
-		return nil, fmt.Errorf("depositForCommit TOKEN_B (side A escrowed, refundable): %w; both commits → RECONCILIATION_REQUIRED", err)
-	}
-
-	if err := retryWithBackoff(ctx, 5, func(attempt int) error {
-		return s.amm.FinalizeCommit(ctx, escrowKey)
-	}); err != nil {
-		_ = s.commitRepo.UpdateStatus(ctx, c1.CommitID, apidomain.CommitStatusReconciliationRequired)
-		_ = s.commitRepo.UpdateStatus(ctx, c2.CommitID, apidomain.CommitStatusReconciliationRequired)
-		return nil, fmt.Errorf("finalizeCommit (both sides escrowed, refundable): %w; both commits → RECONCILIATION_REQUIRED", err)
-	}
-
-	// Both transfers confirmed — mark commits as EXECUTED and create LP positions.
-	_ = s.commitRepo.UpdateStatus(ctx, c1.CommitID, apidomain.CommitStatusExecuted)
-	_ = s.commitRepo.UpdateStatus(ctx, c2.CommitID, apidomain.CommitStatusExecuted)
-
-	now := time.Now()
-	posA := &apidomain.LiquidityPosition{
-		LPID:                uuid.NewString(),
-		ProviderBankID:      commitA.ProviderID,
-		PoolPair:            commitA.PoolPair,
-		TokenAContributed:   commitA.Amount,
-		TokenBContributed:   "0",
-		LPShares:            "0",
-		AddedAt:             now,
-		Status:              apidomain.LPStatusActive,
-		DepositSide:         apidomain.DepositSideA,
-		FeeClaimAccumulated: "0",
-		CommitID:            &commitA.CommitID,
-	}
-	posB := &apidomain.LiquidityPosition{
-		LPID:                uuid.NewString(),
-		ProviderBankID:      commitB.ProviderID,
-		PoolPair:            commitB.PoolPair,
-		TokenAContributed:   "0",
-		TokenBContributed:   commitB.Amount,
-		LPShares:            "0",
-		AddedAt:             now,
-		Status:              apidomain.LPStatusActive,
-		DepositSide:         apidomain.DepositSideB,
-		FeeClaimAccumulated: "0",
-		CommitID:            &commitB.CommitID,
-	}
-
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(posA).Error; err != nil {
-			return err
-		}
-		if err := tx.Create(posB).Error; err != nil {
-			return err
-		}
-		return s.recalculateSharesInTx(ctx, tx, commitA.PoolPair)
-	}); err != nil {
-		return nil, fmt.Errorf("executeMatchedCommits tx: %w", err)
-	}
-
-	// Seed an initial pool_state_reading so that removeProportional can proceed
-	// immediately without waiting for the LiquidityMonitorService to poll.
-	// After a fresh commit-reveal the reserves equal the two committed amounts.
-	amtAF, _ := new(big.Float).SetString(commitA.Amount)
-	amtBF, _ := new(big.Float).SetString(commitB.Amount)
-	var ratio float64
-	if amtAF != nil && amtBF != nil {
-		af64, _ := amtAF.Float64()
-		bf64, _ := amtBF.Float64()
-		if af64 > 0 {
-			ratio = bf64 / af64
-		}
-	}
-	lpCount := 2
-	reading := &apidomain.PoolStateReading{
-		ReadingID:    uuid.NewString(),
-		PoolPair:     commitA.PoolPair,
-		ReserveA:     commitA.Amount,
-		ReserveB:     commitB.Amount,
-		CurrentRatio: ratio,
-		RecordedAt:   now,
-		FeeRateBps:   30,
-		TotalLPCount: &lpCount,
-		PoolStatus:   apidomain.PoolStatusActive,
-	}
-	if err := s.db.WithContext(ctx).Create(reading).Error; err != nil {
-		log.Printf("[liquidity_provision] seed pool_state_reading after commit-reveal: %v (non-fatal)", err)
-	}
-
-	// lp_ids[0] = providerA (side A), lp_ids[1] = providerB (side B) — order matches commit sides.
-	return []string{posA.LPID, posB.LPID}, nil
+	// Commit stays PENDING here. On-chain matching (CommitMatched) and sovereign execution
+	// transition it to EXECUTED asynchronously (D7) — no local counterpart matching.
+	return commitToResult(commit), nil
 }
 
 // GetCommit returns a PoolCommit by ID.
