@@ -72,9 +72,9 @@ func (TransferLimitModel) TableName() string { return "transfer_limits" }
 // TransferVolumeModel tracks daily accumulated transfer volume per participant/currency (R1-10.1).
 type TransferVolumeModel struct {
 	ID             uint      `gorm:"primaryKey;autoIncrement"`
-	ParticipantID  string    `gorm:"column:participant_id;not null;index:idx_vol_lookup"`
-	Currency       string    `gorm:"column:currency;not null;index:idx_vol_lookup"`
-	WindowDate     time.Time `gorm:"column:window_date;not null;index:idx_vol_lookup"`
+	ParticipantID  string    `gorm:"column:participant_id;not null;uniqueIndex:idx_vol_lookup"`
+	Currency       string    `gorm:"column:currency;not null;uniqueIndex:idx_vol_lookup"`
+	WindowDate     time.Time `gorm:"column:window_date;not null;uniqueIndex:idx_vol_lookup"`
 	AccumulatedWei string    `gorm:"column:accumulated_wei;not null;default:'0'"`
 	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
