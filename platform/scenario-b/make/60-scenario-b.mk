@@ -22,6 +22,10 @@ SPOKE_A_RPC  ?= http://localhost:8645
 SPOKE_B_RPC  ?= http://localhost:8745
 KEYCLOAK_URL    ?= http://localhost:8081
 API_GW_URL      ?= http://localhost:3000
+API_GW_BANK_A_URL         ?= http://localhost:18080
+API_GW_BANK_B_URL         ?= http://localhost:28080
+API_GW_CENTRAL_BANK_A_URL ?= http://localhost:38080
+API_GW_CENTRAL_BANK_B_URL ?= http://localhost:60080
 CACTI_RELAYER_URL ?= http://localhost:4000
 
 SCENARIO_B_ENV := \
@@ -53,8 +57,8 @@ scenario-b.down-relayer: cacti-down
 
 # ── Contracts (AMM on Hub, SpokeBridge on each Spoke) ────────────────────────
 
-scenario-b.deploy-contracts: contracts.setup contracts.build contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b contracts.sync-addresses contracts.register-participants scenario-b.seed-sovereign-pair
-	@echo "[scenario-b] deployed Hub (IdentityRegistry + Tokens + AMM) + Spokes + Participants + LiquidityCommitRegistry"
+scenario-b.deploy-contracts: contracts.setup contracts.build contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b contracts.sync-addresses contracts.register-participants scenario-b.seed-sovereign-pair contracts.grant-liquidity-providers
+	@echo "[scenario-b] deployed Hub (IdentityRegistry + Tokens + AMM) + Spokes + Participants + LiquidityCommitRegistry + LP grants"
 	@# contracts.seed-hub removido: pool seeding é feito via commit-reveal cooperativo (step4b)
 
 # ── Backend services (Scenario B v2 API) ────────────────────────────────────
@@ -75,7 +79,7 @@ SOVEREIGN_PAIR_ID ?= W-BRL-ARS
 scenario-b.seed-sovereign-pair:
 	@echo "[scenario-b] Seeding sovereign pair $(SOVEREIGN_PAIR_ID) on Hub..."
 	@test -n "$(ADMIN_PRIVATE_KEY)"          || (echo "ERROR: ADMIN_PRIVATE_KEY not set — check contracts/.env"; exit 1)
-	@test -n "$(CENTRAL_BANK_PRIVATE_KEY)"   || (echo "ERROR: CENTRAL_BANK_PRIVATE_KEY not set — check contracts/.env"; exit 1)
+	@test -n "$(CENTRAL_BANK_A_PRIVATE_KEY)" || (echo "ERROR: CENTRAL_BANK_A_PRIVATE_KEY not set — check contracts/.env"; exit 1)
 	@test -n "$(CENTRAL_BANK_B_PRIVATE_KEY)" || (echo "ERROR: CENTRAL_BANK_B_PRIVATE_KEY not set — check contracts/.env"; exit 1)
 	@test -n "$(ADMIN_ADDRESS)"              || (echo "ERROR: ADMIN_ADDRESS not set — check contracts/.env"; exit 1)
 	@HUB_IR=$$(grep '^HUB_IDENTITY_REGISTRY_ADDRESS=' backend/config/.env.infra.central-bank-a 2>/dev/null | cut -d= -f2-) && \
@@ -86,7 +90,7 @@ scenario-b.seed-sovereign-pair:
 	   TOKEN_SYMBOL_A=$(SOVEREIGN_TOKEN_A) \
 	   TOKEN_SYMBOL_B=$(SOVEREIGN_TOKEN_B) \
 	   PAIR_ID=$(SOVEREIGN_PAIR_ID) \
-	   CB_A_HUB_PRIVATE_KEY=$(CENTRAL_BANK_PRIVATE_KEY) \
+	   CB_A_HUB_PRIVATE_KEY=$(CENTRAL_BANK_A_PRIVATE_KEY) \
 	   CB_B_HUB_PRIVATE_KEY=$(CENTRAL_BANK_B_PRIVATE_KEY) \
 	   ADMIN_PRIVATE_KEY=$(ADMIN_PRIVATE_KEY) \
 	   ADMIN_ADDRESS=$(ADMIN_ADDRESS) \
@@ -118,15 +122,64 @@ scenario-b.down-backend-mlp:
 scenario-b.tryout-us2-mlp:
 	@echo "[scenario-b] E2E tryout — US2 MLP (requires ENABLE_MLP=true and MLP stack running)"
 	@ENABLE_MLP=true $(SCENARIO_B_ENV) bash tryouts/tryout-scenario-b-e2e.sh us2
+# ── Mock FX-rate feeder (system-managed oracle) ──────────────────────────────
+# Pushes a real-life-like, slightly-jittered BRL/ARS rate into the Hub ManualOracle
+# on an interval, standing in for an external price feed. The api-gateway reads this
+# rate to suggest a counterpart match amount during liquidity coordination. Runs as a
+# detached host process (DURATION_SECS=0 = until stopped) so it lives with the stack;
+# launching never blocks or fails `up` (the oracle/cast may not be ready — that's fine).
+FX_FEEDER_PID := /tmp/cbweb3-mock-fx-feeder.pid
+FX_FEEDER_LOG := /tmp/cbweb3-mock-fx-feeder.log
+
+scenario-b.up-fx-feeder:
+	@echo "[scenario-b] starting mock FX-rate feeder (BRL/ARS → Hub ManualOracle)..."
+	@if [ -f $(FX_FEEDER_PID) ] && kill -0 $$(cat $(FX_FEEDER_PID)) 2>/dev/null; then \
+	  echo "  already running (pid $$(cat $(FX_FEEDER_PID)))"; \
+	else \
+	  DURATION_SECS=0 nohup ./deploy/local/tools/mock-fx-feeder.sh > $(FX_FEEDER_LOG) 2>&1 & \
+	  echo $$! > $(FX_FEEDER_PID); \
+	  echo "  started (pid $$(cat $(FX_FEEDER_PID))) — log: $(FX_FEEDER_LOG)"; \
+	fi
+
+scenario-b.down-fx-feeder:
+	@if [ -f $(FX_FEEDER_PID) ]; then \
+	  kill $$(cat $(FX_FEEDER_PID)) 2>/dev/null || true; rm -f $(FX_FEEDER_PID); \
+	  echo "[scenario-b] mock FX-rate feeder stopped"; \
+	fi
+
 # ── Stack targets ────────────────────────────────────────────────────────────
 
-scenario-b.up: scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend
+# down-fx-feeder runs first: the feeder signs setRate with the admin/deployer key, the
+# same account forge uses in deploy-contracts — a stale feeder from a prior `up` would
+# race the deploy's nonce. up-fx-feeder restarts it fresh at the end.
+scenario-b.up: scenario-b.down-fx-feeder scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend scenario-b.up-fx-feeder
 	@echo "[scenario-b] full stack up — ready for tryout (bash tryouts/tryout-scenario-b-e2e.sh)"
 
-scenario-b.down: scenario-b.down-backend scenario-b.down-relayer scenario-b.down-infra
+scenario-b.down: scenario-b.down-fx-feeder scenario-b.down-backend scenario-b.down-relayer scenario-b.down-infra
 	@echo "[scenario-b] full stack down"
 
 scenario-b.restart: scenario-b.down scenario-b.up
+
+# ── Full wipe ────────────────────────────────────────────────────────────────
+# scenario-b.nuke — best-effort total teardown for a guaranteed clean slate.
+# Unlike `scenario-b.down`, this also removes the frontend dev-server containers
+# and force-clears anything a partial/failed down may have left behind, including
+# the `local_postgres_data` Postgres volume (the one a bare re-`up` never drops,
+# which otherwise keeps stale pool_commits / bridged_asset_positions across deploys).
+# All steps are best-effort (errors ignored) so it always reaches the force-clean.
+scenario-b.nuke:
+	@echo "[scenario-b] NUKE — tearing down the entire stack + volumes..."
+	-@$(MAKE) scenario-b.down
+	-@$(MAKE) frontend-scenario-b-down
+	@echo "[scenario-b] force-removing any leftover containers..."
+	-@docker rm -f $$(docker ps -aq --filter name=cbweb3 --filter name=backend-) 2>/dev/null || true
+	@echo "[scenario-b] removing Postgres volume (local_postgres_data)..."
+	-@docker volume rm local_postgres_data 2>/dev/null || true
+	@echo "[scenario-b] verifying clean state..."
+	@docker ps -a --format '{{.Names}}' | grep -E 'cbweb3|backend-' && echo "  WARN: containers still present (see above)" || echo "  OK: no cbweb3 containers"
+	@docker volume ls --format '{{.Name}}' | grep -E 'local_postgres_data' && echo "  WARN: postgres volume still present" || echo "  OK: no postgres volume"
+	@ls -d deploy/local/*/nodes/*/data 2>/dev/null && echo "  WARN: besu chain data still present" || echo "  OK: no besu chain data"
+	@echo "[scenario-b] nuke complete — run 'make scenario-b.up' for a fresh stack"
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -158,6 +211,27 @@ scenario-b.tryout-us2:
 scenario-b.tryout-us3:
 	@$(SCENARIO_B_ENV) bash tryouts/tryout-scenario-b-e2e.sh us3
 
+# ── Integration test (full happy-path API test) ──────────────────────────────
+
+SKIP_UP   ?= 1
+SKIP_DOWN ?= 1
+
+scenario-b.test-integration: ## Run full happy-path API integration test against a live stack
+	@echo "[scenario-b] running integration test (full happy path)..."
+ifeq ($(SKIP_UP),0)
+	@echo "[scenario-b] bringing stack up (SKIP_UP=0)..."
+	@$(MAKE) scenario-b.up
+endif
+	@cd tests/integration && \
+	  SKIP_UP=1 \
+	  SKIP_DOWN=$(SKIP_DOWN) \
+	  KEYCLOAK_URL=$(KEYCLOAK_URL) \
+	  API_GW_BANK_A_URL=$(API_GW_BANK_A_URL) \
+	  API_GW_BANK_B_URL=$(API_GW_BANK_B_URL) \
+	  API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
+	  API_GW_CENTRAL_BANK_B_URL=$(API_GW_CENTRAL_BANK_B_URL) \
+	  go test -v -count=1 -timeout 30m -run TestFullHappyPath ./...
+
 # ── Performance baseline (T105) ──────────────────────────────────────────────
 
 scenario-b.perf-baseline:
@@ -179,7 +253,8 @@ scenario-b.validate-openapi:
 	scenario-b.build-backend-images \
 	scenario-b.up-backend scenario-b.down-backend \
 	scenario-b.up-backend-mlp scenario-b.down-backend-mlp scenario-b.tryout-us2-mlp \
-	scenario-b.up scenario-b.down scenario-b.restart \
+	scenario-b.up scenario-b.down scenario-b.restart scenario-b.nuke \
 	scenario-b.test-contracts scenario-b.test-backend scenario-b.test \
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
+	scenario-b.test-integration \
 	scenario-b.perf-baseline scenario-b.validate-openapi

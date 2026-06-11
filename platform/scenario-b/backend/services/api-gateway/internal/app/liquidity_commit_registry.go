@@ -245,6 +245,77 @@ func (c *LiquidityCommitRegistryClient) GetPendingCommit(ctx context.Context, po
 	return commitId, nil
 }
 
+// CommitView is the decoded result of the getCommit(commitId) view call.
+//
+// status enum: PENDING=0, MATCHED=1, EXPIRED=2, CANCELLED=3
+// side enum:   A=0, B=1
+type CommitView struct {
+	Signer     common.Address
+	WTokenAddr common.Address
+	Amount     *big.Int
+	ExpiresAt  uint64
+	Status     uint8
+	Side       uint8
+}
+
+// GetCommit returns the full commit record for a commitId via the on-chain
+// getCommit view. getPendingCommit only yields the commitId, so this is required
+// to obtain the amount, expiry and signer behind a pending commit.
+func (c *LiquidityCommitRegistryClient) GetCommit(ctx context.Context, commitId [32]byte) (CommitView, error) {
+	input, err := c.parsed.Pack("getCommit", commitId)
+	if err != nil {
+		return CommitView{}, fmt.Errorf("liquidity commit registry getCommit pack: %w", err)
+	}
+	msg := ethereum.CallMsg{To: &c.contract, Data: input}
+	raw, err := c.ec.CallContract(ctx, msg, nil)
+	if err != nil {
+		return CommitView{}, fmt.Errorf("liquidity commit registry getCommit call: %w", err)
+	}
+
+	method := c.parsed.Methods["getCommit"]
+	values, err := method.Outputs.Unpack(raw)
+	if err != nil {
+		return CommitView{}, fmt.Errorf("liquidity commit registry getCommit unpack: %w", err)
+	}
+	if len(values) != 6 {
+		return CommitView{}, fmt.Errorf("liquidity commit registry getCommit: expected 6 outputs, got %d", len(values))
+	}
+
+	signer, ok := values[0].(common.Address)
+	if !ok {
+		return CommitView{}, fmt.Errorf("liquidity commit registry getCommit: signer type %T", values[0])
+	}
+	wToken, ok := values[1].(common.Address)
+	if !ok {
+		return CommitView{}, fmt.Errorf("liquidity commit registry getCommit: wTokenAddr type %T", values[1])
+	}
+	amount, ok := values[2].(*big.Int)
+	if !ok {
+		return CommitView{}, fmt.Errorf("liquidity commit registry getCommit: amount type %T", values[2])
+	}
+	expiresAt, ok := values[3].(*big.Int)
+	if !ok {
+		return CommitView{}, fmt.Errorf("liquidity commit registry getCommit: expiresAt type %T", values[3])
+	}
+	status, ok := values[4].(uint8)
+	if !ok {
+		return CommitView{}, fmt.Errorf("liquidity commit registry getCommit: status type %T", values[4])
+	}
+	side, ok := values[5].(uint8)
+	if !ok {
+		return CommitView{}, fmt.Errorf("liquidity commit registry getCommit: side type %T", values[5])
+	}
+
+	return CommitView{
+		Signer:     signer,
+		WTokenAddr: wToken,
+		Amount:     amount,
+		ExpiresAt:  expiresAt.Uint64(),
+		Status:     status,
+		Side:       side,
+	}, nil
+}
+
 // CommitIDToHex converts a [32]byte commitId to a 0x-prefixed hex string.
 func CommitIDToHex(id [32]byte) string {
 	return "0x" + hex.EncodeToString(id[:])

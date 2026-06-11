@@ -18,7 +18,9 @@ import {
   CROSS_CURRENCY_QUOTE_REFRESH_MS,
   weiToDisplay,
 } from "../services/api/cross-currency-swap.api";
+import { usePaymentStore } from "../stores";
 import { CROSS_CURRENCY_SWAP_ERROR } from "../types/cross-currency-swap.types";
+import { displayToBase, formatAmountInput, parseAmountInput } from "../types";
 
 const CROSS_CURRENCY_POOL_PAIR = "W-BRL-ARS";
 
@@ -57,6 +59,8 @@ export function TransferPage() {
   const acknowledgeSwapError = useCrossCurrencySwapStore((state) => state.acknowledgeSwapError);
   const clearQuoteRefreshedNotice = useCrossCurrencySwapStore((state) => state.clearQuoteRefreshedNotice);
   const reset = useCrossCurrencySwapStore((state) => state.reset);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
+  const tokenDecimals = tCeBMDecimals ?? 18;
 
   const [sourceCurrency, setSourceCurrency] = useState("BRL");
   const [targetCurrency, setTargetCurrency] = useState("ARS");
@@ -82,7 +86,7 @@ export function TransferPage() {
       if (!amountOut) {
         return;
       }
-      void fetchQuote(sourceCurrency, targetCurrency, amountOut);
+      void fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals));
     },
     CROSS_CURRENCY_QUOTE_REFRESH_MS,
     step === "idle" && quote !== null && amountOut.length > 0,
@@ -124,7 +128,7 @@ export function TransferPage() {
   const handleGetQuote = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     clearQuoteRefreshedNotice();
-    await fetchQuote(sourceCurrency, targetCurrency, amountOut);
+    await fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals));
   };
 
   const handleExecuteTransfer = async (event: FormEvent<HTMLFormElement>) => {
@@ -138,8 +142,8 @@ export function TransferPage() {
       source_currency: sourceCurrency,
       target_currency: targetCurrency,
       pool_pair: CROSS_CURRENCY_POOL_PAIR,
-      amount_out: amountOut,
-      max_amount_in: amountInInput,
+      amount_out: displayToBase(parseAmountInput(amountOut), tokenDecimals),
+      max_amount_in: displayToBase(parseAmountInput(amountInInput), tokenDecimals),
       beneficiary_bank_id: beneficiaryBankId,
       quote_id: quote.quote_id,
     });
@@ -214,16 +218,17 @@ export function TransferPage() {
               </div>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="transfer-amount-out">Amount Out (wei)</Label>
+              <Label htmlFor="transfer-amount-out">Amount Out</Label>
               <Input
                 id="transfer-amount-out"
                 value={amountOut}
                 onChange={(event) => {
                   clearQuoteRefreshedNotice();
-                  setAmountOut(event.target.value);
+                  const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+                  setAmountOut(formatAmountInput(cleaned));
                 }}
-                inputMode="numeric"
-                pattern="[0-9]+"
+                inputMode="decimal"
+                placeholder="0.00"
                 required
               />
             </div>
@@ -232,6 +237,21 @@ export function TransferPage() {
         </CardContent>
       </Card>
 
+      {step === "idle" && error && !quote ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Quote Error</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p className="text-destructive">
+              {errorCode && CROSS_CURRENCY_ERROR_MESSAGES[errorCode]
+                ? CROSS_CURRENCY_ERROR_MESSAGES[errorCode]
+                : error}
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {quote ? (
         <Card>
           <CardHeader>
@@ -239,8 +259,8 @@ export function TransferPage() {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <p>Effective Rate: {quote.effective_rate}</p>
-            <p>Amount In: {weiToDisplay(quote.amount_in)} {sourceCurrency}</p>
-            <p>Amount Out: {weiToDisplay(quote.amount_out)} {targetCurrency}</p>
+            <p>Amount In: {weiToDisplay(quote.amount_in, tokenDecimals)} {sourceCurrency}</p>
+            <p>Amount Out: {weiToDisplay(quote.amount_out, tokenDecimals)} {targetCurrency}</p>
             <p>TTL: {ttlSeconds ?? "-"}s</p>
           </CardContent>
         </Card>
@@ -255,17 +275,20 @@ export function TransferPage() {
           <CardContent>
             <form className="space-y-3" onSubmit={handleExecuteTransfer}>
               <div className="space-y-1">
-                <Label htmlFor="transfer-max-amount-in">Amount In (wei)</Label>
+                <Label htmlFor="transfer-max-amount-in">Max Amount In</Label>
                 <Input
                   id="transfer-max-amount-in"
                   value={amountInInput}
-                  onChange={(event) => setAmountInInput(event.target.value)}
-                  inputMode="numeric"
-                  pattern="[0-9]+"
+                  onChange={(event) => {
+                    const cleaned = event.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+                    setAmountInInput(formatAmountInput(cleaned));
+                  }}
+                  inputMode="decimal"
+                  placeholder="0.00"
                   required
                 />
-                <p className="text-xs text-muted-foreground">Suggested max from quote + slippage: {weiToDisplay(suggestedMaxAmountIn)} {sourceCurrency}</p>
-                <Button type="button" variant="outline" size="sm" onClick={() => setAmountInInput(suggestedMaxAmountIn)}>
+                <p className="text-xs text-muted-foreground">Suggested max from quote + slippage: {weiToDisplay(suggestedMaxAmountIn, tokenDecimals)} {sourceCurrency}</p>
+                <Button type="button" variant="outline" size="sm" onClick={() => setAmountInInput(formatAmountInput(weiToDisplay(suggestedMaxAmountIn, tokenDecimals)))}>
                   Use Suggested Max
                 </Button>
               </div>
@@ -321,8 +344,8 @@ export function TransferPage() {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <p>Swap Tx Hash: {swapResult.swap_tx_hash ?? "-"}</p>
-            <p>Amount In: {weiToDisplay(swapResult.amount_in ?? "")}</p>
-            <p>Amount Out: {weiToDisplay(swapResult.amount_out ?? "")}</p>
+            <p>Amount In: {weiToDisplay(swapResult.amount_in ?? "", tokenDecimals)}</p>
+            <p>Amount Out: {weiToDisplay(swapResult.amount_out ?? "", tokenDecimals)}</p>
             <p>Bridge In Position: {swapResult.bridge_in_position_id ?? "-"}</p>
             <p>Bridge Out Position: {swapResult.bridge_out_position_id ?? "-"}</p>
             <p>Correlation ID: {swapResult.correlation_id ?? "-"}</p>

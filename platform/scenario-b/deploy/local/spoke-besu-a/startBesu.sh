@@ -1,10 +1,9 @@
 #!/bin/bash
 #
-# startBesu.sh — Inicia a rede Besu do spoke-a com 3 nós fixos nomeados por entidade:
+# startBesu.sh — Inicia a rede Besu do spoke-a com 2 nós fixos nomeados por entidade:
 #
 #   cbweb3-spoke-a-besu.central-bank-a  (bootnode / validador)  RPC: 8645
 #   cbweb3-spoke-a-besu.bank-a        (validador)              RPC: 8646
-#   cbweb3-spoke-a-besu.bank-c        (validador)              RPC: 8647
 #
 # Cada backend conecta ao RPC do seu próprio nó via BESU_RPC_URL no .env.infra.*
 #
@@ -21,21 +20,17 @@ CONTAINER_PREFIX="cbweb3-spoke-a-besu"
 
 NODE_CENTRAL_BANK="${CONTAINER_PREFIX}.central-bank-a"
 NODE_BANK_A="${CONTAINER_PREFIX}.bank-a"
-NODE_BANK_C="${CONTAINER_PREFIX}.bank-c"
 
 RPC_PORT_CENTRAL_BANK=8645
 RPC_PORT_BANK_A=8646
-RPC_PORT_BANK_C=8647
 
 WS_PORT_CENTRAL_BANK=8655
 WS_PORT_BANK_A=8656
-WS_PORT_BANK_C=8657
 
 P2P_PORT_CENTRAL_BANK=31303
 P2P_PORT_BANK_A=31304
-P2P_PORT_BANK_C=31305
 
-NODES=3
+NODES=2
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo -e "${YELLOW}Stopping any existing Besu network...${NC}"
@@ -84,12 +79,12 @@ if ! [ -x "$(command -v ./bin/besu)" ]; then
 fi
 BESU=./bin/besu
 
-echo -e "${YELLOW}Creating qbftConfigFile.json (3 validators)...${NC}"
-jq '.blockchain += {"nodes": {"generate": true, "count": '"$NODES"'}}' \
+echo -e "${YELLOW}Creating qbftConfigFile.json (2 validators)...${NC}"
+jq '.blockchain += {"nodes": {"generate": true, "count": 2}}' \
     config/configTemplate.json > config/qbftConfigFile.json
 
 echo -e "${YELLOW}Generating blockchain config and keys...${NC}"
-mkdir -p nodes/central-bank-a/data nodes/bank-a/data nodes/bank-c/data
+mkdir -p nodes/central-bank-a/data nodes/bank-a/data
 mkdir tmpFiles && cd tmpFiles
 ../$BESU operator generate-blockchain-config \
     --config-file=../config/qbftConfigFile.json \
@@ -107,10 +102,6 @@ for folder in tmpFiles/networkFiles/keys/*; do
     1)
         echo -e "${YELLOW}Copying bank-a node files...${NC}"
         cp -r "$folder"/* nodes/bank-a/data/
-        ;;
-    2)
-        echo -e "${YELLOW}Copying bank-c node files...${NC}"
-        cp -r "$folder"/* nodes/bank-c/data/
         ;;
     esac
     counter=$((counter + 1))
@@ -221,31 +212,6 @@ docker run -d \
 docker network connect cbweb3_network "${NODE_BANK_A}" 2>/dev/null || true
 echo -e "${GREEN}bank-a node started.${NC}\n"
 
-# ─── Start bank-c node ───────────────────────────────────────────────────────
-echo -e "${BLUE}Starting bank-c node...${NC}"
-docker run -d \
-    --name "${NODE_BANK_C}" \
-    --user root \
-    -v "$(pwd)/nodes/bank-c/data:/opt/besu/data" \
-    -v "$(pwd)/genesis:/opt/besu/genesis" \
-    -p ${RPC_PORT_BANK_C}:8545 \
-    -p ${WS_PORT_BANK_C}:8546 \
-    -p ${P2P_PORT_BANK_C}:30303 \
-    -p ${P2P_PORT_BANK_C}:30303/udp \
-    --network "${NETWORK_NAME}" \
-    --restart always \
-    hyperledger/besu:latest \
-    --data-path=data --genesis-file=genesis/genesis.json --min-gas-price=0 \
-    --bootnodes=${ENODE_INTERNAL} \
-    --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT \
-    --rpc-ws-enabled --rpc-ws-api=ETH,NET,QBFT \
-    --host-allowlist='*' --rpc-http-cors-origins='all' \
-    --rpc-http-host='0.0.0.0' --rpc-ws-host='0.0.0.0' \
-    --rpc-http-port=8545 --rpc-ws-port=8546 --p2p-port=30303 $BESU_LOGGING
-
-docker network connect cbweb3_network "${NODE_BANK_C}" 2>/dev/null || true
-echo -e "${GREEN}bank-c node started.${NC}\n"
-
 echo -e "${YELLOW}Creating network tracker file...${NC}"
 cat > .env.network <<EOF
 NODES=$NODES
@@ -253,13 +219,10 @@ NETWORK_NAME=$NETWORK_NAME
 CONTAINER_PREFIX=$CONTAINER_PREFIX
 NODE_CENTRAL_BANK=$NODE_CENTRAL_BANK
 NODE_BANK_A=$NODE_BANK_A
-NODE_BANK_C=$NODE_BANK_C
 RPC_PORT_CENTRAL_BANK=$RPC_PORT_CENTRAL_BANK
 RPC_PORT_BANK_A=$RPC_PORT_BANK_A
-RPC_PORT_BANK_C=$RPC_PORT_BANK_C
 P2P_PORT_CENTRAL_BANK=$P2P_PORT_CENTRAL_BANK
 P2P_PORT_BANK_A=$P2P_PORT_BANK_A
-P2P_PORT_BANK_C=$P2P_PORT_BANK_C
 ENODE=$ENODE_INTERNAL
 EOF
 
@@ -268,8 +231,7 @@ echo -e "Network started successfully!"
 echo -e "=============================${NC}"
 echo ""
 echo -e "  ${BLUE}central-bank-a${NC}  RPC: http://localhost:${RPC_PORT_CENTRAL_BANK}  (${NODE_CENTRAL_BANK})"
-echo -e "  ${BLUE}bank-a      ${NC}  RPC: http://localhost:${RPC_PORT_BANK_A}          (${NODE_BANK_A})"
-echo -e "  ${BLUE}bank-c      ${NC}  RPC: http://localhost:${RPC_PORT_BANK_C}          (${NODE_BANK_C})"
+echo -e "  ${BLUE}bank-a        ${NC}  RPC: http://localhost:${RPC_PORT_BANK_A}          (${NODE_BANK_A})"
 echo ""
 echo -e "  Network : ${NETWORK_NAME}"
 echo -e "  ENODE   : ${ENODE_INTERNAL}"

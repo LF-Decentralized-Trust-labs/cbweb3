@@ -55,6 +55,17 @@ type Dependencies struct {
 	// CrossCurrencyBeneficiaryResolver resolves a bank_id to its on-chain wallet address.
 	// CB-B uses this to determine where to mint tCeBM without the frontend knowing peer addresses.
 	CrossCurrencyBeneficiaryResolver handlers.BeneficiaryResolverIface
+	// CrossCurrencyLockMintEnqueuer enables the POST /internal/amm/cross-currency-bridge-in route.
+	// Set only on CB gateways that act as bridge-in issuers (e.g. CB-A in BRL→ARS flow).
+	CrossCurrencyLockMintEnqueuer handlers.CrossCurrencyLockMintEnqueuerIface
+	// CrossCurrencyBridgeStateReader reads bridge position state for the synchronous
+	// bridge-in ACTIVE wait. Set alongside CrossCurrencyLockMintEnqueuer on CB gateways.
+	CrossCurrencyBridgeStateReader handlers.BridgeStateReaderIface
+	// CrossCurrencyPayerBalanceChecker checks the payer bank's tCeBM balance before bridge-in.
+	// Enforces Reserve Tokenisation: the CB MUST NOT mint new tCeBM if the bank hasn't tokenized.
+	CrossCurrencyPayerBalanceChecker handlers.PayerBalanceCheckerIface
+	// CrossCurrencyPayerWalletResolver resolves payer bank_code → spoke wallet for the balance check.
+	CrossCurrencyPayerWalletResolver handlers.PayerWalletResolverIface
 	// LPPositionRepo enables GET /api/v2/amm/liquidity/positions (008-fix-cb-liquidity).
 	LPPositionRepo handlers.LPPositionReaderIface
 	// Simplified API config (008-fix-cb-liquidity)
@@ -105,6 +116,7 @@ type liquidityServiceIface interface {
 	RemoveLiquidity(ctx context.Context, req services.LiquidityRemoveRequest) (*services.LPResult, error)
 	RegisterCommit(ctx context.Context, req services.CommitRequest) (*services.CommitResult, error)
 	ListCommits(ctx context.Context, poolPair, status string) ([]domain.PoolCommit, error)
+	GetCommit(ctx context.Context, commitID string) (*domain.PoolCommit, error)
 	CancelCommit(ctx context.Context, commitID, providerID string) error
 }
 
@@ -257,6 +269,12 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 			middleware.RequireAnyAuth(deps.AuthProvider),
 			middleware.RequireLiquidityProviderRole(),
 			lh.ListCommits,
+		)
+		// Single-commit status — front-end polls this for async commit progress.
+		amm.Get("/liquidity/commits/:commit_id",
+			middleware.RequireAnyAuth(deps.AuthProvider),
+			middleware.RequireLiquidityProviderRole(),
+			lh.GetCommit,
 		)
 		amm.Delete("/liquidity/commits/:commit_id",
 			middleware.RequireAnyAuth(deps.AuthProvider),
@@ -417,6 +435,29 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 		app.Post("/internal/amm/cross-currency-bridge-out",
 			middleware.RequireRelayAuth(deps.InternalRelayAuthSecret),
 			ccboh.HandleBridgeOut,
+		)
+	}
+
+	// 009-commercial-cross-currency-swap: bridge-in receiver for the issuing CB (CB-A side).
+	// Called by a commercial bank's orchestrator (Step 1) to perform the sovereign W-<source>
+	// lock-mint that the commercial bank may not do itself.
+	if deps.CrossCurrencyLockMintEnqueuer != nil && deps.CrossCurrencyBridgeStateReader != nil {
+		ccbih := handlers.NewCrossCurrencyBridgeInHandler(
+			deps.CrossCurrencyLockMintEnqueuer,
+			deps.CrossCurrencyBridgeStateReader,
+			deps.WTokenAddress,
+			deps.FiatTokenAddress,
+			deps.SpokeNetwork,
+		)
+		if deps.CrossCurrencyPayerBalanceChecker != nil && deps.CrossCurrencyPayerWalletResolver != nil {
+			ccbih = ccbih.WithReserveTokenisationEnforcement(
+				deps.CrossCurrencyPayerBalanceChecker,
+				deps.CrossCurrencyPayerWalletResolver,
+			)
+		}
+		app.Post("/internal/amm/cross-currency-bridge-in",
+			middleware.RequireRelayAuth(deps.InternalRelayAuthSecret),
+			ccbih.HandleBridgeIn,
 		)
 	}
 

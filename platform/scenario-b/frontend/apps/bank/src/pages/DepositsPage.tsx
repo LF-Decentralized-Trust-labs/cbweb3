@@ -22,6 +22,7 @@ import { useAuthStore } from "../stores/auth.store";
 import { usePaymentStore } from "../stores";
 import {
   PaymentStatus,
+  displayToBase,
   fiatUnitLabel,
   formatFiatUnits,
   getPaymentStatusLabel,
@@ -37,9 +38,12 @@ export function DepositsPage() {
   const deposits = usePaymentStore((state) => state.deposits);
   const balance = usePaymentStore((state) => state.balance);
   const fiatBalance = usePaymentStore((state) => state.fiatBalance);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
+  const fCeBMDecimals = usePaymentStore((state) => state.fCeBMDecimals);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
   const profile = useAuthStore((state) => state.profile);
+  const fDecimals = fCeBMDecimals ?? 18;
 
   const walletAddress = profile?.wallet?.trim() ?? "";
 
@@ -56,13 +60,13 @@ export function DepositsPage() {
   );
 
   const onSubmit = async () => {
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
+      toast.error("Amount must be a positive number.");
       return;
     }
 
     try {
-      const depositId = await registerDeposit(amount);
+      const depositId = await registerDeposit(displayToBase(amount, fDecimals));
       toast.success(`Issuance request submitted: ${depositId}`);
       setAmount("0");
       setConfirmRequest(false);
@@ -72,8 +76,8 @@ export function DepositsPage() {
   };
 
   const onPrepareSubmit = () => {
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
+      toast.error("Amount must be a positive number.");
       return;
     }
     setConfirmRequest(true);
@@ -82,11 +86,11 @@ export function DepositsPage() {
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-3">
-        <BalanceWidget balance={balance} loading={status === "loading" && balance === null} />
+        <BalanceWidget balance={balance} decimals={tCeBMDecimals} loading={status === "loading" && balance === null} />
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Fiat Reserve Balance (fCeBM)</CardDescription>
-            <CardTitle>{fiatBalance !== null ? formatFiatUnits(fiatBalance) : "—"}</CardTitle>
+            <CardTitle>{fiatBalance !== null ? formatFiatUnits(fiatBalance, fDecimals) : "—"}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -112,7 +116,7 @@ export function DepositsPage() {
               id="deposit-amount"
               type="number"
               min="0"
-              step="1"
+              step="any"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
             />
@@ -133,7 +137,7 @@ export function DepositsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Confirm Issuance Request</CardTitle>
-            <CardDescription>{formatFiatUnits(amount)} will be submitted for central bank approval.</CardDescription>
+            <CardDescription>{formatFiatUnits(amount, fDecimals)} will be submitted for central bank approval.</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onSubmit()} disabled={status === "loading"}>
@@ -167,7 +171,7 @@ export function DepositsPage() {
               {deposits.map((deposit) => (
                 <TableRow key={deposit.id}>
                   <TableCell className="font-medium">{deposit.id}</TableCell>
-                  <TableCell>{formatFiatUnits(deposit.amount)}</TableCell>
+                  <TableCell>{formatFiatUnits(deposit.amount, fDecimals)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(deposit.status)}>{getPaymentStatusLabel(deposit.status)}</Badge>
                   </TableCell>

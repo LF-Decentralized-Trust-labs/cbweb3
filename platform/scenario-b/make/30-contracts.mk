@@ -56,27 +56,30 @@ contracts.deploy-identity-registry-besu:
 
 contracts.deploy-hub:
 	@test -n "$(CENTRAL_BANK_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_ADDRESS is not set — check contracts/.env"; exit 1)
-	@echo "Deploying Scenario B Hub contracts (IdentityRegistry + Tokens + AMM + HTLC + Oracle)..."
-	@test -n "$(BESU_HUB_RPC)" || { echo "WARNING: BESU_HUB_RPC not set, defaulting to Spoke-A RPC ($(SPOKE_A_RPC_URL))"; }
-	@BESU_HUB_RPC="$${BESU_HUB_RPC:-$(SPOKE_A_RPC_URL)}" && \
+	@echo "Deploying Scenario B Hub contracts (IdentityRegistry + Tokens + AMM + HTLC + Oracle) to the independent Hub network (chain 1337)..."
+	@./deploy/local/tools/wait-rpc.sh "$${BESU_HUB_RPC:-http://127.0.0.1:8845}"
+	@BESU_HUB_RPC="$${BESU_HUB_RPC:-http://127.0.0.1:8845}" && \
+	 HUB_CHAIN_ID="$${HUB_CHAIN_ID:-1337}" && \
 	 cd contracts && CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_ADDRESS) FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script \
 	   script/CBWeb3Hub.s.sol:DeployCBWeb3Hub \
 	   --rpc-url "$$BESU_HUB_RPC" --broadcast
 
 contracts.deploy-spoke-a:
-	@test -n "$(CENTRAL_BANK_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_ADDRESS is not set — check contracts/.env"; exit 1)
-	@echo "Deploying CBWeb3 spoke-a contracts to chain 1338 (bank-a, bank-c, central-bank-a)..."
+	@test -n "$(CENTRAL_BANK_A_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_A_ADDRESS is not set — check contracts/.env"; exit 1)
+	@echo "Deploying CBWeb3 spoke-a contracts to chain 1338 (bank-a, central-bank-a)..."
+	@./deploy/local/tools/wait-rpc.sh "${SPOKE_A_RPC_URL}"
 	@cd contracts && TOKEN_NAME="Tokenized BRL" TOKEN_SYMBOL="tCeBM_BRL" \
 		FIAT_TOKEN_NAME="Fiat BRL" FIAT_TOKEN_SYMBOL="fCeBM_BRL" \
-		CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_ADDRESS) \
+		CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_A_ADDRESS) \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_A_RPC_URL} --broadcast
 
 contracts.deploy-spoke-b:
-	@test -n "$(CENTRAL_BANK_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_ADDRESS is not set — check contracts/.env"; exit 1)
-	@echo "Deploying CBWeb3 spoke-b contracts (bank-b, bank-d, central-bank-b)..."
-	@cd contracts && TOKEN_NAME="Tokenized BRL" TOKEN_SYMBOL="tCeBM_BRL" \
-		FIAT_TOKEN_NAME="Fiat BRL" FIAT_TOKEN_SYMBOL="fCeBM_BRL" \
-		CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_ADDRESS) \
+	@test -n "$(CENTRAL_BANK_B_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_B_ADDRESS is not set — check contracts/.env"; exit 1)
+	@echo "Deploying CBWeb3 spoke-b contracts (bank-b, central-bank-b)..."
+	@./deploy/local/tools/wait-rpc.sh "${SPOKE_B_RPC_URL}"
+	@cd contracts && TOKEN_NAME="Tokenized ARS" TOKEN_SYMBOL="tCeBM_ARS" \
+		FIAT_TOKEN_NAME="Fiat ARS" FIAT_TOKEN_SYMBOL="fCeBM_ARS" \
+		CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_B_ADDRESS) \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_B_RPC_URL} --broadcast
 
 contracts.deploy-all: contracts.setup contracts.deploy-spoke-a contracts.deploy-spoke-b
@@ -103,8 +106,8 @@ contracts.register-participants-spoke-b:
 
 contracts.register-participants-hub:
 	@echo "Registering participants in Hub IdentityRegistry (AMM governance)..."
-	@HUB_CHAIN_ID="$${HUB_CHAIN_ID:-1338}" && \
-	 HUB_RPC="$${BESU_HUB_RPC:-$${SPOKE_A_RPC_URL:-http://127.0.0.1:8645}}" && \
+	@HUB_CHAIN_ID="$${HUB_CHAIN_ID:-1337}" && \
+	 HUB_RPC="$${BESU_HUB_RPC:-http://127.0.0.1:8845}" && \
 	 REGISTRY=$$(jq -r '[.transactions[] | select(.transactionType=="CREATE" and .contractName=="IdentityRegistry")] | .[0].contractAddress' \
 	   contracts/broadcast/CBWeb3Hub.s.sol/$$HUB_CHAIN_ID/run-latest.json) && \
 	 echo "  Hub IdentityRegistry : $$REGISTRY (chain $$HUB_CHAIN_ID)" && \
@@ -121,7 +124,7 @@ contracts.seed-hub:
 	 TOKEN_EUR=$$(grep '^HUB_TOKEN_B_ADDRESS=' backend/config/.env.infra.bank-a 2>/dev/null | cut -d= -f2-) && \
 	 AMM=$$(grep '^AMM_CONTRACT_ADDRESS=' backend/config/.env.infra.bank-a 2>/dev/null | cut -d= -f2-) && \
 	 HUB_REG=$$(grep '^HUB_IDENTITY_REGISTRY_ADDRESS=' backend/config/.env.infra.bank-a 2>/dev/null | cut -d= -f2- || true) && \
-	 BESU_HUB_RPC="$${BESU_HUB_RPC:-$(SPOKE_A_RPC_URL)}" && \
+	 BESU_HUB_RPC="$${BESU_HUB_RPC:-http://127.0.0.1:8845}" && \
 	 cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} \
 	   ADMIN_PRIVATE_KEY=$(ADMIN_PRIVATE_KEY) \
 	   CENTRAL_BANK_PRIVATE_KEY=$(CENTRAL_BANK_PRIVATE_KEY) \
@@ -137,7 +140,7 @@ contracts.deploy-cbweb3-besu: contracts.deploy-hub
 # Recovery target: grants CENTRAL_BANK_ROLE to CENTRAL_BANK_ADDRESS on already-deployed
 # hub tokens. Run this when hub tokens were deployed with a wrong centralBank address.
 # Requires: ADMIN_PRIVATE_KEY (holds DEFAULT_ADMIN_ROLE), HUB_TOKEN_A_ADDRESS,
-#           HUB_TOKEN_B_ADDRESS, BESU_HUB_RPC (defaults to SPOKE_A_RPC_URL).
+#           HUB_TOKEN_B_ADDRESS, BESU_HUB_RPC (defaults to http://127.0.0.1:8845).
 contracts.grant-central-bank-role:
 	@test -n "$(CENTRAL_BANK_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_ADDRESS is not set — check contracts/.env"; exit 1)
 	@test -n "$(ADMIN_PRIVATE_KEY)" || (echo "ERROR: ADMIN_PRIVATE_KEY is not set — check contracts/.env"; exit 1)
@@ -145,7 +148,7 @@ contracts.grant-central-bank-role:
 	 TOKEN_B=$$(grep '^HUB_TOKEN_B_ADDRESS=' backend/config/.env.infra.central-bank-a 2>/dev/null | cut -d= -f2-) && \
 	 test -n "$$TOKEN_A" || (echo "ERROR: HUB_TOKEN_A_ADDRESS not found in backend/config/.env.infra.central-bank-a"; exit 1) && \
 	 test -n "$$TOKEN_B" || (echo "ERROR: HUB_TOKEN_B_ADDRESS not found in backend/config/.env.infra.central-bank-a"; exit 1) && \
-	 BESU_HUB_RPC="$${BESU_HUB_RPC:-$(SPOKE_A_RPC_URL)}" && \
+	 BESU_HUB_RPC="$${BESU_HUB_RPC:-http://127.0.0.1:8845}" && \
 	 ROLE=$$(cast keccak "CENTRAL_BANK_ROLE") && \
 	 echo "Granting CENTRAL_BANK_ROLE to $(CENTRAL_BANK_ADDRESS) on HUB_TOKEN_A ($$TOKEN_A)..." && \
 	 cast send $$TOKEN_A "grantRole(bytes32,address)" $$ROLE $(CENTRAL_BANK_ADDRESS) \
@@ -167,7 +170,7 @@ contracts.grant-central-bank-b-role:
 	@test -n "$(ADMIN_PRIVATE_KEY)" || (echo "ERROR: ADMIN_PRIVATE_KEY is not set — check contracts/.env"; exit 1)
 	@TOKEN_B=$$(grep '^HUB_TOKEN_B_ADDRESS=' backend/config/.env.infra.central-bank-b 2>/dev/null | cut -d= -f2-) && \
 	 test -n "$$TOKEN_B" || (echo "ERROR: HUB_TOKEN_B_ADDRESS not found in backend/config/.env.infra.central-bank-b"; exit 1) && \
-	 BESU_HUB_RPC="$${BESU_HUB_RPC:-$(SPOKE_A_RPC_URL)}" && \
+	 BESU_HUB_RPC="$${BESU_HUB_RPC:-http://127.0.0.1:8845}" && \
 	 ROLE=$$(cast keccak "CENTRAL_BANK_ROLE") && \
 	 echo "Granting CENTRAL_BANK_ROLE to CB-B ($(CENTRAL_BANK_B_ADDRESS)) on HUB_TOKEN_B ($$TOKEN_B)..." && \
 	 cast send $$TOKEN_B "grantRole(bytes32,address)" $$ROLE $(CENTRAL_BANK_B_ADDRESS) \
@@ -175,6 +178,34 @@ contracts.grant-central-bank-b-role:
 	 echo "Verifying..." && \
 	 cast call $$TOKEN_B "hasRole(bytes32,address)(bool)" $$ROLE $(CENTRAL_BANK_B_ADDRESS) --rpc-url $$BESU_HUB_RPC && \
 	 echo "Done — CENTRAL_BANK_ROLE granted to CB-B on token_b."
+
+# Grants the LiquidityProvider role on the Hub IdentityRegistry to each CB's hub identity
+# (CENTRAL_BANK_A_ADDRESS = 0xfe3b..., CENTRAL_BANK_B_ADDRESS = 0xf17f...), signed by the
+# ADMIN key which holds DEFAULT_ADMIN_ROLE on the registry. The CB hub keys are NOT registry
+# admins, so they cannot self-grant LP at api-gateway startup — this step does it for them
+# (the bootstrap then sees LP already granted and skips). Idempotent: skips addresses that
+# are already LiquidityProviders.
+# Run after contracts.deploy-hub + contracts.register-participants-hub (the registry must exist).
+# Requires: ADMIN_PRIVATE_KEY, CENTRAL_BANK_A_ADDRESS, CENTRAL_BANK_B_ADDRESS, BESU_HUB_RPC.
+contracts.grant-liquidity-providers:
+	@test -n "$(CENTRAL_BANK_A_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_A_ADDRESS is not set — check contracts/.env"; exit 1)
+	@test -n "$(CENTRAL_BANK_B_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_B_ADDRESS is not set — check contracts/.env"; exit 1)
+	@test -n "$(ADMIN_PRIVATE_KEY)" || (echo "ERROR: ADMIN_PRIVATE_KEY is not set — check contracts/.env"; exit 1)
+	@HUB_REG=$$(grep '^HUB_IDENTITY_REGISTRY_ADDRESS=' backend/config/.env.infra.central-bank-a 2>/dev/null | cut -d= -f2-) && \
+	 test -n "$$HUB_REG" || (echo "ERROR: HUB_IDENTITY_REGISTRY_ADDRESS not found in backend/config/.env.infra.central-bank-a"; exit 1) && \
+	 BESU_HUB_RPC="$${BESU_HUB_RPC:-http://127.0.0.1:8845}" && \
+	 for CB in $(CENTRAL_BANK_A_ADDRESS) $(CENTRAL_BANK_B_ADDRESS); do \
+	   IS_LP=$$(cast call $$HUB_REG "isLiquidityProvider(address)(bool)" $$CB --rpc-url $$BESU_HUB_RPC 2>/dev/null || echo error); \
+	   if [ "$$IS_LP" = "true" ]; then \
+	     echo "  Already LiquidityProvider: $$CB"; \
+	   else \
+	     echo "  Granting LiquidityProvider to $$CB..." && \
+	     cast send $$HUB_REG "grantLiquidityProvider(address)" $$CB \
+	       --private-key $(ADMIN_PRIVATE_KEY) --rpc-url $$BESU_HUB_RPC >/dev/null && \
+	     cast call $$HUB_REG "isLiquidityProvider(address)(bool)" $$CB --rpc-url $$BESU_HUB_RPC; \
+	   fi; \
+	 done && \
+	 echo "Done — LiquidityProvider roles granted to both CB hub identities."
 
 contracts.sync-addresses:
 	@SOVEREIGN_PAIR_ID="$(SOVEREIGN_PAIR_ID)" ./deploy/local/tools/sync-contracts.sh
@@ -199,7 +230,7 @@ contracts.sync-addresses:
 # Optional env vars:
 #   LIQUIDITY_COMMIT_REGISTRY_ADDRESS  — reuse existing LCR (deploy new if absent)
 #   RELAYER_ADDR                       — Cacti watcher address to grant CENTRAL_BANK_ROLE
-#   HUB_CHAIN_ID                       — defaults to 1338
+#   HUB_CHAIN_ID                       — defaults to 1337
 #
 # Usage:
 #   make contracts.seed-sovereign-pair \
@@ -217,8 +248,8 @@ contracts.seed-sovereign-pair:
 	@test -n "$(ADMIN_ADDRESS)"        || (echo "ERROR: ADMIN_ADDRESS is required"; exit 1)
 	@test -n "$(HUB_IDENTITY_REGISTRY)" || (echo "ERROR: HUB_IDENTITY_REGISTRY is required"; exit 1)
 	@test -n "$(PAIR_REGISTRY_ADDRESS)" || (echo "ERROR: PAIR_REGISTRY_ADDRESS is required"; exit 1)
-	@BESU_HUB_RPC="$${BESU_HUB_RPC:-$(SPOKE_A_RPC_URL)}" && \
-	 HUB_CHAIN_ID="$${HUB_CHAIN_ID:-1338}" && \
+	@BESU_HUB_RPC="$${BESU_HUB_RPC:-http://127.0.0.1:8845}" && \
+	 HUB_CHAIN_ID="$${HUB_CHAIN_ID:-1337}" && \
 	 echo "Seeding sovereign pair $(PAIR_ID) on Hub (RPC: $$BESU_HUB_RPC chain $$HUB_CHAIN_ID)..." && \
 	 cd contracts && \
 	 TOKEN_SYMBOL_A=$(TOKEN_SYMBOL_A) \
@@ -270,4 +301,4 @@ contracts.abigen: contracts.build
 	@rm -f /tmp/IdentityRegistry.abi
 	@echo "Go bindings generated at $(ABIGEN_OUT_DIR)/identity_registry.go"
 
-.PHONY: contracts.setup contracts.fmt contracts.lint contracts.test contracts.coverage contracts.build contracts.clean contracts.gen-doc contracts.serve-doc contracts.deploy-tcebm-besu contracts.deploy-htlc-besu contracts.deploy-amm-besu contracts.deploy-identity-registry-besu contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b contracts.deploy-all contracts.deploy-cbweb3-besu contracts.grant-central-bank-role contracts.grant-central-bank-b-role contracts.sync-addresses contracts.deploy-all-with-sync contracts.deploy-cbweb3-with-sync contracts.slither contracts.full-check contracts.abigen contracts.register-participants contracts.register-participants-spoke-a contracts.register-participants-spoke-b contracts.register-participants-hub contracts.seed-hub contracts.seed-sovereign-pair contracts.test-sovereign
+.PHONY: contracts.setup contracts.fmt contracts.lint contracts.test contracts.coverage contracts.build contracts.clean contracts.gen-doc contracts.serve-doc contracts.deploy-tcebm-besu contracts.deploy-htlc-besu contracts.deploy-amm-besu contracts.deploy-identity-registry-besu contracts.deploy-hub contracts.deploy-spoke-a contracts.deploy-spoke-b contracts.deploy-all contracts.deploy-cbweb3-besu contracts.grant-central-bank-role contracts.grant-central-bank-b-role contracts.grant-liquidity-providers contracts.sync-addresses contracts.deploy-all-with-sync contracts.deploy-cbweb3-with-sync contracts.slither contracts.full-check contracts.abigen contracts.register-participants contracts.register-participants-spoke-a contracts.register-participants-spoke-b contracts.register-participants-hub contracts.seed-hub contracts.seed-sovereign-pair contracts.test-sovereign

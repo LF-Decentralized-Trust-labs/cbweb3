@@ -20,6 +20,7 @@ import { useEffect, useMemo, useState } from "react";
 import { usePaymentStore } from "../stores";
 import {
   EscrowStatus,
+  displayToBase,
   fiatUnitLabel,
   formatCeBM,
   formatFiatUnits,
@@ -57,8 +58,12 @@ export function EscrowsPage() {
   const deposits = usePaymentStore((state) => state.deposits);
   const escrows = usePaymentStore((state) => state.escrows);
   const fiatBalance = usePaymentStore((state) => state.fiatBalance);
+  const fCeBMDecimals = usePaymentStore((state) => state.fCeBMDecimals);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
+  const fDecimals = fCeBMDecimals ?? 18;
+  const tDecimals = tCeBMDecimals ?? 18;
 
   const [depositId, setDepositId] = useState("");
   const [amount, setAmount] = useState("0");
@@ -88,8 +93,8 @@ export function EscrowsPage() {
       toast.error("Deposit ID is required.");
       return;
     }
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
+      toast.error("Amount must be a positive number.");
       return;
     }
     setConfirmRequest(true);
@@ -97,7 +102,7 @@ export function EscrowsPage() {
 
   const onSubmit = async () => {
     try {
-      const escrowId = await requestEscrow(depositId, amount);
+      const escrowId = await requestEscrow(depositId, displayToBase(amount, fDecimals));
       toast.success(`Tokenisation request submitted: ${escrowId}`);
       setDepositId("");
       setAmount("0");
@@ -116,7 +121,7 @@ export function EscrowsPage() {
           <CardHeader className="pb-2">
             <CardDescription>Fiat Reserve Balance (fCeBM)</CardDescription>
             <CardTitle>
-              {fiatBalance !== null ? formatFiatUnits(fiatBalance) : "—"}
+              {fiatBalance !== null ? formatFiatUnits(fiatBalance, fDecimals) : "—"}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -148,7 +153,7 @@ export function EscrowsPage() {
             <datalist id="approved-deposits">
               {approvedDeposits.map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.id} — {formatFiatUnits(d.amount)}
+                  {d.id} — {formatFiatUnits(d.amount, fDecimals)}
                 </option>
               ))}
             </datalist>
@@ -159,7 +164,7 @@ export function EscrowsPage() {
               id="escrow-amount"
               type="number"
               min="0"
-              step="1"
+              step="any"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
@@ -181,8 +186,8 @@ export function EscrowsPage() {
           <CardHeader>
             <CardTitle>Confirm Tokenisation Request</CardTitle>
             <CardDescription>
-              {formatFiatUnits(amount)} fCeBM will be submitted to the central bank for conversion to{" "}
-              {formatCeBM(amount)} tCeBM.
+              {formatFiatUnits(amount, fDecimals)} fCeBM will be submitted to the central bank for conversion to{" "}
+              {formatCeBM(amount, tDecimals)} tCeBM.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
@@ -219,7 +224,7 @@ export function EscrowsPage() {
                 <TableRow key={escrow.id}>
                   <TableCell className="font-medium">{escrow.id}</TableCell>
                   <TableCell>{escrow.deposit_id}</TableCell>
-                  <TableCell>{formatFiatUnits(escrow.amount)}</TableCell>
+                  <TableCell>{formatFiatUnits(escrow.amount, fDecimals)}</TableCell>
                   <TableCell>
                     <Badge variant={getEscrowStatusVariant(escrow.status)}>
                       {getEscrowStatusLabel(escrow.status)}

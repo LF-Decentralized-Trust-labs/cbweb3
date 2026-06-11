@@ -34,8 +34,18 @@ deploy.down-spoke-b:
 	@echo "Stopping Spoke-B Besu..."
 	@cd ./$(DEPLOY_DIR)/spoke-besu-b && ./stopBesu.sh
 
-deploy.up-besu: deploy.up-spoke-a deploy.up-spoke-b
-deploy.down-besu: deploy.down-spoke-b deploy.down-spoke-a
+# ── Besu hub (independent neutral network — chain 1337) ──────────────────────
+
+deploy.up-hub-besu:
+	@echo "Starting International Hub Besu (single-validator sandbox, chain 1337)..."
+	@cd ./$(DEPLOY_DIR)/hub-besu && ./startBesu.sh
+
+deploy.down-hub-besu:
+	@echo "Stopping International Hub Besu..."
+	@cd ./$(DEPLOY_DIR)/hub-besu && ./stopBesu.sh
+
+deploy.up-besu: deploy.up-hub-besu deploy.up-spoke-a deploy.up-spoke-b
+deploy.down-besu: deploy.down-spoke-b deploy.down-spoke-a deploy.down-hub-besu
 
 # ── Infra (Keycloak, Postgres, Redis) ────────────────────────────────────────
 
@@ -129,6 +139,7 @@ deploy.ci-local: deploy.build-ci-runner
 
 .PHONY: deploy.create-shared-network \
 	deploy.up-spoke-a deploy.down-spoke-a deploy.up-spoke-b deploy.down-spoke-b \
+	deploy.up-hub-besu deploy.down-hub-besu \
 	deploy.up-besu deploy.down-besu deploy.up-infra deploy.down-infra \
 	deploy.up deploy.up-with-contracts deploy.down \
 	deploy.build-backend deploy.up-backend deploy.down-backend \

@@ -9,14 +9,16 @@ This folder contains the local runtime setup for the CBWeb3 platform, focused on
 - Paladin nodes (privacy-preserving smart contract execution, spoke A and spoke B)
 
 ```
+hub (chain 1337)
+├── Besu (chain 1337)          ← 5 nodes: hub-validator, central-bank-a, bank-a, central-bank-b, bank-b
 spoke-a (chain 1338)
-├── Besu (chain 1338)          ← 3 nodes: central-bank-a, bank-a, bank-c
+├── Besu (chain 1338)          ← 2 nodes: central-bank-a, bank-a
 spoke-b (chain 1339)
-├── Besu (chain 1339)          ← 3 nodes: central-bank-b, bank-b, bank-d
+├── Besu (chain 1339)          ← 2 nodes: central-bank-b, bank-b
 shared infra
-├── Keycloak                   ← 6 realms
-├── PostgreSQL                 ← 7 databases
-├── Redis                      ← 6 logical DBs (0-5)
+├── Keycloak                   ← 4 realms
+├── PostgreSQL                 ← 6 databases
+├── Redis                      ← 4 logical DBs (0-3)
 ```
 
 Per-entity backend stacks (api-gateway / auth / compliance) use dedicated host
@@ -24,26 +26,39 @@ ports and internal Docker networks; see **Port allocations** below.
 
 ## Components
 
-### 1) Besu networks — spoke-besu-a and spoke-besu-b
+### 1) Besu networks — hub-besu, spoke-besu-a and spoke-besu-b
 
-Two separate Besu QBFT networks: **spoke-a** (chain **1338**) and **spoke-b**
-(chain **1339**), each with **three fixed named nodes**, one per entity.
+Three separate Besu QBFT networks: **hub** (chain **1337**), **spoke-a** (chain
+**1338**) and **spoke-b** (chain **1339**). The hub network carries one
+validator (`hub-validator`) plus one non-validator peer per entity. Each spoke
+network has two validator nodes.
 
-| Spoke   | Directory      | Chain ID | Docker network           | Container prefix        |
+| Network | Directory      | Chain ID | Docker network           | Container prefix        |
 |---------|----------------|----------|--------------------------|-------------------------|
+| hub     | `hub-besu/`    | `1337`   | `hub_besu_network`       | `cbweb3-hub-besu`       |
 | spoke-a | `spoke-besu-a/` | `1338`   | `spoke_a_besu_network`   | `cbweb3-spoke-a-besu`   |
 | spoke-b | `spoke-besu-b/` | `1339`   | `spoke_b_besu_network`   | `cbweb3-spoke-b-besu`   |
 
 Scripts: `startBesu.sh` / `stopBesu.sh` (and `addNewNode.sh` where present).
 
+**Hub nodes** (chain 1337):
+
+| Node (entity)    | Role                   | Container name                        | Host RPC | Host P2P |
+|------------------|------------------------|---------------------------------------|----------|----------|
+| hub-validator    | bootnode / validator   | `cbweb3-hub-besu.hub-validator`       | `8845`   | `31503`  |
+| central-bank-a   | non-validator peer     | `cbweb3-hub-besu.central-bank-a`      | `8846`   | `31504`  |
+| bank-a           | non-validator peer     | `cbweb3-hub-besu.bank-a`              | `8847`   | `31505`  |
+| central-bank-b   | non-validator peer     | `cbweb3-hub-besu.central-bank-b`      | `8848`   | `31506`  |
+| bank-b           | non-validator peer     | `cbweb3-hub-besu.bank-b`              | `8849`   | `31507`  |
+
+**Spoke nodes** (chains 1338 / 1339):
+
 | Spoke   | Node (entity)    | Container name                         | Host RPC | Host P2P |
 |---------|------------------|----------------------------------------|----------|----------|
 | spoke-a | central-bank-a   | `cbweb3-spoke-a-besu.central-bank-a`   | `8645`   | `31303`  |
 | spoke-a | bank-a           | `cbweb3-spoke-a-besu.bank-a`           | `8646`   | `31304`  |
-| spoke-a | bank-c           | `cbweb3-spoke-a-besu.bank-c`           | `8647`   | `31305`  |
 | spoke-b | central-bank-b   | `cbweb3-spoke-b-besu.central-bank-b`   | `8745`   | `31403`  |
 | spoke-b | bank-b           | `cbweb3-spoke-b-besu.bank-b`           | `8746`   | `31404`  |
-| spoke-b | bank-d           | `cbweb3-spoke-b-besu.bank-d`           | `8747`   | `31405`  |
 
 Each backend service connects to its own node’s RPC endpoint via `BESU_RPC_URL`
 in `.env.infra.*`. When `BLOCKCHAIN_CLIENT=besu`, backends use the container
@@ -65,19 +80,15 @@ On startup, the script:
 
 1. Waits for Keycloak readiness.
 2. Authenticates with admin credentials.
-3. Creates **six** realms, each with one OIDC client:
+3. Creates **four** realms, each with one OIDC client:
    - **`bank-a`** / `bank-a-client`
    - **`bank-b`** / `bank-b-client`
    - **`central-bank-a`** / `central-bank-a-client`
-   - **`bank-c`** / `bank-c-client`
-   - **`bank-d`** / `bank-d-client`
    - **`central-bank-b`** / `central-bank-b-client`
 4. Fetches each client secret and writes runtime infra env files:
    - `backend/config/.env.infra.bank-a`
    - `backend/config/.env.infra.bank-b`
    - `backend/config/.env.infra.central-bank-a`
-   - `backend/config/.env.infra.bank-c`
-   - `backend/config/.env.infra.bank-d`
    - `backend/config/.env.infra.central-bank-b`
 
 When you run `make deploy.up-infra` or `make dev.up` from the repository root,
@@ -93,15 +104,14 @@ Override waits (defaults: 40×3s for HTTP, 600s for init):
 ### 3) PostgreSQL
 
 PostgreSQL runs as a container managed by Compose with a persistent volume.
-[postgres/init-multi-db.sh](postgres/init-multi-db.sh) creates **seven**
-databases at first start (six application DBs + Keycloak):
+[postgres/init-multi-db.sh](postgres/init-multi-db.sh) creates **six**
+databases at first start (four application DBs + MLP + Keycloak):
 
 - `cbweb3_bank_a`
 - `cbweb3_bank_b`
-- `cbweb3_bank_c`
-- `cbweb3_bank_d`
 - `cbweb3_central_bank_a`
 - `cbweb3_central_bank_b`
+- `cbweb3_mlp`
 - `cbweb3_keycloak`
 
 ### 4) Redis
@@ -114,9 +124,7 @@ dedicated Redis logical DB for nonce isolation:
 | bank-a         | 0        |
 | bank-b         | 1        |
 | central-bank-a | 2        |
-| bank-c         | 3        |
-| bank-d         | 4        |
-| central-bank-b | 5        |
+| central-bank-b | 3        |
 
 ## Port allocations (backend host ports)
 
@@ -125,8 +133,6 @@ dedicated Redis logical DB for nonce isolation:
 | bank-a         | spoke-a | `18080`           | `19091`   | `19093`         |
 | bank-b         | spoke-b | `28080`           | `29091`   | `29093`         |
 | central-bank-a | spoke-a | `38080`           | `39091`   | `39093`         |
-| bank-c         | spoke-a | `48080`           | `49091`   | `49093`         |
-| bank-d         | spoke-b | `58080`           | `59091`   | `59093`         |
 | central-bank-b | spoke-b | `60080`           | `60091`   | `60093`         |
 
 ### 5) Paladin nodes
@@ -135,12 +141,10 @@ Paladin provides privacy-preserving smart contract execution using zero-knowledg
 
 | Paladin container | Besu node | RPC port | gRPC port | Metrics port |
 |---|---|---|---|---|
-| `paladin-spoke-a-cb` | bootnode (8645) | 31648 | 31649 | 9011 |
-| `paladin-spoke-a-bank-a` | node-1 (8647) | 31658 | 31659 | 9012 |
-| `paladin-spoke-a-bank-b` | node-2 (8648) | 31668 | 31669 | 9013 |
-| `paladin-spoke-b-cb` | bootnode (8745) | 31748 | 31749 | 9021 |
-| `paladin-spoke-b-bank-a` | node-1 (8747) | 31758 | 31759 | 9022 |
-| `paladin-spoke-b-bank-b` | node-2 (8748) | 31768 | 31769 | 9023 |
+| `paladin-spoke-a-cb` | central-bank-a (8645) | 31648 | 31649 | 9011 |
+| `paladin-spoke-a-bank-a` | bank-a (8646) | 31658 | 31659 | 9012 |
+| `paladin-spoke-b-cb` | central-bank-b (8745) | 31748 | 31749 | 9021 |
+| `paladin-spoke-b-bank-b` | bank-b (8746) | 31758 | 31759 | 9022 |
 
 Paladin nodes run on the same Docker network as Besu (`spoke_a_besu_network` / `spoke_b_besu_network`).
 
@@ -189,18 +193,17 @@ paladin/
   - Keycloak: `http://localhost:${KEYCLOAK_PORT}` (default `8081`)
   - PostgreSQL: `localhost:${POSTGRES_PORT}` (default `5432`)
   - Redis: `localhost:${REDIS_PORT}` (default `6379`)
-  - Besu RPC (spoke-a): central-bank-a `http://localhost:8645`, bank-a `8646`, bank-c `8647`
-  - Besu RPC (spoke-b): central-bank-b `http://localhost:8745`, bank-b `8746`, bank-d `8747`
+  - Besu RPC (hub): hub-validator `http://localhost:8845`, central-bank-a `8846`, bank-a `8847`, central-bank-b `8848`, bank-b `8849`
+  - Besu RPC (spoke-a): central-bank-a `http://localhost:8645`, bank-a `8646`
+  - Besu RPC (spoke-b): central-bank-b `http://localhost:8745`, bank-b `8746`
 
 ## Configuration model
 
-Runtime infra files (six entities):
+Runtime infra files (four entities):
 
 - `backend/config/.env.infra.bank-a`
 - `backend/config/.env.infra.bank-b`
 - `backend/config/.env.infra.central-bank-a`
-- `backend/config/.env.infra.bank-c`
-- `backend/config/.env.infra.bank-d`
 - `backend/config/.env.infra.central-bank-b`
 
 These are generated/updated from `*.example` templates with Keycloak-specific
@@ -211,7 +214,7 @@ written to `.env.infra.*` by `keycloak/init.sh`.
 
 1. Copy and adjust the example files (one per entity), e.g.  
    `backend/config/.env.infra.bank-a.example` → `backend/config/.env.infra.bank-a`  
-   (repeat for `bank-b`, `central-bank-a`, `bank-c`, `bank-d`, `central-bank-b`).
+   (repeat for `bank-b`, `central-bank-a`, `central-bank-b`).
 2. Start infra (Keycloak will regenerate the files automatically):
    ```bash
    make deploy.up-infra
@@ -234,11 +237,9 @@ After starting shared infra, start backends with one compose file per entity:
 - `backend/docker-compose-backend.bank-a.yaml`
 - `backend/docker-compose-backend.bank-b.yaml`
 - `backend/docker-compose-backend.central-bank-a.yaml`
-- `backend/docker-compose-backend.bank-c.yaml`
-- `backend/docker-compose-backend.bank-d.yaml`
 - `backend/docker-compose-backend.central-bank-b.yaml`
 
-All six backend files:
+All four backend files:
 
 - Load entity settings from `backend/config/.env.infra.*`.
 - Keep service-to-service traffic in a dedicated backend network per entity.
@@ -270,18 +271,14 @@ From repository root:
 
 | Target | Description |
 |--------|-------------|
-| `make dev.up` | Full environment: PKI + both Besu spokes + infra + contracts + all six backends. |
-| `make dev.down` | Stop full environment in reverse order (PKI files kept; `deploy.down` tears down both Besu spokes). |
+| `make dev.up` | Full environment: PKI + hub + both Besu spokes + infra + contracts + all four backends. |
+| `make dev.down` | Stop full environment in reverse order (PKI files kept; `deploy.down` tears down hub and both Besu spokes). |
 | `make dev.up-bank-a` | PKI (bank-a CA + commercial banks) + infra + **spoke-a** Besu + bank-a backend. |
 | `make dev.down-bank-a` | Stop bank-a backend only. |
 | `make dev.up-bank-b` | PKI (bank-b CA + commercial banks) + infra + **spoke-b** Besu + bank-b backend. |
 | `make dev.down-bank-b` | Stop bank-b backend only. |
 | `make dev.up-central-bank-a` | PKI (central-bank-a CA) + infra + **spoke-a** Besu + central-bank-a backend. |
 | `make dev.down-central-bank-a` | Stop central-bank-a backend only. |
-| `make dev.up-bank-c` | PKI (bank-c CA + commercial banks) + infra + **spoke-a** Besu + bank-c backend. |
-| `make dev.down-bank-c` | Stop bank-c backend only. |
-| `make dev.up-bank-d` | PKI (bank-d CA + commercial banks) + infra + **spoke-b** Besu + bank-d backend. |
-| `make dev.down-bank-d` | Stop bank-d backend only. |
 | `make dev.up-central-bank-b` | PKI (central-bank-b CA) + infra + **spoke-b** Besu + central-bank-b backend. |
 | `make dev.down-central-bank-b` | Stop central-bank-b backend only. |
 | `make deploy.up-infra` | Shared infra only (Keycloak + Postgres + Redis). |
@@ -289,9 +286,9 @@ From repository root:
 | `make deploy.up-spoke-a` / `make deploy.down-spoke-a` | Besu spoke-a only. |
 | `make deploy.up-spoke-b` / `make deploy.down-spoke-b` | Besu spoke-b only. |
 | `make deploy.up-besu` / `make deploy.down-besu` | Both Besu spokes. |
-| `make deploy.up-backend` | Same as `deploy.up-backend-entities` (all six backends). |
+| `make deploy.up-backend` | Same as `deploy.up-backend-entities` (all four backends). |
 | `make deploy.down-backend` | Same as `deploy.down-backend-entities`. |
-| `make deploy.build-backend` | Build images for all six entity compose files. |
+| `make deploy.build-backend` | Build images for all four entity compose files. |
 
 ### Paladin setup and lifecycle
 
@@ -343,8 +340,6 @@ Examples:
 ./deploy/local/keycloak/get_credentials_direct.sh --entity bank-a
 ./deploy/local/keycloak/get_credentials_direct.sh --entity bank-b
 ./deploy/local/keycloak/get_credentials_direct.sh --entity central-bank-a
-./deploy/local/keycloak/get_credentials_direct.sh --entity bank-c
-./deploy/local/keycloak/get_credentials_direct.sh --entity bank-d
 ./deploy/local/keycloak/get_credentials_direct.sh --entity central-bank-b
 ```
 

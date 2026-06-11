@@ -21,6 +21,7 @@ import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
 import {
   PaymentStatus,
+  displayToBase,
   fiatUnitLabel,
   formatCeBM,
   getPaymentStatusLabel,
@@ -36,8 +37,10 @@ export function RedeemsPage() {
   const requestRedeem = usePaymentStore((state) => state.requestRedeem);
   const redeems = usePaymentStore((state) => state.redeems);
   const balance = usePaymentStore((state) => state.balance);
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
+  const decimals = tCeBMDecimals ?? 18;
 
   const [amount, setAmount] = useState("0");
   const [confirmRequest, setConfirmRequest] = useState(false);
@@ -55,13 +58,13 @@ export function RedeemsPage() {
   );
 
   const onSubmit = async () => {
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
+      toast.error("Amount must be a positive number.");
       return;
     }
 
     try {
-      const redeemId = await requestRedeem(amount);
+      const redeemId = await requestRedeem(displayToBase(amount, decimals));
       toast.success(`Redeem request submitted: ${redeemId}`);
       setAmount("0");
       setConfirmRequest(false);
@@ -75,8 +78,8 @@ export function RedeemsPage() {
   };
 
   const onPrepareSubmit = () => {
-    if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-      toast.error("Amount must be a positive integer.");
+    if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
+      toast.error("Amount must be a positive number.");
       return;
     }
     setConfirmRequest(true);
@@ -87,6 +90,7 @@ export function RedeemsPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <BalanceWidget
           balance={balance}
+          decimals={tCeBMDecimals}
           loading={status === "loading" && balance === null}
         />
         <Card>
@@ -106,12 +110,12 @@ export function RedeemsPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="redeem-amount">Amount (tCeBM units)</Label>
+            <Label htmlFor="redeem-amount">Amount (tCeBM)</Label>
             <Input
               id="redeem-amount"
               type="number"
               min="0"
-              step="1"
+              step="any"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
             />
@@ -137,7 +141,7 @@ export function RedeemsPage() {
           <CardHeader>
             <CardTitle>Confirm Redeem Request</CardTitle>
             <CardDescription>
-              {formatCeBM(amount)} will be submitted for central bank fiat
+              {formatCeBM(amount, decimals)} will be submitted for central bank fiat
               reserve release approval.
             </CardDescription>
           </CardHeader>
@@ -176,7 +180,7 @@ export function RedeemsPage() {
               {redeems.map((redeem) => (
                 <TableRow key={redeem.id}>
                   <TableCell className="font-medium">{redeem.id}</TableCell>
-                  <TableCell>{formatCeBM(redeem.amount)}</TableCell>
+                  <TableCell>{formatCeBM(redeem.amount, decimals)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(redeem.status)}>
                       {getPaymentStatusLabel(redeem.status)}

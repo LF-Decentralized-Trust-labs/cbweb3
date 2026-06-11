@@ -67,6 +67,14 @@ contract DeployCBWeb3Spoke is Script {
 
         fiatToken = new FiatCentralBankMoney(fiatTokenName, fiatTokenSymbol, adminAddress, centralBankAddress);
 
+        // Grant GOVERNANCE_ROLE to this spoke's central bank so its auth/compliance services
+        // (which sign on-chain participant registrations with CB_PRIVATE_KEY = centralBankAddress)
+        // can register participants. DEFAULT_ADMIN_ROLE stays with adminAddress (the deployer).
+        // No-op when centralBankAddress == adminAddress (already holds the role).
+        if (centralBankAddress != adminAddress) {
+            identityRegistry.grantRole(identityRegistry.GOVERNANCE_ROLE(), centralBankAddress);
+        }
+
         vm.stopBroadcast();
 
         console.log("\n===============================================");

@@ -144,6 +144,9 @@ if [[ -f "${SPOKE_A_BROADCAST}" ]]; then
     if [[ -f "${ENV_FILE}" ]]; then
       upsert_env "${ENV_FILE}" "PARTICIPANT_REGISTRY_ADDRESS" "${SA_IDENTITY_REGISTRY}"
       upsert_env "${ENV_FILE}" "TOKEN_ADDRESS"                "${SA_TOKEN}"
+      # 001-hub-network-isolation: NATIVE_ASSET_SYMBOL must be the tCeBM contract address,
+      # not a symbol string — spokeLock()/ensureSpokeFunds() pass it to common.HexToAddress().
+      upsert_env "${ENV_FILE}" "NATIVE_ASSET_SYMBOL"          "${SA_TOKEN}"
       upsert_env "${ENV_FILE}" "HTLC_ADDRESS"                 "${SA_HTLC}"
       [[ -n "${SA_FX_AGREEMENT}" ]] && upsert_env "${ENV_FILE}" "FX_AGREEMENT_ADDRESS" "${SA_FX_AGREEMENT}"
       upsert_env "${ENV_FILE}" "SPOKE_BRIDGE_ADDRESS"         "${SA_SPOKE_BRIDGE}"
@@ -202,6 +205,9 @@ if [[ -f "${SPOKE_B_BROADCAST}" ]]; then
     if [[ -f "${ENV_FILE}" ]]; then
       upsert_env "${ENV_FILE}" "PARTICIPANT_REGISTRY_ADDRESS" "${SB_IDENTITY_REGISTRY}"
       upsert_env "${ENV_FILE}" "TOKEN_ADDRESS"                "${SB_TOKEN}"
+      # 001-hub-network-isolation: NATIVE_ASSET_SYMBOL must be the tCeBM contract address,
+      # not a symbol string — spokeLock() passes it to common.HexToAddress().
+      upsert_env "${ENV_FILE}" "NATIVE_ASSET_SYMBOL"          "${SB_TOKEN}"
       upsert_env "${ENV_FILE}" "HTLC_ADDRESS"                 "${SB_HTLC}"
       [[ -n "${SB_FX_AGREEMENT}" ]] && upsert_env "${ENV_FILE}" "FX_AGREEMENT_ADDRESS" "${SB_FX_AGREEMENT}"
       upsert_env "${ENV_FILE}" "SPOKE_BRIDGE_ADDRESS"         "${SB_SPOKE_BRIDGE}"
@@ -217,11 +223,11 @@ else
 fi
 
 # ============================================================
-# HUB (AMM) — Spoke-A plays Hub role in local dev (chain 1338)
+# HUB (AMM) — independent Hub network (chain 1337, hub-besu/)
 # The AMM broadcast lives under AutomatedMarketMaker.s.sol/<chainId>.
 # We also accept CBWeb3Hub.s.sol/<chainId> as a fallback.
 # ============================================================
-HUB_CHAIN_ID="${HUB_CHAIN_ID:-${SPOKE_A_CHAIN_ID}}"
+HUB_CHAIN_ID="${HUB_CHAIN_ID:-1337}"
 HUB_AMM_BROADCAST="${ROOT_DIR}/contracts/broadcast/AutomatedMarketMaker.s.sol/${HUB_CHAIN_ID}/run-latest.json"
 HUB_FALLBACK_BROADCAST="${ROOT_DIR}/contracts/broadcast/CBWeb3Hub.s.sol/${HUB_CHAIN_ID}/run-latest.json"
 
@@ -319,27 +325,45 @@ else
 fi
 
 # ============================================================
-# CB_PRIVATE_KEY — Propagate governance admin key to central bank envs only
+# CB_PRIVATE_KEY + SIGNER_PRIVATE_KEY — propagate each CB's OWN dedicated key.
+# Each central bank uses a single distinct identity for spoke mint/lock, hub mint,
+# and the governance/auth wallet:
+#   central-bank-a → CENTRAL_BANK_A_PRIVATE_KEY (0xfe3b...)
+#   central-bank-b → CENTRAL_BANK_B_PRIVATE_KEY (0xf17f...)
+# These are deliberately NOT the platform admin/deployer key (ADMIN_PRIVATE_KEY / 0x627306);
+# spoke-a/spoke-b and the Hub W-tCeBM tokens grant CENTRAL_BANK_ROLE to these per-CB addresses.
 # ============================================================
 CONTRACTS_ENV="${ROOT_DIR}/contracts/.env"
 if [[ -f "${CONTRACTS_ENV}" ]]; then
-  ADMIN_KEY=$(grep -E '^ADMIN_PRIVATE_KEY=' "${CONTRACTS_ENV}" 2>/dev/null | head -1 | cut -d= -f2- || true)
-  ADMIN_KEY="${ADMIN_KEY#0x}"
-  if [[ -n "${ADMIN_KEY}" ]]; then
-    echo "--- CB_PRIVATE_KEY + SIGNER_PRIVATE_KEY (governance admin / tCeBM signer) ---"
-    for CB_ENV in "${ENV_CENTRAL_BANK_A}" "${ENV_CENTRAL_BANK_A_EXAMPLE}" \
-                  "${ENV_CENTRAL_BANK_B}" "${ENV_CENTRAL_BANK_B_EXAMPLE}"; do
+  CB_A_KEY=$(grep -E '^CENTRAL_BANK_A_PRIVATE_KEY=' "${CONTRACTS_ENV}" 2>/dev/null | head -1 | cut -d= -f2- || true)
+  CB_B_KEY=$(grep -E '^CENTRAL_BANK_B_PRIVATE_KEY=' "${CONTRACTS_ENV}" 2>/dev/null | head -1 | cut -d= -f2- || true)
+  CB_A_KEY="${CB_A_KEY#0x}"
+  CB_B_KEY="${CB_B_KEY#0x}"
+  echo "--- CB_PRIVATE_KEY + SIGNER_PRIVATE_KEY (per-CB dedicated identity) ---"
+  if [[ -n "${CB_A_KEY}" ]]; then
+    for CB_ENV in "${ENV_CENTRAL_BANK_A}" "${ENV_CENTRAL_BANK_A_EXAMPLE}"; do
       if [[ -f "${CB_ENV}" ]]; then
-        upsert_env "${CB_ENV}" "CB_PRIVATE_KEY" "${ADMIN_KEY}"
-        upsert_env "${CB_ENV}" "SIGNER_PRIVATE_KEY" "${ADMIN_KEY}"
-        echo "  Updated CB_PRIVATE_KEY + SIGNER_PRIVATE_KEY in: ${CB_ENV}"
+        upsert_env "${CB_ENV}" "CB_PRIVATE_KEY" "${CB_A_KEY}"
+        upsert_env "${CB_ENV}" "SIGNER_PRIVATE_KEY" "${CB_A_KEY}"
+        echo "  Updated CB-A CB_PRIVATE_KEY + SIGNER_PRIVATE_KEY in: ${CB_ENV}"
       fi
     done
   else
-    echo "WARN: ADMIN_PRIVATE_KEY is empty in ${CONTRACTS_ENV} — skipping CB_PRIVATE_KEY." >&2
+    echo "WARN: CENTRAL_BANK_A_PRIVATE_KEY empty in ${CONTRACTS_ENV} — skipping CB-A key." >&2
+  fi
+  if [[ -n "${CB_B_KEY}" ]]; then
+    for CB_ENV in "${ENV_CENTRAL_BANK_B}" "${ENV_CENTRAL_BANK_B_EXAMPLE}"; do
+      if [[ -f "${CB_ENV}" ]]; then
+        upsert_env "${CB_ENV}" "CB_PRIVATE_KEY" "${CB_B_KEY}"
+        upsert_env "${CB_ENV}" "SIGNER_PRIVATE_KEY" "${CB_B_KEY}"
+        echo "  Updated CB-B CB_PRIVATE_KEY + SIGNER_PRIVATE_KEY in: ${CB_ENV}"
+      fi
+    done
+  else
+    echo "WARN: CENTRAL_BANK_B_PRIVATE_KEY empty in ${CONTRACTS_ENV} — skipping CB-B key." >&2
   fi
 else
-  echo "WARN: ${CONTRACTS_ENV} not found — skipping CB_PRIVATE_KEY propagation." >&2
+  echo "WARN: ${CONTRACTS_ENV} not found — skipping CB key propagation." >&2
 fi
 
 # ============================================================
@@ -455,6 +479,19 @@ if [[ -f "${SOVEREIGN_PAIR_BROADCAST}" ]]; then
     echo "  WARN: Sovereign Token B not found in SeedNewSovereignPair broadcast — getCentralBankOf will fail." >&2
   fi
 
+  # Both CB gateways need BOTH sovereign token addresses (not just their own) to
+  # compute the FX-suggested counterpart match amount — the Hub ManualOracle keys
+  # getRate on the (token0, token1) pair, so each gateway must know its counterpart's
+  # token too. W_TOKEN_ADDRESS stays per-CB (each CB's own issued token, set above);
+  # this only shares the directory of both sides. Also corrects any stale token-B
+  # address previously left in the central-bank-a env.
+  for ENV_FILE in "${ENV_CENTRAL_BANK_A}" "${ENV_CENTRAL_BANK_A_EXAMPLE}" \
+                  "${ENV_CENTRAL_BANK_B}" "${ENV_CENTRAL_BANK_B_EXAMPLE}"; do
+    [[ -f "${ENV_FILE}" ]] || continue
+    [[ -n "${SOV_TOKEN_A}" ]] && upsert_env "${ENV_FILE}" "SOVEREIGN_HUB_TOKEN_A_ADDRESS" "${SOV_TOKEN_A}"
+    [[ -n "${SOV_TOKEN_B}" ]] && upsert_env "${ENV_FILE}" "SOVEREIGN_HUB_TOKEN_B_ADDRESS" "${SOV_TOKEN_B}"
+  done
+
   if [[ -n "${SOV_AMM}" ]]; then
     echo "  SOVEREIGN_AMM_ADDRESS         : ${SOV_AMM}"
     # SOVEREIGN_PAIR_ID defaults to W-BRL-ARS; override via env when seeding a different pair.
@@ -474,6 +511,25 @@ else
 fi
 
 # ============================================================
+# ORACLE_ADDRESS — Hub ManualOracle (FX price feed)
+# The api-gateway reads ManualOracle.getRate to suggest a counterpart match amount;
+# the mock-fx-feeder writes to the same contract. Sourced from the CBWeb3Hub
+# broadcast (where ManualOracle is deployed) and written to both CB env files.
+# ============================================================
+if [[ -f "${HUB_FALLBACK_BROADCAST}" ]]; then
+  ORACLE_ADDR=$(extract_address "${HUB_FALLBACK_BROADCAST}" "ManualOracle")
+  if [[ -n "${ORACLE_ADDR}" ]]; then
+    echo "--- ORACLE_ADDRESS : ${ORACLE_ADDR} ---"
+    for ENV_FILE in "${ENV_CENTRAL_BANK_A}" "${ENV_CENTRAL_BANK_A_EXAMPLE}" \
+                    "${ENV_CENTRAL_BANK_B}" "${ENV_CENTRAL_BANK_B_EXAMPLE}"; do
+      [[ -f "${ENV_FILE}" ]] && upsert_env "${ENV_FILE}" "ORACLE_ADDRESS" "${ORACLE_ADDR}"
+    done
+  else
+    echo "  WARN: ManualOracle not found in ${HUB_FALLBACK_BROADCAST} — ORACLE_ADDRESS not set." >&2
+  fi
+fi
+
+# ============================================================
 # LOCAL_CB_HUB_SIGNER — derive each CB gateway's Hub signer address
 # from the private keys declared in contracts/.env.
 # Written to .env.infra.central-bank-{a,b} so the api-gateway container
@@ -483,16 +539,23 @@ if command -v cast &>/dev/null; then
   echo "--- LOCAL_CB_HUB_SIGNER ---"
   _CONTRACTS_ENV="${ROOT_DIR}/contracts/.env"
 
-  # CB-A signer comes from CENTRAL_BANK_PRIVATE_KEY (same as ADMIN_PRIVATE_KEY in local dev)
-  _CBA_KEY=$(grep -E '^CENTRAL_BANK_PRIVATE_KEY=' "${_CONTRACTS_ENV}" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]' || true)
+  # CB-A signer comes from CENTRAL_BANK_A_PRIVATE_KEY — a hub identity distinct from the
+  # spoke signer (CENTRAL_BANK_PRIVATE_KEY / 0x627306). HUB_MINT_RECIPIENT must equal it so
+  # the W-tCeBM minted by the relayer lands in the wallet the api-gateway pre-flight checks.
+  _CBA_KEY=$(grep -E '^CENTRAL_BANK_A_PRIVATE_KEY=' "${_CONTRACTS_ENV}" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]' || true)
   if [[ -n "${_CBA_KEY}" ]]; then
     _CBA_SIGNER=$(cast wallet address --private-key "${_CBA_KEY}" 2>/dev/null || true)
     if [[ -n "${_CBA_SIGNER}" ]]; then
       for ENV_FILE in "${ENV_CENTRAL_BANK_A}" "${ENV_CENTRAL_BANK_A_EXAMPLE}"; do
-        [[ -f "${ENV_FILE}" ]] && upsert_env "${ENV_FILE}" "LOCAL_CB_HUB_SIGNER" "${_CBA_SIGNER}"
+        if [[ -f "${ENV_FILE}" ]]; then
+          upsert_env "${ENV_FILE}" "LOCAL_CB_HUB_SIGNER" "${_CBA_SIGNER}"
+          upsert_env "${ENV_FILE}" "HUB_MINT_RECIPIENT" "${_CBA_SIGNER}"
+        fi
       done
-      echo "  CB-A LOCAL_CB_HUB_SIGNER=${_CBA_SIGNER}"
+      echo "  CB-A LOCAL_CB_HUB_SIGNER=${_CBA_SIGNER} HUB_MINT_RECIPIENT=${_CBA_SIGNER}"
     fi
+  else
+    echo "  WARN: CENTRAL_BANK_A_PRIVATE_KEY not set in contracts/.env — CB-A hub identity unchanged" >&2
   fi
 
   # CB-B signer comes from CENTRAL_BANK_B_PRIVATE_KEY
@@ -601,6 +664,11 @@ if [[ -n "${SA_HTLC:-}" || -n "${SB_HTLC:-}" || -n "${LCR_ADDRESS:-}" ]]; then
   _CB_B_GW_URL="${CB_B_GATEWAY_URL:-http://host.docker.internal:60080}"
   upsert_env "${CACTI_ENV}" "CB_B_GATEWAY_URL" "${_CB_B_GW_URL}"
 
+  # 001-hub-network-isolation: Hub Besu RPC for LiquidityCommitWatcher.
+  # The Hub is an independent network on port 8845 (chain 1337) — not Spoke-A.
+  _HUB_BESU_RPC="${HUB_BESU_RPC:-http://host.docker.internal:8845}"
+  upsert_env "${CACTI_ENV}" "HUB_BESU_RPC" "${_HUB_BESU_RPC}"
+
   CACTI_UPDATED=1
   echo "  Updated: ${CACTI_ENV}"
 else
@@ -608,54 +676,19 @@ else
 fi
 
 # ============================================================
-# Grant CENTRAL_BANK_ROLE on sovereign W-tCeBM tokens to ADMIN address
+# (REMOVED) CENTRAL_BANK_ROLE self-grant to the ADMIN signer
 #
-# SeedNewSovereignPair grants CENTRAL_BANK_ROLE only to CENTRAL_BANK_B_PRIVATE_KEY
-# (0xf17f52...), but the payment-orchestrator uses SIGNER_PRIVATE_KEY = ADMIN_PRIVATE_KEY
-# (0x627306...) for hub mints. Without this grant, every hub mint reverts.
-# The ADMIN already has DEFAULT_ADMIN_ROLE on both tokens so it can self-grant.
+# This step used to grant CENTRAL_BANK_ROLE on the hub W-tCeBM tokens to the ADMIN signer
+# (0x627306...) so the commercial payment-orchestrator could mint W-tokens on the Hub. That
+# violated the sovereignty model: minting wrapped central-bank money is a central-bank-only
+# operation, and a commercial bank's signer must never hold CENTRAL_BANK_ROLE.
 #
-# Runs only when sovereign token addresses are known (i.e., after seed-sovereign-pair).
-# On the first sync (before seed), SOV_TOKEN_A/B are empty — skipped silently.
+# Cross-currency bridge-in is now delegated to the issuing CB (POST /internal/amm/
+# cross-currency-bridge-in), symmetric with the Cacti bridge-out to the beneficiary CB. Each
+# CB already receives CENTRAL_BANK_ROLE on its own sovereign token via SeedNewSovereignPair
+# (the token constructor grants it to the CB signer). No self-grant to a commercial/admin
+# signer is needed — and re-adding one would silently re-enable the broken non-sovereign mint.
 # ============================================================
-if command -v cast &>/dev/null && [[ -f "${CONTRACTS_ENV}" ]]; then
-  _ADMIN_KEY_GRANT=$(grep -E '^ADMIN_PRIVATE_KEY=' "${CONTRACTS_ENV}" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]' || true)
-  _ADMIN_KEY_GRANT="${_ADMIN_KEY_GRANT#0x}"
-  # Resolve Hub RPC: prefer env var exported by make, fall back to localhost
-  _GRANT_RPC="${SPOKE_A_RPC_URL:-${BESU_HUB_RPC:-http://127.0.0.1:8645}}"
-  _ROLE=$(cast keccak "CENTRAL_BANK_ROLE" 2>/dev/null || true)
-
-  if [[ -n "${_ADMIN_KEY_GRANT}" && -n "${_ROLE}" ]]; then
-    _ADMIN_ADDR=$(cast wallet address --private-key "${_ADMIN_KEY_GRANT}" 2>/dev/null || true)
-
-    # Collect all hub tokens that need CENTRAL_BANK_ROLE for the ADMIN signer:
-    #   - Sovereign W-tCeBM tokens (deployed by SeedNewSovereignPair, only present on 2nd sync)
-    #   - Hub tCeBM tokens (deployed by CBWeb3Hub, present on both syncs)
-    _GRANT_TOKENS=()
-    [[ -n "${SOV_TOKEN_A:-}" ]] && _GRANT_TOKENS+=("${SOV_TOKEN_A}")
-    [[ -n "${SOV_TOKEN_B:-}" ]] && _GRANT_TOKENS+=("${SOV_TOKEN_B}")
-    [[ -n "${HUB_TOKEN_A:-}" ]] && _GRANT_TOKENS+=("${HUB_TOKEN_A}")
-    [[ -n "${HUB_TOKEN_B:-}" ]] && _GRANT_TOKENS+=("${HUB_TOKEN_B}")
-
-    if [[ ${#_GRANT_TOKENS[@]} -gt 0 ]]; then
-      echo "--- CENTRAL_BANK_ROLE grants on hub tokens for ADMIN signer (${_ADMIN_ADDR}) ---"
-      for _TOKEN in "${_GRANT_TOKENS[@]}"; do
-        _HAS_ROLE=$(cast call "${_TOKEN}" "hasRole(bytes32,address)(bool)" "${_ROLE}" "${_ADMIN_ADDR}" \
-          --rpc-url "${_GRANT_RPC}" 2>/dev/null || echo "error")
-        if [[ "${_HAS_ROLE}" == "false" ]]; then
-          echo "  Granting on ${_TOKEN}..."
-          cast send "${_TOKEN}" "grantRole(bytes32,address)" "${_ROLE}" "${_ADMIN_ADDR}" \
-            --private-key "${_ADMIN_KEY_GRANT}" --rpc-url "${_GRANT_RPC}" \
-            --json 2>/dev/null | python3 -c \
-              "import sys,json; d=json.load(sys.stdin); print('  TX:', d.get('transactionHash','?'), 'status:', d.get('status','?'))" \
-            2>/dev/null || echo "  WARN: grant failed — check RPC and key" >&2
-        elif [[ "${_HAS_ROLE}" == "true" ]]; then
-          echo "  Already granted on ${_TOKEN} — skip"
-        fi
-      done
-    fi
-  fi
-fi
 
 # --- Summary ---
 echo ""

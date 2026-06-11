@@ -146,14 +146,19 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		// Determine whether to fall through or reject hard.
 		st, ok := status.FromError(err)
 		if !ok {
-			// Non-gRPC error (network, timeout, context cancelled) — reject.
+			// Non-gRPC error (network, timeout, context cancelled) — treat as service unavailable.
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable"})
 		}
-		msg := st.Message()
-		if msg != "participant not found" && msg != "PKI_NOT_REQUIRED" {
+		switch st.Code() {
+		case codes.NotFound, codes.PermissionDenied:
+			// "participant not found" or "PKI_NOT_REQUIRED" — fall through to direct login.
+		case codes.Unauthenticated:
+			// PKI first factor failed (wrong clientSecret).
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
+		default:
+			// Internal error, Unavailable (service not ready), etc. — do not leak as auth failure.
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "authentication service unavailable"})
 		}
-		// participant not found or PKI not required → fall through to direct login.
 	}
 
 	// Direct login: Central Bank (client_credentials via Keycloak service account)

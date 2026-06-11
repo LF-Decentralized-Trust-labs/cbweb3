@@ -120,6 +120,7 @@ export const useCrossCurrencySwapStore = create<CrossCurrencySwapStore>((set, ge
       set({
         quote: null,
         quoteExpiresAt: null,
+        errorCode: toErrorCode(parsed.code),
         error: parsed.message ?? "Unable to fetch quote.",
       });
     }

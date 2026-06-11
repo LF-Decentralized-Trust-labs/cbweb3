@@ -66,11 +66,18 @@ contract RegisterParticipants is Script {
         // Spoke operator addresses (Besu genesis accounts used in local dev).
         // Bank-A / Bank-B share key 0dbbe8e4… → 0xC5fdf4…
         // Bank-C / Bank-D share key c88b703f… → 0xc110…
-        // Central Bank A key c87509a1… → 0x627306… (spoke-a / hub governance)
-        // Central Bank B key ae6ae8e5… → 0xf17f52… (spoke-b / hub co-signer, quorum-2 circuit breaker)
-        Participant[4] memory participants = [
+        // Platform admin/deployer key c87509a1… → 0x627306… (ADMIN_ADDRESS; registry/bridge admin,
+        //   hub DEFAULT_ADMIN_ROLE — NOT a sovereign CB identity).
+        // Central Bank A key 8f2a5594… → 0xfe3b55… (spoke-a CB + hub identity for CB-A).
+        // Central Bank B key ae6ae8e5… → 0xf17f52… (spoke-b CB + hub identity for CB-B).
+        Participant[5] memory participants = [
             Participant(
                 0x627306090abaB3A6e1400e9345bC60c78a8BEf57,
+                "Platform Admin",
+                IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
+            ),
+            Participant(
+                0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73,
                 "Central Bank A",
                 IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
             ),

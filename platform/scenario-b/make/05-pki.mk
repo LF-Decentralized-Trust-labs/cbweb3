@@ -82,7 +82,7 @@ pki.gen-bank-b:
 	$(call gen_ca,$(PKI_DIR)/bank-b-ca.key,BankB,$(PKI_DIR)/bank-b-ca.crt,/CN=CBWeb3-BankB-CA/O=BankB/C=BR)
 
 
-pki.gen-all: pki.gen-central-bank-a pki.gen-central-bank-b pki.gen-bank-a pki.gen-bank-b pki.gen-bank-c pki.gen-bank-d pki.gen-commercial-banks
+pki.gen-all: pki.gen-central-bank-a pki.gen-central-bank-b pki.gen-bank-a pki.gen-bank-b pki.gen-commercial-banks
 	@echo "==> All PKI credentials generated in $(PKI_DIR)/"
 
 pki.gen-commercial-bank-%:
@@ -94,7 +94,7 @@ pki.gen-commercial-banks: $(COMMERCIAL_BANK_GEN_TARGETS)
 
 pki.check: pki.check-commercial-banks
 	@echo "==> PKI certificate status ($(PKI_DIR)/):"
-	@for f in central-bank-a-ca.key central-bank-a-ca.crt central-bank-b-ca.key central-bank-b-ca.crt bank-a-ca.key bank-a-ca.crt bank-b-ca.key bank-b-ca.crt bank-c-ca.key bank-c-ca.crt bank-d-ca.key bank-d-ca.crt; do \
+	@for f in central-bank-a-ca.key central-bank-a-ca.crt central-bank-b-ca.key central-bank-b-ca.crt bank-a-ca.key bank-a-ca.crt bank-b-ca.key bank-b-ca.crt; do \
 		if [ -f "$(PKI_DIR)/$$f" ]; then \
 			echo "  [OK]     $$f"; \
 		else \
@@ -121,8 +121,6 @@ pki.clean:
 	@rm -f $(PKI_DIR)/central-bank-b-ca.key $(PKI_DIR)/central-bank-b-ca.crt
 	@rm -f $(PKI_DIR)/bank-a-ca.key $(PKI_DIR)/bank-a-ca.crt
 	@rm -f $(PKI_DIR)/bank-b-ca.key $(PKI_DIR)/bank-b-ca.crt
-	@rm -f $(PKI_DIR)/bank-c-ca.key $(PKI_DIR)/bank-c-ca.crt
-	@rm -f $(PKI_DIR)/bank-d-ca.key $(PKI_DIR)/bank-d-ca.crt
 	@echo "  Done."
 
 pki.clean-commercial-banks:
@@ -130,4 +128,4 @@ pki.clean-commercial-banks:
 	@rm -f $(foreach bank,$(COMMERCIAL_BANK_IDS),$(PKI_DIR)/$(bank)-ca.key $(PKI_DIR)/$(bank)-ca.crt $(PKI_DIR)/$(bank)-ca.srl $(PKI_DIR)/$(bank).key $(PKI_DIR)/$(bank).csr $(PKI_DIR)/$(bank).crt)
 	@echo "  Done."
 
-.PHONY: pki.gen-central-bank-a pki.gen-central-bank-b pki.gen-bank-a pki.gen-bank-b pki.gen-bank-c pki.gen-bank-d pki.gen-all pki.check pki.clean pki.gen-commercial-banks pki.check-commercial-banks pki.clean-commercial-banks
+.PHONY: pki.gen-central-bank-a pki.gen-central-bank-b pki.gen-bank-a pki.gen-bank-b pki.gen-all pki.check pki.clean pki.gen-commercial-banks pki.check-commercial-banks pki.clean-commercial-banks

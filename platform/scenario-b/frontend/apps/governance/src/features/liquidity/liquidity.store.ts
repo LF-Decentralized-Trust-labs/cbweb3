@@ -1,4 +1,5 @@
 import axios from "axios";
+import { toast } from "@cbweb3/ui";
 import { create } from "zustand";
 import { liquidityApi } from "../../services/api/liquidity.api";
 import { useAuthStore } from "../../stores/auth.store";
@@ -31,11 +32,14 @@ type LiquidityStore = {
   sovereignPhase: SovereignFlowPhase;
   commitLatencyWarning: boolean;
   operationalHint: string | null;
+  // on_chain_commit_id of the counterpart commit we last toasted, to avoid re-notifying.
+  lastNotifiedCounterpartId: string | null;
   fetchPoolStatus: (pair: string) => Promise<void>;
   removeLiquidity: (payload: RemoveLiquidityRequest) => Promise<void>;
   lockMint: (amount: string) => Promise<void>;
   approveAmm: (payload: ApproveAmmRequest) => Promise<void>;
   submitCommit: (payload: CommitRequest) => Promise<void>;
+  refreshCommitStatus: (commitId: string) => Promise<void>;
   cancelActiveCommit: (commitId: string) => Promise<void>;
   fetchLpPositions: (poolPair: string, providerBankId: string) => Promise<void>;
   clearCommit: () => void;
@@ -73,18 +77,38 @@ export const useLiquidityStore = create<LiquidityStore>((set, get) => ({
   sovereignPhase: SOVEREIGN_FLOW_PHASE.LOCK_MINT,
   commitLatencyWarning: false,
   operationalHint: null,
+  lastNotifiedCounterpartId: null,
   fetchPoolStatus: async (pair) => {
     set({ status: "loading", error: null });
     try {
       const poolStatus = await liquidityApi.getPoolStatus(pair);
-      set((state) => ({
-        poolStatus,
-        status: "idle",
-        sovereignPhase:
-          poolStatus.pool_status === "ACTIVE" && state.sovereignPhase === SOVEREIGN_FLOW_PHASE.COMMIT_EXECUTED
-            ? SOVEREIGN_FLOW_PHASE.POOL_ACTIVE
-            : state.sovereignPhase,
-      }));
+      set((state) => {
+        // Fire a one-time toast when a counterpart commit first appears (pool not yet ACTIVE),
+        // deduping by on_chain_commit_id so repeated polls don't re-notify.
+        const counterpart = poolStatus.counterpart_commit ?? null;
+        let lastNotifiedCounterpartId = state.lastNotifiedCounterpartId;
+        if (
+          counterpart &&
+          poolStatus.pool_status !== "ACTIVE" &&
+          counterpart.on_chain_commit_id !== state.lastNotifiedCounterpartId
+        ) {
+          toast.info("Counterpart liquidity is waiting", {
+            description: `A counterpart committed ${counterpart.amount} to side ${counterpart.side}. Match it to activate the pool.`,
+          });
+          lastNotifiedCounterpartId = counterpart.on_chain_commit_id;
+        } else if (!counterpart) {
+          lastNotifiedCounterpartId = null;
+        }
+        return {
+          poolStatus,
+          status: "idle",
+          lastNotifiedCounterpartId,
+          sovereignPhase:
+            poolStatus.pool_status === "ACTIVE" && state.sovereignPhase === SOVEREIGN_FLOW_PHASE.COMMIT_EXECUTED
+              ? SOVEREIGN_FLOW_PHASE.POOL_ACTIVE
+              : state.sovereignPhase,
+        };
+      });
     } catch (error) {
       set({ status: "error", error: extractApiError(error, "Unable to fetch pool status") });
     }
@@ -111,13 +135,13 @@ export const useLiquidityStore = create<LiquidityStore>((set, get) => ({
       set({
         bridgeLockMintResult: response,
         currentBankId: bankId,
-        status: "idle",
         sovereignPhase: SOVEREIGN_FLOW_PHASE.BRIDGE_ACTIVE_WAIT,
         operationalHint: "Waiting for bridge position to become ACTIVE.",
       });
 
       const ready = await liquidityApi.waitForBridgeActive();
       set({
+        status: "idle",
         sovereignPhase: ready ? SOVEREIGN_FLOW_PHASE.COMMIT_PENDING : SOVEREIGN_FLOW_PHASE.TIMEOUT,
         operationalHint: ready ? null : "Bridge position did not become ACTIVE within 120s.",
       });
@@ -147,46 +171,25 @@ export const useLiquidityStore = create<LiquidityStore>((set, get) => ({
       operationalHint: null,
     });
     try {
+      // Fire-and-forget: registering the commit persists it server-side (DB + on-chain
+      // LiquidityCommitRegistry) and the Cacti watcher drives it to execution once the
+      // counterpart matches. We do NOT block the UI waiting for settlement — the monitor
+      // step polls refreshCommitStatus()/pool status, and the user can safely leave the
+      // page and re-attach later via "Monitor Pending Commit".
       const result = await liquidityApi.commitLiquidity(payload);
-      set({ activeCommit: result, commitStatus: "idle" });
-
-      if (result.status === "PENDING") {
-        const settledCommit = await liquidityApi.waitForCommitSettled(payload.pool_pair, result.commit_id, () => {
-          set({
-            commitLatencyWarning: true,
-            operationalHint: "Commit still pending for over 30s. Waiting for watcher execution.",
-          });
-        });
-
-        if (!settledCommit) {
-          set({
-            sovereignPhase: SOVEREIGN_FLOW_PHASE.TIMEOUT,
-            commitError: "Commit execution timeout after 180s. Track commit status and retry if needed.",
-          });
-          return;
-        }
-
-        if (settledCommit.status === "CANCELLED") {
-          set({
-            activeCommit: settledCommit,
-            sovereignPhase: SOVEREIGN_FLOW_PHASE.CANCELLED,
-            commitLatencyWarning: false,
-            operationalHint: "Commit was cancelled before execution.",
-          });
-          return;
-        }
-
-        const latestPoolStatus = await liquidityApi.getPoolStatus(payload.pool_pair);
-        set({
-          activeCommit: settledCommit,
-          poolStatus: latestPoolStatus,
-          sovereignPhase:
-            latestPoolStatus.pool_status === "ACTIVE"
-              ? SOVEREIGN_FLOW_PHASE.POOL_ACTIVE
-              : SOVEREIGN_FLOW_PHASE.COMMIT_EXECUTED,
-          commitLatencyWarning: false,
-        });
-      }
+      set({
+        activeCommit: result,
+        commitStatus: "idle",
+        sovereignPhase:
+          result.status === "EXECUTED"
+            ? SOVEREIGN_FLOW_PHASE.COMMIT_EXECUTED
+            : SOVEREIGN_FLOW_PHASE.COMMIT_PENDING,
+        commitLatencyWarning: false,
+        operationalHint:
+          result.status === "EXECUTED"
+            ? null
+            : "Commit registered. Coordination continues server-side — you can safely leave this page.",
+      });
     } catch (error) {
       const apiError = extractApiError(error, "Unable to submit commit");
 
@@ -213,6 +216,44 @@ export const useLiquidityStore = create<LiquidityStore>((set, get) => ({
         commitError: apiError,
         sovereignPhase: SOVEREIGN_FLOW_PHASE.FAILED,
       });
+    }
+  },
+  refreshCommitStatus: async (commitId) => {
+    // Non-blocking poll of a single commit's server-side state. Safe to call on an
+    // interval from the monitor step; never throws into the UI.
+    try {
+      const commit = await liquidityApi.getCommit(commitId);
+      if (!commit) {
+        return;
+      }
+      if (commit.status === "EXECUTED") {
+        const latestPoolStatus = await liquidityApi.getPoolStatus(commit.pool_pair);
+        set({
+          activeCommit: commit,
+          poolStatus: latestPoolStatus,
+          sovereignPhase:
+            latestPoolStatus.pool_status === "ACTIVE"
+              ? SOVEREIGN_FLOW_PHASE.POOL_ACTIVE
+              : SOVEREIGN_FLOW_PHASE.COMMIT_EXECUTED,
+          operationalHint: null,
+        });
+        return;
+      }
+      if (commit.status === "CANCELLED" || commit.status === "EXPIRED") {
+        set({
+          activeCommit: commit,
+          sovereignPhase: SOVEREIGN_FLOW_PHASE.CANCELLED,
+          operationalHint:
+            commit.status === "EXPIRED"
+              ? "Commit expired before a counterpart matched. Cancel and retry when ready."
+              : "Commit was cancelled.",
+        });
+        return;
+      }
+      // PENDING or MATCHED — still coordinating.
+      set({ activeCommit: commit });
+    } catch {
+      // Transient read error — leave state as-is; the next poll retries.
     }
   },
   cancelActiveCommit: async (commitId) => {

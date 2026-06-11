@@ -4,6 +4,7 @@ import type {
   ApproveEscrowResponse,
   ApproveRedeemRequest,
   ApproveRedeemResponse,
+  BalanceResponse,
   ListDepositsResponse,
   ListEscrowsResponse,
   ListRedeemsResponse,
@@ -14,6 +15,10 @@ import type {
 import { httpClient } from "./http-client";
 
 export const paymentApi = {
+  getBalance: async (): Promise<BalanceResponse> => {
+    const response = await httpClient.get<BalanceResponse>("/token/balance");
+    return response.data;
+  },
   listDeposits: async (requesterId?: string): Promise<ListDepositsResponse> => {
     const response = await httpClient.get<ListDepositsResponse>("/payments/deposits", {
       params: requesterId ? { requester_id: requesterId } : undefined,

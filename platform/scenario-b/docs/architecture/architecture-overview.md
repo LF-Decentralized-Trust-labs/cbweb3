@@ -406,7 +406,7 @@ Applies to both hub and spoke `IdentityRegistry` instances. Only `Verified` part
 | Frontend | api-gateway | HTTPS REST | JWT, request payload |
 | api-gateway | auth / compliance / payment-orchestrator | gRPC (Docker-internal) | Authenticated request context |
 | payment-orchestrator | Besu node (spoke-local) | Besu RPC (HTTP) | Signed spoke transactions, `eth_getLogs` |
-| payment-orchestrator | Besu node (hub / chain 1338) | Besu RPC (HTTP) | Signed hub transactions, AMM calls, bridge operations |
+| payment-orchestrator | Besu node (hub / chain 1337) | Besu RPC (HTTP) | Signed hub transactions, AMM calls, bridge operations |
 | Cacti relay | Hub Besu node | Besu RPC (HTTP) | `eth_getLogs` subscription for `CommitMatched` events |
 | Cacti relay | CB api-gateways (both) | HTTPS REST | `POST sovereign-execute-matched-commit` with `X-Relay-Auth` |
 | api-gateway | PostgreSQL | GORM/TCP | Commit records, agreement state, audit logs |

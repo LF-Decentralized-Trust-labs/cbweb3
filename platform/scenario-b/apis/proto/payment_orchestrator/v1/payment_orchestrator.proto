@@ -147,7 +147,8 @@ message GetBalanceRequest {
 }
 
 message GetBalanceResponse {
-  string balance = 1;
+  string balance  = 1;
+  uint32 decimals = 2; // ERC-20 token decimal places (read from contract)
 }
 
 // GetFiatBalance queries the fCeBM balance.
@@ -156,7 +157,8 @@ message GetFiatBalanceRequest {
 }
 
 message GetFiatBalanceResponse {
-  string balance = 1;
+  string balance  = 1;
+  uint32 decimals = 2; // ERC-20 token decimal places (read from contract)
 }
 
 // ─── Escrow Enums ────────────────────────────────────────────────────────

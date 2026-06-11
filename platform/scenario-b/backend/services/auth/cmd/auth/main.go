@@ -25,6 +25,21 @@ func main() {
 		log.Fatalf("kms: %v", err)
 	}
 
+	// Pre-seed the KMS with a known operator key so that CreateOnboardingKey returns
+	// a deterministic address (the bank's BESU_OPERATOR_KEY address) instead of a
+	// random ephemeral one. This ensures bridge-out mints land at the same address
+	// that GetBalance queries. Only applies to KMSLocal (dev); silently ignored otherwise.
+	if keyID := os.Getenv("KMS_SEED_KEY_ID"); keyID != "" {
+		if privKey := os.Getenv("KMS_SEED_PRIVATE_KEY"); privKey != "" {
+			if local, ok := kmsProvider.(*kmsproviders.KMSLocal); ok {
+				if seedErr := local.SeedKey(keyID, privKey); seedErr != nil {
+					log.Fatalf("kms seed: %v", seedErr)
+				}
+				log.Printf("kms: seeded key for %q (KMS_SEED_KEY_ID)", keyID)
+			}
+		}
+	}
+
 	kcClient, err := keycloak.New(keycloak.Config{
 		BaseURL:        mustEnv("KEYCLOAK_BASE_URL"),
 		Realm:          getEnv("KEYCLOAK_REALM", "cbweb3"),

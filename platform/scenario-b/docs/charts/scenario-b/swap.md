@@ -16,7 +16,7 @@ sequenceDiagram
     participant AUTH as Auth Service<br/>(gRPC :9091)
     participant KC as Keycloak<br/>(:8081)
     participant PO as Payment Orchestrator<br/>(gRPC :9094)
-    participant HUB_AMM as Hub AMM<br/>(chain 1338)
+    participant HUB_AMM as Hub AMM<br/>(chain 1337)
     participant HUB_TOKEN_A as tCeBM_BRL<br/>(Hub Token A)
     participant HUB_TOKEN_B as tCeBM_EUR<br/>(Hub Token B)
 
@@ -63,7 +63,7 @@ sequenceDiagram
     participant SWAP_SVC as Swap Service<br/>(API Gateway)
     participant PO as Payment Orchestrator<br/>(gRPC :9094)
     participant ORACLE as ManualOracle<br/>(Hub)
-    participant HUB_AMM as Hub AMM<br/>(chain 1338)
+    participant HUB_AMM as Hub AMM<br/>(chain 1337)
     participant HUB_TOKEN_A as tCeBM_BRL
     participant HUB_TOKEN_B as tCeBM_EUR
 
@@ -233,7 +233,7 @@ sequenceDiagram
     participant CB_A as Central Bank A<br/>(API Gateway :38080)
     participant CB_B as Central Bank B<br/>(API Gateway :48080)
     participant PO as Payment Orchestrator
-    participant HUB_AMM as Hub AMM<br/>(chain 1338)
+    participant HUB_AMM as Hub AMM<br/>(chain 1337)
     participant IR as IdentityRegistry<br/>(Hub Governance)
 
     Note over CB_A,HUB_AMM: Emergency Pause (single CB, immediate)

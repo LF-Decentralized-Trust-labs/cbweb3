@@ -20,6 +20,7 @@ type LiquidityServiceIface interface {
 	RemoveLiquidity(ctx context.Context, req services.LiquidityRemoveRequest) (*services.LPResult, error)
 	RegisterCommit(ctx context.Context, req services.CommitRequest) (*services.CommitResult, error)
 	ListCommits(ctx context.Context, poolPair, status string) ([]domain.PoolCommit, error)
+	GetCommit(ctx context.Context, commitID string) (*domain.PoolCommit, error)
 	CancelCommit(ctx context.Context, commitID, providerID string) error
 }
 
@@ -322,6 +323,25 @@ func (h *LiquidityHandler) ListCommits(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"commits": commits, "count": len(commits)})
+}
+
+// GetCommit handles GET /api/v2/amm/liquidity/commits/:commit_id.
+// Returns a single commit's current lifecycle state so the front-end can poll commit
+// progress without blocking — the commit lifecycle is driven to completion server-side
+// (DB + on-chain registry + Cacti watcher) independent of any open browser session.
+func (h *LiquidityHandler) GetCommit(c *fiber.Ctx) error {
+	commitID := c.Params("commit_id")
+	if commitID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "commit_id required"})
+	}
+	commit, err := h.svc.GetCommit(c.Context(), commitID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	if commit == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "commit not found", "commit_id": commitID})
+	}
+	return c.JSON(commit)
 }
 
 // CancelCommit handles DELETE /api/v2/amm/liquidity/commits/:commit_id (T015 / FR-001).

@@ -35,6 +35,29 @@ type PendingCommitSummary struct {
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 
+// CounterpartSource reports a counterpart central bank's open (PENDING) commit on the
+// opposite side of this gateway's pool, read from the on-chain LiquidityCommitRegistry
+// (the only cross-CB source of truth). Optional: if nil, counterpart_commit is omitted.
+type CounterpartSource interface {
+	CounterpartCommit(ctx context.Context, poolPair string) (*CounterpartCommit, error)
+}
+
+// CounterpartCommit is an on-chain PENDING commit from a counterpart central bank,
+// awaiting this gateway's matching deposit. Identity is the raw signer address only
+// (no off-chain name resolution).
+type CounterpartCommit struct {
+	Side          string `json:"side"`
+	SignerAddress string `json:"signer_address"`
+	Amount        string `json:"amount"`
+	// SuggestedMatchAmount is the amount this gateway should deposit on its own side to
+	// match the counterpart at the current FX rate (ManualOracle). The two currencies
+	// differ, so this rarely equals Amount. Empty string when no rate is available
+	// (oracle unset/unreachable) — the UI then falls back to free entry.
+	SuggestedMatchAmount string    `json:"suggested_match_amount,omitempty"`
+	ExpiresAt            time.Time `json:"expires_at"`
+	OnChainCommitID      string    `json:"on_chain_commit_id"`
+}
+
 // PoolStatusResponse holds the current state of an AMM liquidity pool (T018 / FR-028).
 type PoolStatusResponse struct {
 	PoolPair       string                 `json:"pool_pair"`
@@ -50,13 +73,17 @@ type PoolStatusResponse struct {
 	TotalLPCount   int                    `json:"total_lp_count"`
 	// PendingCommits lists commits awaiting a counterpart (PENDING status only).
 	PendingCommits []PendingCommitSummary `json:"pending_commits"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	// CounterpartCommit, when present, is a counterpart CB's on-chain PENDING commit
+	// awaiting this gateway's matching deposit. Omitted when none exists.
+	CounterpartCommit *CounterpartCommit `json:"counterpart_commit,omitempty"`
+	UpdatedAt         time.Time          `json:"updated_at"`
 }
 
 // PoolStatusService reads live pool reserves from the AMM and computes the imbalance flag.
 type PoolStatusService struct {
-	reader   AMMPoolReader
-	enricher PoolStatusEnricher
+	reader      AMMPoolReader
+	enricher    PoolStatusEnricher
+	counterpart CounterpartSource
 }
 
 // NewPoolStatusService creates a PoolStatusService without DB enrichment.
@@ -68,6 +95,13 @@ func NewPoolStatusService(reader AMMPoolReader) *PoolStatusService {
 // Returns the service to allow method chaining.
 func (s *PoolStatusService) WithEnricher(e PoolStatusEnricher) *PoolStatusService {
 	s.enricher = e
+	return s
+}
+
+// WithCounterpartSource attaches an on-chain CounterpartSource for cross-CB commit
+// discovery. Returns the service to allow method chaining.
+func (s *PoolStatusService) WithCounterpartSource(c CounterpartSource) *PoolStatusService {
+	s.counterpart = c
 	return s
 }
 
@@ -100,24 +134,35 @@ func (s *PoolStatusService) GetPoolStatus(ctx context.Context, pair string) (*Po
 		}
 	}
 
+	// Counterpart commit — only available when the on-chain source is wired. Non-fatal:
+	// discovery failures must not break pool status reads.
+	var counterpart *CounterpartCommit
+	if s.counterpart != nil {
+		if cp, err := s.counterpart.CounterpartCommit(ctx, pair); err == nil {
+			counterpart = cp
+		}
+	}
+
 	poolStatus := derivePoolStatus(reserveA, reserveB)
 	// D15 / FR-001: DB-first override — when reserves are still zero (commit pending on-chain)
-	// but a PENDING PoolCommit exists in DB, the pool is awaiting a counterpart, not empty.
-	if poolStatus == "EMPTY" && len(pendingCommits) > 0 {
+	// but a PENDING PoolCommit exists (ours in DB, or the counterpart's on-chain), the pool is
+	// awaiting a counterpart, not empty.
+	if poolStatus == "EMPTY" && (len(pendingCommits) > 0 || counterpart != nil) {
 		poolStatus = "PENDING_COUNTERPART"
 	}
 
 	return &PoolStatusResponse{
-		PoolPair:       pair,
-		PoolStatus:     poolStatus,
-		ReserveA:       reserveA,
-		ReserveB:       reserveB,
-		CurrentRatio:   ratio,
-		ImbalanceFlag:  ratio > ImbalanceThreshold,
-		FeeRateBps:     feeBps,
-		TotalLPCount:   lpCount,
-		PendingCommits: pendingCommits,
-		UpdatedAt:      time.Now(),
+		PoolPair:          pair,
+		PoolStatus:        poolStatus,
+		ReserveA:          reserveA,
+		ReserveB:          reserveB,
+		CurrentRatio:      ratio,
+		ImbalanceFlag:     ratio > ImbalanceThreshold,
+		FeeRateBps:        feeBps,
+		TotalLPCount:      lpCount,
+		PendingCommits:    pendingCommits,
+		CounterpartCommit: counterpart,
+		UpdatedAt:         time.Now(),
 	}, nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,20 +42,13 @@ func bootstrapLiquidityProviderRole(ctx context.Context) {
 	signerAddr := os.Getenv("LOCAL_CB_HUB_SIGNER")
 	adminKey := os.Getenv("CB_PRIVATE_KEY")
 	rpcURL := os.Getenv("HUB_BESU_RPC_URL")
-	chainIDStr := os.Getenv("HUB_CHAIN_ID")
 
 	if registryAddr == "" || signerAddr == "" || adminKey == "" || rpcURL == "" {
 		// Not a CB environment or vars not yet populated — skip silently.
 		return
 	}
 
-	chainID := int64(1338) // Hub default
-	if chainIDStr != "" {
-		bid := new(big.Int)
-		if _, ok := bid.SetString(strings.TrimSpace(chainIDStr), 10); ok && bid.Sign() > 0 {
-			chainID = bid.Int64()
-		}
-	}
+	chainID := resolveBootstrapHubChainID(log.New(os.Stderr, "[identity-bootstrap] ", 0))
 
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -108,4 +102,21 @@ func bootstrapLiquidityProviderRole(ctx context.Context) {
 	}
 
 	log.Printf("[identity-bootstrap] grantLiquidityProvider(%s) OK — tx=%s", signerAddr, txHash)
+}
+
+// resolveBootstrapHubChainID reads HUB_CHAIN_ID from the environment, defaulting
+// to 1337. Emits a warning when absent so operators see a visible signal rather
+// than a silent assumption (FR-009 / Constitution Principle VI).
+func resolveBootstrapHubChainID(warnLogger *log.Logger) int64 {
+	raw := strings.TrimSpace(os.Getenv("HUB_CHAIN_ID"))
+	if raw == "" {
+		warnLogger.Printf("warning: HUB_CHAIN_ID not set; defaulting to 1337 (set HUB_CHAIN_ID to suppress this warning)")
+		return 1337
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		warnLogger.Printf("warning: HUB_CHAIN_ID=%q invalid; defaulting to 1337", raw)
+		return 1337
+	}
+	return id
 }
