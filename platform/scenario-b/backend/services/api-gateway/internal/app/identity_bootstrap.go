@@ -97,11 +97,11 @@ func bootstrapLiquidityProviderRole(ctx context.Context) {
 	txHash, err := evm.SubmitTx(grantCtx, ec, signer, contract, parsedABI,
 		"grantLiquidityProvider", target)
 	if err != nil {
-		log.Printf("[identity-bootstrap] grantLiquidityProvider(%s): %v", signerAddr, err)
+		log.Printf("[identity-bootstrap] grantLiquidityProvider(%s): %v", signerAddr, err) // #nosec G706 -- signerAddr is a blockchain address from config, not user input
 		return
 	}
 
-	log.Printf("[identity-bootstrap] grantLiquidityProvider(%s) OK — tx=%s", signerAddr, txHash)
+	log.Printf("[identity-bootstrap] grantLiquidityProvider(%s) OK — tx=%s", signerAddr, txHash) // #nosec G706 -- signerAddr/txHash are blockchain values, not user input
 }
 
 // resolveBootstrapHubChainID reads HUB_CHAIN_ID from the environment, defaulting

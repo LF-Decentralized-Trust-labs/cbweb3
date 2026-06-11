@@ -202,5 +202,5 @@ func (m *identityMock) GetKYCStatus(_ context.Context, req *authv1.GetKYCStatusR
 // IssueLoginNonce returns PKI_NOT_REQUIRED so the Login handler falls through
 // to direct (non-PKI) login for all test users.
 func (m *identityMock) IssueLoginNonce(_ context.Context, _ *authv1.IssueLoginNonceRequest) (*authv1.IssueLoginNonceResponse, error) {
-	return nil, status.Error(codes.FailedPrecondition, "PKI_NOT_REQUIRED")
+	return nil, status.Error(codes.PermissionDenied, "PKI_NOT_REQUIRED")
 }
