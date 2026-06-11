@@ -105,5 +105,5 @@ func (r *RemoteTransferLimitChecker) Restore(ctx context.Context, payerBankID, c
 	if err != nil {
 		return
 	}
-	resp.Body.Close()
+	resp.Body.Close() // #nosec G104 -- response body discarded immediately; close error not actionable
 }
