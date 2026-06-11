@@ -46,8 +46,9 @@ type sovereignAMMAdder interface {
 	// own signer (the sovereign CB — decision D4).
 	DepositForCommitAt(ctx context.Context, ammAddress string, commitID [32]byte, isTokenA bool, amount *big.Int, shareRecipient string) error
 	// FinalizeCommitAt finalizes a fully-deposited commit; an "incomplete" error means the other
-	// side has not yet been escrowed (expected for whichever gateway deposits first).
-	FinalizeCommitAt(ctx context.Context, ammAddress string, commitID [32]byte) error
+	// side has not yet been escrowed (expected for whichever gateway deposits first). On success
+	// it returns the minted share split (sharesA, sharesB) from LogCommitFinalized.
+	FinalizeCommitAt(ctx context.Context, ammAddress string, commitID [32]byte) (sharesA, sharesB *big.Int, err error)
 	// TokenBalanceAt returns the ERC-20 balance of holderAddr for TOKEN_A or TOKEN_B
 	// of the AMM at ammAddress. Used for pre-flight balance checks (FR-010 / T021).
 	TokenBalanceAt(ctx context.Context, ammAddress string, isTokenA bool, holderAddr string) (*big.Int, error)
@@ -255,7 +256,7 @@ func (s *SovereignLiquidityService) ExecuteMatchedCommit(ctx context.Context, re
 	existingCommit, existingErr := s.commitRepo.FindByOnChainCommitID(ctx, commitID)
 	if existingErr == nil && existingCommit.Status == domain.CommitStatusExecuted {
 		// Already executed — create LP position if it doesn't exist yet (idempotent).
-		s.ensureLPPosition(ctx, existingCommit, poolPairName, isTokenA)
+		s.ensureLPPosition(ctx, existingCommit, poolPairName, isTokenA, nil)
 		return nil
 	}
 
@@ -277,8 +278,18 @@ func (s *SovereignLiquidityService) ExecuteMatchedCommit(ctx context.Context, re
 
 	// Best-effort finalize: succeeds once both sides are escrowed. A revert here is expected for
 	// whichever gateway deposited first (other side pending) or if the peer already finalized —
-	// either way the on-chain escrow is safe and the matched commit completes.
-	_ = s.amm.FinalizeCommitAt(execCtx, ammAddress, escrowKey)
+	// either way the on-chain escrow is safe and the matched commit completes. When OUR finalize
+	// is the one that lands, LogCommitFinalized gives us the minted share split so the position
+	// can record this CB's exact on-chain LP shares (otherwise LPShares stays "0" and withdrawal
+	// falls back to the signer's live on-chain balance).
+	var myShares *big.Int
+	if sharesA, sharesB, finErr := s.amm.FinalizeCommitAt(execCtx, ammAddress, escrowKey); finErr == nil {
+		if isTokenA {
+			myShares = sharesA
+		} else {
+			myShares = sharesB
+		}
+	}
 
 	// Update commit status to EXECUTED.
 	// Synthetic direct-deposit commit IDs (e.g. "direct-deposit-central-bank-b") are not
@@ -296,7 +307,7 @@ func (s *SovereignLiquidityService) ExecuteMatchedCommit(ctx context.Context, re
 		// Non-fatal — the on-chain deposit succeeded; log but continue.
 		return nil
 	}
-	s.ensureLPPosition(ctx, commit, poolPairName, isTokenA)
+	s.ensureLPPosition(ctx, commit, poolPairName, isTokenA, myShares)
 	return nil
 }
 
@@ -313,11 +324,15 @@ func isSyntheticCommitID(id string) bool {
 }
 
 // ensureLPPosition creates a LiquidityPosition record if one doesn't already exist for this commit.
-func (s *SovereignLiquidityService) ensureLPPosition(ctx context.Context, commit *domain.PoolCommit, poolPairName string, isTokenA bool) {
+func (s *SovereignLiquidityService) ensureLPPosition(ctx context.Context, commit *domain.PoolCommit, poolPairName string, isTokenA bool, shares *big.Int) {
 	if s.lpRepo == nil {
 		return
 	}
 	lpID := commit.CommitID + "-sovereign"
+	lpShares := "0"
+	if shares != nil && shares.Sign() > 0 {
+		lpShares = shares.String()
+	}
 	now := time.Now().UTC()
 	tokenA, tokenB := "0", "0"
 	depositSide := domain.DepositSideA
@@ -333,7 +348,7 @@ func (s *SovereignLiquidityService) ensureLPPosition(ctx context.Context, commit
 		PoolPair:          poolPairName,
 		TokenAContributed: tokenA,
 		TokenBContributed: tokenB,
-		LPShares:          "0",
+		LPShares:          lpShares,
 		Status:            domain.LPStatusActive,
 		DepositSide:       depositSide,
 		AddedAt:           now,

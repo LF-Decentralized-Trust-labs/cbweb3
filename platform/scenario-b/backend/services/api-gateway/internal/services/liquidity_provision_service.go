@@ -207,20 +207,17 @@ func (s *LiquidityProvisionService) RemoveLiquidity(ctx context.Context, req Liq
 	return s.removeShares(ctx, &pos)
 }
 
-// removeShares withdraws via the on-chain LP-share model (decisions D1/D4): it burns the share
+// removeShares withdraws via the on-chain LP-share model (decisions D1/D4/D7): it burns the share
 // owner's LP shares and returns a single home currency (the provider's deposit side), zap-swapping
-// the other side. The configured signer must own the shares.
-//
-// NOTE (off happy-path; flagged for follow-up): for the commercial cooperative flow shares are
-// currently owned by the operator gateway (the off-chain position maps them to the bank). A faithful
-// multi-bank withdrawal requires the owning bank to sign the burn; tracked as a follow-up. The
-// sovereign flow already mints to the CB's own address, so CB-signed withdrawal is correct there.
+// the other side. Liquidity is sovereign-only (D7), so this runs on the owning CB's own gateway
+// and the burn is signed by the CB's configured signer — the on-chain share owner.
 func (s *LiquidityProvisionService) removeShares(ctx context.Context, pos *apidomain.LiquidityPosition) (*LPResult, error) {
-	// Resolve the share count to burn. Prefer the position's recorded shares; fall back to the
-	// owner's full on-chain balance when the position predates on-chain share accounting.
+	// Resolve the share count to burn. Prefer the position's recorded shares (persisted from
+	// LogCommitFinalized); fall back to this gateway's full on-chain balance when the position
+	// predates share persistence (empty holder = the configured CB signer, decision D4).
 	shares, ok := new(big.Int).SetString(pos.LPShares, 10)
 	if !ok || shares.Sign() <= 0 {
-		bal, err := s.amm.LPBalanceOf(ctx, pos.ProviderBankID)
+		bal, err := s.amm.LPBalanceOf(ctx, "")
 		if err != nil {
 			return nil, fmt.Errorf("resolve LP-share balance for %s: %w", pos.LPID, err)
 		}

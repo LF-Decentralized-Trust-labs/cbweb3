@@ -369,11 +369,16 @@ func (c *Client) RemoveLiquidity(ctx context.Context, shares *big.Int, homeIsTok
 }
 
 // LPBalanceOf returns the LP-share balance of `holder` on the configured AMM (the on-chain
-// source of truth for pool ownership).
+// source of truth for pool ownership). An empty holder defaults to the configured signer's own
+// address — on a sovereign CB gateway that is the CB itself (decision D4).
 func (c *Client) LPBalanceOf(ctx context.Context, holder string) (*big.Int, error) {
+	addr := c.resolveRecipient(holder)
+	if addr == (common.Address{}) {
+		return nil, errors.New("amm: LPBalanceOf requires a holder address or a configured signer")
+	}
 	out := new(big.Int)
 	if err := evm.Call(ctx, c.ec, c.contract, c.abi, "balanceOf",
-		[]interface{}{common.HexToAddress(holder)}, out); err != nil {
+		[]interface{}{addr}, out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -466,17 +471,41 @@ func (c *Client) DepositForCommitAt(ctx context.Context, ammAddress string, comm
 	return nil
 }
 
+// FinalizeResult carries the share mint recorded by LogCommitFinalized when a finalize succeeds.
+type FinalizeResult struct {
+	RecipientA common.Address
+	RecipientB common.Address
+	SharesA    *big.Int
+	SharesB    *big.Int
+}
+
 // FinalizeCommitAt finalizes a commit on an arbitrary AMM (sovereign). A revert because the other
 // side is not yet escrowed is surfaced to the caller, which may treat it as "pending finalize".
-func (c *Client) FinalizeCommitAt(ctx context.Context, ammAddress string, commitID [32]byte) error {
+// On success it decodes the LogCommitFinalized event so callers can persist the minted shares.
+func (c *Client) FinalizeCommitAt(ctx context.Context, ammAddress string, commitID [32]byte) (*FinalizeResult, error) {
 	if c.signer == nil {
-		return errors.New("amm: finalizeCommitAt requires a signing key")
+		return nil, errors.New("amm: finalizeCommitAt requires a signing key")
 	}
 	contract := common.HexToAddress(ammAddress)
-	if _, err := evm.SubmitTx(ctx, c.ec, c.signer, contract, c.abi, "finalizeCommit", commitID); err != nil {
-		return fmt.Errorf("finalizeCommitAt %s: %w", ammAddress, err)
+	// keccak256("LogCommitFinalized(bytes32,address,address,uint256,uint256)")
+	eventSig := crypto.Keccak256Hash([]byte("LogCommitFinalized(bytes32,address,address,uint256,uint256)"))
+	receipt, _, err := evm.SubmitTxReceipt(ctx, c.ec, c.signer, contract, c.abi, "finalizeCommit", commitID)
+	if err != nil {
+		return nil, fmt.Errorf("finalizeCommitAt %s: %w", ammAddress, err)
 	}
-	return nil
+	for _, lg := range receipt.Logs {
+		// data = abi(recipientA, recipientB, sharesA, sharesB) — 4 static 32-byte words.
+		if len(lg.Topics) >= 2 && lg.Topics[0] == eventSig && len(lg.Data) >= 128 {
+			return &FinalizeResult{
+				RecipientA: common.BytesToAddress(lg.Data[0:32]),
+				RecipientB: common.BytesToAddress(lg.Data[32:64]),
+				SharesA:    new(big.Int).SetBytes(lg.Data[64:96]),
+				SharesB:    new(big.Int).SetBytes(lg.Data[96:128]),
+			}, nil
+		}
+	}
+	// Finalize succeeded but the event was not found (unexpected) — report success without shares.
+	return &FinalizeResult{}, nil
 }
 
 // TokenBalanceAt reads the ERC-20 balanceOf for the token held by ammAddress (TOKEN_A or TOKEN_B)

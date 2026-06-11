@@ -144,10 +144,15 @@ func (a *ammAdapter) DepositForCommitAt(ctx context.Context, ammAddress string, 
 	return a.c.DepositForCommitAt(ctx, ammAddress, commitID, isTokenA, amount, shareRecipient)
 }
 
-// FinalizeCommitAt finalizes a commit on an arbitrary AMM (sovereign). Returns the error verbatim so
-// callers can distinguish "incomplete" (other side pending) from real failures.
-func (a *ammAdapter) FinalizeCommitAt(ctx context.Context, ammAddress string, commitID [32]byte) error {
-	return a.c.FinalizeCommitAt(ctx, ammAddress, commitID)
+// FinalizeCommitAt finalizes a commit on an arbitrary AMM (sovereign). Returns the minted share
+// split (sharesA, sharesB) decoded from LogCommitFinalized on success; the error is returned
+// verbatim so callers can distinguish "incomplete" (other side pending) from real failures.
+func (a *ammAdapter) FinalizeCommitAt(ctx context.Context, ammAddress string, commitID [32]byte) (*big.Int, *big.Int, error) {
+	res, err := a.c.FinalizeCommitAt(ctx, ammAddress, commitID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return res.SharesA, res.SharesB, nil
 }
 
 // TokenBalanceAt reads the ERC-20 balance of holderAddr for the token (A or B) of ammAddress.
