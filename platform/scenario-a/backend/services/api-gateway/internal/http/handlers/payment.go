@@ -62,7 +62,7 @@ func (h *PaymentHandler) LockHTLC(c *fiber.Ctx) error {
 		req.AgreementID = uuid.NewString()
 	}
 	if req.TimeLock == 0 {
-		req.TimeLock = uint64(time.Now().Unix()) + 3600 // 1h — initiator must have longer timelock
+		req.TimeLock = uint64(time.Now().Unix()) + 3600 // #nosec G115 -- time.Now().Unix() is always ≥0; overflow not reachable
 	}
 	if ok, err := h.checkAndDeductLimit(c, req.Amount); !ok {
 		return err
@@ -94,7 +94,7 @@ func (h *PaymentHandler) LockHTLCWithHashLock(c *fiber.Ctx) error {
 		req.AgreementID = uuid.NewString()
 	}
 	if req.TimeLock == 0 {
-		req.TimeLock = uint64(time.Now().Unix()) + 1800 // 30min — responder must have shorter timelock than initiator
+		req.TimeLock = uint64(time.Now().Unix()) + 1800 // #nosec G115 -- time.Now().Unix() is always ≥0; overflow not reachable
 	}
 	if ok, err := h.checkAndDeductLimit(c, req.Amount); !ok {
 		return err
