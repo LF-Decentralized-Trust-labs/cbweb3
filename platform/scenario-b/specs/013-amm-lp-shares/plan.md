@@ -17,7 +17,7 @@
 | 3 — Backend ledger → on-chain shares | ✅ done, service tests green | `c589acf8` |
 | 4 — Sovereign flow (escrow per-side, shared key) | ✅ done | `c589acf8` |
 | 5 — Frontend LP-share label/types | ✅ done (API-compatible; rich price-impact UI = follow-up) | — |
-| 6 — Specs/docs + live integration test | ⏳ in progress | — |
+| 6 — Specs/docs + live integration test | ✅ done — `TestFullHappyPath` PASS (all 7 phases, 64s) | — |
 
 **Known follow-ups (flagged, off the happy path):** (a) commercial multi-bank withdrawal needs the
 owning bank to sign the burn (sovereign CB-signed withdrawal is already correct); (b) governance
