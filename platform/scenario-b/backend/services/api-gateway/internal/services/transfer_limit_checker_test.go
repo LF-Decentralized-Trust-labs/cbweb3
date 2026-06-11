@@ -53,7 +53,7 @@ func TestChecker_NoLimitConfigured_Passes(t *testing.T) {
 }
 
 func TestChecker_WithinLimit_DeductsVolume(t *testing.T) {
-	limit := &domain.TransferLimit{MaxAmount: "1000000000000000000000000"} // 1,000,000 tokens
+	limit := &domain.TransferLimit{MaxAmount: "1000000"} // 1,000,000 tokens (human-readable)
 	vol := &mockVolumeRepo{accumulated: "0"}
 	checker := NewTransferLimitChecker(&mockLimitRepo{limit: limit}, vol)
 
@@ -63,10 +63,9 @@ func TestChecker_WithinLimit_DeductsVolume(t *testing.T) {
 }
 
 func TestChecker_LimitExceeded_ReturnsError(t *testing.T) {
-	// max = 100 tokens, accumulated = 80 tokens, new = 30 tokens → total 110 > 100
-	maxWei := "100000000000000000000"       // 100 * 10^18
-	accWei := "80000000000000000000"        // 80 * 10^18
-	limit := &domain.TransferLimit{MaxAmount: maxWei}
+	// max = 100 tokens (human), accumulated = 80 tokens in wei, new = 30 → total 110 > 100
+	accWei := "80000000000000000000" // 80 * 10^18
+	limit := &domain.TransferLimit{MaxAmount: "100"}
 	vol := &mockVolumeRepo{accumulated: accWei}
 	checker := NewTransferLimitChecker(&mockLimitRepo{limit: limit}, vol)
 
@@ -79,10 +78,9 @@ func TestChecker_LimitExceeded_ReturnsError(t *testing.T) {
 }
 
 func TestChecker_ExactlyAtLimit_Passes(t *testing.T) {
-	// max = 100, accumulated = 70, new = 30 → total = 100 exactly (not exceeded)
-	maxWei := "100000000000000000000"
-	accWei := "70000000000000000000"
-	limit := &domain.TransferLimit{MaxAmount: maxWei}
+	// max = 100 tokens (human), accumulated = 70 tokens in wei, new = 30 → total = 100 exactly
+	accWei := "70000000000000000000" // 70 * 10^18
+	limit := &domain.TransferLimit{MaxAmount: "100"}
 	vol := &mockVolumeRepo{accumulated: accWei}
 	checker := NewTransferLimitChecker(&mockLimitRepo{limit: limit}, vol)
 

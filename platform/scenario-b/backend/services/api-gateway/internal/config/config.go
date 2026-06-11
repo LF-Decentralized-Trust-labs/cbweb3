@@ -28,6 +28,7 @@ type Config struct {
 	// Simplified bridge/liquidity config (008-fix-cb-liquidity API simplification)
 	SpokeNetwork      string // spoke-a, spoke-b (for bridge lock-mint derivation)
 	NativeAssetSymbol string // tCeBM_BRL, tCeBM_ARS (for bridge lock-mint derivation)
+	FiatSymbol        string // human-readable currency symbol used for transfer-limit matching (e.g. "BRL", "ARS")
 	WTokenAddress     string // Hub W-tCeBM token address (for bridge + commit derivation)
 	CommitSide        string // A or B (derived from BANK_CODE for commit derivation)
 	ApproveSide       string // A or B (derived from BANK_CODE for approve-amm; FR-013)
@@ -60,6 +61,7 @@ func Load() Config {
 		RelayAuthSecret:         getEnv("INTERNAL_RELAY_AUTH_SECRET", ""),
 		SpokeNetwork:            getEnv("SPOKE_NETWORK", ""),
 		NativeAssetSymbol:       getEnv("NATIVE_ASSET_SYMBOL", ""),
+		FiatSymbol:              getEnv("FIAT_SYMBOL", ""),
 		WTokenAddress:           getEnv("W_TOKEN_ADDRESS", ""),
 		CommitSide:         deriveCommitSide(bankCode),
 		ApproveSide:        deriveApproveSide(bankCode),

@@ -79,6 +79,7 @@ type Dependencies struct {
 	// Simplified API config (008-fix-cb-liquidity)
 	SpokeNetwork      string // spoke-a, spoke-b (for bridge lock-mint derivation)
 	NativeAssetSymbol string // tCeBM_BRL, tCeBM_ARS (for bridge lock-mint derivation)
+	FiatSymbol        string // human-readable currency symbol for transfer-limit matching (e.g. "BRL", "ARS")
 	WTokenAddress     string // Hub W-tCeBM token address (for bridge + commit derivation)
 	BankCode          string // BANK_CODE fallback when JWT claims do not include BankID (bridge lock-mint)
 	CommitSide        string // A or B (derived from BANK_CODE for commit derivation)
@@ -212,9 +213,12 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 				deps.BridgePositionReader,
 			).SetFallbackBankCode(deps.BankCode)
 		}
-		// R1-10.1: attach transfer limit checker to bridge handler when configured.
+		// R1-10.1: attach transfer limit checker and fiat symbol to bridge handler when configured.
 		if deps.TransferLimitChecker != nil {
 			bh = bh.WithLimitChecker(deps.TransferLimitChecker)
+		}
+		if deps.FiatSymbol != "" {
+			bh = bh.WithFiatSymbol(deps.FiatSymbol)
 		}
 		if deps.AuthProvider != nil {
 			// spec-007 FR-001: CBs use the same lock-mint/burn-unlock/positions endpoints as

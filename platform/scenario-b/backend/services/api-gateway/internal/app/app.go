@@ -676,6 +676,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// 008-fix-cb-liquidity: Populate simplified API config fields from cfg.
 	deps.SpokeNetwork = cfg.SpokeNetwork
 	deps.NativeAssetSymbol = cfg.NativeAssetSymbol
+	deps.FiatSymbol = cfg.FiatSymbol
 	deps.WTokenAddress = cfg.WTokenAddress
 	deps.BankCode = cfg.BankCode
 	deps.CommitSide = cfg.CommitSide

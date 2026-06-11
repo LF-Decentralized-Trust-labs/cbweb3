@@ -77,7 +77,7 @@ func (c *TransferLimitChecker) CheckAndDeduct(ctx context.Context, payerBankID, 
 		return nil
 	}
 
-	maxWei, err := weiFromString(limit.MaxAmount)
+	maxWei, err := humanToWei(limit.MaxAmount)
 	if err != nil {
 		return fmt.Errorf("malformed limit max_amount %q: %w", limit.MaxAmount, err)
 	}
