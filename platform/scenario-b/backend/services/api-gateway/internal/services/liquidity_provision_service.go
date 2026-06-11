@@ -19,11 +19,17 @@ import (
 // AMLiquidityAdder executes add/remove-liquidity transactions on the Hub AMM.
 type AMLiquidityAdder interface {
 	AddLiquidity(ctx context.Context, pair, providerID, tokenAAmount, tokenBAmount string) (lpShares string, err error)
-	RemoveLiquidity(ctx context.Context, pair, providerID, tokenAAmount, tokenBAmount string) (tokenAOut, tokenBOut string, err error)
-	AddSingleSidedLiquidity(ctx context.Context, isTokenA bool, amount *big.Int) error
-	RemoveLiquidityProportional(ctx context.Context, amountA, amountB *big.Int) error
-	// GetPoolReserves returns live on-chain reserves for proportional withdrawal (D13 / FR-007).
-	// Signature matches AMMPoolReader.GetPoolReserves (pair, reserveA, reserveB, ratio, err).
+	// Escrow-and-finalize paired deposit (decision D6): each side is escrowed against a shared
+	// commit key, then finalized once both are present (mints proportional LP shares on-chain).
+	DepositForCommit(ctx context.Context, commitID [32]byte, isTokenA bool, amount *big.Int, shareRecipient string) error
+	FinalizeCommit(ctx context.Context, commitID [32]byte) error
+	// RemoveLiquidityShares burns the share owner's on-chain LP shares and returns a single (home)
+	// currency (decision D1; homeIsTokenA selects the side). The configured signer must own the
+	// shares (decision D4).
+	RemoveLiquidityShares(ctx context.Context, shares *big.Int, homeIsTokenA bool, minAmountOut *big.Int) (amountOut string, err error)
+	// LPBalanceOf reads the on-chain LP-share balance — the source of truth for pool ownership.
+	LPBalanceOf(ctx context.Context, holder string) (*big.Int, error)
+	// GetPoolReserves returns live on-chain reserves (D13 / FR-007).
 	GetPoolReserves(ctx context.Context, pair string) (reserveA, reserveB string, ratio float64, err error)
 }
 
@@ -205,18 +211,43 @@ func (s *LiquidityProvisionService) RemoveLiquidity(ctx context.Context, req Liq
 		return nil, fmt.Errorf("active liquidity position not found: %w", err)
 	}
 
-	if pos.DepositSide == apidomain.DepositSideBoth {
-		return s.removeLegacy(ctx, &pos)
-	}
-	return s.removeProportional(ctx, &pos)
+	return s.removeShares(ctx, &pos)
 }
 
-// removeLegacy handles the LEGACY withdrawal path (deposit_side = BOTH).
-// Returns the originally contributed amounts (T032).
-func (s *LiquidityProvisionService) removeLegacy(ctx context.Context, pos *apidomain.LiquidityPosition) (*LPResult, error) {
-	tokenAOut, tokenBOut, err := s.amm.RemoveLiquidity(ctx, pos.PoolPair, pos.ProviderBankID, pos.TokenAContributed, pos.TokenBContributed)
+// removeShares withdraws via the on-chain LP-share model (decisions D1/D4): it burns the share
+// owner's LP shares and returns a single home currency (the provider's deposit side), zap-swapping
+// the other side. The configured signer must own the shares.
+//
+// NOTE (off happy-path; flagged for follow-up): for the commercial cooperative flow shares are
+// currently owned by the operator gateway (the off-chain position maps them to the bank). A faithful
+// multi-bank withdrawal requires the owning bank to sign the burn; tracked as a follow-up. The
+// sovereign flow already mints to the CB's own address, so CB-signed withdrawal is correct there.
+func (s *LiquidityProvisionService) removeShares(ctx context.Context, pos *apidomain.LiquidityPosition) (*LPResult, error) {
+	// Resolve the share count to burn. Prefer the position's recorded shares; fall back to the
+	// owner's full on-chain balance when the position predates on-chain share accounting.
+	shares, ok := new(big.Int).SetString(pos.LPShares, 10)
+	if !ok || shares.Sign() <= 0 {
+		bal, err := s.amm.LPBalanceOf(ctx, pos.ProviderBankID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve LP-share balance for %s: %w", pos.LPID, err)
+		}
+		shares = bal
+	}
+	if shares.Sign() <= 0 {
+		return nil, fmt.Errorf("position %s has no LP shares to withdraw", pos.LPID)
+	}
+
+	// Home currency = the provider's deposit side (B only when deposit_side == B).
+	homeIsTokenA := pos.DepositSide != apidomain.DepositSideB
+
+	amountOut, err := s.amm.RemoveLiquidityShares(ctx, shares, homeIsTokenA, big.NewInt(0))
 	if err != nil {
-		return nil, fmt.Errorf("amm remove-liquidity failed: %w", err)
+		return nil, fmt.Errorf("amm remove-liquidity (shares) failed: %w", err)
+	}
+
+	tokenAOut, tokenBOut := amountOut, "0"
+	if !homeIsTokenA {
+		tokenAOut, tokenBOut = "0", amountOut
 	}
 
 	now := time.Now()
@@ -238,66 +269,9 @@ func (s *LiquidityProvisionService) removeLegacy(ctx context.Context, pos *apido
 		ProviderBankID: pos.ProviderBankID,
 		TokenAAmount:   tokenAOut,
 		TokenBAmount:   tokenBOut,
-		LPShares:       pos.LPShares,
-		WithdrawalMode: "LEGACY",
+		LPShares:       shares.String(),
+		WithdrawalMode: "SHARES_HOME_CURRENCY",
 		FeeClaimPaid:   "0",
-		AddedAt:        pos.AddedAt,
-		WithdrawnAt:    now,
-	}, nil
-}
-
-// removeProportional handles the PROPORTIONAL withdrawal path (deposit_side = A or B).
-// Returns reserveX * shares_pct / 100 for each side, plus fee_claim_accumulated (T031).
-func (s *LiquidityProvisionService) removeProportional(ctx context.Context, pos *apidomain.LiquidityPosition) (*LPResult, error) {
-	if pos.SharesPercentage == nil {
-		return nil, fmt.Errorf("position %s has no shares_percentage; cannot withdraw proportionally", pos.LPID)
-	}
-
-	// Fetch current pool reserves on-chain (D13 / FR-007: avoid stale pool_state_readings).
-	reserveAStr, reserveBStr, _, err := s.amm.GetPoolReserves(ctx, pos.PoolPair)
-	if err != nil {
-		return nil, fmt.Errorf("get pool reserves for %s: %w", pos.PoolPair, err)
-	}
-
-	rA, _ := new(big.Int).SetString(reserveAStr, 10)
-	rB, _ := new(big.Int).SetString(reserveBStr, 10)
-	sharesPct := *pos.SharesPercentage
-
-	// returnX = reserveX * sharesPct / 100 (integer arithmetic, 4 decimal places)
-	pctNum := big.NewInt(int64(sharesPct * 10000))
-	amountA := new(big.Int).Mul(rA, pctNum)
-	amountA.Div(amountA, big.NewInt(1000000)) // divide by 100 * 10000
-	amountB := new(big.Int).Mul(rB, pctNum)
-	amountB.Div(amountB, big.NewInt(1000000))
-
-	if err := s.amm.RemoveLiquidityProportional(ctx, amountA, amountB); err != nil {
-		return nil, fmt.Errorf("proportional removal failed: %w", err)
-	}
-
-	feeClaim := pos.FeeClaimAccumulated
-	now := time.Now()
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(pos).Updates(map[string]interface{}{
-			"withdrawn_at":          now,
-			"status":                apidomain.LPStatusWithdrawn,
-			"fee_claim_accumulated": "0",
-		}).Error; err != nil {
-			return err
-		}
-		return s.recalculateSharesInTx(ctx, tx, pos.PoolPair)
-	}); err != nil {
-		return nil, fmt.Errorf("update proportional withdrawal failed: %w", err)
-	}
-
-	return &LPResult{
-		LPID:           pos.LPID,
-		PoolPair:       pos.PoolPair,
-		ProviderBankID: pos.ProviderBankID,
-		TokenAAmount:   amountA.String(),
-		TokenBAmount:   amountB.String(),
-		LPShares:       pos.LPShares,
-		WithdrawalMode: "PROPORTIONAL",
-		FeeClaimPaid:   feeClaim,
 		AddedAt:        pos.AddedAt,
 		WithdrawnAt:    now,
 	}, nil
@@ -401,22 +375,32 @@ func (s *LiquidityProvisionService) executeMatchedCommits(ctx context.Context, c
 	amtA, _ := new(big.Int).SetString(commitA.Amount, 10)
 	amtB, _ := new(big.Int).SetString(commitB.Amount, 10)
 
-	// Execute side A transfer.
-	if err := s.amm.AddSingleSidedLiquidity(ctx, true, amtA); err != nil {
-		// Side A failed before any on-chain state change — mark RECONCILIATION_REQUIRED.
+	// Escrow-and-finalize (decision D6): the operator gateway escrows both matched sides against a
+	// shared key, then finalizes (moves escrow → reserves, mints proportional shares). Unlike the
+	// prior two-tx flow, a failure before finalize leaves only escrowed tokens — refundable via
+	// cancelCommitDeposit — never a partial half-funded pool.
+	escrowKey := deriveEscrowKey(commitA.CommitID, commitB.CommitID)
+
+	if err := s.amm.DepositForCommit(ctx, escrowKey, true, amtA, ""); err != nil {
 		_ = s.commitRepo.UpdateStatus(ctx, c1.CommitID, apidomain.CommitStatusReconciliationRequired)
 		_ = s.commitRepo.UpdateStatus(ctx, c2.CommitID, apidomain.CommitStatusReconciliationRequired)
-		return nil, fmt.Errorf("addSingleSidedLiquidity TOKEN_A: %w", err)
+		return nil, fmt.Errorf("depositForCommit TOKEN_A: %w", err)
 	}
 
-	// Execute side B transfer with retry (FR-014: up to 5 attempts, exponential backoff).
 	if err := retryWithBackoff(ctx, 5, func(attempt int) error {
-		return s.amm.AddSingleSidedLiquidity(ctx, false, amtB)
+		return s.amm.DepositForCommit(ctx, escrowKey, false, amtB, "")
 	}); err != nil {
-		// TOKEN_A is confirmed on-chain but TOKEN_B failed — RECONCILIATION_REQUIRED.
 		_ = s.commitRepo.UpdateStatus(ctx, c1.CommitID, apidomain.CommitStatusReconciliationRequired)
 		_ = s.commitRepo.UpdateStatus(ctx, c2.CommitID, apidomain.CommitStatusReconciliationRequired)
-		return nil, fmt.Errorf("addSingleSidedLiquidity TOKEN_B (partial execution): %w; both commits transitioned to RECONCILIATION_REQUIRED", err)
+		return nil, fmt.Errorf("depositForCommit TOKEN_B (side A escrowed, refundable): %w; both commits → RECONCILIATION_REQUIRED", err)
+	}
+
+	if err := retryWithBackoff(ctx, 5, func(attempt int) error {
+		return s.amm.FinalizeCommit(ctx, escrowKey)
+	}); err != nil {
+		_ = s.commitRepo.UpdateStatus(ctx, c1.CommitID, apidomain.CommitStatusReconciliationRequired)
+		_ = s.commitRepo.UpdateStatus(ctx, c2.CommitID, apidomain.CommitStatusReconciliationRequired)
+		return nil, fmt.Errorf("finalizeCommit (both sides escrowed, refundable): %w; both commits → RECONCILIATION_REQUIRED", err)
 	}
 
 	// Both transfers confirmed — mark commits as EXECUTED and create LP positions.
