@@ -126,12 +126,17 @@ type memoryRepository struct {
 	participants map[string]Participant
 	auditLogs    []AuditRecord
 	params       map[string]SystemParameter
+	// Transfer Limits (R1-10.1)
+	limits  map[string]TransferLimit // key = limitID
+	volumes map[string]string        // key = participantID|currency|date → accumulated wei
 }
 
 func NewMemoryRepository() Repository {
 	return &memoryRepository{
 		participants: map[string]Participant{},
 		params:       map[string]SystemParameter{},
+		limits:       map[string]TransferLimit{},
+		volumes:      map[string]string{},
 	}
 }
 

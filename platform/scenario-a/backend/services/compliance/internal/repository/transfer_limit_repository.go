@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math/big"
 	"strings"
-	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -13,30 +12,21 @@ import (
 )
 
 // ── memory implementation ────────────────────────────────────────────────────
-
-type memoryTransferLimitStore struct {
-	mu      sync.RWMutex
-	limits  map[string]TransferLimit  // key = limitID
-	volumes map[string]string         // key = participantID|currency|date → accumulated wei
-}
-
-var globalMemTLStore = &memoryTransferLimitStore{
-	limits:  map[string]TransferLimit{},
-	volumes: map[string]string{},
-}
+// State is stored directly in *memoryRepository (no package-level global) so
+// that each NewMemoryRepository() call produces a fully isolated instance.
 
 func (m *memoryRepository) CreateTransferLimit(_ context.Context, limit TransferLimit) error {
-	globalMemTLStore.mu.Lock()
-	defer globalMemTLStore.mu.Unlock()
-	globalMemTLStore.limits[limit.LimitID] = limit
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.limits[limit.LimitID] = limit
 	return nil
 }
 
 func (m *memoryRepository) ListTransferLimits(_ context.Context, centralBankID string) ([]TransferLimit, error) {
-	globalMemTLStore.mu.RLock()
-	defer globalMemTLStore.mu.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var result []TransferLimit
-	for _, l := range globalMemTLStore.limits {
+	for _, l := range m.limits {
 		if l.CentralBankID == centralBankID && l.IsActive {
 			result = append(result, l)
 		}
@@ -45,26 +35,34 @@ func (m *memoryRepository) ListTransferLimits(_ context.Context, centralBankID s
 }
 
 func (m *memoryRepository) FindApplicableLimit(_ context.Context, centralBankID, participantID, currency string) (*TransferLimit, error) {
-	globalMemTLStore.mu.RLock()
-	defer globalMemTLStore.mu.RUnlock()
-	for _, l := range globalMemTLStore.limits {
-		if !l.IsActive || l.CentralBankID != centralBankID {
-			continue
-		}
-		pidMatch := l.ParticipantID == "" || l.ParticipantID == participantID
-		curMatch := l.Currency == "" || strings.EqualFold(l.Currency, currency)
-		if pidMatch && curMatch {
-			lCopy := l
-			return &lCopy, nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	// Priority cascade: exact match first, then progressively more general.
+	type candidate struct{ pid, cur string }
+	priority := []candidate{
+		{participantID, currency},
+		{participantID, ""},
+		{"", currency},
+		{"", ""},
+	}
+	for _, c := range priority {
+		for _, l := range m.limits {
+			if !l.IsActive || l.CentralBankID != centralBankID {
+				continue
+			}
+			if l.ParticipantID == c.pid && strings.EqualFold(l.Currency, c.cur) {
+				lCopy := l
+				return &lCopy, nil
+			}
 		}
 	}
 	return nil, nil
 }
 
 func (m *memoryRepository) DeleteTransferLimit(_ context.Context, limitID string) error {
-	globalMemTLStore.mu.Lock()
-	defer globalMemTLStore.mu.Unlock()
-	delete(globalMemTLStore.limits, limitID)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.limits, limitID)
 	return nil
 }
 
@@ -73,10 +71,10 @@ func volumeKey(participantID, currency string, windowDate time.Time) string {
 }
 
 func (m *memoryRepository) DeductTransferVolume(_ context.Context, participantID, currency, amountWei string, windowDate time.Time) error {
-	globalMemTLStore.mu.Lock()
-	defer globalMemTLStore.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	k := volumeKey(participantID, currency, windowDate)
-	cur, _ := new(big.Int).SetString(globalMemTLStore.volumes[k], 10)
+	cur, _ := new(big.Int).SetString(m.volumes[k], 10)
 	if cur == nil {
 		cur = new(big.Int)
 	}
@@ -84,15 +82,15 @@ func (m *memoryRepository) DeductTransferVolume(_ context.Context, participantID
 	if !ok {
 		return errors.New("invalid amountWei: " + amountWei)
 	}
-	globalMemTLStore.volumes[k] = new(big.Int).Add(cur, amt).String()
+	m.volumes[k] = new(big.Int).Add(cur, amt).String()
 	return nil
 }
 
 func (m *memoryRepository) RestoreTransferVolume(_ context.Context, participantID, currency, amountWei string, windowDate time.Time) error {
-	globalMemTLStore.mu.Lock()
-	defer globalMemTLStore.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	k := volumeKey(participantID, currency, windowDate)
-	cur, _ := new(big.Int).SetString(globalMemTLStore.volumes[k], 10)
+	cur, _ := new(big.Int).SetString(m.volumes[k], 10)
 	if cur == nil {
 		cur = new(big.Int)
 	}
@@ -104,15 +102,15 @@ func (m *memoryRepository) RestoreTransferVolume(_ context.Context, participantI
 	if result.Sign() < 0 {
 		result = new(big.Int)
 	}
-	globalMemTLStore.volumes[k] = result.String()
+	m.volumes[k] = result.String()
 	return nil
 }
 
 func (m *memoryRepository) GetAccumulatedVolume(_ context.Context, participantID, currency string, windowDate time.Time) (string, error) {
-	globalMemTLStore.mu.RLock()
-	defer globalMemTLStore.mu.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	k := volumeKey(participantID, currency, windowDate)
-	v := globalMemTLStore.volumes[k]
+	v := m.volumes[k]
 	if v == "" {
 		return "0", nil
 	}

@@ -64,7 +64,7 @@ func (h *PaymentHandler) LockHTLC(c *fiber.Ctx) error {
 	if req.TimeLock == 0 {
 		req.TimeLock = uint64(time.Now().Unix()) + 3600 // 1h — initiator must have longer timelock
 	}
-	if err := h.checkAndDeductLimit(c, req.Amount); err != nil {
+	if ok, err := h.checkAndDeductLimit(c, req.Amount); !ok {
 		return err
 	}
 	result, err := h.payment.LockHTLC(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock)
@@ -96,7 +96,7 @@ func (h *PaymentHandler) LockHTLCWithHashLock(c *fiber.Ctx) error {
 	if req.TimeLock == 0 {
 		req.TimeLock = uint64(time.Now().Unix()) + 1800 // 30min — responder must have shorter timelock than initiator
 	}
-	if err := h.checkAndDeductLimit(c, req.Amount); err != nil {
+	if ok, err := h.checkAndDeductLimit(c, req.Amount); !ok {
 		return err
 	}
 	result, err := h.payment.LockHTLCWithHashLock(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock, req.HashLock)
@@ -631,26 +631,27 @@ func (h *PaymentHandler) ListFXAgreementEvents(c *fiber.Ctx) error {
 }
 
 // checkAndDeductLimit enforces the CB daily transfer limit before an HTLC lock.
-// Returns nil when no checker is configured (limits disabled) or when the transfer is allowed.
-func (h *PaymentHandler) checkAndDeductLimit(c *fiber.Ctx, amount string) error {
+// Returns (true, nil) when allowed or no checker configured.
+// Returns (false, nil) after writing a 422/503 response — callers must return nil to Fiber.
+func (h *PaymentHandler) checkAndDeductLimit(c *fiber.Ctx, amount string) (bool, error) {
 	if h.limitChecker == nil || h.fiatSymbol == "" {
-		return nil
+		return true, nil
 	}
 	allowed, errorCode, _, err := h.limitChecker.CheckAndDeductTransferLimit(c.Context(), h.bankCode, h.fiatSymbol, amount)
 	if err != nil {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+		return false, c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 			"error":      "transfer limit service unavailable",
 			"error_code": "LIMIT_SERVICE_UNAVAILABLE",
 		})
 	}
 	if !allowed {
-		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+		return false, c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error":              "daily transfer limit exceeded",
 			"error_code":         errorCode,
 			"recommended_action": "Contact your Central Bank to review or increase the daily transfer limit.",
 		})
 	}
-	return nil
+	return true, nil
 }
 
 // restoreLimit is best-effort: called when an HTLC lock fails after a successful deduction.
