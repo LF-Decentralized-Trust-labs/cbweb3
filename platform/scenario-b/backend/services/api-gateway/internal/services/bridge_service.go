@@ -5,6 +5,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -157,6 +158,10 @@ func (s *BridgeBurnUnlockService) BurnAndEnqueue(ctx context.Context, positionID
 // beneficiarySpokeAddress optionally specifies the Spoke-B on-chain address where tCeBM
 // should be minted. When provided, the executor calls tCeBM.mint() directly (CENTRAL_BANK_ROLE)
 // instead of SpokeBridge.release() (which requires a prior lock on Spoke-B).
+//
+// extras[2] (swapTxHash) binds the position to the verified Hub swap transaction; a partial
+// unique index on swap_tx_hash makes each swap consumable at most once (R2-CR-6). On a
+// duplicate, the existing position is returned without enqueuing a second burn.
 func (s *BridgeBurnUnlockService) EnqueueBurnAfterSwap(
 	ctx context.Context,
 	ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string,
@@ -168,11 +173,15 @@ func (s *BridgeBurnUnlockService) EnqueueBurnAfterSwap(
 
 	burnFrom := ""
 	beneficiarySpoke := ""
+	swapTxHash := ""
 	if len(burnFromHubAddress) > 0 {
 		burnFrom = burnFromHubAddress[0]
 	}
 	if len(burnFromHubAddress) > 1 {
 		beneficiarySpoke = burnFromHubAddress[1]
+	}
+	if len(burnFromHubAddress) > 2 {
+		swapTxHash = burnFromHubAddress[2]
 	}
 
 	logPrefix := ""
@@ -195,10 +204,21 @@ func (s *BridgeBurnUnlockService) EnqueueBurnAfterSwap(
 		BridgeState:             domain.BridgeStateActive,
 		BurnFromHubAddress:      burnFrom,
 		BeneficiarySpokeAddress: beneficiarySpoke,
+		SwapTxHash:              swapTxHash,
+		CorrelationID:           correlationID,
 		FirstAttemptAt:          &now,
 		LastAttemptAt:           &now,
 	}
 	if err := s.db.WithContext(ctx).Create(pos).Error; err != nil {
+		// Unique-index race: a concurrent replay consumed this swap first. Return the
+		// winning position so the caller's response stays idempotent.
+		if swapTxHash != "" {
+			if existing, findErr := s.FindBySwapTxHash(ctx, swapTxHash); findErr == nil && existing != nil {
+				fmt.Printf("%sbridge-out duplicate swap_tx_hash=%s — returning existing position %s\n",
+					logPrefix, swapTxHash, existing.PositionID)
+				return existing, nil
+			}
+		}
 		return nil, fmt.Errorf("persist bridge-out position failed: %w", err)
 	}
 
@@ -217,6 +237,24 @@ func (s *BridgeBurnUnlockService) EnqueueBurnAfterSwap(
 
 	fmt.Printf("%sbridge-out burn-unlock enqueued: position_id=%s\n", logPrefix, positionID)
 	return toPositionResult(pos), nil
+}
+
+// FindBySwapTxHash returns the bridge-out position that already consumed the given Hub
+// swap transaction, or (nil, nil) when the swap has not been processed (R2-CR-6 replay
+// protection). Used by CrossCurrencyBridgeOutHandler before enqueuing a burn.
+func (s *BridgeBurnUnlockService) FindBySwapTxHash(ctx context.Context, swapTxHash string) (*BridgePositionResult, error) {
+	if swapTxHash == "" {
+		return nil, nil
+	}
+	var pos domain.BridgedAssetPosition
+	err := s.db.WithContext(ctx).Where("swap_tx_hash = ?", swapTxHash).First(&pos).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("lookup by swap_tx_hash failed: %w", err)
+	}
+	return toPositionResult(&pos), nil
 }
 
 // BridgePositionReader reads bridge positions from the DB (FR-033).

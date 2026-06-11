@@ -682,6 +682,15 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		if db != nil {
 			deps.CrossCurrencyBeneficiaryResolver = services.NewParticipantResolver(db)
 		}
+		// R2-CR-6: verify the relay-claimed swap on the Hub before any burn/mint, and
+		// consume each swap_tx_hash at most once. Without an AMM client the bridge-out
+		// endpoint fails closed rather than minting on the relay's word.
+		if ammClient != nil {
+			deps.CrossCurrencySwapVerifier = &swapVerifierAdapter{c: ammClient}
+		} else {
+			log.Printf("[app] WARNING: AMM client unavailable (AMM_CONTRACT_ADDRESS / HUB_BESU_RPC_URL) — cross-currency bridge-out will fail closed")
+		}
+		deps.CrossCurrencyDuplicateFinder = bridgeBurnUnlockSvc
 	}
 
 	// 009 sovereign model: cross-currency bridge-in issuer (CB-A side). Registered only on CB
@@ -736,6 +745,24 @@ type bridgeLockMintAdapter struct {
 
 func (a *bridgeLockMintAdapter) LockAndEnqueue(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string, mintToHubAddress ...string) (*services.BridgePositionResult, error) {
 	return a.svc.LockAndEnqueue(ctx, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID, mintToHubAddress...)
+}
+
+// swapVerifierAdapter adapts ammclient SwapByTxHash to the handler's VerifiedSwap type (R2-CR-6).
+type swapVerifierAdapter struct {
+	c *ammclient.Client
+}
+
+func (a *swapVerifierAdapter) VerifySwap(ctx context.Context, txHash string) (*handlers.VerifiedSwap, error) {
+	vs, err := a.c.SwapByTxHash(ctx, txHash)
+	if err != nil {
+		return nil, err
+	}
+	return &handlers.VerifiedSwap{
+		TokenOut:  vs.TokenOut,
+		AmountIn:  vs.AmountIn,
+		AmountOut: vs.AmountOut,
+		Recipient: vs.Recipient,
+	}, nil
 }
 
 // bridgeBurnUnlockAdapter adapts BridgeBurnUnlockService to add correlation_id parameter for orchestrator (009).
