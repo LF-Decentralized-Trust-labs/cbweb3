@@ -51,6 +51,13 @@ type LPPositionReaderIface interface {
 	FindByProviderAndPoolPair(ctx context.Context, providerID, poolPair string) ([]domain.LiquidityPosition, error)
 }
 
+// LPBalanceReaderIface reads the gateway's on-chain LP-share position (specs/013-amm-lp-shares).
+// An empty holder resolves to the gateway's configured signer — the CB itself (decisions D4/D7).
+type LPBalanceReaderIface interface {
+	LPBalanceOf(ctx context.Context, holder string) (*big.Int, error)
+	LPTotalSupply(ctx context.Context) (*big.Int, error)
+}
+
 // LiquidityHandler handles add/remove liquidity operations.
 type LiquidityHandler struct {
 	svc LiquidityServiceIface
@@ -59,6 +66,7 @@ type LiquidityHandler struct {
 	lcrRegistrar  OnChainCommitRegistrarIface
 	sovereignSvc  SovereignLiquidityServiceIface
 	lpRepo        LPPositionReaderIface // for GET /liquidity/positions (008-fix-cb-liquidity)
+	lpBalance     LPBalanceReaderIface  // for GET /lp-balance (013-amm-lp-shares)
 	// Simplified API config (008-fix-cb-liquidity)
 	commitSide       string
 	wTokenAddress    string
@@ -68,6 +76,12 @@ type LiquidityHandler struct {
 // NewLiquidityHandler creates a LiquidityHandler (cooperative mode only).
 func NewLiquidityHandler(svc LiquidityServiceIface) *LiquidityHandler {
 	return &LiquidityHandler{svc: svc}
+}
+
+// WithLPBalanceReader enables GET /api/v2/amm/lp-balance (on-chain CBW3-LP position, 013).
+func (h *LiquidityHandler) WithLPBalanceReader(r LPBalanceReaderIface) *LiquidityHandler {
+	h.lpBalance = r
+	return h
 }
 
 // NewLiquidityHandlerSovereign creates a LiquidityHandler with sovereign extensions
@@ -565,5 +579,41 @@ func (h *LiquidityHandler) ListPositions(c *fiber.Ctx) error {
 		"pool_pair": poolPair,
 		"positions": dtos,
 		"count":     len(dtos),
+	})
+}
+
+// GetLPBalance handles GET /api/v2/amm/lp-balance (specs/013-amm-lp-shares).
+// Returns this gateway's on-chain CBW3-LP position: the CB's LP-share balance, the pool's
+// total supply, and the resulting ownership percentage. The balance is read live from the
+// AMM contract (source of truth), not from the off-chain position cache.
+func (h *LiquidityHandler) GetLPBalance(c *fiber.Ctx) error {
+	if h.lpBalance == nil {
+		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+			"error": "lp-balance reader not configured (AMM client unavailable)",
+		})
+	}
+
+	balance, err := h.lpBalance.LPBalanceOf(c.Context(), "")
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "read LP balance: " + err.Error()})
+	}
+	supply, err := h.lpBalance.LPTotalSupply(c.Context())
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "read LP total supply: " + err.Error()})
+	}
+
+	sharePct := 0.0
+	if supply != nil && supply.Sign() > 0 {
+		bal := new(big.Float).SetInt(balance)
+		sup := new(big.Float).SetInt(supply)
+		pct, _ := new(big.Float).Quo(bal, sup).Float64()
+		sharePct = pct * 100
+	}
+
+	return c.JSON(fiber.Map{
+		"lp_shares":        balance.String(),
+		"lp_total_supply":  supply.String(),
+		"share_percentage": sharePct,
+		"holder":           h.localCBHubSigner,
 	})
 }

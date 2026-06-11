@@ -135,8 +135,14 @@ func (a *ammAdapter) RemoveLiquidityShares(ctx context.Context, shares *big.Int,
 }
 
 // LPBalanceOf returns the on-chain LP-share balance of holder (the source of truth for ownership).
+// An empty holder resolves to the configured signer (the CB itself on a sovereign gateway, D4).
 func (a *ammAdapter) LPBalanceOf(ctx context.Context, holder string) (*big.Int, error) {
 	return a.c.LPBalanceOf(ctx, holder)
+}
+
+// LPTotalSupply returns the total LP-share supply of the configured AMM pool.
+func (a *ammAdapter) LPTotalSupply(ctx context.Context) (*big.Int, error) {
+	return a.c.LPTotalSupply(ctx)
 }
 
 // DepositForCommitAt escrows one side against a commit on an arbitrary AMM (sovereign flow).

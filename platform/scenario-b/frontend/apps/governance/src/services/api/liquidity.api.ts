@@ -7,6 +7,7 @@ import type {
   CommitRequest,
   CommitResult,
   CommitsListResponse,
+  LpBalanceResponse,
   LpPositionsResponse,
   PoolStatus,
   RemoveLiquidityRequest,
@@ -60,6 +61,11 @@ function mapCommitListItemToCommitResult(item: CommitListItem): CommitResult {
 export const liquidityApi = {
   getPoolStatus: async (pair: string): Promise<PoolStatus> => {
     const response = await httpClientV2.get<PoolStatus>(`/amm/pool/${pair}/status`);
+    return response.data;
+  },
+  // Live on-chain CBW3-LP position of this CB (013-amm-lp-shares).
+  getLpBalance: async (): Promise<LpBalanceResponse> => {
+    const response = await httpClientV2.get<LpBalanceResponse>("/amm/lp-balance");
     return response.data;
   },
   removeLiquidity: async (payload: RemoveLiquidityRequest): Promise<{ status: string }> => {

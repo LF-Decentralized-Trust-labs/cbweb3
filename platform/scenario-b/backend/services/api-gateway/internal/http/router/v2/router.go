@@ -68,6 +68,8 @@ type Dependencies struct {
 	CrossCurrencyPayerWalletResolver handlers.PayerWalletResolverIface
 	// LPPositionRepo enables GET /api/v2/amm/liquidity/positions (008-fix-cb-liquidity).
 	LPPositionRepo handlers.LPPositionReaderIface
+	// LPBalanceReader enables GET /api/v2/amm/lp-balance — the CB's live on-chain CBW3-LP position (013).
+	LPBalanceReader handlers.LPBalanceReaderIface
 	// Simplified API config (008-fix-cb-liquidity)
 	SpokeNetwork      string // spoke-a, spoke-b (for bridge lock-mint derivation)
 	NativeAssetSymbol string // tCeBM_BRL, tCeBM_ARS (for bridge lock-mint derivation)
@@ -284,6 +286,12 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 		// LP positions listing (008-fix-cb-liquidity / FR-028).
 		// Public endpoint — no auth required (each CB sees only its own positions in its DB).
 		amm.Get("/liquidity/positions", lh.ListPositions)
+		// On-chain LP-share position (013-amm-lp-shares). Public like /liquidity/positions —
+		// each CB gateway reports only its own signer's balance.
+		if deps.LPBalanceReader != nil {
+			lh.WithLPBalanceReader(deps.LPBalanceReader)
+			amm.Get("/lp-balance", lh.GetLPBalance)
+		}
 	}
 
 	if deps.TokenPreparer != nil && deps.AuthProvider != nil {

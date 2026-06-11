@@ -49,6 +49,18 @@ export interface LiquidityPosition {
   commit_id: string;
 }
 
+/** Live on-chain CBW3-LP position of this CB gateway (specs/013-amm-lp-shares). */
+export interface LpBalanceResponse {
+  /** This CB's on-chain LP-share balance (source of truth for pool ownership). */
+  lp_shares: string;
+  /** Total LP-share supply of the pool. */
+  lp_total_supply: string;
+  /** lp_shares / lp_total_supply, in percent. */
+  share_percentage: number;
+  /** The CB hub address holding the shares. */
+  holder: string;
+}
+
 export interface RemoveLiquidityRequest {
   lp_id: string;
   pool_pair: string;
