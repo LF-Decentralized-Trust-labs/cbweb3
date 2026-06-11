@@ -8,6 +8,21 @@
 
 ---
 
+## 0. Implementation status (2026-06-10)
+
+| Phase | Status | Commit |
+|---|---|---|
+| 1 — LP-share token in AMM (TASK-12/13) | ✅ done, 52 tests | `09b0690e` |
+| 2 — Escrow-and-finalize paired deposits (D6) | ✅ done, +9 tests (61 total) | `a19aaf2f` |
+| 3 — Backend ledger → on-chain shares | ✅ done, service tests green | `c589acf8` |
+| 4 — Sovereign flow (escrow per-side, shared key) | ✅ done | `c589acf8` |
+| 5 — Frontend LP-share label/types | ✅ done (API-compatible; rich price-impact UI = follow-up) | — |
+| 6 — Specs/docs + live integration test | ⏳ in progress | — |
+
+**Known follow-ups (flagged, off the happy path):** (a) commercial multi-bank withdrawal needs the
+owning bank to sign the burn (sovereign CB-signed withdrawal is already correct); (b) governance
+frontend price-impact/slippage quote UI for the home-currency zap-out.
+
 ## 1. Goal
 
 Replace the current "dumb reserves + off-chain Postgres share ledger" AMM with the **canonical

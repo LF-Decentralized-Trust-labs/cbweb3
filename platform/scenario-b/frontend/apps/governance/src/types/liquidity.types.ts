@@ -40,9 +40,11 @@ export interface LiquidityPosition {
   provider_bank_id: string;
   token_a_contributed: string;
   token_b_contributed: string;
+  /** On-chain ERC20 LP-share balance — the source of truth for pool ownership (specs/013-amm-lp-shares). */
   lp_shares: string;
   status: LpStatus;
   added_at: string;
+  /** Provider's home-currency side ("A" | "B"); withdrawal returns this currency via zap-out (D1). */
   deposit_side: string;
   commit_id: string;
 }

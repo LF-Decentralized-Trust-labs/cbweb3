@@ -2,7 +2,15 @@
 
 **Feature Branch**: `005-cooperative-liquidity`
 **Created**: 2026-05-14
-**Status**: Draft
+**Status**: Draft — **on-chain mechanism superseded by [013-amm-lp-shares](../013-amm-lp-shares/plan.md)**
+
+> **Update (2026-06-10):** The single-sided `addSingleSidedLiquidity`/`removeSingleSidedLiquidity`
+> on-chain primitives and the off-chain `shares_percentage` ledger described here are **replaced** by
+> the on-chain ERC20 LP-share model (TASK-12/13). Deposits now use escrow-and-finalize
+> (`depositForCommit`/`finalizeCommit`); pool ownership is tracked on-chain as LP-share balances;
+> withdrawal is a home-currency zap-out. The cooperative commit-reveal *matching* logic in this spec
+> still applies — only the on-chain settlement mechanism changed. See 013 for the authoritative
+> design and decisions D1–D6.
 
 ## Contexto e Motivação
 

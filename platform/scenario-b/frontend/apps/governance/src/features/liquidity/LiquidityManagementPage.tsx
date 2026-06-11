@@ -342,7 +342,7 @@ export function LiquidityManagementPage() {
                 <TableHead>Provider</TableHead>
                 <TableHead>Token A</TableHead>
                 <TableHead>Token B</TableHead>
-                <TableHead>LP Shares</TableHead>
+                <TableHead>LP Shares (on-chain)</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Added At</TableHead>
               </TableRow>
