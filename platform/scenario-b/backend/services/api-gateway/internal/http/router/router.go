@@ -17,6 +17,7 @@ type Dependencies struct {
 	AuthHandler            *handlers.AuthHandler
 	ComplianceHandler      *handlers.ComplianceHandler
 	GovernanceHandler      *handlers.GovernanceHandler
+	SupervisorHandler      *handlers.SupervisorHandler
 	OnboardingHandler      *handlers.OnboardingHandler
 	OnboardingProxyHandler *handlers.OnboardingProxyHandler
 	AuthProvider           interfaces.IAuthProvider
@@ -70,6 +71,10 @@ func Setup(app *fiber.App, deps Dependencies) {
 	complianceGroup.Post("/aml/screen", deps.ComplianceHandler.AMLScreen)
 	complianceGroup.Get("/participants", middleware.RequireRole("ROLE_GOVERNANCE"), deps.ComplianceHandler.ListParticipants)
 	complianceGroup.Post("/approve-kyc", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.ApproveKYC)
+	if deps.SupervisorHandler != nil {
+		complianceGroup.Get("/audit/logs", middleware.RequireSupervisorRole(), deps.SupervisorHandler.GetAuditLogs)
+		complianceGroup.Get("/zk-pointer/verify", middleware.RequireSupervisorRole(), deps.SupervisorHandler.VerifyZKPointer)
+	}
 
 	// --- Governance Portal ---
 	govGroup := app.Group("/api/v1/governance",

@@ -90,6 +90,18 @@ func New(cfg config.Config) (*App, error) {
 	closers = append(closers, complianceGRPC)
 
 	governanceHandler := handlers.NewGovernanceHandler(complianceGRPC)
+
+	// Wire ZK pointer gate for supervisor verification (D-02 — gate was nil at runtime before this).
+	// Gracefully disabled when DATABASE_URL is absent (non-CB entities without local compliance DB).
+	var zkVerifier handlers.ZKPointerVerifier
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		if zkDB, zkErr := gorm.Open(postgres.Open(dbURL), &gorm.Config{}); zkErr == nil {
+			zkVerifier = newZKPointerAdapter(services.NewZKPointerGate(zkDB))
+		} else {
+			log.Printf("warning: ZK pointer gate unavailable (%v), /zk-pointer/verify disabled", zkErr)
+		}
+	}
+	supervisorHandler := handlers.NewSupervisorHandler(complianceGRPC, zkVerifier)
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure)
 	complianceHandler := handlers.NewComplianceHandler(identityManager, complianceGRPC)
 
@@ -100,6 +112,7 @@ func New(cfg config.Config) (*App, error) {
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
 		GovernanceHandler: governanceHandler,
+		SupervisorHandler: supervisorHandler,
 		AuthProvider:      identityGRPCProvider,
 		V2Deps:            v2Deps,
 	}
