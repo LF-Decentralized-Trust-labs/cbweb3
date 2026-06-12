@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines Scenario B risk control state for the api-gateway.
 package domain
 

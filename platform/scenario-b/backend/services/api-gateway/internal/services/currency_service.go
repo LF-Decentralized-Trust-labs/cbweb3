@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides CurrencyService — business logic for hub currency registry operations.
 // Bridges CurrencyHandler requests to the on-chain CurrencyRegistryClient (006-hub-currency-registry).
 package services

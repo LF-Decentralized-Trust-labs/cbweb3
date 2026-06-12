@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package amm provides an EVM client for the AutomatedMarketMaker Hub contract.
 // It wraps go-ethereum/ethclient with a minimal embedded ABI so the API Gateway and
 // Payment Orchestrator can call read-only methods (getAmountIn/isPaused/reserves) and

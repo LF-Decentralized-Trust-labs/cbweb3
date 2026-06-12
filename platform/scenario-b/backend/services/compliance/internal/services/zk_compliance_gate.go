@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the ZK compliance gate for Scenario B (FR-025 / FR-058 / SC-016).
 package services
 

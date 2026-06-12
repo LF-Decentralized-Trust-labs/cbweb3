@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides contract tests for GovernanceScenarioBHandler (T093 / FR-030 / FR-044 / SC-026).
 package handlers_test
 

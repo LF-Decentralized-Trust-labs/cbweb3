@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines the BridgedAssetPosition model for Scenario B bridging.
 package domain
 

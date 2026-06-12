@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app — startup bootstrap for Hub IdentityRegistry LP role.
 // On every api-gateway start, if HUB_IDENTITY_REGISTRY_ADDRESS and CB_PRIVATE_KEY
 // are set, ensures LOCAL_CB_HUB_SIGNER is registered as LiquidityProvider on the Hub

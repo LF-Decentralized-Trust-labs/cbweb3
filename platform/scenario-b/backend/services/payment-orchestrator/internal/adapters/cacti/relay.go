@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package cacti provides the CactiRelay implementation of InteroperabilityPort.
 // It connects the payment-orchestrator to the Cacti HTLC relay service running
 // at interop/hub-and-spoke/cacti via its REST API.

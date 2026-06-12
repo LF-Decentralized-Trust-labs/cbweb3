@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides bridge HTTP handlers for Scenario B (FR-029 / SC-015).
 package handlers
 

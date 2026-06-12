@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file serves OpenAPI YAML and Swagger UI endpoints.
 package handlers
 

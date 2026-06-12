@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file wires application dependencies and builds the configured Fiber app.
 package app
 

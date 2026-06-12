@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package domain
 
 // ParticipantStatus represents the lifecycle state of a registered participant.

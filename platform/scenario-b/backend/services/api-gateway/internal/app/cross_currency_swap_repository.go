@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app provides CrossCurrencySwapRepository for persisting swap operations.
 //
 // Feature: 009-commercial-cross-currency-swap

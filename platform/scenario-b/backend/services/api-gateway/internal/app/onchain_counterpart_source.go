@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app — on-chain counterpart commit source for cooperative liquidity discovery.
 // Reads the Hub LiquidityCommitRegistry (the only cross-CB source of truth) so a CB
 // gateway can surface a counterpart central bank's open PENDING commit on the opposite

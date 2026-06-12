@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the AMM swap execution service for Scenario B (FR-027 / FR-057).
 package services
 

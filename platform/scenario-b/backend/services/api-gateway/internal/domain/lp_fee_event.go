@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines the LPFeeEvent model for cooperative fee distribution (FR-005 / data-model.md §1.2).
 package domain
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app — PairRegistry EVM adapter.
 // Wraps the on-chain PairRegistry contract (contracts/src/PairRegistry.sol) for use by
 // pair_router.go and pair_handler.go (D9/D10 — 005-cooperative-liquidity).

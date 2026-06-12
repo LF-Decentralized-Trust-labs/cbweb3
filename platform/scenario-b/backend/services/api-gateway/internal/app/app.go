@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app wires application dependencies and builds the configured Fiber app.
 // Scenario B v2 services are wired here (T020).
 package app

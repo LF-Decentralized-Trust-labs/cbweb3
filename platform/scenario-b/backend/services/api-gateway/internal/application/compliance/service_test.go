@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file tests KYC status retrieval and updates in the compliance service.
 package compliance
 

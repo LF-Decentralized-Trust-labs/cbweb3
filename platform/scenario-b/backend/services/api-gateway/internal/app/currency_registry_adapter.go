@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app — CurrencyRegistry EVM adapter.
 // Wraps the on-chain CurrencyRegistry contract (contracts/src/CurrencyRegistry.sol) for use by
 // currency_service.go (006-hub-currency-registry).

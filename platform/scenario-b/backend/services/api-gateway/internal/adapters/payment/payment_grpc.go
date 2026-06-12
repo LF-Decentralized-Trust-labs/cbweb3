@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package payment provides a gRPC client adapter for the payment-orchestrator service.
 package payment
 

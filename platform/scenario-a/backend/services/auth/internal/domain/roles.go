@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package domain
 
 // PKI role constants — canonical participant roles across the platform.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package v2 registers API Gateway routes for Scenario B (API v2).
 package v2
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines pool monitoring models for Scenario B (FR-028 / data-model.md §10-11).
 package domain
 

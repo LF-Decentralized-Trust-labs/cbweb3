@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package besu provides on-chain contract adapters for Besu.
 package besu
 

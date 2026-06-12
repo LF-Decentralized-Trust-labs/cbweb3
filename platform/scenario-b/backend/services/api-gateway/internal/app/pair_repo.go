@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app provides the PairRepository for pair_proposals persistence (D11 — 005-cooperative-liquidity).
 package app
 

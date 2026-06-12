@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app provides SwapQuoteRepository for persisting swap quotes with TTL.
 //
 // Feature: 009-commercial-cross-currency-swap

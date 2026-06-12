@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package workers provides the Relayer idempotent retry worker for Scenario B (FR-031 / FR-039 / Decision 11).
 package workers
 
