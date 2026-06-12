@@ -44,7 +44,7 @@ Each module has its own README with purpose, architecture placement, key details
 | Frontend | [frontend/README.md](frontend/README.md) | React monorepo overview |
 | — bank | [frontend/apps/bank/README.md](frontend/apps/bank/README.md) | Commercial bank portal |
 | — governance | [frontend/apps/governance/README.md](frontend/apps/governance/README.md) | Central bank governance portal |
-| — supervisor | [frontend/apps/supervisor/README.md](frontend/apps/supervisor/README.md) | Regulatory oversight portal |
+| — supervisor | [frontend/apps/supervisor/README.md](frontend/apps/supervisor/README.md) | Regulatory oversight portal — Supervisor Portal (R2-CR-8) In progress |
 | — treasury | [frontend/apps/treasury/README.md](frontend/apps/treasury/README.md) | Treasury management portal |
 | — noc | [frontend/apps/noc/README.md](frontend/apps/noc/README.md) | Network Operations Center dashboard |
 | — dispatcher | [frontend/apps/dispatcher/README.md](frontend/apps/dispatcher/README.md) | Manual event dispatch tool |
