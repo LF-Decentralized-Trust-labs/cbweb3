@@ -154,7 +154,7 @@ func New(cfg config.Config) (*App, error) {
 	if corsOrigins := os.Getenv("CORS_ALLOW_ORIGINS"); corsOrigins != "" {
 		fiberApp.Use(cors.New(cors.Config{
 			AllowOrigins:     corsOrigins,
-			AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept",
+			AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept, X-Correlation-Id",
 			AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 			AllowCredentials: true,
 		}))
