@@ -43,8 +43,11 @@ type Dependencies struct {
 	// CBChecker enables the anti-G5-cross guard in mint-and-approve (FR-004 / T016).
 	// When nil, the guard is disabled and mint-and-approve behaves as before.
 	CBChecker handlers.CentralBankChecker
-	// InternalRelayAuthSecret is the shared secret for X-Relay-Auth on internal routes.
+	// InternalRelayAuthSecret is the shared secret for X-Relay-Auth on internal routes (legacy fallback).
 	InternalRelayAuthSecret string
+	// RelayAuth configures per-CB asymmetric signature verification on internal routes,
+	// with the shared secret as a migration fallback (R2-CR-6).
+	RelayAuth middleware.RelayAuthConfig
 	// FiatTokenAddress is the tCeBM contract address on this CB's spoke (TOKEN_ADDRESS).
 	// Used by the cross-currency bridge-out handler so CB-B can enqueue burn without trusting
 	// the relay payload's token address.
@@ -434,7 +437,7 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 		deps.LocalCBHubSigner, // NEW: LOCAL_CB_HUB_SIGNER for balance checks
 	)
 	app.Post("/internal/amm/execute-matched-commit",
-		middleware.RequireRelayAuth(deps.InternalRelayAuthSecret),
+		middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 		lh.ExecuteMatchedCommit,
 	)
 
@@ -449,7 +452,7 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 			deps.SpokeNetwork,
 		).WithSwapVerification(deps.CrossCurrencySwapVerifier, deps.CrossCurrencyDuplicateFinder)
 		app.Post("/internal/amm/cross-currency-bridge-out",
-			middleware.RequireRelayAuth(deps.InternalRelayAuthSecret),
+			middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 			ccboh.HandleBridgeOut,
 		)
 	}
@@ -472,7 +475,7 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 			)
 		}
 		app.Post("/internal/amm/cross-currency-bridge-in",
-			middleware.RequireRelayAuth(deps.InternalRelayAuthSecret),
+			middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 			ccbih.HandleBridgeIn,
 		)
 	}

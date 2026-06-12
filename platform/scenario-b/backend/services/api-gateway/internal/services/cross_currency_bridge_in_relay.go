@@ -22,6 +22,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/relayauth"
 )
 
 // CrossCurrencyBridgeInRelayIface is implemented by CrossCurrencyBridgeInRelay.
@@ -49,7 +51,8 @@ type CrossCurrencyBridgeInRequest struct {
 // CrossCurrencyBridgeInRelay calls the spoke CB to perform the sovereign lock-mint.
 type CrossCurrencyBridgeInRelay struct {
 	centralBankURL  string // e.g. "http://api-gateway-central-bank-a:8080"
-	relayAuthSecret string // X-Relay-Auth shared secret
+	relayAuthSecret string // X-Relay-Auth shared secret (legacy fallback)
+	signer          *relayauth.Signer
 	httpClient      *http.Client
 }
 
@@ -63,6 +66,15 @@ func NewCrossCurrencyBridgeInRelay(centralBankURL, relayAuthSecret string) *Cros
 	}
 }
 
+// WithSigner attaches a per-CB signer so bridge-in requests carry an asymmetric
+// signature (R2-CR-6). This is a direct Go→Go call to the issuing CB (no Cacti hop),
+// so the signature authenticates end-to-end. The legacy secret is still sent for
+// migration compatibility; the receiver prefers the signature when it can verify it.
+func (r *CrossCurrencyBridgeInRelay) WithSigner(s *relayauth.Signer) *CrossCurrencyBridgeInRelay {
+	r.signer = s
+	return r
+}
+
 // NotifyBridgeIn POSTs the bridge-in request to the CB and returns the position_id.
 func (r *CrossCurrencyBridgeInRelay) NotifyBridgeIn(ctx context.Context, req CrossCurrencyBridgeInRequest) (string, error) {
 	body, err := json.Marshal(req)
@@ -70,13 +82,23 @@ func (r *CrossCurrencyBridgeInRelay) NotifyBridgeIn(ctx context.Context, req Cro
 		return "", fmt.Errorf("marshal bridge-in request: %w", err)
 	}
 
-	url := r.centralBankURL + "/internal/amm/cross-currency-bridge-in"
+	const path = "/internal/amm/cross-currency-bridge-in"
+	url := r.centralBankURL + path
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("create HTTP request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Relay-Auth", r.relayAuthSecret)
+	if r.signer != nil {
+		headers, signErr := r.signer.HeadersFor(http.MethodPost, path, body, time.Now())
+		if signErr != nil {
+			return "", fmt.Errorf("sign bridge-in request: %w", signErr)
+		}
+		for k, v := range headers {
+			httpReq.Header.Set(k, v)
+		}
+	}
 
 	resp, err := r.httpClient.Do(httpReq)
 	if err != nil {
