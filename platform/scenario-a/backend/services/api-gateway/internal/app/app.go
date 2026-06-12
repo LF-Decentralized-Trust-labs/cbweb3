@@ -14,12 +14,16 @@ import (
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
+	dbinit "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/db/init"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 // App wraps the Fiber HTTP server and all gRPC connections for lifecycle management.
@@ -76,14 +80,31 @@ func New(cfg config.Config) (*App, error) {
 	}
 	closers = append(closers, complianceGRPC)
 	governanceHandler := handlers.NewGovernanceHandler(complianceGRPC)
+	supervisorHandler := handlers.NewSupervisorHandler(complianceGRPC)
 
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure)
 	complianceHandler := handlers.NewComplianceHandler(identityManager, complianceGRPC)
+
+	// Investigation Module: open a separate DB connection for the OversightService (optional).
+	var oversightHandler *handlers.OversightHandler
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		if oversightDB, dbErr := gorm.Open(postgres.Open(dbURL), &gorm.Config{}); dbErr == nil {
+			if migrateErr := dbinit.RunAutoMigrate(oversightDB); migrateErr != nil {
+				log.Printf("warning: oversight schema migration failed (%v); disclosure endpoints disabled", migrateErr)
+			} else {
+				oversightHandler = handlers.NewOversightHandler(services.NewOversightService(oversightDB))
+			}
+		} else {
+			log.Printf("warning: oversight DB unavailable (%v); disclosure endpoints disabled", dbErr)
+		}
+	}
 
 	deps := router.Dependencies{
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
 		GovernanceHandler: governanceHandler,
+		SupervisorHandler: supervisorHandler,
+		OversightHandler:  oversightHandler,
 		AuthProvider:      identityGRPCProvider,
 	}
 
