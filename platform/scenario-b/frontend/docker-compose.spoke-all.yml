@@ -79,12 +79,22 @@ services:
     ports:
       - "${CENTRAL_BANK_B_FRONTEND_PORT}:80"
 
-  supervisor-frontend:
-    container_name: cbweb3-supervisor-frontend
+  supervisor-spoke-a-frontend:
+    container_name: cbweb3-supervisor-spoke-a-frontend
     build:
       context: .
       dockerfile: apps/supervisor/Dockerfile
       args:
-        VITE_API_BASE_URL: ${API_SUPERVISOR}
+        VITE_API_BASE_URL: ${API_SUPERVISOR_SPOKE_A}
     ports:
-      - "${SUPERVISOR_FRONTEND_PORT}:80"
+      - "${SUPERVISOR_SPOKE_A_FRONTEND_PORT}:80"
+
+  supervisor-spoke-b-frontend:
+    container_name: cbweb3-supervisor-spoke-b-frontend
+    build:
+      context: .
+      dockerfile: apps/supervisor/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${API_SUPERVISOR_SPOKE_B}
+    ports:
+      - "${SUPERVISOR_SPOKE_B_FRONTEND_PORT}:80"

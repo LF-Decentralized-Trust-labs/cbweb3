@@ -52,3 +52,13 @@ services:
         VITE_INSTITUTION_NAME: ${CENTRAL_BANK_B_INSTITUTION_NAME}
     ports:
       - "${CENTRAL_BANK_B_TREASURY_PORT}:80"
+
+  supervisor-spoke-b-frontend:
+    container_name: cbweb3-supervisor-spoke-b-frontend
+    build:
+      context: .
+      dockerfile: apps/supervisor/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${API_SUPERVISOR_SPOKE_B}
+    ports:
+      - "${SUPERVISOR_SPOKE_B_FRONTEND_PORT}:80"
