@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Activity, ShieldCheck, Users, Search, SlidersHorizontal, Settings } from "lucide-react";
+import { Activity, ShieldCheck, Users, Search, SlidersHorizontal, Settings, FileSearch } from "lucide-react";
 import { PlatformLogo } from "@cbweb3/ui";
 
 const links = [
@@ -8,6 +8,7 @@ const links = [
   { to: "/participants", label: "Compliance Registry", icon: Users },
   { to: "/audit", label: "Audit Vault", icon: Search },
   { to: "/stability", label: "Stability Insights", icon: ShieldCheck },
+  { to: "/investigation", label: "Investigation", icon: FileSearch },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
