@@ -1,17 +1,27 @@
 openapi: 3.0.3
 info:
   title: CBWeb3 API Gateway
-  version: 2.2.0
+  version: 2.3.0
   description: >
-    OpenAPI specification for the CBWeb3 platform API Gateway.
-    Implements authentication, participant onboarding, KYC/AML compliance,
-    governance operations over the identity service (Keycloak + KMS),
-    and payment orchestrator operations (HTLC dual-layer + Zeto token management
-    via Paladin sidecar + escrow deposit/tokenization/redeem lifecycle).
+    OpenAPI specification for the CBWeb3 platform API Gateway (Scenario B —
+    International Hub). Implements authentication, participant onboarding,
+    KYC/AML compliance, governance operations over the identity service
+    (Keycloak + KMS), and payment orchestrator operations (HTLC dual-layer +
+    Zeto token management via Paladin sidecar + escrow deposit/tokenization/
+    redeem lifecycle) under the **/api/v1** core surface, plus the
+    **/api/v2** Hub-and-Spoke AMM surface: exact-output and cross-currency
+    swaps, lock-mint / burn-unlock bridging, cooperative + sovereign liquidity
+    provisioning (commit-reveal), hub currency and AMM pair registries, the
+    asymmetric circuit breaker (1-of-N pause / 2-of-N resume), and the
+    Master Viewing Key oversight (disclosure quorum).
 
-    Security note: All /compliance write endpoints require CENTRAL_BANK role.
-    Payment endpoints (HTLC + Token) are only available when the payment
-    orchestrator service is configured.
+    Security note: All /compliance and /governance write endpoints require the
+    appropriate Central Bank / governance role. Payment endpoints (HTLC +
+    Token) are only available when the payment orchestrator service is
+    configured. The /api/v2 routes are registered only when their backing
+    services are wired (per-gateway dependency injection), so a given gateway
+    deployment may expose a subset of the v2 surface depending on its role
+    (commercial bank vs. central bank).
 servers:
   - url: http://localhost:8080
     description: Local development server
@@ -67,6 +77,53 @@ tags:
       money (Zeto privacy token) and back. Central Bank nodes process approve/
       reject and fiat-exchange actions; commercial bank nodes proxy deposit,
       escrow, and redeem requests to the Central Bank.
+  - name: AMM Swap
+    description: >
+      Automated Market Maker swaps and quotes (Scenario B Hub). Exact-output
+      single-pair swaps for commercial banks, orchestrated cross-currency
+      swaps (bridge-in → Hub AMM swap → bridge-out), quote generation, and
+      pool/hub-liquidity status. Served under /api/v2/amm.
+  - name: AMM Bridge
+    description: >
+      Lock-mint and burn-unlock bridging between a spoke (tCeBM) and the Hub
+      (W-tCeBM mirrored asset), plus bridge position listing. Implements the
+      Scenario B atomicity rule: lock → mint, burn → unlock. Served under
+      /api/v2/bridge.
+  - name: AMM Liquidity
+    description: >
+      Liquidity provisioning for the Hub AMM: cooperative commit-reveal
+      (commit / list / status / cancel), sovereign CB deposits, legacy
+      dual-sided add/remove, on-chain LP-share balance, and position listing.
+      Served under /api/v2/amm/liquidity and /api/v2/amm/lp-balance.
+  - name: AMM Token
+    description: >
+      Token preparation for AMM participation — mint-and-approve (Central Bank)
+      and approve-amm (allowance grant). Served under /api/v2/amm/token.
+  - name: Hub Currency Registry
+    description: >
+      Hub currency discovery — Central Banks register/remove their currency;
+      anyone may list registered currencies. Served under /api/v2/hub.
+  - name: AMM Pair Registry
+    description: >
+      Multi-pair PairRegistry — two-Central-Bank propose/confirm flow to
+      activate a trading pair, plus public pair listing. Served under
+      /api/v2/amm/pairs.
+  - name: Circuit Breaker
+    description: >
+      Asymmetric circuit breaker for the Hub AMM — 1-of-N pause, 2-of-N
+      resume (request + sign), and status. Validated before swaps. Served
+      under /api/v2/governance/circuit-breaker.
+  - name: Oversight
+    description: >
+      Master Viewing Key oversight — disclosure request / sign (quorum) and
+      status, enabling supervised privacy disclosure. Served under
+      /api/v2/oversight.
+  - name: AMM Internal
+    description: >
+      Internal relay-to-gateway routes consumed by the Cacti hub-and-spoke
+      relay (protected by the X-Relay-Auth shared secret, not user auth):
+      matched-commit execution and cross-currency bridge-in/out receivers.
+      Served under /internal/amm.
 paths:
   /healthz:
     get:
@@ -2068,6 +2125,819 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ===========================================================================
+  # API v2 — Hub-and-Spoke AMM surface (Scenario B)
+  #
+  # Routes registered in internal/http/router/v2/router.go. Each route group is
+  # registered only when its backing service is wired (per-gateway DI), so a
+  # given deployment may expose a subset. Schemas below are intentionally
+  # permissive (free-form objects) where the handler request/response shape is
+  # service-defined; see the handler packages for exact field contracts.
+  # ===========================================================================
+
+  /api/v2/amm/quote/exact-output:
+    get:
+      tags: [AMM Swap]
+      summary: Exact-output swap quote
+      description: Quote the input amount required to receive a fixed output amount on a pair.
+      operationId: getExactOutputQuote
+      parameters:
+        - name: pair
+          in: query
+          required: true
+          schema: { type: string }
+          description: Trading pair symbol (e.g. tCeBM_BRL-tCeBM_ARS).
+        - name: amountOut
+          in: query
+          required: true
+          schema: { type: string }
+          description: Desired output amount (stringified integer/decimal).
+      responses:
+        "200":
+          description: Quote computed
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v2/amm/quote/cross-currency:
+    get:
+      tags: [AMM Swap]
+      summary: Cross-currency swap quote (15s TTL)
+      description: Generate a short-lived quote for an orchestrated cross-currency swap.
+      operationId: getCrossCurrencyQuote
+      responses:
+        "200":
+          description: Quote computed
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v2/amm/swap/exact-output:
+    post:
+      tags: [AMM Swap]
+      summary: Execute an exact-output swap (commercial bank)
+      operationId: swapExactOutput
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Swap executed
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v2/amm/swap/cross-currency:
+    post:
+      tags: [AMM Swap]
+      summary: Initiate an orchestrated cross-currency swap (commercial bank)
+      description: >
+        Orchestrates bridge-in → Hub AMM swap → bridge-out. Returns a swap id;
+        poll GET /api/v2/amm/swap/cross-currency/{id} for async status.
+      operationId: swapCrossCurrency
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Swap initiated / completed
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v2/amm/swap/cross-currency/{id}:
+    get:
+      tags: [AMM Swap]
+      summary: Poll cross-currency swap status
+      operationId: getCrossCurrencySwapStatus
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Current swap status
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v2/amm/pool/{pair}/status:
+    get:
+      tags: [AMM Swap]
+      summary: Pool reserves and status for a pair
+      operationId: getPoolStatus
+      parameters:
+        - name: pair
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Pool status
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v2/amm/hub-liquidity-config:
+    get:
+      tags: [AMM Swap]
+      summary: Sovereign Hub AMM config for swap clients
+      description: CB gateways expose Hub AMM configuration for commercial bank swap clients.
+      operationId: getHubLiquidityConfig
+      responses:
+        "200":
+          description: Hub liquidity config
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /api/v2/bridge/lock-mint:
+    post:
+      tags: [AMM Bridge]
+      summary: Lock spoke tCeBM and mint Hub W-tCeBM
+      operationId: bridgeLockMint
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Bridge position created (lock + mint enqueued)
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v2/bridge/burn-unlock:
+    post:
+      tags: [AMM Bridge]
+      summary: Burn Hub W-tCeBM and unlock spoke tCeBM
+      operationId: bridgeBurnUnlock
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Burn + unlock enqueued
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v2/bridge/positions:
+    get:
+      tags: [AMM Bridge]
+      summary: List bridge positions
+      operationId: listBridgePositions
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema: { type: string }
+          description: Optional state filter (e.g. PENDING, ACTIVE, CLOSED).
+      responses:
+        "200":
+          description: Bridge positions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/liquidity/add:
+    post:
+      tags: [AMM Liquidity]
+      summary: Add liquidity (legacy dual-sided)
+      operationId: addLiquidity
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Liquidity added
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/liquidity/remove:
+    post:
+      tags: [AMM Liquidity]
+      summary: Remove liquidity (sovereign CB withdrawal)
+      operationId: removeLiquidity
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Liquidity removed
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/liquidity/commit:
+    post:
+      tags: [AMM Liquidity]
+      summary: Register a liquidity commit (commit-reveal)
+      operationId: commitLiquidity
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Commit registered
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/liquidity/commits:
+    get:
+      tags: [AMM Liquidity]
+      summary: List liquidity commits
+      operationId: listLiquidityCommits
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: pool
+          in: query
+          required: false
+          schema: { type: string }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Commits
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/liquidity/commits/{commit_id}:
+    get:
+      tags: [AMM Liquidity]
+      summary: Get a single liquidity commit (status polling)
+      operationId: getLiquidityCommit
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: commit_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Commit
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [AMM Liquidity]
+      summary: Cancel a liquidity commit
+      operationId: cancelLiquidityCommit
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: commit_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Commit cancelled
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v2/amm/liquidity/positions:
+    get:
+      tags: [AMM Liquidity]
+      summary: List this gateway's LP positions
+      description: Public — each CB gateway reports only its own positions from its DB.
+      operationId: listLiquidityPositions
+      responses:
+        "200":
+          description: LP positions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+
+  /api/v2/amm/lp-balance:
+    get:
+      tags: [AMM Liquidity]
+      summary: On-chain CBW3-LP share balance for this gateway's signer
+      description: >
+        Public — present only when LPBalanceReader is wired. Returns the CB's
+        live on-chain LP-share position (013-amm-lp-shares).
+      operationId: getLPBalance
+      responses:
+        "200":
+          description: LP-share balance
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /api/v2/amm/liquidity/sovereign-add:
+    post:
+      tags: [AMM Liquidity]
+      summary: Sovereign CB direct liquidity top-up
+      description: Direct sovereign deposit (no bridge gate, no commit-reveal). Central Bank only.
+      operationId: sovereignAddLiquidity
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Sovereign liquidity added
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/token/mint-and-approve:
+    post:
+      tags: [AMM Token]
+      summary: Mint tCeBM and approve the AMM (Central Bank)
+      description: Enforces the anti-G5-cross guard when CBChecker is wired (spec-007 SC-002).
+      operationId: mintAndApprove
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Mint + approve submitted
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/token/approve-amm:
+    post:
+      tags: [AMM Token]
+      summary: Grant an AMM allowance (Central or commercial bank)
+      operationId: approveAMM
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Allowance granted
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/hub/currencies:
+    get:
+      tags: [Hub Currency Registry]
+      summary: List registered hub currencies
+      operationId: listHubCurrencies
+      responses:
+        "200":
+          description: Registered currencies
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+    post:
+      tags: [Hub Currency Registry]
+      summary: Register a hub currency (Central Bank)
+      operationId: registerHubCurrency
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Currency registered
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/hub/currencies/{symbol}:
+    delete:
+      tags: [Hub Currency Registry]
+      summary: Remove a hub currency (Central Bank)
+      operationId: removeHubCurrency
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Currency removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v2/amm/pairs:
+    get:
+      tags: [AMM Pair Registry]
+      summary: List active AMM pairs
+      operationId: listPairs
+      responses:
+        "200":
+          description: Active pairs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+
+  /api/v2/amm/pairs/propose:
+    post:
+      tags: [AMM Pair Registry]
+      summary: Propose a new pair (Central Bank of tokenA)
+      operationId: proposePair
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Pair proposed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/pairs/confirm:
+    post:
+      tags: [AMM Pair Registry]
+      summary: Confirm a proposed pair (Central Bank of tokenB)
+      operationId: confirmPair
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Pair confirmed / activated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/governance/circuit-breaker/status:
+    get:
+      tags: [Circuit Breaker]
+      summary: Circuit breaker status
+      operationId: getV2CircuitBreakerStatus
+      responses:
+        "200":
+          description: Circuit breaker state
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /api/v2/governance/circuit-breaker/pause:
+    post:
+      tags: [Circuit Breaker]
+      summary: Pause the AMM (1-of-N, Central Bank)
+      operationId: pauseCircuitBreaker
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Paused
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/governance/circuit-breaker/resume-request:
+    post:
+      tags: [Circuit Breaker]
+      summary: Propose resume (2-of-N step 1, Central Bank)
+      operationId: proposeResume
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Resume proposed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/governance/circuit-breaker/resume-sign:
+    post:
+      tags: [Circuit Breaker]
+      summary: Sign resume (2-of-N step 2, Central Bank)
+      operationId: signResume
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Resume signed / executed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/oversight/disclosure-request:
+    post:
+      tags: [Oversight]
+      summary: Open a disclosure request (Central Bank)
+      operationId: openDisclosure
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Disclosure request opened
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/oversight/disclosure-sign:
+    post:
+      tags: [Oversight]
+      summary: Sign a disclosure request (quorum, Central Bank)
+      operationId: signDisclosure
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Disclosure signed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/oversight/disclosure-status/{requestID}:
+    get:
+      tags: [Oversight]
+      summary: Disclosure request status
+      operationId: getDisclosureStatus
+      parameters:
+        - name: requestID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Disclosure status
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /internal/amm/execute-matched-commit:
+    post:
+      tags: [AMM Internal]
+      summary: Execute a matched liquidity commit (relay → gateway)
+      description: Called by the Cacti LiquidityCommitWatcher when CommitMatched fires.
+      operationId: executeMatchedCommit
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Matched commit executed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/amm/cross-currency-bridge-out:
+    post:
+      tags: [AMM Internal]
+      summary: Cross-currency bridge-out receiver (relay → gateway)
+      description: >
+        Called by the Cacti CrossCurrencySwapRelay after the source CB's Hub AMM
+        swap succeeds. Present only on CB gateways acting as bridge-out receivers.
+      operationId: crossCurrencyBridgeOut
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Bridge-out (burn) enqueued
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/amm/cross-currency-bridge-in:
+    post:
+      tags: [AMM Internal]
+      summary: Cross-currency bridge-in receiver (relay → gateway)
+      description: >
+        Sovereign lock-mint performed on behalf of a commercial bank. Present
+        only on issuing CB gateways. May enforce reserve tokenisation.
+      operationId: crossCurrencyBridgeIn
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Bridge-in (lock-mint) enqueued / ACTIVE
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   securitySchemes:
     CookieAuth:
@@ -2080,6 +2950,23 @@ components:
         All protected endpoints require this cookie to be present.
         Attributes: HttpOnly, SameSite=Strict, Path=/; Secure flag depends on
         the COOKIE_SECURE environment variable (true for HTTPS, false for HTTP).
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Bearer access token. Accepted by /api/v2 routes that use
+        RequireAnyAuth (cookie OR bearer) — primarily machine-to-machine
+        Central Bank sovereign flows (commit, sovereign-add, lock-mint,
+        token approvals).
+    RelayAuth:
+      type: apiKey
+      in: header
+      name: X-Relay-Auth
+      description: >
+        Shared-secret header for /internal/amm routes consumed by the Cacti
+        hub-and-spoke relay. Not a user credential; validated by
+        RequireRelayAuth middleware against the gateway's configured secret.
 
   responses:
     BadRequest:
