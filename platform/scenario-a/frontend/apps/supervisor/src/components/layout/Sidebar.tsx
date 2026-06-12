@@ -1,6 +1,5 @@
 import { NavLink } from "react-router-dom";
 import { Activity, ShieldCheck, Users, Search, SlidersHorizontal, Settings, FileSearch } from "lucide-react";
-import { PlatformLogo } from "@cbweb3/ui";
 
 const links = [
   { to: "/", label: "Dashboard", icon: Activity },

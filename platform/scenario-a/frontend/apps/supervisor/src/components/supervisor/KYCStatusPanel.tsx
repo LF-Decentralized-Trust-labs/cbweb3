@@ -45,7 +45,7 @@ export function KYCStatusPanel() {
       );
       setResult(data);
     } catch {
-      toast({ title: "Subject not found or access denied", variant: "destructive" });
+      toast.error("Subject not found or access denied");
     } finally {
       setLoading(false);
     }

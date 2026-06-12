@@ -69,7 +69,7 @@ export function InvestigationPage() {
 
   const handleOpen = async () => {
     if (!txRef || !requestorId) {
-      toast({ title: "Missing fields", description: "Tx reference and requestor ID are required.", variant: "destructive" });
+      toast.error("Missing fields", { description: "Tx reference and requestor ID are required." });
       return;
     }
     setOpenStatus("loading");
@@ -77,26 +77,26 @@ export function InvestigationPage() {
       const result = await oversightApi.openDisclosure({ txRef, requestorId, reasonCode });
       setOpenResult(result);
       setOpenStatus("idle");
-      toast({ title: "Disclosure request created", description: `Request ID: ${result.requestId}` });
+      toast.success("Disclosure request created", { description: `Request ID: ${result.requestId}` });
     } catch {
       setOpenStatus("error");
-      toast({ title: "Failed to open disclosure", variant: "destructive" });
+      toast.error("Failed to open disclosure");
     }
   };
 
   const handleSign = async () => {
     if (!signRequestId || !signerId) {
-      toast({ title: "Missing fields", description: "Request ID and signer ID are required.", variant: "destructive" });
+      toast.error("Missing fields", { description: "Request ID and signer ID are required." });
       return;
     }
     setSignStatus("loading");
     try {
       await oversightApi.signDisclosure({ requestId: signRequestId, signerId });
       setSignStatus("idle");
-      toast({ title: "Signature recorded" });
+      toast.success("Signature recorded");
     } catch {
       setSignStatus("error");
-      toast({ title: "Failed to sign disclosure", variant: "destructive" });
+      toast.error("Failed to sign disclosure");
     }
   };
 
@@ -110,7 +110,7 @@ export function InvestigationPage() {
       setLookupStatus("idle");
     } catch {
       setLookupStatus("error");
-      toast({ title: "Request not found or access denied", variant: "destructive" });
+      toast.error("Request not found or access denied");
     }
   };
 
