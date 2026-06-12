@@ -239,6 +239,38 @@ scenario-b.perf-baseline:
 	@echo "[scenario-b] running performance baseline (quote + swap p95)..."
 	@API_GW_URL=$(API_GW_URL) k6 run tests/performance/scenario-b-perf.js
 
+# ── R1-12.3 threshold harness (see scenario-b/docs/performance) ───────────────
+# These drive the Report 1 / Finding 12.3 thresholds. AUTH_TOKEN (commercial_bank
+# JWT) is REQUIRED for swap/transfer scenarios. Fill measured numbers into
+# docs/performance/RESULTS-TEMPLATE.md after a real run — do not run the soak in CI.
+
+scenario-b.perf-amm-throughput:
+	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
+	@echo "[scenario-b] AMM swap throughput — validating DRAFT 30 TPS target..."
+	@API_GW_URL=$(API_GW_URL) AUTH_TOKEN=$(AUTH_TOKEN) \
+	  LOAD_MODEL=rate SWAP_TPS=$${SWAP_TPS:-30} QUOTE_TPS=$${QUOTE_TPS:-60} DURATION=$${DURATION:-10m} \
+	  k6 run tests/performance/scenario-b-perf.js
+
+scenario-b.perf-transfer:
+	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
+	@echo "[scenario-b] value-transfer throughput — 50 TPS target..."
+	@API_GW_URL=$(API_GW_URL) AUTH_TOKEN=$(AUTH_TOKEN) \
+	  TRANSFER_TPS=$${TRANSFER_TPS:-50} DURATION=$${DURATION:-10m} \
+	  k6 run tests/performance/k6/bridge-transfer-throughput.js
+
+scenario-b.perf-zeto:
+	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
+	@echo "[scenario-b] Zeto privacy-transfer throughput — 15 TPS target..."
+	@API_GW_URL=$(API_GW_URL) AUTH_TOKEN=$(AUTH_TOKEN) \
+	  TOKEN_KIND=zeto TRANSFER_TPS=$${TRANSFER_TPS:-15} DURATION=$${DURATION:-10m} \
+	  k6 run tests/performance/k6/bridge-transfer-throughput.js
+
+scenario-b.perf-soak:
+	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
+	@echo "[scenario-b] 12-hour SOAK — dedicated infra only, NOT for CI..."
+	@API_GW_URL=$(API_GW_URL) AUTH_TOKEN=$(AUTH_TOKEN) DURATION=$${DURATION:-12h} \
+	  k6 run tests/performance/k6/soak.js
+
 # ── OpenAPI validation (T108) ────────────────────────────────────────────────
 
 scenario-b.validate-openapi:
@@ -257,4 +289,6 @@ scenario-b.validate-openapi:
 	scenario-b.test-contracts scenario-b.test-backend scenario-b.test \
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
 	scenario-b.test-integration \
-	scenario-b.perf-baseline scenario-b.validate-openapi
+	scenario-b.perf-baseline scenario-b.validate-openapi \
+	scenario-b.perf-amm-throughput scenario-b.perf-transfer \
+	scenario-b.perf-zeto scenario-b.perf-soak
