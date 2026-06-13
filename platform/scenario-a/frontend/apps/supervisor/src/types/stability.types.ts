@@ -3,11 +3,10 @@ export type HTLCState = "LOCKED" | "REVEALED" | "REFUNDED" | "EXPIRED";
 export interface HTLCSummary {
   id: string;
   state: HTLCState;
-  amount: number;
-  currency: string;
-  counterparty: string;
+  sender: string;
+  receiver: string;
   expiresAt: string;
-  createdAt: string;
+  counterpartyLocked: boolean;
 }
 
 export interface CircuitBreakerRequest {

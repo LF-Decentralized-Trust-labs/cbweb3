@@ -154,6 +154,15 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
 	}
 
+	// Supervisors have network-wide read access — skip counterparty filtering.
+	isSupervisor := false
+	for _, r := range claims.Roles {
+		if r == domain.RoleSupervisor {
+			isSupervisor = true
+			break
+		}
+	}
+
 	callerBankID := claims.BankID
 	if callerBankID == "" {
 		callerBankID = h.bankCode
@@ -168,6 +177,10 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 	)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if isSupervisor {
+		return c.JSON(fiber.Map{"locks": results, "total": len(results)})
 	}
 
 	// Keep only records where the caller's institution is a counterparty.

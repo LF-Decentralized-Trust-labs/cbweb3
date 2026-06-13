@@ -21,13 +21,7 @@ export function DashboardPage() {
 
   return (
     <div className="min-h-full space-y-4">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Total tCeBM Supply</CardDescription>
-            <CardTitle>{overview?.totalSupply.toLocaleString() ?? "-"}</CardTitle>
-          </CardHeader>
-        </Card>
+      <section className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Active Institutions</CardDescription>
@@ -59,8 +53,8 @@ export function DashboardPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>ID</TableHead>
-                  <TableHead>Counterparty</TableHead>
-                  <TableHead>Amount</TableHead>
+                  <TableHead>Sender</TableHead>
+                  <TableHead>Receiver</TableHead>
                   <TableHead>State</TableHead>
                 </TableRow>
               </TableHeader>
@@ -68,8 +62,8 @@ export function DashboardPage() {
                 {htlcs.map((h) => (
                   <TableRow key={h.id}>
                     <TableCell className="font-mono text-xs">{h.id.slice(0, 10)}…</TableCell>
-                    <TableCell>{h.counterparty}</TableCell>
-                    <TableCell>{h.amount.toLocaleString()} {h.currency}</TableCell>
+                    <TableCell className="font-mono text-xs">{h.sender}</TableCell>
+                    <TableCell className="font-mono text-xs">{h.receiver}</TableCell>
                     <TableCell>
                       <Badge variant={badgeFromState(h.state)}>{h.state}</Badge>
                     </TableCell>

@@ -5,26 +5,32 @@ interface ParticipantsResponse {
   participants: Array<{ status: string }>;
 }
 
+interface HTLCSearchResponse {
+  locks: Array<{ state?: string }>;
+  total: number;
+}
+
 export const networkApi = {
   getOverview: async (): Promise<NetworkOverview> => {
-    try {
-      const { participants } = await apiFetch<ParticipantsResponse>("/api/v1/compliance/participants");
-      const activeInstitutions = participants.filter((p) => p.status === "ACTIVE").length;
-      return {
-        totalSupply: 0,
-        activeInstitutions,
-        activeHTLCs: 0,
-        pendingSettlements: 0,
-        lastUpdatedAt: new Date().toISOString(),
-      };
-    } catch {
-      return {
-        totalSupply: 0,
-        activeInstitutions: 0,
-        activeHTLCs: 0,
-        pendingSettlements: 0,
-        lastUpdatedAt: new Date().toISOString(),
-      };
-    }
+    const [participantsResult, htlcResult] = await Promise.allSettled([
+      apiFetch<ParticipantsResponse>("/api/v1/compliance/participants/summary"),
+      apiFetch<HTLCSearchResponse>("/api/v1/htlc/search"),
+    ]);
+
+    const participants =
+      participantsResult.status === "fulfilled"
+        ? participantsResult.value.participants
+        : [];
+    const htlcs =
+      htlcResult.status === "fulfilled" ? htlcResult.value.locks : [];
+
+    return {
+      activeInstitutions: participants.filter((p) => p.status === "ACTIVE").length,
+      activeHTLCs: htlcs.filter((h) => h.state === "LOCKED").length,
+      pendingSettlements: htlcs.filter(
+        (h) => h.state === "LOCKED" || h.state === "REVEALED",
+      ).length,
+      lastUpdatedAt: new Date().toISOString(),
+    };
   },
 };
