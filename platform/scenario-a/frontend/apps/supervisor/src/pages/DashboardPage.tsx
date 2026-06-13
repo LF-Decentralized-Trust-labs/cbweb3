@@ -3,10 +3,10 @@ import { useEffect } from "react";
 import { useNetworkStore, useStabilityStore, useWebsocketStore } from "../stores";
 
 const badgeFromState = (state: string): "default" | "secondary" | "destructive" | "warning" => {
-  if (state === "REVEALED") return "default";
-  if (state === "LOCKED") return "secondary";
-  if (state === "EXPIRED") return "destructive";
-  return "warning";
+  if (state === "HTLC_STATE_SETTLED") return "default";
+  if (state === "HTLC_STATE_LOCKED" || state === "HTLC_STATE_PENDING") return "secondary";
+  if (state === "HTLC_STATE_REFUNDED" || state === "HTLC_STATE_INVALID") return "destructive";
+  return "warning"; // SETTLING, REFUNDING
 };
 
 export function DashboardPage() {

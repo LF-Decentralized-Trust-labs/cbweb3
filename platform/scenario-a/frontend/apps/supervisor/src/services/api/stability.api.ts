@@ -18,7 +18,7 @@ interface HTLCSearchResponse {
 function toHTLCSummary(lock: HTLCLock): HTLCSummary {
   return {
     id: lock.contract_id,
-    state: (lock.state as HTLCSummary["state"]) ?? "LOCKED",
+    state: (lock.state as HTLCSummary["state"]) ?? "HTLC_STATE_LOCKED",
     sender: lock.sender,
     receiver: lock.receiver,
     expiresAt: lock.time_lock ? new Date(lock.time_lock * 1000).toISOString() : "",

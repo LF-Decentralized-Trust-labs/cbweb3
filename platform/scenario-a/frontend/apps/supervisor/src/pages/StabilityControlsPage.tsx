@@ -3,10 +3,10 @@ import { useEffect } from "react";
 import { useStabilityStore } from "../stores";
 
 const badgeFromState = (state: string): "default" | "secondary" | "destructive" | "warning" => {
-  if (state === "REVEALED") return "default";
-  if (state === "LOCKED") return "secondary";
-  if (state === "EXPIRED") return "destructive";
-  return "warning";
+  if (state === "HTLC_STATE_SETTLED") return "default";
+  if (state === "HTLC_STATE_LOCKED" || state === "HTLC_STATE_PENDING") return "secondary";
+  if (state === "HTLC_STATE_REFUNDED" || state === "HTLC_STATE_INVALID") return "destructive";
+  return "warning"; // SETTLING, REFUNDING
 };
 
 export function StabilityControlsPage() {
@@ -26,7 +26,7 @@ export function StabilityControlsPage() {
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-md border border-border p-3">
             <p className="text-sm text-muted-foreground">Active HTLCs</p>
-            <p className="mt-1 text-lg font-semibold">{htlcs.filter((h) => h.state === "LOCKED").length}</p>
+            <p className="mt-1 text-lg font-semibold">{htlcs.filter((h) => h.state === "HTLC_STATE_LOCKED").length}</p>
           </div>
           <div className="rounded-md border border-border p-3">
             <p className="text-sm text-muted-foreground">Active Alerts</p>

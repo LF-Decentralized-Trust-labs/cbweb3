@@ -26,9 +26,9 @@ export const networkApi = {
 
     return {
       activeInstitutions: participants.filter((p) => p.status === "ACTIVE").length,
-      activeHTLCs: htlcs.filter((h) => h.state === "LOCKED").length,
+      activeHTLCs: htlcs.filter((h) => h.state === "HTLC_STATE_LOCKED").length,
       pendingSettlements: htlcs.filter(
-        (h) => h.state === "LOCKED" || h.state === "REVEALED",
+        (h) => h.state === "HTLC_STATE_LOCKED" || h.state === "HTLC_STATE_SETTLING",
       ).length,
       lastUpdatedAt: new Date().toISOString(),
     };

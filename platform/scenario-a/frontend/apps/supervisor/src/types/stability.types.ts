@@ -1,4 +1,11 @@
-export type HTLCState = "LOCKED" | "REVEALED" | "REFUNDED" | "EXPIRED";
+export type HTLCState =
+  | "HTLC_STATE_PENDING"
+  | "HTLC_STATE_LOCKED"
+  | "HTLC_STATE_SETTLING"
+  | "HTLC_STATE_SETTLED"
+  | "HTLC_STATE_REFUNDING"
+  | "HTLC_STATE_REFUNDED"
+  | "HTLC_STATE_INVALID";
 
 export interface HTLCSummary {
   id: string;
