@@ -95,8 +95,9 @@ func (s *onChainCounterpartSource) CounterpartCommit(ctx context.Context, poolPa
 		SignerAddress:        commit.Signer.Hex(),
 		Amount:               amount,
 		SuggestedMatchAmount: s.suggestMatchAmount(ctx, commit.Amount),
-		ExpiresAt:            time.Unix(int64(commit.ExpiresAt), 0).UTC(),
-		OnChainCommitID:      CommitIDToHex(id),
+		// #nosec G115 -- on-chain expiry is a Unix second timestamp; far within int64 range.
+		ExpiresAt:       time.Unix(int64(commit.ExpiresAt), 0).UTC(),
+		OnChainCommitID: CommitIDToHex(id),
 	}, nil
 }
 

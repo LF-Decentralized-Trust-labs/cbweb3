@@ -442,6 +442,9 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			mirroredOut,
 			req.AmountOut,
 			req.CorrelationID,
+			// extras: no burn-from / beneficiary override (legacy executor fallbacks),
+			// but bind the position to the swap tx so replay protection applies (R2-CR-6).
+			"", "", swapResult.TxHash,
 		)
 		if bridgeOutErr != nil {
 			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("bridge-out failed (partial success): %v", bridgeOutErr))
