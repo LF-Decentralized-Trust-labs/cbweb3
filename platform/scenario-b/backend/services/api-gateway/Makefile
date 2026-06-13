@@ -1,10 +1,10 @@
 GO ?= go
 GOSEC ?= $(shell $(GO) env GOPATH)/bin/gosec
-# Honest baseline: the suite currently covers ~19% of ./internal/... statements.
-# The previous 90% value was aspirational and never actually passed in CI. Keep
-# this slightly below the real number as a ratchet floor and raise it as test
-# coverage grows, rather than letting an unmet gate hide real failures.
-COVERAGE_THRESHOLD ?= 18
+# Project requirement: 80% statement coverage on ./internal/...
+# The suite currently covers only ~19%, so this gate fails until coverage is
+# raised — tracked as a follow-up task (increase test coverage to 80%). This is
+# the real target, not a ratchet floor; do not lower it to mask the gap.
+COVERAGE_THRESHOLD ?= 80
 
 .PHONY: test test-coverage vet security ci
 
