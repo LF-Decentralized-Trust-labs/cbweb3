@@ -199,6 +199,28 @@ func TestBridgeOut_AmountMismatchRejected(t *testing.T) {
 	assert.Equal(t, 0, f.enqueuer.calls)
 }
 
+// A zero (or otherwise non-positive) amount_out is rejected before any verification or
+// enqueue, preventing a phantom zero-amount bridge-out position (R2-CR-6 review).
+func TestBridgeOut_ZeroAmountRejected(t *testing.T) {
+	swap := verifiedSwapOK()
+	swap.AmountOut = "0"
+	f := newBridgeOutFixture(&stubSwapVerifier{swap: swap}, &stubDuplicateFinder{})
+
+	body := `{
+		"correlation_id": "corr-1",
+		"swap_tx_hash": "0xfeed",
+		"amount_out": "0",
+		"beneficiary_bank_id": "bank-b",
+		"spoke_out": "spoke-b"
+	}`
+	resp, parsed := postBridgeOut(t, f.app, body)
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Equal(t, "INVALID_AMOUNT", parsed["code"])
+	assert.Equal(t, 0, f.enqueuer.calls)
+	assert.Equal(t, 0, f.verifier.calls, "zero amount must be rejected before touching the Hub")
+}
+
 // Happy path: the burn is enqueued with the on-chain amount and the on-chain recipient
 // as burn-from — never the client-supplied swap_sender_address.
 func TestBridgeOut_BurnsFromVerifiedRecipient(t *testing.T) {

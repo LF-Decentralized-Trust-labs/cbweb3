@@ -22,11 +22,18 @@ package handlers
 import (
 	"context"
 	"log"
+	"math/big"
 	"strings"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	"github.com/gofiber/fiber/v2"
 )
+
+// sanitizeLogField strips CR/LF so attacker-controlled fields (swap_tx_hash,
+// correlation_id) cannot inject forged log lines (R2-CR-6 review, Low).
+func sanitizeLogField(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
+}
 
 // CrossCurrencyBurnEnqueuerIface is the subset of BridgeBurnUnlockService used here.
 type CrossCurrencyBurnEnqueuerIface interface {
@@ -135,6 +142,15 @@ func (h *CrossCurrencyBridgeOutHandler) HandleBridgeOut(c *fiber.Ctx) error {
 			"error": "correlation_id, swap_tx_hash, amount_out, beneficiary_bank_id are required",
 		})
 	}
+	// Reject non-positive amounts up front: a production AMM would have reverted via
+	// minAmountOut, but a misconfigured contract or test relay could otherwise mint a
+	// phantom zero-amount bridge-out position (R2-CR-6 review, Medium).
+	if amt, ok := new(big.Int).SetString(strings.TrimSpace(req.AmountOut), 10); !ok || amt.Sign() <= 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "amount_out must be a positive integer",
+			"code":  "INVALID_AMOUNT",
+		})
+	}
 
 	if h.wTokenAddress == "" {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
@@ -161,7 +177,7 @@ func (h *CrossCurrencyBridgeOutHandler) HandleBridgeOut(c *fiber.Ctx) error {
 		}
 		if existing != nil {
 			log.Printf("[correlation_id=%s] bridge-out replay detected: swap_tx_hash=%s already consumed by position %s",
-				req.CorrelationID, req.SwapTxHash, existing.PositionID)
+				sanitizeLogField(req.CorrelationID), sanitizeLogField(req.SwapTxHash), existing.PositionID)
 			return c.Status(fiber.StatusOK).JSON(fiber.Map{
 				"status":         "duplicate",
 				"position_id":    existing.PositionID,
@@ -200,7 +216,7 @@ func (h *CrossCurrencyBridgeOutHandler) HandleBridgeOut(c *fiber.Ctx) error {
 	}
 	if req.SwapSenderAddress != "" && !strings.EqualFold(req.SwapSenderAddress, verified.Recipient) {
 		log.Printf("[correlation_id=%s] bridge-out: relay-claimed sender %s differs from verified recipient %s — using on-chain value",
-			req.CorrelationID, req.SwapSenderAddress, verified.Recipient)
+			sanitizeLogField(req.CorrelationID), sanitizeLogField(req.SwapSenderAddress), verified.Recipient)
 	}
 
 	// Resolve the beneficiary on-chain address from CB-B's own participants registry.
