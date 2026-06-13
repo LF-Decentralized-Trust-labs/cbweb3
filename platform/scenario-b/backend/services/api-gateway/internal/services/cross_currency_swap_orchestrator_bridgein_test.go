@@ -20,11 +20,12 @@ func (stubSwapRepo) GetByID(context.Context, string) (*domain.CrossCurrencySwapO
 func (stubSwapRepo) UpdateStatus(context.Context, string, domain.SwapOperationStatus) error {
 	return nil
 }
-func (stubSwapRepo) UpdateBridgeInPositionID(context.Context, string, string) error  { return nil }
-func (stubSwapRepo) UpdateAmountIn(context.Context, string, string) error            { return nil }
-func (stubSwapRepo) UpdateSwapTxHash(context.Context, string, string) error          { return nil }
-func (stubSwapRepo) UpdateBridgeOutPositionID(context.Context, string, string) error { return nil }
-func (stubSwapRepo) UpdateFailureReason(context.Context, string, string) error       { return nil }
+func (stubSwapRepo) UpdateBridgeInPositionID(context.Context, string, string) error { return nil }
+func (stubSwapRepo) UpdateSwapResult(context.Context, string, string, string) error { return nil }
+func (stubSwapRepo) UpdateBridgeOutPositionID(context.Context, string, string) error {
+	return nil
+}
+func (stubSwapRepo) UpdateFailureReason(context.Context, string, string) error { return nil }
 
 type stubLockMint struct{ called bool }
 
@@ -152,6 +153,21 @@ func (stubActivePoller) GetBridgeState(context.Context, string) (domain.BridgeSt
 	return domain.BridgeStateActive, nil
 }
 
+// stubActiveThenReleasedPoller satisfies both bridge waits in the local CB self-service path:
+// the bridge-in step polls until ACTIVE, the bridge-out step polls until RELEASED. It reports
+// ACTIVE on the first call and RELEASED thereafter, so a test that runs the full happy path
+// does not block on the 120s waitForBridgeUnlocked timeout (a fixed-ACTIVE poller would, since
+// bridge-out never observes RELEASED).
+type stubActiveThenReleasedPoller struct{ calls int }
+
+func (p *stubActiveThenReleasedPoller) GetBridgeState(context.Context, string) (domain.BridgeState, error) {
+	p.calls++
+	if p.calls == 1 {
+		return domain.BridgeStateActive, nil
+	}
+	return domain.BridgeStateReleased, nil
+}
+
 // fixedAmountInSwap returns a swap whose realized amount_in is whatever the test sets,
 // modelling the post-fix client that decodes the true amount from LogSwap rather than
 // echoing MaxAmountIn.
@@ -209,7 +225,7 @@ func TestExecute_SlippageCheckPassesWithinCap(t *testing.T) {
 		stubCBOK{},
 		nil,
 		nil,
-		stubActivePoller{},
+		&stubActiveThenReleasedPoller{}, // ACTIVE for bridge-in, then RELEASED for bridge-out
 	).WithHubSignerAddress("0xCBSIGNER")
 
 	_, err := orch.Execute(context.Background(), CrossCurrencySwapRequest{
