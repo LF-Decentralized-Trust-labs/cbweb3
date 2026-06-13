@@ -99,6 +99,7 @@ func (c *CentralBankPoolClient) GetFeeBps(ctx context.Context, pair string) (uin
 	if err != nil {
 		return 0, err
 	}
+	// #nosec G115 -- fee is basis points, bounded to [0,10000] by the AMM contract; fits uint16.
 	return uint16(st.FeeRateBps), nil
 }
 
