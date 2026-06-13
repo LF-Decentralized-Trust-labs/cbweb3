@@ -451,6 +451,87 @@ contract FXAgreementTest is Test {
         fxAgreement.settle(tradeId);
     }
 
+    // ---------- Settlement idempotency (R1-12.4 gap 2: concurrent settlement idempotency) ----------
+
+    /// @dev Settling an already-SETTLED trade reverts; the state machine prevents a double-settle.
+    function test_Revert_Settle_DoubleSettle_Idempotent() public {
+        _proposeAcceptSettle();
+
+        vm.prank(centralBank);
+        vm.expectRevert(IFXAgreement.FXA__InvalidStateTransition.selector);
+        fxAgreement.settle(tradeId);
+
+        FXAgreementLibrary.FxAgreement memory agreement = fxAgreement.getAgreement(tradeId);
+        assertEq(
+            uint256(agreement.state),
+            uint256(FXAgreementLibrary.AgreementState.SETTLED),
+            "trade remains SETTLED after redundant settle"
+        );
+    }
+
+    /// @dev Two Central Banks racing to settle the same accepted trade: the first call settles it,
+    ///      the second reverts. Settlement is applied at most once (idempotent under concurrency).
+    function test_Revert_Settle_ConcurrentGovernors_OnlyFirstWins() public {
+        address centralBankB = makeAddr("centralBankB");
+        vm.prank(admin);
+        identityRegistry.registerParticipant(
+            centralBankB, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+        );
+
+        vm.prank(counterpartyA);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
+        vm.prank(counterpartyB);
+        fxAgreement.accept(tradeId);
+
+        // First governor settles successfully.
+        vm.prank(centralBank);
+        fxAgreement.settle(tradeId);
+
+        // Second governor's concurrent settle is rejected by the state guard.
+        vm.prank(centralBankB);
+        vm.expectRevert(IFXAgreement.FXA__InvalidStateTransition.selector);
+        fxAgreement.settle(tradeId);
+
+        FXAgreementLibrary.FxAgreement memory agreement = fxAgreement.getAgreement(tradeId);
+        assertEq(uint256(agreement.state), uint256(FXAgreementLibrary.AgreementState.SETTLED));
+    }
+
+    /// @dev A cancelled trade is terminal and can never transition to SETTLED.
+    function test_Revert_Settle_AfterCancel() public {
+        vm.prank(counterpartyA);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
+        vm.prank(counterpartyA);
+        fxAgreement.cancel(tradeId);
+
+        vm.prank(centralBank);
+        vm.expectRevert(IFXAgreement.FXA__InvalidStateTransition.selector);
+        fxAgreement.settle(tradeId);
+    }
+
     function test_ProposeOnBehalf_Success() public {
         vm.prank(centralBank);
         fxAgreement.proposeOnBehalf(
@@ -640,5 +721,29 @@ contract FXAgreementTest is Test {
 
         assertTrue(address(deployScript.fxAgreement()) != address(0), "FXAgreement was not deployed");
         assertGt(address(deployScript.fxAgreement()).code.length, 0, "FXAgreement has no bytecode");
+    }
+
+    // ---------- helpers ----------
+
+    /// @dev Drives a trade through propose → accept → settle, leaving it in the SETTLED state.
+    function _proposeAcceptSettle() internal {
+        vm.prank(counterpartyA);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
+        vm.prank(counterpartyB);
+        fxAgreement.accept(tradeId);
+        vm.prank(centralBank);
+        fxAgreement.settle(tradeId);
     }
 }
