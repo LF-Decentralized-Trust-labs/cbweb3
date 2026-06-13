@@ -25,6 +25,48 @@ import { createCrossCurrencySwapRelayFromEnv } from "./cross-currency-swap-relay
 
 
 // ---------------------------------------------------------------------------
+// Hub RPC readiness
+// ---------------------------------------------------------------------------
+
+/**
+ * Poll the hub Besu JSON-RPC until it answers eth_blockNumber, so the watcher is only
+ * started once the chain is actually reachable. This avoids the failure mode where the
+ * relay starts before (or during a restart of) the hub Besu and the watcher races a node
+ * that is not yet serving requests. Bounded wait — falls through after maxWaitMs so the
+ * watcher's own self-healing (request timeouts + provider reconnect) takes over.
+ */
+async function waitForHubRpc(rpcUrl: string, maxWaitMs = 60_000, intervalMs = 2_000): Promise<void> {
+  if (!rpcUrl) return;
+  const deadline = Date.now() + maxWaitMs;
+  for (;;) {
+    try {
+      const resp = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (resp.ok) {
+        const json = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
+        if (json["result"]) {
+          console.log(`[cacti] hub Besu RPC ready at ${rpcUrl} (block ${String(json["result"])})`);
+          return;
+        }
+      }
+    } catch {
+      // not ready yet — keep polling until the deadline.
+    }
+    if (Date.now() >= deadline) {
+      console.warn(
+        `[cacti] hub Besu RPC not ready after ${maxWaitMs}ms — starting watcher anyway (it self-heals)`,
+      );
+      return;
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Bootstrap
 // ---------------------------------------------------------------------------
 
@@ -67,6 +109,9 @@ async function main(): Promise<void> {
   const abortController = new AbortController();
   const lcrWatcher = createLiquidityCommitWatcherFromEnv();
   if (lcrWatcher) {
+    // Wait for the hub chain to be reachable before polling, so a relay that comes up
+    // before (or during a restart of) the hub Besu does not race an unavailable node.
+    await waitForHubRpc(process.env["HUB_BESU_RPC"] ?? "");
     lcrWatcher.start(abortController.signal);
     console.log("[cacti] LiquidityCommitWatcher started");
   } else {
