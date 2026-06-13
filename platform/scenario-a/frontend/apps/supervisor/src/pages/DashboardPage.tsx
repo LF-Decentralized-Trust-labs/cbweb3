@@ -2,12 +2,16 @@ import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Table
 import { useEffect } from "react";
 import { useNetworkStore, useStabilityStore, useWebsocketStore } from "../stores";
 
-const badgeFromRatio = (imbalanced: boolean): "destructive" | "success" => (imbalanced ? "destructive" : "success");
+const badgeFromState = (state: string): "default" | "secondary" | "destructive" | "warning" => {
+  if (state === "REVEALED") return "default";
+  if (state === "LOCKED") return "secondary";
+  if (state === "EXPIRED") return "destructive";
+  return "warning";
+};
 
 export function DashboardPage() {
   const { overview, refresh } = useNetworkStore();
-  const pools = useStabilityStore((state) => state.pools);
-  const refreshStability = useStabilityStore((state) => state.refresh);
+  const { htlcs, refresh: refreshStability } = useStabilityStore();
   const events = useWebsocketStore((state) => state.events);
 
   useEffect(() => {
@@ -17,7 +21,7 @@ export function DashboardPage() {
 
   return (
     <div className="min-h-full space-y-4">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total tCeBM Supply</CardDescription>
@@ -32,20 +36,14 @@ export function DashboardPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Cross-border Agreements</CardDescription>
-            <CardTitle>{overview?.activeAgreements ?? "-"}</CardTitle>
+            <CardDescription>Active HTLCs</CardDescription>
+            <CardTitle>{overview?.activeHTLCs ?? "-"}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Healthy Pools</CardDescription>
-            <CardTitle>{overview?.healthyPools ?? "-"}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Imbalanced Pools</CardDescription>
-            <CardTitle>{overview?.imbalancedPools ?? "-"}</CardTitle>
+            <CardDescription>Pending Settlements</CardDescription>
+            <CardTitle>{overview?.pendingSettlements ?? "-"}</CardTitle>
           </CardHeader>
         </Card>
       </section>
@@ -53,28 +51,35 @@ export function DashboardPage() {
       <section className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Liquidity Health</CardTitle>
-            <CardDescription>AMM pair ratios and threshold checks (70/30).</CardDescription>
+            <CardTitle>HTLC Settlement Status</CardTitle>
+            <CardDescription>Active and recent cross-border HTLC contracts.</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Pair</TableHead>
-                  <TableHead>Ratio</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Counterparty</TableHead>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>State</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pools.map((pool) => (
-                  <TableRow key={pool.pair}>
-                    <TableCell>{pool.pair}</TableCell>
-                    <TableCell>{pool.ratioA}/{pool.ratioB}</TableCell>
+                {htlcs.map((h) => (
+                  <TableRow key={h.id}>
+                    <TableCell className="font-mono text-xs">{h.id.slice(0, 10)}…</TableCell>
+                    <TableCell>{h.counterparty}</TableCell>
+                    <TableCell>{h.amount.toLocaleString()} {h.currency}</TableCell>
                     <TableCell>
-                      <Badge variant={badgeFromRatio(pool.isImbalanced)}>{pool.isImbalanced ? "IMBALANCED" : "HEALTHY"}</Badge>
+                      <Badge variant={badgeFromState(h.state)}>{h.state}</Badge>
                     </TableCell>
                   </TableRow>
                 ))}
+                {!htlcs.length ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">No active HTLCs</TableCell>
+                  </TableRow>
+                ) : null}
               </TableBody>
             </Table>
           </CardContent>

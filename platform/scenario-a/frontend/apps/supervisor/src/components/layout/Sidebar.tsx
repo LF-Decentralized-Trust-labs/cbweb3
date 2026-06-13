@@ -1,12 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { Activity, ShieldCheck, Users, Search, SlidersHorizontal, Settings, FileSearch } from "lucide-react";
+import { Activity, ShieldCheck, Users, Search, Settings, FileSearch } from "lucide-react";
 
 const links = [
   { to: "/", label: "Dashboard", icon: Activity },
-  { to: "/liquidity", label: "Liquidity Monitor", icon: SlidersHorizontal },
   { to: "/participants", label: "Compliance Registry", icon: Users },
   { to: "/audit", label: "Audit Vault", icon: Search },
-  { to: "/stability", label: "Stability Insights", icon: ShieldCheck },
+  { to: "/stability", label: "Settlement Health", icon: ShieldCheck },
   { to: "/investigation", label: "Investigation", icon: FileSearch },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
@@ -15,7 +14,6 @@ export function Sidebar() {
   return (
     <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:border-b-0 md:border-r">
       <div className="mb-3 space-y-1">
-        {/* <PlatformLogo imageClassName="h-7" /> */}
         <p className="text-xs uppercase tracking-wide text-muted-foreground">LNET</p>
         <p className="text-sm font-semibold">Supervisor Portal</p>
       </div>

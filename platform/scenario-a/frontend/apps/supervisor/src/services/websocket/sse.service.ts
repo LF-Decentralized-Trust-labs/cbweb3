@@ -15,11 +15,11 @@ class MockSSEService {
     this.timer = setInterval(() => {
       const event: SupervisorEvent = {
         id: `evt_${Math.random().toString(36).slice(2, 10)}`,
-        type: Math.random() > 0.66 ? "POOL_IMBALANCE" : Math.random() > 0.5 ? "AUDIT_ACTIVITY" : "REGISTRY_STATUS",
+        type: Math.random() > 0.66 ? "HTLC_TIMEOUT" : Math.random() > 0.5 ? "AUDIT_ACTIVITY" : "REGISTRY_STATUS",
         severity: Math.random() > 0.7 ? "CRITICAL" : "HIGH",
         message:
           Math.random() > 0.66
-            ? "Imbalance alert from Liquidity Monitor (threshold exceeded 70/30)"
+            ? "HTLC approaching timeout — lock expiry within threshold window"
             : Math.random() > 0.5
               ? "New compliance audit activity recorded"
               : "Compliance registry status update received",

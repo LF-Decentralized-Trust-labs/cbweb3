@@ -13,18 +13,16 @@ export const networkApi = {
       return {
         totalSupply: 0,
         activeInstitutions,
-        activeAgreements: 0,
-        healthyPools: 0,
-        imbalancedPools: 0,
+        activeHTLCs: 0,
+        pendingSettlements: 0,
         lastUpdatedAt: new Date().toISOString(),
       };
     } catch {
       return {
         totalSupply: 0,
         activeInstitutions: 0,
-        activeAgreements: 0,
-        healthyPools: 0,
-        imbalancedPools: 0,
+        activeHTLCs: 0,
+        pendingSettlements: 0,
         lastUpdatedAt: new Date().toISOString(),
       };
     }

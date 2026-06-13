@@ -4,7 +4,6 @@ import { ProtectedRoute } from "../components/auth/ProtectedRoute";
 import { AppLayout } from "../components/layout/AppLayout";
 import { AuditVaultPage } from "../pages/AuditVaultPage";
 import { DashboardPage } from "../pages/DashboardPage";
-import { LiquidityMonitorPage } from "../pages/LiquidityMonitorPage";
 import { LoginPage } from "../pages/LoginPage";
 import { ParticipantManagementPage } from "../pages/ParticipantManagementPage";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -24,7 +23,6 @@ export const routes: RouteObject[] = [
         element: <AppLayout />,
         children: [
           { index: true, element: <DashboardPage /> },
-          { path: "liquidity", element: <LiquidityMonitorPage /> },
           { path: "participants", element: <ParticipantManagementPage /> },
           { path: "audit", element: <AuditVaultPage /> },
           { path: "stability", element: <StabilityControlsPage /> },

@@ -1,11 +1,13 @@
-export interface PoolStatus {
-  pair: string;
-  reserveA: number;
-  reserveB: number;
-  ratioA: number;
-  ratioB: number;
-  isImbalanced: boolean;
-  updatedAt: string;
+export type HTLCState = "LOCKED" | "REVEALED" | "REFUNDED" | "EXPIRED";
+
+export interface HTLCSummary {
+  id: string;
+  state: HTLCState;
+  amount: number;
+  currency: string;
+  counterparty: string;
+  expiresAt: string;
+  createdAt: string;
 }
 
 export interface CircuitBreakerRequest {
@@ -13,15 +15,8 @@ export interface CircuitBreakerRequest {
   reason: string;
 }
 
-export interface AMMConfigRequest {
-  feeBps: number;
-  slippageBps: number;
-  reason: string;
-}
-
 export interface StabilityAlert {
   id: string;
-  pair: string;
   severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   message: string;
   createdAt: string;
