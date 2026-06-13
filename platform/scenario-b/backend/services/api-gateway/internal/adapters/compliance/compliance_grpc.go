@@ -191,8 +191,8 @@ func (a *GRPCAdapter) GetAuditLogs(ctx context.Context, category, severity, from
 		Severity: severity,
 		FromDate: fromDate,
 		ToDate:   toDate,
-		Page:     int32(page),  // #nosec G115 -- pagination value; overflow not reachable in practice
-		Limit:    int32(limit), // #nosec G115 -- pagination value; overflow not reachable in practice
+		Page:     int32(page),  // #nosec G115 -- pagination value, validated/small; fits int32.
+		Limit:    int32(limit), // #nosec G115 -- pagination value, validated/small; fits int32.
 	})
 	if err != nil {
 		return nil, err

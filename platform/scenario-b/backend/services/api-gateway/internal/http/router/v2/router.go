@@ -64,6 +64,12 @@ type Dependencies struct {
 	// CrossCurrencyBeneficiaryResolver resolves a bank_id to its on-chain wallet address.
 	// CB-B uses this to determine where to mint tCeBM without the frontend knowing peer addresses.
 	CrossCurrencyBeneficiaryResolver handlers.BeneficiaryResolverIface
+	// CrossCurrencySwapVerifier verifies the relay-claimed swap on the Hub before any
+	// burn/mint (R2-CR-6). The bridge-out endpoint fails closed when nil.
+	CrossCurrencySwapVerifier handlers.SwapVerifierIface
+	// CrossCurrencyDuplicateFinder is the swap_tx_hash idempotency lookup for bridge-out
+	// replay protection (R2-CR-6).
+	CrossCurrencyDuplicateFinder handlers.BridgeOutDuplicateFinderIface
 	// CrossCurrencyLockMintEnqueuer enables the POST /internal/amm/cross-currency-bridge-in route.
 	// Set only on CB gateways that act as bridge-in issuers (e.g. CB-A in BRL→ARS flow).
 	CrossCurrencyLockMintEnqueuer handlers.CrossCurrencyLockMintEnqueuerIface
@@ -490,7 +496,7 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 			deps.WTokenAddress,
 			deps.FiatTokenAddress,
 			deps.SpokeNetwork,
-		)
+		).WithSwapVerification(deps.CrossCurrencySwapVerifier, deps.CrossCurrencyDuplicateFinder)
 		app.Post("/internal/amm/cross-currency-bridge-out",
 			middleware.RequireRelayAuth(deps.InternalRelayAuthSecret),
 			ccboh.HandleBridgeOut,

@@ -65,20 +65,18 @@ func (r *crossCurrencySwapRepository) UpdateBridgeInPositionID(ctx context.Conte
 		Update("bridge_in_position_id", positionID).Error
 }
 
-// UpdateAmountIn persists the actual amount_in after the AMM swap executes on Hub.
-func (r *crossCurrencySwapRepository) UpdateAmountIn(ctx context.Context, swapID string, amountIn string) error {
+// UpdateSwapResult atomically persists the swap tx hash and the realized amount_in after the
+// AMM swap executes on Hub. Both columns are written in a single UPDATE so a crash cannot leave
+// the record with a tx hash but a stale/empty amount_in (which now holds the real cost decoded
+// from LogSwap, not the MaxAmountIn cap).
+func (r *crossCurrencySwapRepository) UpdateSwapResult(ctx context.Context, swapID string, txHash string, amountIn string) error {
 	return r.db.WithContext(ctx).
 		Model(&domain.CrossCurrencySwapOperation{}).
 		Where("swap_id = ?", swapID).
-		Update("amount_in", amountIn).Error
-}
-
-// UpdateSwapTxHash updates the swap_tx_hash field after swap execution on Hub.
-func (r *crossCurrencySwapRepository) UpdateSwapTxHash(ctx context.Context, swapID string, txHash string) error {
-	return r.db.WithContext(ctx).
-		Model(&domain.CrossCurrencySwapOperation{}).
-		Where("swap_id = ?", swapID).
-		Update("swap_tx_hash", txHash).Error
+		Updates(map[string]interface{}{
+			"swap_tx_hash": txHash,
+			"amount_in":    amountIn,
+		}).Error
 }
 
 // UpdateBridgeOutPositionID updates the bridge_out_position_id field after bridge-out initiated.

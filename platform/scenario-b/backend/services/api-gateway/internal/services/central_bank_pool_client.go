@@ -99,7 +99,8 @@ func (c *CentralBankPoolClient) GetFeeBps(ctx context.Context, pair string) (uin
 	if err != nil {
 		return 0, err
 	}
-	return uint16(st.FeeRateBps), nil // #nosec G115 -- FeeRateBps is a BPS value (0–10000), always fits in uint16
+	// #nosec G115 -- fee is basis points, bounded to [0,10000] by the AMM contract; fits uint16.
+	return uint16(st.FeeRateBps), nil
 }
 
 // GetHubLiquidityConfig fetches sovereign AMM deployment info from the spoke CB (T054 option B).

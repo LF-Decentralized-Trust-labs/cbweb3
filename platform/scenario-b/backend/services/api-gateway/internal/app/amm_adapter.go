@@ -62,7 +62,8 @@ func (a *ammAdapter) GetFeeBpsForPair(ctx context.Context, pair string) (uint16,
 	if err != nil {
 		return 0, err
 	}
-	return uint16(bps), nil // #nosec G115 -- bps is a BPS value (0–10000), always fits in uint16
+	// #nosec G115 -- fee is basis points, bounded to [0,10000] by the AMM contract; fits uint16.
+	return uint16(bps), nil
 }
 
 // --- AMMSwapper ---

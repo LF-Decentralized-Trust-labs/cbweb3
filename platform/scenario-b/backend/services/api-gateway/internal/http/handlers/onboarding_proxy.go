@@ -78,7 +78,8 @@ func (h *OnboardingProxyHandler) InitiateCredentialRequest(c *fiber.Ctx) error {
 
 	// Read CSR from filesystem.
 	csrPath := filepath.Join(h.pkiDir, h.bankCode+".csr")
-	csrBytes, err := os.ReadFile(csrPath) // #nosec G304 -- path built from service config (pkiDir + bankCode), not user input
+	// #nosec G304 -- path is built from server config (pkiDir, bankCode), not request input.
+	csrBytes, err := os.ReadFile(csrPath)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fmt.Sprintf("read CSR (%s): %v", csrPath, err),
@@ -330,7 +331,8 @@ func (h *OnboardingProxyHandler) postJSON(c *fiber.Ctx, path string, body []byte
 // PKI_DIR/{bankCode}.key and returns the DER-encoded signature as hex.
 func (h *OnboardingProxyHandler) signNonceP256(nonceHex string) (string, error) {
 	keyPath := filepath.Join(h.pkiDir, h.bankCode+".key")
-	keyData, err := os.ReadFile(keyPath) // #nosec G304 -- path built from service config (pkiDir + bankCode), not user input
+	// #nosec G304 -- path is built from server config (pkiDir, bankCode), not request input.
+	keyData, err := os.ReadFile(keyPath)
 	if err != nil {
 		return "", fmt.Errorf("read key %s: %w", keyPath, err)
 	}
@@ -458,7 +460,8 @@ func (h *OnboardingProxyHandler) PKILogin(c *fiber.Ctx) error {
 
 	// Read saved participant certificate.
 	certPath := filepath.Join(h.pkiDir, h.bankCode+"-participant.crt")
-	certData, err := os.ReadFile(certPath) // #nosec G304 -- path built from service config (pkiDir + bankCode), not user input
+	// #nosec G304 -- path is built from server config (pkiDir, bankCode), not request input.
+	certData, err := os.ReadFile(certPath)
 	if err != nil {
 		return c.Status(fiber.StatusPreconditionFailed).JSON(fiber.Map{
 			"error": fmt.Sprintf("participant certificate not found at %s; complete onboarding first", certPath),

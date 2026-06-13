@@ -21,8 +21,11 @@ type CrossCurrencySwapRepository interface {
 	GetByID(ctx context.Context, swapID string) (*domain.CrossCurrencySwapOperation, error)
 	UpdateStatus(ctx context.Context, swapID string, status domain.SwapOperationStatus) error
 	UpdateBridgeInPositionID(ctx context.Context, swapID string, positionID string) error
-	UpdateAmountIn(ctx context.Context, swapID string, amountIn string) error
-	UpdateSwapTxHash(ctx context.Context, swapID string, txHash string) error
+	// UpdateSwapResult atomically persists both the swap tx hash and the realized amount_in.
+	// These two fields must be written together: amount_in now holds the real cost decoded
+	// from LogSwap (not the MaxAmountIn cap), so a partial write would leave the record with a
+	// tx hash but a stale/empty amount_in.
+	UpdateSwapResult(ctx context.Context, swapID string, txHash string, amountIn string) error
 	UpdateBridgeOutPositionID(ctx context.Context, swapID string, positionID string) error
 	UpdateFailureReason(ctx context.Context, swapID string, reason string) error
 }
@@ -310,8 +313,12 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			CorrelationID:  req.CorrelationID,
 			PayerBankID:    req.PayerBankID,
 			SourceCurrency: req.SourceCurrency,
-			Amount:         req.MaxAmountIn, // Use max for bridge (actual amount_in determined after swap)
-			SpokeIn:        spokeIn,
+			// Bridge in the full cap: the worst-case amount_in must be reserved on the Hub
+			// before the swap runs, since the realized cost is only known afterwards.
+			// TODO(stranded-buffer): the residue (MaxAmountIn − realized amount_in) is left on
+			// the Hub signer with no automatic bridge-back. Tracked as a separate R2 follow-up.
+			Amount:  req.MaxAmountIn,
+			SpokeIn: spokeIn,
 			// Mint W-<source> to this gateway's swap signer so Step 2 can spend it (and
 			// Step 3 burns from the same address). Mirrors bridge-out's SwapSenderAddress.
 			SwapSenderAddress: o.hubSignerAddress,
@@ -330,7 +337,10 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			spokeIn,
 			nativeAsset,
 			mirroredAsset,
-			req.MaxAmountIn, // Use max for bridge (actual amount_in determined after swap)
+			// Bridge in the full cap (worst-case amount_in reserved before the swap runs).
+			// TODO(stranded-buffer): the residue (MaxAmountIn − realized amount_in) is left on
+			// the Hub signer with no automatic bridge-back. Tracked as a separate R2 follow-up.
+			req.MaxAmountIn,
 			req.CorrelationID)
 		if err != nil {
 			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("bridge-in failed: %v", err))
@@ -374,8 +384,7 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		return nil, fmt.Errorf("swap failed: %w", err)
 	}
 
-	_ = o.swapRepo.UpdateSwapTxHash(ctx, req.SwapID, swapResult.TxHash)
-	_ = o.swapRepo.UpdateAmountIn(ctx, req.SwapID, swapResult.AmountIn)
+	_ = o.swapRepo.UpdateSwapResult(ctx, req.SwapID, swapResult.TxHash, swapResult.AmountIn)
 	log.Printf("[correlation_id=%s] swap completed (tx_hash=%s, amount_in=%s)",
 		req.CorrelationID, swapResult.TxHash, swapResult.AmountIn)
 
@@ -470,6 +479,9 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			mirroredOut,
 			req.AmountOut,
 			req.CorrelationID,
+			// extras: no burn-from / beneficiary override (legacy executor fallbacks),
+			// but bind the position to the swap tx so replay protection applies (R2-CR-6).
+			"", "", swapResult.TxHash,
 		)
 		if bridgeOutErr != nil {
 			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("bridge-out failed (partial success): %v", bridgeOutErr))
