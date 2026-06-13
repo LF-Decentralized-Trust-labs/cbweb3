@@ -182,7 +182,11 @@ func TestFullHappyPath(t *testing.T) {
 			if s.Status == "FAILED" || s.Status == "CANCELLED" {
 				return false, fmt.Errorf("commit A reached terminal failure status: %s", s.Status)
 			}
-			return s.Status == "EXECUTED" || s.Status == "MATCHED", nil
+			// Require EXECUTED only (R1-12.4 gap 3): MATCHED merely confirms the on-chain
+			// CommitMatched event fired; EXECUTED additionally proves the Cacti watcher detected
+			// it, forwarded to the gateway, and the single-sided liquidity was added. Accepting
+			// MATCHED here would let the test pass without exercising the watcher's forward path.
+			return s.Status == "EXECUTED", nil
 		})
 
 		t.Log("Step 10: Polling pool status until ACTIVE (both commits executed)...")
