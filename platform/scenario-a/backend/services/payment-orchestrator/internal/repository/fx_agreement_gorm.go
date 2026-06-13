@@ -29,6 +29,16 @@ func NewGormFXAgreementRepository(dsn string) (ports.FXAgreementRepository, erro
 	return &gormFXAgreementRepository{db: db}, nil
 }
 
+// NewGormFXAgreementRepositoryFromDB uses an already-open *gorm.DB, runs AutoMigrate,
+// and returns an FXAgreementRepository. Use this when sharing a single DB connection
+// across multiple repositories.
+func NewGormFXAgreementRepositoryFromDB(db *gorm.DB) (ports.FXAgreementRepository, error) {
+	if err := db.AutoMigrate(&FXAgreementModel{}, &FXAgreementEventModel{}, &RelayDeliveryRecordModel{}); err != nil {
+		return nil, err
+	}
+	return &gormFXAgreementRepository{db: db}, nil
+}
+
 // CreateAgreement persists a new FX agreement. Returns an error if trade_id already exists.
 func (r *gormFXAgreementRepository) CreateAgreement(ctx context.Context, rec *domain.FXAgreementRecord) error {
 	m := fxAgreementToModel(rec)
