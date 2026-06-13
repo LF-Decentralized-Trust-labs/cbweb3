@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	authadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
@@ -21,12 +19,16 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
 	dbinit "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/db/init"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
 	v2router "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router/v2"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/relayauth"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	ammclient "github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/amm"
 	tcebmclient "github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/tcebm"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"google.golang.org/grpc"
@@ -500,6 +502,17 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			}
 		}
 
+		// R2-CR-6: per-CB signer for outbound internal relay calls, loaded from this
+		// gateway's PKI key (PKI_DIR/<BANK_CODE>.key). nil falls back to the legacy secret.
+		var relaySigner *relayauth.Signer
+		if cfg.PKIDir != "" && cfg.BankCode != "" {
+			if s, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.BankCode); sErr == nil {
+				relaySigner = s
+			} else {
+				log.Printf("[app] relay signing key unavailable for %q: %v (internal relay calls use legacy secret)", cfg.BankCode, sErr)
+			}
+		}
+
 		orchestrator := services.NewCrossCurrencySwapOrchestrator(
 			swapRepo,
 			quoteRepo,
@@ -531,6 +544,12 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			relaySecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
 			if relaySecret != "" {
 				bridgeInRelay := services.NewCrossCurrencyBridgeInRelay(cbURL, relaySecret)
+				// R2-CR-6: sign bridge-in with this gateway's PKI key so the issuing CB can
+				// authenticate it asymmetrically (per-CB), not just on the shared secret.
+				if relaySigner != nil {
+					bridgeInRelay = bridgeInRelay.WithSigner(relaySigner)
+					log.Printf("[app] bridge-in relay: per-CB signature enabled (key-id=%s)", cfg.BankCode)
+				}
 				orchestrator = orchestrator.WithBridgeInRelay(bridgeInRelay)
 				log.Printf("[app] CrossCurrencySwapOrchestrator: bridge-in relay wired (CB %s)", cbURL)
 			} else {
@@ -620,6 +639,23 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// 007-bridge-based-cb-liquidity: Sovereign CB liquidity services.
 	// Requires LIQUIDITY_COMMIT_REGISTRY_ADDRESS and INTERNAL_RELAY_AUTH_SECRET.
 	deps.InternalRelayAuthSecret = os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
+	// R2-CR-6: per-CB asymmetric relay auth. Pin peer verifying keys from the PKI certs
+	// (PKI_DIR/<entity>.crt). Internal relay routes prefer a valid signature and fall back
+	// to the shared secret until RELAY_REQUIRE_SIGNATURE is set (post-cutover enforcement).
+	relayRegistry, relayRegErr := relayauth.LoadRegistryGlob(cfg.PKIDir)
+	if relayRegErr != nil {
+		log.Printf("[app] relay auth: could not load peer certs from PKI_DIR=%q: %v", cfg.PKIDir, relayRegErr)
+	}
+	deps.RelayAuth = middleware.RelayAuthConfig{
+		Registry:         relayRegistry,
+		LegacySecret:     deps.InternalRelayAuthSecret,
+		RequireSignature: cfg.RelayRequireSignature,
+	}
+	if relayRegistry != nil && relayRegistry.Len() > 0 {
+		log.Printf("[app] relay auth: %d peer key(s) pinned from PKI_DIR; require_signature=%v", relayRegistry.Len(), cfg.RelayRequireSignature)
+	} else {
+		log.Printf("[app] relay auth: no PKI peer keys pinned; internal routes use legacy shared secret")
+	}
 	lcrAddr := os.Getenv("LIQUIDITY_COMMIT_REGISTRY_ADDRESS")
 	if lcrAddr != "" && hubRPC != "" && signerKey != "" && db != nil {
 		chainID := int64(0)
