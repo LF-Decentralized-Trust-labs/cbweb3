@@ -5,3 +5,4 @@ export { reconciliationApi } from "./reconciliation.api";
 export { auditApi } from "./audit.api";
 export { paymentApi } from "./payment.api";
 export { htlcApi } from "./htlc.api";
+export { transferLimitsApi } from "./transfer-limits.api";

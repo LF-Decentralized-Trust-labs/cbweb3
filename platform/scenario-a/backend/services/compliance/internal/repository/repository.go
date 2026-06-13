@@ -79,6 +79,26 @@ type SystemParameter struct {
 	UpdatedBy string
 }
 
+// TransferLimit is the domain struct for a CB-configured daily transfer limit (R1-10.1).
+type TransferLimit struct {
+	LimitID       string
+	CentralBankID string
+	ParticipantID string
+	Currency      string
+	MaxAmount     string
+	IsActive      bool
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// TransferVolume tracks the daily accumulated volume for a participant/currency pair.
+type TransferVolume struct {
+	ParticipantID  string
+	Currency       string
+	WindowDate     time.Time
+	AccumulatedWei string
+}
+
 // --- Repository interface ---
 
 type Repository interface {
@@ -89,6 +109,14 @@ type Repository interface {
 	GetAuditLogs(ctx context.Context, f AuditFilter) ([]AuditRecord, error)
 	GetSystemParameter(ctx context.Context, key string) (string, bool, error)
 	UpsertSystemParameter(ctx context.Context, p SystemParameter) error
+	// Transfer Limits (R1-10.1)
+	CreateTransferLimit(ctx context.Context, limit TransferLimit) error
+	ListTransferLimits(ctx context.Context, centralBankID string) ([]TransferLimit, error)
+	FindApplicableLimit(ctx context.Context, centralBankID, participantID, currency string) (*TransferLimit, error)
+	DeleteTransferLimit(ctx context.Context, limitID string) error
+	DeductTransferVolume(ctx context.Context, participantID, currency, amountWei string, windowDate time.Time) error
+	RestoreTransferVolume(ctx context.Context, participantID, currency, amountWei string, windowDate time.Time) error
+	GetAccumulatedVolume(ctx context.Context, participantID, currency string, windowDate time.Time) (string, error)
 }
 
 // --- In-memory implementation (dev / testing) ---
@@ -98,12 +126,17 @@ type memoryRepository struct {
 	participants map[string]Participant
 	auditLogs    []AuditRecord
 	params       map[string]SystemParameter
+	// Transfer Limits (R1-10.1)
+	limits  map[string]TransferLimit // key = limitID
+	volumes map[string]string        // key = participantID|currency|date → accumulated wei
 }
 
 func NewMemoryRepository() Repository {
 	return &memoryRepository{
 		participants: map[string]Participant{},
 		params:       map[string]SystemParameter{},
+		limits:       map[string]TransferLimit{},
+		volumes:      map[string]string{},
 	}
 }
 
@@ -214,6 +247,8 @@ func NewGormRepository(dsn string) (Repository, error) {
 		&ParticipantModel{},
 		&AuditLogModel{},
 		&SystemParameterModel{},
+		&TransferLimitModel{},
+		&TransferVolumeModel{},
 	); err != nil {
 		return nil, err
 	}

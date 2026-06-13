@@ -43,6 +43,15 @@ type Dependencies struct {
 	// CBChecker enables the anti-G5-cross guard in mint-and-approve (FR-004 / T016).
 	// When nil, the guard is disabled and mint-and-approve behaves as before.
 	CBChecker handlers.CentralBankChecker
+	// TransferLimitHandler manages configurable CB daily transfer limits (R1-10.1).
+	// When nil, transfer limit endpoints are not registered.
+	TransferLimitHandler *handlers.TransferLimitHandler
+	// TransferLimitInternalHandler serves CB-internal pre-auth endpoints for commercial banks (R1-10.1 Option A).
+	// Registered only on CB gateways (CentralBankAPIURL == ""); nil on commercial banks.
+	TransferLimitInternalHandler *handlers.TransferLimitInternalHandler
+	// TransferLimitChecker enforces limits on bridge lock-mint and cross-currency swap (R1-10.1).
+	// When nil, enforcement is skipped (no limits configured).
+	TransferLimitChecker handlers.BridgeLimitCheckerIface
 	// InternalRelayAuthSecret is the shared secret for X-Relay-Auth on internal routes.
 	InternalRelayAuthSecret string
 	// FiatTokenAddress is the tCeBM contract address on this CB's spoke (TOKEN_ADDRESS).
@@ -79,6 +88,7 @@ type Dependencies struct {
 	// Simplified API config (008-fix-cb-liquidity)
 	SpokeNetwork      string // spoke-a, spoke-b (for bridge lock-mint derivation)
 	NativeAssetSymbol string // tCeBM_BRL, tCeBM_ARS (for bridge lock-mint derivation)
+	FiatSymbol        string // human-readable currency symbol for transfer-limit matching (e.g. "BRL", "ARS")
 	WTokenAddress     string // Hub W-tCeBM token address (for bridge + commit derivation)
 	BankCode          string // BANK_CODE fallback when JWT claims do not include BankID (bridge lock-mint)
 	CommitSide        string // A or B (derived from BANK_CODE for commit derivation)
@@ -136,6 +146,20 @@ func Register(app *fiber.App, deps Dependencies) {
 	registerPairRegistryRoutes(app, deps)
 	registerCurrencyRegistryRoutes(app, deps)
 	registerSovereignRoutes(app, deps)
+	registerTransferLimitInternalRoutes(app, deps)
+}
+
+// registerTransferLimitInternalRoutes registers the CB-internal pre-auth endpoints (R1-10.1 Option A).
+// Only registered on CB gateways (TransferLimitInternalHandler != nil); no-op on commercial banks.
+func registerTransferLimitInternalRoutes(app *fiber.App, deps Dependencies) {
+	if deps.TransferLimitInternalHandler == nil {
+		return
+	}
+	internal := app.Group("/internal/v2/transfer-limits",
+		middleware.RequireRelayAuth(deps.InternalRelayAuthSecret),
+	)
+	internal.Post("/check-and-deduct", deps.TransferLimitInternalHandler.HandleCheckAndDeduct)
+	internal.Post("/restore", deps.TransferLimitInternalHandler.HandleRestore)
 }
 
 // registerUS1Routes registers AMM quote, swap, and pool status routes (T045 / FR-027 / FR-028).
@@ -211,6 +235,13 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 				deps.BridgeBurnUnlockService,
 				deps.BridgePositionReader,
 			).SetFallbackBankCode(deps.BankCode)
+		}
+		// R1-10.1: attach transfer limit checker and fiat symbol to bridge handler when configured.
+		if deps.TransferLimitChecker != nil {
+			bh = bh.WithLimitChecker(deps.TransferLimitChecker)
+		}
+		if deps.FiatSymbol != "" {
+			bh = bh.WithFiatSymbol(deps.FiatSymbol)
 		}
 		if deps.AuthProvider != nil {
 			// spec-007 FR-001: CBs use the same lock-mint/burn-unlock/positions endpoints as
@@ -343,6 +374,24 @@ func registerUS3Routes(app *fiber.App, deps Dependencies) {
 			gh.SignResume,
 		)
 		gov.Get("/circuit-breaker/status", gh.GetCircuitBreakerStatus)
+	}
+
+	if deps.TransferLimitHandler != nil {
+		gov.Post("/transfer-limits",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			middleware.RequireCentralBankRole(),
+			deps.TransferLimitHandler.CreateTransferLimit,
+		)
+		gov.Get("/transfer-limits",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			middleware.RequireCentralBankRole(),
+			deps.TransferLimitHandler.ListTransferLimits,
+		)
+		gov.Delete("/transfer-limits/:id",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			middleware.RequireCentralBankRole(),
+			deps.TransferLimitHandler.DeleteTransferLimit,
+		)
 	}
 
 	oversight := app.Group("/api/v2/oversight")

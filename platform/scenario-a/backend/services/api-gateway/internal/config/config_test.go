@@ -28,3 +28,22 @@ func TestGetEnvIntFallback(t *testing.T) {
 		t.Fatalf("expected fallback 15, got %d", got)
 	}
 }
+
+func TestLoadFiatSymbol(t *testing.T) {
+	t.Setenv("FIAT_SYMBOL", "BRL")
+
+	cfg := Load()
+	if cfg.FiatSymbol != "BRL" {
+		t.Fatalf("expected FiatSymbol=BRL, got %q", cfg.FiatSymbol)
+	}
+}
+
+func TestLoadFiatSymbol_DefaultEmpty(t *testing.T) {
+	t.Parallel()
+
+	_ = os.Unsetenv("FIAT_SYMBOL")
+	cfg := Load()
+	if cfg.FiatSymbol != "" {
+		t.Fatalf("expected empty FiatSymbol when env not set, got %q", cfg.FiatSymbol)
+	}
+}

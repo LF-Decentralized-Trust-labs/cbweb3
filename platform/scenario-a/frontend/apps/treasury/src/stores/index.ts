@@ -7,3 +7,4 @@ export { usePaymentStore } from "./payment.store";
 export { useHtlcMonitorStore } from "./htlc.store";
 export { useWebsocketStore } from "./websocket.store";
 export { useUiStore } from "./ui.store";
+export { useTransferLimitsStore } from "./transfer-limits.store";

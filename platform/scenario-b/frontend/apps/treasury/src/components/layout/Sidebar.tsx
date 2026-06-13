@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, HandCoins, Coins, Flame, ShieldAlert, ScrollText, BadgeCheck, Settings } from "lucide-react";
+import { LayoutDashboard, HandCoins, Coins, Flame, ShieldAlert, ScrollText, BadgeCheck, Settings, Gauge } from "lucide-react";
 import { PlatformLogo } from "@cbweb3/ui";
 
 const links = [
@@ -10,6 +10,7 @@ const links = [
   { to: "/reconciliation", label: "Reconciliation", icon: ShieldAlert },
   { to: "/audit", label: "Audit", icon: ScrollText },
   { to: "/kyc", label: "KYC", icon: BadgeCheck },
+  { to: "/transfer-limits", label: "Transfer Limits", icon: Gauge },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 

@@ -26,6 +26,12 @@ type BridgePositionReaderIface interface {
 	ListPositions(ctx context.Context, stateFilter string) ([]services.BridgePositionResult, error)
 }
 
+// BridgeLimitCheckerIface is the transfer limit interface consumed by BridgeHandler (R1-10.1).
+type BridgeLimitCheckerIface interface {
+	CheckAndDeduct(ctx context.Context, payerBankID, currency, amountHuman string) error
+	Restore(ctx context.Context, payerBankID, currency, amountHuman string)
+}
+
 // BridgeHandler handles Lock&Mint / Burn&Unlock bridge operations.
 type BridgeHandler struct {
 	lockMintSvc   BridgeLockMintServiceIface
@@ -36,6 +42,12 @@ type BridgeHandler struct {
 	nativeAssetSymbol string
 	wTokenAddress     string
 	fallbackBankCode  string
+	// limitChecker enforces configurable CB daily transfer limits (R1-10.1). Optional.
+	limitChecker BridgeLimitCheckerIface
+	// fiatSymbol is the canonical currency symbol used for limit matching (e.g. "BRL").
+	// When set, overrides nativeAsset for CheckAndDeduct so limits can be expressed in
+	// human-readable symbols regardless of what NATIVE_ASSET_SYMBOL holds.
+	fiatSymbol string
 }
 
 // NewBridgeHandler creates a BridgeHandler (legacy mode - requires full payload).
@@ -66,6 +78,20 @@ func NewBridgeHandlerSimplified(
 // SetFallbackBankCode configures BANK_CODE fallback for owner resolution when JWT claims lack BankID.
 func (h *BridgeHandler) SetFallbackBankCode(bankCode string) *BridgeHandler {
 	h.fallbackBankCode = strings.TrimSpace(bankCode)
+	return h
+}
+
+// WithLimitChecker attaches a transfer limit checker to the bridge handler (R1-10.1).
+func (h *BridgeHandler) WithLimitChecker(checker BridgeLimitCheckerIface) *BridgeHandler {
+	h.limitChecker = checker
+	return h
+}
+
+// WithFiatSymbol sets the canonical currency symbol used when enforcing transfer limits on bridge
+// operations (R1-10.1). When set, this overrides the raw nativeAsset value (which may be a contract
+// address) so that limits stored as e.g. "BRL" are correctly matched.
+func (h *BridgeHandler) WithFiatSymbol(symbol string) *BridgeHandler {
+	h.fiatSymbol = strings.TrimSpace(symbol)
 	return h
 }
 
@@ -141,8 +167,27 @@ func (h *BridgeHandler) LockMint(c *fiber.Ctx) error {
 		log.Printf("[DEPRECATED] mirrored_asset in payload - should be derived from server config")
 	}
 
+	// R1-10.1: enforce daily transfer limit before submitting the lock.
+	// Use fiatSymbol (e.g. "BRL") as the canonical currency key when available so that limits
+	// expressed in human-readable symbols match correctly even if NATIVE_ASSET_SYMBOL is an address.
+	limitCurrency := nativeAsset
+	if h.fiatSymbol != "" {
+		limitCurrency = h.fiatSymbol
+	}
+	if h.limitChecker != nil {
+		if err := h.limitChecker.CheckAndDeduct(c.Context(), ownerBankID, limitCurrency, req.Amount); err != nil {
+			return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+				"error":      err.Error(),
+				"error_code": "TRANSFER_LIMIT_EXCEEDED",
+			})
+		}
+	}
+
 	pos, err := h.lockMintSvc.LockAndEnqueue(c.Context(), ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, req.Amount)
 	if err != nil {
+		if h.limitChecker != nil {
+			h.limitChecker.Restore(c.Context(), ownerBankID, limitCurrency, req.Amount)
+		}
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(pos)

@@ -196,6 +196,61 @@ message UpdateSystemParametersResponse {
   bool success = 1;
 }
 
+// ─── Transfer Limits (R1-10.1 / Scenario A) ─────────────────────────────────
+
+message TransferLimit {
+  string limit_id       = 1;
+  string central_bank_id = 2;
+  string participant_id  = 3; // empty = applies to all participants
+  string currency        = 4; // empty = applies to all currencies
+  string max_amount      = 5; // human-readable decimal (e.g. "500000")
+  bool   is_active       = 6;
+  string created_at      = 7; // ISO-8601 UTC
+  string updated_at      = 8;
+}
+
+message CreateTransferLimitRequest {
+  string participant_id = 1;
+  string currency       = 2;
+  string max_amount     = 3;
+  string actor_subject  = 4;
+}
+
+message CreateTransferLimitResponse {
+  TransferLimit limit = 1;
+}
+
+message ListTransferLimitsRequest {
+  string central_bank_id = 1;
+}
+
+message ListTransferLimitsResponse {
+  repeated TransferLimit limits = 1;
+}
+
+message DeleteTransferLimitRequest {
+  string limit_id      = 1;
+  string actor_subject = 2;
+}
+
+message CheckAndDeductTransferLimitRequest {
+  string payer_bank_id = 1;
+  string currency      = 2;
+  string amount_human  = 3;
+}
+
+message CheckAndDeductTransferLimitResponse {
+  bool   allowed    = 1;
+  string error_code = 2; // TRANSFER_LIMIT_EXCEEDED when allowed=false
+  string max_amount = 3; // populated when allowed=false
+}
+
+message RestoreTransferLimitRequest {
+  string payer_bank_id = 1;
+  string currency      = 2;
+  string amount_human  = 3;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────
 
 service ComplianceService {
@@ -215,4 +270,11 @@ service ComplianceService {
   rpc ToggleCircuitBreaker(ToggleCircuitBreakerRequest) returns (ToggleCircuitBreakerResponse);
   rpc GetSystemParameters(google.protobuf.Empty) returns (GetSystemParametersResponse);
   rpc UpdateSystemParameters(UpdateSystemParametersRequest) returns (UpdateSystemParametersResponse);
+
+  // Transfer Limits (R1-10.1)
+  rpc CreateTransferLimit(CreateTransferLimitRequest) returns (CreateTransferLimitResponse);
+  rpc ListTransferLimits(ListTransferLimitsRequest) returns (ListTransferLimitsResponse);
+  rpc DeleteTransferLimit(DeleteTransferLimitRequest) returns (google.protobuf.Empty);
+  rpc CheckAndDeductTransferLimit(CheckAndDeductTransferLimitRequest) returns (CheckAndDeductTransferLimitResponse);
+  rpc RestoreTransferLimit(RestoreTransferLimitRequest) returns (google.protobuf.Empty);
 }

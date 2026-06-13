@@ -47,5 +47,9 @@ func RunAutoMigrate(db *gorm.DB) error {
 		&apidomain.SwapQuote{},
 		&apidomain.SwapRollbackLog{},
 		&apidomain.SwapRateLimitCounter{},
+
+		// R1-10.1: configurable CB transfer limits + daily volume tracking
+		&apidomain.TransferLimit{},
+		&apidomain.TransferVolumeLog{},
 	)
 }
