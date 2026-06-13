@@ -13,18 +13,19 @@ import (
 
 // Config holds runtime settings loaded from environment variables.
 type Config struct {
-	AppPort            string
-	RequestTimeout     time.Duration
-	AuthGRPCAddr       string
-	ComplianceGRPCAddr string // compliance-orchestrator address (optional; enables governance endpoints)
-	PaymentGRPCAddr    string // payment-orchestrator address (optional; enables HTLC + token endpoints)
-	CookieSecure       bool   // true for HTTPS (Secure flag); false for plain HTTP
-	CentralBankAPIURL  string // when set, this gateway acts as a commercial bank and proxies onboarding calls to the CB
-	BankCode           string // commercial bank identifier (e.g. "bank-a"); required when CentralBankAPIURL is set
-	PKIDir             string // path to PKI files (CSR, keys); used by the smart proxy to load CSR
-	EntityBesuAddress        string // Besu address of this entity; used by the escrow proxy to enrich requests
-	CBTokenRecipientAddress  string // Central Bank's token recipient address (Besu address); receiver for token transfers in redeem flow
-	RelayAuthSecret          string // shared secret for X-Relay-Auth header on internal service-to-service endpoints
+	AppPort                 string
+	RequestTimeout          time.Duration
+	AuthGRPCAddr            string
+	ComplianceGRPCAddr      string // compliance-orchestrator address (optional; enables governance endpoints)
+	PaymentGRPCAddr         string // payment-orchestrator address (optional; enables HTLC + token endpoints)
+	CookieSecure            bool   // true for HTTPS (Secure flag); false for plain HTTP
+	CentralBankAPIURL       string // when set, this gateway acts as a commercial bank and proxies onboarding calls to the CB
+	BankCode                string // commercial bank identifier (e.g. "bank-a"); required when CentralBankAPIURL is set
+	PKIDir                  string // path to PKI files (CSR, keys); used by the smart proxy to load CSR
+	EntityBesuAddress       string // Besu address of this entity; used by the escrow proxy to enrich requests
+	CBTokenRecipientAddress string // Central Bank's token recipient address (Besu address); receiver for token transfers in redeem flow
+	RelayAuthSecret         string // shared secret for X-Relay-Auth header on internal service-to-service endpoints (legacy fallback)
+	RelayRequireSignature   bool   // when true, internal relay endpoints reject requests without a valid per-CB signature (post-cutover enforcement)
 	// Simplified bridge/liquidity config (008-fix-cb-liquidity API simplification)
 	SpokeNetwork      string // spoke-a, spoke-b (for bridge lock-mint derivation)
 	NativeAssetSymbol string // tCeBM_BRL, tCeBM_ARS (for bridge lock-mint derivation)
@@ -46,23 +47,24 @@ func Load() Config {
 	}
 
 	return Config{
-		AppPort:            getEnv("APP_PORT", "8080"),
-		RequestTimeout:     time.Duration(getEnvInt("REQUEST_TIMEOUT_SEC", 5)) * time.Second,
-		AuthGRPCAddr:       getEnv("AUTH_GRPC_ADDR", "localhost:9091"),
-		ComplianceGRPCAddr: getEnv("COMPLIANCE_GRPC_ADDR", "localhost:9093"),
-		PaymentGRPCAddr:    getEnv("PAYMENT_GRPC_ADDR", ""),
-		CookieSecure:       getEnvBool("COOKIE_SECURE", false),
-		CentralBankAPIURL:  getEnv("CENTRAL_BANK_API_URL", ""),
-		BankCode:           bankCode,
-		PKIDir:             getEnv("PKI_DIR", ""),
+		AppPort:                 getEnv("APP_PORT", "8080"),
+		RequestTimeout:          time.Duration(getEnvInt("REQUEST_TIMEOUT_SEC", 5)) * time.Second,
+		AuthGRPCAddr:            getEnv("AUTH_GRPC_ADDR", "localhost:9091"),
+		ComplianceGRPCAddr:      getEnv("COMPLIANCE_GRPC_ADDR", "localhost:9093"),
+		PaymentGRPCAddr:         getEnv("PAYMENT_GRPC_ADDR", ""),
+		CookieSecure:            getEnvBool("COOKIE_SECURE", false),
+		CentralBankAPIURL:       getEnv("CENTRAL_BANK_API_URL", ""),
+		BankCode:                bankCode,
+		PKIDir:                  getEnv("PKI_DIR", ""),
 		EntityBesuAddress:       getEnv("ENTITY_BESU_ADDRESS", ""),
 		CBTokenRecipientAddress: getEnv("CB_TOKEN_RECIPIENT_ADDRESS", ""),
 		RelayAuthSecret:         getEnv("INTERNAL_RELAY_AUTH_SECRET", ""),
+		RelayRequireSignature:   getEnvBool("RELAY_REQUIRE_SIGNATURE", false),
 		SpokeNetwork:            getEnv("SPOKE_NETWORK", ""),
 		NativeAssetSymbol:       getEnv("NATIVE_ASSET_SYMBOL", ""),
 		WTokenAddress:           getEnv("W_TOKEN_ADDRESS", ""),
-		CommitSide:         deriveCommitSide(bankCode),
-		ApproveSide:        deriveApproveSide(bankCode),
+		CommitSide:              deriveCommitSide(bankCode),
+		ApproveSide:             deriveApproveSide(bankCode),
 	}
 }
 
