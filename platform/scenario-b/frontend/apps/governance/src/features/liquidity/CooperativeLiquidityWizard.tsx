@@ -5,9 +5,9 @@ import { useAuthStore } from "../../stores/auth.store";
 import { usePaymentStore } from "../../stores";
 import { SOVEREIGN_FLOW_PHASE } from "../../types/liquidity.types";
 import type { CommitResult, CommitSide, PendingCommit } from "../../types/liquidity.types";
-import { displayToBase, formatAmountInput, formatTokenAmount, parseAmountInput } from "../../types";
+import { currencyFromTokenSymbol, displayToBase, formatAmountInput, formatTokenAmount, parseAmountInput } from "../../types";
 import { usePolling } from "../../hooks/usePolling";
-import { formatRemainingMs } from "./format";
+import { formatRemainingMs, poolSideInfo, sideRoleLabel } from "./format";
 import { useLiquidityStore } from "./liquidity.store";
 
 const WIZARD_STEPS = [
@@ -61,6 +61,8 @@ export function CooperativeLiquidityWizard({
 }: CooperativeLiquidityWizardProps) {
   const profile = useAuthStore((state) => state.profile);
   const tokenDecimals = usePaymentStore((state) => state.tokenDecimals) ?? 18;
+  // National currency from the CB's own (on-chain) tCeBM symbol; env fallback until loaded.
+  const nationalCurrency = currencyFromTokenSymbol(usePaymentStore((state) => state.tokenSymbol));
   const status = useLiquidityStore((state) => state.status);
   const error = useLiquidityStore((state) => state.error);
   const poolStatus = useLiquidityStore((state) => state.poolStatus);
@@ -283,8 +285,8 @@ export function CooperativeLiquidityWizard({
             {matchContext ? (
               <div className="rounded border border-blue-300 bg-blue-50 p-2 text-sm text-blue-800">
                 <strong>Matching a counterpart.</strong> They committed{" "}
-                <strong>{formatTokenAmount(matchContext.counterpartAmount, tokenDecimals)} tCeBM</strong> to side{" "}
-                <strong>{matchContext.counterpartSide}</strong>. The amount below is the FX-suggested
+                <strong>{formatTokenAmount(matchContext.counterpartAmount, tokenDecimals)} tCeBM</strong> to the{" "}
+                <strong>{sideRoleLabel(poolSideInfo(matchContext.counterpartSide, matchContext.poolPair, nationalCurrency), { fallbackLabel: `side ${matchContext.counterpartSide}` })}</strong> side. The amount below is the FX-suggested
                 equivalent on <strong>your</strong> side — adjust it if your rate differs, then lock-mint
                 your own tokens before committing.
               </div>
