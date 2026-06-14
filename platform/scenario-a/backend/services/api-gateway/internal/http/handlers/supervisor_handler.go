@@ -181,19 +181,24 @@ func (h *SupervisorHandler) DecryptTransaction(c *fiber.Ctx) error {
 		log.Printf("[supervisor] audit log write failed (non-fatal): %v", auditErr)
 	}
 
-	// Zeto locked states don't embed the intended receiver — they only have owner + delegate.
-	// Fall back to the on-chain HTLC event data (LogHTLCLocked topic[3]) which records
-	// the receiver's Ethereum address as provided by the payment-orchestrator.
-	receiver := dec.Receiver
+	// Prefer EVM addresses from the on-chain LogHTLCLocked event (topics[2]/[3]) for both
+	// sender and receiver — they share the same format and are cross-referenceable against
+	// the compliance registry. The Zeto state carries BabyJubJub ZK identities (32-byte
+	// pubkeys), a different format, used only as a fallback if the on-chain data is absent.
+	sender := htlc.Sender
+	if sender == "" {
+		sender = dec.Sender
+	}
+	receiver := htlc.Receiver
 	if receiver == "" {
-		receiver = htlc.Receiver
+		receiver = dec.Receiver
 	}
 
 	return c.JSON(fiber.Map{
 		"tx_hash":      req.TxHash, // HTLC contract ID — consistent with the supervisor dashboard
 		"amount":       dec.Amount,
 		"currency":     dec.Currency,
-		"sender":       dec.Sender,
+		"sender":       sender,
 		"receiver":     receiver,
 		"decrypted_at": time.Now().UTC().Format(time.RFC3339),
 	})
