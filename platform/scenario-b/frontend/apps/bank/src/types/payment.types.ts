@@ -6,6 +6,29 @@ export const PaymentStatus = {
 } as const;
 
 export const fiatUnitLabel = (import.meta.env.VITE_FIAT_SYMBOL ?? "fiat units").trim() || "fiat units";
+const fiatHasSymbol = fiatUnitLabel !== "fiat units";
+
+// currencyFromTokenSymbol extracts the currency code from an on-chain ERC-20 symbol.
+// The tCeBM contract is the single source of truth: symbols are "tCeBM_BRL", "W-tCeBM_ARS",
+// "fCeBM_BRL", etc. — the currency code is the segment after the last underscore.
+// Falls back to the configured VITE_FIAT_SYMBOL while the balance API response is in flight.
+export function currencyFromTokenSymbol(tokenSymbol: string | null | undefined): string {
+  if (tokenSymbol) {
+    const idx = tokenSymbol.lastIndexOf("_");
+    if (idx >= 0 && idx < tokenSymbol.length - 1) {
+      return tokenSymbol.slice(idx + 1).trim();
+    }
+  }
+  return fiatHasSymbol ? fiatUnitLabel : "";
+}
+
+// tCeBM is denominated in the spoke's fiat currency; surface that alongside the token name.
+// e.g. "tCeBM (BRL)" for Bank A, "tCeBM (ARS)" for Bank B. The currency is sourced from the
+// on-chain token symbol (see currencyFromTokenSymbol); pass the symbol from the balance API.
+export function tCeBMUnitLabel(tokenSymbol?: string | null): string {
+  const code = currencyFromTokenSymbol(tokenSymbol);
+  return code ? `tCeBM (${code})` : "tCeBM";
+}
 
 export type PaymentStatus = (typeof PaymentStatus)[keyof typeof PaymentStatus];
 
@@ -97,6 +120,7 @@ export interface ListRedeemsResponse {
 export interface BalanceResponse {
   balance: string;
   decimals: number;
+  symbol?: string; // on-chain ERC-20 symbol, e.g. "tCeBM_BRL"; source of truth for the currency code
 }
 
 export const paymentStatusLabel: Record<PaymentStatus, string> = {
@@ -159,13 +183,20 @@ export function getPaymentStatusVariant(status: unknown): "warning" | "success" 
 
 // formatCeBM converts a raw base-unit amount (wei) to a human-readable tCeBM string.
 // decimals comes from the token contract (included in the balance API response).
-export function formatCeBM(rawAmount: string, decimals: number): string {
-  return `${formatTokenAmount(rawAmount, decimals)} tCeBM`;
+export function formatCeBM(rawAmount: string, decimals: number, tokenSymbol?: string | null): string {
+  return `${formatTokenAmount(rawAmount, decimals)} ${tCeBMUnitLabel(tokenSymbol)}`;
+}
+
+// fiatCurrencyLabel renders the fiat currency code (e.g. "BRL" / "ARS") for the spoke, sourced
+// from the on-chain fCeBM token symbol (see currencyFromTokenSymbol). Falls back to VITE_FIAT_SYMBOL.
+export function fiatCurrencyLabel(tokenSymbol?: string | null): string {
+  return currencyFromTokenSymbol(tokenSymbol) || fiatUnitLabel;
 }
 
 // formatFiatUnits converts a raw base-unit amount to a human-readable fiat string.
-export function formatFiatUnits(rawAmount: string, decimals: number): string {
-  return `${formatTokenAmount(rawAmount, decimals)} ${fiatUnitLabel}`;
+// Pass the on-chain fCeBM symbol (from /token/fiat-balance) so the currency code is contract-sourced.
+export function formatFiatUnits(rawAmount: string, decimals: number, tokenSymbol?: string | null): string {
+  return `${formatTokenAmount(rawAmount, decimals)} ${fiatCurrencyLabel(tokenSymbol)}`;
 }
 
 // formatTokenAmount converts a raw base-unit amount string to a display decimal string.

@@ -50,6 +50,7 @@ export function DashboardPage() {
   const fetchPayments = usePaymentStore((state) => state.fetchAll);
   const paymentBalance = usePaymentStore((state) => state.balance);
   const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
+  const tCeBMSymbol = usePaymentStore((state) => state.tCeBMSymbol);
   const paymentStatus = usePaymentStore((state) => state.status);
   const deposits = usePaymentStore((state) => state.deposits);
   const redeems = usePaymentStore((state) => state.redeems);
@@ -94,6 +95,7 @@ export function DashboardPage() {
         <BalanceWidget
           balance={paymentBalance}
           decimals={tCeBMDecimals}
+          symbol={tCeBMSymbol}
           loading={paymentStatus === "loading" && paymentBalance === null}
         />
         <Card>
