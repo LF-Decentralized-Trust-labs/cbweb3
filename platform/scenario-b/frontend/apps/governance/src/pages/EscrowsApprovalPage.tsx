@@ -24,6 +24,7 @@ const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.s
 export function EscrowsApprovalPage() {
   const escrows = usePaymentStore((state) => state.escrows);
   const tokenDecimals = usePaymentStore((state) => state.tokenDecimals);
+  const tokenSymbol = usePaymentStore((state) => state.tokenSymbol);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
   const fetchEscrows = usePaymentStore((state) => state.fetchEscrows);
@@ -124,7 +125,7 @@ export function EscrowsApprovalPage() {
                 <TableRow key={escrow.id}>
                   <TableCell className="font-medium">{escrow.id}</TableCell>
                   <TableCell>{escrow.requester_id}</TableCell>
-                  <TableCell>{formatCeBM(escrow.amount, decimals)}</TableCell>
+                  <TableCell>{formatCeBM(escrow.amount, decimals, tokenSymbol)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(escrow.status)}>{getPaymentStatusLabel(escrow.status)}</Badge>
                   </TableCell>

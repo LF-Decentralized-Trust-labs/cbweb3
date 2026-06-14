@@ -32,6 +32,9 @@ const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.s
 export function DepositsApprovalPage() {
   const deposits = usePaymentStore((state) => state.deposits);
   const tokenDecimals = usePaymentStore((state) => state.tokenDecimals);
+  // The spoke's fCeBM and tCeBM share the same currency code; reuse the (already-fetched) tCeBM
+  // symbol to label fiat amounts rather than fetching the fiat balance just for the code.
+  const tokenSymbol = usePaymentStore((state) => state.tokenSymbol);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
   const fetchDeposits = usePaymentStore((state) => state.fetchDeposits);
@@ -164,7 +167,7 @@ export function DepositsApprovalPage() {
                 <TableRow key={deposit.id}>
                   <TableCell className="font-medium">{deposit.id}</TableCell>
                   <TableCell>{deposit.requester_id}</TableCell>
-                  <TableCell>{formatFiatUnits(deposit.amount, decimals)}</TableCell>
+                  <TableCell>{formatFiatUnits(deposit.amount, decimals, tokenSymbol)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(deposit.status)}>{getPaymentStatusLabel(deposit.status)}</Badge>
                   </TableCell>
