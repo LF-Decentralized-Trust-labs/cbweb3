@@ -1,5 +1,6 @@
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@cbweb3/ui";
 import { useEffect } from "react";
+import { CopyableValue } from "../components/common/CopyableValue";
 import { useNetworkStore, useStabilityStore, useWebsocketStore } from "../stores";
 
 const badgeFromState = (state: string): "default" | "secondary" | "destructive" | "warning" => {
@@ -62,9 +63,9 @@ export function DashboardPage() {
               <TableBody>
                 {htlcs.map((h) => (
                   <TableRow key={h.id}>
-                    <TableCell className="font-mono text-xs">{h.id.slice(0, 12)}…</TableCell>
-                    <TableCell className="font-mono text-xs">{h.hashLock.slice(0, 12)}…</TableCell>
-                    <TableCell className="font-mono text-xs">{h.zetoLockRef.slice(0, 12)}…</TableCell>
+                    <TableCell><CopyableValue value={h.id} truncate={10} /></TableCell>
+                    <TableCell><CopyableValue value={h.hashLock} truncate={10} /></TableCell>
+                    <TableCell><CopyableValue value={h.zetoLockRef} truncate={10} /></TableCell>
                     <TableCell className="text-xs">{h.expiresAt ? new Date(h.expiresAt).toLocaleString() : "—"}</TableCell>
                     <TableCell>
                       <Badge variant={badgeFromState(h.state)}>{h.state}</Badge>

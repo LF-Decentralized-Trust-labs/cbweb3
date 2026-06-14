@@ -18,6 +18,7 @@ import {
   toast,
 } from "@cbweb3/ui";
 import { useEffect, useState } from "react";
+import { CopyableValue } from "../components/common/CopyableValue";
 import { ZKPointerPanel } from "../components/supervisor/ZKPointerPanel";
 import { useAuditStore } from "../stores";
 
@@ -84,11 +85,23 @@ export function AuditVaultPage() {
           <div className="rounded-md border border-border bg-muted/20 p-3">
             <h3 className="mb-2 text-sm font-semibold">Decryption Result</h3>
             {lastDecrypted ? (
-              <dl className="space-y-1 text-sm">
-                <div className="flex justify-between gap-4"><dt>Tx</dt><dd className="font-mono text-xs">{lastDecrypted.txHash}</dd></div>
-                <div className="flex justify-between gap-4"><dt>Amount</dt><dd>{lastDecrypted.amount} {lastDecrypted.currency}</dd></div>
-                <div className="flex justify-between gap-4"><dt>Sender</dt><dd className="font-mono text-xs">{lastDecrypted.sender}</dd></div>
-                <div className="flex justify-between gap-4"><dt>Receiver</dt><dd className="font-mono text-xs">{lastDecrypted.receiver}</dd></div>
+              <dl className="space-y-2 text-sm">
+                <div className="flex items-start gap-2">
+                  <dt className="w-16 shrink-0 text-muted-foreground">Tx</dt>
+                  <dd><CopyableValue value={lastDecrypted.txHash} /></dd>
+                </div>
+                <div className="flex items-start gap-2">
+                  <dt className="w-16 shrink-0 text-muted-foreground">Amount</dt>
+                  <dd className="text-sm">{lastDecrypted.amount} {lastDecrypted.currency}</dd>
+                </div>
+                <div className="flex items-start gap-2">
+                  <dt className="w-16 shrink-0 text-muted-foreground">Sender</dt>
+                  <dd><CopyableValue value={lastDecrypted.sender || "—"} /></dd>
+                </div>
+                <div className="flex items-start gap-2">
+                  <dt className="w-16 shrink-0 text-muted-foreground">Receiver</dt>
+                  <dd><CopyableValue value={lastDecrypted.receiver || "—"} /></dd>
+                </div>
               </dl>
             ) : (
               <p className="text-sm text-muted-foreground">No decrypted payload in session yet.</p>
@@ -151,7 +164,7 @@ export function AuditVaultPage() {
               {logs.map((log) => (
                 <TableRow key={log.log_id}>
                   <TableCell>{new Date(log.timestamp).toLocaleString()}</TableCell>
-                  <TableCell className="max-w-[140px] truncate" title={log.actor}>{log.actor}</TableCell>
+                  <TableCell className="max-w-[180px]"><CopyableValue value={log.actor} truncate={18} /></TableCell>
                   <TableCell>{log.action}</TableCell>
                   <TableCell>{log.category}</TableCell>
                   <TableCell>
