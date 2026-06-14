@@ -10,10 +10,9 @@ export type HTLCState =
 export interface HTLCSummary {
   id: string;
   state: HTLCState;
-  sender: string;
-  receiver: string;
+  hashLock: string;
+  zetoLockRef: string;
   expiresAt: string;
-  counterpartyLocked: boolean;
 }
 
 export interface CircuitBreakerRequest {

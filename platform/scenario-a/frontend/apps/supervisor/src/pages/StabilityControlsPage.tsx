@@ -45,7 +45,8 @@ export function StabilityControlsPage() {
             <div key={h.id} className="flex items-center justify-between rounded-md border border-border p-3 text-sm">
               <div className="space-y-0.5">
                 <p className="font-mono text-xs">{h.id.slice(0, 14)}…</p>
-                <p className="font-mono text-xs text-muted-foreground">{h.sender} → {h.receiver}</p>
+                <p className="font-mono text-xs text-muted-foreground">hash: {h.hashLock.slice(0, 14)}…</p>
+                <p className="font-mono text-xs text-muted-foreground">zeto: {h.zetoLockRef.slice(0, 14)}…</p>
               </div>
               <div className="flex flex-col items-end gap-1">
                 <Badge variant={badgeFromState(h.state)}>{h.state}</Badge>

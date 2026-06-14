@@ -52,18 +52,20 @@ export function DashboardPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Sender</TableHead>
-                  <TableHead>Receiver</TableHead>
+                  <TableHead>Contract ID</TableHead>
+                  <TableHead>Hash Lock</TableHead>
+                  <TableHead>Zeto Ref</TableHead>
+                  <TableHead>Expires</TableHead>
                   <TableHead>State</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {htlcs.map((h) => (
                   <TableRow key={h.id}>
-                    <TableCell className="font-mono text-xs">{h.id.slice(0, 10)}…</TableCell>
-                    <TableCell className="font-mono text-xs">{h.sender}</TableCell>
-                    <TableCell className="font-mono text-xs">{h.receiver}</TableCell>
+                    <TableCell className="font-mono text-xs">{h.id.slice(0, 12)}…</TableCell>
+                    <TableCell className="font-mono text-xs">{h.hashLock.slice(0, 12)}…</TableCell>
+                    <TableCell className="font-mono text-xs">{h.zetoLockRef.slice(0, 12)}…</TableCell>
+                    <TableCell className="text-xs">{h.expiresAt ? new Date(h.expiresAt).toLocaleString() : "—"}</TableCell>
                     <TableCell>
                       <Badge variant={badgeFromState(h.state)}>{h.state}</Badge>
                     </TableCell>
