@@ -49,8 +49,12 @@ const (
 	mintAmountB = commitAmountB
 
 	depositAmount = "1000000000000000000000" // 1e21 → Bank A fiat deposit
-	swapAmountOut = "500000000000000000000"  // 5e20 → target ARS output
-	swapMaxIn     = "800000000000000000000"  // 8e20 → max BRL in (< depositAmount so bank can cover reserves)
+	swapAmountOut = "500000000000000000000" // 5e20 → target ARS output (500 ARS)
+	// At the 1:287 pool (1000 W-BRL / 287000 W-ARS) an exact-output of 500 ARS costs
+	// ~1.75 BRL in (constant-product + 0.3% fee). The cap is set to 5 BRL: ~3× the
+	// expected cost — comfortable headroom against price impact/fees, yet a meaningful
+	// slippage guard (the prior 800 BRL was sized for the obsolete 1:1 pool).
+	swapMaxIn = "5000000000000000000" // 5e18 → max BRL in
 	poolPair      = "W-BRL-ARS"
 
 	// withdrawFractionBps withdraws part of CB-A's position (40%) so Phase 6 exercises a
