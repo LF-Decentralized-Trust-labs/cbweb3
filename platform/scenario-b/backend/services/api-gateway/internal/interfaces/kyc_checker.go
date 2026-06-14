@@ -88,7 +88,7 @@ type CredentialRequest struct {
 	CsrPem              string
 	BlockchainPubKeyHex string
 	InstitutionName     string
-	CNPJ                string
+	LegalEntityID       string
 	BankCode            string
 	Country             string
 	Role                string

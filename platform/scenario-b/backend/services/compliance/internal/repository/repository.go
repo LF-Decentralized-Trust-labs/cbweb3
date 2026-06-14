@@ -16,7 +16,7 @@ import (
 type Participant struct {
 	UserID              string
 	InstitutionName     string
-	CNPJ                string
+	LegalEntityID       string
 	BankCode            string
 	CountryCode         string
 	Role                string
@@ -230,7 +230,7 @@ func (r *gormRepository) UpsertParticipant(ctx context.Context, p Participant) e
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "user_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"institution_name", "cnpj", "bank_code", "country_code",
+				"institution_name", "legal_entity_id", "bank_code", "country_code",
 				"participant_role", "wallet_address", "status",
 				"certificate_data", "certificate_expiry",
 				"blockchain_pub_key_hex", "csr_pem",
@@ -262,7 +262,7 @@ func (r *gormRepository) ListParticipants(ctx context.Context, f ParticipantFilt
 		q = q.Where("bank_code = ?", f.BankCode)
 	} else if f.Search != "" {
 		like := "%" + f.Search + "%"
-		q = q.Where("institution_name ILIKE ? OR cnpj ILIKE ?", like, like)
+		q = q.Where("institution_name ILIKE ? OR legal_entity_id ILIKE ?", like, like)
 	}
 	var models []ParticipantModel
 	if err := q.Find(&models).Error; err != nil {
@@ -369,7 +369,7 @@ func participantToModel(p Participant) ParticipantModel {
 	return ParticipantModel{
 		UserID:              p.UserID,
 		InstitutionName:     p.InstitutionName,
-		CNPJ:                p.CNPJ,
+		LegalEntityID:       p.LegalEntityID,
 		BankCode:            p.BankCode,
 		CountryCode:         p.CountryCode,
 		Role:                p.Role,
@@ -389,7 +389,7 @@ func participantFromModel(m ParticipantModel) Participant {
 	return Participant{
 		UserID:              m.UserID,
 		InstitutionName:     m.InstitutionName,
-		CNPJ:                m.CNPJ,
+		LegalEntityID:       m.LegalEntityID,
 		BankCode:            m.BankCode,
 		CountryCode:         m.CountryCode,
 		Role:                m.Role,

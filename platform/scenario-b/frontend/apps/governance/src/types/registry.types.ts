@@ -11,7 +11,7 @@ export type ParticipantStatus =
 export type Participant = {
   id: string;
   name: string;
-  cnpj: string;
+  legalEntityId: string;
   status: ParticipantStatus;
   credentialId: string | null;
   credentialExpiry: string | null;
@@ -20,7 +20,7 @@ export type Participant = {
 
 export type IssueCredentialPayload = {
   entityName: string;
-  cnpj: string;
+  legalEntityId: string;
   scopes: string[];
   reason: string;
 };
@@ -46,7 +46,7 @@ export type KycStatusEntry = {
 export type PendingKycParticipantApi = {
   user_id: string;
   institution_name?: string;
-  cnpj?: string;
+  legal_entity_id?: string;
   bank_code?: string;
   country_code?: string;
   role?: string;

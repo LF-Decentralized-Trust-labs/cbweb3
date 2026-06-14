@@ -135,7 +135,7 @@ func (m *IdentityGRPCManager) SubmitCredentialRequest(ctx context.Context, req i
 		CsrPem:              req.CsrPem,
 		BlockchainPubKeyHex: req.BlockchainPubKeyHex,
 		InstitutionName:     req.InstitutionName,
-		Cnpj:                req.CNPJ,
+		LegalEntityId:       req.LegalEntityID,
 		BankCode:            req.BankCode,
 		Country:             req.Country,
 		Role:                req.Role,

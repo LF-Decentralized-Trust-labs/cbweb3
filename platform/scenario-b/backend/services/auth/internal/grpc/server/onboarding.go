@@ -83,7 +83,7 @@ func (s *identityService) SubmitCredentialRequest(ctx context.Context, req *auth
 		BankCode:            req.BankCode,
 		Role:                req.Role,
 		InstitutionName:     req.InstitutionName,
-		CNPJ:                req.Cnpj,
+		LegalEntityID:       req.LegalEntityId,
 		Status:              string(domain.ParticipantStatusCredentialRequested),
 		BlockchainPubKeyHex: req.BlockchainPubKeyHex,
 		CsrPem:              req.CsrPem,
@@ -208,7 +208,7 @@ func (s *identityService) CompleteOnboarding(ctx context.Context, req *authv1.Co
 		return nil, status.Error(codes.FailedPrecondition, "no CSR found for participant; re-submit credential request")
 	}
 	certResult, certErr := s.compliance.SignParticipantCSR(ctx,
-		participant.CsrPem, participant.UserID, participant.Role, participant.InstitutionName, participant.CNPJ)
+		participant.CsrPem, participant.UserID, participant.Role, participant.InstitutionName, participant.LegalEntityID)
 	if certErr != nil {
 		return nil, status.Errorf(codes.Internal, "complete onboarding: sign CSR: %v", certErr)
 	}
@@ -248,7 +248,7 @@ func (s *identityService) CompleteOnboarding(ctx context.Context, req *authv1.Co
 		BankCode:        participant.BankCode,
 		Role:            participant.Role,
 		InstitutionName: participant.InstitutionName,
-		CNPJ:            participant.CNPJ,
+		LegalEntityID:   participant.LegalEntityID,
 		Status:          string(domain.ParticipantStatusActive),
 		CertificateData: certResult.CertPEM,
 		PopNonce:        "",

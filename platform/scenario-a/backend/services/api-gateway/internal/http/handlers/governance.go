@@ -18,7 +18,7 @@ import (
 type GovernanceCompliance interface {
 	RegisterParticipant(ctx context.Context, p complianceadapter.Participant) error
 	ListParticipants(ctx context.Context, statusFilter, search string) ([]complianceadapter.Participant, error)
-	SignParticipantCSR(ctx context.Context, csrPEM, userID, role, institutionName, cnpj string) (complianceadapter.SignedCSRResult, error)
+	SignParticipantCSR(ctx context.Context, csrPEM, userID, role, institutionName, legal_entity_id string) (complianceadapter.SignedCSRResult, error)
 	ApproveKYC(ctx context.Context, subject, actorSubject, reason string) (complianceadapter.ApproveKYCResult, error)
 	ManageParticipantStatus(ctx context.Context, subject, statusVal, reason string) error
 	GetAuditLogs(ctx context.Context, category, severity, fromDate, toDate string, page, limit int) ([]complianceadapter.AuditRecord, error)
@@ -92,7 +92,7 @@ func (h *GovernanceHandler) SubmitCSR(c *fiber.Ctx) error {
 		UserID          string `json:"user_id"`
 		Role            string `json:"role"`
 		InstitutionName string `json:"institution_name"`
-		CNPJ            string `json:"cnpj,omitempty"`
+		LegalEntityID   string `json:"legal_entity_id,omitempty"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
@@ -103,7 +103,7 @@ func (h *GovernanceHandler) SubmitCSR(c *fiber.Ctx) error {
 		})
 	}
 
-	result, err := h.compliance.SignParticipantCSR(c.UserContext(), req.CSRPEM, req.UserID, req.Role, req.InstitutionName, req.CNPJ)
+	result, err := h.compliance.SignParticipantCSR(c.UserContext(), req.CSRPEM, req.UserID, req.Role, req.InstitutionName, req.LegalEntityID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -352,4 +352,3 @@ func (h *GovernanceHandler) GetUser(c *fiber.Ctx) error {
 	}
 	return c.Status(fiber.StatusOK).JSON(resp)
 }
-

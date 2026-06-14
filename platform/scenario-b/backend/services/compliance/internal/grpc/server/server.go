@@ -62,7 +62,7 @@ func (s *complianceService) UpsertParticipant(ctx context.Context, req *complian
 	p := repository.Participant{
 		UserID:              req.Participant.UserId,
 		InstitutionName:     req.Participant.InstitutionName,
-		CNPJ:                req.Participant.Cnpj,
+		LegalEntityID:       req.Participant.LegalEntityId,
 		BankCode:            req.Participant.BankCode,
 		CountryCode:         req.Participant.CountryCode,
 		Role:                req.Participant.Role,
@@ -252,15 +252,15 @@ func (s *complianceService) SignParticipantCSR(ctx context.Context, req *complia
 	if institutionName == "" {
 		institutionName = existing.InstitutionName
 	}
-	cnpj := req.Cnpj
-	if cnpj == "" {
-		cnpj = existing.CNPJ
+	legalEntityID := req.LegalEntityId
+	if legalEntityID == "" {
+		legalEntityID = existing.LegalEntityID
 	}
 
 	p := repository.Participant{
 		UserID:          req.UserId,
 		InstitutionName: institutionName,
-		CNPJ:            cnpj,
+		LegalEntityID:   legalEntityID,
 		BankCode:        existing.BankCode,
 		CountryCode:     existing.CountryCode,
 		Role:            req.Role,
@@ -546,7 +546,7 @@ func participantToProto(p repository.Participant) *compliancv1.Participant {
 	result := &compliancv1.Participant{
 		UserId:              p.UserID,
 		InstitutionName:     p.InstitutionName,
-		Cnpj:                p.CNPJ,
+		LegalEntityId:       p.LegalEntityID,
 		BankCode:            p.BankCode,
 		CountryCode:         p.CountryCode,
 		Role:                p.Role,

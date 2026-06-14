@@ -21,7 +21,7 @@ export const registryApi = {
     return participants.map((entry) => ({
       id: entry.user_id,
       name: entry.institution_name ?? entry.user_id,
-      cnpj: entry.cnpj ?? "—",
+      legalEntityId: entry.legal_entity_id ?? "—",
       status: entry.status,
       credentialId: entry.certificate_data ? "Issued" : null,
       credentialExpiry: entry.certificate_expiry ?? null,

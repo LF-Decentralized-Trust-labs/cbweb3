@@ -18,7 +18,7 @@ import (
 type Participant struct {
 	UserID              string
 	InstitutionName     string
-	CNPJ                string
+	LegalEntityID       string
 	BankCode            string
 	CountryCode         string
 	Role                string
@@ -72,8 +72,8 @@ type Client interface {
 	GetParticipantByUser(ctx context.Context, userID string) (Participant, bool, error)
 	ListParticipants(ctx context.Context, filter ParticipantFilter) ([]Participant, error)
 	CreateAuditLog(ctx context.Context, entry AuditEntry) error
-	IssueParticipantCertificate(ctx context.Context, userID, role, institutionName, cnpj string) (IssuedCertificate, error)
-	SignParticipantCSR(ctx context.Context, csrPem, userID, role, institutionName, cnpj string) (SignedCSR, error)
+	IssueParticipantCertificate(ctx context.Context, userID, role, institutionName, legal_entity_id string) (IssuedCertificate, error)
+	SignParticipantCSR(ctx context.Context, csrPem, userID, role, institutionName, legal_entity_id string) (SignedCSR, error)
 	ManageParticipantStatus(ctx context.Context, subject, status, reason string) error
 }
 
@@ -102,7 +102,7 @@ func (c *grpcClient) UpsertParticipant(ctx context.Context, p Participant) error
 	participant := &compliancv1.Participant{
 		UserId:              p.UserID,
 		InstitutionName:     p.InstitutionName,
-		Cnpj:                p.CNPJ,
+		LegalEntityId:       p.LegalEntityID,
 		BankCode:            p.BankCode,
 		CountryCode:         p.CountryCode,
 		Role:                p.Role,
@@ -135,7 +135,7 @@ func (c *grpcClient) GetParticipantByUser(ctx context.Context, userID string) (P
 	result := Participant{
 		UserID:              pp.UserId,
 		InstitutionName:     pp.InstitutionName,
-		CNPJ:                pp.Cnpj,
+		LegalEntityID:       pp.LegalEntityId,
 		BankCode:            pp.BankCode,
 		CountryCode:         pp.CountryCode,
 		Role:                pp.Role,
@@ -175,12 +175,12 @@ func (c *grpcClient) CreateAuditLog(ctx context.Context, entry AuditEntry) error
 	return err
 }
 
-func (c *grpcClient) IssueParticipantCertificate(ctx context.Context, userID, role, institutionName, cnpj string) (IssuedCertificate, error) {
+func (c *grpcClient) IssueParticipantCertificate(ctx context.Context, userID, role, institutionName, legal_entity_id string) (IssuedCertificate, error) {
 	resp, err := c.cc.IssueParticipantCertificate(ctx, &compliancv1.IssueParticipantCertificateRequest{
 		UserId:          userID,
 		Role:            role,
 		InstitutionName: institutionName,
-		Cnpj:            cnpj,
+		LegalEntityId:   legal_entity_id,
 	})
 	if err != nil {
 		return IssuedCertificate{}, err
@@ -206,7 +206,7 @@ func (c *grpcClient) ListParticipants(ctx context.Context, filter ParticipantFil
 		result = append(result, Participant{
 			UserID:          p.UserId,
 			InstitutionName: p.InstitutionName,
-			CNPJ:            p.Cnpj,
+			LegalEntityID:   p.LegalEntityId,
 			BankCode:        p.BankCode,
 			CountryCode:     p.CountryCode,
 			Role:            p.Role,
@@ -217,13 +217,13 @@ func (c *grpcClient) ListParticipants(ctx context.Context, filter ParticipantFil
 	return result, nil
 }
 
-func (c *grpcClient) SignParticipantCSR(ctx context.Context, csrPem, userID, role, institutionName, cnpj string) (SignedCSR, error) {
+func (c *grpcClient) SignParticipantCSR(ctx context.Context, csrPem, userID, role, institutionName, legal_entity_id string) (SignedCSR, error) {
 	resp, err := c.cc.SignParticipantCSR(ctx, &compliancv1.SignParticipantCSRRequest{
 		CsrPem:          csrPem,
 		UserId:          userID,
 		Role:            role,
 		InstitutionName: institutionName,
-		Cnpj:            cnpj,
+		LegalEntityId:   legal_entity_id,
 	})
 	if err != nil {
 		return SignedCSR{}, err

@@ -33,7 +33,7 @@ export function RegistryPage() {
   const { participants, pendingKyc, fetch, fetchPendingKyc, approveKyc, kycStatus, error } = useRegistry();
   const [search, setSearch] = useState("");
   // const [entityName, setEntityName] = useState("");
-  // const [cnpj, setCnpj] = useState("");
+  // const [legalEntityId, setLegalEntityId] = useState("");
   // const [scopes, setScopes] = useState("DEPOSIT,TRANSFER,SWAP");
   // const [reason, setReason] = useState("");
   // const [confirming, setConfirming] = useState(false);
@@ -60,19 +60,19 @@ export function RegistryPage() {
   }, [participants, search]);
 
   // const onIssue = async () => {
-  //   if (!entityName || !cnpj || !reason || reason.length < 10) {
+  //   if (!entityName || !legalEntityId || !reason || reason.length < 10) {
   //     toast.error("Complete all fields and provide a reason (min 10 chars)");
   //     return;
   //   }
   //   await issueCredential({
   //     entityName,
-  //     cnpj,
+  //     legalEntityId,
   //     scopes: scopes.split(",").map((scope) => scope.trim()).filter(Boolean),
   //     reason,
   //   });
   //   toast.success("Credential issued successfully");
   //   setEntityName("");
-  //   setCnpj("");
+  //   setLegalEntityId("");
   //   setReason("");
   //   setConfirming(false);
   // };
@@ -114,7 +114,7 @@ export function RegistryPage() {
               {filtered.map((participant) => (
                 <TableRow key={participant.id}>
                   <TableCell className="font-medium">{participant.name}</TableCell>
-                  <TableCell>{participant.cnpj}</TableCell>
+                  <TableCell>{participant.legalEntityId}</TableCell>
                   <TableCell>
                     <Badge variant={statusVariant[participant.status]}>{participant.status}</Badge>
                   </TableCell>
@@ -139,7 +139,7 @@ export function RegistryPage() {
           </div>
           <div className="space-y-2">
             <Label>Legal Entity ID</Label>
-            <Input value={cnpj} onChange={(event) => setCnpj(event.target.value)} />
+            <Input value={legalEntityId} onChange={(event) => setLegalEntityId(event.target.value)} />
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label>Scopes (comma separated)</Label>

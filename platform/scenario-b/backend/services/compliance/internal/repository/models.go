@@ -8,7 +8,7 @@ import "time"
 type ParticipantModel struct {
 	UserID              string     `gorm:"column:user_id;primaryKey"`
 	InstitutionName     string     `gorm:"column:institution_name"`
-	CNPJ                string     `gorm:"column:cnpj"`
+	LegalEntityID       string     `gorm:"column:legal_entity_id"`
 	BankCode            string     `gorm:"column:bank_code"`
 	CountryCode         string     `gorm:"column:country_code"`
 	Role                string     `gorm:"column:participant_role"`

@@ -13,7 +13,7 @@ export const generateParticipants = (): Participant[] => [
   {
     id: "pt-001",
     name: "Banco Aurora S.A.",
-    cnpj: "11.222.333/0001-44",
+    legalEntityId: "11.222.333/0001-44",
     status: "ACTIVE",
     credentialId: "cred-aurora-001",
     credentialExpiry: minutesAgo(-60 * 24 * 365),
@@ -22,7 +22,7 @@ export const generateParticipants = (): Participant[] => [
   {
     id: "pt-002",
     name: "Banco Delta S.A.",
-    cnpj: "22.333.444/0001-55",
+    legalEntityId: "22.333.444/0001-55",
     status: "ACTIVE",
     credentialId: "cred-delta-009",
     credentialExpiry: minutesAgo(-60 * 24 * 365),
@@ -31,7 +31,7 @@ export const generateParticipants = (): Participant[] => [
   {
     id: "pt-003",
     name: "Banco Horizonte S.A.",
-    cnpj: "33.444.555/0001-66",
+    legalEntityId: "33.444.555/0001-66",
     status: "PENDING",
     credentialId: null,
     credentialExpiry: null,
@@ -40,7 +40,7 @@ export const generateParticipants = (): Participant[] => [
   {
     id: "pt-004",
     name: "Banco Terra S.A.",
-    cnpj: "44.555.666/0001-77",
+    legalEntityId: "44.555.666/0001-77",
     status: "REVOKED",
     credentialId: "cred-terra-002",
     credentialExpiry: minutesAgo(60 * 24 * 30),
@@ -49,7 +49,7 @@ export const generateParticipants = (): Participant[] => [
   {
     id: "pt-005",
     name: "Banco Prisma S.A.",
-    cnpj: "55.666.777/0001-88",
+    legalEntityId: "55.666.777/0001-88",
     status: "FROZEN",
     credentialId: "cred-prisma-007",
     credentialExpiry: minutesAgo(-60 * 24 * 180),

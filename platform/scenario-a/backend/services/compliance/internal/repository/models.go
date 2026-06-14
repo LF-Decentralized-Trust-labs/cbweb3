@@ -8,7 +8,7 @@ import "time"
 type ParticipantModel struct {
 	UserID              string     `gorm:"column:user_id;primaryKey"`
 	InstitutionName     string     `gorm:"column:institution_name"`
-	CNPJ                string     `gorm:"column:cnpj"`
+	LegalEntityID       string     `gorm:"column:legal_entity_id"`
 	BankCode            string     `gorm:"column:bank_code"`
 	CountryCode         string     `gorm:"column:country_code"`
 	Role                string     `gorm:"column:participant_role"`
@@ -37,9 +37,9 @@ type AuditLogModel struct {
 	TargetSubject string    `gorm:"column:target_subject"`
 	CorrelationID string    `gorm:"column:correlation_id"`
 	IPAddress     string    `gorm:"column:ip_address"`
-	Result        string    `gorm:"column:result"`         // SUCCESS | FAILURE
-	Category      string    `gorm:"column:category"`       // SESSION, CREDENTIAL, FREEZE, etc.
-	Severity      string    `gorm:"column:severity"`       // INFO, WARNING, CRITICAL
+	Result        string    `gorm:"column:result"`   // SUCCESS | FAILURE
+	Category      string    `gorm:"column:category"` // SESSION, CREDENTIAL, FREEZE, etc.
+	Severity      string    `gorm:"column:severity"` // INFO, WARNING, CRITICAL
 	Details       string    `gorm:"column:details;type:jsonb"`
 }
 

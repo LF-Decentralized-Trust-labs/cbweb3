@@ -27,7 +27,7 @@ type Participant struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	UserId              string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	InstitutionName     string                 `protobuf:"bytes,2,opt,name=institution_name,json=institutionName,proto3" json:"institution_name,omitempty"`
-	Cnpj                string                 `protobuf:"bytes,3,opt,name=cnpj,proto3" json:"cnpj,omitempty"`
+	LegalEntityId       string                 `protobuf:"bytes,3,opt,name=legal_entity_id,json=legalEntityId,proto3" json:"legal_entity_id,omitempty"`
 	BankCode            string                 `protobuf:"bytes,4,opt,name=bank_code,json=bankCode,proto3" json:"bank_code,omitempty"`
 	CountryCode         string                 `protobuf:"bytes,5,opt,name=country_code,json=countryCode,proto3" json:"country_code,omitempty"`
 	Role                string                 `protobuf:"bytes,6,opt,name=role,proto3" json:"role,omitempty"`
@@ -87,9 +87,9 @@ func (x *Participant) GetInstitutionName() string {
 	return ""
 }
 
-func (x *Participant) GetCnpj() string {
+func (x *Participant) GetLegalEntityId() string {
 	if x != nil {
-		return x.Cnpj
+		return x.LegalEntityId
 	}
 	return ""
 }
@@ -912,7 +912,7 @@ type IssueParticipantCertificateRequest struct {
 	UserId          string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	Role            string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
 	InstitutionName string                 `protobuf:"bytes,3,opt,name=institution_name,json=institutionName,proto3" json:"institution_name,omitempty"`
-	Cnpj            string                 `protobuf:"bytes,4,opt,name=cnpj,proto3" json:"cnpj,omitempty"`
+	LegalEntityId   string                 `protobuf:"bytes,4,opt,name=legal_entity_id,json=legalEntityId,proto3" json:"legal_entity_id,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -968,9 +968,9 @@ func (x *IssueParticipantCertificateRequest) GetInstitutionName() string {
 	return ""
 }
 
-func (x *IssueParticipantCertificateRequest) GetCnpj() string {
+func (x *IssueParticipantCertificateRequest) GetLegalEntityId() string {
 	if x != nil {
-		return x.Cnpj
+		return x.LegalEntityId
 	}
 	return ""
 }
@@ -1041,7 +1041,7 @@ type SignParticipantCSRRequest struct {
 	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	Role            string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
 	InstitutionName string                 `protobuf:"bytes,4,opt,name=institution_name,json=institutionName,proto3" json:"institution_name,omitempty"`
-	Cnpj            string                 `protobuf:"bytes,5,opt,name=cnpj,proto3" json:"cnpj,omitempty"`
+	LegalEntityId   string                 `protobuf:"bytes,5,opt,name=legal_entity_id,json=legalEntityId,proto3" json:"legal_entity_id,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1104,9 +1104,9 @@ func (x *SignParticipantCSRRequest) GetInstitutionName() string {
 	return ""
 }
 
-func (x *SignParticipantCSRRequest) GetCnpj() string {
+func (x *SignParticipantCSRRequest) GetLegalEntityId() string {
 	if x != nil {
-		return x.Cnpj
+		return x.LegalEntityId
 	}
 	return ""
 }
@@ -2301,11 +2301,11 @@ var File_compliance_v1_compliance_proto protoreflect.FileDescriptor
 
 const file_compliance_v1_compliance_proto_rawDesc = "" +
 	"\n" +
-	"\x1ecompliance/v1/compliance.proto\x12\rcompliance.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bgoogle/protobuf/empty.proto\"\xe0\x04\n" +
+	"\x1ecompliance/v1/compliance.proto\x12\rcompliance.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bgoogle/protobuf/empty.proto\"\xf4\x04\n" +
 	"\vParticipant\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12)\n" +
-	"\x10institution_name\x18\x02 \x01(\tR\x0finstitutionName\x12\x12\n" +
-	"\x04cnpj\x18\x03 \x01(\tR\x04cnpj\x12\x1b\n" +
+	"\x10institution_name\x18\x02 \x01(\tR\x0finstitutionName\x12&\n" +
+	"\x0flegal_entity_id\x18\x03 \x01(\tR\rlegalEntityId\x12\x1b\n" +
 	"\tbank_code\x18\x04 \x01(\tR\bbankCode\x12!\n" +
 	"\fcountry_code\x18\x05 \x01(\tR\vcountryCode\x12\x12\n" +
 	"\x04role\x18\x06 \x01(\tR\x04role\x12%\n" +
@@ -2374,24 +2374,24 @@ const file_compliance_v1_compliance_proto_rawDesc = "" +
 	" \x01(\tR\x06result\x12\x18\n" +
 	"\adetails\x18\v \x01(\tR\adetails\"I\n" +
 	"\x14GetAuditLogsResponse\x121\n" +
-	"\x04logs\x18\x01 \x03(\v2\x1d.compliance.v1.AuditLogRecordR\x04logs\"\x90\x01\n" +
+	"\x04logs\x18\x01 \x03(\v2\x1d.compliance.v1.AuditLogRecordR\x04logs\"\xa4\x01\n" +
 	"\"IssueParticipantCertificateRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\x12)\n" +
-	"\x10institution_name\x18\x03 \x01(\tR\x0finstitutionName\x12\x12\n" +
-	"\x04cnpj\x18\x04 \x01(\tR\x04cnpj\"\x81\x01\n" +
+	"\x10institution_name\x18\x03 \x01(\tR\x0finstitutionName\x12&\n" +
+	"\x0flegal_entity_id\x18\x04 \x01(\tR\rlegalEntityId\"\x81\x01\n" +
 	"#IssueParticipantCertificateResponse\x12\x19\n" +
 	"\bcert_pem\x18\x01 \x01(\tR\acertPem\x12 \n" +
 	"\fpriv_key_pem\x18\x02 \x01(\tR\n" +
 	"privKeyPem\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x03 \x01(\tR\texpiresAt\"\xa0\x01\n" +
+	"expires_at\x18\x03 \x01(\tR\texpiresAt\"\xb4\x01\n" +
 	"\x19SignParticipantCSRRequest\x12\x17\n" +
 	"\acsr_pem\x18\x01 \x01(\tR\x06csrPem\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
 	"\x04role\x18\x03 \x01(\tR\x04role\x12)\n" +
-	"\x10institution_name\x18\x04 \x01(\tR\x0finstitutionName\x12\x12\n" +
-	"\x04cnpj\x18\x05 \x01(\tR\x04cnpj\"V\n" +
+	"\x10institution_name\x18\x04 \x01(\tR\x0finstitutionName\x12&\n" +
+	"\x0flegal_entity_id\x18\x05 \x01(\tR\rlegalEntityId\"V\n" +
 	"\x1aSignParticipantCSRResponse\x12\x19\n" +
 	"\bcert_pem\x18\x01 \x01(\tR\acertPem\x12\x1d\n" +
 	"\n" +

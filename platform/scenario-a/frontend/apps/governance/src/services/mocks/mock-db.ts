@@ -66,7 +66,7 @@ export const mockDb = {
   },
   issueCredential: async (payload: IssueCredentialPayload) => {
     await new Promise((resolve) => setTimeout(resolve, 180));
-    const existing = participants.find((participant) => participant.cnpj === payload.cnpj);
+    const existing = participants.find((participant) => participant.legalEntityId === payload.legalEntityId);
     if (existing) {
       const updated: Participant = {
         ...existing,
@@ -94,7 +94,7 @@ export const mockDb = {
     const created: Participant = {
       id: participantId,
       name: payload.entityName,
-      cnpj: payload.cnpj,
+      legalEntityId: payload.legalEntityId,
       status: "ACTIVE",
       credentialId: `cred-${participantId}`,
       credentialExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
