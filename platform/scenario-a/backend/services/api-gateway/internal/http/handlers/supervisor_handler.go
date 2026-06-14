@@ -181,17 +181,19 @@ func (h *SupervisorHandler) DecryptTransaction(c *fiber.Ctx) error {
 		log.Printf("[supervisor] audit log write failed (non-fatal): %v", auditErr)
 	}
 
-	// Prefer EVM addresses from the on-chain LogHTLCLocked event (topics[2]/[3]) for both
-	// sender and receiver — they share the same format and are cross-referenceable against
-	// the compliance registry. The Zeto state carries BabyJubJub ZK identities (32-byte
-	// pubkeys), a different format, used only as a fallback if the on-chain data is absent.
+	// Sender: use the on-chain msg.sender (EVM address of the initiating operator).
+	// Receiver: the HTLC contract requires onlyVerified(receiver) against the local
+	// IdentityRegistry. Cross-spoke counterparties are not registered locally, so the
+	// payment-orchestrator falls back to its own address as the receiver parameter.
+	// When on-chain sender == receiver it signals this fallback — suppress the duplicate
+	// and fall back to the Zeto private state receiver (empty for locked UTXOs by design).
 	sender := htlc.Sender
 	if sender == "" {
 		sender = dec.Sender
 	}
 	receiver := htlc.Receiver
-	if receiver == "" {
-		receiver = dec.Receiver
+	if receiver == "" || receiver == htlc.Sender {
+		receiver = dec.Receiver // empty for cross-spoke locks; shown as "—" in the UI
 	}
 
 	return c.JSON(fiber.Map{

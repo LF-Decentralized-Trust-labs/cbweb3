@@ -1,7 +1,7 @@
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@cbweb3/ui";
 import { useEffect } from "react";
 import { CopyableValue } from "../components/common/CopyableValue";
-import { useNetworkStore, useStabilityStore, useWebsocketStore } from "../stores";
+import { useNetworkStore, useStabilityStore } from "../stores";
 
 const badgeFromState = (state: string): "default" | "secondary" | "destructive" | "warning" => {
   if (state === "HTLC_STATE_SETTLED") return "default";
@@ -13,7 +13,6 @@ const badgeFromState = (state: string): "default" | "secondary" | "destructive" 
 export function DashboardPage() {
   const { overview, refresh } = useNetworkStore();
   const { htlcs, refresh: refreshStability } = useStabilityStore();
-  const events = useWebsocketStore((state) => state.events);
 
   useEffect(() => {
     void refresh();
@@ -43,64 +42,43 @@ export function DashboardPage() {
         </Card>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>HTLC Settlement Status</CardTitle>
-            <CardDescription>Active and recent cross-border HTLC contracts.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Contract ID</TableHead>
-                  <TableHead>Hash Lock</TableHead>
-                  <TableHead>Zeto Ref</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>State</TableHead>
+      <Card>
+        <CardHeader>
+          <CardTitle>HTLC Settlement Status</CardTitle>
+          <CardDescription>Active and recent cross-border HTLC contracts.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Contract ID</TableHead>
+                <TableHead>Hash Lock</TableHead>
+                <TableHead>Zeto Ref</TableHead>
+                <TableHead>Expires</TableHead>
+                <TableHead>State</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {htlcs.map((h) => (
+                <TableRow key={h.id}>
+                  <TableCell><CopyableValue value={h.id} truncate={14} /></TableCell>
+                  <TableCell><CopyableValue value={h.hashLock} truncate={14} /></TableCell>
+                  <TableCell><CopyableValue value={h.zetoLockRef} truncate={14} /></TableCell>
+                  <TableCell className="text-xs">{h.expiresAt ? new Date(h.expiresAt).toLocaleString() : "—"}</TableCell>
+                  <TableCell>
+                    <Badge variant={badgeFromState(h.state)}>{h.state}</Badge>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {htlcs.map((h) => (
-                  <TableRow key={h.id}>
-                    <TableCell><CopyableValue value={h.id} truncate={10} /></TableCell>
-                    <TableCell><CopyableValue value={h.hashLock} truncate={10} /></TableCell>
-                    <TableCell><CopyableValue value={h.zetoLockRef} truncate={10} /></TableCell>
-                    <TableCell className="text-xs">{h.expiresAt ? new Date(h.expiresAt).toLocaleString() : "—"}</TableCell>
-                    <TableCell>
-                      <Badge variant={badgeFromState(h.state)}>{h.state}</Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!htlcs.length ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">No active HTLCs</TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Real-time Alerts (SSE)</CardTitle>
-            <CardDescription>Latest backend telemetry notifications.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {events.slice(0, 8).map((event) => (
-              <div key={event.id} className="rounded-md border border-border p-2 text-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium">{event.type}</span>
-                  <Badge variant={event.severity === "CRITICAL" ? "destructive" : "warning"}>{event.severity}</Badge>
-                </div>
-                <p className="text-muted-foreground">{event.message}</p>
-              </div>
-            ))}
-            {!events.length ? <p className="text-sm text-muted-foreground">Waiting for realtime events...</p> : null}
-          </CardContent>
-        </Card>
-      </section>
+              ))}
+              {!htlcs.length ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">No active HTLCs</TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
 }

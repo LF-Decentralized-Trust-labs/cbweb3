@@ -93,7 +93,7 @@ services:
       PAYMENT_GRPC_ADDR: payment-orchestrator-central-bank-a:9094
       PKI_DIR: /workspace/backend/config/pki
       DATABASE_URL: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_central_bank_a}?sslmode=disable"
-      PALADIN_URL: "http://host.docker.internal:31648"
+      PALADIN_URL: "http://host.docker.internal:31658"
     volumes:
       - ./config/pki:/workspace/backend/config/pki
     extra_hosts:

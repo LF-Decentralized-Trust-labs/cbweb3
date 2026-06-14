@@ -3,14 +3,15 @@ import { useState } from "react";
 
 interface CopyableValueProps {
   value: string;
-  /** Number of characters to show before truncating. Omit to show full value. */
+  /** Number of characters to show before truncating. Omit to show the full value (wraps). */
   truncate?: number;
   className?: string;
 }
 
 /**
  * Displays a (optionally truncated) value with a copy-to-clipboard button.
- * The full value is always accessible via the button and the title tooltip.
+ * - With `truncate`: single-line display, safe for table cells.
+ * - Without `truncate`: full value with word-break, for detail panels.
  */
 export function CopyableValue({ value, truncate, className = "" }: CopyableValueProps) {
   const [copied, setCopied] = useState(false);
@@ -22,13 +23,17 @@ export function CopyableValue({ value, truncate, className = "" }: CopyableValue
     });
   };
 
-  const display = truncate !== undefined && value.length > truncate
-    ? `${value.slice(0, truncate)}…`
-    : value;
+  const isTruncated = truncate !== undefined && value.length > truncate;
+  const display = isTruncated ? `${value.slice(0, truncate)}…` : value;
 
   return (
     <span className={`inline-flex items-center gap-1 font-mono text-xs ${className}`}>
-      <span className="break-all" title={value}>{display}</span>
+      <span
+        className={isTruncated ? "whitespace-nowrap" : "break-all"}
+        title={value}
+      >
+        {display}
+      </span>
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); handleCopy(); }}

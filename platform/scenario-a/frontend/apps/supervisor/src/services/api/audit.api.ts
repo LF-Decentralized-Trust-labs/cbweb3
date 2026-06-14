@@ -10,12 +10,36 @@ export interface AuditLogsParams {
   limit?: number;
 }
 
+// Raw snake_case shape returned by the backend decrypt endpoint.
+interface DecryptTransactionRaw {
+  tx_hash: string;
+  amount: string;
+  currency: string;
+  sender: string;
+  receiver: string;
+  decrypted_at: string;
+}
+
 export const auditApi = {
-  decryptTransaction: (payload: DecryptTransactionRequest): Promise<DecryptTransactionResponse> =>
-    apiFetch<DecryptTransactionResponse>("/api/v1/compliance/decrypt-transaction", {
+  decryptTransaction: async (payload: DecryptTransactionRequest): Promise<DecryptTransactionResponse> => {
+    const raw = await apiFetch<DecryptTransactionRaw>("/api/v1/compliance/decrypt-transaction", {
       method: "POST",
-      body: JSON.stringify(payload),
-    }),
+      // Backend expects snake_case field names.
+      body: JSON.stringify({
+        tx_hash: payload.txHash,
+        view_key: payload.viewKey,
+        reason: payload.reason,
+      }),
+    });
+    return {
+      txHash: raw.tx_hash,
+      amount: raw.amount,
+      currency: raw.currency,
+      sender: raw.sender,
+      receiver: raw.receiver,
+      decryptedAt: raw.decrypted_at,
+    };
+  },
 
   getAuditLogs: (params: AuditLogsParams = {}): Promise<AuditLogsResponse> => {
     const qs = new URLSearchParams();
