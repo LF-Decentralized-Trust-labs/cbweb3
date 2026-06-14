@@ -18,7 +18,6 @@ func (noopZeto) Transfer(_ context.Context, _, _ string) (string, error) { retur
 func (noopZeto) Lock(_ context.Context, _, _ string) (*ports.ZetoLockResult, error) {
 	return nil, errNoPaladin
 }
-func (noopZeto) Unlock(_ context.Context, _ string) (string, error) { return "", errNoPaladin }
 func (noopZeto) TransferLocked(_ context.Context, _, _, _ string) (string, error) {
 	return "", errNoPaladin
 }

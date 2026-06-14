@@ -220,8 +220,8 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 		})
 		if err != nil {
 			s.logger.Error("on-chain HTLC lock failed — rolling back Zeto lock", "error", err)
-			if _, unlockErr := s.zeto.Unlock(ctx, strings.Join(lockResult.LockedStateIDs, ",")); unlockErr != nil {
-				s.logger.Error("zeto unlock rollback also failed", "error", unlockErr)
+			if _, unlockErr := s.zeto.TransferLocked(ctx, strings.Join(lockResult.LockedStateIDs, ","), s.paladinIdentity, req.Amount); unlockErr != nil {
+				s.logger.Error("zeto transferLocked rollback also failed", "error", unlockErr)
 			}
 			return nil, status.Errorf(codes.Internal, "on-chain HTLC lock failed: %v", err)
 		}
@@ -353,8 +353,8 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 		})
 		if err != nil {
 			s.logger.Error("on-chain HTLC lock failed — rolling back Zeto lock", "error", err)
-			if _, unlockErr := s.zeto.Unlock(ctx, strings.Join(lockResult.LockedStateIDs, ",")); unlockErr != nil {
-				s.logger.Error("zeto unlock rollback also failed", "error", unlockErr)
+			if _, unlockErr := s.zeto.TransferLocked(ctx, strings.Join(lockResult.LockedStateIDs, ","), s.paladinIdentity, req.Amount); unlockErr != nil {
+				s.logger.Error("zeto transferLocked rollback also failed", "error", unlockErr)
 			}
 			return nil, status.Errorf(codes.Internal, "on-chain HTLC lock failed: %v", err)
 		}
@@ -605,12 +605,12 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 		htlcTxHash = record.HTLCTxHash
 	}
 
-	zetoTxHash, err := s.zeto.Unlock(ctx, record.ZetoLockRef)
+	zetoTxHash, err := s.zeto.TransferLocked(ctx, record.ZetoLockRef, record.Sender, record.Amount)
 	if err != nil {
 		// Stay in REFUNDING for retry.
-		s.logger.Error("zeto unlock failed — record stays REFUNDING for retry",
+		s.logger.Error("zeto transferLocked (refund) failed — record stays REFUNDING for retry",
 			"contract_id", req.ContractId, "error", err)
-		return nil, status.Errorf(codes.Internal, "zeto unlock: %v", err)
+		return nil, status.Errorf(codes.Internal, "zeto transferLocked refund: %v", err)
 	}
 
 	// Both operations succeeded — mark REFUNDED.
