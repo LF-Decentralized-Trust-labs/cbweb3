@@ -10,6 +10,7 @@ import (
 	"time"
 
 	authadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
+	besuscanner "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/besu"
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
@@ -129,6 +130,18 @@ func New(cfg config.Config) (*App, error) {
 				cfg.RelayAuthSecret,
 			)
 		}
+	}
+
+	// On-chain HTLC scanner: supervisor searches bypass the payment-orchestrator and
+	// read event logs directly from Besu, making all network HTLCs visible.
+	if cfg.BesuRPCURL != "" && cfg.HTLCContractAddress != "" && deps.PaymentHandler != nil {
+		scanner, scanErr := besuscanner.NewHTLCScanner(cfg.BesuRPCURL, cfg.HTLCContractAddress)
+		if scanErr != nil {
+			closeAll(closers)
+			return nil, fmt.Errorf("besu htlc scanner: %w", scanErr)
+		}
+		closers = append(closers, scanner)
+		deps.PaymentHandler.SetHTLCScanner(scanner)
 	}
 
 	if cfg.CentralBankAPIURL != "" {
