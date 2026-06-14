@@ -185,6 +185,39 @@ func (a *GRPCAdapter) ManageParticipantStatus(ctx context.Context, subject, stat
 	return err
 }
 
+// AuditEntry is the input DTO for writing a single audit log entry.
+type AuditEntry struct {
+	ActorSubject  string
+	ActorAddress  string
+	ActionType    string
+	TargetSubject string
+	CorrelationID string
+	IPAddress     string
+	Result        string
+	Category      string
+	Severity      string
+	Details       string
+}
+
+// CreateAuditLog writes a single compliance audit log entry via gRPC.
+func (a *GRPCAdapter) CreateAuditLog(ctx context.Context, entry AuditEntry) error {
+	_, err := a.cc.CreateAuditLog(ctx, &compliancv1.CreateAuditLogRequest{
+		Entry: &compliancv1.AuditLogEntry{
+			ActorSubject:  entry.ActorSubject,
+			ActorAddress:  entry.ActorAddress,
+			ActionType:    entry.ActionType,
+			TargetSubject: entry.TargetSubject,
+			CorrelationId: entry.CorrelationID,
+			IpAddress:     entry.IPAddress,
+			Result:        entry.Result,
+			Category:      entry.Category,
+			Severity:      entry.Severity,
+			Details:       entry.Details,
+		},
+	})
+	return err
+}
+
 func (a *GRPCAdapter) GetAuditLogs(ctx context.Context, category, severity, fromDate, toDate string, page, limit int) ([]AuditRecord, error) {
 	resp, err := a.cc.GetAuditLogs(ctx, &compliancv1.GetAuditLogsRequest{
 		Category: category,

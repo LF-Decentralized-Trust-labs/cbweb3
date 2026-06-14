@@ -28,6 +28,7 @@ type Config struct {
 	RelayAuthSecret    string // shared secret for X-Relay-Auth header on internal service-to-service endpoints
 	BesuRPCURL          string // Besu JSON-RPC endpoint; when set together with HTLCContractAddress, enables on-chain HTLC scan for supervisors
 	HTLCContractAddress string // HTLC contract address on the Besu network (HTLC_ADDRESS env var)
+	PaladinURL          string // Paladin JSON-RPC endpoint; enables transaction decryption for supervisors (PALADIN_URL env var)
 }
 
 // Load reads environment variables and returns a fully populated Config.
@@ -53,6 +54,7 @@ func Load() Config {
 		RelayAuthSecret:     getEnv("INTERNAL_RELAY_AUTH_SECRET", ""),
 		BesuRPCURL:          getEnv("BESU_RPC_URL", ""),
 		HTLCContractAddress: getEnv("HTLC_ADDRESS", ""),
+		PaladinURL:          getEnv("PALADIN_URL", ""),
 	}
 }
 

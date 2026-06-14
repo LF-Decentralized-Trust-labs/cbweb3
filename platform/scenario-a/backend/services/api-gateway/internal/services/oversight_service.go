@@ -118,6 +118,19 @@ func (s *OversightService) SignDisclosure(ctx context.Context, requestID, signer
 	return nil
 }
 
+// CheckDisclosureQuorum returns nil if a QUORUM_REACHED disclosure exists for txRef, error otherwise.
+// Used as the gate check before the supervisor decrypt endpoint.
+func (s *OversightService) CheckDisclosureQuorum(ctx context.Context, txRef string) error {
+	var count int64
+	s.db.WithContext(ctx).Model(&domain.DisclosureRequest{}).
+		Where("tx_ref = ? AND state = ?", txRef, domain.DisclosureQuorumReached).
+		Count(&count)
+	if count == 0 {
+		return fmt.Errorf("no approved disclosure request for tx %s", txRef)
+	}
+	return nil
+}
+
 // GetDisclosureStatus retrieves a disclosure request, auto-expiring PENDING requests that have passed their deadline.
 func (s *OversightService) GetDisclosureStatus(ctx context.Context, requestID string) (*DisclosureResult, error) {
 	var req domain.DisclosureRequest

@@ -25,6 +25,10 @@ func (s *supervisorAuditStub) GetAuditLogs(_ context.Context, _, _, _, _ string,
 	return s.logs, s.err
 }
 
+func (s *supervisorAuditStub) CreateAuditLog(_ context.Context, _ complianceadapter.AuditEntry) error {
+	return nil
+}
+
 func newSupervisorApp(stub ComplianceAuditLister) *fiber.App {
 	app := fiber.New()
 	h := NewSupervisorHandler(stub)

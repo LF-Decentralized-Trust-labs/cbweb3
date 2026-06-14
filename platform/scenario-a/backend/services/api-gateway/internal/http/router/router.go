@@ -74,6 +74,7 @@ func Setup(app *fiber.App, deps Dependencies) {
 	complianceGroup.Post("/aml/screen", deps.ComplianceHandler.AMLScreen)
 	if deps.SupervisorHandler != nil {
 		complianceGroup.Get("/audit/logs", middleware.RequireSupervisorRole(), deps.SupervisorHandler.GetAuditLogs)
+		complianceGroup.Post("/decrypt-transaction", middleware.RequireSupervisorRole(), deps.SupervisorHandler.DecryptTransaction)
 
 		// Read-only participants list for supervisor (same handler, no write access).
 		complianceGroup.Get("/participants/summary", middleware.RequireSupervisorRole(), deps.ComplianceHandler.ListParticipants)

@@ -13,6 +13,7 @@ import (
 	besuscanner "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/besu"
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
+	paladinadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/paladin"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
 	dbinit "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/db/init"
@@ -93,7 +94,15 @@ func New(cfg config.Config) (*App, error) {
 			if migrateErr := dbinit.RunAutoMigrate(oversightDB); migrateErr != nil {
 				log.Printf("warning: oversight schema migration failed (%v); disclosure endpoints disabled", migrateErr)
 			} else {
-				oversightHandler = handlers.NewOversightHandler(services.NewOversightService(oversightDB))
+				oversightSvc := services.NewOversightService(oversightDB)
+				oversightHandler = handlers.NewOversightHandler(oversightSvc)
+
+				// Decrypt endpoint: wire Paladin client and oversight quorum gate into SupervisorHandler.
+				if cfg.PaladinURL != "" {
+					paladinClient := paladinadapter.NewClient(cfg.PaladinURL)
+					supervisorHandler.SetDecryptDeps(paladinClient, oversightSvc)
+					log.Printf("supervisor decrypt endpoint enabled (paladin: %s)", cfg.PaladinURL)
+				}
 			}
 		} else {
 			log.Printf("warning: oversight DB unavailable (%v); disclosure endpoints disabled", dbErr)
