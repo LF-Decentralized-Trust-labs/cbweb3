@@ -78,7 +78,7 @@ export const mockDb = {
       appendAudit({
         actor: "governance.admin",
         action: "Credential issued",
-        category: "REGISTRY",
+        category: "CREDENTIAL",
         severity: "INFO",
         outcome: "SUCCESS",
         metadata: JSON.stringify({ participantId: existing.id, scopes: payload.scopes }),
@@ -105,7 +105,7 @@ export const mockDb = {
     appendAudit({
       actor: "governance.admin",
       action: "Credential issued",
-      category: "REGISTRY",
+      category: "CREDENTIAL",
       severity: "INFO",
       outcome: "SUCCESS",
       metadata: JSON.stringify({ participantId, scopes: payload.scopes }),
@@ -149,7 +149,7 @@ export const mockDb = {
     appendAudit({
       actor: "governance.admin",
       action: "KYC approved",
-      category: "REGISTRY",
+      category: "CREDENTIAL",
       severity: "INFO",
       outcome: "SUCCESS",
       metadata: JSON.stringify({ subject: payload.subject, reason: payload.reason }),

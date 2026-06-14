@@ -116,7 +116,7 @@ export const generateAudit = (): GovernanceAuditEntry[] => [
     id: "audit-003",
     actor: "governance.admin",
     action: "Credential issued",
-    category: "REGISTRY",
+    category: "CREDENTIAL",
     severity: "INFO",
     outcome: "SUCCESS",
     metadata: "{\"participantId\":\"pt-002\"}",

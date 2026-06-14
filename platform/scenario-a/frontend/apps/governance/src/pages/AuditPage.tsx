@@ -57,11 +57,10 @@ export function AuditPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All categories</SelectItem>
-              <SelectItem value="REGISTRY">Registry</SelectItem>
+              <SelectItem value="CREDENTIAL">Credential</SelectItem>
               <SelectItem value="CIRCUIT_BREAKER">Circuit Breaker</SelectItem>
               <SelectItem value="FREEZE">Freeze</SelectItem>
               <SelectItem value="PARAMETER">Parameter</SelectItem>
-              <SelectItem value="AUTH">Auth</SelectItem>
             </SelectContent>
           </Select>
 
