@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	besuscanner "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/besu"
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	paladinadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/paladin"
 	"github.com/gofiber/fiber/v2"
@@ -27,11 +28,17 @@ type decryptGate interface {
 	CheckDisclosureQuorum(ctx context.Context, txRef string) error
 }
 
+// htlcLookup resolves an HTLC contract ID to its on-chain scan result.
+type htlcLookup interface {
+	GetByContractID(ctx context.Context, contractID string) (*besuscanner.HTLCScanResult, error)
+}
+
 // SupervisorHandler exposes supervisor-only endpoints (ROLE_SUPERVISOR required at the router level).
 type SupervisorHandler struct {
 	lister  ComplianceAuditLister
 	paladin *paladinadapter.Client // nil if PALADIN_URL not configured
 	gate    decryptGate            // nil if oversight DB not available
+	scanner htlcLookup             // nil if Besu scanner not configured
 }
 
 // NewSupervisorHandler creates a SupervisorHandler.
@@ -43,6 +50,12 @@ func NewSupervisorHandler(lister ComplianceAuditLister) *SupervisorHandler {
 func (h *SupervisorHandler) SetDecryptDeps(paladin *paladinadapter.Client, gate decryptGate) {
 	h.paladin = paladin
 	h.gate = gate
+}
+
+// SetHTLCScanner wires the on-chain HTLC scanner used by DecryptTransaction to resolve
+// an HTLC contract ID to the Paladin transaction UUID stored in its zeto_lock_ref field.
+func (h *SupervisorHandler) SetHTLCScanner(s htlcLookup) {
+	h.scanner = s
 }
 
 // GetAuditLogs handles GET /api/v1/compliance/audit/logs.
@@ -82,9 +95,10 @@ func (h *SupervisorHandler) GetAuditLogs(c *fiber.Ctx) error {
 
 // DecryptTransaction handles POST /api/v1/compliance/decrypt-transaction.
 //
-// Gate: requires a QUORUM_REACHED disclosure request for the given tx_hash.
-// Calls Paladin ptx_getStateReceipt to read the private Zeto state,
-// then writes an immutable audit log entry recording the access.
+// Accepts the HTLC contract ID (hex, as shown in the supervisor dashboard) as tx_hash.
+// Gate: requires a QUORUM_REACHED disclosure request for that contract ID.
+// Resolves the on-chain zeto_lock_ref to the Paladin tx UUID, then calls ptx_getStateReceipt
+// to read the private Zeto state and writes an immutable audit log entry.
 func (h *SupervisorHandler) DecryptTransaction(c *fiber.Ctx) error {
 	if h.paladin == nil {
 		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
@@ -96,9 +110,14 @@ func (h *SupervisorHandler) DecryptTransaction(c *fiber.Ctx) error {
 			"error": "transaction decryption not available (oversight DB not configured)",
 		})
 	}
+	if h.scanner == nil {
+		return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+			"error": "transaction decryption not available (HTLC scanner not configured)",
+		})
+	}
 
 	var req struct {
-		TxHash  string `json:"tx_hash"`
+		TxHash  string `json:"tx_hash"`  // HTLC contract ID (0x...), same as shown in the dashboard
 		ViewKey string `json:"view_key"`
 		Reason  string `json:"reason"`
 	}
@@ -109,17 +128,34 @@ func (h *SupervisorHandler) DecryptTransaction(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tx_hash, view_key, and reason are required"})
 	}
 
-	// Quorum gate: only proceed if a QUORUM_REACHED disclosure exists for this tx.
+	// Quorum gate: the disclosure tx_ref must match this HTLC contract ID.
 	if err := h.gate.CheckDisclosureQuorum(c.UserContext(), req.TxHash); err != nil {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": fmt.Sprintf("disclosure quorum not reached for tx %s: open a disclosure request and collect 2 signatures first", req.TxHash),
 		})
 	}
 
-	// Fetch decrypted state from Paladin.
-	dec, err := h.paladin.GetDecryptedTx(c.UserContext(), req.TxHash)
+	// Look up the HTLC on-chain to extract the Paladin UUID from zeto_lock_ref.
+	htlc, err := h.scanner.GetByContractID(c.UserContext(), req.TxHash)
 	if err != nil {
-		log.Printf("[supervisor] decrypt tx %s failed: %v", req.TxHash, err)
+		log.Printf("[supervisor] HTLC on-chain lookup failed for %s: %v", req.TxHash, err)
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "HTLC not found on-chain: " + err.Error(),
+		})
+	}
+
+	paladinUUID, err := paladinadapter.UUIDFromBytes32(htlc.ZetoLockRef)
+	if err != nil {
+		log.Printf("[supervisor] cannot extract Paladin UUID from zeto_lock_ref %s: %v", htlc.ZetoLockRef, err)
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+			"error": "cannot resolve Paladin transaction reference — this HTLC may have been created before the supervisor decrypt feature was deployed",
+		})
+	}
+
+	// Fetch decrypted state from Paladin.
+	dec, err := h.paladin.GetDecryptedTx(c.UserContext(), paladinUUID)
+	if err != nil {
+		log.Printf("[supervisor] decrypt paladin UUID %s (HTLC %s) failed: %v", paladinUUID, req.TxHash, err)
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
 			"error": "failed to decrypt transaction: " + err.Error(),
 		})
@@ -139,14 +175,14 @@ func (h *SupervisorHandler) DecryptTransaction(c *fiber.Ctx) error {
 		Result:        "SUCCESS",
 		Category:      "COMPLIANCE",
 		Severity:      "HIGH",
-		Details:       fmt.Sprintf(`{"reason":%q,"view_key_hint":%q}`, req.Reason, req.ViewKey[:min(8, len(req.ViewKey))]),
+		Details:       fmt.Sprintf(`{"reason":%q,"view_key_hint":%q,"htlc":%q}`, req.Reason, req.ViewKey[:min(8, len(req.ViewKey))], req.TxHash),
 	})
 	if auditErr != nil {
 		log.Printf("[supervisor] audit log write failed (non-fatal): %v", auditErr)
 	}
 
 	return c.JSON(fiber.Map{
-		"tx_hash":      req.TxHash,
+		"tx_hash":      req.TxHash, // HTLC contract ID — consistent with the supervisor dashboard
 		"amount":       dec.Amount,
 		"currency":     dec.Currency,
 		"sender":       dec.Sender,

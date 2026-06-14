@@ -206,9 +206,8 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 	var htlcTxHash string
 	if s.htlc != nil {
 		var zetoRefBytes [32]byte
-		if len(lockResult.LockedStateIDs) > 0 {
-			zetoRefHash := sha256.Sum256([]byte(strings.Join(lockResult.LockedStateIDs, ",")))
-			zetoRefBytes = zetoRefHash
+		if b := uuidToRawBytes(lockResult.TxHash); b != nil {
+			copy(zetoRefBytes[:], b)
 		}
 		htlcTxHash, err = s.htlc.Lock(ctx, ports.HTLCLockParams{
 			ContractID:  contractIDBytes,
@@ -339,9 +338,8 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 		var hashLock32 [32]byte
 		copy(hashLock32[:], hashLockBytes)
 		var zetoRefBytes [32]byte
-		if len(lockResult.LockedStateIDs) > 0 {
-			zetoRefHash := sha256.Sum256([]byte(strings.Join(lockResult.LockedStateIDs, ",")))
-			zetoRefBytes = zetoRefHash
+		if b := uuidToRawBytes(lockResult.TxHash); b != nil {
+			copy(zetoRefBytes[:], b)
 		}
 		htlcTxHash, err = s.htlc.Lock(ctx, ports.HTLCLockParams{
 			ContractID:  contractIDBytes,
@@ -1655,4 +1653,15 @@ func (s *paymentOrchestratorService) handleRelaySettleEvent(proof ports.Interope
 	}
 	s.logger.Info("relay settle: local HTLC leg settled", "contractId", proof.ContractID)
 	return nil
+}
+
+// uuidToRawBytes converts a UUID string (e.g. "dc1e6c37-f676-4848-ab6a-be8ca5c56558")
+// to its 16 raw bytes. Returns nil if the input is not a valid UUID.
+func uuidToRawBytes(u string) []byte {
+	u = strings.ReplaceAll(u, "-", "")
+	b, err := hex.DecodeString(u)
+	if err != nil || len(b) != 16 {
+		return nil
+	}
+	return b
 }

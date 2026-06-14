@@ -186,3 +186,19 @@ func (s *HTLCScanner) ScanAllHTLCs(ctx context.Context) ([]HTLCScanResult, error
 
 	return results, nil
 }
+
+// GetByContractID scans all HTLCs and returns the one matching contractID.
+// The lookup is case-insensitive and accepts IDs with or without the "0x" prefix.
+func (s *HTLCScanner) GetByContractID(ctx context.Context, contractID string) (*HTLCScanResult, error) {
+	results, err := s.ScanAllHTLCs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	needle := strings.ToLower(strings.TrimPrefix(contractID, "0x"))
+	for i := range results {
+		if strings.ToLower(strings.TrimPrefix(results[i].ContractID, "0x")) == needle {
+			return &results[i], nil
+		}
+	}
+	return nil, fmt.Errorf("HTLC %s not found on-chain", contractID)
+}

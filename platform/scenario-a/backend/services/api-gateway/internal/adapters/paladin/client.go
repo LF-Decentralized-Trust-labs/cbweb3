@@ -5,6 +5,7 @@ package paladin
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -139,6 +140,22 @@ func (c *Client) GetDecryptedTx(ctx context.Context, txID string) (*DecryptedTx,
 		return nil, fmt.Errorf("tx %s state data does not contain recognisable Zeto fields", id)
 	}
 	return dec, nil
+}
+
+// UUIDFromBytes32 extracts the Paladin transaction UUID from an on-chain zeto_lock_ref bytes32.
+// The first 16 bytes encode the UUID as raw bytes (written by uuidToRawBytes in the payment-orchestrator).
+// Input hex32 may have or omit the "0x" prefix and must be at least 32 hex chars (16 bytes).
+func UUIDFromBytes32(hex32 string) (string, error) {
+	s := strings.TrimPrefix(hex32, "0x")
+	if len(s) < 32 {
+		return "", fmt.Errorf("zeto_lock_ref %q too short to contain a UUID", hex32)
+	}
+	b, err := hex.DecodeString(s[:32])
+	if err != nil {
+		return "", fmt.Errorf("decode zeto_lock_ref hex: %w", err)
+	}
+	// RFC 4122 UUID: 8-4-4-4-12 hex groups
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
 
 func firstString(data map[string]interface{}, keys ...string) string {

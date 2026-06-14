@@ -151,6 +151,7 @@ func New(cfg config.Config) (*App, error) {
 		}
 		closers = append(closers, scanner)
 		deps.PaymentHandler.SetHTLCScanner(scanner)
+		supervisorHandler.SetHTLCScanner(scanner)
 	}
 
 	if cfg.CentralBankAPIURL != "" {
