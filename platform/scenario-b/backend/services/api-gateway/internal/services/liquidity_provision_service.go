@@ -67,10 +67,17 @@ type LiquidityProvisionRequest struct {
 }
 
 // LiquidityRemoveRequest carries parameters for remove-liquidity calls.
+//
+// FractionBps selects how much of the position to withdraw, in basis points
+// (10000 = 100%). A zero value is treated as a full withdrawal (10000) for
+// backward compatibility. A partial withdrawal (0 < FractionBps < 10000) burns
+// only that fraction of the recorded shares and leaves the position ACTIVE with
+// the remaining shares/contributions.
 type LiquidityRemoveRequest struct {
 	PoolPair       string
 	ProviderBankID string
 	LPID           string
+	FractionBps    int
 }
 
 // CommitRequest carries parameters for a commit-reveal deposit intent.
@@ -196,6 +203,16 @@ func (s *LiquidityProvisionService) RemoveLiquidity(ctx context.Context, req Liq
 		return nil, fmt.Errorf("pool_pair, provider_bank_id, and lp_id are required")
 	}
 
+	// Default a zero/omitted fraction to a full withdrawal (10000 bps) for backward
+	// compatibility; reject out-of-range values.
+	fractionBps := req.FractionBps
+	if fractionBps == 0 {
+		fractionBps = 10000
+	}
+	if fractionBps < 0 || fractionBps > 10000 {
+		return nil, fmt.Errorf("fraction_bps must be between 1 and 10000 (got %d)", req.FractionBps)
+	}
+
 	var pos apidomain.LiquidityPosition
 	if err := s.db.WithContext(ctx).
 		Where("lp_id = ? AND provider_bank_id = ? AND pool_pair = ? AND status = ?",
@@ -204,33 +221,46 @@ func (s *LiquidityProvisionService) RemoveLiquidity(ctx context.Context, req Liq
 		return nil, fmt.Errorf("active liquidity position not found: %w", err)
 	}
 
-	return s.removeShares(ctx, &pos)
+	return s.removeShares(ctx, &pos, fractionBps)
 }
 
 // removeShares withdraws via the on-chain LP-share model (decisions D1/D4/D7): it burns the share
 // owner's LP shares and returns a single home currency (the provider's deposit side), zap-swapping
 // the other side. Liquidity is sovereign-only (D7), so this runs on the owning CB's own gateway
 // and the burn is signed by the CB's configured signer — the on-chain share owner.
-func (s *LiquidityProvisionService) removeShares(ctx context.Context, pos *apidomain.LiquidityPosition) (*LPResult, error) {
+//
+// fractionBps selects how much of the position to withdraw (10000 = full). For a partial
+// withdrawal the position stays ACTIVE with its shares and contributions scaled down by the
+// withdrawn fraction; a full withdrawal flips the position to WITHDRAWN.
+func (s *LiquidityProvisionService) removeShares(ctx context.Context, pos *apidomain.LiquidityPosition, fractionBps int) (*LPResult, error) {
 	// Resolve the share count to burn. Prefer the position's recorded shares (persisted from
 	// LogCommitFinalized); fall back to this gateway's full on-chain balance when the position
 	// predates share persistence (empty holder = the configured CB signer, decision D4).
-	shares, ok := new(big.Int).SetString(pos.LPShares, 10)
-	if !ok || shares.Sign() <= 0 {
+	posShares, ok := new(big.Int).SetString(pos.LPShares, 10)
+	if !ok || posShares.Sign() <= 0 {
 		bal, err := s.amm.LPBalanceOf(ctx, "")
 		if err != nil {
 			return nil, fmt.Errorf("resolve LP-share balance for %s: %w", pos.LPID, err)
 		}
-		shares = bal
+		posShares = bal
 	}
-	if shares.Sign() <= 0 {
+	if posShares.Sign() <= 0 {
 		return nil, fmt.Errorf("position %s has no LP shares to withdraw", pos.LPID)
+	}
+
+	// Shares to burn = posShares * fractionBps / 10000. A full withdrawal burns the whole
+	// position; a partial one burns the fraction and leaves the rest in the pool.
+	full := fractionBps >= 10000
+	sharesToBurn := new(big.Int).Mul(posShares, big.NewInt(int64(fractionBps)))
+	sharesToBurn.Quo(sharesToBurn, big.NewInt(10000))
+	if sharesToBurn.Sign() <= 0 {
+		return nil, fmt.Errorf("fraction_bps %d rounds to zero shares for position %s", fractionBps, pos.LPID)
 	}
 
 	// Home currency = the provider's deposit side (B only when deposit_side == B).
 	homeIsTokenA := pos.DepositSide != apidomain.DepositSideB
 
-	amountOut, err := s.amm.RemoveLiquidityShares(ctx, shares, homeIsTokenA, big.NewInt(0))
+	amountOut, err := s.amm.RemoveLiquidityShares(ctx, sharesToBurn, homeIsTokenA, big.NewInt(0))
 	if err != nil {
 		return nil, fmt.Errorf("amm remove-liquidity (shares) failed: %w", err)
 	}
@@ -242,10 +272,19 @@ func (s *LiquidityProvisionService) removeShares(ctx context.Context, pos *apido
 
 	now := time.Now()
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(pos).Updates(map[string]interface{}{
-			"withdrawn_at": now,
-			"status":       apidomain.LPStatusWithdrawn,
-		}).Error; err != nil {
+		updates := map[string]interface{}{}
+		if full {
+			updates["withdrawn_at"] = now
+			updates["status"] = apidomain.LPStatusWithdrawn
+		} else {
+			// Keep the position ACTIVE; scale shares and contributions down by the remaining
+			// fraction so fee accrual and shares_percentage reflect the reduced stake.
+			remaining := new(big.Int).Sub(posShares, sharesToBurn)
+			updates["lp_shares"] = remaining.String()
+			updates["token_a_contributed"] = scaleAmountBps(pos.TokenAContributed, 10000-fractionBps)
+			updates["token_b_contributed"] = scaleAmountBps(pos.TokenBContributed, 10000-fractionBps)
+		}
+		if err := tx.Model(pos).Updates(updates).Error; err != nil {
 			return err
 		}
 		return s.recalculateSharesInTx(ctx, tx, pos.PoolPair)
@@ -253,18 +292,34 @@ func (s *LiquidityProvisionService) removeShares(ctx context.Context, pos *apido
 		return nil, fmt.Errorf("update withdrawal failed: %w", err)
 	}
 
+	mode := "SHARES_HOME_CURRENCY"
+	if !full {
+		mode = "SHARES_HOME_CURRENCY_PARTIAL"
+	}
 	return &LPResult{
 		LPID:           pos.LPID,
 		PoolPair:       pos.PoolPair,
 		ProviderBankID: pos.ProviderBankID,
 		TokenAAmount:   tokenAOut,
 		TokenBAmount:   tokenBOut,
-		LPShares:       shares.String(),
-		WithdrawalMode: "SHARES_HOME_CURRENCY",
+		LPShares:       sharesToBurn.String(),
+		WithdrawalMode: mode,
 		FeeClaimPaid:   "0",
 		AddedAt:        pos.AddedAt,
 		WithdrawnAt:    now,
 	}, nil
+}
+
+// scaleAmountBps returns amount * bps / 10000 as a decimal integer string. A non-numeric or
+// empty amount is returned unchanged ("0" stays "0").
+func scaleAmountBps(amount string, bps int) string {
+	v, ok := new(big.Int).SetString(amount, 10)
+	if !ok {
+		return amount
+	}
+	v.Mul(v, big.NewInt(int64(bps)))
+	v.Quo(v, big.NewInt(10000))
+	return v.String()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

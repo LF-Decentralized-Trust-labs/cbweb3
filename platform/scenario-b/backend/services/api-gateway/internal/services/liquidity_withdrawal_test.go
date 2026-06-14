@@ -58,7 +58,7 @@ func TestRemoveShares_UsesRecordedShares(t *testing.T) {
 		LPShares:    "12345",
 		DepositSide: apidomain.DepositSideB,
 	}
-	_, err := svc.removeShares(context.Background(), pos)
+	_, err := svc.removeShares(context.Background(), pos, 10000)
 	if !errors.Is(err, errStopBeforeDB) && (err == nil || !strings.Contains(err.Error(), errStopBeforeDB.Error())) {
 		t.Fatalf("expected stop-before-db sentinel, got %v", err)
 	}
@@ -70,6 +70,27 @@ func TestRemoveShares_UsesRecordedShares(t *testing.T) {
 	}
 	if mock.lpBalanceHolder != nil {
 		t.Errorf("LPBalanceOf must not be called when the position records shares")
+	}
+}
+
+// TestRemoveShares_PartialBurnsFraction asserts that a partial withdrawal (fraction_bps < 10000)
+// burns only that fraction of the recorded position shares, rounded down.
+func TestRemoveShares_PartialBurnsFraction(t *testing.T) {
+	mock := &withdrawalMockAMM{}
+	svc := NewLiquidityProvisionService(nil, mock)
+
+	pos := &apidomain.LiquidityPosition{
+		LPID:        "lp-partial",
+		PoolPair:    "W-BRL-ARS",
+		LPShares:    "10000", // 40% → 4000
+		DepositSide: apidomain.DepositSideA,
+	}
+	_, err := svc.removeShares(context.Background(), pos, 4000)
+	if err == nil || !strings.Contains(err.Error(), errStopBeforeDB.Error()) {
+		t.Fatalf("expected stop-before-db sentinel, got %v", err)
+	}
+	if mock.gotShares == nil || mock.gotShares.String() != "4000" {
+		t.Errorf("RemoveLiquidityShares shares = %v; want 4000 (40%% of 10000)", mock.gotShares)
 	}
 }
 
@@ -87,7 +108,7 @@ func TestRemoveShares_FallbackToSignerBalance(t *testing.T) {
 		LPShares:       "0",
 		DepositSide:    apidomain.DepositSideA,
 	}
-	_, err := svc.removeShares(context.Background(), pos)
+	_, err := svc.removeShares(context.Background(), pos, 10000)
 	if err == nil || !strings.Contains(err.Error(), errStopBeforeDB.Error()) {
 		t.Fatalf("expected stop-before-db sentinel, got %v", err)
 	}
@@ -112,7 +133,7 @@ func TestRemoveShares_NoSharesAnywhere(t *testing.T) {
 	svc := NewLiquidityProvisionService(nil, mock)
 
 	pos := &apidomain.LiquidityPosition{LPID: "lp-3", LPShares: "0", DepositSide: apidomain.DepositSideA}
-	_, err := svc.removeShares(context.Background(), pos)
+	_, err := svc.removeShares(context.Background(), pos, 10000)
 	if err == nil || !strings.Contains(err.Error(), "no LP shares") {
 		t.Fatalf("expected 'no LP shares' error, got %v", err)
 	}

@@ -17,6 +17,7 @@ package integration_test
 
 import (
 	"fmt"
+	"math/big"
 	"os"
 	"os/exec"
 	"strings"
@@ -27,14 +28,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// mustBigInt parses a base-10 integer string, failing the test on malformed input.
+func mustBigInt(t *testing.T, s string) *big.Int {
+	t.Helper()
+	v, ok := new(big.Int).SetString(s, 10)
+	require.True(t, ok, "expected base-10 integer, got %q", s)
+	return v
+}
+
 // Token amounts (18-decimal ERC-20, matching sovereign CB liquidity tryout defaults).
 const (
-	mintAmount    = "100000000000000000000000" // 1e23 → CB mints hub W-tokens
-	commitAmount  = "100000000000000000000000" // per commit side
-	depositAmount = "1000000000000000000000"   // 1e21 → Bank A fiat deposit
-	swapAmountOut = "500000000000000000000"    // 5e20 → target ARS output
-	swapMaxIn     = "800000000000000000000"    // 8e20 → max BRL in (< depositAmount so bank can cover reserves)
+	// Pool seed reflects the FX rate 1 BRL = 287 ARS, so the pool is loaded asymmetrically
+	// (matched to the national-currency exchange rate) rather than 1:1. Side A = W-BRL (CB-A),
+	// side B = W-ARS (CB-B). The first deposit still splits LP shares 50/50 by value, which is
+	// correct because both sides post equal value at this rate.
+	commitAmountA = "1000000000000000000000"   // 1e21 → CB-A side A (W-BRL)
+	commitAmountB = "287000000000000000000000" // 287e21 → CB-B side B (W-ARS), 287× side A
+	// Each CB mints/bridges at least its own side's commit amount of hub W-tokens.
+	mintAmountA = commitAmountA
+	mintAmountB = commitAmountB
+
+	depositAmount = "1000000000000000000000" // 1e21 → Bank A fiat deposit
+	swapAmountOut = "500000000000000000000"  // 5e20 → target ARS output
+	swapMaxIn     = "800000000000000000000"  // 8e20 → max BRL in (< depositAmount so bank can cover reserves)
 	poolPair      = "W-BRL-ARS"
+
+	// withdrawFractionBps withdraws part of CB-A's position (40%) so Phase 6 exercises a
+	// partial LP exit — CB-A keeps a reduced, still-active position afterward.
+	withdrawFractionBps = 4000
 )
 
 var cfg *Config
@@ -111,7 +132,7 @@ func TestFullHappyPath(t *testing.T) {
 			BridgeState string `json:"bridge_state"`
 		}
 		cbA.mustPost(t, "/api/v2/bridge/lock-mint",
-			map[string]string{"amount": mintAmount}, &lockMintA)
+			map[string]string{"amount": mintAmountA}, &lockMintA)
 		require.NotEmpty(t, lockMintA.PositionID, "CB-A bridge position_id must not be empty")
 		t.Logf("CB-A bridge position: %s state=%s", lockMintA.PositionID, lockMintA.BridgeState)
 
@@ -121,7 +142,7 @@ func TestFullHappyPath(t *testing.T) {
 			BridgeState string `json:"bridge_state"`
 		}
 		cbB.mustPost(t, "/api/v2/bridge/lock-mint",
-			map[string]string{"amount": mintAmount}, &lockMintB)
+			map[string]string{"amount": mintAmountB}, &lockMintB)
 		require.NotEmpty(t, lockMintB.PositionID, "CB-B bridge position_id must not be empty")
 		t.Logf("CB-B bridge position: %s state=%s", lockMintB.PositionID, lockMintB.BridgeState)
 
@@ -134,12 +155,12 @@ func TestFullHappyPath(t *testing.T) {
 		t.Log("Step 5: CB-A mint-and-approve hub W-tokens for AMM...")
 		var mintResp map[string]interface{}
 		cbA.mustPost(t, "/api/v2/amm/token/mint-and-approve",
-			map[string]string{"amount": mintAmount}, &mintResp)
+			map[string]string{"amount": mintAmountA}, &mintResp)
 		assert.Equal(t, "ok", mintResp["status"], "CB-A mint-and-approve status")
 
 		t.Log("Step 6: CB-B mint-and-approve hub W-tokens for AMM...")
 		cbB.mustPost(t, "/api/v2/amm/token/mint-and-approve",
-			map[string]string{"amount": mintAmount}, &mintResp)
+			map[string]string{"amount": mintAmountB}, &mintResp)
 		assert.Equal(t, "ok", mintResp["status"], "CB-B mint-and-approve status")
 
 		t.Log("Step 7: CB-A submits liquidity commit (side A)...")
@@ -151,7 +172,7 @@ func TestFullHappyPath(t *testing.T) {
 			"pool_pair":   poolPair,
 			"provider_id": "central_bank_a",
 			"side":        "A",
-			"amount":      commitAmount,
+			"amount":      commitAmountA,
 		}, &commitAResp)
 		require.NotEmpty(t, commitAResp.CommitID, "CB-A commit_id must not be empty")
 		t.Logf("CB-A commit_id=%s status=%s", commitAResp.CommitID, commitAResp.Status)
@@ -165,7 +186,7 @@ func TestFullHappyPath(t *testing.T) {
 			"pool_pair":   poolPair,
 			"provider_id": "central_bank_b",
 			"side":        "B",
-			"amount":      commitAmount,
+			"amount":      commitAmountB,
 		}, &commitBResp)
 		require.NotEmpty(t, commitBResp.CommitID, "CB-B commit_id must not be empty")
 		t.Logf("CB-B commit_id=%s status=%s", commitBResp.CommitID, commitBResp.Status)
@@ -537,9 +558,11 @@ func TestFullHappyPath(t *testing.T) {
 		t.Logf("Bank B receipt confirmed: tCeBM balance=%s (swap_id=%s)", finalBalance.Balance, swapID)
 	})
 
-	// Phase 6: LP-share withdrawal (specs/013-amm-lp-shares, decisions D1/D4/D7).
-	// CB-A burns its on-chain CBW3-LP shares and receives a single home-currency amount
-	// (W-BRL) via the zap-out path. Runs LAST: it removes ~half the pool's liquidity.
+	// Phase 6: PARTIAL LP-share withdrawal (specs/013-amm-lp-shares, decisions D1/D4/D7).
+	// CB-A burns a fraction (withdrawFractionBps) of its on-chain CBW3-LP shares and receives a
+	// single home-currency amount (W-BRL) via the zap-out path. Because it is partial, CB-A keeps
+	// a reduced, still-ACTIVE position afterward (on-chain balance drops but stays > 0).
+	// Runs LAST: it removes part of the pool's liquidity.
 	t.Run("phase_6_lp_withdrawal", func(t *testing.T) {
 		t.Log("Step 1: Reading CB-A on-chain LP-share position (lp-balance endpoint)...")
 		var lpBal struct {
@@ -581,32 +604,60 @@ func TestFullHappyPath(t *testing.T) {
 		require.NotEmpty(t, lpID, "CB-A must have an ACTIVE liquidity position")
 		t.Logf("Withdrawing position lp_id=%s provider=%s", lpID, providerID)
 
-		t.Log("Step 3: CB-A withdraws (burn shares -> home currency zap-out)...")
+		t.Logf("Step 3: CB-A withdraws %d bps (partial) -> home currency zap-out...", withdrawFractionBps)
 		var result struct {
 			TokenAAmount   string `json:"token_a_amount"`
 			TokenBAmount   string `json:"token_b_amount"`
 			LPShares       string `json:"lp_shares"`
 			WithdrawalMode string `json:"withdrawal_mode"`
 		}
-		cbA.mustPost(t, "/api/v2/amm/liquidity/remove", map[string]string{
+		cbA.mustPost(t, "/api/v2/amm/liquidity/remove", map[string]interface{}{
 			"pool_pair":        poolPair,
 			"provider_bank_id": providerID,
 			"lp_id":            lpID,
+			"fraction_bps":     withdrawFractionBps,
 		}, &result)
 		t.Logf("Withdrawal: mode=%s shares_burned=%s out_a=%s out_b=%s",
 			result.WithdrawalMode, result.LPShares, result.TokenAAmount, result.TokenBAmount)
-		require.Equal(t, "SHARES_HOME_CURRENCY", result.WithdrawalMode, "must use the on-chain shares path")
+		require.Equal(t, "SHARES_HOME_CURRENCY_PARTIAL", result.WithdrawalMode, "must use the partial on-chain shares path")
 		require.NotEqual(t, "0", result.TokenAAmount, "side-A provider must receive home currency (token A)")
 		require.False(t, strings.HasPrefix(result.TokenAAmount, "0x"),
 			"token_a_amount must be the realized amount, not a tx hash")
 		require.Equal(t, "0", result.TokenBAmount, "single-currency exit must not return token B")
 
-		t.Log("Step 4: Asserting CB-A's on-chain LP balance decreased...")
+		// The shares burned must be the requested fraction of the pre-withdrawal balance.
+		sharesBefore := mustBigInt(t, lpBal.LPShares)
+		sharesBurned := mustBigInt(t, result.LPShares)
+		expectedBurn := new(big.Int).Quo(
+			new(big.Int).Mul(sharesBefore, big.NewInt(int64(withdrawFractionBps))), big.NewInt(10000))
+		require.Equal(t, expectedBurn.String(), sharesBurned.String(),
+			"shares burned must equal fraction_bps of the pre-withdrawal balance")
+
+		t.Log("Step 4: Asserting CB-A's on-chain LP balance decreased but stayed > 0 (partial exit)...")
 		var lpAfter struct {
 			LPShares string `json:"lp_shares"`
 		}
 		cbA.mustGet(t, "/api/v2/amm/lp-balance", &lpAfter)
-		t.Logf("CB-A lp_shares after withdrawal: %s (was %s)", lpAfter.LPShares, lpBal.LPShares)
-		require.NotEqual(t, lpBal.LPShares, lpAfter.LPShares, "on-chain LP shares must decrease after burn")
+		t.Logf("CB-A lp_shares after partial withdrawal: %s (was %s)", lpAfter.LPShares, lpBal.LPShares)
+		sharesAfter := mustBigInt(t, lpAfter.LPShares)
+		require.Equal(t, -1, sharesAfter.Cmp(sharesBefore), "on-chain LP shares must decrease after partial burn")
+		require.Equal(t, 1, sharesAfter.Sign(), "on-chain LP shares must remain > 0 after a partial withdrawal")
+
+		t.Log("Step 5: Asserting CB-A's liquidity position is still ACTIVE after the partial exit...")
+		var positionsAfter struct {
+			Positions []struct {
+				LPID   string `json:"lp_id"`
+				Status string `json:"status"`
+			} `json:"positions"`
+		}
+		cbA.mustGet(t, "/api/v2/amm/liquidity/positions?pool_pair="+poolPair, &positionsAfter)
+		var stillActive bool
+		for _, p := range positionsAfter.Positions {
+			if p.LPID == lpID && p.Status == "ACTIVE" {
+				stillActive = true
+				break
+			}
+		}
+		require.True(t, stillActive, "CB-A's position must remain ACTIVE after a partial withdrawal")
 	})
 }
