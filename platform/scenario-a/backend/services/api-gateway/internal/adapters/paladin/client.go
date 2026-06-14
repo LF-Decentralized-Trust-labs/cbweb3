@@ -111,31 +111,50 @@ func (c *Client) GetDecryptedTx(ctx context.Context, txID string) (*DecryptedTx,
 		return nil, fmt.Errorf("unmarshal state receipt: %w", err)
 	}
 
-	// Collect all states (confirmed outputs + spent inputs) for field extraction.
-	states := receipt.Confirmed
-	states = append(states, receipt.Spent...)
-	if len(states) == 0 {
+	if len(receipt.Confirmed) == 0 && len(receipt.Spent) == 0 {
 		return nil, fmt.Errorf("tx %s has no readable states (not accessible from this node)", id)
 	}
 
 	dec := &DecryptedTx{Currency: "tCeBM"}
 
-	// Extract fields from the first state that has usable data.
-	// Zeto state schemas use: amount/value, owner/sender, receiver/to.
-	for _, s := range states {
+	// For a Zeto lock transaction the receipt contains:
+	//   confirmed: [locked UTXO (locked=true, amount=HTLC value), change UTXO (locked=false)]
+	//   spent:     [original balance UTXO(s)]
+	//
+	// Priority 1: confirmed state where locked==true → this is the specific HTLC amount.
+	// Priority 2: any other confirmed state → at least avoids reading the spent inputs
+	//             (which carry the sender's total pre-lock balance, not the HTLC amount).
+	for _, s := range receipt.Confirmed {
 		if s.Data == nil {
 			continue
 		}
-		if dec.Amount == "" {
-			dec.Amount = firstString(s.Data, "amount", "value")
+		if isLocked, _ := s.Data["locked"].(bool); !isLocked {
+			continue
 		}
-		if dec.Sender == "" {
-			dec.Sender = firstString(s.Data, "owner", "sender", "from")
-		}
-		if dec.Receiver == "" {
-			dec.Receiver = firstString(s.Data, "receiver", "to", "delegate")
+		dec.Amount = firstString(s.Data, "amount", "value")
+		dec.Sender = firstString(s.Data, "owner", "sender", "from")
+		dec.Receiver = firstString(s.Data, "receiver", "to", "delegate")
+		break
+	}
+
+	// Fallback: no locked state found — read first usable confirmed output.
+	if dec.Amount == "" {
+		for _, s := range receipt.Confirmed {
+			if s.Data == nil {
+				continue
+			}
+			if dec.Amount == "" {
+				dec.Amount = firstString(s.Data, "amount", "value")
+			}
+			if dec.Sender == "" {
+				dec.Sender = firstString(s.Data, "owner", "sender", "from")
+			}
+			if dec.Receiver == "" {
+				dec.Receiver = firstString(s.Data, "receiver", "to", "delegate")
+			}
 		}
 	}
+
 	if dec.Amount == "" && dec.Sender == "" {
 		return nil, fmt.Errorf("tx %s state data does not contain recognisable Zeto fields", id)
 	}
