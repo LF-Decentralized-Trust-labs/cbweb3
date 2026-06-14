@@ -20,10 +20,12 @@ import { useRegistry } from "../hooks";
 
 const statusVariant = {
   ACTIVE: "default",
+  APPROVED: "default",
   PENDING: "warning",
   CREDENTIAL_REQUESTED: "warning",
   KYC_APPROVED: "default",
   REVOKED: "destructive",
+  REJECTED: "destructive",
   FROZEN: "secondary",
 } as const;
 
@@ -102,7 +104,7 @@ export function RegistryPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Participant</TableHead>
-                <TableHead>CNPJ</TableHead>
+                <TableHead>Legal Entity ID</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Credential</TableHead>
                 <TableHead>Expiry</TableHead>
@@ -136,7 +138,7 @@ export function RegistryPage() {
             <Input value={entityName} onChange={(event) => setEntityName(event.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label>CNPJ</Label>
+            <Label>Legal Entity ID</Label>
             <Input value={cnpj} onChange={(event) => setCnpj(event.target.value)} />
           </div>
           <div className="space-y-2 md:col-span-2">

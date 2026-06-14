@@ -12,13 +12,21 @@ import { httpClient, useMocks } from "./http-client";
 
 export const registryApi = {
   list: async (): Promise<Participant[]> => {
-    if (useMocks) {
-      return mockDb.listParticipants();
-    }
-    const response = await httpClient.get<Participant[]>(
-      "/compliance/registry",
+    const response = await httpClient.get<PendingKycApiResponse>(
+      "/compliance/participants",
     );
-    return response.data;
+
+    const participants = response.data.participants ?? [];
+
+    return participants.map((entry) => ({
+      id: entry.user_id,
+      name: entry.institution_name ?? entry.user_id,
+      cnpj: entry.cnpj ?? "—",
+      status: entry.status,
+      credentialId: entry.certificate_data ? "Issued" : null,
+      credentialExpiry: entry.certificate_expiry ?? null,
+      createdAt: "",
+    }));
   },
   issueCredential: async (
     payload: IssueCredentialPayload,
@@ -43,7 +51,7 @@ export const registryApi = {
       .filter((entry) => entry.status === "CREDENTIAL_REQUESTED")
       .map((entry) => ({
         subject: entry.user_id,
-        status: entry.status,
+        status: entry.status as KycStatusEntry["status"],
         institution_name: entry.institution_name,
         bank_code: entry.bank_code,
         country: entry.country_code,

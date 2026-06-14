@@ -1,4 +1,12 @@
-export type ParticipantStatus = "ACTIVE" | "PENDING" | "CREDENTIAL_REQUESTED" | "KYC_APPROVED" | "REVOKED" | "FROZEN";
+export type ParticipantStatus =
+  | "ACTIVE"
+  | "APPROVED"
+  | "PENDING"
+  | "CREDENTIAL_REQUESTED"
+  | "KYC_APPROVED"
+  | "REVOKED"
+  | "REJECTED"
+  | "FROZEN";
 
 export type Participant = {
   id: string;
@@ -43,7 +51,9 @@ export type PendingKycParticipantApi = {
   country_code?: string;
   role?: string;
   wallet_address?: string;
-  status: KycRequestStatus;
+  status: ParticipantStatus;
+  certificate_data?: string;
+  certificate_expiry?: string | null;
 };
 
 export type PendingKycApiResponse = {
