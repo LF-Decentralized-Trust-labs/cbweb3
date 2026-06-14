@@ -6,6 +6,7 @@ import "context"
 // TokenizedCentralBankMoney (tCeBM) contract deployed on the spoke's Besu chain.
 type TCeBMPort interface {
 	Decimals(ctx context.Context) (uint8, error)
+	Symbol(ctx context.Context) (string, error)
 	Mint(ctx context.Context, toAddress string, amount string) (txHash string, err error)
 	Burn(ctx context.Context, fromAddress string, amount string) (txHash string, err error)
 	BalanceOf(ctx context.Context, address string) (string, error)

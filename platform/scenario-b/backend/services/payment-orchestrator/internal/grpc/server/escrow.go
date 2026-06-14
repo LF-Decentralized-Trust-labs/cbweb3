@@ -437,7 +437,16 @@ func (s *paymentOrchestratorService) GetFiatBalance(ctx context.Context, req *pb
 		return nil, status.Errorf(codes.Internal, "fCeBM decimals: %v", err)
 	}
 
-	return &pb.GetFiatBalanceResponse{Balance: balance, Decimals: uint32(decimals)}, nil
+	// Symbol is the source of truth for the fiat currency code shown in the UI, but is
+	// non-essential to the balance value: a read failure must not fail the call. Clients
+	// fall back to their configured fiat symbol.
+	symbol, err := s.fiat.Symbol(ctx)
+	if err != nil {
+		s.logger.Warn("fCeBM symbol read failed; returning balance without symbol", "error", err)
+		symbol = ""
+	}
+
+	return &pb.GetFiatBalanceResponse{Balance: balance, Decimals: uint32(decimals), Symbol: symbol}, nil
 }
 
 func escrowRecordToProto(r domain.EscrowRecord) *pb.EscrowRecord {

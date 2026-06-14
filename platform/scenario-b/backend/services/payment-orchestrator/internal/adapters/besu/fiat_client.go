@@ -23,7 +23,7 @@ var _ ports.TCeBMPort = (*TCeBMClient)(nil)
 
 // tcebmABIJSON is the minimal ABI for the TokenizedCentralBankMoney (tCeBM) ERC-20 contract.
 // It includes decimals(), mint(address,uint256), burn(address,uint256), and balanceOf(address).
-const tcebmABIJSON = `[{"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"name":"mint","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"from","type":"address"},{"name":"amount","type":"uint256"}],"name":"burn","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`
+const tcebmABIJSON = `[{"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"name":"mint","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"from","type":"address"},{"name":"amount","type":"uint256"}],"name":"burn","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`
 
 // TCeBMClientConfig holds the configuration for the Besu TokenizedCentralBankMoney client.
 type TCeBMClientConfig struct {
@@ -156,6 +156,31 @@ func (c *TCeBMClient) Decimals(ctx context.Context) (uint8, error) {
 		return 0, fmt.Errorf("decimals: unexpected type %T", outputs[0])
 	}
 	return decimals, nil
+}
+
+// Symbol returns the ERC-20 symbol of this token (e.g. "tCeBM_BRL"). The currency
+// code is the suffix after the underscore; callers may parse it for display.
+func (c *TCeBMClient) Symbol(ctx context.Context) (string, error) {
+	data, err := c.tokenABI.Pack("symbol")
+	if err != nil {
+		return "", fmt.Errorf("pack symbol: %w", err)
+	}
+	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{From: c.fromAddress, To: &c.tokenAddress, Data: data}, nil)
+	if err != nil {
+		return "", fmt.Errorf("call symbol: %w", err)
+	}
+	outputs, err := c.tokenABI.Unpack("symbol", result)
+	if err != nil {
+		return "", fmt.Errorf("unpack symbol: %w", err)
+	}
+	if len(outputs) == 0 {
+		return "", fmt.Errorf("symbol: empty result")
+	}
+	symbol, ok := outputs[0].(string)
+	if !ok {
+		return "", fmt.Errorf("symbol: unexpected type %T", outputs[0])
+	}
+	return symbol, nil
 }
 
 // sendTx signs and sends a transaction to the tCeBM contract, waiting for the receipt.

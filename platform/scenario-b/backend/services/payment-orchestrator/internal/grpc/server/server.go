@@ -99,7 +99,16 @@ func (s *paymentOrchestratorService) GetBalance(ctx context.Context, req *pb.Get
 		return nil, status.Errorf(codes.Internal, "tCeBM decimals: %v", err)
 	}
 
-	return &pb.GetBalanceResponse{Balance: balance, Decimals: uint32(decimals)}, nil
+	// Symbol is the single source of truth for the currency code shown in the UI,
+	// but it is non-essential to the balance value itself: a read failure must not
+	// fail the whole call. Clients fall back to their configured fiat symbol.
+	symbol, err := s.token.Symbol(ctx)
+	if err != nil {
+		s.logger.Warn("tCeBM symbol read failed; returning balance without symbol", "error", err)
+		symbol = ""
+	}
+
+	return &pb.GetBalanceResponse{Balance: balance, Decimals: uint32(decimals), Symbol: symbol}, nil
 }
 
 // --- FX Agreement Operations ---
