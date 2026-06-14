@@ -156,7 +156,8 @@ export function normalizePaymentStatus(status: unknown): PaymentStatus | null {
       .toUpperCase()
       .replace("PAYMENT_STATUS_", "")
       .replace("DEPOSIT_STATUS_", "")
-      .replace("REDEEM_STATUS_", "");
+      .replace("REDEEM_STATUS_", "")
+      .replace("ESCROW_STATUS_", "");
 
     if (/^\d+$/.test(normalized)) {
       return normalizePaymentStatus(Number(normalized));
