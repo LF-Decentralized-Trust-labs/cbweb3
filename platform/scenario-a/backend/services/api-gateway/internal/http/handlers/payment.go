@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	besuscanner "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/besu"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
@@ -28,6 +29,7 @@ type TransferLimitChecker interface {
 type PaymentHandler struct {
 	payment      *paymentadapter.GRPCAdapter
 	bankCode     string // institution fallback when JWT lacks BankID (e.g. user not yet registered in compliance)
+	htlcScanner  *besuscanner.HTLCScanner
 	fiatSymbol   string // currency for transfer limit checks (e.g. "BRL", "ARS"); empty = skip check
 	limitChecker TransferLimitChecker
 }
@@ -35,6 +37,11 @@ type PaymentHandler struct {
 // NewPaymentHandler creates a new PaymentHandler.
 func NewPaymentHandler(payment *paymentadapter.GRPCAdapter, bankCode string) *PaymentHandler {
 	return &PaymentHandler{payment: payment, bankCode: bankCode}
+}
+
+// SetHTLCScanner wires an on-chain scanner; when set, supervisor HTLC searches bypass the orchestrator.
+func (h *PaymentHandler) SetHTLCScanner(s *besuscanner.HTLCScanner) {
+	h.htlcScanner = s
 }
 
 // WithLimitChecker attaches a transfer-limit checker and the fiat currency symbol.
@@ -180,6 +187,25 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
 	}
 
+	// Supervisors have network-wide read access.
+	isSupervisor := false
+	for _, r := range claims.Roles {
+		if r == domain.RoleSupervisor {
+			isSupervisor = true
+			break
+		}
+	}
+
+	// Supervisor + on-chain scanner: bypass the payment-orchestrator entirely so all
+	// HTLCs on the network are visible, not just those indexed by this entity's orchestrator.
+	if isSupervisor && h.htlcScanner != nil {
+		scanResults, err := h.htlcScanner.ScanAllHTLCs(c.UserContext())
+		if err != nil {
+			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "on-chain scan failed: " + err.Error()})
+		}
+		return c.JSON(fiber.Map{"locks": scanResults, "total": len(scanResults)})
+	}
+
 	callerBankID := claims.BankID
 	if callerBankID == "" {
 		callerBankID = h.bankCode
@@ -194,6 +220,11 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 	)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if isSupervisor {
+		// Scanner not configured: fall back to orchestrator results (partial view).
+		return c.JSON(fiber.Map{"locks": results, "total": len(results)})
 	}
 
 	// Keep only records where the caller's institution is a counterparty.

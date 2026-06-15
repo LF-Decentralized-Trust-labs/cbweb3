@@ -273,6 +273,54 @@ assign_governance_role_to_service_account() {
   fi
 }
 
+# create_extra_client_in_realm provisions an additional OAuth2 client in an existing realm.
+# Used to give each portal (governance, treasury, supervisor) its own credential pair.
+# The secret is logged so operators can copy it (or pass a fixed one via the 3rd argument).
+create_extra_client_in_realm() {
+  local realm_name="$1"
+  local client_id="$2"
+  local desired_secret="${3:-}"
+
+  echo -e "\n=== Provisioning extra client '${client_id}' in realm '${realm_name}' ==="
+
+  if ! /opt/keycloak/bin/kcadm.sh get clients -r "$realm_name" --fields clientId \
+      | jq -e ".[] | select(.clientId==\"${client_id}\")" > /dev/null 2>&1; then
+    /opt/keycloak/bin/kcadm.sh create clients -r "$realm_name" \
+      -s "clientId=${client_id}" \
+      -s "name=${client_id}" \
+      -s enabled=true \
+      -s alwaysDisplayInConsole=true \
+      -s serviceAccountsEnabled=true \
+      -s authorizationServicesEnabled=true \
+      -s standardFlowEnabled=true \
+      -s directAccessGrantsEnabled=true
+  fi
+
+  local client_uuid
+  client_uuid=$(
+    /opt/keycloak/bin/kcadm.sh get clients -r "$realm_name" --fields id,clientId \
+      | jq -r ".[] | select(.clientId==\"${client_id}\") | .id"
+  )
+  if [[ -z "$client_uuid" ]]; then
+    echo "Error: unable to resolve internal client ID for ${client_id} in realm ${realm_name}"
+    return 1
+  fi
+
+  local secret
+  if [[ -n "$desired_secret" ]]; then
+    /opt/keycloak/bin/kcadm.sh update "clients/${client_uuid}" -r "$realm_name" \
+      -s "secret=${desired_secret}"
+    secret="$desired_secret"
+  else
+    secret=$(
+      /opt/keycloak/bin/kcadm.sh get "clients/${client_uuid}/client-secret" -r "$realm_name" \
+        | jq -r '.value'
+    )
+  fi
+
+  echo "  Client '${client_id}' ready. Secret: ${secret}"
+}
+
 # assign_scenariob_roles_to_service_account assigns one or more realm roles
 # to the service account of a given client. Used to grant commercial_bank
 # or central_bank roles so that client_credentials tokens carry them.
@@ -356,6 +404,9 @@ create_realm_and_client \
 create_platform_roles "central-bank-a" "${CENTRAL_BANK_ROLES[@]}"
 assign_governance_role_to_service_account "central-bank-a" "central-bank-a-client"
 assign_scenariob_roles_to_service_account "central-bank-a" "central-bank-a-client" "central_bank"
+# Supervisor portal: dedicated client with its own credentials → ROLE_SUPERVISOR only.
+create_extra_client_in_realm "central-bank-a" "central-bank-a-supervisor-client" "central-bank-a-supervisor-local-secret"
+assign_scenariob_roles_to_service_account "central-bank-a" "central-bank-a-supervisor-client" ROLE_SUPERVISOR
 
 create_realm_and_client \
   "central-bank-b" \
@@ -365,6 +416,9 @@ create_realm_and_client \
 create_platform_roles "central-bank-b" "${CENTRAL_BANK_ROLES[@]}"
 assign_governance_role_to_service_account "central-bank-b" "central-bank-b-client"
 assign_scenariob_roles_to_service_account "central-bank-b" "central-bank-b-client" "central_bank"
+# Supervisor portal: dedicated client with its own credentials → ROLE_SUPERVISOR only.
+create_extra_client_in_realm "central-bank-b" "central-bank-b-supervisor-client" "central-bank-b-supervisor-local-secret"
+assign_scenariob_roles_to_service_account "central-bank-b" "central-bank-b-supervisor-client" ROLE_SUPERVISOR
 
 # ── MLP (Multilateral Liquidity Provider — Path B: realm próprio, gateway próprio) ─────────
 # Ativado por ENABLE_MLP=true. Cria realm 'mlp', client 'mlp-client' e role 'mlp'.

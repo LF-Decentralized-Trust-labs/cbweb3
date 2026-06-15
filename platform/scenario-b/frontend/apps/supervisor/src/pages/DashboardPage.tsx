@@ -1,6 +1,8 @@
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@cbweb3/ui";
-import { useEffect } from "react";
-import { useNetworkStore, useStabilityStore, useWebsocketStore } from "../stores";
+import { useEffect, useState } from "react";
+import { useNetworkStore, useStabilityStore } from "../stores";
+import { auditApi } from "../services/api";
+import type { AuditLogEntry } from "../types";
 
 const badgeFromRatio = (imbalanced: boolean): "destructive" | "success" => (imbalanced ? "destructive" : "success");
 
@@ -8,16 +10,17 @@ export function DashboardPage() {
   const { overview, refresh } = useNetworkStore();
   const pools = useStabilityStore((state) => state.pools);
   const refreshStability = useStabilityStore((state) => state.refresh);
-  const events = useWebsocketStore((state) => state.events);
+  const [recentLogs, setRecentLogs] = useState<AuditLogEntry[]>([]);
 
   useEffect(() => {
     void refresh();
     void refreshStability();
+    void auditApi.getAuditLogs({ limit: 5 }).then((r) => setRecentLogs(r.logs));
   }, [refresh, refreshStability]);
 
   return (
     <div className="min-h-full space-y-4">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total tCeBM Supply</CardDescription>
@@ -28,12 +31,6 @@ export function DashboardPage() {
           <CardHeader className="pb-2">
             <CardDescription>Active Institutions</CardDescription>
             <CardTitle>{overview?.activeInstitutions ?? "-"}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Cross-border Agreements</CardDescription>
-            <CardTitle>{overview?.activeAgreements ?? "-"}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -75,6 +72,13 @@ export function DashboardPage() {
                     </TableCell>
                   </TableRow>
                 ))}
+                {!pools.length ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="py-4 text-center text-sm text-muted-foreground">
+                      No active liquidity pools.
+                    </TableCell>
+                  </TableRow>
+                ) : null}
               </TableBody>
             </Table>
           </CardContent>
@@ -82,20 +86,24 @@ export function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Real-time Alerts (SSE)</CardTitle>
-            <CardDescription>Latest backend telemetry notifications.</CardDescription>
+            <CardTitle>Recent Events</CardTitle>
+            <CardDescription>Last 5 entries from the compliance audit log.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            {events.slice(0, 8).map((event) => (
-              <div key={event.id} className="rounded-md border border-border p-2 text-sm">
+            {recentLogs.map((log) => (
+              <div key={log.log_id} className="rounded-md border border-border p-2 text-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium">{event.type}</span>
-                  <Badge variant={event.severity === "CRITICAL" ? "destructive" : "warning"}>{event.severity}</Badge>
+                  <span className="font-medium">{log.action}</span>
+                  <Badge variant={log.outcome === "SUCCESS" ? "success" : "destructive"}>{log.outcome}</Badge>
                 </div>
-                <p className="text-muted-foreground">{event.message}</p>
+                <p className="text-xs text-muted-foreground">
+                  {log.actor}{log.target_subject ? ` → ${log.target_subject}` : ""} · {new Date(log.timestamp).toLocaleString()}
+                </p>
               </div>
             ))}
-            {!events.length ? <p className="text-sm text-muted-foreground">Waiting for realtime events...</p> : null}
+            {!recentLogs.length ? (
+              <p className="text-sm text-muted-foreground">No audit events recorded yet.</p>
+            ) : null}
           </CardContent>
         </Card>
       </section>

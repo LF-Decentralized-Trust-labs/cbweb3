@@ -1,8 +1,6 @@
 export interface NetworkOverview {
-  totalSupply: number;
   activeInstitutions: number;
-  activeAgreements: number;
-  healthyPools: number;
-  imbalancedPools: number;
+  activeHTLCs: number;
+  pendingSettlements: number;
   lastUpdatedAt: string;
 }

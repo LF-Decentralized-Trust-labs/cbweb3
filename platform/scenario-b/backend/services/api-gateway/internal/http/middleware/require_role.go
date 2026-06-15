@@ -7,6 +7,11 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// RequireSupervisorRole enforces ROLE_SUPERVISOR on the request.
+func RequireSupervisorRole() fiber.Handler {
+	return RequireRole(domain.RoleSupervisor)
+}
+
 // RequireRole returns a middleware that enforces the caller has at least one
 // of the specified roles (extracted from the token claims in Locals["claims"]).
 // RequireBearerToken must run BEFORE this middleware to populate the claims.

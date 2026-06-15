@@ -456,21 +456,6 @@ func (c *Client) Lock(ctx context.Context, amount string, delegate string) (*por
 	}, nil
 }
 
-func (c *Client) Unlock(ctx context.Context, zetoLockRef string) (string, error) {
-	tx := paladinTx{
-		Type:     "private",
-		Domain:   "zeto",
-		From:     c.identity,
-		To:       c.zetoTokenAddress,
-		ABI:      zetoABI,
-		Function: "unlock",
-		Data: map[string]interface{}{
-			"lockId": zetoLockRef,
-		},
-	}
-	return c.sendTx(ctx, tx)
-}
-
 func (c *Client) TransferLocked(ctx context.Context, zetoLockRef string, to string, amount string) (string, error) {
 	lockedInputs := strings.Split(zetoLockRef, ",")
 	tx := paladinTx{

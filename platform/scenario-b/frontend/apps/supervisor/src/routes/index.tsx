@@ -9,6 +9,7 @@ import { LoginPage } from "../pages/LoginPage";
 import { ParticipantManagementPage } from "../pages/ParticipantManagementPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { StabilityControlsPage } from "../pages/StabilityControlsPage";
+import { InvestigationPage } from "../pages/InvestigationPage";
 
 export const routes: RouteObject[] = [
   {
@@ -27,6 +28,7 @@ export const routes: RouteObject[] = [
           { path: "participants", element: <ParticipantManagementPage /> },
           { path: "audit", element: <AuditVaultPage /> },
           { path: "stability", element: <StabilityControlsPage /> },
+          { path: "investigation", element: <InvestigationPage /> },
           { path: "settings", element: <SettingsPage /> },
         ],
       },

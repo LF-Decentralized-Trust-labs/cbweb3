@@ -192,7 +192,7 @@ func TestCrossLedger_FailurePath_Timeout_FullRefund_NoPartialSettlement(t *testi
 		t.Fatalf("RefundHTLC after timeout: %v", err)
 	}
 	if refundResp.ZetoTxHash == "" {
-		t.Error("expected a Zeto unlock tx hash on refund")
+		t.Error("expected a Zeto tx hash on refund (TransferLocked back to sender)")
 	}
 
 	st, err := orch.client.GetHTLCStatus(ctx, &orchpb.GetHTLCStatusRequest{ContractId: lockResp.ContractId})
@@ -203,17 +203,20 @@ func TestCrossLedger_FailurePath_Timeout_FullRefund_NoPartialSettlement(t *testi
 		t.Errorf("expected REFUNDED after timeout refund, got %s", st.Lock.State)
 	}
 
-	// Atomicity invariant: tokens were unlocked (refunded) and NEVER transferred.
+	// Atomicity invariant: locked tokens are returned to the sender via
+	// TransferLocked(sender) and never forwarded to the receiver.
 	// No partial settlement — the locked value returns whole to the sender.
+	// Note: the Zeto ABI has no separate "unlock" function; refunds are
+	// implemented as TransferLocked back to the original sender.
 	_, _, lock, unlock, transferLocked := orch.zeto.counters()
 	if lock != 1 {
 		t.Errorf("expected exactly one Zeto lock, got %d", lock)
 	}
-	if transferLocked != 0 {
-		t.Errorf("refund path must NOT transfer locked tokens (no partial settlement), got %d", transferLocked)
+	if transferLocked != 1 {
+		t.Errorf("expected exactly one Zeto TransferLocked (refund to sender), got %d", transferLocked)
 	}
-	if unlock != 1 {
-		t.Errorf("expected exactly one Zeto unlock (full refund), got %d", unlock)
+	if unlock != 0 {
+		t.Errorf("Zeto unlock must not be called on refund path (no unlock ABI), got %d", unlock)
 	}
 
 	// On-chain layer refunded, never settled.
