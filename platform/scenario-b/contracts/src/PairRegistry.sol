@@ -21,18 +21,18 @@ contract PairRegistry {
     /// @notice Lifecycle status of a currency pair.
     enum PairStatus {
         PROPOSED, // tokenA CB proposed; awaiting tokenB CB confirmation
-        ACTIVE    // both CBs approved; AMM is live
+        ACTIVE // both CBs approved; AMM is live
     }
 
     /// @notice Full metadata for a registered currency pair.
     struct PairEntry {
-        string     pairId;      // human-readable, e.g. "BRL-USD"
-        address    ammAddress;  // dedicated AutomatedMarketMaker for this pair
-        address    tokenA;      // tCeBM address for currency A
-        address    tokenB;      // tCeBM address for currency B
+        string pairId; // human-readable, e.g. "BRL-USD"
+        address ammAddress; // dedicated AutomatedMarketMaker for this pair
+        address tokenA; // tCeBM address for currency A
+        address tokenB; // tCeBM address for currency B
         PairStatus status;
-        address    proposer;    // CB that issued tokenA and proposed the pair
-        address    confirmer;   // CB that issued tokenB and confirmed the pair
+        address proposer; // CB that issued tokenA and proposed the pair
+        address confirmer; // CB that issued tokenB and confirmed the pair
     }
 
     // ───────────────────────────── State ─────────────────────────────
@@ -56,24 +56,14 @@ contract PairRegistry {
     /// @param proposer On-chain address of the Central Bank that issued tokenA.
     /// @param tokenA   tCeBM address of the first token.
     /// @param tokenB   tCeBM address of the second token.
-    event PairProposed(
-        string  indexed pairId,
-        address indexed proposer,
-        address tokenA,
-        address tokenB
-    );
+    event PairProposed(string indexed pairId, address indexed proposer, address tokenA, address tokenB);
 
     /// @notice Emitted when a pair becomes ACTIVE (both CBs approved).
     /// @param pairId     Human-readable pair identifier.
     /// @param ammAddress Address of the live AutomatedMarketMaker.
     /// @param tokenA     tCeBM address of the first token.
     /// @param tokenB     tCeBM address of the second token.
-    event PairRegistered(
-        string  indexed pairId,
-        address indexed ammAddress,
-        address tokenA,
-        address tokenB
-    );
+    event PairRegistered(string indexed pairId, address indexed ammAddress, address tokenA, address tokenB);
 
     // ───────────────────────────── Errors ────────────────────────────
 
@@ -109,12 +99,7 @@ contract PairRegistry {
     /// @param tokenA      Address of the tCeBM contract for the first token (caller's currency).
     /// @param tokenB      Address of the tCeBM contract for the second token.
     /// @param ammAddress  Address of a pre-deployed AutomatedMarketMaker for this pair.
-    function proposePair(
-        string  calldata pairId,
-        address tokenA,
-        address tokenB,
-        address ammAddress
-    ) external {
+    function proposePair(string calldata pairId, address tokenA, address tokenB, address ammAddress) external {
         if (tokenA == address(0) || tokenB == address(0) || ammAddress == address(0)) {
             revert PairRegistry__ZeroAddress();
         }
@@ -128,13 +113,13 @@ contract PairRegistry {
         _pairExists[key] = true;
         _pairIds.push(pairId);
         _pairs[key] = PairEntry({
-            pairId:     pairId,
+            pairId: pairId,
             ammAddress: ammAddress,
-            tokenA:     tokenA,
-            tokenB:     tokenB,
-            status:     PairStatus.PROPOSED,
-            proposer:   msg.sender,
-            confirmer:  address(0)
+            tokenA: tokenA,
+            tokenB: tokenB,
+            status: PairStatus.PROPOSED,
+            proposer: msg.sender,
+            confirmer: address(0)
         });
 
         emit PairProposed(pairId, msg.sender, tokenA, tokenB);
@@ -154,7 +139,7 @@ contract PairRegistry {
         address expectedConfirmer = REGISTRY.getCentralBankOf(entry.tokenB);
         if (msg.sender != expectedConfirmer) revert PairRegistry__Unauthorized();
 
-        entry.status    = PairStatus.ACTIVE;
+        entry.status = PairStatus.ACTIVE;
         entry.confirmer = msg.sender;
 
         emit PairRegistered(pairId, entry.ammAddress, entry.tokenA, entry.tokenB);

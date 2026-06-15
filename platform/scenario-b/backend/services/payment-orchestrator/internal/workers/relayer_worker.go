@@ -121,7 +121,7 @@ func (w *RelayerWorker) processItem(ctx context.Context, item *podmain.RelayerQu
 		return
 	}
 
-	backoffSecs := int(math.Min(float64(int(2)<<uint(newAttempts)), float64(backoffCapSeconds)))
+	backoffSecs := int(math.Min(float64(int(2)<<uint(newAttempts)), float64(backoffCapSeconds))) // #nosec G115 -- newAttempts is a small bounded positive retry count
 	backoff := time.Duration(backoffSecs) * time.Second
 	next := time.Now().Add(backoff)
 	w.db.WithContext(ctx).Model(item).Updates(map[string]interface{}{

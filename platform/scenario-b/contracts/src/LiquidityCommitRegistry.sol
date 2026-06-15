@@ -17,7 +17,6 @@ import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
 ///
 ///      Feature: 007-bridge-based-cb-liquidity
 contract LiquidityCommitRegistry is ILiquidityCommitRegistry {
-
     // ─────────────────────────────────────────────────────────────────────────
     // Constants
     // ─────────────────────────────────────────────────────────────────────────
@@ -41,13 +40,13 @@ contract LiquidityCommitRegistry is ILiquidityCommitRegistry {
 
     /// @dev Internal struct storing commit details.
     struct CommitData {
-        address    signer;
-        address    wTokenAddr;
-        uint256    amount;
-        uint256    expiresAt;
+        address signer;
+        address wTokenAddr;
+        uint256 amount;
+        uint256 expiresAt;
         CommitStatus status;
         CommitSide side;
-        string     poolPair;
+        string poolPair;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -65,12 +64,11 @@ contract LiquidityCommitRegistry is ILiquidityCommitRegistry {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// @inheritdoc ILiquidityCommitRegistry
-    function registerCommit(
-        string calldata poolPair,
-        CommitSide side,
-        uint256 amount,
-        address wTokenAddress
-    ) external override returns (bytes32 commitId) {
+    function registerCommit(string calldata poolPair, CommitSide side, uint256 amount, address wTokenAddress)
+        external
+        override
+        returns (bytes32 commitId)
+    {
         // Validate inputs.
         if (amount == 0 || bytes(poolPair).length == 0 || wTokenAddress == address(0)) {
             revert LCR__InvalidParameters();
@@ -94,13 +92,13 @@ contract LiquidityCommitRegistry is ILiquidityCommitRegistry {
 
         uint256 exp = block.timestamp + COMMIT_TTL;
         _commits[commitId] = CommitData({
-            signer:    msg.sender,
+            signer: msg.sender,
             wTokenAddr: wTokenAddress,
-            amount:    amount,
+            amount: amount,
             expiresAt: exp,
-            status:    CommitStatus.PENDING,
-            side:      side,
-            poolPair:  poolPair
+            status: CommitStatus.PENDING,
+            side: side,
+            poolPair: poolPair
         });
 
         _pendingBySlot[pairKey][uint8(side)] = commitId;
@@ -118,7 +116,7 @@ contract LiquidityCommitRegistry is ILiquidityCommitRegistry {
                 counter.status = CommitStatus.MATCHED;
 
                 // Clear pending slots.
-                _pendingBySlot[pairKey][uint8(side)]        = bytes32(0);
+                _pendingBySlot[pairKey][uint8(side)] = bytes32(0);
                 _pendingBySlot[pairKey][uint8(counterSide)] = bytes32(0);
 
                 // Determine A/B ordering for the event.
@@ -130,11 +128,19 @@ contract LiquidityCommitRegistry is ILiquidityCommitRegistry {
                 uint256 amountB;
 
                 if (side == CommitSide.A) {
-                    commitIdA = commitId;      signerA = msg.sender;         amountA = amount;
-                    commitIdB = counterCommitId; signerB = counter.signer;   amountB = counter.amount;
+                    commitIdA = commitId;
+                    signerA = msg.sender;
+                    amountA = amount;
+                    commitIdB = counterCommitId;
+                    signerB = counter.signer;
+                    amountB = counter.amount;
                 } else {
-                    commitIdA = counterCommitId; signerA = counter.signer;   amountA = counter.amount;
-                    commitIdB = commitId;        signerB = msg.sender;       amountB = amount;
+                    commitIdA = counterCommitId;
+                    signerA = counter.signer;
+                    amountA = counter.amount;
+                    commitIdB = commitId;
+                    signerB = msg.sender;
+                    amountB = amount;
                 }
 
                 emit CommitMatched(poolPair, commitIdA, signerA, amountA, commitIdB, signerB, amountB);
@@ -166,7 +172,7 @@ contract LiquidityCommitRegistry is ILiquidityCommitRegistry {
         if (block.timestamp < c.expiresAt) revert LCR__CommitNotExpired(commitId, c.expiresAt);
 
         string memory poolPair = c.poolPair;
-        CommitSide   side      = c.side;
+        CommitSide side = c.side;
         c.status = CommitStatus.EXPIRED;
 
         // Clear pending slot.

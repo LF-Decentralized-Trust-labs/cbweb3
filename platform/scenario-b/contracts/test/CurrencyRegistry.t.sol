@@ -13,16 +13,18 @@ import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
 /// @dev Covers registerCurrency, removeCurrency, getCurrency, and getAllCurrencies.
 contract CurrencyRegistryTest is Test {
     // Re-declare events locally for vm.expectEmit compatibility (Solidity 0.8.20).
-    event CurrencyRegistered(string indexed symbol, address indexed tokenAddress, string countryName, string proposerCB);
+    event CurrencyRegistered(
+        string indexed symbol, address indexed tokenAddress, string countryName, string proposerCB
+    );
     event CurrencyRemoved(string indexed symbol, address indexed tokenAddress);
     CurrencyRegistry public registry;
     IdentityRegistry public identityRegistry;
     TokenizedCentralBankMoney public tokenBRL;
     TokenizedCentralBankMoney public tokenEUR;
 
-    address public admin   = makeAddr("admin");
-    address public cbA     = makeAddr("central_bank_a");
-    address public cbB     = makeAddr("central_bank_b");
+    address public admin = makeAddr("admin");
+    address public cbA = makeAddr("central_bank_a");
+    address public cbB = makeAddr("central_bank_b");
     address public attacker = makeAddr("attacker");
 
     function setUp() public {
@@ -58,10 +60,10 @@ contract CurrencyRegistryTest is Test {
         registry.registerCurrency("BRL", "Brazil", address(tokenBRL), "central_bank_a");
 
         ICurrencyRegistry.CurrencyEntry memory entry = registry.getCurrency("BRL");
-        assertEq(entry.symbol,       "BRL");
-        assertEq(entry.countryName,  "Brazil");
+        assertEq(entry.symbol, "BRL");
+        assertEq(entry.countryName, "Brazil");
         assertEq(entry.tokenAddress, address(tokenBRL));
-        assertEq(entry.proposerCB,   "central_bank_a");
+        assertEq(entry.proposerCB, "central_bank_a");
     }
 
     function test_registerCurrency_emitsCurrencyRegistered() public {
@@ -87,7 +89,11 @@ contract CurrencyRegistryTest is Test {
 
         // Same token address, different symbol — must revert.
         vm.prank(cbA);
-        vm.expectRevert(abi.encodeWithSelector(ICurrencyRegistry.CurrencyRegistry__TokenAlreadyRegistered.selector, address(tokenBRL)));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICurrencyRegistry.CurrencyRegistry__TokenAlreadyRegistered.selector, address(tokenBRL)
+            )
+        );
         registry.registerCurrency("BRL2", "Brazil2", address(tokenBRL), "central_bank_a");
     }
 

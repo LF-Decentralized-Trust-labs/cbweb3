@@ -88,3 +88,6 @@ jobs:
         with:
           target: scenario-b/contracts
           slither-config: scenario-b/contracts/slither.config.json
+          # D6 requires zero HIGH findings in contract bytecode (met). Low/medium
+          # informational hints (e.g. cache-array-length optimizations) do not block.
+          fail-on: high

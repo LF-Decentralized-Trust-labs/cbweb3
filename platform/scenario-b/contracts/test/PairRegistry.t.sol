@@ -21,12 +21,12 @@ contract PairRegistryTest is Test {
     TokenizedCentralBankMoney public tokenUSD;
     TokenizedCentralBankMoney public tokenARS;
 
-    address public admin   = makeAddr("admin");
-    address public cbBRL   = makeAddr("cbBRL");   // Central Bank of Brazil (issues tokenBRL)
-    address public cbUSD   = makeAddr("cbUSD");   // Federal Reserve (issues tokenUSD)
-    address public cbARS   = makeAddr("cbARS");   // Central Bank of Argentina (issues tokenARS)
+    address public admin = makeAddr("admin");
+    address public cbBRL = makeAddr("cbBRL"); // Central Bank of Brazil (issues tokenBRL)
+    address public cbUSD = makeAddr("cbUSD"); // Federal Reserve (issues tokenUSD)
+    address public cbARS = makeAddr("cbARS"); // Central Bank of Argentina (issues tokenARS)
     address public attacker = makeAddr("attacker");
-    address public fakeAMM  = makeAddr("fakeAMM");
+    address public fakeAMM = makeAddr("fakeAMM");
 
     function setUp() public {
         // Deploy tokens
@@ -219,7 +219,7 @@ contract PairRegistryTest is Test {
     /// @notice Admin can set and retrieve the CB of a token via IdentityRegistry.
     function test_setCentralBankOf_and_getCentralBankOf() public {
         address newToken = makeAddr("newToken");
-        address newCB    = makeAddr("newCB");
+        address newCB = makeAddr("newCB");
 
         vm.prank(admin);
         identityRegistry.setCentralBankOf(newToken, newCB);
