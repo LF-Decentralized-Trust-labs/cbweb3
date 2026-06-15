@@ -5,10 +5,6 @@ interface ParticipantsResponse {
   participants: Array<{ status: string }>;
 }
 
-interface CircuitBreakerStatus {
-  state: string;
-}
-
 interface AMMPoolStatus {
   pool_status: "EMPTY" | "PENDING_COUNTERPART" | "ACTIVE";
   imbalance_flag: boolean;
