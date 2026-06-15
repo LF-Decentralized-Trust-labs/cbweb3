@@ -230,7 +230,7 @@ endif
 	  API_GW_BANK_B_URL=$(API_GW_BANK_B_URL) \
 	  API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
 	  API_GW_CENTRAL_BANK_B_URL=$(API_GW_CENTRAL_BANK_B_URL) \
-	  go test -v -count=1 -timeout 30m -run TestFullHappyPath ./...
+	  go test -v -count=1 -tags integration -timeout 30m -run TestFullHappyPath ./...
 
 # ── Performance baseline (T105) ──────────────────────────────────────────────
 
