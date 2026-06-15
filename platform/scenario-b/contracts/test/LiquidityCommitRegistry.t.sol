@@ -251,4 +251,153 @@ contract LiquidityCommitRegistryTest is Test {
         vm.expectRevert(); // LCR__CommitNotExpired
         lcr.expireCommit(commitId);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 9. Constructor zero-address guard
+    // ─────────────────────────────────────────────────────────────────────────
+
+    function test_Revert_Constructor_ZeroRegistry() public {
+        vm.expectRevert(ILiquidityCommitRegistry.LCR__InvalidParameters.selector);
+        new LiquidityCommitRegistry(address(0));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 10. registerCommit input validation branches
+    // ─────────────────────────────────────────────────────────────────────────
+
+    function test_Revert_registerCommit_ZeroAmount() public {
+        vm.prank(cbA);
+        vm.expectRevert(ILiquidityCommitRegistry.LCR__InvalidParameters.selector);
+        lcr.registerCommit(POOL_PAIR, ILiquidityCommitRegistry.CommitSide.A, 0, address(tokenBRL));
+    }
+
+    function test_Revert_registerCommit_EmptyPoolPair() public {
+        vm.prank(cbA);
+        vm.expectRevert(ILiquidityCommitRegistry.LCR__InvalidParameters.selector);
+        lcr.registerCommit("", ILiquidityCommitRegistry.CommitSide.A, AMOUNT_A, address(tokenBRL));
+    }
+
+    function test_Revert_registerCommit_ZeroToken() public {
+        vm.prank(cbA);
+        vm.expectRevert(ILiquidityCommitRegistry.LCR__InvalidParameters.selector);
+        lcr.registerCommit(POOL_PAIR, ILiquidityCommitRegistry.CommitSide.A, AMOUNT_A, address(0));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 11. Match triggered by side B registering first (covers the else-ordering branch)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// @notice CB-B registers side B first, then CB-A registers side A → CommitMatched emitted with
+    ///         A/B ordering resolved via the `side == CommitSide.A` false branch.
+    function test_registerCommit_triggerMatch_BFirst() public {
+        vm.prank(cbB);
+        bytes32 commitIdB = lcr.registerCommit(POOL_PAIR, ILiquidityCommitRegistry.CommitSide.B, AMOUNT_B, address(tokenARS));
+
+        bytes32 expectedCommitIdA = keccak256(abi.encode(
+            POOL_PAIR,
+            ILiquidityCommitRegistry.CommitSide.A,
+            cbA,
+            AMOUNT_A,
+            address(tokenBRL),
+            block.timestamp
+        ));
+
+        vm.expectEmit(true, false, false, true);
+        emit CommitMatched(POOL_PAIR, expectedCommitIdA, cbA, AMOUNT_A, commitIdB, cbB, AMOUNT_B);
+
+        vm.prank(cbA);
+        bytes32 commitIdA = lcr.registerCommit(POOL_PAIR, ILiquidityCommitRegistry.CommitSide.A, AMOUNT_A, address(tokenBRL));
+
+        assertEq(commitIdA, expectedCommitIdA);
+
+        (,,,,ILiquidityCommitRegistry.CommitStatus statusA,) = lcr.getCommit(commitIdA);
+        (,,,,ILiquidityCommitRegistry.CommitStatus statusB,) = lcr.getCommit(commitIdB);
+        assertEq(uint8(statusA), uint8(ILiquidityCommitRegistry.CommitStatus.MATCHED));
+        assertEq(uint8(statusB), uint8(ILiquidityCommitRegistry.CommitStatus.MATCHED));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 12. cancelCommit / expireCommit not-found and not-pending branches
+    // ─────────────────────────────────────────────────────────────────────────
+
+    function test_Revert_cancelCommit_NotFound() public {
+        bytes32 bogus = keccak256("does-not-exist");
+        vm.prank(cbA);
+        vm.expectRevert(abi.encodeWithSelector(ILiquidityCommitRegistry.LCR__CommitNotFound.selector, bogus));
+        lcr.cancelCommit(bogus);
+    }
+
+    function test_Revert_cancelCommit_NotPending() public {
+        // Register and match both sides → MATCHED, no longer PENDING.
+        vm.prank(cbA);
+        bytes32 commitIdA = lcr.registerCommit(POOL_PAIR, ILiquidityCommitRegistry.CommitSide.A, AMOUNT_A, address(tokenBRL));
+        vm.prank(cbB);
+        lcr.registerCommit(POOL_PAIR, ILiquidityCommitRegistry.CommitSide.B, AMOUNT_B, address(tokenARS));
+
+        vm.prank(cbA);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILiquidityCommitRegistry.LCR__CommitNotPending.selector,
+                commitIdA,
+                ILiquidityCommitRegistry.CommitStatus.MATCHED
+            )
+        );
+        lcr.cancelCommit(commitIdA);
+    }
+
+    function test_Revert_expireCommit_NotFound() public {
+        bytes32 bogus = keccak256("does-not-exist");
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSelector(ILiquidityCommitRegistry.LCR__CommitNotFound.selector, bogus));
+        lcr.expireCommit(bogus);
+    }
+
+    function test_Revert_expireCommit_NotPending() public {
+        vm.prank(cbA);
+        bytes32 commitId = lcr.registerCommit(POOL_PAIR, ILiquidityCommitRegistry.CommitSide.A, AMOUNT_A, address(tokenBRL));
+        vm.prank(cbA);
+        lcr.cancelCommit(commitId);
+
+        vm.warp(block.timestamp + 72 hours + 1);
+        vm.prank(attacker);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILiquidityCommitRegistry.LCR__CommitNotPending.selector,
+                commitId,
+                ILiquidityCommitRegistry.CommitStatus.CANCELLED
+            )
+        );
+        lcr.expireCommit(commitId);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 13. getCommit not-found branch
+    // ─────────────────────────────────────────────────────────────────────────
+
+    function test_Revert_getCommit_NotFound() public {
+        bytes32 bogus = keccak256("does-not-exist");
+        vm.expectRevert(abi.encodeWithSelector(ILiquidityCommitRegistry.LCR__CommitNotFound.selector, bogus));
+        lcr.getCommit(bogus);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 14. Re-register after cancel does not re-trigger a stale match (counter not PENDING)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// @notice After side A is cancelled, registering side B finds no PENDING counterpart, so the
+    ///         match block's `counter.status == PENDING` check is exercised on the false path via
+    ///         the cleared slot (counterCommitId == 0). This keeps side B PENDING (unmatched).
+    function test_registerCommit_NoMatchAfterCounterCancelled() public {
+        vm.prank(cbA);
+        bytes32 commitIdA = lcr.registerCommit(POOL_PAIR, ILiquidityCommitRegistry.CommitSide.A, AMOUNT_A, address(tokenBRL));
+        vm.prank(cbA);
+        lcr.cancelCommit(commitIdA);
+
+        vm.prank(cbB);
+        bytes32 commitIdB = lcr.registerCommit(POOL_PAIR, ILiquidityCommitRegistry.CommitSide.B, AMOUNT_B, address(tokenARS));
+
+        (,,,,ILiquidityCommitRegistry.CommitStatus statusB,) = lcr.getCommit(commitIdB);
+        assertEq(uint8(statusB), uint8(ILiquidityCommitRegistry.CommitStatus.PENDING), "B stays PENDING, no match");
+        assertEq(lcr.getPendingCommit(POOL_PAIR, ILiquidityCommitRegistry.CommitSide.B), commitIdB);
+    }
 }
