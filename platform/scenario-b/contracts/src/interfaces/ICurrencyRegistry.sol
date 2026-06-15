@@ -11,10 +11,10 @@ interface ICurrencyRegistry {
 
     /// @notice Full metadata for a registered hub currency.
     struct CurrencyEntry {
-        string  symbol;       // e.g. "BRL"
-        string  countryName;  // e.g. "Brazil"
+        string symbol; // e.g. "BRL"
+        string countryName; // e.g. "Brazil"
         address tokenAddress; // on-chain tCeBM address — unique key 2
-        string  proposerCB;   // human-readable CB identifier, e.g. "central_bank_a"
+        string proposerCB; // human-readable CB identifier, e.g. "central_bank_a"
     }
 
     // ─────────────────────────────── Events ──────────────────────────────
@@ -25,19 +25,13 @@ interface ICurrencyRegistry {
     /// @param countryName  Country name.
     /// @param proposerCB   Human-readable CB identifier.
     event CurrencyRegistered(
-        string  indexed symbol,
-        address indexed tokenAddress,
-        string  countryName,
-        string  proposerCB
+        string indexed symbol, address indexed tokenAddress, string countryName, string proposerCB
     );
 
     /// @notice Emitted when a Central Bank removes its currency from the registry.
     /// @param symbol       The currency symbol that was removed.
     /// @param tokenAddress The tCeBM token address that was freed.
-    event CurrencyRemoved(
-        string  indexed symbol,
-        address indexed tokenAddress
-    );
+    event CurrencyRemoved(string indexed symbol, address indexed tokenAddress);
 
     // ─────────────────────────────── Errors ──────────────────────────────
 
@@ -69,10 +63,10 @@ interface ICurrencyRegistry {
     /// @param tokenAddress On-chain tCeBM address. Unique key. Non-zero.
     /// @param proposerCB   Human-readable CB identifier (e.g. "central_bank_a"). Free-form label.
     function registerCurrency(
-        string  calldata symbol,
-        string  calldata countryName,
-        address          tokenAddress,
-        string  calldata proposerCB
+        string calldata symbol,
+        string calldata countryName,
+        address tokenAddress,
+        string calldata proposerCB
     ) external;
 
     /// @notice Removes the caller's currency from the registry, identified by symbol.
@@ -84,11 +78,9 @@ interface ICurrencyRegistry {
     /// @notice Returns the full entry for a registered currency.
     /// @dev Reverts with CurrencyRegistry__NotFound if the symbol is not registered.
     /// @param symbol The currency symbol to look up.
-    function getCurrency(string calldata symbol)
-        external view returns (CurrencyEntry memory);
+    function getCurrency(string calldata symbol) external view returns (CurrencyEntry memory);
 
     /// @notice Returns all currently registered currencies.
     /// @dev Read-only, permissionless. Tombstoned (removed) entries are excluded.
-    function getAllCurrencies()
-        external view returns (CurrencyEntry[] memory);
+    function getAllCurrencies() external view returns (CurrencyEntry[] memory);
 }

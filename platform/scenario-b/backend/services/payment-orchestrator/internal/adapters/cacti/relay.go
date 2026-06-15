@@ -82,7 +82,7 @@ func (c *CactiRelay) RelayProof(ctx context.Context, proof ports.Interoperabilit
 	if err != nil {
 		return "", fmt.Errorf("cacti relay proof: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated {
 		raw, _ := io.ReadAll(resp.Body)
@@ -120,7 +120,7 @@ func (c *CactiRelay) VerifyProof(ctx context.Context, proof ports.Interoperabili
 	if err != nil {
 		return false, fmt.Errorf("cacti verify proof: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return false, nil
@@ -206,7 +206,7 @@ func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceMs int64
 	if err != nil {
 		return nil, sinceMs, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)

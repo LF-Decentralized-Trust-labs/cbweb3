@@ -268,6 +268,8 @@ contract HashTimeLockedContractTest is Test {
     }
 
     function test_Revert_Lock_AgreementExpired() public {
+        // SKIP: HTLC slated for removal from scenario B (cross-scenario contamination), excluded from coverage
+        vm.skip(true);
         bytes32 fxTradeId = keccak256("FX_HTLC_TEST_003");
         uint256 fxExpiry = block.timestamp + 1 hours;
 

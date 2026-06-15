@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+//go:build integration
+// +build integration
+
 // Package integration_test exercises the Scenario B full happy-path via the REST API:
 //
 //  1. Liquidity provision — CB-A + CB-B run cooperative commit-reveal → pool ACTIVE

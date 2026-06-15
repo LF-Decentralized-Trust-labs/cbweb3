@@ -12,9 +12,9 @@ const (
 	ServiceName = "auth.v1.AuthService"
 
 	LoginMethod                = "/auth.v1.AuthService/Login"
-	RefreshTokenMethod         = "/auth.v1.AuthService/RefreshToken"
-	RevokeTokenMethod          = "/auth.v1.AuthService/RevokeToken"
-	ValidateTokenMethod        = "/auth.v1.AuthService/ValidateToken"
+	RefreshTokenMethod         = "/auth.v1.AuthService/RefreshToken"  // #nosec G101 -- not a secret; gRPC method path
+	RevokeTokenMethod          = "/auth.v1.AuthService/RevokeToken"   // #nosec G101 -- not a secret; gRPC method path
+	ValidateTokenMethod        = "/auth.v1.AuthService/ValidateToken" // #nosec G101 -- not a secret; gRPC method path
 	RegisterParticipantMethod  = "/auth.v1.AuthService/RegisterParticipant"
 	SignTransactionMethod      = "/auth.v1.AuthService/SignTransaction"
 	GetKYCStatusMethod         = "/auth.v1.AuthService/GetKYCStatus"
@@ -28,7 +28,7 @@ const (
 	VerifyPKILoginMethod  = "/auth.v1.AuthService/VerifyPKILogin"
 
 	// Client secret management
-	ChangeClientSecretMethod = "/auth.v1.AuthService/ChangeClientSecret"
+	ChangeClientSecretMethod = "/auth.v1.AuthService/ChangeClientSecret" // #nosec G101 -- not a secret; gRPC method path
 )
 
 // --- Auth ---

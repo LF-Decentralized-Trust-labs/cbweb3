@@ -48,7 +48,12 @@ contract DeployCBWeb3HubTest is Test {
         /// @dev Always set explicit defaults to avoid env contamination from other test suites
         deployerPrivateKey = uint256(0x1);
         expectedDeployer = vm.addr(deployerPrivateKey);
+    }
 
+    /// @dev Sets the deployment env. Called inside the test body (not setUp) because vm.setEnv
+    ///      mutates a process-global env: a sibling deploy-script suite's setUp() can overwrite
+    ///      these keys between this suite's setUp() and run(), causing non-deterministic flakes.
+    function _setDeployEnv() internal {
         vm.setEnv(ENV_DEPLOYER_PRIVATE_KEY, vm.toString(deployerPrivateKey));
         vm.setEnv(ENV_ADMIN_ADDRESS, vm.toString(address(0x1234567890123456789012345678901234567890)));
         vm.setEnv(ENV_CENTRAL_BANK_ADDRESS, vm.toString(address(0x2345678901234567890123456789012345678901)));
@@ -60,6 +65,7 @@ contract DeployCBWeb3HubTest is Test {
     /// @dev The script should successfully deploy all hub contracts using env vars.
     function test_ScriptRun_Success() public {
         /// @dev Act
+        _setDeployEnv();
         deployScript.run();
 
         IdentityRegistry identityRegistry = deployScript.identityRegistry();

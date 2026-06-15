@@ -120,6 +120,7 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
 		return nil, status.Error(codes.InvalidArgument, "counterparty_b, origin_amount, counter_amount, origin_currency, counter_currency, rate, and expiry_date are required")
 	}
+	// #nosec G115 -- unix timestamp is always positive and fits uint64
 	if req.ExpiryDate <= uint64(time.Now().Unix()) {
 		return nil, status.Error(codes.InvalidArgument, "expiry_date must be in the future")
 	}

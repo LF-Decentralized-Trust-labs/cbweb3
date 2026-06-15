@@ -272,6 +272,17 @@ contract AutomatedMarketMakerTest is Test {
         assertEq(amm.getAmountOut(0, 1000, 1000, 30), 0);
     }
 
+    /// @dev getAmountIn reverts when the requested output is not strictly less than the output reserve.
+    function test_Revert_GetAmountIn_OutputExceedsReserve() public {
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InsufficientLiquidity.selector);
+        amm.getAmountIn(1000 * 10 ** 18, 1000 * 10 ** 18, 1000 * 10 ** 18); // amountOut == reserveOut
+    }
+
+    /// @dev resumeQuorum() exposes the 2-of-N resume constant.
+    function test_ResumeQuorum_Value() public view {
+        assertEq(amm.resumeQuorum(), 2);
+    }
+
     function test_SwapTokensForExactTokens_Success() public {
         vm.prank(liquidityProvider);
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
