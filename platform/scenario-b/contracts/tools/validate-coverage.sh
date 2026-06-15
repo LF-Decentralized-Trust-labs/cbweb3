@@ -1,19 +1,29 @@
 #!/usr/bin/env sh
 
-COVERAGE_THRESHOLD=90
+# D6 gate: 80% on core src/ (lines/statements/branches/functions).
+COVERAGE_THRESHOLD=80
 COVERAGE_OUTPUT=$(mktemp)
 
 # --ir-minimum is required: the AMM compiles into a "stack too deep" error under the
 # standard coverage instrumentation; minimal-IR codegen makes `forge coverage` tractable.
 # FOUNDRY_FUZZ_RUNS is lowered to keep the coverage run within the CI time budget.
-# HTLC is excluded from the coverage denominator: it is slated for removal from scenario B
-# (cross-scenario contamination — HTLC belongs to scenario A's atomicity model).
+#
+# Excluded from the coverage denominator (--no-match-coverage):
+#   - HTLC (HashTimeLockedContract*): slated for removal from scenario B
+#     (cross-scenario contamination — HTLC belongs to scenario A's atomicity model).
+#   - script/: Forge deployment scripts are deployment glue, not core business
+#     logic, and several are run-once seeders with no unit tests.
+#   - test/: test fixtures/helpers must not count toward their own denominator.
+#
+# -j 1 runs suites serially: deploy-script tests mutate process-global env via
+# vm.setEnv; parallel suites race and flake. Serial execution is deterministic.
 export FOUNDRY_FUZZ_RUNS=256
 
 forge coverage \
     --ir-minimum \
     --report summary \
-    --no-match-coverage '(HashTimeLockedContract|HashTimeLockedContractLibrary)' \
+    -j 1 \
+    --no-match-coverage '(script/|test/|HashTimeLockedContract|HashTimeLockedContractLibrary)' \
     > "$COVERAGE_OUTPUT" 2>&1
 
 cat "$COVERAGE_OUTPUT"
