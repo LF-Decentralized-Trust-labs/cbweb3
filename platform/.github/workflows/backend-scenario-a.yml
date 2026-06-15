@@ -6,24 +6,38 @@ permissions:
 on:
   push:
     branches: [main, develop]
-    paths: ["scenario-a/backend/**"]
+    paths: ["scenario-a/backend/**", "scenario-a/tests/**"]
   pull_request:
     branches: [main, develop]
-    paths: ["scenario-a/backend/**"]
+    paths: ["scenario-a/backend/**", "scenario-a/tests/**"]
   workflow_dispatch:
 
+env:
+  CGO_ENABLED: "0"
+
 jobs:
-  api-gateway:
+  # Per-service coverage gate. payment-orchestrator, compliance and auth enforce
+  # the D6 80% gate on their core business-logic packages (see each service's
+  # Makefile for the core -coverpkg list + threshold). api-gateway runs the same
+  # target at its own (lower) bar — its core is below 80% and is a tracked gap,
+  # not part of the D6 enforced scope. All jobs run in parallel, CGO_ENABLED=0.
+  coverage:
+    name: coverage (${{ matrix.service }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [payment-orchestrator, compliance, auth, api-gateway]
     defaults:
       run:
-        working-directory: scenario-a/backend/services/api-gateway
+        working-directory: scenario-a/backend/services/${{ matrix.service }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: scenario-a/backend/services/api-gateway/go.mod
+          go-version-file: scenario-a/backend/services/${{ matrix.service }}/go.mod
+          cache-dependency-path: scenario-a/backend/services/${{ matrix.service }}/go.sum
 
       - name: Download dependencies
         run: go mod download
@@ -36,3 +50,49 @@ jobs:
 
       - name: Run gosec
         run: make security
+
+  # shared/identity is a separate Go module in the D6 enforced scope.
+  shared-identity-coverage:
+    name: coverage (shared/identity)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scenario-a/backend/shared/identity
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: scenario-a/backend/shared/identity/go.mod
+          cache-dependency-path: scenario-a/backend/shared/identity/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run go vet
+        run: make vet
+
+      - name: Run tests with coverage threshold
+        run: make test-coverage
+
+  # Hermetic cross-service integration smoke lane (build tag integration_lite,
+  # <1s, no infra/containers).
+  integration-lite:
+    name: integration_lite
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scenario-a/tests/integration
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: scenario-a/tests/integration/go.mod
+          cache-dependency-path: scenario-a/tests/integration/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run integration_lite lane
+        run: go test -tags integration_lite ./...

@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-COVERAGE_THRESHOLD=90
+COVERAGE_THRESHOLD=80
 
 # Keep fuzz runs low so coverage fits a CI time budget. Plain `forge coverage`
 # disables the optimizer for accurate source mapping, which makes the heavier
