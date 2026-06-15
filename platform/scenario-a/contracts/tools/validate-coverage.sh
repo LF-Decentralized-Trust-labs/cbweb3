@@ -1,9 +1,24 @@
 #!/usr/bin/env sh
 
 COVERAGE_THRESHOLD=90
+
+# Keep fuzz runs low so coverage fits a CI time budget. Plain `forge coverage`
+# disables the optimizer for accurate source mapping, which makes the heavier
+# contracts hit "stack too deep"; `--ir-minimum` enables viaIR with minimum
+# optimization to resolve that while keeping coverage data meaningful.
+export FOUNDRY_FUZZ_RUNS="${FOUNDRY_FUZZ_RUNS:-256}"
+
+# Coverage exclusions (denominator filter):
+#   AutomatedMarketMaker* — AMM belongs to scenario B and is flagged for removal
+#     from scenario A; it is excluded from the coverage gate pending that removal.
+#   script/             — deploy scripts are integration glue, not core business
+#     logic, and should not drag the gate.
+COVERAGE_NO_MATCH='(AutomatedMarketMaker|script/)'
+
 COVERAGE_OUTPUT=$(mktemp)
 
-forge coverage --report summary > "$COVERAGE_OUTPUT" 2>&1
+forge coverage --ir-minimum --report summary \
+    --no-match-coverage "$COVERAGE_NO_MATCH" > "$COVERAGE_OUTPUT" 2>&1
 
 cat "$COVERAGE_OUTPUT"
 
