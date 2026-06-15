@@ -31,7 +31,7 @@ vet:
 	$(GO) vet ./...
 
 security:
-	@test -x "$(GOSEC)" || $(GO) install github.com/securego/gosec/v2/cmd/gosec@latest
+	@test -x "$(GOSEC)" || $(GO) install github.com/securego/gosec/v2/cmd/gosec@v2.22.9
 	$(GOSEC) -severity high -exclude=G706 ./...
 
 ci: vet test-coverage security

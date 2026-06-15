@@ -29,7 +29,7 @@ vet:
 	$(GO) vet ./...
 
 security:
-	@test -x "$(GOSEC)" || $(GO) install github.com/securego/gosec/v2/cmd/gosec@latest
+	@test -x "$(GOSEC)" || $(GO) install github.com/securego/gosec/v2/cmd/gosec@v2.22.9
 	# G706 (log injection, LOW) excluded globally: the flagged sites log
 	# config/on-chain-derived values (addresses, tx hashes), not user input.
 	# Relay-controlled fields that ARE logged are sanitized at the call site.
