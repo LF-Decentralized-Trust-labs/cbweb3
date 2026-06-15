@@ -34,6 +34,19 @@ async function fetchPoolStatus(pair: string): Promise<AMMPoolStatus | null> {
 }
 
 const KNOWN_PAIRS = ["W-BRL-ARS"];
+const WEI = BigInt("1000000000000000000");
+
+function fromWei(raw: string): number {
+  if (!raw || raw === "0") return 0;
+  try {
+    const n = BigInt(raw);
+    const whole = n / WEI;
+    const frac = ((n % WEI) * BigInt(1_000_000)) / WEI;
+    return parseFloat(`${whole}.${String(frac).padStart(6, "0")}`);
+  } catch {
+    return 0;
+  }
+}
 
 export const stabilityApi = {
   getPoolStatuses: async (): Promise<PoolStatus[]> => {
@@ -45,8 +58,8 @@ export const stabilityApi = {
       if (p.pool_status === "EMPTY") continue;
       pools.push({
         pair: p.pool_pair,
-        reserveA: parseFloat(p.reserve_a) || 0,
-        reserveB: parseFloat(p.reserve_b) || 0,
+        reserveA: fromWei(p.reserve_a),
+        reserveB: fromWei(p.reserve_b),
         ratioA: parseFloat(p.current_ratio.toFixed(4)),
         ratioB: 1,
         isImbalanced: p.imbalance_flag,
