@@ -74,6 +74,9 @@ func Setup(app *fiber.App, deps Dependencies) {
 	if deps.SupervisorHandler != nil {
 		complianceGroup.Get("/audit/logs", middleware.RequireSupervisorRole(), deps.SupervisorHandler.GetAuditLogs)
 		complianceGroup.Get("/zk-pointer/verify", middleware.RequireSupervisorRole(), deps.SupervisorHandler.VerifyZKPointer)
+
+		// Read-only participants list for supervisor (same handler, no write access).
+		complianceGroup.Get("/participants/summary", middleware.RequireSupervisorRole(), deps.ComplianceHandler.ListParticipants)
 	}
 
 	// --- Governance Portal ---
