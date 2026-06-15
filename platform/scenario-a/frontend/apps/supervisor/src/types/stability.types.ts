@@ -1,11 +1,18 @@
-export interface PoolStatus {
-  pair: string;
-  reserveA: number;
-  reserveB: number;
-  ratioA: number;
-  ratioB: number;
-  isImbalanced: boolean;
-  updatedAt: string;
+export type HTLCState =
+  | "HTLC_STATE_PENDING"
+  | "HTLC_STATE_LOCKED"
+  | "HTLC_STATE_SETTLING"
+  | "HTLC_STATE_SETTLED"
+  | "HTLC_STATE_REFUNDING"
+  | "HTLC_STATE_REFUNDED"
+  | "HTLC_STATE_INVALID";
+
+export interface HTLCSummary {
+  id: string;
+  state: HTLCState;
+  hashLock: string;
+  zetoLockRef: string;
+  expiresAt: string;
 }
 
 export interface CircuitBreakerRequest {
@@ -13,15 +20,8 @@ export interface CircuitBreakerRequest {
   reason: string;
 }
 
-export interface AMMConfigRequest {
-  feeBps: number;
-  slippageBps: number;
-  reason: string;
-}
-
 export interface StabilityAlert {
   id: string;
-  pair: string;
   severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   message: string;
   createdAt: string;

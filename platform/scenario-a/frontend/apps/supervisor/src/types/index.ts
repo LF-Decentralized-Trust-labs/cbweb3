@@ -5,3 +5,4 @@ export * from "./audit.types";
 export * from "./network.types";
 export * from "./events.types";
 export * from "./common.types";
+export * from "./investigation.types";

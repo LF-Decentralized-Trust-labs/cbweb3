@@ -1,4 +1,4 @@
-export type SupervisorEventType = "POOL_IMBALANCE" | "AUDIT_ACTIVITY" | "REGISTRY_STATUS";
+export type SupervisorEventType = "HTLC_TIMEOUT" | "AUDIT_ACTIVITY" | "REGISTRY_STATUS";
 
 export interface SupervisorEvent {
   id: string;

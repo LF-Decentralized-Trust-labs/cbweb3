@@ -715,9 +715,9 @@ func TestLockHTLC_OnChainLockFails_RollsBackZetoLock(t *testing.T) {
 	if env.zeto.lockCalled != 1 {
 		t.Errorf("expected zeto.Lock called 1 time, got %d", env.zeto.lockCalled)
 	}
-	// Zeto Unlock should have been called as rollback
-	if env.zeto.unlockCalled != 1 {
-		t.Errorf("expected zeto.Unlock called 1 time (rollback), got %d", env.zeto.unlockCalled)
+	// TransferLocked should have been called as rollback (returns tokens to sender)
+	if env.zeto.transferLockedCalled != 1 {
+		t.Errorf("expected zeto.TransferLocked called 1 time (rollback), got %d", env.zeto.transferLockedCalled)
 	}
 }
 
@@ -743,9 +743,9 @@ func TestLockHTLCWithHashLock_OnChainLockFails_RollsBackZetoLock(t *testing.T) {
 		t.Errorf("expected codes.Internal, got %s", status.Code(err))
 	}
 
-	// Zeto Unlock should have been called as rollback
-	if env.zeto.unlockCalled != 1 {
-		t.Errorf("expected zeto.Unlock called 1 time (rollback), got %d", env.zeto.unlockCalled)
+	// TransferLocked should have been called as rollback (returns tokens to sender)
+	if env.zeto.transferLockedCalled != 1 {
+		t.Errorf("expected zeto.TransferLocked called 1 time (rollback), got %d", env.zeto.transferLockedCalled)
 	}
 }
 
@@ -1033,7 +1033,7 @@ func TestSettleHTLC_RetryAfterZetoTransferFails(t *testing.T) {
 
 func TestRefundHTLC_RetryAfterZetoUnlockFails(t *testing.T) {
 	env := setupTestEnvFull(t, nil, nil, "")
-	env.zeto.unlockErr = errors.New("zeto unlock failed")
+	env.zeto.transferLockedErr = errors.New("zeto transferLocked failed")
 	ctx := context.Background()
 
 	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
@@ -1046,7 +1046,7 @@ func TestRefundHTLC_RetryAfterZetoUnlockFails(t *testing.T) {
 		t.Fatalf("LockHTLC: %v", err)
 	}
 
-	// First refund: zeto unlock fails → state should be REFUNDING
+	// First refund: zeto transferLocked fails → state should be REFUNDING
 	_, err = env.client.RefundHTLC(ctx, &pb.RefundHTLCRequest{
 		ContractId: lockResp.ContractId,
 	})
@@ -1066,7 +1066,7 @@ func TestRefundHTLC_RetryAfterZetoUnlockFails(t *testing.T) {
 	}
 
 	// Fix the zeto mock and retry
-	env.zeto.unlockErr = nil
+	env.zeto.transferLockedErr = nil
 
 	resp, err := env.client.RefundHTLC(ctx, &pb.RefundHTLCRequest{
 		ContractId: lockResp.ContractId,

@@ -259,9 +259,8 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 	var htlcTxHash string
 	if s.htlc != nil {
 		var zetoRefBytes [32]byte
-		if len(lockResult.LockedStateIDs) > 0 {
-			zetoRefHash := sha256.Sum256([]byte(strings.Join(lockResult.LockedStateIDs, ",")))
-			zetoRefBytes = zetoRefHash
+		if b := uuidToRawBytes(lockResult.TxHash); b != nil {
+			copy(zetoRefBytes[:], b)
 		}
 		htlcTxHash, err = s.htlc.Lock(ctx, ports.HTLCLockParams{
 			ContractID:  contractIDBytes,
@@ -273,8 +272,8 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 		})
 		if err != nil {
 			s.logger.Error("on-chain HTLC lock failed — rolling back Zeto lock", "error", err)
-			if _, unlockErr := s.zeto.Unlock(ctx, strings.Join(lockResult.LockedStateIDs, ",")); unlockErr != nil {
-				s.logger.Error("zeto unlock rollback also failed", "error", unlockErr)
+			if _, unlockErr := s.zeto.TransferLocked(ctx, strings.Join(lockResult.LockedStateIDs, ","), s.paladinIdentity, req.Amount); unlockErr != nil {
+				s.logger.Error("zeto transferLocked rollback also failed", "error", unlockErr)
 			}
 			return nil, status.Errorf(codes.Internal, "on-chain HTLC lock failed: %v", err)
 		}
@@ -398,9 +397,8 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 		var hashLock32 [32]byte
 		copy(hashLock32[:], hashLockBytes)
 		var zetoRefBytes [32]byte
-		if len(lockResult.LockedStateIDs) > 0 {
-			zetoRefHash := sha256.Sum256([]byte(strings.Join(lockResult.LockedStateIDs, ",")))
-			zetoRefBytes = zetoRefHash
+		if b := uuidToRawBytes(lockResult.TxHash); b != nil {
+			copy(zetoRefBytes[:], b)
 		}
 		htlcTxHash, err = s.htlc.Lock(ctx, ports.HTLCLockParams{
 			ContractID:  contractIDBytes,
@@ -412,8 +410,8 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 		})
 		if err != nil {
 			s.logger.Error("on-chain HTLC lock failed — rolling back Zeto lock", "error", err)
-			if _, unlockErr := s.zeto.Unlock(ctx, strings.Join(lockResult.LockedStateIDs, ",")); unlockErr != nil {
-				s.logger.Error("zeto unlock rollback also failed", "error", unlockErr)
+			if _, unlockErr := s.zeto.TransferLocked(ctx, strings.Join(lockResult.LockedStateIDs, ","), s.paladinIdentity, req.Amount); unlockErr != nil {
+				s.logger.Error("zeto transferLocked rollback also failed", "error", unlockErr)
 			}
 			return nil, status.Errorf(codes.Internal, "on-chain HTLC lock failed: %v", err)
 		}
@@ -673,12 +671,12 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 		htlcTxHash = record.HTLCTxHash
 	}
 
-	zetoTxHash, err := s.zeto.Unlock(ctx, record.ZetoLockRef)
+	zetoTxHash, err := s.zeto.TransferLocked(ctx, record.ZetoLockRef, record.Sender, record.Amount)
 	if err != nil {
 		// Stay in REFUNDING for retry.
-		s.logger.Error("zeto unlock failed — record stays REFUNDING for retry",
+		s.logger.Error("zeto transferLocked (refund) failed — record stays REFUNDING for retry",
 			"contract_id", req.ContractId, "error", err)
-		return nil, status.Errorf(codes.Internal, "zeto unlock: %v", err)
+		return nil, status.Errorf(codes.Internal, "zeto transferLocked refund: %v", err)
 	}
 
 	// Both operations succeeded — mark REFUNDED.
@@ -1748,4 +1746,15 @@ func (s *paymentOrchestratorService) handleRelaySettleEvent(proof ports.Interope
 	}
 	s.logger.Info("relay settle: local HTLC leg settled", "contractId", proof.ContractID)
 	return nil
+}
+
+// uuidToRawBytes converts a UUID string (e.g. "dc1e6c37-f676-4848-ab6a-be8ca5c56558")
+// to its 16 raw bytes. Returns nil if the input is not a valid UUID.
+func uuidToRawBytes(u string) []byte {
+	u = strings.ReplaceAll(u, "-", "")
+	b, err := hex.DecodeString(u)
+	if err != nil || len(b) != 16 {
+		return nil
+	}
+	return b
 }

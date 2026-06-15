@@ -18,6 +18,8 @@ type Dependencies struct {
 	AuthHandler            *handlers.AuthHandler
 	ComplianceHandler      *handlers.ComplianceHandler
 	GovernanceHandler      *handlers.GovernanceHandler
+	SupervisorHandler      *handlers.SupervisorHandler
+	OversightHandler       *handlers.OversightHandler       // Investigation Module: AML/CFT disclosure requests
 	TransferLimitHandler   *handlers.TransferLimitHandler   // Central Bank: Treasury transfer-limit CRUD (R1-10.1)
 	PaymentHandler         *handlers.PaymentHandler         // Payment orchestrator: HTLC + token operations
 	PaymentProxyHandler    *handlers.PaymentProxyHandler    // Commercial Bank: proxies escrow requests to CB
@@ -73,6 +75,21 @@ func Setup(app *fiber.App, deps Dependencies) {
 	complianceGroup := app.Group("/api/v1/compliance", middleware.RequireCookieAuth(deps.AuthProvider))
 	complianceGroup.Get("/kyc/status/:subject", deps.ComplianceHandler.GetKYCStatus)
 	complianceGroup.Post("/aml/screen", deps.ComplianceHandler.AMLScreen)
+	if deps.SupervisorHandler != nil {
+		complianceGroup.Get("/audit/logs", middleware.RequireSupervisorRole(), deps.SupervisorHandler.GetAuditLogs)
+		complianceGroup.Post("/decrypt-transaction", middleware.RequireSupervisorRole(), deps.SupervisorHandler.DecryptTransaction)
+
+		// Read-only participants list for supervisor (same handler, no write access).
+		complianceGroup.Get("/participants/summary", middleware.RequireSupervisorRole(), deps.ComplianceHandler.ListParticipants)
+	}
+
+	// --- Investigation Module (AML/CFT Disclosure Requests — FR-034/FR-035/FR-036) ---
+	if deps.OversightHandler != nil {
+		oversightGroup := app.Group("/api/v1/oversight", middleware.RequireCookieAuth(deps.AuthProvider), middleware.RequireSupervisorRole())
+		oversightGroup.Post("/disclosure-request", deps.OversightHandler.OpenDisclosure)
+		oversightGroup.Post("/disclosure-sign", deps.OversightHandler.SignDisclosure)
+		oversightGroup.Get("/disclosure-status/:requestID", deps.OversightHandler.GetDisclosureStatus)
+	}
 
 	centralBankRoutes := complianceGroup.Group("", middleware.RequireRole(domain.RoleGovernance))
 	centralBankRoutes.Get("/participants", deps.ComplianceHandler.ListParticipants)
