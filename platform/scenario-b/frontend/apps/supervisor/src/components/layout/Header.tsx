@@ -1,11 +1,9 @@
-import { Button, Badge, PlatformLogo } from "@cbweb3/ui";
-import { useAuthStore, useWebsocketStore } from "../../stores";
+import { Button, PlatformLogo } from "@cbweb3/ui";
+import { useAuthStore } from "../../stores";
 
 export function Header() {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
-  const connected = useWebsocketStore((state) => state.connected);
-  const alerts = useWebsocketStore((state) => state.events);
 
   return (
     <header className="app-root-header px-4 py-3 backdrop-blur">
@@ -17,14 +15,9 @@ export function Header() {
             <p className="text-xs text-muted-foreground">Institution: {user?.institutionName ?? "-"}</p>
           </div>
         </div>
-
-        <div className="flex items-center gap-3">
-          <Badge variant={connected ? "success" : "destructive"}>{connected ? "Monitoring" : "Disconnected"}</Badge>
-          <span className="text-xs text-muted-foreground">Events: {alerts.length}</span>
-          <Button variant="ghost" size="sm" onClick={() => void logout()}>
-            Sign out
-          </Button>
-        </div>
+        <Button variant="ghost" size="sm" onClick={() => void logout()}>
+          Sign out
+        </Button>
       </div>
     </header>
   );
