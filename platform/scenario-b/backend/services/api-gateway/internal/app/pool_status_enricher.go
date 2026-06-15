@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app provides the GORM-backed PoolStatusEnricher for T018 (005-cooperative-liquidity).
 // Supplies total_lp_count and pending_commits[] to GET /api/v2/amm/pool/:pair/status.
 package app

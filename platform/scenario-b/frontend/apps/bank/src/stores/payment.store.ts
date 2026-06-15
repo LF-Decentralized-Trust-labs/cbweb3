@@ -10,7 +10,9 @@ type PaymentState = {
   balance: string | null;
   fiatBalance: string | null;
   tCeBMDecimals: number | null;
+  tCeBMSymbol: string | null;
   fCeBMDecimals: number | null;
+  fCeBMSymbol: string | null;
   status: AsyncStatus;
   error: string | null;
   fetchAll: () => Promise<void>;
@@ -40,7 +42,9 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
   balance: null,
   fiatBalance: null,
   tCeBMDecimals: null,
+  tCeBMSymbol: null,
   fCeBMDecimals: null,
+  fCeBMSymbol: null,
   status: "idle",
   error: null,
   fetchAll: async () => {
@@ -61,8 +65,10 @@ export const usePaymentStore = create<PaymentState>((set, get) => ({
         redeems: redeemsResponse.status === "fulfilled" ? redeemsResponse.value.redeems : [],
         balance: balanceResponse.status === "fulfilled" ? balanceResponse.value.balance : null,
         tCeBMDecimals: balanceResponse.status === "fulfilled" ? (balanceResponse.value.decimals ?? null) : null,
+        tCeBMSymbol: balanceResponse.status === "fulfilled" ? (balanceResponse.value.symbol ?? null) : null,
         fiatBalance: fiatBalanceResponse.status === "fulfilled" ? fiatBalanceResponse.value.balance : null,
         fCeBMDecimals: fiatBalanceResponse.status === "fulfilled" ? (fiatBalanceResponse.value.decimals ?? null) : null,
+        fCeBMSymbol: fiatBalanceResponse.status === "fulfilled" ? (fiatBalanceResponse.value.symbol ?? null) : null,
         status: "idle",
       });
     } catch (error) {

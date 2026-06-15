@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
@@ -59,6 +59,12 @@ contract ManualOracleTest is Test {
         vm.prank(centralBank);
         vm.expectRevert(IManualOracle.Oracle__InvalidParameters.selector);
         oracle.setRate(address(0), tokenEUR, testRate);
+    }
+
+    function test_Revert_SetRate_ZeroToken1() public {
+        vm.prank(centralBank);
+        vm.expectRevert(IManualOracle.Oracle__InvalidParameters.selector);
+        oracle.setRate(tokenBRL, address(0), testRate);
     }
 
     function test_Revert_SetRate_ZeroRate() public {

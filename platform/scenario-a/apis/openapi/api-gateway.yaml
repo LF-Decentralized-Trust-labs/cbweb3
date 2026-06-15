@@ -667,7 +667,7 @@ paths:
       description: >
         Returns all participants registered in the compliance-orchestrator database.
         Supports optional filtering by onboarding status and free-text search
-        (institution name or CNPJ, case-insensitive). Requires ROLE_GOVERNANCE.
+        (institution name or legal entity ID, case-insensitive). Requires ROLE_GOVERNANCE.
       operationId: listParticipants
       security:
         - CookieAuth: []
@@ -682,7 +682,7 @@ paths:
             enum: [PENDING, CREDENTIAL_REQUESTED, KYC_APPROVED, ACTIVE, FROZEN, REVOKED]
         - name: search
           in: query
-          description: Free-text search across institution_name and CNPJ (case-insensitive ILIKE)
+          description: Free-text search across institution_name and legal entity ID (case-insensitive ILIKE)
           schema:
             type: string
       responses:
@@ -1027,7 +1027,7 @@ paths:
         - name: search
           in: query
           schema: { type: string }
-          description: Search by name, CNPJ, or user_id
+          description: Search by name, legal entity ID, or user_id
       responses:
         "200":
           description: List of participants
@@ -1072,7 +1072,7 @@ paths:
               user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
               role: "ROLE_COMMERCIAL_BANK"
               institution_name: "Banco Itau S.A."
-              cnpj: "60.701.190/0001-04"
+              legal_entity_id: "60.701.190/0001-04"
       responses:
         "201":
           description: CSR signed — X.509 certificate issued
@@ -3024,7 +3024,7 @@ components:
         institution_name:
           type: string
           example: "Banco Itau S.A."
-        cnpj:
+        legal_entity_id:
           type: string
           example: "60.701.190/0001-04"
         status:
@@ -3037,7 +3037,7 @@ components:
       properties:
         user_id:         { type: string }
         institution_name: { type: string }
-        cnpj:            { type: string }
+        legal_entity_id:            { type: string }
         role:            { type: string }
         status:
           type: string
@@ -3068,7 +3068,7 @@ components:
         institution_name:
           type: string
           example: "Banco Itau S.A."
-        cnpj:
+        legal_entity_id:
           type: string
           example: "60.701.190/0001-04"
 
@@ -3162,9 +3162,9 @@ components:
         institution_name:
           type: string
           example: "Banco do Brasil S.A."
-        cnpj:
+        legal_entity_id:
           type: string
-          description: Brazilian CNPJ (optional)
+          description: Legal entity identifier (optional)
           example: "00.000.000/0001-91"
         bank_code:
           type: string

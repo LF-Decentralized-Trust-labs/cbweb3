@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package identity provides utilities for parsing Paladin identity strings.
 package identity
 

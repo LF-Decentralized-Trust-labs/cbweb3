@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides liquidity provision HTTP handlers for Scenario B (FR-027).
 // Extended for 005-cooperative-liquidity: commit-reveal, pool status enrichment.
 // Extended for 007-bridge-based-cb-liquidity: sovereign CB liquidity, on-chain commit gate.
@@ -143,12 +145,18 @@ func (h *LiquidityHandler) RemoveLiquidity(c *fiber.Ctx) error {
 		PoolPair       string `json:"pool_pair"`
 		ProviderBankID string `json:"provider_bank_id"`
 		LPID           string `json:"lp_id"`
+		// FractionBps selects how much of the position to withdraw, in basis points
+		// (10000 = 100%). Omitted/0 → full withdrawal (backward compatible).
+		FractionBps int `json:"fraction_bps,omitempty"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 	if req.PoolPair == "" || req.ProviderBankID == "" || req.LPID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "pool_pair, provider_bank_id, lp_id required"})
+	}
+	if req.FractionBps < 0 || req.FractionBps > 10000 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "fraction_bps must be between 1 and 10000"})
 	}
 
 	// T015: validate provider_bank_id == JWT BankID (FR-009).
@@ -165,6 +173,7 @@ func (h *LiquidityHandler) RemoveLiquidity(c *fiber.Ctx) error {
 		PoolPair:       req.PoolPair,
 		ProviderBankID: req.ProviderBankID,
 		LPID:           req.LPID,
+		FractionBps:    req.FractionBps,
 	})
 	if err != nil {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": err.Error()})

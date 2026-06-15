@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines the ComplianceZKPointer model for Scenario B ZK compliance.
 package domain
 

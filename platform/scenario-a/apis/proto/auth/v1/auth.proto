@@ -213,7 +213,7 @@ message SubmitCredentialRequestReq {
   // Hex-encoded uncompressed secp256k1 public key (04‖X‖Y, 65 bytes).
   string blockchain_pub_key_hex = 2;
   string institution_name = 3;
-  string cnpj = 4;
+  string legal_entity_id = 4;
   string bank_code = 5;
   string country = 6;
   string role = 7;

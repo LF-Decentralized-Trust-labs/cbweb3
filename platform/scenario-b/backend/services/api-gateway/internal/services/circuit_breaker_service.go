@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the Circuit Breaker service for Scenario B (FR-030 / FR-044 / SC-017 / SC-026).
 package services
 

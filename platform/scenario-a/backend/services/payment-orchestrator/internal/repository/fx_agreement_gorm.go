@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package repository
 
 import (
@@ -23,6 +25,16 @@ func NewGormFXAgreementRepository(dsn string) (ports.FXAgreementRepository, erro
 	if err != nil {
 		return nil, err
 	}
+	if err := db.AutoMigrate(&FXAgreementModel{}, &FXAgreementEventModel{}, &RelayDeliveryRecordModel{}); err != nil {
+		return nil, err
+	}
+	return &gormFXAgreementRepository{db: db}, nil
+}
+
+// NewGormFXAgreementRepositoryFromDB uses an already-open *gorm.DB, runs AutoMigrate,
+// and returns an FXAgreementRepository. Use this when sharing a single DB connection
+// across multiple repositories.
+func NewGormFXAgreementRepositoryFromDB(db *gorm.DB) (ports.FXAgreementRepository, error) {
 	if err := db.AutoMigrate(&FXAgreementModel{}, &FXAgreementEventModel{}, &RelayDeliveryRecordModel{}); err != nil {
 		return nil, err
 	}
@@ -116,7 +128,7 @@ func (r *gormFXAgreementRepository) ListExpiredNonTerminal(ctx context.Context, 
 	}
 	var models []FXAgreementModel
 	if err := r.db.WithContext(ctx).
-		Where("expiry_date > 0 AND expiry_date < ? AND state IN ?", uint64(nowUnix), nonTerminal).
+		Where("expiry_date > 0 AND expiry_date < ? AND state IN ?", uint64(nowUnix), nonTerminal). //#nosec G115 -- unix timestamp is always positive and fits uint64
 		Find(&models).Error; err != nil {
 		return nil, err
 	}

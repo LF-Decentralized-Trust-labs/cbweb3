@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file loads environment variables into a typed runtime configuration.
 package config
 
@@ -29,6 +31,8 @@ type Config struct {
 	BesuRPCURL          string // Besu JSON-RPC endpoint; when set together with HTLCContractAddress, enables on-chain HTLC scan for supervisors
 	HTLCContractAddress string // HTLC contract address on the Besu network (HTLC_ADDRESS env var)
 	PaladinURL          string // Paladin JSON-RPC endpoint; enables transaction decryption for supervisors (PALADIN_URL env var)
+	FiatSymbol                  string // currency symbol for transfer limit matching (e.g. "BRL", "ARS"); from FIAT_SYMBOL
+	TransferLimitComplianceAddr string // when set, limit-enforcement checks are sent to this compliance address instead of ComplianceGRPCAddr; allows commercial-bank gateways to query the central bank's compliance service
 }
 
 // Load reads environment variables and returns a fully populated Config.
@@ -51,10 +55,12 @@ func Load() Config {
 		EntityBesuAddress:  getEnv("ENTITY_BESU_ADDRESS", ""),
 		PaladinIdentity:    getEnv("PALADIN_IDENTITY", ""),
 		CBPaladinIdentity:  getEnv("CB_PALADIN_IDENTITY", ""),
-		RelayAuthSecret:     getEnv("INTERNAL_RELAY_AUTH_SECRET", ""),
-		BesuRPCURL:          getEnv("BESU_RPC_URL", ""),
-		HTLCContractAddress: getEnv("HTLC_ADDRESS", ""),
-		PaladinURL:          getEnv("PALADIN_URL", ""),
+		RelayAuthSecret:             getEnv("INTERNAL_RELAY_AUTH_SECRET", ""),
+		BesuRPCURL:                  getEnv("BESU_RPC_URL", ""),
+		HTLCContractAddress:         getEnv("HTLC_ADDRESS", ""),
+		PaladinURL:                  getEnv("PALADIN_URL", ""),
+		FiatSymbol:                  getEnv("FIAT_SYMBOL", ""),
+		TransferLimitComplianceAddr: getEnv("TRANSFER_LIMIT_COMPLIANCE_ADDR", ""),
 	}
 }
 

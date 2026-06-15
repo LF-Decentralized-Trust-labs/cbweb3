@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the pool status service for Scenario B (FR-028 / REQ-FX-008).
 // Extended for 005-cooperative-liquidity (T018): pool_status derivation, fee_rate_bps,
 // total_lp_count, pending_commits[].

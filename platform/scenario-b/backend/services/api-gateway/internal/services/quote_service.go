@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the AMM quote service for Scenario B (FR-037 / SC-021).
 package services
 

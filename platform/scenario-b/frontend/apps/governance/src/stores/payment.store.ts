@@ -14,6 +14,7 @@ type PaymentStore = {
   escrows: EscrowRecord[];
   redeems: RedeemRecord[];
   tokenDecimals: number | null;
+  tokenSymbol: string | null;
   status: AsyncStatus;
   error: string | null;
   fetchAll: () => Promise<void>;
@@ -35,6 +36,7 @@ export const usePaymentStore = create<PaymentStore>((set) => ({
   escrows: [],
   redeems: [],
   tokenDecimals: null,
+  tokenSymbol: null,
   status: "idle",
   error: null,
   fetchAll: async () => {
@@ -51,6 +53,7 @@ export const usePaymentStore = create<PaymentStore>((set) => ({
         escrows: escrowsResponse.status === "fulfilled" ? escrowsResponse.value.escrows : [],
         redeems: redeemsResponse.status === "fulfilled" ? redeemsResponse.value.redeems : [],
         tokenDecimals: balanceResponse.status === "fulfilled" ? (balanceResponse.value.decimals ?? null) : null,
+        tokenSymbol: balanceResponse.status === "fulfilled" ? (balanceResponse.value.symbol ?? null) : null,
         status: "idle",
       });
     } catch (error) {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides CactiCrossCurrencyRelay for notifying CB-B via Cacti (009).
 //
 // After CB-A's Hub AMM swap completes, the orquetrator calls this relay instead of

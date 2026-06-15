@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file registers API Gateway routes and attaches required dependencies.
 package router
 
@@ -18,6 +20,7 @@ type Dependencies struct {
 	GovernanceHandler      *handlers.GovernanceHandler
 	SupervisorHandler      *handlers.SupervisorHandler
 	OversightHandler       *handlers.OversightHandler       // Investigation Module: AML/CFT disclosure requests
+	TransferLimitHandler   *handlers.TransferLimitHandler   // Central Bank: Treasury transfer-limit CRUD (R1-10.1)
 	PaymentHandler         *handlers.PaymentHandler         // Payment orchestrator: HTLC + token operations
 	PaymentProxyHandler    *handlers.PaymentProxyHandler    // Commercial Bank: proxies escrow requests to CB
 	OnboardingHandler      *handlers.OnboardingHandler      // Central Bank: processes onboarding locally
@@ -126,6 +129,17 @@ func Setup(app *fiber.App, deps Dependencies) {
 
 		govGroup.Get("/users", deps.GovernanceHandler.ListUsers)
 		govGroup.Get("/users/:userId", deps.GovernanceHandler.GetUser)
+	}
+
+	// --- Treasury: Transfer Limits (Central Bank only — ROLE_TREASURY, R1-10.1) ---
+	if deps.PaymentProxyHandler == nil && deps.TransferLimitHandler != nil {
+		tlGroup := app.Group("/api/v1/treasury/transfer-limits",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			middleware.RequireRole(domain.RoleTreasury),
+		)
+		tlGroup.Post("", deps.TransferLimitHandler.CreateTransferLimit)
+		tlGroup.Get("", deps.TransferLimitHandler.ListTransferLimits)
+		tlGroup.Delete("/:id", deps.TransferLimitHandler.DeleteTransferLimit)
 	}
 
 	// --- Payment Orchestrator (HTLC + Token) ---

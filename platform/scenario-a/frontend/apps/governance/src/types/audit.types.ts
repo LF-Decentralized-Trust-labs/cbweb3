@@ -1,4 +1,5 @@
-export type AuditCategory = "REGISTRY" | "CIRCUIT_BREAKER" | "FREEZE" | "PARAMETER" | "AUTH";
+// Categories emitted by the compliance service (domain/status.go).
+export type AuditCategory = "CREDENTIAL" | "FREEZE" | "CIRCUIT_BREAKER" | "PARAMETER";
 export type AuditSeverity = "INFO" | "WARNING" | "CRITICAL";
 
 export type GovernanceAuditEntry = {

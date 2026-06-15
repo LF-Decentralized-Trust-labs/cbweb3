@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package spokebridge provides an EVM client for the SpokeBridge contract deployed on a
 // Spoke network. It wraps go-ethereum/ethclient with a minimal embedded ABI so the
 // Payment Orchestrator can call lock/release/getLock without requiring abigen-generated

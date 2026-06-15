@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app provides the LPPositionRepository for sovereign CB liquidity (007-bridge-based-cb-liquidity).
 package app
 

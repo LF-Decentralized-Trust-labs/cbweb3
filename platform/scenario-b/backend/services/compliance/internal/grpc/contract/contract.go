@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package contract
 
 import (
@@ -21,7 +23,7 @@ const (
 
 	// PKI certificate issuance
 	IssueParticipantCertificateMethod = "/compliance.v1.ComplianceService/IssueParticipantCertificate"
-	SignParticipantCSRMethod           = "/compliance.v1.ComplianceService/SignParticipantCSR"
+	SignParticipantCSRMethod          = "/compliance.v1.ComplianceService/SignParticipantCSR"
 
 	// Governance operations
 	ApproveKYCMethod              = "/compliance.v1.ComplianceService/ApproveKYC"
@@ -37,7 +39,7 @@ const (
 type Participant struct {
 	UserID            string     `json:"user_id"`
 	InstitutionName   string     `json:"institution_name"`
-	CNPJ              string     `json:"cnpj"`
+	LegalEntityID     string     `json:"legal_entity_id"`
 	BankCode          string     `json:"bank_code"`
 	CountryCode       string     `json:"country_code"`
 	Role              string     `json:"role"`
@@ -97,12 +99,12 @@ type CreateAuditLogResponse struct {
 }
 
 type GetAuditLogsRequest struct {
-	Category  string `json:"category,omitempty"`
-	Severity  string `json:"severity,omitempty"`
-	FromDate  string `json:"from_date,omitempty"` // ISO-8601 UTC
-	ToDate    string `json:"to_date,omitempty"`   // ISO-8601 UTC
-	Page      int32  `json:"page,omitempty"`
-	Limit     int32  `json:"limit,omitempty"`
+	Category string `json:"category,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	FromDate string `json:"from_date,omitempty"` // ISO-8601 UTC
+	ToDate   string `json:"to_date,omitempty"`   // ISO-8601 UTC
+	Page     int32  `json:"page,omitempty"`
+	Limit    int32  `json:"limit,omitempty"`
 }
 
 type AuditLogRecord struct {
@@ -129,7 +131,7 @@ type IssueParticipantCertificateRequest struct {
 	UserID          string `json:"user_id"`
 	Role            string `json:"role"`
 	InstitutionName string `json:"institution_name"`
-	CNPJ            string `json:"cnpj"`
+	LegalEntityID   string `json:"legal_entity_id"`
 }
 
 type IssueParticipantCertificateResponse struct {
@@ -146,7 +148,7 @@ type SignParticipantCSRRequest struct {
 	UserID          string `json:"user_id"`
 	Role            string `json:"role"`
 	InstitutionName string `json:"institution_name"`
-	CNPJ            string `json:"cnpj,omitempty"`
+	LegalEntityID   string `json:"legal_entity_id,omitempty"`
 }
 
 type SignParticipantCSRResponse struct {

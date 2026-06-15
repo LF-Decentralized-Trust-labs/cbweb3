@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package middleware provides LP/CB role middleware for cooperative liquidity routes (T020 / FR-009).
 package middleware
 

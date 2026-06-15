@@ -1,36 +1,38 @@
 import type { AuditFilter, GovernanceAuditEntry } from "../../types";
-import { mockDb } from "../mocks/mock-db";
-import { httpClient, useMocks } from "./http-client";
+import { httpClient } from "./http-client";
 
-type AuditLogsResponse = {
-  logs: Array<{
-    id: string;
-    actor_subject: string;
-    action: string;
-    category: string;
-    severity: string;
-    outcome: string;
-    metadata?: string;
-    created_at: string;
-  }>;
+// Wire shape returned by GET /api/v1/governance/audit/logs.
+// Mirrors the gateway AuditRecord JSON tags (compliance_grpc.go).
+type AuditLogApi = {
+  log_id: string;
+  timestamp: string;
+  actor: string;
+  actor_address?: string;
+  action: string;
+  target_subject?: string;
+  category: string;
+  severity: string;
+  outcome: string;
+  details?: string;
 };
 
-const mapEntry = (entry: AuditLogsResponse["logs"][number]): GovernanceAuditEntry => ({
-  id: entry.id,
-  actor: entry.actor_subject,
+type AuditLogsResponse = {
+  logs: AuditLogApi[];
+};
+
+const mapEntry = (entry: AuditLogApi): GovernanceAuditEntry => ({
+  id: entry.log_id,
+  actor: entry.actor,
   action: entry.action,
   category: entry.category as GovernanceAuditEntry["category"],
   severity: entry.severity as GovernanceAuditEntry["severity"],
   outcome: entry.outcome as GovernanceAuditEntry["outcome"],
-  metadata: entry.metadata ?? "",
-  createdAt: entry.created_at,
+  metadata: entry.details ?? "",
+  createdAt: entry.timestamp,
 });
 
 export const auditApi = {
   list: async (filter?: AuditFilter): Promise<GovernanceAuditEntry[]> => {
-    if (useMocks) {
-      return mockDb.listAuditLogs(filter);
-    }
     const params: Record<string, string> = {};
     if (filter?.category && filter.category !== "ALL") params.category = filter.category;
     if (filter?.severity && filter.severity !== "ALL") params.severity = filter.severity;

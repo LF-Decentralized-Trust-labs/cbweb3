@@ -94,6 +94,8 @@ services:
       PKI_DIR: /workspace/backend/config/pki
       DATABASE_URL: "postgres://${POSTGRES_USER:-default}:${POSTGRES_PASSWORD:-default}@postgres:5432/${DB_NAME:-cbweb3_central_bank_a}?sslmode=disable"
       PALADIN_URL: "http://host.docker.internal:31658"
+      BANK_CODE: "central-bank-a"
+      FIAT_SYMBOL: "BRL"
     volumes:
       - ./config/pki:/workspace/backend/config/pki
     extra_hosts:

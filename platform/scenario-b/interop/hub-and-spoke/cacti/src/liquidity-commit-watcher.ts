@@ -75,6 +75,16 @@ export class LiquidityCommitWatcher {
   private readonly connector?: PluginLedgerConnectorBesu;
   // Fallback ethers provider for direct polling when no Cacti connector is provided.
   private provider?: ethers.JsonRpcProvider;
+  // Hub RPC URL — kept so the provider can be rebuilt (reconnect) after the node restarts.
+  private readonly hubRpc?: string;
+  // Per-RPC-request timeout. Without this a wedged socket (e.g. after the hub Besu
+  // restarts underneath us) freezes the poll loop forever and CommitMatched events are
+  // silently missed. See incident: relay started before hub Besu, Besu restarted, watcher hung.
+  private readonly requestTimeoutMs: number;
+  // Count of consecutive failed polls. After a threshold the ethers provider is rebuilt,
+  // dropping any wedged connection so the watcher self-heals across node restarts.
+  private consecutiveFailures = 0;
+  private static readonly MAX_FAILURES_BEFORE_RECONNECT = 3;
 
   constructor(opts: {
     contractAddress: string;
@@ -84,6 +94,7 @@ export class LiquidityCommitWatcher {
     startBlock?: number;
     connector?: PluginLedgerConnectorBesu;
     hubRpc?: string;
+    requestTimeoutMs?: number;
   }) {
     this.iface           = new ethers.Interface(COMMIT_MATCHED_ABI);
     this.contractAddress = opts.contractAddress.toLowerCase();
@@ -93,9 +104,54 @@ export class LiquidityCommitWatcher {
     this.startBlock      = opts.startBlock ?? 0;
     this.lastProcessedBlock = this.startBlock;
     this.connector       = opts.connector;
+    this.hubRpc          = opts.hubRpc;
+    this.requestTimeoutMs = opts.requestTimeoutMs ?? 20_000;
     if (!opts.connector && opts.hubRpc) {
-      this.provider = new ethers.JsonRpcProvider(opts.hubRpc);
+      this.provider = this.buildProvider();
     }
+  }
+
+  /**
+   * Build a fresh ethers provider for the hub RPC with an explicit request timeout and a
+   * static network. `staticNetwork` disables ethers' eth_chainId network-change detection,
+   * which otherwise can permanently wedge the provider when the RPC node restarts underneath it.
+   */
+  private buildProvider(): ethers.JsonRpcProvider {
+    const fetchReq = new ethers.FetchRequest(this.hubRpc!);
+    fetchReq.timeout = this.requestTimeoutMs;
+    return new ethers.JsonRpcProvider(fetchReq, undefined, { staticNetwork: true });
+  }
+
+  /**
+   * Drop the current provider (and its possibly-wedged sockets) and build a new one.
+   * No-op when running against a Cacti connector instead of a direct ethers provider.
+   */
+  private reconnectProvider(): void {
+    if (this.connector || !this.hubRpc) return;
+    try {
+      this.provider?.destroy();
+    } catch {
+      // ignore — best effort cleanup of the old provider.
+    }
+    this.provider = this.buildProvider();
+    console.warn("[LiquidityCommitWatcher] rebuilt hub RPC provider after repeated poll failures");
+  }
+
+  /**
+   * Race a promise against the per-request timeout so a hung RPC call can never block the
+   * poll loop indefinitely — even if the underlying socket never errors or resolves.
+   */
+  private withTimeout<T>(p: Promise<T>, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`${label} timed out after ${this.requestTimeoutMs}ms`)),
+        this.requestTimeoutMs,
+      );
+      p.then(
+        v => { clearTimeout(timer); resolve(v); },
+        e => { clearTimeout(timer); reject(e); },
+      );
+    });
   }
 
   /**
@@ -137,8 +193,18 @@ export class LiquidityCommitWatcher {
           }
           this.lastProcessedBlock = toBlock;
         }
+        // Successful poll — clear the failure streak.
+        this.consecutiveFailures = 0;
       } catch (err) {
         console.error("[LiquidityCommitWatcher] poll error:", err);
+        this.consecutiveFailures++;
+        // Self-heal: a wedged connection (typically after the hub Besu restarts) keeps
+        // failing. Rebuild the provider so the next poll uses a fresh socket instead of
+        // hanging forever. lastProcessedBlock is preserved, so no events are skipped.
+        if (this.consecutiveFailures >= LiquidityCommitWatcher.MAX_FAILURES_BEFORE_RECONNECT) {
+          this.reconnectProvider();
+          this.consecutiveFailures = 0;
+        }
       }
 
       await this.sleep(this.pollIntervalMs);
@@ -149,11 +215,14 @@ export class LiquidityCommitWatcher {
 
   private async getLatestBlock(): Promise<number> {
     if (this.connector) {
-      const resp = await this.connector.getBlock({ blockHashOrBlockNumber: "latest" });
+      const resp = await this.withTimeout(
+        this.connector.getBlock({ blockHashOrBlockNumber: "latest" }),
+        "getLatestBlock",
+      );
       return Number(resp.block.number ?? 0);
     }
     if (this.provider) {
-      return await this.provider.getBlockNumber();
+      return await this.withTimeout(this.provider.getBlockNumber(), "getLatestBlock");
     }
     throw new Error("LiquidityCommitWatcher: no connector or provider configured");
   }
@@ -164,21 +233,27 @@ export class LiquidityCommitWatcher {
     topicHash: string,
   ): Promise<EthLog[]> {
     if (this.connector) {
-      const resp = await this.connector.getPastLogs({
-        fromBlock: "0x" + fromBlock.toString(16),
-        toBlock:   "0x" + toBlock.toString(16),
-        address:   this.contractAddress,
-        topics:    [topicHash],
-      });
+      const resp = await this.withTimeout(
+        this.connector.getPastLogs({
+          fromBlock: "0x" + fromBlock.toString(16),
+          toBlock:   "0x" + toBlock.toString(16),
+          address:   this.contractAddress,
+          topics:    [topicHash],
+        }),
+        "getLogs",
+      );
       return (resp.logs ?? []) as EthLog[];
     }
     if (this.provider) {
-      const logs = await this.provider.getLogs({
-        fromBlock,
-        toBlock,
-        address: this.contractAddress,
-        topics:  [topicHash],
-      });
+      const logs = await this.withTimeout(
+        this.provider.getLogs({
+          fromBlock,
+          toBlock,
+          address: this.contractAddress,
+          topics:  [topicHash],
+        }),
+        "getLogs",
+      );
       return logs.map(l => ({
         topics: l.topics as string[],
         data:   l.data,
@@ -319,6 +394,7 @@ export function createLiquidityCommitWatcherFromEnv(
   const hubRpc          = process.env["HUB_BESU_RPC"] ?? "";
   const pollIntervalMs  = parseInt(process.env["POLL_INTERVAL_MS"] ?? "5000", 10);
   const startBlock      = parseInt(process.env["LCR_WATCHER_START_BLOCK"] ?? "0", 10);
+  const requestTimeoutMs = parseInt(process.env["RPC_REQUEST_TIMEOUT_MS"] ?? "20000", 10);
 
   if (!contractAddress) {
     console.log(
@@ -347,5 +423,6 @@ export function createLiquidityCommitWatcherFromEnv(
     startBlock: isNaN(startBlock) ? 0 : startBlock,
     connector,
     hubRpc,
+    requestTimeoutMs: isNaN(requestTimeoutMs) ? 20_000 : requestTimeoutMs,
   });
 }

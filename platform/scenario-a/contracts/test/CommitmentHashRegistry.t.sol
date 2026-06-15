@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
@@ -36,6 +36,11 @@ contract CommitmentHashRegistryTest is Test {
 
         // Deploy CommitmentHashRegistry
         commitmentHashRegistry = new CommitmentHashRegistry(address(identityRegistry));
+    }
+
+    function test_Revert_Constructor_ZeroRegistry() public {
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidParameters.selector);
+        new CommitmentHashRegistry(address(0));
     }
 
     function test_RegisterCommitment_Success() public {
@@ -148,5 +153,112 @@ contract CommitmentHashRegistryTest is Test {
         vm.prank(governance);
         vm.expectRevert(CommitmentHashRegistry.CRG__InvalidStateTransition.selector);
         commitmentHashRegistry.acceptCommitment(expectedHash);
+    }
+
+    // --- registerCommitment parameter-validation branches ---
+
+    function test_Revert_RegisterCommitment_ZeroOriginator() public {
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidParameters.selector);
+        commitmentHashRegistry.registerCommitment(tradeId, address(0), bankB, originAmount, counterAmount, rate);
+    }
+
+    function test_Revert_RegisterCommitment_ZeroCounterparty() public {
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidParameters.selector);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, address(0), originAmount, counterAmount, rate);
+    }
+
+    function test_Revert_RegisterCommitment_ZeroOriginAmount() public {
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidParameters.selector);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, 0, counterAmount, rate);
+    }
+
+    function test_Revert_RegisterCommitment_ZeroCounterAmount() public {
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidParameters.selector);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, originAmount, 0, rate);
+    }
+
+    function test_Revert_RegisterCommitment_ZeroRate() public {
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidParameters.selector);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, originAmount, counterAmount, 0);
+    }
+
+    // --- settleCommitment branch ---
+
+    function test_Revert_SettleCommitment_NotAccepted() public {
+        bytes32 expectedHash = keccak256(abi.encodePacked(tradeId, originAmount, counterAmount, rate));
+
+        vm.prank(governance);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, originAmount, counterAmount, rate);
+
+        // Still PENDING, not ACCEPTED
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidStateTransition.selector);
+        commitmentHashRegistry.settleCommitment(expectedHash);
+    }
+
+    // --- cancelCommitment terminal-state branches ---
+
+    function test_Revert_CancelCommitment_Invalid() public {
+        // never registered → INVALID
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidStateTransition.selector);
+        commitmentHashRegistry.cancelCommitment(keccak256("unknown"));
+    }
+
+    function test_Revert_CancelCommitment_Settled() public {
+        bytes32 expectedHash = keccak256(abi.encodePacked(tradeId, originAmount, counterAmount, rate));
+
+        vm.startPrank(governance);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, originAmount, counterAmount, rate);
+        commitmentHashRegistry.acceptCommitment(expectedHash);
+        commitmentHashRegistry.settleCommitment(expectedHash);
+
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidStateTransition.selector);
+        commitmentHashRegistry.cancelCommitment(expectedHash);
+        vm.stopPrank();
+    }
+
+    function test_Revert_CancelCommitment_AlreadyCancelled() public {
+        bytes32 expectedHash = keccak256(abi.encodePacked(tradeId, originAmount, counterAmount, rate));
+
+        vm.startPrank(governance);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, originAmount, counterAmount, rate);
+        commitmentHashRegistry.cancelCommitment(expectedHash);
+
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidStateTransition.selector);
+        commitmentHashRegistry.cancelCommitment(expectedHash);
+        vm.stopPrank();
+    }
+
+    function test_CancelCommitment_FromAccepted() public {
+        bytes32 expectedHash = keccak256(abi.encodePacked(tradeId, originAmount, counterAmount, rate));
+
+        vm.startPrank(governance);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, originAmount, counterAmount, rate);
+        commitmentHashRegistry.acceptCommitment(expectedHash);
+        commitmentHashRegistry.cancelCommitment(expectedHash);
+        vm.stopPrank();
+
+        assertEq(
+            uint256(commitmentHashRegistry.getCommitmentState(expectedHash)),
+            uint256(CommitmentHashRegistry.CommitmentState.CANCELLED)
+        );
+    }
+
+    // --- view not-found branches ---
+
+    function test_Revert_GetCommitment_NotFound() public {
+        vm.expectRevert(CommitmentHashRegistry.CRG__CommitmentNotFound.selector);
+        commitmentHashRegistry.getCommitment(keccak256("missing"));
+    }
+
+    function test_Revert_GetCommitmentHashByTradeId_NotFound() public {
+        vm.expectRevert(CommitmentHashRegistry.CRG__CommitmentNotFound.selector);
+        commitmentHashRegistry.getCommitmentHashByTradeId(keccak256("missing-trade"));
     }
 }

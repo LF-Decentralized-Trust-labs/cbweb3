@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
 import {IIdentityRegistry} from "./interfaces/IIdentityRegistry.sol";
@@ -17,17 +17,17 @@ contract CommitmentHashRegistry is AccessControl {
 
     /// @notice Commitment hash state for an FX trade
     enum CommitmentState {
-        INVALID,    // Not registered or explicitly cancelled
-        PENDING,    // Registered, awaiting acceptance
-        ACCEPTED,   // Bilateral acceptance confirmed
-        SETTLED,    // Settlement completed, no further locks allowed
-        CANCELLED   // Trade cancelled before acceptance
+        INVALID, // Not registered or explicitly cancelled
+        PENDING, // Registered, awaiting acceptance
+        ACCEPTED, // Bilateral acceptance confirmed
+        SETTLED, // Settlement completed, no further locks allowed
+        CANCELLED // Trade cancelled before acceptance
     }
 
     /// @notice Commitment record for an FX trade
     struct Commitment {
         bytes32 tradeId;
-        bytes32 commitmentHash;         // keccak256(tradeId || originAmount || counterAmount || rate)
+        bytes32 commitmentHash; // keccak256(tradeId || originAmount || counterAmount || rate)
         address originator;
         address counterpartyB;
         uint256 originAmount;
@@ -141,15 +141,7 @@ contract CommitmentHashRegistry is AccessControl {
 
         _tradeIdToHash[tradeId] = commitmentHash;
 
-        emit CommitmentRegistered(
-            tradeId,
-            commitmentHash,
-            originator,
-            counterpartyB,
-            originAmount,
-            counterAmount,
-            rate
-        );
+        emit CommitmentRegistered(tradeId, commitmentHash, originator, counterpartyB, originAmount, counterAmount, rate);
     }
 
     /// @notice Accepts a pending commitment (both parties have agreed)
@@ -190,9 +182,8 @@ contract CommitmentHashRegistry is AccessControl {
         Commitment storage commitment = _commitments[commitmentHash];
 
         if (
-            commitment.state == CommitmentState.INVALID ||
-            commitment.state == CommitmentState.SETTLED ||
-            commitment.state == CommitmentState.CANCELLED
+            commitment.state == CommitmentState.INVALID || commitment.state == CommitmentState.SETTLED
+                || commitment.state == CommitmentState.CANCELLED
         ) {
             revert CRG__InvalidStateTransition();
         }

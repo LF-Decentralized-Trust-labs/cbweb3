@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides gateway-local bridge services that interact with the shared
 // Postgres tables. In production, the payment-orchestrator drives the Relayer lifecycle;
 // the gateway provides the REST surface for creating positions and listing state.
@@ -5,13 +7,34 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
+
+// sanitizeLogField strips CR/LF so relay-influenced fields (correlation_id, swap_tx_hash)
+// cannot inject forged log lines (R2-CR-6 review, Low).
+func sanitizeLogField(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
+}
+
+// pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint violation.
+const pgUniqueViolation = "23505"
+
+// isUniqueViolation reports whether err is a Postgres unique-constraint violation
+// (SQLSTATE 23505). Only such an error should trigger the swap_tx_hash idempotency
+// fallback; a transient connection error or deadlock must surface so the caller can
+// retry rather than masquerade as a duplicate swap.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation
+}
 
 // BridgeLockMintService handles Lock on Spoke → Mint on Hub (FR-029 / SC-015).
 type BridgeLockMintService struct {
@@ -53,7 +76,7 @@ func (s *BridgeLockMintService) LockAndEnqueue(ctx context.Context, ownerBankID,
 
 	logPrefix := ""
 	if correlationID != "" {
-		logPrefix = fmt.Sprintf("[correlation_id=%s] ", correlationID)
+		logPrefix = fmt.Sprintf("[correlation_id=%s] ", sanitizeLogField(correlationID))
 	}
 	fmt.Printf("%sbridge lock-mint initiated: position_id=%s owner=%s spoke=%s asset=%s amount=%s mint_to=%s burn_from_spoke=%s\n",
 		logPrefix, positionID, ownerBankID, spokeNetwork, nativeAsset, amount, mintTo, burnFromSpoke)
@@ -111,7 +134,7 @@ func (s *BridgeBurnUnlockService) BurnAndEnqueue(ctx context.Context, positionID
 
 	logPrefix := ""
 	if correlationID != "" {
-		logPrefix = fmt.Sprintf("[correlation_id=%s] ", correlationID)
+		logPrefix = fmt.Sprintf("[correlation_id=%s] ", sanitizeLogField(correlationID))
 	}
 	fmt.Printf("%sbridge burn-unlock initiated: position_id=%s\n", logPrefix, positionID)
 
@@ -157,6 +180,10 @@ func (s *BridgeBurnUnlockService) BurnAndEnqueue(ctx context.Context, positionID
 // beneficiarySpokeAddress optionally specifies the Spoke-B on-chain address where tCeBM
 // should be minted. When provided, the executor calls tCeBM.mint() directly (CENTRAL_BANK_ROLE)
 // instead of SpokeBridge.release() (which requires a prior lock on Spoke-B).
+//
+// extras[2] (swapTxHash) binds the position to the verified Hub swap transaction; a partial
+// unique index on swap_tx_hash makes each swap consumable at most once (R2-CR-6). On a
+// duplicate, the existing position is returned without enqueuing a second burn.
 func (s *BridgeBurnUnlockService) EnqueueBurnAfterSwap(
 	ctx context.Context,
 	ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string,
@@ -168,16 +195,20 @@ func (s *BridgeBurnUnlockService) EnqueueBurnAfterSwap(
 
 	burnFrom := ""
 	beneficiarySpoke := ""
+	swapTxHash := ""
 	if len(burnFromHubAddress) > 0 {
 		burnFrom = burnFromHubAddress[0]
 	}
 	if len(burnFromHubAddress) > 1 {
 		beneficiarySpoke = burnFromHubAddress[1]
 	}
+	if len(burnFromHubAddress) > 2 {
+		swapTxHash = burnFromHubAddress[2]
+	}
 
 	logPrefix := ""
 	if correlationID != "" {
-		logPrefix = fmt.Sprintf("[correlation_id=%s] ", correlationID)
+		logPrefix = fmt.Sprintf("[correlation_id=%s] ", sanitizeLogField(correlationID))
 	}
 
 	positionID := uuid.NewString()
@@ -195,10 +226,23 @@ func (s *BridgeBurnUnlockService) EnqueueBurnAfterSwap(
 		BridgeState:             domain.BridgeStateActive,
 		BurnFromHubAddress:      burnFrom,
 		BeneficiarySpokeAddress: beneficiarySpoke,
+		SwapTxHash:              swapTxHash,
+		CorrelationID:           correlationID,
 		FirstAttemptAt:          &now,
 		LastAttemptAt:           &now,
 	}
 	if err := s.db.WithContext(ctx).Create(pos).Error; err != nil {
+		// Unique-index race: a concurrent replay consumed this swap first. Return the
+		// winning position so the caller's response stays idempotent. Only a unique
+		// violation (23505) means "duplicate swap"; any other error (connection drop,
+		// deadlock, etc.) must propagate so the caller can retry safely.
+		if swapTxHash != "" && isUniqueViolation(err) {
+			if existing, findErr := s.FindBySwapTxHash(ctx, swapTxHash); findErr == nil && existing != nil {
+				fmt.Printf("%sbridge-out duplicate swap_tx_hash=%s — returning existing position %s\n",
+					logPrefix, sanitizeLogField(swapTxHash), existing.PositionID)
+				return existing, nil
+			}
+		}
 		return nil, fmt.Errorf("persist bridge-out position failed: %w", err)
 	}
 
@@ -217,6 +261,24 @@ func (s *BridgeBurnUnlockService) EnqueueBurnAfterSwap(
 
 	fmt.Printf("%sbridge-out burn-unlock enqueued: position_id=%s\n", logPrefix, positionID)
 	return toPositionResult(pos), nil
+}
+
+// FindBySwapTxHash returns the bridge-out position that already consumed the given Hub
+// swap transaction, or (nil, nil) when the swap has not been processed (R2-CR-6 replay
+// protection). Used by CrossCurrencyBridgeOutHandler before enqueuing a burn.
+func (s *BridgeBurnUnlockService) FindBySwapTxHash(ctx context.Context, swapTxHash string) (*BridgePositionResult, error) {
+	if swapTxHash == "" {
+		return nil, nil
+	}
+	var pos domain.BridgedAssetPosition
+	err := s.db.WithContext(ctx).Where("swap_tx_hash = ?", swapTxHash).First(&pos).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("lookup by swap_tx_hash failed: %w", err)
+	}
+	return toPositionResult(&pos), nil
 }
 
 // BridgePositionReader reads bridge positions from the DB (FR-033).

@@ -24,6 +24,7 @@ const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.s
 export function RedeemsApprovalPage() {
   const redeems = usePaymentStore((state) => state.redeems);
   const tokenDecimals = usePaymentStore((state) => state.tokenDecimals);
+  const tokenSymbol = usePaymentStore((state) => state.tokenSymbol);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
   const fetchRedeems = usePaymentStore((state) => state.fetchRedeems);
@@ -124,7 +125,7 @@ export function RedeemsApprovalPage() {
                 <TableRow key={redeem.id}>
                   <TableCell className="font-medium">{redeem.id}</TableCell>
                   <TableCell>{redeem.requester_id}</TableCell>
-                  <TableCell>{formatCeBM(redeem.amount, decimals)}</TableCell>
+                  <TableCell>{formatCeBM(redeem.amount, decimals, tokenSymbol)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(redeem.status)}>{getPaymentStatusLabel(redeem.status)}</Badge>
                   </TableCell>

@@ -14,6 +14,7 @@ import { LoginPage } from "../pages/LoginPage";
 import { RedeemsApprovalPage } from "../pages/RedeemsApprovalPage";
 // import { RedemptionPage } from "../pages/RedemptionPage";
 // import { SettingsPage } from "../pages/SettingsPage";
+import { TransferLimitsPage } from "../pages/TransferLimitsPage";
 
 export const routes: RouteObject[] = [
   {
@@ -35,6 +36,7 @@ export const routes: RouteObject[] = [
           { path: "escrows-approval", element: <EscrowsApprovalPage /> },
           { path: "redeems-approval", element: <RedeemsApprovalPage /> },
           { path: "htlc-monitor", element: <HTLCMonitorPage /> },
+          { path: "transfer-limits", element: <TransferLimitsPage /> },
           // { path: "reconciliation", element: <ReconciliationPage /> },
           // { path: "audit", element: <AuditPage /> },
           // { path: "settings", element: <SettingsPage /> },

@@ -1792,7 +1792,7 @@ type SubmitCredentialRequestReq struct {
 	// Hex-encoded uncompressed secp256k1 public key (04‖X‖Y, 65 bytes).
 	BlockchainPubKeyHex string `protobuf:"bytes,2,opt,name=blockchain_pub_key_hex,json=blockchainPubKeyHex,proto3" json:"blockchain_pub_key_hex,omitempty"`
 	InstitutionName     string `protobuf:"bytes,3,opt,name=institution_name,json=institutionName,proto3" json:"institution_name,omitempty"`
-	Cnpj                string `protobuf:"bytes,4,opt,name=cnpj,proto3" json:"cnpj,omitempty"`
+	LegalEntityId       string `protobuf:"bytes,4,opt,name=legal_entity_id,json=legalEntityId,proto3" json:"legal_entity_id,omitempty"`
 	BankCode            string `protobuf:"bytes,5,opt,name=bank_code,json=bankCode,proto3" json:"bank_code,omitempty"`
 	Country             string `protobuf:"bytes,6,opt,name=country,proto3" json:"country,omitempty"`
 	Role                string `protobuf:"bytes,7,opt,name=role,proto3" json:"role,omitempty"`
@@ -1853,9 +1853,9 @@ func (x *SubmitCredentialRequestReq) GetInstitutionName() string {
 	return ""
 }
 
-func (x *SubmitCredentialRequestReq) GetCnpj() string {
+func (x *SubmitCredentialRequestReq) GetLegalEntityId() string {
 	if x != nil {
-		return x.Cnpj
+		return x.LegalEntityId
 	}
 	return ""
 }
@@ -2671,12 +2671,12 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\x0ecurrent_secret\x18\x02 \x01(\tR\rcurrentSecret\x12\x1d\n" +
 	"\n" +
 	"new_secret\x18\x03 \x01(\tR\tnewSecret\"\x1c\n" +
-	"\x1aChangeClientSecretResponse\"\xa6\x02\n" +
+	"\x1aChangeClientSecretResponse\"\xba\x02\n" +
 	"\x1aSubmitCredentialRequestReq\x12\x17\n" +
 	"\acsr_pem\x18\x01 \x01(\tR\x06csrPem\x123\n" +
 	"\x16blockchain_pub_key_hex\x18\x02 \x01(\tR\x13blockchainPubKeyHex\x12)\n" +
-	"\x10institution_name\x18\x03 \x01(\tR\x0finstitutionName\x12\x12\n" +
-	"\x04cnpj\x18\x04 \x01(\tR\x04cnpj\x12\x1b\n" +
+	"\x10institution_name\x18\x03 \x01(\tR\x0finstitutionName\x12&\n" +
+	"\x0flegal_entity_id\x18\x04 \x01(\tR\rlegalEntityId\x12\x1b\n" +
 	"\tbank_code\x18\x05 \x01(\tR\bbankCode\x12\x18\n" +
 	"\acountry\x18\x06 \x01(\tR\acountry\x12\x12\n" +
 	"\x04role\x18\a \x01(\tR\x04role\x12\x14\n" +

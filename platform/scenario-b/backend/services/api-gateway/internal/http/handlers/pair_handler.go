@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides HTTP handlers for PairRegistry operations (D9 — 005-cooperative-liquidity).
 // Exposes three endpoints:
 //

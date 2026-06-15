@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package compliance provides a gRPC client adapter for the compliance-orchestrator.
 // Used by the governance handler to manage participants, certificates, audit logs,
 // circuit breaker, and system parameters.
@@ -18,7 +20,7 @@ import (
 type Participant struct {
 	UserID            string     `json:"user_id"`
 	InstitutionName   string     `json:"institution_name"`
-	CNPJ              string     `json:"cnpj"`
+	LegalEntityID     string     `json:"legal_entity_id"`
 	BankCode          string     `json:"bank_code"`
 	CountryCode       string     `json:"country_code"`
 	Role              string     `json:"role"`
@@ -112,7 +114,7 @@ func (a *GRPCAdapter) ListParticipants(ctx context.Context, statusFilter, search
 		part := Participant{
 			UserID:          p.UserId,
 			InstitutionName: p.InstitutionName,
-			CNPJ:            p.Cnpj,
+			LegalEntityID:   p.LegalEntityId,
 			BankCode:        p.BankCode,
 			CountryCode:     p.CountryCode,
 			Role:            p.Role,
@@ -133,7 +135,7 @@ func (a *GRPCAdapter) RegisterParticipant(ctx context.Context, p Participant) er
 	participant := &compliancv1.Participant{
 		UserId:          p.UserID,
 		InstitutionName: p.InstitutionName,
-		Cnpj:            p.CNPJ,
+		LegalEntityId:   p.LegalEntityID,
 		BankCode:        p.BankCode,
 		CountryCode:     p.CountryCode,
 		Role:            p.Role,
@@ -150,13 +152,13 @@ func (a *GRPCAdapter) RegisterParticipant(ctx context.Context, p Participant) er
 
 // SignParticipantCSR submits a PKCS#10 CSR to the compliance-orchestrator for
 // signing by the CA. The participant record is created/updated automatically.
-func (a *GRPCAdapter) SignParticipantCSR(ctx context.Context, csrPEM, userID, role, institutionName, cnpj string) (SignedCSRResult, error) {
+func (a *GRPCAdapter) SignParticipantCSR(ctx context.Context, csrPEM, userID, role, institutionName, legal_entity_id string) (SignedCSRResult, error) {
 	resp, err := a.cc.SignParticipantCSR(ctx, &compliancv1.SignParticipantCSRRequest{
 		CsrPem:          csrPEM,
 		UserId:          userID,
 		Role:            role,
 		InstitutionName: institutionName,
-		Cnpj:            cnpj,
+		LegalEntityId:   legal_entity_id,
 	})
 	if err != nil {
 		return SignedCSRResult{}, err
@@ -224,8 +226,8 @@ func (a *GRPCAdapter) GetAuditLogs(ctx context.Context, category, severity, from
 		Severity: severity,
 		FromDate: fromDate,
 		ToDate:   toDate,
-		Page:     int32(page),
-		Limit:    int32(limit),
+		Page:     int32(page),  // #nosec G115 -- pagination value; overflow not reachable in practice
+		Limit:    int32(limit), // #nosec G115 -- pagination value; overflow not reachable in practice
 	})
 	if err != nil {
 		return nil, err
@@ -294,4 +296,90 @@ func (a *GRPCAdapter) UpdateSystemParameters(ctx context.Context, params SystemP
 		ActorSubject:       actorSubject,
 	})
 	return err
+}
+
+// ── Transfer Limits (R1-10.1) ─────────────────────────────────────────────────
+
+// TransferLimit is the HTTP-layer representation of a configured daily transfer limit.
+type TransferLimit struct {
+	LimitID       string `json:"limit_id"`
+	CentralBankID string `json:"central_bank_id"`
+	ParticipantID string `json:"participant_id"`
+	Currency      string `json:"currency"`
+	MaxAmount     string `json:"max_amount"`
+	IsActive      bool   `json:"is_active"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
+func (a *GRPCAdapter) CreateTransferLimit(ctx context.Context, participantID, currency, maxAmount, actorSubject string) (TransferLimit, error) {
+	resp, err := a.cc.CreateTransferLimit(ctx, &compliancv1.CreateTransferLimitRequest{
+		ParticipantId: participantID,
+		Currency:      currency,
+		MaxAmount:     maxAmount,
+		ActorSubject:  actorSubject,
+	})
+	if err != nil {
+		return TransferLimit{}, err
+	}
+	return protoToTransferLimit(resp.Limit), nil
+}
+
+func (a *GRPCAdapter) ListTransferLimits(ctx context.Context, centralBankID string) ([]TransferLimit, error) {
+	resp, err := a.cc.ListTransferLimits(ctx, &compliancv1.ListTransferLimitsRequest{
+		CentralBankId: centralBankID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]TransferLimit, len(resp.Limits))
+	for i, l := range resp.Limits {
+		result[i] = protoToTransferLimit(l)
+	}
+	return result, nil
+}
+
+func (a *GRPCAdapter) DeleteTransferLimit(ctx context.Context, limitID, actorSubject string) error {
+	_, err := a.cc.DeleteTransferLimit(ctx, &compliancv1.DeleteTransferLimitRequest{
+		LimitId:      limitID,
+		ActorSubject: actorSubject,
+	})
+	return err
+}
+
+func (a *GRPCAdapter) CheckAndDeductTransferLimit(ctx context.Context, payerBankID, currency, amountHuman string) (allowed bool, errorCode, maxAmount string, err error) {
+	resp, err := a.cc.CheckAndDeductTransferLimit(ctx, &compliancv1.CheckAndDeductTransferLimitRequest{
+		PayerBankId: payerBankID,
+		Currency:    currency,
+		AmountHuman: amountHuman,
+	})
+	if err != nil {
+		return false, "", "", err
+	}
+	return resp.Allowed, resp.ErrorCode, resp.MaxAmount, nil
+}
+
+func (a *GRPCAdapter) RestoreTransferLimit(ctx context.Context, payerBankID, currency, amountHuman string) error {
+	_, err := a.cc.RestoreTransferLimit(ctx, &compliancv1.RestoreTransferLimitRequest{
+		PayerBankId: payerBankID,
+		Currency:    currency,
+		AmountHuman: amountHuman,
+	})
+	return err
+}
+
+func protoToTransferLimit(l *compliancv1.TransferLimit) TransferLimit {
+	if l == nil {
+		return TransferLimit{}
+	}
+	return TransferLimit{
+		LimitID:       l.LimitId,
+		CentralBankID: l.CentralBankId,
+		ParticipantID: l.ParticipantId,
+		Currency:      l.Currency,
+		MaxAmount:     l.MaxAmount,
+		IsActive:      l.IsActive,
+		CreatedAt:     l.CreatedAt,
+		UpdatedAt:     l.UpdatedAt,
+	}
 }

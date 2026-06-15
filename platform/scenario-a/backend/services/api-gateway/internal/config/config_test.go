@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file tests environment parsing and default configuration behavior.
 package config
 
@@ -26,5 +28,24 @@ func TestGetEnvIntFallback(t *testing.T) {
 	_ = os.Unsetenv(key)
 	if got := getEnvInt(key, 15); got != 15 {
 		t.Fatalf("expected fallback 15, got %d", got)
+	}
+}
+
+func TestLoadFiatSymbol(t *testing.T) {
+	t.Setenv("FIAT_SYMBOL", "BRL")
+
+	cfg := Load()
+	if cfg.FiatSymbol != "BRL" {
+		t.Fatalf("expected FiatSymbol=BRL, got %q", cfg.FiatSymbol)
+	}
+}
+
+func TestLoadFiatSymbol_DefaultEmpty(t *testing.T) {
+	t.Parallel()
+
+	_ = os.Unsetenv("FIAT_SYMBOL")
+	cfg := Load()
+	if cfg.FiatSymbol != "" {
+		t.Fatalf("expected empty FiatSymbol when env not set, got %q", cfg.FiatSymbol)
 	}
 }

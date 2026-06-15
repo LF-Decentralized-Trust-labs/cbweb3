@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines disclosure request models for Master Viewing Key governance (FR-034/FR-035/FR-036).
 package domain
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package repository
 
 import (
@@ -116,7 +118,7 @@ func (r *gormFXAgreementRepository) ListExpiredNonTerminal(ctx context.Context, 
 	}
 	var models []FXAgreementModel
 	if err := r.db.WithContext(ctx).
-		Where("expiry_date > 0 AND expiry_date < ? AND state IN ?", uint64(nowUnix), nonTerminal).
+		Where("expiry_date > 0 AND expiry_date < ? AND state IN ?", uint64(nowUnix), nonTerminal). // #nosec G115 -- nowUnix is a current unix timestamp, always positive and fits uint64
 		Find(&models).Error; err != nil {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
 import {IFXAgreement} from "./interfaces/IFXAgreement.sol";
@@ -89,8 +89,18 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
         });
 
         emit AgreementProposed(
-            tradeId, msg.sender, counterpartyB, settlementAgent, custodian, beneficiary,
-            originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate
+            tradeId,
+            msg.sender,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
         );
     }
 
@@ -149,8 +159,18 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
         });
 
         emit AgreementProposed(
-            tradeId, originator, counterpartyB, settlementAgent, custodian, beneficiary,
-            originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate
+            tradeId,
+            originator,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
         );
     }
 

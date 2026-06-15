@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
@@ -41,24 +41,23 @@ import {PairRegistry} from "../src/PairRegistry.sol";
 ///
 /// Feature: 007-bridge-based-cb-liquidity
 contract SeedNewSovereignPair is Script {
-
     function setUp() public {}
 
     function run() public {
         // ─── Load environment variables ──────────────────────────────────────
         string memory symbolA = vm.envString("TOKEN_SYMBOL_A");
         string memory symbolB = vm.envString("TOKEN_SYMBOL_B");
-        string memory pairId  = vm.envString("PAIR_ID");
+        string memory pairId = vm.envString("PAIR_ID");
 
         uint256 cbAKey = vm.envUint("CB_A_HUB_PRIVATE_KEY");
         uint256 cbBKey = vm.envUint("CB_B_HUB_PRIVATE_KEY");
 
         address hubIdentityRegistry = vm.envAddress("HUB_IDENTITY_REGISTRY");
-        address pairRegistryAddr    = vm.envAddress("PAIR_REGISTRY_ADDRESS");
-        address adminAddr           = vm.envAddress("ADMIN_ADDRESS");
+        address pairRegistryAddr = vm.envAddress("PAIR_REGISTRY_ADDRESS");
+        address adminAddr = vm.envAddress("ADMIN_ADDRESS");
 
-        address existingLCR  = vm.envOr("LIQUIDITY_COMMIT_REGISTRY_ADDRESS", address(0));
-        address relayerAddr  = vm.envOr("RELAYER_ADDR", address(0));
+        address existingLCR = vm.envOr("LIQUIDITY_COMMIT_REGISTRY_ADDRESS", address(0));
+        address relayerAddr = vm.envOr("RELAYER_ADDR", address(0));
 
         address cbAAddr = vm.addr(cbAKey);
         address cbBAddr = vm.addr(cbBKey);
@@ -109,11 +108,7 @@ contract SeedNewSovereignPair is Script {
         // ─── Step 5: CB-A deploys AMM and proposes the pair ──────────────────
         vm.startBroadcast(cbAKey);
 
-        AutomatedMarketMaker amm = new AutomatedMarketMaker(
-            address(tokenA),
-            address(tokenB),
-            hubIdentityRegistry
-        );
+        AutomatedMarketMaker amm = new AutomatedMarketMaker(address(tokenA), address(tokenB), hubIdentityRegistry);
         console.log("AMM deployed (sovereign pair): %s", address(amm));
 
         PairRegistry pairRegistry = PairRegistry(pairRegistryAddr);
@@ -134,21 +129,21 @@ contract SeedNewSovereignPair is Script {
         console.log("\n===============================================");
         console.log(" SOVEREIGN PAIR SEEDED SUCCESSFULLY");
         console.log("===============================================");
-        console.log("Pair ID:                          %s",     pairId);
-        console.log("W-tCeBM_%s:                       %s",     symbolA, address(tokenA));
-        console.log("W-tCeBM_%s:                       %s",     symbolB, address(tokenB));
-        console.log("AMM Address:                      %s",     address(amm));
-        console.log("LiquidityCommitRegistry:          %s",     lcrAddr);
-        console.log("PairRegistry:                     %s",     pairRegistryAddr);
-        console.log("CB-A Signer:                      %s",     cbAAddr);
-        console.log("CB-B Signer:                      %s",     cbBAddr);
+        console.log("Pair ID:                          %s", pairId);
+        console.log("W-tCeBM_%s:                       %s", symbolA, address(tokenA));
+        console.log("W-tCeBM_%s:                       %s", symbolB, address(tokenB));
+        console.log("AMM Address:                      %s", address(amm));
+        console.log("LiquidityCommitRegistry:          %s", lcrAddr);
+        console.log("PairRegistry:                     %s", pairRegistryAddr);
+        console.log("CB-A Signer:                      %s", cbAAddr);
+        console.log("CB-B Signer:                      %s", cbBAddr);
         console.log("===============================================");
         console.log("Set in your gateway compose files:");
-        console.log("  LIQUIDITY_COMMIT_REGISTRY_ADDRESS=%s",   lcrAddr);
+        console.log("  LIQUIDITY_COMMIT_REGISTRY_ADDRESS=%s", lcrAddr);
         console.log("  SOVEREIGN_PAIR_AMM_MAP={\\\"W-%s-%s\\\":\\\"%s\\\"}", symbolA, symbolB, address(amm));
-        console.log("  SOVEREIGN_PAIR_IDS=W-%s-%s",             symbolA, symbolB);
-        console.log("  W_TOKEN_%s_ADDRESS=%s",                  symbolA, address(tokenA));
-        console.log("  W_TOKEN_%s_ADDRESS=%s",                  symbolB, address(tokenB));
+        console.log("  SOVEREIGN_PAIR_IDS=W-%s-%s", symbolA, symbolB);
+        console.log("  W_TOKEN_%s_ADDRESS=%s", symbolA, address(tokenA));
+        console.log("  W_TOKEN_%s_ADDRESS=%s", symbolB, address(tokenB));
         console.log("  LOCAL_CB_HUB_SIGNER=<your CB's signer address>");
         console.log("===============================================\n");
     }

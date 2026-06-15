@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package besu provides the on-chain HTLC contract adapter for Besu.
 // It calls HashTimeLockedContract.sol's lock/settle/refund via go-ethereum.
 package besu

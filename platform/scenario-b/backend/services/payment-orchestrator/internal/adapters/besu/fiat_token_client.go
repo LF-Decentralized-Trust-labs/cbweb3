@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package besu provides on-chain contract adapters for Besu.
 package besu
 
@@ -23,7 +25,7 @@ var _ ports.FiatTokenPort = (*FiatTokenClient)(nil)
 
 // fiatTokenABIJSON is the minimal ABI for the FiatCentralBankMoney (fCeBM) ERC-20 contract.
 // It includes decimals(), mint(address,uint256), burn(address,uint256), and balanceOf(address).
-const fiatTokenABIJSON = `[{"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"name":"mint","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"from","type":"address"},{"name":"amount","type":"uint256"}],"name":"burn","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`
+const fiatTokenABIJSON = `[{"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"name":"mint","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"from","type":"address"},{"name":"amount","type":"uint256"}],"name":"burn","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]` // #nosec G101 -- not a secret; static ERC-20 contract ABI JSON
 
 // FiatTokenClientConfig holds the configuration for the Besu FiatCentralBankMoney client.
 type FiatTokenClientConfig struct {
@@ -97,6 +99,31 @@ func (c *FiatTokenClient) Decimals(ctx context.Context) (uint8, error) {
 		return 0, fmt.Errorf("decimals: unexpected type %T", outputs[0])
 	}
 	return decimals, nil
+}
+
+// Symbol returns the ERC-20 symbol of this token (e.g. "fCeBM_BRL"). The fiat currency
+// code is the suffix after the underscore; callers may parse it for display.
+func (c *FiatTokenClient) Symbol(ctx context.Context) (string, error) {
+	data, err := c.tokenABI.Pack("symbol")
+	if err != nil {
+		return "", fmt.Errorf("pack symbol: %w", err)
+	}
+	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{From: c.fromAddress, To: &c.tokenAddress, Data: data}, nil)
+	if err != nil {
+		return "", fmt.Errorf("call symbol: %w", err)
+	}
+	outputs, err := c.tokenABI.Unpack("symbol", result)
+	if err != nil {
+		return "", fmt.Errorf("unpack symbol: %w", err)
+	}
+	if len(outputs) == 0 {
+		return "", fmt.Errorf("symbol: empty result")
+	}
+	symbol, ok := outputs[0].(string)
+	if !ok {
+		return "", fmt.Errorf("symbol: unexpected type %T", outputs[0])
+	}
+	return symbol, nil
 }
 
 // Mint issues new fCeBM tokens to the specified Besu address.

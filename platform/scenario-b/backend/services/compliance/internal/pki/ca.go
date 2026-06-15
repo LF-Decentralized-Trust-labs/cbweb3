@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package pki is the compliance-orchestrator wrapper around the shared pkg/pki
 // library. It loads the Central Bank CA credentials from the environment and
 // exposes higher-level operations for issuing participant certificates.

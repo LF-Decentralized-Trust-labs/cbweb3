@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package collector performs health checks against infrastructure components.
 package collector
 

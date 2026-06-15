@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides contract tests for the QuoteHandler (FR-027).
 package handlers_test
 
