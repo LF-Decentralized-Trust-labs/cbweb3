@@ -7,6 +7,16 @@ interface CircuitBreakerStatus {
   reason?: string;
 }
 
+interface AMMPoolStatus {
+  pool_pair: string;
+  pool_status: "EMPTY" | "PENDING_COUNTERPART" | "ACTIVE";
+  reserve_a: string;
+  reserve_b: string;
+  current_ratio: number;
+  imbalance_flag: boolean;
+  updated_at: string;
+}
+
 async function fetchCircuitBreakerStatus(): Promise<CircuitBreakerStatus | null> {
   try {
     return await apiFetch<CircuitBreakerStatus>("/api/v2/governance/circuit-breaker/status");
@@ -15,36 +25,70 @@ async function fetchCircuitBreakerStatus(): Promise<CircuitBreakerStatus | null>
   }
 }
 
+async function fetchPoolStatus(pair: string): Promise<AMMPoolStatus | null> {
+  try {
+    return await apiFetch<AMMPoolStatus>(`/api/v2/amm/pool/${pair}/status`);
+  } catch {
+    return null;
+  }
+}
+
+const KNOWN_PAIRS = ["W-BRL-ARS"];
+
 export const stabilityApi = {
   getPoolStatuses: async (): Promise<PoolStatus[]> => {
-    const cb = await fetchCircuitBreakerStatus();
-    const paused = cb?.state === "PAUSED";
-    return [
-      {
-        pair: "W-BRL-ARS",
-        reserveA: 0,
-        reserveB: 0,
-        ratioA: 1,
+    const results = await Promise.allSettled(KNOWN_PAIRS.map((pair) => fetchPoolStatus(pair)));
+    const pools: PoolStatus[] = [];
+    for (const result of results) {
+      if (result.status !== "fulfilled" || !result.value) continue;
+      const p = result.value;
+      if (p.pool_status === "EMPTY") continue;
+      pools.push({
+        pair: p.pool_pair,
+        reserveA: parseFloat(p.reserve_a) || 0,
+        reserveB: parseFloat(p.reserve_b) || 0,
+        ratioA: parseFloat(p.current_ratio.toFixed(4)),
         ratioB: 1,
-        isImbalanced: paused,
-        updatedAt: cb?.last_toggled_at ?? new Date().toISOString(),
-      },
-    ];
+        isImbalanced: p.imbalance_flag,
+        updatedAt: p.updated_at,
+      });
+    }
+    return pools;
   },
 
   getAlerts: async (): Promise<StabilityAlert[]> => {
-    const cb = await fetchCircuitBreakerStatus();
-    if (cb?.state === "PAUSED") {
-      return [
-        {
-          id: "circuit-breaker-paused",
-          pair: "ALL",
-          severity: "CRITICAL",
-          message: `Circuit breaker is PAUSED${cb.reason ? `: ${cb.reason}` : ""}`,
-          createdAt: cb.last_toggled_at ?? new Date().toISOString(),
-        },
-      ];
+    const [cbResult, ...poolResults] = await Promise.allSettled([
+      fetchCircuitBreakerStatus(),
+      ...KNOWN_PAIRS.map((pair) => fetchPoolStatus(pair)),
+    ]);
+
+    const alerts: StabilityAlert[] = [];
+
+    if (cbResult.status === "fulfilled" && cbResult.value?.state === "PAUSED") {
+      const cb = cbResult.value;
+      alerts.push({
+        id: "circuit-breaker-paused",
+        pair: "ALL",
+        severity: "CRITICAL",
+        message: `Circuit breaker is PAUSED${cb.reason ? `: ${cb.reason}` : ""}`,
+        createdAt: cb.last_toggled_at ?? new Date().toISOString(),
+      });
     }
-    return [];
+
+    for (const result of poolResults) {
+      if (result.status !== "fulfilled" || !result.value) continue;
+      const p = result.value;
+      if (p.pool_status !== "EMPTY" && p.imbalance_flag) {
+        alerts.push({
+          id: `imbalance-${p.pool_pair}`,
+          pair: p.pool_pair,
+          severity: "HIGH",
+          message: `Pool ${p.pool_pair} is imbalanced (ratio: ${p.current_ratio.toFixed(4)})`,
+          createdAt: p.updated_at,
+        });
+      }
+    }
+
+    return alerts;
   },
 };
