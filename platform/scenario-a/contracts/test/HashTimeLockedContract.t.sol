@@ -218,7 +218,19 @@ contract HashTimeLockedContractTest is Test {
         uint256 fxExpiry = block.timestamp + 1 days;
 
         vm.prank(sender);
-        fxAgreement.propose(fxTradeId, receiver, address(0), address(0), address(0), 1e18, 1e18, bytes32("BRL"), bytes32("EUR"), 5e18, fxExpiry);
+        fxAgreement.propose(
+            fxTradeId,
+            receiver,
+            address(0),
+            address(0),
+            address(0),
+            1e18,
+            1e18,
+            bytes32("BRL"),
+            bytes32("EUR"),
+            5e18,
+            fxExpiry
+        );
 
         vm.prank(receiver);
         fxAgreement.accept(fxTradeId);
@@ -236,7 +248,19 @@ contract HashTimeLockedContractTest is Test {
         uint256 fxExpiry = block.timestamp + 1 days;
 
         vm.prank(sender);
-        fxAgreement.propose(fxTradeId, receiver, address(0), address(0), address(0), 1e18, 1e18, bytes32("BRL"), bytes32("EUR"), 5e18, fxExpiry);
+        fxAgreement.propose(
+            fxTradeId,
+            receiver,
+            address(0),
+            address(0),
+            address(0),
+            1e18,
+            1e18,
+            bytes32("BRL"),
+            bytes32("EUR"),
+            5e18,
+            fxExpiry
+        );
 
         vm.prank(sender);
         bytes32 newContractId = keccak256("HTLC_WITH_FX_002");
@@ -249,7 +273,19 @@ contract HashTimeLockedContractTest is Test {
         uint256 fxExpiry = block.timestamp + 1 hours;
 
         vm.prank(sender);
-        fxAgreement.propose(fxTradeId, receiver, address(0), address(0), address(0), 1e18, 1e18, bytes32("BRL"), bytes32("EUR"), 5e18, fxExpiry);
+        fxAgreement.propose(
+            fxTradeId,
+            receiver,
+            address(0),
+            address(0),
+            address(0),
+            1e18,
+            1e18,
+            bytes32("BRL"),
+            bytes32("EUR"),
+            5e18,
+            fxExpiry
+        );
 
         vm.prank(receiver);
         fxAgreement.accept(fxTradeId);
@@ -323,9 +359,7 @@ contract HashTimeLockedContractTest is Test {
 
     function test_Revert_SetCommitmentHashRegistry_Unauthorized() public {
         vm.prank(sender); // not governance
-        vm.expectRevert(
-            abi.encodeWithSelector(IHashTimeLockedContract.HTLC__ParticipantNotVerified.selector, sender)
-        );
+        vm.expectRevert(abi.encodeWithSelector(IHashTimeLockedContract.HTLC__ParticipantNotVerified.selector, sender));
         htlc.setCommitmentHashRegistry(address(0x1234));
     }
 
@@ -421,7 +455,9 @@ contract DeployHTLCTest is Test {
 
         vm.setEnv(ENV_DEPLOYER_PRIVATE_KEY, vm.toString(deployerPrivateKey));
         vm.setEnv(ENV_IDENTITY_REGISTRY_ADDRESS, vm.toString(address(0x6789012345678901234567890123456789012345)));
-        vm.setEnv(ENV_COMMITMENT_HASH_REGISTRY_ADDRESS, vm.toString(address(0x1234567890123456789012345678901234567890)));
+        vm.setEnv(
+            ENV_COMMITMENT_HASH_REGISTRY_ADDRESS, vm.toString(address(0x1234567890123456789012345678901234567890))
+        );
     }
 
     function test_ScriptRun_Success() public {

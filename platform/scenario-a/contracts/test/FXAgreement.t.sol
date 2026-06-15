@@ -61,7 +61,19 @@ contract FXAgreementTest is Test {
 
     function test_Propose_Success() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         FXAgreementLibrary.FxAgreement memory agreement = fxAgreement.getAgreement(tradeId);
         assertEq(uint256(agreement.state), uint256(FXAgreementLibrary.AgreementState.PROPOSED));
@@ -80,40 +92,124 @@ contract FXAgreementTest is Test {
 
     function test_Revert_Propose_DuplicateTradeID() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__TradeAlreadyExists.selector);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_Propose_UnverifiedSender() public {
         vm.prank(unregistered);
         vm.expectRevert(abi.encodeWithSelector(IFXAgreement.FXA__ParticipantNotVerified.selector, unregistered));
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_Propose_ZeroOriginAmount() public {
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, 0, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            0,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_Propose_ZeroCounterAmount() public {
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, 0, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            0,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_Propose_ExpiredDate() public {
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__AgreementExpired.selector);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, block.timestamp - 1);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            block.timestamp - 1
+        );
     }
 
     function test_Accept_Success() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(counterpartyB);
         fxAgreement.accept(tradeId);
@@ -124,7 +220,19 @@ contract FXAgreementTest is Test {
 
     function test_Revert_Accept_WrongCaller() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__Unauthorized.selector);
@@ -139,7 +247,19 @@ contract FXAgreementTest is Test {
 
     function test_Revert_Accept_Expired() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.warp(expiryDate + 1);
 
@@ -150,7 +270,19 @@ contract FXAgreementTest is Test {
 
     function test_Reject_Success() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(counterpartyB);
         fxAgreement.reject(tradeId);
@@ -161,7 +293,19 @@ contract FXAgreementTest is Test {
 
     function test_Revert_Reject_WrongCaller() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__Unauthorized.selector);
@@ -170,7 +314,19 @@ contract FXAgreementTest is Test {
 
     function test_Cancel_Success() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(counterpartyA);
         fxAgreement.cancel(tradeId);
@@ -181,7 +337,19 @@ contract FXAgreementTest is Test {
 
     function test_Revert_Cancel_WrongCaller() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(counterpartyB);
         vm.expectRevert(IFXAgreement.FXA__Unauthorized.selector);
@@ -190,7 +358,19 @@ contract FXAgreementTest is Test {
 
     function test_Revert_Cancel_NotProposed() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(counterpartyB);
         fxAgreement.accept(tradeId);
@@ -202,7 +382,19 @@ contract FXAgreementTest is Test {
 
     function test_Settle_Success() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(counterpartyB);
         fxAgreement.accept(tradeId);
@@ -216,7 +408,19 @@ contract FXAgreementTest is Test {
 
     function test_Revert_Settle_NotGovernance() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(counterpartyB);
         fxAgreement.accept(tradeId);
@@ -228,7 +432,19 @@ contract FXAgreementTest is Test {
 
     function test_Revert_Settle_NotAccepted() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(centralBank);
         vm.expectRevert(IFXAgreement.FXA__InvalidStateTransition.selector);
@@ -237,7 +453,20 @@ contract FXAgreementTest is Test {
 
     function test_ProposeOnBehalf_Success() public {
         vm.prank(centralBank);
-        fxAgreement.proposeOnBehalf(tradeId, counterpartyA, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.proposeOnBehalf(
+            tradeId,
+            counterpartyA,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         FXAgreementLibrary.FxAgreement memory agreement = fxAgreement.getAgreement(tradeId);
         assertEq(uint256(agreement.state), uint256(FXAgreementLibrary.AgreementState.PROPOSED));
@@ -257,12 +486,37 @@ contract FXAgreementTest is Test {
     function test_Revert_ProposeOnBehalf_NotGovernance() public {
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__Unauthorized.selector);
-        fxAgreement.proposeOnBehalf(tradeId, counterpartyA, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.proposeOnBehalf(
+            tradeId,
+            counterpartyA,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_AcceptOnBehalf_Success() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(centralBank);
         fxAgreement.acceptOnBehalf(tradeId);
@@ -273,7 +527,19 @@ contract FXAgreementTest is Test {
 
     function test_Revert_AcceptOnBehalf_NotGovernance() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__Unauthorized.selector);
@@ -288,7 +554,19 @@ contract FXAgreementTest is Test {
 
     function test_Revert_AcceptOnBehalf_Expired() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.warp(expiryDate + 1);
 
@@ -299,7 +577,19 @@ contract FXAgreementTest is Test {
 
     function test_RejectOnBehalf_Success() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(centralBank);
         fxAgreement.rejectOnBehalf(tradeId);
@@ -310,7 +600,19 @@ contract FXAgreementTest is Test {
 
     function test_Revert_RejectOnBehalf_NotGovernance() public {
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__Unauthorized.selector);
@@ -332,84 +634,262 @@ contract FXAgreementTest is Test {
     function test_Revert_Propose_ZeroCounterparty() public {
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.propose(tradeId, address(0), settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            address(0),
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_Propose_ZeroOriginCurrency() public {
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, bytes32(0), counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            bytes32(0),
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_Propose_ZeroCounterCurrency() public {
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, bytes32(0), rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            bytes32(0),
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_Propose_ZeroRate() public {
         vm.prank(counterpartyA);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, 0, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            0,
+            expiryDate
+        );
     }
 
     // --- proposeOnBehalf() parameter-validation branches ---
 
     function test_Revert_ProposeOnBehalf_DuplicateTradeID() public {
         vm.prank(centralBank);
-        fxAgreement.proposeOnBehalf(tradeId, counterpartyA, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.proposeOnBehalf(
+            tradeId,
+            counterpartyA,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         vm.prank(centralBank);
         vm.expectRevert(IFXAgreement.FXA__TradeAlreadyExists.selector);
-        fxAgreement.proposeOnBehalf(tradeId, counterpartyA, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.proposeOnBehalf(
+            tradeId,
+            counterpartyA,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_ProposeOnBehalf_ZeroCounterparty() public {
         vm.prank(centralBank);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.proposeOnBehalf(tradeId, counterpartyA, address(0), settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.proposeOnBehalf(
+            tradeId,
+            counterpartyA,
+            address(0),
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_ProposeOnBehalf_ZeroOriginator() public {
         vm.prank(centralBank);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.proposeOnBehalf(tradeId, address(0), counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.proposeOnBehalf(
+            tradeId,
+            address(0),
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_ProposeOnBehalf_ZeroOriginAmount() public {
         vm.prank(centralBank);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.proposeOnBehalf(tradeId, counterpartyA, counterpartyB, settlementAgent, custodian, beneficiary, 0, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.proposeOnBehalf(
+            tradeId,
+            counterpartyA,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            0,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_ProposeOnBehalf_ZeroCounterAmount() public {
         vm.prank(centralBank);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.proposeOnBehalf(tradeId, counterpartyA, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, 0, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.proposeOnBehalf(
+            tradeId,
+            counterpartyA,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            0,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_ProposeOnBehalf_ZeroOriginCurrency() public {
         vm.prank(centralBank);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.proposeOnBehalf(tradeId, counterpartyA, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, bytes32(0), counterCurrency, rate, expiryDate);
+        fxAgreement.proposeOnBehalf(
+            tradeId,
+            counterpartyA,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            bytes32(0),
+            counterCurrency,
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_ProposeOnBehalf_ZeroCounterCurrency() public {
         vm.prank(centralBank);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.proposeOnBehalf(tradeId, counterpartyA, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, bytes32(0), rate, expiryDate);
+        fxAgreement.proposeOnBehalf(
+            tradeId,
+            counterpartyA,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            bytes32(0),
+            rate,
+            expiryDate
+        );
     }
 
     function test_Revert_ProposeOnBehalf_ZeroRate() public {
         vm.prank(centralBank);
         vm.expectRevert(IFXAgreement.FXA__InvalidParameters.selector);
-        fxAgreement.proposeOnBehalf(tradeId, counterpartyA, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, 0, expiryDate);
+        fxAgreement.proposeOnBehalf(
+            tradeId,
+            counterpartyA,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            0,
+            expiryDate
+        );
     }
 
     function test_Revert_ProposeOnBehalf_ExpiredDate() public {
         vm.prank(centralBank);
         vm.expectRevert(IFXAgreement.FXA__AgreementExpired.selector);
-        fxAgreement.proposeOnBehalf(tradeId, counterpartyA, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, block.timestamp - 1);
+        fxAgreement.proposeOnBehalf(
+            tradeId,
+            counterpartyA,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            block.timestamp - 1
+        );
     }
 
     // --- acceptOnBehalf with expiryDate == 0 (no-expiry branch) ---
@@ -418,7 +898,19 @@ contract FXAgreementTest is Test {
         // proposeOnBehalf requires expiry > now, so craft a zero-expiry agreement is not possible
         // through propose; instead verify the expiryDate>0 guard short-circuits when not expired.
         vm.prank(counterpartyA);
-        fxAgreement.propose(tradeId, counterpartyB, settlementAgent, custodian, beneficiary, originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
+        );
 
         // Not warped past expiry: expiryDate>0 true but block.timestamp>expiryDate false → no revert.
         vm.prank(centralBank);

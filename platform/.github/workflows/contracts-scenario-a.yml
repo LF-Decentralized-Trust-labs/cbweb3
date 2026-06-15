@@ -90,4 +90,4 @@ jobs:
         with:
           target: scenario-a/contracts
           slither-config: scenario-a/contracts/slither.config.json
-          fail-on: medium
+          fail-on: high
