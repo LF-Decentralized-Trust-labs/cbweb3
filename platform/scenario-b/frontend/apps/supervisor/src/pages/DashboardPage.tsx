@@ -17,7 +17,7 @@ export function DashboardPage() {
 
   return (
     <div className="min-h-full space-y-4">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total tCeBM Supply</CardDescription>
@@ -28,12 +28,6 @@ export function DashboardPage() {
           <CardHeader className="pb-2">
             <CardDescription>Active Institutions</CardDescription>
             <CardTitle>{overview?.activeInstitutions ?? "-"}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Cross-border Agreements</CardDescription>
-            <CardTitle>{overview?.activeAgreements ?? "-"}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -75,6 +69,13 @@ export function DashboardPage() {
                     </TableCell>
                   </TableRow>
                 ))}
+                {!pools.length ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="py-4 text-center text-sm text-muted-foreground">
+                      No active liquidity pools.
+                    </TableCell>
+                  </TableRow>
+                ) : null}
               </TableBody>
             </Table>
           </CardContent>
