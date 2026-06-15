@@ -11,7 +11,7 @@ export function Header() {
         <div className="flex items-center gap-3">
           <PlatformLogo imageClassName="h-8" />
           <div>
-            <h1 className="text-lg font-semibold">CBWeb3 Supervisor Portal</h1>
+            <h1 className="text-lg font-semibold">CBWeb3 Supervisor Portal · {import.meta.env.VITE_SPOKE_NAME}</h1>
             <p className="text-xs text-muted-foreground">Institution: {user?.institutionName ?? "-"}</p>
           </div>
         </div>

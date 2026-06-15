@@ -92,6 +92,7 @@ services:
       dockerfile: apps/supervisor/Dockerfile
       args:
         VITE_API_BASE_URL: ${API_SUPERVISOR_SPOKE_A}
+        VITE_SPOKE_NAME: ${SUPERVISOR_SPOKE_A_NAME}
     ports:
       - "${SUPERVISOR_SPOKE_A_FRONTEND_PORT}:80"
 
@@ -102,5 +103,6 @@ services:
       dockerfile: apps/supervisor/Dockerfile
       args:
         VITE_API_BASE_URL: ${API_SUPERVISOR_SPOKE_B}
+        VITE_SPOKE_NAME: ${SUPERVISOR_SPOKE_B_NAME}
     ports:
       - "${SUPERVISOR_SPOKE_B_FRONTEND_PORT}:80"

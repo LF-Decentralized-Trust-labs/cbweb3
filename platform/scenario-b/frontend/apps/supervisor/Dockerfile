@@ -14,6 +14,9 @@ COPY . .
 ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
+ARG VITE_SPOKE_NAME
+ENV VITE_SPOKE_NAME=${VITE_SPOKE_NAME}
+
 RUN npm run build --workspace=supervisor
 
 FROM nginx:1.27-alpine
