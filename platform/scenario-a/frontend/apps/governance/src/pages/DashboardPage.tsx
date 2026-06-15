@@ -4,92 +4,100 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
-  // Table,
-  // TableBody,
-  // TableCell,
-  // TableHead,
-  // TableHeader,
-  // TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@cbweb3/ui";
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { useAccounts, useAuditLogs, useCircuitBreaker, useRegistry } from "../hooks";
+import { useAccounts, useAuditLogs, useRegistry } from "../hooks";
 
 export function DashboardPage() {
-  const { /*participants,*/ pendingKyc, fetch: fetchRegistry } = useRegistry();
-  const { /*accounts,*/ fetch: fetchAccounts } = useAccounts();
-  const { /*logs,*/ fetch: fetchAudit } = useAuditLogs();
-  const { circuitBreaker, fetchState } = useCircuitBreaker();
+  const { participants, pendingKyc, fetch: fetchRegistry } = useRegistry();
+  const { accounts, fetch: fetchAccounts } = useAccounts();
+  const { logs, fetch: fetchAudit } = useAuditLogs();
 
   useEffect(() => {
     void fetchRegistry();
     void fetchAccounts();
     void fetchAudit();
-    void fetchState();
-  }, [fetchRegistry, fetchAccounts, fetchAudit, fetchState]);
+  }, [fetchRegistry, fetchAccounts, fetchAudit]);
 
-  // const activeParticipants = participants.filter((item) => item.status === "ACTIVE").length;
-  // const frozenAccounts = accounts.filter((item) => item.frozen).length;
+  const commercialBanks = participants.filter((p) => p.role === "ROLE_COMMERCIAL_BANK");
+  const activeParticipants = commercialBanks.filter((p) => p.status === "ACTIVE").length;
+  const frozenAccounts = accounts.filter((a) => a.frozen).length;
   const pendingKycCount = pendingKyc.length;
-  // const criticalToday = logs.filter((item) => item.severity === "CRITICAL").length;
+  const recentEvents = logs.slice(0, 5);
 
   return (
     <div className="space-y-4">
-      <section className="grid gap-4 md:grid-cols-1 xl:grid-cols-1">
-        <Card>
+      <section className="grid gap-4 md:grid-cols-3">
+        <Card className={pendingKycCount > 0 ? "border-yellow-500" : ""}>
           <CardHeader className="pb-2">
-            <CardDescription>Circuit Breaker</CardDescription>
-            <CardTitle>
-              <Badge variant={circuitBreaker?.state === "HALTED" ? "destructive" : "default"}>
-                {circuitBreaker?.state ?? "LIVE"}
-              </Badge>
+            <CardDescription>Pending KYC Approvals</CardDescription>
+            <CardTitle className="flex items-center gap-2">
+              {pendingKycCount}
+              {pendingKycCount > 0 && <Badge variant="warning">NEEDS ATTENTION</Badge>}
             </CardTitle>
           </CardHeader>
+          <CardContent className="pt-0">
+            <p className={`text-xs ${pendingKycCount > 0 ? "text-yellow-600" : "text-muted-foreground"}`}>
+              {pendingKycCount > 0 ? "Onboarding requests awaiting review" : "No pending requests"}
+            </p>
+          </CardContent>
+          <CardFooter className="pt-0">
+            <Button asChild variant="ghost" size="sm" className="h-auto p-0 text-xs">
+              <Link to="/registry">Review KYC →</Link>
+            </Button>
+          </CardFooter>
         </Card>
-        {/* <Card>
+
+        <Card>
           <CardHeader className="pb-2">
             <CardDescription>Active Participants</CardDescription>
-            <CardTitle>{activeParticipants}</CardTitle>
+            <CardTitle>
+              {activeParticipants} / {commercialBanks.length}
+            </CardTitle>
           </CardHeader>
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground">Registered commercial banks</p>
+          </CardContent>
+          <CardFooter className="pt-0">
+            <Button asChild variant="ghost" size="sm" className="h-auto p-0 text-xs">
+              <Link to="/accounts">View all →</Link>
+            </Button>
+          </CardFooter>
         </Card>
-        <Card>
+
+        <Card className={frozenAccounts > 0 ? "border-destructive" : ""}>
           <CardHeader className="pb-2">
             <CardDescription>Frozen Accounts</CardDescription>
-            <CardTitle>{frozenAccounts}</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              {frozenAccounts}
+              {frozenAccounts > 0 && <Badge variant="destructive">FROZEN</Badge>}
+            </CardTitle>
           </CardHeader>
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground">
+              {frozenAccounts > 0 ? "Accounts suspended by governance" : "No frozen accounts"}
+            </p>
+          </CardContent>
+          <CardFooter className="pt-0">
+            <Button asChild variant="ghost" size="sm" className="h-auto p-0 text-xs">
+              <Link to="/accounts">Manage →</Link>
+            </Button>
+          </CardFooter>
         </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Critical Audit Events</CardDescription>
-            <CardTitle>{criticalToday}</CardTitle>
-          </CardHeader>
-        </Card> */}
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-1">
+      <section>
         <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <Button asChild>
-              <Link to="/registry">Review Registry ({pendingKycCount})</Link>
-            </Button>
-            {/* <Button asChild variant="outline">
-              <Link to="/accounts">Account Controls</Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/circuit-breaker">Circuit Breaker</Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/parameters">Global Parameters</Link>
-            </Button> */}
-          </CardContent>
-        </Card>
-
-        {/* <Card>
           <CardHeader>
             <CardTitle>Recent Governance Events</CardTitle>
           </CardHeader>
@@ -97,35 +105,65 @@ export function DashboardPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Timestamp</TableHead>
+                  <TableHead>Time</TableHead>
                   <TableHead>Action</TableHead>
+                  <TableHead>Category</TableHead>
                   <TableHead>Severity</TableHead>
+                  <TableHead>Outcome</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {logs.slice(0, 6).map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell>{new Date(log.createdAt).toLocaleString()}</TableCell>
-                    <TableCell>{log.action}</TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          log.severity === "CRITICAL"
-                            ? "destructive"
-                            : log.severity === "WARNING"
-                              ? "warning"
-                              : "secondary"
-                        }
-                      >
-                        {log.severity}
-                      </Badge>
+                {recentEvents.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      No governance events recorded yet.
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  recentEvents.map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="whitespace-nowrap text-xs">
+                        {new Date(log.createdAt).toLocaleTimeString()}
+                      </TableCell>
+                      <TableCell className="max-w-[200px] truncate text-xs" title={log.action}>
+                        {log.action}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="text-xs">
+                          {log.category}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            log.severity === "CRITICAL"
+                              ? "destructive"
+                              : log.severity === "WARNING"
+                                ? "warning"
+                                : "secondary"
+                          }
+                          className="text-xs"
+                        >
+                          {log.severity}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={log.outcome === "SUCCESS" ? "default" : "destructive"} className="text-xs">
+                          {log.outcome}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>
-        </Card> */}
+          <CardFooter>
+            <Button asChild variant="ghost" size="sm" className="h-auto p-0 text-xs">
+              <Link to="/audit">View all audit logs →</Link>
+            </Button>
+          </CardFooter>
+        </Card>
       </section>
     </div>
   );

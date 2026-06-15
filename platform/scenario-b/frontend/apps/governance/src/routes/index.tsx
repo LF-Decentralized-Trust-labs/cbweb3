@@ -3,7 +3,6 @@ import { Navigate } from "react-router-dom";
 import { ProtectedRoute } from "../components/auth/ProtectedRoute";
 import { AppLayout } from "../components/layout/AppLayout";
 import { isScenarioB } from "../config/scenario";
-import { LiquidityManagementPage } from "../features/liquidity/LiquidityManagementPage";
 import { OversightPage } from "../features/oversight/OversightPage";
 import {
   AccountsPage,
@@ -19,7 +18,6 @@ import {
   RegistryPage,
   SettingsPage,
   SwapMonitorPage,
-  TransferLimitsPage,
 } from "../pages";
 
 const scenarioAChildren: RouteObject[] = [
@@ -39,14 +37,10 @@ const scenarioAChildren: RouteObject[] = [
 const scenarioBChildren: RouteObject[] = [
   { index: true, element: <DashboardPage /> },
   { path: "registry", element: <RegistryPage /> },
-  { path: "liquidity", element: <LiquidityManagementPage /> },
-  { path: "deposits-approval", element: <DepositsApprovalPage /> },
-  { path: "escrows-approval", element: <EscrowsApprovalPage /> },
-  { path: "redeems-approval", element: <RedeemsApprovalPage /> },
+  { path: "accounts", element: <AccountsPage /> },
   { path: "swap-monitor", element: <SwapMonitorPage /> },
   { path: "circuit-breaker", element: <CircuitBreakerPage /> },
   { path: "oversight", element: <OversightPage /> },
-  { path: "transfer-limits", element: <TransferLimitsPage /> },
   { path: "audit", element: <AuditPage /> },
   { path: "settings", element: <SettingsPage /> },
 ];

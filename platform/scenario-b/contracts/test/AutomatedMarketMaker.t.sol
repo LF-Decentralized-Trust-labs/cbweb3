@@ -364,6 +364,10 @@ contract AutomatedMarketMakerTest is Test {
 
     function test_Fees_AccrueToShareValue() public {
         // LP1 seeds; a swap leaves a 0.3% fee in reserves; LP1's redeemable value rises.
+        // The default swap fee is now 0, so set a non-zero fee explicitly to exercise accrual.
+        vm.prank(governanceA);
+        amm.setFeeBps(30);
+
         vm.prank(liquidityProvider);
         uint256 shares = amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
 

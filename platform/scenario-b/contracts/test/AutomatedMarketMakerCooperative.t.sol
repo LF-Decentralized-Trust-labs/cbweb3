@@ -48,8 +48,8 @@ contract AutomatedMarketMakerFeesTest is Test {
 
     // ---------- swap fee (feeBps) ----------
 
-    function test_feeBps_defaultIs30() public view {
-        assertEq(amm.feeBps(), 30);
+    function test_feeBps_defaultIsZero() public view {
+        assertEq(amm.feeBps(), 0);
     }
 
     function test_setFeeBps_governance_succeeds() public {
@@ -60,7 +60,7 @@ contract AutomatedMarketMakerFeesTest is Test {
 
     function test_setFeeBps_emitsEvent() public {
         vm.expectEmit(false, false, false, true);
-        emit LogFeeRateUpdated(30, 50);
+        emit LogFeeRateUpdated(0, 50);
         vm.prank(governance);
         amm.setFeeBps(50);
     }
@@ -85,8 +85,8 @@ contract AutomatedMarketMakerFeesTest is Test {
 
     // ---------- withdrawal fee (withdrawalFeeBps) ----------
 
-    function test_withdrawalFeeBps_defaultIs30() public view {
-        assertEq(amm.withdrawalFeeBps(), 30);
+    function test_withdrawalFeeBps_defaultIsZero() public view {
+        assertEq(amm.withdrawalFeeBps(), 0);
     }
 
     function test_setWithdrawalFeeBps_governance_succeeds() public {
@@ -97,7 +97,7 @@ contract AutomatedMarketMakerFeesTest is Test {
 
     function test_setWithdrawalFeeBps_emitsEvent() public {
         vm.expectEmit(false, false, false, true);
-        emit LogWithdrawalFeeRateUpdated(30, 75);
+        emit LogWithdrawalFeeRateUpdated(0, 75);
         vm.prank(governance);
         amm.setWithdrawalFeeBps(75);
     }
