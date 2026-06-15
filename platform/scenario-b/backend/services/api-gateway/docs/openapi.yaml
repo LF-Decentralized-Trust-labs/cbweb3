@@ -54,21 +54,10 @@ tags:
       Governance Portal — endpoints exclusive to the Central Bank (ROLE_GOVERNANCE).
       Participant registration, PKI certificate management, account control,
       circuit breaker, global parameters, audit logs, and user management.
-  - name: HTLC
-    description: >
-      Hash Time-Locked Contract (HTLC) dual-layer operations.
-      Coordinates public HTLC state on Hyperledger Besu with private token
-      locking via Zeto/Paladin. Supports lock, settle (happy path), and
-      refund (timeout path) lifecycle.
-      These endpoints are only available when the payment orchestrator
-      service is configured (PaymentHandler != nil).
   - name: Token
     description: >
-      Token operations — mint, transfer, and balance queries for tCeBM
-      (tokenized Central Bank Money) via the Zeto privacy-preserving token
-      system on Paladin sidecar.
-      These endpoints are only available when the payment orchestrator
-      service is configured (PaymentHandler != nil).
+      Token balance queries for tCeBM (tokenized Central Bank Money) via the
+      payment-orchestrator gRPC service. Available when PAYMENT_GRPC_ADDR is set.
   - name: Escrow
     description: >
       Escrow lifecycle — deposit, tokenization (tCeBM → tCeBM), and
@@ -108,6 +97,12 @@ tags:
       Multi-pair PairRegistry — two-Central-Bank propose/confirm flow to
       activate a trading pair, plus public pair listing. Served under
       /api/v2/amm/pairs.
+  - name: Transfer Limits
+    description: >
+      Configurable daily transfer limits (R1-10.1). Central Banks set per-participant
+      and/or per-currency limits; commercial bank gateways enforce them via the CB's
+      internal pre-auth relay. CRUD under /api/v2/governance/transfer-limits (CB only);
+      internal relay under /internal/v2/transfer-limits (relay auth).
   - name: Circuit Breaker
     description: >
       Asymmetric circuit breaker for the Hub AMM — 1-of-N pause, 2-of-N
@@ -120,10 +115,12 @@ tags:
       /api/v2/oversight.
   - name: AMM Internal
     description: >
-      Internal relay-to-gateway routes consumed by the Cacti hub-and-spoke
-      relay (protected by the X-Relay-Auth shared secret, not user auth):
-      matched-commit execution and cross-currency bridge-in/out receivers.
-      Served under /internal/amm.
+      Internal relay-to-gateway routes (protected by the X-Relay-Auth shared secret,
+      not user auth). Includes: Cacti hub-and-spoke relay endpoints (matched-commit
+      execution, cross-currency bridge-in/out) under /internal/amm; payment relay
+      endpoints proxied by commercial banks under /internal/v1/payments; and
+      transfer limit pre-auth relay endpoints under /internal/v2/transfer-limits.
+      All are CB-only endpoints that must never be exposed publicly.
 paths:
   /healthz:
     get:
@@ -573,105 +570,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/AMLScreenResponse"
 
-  /api/v1/compliance/participants/provision:
-    post:
-      tags: [Compliance]
-      summary: >
-        Set KYC status for a participant (CENTRAL_BANK only).
-        Used for initial approval, freeze, unfreeze, and revocation.
-      operationId: provisionParticipant
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProvisionRequest"
-      responses:
-        "200":
-          description: Participant provisioned
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProvisionResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/compliance/accounts/freeze:
-    post:
-      tags: [Compliance]
-      summary: >
-        Freeze an account (CENTRAL_BANK only — REQ-COM-003, UT-API-16).
-        Sets KYC status to FROZEN — all operations are suspended.
-      operationId: freezeAccount
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [subject]
-              properties:
-                subject:
-                  type: string
-      responses:
-        "200":
-          description: Account frozen
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProvisionResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/compliance/accounts/unfreeze:
-    post:
-      tags: [Compliance]
-      summary: Restore a frozen account to APPROVED status (CENTRAL_BANK only)
-      operationId: unfreezeAccount
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [subject]
-              properties:
-                subject:
-                  type: string
-      responses:
-        "200":
-          description: Account unfrozen
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProvisionResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
   /api/v1/compliance/participants:
     get:
       tags: [Compliance]
@@ -714,45 +612,139 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "500": { $ref: "#/components/responses/InternalError" }
 
-  /api/v1/compliance/register:
-    post:
+  /api/v1/compliance/audit/logs:
+    get:
       tags: [Compliance]
-      summary: Register a new participant (Commercial Bank or Treasury user) — CENTRAL_BANK only
+      summary: Get compliance audit logs (Supervisor only)
       description: >
-        Called by Central Bank administrators to onboard new Commercial Banks and
-        Treasury users. The identity service creates a Keycloak user, optionally
-        generates a KMS key pair, and optionally registers the wallet address
-        on-chain in the ParticipantRegistry smart contract (signed with CB_PRIVATE_KEY).
-      operationId: registerParticipant
+        Returns immutable audit log entries from the compliance service.
+        Requires ROLE_SUPERVISOR. Supports filtering by category, severity,
+        and date range. Max 100 entries per page.
+      operationId: supervisorGetAuditLogs
       security:
         - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RegisterParticipantRequest"
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [SESSION, CREDENTIAL, FREEZE, CIRCUIT_BREAKER, PARAMETER, PARTICIPANT]
+        - name: severity
+          in: query
+          schema: { type: string, enum: [INFO, WARNING, CRITICAL] }
+        - name: from_date
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to_date
+          in: query
+          schema: { type: string, format: date-time }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
       responses:
-        "201":
-          description: Participant successfully registered
+        "200":
+          description: Audit log entries
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RegisterParticipantResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          description: Participant already exists
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditRecord" }
+                  page:  { type: integer }
+                  limit: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502":
+          description: Compliance service unreachable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v1/compliance/zk-pointer/verify:
+    get:
+      tags: [Compliance]
+      summary: Verify a ZK pointer record (Supervisor only)
+      description: >
+        Looks up a ZK-Pointer record for a given bank and commitment hash.
+        Requires ROLE_SUPERVISOR. Available only when DATABASE_URL is set
+        and the ZK pointer gate is wired.
+      operationId: verifyZKPointer
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: bank_id
+          in: query
+          required: true
+          schema: { type: string }
+          description: Bank identifier
+        - name: commitment_hash
+          in: query
+          required: true
+          schema: { type: string }
+          description: Commitment hash to look up
+      responses:
+        "200":
+          description: ZK-Pointer record found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                type: object
+                properties:
+                  bank_id:         { type: string }
+                  pointer_id:      { type: string }
+                  commitment_hash: { type: string }
+                  state:           { type: string }
+                  expires_at:      { type: string, format: date-time, nullable: true }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503":
+          description: ZK pointer verification not available (DATABASE_URL not set)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v1/compliance/participants/summary:
+    get:
+      tags: [Compliance]
+      summary: List participants (Supervisor read-only view)
+      description: >
+        Returns the list of registered participants. Same handler as ROLE_GOVERNANCE
+        GET /api/v1/compliance/participants but accessible to ROLE_SUPERVISOR for
+        read-only oversight. Supports optional status and search filters.
+      operationId: supervisorListParticipants
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, CREDENTIAL_REQUESTED, KYC_APPROVED, ACTIVE, FROZEN, REVOKED]
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: List of participants (may be empty)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [participants]
+                properties:
+                  participants:
+                    type: array
+                    items: { $ref: "#/components/schemas/ParticipantRecord" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   # ---------------------------------------------------------------------------
   # Onboarding — 3-phase PKI + Blockchain
@@ -1410,248 +1402,10 @@ paths:
         "500": { $ref: "#/components/responses/InternalError" }
 
   # ---------------------------------------------------------------------------
-  # Payment Orchestrator — HTLC (dual-layer: Besu + Zeto/Paladin)
+  # Payment Orchestrator — Token (tCeBM balance queries)
   # All endpoints below require: access_token cookie
   # Only available when the payment orchestrator service is configured.
   # ---------------------------------------------------------------------------
-
-  /api/v1/htlc/lock:
-    post:
-      tags: [HTLC]
-      summary: Create a dual-layer HTLC lock
-      description: >
-        Locks tokens via a Hash Time-Locked Contract. The secret is generated
-        internally; a hash lock is derived from it. On the public layer (Besu)
-        the HTLC coordination contract records the lock metadata, while on the
-        private layer (Zeto/Paladin) the actual token amount is locked.
-      operationId: lockHTLC
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/LockHTLCRequest"
-      responses:
-        "201":
-          description: HTLC created and tokens locked
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LockHTLCResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/htlc/settle:
-    post:
-      tags: [HTLC]
-      summary: Settle an HTLC by revealing the secret
-      description: >
-        Happy-path settlement. The caller reveals the pre-image (secret) that
-        hashes to the hash lock. The contract validates SHA-256(secret) == hashLock,
-        then calls Zeto transferLocked() to release the privately locked tokens
-        to the receiver.
-      operationId: settleHTLC
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SettleHTLCRequest"
-      responses:
-        "200":
-          description: HTLC settled — tokens released to receiver
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SettleHTLCResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/htlc/refund:
-    post:
-      tags: [HTLC]
-      summary: Refund an HTLC after timelock expiry
-      description: >
-        Timeout-path refund. If the timelock has expired and the secret was
-        never revealed, the sender can reclaim the locked tokens via
-        Zeto unlock().
-      operationId: refundHTLC
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RefundHTLCRequest"
-      responses:
-        "200":
-          description: HTLC refunded — tokens returned to sender
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RefundHTLCResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/htlc/status/{contractId}:
-    get:
-      tags: [HTLC]
-      summary: Get the status of a specific HTLC
-      description: >
-        Returns the full HTLC lock record including state, hash lock,
-        time lock, sender, receiver, and optionally the secret (only visible
-        to the lock creator).
-      operationId: getHTLCStatus
-      security:
-        - CookieAuth: []
-      parameters:
-        - name: contractId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: HTLC contract identifier returned by POST /htlc/lock
-      responses:
-        "200":
-          description: HTLC status returned
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GetHTLCStatusResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/htlc/search:
-    get:
-      tags: [HTLC]
-      summary: Search HTLC locks by criteria
-      description: >
-        Returns a list of HTLC lock records matching the provided filters.
-        All query parameters are optional; when none are provided, all locks
-        visible to the caller are returned.
-      operationId: searchHTLC
-      security:
-        - CookieAuth: []
-      parameters:
-        - name: agreement_id
-          in: query
-          schema:
-            type: string
-          description: Filter by FX agreement identifier
-        - name: sender
-          in: query
-          schema:
-            type: string
-          description: Filter by sender identity
-        - name: receiver
-          in: query
-          schema:
-            type: string
-          description: Filter by receiver identity
-        - name: state
-          in: query
-          schema:
-            type: string
-            enum: [LOCKED, SETTLED, REFUNDED]
-          description: Filter by HTLC state
-      responses:
-        "200":
-          description: Matching HTLC locks
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SearchHTLCResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  # ---------------------------------------------------------------------------
-  # Payment Orchestrator — Token (Zeto via Paladin)
-  # All endpoints below require: access_token cookie
-  # Only available when the payment orchestrator service is configured.
-  # ---------------------------------------------------------------------------
-
-  /api/v1/token/mint:
-    post:
-      tags: [Token]
-      summary: Mint tCeBM tokens
-      description: >
-        Issues new tCeBM (tokenized Central Bank Money) to the specified
-        Paladin identity via the Zeto privacy-preserving token system.
-      operationId: mintToken
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/MintTokenRequest"
-      responses:
-        "201":
-          description: Tokens minted successfully
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MintTokenResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/token/transfer:
-    post:
-      tags: [Token]
-      summary: Transfer tCeBM tokens
-      description: >
-        Transfers tCeBM tokens to the specified Paladin identity via
-        Zeto's privacy-preserving transfer mechanism.
-      operationId: transferToken
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/TransferTokenRequest"
-      responses:
-        "200":
-          description: Tokens transferred successfully
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TransferTokenResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
 
   /api/v1/token/balance:
     get:
@@ -1838,13 +1592,14 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  /api/v1/payments/deposits/fiat-exchange:
+  /api/v1/payments/deposits/exchange:
     post:
       tags: [Escrow]
       summary: Execute fiat exchange — mint tCeBM (Central Bank only)
       description: >
         After approving a deposit, the Central Bank triggers the fiat exchange:
         mints tCeBM (ERC-20) to the requester's Besu address on-chain.
+        Also proxied by commercial bank gateways: POST /api/v1/payments/deposits/exchange.
       operationId: requestFiatExchange
       security:
         - CookieAuth: []
@@ -2812,6 +2567,109 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/v2/governance/transfer-limits:
+    post:
+      tags: [Transfer Limits]
+      summary: Create a daily transfer limit (Central Bank)
+      description: >
+        Sets a configurable daily transfer limit for a participant and/or currency.
+        Limits are matched by specificity: (participant_id + currency) > (participant_id) >
+        (currency) > global. Only the CB that created the limit may list or delete it.
+        Requires ROLE_CENTRAL_BANK_SCENARIO_B (cookie auth).
+      operationId: createTransferLimit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [max_amount]
+              properties:
+                participant_id:
+                  type: string
+                  description: >
+                    Bank identifier to restrict (e.g. "bank-a"). Empty means "applies to all
+                    participants on this spoke".
+                  example: "bank-a"
+                currency:
+                  type: string
+                  description: Currency symbol to restrict (e.g. "BRL"). Empty means "all currencies".
+                  example: "BRL"
+                max_amount:
+                  type: string
+                  description: Human-readable decimal daily maximum (e.g. "100000.00"). Converted to wei internally.
+                  example: "100000.00"
+      responses:
+        "201":
+          description: Transfer limit created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransferLimitRecord"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: Invalid max_amount value
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [Transfer Limits]
+      summary: List active transfer limits (Central Bank)
+      description: >
+        Returns all active transfer limits created by the authenticated CB.
+        Requires ROLE_CENTRAL_BANK_SCENARIO_B (cookie auth).
+      operationId: listTransferLimits
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Active transfer limits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  limits:
+                    type: array
+                    items: { $ref: "#/components/schemas/TransferLimitRecord" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v2/governance/transfer-limits/{id}:
+    delete:
+      tags: [Transfer Limits]
+      summary: Delete a transfer limit (Central Bank)
+      description: >
+        Removes a transfer limit by ID. Only the CB that created the limit may delete it.
+        Requires ROLE_CENTRAL_BANK_SCENARIO_B (cookie auth). Returns 204 on success.
+      operationId: deleteTransferLimit
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          description: Transfer limit ID (UUID)
+      responses:
+        "204":
+          description: Transfer limit deleted
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: Limit exists but cannot be deleted (e.g. belongs to another CB)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /api/v2/oversight/disclosure-request:
     post:
       tags: [Oversight]
@@ -2938,6 +2796,268 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ---------------------------------------------------------------------------
+  # Internal V1 Payment Relay Endpoints (CB-side only)
+  # Protected by X-Relay-Auth shared secret. Called by commercial bank gateways
+  # via PaymentProxyHandler → Central Bank. Only registered on CB gateways
+  # (PaymentHandler != nil, PaymentProxyHandler == nil).
+  # ---------------------------------------------------------------------------
+
+  /internal/v1/payments/deposits/exchange:
+    post:
+      tags: [AMM Internal]
+      summary: Internal relay — fiat exchange (CB only)
+      description: >
+        Proxied by commercial bank gateways to execute fiat exchange on the Central
+        Bank. Requires X-Relay-Auth header (shared secret).
+      operationId: internalFiatExchange
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deposit_id]
+              properties:
+                deposit_id: { type: string }
+      responses:
+        "201":
+          description: Fiat exchange completed — tCeBM minted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FiatExchangeResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v1/payments/deposits:
+    post:
+      tags: [AMM Internal]
+      summary: Internal relay — register deposit (CB only)
+      description: Called by commercial bank gateways via relay to register a deposit on the CB.
+      operationId: internalRegisterDeposit
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterDepositRequest" }
+      responses:
+        "201":
+          description: Deposit registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterDepositResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [AMM Internal]
+      summary: Internal relay — list deposits (CB only)
+      operationId: internalListDeposits
+      security:
+        - RelayAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deposits
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListDepositsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v1/payments/escrows:
+    post:
+      tags: [AMM Internal]
+      summary: Internal relay — request escrow (CB only)
+      operationId: internalRequestEscrow
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RequestEscrowRequest" }
+      responses:
+        "201":
+          description: Escrow request registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestEscrowResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [AMM Internal]
+      summary: Internal relay — list escrows (CB only)
+      operationId: internalListEscrows
+      security:
+        - RelayAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Escrows
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListEscrowsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v1/payments/redeems:
+    post:
+      tags: [AMM Internal]
+      summary: Internal relay — request redeem (CB only)
+      operationId: internalRequestRedeem
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RequestRedeemRequest" }
+      responses:
+        "201":
+          description: Redeem request registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestRedeemResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [AMM Internal]
+      summary: Internal relay — list redeems (CB only)
+      operationId: internalListRedeems
+      security:
+        - RelayAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Redeems
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListRedeemsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------------------
+  # Internal V2 Transfer Limit Relay Endpoints (CB-side only)
+  # Called by commercial bank gateways via RemoteTransferLimitChecker.
+  # Protected by X-Relay-Auth shared secret (RequireRelayAuth middleware).
+  # Only registered on CB gateways (TransferLimitInternalHandler != nil).
+  # ---------------------------------------------------------------------------
+
+  /internal/v2/transfer-limits/check-and-deduct:
+    post:
+      tags: [Transfer Limits]
+      summary: Internal relay — check and deduct transfer limit (CB only)
+      description: >
+        Called by commercial bank gateways before initiating a bridge lock-mint or
+        cross-currency swap. The CB checks the payer's daily usage against the
+        configured limit and atomically deducts the amount if within bounds.
+        Returns 422 TRANSFER_LIMIT_EXCEEDED if the limit would be breached.
+      operationId: internalCheckAndDeductTransferLimit
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payer_bank_id, amount_human]
+              properties:
+                payer_bank_id:
+                  type: string
+                  description: Bank identifier of the payer (e.g. "bank-a")
+                  example: "bank-a"
+                currency:
+                  type: string
+                  description: Currency symbol (e.g. "BRL"). Empty means global limit.
+                  example: "BRL"
+                amount_human:
+                  type: string
+                  description: Human-readable decimal amount to check/deduct (e.g. "10000.00")
+                  example: "10000.00"
+      responses:
+        "200":
+          description: Limit not exceeded — amount deducted from daily usage
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422":
+          description: Daily transfer limit would be exceeded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, error_code]
+                properties:
+                  error:         { type: string }
+                  error_code:    { type: string, example: "TRANSFER_LIMIT_EXCEEDED" }
+                  payer_bank_id: { type: string }
+                  currency:      { type: string }
+                  max_amount:    { type: string }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v2/transfer-limits/restore:
+    post:
+      tags: [Transfer Limits]
+      summary: Internal relay — restore transfer limit usage (CB only)
+      description: >
+        Called by commercial bank gateways on swap rollback or cancellation to
+        restore a previously deducted amount to the payer's daily usage counter.
+        Best-effort — always returns 200 even if the restore fails internally.
+      operationId: internalRestoreTransferLimit
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payer_bank_id, amount_human]
+              properties:
+                payer_bank_id:
+                  type: string
+                  example: "bank-a"
+                currency:
+                  type: string
+                  example: "BRL"
+                amount_human:
+                  type: string
+                  example: "10000.00"
+      responses:
+        "200":
+          description: Restore acknowledged (best-effort)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
 components:
   securitySchemes:
     CookieAuth:
@@ -3021,6 +3141,40 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    TransferLimitRecord:
+      type: object
+      description: A configurable daily transfer limit set by a Central Bank (R1-10.1).
+      properties:
+        limit_id:
+          type: string
+          description: UUID of the limit record
+          example: "tl-a1b2c3d4"
+        central_bank_id:
+          type: string
+          description: Bank identifier of the CB that owns this limit
+          example: "cb-a"
+        participant_id:
+          type: string
+          description: Participant the limit applies to. Empty string means all participants.
+          example: "bank-a"
+        currency:
+          type: string
+          description: Currency the limit applies to. Empty string means all currencies.
+          example: "BRL"
+        max_amount:
+          type: string
+          description: Maximum daily transfer amount in wei (stored as string for precision)
+          example: "100000000000000000000"
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
     ErrorResponse:
       type: object
       required: [error]

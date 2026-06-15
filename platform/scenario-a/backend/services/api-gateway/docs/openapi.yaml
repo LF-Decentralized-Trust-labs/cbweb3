@@ -98,6 +98,24 @@ tags:
                      PROPOSED|ACCEPTED → CANCELLED (terminal)
 
       These endpoints require the payment orchestrator service to be configured.
+  - name: Supervisor
+    description: >
+      Supervisor Portal — read-only audit log access and regulatory transaction
+      decryption. All endpoints require ROLE_SUPERVISOR.
+      The audit log endpoint mirrors the governance audit log but is scoped to
+      the supervisor's read-only view. DecryptTransaction requires a QUORUM_REACHED
+      disclosure request (2-of-N signatures) before revealing private Zeto state.
+  - name: Oversight
+    description: >
+      Investigation Module — AML/CFT disclosure requests (FR-034/FR-035/FR-036).
+      All endpoints require ROLE_SUPERVISOR. A supervisor opens a disclosure
+      request referencing an HTLC contract ID, other supervisors sign it, and
+      once quorum (2-of-N) is reached the DecryptTransaction endpoint is unlocked.
+  - name: Treasury
+    description: >
+      Treasury Portal — transfer limit management. All endpoints require
+      ROLE_TREASURY and are only available on Central Bank gateways
+      (not registered on Commercial Bank gateways). Implements R1-10.1.
   - name: Internal
     description: >
       Internal relay endpoints consumed by the Hyperledger Cacti cross-spoke
@@ -741,6 +759,424 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalError"
+
+  /api/v1/compliance/audit/logs:
+    get:
+      tags: [Supervisor]
+      summary: Get compliance audit logs (ROLE_SUPERVISOR)
+      description: >
+        Read-only audit log access for supervisors. Returns paginated compliance
+        audit log entries. Mirrors the governance audit log but requires
+        ROLE_SUPERVISOR instead of ROLE_GOVERNANCE.
+      operationId: supervisorGetAuditLogs
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [SESSION, CREDENTIAL, FREEZE, CIRCUIT_BREAKER, PARAMETER, PARTICIPANT]
+        - name: severity
+          in: query
+          schema: { type: string, enum: [INFO, WARNING, CRITICAL] }
+        - name: from_date
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to_date
+          in: query
+          schema: { type: string, format: date-time }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditRecord" }
+                  page:
+                    type: integer
+                    example: 1
+                  limit:
+                    type: integer
+                    example: 20
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502":
+          description: Compliance service unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v1/compliance/decrypt-transaction:
+    post:
+      tags: [Supervisor]
+      summary: Decrypt a private Zeto transaction (ROLE_SUPERVISOR, quorum gate)
+      description: >
+        Reveals the private Zeto token state (amount, sender, receiver) for an
+        HTLC identified by its contract ID. **Requires a QUORUM_REACHED disclosure
+        request** (2-of-N signatures via the Oversight module) for the same HTLC
+        contract ID before this endpoint will proceed.
+
+        The handler resolves the on-chain `zeto_lock_ref` from the HTLC scanner,
+        then calls Paladin `ptx_getStateReceipt` to read the private UTXO state.
+        An immutable audit log entry is written regardless of the outcome.
+
+        Returns 501 if PALADIN_URL, the oversight database, or the HTLC scanner
+        are not configured.
+      operationId: supervisorDecryptTransaction
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tx_hash, view_key, reason]
+              properties:
+                tx_hash:
+                  type: string
+                  description: HTLC contract ID (0x-prefixed hex) as shown in the supervisor dashboard
+                  example: "0xabcd1234..."
+                view_key:
+                  type: string
+                  description: Viewing key authorising decryption of the Zeto UTXO state
+                  example: "0xdeadbeef..."
+                reason:
+                  type: string
+                  description: Regulatory justification recorded in the immutable audit trail
+                  example: "AML investigation INV-2026-001"
+      responses:
+        "200":
+          description: Decrypted transaction details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tx_hash:
+                    type: string
+                    description: HTLC contract ID echoed from the request
+                    example: "0xabcd1234..."
+                  amount:
+                    type: string
+                    description: Private token amount (decimal string)
+                    example: "500000"
+                  currency:
+                    type: string
+                    example: "BRL"
+                  sender:
+                    type: string
+                    description: EVM address of the initiating operator
+                    example: "0x1234abcd..."
+                  receiver:
+                    type: string
+                    description: EVM address of the receiver (empty for cross-spoke locks)
+                    example: "0x5678ef01..."
+                  decrypted_at:
+                    type: string
+                    format: date-time
+                    example: "2026-06-15T12:00:00Z"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Disclosure quorum not reached for this HTLC contract ID
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                error: "disclosure quorum not reached for tx 0xabcd...: open a disclosure request and collect 2 signatures first"
+        "404":
+          description: HTLC not found on-chain
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "501":
+          description: Decryption not available (PALADIN_URL, oversight DB, or HTLC scanner not configured)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: Paladin or compliance service unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/compliance/participants/summary:
+    get:
+      tags: [Supervisor]
+      summary: List participants summary (ROLE_SUPERVISOR, read-only)
+      description: >
+        Returns all participants registered in the compliance-orchestrator database.
+        Same data as GET /api/v1/compliance/participants (ROLE_GOVERNANCE) but
+        accessible to supervisors (ROLE_SUPERVISOR) in read-only mode.
+        Supports optional filtering by onboarding status and free-text search.
+      operationId: supervisorListParticipants
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          description: Filter by participant onboarding status
+          schema:
+            type: string
+            enum: [PENDING, CREDENTIAL_REQUESTED, KYC_APPROVED, ACTIVE, FROZEN, REVOKED]
+        - name: search
+          in: query
+          description: Free-text search across institution_name and legal entity ID (case-insensitive)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of participants (may be empty if no matches)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [participants]
+                properties:
+                  participants:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ParticipantRecord"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------------------
+  # Investigation Module — Oversight (AML/CFT Disclosure Requests)
+  # All endpoints require: access_token cookie (ROLE_SUPERVISOR)
+  # ---------------------------------------------------------------------------
+
+  /api/v1/oversight/disclosure-request:
+    post:
+      tags: [Oversight]
+      summary: Open an AML/CFT disclosure request (FR-034)
+      description: >
+        Creates a new pending disclosure request referencing an HTLC contract ID.
+        The request expires after 72 hours. Once a quorum of supervisor signatures
+        (2-of-N, see POST /api/v1/oversight/disclosure-sign) is collected the
+        request state becomes QUORUM_REACHED and the decrypt endpoint is unlocked.
+
+        Valid reason codes: `AML_ALERT`, `CFT_INVESTIGATION`, `COURT_ORDER`,
+        `REGULATORY_EXAM`.
+      operationId: openDisclosure
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenDisclosureRequest"
+      responses:
+        "201":
+          description: Disclosure request opened
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisclosureStatusResponse"
+        "400":
+          description: Missing required field or invalid reason_code
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              examples:
+                missingField:
+                  value:
+                    error: "tx_ref, requestor_id, and reason_code are required"
+                invalidCode:
+                  value:
+                    error: "invalid reason_code; accepted: AML_ALERT, CFT_INVESTIGATION, COURT_ORDER, REGULATORY_EXAM"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/oversight/disclosure-sign:
+    post:
+      tags: [Oversight]
+      summary: Co-sign a pending disclosure request (FR-035)
+      description: >
+        Adds a supervisor's signature to a pending disclosure request.
+        Each supervisor can sign at most once. When the quorum threshold (2-of-N)
+        is reached the request state transitions to QUORUM_REACHED automatically,
+        unlocking POST /api/v1/compliance/decrypt-transaction.
+
+        Returns 400 if the request is not in PENDING state, already signed by
+        the same signer, or has expired.
+      operationId: signDisclosure
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id, signer_id]
+              properties:
+                request_id:
+                  type: string
+                  description: UUID of the disclosure request (from OpenDisclosure response)
+                  example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                signer_id:
+                  type: string
+                  description: Supervisor identifier co-signing the request
+                  example: "supervisor-002"
+      responses:
+        "200":
+          description: Signature accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "signed"
+        "400":
+          description: Already signed, not in PENDING state, or request expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/oversight/disclosure-status/{requestID}:
+    get:
+      tags: [Oversight]
+      summary: Get the status of a disclosure request (FR-036)
+      description: >
+        Returns the full state of a disclosure request: request ID, target
+        transaction reference, reason code, current state, quorum counters,
+        and timestamps. Use this to poll for QUORUM_REACHED before calling
+        DecryptTransaction.
+      operationId: getDisclosureStatus
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: requestID
+          in: path
+          required: true
+          schema:
+            type: string
+          description: UUID of the disclosure request
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      responses:
+        "200":
+          description: Disclosure request state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DisclosureStatusResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------------------
+  # Treasury Portal — Transfer Limits (Central Bank only — ROLE_TREASURY, R1-10.1)
+  # Only registered when PaymentProxyHandler == nil (Central Bank gateway).
+  # ---------------------------------------------------------------------------
+
+  /api/v1/treasury/transfer-limits:
+    post:
+      tags: [Treasury]
+      summary: Create a transfer limit for a participant (ROLE_TREASURY)
+      description: >
+        Configures a maximum daily transfer limit for a specific participant
+        and currency. Requires ROLE_TREASURY and is only available on Central
+        Bank gateways. Implements R1-10.1.
+      operationId: createTransferLimit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTransferLimitRequest"
+      responses:
+        "201":
+          description: Transfer limit created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransferLimit"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [Treasury]
+      summary: List transfer limits (ROLE_TREASURY)
+      description: >
+        Returns all configured transfer limits, optionally filtered by
+        central_bank_id. Requires ROLE_TREASURY.
+      operationId: listTransferLimits
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: central_bank_id
+          in: query
+          schema: { type: string }
+          description: Filter by central bank identifier (optional)
+          example: "central-bank-a"
+      responses:
+        "200":
+          description: List of transfer limits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  limits:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TransferLimit"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/treasury/transfer-limits/{id}:
+    delete:
+      tags: [Treasury]
+      summary: Delete a transfer limit (ROLE_TREASURY)
+      description: >
+        Removes a transfer limit configuration by its ID. Requires ROLE_TREASURY.
+        Returns 204 No Content on success.
+      operationId: deleteTransferLimit
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Transfer limit identifier
+          example: "tl-a1b2c3d4"
+      responses:
+        "204":
+          description: Transfer limit deleted
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   # ---------------------------------------------------------------------------
   # Onboarding — 3-phase PKI + Blockchain
@@ -4139,6 +4575,129 @@ components:
         total:
           type: integer
           description: Total number of audit events for this agreement
+
+    # --- Oversight (Investigation Module) schemas ---
+
+    OpenDisclosureRequest:
+      type: object
+      required: [tx_ref, requestor_id, reason_code]
+      properties:
+        tx_ref:
+          type: string
+          description: HTLC contract ID (0x-prefixed hex) to investigate
+          example: "0xabcd1234..."
+        requestor_id:
+          type: string
+          description: Identifier of the requesting supervisor
+          example: "supervisor-001"
+        reason_code:
+          type: string
+          enum: [AML_ALERT, CFT_INVESTIGATION, COURT_ORDER, REGULATORY_EXAM]
+          description: Regulatory reason code for the disclosure
+          example: "AML_ALERT"
+
+    DisclosureStatusResponse:
+      type: object
+      required: [request_id, state, quorum_required, quorum_reached, opened_at, expires_at]
+      properties:
+        request_id:
+          type: string
+          description: UUID of the disclosure request
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        requested_by_bank_id:
+          type: string
+          description: Bank identifier of the requesting supervisor
+          example: "supervisor-001"
+        target_transaction_ref:
+          type: string
+          description: HTLC contract ID under investigation
+          example: "0xabcd1234..."
+        reason_code:
+          type: string
+          enum: [AML_ALERT, CFT_INVESTIGATION, COURT_ORDER, REGULATORY_EXAM]
+          example: "AML_ALERT"
+        state:
+          type: string
+          description: Current state of the disclosure request
+          enum: [PENDING, QUORUM_REACHED, EXPIRED, CLOSED]
+          example: "PENDING"
+        quorum_required:
+          type: integer
+          description: Number of signatures required to reach quorum
+          example: 2
+        quorum_reached:
+          type: integer
+          description: Number of signatures collected so far
+          example: 1
+        opened_at:
+          type: string
+          format: date-time
+          example: "2026-06-15T10:00:00Z"
+        expires_at:
+          type: string
+          format: date-time
+          example: "2026-06-18T10:00:00Z"
+        closed_at:
+          type: string
+          format: date-time
+          description: Set when the request was closed (null while open)
+          nullable: true
+          example: null
+
+    # --- Treasury schemas ---
+
+    CreateTransferLimitRequest:
+      type: object
+      required: [max_amount]
+      properties:
+        participant_id:
+          type: string
+          description: Keycloak UUID or bank identifier of the participant (optional — applies globally if omitted)
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        currency:
+          type: string
+          description: ISO 4217 currency code the limit applies to
+          example: "BRL"
+        max_amount:
+          type: string
+          description: Maximum daily transfer amount (decimal string)
+          example: "10000000"
+
+    TransferLimit:
+      type: object
+      properties:
+        limit_id:
+          type: string
+          description: Unique transfer limit identifier
+          example: "tl-a1b2c3d4"
+        central_bank_id:
+          type: string
+          description: Identifier of the Central Bank that set this limit
+          example: "central-bank-a"
+        participant_id:
+          type: string
+          description: Participant this limit applies to (empty means global)
+          example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        currency:
+          type: string
+          description: ISO 4217 currency code
+          example: "BRL"
+        max_amount:
+          type: string
+          description: Maximum daily transfer amount (decimal string)
+          example: "10000000"
+        is_active:
+          type: boolean
+          description: Whether this limit is currently enforced
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-06-15T10:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2026-06-15T10:00:00Z"
 
     # --- Internal relay request schemas ---
 
