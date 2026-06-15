@@ -1,17 +1,13 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, HandCoins, Coins, Flame, ShieldAlert, ScrollText, Settings, Gauge, Landmark, Wallet, ListChecks } from "lucide-react";
+import { LayoutDashboard, ScrollText, Settings, Gauge, Landmark, Wallet, ListChecks, SlidersHorizontal } from "lucide-react";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/funding-requests", label: "Funding Requests", icon: HandCoins },
-  { to: "/issuance", label: "Issuance", icon: Coins },
-  { to: "/redemption", label: "Redemption", icon: Flame },
   { to: "/deposits-approval", label: "Issuance Approvals", icon: Wallet },
   { to: "/escrows-approval", label: "Tokenisation Approvals", icon: ListChecks },
   { to: "/redeems-approval", label: "Redeem Approvals", icon: Gauge },
-  { to: "/reconciliation", label: "Reconciliation", icon: ShieldAlert },
   { to: "/liquidity", label: "Liquidity Management", icon: Landmark },
-  { to: "/transfer-limits", label: "Transfer Limits", icon: Gauge },
+  { to: "/transfer-limits", label: "Transfer Limits", icon: SlidersHorizontal },
   { to: "/audit", label: "Audit", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
