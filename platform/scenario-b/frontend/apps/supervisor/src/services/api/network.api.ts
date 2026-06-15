@@ -13,7 +13,7 @@ export const networkApi = {
   getOverview: async (): Promise<NetworkOverview> => {
     const [participantsResult, cbResult] = await Promise.allSettled([
       apiFetch<ParticipantsResponse>("/api/v1/compliance/participants/summary"),
-      apiFetch<CircuitBreakerStatus>("/api/v1/governance/circuit-breaker/status"),
+      apiFetch<CircuitBreakerStatus>("/api/v2/governance/circuit-breaker/status"),
     ]);
 
     const participants =

@@ -29,7 +29,7 @@ function toParticipant(p: ParticipantsResponse["participants"][number]): Partici
 
 export const governanceApi = {
   listParticipants: (): Promise<Participant[]> =>
-    apiFetch<ParticipantsResponse>("/api/v1/compliance/participants").then((r) =>
+    apiFetch<ParticipantsResponse>("/api/v1/compliance/participants/summary").then((r) =>
       r.participants.map(toParticipant),
     ),
 };

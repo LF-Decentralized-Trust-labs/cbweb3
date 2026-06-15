@@ -7,15 +7,12 @@ import {
   CardHeader,
   CardTitle,
   Input,
-  Label,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
-  Textarea,
-  toast,
 } from "@cbweb3/ui";
 import { useEffect, useState } from "react";
 import { CopyableValue } from "../components/common/CopyableValue";
@@ -31,10 +28,7 @@ const SEVERITY_VARIANTS: Record<string, "destructive" | "warning" | "secondary" 
 };
 
 export function AuditVaultPage() {
-  const { logs, page, limit, lastDecrypted, status, error, refreshLogs, decryptTransaction } = useAuditStore();
-  const [txHash, setTxHash] = useState("0x8f41b290d90e10a89c90f6d20d9eae1288a8ff1f9d");
-  const [viewKey, setViewKey] = useState("regulatory-view-key-local-session");
-  const [reason, setReason] = useState("AML investigation review");
+  const { logs, page, limit, status, error, refreshLogs } = useAuditStore();
   const [severityFilter, setSeverityFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
 
@@ -53,62 +47,13 @@ export function AuditVaultPage() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Compliance & Audit Vault</CardTitle>
-          <CardDescription>Use regulatory view keys to decrypt shielded transactions for forensic review.</CardDescription>
+          <CardTitle>Privacy Notice · Scenario B</CardTitle>
+          <CardDescription>
+            Scenario B uses Zeto ZKP commitments — transaction amounts and parties are never revealed
+            on-chain. There is no regulatory view-key decrypt in this scenario. Use ZK-Pointer
+            verification below to confirm that a shielded transfer commitment was validly issued.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3 lg:grid-cols-2">
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Label htmlFor="tx-hash">Transaction hash</Label>
-              <Input id="tx-hash" value={txHash} onChange={(event) => setTxHash(event.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="view-key">Regulatory view key (in-memory only)</Label>
-              <Input id="view-key" type="password" value={viewKey} onChange={(event) => setViewKey(event.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="reason">Reason</Label>
-              <Textarea id="reason" value={reason} onChange={(event) => setReason(event.target.value)} />
-            </div>
-            <Button
-              disabled={status === "loading" || txHash.length < 8 || viewKey.length < 8 || reason.length < 5}
-              onClick={async () => {
-                await decryptTransaction({ txHash, viewKey, reason });
-                toast("Transaction decrypted for active session");
-              }}
-            >
-              Decrypt Transaction
-            </Button>
-            <p className="text-xs text-muted-foreground">Sensitive decrypted values are not persisted to browser localStorage/sessionStorage.</p>
-          </div>
-
-          <div className="rounded-md border border-border bg-muted/20 p-3">
-            <h3 className="mb-2 text-sm font-semibold">Decryption Result</h3>
-            {lastDecrypted ? (
-              <dl className="space-y-2 text-sm">
-                <div className="flex items-start gap-2">
-                  <dt className="w-16 shrink-0 text-muted-foreground">Tx</dt>
-                  <dd><CopyableValue value={lastDecrypted.txHash} /></dd>
-                </div>
-                <div className="flex items-start gap-2">
-                  <dt className="w-16 shrink-0 text-muted-foreground">Amount</dt>
-                  <dd className="text-sm">{lastDecrypted.amount} {lastDecrypted.currency}</dd>
-                </div>
-                <div className="flex items-start gap-2">
-                  <dt className="w-16 shrink-0 text-muted-foreground">Sender</dt>
-                  <dd><CopyableValue value={lastDecrypted.sender || "—"} /></dd>
-                </div>
-                <div className="flex items-start gap-2">
-                  <dt className="w-16 shrink-0 text-muted-foreground">Receiver</dt>
-                  <dd><CopyableValue value={lastDecrypted.receiver || "—"} /></dd>
-                </div>
-              </dl>
-            ) : (
-              <p className="text-sm text-muted-foreground">No decrypted payload in session yet.</p>
-            )}
-            {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
-          </div>
-        </CardContent>
       </Card>
 
       <ZKPointerPanel />
