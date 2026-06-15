@@ -24,11 +24,15 @@ contracts.fmt:
 contracts.lint:
 	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge lint
 
+# -j 1 runs test suites serially. Several deploy-script tests mutate process-global env
+# vars via vm.setEnv (ADMIN_ADDRESS, DEPLOYER_PRIVATE_KEY); under parallel suite execution
+# one suite's setUp() can overwrite another's env, causing intermittent
+# AccessControlUnauthorizedAccount / role-assertion flakes. Serial execution is deterministic.
 contracts.test:
-	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge test -vvv
+	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge test -vvv -j 1
 
 contracts.coverage:
-	@cd contracts && bash tools/validate-coverage.sh
+	@cd contracts && FOUNDRY_FUZZ_RUNS=256 bash tools/validate-coverage.sh
 
 contracts.build:
 	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge build --sizes

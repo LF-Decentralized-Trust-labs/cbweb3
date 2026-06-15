@@ -3,7 +3,18 @@
 COVERAGE_THRESHOLD=90
 COVERAGE_OUTPUT=$(mktemp)
 
-forge coverage --report summary > "$COVERAGE_OUTPUT" 2>&1
+# --ir-minimum is required: the AMM compiles into a "stack too deep" error under the
+# standard coverage instrumentation; minimal-IR codegen makes `forge coverage` tractable.
+# FOUNDRY_FUZZ_RUNS is lowered to keep the coverage run within the CI time budget.
+# HTLC is excluded from the coverage denominator: it is slated for removal from scenario B
+# (cross-scenario contamination — HTLC belongs to scenario A's atomicity model).
+export FOUNDRY_FUZZ_RUNS=256
+
+forge coverage \
+    --ir-minimum \
+    --report summary \
+    --no-match-coverage '(HashTimeLockedContract|HashTimeLockedContractLibrary)' \
+    > "$COVERAGE_OUTPUT" 2>&1
 
 cat "$COVERAGE_OUTPUT"
 

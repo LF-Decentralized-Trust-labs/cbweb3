@@ -189,7 +189,12 @@ contract DeployFiatCBMTest is Test {
         expectedDeployer = vm.addr(deployerPrivateKey);
         expectedAdmin = makeAddr("admin");
         expectedCentralBank = makeAddr("centralBank");
+    }
 
+    /// @dev Sets the deployment env. Called inside the test body (not setUp) because vm.setEnv
+    ///      mutates a process-global env: a sibling deploy-script suite's setUp() can overwrite
+    ///      these keys between this suite's setUp() and run(), causing non-deterministic flakes.
+    function _setDeployEnv() internal {
         vm.setEnv("DEPLOYER_PRIVATE_KEY", vm.toString(deployerPrivateKey));
         vm.setEnv("ADMIN_ADDRESS", vm.toString(expectedAdmin));
         vm.setEnv("CENTRAL_BANK_ADDRESS", vm.toString(expectedCentralBank));
@@ -199,6 +204,7 @@ contract DeployFiatCBMTest is Test {
 
     /// @dev Verify the deployment script configures name, symbol, and roles correctly.
     function test_DeployScript_ConfiguresCorrectly() public {
+        _setDeployEnv();
         deployScript.run();
 
         FiatCentralBankMoney fiat = deployScript.fiatToken();
