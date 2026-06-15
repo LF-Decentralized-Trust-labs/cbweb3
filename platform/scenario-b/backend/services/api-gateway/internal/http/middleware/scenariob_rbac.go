@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package middleware provides Scenario B role-based access control middleware (FR-056).
 package middleware
 

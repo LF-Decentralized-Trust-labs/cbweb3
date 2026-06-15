@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app — on-chain counterpart commit source for cooperative liquidity discovery.
 // Reads the Hub LiquidityCommitRegistry (the only cross-CB source of truth) so a CB
 // gateway can surface a counterpart central bank's open PENDING commit on the opposite
@@ -95,8 +97,9 @@ func (s *onChainCounterpartSource) CounterpartCommit(ctx context.Context, poolPa
 		SignerAddress:        commit.Signer.Hex(),
 		Amount:               amount,
 		SuggestedMatchAmount: s.suggestMatchAmount(ctx, commit.Amount),
-		ExpiresAt:            time.Unix(int64(commit.ExpiresAt), 0).UTC(),
-		OnChainCommitID:      CommitIDToHex(id),
+		// #nosec G115 -- on-chain expiry is a Unix second timestamp; far within int64 range.
+		ExpiresAt:       time.Unix(int64(commit.ExpiresAt), 0).UTC(),
+		OnChainCommitID: CommitIDToHex(id),
 	}, nil
 }
 

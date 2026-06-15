@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app — CentralBankChecker implementations for the anti-G5-cross guard (FR-004 / T016).
 package app
 

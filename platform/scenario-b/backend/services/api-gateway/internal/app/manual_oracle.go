@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app — ManualOracle EVM adapter (read-only).
 // Wraps the Hub ManualOracle contract (contracts/src/ManualOracle.sol) so the
 // api-gateway can read FX rates and suggest a counterpart matching deposit amount

@@ -97,6 +97,8 @@ services:
       PKI_DIR: /workspace/backend/config/pki
       BANK_CODE: "bank-a"
       CENTRAL_BANK_API_URL: "http://api-gateway-central-bank-a:8080"
+      FIAT_SYMBOL: "BRL"
+      TRANSFER_LIMIT_COMPLIANCE_ADDR: "compliance-central-bank-a:9093"
       ENTITY_BESU_ADDRESS: "0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef"
       PALADIN_IDENTITY: "funded_operator@spoke-a-bank-a"
       CB_PALADIN_IDENTITY: "funded_operator@spoke-a-cb"

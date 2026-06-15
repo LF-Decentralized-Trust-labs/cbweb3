@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package audit provides an append-only audit log helper for Scenario B.
 // Entries are inserted via GORM Create; UPDATE and DELETE are blocked by
 // database-level PL/pgSQL triggers (see internal/db/init/triggers.go).

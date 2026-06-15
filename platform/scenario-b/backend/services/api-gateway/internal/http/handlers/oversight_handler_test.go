@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides contract tests for OversightHandler (T094 / FR-034 / FR-035 / SC-027).
 package handlers_test
 

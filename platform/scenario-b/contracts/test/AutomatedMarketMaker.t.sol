@@ -1,7 +1,8 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
+import {stdError} from "forge-std/StdError.sol";
 import {AutomatedMarketMaker} from "../src/AutomatedMarketMaker.sol";
 import {IAutomatedMarketMaker} from "../src/interfaces/IAutomatedMarketMaker.sol";
 import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
@@ -271,6 +272,17 @@ contract AutomatedMarketMakerTest is Test {
         assertEq(amm.getAmountOut(0, 1000, 1000, 30), 0);
     }
 
+    /// @dev getAmountIn reverts when the requested output is not strictly less than the output reserve.
+    function test_Revert_GetAmountIn_OutputExceedsReserve() public {
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InsufficientLiquidity.selector);
+        amm.getAmountIn(1000 * 10 ** 18, 1000 * 10 ** 18, 1000 * 10 ** 18); // amountOut == reserveOut
+    }
+
+    /// @dev resumeQuorum() exposes the 2-of-N resume constant.
+    function test_ResumeQuorum_Value() public view {
+        assertEq(amm.resumeQuorum(), 2);
+    }
+
     function test_SwapTokensForExactTokens_Success() public {
         vm.prank(liquidityProvider);
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
@@ -352,6 +364,10 @@ contract AutomatedMarketMakerTest is Test {
 
     function test_Fees_AccrueToShareValue() public {
         // LP1 seeds; a swap leaves a 0.3% fee in reserves; LP1's redeemable value rises.
+        // The default swap fee is now 0, so set a non-zero fee explicitly to exercise accrual.
+        vm.prank(governanceA);
+        amm.setFeeBps(30);
+
         vm.prank(liquidityProvider);
         uint256 shares = amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
 
@@ -522,7 +538,67 @@ contract AutomatedMarketMakerTest is Test {
         amm.swapTokensForExactTokens(address(tokenA), address(tokenB), 100 * 10 ** 18, type(uint256).max, unverifiedTo);
     }
 
+    // ---------- Reserve overflow (R1-12.4 gap 1: AMM reserve overflow) ----------
+
+    /// @dev A first deposit so large that the `sqrt(amountA * amountB)` invariant math overflows
+    ///      must revert via Solidity 0.8 checked arithmetic — never silently wrap the reserves.
+    function test_Revert_AddLiquidity_FirstDeposit_OverflowReverts() public {
+        address whale = _registerWhale();
+        uint256 huge = type(uint256).max / 2;
+
+        vm.startPrank(centralBank);
+        tokenA.mint(whale, huge);
+        tokenB.mint(whale, huge);
+        vm.stopPrank();
+
+        vm.startPrank(whale);
+        tokenA.approve(address(amm), type(uint256).max);
+        tokenB.approve(address(amm), type(uint256).max);
+        vm.expectRevert(stdError.arithmeticError);
+        amm.addLiquidity(huge, huge);
+        vm.stopPrank();
+
+        // No state corruption: the overflow reverts before any reserve/supply mutation.
+        assertEq(amm.reserveA(), 0, "reserveA untouched after overflow revert");
+        assertEq(amm.reserveB(), 0, "reserveB untouched after overflow revert");
+        assertEq(amm.totalSupply(), 0, "no shares minted after overflow revert");
+    }
+
+    /// @dev An oversized *second* deposit into a healthy pool must revert (checked arithmetic in the
+    ///      share/reserve accounting) and leave the existing reserves exactly intact.
+    function test_Revert_AddLiquidity_OversizedSecondDeposit_LeavesReservesIntact() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        address whale = _registerWhale();
+        uint256 huge = type(uint256).max / 2;
+
+        vm.startPrank(centralBank);
+        tokenA.mint(whale, huge);
+        tokenB.mint(whale, huge);
+        vm.stopPrank();
+
+        vm.startPrank(whale);
+        tokenA.approve(address(amm), type(uint256).max);
+        tokenB.approve(address(amm), type(uint256).max);
+        vm.expectRevert(stdError.arithmeticError);
+        amm.addLiquidity(huge, huge);
+        vm.stopPrank();
+
+        assertEq(amm.reserveA(), INITIAL_LIQUIDITY, "reserveA intact after overflow revert");
+        assertEq(amm.reserveB(), INITIAL_LIQUIDITY, "reserveB intact after overflow revert");
+    }
+
     // ---------- helpers ----------
+
+    /// @dev Registers and returns a verified COMMERCIAL_BANK participant for overflow-scale deposits.
+    function _registerWhale() internal returns (address whale) {
+        whale = makeAddr("whale");
+        vm.prank(admin);
+        identityRegistry.registerParticipant(
+            whale, "Whale Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+        );
+    }
 
     /// @dev Seeds the §2.2 worked-example pool: 5,000,000 (A/BRL) : 1,000,000 (B/EUR), price 5:1.
     function _seedWorkedExamplePool() internal {

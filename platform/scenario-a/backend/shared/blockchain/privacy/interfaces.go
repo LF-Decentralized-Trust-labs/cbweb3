@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package privacy provides interfaces and implementations for interacting with
 // Hyperledger Paladin — the privacy layer between the Hub & Spoke and Besu networks.
 //

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package domain
 
 // ParticipantStatus represents the lifecycle state of a registered participant.
@@ -5,7 +7,7 @@ type ParticipantStatus string
 
 const (
 	StatusPending             ParticipantStatus = "PENDING"              // initial state
-	StatusCredentialRequested ParticipantStatus = "CREDENTIAL_REQUESTED" // CSR + pub_key submitted, awaiting KYC review
+	StatusCredentialRequested ParticipantStatus = "CREDENTIAL_REQUESTED" //#nosec G101 -- not a secret; participant lifecycle status enum value (CSR + pub_key submitted, awaiting KYC review)
 	StatusKYCApproved         ParticipantStatus = "KYC_APPROVED"         // KYC approved, awaiting PoP + wallet bind
 	StatusActive              ParticipantStatus = "ACTIVE"               // fully operational on the network
 	StatusFrozen              ParticipantStatus = "FROZEN"               // temporarily suspended
@@ -35,12 +37,12 @@ func IsValidTransition(current, next ParticipantStatus) bool {
 type AuditCategory string
 
 const (
-	CategorySession      AuditCategory = "SESSION"
-	CategoryCredential   AuditCategory = "CREDENTIAL"
-	CategoryFreeze       AuditCategory = "FREEZE"
+	CategorySession        AuditCategory = "SESSION"
+	CategoryCredential     AuditCategory = "CREDENTIAL"
+	CategoryFreeze         AuditCategory = "FREEZE"
 	CategoryCircuitBreaker AuditCategory = "CIRCUIT_BREAKER"
-	CategoryParameter    AuditCategory = "PARAMETER"
-	CategoryParticipant  AuditCategory = "PARTICIPANT"
+	CategoryParameter      AuditCategory = "PARAMETER"
+	CategoryParticipant    AuditCategory = "PARTICIPANT"
 )
 
 // AuditSeverity indicates the importance/risk level of an audit event.

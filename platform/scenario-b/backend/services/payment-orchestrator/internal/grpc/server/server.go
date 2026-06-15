@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package server
 
 import (
@@ -99,7 +101,16 @@ func (s *paymentOrchestratorService) GetBalance(ctx context.Context, req *pb.Get
 		return nil, status.Errorf(codes.Internal, "tCeBM decimals: %v", err)
 	}
 
-	return &pb.GetBalanceResponse{Balance: balance, Decimals: uint32(decimals)}, nil
+	// Symbol is the single source of truth for the currency code shown in the UI,
+	// but it is non-essential to the balance value itself: a read failure must not
+	// fail the whole call. Clients fall back to their configured fiat symbol.
+	symbol, err := s.token.Symbol(ctx)
+	if err != nil {
+		s.logger.Warn("tCeBM symbol read failed; returning balance without symbol", "error", err)
+		symbol = ""
+	}
+
+	return &pb.GetBalanceResponse{Balance: balance, Decimals: uint32(decimals), Symbol: symbol}, nil
 }
 
 // --- FX Agreement Operations ---
@@ -109,6 +120,7 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
 		return nil, status.Error(codes.InvalidArgument, "counterparty_b, origin_amount, counter_amount, origin_currency, counter_currency, rate, and expiry_date are required")
 	}
+	// #nosec G115 -- unix timestamp is always positive and fits uint64
 	if req.ExpiryDate <= uint64(time.Now().Unix()) {
 		return nil, status.Error(codes.InvalidArgument, "expiry_date must be in the future")
 	}

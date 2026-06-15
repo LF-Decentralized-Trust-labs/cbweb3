@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package handlers
 
 import (
@@ -25,7 +27,7 @@ func (h *OnboardingHandler) SubmitCredentialRequest(c *fiber.Ctx) error {
 		CsrPem              string `json:"csr_pem"`
 		BlockchainPubKeyHex string `json:"blockchain_pub_key_hex"`
 		InstitutionName     string `json:"institution_name"`
-		CNPJ                string `json:"cnpj,omitempty"`
+		LegalEntityID       string `json:"legal_entity_id,omitempty"`
 		BankCode            string `json:"bank_code"`
 		Country             string `json:"country"`
 		Role                string `json:"role"`
@@ -46,7 +48,7 @@ func (h *OnboardingHandler) SubmitCredentialRequest(c *fiber.Ctx) error {
 		CsrPem:              req.CsrPem,
 		BlockchainPubKeyHex: req.BlockchainPubKeyHex,
 		InstitutionName:     req.InstitutionName,
-		CNPJ:                req.CNPJ,
+		LegalEntityID:       req.LegalEntityID,
 		BankCode:            req.BankCode,
 		Country:             req.Country,
 		Role:                req.Role,

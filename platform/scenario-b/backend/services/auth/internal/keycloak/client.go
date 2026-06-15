@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package keycloak
 
 import (
@@ -99,24 +101,43 @@ func (c *keycloakClient) certsURL() string {
 
 // Login authenticates and returns tokens.
 //
-// When username equals the configured ClientID (i.e. the caller is authenticating
-// as the realm service account itself), client_credentials grant is used — Keycloak
-// service accounts have no password and cannot use the password grant.
-// For all other callers the password grant is used as usual.
+// The auth service exposes a single login endpoint that must support both
+// realm service-account clients (e.g. central-bank-a-client,
+// central-bank-a-supervisor-client) and human users (password grant).
+// We resolve which grant to use as follows:
+//
+//  1. Always attempt client_credentials first with (username, password) as
+//     (client_id, client_secret). This succeeds for any service-account client
+//     in the realm, regardless of whether it matches the gateway's configured
+//     ClientID. This is the path taken by the Supervisor portal, which
+//     authenticates with its own dedicated client.
+//  2. If client_credentials fails (typically because the supplied credentials
+//     identify a regular user rather than a client), fall back to the password
+//     grant using the gateway's admin client as the intermediary.
+//
+// On failure the error returned is the one from the password grant attempt,
+// unless the first attempt's error indicates a transport / non-Keycloak issue
+// that is more useful to surface.
 func (c *keycloakClient) Login(ctx context.Context, username, password string) (TokenResponse, error) {
-	form := url.Values{}
-	if username == c.cfg.ClientID {
-		form.Set("grant_type", "client_credentials")
-		form.Set("client_id", username)
-		form.Set("client_secret", password)
-	} else {
-		form.Set("grant_type", "password")
-		form.Set("client_id", c.cfg.ClientID)
-		form.Set("client_secret", c.cfg.ClientSecret)
-		form.Set("username", username)
-		form.Set("password", password)
+	ccForm := url.Values{}
+	ccForm.Set("grant_type", "client_credentials")
+	ccForm.Set("client_id", username)
+	ccForm.Set("client_secret", password)
+	if tr, err := c.postForm(ctx, c.tokenURL(), ccForm); err == nil {
+		return tr, nil
 	}
-	return c.postForm(ctx, c.tokenURL(), form)
+
+	if c.cfg.ClientID == "" {
+		return TokenResponse{}, errors.New("keycloak: client_credentials grant failed and no admin client is configured for password grant")
+	}
+
+	pwForm := url.Values{}
+	pwForm.Set("grant_type", "password")
+	pwForm.Set("client_id", c.cfg.ClientID)
+	pwForm.Set("client_secret", c.cfg.ClientSecret)
+	pwForm.Set("username", username)
+	pwForm.Set("password", password)
+	return c.postForm(ctx, c.tokenURL(), pwForm)
 }
 
 // Refresh exchanges a refresh token for a new token pair.

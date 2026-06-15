@@ -1,18 +1,8 @@
-import { useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
-import { useWebsocketStore } from "../../stores";
 
 export function AppLayout() {
-  const connect = useWebsocketStore((state) => state.connect);
-  const disconnect = useWebsocketStore((state) => state.disconnect);
-
-  useEffect(() => {
-    connect();
-    return () => disconnect();
-  }, [connect, disconnect]);
-
   return (
     <div className="min-h-screen bg-muted/30">
       <Header />

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package tcebm provides an EVM client for the TokenizedCentralBankMoney (tCeBM) contract.
 // The client uses an embedded ABI and go-ethereum/ethclient for ERC-20 + mint/burn calls,
 // following the same pattern as the AMM client (T057).

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package noncestore provides short-lived nonce storage for PKI 2FA login.
 // InMemoryStore is suitable for single-instance dev; RedisStore for production.
 package noncestore

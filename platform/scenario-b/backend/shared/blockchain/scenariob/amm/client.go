@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package amm provides an EVM client for the AutomatedMarketMaker Hub contract.
 // It wraps go-ethereum/ethclient with a minimal embedded ABI so the API Gateway and
 // Payment Orchestrator can call read-only methods (getAmountIn/isPaused/reserves) and
@@ -314,7 +316,7 @@ func (c *Client) SwapExactOutput(ctx context.Context, req SwapRequest) (*SwapRes
 	if err := c.approveToken(ctx, tokenIn, maxAmountIn); err != nil {
 		return nil, fmt.Errorf("approve tokenIn for swap: %w", err)
 	}
-	txHash, err := evm.SubmitTx(ctx, c.ec, c.signer, c.contract, c.abi,
+	receipt, txHash, err := evm.SubmitTxReceipt(ctx, c.ec, c.signer, c.contract, c.abi,
 		"swapTokensForExactTokens",
 		tokenIn,
 		tokenOut,
@@ -325,7 +327,15 @@ func (c *Client) SwapExactOutput(ctx context.Context, req SwapRequest) (*SwapRes
 	if err != nil {
 		return nil, err
 	}
-	return &SwapResult{TxHash: txHash, AmountIn: req.MaxAmountIn, OrderID: req.PayerID}, nil
+	// Realized input cost comes from the on-chain LogSwap event, not from MaxAmountIn.
+	// Echoing the cap would make the orchestrator's post-trade slippage check a tautology
+	// and persist an inflated amount_in. Fall back to the cap only if the event is somehow
+	// absent — the swap already succeeded (receipt status checked), so we must not fail it.
+	amountIn := req.MaxAmountIn
+	if verified, perr := ParseSwapLogs(receipt.Logs, c.contract); perr == nil {
+		amountIn = verified.AmountIn
+	}
+	return &SwapResult{TxHash: txHash, AmountIn: amountIn, OrderID: req.PayerID}, nil
 }
 
 // approveToken grants the AMM contract max-uint256 allowance on a given ERC-20 token.

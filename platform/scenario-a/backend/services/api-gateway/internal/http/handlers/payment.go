@@ -1,10 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
+	besuscanner "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/besu"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
@@ -15,15 +19,36 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// TransferLimitChecker gates outgoing HTLC locks against CB-configured daily limits.
+type TransferLimitChecker interface {
+	CheckAndDeductTransferLimit(ctx context.Context, payerBankID, currency, amountHuman string) (allowed bool, errorCode, maxAmount string, err error)
+	RestoreTransferLimit(ctx context.Context, payerBankID, currency, amountHuman string) error
+}
+
 // PaymentHandler exposes the payment-orchestrator operations as REST endpoints.
 type PaymentHandler struct {
-	payment  *paymentadapter.GRPCAdapter
-	bankCode string // institution fallback when JWT lacks BankID (e.g. user not yet registered in compliance)
+	payment      *paymentadapter.GRPCAdapter
+	bankCode     string // institution fallback when JWT lacks BankID (e.g. user not yet registered in compliance)
+	htlcScanner  *besuscanner.HTLCScanner
+	fiatSymbol   string // currency for transfer limit checks (e.g. "BRL", "ARS"); empty = skip check
+	limitChecker TransferLimitChecker
 }
 
 // NewPaymentHandler creates a new PaymentHandler.
 func NewPaymentHandler(payment *paymentadapter.GRPCAdapter, bankCode string) *PaymentHandler {
 	return &PaymentHandler{payment: payment, bankCode: bankCode}
+}
+
+// SetHTLCScanner wires an on-chain scanner; when set, supervisor HTLC searches bypass the orchestrator.
+func (h *PaymentHandler) SetHTLCScanner(s *besuscanner.HTLCScanner) {
+	h.htlcScanner = s
+}
+
+// WithLimitChecker attaches a transfer-limit checker and the fiat currency symbol.
+func (h *PaymentHandler) WithLimitChecker(checker TransferLimitChecker, fiatSymbol string) *PaymentHandler {
+	h.limitChecker = checker
+	h.fiatSymbol = fiatSymbol
+	return h
 }
 
 // --- HTLC endpoints ---
@@ -46,10 +71,14 @@ func (h *PaymentHandler) LockHTLC(c *fiber.Ctx) error {
 		req.AgreementID = uuid.NewString()
 	}
 	if req.TimeLock == 0 {
-		req.TimeLock = uint64(time.Now().Unix()) + 3600 // 1h — initiator must have longer timelock
+		req.TimeLock = uint64(time.Now().Unix()) + 3600 // #nosec G115 -- time.Now().Unix() is always ≥0; overflow not reachable
+	}
+	if ok, err := h.checkAndDeductLimit(c, req.Amount); !ok {
+		return err
 	}
 	result, err := h.payment.LockHTLC(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock)
 	if err != nil {
+		h.restoreLimit(c, req.Amount)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(result)
@@ -74,10 +103,14 @@ func (h *PaymentHandler) LockHTLCWithHashLock(c *fiber.Ctx) error {
 		req.AgreementID = uuid.NewString()
 	}
 	if req.TimeLock == 0 {
-		req.TimeLock = uint64(time.Now().Unix()) + 1800 // 30min — responder must have shorter timelock than initiator
+		req.TimeLock = uint64(time.Now().Unix()) + 1800 // #nosec G115 -- time.Now().Unix() is always ≥0; overflow not reachable
+	}
+	if ok, err := h.checkAndDeductLimit(c, req.Amount); !ok {
+		return err
 	}
 	result, err := h.payment.LockHTLCWithHashLock(c.Context(), req.AgreementID, req.Receiver, req.Amount, req.TimeLock, req.HashLock)
 	if err != nil {
+		h.restoreLimit(c, req.Amount)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(result)
@@ -154,6 +187,25 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
 	}
 
+	// Supervisors have network-wide read access.
+	isSupervisor := false
+	for _, r := range claims.Roles {
+		if r == domain.RoleSupervisor {
+			isSupervisor = true
+			break
+		}
+	}
+
+	// Supervisor + on-chain scanner: bypass the payment-orchestrator entirely so all
+	// HTLCs on the network are visible, not just those indexed by this entity's orchestrator.
+	if isSupervisor && h.htlcScanner != nil {
+		scanResults, err := h.htlcScanner.ScanAllHTLCs(c.UserContext())
+		if err != nil {
+			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "on-chain scan failed: " + err.Error()})
+		}
+		return c.JSON(fiber.Map{"locks": scanResults, "total": len(scanResults)})
+	}
+
 	callerBankID := claims.BankID
 	if callerBankID == "" {
 		callerBankID = h.bankCode
@@ -168,6 +220,11 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 	)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if isSupervisor {
+		// Scanner not configured: fall back to orchestrator results (partial view).
+		return c.JSON(fiber.Map{"locks": results, "total": len(results)})
 	}
 
 	// Keep only records where the caller's institution is a counterparty.
@@ -604,6 +661,38 @@ func (h *PaymentHandler) ListFXAgreementEvents(c *fiber.Ctx) error {
 		return grpcErrorToHTTP(c, err)
 	}
 	return c.JSON(fiber.Map{"events": results, "total": len(results)})
+}
+
+// checkAndDeductLimit enforces the CB daily transfer limit before an HTLC lock.
+// Returns (true, nil) when allowed or no checker configured.
+// Returns (false, nil) after writing a 422/503 response — callers must return nil to Fiber.
+func (h *PaymentHandler) checkAndDeductLimit(c *fiber.Ctx, amount string) (bool, error) {
+	if h.limitChecker == nil || h.fiatSymbol == "" {
+		return true, nil
+	}
+	allowed, errorCode, _, err := h.limitChecker.CheckAndDeductTransferLimit(c.Context(), h.bankCode, h.fiatSymbol, amount)
+	if err != nil {
+		return false, c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error":      "transfer limit service unavailable",
+			"error_code": "LIMIT_SERVICE_UNAVAILABLE",
+		})
+	}
+	if !allowed {
+		return false, c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error":              "daily transfer limit exceeded",
+			"error_code":         errorCode,
+			"recommended_action": "Contact your Central Bank to review or increase the daily transfer limit.",
+		})
+	}
+	return true, nil
+}
+
+// restoreLimit is best-effort: called when an HTLC lock fails after a successful deduction.
+func (h *PaymentHandler) restoreLimit(c *fiber.Ctx, amount string) {
+	if h.limitChecker == nil || h.fiatSymbol == "" {
+		return
+	}
+	_ = h.limitChecker.RestoreTransferLimit(c.Context(), h.bankCode, h.fiatSymbol, amount)
 }
 
 // grpcErrorToHTTP maps gRPC status codes to appropriate HTTP responses.

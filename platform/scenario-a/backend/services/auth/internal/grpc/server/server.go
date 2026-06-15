@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package server
 
 import (
@@ -71,8 +73,8 @@ func (s *identityService) Login(ctx context.Context, req *authv1.LoginRequest) (
 		AccessToken:      tr.AccessToken,
 		RefreshToken:     tr.RefreshToken,
 		TokenType:        tr.TokenType,
-		ExpiresIn:        int32(tr.ExpiresIn),
-		RefreshExpiresIn: int32(tr.RefreshExpiresIn),
+		ExpiresIn:        int32(tr.ExpiresIn),        //#nosec G115 -- token TTL seconds from Keycloak are small positive values, fit int32
+		RefreshExpiresIn: int32(tr.RefreshExpiresIn), //#nosec G115 -- token TTL seconds from Keycloak are small positive values, fit int32
 	}, nil
 }
 
@@ -85,8 +87,8 @@ func (s *identityService) RefreshToken(ctx context.Context, req *authv1.RefreshT
 		AccessToken:      tr.AccessToken,
 		RefreshToken:     tr.RefreshToken,
 		TokenType:        tr.TokenType,
-		ExpiresIn:        int32(tr.ExpiresIn),
-		RefreshExpiresIn: int32(tr.RefreshExpiresIn),
+		ExpiresIn:        int32(tr.ExpiresIn),        //#nosec G115 -- token TTL seconds from Keycloak are small positive values, fit int32
+		RefreshExpiresIn: int32(tr.RefreshExpiresIn), //#nosec G115 -- token TTL seconds from Keycloak are small positive values, fit int32
 	}, nil
 }
 
@@ -365,7 +367,7 @@ func (s *identityService) ListUsers(ctx context.Context, req *authv1.ListUsersRe
 			BankCode:        p.BankCode,
 		})
 	}
-	return &authv1.ListUsersResponse{Users: users, Total: int32(len(users))}, nil
+	return &authv1.ListUsersResponse{Users: users, Total: int32(len(users))}, nil //#nosec G115 -- user count is a small non-negative slice length, fits int32
 }
 
 // GetUser returns the full profile of a single participant, enriched with the Keycloak username.
@@ -539,8 +541,8 @@ func (s *identityService) VerifyPKILogin(ctx context.Context, req *authv1.Verify
 		AccessToken:      tr.AccessToken,
 		RefreshToken:     tr.RefreshToken,
 		TokenType:        "Bearer",
-		ExpiresIn:        int32(tr.ExpiresIn),
-		RefreshExpiresIn: int32(tr.RefreshExpiresIn),
+		ExpiresIn:        int32(tr.ExpiresIn),        //#nosec G115 -- token TTL seconds from Keycloak are small positive values, fit int32
+		RefreshExpiresIn: int32(tr.RefreshExpiresIn), //#nosec G115 -- token TTL seconds from Keycloak are small positive values, fit int32
 	}, nil
 }
 

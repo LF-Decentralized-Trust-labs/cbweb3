@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package identity provides an EVM client for the IdentityRegistry contract.
 // The client uses an embedded ABI and go-ethereum/ethclient for read-only verification
 // of participant registration and governance eligibility (T057).

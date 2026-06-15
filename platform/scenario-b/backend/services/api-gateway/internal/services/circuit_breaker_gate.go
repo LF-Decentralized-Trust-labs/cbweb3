@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the Circuit Breaker gate for Scenario B swap execution (FR-030 / H4).
 package services
 

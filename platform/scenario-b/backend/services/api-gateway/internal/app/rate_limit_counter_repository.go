@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app provides RateLimitCounterRepository for database-backed rate limiting.
 //
 // Feature: 009-commercial-cross-currency-swap

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app provides the LPFeeEventRepository for fee distribution audit (FR-005 / data-model.md §1.2).
 package app
 

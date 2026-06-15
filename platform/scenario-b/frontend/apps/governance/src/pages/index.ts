@@ -11,3 +11,4 @@ export * from "./RedeemsApprovalPage";
 export * from "./RegistryPage";
 export * from "./SettingsPage";
 export * from "./SwapMonitorPage";
+export * from "./TransferLimitsPage";

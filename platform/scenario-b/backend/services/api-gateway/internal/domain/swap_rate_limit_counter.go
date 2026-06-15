@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines SwapRateLimitCounter model for database-backed rate limiting
 // (10 swaps/min, 100 swaps/hour per bank).
 //

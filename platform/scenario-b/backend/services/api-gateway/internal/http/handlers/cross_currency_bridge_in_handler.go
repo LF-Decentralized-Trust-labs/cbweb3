@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides the cross-currency bridge-in handler for the issuing CB.
 //
 // POST /internal/amm/cross-currency-bridge-in

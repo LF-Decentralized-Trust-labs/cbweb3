@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file registers API Gateway routes and attaches required dependencies.
 package router
 
@@ -16,6 +18,9 @@ type Dependencies struct {
 	AuthHandler            *handlers.AuthHandler
 	ComplianceHandler      *handlers.ComplianceHandler
 	GovernanceHandler      *handlers.GovernanceHandler
+	SupervisorHandler      *handlers.SupervisorHandler
+	OversightHandler       *handlers.OversightHandler       // Investigation Module: AML/CFT disclosure requests
+	TransferLimitHandler   *handlers.TransferLimitHandler   // Central Bank: Treasury transfer-limit CRUD (R1-10.1)
 	PaymentHandler         *handlers.PaymentHandler         // Payment orchestrator: HTLC + token operations
 	PaymentProxyHandler    *handlers.PaymentProxyHandler    // Commercial Bank: proxies escrow requests to CB
 	OnboardingHandler      *handlers.OnboardingHandler      // Central Bank: processes onboarding locally
@@ -72,6 +77,21 @@ func Setup(app *fiber.App, deps Dependencies) {
 	complianceGroup := app.Group("/api/v1/compliance", middleware.RequireCookieAuth(deps.AuthProvider))
 	complianceGroup.Get("/kyc/status/:subject", deps.ComplianceHandler.GetKYCStatus)
 	complianceGroup.Post("/aml/screen", deps.ComplianceHandler.AMLScreen)
+	if deps.SupervisorHandler != nil {
+		complianceGroup.Get("/audit/logs", middleware.RequireSupervisorRole(), deps.SupervisorHandler.GetAuditLogs)
+		complianceGroup.Post("/decrypt-transaction", middleware.RequireSupervisorRole(), deps.SupervisorHandler.DecryptTransaction)
+
+		// Read-only participants list for supervisor (same handler, no write access).
+		complianceGroup.Get("/participants/summary", middleware.RequireSupervisorRole(), deps.ComplianceHandler.ListParticipants)
+	}
+
+	// --- Investigation Module (AML/CFT Disclosure Requests — FR-034/FR-035/FR-036) ---
+	if deps.OversightHandler != nil {
+		oversightGroup := app.Group("/api/v1/oversight", middleware.RequireCookieAuth(deps.AuthProvider), middleware.RequireSupervisorRole())
+		oversightGroup.Post("/disclosure-request", deps.OversightHandler.OpenDisclosure)
+		oversightGroup.Post("/disclosure-sign", deps.OversightHandler.SignDisclosure)
+		oversightGroup.Get("/disclosure-status/:requestID", deps.OversightHandler.GetDisclosureStatus)
+	}
 
 	centralBankRoutes := complianceGroup.Group("", middleware.RequireRole(domain.RoleGovernance))
 	centralBankRoutes.Get("/participants", deps.ComplianceHandler.ListParticipants)
@@ -111,6 +131,17 @@ func Setup(app *fiber.App, deps Dependencies) {
 
 		govGroup.Get("/users", deps.GovernanceHandler.ListUsers)
 		govGroup.Get("/users/:userId", deps.GovernanceHandler.GetUser)
+	}
+
+	// --- Treasury: Transfer Limits (Central Bank only — ROLE_TREASURY, R1-10.1) ---
+	if deps.PaymentProxyHandler == nil && deps.TransferLimitHandler != nil {
+		tlGroup := app.Group("/api/v1/treasury/transfer-limits",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			middleware.RequireRole(domain.RoleTreasury),
+		)
+		tlGroup.Post("", deps.TransferLimitHandler.CreateTransferLimit)
+		tlGroup.Get("", deps.TransferLimitHandler.ListTransferLimits)
+		tlGroup.Delete("/:id", deps.TransferLimitHandler.DeleteTransferLimit)
 	}
 
 	// --- Payment Orchestrator (HTLC + Token) ---

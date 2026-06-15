@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package repository
 
 import (
@@ -16,7 +18,7 @@ import (
 type Participant struct {
 	UserID              string
 	InstitutionName     string
-	CNPJ                string
+	LegalEntityID       string
 	BankCode            string
 	CountryCode         string
 	Role                string
@@ -79,6 +81,26 @@ type SystemParameter struct {
 	UpdatedBy string
 }
 
+// TransferLimit is the domain struct for a CB-configured daily transfer limit (R1-10.1).
+type TransferLimit struct {
+	LimitID       string
+	CentralBankID string
+	ParticipantID string
+	Currency      string
+	MaxAmount     string
+	IsActive      bool
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// TransferVolume tracks the daily accumulated volume for a participant/currency pair.
+type TransferVolume struct {
+	ParticipantID  string
+	Currency       string
+	WindowDate     time.Time
+	AccumulatedWei string
+}
+
 // --- Repository interface ---
 
 type Repository interface {
@@ -89,6 +111,14 @@ type Repository interface {
 	GetAuditLogs(ctx context.Context, f AuditFilter) ([]AuditRecord, error)
 	GetSystemParameter(ctx context.Context, key string) (string, bool, error)
 	UpsertSystemParameter(ctx context.Context, p SystemParameter) error
+	// Transfer Limits (R1-10.1)
+	CreateTransferLimit(ctx context.Context, limit TransferLimit) error
+	ListTransferLimits(ctx context.Context, centralBankID string) ([]TransferLimit, error)
+	FindApplicableLimit(ctx context.Context, centralBankID, participantID, currency string) (*TransferLimit, error)
+	DeleteTransferLimit(ctx context.Context, limitID string) error
+	DeductTransferVolume(ctx context.Context, participantID, currency, amountWei string, windowDate time.Time) error
+	RestoreTransferVolume(ctx context.Context, participantID, currency, amountWei string, windowDate time.Time) error
+	GetAccumulatedVolume(ctx context.Context, participantID, currency string, windowDate time.Time) (string, error)
 }
 
 // --- In-memory implementation (dev / testing) ---
@@ -98,12 +128,17 @@ type memoryRepository struct {
 	participants map[string]Participant
 	auditLogs    []AuditRecord
 	params       map[string]SystemParameter
+	// Transfer Limits (R1-10.1)
+	limits  map[string]TransferLimit // key = limitID
+	volumes map[string]string        // key = participantID|currency|date → accumulated wei
 }
 
 func NewMemoryRepository() Repository {
 	return &memoryRepository{
 		participants: map[string]Participant{},
 		params:       map[string]SystemParameter{},
+		limits:       map[string]TransferLimit{},
+		volumes:      map[string]string{},
 	}
 }
 
@@ -214,6 +249,8 @@ func NewGormRepository(dsn string) (Repository, error) {
 		&ParticipantModel{},
 		&AuditLogModel{},
 		&SystemParameterModel{},
+		&TransferLimitModel{},
+		&TransferVolumeModel{},
 	); err != nil {
 		return nil, err
 	}
@@ -229,7 +266,7 @@ func (r *gormRepository) UpsertParticipant(ctx context.Context, p Participant) e
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "user_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"institution_name", "cnpj", "bank_code", "country_code",
+				"institution_name", "legal_entity_id", "bank_code", "country_code",
 				"participant_role", "wallet_address", "status",
 				"certificate_data", "certificate_expiry",
 				"blockchain_pub_key_hex", "csr_pem",
@@ -261,7 +298,7 @@ func (r *gormRepository) ListParticipants(ctx context.Context, f ParticipantFilt
 		q = q.Where("bank_code = ?", f.BankCode)
 	} else if f.Search != "" {
 		like := "%" + f.Search + "%"
-		q = q.Where("institution_name ILIKE ? OR cnpj ILIKE ?", like, like)
+		q = q.Where("institution_name ILIKE ? OR legal_entity_id ILIKE ?", like, like)
 	}
 	var models []ParticipantModel
 	if err := q.Find(&models).Error; err != nil {
@@ -368,7 +405,7 @@ func participantToModel(p Participant) ParticipantModel {
 	return ParticipantModel{
 		UserID:              p.UserID,
 		InstitutionName:     p.InstitutionName,
-		CNPJ:                p.CNPJ,
+		LegalEntityID:       p.LegalEntityID,
 		BankCode:            p.BankCode,
 		CountryCode:         p.CountryCode,
 		Role:                p.Role,
@@ -387,7 +424,7 @@ func participantFromModel(m ParticipantModel) Participant {
 	return Participant{
 		UserID:              m.UserID,
 		InstitutionName:     m.InstitutionName,
-		CNPJ:                m.CNPJ,
+		LegalEntityID:       m.LegalEntityID,
 		BankCode:            m.BankCode,
 		CountryCode:         m.CountryCode,
 		Role:                m.Role,

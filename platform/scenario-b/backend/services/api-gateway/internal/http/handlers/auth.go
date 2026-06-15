@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file handles login, refresh, logout, and onboarding endpoints.
 package handlers
 

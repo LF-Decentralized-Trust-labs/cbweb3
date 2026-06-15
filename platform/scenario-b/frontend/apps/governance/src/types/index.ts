@@ -11,3 +11,4 @@ export * from "./payment.types";
 export * from "./liquidity.types";
 export * from "./circuit-breaker-v2.types";
 export * from "./oversight.types";
+export * from "./transfer-limits.types";

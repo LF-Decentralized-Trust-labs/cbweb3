@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
@@ -38,12 +38,20 @@ contract DeployCBWeb3SpokeTest is Test {
         deployScript = new DeployCBWeb3Spoke();
         deployScript.setUp();
 
-        /// @dev Always set explicit defaults to avoid env contamination from other test suites
         deployerPrivateKey = uint256(0x1);
         expectedDeployer = vm.addr(deployerPrivateKey);
+    }
 
+    /// @dev Sets the deployment env. Called inside the test body (not setUp) because vm.setEnv
+    ///      mutates a process-global env: a sibling deploy-script suite's setUp() can overwrite
+    ///      these keys between this suite's setUp() and run(), causing non-deterministic flakes.
+    ///      Setting them immediately before run() guarantees they hold at envAddress() read time.
+    function _setDeployEnv() internal {
         vm.setEnv("DEPLOYER_PRIVATE_KEY", vm.toString(deployerPrivateKey));
-        vm.setEnv("ADMIN_ADDRESS", vm.toString(address(0x1234567890123456789012345678901234567890)));
+        // ADMIN_ADDRESS must be the broadcaster (deployer) so it holds DEFAULT_ADMIN_ROLE on
+        // the freshly-deployed IdentityRegistry and can grant GOVERNANCE_ROLE to the central
+        // bank inside run(); otherwise grantRole reverts with AccessControlUnauthorizedAccount.
+        vm.setEnv("ADMIN_ADDRESS", vm.toString(expectedDeployer));
         vm.setEnv("CENTRAL_BANK_ADDRESS", vm.toString(address(0x2345678901234567890123456789012345678901)));
         vm.setEnv("TOKEN_NAME", TOKEN_NAME);
         vm.setEnv("TOKEN_SYMBOL", TOKEN_SYMBOL);
@@ -53,6 +61,7 @@ contract DeployCBWeb3SpokeTest is Test {
 
     /// @dev The script should deploy IdentityRegistry, a single token, and HTLC.
     function test_ScriptRun_Success() public {
+        _setDeployEnv();
         deployScript.run();
 
         IdentityRegistry identityRegistry = deployScript.identityRegistry();

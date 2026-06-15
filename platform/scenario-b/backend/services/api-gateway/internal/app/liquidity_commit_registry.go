@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app — LiquidityCommitRegistry EVM adapter.
 // Wraps the on-chain LiquidityCommitRegistry contract (contracts/src/LiquidityCommitRegistry.sol)
 // for use by sovereign_liquidity_service.go and the CommitLiquidity handler

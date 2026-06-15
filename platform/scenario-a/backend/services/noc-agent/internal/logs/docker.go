@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package logs provides Docker container log collection over the Unix socket API
 // without depending on the Docker SDK.
 package logs

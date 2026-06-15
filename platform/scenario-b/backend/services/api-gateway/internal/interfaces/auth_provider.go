@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file declares the authentication provider contract used by handlers.
 package interfaces
 

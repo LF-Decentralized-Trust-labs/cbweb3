@@ -24,10 +24,10 @@ import { liquidityApi } from "../../services/api/liquidity.api";
 import { paymentApi } from "../../services/api";
 import type { LpBalanceResponse, PendingCommit } from "../../types/liquidity.types";
 import type { BalanceResponse } from "../../types/payment.types";
-import { formatTokenAmount } from "../../types";
+import { currencyFromTokenSymbol, formatCeBM, formatTokenAmount } from "../../types";
 import type { MatchContext } from "./CooperativeLiquidityWizard";
 import { CooperativeLiquidityWizard } from "./CooperativeLiquidityWizard";
-import { formatRemainingMs, remainingMsUntil, truncateAddress } from "./format";
+import { classifyPoolSides, formatRemainingMs, poolSideInfo, remainingMsUntil, sideRoleLabel, truncateAddress } from "./format";
 import { useLiquidityStore } from "./liquidity.store";
 
 const configuredPoolPair = (import.meta.env.VITE_POOL_PAIR ?? "W-BRL-ARS").trim() || "W-BRL-ARS";
@@ -98,6 +98,12 @@ export function LiquidityManagementPage() {
       window.clearInterval(id);
     };
   }, []);
+
+  // National currency is sourced on-chain from the CB's own tCeBM symbol (falls back to env
+  // VITE_FIAT_SYMBOL until the balance loads); the foreign side comes from the pair id. This
+  // classifies each pool side as National/Foreign relative to the viewing Central Bank.
+  const nationalCurrency = currencyFromTokenSymbol(cbTokenBalance?.symbol);
+  const poolSides = classifyPoolSides(configuredPoolPair, nationalCurrency);
 
   const handleRemoveLiquidity = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -189,8 +195,8 @@ export function LiquidityManagementPage() {
           ) : (
             <Badge variant="success">Pool balanced</Badge>
           )}
-          <p className="text-sm">Reserve A: {poolStatus?.reserve_a ? formatTokenAmount(poolStatus.reserve_a, tokenDecimals) : "-"}</p>
-          <p className="text-sm">Reserve B: {poolStatus?.reserve_b ? formatTokenAmount(poolStatus.reserve_b, tokenDecimals) : "-"}</p>
+          <p className="text-sm">Reserve — {sideRoleLabel(poolSides.a, { fallbackLabel: "Token A" })}: {poolStatus?.reserve_a ? formatTokenAmount(poolStatus.reserve_a, tokenDecimals) : "-"}</p>
+          <p className="text-sm">Reserve — {sideRoleLabel(poolSides.b, { fallbackLabel: "Token B" })}: {poolStatus?.reserve_b ? formatTokenAmount(poolStatus.reserve_b, tokenDecimals) : "-"}</p>
           <p className="text-sm">Current ratio: {poolStatus?.current_ratio ?? "-"}</p>
           <p className="text-xs text-muted-foreground">Updated at: {poolStatus?.updated_at ?? "-"}</p>
         </CardContent>
@@ -221,7 +227,7 @@ export function LiquidityManagementPage() {
             <p className="text-xs text-muted-foreground">tCeBM balance</p>
             <p className="text-sm font-medium">
               {cbTokenBalance
-                ? formatTokenAmount(cbTokenBalance.balance, cbTokenBalance.decimals ?? tokenDecimals)
+                ? formatCeBM(cbTokenBalance.balance, cbTokenBalance.decimals ?? tokenDecimals, cbTokenBalance.symbol)
                 : "-"}
             </p>
           </div>
@@ -271,14 +277,14 @@ export function LiquidityManagementPage() {
           {poolActive ? (
             <div className="space-y-1">
               <Badge variant="success">Pool ACTIVE</Badge>
-              <p className="text-sm">Both sides are funded. Reserves A {poolStatus?.reserve_a ? formatTokenAmount(poolStatus.reserve_a, tokenDecimals) : "-"} / B {poolStatus?.reserve_b ? formatTokenAmount(poolStatus.reserve_b, tokenDecimals) : "-"}.</p>
+              <p className="text-sm">Both sides are funded. Reserves {sideRoleLabel(poolSides.a, { short: true, fallbackLabel: "A" })} {poolStatus?.reserve_a ? formatTokenAmount(poolStatus.reserve_a, tokenDecimals) : "-"} / {sideRoleLabel(poolSides.b, { short: true, fallbackLabel: "B" })} {poolStatus?.reserve_b ? formatTokenAmount(poolStatus.reserve_b, tokenDecimals) : "-"}.</p>
             </div>
           ) : counterpartCommit ? (
             <div className="space-y-3 rounded border border-amber-300 bg-amber-50 p-3">
               <Badge variant="warning">Counterpart waiting on you</Badge>
               <p className="text-sm">
-                A counterpart central bank committed <strong>{formatTokenAmount(counterpartCommit.amount, tokenDecimals)} tCeBM</strong> to side{" "}
-                <strong>{counterpartCommit.side}</strong> and is waiting for your matching deposit.
+                A counterpart central bank committed <strong>{formatTokenAmount(counterpartCommit.amount, tokenDecimals)} tCeBM</strong> to the{" "}
+                <strong>{sideRoleLabel(poolSideInfo(counterpartCommit.side, configuredPoolPair, nationalCurrency), { fallbackLabel: `side ${counterpartCommit.side}` })}</strong> side and is waiting for your matching deposit.
               </p>
               {counterpartCommit.suggested_match_amount ? (
                 <p className="text-sm">
@@ -300,7 +306,7 @@ export function LiquidityManagementPage() {
             <div className="space-y-3">
               <Badge variant="outline">Waiting for counterpart</Badge>
               <p className="text-sm">
-                Your commit {ownPendingCommit.commit_id} (side {ownPendingCommit.side}) is registered and awaiting a
+                Your commit {ownPendingCommit.commit_id} ({sideRoleLabel(poolSideInfo(ownPendingCommit.side, configuredPoolPair, nationalCurrency), { fallbackLabel: `side ${ownPendingCommit.side}` })}) is registered and awaiting a
                 counterpart deposit.
               </p>
               <p className="text-xs text-muted-foreground">
@@ -402,8 +408,8 @@ export function LiquidityManagementPage() {
                 <TableHead>LP ID</TableHead>
                 <TableHead>Pool Pair</TableHead>
                 <TableHead>Provider</TableHead>
-                <TableHead>Token A</TableHead>
-                <TableHead>Token B</TableHead>
+                <TableHead>{sideRoleLabel(poolSides.a, { fallbackLabel: "Token A" })}</TableHead>
+                <TableHead>{sideRoleLabel(poolSides.b, { fallbackLabel: "Token B" })}</TableHead>
                 <TableHead>LP Shares (on-chain)</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Added At</TableHead>

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package bootstrap handles automatic provisioning of the Central Bank
 // governance participant on service startup.
 package bootstrap
