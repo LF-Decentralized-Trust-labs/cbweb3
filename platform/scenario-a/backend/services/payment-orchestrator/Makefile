@@ -24,7 +24,7 @@ test:
 	$(GO) test ./internal/...
 
 test-coverage:
-	CGO_ENABLED=0 $(GO) test $(CORE_PKGS) -coverpkg=$(COVERPKGS) -coverprofile=coverage.out -covermode=atomic
+	CGO_ENABLED=0 $(GO) test -count=1 $(CORE_PKGS) -coverpkg=$(COVERPKGS) -coverprofile=coverage.out -covermode=atomic
 	$(GO) tool cover -func=coverage.out | awk '/total:/ { gsub("%","",$$3); if ($$3+0 < $(COVERAGE_THRESHOLD)) { printf "coverage %.2f%% is below threshold $(COVERAGE_THRESHOLD)%%\n", $$3; exit 1 } else { printf "coverage %.2f%% meets threshold $(COVERAGE_THRESHOLD)%%\n", $$3 } }'
 
 vet:
