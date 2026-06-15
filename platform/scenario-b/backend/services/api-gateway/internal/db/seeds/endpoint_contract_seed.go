@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package seeds provides initial data seeding for Scenario B endpoint contracts (FR-055 / data-model.md §2).
 package seeds
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file declares KYC read and write contracts used by compliance flows.
 package interfaces
 

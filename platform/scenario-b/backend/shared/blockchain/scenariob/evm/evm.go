@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package evm provides shared helpers for building Scenario B EVM clients on top of
 // go-ethereum/ethclient. Each concrete client (AMM, SpokeBridge) reuses these helpers to
 // dial the Hub or Spoke RPC, sign transactions from a hex-encoded private key, and bind

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides the cross-currency swap HTTP handler for commercial banks
 // (009-commercial-cross-currency-swap / FR-001).
 package handlers

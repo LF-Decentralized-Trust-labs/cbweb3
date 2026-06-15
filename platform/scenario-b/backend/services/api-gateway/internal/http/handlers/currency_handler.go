@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides HTTP handlers for CurrencyRegistry operations (006-hub-currency-registry).
 // Exposes three endpoints:
 //

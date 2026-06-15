@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services — CentralBankPoolClient proxies pool status reads to the spoke's
 // Central Bank API gateway (CENTRAL_BANK_API_URL). Commercial banks do not read the
 // Hub sovereign AMM directly; the CB gateway holds SOVEREIGN_AMM_ADDRESS and DB enrichment.

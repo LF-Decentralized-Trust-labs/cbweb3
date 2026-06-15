@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the bridge lock-mint service for Scenario B (FR-029 / SC-015).
 package services
 

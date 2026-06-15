@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file registers API Gateway routes and attaches required dependencies.
 package router
 

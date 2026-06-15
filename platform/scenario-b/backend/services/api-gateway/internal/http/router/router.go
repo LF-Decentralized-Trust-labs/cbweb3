@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package router registers API Gateway routes and attaches required dependencies.
 // Scenario B v2 routes are registered by the v2 sub-package (T045/T070/T091).
 package router

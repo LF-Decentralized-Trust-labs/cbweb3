@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package paladin provides the real ZetoOperator implementation that talks to
 // Paladin sidecar nodes via their JSON-RPC HTTP API (POST /).
 package paladin

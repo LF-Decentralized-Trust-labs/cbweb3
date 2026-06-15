@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines the BridgedAssetPosition and RelayerQueueItem models for the
 // gateway-local bridge service (FR-029 / FR-031 / FR-032 / data-model §6).
 //

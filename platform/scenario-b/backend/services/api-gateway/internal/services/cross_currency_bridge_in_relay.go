@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides CrossCurrencyBridgeInRelay for delegating the bridge-in
 // lock-mint to the issuing Central Bank of the initiating bank's own spoke.
 //

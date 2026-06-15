@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file handles all compliance endpoints: KYC status, credential issuance,
 // proof verification, AML screening, participant provisioning, and account freeze.
 package handlers

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides PairService — the business logic layer for pair proposal and confirmation.
 // Bridges PairHandler requests to the on-chain PairRegistryClient and the DB PairRepository (D9/D11).
 package services

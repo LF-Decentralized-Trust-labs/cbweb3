@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the bridge burn-unlock service for Scenario B (FR-029 / FR-032 / SC-015).
 package services
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package complianceclient is the gRPC client that the identity service uses
 // to communicate with the compliance-orchestrator service.
 // It replaces dataaccessclient — all persistence and compliance operations now

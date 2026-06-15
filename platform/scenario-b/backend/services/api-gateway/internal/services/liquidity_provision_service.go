@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the liquidity provision service for Scenario B (FR-027 / data-model.md §9).
 // Extended for 005-cooperative-liquidity: commit-reveal, fee distribution, proportional withdrawal.
 package services

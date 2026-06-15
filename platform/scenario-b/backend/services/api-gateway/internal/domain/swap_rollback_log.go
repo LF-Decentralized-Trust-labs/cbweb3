@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines SwapRollbackLog model for auditing automatic rollback
 // attempts when swap fails after bridge-in succeeds.
 //

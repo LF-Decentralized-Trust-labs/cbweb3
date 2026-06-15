@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides liquidity provision HTTP handlers for Scenario B (FR-027).
 // Extended for 005-cooperative-liquidity: commit-reveal, pool status enrichment.
 // Extended for 007-bridge-based-cb-liquidity: sovereign CB liquidity, on-chain commit gate.

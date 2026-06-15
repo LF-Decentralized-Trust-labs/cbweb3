@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package pusher sends collected health data to the NOC backend.
 package pusher
 

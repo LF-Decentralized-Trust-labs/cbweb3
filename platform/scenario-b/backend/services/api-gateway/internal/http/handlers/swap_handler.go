@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides the AMM swap HTTP handler for Scenario B (FR-027 / FR-057 / FR-058 / FR-059).
 package handlers
 

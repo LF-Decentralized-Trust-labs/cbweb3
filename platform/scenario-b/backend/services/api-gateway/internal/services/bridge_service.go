@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides gateway-local bridge services that interact with the shared
 // Postgres tables. In production, the payment-orchestrator drives the Relayer lifecycle;
 // the gateway provides the REST surface for creating positions and listing state.

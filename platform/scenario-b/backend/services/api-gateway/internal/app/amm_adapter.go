@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app provides adapters that bridge the amm.Client to the service-layer interfaces.
 package app
 

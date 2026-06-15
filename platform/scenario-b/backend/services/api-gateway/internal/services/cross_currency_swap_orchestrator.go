@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides CrossCurrencySwapOrchestrator for coordinating the 3-step
 // cross-currency swap flow (bridge-in → swap Hub → bridge-out).
 //

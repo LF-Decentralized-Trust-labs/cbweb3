@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package main provides a background job to delete expired swap quotes.
 // Run hourly via cron to clean up quotes older than 1 hour (T036).
 package main

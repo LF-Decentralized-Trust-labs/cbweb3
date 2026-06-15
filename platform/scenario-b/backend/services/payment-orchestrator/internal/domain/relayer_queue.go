@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines the RelayerQueueItem model for Scenario B idempotent bridging retries.
 package domain
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers contains the governance portal handlers for the Central Bank role.
 // These handlers expose participant management, credential issuance, account control,
 // circuit breaker, global parameters, and audit log endpoints.

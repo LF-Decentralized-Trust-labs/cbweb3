@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides contract tests for the PoolHandler (FR-028).
 package handlers_test
 

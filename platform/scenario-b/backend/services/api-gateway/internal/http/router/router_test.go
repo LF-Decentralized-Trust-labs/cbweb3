@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file tests route registration and basic router wiring.
 package router
 

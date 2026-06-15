@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides the AMM quote HTTP handler for Scenario B (FR-027 / SC-013).
 package handlers
 

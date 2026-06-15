@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package compliance provides a gRPC client adapter for the compliance-orchestrator.
 // Used by the governance handler to manage participants, certificates, audit logs,
 // circuit breaker, and system parameters.

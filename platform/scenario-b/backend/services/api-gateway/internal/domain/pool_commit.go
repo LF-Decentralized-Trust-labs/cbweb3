@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines the PoolCommit model for cooperative liquidity commit-reveal (FR-001 / data-model.md §1.1).
 package domain
 

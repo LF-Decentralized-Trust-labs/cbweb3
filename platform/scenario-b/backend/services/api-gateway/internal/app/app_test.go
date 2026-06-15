@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file runs end-to-end style tests for gateway routes and auth flows.
 package app_test
 

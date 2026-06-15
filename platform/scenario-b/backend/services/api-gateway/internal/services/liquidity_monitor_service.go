@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the Liquidity Monitor service for Scenario B (FR-028 / FR-037 / SC-014).
 // Performance gate: polling cadence p95 <= 15s (SC-023).
 package services

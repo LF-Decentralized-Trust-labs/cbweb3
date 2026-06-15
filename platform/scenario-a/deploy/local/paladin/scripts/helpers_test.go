@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package scripts_test contains shared helpers used by the Paladin deploy and
 // register test scripts. These helpers read Paladin K8s artifact YAML files to
 // extract contract bytecode for deployment.

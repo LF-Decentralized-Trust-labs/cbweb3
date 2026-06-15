@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides PairRouter — the in-memory routing cache for multi-pair AMM support.
 // PairRouter maps pool_pair strings (e.g. "BRL-USD") to their dedicated AMM client instances.
 // It is initialized at startup from the on-chain PairRegistry.getAllActivePairs() and

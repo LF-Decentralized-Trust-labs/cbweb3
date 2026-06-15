@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services — SovereignLiquidityService.
 // Handles the matched-commit execution path for sovereign CB liquidity pairs
 // (007-bridge-based-cb-liquidity / FR-003, FR-005, NFR-001).

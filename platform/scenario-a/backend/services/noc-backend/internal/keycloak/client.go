@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package keycloak provides a minimal Keycloak JWT validator for the NOC backend.
 // It only needs to validate RS256 tokens and extract subject + realm roles.
 package keycloak

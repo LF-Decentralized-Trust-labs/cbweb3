@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides SwapRollbackCoordinator for handling automatic rollback
 // when swap fails after successful bridge-in (FR-010).
 //

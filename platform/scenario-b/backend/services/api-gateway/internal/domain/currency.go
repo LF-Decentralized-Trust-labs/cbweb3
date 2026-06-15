@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package domain
 
 // CurrencyEntry is the in-memory representation of a registered currency
