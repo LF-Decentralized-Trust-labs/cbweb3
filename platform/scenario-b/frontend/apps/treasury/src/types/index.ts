@@ -1,5 +1,5 @@
 export type { AsyncStatus, ApiResponse, ErrorEnvelope } from "./common.types";
-export type { Role, TreasuryUser, LoginRequest, LoginResponse } from "./auth.types";
+export type { Role, TreasuryUser, LoginRequest, MeResponse } from "./auth.types";
 export type { FundingRequestStatus, FundingRequest, FundingDecisionPayload } from "./funding.types";
 export type {
   TreasuryOperationKind,

@@ -1,13 +1,12 @@
-import type { LoginResponse } from "../../types";
+import type { MeResponse } from "../../types";
 import { httpClient } from "./http-client";
 
 export const authApi = {
-  login: async (username: string, password: string): Promise<LoginResponse> => {
-    const response = await httpClient.post<LoginResponse>("/auth/login", { username, password });
-    return response.data;
+  login: async (clientId: string, clientSecret: string): Promise<void> => {
+    await httpClient.post("/auth/login", { clientId, clientSecret });
   },
-  me: async (): Promise<LoginResponse> => {
-    const response = await httpClient.get<LoginResponse>("/auth/me");
+  me: async (): Promise<MeResponse> => {
+    const response = await httpClient.get<MeResponse>("/auth/me");
     return response.data;
   },
   logout: async (): Promise<void> => {
