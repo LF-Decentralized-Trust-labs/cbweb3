@@ -4,7 +4,6 @@ import {
   Gauge,
   Eye,
   LayoutDashboard,
-  Landmark,
   ListChecks,
   Lock,
   Scale,
@@ -34,14 +33,10 @@ const scenarioANavItems = [
 const scenarioBNavItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/registry", label: "Registry", icon: ClipboardCheck },
-  { to: "/liquidity", label: "Liquidity Management", icon: Landmark },
-  { to: "/deposits-approval", label: "Issuance Approvals", icon: Wallet },
-  { to: "/escrows-approval", label: "Tokenisation Approvals", icon: ListChecks },
-  { to: "/redeems-approval", label: "Redeem Approvals", icon: Gauge },
+  { to: "/accounts", label: "Accounts", icon: Users },
   { to: "/swap-monitor", label: "Swap Monitor", icon: ListChecks },
   { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
   { to: "/oversight", label: "Oversight", icon: Eye },
-  { to: "/transfer-limits", label: "Transfer Limits", icon: Scale },
   { to: "/audit", label: "Audit", icon: ClipboardCheck },
   { to: "/settings", label: "Settings", icon: Settings },
 ];

@@ -1,9 +1,13 @@
 import type { IssueCredentialPayload, IssuedCredential } from "../../types";
-import { mockDb } from "../mocks/mock-db";
-
-const issuer = "Treasury Operator";
+import { httpClient } from "./http-client";
 
 export const kycApi = {
-  issue: (payload: IssueCredentialPayload): Promise<IssuedCredential> => mockDb.issueCredential(payload, issuer),
-  list: (): Promise<IssuedCredential[]> => mockDb.getIssuedCredentials(),
+  issue: async (payload: IssueCredentialPayload): Promise<IssuedCredential> => {
+    const response = await httpClient.post<IssuedCredential>("/kyc/credentials/issue", payload);
+    return response.data;
+  },
+  list: async (): Promise<IssuedCredential[]> => {
+    const response = await httpClient.get<{ credentials: IssuedCredential[] }>("/kyc/credentials");
+    return response.data.credentials ?? [];
+  },
 };

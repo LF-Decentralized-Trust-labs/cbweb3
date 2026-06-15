@@ -15,3 +15,5 @@ export type { AuditLogEntry, AuditFilter } from "./audit.types";
 export type { IssueCredentialPayload, IssuedCredential } from "./kyc.types";
 export type { EventType, TreasuryEvent } from "./events.types";
 export type { TransferLimit, CreateTransferLimitPayload } from "./transfer-limits.types";
+export * from "./payment.types";
+export * from "./liquidity.types";

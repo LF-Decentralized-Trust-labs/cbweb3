@@ -7,3 +7,4 @@ export { useKycStore } from "./kyc.store";
 export { useTransferLimitsStore } from "./transfer-limits.store";
 export { useWebsocketStore } from "./websocket.store";
 export { useUiStore } from "./ui.store";
+export { usePaymentStore } from "./payment.store";

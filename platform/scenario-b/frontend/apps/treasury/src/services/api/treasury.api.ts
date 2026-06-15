@@ -1,10 +1,31 @@
 import type { BurnPayload, BurnToMintValidation, MintPayload, SupplySnapshot, TreasuryOperation } from "../../types";
-import { mockDb } from "../mocks/mock-db";
+import { httpClient } from "./http-client";
+
+type OperationsResponse = {
+  operations: TreasuryOperation[];
+};
 
 export const treasuryApi = {
-  getSupply: (): Promise<SupplySnapshot> => mockDb.getSupplySnapshot(),
-  getOperations: (): Promise<TreasuryOperation[]> => mockDb.getOperations(),
-  validateBurnToMint: (requestId: string, amount: string): Promise<BurnToMintValidation> => mockDb.validateBurnToMint(requestId, amount),
-  mint: (payload: MintPayload): Promise<TreasuryOperation> => mockDb.mint(payload),
-  burn: (payload: BurnPayload): Promise<TreasuryOperation> => mockDb.burn(payload),
+  getSupply: async (): Promise<SupplySnapshot> => {
+    const response = await httpClient.get<SupplySnapshot>("/treasury/supply");
+    return response.data;
+  },
+  getOperations: async (): Promise<TreasuryOperation[]> => {
+    const response = await httpClient.get<OperationsResponse>("/treasury/operations");
+    return response.data.operations ?? [];
+  },
+  validateBurnToMint: async (requestId: string, amount: string): Promise<BurnToMintValidation> => {
+    const response = await httpClient.get<BurnToMintValidation>("/treasury/validate-burn-to-mint", {
+      params: { requestId, amount },
+    });
+    return response.data;
+  },
+  mint: async (payload: MintPayload): Promise<TreasuryOperation> => {
+    const response = await httpClient.post<TreasuryOperation>("/treasury/mint", payload);
+    return response.data;
+  },
+  burn: async (payload: BurnPayload): Promise<TreasuryOperation> => {
+    const response = await httpClient.post<TreasuryOperation>("/treasury/burn", payload);
+    return response.data;
+  },
 };
