@@ -82,8 +82,8 @@ export function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Real-time Alerts (SSE)</CardTitle>
-            <CardDescription>Latest backend telemetry notifications.</CardDescription>
+            <CardTitle>System Events</CardTitle>
+            <CardDescription>State changes detected by polling circuit breaker, pool status, and audit logs (30s interval).</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             {events.slice(0, 8).map((event) => (
