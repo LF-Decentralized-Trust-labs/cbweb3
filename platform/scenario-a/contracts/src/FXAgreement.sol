@@ -89,8 +89,18 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
         });
 
         emit AgreementProposed(
-            tradeId, msg.sender, counterpartyB, settlementAgent, custodian, beneficiary,
-            originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate
+            tradeId,
+            msg.sender,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
         );
     }
 
@@ -149,8 +159,18 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
         });
 
         emit AgreementProposed(
-            tradeId, originator, counterpartyB, settlementAgent, custodian, beneficiary,
-            originAmount, counterAmount, originCurrency, counterCurrency, rate, expiryDate
+            tradeId,
+            originator,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate
         );
     }
 

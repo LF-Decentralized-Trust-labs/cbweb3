@@ -11,6 +11,7 @@ import {FXAgreement} from "../src/FXAgreement.sol";
 import {IFXAgreement} from "../src/interfaces/IFXAgreement.sol";
 import {FXAgreementLibrary} from "../src/libraries/FXAgreementLibrary.sol";
 import {DeployHTLC} from "../script/HashTimeLockedContract.s.sol";
+import {CommitmentHashRegistry} from "../src/CommitmentHashRegistry.sol";
 
 contract HashTimeLockedContractTest is Test {
     event LogHTLCLocked(
@@ -217,7 +218,19 @@ contract HashTimeLockedContractTest is Test {
         uint256 fxExpiry = block.timestamp + 1 days;
 
         vm.prank(sender);
-        fxAgreement.propose(fxTradeId, receiver, address(0), address(0), address(0), 1e18, 1e18, bytes32("BRL"), bytes32("EUR"), 5e18, fxExpiry);
+        fxAgreement.propose(
+            fxTradeId,
+            receiver,
+            address(0),
+            address(0),
+            address(0),
+            1e18,
+            1e18,
+            bytes32("BRL"),
+            bytes32("EUR"),
+            5e18,
+            fxExpiry
+        );
 
         vm.prank(receiver);
         fxAgreement.accept(fxTradeId);
@@ -235,7 +248,19 @@ contract HashTimeLockedContractTest is Test {
         uint256 fxExpiry = block.timestamp + 1 days;
 
         vm.prank(sender);
-        fxAgreement.propose(fxTradeId, receiver, address(0), address(0), address(0), 1e18, 1e18, bytes32("BRL"), bytes32("EUR"), 5e18, fxExpiry);
+        fxAgreement.propose(
+            fxTradeId,
+            receiver,
+            address(0),
+            address(0),
+            address(0),
+            1e18,
+            1e18,
+            bytes32("BRL"),
+            bytes32("EUR"),
+            5e18,
+            fxExpiry
+        );
 
         vm.prank(sender);
         bytes32 newContractId = keccak256("HTLC_WITH_FX_002");
@@ -248,7 +273,19 @@ contract HashTimeLockedContractTest is Test {
         uint256 fxExpiry = block.timestamp + 1 hours;
 
         vm.prank(sender);
-        fxAgreement.propose(fxTradeId, receiver, address(0), address(0), address(0), 1e18, 1e18, bytes32("BRL"), bytes32("EUR"), 5e18, fxExpiry);
+        fxAgreement.propose(
+            fxTradeId,
+            receiver,
+            address(0),
+            address(0),
+            address(0),
+            1e18,
+            1e18,
+            bytes32("BRL"),
+            bytes32("EUR"),
+            5e18,
+            fxExpiry
+        );
 
         vm.prank(receiver);
         fxAgreement.accept(fxTradeId);
@@ -282,6 +319,121 @@ contract HashTimeLockedContractTest is Test {
         HashTimeLockedContractLibrary.LockDetails memory details = htlcNoFx.getLockDetails(newContractId);
         assertEq(uint256(details.state), uint256(HashTimeLockedContractLibrary.HTLCState.LOCKED));
     }
+
+    // --- double-spend / re-state reverts on settle & refund ---
+
+    function test_Revert_Settle_AlreadySettled() public {
+        vm.prank(sender);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
+        htlc.settle(contractId, secret);
+
+        // second settle: state is SETTLED, not LOCKED
+        vm.expectRevert(IHashTimeLockedContract.HTLC__ContractNotLocked.selector);
+        htlc.settle(contractId, secret);
+    }
+
+    function test_Revert_Refund_AlreadySettled() public {
+        vm.prank(sender);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
+        htlc.settle(contractId, secret);
+
+        vm.warp(timeLock + 1);
+        // refund after settle: state SETTLED, not LOCKED
+        vm.expectRevert(IHashTimeLockedContract.HTLC__ContractNotLocked.selector);
+        htlc.refund(contractId);
+    }
+
+    function test_Revert_Settle_AfterRefund() public {
+        vm.prank(sender);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
+        vm.warp(timeLock + 1);
+        vm.prank(sender);
+        htlc.refund(contractId);
+
+        // settle after refund: state REFUNDED, not LOCKED
+        vm.expectRevert(IHashTimeLockedContract.HTLC__ContractNotLocked.selector);
+        htlc.settle(contractId, secret);
+    }
+
+    // --- setCommitmentHashRegistry auth branches ---
+
+    function test_Revert_SetCommitmentHashRegistry_Unauthorized() public {
+        vm.prank(sender); // not governance
+        vm.expectRevert(abi.encodeWithSelector(IHashTimeLockedContract.HTLC__ParticipantNotVerified.selector, sender));
+        htlc.setCommitmentHashRegistry(address(0x1234));
+    }
+
+    function test_SetCommitmentHashRegistry_Success() public {
+        address centralBank = makeAddr("htlcCentralBank");
+        vm.prank(admin);
+        identityRegistry.registerParticipant(
+            centralBank, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+        );
+
+        CommitmentHashRegistry reg = new CommitmentHashRegistry(address(identityRegistry));
+        vm.prank(centralBank);
+        htlc.setCommitmentHashRegistry(address(reg));
+
+        assertEq(address(htlc.COMMITMENT_HASH_REGISTRY()), address(reg));
+    }
+
+    // --- CommitmentHashRegistry fallback gate (FX_AGREEMENT == address(0)) ---
+
+    function _deployHtlcWithCommitmentRegistry()
+        internal
+        returns (HashTimeLockedContract htlcFb, CommitmentHashRegistry reg, address centralBank)
+    {
+        centralBank = makeAddr("fbCentralBank");
+        vm.prank(admin);
+        identityRegistry.registerParticipant(
+            centralBank, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+        );
+        reg = new CommitmentHashRegistry(address(identityRegistry));
+        htlcFb = new HashTimeLockedContract(address(identityRegistry), address(0), address(reg));
+    }
+
+    function test_Lock_CommitmentFallback_Accepted_Success() public {
+        (HashTimeLockedContract htlcFb, CommitmentHashRegistry reg, address centralBank) =
+            _deployHtlcWithCommitmentRegistry();
+
+        bytes32 fbTradeId = keccak256("FB_TRADE_001");
+        uint256 oAmt = 1e18;
+        uint256 cAmt = 5e18;
+        uint256 r = 5e18;
+        bytes32 commitmentHash = keccak256(abi.encodePacked(fbTradeId, oAmt, cAmt, r));
+
+        vm.startPrank(centralBank);
+        reg.registerCommitment(fbTradeId, sender, receiver, oAmt, cAmt, r);
+        reg.acceptCommitment(commitmentHash);
+        vm.stopPrank();
+
+        vm.prank(sender);
+        bytes32 newContractId = keccak256("HTLC_FB_OK");
+        htlcFb.lock(newContractId, receiver, hashLock, timeLock, zetoLockRef, commitmentHash);
+
+        HashTimeLockedContractLibrary.LockDetails memory details = htlcFb.getLockDetails(newContractId);
+        assertEq(uint256(details.state), uint256(HashTimeLockedContractLibrary.HTLCState.LOCKED));
+    }
+
+    function test_Revert_Lock_CommitmentFallback_NotAccepted() public {
+        (HashTimeLockedContract htlcFb, CommitmentHashRegistry reg, address centralBank) =
+            _deployHtlcWithCommitmentRegistry();
+
+        bytes32 fbTradeId = keccak256("FB_TRADE_002");
+        uint256 oAmt = 1e18;
+        uint256 cAmt = 5e18;
+        uint256 r = 5e18;
+        bytes32 commitmentHash = keccak256(abi.encodePacked(fbTradeId, oAmt, cAmt, r));
+
+        // registered but only PENDING (not accepted)
+        vm.prank(centralBank);
+        reg.registerCommitment(fbTradeId, sender, receiver, oAmt, cAmt, r);
+
+        vm.prank(sender);
+        bytes32 newContractId = keccak256("HTLC_FB_FAIL");
+        vm.expectRevert(IHashTimeLockedContract.HTLC__CommitmentNotAccepted.selector);
+        htlcFb.lock(newContractId, receiver, hashLock, timeLock, zetoLockRef, commitmentHash);
+    }
 }
 
 contract DeployHTLCTest is Test {
@@ -303,7 +455,9 @@ contract DeployHTLCTest is Test {
 
         vm.setEnv(ENV_DEPLOYER_PRIVATE_KEY, vm.toString(deployerPrivateKey));
         vm.setEnv(ENV_IDENTITY_REGISTRY_ADDRESS, vm.toString(address(0x6789012345678901234567890123456789012345)));
-        vm.setEnv(ENV_COMMITMENT_HASH_REGISTRY_ADDRESS, vm.toString(address(0x1234567890123456789012345678901234567890)));
+        vm.setEnv(
+            ENV_COMMITMENT_HASH_REGISTRY_ADDRESS, vm.toString(address(0x1234567890123456789012345678901234567890))
+        );
     }
 
     function test_ScriptRun_Success() public {

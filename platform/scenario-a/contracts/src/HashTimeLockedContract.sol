@@ -59,19 +59,24 @@ contract HashTimeLockedContract is IHashTimeLockedContract {
     }
 
     /// @inheritdoc IHashTimeLockedContract
-    function lock(bytes32 contractId, address receiver, bytes32 hashLock, uint256 timeLock, bytes32 zetoLockRef, bytes32 agreementId)
-        external
-        onlyVerified(msg.sender)
-        onlyVerified(receiver)
-    {
+    function lock(
+        bytes32 contractId,
+        address receiver,
+        bytes32 hashLock,
+        uint256 timeLock,
+        bytes32 zetoLockRef,
+        bytes32 agreementId
+    ) external onlyVerified(msg.sender) onlyVerified(receiver) {
         if (_locks[contractId].state != HashTimeLockedContractLibrary.HTLCState.INVALID) {
             revert HTLC__ContractAlreadyExists();
         }
-        if (timeLock <= block.timestamp) {
-            revert HTLC__TimeLockExpired();
-        }
 
-        // FX Agreement gate (Primary: Pente FXAgreement on-chain)
+        // FX Agreement gate (Primary: Pente FXAgreement on-chain).
+        // Checked BEFORE the HTLC timelock: an expired/invalid FX agreement is a
+        // business-precondition failure that must surface its own distinct error
+        // (HTLC__AgreementExpired / HTLC__AgreementNotAccepted) regardless of the
+        // requested timelock. Ordering this before the timelock check keeps the
+        // revert reason unambiguous and stable across solc legacy/viaIR codegen.
         if (address(FX_AGREEMENT) != address(0) && agreementId != bytes32(0)) {
             FXAgreementLibrary.FxAgreement memory agreement = FX_AGREEMENT.getAgreement(agreementId);
             if (agreement.state != FXAgreementLibrary.AgreementState.ACCEPTED) {
@@ -80,12 +85,16 @@ contract HashTimeLockedContract is IHashTimeLockedContract {
             if (agreement.expiryDate > 0 && block.timestamp > agreement.expiryDate) {
                 revert HTLC__AgreementExpired();
             }
-        } 
+        }
         // Fallback: CommitmentHashRegistry (for when FXAgreement unavailable)
         else if (address(COMMITMENT_HASH_REGISTRY) != address(0) && agreementId != bytes32(0)) {
             if (!COMMITMENT_HASH_REGISTRY.isAccepted(agreementId)) {
                 revert HTLC__CommitmentNotAccepted();
             }
+        }
+
+        if (timeLock <= block.timestamp) {
+            revert HTLC__TimeLockExpired();
         }
 
         _locks[contractId] = HashTimeLockedContractLibrary.LockDetails({

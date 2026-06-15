@@ -64,20 +64,20 @@ type Config struct {
 	FXRepo           ports.FXAgreementRepository   // optional — nil falls back to in-memory map (dev)
 	// HTLCRepo is required in production for durable HTLC state across restarts.
 	// Pass nil only in unit tests that do not need DB persistence.
-	HTLCRepo ports.HTLCRepository
-	Pente            ports.PenteClientPort         // optional — nil disables bilateral private context integration
-	RateTolPct       float64                       // rate tolerance fraction, default 0.001 (0.1%)
+	HTLCRepo   ports.HTLCRepository
+	Pente      ports.PenteClientPort // optional — nil disables bilateral private context integration
+	RateTolPct float64               // rate tolerance fraction, default 0.001 (0.1%)
 	// CrossSpokeMode gates SettleHTLC on CounterpartyLocked. Set this to true
 	// whenever the interoperability relay is active (i.e. in all production
 	// deployments). When false (dev/single-spoke), the initiator can settle
 	// immediately without waiting for the counterparty leg to be confirmed.
 	// Do NOT use the presence of FXRepo or HTLC adapters as a proxy for this
 	// flag — those are independent configuration axes.
-	CrossSpokeMode bool
-	StrictHTLC       bool                          // strict Agreement-HTLC enforcement mode
-	SpokePrefix      string                        // e.g. "spoke-a" — empty disables receiver locality check
-	PaladinIdentity  string                        // full identity, e.g. "funded_operator@spoke-a-bank-a"
-	Logger           *slog.Logger
+	CrossSpokeMode  bool
+	StrictHTLC      bool   // strict Agreement-HTLC enforcement mode
+	SpokePrefix     string // e.g. "spoke-a" — empty disables receiver locality check
+	PaladinIdentity string // full identity, e.g. "funded_operator@spoke-a-bank-a"
+	Logger          *slog.Logger
 }
 
 // New builds a configured gRPC server with all payment-orchestrator handlers.
@@ -196,7 +196,7 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 		req.AgreementId = newUUID()
 	}
 	if req.TimeLock == 0 {
-		req.TimeLock = uint64(time.Now().Unix()) + 3600 // 1h — initiator must have longer timelock
+		req.TimeLock = uint64(time.Now().Unix()) + 3600 //#nosec G115 -- unix timestamp is always positive and fits uint64; 1h — initiator must have longer timelock
 	}
 
 	// FX Agreement gate: if an agreement_id references a known FX agreement, verify it's accepted
@@ -218,6 +218,7 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 			if fxRecord.State != domain.FXStateAccepted {
 				return nil, status.Error(codes.FailedPrecondition, "FX agreement must be accepted before locking HTLC")
 			}
+			//#nosec G115 -- unix timestamp is always positive and fits uint64
 			if fxRecord.ExpiryDate > 0 && uint64(time.Now().Unix()) > fxRecord.ExpiryDate {
 				return nil, status.Error(codes.FailedPrecondition, "FX agreement has expired")
 			}
@@ -335,7 +336,7 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 		req.AgreementId = newUUID()
 	}
 	if req.TimeLock == 0 {
-		req.TimeLock = uint64(time.Now().Unix()) + 1800 // 30min — responder must have shorter timelock than initiator
+		req.TimeLock = uint64(time.Now().Unix()) + 1800 //#nosec G115 -- unix timestamp is always positive and fits uint64; 30min — responder must have shorter timelock than initiator
 	}
 
 	// FX Agreement gate: if an agreement_id references a known FX agreement, verify it's accepted
@@ -357,6 +358,7 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 			if fxRecord.State != domain.FXStateAccepted {
 				return nil, status.Error(codes.FailedPrecondition, "FX agreement must be accepted before locking HTLC")
 			}
+			//#nosec G115 -- unix timestamp is always positive and fits uint64
 			if fxRecord.ExpiryDate > 0 && uint64(time.Now().Unix()) > fxRecord.ExpiryDate {
 				return nil, status.Error(codes.FailedPrecondition, "FX agreement has expired")
 			}
@@ -640,6 +642,7 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 			return nil, status.Errorf(codes.FailedPrecondition, "HTLC %q is in state %s, expected LOCKED", req.ContractId, record.State)
 		}
 
+		//#nosec G115 -- unix timestamp is always positive and fits uint64
 		if uint64(time.Now().Unix()) < record.TimeLock {
 			s.mu.Unlock()
 			return nil, status.Error(codes.FailedPrecondition, "time lock has not expired yet")
@@ -890,6 +893,7 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
 		return nil, status.Error(codes.InvalidArgument, "counterparty_b, origin_amount, counter_amount, origin_currency, counter_currency, rate, and expiry_date are required")
 	}
+	//#nosec G115 -- unix timestamp is always positive and fits uint64
 	if req.ExpiryDate <= uint64(time.Now().Unix()) {
 		return nil, status.Error(codes.InvalidArgument, "expiry_date must be in the future")
 	}

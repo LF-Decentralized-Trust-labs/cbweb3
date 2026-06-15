@@ -259,7 +259,7 @@ func main() {
 	}
 
 	// Initialize FX expiration worker
-	expiryWorker := workers.NewFXExpirationWorker(fxRepo, time.Duration(fxExpiryCheckIntervalU)*time.Second, logger)
+	expiryWorker := workers.NewFXExpirationWorker(fxRepo, time.Duration(fxExpiryCheckIntervalU)*time.Second, logger) //#nosec G115 -- check interval is a small positive uint64 from config, fits int64 Duration
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
