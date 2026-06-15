@@ -149,4 +149,122 @@ contract CommitmentHashRegistryTest is Test {
         vm.expectRevert(CommitmentHashRegistry.CRG__InvalidStateTransition.selector);
         commitmentHashRegistry.acceptCommitment(expectedHash);
     }
+
+    // ---------- Constructor ----------
+
+    function test_Revert_Constructor_ZeroRegistry() public {
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidParameters.selector);
+        new CommitmentHashRegistry(address(0));
+    }
+
+    // ---------- registerCommitment additional parameter branches ----------
+
+    function test_Revert_RegisterCommitment_ZeroOriginator() public {
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidParameters.selector);
+        commitmentHashRegistry.registerCommitment(tradeId, address(0), bankB, originAmount, counterAmount, rate);
+    }
+
+    function test_Revert_RegisterCommitment_ZeroCounterparty() public {
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidParameters.selector);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, address(0), originAmount, counterAmount, rate);
+    }
+
+    function test_Revert_RegisterCommitment_ZeroOriginAmount() public {
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidParameters.selector);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, 0, counterAmount, rate);
+    }
+
+    function test_Revert_RegisterCommitment_ZeroCounterAmount() public {
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidParameters.selector);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, originAmount, 0, rate);
+    }
+
+    function test_Revert_RegisterCommitment_ZeroRate() public {
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidParameters.selector);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, originAmount, counterAmount, 0);
+    }
+
+    // ---------- settleCommitment invalid-state branch ----------
+
+    function test_Revert_SettleCommitment_NotAccepted() public {
+        bytes32 expectedHash = keccak256(abi.encodePacked(tradeId, originAmount, counterAmount, rate));
+
+        vm.prank(governance);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, originAmount, counterAmount, rate);
+
+        // PENDING (not ACCEPTED) → cannot settle.
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidStateTransition.selector);
+        commitmentHashRegistry.settleCommitment(expectedHash);
+    }
+
+    // ---------- cancelCommitment terminal-state branches ----------
+
+    function test_CancelCommitment_FromAccepted() public {
+        bytes32 expectedHash = keccak256(abi.encodePacked(tradeId, originAmount, counterAmount, rate));
+
+        vm.prank(governance);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, originAmount, counterAmount, rate);
+        vm.prank(governance);
+        commitmentHashRegistry.acceptCommitment(expectedHash);
+
+        // Cancel allowed from ACCEPTED (non-terminal) state.
+        vm.prank(governance);
+        commitmentHashRegistry.cancelCommitment(expectedHash);
+
+        CommitmentHashRegistry.CommitmentState state = commitmentHashRegistry.getCommitmentState(expectedHash);
+        assertEq(uint256(state), uint256(CommitmentHashRegistry.CommitmentState.CANCELLED));
+    }
+
+    function test_Revert_CancelCommitment_Invalid() public {
+        // Never registered → INVALID terminal guard reverts.
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidStateTransition.selector);
+        commitmentHashRegistry.cancelCommitment(keccak256("NONEXISTENT"));
+    }
+
+    function test_Revert_CancelCommitment_AlreadySettled() public {
+        bytes32 expectedHash = keccak256(abi.encodePacked(tradeId, originAmount, counterAmount, rate));
+
+        vm.prank(governance);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, originAmount, counterAmount, rate);
+        vm.prank(governance);
+        commitmentHashRegistry.acceptCommitment(expectedHash);
+        vm.prank(governance);
+        commitmentHashRegistry.settleCommitment(expectedHash);
+
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidStateTransition.selector);
+        commitmentHashRegistry.cancelCommitment(expectedHash);
+    }
+
+    function test_Revert_CancelCommitment_AlreadyCancelled() public {
+        bytes32 expectedHash = keccak256(abi.encodePacked(tradeId, originAmount, counterAmount, rate));
+
+        vm.prank(governance);
+        commitmentHashRegistry.registerCommitment(tradeId, bankA, bankB, originAmount, counterAmount, rate);
+        vm.prank(governance);
+        commitmentHashRegistry.cancelCommitment(expectedHash);
+
+        vm.prank(governance);
+        vm.expectRevert(CommitmentHashRegistry.CRG__InvalidStateTransition.selector);
+        commitmentHashRegistry.cancelCommitment(expectedHash);
+    }
+
+    // ---------- view not-found branches ----------
+
+    function test_Revert_GetCommitment_NotFound() public {
+        vm.expectRevert(CommitmentHashRegistry.CRG__CommitmentNotFound.selector);
+        commitmentHashRegistry.getCommitment(keccak256("NONEXISTENT"));
+    }
+
+    function test_Revert_GetCommitmentHashByTradeId_NotFound() public {
+        vm.expectRevert(CommitmentHashRegistry.CRG__CommitmentNotFound.selector);
+        commitmentHashRegistry.getCommitmentHashByTradeId(keccak256("NONEXISTENT"));
+    }
 }
