@@ -17,9 +17,7 @@ import {
 } from "@cbweb3/ui";
 import { useState } from "react";
 import type { DisclosureReasonCode, DisclosureRequest } from "../types";
-import { SupervisorRole } from "../types";
 import { oversightApi } from "../services/api";
-import { useAuthStore } from "../stores";
 
 const REASON_CODES: { value: DisclosureReasonCode; label: string }[] = [
   { value: "AML_ALERT", label: "AML Alert" },
@@ -52,9 +50,6 @@ function DisclosureCard({ disclosure }: { disclosure: DisclosureRequest }) {
 }
 
 export function InvestigationPage() {
-  const { user } = useAuthStore();
-  const isSupervisorOnly = user?.role === SupervisorRole.SUPERVISOR_ROLE;
-
   // Open disclosure form
   const [txRef, setTxRef] = useState("");
   const [requestorId, setRequestorId] = useState("");
@@ -121,17 +116,6 @@ export function InvestigationPage() {
 
   return (
     <div className="space-y-4">
-      {isSupervisorOnly ? (
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">
-              Opening and co-signing disclosure requests requires <span className="font-medium">ROLE_CENTRAL_BANK</span>.
-              As a supervisor you can look up the status of any existing request below.
-            </p>
-          </CardContent>
-        </Card>
-      ) : null}
-
       {/* Open Disclosure */}
       <Card>
         <CardHeader>
@@ -139,39 +123,33 @@ export function InvestigationPage() {
           <CardDescription>Initiate a 2-of-N AML/CFT disclosure workflow. The request expires in 72 hours.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {isSupervisorOnly ? (
-            <p className="text-sm text-muted-foreground">Not available for ROLE_SUPERVISOR.</p>
-          ) : (
-            <>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label htmlFor="tx-ref">Transaction Reference</Label>
-                  <Input id="tx-ref" placeholder="0xabc..." value={txRef} onChange={(e) => setTxRef(e.target.value)} />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="requestor-id">Requestor Bank ID</Label>
-                  <Input id="requestor-id" placeholder="cb_lnet" value={requestorId} onChange={(e) => setRequestorId(e.target.value)} />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label>Reason Code</Label>
-                <Select value={reasonCode} onValueChange={(v) => setReasonCode(v as DisclosureReasonCode)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {REASON_CODES.map((r) => (
-                      <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button onClick={() => void handleOpen()} disabled={openStatus === "loading"}>
-                {openStatus === "loading" ? "Opening..." : "Open Request"}
-              </Button>
-              {openResult && <DisclosureCard disclosure={openResult} />}
-            </>
-          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="tx-ref">Transaction Reference</Label>
+              <Input id="tx-ref" placeholder="0xabc..." value={txRef} onChange={(e) => setTxRef(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="requestor-id">Requestor Bank ID</Label>
+              <Input id="requestor-id" placeholder="cb_lnet" value={requestorId} onChange={(e) => setRequestorId(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label>Reason Code</Label>
+            <Select value={reasonCode} onValueChange={(v) => setReasonCode(v as DisclosureReasonCode)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {REASON_CODES.map((r) => (
+                  <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button onClick={() => void handleOpen()} disabled={openStatus === "loading"}>
+            {openStatus === "loading" ? "Opening..." : "Open Request"}
+          </Button>
+          {openResult && <DisclosureCard disclosure={openResult} />}
         </CardContent>
       </Card>
 
@@ -182,25 +160,19 @@ export function InvestigationPage() {
           <CardDescription>Add your co-signature to an existing PENDING disclosure request.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {isSupervisorOnly ? (
-            <p className="text-sm text-muted-foreground">Not available for ROLE_SUPERVISOR.</p>
-          ) : (
-            <>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label htmlFor="sign-req-id">Request ID</Label>
-                  <Input id="sign-req-id" placeholder="req-uuid" value={signRequestId} onChange={(e) => setSignRequestId(e.target.value)} />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="signer-id">Signer Bank ID</Label>
-                  <Input id="signer-id" placeholder="cb_spoke_a" value={signerId} onChange={(e) => setSignerId(e.target.value)} />
-                </div>
-              </div>
-              <Button onClick={() => void handleSign()} disabled={signStatus === "loading"}>
-                {signStatus === "loading" ? "Signing..." : "Sign Request"}
-              </Button>
-            </>
-          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="sign-req-id">Request ID</Label>
+              <Input id="sign-req-id" placeholder="req-uuid" value={signRequestId} onChange={(e) => setSignRequestId(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="signer-id">Signer Bank ID</Label>
+              <Input id="signer-id" placeholder="cb_spoke_a" value={signerId} onChange={(e) => setSignerId(e.target.value)} />
+            </div>
+          </div>
+          <Button onClick={() => void handleSign()} disabled={signStatus === "loading"}>
+            {signStatus === "loading" ? "Signing..." : "Sign Request"}
+          </Button>
         </CardContent>
       </Card>
 

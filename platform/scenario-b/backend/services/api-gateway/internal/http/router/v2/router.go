@@ -344,12 +344,12 @@ func registerUS3Routes(app *fiber.App, deps Dependencies) {
 		oh := handlers.NewOversightHandler(deps.OversightService)
 		oversight.Post("/disclosure-request",
 			middleware.RequireCookieAuth(deps.AuthProvider),
-			middleware.RequireCentralBankRole(),
+			middleware.RequireRole(domain.RoleCentralBankScenarioB, domain.RoleSupervisor),
 			oh.OpenDisclosure,
 		)
 		oversight.Post("/disclosure-sign",
 			middleware.RequireCookieAuth(deps.AuthProvider),
-			middleware.RequireCentralBankRole(),
+			middleware.RequireRole(domain.RoleCentralBankScenarioB, domain.RoleSupervisor),
 			oh.SignDisclosure,
 		)
 		oversight.Get("/disclosure-status/:requestID", oh.GetDisclosureStatus)
