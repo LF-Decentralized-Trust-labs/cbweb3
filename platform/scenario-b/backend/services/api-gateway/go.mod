@@ -5,12 +5,23 @@ go 1.25.5
 require (
 	github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain v0.0.0
 	github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto v0.0.0
+	github.com/glebarez/sqlite v1.11.0
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/joho/godotenv v1.5.1
 	github.com/stretchr/testify v1.11.1
 	google.golang.org/grpc v1.79.2
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
+)
+
+require (
+	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/glebarez/go-sqlite v1.21.2 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	modernc.org/libc v1.22.5 // indirect
+	modernc.org/mathutil v1.5.0 // indirect
+	modernc.org/memory v1.5.0 // indirect
+	modernc.org/sqlite v1.23.1 // indirect
 )
 
 require (
