@@ -4,6 +4,7 @@ export type Participant = {
   id: string;
   name: string;
   legalEntityId: string;
+  role?: string;
   status: ParticipantStatus;
   credentialId: string | null;
   credentialExpiry: string | null;
