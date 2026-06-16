@@ -56,8 +56,11 @@ stack_ensure_up() {
   fi
   require_cmd make
   makedir="${PERF_MAKE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
-  log_info "no stack at gateway — bringing it up (make scenario-b.up)" url="$API_GW_URL" dir="$makedir"
-  ( cd "$makedir" && make scenario-b.up ) || log_fatal "scenario-b.up failed"
+  # Default to the perf-lean bring-up (full settlement stack minus the NOC portal, which
+  # is a monitoring frontend not on the perf path). Override with PERF_UP_TARGET if needed.
+  up_target="${PERF_UP_TARGET:-scenario-b.up-perf}"
+  log_info "no stack at gateway — bringing it up" url="$API_GW_URL" dir="$makedir" target="$up_target"
+  ( cd "$makedir" && make "$up_target" ) || log_fatal "stack bring-up failed" target="$up_target"
   log_info "waiting for gateway readiness (up to 10m)"
   stack_wait_ready "$API_GW_URL" 600 || log_fatal "gateway not ready after scenario-b.up" url="$API_GW_URL"
   log_info "stack is up and ready" url="$API_GW_URL"

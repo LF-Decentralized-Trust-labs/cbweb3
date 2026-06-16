@@ -155,6 +155,13 @@ scenario-b.down-fx-feeder:
 scenario-b.up: scenario-b.down-fx-feeder scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend scenario-b.up-fx-feeder noc.setup-keycloak noc.up noc.setup-agents
 	@echo "[scenario-b] full stack up — ready for tryout (bash tryouts/tryout-scenario-b-e2e.sh)"
 
+# Perf-lean bring-up: the full settlement stack (infra + contracts + relayer + backend +
+# fx-feeder) WITHOUT the NOC operations portal (noc.setup-keycloak/noc.up/noc.setup-agents).
+# The NOC portal is a monitoring frontend and is not on the perf path; excluding it keeps the
+# R1-12.3 perf harness (scenario-b.perf-all) from depending on the NOC frontend build.
+scenario-b.up-perf: scenario-b.down-fx-feeder scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend scenario-b.up-fx-feeder
+	@echo "[scenario-b] perf stack up (no NOC portal) — ready for make scenario-b.perf-all"
+
 scenario-b.down: scenario-b.down-fx-feeder scenario-b.down-backend scenario-b.down-relayer scenario-b.down-infra noc.down
 	@echo "[scenario-b] full stack down"
 
@@ -310,7 +317,7 @@ scenario-b.validate-openapi:
 	scenario-b.build-backend-images \
 	scenario-b.up-backend scenario-b.down-backend \
 	scenario-b.up-backend-mlp scenario-b.down-backend-mlp scenario-b.tryout-us2-mlp \
-	scenario-b.up scenario-b.down scenario-b.restart scenario-b.nuke \
+	scenario-b.up scenario-b.up-perf scenario-b.down scenario-b.restart scenario-b.nuke \
 	scenario-b.test-contracts scenario-b.test-backend scenario-b.test \
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
 	scenario-b.test-integration \
