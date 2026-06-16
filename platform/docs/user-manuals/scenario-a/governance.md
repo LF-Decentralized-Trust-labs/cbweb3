@@ -14,18 +14,13 @@
    - [Dashboard (`/`)](#41-dashboard-)
    - [Registry (`/registry`)](#42-registry-registry)
    - [Accounts (`/accounts`)](#43-accounts-accounts)
-   - [Circuit Breaker (`/circuit-breaker`)](#44-circuit-breaker-circuit-breaker)
-   - [Parameters (`/parameters`)](#45-parameters-parameters)
-   - [Audit (`/audit`)](#46-audit-audit)
-   - [Settings (`/settings`)](#47-settings-settings)
+   - [Audit (`/audit`)](#44-audit-audit)
+   - [Settings (`/settings`)](#45-settings-settings)
 5. [Typical workflows](#5-typical-workflows)
    - [Approve a pending KYC request](#51-approve-a-pending-kyc-request)
    - [Freeze a participant account](#52-freeze-a-participant-account)
    - [Unfreeze a participant account](#53-unfreeze-a-participant-account)
-   - [Update a system parameter](#54-update-a-system-parameter)
-   - [Trigger the circuit breaker (pause swaps)](#55-trigger-the-circuit-breaker-pause-swaps)
-   - [Resume swaps after a circuit breaker halt](#56-resume-swaps-after-a-circuit-breaker-halt)
-   - [Review the audit trail for a governance action](#57-review-the-audit-trail-for-a-governance-action)
+   - [Review the audit trail for a governance action](#54-review-the-audit-trail-for-a-governance-action)
 6. [Status reference](#6-status-reference)
 7. [Troubleshooting](#7-troubleshooting)
 
@@ -37,8 +32,6 @@ The Governance Portal is the Central Bank's control surface for **Scenario A —
 
 - **KYC / participant admission** — approving commercial banks that have submitted onboarding requests
 - **Account intervention** — freezing or unfreezing participant accounts with an auditable reason
-- **System parameters** — setting transaction limits, slippage tolerance, and settlement windows
-- **Emergency circuit breaker** — halting or resuming all AMM swap operations across the hub
 - **Audit trail** — immutable log of all governance actions with filtering by category, severity, and date
 
 All actions performed in the portal are confirmation-gated and permanently recorded in the governance audit log. The portal communicates exclusively with the Central Bank's API Gateway over HTTPS; there is no direct connection to the blockchain or Paladin sidecar.
@@ -82,8 +75,6 @@ The portal uses a left-hand sidebar with the following items. All routes require
 | Dashboard | `/` | At-a-glance health summary and recent events |
 | Registry | `/registry` | KYC approval queue for pending commercial banks |
 | Accounts | `/accounts` | Freeze or unfreeze participant accounts |
-| Circuit Breaker | `/circuit-breaker` | Halt or resume all swap operations |
-| Parameters | `/parameters` | Update global transaction limits and settlement window |
 | Audit | `/audit` | Full audit trail with filters |
 | Settings | `/settings` | Operator display preferences |
 
@@ -95,7 +86,7 @@ Unauthenticated requests to any protected route redirect to `/login`. Unknown ro
 
 ### 4.1 Dashboard (`/`)
 
-<!-- TODO: screenshot — dashboard -->
+![Governance Dashboard](../img/scenario-a/governance/01-governance-dashboard.png)
 
 The Dashboard is the landing page after login. It loads data from three live data sources in parallel — the participant registry, the accounts list, and the audit log — and presents a summary without requiring manual refresh.
 
@@ -115,9 +106,7 @@ When the portal starts up, if Pending KYC Approvals is greater than zero, review
 
 ### 4.2 Registry (`/registry`)
 
-![Registry Overview](../img/scenario-a/governance/02-registry-overview.png)
-
-![Pending KYC Approvals Table](../img/scenario-a/governance/03-pending-kyc-table.png)
+![Registry Overview](../img/scenario-a/governance/02-governance-registry.png)
 
 The Registry screen is the primary admission gate for new commercial banks. Its current active section is the **Pending KYC Approvals** table.
 
@@ -144,7 +133,7 @@ For the approval workflow, see [Approve a pending KYC request](#51-approve-a-pen
 
 ### 4.3 Accounts (`/accounts`)
 
-<!-- TODO: screenshot — accounts page -->
+![Registry Overview](../img/scenario-a/governance/03-accounts.png)
 
 The Accounts page (titled **Account Intervention** in the UI) allows governance operators to freeze or unfreeze participant accounts. This is a high-privilege action — it directly blocks or restores a participant's ability to transact.
 
@@ -173,66 +162,9 @@ Both freeze and unfreeze actions are recorded in the audit log under the `FREEZE
 
 ---
 
-### 4.4 Circuit Breaker (`/circuit-breaker`)
+### 4.4 Audit (`/audit`)
 
-<!-- TODO: screenshot — circuit breaker page -->
-
-The Circuit Breaker screen provides emergency control over all AMM swap operations across the hub. This is an irreversible-in-kind action (swaps halt immediately) and is permanently recorded in the audit log at `CRITICAL` severity.
-
-#### Current state display
-
-The current state panel shows:
-
-| Field | Meaning |
-|---|---|
-| **State badge** | `LIVE` (green/default) or `HALTED` (red/destructive). |
-| **Last update** | Timestamp of the most recent state change. |
-
-#### Toggling the circuit breaker
-
-1. Enter a **Reason** in the text area (required, minimum 10 characters) describing why the intervention is needed.
-2. Click **Pause Swaps** (when state is `LIVE`) or **Resume Swaps** (when state is `HALTED`).
-3. A confirmation panel appears with the message: "This action changes the global swap state and will be permanently recorded in audit logs."
-4. Click **Confirm** to apply, or **Cancel** to abort.
-
-The button shows "Submitting..." while the request is in flight. On success, the state badge updates immediately.
-
-For the full workflow, see [Trigger the circuit breaker](#55-trigger-the-circuit-breaker-pause-swaps) and [Resume swaps](#56-resume-swaps-after-a-circuit-breaker-halt).
-
----
-
-### 4.5 Parameters (`/parameters`)
-
-<!-- TODO: screenshot — parameters page -->
-
-The Parameters page (titled **Global Parameters** in the UI) controls the system-wide transaction and settlement constraints that apply to all participants.
-
-#### Editable parameters
-
-| Parameter label | Internal field | Description |
-|---|---|---|
-| **Transaction Minimum** | `txLimitMin` | The minimum allowed transaction amount. |
-| **Transaction Maximum** | `txLimitMax` | The maximum allowed transaction amount. |
-| **Slippage Tolerance** | `slippageTolerance` | Maximum acceptable price slippage for AMM swap operations (as a decimal, e.g., `0.01` for 1%). |
-| **Settlement Window (seconds)** | `settlementWindowSeconds` | The maximum time allowed for HTLC settlement before a refund path is triggered. |
-
-All four fields are editable directly in the form. A **Reason** text area (required, minimum 10 characters) must be completed before submitting any change.
-
-#### Reviewing and confirming changes
-
-1. Edit one or more parameter fields.
-2. Fill in the **Reason** field.
-3. Click **Review Changes**. A **Confirm Parameter Diff** table appears listing only the fields you changed, showing the current value and the proposed value side by side.
-4. If no changes are detected the diff table shows "No changes detected" and the **Confirm Update** button is disabled.
-5. Click **Confirm Update** to apply, or **Cancel** to return to the edit form.
-
-Parameter updates are recorded in the audit log under the `PARAMETER` category with `CRITICAL` severity.
-
----
-
-### 4.6 Audit (`/audit`)
-
-<!-- TODO: screenshot — audit page -->
+![Registry Overview](../img/scenario-a/governance/04-audit.png)
 
 The Audit page (titled **Governance Audit Trail** in the UI) provides an immutable history of all governance actions and their outcomes. Use it to investigate past decisions and fulfill compliance or regulatory reporting requirements.
 
@@ -240,7 +172,7 @@ The Audit page (titled **Governance Audit Trail** in the UI) provides an immutab
 
 | Filter | Options |
 |---|---|
-| **Category** | All categories · Credential · Circuit Breaker · Freeze · Parameter |
+| **Category** | All categories · Credential · Freeze · Parameter |
 | **Severity** | All severities · Info · Warning · Critical |
 | **From date** | Date picker — start of the date range |
 | **To date** | Date picker — end of the date range |
@@ -263,15 +195,14 @@ Set the desired filters and click **Apply Filters**. The button shows "Applying.
 | Category | Events included |
 |---|---|
 | `CREDENTIAL` | KYC approvals, credential issuance |
-| `CIRCUIT_BREAKER` | Swap pause and resume events |
 | `FREEZE` | Account freeze and unfreeze events |
 | `PARAMETER` | Parameter update events |
 
 ---
 
-### 4.7 Settings (`/settings`)
+### 4.5 Settings (`/settings`)
 
-<!-- TODO: screenshot — settings page -->
+![Registry Overview](../img/scenario-a/governance/05-settings.png)
 
 The Settings page controls operator display preferences for the current session. It does not affect backend state.
 
@@ -334,55 +265,7 @@ Use this workflow when a previously frozen account is cleared to resume operatio
 
 ---
 
-### 5.4 Update a system parameter
-
-Use this workflow when a policy decision requires changing transaction limits or the settlement window.
-
-1. Navigate to **Parameters**.
-2. Review the current values shown in each field.
-3. Edit the field(s) you want to change.
-4. Enter a **Reason** explaining the change (minimum 10 characters, e.g., "Board directive 2026-Q2 — increasing maximum transaction limit").
-5. Click **Review Changes**.
-6. The **Confirm Parameter Diff** table appears. Verify the **Current** and **Proposed** values are exactly what you intend.
-7. If the diff is correct, click **Confirm Update**.
-8. A success toast confirms "Parameters updated".
-9. Navigate to **Audit** and confirm a `PARAMETER` / `CRITICAL` / `SUCCESS` entry was recorded.
-
-> If you click **Review Changes** without editing any field, the diff table shows "No changes detected" and the **Confirm Update** button is disabled. Return to the form and make your edits.
-
----
-
-### 5.5 Trigger the circuit breaker (pause swaps)
-
-Use this workflow only in emergency situations requiring immediate suspension of all swap activity.
-
-1. Navigate to **Circuit Breaker**.
-2. Confirm the current state badge shows `LIVE`.
-3. Enter a **Reason** describing the emergency (minimum 10 characters).
-4. Click **Pause Swaps**.
-5. Read the confirmation warning: "This action changes the global swap state and will be permanently recorded in audit logs."
-6. Click **Confirm**.
-7. The state badge immediately changes to `HALTED` (red).
-8. Navigate to **Audit** and confirm a `CIRCUIT_BREAKER` / `CRITICAL` / `SUCCESS` entry was recorded.
-9. Notify relevant stakeholders that swap operations are halted.
-
----
-
-### 5.6 Resume swaps after a circuit breaker halt
-
-Use this workflow when the emergency condition has been resolved.
-
-1. Navigate to **Circuit Breaker**.
-2. Confirm the current state badge shows `HALTED`.
-3. Enter a **Reason** explaining why operations are being resumed (minimum 10 characters).
-4. Click **Resume Swaps**.
-5. Read the confirmation warning and click **Confirm**.
-6. The state badge immediately changes to `LIVE` (green).
-7. Navigate to **Audit** and confirm a resume entry was recorded.
-
----
-
-### 5.7 Review the audit trail for a governance action
+### 5.4 Review the audit trail for a governance action
 
 Use this workflow when investigating a past governance action for compliance or incident review.
 
@@ -405,13 +288,6 @@ Use this workflow when investigating a past governance action for compliance or 
 | `ACTIVE` | Account is operational; participant can transact. | Accounts page, Dashboard |
 | `FROZEN` | Account has been suspended by governance; participant cannot transact. | Accounts page, Dashboard |
 
-### Circuit breaker state
-
-| State | Meaning | Badge color |
-|---|---|---|
-| `LIVE` | All AMM swap operations are running normally. | Default (green) |
-| `HALTED` | All AMM swap operations are paused. | Destructive (red) |
-
 ### KYC / participant status
 
 | Status | Meaning | Displayed in |
@@ -427,7 +303,7 @@ Use this workflow when investigating a past governance action for compliance or 
 |---|---|
 | `INFO` | Routine governance action (e.g., KYC approval). |
 | `WARNING` | Action that may require follow-up attention. |
-| `CRITICAL` | High-impact action: freeze, circuit breaker toggle, parameter update. |
+| `CRITICAL` | High-impact action: freeze or parameter update. |
 
 ### Audit outcome
 
@@ -441,7 +317,6 @@ Use this workflow when investigating a past governance action for compliance or 
 | Category | Governance domain |
 |---|---|
 | `CREDENTIAL` | KYC approvals and credential issuance |
-| `CIRCUIT_BREAKER` | Swap pause and resume |
 | `FREEZE` | Account freeze and unfreeze |
 | `PARAMETER` | System parameter updates |
 
@@ -475,18 +350,6 @@ Use this workflow when investigating a past governance action for compliance or 
 
 - The Accounts page loads data on mount. Reload the page to refresh.
 - Confirm the compliance service is accessible via the API Gateway.
-
-### Circuit Breaker state does not update after confirming
-
-- If the state badge does not change after clicking **Confirm**, check the error message displayed below the form.
-- Common causes: API Gateway unreachable, insufficient role permissions on the backend, or a backend service outage.
-- Reload the page to fetch the current state from the backend.
-
-### Parameters do not save
-
-- Confirm the **Reason** field has at least 10 characters before clicking **Review Changes**.
-- In the diff table, confirm the **Proposed** column shows values different from **Current**. If values are identical, the **Confirm Update** button is disabled.
-- If a backend error appears, contact the network administrator.
 
 ### Audit log is empty
 
