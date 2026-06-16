@@ -58,7 +58,7 @@ Central bank governance and compliance officers. Access is provisioned by the ne
 
 Open the Governance Portal URL for your central bank entity. The URL is defined in the **Portal Ports** table of `scenario-b/frontend/README.md` for the local deployment, or provided by the network administrator for production deployments.
 
-<!-- TODO: screenshot — governance login page -->
+![Login](../img/scenario-b/governance/01-login.png)
 
 The login form requires two fields:
 
@@ -100,7 +100,7 @@ Unknown routes redirect to `/` automatically.
 
 The Dashboard is the first screen after login. It provides a real-time summary of the most important network health indicators.
 
-<!-- TODO: screenshot — Scenario B Governance Dashboard -->
+![Dashboard](../img/scenario-b/governance/02-dashboard.png)
 
 #### Circuit Breaker status card
 
@@ -128,7 +128,7 @@ A table showing the five most recent audit log entries with columns: Time, Actio
 
 The Registry is the compliance registry of all institutions known to the network. It has two sections: the full participant list and a live queue of pending KYC approvals.
 
-<!-- TODO: screenshot — Scenario B Governance Registry -->
+![Registry](../img/scenario-b/governance/03-registry.png)
 
 #### Compliance Registry table
 
@@ -170,7 +170,7 @@ To approve a pending bank:
 
 The Accounts screen provides emergency account intervention: governance operators can freeze a participant account. This is an irreversible action that must be accompanied by a written reason.
 
-<!-- TODO: screenshot — Scenario B Governance Accounts -->
+![Accounts](../img/scenario-b/governance/04-accounts.png)
 
 #### Account list
 
@@ -203,7 +203,7 @@ A searchable table of all participant accounts. The search field filters by acco
 
 The Swap Monitor provides read-only operational visibility into the Scenario B payment pipeline. It shows live counts of pending approval queues and allows governance operators to track individual swaps by swap ID during a session.
 
-<!-- TODO: screenshot — Scenario B Swap Monitor -->
+![Swap Monitor](../img/scenario-b/governance/05-swap-monitor.png)
 
 #### Pending approval summary
 
@@ -249,7 +249,7 @@ In Scenario B, the circuit breaker uses a **multi-signature governance model**:
 
 The page polls the current breaker state automatically every 15 seconds.
 
-<!-- TODO: screenshot — Scenario B Circuit Breaker page -->
+![Circuit Breaker](../img/scenario-b/governance/06-circuit-breaker.png)
 
 #### Current state panel
 
@@ -313,7 +313,7 @@ Click **Sign Resume** (enabled only when a Request ID is entered). Once the requ
 
 The Oversight screen is for AML/CFT disclosure requests. A governance operator can open a formal disclosure request tied to a cross-border transaction reference, and a second operator from another institution can co-sign the request to reach quorum.
 
-<!-- TODO: screenshot — Scenario B Oversight page -->
+![Oversight](../img/scenario-b/governance/07-oversight.png)
 
 #### Open Disclosure Request
 
@@ -356,7 +356,7 @@ A full JSON view of the disclosure record is shown below the summary for detaile
 
 The Audit screen provides the immutable governance action trail. Every action taken through this portal — credential approvals, account freezes, parameter changes, circuit breaker operations — is recorded here.
 
-<!-- TODO: screenshot — Scenario B Governance Audit -->
+![Audit](../img/scenario-b/governance/08-audit.png)
 
 #### Filters
 
@@ -381,25 +381,6 @@ Click **Apply Filters** to execute the filtered query. The filter state is not p
 | **Category** | `CREDENTIAL`, `CIRCUIT_BREAKER`, `FREEZE`, or `PARAMETER`. |
 | **Severity** | `INFO`, `WARNING`, or `CRITICAL`. |
 | **Outcome** | `SUCCESS` (green) or failure status (red). |
-
----
-
-### 5.8 Settings
-
-**Route:** `/settings`
-
-Portal display and session preferences for the current operator.
-
-<!-- TODO: screenshot — Scenario B Governance Settings -->
-
-| Setting | Description |
-|---|---|
-| **Current Session** | Read-only panel showing the logged-in user's subject identifier and assigned roles. |
-| **Timezone** | Timezone used for displaying timestamps throughout the portal (default: `America/Sao_Paulo`). |
-| **Date format** | Date and time format string (default: `dd/MM/yyyy HH:mm`). |
-| **Enable dashboard alert sounds** | Toggle for audible alert sounds on the Dashboard. |
-
-Click **Save Settings** to confirm preferences. Settings are applied for the current session; persistence across sessions depends on browser storage.
 
 ---
 

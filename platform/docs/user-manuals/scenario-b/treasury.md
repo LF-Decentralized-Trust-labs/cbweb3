@@ -65,7 +65,7 @@ that require multi-party signatures. The table below summarises the division of 
 Open the Treasury Portal URL provided by your platform administrator and sign in with your
 institutional client credentials.
 
-<!-- TODO: screenshot — login screen -->
+![Login](../img/scenario-b/treasury/01-login.png)
 
 The login form requires two fields:
 
@@ -116,7 +116,7 @@ unrecognised paths redirect to the Dashboard.
 The Dashboard provides a real-time overview of the treasury position and pending workload.
 It is the first screen seen after login and the primary situational-awareness view.
 
-<!-- TODO: screenshot — dashboard -->
+![Dashboard](../img/scenario-b/treasury/02-dashboard.png)
 
 **Identity card.** The top card shows the authenticated institution name (sourced from
 `VITE_INSTITUTION_NAME` or the Keycloak user profile), the wallet address (truncated), the
@@ -173,7 +173,7 @@ This screen manages requests from commercial bank participants to obtain fiat-ba
 (the "Issuance" or "Deposit" flow). When a participant deposits fiat reserves and requests
 a corresponding tCeBM mint, the request appears here for treasury approval.
 
-<!-- TODO: screenshot — deposits approval queue -->
+![Deposits Approval](../img/scenario-b/treasury/03-deposits.png)
 
 **Summary cards.** Show the total number of issuance requests and the number currently in
 `PENDING` status.
@@ -222,7 +222,7 @@ burns tokens on one spoke network (Redemption leg) and mints tokens on a destina
 (Issuance leg) via the hub. Both legs are coordinated atomically; approving an escrow
 triggers both the on-chain burn (Redemption tx hash) and the on-chain mint (Issuance ref).
 
-<!-- TODO: screenshot — escrows approval queue -->
+![Escrows Approval](../img/scenario-b/treasury/04-escrows.png)
 
 **Summary cards.** Total and pending tokenisation request counts.
 
@@ -264,7 +264,7 @@ Redemption requests represent a participant returning tCeBM to the central bank 
 for fiat reserves. Approving a redeem burns the participant's tCeBM via a Zeto privacy
 transfer and releases the corresponding fiat reserve.
 
-<!-- TODO: screenshot — redeems approval queue -->
+![Redeems Approval](../img/scenario-b/treasury/05-redeems.png)
 
 **Summary cards.** Total and pending redeem counts.
 
@@ -305,7 +305,7 @@ This screen allows the central bank to monitor and manage its position in the hu
 It is relevant when the treasury institution acts as a liquidity provider (LP) for cross-border
 FX swaps between two spoke currencies.
 
-<!-- TODO: screenshot — liquidity management -->
+![Liquidity Management](../img/scenario-b/treasury/06-liquidity-management.png)
 
 The screen is organised into the following panels:
 
@@ -368,7 +368,7 @@ Foreign-side tokens contributed, LP shares held on-chain, Status, Added At.
 Transfer limits define the maximum daily transfer volume permitted for a participant and/or
 currency on this spoke. Limits are enforced by the payment orchestrator at transfer initiation.
 
-<!-- TODO: screenshot — transfer limits -->
+![Transfer Limits](../img/scenario-b/treasury/07-transfer-limits.png)
 
 **Creating a new limit.**
 
@@ -405,7 +405,7 @@ the removed rule from the next transfer attempt onward.
 The Audit screen provides a filterable log of treasury-relevant events recorded by the
 backend. This is the primary tool for regulatory review and incident investigation.
 
-<!-- TODO: screenshot — audit log -->
+![Audit](../img/scenario-b/treasury/08-audit.png)
 
 **Filters.** Two dropdown filters can be combined independently:
 
@@ -430,23 +430,6 @@ request is in flight. Any backend error is displayed below the table.
 
 > The audit log is append-only on the backend. Records cannot be edited or deleted from
 > this interface.
-
----
-
-### 4.8 Settings
-
-**Route:** `/settings`
-
-The Settings screen is a read-only security profile summary. It does not offer configurable
-preferences. It documents three aspects of the portal's operational security posture:
-
-| Section | Content |
-|---|---|
-| RBAC | Route and action guards require the `TREASURY` role claim. |
-| Credential Policy | Mint operations require an approved funding request and valid issuer credentials. |
-| Session Handling | No local storage or session storage is used for authentication tokens or sensitive payloads. |
-
-This screen is provided as a reference for security audits and onboarding reviews.
 
 ---
 

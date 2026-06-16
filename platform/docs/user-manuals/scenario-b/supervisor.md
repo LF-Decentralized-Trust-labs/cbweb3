@@ -86,7 +86,7 @@ read-only anonymous access.
 Navigate to the Supervisor Portal URL. The login page presents an
 institutional SSO/OIDC sign-in form.
 
-<!-- TODO: screenshot -->
+![Login](../img/scenario-b/supervisor/01-login.png)
 
 **Fields:**
 
@@ -148,7 +148,7 @@ The Dashboard provides a real-time network-level overview by combining data
 from the network overview API and the stability (AMM pool) API. It is the
 recommended starting point for any supervisory session.
 
-<!-- TODO: screenshot -->
+![Dashboard](../img/scenario-b/supervisor/02-dashboard.png)
 
 **Summary cards (top row):**
 
@@ -200,7 +200,7 @@ This screen is specific to Scenario B and provides detailed, pool-level AMM
 surveillance. It is the primary tool for assessing hub liquidity health during
 normal operations or a market stress event.
 
-<!-- TODO: screenshot -->
+![Liquidity Monitor](../img/scenario-b/supervisor/03-liquidity-monitor.png)
 
 > **Scenario B specific.** This page does not exist in the Scenario A
 > Supervisor Portal. It reflects the AMM architecture of the International Hub.
@@ -251,7 +251,7 @@ A searchable, read-only view of all institutions registered in the hub
 compliance system. Use this screen to verify participant credentials and
 jurisdictional standing.
 
-<!-- TODO: screenshot -->
+![Compliance Registry](../img/scenario-b/supervisor/04-compliance.png)
 
 **Summary cards:**
 
@@ -290,7 +290,7 @@ privacy model: because Zeto ZKP shielding means that amounts and parties are
 never revealed on-chain, classical "decrypt with view key" functionality does
 not apply. The ZK Pointer tool provides the appropriate alternative.
 
-<!-- TODO: screenshot -->
+![Audit Vault](../img/scenario-b/supervisor/05-audit.png)
 
 **Privacy notice (top card):**
 
@@ -362,7 +362,7 @@ A summary dashboard of the AMM network's current risk posture. This screen is
 the Scenario B equivalent of a stability controls page; it is intentionally
 read-only and does not expose any intervention buttons.
 
-<!-- TODO: screenshot -->
+![Stability Insights](../img/scenario-b/supervisor/06-stability.png)
 
 > **Scenario B specific.** This page focuses entirely on AMM pool risk. It
 > does not display HTLC expiry or escrow risk indicators, which are Scenario A
@@ -402,7 +402,7 @@ authorised supervisors to open a multi-party disclosure request against a
 specific shielded transaction reference and to co-sign requests opened by
 other supervisors.
 
-<!-- TODO: screenshot -->
+![Investigation](../img/scenario-b/supervisor/07-investigation.png)
 
 > **Active write operations.** Unlike the other screens, this page makes write
 > API calls when opening or signing a disclosure request. Operations require
@@ -471,27 +471,6 @@ The result card shows:
 > **Live data required.** All three sections call the oversight API
 > (`/api/v2/oversight/...`). Backend availability and correct role permissions
 > are required for operations to succeed.
-
----
-
-### 5.7 Settings
-
-**Route:** `/settings` · **Sidebar label:** Settings
-
-Session-scoped preferences for the current supervisor session. Settings are
-not persisted to the backend; they reset when the session ends.
-
-<!-- TODO: screenshot -->
-
-| Setting | Default | Description |
-|---|---|---|
-| Realtime Telemetry (SSE) | Enabled | Receive imbalance and governance alerts as Server-Sent Events. When enabled the portal can display alerts without manual page refresh. |
-| Strict Session Management | Enabled | Requires periodic re-authentication before privileged operations (recommended for production use). |
-| Mask Sensitive Data | Enabled | Prevents accidental on-screen exposure of decrypted payloads (recommended at all times). |
-
-Click **Save Preferences** to apply changes for the duration of the current
-session. A toast notification confirms the save. The badge "Session-only
-preferences" is a reminder that no preference is persisted beyond the session.
 
 ---
 
