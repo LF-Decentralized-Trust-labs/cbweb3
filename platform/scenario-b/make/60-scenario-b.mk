@@ -266,11 +266,29 @@ scenario-b.perf-zeto:
 	  TOKEN_KIND=zeto TRANSFER_TPS=$${TRANSFER_TPS:-15} DURATION=$${DURATION:-10m} \
 	  k6 run tests/performance/k6/bridge-transfer-throughput.js
 
+# ── R1-12.3 ZERO-CONFIG orchestration ────────────────────────────────────────
+# scenario-b.perf-all — ONE command, NO config, NO manual steps. Stands up the stack if
+# needed, mints the auth tokens via the gateway login, applies the perf profile (clears
+# transfer limits + asserts the circuit breaker is RESUMED before swaps), seeds 30-TPS-sized
+# liquidity, runs every threshold benchmark with --summary-export, does on-chain TTF
+# correlation, and writes measured numbers + PASS/FAIL into docs/performance/RESULTS.md.
+# The 12h soak is SEPARATE (scenario-b.perf-soak). Override DURATION/SWAP_TPS/etc. if desired.
+scenario-b.perf-all:
+	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
+	@echo "[scenario-b] R1-12.3 full perf suite (zero-config) — see docs/performance/RESULTS.md..."
+	@PERF_MAKE_DIR=$(CURDIR) \
+	 API_GW_URL=$(API_GW_URL) \
+	 API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
+	 bash tests/performance/run-all.sh
+
 scenario-b.perf-soak:
 	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
 	@echo "[scenario-b] 12-hour SOAK — dedicated infra only, NOT for CI..."
-	@API_GW_URL=$(API_GW_URL) AUTH_TOKEN=$(AUTH_TOKEN) DURATION=$${DURATION:-12h} \
-	  k6 run tests/performance/k6/soak.js
+	@PERF_MAKE_DIR=$(CURDIR) \
+	 API_GW_URL=$(API_GW_URL) \
+	 API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
+	 DURATION=$${DURATION:-12h} \
+	 bash tests/performance/run-soak.sh
 
 # ── OpenAPI validation (T108) ────────────────────────────────────────────────
 
@@ -292,4 +310,4 @@ scenario-b.validate-openapi:
 	scenario-b.test-integration \
 	scenario-b.perf-baseline scenario-b.validate-openapi \
 	scenario-b.perf-amm-throughput scenario-b.perf-transfer \
-	scenario-b.perf-zeto scenario-b.perf-soak
+	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all
