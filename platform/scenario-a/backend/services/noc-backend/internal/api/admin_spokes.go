@@ -30,6 +30,7 @@ func (h *SpokesHandler) Register(g fiber.Router) {
 }
 
 type upsertSpokeRequest struct {
+	ID           string `json:"id"`
 	Name         string `json:"name"`
 	CurrencyCode string `json:"currency_code"`
 	Jurisdiction string `json:"jurisdiction"`
@@ -61,6 +62,13 @@ func (h *SpokesHandler) create(c *fiber.Ctx) error {
 		CurrencyCode: req.CurrencyCode,
 		Jurisdiction: req.Jurisdiction,
 		Active:       active,
+	}
+	if req.ID != "" {
+		id, err := uuid.Parse(req.ID)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+		}
+		spoke.ID = id
 	}
 	if err := h.repo.Create(spoke); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})

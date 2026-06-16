@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { healthApi } from "../services/api";
 import type { AsyncStatus, TelemetryFrame } from "../types";
 
 type TelemetryState = {
@@ -15,15 +14,8 @@ export const useTelemetryStore = create<TelemetryState>((set) => ({
   frames: [],
   status: "idle",
   error: null,
-  fetchSnapshot: async () => {
-    set({ status: "loading", error: null });
-    try {
-      const frames = await healthApi.getTelemetrySnapshot();
-      set({ frames, status: "idle" });
-    } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to fetch telemetry" });
-    }
-  },
+  // Telemetry is pushed via WebSocket; this is a no-op kept for interface compatibility.
+  fetchSnapshot: async () => { set({ status: "idle" }); },
   pushFrame: (frame) => set((state) => ({ frames: [frame, ...state.frames].slice(0, 80) })),
   clear: () => set({ frames: [] }),
 }));

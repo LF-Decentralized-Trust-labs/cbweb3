@@ -1,12 +1,14 @@
 export type AuditLogEntry = {
   id: string;
-  component: "BESU" | "PALADIN" | "CACTI" | "SYSTEM";
-  severity: "INFO" | "WARNING" | "CRITICAL";
-  message: string;
-  createdAt: string;
+  actor: string;
+  action: string;
+  target_id: string;
+  target_type: string;
+  detail: string;
+  created_at: string;
 };
 
 export type AuditFilter = {
-  component?: AuditLogEntry["component"];
-  severity?: AuditLogEntry["severity"];
+  actor?: string;
+  action?: string;
 };

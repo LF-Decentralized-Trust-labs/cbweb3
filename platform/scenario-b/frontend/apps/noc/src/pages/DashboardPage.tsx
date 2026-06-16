@@ -1,10 +1,16 @@
 import {
   Badge,
+  Button,
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
+  CardDescription,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Table,
   TableBody,
   TableCell,
@@ -12,53 +18,114 @@ import {
   TableHeader,
   TableRow,
 } from "@cbweb3/ui";
-import { useEffect } from "react";
-import { useAlerts, useInfrastructure, usePoolStability, useRelays, useTelemetry } from "../hooks";
+import { XCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AlertDetailModal } from "../components/alerts/AlertDetailModal";
+import { usePolling } from "../hooks";
+import { useAlertStore, useInfrastructureStore, usePoolStore, useSpokeStore, useUiStore } from "../stores";
+
+const severityVariant: Record<string, "default" | "secondary" | "warning" | "destructive"> = {
+  INFO: "secondary",
+  WARNING: "warning",
+  HIGH: "destructive",
+  CRITICAL: "destructive",
+};
+
+const healthVariant: Record<string, "default" | "secondary" | "warning" | "destructive"> = {
+  HEALTHY: "default",
+  DEGRADED: "warning",
+  OFFLINE: "destructive",
+  UNKNOWN: "secondary",
+};
 
 export function DashboardPage() {
-  const { nodes, fetch: fetchInfrastructure } = useInfrastructure();
-  const { relays, fetch: fetchRelays } = useRelays();
-  const { pools, fetch: fetchPools } = usePoolStability();
-  const { alerts } = useAlerts();
-  const { frames, fetchSnapshot } = useTelemetry();
+  const { spokes, selectedSpokeId, fetchSpokes, selectSpoke } = useSpokeStore();
+  const { components, fetchComponents } = useInfrastructureStore();
+  const { alerts, fetchAlerts, dismissAlert, clearSelectedAlert } = useAlertStore();
+  const { pools, fetch: fetchPools } = usePoolStore();
+  const { fallbackPollingSeconds } = useUiStore();
+  const [openAlertId, setOpenAlertId] = useState<string | null>(null);
 
   useEffect(() => {
-    void fetchInfrastructure();
-    void fetchRelays();
+    void fetchSpokes();
     void fetchPools();
-    void fetchSnapshot();
-  }, [fetchInfrastructure, fetchRelays, fetchPools, fetchSnapshot]);
+  }, [fetchSpokes, fetchPools]);
 
-  const critical = alerts.filter((alert) => alert.severity === "CRITICAL").length;
-  const degradedNodes = nodes.filter((node) => node.status !== "HEALTHY").length;
-  const worstRelay = relays.length ? Math.max(...relays.map((relay) => relay.latencyP95Ms)) : 0;
-  const breachedPools = pools.filter((pool) => pool.breached7030).length;
+  useEffect(() => {
+    if (selectedSpokeId) {
+      void fetchComponents(selectedSpokeId);
+      void fetchAlerts(selectedSpokeId);
+    } else {
+      void fetchAlerts();
+    }
+  }, [selectedSpokeId, fetchComponents, fetchAlerts]);
+
+  usePolling(() => {
+    if (selectedSpokeId) {
+      void fetchComponents(selectedSpokeId);
+      void fetchAlerts(selectedSpokeId);
+    } else {
+      void fetchAlerts();
+    }
+  }, fallbackPollingSeconds);
+
+  const critical = alerts.filter((a) => a.state === "ACTIVE" && (a.severity === "CRITICAL" || a.severity === "HIGH")).length;
+  const degraded = components.filter((c) => c.health_status !== "HEALTHY").length;
+  const offline = components.filter((c) => c.health_status === "OFFLINE").length;
+  const breachedPools = pools.filter((p) => p.breached7030).length;
+
+  const activeAlerts = alerts.filter((a) => a.state === "ACTIVE");
+
+  function handleSelectSpoke(value: string) {
+    selectSpoke(value === "all" ? null : value);
+  }
+
+  function handleCloseModal() {
+    setOpenAlertId(null);
+    clearSelectedAlert();
+  }
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-muted-foreground shrink-0">Viewing spoke:</span>
+        <Select value={selectedSpokeId ?? "all"} onValueChange={handleSelectSpoke}>
+          <SelectTrigger className="w-56">
+            <SelectValue placeholder="All Spokes" />
+          </SelectTrigger>
+          <SelectContent>
+            {spokes.filter((s) => s.active).map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Critical Alerts</CardDescription>
-            <CardTitle>{critical}</CardTitle>
+            <CardDescription>Critical / High Alerts</CardDescription>
+            <CardTitle className={critical > 0 ? "text-destructive" : ""}>{critical}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Degraded Nodes</CardDescription>
-            <CardTitle>{degradedNodes}</CardTitle>
+            <CardDescription>Degraded Components</CardDescription>
+            <CardTitle className={degraded > 0 ? "text-warning" : ""}>{degraded}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Worst Relay p95</CardDescription>
-            <CardTitle>{worstRelay} ms</CardTitle>
+            <CardDescription>Offline Components</CardDescription>
+            <CardTitle className={offline > 0 ? "text-destructive" : ""}>{offline}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Pool Breaches (70/30)</CardDescription>
-            <CardTitle>{breachedPools}</CardTitle>
+            <CardTitle className={breachedPools > 0 ? "text-destructive" : ""}>{breachedPools}</CardTitle>
           </CardHeader>
         </Card>
       </section>
@@ -66,27 +133,32 @@ export function DashboardPage() {
       <section className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Recent Telemetry Frames</CardTitle>
+            <CardTitle>Component Health</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Component</TableHead>
-                  <TableHead>CPU</TableHead>
-                  <TableHead>Mem</TableHead>
-                  <TableHead>Latency</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {frames.slice(0, 6).map((frame) => (
-                  <TableRow key={frame.id}>
-                    <TableCell>{frame.component}</TableCell>
-                    <TableCell>{frame.cpuPct}%</TableCell>
-                    <TableCell>{frame.memoryPct}%</TableCell>
-                    <TableCell>{frame.latencyMs} ms</TableCell>
+                {components.slice(0, 8).map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell className="font-medium">{c.name}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{c.type}</TableCell>
+                    <TableCell>
+                      <Badge variant={healthVariant[c.health_status] ?? "secondary"}>{c.health_status}</Badge>
+                    </TableCell>
                   </TableRow>
                 ))}
+                {components.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">No components yet</TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </CardContent>
@@ -97,20 +169,47 @@ export function DashboardPage() {
             <CardTitle>Active Alert Feed</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {alerts.slice(0, 8).map((alert) => (
-              <div key={alert.id} className="rounded-md border border-border p-2 text-sm">
+            {activeAlerts.length === 0 && (
+              <p className="py-4 text-center text-sm text-muted-foreground">No active alerts</p>
+            )}
+            {activeAlerts.slice(0, 8).map((alert) => (
+              <div
+                key={alert.id}
+                className="rounded-md border border-border p-2 text-sm cursor-pointer hover:bg-accent transition-colors"
+                onClick={() => setOpenAlertId(alert.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === "Enter" && setOpenAlertId(alert.id)}
+              >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium">{alert.source}</span>
-                  <Badge variant={alert.severity === "CRITICAL" ? "destructive" : alert.severity === "WARNING" ? "warning" : "secondary"}>
+                  <span className="font-medium truncate flex-1">{alert.title}</span>
+                  <Badge variant={severityVariant[alert.severity] ?? "secondary"}>
                     {alert.severity}
                   </Badge>
+                  {alert.acknowledged_by && (
+                    <Badge variant="secondary" className="shrink-0">ACK</Badge>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0 shrink-0 text-muted-foreground hover:text-destructive"
+                    title="Dismiss alert"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void dismissAlert(alert.id);
+                    }}
+                  >
+                    <XCircle className="h-4 w-4" />
+                  </Button>
                 </div>
-                <p className="text-muted-foreground">{alert.message}</p>
+                <p className="text-xs text-muted-foreground">{new Date(alert.created_at).toLocaleString()}</p>
               </div>
             ))}
           </CardContent>
         </Card>
       </section>
+
+      <AlertDetailModal alertId={openAlertId} onClose={handleCloseModal} />
     </div>
   );
 }

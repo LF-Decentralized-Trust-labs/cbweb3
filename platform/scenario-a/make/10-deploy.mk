@@ -75,6 +75,18 @@ noc.setup-keycloak:
 	@echo "Setting up NOC realm in Keycloak..."
 	@bash $(DEPLOY_DIR)/keycloak/setup-noc-realm.sh
 
+noc.up:
+	@echo "Starting NOC stack (backend, portal, agents)..."
+	@docker compose -f $(DEPLOY_DIR)/compose.noc.yml up -d --build
+
+noc.down:
+	@echo "Stopping NOC stack..."
+	@docker compose -f $(DEPLOY_DIR)/compose.noc.yml down
+
+noc.setup-agents:
+	@echo "Provisioning NOC spokes and agent API keys..."
+	@bash $(DEPLOY_DIR)/keycloak/setup-noc-agents.sh
+
 deploy.down-infra:
 	@echo "Stopping Compose Services..."
 	@docker compose -f $(DEPLOY_DIR)/compose.yml down -v
@@ -140,4 +152,4 @@ deploy.ci-local: deploy.build-ci-runner
 	deploy.up-backend-spoke-b deploy.down-backend-spoke-b \
 	deploy.up-backend-entities deploy.down-backend-entities deploy.validate-backend-entities \
 	deploy.build-ci-runner deploy.ci-local \
-	noc.setup-keycloak
+	noc.setup-keycloak noc.up noc.down noc.setup-agents
