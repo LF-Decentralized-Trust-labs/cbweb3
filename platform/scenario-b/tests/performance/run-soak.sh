@@ -19,7 +19,7 @@ PERF_SERVICE="perf-soak"
 
 : "${API_GW_URL:=http://localhost:3000}"
 : "${API_GW_CENTRAL_BANK_A_URL:=http://localhost:38080}"
-: "${PAIR:=BRL-USD}"
+: "${PAIR:=W-BRL-ARS}"
 : "${DURATION:=12h}"
 : "${SOAK_METRICS_INTERVAL:=300}"
 

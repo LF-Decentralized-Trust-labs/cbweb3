@@ -2,10 +2,13 @@
 # seed.sh — ensure the AMM pair has enough depth for the 30-TPS swap run and is ACTIVE.
 #
 # Pool reserves in Scenario B come from the cooperative commit-reveal flow (two CBs), not a
-# single admin call — the canonical, idempotent seeder is `make scenario-b.tryout-us1`, which
-# verifies/seeds the BRL-USD pool and is safe to re-run (it skips when the pool already has
-# bilateral liquidity). seed.sh checks the live pool first and only invokes the seeder when the
-# pool is not ACTIVE, then re-verifies and computes a depth headroom estimate.
+# single admin call. The canonical idempotent seeders are:
+#   - W-BRL-ARS (the sovereign pair `scenario-b.up` registers): tryouts/tryout-sovereign-cb-liquidity.sh
+#     — supports AMOUNT_A/AMOUNT_B for depth sizing (defaults are already deep ~1e23/2e23 wei).
+#   - BRL-USD (legacy pool): `make scenario-b.tryout-us1`.
+# Both skip when the pool already has bilateral liquidity, so re-running is safe. seed.sh checks
+# the live pool first and only invokes the seeder when the pool is not ACTIVE, then re-verifies
+# and computes a depth headroom estimate.
 #
 # Depth math (why this matters): an exact-output swap of AMOUNT_OUT against a constant-product
 # pool moves price; if cumulative output over the run approaches a reserve, later swaps exceed
@@ -49,10 +52,20 @@ seed_ensure_depth() {
     if [ "$SKIP_SEED" = "1" ]; then
       log_warn "pool not ACTIVE and SKIP_SEED=1 — leaving as-is" pair="$pair"
     else
-      require_cmd make
       makedir="${PERF_MAKE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
-      log_info "pool not ACTIVE — seeding via cooperative commit-reveal (make scenario-b.tryout-us1)" pair="$pair"
-      ( cd "$makedir" && make scenario-b.tryout-us1 ) || log_warn "tryout-us1 returned non-zero (pool may still be partially seeded)"
+      case "$pair" in
+        W-BRL-ARS|W-*)
+          log_info "pool not ACTIVE — seeding sovereign pair via cooperative commit-reveal" pair="$pair"
+          ( cd "$makedir" && POOL_PAIR="$pair" bash tryouts/tryout-sovereign-cb-liquidity.sh ) \
+            || log_warn "sovereign liquidity tryout returned non-zero (pool may still be partially seeded)" pair="$pair"
+          ;;
+        *)
+          require_cmd make
+          log_info "pool not ACTIVE — seeding legacy pool (make scenario-b.tryout-us1)" pair="$pair"
+          ( cd "$makedir" && make scenario-b.tryout-us1 ) \
+            || log_warn "tryout-us1 returned non-zero (pool may still be partially seeded)"
+          ;;
+      esac
       st="$(seed_pool_status "$pair" "$token")"
       status="${st%% *}"; rest="${st#* }"; ra="${rest%% *}"; rb="${rest##* }"
       log_info "pool status after seed" pair="$pair" status="$status" reserve_a="$ra" reserve_b="$rb"

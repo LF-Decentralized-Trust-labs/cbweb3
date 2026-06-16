@@ -43,8 +43,8 @@ profile_clear_limits() {
     log_warn "could not list transfer-limits (skipping clear)" gw="$gw" code="$code"
     return 0
   fi
-  # Extract each limit id. Limits expose an "id" field (UUID/string).
-  ids="$(printf '%s' "$body" | grep -o '"id":"[^"]*"' | sed 's/"id":"//;s/"//')"
+  # Extract each limit id. The TransferLimit JSON exposes "limit_id" (the DELETE route's :id).
+  ids="$(printf '%s' "$body" | grep -o '"limit_id":"[^"]*"' | sed 's/"limit_id":"//;s/"//')"
   if [ -z "$ids" ]; then
     log_info "no transfer limits set — transfers already unlimited" gw="$gw"
     return 0
@@ -59,31 +59,41 @@ profile_clear_limits() {
   done
 }
 
+# _breaker_state BODY -> echoes the "state" value (LIVE | HALTED | RESUME_PENDING | "").
+_breaker_state() {
+  printf '%s' "$1" | grep -o '"state":"[^"]*"' | head -1 | sed 's/"state":"//;s/"//'
+}
+
 # profile_assert_breaker_resumed CB_GW_URL CB_TOKEN — constitution III precondition.
+# The circuit-breaker status reports {"state":"LIVE"|"HALTED"|"RESUME_PENDING"}. Swaps are only
+# allowed when state==LIVE; HALTED (paused) and RESUME_PENDING (1-of-N requested, not yet 2-of-N)
+# both block swaps. Resume is 2-of-N, so a single CB can request+sign but may not fully clear it.
 profile_assert_breaker_resumed() {
   gw="$1"; token="$2"
   out="$(_gov_curl GET "$gw/api/v2/governance/circuit-breaker/status" "$token")"
   code="${out%% *}"; body="${out#* }"
   if [ "$code" != "200" ]; then
-    log_warn "circuit-breaker status unavailable — assuming active" gw="$gw" code="$code"
+    log_warn "circuit-breaker status unavailable — assuming LIVE" gw="$gw" code="$code"
     return 0
   fi
-  # Treat any "paused":true or "status":"PAUSED" as paused.
-  if printf '%s' "$body" | grep -qiE '"paused"[[:space:]]*:[[:space:]]*true|"(status|state)"[[:space:]]*:[[:space:]]*"paused"'; then
-    log_warn "circuit breaker is PAUSED — swaps would revert" gw="$gw"
-    if [ "$PERF_BREAKER_RESUME" = "1" ]; then
-      log_info "attempting resume-request + resume-sign (single-CB best effort)" gw="$gw"
-      _gov_curl POST "$gw/api/v2/governance/circuit-breaker/resume-request" "$token" '{}' >/dev/null
-      _gov_curl POST "$gw/api/v2/governance/circuit-breaker/resume-sign" "$token" '{}' >/dev/null
-      out2="$(_gov_curl GET "$gw/api/v2/governance/circuit-breaker/status" "$token")"
-      if printf '%s' "${out2#* }" | grep -qiE '"paused"[[:space:]]*:[[:space:]]*true|"(status|state)"[[:space:]]*:[[:space:]]*"paused"'; then
-        log_fatal "circuit breaker still PAUSED after resume attempt (2-of-N needs a second CB) — cannot run swaps" gw="$gw"
-      fi
-    else
-      log_fatal "circuit breaker PAUSED and PERF_BREAKER_RESUME!=1 — cannot run swaps" gw="$gw"
-    fi
+  state="$(_breaker_state "$body")"
+  if [ "$state" = "LIVE" ] || [ -z "$state" ]; then
+    log_info "circuit breaker LIVE — swaps allowed" gw="$gw" state="${state:-unknown}"
+    return 0
   fi
-  log_info "circuit breaker is active (not paused) — swaps allowed" gw="$gw"
+  log_warn "circuit breaker not LIVE — swaps would revert" gw="$gw" state="$state"
+  if [ "$PERF_BREAKER_RESUME" != "1" ]; then
+    log_fatal "circuit breaker $state and PERF_BREAKER_RESUME!=1 — cannot run swaps" gw="$gw"
+  fi
+  log_info "attempting resume-request + resume-sign (2-of-N; single-CB best effort)" gw="$gw"
+  _gov_curl POST "$gw/api/v2/governance/circuit-breaker/resume-request" "$token" '{}' >/dev/null
+  _gov_curl POST "$gw/api/v2/governance/circuit-breaker/resume-sign" "$token" '{}' >/dev/null
+  out2="$(_gov_curl GET "$gw/api/v2/governance/circuit-breaker/status" "$token")"
+  state2="$(_breaker_state "${out2#* }")"
+  if [ "$state2" != "LIVE" ]; then
+    log_fatal "circuit breaker still $state2 after resume attempt (2-of-N needs a second CB) — cannot run swaps" gw="$gw"
+  fi
+  log_info "circuit breaker resumed to LIVE — swaps allowed" gw="$gw"
 }
 
 # profile_apply CB_GW_URL CB_TOKEN

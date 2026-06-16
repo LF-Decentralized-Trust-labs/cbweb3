@@ -19,7 +19,8 @@
 #
 # Knobs (all optional — sensible defaults make it zero-config):
 #   API_GW_URL (3000), API_GW_CENTRAL_BANK_A_URL (38080)
-#   PAIR (BRL-USD), DURATION (3m for the throughput runs — shorter than the 10m manual default
+#   PAIR (W-BRL-ARS — the sovereign pair scenario-b.up seeds), DURATION (3m for the throughput
+#         runs — shorter than the 10m manual default
 #         so the unattended suite finishes; override DURATION=10m for a publication run)
 #   SWAP_TPS (30), TRANSFER_TPS (50), ZETO_TPS (15)
 #   SKIP_STACK / SKIP_SEED (set by the dry-run smoke test)
@@ -42,7 +43,7 @@ PERF_SERVICE="perf-all"
 
 : "${API_GW_URL:=http://localhost:3000}"
 : "${API_GW_CENTRAL_BANK_A_URL:=http://localhost:38080}"
-: "${PAIR:=BRL-USD}"
+: "${PAIR:=W-BRL-ARS}"
 : "${DURATION:=3m}"
 : "${SWAP_TPS:=30}"
 : "${TRANSFER_TPS:=50}"

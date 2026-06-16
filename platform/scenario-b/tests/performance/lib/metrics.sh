@@ -18,11 +18,11 @@
 #
 # Env:
 #   API_GW_URL   gateway for pool status (default http://localhost:3000)
-#   PERF_PAIR    pool pair for the invariant (default BRL-USD)
+#   PERF_PAIR    pool pair for the invariant (default W-BRL-ARS)
 #   PG_CONTAINER postgres container name (default cbweb3-postgres)
 
 : "${API_GW_URL:=http://localhost:3000}"
-: "${PERF_PAIR:=BRL-USD}"
+: "${PERF_PAIR:=W-BRL-ARS}"
 : "${PG_CONTAINER:=cbweb3-postgres}"
 
 # _pool_reserves -> "<reserve_a> <reserve_b>"

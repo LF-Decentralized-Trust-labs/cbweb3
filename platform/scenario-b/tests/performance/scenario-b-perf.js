@@ -23,7 +23,7 @@
  * Environment variables:
  *   API_GW_URL   — API Gateway base URL (default: http://localhost:3000)
  *   AUTH_TOKEN   — Bearer token with commercial_bank role (required for swap)
- *   PAIR         — Pool pair to probe (default: BRL-USD)
+ *   PAIR         — Pool pair to probe (default: W-BRL-ARS)
  *   DURATION     — Test duration (default: 1m; use 12h for the soak)
  *   LOAD_MODEL   — "vus" | "rate" (default: vus)
  *   VUS          — quote VUs in vus-mode (default: 20)
@@ -51,7 +51,7 @@ import { Trend, Counter } from "k6/metrics";
 
 const API_GW_URL = __ENV.API_GW_URL || "http://localhost:3000";
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || "";
-const PAIR = __ENV.PAIR || "BRL-USD";
+const PAIR = __ENV.PAIR || "W-BRL-ARS";
 const DURATION = __ENV.DURATION || "1m";
 const LOAD_MODEL = (__ENV.LOAD_MODEL || "vus").toLowerCase();
 

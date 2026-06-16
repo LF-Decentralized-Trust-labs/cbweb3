@@ -20,7 +20,7 @@
  * Environment variables:
  *   API_GW_URL    — API Gateway base URL (default: http://localhost:3000)
  *   AUTH_TOKEN    — Bearer token with commercial_bank role (REQUIRED for swap/transfer)
- *   PAIR          — AMM pair to probe (default: BRL-USD)
+ *   PAIR          — AMM pair to probe (default: W-BRL-ARS)
  *   SPOKE/ASSET   — bridge transfer source/asset (defaults: spoke-a / BRL)
  *   DURATION      — soak window (default: 12h)
  *   QUOTE_TPS     — quote req/s (default: 10 — moderate)
@@ -37,7 +37,7 @@ import { Trend, Rate } from "k6/metrics";
 
 const API_GW_URL = __ENV.API_GW_URL || "http://localhost:3000";
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || "";
-const PAIR = __ENV.PAIR || "BRL-USD";
+const PAIR = __ENV.PAIR || "W-BRL-ARS";
 const SPOKE = __ENV.SPOKE || "spoke-a";
 const ASSET = __ENV.ASSET || "BRL";
 const DURATION = __ENV.DURATION || "12h";
