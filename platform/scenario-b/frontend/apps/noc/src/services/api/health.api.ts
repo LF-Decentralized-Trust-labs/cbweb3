@@ -1,8 +1,13 @@
-import type { InfrastructureNode, TelemetryFrame, TopologyEdge, TopologyNode } from "../../types";
-import { mockDb } from "../mocks/mock-db";
+import type { TopologyEdge, TopologyNode } from "../../types";
+import { httpClient } from "./http-client";
+
+type DataEnvelope<T> = { data: T };
 
 export const healthApi = {
-  getInfrastructure: (): Promise<InfrastructureNode[]> => mockDb.getInfrastructure(),
-  getTelemetrySnapshot: (): Promise<TelemetryFrame[]> => mockDb.getTelemetrySnapshot(),
-  getTopology: (): Promise<{ nodes: TopologyNode[]; edges: TopologyEdge[] }> => mockDb.getTopology(),
+  getTopology: async (): Promise<{ nodes: TopologyNode[]; edges: TopologyEdge[] }> => {
+    const res = await httpClient.get<DataEnvelope<{ nodes: TopologyNode[]; edges: TopologyEdge[] }>>(
+      "/topology",
+    );
+    return res.data.data;
+  },
 };

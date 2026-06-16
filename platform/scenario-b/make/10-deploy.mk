@@ -137,6 +137,24 @@ deploy.ci-local: deploy.build-ci-runner
 		-P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-22.04 \
 		$(ARGS)
 
+## NOC targets (Scenario B)
+noc.up:
+	@docker compose -f $(DEPLOY_DIR)/compose.noc.yml up -d --build
+
+noc.down:
+	@docker compose -f $(DEPLOY_DIR)/compose.noc.yml down
+
+noc.logs:
+	@docker compose -f $(DEPLOY_DIR)/compose.noc.yml logs -f
+
+noc.setup-keycloak:
+	@bash $(DEPLOY_DIR)/keycloak/setup-noc-realm.sh
+
+noc.setup-agents:
+	@bash $(DEPLOY_DIR)/keycloak/setup-noc-agents.sh
+
+.PHONY: noc.up noc.down noc.logs noc.setup-keycloak noc.setup-agents
+
 .PHONY: deploy.create-shared-network \
 	deploy.up-spoke-a deploy.down-spoke-a deploy.up-spoke-b deploy.down-spoke-b \
 	deploy.up-hub-besu deploy.down-hub-besu \

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package router registers API Gateway routes and attaches required dependencies.
 // Scenario B v2 routes are registered by the v2 sub-package (T045/T070/T091).
 package router
@@ -17,6 +19,7 @@ type Dependencies struct {
 	AuthHandler            *handlers.AuthHandler
 	ComplianceHandler      *handlers.ComplianceHandler
 	GovernanceHandler      *handlers.GovernanceHandler
+	SupervisorHandler      *handlers.SupervisorHandler
 	OnboardingHandler      *handlers.OnboardingHandler
 	OnboardingProxyHandler *handlers.OnboardingProxyHandler
 	AuthProvider           interfaces.IAuthProvider
@@ -36,6 +39,8 @@ func Setup(app *fiber.App, deps Dependencies) {
 
 	app.Get("/openapi.yaml", handlers.OpenAPIYAML)
 	app.Get("/docs", handlers.SwaggerUI)
+	// Vendored, embedded Swagger UI assets — served locally so /docs works offline (no CDN).
+	app.Get("/docs/swagger-ui/:asset", handlers.SwaggerUIAsset)
 	app.Get("/healthz", handlers.Health)
 
 	// --- Auth ---
@@ -70,6 +75,13 @@ func Setup(app *fiber.App, deps Dependencies) {
 	complianceGroup.Post("/aml/screen", deps.ComplianceHandler.AMLScreen)
 	complianceGroup.Get("/participants", middleware.RequireRole("ROLE_GOVERNANCE"), deps.ComplianceHandler.ListParticipants)
 	complianceGroup.Post("/approve-kyc", middleware.RequireRole("ROLE_GOVERNANCE"), deps.GovernanceHandler.ApproveKYC)
+	if deps.SupervisorHandler != nil {
+		complianceGroup.Get("/audit/logs", middleware.RequireSupervisorRole(), deps.SupervisorHandler.GetAuditLogs)
+		complianceGroup.Get("/zk-pointer/verify", middleware.RequireSupervisorRole(), deps.SupervisorHandler.VerifyZKPointer)
+
+		// Read-only participants list for supervisor (same handler, no write access).
+		complianceGroup.Get("/participants/summary", middleware.RequireSupervisorRole(), deps.ComplianceHandler.ListParticipants)
+	}
 
 	// --- Governance Portal ---
 	govGroup := app.Group("/api/v1/governance",

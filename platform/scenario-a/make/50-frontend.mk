@@ -1,4 +1,4 @@
-include frontend/.env
+-include frontend/.env
 
 frontend-spoke-a:
 	@./frontend/scripts/spoke-a-stack.sh up

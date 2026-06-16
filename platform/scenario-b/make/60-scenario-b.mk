@@ -152,10 +152,10 @@ scenario-b.down-fx-feeder:
 # down-fx-feeder runs first: the feeder signs setRate with the admin/deployer key, the
 # same account forge uses in deploy-contracts — a stale feeder from a prior `up` would
 # race the deploy's nonce. up-fx-feeder restarts it fresh at the end.
-scenario-b.up: scenario-b.down-fx-feeder scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend scenario-b.up-fx-feeder
+scenario-b.up: scenario-b.down-fx-feeder scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend scenario-b.up-fx-feeder noc.setup-keycloak noc.up noc.setup-agents
 	@echo "[scenario-b] full stack up — ready for tryout (bash tryouts/tryout-scenario-b-e2e.sh)"
 
-scenario-b.down: scenario-b.down-fx-feeder scenario-b.down-backend scenario-b.down-relayer scenario-b.down-infra
+scenario-b.down: scenario-b.down-fx-feeder scenario-b.down-backend scenario-b.down-relayer scenario-b.down-infra noc.down
 	@echo "[scenario-b] full stack down"
 
 scenario-b.restart: scenario-b.down scenario-b.up
@@ -170,6 +170,7 @@ scenario-b.restart: scenario-b.down scenario-b.up
 scenario-b.nuke:
 	@echo "[scenario-b] NUKE — tearing down the entire stack + volumes..."
 	-@$(MAKE) scenario-b.down
+	-@$(MAKE) noc.down
 	-@$(MAKE) frontend-scenario-b-down
 	@echo "[scenario-b] force-removing any leftover containers..."
 	-@docker rm -f $$(docker ps -aq --filter name=cbweb3 --filter name=backend-) 2>/dev/null || true
@@ -230,7 +231,7 @@ endif
 	  API_GW_BANK_B_URL=$(API_GW_BANK_B_URL) \
 	  API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
 	  API_GW_CENTRAL_BANK_B_URL=$(API_GW_CENTRAL_BANK_B_URL) \
-	  go test -v -count=1 -timeout 30m -run TestFullHappyPath ./...
+	  go test -v -count=1 -tags integration -timeout 30m -run TestFullHappyPath ./...
 
 # ── Performance baseline (T105) ──────────────────────────────────────────────
 

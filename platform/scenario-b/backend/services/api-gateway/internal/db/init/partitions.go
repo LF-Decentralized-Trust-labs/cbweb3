@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package init provides declarative time-based partitioning DDL for high-cardinality tables.
 // Partitions are created via db.Exec() using Postgres PARTITION BY RANGE (FR-046 / Decision 14).
 package init

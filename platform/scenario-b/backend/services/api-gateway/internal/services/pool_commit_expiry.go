@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the PoolCommitExpiryWorker goroutine (FR-013 / D6).
 package services
 

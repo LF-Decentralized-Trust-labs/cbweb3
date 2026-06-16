@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package middleware provides bearer-token authentication middleware for Scenario B API v2.
 package middleware
 

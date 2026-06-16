@@ -1,17 +1,27 @@
 openapi: 3.0.3
 info:
   title: CBWeb3 API Gateway
-  version: 2.2.0
+  version: 2.3.0
   description: >
-    OpenAPI specification for the CBWeb3 platform API Gateway.
-    Implements authentication, participant onboarding, KYC/AML compliance,
-    governance operations over the identity service (Keycloak + KMS),
-    and payment orchestrator operations (HTLC dual-layer + Zeto token management
-    via Paladin sidecar + escrow deposit/tokenization/redeem lifecycle).
+    OpenAPI specification for the CBWeb3 platform API Gateway (Scenario B —
+    International Hub). Implements authentication, participant onboarding,
+    KYC/AML compliance, governance operations over the identity service
+    (Keycloak + KMS), and payment orchestrator operations (HTLC dual-layer +
+    Zeto token management via Paladin sidecar + escrow deposit/tokenization/
+    redeem lifecycle) under the **/api/v1** core surface, plus the
+    **/api/v2** Hub-and-Spoke AMM surface: exact-output and cross-currency
+    swaps, lock-mint / burn-unlock bridging, cooperative + sovereign liquidity
+    provisioning (commit-reveal), hub currency and AMM pair registries, the
+    asymmetric circuit breaker (1-of-N pause / 2-of-N resume), and the
+    Master Viewing Key oversight (disclosure quorum).
 
-    Security note: All /compliance write endpoints require CENTRAL_BANK role.
-    Payment endpoints (HTLC + Token) are only available when the payment
-    orchestrator service is configured.
+    Security note: All /compliance and /governance write endpoints require the
+    appropriate Central Bank / governance role. Payment endpoints (HTLC +
+    Token) are only available when the payment orchestrator service is
+    configured. The /api/v2 routes are registered only when their backing
+    services are wired (per-gateway dependency injection), so a given gateway
+    deployment may expose a subset of the v2 surface depending on its role
+    (commercial bank vs. central bank).
 servers:
   - url: http://localhost:8080
     description: Local development server
@@ -44,21 +54,10 @@ tags:
       Governance Portal — endpoints exclusive to the Central Bank (ROLE_GOVERNANCE).
       Participant registration, PKI certificate management, account control,
       circuit breaker, global parameters, audit logs, and user management.
-  - name: HTLC
-    description: >
-      Hash Time-Locked Contract (HTLC) dual-layer operations.
-      Coordinates public HTLC state on Hyperledger Besu with private token
-      locking via Zeto/Paladin. Supports lock, settle (happy path), and
-      refund (timeout path) lifecycle.
-      These endpoints are only available when the payment orchestrator
-      service is configured (PaymentHandler != nil).
   - name: Token
     description: >
-      Token operations — mint, transfer, and balance queries for tCeBM
-      (tokenized Central Bank Money) via the Zeto privacy-preserving token
-      system on Paladin sidecar.
-      These endpoints are only available when the payment orchestrator
-      service is configured (PaymentHandler != nil).
+      Token balance queries for tCeBM (tokenized Central Bank Money) via the
+      payment-orchestrator gRPC service. Available when PAYMENT_GRPC_ADDR is set.
   - name: Escrow
     description: >
       Escrow lifecycle — deposit, tokenization (tCeBM → tCeBM), and
@@ -67,6 +66,61 @@ tags:
       money (Zeto privacy token) and back. Central Bank nodes process approve/
       reject and fiat-exchange actions; commercial bank nodes proxy deposit,
       escrow, and redeem requests to the Central Bank.
+  - name: AMM Swap
+    description: >
+      Automated Market Maker swaps and quotes (Scenario B Hub). Exact-output
+      single-pair swaps for commercial banks, orchestrated cross-currency
+      swaps (bridge-in → Hub AMM swap → bridge-out), quote generation, and
+      pool/hub-liquidity status. Served under /api/v2/amm.
+  - name: AMM Bridge
+    description: >
+      Lock-mint and burn-unlock bridging between a spoke (tCeBM) and the Hub
+      (W-tCeBM mirrored asset), plus bridge position listing. Implements the
+      Scenario B atomicity rule: lock → mint, burn → unlock. Served under
+      /api/v2/bridge.
+  - name: AMM Liquidity
+    description: >
+      Liquidity provisioning for the Hub AMM: cooperative commit-reveal
+      (commit / list / status / cancel), sovereign CB deposits, legacy
+      dual-sided add/remove, on-chain LP-share balance, and position listing.
+      Served under /api/v2/amm/liquidity and /api/v2/amm/lp-balance.
+  - name: AMM Token
+    description: >
+      Token preparation for AMM participation — mint-and-approve (Central Bank)
+      and approve-amm (allowance grant). Served under /api/v2/amm/token.
+  - name: Hub Currency Registry
+    description: >
+      Hub currency discovery — Central Banks register/remove their currency;
+      anyone may list registered currencies. Served under /api/v2/hub.
+  - name: AMM Pair Registry
+    description: >
+      Multi-pair PairRegistry — two-Central-Bank propose/confirm flow to
+      activate a trading pair, plus public pair listing. Served under
+      /api/v2/amm/pairs.
+  - name: Transfer Limits
+    description: >
+      Configurable daily transfer limits (R1-10.1). Central Banks set per-participant
+      and/or per-currency limits; commercial bank gateways enforce them via the CB's
+      internal pre-auth relay. CRUD under /api/v2/governance/transfer-limits (CB only);
+      internal relay under /internal/v2/transfer-limits (relay auth).
+  - name: Circuit Breaker
+    description: >
+      Asymmetric circuit breaker for the Hub AMM — 1-of-N pause, 2-of-N
+      resume (request + sign), and status. Validated before swaps. Served
+      under /api/v2/governance/circuit-breaker.
+  - name: Oversight
+    description: >
+      Master Viewing Key oversight — disclosure request / sign (quorum) and
+      status, enabling supervised privacy disclosure. Served under
+      /api/v2/oversight.
+  - name: AMM Internal
+    description: >
+      Internal relay-to-gateway routes (protected by the X-Relay-Auth shared secret,
+      not user auth). Includes: Cacti hub-and-spoke relay endpoints (matched-commit
+      execution, cross-currency bridge-in/out) under /internal/amm; payment relay
+      endpoints proxied by commercial banks under /internal/v1/payments; and
+      transfer limit pre-auth relay endpoints under /internal/v2/transfer-limits.
+      All are CB-only endpoints that must never be exposed publicly.
 paths:
   /healthz:
     get:
@@ -516,105 +570,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/AMLScreenResponse"
 
-  /api/v1/compliance/participants/provision:
-    post:
-      tags: [Compliance]
-      summary: >
-        Set KYC status for a participant (CENTRAL_BANK only).
-        Used for initial approval, freeze, unfreeze, and revocation.
-      operationId: provisionParticipant
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProvisionRequest"
-      responses:
-        "200":
-          description: Participant provisioned
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProvisionResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/compliance/accounts/freeze:
-    post:
-      tags: [Compliance]
-      summary: >
-        Freeze an account (CENTRAL_BANK only — REQ-COM-003, UT-API-16).
-        Sets KYC status to FROZEN — all operations are suspended.
-      operationId: freezeAccount
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [subject]
-              properties:
-                subject:
-                  type: string
-      responses:
-        "200":
-          description: Account frozen
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProvisionResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/compliance/accounts/unfreeze:
-    post:
-      tags: [Compliance]
-      summary: Restore a frozen account to APPROVED status (CENTRAL_BANK only)
-      operationId: unfreezeAccount
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [subject]
-              properties:
-                subject:
-                  type: string
-      responses:
-        "200":
-          description: Account unfrozen
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProvisionResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
   /api/v1/compliance/participants:
     get:
       tags: [Compliance]
@@ -622,7 +577,7 @@ paths:
       description: >
         Returns all participants registered in the compliance-orchestrator database.
         Supports optional filtering by onboarding status and free-text search
-        (institution name or CNPJ, case-insensitive). Requires ROLE_GOVERNANCE.
+        (institution name or legal entity ID, case-insensitive). Requires ROLE_GOVERNANCE.
       operationId: listParticipants
       security:
         - CookieAuth: []
@@ -637,7 +592,7 @@ paths:
             enum: [PENDING, CREDENTIAL_REQUESTED, KYC_APPROVED, ACTIVE, FROZEN, REVOKED]
         - name: search
           in: query
-          description: Free-text search across institution_name and CNPJ (case-insensitive ILIKE)
+          description: Free-text search across institution_name and legal entity ID (case-insensitive ILIKE)
           schema:
             type: string
       responses:
@@ -657,45 +612,139 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "500": { $ref: "#/components/responses/InternalError" }
 
-  /api/v1/compliance/register:
-    post:
+  /api/v1/compliance/audit/logs:
+    get:
       tags: [Compliance]
-      summary: Register a new participant (Commercial Bank or Treasury user) — CENTRAL_BANK only
+      summary: Get compliance audit logs (Supervisor only)
       description: >
-        Called by Central Bank administrators to onboard new Commercial Banks and
-        Treasury users. The identity service creates a Keycloak user, optionally
-        generates a KMS key pair, and optionally registers the wallet address
-        on-chain in the ParticipantRegistry smart contract (signed with CB_PRIVATE_KEY).
-      operationId: registerParticipant
+        Returns immutable audit log entries from the compliance service.
+        Requires ROLE_SUPERVISOR. Supports filtering by category, severity,
+        and date range. Max 100 entries per page.
+      operationId: supervisorGetAuditLogs
       security:
         - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RegisterParticipantRequest"
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [SESSION, CREDENTIAL, FREEZE, CIRCUIT_BREAKER, PARAMETER, PARTICIPANT]
+        - name: severity
+          in: query
+          schema: { type: string, enum: [INFO, WARNING, CRITICAL] }
+        - name: from_date
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to_date
+          in: query
+          schema: { type: string, format: date-time }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
       responses:
-        "201":
-          description: Participant successfully registered
+        "200":
+          description: Audit log entries
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RegisterParticipantResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          description: Participant already exists
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditRecord" }
+                  page:  { type: integer }
+                  limit: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502":
+          description: Compliance service unreachable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v1/compliance/zk-pointer/verify:
+    get:
+      tags: [Compliance]
+      summary: Verify a ZK pointer record (Supervisor only)
+      description: >
+        Looks up a ZK-Pointer record for a given bank and commitment hash.
+        Requires ROLE_SUPERVISOR. Available only when DATABASE_URL is set
+        and the ZK pointer gate is wired.
+      operationId: verifyZKPointer
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: bank_id
+          in: query
+          required: true
+          schema: { type: string }
+          description: Bank identifier
+        - name: commitment_hash
+          in: query
+          required: true
+          schema: { type: string }
+          description: Commitment hash to look up
+      responses:
+        "200":
+          description: ZK-Pointer record found
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          $ref: "#/components/responses/InternalError"
+                type: object
+                properties:
+                  bank_id:         { type: string }
+                  pointer_id:      { type: string }
+                  commitment_hash: { type: string }
+                  state:           { type: string }
+                  expires_at:      { type: string, format: date-time, nullable: true }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503":
+          description: ZK pointer verification not available (DATABASE_URL not set)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v1/compliance/participants/summary:
+    get:
+      tags: [Compliance]
+      summary: List participants (Supervisor read-only view)
+      description: >
+        Returns the list of registered participants. Same handler as ROLE_GOVERNANCE
+        GET /api/v1/compliance/participants but accessible to ROLE_SUPERVISOR for
+        read-only oversight. Supports optional status and search filters.
+      operationId: supervisorListParticipants
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, CREDENTIAL_REQUESTED, KYC_APPROVED, ACTIVE, FROZEN, REVOKED]
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: List of participants (may be empty)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [participants]
+                properties:
+                  participants:
+                    type: array
+                    items: { $ref: "#/components/schemas/ParticipantRecord" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   # ---------------------------------------------------------------------------
   # Onboarding — 3-phase PKI + Blockchain
@@ -982,7 +1031,7 @@ paths:
         - name: search
           in: query
           schema: { type: string }
-          description: Search by name, CNPJ, or user_id
+          description: Search by name, legal entity ID, or user_id
       responses:
         "200":
           description: List of participants
@@ -1027,7 +1076,7 @@ paths:
               user_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
               role: "ROLE_COMMERCIAL_BANK"
               institution_name: "Banco Itau S.A."
-              cnpj: "60.701.190/0001-04"
+              legal_entity_id: "60.701.190/0001-04"
       responses:
         "201":
           description: CSR signed — X.509 certificate issued
@@ -1353,248 +1402,10 @@ paths:
         "500": { $ref: "#/components/responses/InternalError" }
 
   # ---------------------------------------------------------------------------
-  # Payment Orchestrator — HTLC (dual-layer: Besu + Zeto/Paladin)
+  # Payment Orchestrator — Token (tCeBM balance queries)
   # All endpoints below require: access_token cookie
   # Only available when the payment orchestrator service is configured.
   # ---------------------------------------------------------------------------
-
-  /api/v1/htlc/lock:
-    post:
-      tags: [HTLC]
-      summary: Create a dual-layer HTLC lock
-      description: >
-        Locks tokens via a Hash Time-Locked Contract. The secret is generated
-        internally; a hash lock is derived from it. On the public layer (Besu)
-        the HTLC coordination contract records the lock metadata, while on the
-        private layer (Zeto/Paladin) the actual token amount is locked.
-      operationId: lockHTLC
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/LockHTLCRequest"
-      responses:
-        "201":
-          description: HTLC created and tokens locked
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LockHTLCResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/htlc/settle:
-    post:
-      tags: [HTLC]
-      summary: Settle an HTLC by revealing the secret
-      description: >
-        Happy-path settlement. The caller reveals the pre-image (secret) that
-        hashes to the hash lock. The contract validates SHA-256(secret) == hashLock,
-        then calls Zeto transferLocked() to release the privately locked tokens
-        to the receiver.
-      operationId: settleHTLC
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SettleHTLCRequest"
-      responses:
-        "200":
-          description: HTLC settled — tokens released to receiver
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SettleHTLCResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/htlc/refund:
-    post:
-      tags: [HTLC]
-      summary: Refund an HTLC after timelock expiry
-      description: >
-        Timeout-path refund. If the timelock has expired and the secret was
-        never revealed, the sender can reclaim the locked tokens via
-        Zeto unlock().
-      operationId: refundHTLC
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RefundHTLCRequest"
-      responses:
-        "200":
-          description: HTLC refunded — tokens returned to sender
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RefundHTLCResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/htlc/status/{contractId}:
-    get:
-      tags: [HTLC]
-      summary: Get the status of a specific HTLC
-      description: >
-        Returns the full HTLC lock record including state, hash lock,
-        time lock, sender, receiver, and optionally the secret (only visible
-        to the lock creator).
-      operationId: getHTLCStatus
-      security:
-        - CookieAuth: []
-      parameters:
-        - name: contractId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: HTLC contract identifier returned by POST /htlc/lock
-      responses:
-        "200":
-          description: HTLC status returned
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GetHTLCStatusResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/htlc/search:
-    get:
-      tags: [HTLC]
-      summary: Search HTLC locks by criteria
-      description: >
-        Returns a list of HTLC lock records matching the provided filters.
-        All query parameters are optional; when none are provided, all locks
-        visible to the caller are returned.
-      operationId: searchHTLC
-      security:
-        - CookieAuth: []
-      parameters:
-        - name: agreement_id
-          in: query
-          schema:
-            type: string
-          description: Filter by FX agreement identifier
-        - name: sender
-          in: query
-          schema:
-            type: string
-          description: Filter by sender identity
-        - name: receiver
-          in: query
-          schema:
-            type: string
-          description: Filter by receiver identity
-        - name: state
-          in: query
-          schema:
-            type: string
-            enum: [LOCKED, SETTLED, REFUNDED]
-          description: Filter by HTLC state
-      responses:
-        "200":
-          description: Matching HTLC locks
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SearchHTLCResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  # ---------------------------------------------------------------------------
-  # Payment Orchestrator — Token (Zeto via Paladin)
-  # All endpoints below require: access_token cookie
-  # Only available when the payment orchestrator service is configured.
-  # ---------------------------------------------------------------------------
-
-  /api/v1/token/mint:
-    post:
-      tags: [Token]
-      summary: Mint tCeBM tokens
-      description: >
-        Issues new tCeBM (tokenized Central Bank Money) to the specified
-        Paladin identity via the Zeto privacy-preserving token system.
-      operationId: mintToken
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/MintTokenRequest"
-      responses:
-        "201":
-          description: Tokens minted successfully
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MintTokenResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/token/transfer:
-    post:
-      tags: [Token]
-      summary: Transfer tCeBM tokens
-      description: >
-        Transfers tCeBM tokens to the specified Paladin identity via
-        Zeto's privacy-preserving transfer mechanism.
-      operationId: transferToken
-      security:
-        - CookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/TransferTokenRequest"
-      responses:
-        "200":
-          description: Tokens transferred successfully
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TransferTokenResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          $ref: "#/components/responses/InternalError"
 
   /api/v1/token/balance:
     get:
@@ -1781,13 +1592,14 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  /api/v1/payments/deposits/fiat-exchange:
+  /api/v1/payments/deposits/exchange:
     post:
       tags: [Escrow]
       summary: Execute fiat exchange — mint tCeBM (Central Bank only)
       description: >
         After approving a deposit, the Central Bank triggers the fiat exchange:
         mints tCeBM (ERC-20) to the requester's Besu address on-chain.
+        Also proxied by commercial bank gateways: POST /api/v1/payments/deposits/exchange.
       operationId: requestFiatExchange
       security:
         - CookieAuth: []
@@ -2068,6 +1880,1184 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ===========================================================================
+  # API v2 — Hub-and-Spoke AMM surface (Scenario B)
+  #
+  # Routes registered in internal/http/router/v2/router.go. Each route group is
+  # registered only when its backing service is wired (per-gateway DI), so a
+  # given deployment may expose a subset. Schemas below are intentionally
+  # permissive (free-form objects) where the handler request/response shape is
+  # service-defined; see the handler packages for exact field contracts.
+  # ===========================================================================
+
+  /api/v2/amm/quote/exact-output:
+    get:
+      tags: [AMM Swap]
+      summary: Exact-output swap quote
+      description: Quote the input amount required to receive a fixed output amount on a pair.
+      operationId: getExactOutputQuote
+      parameters:
+        - name: pair
+          in: query
+          required: true
+          schema: { type: string }
+          description: Trading pair symbol (e.g. tCeBM_BRL-tCeBM_ARS).
+        - name: amountOut
+          in: query
+          required: true
+          schema: { type: string }
+          description: Desired output amount (stringified integer/decimal).
+      responses:
+        "200":
+          description: Quote computed
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v2/amm/quote/cross-currency:
+    get:
+      tags: [AMM Swap]
+      summary: Cross-currency swap quote (15s TTL)
+      description: Generate a short-lived quote for an orchestrated cross-currency swap.
+      operationId: getCrossCurrencyQuote
+      responses:
+        "200":
+          description: Quote computed
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v2/amm/swap/exact-output:
+    post:
+      tags: [AMM Swap]
+      summary: Execute an exact-output swap (commercial bank)
+      operationId: swapExactOutput
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Swap executed
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v2/amm/swap/cross-currency:
+    post:
+      tags: [AMM Swap]
+      summary: Initiate an orchestrated cross-currency swap (commercial bank)
+      description: >
+        Orchestrates bridge-in → Hub AMM swap → bridge-out. Returns a swap id;
+        poll GET /api/v2/amm/swap/cross-currency/{id} for async status.
+      operationId: swapCrossCurrency
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Swap initiated / completed
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v2/amm/swap/cross-currency/{id}:
+    get:
+      tags: [AMM Swap]
+      summary: Poll cross-currency swap status
+      operationId: getCrossCurrencySwapStatus
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Current swap status
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v2/amm/pool/{pair}/status:
+    get:
+      tags: [AMM Swap]
+      summary: Pool reserves and status for a pair
+      operationId: getPoolStatus
+      parameters:
+        - name: pair
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Pool status
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v2/amm/hub-liquidity-config:
+    get:
+      tags: [AMM Swap]
+      summary: Sovereign Hub AMM config for swap clients
+      description: CB gateways expose Hub AMM configuration for commercial bank swap clients.
+      operationId: getHubLiquidityConfig
+      responses:
+        "200":
+          description: Hub liquidity config
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /api/v2/bridge/lock-mint:
+    post:
+      tags: [AMM Bridge]
+      summary: Lock spoke tCeBM and mint Hub W-tCeBM
+      operationId: bridgeLockMint
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Bridge position created (lock + mint enqueued)
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v2/bridge/burn-unlock:
+    post:
+      tags: [AMM Bridge]
+      summary: Burn Hub W-tCeBM and unlock spoke tCeBM
+      operationId: bridgeBurnUnlock
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Burn + unlock enqueued
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v2/bridge/positions:
+    get:
+      tags: [AMM Bridge]
+      summary: List bridge positions
+      operationId: listBridgePositions
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema: { type: string }
+          description: Optional state filter (e.g. PENDING, ACTIVE, CLOSED).
+      responses:
+        "200":
+          description: Bridge positions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/liquidity/add:
+    post:
+      tags: [AMM Liquidity]
+      summary: Add liquidity (legacy dual-sided)
+      operationId: addLiquidity
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Liquidity added
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/liquidity/remove:
+    post:
+      tags: [AMM Liquidity]
+      summary: Remove liquidity (sovereign CB withdrawal)
+      operationId: removeLiquidity
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Liquidity removed
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/liquidity/commit:
+    post:
+      tags: [AMM Liquidity]
+      summary: Register a liquidity commit (commit-reveal)
+      operationId: commitLiquidity
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Commit registered
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/liquidity/commits:
+    get:
+      tags: [AMM Liquidity]
+      summary: List liquidity commits
+      operationId: listLiquidityCommits
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: pool
+          in: query
+          required: false
+          schema: { type: string }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Commits
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/liquidity/commits/{commit_id}:
+    get:
+      tags: [AMM Liquidity]
+      summary: Get a single liquidity commit (status polling)
+      operationId: getLiquidityCommit
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: commit_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Commit
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [AMM Liquidity]
+      summary: Cancel a liquidity commit
+      operationId: cancelLiquidityCommit
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: commit_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Commit cancelled
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v2/amm/liquidity/positions:
+    get:
+      tags: [AMM Liquidity]
+      summary: List this gateway's LP positions
+      description: Public — each CB gateway reports only its own positions from its DB.
+      operationId: listLiquidityPositions
+      responses:
+        "200":
+          description: LP positions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+
+  /api/v2/amm/lp-balance:
+    get:
+      tags: [AMM Liquidity]
+      summary: On-chain CBW3-LP share balance for this gateway's signer
+      description: >
+        Public — present only when LPBalanceReader is wired. Returns the CB's
+        live on-chain LP-share position (013-amm-lp-shares).
+      operationId: getLPBalance
+      responses:
+        "200":
+          description: LP-share balance
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /api/v2/amm/liquidity/sovereign-add:
+    post:
+      tags: [AMM Liquidity]
+      summary: Sovereign CB direct liquidity top-up
+      description: Direct sovereign deposit (no bridge gate, no commit-reveal). Central Bank only.
+      operationId: sovereignAddLiquidity
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Sovereign liquidity added
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/token/mint-and-approve:
+    post:
+      tags: [AMM Token]
+      summary: Mint tCeBM and approve the AMM (Central Bank)
+      description: Enforces the anti-G5-cross guard when CBChecker is wired (spec-007 SC-002).
+      operationId: mintAndApprove
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Mint + approve submitted
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/token/approve-amm:
+    post:
+      tags: [AMM Token]
+      summary: Grant an AMM allowance (Central or commercial bank)
+      operationId: approveAMM
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Allowance granted
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/hub/currencies:
+    get:
+      tags: [Hub Currency Registry]
+      summary: List registered hub currencies
+      operationId: listHubCurrencies
+      responses:
+        "200":
+          description: Registered currencies
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+    post:
+      tags: [Hub Currency Registry]
+      summary: Register a hub currency (Central Bank)
+      operationId: registerHubCurrency
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Currency registered
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/hub/currencies/{symbol}:
+    delete:
+      tags: [Hub Currency Registry]
+      summary: Remove a hub currency (Central Bank)
+      operationId: removeHubCurrency
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Currency removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v2/amm/pairs:
+    get:
+      tags: [AMM Pair Registry]
+      summary: List active AMM pairs
+      operationId: listPairs
+      responses:
+        "200":
+          description: Active pairs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+
+  /api/v2/amm/pairs/propose:
+    post:
+      tags: [AMM Pair Registry]
+      summary: Propose a new pair (Central Bank of tokenA)
+      operationId: proposePair
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Pair proposed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/amm/pairs/confirm:
+    post:
+      tags: [AMM Pair Registry]
+      summary: Confirm a proposed pair (Central Bank of tokenB)
+      operationId: confirmPair
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Pair confirmed / activated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/governance/circuit-breaker/status:
+    get:
+      tags: [Circuit Breaker]
+      summary: Circuit breaker status
+      operationId: getV2CircuitBreakerStatus
+      responses:
+        "200":
+          description: Circuit breaker state
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /api/v2/governance/circuit-breaker/pause:
+    post:
+      tags: [Circuit Breaker]
+      summary: Pause the AMM (1-of-N, Central Bank)
+      operationId: pauseCircuitBreaker
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Paused
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/governance/circuit-breaker/resume-request:
+    post:
+      tags: [Circuit Breaker]
+      summary: Propose resume (2-of-N step 1, Central Bank)
+      operationId: proposeResume
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Resume proposed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/governance/circuit-breaker/resume-sign:
+    post:
+      tags: [Circuit Breaker]
+      summary: Sign resume (2-of-N step 2, Central Bank)
+      operationId: signResume
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Resume signed / executed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/governance/transfer-limits:
+    post:
+      tags: [Transfer Limits]
+      summary: Create a daily transfer limit (Central Bank)
+      description: >
+        Sets a configurable daily transfer limit for a participant and/or currency.
+        Limits are matched by specificity: (participant_id + currency) > (participant_id) >
+        (currency) > global. Only the CB that created the limit may list or delete it.
+        Requires ROLE_CENTRAL_BANK_SCENARIO_B (cookie auth).
+      operationId: createTransferLimit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [max_amount]
+              properties:
+                participant_id:
+                  type: string
+                  description: >
+                    Bank identifier to restrict (e.g. "bank-a"). Empty means "applies to all
+                    participants on this spoke".
+                  example: "bank-a"
+                currency:
+                  type: string
+                  description: Currency symbol to restrict (e.g. "BRL"). Empty means "all currencies".
+                  example: "BRL"
+                max_amount:
+                  type: string
+                  description: Human-readable decimal daily maximum (e.g. "100000.00"). Converted to wei internally.
+                  example: "100000.00"
+      responses:
+        "201":
+          description: Transfer limit created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransferLimitRecord"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: Invalid max_amount value
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [Transfer Limits]
+      summary: List active transfer limits (Central Bank)
+      description: >
+        Returns all active transfer limits created by the authenticated CB.
+        Requires ROLE_CENTRAL_BANK_SCENARIO_B (cookie auth).
+      operationId: listTransferLimits
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Active transfer limits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  limits:
+                    type: array
+                    items: { $ref: "#/components/schemas/TransferLimitRecord" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v2/governance/transfer-limits/{id}:
+    delete:
+      tags: [Transfer Limits]
+      summary: Delete a transfer limit (Central Bank)
+      description: >
+        Removes a transfer limit by ID. Only the CB that created the limit may delete it.
+        Requires ROLE_CENTRAL_BANK_SCENARIO_B (cookie auth). Returns 204 on success.
+      operationId: deleteTransferLimit
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          description: Transfer limit ID (UUID)
+      responses:
+        "204":
+          description: Transfer limit deleted
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: Limit exists but cannot be deleted (e.g. belongs to another CB)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v2/oversight/disclosure-request:
+    post:
+      tags: [Oversight]
+      summary: Open a disclosure request (Central Bank)
+      operationId: openDisclosure
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Disclosure request opened
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/oversight/disclosure-sign:
+    post:
+      tags: [Oversight]
+      summary: Sign a disclosure request (quorum, Central Bank)
+      operationId: signDisclosure
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Disclosure signed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v2/oversight/disclosure-status/{requestID}:
+    get:
+      tags: [Oversight]
+      summary: Disclosure request status
+      operationId: getDisclosureStatus
+      parameters:
+        - name: requestID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Disclosure status
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /internal/amm/execute-matched-commit:
+    post:
+      tags: [AMM Internal]
+      summary: Execute a matched liquidity commit (relay → gateway)
+      description: Called by the Cacti LiquidityCommitWatcher when CommitMatched fires.
+      operationId: executeMatchedCommit
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Matched commit executed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/amm/cross-currency-bridge-out:
+    post:
+      tags: [AMM Internal]
+      summary: Cross-currency bridge-out receiver (relay → gateway)
+      description: >
+        Called by the Cacti CrossCurrencySwapRelay after the source CB's Hub AMM
+        swap succeeds. Present only on CB gateways acting as bridge-out receivers.
+      operationId: crossCurrencyBridgeOut
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Bridge-out (burn) enqueued
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/amm/cross-currency-bridge-in:
+    post:
+      tags: [AMM Internal]
+      summary: Cross-currency bridge-in receiver (relay → gateway)
+      description: >
+        Sovereign lock-mint performed on behalf of a commercial bank. Present
+        only on issuing CB gateways. May enforce reserve tokenisation.
+      operationId: crossCurrencyBridgeIn
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Bridge-in (lock-mint) enqueued / ACTIVE
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ---------------------------------------------------------------------------
+  # Internal V1 Payment Relay Endpoints (CB-side only)
+  # Protected by X-Relay-Auth shared secret. Called by commercial bank gateways
+  # via PaymentProxyHandler → Central Bank. Only registered on CB gateways
+  # (PaymentHandler != nil, PaymentProxyHandler == nil).
+  # ---------------------------------------------------------------------------
+
+  /internal/v1/payments/deposits/exchange:
+    post:
+      tags: [AMM Internal]
+      summary: Internal relay — fiat exchange (CB only)
+      description: >
+        Proxied by commercial bank gateways to execute fiat exchange on the Central
+        Bank. Requires X-Relay-Auth header (shared secret).
+      operationId: internalFiatExchange
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deposit_id]
+              properties:
+                deposit_id: { type: string }
+      responses:
+        "201":
+          description: Fiat exchange completed — tCeBM minted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FiatExchangeResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v1/payments/deposits:
+    post:
+      tags: [AMM Internal]
+      summary: Internal relay — register deposit (CB only)
+      description: Called by commercial bank gateways via relay to register a deposit on the CB.
+      operationId: internalRegisterDeposit
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterDepositRequest" }
+      responses:
+        "201":
+          description: Deposit registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterDepositResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [AMM Internal]
+      summary: Internal relay — list deposits (CB only)
+      operationId: internalListDeposits
+      security:
+        - RelayAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deposits
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListDepositsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v1/payments/escrows:
+    post:
+      tags: [AMM Internal]
+      summary: Internal relay — request escrow (CB only)
+      operationId: internalRequestEscrow
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RequestEscrowRequest" }
+      responses:
+        "201":
+          description: Escrow request registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestEscrowResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [AMM Internal]
+      summary: Internal relay — list escrows (CB only)
+      operationId: internalListEscrows
+      security:
+        - RelayAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Escrows
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListEscrowsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v1/payments/redeems:
+    post:
+      tags: [AMM Internal]
+      summary: Internal relay — request redeem (CB only)
+      operationId: internalRequestRedeem
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RequestRedeemRequest" }
+      responses:
+        "201":
+          description: Redeem request registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestRedeemResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [AMM Internal]
+      summary: Internal relay — list redeems (CB only)
+      operationId: internalListRedeems
+      security:
+        - RelayAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Redeems
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListRedeemsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------------------
+  # Internal V2 Transfer Limit Relay Endpoints (CB-side only)
+  # Called by commercial bank gateways via RemoteTransferLimitChecker.
+  # Protected by X-Relay-Auth shared secret (RequireRelayAuth middleware).
+  # Only registered on CB gateways (TransferLimitInternalHandler != nil).
+  # ---------------------------------------------------------------------------
+
+  /internal/v2/transfer-limits/check-and-deduct:
+    post:
+      tags: [Transfer Limits]
+      summary: Internal relay — check and deduct transfer limit (CB only)
+      description: >
+        Called by commercial bank gateways before initiating a bridge lock-mint or
+        cross-currency swap. The CB checks the payer's daily usage against the
+        configured limit and atomically deducts the amount if within bounds.
+        Returns 422 TRANSFER_LIMIT_EXCEEDED if the limit would be breached.
+      operationId: internalCheckAndDeductTransferLimit
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payer_bank_id, amount_human]
+              properties:
+                payer_bank_id:
+                  type: string
+                  description: Bank identifier of the payer (e.g. "bank-a")
+                  example: "bank-a"
+                currency:
+                  type: string
+                  description: Currency symbol (e.g. "BRL"). Empty means global limit.
+                  example: "BRL"
+                amount_human:
+                  type: string
+                  description: Human-readable decimal amount to check/deduct (e.g. "10000.00")
+                  example: "10000.00"
+      responses:
+        "200":
+          description: Limit not exceeded — amount deducted from daily usage
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422":
+          description: Daily transfer limit would be exceeded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, error_code]
+                properties:
+                  error:         { type: string }
+                  error_code:    { type: string, example: "TRANSFER_LIMIT_EXCEEDED" }
+                  payer_bank_id: { type: string }
+                  currency:      { type: string }
+                  max_amount:    { type: string }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v2/transfer-limits/restore:
+    post:
+      tags: [Transfer Limits]
+      summary: Internal relay — restore transfer limit usage (CB only)
+      description: >
+        Called by commercial bank gateways on swap rollback or cancellation to
+        restore a previously deducted amount to the payer's daily usage counter.
+        Best-effort — always returns 200 even if the restore fails internally.
+      operationId: internalRestoreTransferLimit
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payer_bank_id, amount_human]
+              properties:
+                payer_bank_id:
+                  type: string
+                  example: "bank-a"
+                currency:
+                  type: string
+                  example: "BRL"
+                amount_human:
+                  type: string
+                  example: "10000.00"
+      responses:
+        "200":
+          description: Restore acknowledged (best-effort)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
 components:
   securitySchemes:
     CookieAuth:
@@ -2080,6 +3070,23 @@ components:
         All protected endpoints require this cookie to be present.
         Attributes: HttpOnly, SameSite=Strict, Path=/; Secure flag depends on
         the COOKIE_SECURE environment variable (true for HTTPS, false for HTTP).
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Bearer access token. Accepted by /api/v2 routes that use
+        RequireAnyAuth (cookie OR bearer) — primarily machine-to-machine
+        Central Bank sovereign flows (commit, sovereign-add, lock-mint,
+        token approvals).
+    RelayAuth:
+      type: apiKey
+      in: header
+      name: X-Relay-Auth
+      description: >
+        Shared-secret header for /internal/amm routes consumed by the Cacti
+        hub-and-spoke relay. Not a user credential; validated by
+        RequireRelayAuth middleware against the gateway's configured secret.
 
   responses:
     BadRequest:
@@ -2134,6 +3141,40 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    TransferLimitRecord:
+      type: object
+      description: A configurable daily transfer limit set by a Central Bank (R1-10.1).
+      properties:
+        limit_id:
+          type: string
+          description: UUID of the limit record
+          example: "tl-a1b2c3d4"
+        central_bank_id:
+          type: string
+          description: Bank identifier of the CB that owns this limit
+          example: "cb-a"
+        participant_id:
+          type: string
+          description: Participant the limit applies to. Empty string means all participants.
+          example: "bank-a"
+        currency:
+          type: string
+          description: Currency the limit applies to. Empty string means all currencies.
+          example: "BRL"
+        max_amount:
+          type: string
+          description: Maximum daily transfer amount in wei (stored as string for precision)
+          example: "100000000000000000000"
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
     ErrorResponse:
       type: object
       required: [error]
@@ -2362,7 +3403,7 @@ components:
         institution_name:
           type: string
           example: "Banco Itau S.A."
-        cnpj:
+        legal_entity_id:
           type: string
           example: "60.701.190/0001-04"
         status:
@@ -2375,7 +3416,7 @@ components:
       properties:
         user_id:         { type: string }
         institution_name: { type: string }
-        cnpj:            { type: string }
+        legal_entity_id:            { type: string }
         role:            { type: string }
         status:
           type: string
@@ -2406,7 +3447,7 @@ components:
         institution_name:
           type: string
           example: "Banco Itau S.A."
-        cnpj:
+        legal_entity_id:
           type: string
           example: "60.701.190/0001-04"
 
@@ -2500,9 +3541,9 @@ components:
         institution_name:
           type: string
           example: "Banco do Brasil S.A."
-        cnpj:
+        legal_entity_id:
           type: string
-          description: Brazilian CNPJ (optional)
+          description: Legal entity identifier (optional)
           example: "00.000.000/0001-91"
         bank_code:
           type: string

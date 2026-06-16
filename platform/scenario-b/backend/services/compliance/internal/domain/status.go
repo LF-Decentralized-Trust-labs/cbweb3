@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package domain
 
 // ParticipantStatus represents the lifecycle state of a registered participant.
@@ -5,7 +7,7 @@ type ParticipantStatus string
 
 const (
 	StatusPending             ParticipantStatus = "PENDING"              // initial state
-	StatusCredentialRequested ParticipantStatus = "CREDENTIAL_REQUESTED" // CSR + pub_key submitted, awaiting KYC review
+	StatusCredentialRequested ParticipantStatus = "CREDENTIAL_REQUESTED" // #nosec G101 -- not a secret; participant lifecycle status label (CSR + pub_key submitted, awaiting KYC review)
 	StatusKYCApproved         ParticipantStatus = "KYC_APPROVED"         // KYC approved, awaiting PoP + wallet bind
 	StatusActive              ParticipantStatus = "ACTIVE"               // fully operational on the network
 	StatusFrozen              ParticipantStatus = "FROZEN"               // temporarily suspended

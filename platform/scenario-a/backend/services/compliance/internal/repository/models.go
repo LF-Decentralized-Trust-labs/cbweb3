@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package repository
 
 import "time"
@@ -8,7 +10,7 @@ import "time"
 type ParticipantModel struct {
 	UserID              string     `gorm:"column:user_id;primaryKey"`
 	InstitutionName     string     `gorm:"column:institution_name"`
-	CNPJ                string     `gorm:"column:cnpj"`
+	LegalEntityID       string     `gorm:"column:legal_entity_id"`
 	BankCode            string     `gorm:"column:bank_code"`
 	CountryCode         string     `gorm:"column:country_code"`
 	Role                string     `gorm:"column:participant_role"`
@@ -37,9 +39,9 @@ type AuditLogModel struct {
 	TargetSubject string    `gorm:"column:target_subject"`
 	CorrelationID string    `gorm:"column:correlation_id"`
 	IPAddress     string    `gorm:"column:ip_address"`
-	Result        string    `gorm:"column:result"`         // SUCCESS | FAILURE
-	Category      string    `gorm:"column:category"`       // SESSION, CREDENTIAL, FREEZE, etc.
-	Severity      string    `gorm:"column:severity"`       // INFO, WARNING, CRITICAL
+	Result        string    `gorm:"column:result"`   // SUCCESS | FAILURE
+	Category      string    `gorm:"column:category"` // SESSION, CREDENTIAL, FREEZE, etc.
+	Severity      string    `gorm:"column:severity"` // INFO, WARNING, CRITICAL
 	Details       string    `gorm:"column:details;type:jsonb"`
 }
 
@@ -54,3 +56,29 @@ type SystemParameterModel struct {
 }
 
 func (SystemParameterModel) TableName() string { return "system_parameters" }
+
+// TransferLimitModel stores CB-configured daily transfer limits per participant/currency (R1-10.1).
+type TransferLimitModel struct {
+	LimitID       string    `gorm:"column:limit_id;primaryKey;type:varchar(64)"`
+	CentralBankID string    `gorm:"column:central_bank_id;not null;index"`
+	ParticipantID string    `gorm:"column:participant_id;not null;default:''"`
+	Currency      string    `gorm:"column:currency;not null;default:''"`
+	MaxAmount     string    `gorm:"column:max_amount;not null"`
+	IsActive      bool      `gorm:"column:is_active;not null;default:true"`
+	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (TransferLimitModel) TableName() string { return "transfer_limits" }
+
+// TransferVolumeModel tracks daily accumulated transfer volume per participant/currency (R1-10.1).
+type TransferVolumeModel struct {
+	ID             uint      `gorm:"primaryKey;autoIncrement"`
+	ParticipantID  string    `gorm:"column:participant_id;not null;uniqueIndex:idx_vol_lookup"`
+	Currency       string    `gorm:"column:currency;not null;uniqueIndex:idx_vol_lookup"`
+	WindowDate     time.Time `gorm:"column:window_date;not null;uniqueIndex:idx_vol_lookup"`
+	AccumulatedWei string    `gorm:"column:accumulated_wei;not null;default:'0'"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (TransferVolumeModel) TableName() string { return "transfer_volumes" }

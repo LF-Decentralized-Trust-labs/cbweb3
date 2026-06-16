@@ -1,3 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//go:build e2e
+
+// These end-to-end tests spawn real service subprocesses and are not hermetic;
+// they are excluded from the default unit lane (`go test ./...`). Run them
+// explicitly with `go test -tags e2e ./e2e/...`.
+
 package e2e_test
 
 import (

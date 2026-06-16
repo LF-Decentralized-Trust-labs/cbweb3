@@ -71,6 +71,21 @@ services:
     ports:
       - "${CENTRAL_BANK_A_FRONTEND_PORT}:80"
 
+  central-bank-a-treasury:
+    container_name: cbweb3-central-bank-a-treasury
+    build:
+      context: .
+      dockerfile: apps/treasury/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${API_CENTRAL_BANK_A}
+        VITE_FIAT_SYMBOL: ${SPOKE_A_FIAT_SYMBOL}
+        VITE_POOL_PAIR: ${SPOKE_A_POOL_PAIR}
+        VITE_INSTITUTION_NAME: ${CENTRAL_BANK_A_INSTITUTION_NAME}
+        VITE_KC_CLIENT_ID: ${CENTRAL_BANK_A_KC_CLIENT_ID}
+        VITE_KC_CLIENT_SECRET: ${CENTRAL_BANK_A_KC_CLIENT_SECRET}
+    ports:
+      - "${CENTRAL_BANK_A_TREASURY_PORT}:80"
+
   central-bank-b-frontend:
     container_name: cbweb3-central-bank-b-frontend
     build:
@@ -84,3 +99,40 @@ services:
         VITE_SCENARIO: b
     ports:
       - "${CENTRAL_BANK_B_FRONTEND_PORT}:80"
+
+  central-bank-b-treasury:
+    container_name: cbweb3-central-bank-b-treasury
+    build:
+      context: .
+      dockerfile: apps/treasury/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${API_CENTRAL_BANK_B}
+        VITE_FIAT_SYMBOL: ${SPOKE_B_FIAT_SYMBOL}
+        VITE_POOL_PAIR: ${SPOKE_B_POOL_PAIR}
+        VITE_INSTITUTION_NAME: ${CENTRAL_BANK_B_INSTITUTION_NAME}
+        VITE_KC_CLIENT_ID: ${CENTRAL_BANK_B_KC_CLIENT_ID}
+        VITE_KC_CLIENT_SECRET: ${CENTRAL_BANK_B_KC_CLIENT_SECRET}
+    ports:
+      - "${CENTRAL_BANK_B_TREASURY_PORT}:80"
+
+  supervisor-spoke-a-frontend:
+    container_name: cbweb3-supervisor-spoke-a-frontend
+    build:
+      context: .
+      dockerfile: apps/supervisor/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${API_SUPERVISOR_SPOKE_A}
+        VITE_SPOKE_NAME: ${SUPERVISOR_SPOKE_A_NAME}
+    ports:
+      - "${SUPERVISOR_SPOKE_A_FRONTEND_PORT}:80"
+
+  supervisor-spoke-b-frontend:
+    container_name: cbweb3-supervisor-spoke-b-frontend
+    build:
+      context: .
+      dockerfile: apps/supervisor/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${API_SUPERVISOR_SPOKE_B}
+        VITE_SPOKE_NAME: ${SUPERVISOR_SPOKE_B_NAME}
+    ports:
+      - "${SUPERVISOR_SPOKE_B_FRONTEND_PORT}:80"

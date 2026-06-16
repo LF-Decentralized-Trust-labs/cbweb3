@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines CrossCurrencySwapOperation model for tracking end-to-end
 // cross-currency swap flow (bridge-in → swap Hub → bridge-out).
 //

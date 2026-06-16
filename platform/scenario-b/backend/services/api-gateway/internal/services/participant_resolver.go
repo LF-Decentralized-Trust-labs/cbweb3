@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides ParticipantResolver for looking up bank on-chain addresses.
 package services
 

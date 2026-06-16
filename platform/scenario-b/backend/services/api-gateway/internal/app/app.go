@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app wires application dependencies and builds the configured Fiber app.
 // Scenario B v2 services are wired here (T020).
 package app
@@ -12,8 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	authadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
@@ -21,12 +21,16 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
 	dbinit "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/db/init"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
 	v2router "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router/v2"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/relayauth"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	ammclient "github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/amm"
 	tcebmclient "github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/tcebm"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"google.golang.org/grpc"
@@ -90,6 +94,18 @@ func New(cfg config.Config) (*App, error) {
 	closers = append(closers, complianceGRPC)
 
 	governanceHandler := handlers.NewGovernanceHandler(complianceGRPC)
+
+	// Wire ZK pointer gate for supervisor verification (D-02 — gate was nil at runtime before this).
+	// Gracefully disabled when DATABASE_URL is absent (non-CB entities without local compliance DB).
+	var zkVerifier handlers.ZKPointerVerifier
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		if zkDB, zkErr := gorm.Open(postgres.Open(dbURL), &gorm.Config{}); zkErr == nil {
+			zkVerifier = newZKPointerAdapter(services.NewZKPointerGate(zkDB))
+		} else {
+			log.Printf("warning: ZK pointer gate unavailable (%v), /zk-pointer/verify disabled", zkErr)
+		}
+	}
+	supervisorHandler := handlers.NewSupervisorHandler(complianceGRPC, zkVerifier)
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure)
 	complianceHandler := handlers.NewComplianceHandler(identityManager, complianceGRPC)
 
@@ -100,6 +116,7 @@ func New(cfg config.Config) (*App, error) {
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
 		GovernanceHandler: governanceHandler,
+		SupervisorHandler: supervisorHandler,
 		AuthProvider:      identityGRPCProvider,
 		V2Deps:            v2Deps,
 	}
@@ -171,7 +188,7 @@ func New(cfg config.Config) (*App, error) {
 	if corsOrigins := os.Getenv("CORS_ALLOW_ORIGINS"); corsOrigins != "" {
 		fiberApp.Use(cors.New(cors.Config{
 			AllowOrigins:     corsOrigins,
-			AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept",
+			AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept, X-Correlation-Id",
 			AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 			AllowCredentials: true,
 		}))
@@ -436,6 +453,32 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		deps.OversightService = services.NewOversightService(db)
 	}
 
+	// R1-10.1: Transfer limit enforcement — wired differently for CB vs commercial bank.
+	// CB (CentralBankAPIURL == ""): local DB checker + internal pre-auth endpoint + governance CRUD.
+	// Commercial bank (CentralBankAPIURL != ""): remote checker delegates to CB; fail-closed.
+	var transferLimitChecker services.TransferLimitCheckerIface
+	if cfg.CentralBankAPIURL == "" {
+		if db != nil {
+			limitRepo := newTransferLimitRepository(db)
+			volumeRepo := newTransferVolumeRepository(db)
+			localChecker := services.NewTransferLimitChecker(limitRepo, volumeRepo)
+			transferLimitChecker = localChecker
+			deps.TransferLimitHandler = handlers.NewTransferLimitHandler(limitRepo)
+			deps.TransferLimitInternalHandler = handlers.NewTransferLimitInternalHandler(localChecker)
+		}
+	} else {
+		relaySecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
+		if relaySecret != "" {
+			transferLimitChecker = services.NewRemoteTransferLimitChecker(cfg.CentralBankAPIURL, relaySecret, cfg.RequestTimeout)
+			log.Printf("[app] transfer limit enforcement: delegating pre-auth to CB at %s", cfg.CentralBankAPIURL)
+		} else {
+			log.Printf("[app] WARNING: CENTRAL_BANK_API_URL set but INTERNAL_RELAY_AUTH_SECRET missing — transfer limit enforcement disabled")
+		}
+	}
+	if transferLimitChecker != nil {
+		deps.TransferLimitChecker = transferLimitChecker
+	}
+
 	// 009-commercial-cross-currency-swap: Wire orchestrator for cross-currency swaps (T014).
 	if db != nil && swapSvc != nil && bridgeLockMintSvc != nil && bridgeBurnUnlockSvc != nil && ammClient != nil {
 		adapter := &ammAdapter{c: ammClient}
@@ -474,6 +517,17 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			}
 		}
 
+		// R2-CR-6: per-CB signer for outbound internal relay calls, loaded from this
+		// gateway's PKI key (PKI_DIR/<BANK_CODE>.key). nil falls back to the legacy secret.
+		var relaySigner *relayauth.Signer
+		if cfg.PKIDir != "" && cfg.BankCode != "" {
+			if s, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.BankCode); sErr == nil {
+				relaySigner = s
+			} else {
+				log.Printf("[app] relay signing key unavailable for %q: %v (internal relay calls use legacy secret)", cfg.BankCode, sErr)
+			}
+		}
+
 		orchestrator := services.NewCrossCurrencySwapOrchestrator(
 			swapRepo,
 			quoteRepo,
@@ -505,6 +559,12 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			relaySecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
 			if relaySecret != "" {
 				bridgeInRelay := services.NewCrossCurrencyBridgeInRelay(cbURL, relaySecret)
+				// R2-CR-6: sign bridge-in with this gateway's PKI key so the issuing CB can
+				// authenticate it asymmetrically (per-CB), not just on the shared secret.
+				if relaySigner != nil {
+					bridgeInRelay = bridgeInRelay.WithSigner(relaySigner)
+					log.Printf("[app] bridge-in relay: per-CB signature enabled (key-id=%s)", cfg.BankCode)
+				}
 				orchestrator = orchestrator.WithBridgeInRelay(bridgeInRelay)
 				log.Printf("[app] CrossCurrencySwapOrchestrator: bridge-in relay wired (CB %s)", cbURL)
 			} else {
@@ -523,6 +583,9 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			}
 		}
 
+		if transferLimitChecker != nil {
+			orchestrator = orchestrator.WithTransferLimitChecker(transferLimitChecker)
+		}
 		deps.CrossCurrencySwapOrchestrator = orchestrator
 
 		// 009-commercial-cross-currency-swap: Wire quote generator with 15s TTL (T030/T031).
@@ -591,6 +654,23 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// 007-bridge-based-cb-liquidity: Sovereign CB liquidity services.
 	// Requires LIQUIDITY_COMMIT_REGISTRY_ADDRESS and INTERNAL_RELAY_AUTH_SECRET.
 	deps.InternalRelayAuthSecret = os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
+	// R2-CR-6: per-CB asymmetric relay auth. Pin peer verifying keys from the PKI certs
+	// (PKI_DIR/<entity>.crt). Internal relay routes prefer a valid signature and fall back
+	// to the shared secret until RELAY_REQUIRE_SIGNATURE is set (post-cutover enforcement).
+	relayRegistry, relayRegErr := relayauth.LoadRegistryGlob(cfg.PKIDir)
+	if relayRegErr != nil {
+		log.Printf("[app] relay auth: could not load peer certs from PKI_DIR=%q: %v", cfg.PKIDir, relayRegErr)
+	}
+	deps.RelayAuth = middleware.RelayAuthConfig{
+		Registry:         relayRegistry,
+		LegacySecret:     deps.InternalRelayAuthSecret,
+		RequireSignature: cfg.RelayRequireSignature,
+	}
+	if relayRegistry != nil && relayRegistry.Len() > 0 {
+		log.Printf("[app] relay auth: %d peer key(s) pinned from PKI_DIR; require_signature=%v", relayRegistry.Len(), cfg.RelayRequireSignature)
+	} else {
+		log.Printf("[app] relay auth: no PKI peer keys pinned; internal routes use legacy shared secret")
+	}
 	lcrAddr := os.Getenv("LIQUIDITY_COMMIT_REGISTRY_ADDRESS")
 	if lcrAddr != "" && hubRPC != "" && signerKey != "" && db != nil {
 		chainID := int64(0)
@@ -663,6 +743,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// 008-fix-cb-liquidity: Populate simplified API config fields from cfg.
 	deps.SpokeNetwork = cfg.SpokeNetwork
 	deps.NativeAssetSymbol = cfg.NativeAssetSymbol
+	deps.FiatSymbol = cfg.FiatSymbol
 	deps.WTokenAddress = cfg.WTokenAddress
 	deps.BankCode = cfg.BankCode
 	deps.CommitSide = cfg.CommitSide
@@ -682,6 +763,15 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		if db != nil {
 			deps.CrossCurrencyBeneficiaryResolver = services.NewParticipantResolver(db)
 		}
+		// R2-CR-6: verify the relay-claimed swap on the Hub before any burn/mint, and
+		// consume each swap_tx_hash at most once. Without an AMM client the bridge-out
+		// endpoint fails closed rather than minting on the relay's word.
+		if ammClient != nil {
+			deps.CrossCurrencySwapVerifier = &swapVerifierAdapter{c: ammClient}
+		} else {
+			log.Printf("[app] WARNING: AMM client unavailable (AMM_CONTRACT_ADDRESS / HUB_BESU_RPC_URL) — cross-currency bridge-out will fail closed")
+		}
+		deps.CrossCurrencyDuplicateFinder = bridgeBurnUnlockSvc
 	}
 
 	// 009 sovereign model: cross-currency bridge-in issuer (CB-A side). Registered only on CB
@@ -736,6 +826,24 @@ type bridgeLockMintAdapter struct {
 
 func (a *bridgeLockMintAdapter) LockAndEnqueue(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string, mintToHubAddress ...string) (*services.BridgePositionResult, error) {
 	return a.svc.LockAndEnqueue(ctx, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID, mintToHubAddress...)
+}
+
+// swapVerifierAdapter adapts ammclient SwapByTxHash to the handler's VerifiedSwap type (R2-CR-6).
+type swapVerifierAdapter struct {
+	c *ammclient.Client
+}
+
+func (a *swapVerifierAdapter) VerifySwap(ctx context.Context, txHash string) (*handlers.VerifiedSwap, error) {
+	vs, err := a.c.SwapByTxHash(ctx, txHash)
+	if err != nil {
+		return nil, err
+	}
+	return &handlers.VerifiedSwap{
+		TokenOut:  vs.TokenOut,
+		AmountIn:  vs.AmountIn,
+		AmountOut: vs.AmountOut,
+		Recipient: vs.Recipient,
+	}, nil
 }
 
 // bridgeBurnUnlockAdapter adapts BridgeBurnUnlockService to add correlation_id parameter for orchestrator (009).

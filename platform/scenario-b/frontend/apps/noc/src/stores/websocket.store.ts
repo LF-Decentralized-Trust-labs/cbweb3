@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { telemetryService } from "../services/websocket/telemetry.service";
-import { useAlertStore } from "./alert.store";
 import { useTelemetryStore } from "./telemetry.store";
 
 type WebsocketState = {
@@ -43,17 +42,6 @@ export const useWebsocketStore = create<WebsocketState>((set, get) => ({
       onFrame: (frame) => {
         useTelemetryStore.getState().pushFrame(frame);
         set({ stale: false, isConnected: true, reconnectAttempts: 0 });
-
-        if (!frame.healthy || frame.cpuPct > 90 || frame.memoryPct > 90) {
-          useAlertStore.getState().addAlert({
-            id: `alert_${frame.id}`,
-            source: "TELEMETRY",
-            severity: frame.cpuPct > 90 || frame.memoryPct > 90 ? "CRITICAL" : "WARNING",
-            message: `${frame.component} ${frame.componentId} degraded metrics`,
-            correlationId: frame.id,
-            createdAt: frame.timestamp,
-          });
-        }
       },
       onDrop,
     });

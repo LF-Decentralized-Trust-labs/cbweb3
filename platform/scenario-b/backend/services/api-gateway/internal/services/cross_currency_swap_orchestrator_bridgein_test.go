@@ -1,8 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package services
 
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
@@ -12,16 +15,19 @@ import (
 
 type stubSwapRepo struct{}
 
-func (stubSwapRepo) Create(context.Context, *domain.CrossCurrencySwapOperation) error    { return nil }
+func (stubSwapRepo) Create(context.Context, *domain.CrossCurrencySwapOperation) error { return nil }
 func (stubSwapRepo) GetByID(context.Context, string) (*domain.CrossCurrencySwapOperation, error) {
 	return nil, nil
 }
-func (stubSwapRepo) UpdateStatus(context.Context, string, domain.SwapOperationStatus) error { return nil }
-func (stubSwapRepo) UpdateBridgeInPositionID(context.Context, string, string) error         { return nil }
-func (stubSwapRepo) UpdateAmountIn(context.Context, string, string) error                   { return nil }
-func (stubSwapRepo) UpdateSwapTxHash(context.Context, string, string) error                 { return nil }
-func (stubSwapRepo) UpdateBridgeOutPositionID(context.Context, string, string) error        { return nil }
-func (stubSwapRepo) UpdateFailureReason(context.Context, string, string) error              { return nil }
+func (stubSwapRepo) UpdateStatus(context.Context, string, domain.SwapOperationStatus) error {
+	return nil
+}
+func (stubSwapRepo) UpdateBridgeInPositionID(context.Context, string, string) error { return nil }
+func (stubSwapRepo) UpdateSwapResult(context.Context, string, string, string) error { return nil }
+func (stubSwapRepo) UpdateBridgeOutPositionID(context.Context, string, string) error {
+	return nil
+}
+func (stubSwapRepo) UpdateFailureReason(context.Context, string, string) error { return nil }
 
 type stubLockMint struct{ called bool }
 
@@ -147,4 +153,93 @@ type stubActivePoller struct{}
 
 func (stubActivePoller) GetBridgeState(context.Context, string) (domain.BridgeState, error) {
 	return domain.BridgeStateActive, nil
+}
+
+// stubActiveThenReleasedPoller satisfies both bridge waits in the local CB self-service path:
+// the bridge-in step polls until ACTIVE, the bridge-out step polls until RELEASED. It reports
+// ACTIVE on the first call and RELEASED thereafter, so a test that runs the full happy path
+// does not block on the 120s waitForBridgeUnlocked timeout (a fixed-ACTIVE poller would, since
+// bridge-out never observes RELEASED).
+type stubActiveThenReleasedPoller struct{ calls int }
+
+func (p *stubActiveThenReleasedPoller) GetBridgeState(context.Context, string) (domain.BridgeState, error) {
+	p.calls++
+	if p.calls == 1 {
+		return domain.BridgeStateActive, nil
+	}
+	return domain.BridgeStateReleased, nil
+}
+
+// fixedAmountInSwap returns a swap whose realized amount_in is whatever the test sets,
+// modelling the post-fix client that decodes the true amount from LogSwap rather than
+// echoing MaxAmountIn.
+type fixedAmountInSwap struct{ amountIn string }
+
+func (s fixedAmountInSwap) Execute(context.Context, SwapRequest) (*SwapResult, error) {
+	return &SwapResult{TxHash: "0xdeadbeef", AmountIn: s.amountIn, OrderID: "ord-1"}, nil
+}
+
+// TestExecute_SlippageCheckFiresOnRealizedAmountIn locks in the Task 2 fix: the orchestrator's
+// post-trade slippage guard must reject a swap whose realized amount_in exceeds MaxAmountIn.
+// This path was dead before the fix because the AMM client echoed MaxAmountIn as amount_in,
+// making actual == max by construction (the check could never trip).
+func TestExecute_SlippageCheckFiresOnRealizedAmountIn(t *testing.T) {
+	orch := NewCrossCurrencySwapOrchestrator(
+		stubSwapRepo{},
+		nil,
+		&stubLockMint{},
+		stubBurnUnlock{},
+		fixedAmountInSwap{amountIn: "1500"}, // realized cost above the 1000 cap
+		stubPoolActive{},
+		stubCBOK{},
+		nil, // rollbackCoordinator optional; slippage still returns an error without it
+		nil,
+		stubActivePoller{},
+	).WithHubSignerAddress("0xCBSIGNER")
+
+	_, err := orch.Execute(context.Background(), CrossCurrencySwapRequest{
+		SwapID:        "swap-slip",
+		CorrelationID: "corr-slip",
+		PoolPair:      "W-BRL-ARS",
+		AmountOut:     "100",
+		MaxAmountIn:   "1000",
+		PayerBankID:   "central-bank-a",
+	})
+
+	if err == nil {
+		t.Fatal("expected slippage error when realized amount_in (1500) exceeds max (1000), got nil")
+	}
+	if !strings.Contains(err.Error(), "slippage") {
+		t.Fatalf("expected a slippage error, got: %v", err)
+	}
+}
+
+// TestExecute_SlippageCheckPassesWithinCap is the companion: a realized amount_in at or under
+// the cap must NOT trip the guard (it then proceeds to bridge-out).
+func TestExecute_SlippageCheckPassesWithinCap(t *testing.T) {
+	orch := NewCrossCurrencySwapOrchestrator(
+		stubSwapRepo{},
+		nil,
+		&stubLockMint{},
+		stubBurnUnlock{},
+		fixedAmountInSwap{amountIn: "800"}, // realized cost under the 1000 cap
+		stubPoolActive{},
+		stubCBOK{},
+		nil,
+		nil,
+		&stubActiveThenReleasedPoller{}, // ACTIVE for bridge-in, then RELEASED for bridge-out
+	).WithHubSignerAddress("0xCBSIGNER")
+
+	_, err := orch.Execute(context.Background(), CrossCurrencySwapRequest{
+		SwapID:        "swap-ok",
+		CorrelationID: "corr-ok",
+		PoolPair:      "W-BRL-ARS",
+		AmountOut:     "100",
+		MaxAmountIn:   "1000",
+		PayerBankID:   "central-bank-a",
+	})
+
+	if err != nil && strings.Contains(err.Error(), "slippage") {
+		t.Fatalf("did not expect a slippage error for amount_in within cap, got: %v", err)
+	}
 }

@@ -11,8 +11,8 @@ contract IdentityRegistryLPTest is Test {
     address lp2;
     address nonAdmin;
 
-    event LogLiquidityProviderGranted(address indexed account, address indexed by);
-    event LogLiquidityProviderRevoked(address indexed account, address indexed by);
+    event LogLiquidityProviderGranted(address indexed account);
+    event LogLiquidityProviderRevoked(address indexed account);
 
     function setUp() public {
         admin = makeAddr("admin");
@@ -28,8 +28,8 @@ contract IdentityRegistryLPTest is Test {
     // --- grantLiquidityProvider ---
 
     function test_grantLP_emitsEvent() public {
-        vm.expectEmit(true, true, false, false);
-        emit LogLiquidityProviderGranted(lp1, admin);
+        vm.expectEmit(true, false, false, false);
+        emit LogLiquidityProviderGranted(lp1);
 
         vm.prank(admin);
         registry.grantLiquidityProvider(lp1);
@@ -64,8 +64,8 @@ contract IdentityRegistryLPTest is Test {
         vm.prank(admin);
         registry.grantLiquidityProvider(lp1);
 
-        vm.expectEmit(true, true, false, false);
-        emit LogLiquidityProviderRevoked(lp1, admin);
+        vm.expectEmit(true, false, false, false);
+        emit LogLiquidityProviderRevoked(lp1);
 
         vm.prank(admin);
         registry.revokeLiquidityProvider(lp1);

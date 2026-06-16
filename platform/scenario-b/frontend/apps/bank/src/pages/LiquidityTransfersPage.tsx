@@ -23,8 +23,9 @@ import {
   Textarea,
 } from "@cbweb3/ui";
 import { useEffect, useState } from "react";
+import { tCeBMUnitLabel } from "../types";
 import type { LiquidityRequestType, OnRampRequestStatus } from "../types";
-import { useTokenStore } from "../stores";
+import { useTokenStore, usePaymentStore } from "../stores";
 
 const txStatusVariant = (status: string): "warning" | "default" | "success" | "destructive" | "outline" => {
   const variants: Record<string, "warning" | "default" | "success" | "destructive"> = {
@@ -49,6 +50,8 @@ const requestStatusVariant = (status: OnRampRequestStatus): "warning" | "default
 
 export function LiquidityTransfersPage() {
   const { balance, transactions, onRampRequests, fetch, requestOnRamp, transfer, status, error } = useTokenStore();
+  const tCeBMSymbol = usePaymentStore((state) => state.tCeBMSymbol);
+  const tCeBMLabel = tCeBMUnitLabel(tCeBMSymbol);
   const [toAddress, setToAddress] = useState("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed");
   const [transferAmount, setTransferAmount] = useState("250");
 
@@ -67,7 +70,7 @@ export function LiquidityTransfersPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Public Balance</CardDescription>
-            <CardTitle>{balance?.publicBalance ?? "-"} tCeBM</CardTitle>
+            <CardTitle>{balance?.publicBalance ?? "-"} {tCeBMLabel}</CardTitle>
           </CardHeader>
           <CardContent>
             <Badge variant="secondary">Available</Badge>
@@ -76,7 +79,7 @@ export function LiquidityTransfersPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Private Balance</CardDescription>
-            <CardTitle>{balance?.privateBalance ?? "-"} tCeBM</CardTitle>
+            <CardTitle>{balance?.privateBalance ?? "-"} {tCeBMLabel}</CardTitle>
           </CardHeader>
           <CardContent>
             <Badge variant="outline">View-key protected</Badge>

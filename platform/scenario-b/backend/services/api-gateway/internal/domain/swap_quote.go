@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines SwapQuote model for storing swap quotes with 15s TTL
 // and server-side timestamp validation.
 //

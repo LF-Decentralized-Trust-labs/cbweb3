@@ -61,9 +61,13 @@ spoke-all:
 	$(MAKE) spoke-a
 	$(MAKE) spoke-b
 	$(MAKE) cacti-up
-	@echo "Both Spoke-A and Spoke-B stacks are up (with Cacti interop)."
+	$(MAKE) noc.setup-keycloak
+	$(MAKE) noc.up
+	$(MAKE) noc.setup-agents
+	@echo "Both Spoke-A and Spoke-B stacks are up (with Cacti interop and NOC)."
 
 spoke-all-down:
+	$(MAKE) noc.down
 	$(MAKE) cacti-down
 	$(MAKE) spoke-b-down
 	$(MAKE) spoke-a-down

@@ -43,3 +43,4 @@ export {
   formatFiatUnits,
 } from "./payment.types";
 export type { HTLCState, HTLCSearchState, HTLCLock, SearchHTLCParams, SearchHTLCResponse } from "./htlc.types";
+export type { TransferLimit, CreateTransferLimitRequest, ListTransferLimitsResponse } from "./transfer-limits.types";

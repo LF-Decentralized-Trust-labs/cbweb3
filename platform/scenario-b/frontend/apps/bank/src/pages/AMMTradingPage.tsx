@@ -376,6 +376,8 @@ const CROSS_CURRENCY_ERROR_MESSAGES: Record<string, string> = {
     "The swap operation could not be found. Please contact support with the operation reference.",
   [CROSS_CURRENCY_SWAP_ERROR.INVALID_REQUEST]:
     "The request was invalid. Please verify your inputs and try again.",
+  [CROSS_CURRENCY_SWAP_ERROR.TRANSFER_LIMIT_EXCEEDED]:
+    "Daily transfer limit reached. Your Central Bank has set a maximum transfer volume for today. Contact your Central Bank to adjust the limit.",
 };
 
 function CrossCurrencySwapPanel() {

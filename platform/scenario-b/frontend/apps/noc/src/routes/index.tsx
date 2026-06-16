@@ -6,6 +6,7 @@ import { AuditPage } from "../pages/AuditPage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { InfrastructurePage } from "../pages/InfrastructurePage";
 import { LoginPage } from "../pages/LoginPage";
+import { LogViewerPage } from "../pages/LogViewerPage";
 import { PoolStabilityPage } from "../pages/PoolStabilityPage";
 import { RelayStatusPage } from "../pages/RelayStatusPage";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -25,6 +26,7 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, element: <DashboardPage /> },
           { path: "infrastructure", element: <InfrastructurePage /> },
+          { path: "logs/:componentId", element: <LogViewerPage /> },
           { path: "relays", element: <RelayStatusPage /> },
           { path: "pool-stability", element: <PoolStabilityPage /> },
           { path: "topology", element: <TopologyPage /> },

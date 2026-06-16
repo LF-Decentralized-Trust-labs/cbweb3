@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file tests route registration and basic router wiring.
 package router
 
@@ -9,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
@@ -274,6 +277,121 @@ func TestCBMyStatusRouteIsRegistered(t *testing.T) {
 		t.Fatalf("expected 200 from CB my-status route, got %d", resp.StatusCode)
 	}
 }
+
+// ── Transfer Limits routes (R1-10.1) ─────────────────────────────────────────
+
+// TestTransferLimitRoutesRegisteredOnCB verifies that the Treasury transfer-limit
+// CRUD routes are registered when no PaymentProxyHandler is wired (CB mode) and a
+// TransferLimitHandler is provided.
+func TestTransferLimitRoutesRegisteredOnCB(t *testing.T) {
+	t.Parallel()
+
+	tlHandler := handlers.NewTransferLimitHandler(noopTransferLimitManager{})
+	app := fiber.New()
+	Setup(app, Dependencies{
+		AuthHandler:          handlers.NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false),
+		ComplianceHandler:    handlers.NewComplianceHandler(kycCheckerStub{}, nil),
+		TransferLimitHandler: tlHandler,
+		AuthProvider:         authProviderStub{},
+	})
+
+	routes := []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/treasury/transfer-limits"},
+		{http.MethodGet, "/api/v1/treasury/transfer-limits"},
+		{http.MethodDelete, "/api/v1/treasury/transfer-limits/some-id"},
+	}
+	for _, tc := range routes {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
+		req.AddCookie(&http.Cookie{Name: "access_token", Value: "tok"})
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", tc.method, tc.path, err)
+		}
+		// 403 (wrong role) is acceptable — it means the route exists and auth ran.
+		// 404 means the route was not registered at all.
+		if resp.StatusCode == http.StatusNotFound {
+			t.Errorf("%s %s: route not registered (404)", tc.method, tc.path)
+		}
+	}
+}
+
+// TestTransferLimitRoutesNotRegisteredOnCommercialBank ensures that commercial
+// bank gateways (PaymentProxyHandler set) never expose transfer-limit management.
+func TestTransferLimitRoutesNotRegisteredOnCommercialBank(t *testing.T) {
+	t.Parallel()
+
+	tlHandler := handlers.NewTransferLimitHandler(noopTransferLimitManager{})
+	app := fiber.New()
+	Setup(app, Dependencies{
+		AuthHandler:          handlers.NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false),
+		ComplianceHandler:    handlers.NewComplianceHandler(kycCheckerStub{}, nil),
+		PaymentProxyHandler:  &handlers.PaymentProxyHandler{}, // marks this as commercial bank — TL routes must be absent
+		TransferLimitHandler: tlHandler,
+		AuthProvider:         authProviderStub{},
+	})
+
+	for _, path := range []string{
+		"/api/v1/treasury/transfer-limits",
+	} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+		req.AddCookie(&http.Cookie{Name: "access_token", Value: "tok"})
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("POST %s: expected 404 on commercial bank, got %d", path, resp.StatusCode)
+		}
+	}
+}
+
+// TestTransferLimitRoutesRequireTreasuryRole ensures that ROLE_COMMERCIAL_BANK
+// cannot access the transfer-limit management endpoints (expects 403).
+func TestTransferLimitRoutesRequireTreasuryRole(t *testing.T) {
+	t.Parallel()
+
+	tlHandler := handlers.NewTransferLimitHandler(noopTransferLimitManager{})
+	app := fiber.New()
+	// Validator returns COMMERCIAL_BANK role — never ROLE_TREASURY.
+	authProvider := roleAuthProviderStub{roles: []string{domain.RoleCommercialBank}}
+	Setup(app, Dependencies{
+		AuthHandler:          handlers.NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false),
+		ComplianceHandler:    handlers.NewComplianceHandler(kycCheckerStub{}, nil),
+		TransferLimitHandler: tlHandler,
+		AuthProvider:         authProvider,
+	})
+
+	routes := []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/treasury/transfer-limits"},
+		{http.MethodGet, "/api/v1/treasury/transfer-limits"},
+		{http.MethodDelete, "/api/v1/treasury/transfer-limits/id"},
+	}
+	for _, tc := range routes {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
+		req.AddCookie(&http.Cookie{Name: "access_token", Value: "tok"})
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", tc.method, tc.path, err)
+		}
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s %s: expected 403 for COMMERCIAL_BANK, got %d", tc.method, tc.path, resp.StatusCode)
+		}
+	}
+}
+
+// noopTransferLimitManager satisfies handlers.transferLimitManager for router tests.
+type noopTransferLimitManager struct{}
+
+func (noopTransferLimitManager) CreateTransferLimit(_ context.Context, _, _, _, _ string) (complianceadapter.TransferLimit, error) {
+	return complianceadapter.TransferLimit{}, nil
+}
+func (noopTransferLimitManager) ListTransferLimits(_ context.Context, _ string) ([]complianceadapter.TransferLimit, error) {
+	return nil, nil
+}
+func (noopTransferLimitManager) DeleteTransferLimit(_ context.Context, _, _ string) error { return nil }
 
 // TestBankMyStatusRouteRequiresAuth verifies that GET /api/v1/onboarding/my-status
 // on a Commercial Bank gateway (OnboardingProxyHandler mode) is protected by

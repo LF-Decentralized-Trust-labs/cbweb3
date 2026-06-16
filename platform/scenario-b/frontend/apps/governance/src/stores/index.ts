@@ -7,3 +7,4 @@ export * from "./parameters.store";
 export * from "./registry.store";
 export * from "./ui.store";
 export * from "./payment.store";
+export * from "./transfer-limits.store";

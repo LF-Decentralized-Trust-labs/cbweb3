@@ -28,7 +28,7 @@ contracts.test:
 	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge test -vvv
 
 contracts.coverage:
-	@cd contracts && bash tools/validate-coverage.sh
+	@cd contracts && FOUNDRY_FUZZ_RUNS=$${FOUNDRY_FUZZ_RUNS:-256} bash tools/validate-coverage.sh
 
 contracts.build:
 	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge build --sizes

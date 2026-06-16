@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
 import {IAutomatedMarketMaker} from "./interfaces/IAutomatedMarketMaker.sol";
@@ -48,10 +48,10 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ERC20, ReentrancyGuard {
     /// @notice Current paused state of the AMM (asymmetric circuit breaker).
     bool private _paused;
 
-    /// @notice Swap fee in basis points. Default 30 (0.3%). Governance-controlled (FR-005).
+    /// @notice Swap fee in basis points. Default 0 (no fee). Governance-controlled (FR-005).
     uint256 public feeBps;
 
-    /// @notice Withdrawal (zap-out) fee in basis points. Default 30 (0.3%). Governance-controlled.
+    /// @notice Withdrawal (zap-out) fee in basis points. Default 0 (no fee). Governance-controlled.
     uint256 public withdrawalFeeBps;
 
     /// @notice Resume proposals awaiting quorum. Key is a hash derived from proposer + block.
@@ -88,8 +88,8 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ERC20, ReentrancyGuard {
         TOKEN_A = IERC20(_tokenA);
         TOKEN_B = IERC20(_tokenB);
         IDENTITY_REGISTRY = IIdentityRegistry(_identityRegistry);
-        feeBps = 30;
-        withdrawalFeeBps = 30;
+        feeBps = 0;
+        withdrawalFeeBps = 0;
     }
 
     // ============================================================================

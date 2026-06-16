@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package workers provides BesuRelayerExecutor — the production RelayerEventExecutor
 // that performs real on-chain operations via go-ethereum clients.
 //

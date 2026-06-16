@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file runs end-to-end style tests for gateway routes and auth flows.
 package app_test
 
@@ -200,7 +202,10 @@ func (m *identityMock) GetKYCStatus(_ context.Context, req *authv1.GetKYCStatusR
 }
 
 // IssueLoginNonce returns PKI_NOT_REQUIRED so the Login handler falls through
-// to direct (non-PKI) login for all test users.
+// to direct (non-PKI) login for all test users. The real auth service signals
+// this with codes.PermissionDenied (see auth/internal/grpc/server/server.go),
+// which the Login handler treats as a fall-through; the mock must match that
+// contract or the handler rejects the login as service-unavailable (503).
 func (m *identityMock) IssueLoginNonce(_ context.Context, _ *authv1.IssueLoginNonceRequest) (*authv1.IssueLoginNonceResponse, error) {
-	return nil, status.Error(codes.FailedPrecondition, "PKI_NOT_REQUIRED")
+	return nil, status.Error(codes.PermissionDenied, "PKI_NOT_REQUIRED")
 }

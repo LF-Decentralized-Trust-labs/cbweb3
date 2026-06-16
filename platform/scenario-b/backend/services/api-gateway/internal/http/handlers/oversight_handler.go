@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides oversight HTTP handlers for Master Viewing Key disclosure (FR-034/FR-035/FR-036).
 package handlers
 

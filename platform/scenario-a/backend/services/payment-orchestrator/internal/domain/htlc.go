@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines the core business types for the payment-orchestrator.
 package domain
 

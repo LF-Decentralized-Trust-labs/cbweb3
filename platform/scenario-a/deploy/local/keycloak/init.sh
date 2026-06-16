@@ -358,6 +358,9 @@ assign_roles_to_service_account "central-bank-a" "central-bank-a-client" ROLE_GO
 # Treasury portal: dedicated client with its own credentials → ROLE_TREASURY only.
 create_extra_client_in_realm "central-bank-a" "central-bank-a-treasury-client" "central-bank-a-treasury-local-secret"
 assign_roles_to_service_account "central-bank-a" "central-bank-a-treasury-client" ROLE_TREASURY
+# Supervisor portal: dedicated client with its own credentials → ROLE_SUPERVISOR only.
+create_extra_client_in_realm "central-bank-a" "central-bank-a-supervisor-client" "central-bank-a-supervisor-local-secret"
+assign_roles_to_service_account "central-bank-a" "central-bank-a-supervisor-client" ROLE_SUPERVISOR
 
 create_realm_and_client \
   "bank-c" \
@@ -386,6 +389,9 @@ assign_roles_to_service_account "central-bank-b" "central-bank-b-client" ROLE_GO
 # Treasury portal: dedicated client with its own credentials → ROLE_TREASURY only.
 create_extra_client_in_realm "central-bank-b" "central-bank-b-treasury-client" "central-bank-b-treasury-local-secret"
 assign_roles_to_service_account "central-bank-b" "central-bank-b-treasury-client" ROLE_TREASURY
+# Supervisor portal: dedicated client with its own credentials → ROLE_SUPERVISOR only.
+create_extra_client_in_realm "central-bank-b" "central-bank-b-supervisor-client" "central-bank-b-supervisor-local-secret"
+assign_roles_to_service_account "central-bank-b" "central-bank-b-supervisor-client" ROLE_SUPERVISOR
 
 echo "KEYCLOAK_INIT_DONE"
 echo -e "\nConfiguração concluída. Keycloak está em execução."

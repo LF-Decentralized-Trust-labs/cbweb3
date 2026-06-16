@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file exposes a lightweight health check endpoint handler.
 package handlers
 

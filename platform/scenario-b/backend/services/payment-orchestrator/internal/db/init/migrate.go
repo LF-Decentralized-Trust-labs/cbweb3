@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package init provides GORM-based schema initialisation for payment-orchestrator.
 package init
 

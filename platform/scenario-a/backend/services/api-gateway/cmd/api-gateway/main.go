@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file bootstraps the API Gateway process and starts the Fiber server.
 package main
 

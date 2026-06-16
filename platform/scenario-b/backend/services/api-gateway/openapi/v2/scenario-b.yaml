@@ -137,14 +137,24 @@ components:
           $ref: '#/components/schemas/Amount'
     LiquidityRemoveRequest:
       type: object
-      required: [pair, provider_bank_id, lp_shares]
+      required: [pool_pair, provider_bank_id, lp_id]
       properties:
-        pair:
+        pool_pair:
           $ref: '#/components/schemas/PoolPair'
         provider_bank_id:
           type: string
-        lp_shares:
-          $ref: '#/components/schemas/Amount'
+        lp_id:
+          type: string
+        fraction_bps:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          description: >
+            Fraction of the position to withdraw, in basis points (10000 = 100%).
+            Omitted or 0 means a full withdrawal (the position is marked WITHDRAWN).
+            A partial value (0 < fraction_bps < 10000) burns only that fraction of the
+            recorded shares and leaves the position ACTIVE with the remainder; the
+            response withdrawal_mode is then SHARES_HOME_CURRENCY_PARTIAL.
     LiquidityPositionResponse:
       type: object
       required: [lp_id, provider_bank_id, pool_pair, lp_shares]

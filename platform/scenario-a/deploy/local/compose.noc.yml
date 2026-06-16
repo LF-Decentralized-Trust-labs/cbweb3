@@ -61,9 +61,47 @@ services:
     networks:
       - cbweb3_network
 
+  noc-agent-spoke-a:
+    container_name: "${NOC_AGENT_SPOKE_A_CONTAINER_NAME:-cbweb3-noc-agent-spoke-a}"
+    build:
+      context: ../../backend/services/noc-agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ../../interop/hub-and-spoke/noc/agent-configs/spoke-a/agent.yaml:/etc/noc-agent/agent.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - noc-backend
+    networks:
+      - cbweb3_network
+      - spoke_a_besu_network
+      - cacti_default
+
+  noc-agent-spoke-b:
+    container_name: "${NOC_AGENT_SPOKE_B_CONTAINER_NAME:-cbweb3-noc-agent-spoke-b}"
+    build:
+      context: ../../backend/services/noc-agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ../../interop/hub-and-spoke/noc/agent-configs/spoke-b/agent.yaml:/etc/noc-agent/agent.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - noc-backend
+    networks:
+      - cbweb3_network
+      - spoke_b_besu_network
+      - cacti_default
+
 volumes:
   noc_db_data:
 
 networks:
   cbweb3_network:
+    external: true
+  spoke_a_besu_network:
+    external: true
+  spoke_b_besu_network:
+    external: true
+  cacti_default:
     external: true
