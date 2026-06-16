@@ -59,7 +59,7 @@ The end-to-end operational lifecycle is:
 
 Open the Bank Portal URL provided by your administrator. You will land on the **Sign in to Bank Portal** screen.
 
-<!-- TODO: screenshot -->
+![Login](../img/scenario-b/bank/01-login.png)
 
 Fill in both fields and click **Sign in**:
 
@@ -101,7 +101,7 @@ The left-hand sidebar lists all screens available in Scenario B:
 
 **Route:** `/` · **Sidebar label:** Dashboard
 
-<!-- TODO: screenshot -->
+![Dashboard](../img/scenario-b/bank/02-dashboard.png)
 
 The Dashboard provides a real-time summary of your institution's position. It refreshes pool and circuit-breaker status every 30 seconds automatically.
 
@@ -148,7 +148,7 @@ Three bar charts summarising: Tokenised vs Reserve balance comparison, request b
 
 **Route:** `/transfer` · **Sidebar label:** Transfer
 
-<!-- TODO: screenshot -->
+![Transfer](../img/scenario-b/bank/03-transfer.png)
 
 This is the primary screen for initiating a **cross-border payment via the Hub AMM**. The transfer uses the cross-currency swap flow: your tCeBM on the source spoke is bridged in, swapped at the Hub for the target currency, and bridged out to the beneficiary's spoke. The page shows the current pool status for pair **W-BRL-ARS** at the top.
 
@@ -215,7 +215,7 @@ On completion, the screen shows the swap transaction hash, amounts in and out, b
 
 **Route:** `/deposits` · **Sidebar label:** Issuance Requests
 
-<!-- TODO: screenshot -->
+![Deposits](../img/scenario-b/bank/04-deposits.png)
 
 Use this screen to request the Central Bank to **issue tCeBM** against your fiat collateral. The top of the screen shows your current tCeBM balance, fiat reserve (fCeBM) balance, and count of pending issuance requests.
 
@@ -245,7 +245,7 @@ Use this screen to request the Central Bank to **issue tCeBM** against your fiat
 
 **Route:** `/escrows` · **Sidebar label:** Reserve Tokenisation
 
-<!-- TODO: screenshot -->
+![Escrows](../img/scenario-b/bank/05-escrows.png)
 
 After a deposit (issuance request) is approved, use this screen to **convert the approved fiat reserve (fCeBM) into tCeBM**. The top of the screen shows your fCeBM balance and count of pending tokenisation requests.
 
@@ -276,7 +276,7 @@ After a deposit (issuance request) is approved, use this screen to **convert the
 
 **Route:** `/approve-amm` · **Sidebar label:** Approve AMM
 
-<!-- TODO: screenshot -->
+![Approve AMM](../img/scenario-b/bank/06-approve-amm.png)
 
 Before the AMM can use your tCeBM in a swap, you must grant it a spending allowance. This step is required once per session (or whenever you need to increase the allowance). The screen shows your current tCeBM balance for reference.
 
@@ -295,7 +295,7 @@ Before the AMM can use your tCeBM in a swap, you must grant it a spending allowa
 
 **Route:** `/redeems` · **Sidebar label:** Redeems
 
-<!-- TODO: screenshot -->
+![Redeems](../img/scenario-b/bank/07-redeems.png)
 
 Use this screen to **convert tCeBM back to fiat**. The top of the screen shows your tCeBM balance and count of pending redeem requests.
 
@@ -325,7 +325,7 @@ Use this screen to **convert tCeBM back to fiat**. The top of the screen shows y
 
 **Route:** `/bridge` · **Sidebar label:** Bridge
 
-<!-- TODO: screenshot -->
+![Bridge](../img/scenario-b/bank/08-bridge.png)
 
 The Bridge moves tCeBM between your spoke and the Hub using a **lock/mint** (spoke → Hub) and **burn/unlock** (Hub → spoke) model. Positions are tracked in the Bridge Positions table, which polls automatically every 5 seconds while any position is in a non-terminal state.
 
@@ -366,7 +366,7 @@ If a position remains in `LOCKING` or `BURNING` for more than 2 minutes, the tab
 
 **Route:** `/compliance` · **Sidebar label:** Compliance
 
-<!-- TODO: screenshot -->
+![Compliance](../img/scenario-b/bank/09-compliance.png)
 
 The Compliance Center allows you to view your institution's ZK-compliance credentials and attach them to pending on-chain operations.
 
@@ -395,7 +395,7 @@ A table listing all credentials associated with your institution:
 
 **Route:** `/onboarding` · **Sidebar label:** Onboarding
 
-<!-- TODO: screenshot -->
+![Onboarding](../img/scenario-b/bank/10-onboarding.png)
 
 The Onboarding Wizard registers a new commercial bank with the Central Bank and provisions its on-chain wallet. This is a one-time process. Until onboarding completes and the institution status reaches `ACTIVE`, the operational screens are inaccessible.
 
@@ -413,47 +413,6 @@ For the full step-by-step onboarding procedure, see the [ONBOARDING-DOCS runbook
 | **2. Institution Data** | Fill in Institution Name, Bank Code, Country, Role, Username, and Email. Click **Submit Onboarding Request**. |
 | **3. KYC Approval** | Waiting state. The portal polls for Central Bank approval every 5 seconds. Displays Request ID, Wallet, and elapsed time. Click **Refresh status** to force an immediate check. |
 | **4. Complete** | Finalization: PKI credential exchange and on-chain activation. Shows Wallet Address, Transaction Hash, and PKI login badge. Click **Go to Dashboard**. |
-
----
-
-### 4.10 Settings (`/settings`)
-
-**Route:** `/settings` · **Sidebar label:** Settings
-
-<!-- TODO: screenshot -->
-
-Displays read-only environment information for the current portal session:
-
-- API mode (mock services enabled/disabled).
-- Authentication mechanism (backend-managed HTTP-only cookies).
-- WebSocket mode (simulated relay events or live).
-
-> This screen contains no configurable options. It is informational only.
-
----
-
-### 4.11 AMM Trading (`/amm`) — advanced, not in sidebar
-
-**Route:** `/amm` · Not in sidebar navigation (access via direct URL or Dashboard quick action **AMM Trade**)
-
-<!-- TODO: screenshot -->
-
-This is an advanced interface that provides direct access to the Hub AMM pool. It offers two trading modes via tabs:
-
-**Exact Output tab**
-
-A two-panel interface for manual pool swaps:
-
-- **Quote Exact Output** — Enter a pair (e.g. `BRL-ARS`) and an Amount Out to get the required input amount and price impact. Quotes go stale after 10 seconds; a **Refresh Quote** button appears when stale.
-- **Swap Exact Output** — Execute the swap with explicit control over Max Amount In, Payer ID (pre-filled from session), and Beneficiary ID. The Execute Swap button is disabled if the circuit breaker is `HALTED`, the pool is not `ACTIVE`, or AMM approval is missing.
-- **Pool Status** panel — Shows reserves for both sides, current ratio, and last update time.
-- **Approve AMM** panel — A collapsible helper to grant AMM approval without leaving the page (equivalent to the dedicated Approve AMM page).
-
-**Cross-Currency tab**
-
-A guided cross-currency swap flow (BRL → ARS via pool `W-BRL-ARS`) with the same quote → execute pattern as the Transfer page. Includes a four-step progress indicator (BRIDGE IN PROGRESS → SWAP IN PROGRESS → BRIDGE OUT PROGRESS → COMPLETED) and the same error handling, including the critical `BRIDGE_OUT_FAILED` case.
-
-> For day-to-day cross-border payments, use the **Transfer** page instead. The AMM Trading page is intended for operators who need direct pool visibility or are troubleshooting swap parameters.
 
 ---
 
