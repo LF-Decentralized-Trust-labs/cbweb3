@@ -39,6 +39,8 @@ func Setup(app *fiber.App, deps Dependencies) {
 
 	app.Get("/openapi.yaml", handlers.OpenAPIYAML)
 	app.Get("/docs", handlers.SwaggerUI)
+	// Vendored, embedded Swagger UI assets — served locally so /docs works offline (no CDN).
+	app.Get("/docs/swagger-ui/:asset", handlers.SwaggerUIAsset)
 	app.Get("/healthz", handlers.Health)
 
 	// --- Auth ---

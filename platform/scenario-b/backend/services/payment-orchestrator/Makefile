@@ -26,7 +26,7 @@ test:
 	$(GO) test ./internal/...
 
 test-coverage:
-	$(GO) test $(CORE_TESTPKG) -coverpkg=$(CORE_COVERPKG) -coverprofile=coverage.raw.out -covermode=atomic
+	$(GO) test $(CORE_TESTPKG) -count=1 -coverpkg=$(CORE_COVERPKG) -coverprofile=coverage.raw.out -covermode=atomic
 	@grep -v -E '$(COVERAGE_EXCLUDE)' coverage.raw.out > coverage.out
 	$(GO) tool cover -func=coverage.out | awk '/total:/ { gsub("%","",$$3); if ($$3+0 < $(COVERAGE_THRESHOLD)) { printf "coverage %.2f%% is below threshold $(COVERAGE_THRESHOLD)%%\n", $$3; exit 1 } else { printf "coverage %.2f%% meets threshold $(COVERAGE_THRESHOLD)%%\n", $$3 } }'
 
