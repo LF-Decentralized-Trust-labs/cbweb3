@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# setup-noc-agents.sh — Provisions the three NOC agent API keys and spoke records
+# setup-noc-agents.sh — Provisions the three NOC agent spokes and API keys
 # in the Scenario B NOC backend (hub + spoke-a + spoke-b).
+#
+# The NOC backend exposes two admin endpoints (Bearer token required):
+#   POST /api/v1/admin/spokes                 — create/register a spoke
+#   POST /api/v1/admin/agents/provision-key   — bind a pre-shared key to a spoke
 #
 # Run AFTER compose.noc.yml is up and Keycloak is configured.
 #
@@ -65,39 +69,82 @@ fi
 
 AUTH_HEADER="Authorization: Bearer ${NOC_ADMIN_TOKEN}"
 
-# ── Helper: upsert a spoke ────────────────────────────────────────────────────
-upsert_spoke() {
+# ── Helper: create a spoke via POST /api/v1/admin/spokes ─────────────────────
+create_spoke() {
   local id="$1"
   local name="$2"
   local currency="$3"
   local jurisdiction="$4"
-  local agent_key="$5"
 
-  echo -e "${BLUE}Upserting spoke '${name}' (${id})...${NC}"
-  HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-    -X POST "${NOC_BACKEND}/api/v1/spokes" \
+  echo -e "${BLUE}Creating spoke '${name}' (${id})...${NC}"
+
+  RESP=$(curl -s -w "\n%{http_code}" \
+    -X POST "${NOC_BACKEND}/api/v1/admin/spokes" \
     -H "${AUTH_HEADER}" \
     -H "Content-Type: application/json" \
     -d "{
       \"id\": \"${id}\",
       \"name\": \"${name}\",
       \"currency_code\": \"${currency}\",
-      \"jurisdiction\": \"${jurisdiction}\",
-      \"agent_key\": \"${agent_key}\"
+      \"jurisdiction\": \"${jurisdiction}\"
     }")
 
-  if [[ "${HTTP_STATUS}" == "200" || "${HTTP_STATUS}" == "201" || "${HTTP_STATUS}" == "409" ]]; then
-    echo -e "${GREEN}  Spoke '${name}' registered (HTTP ${HTTP_STATUS}).${NC}"
+  HTTP_STATUS=$(echo "${RESP}" | tail -1)
+  BODY=$(echo "${RESP}" | head -n -1)
+
+  if [[ "${HTTP_STATUS}" == "201" || "${HTTP_STATUS}" == "200" ]]; then
+    echo -e "${GREEN}  Spoke '${name}' created (HTTP ${HTTP_STATUS}).${NC}"
+  elif [[ "${HTTP_STATUS}" == "409" ]]; then
+    echo -e "${YELLOW}  Spoke '${name}' already exists — skipping creation.${NC}"
   else
-    echo -e "${RED}  ERROR registering spoke '${name}': HTTP ${HTTP_STATUS}${NC}"
+    echo -e "${RED}  ERROR creating spoke '${name}': HTTP ${HTTP_STATUS} — ${BODY}${NC}"
+    exit 1
+  fi
+}
+
+# ── Helper: provision an agent key via POST /api/v1/admin/agents/provision-key
+provision_key() {
+  local spoke_id="$1"
+  local spoke_name="$2"
+  local raw_key="$3"
+  local hint="$4"
+
+  echo -e "${BLUE}Provisioning agent key for '${spoke_name}'...${NC}"
+
+  RESP=$(curl -s -w "\n%{http_code}" \
+    -X POST "${NOC_BACKEND}/api/v1/admin/agents/provision-key" \
+    -H "${AUTH_HEADER}" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"raw_key\": \"${raw_key}\",
+      \"spoke_id\": \"${spoke_id}\",
+      \"hint\": \"${hint}\"
+    }")
+
+  HTTP_STATUS=$(echo "${RESP}" | tail -1)
+  BODY=$(echo "${RESP}" | head -n -1)
+
+  if [[ "${HTTP_STATUS}" == "201" || "${HTTP_STATUS}" == "200" ]]; then
+    echo -e "${GREEN}  Key provisioned for '${spoke_name}' (HTTP ${HTTP_STATUS}).${NC}"
+  elif [[ "${HTTP_STATUS}" == "409" ]]; then
+    echo -e "${YELLOW}  Key for '${spoke_name}' already exists — skipping.${NC}"
+  else
+    echo -e "${RED}  ERROR provisioning key for '${spoke_name}': HTTP ${HTTP_STATUS} — ${BODY}${NC}"
     exit 1
   fi
 }
 
 # ── Register spokes ───────────────────────────────────────────────────────────
-upsert_spoke "${HUB_SPOKE_ID}"  "Regional Hub" "HUB"  "SA-HUB"  "${HUB_AGENT_KEY}"
-upsert_spoke "${SPOKE_A_ID}"    "Spoke A"      "BRL"  "BR"      "${SPOKE_A_AGENT_KEY}"
-upsert_spoke "${SPOKE_B_ID}"    "Spoke B"      "ARS"  "AR"      "${SPOKE_B_AGENT_KEY}"
+create_spoke "${HUB_SPOKE_ID}"  "Regional Hub" "HUB"  "SA-HUB"
+create_spoke "${SPOKE_A_ID}"    "Spoke A"      "BRL"  "BR"
+create_spoke "${SPOKE_B_ID}"    "Spoke B"      "ARS"  "AR"
+
+echo ""
+
+# ── Provision agent keys ──────────────────────────────────────────────────────
+provision_key "${HUB_SPOKE_ID}"  "Regional Hub" "${HUB_AGENT_KEY}"     "hub-local-dev"
+provision_key "${SPOKE_A_ID}"    "Spoke A"      "${SPOKE_A_AGENT_KEY}" "spoke-a-local-dev"
+provision_key "${SPOKE_B_ID}"    "Spoke B"      "${SPOKE_B_AGENT_KEY}" "spoke-b-local-dev"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
