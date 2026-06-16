@@ -20,7 +20,7 @@
  * Environment variables:
  *   API_GW_URL    — API Gateway base URL (default: http://localhost:3000)
  *   AUTH_TOKEN    — Bearer token with commercial_bank role (REQUIRED for swap/transfer)
- *   PAIR          — AMM pair to probe (default: BRL-USD)
+ *   PAIR          — AMM pair to probe (default: W-BRL-ARS)
  *   SPOKE/ASSET   — bridge transfer source/asset (defaults: spoke-a / BRL)
  *   DURATION      — soak window (default: 12h)
  *   QUOTE_TPS     — quote req/s (default: 10 — moderate)
@@ -37,7 +37,7 @@ import { Trend, Rate } from "k6/metrics";
 
 const API_GW_URL = __ENV.API_GW_URL || "http://localhost:3000";
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || "";
-const PAIR = __ENV.PAIR || "BRL-USD";
+const PAIR = __ENV.PAIR || "W-BRL-ARS";
 const SPOKE = __ENV.SPOKE || "spoke-a";
 const ASSET = __ENV.ASSET || "BRL";
 const DURATION = __ENV.DURATION || "12h";
@@ -45,6 +45,8 @@ const DURATION = __ENV.DURATION || "12h";
 const QUOTE_TPS = Number(__ENV.QUOTE_TPS || 10);
 const SWAP_TPS = Number(__ENV.SWAP_TPS || 3);
 const TRANSFER_TPS = Number(__ENV.TRANSFER_TPS || 5);
+const PAYER_ID = __ENV.PAYER_ID || "bank-a";
+const BENEFICIARY_ID = __ENV.BENEFICIARY_ID || "bank-b";
 
 const quoteLatency = new Trend("quote_latency_ms", true);
 const swapLatency = new Trend("swap_latency_ms", true);
@@ -97,9 +99,10 @@ export function swapScenario() {
   if (!AUTH_TOKEN) return;
   const body = JSON.stringify({
     pair: PAIR,
-    amount_out: 1000,
+    amount_out: "1000",
     max_amount_in: "999999999",
-    recipient: "0xPerfRecipient",
+    payer_id: PAYER_ID,
+    beneficiary_id: BENEFICIARY_ID,
   });
   const r = http.post(`${API_GW_URL}/api/v2/amm/swap/exact-output`, body, {
     headers: headers(true),
@@ -111,19 +114,12 @@ export function swapScenario() {
 
 export function transferScenario() {
   if (!AUTH_TOKEN) return;
-  const idem = `soak-${__VU}-${__ITER}-${Date.now()}`;
-  const body = JSON.stringify({
-    spoke: SPOKE,
-    asset: ASSET,
-    amount: 1000,
-    token_kind: "noto",
-    recipient: "0xPerfRecipient",
-    idempotency_key: idem,
-  });
+  // Simplified lock-mint payload (server derives owner/spoke/asset). 201 on success.
+  const body = JSON.stringify({ amount: "1000" });
   const r = http.post(`${API_GW_URL}/api/v2/bridge/lock-mint`, body, {
     headers: headers(true),
-    tags: { endpoint: "lock-mint" },
+    tags: { endpoint: "lock-mint", spoke: SPOKE, asset: ASSET },
   });
   transferLatency.add(r.timings.duration);
-  okRate.add(check(r, { "lock-mint 202": (res) => res.status === 202 }));
+  okRate.add(check(r, { "lock-mint 201": (res) => res.status === 201 }));
 }

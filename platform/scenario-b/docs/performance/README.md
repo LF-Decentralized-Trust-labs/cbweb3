@@ -1,13 +1,47 @@
 # Scenario B — Performance Benchmark Harness & Methodology (R1-12.3)
 
 > Addresses **Report 1 — Deliverable 12, Finding 12.3 (P0)**: performance thresholds were
-> *restated, not measured*. This directory provides a **turnkey harness + methodology** so a
-> human can stand up real devnet infra, run each benchmark, and record measured numbers in
-> [`RESULTS-TEMPLATE.md`](./RESULTS-TEMPLATE.md).
->
-> **No measured numbers live here.** This is the SCOPED deliverable (harness + methodology +
-> results template). An isolated worktree cannot produce credible measurements; the numbers are
-> intentionally deferred to a real infrastructure run.
+> *restated, not measured*. This directory provides a **turnkey harness + methodology** plus a
+> **single zero-config command** that runs the full suite and records measured numbers.
+
+---
+
+## 0. One command (zero-config) — `make scenario-b.perf-all`
+
+```bash
+# from scenario-b/
+make scenario-b.perf-all
+```
+
+That's it. With **no arguments and no manual steps** the driver
+(`tests/performance/run-all.sh`, orchestrating the helpers in `tests/performance/lib/`):
+
+1. **Stack** — reuses a stack already serving at `API_GW_URL`, else runs `make scenario-b.up`.
+2. **Auth** — mints a `commercial_bank` and a `central_bank` JWT via the gateway login
+   `POST /api/v1/auth/login` (`{clientId,clientSecret}` → `{accessToken}`) — the same path
+   `tests/integration` uses; **no direct Keycloak call** (it is blocked outside Docker).
+   Client secrets are read from `backend/config/.env.infra.*` with local fallbacks.
+3. **Perf profile** — clears any R1-10.1 daily transfer limits (so sustained 50 TPS does not
+   trip `TRANSFER_LIMIT_EXCEEDED` and flood the <1% gate) and **asserts the circuit breaker is
+   RESUMED before any swap runs** (constitution III).
+4. **Seed** — ensures the AMM pair is `ACTIVE` with depth sized for the 30-TPS run (cooperative
+   commit-reveal via `scenario-b.tryout-us1` when needed); warns if reserves are shallow.
+5. **Benchmarks** — runs the latency baseline, AMM 30 TPS throughput, 50 TPS transfer, and
+   15 TPS Zeto transfer, each with `--summary-export` JSON capture.
+6. **TTF** — measures end-to-end Time-To-Finality by on-chain correlation (§4).
+7. **Results** — writes measured numbers + PASS/FAIL into [`RESULTS.md`](./RESULTS.md) and
+   **validates-or-revises the AMM 30 TPS DRAFT** based on the measured result.
+
+All helpers emit structured JSON logs to stdout. Raw evidence (k6 summaries, TTF samples) lands
+in `tests/performance/results/<timestamp>/` (gitignored). The **12-hour soak is a SEPARATE
+opt-in**: `make scenario-b.perf-soak` (runs the load generator + the out-of-band metrics
+collector in parallel; never run it in CI).
+
+Useful overrides (all optional): `DURATION` (default `3m` per throughput run; use `10m` for a
+publication run), `SWAP_TPS`, `TRANSFER_TPS`, `ZETO_TPS`, `PAIR`, `API_GW_URL`.
+
+The sections below document the methodology and the individual `make scenario-b.perf-*` targets
+the one-command flow composes — use them to drive a single threshold in isolation.
 
 ---
 
@@ -62,15 +96,20 @@ make scenario-b.seed-sovereign-pair   # ensure the AMM pair (PAIR) has liquidity
 
 ### Obtain an AUTH_TOKEN
 
-Mint a token for a `commercial_bank` user against the local Keycloak realm, e.g.:
+`make scenario-b.perf-all` mints this automatically. To get one by hand for the individual
+targets, use the **gateway login** (direct Keycloak HTTP is blocked outside Docker — this is the
+path `tests/integration` and `tests/performance/lib/auth.sh` use):
 
 ```bash
-export AUTH_TOKEN=$(curl -s "$KEYCLOAK_URL/realms/<realm>/protocol/openid-connect/token" \
-  -d grant_type=password -d client_id=<client> \
-  -d username=<bank-user> -d password=<pw> | jq -r .access_token)
+# commercial_bank token (for swap + transfer):
+export AUTH_TOKEN=$(curl -s -H 'Content-Type: application/json' \
+  -d '{"clientId":"bank-a-client","clientSecret":"<KC_CLIENT_SECRET>"}' \
+  "$API_GW_URL/api/v1/auth/login" | jq -r .accessToken)
 ```
 
-(Use the same client/realm the integration tests use — see `tests/integration`.)
+The client secret lives in `backend/config/.env.infra.bank-a` (`KC_CLIENT_SECRET`), with the
+local fallback `bank-a-local-secret`. The central-bank token (for governance/profile calls) comes
+from the CB-A gateway (`API_GW_CENTRAL_BANK_A_URL`, client `central-bank-a-client`).
 
 ---
 
@@ -191,7 +230,13 @@ point to justify Caliper in a PR per the stack rules — it is out of scope for 
 
 ## 7. After the run
 
-Fill in [`RESULTS-TEMPLATE.md`](./RESULTS-TEMPLATE.md) with the measured values, mark each
-threshold PASS/FAIL, and in particular **validate or revise the AMM 30 TPS draft target** based
-on the measured devnet result. Attach raw k6 summaries (use `k6 run --summary-export=...`) and
-the soak metric snapshots as evidence.
+`make scenario-b.perf-all` **auto-generates** [`RESULTS.md`](./RESULTS.md) with the measured
+values, a PASS/FAIL per threshold, and an explicit **validate-or-revise verdict for the AMM
+30 TPS draft target** (`write-results.sh` parses the `--summary-export` JSON + the TTF result).
+Raw k6 summaries and TTF samples are kept under `tests/performance/results/<timestamp>/`.
+
+If you ran the individual `make scenario-b.perf-*` targets by hand instead of the one-command
+flow, fill in [`RESULTS-TEMPLATE.md`](./RESULTS-TEMPLATE.md) yourself (it stays as the blank
+reference form) and attach the raw summaries + soak metric snapshots as evidence. After a 12h
+soak, inspect `results/soak-*/soak-metrics.jsonl` for RSS/connection trends, container restarts,
+and the before/after AMM `x*y=k` invariant.
