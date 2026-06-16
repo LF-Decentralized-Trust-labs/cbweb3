@@ -469,7 +469,7 @@ On success, you are navigated to the Settlement Detail page for the new contract
 
 Opened by clicking **View** on any row in the Settlement History, or navigated to automatically after creating a new transfer.
 
-<!-- TODO: screenshot — HTLC detail -->
+![HTLC Details](../img/scenario-a/bank/13-htlc-details.png)
 
 The page auto-polls the backend every **5 seconds** while the contract is in an active state (`LOCKED`, `SETTLING`, `REFUNDING`). Polling stops automatically once the contract reaches `SETTLED` or `REFUNDED`.
 
