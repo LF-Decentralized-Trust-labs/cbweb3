@@ -31,6 +31,15 @@
  *   VUS_POOL     — pool VUs in vus-mode (default: 5)
  *   QUOTE_TPS    — quote target req/s in rate-mode (default: 60)
  *   SWAP_TPS     — swap target req/s in rate-mode  (default: 30 — the DRAFT gate)
+ *   PAYER_ID     — swap payer bank id     (default: bank-a)
+ *   BENEFICIARY_ID — swap beneficiary bank id (default: bank-b)
+ *   AMOUNT_OUT   — exact-output target per swap (default: 1000)
+ *   MAX_AMOUNT_IN— max input cap per swap (default: 999999999)
+ *
+ * API CONTRACT (verified against backend/.../handlers/swap_handler.go):
+ *   POST /api/v2/amm/swap/exact-output requires {pair, amount_out, max_amount_in,
+ *   payer_id, beneficiary_id}. There is NO `recipient` field — the earlier
+ *   "recipient: 0xPerfRecipient" body 400'd on every request.
  *
  * A delta >20% above the gates MUST block merge per Decision 13.
  * NOTE: measured numbers belong in docs/performance/RESULTS-TEMPLATE.md after a real run.
@@ -48,6 +57,10 @@ const LOAD_MODEL = (__ENV.LOAD_MODEL || "vus").toLowerCase();
 
 const QUOTE_TPS = Number(__ENV.QUOTE_TPS || 60);
 const SWAP_TPS = Number(__ENV.SWAP_TPS || 30); // DRAFT AMM throughput target (R1-12.3)
+const PAYER_ID = __ENV.PAYER_ID || "bank-a";
+const BENEFICIARY_ID = __ENV.BENEFICIARY_ID || "bank-b";
+const AMOUNT_OUT = __ENV.AMOUNT_OUT || "1000";
+const MAX_AMOUNT_IN = __ENV.MAX_AMOUNT_IN || "999999999";
 
 const quoteLatency = new Trend("quote_latency_ms", true);
 const swapLatency = new Trend("swap_latency_ms", true);
@@ -134,9 +147,10 @@ export function swapScenario() {
   if (!AUTH_TOKEN) return;
   const body = JSON.stringify({
     pair: PAIR,
-    amount_out: 1000,
-    max_amount_in: "999999999",
-    recipient: "0xPerfRecipient",
+    amount_out: AMOUNT_OUT,
+    max_amount_in: MAX_AMOUNT_IN,
+    payer_id: PAYER_ID,
+    beneficiary_id: BENEFICIARY_ID,
   });
   const r = http.post(`${API_GW_URL}/api/v2/amm/swap/exact-output`, body, {
     headers: headers(true),

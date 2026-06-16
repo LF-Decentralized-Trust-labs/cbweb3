@@ -15,7 +15,17 @@
  * Mirrored-asset privacy is provided by Zeto/Noto, so the lock-mint path is also the
  * harness for the 15 TPS Zeto threshold when TOKEN_KIND=zeto.
  *
- * TTF NOTE: k6 measures *API admission* latency only (the endpoints return 202 ACCEPTED and
+ * API CONTRACT (verified against backend/.../handlers/bridge_handler.go):
+ *   - lock-mint accepts the SIMPLIFIED payload {"amount":"..."} only. owner_bank_id,
+ *     spoke_network, native_asset and mirrored_asset are all derived server-side from the
+ *     JWT + gateway config; sending them is deprecated and ignored. There is no per-request
+ *     recipient or idempotency_key field, and no per-request Zeto/Noto switch (the privacy
+ *     domain is a server config concern). TOKEN_KIND is kept only as a label so the 15-TPS
+ *     privacy-mirrored run is tagged distinctly; it does not change the request body.
+ *   - On success the handler returns HTTP 201 Created with a JSON body containing
+ *     "position_id". (NOT 202; the older 202/`id` assumption was wrong.)
+ *
+ * TTF NOTE: k6 measures *API admission* latency only (the endpoint returns 201 CREATED and
  * the relayer finalises asynchronously). End-to-end Time-To-Finality (<5s) is NOT something a
  * black-box HTTP probe can observe. To measure TTF, correlate the returned position id with
  * the on-chain `Locked`/`Minted` (or `Burned`/`Released`) events via the relayer logs /
@@ -75,7 +85,7 @@ export const options = {
     },
   },
   thresholds: {
-    // <1% error rate (R1-12.3). The API admits transfers with 202; anything else is an error.
+    // <1% error rate (R1-12.3). The API admits transfers with 201; anything else is an error.
     http_req_failed: ["rate<0.01"],
     transfer_accept_rate: ["rate>0.99"],
     // API admission latency budget — NOT end-to-end TTF (see header note).
@@ -90,28 +100,25 @@ function headers() {
 }
 
 export function transferScenario() {
-  const idem = `perf-${__VU}-${__ITER}-${Date.now()}`;
-  const body = JSON.stringify({
-    spoke: SPOKE,
-    asset: ASSET,
-    amount: AMOUNT,
-    token_kind: TOKEN_KIND, // noto | zeto — privacy domain for mirrored asset
-    recipient: "0xPerfRecipient",
-    idempotency_key: idem,
-  });
+  // Simplified lock-mint payload: the gateway derives owner_bank_id (JWT) +
+  // spoke_network / native_asset / mirrored_asset (server config). Amount is the
+  // only client-supplied field. SPOKE/ASSET remain as env labels for the run only.
+  const body = JSON.stringify({ amount: String(AMOUNT) });
   const r = http.post(`${API_GW_URL}/api/v2/bridge/lock-mint`, body, {
     headers: headers(),
-    tags: { endpoint: "lock-mint", token_kind: TOKEN_KIND },
+    tags: { endpoint: "lock-mint", token_kind: TOKEN_KIND, spoke: SPOKE, asset: ASSET },
   });
   admitLatency.add(r.timings.duration);
-  const ok = check(r, { "lock-mint 202": (res) => res.status === 202 });
+  const ok = check(r, { "lock-mint 201": (res) => res.status === 201 });
   acceptRate.add(ok);
   if (ok) {
     accepted.add(1);
     if (PRINT_IDS) {
       try {
-        const id = r.json("id") || r.json("positionId");
-        if (id) console.log(`POSITION_ID ${id}`);
+        const id = r.json("position_id");
+        // ts = client send time in epoch ms; ttf.sh pairs this with the on-chain
+        // Minted event timestamp to compute end-to-end Time-To-Finality.
+        if (id) console.log(`POSITION_ID ${id} ${Date.now()}`);
       } catch (_) {
         /* body not JSON — ignore for id capture */
       }
