@@ -3,6 +3,9 @@
 package api
 
 import (
+	"strings"
+	"time"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
@@ -57,6 +60,32 @@ func (h *SpokesHandler) create(c *fiber.Ctx) error {
 	if req.Active != nil {
 		active = *req.Active
 	}
+
+	// If a UUID is provided, check for a soft-deleted spoke with that ID and restore it.
+	if req.ID != "" {
+		id, err := uuid.Parse(req.ID)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+		}
+		if existing, err := h.repo.FindAnyByID(id); err == nil {
+			if existing.DeletedAt.Valid {
+				// Restore soft-deleted spoke and update its fields.
+				existing.Name = req.Name
+				existing.CurrencyCode = req.CurrencyCode
+				existing.Jurisdiction = req.Jurisdiction
+				existing.Active = active
+				existing.DeletedAt.Valid = false
+				existing.DeletedAt.Time = time.Time{}
+				if err := h.repo.Restore(existing); err != nil {
+					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+				}
+				return c.Status(fiber.StatusOK).JSON(existing)
+			}
+			// Already active — idempotent 409.
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "spoke already exists"})
+		}
+	}
+
 	spoke := &domain.NocSpoke{
 		Name:         req.Name,
 		CurrencyCode: req.CurrencyCode,
@@ -64,13 +93,13 @@ func (h *SpokesHandler) create(c *fiber.Ctx) error {
 		Active:       active,
 	}
 	if req.ID != "" {
-		id, err := uuid.Parse(req.ID)
-		if err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
-		}
+		id, _ := uuid.Parse(req.ID)
 		spoke.ID = id
 	}
 	if err := h.repo.Create(spoke); err != nil {
+		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "spoke already exists"})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(spoke)

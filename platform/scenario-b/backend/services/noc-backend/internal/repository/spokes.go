@@ -38,13 +38,30 @@ func (r *SpokesRepository) List() ([]domain.NocSpoke, error) {
 	return spokes, nil
 }
 
-// GetByID returns a spoke by UUID.
+// GetByID returns a non-deleted spoke by UUID.
 func (r *SpokesRepository) GetByID(id uuid.UUID) (*domain.NocSpoke, error) {
 	var spoke domain.NocSpoke
 	if err := r.db.First(&spoke, "id = ?", id).Error; err != nil {
 		return nil, fmt.Errorf("spokes: get: %w", err)
 	}
 	return &spoke, nil
+}
+
+// FindAnyByID returns a spoke by UUID including soft-deleted records.
+func (r *SpokesRepository) FindAnyByID(id uuid.UUID) (*domain.NocSpoke, error) {
+	var spoke domain.NocSpoke
+	if err := r.db.Unscoped().First(&spoke, "id = ?", id).Error; err != nil {
+		return nil, fmt.Errorf("spokes: find-any: %w", err)
+	}
+	return &spoke, nil
+}
+
+// Restore undeletes a soft-deleted spoke and saves updated fields.
+func (r *SpokesRepository) Restore(spoke *domain.NocSpoke) error {
+	if err := r.db.Unscoped().Save(spoke).Error; err != nil {
+		return fmt.Errorf("spokes: restore: %w", err)
+	}
+	return nil
 }
 
 // GetByName returns a spoke by unique name.

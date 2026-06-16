@@ -34,7 +34,7 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		DatabaseURL:          getEnv("DATABASE_URL", ""),
-		Port:                 getEnv("NOC_BACKEND_PORT", "8090"),
+		Port:                 getEnv("NOC_BACKEND_PORT", "8091"),
 		KeycloakURL:          getEnv("KEYCLOAK_URL", "http://keycloak:8080"),
 		KeycloakRealm:        getEnv("KEYCLOAK_REALM", "cbweb3"),
 		KeycloakClientID:     getEnv("KEYCLOAK_CLIENT_ID", "noc-portal"),

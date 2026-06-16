@@ -7,5 +7,5 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /noc-backend ./cmd/ser
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=builder /noc-backend /noc-backend
-EXPOSE 8090
+EXPOSE 8091
 ENTRYPOINT ["/noc-backend"]
