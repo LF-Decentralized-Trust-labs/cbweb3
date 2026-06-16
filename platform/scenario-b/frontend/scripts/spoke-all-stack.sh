@@ -30,7 +30,8 @@ case "${ACTION}" in
       cd "${ROOT_DIR}/frontend"
       npm install
     )
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up --build -d
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" build --no-cache
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d
     ;;
   down)
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" down --remove-orphans

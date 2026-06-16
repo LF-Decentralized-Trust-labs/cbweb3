@@ -263,7 +263,7 @@ Click **Refresh** at any time to manually reload the redeem queue.
 
 This page provides a **read-only** view of all cross-border atomic settlement contracts (Hash Time Lock Contracts — HTLCs) tracked by the system. No approval actions are available here; it is used for oversight and auditing of the PvP settlement lifecycle.
 
-<!-- TODO: screenshot — HTLC Monitor page -->
+![HTLC Monitor](../img/scenario-a/treasury/09-htlc-monitor.png)
 
 #### Filters
 
@@ -311,7 +311,7 @@ Click **Close** to dismiss the detail panel.
 
 This screen allows treasury operators to create and remove daily transfer limits for participants. Limits can be scoped to a specific participant and/or currency, or applied globally.
 
-<!-- TODO: screenshot — Transfer Limits page -->
+![Transfer Limits](../img/scenario-a/treasury/10-transfer-limits.png)
 
 #### Summary Cards
 
