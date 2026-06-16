@@ -90,7 +90,7 @@ create_spoke() {
     }")
 
   HTTP_STATUS=$(echo "${RESP}" | tail -1)
-  BODY=$(echo "${RESP}" | head -n -1)
+  BODY=$(echo "${RESP}" | sed '$d')
 
   if [[ "${HTTP_STATUS}" == "201" || "${HTTP_STATUS}" == "200" ]]; then
     echo -e "${GREEN}  Spoke '${name}' created (HTTP ${HTTP_STATUS}).${NC}"
@@ -122,7 +122,7 @@ provision_key() {
     }")
 
   HTTP_STATUS=$(echo "${RESP}" | tail -1)
-  BODY=$(echo "${RESP}" | head -n -1)
+  BODY=$(echo "${RESP}" | sed '$d')
 
   if [[ "${HTTP_STATUS}" == "201" || "${HTTP_STATUS}" == "200" ]]; then
     echo -e "${GREEN}  Key provisioned for '${spoke_name}' (HTTP ${HTTP_STATUS}).${NC}"
