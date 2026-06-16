@@ -13,12 +13,12 @@
  *   - No memory growth trend / node crash (observed out-of-band via metrics)
  *
  * Usage:
- *   API_GW_URL=http://localhost:3000 AUTH_TOKEN=<jwt> \
+ *   API_GW_URL=http://localhost:18080 AUTH_TOKEN=<jwt> \
  *   DURATION=12h \
  *   k6 run tests/performance/k6/soak.js
  *
  * Environment variables:
- *   API_GW_URL    — API Gateway base URL (default: http://localhost:3000)
+ *   API_GW_URL    — API Gateway base URL (default: http://localhost:18080)
  *   AUTH_TOKEN    — Bearer token with commercial_bank role (REQUIRED for swap/transfer)
  *   PAIR          — AMM pair to probe (default: W-BRL-ARS)
  *   SPOKE/ASSET   — bridge transfer source/asset (defaults: spoke-a / BRL)
@@ -35,7 +35,7 @@ import http from "k6/http";
 import { check } from "k6";
 import { Trend, Rate } from "k6/metrics";
 
-const API_GW_URL = __ENV.API_GW_URL || "http://localhost:3000";
+const API_GW_URL = __ENV.API_GW_URL || "http://localhost:18080";
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || "";
 const PAIR = __ENV.PAIR || "W-BRL-ARS";
 const SPOKE = __ENV.SPOKE || "spoke-a";

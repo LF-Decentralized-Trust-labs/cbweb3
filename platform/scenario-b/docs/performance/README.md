@@ -81,7 +81,7 @@ the one-command flow composes — use them to drive a single threshold in isolat
 
 - [`k6`](https://k6.io) installed (`k6 version`). k6 is the established perf tool in this repo;
   there is **no Caliper** here — see §6 for why k6 covers the on-chain throughput scenarios.
-- A running Scenario B stack reachable at `API_GW_URL` (default `http://localhost:3000`).
+- A running Scenario B stack reachable at `API_GW_URL` (default `http://localhost:18080`).
 - An `AUTH_TOKEN`: a Keycloak-issued JWT with the `commercial_bank` realm role (required for
   swap and bridge transfers). Quote/pool endpoints are unauthenticated.
 
@@ -124,7 +124,7 @@ All commands run from `scenario-b/`. Override `API_GW_URL` if not on localhost.
 ```bash
 make scenario-b.perf-baseline
 # equivalent to:
-API_GW_URL=http://localhost:3000 AUTH_TOKEN=$AUTH_TOKEN \
+API_GW_URL=http://localhost:18080 AUTH_TOKEN=$AUTH_TOKEN \
   k6 run tests/performance/scenario-b-perf.js
 ```
 
@@ -133,7 +133,7 @@ API_GW_URL=http://localhost:3000 AUTH_TOKEN=$AUTH_TOKEN \
 ```bash
 make scenario-b.perf-amm-throughput
 # equivalent to:
-API_GW_URL=http://localhost:3000 AUTH_TOKEN=$AUTH_TOKEN \
+API_GW_URL=http://localhost:18080 AUTH_TOKEN=$AUTH_TOKEN \
   LOAD_MODEL=rate SWAP_TPS=30 QUOTE_TPS=60 DURATION=10m \
   k6 run tests/performance/scenario-b-perf.js
 ```
@@ -143,7 +143,7 @@ API_GW_URL=http://localhost:3000 AUTH_TOKEN=$AUTH_TOKEN \
 ```bash
 make scenario-b.perf-transfer
 # equivalent to:
-API_GW_URL=http://localhost:3000 AUTH_TOKEN=$AUTH_TOKEN \
+API_GW_URL=http://localhost:18080 AUTH_TOKEN=$AUTH_TOKEN \
   TRANSFER_TPS=50 DURATION=10m \
   k6 run tests/performance/k6/bridge-transfer-throughput.js
 ```
@@ -153,7 +153,7 @@ API_GW_URL=http://localhost:3000 AUTH_TOKEN=$AUTH_TOKEN \
 ```bash
 make scenario-b.perf-zeto
 # equivalent to:
-API_GW_URL=http://localhost:3000 AUTH_TOKEN=$AUTH_TOKEN \
+API_GW_URL=http://localhost:18080 AUTH_TOKEN=$AUTH_TOKEN \
   TOKEN_KIND=zeto TRANSFER_TPS=15 DURATION=10m \
   k6 run tests/performance/k6/bridge-transfer-throughput.js
 ```
@@ -163,7 +163,7 @@ API_GW_URL=http://localhost:3000 AUTH_TOKEN=$AUTH_TOKEN \
 ```bash
 make scenario-b.perf-soak     # WARNING: runs for 12 hours; dedicated infra only
 # equivalent to:
-API_GW_URL=http://localhost:3000 AUTH_TOKEN=$AUTH_TOKEN DURATION=12h \
+API_GW_URL=http://localhost:18080 AUTH_TOKEN=$AUTH_TOKEN DURATION=12h \
   k6 run tests/performance/k6/soak.js
 ```
 

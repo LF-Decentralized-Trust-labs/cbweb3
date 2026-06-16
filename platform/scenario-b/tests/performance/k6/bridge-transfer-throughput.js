@@ -33,17 +33,17 @@
  * the position ids it created to stdout so a TTF post-processor can consume them.
  *
  * Usage (50 TPS transfer throughput):
- *   API_GW_URL=http://localhost:3000 AUTH_TOKEN=<jwt> \
+ *   API_GW_URL=http://localhost:18080 AUTH_TOKEN=<jwt> \
  *   TRANSFER_TPS=50 DURATION=10m \
  *   k6 run tests/performance/k6/bridge-transfer-throughput.js
  *
  * Usage (15 TPS Zeto/privacy throughput):
- *   API_GW_URL=http://localhost:3000 AUTH_TOKEN=<jwt> \
+ *   API_GW_URL=http://localhost:18080 AUTH_TOKEN=<jwt> \
  *   TOKEN_KIND=zeto TRANSFER_TPS=15 DURATION=10m \
  *   k6 run tests/performance/k6/bridge-transfer-throughput.js
  *
  * Environment variables:
- *   API_GW_URL    — API Gateway base URL (default: http://localhost:3000)
+ *   API_GW_URL    — API Gateway base URL (default: http://localhost:18080)
  *   AUTH_TOKEN    — Bearer token with commercial_bank role (REQUIRED)
  *   TOKEN_KIND    — "noto" | "zeto" (default: noto) — selects privacy domain for the mirrored asset
  *   TRANSFER_TPS  — target transfers/sec (default: 50; use 15 for the Zeto threshold)
@@ -58,7 +58,7 @@ import http from "k6/http";
 import { check } from "k6";
 import { Trend, Counter, Rate } from "k6/metrics";
 
-const API_GW_URL = __ENV.API_GW_URL || "http://localhost:3000";
+const API_GW_URL = __ENV.API_GW_URL || "http://localhost:18080";
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || "";
 const TOKEN_KIND = (__ENV.TOKEN_KIND || "noto").toLowerCase();
 const TRANSFER_TPS = Number(__ENV.TRANSFER_TPS || 50);

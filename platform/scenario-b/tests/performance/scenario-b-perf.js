@@ -12,16 +12,16 @@
  *                        AMM 30 TPS DRAFT target (R1-12.3). Set SWAP_TPS / QUOTE_TPS.
  *
  * Usage (latency baseline):
- *   API_GW_URL=http://localhost:3000 AUTH_TOKEN=<jwt> \
+ *   API_GW_URL=http://localhost:18080 AUTH_TOKEN=<jwt> \
  *   k6 run tests/performance/scenario-b-perf.js
  *
  * Usage (AMM 30 TPS throughput validation):
- *   API_GW_URL=http://localhost:3000 AUTH_TOKEN=<jwt> \
+ *   API_GW_URL=http://localhost:18080 AUTH_TOKEN=<jwt> \
  *   LOAD_MODEL=rate SWAP_TPS=30 QUOTE_TPS=60 DURATION=10m \
  *   k6 run tests/performance/scenario-b-perf.js
  *
  * Environment variables:
- *   API_GW_URL   — API Gateway base URL (default: http://localhost:3000)
+ *   API_GW_URL   — API Gateway base URL (default: http://localhost:18080)
  *   AUTH_TOKEN   — Bearer token with commercial_bank role (required for swap)
  *   PAIR         — Pool pair to probe (default: W-BRL-ARS)
  *   DURATION     — Test duration (default: 1m; use 12h for the soak)
@@ -49,7 +49,7 @@ import http from "k6/http";
 import { check, sleep } from "k6";
 import { Trend, Counter } from "k6/metrics";
 
-const API_GW_URL = __ENV.API_GW_URL || "http://localhost:3000";
+const API_GW_URL = __ENV.API_GW_URL || "http://localhost:18080";
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || "";
 const PAIR = __ENV.PAIR || "W-BRL-ARS";
 const DURATION = __ENV.DURATION || "1m";

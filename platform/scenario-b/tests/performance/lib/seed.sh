@@ -25,7 +25,7 @@
 #   PERF_MAKE_DIR              dir to run `make` from (default scenario-b root)
 #   SKIP_SEED                  "1" to skip seeding entirely (dry-run)
 
-: "${API_GW_URL:=http://localhost:3000}"
+: "${API_GW_URL:=http://localhost:18080}"
 : "${SKIP_SEED:=0}"
 
 # seed_pool_status PAIR [TOKEN]

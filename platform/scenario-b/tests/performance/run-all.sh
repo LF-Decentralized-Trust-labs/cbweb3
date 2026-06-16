@@ -41,7 +41,7 @@ PERF_SERVICE="perf-all"
 # shellcheck source=lib/ttf.sh
 . "$PERF_DIR/lib/ttf.sh"
 
-: "${API_GW_URL:=http://localhost:3000}"
+: "${API_GW_URL:=http://localhost:18080}"
 : "${API_GW_CENTRAL_BANK_A_URL:=http://localhost:38080}"
 : "${PAIR:=W-BRL-ARS}"
 : "${DURATION:=3m}"

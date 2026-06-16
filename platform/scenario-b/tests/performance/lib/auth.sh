@@ -13,12 +13,12 @@
 #   auth_central_bank_token      -> central-bank-a (central_bank role; profile/seed governance)
 #
 # Env overrides:
-#   API_GW_URL                  commercial-bank gateway (default http://localhost:3000)
+#   API_GW_URL                  commercial-bank gateway (default http://localhost:18080)
 #   API_GW_CENTRAL_BANK_A_URL   CB-A gateway (default http://localhost:38080)
 #   KC_BANK_A_CLIENT / KC_CENTRAL_BANK_A_CLIENT   client ids
 #   KC_BANK_A_SECRET / KC_CENTRAL_BANK_A_SECRET   secrets (else read from .env.infra.*)
 
-: "${API_GW_URL:=http://localhost:3000}"
+: "${API_GW_URL:=http://localhost:18080}"
 : "${API_GW_CENTRAL_BANK_A_URL:=http://localhost:38080}"
 
 # _perf_root → scenario-b/

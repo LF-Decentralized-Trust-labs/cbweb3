@@ -10,13 +10,13 @@
 #   stack_ensure_up                       -> reuse if up, else `make scenario-b.up`
 #
 # Env:
-#   API_GW_URL                 commercial-bank gateway (default http://localhost:3000)
+#   API_GW_URL                 commercial-bank gateway (default http://localhost:18080)
 #   API_GW_CENTRAL_BANK_A_URL  CB-A gateway (for profile/seed); default http://localhost:38080
 #   SKIP_STACK                 "1" to never start a stack (dry-run / CI parse)
 #   PERF_MAKE_DIR              dir to run `make` from (default: scenario-b root)
 
 # shellcheck source=./log.sh
-: "${API_GW_URL:=http://localhost:3000}"
+: "${API_GW_URL:=http://localhost:18080}"
 : "${SKIP_STACK:=0}"
 
 # stack_gateway_ready URL [TIMEOUT_SECS]
@@ -26,11 +26,11 @@ stack_gateway_ready() {
   # "process is serving" — 401 just means auth is required, which is fine for liveness.
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "$timeout" "$url/health" 2>/dev/null || echo 000)"
   case "$code" in
-    2??|3??|401|403) return 0 ;;
+    2??|3??|4??) return 0 ;;
   esac
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "$timeout" "$url" 2>/dev/null || echo 000)"
   case "$code" in
-    2??|3??|401|403) return 0 ;;
+    2??|3??|4??) return 0 ;;
     *) return 1 ;;
   esac
 }
