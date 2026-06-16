@@ -10,6 +10,43 @@
 
 ---
 
+## 0. TL;DR — one command (zero-config)
+
+```bash
+make scenario-a.perf-all        # from scenario-a/
+```
+
+That single command needs **no arguments and no manual setup**. It:
+
+1. **Stands up the stack** if it isn't already reachable (`make spoke-a` — `lib/stack.sh`).
+2. **Mints `AUTH_TOKEN`** for bank-a and central-bank-a via `/api/v1/auth/login`, reading
+   `KC_CLIENT_ID`/`KC_CLIENT_SECRET` from `backend/config/.env.infra.{bank-a,central-bank-a}`
+   (`lib/auth.sh`).
+3. **Funds the sender** (deposit → approve → fiat-exchange) so a 50 TPS run does not exhaust
+   fCeBM and trip the error gate (`lib/fund.sh`).
+4. **Runs the threshold benchmarks** — baseline (read/write p95), 50 TPS HTLC transfer,
+   15 TPS Zeto escrow — each with its built-in k6 gates and `--summary-export` evidence.
+5. **Correlates on-chain TTF** (`HTLCLocked` events via `eth_getLogs`, `lib/ttf.sh`).
+6. **Writes `docs/performance/RESULTS-<UTC>.md`** with measured numbers + PASS/FAIL per
+   threshold (`lib/results.sh`); raw evidence lands under `tests/performance/.artifacts/<run-id>/`.
+
+The run exits non-zero if any k6 threshold gate is breached. Everything is overridable by env
+var (`API_GW_URL`, `RECEIVER`, `DURATION`, `TRANSFER_TPS`, …) but **nothing is required**.
+
+Related targets:
+
+| Target | What it does |
+|--------|--------------|
+| `make scenario-a.perf-all` | Full zero-config threshold suite (above). |
+| `make scenario-a.perf-all-dry` | Validates the orchestrator end-to-end with **no infra** (CI-safe smoke). |
+| `make scenario-a.perf-soak-all` | **Opt-in** 12h soak (dedicated infra only; never in CI). |
+| `make scenario-a.perf-{baseline,transfer,zeto,soak}` | Single benchmarks (require `AUTH_TOKEN`); see §3. |
+
+The sections below document the methodology and the manual single-benchmark path that
+`perf-all` automates.
+
+---
+
 ## 1. Authoritative threshold table
 
 | # | Threshold | Target | Scope | Source | Metric / Tool |

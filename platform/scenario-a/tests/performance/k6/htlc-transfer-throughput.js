@@ -90,6 +90,8 @@ export function lockScenario() {
     amount: AMOUNT,
     time_lock: timeLock,
   });
+  // t0 = client send time (epoch ms), captured for TTF post-processing (§4).
+  const t0 = Date.now();
   const r = http.post(`${API_GW_URL}/api/v1/htlc/lock`, body, {
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     jar: cookieJar(),
@@ -103,7 +105,10 @@ export function lockScenario() {
     if (PRINT_IDS) {
       try {
         const id = r.json("contract_id");
-        if (id) console.log(`CONTRACT_ID ${id}`);
+        // "CONTRACT_ID <id> <t0_epoch_ms>" — the trailing t0 is optional and
+        // backward-compatible with parsers that read only the id. The TTF
+        // post-processor (lib/ttf.sh) uses t0 as the finality-clock start.
+        if (id) console.log(`CONTRACT_ID ${id} ${t0}`);
       } catch (_) {
         /* body not JSON — ignore for id capture */
       }
