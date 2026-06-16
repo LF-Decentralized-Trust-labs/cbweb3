@@ -273,6 +273,12 @@ scenario-b.perf-zeto:
 # liquidity, runs every threshold benchmark with --summary-export, does on-chain TTF
 # correlation, and writes measured numbers + PASS/FAIL into docs/performance/RESULTS.md.
 # The 12h soak is SEPARATE (scenario-b.perf-soak). Override DURATION/SWAP_TPS/etc. if desired.
+# scenario-b.perf-smoke — static + logic smoke test for the perf harness helpers. No infra, no
+# k6 run; safe for CI. Validates syntax, JSON logging, and write-results PASS/FAIL/VALIDATED/REVISE.
+scenario-b.perf-smoke:
+	@echo "[scenario-b] perf harness smoke test (no infra)..."
+	@bash tests/performance/lib/smoke_test.sh
+
 scenario-b.perf-all:
 	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
 	@echo "[scenario-b] R1-12.3 full perf suite (zero-config) — see docs/performance/RESULTS.md..."
@@ -310,4 +316,4 @@ scenario-b.validate-openapi:
 	scenario-b.test-integration \
 	scenario-b.perf-baseline scenario-b.validate-openapi \
 	scenario-b.perf-amm-throughput scenario-b.perf-transfer \
-	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all
+	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all scenario-b.perf-smoke
