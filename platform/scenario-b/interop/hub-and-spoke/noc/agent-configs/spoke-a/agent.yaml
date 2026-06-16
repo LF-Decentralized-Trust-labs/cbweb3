@@ -1,7 +1,7 @@
 # NOC Agent Configuration — Spoke A
 # Monitors: Central Bank A Besu, Bank A Besu, Paladin Spoke A nodes, Cacti relay
-spoke_id: "spoke-a"
-noc_backend_url: "http://cbweb3-b-noc-backend:8090"
+spoke_id: "b1000000-0000-0000-0000-000000000001"
+noc_backend_url: "http://cbweb3-b-noc-backend:8091"
 api_key: "noc-agent-spoke-a-key-local"
 push_interval_seconds: 15
 

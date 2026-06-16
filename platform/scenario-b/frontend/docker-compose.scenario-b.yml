@@ -136,3 +136,16 @@ services:
         VITE_SPOKE_NAME: ${SUPERVISOR_SPOKE_B_NAME}
     ports:
       - "${SUPERVISOR_SPOKE_B_FRONTEND_PORT}:80"
+
+  noc-frontend:
+    container_name: cbweb3-b-noc-portal
+    build:
+      context: .
+      dockerfile: apps/noc/Dockerfile
+      args:
+        VITE_NOC_BACKEND_URL: ${VITE_NOC_BACKEND_URL:-http://localhost:8091/api/v1}
+        VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL:-http://localhost:8081}
+        VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM:-cbweb3}
+        VITE_KEYCLOAK_CLIENT_ID: ${VITE_KEYCLOAK_CLIENT_ID:-noc-portal}
+    ports:
+      - "${NOC_PORTAL_PORT:-5910}:80"

@@ -1,7 +1,7 @@
 # NOC Agent Configuration — Spoke B
 # Monitors: Central Bank B Besu, Bank B Besu, Paladin Spoke B nodes
-spoke_id: "spoke-b"
-noc_backend_url: "http://cbweb3-b-noc-backend:8090"
+spoke_id: "b2000000-0000-0000-0000-000000000001"
+noc_backend_url: "http://cbweb3-b-noc-backend:8091"
 api_key: "noc-agent-spoke-b-key-local"
 push_interval_seconds: 15
 
