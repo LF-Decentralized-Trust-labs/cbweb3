@@ -84,7 +84,7 @@ write actions available are:
 
 ## 3. Access and login
 
-<!-- TODO: screenshot -->
+![Supervisor Login](../img/scenario-a/supervisor/01-supervisor-login.png)
 
 Open the Supervisor Portal URL in your browser. Two instances run by default:
 
@@ -123,7 +123,7 @@ the Dashboard (`/`).
 
 ### 5.1 Dashboard (`/`)
 
-<!-- TODO: screenshot -->
+![Supervisor Dashboard](../img/scenario-a/supervisor/02-dashboard.png)
 
 The landing page after login. It provides a network-level summary and a full
 HTLC settlement table.
@@ -161,7 +161,7 @@ shows "No active HTLCs".
 
 ### 5.2 Audit Vault (`/audit`)
 
-<!-- TODO: screenshot -->
+![Supervisor Audit](../img/scenario-a/supervisor/03-audit.png)
 
 The Audit Vault is a three-panel forensic screen:
 
@@ -245,7 +245,7 @@ requests — is recorded here and is non-repudiable.
 
 ### 5.3 Investigations (`/investigation`)
 
-<!-- TODO: screenshot -->
+![Supervisor Investigation](../img/scenario-a/supervisor/04-investigation.png)
 
 The Investigations screen manages the **disclosure request workflow** — the
 multi-party sign-off process required to legally compel disclosure of shielded
@@ -313,7 +313,7 @@ Look up the current state and quorum progress of any disclosure request.
 
 ### 5.4 Participant Management (`/participants`)
 
-<!-- TODO: screenshot -->
+![Compliance Participants](../img/scenario-a/supervisor/05-participants.png)
 
 A read-only view of the compliance registry for all onboarded participants.
 
@@ -348,7 +348,7 @@ reinstatement is a governance function handled outside this portal.
 
 ### 5.5 Stability Controls (`/stability`)
 
-<!-- TODO: screenshot -->
+![HTLC Health](../img/scenario-a/supervisor/06-htlc-health.png)
 
 The Stability Controls screen provides HTLC expiry risk monitoring and a count
 of active stability alerts. It is intended for senior supervisors watching for
@@ -386,7 +386,7 @@ applicable) are owned by the Governance Portal and are not accessible here.
 
 ### 5.6 Settings (`/settings`)
 
-<!-- TODO: screenshot -->
+![Settings](../img/scenario-a/supervisor/07-settings.png)
 
 Session-scoped operational preferences. Changes are saved for the current
 browser session only and are lost on logout or tab close.
