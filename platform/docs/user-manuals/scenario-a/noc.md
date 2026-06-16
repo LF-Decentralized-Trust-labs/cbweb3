@@ -64,8 +64,7 @@ configuration changes) are exposed here.
 
 ## 2. Access and Login
 
-**URL:** Provided by your system administrator (dispatcher URL or direct NOC
-portal URL).
+**URL:** The NOC Portal URL provided by your system administrator.
 
 **Authentication:** Keycloak OIDC. The portal authenticates against the
 `cbweb3` realm with client ID `noc-portal`. Only accounts carrying the

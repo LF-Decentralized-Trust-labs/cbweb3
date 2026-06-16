@@ -26,7 +26,7 @@ digital-currency lifecycle:
 
 ## Access & Login
 
-**URL:** The dispatcher URL provided by your system administrator. It automatically routes each user to the correct portal based on their credentials (e.g., `http://bank-a.spoke-a.local` in a local deployment).
+**URL:** The Bank Portal URL provided by your system administrator (e.g., `http://localhost:5173` in a local deployment).
 
 **Credentials:** A **Client ID** and **Client Secret** issued by the Central Bank operator. The Client ID is in UUID format.
 
@@ -34,7 +34,7 @@ digital-currency lifecycle:
 
 ### Signing in
 
-1. Open the dispatcher URL in your browser.
+1. Open the Bank Portal URL in your browser.
 2. Enter your **Client ID** and **Client Secret**.
 3. Click **Sign in**.
 

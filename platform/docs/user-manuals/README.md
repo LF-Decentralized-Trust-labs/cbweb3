@@ -36,7 +36,6 @@ top where it currently runs on **mock (sample) data** rather than live data.
 
 | Portal | Scenario A | Scenario B | Data source today |
 |---|---|---|---|
-| **Dispatcher** | Static routing only | N/A | No backend — all routing is client-side |
 | **Bank** | Live backend | Live backend | Real API (API Gateway) |
 | **Governance** | Live backend (Dashboard + Registry exposed) | Live backend | Real API, with a development mock toggle |
 | **Treasury** | Live backend (approvals exposed) | Mock data | See note in the manual |
@@ -55,7 +54,6 @@ top where it currently runs on **mock (sample) data** rather than live data.
 
 | Portal | Who uses it | Manual |
 |---|---|---|
-| Dispatcher | All users — unified entry point that routes to the correct institutional portal | [scenario-a/dispatcher.md](./scenario-a/dispatcher.md) |
 | Bank | Commercial bank operators | [scenario-a/bank.md](./scenario-a/bank.md) |
 | Governance | Central bank governance team | [scenario-a/governance.md](./scenario-a/governance.md) |
 | Treasury | Central bank treasury / issuance team | [scenario-a/treasury.md](./scenario-a/treasury.md) |

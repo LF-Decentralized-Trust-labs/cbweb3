@@ -55,7 +55,7 @@ Bank submits redemption request
 
 ## 2. Access and Login
 
-Open the **dispatcher URL** provided by your system administrator in your browser. Enter your institutional credentials; the dispatcher automatically routes treasury accounts to this portal.
+Open the **Treasury Portal URL** provided by your system administrator in your browser and enter your institutional credentials.
 
 ![Treasury Portal Login Screen](../img/scenario-a/treasury/01-treasury-login.png)
 
