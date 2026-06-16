@@ -1,235 +1,294 @@
 # NOC Portal — User Manual (Scenario B)
 
 **Audience:** Network operations / SRE engineers.
-**Portal:** Network Operations Center (NOC) — International Hub (Scenario B).
+**Scenario:** B — International Hub (hub-and-spoke, AMM-based FX settlement).
+**Data source:** The portal connects to a live NOC backend service. Component
+health, alerts, logs, and topology data reflect actual spoke and hub state when
+the stack is running. The WebSocket telemetry stream falls back to HTTP polling
+automatically.
 
 ---
 
-> ## Read first — current data status
+> ## Read first — current status
 >
-> All data displayed in the NOC Portal is currently **mock (sample) data** served
-> from an in-memory fixture. The screens show the intended layout and interaction
-> model for infrastructure health, relay status, pool stability, and network
-> topology, but no figures are drawn from a live telemetry feed. Telemetry frames
-> displayed on the Dashboard are randomly generated in-browser on a 3-second
-> timer and are not real measurements.
->
-> **Do not use these figures for incident response until live API wiring is
-> confirmed.**
+> The NOC Portal is wired to a real backend API (Keycloak auth + NOC backend
+> service). Component health, alerts, and logs reflect actual spoke and hub
+> state when the stack is running. The **WebSocket push stream** is a stub —
+> the portal always runs in HTTP polling mode until the stream is implemented.
+> Authenticated sessions are stored as JWT tokens in `localStorage`.
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#1-overview)
-2. [Access and login](#2-access-and-login)
+2. [Access and Login](#2-access-and-login)
 3. [Navigation](#3-navigation)
 4. [Screens](#4-screens)
-   - 4.1 [Dashboard](#41-dashboard)
-   - 4.2 [Infrastructure](#42-infrastructure)
-   - 4.3 [Relay Status](#43-relay-status)
-   - 4.4 [Pool Stability](#44-pool-stability)
-   - 4.5 [Topology](#45-topology)
-   - 4.6 [Audit](#46-audit)
-   - 4.7 [Settings](#47-settings)
-5. [Typical workflows](#5-typical-workflows)
-6. [Alert reference](#6-alert-reference)
-7. [Troubleshooting](#7-troubleshooting)
+   - [Dashboard (`/`)](#41-dashboard-)
+   - [Infrastructure (`/infrastructure`)](#42-infrastructure-infrastructure)
+   - [Relay Status (`/relays`)](#43-relay-status-relays)
+   - [Pool Stability (`/pool-stability`)](#44-pool-stability-pool-stability)
+   - [Topology (`/topology`)](#45-topology-topology)
+   - [Log Viewer (`/logs/:componentId`)](#46-log-viewer-logscomponentid)
+   - [Audit (`/audit`)](#47-audit-audit)
+   - [Settings (`/settings`)](#48-settings-settings)
+5. [Alert Management](#5-alert-management)
+6. [Typical Workflows](#6-typical-workflows)
+7. [Alert Reference](#7-alert-reference)
+8. [Status Reference](#8-status-reference)
+9. [Troubleshooting](#9-troubleshooting)
 
 ---
 
 ## 1. Overview
 
-The NOC Portal is the monitoring surface for the **International Hub** scenario
-(Scenario B). Scenario B uses a **hub-and-spoke** architecture: multiple spoke
-networks (one per central bank) connect to a shared Regional Hub network. The
-Cacti-based relay bridges events between spoke networks and the Hub.
+The NOC (Network Operations Center) Portal is the monitoring surface for
+engineers responsible for the health of Scenario B's hub-and-spoke
+infrastructure. Scenario B uses a **Regional Hub** network connected to
+multiple **spoke networks** (one per central bank) via a Cacti-based relay. The
+AMM (AutomatedMarketMaker) handles FX settlement between spoke currencies.
 
-The NOC Portal gives network operations engineers a unified view of:
+The NOC Portal gives operations engineers a unified view of:
 
-- Node and service health across all spoke networks and the Hub
-- Cross-network relay latency, proof success rate, and status
-- AMM liquidity pool reserve ratios and 70/30 breach alerts
-- Network topology: nodes, links, and redundancy flags
-- Immutable audit trail of control-plane events
+- Real-time health status for Hyperledger Besu nodes, Paladin privacy nodes,
+  payment orchestrators, and CACTI relay containers across all spokes and the Hub.
+- An active alert feed with acknowledge/dismiss workflow.
+- Container log inspection for any registered component.
+- AMM liquidity pool reserve ratios and 70/30 breach alerts.
+- An interactive topology diagram showing the full hub-and-spoke layout.
+- An immutable audit trail of operator actions.
+
+| Actor | Portal | Role |
+|---|---|---|
+| Network Operations Engineer / SRE | NOC Portal | Infrastructure health, alert triage, relay monitoring, pool stability, log review, topology |
+
+The portal is **read-only with two exceptions**: operators can acknowledge and
+dismiss alerts. No destructive infrastructure controls are exposed here.
 
 ### How Scenario B differs from Scenario A
 
 | Dimension | Scenario A | Scenario B |
 |---|---|---|
 | Architecture | Peer-to-peer corridors (HTLC) | Hub-and-spoke (Regional Hub + spoke networks) |
-| Relay component | Not present | Cacti relay (spoke ↔ Hub) |
+| 4th Dashboard KPI | Total Spokes | Pool Breaches (70/30) |
 | Pool Stability page | Not present | Present — monitors AMM 70/30 reserve ratio |
-| Log Viewer page | Present | Not present |
+| Topology node kinds | BESU, PALADIN, CACTI | BESU, PALADIN, CACTI, HUB |
+| Log Viewer page | Present | Present |
 | Privacy tokens | ZetoToken / NotoToken | ZetoToken / NotoToken via Paladin |
 
 ---
 
 ## 2. Access and Login
 
-**Route:** `/login`
+**URL:** The NOC Portal URL provided by your system administrator (default local
+port: `5910`).
 
-Open the NOC Portal URL provided by your administrator and sign in with your
-operational credentials. The login form requires a username (minimum 3
-characters) and a password (minimum 6 characters).
+**Authentication:** Keycloak OIDC. The portal authenticates against the
+`cbweb3` realm with client ID `noc-portal`. Only accounts carrying the
+`SYS_ADMIN` role are accepted.
 
-<!-- TODO: screenshot — NOC login page -->
+![Login Page](../img/scenario-b/noc/01-login.png)
 
-Access is RBAC-constrained to the `SYS_ADMIN` role. The portal exposes no
-destructive infrastructure controls — it is read-only from an operations plane
-perspective.
+### Login steps
 
-> **Demo credentials** (local structural testing only): username `noc.admin`,
-> password `NOCAdmin2026!`. These are pre-filled for local environments and
-> must not be used in any non-local deployment.
+1. Open the NOC Portal URL in your browser.
+2. Enter your `SYS_ADMIN` username and password.
+3. Click **Sign in**.
+4. On success, you are redirected to the Dashboard.
 
-After a successful login you are redirected to the Dashboard. If the portal
-detects an existing session it will restore it automatically; you will not be
-asked to sign in again unless the session has expired or the portal has been
-reloaded after a logout.
+### Login page layout
+
+The login page has two panels on desktop:
+
+- **Left panel** — feature summary (SYS_ADMIN restriction, live telemetry,
+  read-only operations plane).
+- **Right panel** — sign-in form (username, password, submit button).
+
+| Field | Notes |
+|---|---|
+| **Username** | Your `SYS_ADMIN` Keycloak username. |
+| **Password** | Your `SYS_ADMIN` Keycloak password. |
+
+> Standard bank-portal or governance-portal credentials cannot be used here.
+> If login fails immediately, verify the account has the `SYS_ADMIN` role in
+> Keycloak.
+
+**Demo credentials** (local environments only): username `noc.admin`, password
+`NOCAdmin2026!`. These must not be used in any non-local deployment.
+
+**Session persistence:** On successful login the portal stores `noc_access_token`
+and `noc_refresh_token` in `localStorage`. The session is checked on page
+reload; if the token is expired the operator is redirected to the login page.
+Logging out clears both tokens.
 
 ---
 
 ## 3. Navigation
 
-The portal uses a persistent sidebar for primary navigation. All protected
-screens require authentication. An unauthenticated request to any protected
-route is silently redirected to `/login`.
+The portal uses a persistent left sidebar. All routes are protected — the
+login page is the only publicly accessible screen.
 
 | Sidebar label | Route | Description |
 |---|---|---|
-| Dashboard | `/` | Aggregated health overview and live telemetry feed |
-| Infrastructure | `/infrastructure` | Node and service health per network |
-| Relays | `/relays` | Cross-network relay latency and proof success |
-| Pool Stability | `/pool-stability` | AMM pool reserve ratios and 70/30 breach status |
-| Topology | `/topology` | Hub-and-spoke topology snapshot |
-| Audit | `/audit` | Immutable control-plane audit trail |
-| Settings | `/settings` | Notification and polling preferences |
+| Dashboard | `/` | Platform-wide health snapshot and alert feed. |
+| Infrastructure | `/infrastructure` | Per-component health table (nodes, orchestrators). |
+| Relays | `/relays` | CACTI relay container health per spoke. |
+| Pool Stability | `/pool-stability` | AMM pool reserve ratios and 70/30 breach status. |
+| Topology | `/topology` | Interactive hub-and-spoke network diagram. |
+| Audit | `/audit` | Operator action history and resolved alerts. |
+| Settings | `/settings` | Polling interval and notification preferences. |
 
-All routes in the table above are active. There is no Log Viewer route in
-Scenario B.
+The **Log Viewer** (`/logs/:componentId`) has no sidebar entry. It is reached
+by clicking the **View Logs** button on the Infrastructure or Relays pages.
+
+Unknown routes redirect to `/` (Dashboard).
 
 ---
 
 ## 4. Screens
 
-### 4.1 Dashboard
+### 4.1 Dashboard (`/`)
 
-**Route:** `/` — **Sidebar label:** Dashboard
+![Dashboard](../img/scenario-b/noc/02-dashboard.png)
 
-<!-- TODO: screenshot — NOC Dashboard -->
+The Dashboard is the primary monitoring view. It aggregates platform-wide
+health data across all spokes and the Regional Hub (or a single selected
+spoke) and displays the active alert feed.
 
-The Dashboard is a single-pane overview that aggregates key signals from all
-monitored subsystems. It loads data from Infrastructure, Relay, Pool, and
-Telemetry stores on mount.
+#### Spoke Selector
 
-#### Summary cards
+A dropdown at the top of the page. By default, the first available spoke is
+selected automatically. Select **a specific spoke** to filter both the
+Component Health table and the Alert Feed to that spoke only. Clearing the
+selection shows alerts across all spokes.
 
-Four summary cards appear at the top of the page:
+#### Summary Cards
 
-| Card | What it shows |
-|---|---|
-| Critical Alerts | Count of active alerts with severity `CRITICAL` |
-| Degraded Nodes | Count of infrastructure nodes whose status is not `HEALTHY` |
-| Worst Relay p95 | Highest p95 latency (ms) across all monitored relays |
-| Pool Breaches (70/30) | Count of AMM pools that have breached the 70/30 reserve threshold |
+Four cards provide an instant platform status snapshot:
 
-A value of zero in "Critical Alerts" and "Pool Breaches" and a "Worst Relay p95"
-within acceptable bounds indicates normal operating state. Elevated counts
-require investigation on the respective detail pages.
+| Card | Colour when non-zero | Description |
+|---|---|---|
+| **Critical / High Alerts** | Red | Active alerts with severity `HIGH` or `CRITICAL`. Requires immediate attention. |
+| **Degraded Components** | Orange | Components not in `HEALTHY` state (includes `DEGRADED`, `OFFLINE`, `UNKNOWN`). |
+| **Offline Components** | Red | Components in `OFFLINE` state. Requires immediate attention. |
+| **Pool Breaches (70/30)** | Red | AMM pools whose reserve ratio has exceeded the 70/30 threshold. |
 
-#### Recent Telemetry Frames
+#### Component Health Table
 
-A table of the six most recent telemetry snapshots, updated on a 3-second
-interval by a simulated WebSocket stream. Columns: Component, CPU (%), Memory
-(%), Latency (ms).
-
-> **Note:** Telemetry frames are generated in-browser from the mock data layer.
-> Frames where CPU or memory exceeds 90% automatically produce a `CRITICAL`
-> alert in the Active Alert Feed; frames with `healthy = false` produce a
-> `WARNING` alert.
+Shows the first 8 components for the selected scope. Columns: **Name**,
+**Type**, **Status** badge. For the full component list, navigate to
+[Infrastructure](#42-infrastructure-infrastructure).
 
 #### Active Alert Feed
 
-Up to eight most recent alerts from all sources (INFRASTRUCTURE, RELAY, POOL,
-TELEMETRY). Each entry shows the source, severity badge, and message. Alert
-severity values are `INFO`, `WARNING`, and `CRITICAL`.
+Lists up to 8 active alerts. Each alert row shows:
+
+| Element | Description |
+|---|---|
+| **Title** | Short description of the alert condition. |
+| **Severity badge** | `INFO`, `WARNING`, `HIGH`, or `CRITICAL`. |
+| **ACK badge** | Shown when the alert has been acknowledged by any operator. |
+| **Dismiss button** | X icon on the right — click to dismiss directly from the feed. |
+
+Click any alert row (not the dismiss button) to open the **Alert Detail Modal**.
+
+**Alert Detail Modal** fields:
+
+| Field | Description |
+|---|---|
+| **Title** | Alert title. |
+| **Severity** | Severity badge. |
+| **State** | `ACTIVE` or `RESOLVED`. |
+| **Affected component** | The component that raised the alert with its health status. |
+| **Created** | ISO timestamp of alert creation. |
+| **Root cause sig** | System-generated root cause pattern identifier. |
+| **Acknowledge button** | Marks the alert as seen; keeps it in the feed. |
+| **Dismiss button** | Removes the alert from the active feed. |
+
+#### Polling
+
+The Dashboard refreshes automatically at the interval configured in
+[Settings](#48-settings-settings) (default: 15 seconds, minimum: 5 seconds).
+The WebSocket stream is not yet active; the portal always uses HTTP polling.
 
 ---
 
-### 4.2 Infrastructure
+### 4.2 Infrastructure (`/infrastructure`)
 
-**Route:** `/infrastructure` — **Sidebar label:** Infrastructure
+![Infrastructure](../img/scenario-b/noc/03-infrastructure.png)
 
-<!-- TODO: screenshot — NOC Infrastructure page -->
+Lists the health status of all non-relay infrastructure components for the
+selected spoke or the Regional Hub: Hyperledger Besu blockchain nodes, Paladin
+privacy nodes, and payment orchestrators. CACTI relay containers are excluded
+here — use [Relays](#43-relay-status-relays) for those.
 
-Lists all monitored infrastructure nodes across spoke networks and the Hub, with
-their current health state. A **Refresh** button triggers a manual data reload.
+#### Controls
 
-> **Sample data.** Node health is illustrative; no live data source is wired.
+| Control | Description |
+|---|---|
+| **Spoke Selector** | Select a spoke or the Regional Hub. The table is empty until a spoke is selected. |
+| **Refresh button** | Force an immediate health poll; disabled while loading. |
 
-#### Column reference
+#### Component Health Table
 
 | Column | Description |
 |---|---|
-| Node | Unique node identifier (e.g. `besu-a-1`) |
-| Component | Runtime type: `BESU` (Hyperledger Besu node) or `PALADIN` (Paladin Core) |
-| Network | The spoke or hub network this node belongs to |
-| Region | Geographic region code (e.g. `BR-SP`) |
-| Uptime | Rolling uptime percentage |
-| Sync Lag | Number of blocks by which this node lags behind the chain head |
-| Status | Health badge — see [Status reference](#6-alert-reference) |
+| **Name** | The component's display name. |
+| **Type** | Component category: `BESU`, `PALADIN`, or `PAYMENT_ORCHESTRATOR`. |
+| **Endpoint** | The component's API or RPC endpoint (truncated). |
+| **Block #** | Latest block number — populated for `BESU` nodes only. `—` for other types. |
+| **Last Check** | Timestamp of the most recent health poll (shown as local time). |
+| **Status** | Health status badge. See [Status Reference](#8-status-reference). |
+| **View Logs** | Icon button — navigates to the [Log Viewer](#46-log-viewer-logscomponentid) for this component. |
 
-A `syncLagBlocks` value greater than zero on a `BESU` node indicates that the
-node is not fully synchronised. Combined with a `DEGRADED` status this warrants
-investigation of the node's peer connectivity and disk I/O.
+The table auto-refreshes at the configured polling interval whenever a spoke is
+selected.
 
 ---
 
-### 4.3 Relay Status
+### 4.3 Relay Status (`/relays`)
 
-**Route:** `/relays` — **Sidebar label:** Relays
+![Relay Status](../img/scenario-b/noc/04-relays.png)
 
-<!-- TODO: screenshot — NOC Relay Status page -->
+Shows the health of **CACTI interoperability relay containers** — the components
+responsible for bridging events between spoke networks and the Regional Hub.
+When a cross-spoke settlement appears stuck, this page is the first place to
+check.
 
-Displays the health and performance metrics of each Cacti relay route. Relays
-carry events between spoke networks and the Regional Hub — a stalled relay is
-the most common cause of a frozen cross-spoke transfer or bridge operation. A
-**Refresh** button triggers a manual data reload.
+#### Controls
 
-> **Sample data.** Relay states are illustrative.
+| Control | Description |
+|---|---|
+| **Spoke Selector** | You must select a specific spoke. The table is empty until a spoke is chosen. |
 
-#### Column reference
+#### Relay Components Table
+
+Displays only `CACTI_RELAY` type components for the selected spoke.
 
 | Column | Description |
 |---|---|
-| Relay | Route identifier in the form `Network X ↔ Hub` or `Network X ↔ Network Y` |
-| Status | Health badge: `HEALTHY`, `DEGRADED`, or `DOWN` |
-| p50 Latency | Median round-trip latency for relay proof submissions (ms) |
-| p95 Latency | 95th-percentile latency — the tail value used by the Dashboard "Worst Relay p95" card |
-| Proof Success | Percentage of relay proof submissions that completed successfully |
-| Updated At | Timestamp of the last data refresh |
+| **Name** | Relay container name. |
+| **Type** | Always `CACTI_RELAY`. |
+| **Endpoint** | The relay container's API endpoint (truncated). |
+| **Last Check** | Timestamp of the last health poll (local time). |
+| **Status** | Health status badge. See [Status Reference](#8-status-reference). |
+| **View Logs** | Icon button — navigates to the [Log Viewer](#46-log-viewer-logscomponentid) for this relay. |
 
-A relay showing `DEGRADED` or `DOWN` with a low proof success rate means events
-are not being delivered reliably between networks. Investigate the relay
-container logs (`cacti`) before assuming a smart contract issue.
+> If no relay components appear after selecting a spoke, verify that the CACTI
+> relay containers for that spoke are registered in the NOC backend and that
+> the backend service can reach them.
 
 ---
 
-### 4.4 Pool Stability
-
-**Route:** `/pool-stability` — **Sidebar label:** Pool Stability
+### 4.4 Pool Stability (`/pool-stability`)
 
 **This page is specific to Scenario B.** It is not present in the Scenario A
 NOC Portal.
 
-<!-- TODO: screenshot — NOC Pool Stability page -->
-
 Displays the reserve ratios of each AMM (AutomatedMarketMaker) liquidity pool
 and flags pools that have breached the 70/30 threshold. A **Refresh** button
 triggers a manual data reload.
-
-> **Sample data.** Pool figures and breach flags are illustrative.
 
 #### Understanding the 70/30 rule
 
@@ -243,248 +302,422 @@ impact on settlement transactions.
 
 | Column | Description |
 |---|---|
-| Pool | Currency pair identifier |
-| Reserve A | Total units held for token A |
-| Reserve B | Total units held for token B |
-| Split | Visual progress bar showing `ratioA% / ratioB%` — the current reserve split |
-| Status | `STABLE` (within 70/30) or `BREACHED` (threshold exceeded) |
-| Updated At | Timestamp of the last pool snapshot |
+| **Pool** | Currency pair identifier. |
+| **Reserve A** | Total units held for token A. |
+| **Reserve B** | Total units held for token B. |
+| **Split** | Visual progress bar showing `ratioA% / ratioB%` — the current reserve split. |
+| **Status** | `STABLE` (within 70/30) or `BREACHED` (threshold exceeded). |
+| **Updated At** | Timestamp of the last pool snapshot. |
 
 #### Responding to a BREACHED pool
 
 1. Note which pool pair is flagged and whether it is a single corridor or
    multiple.
-2. Cross-reference with Relay Status — if the relay carrying that corridor is
-   also degraded, the imbalance may be caused by undelivered settlement events
-   rather than organic trading pressure.
-3. Escalate to the liquidity operations team with the pool name, current ratios,
-   and the time the breach appeared.
-4. Do not attempt to rebalance the pool directly from this portal; the portal is
-   read-only.
+2. Cross-reference with [Relay Status](#43-relay-status-relays) — if the relay
+   carrying that corridor is also degraded, the imbalance may be caused by
+   undelivered settlement events rather than organic trading pressure.
+3. Escalate to the liquidity operations team with the pool name, current
+   ratios, and the time the breach appeared.
+4. Do not attempt to rebalance the pool directly from this portal; the portal
+   is read-only.
 
 ---
 
-### 4.5 Topology
+### 4.5 Topology (`/topology`)
 
-**Route:** `/topology` — **Sidebar label:** Topology
+![Topology](../img/scenario-b/noc/05-topology.png)
 
-<!-- TODO: screenshot — NOC Topology page -->
+Renders an interactive network diagram of all nodes and their links across the
+hub-and-spoke topology. Useful for identifying where in the topology a fault is
+isolated and for verifying the Regional Hub's connectivity to all spokes.
 
-Displays a tabular snapshot of the hub-and-spoke network graph from the latest
-synchronisation cycle. The page is split into two panels.
+#### Diagram Elements
 
-> **Sample data.** The topology shown is illustrative.
+| Element | Colour | Description |
+|---|---|---|
+| **BESU node** | Blue dot | A Hyperledger Besu blockchain node. |
+| **PALADIN node** | Purple dot | A Paladin privacy node. |
+| **CACTI relay node** | Orange dot | An interoperability relay container. |
+| **HUB node** | Green dot | The Regional Hub network node. |
+| **Green edge** | Green line | A healthy link between two nodes. |
+| **Red edge** | Red line | An unhealthy link between two nodes. |
 
-#### Topology Snapshot panel (left)
+Each node card shows: a colour-coded dot, the node name, its kind label, a
+health status badge, and the name of the spoke or hub it belongs to.
 
-Lists all nodes in the network graph.
+Nodes are grouped by spoke in columns. The Regional Hub nodes appear in their
+own column. The layout is generated automatically based on spoke membership.
 
-| Column | Description |
+#### Diagram Controls
+
+| Control | Action |
 |---|---|
-| Node | Human-readable node label (e.g. `Regional Hub`, `Besu A`) |
-| Kind | Node type: `HUB`, `BESU`, `PALADIN`, or `CACTI` |
-| Redundant | Whether a redundant peer exists for this node (`YES` / `NO`) |
-| Status | Health badge: `HEALTHY`, `DEGRADED`, or `DOWN` |
+| **Scroll wheel** | Zoom in / out. |
+| **Click and drag** (on the canvas) | Pan the diagram. |
+| **Mini-map** (bottom-right corner) | Navigate quickly across a large topology. |
+| **Controls panel** (bottom-left) | Zoom in, zoom out, fit view, lock layout buttons provided by ReactFlow. |
 
-Nodes flagged `redundant: NO` are single points of failure. A `DEGRADED` or
-`DOWN` status on a non-redundant node requires immediate escalation.
+#### Topology Health Summary Card
 
-#### Topology Health panel (right)
-
-A summary sidebar showing:
+Located to the right of the diagram:
 
 | Metric | Description |
 |---|---|
-| Total Nodes | Count of all nodes in the snapshot |
-| Total Links | Count of all edges (connections) between nodes |
-| Healthy Links | Count of edges flagged as `healthy = true` |
+| **Total Nodes** | Number of nodes registered in the topology. |
+| **Total Links** | Number of directed edges between nodes. |
+| **Healthy Links** | Count of edges marked as healthy (green). |
+| **Unhealthy Links** | Count of edges marked as unhealthy (red). |
 
-A gap between Total Links and Healthy Links indicates one or more broken
-connections in the topology. Cross-reference with the Relay Status page to
-identify which relay corresponds to the unhealthy edge.
+A colour legend below the metrics identifies each node type, including the
+HUB kind which is specific to Scenario B.
 
 ---
 
-### 4.6 Audit
+### 4.6 Log Viewer (`/logs/:componentId`)
 
-**Route:** `/audit` — **Sidebar label:** Audit
+![Log Viewer](../img/scenario-b/noc/06-logs.png)
 
-<!-- TODO: screenshot — NOC Audit page -->
+Displays container logs for a specific infrastructure or relay component. There
+is no sidebar entry for this screen — navigate here by clicking the **View
+Logs** button from the [Infrastructure](#42-infrastructure-infrastructure) or
+[Relays](#43-relay-status-relays) pages.
 
-An immutable trail of operator actions and control-plane decisions emitted by
-the monitored components. Records are loaded on mount and can be filtered
-in-browser using the search field.
+The component name is shown in the page subtitle. The `componentId` in the URL
+is the internal component ID; the human-readable name is passed as a query
+parameter (`?name=...`).
 
-> **Sample data.** Audit records are illustrative.
+#### Controls
 
-#### Filtering
+| Control | Description |
+|---|---|
+| **Refresh button** | Force an immediate log fetch. Spinner is shown while loading. |
 
-Type any term into the search field to filter records by component name,
-message text, or severity. The filter is applied client-side against the
-currently loaded dataset.
+#### Log Panel
 
-#### Column reference
+Terminal-style viewer (black background, green text).
 
 | Column | Description |
 |---|---|
-| Timestamp | Local datetime when the event was recorded |
-| Component | Emitting component: `BESU`, `PALADIN`, `CACTI`, or `SYSTEM` |
-| Severity | `INFO`, `WARNING`, or `CRITICAL` |
-| Message | Free-text description of the event |
+| **Timestamp** | Time portion of the log line's `occurred_at` timestamp (HH:MM:SS.mmm). |
+| **Stream badge** | `stdout` (normal output) or `stderr` (error output). `stderr` lines appear in red. |
+| **Log line** | Raw log text from the container. |
 
-Use the Audit page to confirm that a relay restart, node configuration change,
-or other control-plane action was recorded correctly. The audit trail cannot be
-edited or deleted from the portal.
+- Displays the **last 500 lines**.
+- Auto-scrolls to the bottom on initial load and on each refresh.
+- Refreshes automatically every **15 seconds**.
 
 ---
 
-### 4.7 Settings
+### 4.7 Audit (`/audit`)
 
-**Route:** `/settings` — **Sidebar label:** Settings
+![Audit](../img/scenario-b/noc/07-audit.png)
 
-<!-- TODO: screenshot — NOC Settings page -->
+Provides an immutable record of all operator actions taken within the NOC
+Portal and a history of resolved alerts.
 
-Configures notification and polling preferences for the current session.
-Settings are applied immediately on save and are local to the browser session.
+A **search box** at the top filters both tables simultaneously. The filter
+matches against actor, action, target ID, and detail text in the Audit Trail
+table; and against title, severity, and root cause signature in the Resolved
+Alerts table.
 
-| Setting | Description |
+#### Audit Trail Table
+
+Every alert acknowledgement and dismissal performed by any NOC operator is
+recorded here.
+
+| Column | Description |
 |---|---|
-| Alert Email | Email address to which alert notifications will be sent |
-| Critical Alerts Only | When checked, notifications are sent only for `CRITICAL` severity events |
-| Polling Interval (seconds) | How frequently the portal polls for updated data (minimum 1 second) |
+| **Timestamp** | When the action was performed (local time). |
+| **Actor** | Username of the NOC operator who performed the action. |
+| **Action** | The action type: `Acknowledge` (from `ACKNOWLEDGE_ALERT`) or `Dismiss` (from `DISMISS_ALERT`). |
+| **Target** | The internal ID of the alert that was acted upon. |
+| **Detail** | Any additional context recorded at the time of the action. |
 
-Click **Save Settings** to apply. A toast confirmation appears on success.
+#### Resolved Alerts Table
 
-> Settings persistence across sessions depends on backend wiring that is not yet
-> implemented. Changes made here may not survive a page reload in the current
-> build.
+A searchable history of alerts that have been resolved (automatically or via
+dismissal).
+
+| Column | Description |
+|---|---|
+| **Resolved At** | Timestamp when the alert transitioned to resolved (local time). `—` if not yet recorded. |
+| **Title** | The alert title. |
+| **Severity** | Severity badge at the time of resolution. |
+| **Root Cause Sig** | System-generated identifier for the root cause pattern (monospaced, truncated). |
 
 ---
 
-## 5. Typical Workflows
+### 4.8 Settings (`/settings`)
 
-### Investigating a stuck cross-spoke transfer
+![Settings](../img/scenario-b/noc/08-settings.png)
 
-1. Open **Relay Status** and identify the relay route for the affected corridor
-   (e.g. `Network A ↔ Hub` or `Network B ↔ Hub`).
-2. Check the relay's **Status**, **p95 Latency**, and **Proof Success** rate. A
-   degraded proof success rate or high p95 latency confirms the relay is the
-   bottleneck.
-3. If the relay appears healthy, open **Pool Stability** for the affected currency
-   pair. A `BREACHED` pool may cause settlement to fail on price impact rather
-   than freezing.
-4. Check the **Topology** panel for unhealthy links on the affected corridor.
-5. Review the **Audit** trail filtered on `CACTI` or the affected network for
-   recent control-plane events.
-6. Escalate with: relay route, proof success rate, p95 latency, pool status, and
-   any relevant audit entries.
+Configures operator-level monitoring preferences. Settings are persisted to
+`localStorage` (key: `noc-ui-settings`) and survive page reloads within the
+same browser. They reset when the browser storage is cleared.
 
-### Checking node sync health after a deployment
+| Setting | Default | Description |
+|---|---|---|
+| **Alert Email** | `noc-ops@cbweb3.local` | Email address for alert notifications. Stored locally — not sent to the backend. |
+| **Critical Alerts Only** | Off | When checked, mutes `INFO` and `WARNING` severity alerts from the Dashboard feed. Only `HIGH` and `CRITICAL` alerts appear. |
+| **Polling Interval** | 15 seconds | How frequently the Dashboard auto-refreshes. **Minimum: 5 seconds.** Values below 5 are rejected. |
 
-1. Open **Infrastructure** and click **Refresh**.
-2. Sort mentally by **Sync Lag** — nodes with non-zero sync lag are not at chain
-   head.
-3. Nodes that are `DEGRADED` and have a sync lag of more than a few blocks should
-   be investigated for peer connectivity or disk issues.
-4. Confirm in **Topology** that the affected node's links are still healthy.
+Click **Save Settings** to apply changes. A toast confirms success. The active
+polling interval shown below the input updates immediately.
 
-### Monitoring pool stability before a high-volume settlement window
+---
+
+## 5. Alert Management
+
+NOC operators can take two actions on active alerts: **Acknowledge** and
+**Dismiss**. Both actions are logged in the [Audit](#47-audit-audit) page.
+
+### Acknowledge vs. Dismiss
+
+| Action | Meaning | Effect |
+|---|---|---|
+| **Acknowledge** | An operator has seen the alert and is actively investigating. | Alert remains in the active feed. An **ACK** badge appears on the row. Action logged in Audit. |
+| **Dismiss** | The alert is not actionable, is a false positive, or has been resolved externally. | Alert is removed from the active feed and moved to Resolved Alerts on the Audit page. Action logged in Audit. |
+
+### How to Acknowledge
+
+1. On the Dashboard, locate the alert in the **Active Alert Feed**.
+2. Click the alert row to open the **Alert Detail Modal**.
+3. Review the alert title, severity, affected component, and description.
+4. Click **Acknowledge**.
+
+The ACK badge appears on the alert row. The action appears in the Audit Trail.
+
+### How to Dismiss
+
+**Option A — from the alert feed directly:**
+
+1. Click the **X (dismiss) button** on the right side of the alert row.
+2. The alert is removed immediately.
+
+**Option B — from the Alert Detail Modal:**
+
+1. Click the alert row to open the modal.
+2. Click **Dismiss** in the modal.
+
+In both cases the alert disappears from the feed and is logged in the Audit
+Trail. Dismissed alerts cannot be re-activated from the portal.
+
+---
+
+## 6. Typical Workflows
+
+### 6.1 Morning health check
+
+1. Log in to the NOC Portal.
+2. On the **Dashboard**, check the four summary cards. Any non-zero values in
+   **Critical / High Alerts**, **Offline Components**, or **Pool Breaches**
+   require immediate action.
+3. If critical/high alerts are present, click each alert row to open the Alert
+   Detail Modal and review the affected component.
+4. Navigate to **Infrastructure** and select each spoke and the Regional Hub in
+   turn. Confirm no unexpected `DEGRADED` or `OFFLINE` components.
+5. Navigate to **Relays** and select each spoke. Confirm all CACTI relay
+   containers show `HEALTHY`.
+6. Open **Pool Stability** and confirm all pools are `STABLE`.
+7. Navigate to **Topology** and verify that all edges are green (healthy links),
+   including the Hub-to-spoke connections.
+
+### 6.2 Investigating a stuck cross-spoke transfer
+
+1. Navigate to **Relays** and select the spoke involved in the settlement.
+2. Identify any relay in `DEGRADED` or `OFFLINE` state.
+3. Click **View Logs** for the suspect relay to open the Log Viewer.
+4. Review `stderr` lines (highlighted in red) for error messages — connection
+   failures, timeout errors, or panics.
+5. If the relay log shows no recent activity within the expected settlement
+   window, the relay may be stalled — not the contract.
+6. Open **Pool Stability** for the affected currency pair. A `BREACHED` pool
+   may cause settlement to fail on price impact rather than the relay being
+   the bottleneck.
+7. Check the **Topology** panel for unhealthy links on the Hub-to-spoke corridor.
+8. Escalate with: spoke name, relay component ID, log excerpt, pool status,
+   and last-checked timestamp.
+
+### 6.3 Acknowledging and tracking an active alert
+
+1. On the **Dashboard**, click the alert row in the Active Alert Feed.
+2. Read the Alert Detail Modal fully: title, severity, affected component,
+   created time, and root cause signature.
+3. If you are taking ownership, click **Acknowledge**. The ACK badge appears.
+4. Investigate using the **Log Viewer** for the affected component.
+5. Once resolved externally, return to the Dashboard and **Dismiss** the alert.
+6. Verify the action appears in **Audit** > Audit Trail.
+
+### 6.4 Checking container logs for a specific component
+
+1. Navigate to **Infrastructure** (for nodes/orchestrators) or **Relays** (for
+   CACTI containers).
+2. Select the appropriate spoke from the Spoke Selector.
+3. Locate the component in the table and click the **View Logs** icon button.
+4. The Log Viewer opens showing the last 500 lines.
+5. Look for `stderr` lines (red) — these typically contain error or warning
+   messages.
+6. Click **Refresh** to force an immediate fetch if the 15-second auto-refresh
+   has not triggered yet.
+
+### 6.5 Monitoring pool stability before a high-volume settlement window
 
 1. Open **Pool Stability** and click **Refresh**.
-2. Review the **Split** column for each pool that will be used in the settlement
-   window.
-3. Alert the liquidity operations team if any pool's ratio is approaching 70/30
-   (e.g. A ratio above 65% or below 35%) even if not yet flagged `BREACHED`.
-4. Monitor the **Dashboard** "Pool Breaches (70/30)" card during the window for
-   any breach that occurs mid-flight.
+2. Review the **Split** column for each pool that will be used in the
+   settlement window.
+3. Alert the liquidity operations team if any pool's ratio is approaching
+   70/30 (e.g. A ratio above 65% or below 35%) even if not yet flagged
+   `BREACHED`.
+4. Monitor the **Dashboard** "Pool Breaches (70/30)" card during the window
+   for any breach that occurs mid-flight.
+
+### 6.6 Adjusting the polling interval during an incident
+
+1. Navigate to **Settings**.
+2. Lower the **Polling Interval** to `5` seconds (the minimum) for faster
+   alert and health updates during active incident investigation.
+3. Click **Save Settings**.
+4. Return the interval to the normal value (15–30 seconds) after the incident
+   is resolved to reduce backend load.
 
 ---
 
-## 6. Alert Reference
+## 7. Alert Reference
 
-### Infrastructure node status
+### Severity Levels
 
-| Status | Meaning |
+| Severity | Badge colour | When to act |
+|---|---|---|
+| `INFO` | Grey | Informational — no action required. Review periodically. |
+| `WARNING` | Yellow/orange | Potential issue — monitor. Investigate if condition persists or worsens. |
+| `HIGH` | Red | Significant problem — investigate as soon as possible. |
+| `CRITICAL` | Red | Severe failure — requires immediate action. |
+
+### Recommended Response by Severity
+
+| Severity | Recommended response |
 |---|---|
-| `HEALTHY` | Node is up, synced, and responding normally |
-| `DEGRADED` | Node is responding but impaired — elevated sync lag or reduced uptime |
-| `DOWN` | Node is not responding |
-
-### Relay status
-
-| Status | Meaning |
-|---|---|
-| `HEALTHY` | Relay is connected and forwarding events with acceptable latency and proof success |
-| `DEGRADED` | Relay is operational but showing elevated latency or reduced proof success rate |
-| `DOWN` | Relay is not forwarding events |
-
-### Pool stability status
-
-| Status | Meaning |
-|---|---|
-| `STABLE` | Pool reserves are within the 70/30 tolerance |
-| `BREACHED` | One side of the pool has dropped below 30% of total reserves; transfers on this corridor may fail on price impact |
-
-### Topology node and link status
-
-| Value | Meaning |
-|---|---|
-| `HEALTHY` | Node or link is operating normally |
-| `DEGRADED` | Node or link is impaired but not fully down |
-| `DOWN` | Node or link is not operational |
-| `redundant: NO` | No failover peer exists — this node is a single point of failure |
-
-### Alert severity
-
-| Severity | Meaning |
-|---|---|
-| `INFO` | Informational event; no action required |
-| `WARNING` | Condition warrants monitoring; may escalate |
-| `CRITICAL` | Immediate investigation required |
-
-Alert sources: `INFRASTRUCTURE`, `RELAY`, `POOL`, `TELEMETRY`.
+| `INFO` | Acknowledge to mark as seen; dismiss if it is a known benign event. |
+| `WARNING` | Acknowledge and investigate root cause. Check component logs. Dismiss once confirmed non-critical. |
+| `HIGH` | Acknowledge immediately. Investigate component logs and relay status. Escalate if not resolved within SLA. |
+| `CRITICAL` | Page on-call engineer. Acknowledge immediately. Isolate affected spoke if necessary. Escalate to lead. |
 
 ---
 
-## 7. Troubleshooting
+## 8. Status Reference
 
-### All figures are static and never update
+### Component Health Statuses
 
-Expected in the current build. All data is served from an in-memory mock. There
-is no live telemetry backend wired. The only live-style data is the Dashboard
-telemetry feed, which generates frames in-browser every three seconds using
-random values.
+| Status | Badge colour | Meaning |
+|---|---|---|
+| `HEALTHY` | Green (default) | Component is responding correctly to health checks. |
+| `DEGRADED` | Yellow/orange (warning) | Component is responding but with errors or elevated latency. Investigate promptly. |
+| `OFFLINE` | Red (destructive) | Component is not responding to health checks. Requires immediate attention. |
+| `UNKNOWN` | Grey (secondary) | Health check has not been performed yet, or the last result could not be determined. |
 
-### The telemetry feed on the Dashboard stops updating
+### Relay-Specific Interpretation
 
-The simulated telemetry service randomly drops its connection (approximately 3%
-chance per tick). The portal automatically reconnects with exponential backoff
-starting at two seconds and capping at 15 seconds. If the feed does not resume
-within a minute, reload the page.
+| Status | Relay meaning |
+|---|---|
+| `HEALTHY` | CACTI relay container is up and forwarding events between the spoke and the Regional Hub. |
+| `DEGRADED` | Relay is responding but may be experiencing partial failures, high latency, or reconnection loops. Cross-spoke settlements may be slow. |
+| `OFFLINE` | Relay container is not responding. Cross-spoke settlements will stall. Investigate relay logs and container state immediately. |
+| `UNKNOWN` | Relay has not been polled yet, or the NOC backend cannot reach the container endpoint. |
 
-### Relay Status shows a relay as DEGRADED but transfers appear to be working
+### Pool Stability Statuses
 
-In the current build the relay state is mock data and does not reflect actual
-relay health. Once live telemetry is wired, a `DEGRADED` relay with a proof
-success rate above 95% typically means elevated latency rather than message
-loss, and transfers may still complete with added delay.
+| Status | Meaning |
+|---|---|
+| `STABLE` | Pool reserves are within the 70/30 tolerance. |
+| `BREACHED` | One side of the pool has dropped below 30% of total reserves; transfers on this corridor may fail on price impact. |
 
-### Pool Stability shows STABLE during a known AMM incident
+### Topology Link Colours
 
-Expected in the current build — pool data is illustrative, not live. Once live
-data is connected, confirm the pool pair, note the reserve ratios, and escalate
-to the liquidity operations team if the ratio is outside tolerance.
+| Colour | Meaning |
+|---|---|
+| Green edge | Link between nodes is healthy. |
+| Red edge | Link between nodes is unhealthy. |
 
-### Login fails with "Invalid credentials"
+---
 
-Verify that the username is at least 3 characters and the password is at least
-6 characters. In local environments the form is pre-filled with demo credentials
-(`noc.admin` / `NOCAdmin2026!`). If credentials are correct and login still
-fails, check that the auth service is reachable and that the Keycloak OIDC
-provider is running (`make deploy.up-infra` from `scenario-b/`).
+## 9. Troubleshooting
 
-### A page shows no data after navigating to it
+### Login fails
 
-Each page fetches data on mount. If the fetch is in a loading state the table
-will appear empty. Click **Refresh** (where available) or reload the page. If
-the problem persists, check browser console logs for network errors.
+- Verify the username and password are correct for a `SYS_ADMIN` Keycloak
+  account. Standard bank-portal credentials will not work.
+- Confirm the Keycloak service is running (`docker compose ps` in the deploy
+  directory — look for the `keycloak` container).
+- Confirm the NOC backend service is running and reachable on port `8091`.
+- Check the browser console for the Keycloak error description; the portal
+  surfaces the `error_description` field from the Keycloak token endpoint.
+- Run `make noc.setup-keycloak` from `scenario-b/` if the `noc-portal` client
+  does not yet exist in Keycloak.
+
+### Dashboard shows no data or all components show `UNKNOWN`
+
+- Verify the NOC backend service is running and that the spoke services are up.
+- Navigate to **Infrastructure**, select a spoke, and click **Refresh** to
+  trigger a manual health poll.
+- Check the NOC backend service logs for database connectivity issues or
+  spoke-endpoint unreachability.
+- Run `make noc.setup-agents` from `scenario-b/` if spokes are not yet
+  registered in the NOC backend.
+
+### Relay page shows an empty table
+
+- A spoke must be selected in the **Spoke Selector** before relay data is
+  shown. Select a specific spoke — the table will populate with `CACTI_RELAY`
+  components for that spoke.
+- If the table remains empty after selecting a spoke, no CACTI relay components
+  are registered for that spoke in the NOC backend. Verify the spoke was
+  onboarded correctly.
+
+### Pool Stability shows no pools
+
+- Confirm the NOC backend's pool data source is configured and reachable.
+- Check browser console for network errors on the `/api/v1/pools` request.
+- If the stack was just started, allow a few minutes for the AMM to initialise
+  and for the first pool snapshot to be recorded.
+
+### Log Viewer shows no logs or an error
+
+- Verify the component is running and that its endpoint is reachable from the
+  NOC backend host.
+- Click **Refresh** to force a new fetch.
+- Some components produce minimal stdout output; check the `stderr` stream for
+  error messages.
+- If the backend returns an error, check the NOC backend logs for the
+  `/components/:id/logs` request.
+
+### Alerts are not updating
+
+- Check the **Polling Interval** in [Settings](#48-settings-settings). If set
+  to a high value, new alerts will appear infrequently.
+- The WebSocket stream is not yet active — the portal always polls. This is
+  expected behavior and not an error.
+- Click **Refresh** on the Infrastructure page or navigate away and back to the
+  Dashboard to trigger an immediate data pull.
+
+### Alert dismissed by mistake
+
+- Dismissed alerts are moved to the **Resolved Alerts** table on the Audit
+  page and cannot be re-activated from the portal.
+- Contact the system administrator to re-raise the alert at the backend level
+  if re-activation is required.
+
+### Topology diagram shows no nodes or all links red
+
+- Navigate to **Infrastructure** and verify that component data is loading
+  (indicates the backend is reachable and spokes are registered).
+- If components load but the topology is empty, the topology endpoint
+  (`/topology`) may have no data registered. Check the NOC backend for topology
+  seeding.
+- All-red links indicate that the NOC backend's link health checks are failing
+  for every pair. Check backend logs for the health check job errors.
+
+### Settings do not persist after page reload
+
+- Settings are stored in `localStorage` under the key `noc-ui-settings`.
+  Verify the browser is not running in a private/incognito mode (which clears
+  storage on close) or that storage is not being cleared by a browser extension.
