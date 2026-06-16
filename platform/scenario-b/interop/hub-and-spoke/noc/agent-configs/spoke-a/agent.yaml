@@ -1,0 +1,32 @@
+# NOC Agent Configuration — Spoke A
+# Monitors: Central Bank A Besu, Bank A Besu, Paladin Spoke A nodes, Cacti relay
+spoke_id: "spoke-a"
+noc_backend_url: "http://cbweb3-b-noc-backend:8090"
+api_key: "noc-agent-spoke-a-key-local"
+push_interval_seconds: 15
+
+components:
+  - name: "besu-central-bank-a"
+    type: "BESU"
+    endpoint: "http://host.docker.internal:8645"
+    container_name: "cbweb3-spoke-a-besu.central-bank-a"
+
+  - name: "besu-bank-a"
+    type: "BESU"
+    endpoint: "http://host.docker.internal:8646"
+    container_name: "cbweb3-spoke-a-besu.bank-a"
+
+  - name: "paladin-central-bank-a"
+    type: "PALADIN"
+    endpoint: "http://host.docker.internal:8548"
+    container_name: "paladin-spoke-a-cb"
+
+  - name: "paladin-bank-a"
+    type: "PALADIN"
+    endpoint: "http://host.docker.internal:8549"
+    container_name: "paladin-spoke-a-bank-a"
+
+  - name: "cacti-liquidity-relay"
+    type: "CACTI_RELAY"
+    endpoint: "http://host.docker.internal:4000"
+    container_name: "cbweb3-cacti-liquidity-relay"

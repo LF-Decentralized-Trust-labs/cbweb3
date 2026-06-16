@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@cbweb3/ui";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useInfrastructure } from "../hooks";
 
 const statusVariant: Record<string, "default" | "secondary" | "warning" | "destructive"> = {
@@ -22,23 +22,42 @@ const statusVariant: Record<string, "default" | "secondary" | "warning" | "destr
   DOWN: "destructive",
 };
 
+const ALL_NETWORKS = "All Networks";
+
 export function InfrastructurePage() {
   const { nodes, status, fetch } = useInfrastructure();
+  const [selectedNetwork, setSelectedNetwork] = useState<string>(ALL_NETWORKS);
 
   useEffect(() => {
     void fetch();
   }, [fetch]);
+
+  const networks = [ALL_NETWORKS, ...Array.from(new Set(nodes.map((n) => n.network))).sort()];
+  const filtered = selectedNetwork === ALL_NETWORKS ? nodes : nodes.filter((n) => n.network === selectedNetwork);
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <div>
           <CardTitle>Infrastructure Health</CardTitle>
-          <CardDescription>Monitor service and node health across runtime topology.</CardDescription>
+          <CardDescription>Monitor service and node health across the Hub and all spoke networks.</CardDescription>
         </div>
-        <Button onClick={() => void fetch()} disabled={status === "loading"}>
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <select
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            value={selectedNetwork}
+            onChange={(e) => setSelectedNetwork(e.target.value)}
+          >
+            {networks.map((net) => (
+              <option key={net} value={net}>
+                {net}
+              </option>
+            ))}
+          </select>
+          <Button onClick={() => void fetch()} disabled={status === "loading"}>
+            Refresh
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         <Table>
@@ -54,7 +73,7 @@ export function InfrastructurePage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {nodes.map((node) => (
+            {filtered.map((node) => (
               <TableRow key={node.id}>
                 <TableCell className="font-medium">{node.id}</TableCell>
                 <TableCell>{node.component}</TableCell>

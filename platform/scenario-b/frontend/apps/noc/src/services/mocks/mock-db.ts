@@ -22,16 +22,17 @@ const currentUser: SysAdminUser = {
 };
 
 const infrastructure: InfrastructureNode[] = [
-  { id: "besu-a-1", network: "Network A", region: "BR-SP", component: "BESU", uptimePct: 99.95, syncLagBlocks: 0, status: "HEALTHY", updatedAt: nowIso() },
-  { id: "besu-b-1", network: "Network B", region: "BR-RJ", component: "BESU", uptimePct: 99.72, syncLagBlocks: 2, status: "DEGRADED", updatedAt: nowIso() },
-  { id: "paladin-a", network: "Network A", region: "BR-SP", component: "PALADIN", uptimePct: 99.88, syncLagBlocks: 0, status: "HEALTHY", updatedAt: nowIso() },
-  { id: "paladin-b", network: "Network B", region: "BR-RJ", component: "PALADIN", uptimePct: 99.31, syncLagBlocks: 1, status: "DEGRADED", updatedAt: nowIso() },
+  { id: "besu-hub-1", network: "Regional Hub", region: "HUB-SA", component: "BESU", uptimePct: 99.99, syncLagBlocks: 0, status: "HEALTHY", updatedAt: nowIso() },
+  { id: "paladin-hub", network: "Regional Hub", region: "HUB-SA", component: "PALADIN", uptimePct: 99.97, syncLagBlocks: 0, status: "HEALTHY", updatedAt: nowIso() },
+  { id: "besu-a-1", network: "Spoke A", region: "BR-SP", component: "BESU", uptimePct: 99.95, syncLagBlocks: 0, status: "HEALTHY", updatedAt: nowIso() },
+  { id: "besu-b-1", network: "Spoke B", region: "BR-RJ", component: "BESU", uptimePct: 99.72, syncLagBlocks: 2, status: "DEGRADED", updatedAt: nowIso() },
+  { id: "paladin-a", network: "Spoke A", region: "BR-SP", component: "PALADIN", uptimePct: 99.88, syncLagBlocks: 0, status: "HEALTHY", updatedAt: nowIso() },
+  { id: "paladin-b", network: "Spoke B", region: "BR-RJ", component: "PALADIN", uptimePct: 99.31, syncLagBlocks: 1, status: "DEGRADED", updatedAt: nowIso() },
 ];
 
 const relays: RelayStatus[] = [
-  { id: "relay-a-hub", route: "Network A ↔ Hub", latencyP50Ms: 82, latencyP95Ms: 168, proofSuccessRatePct: 99.4, status: "HEALTHY", updatedAt: nowIso() },
-  { id: "relay-b-hub", route: "Network B ↔ Hub", latencyP50Ms: 95, latencyP95Ms: 241, proofSuccessRatePct: 97.6, status: "DEGRADED", updatedAt: nowIso() },
-  { id: "relay-a-b", route: "Network A ↔ Network B", latencyP50Ms: 112, latencyP95Ms: 284, proofSuccessRatePct: 96.8, status: "DEGRADED", updatedAt: nowIso() },
+  { id: "relay-a-hub", route: "Spoke A ↔ Regional Hub", latencyP50Ms: 82, latencyP95Ms: 168, proofSuccessRatePct: 99.4, status: "HEALTHY", updatedAt: nowIso() },
+  { id: "relay-b-hub", route: "Spoke B ↔ Regional Hub", latencyP50Ms: 95, latencyP95Ms: 241, proofSuccessRatePct: 97.6, status: "DEGRADED", updatedAt: nowIso() },
 ];
 
 const pools: PoolStatus[] = [
@@ -40,18 +41,24 @@ const pools: PoolStatus[] = [
 ];
 
 const topologyNodes: TopologyNode[] = [
-  { id: "hub", label: "Regional Hub", kind: "HUB", redundant: true, status: "HEALTHY" },
-  { id: "besu-a", label: "Besu A", kind: "BESU", redundant: true, status: "HEALTHY" },
-  { id: "besu-b", label: "Besu B", kind: "BESU", redundant: false, status: "DEGRADED" },
-  { id: "paladin-a", label: "Paladin A", kind: "PALADIN", redundant: true, status: "HEALTHY" },
-  { id: "cacti", label: "Cacti Relay", kind: "CACTI", redundant: false, status: "DEGRADED" },
+  { id: "hub", label: "Regional Hub (Besu)", kind: "HUB", redundant: true, status: "HEALTHY" },
+  { id: "paladin-hub", label: "Paladin Hub", kind: "PALADIN", redundant: true, status: "HEALTHY" },
+  { id: "besu-a", label: "Besu Spoke A", kind: "BESU", redundant: true, status: "HEALTHY" },
+  { id: "paladin-a", label: "Paladin Spoke A", kind: "PALADIN", redundant: true, status: "HEALTHY" },
+  { id: "cacti-a", label: "Cacti Relay A↔Hub", kind: "CACTI", redundant: false, status: "HEALTHY" },
+  { id: "besu-b", label: "Besu Spoke B", kind: "BESU", redundant: false, status: "DEGRADED" },
+  { id: "paladin-b", label: "Paladin Spoke B", kind: "PALADIN", redundant: false, status: "DEGRADED" },
+  { id: "cacti-b", label: "Cacti Relay B↔Hub", kind: "CACTI", redundant: false, status: "DEGRADED" },
 ];
 
 const topologyEdges: TopologyEdge[] = [
   { id: "e1", from: "besu-a", to: "hub", healthy: true },
-  { id: "e2", from: "besu-b", to: "hub", healthy: true },
-  { id: "e3", from: "paladin-a", to: "besu-a", healthy: true },
-  { id: "e4", from: "cacti", to: "hub", healthy: false },
+  { id: "e2", from: "paladin-a", to: "besu-a", healthy: true },
+  { id: "e3", from: "cacti-a", to: "hub", healthy: true },
+  { id: "e4", from: "paladin-hub", to: "hub", healthy: true },
+  { id: "e5", from: "besu-b", to: "hub", healthy: false },
+  { id: "e6", from: "paladin-b", to: "besu-b", healthy: true },
+  { id: "e7", from: "cacti-b", to: "hub", healthy: false },
 ];
 
 const auditLogs: AuditLogEntry[] = [

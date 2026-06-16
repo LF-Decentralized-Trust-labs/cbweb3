@@ -137,6 +137,18 @@ deploy.ci-local: deploy.build-ci-runner
 		-P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-22.04 \
 		$(ARGS)
 
+## NOC targets (Scenario B)
+noc.up:
+	@docker compose -f $(DEPLOY_DIR)/compose.noc.yml up -d --build
+
+noc.down:
+	@docker compose -f $(DEPLOY_DIR)/compose.noc.yml down
+
+noc.logs:
+	@docker compose -f $(DEPLOY_DIR)/compose.noc.yml logs -f
+
+.PHONY: noc.up noc.down noc.logs
+
 .PHONY: deploy.create-shared-network \
 	deploy.up-spoke-a deploy.down-spoke-a deploy.up-spoke-b deploy.down-spoke-b \
 	deploy.up-hub-besu deploy.down-hub-besu \

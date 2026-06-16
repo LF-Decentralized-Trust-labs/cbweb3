@@ -1,0 +1,27 @@
+# NOC Agent Configuration — Spoke B
+# Monitors: Central Bank B Besu, Bank B Besu, Paladin Spoke B nodes
+spoke_id: "spoke-b"
+noc_backend_url: "http://cbweb3-b-noc-backend:8090"
+api_key: "noc-agent-spoke-b-key-local"
+push_interval_seconds: 15
+
+components:
+  - name: "besu-central-bank-b"
+    type: "BESU"
+    endpoint: "http://host.docker.internal:8745"
+    container_name: "cbweb3-spoke-b-besu.central-bank-b"
+
+  - name: "besu-bank-b"
+    type: "BESU"
+    endpoint: "http://host.docker.internal:8746"
+    container_name: "cbweb3-spoke-b-besu.bank-b"
+
+  - name: "paladin-central-bank-b"
+    type: "PALADIN"
+    endpoint: "http://host.docker.internal:8558"
+    container_name: "paladin-spoke-b-cb"
+
+  - name: "paladin-bank-b"
+    type: "PALADIN"
+    endpoint: "http://host.docker.internal:8559"
+    container_name: "paladin-spoke-b-bank-b"
