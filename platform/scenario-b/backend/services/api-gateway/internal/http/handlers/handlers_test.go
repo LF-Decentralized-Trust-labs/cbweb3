@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file tests auth and compliance HTTP handler behaviors and responses.
 package handlers
 

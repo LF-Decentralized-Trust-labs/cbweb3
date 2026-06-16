@@ -20,10 +20,12 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useAccounts } from "../hooks";
 
+type PendingAction = { accountId: string; action: "freeze" | "unfreeze" };
+
 export function AccountsPage() {
-  const { accounts, status, error, fetch, freeze } = useAccounts();
+  const { accounts, status, error, fetch, freeze, unfreeze } = useAccounts();
   const [search, setSearch] = useState("");
-  const [targetAccountId, setTargetAccountId] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingAction | null>(null);
   const [reason, setReason] = useState("");
 
   useEffect(() => {
@@ -38,17 +40,20 @@ export function AccountsPage() {
     );
   }, [accounts, search]);
 
-  const onFreeze = async () => {
-    if (!targetAccountId) {
-      return;
-    }
+  const onConfirm = async () => {
+    if (!pending) return;
     if (reason.trim().length < 10) {
       toast.error("Reason must contain at least 10 characters.");
       return;
     }
-    await freeze({ accountId: targetAccountId, reason });
-    toast.success("Account frozen successfully");
-    setTargetAccountId(null);
+    if (pending.action === "freeze") {
+      await freeze({ accountId: pending.accountId, reason });
+      toast.success("Account frozen successfully.");
+    } else {
+      await unfreeze({ accountId: pending.accountId, reason });
+      toast.success("Account unfrozen successfully.");
+    }
+    setPending(null);
     setReason("");
   };
 
@@ -57,10 +62,14 @@ export function AccountsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Account Intervention</CardTitle>
-          <CardDescription>Freeze participant accounts in emergency scenarios.</CardDescription>
+          <CardDescription>Freeze or unfreeze participant accounts.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Input placeholder="Search by account ID or participant" value={search} onChange={(event) => setSearch(event.target.value)} />
+          <Input
+            placeholder="Search by account ID or participant"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
           <Table>
             <TableHeader>
               <TableRow>
@@ -78,22 +87,30 @@ export function AccountsPage() {
                   <TableCell className="font-medium">{account.id}</TableCell>
                   <TableCell>{account.participantName}</TableCell>
                   <TableCell>
-                    <Badge variant={account.frozen ? "destructive" : "default"}>{account.frozen ? "FROZEN" : "ACTIVE"}</Badge>
+                    <Badge variant={account.frozen ? "destructive" : "default"}>
+                      {account.frozen ? "FROZEN" : "ACTIVE"}
+                    </Badge>
                   </TableCell>
                   <TableCell>{account.frozenAt ? new Date(account.frozenAt).toLocaleString() : "—"}</TableCell>
                   <TableCell>{account.frozenReason ?? "—"}</TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={account.frozen}
-                      onClick={() => {
-                        setTargetAccountId(account.id);
-                        setReason("");
-                      }}
-                    >
-                      Freeze Account
-                    </Button>
+                    {account.frozen ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setPending({ accountId: account.id, action: "unfreeze" }); setReason(""); }}
+                      >
+                        Unfreeze
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setPending({ accountId: account.id, action: "freeze" }); setReason(""); }}
+                      >
+                        Freeze
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -103,22 +120,26 @@ export function AccountsPage() {
         </CardContent>
       </Card>
 
-      {targetAccountId ? (
+      {pending ? (
         <Card>
           <CardHeader>
-            <CardTitle>Confirm Freeze</CardTitle>
-            <CardDescription>Account: {targetAccountId}</CardDescription>
+            <CardTitle>{pending.action === "freeze" ? "Confirm Freeze" : "Confirm Unfreeze"}</CardTitle>
+            <CardDescription>Account: {pending.accountId}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-2">
               <Label>Reason (required)</Label>
-              <Textarea value={reason} onChange={(event) => setReason(event.target.value)} />
+              <Textarea value={reason} onChange={(e) => setReason(e.target.value)} />
             </div>
             <div className="flex gap-2">
-              <Button variant="destructive" onClick={() => void onFreeze()} disabled={status === "loading"}>
-                {status === "loading" ? "Submitting..." : "Confirm Freeze"}
+              <Button
+                variant={pending.action === "freeze" ? "destructive" : "default"}
+                onClick={() => void onConfirm()}
+                disabled={status === "loading"}
+              >
+                {status === "loading" ? "Submitting..." : pending.action === "freeze" ? "Confirm Freeze" : "Confirm Unfreeze"}
               </Button>
-              <Button variant="outline" onClick={() => setTargetAccountId(null)}>
+              <Button variant="outline" onClick={() => setPending(null)}>
                 Cancel
               </Button>
             </div>

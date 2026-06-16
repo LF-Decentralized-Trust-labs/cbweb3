@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
 /// @title ILiquidityCommitRegistry
@@ -23,13 +23,20 @@ pragma solidity ^0.8.20;
 ///
 ///      Feature: 007-bridge-based-cb-liquidity
 interface ILiquidityCommitRegistry {
-
     // -------------------------------------------------------------------------
     // Enums
     // -------------------------------------------------------------------------
 
-    enum CommitStatus { PENDING, MATCHED, EXPIRED, CANCELLED }
-    enum CommitSide { A, B }
+    enum CommitStatus {
+        PENDING,
+        MATCHED,
+        EXPIRED,
+        CANCELLED
+    }
+    enum CommitSide {
+        A,
+        B
+    }
 
     // -------------------------------------------------------------------------
     // Events
@@ -45,7 +52,7 @@ interface ILiquidityCommitRegistry {
     /// @param expiresAt  block.timestamp when this commit expires (now + 72h).
     event CommitRegistered(
         bytes32 indexed commitId,
-        string  poolPair,
+        string poolPair,
         CommitSide side,
         address indexed signer,
         address wTokenAddr,
@@ -63,7 +70,7 @@ interface ILiquidityCommitRegistry {
     /// @param signerB    Sovereign signer of CB-B.
     /// @param amountB    Deposit amount for side B in wei.
     event CommitMatched(
-        string  indexed poolPair,
+        string indexed poolPair,
         bytes32 commitIdA,
         address signerA,
         uint256 amountA,
@@ -121,12 +128,9 @@ interface ILiquidityCommitRegistry {
     /// @param amount        Deposit amount in wei (> 0).
     /// @param wTokenAddress Address of the W-tCeBM contract on the Hub.
     /// @return commitId     Unique ID assigned to this commit.
-    function registerCommit(
-        string calldata poolPair,
-        CommitSide side,
-        uint256 amount,
-        address wTokenAddress
-    ) external returns (bytes32 commitId);
+    function registerCommit(string calldata poolPair, CommitSide side, uint256 amount, address wTokenAddress)
+        external
+        returns (bytes32 commitId);
 
     /// @notice Cancels a PENDING commit owned by msg.sender.
     /// @dev Only callable by the original signer. Emits CommitCancelled.
@@ -170,8 +174,5 @@ interface ILiquidityCommitRegistry {
     /// @param poolPair  Pool pair identifier.
     /// @param side      CommitSide.A or CommitSide.B.
     /// @return commitId  The pending commit ID, or bytes32(0).
-    function getPendingCommit(string calldata poolPair, CommitSide side)
-        external
-        view
-        returns (bytes32 commitId);
+    function getPendingCommit(string calldata poolPair, CommitSide side) external view returns (bytes32 commitId);
 }

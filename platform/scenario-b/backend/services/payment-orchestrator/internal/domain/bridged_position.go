@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines the BridgedAssetPosition model for Scenario B bridging.
 package domain
 
@@ -47,6 +49,12 @@ type BridgedAssetPosition struct {
 	// reserves (obtained via Reserve Tokenisation / ApproveEscrow) before a bridge-in can proceed.
 	// Empty string = sovereign CB self-service path (CB mints its own liquidity).
 	BurnFromSpokeAddress string `gorm:"column:burn_from_spoke_address;default:''"`
-	CreatedAt               time.Time `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt               time.Time `gorm:"column:updated_at;autoUpdateTime"`
+	// SwapTxHash is the Hub AMM swap transaction this bridge-out settles (R2-CR-6).
+	// Unique when set (partial index, owned by the api-gateway migration): each on-chain
+	// swap can be consumed by exactly one burn/mint — replay protection.
+	SwapTxHash string `gorm:"column:swap_tx_hash;default:''"`
+	// CorrelationID links the position to the cross-currency swap operation (009) for tracing.
+	CorrelationID string    `gorm:"column:correlation_id;default:''"`
+	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }

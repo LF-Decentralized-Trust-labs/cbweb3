@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services — CentralBankPoolClient proxies pool status reads to the spoke's
 // Central Bank API gateway (CENTRAL_BANK_API_URL). Commercial banks do not read the
 // Hub sovereign AMM directly; the CB gateway holds SOVEREIGN_AMM_ADDRESS and DB enrichment.
@@ -99,6 +101,7 @@ func (c *CentralBankPoolClient) GetFeeBps(ctx context.Context, pair string) (uin
 	if err != nil {
 		return 0, err
 	}
+	// #nosec G115 -- fee is basis points, bounded to [0,10000] by the AMM contract; fits uint16.
 	return uint16(st.FeeRateBps), nil
 }
 

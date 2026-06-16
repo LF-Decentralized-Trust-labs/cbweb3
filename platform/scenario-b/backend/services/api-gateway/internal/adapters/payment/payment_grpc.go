@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package payment provides a gRPC client adapter for the payment-orchestrator service.
 package payment
 
@@ -44,7 +46,9 @@ func (a *GRPCAdapter) Close() error {
 // --- Token Balance ---
 
 type BalanceResult struct {
-	Balance string `json:"balance"`
+	Balance  string `json:"balance"`
+	Decimals uint32 `json:"decimals"`
+	Symbol   string `json:"symbol"` // on-chain ERC-20 symbol, e.g. "tCeBM_BRL"; source of truth for the currency code
 }
 
 func (a *GRPCAdapter) GetBalance(ctx context.Context) (*BalanceResult, error) {
@@ -52,7 +56,7 @@ func (a *GRPCAdapter) GetBalance(ctx context.Context) (*BalanceResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &BalanceResult{Balance: resp.Balance}, nil
+	return &BalanceResult{Balance: resp.Balance, Decimals: resp.Decimals, Symbol: resp.Symbol}, nil
 }
 
 // GetBalanceOf returns the tCeBM balance for the given Besu address.
@@ -147,7 +151,9 @@ func (a *GRPCAdapter) ListDeposits(ctx context.Context, requesterID string) ([]D
 // --- Fiat Balance ---
 
 type FiatBalanceResult struct {
-	Balance string `json:"balance"`
+	Balance  string `json:"balance"`
+	Decimals uint32 `json:"decimals"`
+	Symbol   string `json:"symbol"` // on-chain ERC-20 symbol, e.g. "fCeBM_BRL"; source of truth for the fiat currency code
 }
 
 func (a *GRPCAdapter) GetFiatBalance(ctx context.Context) (*FiatBalanceResult, error) {
@@ -155,7 +161,7 @@ func (a *GRPCAdapter) GetFiatBalance(ctx context.Context) (*FiatBalanceResult, e
 	if err != nil {
 		return nil, err
 	}
-	return &FiatBalanceResult{Balance: resp.Balance}, nil
+	return &FiatBalanceResult{Balance: resp.Balance, Decimals: resp.Decimals, Symbol: resp.Symbol}, nil
 }
 
 // --- Escrow (Tokenization): fCeBM → tCeBM ---

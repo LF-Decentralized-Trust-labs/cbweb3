@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package server
 
 import (
@@ -36,7 +38,7 @@ type paymentOrchestratorService struct {
 	fxAgreementBesu  ports.FXAgreementContractPort // FX agreement on Besu (optional)
 	fxAgreementPente ports.FXAgreementContractPort // FX agreement on Pente private context (optional)
 	fxRepo           ports.FXAgreementRepository   // persistent FX agreement storage (nil = dev in-memory)
-	htlcRepo         ports.HTLCRepository          // optional — nil means CounterpartyLocked is in-memory only
+	htlcRepo         ports.HTLCRepository          // required in production; nil only in unit tests
 	pente            ports.PenteClientPort         // optional bilateral private-context manager
 	rateTolPct       float64                       // rate tolerance fraction (e.g. 0.001 for 0.1%)
 	crossSpokeMode   bool                          // when true, settle is gated on CounterpartyLocked
@@ -60,26 +62,30 @@ type Config struct {
 	FXAgreementBesu  ports.FXAgreementContractPort // optional — nil disables Besu FXAgreement path
 	FXAgreementPente ports.FXAgreementContractPort // optional — nil disables Pente FXAgreement path
 	FXRepo           ports.FXAgreementRepository   // optional — nil falls back to in-memory map (dev)
-	HTLCRepo         ports.HTLCRepository          // optional — nil means CounterpartyLocked is not persisted across restarts
-	Pente            ports.PenteClientPort         // optional — nil disables bilateral private context integration
-	RateTolPct       float64                       // rate tolerance fraction, default 0.001 (0.1%)
+	// HTLCRepo is required in production for durable HTLC state across restarts.
+	// Pass nil only in unit tests that do not need DB persistence.
+	HTLCRepo   ports.HTLCRepository
+	Pente      ports.PenteClientPort // optional — nil disables bilateral private context integration
+	RateTolPct float64               // rate tolerance fraction, default 0.001 (0.1%)
 	// CrossSpokeMode gates SettleHTLC on CounterpartyLocked. Set this to true
 	// whenever the interoperability relay is active (i.e. in all production
 	// deployments). When false (dev/single-spoke), the initiator can settle
 	// immediately without waiting for the counterparty leg to be confirmed.
 	// Do NOT use the presence of FXRepo or HTLC adapters as a proxy for this
 	// flag — those are independent configuration axes.
-	CrossSpokeMode bool
-	StrictHTLC       bool                          // strict Agreement-HTLC enforcement mode
-	SpokePrefix      string                        // e.g. "spoke-a" — empty disables receiver locality check
-	PaladinIdentity  string                        // full identity, e.g. "funded_operator@spoke-a-bank-a"
-	Logger           *slog.Logger
+	CrossSpokeMode  bool
+	StrictHTLC      bool   // strict Agreement-HTLC enforcement mode
+	SpokePrefix     string // e.g. "spoke-a" — empty disables receiver locality check
+	PaladinIdentity string // full identity, e.g. "funded_operator@spoke-a-bank-a"
+	Logger          *slog.Logger
 }
 
 // New builds a configured gRPC server with all payment-orchestrator handlers.
 // The returned StartRelayWorkers function must be called (in a goroutine) after
 // the gRPC server is listening to activate cross-spoke HTLC relay automation.
-func New(cfg Config) (*grpc.Server, func(context.Context)) {
+// If HTLCRepo is configured, non-terminal HTLCs are loaded from the database on
+// startup; any error is returned to the caller.
+func New(cfg Config) (*grpc.Server, func(context.Context), error) {
 	rateTol := cfg.RateTolPct
 	if rateTol <= 0 {
 		rateTol = 0.001 // default 0.1%
@@ -104,9 +110,12 @@ func New(cfg Config) (*grpc.Server, func(context.Context)) {
 		htlcs:            make(map[string]*domain.HTLCRecord),
 		fxAgreements:     make(map[string]*domain.FXAgreementRecord),
 	}
+	if err := svc.loadHTLCsFromDB(context.Background()); err != nil {
+		return nil, nil, err
+	}
 	grpcServer := grpc.NewServer()
 	pb.RegisterPaymentOrchestratorServiceServer(grpcServer, svc)
-	return grpcServer, svc.startRelayWorkers
+	return grpcServer, svc.startRelayWorkers, nil
 }
 
 // generateID returns a new UUID v4 string for record IDs.
@@ -128,6 +137,49 @@ func (s *paymentOrchestratorService) isLocalReceiver(receiver string) bool {
 	return receiverSpoke == s.spokePrefix
 }
 
+// loadHTLCsFromDB pre-populates the in-memory HTLC cache from the database.
+// It is called once during New() when HTLCRepo is configured. Non-terminal records
+// (LOCKED, SETTLING, REFUNDING) are loaded so the service can resume in-flight operations
+// after a restart without losing state.
+func (s *paymentOrchestratorService) loadHTLCsFromDB(ctx context.Context) error {
+	if s.htlcRepo == nil {
+		return nil
+	}
+	records, err := s.htlcRepo.ListNonTerminal(ctx)
+	if err != nil {
+		return fmt.Errorf("load HTLCs from DB: %w", err)
+	}
+	s.mu.Lock()
+	for _, r := range records {
+		s.htlcs[r.ContractID] = r
+	}
+	s.mu.Unlock()
+	s.logger.Info("loaded HTLCs from DB on startup", "count", len(records))
+	return nil
+}
+
+// persistHTLC writes the current in-memory HTLC state to the database.
+// If HTLCRepo is not configured, this is a no-op. Errors are logged but do not
+// fail the caller — the in-memory state is authoritative; the DB is a best-effort
+// write-through cache.
+func (s *paymentOrchestratorService) persistHTLC(ctx context.Context, contractID string) {
+	if s.htlcRepo == nil {
+		return
+	}
+	s.mu.RLock()
+	r, ok := s.htlcs[contractID]
+	if !ok {
+		s.mu.RUnlock()
+		return
+	}
+	snap := *r
+	s.mu.RUnlock()
+	if err := s.htlcRepo.UpdateHTLC(ctx, &snap); err != nil {
+		s.logger.Error("failed to persist HTLC state",
+			"contract_id", contractID, "state", snap.State, "error", err)
+	}
+}
+
 // --- HTLC Dual-Layer Operations ---
 
 func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockHTLCRequest) (*pb.LockHTLCResponse, error) {
@@ -144,7 +196,7 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 		req.AgreementId = newUUID()
 	}
 	if req.TimeLock == 0 {
-		req.TimeLock = uint64(time.Now().Unix()) + 3600 // 1h — initiator must have longer timelock
+		req.TimeLock = uint64(time.Now().Unix()) + 3600 //#nosec G115 -- unix timestamp is always positive and fits uint64; 1h — initiator must have longer timelock
 	}
 
 	// FX Agreement gate: if an agreement_id references a known FX agreement, verify it's accepted
@@ -166,6 +218,7 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 			if fxRecord.State != domain.FXStateAccepted {
 				return nil, status.Error(codes.FailedPrecondition, "FX agreement must be accepted before locking HTLC")
 			}
+			//#nosec G115 -- unix timestamp is always positive and fits uint64
 			if fxRecord.ExpiryDate > 0 && uint64(time.Now().Unix()) > fxRecord.ExpiryDate {
 				return nil, status.Error(codes.FailedPrecondition, "FX agreement has expired")
 			}
@@ -206,9 +259,8 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 	var htlcTxHash string
 	if s.htlc != nil {
 		var zetoRefBytes [32]byte
-		if len(lockResult.LockedStateIDs) > 0 {
-			zetoRefHash := sha256.Sum256([]byte(strings.Join(lockResult.LockedStateIDs, ",")))
-			zetoRefBytes = zetoRefHash
+		if b := uuidToRawBytes(lockResult.TxHash); b != nil {
+			copy(zetoRefBytes[:], b)
 		}
 		htlcTxHash, err = s.htlc.Lock(ctx, ports.HTLCLockParams{
 			ContractID:  contractIDBytes,
@@ -220,8 +272,8 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 		})
 		if err != nil {
 			s.logger.Error("on-chain HTLC lock failed — rolling back Zeto lock", "error", err)
-			if _, unlockErr := s.zeto.Unlock(ctx, strings.Join(lockResult.LockedStateIDs, ",")); unlockErr != nil {
-				s.logger.Error("zeto unlock rollback also failed", "error", unlockErr)
+			if _, unlockErr := s.zeto.TransferLocked(ctx, strings.Join(lockResult.LockedStateIDs, ","), s.paladinIdentity, req.Amount); unlockErr != nil {
+				s.logger.Error("zeto transferLocked rollback also failed", "error", unlockErr)
 			}
 			return nil, status.Errorf(codes.Internal, "on-chain HTLC lock failed: %v", err)
 		}
@@ -245,6 +297,11 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 		UpdatedAt:   time.Now().UTC(),
 	}
 
+	if s.htlcRepo != nil {
+		if err := s.htlcRepo.CreateHTLC(ctx, record); err != nil {
+			return nil, status.Errorf(codes.Internal, "persist HTLC: %v", err)
+		}
+	}
 	s.mu.Lock()
 	s.htlcs[contractID] = record
 	s.mu.Unlock()
@@ -278,7 +335,7 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 		req.AgreementId = newUUID()
 	}
 	if req.TimeLock == 0 {
-		req.TimeLock = uint64(time.Now().Unix()) + 1800 // 30min — responder must have shorter timelock than initiator
+		req.TimeLock = uint64(time.Now().Unix()) + 1800 //#nosec G115 -- unix timestamp is always positive and fits uint64; 30min — responder must have shorter timelock than initiator
 	}
 
 	// FX Agreement gate: if an agreement_id references a known FX agreement, verify it's accepted
@@ -300,6 +357,7 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 			if fxRecord.State != domain.FXStateAccepted {
 				return nil, status.Error(codes.FailedPrecondition, "FX agreement must be accepted before locking HTLC")
 			}
+			//#nosec G115 -- unix timestamp is always positive and fits uint64
 			if fxRecord.ExpiryDate > 0 && uint64(time.Now().Unix()) > fxRecord.ExpiryDate {
 				return nil, status.Error(codes.FailedPrecondition, "FX agreement has expired")
 			}
@@ -339,9 +397,8 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 		var hashLock32 [32]byte
 		copy(hashLock32[:], hashLockBytes)
 		var zetoRefBytes [32]byte
-		if len(lockResult.LockedStateIDs) > 0 {
-			zetoRefHash := sha256.Sum256([]byte(strings.Join(lockResult.LockedStateIDs, ",")))
-			zetoRefBytes = zetoRefHash
+		if b := uuidToRawBytes(lockResult.TxHash); b != nil {
+			copy(zetoRefBytes[:], b)
 		}
 		htlcTxHash, err = s.htlc.Lock(ctx, ports.HTLCLockParams{
 			ContractID:  contractIDBytes,
@@ -353,8 +410,8 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 		})
 		if err != nil {
 			s.logger.Error("on-chain HTLC lock failed — rolling back Zeto lock", "error", err)
-			if _, unlockErr := s.zeto.Unlock(ctx, strings.Join(lockResult.LockedStateIDs, ",")); unlockErr != nil {
-				s.logger.Error("zeto unlock rollback also failed", "error", unlockErr)
+			if _, unlockErr := s.zeto.TransferLocked(ctx, strings.Join(lockResult.LockedStateIDs, ","), s.paladinIdentity, req.Amount); unlockErr != nil {
+				s.logger.Error("zeto transferLocked rollback also failed", "error", unlockErr)
 			}
 			return nil, status.Errorf(codes.Internal, "on-chain HTLC lock failed: %v", err)
 		}
@@ -377,6 +434,11 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 		UpdatedAt:   time.Now().UTC(),
 	}
 
+	if s.htlcRepo != nil {
+		if err := s.htlcRepo.CreateHTLC(ctx, record); err != nil {
+			return nil, status.Errorf(codes.Internal, "persist HTLC: %v", err)
+		}
+	}
 	s.mu.Lock()
 	s.htlcs[contractID] = record
 	s.mu.Unlock()
@@ -511,6 +573,7 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 			record.State = domain.HTLCStateLocked
 			record.UpdatedAt = time.Now().UTC()
 			s.mu.Unlock()
+			s.persistHTLC(ctx, record.ContractID)
 			return nil, status.Errorf(codes.Internal, "on-chain HTLC settle failed: %v", err)
 		}
 		// Store htlcTxHash immediately so a retry can find it.
@@ -537,6 +600,7 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 	record.HTLCTxHash = htlcTxHash
 	record.ZetoTxHash = zetoTxHash
 	s.mu.Unlock()
+	s.persistHTLC(ctx, record.ContractID)
 
 	s.logger.Info("HTLC settled", "contract_id", record.ContractID, "zeto_tx_hash", zetoTxHash, "htlc_tx_hash", htlcTxHash)
 
@@ -576,6 +640,7 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 			return nil, status.Errorf(codes.FailedPrecondition, "HTLC %q is in state %s, expected LOCKED", req.ContractId, record.State)
 		}
 
+		//#nosec G115 -- unix timestamp is always positive and fits uint64
 		if uint64(time.Now().Unix()) < record.TimeLock {
 			s.mu.Unlock()
 			return nil, status.Error(codes.FailedPrecondition, "time lock has not expired yet")
@@ -586,6 +651,7 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 		record.UpdatedAt = time.Now().UTC()
 	}
 	s.mu.Unlock()
+	s.persistHTLC(ctx, record.ContractID)
 
 	// Refund on-chain HTLC coordination
 	var htlcTxHash string
@@ -605,12 +671,12 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 		htlcTxHash = record.HTLCTxHash
 	}
 
-	zetoTxHash, err := s.zeto.Unlock(ctx, record.ZetoLockRef)
+	zetoTxHash, err := s.zeto.TransferLocked(ctx, record.ZetoLockRef, record.Sender, record.Amount)
 	if err != nil {
 		// Stay in REFUNDING for retry.
-		s.logger.Error("zeto unlock failed — record stays REFUNDING for retry",
+		s.logger.Error("zeto transferLocked (refund) failed — record stays REFUNDING for retry",
 			"contract_id", req.ContractId, "error", err)
-		return nil, status.Errorf(codes.Internal, "zeto unlock: %v", err)
+		return nil, status.Errorf(codes.Internal, "zeto transferLocked refund: %v", err)
 	}
 
 	// Both operations succeeded — mark REFUNDED.
@@ -620,6 +686,7 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 	record.HTLCTxHash = htlcTxHash
 	record.ZetoTxHash = zetoTxHash
 	s.mu.Unlock()
+	s.persistHTLC(ctx, record.ContractID)
 
 	s.logger.Info("HTLC refunded", "contract_id", req.ContractId, "zeto_tx_hash", zetoTxHash, "htlc_tx_hash", htlcTxHash)
 
@@ -638,7 +705,14 @@ func (s *paymentOrchestratorService) GetHTLCStatus(ctx context.Context, req *pb.
 	record, ok := s.htlcs[req.ContractId]
 	s.mu.RUnlock()
 
-	if !ok {
+	if !ok && s.htlcRepo != nil {
+		var err error
+		record, err = s.htlcRepo.GetHTLC(ctx, req.ContractId)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "get HTLC: %v", err)
+		}
+	}
+	if record == nil {
 		return nil, status.Errorf(codes.NotFound, "HTLC %q not found", req.ContractId)
 	}
 
@@ -655,8 +729,6 @@ func (s *paymentOrchestratorService) SearchHTLC(ctx context.Context, req *pb.Sea
 	callerIdentity := callerIdentityFromContext(ctx)
 
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	var results []*pb.HTLCLock
 	for _, r := range s.htlcs {
 		if req.AgreementId != "" && r.AgreementID != req.AgreementId {
@@ -687,6 +759,24 @@ func (s *paymentOrchestratorService) SearchHTLC(ctx context.Context, req *pb.Sea
 			}
 		}
 		results = append(results, recordToProto(r))
+	}
+	s.mu.RUnlock()
+
+	// Fall back to DB when in-memory map is empty and a repository is configured.
+	if len(results) == 0 && s.htlcRepo != nil {
+		filter := ports.HTLCFilter{
+			AgreementID: req.AgreementId,
+			Sender:      req.Sender,
+			Receiver:    req.Receiver,
+			State:       req.State,
+		}
+		recs, err := s.htlcRepo.ListHTLCs(ctx, filter)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "search HTLC: %v", err)
+		}
+		for _, r := range recs {
+			results = append(results, recordToProto(r))
+		}
 	}
 
 	return &pb.SearchHTLCResponse{Locks: results}, nil
@@ -801,6 +891,7 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
 		return nil, status.Error(codes.InvalidArgument, "counterparty_b, origin_amount, counter_amount, origin_currency, counter_currency, rate, and expiry_date are required")
 	}
+	//#nosec G115 -- unix timestamp is always positive and fits uint64
 	if req.ExpiryDate <= uint64(time.Now().Unix()) {
 		return nil, status.Error(codes.InvalidArgument, "expiry_date must be in the future")
 	}
@@ -1530,14 +1621,14 @@ func (s *paymentOrchestratorService) handleRelayLockEvent(proof ports.Interopera
 			// its leg. Setting CounterpartyLocked unblocks the SettleHTLC guard above.
 			r.CounterpartyLocked = true
 			r.UpdatedAt = time.Now().UTC()
-			localContractID := r.ContractID
+			snap := *r // snapshot under lock — prevents data race on DB write below
 			s.mu.Unlock()
 			s.logger.Info("relay lock: counterparty leg confirmed — settlement unblocked",
-				"hashLock", proof.HashLock, "localContractId", localContractID, "remoteContractId", proof.ContractID)
+				"hashLock", proof.HashLock, "localContractId", snap.ContractID, "remoteContractId", proof.ContractID)
 			if s.htlcRepo != nil {
-				if err := s.htlcRepo.SetCounterpartyLocked(context.Background(), localContractID); err != nil {
+				if err := s.htlcRepo.UpdateHTLC(context.Background(), &snap); err != nil {
 					s.logger.Warn("relay lock: failed to persist CounterpartyLocked",
-						"contractId", localContractID, "error", err)
+						"contract_id", snap.ContractID, "error", err)
 				}
 			}
 			return nil
@@ -1655,4 +1746,15 @@ func (s *paymentOrchestratorService) handleRelaySettleEvent(proof ports.Interope
 	}
 	s.logger.Info("relay settle: local HTLC leg settled", "contractId", proof.ContractID)
 	return nil
+}
+
+// uuidToRawBytes converts a UUID string (e.g. "dc1e6c37-f676-4848-ab6a-be8ca5c56558")
+// to its 16 raw bytes. Returns nil if the input is not a valid UUID.
+func uuidToRawBytes(u string) []byte {
+	u = strings.ReplaceAll(u, "-", "")
+	b, err := hex.DecodeString(u)
+	if err != nil || len(b) != 16 {
+		return nil
+	}
+	return b
 }

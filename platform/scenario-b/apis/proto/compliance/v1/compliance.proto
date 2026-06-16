@@ -12,7 +12,7 @@ option go_package = "github.com/LACNetNetworks/cbweb3-platform/backend/shared/pr
 message Participant {
   string user_id = 1;
   string institution_name = 2;
-  string cnpj = 3;
+  string legal_entity_id = 3;
   string bank_code = 4;
   string country_code = 5;
   string role = 6;
@@ -108,7 +108,7 @@ message IssueParticipantCertificateRequest {
   string user_id = 1;
   string role = 2;
   string institution_name = 3;
-  string cnpj = 4;
+  string legal_entity_id = 4;
 }
 
 message IssueParticipantCertificateResponse {
@@ -124,7 +124,7 @@ message SignParticipantCSRRequest {
   string user_id = 2;
   string role = 3;
   string institution_name = 4;
-  string cnpj = 5;
+  string legal_entity_id = 5;
 }
 
 message SignParticipantCSRResponse {

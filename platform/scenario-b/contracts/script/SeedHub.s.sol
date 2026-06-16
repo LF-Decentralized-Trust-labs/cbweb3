@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
@@ -76,9 +76,7 @@ contract SeedHub is Script {
             _registerIfNeeded(
                 hubRegistry, AMM_SIGNER, "AMM Gateway Dev", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
             );
-            _registerIfNeeded(
-                hubRegistry, mlpSigner, "MLP", IdentityRegistryLibrary.ParticipantRole.MLP
-            );
+            _registerIfNeeded(hubRegistry, mlpSigner, "MLP", IdentityRegistryLibrary.ParticipantRole.MLP);
             console.log("Hub participants registered");
 
             // Grant LiquidityProvider role to gateway signers so they can call

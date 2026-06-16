@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package paladin provides the real ZetoOperator implementation that talks to
 // Paladin sidecar nodes via their JSON-RPC HTTP API (POST /).
 package paladin
@@ -222,7 +224,7 @@ func (c *Client) getLockedStateIDs(ctx context.Context, txID string) ([]string, 
 				continue
 			}
 			respBody, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			var rpcResp jsonRPCResponse
 			if err := json.Unmarshal(respBody, &rpcResp); err != nil {
@@ -347,7 +349,7 @@ func (c *Client) pollReceipt(ctx context.Context, txID string) (*txReceipt, erro
 				continue
 			}
 			respBody, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			var rpcResp jsonRPCResponse
 			if err := json.Unmarshal(respBody, &rpcResp); err != nil {
@@ -452,21 +454,6 @@ func (c *Client) Lock(ctx context.Context, amount string, delegate string) (*por
 		ZetoLockRef:    txHash,
 		LockedStateIDs: lockedIDs,
 	}, nil
-}
-
-func (c *Client) Unlock(ctx context.Context, zetoLockRef string) (string, error) {
-	tx := paladinTx{
-		Type:     "private",
-		Domain:   "zeto",
-		From:     c.identity,
-		To:       c.zetoTokenAddress,
-		ABI:      zetoABI,
-		Function: "unlock",
-		Data: map[string]interface{}{
-			"lockId": zetoLockRef,
-		},
-	}
-	return c.sendTx(ctx, tx)
 }
 
 func (c *Client) TransferLocked(ctx context.Context, zetoLockRef string, to string, amount string) (string, error) {

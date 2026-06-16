@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the OversightService for Master Viewing Key disclosure (FR-034/FR-035/FR-036).
 //
 // Architecture note: Paladin operates exclusively at the spoke level.

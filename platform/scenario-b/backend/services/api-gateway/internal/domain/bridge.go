@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines the BridgedAssetPosition and RelayerQueueItem models for the
 // gateway-local bridge service (FR-029 / FR-031 / FR-032 / data-model §6).
 //
@@ -50,9 +52,18 @@ type BridgedAssetPosition struct {
 	// When set on a LOCK_MINT position, the executor burns tCeBM from this address instead of
 	// auto-minting (ensureSpokeFunds). Enforces that bank-a must hold tokenized reserves
 	// obtained via Reserve Tokenisation before a cross-currency bridge-in can proceed.
-	BurnFromSpokeAddress string    `gorm:"column:burn_from_spoke_address;default:''"`
-	CreatedAt            time.Time `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt            time.Time `gorm:"column:updated_at;autoUpdateTime"`
+	BurnFromSpokeAddress string `gorm:"column:burn_from_spoke_address;default:''"`
+	// SwapTxHash is the Hub AMM swap transaction this bridge-out settles (R2-CR-6).
+	// Unique (when set): each on-chain swap can be consumed by exactly one burn/mint,
+	// so replayed relay notifications cannot mint twice. Partial index because legacy
+	// flows (plain lock-mint, dev paths) have no associated swap.
+	SwapTxHash string `gorm:"column:swap_tx_hash;default:'';index:idx_bridge_swap_tx_hash,unique,where:swap_tx_hash <> ''"`
+	// CorrelationID links the position to the cross-currency swap operation (009) for
+	// tracing. Not unique: a rollback position legitimately shares the correlation of
+	// the bridge-in it reverses — replay protection is keyed on SwapTxHash.
+	CorrelationID string    `gorm:"column:correlation_id;default:'';index:idx_bridge_correlation_id"`
+	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 // RelayerItemState is the state of a Relayer queue item.

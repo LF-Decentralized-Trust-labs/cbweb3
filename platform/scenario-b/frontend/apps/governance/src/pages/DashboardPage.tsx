@@ -1,127 +1,147 @@
 import {
+  Badge,
   Button,
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@cbweb3/ui";
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import {
-  useAccounts,
-  useAuditLogs,
-  useCircuitBreaker,
-  useRegistry,
-} from "../hooks";
-import { useHtlcMonitorStore, usePaymentStore } from "../stores";
-import { PaymentStatus, normalizePaymentStatus } from "../types";
+import { isScenarioB } from "../config/scenario";
+import { useAccounts, useAuditLogs, useCircuitBreaker, useRegistry } from "../hooks";
+
+type BadgeVariant = "warning" | "success" | "destructive" | "default" | "secondary" | "outline";
+
+function severityVariant(severity: string): BadgeVariant {
+  if (severity === "CRITICAL") return "destructive";
+  if (severity === "WARNING") return "warning";
+  return "secondary";
+}
+
+function circuitBreakerVariant(state: string | undefined): BadgeVariant {
+  if (!state) return "outline";
+  if (state === "LIVE" || state === "ACTIVE") return "success";
+  if (state === "HALTED") return "destructive";
+  if (state === "RESUMING") return "warning";
+  return "outline";
+}
 
 export function DashboardPage() {
-  const { fetch: fetchRegistry } = useRegistry();
-  const { fetch: fetchAccounts } = useAccounts();
-  const { fetch: fetchAudit } = useAuditLogs();
-  const { fetchState } = useCircuitBreaker();
-  const htlcLocks = useHtlcMonitorStore((state) => state.locks);
-  const fetchHtlc = useHtlcMonitorStore((state) => state.fetch);
-  const fetchPayments = usePaymentStore((state) => state.fetchAll);
-  const deposits = usePaymentStore((state) => state.deposits);
-  const escrows = usePaymentStore((state) => state.escrows);
-  const redeems = usePaymentStore((state) => state.redeems);
+  const { participants, pendingKyc, fetch: fetchRegistry } = useRegistry();
+  const { accounts, fetch: fetchAccounts } = useAccounts();
+  const { logs, fetch: fetchAudit } = useAuditLogs();
+  const { fetchState, circuitBreaker } = useCircuitBreaker();
 
   useEffect(() => {
     void fetchRegistry();
     void fetchAccounts();
     void fetchAudit();
-    void fetchState();
-    void fetchHtlc();
-    void fetchPayments();
-  }, [
-    fetchRegistry,
-    fetchAccounts,
-    fetchAudit,
-    fetchState,
-    fetchHtlc,
-    fetchPayments,
-  ]);
+    if (isScenarioB) void fetchState();
+  }, [fetchRegistry, fetchAccounts, fetchAudit, fetchState]);
 
-  // const activeParticipants = participants.filter((item) => item.status === "ACTIVE").length;
-  // const frozenAccounts = accounts.filter((item) => item.frozen).length;
-  // const criticalToday = logs.filter((item) => item.severity === "CRITICAL").length;
-  const lockedCount = htlcLocks.filter(
-    (item) => item.state === "HTLC_STATE_LOCKED",
-  ).length;
-  const settledCount = htlcLocks.filter(
-    (item) => item.state === "HTLC_STATE_SETTLED",
-  ).length;
-  const refundedCount = htlcLocks.filter(
-    (item) => item.state === "HTLC_STATE_REFUNDED",
-  ).length;
-  const pendingDeposits = deposits.filter(
-    (item) => normalizePaymentStatus(item.status) === PaymentStatus.PENDING,
-  ).length;
-  const pendingPledges = escrows.filter(
-    (item) => normalizePaymentStatus(item.status) === PaymentStatus.PENDING,
-  ).length;
-  const pendingRedeems = redeems.filter(
-    (item) => normalizePaymentStatus(item.status) === PaymentStatus.PENDING,
-  ).length;
+  const commercialBanks = participants;
+  const activeParticipants = commercialBanks.filter((p) => p.status === "ACTIVE").length;
+  const frozenAccounts = accounts.filter((a) => a.frozen).length;
+  const pendingKycCount = pendingKyc.length;
+  const recentEvents = logs.slice(0, 5);
 
   return (
     <div className="space-y-4">
-      {/* <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card>
+      {isScenarioB ? (
+        <Card className={circuitBreaker?.state === "HALTED" ? "border-destructive" : ""}>
           <CardHeader className="pb-2">
             <CardDescription>Circuit Breaker</CardDescription>
-            <CardTitle>
-              <Badge variant={circuitBreaker?.state === "HALTED" ? "destructive" : "default"}>
-                {circuitBreaker?.state ?? "LIVE"}
+            <CardTitle className="flex items-center gap-2">
+              <Badge variant={circuitBreakerVariant(circuitBreaker?.state)}>
+                {circuitBreaker?.state ?? "UNKNOWN"}
               </Badge>
             </CardTitle>
           </CardHeader>
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground">
+              {circuitBreaker?.state === "HALTED"
+                ? "Cross-border swaps are paused network-wide."
+                : "Cross-border swaps operational."}
+            </p>
+          </CardContent>
+          <CardFooter className="pt-0">
+            <Button asChild variant="ghost" size="sm" className="h-auto p-0 text-xs">
+              <Link to="/circuit-breaker">Manage →</Link>
+            </Button>
+          </CardFooter>
         </Card>
+      ) : null}
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <Card className={pendingKycCount > 0 ? "border-yellow-500" : ""}>
+          <CardHeader className="pb-2">
+            <CardDescription>Pending KYC Approvals</CardDescription>
+            <CardTitle className="flex items-center gap-2">
+              {pendingKycCount}
+              {pendingKycCount > 0 && <Badge variant="warning">NEEDS ATTENTION</Badge>}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <p className={`text-xs ${pendingKycCount > 0 ? "text-yellow-600" : "text-muted-foreground"}`}>
+              {pendingKycCount > 0 ? "Onboarding requests awaiting review" : "No pending requests"}
+            </p>
+          </CardContent>
+          <CardFooter className="pt-0">
+            <Button asChild variant="ghost" size="sm" className="h-auto p-0 text-xs">
+              <Link to="/registry">Review KYC →</Link>
+            </Button>
+          </CardFooter>
+        </Card>
+
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Active Participants</CardDescription>
-            <CardTitle>{activeParticipants}</CardTitle>
+            <CardTitle>
+              {activeParticipants} / {commercialBanks.length}
+            </CardTitle>
           </CardHeader>
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground">Registered commercial banks</p>
+          </CardContent>
+          <CardFooter className="pt-0">
+            <Button asChild variant="ghost" size="sm" className="h-auto p-0 text-xs">
+              <Link to="/accounts">View all →</Link>
+            </Button>
+          </CardFooter>
         </Card>
-        <Card>
+
+        <Card className={frozenAccounts > 0 ? "border-destructive" : ""}>
           <CardHeader className="pb-2">
             <CardDescription>Frozen Accounts</CardDescription>
-            <CardTitle>{frozenAccounts}</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              {frozenAccounts}
+              {frozenAccounts > 0 && <Badge variant="destructive">FROZEN</Badge>}
+            </CardTitle>
           </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Critical Audit Events</CardDescription>
-            <CardTitle>{criticalToday}</CardTitle>
-          </CardHeader>
-        </Card>
-      </section> */}
-
-      <section className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <Button asChild>
-              <Link to="/circuit-breaker">Go to Circuit Breaker</Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/registry">View Registry</Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/accounts">Freeze Controls</Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/htlc-monitor">PvP Settlement</Link>
-            </Button>
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground">
+              {frozenAccounts > 0 ? "Accounts suspended by governance" : "No frozen accounts"}
+            </p>
           </CardContent>
+          <CardFooter className="pt-0">
+            <Button asChild variant="ghost" size="sm" className="h-auto p-0 text-xs">
+              <Link to="/accounts">Manage →</Link>
+            </Button>
+          </CardFooter>
         </Card>
+      </section>
 
-        {/* <Card>
+      <section>
+        <Card>
           <CardHeader>
             <CardTitle>Recent Governance Events</CardTitle>
           </CardHeader>
@@ -129,97 +149,57 @@ export function DashboardPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Timestamp</TableHead>
+                  <TableHead>Time</TableHead>
                   <TableHead>Action</TableHead>
+                  <TableHead>Category</TableHead>
                   <TableHead>Severity</TableHead>
+                  <TableHead>Outcome</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {logs.slice(0, 6).map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell>
-                      {new Date(log.createdAt).toLocaleString()}
-                    </TableCell>
-                    <TableCell>{log.action}</TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          log.severity === "CRITICAL"
-                            ? "destructive"
-                            : log.severity === "WARNING"
-                              ? "warning"
-                              : "secondary"
-                        }
-                      >
-                        {log.severity}
-                      </Badge>
+                {recentEvents.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      No governance events recorded yet.
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  recentEvents.map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="whitespace-nowrap text-xs">
+                        {new Date(log.createdAt).toLocaleTimeString()}
+                      </TableCell>
+                      <TableCell className="max-w-[200px] truncate text-xs" title={log.action}>
+                        {log.action}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="text-xs">
+                          {log.category}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={severityVariant(log.severity)} className="text-xs">
+                          {log.severity}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={log.outcome === "SUCCESS" ? "default" : "destructive"} className="text-xs">
+                          {log.outcome}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>
-        </Card> */}
-      </section>
-
-      <section className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Pending Deposits</CardDescription>
-            <CardTitle>{pendingDeposits}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Button asChild size="sm">
-              <Link to="/deposits-approval">Review Deposits</Link>
+          <CardFooter>
+            <Button asChild variant="ghost" size="sm" className="h-auto p-0 text-xs">
+              <Link to="/audit">View all audit logs →</Link>
             </Button>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Pending Pledges</CardDescription>
-            <CardTitle>{pendingPledges}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Button asChild size="sm">
-              <Link to="/escrows-approval">Review Pledges</Link>
-            </Button>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Pending Redeems</CardDescription>
-            <CardTitle>{pendingRedeems}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Button asChild size="sm">
-              <Link to="/redeems-approval">Review Redeems</Link>
-            </Button>
-          </CardContent>
+          </CardFooter>
         </Card>
       </section>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>HTLC Cross-Spoke Activity</CardTitle>
-          <CardDescription>
-            Operational monitor for inter-spoke atomic settlement contracts.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-2 md:grid-cols-3">
-          <div className="rounded border border-border p-3">
-            <p className="text-xs text-muted-foreground">Active Locks</p>
-            <p className="text-lg font-semibold">{lockedCount}</p>
-          </div>
-          <div className="rounded border border-border p-3">
-            <p className="text-xs text-muted-foreground">Settled</p>
-            <p className="text-lg font-semibold">{settledCount}</p>
-          </div>
-          <div className="rounded border border-border p-3">
-            <p className="text-xs text-muted-foreground">Refunded</p>
-            <p className="text-lg font-semibold">{refundedCount}</p>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package registry provides interfaces and implementations for interacting with
 // the IdentityRegistry smart contract on Hyperledger Besu.
 //

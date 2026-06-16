@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides CrossCurrencySwapOrchestrator for coordinating the 3-step
 // cross-currency swap flow (bridge-in → swap Hub → bridge-out).
 //
@@ -21,8 +23,11 @@ type CrossCurrencySwapRepository interface {
 	GetByID(ctx context.Context, swapID string) (*domain.CrossCurrencySwapOperation, error)
 	UpdateStatus(ctx context.Context, swapID string, status domain.SwapOperationStatus) error
 	UpdateBridgeInPositionID(ctx context.Context, swapID string, positionID string) error
-	UpdateAmountIn(ctx context.Context, swapID string, amountIn string) error
-	UpdateSwapTxHash(ctx context.Context, swapID string, txHash string) error
+	// UpdateSwapResult atomically persists both the swap tx hash and the realized amount_in.
+	// These two fields must be written together: amount_in now holds the real cost decoded
+	// from LogSwap (not the MaxAmountIn cap), so a partial write would leave the record with a
+	// tx hash but a stale/empty amount_in.
+	UpdateSwapResult(ctx context.Context, swapID string, txHash string, amountIn string) error
 	UpdateBridgeOutPositionID(ctx context.Context, swapID string, positionID string) error
 	UpdateFailureReason(ctx context.Context, swapID string, reason string) error
 }
@@ -127,6 +132,8 @@ type CrossCurrencySwapOrchestrator struct {
 	// hubSignerAddress is the Hub address used by this gateway's signer (SIGNER_PRIVATE_KEY).
 	// After the AMM swap, W-ARS lands on this address; CB-B uses it as burnFrom.
 	hubSignerAddress string
+	// transferLimitChecker enforces configurable CB daily transfer limits (R1-10.1).
+	transferLimitChecker TransferLimitCheckerIface
 }
 
 // NewCrossCurrencySwapOrchestrator creates an orchestrator.
@@ -176,6 +183,13 @@ func (o *CrossCurrencySwapOrchestrator) WithBridgeInRelay(relay BridgeInRelayIfa
 // where to burn from (CB-B has CENTRAL_BANK_ROLE = can burn from any address).
 func (o *CrossCurrencySwapOrchestrator) WithHubSignerAddress(addr string) *CrossCurrencySwapOrchestrator {
 	o.hubSignerAddress = addr
+	return o
+}
+
+// WithTransferLimitChecker attaches the CB transfer limit enforcer (R1-10.1).
+// When set, CheckAndDeduct is called before Step 1 (bridge-in) and Restore is called on failure.
+func (o *CrossCurrencySwapOrchestrator) WithTransferLimitChecker(checker TransferLimitCheckerIface) *CrossCurrencySwapOrchestrator {
+	o.transferLimitChecker = checker
 	return o
 }
 
@@ -252,6 +266,25 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		}
 	}
 
+	// Pre-condition 3: Daily transfer limit check (R1-10.1).
+	// MaxAmountIn is the worst-case amount the payer will spend; use it for limit accounting.
+	if o.transferLimitChecker != nil {
+		if err := o.transferLimitChecker.CheckAndDeduct(ctx, req.PayerBankID, req.SourceCurrency, req.MaxAmountIn); err != nil {
+			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("transfer limit check failed: %v", err))
+			return nil, err
+		}
+		// Restore quota on any subsequent failure in Steps 1–3.
+		defer func() {
+			// Only restore if the swap ultimately failed (checked via DB status).
+			if recovered := o.swapRepo; recovered != nil {
+				op, fetchErr := recovered.GetByID(ctx, req.SwapID)
+				if fetchErr == nil && op != nil && op.Status == domain.SwapStatusFailed {
+					o.transferLimitChecker.Restore(ctx, req.PayerBankID, req.SourceCurrency, req.MaxAmountIn)
+				}
+			}
+		}()
+	}
+
 	// Step 1: Bridge-In (Spoke-A → Hub)
 	log.Printf("[correlation_id=%s] Step 1: Bridge-In (lock %s on Spoke-A, mint W-%s on Hub)",
 		req.CorrelationID, req.SourceCurrency, req.SourceCurrency)
@@ -282,8 +315,12 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			CorrelationID:  req.CorrelationID,
 			PayerBankID:    req.PayerBankID,
 			SourceCurrency: req.SourceCurrency,
-			Amount:         req.MaxAmountIn, // Use max for bridge (actual amount_in determined after swap)
-			SpokeIn:        spokeIn,
+			// Bridge in the full cap: the worst-case amount_in must be reserved on the Hub
+			// before the swap runs, since the realized cost is only known afterwards.
+			// TODO(stranded-buffer): the residue (MaxAmountIn − realized amount_in) is left on
+			// the Hub signer with no automatic bridge-back. Tracked as a separate R2 follow-up.
+			Amount:  req.MaxAmountIn,
+			SpokeIn: spokeIn,
 			// Mint W-<source> to this gateway's swap signer so Step 2 can spend it (and
 			// Step 3 burns from the same address). Mirrors bridge-out's SwapSenderAddress.
 			SwapSenderAddress: o.hubSignerAddress,
@@ -302,7 +339,10 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			spokeIn,
 			nativeAsset,
 			mirroredAsset,
-			req.MaxAmountIn, // Use max for bridge (actual amount_in determined after swap)
+			// Bridge in the full cap (worst-case amount_in reserved before the swap runs).
+			// TODO(stranded-buffer): the residue (MaxAmountIn − realized amount_in) is left on
+			// the Hub signer with no automatic bridge-back. Tracked as a separate R2 follow-up.
+			req.MaxAmountIn,
 			req.CorrelationID)
 		if err != nil {
 			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("bridge-in failed: %v", err))
@@ -346,8 +386,7 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		return nil, fmt.Errorf("swap failed: %w", err)
 	}
 
-	_ = o.swapRepo.UpdateSwapTxHash(ctx, req.SwapID, swapResult.TxHash)
-	_ = o.swapRepo.UpdateAmountIn(ctx, req.SwapID, swapResult.AmountIn)
+	_ = o.swapRepo.UpdateSwapResult(ctx, req.SwapID, swapResult.TxHash, swapResult.AmountIn)
 	log.Printf("[correlation_id=%s] swap completed (tx_hash=%s, amount_in=%s)",
 		req.CorrelationID, swapResult.TxHash, swapResult.AmountIn)
 
@@ -442,6 +481,9 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			mirroredOut,
 			req.AmountOut,
 			req.CorrelationID,
+			// extras: no burn-from / beneficiary override (legacy executor fallbacks),
+			// but bind the position to the swap tx so replay protection applies (R2-CR-6).
+			"", "", swapResult.TxHash,
 		)
 		if bridgeOutErr != nil {
 			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("bridge-out failed (partial success): %v", bridgeOutErr))

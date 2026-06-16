@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package pki provides X.509 PKI utilities for the CBWeb3 platform.
 // It covers certificate issuance (CA), chain verification and ECDSA signature
 // validation. All cryptographic operations use P-256 (ECDSA) for X.509

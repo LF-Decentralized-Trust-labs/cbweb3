@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the PoolStatusGate that enforces FR-011:
 // swaps MUST be blocked when the pool is not in ACTIVE state.
 package services

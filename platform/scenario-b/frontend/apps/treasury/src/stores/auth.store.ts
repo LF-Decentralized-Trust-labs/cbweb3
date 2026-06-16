@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { authApi } from "../services/api";
-import type { AsyncStatus, TreasuryUser } from "../types";
+import type { AsyncStatus, MeResponse, TreasuryUser } from "../types";
 
 type AuthState = {
   user: TreasuryUser | null;
@@ -8,10 +8,21 @@ type AuthState = {
   initialized: boolean;
   status: AsyncStatus;
   error: string | null;
-  login: (username: string, password: string) => Promise<void>;
+  login: (clientId: string, clientSecret: string) => Promise<void>;
   logout: () => Promise<void>;
   checkSession: () => Promise<void>;
 };
+
+function meToUser(me: MeResponse): TreasuryUser {
+  return {
+    id: me.subject,
+    name: me.subject,
+    institutionId: me.bankId ?? "",
+    role: "TREASURY",
+    walletAddress: me.wallet ?? "",
+    authorizedIssuer: me.roles.some((r) => r.toLowerCase().includes("treasury") || r.toLowerCase().includes("issuer")),
+  };
+}
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
@@ -19,11 +30,12 @@ export const useAuthStore = create<AuthState>((set) => ({
   initialized: false,
   status: "idle",
   error: null,
-  login: async (username, password) => {
+  login: async (clientId, clientSecret) => {
     set({ status: "loading", error: null });
     try {
-      const response = await authApi.login(username, password);
-      set({ user: response.user, isAuthenticated: true, initialized: true, status: "idle" });
+      await authApi.login(clientId, clientSecret);
+      const me = await authApi.me();
+      set({ user: meToUser(me), isAuthenticated: true, initialized: true, status: "idle" });
     } catch (error) {
       set({
         status: "error",
@@ -38,6 +50,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
   },
   checkSession: async () => {
-    set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
+    try {
+      const me = await authApi.me();
+      set({ user: meToUser(me), isAuthenticated: true, initialized: true, status: "idle" });
+    } catch {
+      set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
+    }
   },
 }));

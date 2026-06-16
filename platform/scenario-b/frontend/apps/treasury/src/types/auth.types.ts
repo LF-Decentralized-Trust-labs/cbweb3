@@ -9,11 +9,17 @@ export type TreasuryUser = {
   authorizedIssuer: boolean;
 };
 
-export type LoginRequest = {
-  username: string;
-  password: string;
+export type MeResponse = {
+  subject: string;
+  issuer: string;
+  roles: string[];
+  wallet?: string;
+  country?: string;
+  bankId?: string;
+  privacyGroup?: string;
 };
 
-export type LoginResponse = {
-  user: TreasuryUser;
+export type LoginRequest = {
+  clientId: string;
+  clientSecret: string;
 };

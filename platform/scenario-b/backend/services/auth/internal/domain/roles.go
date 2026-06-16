@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package domain
 
 // PKI role constants — canonical participant roles across the platform.
@@ -64,7 +66,7 @@ type ParticipantStatus string
 
 const (
 	ParticipantStatusPending              ParticipantStatus = "PENDING"
-	ParticipantStatusCredentialRequested  ParticipantStatus = "CREDENTIAL_REQUESTED"
+	ParticipantStatusCredentialRequested  ParticipantStatus = "CREDENTIAL_REQUESTED" // #nosec G101 -- not a secret; participant lifecycle status label
 	ParticipantStatusKYCApproved          ParticipantStatus = "KYC_APPROVED"
 	ParticipantStatusActive               ParticipantStatus = "ACTIVE"
 	ParticipantStatusFrozen               ParticipantStatus = "FROZEN"

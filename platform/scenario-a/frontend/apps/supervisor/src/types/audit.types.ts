@@ -13,11 +13,22 @@ export interface DecryptTransactionResponse {
   decryptedAt: string;
 }
 
+// AuditLogEntry mirrors the backend AuditRecord JSON shape from GET /api/v1/compliance/audit/logs.
 export interface AuditLogEntry {
-  id: string;
-  actor: string;
-  action: string;
-  target: string;
+  log_id: string;
   timestamp: string;
-  status: "SUCCESS" | "FAILED";
+  actor: string;
+  actor_address?: string;
+  action: string;
+  target_subject?: string;
+  category: string;
+  severity: string;
+  outcome: string;
+  details?: string;
+}
+
+export interface AuditLogsResponse {
+  logs: AuditLogEntry[];
+  page: number;
+  limit: number;
 }

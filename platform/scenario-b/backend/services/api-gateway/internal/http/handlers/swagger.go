@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file serves OpenAPI YAML and Swagger UI endpoints.
 package handlers
 
@@ -32,7 +34,7 @@ func OpenAPIYAML(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "unable to load openapi specification"})
 	}
 
-	c.Type("yaml")
+	c.Set(fiber.HeaderContentType, "application/yaml; charset=utf-8")
 	return c.Send(apidocs.OpenAPIYAML)
 }
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file defines cookie-auth middleware and injects validated claims into context.
 package middleware
 

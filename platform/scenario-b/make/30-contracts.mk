@@ -1,5 +1,14 @@
 -include contracts/.env
 
+# ── Local Besu broadcast mode ─────────────────────────────────────────────────
+# The local Besu networks run zeroBaseFee (London@0, base fee forced to 0,
+# --min-gas-price=0), so eth_feeHistory returns a null reward and Foundry's default
+# EIP-1559 fee estimation fails ("Failed to estimate EIP1559 fees ... null response").
+# Broadcast legacy (type-0) txs to match the zero-gas chain. Override with empty
+# (e.g. `make <target> FORGE_LEGACY= CAST_LEGACY=`) for a real EIP-1559 network.
+FORGE_LEGACY ?= --legacy
+CAST_LEGACY  ?= --legacy
+
 # ── Protobuf / gRPC code generation ──────────────────────────────────────────
 # Prerequisites (install once):
 #   go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
@@ -24,11 +33,15 @@ contracts.fmt:
 contracts.lint:
 	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge lint
 
+# -j 1 runs test suites serially. Several deploy-script tests mutate process-global env
+# vars via vm.setEnv (ADMIN_ADDRESS, DEPLOYER_PRIVATE_KEY); under parallel suite execution
+# one suite's setUp() can overwrite another's env, causing intermittent
+# AccessControlUnauthorizedAccount / role-assertion flakes. Serial execution is deterministic.
 contracts.test:
-	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge test -vvv
+	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge test -vvv -j 1
 
 contracts.coverage:
-	@cd contracts && bash tools/validate-coverage.sh
+	@cd contracts && FOUNDRY_FUZZ_RUNS=256 bash tools/validate-coverage.sh
 
 contracts.build:
 	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge build --sizes
@@ -43,16 +56,16 @@ contracts.serve-doc:
 	@cd contracts && forge doc --serve
 
 contracts.deploy-tcebm-besu:
-	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/TokenizedCentralBankMoney.s.sol:DeployTCeBM --rpc-url ${BESU_RPC_URL} --broadcast
+	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/TokenizedCentralBankMoney.s.sol:DeployTCeBM --rpc-url ${BESU_RPC_URL} --broadcast $(FORGE_LEGACY)
 
 contracts.deploy-htlc-besu:
-	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/HashTimeLockedContract.s.sol:DeployHTLC --rpc-url ${BESU_RPC_URL} --broadcast
+	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/HashTimeLockedContract.s.sol:DeployHTLC --rpc-url ${BESU_RPC_URL} --broadcast $(FORGE_LEGACY)
 
 contracts.deploy-amm-besu:
-	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/AutomatedMarketMaker.s.sol:DeployAMM --rpc-url ${BESU_RPC_URL} --broadcast
+	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/AutomatedMarketMaker.s.sol:DeployAMM --rpc-url ${BESU_RPC_URL} --broadcast $(FORGE_LEGACY)
 
 contracts.deploy-identity-registry-besu:
-	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/IdentityRegistry.s.sol:DeployIdentityRegistry --rpc-url ${BESU_RPC_URL} --broadcast
+	@cd contracts && FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/IdentityRegistry.s.sol:DeployIdentityRegistry --rpc-url ${BESU_RPC_URL} --broadcast $(FORGE_LEGACY)
 
 contracts.deploy-hub:
 	@test -n "$(CENTRAL_BANK_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_ADDRESS is not set — check contracts/.env"; exit 1)
@@ -62,7 +75,7 @@ contracts.deploy-hub:
 	 HUB_CHAIN_ID="$${HUB_CHAIN_ID:-1337}" && \
 	 cd contracts && CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_ADDRESS) FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script \
 	   script/CBWeb3Hub.s.sol:DeployCBWeb3Hub \
-	   --rpc-url "$$BESU_HUB_RPC" --broadcast
+	   --rpc-url "$$BESU_HUB_RPC" --broadcast $(FORGE_LEGACY)
 
 contracts.deploy-spoke-a:
 	@test -n "$(CENTRAL_BANK_A_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_A_ADDRESS is not set — check contracts/.env"; exit 1)
@@ -71,7 +84,7 @@ contracts.deploy-spoke-a:
 	@cd contracts && TOKEN_NAME="Tokenized BRL" TOKEN_SYMBOL="tCeBM_BRL" \
 		FIAT_TOKEN_NAME="Fiat BRL" FIAT_TOKEN_SYMBOL="fCeBM_BRL" \
 		CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_A_ADDRESS) \
-		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_A_RPC_URL} --broadcast
+		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_A_RPC_URL} --broadcast $(FORGE_LEGACY)
 
 contracts.deploy-spoke-b:
 	@test -n "$(CENTRAL_BANK_B_ADDRESS)" || (echo "ERROR: CENTRAL_BANK_B_ADDRESS is not set — check contracts/.env"; exit 1)
@@ -80,7 +93,7 @@ contracts.deploy-spoke-b:
 	@cd contracts && TOKEN_NAME="Tokenized ARS" TOKEN_SYMBOL="tCeBM_ARS" \
 		FIAT_TOKEN_NAME="Fiat ARS" FIAT_TOKEN_SYMBOL="fCeBM_ARS" \
 		CENTRAL_BANK_ADDRESS=$(CENTRAL_BANK_B_ADDRESS) \
-		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_B_RPC_URL} --broadcast
+		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/CBWeb3Spoke.s.sol:DeployCBWeb3Spoke --rpc-url ${SPOKE_B_RPC_URL} --broadcast $(FORGE_LEGACY)
 
 contracts.deploy-all: contracts.setup contracts.deploy-spoke-a contracts.deploy-spoke-b
 
@@ -92,7 +105,7 @@ contracts.register-participants-spoke-a:
 		IDENTITY_REGISTRY=$$REGISTRY \
 		HUB_IDENTITY_REGISTRY=$$HUB_REG \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/RegisterParticipants.s.sol:RegisterParticipants \
-		--rpc-url ${SPOKE_A_RPC_URL} --broadcast
+		--rpc-url ${SPOKE_A_RPC_URL} --broadcast $(FORGE_LEGACY)
 
 contracts.register-participants-spoke-b:
 	@echo "Registering participants in compliance IdentityRegistry on spoke-b..."
@@ -102,7 +115,7 @@ contracts.register-participants-spoke-b:
 		IDENTITY_REGISTRY=$$REGISTRY \
 		HUB_IDENTITY_REGISTRY=$$HUB_REG \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/RegisterParticipants.s.sol:RegisterParticipants \
-		--rpc-url ${SPOKE_B_RPC_URL} --broadcast
+		--rpc-url ${SPOKE_B_RPC_URL} --broadcast $(FORGE_LEGACY)
 
 contracts.register-participants-hub:
 	@echo "Registering participants in Hub IdentityRegistry (AMM governance)..."
@@ -114,7 +127,7 @@ contracts.register-participants-hub:
 	 cd contracts && ADMIN_PRIVATE_KEY=$(ADMIN_PRIVATE_KEY) \
 		IDENTITY_REGISTRY=$$REGISTRY \
 		FOUNDRY_PROFILE=${FOUNDRY_PROFILE} forge script script/RegisterParticipants.s.sol:RegisterParticipants \
-		--rpc-url $$HUB_RPC --broadcast
+		--rpc-url $$HUB_RPC --broadcast $(FORGE_LEGACY)
 
 contracts.register-participants: contracts.register-participants-spoke-a contracts.register-participants-spoke-b contracts.register-participants-hub
 
@@ -133,7 +146,7 @@ contracts.seed-hub:
 	   AMM_ADDRESS=$$AMM \
 	   HUB_IDENTITY_REGISTRY=$$HUB_REG \
 	   forge script script/SeedHub.s.sol:SeedHub \
-	   --rpc-url "$$BESU_HUB_RPC" --broadcast
+	   --rpc-url "$$BESU_HUB_RPC" --broadcast $(FORGE_LEGACY)
 
 contracts.deploy-cbweb3-besu: contracts.deploy-hub
 
@@ -152,10 +165,10 @@ contracts.grant-central-bank-role:
 	 ROLE=$$(cast keccak "CENTRAL_BANK_ROLE") && \
 	 echo "Granting CENTRAL_BANK_ROLE to $(CENTRAL_BANK_ADDRESS) on HUB_TOKEN_A ($$TOKEN_A)..." && \
 	 cast send $$TOKEN_A "grantRole(bytes32,address)" $$ROLE $(CENTRAL_BANK_ADDRESS) \
-	   --private-key $(ADMIN_PRIVATE_KEY) --rpc-url $$BESU_HUB_RPC && \
+	   --private-key $(ADMIN_PRIVATE_KEY) --rpc-url $$BESU_HUB_RPC $(CAST_LEGACY) && \
 	 echo "Granting CENTRAL_BANK_ROLE to $(CENTRAL_BANK_ADDRESS) on HUB_TOKEN_B ($$TOKEN_B)..." && \
 	 cast send $$TOKEN_B "grantRole(bytes32,address)" $$ROLE $(CENTRAL_BANK_ADDRESS) \
-	   --private-key $(ADMIN_PRIVATE_KEY) --rpc-url $$BESU_HUB_RPC && \
+	   --private-key $(ADMIN_PRIVATE_KEY) --rpc-url $$BESU_HUB_RPC $(CAST_LEGACY) && \
 	 echo "Verifying roles..." && \
 	 cast call $$TOKEN_A "hasRole(bytes32,address)(bool)" $$ROLE $(CENTRAL_BANK_ADDRESS) --rpc-url $$BESU_HUB_RPC && \
 	 cast call $$TOKEN_B "hasRole(bytes32,address)(bool)" $$ROLE $(CENTRAL_BANK_ADDRESS) --rpc-url $$BESU_HUB_RPC && \
@@ -174,7 +187,7 @@ contracts.grant-central-bank-b-role:
 	 ROLE=$$(cast keccak "CENTRAL_BANK_ROLE") && \
 	 echo "Granting CENTRAL_BANK_ROLE to CB-B ($(CENTRAL_BANK_B_ADDRESS)) on HUB_TOKEN_B ($$TOKEN_B)..." && \
 	 cast send $$TOKEN_B "grantRole(bytes32,address)" $$ROLE $(CENTRAL_BANK_B_ADDRESS) \
-	   --private-key $(ADMIN_PRIVATE_KEY) --rpc-url $$BESU_HUB_RPC && \
+	   --private-key $(ADMIN_PRIVATE_KEY) --rpc-url $$BESU_HUB_RPC $(CAST_LEGACY) && \
 	 echo "Verifying..." && \
 	 cast call $$TOKEN_B "hasRole(bytes32,address)(bool)" $$ROLE $(CENTRAL_BANK_B_ADDRESS) --rpc-url $$BESU_HUB_RPC && \
 	 echo "Done — CENTRAL_BANK_ROLE granted to CB-B on token_b."
@@ -201,7 +214,7 @@ contracts.grant-liquidity-providers:
 	   else \
 	     echo "  Granting LiquidityProvider to $$CB..." && \
 	     cast send $$HUB_REG "grantLiquidityProvider(address)" $$CB \
-	       --private-key $(ADMIN_PRIVATE_KEY) --rpc-url $$BESU_HUB_RPC >/dev/null && \
+	       --private-key $(ADMIN_PRIVATE_KEY) --rpc-url $$BESU_HUB_RPC $(CAST_LEGACY) >/dev/null && \
 	     cast call $$HUB_REG "isLiquidityProvider(address)(bool)" $$CB --rpc-url $$BESU_HUB_RPC; \
 	   fi; \
 	 done && \
@@ -267,7 +280,7 @@ contracts.seed-sovereign-pair:
 	 forge script script/SeedNewSovereignPair.s.sol:SeedNewSovereignPair \
 	   --rpc-url $$BESU_HUB_RPC \
 	   --chain-id $$HUB_CHAIN_ID \
-	   --broadcast \
+	   --broadcast $(FORGE_LEGACY) \
 	   -vvv
 
 # ── Run LiquidityCommitRegistry Foundry tests ───────────────────────────────

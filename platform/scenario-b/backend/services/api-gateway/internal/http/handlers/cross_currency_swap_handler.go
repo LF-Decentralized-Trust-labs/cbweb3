@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides the cross-currency swap HTTP handler for commercial banks
 // (009-commercial-cross-currency-swap / FR-001).
 package handlers
@@ -211,6 +213,16 @@ func (h *CrossCurrencySwapHandler) handleCrossCurrencySwapError(c *fiber.Ctx, er
 	var execErr *domain.SwapExecError
 	if errors.As(err, &execErr) {
 		return h.mapSwapExecError(c, execErr)
+	}
+
+	// R1-10.1: Daily transfer limit exceeded — surface a clear 422 with actionable message.
+	var limitErr *services.ErrTransferLimitExceeded
+	if errors.As(err, &limitErr) {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error":              err.Error(),
+			"error_code":         "TRANSFER_LIMIT_EXCEEDED",
+			"recommended_action": "Contact your Central Bank to review or increase the daily transfer limit.",
+		})
 	}
 
 	// Check for pool not active error (from orchestrator pre-validation)

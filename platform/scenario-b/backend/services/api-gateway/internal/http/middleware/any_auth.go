@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package middleware provides a dual-auth middleware that accepts either an
 // HttpOnly cookie (browser flows) or an Authorization: Bearer header (M2M/CB
 // sovereign flows such as spec-007 client_credentials tokens).

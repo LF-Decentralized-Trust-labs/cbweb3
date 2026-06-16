@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides governance circuit-breaker HTTP handlers for Scenario B (FR-030 / SC-017 / SC-026).
 package handlers
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // This file wires application dependencies and builds the configured Fiber app.
 package app
 
@@ -10,16 +12,22 @@ import (
 	"time"
 
 	authadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/auth"
+	besuscanner "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/besu"
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
+	paladinadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/paladin"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
+	dbinit "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/db/init"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 // App wraps the Fiber HTTP server and all gRPC connections for lifecycle management.
@@ -76,15 +84,45 @@ func New(cfg config.Config) (*App, error) {
 	}
 	closers = append(closers, complianceGRPC)
 	governanceHandler := handlers.NewGovernanceHandler(complianceGRPC)
+	supervisorHandler := handlers.NewSupervisorHandler(complianceGRPC)
 
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure)
 	complianceHandler := handlers.NewComplianceHandler(identityManager, complianceGRPC)
+
+	// Investigation Module: open a separate DB connection for the OversightService (optional).
+	var oversightHandler *handlers.OversightHandler
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		if oversightDB, dbErr := gorm.Open(postgres.Open(dbURL), &gorm.Config{}); dbErr == nil {
+			if migrateErr := dbinit.RunAutoMigrate(oversightDB); migrateErr != nil {
+				log.Printf("warning: oversight schema migration failed (%v); disclosure endpoints disabled", migrateErr)
+			} else {
+				oversightSvc := services.NewOversightService(oversightDB)
+				oversightHandler = handlers.NewOversightHandler(oversightSvc)
+
+				// Decrypt endpoint: wire Paladin client and oversight quorum gate into SupervisorHandler.
+				if cfg.PaladinURL != "" {
+					paladinClient := paladinadapter.NewClient(cfg.PaladinURL)
+					supervisorHandler.SetDecryptDeps(paladinClient, oversightSvc)
+					log.Printf("supervisor decrypt endpoint enabled (paladin: %s)", cfg.PaladinURL)
+				}
+			}
+		} else {
+			log.Printf("warning: oversight DB unavailable (%v); disclosure endpoints disabled", dbErr)
+		}
+	}
 
 	deps := router.Dependencies{
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
 		GovernanceHandler: governanceHandler,
+		SupervisorHandler: supervisorHandler,
+		OversightHandler:  oversightHandler,
 		AuthProvider:      identityGRPCProvider,
+	}
+
+	// Transfer Limits (R1-10.1): CB only — commercial banks do not manage limits.
+	if cfg.CentralBankAPIURL == "" {
+		deps.TransferLimitHandler = handlers.NewTransferLimitHandler(complianceGRPC)
 	}
 
 	// Payment orchestrator gRPC adapter (optional; enables HTLC + token endpoints).
@@ -95,7 +133,23 @@ func New(cfg config.Config) (*App, error) {
 			return nil, fmt.Errorf("payment gRPC unavailable at %s: %w", cfg.PaymentGRPCAddr, err)
 		}
 		closers = append(closers, paymentGRPC)
-		deps.PaymentHandler = handlers.NewPaymentHandler(paymentGRPC, cfg.BankCode)
+		ph := handlers.NewPaymentHandler(paymentGRPC, cfg.BankCode)
+		if cfg.FiatSymbol != "" {
+			limitComplianceGRPC := complianceGRPC
+			// Commercial banks point their limit checks at the central bank's compliance service,
+			// since transfer limits are stored there (managed by the CB Treasury portal).
+			if cfg.TransferLimitComplianceAddr != "" {
+				tlConn, err := complianceadapter.NewGRPCAdapter(cfg.TransferLimitComplianceAddr, cfg.RequestTimeout)
+				if err != nil {
+					closeAll(closers)
+					return nil, fmt.Errorf("transfer limit compliance gRPC unavailable at %s: %w", cfg.TransferLimitComplianceAddr, err)
+				}
+				closers = append(closers, tlConn)
+				limitComplianceGRPC = tlConn
+			}
+			ph = ph.WithLimitChecker(limitComplianceGRPC, cfg.FiatSymbol)
+		}
+		deps.PaymentHandler = ph
 
 		// Commercial bank: wire escrow proxy that forwards to the Central Bank.
 		if cfg.CentralBankAPIURL != "" {
@@ -108,6 +162,19 @@ func New(cfg config.Config) (*App, error) {
 				cfg.RelayAuthSecret,
 			)
 		}
+	}
+
+	// On-chain HTLC scanner: supervisor searches bypass the payment-orchestrator and
+	// read event logs directly from Besu, making all network HTLCs visible.
+	if cfg.BesuRPCURL != "" && cfg.HTLCContractAddress != "" && deps.PaymentHandler != nil {
+		scanner, scanErr := besuscanner.NewHTLCScanner(cfg.BesuRPCURL, cfg.HTLCContractAddress)
+		if scanErr != nil {
+			closeAll(closers)
+			return nil, fmt.Errorf("besu htlc scanner: %w", scanErr)
+		}
+		closers = append(closers, scanner)
+		deps.PaymentHandler.SetHTLCScanner(scanner)
+		supervisorHandler.SetHTLCScanner(scanner)
 	}
 
 	if cfg.CentralBankAPIURL != "" {
@@ -133,7 +200,7 @@ func New(cfg config.Config) (*App, error) {
 	if corsOrigins := os.Getenv("CORS_ALLOW_ORIGINS"); corsOrigins != "" {
 		fiberApp.Use(cors.New(cors.Config{
 			AllowOrigins:     corsOrigins,
-			AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept",
+			AllowHeaders:     "Authorization, Content-Type, X-Requested-With, Accept, X-Correlation-Id",
 			AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 			AllowCredentials: true,
 		}))

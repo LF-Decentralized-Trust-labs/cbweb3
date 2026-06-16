@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package init provides append-only PL/pgSQL triggers for Scenario B audit tables.
 package init
 

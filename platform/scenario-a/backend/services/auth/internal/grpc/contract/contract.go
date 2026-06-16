@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package contract
 
 import (
@@ -10,9 +12,9 @@ const (
 	ServiceName = "auth.v1.AuthService"
 
 	LoginMethod                = "/auth.v1.AuthService/Login"
-	RefreshTokenMethod         = "/auth.v1.AuthService/RefreshToken"
-	RevokeTokenMethod          = "/auth.v1.AuthService/RevokeToken"
-	ValidateTokenMethod        = "/auth.v1.AuthService/ValidateToken"
+	RefreshTokenMethod         = "/auth.v1.AuthService/RefreshToken"  //#nosec G101 -- not a secret; gRPC method path string
+	RevokeTokenMethod          = "/auth.v1.AuthService/RevokeToken"   //#nosec G101 -- not a secret; gRPC method path string
+	ValidateTokenMethod        = "/auth.v1.AuthService/ValidateToken" //#nosec G101 -- not a secret; gRPC method path string
 	RegisterParticipantMethod  = "/auth.v1.AuthService/RegisterParticipant"
 	SignTransactionMethod      = "/auth.v1.AuthService/SignTransaction"
 	GetKYCStatusMethod         = "/auth.v1.AuthService/GetKYCStatus"
@@ -26,7 +28,7 @@ const (
 	VerifyPKILoginMethod  = "/auth.v1.AuthService/VerifyPKILogin"
 
 	// Client secret management
-	ChangeClientSecretMethod = "/auth.v1.AuthService/ChangeClientSecret"
+	ChangeClientSecretMethod = "/auth.v1.AuthService/ChangeClientSecret" //#nosec G101 -- not a secret; gRPC method path string
 )
 
 // --- Auth ---
@@ -188,7 +190,7 @@ type IssueLoginNonceResponse struct {
 
 // VerifyPKILoginRequest carries the signed nonce and the institution's X.509 cert.
 type VerifyPKILoginRequest struct {
-	UserID       string `json:"user_id"`
+	UserID string `json:"user_id"`
 	// NonceSignatureHex is the DER-encoded ECDSA signature of SHA-256(nonce bytes), hex-encoded.
 	NonceSignatureHex string `json:"nonce_signature_hex"`
 	// CertPEM is the institution's X.509 certificate issued by the Central Bank CA.
@@ -252,9 +254,9 @@ type GetUserResponse struct {
 
 // ChangeClientSecretRequest allows an authenticated user to rotate their clientSecret.
 type ChangeClientSecretRequest struct {
-	UserID               string `json:"user_id"`
-	CurrentClientSecret  string `json:"current_client_secret"`
-	NewClientSecret      string `json:"new_client_secret"`
+	UserID              string `json:"user_id"`
+	CurrentClientSecret string `json:"current_client_secret"`
+	NewClientSecret     string `json:"new_client_secret"`
 }
 
 // ChangeClientSecretResponse is returned on successful secret rotation.

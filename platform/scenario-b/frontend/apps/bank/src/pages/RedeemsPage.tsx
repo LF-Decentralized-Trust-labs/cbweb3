@@ -22,7 +22,7 @@ import { usePaymentStore } from "../stores";
 import {
   PaymentStatus,
   displayToBase,
-  fiatUnitLabel,
+  fiatCurrencyLabel,
   formatCeBM,
   getPaymentStatusLabel,
   getPaymentStatusVariant,
@@ -38,6 +38,8 @@ export function RedeemsPage() {
   const redeems = usePaymentStore((state) => state.redeems);
   const balance = usePaymentStore((state) => state.balance);
   const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
+  const tCeBMSymbol = usePaymentStore((state) => state.tCeBMSymbol);
+  const fCeBMSymbol = usePaymentStore((state) => state.fCeBMSymbol);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
   const decimals = tCeBMDecimals ?? 18;
@@ -103,7 +105,7 @@ export function RedeemsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Redeem tCeBM (tCeBM to {fiatUnitLabel})</CardTitle>
+          <CardTitle>Redeem tCeBM (tCeBM to {fiatCurrencyLabel(fCeBMSymbol)})</CardTitle>
           <CardDescription>
             Submit a redemption request to the central bank.
           </CardDescription>
@@ -141,7 +143,7 @@ export function RedeemsPage() {
           <CardHeader>
             <CardTitle>Confirm Redeem Request</CardTitle>
             <CardDescription>
-              {formatCeBM(amount, decimals)} will be submitted for central bank fiat
+              {formatCeBM(amount, decimals, tCeBMSymbol)} will be submitted for central bank fiat
               reserve release approval.
             </CardDescription>
           </CardHeader>
@@ -180,7 +182,7 @@ export function RedeemsPage() {
               {redeems.map((redeem) => (
                 <TableRow key={redeem.id}>
                   <TableCell className="font-medium">{redeem.id}</TableCell>
-                  <TableCell>{formatCeBM(redeem.amount, decimals)}</TableCell>
+                  <TableCell>{formatCeBM(redeem.amount, decimals, tCeBMSymbol)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(redeem.status)}>
                       {getPaymentStatusLabel(redeem.status)}

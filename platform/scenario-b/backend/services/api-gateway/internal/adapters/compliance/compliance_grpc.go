@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package compliance provides a gRPC client adapter for the compliance-orchestrator.
 // Used by the governance handler to manage participants, certificates, audit logs,
 // circuit breaker, and system parameters.
@@ -18,7 +20,7 @@ import (
 type Participant struct {
 	UserID            string     `json:"user_id"`
 	InstitutionName   string     `json:"institution_name"`
-	CNPJ              string     `json:"cnpj"`
+	LegalEntityID     string     `json:"legal_entity_id"`
 	BankCode          string     `json:"bank_code"`
 	CountryCode       string     `json:"country_code"`
 	Role              string     `json:"role"`
@@ -112,7 +114,7 @@ func (a *GRPCAdapter) ListParticipants(ctx context.Context, statusFilter, search
 		part := Participant{
 			UserID:          p.UserId,
 			InstitutionName: p.InstitutionName,
-			CNPJ:            p.Cnpj,
+			LegalEntityID:   p.LegalEntityId,
 			BankCode:        p.BankCode,
 			CountryCode:     p.CountryCode,
 			Role:            p.Role,
@@ -133,7 +135,7 @@ func (a *GRPCAdapter) RegisterParticipant(ctx context.Context, p Participant) er
 	participant := &compliancv1.Participant{
 		UserId:          p.UserID,
 		InstitutionName: p.InstitutionName,
-		Cnpj:            p.CNPJ,
+		LegalEntityId:   p.LegalEntityID,
 		BankCode:        p.BankCode,
 		CountryCode:     p.CountryCode,
 		Role:            p.Role,
@@ -150,13 +152,13 @@ func (a *GRPCAdapter) RegisterParticipant(ctx context.Context, p Participant) er
 
 // SignParticipantCSR submits a PKCS#10 CSR to the compliance-orchestrator for
 // signing by the CA. The participant record is created/updated automatically.
-func (a *GRPCAdapter) SignParticipantCSR(ctx context.Context, csrPEM, userID, role, institutionName, cnpj string) (SignedCSRResult, error) {
+func (a *GRPCAdapter) SignParticipantCSR(ctx context.Context, csrPEM, userID, role, institutionName, legal_entity_id string) (SignedCSRResult, error) {
 	resp, err := a.cc.SignParticipantCSR(ctx, &compliancv1.SignParticipantCSRRequest{
 		CsrPem:          csrPEM,
 		UserId:          userID,
 		Role:            role,
 		InstitutionName: institutionName,
-		Cnpj:            cnpj,
+		LegalEntityId:   legal_entity_id,
 	})
 	if err != nil {
 		return SignedCSRResult{}, err
@@ -191,8 +193,8 @@ func (a *GRPCAdapter) GetAuditLogs(ctx context.Context, category, severity, from
 		Severity: severity,
 		FromDate: fromDate,
 		ToDate:   toDate,
-		Page:     int32(page),
-		Limit:    int32(limit),
+		Page:     int32(page),  // #nosec G115 -- pagination value, validated/small; fits int32.
+		Limit:    int32(limit), // #nosec G115 -- pagination value, validated/small; fits int32.
 	})
 	if err != nil {
 		return nil, err

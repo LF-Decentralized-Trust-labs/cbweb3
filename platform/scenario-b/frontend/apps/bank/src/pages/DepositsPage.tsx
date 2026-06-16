@@ -23,7 +23,7 @@ import { usePaymentStore } from "../stores";
 import {
   PaymentStatus,
   displayToBase,
-  fiatUnitLabel,
+  fiatCurrencyLabel,
   formatFiatUnits,
   getPaymentStatusLabel,
   getPaymentStatusVariant,
@@ -39,7 +39,9 @@ export function DepositsPage() {
   const balance = usePaymentStore((state) => state.balance);
   const fiatBalance = usePaymentStore((state) => state.fiatBalance);
   const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
+  const tCeBMSymbol = usePaymentStore((state) => state.tCeBMSymbol);
   const fCeBMDecimals = usePaymentStore((state) => state.fCeBMDecimals);
+  const fCeBMSymbol = usePaymentStore((state) => state.fCeBMSymbol);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
   const profile = useAuthStore((state) => state.profile);
@@ -86,11 +88,11 @@ export function DepositsPage() {
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-3">
-        <BalanceWidget balance={balance} decimals={tCeBMDecimals} loading={status === "loading" && balance === null} />
+        <BalanceWidget balance={balance} decimals={tCeBMDecimals} symbol={tCeBMSymbol} loading={status === "loading" && balance === null} />
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Fiat Reserve Balance (fCeBM)</CardDescription>
-            <CardTitle>{fiatBalance !== null ? formatFiatUnits(fiatBalance, fDecimals) : "—"}</CardTitle>
+            <CardTitle>{fiatBalance !== null ? formatFiatUnits(fiatBalance, fDecimals, fCeBMSymbol) : "—"}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -111,7 +113,7 @@ export function DepositsPage() {
             Wallet: {walletAddress || "Not available in session"}
           </p>
           <div className="space-y-2">
-            <Label htmlFor="deposit-amount">Amount ({fiatUnitLabel})</Label>
+            <Label htmlFor="deposit-amount">Amount ({fiatCurrencyLabel(fCeBMSymbol)})</Label>
             <Input
               id="deposit-amount"
               type="number"
@@ -137,7 +139,7 @@ export function DepositsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Confirm Issuance Request</CardTitle>
-            <CardDescription>{formatFiatUnits(amount, fDecimals)} will be submitted for central bank approval.</CardDescription>
+            <CardDescription>{formatFiatUnits(amount, fDecimals, fCeBMSymbol)} will be submitted for central bank approval.</CardDescription>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Button onClick={() => void onSubmit()} disabled={status === "loading"}>
@@ -171,7 +173,7 @@ export function DepositsPage() {
               {deposits.map((deposit) => (
                 <TableRow key={deposit.id}>
                   <TableCell className="font-medium">{deposit.id}</TableCell>
-                  <TableCell>{formatFiatUnits(deposit.amount, fDecimals)}</TableCell>
+                  <TableCell>{formatFiatUnits(deposit.amount, fDecimals, fCeBMSymbol)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(deposit.status)}>{getPaymentStatusLabel(deposit.status)}</Badge>
                   </TableCell>

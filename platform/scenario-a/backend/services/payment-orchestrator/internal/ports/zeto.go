@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package ports
 
 import "context"
@@ -27,10 +29,8 @@ type ZetoOperator interface {
 	// Returns the Zeto lock reference that links to the public HTLC contract.
 	Lock(ctx context.Context, amount string, delegate string) (*ZetoLockResult, error)
 
-	// Unlock releases previously locked Zeto tokens back to the owner (refund path).
-	Unlock(ctx context.Context, zetoLockRef string) (txHash string, err error)
-
-	// TransferLocked transfers locked tokens to the receiver (settle path).
+	// TransferLocked transfers locked tokens to a recipient (settle path to receiver,
+	// or refund path back to the original sender).
 	// This is called when the HTLC secret is revealed on-chain.
 	TransferLocked(ctx context.Context, zetoLockRef string, to string, amount string) (txHash string, err error)
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package init provides GORM-based schema initialisation for Scenario B.
 package init
 
@@ -47,5 +49,9 @@ func RunAutoMigrate(db *gorm.DB) error {
 		&apidomain.SwapQuote{},
 		&apidomain.SwapRollbackLog{},
 		&apidomain.SwapRateLimitCounter{},
+
+		// R1-10.1: configurable CB transfer limits + daily volume tracking
+		&apidomain.TransferLimit{},
+		&apidomain.TransferVolumeLog{},
 	)
 }

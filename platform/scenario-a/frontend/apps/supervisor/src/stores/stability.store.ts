@@ -1,9 +1,9 @@
 import { create } from "zustand";
 import { stabilityApi } from "../services/api";
-import type { PoolStatus, StabilityAlert } from "../types";
+import type { HTLCSummary, StabilityAlert } from "../types";
 
 type StabilityState = {
-  pools: PoolStatus[];
+  htlcs: HTLCSummary[];
   alerts: StabilityAlert[];
   status: "idle" | "loading" | "error";
   error: string | null;
@@ -11,17 +11,17 @@ type StabilityState = {
 };
 
 export const useStabilityStore = create<StabilityState>((set) => ({
-  pools: [],
+  htlcs: [],
   alerts: [],
   status: "idle",
   error: null,
   refresh: async () => {
     set({ status: "loading", error: null });
     try {
-      const [pools, alerts] = await Promise.all([stabilityApi.getPoolStatuses(), stabilityApi.getAlerts()]);
-      set({ pools, alerts, status: "idle" });
+      const [htlcs, alerts] = await Promise.all([stabilityApi.getHTLCs(), stabilityApi.getAlerts()]);
+      set({ htlcs, alerts, status: "idle" });
     } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to fetch stability data" });
+      set({ status: "error", error: error instanceof Error ? error.message : "Unable to fetch settlement data" });
     }
   },
 }));

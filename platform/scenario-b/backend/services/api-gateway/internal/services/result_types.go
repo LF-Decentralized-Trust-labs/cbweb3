@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services defines result types shared between services and handlers.
 package services
 

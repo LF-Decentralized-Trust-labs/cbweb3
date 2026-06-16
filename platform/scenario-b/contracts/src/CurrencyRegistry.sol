@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
 import {ICurrencyRegistry} from "./interfaces/ICurrencyRegistry.sol";
@@ -48,10 +48,10 @@ contract CurrencyRegistry is ICurrencyRegistry {
 
     /// @inheritdoc ICurrencyRegistry
     function registerCurrency(
-        string  calldata symbol,
-        string  calldata countryName,
-        address          tokenAddress,
-        string  calldata proposerCB
+        string calldata symbol,
+        string calldata countryName,
+        address tokenAddress,
+        string calldata proposerCB
     ) external {
         if (bytes(symbol).length == 0 || bytes(countryName).length == 0 || bytes(proposerCB).length == 0) {
             revert CurrencyRegistry__EmptyString();
@@ -74,10 +74,7 @@ contract CurrencyRegistry is ICurrencyRegistry {
         _tokenToSymbolKey[tokenAddress] = key;
         _symbols.push(symbol);
         _bySymbolKey[key] = CurrencyEntry({
-            symbol:       symbol,
-            countryName:  countryName,
-            tokenAddress: tokenAddress,
-            proposerCB:   proposerCB
+            symbol: symbol, countryName: countryName, tokenAddress: tokenAddress, proposerCB: proposerCB
         });
 
         emit CurrencyRegistered(symbol, tokenAddress, countryName, proposerCB);
@@ -103,9 +100,7 @@ contract CurrencyRegistry is ICurrencyRegistry {
     }
 
     /// @inheritdoc ICurrencyRegistry
-    function getCurrency(string calldata symbol)
-        external view returns (CurrencyEntry memory)
-    {
+    function getCurrency(string calldata symbol) external view returns (CurrencyEntry memory) {
         bytes32 key = _key(symbol);
         if (!_symbolExists[key]) revert CurrencyRegistry__NotFound(symbol);
         return _bySymbolKey[key];

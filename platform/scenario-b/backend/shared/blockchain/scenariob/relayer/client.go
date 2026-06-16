@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package relayer provides a client for the Hyperledger Cacti Relayer that orchestrates
 // cross-chain bridging operations (Lock&Mint / Burn&Unlock) between Spokes and the Hub.
 // It uses plain HTTP JSON and is safe to run as a no-op stub when CACTI_RELAYER_URL is
