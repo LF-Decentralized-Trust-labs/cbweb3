@@ -23,7 +23,8 @@ func NewAgentsRepository(db *gorm.DB) *AgentsRepository {
 	return &AgentsRepository{db: db}
 }
 
-// ProvisionKey stores a hashed API key bound to a spoke.
+// ProvisionKey stores a hashed API key bound to a spoke (idempotent — returns
+// the existing record if the same raw key was already provisioned).
 func (r *AgentsRepository) ProvisionKey(rawKey string, spokeID uuid.UUID, hint string) (*domain.NocProvisionedKey, error) {
 	hash := sha256Hex(rawKey)
 	pk := &domain.NocProvisionedKey{
@@ -31,7 +32,7 @@ func (r *AgentsRepository) ProvisionKey(rawKey string, spokeID uuid.UUID, hint s
 		SpokeID: spokeID,
 		Hint:    hint,
 	}
-	if err := r.db.Create(pk).Error; err != nil {
+	if err := r.db.Where("key_hash = ?", hash).FirstOrCreate(pk).Error; err != nil {
 		return nil, fmt.Errorf("agents: provision-key: %w", err)
 	}
 	return pk, nil

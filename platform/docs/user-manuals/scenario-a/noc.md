@@ -71,7 +71,7 @@ portal URL).
 `cbweb3` realm with client ID `noc-portal`. Only accounts carrying the
 `SYS_ADMIN` role are accepted.
 
-<!-- TODO: screenshot — login page -->
+![Login Page](../img/scenario-a/noc/01-login.png)
 
 ### Login steps
 
@@ -129,7 +129,7 @@ Unknown routes redirect to `/` (Dashboard).
 
 ### 4.1 Dashboard (`/`)
 
-<!-- TODO: screenshot — Dashboard overview -->
+![Dashboard](../img/scenario-a/noc/02-dashboard.png)
 
 The Dashboard is the primary monitoring view. It aggregates platform-wide health
 data across all spokes (or a single selected spoke) and displays the active
@@ -194,7 +194,7 @@ The WebSocket stream is not yet active; the portal always uses HTTP polling.
 
 ### 4.2 Infrastructure (`/infrastructure`)
 
-<!-- TODO: screenshot — Infrastructure page -->
+![Infrastructure](../img/scenario-a/noc/03-infrastructure.png)
 
 Lists the health status of all non-relay infrastructure components for the
 selected spoke: Hyperledger Besu blockchain nodes, Paladin privacy nodes, and
@@ -227,7 +227,7 @@ selected.
 
 ### 4.3 Relay Status (`/relays`)
 
-<!-- TODO: screenshot — Relay Status page -->
+![Relay](../img/scenario-a/noc/04-relays.png)
 
 Shows the health of **CACTI interoperability relay containers** — the components
 responsible for cross-spoke event propagation. When a cross-border settlement
@@ -260,7 +260,7 @@ Displays only `CACTI_RELAY` type components for the selected spoke.
 
 ### 4.4 Topology (`/topology`)
 
-<!-- TODO: screenshot — Topology page -->
+![Topology](../img/scenario-a/noc/05-topology.png)
 
 Renders an interactive network diagram of all nodes and their links across the
 platform. Useful for identifying where in the topology a fault is isolated.
@@ -307,7 +307,7 @@ A colour legend below the metrics identifies each node type.
 
 ### 4.5 Log Viewer (`/logs/:componentId`)
 
-<!-- TODO: screenshot — Log Viewer -->
+![Logs](../img/scenario-a/noc/06-logs.png)
 
 Displays container logs for a specific infrastructure or relay component. There
 is no sidebar entry for this screen — navigate here by clicking the **View Logs**
@@ -342,7 +342,7 @@ Terminal-style viewer (black background, green text).
 
 ### 4.6 Audit (`/audit`)
 
-<!-- TODO: screenshot — Audit page -->
+![Audit](../img/scenario-a/noc/07-audit.png)
 
 Provides an immutable record of all operator actions taken within the NOC Portal
 and a history of resolved alerts.
@@ -381,7 +381,7 @@ dismissal).
 
 ### 4.7 Settings (`/settings`)
 
-<!-- TODO: screenshot — Settings page -->
+![Settings](../img/scenario-a/noc/08-settings.png)
 
 Configures operator-level monitoring preferences. Settings are persisted to
 `localStorage` (key: `noc-ui-settings`) and survive page reloads within the
