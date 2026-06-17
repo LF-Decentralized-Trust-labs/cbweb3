@@ -70,14 +70,26 @@ const SWAP_TPS = Number(__ENV.SWAP_TPS || 30); // DRAFT AMM throughput target (R
 const SOURCE_CURRENCY = __ENV.SOURCE_CURRENCY || "BRL";
 const TARGET_CURRENCY = __ENV.TARGET_CURRENCY || "ARS";
 const POOL_PAIR = __ENV.POOL_PAIR || PAIR;
+const PAYER_BANK_ID = __ENV.PAYER_BANK_ID || "bank-a";
 const BENEFICIARY_BANK_ID = __ENV.BENEFICIARY_BANK_ID || "bank-b";
 const AMOUNT_OUT = __ENV.AMOUNT_OUT || "100000";
 const MAX_AMOUNT_IN = __ENV.MAX_AMOUNT_IN || "100000000000000000000"; // 1e20 cap
 
+// SWAP_MODE selects WHICH operation the swap scenario measures (R1-12.3 decomposition):
+//   "amm" (default) — hub-only AMM swap (POST /swap/exact-output). Isolates pool capacity;
+//                     this is the 30-TPS target. Tokens must already be on the hub.
+//   "xc"            — full cross-currency payment (bridge-in -> AMM -> bridge-out). The
+//                     end-to-end SLA; bridge-bound, NOT gated at 30 TPS.
+const SWAP_MODE = (__ENV.SWAP_MODE || "amm").toLowerCase();
+
 const quoteLatency = new Trend("quote_latency_ms", true);
-const swapLatency = new Trend("swap_latency_ms", true);
+const swapLatency = new Trend("swap_latency_ms", true); // hub-only AMM swap (SWAP_MODE=amm)
 const poolLatency = new Trend("pool_latency_ms", true);
 const swapOk = new Counter("swap_success_total");
+// Full cross-currency payment latency (SWAP_MODE=xc) — measured separately and NOT gated at 6s,
+// because it spans 3 networks (bridge-in -> AMM -> bridge-out) and is bridge-bound by design.
+const xcPaymentLatency = new Trend("xc_payment_latency_ms", true);
+const xcPaymentOk = new Counter("xc_payment_success_total");
 
 function vusScenarios() {
   return {
@@ -161,9 +173,27 @@ export function quoteScenario() {
   if (LOAD_MODEL !== "rate") sleep(0.2);
 }
 
-export function swapScenario() {
-  if (!AUTH_TOKEN) return;
-  // Step 1: get a fresh cross-currency quote (quotes expire ~15s; used immediately).
+// ammSwap — hub-only AMM swap (POST /swap/exact-output). Tokens already on the hub; no bridge.
+// Isolates the AMM/pool's swap capacity (the 30-TPS target).
+function ammSwap() {
+  const body = JSON.stringify({
+    pair: POOL_PAIR,
+    amount_out: AMOUNT_OUT,
+    max_amount_in: MAX_AMOUNT_IN,
+    payer_id: PAYER_BANK_ID,
+    beneficiary_id: PAYER_BANK_ID,
+  });
+  const r = http.post(`${API_GW_URL}/api/v2/amm/swap/exact-output`, body, {
+    headers: headers(true),
+    tags: { endpoint: "swap" },
+  });
+  swapLatency.add(r.timings.duration);
+  const ok = check(r, { "amm swap 2xx": (res) => res.status >= 200 && res.status < 300 });
+  if (ok) swapOk.add(1);
+}
+
+// xcSwap — full cross-currency payment (bridge-in -> AMM -> bridge-out). End-to-end SLA.
+function xcSwap() {
   const qurl =
     `${API_GW_URL}/api/v2/amm/quote/cross-currency` +
     `?source_currency=${SOURCE_CURRENCY}&target_currency=${TARGET_CURRENCY}&amount_out=${AMOUNT_OUT}`;
@@ -172,10 +202,8 @@ export function swapScenario() {
   try { quoteId = qr.json("quote_id") || ""; } catch (_) { /* non-JSON */ }
   if (!quoteId) {
     check(qr, { "xc-quote has quote_id": () => false });
-    if (LOAD_MODEL !== "rate") sleep(1);
     return;
   }
-  // Step 2: execute the cross-currency swap (payer = authenticated bank).
   const body = JSON.stringify({
     source_currency: SOURCE_CURRENCY,
     target_currency: TARGET_CURRENCY,
@@ -187,11 +215,17 @@ export function swapScenario() {
   });
   const r = http.post(`${API_GW_URL}/api/v2/amm/swap/cross-currency`, body, {
     headers: headers(true),
-    tags: { endpoint: "swap" },
+    tags: { endpoint: "xc-swap" },
   });
-  swapLatency.add(r.timings.duration);
-  const ok = check(r, { "swap 2xx": (res) => res.status >= 200 && res.status < 300 });
-  if (ok) swapOk.add(1);
+  xcPaymentLatency.add(r.timings.duration);
+  const ok = check(r, { "xc payment 2xx": (res) => res.status >= 200 && res.status < 300 });
+  if (ok) xcPaymentOk.add(1);
+}
+
+export function swapScenario() {
+  if (!AUTH_TOKEN) return;
+  if (SWAP_MODE === "xc") xcSwap();
+  else ammSwap();
   if (LOAD_MODEL !== "rate") sleep(1);
 }
 

@@ -113,5 +113,13 @@ provision_swap_actors() {
   _onboard "$API_GW_BANK_B_URL" "$API_GW_CENTRAL_BANK_B_URL" "$bb" "$cbb" "$benef" "AR" || log_warn "beneficiary onboarding incomplete"
   log_info "provision: funding payer with tCeBM" amount="$PROVISION_AMOUNT"
   _fund_payer "$API_GW_URL" "$API_GW_CENTRAL_BANK_A_URL" "$ba" "$cba" "$PROVISION_AMOUNT" || log_warn "payer funding incomplete"
+
+  # Approve the AMM to spend the payer's tokens (both sides) so the hub-only exact-output
+  # swap (SWAP_MODE=amm / measurement 1) does not revert on allowance. Idempotent.
+  for side in A B; do
+    _jpost "$API_GW_URL/api/v2/amm/token/approve-amm" "$ba" \
+      "$(jq -nc --arg a "$PROVISION_AMOUNT" --arg s "$side" '{amount:$a,side:$s}')" >/dev/null \
+      && log_info "provision: approve-amm ok" side="$side" || log_warn "provision: approve-amm failed" side="$side"
+  done
   log_info "provision: done"
 }

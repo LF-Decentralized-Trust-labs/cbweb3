@@ -28,11 +28,25 @@ That's it. With **no arguments and no manual steps** the driver
    RESUMED before any swap runs** (constitution III).
 4. **Seed** — ensures the AMM pair is `ACTIVE` with depth sized for the 30-TPS run (cooperative
    commit-reveal via `scenario-b.tryout-us1` when needed); warns if reserves are shallow.
-5. **Benchmarks** — runs the latency baseline, AMM 30 TPS throughput, 50 TPS transfer, and
-   15 TPS Zeto transfer, each with `--summary-export` JSON capture.
+5. **Benchmarks** — latency baseline, 50 TPS transfer, 15 TPS Zeto, plus the **three-way swap
+   decomposition** (see below), each with `--summary-export` JSON capture.
 6. **TTF** — measures end-to-end Time-To-Finality by on-chain correlation (§4).
-7. **Results** — writes measured numbers + PASS/FAIL into [`RESULTS.md`](./RESULTS.md) and
-   **validates-or-revises the AMM 30 TPS DRAFT** based on the measured result.
+7. **Results** — writes measured numbers + verdicts into [`RESULTS.md`](./RESULTS.md) and
+   **validates-or-revises the AMM 30 TPS DRAFT** against the hub-only swap (3a).
+
+### Swap throughput is measured three ways (R1-12.3 decomposition)
+
+A single "AMM swap TPS" conflates a millisecond pool operation with multi-second cross-chain
+bridge legs, so the suite splits it:
+
+- **3a — Hub-only AMM swap** (`SWAP_MODE=amm`, `POST /swap/exact-output`): tokens already on the
+  hub, no bridging. Isolates **pool capacity** — this is where the 30 TPS target is fair. Requires
+  the payer onboarded + funded + `approve-amm` (done once by `lib/provision-swap.sh`).
+- **3b — Cross-chain bridge finality** (transfer + TTF): settlement time for a lock-mint.
+- **3c — Full cross-currency payment** (`SWAP_MODE=xc`, `POST /swap/cross-currency`): bridge-in →
+  AMM → bridge-out across 3 networks. Reported as an end-to-end SLA, **not** gated at 30 TPS —
+  it is bridge-bound by single-signer nonce serialisation + the 2s block cadence. Probed at
+  `XC_TPS` (default 5). The "buffer" strategy (banks pre-holding hub balances) collapses 3c → 3a.
 
 All helpers emit structured JSON logs to stdout. Raw evidence (k6 summaries, TTF samples) lands
 in `tests/performance/results/<timestamp>/` (gitignored). The **12-hour soak is a SEPARATE

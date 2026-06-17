@@ -50,6 +50,7 @@ PERF_SERVICE="perf-all"
 : "${SWAP_TPS:=30}"
 : "${TRANSFER_TPS:=50}"
 : "${ZETO_TPS:=15}"
+: "${XC_TPS:=5}"  # full cross-currency payment is bridge-bound (single-signer); probe low
 
 require_cmd k6
 require_cmd curl
@@ -132,12 +133,21 @@ run_k6() { # NAME SCRIPT EXTRA_ENV...
 if [ "${SKIP_STACK:-0}" = "1" ]; then
   log_warn "SKIP_STACK=1 — dry-run: skipping live benchmark execution + TTF"
 else
-  BASELINE_OUT="$(run_k6 baseline scenario-b-perf.js PAIR="$PAIR" DURATION="$DURATION" LOAD_MODEL=vus)"
-  AMM_OUT="$(run_k6 amm-throughput scenario-b-perf.js PAIR="$PAIR" DURATION="$DURATION" LOAD_MODEL=rate SWAP_TPS="$SWAP_TPS" QUOTE_TPS=$(( SWAP_TPS * 2 )))"
+  # latency baseline (thresholds 5,6,7,8) — swap latency is hub-only AMM (SWAP_MODE=amm).
+  BASELINE_OUT="$(run_k6 baseline scenario-b-perf.js PAIR="$PAIR" DURATION="$DURATION" LOAD_MODEL=vus SWAP_MODE=amm)"
+
+  # Measurement 3a — AMM swap throughput, HUB-ONLY (the 30 TPS target). Isolates pool capacity.
+  AMM_OUT="$(run_k6 amm-throughput scenario-b-perf.js PAIR="$PAIR" DURATION="$DURATION" LOAD_MODEL=rate SWAP_MODE=amm SWAP_TPS="$SWAP_TPS" QUOTE_TPS=$(( SWAP_TPS * 2 )))"
+
+  # Measurement 3b — cross-chain value transfer throughput + (3b TTF below).
   TRANSFER_OUT="$(run_k6 transfer k6/bridge-transfer-throughput.js DURATION="$DURATION" TRANSFER_TPS="$TRANSFER_TPS" TOKEN_KIND=noto)"
   ZETO_OUT="$(run_k6 zeto k6/bridge-transfer-throughput.js DURATION="$DURATION" TRANSFER_TPS="$ZETO_TPS" TOKEN_KIND=zeto)"
 
-  # ── 6. TTF ──────────────────────────────────────────────────────────────────
+  # Measurement 3c — FULL cross-currency payment (bridge-in -> AMM -> bridge-out). End-to-end SLA;
+  # bridge-bound and NOT gated at 30 TPS. Probed at XC_TPS to characterise latency + realistic rate.
+  XC_OUT="$(run_k6 cross-currency scenario-b-perf.js PAIR="$PAIR" DURATION="${XC_DURATION:-$DURATION}" LOAD_MODEL=rate SWAP_MODE=xc SWAP_TPS="$XC_TPS" QUOTE_TPS=$(( XC_TPS * 2 )))"
+
+  # ── 6. TTF (measurement 3b finality) ─────────────────────────────────────────
   ttf_run "$COMM_TOKEN" "${TTF_TPS:-10}" "${TTF_SECS:-60}" "$RESULTS_DIR"
 fi
 
