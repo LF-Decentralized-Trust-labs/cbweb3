@@ -6,6 +6,18 @@ export { Checkbox } from "./components/checkbox";
 export { Separator } from "./components/separator";
 export { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/tabs";
 export { Popover, PopoverTrigger, PopoverContent } from "./components/popover";
+export {
+	Dialog,
+	DialogTrigger,
+	DialogPortal,
+	DialogClose,
+	DialogOverlay,
+	DialogContent,
+	DialogHeader,
+	DialogFooter,
+	DialogTitle,
+	DialogDescription,
+} from "./components/dialog";
 export { Calendar } from "./components/calendar";
 export { DatePicker } from "./components/date-picker";
 export { Toaster } from "./components/sonner";
