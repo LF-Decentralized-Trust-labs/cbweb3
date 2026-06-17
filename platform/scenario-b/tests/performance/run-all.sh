@@ -40,6 +40,8 @@ PERF_SERVICE="perf-all"
 . "$PERF_DIR/lib/seed.sh"
 # shellcheck source=lib/ttf.sh
 . "$PERF_DIR/lib/ttf.sh"
+# shellcheck source=lib/provision-swap.sh
+. "$PERF_DIR/lib/provision-swap.sh"
 
 : "${API_GW_URL:=http://localhost:18080}"
 : "${API_GW_CENTRAL_BANK_A_URL:=http://localhost:38080}"
@@ -105,6 +107,11 @@ fi
 
 # ── 4. seed depth ─────────────────────────────────────────────────────────────
 seed_ensure_depth "$PAIR" "$COMM_TOKEN" "$SWAP_TPS" "$DUR_SECS" 1000
+
+# ── 4b. provision swap actors (payer + beneficiary onboarded; payer funded) ─────
+# The cross-currency swap reverts unless both banks are onboarded participants and the
+# payer holds tCeBM. Idempotent: skipped fast if already provisioned.
+provision_swap_actors
 
 # ── 5. benchmarks (with --summary-export) ──────────────────────────────────────
 run_k6() { # NAME SCRIPT EXTRA_ENV...

@@ -31,15 +31,22 @@
  *   VUS_POOL     — pool VUs in vus-mode (default: 5)
  *   QUOTE_TPS    — quote target req/s in rate-mode (default: 60)
  *   SWAP_TPS     — swap target req/s in rate-mode  (default: 30 — the DRAFT gate)
- *   PAYER_ID     — swap payer bank id     (default: bank-a)
- *   BENEFICIARY_ID — swap beneficiary bank id (default: bank-b)
- *   AMOUNT_OUT   — exact-output target per swap (default: 1000)
- *   MAX_AMOUNT_IN— max input cap per swap (default: 999999999)
+ *   SOURCE_CURRENCY / TARGET_CURRENCY — swap currencies (default: BRL / ARS)
+ *   POOL_PAIR    — AMM pool pair (default: PAIR)
+ *   BENEFICIARY_BANK_ID — beneficiary bank id (default: bank-b)
+ *   AMOUNT_OUT   — exact-output target per swap (default: 100000 — tiny, no pool drain)
+ *   MAX_AMOUNT_IN— max input cap per swap (default: 1e20)
  *
- * API CONTRACT (verified against backend/.../handlers/swap_handler.go):
- *   POST /api/v2/amm/swap/exact-output requires {pair, amount_out, max_amount_in,
- *   payer_id, beneficiary_id}. There is NO `recipient` field — the earlier
- *   "recipient: 0xPerfRecipient" body 400'd on every request.
+ * API CONTRACT (verified live against the running gateway + integration happy_path_test.go):
+ *   The swap is a two-step CROSS-CURRENCY flow, not a direct exact-output swap:
+ *     1. GET  /api/v2/amm/quote/cross-currency?source_currency&target_currency&amount_out
+ *        -> { quote_id }
+ *     2. POST /api/v2/amm/swap/cross-currency
+ *        { source_currency, target_currency, pool_pair, amount_out, max_amount_in,
+ *          beneficiary_bank_id, quote_id }  -> { status: COMPLETED }
+ *   AUTH: these routes use cookie auth (access_token); the payer is the authenticated bank.
+ *   PREREQ: payer + beneficiary banks must be onboarded and the payer funded with tCeBM
+ *   (run-all.sh does this once via lib/provision-swap.sh before the swap benchmark).
  *
  * A delta >20% above the gates MUST block merge per Decision 13.
  * NOTE: measured numbers belong in docs/performance/RESULTS-TEMPLATE.md after a real run.
@@ -57,10 +64,15 @@ const LOAD_MODEL = (__ENV.LOAD_MODEL || "vus").toLowerCase();
 
 const QUOTE_TPS = Number(__ENV.QUOTE_TPS || 60);
 const SWAP_TPS = Number(__ENV.SWAP_TPS || 30); // DRAFT AMM throughput target (R1-12.3)
-const PAYER_ID = __ENV.PAYER_ID || "bank-a";
-const BENEFICIARY_ID = __ENV.BENEFICIARY_ID || "bank-b";
-const AMOUNT_OUT = __ENV.AMOUNT_OUT || "1000";
-const MAX_AMOUNT_IN = __ENV.MAX_AMOUNT_IN || "999999999";
+// Cross-currency swap params. The payer is the AUTHENTICATED bank (no payer field in
+// the body); the beneficiary is resolved by bank id. AMOUNT_OUT is intentionally tiny so
+// thousands of swaps over a run cause negligible price impact / pool drain.
+const SOURCE_CURRENCY = __ENV.SOURCE_CURRENCY || "BRL";
+const TARGET_CURRENCY = __ENV.TARGET_CURRENCY || "ARS";
+const POOL_PAIR = __ENV.POOL_PAIR || PAIR;
+const BENEFICIARY_BANK_ID = __ENV.BENEFICIARY_BANK_ID || "bank-b";
+const AMOUNT_OUT = __ENV.AMOUNT_OUT || "100000";
+const MAX_AMOUNT_IN = __ENV.MAX_AMOUNT_IN || "100000000000000000000"; // 1e20 cap
 
 const quoteLatency = new Trend("quote_latency_ms", true);
 const swapLatency = new Trend("swap_latency_ms", true);
@@ -129,7 +141,13 @@ export const options = {
 
 function headers(authRequired = false) {
   const h = { "Content-Type": "application/json", Accept: "application/json" };
-  if (authRequired && AUTH_TOKEN) h["Authorization"] = `Bearer ${AUTH_TOKEN}`;
+  if (authRequired && AUTH_TOKEN) {
+    // Scenario B swap routes use RequireCookieAuth. Set BOTH the cookie and a Bearer
+    // header — exactly like the integration test client — so the request works on
+    // cookie-only, bearer-only, and RequireAnyAuth routes alike.
+    h["Authorization"] = `Bearer ${AUTH_TOKEN}`;
+    h["Cookie"] = `access_token=${AUTH_TOKEN}`;
+  }
   return h;
 }
 
@@ -145,14 +163,29 @@ export function quoteScenario() {
 
 export function swapScenario() {
   if (!AUTH_TOKEN) return;
+  // Step 1: get a fresh cross-currency quote (quotes expire ~15s; used immediately).
+  const qurl =
+    `${API_GW_URL}/api/v2/amm/quote/cross-currency` +
+    `?source_currency=${SOURCE_CURRENCY}&target_currency=${TARGET_CURRENCY}&amount_out=${AMOUNT_OUT}`;
+  const qr = http.get(qurl, { headers: headers(true), tags: { endpoint: "xc-quote" } });
+  let quoteId = "";
+  try { quoteId = qr.json("quote_id") || ""; } catch (_) { /* non-JSON */ }
+  if (!quoteId) {
+    check(qr, { "xc-quote has quote_id": () => false });
+    if (LOAD_MODEL !== "rate") sleep(1);
+    return;
+  }
+  // Step 2: execute the cross-currency swap (payer = authenticated bank).
   const body = JSON.stringify({
-    pair: PAIR,
+    source_currency: SOURCE_CURRENCY,
+    target_currency: TARGET_CURRENCY,
+    pool_pair: POOL_PAIR,
     amount_out: AMOUNT_OUT,
     max_amount_in: MAX_AMOUNT_IN,
-    payer_id: PAYER_ID,
-    beneficiary_id: BENEFICIARY_ID,
+    beneficiary_bank_id: BENEFICIARY_BANK_ID,
+    quote_id: quoteId,
   });
-  const r = http.post(`${API_GW_URL}/api/v2/amm/swap/exact-output`, body, {
+  const r = http.post(`${API_GW_URL}/api/v2/amm/swap/cross-currency`, body, {
     headers: headers(true),
     tags: { endpoint: "swap" },
   });
