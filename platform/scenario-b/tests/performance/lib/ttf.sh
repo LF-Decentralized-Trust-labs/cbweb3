@@ -61,21 +61,48 @@ ttf_run() {
   fi
   log_info "captured position ids; polling for on-chain finality" samples="$count"
 
+  # Bounded correlation: sample at most TTF_MAX_SAMPLES positions and cap the WHOLE
+  # phase at TTF_GLOBAL_DEADLINE seconds, polling the ACTIVE set ONCE per round (not
+  # once per position). This makes the phase finish in ~the deadline regardless of how
+  # many positions never finalise — it can never serialise into a multi-hour hang.
+  max_samples="${TTF_MAX_SAMPLES:-30}"
+  global_deadline=$(( $(date +%s) + ${TTF_GLOBAL_DEADLINE:-120} ))
+
+  pending="$outdir/ttf-pending.txt"
+  grep '^POSITION_ID' "$ids_file" | head -n "$max_samples" | awk '{print $2" "$3}' > "$pending"
+  sampled="$(grep -c . "$pending" 2>/dev/null || echo 0)"
+  log_info "TTF bounded sample" sampled="$sampled" max_samples="$max_samples" \
+    global_deadline_s="${TTF_GLOBAL_DEADLINE:-120}"
+
   ttf_samples="$outdir/ttf-samples.txt"; : > "$ttf_samples"
-  # For each (id,t0) wait until it appears ACTIVE, stamp t1, record TTF ms.
-  while read -r _tag id t0; do
-    [ -n "$id" ] || continue
-    deadline=$(( $(date +%s) + poll_timeout ))
-    while :; do
-      if _positions_active "$token" | grep -qx "$id"; then
-        t1=$(( $(date +%s) * 1000 ))
-        printf '%s\n' "$(( t1 - t0 ))" >> "$ttf_samples"
-        break
+  matched=0
+  while [ -s "$pending" ]; do
+    active_set="$outdir/.active.$$"
+    _positions_active "$token" > "$active_set" 2>/dev/null || true
+    now_ms=$(( $(date +%s) * 1000 ))
+    remaining="$outdir/.pending.$$"; : > "$remaining"
+    while read -r id t0; do
+      [ -n "$id" ] || continue
+      if grep -qx "$id" "$active_set" 2>/dev/null; then
+        printf '%s\n' "$(( now_ms - t0 ))" >> "$ttf_samples"
+        matched=$(( matched + 1 ))
+      else
+        printf '%s %s\n' "$id" "$t0" >> "$remaining"
       fi
-      [ "$(date +%s)" -lt "$deadline" ] || { log_warn "position not ACTIVE within timeout" id="$id" timeout="${poll_timeout}s"; break; }
-      sleep 1
-    done
-  done < "$ids_file"
+    done < "$pending"
+    mv "$remaining" "$pending"
+    rm -f "$active_set"
+    [ -s "$pending" ] || break
+    if [ "$(date +%s)" -ge "$global_deadline" ]; then
+      log_warn "TTF global deadline reached — unfinalised positions remain" \
+        unmatched="$(grep -c . "$pending" 2>/dev/null || echo 0)" timeout="$poll_timeout"
+      break
+    fi
+    sleep 2
+  done
+  log_info "TTF correlation finished" matched="$matched" \
+    unmatched="$(grep -c . "$pending" 2>/dev/null || echo 0)"
+  rm -f "$pending"
 
   # Compute p50/p95 in awk.
   awk '

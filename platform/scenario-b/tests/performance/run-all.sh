@@ -57,6 +57,20 @@ RESULTS_DIR="$PERF_DIR/results/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$RESULTS_DIR"
 log_info "results directory" dir="$RESULTS_DIR"
 
+DOC_OUT="$PERF_DIR/../../docs/performance/RESULTS.md"
+# Always emit a report from whatever summaries exist — even on Ctrl-C or an early
+# failure — so a partial run is never lost. write-results.sh tolerates missing phases
+# (they render as n/a). The trap fires once on normal EXIT or on INT/TERM.
+_finalize() {
+  trap - EXIT INT TERM
+  log_info "finalising — writing results from captured summaries" dir="$RESULTS_DIR"
+  "$PERF_DIR/lib/write-results.sh" "$RESULTS_DIR" "$DOC_OUT" \
+    || log_warn "results writer reported an issue"
+  log_info "perf-all results written" results="$RESULTS_DIR" doc="docs/performance/RESULTS.md"
+}
+trap '_finalize; exit 130' INT TERM
+trap '_finalize' EXIT
+
 # duration in seconds for depth/ttf math (accept Nm or Ns).
 _dur_secs() {
   d="$1"
@@ -121,7 +135,4 @@ else
 fi
 
 # ── 7. write RESULTS.md ────────────────────────────────────────────────────────
-"$PERF_DIR/lib/write-results.sh" "$RESULTS_DIR" "$PERF_DIR/../../docs/performance/RESULTS.md" \
-  || log_warn "results writer reported an issue"
-
-log_info "perf-all complete" results="$RESULTS_DIR" doc="docs/performance/RESULTS.md"
+# Handled by the _finalize EXIT trap (defined above) so it also runs on interruption.
