@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -25,10 +26,15 @@ import (
 )
 
 // Signer carries the private key and chain ID needed to sign and submit transactions.
+// mu serializes nonce assignment through SendTransaction so concurrent callers cannot
+// collide on the same nonce — see signAndSend.
 type Signer struct {
-	key     *ecdsa.PrivateKey
-	address common.Address
-	chainID *big.Int
+	key       *ecdsa.PrivateKey
+	address   common.Address
+	chainID   *big.Int
+	mu        sync.Mutex
+	nonce     uint64
+	nonceInit bool
 }
 
 // NewSigner parses a hex-encoded secp256k1 private key and binds it to a chain ID.
@@ -169,10 +175,6 @@ func submitTxInternal(
 	if err != nil {
 		return nil, "", fmt.Errorf("pack %s: %w", method, err)
 	}
-	nonce, err := ec.PendingNonceAt(ctx, signer.Address())
-	if err != nil {
-		return nil, "", fmt.Errorf("nonce: %w", err)
-	}
 	gasPrice, err := ec.SuggestGasPrice(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("gas price: %w", err)
@@ -187,13 +189,9 @@ func submitTxInternal(
 	if err != nil {
 		gasLimit = 500_000 // conservative fallback for Besu dev networks
 	}
-	tx := types.NewTransaction(nonce, contract, big.NewInt(0), gasLimit, gasPrice, input)
-	signed, err := types.SignTx(tx, types.NewLondonSigner(signer.ChainID()), signer.key)
+	signed, err := signer.signAndSend(ctx, ec, contract, gasLimit, gasPrice, input)
 	if err != nil {
-		return nil, "", fmt.Errorf("sign tx: %w", err)
-	}
-	if err := ec.SendTransaction(ctx, signed); err != nil {
-		return nil, "", fmt.Errorf("send tx: %w", err)
+		return nil, "", err
 	}
 	receipt, err := bind.WaitMined(ctx, ec, signed)
 	if err != nil {
@@ -203,6 +201,65 @@ func submitTxInternal(
 		return nil, "", fmt.Errorf("transaction reverted on-chain (tx=%s) — check contract permissions and token allowances", signed.Hash().Hex())
 	}
 	return receipt, signed.Hash().Hex(), nil
+}
+
+// signAndSend assigns a unique nonce, signs, and broadcasts the transaction while holding
+// signer.mu. The lock is released as soon as the tx is in the node's mempool so that
+// bind.WaitMined (which can take 2–4 s on QBFT) runs outside the critical section and
+// concurrent callers can queue their own transactions without blocking on mining.
+//
+// On "nonce too low" (e.g. after a node restart or manual tx), the counter is re-synced
+// from PendingNonceAt and the submission is retried once.
+func (s *Signer) signAndSend(
+	ctx context.Context,
+	ec *ethclient.Client,
+	contract common.Address,
+	gasLimit uint64,
+	gasPrice *big.Int,
+	input []byte,
+) (*types.Transaction, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.nonceInit {
+		n, err := ec.PendingNonceAt(ctx, s.Address())
+		if err != nil {
+			return nil, fmt.Errorf("nonce: %w", err)
+		}
+		s.nonce = n
+		s.nonceInit = true
+	}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		tx := types.NewTransaction(s.nonce, contract, big.NewInt(0), gasLimit, gasPrice, input)
+		signed, err := types.SignTx(tx, types.NewLondonSigner(s.ChainID()), s.key)
+		if err != nil {
+			return nil, fmt.Errorf("sign tx: %w", err)
+		}
+		if err = ec.SendTransaction(ctx, signed); err == nil {
+			s.nonce++
+			return signed, nil
+		}
+		if attempt == 0 && isNonceTooLow(err) {
+			n, rerr := ec.PendingNonceAt(ctx, s.Address())
+			if rerr != nil {
+				return nil, fmt.Errorf("send tx: %w (nonce re-sync: %v)", err, rerr)
+			}
+			s.nonce = n
+			continue
+		}
+		return nil, fmt.Errorf("send tx: %w", err)
+	}
+	return nil, fmt.Errorf("send tx: nonce re-sync did not resolve the error")
+}
+
+// isNonceTooLow reports whether a SendTransaction error indicates the account nonce on the
+// node has advanced past the one we used — e.g. after a node restart or an out-of-band tx.
+func isNonceTooLow(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "nonce too low") ||
+		strings.Contains(msg, "nonce too high") ||
+		strings.Contains(msg, "replacement transaction underpriced")
 }
 
 // copyOutput copies src into dst through reflection; dst must be a pointer.
