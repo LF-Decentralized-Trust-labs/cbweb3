@@ -12,6 +12,52 @@ test.compliance:
 
 test.all: test.compliance test.auth test.api-gateway
 
+# ── Live happy-path integration test (full FX + cross-spoke HTLC flow) ────────
+# Drives the real REST API of a running `make spoke-all` stack through the
+# Scenario A core workflow (login → mint → FX propose/accept → HTLC lock both
+# legs → settle → relay-settle → verify). Counterpart to the hermetic
+# integration_lite lane; gated behind the `integration` build tag so the two
+# never compile together.
+#
+#   make scenario-a.test-integration              # auto-detect: brings the stack up only if it isn't already running
+#   SKIP_UP=0 make scenario-a.test-integration    # force a fresh bring-up first (WIPES the chain)
+#   SKIP_UP=1 make scenario-a.test-integration    # never bring up; fail fast if the stack is down
+#   SKIP_DOWN=0 make scenario-a.test-integration  # tear the stack down afterwards
+#
+# SKIP_UP unset → auto: a healthz probe decides whether to run `spoke-all` first.
+SKIP_UP   ?= auto
+SKIP_DOWN ?= 1
+
+API_GW_BANK_A_URL         ?= http://localhost:18080
+API_GW_BANK_B_URL         ?= http://localhost:28080
+API_GW_BANK_D_URL         ?= http://localhost:58080
+API_GW_CENTRAL_BANK_A_URL ?= http://localhost:38080
+API_GW_CENTRAL_BANK_B_URL ?= http://localhost:60080
+
+scenario-a.test-integration: ## Run the happy-path test; brings the stack up automatically if it isn't already running
+	@echo "[scenario-a] running integration test (full happy path)..."
+	@if [ "$(SKIP_UP)" = "0" ]; then \
+	  echo "[scenario-a] SKIP_UP=0 — forcing a fresh bring-up (regenerates genesis, WIPES the chain)..."; \
+	  $(MAKE) spoke-all; \
+	elif [ "$(SKIP_UP)" = "auto" ] && ! curl -sf -o /dev/null --max-time 5 "$(API_GW_BANK_A_URL)/healthz"; then \
+	  echo "[scenario-a] stack not detected at $(API_GW_BANK_A_URL) — bringing it up via spoke-all..."; \
+	  $(MAKE) spoke-all; \
+	else \
+	  echo "[scenario-a] stack detected — running against the live stack..."; \
+	fi
+	@cd tests/integration && \
+	  SKIP_UP=1 \
+	  SKIP_DOWN=$(SKIP_DOWN) \
+	  API_GW_BANK_A_URL=$(API_GW_BANK_A_URL) \
+	  API_GW_BANK_B_URL=$(API_GW_BANK_B_URL) \
+	  API_GW_BANK_D_URL=$(API_GW_BANK_D_URL) \
+	  API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
+	  API_GW_CENTRAL_BANK_B_URL=$(API_GW_CENTRAL_BANK_B_URL) \
+	  go test -v -count=1 -tags integration -timeout 30m -run TestFullHappyPath ./...
+
+scenario-a.test-integration-up: ## Bring the full stack up via `make spoke-all`, then run the happy-path test
+	@$(MAKE) scenario-a.test-integration SKIP_UP=0 SKIP_DOWN=$(SKIP_DOWN)
+
 # ── D6 coverage gate (80% on CORE back-end business logic) ───────────────────
 # Each module gates its own core -coverpkg list (see its Makefile). The
 # integration_lite lane is a hermetic cross-service smoke suite (<1s, no infra).
@@ -93,6 +139,6 @@ scenario-a.perf-soak-all:
 	@echo "[scenario-a] R1-12.3 12-hour SOAK (opt-in, dedicated infra only)..."
 	@PERF_SOAK=1 bash tests/performance/run-all.sh
 
-.PHONY: test.api-gateway test.auth test.compliance test.all scenario-a.test-backend-coverage \
+.PHONY: test.api-gateway test.auth test.compliance test.all scenario-a.test-integration scenario-a.test-integration-up scenario-a.test-backend-coverage \
 	scenario-a.perf-baseline scenario-a.perf-transfer scenario-a.perf-zeto scenario-a.perf-soak \
 	scenario-a.perf-all scenario-a.perf-all-dry scenario-a.perf-soak-all

@@ -40,7 +40,11 @@ _perf_log() {
   fi
 }
 
-log_info() { _perf_log info "$@"; }
+# All logs go to stderr so stdout stays clean for value-returning functions
+# (perf_mint_token, perf_run_id, perf_artifact_dir) captured via $(...). Emitting
+# log_info on stdout poisoned captured tokens with JSON (quotes), which broke the
+# auth cookie ("invalid byte '\"' in Cookie.Value") and failed every k6 request.
+log_info() { _perf_log info "$@" >&2; }
 log_warn() { _perf_log warn "$@" >&2; }
 log_error() { _perf_log error "$@" >&2; }
 
