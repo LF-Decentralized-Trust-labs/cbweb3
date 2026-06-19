@@ -33,6 +33,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${HERE}/lib/fund.sh"
 . "${HERE}/lib/ttf.sh"
 . "${HERE}/lib/results.sh"
+. "${HERE}/lib/provision.sh"
 
 # ── Config (all defaulted) ───────────────────────────────────────────────────
 API_GW_URL="${API_GW_URL:-http://localhost:18080}"
@@ -48,6 +49,22 @@ TTF_TPS="${TTF_TPS:-10}"
 TRANSFER_TPS="${TRANSFER_TPS:-50}"
 ZETO_TPS="${ZETO_TPS:-15}"
 PERF_DRY_RUN="${PERF_DRY_RUN:-0}"
+
+# Full happy-path (FX + cross-spoke HTLC settlement) benchmark — the Scenario A
+# analogue of Scenario B's end-to-end cross-currency measurement. Relay-bound, so a
+# few concurrent flows (HAPPY_VUS) rather than a high TPS gate.
+BANK_D_GW_URL="${BANK_D_GW_URL:-http://localhost:58080}"
+BANK_D_ENV="${BANK_D_ENV:-backend/config/.env.infra.bank-d}"
+# Sequential by default: the cross-spoke path is relay-bound + single-signer per
+# bank (one EVM operator key), so 1 flow gives the clean per-lifecycle D6 timing
+# with 100% completion. Raise HAPPY_VUS for the burst/stress profiles — concurrency
+# >1 deliberately surfaces the single-signer (nonce-serialised) bottleneck.
+HAPPY_VUS="${HAPPY_VUS:-1}"
+HAPPY_DURATION="${HAPPY_DURATION:-3m}"
+# PERF_ONLY_HAPPY=1 → run ONLY the happy-path benchmark (skip baseline/transfer/zeto/TTF).
+PERF_ONLY_HAPPY="${PERF_ONLY_HAPPY:-0}"
+RUN_COMPONENTS=1
+[ "$PERF_ONLY_HAPPY" = "1" ] && RUN_COMPONENTS=0
 
 export PERF_DRY_RUN API_GW_URL
 
@@ -83,21 +100,31 @@ k6_run() {
 }
 
 # ── Phase 1: stack ────────────────────────────────────────────────────────────
+# The suite now includes the cross-spoke happy-path benchmark, so by default it
+# runs against the FULL stack (both spokes + custodian bank-d + relay). Only when
+# the happy path is explicitly skipped (component-only run) does spoke-a suffice.
 if [ "${PERF_SKIP_STACK:-0}" = "1" ]; then
   log_info "PERF_SKIP_STACK=1 — assuming stack is up"
-else
+elif [ "${PERF_SKIP_HAPPY:-0}" = "1" ]; then
   perf_ensure_stack "$API_GW_URL" || { log_error "stack unavailable"; exit 1; }
+else
+  perf_ensure_full_stack "$API_GW_URL" "$BANK_D_GW_URL" || { log_error "full stack unavailable"; exit 1; }
 fi
 
 # ── Phase 2: auth ─────────────────────────────────────────────────────────────
+# The happy-path benchmark needs BOTH the originator (bank-a) and custodian (bank-d)
+# tokens; the component benchmarks use only bank-a.
 BANK_TOKEN=""
 CB_TOKEN=""
+CUSTODIAN_TOKEN=""
 if [ "$PERF_DRY_RUN" = "1" ]; then
   log_info "dry-run: skipping auth mint"
-  BANK_TOKEN="dry-run-token"; CB_TOKEN="dry-run-token"
+  BANK_TOKEN="dry-run-token"; CB_TOKEN="dry-run-token"; CUSTODIAN_TOKEN="dry-run-token"
 else
   BANK_TOKEN="$(perf_mint_token "$API_GW_URL" "$BANK_ENV")" || { log_error "bank-a auth failed"; exit 1; }
   CB_TOKEN="$(perf_mint_token "$CB_GW_URL" "$CB_ENV")"   || { log_error "central-bank-a auth failed"; exit 1; }
+  CUSTODIAN_TOKEN="$(perf_mint_token "$BANK_D_GW_URL" "$BANK_D_ENV")" \
+    || log_warn "bank-d (custodian) auth failed — happy-path benchmark will be skipped"
 fi
 export AUTH_TOKEN="$BANK_TOKEN"
 
@@ -108,6 +135,11 @@ else
   perf_fund_sender "$API_GW_URL" "$CB_GW_URL" "$BANK_TOKEN" "$CB_TOKEN" \
     || log_warn "funding step failed — continuing (run may hit funding limits)"
 fi
+
+# ── Phase 3b: provision happy-path actors (fund originator + custodian) ─────────
+# The FX-settlement happy path locks real tCeBM on both legs, so the originator
+# (bank-a) and custodian (bank-d) operators must hold reserves. Idempotent-enough.
+provision_settlement_actors || log_warn "provision step incomplete — happy-path benchmark may revert"
 
 # ── meta.json (for results.sh) ────────────────────────────────────────────────
 k6ver="n/a"
@@ -125,6 +157,10 @@ if [ "${PERF_SOAK:-0}" = "1" ]; then
   log_info "soak complete — capture out-of-band leak/crash evidence (README §5)" artifact_dir="$ART"
   exit "$FAILED"
 fi
+
+# ── Component benchmarks (baseline + isolated HTLC transfer + Zeto) ───────────
+# Skipped when PERF_ONLY_HAPPY=1 (the standalone happy-path target).
+if [ "$RUN_COMPONENTS" = "1" ]; then
 
 # ── Phase 4: baseline (thresholds 4,5,6) ─────────────────────────────────────
 k6_run "${HERE}/scenario-a-perf.js" "${ART}/baseline.summary.json" \
@@ -164,7 +200,26 @@ k6_run "${HERE}/k6/zeto-escrow-throughput.js" "${ART}/zeto.summary.json" \
   AUTH_TOKEN="$BANK_TOKEN" ZETO_TPS="$ZETO_TPS" DURATION="$DURATION" \
   || { log_error "zeto gate breached"; FAILED=1; }
 
-# ── Phase 8: write the results doc ────────────────────────────────────────────
+fi  # RUN_COMPONENTS
+
+# ── Phase 8: full happy-path settlement (FX + cross-spoke HTLC) ───────────────
+# The headline measurement — drives the SAME flow as the integration happy path
+# end to end (propose → accept → dual-leg lock → settle → relay settlement) and
+# captures end-to-end settlement latency + completion rate. Relay-bound, so it runs
+# a few concurrent flows (HAPPY_VUS) rather than a TPS gate.
+if [ "${PERF_SKIP_HAPPY:-0}" = "1" ]; then
+  log_info "PERF_SKIP_HAPPY=1 — skipping happy-path benchmark"
+elif [ "$PERF_DRY_RUN" != "1" ] && [ -z "$CUSTODIAN_TOKEN" ]; then
+  log_warn "no custodian (bank-d) token — skipping happy-path benchmark"
+  jq -nc '{metrics:{},note:"skipped: no custodian token"}' > "${ART}/happy-path.summary.json"
+else
+  k6_run "${HERE}/k6/fx-settlement-throughput.js" "${ART}/happy-path.summary.json" \
+    ORIGINATOR_TOKEN="$BANK_TOKEN" CUSTODIAN_TOKEN="$CUSTODIAN_TOKEN" \
+    API_GW_BANK_D_URL="$BANK_D_GW_URL" HAPPY_VUS="$HAPPY_VUS" DURATION="$HAPPY_DURATION" \
+    || { log_error "happy-path gate breached"; FAILED=1; }
+fi
+
+# ── Phase 9: write the results doc ────────────────────────────────────────────
 mkdir -p "$RESULTS_DIR"
 perf_write_results "$RESULTS_OUT" "$ART"
 

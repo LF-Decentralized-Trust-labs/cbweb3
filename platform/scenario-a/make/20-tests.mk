@@ -115,6 +115,16 @@ scenario-a.perf-soak:
 	  DURATION=$${DURATION:-12h} \
 	  k6 run tests/performance/k6/soak.js
 
+# Full happy-path settlement benchmark ONLY (FX + cross-spoke HTLC, end to end) —
+# the Scenario A analogue of scenario-b's cross-currency measurement. Zero-config:
+# mints originator (bank-a) + custodian (bank-d) tokens, provisions tCeBM to both,
+# then drives the complete flow. Relay-bound; set HAPPY_VUS / HAPPY_DURATION to tune.
+scenario-a.perf-happy-path:
+	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
+	@command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required"; exit 1; }
+	@echo "[scenario-a] full happy-path settlement benchmark (FX + cross-spoke HTLC)..."
+	@PERF_ONLY_HAPPY=1 bash tests/performance/run-all.sh
+
 # ── R1-12.3 zero-config orchestration ───────────────────────────────────────
 # perf-all takes NO required args: it stands up the stack (lib/stack.sh), mints
 # AUTH_TOKEN via /auth/login (lib/auth.sh), funds the sender (lib/fund.sh), runs
@@ -141,4 +151,4 @@ scenario-a.perf-soak-all:
 
 .PHONY: test.api-gateway test.auth test.compliance test.all scenario-a.test-integration scenario-a.test-integration-up scenario-a.test-backend-coverage \
 	scenario-a.perf-baseline scenario-a.perf-transfer scenario-a.perf-zeto scenario-a.perf-soak \
-	scenario-a.perf-all scenario-a.perf-all-dry scenario-a.perf-soak-all
+	scenario-a.perf-happy-path scenario-a.perf-all scenario-a.perf-all-dry scenario-a.perf-soak-all

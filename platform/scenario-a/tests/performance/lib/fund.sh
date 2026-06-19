@@ -53,12 +53,26 @@ perf_fund_sender() {
   deposit_id=$(printf '%s' "$dep" | jq -r '.deposit_id // empty')
   [ -n "$deposit_id" ] || { log_error "no deposit_id returned"; return 1; }
 
+  # CB deposit approval + fiat-exchange require ROLE_TREASURY — the governance CB
+  # token ($cb_token) cannot perform them (403). Mint a treasury token (the same
+  # dedicated client keycloak init provisions and provision.sh uses).
+  local cb_treasury
+  cb_treasury=$(curl -sS --max-time 30 -X POST "${cb_gw}/api/v1/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg id "${CB_A_TREASURY_CLIENT:-central-bank-a-treasury-client}" \
+                 --arg sec "${CB_A_TREASURY_SECRET:-central-bank-a-treasury-local-secret}" \
+                 '{clientId:$id,clientSecret:$sec}')" 2>/dev/null | jq -r '.accessToken // empty')
+  if [ -z "$cb_treasury" ]; then
+    log_warn "fund: CB treasury login failed — approval will 403; falling back to governance token"
+    cb_treasury="$cb_token"
+  fi
+
   log_info "funding sender: approve deposit" deposit_id="$deposit_id"
-  _perf_post "$cb_gw" "payments/deposits/approve" "$cb_token" \
+  _perf_post "$cb_gw" "payments/deposits/approve" "$cb_treasury" \
     "$(jq -nc --arg d "$deposit_id" '{deposit_id:$d}')" "201" >/dev/null || return 1
 
   log_info "funding sender: fiat-exchange (mint fCeBM)" deposit_id="$deposit_id"
-  _perf_post "$cb_gw" "payments/deposits/fiat-exchange" "$cb_token" \
+  _perf_post "$cb_gw" "payments/deposits/fiat-exchange" "$cb_treasury" \
     "$(jq -nc --arg d "$deposit_id" '{deposit_id:$d}')" "201" >/dev/null || return 1
 
   log_info "sender funded" deposit_id="$deposit_id" amount="$amount"

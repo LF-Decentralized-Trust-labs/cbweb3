@@ -105,9 +105,11 @@ function rateScenarios() {
 export const options = {
   scenarios: LOAD_MODEL === "rate" ? rateScenarios() : vusScenarios(),
   thresholds: {
-    htlc_search_latency_ms: ["p(95)<500"],
-    fx_list_latency_ms: ["p(95)<500"],
-    htlc_lock_latency_ms: ["p(95)<1500"],
+    // D6 read gates: p50 < 200ms, p95 < 500ms.
+    htlc_search_latency_ms: ["p(50)<200", "p(95)<500"],
+    fx_list_latency_ms: ["p(50)<200", "p(95)<500"],
+    // D6 write (admission) gates: p50 < 800ms, p95 < 1500ms.
+    htlc_lock_latency_ms: ["p(50)<800", "p(95)<1500"],
     http_req_failed: ["rate<0.01"],
   },
 };

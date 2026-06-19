@@ -52,23 +52,27 @@ perf_write_results() {
   # --- pull measured values -------------------------------------------------
   # k6 summary-export schema: .metrics.<name>.{values}.<stat>
   local read_p95 fx_p95 write_p95 err_rate
-  read_p95=$(perf_jq_metric "$base" '.metrics.htlc_search_latency_ms.values["p(95)"]')
-  fx_p95=$(perf_jq_metric "$base" '.metrics.fx_list_latency_ms.values["p(95)"]')
-  write_p95=$(perf_jq_metric "$base" '.metrics.htlc_lock_latency_ms.values["p(95)"]')
-  err_rate=$(perf_jq_metric "$base" '.metrics.http_req_failed.values.rate')
+  # k6 --summary-export schema (v2.x): stats live DIRECTLY under .metrics.<name>
+  # (e.g. ["p(95)"], .med for median≈p50). Rate metrics expose .value; Counters
+  # expose .count and .rate. (There is NO .values wrapper — that is the in-process
+  # end-of-test summary object, not the exported JSON.)
+  read_p95=$(perf_jq_metric "$base" '.metrics.htlc_search_latency_ms["p(95)"]')
+  fx_p95=$(perf_jq_metric "$base" '.metrics.fx_list_latency_ms["p(95)"]')
+  write_p95=$(perf_jq_metric "$base" '.metrics.htlc_lock_latency_ms["p(95)"]')
+  err_rate=$(perf_jq_metric "$base" '.metrics.http_req_failed.value')
 
   # transfer (50 TPS): achieved rate = locks / duration(s); error rate
   local xfer_count xfer_rate xfer_err xfer_dur xfer_tps
-  xfer_count=$(perf_jq_metric "$xfer" '.metrics.htlc_locked_total.values.count')
-  xfer_rate=$(perf_jq_metric "$xfer" '.metrics.htlc_lock_rate.values.rate')
-  xfer_err=$(perf_jq_metric "$xfer" '.metrics.http_req_failed.values.rate')
-  # k6 records iteration throughput on .metrics.iterations.values.rate (per second)
-  xfer_tps=$(perf_jq_metric "$xfer" '.metrics.iterations.values.rate')
+  xfer_count=$(perf_jq_metric "$xfer" '.metrics.htlc_locked_total.count')
+  xfer_rate=$(perf_jq_metric "$xfer" '.metrics.htlc_lock_rate.value')
+  xfer_err=$(perf_jq_metric "$xfer" '.metrics.http_req_failed.value')
+  # iterations is a Counter: .rate is iterations/second
+  xfer_tps=$(perf_jq_metric "$xfer" '.metrics.iterations.rate')
 
   local zeto_count zeto_tps zeto_err
-  zeto_count=$(perf_jq_metric "$zeto" '.metrics.zeto_escrow_submitted_total.values.count')
-  zeto_tps=$(perf_jq_metric "$zeto" '.metrics.iterations.values.rate')
-  zeto_err=$(perf_jq_metric "$zeto" '.metrics.http_req_failed.values.rate')
+  zeto_count=$(perf_jq_metric "$zeto" '.metrics.zeto_escrow_submitted_total.count')
+  zeto_tps=$(perf_jq_metric "$zeto" '.metrics.iterations.rate')
+  zeto_err=$(perf_jq_metric "$zeto" '.metrics.http_req_failed.value')
 
   local ttf_p50 ttf_p95 ttf_n ttf_pass
   if [ -f "$ttf" ]; then
@@ -79,6 +83,23 @@ perf_write_results() {
   else
     ttf_p50="n/a"; ttf_p95="n/a"; ttf_n=0; ttf_pass="n/a"
   fi
+
+  # baseline p50 (D6 read p50<200ms, write p50<800ms). k6 exports the median as
+  # .med (= p50); it does not export an explicit "p(50)" by default.
+  local read_p50 fx_p50 write_p50
+  read_p50=$(perf_jq_metric "$base" '.metrics.htlc_search_latency_ms.med')
+  fx_p50=$(perf_jq_metric "$base" '.metrics.fx_list_latency_ms.med')
+  write_p50=$(perf_jq_metric "$base" '.metrics.htlc_lock_latency_ms.med')
+
+  # happy path — Scenario A HTLC settlement lifecycle (D6 timing constraints)
+  local happy="${dir}/happy-path.summary.json"
+  local life_p50 life_p95 relay_p95 apisync_p95 settle_rate settle_n
+  life_p50=$(perf_jq_metric "$happy" '.metrics.fx_settlement_latency_ms.med')
+  life_p95=$(perf_jq_metric "$happy" '.metrics.fx_settlement_latency_ms["p(95)"]')
+  relay_p95=$(perf_jq_metric "$happy" '.metrics.fx_relay_propagation_ms["p(95)"]')
+  apisync_p95=$(perf_jq_metric "$happy" '.metrics.api_sync_ms["p(95)"]')
+  settle_rate=$(perf_jq_metric "$happy" '.metrics.fx_settlement_rate.value')
+  settle_n=$(perf_jq_metric "$happy" '.metrics.fx_settlement_success_total.count')
 
   # --- verdicts -------------------------------------------------------------
   # error rate as percent for display
@@ -96,6 +117,24 @@ perf_write_results() {
   if [ "$read_pf" != "n/a" ] && [ "$fx_pf" != "n/a" ]; then
     if [ "$read_pf" = "PASS" ] && [ "$fx_pf" = "PASS" ]; then read4_pf="PASS"; else read4_pf="FAIL"; fi
   fi
+
+  # D6 p50 verdicts
+  local read_p50_pf fx_p50_pf read_p50_4_pf write_p50_pf
+  read_p50_pf=$(perf_pf "$read_p50" "<" 200)
+  fx_p50_pf=$(perf_pf "$fx_p50" "<" 200)
+  read_p50_4_pf="n/a"
+  if [ "$read_p50_pf" != "n/a" ] && [ "$fx_p50_pf" != "n/a" ]; then
+    if [ "$read_p50_pf" = "PASS" ] && [ "$fx_p50_pf" = "PASS" ]; then read_p50_4_pf="PASS"; else read_p50_4_pf="FAIL"; fi
+  fi
+  write_p50_pf=$(perf_pf "$write_p50" "<" 800)
+
+  # D6 Scenario-A HTLC settlement lifecycle verdicts
+  local life_pf relay_pf apisync_pf settle_pf settle_pct
+  life_pf=$(perf_pf "$life_p95" "<" 60000)     # full lifecycle ≤ 60s
+  relay_pf=$(perf_pf "$relay_p95" "<" 15000)   # relayer cross-chain ≤ 15s
+  apisync_pf=$(perf_pf "$apisync_p95" "<" 30000) # synchronous API response ≤ 30s
+  settle_pf=$(perf_pf "$settle_rate" ">" 0.9)
+  settle_pct=$(awk -v r="$settle_rate" 'BEGIN{ if(r=="n/a"||r==""){print "n/a"} else {printf "%.1f", r*100} }')
 
   local ts commit env_note k6ver gw rcv
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -127,11 +166,11 @@ perf_write_results() {
 | Git commit | ${commit} |
 | Environment | ${env_note} |
 | Besu version / consensus | 25.8.0 / QBFT |
-| Stack brought up via | \`make spoke-a\` (auto, lib/stack.sh) |
+| Stack brought up via | \`make spoke-all\` (auto, full cross-spoke; lib/stack.sh) |
 | k6 version | ${k6ver} |
 | API gateway (bank-a) | ${gw} |
 | RECEIVER identity used | ${rcv} |
-| Raw evidence | ${dir}/{baseline,transfer,zeto,ttf}.summary.json |
+| Raw evidence | ${dir}/{baseline,transfer,zeto,ttf,happy-path}.summary.json |
 
 ## Threshold results
 
@@ -140,10 +179,24 @@ perf_write_results() {
 | 1 | HTLC token-transfer throughput | 50 TPS sustained | ${xfer_tps} TPS (${xfer_count} locks) | ${xfer_pf} | iteration rate; lock-success rate ${xfer_rate} |
 | 2 | Zeto (privacy) escrow throughput | 15 TPS sustained | ${zeto_tps} TPS (${zeto_count} escrows) | ${zeto_pf} | escrow-request admission rate |
 | 3 | Time-To-Finality per spoke (TTF) | p95 < 5s | p50 ${ttf_p50} / p95 ${ttf_p95} s | ${ttf_pass} | HTLCLocked event correlation, n=${ttf_n} (README §4) |
-| 4 | API read p95 latency | < 500ms | search ${read_p95} / fx ${fx_p95} ms | ${read4_pf} | both read endpoints must pass |
-| 5 | API write p95 latency | < 1500ms | ${write_p95} ms | ${write_pf} | \`htlc_lock_latency_ms\` (admission only) |
+| 4 | API read latency | p50<200 / p95<500 ms | p50 search ${read_p50}/fx ${fx_p50}; p95 search ${read_p95}/fx ${fx_p95} ms | p50 ${read_p50_4_pf} / p95 ${read4_pf} | both read endpoints |
+| 5 | API write latency (admission) | p50<800 / p95<1500 ms | p50 ${write_p50}; p95 ${write_p95} ms | p50 ${write_p50_pf} / p95 ${write_pf} | \`htlc_lock_latency_ms\` |
 | 6 | Error rate (steady state) | < 1% | ${err_pct} % | ${err_pf} | baseline \`http_req_failed\`; transfer ${xfer_err}, zeto ${zeto_err} |
 | 7 | Resource stability (12h soak) | no leak / crash | (run \`make scenario-a.perf-soak-all\`) | n/a | opt-in; not part of perf-all |
+
+## Scenario A — HTLC settlement lifecycle (D6 timing constraints)
+
+End-to-end correspondent-banking settlement (FX propose → custodian accept → dual-leg
+HTLC lock → secret reveal → both spokes SETTLED), driven by the happy-path benchmark
+(\`k6/fx-settlement-throughput.js\`). State is polled every 1s (no fixed sleeps), per D6.
+
+| D6 constraint | Target | Measured | Pass/Fail | Notes |
+|---|--------|----------|-----------|-------|
+| Full HTLC lifecycle (end to end) | ≤ 60s | p50 ${life_p50} / p95 ${life_p95} ms | ${life_pf} | ${settle_n} settlements completed |
+| Synchronous API response | ≤ 30s | p95 ${apisync_p95} ms | ${apisync_pf} | propose/accept/lock/settle calls (\`api_sync_ms\`) |
+| Relayer cross-chain propagation | ≤ 15s | p95 ${relay_p95} ms | ${relay_pf} | secret carry → custodian SETTLED (reported) |
+| Settlement completion rate | > 90% | ${settle_pct} % | ${settle_pf} | relay-bound; raise \`HAPPY_VUS\` for burst/stress |
+| Transaction mining (per spoke) | ≤ 10s | see TTF (row 3) | ${ttf_pass} | QBFT single-block finality |
 
 ## Per-scenario evidence
 
@@ -151,10 +204,12 @@ perf_write_results() {
 - 50 TPS HTLC transfer: \`${xfer}\`
 - 15 TPS Zeto escrow: \`${zeto}\`
 - Time-To-Finality correlation: \`${ttf}\`
+- Full happy-path settlement (D6 lifecycle): \`${happy}\`
 
 ## Overall verdict
 
-$(perf_overall_verdict "$xfer_pf" "$zeto_pf" "$ttf_pass" "$read4_pf" "$write_pf" "$err_pf")
+$(perf_overall_verdict "$xfer_pf" "$zeto_pf" "$ttf_pass" "$read4_pf" "$write_pf" "$err_pf" \
+    "$read_p50_4_pf" "$write_p50_pf" "$life_pf" "$apisync_pf" "$settle_pf")
 EOF
 
   log_info "results written" out="$out"
