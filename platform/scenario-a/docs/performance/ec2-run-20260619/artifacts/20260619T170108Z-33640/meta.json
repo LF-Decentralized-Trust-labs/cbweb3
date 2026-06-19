@@ -1,0 +1,1 @@
+{"api_gw_url":"http://localhost:18080","receiver":"funded_operator@spoke-a-bank-c","k6_version":"k6 v2.0.0 (commit/8c3be52cc1, go1.26.3, linux/amd64)","environment":"local devnet (spoke-a, Besu QBFT)"}

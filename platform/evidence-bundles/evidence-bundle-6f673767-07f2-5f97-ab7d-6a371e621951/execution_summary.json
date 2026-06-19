@@ -1,0 +1,122 @@
+{
+  "bundle": "perf-scenario-a",
+  "suite": "scenario-a.perf-all (R1-12.3) \u2014 local DURATION=2m + EC2 c6a.8xlarge",
+  "scenario": "A",
+  "passed": false,
+  "total_duration_ms": null,
+  "run_id": "6f673767-07f2-5f97-ab7d-6a371e621951",
+  "timestamp": "2026-06-19",
+  "notes": "Functional + latency + D6 lifecycle gates pass; HTLC lock throughput + write latency fail (Paladin/Zeto synchronous blocking lock path; hardware-independent per EC2). See D12_results.md A.4.",
+  "results": [
+    {
+      "scenario_id": "PERF-A-1",
+      "step": "htlc_transfer_throughput_50tps",
+      "http_status": null,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": null,
+      "passed": false,
+      "target": "50 TPS, <1% err",
+      "measured": "2.9-4.4 TPS"
+    },
+    {
+      "scenario_id": "PERF-A-2",
+      "step": "zeto_escrow_throughput_15tps",
+      "http_status": null,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": null,
+      "passed": true,
+      "target": "15 TPS, <1% err",
+      "measured": "15.0 TPS, 0% err"
+    },
+    {
+      "scenario_id": "PERF-A-3",
+      "step": "time_to_finality_per_spoke",
+      "http_status": null,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": null,
+      "passed": null,
+      "target": "p95 < 5s",
+      "measured": "no samples (n=0)"
+    },
+    {
+      "scenario_id": "PERF-A-4",
+      "step": "api_read_latency_p95",
+      "http_status": null,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 81,
+      "passed": true,
+      "target": "p95 < 500ms",
+      "measured": "36-81 ms"
+    },
+    {
+      "scenario_id": "PERF-A-5",
+      "step": "api_write_latency_p95",
+      "http_status": null,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 60000,
+      "passed": false,
+      "target": "p50<800 / p95<1500 ms",
+      "measured": "p50 7200 / p95 60000 ms"
+    },
+    {
+      "scenario_id": "PERF-A-6",
+      "step": "error_rate_steady_state",
+      "http_status": null,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": null,
+      "passed": true,
+      "target": "< 1%",
+      "measured": "0.03%"
+    },
+    {
+      "scenario_id": "PERF-A-D6-lifecycle",
+      "step": "htlc_full_lifecycle",
+      "http_status": null,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 32910,
+      "passed": true,
+      "target": "<= 60s",
+      "measured": "p95 30.6s (local) / 32.9s (EC2)"
+    },
+    {
+      "scenario_id": "PERF-A-D6-apisync",
+      "step": "synchronous_api_response",
+      "http_status": null,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 7148,
+      "passed": true,
+      "target": "<= 30s",
+      "measured": "p95 7.1s"
+    },
+    {
+      "scenario_id": "PERF-A-D6-relay",
+      "step": "relayer_cross_chain_propagation",
+      "http_status": null,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 3773,
+      "passed": true,
+      "target": "<= 15s",
+      "measured": "p95 3.8s"
+    },
+    {
+      "scenario_id": "PERF-A-D6-completion",
+      "step": "settlement_completion_rate",
+      "http_status": null,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": null,
+      "passed": true,
+      "target": "> 90%",
+      "measured": "100%"
+    }
+  ]
+}

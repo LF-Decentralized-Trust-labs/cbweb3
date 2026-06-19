@@ -21,7 +21,7 @@ BESU_HUB_RPC ?= http://localhost:8645
 SPOKE_A_RPC  ?= http://localhost:8645
 SPOKE_B_RPC  ?= http://localhost:8745
 KEYCLOAK_URL    ?= http://localhost:8081
-API_GW_URL      ?= http://localhost:3000
+API_GW_URL      ?= http://localhost:18080
 API_GW_BANK_A_URL         ?= http://localhost:18080
 API_GW_BANK_B_URL         ?= http://localhost:28080
 API_GW_CENTRAL_BANK_A_URL ?= http://localhost:38080
@@ -155,6 +155,13 @@ scenario-b.down-fx-feeder:
 scenario-b.up: scenario-b.down-fx-feeder scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend scenario-b.up-fx-feeder noc.setup-keycloak noc.up noc.setup-agents
 	@echo "[scenario-b] full stack up — ready for tryout (bash tryouts/tryout-scenario-b-e2e.sh)"
 
+# Perf-lean bring-up: the full settlement stack (infra + contracts + relayer + backend +
+# fx-feeder) WITHOUT the NOC operations portal (noc.setup-keycloak/noc.up/noc.setup-agents).
+# The NOC portal is a monitoring frontend and is not on the perf path; excluding it keeps the
+# R1-12.3 perf harness (scenario-b.perf-all) from depending on the NOC frontend build.
+scenario-b.up-perf: scenario-b.down-fx-feeder scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend scenario-b.up-fx-feeder
+	@echo "[scenario-b] perf stack up (no NOC portal) — ready for make scenario-b.perf-all"
+
 scenario-b.down: scenario-b.down-fx-feeder scenario-b.down-backend scenario-b.down-relayer scenario-b.down-infra noc.down
 	@echo "[scenario-b] full stack down"
 
@@ -240,6 +247,62 @@ scenario-b.perf-baseline:
 	@echo "[scenario-b] running performance baseline (quote + swap p95)..."
 	@API_GW_URL=$(API_GW_URL) k6 run tests/performance/scenario-b-perf.js
 
+# ── R1-12.3 threshold harness (see scenario-b/docs/performance) ───────────────
+# These drive the Report 1 / Finding 12.3 thresholds. AUTH_TOKEN (commercial_bank
+# JWT) is REQUIRED for swap/transfer scenarios. Fill measured numbers into
+# docs/performance/RESULTS-TEMPLATE.md after a real run — do not run the soak in CI.
+
+scenario-b.perf-amm-throughput:
+	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
+	@echo "[scenario-b] AMM swap throughput — validating DRAFT 30 TPS target..."
+	@API_GW_URL=$(API_GW_URL) AUTH_TOKEN=$(AUTH_TOKEN) \
+	  LOAD_MODEL=rate SWAP_TPS=$${SWAP_TPS:-30} QUOTE_TPS=$${QUOTE_TPS:-60} DURATION=$${DURATION:-10m} \
+	  k6 run tests/performance/scenario-b-perf.js
+
+scenario-b.perf-transfer:
+	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
+	@echo "[scenario-b] value-transfer throughput — 50 TPS target..."
+	@API_GW_URL=$(API_GW_URL) AUTH_TOKEN=$(AUTH_TOKEN) \
+	  TRANSFER_TPS=$${TRANSFER_TPS:-50} DURATION=$${DURATION:-10m} \
+	  k6 run tests/performance/k6/bridge-transfer-throughput.js
+
+scenario-b.perf-zeto:
+	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
+	@echo "[scenario-b] Zeto privacy-transfer throughput — 15 TPS target..."
+	@API_GW_URL=$(API_GW_URL) AUTH_TOKEN=$(AUTH_TOKEN) \
+	  TOKEN_KIND=zeto TRANSFER_TPS=$${TRANSFER_TPS:-15} DURATION=$${DURATION:-10m} \
+	  k6 run tests/performance/k6/bridge-transfer-throughput.js
+
+# ── R1-12.3 ZERO-CONFIG orchestration ────────────────────────────────────────
+# scenario-b.perf-all — ONE command, NO config, NO manual steps. Stands up the stack if
+# needed, mints the auth tokens via the gateway login, applies the perf profile (clears
+# transfer limits + asserts the circuit breaker is RESUMED before swaps), seeds 30-TPS-sized
+# liquidity, runs every threshold benchmark with --summary-export, does on-chain TTF
+# correlation, and writes measured numbers + PASS/FAIL into docs/performance/RESULTS.md.
+# The 12h soak is SEPARATE (scenario-b.perf-soak). Override DURATION/SWAP_TPS/etc. if desired.
+# scenario-b.perf-smoke — static + logic smoke test for the perf harness helpers. No infra, no
+# k6 run; safe for CI. Validates syntax, JSON logging, and write-results PASS/FAIL/VALIDATED/REVISE.
+scenario-b.perf-smoke:
+	@echo "[scenario-b] perf harness smoke test (no infra)..."
+	@bash tests/performance/lib/smoke_test.sh
+
+scenario-b.perf-all:
+	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
+	@echo "[scenario-b] R1-12.3 full perf suite (zero-config) — see docs/performance/RESULTS.md..."
+	@PERF_MAKE_DIR=$(CURDIR) \
+	 API_GW_URL=$(API_GW_URL) \
+	 API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
+	 bash tests/performance/run-all.sh
+
+scenario-b.perf-soak:
+	@command -v k6 >/dev/null 2>&1 || { echo "ERROR: k6 is required (https://k6.io)"; exit 1; }
+	@echo "[scenario-b] 12-hour SOAK — dedicated infra only, NOT for CI..."
+	@PERF_MAKE_DIR=$(CURDIR) \
+	 API_GW_URL=$(API_GW_URL) \
+	 API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
+	 DURATION=$${DURATION:-12h} \
+	 bash tests/performance/run-soak.sh
+
 # ── OpenAPI validation (T108) ────────────────────────────────────────────────
 
 scenario-b.validate-openapi:
@@ -254,8 +317,10 @@ scenario-b.validate-openapi:
 	scenario-b.build-backend-images \
 	scenario-b.up-backend scenario-b.down-backend \
 	scenario-b.up-backend-mlp scenario-b.down-backend-mlp scenario-b.tryout-us2-mlp \
-	scenario-b.up scenario-b.down scenario-b.restart scenario-b.nuke \
+	scenario-b.up scenario-b.up-perf scenario-b.down scenario-b.restart scenario-b.nuke \
 	scenario-b.test-contracts scenario-b.test-backend scenario-b.test \
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
 	scenario-b.test-integration \
-	scenario-b.perf-baseline scenario-b.validate-openapi
+	scenario-b.perf-baseline scenario-b.validate-openapi \
+	scenario-b.perf-amm-throughput scenario-b.perf-transfer \
+	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all scenario-b.perf-smoke

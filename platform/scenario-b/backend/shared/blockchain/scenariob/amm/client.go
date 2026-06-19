@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
@@ -23,10 +24,20 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-// erc20ABI is the minimal ERC-20 ABI for approve() and balanceOf().
-// approve() is required before safeTransferFrom; balanceOf() is used for pre-flight
-// balance checks in SovereignAddLiquidity (FR-010 / T021).
-const erc20ABI = `[{"type":"function","name":"approve","stateMutability":"nonpayable","inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},{"type":"function","name":"balanceOf","stateMutability":"view","inputs":[{"name":"account","type":"address"}],"outputs":[{"name":"","type":"uint256"}]}]`
+// erc20ABI is the minimal ERC-20 ABI for approve(), allowance(), and balanceOf().
+// approve() is required before safeTransferFrom; allowance() lets ensureUnlimitedApproval
+// skip re-approvals that are already in effect from a previous run; balanceOf() is used
+// for pre-flight balance checks in SovereignAddLiquidity (FR-010 / T021).
+const erc20ABI = `[{"type":"function","name":"approve","stateMutability":"nonpayable","inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},{"type":"function","name":"allowance","stateMutability":"view","inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},{"type":"function","name":"balanceOf","stateMutability":"view","inputs":[{"name":"account","type":"address"}],"outputs":[{"name":"","type":"uint256"}]}]`
+
+// approvalFloor is the minimum allowance below which ensureUnlimitedApproval submits a
+// new approve(max_uint256). 2^128 is effectively unlimited for any realistic token supply
+// and lets the service survive a restart without re-approving when the prior allowance
+// is still large.
+var approvalFloor = new(big.Int).Lsh(big.NewInt(1), 128)
+
+// maxUint256 is the conventional "unlimited" ERC-20 allowance.
+var maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 
 // ABIJSON is the minimal IAutomatedMarketMaker ABI used by the Go client. Keep the method
 // signatures in sync with contracts/src/interfaces/IAutomatedMarketMaker.sol.
@@ -139,14 +150,16 @@ type SwapResult struct {
 // Client is the EVM client for the AMM contract on the Hub. All methods are safe for
 // concurrent use; the embedded ABI is immutable.
 type Client struct {
-	contract common.Address
-	ec       *ethclient.Client
-	abi      abi.ABI
-	erc20ABI abi.ABI
-	signer   *evm.Signer
-	timeout  time.Duration
-	tokenA   common.Address
-	tokenB   common.Address
+	contract   common.Address
+	ec         *ethclient.Client
+	abi        abi.ABI
+	erc20ABI   abi.ABI
+	signer     *evm.Signer
+	timeout    time.Duration
+	tokenA     common.Address
+	tokenB     common.Address
+	approvalMu sync.Mutex
+	approved   map[common.Address]bool // tokens with an in-effect unlimited allowance
 }
 
 // Config holds the connection parameters for the AMM client.
@@ -189,6 +202,7 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 		timeout:  cfg.Timeout,
 		tokenA:   common.HexToAddress(cfg.TokenAAddress),
 		tokenB:   common.HexToAddress(cfg.TokenBAddress),
+		approved: make(map[common.Address]bool),
 	}
 	if cfg.PrivateKeyHex != "" {
 		signer, err := evm.NewSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
@@ -313,7 +327,7 @@ func (c *Client) SwapExactOutput(ctx context.Context, req SwapRequest) (*SwapRes
 	if req.To != "" {
 		to = common.HexToAddress(req.To)
 	}
-	if err := c.approveToken(ctx, tokenIn, maxAmountIn); err != nil {
+	if err := c.ensureUnlimitedApproval(ctx, tokenIn); err != nil {
 		return nil, fmt.Errorf("approve tokenIn for swap: %w", err)
 	}
 	receipt, txHash, err := evm.SubmitTxReceipt(ctx, c.ec, c.signer, c.contract, c.abi,
@@ -338,14 +352,54 @@ func (c *Client) SwapExactOutput(ctx context.Context, req SwapRequest) (*SwapRes
 	return &SwapResult{TxHash: txHash, AmountIn: amountIn, OrderID: req.PayerID}, nil
 }
 
-// approveToken grants the AMM contract max-uint256 allowance on a given ERC-20 token.
-// It is called before addLiquidity and swap to satisfy safeTransferFrom requirements.
+// approveToken grants the AMM contract an exact allowance on a given ERC-20 token.
+// Used by AddLiquidity, DepositForCommit, and DepositForCommitAt where the caller
+// controls the amount being deposited. For the swap hot-path use ensureUnlimitedApproval.
 func (c *Client) approveToken(ctx context.Context, token common.Address, amount *big.Int) error {
 	if token == (common.Address{}) {
 		return fmt.Errorf("amm: token address not resolved; check AMM contract address and RPC connectivity")
 	}
 	_, err := evm.SubmitTx(ctx, c.ec, c.signer, token, c.erc20ABI, "approve", c.contract, amount)
 	return err
+}
+
+// ensureUnlimitedApproval approves max_uint256 for the swap hot-path if the current
+// on-chain allowance is below approvalFloor. The result is cached in-process so
+// subsequent swaps skip both the RPC read and the approve transaction.
+//
+// The entire check-and-approve sequence runs under approvalMu so concurrent swap
+// goroutines cannot each submit a redundant approve transaction on the first call.
+func (c *Client) ensureUnlimitedApproval(ctx context.Context, token common.Address) error {
+	if token == (common.Address{}) {
+		return fmt.Errorf("amm: token address not resolved; check AMM contract address and RPC connectivity")
+	}
+	if c.signer == nil {
+		return fmt.Errorf("amm: signer required for approval")
+	}
+
+	c.approvalMu.Lock()
+	defer c.approvalMu.Unlock()
+
+	if c.approved[token] {
+		return nil
+	}
+
+	// Read on-chain allowance — catches a large approval left from a previous run.
+	allowance := new(big.Int)
+	if err := evm.Call(ctx, c.ec, token, c.erc20ABI, "allowance",
+		[]interface{}{c.signer.Address(), c.contract}, allowance); err != nil {
+		return fmt.Errorf("read allowance: %w", err)
+	}
+	if allowance.Cmp(approvalFloor) >= 0 {
+		c.approved[token] = true
+		return nil
+	}
+
+	if _, err := evm.SubmitTx(ctx, c.ec, c.signer, token, c.erc20ABI, "approve", c.contract, maxUint256); err != nil {
+		return fmt.Errorf("approve max for swap: %w", err)
+	}
+	c.approved[token] = true
+	return nil
 }
 
 // AddLiquidity approves both pool tokens and submits an addLiquidity transaction.

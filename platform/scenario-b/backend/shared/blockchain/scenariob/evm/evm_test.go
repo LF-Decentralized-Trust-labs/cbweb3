@@ -5,6 +5,7 @@ package evm
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -118,6 +119,36 @@ func TestDial_Errors(t *testing.T) {
 			t.Fatal("expected error for malformed URL")
 		}
 	})
+}
+
+func TestSigner_NonceInit(t *testing.T) {
+	s, err := NewSigner(newKeyHex(t), big.NewInt(1337))
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	if s.nonceInit {
+		t.Fatal("nonceInit should start false; first signAndSend seeds it from PendingNonceAt")
+	}
+}
+
+func TestIsNonceTooLow(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want bool
+	}{
+		{"nonce too low", true},
+		{"nonce too high", true},
+		{"replacement transaction underpriced", true},
+		{"NONCE TOO LOW", true}, // case-insensitive
+		{"insufficient funds", false},
+		{"known transaction", false},
+		{"gas limit exceeded", false},
+	}
+	for _, tc := range tests {
+		if got := isNonceTooLow(fmt.Errorf("%s", tc.msg)); got != tc.want {
+			t.Errorf("isNonceTooLow(%q) = %v, want %v", tc.msg, got, tc.want)
+		}
+	}
 }
 
 func TestCopyOutput(t *testing.T) {

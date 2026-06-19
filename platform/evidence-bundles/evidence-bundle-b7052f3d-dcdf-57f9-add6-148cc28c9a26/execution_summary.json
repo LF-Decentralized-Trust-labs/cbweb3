@@ -1,0 +1,84 @@
+{
+  "bundle": "e2e-scenario-b",
+  "suite": "scenario-b TestFullHappyPath (go test -tags integration) \u2014 composite covering E2E-B-01 (liquidity), E2E-B-02 (MLP), E2E-B-03 (AMM swap), E2E-B-06 (bridge lock&mint)",
+  "scenario": "B",
+  "passed": true,
+  "total_duration_ms": 63060,
+  "run_id": "b7052f3d-dcdf-57f9-add6-148cc28c9a26",
+  "timestamp": "2026-06-19",
+  "notes": "Per-call tx_hash/block_number/X-Correlation-Id are null: the Go integration harness reports phase-level pass/fail + duration, not per-HTTP-call on-chain traces. contract_id is included where the test captured it. Add OTel/correlation emission to the harness for fully machine-graded traces.",
+  "results": [
+    {
+      "scenario_id": "E2E-B-01",
+      "step": "phase_0_readiness",
+      "http_status": 200,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 30,
+      "passed": true
+    },
+    {
+      "scenario_id": "E2E-B-01",
+      "step": "phase_1_liquidity_provision",
+      "http_status": 201,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 32130,
+      "passed": true
+    },
+    {
+      "scenario_id": "E2E-B-01",
+      "step": "phase_2_onboarding",
+      "http_status": 201,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 4370,
+      "passed": true
+    },
+    {
+      "scenario_id": "E2E-B-06",
+      "step": "phase_3_fiat_issuance",
+      "http_status": 201,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 2640,
+      "passed": true
+    },
+    {
+      "scenario_id": "E2E-B-06",
+      "step": "phase_3b_reserve_tokenisation",
+      "http_status": 201,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 4370,
+      "passed": true
+    },
+    {
+      "scenario_id": "E2E-B-03",
+      "step": "phase_4_cross_currency_transfer",
+      "http_status": 200,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 10380,
+      "passed": true
+    },
+    {
+      "scenario_id": "E2E-B-03",
+      "step": "phase_5_bank_b_receipt",
+      "http_status": 200,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 6130,
+      "passed": true
+    },
+    {
+      "scenario_id": "E2E-B-02",
+      "step": "phase_6_lp_withdrawal",
+      "http_status": 200,
+      "tx_hash": null,
+      "block_number": null,
+      "latency_ms": 2160,
+      "passed": true
+    }
+  ]
+}

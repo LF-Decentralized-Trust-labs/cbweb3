@@ -41,14 +41,14 @@ const pools: PoolStatus[] = [
 ];
 
 const topologyNodes: TopologyNode[] = [
-  { id: "hub", label: "Regional Hub (Besu)", kind: "HUB", redundant: true, status: "HEALTHY" },
-  { id: "paladin-hub", label: "Paladin Hub", kind: "PALADIN", redundant: true, status: "HEALTHY" },
-  { id: "besu-a", label: "Besu Spoke A", kind: "BESU", redundant: true, status: "HEALTHY" },
-  { id: "paladin-a", label: "Paladin Spoke A", kind: "PALADIN", redundant: true, status: "HEALTHY" },
-  { id: "cacti-a", label: "Cacti Relay A↔Hub", kind: "CACTI", redundant: false, status: "HEALTHY" },
-  { id: "besu-b", label: "Besu Spoke B", kind: "BESU", redundant: false, status: "DEGRADED" },
-  { id: "paladin-b", label: "Paladin Spoke B", kind: "PALADIN", redundant: false, status: "DEGRADED" },
-  { id: "cacti-b", label: "Cacti Relay B↔Hub", kind: "CACTI", redundant: false, status: "DEGRADED" },
+  { id: "hub", label: "Regional Hub (Besu)", kind: "HUB", spoke_id: "hub", spoke_name: "Regional Hub", redundant: true, status: "HEALTHY" },
+  { id: "paladin-hub", label: "Paladin Hub", kind: "PALADIN", spoke_id: "hub", spoke_name: "Regional Hub", redundant: true, status: "HEALTHY" },
+  { id: "besu-a", label: "Besu Spoke A", kind: "BESU", spoke_id: "spoke-a", spoke_name: "Spoke A", redundant: true, status: "HEALTHY" },
+  { id: "paladin-a", label: "Paladin Spoke A", kind: "PALADIN", spoke_id: "spoke-a", spoke_name: "Spoke A", redundant: true, status: "HEALTHY" },
+  { id: "cacti-a", label: "Cacti Relay A↔Hub", kind: "CACTI", spoke_id: "spoke-a", spoke_name: "Spoke A", redundant: false, status: "HEALTHY" },
+  { id: "besu-b", label: "Besu Spoke B", kind: "BESU", spoke_id: "spoke-b", spoke_name: "Spoke B", redundant: false, status: "DEGRADED" },
+  { id: "paladin-b", label: "Paladin Spoke B", kind: "PALADIN", spoke_id: "spoke-b", spoke_name: "Spoke B", redundant: false, status: "DEGRADED" },
+  { id: "cacti-b", label: "Cacti Relay B↔Hub", kind: "CACTI", spoke_id: "spoke-b", spoke_name: "Spoke B", redundant: false, status: "DEGRADED" },
 ];
 
 const topologyEdges: TopologyEdge[] = [
@@ -62,9 +62,9 @@ const topologyEdges: TopologyEdge[] = [
 ];
 
 const auditLogs: AuditLogEntry[] = [
-  { id: "audit-1", component: "SYSTEM", severity: "INFO", message: "NOC monitoring cycle started", createdAt: nowIso() },
-  { id: "audit-2", component: "CACTI", severity: "WARNING", message: "Relay latency exceeded warning threshold", createdAt: nowIso() },
-  { id: "audit-3", component: "BESU", severity: "CRITICAL", message: "Node sync lag crossed critical threshold", createdAt: nowIso() },
+  { id: "audit-1", actor: "system", action: "MONITORING_CYCLE_START", target_id: "noc", target_type: "SYSTEM", detail: "NOC monitoring cycle started", created_at: nowIso() },
+  { id: "audit-2", actor: "system", action: "RELAY_LATENCY_WARNING", target_id: "cacti", target_type: "CACTI", detail: "Relay latency exceeded warning threshold", created_at: nowIso() },
+  { id: "audit-3", actor: "system", action: "NODE_SYNC_LAG_CRITICAL", target_id: "besu", target_type: "BESU", detail: "Node sync lag crossed critical threshold", created_at: nowIso() },
 ];
 
 export const mockDb = {
