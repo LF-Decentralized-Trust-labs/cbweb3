@@ -73,6 +73,22 @@ spoke-all-down:
 	$(MAKE) spoke-a-down
 	@echo "Both Spoke-A and Spoke-B stacks are down (shared infra left running)."
 
+# Full wipe: stack + ALL volumes (Postgres, Paladin nodes, Cacti relay) for a
+# clean reproducible redeploy. Use before `make spoke-all` when you want a true
+# from-scratch deploy (e.g. to let the Postgres init script recreate every DB).
+# `-@` so a missing/already-gone piece never aborts the wipe.
+scenario-a.nuke:
+	@echo "[scenario-a] NUKE — tearing down the entire stack + ALL volumes..."
+	-@$(MAKE) spoke-all-down
+	-@$(MAKE) paladin.clean-volumes-spoke-a
+	-@$(MAKE) paladin.clean-volumes-spoke-b
+	-@$(MAKE) deploy.down-infra
+	@echo "[scenario-a] removing Cacti relay volume..."
+	-@docker volume rm cacti_cacti-relay-data 2>/dev/null || true
+	@echo "[scenario-a] force-removing any leftover app containers..."
+	-@docker rm -f $$(docker ps -aq --filter name=cbweb3 --filter name=backend- --filter name=paladin) 2>/dev/null || true
+	@echo "[scenario-a] NUKE complete — clean slate. Next 'make spoke-all' is a from-scratch deploy."
+
 # ── Full environment ─────────────────────────────────────────────────────────
 
 dev.up: pki.gen-all deploy.up contracts.deploy-all-with-sync \
@@ -105,7 +121,7 @@ dev.down-central-bank-a: deploy.down-backend-central-bank-a
 dev.up-central-bank-b: pki.gen-central-bank-b deploy.up-infra deploy.up-spoke-b deploy.up-backend-central-bank-b
 dev.down-central-bank-b: deploy.down-backend-central-bank-b
 
-.PHONY: spoke-a spoke-a-down spoke-b spoke-b-down spoke-all spoke-all-down cacti-up cacti-down \
+.PHONY: spoke-a spoke-a-down spoke-b spoke-b-down spoke-all spoke-all-down scenario-a.nuke cacti-up cacti-down \
 	dev.up dev.down \
 	dev.up-bank-a dev.down-bank-a dev.up-bank-b dev.down-bank-b \
 	dev.up-bank-c dev.down-bank-c dev.up-bank-d dev.down-bank-d \
