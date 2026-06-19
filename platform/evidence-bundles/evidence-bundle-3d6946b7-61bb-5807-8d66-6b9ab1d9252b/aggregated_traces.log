@@ -1,0 +1,5 @@
+# Scenario A — TestFullHappyPath correlation artifacts (2026-06-19)
+# format: contract_id -> tx_hash -> block_number (tx/block require trace harness; see note)
+phase_6_htlc_lock origin_leg   contract_id=1c10748db4974fb073a4eb7d452fc4b8f0f9cf3a0f6764d6bc4a5ee9e64ef5ec tx_hash=<not-captured> block=<not-captured>
+phase_6_htlc_lock counter_leg  contract_id=59b53a13c55133ec7d939f9d01863e1da1d8904aa1f6cf1dfdd52e2027b40b7c tx_hash=<not-captured> block=<not-captured>
+# X-Correlation-Id mapping not available: the harness does not yet propagate/emit it per request.

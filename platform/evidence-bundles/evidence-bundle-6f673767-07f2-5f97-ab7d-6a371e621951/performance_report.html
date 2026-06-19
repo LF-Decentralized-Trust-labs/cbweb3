@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>perf-scenario-a — performance report</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:2rem;color:#1a1a1a}
+h1{font-size:1.3rem} table{border-collapse:collapse;width:100%;margin-top:1rem}
+th,td{border:1px solid #ddd;padding:.5rem .7rem;text-align:left;font-size:.9rem}
+th{background:#f4f4f5} .verdict{font-weight:600}
+tr.pass .verdict{color:#15803d} tr.fail .verdict{color:#b91c1c}
+tr.revise .verdict,tr.unknown .verdict,tr.characterized .verdict,tr.n\/a .verdict{color:#a16207}
+.meta{color:#666;font-size:.85rem}
+</style></head><body>
+<h1>scenario-a.perf-all (R1-12.3) — local DURATION=2m + EC2 c6a.8xlarge</h1>
+<p class="meta">run_id 6f673767-07f2-5f97-ab7d-6a371e621951 · 2026-06-19 ·
+overall: gates breached (see below)</p>
+<p class="meta">Rendered summary of the k6 measurements. The native k6 dashboard requires
+running with <code>k6 run --out web-dashboard</code> (nightly). Source: D12_results.md.</p>
+<table><thead><tr><th>Measurement</th><th>Measured</th><th>Target</th><th>Verdict</th></tr></thead>
+<tbody>
+<tr class="fail"><td>HTLC lock throughput (50 TPS)</td><td>2.9–4.4 TPS</td><td>50 TPS, &lt;1% err</td><td class="verdict">FAIL</td></tr>
+<tr class="pass"><td>Zeto escrow throughput (15 TPS)</td><td>15.0 TPS, 0% err</td><td>15 TPS, &lt;1% err</td><td class="verdict">PASS</td></tr>
+<tr class="n/a"><td>Time-to-finality per spoke</td><td>no samples</td><td>p95 &lt; 5s</td><td class="verdict">n/a</td></tr>
+<tr class="pass"><td>API read latency p95</td><td>36–81 ms</td><td>p95 &lt; 500ms</td><td class="verdict">PASS</td></tr>
+<tr class="fail"><td>API write latency</td><td>p50 7.2s / p95 60s</td><td>p50&lt;800 / p95&lt;1500 ms</td><td class="verdict">FAIL</td></tr>
+<tr class="pass"><td>Error rate (steady state)</td><td>0.03%</td><td>&lt; 1%</td><td class="verdict">PASS</td></tr>
+<tr class="pass"><td>D6 full HTLC lifecycle</td><td>p95 30.6s / 32.9s (EC2)</td><td>&lt;= 60s</td><td class="verdict">PASS</td></tr>
+<tr class="pass"><td>D6 synchronous API response</td><td>p95 7.1s</td><td>&lt;= 30s</td><td class="verdict">PASS</td></tr>
+<tr class="pass"><td>D6 relayer cross-chain</td><td>p95 3.8s</td><td>&lt;= 15s</td><td class="verdict">PASS</td></tr>
+<tr class="pass"><td>D6 settlement completion</td><td>100%</td><td>&gt; 90%</td><td class="verdict">PASS</td></tr>
+</tbody></table></body></html>
