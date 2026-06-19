@@ -34,7 +34,7 @@ point for the project test documentation.
 | | Scenario A | Scenario B |
 |---|---|---|
 | Hermetic integration (`integration_lite`, PR gate) | ✅ | ✅ |
-| Live-stack E2E happy path | ✅ PASS | (suite present; live capture pending) |
+| Live-stack E2E happy path | ✅ PASS (8 phases, 56s) | ✅ PASS (8 phases, 63s) |
 | Performance (R1-12.3) | D6 HTLC lifecycle PASS; lock 50 TPS not met (Paladin/Zeto-bound) | transfer/Zeto PASS; AMM 30 TPS REVISE; error-rate FAIL |
 
 Performance evidence: [`scenario-a/docs/performance/`](../scenario-a/docs/performance/)
@@ -68,6 +68,5 @@ make scenario-a.perf-all                    # scenario-b: make scenario-b.perf-a
 ```
 
 ## Next pass
-- Capture live-run E2E flow results (per-phase pass/fail) for both scenarios.
 - Side-by-side perf deep-dive (the two throughput ceilings: A = Paladin/Zeto blocking lock
   path; B = single-signer EVM nonce — different root causes, different fixes).

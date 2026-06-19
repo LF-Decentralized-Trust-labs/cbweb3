@@ -54,12 +54,21 @@ coverage).
 **Hermetic (`integration_lite`)** — orchestrator + compliance-gate suites (bufconn +
 fakes, no infra). PR-gated.
 
-**Live-stack E2E (`integration`)** — `make scenario-b.test-integration` drives the full
-hub happy path against `make scenario-b.up`: liquidity provision (commit-reveal) → PKI
-onboarding → fiat issuance → reserve tokenisation → cross-currency swap (bridge-in → AMM
-→ bridge-out) → beneficiary receipt → partial LP withdrawal.
+**Live-stack E2E (`integration`)** — `make scenario-b.test-integration` (`TestFullHappyPath`)
+drives the full hub happy path against `make scenario-b.up`.
 
-> Detailed flow results to be expanded in a follow-up pass (live-run capture).
+Live run captured 2026-06-19 — **PASS (63.1s total)**:
+
+| Phase | What it validates | Result |
+|-------|-------------------|:------:|
+| 0 Readiness | gateways healthy | ✅ |
+| 1 Liquidity provision | dual-sided commit-reveal → pool ACTIVE | ✅ |
+| 2 Onboarding | PKI onboarding (payer + beneficiary) | ✅ |
+| 3 Fiat issuance | deposit → CB approve → fCeBM minted | ✅ |
+| 3b Reserve tokenisation | fCeBM → tCeBM escrow | ✅ |
+| 4 Cross-currency transfer | **bridge-in → AMM swap → bridge-out** | ✅ |
+| 5 Bank-B receipt | beneficiary balance increased | ✅ |
+| 6 LP withdrawal | partial zap-out (position stays ACTIVE) | ✅ |
 
 ## 4. Performance (R1-12.3) — summary
 

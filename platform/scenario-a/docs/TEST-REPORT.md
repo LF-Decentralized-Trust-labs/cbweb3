@@ -55,12 +55,23 @@ CI is unaffected (`.env` is git-ignored). Run coverage with `contracts/.env` abs
 infra): cross-ledger two-leg HTLC happy path + refund (atomicity), and the AML/CFT
 compliance gate. PR-gated.
 
-**Live-stack E2E (`integration`)** — `make scenario-a.test-integration` drives the full
-correspondent-banking happy path end to end against `make spoke-all`:
-bank-a (originator) → custodian bank-d → beneficiary bank-b, FX propose → accept →
-dual-leg HTLC lock → settle → relay settlement. **Status: PASS** (validated this branch).
+**Live-stack E2E (`integration`)** — `make scenario-a.test-integration` (`TestFullHappyPath`)
+drives the full correspondent-banking happy path end to end against `make spoke-all`:
+bank-a (originator) → custodian bank-d → beneficiary bank-b.
 
-> Detailed flow results to be expanded in a follow-up pass (live-run capture).
+Live run captured 2026-06-19 — **PASS (56.1s total)**:
+
+| Phase | What it validates | Result |
+|-------|-------------------|:------:|
+| 0 Readiness | all 4 gateways healthy | ✅ |
+| 1 Login | bank-a/b/d + cb-a/b authenticate | ✅ |
+| 2 Onboard | PKI onboarding (opt-in `ONBOARD=1`) | ⏭️ SKIP |
+| 3 Mint | central banks fund originator + custodian (treasury) | ✅ |
+| 4 FX propose | bank-a proposes; persistence + audit | ✅ |
+| 5 Cross-spoke sync | relay mirrors to bank-d → accept → ACCEPTED both spokes | ✅ |
+| 6 HTLC lock | originator + custodian dual-leg lock; timelock invariant | ✅ |
+| 7 Settle | secret reveal on spoke-a; relay settles spoke-b | ✅ |
+| 8 Verify | **both legs SETTLED — atomic cross-spoke settlement** | ✅ |
 
 ## 4. Performance (R1-12.3) — summary
 
