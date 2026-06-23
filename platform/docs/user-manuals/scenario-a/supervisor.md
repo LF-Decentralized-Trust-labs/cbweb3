@@ -4,7 +4,7 @@
 
 ---
 
-> ## Preview status (R2-CR-8)
+> ## Preview status
 >
 > The Supervisor Portal is currently a **UI preview**. Most data-fetching screens
 > call real backend endpoints, but **the data those endpoints return in the current
@@ -16,8 +16,8 @@
 > - **Do not** use any figure, balance, alert, HTLC record, participant entry, or
 >   audit log shown in this portal for a real supervisory or regulatory decision.
 > - **Do not** treat the login as a production security boundary.
-> - Live data wiring and production Keycloak authentication are tracked under
->   finding **R2-CR-8** and are **not yet available**.
+> - Live data wiring and production Keycloak authentication are **not yet
+>   available**.
 >
 > Every screen that displays data currently sourced from the development/demo
 > environment is labelled **Mock data** in a callout below its description.
@@ -99,7 +99,7 @@ Enter your **Client ID** (minimum 3 characters) and **Client Secret** (minimum
 6 characters), then click **Sign in**. On success you are redirected to the
 Dashboard.
 
-> **Mock data — demo login (R2-CR-8):** The login form calls `/api/v1/auth/login`
+> **Mock data — demo login:** The login form calls `/api/v1/auth/login`
 > with the supplied credentials. In the current development environment the
 > backend accepts any locally-configured credentials. Production Keycloak OIDC
 > enforcement is not yet active. Do not treat this login as a security boundary.
@@ -499,7 +499,7 @@ persisted to the backend.
 
 | Concern | Current behaviour |
 |---|---|
-| Authentication | Institutional SSO/OIDC credentials submitted to `/api/v1/auth/login`. Production Keycloak enforcement is not yet active (R2-CR-8). |
+| Authentication | Institutional SSO/OIDC credentials submitted to `/api/v1/auth/login`. Production Keycloak enforcement is not yet active. |
 | No token issuance | The Supervisor Portal has no mint, burn, or transfer capabilities by design. |
 | View key handling | Regulatory view keys are never written to `localStorage` or `sessionStorage`; they exist in memory only for the active browser session. |
 | Audit trail | Every action — including decryption requests and registry views — is logged in the immutable audit log. |

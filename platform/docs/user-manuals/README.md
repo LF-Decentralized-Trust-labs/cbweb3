@@ -30,23 +30,36 @@ behaves in that scenario**.
 
 ## Implementation status — read this first
 
-Not every portal is wired to a live backend yet. The manuals only describe
-features that exist in the shipped product, and each manual states clearly at the
-top where it currently runs on **mock (sample) data** rather than live data.
+Every portal below is wired to a live backend through the API Gateway. The
+manuals only describe features that exist in the shipped product, and each manual
+states at the top exactly where its data comes from. A portal's screens are
+populated only when the backend services it calls are reachable; in an offline or
+demo environment with the backends down, screens show empty tables or zero
+counters rather than fabricated data.
 
 | Portal | Scenario A | Scenario B | Data source today |
 |---|---|---|---|
 | **Bank** | Live backend | Live backend | Real API (API Gateway) |
-| **Governance** | Live backend (Dashboard + Registry exposed) | Live backend | Real API, with a development mock toggle |
-| **Treasury** | Live backend (approvals exposed) | Mock data | See note in the manual |
-| **Supervisor** | **Mock data only** | **Mock data only** | Sample data + demo login — **not production** (see R2-CR-8) |
-| **NOC** | Mock data only | Mock data only | Sample data — monitoring views are illustrative |
+| **Governance** | Live backend (Dashboard + Registry exposed) | Live backend | Real API; Scenario A retains a development mock toggle |
+| **Treasury** | Live backend (approvals exposed) | Live backend | Real API (API Gateway) |
+| **Supervisor** | Live backend (connectivity-dependent) | Live backend (connectivity-dependent) | Real API; every screen calls live endpoints. See the note below for auth/data caveats |
+| **NOC** | Live backend | Live backend | Real API — connects to the live NOC backend service |
 
-> **Important (R2-CR-8):** The **Supervisor** portal currently runs entirely on
-> mock data and a demonstration login. It is a UI preview, not a live regulatory
-> tool. Its manual documents only the screens that exist and flags every place
-> where the data is illustrative. Do not rely on Supervisor figures for any real
-> decision.
+> **Important:** The **Supervisor** portal's screens call real backend
+> endpoints through the API Gateway — it is **not** a hardcoded mock-data or
+> fake-login build, and its frontend holds no sample data. Two caveats remain,
+> documented per screen in each manual:
+>
+> - **Data freshness.** When the backend services are offline (as in most
+>   local/demo setups) screens show empty tables or zero counters, and in a
+>   development environment the endpoints may return demonstration data rather
+>   than a live production data set.
+> - **Authentication.** Scenario B authenticates against the platform's OIDC
+>   provider (Keycloak). In Scenario A, production Keycloak enforcement is not yet
+>   active, so the login is not a production security boundary.
+>
+> Do not treat figures shown in an offline or development environment as
+> authoritative for any real supervisory decision.
 
 ---
 

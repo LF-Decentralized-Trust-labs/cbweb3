@@ -186,7 +186,7 @@ make frontend-spoke-all-logs   # Tail frontend logs
 |-----|------|-------------|
 | `bank` | `frontend/apps/bank/` | Commercial bank operator portal |
 | `governance` | `frontend/apps/governance/` | Central bank governance console |
-| `supervisor` | `frontend/apps/supervisor/` | Operations supervisor dashboard — Supervisor Portal (R2-CR-8) In progress |
+| `supervisor` | `frontend/apps/supervisor/` | Operations supervisor dashboard — Supervisor Portal — In progress |
 | `treasury` | `frontend/apps/treasury/` | Treasury management |
 | `noc` | `frontend/apps/noc/` | Network Operations Center |
 
