@@ -382,7 +382,9 @@ fi
 
 if [[ -z "${LCR_ADDRESS}" ]]; then
   echo "  Not found in broadcast — attempting auto-deploy..."
-  _HUB_RPC="${SPOKE_A_RPC_URL:-http://127.0.0.1:8645}"
+  # LiquidityCommitRegistry is a Hub contract — deploy to the independent Hub
+  # network (chain 1337, port 8845), not Spoke-A.
+  _HUB_RPC="${HUB_BESU_RPC:-http://127.0.0.1:8845}"
   _CONTRACTS_ENV="${ROOT_DIR}/contracts/.env"
   _ADMIN_KEY=$(grep -E '^ADMIN_PRIVATE_KEY=' "${_CONTRACTS_ENV}" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]' || true)
   _HUB_IR="${HUB_IDENTITY_REGISTRY:-}"

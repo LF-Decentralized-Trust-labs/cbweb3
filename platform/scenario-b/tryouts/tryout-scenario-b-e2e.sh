@@ -35,7 +35,7 @@ API_GW_BANK_A_URL="${API_GW_BANK_A_URL:-http://localhost:18080}"
 API_GW_CENTRAL_BANK_A_URL="${API_GW_CENTRAL_BANK_A_URL:-http://localhost:38080}"
 API_GW_CENTRAL_BANK_B_URL="${API_GW_CENTRAL_BANK_B_URL:-http://localhost:60080}"
 
-BESU_HUB_RPC="${BESU_HUB_RPC:-http://localhost:8645}"
+BESU_HUB_RPC="${BESU_HUB_RPC:-http://localhost:8845}"
 SPOKE_A_RPC="${SPOKE_A_RPC:-http://localhost:8645}"
 SPOKE_B_RPC="${SPOKE_B_RPC:-http://localhost:8745}"
 KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8081}"

@@ -11,9 +11,9 @@ set -euo pipefail
 
 API_GATEWAY_URL="${API_GATEWAY_URL:-http://localhost:18080}"
 BANK_A_ENV="${BANK_A_ENV:-backend/config/.env.infra.bank-a}"
-HUB_RPC="${HUB_RPC:-http://localhost:8545}"
-SPOKE_A_RPC="${SPOKE_A_RPC:-http://localhost:8546}"
-SPOKE_B_RPC="${SPOKE_B_RPC:-http://localhost:8547}"
+HUB_RPC="${HUB_RPC:-http://localhost:8845}"
+SPOKE_A_RPC="${SPOKE_A_RPC:-http://localhost:8645}"
+SPOKE_B_RPC="${SPOKE_B_RPC:-http://localhost:8745}"
 
 PAYER_BANK_ID="bank-a"
 BENEFICIARY_BANK_ID="bank-b"

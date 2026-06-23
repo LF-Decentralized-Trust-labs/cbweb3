@@ -63,7 +63,7 @@ CB_B_HUB_SIGNER="${CB_B_HUB_SIGNER:-${_CB_B_SIGNER_FROM_ENV:-}}"
 # Auto-read from CB-A env file (SOVEREIGN_AMM_ADDRESS) if not explicitly set.
 _SOV_AMM_FROM_ENV=$(grep -m1 "^SOVEREIGN_AMM_ADDRESS=" "${CB_A_ENV}" 2>/dev/null | cut -d= -f2)
 SOVEREIGN_AMM_ADDR="${SOVEREIGN_AMM_ADDR:-${_SOV_AMM_FROM_ENV:-}}"
-HUB_RPC_URL="${HUB_RPC_URL:-http://localhost:8645}"
+HUB_RPC_URL="${HUB_RPC_URL:-http://localhost:8845}"
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'

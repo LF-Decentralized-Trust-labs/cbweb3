@@ -35,7 +35,7 @@
 #   AMOUNT_B              CB-B liquidity amount in wei (default: 200000000000000000000000)
 #   CB_B_HUB_SIGNER       CB-B Ethereum address on Hub (for anti-G5 check)
 #   SOVEREIGN_AMM_ADDR    Sovereign AMM contract on Hub (for cast logs)
-#   HUB_RPC_URL           Hub Besu RPC (default: http://localhost:8645)
+#   HUB_RPC_URL           Hub Besu RPC (default: http://localhost:8845)
 #   SKIP_MINT             If "true" (default), skip Phase 2 — with BesuRelayerExecutor mint is automatic
 #   SKIP_LOCK_MINT        If "true", skip Phase 3 and use existing bridge positions
 #   SKIP_COMMIT           If "true", skip Phase 5 and use existing commits
@@ -87,7 +87,7 @@ SPOKE_A_ASSET="${SPOKE_A_ASSET:-tCeBM_BRL}"
 SPOKE_B_ASSET="${SPOKE_B_ASSET:-tCeBM_ARS}"
 SPOKE_A_NETWORK="${SPOKE_A_NETWORK:-spoke-a}"
 SPOKE_B_NETWORK="${SPOKE_B_NETWORK:-spoke-b}"
-HUB_RPC_URL="${HUB_RPC_URL:-http://localhost:8645}"
+HUB_RPC_URL="${HUB_RPC_URL:-http://localhost:8845}"
 SOVEREIGN_AMM_ADDR="${SOVEREIGN_AMM_ADDR:-}"
 CB_B_HUB_SIGNER="${CB_B_HUB_SIGNER:-}"
 SKIP_MINT="${SKIP_MINT:-true}"
