@@ -1,0 +1,4 @@
+# Generated test-evidence bundles — build output, not source. Regenerate locally with
+# the per-scenario `make evidence.e2e-{a,b}` targets / `tools/gen_evidence_bundles.py`.
+# Includes the transient harness captures under _harness/ consumed by that generator.
+/evidence-bundles/
