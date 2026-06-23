@@ -40,6 +40,10 @@ services:
       KEYCLOAK_CLIENT_SECRET: "${KC_CLIENT_SECRET:-change-me}"
       KEYCLOAK_JWKS_CACHE_TTL_SEC: "3000"
       KEYCLOAK_REQUEST_TIMEOUT_SEC: "10"
+      # Local-dev: seed KMS so onboarding's wallet == this bank's BESU_OPERATOR_KEY
+      # address (the orchestrator's HTLC signer), satisfying contracts' onlyVerified.
+      KMS_SEED_KEY_ID: "bank-c"
+      KMS_SEED_PRIVATE_KEY: "c88b703fb08cbea894b6aeff5a544fb92e78a18e19814cd85da83b71f772aa6f"
       COMPLIANCE_GRPC_ADDR: compliance-bank-c:9093
       COMPLIANCE_REQUEST_TIMEOUT_SEC: "5"
       REDIS_ADDR: "${REDIS_CONTAINER_NAME:-cbweb3-redis}:6379"

@@ -34,6 +34,14 @@ func TestRoleToSolidityEnum(t *testing.T) {
 		{"ROLE_CENTRAL_BANK", RoleCentralBank},
 		{"ROLE_UNKNOWN", RoleNone},
 		{"", RoleNone},
+		// Bare form (no ROLE_ prefix) as sent by the onboarding flow — must map to a
+		// non-NONE role so IdentityRegistry.canTransact returns true after onboarding.
+		{"commercial_bank", RoleCommercialBank},
+		{"COMMERCIAL_BANK", RoleCommercialBank},
+		{"central_bank", RoleCentralBank},
+		{"treasury", RoleTreasury},
+		{"governance", RoleGovernance},
+		{"unknown", RoleNone},
 	}
 	for _, tc := range cases {
 		if got := RoleToSolidityEnum(tc.role); got != tc.want {

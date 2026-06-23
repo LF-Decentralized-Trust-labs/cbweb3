@@ -29,14 +29,15 @@ import {IdentityRegistryLibrary} from "../src/libraries/IdentityRegistryLibrary.
 ///        • `make contracts.register-participants`
 ///
 ///      **What it registers**
-///      Three Besu genesis accounts used by the local dev payment-orchestrator
-///      containers (configured via BESU_OPERATOR_KEY in docker-compose):
+///      ONLY the Central Bank genesis account (the governance bootstrap, which
+///      approves KYC and therefore cannot self-onboard):
 ///
-///        | Address                                    | Role            | Key (BESU_OPERATOR_KEY)   |
-///        |--------------------------------------------|-----------------|--------------------------|
-///        | 0x627306090abaB3A6e1400e9345bC60c78a8BEf57 | CENTRAL_BANK    | c87509a1… (CB)            |
-///        | 0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef | COMMERCIAL_BANK | 0dbbe8e4… (Bank-A/B)      |
-///        | 0x821aEa9a577a9b44299B9c15c88cf3087F3b5544 | COMMERCIAL_BANK | c88b703f… (Bank-C/D)      |
+///        | Address                                    | Role         | Key (BESU_OPERATOR_KEY) |
+///        |--------------------------------------------|--------------|-------------------------|
+///        | 0x627306090abaB3A6e1400e9345bC60c78a8BEf57 | CENTRAL_BANK | c87509a1… (CB)          |
+///
+///      Commercial banks are NOT registered here — they go through the real
+///      3-phase onboarding flow (see Phase2_Onboard in the happy-path test).
 ///
 ///      The script is idempotent — it skips addresses that are already registered.
 ///
@@ -63,25 +64,22 @@ contract RegisterParticipants is Script {
 
         IIdentityRegistry registry = IIdentityRegistry(registryAddr);
 
-        // Spoke operator addresses (Besu genesis accounts used in local dev).
-        // Bank-A / Bank-B share key 0dbbe8e4… → 0xC5fdf4…
-        // Bank-C / Bank-D share key c88b703f… → 0xc110…
-        // Central Bank key c87509a1… → 0x627306…
-        Participant[3] memory participants = [
+        // Governance bootstrap ONLY: the Central Bank holds GOVERNANCE_ROLE and
+        // approves KYC, so it cannot be onboarded through the commercial-bank flow
+        // and must be registered directly.
+        //
+        // Commercial banks (Bank-A/B → 0xC5fdf4…, Bank-C/D → 0xc110…) are NO LONGER
+        // registered here: they are registered+verified via the real 3-phase
+        // onboarding flow (credential request → KYC approval → PoP), exercised by
+        // the happy-path integration test (Phase2_Onboard) and the tryout scripts.
+        // The local-dev KMS seeding (KMS_SEED_* on each bank's auth service) makes
+        // the onboarded wallet equal that bank's BESU_OPERATOR_KEY address, so the
+        // onboarded identity is the one that signs HTLC txs and passes onlyVerified.
+        Participant[1] memory participants = [
             Participant(
                 0x627306090abaB3A6e1400e9345bC60c78a8BEf57,
                 "Central Bank",
                 IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
-            ),
-            Participant(
-                0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef,
-                "Commercial Bank A/B",
-                IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK
-            ),
-            Participant(
-                0xc110089385bad5026E5083443C3b443806DA42Df,
-                "Commercial Bank C/D",
-                IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK
             )
         ];
 

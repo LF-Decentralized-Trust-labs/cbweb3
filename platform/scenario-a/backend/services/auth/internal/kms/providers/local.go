@@ -84,6 +84,33 @@ func (k *KMSLocal) CreateKey(_ context.Context, userID string) (kms.KeyInfo, err
 	}, nil
 }
 
+// SeedKey pre-loads a known private key for userID. Idempotent: if the userID
+// already has a key it is NOT overwritten. Intended for dev/test environments
+// where a pre-configured operator key must be the onboarding identity, so that
+// onboarding registers/verifies the same address the orchestrator signs with.
+func (k *KMSLocal) SeedKey(userID, privKeyHex string) error {
+	if userID == "" || privKeyHex == "" {
+		return errors.New("kms: userID and privKeyHex are required")
+	}
+	privKeyHex = strings.TrimPrefix(privKeyHex, "0x")
+	privKeyBytes, err := hex.DecodeString(privKeyHex)
+	if err != nil {
+		return fmt.Errorf("kms: invalid private key hex: %w", err)
+	}
+	privKey, err := gethcrypto.ToECDSA(privKeyBytes)
+	if err != nil {
+		return fmt.Errorf("kms: parse private key: %w", err)
+	}
+	address := gethcrypto.PubkeyToAddress(privKey.PublicKey).Hex()
+
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if _, exists := k.keys[userID]; !exists {
+		k.keys[userID] = localEntry{privKeyHex: privKeyHex, address: address}
+	}
+	return nil
+}
+
 // Sign signs the given digestHex (exactly 32 bytes after hex decode) with the
 // private key stored for userID. Returns ErrKeyNotFound if no key exists.
 func (k *KMSLocal) Sign(_ context.Context, userID, digestHex string) (kms.SignResult, error) {

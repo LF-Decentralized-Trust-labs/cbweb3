@@ -27,6 +27,22 @@ func main() {
 		log.Fatalf("kms: %v", err)
 	}
 
+	// Pre-seed the KMS with a known operator key so CreateOnboardingKey returns the
+	// bank's BESU_OPERATOR_KEY address instead of a random one. This makes the
+	// onboarded+verified wallet the SAME address the orchestrator signs HTLC txs
+	// with, so onboarding (not a direct registry shortcut) is what satisfies the
+	// contracts' onlyVerified checks. Local-dev only (KMSLocal); ignored otherwise.
+	if keyID := os.Getenv("KMS_SEED_KEY_ID"); keyID != "" {
+		if privKey := os.Getenv("KMS_SEED_PRIVATE_KEY"); privKey != "" {
+			if local, ok := kmsProvider.(*kmsproviders.KMSLocal); ok {
+				if seedErr := local.SeedKey(keyID, privKey); seedErr != nil {
+					log.Fatalf("kms seed: %v", seedErr)
+				}
+				log.Printf("kms: seeded key for %q (KMS_SEED_KEY_ID)", keyID)
+			}
+		}
+	}
+
 	kcClient, err := keycloak.New(keycloak.Config{
 		BaseURL:        mustEnv("KEYCLOAK_BASE_URL"),
 		Realm:          getEnv("KEYCLOAK_REALM", "cbweb3"),
