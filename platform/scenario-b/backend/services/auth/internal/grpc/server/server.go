@@ -505,15 +505,39 @@ func (s *identityService) VerifyPKILogin(ctx context.Context, req *authv1.Verify
 		return nil, status.Error(codes.Unauthenticated, "NONCE_SIGNATURE_MISMATCH")
 	}
 
-	// 4. On-chain authorization check (best-effort: warn on errors, hard-fail only when explicitly unauthorized)
+	// 3b. Bind certificate CN to the claimed UserId (H-5).
+	meta, metaErr := pki.ExtractMetadata(req.CertPem)
+	if metaErr != nil {
+		return nil, status.Error(codes.Unauthenticated, "CERTIFICATE_PARSE_ERROR")
+	}
+	if meta.CommonName != req.UserId {
+		s.emitAudit(ctx, "PKI_LOGIN_FAILED", req.UserId, "", "", correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "CN_MISMATCH")
+		return nil, status.Error(codes.Unauthenticated, "CERTIFICATE_IDENTITY_MISMATCH")
+	}
+
+	// 3c. Extract wallet extension for binding check below.
+	certWallet, walletExtErr := pki.ExtractWalletFromCert(req.CertPem)
+	if walletExtErr != nil {
+		return nil, status.Error(codes.Unauthenticated, "CERTIFICATE_WALLET_PARSE_ERROR")
+	}
+
+	// 4. Wallet binding + on-chain authorization check.
+	//    Wallet binding: if the cert carries a wallet extension, it must match the participant record.
+	//    On-chain check is best-effort: warn on errors, hard-fail only when explicitly unauthorized.
 	if participant, found, lookupErr := s.compliance.GetParticipantByUser(ctx, req.UserId); lookupErr != nil {
 		log.Printf("WARN: VerifyPKILogin: compliance lookup %s: %v (skipping on-chain check)", req.UserId, lookupErr)
-	} else if found && participant.WalletAddress != "" {
-		authorized, authErr := s.blockchainClient.CanTransact(ctx, participant.WalletAddress)
-		if authErr != nil {
-			log.Printf("WARN: VerifyPKILogin: on-chain check %s: %v (skipping)", req.UserId, authErr)
-		} else if !authorized {
-			return nil, status.Error(codes.PermissionDenied, "wallet not authorized on-chain")
+	} else if found {
+		if certWallet != "" && participant.WalletAddress != "" && !strings.EqualFold(certWallet, participant.WalletAddress) {
+			s.emitAudit(ctx, "PKI_LOGIN_FAILED", req.UserId, "", "", correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "WALLET_MISMATCH")
+			return nil, status.Error(codes.Unauthenticated, "CERTIFICATE_WALLET_MISMATCH")
+		}
+		if participant.WalletAddress != "" {
+			authorized, authErr := s.blockchainClient.CanTransact(ctx, participant.WalletAddress)
+			if authErr != nil {
+				log.Printf("WARN: VerifyPKILogin: on-chain check %s: %v (skipping)", req.UserId, authErr)
+			} else if !authorized {
+				return nil, status.Error(codes.PermissionDenied, "wallet not authorized on-chain")
+			}
 		}
 	}
 

@@ -657,7 +657,7 @@ func newPKIFixture(t *testing.T) pkiFixture {
 	if err != nil {
 		t.Fatalf("GenerateSelfSignedCA: %v", err)
 	}
-	csrPEM, keyPEM, err := pki.GenerateCSR("user", "Org", "ROLE_COMMERCIAL_BANK", "BR")
+	csrPEM, keyPEM, err := pki.GenerateCSR("u", "Org", "ROLE_COMMERCIAL_BANK", "BR")
 	if err != nil {
 		t.Fatalf("GenerateCSR: %v", err)
 	}
@@ -676,6 +676,25 @@ func signNonceP256(t *testing.T, keyPEM, nonce string) string {
 		t.Fatalf("SignMessage: %v", err)
 	}
 	return sig
+}
+
+// newPKIFixtureWallet returns a fixture whose end-entity cert carries the
+// given walletAddr in the custom OID extension (CN is always "u").
+func newPKIFixtureWallet(t *testing.T, walletAddr string) pkiFixture {
+	t.Helper()
+	caCert, caKey, err := pki.GenerateSelfSignedCA("Test CA W", "Org", 2)
+	if err != nil {
+		t.Fatalf("newPKIFixtureWallet/GenerateSelfSignedCA: %v", err)
+	}
+	csrPEM, keyPEM, err := pki.GenerateCSR("u", "Org", "ROLE_COMMERCIAL_BANK", "BR")
+	if err != nil {
+		t.Fatalf("newPKIFixtureWallet/GenerateCSR: %v", err)
+	}
+	issued, err := pki.SignCSR(caCert, caKey, csrPEM, 1, pki.SignCSROptions{WalletAddress: walletAddr})
+	if err != nil {
+		t.Fatalf("newPKIFixtureWallet/SignCSR: %v", err)
+	}
+	return pkiFixture{caPEM: caCert, certPEM: issued.CertPEM, keyPEM: keyPEM}
 }
 
 func TestVerifyPKILogin(t *testing.T) {
@@ -785,6 +804,28 @@ func TestVerifyPKILogin(t *testing.T) {
 			UserId: "u", NonceSignatureHex: sig, CertPem: fix.certPEM,
 		})
 		wantCode(t, err, codes.Internal)
+	})
+	// H-5: cert CN must match the claimed UserId.
+	t.Run("cert_cn_user_id_mismatch", func(t *testing.T) {
+		sig := signNonceP256(t, fix.keyPEM, nonce) // cert CN = "u"
+		_, err := svc(nil, nil, nil, nil, storeWith(storedVal, true), fix.caPEM).VerifyPKILogin(ctx, &authv1.VerifyPKILoginRequest{
+			UserId: "different-user", NonceSignatureHex: sig, CertPem: fix.certPEM,
+		})
+		wantCode(t, err, codes.Unauthenticated)
+	})
+	// H-5: when the cert carries a wallet extension it must match the participant record.
+	t.Run("cert_wallet_participant_mismatch", func(t *testing.T) {
+		const certWallet = "0x1111111111111111111111111111111111111111"
+		const participantWallet = "0x2222222222222222222222222222222222222222"
+		walletFix := newPKIFixtureWallet(t, certWallet)
+		sig := signNonceP256(t, walletFix.keyPEM, nonce)
+		comp := &fakeCompliance{getByUserFn: func(_ context.Context, _ string) (complianceclient.Participant, bool, error) {
+			return complianceclient.Participant{WalletAddress: participantWallet}, true, nil
+		}}
+		_, err := svc(okKC(), comp, nil, nil, storeWith(storedVal, true), walletFix.caPEM).VerifyPKILogin(ctx, &authv1.VerifyPKILoginRequest{
+			UserId: "u", NonceSignatureHex: sig, CertPem: walletFix.certPEM,
+		})
+		wantCode(t, err, codes.Unauthenticated)
 	})
 }
 
