@@ -2,13 +2,14 @@
 #
 # Scenario B reuses the transverse infrastructure of Scenario A:
 #   * Keycloak + Postgres + Redis   (deploy.up-infra)
-#   * Spoke-A Besu  (deploy.up-spoke-a, also playing the Hub role in local dev)
-#   * Spoke-B Besu  (deploy.up-spoke-b)
+#   * Hub Besu     (independent network, chain 1337, RPC port 8845)
+#   * Spoke-A Besu  (deploy.up-spoke-a, chain 1338, RPC port 8645)
+#   * Spoke-B Besu  (deploy.up-spoke-b, chain 1339, RPC port 8745)
 #   * Hyperledger Cacti Relayer    (scenario-b.up-relayer)
 #
-# Design decision: to keep the local footprint small we use Spoke-A as the
-# "Hub" for AMM contracts in dev. Production deployments may split the Hub
-# into its own Besu network by setting BESU_HUB_RPC in the env.
+# The Hub runs on its own Besu network (chain 1337) for AMM contracts, fully
+# isolated from the spokes. Override BESU_HUB_RPC in the env to point at a
+# different Hub endpoint.
 
 # ── Feature toggle: MLP Path B ──────────────────────────────────────────────────
 # Loaded from deploy/local/.env (gitignored). Copy from deploy/local/.env.example.
@@ -17,7 +18,7 @@ export ENABLE_MLP
 export MLP_ADDRESS
 
 # ── RPC defaults (override via env) ──────────────────────────────────────────
-BESU_HUB_RPC ?= http://localhost:8645
+BESU_HUB_RPC ?= http://localhost:8845
 SPOKE_A_RPC  ?= http://localhost:8645
 SPOKE_B_RPC  ?= http://localhost:8745
 KEYCLOAK_URL    ?= http://localhost:8081
