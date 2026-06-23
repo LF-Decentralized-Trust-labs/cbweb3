@@ -54,13 +54,13 @@ const (
 	mintAmountB = commitAmountB
 
 	depositAmount = "1000000000000000000000" // 1e21 → Bank A fiat deposit
-	swapAmountOut = "500000000000000000000" // 5e20 → target ARS output (500 ARS)
+	swapAmountOut = "500000000000000000000"  // 5e20 → target ARS output (500 ARS)
 	// At the 1:287 pool (1000 W-BRL / 287000 W-ARS) an exact-output of 500 ARS costs
 	// ~1.75 BRL in (constant-product + 0.3% fee). The cap is set to 5 BRL: ~3× the
 	// expected cost — comfortable headroom against price impact/fees, yet a meaningful
 	// slippage guard (the prior 800 BRL was sized for the obsolete 1:1 pool).
 	swapMaxIn = "5000000000000000000" // 5e18 → max BRL in
-	poolPair      = "W-BRL-ARS"
+	poolPair  = "W-BRL-ARS"
 
 	// withdrawFractionBps withdraws part of CB-A's position (40%) so Phase 6 exercises a
 	// partial LP exit — CB-A keeps a reduced, still-active position afterward.
@@ -69,8 +69,16 @@ const (
 
 var cfg *Config
 
+// evidence records per-step on-chain artifacts (tx_hash, block_number, gas) for
+// the machine-readable evidence bundle. Initialized in TestMain.
+var evidence *evidenceRecorder
+
 func TestMain(m *testing.M) {
 	cfg = loadConfig()
+	evidence = newEvidenceRecorder(map[string]string{
+		"hub":     cfg.BesuHubURL,
+		"spoke-b": cfg.BesuSpokeBURL,
+	})
 
 	if !cfg.SkipUp {
 		root := scenarioBRoot()
@@ -84,6 +92,15 @@ func TestMain(m *testing.M) {
 	}
 
 	code := m.Run()
+
+	// Emit the harness evidence file (tx_hash/block_number/gas per step) for
+	// tools/gen_evidence_bundles.py to fold into evidence-bundle-<run-id>/.
+	if path, err := evidence.flush("e2e-scenario-b",
+		"scenario-b TestFullHappyPath (go test -tags integration)", code == 0); err != nil {
+		fmt.Fprintf(os.Stderr, "[scenario-b] evidence flush failed: %v\n", err)
+	} else {
+		fmt.Printf("[scenario-b] wrote on-chain evidence: %s\n", path)
+	}
 
 	if !cfg.SkipDown {
 		root := scenarioBRoot()
@@ -101,6 +118,8 @@ func TestMain(m *testing.M) {
 func TestFullHappyPath(t *testing.T) {
 	// Phase 0: wait for all gateways to be healthy.
 	t.Run("phase_0_readiness", func(t *testing.T) {
+		start := time.Now()
+		defer func() { evidence.record("E2E-B-01", "phase_0_readiness", 200, time.Since(start), !t.Failed(), "") }()
 		t.Log("Waiting for API gateways to report healthy...")
 		waitForHTTP(t, cfg.CentralBankAURL, 3*time.Minute)
 		waitForHTTP(t, cfg.CentralBankBURL, 3*time.Minute)
@@ -122,6 +141,10 @@ func TestFullHappyPath(t *testing.T) {
 
 	// Phase 1: Liquidity provision — CB-A and CB-B run cooperative commit-reveal.
 	t.Run("phase_1_liquidity_provision", func(t *testing.T) {
+		start := time.Now()
+		defer func() {
+			evidence.record("E2E-B-01", "phase_1_liquidity_provision", 201, time.Since(start), !t.Failed(), "")
+		}()
 		// Check if pool is already active to allow re-running against a seeded stack.
 		var poolStatus struct {
 			PoolStatus string `json:"pool_status"`
@@ -239,6 +262,8 @@ func TestFullHappyPath(t *testing.T) {
 	// Uses the onboardBank helper which is idempotent — safe to re-run against a live stack.
 	var bankAUserID string
 	t.Run("phase_2_onboarding", func(t *testing.T) {
+		start := time.Now()
+		defer func() { evidence.record("E2E-B-01", "phase_2_onboarding", 201, time.Since(start), !t.Failed(), "") }()
 		t.Log("Onboarding Bank A through CB-A...")
 		bankAUserID = onboardBank(t, bankA, cbA, "bank-a", "Test Bank A", "BR")
 		require.NotEmpty(t, bankAUserID, "bank-a user_id must not be empty after onboarding")
@@ -260,6 +285,12 @@ func TestFullHappyPath(t *testing.T) {
 	// Phase 3: Fiat issuance — Bank A registers a deposit, CB-A approves it.
 	var depositID string
 	t.Run("phase_3_fiat_issuance", func(t *testing.T) {
+		start := time.Now()
+		corr := newCorrID()
+		var refs []txRef
+		defer func() {
+			evidence.record("E2E-B-06", "phase_3_fiat_issuance", 201, time.Since(start), !t.Failed(), corr, refs...)
+		}()
 		t.Log("Step 1: Bank A registers deposit request...")
 		var depositResp struct {
 			DepositID string `json:"deposit_id"`
@@ -282,13 +313,15 @@ func TestFullHappyPath(t *testing.T) {
 			FiatMintTxHash string `json:"fiat_mint_tx_hash"`
 		}
 		require.NoError(t,
-			cbA.post(t, "/api/v1/payments/deposits/approve",
+			cbA.withCorr(corr).post(t, "/api/v1/payments/deposits/approve",
 				map[string]string{"deposit_id": depositID},
 				&approveResp,
 			),
 			"CB-A deposit approval must succeed",
 		)
 		assert.Equal(t, "approved", approveResp.Status, "deposit approval status")
+		// fCeBM fiat mint executes on Spoke-B.
+		refs = append(refs, txRef{network: "spoke-b", label: "fiat_mint", hash: approveResp.FiatMintTxHash})
 		t.Logf("Deposit approved: tx_hash=%s", approveResp.FiatMintTxHash)
 
 		// NOTE: ApproveDeposit auto-mints fCeBM to the bank's wallet. No separate
@@ -328,13 +361,20 @@ func TestFullHappyPath(t *testing.T) {
 		t.Logf("Bank A fiat balance: %s %s", balance.Balance, balance.Currency)
 	})
 
-		// Phase 3b: Reserve Tokenisation — Bank A converts fCeBM → tCeBM via CB-A ApproveEscrow.
+	// Phase 3b: Reserve Tokenisation — Bank A converts fCeBM → tCeBM via CB-A ApproveEscrow.
 	// This is the mandatory prerequisite for a cross-currency swap: the bank must hold
 	// tokenized reserves before the CB can perform the spoke burn → hub mint.
 	t.Run("phase_3b_reserve_tokenisation", func(t *testing.T) {
 		if depositID == "" {
+			evidence.recordSkipped("E2E-B-06", "phase_3b_reserve_tokenisation")
 			t.Skip("depositID not set (phase 3 did not run)")
 		}
+		start := time.Now()
+		corr := newCorrID()
+		var refs []txRef
+		defer func() {
+			evidence.record("E2E-B-06", "phase_3b_reserve_tokenisation", 201, time.Since(start), !t.Failed(), corr, refs...)
+		}()
 
 		// Use the full depositAmount for tokenisation (same units as deposit).
 		tokeniseAmount := depositAmount
@@ -362,12 +402,16 @@ func TestFullHappyPath(t *testing.T) {
 			MintTxHash string `json:"mint_tx_hash"`
 		}
 		require.NoError(t,
-			cbA.post(t, "/api/v1/payments/escrows/approve",
+			cbA.withCorr(corr).post(t, "/api/v1/payments/escrows/approve",
 				map[string]string{"escrow_id": escrowResp.EscrowID},
 				&approveResp,
 			),
 			"CB-A escrow approval must succeed",
 		)
+		// fCeBM burn + tCeBM mint both execute on Spoke-B.
+		refs = append(refs,
+			txRef{network: "spoke-b", label: "fcebm_burn", hash: approveResp.BurnTxHash},
+			txRef{network: "spoke-b", label: "tcebm_mint", hash: approveResp.MintTxHash})
 		t.Logf("Escrow approved: burn_tx=%s mint_tx=%s", approveResp.BurnTxHash, approveResp.MintTxHash)
 
 		t.Log("Step 3: Polling Bank A tCeBM balance until non-zero...")
@@ -390,6 +434,12 @@ func TestFullHappyPath(t *testing.T) {
 	// Phase 4: Cross-currency transfer — Bank A sends BRL, Bank B receives ARS.
 	var swapID string
 	t.Run("phase_4_transfer", func(t *testing.T) {
+		start := time.Now()
+		corr := newCorrID()
+		var refs []txRef
+		defer func() {
+			evidence.record("E2E-B-03", "phase_4_cross_currency_transfer", 200, time.Since(start), !t.Failed(), corr, refs...)
+		}()
 		// Record Bank A tCeBM balance before transfer (must decrease after bridge-in burn).
 		var bankABalanceBefore struct {
 			Balance string `json:"balance"`
@@ -429,14 +479,14 @@ func TestFullHappyPath(t *testing.T) {
 			BridgeInPositionID string `json:"bridge_in_position_id"`
 		}
 		require.NoError(t,
-			bankA.post(t, "/api/v2/amm/swap/cross-currency", map[string]interface{}{
-				"source_currency":    "BRL",
-				"target_currency":    "ARS",
-				"pool_pair":          poolPair,
-				"amount_out":         swapAmountOut,
-				"max_amount_in":      swapMaxIn,
+			bankA.withCorr(corr).post(t, "/api/v2/amm/swap/cross-currency", map[string]interface{}{
+				"source_currency":     "BRL",
+				"target_currency":     "ARS",
+				"pool_pair":           poolPair,
+				"amount_out":          swapAmountOut,
+				"max_amount_in":       swapMaxIn,
 				"beneficiary_bank_id": "bank-b",
-				"quote_id":           quote.QuoteID,
+				"quote_id":            quote.QuoteID,
 			}, &swapResp),
 			"swap initiation must succeed",
 		)
@@ -476,6 +526,8 @@ func TestFullHappyPath(t *testing.T) {
 		assert.NotEmpty(t, finalSwap.AmountIn, "amount_in must be set")
 		// Note: completed_at may not be present in all API versions; swap_tx_hash is the key receipt.
 		assert.NotEmpty(t, finalSwap.SwapTxHash, "swap_tx_hash must be set")
+		// The AMM exact-output swap executes on the Hub chain.
+		refs = append(refs, txRef{network: "hub", label: "amm_swap", hash: finalSwap.SwapTxHash})
 		t.Logf("Swap COMPLETED: amount_in=%s amount_out=%s tx=%s bridge_out=%s",
 			finalSwap.AmountIn, finalSwap.AmountOut, finalSwap.SwapTxHash, finalSwap.BridgeOutPositionID)
 
@@ -507,8 +559,11 @@ func TestFullHappyPath(t *testing.T) {
 	// We verify both the bridge position state AND the dashboard-visible token balance.
 	t.Run("phase_5_bank_b_receipt", func(t *testing.T) {
 		if swapID == "" {
+			evidence.recordSkipped("E2E-B-03", "phase_5_bank_b_receipt")
 			t.Skip("swapID not set (phase 4 did not run)")
 		}
+		start := time.Now()
+		defer func() { evidence.record("E2E-B-03", "phase_5_bank_b_receipt", 200, time.Since(start), !t.Failed(), "") }()
 		// Fetch the bridge_out_position_id from the completed swap.
 		var swapStatus struct {
 			Status              string `json:"status"`
@@ -573,6 +628,8 @@ func TestFullHappyPath(t *testing.T) {
 	// a reduced, still-ACTIVE position afterward (on-chain balance drops but stays > 0).
 	// Runs LAST: it removes part of the pool's liquidity.
 	t.Run("phase_6_lp_withdrawal", func(t *testing.T) {
+		start := time.Now()
+		defer func() { evidence.record("E2E-B-02", "phase_6_lp_withdrawal", 200, time.Since(start), !t.Failed(), "") }()
 		t.Log("Step 1: Reading CB-A on-chain LP-share position (lp-balance endpoint)...")
 		var lpBal struct {
 			LPShares        string  `json:"lp_shares"`

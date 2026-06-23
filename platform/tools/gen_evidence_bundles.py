@@ -13,7 +13,7 @@ in D12_results.md / docs/TEST-REPORTS.md / docs/performance/. Fields the current
 does not emit per call (tx_hash, block_number, X-Correlation-Id) are null — not fabricated.
 Re-run this script to regenerate (run ids are deterministic per bundle key so diffs are stable).
 """
-import json, os, uuid, html, datetime
+import json, os, sys, uuid, html, datetime, glob
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "evidence-bundles")
@@ -30,10 +30,94 @@ def step(scenario_id, name, latency_ms, passed, http_status=None,
     r.update(extra)
     return r
 
-NOTE_TRACE = ("Per-call tx_hash/block_number/X-Correlation-Id are null: the Go integration "
-              "harness reports phase-level pass/fail + duration, not per-HTTP-call on-chain "
-              "traces. contract_id is included where the test captured it. Add OTel/correlation "
-              "emission to the harness for fully machine-graded traces.")
+NOTE_TRACE = ("On-chain fields are populated by a live run: the instrumented Go harness captures "
+              "each step's tx_hash from the API response and resolves block_number / gas_used / "
+              "status from the Besu RPC (eth_getTransactionReceipt), writing them to "
+              "evidence-bundles/_harness/<bundle>.json which this generator folds in. When no live "
+              "harness file is present, tx_hash/block_number are null (never fabricated) — re-run "
+              "the instrumented suite against a live stack (see Makefile evidence.* targets) to "
+              "populate them.")
+
+# Directory where the instrumented integration harness writes its live capture
+# (scenario-{a,b}/tests/integration TestMain -> evidenceRecorder.flush).
+HARNESS_DIR = os.path.join(OUT, "_harness")
+
+
+def load_harness(bundle_key):
+    """Return the live harness capture for a bundle key, or None if absent."""
+    path = os.path.join(HARNESS_DIR, bundle_key + ".json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)
+
+
+def harness_step(h):
+    """Map a harness step to the execution_summary.json step schema, preserving
+    the resolved on-chain detail (gas_used, per-tx txs, correlation id)."""
+    if h.get("skipped"):
+        return {"scenario_id": h["scenario_id"], "step": h["step"], "http_status": None,
+                "tx_hash": None, "block_number": None, "latency_ms": 0,
+                "passed": None, "skipped": True}
+    r = {"scenario_id": h["scenario_id"], "step": h["step"],
+         "http_status": h.get("http_status"), "tx_hash": h.get("tx_hash"),
+         "block_number": h.get("block_number"), "latency_ms": h.get("latency_ms"),
+         "passed": h.get("passed")}
+    if h.get("gas_used") is not None:
+        r["gas_used"] = h["gas_used"]
+    if h.get("correlation_id"):
+        r["correlation_id"] = h["correlation_id"]
+    for k in ("contract_id_a", "contract_id_b"):
+        if h.get(k):
+            r[k] = h[k]
+    if h.get("txs"):
+        r["txs"] = h["txs"]
+    return r
+
+
+def harness_traces(scenario, h):
+    """Build aggregated_traces.log lines (correlation_id | txHash | block | network)
+    from the live harness capture."""
+    lines = [f"# Scenario {scenario} — TestFullHappyPath on-chain correlation artifacts "
+             f"({h.get('timestamp', TS)})",
+             "# format: <X-Correlation-Id> | <txHash> | <blockNumber> | <network> | <label> | <status>",
+             f"# on-chain EVM txs resolved via eth_getTransactionReceipt: {h.get('on_chain_txs_found', 0)}"]
+    for step in h.get("steps", []):
+        corr = step.get("correlation_id") or "-"
+        for tx in step.get("txs", []):
+            if tx.get("resolved"):
+                lines.append(f"{corr} | {tx['tx_hash']} | {tx['block_number']} | "
+                             f"{tx['network']} | {tx['label']} | {tx.get('status', '')}")
+            else:
+                lines.append(f"{corr} | {tx['tx_hash']} | <unresolved: "
+                             f"{tx.get('unresolved', 'n/a')}> | {tx['network']} | {tx['label']}")
+        for k in ("contract_id_a", "contract_id_b"):
+            if step.get(k):
+                lines.append(f"# {step['step']} {k}={step[k]}")
+    return lines
+
+
+def fold_harness(bundle, scenario):
+    """If a live harness capture exists for this bundle, replace its placeholder
+    results/traces with the real (on-chain-populated) data."""
+    key = bundle["summary"]["bundle"]
+    h = load_harness(key)
+    if not h:
+        return False
+    bundle["summary"]["passed"] = h.get("passed", bundle["summary"]["passed"])
+    if h.get("total_duration_ms") is not None:
+        bundle["summary"]["total_duration_ms"] = h["total_duration_ms"]
+    if h.get("timestamp"):
+        bundle["summary"]["timestamp"] = h["timestamp"]
+    bundle["summary"]["results"] = [harness_step(s) for s in h.get("steps", [])]
+    bundle["summary"]["notes"] = (
+        "Live capture folded in from evidence-bundles/_harness/%s.json: per-step tx_hash, "
+        "block_number, and gas_used are real values resolved from the Besu RPC. Privacy-layer "
+        "(Paladin/Zeto) ids carry no EVM receipt and are recorded under txs[] as unresolved with "
+        "a reason. %d on-chain EVM tx(s) resolved." % (key, h.get("on_chain_txs_found", 0)))
+    bundle["traces"] = harness_traces(scenario, h)
+    return True
+
 
 bundles = {}
 
@@ -229,10 +313,29 @@ running with <code>k6 run --out web-dashboard</code> (nightly). Source: D12_resu
 {rows}
 </tbody></table></body></html>"""
 
-# ── write everything ──
+# ── bundle selection (scenario isolation) ────────────────────────────────────
+# With no args, regenerate every bundle. With args, regenerate ONLY the named
+# bundle keys — so `make evidence.e2e-a` touches the Scenario A bundle and never
+# rewrites Scenario B's (and vice versa). Unknown keys are a hard error.
+selected = set(sys.argv[1:])
+unknown = selected - set(bundles)
+if unknown:
+    sys.exit("unknown bundle key(s): %s (valid: %s)" % (", ".join(sorted(unknown)), ", ".join(bundles)))
+to_write = [k for k in bundles if not selected or k in selected]
+
+# ── fold in live on-chain captures from the instrumented harness (if present) ──
+# Only for bundles we are about to write, so a scoped run cannot disturb another
+# scenario's on-disk bundle.
+folded = []
+for key in to_write:
+    scenario = "A" if key.endswith("-scenario-a") else "B" if key.endswith("-scenario-b") else None
+    if scenario and fold_harness(bundles[key], scenario):
+        folded.append(key)
+
+# ── write the selected bundles ────────────────────────────────────────────────
 os.makedirs(OUT, exist_ok=True)
-index = []
-for key, b in bundles.items():
+for key in to_write:
+    b = bundles[key]
     rid = b["summary"]["run_id"]
     d = os.path.join(OUT, f"evidence-bundle-{rid}")
     os.makedirs(d, exist_ok=True)
@@ -245,23 +348,60 @@ for key, b in bundles.items():
     if "perf_metrics" in b:
         with open(os.path.join(d, "performance_report.html"), "w") as f:
             f.write(perf_html(b))
-    n = len(b["summary"]["results"])
-    npass = sum(1 for r in b["summary"]["results"] if r.get("passed") is True)
-    index.append((b["dir"], rid, b["summary"]["passed"], npass, n))
+
+
+# ── rebuild the README index from what is actually on disk ────────────────────
+# Scanning disk (rather than the in-memory subset) keeps the index complete and
+# accurate even when only one scenario's bundle was regenerated this run.
+def scan_disk_index():
+    rows, any_live = [], False
+    for d in sorted(glob.glob(os.path.join(OUT, "evidence-bundle-*"))):
+        summ = os.path.join(d, "execution_summary.json")
+        if not os.path.exists(summ):
+            continue
+        with open(summ) as fh:
+            s = json.load(fh)
+        results = s.get("results", [])
+        npass = sum(1 for r in results if r.get("passed") is True)
+        live = any(r.get("block_number") is not None for r in results)
+        any_live = any_live or live
+        rows.append((s.get("bundle", os.path.basename(d)), s.get("run_id", ""),
+                     s.get("passed"), npass, len(results), live))
+    return rows, any_live
+
+
+index, any_live = scan_disk_index()
 
 with open(os.path.join(OUT, "README.md"), "w") as f:
     f.write("# Test evidence bundles\n\n")
-    f.write("Machine-readable evidence bundles generated by `tools/gen_evidence_bundles.py` "
-            "from the measured runs on this branch (2026-06-19). Each bundle holds an "
-            "`execution_summary.json` (pass/fail per step), and where applicable an "
-            "`aggregated_traces.log` (e2e) and `performance_report.html` (perf).\n\n")
-    f.write("| Bundle | run_id | overall | steps pass/total |\n|---|---|:---:|:---:|\n")
-    for name, rid, passed, npass, n in index:
-        f.write(f"| {name} | `{rid}` | {'✅' if passed else '❌'} | {npass}/{n} |\n")
-    f.write("\nFidelity note: the Go integration harness emits phase-level pass/fail + durations, "
-            "not per-call `tx_hash`/`block_number`/`X-Correlation-Id`; those fields are `null` "
-            "(never fabricated). `contract_id`s are included where captured.\n")
+    f.write("Machine-readable evidence bundles generated by `tools/gen_evidence_bundles.py`. "
+            "Each bundle holds an `execution_summary.json` (pass/fail per step), and where "
+            "applicable an `aggregated_traces.log` (e2e) and `performance_report.html` (perf). "
+            "The e2e bundles are scenario-scoped: regenerate Scenario A with "
+            "`make evidence.e2e-a` and Scenario B with `make evidence.e2e-b` "
+            "(or `python tools/gen_evidence_bundles.py <bundle-key>`).\n\n")
+    f.write("| Bundle | run_id | overall | steps pass/total | on-chain |\n|---|---|:---:|:---:|:---:|\n")
+    for name, rid, passed, npass, n, live in index:
+        f.write(f"| {name} | `{rid}` | {'✅' if passed else '❌'} | {npass}/{n} | {'live' if live else '—'} |\n")
+    if any_live:
+        f.write("\nFidelity note: bundles marked **live** carry real on-chain evidence — per-step "
+                "`tx_hash`, `block_number`, and `gas_used` resolved from the Besu RPC by the "
+                "instrumented harness (`scenario-{a,b}/tests/integration` TestMain → "
+                "`_harness/<bundle>.json`), with `aggregated_traces.log` mapping "
+                "`X-Correlation-Id → txHash → blockNumber → network`. Privacy-layer (Paladin/Zeto) "
+                "ids have no EVM receipt and are listed under `txs[]` as unresolved with a reason. "
+                "Perf/coverage bundles report aggregate metrics, so their per-tx fields are `null` "
+                "by design.\n")
+    else:
+        f.write("\nFidelity note: no live harness capture was folded in, so the e2e bundles' "
+                "`tx_hash`/`block_number`/`gas_used` are `null` (never fabricated). Run the "
+                "instrumented suite against a live stack (`make evidence.e2e-a` / `evidence.e2e-b`) "
+                "to populate them.\n")
 
-print(f"wrote {len(bundles)} bundles to {OUT}")
-for name, rid, passed, npass, n in index:
-    print(f"  {name:22} {rid}  {'PASS' if passed else 'FAIL'}  {npass}/{n}")
+print(f"wrote {len(to_write)} bundle(s) to {OUT}: {', '.join(to_write)}")
+if folded:
+    print(f"  folded live on-chain capture into: {', '.join(folded)}")
+elif any(k.startswith('e2e') for k in to_write):
+    print("  no live harness capture under _harness/ for the selected e2e bundle(s) — tx fields null")
+for name, rid, passed, npass, n, live in index:
+    print(f"  {name:22} {rid}  {'PASS' if passed else 'FAIL'}  {npass}/{n}{'  [live]' if live else ''}")

@@ -239,7 +239,28 @@ endif
 	  API_GW_BANK_B_URL=$(API_GW_BANK_B_URL) \
 	  API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
 	  API_GW_CENTRAL_BANK_B_URL=$(API_GW_CENTRAL_BANK_B_URL) \
+	  $(if $(EVIDENCE_DIR),EVIDENCE_DIR=$(EVIDENCE_DIR),) \
+	  BESU_HUB_RPC=$(BESU_HUB_RPC) \
+	  BESU_SPOKE_B_RPC=$(BESU_SPOKE_B_RPC) \
 	  go test -v -count=1 -tags integration -timeout 30m -run TestFullHappyPath ./...
+
+# ── On-chain evidence capture (D12 P0-D12-1) ─────────────────────────────────
+# Run the instrumented happy path against a live stack so the harness records each
+# step's tx_hash + block_number + gas_used from the Besu RPC, then regenerate the
+# machine-readable evidence bundle with those populated on-chain fields.
+BESU_HUB_RPC     ?= http://localhost:8845
+BESU_SPOKE_B_RPC ?= http://localhost:8745
+EVIDENCE_DIR     ?= $(CURDIR)/../evidence-bundles/_harness
+
+evidence.e2e-b: ## Capture live on-chain evidence (tx_hash/block/gas) and regenerate the Scenario B bundle
+	@echo "[scenario-b] capturing on-chain evidence to $(EVIDENCE_DIR)..."
+	@mkdir -p "$(EVIDENCE_DIR)"
+	@$(MAKE) scenario-b.test-integration \
+	  EVIDENCE_DIR="$(EVIDENCE_DIR)" \
+	  BESU_HUB_RPC=$(BESU_HUB_RPC) \
+	  BESU_SPOKE_B_RPC=$(BESU_SPOKE_B_RPC)
+	@echo "[scenario-b] folding capture into the Scenario B evidence bundle..."
+	@python3 ../tools/gen_evidence_bundles.py e2e-scenario-b
 
 # ── Performance baseline (T105) ──────────────────────────────────────────────
 
@@ -321,7 +342,7 @@ scenario-b.validate-openapi:
 	scenario-b.up scenario-b.up-perf scenario-b.down scenario-b.restart scenario-b.nuke \
 	scenario-b.test-contracts scenario-b.test-backend scenario-b.test \
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
-	scenario-b.test-integration \
+	scenario-b.test-integration evidence.e2e-b \
 	scenario-b.perf-baseline scenario-b.validate-openapi \
 	scenario-b.perf-amm-throughput scenario-b.perf-transfer \
 	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all scenario-b.perf-smoke

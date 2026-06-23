@@ -23,6 +23,7 @@ import (
 type httpClient struct {
 	base   string
 	token  string
+	corr   string // X-Correlation-Id sent with each request when set
 	client *http.Client
 }
 
@@ -41,6 +42,22 @@ func (c *httpClient) withToken(token string) *httpClient {
 	cp := *c
 	cp.token = token
 	return &cp
+}
+
+// withCorr returns a shallow copy of the client that sends the given
+// X-Correlation-Id with each request, tying the request to its on-chain tx in
+// the evidence bundle's aggregated_traces.log.
+func (c *httpClient) withCorr(corr string) *httpClient {
+	cp := *c
+	cp.corr = corr
+	return &cp
+}
+
+// setCorr attaches the X-Correlation-Id header when one is set on the client.
+func (c *httpClient) setCorr(req *http.Request) {
+	if c.corr != "" {
+		req.Header.Set("X-Correlation-Id", c.corr)
+	}
 }
 
 // setAuth injects the token as both a Bearer header and an access_token cookie so
@@ -63,6 +80,7 @@ func (c *httpClient) get(t *testing.T, path string, out interface{}) error {
 	}
 	req.Header.Set("Accept", "application/json")
 	c.setAuth(req)
+	c.setCorr(req)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err
@@ -104,6 +122,7 @@ func (c *httpClient) post(t *testing.T, path string, in, out interface{}) error 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	c.setAuth(req)
+	c.setCorr(req)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err

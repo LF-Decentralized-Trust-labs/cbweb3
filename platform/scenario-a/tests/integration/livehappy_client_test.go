@@ -38,6 +38,7 @@ import (
 type httpClient struct {
 	base   string
 	token  string
+	corr   string // X-Correlation-Id sent with each request when set
 	client *http.Client
 }
 
@@ -58,6 +59,15 @@ func (c *httpClient) withToken(token string) *httpClient {
 	return &cp
 }
 
+// withCorr returns a shallow copy of the client that sends the given
+// X-Correlation-Id with each request, so the request can be tied to its
+// on-chain tx in the evidence bundle's aggregated_traces.log.
+func (c *httpClient) withCorr(corr string) *httpClient {
+	cp := *c
+	cp.corr = corr
+	return &cp
+}
+
 // setAuth injects the token as both an access_token cookie and a Bearer header.
 // Scenario A's payment/fx/htlc routes use RequireCookieAuth; sending both keeps
 // the client compatible with any bearer-guarded routes too.
@@ -69,6 +79,13 @@ func (c *httpClient) setAuth(req *http.Request) {
 	req.AddCookie(&http.Cookie{Name: "access_token", Value: c.token})
 }
 
+// setCorr attaches the X-Correlation-Id header when one is set on the client.
+func (c *httpClient) setCorr(req *http.Request) {
+	if c.corr != "" {
+		req.Header.Set("X-Correlation-Id", c.corr)
+	}
+}
+
 // get performs GET {base}{path} and JSON-decodes the response into out (if non-nil).
 // It returns an error (rather than failing the test) so it can be used inside pollUntil.
 func (c *httpClient) get(path string, out interface{}) error {
@@ -78,6 +95,7 @@ func (c *httpClient) get(path string, out interface{}) error {
 	}
 	req.Header.Set("Accept", "application/json")
 	c.setAuth(req)
+	c.setCorr(req)
 	return c.do(req, http.MethodGet, path, out)
 }
 
@@ -94,6 +112,7 @@ func (c *httpClient) post(path string, in, out interface{}) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	c.setAuth(req)
+	c.setCorr(req)
 	return c.do(req, http.MethodPost, path, out)
 }
 
