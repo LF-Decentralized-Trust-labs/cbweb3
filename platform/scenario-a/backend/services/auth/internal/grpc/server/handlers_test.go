@@ -725,6 +725,41 @@ func TestVerifyPKILogin_Failures(t *testing.T) {
 	if _, err := svc.VerifyPKILogin(context.Background(), &authv1.VerifyPKILoginRequest{UserId: "u", NonceSignatureHex: sig, CertPem: issued.CertPEM}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("expected PermissionDenied (not authorized), got %v", err)
 	}
+
+	// H-5: cert CN must match the claimed UserId.
+	caCert3, caKey3, _ := pki.GenerateSelfSignedCA("CB CA 3", "CB", 5)
+	issued3, _ := pki.IssueCertificate(caCert3, caKey3, pki.CertRequest{Subject: "u", Org: "Bank", Role: domain.RoleCommercialBank, ValidYears: 1})
+	svc3 := newPKISvc()
+	svc3.caCertPEM = caCert3
+	ns3 := svc3.nonceStore.(*fakeNonce)
+	_ = ns3.Set(context.Background(), "other-user", "aabbccdd|sec", time.Minute)
+	sig3, _ := pki.SignMessage(issued3.PrivKeyPEM, "aabbccdd")
+	if _, err := svc3.VerifyPKILogin(context.Background(), &authv1.VerifyPKILoginRequest{
+		UserId: "other-user", NonceSignatureHex: sig3, CertPem: issued3.CertPEM,
+	}); status.Code(err) != codes.Unauthenticated {
+		t.Errorf("expected Unauthenticated (CN mismatch), got %v", err)
+	}
+
+	// H-5: when the cert carries a wallet extension it must match the participant record.
+	const certWalletAddr = "0x1111111111111111111111111111111111111111"
+	const participantWalletAddr = "0x2222222222222222222222222222222222222222"
+	caCert4, caKey4, _ := pki.GenerateSelfSignedCA("CB CA 4", "CB", 5)
+	issued4, _ := pki.IssueCertificate(caCert4, caKey4, pki.CertRequest{
+		Subject: "u", Org: "Bank", Role: domain.RoleCommercialBank, ValidYears: 1, WalletAddress: certWalletAddr,
+	})
+	svc4 := newPKISvc()
+	svc4.caCertPEM = caCert4
+	svc4.compliance = &fakeCompliance{getFn: func(_ context.Context, uid string) (complianceclient.Participant, bool, error) {
+		return complianceclient.Participant{UserID: uid, Role: domain.RoleCommercialBank, WalletAddress: participantWalletAddr}, true, nil
+	}}
+	ns4 := svc4.nonceStore.(*fakeNonce)
+	_ = ns4.Set(context.Background(), "u", "11223344|sec", time.Minute)
+	sig4, _ := pki.SignMessage(issued4.PrivKeyPEM, "11223344")
+	if _, err := svc4.VerifyPKILogin(context.Background(), &authv1.VerifyPKILoginRequest{
+		UserId: "u", NonceSignatureHex: sig4, CertPem: issued4.CertPEM,
+	}); status.Code(err) != codes.Unauthenticated {
+		t.Errorf("expected Unauthenticated (wallet mismatch), got %v", err)
+	}
 }
 
 // ── ChangeClientSecret ────────────────────────────────────────────────────────
