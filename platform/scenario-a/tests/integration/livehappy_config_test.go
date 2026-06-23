@@ -19,14 +19,23 @@ import (
 type Config struct {
 	BankAURL        string
 	BankBURL        string
+	BankCURL        string // spoke-a financial correspondent (origin-leg receiver)
 	BankDURL        string // custodian (financial correspondent) on spoke-b
 	CentralBankAURL string
 	CentralBankBURL string
+
+	// Besu JSON-RPC endpoints used to resolve on-chain evidence
+	// (eth_getTransactionReceipt / eth_getLogs). Any validator on a given chain
+	// can answer, so the always-up central-bank node is the default per spoke.
+	BesuSpokeAURL string
+	BesuSpokeBURL string
 
 	BankAClient string
 	BankASecret string
 	BankBClient string
 	BankBSecret string
+	BankCClient string
+	BankCSecret string
 	BankDClient string
 	BankDSecret string
 	CBAClient   string
@@ -61,7 +70,7 @@ type Config struct {
 	SkipUp   bool // bring the stack up via `make spoke-all` before the suite
 	SkipDown bool // tear the stack down after the suite
 	SkipMint bool // skip the CB mint step (operators already funded)
-	Onboard  bool // run runtime PKI onboarding (off by default; operators are pre-registered)
+	Onboard  bool // run 3-phase PKI onboarding (ON by default; ONBOARD=0 to skip). Commercial banks are no longer pre-registered, so onboarding is what verifies them.
 }
 
 func loadConfig() *Config {
@@ -69,9 +78,15 @@ func loadConfig() *Config {
 	return &Config{
 		BankAURL:        envOr("API_GW_BANK_A_URL", "http://localhost:18080"),
 		BankBURL:        envOr("API_GW_BANK_B_URL", "http://localhost:28080"),
+		BankCURL:        envOr("API_GW_BANK_C_URL", "http://localhost:48080"),
 		BankDURL:        envOr("API_GW_BANK_D_URL", "http://localhost:58080"),
 		CentralBankAURL: envOr("API_GW_CENTRAL_BANK_A_URL", "http://localhost:38080"),
 		CentralBankBURL: envOr("API_GW_CENTRAL_BANK_B_URL", "http://localhost:60080"),
+
+		// Besu RPC host-port mappings from deploy/local/spoke-besu-{a,b}/startBesu.sh
+		// (central-bank node per spoke: spoke-a 8645, spoke-b 8745).
+		BesuSpokeAURL: envOr("BESU_SPOKE_A_RPC", "http://localhost:8645"),
+		BesuSpokeBURL: envOr("BESU_SPOKE_B_RPC", "http://localhost:8745"),
 
 		BankAClient: envOr("KC_BANK_A_CLIENT", "bank-a-client"),
 		BankASecret: envOrEnvFile("KC_BANK_A_SECRET",
@@ -79,6 +94,9 @@ func loadConfig() *Config {
 		BankBClient: envOr("KC_BANK_B_CLIENT", "bank-b-client"),
 		BankBSecret: envOrEnvFile("KC_BANK_B_SECRET",
 			filepath.Join(root, "backend/config/.env.infra.bank-b"), "KC_CLIENT_SECRET", ""),
+		BankCClient: envOr("KC_BANK_C_CLIENT", "bank-c-client"),
+		BankCSecret: envOrEnvFile("KC_BANK_C_SECRET",
+			filepath.Join(root, "backend/config/.env.infra.bank-c"), "KC_CLIENT_SECRET", ""),
 		BankDClient: envOr("KC_BANK_D_CLIENT", "bank-d-client"),
 		BankDSecret: envOrEnvFile("KC_BANK_D_SECRET",
 			filepath.Join(root, "backend/config/.env.infra.bank-d"), "KC_CLIENT_SECRET", ""),
@@ -111,7 +129,9 @@ func loadConfig() *Config {
 		SkipUp:   os.Getenv("SKIP_UP") != "0",
 		SkipDown: os.Getenv("SKIP_DOWN") != "0",
 		SkipMint: os.Getenv("SKIP_MINT") == "true",
-		Onboard:  os.Getenv("ONBOARD") == "1",
+		// Onboarding is part of the happy path and runs by default (idempotent: it
+		// skips banks already ACTIVE). Set ONBOARD=0 to skip (e.g. faster reruns).
+		Onboard: os.Getenv("ONBOARD") != "0",
 	}
 }
 

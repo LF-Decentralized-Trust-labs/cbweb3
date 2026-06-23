@@ -17,8 +17,16 @@ import (
 
 var cfg *Config
 
+// evidence records per-step on-chain artifacts (tx_hash, block_number, gas) for
+// the machine-readable evidence bundle. Initialized in TestMain.
+var evidence *evidenceRecorder
+
 func TestMain(m *testing.M) {
 	cfg = loadConfig()
+	evidence = newEvidenceRecorder(map[string]string{
+		"spoke-a": cfg.BesuSpokeAURL,
+		"spoke-b": cfg.BesuSpokeBURL,
+	})
 
 	if !cfg.SkipUp {
 		fmt.Println("[scenario-a] SKIP_UP=0 — bringing the full stack up via `make spoke-all` (this WIPES the chain)...")
@@ -29,6 +37,15 @@ func TestMain(m *testing.M) {
 	}
 
 	code := m.Run()
+
+	// Emit the harness evidence file (tx_hash/block_number/gas per step) for
+	// tools/gen_evidence_bundles.py to fold into evidence-bundle-<run-id>/.
+	if path, err := evidence.flush("e2e-scenario-a",
+		"scenario-a TestFullHappyPath (go test -tags integration)", code == 0); err != nil {
+		fmt.Printf("[scenario-a] evidence flush failed: %v\n", err)
+	} else {
+		fmt.Printf("[scenario-a] wrote on-chain evidence: %s\n", path)
+	}
 
 	if !cfg.SkipDown {
 		fmt.Println("[scenario-a] SKIP_DOWN=0 — tearing the stack down via `make spoke-all-down`...")
@@ -68,6 +85,7 @@ func TestFullHappyPath(t *testing.T) {
 	gateways := map[string]string{
 		"bank-a":         cfg.BankAURL,
 		"bank-b":         cfg.BankBURL,
+		"bank-c":         cfg.BankCURL,
 		"bank-d":         cfg.BankDURL,
 		"central-bank-a": cfg.CentralBankAURL,
 		"central-bank-b": cfg.CentralBankBURL,
@@ -75,30 +93,37 @@ func TestFullHappyPath(t *testing.T) {
 
 	// Shared state threaded across phases.
 	//   bankA — originator (spoke-a)        bankB — beneficiary (spoke-b)
-	//   bankD — custodian (spoke-b)         cbA/cbB — central banks
+	//   bankC — correspondent (spoke-a)     bankD — custodian (spoke-b)
+	//   cbA/cbB — central banks
 	var (
-		bankA, bankB, bankD, cbA, cbB *httpClient
-		tradeID                       string
-		contractIDA                   string
-		contractIDB                   string
-		secret                        string
+		bankA, bankB, bankC, bankD, cbA, cbB *httpClient
+		tradeID                              string
+		contractIDA                          string
+		contractIDB                          string
+		secret                               string
 	)
 
 	t.Run("Phase0_Readiness", func(t *testing.T) {
+		start := time.Now()
 		for name, url := range gateways {
 			waitForHTTP(t, name, url, 3*time.Minute)
 		}
+		evidence.record("E2E-A-03", "phase_0_readiness", 200, time.Since(start), !t.Failed(), "")
 	})
 
 	t.Run("Phase1_Login", func(t *testing.T) {
+		start := time.Now()
+		defer func() { evidence.record("E2E-A-03", "phase_1_login", 200, time.Since(start), !t.Failed(), "") }()
 		requireSecret(t, "bank-a", cfg.BankASecret)
 		requireSecret(t, "bank-b", cfg.BankBSecret)
+		requireSecret(t, "bank-c", cfg.BankCSecret)
 		requireSecret(t, "bank-d", cfg.BankDSecret)
 		requireSecret(t, "central-bank-a", cfg.CBASecret)
 		requireSecret(t, "central-bank-b", cfg.CBBSecret)
 
 		bankA = newHTTPClient(cfg.BankAURL, gatewayLogin(t, "bank-a", cfg.BankAURL, cfg.BankAClient, cfg.BankASecret))
 		bankB = newHTTPClient(cfg.BankBURL, gatewayLogin(t, "bank-b", cfg.BankBURL, cfg.BankBClient, cfg.BankBSecret))
+		bankC = newHTTPClient(cfg.BankCURL, gatewayLogin(t, "bank-c", cfg.BankCURL, cfg.BankCClient, cfg.BankCSecret))
 		bankD = newHTTPClient(cfg.BankDURL, gatewayLogin(t, "bank-d", cfg.BankDURL, cfg.BankDClient, cfg.BankDSecret))
 		cbA = newHTTPClient(cfg.CentralBankAURL, gatewayLogin(t, "central-bank-a", cfg.CentralBankAURL, cfg.CBAClient, cfg.CBASecret))
 		cbB = newHTTPClient(cfg.CentralBankBURL, gatewayLogin(t, "central-bank-b", cfg.CentralBankBURL, cfg.CBBClient, cfg.CBBSecret))
@@ -106,11 +131,24 @@ func TestFullHappyPath(t *testing.T) {
 
 	t.Run("Phase2_Onboard", func(t *testing.T) {
 		if !cfg.Onboard {
-			t.Skip("onboarding disabled (set ONBOARD=1 to run against a freshly nuked stack)")
+			evidence.recordSkipped("E2E-A-03", "phase_2_onboard")
+			t.Skip("onboarding disabled (ONBOARD=0)")
 		}
+		start := time.Now()
+		defer func() { evidence.record("E2E-A-03", "phase_2_onboard", 201, time.Since(start), !t.Failed(), "") }()
 		requireLoggedIn(t, bankA)
+
+		// All four commercial banks must be verified in the IdentityRegistry: the
+		// HTLC lock requires onlyVerified(msg.sender) AND onlyVerified(receiver), so
+		// each leg needs both its locker and its receiver registered.
+		//   spoke-a: bank-a (origin locker) + bank-c (origin receiver) via cb-a
+		//   spoke-b: bank-d (counter locker) + bank-b (counter receiver) via cb-b
+		// Onboarding (with KMS seeded to the operator key) registers exactly the
+		// address the orchestrator signs with. Idempotent: ACTIVE banks are skipped.
 		onboardBank(t, bankA, cbA, "bank-a", "Bank A", "US")
+		onboardBank(t, bankC, cbA, "bank-c", "Bank C", "US")
 		onboardBank(t, bankB, cbB, "bank-b", "Bank B", "BR")
+		onboardBank(t, bankD, cbB, "bank-d", "Bank D", "BR")
 	})
 
 	t.Run("Phase3_Mint", func(t *testing.T) {
@@ -125,21 +163,31 @@ func TestFullHappyPath(t *testing.T) {
 		cbBTreasury := newHTTPClient(cfg.CentralBankBURL,
 			gatewayLogin(t, "cb-b-treasury", cfg.CentralBankBURL, cfg.CBBTreasuryClient, cfg.CBBTreasurySecret))
 
-		mint := func(name string, c *httpClient, to string) {
-			err := c.post("/api/v1/token/mint", map[string]string{"to": to, "amount": cfg.MintAmount}, nil)
+		start := time.Now()
+		corr := newCorrID()
+		var refs []txRef
+		mint := func(name, network string, c *httpClient, to string) {
+			var res struct {
+				TxHash string `json:"tx_hash"`
+			}
+			err := c.withCorr(corr).post("/api/v1/token/mint", map[string]string{"to": to, "amount": cfg.MintAmount}, &res)
 			if err != nil {
 				t.Fatalf("[%s] mint to %s: %v", name, to, err)
 			}
-			t.Logf("  [%s] minted %s to %s", name, cfg.MintAmount, to)
+			refs = append(refs, txRef{network: network, label: name + "_mint", hash: res.TxHash})
+			t.Logf("  [%s] minted %s to %s (tx=%s)", name, cfg.MintAmount, to, res.TxHash)
 		}
 		// cb-a funds the originator (bank-a) so it can lock the origin leg.
 		// cb-b funds the CUSTODIAN (bank-d) — it locks the counter leg on spoke-b,
 		// not the beneficiary bank-b (which only receives on settlement).
-		mint("central-bank-a", cbATreasury, cfg.IdentityBankA)
-		mint("central-bank-b", cbBTreasury, cfg.IdentityCustodian)
+		mint("central-bank-a", "spoke-a", cbATreasury, cfg.IdentityBankA)
+		mint("central-bank-b", "spoke-b", cbBTreasury, cfg.IdentityCustodian)
+		evidence.record("E2E-A-03", "phase_3_mint", 201, time.Since(start), !t.Failed(), corr, refs...)
 	})
 
 	t.Run("Phase4_FXPropose", func(t *testing.T) {
+		start := time.Now()
+		defer func() { evidence.record("E2E-A-03", "phase_4_fx_propose", 201, time.Since(start), !t.Failed(), "") }()
 		requireLoggedIn(t, bankA)
 		tradeID = "TRADE-" + strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
 
@@ -185,6 +233,10 @@ func TestFullHappyPath(t *testing.T) {
 	})
 
 	t.Run("Phase5_CrossSpokeSync", func(t *testing.T) {
+		start := time.Now()
+		defer func() {
+			evidence.record("E2E-A-03", "phase_5_cross_spoke_sync", 200, time.Since(start), !t.Failed(), "")
+		}()
 		requireTradeID(t, tradeID)
 
 		// The relay mirrors the proposal to the custodian (bank-d) on spoke-b,
@@ -206,24 +258,37 @@ func TestFullHappyPath(t *testing.T) {
 	})
 
 	t.Run("Phase6_HTLCLock", func(t *testing.T) {
+		start := time.Now()
+		corr := newCorrID()
+		var refs []txRef
+		defer func() {
+			evidence.record("E2E-A-03", "phase_6_htlc_lock", 201, time.Since(start), !t.Failed(), corr, refs...)
+			evidence.setContracts("phase_6_htlc_lock", contractIDA, contractIDB)
+		}()
 		requireTradeID(t, tradeID)
 
 		// Initiator lock on spoke-a — the orchestrator generates the secret +
 		// hashlock and returns BOTH in the lock response. The secret is a one-time
 		// disclosure to the creator (never re-exposed via /htlc/status), so it must
-		// be captured here.
+		// be captured here. htlc_tx_hash is the Besu EVM tx; zeto_tx_hash is the
+		// Paladin/Zeto private-transfer id (no EVM receipt).
 		var lockA struct {
 			ContractID string `json:"contract_id"`
 			HashLock   string `json:"hash_lock"`
 			Secret     string `json:"secret"`
+			HTLCTxHash string `json:"htlc_tx_hash"`
+			ZetoTxHash string `json:"zeto_tx_hash"`
 		}
 		// Originator bank-a locks the origin leg; on settlement it releases to the
 		// spoke-a financial correspondent (bank-c).
-		bankA.mustPost(t, "/api/v1/htlc/lock", map[string]string{
+		bankA.withCorr(corr).mustPost(t, "/api/v1/htlc/lock", map[string]string{
 			"agreement_id": tradeID,
 			"receiver":     cfg.IdentityCorrespondentA,
 			"amount":       cfg.OriginAmount,
 		}, &lockA)
+		refs = append(refs,
+			txRef{network: "spoke-a", label: "htlc_lock_origin", hash: lockA.HTLCTxHash},
+			txRef{network: "spoke-a", label: "zeto_lock_origin", hash: lockA.ZetoTxHash})
 		contractIDA = lockA.ContractID
 		if contractIDA == "" {
 			t.Fatal("initiator lock returned empty contract_id")
@@ -241,13 +306,18 @@ func TestFullHappyPath(t *testing.T) {
 		// under the SAME hashlock, with the BENEFICIARY (bank-b) as receiver.
 		var lockB struct {
 			ContractID string `json:"contract_id"`
+			HTLCTxHash string `json:"htlc_tx_hash"`
+			ZetoTxHash string `json:"zeto_tx_hash"`
 		}
-		bankD.mustPost(t, "/api/v1/htlc/lock-with-hash", map[string]string{
+		bankD.withCorr(corr).mustPost(t, "/api/v1/htlc/lock-with-hash", map[string]string{
 			"agreement_id": tradeID,
 			"receiver":     cfg.IdentityBankB,
 			"amount":       cfg.CounterAmount,
 			"hash_lock":    lockA.HashLock,
 		}, &lockB)
+		refs = append(refs,
+			txRef{network: "spoke-b", label: "htlc_lock_counter", hash: lockB.HTLCTxHash},
+			txRef{network: "spoke-b", label: "zeto_lock_counter", hash: lockB.ZetoTxHash})
 		contractIDB = lockB.ContractID
 		if contractIDB == "" {
 			t.Fatal("responder lock returned empty contract_id")
@@ -277,6 +347,12 @@ func TestFullHappyPath(t *testing.T) {
 	})
 
 	t.Run("Phase7_Settle", func(t *testing.T) {
+		start := time.Now()
+		corr := newCorrID()
+		var refs []txRef
+		defer func() {
+			evidence.record("E2E-A-03", "phase_7_settle", 200, time.Since(start), !t.Failed(), corr, refs...)
+		}()
 		requireContracts(t, contractIDA, contractIDB)
 
 		// Reveal the secret on spoke-a. The orchestrator gates this on having seen
@@ -284,11 +360,15 @@ func TestFullHappyPath(t *testing.T) {
 		// records lock events on a poll interval, so right after the responder lock
 		// the precondition is briefly unmet. Retry until it clears; any other error
 		// fails immediately.
+		var settle struct {
+			HTLCTxHash string `json:"htlc_tx_hash"`
+			ZetoTxHash string `json:"zeto_tx_hash"`
+		}
 		pollUntil(t, 3*time.Second, 90*time.Second, func() (bool, error) {
-			err := bankA.post("/api/v1/htlc/settle", map[string]string{
+			err := bankA.withCorr(corr).post("/api/v1/htlc/settle", map[string]string{
 				"contract_id": contractIDA,
 				"secret":      secret,
-			}, nil)
+			}, &settle)
 			if err == nil {
 				return true, nil
 			}
@@ -297,6 +377,9 @@ func TestFullHappyPath(t *testing.T) {
 			}
 			return false, err
 		})
+		refs = append(refs,
+			txRef{network: "spoke-a", label: "htlc_settle_origin", hash: settle.HTLCTxHash},
+			txRef{network: "spoke-a", label: "zeto_settle_origin", hash: settle.ZetoTxHash})
 		t.Logf("  initiator settled on spoke-a")
 
 		// Relay bridges the secret and settles the custodian's leg on spoke-b.
@@ -305,6 +388,8 @@ func TestFullHappyPath(t *testing.T) {
 	})
 
 	t.Run("Phase8_Verify", func(t *testing.T) {
+		start := time.Now()
+		defer func() { evidence.record("E2E-A-03", "phase_8_verify", 200, time.Since(start), !t.Failed(), "") }()
 		requireContracts(t, contractIDA, contractIDB)
 
 		var sA, sB htlcStatus

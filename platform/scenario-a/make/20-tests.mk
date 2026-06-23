@@ -53,10 +53,32 @@ scenario-a.test-integration: ## Run the happy-path test; brings the stack up aut
 	  API_GW_BANK_D_URL=$(API_GW_BANK_D_URL) \
 	  API_GW_CENTRAL_BANK_A_URL=$(API_GW_CENTRAL_BANK_A_URL) \
 	  API_GW_CENTRAL_BANK_B_URL=$(API_GW_CENTRAL_BANK_B_URL) \
+	  $(if $(EVIDENCE_DIR),EVIDENCE_DIR=$(EVIDENCE_DIR),) \
+	  $(if $(ONBOARD),ONBOARD=$(ONBOARD),) \
+	  BESU_SPOKE_A_RPC=$(BESU_SPOKE_A_RPC) \
+	  BESU_SPOKE_B_RPC=$(BESU_SPOKE_B_RPC) \
 	  go test -v -count=1 -tags integration -timeout 30m -run TestFullHappyPath ./...
 
 scenario-a.test-integration-up: ## Bring the full stack up via `make spoke-all`, then run the happy-path test
 	@$(MAKE) scenario-a.test-integration SKIP_UP=0 SKIP_DOWN=$(SKIP_DOWN)
+
+# ── On-chain evidence capture (D12 P0-D12-1) ─────────────────────────────────
+# Run the instrumented happy path against a live stack so the harness records each
+# step's tx_hash + block_number + gas_used from the Besu RPC, then regenerate the
+# machine-readable evidence bundle with those populated on-chain fields.
+BESU_SPOKE_A_RPC ?= http://localhost:8645
+BESU_SPOKE_B_RPC ?= http://localhost:8745
+EVIDENCE_DIR     ?= $(CURDIR)/../evidence-bundles/_harness
+
+evidence.e2e-a: ## Capture live on-chain evidence (tx_hash/block/gas) and regenerate the Scenario A bundle
+	@echo "[scenario-a] capturing on-chain evidence to $(EVIDENCE_DIR)..."
+	@mkdir -p "$(EVIDENCE_DIR)"
+	@$(MAKE) scenario-a.test-integration \
+	  EVIDENCE_DIR="$(EVIDENCE_DIR)" \
+	  BESU_SPOKE_A_RPC=$(BESU_SPOKE_A_RPC) \
+	  BESU_SPOKE_B_RPC=$(BESU_SPOKE_B_RPC)
+	@echo "[scenario-a] folding capture into the Scenario A evidence bundle..."
+	@python3 ../tools/gen_evidence_bundles.py e2e-scenario-a
 
 # ── D6 coverage gate (80% on CORE back-end business logic) ───────────────────
 # Each module gates its own core -coverpkg list (see its Makefile). The
@@ -149,6 +171,6 @@ scenario-a.perf-soak-all:
 	@echo "[scenario-a] R1-12.3 12-hour SOAK (opt-in, dedicated infra only)..."
 	@PERF_SOAK=1 bash tests/performance/run-all.sh
 
-.PHONY: test.api-gateway test.auth test.compliance test.all scenario-a.test-integration scenario-a.test-integration-up scenario-a.test-backend-coverage \
+.PHONY: test.api-gateway test.auth test.compliance test.all scenario-a.test-integration scenario-a.test-integration-up evidence.e2e-a scenario-a.test-backend-coverage \
 	scenario-a.perf-baseline scenario-a.perf-transfer scenario-a.perf-zeto scenario-a.perf-soak \
 	scenario-a.perf-happy-path scenario-a.perf-all scenario-a.perf-all-dry scenario-a.perf-soak-all
