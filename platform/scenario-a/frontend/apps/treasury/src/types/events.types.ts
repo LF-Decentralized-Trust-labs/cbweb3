@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type EventType = "funding.request.updated" | "supply.updated" | "reconciliation.updated" | "audit.log.created";
 
 export type TreasuryEvent = {

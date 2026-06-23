@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Card, CardContent, CardHeader, CardTitle, Progress } from "@cbweb3/ui";
 import { useEffect, useRef } from "react";
 import { Navigate, useNavigate } from "react-router-dom";

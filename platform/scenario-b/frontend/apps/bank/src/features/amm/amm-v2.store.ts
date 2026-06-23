@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import axios from "axios";
 import { create } from "zustand";
 import { ammV2Api } from "../../services/api/amm-v2.api";

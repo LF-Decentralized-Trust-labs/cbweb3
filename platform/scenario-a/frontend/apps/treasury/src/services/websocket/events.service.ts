@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { TreasuryEvent } from "../../types";
 
 const messages = [

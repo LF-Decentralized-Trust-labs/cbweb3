@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { CreateTransferLimitPayload, TransferLimit } from "../../types";
 import { httpClientV2 } from "./http-client";
 

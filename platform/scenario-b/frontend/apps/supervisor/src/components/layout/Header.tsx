@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Button, PlatformLogo } from "@cbweb3/ui";
 import { useAuthStore } from "../../stores";
 

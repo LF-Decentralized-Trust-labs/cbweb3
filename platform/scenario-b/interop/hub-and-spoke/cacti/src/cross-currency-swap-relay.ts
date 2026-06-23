@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * CrossCurrencySwapRelay — Cacti module for 009-commercial-cross-currency-swap.
  *

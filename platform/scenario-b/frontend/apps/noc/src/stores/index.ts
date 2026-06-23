@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export { useAuthStore } from "./auth.store";
 export { useTelemetryStore } from "./telemetry.store";
 export { useInfrastructureStore } from "./infrastructure.store";

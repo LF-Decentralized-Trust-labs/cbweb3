@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { reconciliationApi } from "../services/api";
 import type { AsyncStatus, SpokeHubDelta, TvlSnapshot } from "../types";

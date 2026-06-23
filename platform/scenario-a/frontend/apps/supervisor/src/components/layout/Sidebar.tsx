@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { NavLink } from "react-router-dom";
 import { Activity, ShieldCheck, Users, Search, Settings, FileSearch } from "lucide-react";
 

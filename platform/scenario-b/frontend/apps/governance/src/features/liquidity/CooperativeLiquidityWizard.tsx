@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@cbweb3/ui";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Badge } from "@cbweb3/ui";
 import { ClipboardCheck, LayoutDashboard, ScrollText, Settings, Users } from "lucide-react";
 import { NavLink } from "react-router-dom";

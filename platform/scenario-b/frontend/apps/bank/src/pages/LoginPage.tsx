@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Separator } from "@cbweb3/ui";
 import { Building2, LockKeyhole, ShieldCheck, Wallet } from "lucide-react";
 import { useForm } from "react-hook-form";

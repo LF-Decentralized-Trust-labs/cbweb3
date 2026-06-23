@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { test, expect } from "@playwright/test";
 
 // Prerequisites: full stack running via `make scenario-a.up`

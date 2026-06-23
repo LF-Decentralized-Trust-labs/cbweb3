@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Permission, SupervisorRole } from "../../types";
 import type { LoginResponse, SupervisorUser } from "../../types";
 import { apiFetch } from "./apiClient";

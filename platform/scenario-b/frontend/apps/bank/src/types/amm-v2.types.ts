@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const SWAP_ERROR = {
   POOL_NOT_ACTIVE: "POOL_NOT_ACTIVE",
   SLIPPAGE_LIMIT_EXCEEDED: "SLIPPAGE_LIMIT_EXCEEDED",

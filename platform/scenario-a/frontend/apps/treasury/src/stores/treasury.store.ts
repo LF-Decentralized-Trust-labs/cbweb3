@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { treasuryApi } from "../services/api";
 import type { AsyncStatus, BurnPayload, BurnToMintValidation, MintPayload, SupplySnapshot, TreasuryOperation } from "../types";

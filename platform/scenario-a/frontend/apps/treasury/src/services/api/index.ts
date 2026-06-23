@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export { authApi } from "./auth.api";
 export { fundingApi } from "./funding.api";
 export { treasuryApi } from "./treasury.api";

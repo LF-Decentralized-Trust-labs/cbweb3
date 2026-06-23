@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type TreasuryOperationKind = "MINT" | "BURN";
 
 export type TreasuryOperationStatus = "PENDING" | "CONFIRMED" | "FAILED";

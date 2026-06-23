@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export { Button, buttonVariants } from "./components/button";
 export { Input } from "./components/input";
 export { Textarea } from "./components/textarea";

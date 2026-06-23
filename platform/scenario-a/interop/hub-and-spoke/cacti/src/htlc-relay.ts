@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * HtlcRelay — core interoperability logic for the Cacti HTLC cross-spoke relay.
  *

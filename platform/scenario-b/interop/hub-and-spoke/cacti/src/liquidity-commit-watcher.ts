@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * LiquidityCommitWatcher — Cacti module for 007-bridge-based-cb-liquidity.
  *

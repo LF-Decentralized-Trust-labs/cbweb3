@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export * from "./apiClient";
 export * from "./auth.api";
 export * from "./governance.api";

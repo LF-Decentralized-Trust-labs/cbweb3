@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type {
   CircuitBreakerV2Status,
   PauseRequest,

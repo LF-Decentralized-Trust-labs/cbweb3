@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { htlcApi } from "../services/api";
 import { saveSecret } from "../services/htlc-secrets";

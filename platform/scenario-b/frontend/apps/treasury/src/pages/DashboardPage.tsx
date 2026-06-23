@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@cbweb3/ui";
 import { useEffect, useMemo, useState } from "react";
 import { circuitBreakerApi, liquidityApi, paymentApi } from "../services/api";

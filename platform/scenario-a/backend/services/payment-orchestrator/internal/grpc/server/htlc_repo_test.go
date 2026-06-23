@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package server_test — HTLC repository integration tests.
 //
 // These tests verify:

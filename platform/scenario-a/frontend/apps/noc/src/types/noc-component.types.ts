@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type ComponentHealthStatus = "HEALTHY" | "DEGRADED" | "OFFLINE" | "UNKNOWN";
 export type ComponentType = "BESU" | "CACTI_RELAY" | "PALADIN" | "PAYMENT_ORCHESTRATOR";
 

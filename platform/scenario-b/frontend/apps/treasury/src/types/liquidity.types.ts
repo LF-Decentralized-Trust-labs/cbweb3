@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const LP_STATUS = {
   ACTIVE: "ACTIVE",
   WITHDRAWN: "WITHDRAWN",

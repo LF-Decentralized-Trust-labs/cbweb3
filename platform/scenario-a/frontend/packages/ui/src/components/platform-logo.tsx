@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { cn } from "../lib/utils";
 import logoImage from "../images/logo-para-web-blancos-scaled-1-1.webp";
 

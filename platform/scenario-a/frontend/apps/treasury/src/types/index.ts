@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type { AsyncStatus, ApiResponse, ErrorEnvelope } from "./common.types";
 export type { LoginRequest, LoginResponse, TokenResponse, PkiChallengeResponse, UserProfile } from "./auth.types";
 export type { FundingRequestStatus, FundingRequest, FundingDecisionPayload } from "./funding.types";

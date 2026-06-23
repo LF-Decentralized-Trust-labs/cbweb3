@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export { useAuth } from "./useAuth";
 export { useFundingRequests } from "./useFundingRequests";
 export { useIssuance } from "./useIssuance";

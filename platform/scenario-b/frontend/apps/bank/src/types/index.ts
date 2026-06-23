@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export * from "./common.types";
 export * from "./auth.types";
 export * from "./token.types";

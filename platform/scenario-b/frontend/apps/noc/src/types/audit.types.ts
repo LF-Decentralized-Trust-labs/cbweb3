@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type AuditLogEntry = {
   id: string;
   actor: string;

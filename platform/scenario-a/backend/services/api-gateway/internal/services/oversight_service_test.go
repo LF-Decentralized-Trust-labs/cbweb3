@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services tests the OversightService disclosure workflow (T036 / FR-034/FR-035/FR-036).
 // Tests MUST fail before T040 creates the service.
 package services_test

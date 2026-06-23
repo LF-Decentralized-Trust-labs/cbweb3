@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { httpClientV2 } from "./http-client";
 
 type CircuitBreakerStatusResponse = {

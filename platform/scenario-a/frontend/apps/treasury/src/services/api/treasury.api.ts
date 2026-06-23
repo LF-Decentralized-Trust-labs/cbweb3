@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { BurnPayload, BurnToMintValidation, MintPayload, SupplySnapshot, TreasuryOperation } from "../../types";
 import { httpClient } from "./http-client";
 

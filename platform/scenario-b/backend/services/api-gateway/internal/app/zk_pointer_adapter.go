@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package app provides the ZK pointer adapter that bridges ZKPointerGate to the handler interface.
 package app
 

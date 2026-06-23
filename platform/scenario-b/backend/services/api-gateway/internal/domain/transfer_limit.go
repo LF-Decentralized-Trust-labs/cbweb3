@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines TransferLimit model for configurable CB transfer limits (R1-10.1).
 package domain
 

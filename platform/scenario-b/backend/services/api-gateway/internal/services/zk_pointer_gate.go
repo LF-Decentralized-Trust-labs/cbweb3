@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides the ZK pointer gate for supervisor verification (FR-SUP-002 / US2).
 package services
 

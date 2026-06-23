@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package services provides TransferLimitChecker for enforcing CB transfer limits (R1-10.1).
 package services
 

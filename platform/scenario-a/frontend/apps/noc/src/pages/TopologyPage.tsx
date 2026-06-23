@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import "@xyflow/react/dist/style.css";
 import {
   Background,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type TransferLimit = {
   limit_id: string;
   central_bank_id: string;

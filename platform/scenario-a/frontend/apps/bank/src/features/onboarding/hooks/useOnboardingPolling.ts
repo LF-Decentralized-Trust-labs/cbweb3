@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useCallback, useEffect, useState } from "react";
 import type { AsyncStatus } from "../../../types";
 import { useOnboardingStore } from "../store/useOnboardingStore";

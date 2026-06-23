@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Shared formatting helpers for the cooperative-liquidity UI.
 
 // formatRemainingMs renders a millisecond duration as "Hh Mm Ss", or "Expired" at/below zero.

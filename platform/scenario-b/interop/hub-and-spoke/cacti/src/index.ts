@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Cacti Liquidity Relay — entry point (Scenario B).
  *

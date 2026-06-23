@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Configuration loader for the Cacti HTLC relay service.
  * All required environment variables are validated at startup; missing values

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import axios, { type AxiosError } from "axios";
 import { attachAuthInterceptor } from "./interceptors/auth.interceptor";
 

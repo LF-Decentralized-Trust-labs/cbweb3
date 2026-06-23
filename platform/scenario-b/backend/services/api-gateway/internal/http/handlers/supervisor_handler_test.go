@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides contract tests for SupervisorHandler (T007/T027 / FR-SUP-001 / US1/US2).
 package handlers_test
 

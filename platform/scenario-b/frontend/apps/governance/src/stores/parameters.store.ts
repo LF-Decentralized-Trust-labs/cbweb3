@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { governanceApi } from "../services/api";
 import type { AsyncStatus, GovernanceParameters, UpdateParametersPayload } from "../types";

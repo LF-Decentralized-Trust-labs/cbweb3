@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type { AsyncStatus, ApiResponse, ErrorEnvelope } from "./common.types";
 export type { Role, SysAdminUser, LoginRequest, LoginResponse } from "./auth.types";
 export type { InfrastructureNode, NodeHealthStatus } from "./infrastructure.types";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type ParticipantStatus = "ACTIVE" | "PENDING" | "CREDENTIAL_REQUESTED" | "KYC_APPROVED" | "REVOKED" | "FROZEN";
 
 export type Participant = {

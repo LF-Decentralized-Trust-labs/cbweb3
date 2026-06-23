@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, Separator } from "@cbweb3/ui";
 
 export function SettingsPage() {

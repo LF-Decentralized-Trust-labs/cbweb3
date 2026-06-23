@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { useEffect, useState } from "react";
 import type { HTLCLock } from "../types";
 import { htlcApi } from "../services/api";

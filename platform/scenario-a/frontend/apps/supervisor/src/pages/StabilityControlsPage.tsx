@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@cbweb3/ui";
 import { useEffect } from "react";
 import { useStabilityStore } from "../stores";

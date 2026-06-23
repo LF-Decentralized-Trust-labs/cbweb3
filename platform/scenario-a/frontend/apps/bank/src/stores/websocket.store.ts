@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { eventsService } from "../services/websocket/events.service";
 import type { BankEvent } from "../types";

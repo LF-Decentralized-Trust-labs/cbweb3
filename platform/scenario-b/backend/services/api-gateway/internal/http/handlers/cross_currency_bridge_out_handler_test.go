@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides contract tests for CrossCurrencyBridgeOutHandler
 // (R2-CR-6: on-chain swap verification + replay protection).
 package handlers_test

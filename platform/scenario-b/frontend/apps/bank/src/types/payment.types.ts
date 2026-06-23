@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const PaymentStatus = {
   PENDING: 0,
   APPROVED: 1,

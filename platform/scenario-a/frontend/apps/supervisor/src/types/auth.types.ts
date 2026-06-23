@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const SupervisorRole = {
   SUPERVISOR_ROLE: "SUPERVISOR_ROLE",
   CENTRAL_BANK_ADMIN: "CENTRAL_BANK_ADMIN",

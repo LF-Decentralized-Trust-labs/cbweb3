@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { stabilityApi } from "../services/api";
 import type { HTLCSummary, StabilityAlert } from "../types";

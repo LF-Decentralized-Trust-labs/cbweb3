@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package domain defines TransferVolumeLog for daily transfer volume tracking (R1-10.1).
 package domain
 

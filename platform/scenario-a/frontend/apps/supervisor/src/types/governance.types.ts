@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const InstitutionType = {
   COMMERCIAL_BANK: "COMMERCIAL_BANK",
   CENTRAL_BANK: "CENTRAL_BANK",

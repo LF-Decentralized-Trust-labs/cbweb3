@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type FundingRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "COMPLETED";
 
 export type FundingRequest = {

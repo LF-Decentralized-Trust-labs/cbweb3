@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { sseService } from "../services/websocket/sse.service";
 import type { SupervisorEvent } from "../types";

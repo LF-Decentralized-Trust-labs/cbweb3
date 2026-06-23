@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides HTTP handlers for CB transfer limit management (R1-10.1).
 package handlers
 

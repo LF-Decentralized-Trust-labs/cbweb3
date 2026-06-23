@@ -1,0 +1,21 @@
+name: License Headers
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  spdx-headers:
+    name: SPDX header check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify SPDX-License-Identifier headers (Go + TypeScript)
+        run: bash tools/check-license-headers.sh

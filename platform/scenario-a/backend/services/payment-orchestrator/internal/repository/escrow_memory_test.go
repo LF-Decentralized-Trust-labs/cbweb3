@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package repository_test verifies the EscrowRepository interface contract using
 // MemoryEscrowRepository as the concrete implementation under test. These tests
 // document (and protect) the expected behaviour for every EscrowRepository

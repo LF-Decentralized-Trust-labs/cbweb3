@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { BankEvent, EventType } from "../../types";
 
 type Subscriber = (event: BankEvent) => void;

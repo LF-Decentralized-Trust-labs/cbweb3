@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // swap_lookup.go verifies executed AMM swaps on the Hub chain (R2-CR-6).
 //
 // A bridge-out must never trust relay-supplied JSON for amounts or addresses: the

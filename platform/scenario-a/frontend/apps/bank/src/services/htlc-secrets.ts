@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 const KEY = "htlc_secrets";
 
 function load(): Record<string, string> {

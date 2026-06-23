@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { tokenApi } from "../services/api";
 import type { OnRampRequest, OnRampRequestPayload, TokenBalance, TokenTransaction, TransferRequest } from "../types";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { registryApi } from "../services/api";
 import type { ApproveKycPayload, ApproveKycResponse, AsyncStatus, IssueCredentialPayload, KycStatusEntry, Participant } from "../types";

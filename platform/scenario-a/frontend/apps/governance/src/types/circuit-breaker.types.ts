@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type CircuitBreakerMode = "LIVE" | "HALTED";
 
 export type CircuitBreakerState = {

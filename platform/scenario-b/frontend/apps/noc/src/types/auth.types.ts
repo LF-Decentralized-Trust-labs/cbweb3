@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type Role = "SYS_ADMIN";
 
 export type SysAdminUser = {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package relayauth provides per-CB asymmetric authentication for internal
 // service-to-service relay endpoints (R2-CR-6 / TASK-17, requirement C).
 //

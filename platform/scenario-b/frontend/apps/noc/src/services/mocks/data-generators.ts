@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { TelemetryFrame } from "../../types";
 
 const random = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;

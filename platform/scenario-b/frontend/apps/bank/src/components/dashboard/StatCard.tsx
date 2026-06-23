@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { ReactNode } from "react";
 import { Card, CardDescription, CardHeader, CardTitle } from "@cbweb3/ui";
 

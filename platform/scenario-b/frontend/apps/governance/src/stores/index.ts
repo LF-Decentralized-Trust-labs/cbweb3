@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export * from "./account.store";
 export * from "./audit.store";
 export * from "./auth.store";

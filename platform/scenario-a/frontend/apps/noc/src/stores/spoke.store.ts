@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { nocBackendApi } from "../services/api";
 import type { AsyncStatus, NocSpoke } from "../types";

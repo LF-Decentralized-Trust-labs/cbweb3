@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type UserRole = "COMMERCIAL_BANK_OPERATOR";
 
 export type AsyncStatus = "idle" | "loading" | "success" | "error";

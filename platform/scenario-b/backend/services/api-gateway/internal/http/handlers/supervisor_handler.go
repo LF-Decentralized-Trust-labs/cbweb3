@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides the SupervisorHandler for read-only audit log access (FR-SUP-001/FR-SUP-002).
 package handlers
 

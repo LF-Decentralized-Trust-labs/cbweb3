@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { AuditLogsResponse, DecryptTransactionRequest, DecryptTransactionResponse } from "../../types";
 import { apiFetch } from "./apiClient";
 

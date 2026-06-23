@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type FXAgreementState =
   | "FX_STATE_PROPOSED"
   | "FX_STATE_ACCEPTED"

@@ -37,13 +37,18 @@ Status legend: ✅ done · 🟡 partial / in progress · ⬜ not started
 - 🟡 Formal privacy policy / data-handling doc to be added.
 
 ## 8. Adherence to standards & best practices
-- ✅ SPDX identifiers corrected across the codebase:
+- ✅ SPDX identifiers cover every first-party source across the codebase:
   - Solidity: all `UNLICENSED` → `Apache-2.0` (116 files).
-  - Go: `// SPDX-License-Identifier: Apache-2.0` added to first-party sources
-    (391 files); vendored/generated code excluded.
+  - Go: `// SPDX-License-Identifier: Apache-2.0` on all first-party `.go` sources;
+    vendored and generated code excluded (`*.pb.go`, abigen `bindings/`).
+  - TypeScript: `// SPDX-License-Identifier: Apache-2.0` on all first-party
+    `.ts`/`.tsx` sources (frontend apps and shared packages); `node_modules` and
+    build output (`dist`, `build`, `.next`, `.turbo`) excluded.
 - ✅ `CONTRIBUTING.md` added (branch workflow, test-first, SPDX policy).
 - ✅ Third-party dependency license report: `LICENSES-THIRD-PARTY.md`.
-- 🟡 CI enforcement of license headers (e.g. a header-lint check) recommended.
+- ✅ CI enforcement of license headers: the `License Headers` workflow runs
+  `tools/check-license-headers.sh` on every push/PR to `main` and `develop` and
+  fails on any first-party Go or TypeScript file missing an SPDX header.
 
 ## 9. Do no harm by design
 - 🟡 Compliance gate (IdentityRegistry + Compliance service + Keycloak OIDC) and
@@ -53,8 +58,9 @@ Status legend: ✅ done · 🟡 partial / in progress · ⬜ not started
 ## Remaining gaps / follow-ups
 - Add SDG relevance statement and project description to the root README.
 - Add a privacy policy / data-handling document.
-- Add CI license-header enforcement and an automated (machine-generated)
-  third-party license manifest (`go-licenses`, `license-checker`).
+- Add an automated (machine-generated) third-party license manifest
+  (`go-licenses`, `license-checker`). _(CI license-header enforcement is now
+  in place — see §8.)_
 - One Solidity test file (`scenario-b/contracts/test/IdentityRegistryLP.t.sol`)
   is `MIT`-licensed; left as-is (compatible). Normalize if desired.
 - Confirm go-ethereum (LGPL) usage is acceptable for DPG certification or

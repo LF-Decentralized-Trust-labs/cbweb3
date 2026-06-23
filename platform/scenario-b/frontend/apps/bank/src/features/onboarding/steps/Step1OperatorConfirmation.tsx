@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@cbweb3/ui";
 
 type Step1OperatorConfirmationProps = {

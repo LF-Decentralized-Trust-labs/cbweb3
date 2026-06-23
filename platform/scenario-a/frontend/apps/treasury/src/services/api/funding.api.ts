@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { DepositRecord, FundingDecisionPayload, FundingRequest, FundingRequestStatus } from "../../types";
 import { normalizePaymentStatus, PaymentStatus } from "../../types";
 import { paymentApi } from "./payment.api";

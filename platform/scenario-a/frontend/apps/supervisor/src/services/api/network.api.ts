@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { NetworkOverview } from "../../types";
 import { apiFetch } from "./apiClient";
 

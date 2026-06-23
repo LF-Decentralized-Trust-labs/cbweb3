@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { fxAgreementApi } from "../services/api/fx-agreement.api";
 import type {

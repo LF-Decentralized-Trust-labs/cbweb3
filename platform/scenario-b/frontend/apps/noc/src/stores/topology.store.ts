@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { healthApi } from "../services/api";
 import type { AsyncStatus, TopologyEdge, TopologyNode } from "../types";

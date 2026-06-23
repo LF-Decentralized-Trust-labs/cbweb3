@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package handlers provides internal HTTP endpoints for CB transfer limit enforcement (R1-10.1).
 // These endpoints are called by commercial bank gateways via RemoteTransferLimitChecker and are
 // protected by X-Relay-Auth. They must never be exposed publicly.

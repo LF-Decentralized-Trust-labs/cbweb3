@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { format } from "date-fns"
 import { Calendar as CalendarIcon } from "lucide-react"
  

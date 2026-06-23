@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Textarea, toast } from "@cbweb3/ui";
 import { useEffect, useMemo, useState } from "react";
 import { useRedemption, useSupplyAudit } from "../hooks";

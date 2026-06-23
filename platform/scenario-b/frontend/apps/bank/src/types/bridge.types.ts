@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export const BRIDGE_STATE = {
   LOCKING: "LOCKING",
   ACTIVE: "ACTIVE",

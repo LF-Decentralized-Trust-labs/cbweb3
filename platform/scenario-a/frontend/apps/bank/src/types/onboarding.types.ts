@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type OnboardingRole = "ROLE_COMMERCIAL_BANK" | "ROLE_TREASURY_BANK";
 
 export type OnboardingRequestStatus =

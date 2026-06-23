@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { Button } from "@cbweb3/ui";
 import type { ReactNode } from "react";
 import { Component } from "react";

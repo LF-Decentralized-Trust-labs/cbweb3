@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package paladin provides a lightweight JSON-RPC client for querying private
 // transaction state from a Paladin node. Used by the supervisor decrypt endpoint.
 package paladin

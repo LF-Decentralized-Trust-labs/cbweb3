@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 export type AlertSeverity = "INFO" | "WARNING" | "HIGH" | "CRITICAL";
 export type AlertState = "ACTIVE" | "RESOLVED";
 

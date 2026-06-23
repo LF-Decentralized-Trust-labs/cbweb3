@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { bridgeApi } from "../../services/api/bridge.api";
 import type {

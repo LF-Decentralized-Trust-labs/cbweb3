@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { create } from "zustand";
 import { transferLimitsApi } from "../services/api";
 import type { CreateTransferLimitRequest, TransferLimit } from "../types";
