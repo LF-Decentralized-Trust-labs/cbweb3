@@ -1,5 +1,11 @@
 # CBWeb3 Platform
 
+[![Backend CI — Scenario A](https://github.com/LACNetNetworks/cbweb3-platform/actions/workflows/backend-scenario-a.yml/badge.svg?branch=develop)](https://github.com/LACNetNetworks/cbweb3-platform/actions/workflows/backend-scenario-a.yml?query=branch%3Adevelop)
+[![Backend CI — Scenario B](https://github.com/LACNetNetworks/cbweb3-platform/actions/workflows/backend-scenario-b.yml/badge.svg?branch=develop)](https://github.com/LACNetNetworks/cbweb3-platform/actions/workflows/backend-scenario-b.yml?query=branch%3Adevelop)
+[![Contracts CI — Scenario A](https://github.com/LACNetNetworks/cbweb3-platform/actions/workflows/contracts-scenario-a.yml/badge.svg?branch=develop)](https://github.com/LACNetNetworks/cbweb3-platform/actions/workflows/contracts-scenario-a.yml?query=branch%3Adevelop)
+[![Contracts CI — Scenario B](https://github.com/LACNetNetworks/cbweb3-platform/actions/workflows/contracts-scenario-b.yml/badge.svg?branch=develop)](https://github.com/LACNetNetworks/cbweb3-platform/actions/workflows/contracts-scenario-b.yml?query=branch%3Adevelop)
+[![License Headers](https://github.com/LACNetNetworks/cbweb3-platform/actions/workflows/license-headers.yml/badge.svg?branch=develop)](https://github.com/LACNetNetworks/cbweb3-platform/actions/workflows/license-headers.yml?query=branch%3Adevelop)
+
 A research platform implementing a **hub-and-spoke wholesale CBDC ecosystem** for cross-network interoperability. The system models central banks and commercial banks operating across independent blockchain networks, with privacy-preserving payments and cross-network atomic settlement.
 
 ---
