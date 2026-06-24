@@ -73,6 +73,15 @@ type LiquidityHandler struct {
 	commitSide       string
 	wTokenAddress    string
 	localCBHubSigner string // LOCAL_CB_HUB_SIGNER — address that receives lock-mint tokens (for balance checks)
+	fallbackBankCode string // BANK_CODE fallback for provider resolution when JWT carries no BankID (CB service accounts)
+}
+
+// SetFallbackBankCode configures the BANK_CODE fallback used to resolve the
+// provider id when JWT claims carry no BankID (e.g. CB service accounts),
+// mirroring the bridge handler's behavior.
+func (h *LiquidityHandler) SetFallbackBankCode(bankCode string) *LiquidityHandler {
+	h.fallbackBankCode = bankCode
+	return h
 }
 
 // NewLiquidityHandler creates a LiquidityHandler (cooperative mode only).
@@ -210,12 +219,23 @@ func (h *LiquidityHandler) CommitLiquidity(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "pool_pair and amount required"})
 	}
 
-	// Derive provider_id from JWT (simplified API)
+	// Derive provider_id from JWT (simplified API). CB service-account tokens carry
+	// no BankID, so fall back to the configured BANK_CODE — mirroring the bridge
+	// handler — otherwise a CB providing liquidity would be rejected with 401.
 	claims, ok := c.Locals("claims").(domain.TokenClaims)
-	if !ok || claims.BankID == "" {
+	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing authenticated claims"})
 	}
 	providerID := claims.BankID
+	if providerID == "" {
+		providerID = h.fallbackBankCode
+		if providerID != "" {
+			log.Printf("[liquidity] BankID missing in claims; using configured BANK_CODE fallback: %s", providerID)
+		}
+	}
+	if providerID == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing authenticated claims"})
+	}
 
 	// Use config values if available (simplified API), otherwise require client-provided values
 	side := h.commitSide

@@ -286,7 +286,7 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 				deps.CommitSide,       // NEW: derived from BANK_CODE
 				deps.WTokenAddress,    // NEW: from config
 				deps.LocalCBHubSigner, // NEW: LOCAL_CB_HUB_SIGNER for balance checks
-			)
+			).SetFallbackBankCode(deps.BankCode)
 		} else {
 			lh = handlers.NewLiquidityHandler(deps.LiquidityService)
 		}
@@ -486,7 +486,7 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 		deps.CommitSide,       // NEW: derived from BANK_CODE
 		deps.WTokenAddress,    // NEW: from config
 		deps.LocalCBHubSigner, // NEW: LOCAL_CB_HUB_SIGNER for balance checks
-	)
+	).SetFallbackBankCode(deps.BankCode)
 	app.Post("/internal/amm/execute-matched-commit",
 		middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 		lh.ExecuteMatchedCommit,
