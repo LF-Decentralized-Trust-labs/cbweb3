@@ -77,6 +77,7 @@ func TestMain(m *testing.M) {
 	cfg = loadConfig()
 	evidence = newEvidenceRecorder(map[string]string{
 		"hub":     cfg.BesuHubURL,
+		"spoke-a": cfg.BesuSpokeAURL,
 		"spoke-b": cfg.BesuSpokeBURL,
 	})
 
@@ -320,8 +321,8 @@ func TestFullHappyPath(t *testing.T) {
 			"CB-A deposit approval must succeed",
 		)
 		assert.Equal(t, "approved", approveResp.Status, "deposit approval status")
-		// fCeBM fiat mint executes on Spoke-B.
-		refs = append(refs, txRef{network: "spoke-b", label: "fiat_mint", hash: approveResp.FiatMintTxHash})
+		// fCeBM fiat mint executes on the payer's spoke (Spoke-A, BRL).
+		refs = append(refs, txRef{network: "spoke-a", label: "fiat_mint", hash: approveResp.FiatMintTxHash})
 		t.Logf("Deposit approved: tx_hash=%s", approveResp.FiatMintTxHash)
 
 		// NOTE: ApproveDeposit auto-mints fCeBM to the bank's wallet. No separate
@@ -408,10 +409,10 @@ func TestFullHappyPath(t *testing.T) {
 			),
 			"CB-A escrow approval must succeed",
 		)
-		// fCeBM burn + tCeBM mint both execute on Spoke-B.
+		// fCeBM burn + tCeBM mint both execute on the payer's spoke (Spoke-A, BRL).
 		refs = append(refs,
-			txRef{network: "spoke-b", label: "fcebm_burn", hash: approveResp.BurnTxHash},
-			txRef{network: "spoke-b", label: "tcebm_mint", hash: approveResp.MintTxHash})
+			txRef{network: "spoke-a", label: "fcebm_burn", hash: approveResp.BurnTxHash},
+			txRef{network: "spoke-a", label: "tcebm_mint", hash: approveResp.MintTxHash})
 		t.Logf("Escrow approved: burn_tx=%s mint_tx=%s", approveResp.BurnTxHash, approveResp.MintTxHash)
 
 		t.Log("Step 3: Polling Bank A tCeBM balance until non-zero...")

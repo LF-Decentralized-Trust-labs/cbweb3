@@ -23,8 +23,10 @@ type Config struct {
 	KeycloakURL     string
 
 	// Besu JSON-RPC endpoints for on-chain evidence (eth_getTransactionReceipt).
-	// Hub chain hosts the AMM/swap; Spoke-B hosts fiat/reserve token mints.
+	// Hub hosts the AMM swap; Spoke-A (BRL — bank-a/cb-a) hosts the fiat/reserve
+	// token mints; Spoke-B (ARS) hosts the beneficiary bridge-out.
 	BesuHubURL    string
+	BesuSpokeAURL string
 	BesuSpokeBURL string
 
 	BankARealm         string
@@ -53,9 +55,10 @@ func loadConfig() *Config {
 		CentralBankBURL: envOr("API_GW_CENTRAL_BANK_B_URL", "http://localhost:60080"),
 		KeycloakURL:     envOr("KEYCLOAK_URL", "http://localhost:8081"),
 
-		// Besu RPC host-port mappings from deploy/local/{hub-besu,spoke-besu-b}/startBesu.sh
-		// (hub 8845, spoke-b 8745).
+		// Besu RPC host-port mappings from deploy/local/{hub-besu,spoke-besu-a,spoke-besu-b}/startBesu.sh
+		// (hub 8845, spoke-a 8645, spoke-b 8745).
 		BesuHubURL:    envOr("BESU_HUB_RPC", "http://localhost:8845"),
+		BesuSpokeAURL: envOr("BESU_SPOKE_A_RPC", "http://localhost:8645"),
 		BesuSpokeBURL: envOr("BESU_SPOKE_B_RPC", "http://localhost:8745"),
 
 		BankARealm:  envOr("KC_BANK_A_REALM", "bank-a"),
