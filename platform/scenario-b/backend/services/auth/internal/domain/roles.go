@@ -2,6 +2,8 @@
 
 package domain
 
+import "strings"
+
 // PKI role constants — canonical participant roles across the platform.
 // All roles use the ROLE_ prefix to match Keycloak realm role names.
 const (
@@ -45,9 +47,16 @@ var onChainRoles = map[string]bool{
 	RoleCommercialBank: true,
 }
 
-// RequiresOnChain reports whether role demands on-chain registration.
+// RequiresOnChain reports whether role demands on-chain registration. It accepts
+// both the canonical "ROLE_"-prefixed form and the bare form (e.g. "commercial_bank")
+// the onboarding flow stores, so the registration is not silently skipped on a
+// role-string mismatch.
 func RequiresOnChain(role string) bool {
-	return onChainRoles[role]
+	r := strings.ToUpper(strings.TrimSpace(role))
+	if !strings.HasPrefix(r, "ROLE_") {
+		r = "ROLE_" + r
+	}
+	return onChainRoles[r]
 }
 
 // kmsRoles is the subset of roles for which the platform generates a KMS key pair.
@@ -65,12 +74,12 @@ func RequiresKMS(role string) bool {
 type ParticipantStatus string
 
 const (
-	ParticipantStatusPending              ParticipantStatus = "PENDING"
-	ParticipantStatusCredentialRequested  ParticipantStatus = "CREDENTIAL_REQUESTED" // #nosec G101 -- not a secret; participant lifecycle status label
-	ParticipantStatusKYCApproved          ParticipantStatus = "KYC_APPROVED"
-	ParticipantStatusActive               ParticipantStatus = "ACTIVE"
-	ParticipantStatusFrozen               ParticipantStatus = "FROZEN"
-	ParticipantStatusRevoked              ParticipantStatus = "REVOKED"
+	ParticipantStatusPending             ParticipantStatus = "PENDING"
+	ParticipantStatusCredentialRequested ParticipantStatus = "CREDENTIAL_REQUESTED" // #nosec G101 -- not a secret; participant lifecycle status label
+	ParticipantStatusKYCApproved         ParticipantStatus = "KYC_APPROVED"
+	ParticipantStatusActive              ParticipantStatus = "ACTIVE"
+	ParticipantStatusFrozen              ParticipantStatus = "FROZEN"
+	ParticipantStatusRevoked             ParticipantStatus = "REVOKED"
 )
 
 // validTransitions defines the allowed state machine for participant lifecycle.
