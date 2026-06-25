@@ -135,7 +135,10 @@ func TestFullHappyPath(t *testing.T) {
 			t.Skip("onboarding disabled (ONBOARD=0)")
 		}
 		start := time.Now()
-		defer func() { evidence.record("E2E-A-03", "phase_2_onboard", 201, time.Since(start), !t.Failed(), "") }()
+		var refs []txRef
+		defer func() {
+			evidence.record("E2E-A-03", "phase_2_onboard", 201, time.Since(start), !t.Failed(), "", refs...)
+		}()
 		requireLoggedIn(t, bankA)
 
 		// All four commercial banks must be verified in the IdentityRegistry: the
@@ -145,10 +148,17 @@ func TestFullHappyPath(t *testing.T) {
 		//   spoke-b: bank-d (counter locker) + bank-b (counter receiver) via cb-b
 		// Onboarding (with KMS seeded to the operator key) registers exactly the
 		// address the orchestrator signs with. Idempotent: ACTIVE banks are skipped.
-		onboardBank(t, bankA, cbA, "bank-a", "Bank A", "US")
-		onboardBank(t, bankC, cbA, "bank-c", "Bank C", "US")
-		onboardBank(t, bankB, cbB, "bank-b", "Bank B", "BR")
-		onboardBank(t, bankD, cbB, "bank-d", "Bank D", "BR")
+		// Each approve-kyc mines an IdentityRegistry.setParticipant tx on the home
+		// CB's spoke; capture it for the evidence bundle (empty when already ACTIVE).
+		addReg := func(network, bankCode, hash string) {
+			if hash != "" {
+				refs = append(refs, txRef{network: network, label: "kyc_register_" + bankCode, hash: hash})
+			}
+		}
+		addReg("spoke-a", "bank-a", onboardBank(t, bankA, cbA, "bank-a", "Bank A", "US"))
+		addReg("spoke-a", "bank-c", onboardBank(t, bankC, cbA, "bank-c", "Bank C", "US"))
+		addReg("spoke-b", "bank-b", onboardBank(t, bankB, cbB, "bank-b", "Bank B", "BR"))
+		addReg("spoke-b", "bank-d", onboardBank(t, bankD, cbB, "bank-d", "Bank D", "BR"))
 	})
 
 	t.Run("Phase3_Mint", func(t *testing.T) {
@@ -187,7 +197,10 @@ func TestFullHappyPath(t *testing.T) {
 
 	t.Run("Phase4_FXPropose", func(t *testing.T) {
 		start := time.Now()
-		defer func() { evidence.record("E2E-A-03", "phase_4_fx_propose", 201, time.Since(start), !t.Failed(), "") }()
+		var refs []txRef
+		defer func() {
+			evidence.record("E2E-A-03", "phase_4_fx_propose", 201, time.Since(start), !t.Failed(), "", refs...)
+		}()
 		requireLoggedIn(t, bankA)
 		tradeID = "TRADE-" + strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
 
@@ -221,21 +234,25 @@ func TestFullHappyPath(t *testing.T) {
 			t.Fatalf("unexpected FX state after propose: %q", state)
 		}
 
-		// Audit: at least one lifecycle event was recorded.
-		var audit struct {
-			Total int `json:"total"`
-		}
+		// Audit: at least one lifecycle event was recorded. Each event carries the
+		// on-chain FXAgreement tx hash; the PROPOSED transition is the propose() tx
+		// mined on spoke-a — capture it for the evidence bundle (best-effort).
+		var audit fxAuditResponse
 		bankA.mustGet(t, "/api/v1/payments/fx/agreements/"+tradeID+"/audit", &audit)
 		if audit.Total < 1 {
 			t.Fatalf("expected >=1 audit event after propose, got %d", audit.Total)
+		}
+		if h := audit.txHashForState("PROPOSED"); h != "" {
+			refs = append(refs, txRef{network: "spoke-a", label: "fx_propose", hash: h})
 		}
 		t.Logf("  persistence + audit OK (%d event(s))", audit.Total)
 	})
 
 	t.Run("Phase5_CrossSpokeSync", func(t *testing.T) {
 		start := time.Now()
+		var refs []txRef
 		defer func() {
-			evidence.record("E2E-A-03", "phase_5_cross_spoke_sync", 200, time.Since(start), !t.Failed(), "")
+			evidence.record("E2E-A-03", "phase_5_cross_spoke_sync", 200, time.Since(start), !t.Failed(), "", refs...)
 		}()
 		requireTradeID(t, tradeID)
 
@@ -255,6 +272,15 @@ func TestFullHappyPath(t *testing.T) {
 			return isFXState(state, "ACCEPTED"), nil
 		})
 		t.Logf("  cross-spoke sync confirmed: ACCEPTED on both spokes")
+
+		// The custodian's accept() is mined on spoke-b; its tx hash surfaces in the
+		// bank-d audit trail as the ACCEPTED transition — capture it (best-effort).
+		var audit fxAuditResponse
+		if err := bankD.get("/api/v1/payments/fx/agreements/"+tradeID+"/audit", &audit); err == nil {
+			if h := audit.txHashForState("ACCEPTED"); h != "" {
+				refs = append(refs, txRef{network: "spoke-b", label: "fx_accept", hash: h})
+			}
+		}
 	})
 
 	t.Run("Phase6_HTLCLock", func(t *testing.T) {

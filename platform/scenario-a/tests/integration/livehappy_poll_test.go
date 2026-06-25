@@ -63,6 +63,28 @@ func isFXState(state, want string) bool {
 	return state == want || state == "FX_STATE_"+want
 }
 
+// fxAuditResponse is the subset of GET /fx/agreements/:id/audit we read. Each
+// lifecycle event carries the on-chain FXAgreement tx hash for its transition.
+type fxAuditResponse struct {
+	Total  int `json:"total"`
+	Events []struct {
+		ToState string `json:"to_state"`
+		TxHash  string `json:"tx_hash"`
+	} `json:"events"`
+}
+
+// txHashForState returns the on-chain tx hash of the event transitioning INTO
+// want (e.g. "PROPOSED", "ACCEPTED"), or "" if none recorded one — so callers
+// surface a real hash when present and never fabricate one.
+func (a fxAuditResponse) txHashForState(want string) string {
+	for _, ev := range a.Events {
+		if isFXState(ev.ToState, want) && ev.TxHash != "" {
+			return ev.TxHash
+		}
+	}
+	return ""
+}
+
 // htlcStatus is the subset of GET /htlc/status/:id we assert on.
 type htlcStatus struct {
 	State    string `json:"state"`

@@ -17,8 +17,20 @@ import (
 // the funded operators the happy path actually transacts with, so the core flow
 // does not depend on a runtime onboarding round-trip. This helper exists for the
 // opt-in case where the suite is run against a freshly nuked stack.
-func onboardBank(t *testing.T, bankClient, cbClient *httpClient, bankCode, institutionName, country string) {
+//
+// Returns the on-chain participant-registration tx hash from the complete step —
+// the CB's auth service registers the participant on its spoke (governance-signed)
+// during /onboarding/complete and returns the tx hash there. approve-kyc performs
+// no on-chain write, so its hash is always empty. Returns "" when the bank is
+// already ACTIVE (no tx) or the response surfaced no hash — never fabricated.
+func onboardBank(t *testing.T, bankClient, cbClient *httpClient, bankCode, institutionName, country string) string {
 	t.Helper()
+
+	// Fail cleanly (instead of nil-dereferencing) if a client wasn't logged in —
+	// e.g. Phase1 login failed for this entity.
+	if bankClient == nil || cbClient == nil {
+		t.Fatalf("onboardBank[%s]: nil client — Phase1 login likely failed for this entity", bankCode)
+	}
 
 	var myStatus struct {
 		Status    string `json:"status"`
@@ -28,7 +40,7 @@ func onboardBank(t *testing.T, bankClient, cbClient *httpClient, bankCode, insti
 	_ = bankClient.get("/api/v1/onboarding/my-status?bank_code="+bankCode, &myStatus)
 	if myStatus.Status == "ACTIVE" {
 		t.Logf("  [%s] already ACTIVE (user_id=%s) — skipping onboarding", bankCode, myStatus.UserID)
-		return
+		return ""
 	}
 
 	requestID, userID := myStatus.RequestID, myStatus.UserID
@@ -52,9 +64,9 @@ func onboardBank(t *testing.T, bankClient, cbClient *httpClient, bankCode, insti
 	}
 
 	// CB approves KYC — idempotent; log but don't fail if already approved.
-	var kyc map[string]interface{}
+	// (No on-chain write here; the registration tx is minted at complete.)
 	if err := cbClient.post("/api/v1/compliance/approve-kyc",
-		map[string]string{"subject": userID, "reason": "integration-test"}, &kyc); err != nil {
+		map[string]string{"subject": userID, "reason": "integration-test"}, nil); err != nil {
 		t.Logf("  [%s] approve-kyc: %v (may already be approved)", bankCode, err)
 	}
 
@@ -70,15 +82,19 @@ func onboardBank(t *testing.T, bankClient, cbClient *httpClient, bankCode, insti
 		return s.PopNonce != "", nil
 	})
 
-	// Complete — the proxy signs the PoP nonce automatically.
+	// Complete — the proxy signs the PoP nonce automatically. The CB's auth service
+	// registers the participant on-chain here (governance-signed) and returns the
+	// registration tx hash, which we fold into the evidence bundle.
 	var done struct {
 		WalletAddress string `json:"wallet_address"`
 		Status        string `json:"status"`
+		TxHash        string `json:"tx_hash"`
 	}
 	if err := bankClient.post("/api/v1/onboarding/complete",
 		map[string]string{"request_id": requestID, "user_id": userID}, &done); err != nil {
 		t.Logf("  [%s] complete: %v (may already be done)", bankCode, err)
-		return
+		return ""
 	}
-	t.Logf("  [%s] onboarded: wallet=%s status=%s", bankCode, done.WalletAddress, done.Status)
+	t.Logf("  [%s] onboarded: wallet=%s status=%s tx=%s", bankCode, done.WalletAddress, done.Status, done.TxHash)
+	return done.TxHash
 }
