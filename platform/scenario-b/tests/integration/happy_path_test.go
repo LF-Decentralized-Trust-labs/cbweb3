@@ -264,13 +264,26 @@ func TestFullHappyPath(t *testing.T) {
 	var bankAUserID string
 	t.Run("phase_2_onboarding", func(t *testing.T) {
 		start := time.Now()
-		defer func() { evidence.record("E2E-B-01", "phase_2_onboarding", 201, time.Since(start), !t.Failed(), "") }()
+		// Capture the on-chain participant-registration tx per bank: bank-a registers
+		// on CB-A's BRL spoke (spoke-a), bank-b on CB-B's ARS spoke (spoke-b). Empty
+		// hashes (already-ACTIVE / idempotent re-approval) yield no ref, never faked.
+		var kycRefs []txRef
+		defer func() {
+			evidence.record("E2E-B-01", "phase_2_onboarding", 201, time.Since(start), !t.Failed(), "", kycRefs...)
+		}()
 		t.Log("Onboarding Bank A through CB-A...")
-		bankAUserID = onboardBank(t, bankA, cbA, "bank-a", "Test Bank A", "BR")
+		var bankAKycTx string
+		bankAUserID, bankAKycTx = onboardBank(t, bankA, cbA, "bank-a", "Test Bank A", "BR")
 		require.NotEmpty(t, bankAUserID, "bank-a user_id must not be empty after onboarding")
+		if bankAKycTx != "" {
+			kycRefs = append(kycRefs, txRef{network: "spoke-a", label: "kyc_register_bank-a", hash: bankAKycTx})
+		}
 
 		t.Log("Onboarding Bank B through CB-B (required for beneficiary resolution in swap)...")
-		_ = onboardBank(t, bankB, cbB, "bank-b", "Test Bank B", "AR")
+		_, bankBKycTx := onboardBank(t, bankB, cbB, "bank-b", "Test Bank B", "AR")
+		if bankBKycTx != "" {
+			kycRefs = append(kycRefs, txRef{network: "spoke-b", label: "kyc_register_bank-b", hash: bankBKycTx})
+		}
 
 		t.Log("Verifying Bank A identity via /auth/me...")
 		var me struct {

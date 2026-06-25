@@ -15,8 +15,14 @@ import (
 // onboardBank runs the full 4-step PKI onboarding for a commercial bank.
 // It is idempotent: if the bank already has status ACTIVE it returns immediately.
 // bankClient is the bank's API gateway client; cbClient is its home central-bank's client.
-// Returns the user_id of the onboarded participant.
-func onboardBank(t *testing.T, bankClient, cbClient *httpClient, bankCode, institutionName, country string) string {
+// Returns the user_id of the onboarded participant and the on-chain
+// participant-registration tx hash from the complete step — the CB's auth service
+// registers the participant on its spoke (governance-signed) during
+// /onboarding/complete and returns the tx hash there. approve-kyc performs no
+// on-chain write, so its hash is always empty. Returns "" for the hash when the
+// bank was already ACTIVE or the response surfaced none. Callers feed the hash into
+// the evidence recorder as a txRef so phase_2 captures the participant-registration tx.
+func onboardBank(t *testing.T, bankClient, cbClient *httpClient, bankCode, institutionName, country string) (userID, kycTxHash string) {
 	t.Helper()
 
 	// Step 0: check existing state — resume if we have a partial request.
@@ -28,11 +34,12 @@ func onboardBank(t *testing.T, bankClient, cbClient *httpClient, bankCode, insti
 	_ = bankClient.get(t, "/api/v1/onboarding/my-status?bank_code="+bankCode, &myStatus)
 
 	if myStatus.Status == "ACTIVE" {
+		// Idempotent skip: no new registration tx is produced, so record no ref.
 		t.Logf("  [%s] already ACTIVE (user_id=%s) — skipping", bankCode, myStatus.UserID)
-		return myStatus.UserID
+		return myStatus.UserID, ""
 	}
 
-	var requestID, userID string
+	var requestID string
 	if myStatus.RequestID != "" {
 		t.Logf("  [%s] resuming existing request: id=%s status=%s", bankCode, myStatus.RequestID, myStatus.Status)
 		requestID = myStatus.RequestID
@@ -60,14 +67,12 @@ func onboardBank(t *testing.T, bankClient, cbClient *httpClient, bankCode, insti
 	}
 
 	// Step 2: CB approves KYC. Idempotent — log but don't fail if already approved.
-	var kycResp map[string]interface{}
+	// (No on-chain write here; the registration tx is minted at complete.)
 	if err := cbClient.post(t, "/api/v1/compliance/approve-kyc",
 		map[string]string{"subject": userID, "reason": "integration-test"},
-		&kycResp,
+		nil,
 	); err != nil {
 		t.Logf("  [%s] approve-kyc: %v (may already be approved)", bankCode, err)
-	} else {
-		t.Logf("  [%s] KYC approved", bankCode)
 	}
 
 	// Step 3: Poll until pop_nonce is available (KYC_APPROVED state).
@@ -83,11 +88,14 @@ func onboardBank(t *testing.T, bankClient, cbClient *httpClient, bankCode, insti
 		return s.PopNonce != "", nil
 	})
 
-	// Step 4: Complete onboarding — proxy signs the PoP nonce automatically.
+	// Step 4: Complete onboarding — proxy signs the PoP nonce automatically. The CB's
+	// auth service registers the participant on-chain here (governance-signed) and
+	// returns the registration tx hash, which we fold into the evidence bundle.
 	var completeResp struct {
 		UserID        string `json:"user_id"`
 		WalletAddress string `json:"wallet_address"`
 		Status        string `json:"status"`
+		TxHash        string `json:"tx_hash"`
 	}
 	if err := bankClient.post(t, "/api/v1/onboarding/complete", map[string]string{
 		"request_id": requestID,
@@ -95,11 +103,12 @@ func onboardBank(t *testing.T, bankClient, cbClient *httpClient, bankCode, insti
 	}, &completeResp); err != nil {
 		t.Logf("  [%s] complete: %v (may already be done)", bankCode, err)
 	} else {
-		t.Logf("  [%s] onboarded: wallet=%s status=%s", bankCode, completeResp.WalletAddress, completeResp.Status)
+		kycTxHash = completeResp.TxHash
+		t.Logf("  [%s] onboarded: wallet=%s status=%s tx=%s", bankCode, completeResp.WalletAddress, completeResp.Status, completeResp.TxHash)
 		if completeResp.UserID != "" {
 			userID = completeResp.UserID
 		}
 	}
 
-	return userID
+	return userID, kycTxHash
 }
