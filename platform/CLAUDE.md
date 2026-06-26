@@ -95,6 +95,8 @@ Proto:
 - Postgres — existing `audit_log` table (both scenarios); new `disclosure_requests` + `disclosure_signatures` tables (Scenario A only); existing tables in Scenario B (014-supervisor-portal)
 - Go 1.26+ (toolkit PKI step), GNU Make + Bash (Makefile fix) (016-fix-pki-local-ca)
 - Filesystem only — `{bankCode}.key`, `{bankCode}.csr`, `{bankCode}.crt` (leaf cert from CB) (016-fix-pki-local-ca)
+- Bash 5+ scripts, Docker Compose v2, YAML + `hyperledger/besu:25.8.0` (pinned), `curlimages/curl:latest` (smoke test), `jq`, `sha256sum` (018-spk01-cross-stack-enode)
+- Filesystem only — genesis.json, node keypairs, bundle YAML (`bundles/<spoke-id>.bundle.yaml`) (018-spk01-cross-stack-enode)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
