@@ -8,35 +8,50 @@ BUNDLES_DIR="${SPIKE_ROOT}/bundles"
 
 source "${SCRIPT_DIR}/env-defaults.sh"
 
-# Step 1: Retrieve enode from admin_nodeInfo
-ENODE=$(curl -sf -X POST "http://localhost:${HOST_RPC_BOOT}" \
+# Step 1: Retrieve node info from admin_nodeInfo
+NODE_INFO=$(curl -sf -X POST "http://localhost:${HOST_RPC_BOOT}" \
     -H 'Content-Type: application/json' \
-    -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
-    | jq -r '.result.enode')
+    -d '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}')
 
-if [ -z "${ENODE}" ] || [ "${ENODE}" = "null" ]; then
-    echo "[FAIL] extract-bundle: could not retrieve enode from RPC at port ${HOST_RPC_BOOT}"
+NODE_ID=$(echo "${NODE_INFO}" | jq -r '.result.id')
+NODE_ENODE=$(echo "${NODE_INFO}" | jq -r '.result.enode')
+
+if [ -z "${NODE_ID}" ] || [ "${NODE_ID}" = "null" ]; then
+    echo "[FAIL] extract-bundle: could not retrieve node id from RPC at port ${HOST_RPC_BOOT}"
     exit 1
 fi
 
-# Step 2: Guard — enode must not contain private Docker IP
-if echo "${ENODE}" | grep -qE '172\.(1[6-9]|2[0-9]|3[01])\.|127\.0\.0\.1'; then
-    echo "[FAIL] extract-bundle: enode contains private Docker IP: ${ENODE}"
-    echo "[FAIL] Ensure bootnode is started with --nat-method=DOCKER and host port is published"
+# Step 2: Discover host IP (NOT docker inspect — standard Linux hostname command)
+HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+if [ -z "${HOST_IP}" ]; then
+    echo "[FAIL] extract-bundle: could not determine host IP via hostname -I"
+    exit 1
+fi
+echo "[extract-bundle] host IP: ${HOST_IP}"
+
+# Step 3: Reconstruct the stable host-level enode
+# admin_nodeInfo.enode returns 127.0.0.1 even with --nat-method=DOCKER (Besu 25.8.0).
+# We use the node's id (pubkey) + host IP + published port — NOT docker inspect.
+STABLE_ENODE="enode://${NODE_ID}@${HOST_IP}:${HOST_P2P_BOOT}"
+echo "[extract-bundle] reconstructed enode: ${STABLE_ENODE}"
+
+# Guard — enode must not contain private Docker IP
+if echo "${STABLE_ENODE}" | grep -qE '172\.(1[6-9]|2[0-9]|3[01])\.|127\.0\.0\.1'; then
+    echo "[FAIL] extract-bundle: enode contains private Docker IP: ${STABLE_ENODE}"
     exit 1
 fi
 
-# Step 3: Compute genesis hash
+# Step 4: Compute genesis hash
 GENESIS_HASH=$(sha256sum "${DATA_DIR}/genesis.json" | awk '{print $1}')
 echo "[extract-bundle] genesis hash: ${GENESIS_HASH}"
 
-# Step 4: Read CA certificate if present
+# Step 5: Read CA certificate if present
 CA_CERT=""
 if [ -f "${DATA_DIR}/ca.crt" ]; then
     CA_CERT=$(cat "${DATA_DIR}/ca.crt")
 fi
 
-# Step 5: Build and write bundle
+# Step 6: Build and write bundle
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 BUNDLE_FILE="${BUNDLES_DIR}/${SPOKE_ID}.bundle.yaml"
 
@@ -50,10 +65,10 @@ metadata:
   createdAt: "${TIMESTAMP}"
 spec:
   p2p:
-    bootnodeEnode: "${ENODE}"
+    bootnodeEnode: "${STABLE_ENODE}"
   rpc:
-    endpoint: "http://host.docker.internal:${HOST_RPC_BOOT}"
-    wsEndpoint: "ws://host.docker.internal:${HOST_WS_BOOT}"
+    endpoint: "http://${HOST_IP}:${HOST_RPC_BOOT}"
+    wsEndpoint: "ws://${HOST_IP}:${HOST_WS_BOOT}"
   chain:
     genesisHash: "${GENESIS_HASH}"
   pki:
@@ -66,7 +81,7 @@ BUNDLEEOF
 
 echo "[extract-bundle] bundle written to ${BUNDLE_FILE}"
 
-# Step 6: Self-validate
+# Step 7: Self-validate
 if ! "${SCRIPT_DIR}/verify-bundle.sh" "${BUNDLE_FILE}"; then
     echo "[FAIL] extract-bundle: bundle validation failed"
     exit 1

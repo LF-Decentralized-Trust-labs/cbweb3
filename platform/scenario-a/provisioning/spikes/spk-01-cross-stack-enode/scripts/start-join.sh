@@ -27,15 +27,8 @@ if [ ! -f "${BUNDLE_FILE}" ]; then
     exit 1
 fi
 
-# Parse bootnodeEnode from bundle (try yq first, fallback to python3)
-if command -v yq &>/dev/null; then
-    BOOTNODE_ENODE=$(yq e '.spec.p2p.bootnodeEnode' "${BUNDLE_FILE}")
-elif command -v python3 &>/dev/null; then
-    BOOTNODE_ENODE=$(python3 -c "import yaml,sys; print(yaml.safe_load(open('${BUNDLE_FILE}'))['spec']['p2p']['bootnodeEnode'])")
-else
-    echo "[start-join] ERROR: neither yq nor python3 with PyYAML found. Install one to proceed."
-    exit 1
-fi
+# Parse bootnodeEnode from bundle using grep+sed (no external YAML parser required)
+BOOTNODE_ENODE=$(grep "bootnodeEnode:" "${BUNDLE_FILE}" | head -1 | sed 's/.*bootnodeEnode: *"\(.*\)"/\1/' | sed 's/.*bootnodeEnode: *//' | tr -d '"' | tr -d ' ')
 
 if [ -z "${BOOTNODE_ENODE}" ] || [ "${BOOTNODE_ENODE}" = "null" ]; then
     echo "[start-join] ERROR: could not extract bootnodeEnode from bundle"
