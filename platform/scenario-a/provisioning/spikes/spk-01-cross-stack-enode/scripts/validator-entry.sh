@@ -1,6 +1,10 @@
 #!/bin/bash
 # validator-entry.sh
-# Resolves besu-boot via DNS inside the container (NOT `docker inspect`) and starts Besu.
+# Besu's --bootnodes flag requires an IP address, not a hostname.
+# Docker Compose cannot substitute ${BOOTNODE_ENODE_INTERNAL} with a hostname-based enode
+# because Besu validates the host part and rejects non-IP values at startup.
+# This script resolves besu-boot via Docker DNS (getent hosts) — NOT docker inspect —
+# and constructs the bootnode enode with the resolved IP before exec'ing Besu.
 set -e
 
 BOOTNODE_PUBKEY="${BOOTNODE_PUBKEY:-}"
@@ -12,7 +16,7 @@ if [ -z "${BOOTNODE_PUBKEY}" ]; then
     exit 1
 fi
 
-echo "[validator-entry] resolving ${BOOT_DNS} via DNS..."
+echo "[validator-entry] resolving ${BOOT_DNS} via Docker DNS..."
 for i in $(seq 1 30); do
     BOOT_IP=$(getent hosts "${BOOT_DNS}" 2>/dev/null | awk '{print $1}')
     if [ -n "${BOOT_IP}" ]; then

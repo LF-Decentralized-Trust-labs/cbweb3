@@ -21,16 +21,19 @@ if [ -z "${NODE_ID}" ] || [ "${NODE_ID}" = "null" ]; then
     exit 1
 fi
 
-# Step 2: Discover host IP (NOT docker inspect). Override with HOST_IP env if needed.
+# Step 2: Discover host IP via resolve-host-ip.sh (hostname -I on Linux, route on macOS).
+# We use the real LAN IP instead of host.docker.internal because Besu 25.8.0 returns
+# 127.0.0.1 in admin_nodeInfo.enode even with --nat-method=DOCKER, making the RPC-reported
+# enode unusable. The LAN IP is reachable from any Docker container on the same host
+# without requiring extra_hosts, and avoids the Linux-specific host.docker.internal quirk.
+# Override: export HOST_IP=<addr> before calling this script.
 if ! HOST_IP=$("${SCRIPT_DIR}/resolve-host-ip.sh"); then
     echo "[FAIL] extract-bundle: could not determine host IP (set HOST_IP explicitly)"
     exit 1
 fi
 echo "[extract-bundle] host IP: ${HOST_IP}"
 
-# Step 3: Reconstruct the stable host-level enode
-# admin_nodeInfo.enode returns 127.0.0.1 even with --nat-method=DOCKER (Besu 25.8.0).
-# We use the node's id (pubkey) + host IP + published port — NOT docker inspect.
+# Step 3: Reconstruct enode using admin_nodeInfo pubkey + real host IP + published P2P port.
 STABLE_ENODE="enode://${NODE_ID}@${HOST_IP}:${HOST_P2P_BOOT}"
 echo "[extract-bundle] reconstructed enode: ${STABLE_ENODE}"
 

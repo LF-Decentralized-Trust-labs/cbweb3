@@ -12,7 +12,6 @@ services:
     volumes:
       - ../data/genesis.json:/opt/besu/genesis/genesis.json:ro
       - ../data/key0:/opt/besu/data/key
-      - /var/run/docker.sock:/var/run/docker.sock
       - besu_boot_data:/opt/besu/data
     command:
       - --nat-method=DOCKER

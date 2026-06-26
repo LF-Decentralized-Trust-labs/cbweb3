@@ -110,11 +110,6 @@ make spk01.down   → cacti ↓ → join ↓ → found ↓
 make spk01.clean  → down + remove data/ e bundles/
 ```
 
-1. Start the found stack
-2. Wait for the found stack to produce blocks
-3. Extract the join bundle
-## Flow Execution
-
 ## See Also
 
 - [ADR-001: Cross-Stack Enode Addressing](../../docs/adr-001-cross-stack-enode-addressing.md)

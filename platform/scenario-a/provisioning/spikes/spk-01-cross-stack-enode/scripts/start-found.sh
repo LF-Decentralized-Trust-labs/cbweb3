@@ -32,8 +32,10 @@ fi
 export BOOTNODE_PUBKEY
 echo "[start-found] bootnode pubkey: ${BOOTNODE_PUBKEY}"
 
-# Step 3: Start the full found stack (bootnode + validators)
-# Validators resolve "besu-boot" via DNS inside the container (getent hosts) — no `docker inspect`.
+# Step 3: Start the full found stack (bootnode + validators).
+# Validators use validator-entry.sh to resolve besu-boot via Docker DNS (getent hosts)
+# and build the bootnode enode with the resolved IP. This is required because Besu's
+# --bootnodes flag rejects hostnames — it only accepts IP addresses.
 cd "${SPIKE_ROOT}"
 docker compose -f compose/stack-found.yml up -d
 

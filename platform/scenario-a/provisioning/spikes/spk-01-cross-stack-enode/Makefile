@@ -29,7 +29,7 @@ spk01.verify:
 	bash scripts/verify-network-isolation.sh
 	@echo ""
 	@echo "=== T5: cacti RPC isolation ==="
-	docker compose -f compose/cacti-isolated.yml run --rm cacti-smoke bash /scripts/verify-cacti-rpc.sh
+	docker compose -f compose/cacti-isolated.yml run --rm cacti-smoke
 	@echo ""
 	@echo "=== T6: bundle clean ==="
 	bash scripts/verify-bundle.sh bundles/spoke-spk01.bundle.yaml
@@ -43,4 +43,3 @@ spk01.down:
 
 spk01.clean: spk01.down
 	rm -rf data/ bundles/*.yaml
-	rm -f bundles/*.yaml

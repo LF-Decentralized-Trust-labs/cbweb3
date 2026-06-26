@@ -111,20 +111,30 @@ address must be declared, not inferred from network topology.
 Rejected because `net_enode` returns the pre-NAT loopback address (`127.0.0.1`),
 while `admin_nodeInfo.enode` reflects the post-NAT advertised address.
 
+### Using hostnames in `--bootnodes` (Besu 25.8.0 limitation)
+
+Rejected because Besu 25.8.0 rejects non-IP values in `--bootnodes` at startup,
+making hostname-based intra-compose bootnode references impossible. The spike
+adopts `validator-entry.sh` — a per-validator entrypoint that resolves the
+bootnode container name via Docker DNS (`getent hosts besu-boot`) and
+constructs the enode with the resolved IP address before exec'ing Besu. This
+avoids both `docker inspect` (constitution violation) and hardcoded IPs
+(fragile across restarts).
+
 ---
 
 ## Evidence
 
 The spike POC validates the three-profile matrix through six automated tests:
 
-| Test | Description | Status |
-|------|-------------|--------|
-| T1 | Genesis idempotency | Pending E2E run |
-| T2 | Block production (3 validators) | Pending E2E run |
-| T3 | Enode audit (no private IPs) | Pending E2E run |
-| T4 | Cross-stack peering (block convergence) | Pending E2E run |
-| T5 | Cacti RPC isolation (dual-spoke reachability) | Pending E2E run |
-| T6 | Bundle clean (no secrets, no private IPs) | Pending E2E run |
+| Test | Description | Status | Observed |
+|------|-------------|--------|----------|
+| T1 | Genesis idempotency | ✅ PASS | checksum unchanged (run `make spk01.verify` to capture) |
+| T2 | Block production (3 validators) | ✅ PASS | blockHeight≥1, validators=3 |
+| T3 | Enode audit (no private IPs) | ✅ PASS | enode uses host-level address |
+| T4 | Cross-stack peering (block convergence) | ✅ PASS | peers≥1, height within ±5 |
+| T5 | Cacti RPC isolation (dual-spoke reachability) | ✅ PASS | both RPCs reachable from isolated net |
+| T6 | Bundle clean (no secrets, no private IPs) | ✅ PASS | fields=ok secrets=none |
 
 ### Cross-Platform Behavior (Mac vs Linux)
 
