@@ -42,7 +42,7 @@ func artifactsDir() string {
 }
 
 // deployerPrivKeyHex is a Besu dev account pre-funded in all spoke genesis allocs.
-// Address: 0x627306090abaB3A6e1400e9345bC60c78a8BEf57
+// Address: 0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73
 const deployerPrivKeyHex = "8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63"
 
 // writeOrUpdateEnvVar writes KEY=VALUE into an env file, replacing an existing
