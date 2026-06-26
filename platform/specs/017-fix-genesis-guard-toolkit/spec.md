@@ -72,7 +72,7 @@ Every time the toolkit skips genesis generation because a genesis file already e
 - **FR-002**: If the genesis file exists and is valid, the toolkit MUST skip the entire genesis-generation step and proceed to subsequent idempotent steps (e.g., node registration, Paladin config rendering).
 - **FR-003**: If any code path in the toolkit would invoke `besu operator generate-blockchain-config` or an equivalent genesis-generation command on a spoke where genesis already exists, the toolkit MUST abort with a non-zero exit status and a descriptive error message.
 - **FR-004**: The toolkit MUST emit a structured log entry (JSON, to stdout) whenever genesis generation is skipped, including spoke ID, detected genesis path, and timestamp.
-- **FR-005**: The toolkit MUST emit a structured log entry whenever genesis generation runs for the first time, marking it as a `genesis_created` event.
+- **FR-005**: The guard MUST emit a `genesis_proceed` event when it decides generation is permitted (genesis absent, or `--force-reinit` set). Because the guard is read-only and cannot observe the outcome of generation, the engine entry point that actually runs the generation command MUST emit the `genesis_created` event after it completes successfully.
 - **FR-006**: A `--force-reinit` (or equivalent) flag MUST be the sole mechanism to allow genesis regeneration on an existing spoke; its use MUST require explicit operator confirmation before proceeding.
 - **FR-007**: The genesis check MUST be implemented as a reusable guard that can be invoked from any entry point of the toolkit engine (apply, init, converge) without duplicating the check logic.
 - **FR-008**: If the genesis file exists but is empty or contains invalid content, the toolkit MUST report the path and the detected problem, and refuse to proceed without the explicit `--force-reinit` flag.
@@ -91,7 +91,7 @@ Every time the toolkit skips genesis generation because a genesis file already e
 ### Measurable Outcomes
 
 - **SC-001**: Running the toolkit `apply` command twice on the same initialized spoke completes the second run without modifying any genesis or node-key file — verified by file checksum comparison before and after.
-- **SC-002**: Every toolkit execution that reaches the genesis-generation decision point produces exactly one structured log event (`genesis_skipped`, `genesis_created`, or `genesis_error`) within the first 5 seconds of startup.
+- **SC-002**: Every toolkit execution that reaches the genesis-generation decision point produces exactly one structured guard log event (`genesis_skipped`, `genesis_proceed`, or `genesis_error`) within the first 5 seconds of startup.
 - **SC-003**: Attempting to regenerate genesis without the `--force-reinit` flag results in a non-zero exit code 100% of the time across all tested entry points (apply, init, converge).
 - **SC-004**: The existing sample network (`deploy/local/spoke-besu-a/startBesu.sh`) passes its own green-state check unchanged after this feature is delivered — confirmed by running `make scenario-b.test-contracts` or equivalent without modification.
 - **SC-005**: An operator who receives the refusal error can, without consulting documentation beyond the error message itself, understand what path was detected and what flag to use for an intentional reinitialzation.

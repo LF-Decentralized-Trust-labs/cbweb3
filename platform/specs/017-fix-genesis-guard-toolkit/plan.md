@@ -35,7 +35,7 @@ Add a `GenesisGuard` to the Scenario A provisioning toolkit's orchestration engi
 | III. Atomic Settlement Guarantee | ✅ PASS (N/A) | No settlement protocol involvement. Pre-provisioning guard. |
 | IV. Compliance Gate Before Participation | ✅ PASS (N/A) | Operates below the identity/compliance layer. |
 | V. Test-First at Every Layer | ✅ PASS | `guard_test.go` with failing tests is Phase 1, Step 1. Implementation is Step 2. |
-| VI. Observability and Auditability | ✅ PASS | Spec requires structured JSON log event (`genesis_skipped`, `genesis_created`, `genesis_error`) per call. |
+| VI. Observability and Auditability | ✅ PASS | Spec requires structured JSON log event (`genesis_skipped`, `genesis_proceed`, `genesis_error`) per call; the engine emits `genesis_created` after generation completes. |
 
 **All gates pass. No Complexity Tracking entries required.**
 

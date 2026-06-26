@@ -21,7 +21,17 @@
 //
 // The guard is read-only — it never modifies any file on disk.
 // Every call to GuardGenesis emits exactly one GenesisLogEvent JSON line
-// to the provided io.Writer (pass os.Stdout in production callers).
+// to the provided io.Writer (pass os.Stdout in production callers):
+//
+//	DecisionSkip    → "genesis_skipped" (INFO)
+//	DecisionProceed → "genesis_proceed" (INFO)
+//	DecisionAbort   → "genesis_error"   (ERROR)
+//
+// Note: the guard emits "genesis_proceed" — a decision to allow generation —
+// NOT "genesis_created". Because the guard never writes, it cannot know that
+// generation succeeded; the engine entry point that actually runs
+// "besu operator generate-blockchain-config" is responsible for emitting the
+// "genesis_created" event after that command completes successfully.
 package genesis
 
 import (
@@ -156,7 +166,7 @@ func GuardGenesis(spokeID, workspacePath string, forceReinit bool, w io.Writer) 
 			GenesisPath: path,
 			SpokeID:     spokeID,
 		}
-		emitLogEvent(w, "genesis_created", "INFO", result.Reason, spokeID, path)
+		emitLogEvent(w, "genesis_proceed", "INFO", result.Reason, spokeID, path)
 		return result, nil
 	case GenesisAbsent:
 		result := GuardResult{
@@ -165,7 +175,7 @@ func GuardGenesis(spokeID, workspacePath string, forceReinit bool, w io.Writer) 
 			GenesisPath: path,
 			SpokeID:     spokeID,
 		}
-		emitLogEvent(w, "genesis_created", "INFO", result.Reason, spokeID, path)
+		emitLogEvent(w, "genesis_proceed", "INFO", result.Reason, spokeID, path)
 		return result, nil
 	case GenesisCorrupt:
 		if !forceReinit {
@@ -184,7 +194,7 @@ func GuardGenesis(spokeID, workspacePath string, forceReinit bool, w io.Writer) 
 			GenesisPath: path,
 			SpokeID:     spokeID,
 		}
-		emitLogEvent(w, "genesis_created", "INFO", result.Reason, spokeID, path)
+		emitLogEvent(w, "genesis_proceed", "INFO", result.Reason, spokeID, path)
 		return result, nil
 	default:
 		return GuardResult{}, errors.New("unknown genesis state")

@@ -59,7 +59,7 @@ Emitted to stdout as a single-line JSON object on every `GuardGenesis` call.
 
 | Field | Type | Example |
 |-------|------|---------|
-| `event` | string | `"genesis_skipped"` / `"genesis_created"` / `"genesis_error"` |
+| `event` | string | `"genesis_skipped"` / `"genesis_proceed"` / `"genesis_error"` |
 | `spoke_id` | string | `"spoke-brl"` |
 | `genesis_path` | string | `"/workspace/spoke-brl/genesis/genesis.json"` |
 | `timestamp` | string (ISO-8601) | `"2026-06-25T14:30:00Z"` |
@@ -69,8 +69,13 @@ Emitted to stdout as a single-line JSON object on every `GuardGenesis` call.
 
 Event mapping:
 - `DecisionSkip` → `genesis_skipped` (severity: INFO)
-- `DecisionProceed` (after first-time generation) → `genesis_created` (severity: INFO)
+- `DecisionProceed` → `genesis_proceed` (severity: INFO)
 - `DecisionAbort` → `genesis_error` (severity: ERROR)
+
+The guard is read-only and only *decides* to allow generation, so it emits
+`genesis_proceed`, not `genesis_created`. The engine entry point that runs
+`besu operator generate-blockchain-config` is responsible for emitting the
+`genesis_created` event after that command completes successfully (TK-5).
 
 ---
 

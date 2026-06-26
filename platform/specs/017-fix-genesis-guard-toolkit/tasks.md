@@ -112,7 +112,7 @@
 
 ### Implementation for User Story 3
 
-- [x] T031 [US3] Implement log event emission in `GuardGenesis` in `scenario-a/toolkit/engine/genesis/guard.go`: build a `GenesisLogEvent`, marshal to JSON with `json.Marshal`, write single line to `w` (`fmt.Fprintln(w, string(jsonBytes))`); map `DecisionSkip`→`genesis_skipped`/INFO, `DecisionProceed`→`genesis_created`/INFO, `DecisionAbort`→`genesis_error`/ERROR
+- [x] T031 [US3] Implement log event emission in `GuardGenesis` in `scenario-a/toolkit/engine/genesis/guard.go`: build a `GenesisLogEvent`, marshal to JSON with `json.Marshal`, write single line to `w` (`fmt.Fprintln(w, string(jsonBytes))`); map `DecisionSkip`→`genesis_skipped`/INFO, `DecisionProceed`→`genesis_proceed`/INFO, `DecisionAbort`→`genesis_error`/ERROR (the engine, not the guard, emits `genesis_created` after generation completes)
 - [x] T032 [US3] Run `go test ./engine/genesis/... -run TestGuardGenesis_PresentGenesis_EmitsSkipEvent -v` and confirm GREEN
 
 **Checkpoint**: All three user stories fully functional. All 10 contract tests pass GREEN.
