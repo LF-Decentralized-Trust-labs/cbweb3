@@ -67,6 +67,8 @@ All tests emit `PASS <id> <description>` or `FAIL <id> <description>`.
 ### macOS (Docker Desktop)
 - `host.docker.internal` resolves automatically
 - `ss` may not be available; port checks fall back to `lsof -i :<port>`
+- Host IP for the join bundle is resolved via `scripts/resolve-host-ip.sh` (default-route
+  interface). Override with `export HOST_IP=<your-lan-ip>` if auto-detection fails.
 
 ### macOS (colima)
 - May require `colima start --network-address` for `host.docker.internal` to resolve

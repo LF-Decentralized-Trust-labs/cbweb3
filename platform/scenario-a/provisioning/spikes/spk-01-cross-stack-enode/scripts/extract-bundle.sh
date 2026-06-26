@@ -21,10 +21,9 @@ if [ -z "${NODE_ID}" ] || [ "${NODE_ID}" = "null" ]; then
     exit 1
 fi
 
-# Step 2: Discover host IP (NOT docker inspect — standard Linux hostname command)
-HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-if [ -z "${HOST_IP}" ]; then
-    echo "[FAIL] extract-bundle: could not determine host IP via hostname -I"
+# Step 2: Discover host IP (NOT docker inspect). Override with HOST_IP env if needed.
+if ! HOST_IP=$("${SCRIPT_DIR}/resolve-host-ip.sh"); then
+    echo "[FAIL] extract-bundle: could not determine host IP (set HOST_IP explicitly)"
     exit 1
 fi
 echo "[extract-bundle] host IP: ${HOST_IP}"
