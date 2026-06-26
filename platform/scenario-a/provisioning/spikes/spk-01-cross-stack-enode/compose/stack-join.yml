@@ -1,0 +1,41 @@
+services:
+  besu-joiner:
+    image: hyperledger/besu:25.8.0
+    container_name: spk01-besu-joiner
+    networks:
+      - spk01_join_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${HOST_P2P_JOIN:-31306}:30303/tcp"
+      - "${HOST_P2P_JOIN:-31306}:30303/udp"
+      - "${HOST_RPC_JOIN:-8646}:8545"
+      - "${HOST_WS_JOIN:-8656}:8546"
+    volumes:
+      - ../data/genesis.json:/opt/besu/genesis/genesis.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - besu_joiner_data:/opt/besu/data
+    command:
+      - --nat-method=DOCKER
+      - --bootnodes=${BOOTNODE_ENODE}
+      - --p2p-port=30303
+      - --rpc-http-enabled=true
+      - --rpc-http-port=8545
+      - --rpc-http-api=ETH,NET,QBFT,ADMIN
+      - --rpc-ws-enabled=true
+      - --rpc-ws-port=8546
+      - --rpc-http-host=0.0.0.0
+      - --rpc-ws-host=0.0.0.0
+      - --host-allowlist=*
+      - --rpc-http-cors-origins=all
+      - --genesis-file=/opt/besu/genesis/genesis.json
+      - --data-path=/opt/besu/data
+      - --min-gas-price=0
+
+networks:
+  spk01_join_net:
+    name: spk01_join_net
+    driver: bridge
+
+volumes:
+  besu_joiner_data:

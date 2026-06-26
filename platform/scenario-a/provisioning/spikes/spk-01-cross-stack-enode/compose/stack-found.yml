@@ -1,0 +1,76 @@
+services:
+  besu-boot:
+    image: hyperledger/besu:25.8.0
+    container_name: spk01-besu-boot
+    networks:
+      - spk01_found_net
+    ports:
+      - "${HOST_P2P_BOOT:-31303}:30303/tcp"
+      - "${HOST_P2P_BOOT:-31303}:30303/udp"
+      - "${HOST_RPC_BOOT:-8645}:8545"
+      - "${HOST_WS_BOOT:-8655}:8546"
+    volumes:
+      - ../data/genesis.json:/opt/besu/genesis/genesis.json:ro
+      - ../data/key0:/opt/besu/data/key
+      - /var/run/docker.sock:/var/run/docker.sock
+      - besu_boot_data:/opt/besu/data
+    command:
+      - --nat-method=DOCKER
+      - --p2p-port=30303
+      - --rpc-http-enabled=true
+      - --rpc-http-port=8545
+      - --rpc-http-api=ETH,NET,QBFT,ADMIN
+      - --rpc-ws-enabled=true
+      - --rpc-ws-port=8546
+      - --rpc-http-host=0.0.0.0
+      - --rpc-ws-host=0.0.0.0
+      - --host-allowlist=*
+      - --rpc-http-cors-origins=all
+      - --genesis-file=/opt/besu/genesis/genesis.json
+      - --data-path=/opt/besu/data
+      - --node-private-key-file=/opt/besu/data/key
+      - --min-gas-price=0
+
+  besu-v1:
+    image: hyperledger/besu:25.8.0
+    container_name: spk01-besu-v1
+    networks:
+      - spk01_found_net
+    ports:
+      - "${HOST_P2P_V1:-31304}:30303/tcp"
+      - "${HOST_P2P_V1:-31304}:30303/udp"
+    volumes:
+      - ../data/genesis.json:/opt/besu/genesis/genesis.json:ro
+      - ../data/key1:/opt/besu/data/key
+      - ../scripts/validator-entry.sh:/validator-entry.sh:ro
+      - besu_v1_data:/opt/besu/data
+    environment:
+      - BOOTNODE_PUBKEY=${BOOTNODE_PUBKEY}
+    entrypoint: ["/bin/bash", "/validator-entry.sh"]
+
+  besu-v2:
+    image: hyperledger/besu:25.8.0
+    container_name: spk01-besu-v2
+    networks:
+      - spk01_found_net
+    ports:
+      - "${HOST_P2P_V2:-31305}:30303/tcp"
+      - "${HOST_P2P_V2:-31305}:30303/udp"
+    volumes:
+      - ../data/genesis.json:/opt/besu/genesis/genesis.json:ro
+      - ../data/key2:/opt/besu/data/key
+      - ../scripts/validator-entry.sh:/validator-entry.sh:ro
+      - besu_v2_data:/opt/besu/data
+    environment:
+      - BOOTNODE_PUBKEY=${BOOTNODE_PUBKEY}
+    entrypoint: ["/bin/bash", "/validator-entry.sh"]
+
+networks:
+  spk01_found_net:
+    name: spk01_found_net
+    driver: bridge
+
+volumes:
+  besu_boot_data:
+  besu_v1_data:
+  besu_v2_data:
