@@ -75,13 +75,11 @@ contract RegisterParticipants is Script {
         // The local-dev KMS seeding (KMS_SEED_* on each bank's auth service) makes
         // the onboarded wallet equal that bank's BESU_OPERATOR_KEY address, so the
         // onboarded identity is the one that signs HTLC txs and passes onlyVerified.
-        Participant[1] memory participants = [
-            Participant(
+        Participant[1] memory participants = [Participant(
                 0x627306090abaB3A6e1400e9345bC60c78a8BEf57,
                 "Central Bank",
                 IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK
-            )
-        ];
+            )];
 
         vm.startBroadcast(adminKey);
 
