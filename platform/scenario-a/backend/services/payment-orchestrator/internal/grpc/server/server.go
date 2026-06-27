@@ -898,6 +898,21 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 	if strings.EqualFold(req.OriginCurrency, req.CounterCurrency) {
 		return nil, status.Error(codes.InvalidArgument, "origin_currency and counter_currency must be different")
 	}
+	if req.SourceSpokeId == "" {
+		return nil, status.Error(codes.InvalidArgument, "source_spoke_id is required")
+	}
+	if req.DestSpokeId == "" {
+		return nil, status.Error(codes.InvalidArgument, "dest_spoke_id is required")
+	}
+	if req.SourceReceiver == "" {
+		return nil, status.Error(codes.InvalidArgument, "source_receiver is required")
+	}
+	if req.DestReceiver == "" {
+		return nil, status.Error(codes.InvalidArgument, "dest_receiver is required")
+	}
+	if req.SourceSpokeId == req.DestSpokeId {
+		return nil, status.Error(codes.InvalidArgument, "source_spoke_id and dest_spoke_id must be different")
+	}
 	originRat, ok := new(big.Rat).SetString(req.OriginAmount)
 	if !ok || originRat.Sign() <= 0 {
 		return nil, status.Error(codes.InvalidArgument, "origin_amount must be a positive decimal")
@@ -960,8 +975,10 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 		OriginCurrency:  req.OriginCurrency,
 		CounterCurrency: req.CounterCurrency,
 		Rate:            req.Rate,
-		SpokeAReceiver:  req.SpokeAReceiver,
-		SpokeBReceiver:  req.SpokeBReceiver,
+		SourceSpokeId:   req.SourceSpokeId,
+		DestSpokeId:     req.DestSpokeId,
+		SourceReceiver:  req.SourceReceiver,
+		DestReceiver:    req.DestReceiver,
 		ExpiryDate:      req.ExpiryDate,
 		State:           domain.FXStateProposed,
 		OnChainTxHash:   txHash,
@@ -1333,9 +1350,11 @@ func fxRecordToProto(r *domain.FXAgreementRecord) *pb.FXAgreement {
 		CounterAmount:   r.CounterAmount,
 		OriginCurrency:  r.OriginCurrency,
 		CounterCurrency: r.CounterCurrency,
-		SpokeAReceiver:  r.SpokeAReceiver,
-		SpokeBReceiver:  r.SpokeBReceiver,
-		Rate:            r.Rate,
+		SourceSpokeId:  r.SourceSpokeId,
+		DestSpokeId:    r.DestSpokeId,
+		SourceReceiver: r.SourceReceiver,
+		DestReceiver:   r.DestReceiver,
+		Rate:           r.Rate,
 		ExpiryDate:      r.ExpiryDate,
 		State:           stateMap[r.State],
 		GroupId:         r.GroupID,
@@ -1456,8 +1475,10 @@ func (s *paymentOrchestratorService) agreementCommitmentHash(rec *domain.FXAgree
 // the FX agreement terms for the current spoke leg. It is called while s.mu is held for read,
 // so it must not acquire the lock itself.
 //
-// Spoke-A leg  → receiver must be SpokeAReceiver, amount must be OriginAmount.
-// Spoke-B leg  → receiver must be SpokeBReceiver, amount must be CounterAmount.
+// The local leg is identified by comparing s.spokePrefix against fx.DestSpokeId:
+//   - If this server is the dest spoke → local receiver = fx.DestReceiver, amount = fx.CounterAmount
+//   - Otherwise (source spoke) → local receiver = fx.SourceReceiver, amount = fx.OriginAmount
+//
 // If SpokePrefix is empty (dev mode) or the agreement has no receivers set, the check is skipped.
 func (s *paymentOrchestratorService) validateHTLCTermsAgainstAgreement(
 	receiver, amount string,
@@ -1468,12 +1489,14 @@ func (s *paymentOrchestratorService) validateHTLCTermsAgainstAgreement(
 	}
 
 	var expectedReceiver, expectedAmount string
-	if strings.HasPrefix(s.spokePrefix, "spoke-a") {
-		expectedReceiver = fx.SpokeAReceiver
-		expectedAmount = fx.OriginAmount
-	} else {
-		expectedReceiver = fx.SpokeBReceiver
+	if fx.DestSpokeId == s.spokePrefix {
+		// We are the dest spoke: lock targets DestReceiver, amount is CounterAmount.
+		expectedReceiver = fx.DestReceiver
 		expectedAmount = fx.CounterAmount
+	} else {
+		// We are the source spoke: lock targets SourceReceiver, amount is OriginAmount.
+		expectedReceiver = fx.SourceReceiver
+		expectedAmount = fx.OriginAmount
 	}
 
 	if expectedReceiver != "" && receiver != expectedReceiver {
@@ -1511,8 +1534,10 @@ func resolveFXPartyAddresses(ctx context.Context, req *pb.ProposeFXAgreementRequ
 		Rate:            req.Rate,
 		ExpiryDate:      req.ExpiryDate,
 		OnBehalf:        req.OnBehalf,
-		SpokeAReceiver:  req.SpokeAReceiver,
-		SpokeBReceiver:  req.SpokeBReceiver,
+		SourceSpokeId:  req.SourceSpokeId,
+		DestSpokeId:    req.DestSpokeId,
+		SourceReceiver: req.SourceReceiver,
+		DestReceiver:   req.DestReceiver,
 	}
 
 	resolve := func(field string) (string, error) {
@@ -1660,21 +1685,20 @@ func (s *paymentOrchestratorService) handleRelayLockEvent(proof ports.Interopera
 	}
 
 	var localReceiver, localAmount, agreementID string
-	isSpokeA := strings.HasPrefix(s.spokePrefix, "spoke-a")
 	for _, fx := range agreements {
-		if isSpokeA {
-			// This orchestrator is on spoke-a. Counterparty lock is on spoke-b (SpokeBReceiver).
-			if fx.SpokeBReceiver == payload.Receiver {
-				localReceiver = fx.SpokeAReceiver
-				localAmount = fx.OriginAmount
+		if fx.DestSpokeId == s.spokePrefix {
+			// We are the dest spoke. Counterparty (source) locked for SourceReceiver.
+			if fx.SourceReceiver == payload.Receiver {
+				localReceiver = fx.DestReceiver
+				localAmount = fx.CounterAmount
 				agreementID = fx.TradeID
 				break
 			}
 		} else {
-			// This orchestrator is on spoke-b. Counterparty lock is on spoke-a (SpokeAReceiver).
-			if fx.SpokeAReceiver == payload.Receiver {
-				localReceiver = fx.SpokeBReceiver
-				localAmount = fx.CounterAmount
+			// We are the source spoke. Counterparty (dest) locked for DestReceiver.
+			if fx.DestReceiver == payload.Receiver {
+				localReceiver = fx.SourceReceiver
+				localAmount = fx.OriginAmount
 				agreementID = fx.TradeID
 				break
 			}

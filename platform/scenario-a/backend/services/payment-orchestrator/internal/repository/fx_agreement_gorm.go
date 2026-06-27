@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
@@ -28,6 +29,9 @@ func NewGormFXAgreementRepository(dsn string) (ports.FXAgreementRepository, erro
 	if err := db.AutoMigrate(&FXAgreementModel{}, &FXAgreementEventModel{}, &RelayDeliveryRecordModel{}); err != nil {
 		return nil, err
 	}
+	if err := RunSpokeKeyedMigration(db); err != nil {
+		return nil, err
+	}
 	return &gormFXAgreementRepository{db: db}, nil
 }
 
@@ -36,6 +40,9 @@ func NewGormFXAgreementRepository(dsn string) (ports.FXAgreementRepository, erro
 // across multiple repositories.
 func NewGormFXAgreementRepositoryFromDB(db *gorm.DB) (ports.FXAgreementRepository, error) {
 	if err := db.AutoMigrate(&FXAgreementModel{}, &FXAgreementEventModel{}, &RelayDeliveryRecordModel{}); err != nil {
+		return nil, err
+	}
+	if err := RunSpokeKeyedMigration(db); err != nil {
 		return nil, err
 	}
 	return &gormFXAgreementRepository{db: db}, nil
@@ -137,6 +144,35 @@ func (r *gormFXAgreementRepository) ListExpiredNonTerminal(ctx context.Context, 
 		result[i] = fxAgreementFromModel(m)
 	}
 	return result, nil
+}
+
+// runSpokeKeyedMigration performs an idempotent migration from positional
+// spoke_a_receiver/spoke_b_receiver columns to spoke-keyed fields.
+// AutoMigrate already added the new columns; this function backfills data
+// from old columns and drops them. If the old columns don't exist (fresh
+// schema or already migrated), the backfill UPDATE fails and we return nil.
+func RunSpokeKeyedMigration(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&FXAgreementModel{}) {
+		return nil
+	}
+
+	// Try to backfill. If the old columns don't exist, the error
+	// means fresh schema — nothing to do.
+	result := db.Exec(
+		`UPDATE fx_agreements SET source_spoke_id = 'spoke-a', dest_spoke_id = 'spoke-b', source_receiver = COALESCE(spoke_a_receiver, ''), dest_receiver = COALESCE(spoke_b_receiver, '') WHERE source_spoke_id IS NULL OR source_spoke_id = ''`,
+	)
+	if result.Error != nil {
+		return nil // old columns missing — already on new schema
+	}
+
+	// Backfill succeeded — drop the legacy columns.
+	for _, col := range []string{"spoke_a_receiver", "spoke_b_receiver"} {
+		if err := db.Exec(fmt.Sprintf("ALTER TABLE fx_agreements DROP COLUMN %s", col)).Error; err != nil {
+			return fmt.Errorf("spoke-keyed migration drop %s: %w", col, err)
+		}
+	}
+
+	return nil
 }
 
 // nowUTC is a helper for consistent timestamps.
