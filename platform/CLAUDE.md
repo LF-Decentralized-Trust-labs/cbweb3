@@ -103,6 +103,8 @@ Proto:
 - PostgreSQL — `fx_agreements` table; column additions + backfill + column drops via startup SQL (020-fx-spoke-keyed-legs)
 - Go 1.26+ + GORM v2 (`gorm.io/gorm`, `gorm.io/driver/postgres`), `gorm.io/driver/sqlite` (testes), `log/slog` (stdlib) (021-db-migration-spoke-keyed)
 - PostgreSQL (produção), SQLite (testes de repositório) (021-db-migration-spoke-keyed)
+- Go 1.26+ (backend), TypeScript 5.x (relay + frontend) + `gorm.io/gorm` v2, `google.golang.org/grpc`, `google.golang.org/protobuf`, `buf` (proto codegen), Cacti HTLC relay (TypeScript) (022-update-proto-consumers)
+- PostgreSQL (produção, tabelas `fx_agreements`), SQLite (testes de repositório) (022-update-proto-consumers)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
