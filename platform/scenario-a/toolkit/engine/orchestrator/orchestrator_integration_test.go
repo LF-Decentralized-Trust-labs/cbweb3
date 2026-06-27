@@ -98,9 +98,9 @@ func TestRunFound_Integration(t *testing.T) {
 	}
 
 	// SC-002: State file exists with all steps done.
-	state, err := loadState(dataDir)
+	state, err := LoadState(dataDir)
 	if err != nil {
-		t.Fatalf("loadState: %v", err)
+		t.Fatalf("LoadState: %v", err)
 	}
 	if len(state.Steps) != 10 {
 		t.Errorf("expected 10 steps in state, got %d", len(state.Steps))

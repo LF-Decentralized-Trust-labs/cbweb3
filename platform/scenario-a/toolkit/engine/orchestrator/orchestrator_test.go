@@ -122,8 +122,8 @@ func TestRunFound_AllStepsMockSuccess(t *testing.T) {
 	m := testManifest(dataDir)
 	deps := testDeps()
 
-	steps := make([]Step, len(canonicalStepOrder))
-	for i, name := range canonicalStepOrder {
+	steps := make([]Step, len(CanonicalStepOrder))
+	for i, name := range CanonicalStepOrder {
 		name := name
 		steps[i] = &mockStep{name: name, checkVal: false}
 	}
@@ -134,9 +134,9 @@ func TestRunFound_AllStepsMockSuccess(t *testing.T) {
 	}
 
 	// Verify state file has all 10 steps as "done".
-	state, err := loadState(dataDir)
+	state, err := LoadState(dataDir)
 	if err != nil {
-		t.Fatalf("loadState: %v", err)
+		t.Fatalf("LoadState: %v", err)
 	}
 	if len(state.Steps) != 10 {
 		t.Errorf("expected 10 steps in state, got %d", len(state.Steps))
@@ -154,8 +154,8 @@ func TestRunFound_AllStepsMock_LogOutput(t *testing.T) {
 	m := testManifest(dataDir)
 	deps := testDeps()
 
-	steps := make([]Step, len(canonicalStepOrder))
-	for i, name := range canonicalStepOrder {
+	steps := make([]Step, len(CanonicalStepOrder))
+	for i, name := range CanonicalStepOrder {
 		name := name
 		steps[i] = &mockStep{name: name, checkVal: false}
 	}
@@ -195,16 +195,16 @@ func TestRunFound_Idempotent_AllStepsDone(t *testing.T) {
 
 	// Pre-populate state with all steps done.
 	state := ProvisioningState{SpokeID: "spoke-test"}
-	for _, name := range canonicalStepOrder {
+	for _, name := range CanonicalStepOrder {
 		state = markStep(state, name, "done", "2026-06-27T00:00:00Z")
 	}
 	if err := saveState(dataDir, state); err != nil {
 		t.Fatalf("saveState: %v", err)
 	}
 
-	mocks := make([]*mockStep, len(canonicalStepOrder))
-	steps := make([]Step, len(canonicalStepOrder))
-	for i, name := range canonicalStepOrder {
+	mocks := make([]*mockStep, len(CanonicalStepOrder))
+	steps := make([]Step, len(CanonicalStepOrder))
+	for i, name := range CanonicalStepOrder {
 		name := name
 		mocks[i] = &mockStep{name: name, checkVal: true} // all already done
 		steps[i] = mocks[i]
@@ -230,12 +230,12 @@ func TestRunFound_Idempotent_FirstStepDone(t *testing.T) {
 	m := testManifest(dataDir)
 	deps := testDeps()
 
-	mocks := make([]*mockStep, len(canonicalStepOrder))
-	steps := make([]Step, len(canonicalStepOrder))
-	mocks[0] = &mockStep{name: canonicalStepOrder[0], checkVal: true} // step 1 done
+	mocks := make([]*mockStep, len(CanonicalStepOrder))
+	steps := make([]Step, len(CanonicalStepOrder))
+	mocks[0] = &mockStep{name: CanonicalStepOrder[0], checkVal: true} // step 1 done
 	steps[0] = mocks[0]
-	for i := 1; i < len(canonicalStepOrder); i++ {
-		name := canonicalStepOrder[i]
+	for i := 1; i < len(CanonicalStepOrder); i++ {
+		name := CanonicalStepOrder[i]
 		mocks[i] = &mockStep{name: name, checkVal: false}
 		steps[i] = mocks[i]
 	}
@@ -265,16 +265,16 @@ func TestRunFound_Resume_PartialState(t *testing.T) {
 
 	// Pre-populate first 6 steps as done.
 	state := ProvisioningState{SpokeID: "spoke-test"}
-	for _, name := range canonicalStepOrder[:6] {
+	for _, name := range CanonicalStepOrder[:6] {
 		state = markStep(state, name, "done", "2026-06-27T00:00:00Z")
 	}
 	if err := saveState(dataDir, state); err != nil {
 		t.Fatalf("saveState: %v", err)
 	}
 
-	mocks := make([]*mockStep, len(canonicalStepOrder))
-	steps := make([]Step, len(canonicalStepOrder))
-	for i, name := range canonicalStepOrder {
+	mocks := make([]*mockStep, len(CanonicalStepOrder))
+	steps := make([]Step, len(CanonicalStepOrder))
+	for i, name := range CanonicalStepOrder {
 		name := name
 		mocks[i] = &mockStep{name: name, checkVal: i < 6} // first 6 return true
 		steps[i] = mocks[i]
@@ -305,17 +305,17 @@ func TestRunFound_FailedStep_IsRetried(t *testing.T) {
 
 	// passo 7 estava com status "failed"
 	state := ProvisioningState{SpokeID: "spoke-test"}
-	for _, name := range canonicalStepOrder[:6] {
+	for _, name := range CanonicalStepOrder[:6] {
 		state = markStep(state, name, "done", "2026-06-27T00:00:00Z")
 	}
-	state = markStep(state, canonicalStepOrder[6], "failed", "")
+	state = markStep(state, CanonicalStepOrder[6], "failed", "")
 	if err := saveState(dataDir, state); err != nil {
 		t.Fatalf("saveState: %v", err)
 	}
 
-	mocks := make([]*mockStep, len(canonicalStepOrder))
-	steps := make([]Step, len(canonicalStepOrder))
-	for i, name := range canonicalStepOrder {
+	mocks := make([]*mockStep, len(CanonicalStepOrder))
+	steps := make([]Step, len(CanonicalStepOrder))
+	for i, name := range CanonicalStepOrder {
 		name := name
 		// check returns true for first 6 (done), false for step 7 (failed) and beyond
 		mocks[i] = &mockStep{name: name, checkVal: i < 6}
@@ -343,8 +343,8 @@ func TestRunFound_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // immediately cancelled
 
-	steps := make([]Step, len(canonicalStepOrder))
-	for i, name := range canonicalStepOrder {
+	steps := make([]Step, len(CanonicalStepOrder))
+	for i, name := range CanonicalStepOrder {
 		name := name
 		steps[i] = &mockStep{name: name, checkVal: false}
 	}
@@ -364,8 +364,8 @@ func TestRunFound_Log_StepSkipped_HasReason(t *testing.T) {
 	m := testManifest(dataDir)
 	deps := testDeps()
 
-	steps := make([]Step, len(canonicalStepOrder))
-	for i, name := range canonicalStepOrder {
+	steps := make([]Step, len(CanonicalStepOrder))
+	for i, name := range CanonicalStepOrder {
 		name := name
 		steps[i] = &mockStep{name: name, checkVal: true} // all skipped
 	}
@@ -396,10 +396,10 @@ func TestRunFound_Log_StepFailed_HasError(t *testing.T) {
 	deps := testDeps()
 
 	failErr := errors.New("simulated step failure")
-	steps := make([]Step, len(canonicalStepOrder))
-	steps[0] = &mockStep{name: canonicalStepOrder[0], checkVal: false, runErr: failErr}
-	for i := 1; i < len(canonicalStepOrder); i++ {
-		name := canonicalStepOrder[i]
+	steps := make([]Step, len(CanonicalStepOrder))
+	steps[0] = &mockStep{name: CanonicalStepOrder[0], checkVal: false, runErr: failErr}
+	for i := 1; i < len(CanonicalStepOrder); i++ {
+		name := CanonicalStepOrder[i]
 		steps[i] = &mockStep{name: name, checkVal: false}
 	}
 

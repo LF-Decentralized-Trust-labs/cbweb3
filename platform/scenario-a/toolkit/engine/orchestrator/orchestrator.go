@@ -69,7 +69,7 @@ func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w i
 	defer unlock()
 
 	// 3. Load persisted state.
-	state, err := loadState(dataDir)
+	state, err := LoadState(dataDir)
 	if err != nil {
 		return fmt.Errorf("orchestrator: load state: %w", err)
 	}

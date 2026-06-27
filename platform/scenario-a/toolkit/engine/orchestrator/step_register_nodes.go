@@ -28,7 +28,7 @@ func (s *registerNodesStep) Name() string { return StepRegisterNodes }
 
 // Check uses only the provisioning state file (no idempotent external query available for Paladin node registry).
 func (s *registerNodesStep) Check(_ context.Context) (bool, error) {
-	state, err := loadState(s.dataDir)
+	state, err := LoadState(s.dataDir)
 	if err != nil {
 		return false, err
 	}

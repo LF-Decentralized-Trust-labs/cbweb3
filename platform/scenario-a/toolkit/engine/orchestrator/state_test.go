@@ -9,7 +9,7 @@ import (
 
 func TestLoadState_FileNotExist(t *testing.T) {
 	dir := t.TempDir()
-	state, err := loadState(dir)
+	state, err := LoadState(dir)
 	if err != nil {
 		t.Fatalf("expected no error for missing state file, got: %v", err)
 	}
@@ -33,9 +33,9 @@ func TestSaveAndLoadState_RoundTrip(t *testing.T) {
 	if err := saveState(dir, original); err != nil {
 		t.Fatalf("saveState: %v", err)
 	}
-	loaded, err := loadState(dir)
+	loaded, err := LoadState(dir)
 	if err != nil {
-		t.Fatalf("loadState: %v", err)
+		t.Fatalf("LoadState: %v", err)
 	}
 	if loaded.SpokeID != "spoke-brl" {
 		t.Errorf("SpokeID = %q; want spoke-brl", loaded.SpokeID)

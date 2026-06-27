@@ -33,8 +33,8 @@ const (
 	StepRegisterRelay   = "register-relay"
 )
 
-// canonicalStepOrder is the definitive execution sequence for mode:found.
-var canonicalStepOrder = []string{
+// CanonicalStepOrder is the definitive execution sequence for mode:found.
+var CanonicalStepOrder = []string{
 	StepDeployContracts,
 	StepGenTLS,
 	StepRenderConfigs,

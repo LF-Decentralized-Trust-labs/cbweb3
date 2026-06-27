@@ -38,9 +38,9 @@ func statusFor(state ProvisioningState, stepName string) string {
 	return "pending"
 }
 
-// loadState reads .provisioning-state.yaml from dir.
+// LoadState reads .provisioning-state.yaml from dir.
 // Returns a state with all steps pending if the file does not exist.
-func loadState(dir string) (ProvisioningState, error) {
+func LoadState(dir string) (ProvisioningState, error) {
 	path := stateFilePath(dir)
 	data, err := os.ReadFile(path)
 	if err != nil {
