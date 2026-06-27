@@ -485,6 +485,10 @@ type FXAgreementResult struct {
 	CounterCurrency string `json:"counter_currency,omitempty"`
 	Rate            string `json:"rate,omitempty"`
 	ExpiryDate      uint64 `json:"expiry_date,omitempty"`
+	SourceSpokeID   string `json:"source_spoke_id,omitempty"`
+	DestSpokeID     string `json:"dest_spoke_id,omitempty"`
+	SourceReceiver  string `json:"source_receiver,omitempty"`
+	DestReceiver    string `json:"dest_receiver,omitempty"`
 	State           string `json:"state,omitempty"`
 	GroupID         string `json:"group_id,omitempty"`
 	ContractAddress string `json:"contract_address,omitempty"`
@@ -591,6 +595,10 @@ func fxAgreementToResult(ag *pb.FXAgreement) *FXAgreementResult {
 		CounterCurrency: ag.CounterCurrency,
 		Rate:            ag.Rate,
 		ExpiryDate:      ag.ExpiryDate,
+		SourceSpokeID:   ag.SourceSpokeId,
+		DestSpokeID:     ag.DestSpokeId,
+		SourceReceiver:  ag.SourceReceiver,
+		DestReceiver:    ag.DestReceiver,
 		State:           ag.State.String(),
 		GroupID:         ag.GroupId,
 		ContractAddress: ag.ContractAddress,

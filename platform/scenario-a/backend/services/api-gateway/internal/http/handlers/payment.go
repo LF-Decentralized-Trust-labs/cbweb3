@@ -545,6 +545,10 @@ func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
 		CounterCurrency string `json:"counter_currency"`
 		Rate            string `json:"rate"`
 		ExpiryDate      uint64 `json:"expiry_date"`
+		SourceSpokeID   string `json:"source_spoke_id"`
+		DestSpokeID     string `json:"dest_spoke_id"`
+		SourceReceiver  string `json:"source_receiver"`
+		DestReceiver    string `json:"dest_receiver"`
 		OnBehalf        bool   `json:"on_behalf"`
 	}
 	if err := c.BodyParser(&req); err != nil {
@@ -567,6 +571,10 @@ func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
 		CounterCurrency: req.CounterCurrency,
 		Rate:            req.Rate,
 		ExpiryDate:      req.ExpiryDate,
+		SourceSpokeId:   req.SourceSpokeID,
+		DestSpokeId:     req.DestSpokeID,
+		SourceReceiver:  req.SourceReceiver,
+		DestReceiver:    req.DestReceiver,
 		OnBehalf:        req.OnBehalf,
 	})
 	if err != nil {
