@@ -101,6 +101,8 @@ Proto:
 - Filesystem only — genesis.json, Besu data volumes, Paladin SQLite + LevelDB data volumes, TLS cert files (019-spk02-live-join)
 - Go 1.26+ (payment-orchestrator), TypeScript (relay, frontend) + protoc + protoc-gen-go (code gen), GORM v2 (ORM + AutoMigrate), gRPC (020-fx-spoke-keyed-legs)
 - PostgreSQL — `fx_agreements` table; column additions + backfill + column drops via startup SQL (020-fx-spoke-keyed-legs)
+- Go 1.26+ + GORM v2 (`gorm.io/gorm`, `gorm.io/driver/postgres`), `gorm.io/driver/sqlite` (testes), `log/slog` (stdlib) (021-db-migration-spoke-keyed)
+- PostgreSQL (produção), SQLite (testes de repositório) (021-db-migration-spoke-keyed)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
