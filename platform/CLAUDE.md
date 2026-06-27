@@ -105,6 +105,8 @@ Proto:
 - PostgreSQL (produção), SQLite (testes de repositório) (021-db-migration-spoke-keyed)
 - Go 1.26+ (backend), TypeScript 5.x (relay + frontend) + `gorm.io/gorm` v2, `google.golang.org/grpc`, `google.golang.org/protobuf`, `buf` (proto codegen), Cacti HTLC relay (TypeScript) (022-update-proto-consumers)
 - PostgreSQL (produção, tabelas `fx_agreements`), SQLite (testes de repositório) (022-update-proto-consumers)
+- Go 1.26+; YAML 1.2 (schema and manifest files) + `gopkg.in/yaml.v3` (new; only addition to `toolkit/go.mod`) (023-manifest-schema-validation)
+- None — stateless; reads one file, validates, returns result (023-manifest-schema-validation)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
