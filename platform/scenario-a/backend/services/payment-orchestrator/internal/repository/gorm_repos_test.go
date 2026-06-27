@@ -4,6 +4,9 @@ package repository_test
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -14,6 +17,11 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/repository"
 )
+
+// testLogger returns a discarded slog.Logger for tests.
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 // newTestDB returns an in-memory SQLite *gorm.DB. The pure-Go (modernc) driver
 // is used so the suite stays hermetic and CGO-free.
@@ -432,7 +440,7 @@ func TestGormFXAgreementRepository_SpokeKeyedMigration_Idempotent(t *testing.T) 
 	}
 
 	// Run migration the first time.
-	if err := repository.RunSpokeKeyedMigration(db); err != nil {
+	if err := repository.RunSpokeKeyedMigration(db, testLogger()); err != nil {
 		t.Fatalf("first migration: %v", err)
 	}
 
@@ -476,11 +484,171 @@ func TestGormFXAgreementRepository_SpokeKeyedMigration_Idempotent(t *testing.T) 
 
 	// Second run must be a no-op (old columns already gone — UPDATE fails,
 	// RunSpokeKeyedMigration returns nil).
-	if err := repository.RunSpokeKeyedMigration(db); err != nil {
+	if err := repository.RunSpokeKeyedMigration(db, testLogger()); err != nil {
 		t.Fatalf("second migration: %v", err)
 	}
 
 	// Row count unchanged.
+	var count int64
+	if err := db.Raw("SELECT COUNT(*) FROM fx_agreements").Scan(&count).Error; err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count = %d, want 1", count)
+	}
+}
+
+// TestRunSpokeKeyedMigration_FreshSchema verifies that RunSpokeKeyedMigration
+// is a no-op when the table has never had legacy columns (fresh schema via
+// AutoMigrate only — no spoke_a_receiver / spoke_b_receiver columns).
+func TestRunSpokeKeyedMigration_FreshSchema(t *testing.T) {
+	db := newTestDB(t)
+
+	// AutoMigrate adds source_spoke_id, dest_spoke_id, etc. but NOT the
+	// legacy spoke_a_receiver / spoke_b_receiver columns.
+	if err := db.AutoMigrate(&repository.FXAgreementModel{}); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+
+	// Migration should be a no-op — no legacy columns present.
+	if err := repository.RunSpokeKeyedMigration(db, testLogger()); err != nil {
+		t.Fatalf("RunSpokeKeyedMigration on fresh schema: %v", err)
+	}
+
+	// Verify no legacy columns exist.
+	for _, col := range []string{"spoke_a_receiver", "spoke_b_receiver"} {
+		var count int64
+		query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('fx_agreements') WHERE name = '%s'", col)
+		if err := db.Raw(query).Scan(&count).Error; err != nil {
+			t.Fatalf("pragma for %s: %v", col, err)
+		}
+		if count != 0 {
+			t.Errorf("column %s should not exist on fresh schema", col)
+		}
+	}
+
+	// Verify new columns exist.
+	for _, col := range []string{"source_spoke_id", "dest_spoke_id", "source_receiver", "dest_receiver"} {
+		var count int64
+		query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('fx_agreements') WHERE name = '%s'", col)
+		if err := db.Raw(query).Scan(&count).Error; err != nil {
+			t.Fatalf("pragma for %s: %v", col, err)
+		}
+		if count != 1 {
+			t.Errorf("column %s should exist on fresh schema, got count=%d", col, count)
+		}
+	}
+}
+
+// TestRunSpokeKeyedMigration_PartialState simulates an interrupted migration
+// (spoke_a_receiver already dropped, spoke_b_receiver still present, data
+// already backfilled) and verifies that RunSpokeKeyedMigration completes
+// the remaining work without data loss.
+func TestRunSpokeKeyedMigration_PartialState(t *testing.T) {
+	db := newTestDB(t)
+
+	// 1. Create legacy table with both positional columns.
+	createLegacy := `
+		CREATE TABLE fx_agreements (
+			trade_id TEXT PRIMARY KEY,
+			originator TEXT NOT NULL,
+			counterparty_b TEXT NOT NULL,
+			settlement_agent TEXT,
+			custodian TEXT,
+			beneficiary TEXT,
+			origin_amount TEXT NOT NULL,
+			counter_amount TEXT NOT NULL,
+			origin_currency TEXT NOT NULL,
+			counter_currency TEXT NOT NULL,
+			rate TEXT NOT NULL,
+			spoke_a_receiver TEXT,
+			spoke_b_receiver TEXT,
+			expiry_date INTEGER NOT NULL,
+			state TEXT NOT NULL,
+			on_chain_tx_hash TEXT,
+			group_id TEXT,
+			contract_address TEXT,
+			created_at DATETIME,
+			updated_at DATETIME
+		)`
+	if err := db.Exec(createLegacy).Error; err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+
+	// 2. Seed a legacy row.
+	seed := `
+		INSERT INTO fx_agreements (trade_id, originator, counterparty_b, origin_amount, counter_amount,
+			origin_currency, counter_currency, rate, spoke_a_receiver, spoke_b_receiver,
+			expiry_date, state, created_at, updated_at)
+		VALUES ('T-PARTIAL-1', 'bank-a', 'bank-b', '100', '120', 'USD', 'BRL', '1.2',
+			'recv@a', 'recv@b', 9999999999, 'PROPOSED',
+			datetime('now'), datetime('now'))
+	`
+	if err := db.Exec(seed).Error; err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	// 3. AutoMigrate adds the new spoke-keyed columns.
+	if err := db.AutoMigrate(&repository.FXAgreementModel{}); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+
+	// 4. Simulate backfill that would have run before the first DROP.
+	backfill := `
+		UPDATE fx_agreements SET
+			source_spoke_id = 'spoke-a',
+			dest_spoke_id = 'spoke-b',
+			source_receiver = COALESCE(spoke_a_receiver, ''),
+			dest_receiver = COALESCE(spoke_b_receiver, '')
+		WHERE source_spoke_id IS NULL OR source_spoke_id = ''
+	`
+	if err := db.Exec(backfill).Error; err != nil {
+		t.Fatalf("simulate backfill: %v", err)
+	}
+
+	// 5. Simulate first DROP (spoke_a_receiver) completed — only spoke_b_receiver remains.
+	if err := db.Exec("ALTER TABLE fx_agreements DROP COLUMN spoke_a_receiver").Error; err != nil {
+		t.Fatalf("simulate first DROP: %v", err)
+	}
+
+	// 6. Call RunSpokeKeyedMigration — should complete the remaining DROP.
+	if err := repository.RunSpokeKeyedMigration(db, testLogger()); err != nil {
+		t.Fatalf("RunSpokeKeyedMigration on partial state: %v", err)
+	}
+
+	// 7. Assertions: no error (checked above), spoke_b_receiver absent.
+	var colCount int64
+	if err := db.Raw("SELECT COUNT(*) FROM pragma_table_info('fx_agreements') WHERE name = 'spoke_b_receiver'").Scan(&colCount).Error; err != nil {
+		t.Fatalf("pragma: %v", err)
+	}
+	if colCount != 0 {
+		t.Errorf("spoke_b_receiver column should be dropped")
+	}
+
+	// 8. Verify data intact.
+	var row struct {
+		SourceReceiver string
+		DestReceiver   string
+		SourceSpokeId  string
+		DestSpokeId    string
+	}
+	if err := db.Raw(`SELECT source_spoke_id, dest_spoke_id, source_receiver, dest_receiver FROM fx_agreements WHERE trade_id = 'T-PARTIAL-1'`).Scan(&row).Error; err != nil {
+		t.Fatalf("query row: %v", err)
+	}
+	if row.SourceReceiver != "recv@a" {
+		t.Errorf("source_receiver = %q, want %q", row.SourceReceiver, "recv@a")
+	}
+	if row.DestReceiver != "recv@b" {
+		t.Errorf("dest_receiver = %q, want %q", row.DestReceiver, "recv@b")
+	}
+	if row.SourceSpokeId != "spoke-a" {
+		t.Errorf("source_spoke_id = %q, want %q", row.SourceSpokeId, "spoke-a")
+	}
+	if row.DestSpokeId != "spoke-b" {
+		t.Errorf("dest_spoke_id = %q, want %q", row.DestSpokeId, "spoke-b")
+	}
+
+	// 9. Row count = 1 (no data duplication or loss).
 	var count int64
 	if err := db.Raw("SELECT COUNT(*) FROM fx_agreements").Scan(&count).Error; err != nil {
 		t.Fatalf("count: %v", err)
