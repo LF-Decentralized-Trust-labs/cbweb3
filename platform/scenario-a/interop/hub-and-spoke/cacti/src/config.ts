@@ -19,6 +19,8 @@ export interface SpokeConfig {
   internalApiUrl: string;
   /** gRPC target for the counterpart spoke's payment-orchestrator (e.g. "host:29094"). */
   counterpartGrpc: string;
+  /** Spoke ID of the bilateral counterpart (e.g. "spoke-b"). Used to validate dest_spoke_id on incoming FX proposals. */
+  counterpartName: string;
 }
 
 function requireEnv(key: string): string {
@@ -41,6 +43,7 @@ export const config = {
     htlcAddress: requireEnv("SPOKE_A_HTLC_ADDRESS"),
     internalApiUrl: requireEnv("SPOKE_A_INTERNAL_API"),
     counterpartGrpc: requireEnv("SPOKE_B_PAYMENT_GRPC"),
+    counterpartName: "spoke-b",
   } satisfies SpokeConfig,
 
   spokeB: {
@@ -50,6 +53,7 @@ export const config = {
     htlcAddress: requireEnv("SPOKE_B_HTLC_ADDRESS"),
     internalApiUrl: requireEnv("SPOKE_B_INTERNAL_API"),
     counterpartGrpc: requireEnv("SPOKE_A_PAYMENT_GRPC"),
+    counterpartName: "spoke-a",
   } satisfies SpokeConfig,
 
   /** Port for the Cacti REST API server (default: 4000). */

@@ -247,6 +247,8 @@ export interface SpokeDep {
   htlcAddress: string;
   internalApiUrl: string;
   counterpartGrpc: string;
+  /** Spoke ID of the bilateral counterpart. When set, FX proposals with a different dest_spoke_id are rejected with an error log. */
+  counterpartName?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -620,6 +622,12 @@ export class HtlcRelay {
           this.log.error(`[${spoke.name}] FX REST: skipping proposal tradeId=${tradeId} — missing source_spoke_id or dest_spoke_id`);
           continue;
         }
+        if (spoke.counterpartName && evt.destSpokeId !== spoke.counterpartName) {
+          this.log.error(
+            `[${spoke.name}] FX REST: skipping proposal tradeId=${tradeId} — dest_spoke_id="${evt.destSpokeId}" is not the configured counterpart "${spoke.counterpartName}"`,
+          );
+          continue;
+        }
         pushRing(this.fxProposalEvents, evt, MAX_EVENTS);
         this.log.info(`[${spoke.name}] FX REST: forwarding proposal tradeId=${tradeId} sourceSpokeId=${evt.sourceSpokeId} destSpokeId=${evt.destSpokeId}`);
         await this.tryForwardFXAction("propose", spoke.name, tradeId, client, evt as unknown as Record<string, unknown>);
@@ -733,6 +741,12 @@ export class HtlcRelay {
     await this.relayStore.scheduleRetry(key, action, spokeName, tradeId, reason, payload);
   }
 
+  // KNOWN_LIMITATION (quick-path bilateral routing): the gRPC client passed here is
+  // created from spoke.counterpartGrpc (a static, bilateral config field). The destination
+  // endpoint is therefore determined by configuration topology, not by event.destSpokeId.
+  // Dynamic routing by dest_spoke_id (replacing counterpartGrpc with a spoke registry lookup)
+  // is deferred to RL-1 / RL-2 (Phase 2 of the scalability plan). The dest_spoke_id field
+  // is already validated against spoke.counterpartName before this method is called.
   private proposeOnCounterpart(
     client: PaymentOrchestratorClient,
     spokeName: string,
