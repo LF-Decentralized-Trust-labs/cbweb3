@@ -63,54 +63,35 @@ function pruneProofs(): void {
 
 async function main(): Promise<void> {
   console.log("Cacti HTLC relay starting…");
-  console.log(`  Spoke-A RPC  : ${config.spokeA.besuRpc}`);
-  console.log(`  Spoke-A WS   : ${config.spokeA.besuWs}`);
-  console.log(`  Spoke-A HTLC : ${config.spokeA.htlcAddress}`);
-  console.log(`  Spoke-A API  : ${config.spokeA.internalApiUrl}`);
-  console.log(`  Spoke-B RPC  : ${config.spokeB.besuRpc}`);
-  console.log(`  Spoke-B WS   : ${config.spokeB.besuWs}`);
-  console.log(`  Spoke-B HTLC : ${config.spokeB.htlcAddress}`);
-  console.log(`  Spoke-B API  : ${config.spokeB.internalApiUrl}`);
   console.log(`  Poll interval: ${config.pollIntervalMs} ms`);
   console.log(`  API port     : ${config.apiPort}`);
   console.log(`  Store path   : ${config.relayStorePath}`);
+  console.log(`  Spokes       : ${config.spokes.length}`);
 
   // ── Cacti PluginRegistry + Besu connectors ──────────────────────────────
   const pluginRegistry = new PluginRegistry();
+  const connectors = new Map<string, PluginLedgerConnectorBesu>();
 
-  const connectorSpokeA = new PluginLedgerConnectorBesu({
-    instanceId: `besu-connector-spoke-a-${randomUUID()}`,
-    rpcApiHttpHost: config.spokeA.besuRpc,
-    rpcApiWsHost: config.spokeA.besuWs,
-    pluginRegistry,
-    logLevel: "INFO",
-  });
-
-  const connectorSpokeB = new PluginLedgerConnectorBesu({
-    instanceId: `besu-connector-spoke-b-${randomUUID()}`,
-    rpcApiHttpHost: config.spokeB.besuRpc,
-    rpcApiWsHost: config.spokeB.besuWs,
-    pluginRegistry,
-    logLevel: "INFO",
-  });
-
-  await connectorSpokeA.onPluginInit();
-  console.log(`[cacti] PluginLedgerConnectorBesu spoke-a initialized (${connectorSpokeA.getInstanceId()})`);
-
-  await connectorSpokeB.onPluginInit();
-  console.log(`[cacti] PluginLedgerConnectorBesu spoke-b initialized (${connectorSpokeB.getInstanceId()})`);
+  for (const spoke of config.spokes) {
+    const connector = new PluginLedgerConnectorBesu({
+      instanceId: `besu-connector-${spoke.id}-${randomUUID()}`,
+      rpcApiHttpHost: spoke.besuRpc,
+      rpcApiWsHost: spoke.besuWs,
+      pluginRegistry,
+      logLevel: "INFO",
+    });
+    await connector.onPluginInit();
+    connectors.set(spoke.id, connector);
+    console.log(`[cacti] registered spoke: ${spoke.id} rpc=${spoke.besuRpc} htlc=${spoke.htlcAddress}`);
+  }
 
   // ── Start HTLC relay ────────────────────────────────────────────────────
   const abortController = new AbortController();
   const relayStore = new RelayStore(config.relayStorePath);
   await relayStore.init();
 
-  const connectors = new Map<string, PluginLedgerConnectorBesu>();
-  connectors.set("spoke-a", connectorSpokeA);
-  connectors.set("spoke-b", connectorSpokeB);
-
   const relay = new HtlcRelay(
-    [config.spokeA, config.spokeB],
+    config.spokes,
     config.protoPath,
     config.pollIntervalMs,
     config.relayAuthSecret,
@@ -263,10 +244,10 @@ async function main(): Promise<void> {
   });
 
   // Register Cacti connector web services (REST + watchBlocksV1 Socket.IO)
-  const endpointsA = await connectorSpokeA.registerWebServices(app, ioServer);
-  console.log(`[cacti] spoke-a registered ${endpointsA.length} web service endpoint(s)`);
-  const endpointsB = await connectorSpokeB.registerWebServices(app, ioServer);
-  console.log(`[cacti] spoke-b registered ${endpointsB.length} web service endpoint(s)`);
+  for (const [spokeId, connector] of connectors) {
+    const endpoints = await connector.registerWebServices(app, ioServer);
+    console.log(`[cacti] ${spokeId} registered ${endpoints.length} web service endpoint(s)`);
+  }
 
   httpServer.listen(config.apiPort, () => {
     console.log(`Cacti HTLC relay API listening on :${config.apiPort}`);
@@ -276,8 +257,9 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     console.log("Shutting down…");
     abortController.abort();
-    connectorSpokeA.shutdown().catch(() => {});
-    connectorSpokeB.shutdown().catch(() => {});
+    for (const connector of connectors.values()) {
+      connector.shutdown().catch(() => {});
+    }
     ioServer.close();
     httpServer.close(() => process.exit(0));
   };
