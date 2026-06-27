@@ -1,0 +1,27 @@
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-brazil
+spec:
+  scenario: a
+  environment: local
+  role: central-bank
+  mode: found
+  spoke:
+    id: spoke-brl
+    chainId: 1337
+    currency: BRL
+  node:
+    advertisedHost: cbweb3-spoke-brl-besu.central-bank-brazil
+    rpc:
+      port: 8645
+    ws:
+      port: 8655
+    p2p:
+      port: 31303
+    dataDir: /opt/cbweb3/data/spoke-brl
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed://local
+  relay:
+    endpoint: http://cbweb3-cacti:4000

@@ -1,0 +1,26 @@
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-alpha
+spec:
+  scenario: a
+  environment: local
+  role: bank
+  mode: join
+  spoke:
+    id: spoke-brl
+    chainId: 1337
+    currency: BRL
+  node:
+    advertisedHost: cbweb3-spoke-brl-besu.bank-alpha
+    rpc:
+      port: 8645
+    ws:
+      port: 8655
+    p2p:
+      port: 31303
+    dataDir: /opt/cbweb3/data/spoke-brl
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed://local
+  joinBundleRef: bundles/spoke-brl.bundle.yaml
