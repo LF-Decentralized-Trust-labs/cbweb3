@@ -249,6 +249,30 @@ func TestFX_Propose_Validation(t *testing.T) {
 			OriginCurrency: "USD", CounterCurrency: "BRL", Rate: "9.9",
 			ExpiryDate: uint64(time.Now().Add(time.Hour).Unix()),
 		}},
+		{"missing source_spoke_id", &pb.ProposeFXAgreementRequest{
+			CounterpartyB: "b", Originator: "bank-a", OriginAmount: "100", CounterAmount: "120",
+			OriginCurrency: "USD", CounterCurrency: "BRL", Rate: "1.2",
+			ExpiryDate:     uint64(time.Now().Add(time.Hour).Unix()),
+			DestSpokeId:    "spoke-b", SourceReceiver: "recv@spoke-a", DestReceiver: "recv@spoke-b",
+		}},
+		{"missing dest_spoke_id", &pb.ProposeFXAgreementRequest{
+			CounterpartyB: "b", Originator: "bank-a", OriginAmount: "100", CounterAmount: "120",
+			OriginCurrency: "USD", CounterCurrency: "BRL", Rate: "1.2",
+			ExpiryDate:     uint64(time.Now().Add(time.Hour).Unix()),
+			SourceSpokeId:  "spoke-a", SourceReceiver: "recv@spoke-a", DestReceiver: "recv@spoke-b",
+		}},
+		{"missing source_receiver", &pb.ProposeFXAgreementRequest{
+			CounterpartyB: "b", Originator: "bank-a", OriginAmount: "100", CounterAmount: "120",
+			OriginCurrency: "USD", CounterCurrency: "BRL", Rate: "1.2",
+			ExpiryDate:    uint64(time.Now().Add(time.Hour).Unix()),
+			SourceSpokeId: "spoke-a", DestSpokeId: "spoke-b", DestReceiver: "recv@spoke-b",
+		}},
+		{"missing dest_receiver", &pb.ProposeFXAgreementRequest{
+			CounterpartyB: "b", Originator: "bank-a", OriginAmount: "100", CounterAmount: "120",
+			OriginCurrency: "USD", CounterCurrency: "BRL", Rate: "1.2",
+			ExpiryDate:    uint64(time.Now().Add(time.Hour).Unix()),
+			SourceSpokeId: "spoke-a", DestSpokeId: "spoke-b", SourceReceiver: "recv@spoke-a",
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
