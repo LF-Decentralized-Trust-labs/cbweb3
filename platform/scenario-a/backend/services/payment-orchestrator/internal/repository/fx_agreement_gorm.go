@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
@@ -29,7 +30,7 @@ func NewGormFXAgreementRepository(dsn string) (ports.FXAgreementRepository, erro
 	if err := db.AutoMigrate(&FXAgreementModel{}, &FXAgreementEventModel{}, &RelayDeliveryRecordModel{}); err != nil {
 		return nil, err
 	}
-	if err := RunSpokeKeyedMigration(db); err != nil {
+	if err := RunSpokeKeyedMigration(db, slog.Default()); err != nil {
 		return nil, err
 	}
 	return &gormFXAgreementRepository{db: db}, nil
@@ -42,7 +43,7 @@ func NewGormFXAgreementRepositoryFromDB(db *gorm.DB) (ports.FXAgreementRepositor
 	if err := db.AutoMigrate(&FXAgreementModel{}, &FXAgreementEventModel{}, &RelayDeliveryRecordModel{}); err != nil {
 		return nil, err
 	}
-	if err := RunSpokeKeyedMigration(db); err != nil {
+	if err := RunSpokeKeyedMigration(db, slog.Default()); err != nil {
 		return nil, err
 	}
 	return &gormFXAgreementRepository{db: db}, nil
@@ -146,33 +147,64 @@ func (r *gormFXAgreementRepository) ListExpiredNonTerminal(ctx context.Context, 
 	return result, nil
 }
 
-// runSpokeKeyedMigration performs an idempotent migration from positional
+// RunSpokeKeyedMigration performs an idempotent migration from positional
 // spoke_a_receiver/spoke_b_receiver columns to spoke-keyed fields.
 // AutoMigrate already added the new columns; this function backfills data
-// from old columns and drops them. If the old columns don't exist (fresh
-// schema or already migrated), the backfill UPDATE fails and we return nil.
-func RunSpokeKeyedMigration(db *gorm.DB) error {
+// from old columns and drops them atomically within a transaction.
+//
+// The logger parameter is used for structured lifecycle logging.
+func RunSpokeKeyedMigration(db *gorm.DB, logger *slog.Logger) error {
 	if !db.Migrator().HasTable(&FXAgreementModel{}) {
 		return nil
 	}
 
-	// Try to backfill. If the old columns don't exist, the error
-	// means fresh schema — nothing to do.
-	result := db.Exec(
-		`UPDATE fx_agreements SET source_spoke_id = 'spoke-a', dest_spoke_id = 'spoke-b', source_receiver = COALESCE(spoke_a_receiver, ''), dest_receiver = COALESCE(spoke_b_receiver, '') WHERE source_spoke_id IS NULL OR source_spoke_id = ''`,
+	hasA := db.Migrator().HasColumn(&FXAgreementModel{}, "spoke_a_receiver")
+	hasB := db.Migrator().HasColumn(&FXAgreementModel{}, "spoke_b_receiver")
+
+	// Already on target schema — nothing to do.
+	if !hasA && !hasB {
+		return nil
+	}
+
+	logger.Info("spoke-keyed migration starting",
+		"has_spoke_a_receiver", hasA,
+		"has_spoke_b_receiver", hasB,
 	)
-	if result.Error != nil {
-		return nil // old columns missing — already on new schema
-	}
 
-	// Backfill succeeded — drop the legacy columns.
-	for _, col := range []string{"spoke_a_receiver", "spoke_b_receiver"} {
-		if err := db.Exec(fmt.Sprintf("ALTER TABLE fx_agreements DROP COLUMN %s", col)).Error; err != nil {
-			return fmt.Errorf("spoke-keyed migration drop %s: %w", col, err)
+	return db.Transaction(func(tx *gorm.DB) error {
+		// Backfill only when both legacy columns are present (data hasn't
+		// been migrated yet). In partial state the backfill already ran.
+		if hasA && hasB {
+			result := tx.Exec(
+				`UPDATE fx_agreements SET source_spoke_id = 'spoke-a', dest_spoke_id = 'spoke-b', source_receiver = COALESCE(spoke_a_receiver, ''), dest_receiver = COALESCE(spoke_b_receiver, '') WHERE source_spoke_id IS NULL OR source_spoke_id = ''`,
+			)
+			if result.Error != nil {
+				return fmt.Errorf("spoke-keyed migration backfill: %w", result.Error)
+			}
+			logger.Info("spoke-keyed migration backfill complete",
+				"rows_affected", result.RowsAffected,
+			)
 		}
-	}
 
-	return nil
+		// Drop legacy columns conditionally — each column is checked
+		// independently so partial states are recovered automatically.
+		if hasA {
+			if err := tx.Exec("ALTER TABLE fx_agreements DROP COLUMN spoke_a_receiver").Error; err != nil {
+				return fmt.Errorf("spoke-keyed migration drop spoke_a_receiver: %w", err)
+			}
+			logger.Info("spoke-keyed migration dropped column", "column", "spoke_a_receiver")
+		}
+
+		if hasB {
+			if err := tx.Exec("ALTER TABLE fx_agreements DROP COLUMN spoke_b_receiver").Error; err != nil {
+				return fmt.Errorf("spoke-keyed migration drop spoke_b_receiver: %w", err)
+			}
+			logger.Info("spoke-keyed migration dropped column", "column", "spoke_b_receiver")
+		}
+
+		logger.Info("spoke-keyed migration complete")
+		return nil
+	})
 }
 
 // nowUTC is a helper for consistent timestamps.
