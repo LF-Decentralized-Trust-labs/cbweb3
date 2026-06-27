@@ -114,6 +114,8 @@ Proto:
 - Docker Compose v2 (YAML 3.8+); Bash 5+ (script de guarda do genesis) + `hyperledger/besu:25.8.0` (imagem parametrizada via `BESU_IMAGE`); `docker compose` plugin v2 (026-tk4-compose-central-bank)
 - Bind mounts via `SPOKE_DATA_DIR`; sem named volumes — garante portabilidade entre hosts (026-tk4-compose-central-bank)
 - Filesystem — `<SPOKE_DATA_DIR>/.provisioning-state.yaml`, `<SPOKE_DATA_DIR>/.deployed-addrs.env` (027-tk5-orchestration-engine)
+- Go 1.26+ + `gopkg.in/yaml.v3` (serialização do bundle), `encoding/pem` (validação CA cert), `crypto/sha256` (hash genesis), `encoding/base64` (embedding genesis), `net/http` (JSON-RPC admin_nodeInfo) — todos stdlib ou já em `toolkit/go.mod` (028-tk6-join-bundle-emitter)
+- Filesystem — `<SPOKE_DATA_DIR>/.deployed-addrs.env`, `<SPOKE_DATA_DIR>/genesis/genesis.json`, `<SPOKE_DATA_DIR>/tls/central-bank.crt`; saída: `<outputDir>/bundles/<spoke-id>.bundle.yaml` (028-tk6-join-bundle-emitter)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
