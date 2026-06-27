@@ -1,75 +1,104 @@
-# Implementation Plan: TK-2 — Interface keyProvider
+# Implementation Plan: [FEATURE]
 
-**Branch**: `024-tk2-keyprovider-interface` | **Date**: 2026-06-27 | **Spec**: [spec.md](spec.md)  
-**Input**: Feature specification from `specs/024-tk2-keyprovider-interface/spec.md`
+**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+
+**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
 
 ## Summary
 
-Criar a abstração de gerenciamento de chaves secp256k1 para o toolkit de provisionamento do Scenario A. A regra central é que chaves privadas nunca aparecem em arquivos, variáveis de ambiente, manifestos ou logs — o motor de orquestração recebe apenas chaves públicas e assinaturas. A feature entrega: (1) a interface `KeyProvider` com três operações, (2) uma implementação local em memória para o perfil `local`, (3) um stub de produção para a Fase 4, e (4) um factory que instancia o provedor correto a partir da URI do campo `spec.keyProvider` do manifesto.
-
-O padrão de referência já existe no projeto: `backend/services/auth/internal/kms/` usa exatamente esse modelo com `go-ethereum/crypto` e `sync.RWMutex`.
+[Extract from feature spec: primary requirement + technical approach from research]
 
 ## Technical Context
 
-**Language/Version**: Go 1.26+  
-**Primary Dependencies**: `github.com/ethereum/go-ethereum v1.17.1` (já presente em múltiplos módulos do Scenario A; adicionar ao `toolkit/go.mod`)  
-**Storage**: Nenhum — implementação local usa in-memory map; sem persistência  
-**Testing**: `go test ./...` com tabelas de teste; padrão `t.TempDir()` para isolamento  
-**Target Platform**: Linux (mesma plataforma do toolkit)  
-**Project Type**: Biblioteca Go (package), integrada ao toolkit de provisionamento  
-**Performance Goals**: Operações individuais imperceptíveis para o operador (<100ms local) — sem requisito de throughput  
-**Constraints**: Chaves privadas nunca em disco, log, ou retorno de função; thread-safe sob chamadas concorrentes para o mesmo ID  
-**Scale/Scope**: Uma chave por participante por sessão; toolkit single-process
+<!--
+  ACTION REQUIRED: Replace the content in this section with the technical details
+  for the project. The structure here is presented in advisory capacity to guide
+  the iteration process.
+-->
+
+**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
+**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
+**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
+**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
+**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
+**Project Type**: [e.g., library/cli/web-service/mobile-app/compiler/desktop-app or NEEDS CLARIFICATION]  
+**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
+**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
+**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-| Princípio | Status | Observação |
-|-----------|--------|------------|
-| **I. Scenario-Scoped Independence** | ✅ PASS | Todo o código vai para `scenario-a/toolkit/engine/keyprovider/`. Nenhum arquivo de `scenario-b/` tocado. |
-| **II. Privacy by Design** | ✅ PASS | A interface garante por contrato que chaves privadas nunca são retornadas. O emulador local não grava material de chave em disco ou log. |
-| **III. Atomic Settlement Guarantee** | ✅ N/A | TK-2 é infraestrutura de provisionamento, não lógica de liquidação. Não envolve HTLC, FXAgreement ou relay. |
-| **IV. Compliance Gate Before Participation** | ✅ PASS | TK-2 viabiliza a geração de chaves necessária para o fluxo de onboarding real no IdentityRegistry (FR-001 do concat.md). Não bypassa nenhum gate de compliance. |
-| **V. Test-First at Every Layer** | ✅ PASS | `local_test.go` é criado antes de `local.go` e `factory.go`. Ciclo Red-Green-Refactor explicitamente exigido. |
-| **VI. Observability and Auditability** | ✅ PASS | TK-2 é uma biblioteca; não emite logs de infraestrutura. Nenhuma chave privada pode aparecer em log (garantido pelo design da interface). |
-
-**Resultado**: Sem violações. Aprovado para Phase 1.
-
-**Justificativa de dependência nova** (Technology Stack Constraints): `go-ethereum v1.17.1` já é dependência padrão em `backend/shared/blockchain/go.mod`, `backend/services/auth/go.mod` e outros. A adição ao `toolkit/go.mod` é consistente com o padrão do projeto e não introduz nova tecnologia.
+[Gates determined based on constitution file]
 
 ## Project Structure
 
 ### Documentation (this feature)
 
 ```text
-specs/024-tk2-keyprovider-interface/
-├── plan.md              # This file
-├── research.md          # Phase 0 output
-├── data-model.md        # Phase 1 output
-└── tasks.md             # Phase 2 output (/speckit.tasks)
+specs/[###-feature]/
+├── plan.md              # This file (/speckit.plan command output)
+├── research.md          # Phase 0 output (/speckit.plan command)
+├── data-model.md        # Phase 1 output (/speckit.plan command)
+├── quickstart.md        # Phase 1 output (/speckit.plan command)
+├── contracts/           # Phase 1 output (/speckit.plan command)
+└── tasks.md             # Phase 2 output (/speckit.tasks command - NOT created by /speckit.plan)
 ```
 
-### Source Code
+### Source Code (repository root)
+<!--
+  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
+  for this feature. Delete unused options and expand the chosen structure with
+  real paths (e.g., apps/admin, packages/something). The delivered plan must
+  not include Option labels.
+-->
 
 ```text
-scenario-a/toolkit/
-├── go.mod                          # adicionar github.com/ethereum/go-ethereum v1.17.1
-├── go.sum
-└── engine/
-    ├── manifest/                   # existente (TK-1) — não modificar
-    ├── genesis/                    # existente — não modificar
-    ├── pki/                        # existente — não modificar
-    └── keyprovider/                # NOVO
-        ├── keyprovider.go          # interface + sentinel errors + helper EVMAddress
-        ├── local.go                # emulador local in-memory (secp256k1 via go-ethereum)
-        ├── prod.go                 # stub prod (ErrNotImplemented em tudo)
-        ├── factory.go              # New(uri string) (KeyProvider, error)
-        └── local_test.go           # testes table-driven (escritos antes das implementações)
+# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
+src/
+├── models/
+├── services/
+├── cli/
+└── lib/
+
+tests/
+├── contract/
+├── integration/
+└── unit/
+
+# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
+backend/
+├── src/
+│   ├── models/
+│   ├── services/
+│   └── api/
+└── tests/
+
+frontend/
+├── src/
+│   ├── components/
+│   ├── pages/
+│   └── services/
+└── tests/
+
+# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
+api/
+└── [same as backend above]
+
+ios/ or android/
+└── [platform-specific structure: feature modules, UI flows, platform tests]
 ```
 
-**Structure Decision**: Package único `engine/keyprovider/` dentro do módulo `scenario-a/toolkit/`, paralelo a `engine/manifest/` e `engine/genesis/`. Sem subpacotes — o escopo é pequeno e a interface, as implementações e o factory formam uma unidade coesa.
+**Structure Decision**: [Document the selected structure and reference the real
+directories captured above]
 
 ## Complexity Tracking
 
-*Sem violações da constituição — seção vazia.*
+> **Fill ONLY if Constitution Check has violations that must be justified**
+
+| Violation | Why Needed | Simpler Alternative Rejected Because |
+|-----------|------------|-------------------------------------|
+| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
+| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
