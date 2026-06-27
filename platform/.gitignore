@@ -3,3 +3,4 @@
 # Includes the transient harness captures under _harness/ consumed by that generator.
 /evidence-bundles/
 tmp/
+scenario-a/toolkit/cbweb3
