@@ -35,7 +35,7 @@ sequenceDiagram
     rect rgb(230, 210, 255)
         Note over BankA, BankB: PHASE 0 — FX Agreement Negotiation (Bilateral Pre-Trade Contract)
 
-        BankA->>GW_A: POST /api/v1/payments/fx/agreements<br/>{ counterparty_b, origin_amount, counter_amount,<br/>  origin_currency, counter_currency, rate,<br/>  expiry_date, spoke_a_receiver, spoke_b_receiver }%
+        BankA->>GW_A: POST /api/v1/payments/fx/agreements<br/>{ counterparty_b, origin_amount, counter_amount,<br/>  origin_currency, counter_currency, rate,<br/>  expiry_date, source_spoke_id, dest_spoke_id,<br/>  source_receiver, dest_receiver }%
         GW_A->>PayOrch_A: gRPC ProposeFXAgreement(...)%
         Note over PayOrch_A: Assigns trade_id (UUID)<br/>Records FX Agreement in memory<br/>state → PROPOSED%
         PayOrch_A-->>GW_A: { trade_id }%
@@ -70,7 +70,7 @@ sequenceDiagram
         BankA->>GW_A: POST /api/v1/payments/pvp/lock<br/>{ receiver: BankC_paladin_identity, amount, agreement_id }%
         GW_A->>PayOrch_A: gRPC LockHTLC(receiver, amount, agreement_id)
 
-        Note over PayOrch_A: FX Agreement gate (service-layer enforcement):<br/>• agreement state must be ACCEPTED<br/>• receiver must match spoke_a_receiver<br/>• amount must match origin_amount<br/>• agreement must not be expired
+        Note over PayOrch_A: FX Agreement gate (service-layer enforcement):<br/>• agreement state must be ACCEPTED<br/>• receiver must match source_receiver (source spoke leg)<br/>• amount must match origin_amount<br/>• agreement must not be expired
 
         Note over PayOrch_A: Generates cryptographic secret (32 bytes)<br/>hashLock = SHA-256(secret)<br/>contractID = SHA-256(agreement_id + timestamp)
 
@@ -105,7 +105,7 @@ sequenceDiagram
         Note right of BankB: Counterparty sets a SHORTER time lock than initiator<br/>(1800s < 3600s) — atomicity guarantee
         GW_B->>PayOrch_B: gRPC LockHTLCWithHashLock(receiver, amount, hash_lock)%
 
-        Note over PayOrch_B: FX Agreement gate applied identically<br/>receiver validated against spoke_b_receiver<br/>amount validated against counter_amount%
+        Note over PayOrch_B: FX Agreement gate applied identically<br/>receiver validated against dest_receiver (dest spoke leg)<br/>amount validated against counter_amount%
 
         PayOrch_B->>Paladin_B: ptx_resolveVerifier(receiver_identity)%
         Paladin_B-->>PayOrch_B: receiver_eth_address%

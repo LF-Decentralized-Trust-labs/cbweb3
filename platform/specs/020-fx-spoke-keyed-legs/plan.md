@@ -141,9 +141,17 @@ cd scenario-a && go test ./backend/services/payment-orchestrator/...
 
 ## Verification Checklist
 
-- [ ] `grep -r "spoke_a_receiver\|spoke_b_receiver" scenario-a/` returns zero results outside of `reserved` declarations and this plan.
-- [ ] `go test ./backend/services/payment-orchestrator/...` passes.
-- [ ] `make proto-gen` produces no diff beyond the expected field additions/removals.
-- [ ] `tsc --noEmit` in the relay passes.
-- [ ] A fresh `ProposeFXAgreement` with two distinct spoke IDs completes the propose–accept–lock–settle flow in the local stack.
-- [ ] The database backfill migration is idempotent (run twice: second run is a no-op).
+- [x] `grep -r "spoke_a_receiver\|spoke_b_receiver" scenario-a/` returns zero results outside of `reserved` declarations and this plan.
+- [x] `go test ./backend/services/payment-orchestrator/...` passes (169 passed, 0 new failures).
+- [x] `make proto-gen` produces no diff beyond the expected field additions/removals.
+- [x] `tsc --noEmit` in the relay passes.
+- [ ] A fresh `ProposeFXAgreement` with two distinct spoke IDs completes the propose–accept–lock–settle flow in the local stack. **[SC-003 manual verification — requires running local Scenario A stack]**
+  - Prerequisites: `make scenario-a.up` with live Besu + Paladin + payment-orchestrator containers
+  - Step 1: Propose an FX agreement via gRPC or REST with `source_spoke_id="spoke-a"`, `dest_spoke_id="spoke-b"`, `source_receiver` and `dest_receiver` set to valid Paladin identities from the running stack
+  - Step 2: Accept the agreement
+  - Step 3: Lock HTLC on spoke-a (originator leg)
+  - Step 4: Verify the relay forwards the lock event to spoke-b and the counterparty HTLC is created on spoke-b (check relay logs for `dest_spoke_id` in the proposal-forwarding event)
+  - Step 5: Settle the HTLC on spoke-a (secret reveal)
+  - Step 6: Verify the relay settles the counterparty HTLC on spoke-b
+  - Expected: Both HTLCs reach `SETTLED` state; relay logs show `dest_spoke_id` and `source_spoke_id` in proposal events per Constitution VI
+- [x] The database backfill migration is idempotent (run twice: second run is a no-op) — verified by `TestGormFXAgreementRepository_SpokeKeyedMigration_Idempotent` in `gorm_repos_test.go`.

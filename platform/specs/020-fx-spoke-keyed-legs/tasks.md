@@ -18,7 +18,7 @@
 
 **Purpose**: Confirm test file locations and that the local stack builds cleanly before starting.
 
-- [ ] T001 Confirm `go build ./...` passes from `scenario-a/backend/services/payment-orchestrator/` (baseline green before any change)
+- [x] T001 Confirm `go build ./...` passes from `scenario-a/backend/services/payment-orchestrator/` (baseline green before any change)
 
 ---
 
@@ -30,11 +30,11 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL (compile error) before implementation**
 
-- [ ] T002 [P] Write failing test in `scenario-a/backend/services/payment-orchestrator/internal/grpc/server/fx_onchain_test.go`: add a `ProposeFXAgreement` test case that constructs the request using `SourceSpokeID`, `DestSpokeID`, `SourceReceiver`, `DestReceiver` and asserts all four fields are returned in `GetFXAgreement` — expected: compile error (fields do not exist yet)
-- [ ] T003 [P] Write failing test in `scenario-a/backend/services/payment-orchestrator/internal/grpc/server/relay_test.go`: add a test case for the new spoke-ID routing logic (`fx.DestSpokeID == s.spokePrefix → localReceiver = fx.DestReceiver`), replacing the current positional receiver comparison — expected: compile error
-- [ ] T004 [P] Write failing test in `scenario-a/backend/services/payment-orchestrator/internal/repository/gorm_repos_test.go`: assert that `SourceSpokeID`, `DestSpokeID`, `SourceReceiver`, `DestReceiver` are persisted and retrieved correctly from the `fx_agreements` table — expected: compile error
-- [ ] T005 Edit `scenario-a/apis/proto/payment_orchestrator/v1/payment_orchestrator.proto`: (1) in `FXAgreement` add `reserved 17, 18; reserved "spoke_a_receiver", "spoke_b_receiver";` then add fields `source_spoke_id=21`, `dest_spoke_id=22`, `source_receiver=23`, `dest_receiver=24`; (2) in `ProposeFXAgreementRequest` add `reserved 14, 15; reserved "spoke_a_receiver", "spoke_b_receiver";` then add fields `source_spoke_id=16`, `dest_spoke_id=17`, `source_receiver=18`, `dest_receiver=19` (depends on T002, T003, T004)
-- [ ] T006 Regenerate Go proto code: run `make proto-gen` from `scenario-a/` — confirms `scenario-a/backend/shared/proto/payment_orchestrator/v1/payment_orchestrator.pb.go` is updated; tests T002/T003/T004 should now compile but fail functionally (depends on T005)
+- [x] T002 [P] Write failing test in `scenario-a/backend/services/payment-orchestrator/internal/grpc/server/fx_onchain_test.go`: add a `ProposeFXAgreement` test case that constructs the request using `SourceSpokeID`, `DestSpokeID`, `SourceReceiver`, `DestReceiver` and asserts all four fields are returned in `GetFXAgreement` — expected: compile error (fields do not exist yet)
+- [x] T003 [P] Write failing test in `scenario-a/backend/services/payment-orchestrator/internal/grpc/server/relay_test.go`: add a test case for the new spoke-ID routing logic (`fx.DestSpokeID == s.spokePrefix → localReceiver = fx.DestReceiver`), replacing the current positional receiver comparison — expected: compile error
+- [x] T004 [P] Write failing test in `scenario-a/backend/services/payment-orchestrator/internal/repository/gorm_repos_test.go`: assert that `SourceSpokeID`, `DestSpokeID`, `SourceReceiver`, `DestReceiver` are persisted and retrieved correctly from the `fx_agreements` table — expected: compile error
+- [x] T005 Edit `scenario-a/apis/proto/payment_orchestrator/v1/payment_orchestrator.proto`: (1) in `FXAgreement` add `reserved 17, 18; reserved "spoke_a_receiver", "spoke_b_receiver";` then add fields `source_spoke_id=21`, `dest_spoke_id=22`, `source_receiver=23`, `dest_receiver=24`; (2) in `ProposeFXAgreementRequest` add `reserved 14, 15; reserved "spoke_a_receiver", "spoke_b_receiver";` then add fields `source_spoke_id=16`, `dest_spoke_id=17`, `source_receiver=18`, `dest_receiver=19` (depends on T002, T003, T004)
+- [x] T006 Regenerate Go proto code: run `make proto-gen` from `scenario-a/` — confirms `scenario-a/backend/shared/proto/payment_orchestrator/v1/payment_orchestrator.pb.go` is updated; tests T002/T003/T004 should now compile but fail functionally (depends on T005)
 
 **Checkpoint**: `go build ./...` compiles (with new proto fields), but `go test ./...` fails — expected RED state confirmed.
 
@@ -48,11 +48,11 @@
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Update `scenario-a/backend/services/payment-orchestrator/internal/domain/fx.go`: remove fields `SpokeAReceiver` and `SpokeBReceiver`; add `SourceSpokeID string`, `DestSpokeID string`, `SourceReceiver string`, `DestReceiver string` (depends on T006)
-- [ ] T008 [US1] Update `scenario-a/backend/services/payment-orchestrator/internal/repository/fx_agreement_models.go`: rename GORM struct fields and column tags — remove `SpokeAReceiver`/`SpokeBReceiver`, add `SourceSpokeID` (`column:source_spoke_id`), `DestSpokeID` (`column:dest_spoke_id`), `SourceReceiver` (`column:source_receiver`), `DestReceiver` (`column:dest_receiver`); update the two `toModel`/`fromModel` mapping blocks at lines 88–89 and 113–114 (depends on T007)
-- [ ] T009 [US1] Add startup SQL migration to `scenario-a/backend/services/payment-orchestrator/internal/repository/fx_agreement_gorm.go`: before the `AutoMigrate` call, run the idempotent SQL sequence — `ADD COLUMN IF NOT EXISTS` (×4), `UPDATE ... WHERE source_spoke_id = ''` backfill, `DROP COLUMN IF EXISTS spoke_a_receiver`, `DROP COLUMN IF EXISTS spoke_b_receiver`; same steps for `fx_agreement_events` if those columns exist there (depends on T008)
-- [ ] T010 [US1] Update `scenario-a/backend/services/payment-orchestrator/internal/grpc/server/server.go`: replace all 14 references to `SpokeAReceiver`/`SpokeBReceiver` with the four new fields; replace the spoke-leg routing logic at lines 1666–1676 with `if fx.DestSpokeID == s.spokePrefix { localReceiver = fx.DestReceiver } else { localReceiver = fx.SourceReceiver }`; add validation rejecting requests where `source_spoke_id`, `dest_spoke_id`, `source_receiver`, or `dest_receiver` are empty, or where `source_spoke_id == dest_spoke_id` (depends on T008, T009)
-- [ ] T011 [US1] Run `go test ./...` from `scenario-a/backend/services/payment-orchestrator/` — T002 (fx_onchain_test) and T004 (gorm_repos_test) must now be GREEN (depends on T010)
+- [x] T007 [US1] Update `scenario-a/backend/services/payment-orchestrator/internal/domain/fx.go`: remove fields `SpokeAReceiver` and `SpokeBReceiver`; add `SourceSpokeID string`, `DestSpokeID string`, `SourceReceiver string`, `DestReceiver string` (depends on T006)
+- [x] T008 [US1] Update `scenario-a/backend/services/payment-orchestrator/internal/repository/fx_agreement_models.go`: rename GORM struct fields and column tags — remove `SpokeAReceiver`/`SpokeBReceiver`, add `SourceSpokeID` (`column:source_spoke_id`), `DestSpokeID` (`column:dest_spoke_id`), `SourceReceiver` (`column:source_receiver`), `DestReceiver` (`column:dest_receiver`); update the two `toModel`/`fromModel` mapping blocks at lines 88–89 and 113–114 (depends on T007)
+- [x] T009 [US1] Add startup SQL migration to `scenario-a/backend/services/payment-orchestrator/internal/repository/fx_agreement_gorm.go`: before the `AutoMigrate` call, run the idempotent SQL sequence — `ADD COLUMN IF NOT EXISTS` (×4), `UPDATE ... WHERE source_spoke_id = ''` backfill, `DROP COLUMN IF EXISTS spoke_a_receiver`, `DROP COLUMN IF EXISTS spoke_b_receiver`; same steps for `fx_agreement_events` if those columns exist there (depends on T008)
+- [x] T010 [US1] Update `scenario-a/backend/services/payment-orchestrator/internal/grpc/server/server.go`: replace all 14 references to `SpokeAReceiver`/`SpokeBReceiver` with the four new fields; replace the spoke-leg routing logic at lines 1666–1676 with `if fx.DestSpokeID == s.spokePrefix { localReceiver = fx.DestReceiver } else { localReceiver = fx.SourceReceiver }`; add validation rejecting requests where `source_spoke_id`, `dest_spoke_id`, `source_receiver`, or `dest_receiver` are empty, or where `source_spoke_id == dest_spoke_id` (depends on T008, T009)
+- [x] T011 [US1] Run `go test ./...` from `scenario-a/backend/services/payment-orchestrator/` — T002 (fx_onchain_test) and T004 (gorm_repos_test) must now be GREEN (depends on T010)
 
 **Checkpoint**: User Story 1 is fully functional. `ProposeFXAgreement` and `GetFXAgreement` work with spoke-keyed fields. T002 and T004 pass.
 
@@ -66,10 +66,10 @@
 
 ### Implementation for User Story 2
 
-- [ ] T012 [P] [US2] Update `scenario-a/interop/hub-and-spoke/cacti/src/htlc-relay.ts`: (1) in the `FXAgreement` TypeScript interface (lines 148–149) remove `spoke_a_receiver`/`spoke_b_receiver`, add `source_spoke_id`, `dest_spoke_id`, `source_receiver`, `dest_receiver`; (2) update chain-event parsing at lines 607–608 to read the four new keys; (3) update counterpart payload construction at lines 747–748 to emit the four new keys (depends on T006)
-- [ ] T013 [P] [US2] Update `scenario-a/frontend/apps/bank/src/types/fx-agreement.types.ts`: remove `spoke_a_receiver` and `spoke_b_receiver` from the `FXAgreement` TypeScript interface; add `source_spoke_id`, `dest_spoke_id`, `source_receiver`, `dest_receiver` (depends on T006)
-- [ ] T014 [US2] Run `tsc --noEmit` in both `scenario-a/interop/hub-and-spoke/cacti/` and `scenario-a/frontend/` to confirm zero type errors (depends on T012, T013)
-- [ ] T015 [US2] Run `go test ./internal/grpc/server/...` from `scenario-a/backend/services/payment-orchestrator/` — T003 (`relay_test.go`) must now be GREEN (depends on T010)
+- [x] T012 [P] [US2] Update `scenario-a/interop/hub-and-spoke/cacti/src/htlc-relay.ts`: (1) in the `FXAgreement` TypeScript interface (lines 148–149) remove `spoke_a_receiver`/`spoke_b_receiver`, add `source_spoke_id`, `dest_spoke_id`, `source_receiver`, `dest_receiver`; (2) update chain-event parsing at lines 607–608 to read the four new keys; (3) update counterpart payload construction at lines 747–748 to emit the four new keys (depends on T006)
+- [x] T013 [P] [US2] Update `scenario-a/frontend/apps/bank/src/types/fx-agreement.types.ts`: remove `spoke_a_receiver` and `spoke_b_receiver` from the `FXAgreement` TypeScript interface; add `source_spoke_id`, `dest_spoke_id`, `source_receiver`, `dest_receiver` (depends on T006)
+- [x] T014 [US2] Run `tsc --noEmit` in both `scenario-a/interop/hub-and-spoke/cacti/` and `scenario-a/frontend/` to confirm zero type errors (depends on T012, T013)
+- [x] T015 [US2] Run `go test ./internal/grpc/server/...` from `scenario-a/backend/services/payment-orchestrator/` — T003 (`relay_test.go`) must now be GREEN (depends on T010)
 
 **Checkpoint**: Relay and frontend compile clean. T003 passes. Relay reads `dest_spoke_id` for spoke selection.
 
@@ -83,8 +83,8 @@
 
 ### Implementation for User Story 3
 
-- [ ] T016 [US3] Extend `scenario-a/backend/services/payment-orchestrator/internal/repository/gorm_repos_test.go`: add a test that seeds legacy rows directly via SQL, then calls the migration function twice, and asserts: (1) all rows have non-empty `source_spoke_id` and `dest_spoke_id`; (2) the old columns do not exist; (3) the second run is a no-op (row count unchanged, no error) (depends on T009)
-- [ ] T017 [US3] Run `go test ./internal/repository/...` — T016 must pass; confirm `AcceptFXAgreement` and `SettleFXAgreement` still work on migrated rows by reusing existing test helpers (depends on T016)
+- [x] T016 [US3] Extend `scenario-a/backend/services/payment-orchestrator/internal/repository/gorm_repos_test.go`: add a test that seeds legacy rows directly via SQL, then calls the migration function twice, and asserts: (1) all rows have non-empty `source_spoke_id` and `dest_spoke_id`; (2) the old columns do not exist; (3) the second run is a no-op (row count unchanged, no error) (depends on T009)
+- [x] T017 [US3] Run `go test ./internal/repository/...` — T016 must pass; confirm `AcceptFXAgreement` and `SettleFXAgreement` still work on migrated rows by reusing existing test helpers (depends on T016)
 
 **Checkpoint**: All three user stories are independently functional. Full `go test ./...` passes.
 
@@ -94,9 +94,9 @@
 
 **Purpose**: Final verification and documentation.
 
-- [ ] T018 [P] Run `grep -r "spoke_a_receiver\|spoke_b_receiver" scenario-a/` — must return zero hits outside of `reserved` declarations in the proto file and this tasks.md (depends on T017)
-- [ ] T019 [P] Update `scenario-a/README.md`: mark the spoke-keyed FX Agreement data model as "In progress" or "Fully implemented" per actual status at merge time (depends on T017)
-- [ ] T020 Run the full integration test suite: `cd scenario-a && go test ./...` — confirm no regressions in any unrelated test (depends on T018, T019)
+- [x] T018 [P] Run `grep -r "spoke_a_receiver\|spoke_b_receiver" scenario-a/` — must return zero hits outside of `reserved` declarations in the proto file and this tasks.md (depends on T017)
+- [x] T019 [P] Update `scenario-a/README.md`: mark the spoke-keyed FX Agreement data model as "In progress" or "Fully implemented" per actual status at merge time (depends on T017)
+- [x] T020 Run the full integration test suite: `cd scenario-a && go test ./...` — confirm no regressions in any unrelated test (depends on T018, T019)
 
 ---
 
@@ -185,3 +185,19 @@ With two developers (after T006):
 - `spokePrefix` is already derived from `PALADIN_IDENTITY` at startup; no new env var is needed
 - Proto3 `reserved` declarations are mandatory — do not skip them even if "it compiles without them"
 - Commit after T006 (proto-gen), after T011 (US1 green), and after T015/T017 (US2/US3 green)
+
+---
+
+## Phase 7: Convergence
+
+- [x] T021 CRITICAL: In `scenario-a/interop/hub-and-spoke/cacti/src/htlc-relay.ts` update the `log.info` at line 614 (proposal-forwarding event) to include `dest_spoke_id` and `source_spoke_id` from the parsed event — required by Constitution VI to reconstruct the full settlement lifecycle from logs per Constitution VI (missing)
+- [x] T022 In `scenario-a/interop/hub-and-spoke/cacti/src/htlc-relay.ts` add a guard after the REST parsing block (lines 607-608 / their replacement in T012): if `sourceSpokeId` or `destSpokeId` is empty after parsing, emit `this.log.error(...)` and `continue` to skip the event without crashing — satisfies US2/AC2 acceptance scenario per US2/AC2 (missing)
+- [x] T023 Add a verification step for SC-003 (manual verification checklist added to plan.md): either (a) write an integration test in `scenario-a/tests/integration/` that seeds a full FX Agreement with two distinct spoke IDs and drives propose → accept → lock → settle, or (b) add an explicit manual verification checklist to `specs/020-fx-spoke-keyed-legs/plan.md` documenting the expected commands and assertions — required before this feature is declared complete per SC-003 (missing)
+
+---
+
+## Phase 8: Convergence
+
+- [x] T024 Update `scenario-a/apis/openapi/api-gateway.yaml`: in both the `FXAgreement` schema (lines ~4390/4394) and the `ProposeFXAgreementRequest` schema (lines ~4521/4525), replace `spoke_a_receiver` and `spoke_b_receiver` with `source_spoke_id`, `dest_spoke_id`, `source_receiver`, `dest_receiver`; update descriptions accordingly per SC-001 / FR-001 (missing)
+- [x] T025 Update `scenario-a/tryouts/tryout-fx-agreement-e2e.sh`: at lines 256–257 replace `spoke_a_receiver: $sra` and `spoke_b_receiver: $srb` with `source_spoke_id`, `dest_spoke_id`, `source_receiver`, `dest_receiver` using appropriate variable assignments; update any variable declarations that feed these fields per SC-001 / SC-002 (missing)
+- [x] T026 Update `scenario-a/docs/charts/scenario-a/transfer.md`: replace all three remaining references to `spoke_a_receiver`/`spoke_b_receiver` (lines ~38, ~73, ~108) with `source_spoke_id`/`dest_spoke_id`/`source_receiver`/`dest_receiver` and update the validation note text per SC-001 / Constitution §VI (missing)
