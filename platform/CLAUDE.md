@@ -109,6 +109,8 @@ Proto:
 - None — stateless; reads one file, validates, returns result (023-manifest-schema-validation)
 - Go 1.26+ + `github.com/ethereum/go-ethereum v1.17.1` (já presente em múltiplos módulos do Scenario A; adicionar ao `toolkit/go.mod`) (024-tk2-keyprovider-interface)
 - Nenhum — implementação local usa in-memory map; sem persistência (024-tk2-keyprovider-interface)
+- Go 1.26+ + Go stdlib apenas (`crypto/x509`, `crypto/ecdsa`, `crypto/elliptic`, `crypto/rand`, `encoding/pem`, `sync`, `context`) (025-tk3-certsource-interface)
+- Nenhum — implementação local usa `map[string]*spokeCert` em memória; a chave privada da CA do spoke nunca é serializada para disco (025-tk3-certsource-interface)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
