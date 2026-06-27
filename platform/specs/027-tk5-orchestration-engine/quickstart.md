@@ -90,6 +90,7 @@ func main() {
         ComposeTemplatePath:     "scenario-a/provisioning/templates/central-bank/paladin-compose.yaml",
         PaladinConfigTemplateDir: "scenario-a/provisioning/templates/central-bank/paladin-config",
         BesuRPCURL:              "http://localhost:8645",
+        PaladinCBURL:            "http://localhost:31648",
     }
 
     ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
