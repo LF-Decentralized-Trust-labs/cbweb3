@@ -64,8 +64,10 @@ export interface FXProposalEvent {
   counterCurrency: string;
   rate: string;
   expiryDate: number;
-  spokeAReceiver: string;
-  spokenBReceiver: string;
+  sourceSpokeId: string;
+  destSpokeId: string;
+  sourceReceiver: string;
+  destReceiver: string;
   blockNumber: number;
   txHash: string;
   timestamp: number;
@@ -145,8 +147,10 @@ interface ProposeFXAgreementGrpcRequest {
   counter_currency: string;
   rate: string;
   expiry_date: number;
-  spoke_a_receiver: string;
-  spoke_b_receiver: string;
+  source_spoke_id: string;
+  dest_spoke_id: string;
+  source_receiver: string;
+  dest_receiver: string;
   on_behalf: boolean;
 }
 interface ProposeFXAgreementGrpcResponse { tx_hash: string; trade_id: string; }
@@ -604,14 +608,20 @@ export class HtlcRelay {
           counterCurrency: a["counter_currency"] as string,
           rate: a["rate"] as string,
           expiryDate: a["expiry_date"] as number,
-          spokeAReceiver: (a["spoke_a_receiver"] as string) ?? "",
-          spokenBReceiver: (a["spoke_b_receiver"] as string) ?? "",
+          sourceSpokeId: (a["source_spoke_id"] as string) ?? "",
+          destSpokeId: (a["dest_spoke_id"] as string) ?? "",
+          sourceReceiver: (a["source_receiver"] as string) ?? "",
+          destReceiver: (a["dest_receiver"] as string) ?? "",
           blockNumber: 0,
           txHash: "",
           timestamp: Date.now(),
         };
+        if (!evt.sourceSpokeId || !evt.destSpokeId) {
+          this.log.error(`[${spoke.name}] FX REST: skipping proposal tradeId=${tradeId} — missing source_spoke_id or dest_spoke_id`);
+          continue;
+        }
         pushRing(this.fxProposalEvents, evt, MAX_EVENTS);
-        this.log.info(`[${spoke.name}] FX REST: forwarding proposal tradeId=${tradeId}`);
+        this.log.info(`[${spoke.name}] FX REST: forwarding proposal tradeId=${tradeId} sourceSpokeId=${evt.sourceSpokeId} destSpokeId=${evt.destSpokeId}`);
         await this.tryForwardFXAction("propose", spoke.name, tradeId, client, evt as unknown as Record<string, unknown>);
 
       } else if (state === "FX_STATE_ACCEPTED" && !(await this.wasForwarded(`accept:${tradeId}`))) {
@@ -744,8 +754,10 @@ export class HtlcRelay {
           counter_currency: event.counterCurrency,
           rate: event.rate,
           expiry_date: event.expiryDate,
-          spoke_a_receiver: event.spokeAReceiver,
-          spoke_b_receiver: event.spokenBReceiver,
+          source_spoke_id: event.sourceSpokeId,
+          dest_spoke_id: event.destSpokeId,
+          source_receiver: event.sourceReceiver,
+          dest_receiver: event.destReceiver,
           on_behalf: true,
         },
         new grpc.Metadata(),
