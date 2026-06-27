@@ -24,7 +24,7 @@ run_t3() {
         -d '{"jsonrpc":"2.0","method":"reg_queryEntriesWithProps","params":["evm-registry", {"limit": 100}, "any"],"id":1}' \
         2>/dev/null || echo "")
 
-    if echo "${ENTRY_RESP}" | grep -qi 'spoke-spk02-bank-x'; then
+    if echo "${ENTRY_RESP}" | grep -qi "${PALADIN_BX_NODE_NAME}"; then
         TRANSPORT_COUNT=$(echo "${ENTRY_RESP}" | grep -c 'transport.grpc' || echo "0")
         echo "[T3]   Probe 1 PASS: Bank-X entry visible in CB registry (transport property present, total transport entries=${TRANSPORT_COUNT})"
         PROBE1="PASS"
@@ -41,9 +41,10 @@ run_t3() {
     #   x509 / TLS handshake error → H-B (trust store loaded at startup, restart required)
     #   response (even "verifier not found") without x509 → H-A (dynamic trust, no restart)
     echo "[T3]   Probe 2: forcing gRPC call CB → Bank-X (ptx_resolveVerifier)..."
+    RESOLVE_PAYLOAD="{\"jsonrpc\":\"2.0\",\"method\":\"ptx_resolveVerifier\",\"params\":[\"${PALADIN_BX_NODE_NAME}@ecdsa:secp256k1\",\"ecdsa:secp256k1\",\"eth_address\"],\"id\":1}"
     RESOLVE_RESP=$(curl -sf -X POST "${RPC_CB}" \
         -H 'Content-Type: application/json' \
-        -d '{"jsonrpc":"2.0","method":"ptx_resolveVerifier","params":["spoke-spk02-bank-x@ecdsa:secp256k1","ecdsa:secp256k1","eth_address"],"id":1}' \
+        -d "${RESOLVE_PAYLOAD}" \
         2>&1) || RESOLVE_RESP="CURL_FAILED"
 
     # Allow CB logs to surface any async TLS errors

@@ -21,8 +21,8 @@ source "${SCRIPT_DIR}/env-defaults.sh"
 
 BESU_RPC="http://localhost:${HOST_RPC_BOOT}"
 
-# Funded operator private key — same in all spike Paladin configs (research context only).
-PRIVATE_KEY="0xc87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3"
+# Funded operator key — sourced from env-defaults.sh (research context only, from genesis alloc).
+PRIVATE_KEY="${OPERATOR_PRIVATE_KEY}"
 OWNER_ADDR=$(cast wallet address "${PRIVATE_KEY}")
 
 # Read deployed registry address
@@ -43,7 +43,7 @@ ZERO_HASH="0x0000000000000000000000000000000000000000000000000000000000000000"
 
 register_node() {
     local node_key="$1"     # cb | bank-a | bank-x
-    local node_name="$2"    # spoke-spk02-cb | spoke-spk02-bank-a | spoke-spk02-bank-x
+    local node_name="$2"    # PALADIN_{CB,BA,BX}_NODE_NAME from env-defaults.sh
     local grpc_host="$3"    # hostname for gRPC endpoint
     local grpc_port="$4"    # host-mapped gRPC port
     local cert_file="${DATA_DIR}/paladin/${node_key}/tls.crt"
@@ -120,9 +120,9 @@ register_node() {
 case "${MODE}" in
     found|all)
         # CB and Bank-A are on spk02_found_net — they communicate via Docker DNS (internal).
-        register_node "cb"     "spoke-spk02-cb"     "spk02-paladin-cb"     "9000"
+        register_node "cb"     "${PALADIN_CB_NODE_NAME}" "${CONTAINER_PALADIN_CB}" "9000"
         sleep 5
-        register_node "bank-a" "spoke-spk02-bank-a" "spk02-paladin-bank-a" "9000"
+        register_node "bank-a" "${PALADIN_BA_NODE_NAME}" "${CONTAINER_PALADIN_BA}" "9000"
         ;;
 esac
 
@@ -130,7 +130,7 @@ case "${MODE}" in
     bank-x|all)
         # Bank-X is on spk02_join_net — CB must reach it via host.docker.internal + mapped port.
         # The gRPC host-port mapping is HOST_PALADIN_BX_GRPC (9702) → container 9000.
-        register_node "bank-x" "spoke-spk02-bank-x" "host.docker.internal" "${HOST_PALADIN_BX_GRPC}"
+        register_node "bank-x" "${PALADIN_BX_NODE_NAME}" "host.docker.internal" "${HOST_PALADIN_BX_GRPC}"
         ;;
 esac
 
