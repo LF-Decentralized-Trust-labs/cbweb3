@@ -107,6 +107,8 @@ Proto:
 - PostgreSQL (produção, tabelas `fx_agreements`), SQLite (testes de repositório) (022-update-proto-consumers)
 - Go 1.26+; YAML 1.2 (schema and manifest files) + `gopkg.in/yaml.v3` (new; only addition to `toolkit/go.mod`) (023-manifest-schema-validation)
 - None — stateless; reads one file, validates, returns result (023-manifest-schema-validation)
+- Go 1.26+ + `github.com/ethereum/go-ethereum v1.17.1` (já presente em múltiplos módulos do Scenario A; adicionar ao `toolkit/go.mod`) (024-tk2-keyprovider-interface)
+- Nenhum — implementação local usa in-memory map; sem persistência (024-tk2-keyprovider-interface)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
