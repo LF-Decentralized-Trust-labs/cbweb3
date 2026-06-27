@@ -62,7 +62,7 @@ for VNAME in boot v1 v2; do
 done
 
 # ── Step 4: Poll for activation ─────────────────────────────────────────────
-echo "[vote-in-validator] polling for joiner in validator set (max 120s, epochlength=30 blocks)..."
+echo "[vote-in-validator] polling for joiner in validator set (max 120s, epochlength=${QBFT_EPOCH_LENGTH} blocks)..."
 for i in $(seq 1 60); do
     VALIDATORS=$(rpc_call "${BOOT_RPC}" "qbft_getValidatorsByBlockNumber" '["latest"]' \
         | jq -r '.result[]?' 2>/dev/null | tr '[:upper:]' '[:lower:]') || VALIDATORS=""
@@ -72,16 +72,16 @@ for i in $(seq 1 60); do
     if echo "${VALIDATORS}" | grep -qF "${JOINER_LOWER}"; then
         CURRENT_BLOCK_HEX=$(rpc_call "${BOOT_RPC}" "eth_blockNumber" | jq -r '.result')
         ACTIVATION_BLOCK=$((CURRENT_BLOCK_HEX))
-        EPOCH=$((ACTIVATION_BLOCK / 30))
+        EPOCH=$((ACTIVATION_BLOCK / QBFT_EPOCH_LENGTH))
         echo ""
         echo "[vote-in-validator] PASS: joiner ${JOINER_ADDR} is now an active validator"
-        echo "[vote-in-validator] activation block: ${ACTIVATION_BLOCK} (epoch ${EPOCH}, block % 30 = $((ACTIVATION_BLOCK % 30)))"
+        echo "[vote-in-validator] activation block: ${ACTIVATION_BLOCK} (epoch ${EPOCH}, block % ${QBFT_EPOCH_LENGTH} = $((ACTIVATION_BLOCK % QBFT_EPOCH_LENGTH)))"
         exit 0
     fi
 
     CURRENT_BLOCK_HEX=$(rpc_call "${BOOT_RPC}" "eth_blockNumber" | jq -r '.result' 2>/dev/null || echo "0x0")
     CURRENT_BLOCK=$((CURRENT_BLOCK_HEX))
-    NEXT_EPOCH=$(( (CURRENT_BLOCK / 30 + 1) * 30 ))
+    NEXT_EPOCH=$(( (CURRENT_BLOCK / QBFT_EPOCH_LENGTH + 1) * QBFT_EPOCH_LENGTH ))
     printf "[vote-in-validator] poll %d/60: block=%d next_epoch_at=%d\n" "${i}" "${CURRENT_BLOCK}" "${NEXT_EPOCH}"
 
     sleep 2

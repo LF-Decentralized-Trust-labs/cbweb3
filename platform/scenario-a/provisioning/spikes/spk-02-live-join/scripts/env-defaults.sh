@@ -38,6 +38,17 @@ export CONTAINER_PALADIN_BX="${CONTAINER_PALADIN_BX:-spk02-paladin-bank-x}"
 
 export SPOKE_ID="${SPOKE_ID:-spoke-spk02}"
 
+# === QBFT parameters (must match compose/genesis-config.json) ===
+export QBFT_EPOCH_LENGTH="${QBFT_EPOCH_LENGTH:-30}"
+
+# === Paladin node names (on-chain identity, derived from SPOKE_ID) ===
+export PALADIN_CB_NODE_NAME="${PALADIN_CB_NODE_NAME:-${SPOKE_ID}-cb}"
+export PALADIN_BA_NODE_NAME="${PALADIN_BA_NODE_NAME:-${SPOKE_ID}-bank-a}"
+export PALADIN_BX_NODE_NAME="${PALADIN_BX_NODE_NAME:-${SPOKE_ID}-bank-x}"
+
+# === Operator funded account (genesis alloc — research context only) ===
+export OPERATOR_PRIVATE_KEY="${OPERATOR_PRIVATE_KEY:-0xc87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3}"
+
 # === Toolchain PATH ===
 # Foundry's `cast` (used by register-paladin-nodes.sh) is typically installed
 # user-local in ~/.foundry/bin, which the Make-inherited PATH may not include.

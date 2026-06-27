@@ -74,7 +74,7 @@ spec:
     wsEndpoint: "ws://${HOST_IP}:${HOST_WS_BOOT}"
   chain:
     genesisHash: "${GENESIS_HASH}"
-    epochlength: 30
+    epochlength: ${QBFT_EPOCH_LENGTH}
   pki:
     trustAnchor: "${CA_CERT}"
   contracts:
