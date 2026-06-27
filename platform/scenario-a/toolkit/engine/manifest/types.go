@@ -46,11 +46,15 @@ type Spoke struct {
 // Node holds the network addressing configuration for the Besu node.
 // AdvertisedHost must always be set explicitly; it is never inferred from
 // co-location or container IP.
+// DataDir is the absolute path on the host where the provisioning engine stores
+// all spoke-specific runtime data: genesis files, TLS certs, Paladin configs,
+// provisioning state, and deployed contract addresses.
 type Node struct {
 	AdvertisedHost string `yaml:"advertisedHost"`
 	RPC            *Port  `yaml:"rpc,omitempty"`
 	WS             *Port  `yaml:"ws,omitempty"`
 	P2P            *Port  `yaml:"p2p,omitempty"`
+	DataDir        string `yaml:"dataDir,omitempty"`
 }
 
 // Port holds a single TCP port number.

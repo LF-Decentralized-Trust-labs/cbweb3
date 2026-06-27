@@ -33,6 +33,7 @@ spec:
     p2p:
       port: 31303
     advertisedHost: cbweb3-spoke-brl-besu.central-bank-brazil
+    dataDir: /data/spokes/spoke-brl
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed
@@ -58,6 +59,7 @@ func validManifest() *manifest.Manifest {
 			},
 			Node: manifest.Node{
 				AdvertisedHost: "cbweb3-spoke-brl-besu.central-bank-brazil",
+				DataDir:        "/data/spokes/spoke-brl",
 			},
 			Image:       "build",
 			KeyProvider: "kms://local-emulator",
@@ -225,6 +227,12 @@ func TestValidate_MissingRequiredFields(t *testing.T) {
 			wantInErrs: []string{"spec.certSource"},
 		},
 		{
+			// spec.node.dataDir required when mode is "found" (FR-008)
+			name:       "missing spec.node.dataDir for mode:found",
+			modify:     func(m *manifest.Manifest) { m.Spec.Node.DataDir = "" },
+			wantInErrs: []string{"spec.node.dataDir"},
+		},
+		{
 			// all required fields missing → all errors reported in one call (FR-004, SC-003)
 			name: "all required fields missing reports all errors",
 			modify: func(m *manifest.Manifest) {
@@ -276,6 +284,19 @@ func TestValidate_MissingRequiredFields(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ── US2b: dataDir mode-specific rule ─────────────────────────────────────────
+
+func TestValidate_DataDir_NotRequiredForJoin(t *testing.T) {
+	m := validManifest()
+	m.Spec.Mode = "join"
+	m.Spec.Node.DataDir = "" // omit dataDir; should not trigger an error for mode:join
+	if err := manifest.Validate(m); err != nil {
+		if strings.Contains(err.Error(), "spec.node.dataDir") {
+			t.Errorf("dataDir should not be required for mode:join, but got: %v", err)
+		}
 	}
 }
 

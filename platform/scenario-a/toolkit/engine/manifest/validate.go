@@ -111,6 +111,14 @@ func Validate(m *Manifest) error {
 		))
 	}
 
+	// spec.node.dataDir — required when mode is "found"; the engine uses this as SPOKE_DATA_DIR
+	if m.Spec.Mode == "found" && m.Spec.Node.DataDir == "" {
+		errs = append(errs, errors.New(
+			"spec.node.dataDir: required field is missing for mode:found; " +
+				"set it to the absolute path where the provisioning engine will store spoke runtime data",
+		))
+	}
+
 	// spec.image
 	if m.Spec.Image == "" {
 		errs = append(errs, errors.New("spec.image: required field is missing"))
