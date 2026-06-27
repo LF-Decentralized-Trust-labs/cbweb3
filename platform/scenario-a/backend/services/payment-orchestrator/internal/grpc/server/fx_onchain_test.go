@@ -126,6 +126,8 @@ func proposeChain(t *testing.T, c pb.PaymentOrchestratorServiceClient, tid strin
 		TradeId: tid, Originator: "bank-a", CounterpartyB: "bank-b",
 		OriginAmount: "100", CounterAmount: "120", OriginCurrency: "USD",
 		CounterCurrency: "BRL", Rate: "1.2", ExpiryDate: uint64(time.Now().Add(time.Hour).Unix()),
+		SourceSpokeId: "spoke-a", DestSpokeId: "spoke-b",
+		SourceReceiver: "recv@spoke-a-bank-a", DestReceiver: "recv@spoke-b-bank-b",
 	})
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
@@ -199,6 +201,8 @@ func TestFX_OnBehalfPath(t *testing.T) {
 		OriginAmount: "100", CounterAmount: "120", OriginCurrency: "USD",
 		CounterCurrency: "BRL", Rate: "1.2",
 		ExpiryDate: uint64(time.Now().Add(time.Hour).Unix()), OnBehalf: true,
+		SourceSpokeId: "spoke-a", DestSpokeId: "spoke-b",
+		SourceReceiver: "recv@spoke-a", DestReceiver: "recv@spoke-b",
 	})
 	if err != nil {
 		t.Fatalf("Propose on-behalf: %v", err)
@@ -309,13 +313,55 @@ func TestLockHTLC_StrictMode_RequiresAgreement(t *testing.T) {
 
 // --- validateHTLCTermsAgainstAgreement mismatch paths ---
 
+// TestFX_SpokeKeyedFieldsProposeAndGet verifies that an FX Agreement proposed
+// with spoke-keyed fields (source_spoke_id, dest_spoke_id, source_receiver,
+// dest_receiver) stores and returns all four fields correctly.
+func TestFX_SpokeKeyedFieldsProposeAndGet(t *testing.T) {
+	repo := newMemFXRepo()
+	env := setupFXChainEnv(t, server.Config{FXRepo: repo, FXAgreementBesu: &fakeFXClient{}})
+	ctx := context.Background()
+
+	resp, err := env.client.ProposeFXAgreement(ctx, &pb.ProposeFXAgreementRequest{
+		TradeId: "T-SPOKE-KEY", Originator: "bank-a", CounterpartyB: "bank-b",
+		OriginAmount: "100", CounterAmount: "120", OriginCurrency: "USD",
+		CounterCurrency: "BRL", Rate: "1.2",
+		ExpiryDate:   uint64(time.Now().Add(time.Hour).Unix()),
+		SourceSpokeId: "spoke-brl",
+		DestSpokeId:   "spoke-usd",
+		SourceReceiver: "recv@spoke-brl-bank-a",
+		DestReceiver:   "recv@spoke-usd-bank-b",
+	})
+	if err != nil {
+		t.Fatalf("Propose with spoke-keyed fields: %v", err)
+	}
+
+	got, err := env.client.GetFXAgreement(ctx, &pb.GetFXAgreementRequest{TradeId: resp.TradeId})
+	if err != nil {
+		t.Fatalf("GetFXAgreement: %v", err)
+	}
+	if got.Agreement.SourceSpokeId != "spoke-brl" {
+		t.Errorf("source_spoke_id = %q, want %q", got.Agreement.SourceSpokeId, "spoke-brl")
+	}
+	if got.Agreement.DestSpokeId != "spoke-usd" {
+		t.Errorf("dest_spoke_id = %q, want %q", got.Agreement.DestSpokeId, "spoke-usd")
+	}
+	if got.Agreement.SourceReceiver != "recv@spoke-brl-bank-a" {
+		t.Errorf("source_receiver = %q, want %q", got.Agreement.SourceReceiver, "recv@spoke-brl-bank-a")
+	}
+	if got.Agreement.DestReceiver != "recv@spoke-usd-bank-b" {
+		t.Errorf("dest_receiver = %q, want %q", got.Agreement.DestReceiver, "recv@spoke-usd-bank-b")
+	}
+}
+
 func TestLockHTLC_TermsMismatch(t *testing.T) {
 	repo := newMemFXRepo()
 	now := time.Now()
 	repo.CreateAgreement(context.Background(), &domain.FXAgreementRecord{
 		TradeID: "T-TERMS", Originator: "bank-a", CounterpartyB: "bank-b",
 		OriginAmount: "100", CounterAmount: "120", OriginCurrency: "USD", CounterCurrency: "BRL",
-		Rate: "1.2", SpokeAReceiver: "recv@spoke-a-bank-a",
+		Rate: "1.2",
+		SourceSpokeId: "spoke-a", DestSpokeId: "spoke-b",
+		SourceReceiver: "recv@spoke-a-bank-a", DestReceiver: "recv@spoke-b-bank-b",
 		ExpiryDate: uint64(now.Add(time.Hour).Unix()), State: domain.FXStateAccepted,
 		CreatedAt: now, UpdatedAt: now,
 	})

@@ -136,16 +136,20 @@ func mustFX(r *memFXRepo) *memFXRepo {
 func TestRelayLock_CreatesLocalLeg(t *testing.T) {
 	repo := newMemFXRepo()
 	now := time.Now()
-	// This orchestrator is spoke-a. Counterparty receiver is the spoke-b receiver.
+	// This orchestrator is spoke-a (source spoke). Counterparty (dest spoke) lock
+	// is at DestReceiver. The local leg must target SourceReceiver.
 	repo.CreateAgreement(context.Background(), &domain.FXAgreementRecord{
 		TradeID: "T-RELAY", Originator: "bank-a", CounterpartyB: "bank-b",
 		OriginAmount: "100", CounterAmount: "120", OriginCurrency: "USD", CounterCurrency: "BRL",
-		Rate: "1.2", SpokeAReceiver: "recv@spoke-a-bank-a", SpokeBReceiver: "recv@spoke-b-bank-b",
+		Rate: "1.2",
+		SourceSpokeId: "spoke-a", DestSpokeId: "spoke-b",
+		SourceReceiver: "recv@spoke-a-bank-a", DestReceiver: "recv@spoke-b-bank-b",
 		ExpiryDate: uint64(now.Add(time.Hour).Unix()), State: domain.FXStateAccepted,
 		CreatedAt: now, UpdatedAt: now,
 	})
 	env := setupRelayEnv(t, "spoke-a", repo)
 
+	// Counterparty lock arrives for DestReceiver (the dest spoke receiver).
 	payload, _ := json.Marshal(map[string]string{"receiver": "recv@spoke-b-bank-b"})
 	proof := ports.InteroperabilityProof{
 		ContractID: "remote-cid", HashLock: "ffeeddccbbaa00112233445566778899aabbccddeeff00112233445566778899",
@@ -300,6 +304,85 @@ func TestRelaySettle_NoMatchingLocalHTLC(t *testing.T) {
 	proof := ports.InteroperabilityProof{ContractID: "orphan-cid", ProofPayload: payload}
 	if err := env.relay.settle()(proof); err != nil {
 		t.Fatalf("expected nil for unmatched settle, got %v", err)
+	}
+}
+
+// TestRelayLock_SpokeKeyedRouting verifies that the relay lock handler
+// identifies the local receiver by comparing DestSpokeID against the server's
+// spoke prefix (spoke-ID routing) instead of positional receiver fields.
+func TestRelayLock_SpokeKeyedRouting(t *testing.T) {
+	repo := newMemFXRepo()
+	now := time.Now()
+	repo.CreateAgreement(context.Background(), &domain.FXAgreementRecord{
+		TradeID: "T-SPOKE-ROUTE", Originator: "bank-a", CounterpartyB: "bank-b",
+		OriginAmount: "100", CounterAmount: "120", OriginCurrency: "USD", CounterCurrency: "BRL",
+		Rate: "1.2", ExpiryDate: uint64(now.Add(time.Hour).Unix()), State: domain.FXStateAccepted,
+		SourceSpokeId: "spoke-brl", DestSpokeId: "spoke-eur",
+		SourceReceiver: "recv@spoke-brl-bank-a", DestReceiver: "recv@spoke-eur-bank-b",
+		CreatedAt: now, UpdatedAt: now,
+	})
+	// This orchestrator is spoke-eur (dest spoke). Counterparty (source) locked
+	// for SourceReceiver. Local leg must target DestReceiver.
+	env := setupRelayEnv(t, "spoke-eur", repo)
+
+	payload, _ := json.Marshal(map[string]string{"receiver": "recv@spoke-brl-bank-a"})
+	proof := ports.InteroperabilityProof{
+		ContractID: "remote-spoke-route", HashLock: "f1e2d3c4b5a600112233445566778899aabbccddeeff00112233445566778899",
+		TimeLock: uint64(now.Add(time.Hour).Unix()), ProofPayload: payload,
+	}
+	if err := env.relay.lock()(proof); err != nil {
+		t.Fatalf("lock handler: %v", err)
+	}
+
+	// Local leg receiver must be DestReceiver (dest spoke's receiver).
+	search, err := env.client.SearchHTLC(context.Background(), &pb.SearchHTLCRequest{AgreementId: "T-SPOKE-ROUTE"})
+	if err != nil {
+		t.Fatalf("SearchHTLC: %v", err)
+	}
+	if len(search.Locks) != 1 {
+		t.Fatalf("expected 1 local leg, got %d", len(search.Locks))
+	}
+	if search.Locks[0].Receiver != "recv@spoke-eur-bank-b" {
+		t.Errorf("local receiver = %q, want dest receiver %q", search.Locks[0].Receiver, "recv@spoke-eur-bank-b")
+	}
+}
+
+// TestRelayLock_SpokeKeyedRouting_SourceSpoke verifies routing when the
+// orchestrator is the source spoke (DestSpokeID differs from spokePrefix).
+func TestRelayLock_SpokeKeyedRouting_SourceSpoke(t *testing.T) {
+	repo := newMemFXRepo()
+	now := time.Now()
+	repo.CreateAgreement(context.Background(), &domain.FXAgreementRecord{
+		TradeID: "T-SPOKE-ROUTE-SRC", Originator: "bank-a", CounterpartyB: "bank-b",
+		OriginAmount: "100", CounterAmount: "120", OriginCurrency: "USD", CounterCurrency: "BRL",
+		Rate: "1.2", ExpiryDate: uint64(now.Add(time.Hour).Unix()), State: domain.FXStateAccepted,
+		SourceSpokeId: "spoke-brl", DestSpokeId: "spoke-eur",
+		SourceReceiver: "recv@spoke-brl-bank-a", DestReceiver: "recv@spoke-eur-bank-b",
+		CreatedAt: now, UpdatedAt: now,
+	})
+	// This orchestrator is spoke-brl (source spoke). Counterparty (dest) locked
+	// for DestReceiver. Local leg must target SourceReceiver.
+	env := setupRelayEnv(t, "spoke-brl", repo)
+
+	payload, _ := json.Marshal(map[string]string{"receiver": "recv@spoke-eur-bank-b"})
+	proof := ports.InteroperabilityProof{
+		ContractID: "remote-spoke-route-src", HashLock: "a1b2c3d4e5f600112233445566778899aabbccddeeff00112233445566778899",
+		TimeLock: uint64(now.Add(time.Hour).Unix()), ProofPayload: payload,
+	}
+	if err := env.relay.lock()(proof); err != nil {
+		t.Fatalf("lock handler: %v", err)
+	}
+
+	// Local leg receiver must be SourceReceiver (source spoke's receiver).
+	search, err := env.client.SearchHTLC(context.Background(), &pb.SearchHTLCRequest{AgreementId: "T-SPOKE-ROUTE-SRC"})
+	if err != nil {
+		t.Fatalf("SearchHTLC: %v", err)
+	}
+	if len(search.Locks) != 1 {
+		t.Fatalf("expected 1 local leg, got %d", len(search.Locks))
+	}
+	if search.Locks[0].Receiver != "recv@spoke-brl-bank-a" {
+		t.Errorf("local receiver = %q, want source receiver %q", search.Locks[0].Receiver, "recv@spoke-brl-bank-a")
 	}
 }
 

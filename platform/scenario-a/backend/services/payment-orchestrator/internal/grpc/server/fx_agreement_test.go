@@ -146,6 +146,8 @@ func proposeValid(t *testing.T, env *fxEnv, tradeID string) string {
 		TradeId: tradeID, Originator: "bank-a", CounterpartyB: "bank-b",
 		OriginAmount: "100", CounterAmount: "120", OriginCurrency: "USD",
 		CounterCurrency: "BRL", Rate: "1.2", ExpiryDate: uint64(time.Now().Add(time.Hour).Unix()),
+		SourceSpokeId: "spoke-a", DestSpokeId: "spoke-b",
+		SourceReceiver: "recv@spoke-a", DestReceiver: "recv@spoke-b",
 	})
 	if err != nil {
 		t.Fatalf("ProposeFXAgreement: %v", err)

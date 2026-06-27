@@ -339,6 +339,157 @@ func TestGormFXAgreementRepository_Lifecycle(t *testing.T) {
 	}
 }
 
+func TestGormFXAgreementRepository_SpokeKeyedColumns(t *testing.T) {
+	repo, err := repository.NewGormFXAgreementRepositoryFromDB(newTestDB(t))
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	rec := &domain.FXAgreementRecord{
+		TradeID: "T-SPOKE-GORM", Originator: "bank-a", CounterpartyB: "bank-b",
+		OriginAmount: "100", CounterAmount: "120", OriginCurrency: "USD",
+		CounterCurrency: "BRL", Rate: "1.2",
+		ExpiryDate:     uint64(now.Add(time.Hour).Unix()),
+		SourceSpokeId:  "spoke-brl",
+		DestSpokeId:    "spoke-usd",
+		SourceReceiver: "recv@spoke-brl-bank-a",
+		DestReceiver:   "recv@spoke-usd-bank-b",
+		State:          domain.FXStateProposed,
+		CreatedAt:      now, UpdatedAt: now,
+	}
+	if err := repo.CreateAgreement(ctx, rec); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := repo.GetAgreement(ctx, "T-SPOKE-GORM")
+	if err != nil || got == nil {
+		t.Fatalf("get: err=%v got=%v", err, got)
+	}
+	if got.SourceSpokeId != "spoke-brl" {
+		t.Errorf("SourceSpokeId = %q, want %q", got.SourceSpokeId, "spoke-brl")
+	}
+	if got.DestSpokeId != "spoke-usd" {
+		t.Errorf("DestSpokeId = %q, want %q", got.DestSpokeId, "spoke-usd")
+	}
+	if got.SourceReceiver != "recv@spoke-brl-bank-a" {
+		t.Errorf("SourceReceiver = %q, want %q", got.SourceReceiver, "recv@spoke-brl-bank-a")
+	}
+	if got.DestReceiver != "recv@spoke-usd-bank-b" {
+		t.Errorf("DestReceiver = %q, want %q", got.DestReceiver, "recv@spoke-usd-bank-b")
+	}
+}
+
+func TestGormFXAgreementRepository_SpokeKeyedMigration_Idempotent(t *testing.T) {
+	db := newTestDB(t)
+
+	// Create the fx_agreements table with the LEGACY schema (spoke_a_receiver /
+	// spoke_b_receiver columns present; source_* / dest_* columns absent).
+	createLegacy := `
+		CREATE TABLE fx_agreements (
+			trade_id TEXT PRIMARY KEY,
+			originator TEXT NOT NULL,
+			counterparty_b TEXT NOT NULL,
+			settlement_agent TEXT,
+			custodian TEXT,
+			beneficiary TEXT,
+			origin_amount TEXT NOT NULL,
+			counter_amount TEXT NOT NULL,
+			origin_currency TEXT NOT NULL,
+			counter_currency TEXT NOT NULL,
+			rate TEXT NOT NULL,
+			spoke_a_receiver TEXT,
+			spoke_b_receiver TEXT,
+			expiry_date INTEGER NOT NULL,
+			state TEXT NOT NULL,
+			on_chain_tx_hash TEXT,
+			group_id TEXT,
+			contract_address TEXT,
+			created_at DATETIME,
+			updated_at DATETIME
+		)`
+	if err := db.Exec(createLegacy).Error; err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+
+	// Seed a legacy row.
+	seed := `
+		INSERT INTO fx_agreements (trade_id, originator, counterparty_b, origin_amount, counter_amount,
+			origin_currency, counter_currency, rate, spoke_a_receiver, spoke_b_receiver,
+			expiry_date, state, created_at, updated_at)
+		VALUES ('T-LEGACY-1', 'bank-a', 'bank-b', '100', '120', 'USD', 'BRL', '1.2',
+			'recv@spoke-a', 'recv@spoke-b', 9999999999, 'PROPOSED',
+			datetime('now'), datetime('now'))
+	`
+	if err := db.Exec(seed).Error; err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	// AutoMigrate adds the new columns (source_spoke_id, etc.) from the GORM model.
+	if err := db.AutoMigrate(&repository.FXAgreementModel{}); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+
+	// Run migration the first time.
+	if err := repository.RunSpokeKeyedMigration(db); err != nil {
+		t.Fatalf("first migration: %v", err)
+	}
+
+	// Verify the new columns have been backfilled.
+	var row struct {
+		SourceSpokeId  string
+		DestSpokeId    string
+		SourceReceiver string
+		DestReceiver   string
+	}
+	if err := db.Raw(`SELECT source_spoke_id, dest_spoke_id, source_receiver, dest_receiver FROM fx_agreements WHERE trade_id = 'T-LEGACY-1'`).Scan(&row).Error; err != nil {
+		t.Fatalf("query backfilled row: %v", err)
+	}
+	if row.SourceSpokeId != "spoke-a" {
+		t.Errorf("source_spoke_id = %q, want %q", row.SourceSpokeId, "spoke-a")
+	}
+	if row.DestSpokeId != "spoke-b" {
+		t.Errorf("dest_spoke_id = %q, want %q", row.DestSpokeId, "spoke-b")
+	}
+	if row.SourceReceiver != "recv@spoke-a" {
+		t.Errorf("source_receiver = %q, want %q", row.SourceReceiver, "recv@spoke-a")
+	}
+	if row.DestReceiver != "recv@spoke-b" {
+		t.Errorf("dest_receiver = %q, want %q", row.DestReceiver, "recv@spoke-b")
+	}
+
+	// Verify legacy columns are gone.
+	var colCount int64
+	if err := db.Raw("SELECT COUNT(*) FROM pragma_table_info('fx_agreements') WHERE name = 'spoke_a_receiver'").Scan(&colCount).Error; err != nil {
+		t.Fatalf("pragma: %v", err)
+	}
+	if colCount != 0 {
+		t.Errorf("spoke_a_receiver column should be dropped")
+	}
+	if err := db.Raw("SELECT COUNT(*) FROM pragma_table_info('fx_agreements') WHERE name = 'spoke_b_receiver'").Scan(&colCount).Error; err != nil {
+		t.Fatalf("pragma: %v", err)
+	}
+	if colCount != 0 {
+		t.Errorf("spoke_b_receiver column should be dropped")
+	}
+
+	// Second run must be a no-op (old columns already gone — UPDATE fails,
+	// RunSpokeKeyedMigration returns nil).
+	if err := repository.RunSpokeKeyedMigration(db); err != nil {
+		t.Fatalf("second migration: %v", err)
+	}
+
+	// Row count unchanged.
+	var count int64
+	if err := db.Raw("SELECT COUNT(*) FROM fx_agreements").Scan(&count).Error; err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("row count = %d, want 1", count)
+	}
+}
+
 func TestGormFXAgreementRepository_ListExpiredNonTerminal(t *testing.T) {
 	repo, err := repository.NewGormFXAgreementRepositoryFromDB(newTestDB(t))
 	if err != nil {
