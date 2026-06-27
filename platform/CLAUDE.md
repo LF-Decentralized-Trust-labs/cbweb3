@@ -118,6 +118,8 @@ Proto:
 - Filesystem — `<SPOKE_DATA_DIR>/.deployed-addrs.env`, `<SPOKE_DATA_DIR>/genesis/genesis.json`, `<SPOKE_DATA_DIR>/tls/central-bank.crt`; saída: `<outputDir>/bundles/<spoke-id>.bundle.yaml` (028-tk6-join-bundle-emitter)
 - Go 1.26+ CLI binary + `flag` stdlib (flag parsing), `encoding/json` + `gopkg.in/yaml.v3` (structured output), `os/signal` + `syscall` (signal handling) — zero new external deps (029-tk7-apply-command)
 - Filesystem — lê `<dataDir>/.provisioning-state.yaml` (dry-run); escreve nenhum arquivo diretamente (delegado ao engine e bundle emitter) (029-tk7-apply-command)
+- TypeScript 5.4+ (Node.js 20 LTS — conforme devDependencies `@types/node ^20`) + `js-yaml ^4.1.0` (novo — parsing YAML), `@hyperledger/cactus-plugin-ledger-connector-besu ^2.0.0`, `@grpc/grpc-js ^1.10.0`, `express ^4.18.0` (031-relay-spoke-registry)
+- Nenhum novo. `RelayStore` (arquivo JSON existente) é preservado. (031-relay-spoke-registry)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
