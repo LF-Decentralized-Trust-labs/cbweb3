@@ -6,9 +6,11 @@
  * cause an immediate fatal error with a clear message.
  */
 
+import { loadSpokesConfig } from "./spokes-config";
+
 export interface SpokeConfig {
-  /** Human-readable name used in logs (e.g. "spoke-a"). */
-  name: string;
+  /** Unique identifier for this spoke (e.g. "spoke-a"). */
+  id: string;
   /** HTTP JSON-RPC URL for the Besu node (e.g. "http://host:8645"). */
   besuRpc: string;
   /** WebSocket JSON-RPC URL for the Besu node (e.g. "ws://host:8655"). */
@@ -17,10 +19,8 @@ export interface SpokeConfig {
   htlcAddress: string;
   /** Internal api-gateway URL for polling FX agreements (e.g. "http://host:18080"). */
   internalApiUrl: string;
-  /** gRPC target for the counterpart spoke's payment-orchestrator (e.g. "host:29094"). */
-  counterpartGrpc: string;
-  /** Spoke ID of the bilateral counterpart (e.g. "spoke-b"). Used to validate dest_spoke_id on incoming FX proposals. */
-  counterpartName: string;
+  /** gRPC target for this spoke's payment-orchestrator (e.g. "host:19094"). Each spoke stores its own endpoint; the relay routes by dest_spoke_id. */
+  grpcEndpoint: string;
 }
 
 function requireEnv(key: string): string {
@@ -36,25 +36,8 @@ function optionalEnv(key: string, fallback: string): string {
 }
 
 export const config = {
-  spokeA: {
-    name: "spoke-a",
-    besuRpc: requireEnv("SPOKE_A_BESU_RPC"),
-    besuWs: optionalEnv("SPOKE_A_BESU_WS", "ws://localhost:8655"),
-    htlcAddress: requireEnv("SPOKE_A_HTLC_ADDRESS"),
-    internalApiUrl: requireEnv("SPOKE_A_INTERNAL_API"),
-    counterpartGrpc: requireEnv("SPOKE_B_PAYMENT_GRPC"),
-    counterpartName: "spoke-b",
-  } satisfies SpokeConfig,
-
-  spokeB: {
-    name: "spoke-b",
-    besuRpc: requireEnv("SPOKE_B_BESU_RPC"),
-    besuWs: optionalEnv("SPOKE_B_BESU_WS", "ws://localhost:8755"),
-    htlcAddress: requireEnv("SPOKE_B_HTLC_ADDRESS"),
-    internalApiUrl: requireEnv("SPOKE_B_INTERNAL_API"),
-    counterpartGrpc: requireEnv("SPOKE_A_PAYMENT_GRPC"),
-    counterpartName: "spoke-a",
-  } satisfies SpokeConfig,
+  // Spoke registry — loaded from CACTI_SPOKES_CONFIG YAML or legacy SPOKE_A/SPOKE_B env vars.
+  spokes: loadSpokesConfig(console),
 
   /** Port for the Cacti REST API server (default: 4000). */
   apiPort: parseInt(optionalEnv("CACTI_API_PORT", "4000"), 10),
