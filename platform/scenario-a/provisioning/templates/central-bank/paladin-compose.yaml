@@ -1,0 +1,95 @@
+# Paladin node compose template for central-bank (mode: found).
+# Variables injected by the provisioning engine at runtime:
+#   SPOKE_ID              — spoke identifier (e.g. "spoke-brl")
+#   PALADIN_CB_RPC_PORT   — host port for Paladin CB HTTP RPC
+#   PALADIN_CB_WS_PORT    — host port for Paladin CB WebSocket RPC
+#   PALADIN_CB_GRPC_PORT  — host port for Paladin CB gRPC transport
+#   PALADIN_IMAGE         — Docker image for Paladin nodes
+#   SPOKE_DATA_DIR        — absolute path on host to spoke runtime data
+#   SPOKE_NETWORK_NAME    — external Docker network shared with the Besu stack
+
+services:
+  paladin-data-init:
+    image: alpine:3.20
+    user: "0:0"
+    volumes:
+      - ${SPOKE_DATA_DIR}/paladin/central-bank:/data/cb
+      - ${SPOKE_DATA_DIR}/paladin/bank-a:/data/bank-a
+      - ${SPOKE_DATA_DIR}/paladin/bank-c:/data/bank-c
+    command: ["sh", "-c", "mkdir -p /data/cb /data/bank-a /data/bank-c && chmod 777 /data/cb /data/bank-a /data/bank-c"]
+    restart: "no"
+
+  paladin-${SPOKE_ID}-cb:
+    image: ${PALADIN_IMAGE}
+    container_name: paladin-${SPOKE_ID}-cb
+    user: "${PALADIN_UID:-1000}:${PALADIN_GID:-1000}"
+    ports:
+      - "${PALADIN_CB_RPC_PORT}:8548"
+      - "${PALADIN_CB_WS_PORT}:8549"
+      - "${PALADIN_CB_GRPC_PORT}:9000"
+    environment:
+      - PALADIN_LOG_LEVEL=debug
+    volumes:
+      - ${SPOKE_DATA_DIR}/paladin/central-bank:/etc/paladin
+      - ${SPOKE_DATA_DIR}/paladin/central-bank/db:/data
+    tmpfs:
+      - /app/jna:exec,mode=1777
+      - /data/keystore:mode=0777
+    networks:
+      - spoke_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    depends_on:
+      paladin-data-init:
+        condition: service_completed_successfully
+    command: ["/etc/paladin/config.yaml", "engine"]
+
+  paladin-${SPOKE_ID}-bank-a:
+    image: ${PALADIN_IMAGE}
+    container_name: paladin-${SPOKE_ID}-bank-a
+    user: "${PALADIN_UID:-1000}:${PALADIN_GID:-1000}"
+    environment:
+      - PALADIN_LOG_LEVEL=debug
+    volumes:
+      - ${SPOKE_DATA_DIR}/paladin/bank-a:/etc/paladin
+      - ${SPOKE_DATA_DIR}/paladin/bank-a/db:/data
+    tmpfs:
+      - /app/jna:exec,mode=1777
+      - /data/keystore:mode=0777
+    networks:
+      - spoke_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    depends_on:
+      paladin-data-init:
+        condition: service_completed_successfully
+    command: ["/etc/paladin/config.yaml", "engine"]
+
+  paladin-${SPOKE_ID}-bank-c:
+    image: ${PALADIN_IMAGE}
+    container_name: paladin-${SPOKE_ID}-bank-c
+    user: "${PALADIN_UID:-1000}:${PALADIN_GID:-1000}"
+    environment:
+      - PALADIN_LOG_LEVEL=debug
+    volumes:
+      - ${SPOKE_DATA_DIR}/paladin/bank-c:/etc/paladin
+      - ${SPOKE_DATA_DIR}/paladin/bank-c/db:/data
+    tmpfs:
+      - /app/jna:exec,mode=1777
+      - /data/keystore:mode=0777
+    networks:
+      - spoke_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    depends_on:
+      paladin-data-init:
+        condition: service_completed_successfully
+    command: ["/etc/paladin/config.yaml", "engine"]
+
+networks:
+  spoke_network:
+    name: ${SPOKE_NETWORK_NAME}
+    external: true
