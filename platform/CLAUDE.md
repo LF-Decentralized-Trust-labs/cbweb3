@@ -113,6 +113,7 @@ Proto:
 - Nenhum — implementação local usa `map[string]*spokeCert` em memória; a chave privada da CA do spoke nunca é serializada para disco (025-tk3-certsource-interface)
 - Docker Compose v2 (YAML 3.8+); Bash 5+ (script de guarda do genesis) + `hyperledger/besu:25.8.0` (imagem parametrizada via `BESU_IMAGE`); `docker compose` plugin v2 (026-tk4-compose-central-bank)
 - Bind mounts via `SPOKE_DATA_DIR`; sem named volumes — garante portabilidade entre hosts (026-tk4-compose-central-bank)
+- Filesystem — `<SPOKE_DATA_DIR>/.provisioning-state.yaml`, `<SPOKE_DATA_DIR>/.deployed-addrs.env` (027-tk5-orchestration-engine)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
