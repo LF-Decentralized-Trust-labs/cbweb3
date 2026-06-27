@@ -99,6 +99,8 @@ Proto:
 - Filesystem only — genesis.json, node keypairs, bundle YAML (`bundles/<spoke-id>.bundle.yaml`) (018-spk01-cross-stack-enode)
 - Bash 5+, `jq`, `yq` (YAML parse), `openssl` (cert gen), `curl` (RPC) + `hyperledger/besu:25.8.0` (pinned), Paladin Core (project-pinned version) (019-spk02-live-join)
 - Filesystem only — genesis.json, Besu data volumes, Paladin SQLite + LevelDB data volumes, TLS cert files (019-spk02-live-join)
+- Go 1.26+ (payment-orchestrator), TypeScript (relay, frontend) + protoc + protoc-gen-go (code gen), GORM v2 (ORM + AutoMigrate), gRPC (020-fx-spoke-keyed-legs)
+- PostgreSQL — `fx_agreements` table; column additions + backfill + column drops via startup SQL (020-fx-spoke-keyed-legs)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
