@@ -116,6 +116,8 @@ Proto:
 - Filesystem — `<SPOKE_DATA_DIR>/.provisioning-state.yaml`, `<SPOKE_DATA_DIR>/.deployed-addrs.env` (027-tk5-orchestration-engine)
 - Go 1.26+ + `gopkg.in/yaml.v3` (serialização do bundle), `encoding/pem` (validação CA cert), `crypto/sha256` (hash genesis), `encoding/base64` (embedding genesis), `net/http` (JSON-RPC admin_nodeInfo) — todos stdlib ou já em `toolkit/go.mod` (028-tk6-join-bundle-emitter)
 - Filesystem — `<SPOKE_DATA_DIR>/.deployed-addrs.env`, `<SPOKE_DATA_DIR>/genesis/genesis.json`, `<SPOKE_DATA_DIR>/tls/central-bank.crt`; saída: `<outputDir>/bundles/<spoke-id>.bundle.yaml` (028-tk6-join-bundle-emitter)
+- Go 1.26+ CLI binary + `flag` stdlib (flag parsing), `encoding/json` + `gopkg.in/yaml.v3` (structured output), `os/signal` + `syscall` (signal handling) — zero new external deps (029-tk7-apply-command)
+- Filesystem — lê `<dataDir>/.provisioning-state.yaml` (dry-run); escreve nenhum arquivo diretamente (delegado ao engine e bundle emitter) (029-tk7-apply-command)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
