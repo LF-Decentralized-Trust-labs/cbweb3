@@ -18,8 +18,10 @@ export interface FXAgreement {
   counter_amount: string;
   origin_currency: string;
   counter_currency: string;
-  spoke_a_receiver?: string;
-  spoke_b_receiver?: string;
+  source_spoke_id?: string;
+  dest_spoke_id?: string;
+  source_receiver?: string;
+  dest_receiver?: string;
   rate: string;
   expiry_date: number;
   state: FXAgreementState;
@@ -37,8 +39,10 @@ export interface ProposeFXAgreementRequest {
   counter_currency: string;
   rate: string;
   expiry_date: number;
-  spoke_a_receiver?: string;
-  spoke_b_receiver?: string;
+  source_spoke_id?: string;
+  dest_spoke_id?: string;
+  source_receiver?: string;
+  dest_receiver?: string;
 }
 
 export interface ProposeFXAgreementResponse {

@@ -37,8 +37,10 @@ export function AgreementProposalPage() {
   const [settlementAgent, setSettlementAgent] = useState("");
   const [custodian, setCustodian] = useState("");
   const [beneficiary, setBeneficiary] = useState("");
-  const [spokeAReceiver, setSpokeAReceiver] = useState("");
-  const [spokeBReceiver, setSpokeBReceiver] = useState("");
+  const [sourceSpokeId, setSourceSpokeId] = useState("");
+  const [destSpokeId, setDestSpokeId] = useState("");
+  const [sourceReceiver, setSourceReceiver] = useState("");
+  const [destReceiver, setDestReceiver] = useState("");
   const [originAmount, setOriginAmount] = useState("");
   const [originCurrency, setOriginCurrency] = useState("USD");
   const [counterAmount, setCounterAmount] = useState("");
@@ -108,8 +110,10 @@ export function AgreementProposalPage() {
         counter_currency: counterCurrency,
         rate: rate,
         expiry_date: Math.floor(new Date(expiryDateTime).getTime() / 1000),
-        spoke_a_receiver: spokeAReceiver.trim() || undefined,
-        spoke_b_receiver: spokeBReceiver.trim() || undefined,
+        source_spoke_id: sourceSpokeId.trim() || undefined,
+        dest_spoke_id: destSpokeId.trim() || undefined,
+        source_receiver: sourceReceiver.trim() || undefined,
+        dest_receiver: destReceiver.trim() || undefined,
       });
       toast.success("Trade agreement proposed successfully.");
       navigate(`/agreements/${result.trade_id}`);
@@ -173,21 +177,39 @@ export function AgreementProposalPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="spoke-a-receiver">Spoke-A HTLC Receiver</Label>
+            <Label htmlFor="source-spoke-id">Source Spoke ID</Label>
             <Input
-              id="spoke-a-receiver"
-              placeholder="funded_operator@spoke-a-bank-c"
-              value={spokeAReceiver}
-              onChange={(e) => setSpokeAReceiver(e.target.value)}
+              id="source-spoke-id"
+              placeholder="spoke-brl"
+              value={sourceSpokeId}
+              onChange={(e) => setSourceSpokeId(e.target.value)}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="spoke-b-receiver">Spoke-B HTLC Receiver</Label>
+            <Label htmlFor="dest-spoke-id">Destination Spoke ID</Label>
             <Input
-              id="spoke-b-receiver"
-              placeholder="funded_operator@spoke-b-bank-b"
-              value={spokeBReceiver}
-              onChange={(e) => setSpokeBReceiver(e.target.value)}
+              id="dest-spoke-id"
+              placeholder="spoke-usd"
+              value={destSpokeId}
+              onChange={(e) => setDestSpokeId(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="source-receiver">Source Receiver</Label>
+            <Input
+              id="source-receiver"
+              placeholder="funded_operator@spoke-brl-bank-c"
+              value={sourceReceiver}
+              onChange={(e) => setSourceReceiver(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="dest-receiver">Destination Receiver</Label>
+            <Input
+              id="dest-receiver"
+              placeholder="funded_operator@spoke-usd-bank-b"
+              value={destReceiver}
+              onChange={(e) => setDestReceiver(e.target.value)}
             />
           </div>
         </CardContent>
