@@ -19,6 +19,15 @@ type Metadata struct {
 	Name string `yaml:"name"`
 }
 
+// BankCode returns the resolved commercial-bank identifier: spec.bankId when set,
+// otherwise metadata.name (which is always required). Used for mode:join.
+func (m *Manifest) BankCode() string {
+	if m.Spec.BankID != "" {
+		return m.Spec.BankID
+	}
+	return m.Metadata.Name
+}
+
 // Spec is the desired-state specification for the participant.
 // Secrets (private keys, passphrases, credentials) are never expressible here;
 // all key material is referenced via KeyProvider URI only.
@@ -27,6 +36,10 @@ type Spec struct {
 	Environment   string `yaml:"environment,omitempty"`
 	Role          string `yaml:"role"`
 	Mode          string `yaml:"mode"`
+	// BankID identifies a commercial bank within a spoke (mode:join). Optional:
+	// when empty, the bank code is derived from metadata.name. It feeds the CSR
+	// subject CN, the IdentityRegistry name, and the BANK_ID compose variable.
+	BankID        string `yaml:"bankId,omitempty"`
 	Spoke         Spoke  `yaml:"spoke"`
 	Node          Node   `yaml:"node"`
 	Image         string `yaml:"image"`
@@ -34,6 +47,10 @@ type Spec struct {
 	CertSource    string `yaml:"certSource"`
 	Relay         *Relay `yaml:"relay,omitempty"`
 	JoinBundleRef string `yaml:"joinBundleRef,omitempty"`
+	// CBEndpoint is the central bank's credential-request URL (mode:found). It is
+	// embedded into the emitted join bundle so a joining commercial bank knows
+	// where to submit its CSR. Required for a usable found→join chain.
+	CBEndpoint string `yaml:"cbEndpoint,omitempty"`
 }
 
 // Spoke identifies the blockchain network this participant belongs to.

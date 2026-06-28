@@ -287,16 +287,30 @@ func TestValidate_MissingRequiredFields(t *testing.T) {
 	}
 }
 
-// ── US2b: dataDir mode-specific rule ─────────────────────────────────────────
+// ── dataDir mode-specific rule (feature 032 T050) ────────────────────────────
 
-func TestValidate_DataDir_NotRequiredForJoin(t *testing.T) {
+// Feature 032 (mode:join) makes dataDir required for join as well, since the
+// join engine uses it as SPOKE_DATA_DIR (genesis, TLS, provisioning state, lock).
+func TestValidate_DataDir_RequiredForJoin(t *testing.T) {
 	m := validManifest()
 	m.Spec.Mode = "join"
-	m.Spec.Node.DataDir = "" // omit dataDir; should not trigger an error for mode:join
-	if err := manifest.Validate(m); err != nil {
-		if strings.Contains(err.Error(), "spec.node.dataDir") {
-			t.Errorf("dataDir should not be required for mode:join, but got: %v", err)
-		}
+	m.Spec.JoinBundleRef = "./bundles/spoke-brl.bundle.yaml"
+	m.Spec.Node.DataDir = "" // omit dataDir — must now trigger an error for mode:join
+	err := manifest.Validate(m)
+	if err == nil || !strings.Contains(err.Error(), "spec.node.dataDir") {
+		t.Errorf("dataDir must be required for mode:join, got: %v", err)
+	}
+}
+
+// Feature 032 T049: joinBundleRef is required for mode:join.
+func TestValidate_JoinBundleRef_RequiredForJoin(t *testing.T) {
+	m := validManifest()
+	m.Spec.Mode = "join"
+	m.Spec.Node.DataDir = "/opt/cbweb3/data/bank"
+	m.Spec.JoinBundleRef = "" // omit — must trigger an error for mode:join
+	err := manifest.Validate(m)
+	if err == nil || !strings.Contains(err.Error(), "spec.joinBundleRef") {
+		t.Errorf("joinBundleRef must be required for mode:join, got: %v", err)
 	}
 }
 

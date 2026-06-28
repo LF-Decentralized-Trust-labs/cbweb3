@@ -111,11 +111,21 @@ func Validate(m *Manifest) error {
 		))
 	}
 
-	// spec.node.dataDir — required when mode is "found"; the engine uses this as SPOKE_DATA_DIR
-	if m.Spec.Mode == "found" && m.Spec.Node.DataDir == "" {
-		errs = append(errs, errors.New(
-			"spec.node.dataDir: required field is missing for mode:found; " +
+	// spec.node.dataDir — required for both modes; the engine uses this as SPOKE_DATA_DIR
+	// (genesis, TLS, provisioning state, lock). mode:join also relies on it.
+	if (m.Spec.Mode == "found" || m.Spec.Mode == "join") && m.Spec.Node.DataDir == "" {
+		errs = append(errs, fmt.Errorf(
+			"spec.node.dataDir: required field is missing for mode:%s; "+
 				"set it to the absolute path where the provisioning engine will store spoke runtime data",
+			m.Spec.Mode,
+		))
+	}
+
+	// spec.joinBundleRef — required when mode is "join"; the bundle drives the join flow.
+	if m.Spec.Mode == "join" && m.Spec.JoinBundleRef == "" {
+		errs = append(errs, errors.New(
+			"spec.joinBundleRef: required field is missing for mode:join; " +
+				"set it to the path of the join bundle emitted by the founding central bank (TK-6)",
 		))
 	}
 
