@@ -46,3 +46,30 @@ var CanonicalStepOrder = []string{
 	StepOnboardRegistry,
 	StepRegisterRelay,
 }
+
+// Canonical step name constants for mode:join. Kept in a namespace distinct from
+// mode:found so both modes can share a SPOKE_DATA_DIR state file without collision.
+const (
+	StepWriteGenesis    = "write-genesis"
+	StepStartBesuJoin   = "start-besu-join"
+	StepWaitSync        = "wait-sync"
+	StepVoteQBFT        = "vote-qbft"
+	StepGenCSR          = "gen-csr"
+	StepRequestCert     = "request-cert"
+	StepReceiveCert     = "receive-cert"
+	StepProofPossession = "proof-of-possession"
+	StepStartBackend    = "start-backend"
+)
+
+// CanonicalJoinStepOrder is the definitive execution sequence for mode:join.
+var CanonicalJoinStepOrder = []string{
+	StepWriteGenesis,
+	StepStartBesuJoin,
+	StepWaitSync,
+	StepVoteQBFT,
+	StepGenCSR,
+	StepRequestCert,
+	StepReceiveCert,
+	StepProofPossession,
+	StepStartBackend,
+}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/bundle"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/genesis"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/manifest"
 )
@@ -144,5 +145,117 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 		newDeployFXAStep(spokeID, dataDir, deps.PaladinCBURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
 		newOnboardRegistryStep(spokeID, dataDir, besuRPCURL, deps.KeyProvider, deps.Timeouts.OnboardRegistry),
 		newRegisterRelayStep(spokeID, dataDir, deps.BesuRPCURL, deps.RelayRegistrar, deps.Timeouts.RelayRegistration),
+	}
+}
+
+// ErrBundleNotFound is returned by RunJoin when the join bundle is nil.
+var ErrBundleNotFound = errors.New("orchestrator: join bundle is required for mode:join")
+
+// RunJoin provisions a commercial bank into an existing spoke in mode:join.
+// It executes the 9-step sequence idempotently: each step is skipped if already
+// complete (per persisted state). Unlike RunFound it does NOT require a
+// pre-existing genesis — the write-genesis step materializes it from the bundle.
+//
+// Preconditions (caller's responsibility):
+//   - b is a validated join bundle (see bundle.ValidateForJoin).
+//   - deps.KeyProvider is non-nil and deps.BankCode is non-empty.
+//   - deps.ComposeTemplatePath points at the commercial-bank docker-compose.yaml.
+func RunJoin(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps) error {
+	return runJoinWithSteps(ctx, m, b, deps, os.Stdout, nil)
+}
+
+func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, w io.Writer, steps []Step) error {
+	if b == nil {
+		return ErrBundleNotFound
+	}
+	if deps.BankCode == "" {
+		return fmt.Errorf("orchestrator: deps.BankCode is required for mode:join")
+	}
+	spokeID := m.Spec.Spoke.ID
+	dataDir := m.Spec.Node.DataDir
+	deps.Timeouts = deps.Timeouts.resolved()
+
+	unlock, err := lockState(dataDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	state, err := LoadState(dataDir)
+	if err != nil {
+		return fmt.Errorf("orchestrator: load state: %w", err)
+	}
+	if state.SpokeID == "" {
+		state.SpokeID = spokeID
+	}
+
+	if steps == nil {
+		steps = buildJoinSteps(m, b, deps, dataDir, w)
+	}
+
+	for _, step := range steps {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		done, err := step.Check(ctx)
+		if err != nil {
+			return fmt.Errorf("step %s: check: %w", step.Name(), err)
+		}
+		if done {
+			logSkipped(w, spokeID, step.Name())
+			continue
+		}
+
+		logStarted(w, spokeID, step.Name())
+		runErr := step.Run(ctx)
+		if runErr != nil {
+			state = markStep(state, step.Name(), "failed", "")
+			_ = saveState(dataDir, state)
+			logFailed(w, spokeID, step.Name(), runErr)
+			// start-backend is a soft failure: the bank is already joined and
+			// registered on-chain; the backend stack can be started separately.
+			if step.Name() == StepStartBackend {
+				continue
+			}
+			return fmt.Errorf("step %s: %w", step.Name(), runErr)
+		}
+
+		state = markStep(state, step.Name(), "done", time.Now().UTC().Format(time.RFC3339))
+		if err := saveState(dataDir, state); err != nil {
+			return fmt.Errorf("step %s: save state: %w", step.Name(), err)
+		}
+		logCompleted(w, spokeID, step.Name())
+	}
+
+	return nil
+}
+
+// buildJoinSteps constructs the ordered list of production Step implementations
+// for mode:join.
+func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, dataDir string, w io.Writer) []Step {
+	spokeID := m.Spec.Spoke.ID
+	var rpcPort, wsPort, p2pPort int
+	if m.Spec.Node.RPC != nil {
+		rpcPort = m.Spec.Node.RPC.Port
+	}
+	if m.Spec.Node.WS != nil {
+		wsPort = m.Spec.Node.WS.Port
+	}
+	if m.Spec.Node.P2P != nil {
+		p2pPort = m.Spec.Node.P2P.Port
+	}
+
+	return []Step{
+		newWriteGenesisStep(dataDir, b.Spec.Genesis.Content, b.Spec.Genesis.Hash),
+		newStartBesuJoinStep(spokeID, deps.BankCode, dataDir, deps.ComposeTemplatePath, deps.BesuRPCURL,
+			b.Spec.Bootnode.Enode, m.Spec.Node.AdvertisedHost, m.Spec.Image, rpcPort, wsPort, p2pPort),
+		newWaitSyncStep(deps.BesuRPCURL, 1, deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval, w),
+		newVoteQBFTStep(spokeID, deps.BesuRPCURL, b.Spec.Validators, deps.Timeouts.VoteQBFT, deps.Timeouts.VoteQBFTInterval, w),
+		newGenCSRStep(deps.BankCode, deps.Institution, dataDir),
+		newRequestCertStep(deps.BankCode, dataDir, b.Spec.CBEndpoint, deps.KeyProvider, deps.Timeouts.RequestCert),
+		newReceiveCertStep(deps.BankCode, dataDir, b.Spec.CBEndpoint, deps.Timeouts.ReceiveCert, deps.Timeouts.ReceiveCertInterval, deps.Timeouts.RequestCert),
+		newProofPossessionStep(deps.BankCode, b.Spec.Contracts.RegistryAddress, deps.BesuRPCURL, deps.KeyProvider, deps.Timeouts.ProofOfPossession),
+		newStartBackendStep(spokeID, deps.BankCode, dataDir, deps.BackendComposePath, w),
 	}
 }

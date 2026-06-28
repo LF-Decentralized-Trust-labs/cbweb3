@@ -99,6 +99,97 @@ func (t Timeouts) resolved() Timeouts {
 	return t
 }
 
+// JoinDeps holds all external dependencies injected into the mode:join engine
+// (RunJoin). All fields are required unless marked optional.
+type JoinDeps struct {
+	// KeyProvider manages the commercial bank's blockchain secp256k1 key. Never nil.
+	KeyProvider keyprovider.KeyProvider
+
+	// BankCode is the resolved identifier for this commercial bank (CSR subject CN,
+	// IdentityRegistry name, BANK_ID compose variable). Never empty.
+	BankCode string
+
+	// Institution is the bank's legal name for the CSR subject O= field.
+	Institution string
+
+	// BesuRPCURL is the HTTP RPC URL of the joining bank's own Besu node.
+	BesuRPCURL string
+
+	// ComposeTemplatePath is the absolute path to the commercial-bank docker-compose.yaml.
+	ComposeTemplatePath string
+
+	// BackendComposePath is the absolute path to the bank's backend docker-compose file.
+	// Optional: when empty, the start-backend step is skipped (logged).
+	BackendComposePath string
+
+	// Timeouts overrides the default per-step timeout values. Zero values use defaults.
+	Timeouts JoinTimeouts
+}
+
+// JoinTimeouts configures per-step execution deadlines for mode:join.
+type JoinTimeouts struct {
+	// WaitSync is the maximum time to wait for the node to sync to the network. Default: 3m.
+	WaitSync time.Duration
+	// WaitSyncInterval is the polling interval for sync progress. Default: 5s.
+	WaitSyncInterval time.Duration
+	// VoteQBFT is the maximum time to wait for validator-set activation. Default: 5m.
+	VoteQBFT time.Duration
+	// VoteQBFTInterval is the polling interval for activation. Default: 3s.
+	VoteQBFTInterval time.Duration
+	// RequestCert is the timeout for the HTTP POST to cbEndpoint. Default: 30s.
+	RequestCert time.Duration
+	// ReceiveCert is the maximum polling time for the signed certificate. Default: 5m.
+	ReceiveCert time.Duration
+	// ReceiveCertInterval is the polling interval for the signed cert. Default: 10s.
+	ReceiveCertInterval time.Duration
+	// ProofOfPossession is the timeout for the IdentityRegistry transaction. Default: 2m.
+	ProofOfPossession time.Duration
+}
+
+// DefaultJoinTimeouts returns the default per-step timeout configuration for mode:join.
+func DefaultJoinTimeouts() JoinTimeouts {
+	return JoinTimeouts{
+		WaitSync:            3 * time.Minute,
+		WaitSyncInterval:    5 * time.Second,
+		VoteQBFT:            5 * time.Minute,
+		VoteQBFTInterval:    3 * time.Second,
+		RequestCert:         30 * time.Second,
+		ReceiveCert:         5 * time.Minute,
+		ReceiveCertInterval: 10 * time.Second,
+		ProofOfPossession:   2 * time.Minute,
+	}
+}
+
+// resolved returns a JoinTimeouts with zero values replaced by defaults.
+func (t JoinTimeouts) resolved() JoinTimeouts {
+	d := DefaultJoinTimeouts()
+	if t.WaitSync == 0 {
+		t.WaitSync = d.WaitSync
+	}
+	if t.WaitSyncInterval == 0 {
+		t.WaitSyncInterval = d.WaitSyncInterval
+	}
+	if t.VoteQBFT == 0 {
+		t.VoteQBFT = d.VoteQBFT
+	}
+	if t.VoteQBFTInterval == 0 {
+		t.VoteQBFTInterval = d.VoteQBFTInterval
+	}
+	if t.RequestCert == 0 {
+		t.RequestCert = d.RequestCert
+	}
+	if t.ReceiveCert == 0 {
+		t.ReceiveCert = d.ReceiveCert
+	}
+	if t.ReceiveCertInterval == 0 {
+		t.ReceiveCertInterval = d.ReceiveCertInterval
+	}
+	if t.ProofOfPossession == 0 {
+		t.ProofOfPossession = d.ProofOfPossession
+	}
+	return t
+}
+
 // SpokeInfo is the payload sent to the Cacti relay when registering a new spoke.
 type SpokeInfo struct {
 	SpokeID      string `json:"spoke_id"`

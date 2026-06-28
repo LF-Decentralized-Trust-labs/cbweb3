@@ -17,6 +17,7 @@ type logEntry struct {
 	Action   string `json:"action"`
 	Error    string `json:"error,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+	Detail   string `json:"detail,omitempty"`
 }
 
 // logLine emits a single JSON log event to w. Fields:
@@ -44,6 +45,9 @@ func logLine(w io.Writer, entry logEntry) {
 	if entry.Reason != "" {
 		record["reason"] = entry.Reason
 	}
+	if entry.Detail != "" {
+		record["detail"] = entry.Detail
+	}
 
 	data, err := json.Marshal(record)
 	if err != nil {
@@ -67,4 +71,14 @@ func logSkipped(w io.Writer, spokeID, step string) {
 
 func logFailed(w io.Writer, spokeID, step string, err error) {
 	logLine(w, logEntry{Severity: "ERROR", SpokeID: spokeID, Step: step, Action: "step_failed", Error: err.Error()})
+}
+
+// logDetail emits a structured INFO line carrying a step-specific diagnostic
+// (e.g. vote progress). Keeps in-step diagnostics in the same JSON format as the
+// lifecycle events, per Constitution VI. A nil writer is a no-op.
+func logDetail(w io.Writer, spokeID, step, detail string) {
+	if w == nil {
+		return
+	}
+	logLine(w, logEntry{Severity: "INFO", SpokeID: spokeID, Step: step, Action: "step_detail", Detail: detail})
 }
