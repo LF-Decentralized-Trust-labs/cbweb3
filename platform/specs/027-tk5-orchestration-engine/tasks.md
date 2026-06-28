@@ -91,8 +91,8 @@
 
 ### Passo 10 — `register-relay`
 
-- [X] T029 [US1] Escrever testes failing para passo 10 em `scenario-a/toolkit/engine/orchestrator/steps/register_relay_test.go`: `check()` chama `RelayRegistrar.IsRegistered` e retorna `true`/`false`; `run()` chama `RelayRegistrar.Register`; erro de `ErrRelayUnavailable` ou `ErrNotImplemented` NÃO propaga (step marcado `failed` mas engine continua)
-- [X] T030 [US1] Implementar passo 10 em `scenario-a/toolkit/engine/orchestrator/steps/register_relay.go`: `Check` chama `deps.RelayRegistrar.IsRegistered`; `Run` chama `deps.RelayRegistrar.Register` com `SpokeInfo` extraído do manifesto; capturar `ErrRelayUnavailable`/`ErrNotImplemented` e retornar nil (soft failure — passo fica como `failed` no estado mas engine não aborta)
+- [X] T029 [US1] Escrever testes failing para passo 10 em `scenario-a/toolkit/engine/orchestrator/steps/register_relay_test.go`: `check()` chama `RelayRegistrar.IsRegistered` e retorna `true`/`false` (relay indisponível em `Check` → `false`, para retry); `run()` chama `RelayRegistrar.Register` e PROPAGA o erro retornado (passo normal — falha do relay configurado falha a execução)
+- [X] T030 [US1] Implementar passo 10 em `scenario-a/toolkit/engine/orchestrator/steps/register_relay.go`: `Check` chama `deps.RelayRegistrar.IsRegistered`; `Run` chama `deps.RelayRegistrar.Register` com `SpokeInfo` extraído do manifesto e RETORNA o erro de `Register` (passo normal/hard step: quando há relay configurado e ele rejeita/está inacessível, a execução falha). Quando nenhum `relay.endpoint` é configurado, TK-7 injeta `NoOpRelayRegistrar` cujo `Register` é um no-op de sucesso (registro simplesmente pulado, não é falha)
 
 ### Wiring e teste de integração
 
@@ -251,7 +251,7 @@ Dev A e Dev B reintegram em Phase 3 passos 6–10 e Phase 4.
 - Testes **devem** falhar antes da implementação (Constitution V)
 - Fazer commit após cada checkpoint de fase
 - O arquivo de estado `running` nunca é escrito em disco (invariante crítico — data-model.md)
-- Passo 10 (register-relay): falha soft — engine não aborta se relay indisponível
+- Passo 10 (register-relay): passo normal/hard step — relay configurado que rejeita/está inacessível falha a execução; sem `relay.endpoint`, TK-7 injeta `NoOpRelayRegistrar` (no-op de sucesso, registro pulado)
 - Nenhum arquivo em `deploy/local/` ou `make/` é modificado neste PR
 
 ---

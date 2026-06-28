@@ -70,7 +70,7 @@
    ```
 2. A implementação padrão (`httpRelayRegistrar`) tenta `POST <relay.endpoint>/api/v1/spokes` — retorna `ErrNotImplemented` se o relay responder 404/405 (endpoint ainda não existe).
 3. O `check()` do passo 10 chama `IsRegistered`; se o relay retornar 404, considera o passo `pending`.
-4. O engine não falha fatalmente se o relay estiver indisponível no passo 10 — registra `step_failed` com `error: relay unavailable` e deixa o passo como `failed` para retry.
+4. O passo 10 é um passo normal (hard step): `Run` propaga o erro de `Register`, então um relay configurado que rejeita/está inacessível registra `step_failed` e falha a execução (como é o último passo, o run reporta falha); `Check` retorna `false` quando o relay está indisponível, de modo que uma nova execução faz retry. Quando nenhum `relay.endpoint` é configurado, TK-7 injeta `NoOpRelayRegistrar` e o passo conclui como no-op de sucesso (registro pulado).
 
 **Rationale**: Acoplamento rígido ao endpoint do relay bloquearia TK-5 de ser testável hoje. A interface `RelayRegistrar` permite mock nos testes e a implementação real é plugável quando RL-1 for concluído.
 

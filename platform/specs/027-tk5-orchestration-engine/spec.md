@@ -91,7 +91,7 @@ Para `mode: found`, o banco central registra sua própria identidade on-chain no
 - O que acontece quando o Besu do spoke ainda não está pronto quando o engine inicia (passo 1 falha por timeout de RPC)?
 - O que acontece quando o Paladin não sobe após o restart no passo 5 (health check expira)?
 - O que acontece quando `.deployed-addrs.env` existe mas está corrompido (chave presente com valor vazio)?
-- O que acontece quando o relay está indisponível no passo 10 — o engine falha o spoke inteiro ou marca o passo como `pending` para retry?
+- O que acontece quando o relay está indisponível no passo 10 — o engine falha o spoke inteiro ou marca o passo como `pending` para retry? → O passo 10 é um passo normal (hard step): quando um `relay.endpoint` está configurado, o engine usa o `RelayRegistrar` HTTP e o passo FALHA a execução (`step_failed`) se o relay rejeitar ou estiver inacessível; como é o último passo, a execução reporta falha. O `check()` do passo retorna `false` quando o relay está indisponível, de modo que uma re-execução tenta novamente. Quando nenhum `relay.endpoint` está configurado, o injetor (TK-7) fornece `NoOpRelayRegistrar` e o passo conclui com sucesso como no-op (o registro no relay é simplesmente pulado).
 - O que acontece quando o engine é executado por dois processos simultaneamente no mesmo `SPOKE_DATA_DIR`?
 - O que acontece quando `SPOKE_DATA_DIR` não existe no momento da execução?
 

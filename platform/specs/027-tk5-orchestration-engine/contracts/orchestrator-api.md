@@ -61,6 +61,8 @@ func (NoOpRelayRegistrar) Register(_ context.Context, _ SpokeInfo) error        
 func (NoOpRelayRegistrar) IsRegistered(_ context.Context, _ string) (bool, error) { return false, nil }
 ```
 
+**Step 10 (`register-relay`) semantics.** `register-relay` is a normal sequenced hard step. The engine accepts an injected `RelayRegistrar` via `deps.RelayRegistrar`; the step's `Run` calls `Register` and returns its error. When a relay endpoint is configured in the manifest, the caller (TK-7) injects an HTTP relay registrar (`NewHTTPRelayRegistrar(endpoint)`) and the step **fails the run** (`step_failed`) if the relay rejects or is unreachable; `check()` returns `false` while the relay is unavailable, so a re-run retries. When no relay endpoint is configured, the caller injects `NoOpRelayRegistrar`, whose `Register` is a successful no-op — the step completes successfully and relay registration is simply skipped (not a failure).
+
 ---
 
 ## Log contract
