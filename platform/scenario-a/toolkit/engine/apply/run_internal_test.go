@@ -17,6 +17,21 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/orchestrator"
 )
 
+// validEmittedBundleForTest returns a minimal JoinBundle that passes
+// bundle.ValidateForJoin, so the found-path's post-emission guard accepts it.
+func validEmittedBundleForTest() *bundle.JoinBundle {
+	return &bundle.JoinBundle{
+		Spec: bundle.BundleSpec{
+			SpokeID:    "spoke-brl",
+			Genesis:    bundle.GenesisSpec{Hash: "sha256:x", Content: "eyJ9"},
+			Bootnode:   bundle.BootnodeSpec{Enode: "enode://abc@h:1"},
+			Contracts:  bundle.ContractsSpec{RegistryAddress: "0x1234"},
+			Validators: []bundle.ValidatorSpec{{Address: "0xCB", RPCURL: "http://cb:8645"}},
+			CBEndpoint: "http://cb:8080/cr",
+		},
+	}
+}
+
 // internalTestdataDir returns the path to cmd/cbweb3/testdata relative to this package.
 func internalTestdataDir(t *testing.T) string {
 	t.Helper()
@@ -91,7 +106,7 @@ func TestRun_SuccessPath(t *testing.T) {
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			bundleCalled = true
-			return &bundle.JoinBundle{}, nil
+			return validEmittedBundleForTest(), nil
 		},
 	}
 
@@ -158,7 +173,7 @@ func TestRun_IdempotenceAllDone(t *testing.T) {
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
 			bundleCallCount++
-			return &bundle.JoinBundle{}, nil
+			return validEmittedBundleForTest(), nil
 		},
 	}
 
@@ -190,7 +205,7 @@ func TestRun_BundlePathAfterSuccess(t *testing.T) {
 			return nil
 		},
 		emitBundle: func(_ context.Context, _ bundle.BundleInput) (*bundle.JoinBundle, error) {
-			return &bundle.JoinBundle{}, nil
+			return validEmittedBundleForTest(), nil
 		},
 	}
 

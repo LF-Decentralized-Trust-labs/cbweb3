@@ -23,8 +23,14 @@ func DryRun(_ context.Context, in ApplyInput) (ApplyResult, error) {
 	// Read state file — missing file means all steps pending.
 	state, _ := orchestrator.LoadState(m.Spec.Node.DataDir)
 
-	steps := make([]StepResult, len(orchestrator.CanonicalStepOrder))
-	for i, stepName := range orchestrator.CanonicalStepOrder {
+	// Select the step order for the manifest's mode.
+	stepOrder := orchestrator.CanonicalStepOrder
+	if m.Spec.Mode == "join" {
+		stepOrder = orchestrator.CanonicalJoinStepOrder
+	}
+
+	steps := make([]StepResult, len(stepOrder))
+	for i, stepName := range stepOrder {
 		status := "pending"
 		for _, s := range state.Steps {
 			if s.Step == stepName && s.Status == "done" {

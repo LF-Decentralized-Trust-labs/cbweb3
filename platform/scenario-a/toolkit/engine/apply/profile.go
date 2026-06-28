@@ -17,6 +17,12 @@ type LocalProfile struct {
 	ComposeTemplatePath string
 	PaladinConfigDir    string
 	OutputDir           string
+
+	// CommercialBankComposePath is the TK-8 commercial-bank Besu compose template
+	// (used by mode:join). BackendComposePath is the bank's backend compose file
+	// (optional; empty means the start-backend step is a no-op).
+	CommercialBankComposePath string
+	BackendComposePath        string
 }
 
 // LocalProfileFromExDir builds a LocalProfile for the given manifest spec.
@@ -41,6 +47,11 @@ func LocalProfileFromExDir(exDir, dataDir string, rpcPort int) LocalProfile {
 
 	p.OutputDir = envOr("CBWEB3_OUTPUT_DIR", filepath.Dir(dataDir))
 
+	p.CommercialBankComposePath = envOr("CBWEB3_COMMERCIAL_BANK_COMPOSE",
+		filepath.Join(exDir, "..", "..", "provisioning", "templates", "commercial-bank", "docker-compose.yaml"))
+
+	p.BackendComposePath = envOr("CBWEB3_BACKEND_COMPOSE", "")
+
 	return p
 }
 
@@ -49,4 +60,14 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// firstNonEmpty returns the first non-empty string among its arguments, or "".
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

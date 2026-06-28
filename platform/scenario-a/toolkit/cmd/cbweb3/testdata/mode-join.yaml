@@ -5,8 +5,9 @@ metadata:
 spec:
   scenario: a
   environment: local
-  role: bank
+  role: commercial-bank
   mode: join
+  bankId: bank-alpha
   spoke:
     id: spoke-brl
     chainId: 1337

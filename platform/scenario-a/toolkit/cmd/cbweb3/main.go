@@ -79,12 +79,12 @@ func runApply(args []string) int {
 	}
 
 	// Guard unsupported modes and environments.
-	if m.Spec.Mode != "found" {
-		fmt.Fprintf(os.Stderr, "mode: %s not yet supported — will be implemented in TK-9\n", m.Spec.Mode)
+	if m.Spec.Mode != "found" && m.Spec.Mode != "join" {
+		fmt.Fprintf(os.Stderr, "mode: %s not supported (accepted: found, join)\n", m.Spec.Mode)
 		return 1
 	}
 	if m.Spec.Environment != "local" {
-		fmt.Fprintf(os.Stderr, "environment %s is not yet supported in TK-7 — only local is available\n", m.Spec.Environment)
+		fmt.Fprintf(os.Stderr, "environment %s is not yet supported — only local is available\n", m.Spec.Environment)
 		return 1
 	}
 
@@ -102,12 +102,24 @@ func runApply(args []string) int {
 	}
 	profile := apply.LocalProfileFromExDir(exDir, m.Spec.Node.DataDir, rpcPort)
 
+	// Resolve the join bundle path relative to the manifest file (mode:join).
+	joinBundlePath := ""
+	if m.Spec.Mode == "join" && m.Spec.JoinBundleRef != "" {
+		joinBundlePath = m.Spec.JoinBundleRef
+		if !filepath.IsAbs(joinBundlePath) {
+			joinBundlePath = filepath.Join(filepath.Dir(manifestFile), joinBundlePath)
+		}
+	}
+
 	in := apply.ApplyInput{
-		Manifest:   m,
-		DryRun:     dryRun,
-		OutputFmt:  outputFmt,
-		OutputDir:  profile.OutputDir,
-		BesuRPCURL: profile.BesuRPCURL,
+		Manifest:                  m,
+		DryRun:                    dryRun,
+		OutputFmt:                 outputFmt,
+		OutputDir:                 profile.OutputDir,
+		BesuRPCURL:                profile.BesuRPCURL,
+		JoinBundlePath:            joinBundlePath,
+		CommercialBankComposePath: profile.CommercialBankComposePath,
+		BackendComposePath:        profile.BackendComposePath,
 	}
 
 	// Set up signal handling so Ctrl-C produces a partial report.

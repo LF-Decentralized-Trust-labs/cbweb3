@@ -21,6 +21,12 @@ type ApplyInput struct {
 	OutputFmt  string // "yaml" | "json"; default "yaml"
 	OutputDir  string // where to write bundles/<spoke-id>.bundle.yaml
 	BesuRPCURL string // http://localhost:<rpc.port> (local profile)
+	// JoinBundlePath is the resolved absolute path to the join bundle (mode:join).
+	JoinBundlePath string
+	// CommercialBankComposePath / BackendComposePath are resolved (binary-relative)
+	// paths for mode:join, passed through from the CLI profile.
+	CommercialBankComposePath string
+	BackendComposePath        string
 }
 
 // ApplyResult is the structured execution report written to stdout.
