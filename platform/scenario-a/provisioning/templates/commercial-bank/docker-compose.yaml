@@ -1,0 +1,82 @@
+# Template Compose — commercial-bank (TK-8)
+# Provisioning toolkit for Scenario A — Enhanced Correspondent Banking.
+#
+# USAGE: Invoked by the mode:join orchestration engine (TK-9). Do NOT run directly
+# without setting all required variables.
+#
+# DIFFERENCE FROM TK-4 (central-bank): there is NO genesis-init service. The
+# genesis is supplied by the join bundle (TK-6) and written to
+# ${SPOKE_DATA_DIR}/genesis/genesis.json by the engine BEFORE `docker compose up`.
+# This node is a JOINER: it requires BOOTNODE_ENODE and syncs from the spoke.
+#
+# REQUIRED variables (no default — docker compose fails explicitly if absent):
+#   SPOKE_ID              Spoke identifier (e.g. spoke-brl)
+#   BANK_ID               Commercial bank identifier within the spoke (e.g. commercial-bank-alpha)
+#   BESU_RPC_PORT         Host port mapped to Besu RPC HTTP (internal: 8545)
+#   BESU_WS_PORT          Host port mapped to Besu RPC WS  (internal: 8546)
+#   BESU_P2P_PORT         Host port mapped to Besu P2P     (internal: 30303)
+#   BESU_IMAGE            Besu Docker image (e.g. hyperledger/besu:25.8.0)
+#   SPOKE_DATA_DIR        Base directory for all bank data (bind mounts)
+#   BESU_ADVERTISED_HOST  Host declared for this node's enode (never inferred)
+#   BOOTNODE_ENODE        Enode of the spoke bootnode (REQUIRED — this is a joiner)
+#
+# OPTIONAL variables (with sensible defaults):
+#   SPOKE_NETWORK_NAME    Docker network name (default: cbweb3-${SPOKE_ID}-besu)
+#   BESU_CONTAINER_NAME   Container name for the Besu node
+#   BESU_NAT_PROFILE      NAT addressing profile: DOCKER (default) or NONE (ADR-001)
+#   BESU_LOGGING          Besu log level (default: INFO)
+#   BESU_HOST_ALLOWLIST   Comma-separated host allowlist for RPC (default: '*')
+#   BESU_CORS_ORIGINS     CORS origins for RPC HTTP (default: 'all')
+
+services:
+
+  # ─── Besu node (commercial-bank / joiner) ──────────────────────────────────
+  # No genesis-init: the genesis.json is written from the join bundle by TK-9.
+  besu:
+    image: ${BESU_IMAGE?BESU_IMAGE is required (e.g. hyperledger/besu:25.8.0)}
+    container_name: ${BESU_CONTAINER_NAME:-cbweb3-${SPOKE_ID}-besu.${BANK_ID}}
+    restart: always
+    volumes:
+      - ${SPOKE_DATA_DIR?SPOKE_DATA_DIR is required}/nodes/commercial-bank/data:/opt/besu/data
+      - ${SPOKE_DATA_DIR}/genesis:/opt/besu/genesis:ro
+      - ./scripts/entry.sh:/entry.sh:ro
+    ports:
+      - "${BESU_RPC_PORT?BESU_RPC_PORT is required}:8545"
+      - "${BESU_WS_PORT?BESU_WS_PORT is required}:8546"
+      - "${BESU_P2P_PORT?BESU_P2P_PORT is required}:30303"
+      - "${BESU_P2P_PORT}:30303/udp"
+    environment:
+      SPOKE_ID: ${SPOKE_ID?SPOKE_ID is required}
+      BANK_ID: ${BANK_ID?BANK_ID is required}
+      BESU_NAT_PROFILE: ${BESU_NAT_PROFILE:-DOCKER}
+      BESU_ADVERTISED_HOST: ${BESU_ADVERTISED_HOST:?BESU_ADVERTISED_HOST is required}
+      BESU_P2P_PORT: "30303"
+      BESU_RPC_PORT_INTERNAL: "8545"
+      BESU_WS_PORT_INTERNAL: "8546"
+      BESU_LOGGING: ${BESU_LOGGING:-INFO}
+      BESU_HOST_ALLOWLIST: ${BESU_HOST_ALLOWLIST:-*}
+      BESU_CORS_ORIGINS: ${BESU_CORS_ORIGINS:-all}
+      # BOOTNODE_ENODE is REQUIRED for a joiner (no default — fail fast if absent).
+      BOOTNODE_ENODE: ${BOOTNODE_ENODE:?BOOTNODE_ENODE is required for mode:join}
+    entrypoint: ["/bin/sh", "/entry.sh"]
+    healthcheck:
+      test:
+        - CMD
+        - sh
+        - -c
+        - >
+          curl -sf -X POST http://localhost:8545
+          -H 'Content-Type: application/json'
+          -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+          | grep -q '"result"'
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 15s
+    networks:
+      - spoke_besu
+
+networks:
+  spoke_besu:
+    name: ${SPOKE_NETWORK_NAME:-cbweb3-${SPOKE_ID}-besu}
+    driver: bridge

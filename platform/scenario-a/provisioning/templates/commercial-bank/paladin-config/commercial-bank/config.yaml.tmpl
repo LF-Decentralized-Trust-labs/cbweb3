@@ -1,0 +1,119 @@
+nodeName: {{.SpokeID}}-{{.BankID}}
+
+log:
+  level: debug
+
+db:
+  sqlite:
+    dsn: "/data/paladin.db"
+    autoMigrate: true
+    migrationsDir: "./db/migrations/sqlite"
+    debugQueries: false
+
+rpcServer:
+  enabled: true
+  http:
+    port: 8548
+    address: 0.0.0.0
+  ws:
+    port: 8549
+    address: 0.0.0.0
+
+# Joining bank's own Besu node (host port {{.BesuRPCPort}}/{{.BesuWSPort}})
+blockchain:
+  http:
+    url: "http://host.docker.internal:{{.BesuRPCPort}}"
+  ws:
+    url: "ws://host.docker.internal:{{.BesuWSPort}}"
+
+transports:
+  grpc:
+    plugin:
+      type: "c-shared"
+      library: "/app/transports/libgrpc.so"
+    config:
+      port: 9000
+      address: 0.0.0.0
+      externalHostname: paladin-{{.SpokeID}}-{{.BankID}}
+      tls:
+        certFile: /etc/paladin/tls.crt
+        keyFile: /etc/paladin/tls.key
+
+domains:
+  zeto:
+    registryAddress: "{{.ZetoFactoryAddress}}"
+    allowSigning: true
+    fixedSigningIdentity: "funded_operator"
+    plugin:
+      type: "c-shared"
+      library: "/app/domains/libzeto.so"
+    config:
+      domainContracts:
+        implementations:
+          - name: "Zeto_Anon"
+            circuits:
+              deposit:
+                name: "deposit"
+              withdraw:
+                name: "withdraw"
+              transfer:
+                name: "anon"
+              transferLocked:
+                name: "anon"
+      snarkProver:
+        circuitsDir: "/app/domains/zeto/zkp"
+        provingKeysDir: "/app/domains/zeto/zkp"
+  pente:
+    registryAddress: "{{.PenteFactoryAddress}}"
+    allowSigning: true
+    fixedSigningIdentity: "funded_operator"
+    plugin:
+      type: "jar"
+      library: "/app/domains/pente.jar"
+      class: "io.kaleido.paladin.pente.domain.PenteDomainFactory"
+    config:
+      enabled: true
+      privateMTX: true
+
+registries:
+  evm-registry:
+    plugin:
+      type: "c-shared"
+      library: "/app/registries/libevm.so"
+    config:
+      contractAddress: "{{.RegistryContractAddress}}"
+
+wallets:
+  - name: "funded_wallet"
+    keySelector: "^funded_operator$"
+    signer:
+      keyStore:
+        type: static
+        static:
+          keys:
+            funded_operator:
+              encoding: hex
+              inline: "ae6ae8e5ccbfb04590405997ee2d52d2b330726137b875053c36d94e974d162f"
+      keyDerivation:
+        type: direct
+  - name: "hd_wallet"
+    keySelector: ".*"
+    signer:
+      keyStore:
+        type: filesystem
+        filesystem:
+          path: /data/keystore
+      keyDerivation:
+        type: bip32
+
+publicTxManager:
+  gasLimit:
+    gasEstimateFactor: 2.0
+  gasPrice:
+    fixedGasPrice:
+      maxFeePerGas: "1000000000"
+      maxPriorityFeePerGas: "0"
+
+persistence:
+  leveldb:
+    path: "/data/leveldb"
