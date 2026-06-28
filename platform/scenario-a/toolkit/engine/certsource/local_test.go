@@ -265,8 +265,25 @@ func TestFactory_ProdURI_ReturnsStubWithErrNotImplemented(t *testing.T) {
 	}
 }
 
+func TestFactory_SelfSignedBare_ReturnsLocalCertSource(t *testing.T) {
+	cs, err := New("self-signed")
+	if err != nil {
+		t.Fatalf("New(self-signed): %v", err)
+	}
+	csrPEM := generateTestCSR(t, "bank-a", "ROLE_COMMERCIAL_BANK")
+	certPEM, err := cs.IssueLeafCert(context.Background(), csrPEM, "spoke-brl")
+	if err != nil {
+		t.Fatalf("IssueLeafCert via factory: %v", err)
+	}
+	caCertPEM, err := cs.GetTrustAnchor(context.Background(), "spoke-brl")
+	if err != nil {
+		t.Fatalf("GetTrustAnchor via factory: %v", err)
+	}
+	verifyLeafCert(t, certPEM, caCertPEM, "bank-a")
+}
+
 func TestFactory_InvalidURI_ReturnsError(t *testing.T) {
-	for _, uri := range []string{"", "http://foo", "lnet-pki", "self-signed", "ca:"} {
+	for _, uri := range []string{"", "http://foo", "lnet-pki", "self-signed-x", "ca:"} {
 		_, err := New(uri)
 		if err == nil {
 			t.Errorf("New(%q): expected error, got nil", uri)

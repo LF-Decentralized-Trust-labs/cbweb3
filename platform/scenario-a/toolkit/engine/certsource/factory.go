@@ -8,25 +8,27 @@ import (
 )
 
 const (
+	selfSignedBare   = "self-signed"
 	selfSignedScheme = "self-signed://"
 	prodScheme       = "ca://"
 )
 
-// New parses the certSource URI from spec.certSource and returns the
+// New parses the certSource value from spec.certSource and returns the
 // appropriate CertSource implementation.
 //
-// Accepted URI forms:
-//   - self-signed://<any>  → LocalCertSource (in-memory, self-signed CA per spoke)
-//   - ca://<any>           → prodCertSource stub (all methods return ErrNotImplemented)
+// Accepted forms:
+//   - self-signed          → LocalCertSource (canonical local value, per concat.md §5.1)
+//   - self-signed://<any>   → LocalCertSource (tolerated scheme form)
+//   - ca://<any>            → prodCertSource stub (all methods return ErrNotImplemented)
 //
-// Returns an error for any URI that does not begin with a recognised scheme.
+// Returns an error for any value that does not match a recognised form.
 func New(uri string) (CertSource, error) {
 	switch {
-	case strings.HasPrefix(uri, selfSignedScheme):
+	case uri == selfSignedBare || strings.HasPrefix(uri, selfSignedScheme):
 		return NewLocalCertSource(), nil
 	case strings.HasPrefix(uri, prodScheme):
 		return &prodCertSource{}, nil
 	default:
-		return nil, fmt.Errorf("certsource: invalid URI %q: must begin with %q or %q", uri, selfSignedScheme, prodScheme)
+		return nil, fmt.Errorf("certsource: invalid value %q: must be %q, or begin with %q or %q", uri, selfSignedBare, selfSignedScheme, prodScheme)
 	}
 }
