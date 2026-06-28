@@ -1,7 +1,7 @@
-# Implementation Plan: [FEATURE]
+# Implementation Plan: TK-1 — Manifest Schema and Validation for Participant Deployment
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+**Branch**: `023-manifest-schema-validation` | **Date**: 2026-06-27 | **Spec**: `specs/023-manifest-schema-validation/spec.md`
+**Input**: Feature specification from `/specs/023-manifest-schema-validation/spec.md`
 
 **Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
 
@@ -31,7 +31,30 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+This feature delivers the ParticipantDeployment manifest JSON Schema (draft-07) and its
+runtime validator for the Scenario A provisioning toolkit. Per-principle assessment:
+
+- **I. Scenario-Scoped Independence — PASS.** Schema and validator live entirely under
+  `scenario-a/toolkit/`. The schema rejects `spec.scenario: b` (FR-002), structurally enforcing
+  that this artifact only describes Scenario A participants. No Scenario B files are read or written.
+- **II. Privacy by Design — PASS (security-relevant).** The schema MUST NOT accommodate secrets:
+  private keys, passphrases, and credentials cannot be expressed as manifest fields (FR-007).
+  `spec.keyProvider` / `spec.certSource` carry only URI references to a backend, never key material.
+  This keeps key handling delegated to TK-2/TK-3, consistent with the constitution's prohibition on
+  plaintext sensitive data in declarative artifacts.
+- **III. Atomic Settlement Guarantee — N/A.** This task introduces no settlement, HTLC, or
+  cross-network transfer logic; it is a static schema + validator over a deployment manifest.
+- **IV. Compliance Gate Before Participation — N/A.** No payment path, IdentityRegistry, or
+  Keycloak interaction is introduced; validation runs at provisioning time, before any runtime entity exists.
+- **V. Test-First at Every Layer — PASS.** Validator is a Go toolkit component covered by `go test`.
+  The four user stories (valid manifest, missing field, invalid enum, editor tooling) map directly to
+  acceptance tests written before implementation, per the Red-Green-Refactor discipline. SC-005
+  pins the canonical minimal manifest (concat.md §5.1) as a passing fixture.
+- **VI. Observability and Auditability — PASS.** The validator fails fast and reports every
+  violation in a single pass (FR-004, SC-003), naming each field by full path (FR-002, SC-002). No
+  error is swallowed silently; missing-field and enum-violation cases produce distinct messages (FR-005).
+
+**Gate result: PASS.** No deviations to record in Complexity Tracking.
 
 ## Project Structure
 

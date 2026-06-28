@@ -41,16 +41,16 @@ Representa um acordo de câmbio bilateral entre dois spokes do Scenario A. Após
 ### Mapeamento entre camadas
 
 ```
-Proto message          →  Go domain struct       →  DB column (GORM)
+ProposeFXAgreementRequest  →  Go domain struct   →  DB column (GORM)
 ─────────────────────────────────────────────────────────────────────
-source_spoke_id (21)   →  SourceSpokeId          →  source_spoke_id
-dest_spoke_id (22)     →  DestSpokeId            →  dest_spoke_id
-source_receiver (23)   →  SourceReceiver         →  source_receiver
-dest_receiver (24)     →  DestReceiver           →  dest_receiver
+source_spoke_id (16)   →  SourceSpokeId          →  source_spoke_id
+dest_spoke_id (17)     →  DestSpokeId            →  dest_spoke_id
+source_receiver (18)   →  SourceReceiver         →  source_receiver
+dest_receiver (19)     →  DestReceiver           →  dest_receiver
 ```
 
 ```
-Proto message          →  TypeScript interface    →  REST JSON key
+FXAgreement (response) →  TypeScript interface    →  REST JSON key
 ─────────────────────────────────────────────────────────────────────
 source_spoke_id (21)   →  source_spoke_id         →  source_spoke_id
 dest_spoke_id (22)     →  dest_spoke_id           →  dest_spoke_id

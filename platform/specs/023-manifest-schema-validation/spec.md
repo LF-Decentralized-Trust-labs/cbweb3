@@ -93,7 +93,7 @@ A developer authoring a new manifest in their editor (VS Code with YAML extensio
 - **FR-008**: The schema MUST be versioned; manifests with an unrecognized `apiVersion` MUST be rejected with an error naming the field.
 - **FR-009**: The schema MUST accept `environment` (values: `local`, `staging`, `prod`) as an optional field; its absence MUST NOT block validation.
 - **FR-010**: The schema MUST accept `spec.relay.endpoint` as an optional field for relay configuration.
-- **FR-011**: `joinBundleRef` MUST be accepted as an optional field in the schema; conditional-required enforcement (required only when `mode: join`) is out of scope for this task but MUST be documented in the schema description for that field.
+- **FR-011**: `joinBundleRef` MUST be accepted as an optional field in the schema; conditional-required enforcement (required only when `mode: join`) is out of scope for this task — it belongs to the apply command (TK-7) and the join orchestration (TK-9) — but MUST be documented in the schema description for that field.
 
 ### Key Entities
 
@@ -120,4 +120,4 @@ A developer authoring a new manifest in their editor (VS Code with YAML extensio
 - `spec.keyProvider` and `spec.certSource` accept URI-format strings (e.g., `kms://local-emulator`, `ca://...`, `self-signed`); deep URI parsing is out of scope.
 - The schema covers only Scenario A manifests; Scenario B manifests are out of scope.
 - The schema and its runtime validator are co-located in the same toolkit and must agree on required fields; keeping them in sync manually is acceptable for this task.
-- Additional fields needed by `mode: join` (e.g., `joinBundleRef` conditionally required) are tracked as optional in this schema; their conditional enforcement belongs to a later task (TK-3 or later).
+- Additional fields needed by `mode: join` (e.g., `joinBundleRef` conditionally required) are tracked as optional in this schema; their conditional enforcement belongs to a later task (TK-7 / TK-9).

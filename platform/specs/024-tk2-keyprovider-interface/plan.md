@@ -1,7 +1,7 @@
-# Implementation Plan: [FEATURE]
+# Implementation Plan: TK-2 — Interface keyProvider
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+**Branch**: `024-tk2-keyprovider-interface` | **Date**: 2026-06-27 | **Spec**: `specs/024-tk2-keyprovider-interface/spec.md`
+**Input**: Feature specification from `/specs/024-tk2-keyprovider-interface/spec.md`
 
 **Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
 
@@ -31,7 +31,35 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+This feature defines the `KeyProvider` interface, a local in-memory KMS emulator
+(`kms://local-emulator`), a production stub, and a URI-driven factory for the Scenario A
+provisioning toolkit. Production KMS implementation is deferred to Phase 4. Per-principle assessment:
+
+- **I. Scenario-Scoped Independence — PASS.** The interface, emulator, stub, and factory live
+  entirely under `scenario-a/toolkit/`. No code is shared with Scenario B and no Scenario B
+  artifacts are read or written.
+- **II. Privacy by Design — PASS (security-relevant: keys never in files/env/manifest).** The
+  interface never returns private key material to callers — only public keys (EVM address) and
+  signatures are exposed (FR-002). The local emulator generates and holds keys exclusively in memory,
+  writing no key material to file, environment variable, or log (FR-003), and the manifest carries
+  only a `keyProvider` URI reference, never key bytes (KeyProviderURI entity). This directly upholds
+  the constitution's prohibition on plaintext sensitive data outside the privacy-preserving layer.
+- **III. Atomic Settlement Guarantee — N/A.** No settlement or cross-network transfer logic is
+  introduced; signing is an isolated cryptographic primitive consumed later by the orchestration engine.
+- **IV. Compliance Gate Before Participation — N/A.** No payment path, IdentityRegistry, or
+  Keycloak interaction is introduced; the provider operates at provisioning time.
+- **V. Test-First at Every Layer — PASS.** The package is covered by `go test`. The three user
+  stories (no keys in files, local-only operation, prod extensibility) map to acceptance tests
+  written before implementation, including idempotent `GenerateKey`, wrong-size payload rejection,
+  `key not found` errors, and concurrent-access safety, per Red-Green-Refactor (SC-002).
+- **VI. Observability and Auditability — PASS.** The factory returns a readable error (no raw
+  stack trace) for malformed or unrecognized URIs (FR-008, SC-005); all operations support context
+  cancellation (FR-010). Errors are surfaced descriptively rather than swallowed; logging key
+  material is explicitly prohibited (FR-003), consistent with structured-logging discipline.
+
+**Gate result: PASS.** No deviations to record in Complexity Tracking. Production KMS deferral to
+Phase 4 is a scope boundary, not an architectural deviation; the production stub preserves the
+interface contract so the orchestration engine needs no code change at migration (SC-003).
 
 ## Project Structure
 
