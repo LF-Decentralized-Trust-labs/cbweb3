@@ -5,12 +5,43 @@ package bundle
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ethereum/go-ethereum/crypto"
 )
+
+// EnodeToValidatorAddress derives the QBFT validator EVM address from an enode URI.
+// The enode embeds the node's uncompressed secp256k1 public key (128 hex chars,
+// no 0x04 prefix); the validator address is the last 20 bytes of its keccak256.
+// Exported so the mode:join engine derives addresses with identical semantics.
+func EnodeToValidatorAddress(enode string) (string, error) {
+	if !strings.HasPrefix(enode, "enode://") {
+		return "", fmt.Errorf("enode: missing enode:// prefix")
+	}
+	rest := strings.TrimPrefix(enode, "enode://")
+	at := strings.Index(rest, "@")
+	if at < 0 {
+		return "", fmt.Errorf("enode: missing @ separator")
+	}
+	pubHex := rest[:at]
+	if len(pubHex) != 128 {
+		return "", fmt.Errorf("enode: expected 128 hex chars of pubkey, got %d", len(pubHex))
+	}
+	pubBytes, err := hex.DecodeString(pubHex)
+	if err != nil {
+		return "", fmt.Errorf("enode: decode pubkey: %w", err)
+	}
+	pub, err := crypto.UnmarshalPubkey(append([]byte{0x04}, pubBytes...))
+	if err != nil {
+		return "", fmt.Errorf("enode: unmarshal pubkey: %w", err)
+	}
+	return crypto.PubkeyToAddress(*pub).Hex(), nil
+}
 
 // parseAndRewriteEnode extracts the enode-id from raw (e.g. "enode://<id>@<host>:<port>")
 // and rebuilds the enode using advertisedHost and p2pPort from the manifest.

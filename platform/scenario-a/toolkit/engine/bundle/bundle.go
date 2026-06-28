@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/addrs"
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/manifest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -101,12 +102,35 @@ func EmitBundle(ctx context.Context, in BundleInput) (*JoinBundle, error) {
 			AdvertisedHost: in.Manifest.Spec.Node.AdvertisedHost,
 			P2PPort:        in.Manifest.Spec.Node.P2P.Port,
 		},
-		Genesis:   genesis,
-		Contracts: contracts,
-		Trust:     trust,
+		Genesis:    genesis,
+		Contracts:  contracts,
+		Trust:      trust,
+		Validators: in.Validators,
+		CBEndpoint: in.CBEndpoint,
 	}
 	if in.Manifest.Spec.Relay != nil {
 		spec.Relay = &RelaySpec{Endpoint: in.Manifest.Spec.Relay.Endpoint}
+	}
+
+	// When no validators are supplied, derive the founding CB validator from its
+	// own enode. This is correct by construction for mode:found: the founding
+	// central bank creates the spoke and is its sole initial QBFT validator;
+	// additional validators are added later via mode:join, not at founding time.
+	// Callers that already know the live validator set (e.g. re-emitting a bundle
+	// for a grown spoke) should pass in.Validators explicitly.
+	// NOTE: rpcURL uses the P2P-advertised host. In the local (DOCKER) profile the
+	// advertised host also serves JSON-RPC; a prod deployment that binds RPC to a
+	// different host/port must pass in.Validators with the correct rpcUrl.
+	if len(spec.Validators) == 0 {
+		if vAddr, derr := EnodeToValidatorAddress(enode); derr == nil {
+			rpcURL := fmt.Sprintf("http://%s:%d", in.Manifest.Spec.Node.AdvertisedHost, rpcPortOf(in.Manifest))
+			spec.Validators = []ValidatorSpec{{Address: vAddr, RPCURL: rpcURL}}
+		} else {
+			// Leave validators empty; the apply found-path validates the emitted
+			// bundle with ValidateForJoin and fails fast if it is unusable, so the
+			// fault surfaces at emission rather than at a later join.
+			slog.WarnContext(ctx, "bundle: could not derive founding validator from enode", "spoke_id", spokeID, "error", derr)
+		}
 	}
 
 	bundle := &JoinBundle{
@@ -127,6 +151,14 @@ func EmitBundle(ctx context.Context, in BundleInput) (*JoinBundle, error) {
 	bundlePath := filepath.Join(in.OutputDir, "bundles", spokeID+".bundle.yaml")
 	slog.InfoContext(ctx, "bundle: written", "spoke_id", spokeID, "path", bundlePath)
 	return bundle, nil
+}
+
+// rpcPortOf returns the manifest's RPC port, or 8545 if unset.
+func rpcPortOf(m *manifest.Manifest) int {
+	if m.Spec.Node.RPC != nil && m.Spec.Node.RPC.Port > 0 {
+		return m.Spec.Node.RPC.Port
+	}
+	return 8545
 }
 
 // readGenesis reads genesis/genesis.json from dataDir, computes its SHA-256 hash,

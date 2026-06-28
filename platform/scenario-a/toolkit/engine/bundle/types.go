@@ -27,6 +27,11 @@ type BundleInput struct {
 	DataDir       string             // absolute path to SPOKE_DATA_DIR
 	OutputDir     string             // root where bundles/ is created; "." is valid
 	EnodeProvider EnodeProvider      // never nil; use NewBesuEnodeProvider in production
+	// Validators is the existing QBFT validator set to embed (mode:join needs it).
+	// Typically the founding CB validator(s); rpcUrl uses the advertised host.
+	Validators []ValidatorSpec
+	// CBEndpoint is the central bank's credential-request URL embedded in the bundle.
+	CBEndpoint string
 }
 
 // JoinBundle is the top-level YAML document emitted by EmitBundle.
@@ -45,14 +50,26 @@ type BundleMetadata struct {
 
 // BundleSpec contains all public artifacts needed by a commercial bank to join the spoke.
 type BundleSpec struct {
-	SpokeID   string        `yaml:"spokeId"`
-	ChainID   int           `yaml:"chainId"`
-	Currency  string        `yaml:"currency"`
-	Bootnode  BootnodeSpec  `yaml:"bootnode"`
-	Genesis   GenesisSpec   `yaml:"genesis"`
-	Contracts ContractsSpec `yaml:"contracts"`
-	Relay     *RelaySpec    `yaml:"relay,omitempty"`
-	Trust     TrustSpec     `yaml:"trust"`
+	SpokeID    string          `yaml:"spokeId"`
+	ChainID    int             `yaml:"chainId"`
+	Currency   string          `yaml:"currency"`
+	Bootnode   BootnodeSpec    `yaml:"bootnode"`
+	Genesis    GenesisSpec     `yaml:"genesis"`
+	Contracts  ContractsSpec   `yaml:"contracts"`
+	Relay      *RelaySpec      `yaml:"relay,omitempty"`
+	Trust      TrustSpec       `yaml:"trust"`
+	Validators []ValidatorSpec `yaml:"validators"`
+	// CBEndpoint is the central bank's credential-request URL. Consumed by the
+	// mode:join engine to submit the commercial bank's CSR. Required for mode:join.
+	CBEndpoint string `yaml:"cbEndpoint,omitempty"`
+}
+
+// ValidatorSpec identifies an existing QBFT validator in the spoke. The mode:join
+// engine casts a validator vote (qbft_proposeValidatorVote) against each entry to
+// promote the joining node to validator. Contains only public information.
+type ValidatorSpec struct {
+	Address string `yaml:"address"` // Ethereum address (0x-prefixed)
+	RPCURL  string `yaml:"rpcUrl"`  // JSON-RPC HTTP endpoint of the validator
 }
 
 // BootnodeSpec identifies the Besu node that a joining bank must dial first.
