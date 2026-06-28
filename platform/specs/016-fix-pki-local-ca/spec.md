@@ -27,7 +27,7 @@ After this fix, the developer sees an explicit notice in the Makefile comments (
 
 ### User Story 2 - Operator Provisions a Commercial Bank with CB-Signed Certificate (Priority: P2)
 
-An operator uses the new provisioning toolkit (TK-3 orchestration engine + TK-9 commercial-bank join flow) to onboard a commercial bank onto a spoke. The operator provides a `commercial-bank` manifest (`mode: join`). The toolkit must issue the bank's TLS certificate via the real production flow: the bank generates its keypair and CSR locally; the CSR is submitted to the spoke's central bank; the central bank signs it using the spoke CA (`central-bank-<x>-ca.{crt,key}`); the bank receives a leaf cert whose chain terminates at the CB CA.
+An operator uses the new provisioning toolkit (TK-3 certSource interface + TK-9 commercial-bank join flow) to onboard a commercial bank onto a spoke. The operator provides a `commercial-bank` manifest (`mode: join`). The toolkit must issue the bank's TLS certificate via the real production flow: the bank generates its keypair and CSR locally; the CSR is submitted to the spoke's central bank; the central bank signs it using the spoke CA (`central-bank-<x>-ca.{crt,key}`); the bank receives a leaf cert whose chain terminates at the CB CA.
 
 **Why this priority**: This is the core correctness fix. Allowing the toolkit to silently use a bank-self-signed CA in "new toolkit" code would reproduce the exact problem the fix is meant to eliminate, and it would never be caught until a production deployment.
 
@@ -72,7 +72,7 @@ A security auditor or reviewer inspects a commercial bank's deployed credential 
 - **FR-001**: The `pki.gen-commercial-bank-*` Makefile targets and the `gen_commercial_bank_cert` macro MUST include a prominent comment block stating they are **local development bootstrap shortcuts** that do not represent the production PKI model.
 - **FR-002**: The terminal output of `pki.gen-commercial-bank-*` MUST include a visible `[DEV ONLY]` warning line to distinguish this path from the production CSR→CB flow at runtime.
 - **FR-003**: The scenario-a `README.md` (or equivalent PKI documentation) MUST explicitly describe both paths: (a) local bootstrap shortcut (Makefile) and (b) production path (CSR → central bank signs), with a reference to `onboarding_proxy.go` smart mode as the authoritative production implementation.
-- **FR-004**: The new provisioning toolkit (orchestration engine / TK-3 and commercial-bank join flow / TK-9) MUST issue commercial bank certificates exclusively via the CSR → central-bank-signs flow; no toolkit code path may generate a CA keypair for a commercial bank entity.
+- **FR-004**: The new provisioning toolkit (certSource interface / TK-3 and commercial-bank join flow / TK-9) MUST issue commercial bank certificates exclusively via the CSR → central-bank-signs flow; no toolkit code path may generate a CA keypair for a commercial bank entity.
 - **FR-005**: When the toolkit submits a CSR for signing, it MUST use the spoke's central bank credential-request endpoint (the same endpoint used by `onboarding_proxy.go` smart mode), not any local self-signing shortcut.
 - **FR-006**: The toolkit join flow MUST fail fast with a clear error message if the central bank CA is unreachable or if certificate signing fails; it MUST NOT fall back to self-signing.
 - **FR-007**: The existing `pki.gen-commercial-bank-*` Makefile targets MUST continue to function for local bootstrapping (no functional regression); only comments and output messaging are added.
@@ -101,7 +101,7 @@ A security auditor or reviewer inspects a commercial bank's deployed credential 
 ## Assumptions
 
 - This fix is scoped exclusively to Scenario A; Scenario B is not affected.
-- TK-3 refers to the orchestration engine component of the new provisioning toolkit (§5.3 of task-notions), which owns the TLS generation step during spoke setup.
+- TK-3 refers to the certSource interface component of the new provisioning toolkit (§5.3 of task-notions), which owns the TLS generation step during spoke setup.
 - TK-9 refers to the commercial-bank join flow component (Phase 3 / step 10 of task-notions), which is the entry point for commercial bank onboarding via the toolkit.
 - The new provisioning toolkit is not yet implemented; this specification defines what the PKI behavior of those toolkit components MUST be before they are built.
 - The `onboarding_proxy.go` smart mode is the canonical reference implementation of the CSR → CB-signs flow and should be reused or mirrored by the toolkit — not reimplemented from scratch.

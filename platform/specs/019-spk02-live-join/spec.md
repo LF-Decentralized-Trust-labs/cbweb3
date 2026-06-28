@@ -206,9 +206,12 @@ research has no durable artifact and the toolkit cannot be implemented correctly
 - **Paladin Node**: A privacy middleware instance running alongside a Besu node, identified by
   a `nodeName`; registers its gRPC transport endpoint + TLS certificate in the on-chain
   transport registry
-- **Transport Registry**: The on-chain EVM contract (IdentityRegistry) where each Paladin node
-  publishes its `nodeName`, gRPC endpoint, and TLS certificate; used by other Paladin nodes
-  for peer discovery
+- **Transport Registry**: The on-chain registration mechanism where each Paladin node publishes
+  its `nodeName`, gRPC endpoint, and TLS certificate; used by other Paladin nodes for peer
+  discovery. Hypothesis to validate: this transport registry may or may not be the
+  `IdentityRegistry` contract (`PARTICIPANT_REGISTRY_ADDRESS`), which is the approved-participant
+  whitelist for blockchain identity — a distinct concern from Paladin node/transport
+  registration. The spike must determine the actual Paladin node/transport registration mechanism.
 - **TLS Trust Model**: The mechanism by which Paladin nodes verify each other's TLS certificates
   during mTLS transport establishment; the critical unknown of this spike (pre-loaded CA vs.
   per-peer cert vs. TOFU vs. registry-fetched)
@@ -247,8 +250,11 @@ research has no durable artifact and the toolkit cannot be implemented correctly
   API is `qbft_proposeValidatorVote` / `qbft_getValidatorsByBlockNumber`
 - Paladin nodes use self-signed TLS certificates (as established in SP01's
   `generate-certs.sh`) — there is no shared CA; the TLS trust behavior is the core unknown
-- The on-chain transport registry is the `IdentityRegistry` contract already deployed in
-  the existing spoke setup; no new contracts are deployed for this spike
+- No new contracts are deployed for this spike. Hypothesis to validate: the Paladin transport
+  registry may or may not be the `IdentityRegistry` contract already deployed in the existing
+  spoke setup; `IdentityRegistry` (`PARTICIPANT_REGISTRY_ADDRESS`) is the approved-participant
+  whitelist for blockchain identity, which is distinct from a Paladin node/transport registry.
+  The spike must determine the actual Paladin node/transport registration mechanism.
 - The spike is scoped to Scenario A only; Scenario B infrastructure is not affected
 - The spike artifacts land exclusively in `scenario-a/provisioning/spikes/spk-02-live-join/`;
   no existing files are modified

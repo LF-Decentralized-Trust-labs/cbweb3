@@ -33,11 +33,11 @@ Um join falhou na metade (ex: timeout no passo de sincronização do Besu). O op
 
 **Why this priority**: Idempotência é requisito não-funcional crítico da constituição do projeto. Sem ela, uma falha obriga o operador a desfazer manualmente o estado parcial.
 
-**Independent Test**: Pode ser testado injetando uma falha controlada (ex: banco central indisponível no passo de CSR) e verificando que o re-run pula os passos anteriores (deploy-genesis, start-besu, wait-sync, vote-qbft) e retoma a partir de `gen-tls`.
+**Independent Test**: Pode ser testado injetando uma falha controlada (ex: banco central indisponível no passo de CSR) e verificando que o re-run pula os passos anteriores (deploy-genesis, start-besu, wait-sync, vote-qbft) e retoma a partir de `gen-csr`.
 
 **Acceptance Scenarios**:
 
-1. **Given** um join que falhou no passo `gen-tls`, **When** o operador re-executa `cbweb3 apply`, **Then** os passos `write-genesis`, `start-besu`, `wait-sync` e `vote-qbft` são marcados como "skipped (already done)" na saída e `gen-tls` é o primeiro passo executado.
+1. **Given** um join que falhou no passo `gen-csr`, **When** o operador re-executa `cbweb3 apply`, **Then** os passos `write-genesis`, `start-besu`, `wait-sync` e `vote-qbft` são marcados como "skipped (already done)" na saída e `gen-csr` é o primeiro passo executado.
 
 2. **Given** um join completado em sua totalidade, **When** o operador re-executa `cbweb3 apply`, **Then** todos os 9 passos são pulados e o comando retorna sucesso imediatamente.
 
@@ -90,8 +90,8 @@ Antes de iniciar o join em produção, o operador quer ver quais passos serão e
 ### Key Entities
 
 - **JoinBundle (estendido)**: Documento YAML emitido por TK-6, agora com `spec.validators[]` (endereço + rpcUrl por validador) e `spec.cbEndpoint` (URL credential-request do CB). Nunca contém chaves privadas.
-- **CommercialBankManifest**: Manifesto `mode: join` com `spec.joinBundleRef`, `spec.bankId`, `spec.keyProvider`, `spec.certSource`. Mesma estrutura de `Manifest` do TK-1, sem novos campos no schema Go (joinBundleRef já existe em `manifest.Spec`).
-- **ProvisioningState (modo join)**: Mesmo formato `.provisioning-state.yaml` do TK-5, com novos nomes de passos: `write-genesis`, `start-besu`, `wait-sync`, `vote-qbft`, `gen-tls`, `request-cert`, `receive-cert`, `proof-of-possession`, `start-backend`.
+- **CommercialBankManifest**: Manifesto `mode: join` com `spec.joinBundleRef`, `spec.bankId`, `spec.keyProvider`, `spec.certSource`. Estende a estrutura de `Manifest` do TK-1: além de `joinBundleRef` (já existente em `manifest.Spec`), o fluxo de join adicionou o campo `BankID` a `manifest.Spec` (T047) e passou a exigir `spec.joinBundleRef` (T049) e `spec.node.dataDir` (T050) na validação em `mode: join`.
+- **ProvisioningState (modo join)**: Mesmo formato `.provisioning-state.yaml` do TK-5, com novos nomes de passos: `write-genesis`, `start-besu`, `wait-sync`, `vote-qbft`, `gen-csr`, `request-cert`, `receive-cert`, `proof-of-possession`, `start-backend`.
 
 ## Success Criteria *(mandatory)*
 
@@ -114,6 +114,6 @@ Antes de iniciar o join em produção, o operador quer ver quais passos serão e
 - O endpoint `cbEndpoint` no bundle aponta para o API gateway do banco central, que expõe `/credential-request` conforme `onboarding_proxy.go`. Esta rota já existe no backend; TK-9 apenas a consome.
 - O backend do banco comercial (passo 9) é iniciado via `docker compose up -d` sobre um template existente (fora do escopo desta feature); TK-9 apenas dispara o comando.
 - A Paladin do banco comercial segue o padrão `paladin-bank-x` validado no SP-02; o template Compose TK-8 inclui o serviço Paladin parametrizado (analogamente ao `paladin-compose.yaml` do TK-4).
-- O campo `spec.joinBundleRef` já existe no tipo `manifest.Spec` (Go); nenhuma mudança de schema Go é necessária para o manifesto.
+- O fluxo de join exigiu adições ao schema Go do manifesto: além de `spec.joinBundleRef` (já existente em `manifest.Spec`), foi adicionado o campo `BankID` a `manifest.Spec` (T047) para identificar o banco comercial dentro do spoke. A validação em `mode: join` passou a exigir `spec.joinBundleRef` (T049) e `spec.node.dataDir` (T050) como campos obrigatórios.
 - Suporte mobile (frontend) está fora do escopo desta feature.
 - Os testes do motor `mode: join` usam stubs/mocks para BesuRPC, CB endpoint e IdentityRegistry, seguindo o padrão já estabelecido em TK-5.
