@@ -31,7 +31,7 @@
 
 - [x] T002 Criar `scenario-a/toolkit/engine/certsource/certsource.go` com a interface `CertSource` (métodos `IssueLeafCert` e `GetTrustAnchor` com assinaturas conforme data-model.md) e os cinco erros sentinela (`ErrTrustAnchorNotFound`, `ErrForbiddenRole`, `ErrUnsupportedKeyAlgorithm`, `ErrInvalidCSR`, `ErrNotImplemented`) e comentário de pacote
 - [x] T003 [P] Criar `scenario-a/toolkit/engine/certsource/prod.go` com o tipo `prodCertSource` (não exportado), verificação de interface `var _ CertSource = (*prodCertSource)(nil)`, e métodos retornando `ErrNotImplemented`
-- [x] T004 [P] Criar `scenario-a/toolkit/engine/certsource/factory.go` com a função `New(uri string) (CertSource, error)` — aceita `self-signed://` (retorna `NewLocalCertSource()`), `ca://` (retorna `&prodCertSource{}`), e qualquer outro valor retorna erro descritivo
+- [x] T004 [P] Criar `scenario-a/toolkit/engine/certsource/factory.go` com a função `New(uri string) (CertSource, error)` — aceita `self-signed` (valor canônico, retorna `NewLocalCertSource()`), `self-signed://<x>` (forma tolerada, retorna `NewLocalCertSource()`), `ca://<x>` (retorna `&prodCertSource{}`), e qualquer outro valor retorna erro descritivo
 - [x] T005 [P] Criar `scenario-a/toolkit/engine/certsource/local.go` com: tipo interno `spokeCert` (`key *ecdsa.PrivateKey`, `cert *x509.Certificate`), struct `LocalCertSource` (`mu sync.RWMutex`, `spokes map[string]*spokeCert`, `leafValidity time.Duration`), função `NewLocalCertSource()`, verificação de interface `var _ CertSource = (*LocalCertSource)(nil)`, e stubs de `IssueLeafCert` e `GetTrustAnchor` retornando `errors.New("not implemented: ...")`
 - [x] T006 [P] Criar `scenario-a/toolkit/engine/certsource/helpers_test.go` com as funções de teste auxiliares: `generateTestCSR(t *testing.T, commonName, ou string) []byte` (gera par ECDSA P-256 + CSR PKCS#10 PEM com OU configurável) e `verifyLeafCert(t *testing.T, certPEM, caCertPEM []byte, cn string)` (verifica assinatura do cert folha contra o pool da CA e valida CN)
 
@@ -103,14 +103,14 @@
 ### Testes para User Story 3 (escrever PRIMEIRO — devem FALHAR)
 
 - [x] T018 [US3] Acrescentar em `scenario-a/toolkit/engine/certsource/local_test.go` os três testes do factory:
-  - `TestFactory_SelfSignedURI_ReturnsLocalCertSource` — `New("self-signed://local")` retorna implementação que produz cert verificável
+  - `TestFactory_SelfSignedURI_ReturnsLocalCertSource` — `New("self-signed")` (valor canônico) e `New("self-signed://local")` (forma tolerada) retornam implementação que produz cert verificável
   - `TestFactory_ProdURI_ReturnsStubWithErrNotImplemented` — `New("ca://lnet-pki")` retorna stub; `IssueLeafCert` retorna `ErrNotImplemented`; `GetTrustAnchor` retorna `ErrNotImplemented`
-  - `TestFactory_InvalidURI_ReturnsError` — URI sem prefixo reconhecido (`"http://..."`, `""`, `"lnet-pki"`) retorna erro descritivo; nenhuma implementação criada
+  - `TestFactory_InvalidURI_ReturnsError` — valor sem forma reconhecida (`"http://..."`, `""`, `"lnet-pki"`) retorna erro descritivo; nenhuma implementação criada
 - [x] T019 [US3] Verificar RED: `go test ./scenario-a/toolkit/engine/certsource/... -run TestFactory 2>&1` — deve mostrar falhas para os novos testes
 
 ### Implementação de User Story 3
 
-- [x] T020 [US3] Verificar que `factory.go` (criado em T004) já cobre os casos de `self-signed://`, `ca://`, e URI inválida conforme spec; ajustar se necessário para passar os testes T018
+- [x] T020 [US3] Verificar que `factory.go` (criado em T004) já cobre os casos de `self-signed` (canônico), `self-signed://<x>` (tolerado), `ca://`, e valor inválido conforme spec; ajustar se necessário para passar os testes T018
 - [x] T021 [US3] Verificar GREEN: `go test ./scenario-a/toolkit/engine/certsource/... -run TestFactory -v` — todos os 3 testes do factory passam
 
 **Checkpoint**: Factory funcional. Todas as user stories cobertas.

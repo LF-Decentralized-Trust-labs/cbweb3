@@ -13,11 +13,11 @@ O motor de provisionamento precisa emitir um certificado TLS para um banco comer
 
 **Why this priority**: É o fluxo de onboarding real do Scenario A. Sem este passo, o banco comercial não pode autenticar no gateway via PKI nonce challenge-response, bloqueando toda integração entre participantes.
 
-**Independent Test**: Pode ser testado gerando um CSR de teste (P-256), chamando `IssueLeafCert` com o CSR e um trust anchor válido, e verificando que o certificado emitido (a) tem `CN` do banco, (b) tem `OU=ROLE_COMMERCIAL_BANK`, (c) é assinado pela CA do spoke (verificável com `GetTrustAnchor`), e (d) não vaza a chave privada da CA.
+**Independent Test**: Pode ser testado gerando um CSR de teste (P-256), chamando `IssueLeafCert(ctx, csrPEM, spokeID)` com o CSR e o identificador do spoke, e verificando que o certificado emitido (a) tem `CN` do banco, (b) tem `OU=ROLE_COMMERCIAL_BANK`, (c) é assinado pela CA do spoke (verificável com `GetTrustAnchor`), e (d) não vaza a chave privada da CA.
 
 **Acceptance Scenarios**:
 
-1. **Given** um manifesto com `certSource: self-signed` e um CSR PKCS#10 válido com `OU=ROLE_COMMERCIAL_BANK`, **When** o motor chama `IssueLeafCert(csr, spokeTrustAnchor)`, **Then** o certificado retornado é assinado pela CA do spoke, contém o `CN` e `OU` do CSR, e tem validade configurável.
+1. **Given** um manifesto com `certSource: self-signed` e um CSR PKCS#10 válido com `OU=ROLE_COMMERCIAL_BANK`, **When** o motor chama `IssueLeafCert(ctx, csrPEM, spokeID)`, **Then** o certificado retornado é assinado pela CA do spoke (resolvida internamente pelo `spokeID`), contém o `CN` e `OU` do CSR, e tem validade configurável.
 2. **Given** um CSR malformado (PEM inválido ou campos obrigatórios ausentes), **When** `IssueLeafCert` é chamado, **Then** o método retorna um erro descritivo sem criar nenhum material criptográfico.
 3. **Given** um CSR de teste com `OU=ROLE_CENTRAL_BANK` (proibido — CB não emite cert para outro CB neste fluxo), **When** `IssueLeafCert` é chamado, **Then** o método retorna `ErrForbiddenRole` sem assinar o CSR.
 
@@ -71,7 +71,7 @@ Um operador que migra para produção consegue trocar a fonte de certificados ap
 - **FR-004**: A implementação local MUST gerar a CA do spoke em memória na primeira chamada que referencia um `spokeID`; a chave privada da CA MUST nunca aparecer em arquivo, log, variável de ambiente ou manifesto.
 - **FR-005**: `GetTrustAnchor` MUST retornar `ErrTrustAnchorNotFound` quando o `spokeID` nunca foi inicializado.
 - **FR-006**: A implementação local MUST ser thread-safe (chamadas concorrentes para o mesmo ou diferente `spokeID` não devem causar data races).
-- **FR-007**: O factory `New(uri string) (CertSource, error)` MUST aceitar o prefixo `self-signed://` para instanciar a implementação local e qualquer outra URI com prefixo `ca://` para instanciar o stub de produção.
+- **FR-007**: O factory `New(uri string) (CertSource, error)` MUST aceitar o valor canônico `self-signed` (forma simples, sem esquema) para instanciar a implementação local; a forma com esquema `self-signed://<x>` também é tolerada e instancia a mesma implementação local. Qualquer URI com prefixo `ca://` instancia o stub de produção. O manifesto local canônico `certSource: self-signed` MUST instanciar a `LocalCertSource`.
 - **FR-008**: O stub de produção MUST retornar `ErrNotImplemented` em todos os métodos (implementação Fase 4).
 - **FR-009**: A validade do certificado folha emitido pela implementação local MUST ser configurável via opção (padrão: 1 ano).
 
@@ -90,7 +90,7 @@ Um operador que migra para produção consegue trocar a fonte de certificados ap
 - **SC-002**: O certificado emitido por `IssueLeafCert` é verificável via `x509.Certificate.Verify` usando o pool de CAs retornado por `GetTrustAnchor`.
 - **SC-003**: Nenhum arquivo `*-ca.key` ou `*-ca.crt` é criado pela implementação local durante a execução dos testes.
 - **SC-004**: A implementação local pode ser instanciada e utilizada pelo motor de orquestração (TK-5) sem dependência de serviço externo.
-- **SC-005**: O factory `New` retorna o tipo correto para `self-signed://local` e para `ca://qualquer-coisa`, e retorna erro para URI malformada.
+- **SC-005**: O factory `New` retorna a `LocalCertSource` para o valor canônico `self-signed` (e também para a forma tolerada `self-signed://local`), retorna o stub de produção para `ca://qualquer-coisa`, e retorna erro para URI malformada.
 
 ## Assumptions
 

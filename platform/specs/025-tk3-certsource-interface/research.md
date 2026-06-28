@@ -51,15 +51,15 @@
 
 ---
 
-### 5. Prefixo URI do factory — `self-signed://` ou `certSource://self-signed`?
+### 5. Valor `certSource` do factory — `self-signed` simples ou `self-signed://<x>`?
 
-**Decision**: `self-signed://local` para a implementação local; `ca://` como prefixo para produção.
+**Decision**: `self-signed` (forma simples, sem esquema) é o valor canônico para a implementação local; `self-signed://<x>` é tolerado e mapeia para a mesma implementação; `ca://` como prefixo para produção.
 
-**Rationale**: Espelha a estrutura do `keyprovider` que usa `kms://local-emulator` e `kms://<backend>`. O esquema é o tipo de implementação, o host/path é o backend específico. Mantém simetria no manifesto:
+**Rationale**: O valor canônico do manifesto local é `self-signed` (forma simples), conforme o validador de manifesto (TK-1, spec 023) e `concat.md` §5.1. O factory aceita adicionalmente a forma com esquema `self-signed://<x>` por tolerância, para não rejeitar manifestos que sigam o padrão de esquema do `keyprovider` (`kms://local-emulator`). Para produção, o esquema `ca://` identifica a CA real. Manifesto local canônico:
 
 ```yaml
 keyProvider:  kms://local-emulator
-certSource:   self-signed://local
+certSource:   self-signed
 ```
 
 No prod:
@@ -94,6 +94,6 @@ certSource:   ca://lnet-pki
 | Assinatura de `IssueLeafCert` | `(ctx, csrPEM []byte, spokeID string)` |
 | Thread safety | Double-check locking, padrão TK-2 |
 | Validade cert folha | 1 ano (default), campo configurável em `LocalCertSource` |
-| URI factory | `self-signed://local` → local; `ca://` → prod stub |
+| Valor factory | `self-signed` (canônico) → local; `self-signed://<x>` (tolerado) → local; `ca://` → prod stub |
 | Validação de OU | `contains("ROLE_COMMERCIAL_BANK")` |
 | Verificação no-file | Teste explícito `TestLocalCertSource_NoPrivateKeyFile` |

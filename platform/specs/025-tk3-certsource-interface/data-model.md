@@ -118,10 +118,11 @@ spokeID → RLock → lookup c.spokes[spokeID]
 
 ## Factory — mapeamento URI → implementação
 
-| URI prefix | Tipo instanciado |
+| Valor `certSource` | Tipo instanciado |
 |-----------|-----------------|
-| `self-signed://` | `*LocalCertSource` via `NewLocalCertSource()` |
-| `ca://` | `*prodCertSource` (stub) |
+| `self-signed` (canônico, forma simples) | `*LocalCertSource` via `NewLocalCertSource()` |
+| `self-signed://<x>` (forma com esquema, tolerada) | `*LocalCertSource` via `NewLocalCertSource()` |
+| `ca://<x>` | `*prodCertSource` (stub) |
 | qualquer outro | `error` descritivo |
 
 ---
