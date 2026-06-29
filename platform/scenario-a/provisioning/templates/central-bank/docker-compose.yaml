@@ -131,7 +131,12 @@ services:
       retries: 24
       start_period: 15s
     networks:
-      - spoke_besu
+      spoke_besu:
+        # Register the advertised host as a network alias so a joining bank's node
+        # (on the same shared spoke network) can resolve the bootnode enode, which
+        # is built from BESU_ADVERTISED_HOST and need not match container_name.
+        aliases:
+          - ${BESU_ADVERTISED_HOST}
 
 networks:
   spoke_besu:
