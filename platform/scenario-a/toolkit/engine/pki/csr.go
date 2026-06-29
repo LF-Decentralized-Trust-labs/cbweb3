@@ -207,9 +207,10 @@ func postCredentialRequest(cbURL string, payload map[string]string, timeout time
 			return "", fmt.Errorf("%w: 200 response has empty cert_pem", ErrCBRejected)
 		}
 		return parsed.CertPEM, nil
-	case http.StatusCreated, http.StatusAccepted:
+	case http.StatusCreated, http.StatusAccepted, http.StatusConflict:
 		// 201 Created / 202 Accepted: the CB registered the request for async
-		// issuance (e.g. pending governance approval). The receive step polls.
+		// issuance (e.g. pending governance approval). 409 Conflict: the request
+		// already exists (idempotent re-run). All await governance approval.
 		return "", ErrCertPending
 	default:
 		return "", fmt.Errorf("%w: HTTP %d: %s", ErrCBRejected, resp.StatusCode, strings.TrimSpace(string(respBody)))

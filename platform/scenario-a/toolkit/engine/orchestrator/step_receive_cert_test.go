@@ -4,11 +4,9 @@ package orchestrator
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
+	"errors"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -42,26 +40,18 @@ func TestReceiveCertStep_StoresStagedPendingCert(t *testing.T) {
 	}
 }
 
-func TestReceiveCertStep_PollsUntilReady(t *testing.T) {
+// When the request was accepted but the cert is not yet issued (the .cert-requested
+// marker is present), the step reports that it is awaiting governance approval
+// rather than polling — cert issuance is gated on a human Governance Portal action.
+func TestReceiveCertStep_AwaitsGovernanceApproval(t *testing.T) {
 	dir := t.TempDir()
-	writeFakeCSR(t, dir, "bank-x")
-	var calls int64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if atomic.AddInt64(&calls, 1) < 2 {
-			w.WriteHeader(http.StatusAccepted) // pending on first call
-			w.Write([]byte(`{"status":"pending"}`))
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"cert_pem":"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"}`))
-	}))
-	defer srv.Close()
+	tlsDir := filepath.Join(dir, "tls")
+	os.MkdirAll(tlsDir, 0o755)
+	os.WriteFile(filepath.Join(tlsDir, certRequestedMark), []byte("pending\n"), 0o644)
 
-	step := newReceiveCertStep("bank-x", dir, srv.URL, 5*time.Second, 10*time.Millisecond, 5*time.Second)
-	if err := step.Run(context.Background()); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "tls", "bank-x.crt")); err != nil {
-		t.Errorf("final cert not stored after polling: %v", err)
+	step := newReceiveCertStep("bank-x", dir, "http://unused", time.Second, 10*time.Millisecond, time.Second)
+	err := step.Run(context.Background())
+	if !errors.Is(err, ErrAwaitingGovernanceApproval) {
+		t.Fatalf("Run err = %v; want ErrAwaitingGovernanceApproval", err)
 	}
 }

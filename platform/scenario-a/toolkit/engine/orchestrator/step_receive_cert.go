@@ -13,10 +13,19 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/pki"
 )
 
+// ErrAwaitingGovernanceApproval signals that the credential request was accepted
+// by the central bank but the certificate cannot be issued until a governance
+// officer approves the bank's KYC. Approval is a human action performed in the
+// Governance Portal (ROLE_GOVERNANCE); once approved, re-running apply resumes
+// the join. The full Phase 2.5/3 handshake (poll pop_nonce → sign → complete) is
+// owned by the Governance Portal milestone.
+var ErrAwaitingGovernanceApproval = errors.New(
+	"awaiting central bank governance KYC approval (Governance Portal); re-run apply after the bank is approved")
+
 // receiveCertStep finalizes the certificate acquisition. If the request step
 // already obtained the cert synchronously (pending-cert staged), it stores it.
-// Otherwise it polls the central bank (by resubmitting the CSR; the CB endpoint
-// is idempotent) until the signed cert is issued, then stores it.
+// Otherwise the request is awaiting governance approval: the step reports that
+// clearly rather than polling, since cert issuance is gated on a human decision.
 type receiveCertStep struct {
 	bankCode   string
 	dataDir    string
@@ -57,27 +66,11 @@ func (s *receiveCertStep) Run(ctx context.Context) error {
 		return nil
 	}
 
-	// Async path: poll the CB by resubmitting the CSR until issued.
-	ctx, cancel := context.WithTimeout(ctx, s.timeout)
-	defer cancel()
-	csrPath := filepath.Join(s.dataDir, "pki", s.bankCode+".csr")
-
-	for {
-		certPEM, err := pki.SubmitCSRToCB(csrPath, s.cbEndpoint, s.reqTimeout)
-		if err == nil {
-			if err := pki.StoreCertificate(certPEM, s.bankCode, tlsDir); err != nil {
-				return err
-			}
-			_ = os.Remove(filepath.Join(tlsDir, certRequestedMark))
-			return nil
-		}
-		if !errors.Is(err, pki.ErrCertPending) {
-			return err // hard rejection — fail fast
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("receive-cert: timed out after %s waiting for CB to issue certificate", s.timeout)
-		case <-time.After(s.interval):
-		}
+	// Async path: the request was accepted (.cert-requested marker) but the cert is
+	// not yet issued. Issuance is gated on a governance KYC approval performed in
+	// the Governance Portal, so there is nothing to poll autonomously here.
+	if _, err := os.Stat(filepath.Join(tlsDir, certRequestedMark)); err == nil {
+		return ErrAwaitingGovernanceApproval
 	}
+	return fmt.Errorf("receive-cert: no staged certificate and no pending request marker for %s", s.bankCode)
 }
