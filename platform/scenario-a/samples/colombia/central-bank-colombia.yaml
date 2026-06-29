@@ -31,4 +31,4 @@ spec:
   # Relay Cacti local (RL-1) — precisa estar no ar antes do apply (register-relay e hard).
   relay:
     endpoint: http://localhost:4000
-  cbEndpoint: http://cbweb3-api-gateway.central-bank-colombia:8080/api/v1/credential-request
+  cbEndpoint: http://cbweb3-api-gateway.central-bank-colombia:8080/api/v1/onboarding/credential-request

@@ -35,4 +35,4 @@ spec:
     endpoint: http://localhost:4000
   # Endpoint de credential-request do CB, embutido no join bundle para que os
   # bancos comerciais saibam onde submeter o CSR (mode: join).
-  cbEndpoint: http://cbweb3-api-gateway.central-bank-brazil:8080/api/v1/credential-request
+  cbEndpoint: http://cbweb3-api-gateway.central-bank-brazil:8080/api/v1/onboarding/credential-request
