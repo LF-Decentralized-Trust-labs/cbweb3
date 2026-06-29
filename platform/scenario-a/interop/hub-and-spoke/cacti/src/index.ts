@@ -28,6 +28,7 @@ import { PluginLedgerConnectorBesu } from "@hyperledger/cactus-plugin-ledger-con
 import { config } from "./config";
 import { HtlcRelay } from "./htlc-relay";
 import { RelayStore } from "./relay-store";
+import { SpokeRegistry, normalizeSpokeRegistration, SpokeRegistrationError } from "./spoke-registry";
 
 // ---------------------------------------------------------------------------
 // In-memory proof store (RelayProof / VerifyProof for InteroperabilityPort)
@@ -100,6 +101,15 @@ async function main(): Promise<void> {
   );
   relay.start(abortController.signal);
 
+  // ── Dynamic spoke registry (RL-1) ────────────────────────────────────────
+  // A founding central bank self-registers its new spoke here; the toolkit's
+  // relay registrar confirms via GET. Registrations persist across restarts.
+  const spokeRegistry = new SpokeRegistry(config.spokeRegistryPath);
+  await spokeRegistry.load();
+  for (const s of spokeRegistry.list()) {
+    console.log(`[spoke-registry] known spoke: ${s.id} rpc=${s.besuRpc}`);
+  }
+
   // ── Express REST API ────────────────────────────────────────────────────
   const app = express();
   app.use(express.json());
@@ -124,6 +134,56 @@ async function main(): Promise<void> {
   // Liveness / readiness
   app.get("/api/v1/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", uptime: process.uptime() });
+  });
+
+  // ── Spoke registration (RL-1) ────────────────────────────────────────────
+  // NOTE: these endpoints are intentionally outside the /api/v1/relay auth guard
+  // so the toolkit registrar (which posts without X-Relay-Auth) can reach them.
+  // In a multi-tenant deployment this should be hardened with mutual auth.
+
+  /**
+   * POST /api/v1/spokes
+   * Register (or re-register) a spoke. Accepts the snake_case body sent by the
+   * Go relay registrar. Idempotent: re-registering the same id updates it.
+   */
+  app.post("/api/v1/spokes", (req: Request, res: Response) => {
+    void (async () => {
+      try {
+        const spoke = normalizeSpokeRegistration((req.body ?? {}) as Record<string, unknown>);
+        await spokeRegistry.register(spoke);
+        console.log(`[spoke-registry] registered spoke=${spoke.id} rpc=${spoke.besuRpc}`);
+        res.status(201).json(spoke);
+      } catch (err) {
+        if (err instanceof SpokeRegistrationError) {
+          res.status(400).json({ error: err.message });
+          return;
+        }
+        console.error("[spoke-registry] register failed:", err);
+        res.status(500).json({ error: "failed to register spoke" });
+      }
+    })();
+  });
+
+  /**
+   * GET /api/v1/spokes
+   * List all registered spokes.
+   */
+  app.get("/api/v1/spokes", (_req: Request, res: Response) => {
+    res.json(spokeRegistry.list());
+  });
+
+  /**
+   * GET /api/v1/spokes/:id
+   * Return a registered spoke (200) or 404. Polled by the toolkit's
+   * RelayRegistrar.IsRegistered to confirm registration.
+   */
+  app.get("/api/v1/spokes/:id", (req: Request, res: Response) => {
+    const spoke = spokeRegistry.get(req.params["id"] ?? "");
+    if (!spoke) {
+      res.status(404).json({ error: "spoke not registered" });
+      return;
+    }
+    res.json(spoke);
   });
 
   /**

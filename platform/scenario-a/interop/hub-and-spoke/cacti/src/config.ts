@@ -54,6 +54,9 @@ export const config = {
   /** JSON file path used to persist relay dedup/retry state across restarts. */
   relayStorePath: optionalEnv("RELAY_STORE_PATH", "/tmp/cacti-relay-store.json"),
 
+  /** JSON file path used to persist the dynamic spoke registry (RL-1) across restarts. */
+  spokeRegistryPath: optionalEnv("CACTI_SPOKES_REGISTRY", "/data/cacti-spoke-registry.json"),
+
   /**
    * Absolute path to the payment-orchestrator proto file.
    * In the Docker image this is copied to /app/apis/proto/…

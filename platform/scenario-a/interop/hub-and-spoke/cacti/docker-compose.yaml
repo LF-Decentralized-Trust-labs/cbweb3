@@ -32,6 +32,8 @@ services:
       POLL_INTERVAL_MS: "${POLL_INTERVAL_MS:-3000}"
       # Persistent store path — backed by a named volume so state survives container restarts
       RELAY_STORE_PATH: "/data/cacti-relay-store.json"
+      # Dynamic spoke registry (RL-1) — persisted on the same volume
+      CACTI_SPOKES_REGISTRY: "/data/cacti-spoke-registry.json"
     volumes:
       - cacti-relay-data:/data
     ports:
