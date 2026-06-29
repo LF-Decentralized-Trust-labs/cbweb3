@@ -1,0 +1,119 @@
+# Per-entity backend stack (feature 034): compliance, auth, payment-orchestrator,
+# api-gateway. Parametrized; reuses the existing service Dockerfiles as building
+# blocks (build context = the backend dir). Does NOT modify the legacy
+# backend/docker-compose-backend.<entity>.yaml files.
+#
+# Each entity runs on its OWN network (ENTITY_NET_NAME, created by the infra step),
+# so service names are fixed and isolated; container_name is per-entity. The backend
+# reaches its dedicated Postgres/Redis by container name on that network, and Besu/
+# Paladin/Cacti via host.docker.internal.
+#
+# REQUIRED env (set by the engine):
+#   BACKEND_CONTEXT   path to the backend/ build context
+#   ENTITY_PREFIX     container-name prefix, e.g. cbweb3-central-bank-brazil
+#   ENTITY_NET_NAME   per-entity network (external; from the infra step)
+#   ENTITY_ENV_FILE   path to the rendered .env (entityenv.go)
+#   API_GATEWAY_PORT / AUTH_PORT / COMPLIANCE_PORT / PAYMENT_PORT   host ports
+#   BANK_CODE         entity code
+#   PALADIN_URL / PALADIN_IDENTITY   the entity's Paladin RPC + identity
+#   CACTI_API_URL     relay URL (host.docker.internal:4000)
+#   BACKEND_IMAGE_TAG image tag suffix (build => local)
+
+services:
+  compliance:
+    build:
+      context: ${BACKEND_CONTEXT:?BACKEND_CONTEXT is required}
+      dockerfile: services/compliance/Dockerfile
+    image: cbweb3/compliance:${BACKEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX:?ENTITY_PREFIX is required}-compliance
+    env_file:
+      - path: ${ENTITY_ENV_FILE:?ENTITY_ENV_FILE is required}
+        required: true
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+    volumes:
+      - ${BACKEND_CONTEXT}/config/pki:/workspace/backend/config/pki
+    ports:
+      - "${COMPLIANCE_PORT:?COMPLIANCE_PORT is required}:9093"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+
+  auth:
+    build:
+      context: ${BACKEND_CONTEXT}
+      dockerfile: services/auth/Dockerfile
+    image: cbweb3/auth:${BACKEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX}-auth
+    env_file:
+      - path: ${ENTITY_ENV_FILE}
+        required: true
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      COMPLIANCE_GRPC_ADDR: ${ENTITY_PREFIX}-compliance:9093
+    ports:
+      - "${AUTH_PORT:?AUTH_PORT is required}:9091"
+    depends_on:
+      - compliance
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+
+  payment-orchestrator:
+    build:
+      context: ${BACKEND_CONTEXT}
+      dockerfile: services/payment-orchestrator/Dockerfile
+    image: cbweb3/payment-orchestrator:${BACKEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX}-payment-orchestrator
+    env_file:
+      - path: ${ENTITY_ENV_FILE}
+        required: true
+    environment:
+      PAYMENT_GRPC_PORT: "9094"
+      PALADIN_URL: ${PALADIN_URL:?PALADIN_URL is required}
+      PALADIN_IDENTITY: ${PALADIN_IDENTITY:?PALADIN_IDENTITY is required}
+      CACTI_API_URL: ${CACTI_API_URL:-http://host.docker.internal:4000}
+    ports:
+      - "${PAYMENT_PORT:?PAYMENT_PORT is required}:9094"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+
+  api-gateway:
+    build:
+      context: ${BACKEND_CONTEXT}
+      dockerfile: services/api-gateway/Dockerfile
+    image: cbweb3/api-gateway:${BACKEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX}-api-gateway
+    env_file:
+      - path: ${ENTITY_ENV_FILE}
+        required: true
+    environment:
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "30"
+      AUTH_GRPC_ADDR: ${ENTITY_PREFIX}-auth:9091
+      COMPLIANCE_GRPC_ADDR: ${ENTITY_PREFIX}-compliance:9093
+      PAYMENT_GRPC_ADDR: ${ENTITY_PREFIX}-payment-orchestrator:9094
+      PKI_DIR: /workspace/backend/config/pki
+      BANK_CODE: ${BANK_CODE:?BANK_CODE is required}
+      PALADIN_URL: ${PALADIN_URL}
+    volumes:
+      - ${BACKEND_CONTEXT}/config/pki:/workspace/backend/config/pki
+    ports:
+      - "${API_GATEWAY_PORT:?API_GATEWAY_PORT is required}:8080"
+    depends_on:
+      - auth
+      - compliance
+      - payment-orchestrator
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+
+networks:
+  entity_net:
+    name: ${ENTITY_NET_NAME:?ENTITY_NET_NAME is required}
+    external: true
