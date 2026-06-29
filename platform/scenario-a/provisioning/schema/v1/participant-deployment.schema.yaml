@@ -93,6 +93,16 @@ definitions:
           - "join"
         description: "'found': this participant creates a new spoke, deploys contracts, and emits a join bundle. 'join': attaches to an existing spoke by consuming a join bundle at joinBundleRef."
 
+      bankId:
+        type: string
+        minLength: 1
+        description: "Commercial-bank identifier within a spoke (mode:join). Optional — defaults to metadata.name. Feeds the CSR subject CN, the IdentityRegistry name, and the BANK_ID compose variable."
+
+      cbEndpoint:
+        type: string
+        minLength: 1
+        description: "Central bank's credential-request URL (mode:found). Embedded into the emitted join bundle so a joining commercial bank knows where to submit its CSR."
+
       spoke:
         $ref: "#/definitions/Spoke"
 
@@ -172,6 +182,14 @@ definitions:
       p2p:
         $ref: "#/definitions/Port"
         description: "P2P (enode) port for Besu peer discovery. Defaults applied by the 'environment' preset when omitted."
+
+      dataDir:
+        type: string
+        minLength: 1
+        description: >
+          Absolute host path where the provisioning engine stores all spoke runtime
+          data: genesis files, TLS certs, Paladin configs, provisioning state, and
+          deployed contract addresses. Required for mode:found and mode:join.
 
   Port:
     type: object
