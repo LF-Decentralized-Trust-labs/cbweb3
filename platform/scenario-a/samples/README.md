@@ -140,21 +140,22 @@ manifestos de exemplo já apontam `spec.relay.endpoint: http://localhost:4000`.
 "$CBWEB3" apply -f ../samples/brazil/central-bank-brazil.yaml --output yaml
 ```
 
-O `found` agora **cria a rede inteira do país a partir do manifesto** — não é
-mais necessário subir o Besu manualmente. A engine executa a sequência
-idempotente de 11 passos:
+O `found` é **CB-only**: cria a rede do país (banco central) a partir do
+manifesto — sem subir o Besu manualmente e **sem** nós de banco fixos. A engine
+executa a sequência idempotente de **9 passos**:
 
-1. `start-besu` — sobe o nó Besu bootnode (compose TK-4) e **gera o genesis** na 1ª execução (idempotente; nunca regenera)
-2. `deploy-contracts` — IdentityRegistry, ZetoFactory, PenteFactory, FXAgreement
-3. `gen-tls` — TLS via `certSource` (self-signed; o CB gera a CA do spoke)
-4. `render-configs` — configs do Paladin
-5. `register-nodes` — registro dos nós Paladin
-6. `start-paladin` — start + health-check
+1. `start-besu` — sobe o nó Besu bootnode e **gera o genesis** na 1ª execução (idempotente; nunca regenera)
+2. `deploy-contracts` — registry de nós Paladin, ZetoFactory, PenteFactory
+3. `gen-tls` — cert TLS do nó Paladin do CB (self-signed)
+4. `render-configs` — config do Paladin do CB
+5. `register-nodes` — registra **o nó Paladin do CB** on-chain (lógica nativa, parametrizada por spoke — sem fallback `spoke-a`)
+6. `start-paladin` — sobe o Paladin do CB + health-check
 7. `create-zeto-token`
-8. `create-pente-context`
-9. `deploy-fxa-pente` — FXAgreement dentro do contexto Pente
-10. `onboard-registry` — onboarding real no IdentityRegistry (não o atalho)
-11. `register-relay` — registra o spoke no relay Cacti (hard: falha se o relay não responder)
+8. `onboard-registry` — deploya o `IdentityRegistry.sol` (whitelist de participantes) e registra o CB via chave de governança
+9. `register-relay` — registra o spoke no relay Cacti (hard: falha se o relay não responder)
+
+> O contexto **Pente** e o **FXAgreement** (bilaterais) **não** são criados no
+> found — eles são criados no `join`, no relacionamento CB↔banco (pairwise).
 
 Ao concluir, a rede do Brasil está **no ar e pronta para operar**, registrada no
 relay e aguardando os bancos comerciais. É emitido o **join bundle**:
@@ -164,8 +165,9 @@ samples/bundles/spoke-brl.bundle.yaml
 ```
 
 Ele contém o enode do bootnode, o genesis (hash + conteúdo), os endereços dos
-contratos, o conjunto de validadores QBFT, a CA do spoke (âncora de confiança) e
-o `cbEndpoint`. **Não contém chaves privadas.**
+contratos de nível-spoke (registry de nós, ZetoFactory, PenteFactory, ZetoToken,
+e o whitelist de participantes), o conjunto de validadores QBFT, a CA do spoke
+(âncora de confiança) e o `cbEndpoint`. **Não contém chaves privadas.**
 
 > Idempotência: rodar `apply` de novo reexecuta apenas o que falta. O genesis
 > **nunca** é regenerado em um spoke já existente.
@@ -181,16 +183,28 @@ Com o bundle de `spoke-brl` emitido, provisione os dois bancos:
 "$CBWEB3" apply -f ../samples/brazil/bank-bradesco.yaml --output yaml
 ```
 
-A engine de join executa 9 passos: escreve o genesis do bundle, sobe o Besu
-sincronizando pelo enode do bootnode, aguarda sync, vota o validador QBFT, gera
-par de chaves + CSR (via `keyProvider`), envia o CSR ao CB (via `cbEndpoint`),
-recebe o cert assinado, faz proof-of-possession + registro no IdentityRegistry e
-sobe o backend do banco.
+A engine de join executa **15 passos**, em três blocos:
 
-> **Pré-requisito do join:** o passo `request-cert` faz POST do CSR ao
-> `cbEndpoint` do bundle. O backend do banco central (api-gateway, modo smart de
-> onboarding) precisa estar no ar e acessível nesse endpoint, senão o join falha
-> rápido (`ErrCBUnreachable`).
+- **Entrada na rede Besu (1–8):** escreve o genesis do bundle, sobe o Besu
+  sincronizando pelo enode do bootnode, aguarda sync, vota o validador QBFT, gera
+  par de chaves + CSR (via `keyProvider`), envia o CSR ao CB (via `cbEndpoint`),
+  recebe o cert assinado, faz proof-of-possession + registro no IdentityRegistry.
+- **Paladin do banco, dinâmico (9–12):** `gen-tls-join` (cert do nó Paladin do
+  banco, derivado de `bankId`), `render-config-join`, `start-paladin-join`
+  (sobe o Paladin do banco), `register-paladin-node` (registra a identidade do
+  nó on-chain — lógica nativa, sem nome de banco fixo).
+- **Relacionamento privado CB↔banco (13–15):** `create-pente-context` (grupo
+  Pente bilateral CB↔banco), `deploy-fxa-pente` (FXAgreement dentro do grupo),
+  `start-backend`.
+
+> **Pré-requisitos do join:**
+> 1. O passo `request-cert` faz POST do CSR ao `cbEndpoint`. O **backend do banco
+>    central (api-gateway)** precisa estar no ar, senão o join falha (`ErrCBUnreachable`).
+> 2. Os passos de Pente exigem que **os dois nós Paladin (CB e banco) se enxerguem**
+>    via transport mTLS na rede do spoke.
+>
+> A capacidade do toolkit subir automaticamente a stack de backend do CB e do
+> banco é um próximo incremento (hoje o backend é um pré-requisito externo).
 
 ---
 
