@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/bundle"
@@ -149,7 +150,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 		besuImage = defaultBesuImage
 	}
 
-	return []Step{
+	steps := []Step{
 		newStartBesuFoundStep(spokeID, m.Spec.Spoke.ChainID, dataDir, deps.CentralBankComposePath, besuRPCURL,
 			m.Spec.Node.AdvertisedHost, besuImage, besuRPCPort, besuWSPort, besuP2PPort,
 			deps.Timeouts.PaladinHealthCheck, deps.Timeouts.PaladinHealthCheckInterval),
@@ -164,6 +165,49 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			deps.Timeouts.OnboardRegistry),
 		newRegisterRelayStep(spokeID, dataDir, deps.BesuRPCURL, deps.RelayRegistrar, deps.Timeouts.RelayRegistration),
 	}
+
+	// CB operational stack (feature 034 US1): dedicated infra + Keycloak + backend.
+	// Template/context paths are derived from the Scenario A root (ContractsOutDir
+	// is <root>/contracts/out).
+	root := filepath.Dir(filepath.Dir(deps.ContractsOutDir))
+	templatesDir := filepath.Join(root, "provisioning", "templates")
+	entity := m.Metadata.Name
+	prefix := entityContainerPrefix(entity)
+	net := entityNetName(entity)
+	ports := entityPorts(besuRPCPort)
+	dbName := entityDBName(entity)
+	kcDBURL := fmt.Sprintf("jdbc:postgresql://%s-postgres:5432/%s", prefix, dbName)
+	stackTO := deps.Timeouts.PaladinHealthCheck
+	stackInt := deps.Timeouts.PaladinHealthCheckInterval
+
+	steps = append(steps,
+		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, dataDir),
+		newStartInfraStep(StepStartCBInfra, prefix, net, dataDir,
+			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
+			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
+		newProvisionKeycloakStep(StepProvisionKeycloak, keycloakStepParams{
+			EntityPrefix: prefix, NetName: net, DataDir: dataDir,
+			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
+			KCDBURL:     kcDBURL, KCUser: "default", KCPassword: "default",
+			HostPort: ports.Keycloak, Realms: centralBankRealmPlans(entity), Timeout: stackTO,
+		}),
+		newStartBackendStackStep(StepStartCBBackend, backendStackParams{
+			EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
+			EnvFile:     cbEnvPath(dataDir, entity),
+			ComposePath: filepath.Join(templatesDir, "entity-backend", "backend-compose.yaml"),
+			BankCode:    entity,
+			PaladinURL:  hostInternalURL(deps.PaladinCBURL), PaladinIdentity: paladinIdentity(cbNodeName(spokeID)),
+			APIPort: ports.APIGateway, AuthPort: ports.AuthGRPC, CompliancePort: ports.ComplianceGRPC, PaymentPort: ports.PaymentGRPC,
+			HealthTimeout: stackTO, HealthInterval: stackInt,
+		}),
+	)
+	return steps
+}
+
+// hostInternalURL rewrites a localhost URL to host.docker.internal so a container
+// can reach a host-published port (Paladin/Cacti run as separate compose stacks).
+func hostInternalURL(url string) string {
+	return strings.Replace(url, "localhost", "host.docker.internal", 1)
 }
 
 // ErrBundleNotFound is returned by RunJoin when the join bundle is nil.

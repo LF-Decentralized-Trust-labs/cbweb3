@@ -161,13 +161,13 @@ func TestRunFound_AllStepsMockSuccess(t *testing.T) {
 		t.Fatalf("RunFound returned unexpected error: %v", err)
 	}
 
-	// Verify state file has all 9 steps as "done".
+	// Verify state file has all 13 steps as "done".
 	state, err := LoadState(dataDir)
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
-	if len(state.Steps) != 9 {
-		t.Errorf("expected 9 steps in state, got %d", len(state.Steps))
+	if len(state.Steps) != 13 {
+		t.Errorf("expected 13 steps in state, got %d", len(state.Steps))
 	}
 	for _, s := range state.Steps {
 		if s.Status != "done" {

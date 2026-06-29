@@ -1,0 +1,107 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package orchestrator
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+// renderCBEnvStep renders the central bank's backend .env (feature 034 US1) into
+// the entity data dir, reading the spoke contract addresses from .deployed-addrs.env
+// (populated by the network steps). It points the backend at the CB's dedicated
+// infra and Keycloak.
+type renderCBEnvStep struct {
+	spokeID     string
+	entityName  string
+	currency    string
+	besuRPCPort int
+	dataDir     string
+}
+
+func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort int, dataDir string) Step {
+	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, dataDir: dataDir}
+}
+
+func (s *renderCBEnvStep) Name() string { return StepRenderCBEnv }
+
+func (s *renderCBEnvStep) Check(_ context.Context) (bool, error) {
+	if _, err := os.Stat(cbEnvPath(s.dataDir, s.entityName)); err == nil {
+		return true, nil
+	}
+	return false, nil
+}
+
+func (s *renderCBEnvStep) Run(_ context.Context) error {
+	addrs, err := parseDeployedAddrs(filepath.Join(s.dataDir, ".deployed-addrs.env"))
+	if err != nil {
+		return fmt.Errorf("read deployed-addrs: %w", err)
+	}
+	prefix := entityContainerPrefix(s.entityName)
+	ports := entityPorts(s.besuRPCPort)
+
+	data := EntityEnvData{
+		EntityName:    s.entityName,
+		IsCentralBank: true,
+		SpokeID:       s.spokeID,
+		FiatSymbol:    s.currency,
+		// CB/NOC/Governance authenticate against the CB's own Keycloak instance.
+		KeycloakURL:    fmt.Sprintf("http://%s-keycloak:8080", prefix),
+		KCRealm:        s.entityName,
+		KCClientID:     s.entityName + "-client",
+		KCClientSecret: s.entityName + "-local-secret",
+
+		PostgresContainer: prefix + "-postgres",
+		PostgresPort:      ports.Postgres,
+		PostgresUser:      "default",
+		PostgresPassword:  "default",
+		DBName:            entityDBName(s.entityName),
+		RedisContainer:    prefix + "-redis",
+		RedisPort:         ports.Redis,
+		RedisDB:           0,
+
+		CACertFile: fmt.Sprintf("/workspace/backend/config/pki/%s-ca.crt", s.entityName),
+		CAKeyFile:  fmt.Sprintf("/workspace/backend/config/pki/%s-ca.key", s.entityName),
+
+		BesuRPCURL: fmt.Sprintf("http://host.docker.internal:%d", s.besuRPCPort),
+		ChainID:    0, // chain id is read from the manifest by the engine; not required by the backend env
+
+		ParticipantRegistryAddress: addrs.ParticipantRegistryAddress,
+
+		GovernanceUserID: governanceUserID(s.entityName),
+		// CB_PRIVATE_KEY is intentionally NOT rendered: signing goes through the
+		// KeyProvider. Left blank for the local backend bootstrap.
+		CBPrivateKey: "",
+
+		RelaySecret: "cbweb3-relay-shared-secret",
+		CORSOrigins: "*",
+	}
+	return RenderEntityEnv(data, cbEnvPath(s.dataDir, s.entityName))
+}
+
+// cbEnvPath is the rendered backend .env path for an entity.
+func cbEnvPath(dataDir, entity string) string {
+	return filepath.Join(dataDir, "stack", entity, ".env.infra")
+}
+
+// entityContainerPrefix is the dedicated-infra container-name prefix for an entity.
+func entityContainerPrefix(entity string) string { return "cbweb3-" + entity }
+
+// entityNetName is the per-entity docker network name.
+func entityNetName(entity string) string { return "cbweb3-" + entity + "-net" }
+
+// entityDBName is the Postgres database name for an entity (underscored).
+func entityDBName(entity string) string {
+	b := make([]byte, 0, len(entity)+8)
+	b = append(b, "cbweb3_"...)
+	for _, r := range entity {
+		if r == '-' {
+			b = append(b, '_')
+		} else {
+			b = append(b, byte(r))
+		}
+	}
+	return string(b)
+}

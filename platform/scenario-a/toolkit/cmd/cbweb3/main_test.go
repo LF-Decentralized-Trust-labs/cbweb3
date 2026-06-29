@@ -96,8 +96,8 @@ func TestRunApply_DryRun_AllPending(t *testing.T) {
 	if !ok {
 		t.Fatalf("steps is not an array: %v", result["steps"])
 	}
-	if len(steps) != 9 {
-		t.Errorf("steps len = %d; want 9", len(steps))
+	if len(steps) != 13 {
+		t.Errorf("steps len = %d; want 13", len(steps))
 	}
 	for i, s := range steps {
 		step := s.(map[string]interface{})

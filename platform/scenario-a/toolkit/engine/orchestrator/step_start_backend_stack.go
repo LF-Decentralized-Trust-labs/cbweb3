@@ -87,7 +87,7 @@ func (s *startBackendStackStep) Check(ctx context.Context) (bool, error) {
 }
 
 func (s *startBackendStackStep) Run(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", s.composePath, "up", "-d", "--build")
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", s.composePath, "up", "-d")
 	cmd.Env = s.composeEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compose up backend: %w\noutput:\n%s", err, out)

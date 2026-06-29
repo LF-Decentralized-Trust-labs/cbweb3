@@ -32,6 +32,11 @@ const (
 	StepDeployFXAPente  = "deploy-fxa-pente"
 	StepOnboardRegistry = "onboard-registry"
 	StepRegisterRelay   = "register-relay"
+	// CB operational stack (feature 034 US1): dedicated infra + Keycloak + backend.
+	StepRenderCBEnv       = "render-cb-env"
+	StepStartCBInfra      = "start-cb-infra"
+	StepProvisionKeycloak = "provision-keycloak"
+	StepStartCBBackend    = "start-cb-backend"
 )
 
 // CanonicalStepOrder is the definitive execution sequence for mode:found.
@@ -49,6 +54,10 @@ var CanonicalStepOrder = []string{
 	StepCreateZetoToken,
 	StepOnboardRegistry,
 	StepRegisterRelay,
+	StepRenderCBEnv,
+	StepStartCBInfra,
+	StepProvisionKeycloak,
+	StepStartCBBackend,
 }
 
 // Canonical step name constants for mode:join. Kept in a namespace distinct from
