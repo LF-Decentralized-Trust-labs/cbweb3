@@ -84,15 +84,43 @@ func writeGenesisJSON(t *testing.T, dataDir string) {
 
 // ── T010: Failing tests for RunFound ─────────────────────────────────────────
 
-func TestRunFound_ErrGenesisNotFound(t *testing.T) {
+// TestRunFound_GenesisAbsent_DoesNotAbort verifies the new semantics: a missing
+// genesis is no longer a hard error — mode:found owns the Besu lifecycle and the
+// start-besu step generates genesis. With a nonexistent compose path the
+// start-besu step's docker call will fail, so we assert only that the failure is
+// NOT the (removed) genesis-not-found gate and NOT ErrGenesisCorrupt.
+func TestRunFound_GenesisAbsent_DoesNotAbort(t *testing.T) {
 	dataDir := t.TempDir()
 	m := testManifest(dataDir)
 	deps := testDeps()
 	var buf bytes.Buffer
 
 	err := runFoundWithSteps(context.Background(), m, deps, &buf, nil)
-	if !errors.Is(err, ErrGenesisNotFound) {
-		t.Errorf("expected ErrGenesisNotFound, got: %v", err)
+	if errors.Is(err, ErrGenesisCorrupt) {
+		t.Errorf("absent genesis must not be treated as corrupt, got: %v", err)
+	}
+	// The run proceeds past the genesis gate into start-besu; with a fake compose
+	// path it fails there, which is expected in this unit context.
+}
+
+// TestRunFound_GenesisCorrupt_Aborts verifies that a present-but-corrupt genesis
+// aborts before any step runs (FIX-2: never regenerate on a running spoke).
+func TestRunFound_GenesisCorrupt_Aborts(t *testing.T) {
+	dataDir := t.TempDir()
+	dir := filepath.Join(dataDir, "genesis")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "genesis.json"), []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := testManifest(dataDir)
+	deps := testDeps()
+	var buf bytes.Buffer
+
+	err := runFoundWithSteps(context.Background(), m, deps, &buf, nil)
+	if !errors.Is(err, ErrGenesisCorrupt) {
+		t.Errorf("expected ErrGenesisCorrupt, got: %v", err)
 	}
 }
 
@@ -133,13 +161,13 @@ func TestRunFound_AllStepsMockSuccess(t *testing.T) {
 		t.Fatalf("RunFound returned unexpected error: %v", err)
 	}
 
-	// Verify state file has all 10 steps as "done".
+	// Verify state file has all 11 steps as "done".
 	state, err := LoadState(dataDir)
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
-	if len(state.Steps) != 10 {
-		t.Errorf("expected 10 steps in state, got %d", len(state.Steps))
+	if len(state.Steps) != 11 {
+		t.Errorf("expected 11 steps in state, got %d", len(state.Steps))
 	}
 	for _, s := range state.Steps {
 		if s.Status != "done" {

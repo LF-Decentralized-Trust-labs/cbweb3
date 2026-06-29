@@ -37,6 +37,16 @@ type Deps struct {
 	// (provisioning/templates/central-bank/paladin-compose.yaml).
 	ComposeTemplatePath string
 
+	// CentralBankComposePath is the absolute path to the TK-4 central-bank Besu
+	// compose template (provisioning/templates/central-bank/docker-compose.yaml).
+	// Used by the start-besu step (mode:found) to bring up the spoke bootnode.
+	CentralBankComposePath string
+
+	// BesuImage is the pinned Besu Docker image for the bootnode
+	// (e.g. hyperledger/besu:25.8.0). Distinct from manifest.spec.image, which
+	// selects the backend service image source, not the Besu image.
+	BesuImage string
+
 	// PaladinConfigTemplateDir is the absolute path to provisioning/templates/
 	// central-bank/paladin-config/ — templates for Paladin node config.yaml.
 	PaladinConfigTemplateDir string

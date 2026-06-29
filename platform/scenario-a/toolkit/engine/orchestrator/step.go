@@ -21,6 +21,7 @@ type Step interface {
 
 // Canonical step name constants — used as keys in ProvisioningState and log events.
 const (
+	StepStartBesu       = "start-besu"
 	StepDeployContracts = "deploy-contracts"
 	StepGenTLS          = "gen-tls"
 	StepRenderConfigs   = "render-configs"
@@ -35,6 +36,7 @@ const (
 
 // CanonicalStepOrder is the definitive execution sequence for mode:found.
 var CanonicalStepOrder = []string{
+	StepStartBesu,
 	StepDeployContracts,
 	StepGenTLS,
 	StepRenderConfigs,

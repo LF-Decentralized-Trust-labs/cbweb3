@@ -120,6 +120,8 @@ func runApply(args []string) int {
 		JoinBundlePath:            joinBundlePath,
 		CommercialBankComposePath: profile.CommercialBankComposePath,
 		BackendComposePath:        profile.BackendComposePath,
+		CentralBankComposePath:    profile.CentralBankComposePath,
+		BesuImage:                 profile.BesuImage,
 	}
 
 	// Set up signal handling so Ctrl-C produces a partial report.

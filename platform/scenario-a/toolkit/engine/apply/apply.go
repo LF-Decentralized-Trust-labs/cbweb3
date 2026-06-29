@@ -268,6 +268,8 @@ func resolveLocalProfileFromInput(in ApplyInput) LocalProfile {
 		PaladinConfigDir:    envOr("CBWEB3_PALADIN_CONFIG_DIR", ""),
 		CommercialBankComposePath: firstNonEmpty(in.CommercialBankComposePath, envOr("CBWEB3_COMMERCIAL_BANK_COMPOSE", "")),
 		BackendComposePath:        firstNonEmpty(in.BackendComposePath, envOr("CBWEB3_BACKEND_COMPOSE", "")),
+		CentralBankComposePath:    firstNonEmpty(in.CentralBankComposePath, envOr("CBWEB3_CENTRAL_BANK_COMPOSE", "")),
+		BesuImage:                 firstNonEmpty(in.BesuImage, envOr("CBWEB3_BESU_IMAGE", "hyperledger/besu:25.8.0")),
 	}
 	if p.BesuRPCURL == "" && rpcPort > 0 {
 		p.BesuRPCURL = fmt.Sprintf("http://localhost:%d", rpcPort)

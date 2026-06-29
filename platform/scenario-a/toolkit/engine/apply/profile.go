@@ -23,6 +23,11 @@ type LocalProfile struct {
 	// (optional; empty means the start-backend step is a no-op).
 	CommercialBankComposePath string
 	BackendComposePath        string
+
+	// CentralBankComposePath is the TK-4 central-bank Besu compose template
+	// (used by mode:found start-besu). BesuImage is the pinned bootnode image.
+	CentralBankComposePath string
+	BesuImage              string
 }
 
 // LocalProfileFromExDir builds a LocalProfile for the given manifest spec.
@@ -51,6 +56,11 @@ func LocalProfileFromExDir(exDir, dataDir string, rpcPort int) LocalProfile {
 		filepath.Join(exDir, "..", "..", "provisioning", "templates", "commercial-bank", "docker-compose.yaml"))
 
 	p.BackendComposePath = envOr("CBWEB3_BACKEND_COMPOSE", "")
+
+	p.CentralBankComposePath = envOr("CBWEB3_CENTRAL_BANK_COMPOSE",
+		filepath.Join(exDir, "..", "..", "provisioning", "templates", "central-bank", "docker-compose.yaml"))
+
+	p.BesuImage = envOr("CBWEB3_BESU_IMAGE", "hyperledger/besu:25.8.0")
 
 	return p
 }

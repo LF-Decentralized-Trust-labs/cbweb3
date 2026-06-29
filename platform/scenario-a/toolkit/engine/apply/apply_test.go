@@ -236,8 +236,8 @@ func TestDryRun_AllPendingForNewSpoke(t *testing.T) {
 	if result.DryRun != true {
 		t.Error("DryRun should be true")
 	}
-	if len(result.Steps) != 10 {
-		t.Errorf("Steps len = %d; want 10", len(result.Steps))
+	if len(result.Steps) != 11 {
+		t.Errorf("Steps len = %d; want 11", len(result.Steps))
 	}
 	for _, s := range result.Steps {
 		if s.Status != "pending" {
@@ -254,13 +254,13 @@ func TestDryRun_PartiallyDoneStepsShowSkipped(t *testing.T) {
 	dataDir := t.TempDir()
 	m.Spec.Node.DataDir = dataDir
 
-	// Pre-populate state: first 3 steps done.
+	// Pre-populate state: first 3 canonical steps done (start-besu, deploy-contracts, gen-tls).
 	state := orchestrator.ProvisioningState{
 		SpokeID: "spoke-brl",
 		Steps: []orchestrator.StepState{
-			{Step: orchestrator.StepDeployContracts, Status: "done", CompletedAt: "2026-06-27T10:00:01Z"},
-			{Step: orchestrator.StepGenTLS, Status: "done", CompletedAt: "2026-06-27T10:00:02Z"},
-			{Step: orchestrator.StepRenderConfigs, Status: "done", CompletedAt: "2026-06-27T10:00:03Z"},
+			{Step: orchestrator.StepStartBesu, Status: "done", CompletedAt: "2026-06-27T10:00:01Z"},
+			{Step: orchestrator.StepDeployContracts, Status: "done", CompletedAt: "2026-06-27T10:00:02Z"},
+			{Step: orchestrator.StepGenTLS, Status: "done", CompletedAt: "2026-06-27T10:00:03Z"},
 		},
 	}
 	if err := writeTestState(dataDir, state); err != nil {

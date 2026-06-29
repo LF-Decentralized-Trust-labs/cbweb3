@@ -27,6 +27,11 @@ type ApplyInput struct {
 	// paths for mode:join, passed through from the CLI profile.
 	CommercialBankComposePath string
 	BackendComposePath        string
+	// CentralBankComposePath is the resolved (binary-relative) path to the TK-4
+	// central-bank Besu compose template, used by the start-besu step (mode:found).
+	CentralBankComposePath string
+	// BesuImage is the pinned Besu image for the bootnode (mode:found).
+	BesuImage string
 }
 
 // ApplyResult is the structured execution report written to stdout.
