@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Banco comercial brasileiro (ilustrativo) — junta-se ao spoke-brl.
+# mode: join  → consome o join bundle emitido pelo central-bank-brazil.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-itau
+spec:
+  scenario: a
+  environment: local
+  role: commercial-bank
+  mode: join
+  bankId: bank-itau
+  spoke:
+    id: spoke-brl
+    chainId: 1337
+    currency: BRL
+  # Resolvido relativo a este arquivo de manifesto. O bundle é gravado em
+  # samples/bundles/ quando CBWEB3_OUTPUT_DIR aponta para samples/ (ver README).
+  joinBundleRef: ../bundles/spoke-brl.bundle.yaml
+  node:
+    advertisedHost: cbweb3-spoke-brl-besu.bank-itau
+    rpc:
+      port: 8646
+    ws:
+      port: 8656
+    p2p:
+      port: 31304
+    dataDir: /opt/cbweb3/data/bank-itau
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed

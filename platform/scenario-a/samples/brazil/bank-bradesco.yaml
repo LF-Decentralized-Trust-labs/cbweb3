@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Segundo banco comercial brasileiro (ilustrativo) — junta-se ao spoke-brl.
+# mode: join  → consome o mesmo join bundle do central-bank-brazil.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-bradesco
+spec:
+  scenario: a
+  environment: local
+  role: commercial-bank
+  mode: join
+  bankId: bank-bradesco
+  spoke:
+    id: spoke-brl
+    chainId: 1337
+    currency: BRL
+  joinBundleRef: ../bundles/spoke-brl.bundle.yaml
+  node:
+    advertisedHost: cbweb3-spoke-brl-besu.bank-bradesco
+    rpc:
+      port: 8647
+    ws:
+      port: 8657
+    p2p:
+      port: 31305
+    dataDir: /opt/cbweb3/data/bank-bradesco
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed

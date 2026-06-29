@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Banco central da Colômbia — funda o spoke colombiano (spoke-cop).
+# mode: found  → nó bootnode próprio, contratos próprios, join bundle próprio
+#                (samples/bundles/spoke-cop.bundle.yaml). Spoke independente do BRL.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-colombia
+spec:
+  scenario: a
+  environment: local
+  role: central-bank
+  mode: found
+  spoke:
+    id: spoke-cop
+    chainId: 1338
+    currency: COP
+  node:
+    advertisedHost: cbweb3-spoke-cop-besu.central-bank-colombia
+    rpc:
+      port: 8745
+    ws:
+      port: 8755
+    p2p:
+      port: 31403
+    dataDir: /opt/cbweb3/data/central-bank-colombia
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  # Relay Cacti local (RL-1) — precisa estar no ar antes do apply (register-relay e hard).
+  relay:
+    endpoint: http://localhost:4000
+  cbEndpoint: http://cbweb3-api-gateway.central-bank-colombia:8080/api/v1/credential-request

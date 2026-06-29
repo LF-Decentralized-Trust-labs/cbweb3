@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Banco comercial colombiano (ilustrativo) — junta-se ao spoke-cop.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-bancolombia
+spec:
+  scenario: a
+  environment: local
+  role: commercial-bank
+  mode: join
+  bankId: bank-bancolombia
+  spoke:
+    id: spoke-cop
+    chainId: 1338
+    currency: COP
+  joinBundleRef: ../bundles/spoke-cop.bundle.yaml
+  node:
+    advertisedHost: cbweb3-spoke-cop-besu.bank-bancolombia
+    rpc:
+      port: 8746
+    ws:
+      port: 8756
+    p2p:
+      port: 31404
+    dataDir: /opt/cbweb3/data/bank-bancolombia
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed

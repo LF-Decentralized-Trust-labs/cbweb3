@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Segundo banco comercial colombiano (ilustrativo) — junta-se ao spoke-cop.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-davivienda
+spec:
+  scenario: a
+  environment: local
+  role: commercial-bank
+  mode: join
+  bankId: bank-davivienda
+  spoke:
+    id: spoke-cop
+    chainId: 1338
+    currency: COP
+  joinBundleRef: ../bundles/spoke-cop.bundle.yaml
+  node:
+    advertisedHost: cbweb3-spoke-cop-besu.bank-davivienda
+    rpc:
+      port: 8747
+    ws:
+      port: 8757
+    p2p:
+      port: 31405
+    dataDir: /opt/cbweb3/data/bank-davivienda
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
