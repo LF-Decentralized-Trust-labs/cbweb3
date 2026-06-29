@@ -22,6 +22,7 @@ type startBackendStackStep struct {
 	entityPrefix    string
 	netName         string
 	backendContext  string
+	pkiDir          string
 	envFile         string
 	composePath     string
 	bankCode        string
@@ -43,6 +44,7 @@ func newStartBackendStackStep(name string, p backendStackParams) Step {
 		entityPrefix:    p.EntityPrefix,
 		netName:         p.NetName,
 		backendContext:  p.BackendContext,
+		pkiDir:          p.PKIDir,
 		envFile:         p.EnvFile,
 		composePath:     p.ComposePath,
 		bankCode:        p.BankCode,
@@ -64,6 +66,7 @@ type backendStackParams struct {
 	EntityPrefix    string
 	NetName         string
 	BackendContext  string
+	PKIDir          string
 	EnvFile         string
 	ComposePath     string
 	BankCode        string
@@ -81,9 +84,15 @@ type backendStackParams struct {
 
 func (s *startBackendStackStep) Name() string { return s.name }
 
-// Check returns true if the api-gateway health endpoint already responds.
+// Check returns true if the api-gateway liveness endpoint already responds.
+// /healthz is the unauthenticated liveness probe; /api/v1/health sits behind the
+// auth middleware (returns 401), so it cannot be used as a readiness gate.
 func (s *startBackendStackStep) Check(ctx context.Context) (bool, error) {
-	return httpHealthy(ctx, fmt.Sprintf("http://localhost:%d/api/v1/health", s.apiPort)), nil
+	return httpHealthy(ctx, s.healthURL()), nil
+}
+
+func (s *startBackendStackStep) healthURL() string {
+	return fmt.Sprintf("http://localhost:%d/healthz", s.apiPort)
 }
 
 func (s *startBackendStackStep) Run(ctx context.Context) error {
@@ -92,7 +101,7 @@ func (s *startBackendStackStep) Run(ctx context.Context) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compose up backend: %w\noutput:\n%s", err, out)
 	}
-	url := fmt.Sprintf("http://localhost:%d/api/v1/health", s.apiPort)
+	url := s.healthURL()
 	deadline := time.Now().Add(s.healthTimeout)
 	for time.Now().Before(deadline) {
 		if httpHealthy(ctx, url) {
@@ -116,7 +125,7 @@ func (s *startBackendStackStep) composeEnv() []string {
 	if tag == "" {
 		tag = "local"
 	}
-	return append(os.Environ(),
+	env := append(os.Environ(),
 		"ENTITY_PREFIX="+s.entityPrefix,
 		"ENTITY_NET_NAME="+s.netName,
 		"BACKEND_CONTEXT="+s.backendContext,
@@ -131,6 +140,11 @@ func (s *startBackendStackStep) composeEnv() []string {
 		"COMPLIANCE_PORT="+strconv.Itoa(s.compliancePort),
 		"PAYMENT_PORT="+strconv.Itoa(s.paymentPort),
 	)
+	// Mount the entity's own PKI dir (its CA from gen-tls) over the repo default.
+	if s.pkiDir != "" {
+		env = append(env, "ENTITY_PKI_DIR="+s.pkiDir)
+	}
+	return env
 }
 
 // httpHealthy reports whether a GET to url returns 2xx within a short timeout.

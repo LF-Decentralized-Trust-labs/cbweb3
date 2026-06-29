@@ -31,8 +31,12 @@ services:
       - "${KEYCLOAK_HOST_PORT:?KEYCLOAK_HOST_PORT is required}:8080"
     volumes:
       - ${KEYCLOAK_IMPORT_DIR:?KEYCLOAK_IMPORT_DIR is required}:/opt/keycloak/data/import:ro
+    # Keycloak 26 (ubi9-micro) has no curl/wget; use the shell's /dev/tcp. The
+    # request MUST be HTTP/1.1 with a Host header — Keycloak rejects HTTP/1.0 with
+    # no Host (returns an error, not 200). A 200 on /realms/master means the master
+    # realm is served and the server is ready.
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /realms/master HTTP/1.0\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200\\|301\\|302'"]
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /realms/master HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q ' 200'"]
       interval: 5s
       timeout: 5s
       retries: 30

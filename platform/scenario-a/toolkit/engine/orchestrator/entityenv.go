@@ -51,6 +51,7 @@ type EntityEnvData struct {
 
 	// Contract addresses (from found .deployed-addrs.env / join bundle).
 	ParticipantRegistryAddress string
+	ZetoTokenAddress           string
 	FiatTokenAddress           string
 	HTLCAddress                string
 	TokenAddress               string
@@ -78,6 +79,7 @@ POSTGRES_USER={{.PostgresUser}}
 POSTGRES_PASSWORD={{.PostgresPassword}}
 DB_NAME={{.DBName}}
 DATABASE_URL=postgres://{{.PostgresUser}}:{{.PostgresPassword}}@{{.PostgresContainer}}:5432/{{.DBName}}?sslmode=disable
+POSTGRES_DSN=postgres://{{.PostgresUser}}:{{.PostgresPassword}}@{{.PostgresContainer}}:5432/{{.DBName}}?sslmode=disable
 
 REDIS_CONTAINER_NAME={{.RedisContainer}}
 REDIS_IMAGE_TAG=7-alpine
@@ -86,6 +88,7 @@ REDIS_DB={{.RedisDB}}
 
 # Keycloak (CB instance for CB/NOC/Governance; own when per-entity)
 KC_BASE_PATH={{.KeycloakURL}}
+KEYCLOAK_BASE_URL={{.KeycloakURL}}
 KC_REALM={{.KCRealm}}
 KC_CLIENT_ID={{.KCClientID}}
 KC_CLIENT_SECRET={{.KCClientSecret}}
@@ -101,6 +104,7 @@ BESU_CHAIN_ID={{.ChainID}}
 
 # Contracts
 PARTICIPANT_REGISTRY_ADDRESS={{.ParticipantRegistryAddress}}
+ZETO_TOKEN_ADDRESS={{.ZetoTokenAddress}}
 FIAT_TOKEN_ADDRESS={{.FiatTokenAddress}}
 HTLC_ADDRESS={{.HTLCAddress}}
 TOKEN_ADDRESS={{.TokenAddress}}

@@ -32,7 +32,7 @@ services:
     environment:
       COMPLIANCE_GRPC_PORT: "9093"
     volumes:
-      - ${BACKEND_CONTEXT}/config/pki:/workspace/backend/config/pki
+      - ${ENTITY_PKI_DIR:-${BACKEND_CONTEXT}/config/pki}:/workspace/backend/config/pki
     ports:
       - "${COMPLIANCE_PORT:?COMPLIANCE_PORT is required}:9093"
     extra_hosts:
@@ -75,6 +75,10 @@ services:
       PALADIN_URL: ${PALADIN_URL:?PALADIN_URL is required}
       PALADIN_IDENTITY: ${PALADIN_IDENTITY:?PALADIN_IDENTITY is required}
       CACTI_API_URL: ${CACTI_API_URL:-http://host.docker.internal:4000}
+      # Besu signing path (HTLC) is per-relationship and only wired once a bilateral
+      # contract exists. At found (CB-only) it is OFF, so no operator key is needed.
+      # The engine sets PAYMENT_ORCH_BESU_RPC_URL only when the besu path applies.
+      BESU_RPC_URL: ${PAYMENT_ORCH_BESU_RPC_URL-}
     ports:
       - "${PAYMENT_PORT:?PAYMENT_PORT is required}:9094"
     extra_hosts:
@@ -101,7 +105,7 @@ services:
       BANK_CODE: ${BANK_CODE:?BANK_CODE is required}
       PALADIN_URL: ${PALADIN_URL}
     volumes:
-      - ${BACKEND_CONTEXT}/config/pki:/workspace/backend/config/pki
+      - ${ENTITY_PKI_DIR:-${BACKEND_CONTEXT}/config/pki}:/workspace/backend/config/pki
     ports:
       - "${API_GATEWAY_PORT:?API_GATEWAY_PORT is required}:8080"
     depends_on:

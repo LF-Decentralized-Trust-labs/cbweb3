@@ -65,7 +65,13 @@ type keycloakStepParams struct {
 func (s *provisionKeycloakStep) Name() string { return s.name }
 
 func (s *provisionKeycloakStep) Check(ctx context.Context) (bool, error) {
-	return tcpReachable("localhost", s.hostPort), nil
+	return httpHealthy(ctx, s.readyURL()), nil
+}
+
+// readyURL is the Keycloak readiness probe: a 200 on /realms/master means the
+// master realm is served and the server has finished booting (and importing).
+func (s *provisionKeycloakStep) readyURL() string {
+	return fmt.Sprintf("http://localhost:%d/realms/master", s.hostPort)
 }
 
 func (s *provisionKeycloakStep) Run(ctx context.Context) error {
@@ -85,12 +91,27 @@ func (s *provisionKeycloakStep) Run(ctx context.Context) error {
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", s.composePath, "up", "-d", "--wait")
+	// No --wait: the container healthcheck is for ops/NOC visibility. The step
+	// gates on a Go-side HTTP poll (consistent with the backend step) so it does
+	// not depend on the in-container shell's healthcheck quirks.
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", s.composePath, "up", "-d")
 	cmd.Env = s.composeEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compose up keycloak: %w\noutput:\n%s", err, out)
 	}
-	return nil
+
+	deadline := time.Now().Add(s.timeout)
+	for time.Now().Before(deadline) {
+		if httpHealthy(ctx, s.readyURL()) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return fmt.Errorf("keycloak readiness check timed out after %s", s.timeout)
 }
 
 func (s *provisionKeycloakStep) importDir() string {
