@@ -15,7 +15,7 @@ func TestStartPaladinStep_Check_False_DockerNotAvailable(t *testing.T) {
 	dir := t.TempDir()
 	// nonexistent compose file → docker compose ps fails → containerRunning = false
 	step := newStartPaladinStep("spoke-test", dir, "/nonexistent/paladin-compose.yaml",
-		"http://localhost:31648", 5*time.Second, 500*time.Millisecond)
+		"http://localhost:31648", "", 5*time.Second, 500*time.Millisecond)
 	done, err := step.Check(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -11,11 +11,11 @@ import (
 )
 
 type renderConfigsStep struct {
-	spokeID            string
-	dataDir            string
-	besuRPCPort        int
-	besuWSPort         int
-	configTemplateDir  string
+	spokeID           string
+	dataDir           string
+	besuRPCPort       int
+	besuWSPort        int
+	configTemplateDir string
 }
 
 // configTemplateData is the data injected into every Paladin config template.
@@ -58,13 +58,13 @@ func (s *renderConfigsStep) Run(_ context.Context) error {
 		return fmt.Errorf("read deployed-addrs: %w", err)
 	}
 
+	// found is CB-only: render only the central-bank node config. Commercial-bank
+	// Paladin configs are rendered dynamically at join time (feature 033 US2).
 	nodes := []struct {
 		name        string
 		tmplSubPath string // relative to configTemplateDir
 	}{
 		{"central-bank", "central-bank/config.yaml.tmpl"},
-		{"bank-a", "bank/config.yaml.tmpl"},
-		{"bank-c", "bank/config.yaml.tmpl"},
 	}
 
 	for _, node := range nodes {

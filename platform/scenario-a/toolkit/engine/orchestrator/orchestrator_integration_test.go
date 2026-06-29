@@ -102,8 +102,8 @@ func TestRunFound_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
-	if len(state.Steps) != 11 {
-		t.Errorf("expected 11 steps in state, got %d", len(state.Steps))
+	if len(state.Steps) != 9 {
+		t.Errorf("expected 9 steps in state, got %d", len(state.Steps))
 	}
 	for _, s := range state.Steps {
 		if s.Step != StepRegisterRelay && s.Status != "done" {

@@ -97,6 +97,19 @@ func TestStartBesuFoundStep_Scaffold_RendersQBFTWithChainID(t *testing.T) {
 	if _, ok := genesisCfg["qbft"]; !ok {
 		t.Error("qbft config missing genesis.config.qbft block")
 	}
+
+	// The deployer dev account must be pre-funded or deploy-contracts fails.
+	alloc, ok := doc["genesis"].(map[string]any)["alloc"].(map[string]any)
+	if !ok {
+		t.Fatal("genesis.alloc missing or not an object")
+	}
+	deployer, ok := alloc["fe3b557e8fb62b89f4916b721be55ceb828dbd73"].(map[string]any)
+	if !ok {
+		t.Fatal("deployer account 0xfe3b557e… is not funded in genesis.alloc")
+	}
+	if deployer["balance"] == "" || deployer["balance"] == nil {
+		t.Error("deployer account has no balance in genesis.alloc")
+	}
 }
 
 func TestStartBesuFoundStep_Scaffold_PreservesExistingQBFT(t *testing.T) {

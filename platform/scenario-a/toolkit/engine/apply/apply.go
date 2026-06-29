@@ -260,16 +260,19 @@ func resolveLocalProfileFromInput(in ApplyInput) LocalProfile {
 		rpcPort = in.Manifest.Spec.Node.RPC.Port
 	}
 	p := LocalProfile{
-		BesuRPCURL: in.BesuRPCURL,
-		OutputDir:  in.OutputDir,
-		PaladinCBURL: envOr("CBWEB3_PALADIN_CB_URL", "http://localhost:31648"),
-		ScriptsDir:   envOr("CBWEB3_SCRIPTS_DIR", ""),
-		ComposeTemplatePath: envOr("CBWEB3_COMPOSE_TEMPLATE", ""),
-		PaladinConfigDir:    envOr("CBWEB3_PALADIN_CONFIG_DIR", ""),
-		CommercialBankComposePath: firstNonEmpty(in.CommercialBankComposePath, envOr("CBWEB3_COMMERCIAL_BANK_COMPOSE", "")),
-		BackendComposePath:        firstNonEmpty(in.BackendComposePath, envOr("CBWEB3_BACKEND_COMPOSE", "")),
-		CentralBankComposePath:    firstNonEmpty(in.CentralBankComposePath, envOr("CBWEB3_CENTRAL_BANK_COMPOSE", "")),
-		BesuImage:                 firstNonEmpty(in.BesuImage, envOr("CBWEB3_BESU_IMAGE", "hyperledger/besu:25.8.0")),
+		BesuRPCURL:                       in.BesuRPCURL,
+		OutputDir:                        in.OutputDir,
+		PaladinCBURL:                     envOr("CBWEB3_PALADIN_CB_URL", "http://localhost:31648"),
+		ScriptsDir:                       firstNonEmpty(in.ScriptsDir, envOr("CBWEB3_SCRIPTS_DIR", "")),
+		ComposeTemplatePath:              firstNonEmpty(in.ComposeTemplatePath, envOr("CBWEB3_COMPOSE_TEMPLATE", "")),
+		PaladinConfigDir:                 firstNonEmpty(in.PaladinConfigDir, envOr("CBWEB3_PALADIN_CONFIG_DIR", "")),
+		CommercialBankComposePath:        firstNonEmpty(in.CommercialBankComposePath, envOr("CBWEB3_COMMERCIAL_BANK_COMPOSE", "")),
+		BackendComposePath:               firstNonEmpty(in.BackendComposePath, envOr("CBWEB3_BACKEND_COMPOSE", "")),
+		CentralBankComposePath:           firstNonEmpty(in.CentralBankComposePath, envOr("CBWEB3_CENTRAL_BANK_COMPOSE", "")),
+		BesuImage:                        firstNonEmpty(in.BesuImage, envOr("CBWEB3_BESU_IMAGE", "hyperledger/besu:25.8.0")),
+		PaladinImage:                     firstNonEmpty(in.PaladinImage, envOr("CBWEB3_PALADIN_IMAGE", "docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1")),
+		ContractsOutDir:                  firstNonEmpty(in.ContractsOutDir, envOr("CBWEB3_CONTRACTS_OUT", "")),
+		CommercialBankPaladinComposePath: firstNonEmpty(in.CommercialBankPaladinComposePath, envOr("CBWEB3_COMMERCIAL_BANK_PALADIN_COMPOSE", "")),
 	}
 	if p.BesuRPCURL == "" && rpcPort > 0 {
 		p.BesuRPCURL = fmt.Sprintf("http://localhost:%d", rpcPort)
@@ -279,4 +282,3 @@ func resolveLocalProfileFromInput(in ApplyInput) LocalProfile {
 	}
 	return p
 }
-

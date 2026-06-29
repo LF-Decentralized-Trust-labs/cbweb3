@@ -72,9 +72,18 @@ cd scenario-a/toolkit
 go build -o ./cbweb3 ./cmd/cbweb3
 ```
 
-O binário resolve caminhos de templates e scripts relativos à sua localização.
-Mantenha-o em `scenario-a/toolkit/cbweb3` (como acima) para que os defaults de
-template (`provisioning/templates/...`) sejam encontrados.
+O binário localiza a raiz do `scenario-a` automaticamente (busca por âncora a
+partir do executável e do diretório atual), então funciona de **qualquer lugar
+dentro do repositório** — inclusive rodando `./cbweb3` de dentro de `samples/`.
+Se rodar o binário **fora** do repositório, aponte a raiz com `CBWEB3_HOME`:
+
+```bash
+export CBWEB3_HOME="$(cd ../ && pwd)"   # raiz do scenario-a
+```
+
+> Os templates (`provisioning/templates/...`) e scripts (`deploy/local/...`) são
+> ativos canônicos do toolkit — não são copiados para `samples/`. O `deploy-contracts`
+> roda `go test` nesses scripts, então a engine sempre requer o repositório presente.
 
 Defina, para toda a sessão, o diretório onde os join bundles serão emitidos —
 apontando para esta pasta `samples/`, de modo que os manifestos `mode: join`

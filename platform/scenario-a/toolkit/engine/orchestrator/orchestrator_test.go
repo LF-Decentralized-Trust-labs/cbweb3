@@ -42,12 +42,12 @@ func testManifest(dataDir string) *manifest.Manifest {
 // testDeps returns minimal Deps with a NoOpRelayRegistrar and all string fields set.
 func testDeps() Deps {
 	return Deps{
-		RelayRegistrar:          NoOpRelayRegistrar{},
-		ScriptsDir:              "/nonexistent/scripts",
-		ComposeTemplatePath:     "/nonexistent/paladin-compose.yaml",
+		RelayRegistrar:           NoOpRelayRegistrar{},
+		ScriptsDir:               "/nonexistent/scripts",
+		ComposeTemplatePath:      "/nonexistent/paladin-compose.yaml",
 		PaladinConfigTemplateDir: "/nonexistent/paladin-config",
-		BesuRPCURL:              "http://localhost:8645",
-		PaladinCBURL:            "http://localhost:31648",
+		BesuRPCURL:               "http://localhost:8645",
+		PaladinCBURL:             "http://localhost:31648",
 	}
 }
 
@@ -161,13 +161,13 @@ func TestRunFound_AllStepsMockSuccess(t *testing.T) {
 		t.Fatalf("RunFound returned unexpected error: %v", err)
 	}
 
-	// Verify state file has all 11 steps as "done".
+	// Verify state file has all 9 steps as "done".
 	state, err := LoadState(dataDir)
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
-	if len(state.Steps) != 11 {
-		t.Errorf("expected 11 steps in state, got %d", len(state.Steps))
+	if len(state.Steps) != 9 {
+		t.Errorf("expected 9 steps in state, got %d", len(state.Steps))
 	}
 	for _, s := range state.Steps {
 		if s.Status != "done" {

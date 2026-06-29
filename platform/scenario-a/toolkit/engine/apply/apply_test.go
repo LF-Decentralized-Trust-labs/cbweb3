@@ -236,8 +236,8 @@ func TestDryRun_AllPendingForNewSpoke(t *testing.T) {
 	if result.DryRun != true {
 		t.Error("DryRun should be true")
 	}
-	if len(result.Steps) != 11 {
-		t.Errorf("Steps len = %d; want 11", len(result.Steps))
+	if len(result.Steps) != 9 {
+		t.Errorf("Steps len = %d; want 9", len(result.Steps))
 	}
 	for _, s := range result.Steps {
 		if s.Status != "pending" {

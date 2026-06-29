@@ -18,6 +18,10 @@ import (
 // deps do not override it. Matches the project-pinned Hyperledger Besu version.
 const defaultBesuImage = "hyperledger/besu:25.8.0"
 
+// defaultPaladinImage is the pinned Paladin image used for the spoke's Paladin
+// nodes when the deps do not override it. Matches the reference network.
+const defaultPaladinImage = "docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1"
+
 // startBesuFoundStep brings up the central-bank Besu node (the spoke bootnode)
 // for mode:found using the TK-4 central-bank compose template. It is the first
 // step of the found sequence and owns the full Besu lifecycle so mode:found
@@ -144,28 +148,78 @@ func (s *startBesuFoundStep) scaffold() error {
 	return nil
 }
 
+// devGenesisAllocAddresses are the standard Hyperledger Besu dev accounts that
+// the reference network pre-funds in genesis (see
+// deploy/local/spoke-besu-a/config/qbftConfigFile.json). The deploy-contracts
+// scripts deploy from 0xFE3B557E…, so it must be funded; the rest match the
+// reference set so script behaviour is identical across spokes.
+//
+// Only balances are written here — never the dev private keys. Those keys live
+// in the reference scripts that already hold them; participant identity keys go
+// through the KeyProvider, never into genesis.
+var devGenesisAllocAddresses = []string{
+	"fe3b557e8fb62b89f4916b721be55ceb828dbd73",
+	"c5fdf4076b8f3a5357c5e395ab970b5b54098fef",
+	"c110089385bad5026e5083443c3b443806da42df",
+	"627306090abab3a6e1400e9345bc60c78a8bef57",
+	"f17f52151ebef6c7334fad080c5704d77216b732",
+	"a2ef7fad3fb7705424b7cc27d21526828dc08ae8",
+	"17e2fb46c3c8445cf458fe94b795e32ae50faba9",
+	"3fcb45e5fed0c339e621bf1c2f87a3d1fb92e399",
+	"ccba841b4ca824e72609609f79dee43a99e44b74",
+	"12e28f145001ce04ccb26cbc944c244613d47270",
+	"7834b5acfd91706b4d11046ac7f296ca2e9528ec",
+	"2d5bec6764271cdde02e6a7273ae1e65d58156af",
+}
+
+// devGenesisBalance is 10,000 ETH in wei — the reference per-account funding.
+const devGenesisBalance = "10000000000000000000000"
+
 // renderQBFTConfig builds the QBFT blockchain config used by
 // `besu operator generate-blockchain-config`, with the spoke's chainId injected.
-// Mirrors provisioning/templates/central-bank/examples/qbftConfigFile.json.
+// Mirrors provisioning/templates/central-bank/examples/qbftConfigFile.json,
+// pre-funding the standard dev accounts so contract deployment can proceed.
 func (s *startBesuFoundStep) renderQBFTConfig() ([]byte, error) {
+	alloc := make(map[string]any, len(devGenesisAllocAddresses))
+	for _, addr := range devGenesisAllocAddresses {
+		alloc[addr] = map[string]any{"balance": devGenesisBalance}
+	}
+
 	cfg := map[string]any{
 		"genesis": map[string]any{
+			// All fork blocks at 0 plus shanghaiTime/cancunTime so modern Solidity
+			// bytecode (PUSH0 etc.) deploys without reverting. zeroBaseFee lets
+			// deploys send gasPrice 0. Mirrors the reference network genesis.config.
 			"config": map[string]any{
-				"chainId":     s.chainID,
-				"londonBlock": 0,
+				"chainId":             s.chainID,
+				"homesteadBlock":      0,
+				"eip150Block":         0,
+				"eip155Block":         0,
+				"eip158Block":         0,
+				"byzantiumBlock":      0,
+				"constantinopleBlock": 0,
+				"petersburgBlock":     0,
+				"istanbulBlock":       0,
+				"berlinBlock":         0,
+				"londonBlock":         0,
+				"preMergeForkBlock":   0,
+				"shanghaiTime":        0,
+				"cancunTime":          0,
 				"qbft": map[string]any{
 					"blockperiodseconds":    2,
 					"epochlength":           30000,
 					"requesttimeoutseconds": 4,
 				},
+				"zeroBaseFee": true,
 			},
 			"nonce":      "0x0",
-			"timestamp":  "0x0",
-			"gasLimit":   "0x1fffffffffffff",
+			"timestamp":  "0x58ee40ba",
+			"gasLimit":   "0x1c9c380",
 			"difficulty": "0x1",
-			"mixHash":    "0x0000000000000000000000000000000000000000000000000000000000000000",
-			"coinbase":   "0x0000000000000000000000000000000000000000",
-			"alloc":      map[string]any{},
+			// QBFT magic mixHash ("critical byzantine fault tolerance").
+			"mixHash":  "0x63746963616c2062797a616e74696e65206661756c7420746f6c6572616e6365",
+			"coinbase": "0x0000000000000000000000000000000000000000",
+			"alloc":    alloc,
 		},
 		"blockchain": map[string]any{
 			"nodes": map[string]any{

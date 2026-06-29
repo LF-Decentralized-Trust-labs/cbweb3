@@ -23,12 +23,25 @@ func ResolveJoinDeps(m *manifest.Manifest, profile LocalProfile) (orchestrator.J
 		return orchestrator.JoinDeps{}, fmt.Errorf("keyProvider URI error: %w", err)
 	}
 
+	var besuRPCPort, besuWSPort int
+	if m.Spec.Node.RPC != nil {
+		besuRPCPort = m.Spec.Node.RPC.Port
+	}
+	if m.Spec.Node.WS != nil {
+		besuWSPort = m.Spec.Node.WS.Port
+	}
+
 	return orchestrator.JoinDeps{
-		KeyProvider:         kp,
-		BankCode:            m.BankCode(),
-		Institution:        m.Metadata.Name,
-		BesuRPCURL:          profile.BesuRPCURL,
-		ComposeTemplatePath: profile.CommercialBankComposePath,
-		BackendComposePath:  profile.BackendComposePath,
+		KeyProvider:              kp,
+		BankCode:                 m.BankCode(),
+		Institution:              m.Metadata.Name,
+		BesuRPCURL:               profile.BesuRPCURL,
+		ComposeTemplatePath:      profile.CommercialBankComposePath,
+		BackendComposePath:       profile.BackendComposePath,
+		PaladinComposePath:       profile.CommercialBankPaladinComposePath,
+		PaladinConfigTemplateDir: profile.PaladinConfigDir,
+		PaladinImage:             profile.PaladinImage,
+		BesuRPCPort:              besuRPCPort,
+		BesuWSPort:               besuWSPort,
 	}, nil
 }

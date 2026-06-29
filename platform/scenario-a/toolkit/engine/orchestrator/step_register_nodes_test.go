@@ -9,7 +9,7 @@ import (
 
 func TestRegisterNodesStep_Check_False_NoStateFile(t *testing.T) {
 	dir := t.TempDir()
-	step := newRegisterNodesStep("spoke-test", dir, "http://localhost:8645", "/scripts", 0)
+	step := newRegisterNodesStep("spoke-test", dir, "http://localhost:8645", 0)
 	done, err := step.Check(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -26,7 +26,7 @@ func TestRegisterNodesStep_Check_False_StatusPending(t *testing.T) {
 	if err := saveState(dir, state); err != nil {
 		t.Fatalf("saveState: %v", err)
 	}
-	step := newRegisterNodesStep("spoke-test", dir, "http://localhost:8645", "/scripts", 0)
+	step := newRegisterNodesStep("spoke-test", dir, "http://localhost:8645", 0)
 	done, err := step.Check(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -43,7 +43,7 @@ func TestRegisterNodesStep_Check_True_StatusDone(t *testing.T) {
 	if err := saveState(dir, state); err != nil {
 		t.Fatalf("saveState: %v", err)
 	}
-	step := newRegisterNodesStep("spoke-test", dir, "http://localhost:8645", "/scripts", 0)
+	step := newRegisterNodesStep("spoke-test", dir, "http://localhost:8645", 0)
 	done, err := step.Check(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -60,7 +60,7 @@ func TestRegisterNodesStep_Check_False_StatusFailed(t *testing.T) {
 	if err := saveState(dir, state); err != nil {
 		t.Fatalf("saveState: %v", err)
 	}
-	step := newRegisterNodesStep("spoke-test", dir, "http://localhost:8645", "/scripts", 0)
+	step := newRegisterNodesStep("spoke-test", dir, "http://localhost:8645", 0)
 	done, err := step.Check(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -70,11 +70,13 @@ func TestRegisterNodesStep_Check_False_StatusFailed(t *testing.T) {
 	}
 }
 
-func TestRegisterNodesStep_Run_ErrorsOnMissingScriptsDir(t *testing.T) {
+func TestRegisterNodesStep_Run_ErrorsOnMissingDeployedAddrs(t *testing.T) {
 	dir := t.TempDir()
-	step := newRegisterNodesStep("spoke-test", dir, "http://localhost:8645", "/nonexistent/scripts", 0)
+	// No .deployed-addrs.env present → native register-nodes must fail fast,
+	// before any on-chain call. (No reference scripts are used anymore.)
+	step := newRegisterNodesStep("spoke-test", dir, "http://localhost:8645", 0)
 	err := step.Run(context.Background())
 	if err == nil {
-		t.Error("Run should error when scripts directory does not exist")
+		t.Error("Run should error when .deployed-addrs.env is missing")
 	}
 }

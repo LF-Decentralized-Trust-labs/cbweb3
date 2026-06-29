@@ -36,18 +36,14 @@ func TestRenderConfigsStep_Check_True_ConfigExists(t *testing.T) {
 	}
 }
 
-func TestRenderConfigsStep_Run_RendersThreeConfigs(t *testing.T) {
+func TestRenderConfigsStep_Run_RendersCBConfigOnly(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create minimal template files.
 	cbTmplDir := filepath.Join(dir, "tmpl", "central-bank")
-	bankTmplDir := filepath.Join(dir, "tmpl", "bank")
 	os.MkdirAll(cbTmplDir, 0o755)
-	os.MkdirAll(bankTmplDir, 0o755)
 	cbTmpl := `spokeid: {{.SpokeID}} rpc: {{.BesuRPCPort}}`
-	bankTmpl := `spokeid: {{.SpokeID}} node: {{.NodeName}}`
 	os.WriteFile(filepath.Join(cbTmplDir, "config.yaml.tmpl"), []byte(cbTmpl), 0o644)
-	os.WriteFile(filepath.Join(bankTmplDir, "config.yaml.tmpl"), []byte(bankTmpl), 0o644)
 
 	// Write a minimal .deployed-addrs.env.
 	os.WriteFile(filepath.Join(dir, ".deployed-addrs.env"), []byte(
@@ -59,10 +55,14 @@ func TestRenderConfigsStep_Run_RendersThreeConfigs(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, node := range []string{"central-bank", "bank-a", "bank-c"} {
-		cfgPath := filepath.Join(dir, "paladin", node, "config.yaml")
-		if _, err := os.Stat(cfgPath); err != nil {
-			t.Errorf("expected config for node %s at %s: %v", node, cfgPath, err)
+	// found is CB-only: central-bank config rendered; no bank-a/bank-c.
+	cbPath := filepath.Join(dir, "paladin", "central-bank", "config.yaml")
+	if _, err := os.Stat(cbPath); err != nil {
+		t.Errorf("expected central-bank config at %s: %v", cbPath, err)
+	}
+	for _, node := range []string{"bank-a", "bank-c"} {
+		if _, err := os.Stat(filepath.Join(dir, "paladin", node, "config.yaml")); err == nil {
+			t.Errorf("found must NOT render config for %s (CB-only)", node)
 		}
 	}
 }

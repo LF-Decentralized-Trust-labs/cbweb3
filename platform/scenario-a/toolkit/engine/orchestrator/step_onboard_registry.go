@@ -46,24 +46,28 @@ const (
 	]`
 
 	// RoleCentralBank is the uint8 role code for a central bank in IdentityRegistry.
-	RoleCentralBank uint8 = 1
+	// Matches IdentityRegistryLibrary.ParticipantRole: NONE=0, TREASURY=1,
+	// GOVERNANCE=2, CENTRAL_BANK=3, COMMERCIAL_BANK=4.
+	RoleCentralBank uint8 = 3
 )
 
 type onboardRegistryStep struct {
-	spokeID     string
-	dataDir     string
-	besuRPCURL  string
-	keyProvider kp.KeyProvider
-	timeout     time.Duration
+	spokeID             string
+	dataDir             string
+	besuRPCURL          string
+	keyProvider         kp.KeyProvider
+	participantArtifact string // path to IdentityRegistry.sol Foundry artifact
+	timeout             time.Duration
 }
 
-func newOnboardRegistryStep(spokeID, dataDir, besuRPCURL string, keyProvider kp.KeyProvider, timeout time.Duration) Step {
+func newOnboardRegistryStep(spokeID, dataDir, besuRPCURL string, keyProvider kp.KeyProvider, participantArtifact string, timeout time.Duration) Step {
 	return &onboardRegistryStep{
-		spokeID:     spokeID,
-		dataDir:     dataDir,
-		besuRPCURL:  besuRPCURL,
-		keyProvider: keyProvider,
-		timeout:     timeout,
+		spokeID:             spokeID,
+		dataDir:             dataDir,
+		besuRPCURL:          besuRPCURL,
+		keyProvider:         keyProvider,
+		participantArtifact: participantArtifact,
+		timeout:             timeout,
 	}
 }
 
@@ -74,7 +78,9 @@ func (s *onboardRegistryStep) Check(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if addrs.RegistryContractAddress == "" {
+	// The participant whitelist (IdentityRegistry.sol) is deployed by this step.
+	// If it does not exist yet, onboarding has not happened.
+	if addrs.ParticipantRegistryAddress == "" {
 		return false, nil
 	}
 
@@ -103,7 +109,7 @@ func (s *onboardRegistryStep) Check(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("pack isParticipant: %w", err)
 	}
 
-	contractAddr := common.HexToAddress(addrs.RegistryContractAddress)
+	contractAddr := common.HexToAddress(addrs.ParticipantRegistryAddress)
 	result, err := client.CallContract(ctx, ethereum.CallMsg{To: &contractAddr, Data: callData}, nil)
 	if err != nil {
 		return false, fmt.Errorf("call isParticipant: %w", err)
@@ -150,10 +156,35 @@ func (s *onboardRegistryStep) Run(ctx context.Context) error {
 		return fmt.Errorf("parse ABI: %w", err)
 	}
 
-	contractAddr := common.HexToAddress(addrs.RegistryContractAddress)
+	// registerParticipant is onlyRole(GOVERNANCE_ROLE). The central bank founding
+	// the spoke IS the governance authority, so the tx is sent by the governance
+	// (deployer) key; the KeyProvider-derived address is the CB participant wallet
+	// being registered. The zkPointer carries the proof-of-possession binding.
+	govKey, err := devKey(registryDeployerKey)
+	if err != nil {
+		return fmt.Errorf("decode governance key: %w", err)
+	}
+	govAddr := crypto.PubkeyToAddress(govKey.PublicKey)
+
+	// 2b. Ensure the participant whitelist (IdentityRegistry.sol) exists. It is a
+	// spoke-level contract distinct from the Paladin node registry; deploy it once
+	// (admin = governance key) and persist PARTICIPANT_REGISTRY_ADDRESS (FR-018).
+	envPath := filepath.Join(s.dataDir, ".deployed-addrs.env")
+	participantAddrHex := addrs.ParticipantRegistryAddress
+	if participantAddrHex == "" {
+		deployed, derr := deployParticipantRegistry(ctx, s.besuRPCURL, s.participantArtifact, govKey)
+		if derr != nil {
+			return fmt.Errorf("deploy participant registry: %w", derr)
+		}
+		participantAddrHex = deployed.Hex()
+		if werr := addrsAppend(envPath, "PARTICIPANT_REGISTRY_ADDRESS", participantAddrHex); werr != nil {
+			return fmt.Errorf("persist participant registry address: %w", werr)
+		}
+	}
+	contractAddr := common.HexToAddress(participantAddrHex)
 	addr := common.HexToAddress(evmAddr)
 
-	// 3. Build and sign registerParticipant transaction.
+	// 3. Build the registerParticipant transaction.
 	var zkPointer [32]byte
 	// Compute a deterministic proof-of-possession nonce as zkPointer placeholder.
 	h := sha256.Sum256([]byte(evmAddr + s.spokeID))
@@ -173,7 +204,7 @@ func (s *onboardRegistryStep) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get chainID: %w", err)
 	}
-	nonce, err := client.PendingNonceAt(ctx, addr)
+	nonce, err := client.PendingNonceAt(ctx, govAddr)
 	if err != nil {
 		return fmt.Errorf("get nonce: %w", err)
 	}
@@ -184,22 +215,9 @@ func (s *onboardRegistryStep) Run(ctx context.Context) error {
 
 	tx := types.NewTransaction(nonce, contractAddr, big.NewInt(0), 300000, gasPrice, callData)
 	signer := types.NewEIP155Signer(chainID)
-	txHash := signer.Hash(tx)
-
-	// 4. Sign via KeyProvider (private key never leaves the provider).
-	sig, err := s.keyProvider.Sign(ctx, s.spokeID+"/cb", txHash[:])
+	signedTx, err := types.SignTx(tx, signer, govKey)
 	if err != nil {
-		return fmt.Errorf("sign transaction: %w", err)
-	}
-
-	// go-ethereum expects the V byte at index 64 as 0 or 1 (not 27/28).
-	if len(sig) == 65 && sig[64] >= 27 {
-		sig[64] -= 27
-	}
-
-	signedTx, err := tx.WithSignature(signer, sig)
-	if err != nil {
-		return fmt.Errorf("attach signature: %w", err)
+		return fmt.Errorf("sign registerParticipant: %w", err)
 	}
 
 	// 5. Send and wait for receipt.

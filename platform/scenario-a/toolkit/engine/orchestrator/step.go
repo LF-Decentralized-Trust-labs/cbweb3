@@ -35,6 +35,10 @@ const (
 )
 
 // CanonicalStepOrder is the definitive execution sequence for mode:found.
+// found is CB-only: it deploys spoke-level contracts and stands up the central
+// bank's Besu + Paladin, but does NOT create the bilateral Pente context or
+// deploy FXAgreement-in-Pente — those are per-relationship and are created at
+// join time (feature 033), when a commercial bank's Paladin node exists.
 var CanonicalStepOrder = []string{
 	StepStartBesu,
 	StepDeployContracts,
@@ -43,8 +47,6 @@ var CanonicalStepOrder = []string{
 	StepRegisterNodes,
 	StepStartPaladin,
 	StepCreateZetoToken,
-	StepCreatePente,
-	StepDeployFXAPente,
 	StepOnboardRegistry,
 	StepRegisterRelay,
 }
@@ -60,10 +62,17 @@ const (
 	StepRequestCert     = "request-cert"
 	StepReceiveCert     = "receive-cert"
 	StepProofPossession = "proof-of-possession"
-	StepStartBackend    = "start-backend"
+	// Dynamic Paladin node bring-up for the joining commercial bank (feature 033 US2).
+	StepGenTLSJoin          = "gen-tls-join"
+	StepRenderConfigJoin    = "render-config-join"
+	StepStartPaladinJoin    = "start-paladin-join"
+	StepRegisterPaladinNode = "register-paladin-node"
+	StepStartBackend        = "start-backend"
 )
 
 // CanonicalJoinStepOrder is the definitive execution sequence for mode:join.
+// After the bank is registered on-chain (proof-of-possession), its Paladin node
+// is brought up and registered dynamically (US2), then the backend starts.
 var CanonicalJoinStepOrder = []string{
 	StepWriteGenesis,
 	StepStartBesuJoin,
@@ -73,5 +82,9 @@ var CanonicalJoinStepOrder = []string{
 	StepRequestCert,
 	StepReceiveCert,
 	StepProofPossession,
+	StepGenTLSJoin,
+	StepRenderConfigJoin,
+	StepStartPaladinJoin,
+	StepRegisterPaladinNode,
 	StepStartBackend,
 }

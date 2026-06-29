@@ -32,6 +32,19 @@ type ApplyInput struct {
 	CentralBankComposePath string
 	// BesuImage is the pinned Besu image for the bootnode (mode:found).
 	BesuImage string
+	// PaladinImage is the pinned Paladin image for the spoke's Paladin nodes (mode:found).
+	PaladinImage string
+	// ContractsOutDir is the Foundry build output dir for the participant whitelist deploy.
+	ContractsOutDir string
+	// CommercialBankPaladinComposePath is the bank Paladin compose template (mode:join US2).
+	CommercialBankPaladinComposePath string
+	// ScriptsDir, ComposeTemplatePath (Paladin), and PaladinConfigDir are the
+	// resolved (binary-relative) paths the mode:found engine needs. They are
+	// threaded through here so the binary-relative resolution survives into the
+	// engine instead of being dropped and re-resolved to empty.
+	ScriptsDir          string
+	ComposeTemplatePath string
+	PaladinConfigDir    string
 }
 
 // ApplyResult is the structured execution report written to stdout.

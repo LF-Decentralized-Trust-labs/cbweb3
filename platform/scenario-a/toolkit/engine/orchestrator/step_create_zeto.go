@@ -45,5 +45,19 @@ func (s *createZetoStep) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("TestCreateZetoTokenInstance: %w\noutput:\n%s", err, out)
 	}
+
+	// The script appends ZETO_TOKEN_ADDRESS to <scriptsDir>/../<spoke>/.deployed-addrs.env;
+	// sync it into dataDir so Check (idempotency) and the bundle emitter see it.
+	src := filepath.Join(s.scriptsDir, "..", s.spokeID, ".deployed-addrs.env")
+	dst := filepath.Join(s.dataDir, ".deployed-addrs.env")
+	if src != dst {
+		data, rerr := os.ReadFile(src)
+		if rerr != nil {
+			return fmt.Errorf("read deployed-addrs after zeto: %w", rerr)
+		}
+		if werr := os.WriteFile(dst, data, 0o644); werr != nil {
+			return fmt.Errorf("sync deployed-addrs to dataDir: %w", werr)
+		}
+	}
 	return nil
 }

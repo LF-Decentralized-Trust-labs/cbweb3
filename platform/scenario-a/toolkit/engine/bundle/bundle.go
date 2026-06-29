@@ -216,6 +216,9 @@ func readContracts(dataDir string) (ContractsSpec, error) {
 		return ContractsSpec{}, fmt.Errorf("%w: %v", ErrDeployedAddrsIncomplete, err)
 	}
 
+	// found (CB-only) produces only spoke-level contracts. The Pente context and
+	// FXAgreement-in-Pente are per-relationship and created at join time
+	// (feature 033), so they are NOT required in the bundle.
 	required := []struct {
 		name string
 		val  string
@@ -224,9 +227,6 @@ func readContracts(dataDir string) (ContractsSpec, error) {
 		{"ZETO_FACTORY_ADDRESS", a.ZetoFactoryAddress},
 		{"PENTE_FACTORY_ADDRESS", a.PenteFactoryAddress},
 		{"ZETO_TOKEN_ADDRESS", a.ZetoTokenAddress},
-		{"PENTE_CONTEXT_GROUP_ID", a.PenteContextGroupID},
-		{"PENTE_CONTEXT_ADDRESS", a.PenteContextAddress},
-		{"FX_AGREEMENT_DEPLOYED_AT", a.FXAgreementDeployedAt},
 	}
 	for _, r := range required {
 		if r.val == "" {

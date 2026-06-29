@@ -9,27 +9,31 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type startPaladinStep struct {
-	spokeID           string
-	dataDir           string
-	composePath       string
-	paladinCBURL      string
-	healthTimeout     time.Duration
-	healthInterval    time.Duration
+	spokeID        string
+	dataDir        string
+	composePath    string
+	paladinCBURL   string
+	paladinImage   string
+	healthTimeout  time.Duration
+	healthInterval time.Duration
 }
 
-func newStartPaladinStep(spokeID, dataDir, composePath, paladinCBURL string, healthTimeout, healthInterval time.Duration) Step {
+func newStartPaladinStep(spokeID, dataDir, composePath, paladinCBURL, paladinImage string, healthTimeout, healthInterval time.Duration) Step {
 	return &startPaladinStep{
 		spokeID:        spokeID,
 		dataDir:        dataDir,
 		composePath:    composePath,
 		paladinCBURL:   paladinCBURL,
+		paladinImage:   paladinImage,
 		healthTimeout:  healthTimeout,
 		healthInterval: healthInterval,
 	}
@@ -72,10 +76,42 @@ func (s *startPaladinStep) Run(ctx context.Context) error {
 }
 
 func (s *startPaladinStep) composeEnv() []string {
+	image := s.paladinImage
+	if image == "" {
+		image = defaultPaladinImage
+	}
+	// Derive Paladin CB host ports from the RPC URL. WS = RPC+1, gRPC = RPC+2 —
+	// deterministic and unique per spoke (the RPC port is per-spoke). Internal
+	// container ports (8548/8549/9000) are fixed by the template.
+	rpcPort := paladinHostPort(s.paladinCBURL, 31648)
 	return append(os.Environ(),
 		"SPOKE_ID="+s.spokeID,
 		"SPOKE_DATA_DIR="+s.dataDir,
+		"PALADIN_IMAGE="+image,
+		"PALADIN_CB_RPC_PORT="+strconv.Itoa(rpcPort),
+		"PALADIN_CB_WS_PORT="+strconv.Itoa(rpcPort+1),
+		"PALADIN_CB_GRPC_PORT="+strconv.Itoa(rpcPort+2),
+		// The Paladin nodes attach to the external Besu network created by the
+		// central-bank Besu compose (default name cbweb3-<spoke>-besu).
+		"SPOKE_NETWORK_NAME=cbweb3-"+s.spokeID+"-besu",
+		"PALADIN_UID="+strconv.Itoa(os.Getuid()),
+		"PALADIN_GID="+strconv.Itoa(os.Getgid()),
 	)
+}
+
+// paladinHostPort extracts the TCP port from a URL like "http://localhost:31648".
+// Returns fallback when the URL has no parseable port.
+func paladinHostPort(rawURL string, fallback int) int {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fallback
+	}
+	if p := u.Port(); p != "" {
+		if n, err := strconv.Atoi(p); err == nil {
+			return n
+		}
+	}
+	return fallback
 }
 
 func (s *startPaladinStep) composeDown(ctx context.Context) error {

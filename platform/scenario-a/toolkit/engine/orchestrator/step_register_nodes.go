@@ -3,30 +3,38 @@
 package orchestrator
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"strings"
+	"path/filepath"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
+// registerNodesStep registers the central bank's Paladin node identity on-chain
+// (mode:found). It uses native Go logic parametrized by the spoke id — it does
+// NOT invoke the reference go-test scripts, which hardcode the spoke-a/spoke-b
+// topology and would register the wrong nodes for an arbitrary spoke.
+//
+// found is CB-only: exactly one node (<spoke-id>-cb) is registered here.
+// Commercial-bank Paladin nodes are registered dynamically at join time (TK-9 /
+// feature 033 US2).
 type registerNodesStep struct {
 	spokeID    string
 	dataDir    string
 	besuRPCURL string
-	scriptsDir string
 	timeout    time.Duration
 }
 
-func newRegisterNodesStep(spokeID, dataDir, besuRPCURL, scriptsDir string, timeout time.Duration) Step {
-	return &registerNodesStep{spokeID: spokeID, dataDir: dataDir, besuRPCURL: besuRPCURL, scriptsDir: scriptsDir, timeout: timeout}
+func newRegisterNodesStep(spokeID, dataDir, besuRPCURL string, timeout time.Duration) Step {
+	return &registerNodesStep{spokeID: spokeID, dataDir: dataDir, besuRPCURL: besuRPCURL, timeout: timeout}
 }
 
 func (s *registerNodesStep) Name() string { return StepRegisterNodes }
 
-// Check uses only the provisioning state file (no idempotent external query available for Paladin node registry).
+// Check uses the provisioning state file (no idempotent on-chain query is exposed
+// for the Paladin node registry).
 func (s *registerNodesStep) Check(_ context.Context) (bool, error) {
 	state, err := LoadState(s.dataDir)
 	if err != nil {
@@ -39,24 +47,37 @@ func (s *registerNodesStep) Run(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "go", "test", "./...",
-		"-run", "TestRegisterPaladinNodes", "-v", "-count=1",
-		fmt.Sprintf("-timeout=%s", s.timeout))
-	cmd.Dir = s.scriptsDir
-	cmd.Env = append(os.Environ(), "SPOKE="+s.spokeID, "BESU_RPC_URL="+s.besuRPCURL)
-
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
-	err := cmd.Run()
+	// Registry address produced by deploy-contracts.
+	addrs, err := parseDeployedAddrs(filepath.Join(s.dataDir, ".deployed-addrs.env"))
 	if err != nil {
-		output := out.String()
-		// "already registered" is treated as idempotent success.
-		if strings.Contains(output, "already registered") {
-			return nil
-		}
-		return fmt.Errorf("go test TestRegisterPaladinNodes: %w\noutput:\n%s", err, output)
+		return fmt.Errorf("read deployed-addrs: %w", err)
 	}
-	return nil
+	if addrs.RegistryContractAddress == "" {
+		return fmt.Errorf("REGISTRY_CONTRACT_ADDRESS missing in .deployed-addrs.env")
+	}
+
+	// CB Paladin node TLS cert written by gen-tls.
+	certPath := filepath.Join(s.dataDir, "paladin", "central-bank", "tls.crt")
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		return fmt.Errorf("read CB Paladin cert %s: %w", certPath, err)
+	}
+
+	deployerKey, err := devKey(registryDeployerKey)
+	if err != nil {
+		return fmt.Errorf("decode registry deployer key: %w", err)
+	}
+	ownerKey, err := devKey(cbNodeOwnerKey)
+	if err != nil {
+		return fmt.Errorf("decode CB node owner key: %w", err)
+	}
+
+	return registerPaladinNode(ctx, s.besuRPCURL, paladinNodeRegistration{
+		registry:     common.HexToAddress(addrs.RegistryContractAddress),
+		nodeName:     cbNodeName(s.spokeID),
+		grpcHostname: cbGrpcHostname(s.spokeID),
+		certPEM:      certPEM,
+		deployerKey:  deployerKey,
+		ownerKey:     ownerKey,
+	})
 }

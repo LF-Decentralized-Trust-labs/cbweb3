@@ -42,7 +42,7 @@ func (notFoundKeyProvider) GetPublicKey(_ context.Context, _ string) ([]byte, er
 func TestOnboardRegistryStep_Check_False_NoRegistryAddr(t *testing.T) {
 	dir := t.TempDir()
 	// No .deployed-addrs.env → registry address empty → returns false without connecting.
-	step := newOnboardRegistryStep("spoke-test", dir, "http://localhost:8645", errKeyProvider{}, 0)
+	step := newOnboardRegistryStep("spoke-test", dir, "http://localhost:8645", errKeyProvider{}, "", 0)
 	done, err := step.Check(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -56,7 +56,7 @@ func TestOnboardRegistryStep_Check_False_KeyNotFound(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".deployed-addrs.env"), []byte("REGISTRY_CONTRACT_ADDRESS=0xREG\n"), 0o644)
 	// GetPublicKey returns ErrKeyNotFound → check returns false, nil (key not generated yet).
-	step := newOnboardRegistryStep("spoke-test", dir, "http://localhost:8645", errKeyProvider{}, 0)
+	step := newOnboardRegistryStep("spoke-test", dir, "http://localhost:8645", errKeyProvider{}, "", 0)
 	done, err := step.Check(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -70,7 +70,7 @@ func TestOnboardRegistryStep_Run_ErrorsWhenGenerateKeyFails(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".deployed-addrs.env"), []byte("REGISTRY_CONTRACT_ADDRESS=0xREG\n"), 0o644)
 	// Both GetPublicKey (ErrKeyNotFound) and GenerateKey fail → Run should propagate error.
-	step := newOnboardRegistryStep("spoke-test", dir, "http://localhost:8645", notFoundKeyProvider{}, 0)
+	step := newOnboardRegistryStep("spoke-test", dir, "http://localhost:8645", notFoundKeyProvider{}, "", 0)
 	err := step.Run(context.Background())
 	if err == nil {
 		t.Error("Run should error when both GetPublicKey and GenerateKey fail")

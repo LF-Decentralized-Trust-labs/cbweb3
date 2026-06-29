@@ -36,6 +36,15 @@ func (s *deployContractsStep) Check(_ context.Context) (bool, error) {
 }
 
 func (s *deployContractsStep) Run(ctx context.Context) error {
+	// The reference deploy scripts write .deployed-addrs.env to
+	// <scriptsDir>/../<spokeID>/ (addrsEnvFile = "../$SPOKE/.deployed-addrs.env").
+	// That per-spoke directory does not exist for an arbitrary new spoke id, so
+	// create it before invoking the scripts (the scripts must not be modified).
+	addrDir := filepath.Join(s.scriptsDir, "..", s.spokeID)
+	if err := os.MkdirAll(addrDir, 0o755); err != nil {
+		return fmt.Errorf("create deployed-addrs dir %q: %w", addrDir, err)
+	}
+
 	for _, testName := range []string{"TestDeployEVMRegistry", "TestDeployZetoFactory", "TestDeployPenteFactory"} {
 		if err := s.runGoTest(ctx, testName); err != nil {
 			return fmt.Errorf("%s: %w", testName, err)

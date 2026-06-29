@@ -15,3 +15,8 @@ type DeployedAddrs = addrs.DeployedAddrs
 func parseDeployedAddrs(path string) (DeployedAddrs, error) {
 	return addrs.ParseDeployedAddrs(path)
 }
+
+// addrsAppend appends a KEY=value line to the deployed-addrs env file at path.
+func addrsAppend(path, key, value string) error {
+	return addrs.AppendAddr(path, key, value)
+}

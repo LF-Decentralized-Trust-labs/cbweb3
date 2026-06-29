@@ -112,16 +112,22 @@ func runApply(args []string) int {
 	}
 
 	in := apply.ApplyInput{
-		Manifest:                  m,
-		DryRun:                    dryRun,
-		OutputFmt:                 outputFmt,
-		OutputDir:                 profile.OutputDir,
-		BesuRPCURL:                profile.BesuRPCURL,
-		JoinBundlePath:            joinBundlePath,
-		CommercialBankComposePath: profile.CommercialBankComposePath,
-		BackendComposePath:        profile.BackendComposePath,
-		CentralBankComposePath:    profile.CentralBankComposePath,
-		BesuImage:                 profile.BesuImage,
+		Manifest:                         m,
+		DryRun:                           dryRun,
+		OutputFmt:                        outputFmt,
+		OutputDir:                        profile.OutputDir,
+		BesuRPCURL:                       profile.BesuRPCURL,
+		JoinBundlePath:                   joinBundlePath,
+		CommercialBankComposePath:        profile.CommercialBankComposePath,
+		BackendComposePath:               profile.BackendComposePath,
+		CentralBankComposePath:           profile.CentralBankComposePath,
+		BesuImage:                        profile.BesuImage,
+		PaladinImage:                     profile.PaladinImage,
+		ContractsOutDir:                  profile.ContractsOutDir,
+		CommercialBankPaladinComposePath: profile.CommercialBankPaladinComposePath,
+		ScriptsDir:                       profile.ScriptsDir,
+		ComposeTemplatePath:              profile.ComposeTemplatePath,
+		PaladinConfigDir:                 profile.PaladinConfigDir,
 	}
 
 	// Set up signal handling so Ctrl-C produces a partial report.

@@ -47,6 +47,15 @@ type Deps struct {
 	// selects the backend service image source, not the Besu image.
 	BesuImage string
 
+	// PaladinImage is the pinned Paladin Docker image for the spoke's Paladin
+	// nodes (e.g. docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1).
+	PaladinImage string
+
+	// ContractsOutDir is the Foundry build output dir (contracts/out) from which
+	// the engine reads the IdentityRegistry.sol artifact to deploy the participant
+	// whitelist natively (onboard-registry / FR-018).
+	ContractsOutDir string
+
 	// PaladinConfigTemplateDir is the absolute path to provisioning/templates/
 	// central-bank/paladin-config/ — templates for Paladin node config.yaml.
 	PaladinConfigTemplateDir string
@@ -131,6 +140,17 @@ type JoinDeps struct {
 	// BackendComposePath is the absolute path to the bank's backend docker-compose file.
 	// Optional: when empty, the start-backend step is skipped (logged).
 	BackendComposePath string
+
+	// PaladinComposePath is the commercial-bank Paladin compose template (US2).
+	PaladinComposePath string
+	// PaladinConfigTemplateDir is provisioning/templates/central-bank/paladin-config
+	// (the bank/config.yaml.tmpl lives there). PaladinImage is the pinned image.
+	PaladinConfigTemplateDir string
+	PaladinImage             string
+	// BesuRPCPort / BesuWSPort are the bank's Besu host ports (for the bank Paladin
+	// config and to derive the bank Paladin host ports).
+	BesuRPCPort int
+	BesuWSPort  int
 
 	// Timeouts overrides the default per-step timeout values. Zero values use defaults.
 	Timeouts JoinTimeouts

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/bundle"
@@ -155,12 +156,12 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 		newDeployContractsStep(spokeID, dataDir, besuRPCURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
 		newGenTLSStep(spokeID, dataDir, deps.CertSource, deps.KeyProvider),
 		newRenderConfigsStep(spokeID, dataDir, besuRPCPort, besuWSPort, deps.PaladinConfigTemplateDir),
-		newRegisterNodesStep(spokeID, dataDir, besuRPCURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
-		newStartPaladinStep(spokeID, dataDir, deps.ComposeTemplatePath, deps.PaladinCBURL, deps.Timeouts.PaladinHealthCheck, deps.Timeouts.PaladinHealthCheckInterval),
+		newRegisterNodesStep(spokeID, dataDir, besuRPCURL, deps.Timeouts.OnboardRegistry),
+		newStartPaladinStep(spokeID, dataDir, deps.ComposeTemplatePath, deps.PaladinCBURL, deps.PaladinImage, deps.Timeouts.PaladinHealthCheck, deps.Timeouts.PaladinHealthCheckInterval),
 		newCreateZetoStep(spokeID, dataDir, deps.PaladinCBURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
-		newCreatePenteStep(spokeID, dataDir, deps.PaladinCBURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
-		newDeployFXAStep(spokeID, dataDir, deps.PaladinCBURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
-		newOnboardRegistryStep(spokeID, dataDir, besuRPCURL, deps.KeyProvider, deps.Timeouts.OnboardRegistry),
+		newOnboardRegistryStep(spokeID, dataDir, besuRPCURL, deps.KeyProvider,
+			filepath.Join(deps.ContractsOutDir, "IdentityRegistry.sol", "IdentityRegistry.json"),
+			deps.Timeouts.OnboardRegistry),
 		newRegisterRelayStep(spokeID, dataDir, deps.BesuRPCURL, deps.RelayRegistrar, deps.Timeouts.RelayRegistration),
 	}
 }
@@ -273,6 +274,15 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		newRequestCertStep(deps.BankCode, dataDir, b.Spec.CBEndpoint, deps.KeyProvider, deps.Timeouts.RequestCert),
 		newReceiveCertStep(deps.BankCode, dataDir, b.Spec.CBEndpoint, deps.Timeouts.ReceiveCert, deps.Timeouts.ReceiveCertInterval, deps.Timeouts.RequestCert),
 		newProofPossessionStep(deps.BankCode, b.Spec.Contracts.RegistryAddress, deps.BesuRPCURL, deps.KeyProvider, deps.Timeouts.ProofOfPossession),
+		// US2 — dynamic Paladin node bring-up for the joining bank.
+		newGenTLSJoinStep(spokeID, deps.BankCode, dataDir),
+		newRenderConfigJoinStep(spokeID, deps.BankCode, dataDir, deps.BesuRPCPort, deps.BesuWSPort,
+			b.Spec.Contracts.RegistryAddress, b.Spec.Contracts.ZetoFactoryAddress, b.Spec.Contracts.PenteFactoryAddress,
+			deps.PaladinConfigTemplateDir),
+		newStartPaladinJoinStep(spokeID, deps.BankCode, dataDir, deps.PaladinComposePath, deps.PaladinImage,
+			deps.BesuRPCPort, deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval),
+		newRegisterPaladinNodeStep(spokeID, deps.BankCode, dataDir, deps.BesuRPCURL,
+			b.Spec.Contracts.RegistryAddress, deps.Timeouts.ProofOfPossession),
 		newStartBackendStep(spokeID, deps.BankCode, dataDir, deps.BackendComposePath, w),
 	}
 }

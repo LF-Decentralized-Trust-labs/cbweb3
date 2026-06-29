@@ -13,13 +13,13 @@ services:
     image: alpine:3.20
     user: "0:0"
     volumes:
-      - ${SPOKE_DATA_DIR}/paladin/central-bank:/data/cb
-      - ${SPOKE_DATA_DIR}/paladin/bank-a:/data/bank-a
-      - ${SPOKE_DATA_DIR}/paladin/bank-c:/data/bank-c
-    command: ["sh", "-c", "mkdir -p /data/cb /data/bank-a /data/bank-c && chmod 777 /data/cb /data/bank-a /data/bank-c"]
+      - cb_data:/data/cb
+    command: ["sh", "-c", "mkdir -p /data/cb && chmod -R 777 /data/cb"]
     restart: "no"
 
-  paladin-${SPOKE_ID}-cb:
+  # Service keys are fixed (Compose forbids ${...} in service names); the spoke
+  # id is carried in container_name instead.
+  paladin-cb:
     image: ${PALADIN_IMAGE}
     container_name: paladin-${SPOKE_ID}-cb
     user: "${PALADIN_UID:-1000}:${PALADIN_GID:-1000}"
@@ -31,51 +31,10 @@ services:
       - PALADIN_LOG_LEVEL=debug
     volumes:
       - ${SPOKE_DATA_DIR}/paladin/central-bank:/etc/paladin
-      - ${SPOKE_DATA_DIR}/paladin/central-bank/db:/data
-    tmpfs:
-      - /app/jna:exec,mode=1777
-      - /data/keystore:mode=0777
-    networks:
-      - spoke_network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
-    depends_on:
-      paladin-data-init:
-        condition: service_completed_successfully
-    command: ["/etc/paladin/config.yaml", "engine"]
-
-  paladin-${SPOKE_ID}-bank-a:
-    image: ${PALADIN_IMAGE}
-    container_name: paladin-${SPOKE_ID}-bank-a
-    user: "${PALADIN_UID:-1000}:${PALADIN_GID:-1000}"
-    environment:
-      - PALADIN_LOG_LEVEL=debug
-    volumes:
-      - ${SPOKE_DATA_DIR}/paladin/bank-a:/etc/paladin
-      - ${SPOKE_DATA_DIR}/paladin/bank-a/db:/data
-    tmpfs:
-      - /app/jna:exec,mode=1777
-      - /data/keystore:mode=0777
-    networks:
-      - spoke_network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
-    depends_on:
-      paladin-data-init:
-        condition: service_completed_successfully
-    command: ["/etc/paladin/config.yaml", "engine"]
-
-  paladin-${SPOKE_ID}-bank-c:
-    image: ${PALADIN_IMAGE}
-    container_name: paladin-${SPOKE_ID}-bank-c
-    user: "${PALADIN_UID:-1000}:${PALADIN_GID:-1000}"
-    environment:
-      - PALADIN_LOG_LEVEL=debug
-    volumes:
-      - ${SPOKE_DATA_DIR}/paladin/bank-c:/etc/paladin
-      - ${SPOKE_DATA_DIR}/paladin/bank-c/db:/data
+      # Paladin DB on a named volume (writable; chmod'd by paladin-data-init) —
+      # a bind mount left /data root-owned and Paladin (uid 1000) could not open
+      # its SQLite database (PD010202). Matches the spk-02 found stack.
+      - cb_data:/data
     tmpfs:
       - /app/jna:exec,mode=1777
       - /data/keystore:mode=0777
@@ -93,3 +52,9 @@ networks:
   spoke_network:
     name: ${SPOKE_NETWORK_NAME}
     external: true
+
+volumes:
+  # Named so the engine's removeVolumes (start-paladin) can target it as
+  # "<SPOKE_ID>_paladin_cb_data".
+  cb_data:
+    name: ${SPOKE_ID}_paladin_cb_data

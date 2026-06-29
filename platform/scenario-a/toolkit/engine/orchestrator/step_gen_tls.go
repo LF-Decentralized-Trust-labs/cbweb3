@@ -61,12 +61,20 @@ func (s *genTLSStep) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("generate serial: %w", err)
 	}
+	// found generates ONLY the central bank's Paladin cert. Each commercial bank
+	// generates its own cert dynamically at join time (mode:join), per the
+	// dynamic-registration architecture (concat.md / spk-02 join-paladin.sh) —
+	// the found step must not bake in a fixed set of bank nodes.
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
 			CommonName:         "paladin-" + s.spokeID + "-cb",
 			OrganizationalUnit: []string{"ROLE_CENTRAL_BANK"},
 			Organization:       []string{s.spokeID},
+		},
+		DNSNames: []string{
+			"paladin-" + s.spokeID + "-cb",
+			"localhost",
 		},
 		NotBefore:             time.Now().Add(-time.Minute),
 		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
@@ -78,31 +86,31 @@ func (s *genTLSStep) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create certificate: %w", err)
 	}
-
-	// Write certificate.
-	certPath := filepath.Join(tlsDir, "central-bank.crt")
-	certFile, err := os.OpenFile(certPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return fmt.Errorf("create cert file: %w", err)
-	}
-	defer certFile.Close()
-	if err := pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
-		return fmt.Errorf("encode cert: %w", err)
-	}
-
-	// Write private key.
-	keyPath := filepath.Join(tlsDir, "central-bank.key")
 	keyDER, err := x509.MarshalECPrivateKey(privKey)
 	if err != nil {
 		return fmt.Errorf("marshal TLS key: %w", err)
 	}
-	keyFile, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("create key file: %w", err)
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
+	// Write the cert/key where the engine and the CB Paladin compose expect them.
+	// Legacy tls/central-bank.{crt,key} is kept; the CB Paladin node dir gets
+	// tls.{crt,key} (mounted into /etc/paladin; the config references
+	// /etc/paladin/tls.{crt,key}).
+	targets := []struct{ dir, certName, keyName string }{
+		{filepath.Join(s.dataDir, "tls"), "central-bank.crt", "central-bank.key"},
+		{filepath.Join(s.dataDir, "paladin", "central-bank"), "tls.crt", "tls.key"},
 	}
-	defer keyFile.Close()
-	if err := pem.Encode(keyFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}); err != nil {
-		return fmt.Errorf("encode key: %w", err)
+	for _, t := range targets {
+		if err := os.MkdirAll(t.dir, 0o755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", t.dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(t.dir, t.certName), certPEM, 0o644); err != nil {
+			return fmt.Errorf("write cert %s: %w", t.certName, err)
+		}
+		if err := os.WriteFile(filepath.Join(t.dir, t.keyName), keyPEM, 0o600); err != nil {
+			return fmt.Errorf("write key %s: %w", t.keyName, err)
+		}
 	}
 
 	_ = ctx

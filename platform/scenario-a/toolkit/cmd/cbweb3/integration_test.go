@@ -58,8 +58,8 @@ func TestIntegration_DryRun_JSON(t *testing.T) {
 		t.Errorf("status = %v; want dry-run", result["status"])
 	}
 	steps, _ := result["steps"].([]interface{})
-	if len(steps) != 11 {
-		t.Errorf("steps len = %d; want 11", len(steps))
+	if len(steps) != 9 {
+		t.Errorf("steps len = %d; want 9", len(steps))
 	}
 }
 
