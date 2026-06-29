@@ -2,6 +2,10 @@
 
 package orchestrator
 
+import "encoding/json"
+
+// (see renderRealmJSON below for the Keycloak realm-import document.)
+
 // keycloak.go derives the per-entity Keycloak provisioning plan (feature 034):
 // realm name, confidential service-account client (id + fixed local secret +
 // directAccessGrants), realm roles, and the governance service-account user id.
@@ -65,4 +69,44 @@ func commercialBankRealmPlan(entity string) KeycloakRealmPlan {
 // register the governance participant on first startup (CB only).
 func governanceUserID(entity string) string {
 	return "service-account-" + entity + "-client"
+}
+
+// renderRealmJSON produces a Keycloak realm-import document for a plan: the realm,
+// its realm roles, and confidential service-account clients (fixed secret,
+// directAccessGrants for ROPC). Keycloak imports this on startup (--import-realm).
+func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
+	roleSet := map[string]bool{}
+	var realmRoles []map[string]any
+	clients := make([]map[string]any, 0, len(plan.Clients))
+	for _, c := range plan.Clients {
+		for _, r := range c.Roles {
+			if !roleSet[r] {
+				roleSet[r] = true
+				realmRoles = append(realmRoles, map[string]any{"name": r})
+			}
+		}
+		client := map[string]any{
+			"clientId":                  c.ClientID,
+			"name":                      c.ClientID,
+			"enabled":                   true,
+			"protocol":                  "openid-connect",
+			"publicClient":              c.Secret == "",
+			"standardFlowEnabled":       true,
+			"directAccessGrantsEnabled": true,
+			"serviceAccountsEnabled":    c.Secret != "",
+			"redirectUris":              []string{"*"},
+			"webOrigins":                []string{"*"},
+		}
+		if c.Secret != "" {
+			client["secret"] = c.Secret
+		}
+		clients = append(clients, client)
+	}
+	realm := map[string]any{
+		"realm":   plan.Realm,
+		"enabled": true,
+		"roles":   map[string]any{"realm": realmRoles},
+		"clients": clients,
+	}
+	return json.MarshalIndent(realm, "", "  ")
 }

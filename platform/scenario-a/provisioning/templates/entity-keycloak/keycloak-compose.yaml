@@ -1,0 +1,47 @@
+# Per-entity Keycloak (feature 034). Backed by the entity's dedicated Postgres
+# (created by the infra step) and importing realm JSONs rendered by the engine.
+# The CB instance hosts the central-bank realm (governance + treasury) and the
+# cbweb3 realm (NOC); a commercial bank gets its own only in keycloak: per-entity.
+#
+# REQUIRED env (set by the engine):
+#   ENTITY_INFRA_PREFIX   container-name prefix (matches the infra step)
+#   ENTITY_NET_NAME       per-entity network (external; from the infra step)
+#   KEYCLOAK_HOST_PORT    host port -> 8080
+#   KC_DB_URL             jdbc url to the entity's Postgres (e.g. jdbc:postgresql://<prefix>-postgres:5432/<db>)
+#   KC_DB_USERNAME / KC_DB_PASSWORD
+#   KEYCLOAK_IMAGE        Keycloak image (pinned)
+#   KEYCLOAK_IMPORT_DIR   host dir with the rendered realm JSON files
+# OPTIONAL: KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD (default admin/admin)
+
+services:
+  keycloak:
+    image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.0}
+    container_name: ${ENTITY_INFRA_PREFIX:?ENTITY_INFRA_PREFIX is required}-keycloak
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}
+      KC_DB: postgres
+      KC_DB_URL: ${KC_DB_URL:?KC_DB_URL is required}
+      KC_DB_USERNAME: ${KC_DB_USERNAME:-default}
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:-default}
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_HOST_PORT:?KEYCLOAK_HOST_PORT is required}:8080"
+    volumes:
+      - ${KEYCLOAK_IMPORT_DIR:?KEYCLOAK_IMPORT_DIR is required}:/opt/keycloak/data/import:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /realms/master HTTP/1.0\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200\\|301\\|302'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - entity_net
+
+networks:
+  entity_net:
+    name: ${ENTITY_NET_NAME:?ENTITY_NET_NAME is required}
+    external: true

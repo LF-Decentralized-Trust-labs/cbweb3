@@ -2,7 +2,10 @@
 
 package orchestrator
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestCentralBankRealmPlans_IncludeNOCAndTreasury(t *testing.T) {
 	plans := centralBankRealmPlans("central-bank-brazil")
@@ -40,5 +43,35 @@ func TestCommercialBankRealmPlan(t *testing.T) {
 func TestGovernanceUserID(t *testing.T) {
 	if got := governanceUserID("central-bank-brazil"); got != "service-account-central-bank-brazil-client" {
 		t.Errorf("governanceUserID = %q", got)
+	}
+}
+
+func TestRenderRealmJSON_ClientsRolesSecret(t *testing.T) {
+	plans := centralBankRealmPlans("central-bank-brazil")
+	data, err := renderRealmJSON(plans[0])
+	if err != nil {
+		t.Fatalf("renderRealmJSON: %v", err)
+	}
+	var realm map[string]any
+	if err := json.Unmarshal(data, &realm); err != nil {
+		t.Fatalf("invalid realm JSON: %v", err)
+	}
+	if realm["realm"] != "central-bank-brazil" {
+		t.Errorf("realm = %v", realm["realm"])
+	}
+	clients := realm["clients"].([]any)
+	if len(clients) != 2 {
+		t.Fatalf("expected 2 clients, got %d", len(clients))
+	}
+	gov := clients[0].(map[string]any)
+	if gov["clientId"] != "central-bank-brazil-client" || gov["secret"] != "central-bank-brazil-local-secret" {
+		t.Errorf("governance client mismatch: %v", gov)
+	}
+	if gov["serviceAccountsEnabled"] != true || gov["directAccessGrantsEnabled"] != true {
+		t.Errorf("governance client must enable service accounts + direct access grants")
+	}
+	roles := realm["roles"].(map[string]any)["realm"].([]any)
+	if len(roles) < 2 {
+		t.Errorf("expected ROLE_GOVERNANCE + ROLE_TREASURY realm roles, got %v", roles)
 	}
 }
