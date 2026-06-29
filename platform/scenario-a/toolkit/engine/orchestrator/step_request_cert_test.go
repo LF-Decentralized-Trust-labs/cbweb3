@@ -34,7 +34,7 @@ func TestRequestCertStep_HTTP200_StagesPendingCert(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	step := newRequestCertStep("bank-x", dir, srv.URL, nil, 5*time.Second)
+	step := newRequestCertStep("bank-x", "Bank X SA", dir, srv.URL, nil, 5*time.Second)
 	if err := step.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestRequestCertStep_HTTP202_WritesMarker(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	step := newRequestCertStep("bank-x", dir, srv.URL, nil, 5*time.Second)
+	step := newRequestCertStep("bank-x", "Bank X SA", dir, srv.URL, nil, 5*time.Second)
 	if err := step.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -74,13 +74,13 @@ func TestRequestCertStep_HTTP400_FailsFast(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	step := newRequestCertStep("bank-x", dir, srv.URL, nil, 5*time.Second)
+	step := newRequestCertStep("bank-x", "Bank X SA", dir, srv.URL, nil, 5*time.Second)
 	if err := step.Run(context.Background()); err == nil {
 		t.Fatal("Run should fail fast on HTTP 400")
 	}
 }
 
-// T053: the POST body includes blockchain_pubkey when a key provider is set.
+// T053: the POST body includes blockchain_pub_key_hex when a key provider is set.
 func TestRequestCertStep_SendsBlockchainPubkey(t *testing.T) {
 	dir := t.TempDir()
 	writeFakeCSR(t, dir, "bank-x")
@@ -95,14 +95,14 @@ func TestRequestCertStep_SendsBlockchainPubkey(t *testing.T) {
 	defer srv.Close()
 
 	kp := keyprovider.NewLocalKeyProvider()
-	step := newRequestCertStep("bank-x", dir, srv.URL, kp, 5*time.Second)
+	step := newRequestCertStep("bank-x", "Bank X SA", dir, srv.URL, kp, 5*time.Second)
 	if err := step.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !strings.Contains(gotBody, "blockchain_pubkey") {
-		t.Errorf("POST body must include blockchain_pubkey, got: %s", gotBody)
+	if !strings.Contains(gotBody, "blockchain_pub_key_hex") {
+		t.Errorf("POST body must include blockchain_pub_key_hex, got: %s", gotBody)
 	}
 	if !strings.Contains(gotBody, "0x") {
-		t.Errorf("blockchain_pubkey should be hex-encoded with 0x prefix, got: %s", gotBody)
+		t.Errorf("blockchain_pub_key_hex should be hex-encoded with 0x prefix, got: %s", gotBody)
 	}
 }

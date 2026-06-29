@@ -92,6 +92,10 @@ KEYCLOAK_BASE_URL={{.KeycloakURL}}
 KC_REALM={{.KCRealm}}
 KC_CLIENT_ID={{.KCClientID}}
 KC_CLIENT_SECRET={{.KCClientSecret}}
+# Names the auth service reads for the admin (service-account) token + realm.
+KEYCLOAK_REALM={{.KCRealm}}
+KEYCLOAK_CLIENT_ID={{.KCClientID}}
+KEYCLOAK_CLIENT_SECRET={{.KCClientSecret}}
 
 # PKI (local dev)
 CA_CERT_FILE={{.CACertFile}}

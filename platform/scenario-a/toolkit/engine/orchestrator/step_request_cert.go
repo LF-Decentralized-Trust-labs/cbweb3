@@ -27,14 +27,15 @@ const (
 // resubmit redundantly. The receive step finalizes either path.
 type requestCertStep struct {
 	bankCode    string
+	institution string
 	dataDir     string
 	cbEndpoint  string
 	keyProvider kp.KeyProvider
 	timeout     time.Duration
 }
 
-func newRequestCertStep(bankCode, dataDir, cbEndpoint string, keyProvider kp.KeyProvider, timeout time.Duration) Step {
-	return &requestCertStep{bankCode: bankCode, dataDir: dataDir, cbEndpoint: cbEndpoint, keyProvider: keyProvider, timeout: timeout}
+func newRequestCertStep(bankCode, institution, dataDir, cbEndpoint string, keyProvider kp.KeyProvider, timeout time.Duration) Step {
+	return &requestCertStep{bankCode: bankCode, institution: institution, dataDir: dataDir, cbEndpoint: cbEndpoint, keyProvider: keyProvider, timeout: timeout}
 }
 
 func (s *requestCertStep) Name() string { return StepRequestCert }
@@ -73,7 +74,16 @@ func (s *requestCertStep) Run(ctx context.Context) error {
 		pubkeyHex = "0x" + hex.EncodeToString(pub)
 	}
 
-	certPEM, err := pki.SubmitCSRToCBWithPubkey(csrPath, s.cbEndpoint, pubkeyHex, s.timeout)
+	certPEM, err := pki.SubmitCredentialRequest(pki.CredentialRequest{
+		CSRPath:          csrPath,
+		BlockchainPubKey: pubkeyHex,
+		InstitutionName:  s.institution,
+		Role:             "ROLE_COMMERCIAL_BANK",
+		// Local bootstrap identity for the bank's admin user; the CB compliance
+		// service provisions the Keycloak user from these.
+		Username: s.bankCode + "-admin",
+		Email:    s.bankCode + "@cbweb3.local",
+	}, s.cbEndpoint, s.timeout)
 	if err != nil {
 		if errors.Is(err, pki.ErrCertPending) {
 			// CB accepted asynchronously — mark so receive step polls.

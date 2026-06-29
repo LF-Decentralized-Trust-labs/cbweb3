@@ -328,15 +328,28 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		besuImage = defaultBesuImage
 	}
 
+	// Local single-host adaptation (feature 018): the bundle carries the CB's
+	// in-Docker advertised host. Rewrite endpoints so Besu peers over the shared
+	// network (internal P2P port) while the host-run toolkit reaches the CB via
+	// published host ports. Non-local profiles use the bundle endpoints verbatim.
+	ep := rawEndpoints(b)
+	if m.Spec.Environment == "local" {
+		if l, err := localizeBundleEndpoints(b); err != nil {
+			logDetail(w, spokeID, "localize-endpoints", err.Error())
+		} else {
+			ep = l
+		}
+	}
+
 	steps := []Step{
 		newWriteGenesisStep(dataDir, b.Spec.Genesis.Content, b.Spec.Genesis.Hash),
 		newStartBesuJoinStep(spokeID, deps.BankCode, dataDir, deps.ComposeTemplatePath, deps.BesuRPCURL,
-			b.Spec.Bootnode.Enode, m.Spec.Node.AdvertisedHost, besuImage, rpcPort, wsPort, p2pPort),
+			ep.bootnodeEnode, m.Spec.Node.AdvertisedHost, besuImage, rpcPort, wsPort, p2pPort),
 		newWaitSyncStep(deps.BesuRPCURL, 1, deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval, w),
-		newVoteQBFTStep(spokeID, deps.BesuRPCURL, b.Spec.Validators, deps.Timeouts.VoteQBFT, deps.Timeouts.VoteQBFTInterval, w),
+		newVoteQBFTStep(spokeID, deps.BesuRPCURL, ep.validators, deps.Timeouts.VoteQBFT, deps.Timeouts.VoteQBFTInterval, w),
 		newGenCSRStep(deps.BankCode, deps.Institution, dataDir),
-		newRequestCertStep(deps.BankCode, dataDir, b.Spec.CBEndpoint, deps.KeyProvider, deps.Timeouts.RequestCert),
-		newReceiveCertStep(deps.BankCode, dataDir, b.Spec.CBEndpoint, deps.Timeouts.ReceiveCert, deps.Timeouts.ReceiveCertInterval, deps.Timeouts.RequestCert),
+		newRequestCertStep(deps.BankCode, deps.Institution, dataDir, ep.cbCertEndpoint, deps.KeyProvider, deps.Timeouts.RequestCert),
+		newReceiveCertStep(deps.BankCode, dataDir, ep.cbCertEndpoint, deps.Timeouts.ReceiveCert, deps.Timeouts.ReceiveCertInterval, deps.Timeouts.RequestCert),
 		newProofPossessionStep(deps.BankCode, b.Spec.Contracts.RegistryAddress, deps.BesuRPCURL, deps.KeyProvider, deps.Timeouts.ProofOfPossession),
 		// US2 — dynamic Paladin node bring-up for the joining bank.
 		newGenTLSJoinStep(spokeID, deps.BankCode, dataDir),
@@ -373,7 +386,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		newRenderBankEnvStep(bankEnvParams{
 			SpokeID: spokeID, BankCode: bank, Currency: b.Spec.Currency,
 			BesuRPCPort: deps.BesuRPCPort, BesuRPCURL: deps.BesuRPCURL, DataDir: dataDir,
-			CentralBankAPIURL:          centralBankAPIURL(b.Spec.CBEndpoint),
+			CentralBankAPIURL:          ep.cbAPIBaseForBank,
 			ZetoTokenAddress:           b.Spec.Contracts.ZetoTokenAddress,
 			ParticipantRegistryAddress: b.Spec.Contracts.ParticipantRegistryAddress,
 		}),

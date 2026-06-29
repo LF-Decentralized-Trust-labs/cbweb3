@@ -78,6 +78,10 @@ func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
 	roleSet := map[string]bool{}
 	var realmRoles []map[string]any
 	clients := make([]map[string]any, 0, len(plan.Clients))
+	// Service accounts need realm-management roles so the auth service can create
+	// and manage users (e.g. provisioning a joining bank's admin user). These are
+	// granted via a users entry per the Keycloak realm-import format.
+	var users []map[string]any
 	for _, c := range plan.Clients {
 		for _, r := range c.Roles {
 			if !roleSet[r] {
@@ -99,6 +103,14 @@ func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
 		}
 		if c.Secret != "" {
 			client["secret"] = c.Secret
+			users = append(users, map[string]any{
+				"username":               "service-account-" + c.ClientID,
+				"enabled":                true,
+				"serviceAccountClientId": c.ClientID,
+				"clientRoles": map[string]any{
+					"realm-management": []string{"manage-users", "view-users", "query-users", "manage-clients"},
+				},
+			})
 		}
 		clients = append(clients, client)
 	}
@@ -107,6 +119,9 @@ func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
 		"enabled": true,
 		"roles":   map[string]any{"realm": realmRoles},
 		"clients": clients,
+	}
+	if len(users) > 0 {
+		realm["users"] = users
 	}
 	return json.MarshalIndent(realm, "", "  ")
 }

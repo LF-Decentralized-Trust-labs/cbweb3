@@ -131,6 +131,51 @@ func SubmitCSRToCBWithPubkey(csrPath, cbURL, blockchainPubkey string, timeout ti
 	if blockchainPubkey != "" {
 		payload["blockchain_pubkey"] = blockchainPubkey
 	}
+	return postCredentialRequest(cbURL, payload, timeout)
+}
+
+// CredentialRequest is the full credential-request payload the central bank's
+// api-gateway (POST /api/v1/onboarding/credential-request) requires. The private
+// key never leaves the caller; only the CSR and the public key are sent.
+type CredentialRequest struct {
+	CSRPath          string
+	BlockchainPubKey string // hex, 0x-prefixed
+	InstitutionName  string
+	Role             string // e.g. ROLE_COMMERCIAL_BANK
+	Username         string
+	Email            string
+	Country          string // optional
+}
+
+// SubmitCredentialRequest reads the CSR and POSTs the full credential-request
+// payload to the central bank. Field names match the api-gateway contract
+// (csr_pem, blockchain_pub_key_hex, institution_name, role, username, email).
+func SubmitCredentialRequest(req CredentialRequest, cbURL string, timeout time.Duration) (certPEM string, err error) {
+	if cbURL == "" {
+		return "", fmt.Errorf("%w: cbURL is empty", ErrInvalidInput)
+	}
+	csrBytes, err := os.ReadFile(req.CSRPath)
+	if err != nil {
+		return "", fmt.Errorf("read CSR %q: %w", req.CSRPath, err)
+	}
+	payload := map[string]string{
+		"csr_pem":                string(csrBytes),
+		"blockchain_pub_key_hex": req.BlockchainPubKey,
+		"institution_name":       req.InstitutionName,
+		"role":                   req.Role,
+		"username":               req.Username,
+		"email":                  req.Email,
+		"bank_code":              bankCodeFromCSR(csrBytes),
+	}
+	if req.Country != "" {
+		payload["country"] = req.Country
+	}
+	return postCredentialRequest(cbURL, payload, timeout)
+}
+
+// postCredentialRequest marshals payload as JSON, POSTs it to cbURL, and maps the
+// response: 200 → cert_pem, 202 → ErrCertPending, other → ErrCBRejected.
+func postCredentialRequest(cbURL string, payload map[string]string, timeout time.Duration) (string, error) {
 	reqBody, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("marshal credential request: %w", err)
@@ -162,7 +207,9 @@ func SubmitCSRToCBWithPubkey(csrPath, cbURL, blockchainPubkey string, timeout ti
 			return "", fmt.Errorf("%w: 200 response has empty cert_pem", ErrCBRejected)
 		}
 		return parsed.CertPEM, nil
-	case http.StatusAccepted:
+	case http.StatusCreated, http.StatusAccepted:
+		// 201 Created / 202 Accepted: the CB registered the request for async
+		// issuance (e.g. pending governance approval). The receive step polls.
 		return "", ErrCertPending
 	default:
 		return "", fmt.Errorf("%w: HTTP %d: %s", ErrCBRejected, resp.StatusCode, strings.TrimSpace(string(respBody)))
