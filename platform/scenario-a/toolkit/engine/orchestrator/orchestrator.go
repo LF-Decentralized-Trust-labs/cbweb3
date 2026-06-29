@@ -321,10 +321,17 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		p2pPort = m.Spec.Node.P2P.Port
 	}
 
-	return []Step{
+	// "build" / empty is a directive to use the locally-pinned image, not a pullable
+	// repository — resolve it to the default Besu image (same as mode:found).
+	besuImage := m.Spec.Image
+	if besuImage == "" || besuImage == "build" {
+		besuImage = defaultBesuImage
+	}
+
+	steps := []Step{
 		newWriteGenesisStep(dataDir, b.Spec.Genesis.Content, b.Spec.Genesis.Hash),
 		newStartBesuJoinStep(spokeID, deps.BankCode, dataDir, deps.ComposeTemplatePath, deps.BesuRPCURL,
-			b.Spec.Bootnode.Enode, m.Spec.Node.AdvertisedHost, m.Spec.Image, rpcPort, wsPort, p2pPort),
+			b.Spec.Bootnode.Enode, m.Spec.Node.AdvertisedHost, besuImage, rpcPort, wsPort, p2pPort),
 		newWaitSyncStep(deps.BesuRPCURL, 1, deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval, w),
 		newVoteQBFTStep(spokeID, deps.BesuRPCURL, b.Spec.Validators, deps.Timeouts.VoteQBFT, deps.Timeouts.VoteQBFTInterval, w),
 		newGenCSRStep(deps.BankCode, deps.Institution, dataDir),
@@ -345,8 +352,60 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		newDeployFXAJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort),
 			filepath.Join(deps.ContractsOutDir, "FXAgreement.sol", "FXAgreement.json"),
 			b.Spec.Contracts.ParticipantRegistryAddress, deps.Timeouts.VoteQBFT),
-		newStartBackendStep(spokeID, deps.BankCode, dataDir, deps.BackendComposePath, w),
 	}
+
+	// Commercial bank operational stack (feature 034 US2): dedicated infra +
+	// per-entity Keycloak + the 4 backend services, in commercial-bank mode.
+	// Template/context paths are derived from the Scenario A root (ContractsOutDir
+	// is <root>/contracts/out), mirroring the CB found path.
+	root := filepath.Dir(filepath.Dir(deps.ContractsOutDir))
+	templatesDir := filepath.Join(root, "provisioning", "templates")
+	bank := deps.BankCode
+	prefix := entityContainerPrefix(bank)
+	net := entityNetName(bank)
+	ports := entityPorts(deps.BesuRPCPort)
+	dbName := entityDBName(bank)
+	kcDBURL := fmt.Sprintf("jdbc:postgresql://%s-postgres:5432/%s", prefix, dbName)
+	stackTO := deps.Timeouts.WaitSync
+	stackInt := deps.Timeouts.WaitSyncInterval
+
+	steps = append(steps,
+		newRenderBankEnvStep(bankEnvParams{
+			SpokeID: spokeID, BankCode: bank, Currency: b.Spec.Currency,
+			BesuRPCPort: deps.BesuRPCPort, BesuRPCURL: deps.BesuRPCURL, DataDir: dataDir,
+			CentralBankAPIURL:          centralBankAPIURL(b.Spec.CBEndpoint),
+			ZetoTokenAddress:           b.Spec.Contracts.ZetoTokenAddress,
+			ParticipantRegistryAddress: b.Spec.Contracts.ParticipantRegistryAddress,
+		}),
+		newStartInfraStep(StepStartBankInfra, prefix, net, dataDir,
+			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
+			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
+		newProvisionKeycloakStep(StepProvisionBankKeycloak, keycloakStepParams{
+			EntityPrefix: prefix, NetName: net, DataDir: dataDir,
+			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
+			KCDBURL:     kcDBURL, KCUser: "default", KCPassword: "default",
+			HostPort: ports.Keycloak, Realms: []KeycloakRealmPlan{commercialBankRealmPlan(bank)}, Timeout: stackTO,
+		}),
+		newStartBackendStackStep(StepStartBackend, backendStackParams{
+			EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
+			EnvFile:     cbEnvPath(dataDir, bank),
+			ComposePath: filepath.Join(templatesDir, "entity-backend", "backend-compose.yaml"),
+			BankCode:    bank,
+			PaladinURL:  hostInternalURL(bankPaladinURL(deps.BesuRPCPort)), PaladinIdentity: paladinIdentity(bankNodeName(spokeID, bank)),
+			APIPort: ports.APIGateway, AuthPort: ports.AuthGRPC, CompliancePort: ports.ComplianceGRPC, PaymentPort: ports.PaymentGRPC,
+			HealthTimeout: stackTO, HealthInterval: stackInt,
+		}),
+	)
+	return steps
+}
+
+// centralBankAPIURL derives the CB api-gateway base URL a commercial bank uses for
+// onboarding/proxy, from the credential-request endpoint embedded in the bundle.
+func centralBankAPIURL(cbEndpoint string) string {
+	if i := strings.Index(cbEndpoint, "/api/v1/"); i >= 0 {
+		return cbEndpoint[:i]
+	}
+	return cbEndpoint
 }
 
 // bankPaladinURL is the host RPC URL of the joining bank's Paladin node, derived
