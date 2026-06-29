@@ -94,18 +94,19 @@ func TestStartPaladinJoinStep_ComposeEnvAndPorts(t *testing.T) {
 	step := newStartPaladinJoinStep("spoke-brl", "bank-itau", t.TempDir(), "/nonexistent/compose.yaml",
 		"paladin:test", 8746, 0, 0).(*startPaladinJoinStep)
 
-	// Ports derived from the bank Besu RPC port (8746): RPC=31746, WS+1, gRPC+2.
-	if !strings.Contains(step.paladinRPCURL, "31746") {
-		t.Errorf("paladinRPCURL = %q; want port 31746", step.paladinRPCURL)
+	// Ports derived from the bank Besu RPC port (8746), each in its own +1000 band:
+	// RPC=+19000, WS=+20000, gRPC=+21000.
+	if !strings.Contains(step.paladinRPCURL, "27746") {
+		t.Errorf("paladinRPCURL = %q; want port 27746", step.paladinRPCURL)
 	}
 	env := strings.Join(step.composeEnv(), "\n")
 	for _, want := range []string{
 		"SPOKE_ID=spoke-brl",
 		"BANK_ID=bank-itau",
 		"PALADIN_IMAGE=paladin:test",
-		"PALADIN_BANK_RPC_PORT=31746",
-		"PALADIN_BANK_WS_PORT=31747",
-		"PALADIN_BANK_GRPC_PORT=31748",
+		"PALADIN_BANK_RPC_PORT=27746",
+		"PALADIN_BANK_WS_PORT=28746",
+		"PALADIN_BANK_GRPC_PORT=29746",
 		"SPOKE_NETWORK_NAME=cbweb3-spoke-brl-besu",
 	} {
 		if !strings.Contains(env, want) {

@@ -45,9 +45,16 @@ func newStartPaladinJoinStep(spokeID, bankID, dataDir, composePath, paladinImage
 	}
 }
 
-// bankPaladinRPCPortOffset derives the bank Paladin host ports from its Besu RPC
-// port (unique per bank), avoiding collisions: RPC=+23000, WS=+23001, gRPC=+23002.
-const bankPaladinRPCPortOffset = 23000
+// Bank Paladin host ports are derived from the bank's (unique) Besu RPC port, each
+// in its OWN +1000 band — NOT 3 consecutive ports. Consecutive ports made adjacent
+// banks' (and the CB's) 3-wide bands overlap (e.g. besu 8646 → 31646-31648 hit the
+// CB's fixed 31648). Separate bands mean adjacent Besu ports differ by 1 per band
+// and never collide, and the bank range (27xxx-29xxx) clears the CB's (31648-31650).
+const (
+	bankPaladinRPCPortOffset  = 19000
+	bankPaladinWSPortOffset   = 20000
+	bankPaladinGRPCPortOffset = 21000
+)
 
 func (s *startPaladinJoinStep) Name() string { return StepStartPaladinJoin }
 
@@ -80,15 +87,14 @@ func (s *startPaladinJoinStep) composeEnv() []string {
 	if image == "" {
 		image = defaultPaladinImage
 	}
-	rpc := s.besuRPCPort + bankPaladinRPCPortOffset
 	return append(os.Environ(),
 		"SPOKE_ID="+s.spokeID,
 		"BANK_ID="+s.bankID,
 		"SPOKE_DATA_DIR="+s.dataDir,
 		"PALADIN_IMAGE="+image,
-		"PALADIN_BANK_RPC_PORT="+strconv.Itoa(rpc),
-		"PALADIN_BANK_WS_PORT="+strconv.Itoa(rpc+1),
-		"PALADIN_BANK_GRPC_PORT="+strconv.Itoa(rpc+2),
+		"PALADIN_BANK_RPC_PORT="+strconv.Itoa(s.besuRPCPort+bankPaladinRPCPortOffset),
+		"PALADIN_BANK_WS_PORT="+strconv.Itoa(s.besuRPCPort+bankPaladinWSPortOffset),
+		"PALADIN_BANK_GRPC_PORT="+strconv.Itoa(s.besuRPCPort+bankPaladinGRPCPortOffset),
 		"SPOKE_NETWORK_NAME=cbweb3-"+s.spokeID+"-besu",
 		"PALADIN_UID="+strconv.Itoa(os.Getuid()),
 		"PALADIN_GID="+strconv.Itoa(os.Getgid()),
