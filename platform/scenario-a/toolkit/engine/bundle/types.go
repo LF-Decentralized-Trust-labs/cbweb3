@@ -97,6 +97,10 @@ type ContractsSpec struct {
 	PenteContextGroupID string `yaml:"penteContextGroupId"`
 	PenteContextAddress string `yaml:"penteContextAddress"`
 	FXAgreementAddress  string `yaml:"fxAgreementAddress"`
+	// ParticipantRegistryAddress is the IdentityRegistry.sol participant whitelist
+	// (deployed at found onboard, FR-018). Consumed by mode:join to set the
+	// FXAgreement constructor's _identityRegistry (US3).
+	ParticipantRegistryAddress string `yaml:"participantRegistryAddress,omitempty"`
 }
 
 // RelaySpec holds the relay endpoint for the spoke.

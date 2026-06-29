@@ -235,13 +235,14 @@ func readContracts(dataDir string) (ContractsSpec, error) {
 	}
 
 	return ContractsSpec{
-		RegistryAddress:     a.RegistryContractAddress,
-		ZetoFactoryAddress:  a.ZetoFactoryAddress,
-		PenteFactoryAddress: a.PenteFactoryAddress,
-		ZetoTokenAddress:    a.ZetoTokenAddress,
-		PenteContextGroupID: a.PenteContextGroupID,
-		PenteContextAddress: a.PenteContextAddress,
-		FXAgreementAddress:  a.FXAgreementDeployedAt,
+		RegistryAddress:            a.RegistryContractAddress,
+		ZetoFactoryAddress:         a.ZetoFactoryAddress,
+		PenteFactoryAddress:        a.PenteFactoryAddress,
+		ZetoTokenAddress:           a.ZetoTokenAddress,
+		PenteContextGroupID:        a.PenteContextGroupID,
+		PenteContextAddress:        a.PenteContextAddress,
+		FXAgreementAddress:         a.FXAgreementDeployedAt,
+		ParticipantRegistryAddress: a.ParticipantRegistryAddress,
 	}, nil
 }
 

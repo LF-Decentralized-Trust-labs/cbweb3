@@ -283,6 +283,17 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			deps.BesuRPCPort, deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval),
 		newRegisterPaladinNodeStep(spokeID, deps.BankCode, dataDir, deps.BesuRPCURL,
 			b.Spec.Contracts.RegistryAddress, deps.Timeouts.ProofOfPossession),
+		// US3 — bilateral Pente context + FXAgreement, against the bank's Paladin.
+		newCreatePenteJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort), deps.Timeouts.VoteQBFT),
+		newDeployFXAJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort),
+			filepath.Join(deps.ContractsOutDir, "FXAgreement.sol", "FXAgreement.json"),
+			b.Spec.Contracts.ParticipantRegistryAddress, deps.Timeouts.VoteQBFT),
 		newStartBackendStep(spokeID, deps.BankCode, dataDir, deps.BackendComposePath, w),
 	}
+}
+
+// bankPaladinURL is the host RPC URL of the joining bank's Paladin node, derived
+// from its Besu RPC host port (see startPaladinJoinStep port scheme).
+func bankPaladinURL(besuRPCPort int) string {
+	return fmt.Sprintf("http://localhost:%d", besuRPCPort+bankPaladinRPCPortOffset)
 }

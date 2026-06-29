@@ -151,6 +151,9 @@ type JoinDeps struct {
 	// config and to derive the bank Paladin host ports).
 	BesuRPCPort int
 	BesuWSPort  int
+	// ContractsOutDir is the Foundry build output dir (for the FXAgreement artifact,
+	// US3 deploy-fxa-pente).
+	ContractsOutDir string
 
 	// Timeouts overrides the default per-step timeout values. Zero values use defaults.
 	Timeouts JoinTimeouts

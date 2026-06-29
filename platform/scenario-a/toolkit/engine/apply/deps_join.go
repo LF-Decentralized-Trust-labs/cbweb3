@@ -43,5 +43,6 @@ func ResolveJoinDeps(m *manifest.Manifest, profile LocalProfile) (orchestrator.J
 		PaladinImage:             profile.PaladinImage,
 		BesuRPCPort:              besuRPCPort,
 		BesuWSPort:               besuWSPort,
+		ContractsOutDir:          profile.ContractsOutDir,
 	}, nil
 }

@@ -67,7 +67,10 @@ const (
 	StepRenderConfigJoin    = "render-config-join"
 	StepStartPaladinJoin    = "start-paladin-join"
 	StepRegisterPaladinNode = "register-paladin-node"
-	StepStartBackend        = "start-backend"
+	// Bilateral Pente context + FXAgreement deploy for the CB↔bank relationship (US3).
+	StepCreatePenteJoin = "create-pente-context"
+	StepDeployFXAJoin   = "deploy-fxa-pente"
+	StepStartBackend    = "start-backend"
 )
 
 // CanonicalJoinStepOrder is the definitive execution sequence for mode:join.
@@ -86,5 +89,7 @@ var CanonicalJoinStepOrder = []string{
 	StepRenderConfigJoin,
 	StepStartPaladinJoin,
 	StepRegisterPaladinNode,
+	StepCreatePenteJoin,
+	StepDeployFXAJoin,
 	StepStartBackend,
 }
