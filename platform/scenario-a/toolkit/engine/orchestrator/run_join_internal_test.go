@@ -56,7 +56,7 @@ func testJoinDeps() JoinDeps {
 	return JoinDeps{
 		KeyProvider:         keyprovider.NewLocalKeyProvider(),
 		BankCode:            "commercial-bank-alpha",
-		Institution:        "Alpha Bank",
+		Institution:         "Alpha Bank",
 		BesuRPCURL:          "http://localhost:8746",
 		ComposeTemplatePath: "/nonexistent/docker-compose.yaml",
 	}

@@ -4,8 +4,6 @@ package orchestrator
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -15,8 +13,9 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	kp "github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/keyprovider"
 )
 
 // identityRegistryABIJSON is the minimal ABI of the IdentityRegistry needed to
@@ -29,43 +28,25 @@ const identityRegistryABIJSON = `[
 	{"anonymous":false,"inputs":[{"name":"parentIdentityHash","type":"bytes32","indexed":false},{"name":"identityHash","type":"bytes32","indexed":false},{"name":"name","type":"string","indexed":false},{"name":"owner","type":"address","indexed":false}],"name":"IdentityRegistered","type":"event"}
 ]`
 
-// IMPORTANT (local-profile bootstrap keys): these are well-known Hyperledger Besu
-// dev keys, pre-funded in the spoke genesis alloc (see start-besu). They are used
-// ONLY for the local profile to satisfy the on-chain registration's gas + owner
-// requirements, exactly as the reference network does for the CB node.
-//
-// The IdentityRegistry is deployed (by deploy-contracts) from registryDeployerKey,
-// which is therefore the registry owner authorized to call registerIdentity.
-// FR-009 (node owner key sourced from the KeyProvider) is deferred until the
-// research phase (T001) resolves how a KeyProvider-managed key is funded for gas;
-// it is NOT a hardcoded production key.
-const (
-	// registryDeployerKey — 0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73 (registry owner).
-	registryDeployerKey = "8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63"
-	// cbNodeOwnerKey — 0x627306090abaB3A6e1400e9345bC60c78a8BEf57 (CB Paladin node owner).
-	cbNodeOwnerKey = "c87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3"
-	// bankNodeOwnerKey — 0xf17f52151EbEF6C7334FAD080c5704D77216b732 (commercial-bank
-	// Paladin node owner, local profile; genesis-funded). One owner key serves all
-	// local bank nodes (identities are keyed by name). keyProvider-owner is deferred
-	// (FR-009) until the funding model is resolved.
-	bankNodeOwnerKey = "ae6ae8e5ccbfb04590405997ee2d52d2b330726137b875053c36d94e974d162f"
-)
-
 // paladinNodeRegistration carries the inputs to register one Paladin node.
+// All signing goes through the KeyProvider (no raw key material here): the operator
+// key (LocalOperatorKeyID locally; a real KMS key in prod) is the registry owner
+// and the node owner, and signs both on-chain phases.
 type paladinNodeRegistration struct {
 	registry     common.Address
 	nodeName     string // e.g. "spoke-brl-cb"
 	grpcHostname string // e.g. "paladin-spoke-brl-cb"
 	certPEM      []byte
-	deployerKey  *ecdsa.PrivateKey // registry owner; sends registerIdentity
-	ownerKey     *ecdsa.PrivateKey // node owner; sends setIdentityProperty
+	provider     kp.KeyProvider
+	signerKeyID  string
 }
 
 // registerPaladinNode registers a single Paladin node identity on-chain and
 // publishes its gRPC transport endpoint + TLS cert. Parametrized per node — no
-// hardcoded spoke/bank topology. Two phases (mirroring the reference flow):
-//  1. registerIdentity(0, name, ownerAddr)         — sent by the registry owner
-//  2. setIdentityProperty(hash, transport.grpc, …) — sent by the node owner
+// hardcoded spoke/bank topology, no raw keys. Two phases (mirroring the reference
+// flow), both signed by the operator key via the KeyProvider:
+//  1. registerIdentity(0, name, ownerAddr)
+//  2. setIdentityProperty(hash, transport.grpc, …)
 func registerPaladinNode(ctx context.Context, rpcURL string, r paladinNodeRegistration) error {
 	client, err := ethclient.DialContext(ctx, rpcURL)
 	if err != nil {
@@ -93,7 +74,12 @@ func registerPaladinNode(ctx context.Context, rpcURL string, r paladinNodeRegist
 		return fmt.Errorf("IdentityRegistry not deployed at %s", r.registry.Hex())
 	}
 
-	send := func(label string, key *ecdsa.PrivateKey, nonce uint64, data []byte) (*types.Receipt, error) {
+	operatorAddr, err := keyProviderAddress(ctx, r.provider, r.signerKeyID)
+	if err != nil {
+		return err
+	}
+
+	send := func(label string, nonce uint64, data []byte) (*types.Receipt, error) {
 		tx := types.NewTx(&types.LegacyTx{
 			Nonce:    nonce,
 			GasPrice: big.NewInt(1_000_000_000),
@@ -102,7 +88,7 @@ func registerPaladinNode(ctx context.Context, rpcURL string, r paladinNodeRegist
 			Value:    big.NewInt(0),
 			Data:     data,
 		})
-		signed, err := types.SignTx(tx, signer, key)
+		signed, err := signTxViaKeyProvider(ctx, r.provider, r.signerKeyID, signer, tx)
 		if err != nil {
 			return nil, fmt.Errorf("sign %s: %w", label, err)
 		}
@@ -127,19 +113,17 @@ func registerPaladinNode(ctx context.Context, rpcURL string, r paladinNodeRegist
 		return nil, fmt.Errorf("timeout waiting for %s receipt", label)
 	}
 
-	// Phase 1 — registerIdentity by the registry owner (deployer).
-	deployerAddr := crypto.PubkeyToAddress(r.deployerKey.PublicKey)
-	deployerNonce, err := client.PendingNonceAt(ctx, deployerAddr)
+	// Phase 1 — registerIdentity (owner = the operator address).
+	nonce, err := client.PendingNonceAt(ctx, operatorAddr)
 	if err != nil {
-		return fmt.Errorf("deployer nonce: %w", err)
+		return fmt.Errorf("operator nonce: %w", err)
 	}
-	ownerAddr := crypto.PubkeyToAddress(r.ownerKey.PublicKey)
 	var zeroHash [32]byte
-	regData, err := parsedABI.Pack("registerIdentity", zeroHash, r.nodeName, ownerAddr)
+	regData, err := parsedABI.Pack("registerIdentity", zeroHash, r.nodeName, operatorAddr)
 	if err != nil {
 		return fmt.Errorf("encode registerIdentity(%s): %w", r.nodeName, err)
 	}
-	receipt, err := send("registerIdentity("+r.nodeName+")", r.deployerKey, deployerNonce, regData)
+	receipt, err := send("registerIdentity("+r.nodeName+")", nonce, regData)
 	if err != nil {
 		return err
 	}
@@ -158,10 +142,10 @@ func registerPaladinNode(ctx context.Context, rpcURL string, r paladinNodeRegist
 		}
 	}
 
-	// Phase 2 — setIdentityProperty(transport.grpc) by the node owner.
-	ownerNonce, err := client.PendingNonceAt(ctx, ownerAddr)
+	// Phase 2 — setIdentityProperty(transport.grpc), signed by the same operator.
+	nonce2, err := client.PendingNonceAt(ctx, operatorAddr)
 	if err != nil {
-		return fmt.Errorf("owner nonce: %w", err)
+		return fmt.Errorf("operator nonce (2): %w", err)
 	}
 	transport := struct {
 		Endpoint string `json:"endpoint"`
@@ -178,19 +162,10 @@ func registerPaladinNode(ctx context.Context, rpcURL string, r paladinNodeRegist
 	if err != nil {
 		return fmt.Errorf("encode setIdentityProperty(%s): %w", r.nodeName, err)
 	}
-	if _, err := send("setIdentityProperty("+r.nodeName+")", r.ownerKey, ownerNonce, propData); err != nil {
+	if _, err := send("setIdentityProperty("+r.nodeName+")", nonce2, propData); err != nil {
 		return err
 	}
 	return nil
-}
-
-// devKey decodes one of the local-profile funded dev keys above into an ECDSA key.
-func devKey(hexKey string) (*ecdsa.PrivateKey, error) {
-	b, err := hex.DecodeString(hexKey)
-	if err != nil {
-		return nil, fmt.Errorf("decode key: %w", err)
-	}
-	return crypto.ToECDSA(b)
 }
 
 // cbNodeName / cbGrpcHostname derive the central-bank Paladin node identity from

@@ -17,8 +17,8 @@ import (
 
 // Intermediate artifact names written under SPOKE_DATA_DIR/tls/.
 const (
-	pendingCertFile    = ".pending-cert.pem" // synchronous (HTTP 200) cert awaiting StoreCertificate
-	certRequestedMark  = ".cert-requested"   // marker that the CSR was accepted (HTTP 202) for async signing
+	pendingCertFile   = ".pending-cert.pem" // synchronous (HTTP 200) cert awaiting StoreCertificate
+	certRequestedMark = ".cert-requested"   // marker that the CSR was accepted (HTTP 202) for async signing
 )
 
 // requestCertStep submits the CSR to the central bank's credential-request

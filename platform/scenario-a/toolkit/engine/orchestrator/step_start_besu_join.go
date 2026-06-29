@@ -15,18 +15,18 @@ import (
 // startBesuJoinStep brings up the commercial-bank Besu node (TK-8 template)
 // as a non-validator that syncs from the spoke bootnode via BOOTNODE_ENODE.
 type startBesuJoinStep struct {
-	spokeID      string
-	bankID       string
-	dataDir      string
-	composePath  string
-	besuRPCURL   string
-	bootnodeEnode string
+	spokeID        string
+	bankID         string
+	dataDir        string
+	composePath    string
+	besuRPCURL     string
+	bootnodeEnode  string
 	advertisedHost string
-	rpcPort      int
-	wsPort       int
-	p2pPort      int
-	besuImage    string
-	httpClient   *http.Client
+	rpcPort        int
+	wsPort         int
+	p2pPort        int
+	besuImage      string
+	httpClient     *http.Client
 }
 
 func newStartBesuJoinStep(spokeID, bankID, dataDir, composePath, besuRPCURL, bootnodeEnode, advertisedHost, besuImage string, rpcPort, wsPort, p2pPort int) Step {

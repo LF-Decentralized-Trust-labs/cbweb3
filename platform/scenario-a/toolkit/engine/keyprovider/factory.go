@@ -24,7 +24,7 @@ func New(uri string) (KeyProvider, error) {
 	backend := strings.TrimPrefix(uri, schemePrefix)
 	switch backend {
 	case "local-emulator":
-		return NewLocalKeyProvider(), nil
+		return NewLocalKeyProviderSeeded(), nil
 	default:
 		return &prodKeyProvider{}, nil
 	}

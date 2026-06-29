@@ -3,11 +3,13 @@
 package orchestrator
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/crypto"
+
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/keyprovider"
 )
 
 func TestCBNodeName_DerivedFromSpoke(t *testing.T) {
@@ -29,22 +31,16 @@ func TestCBGrpcHostname_DerivedFromSpoke(t *testing.T) {
 	}
 }
 
-func TestDevKeys_DecodeToFundedAddresses(t *testing.T) {
-	// The local-profile bootstrap keys must decode and match their documented,
-	// genesis-funded addresses.
-	cases := map[string]string{
-		registryDeployerKey: "0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73",
-		cbNodeOwnerKey:      "0x627306090abaB3A6e1400e9345bC60c78a8BEf57",
+func TestLocalKeyProvider_SeedsFundedOperator(t *testing.T) {
+	// The orchestrator holds no raw keys: the funded operator lives in the key
+	// provider under LocalOperatorKeyID and resolves to the genesis-funded address.
+	p := keyprovider.NewLocalKeyProviderSeeded()
+	addr, err := keyProviderAddress(context.Background(), p, keyprovider.LocalOperatorKeyID)
+	if err != nil {
+		t.Fatalf("keyProviderAddress: %v", err)
 	}
-	for keyHex, wantAddr := range cases {
-		k, err := devKey(keyHex)
-		if err != nil {
-			t.Fatalf("devKey: %v", err)
-		}
-		got := crypto.PubkeyToAddress(k.PublicKey).Hex()
-		if !strings.EqualFold(got, wantAddr) {
-			t.Errorf("addr = %s; want %s", got, wantAddr)
-		}
+	if !strings.EqualFold(addr.Hex(), "0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73") {
+		t.Errorf("operator addr = %s; want 0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73", addr.Hex())
 	}
 }
 

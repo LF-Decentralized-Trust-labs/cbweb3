@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/keyprovider"
 )
 
 func TestBankNodeName_DerivedFromSpokeAndBank(t *testing.T) {
@@ -114,7 +116,7 @@ func TestStartPaladinJoinStep_ComposeEnvAndPorts(t *testing.T) {
 
 func TestRegisterPaladinNodeStep_Check_StateDriven(t *testing.T) {
 	dir := t.TempDir()
-	step := newRegisterPaladinNodeStep("spoke-brl", "bank-itau", dir, "http://localhost:8746", "0xREG", 0)
+	step := newRegisterPaladinNodeStep("spoke-brl", "bank-itau", dir, "http://localhost:8746", "0xREG", keyprovider.NewLocalKeyProviderSeeded(), 0)
 	done, _ := step.Check(context.Background())
 	if done {
 		t.Error("Check should be false with no state")
@@ -130,7 +132,7 @@ func TestRegisterPaladinNodeStep_Check_StateDriven(t *testing.T) {
 
 func TestRegisterPaladinNodeStep_Run_ErrorsOnMissingCert(t *testing.T) {
 	dir := t.TempDir()
-	step := newRegisterPaladinNodeStep("spoke-brl", "bank-itau", dir, "http://localhost:8746", "0xREG", 0)
+	step := newRegisterPaladinNodeStep("spoke-brl", "bank-itau", dir, "http://localhost:8746", "0xREG", keyprovider.NewLocalKeyProviderSeeded(), 0)
 	if err := step.Run(context.Background()); err == nil {
 		t.Error("Run should error when the bank Paladin cert is missing")
 	}

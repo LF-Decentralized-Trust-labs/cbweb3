@@ -12,9 +12,9 @@ import (
 
 // captureRelayRegistrar records Register calls for assertion.
 type captureRelayRegistrar struct {
-	registered   bool
-	lastInfo     SpokeInfo
-	registerErr  error
+	registered  bool
+	lastInfo    SpokeInfo
+	registerErr error
 }
 
 func (r *captureRelayRegistrar) Register(_ context.Context, info SpokeInfo) error {

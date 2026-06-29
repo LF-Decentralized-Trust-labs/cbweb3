@@ -157,14 +157,14 @@ func (s *onboardRegistryStep) Run(ctx context.Context) error {
 	}
 
 	// registerParticipant is onlyRole(GOVERNANCE_ROLE). The central bank founding
-	// the spoke IS the governance authority, so the tx is sent by the governance
-	// (deployer) key; the KeyProvider-derived address is the CB participant wallet
-	// being registered. The zkPointer carries the proof-of-possession binding.
-	govKey, err := devKey(registryDeployerKey)
+	// the spoke IS the governance authority, so the tx is signed by the operator
+	// (governance) key via the KeyProvider — no raw key material here. The
+	// KeyProvider-derived CB wallet address is what gets registered; the zkPointer
+	// carries the proof-of-possession binding.
+	govAddr, err := keyProviderAddress(ctx, s.keyProvider, kp.LocalOperatorKeyID)
 	if err != nil {
-		return fmt.Errorf("decode governance key: %w", err)
+		return fmt.Errorf("resolve governance address: %w", err)
 	}
-	govAddr := crypto.PubkeyToAddress(govKey.PublicKey)
 
 	// 2b. Ensure the participant whitelist (IdentityRegistry.sol) exists. It is a
 	// spoke-level contract distinct from the Paladin node registry; deploy it once
@@ -172,7 +172,7 @@ func (s *onboardRegistryStep) Run(ctx context.Context) error {
 	envPath := filepath.Join(s.dataDir, ".deployed-addrs.env")
 	participantAddrHex := addrs.ParticipantRegistryAddress
 	if participantAddrHex == "" {
-		deployed, derr := deployParticipantRegistry(ctx, s.besuRPCURL, s.participantArtifact, govKey)
+		deployed, derr := deployParticipantRegistry(ctx, s.besuRPCURL, s.participantArtifact, s.keyProvider, kp.LocalOperatorKeyID)
 		if derr != nil {
 			return fmt.Errorf("deploy participant registry: %w", derr)
 		}
@@ -215,7 +215,7 @@ func (s *onboardRegistryStep) Run(ctx context.Context) error {
 
 	tx := types.NewTransaction(nonce, contractAddr, big.NewInt(0), 300000, gasPrice, callData)
 	signer := types.NewEIP155Signer(chainID)
-	signedTx, err := types.SignTx(tx, signer, govKey)
+	signedTx, err := signTxViaKeyProvider(ctx, s.keyProvider, kp.LocalOperatorKeyID, signer, tx)
 	if err != nil {
 		return fmt.Errorf("sign registerParticipant: %w", err)
 	}

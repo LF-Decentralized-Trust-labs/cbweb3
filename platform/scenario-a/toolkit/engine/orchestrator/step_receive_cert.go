@@ -18,12 +18,12 @@ import (
 // Otherwise it polls the central bank (by resubmitting the CSR; the CB endpoint
 // is idempotent) until the signed cert is issued, then stores it.
 type receiveCertStep struct {
-	bankCode    string
-	dataDir     string
-	cbEndpoint  string
-	timeout     time.Duration // overall deadline for the polling loop
-	interval    time.Duration // sleep between poll attempts
-	reqTimeout  time.Duration // per-request HTTP timeout for each CB submission
+	bankCode   string
+	dataDir    string
+	cbEndpoint string
+	timeout    time.Duration // overall deadline for the polling loop
+	interval   time.Duration // sleep between poll attempts
+	reqTimeout time.Duration // per-request HTTP timeout for each CB submission
 }
 
 func newReceiveCertStep(bankCode, dataDir, cbEndpoint string, timeout, interval, reqTimeout time.Duration) Step {

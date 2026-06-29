@@ -23,6 +23,31 @@ func NewLocalKeyProvider() *LocalKeyProvider {
 	return &LocalKeyProvider{keys: make(map[string]*ecdsa.PrivateKey)}
 }
 
+// LocalOperatorKeyID is the reserved id of the local-profile funded operator key.
+// The provisioning engine signs all bootstrap on-chain transactions (deploy,
+// registerIdentity/setIdentityProperty, registerParticipant, faucet) under this
+// id — never holding raw key material itself. In prod this same id resolves to a
+// real KMS-managed key, funded out-of-band; no engine code changes.
+const LocalOperatorKeyID = "local-operator"
+
+// localFundedOperatorKeyHex is the well-known Hyperledger Besu dev account
+// (0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73), pre-funded in the spoke genesis
+// alloc and the deployer/owner of the spoke contracts. It is a PUBLIC test vector
+// (published in Besu docs and the reference network), not a secret, and is used
+// ONLY by the local emulator. It lives here — inside the key-custodian boundary —
+// so the orchestrator never embeds key material.
+const localFundedOperatorKeyHex = "8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63"
+
+// NewLocalKeyProviderSeeded returns a LocalKeyProvider seeded with the local
+// funded operator key under LocalOperatorKeyID. Used for the local profile.
+func NewLocalKeyProviderSeeded() *LocalKeyProvider {
+	p := NewLocalKeyProvider()
+	if k, err := gethcrypto.HexToECDSA(localFundedOperatorKeyHex); err == nil {
+		p.keys[LocalOperatorKeyID] = k
+	}
+	return p
+}
+
 var _ KeyProvider = (*LocalKeyProvider)(nil)
 
 // GenerateKey creates a secp256k1 key pair for id, or returns the existing pubkey

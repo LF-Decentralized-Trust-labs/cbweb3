@@ -15,9 +15,9 @@ import (
 // SPOKE_DATA_DIR/genesis/genesis.json. It NEVER overwrites an existing genesis
 // whose hash diverges from the bundle (genesis-once invariant).
 type writeGenesisStep struct {
-	dataDir       string
-	genesisB64    string // bundle.Spec.Genesis.Content
-	genesisHash   string // bundle.Spec.Genesis.Hash, format "sha256:<hex>"
+	dataDir     string
+	genesisB64  string // bundle.Spec.Genesis.Content
+	genesisHash string // bundle.Spec.Genesis.Hash, format "sha256:<hex>"
 }
 
 func newWriteGenesisStep(dataDir, genesisB64, genesisHash string) Step {

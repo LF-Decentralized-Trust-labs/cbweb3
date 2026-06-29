@@ -4,7 +4,6 @@ package orchestrator
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -15,8 +14,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	kp "github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/keyprovider"
 )
 
 // forgeArtifact is the subset of a Foundry build artifact we need: the creation
@@ -35,7 +35,7 @@ type forgeArtifact struct {
 // This is distinct from the Paladin node registry (REGISTRY_CONTRACT_ADDRESS):
 // IdentityRegistry.sol exposes registerParticipant(onlyRole(GOVERNANCE_ROLE)),
 // which onboard-registry calls to whitelist the central bank.
-func deployParticipantRegistry(ctx context.Context, rpcURL, artifactPath string, deployerKey *ecdsa.PrivateKey) (common.Address, error) {
+func deployParticipantRegistry(ctx context.Context, rpcURL, artifactPath string, provider kp.KeyProvider, signerKeyID string) (common.Address, error) {
 	raw, err := os.ReadFile(artifactPath)
 	if err != nil {
 		return common.Address{}, fmt.Errorf("read artifact %s: %w", artifactPath, err)
@@ -58,8 +58,11 @@ func deployParticipantRegistry(ctx context.Context, rpcURL, artifactPath string,
 	}
 	defer client.Close()
 
-	deployerAddr := crypto.PubkeyToAddress(deployerKey.PublicKey)
-	// constructor(address admin) — admin = deployer (governance authority).
+	deployerAddr, err := keyProviderAddress(ctx, provider, signerKeyID)
+	if err != nil {
+		return common.Address{}, err
+	}
+	// constructor(address admin) — admin = the operator (governance authority).
 	ctorArg := common.LeftPadBytes(deployerAddr.Bytes(), 32)
 	data := append(bytecode, ctorArg...)
 
@@ -84,7 +87,7 @@ func deployParticipantRegistry(ctx context.Context, rpcURL, artifactPath string,
 		Value:    big.NewInt(0),
 		Data:     data,
 	})
-	signed, err := types.SignTx(tx, types.NewEIP155Signer(chainID), deployerKey)
+	signed, err := signTxViaKeyProvider(ctx, provider, signerKeyID, types.NewEIP155Signer(chainID), tx)
 	if err != nil {
 		return common.Address{}, fmt.Errorf("sign deploy tx: %w", err)
 	}

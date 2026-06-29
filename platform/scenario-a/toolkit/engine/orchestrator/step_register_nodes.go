@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+
+	kp "github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/keyprovider"
 )
 
 // registerNodesStep registers the central bank's Paladin node identity on-chain
@@ -21,14 +23,15 @@ import (
 // Commercial-bank Paladin nodes are registered dynamically at join time (TK-9 /
 // feature 033 US2).
 type registerNodesStep struct {
-	spokeID    string
-	dataDir    string
-	besuRPCURL string
-	timeout    time.Duration
+	spokeID     string
+	dataDir     string
+	besuRPCURL  string
+	keyProvider kp.KeyProvider
+	timeout     time.Duration
 }
 
-func newRegisterNodesStep(spokeID, dataDir, besuRPCURL string, timeout time.Duration) Step {
-	return &registerNodesStep{spokeID: spokeID, dataDir: dataDir, besuRPCURL: besuRPCURL, timeout: timeout}
+func newRegisterNodesStep(spokeID, dataDir, besuRPCURL string, keyProvider kp.KeyProvider, timeout time.Duration) Step {
+	return &registerNodesStep{spokeID: spokeID, dataDir: dataDir, besuRPCURL: besuRPCURL, keyProvider: keyProvider, timeout: timeout}
 }
 
 func (s *registerNodesStep) Name() string { return StepRegisterNodes }
@@ -63,21 +66,12 @@ func (s *registerNodesStep) Run(ctx context.Context) error {
 		return fmt.Errorf("read CB Paladin cert %s: %w", certPath, err)
 	}
 
-	deployerKey, err := devKey(registryDeployerKey)
-	if err != nil {
-		return fmt.Errorf("decode registry deployer key: %w", err)
-	}
-	ownerKey, err := devKey(cbNodeOwnerKey)
-	if err != nil {
-		return fmt.Errorf("decode CB node owner key: %w", err)
-	}
-
 	return registerPaladinNode(ctx, s.besuRPCURL, paladinNodeRegistration{
 		registry:     common.HexToAddress(addrs.RegistryContractAddress),
 		nodeName:     cbNodeName(s.spokeID),
 		grpcHostname: cbGrpcHostname(s.spokeID),
 		certPEM:      certPEM,
-		deployerKey:  deployerKey,
-		ownerKey:     ownerKey,
+		provider:     s.keyProvider,
+		signerKeyID:  kp.LocalOperatorKeyID,
 	})
 }
