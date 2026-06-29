@@ -104,6 +104,12 @@ func runFoundWithSteps(ctx context.Context, m *manifest.Manifest, deps Deps, w i
 		}
 		if done {
 			logSkipped(w, spokeID, step.Name())
+			// Persist the step as done so a stale "failed"/"pending" from an earlier
+			// run converges to the real state on idempotent re-runs.
+			state = markStep(state, step.Name(), "done", time.Now().UTC().Format(time.RFC3339))
+			if err := saveState(dataDir, state); err != nil {
+				return fmt.Errorf("step %s: save state: %w", step.Name(), err)
+			}
 			continue
 		}
 
@@ -193,6 +199,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 		}),
 		newStartBackendStackStep(StepStartCBBackend, backendStackParams{
 			EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
+			PKIDir:      filepath.Join(dataDir, "tls"),
 			EnvFile:     cbEnvPath(dataDir, entity),
 			ComposePath: filepath.Join(templatesDir, "entity-backend", "backend-compose.yaml"),
 			BankCode:    entity,
@@ -266,6 +273,12 @@ func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinB
 		}
 		if done {
 			logSkipped(w, spokeID, step.Name())
+			// Persist the step as done so a stale "failed"/"pending" from an earlier
+			// run converges to the real state on idempotent re-runs.
+			state = markStep(state, step.Name(), "done", time.Now().UTC().Format(time.RFC3339))
+			if err := saveState(dataDir, state); err != nil {
+				return fmt.Errorf("step %s: save state: %w", step.Name(), err)
+			}
 			continue
 		}
 
