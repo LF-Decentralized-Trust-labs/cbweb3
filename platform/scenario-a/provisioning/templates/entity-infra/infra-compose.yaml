@@ -1,0 +1,58 @@
+# Per-entity dedicated infrastructure (feature 034): Postgres + Redis.
+# One instance PER ENTITY (not the shared deploy/local/compose.yml). Brought up by
+# the start-infra step for both the central bank (found) and commercial banks (join).
+# Keycloak is handled separately (strategy: shared | per-entity).
+#
+# REQUIRED env (set by the engine; no defaults for the discriminating values):
+#   ENTITY_INFRA_PREFIX   container-name prefix, e.g. cbweb3-central-bank-brazil
+#   ENTITY_NET_NAME       per-entity docker network name
+#   POSTGRES_HOST_PORT    host port -> 5432
+#   REDIS_HOST_PORT       host port -> 6379
+#   POSTGRES_DB           the entity's database name
+#   SPOKE_DATA_DIR        host data dir (unused volume base; named volumes used)
+# OPTIONAL: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_IMAGE_TAG, REDIS_IMAGE_TAG
+
+services:
+  postgres:
+    image: postgres:${POSTGRES_IMAGE_TAG:-17-alpine}
+    container_name: ${ENTITY_INFRA_PREFIX:?ENTITY_INFRA_PREFIX is required}-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-default}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-default}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    ports:
+      - "${POSTGRES_HOST_PORT:?POSTGRES_HOST_PORT is required}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-default} -d ${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - entity_net
+
+  redis:
+    image: redis:${REDIS_IMAGE_TAG:-7-alpine}
+    container_name: ${ENTITY_INFRA_PREFIX}-redis
+    ports:
+      - "${REDIS_HOST_PORT:?REDIS_HOST_PORT is required}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - entity_net
+
+networks:
+  entity_net:
+    name: ${ENTITY_NET_NAME:?ENTITY_NET_NAME is required}
+    driver: bridge
+
+volumes:
+  pg_data:
+    name: ${ENTITY_INFRA_PREFIX}_pg_data
