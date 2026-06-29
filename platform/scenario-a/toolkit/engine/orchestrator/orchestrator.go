@@ -285,6 +285,17 @@ func runJoinWithSteps(ctx context.Context, m *manifest.Manifest, b *bundle.JoinB
 		logStarted(w, spokeID, step.Name())
 		runErr := step.Run(ctx)
 		if runErr != nil {
+			// Governance-gated identity steps are non-fatal: the bank is fully
+			// provisioned and operational. participant registration (proof-of-
+			// possession) is performed by the CB on KYC approval, and the CB-signed
+			// cert is issued after approval (Governance Portal). Mark pending and
+			// continue so the join reports success.
+			if isDeferredOnboardingStep(step.Name()) {
+				state = markStep(state, step.Name(), "pending", "")
+				_ = saveState(dataDir, state)
+				logDetail(w, spokeID, step.Name(), "deferred to governance onboarding: "+runErr.Error())
+				continue
+			}
 			state = markStep(state, step.Name(), "failed", "")
 			_ = saveState(dataDir, state)
 			logFailed(w, spokeID, step.Name(), runErr)
@@ -347,10 +358,6 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			ep.bootnodeEnode, m.Spec.Node.AdvertisedHost, besuImage, rpcPort, wsPort, p2pPort),
 		newWaitSyncStep(deps.BesuRPCURL, 1, deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval, w),
 		newVoteQBFTStep(spokeID, deps.BesuRPCURL, ep.validators, deps.Timeouts.VoteQBFT, deps.Timeouts.VoteQBFTInterval, w),
-		newGenCSRStep(deps.BankCode, deps.Institution, dataDir),
-		newRequestCertStep(deps.BankCode, deps.Institution, dataDir, ep.cbCertEndpoint, deps.KeyProvider, deps.Timeouts.RequestCert),
-		newReceiveCertStep(deps.BankCode, dataDir, ep.cbCertEndpoint, deps.Timeouts.ReceiveCert, deps.Timeouts.ReceiveCertInterval, deps.Timeouts.RequestCert),
-		newProofPossessionStep(deps.BankCode, b.Spec.Contracts.RegistryAddress, deps.BesuRPCURL, deps.KeyProvider, deps.Timeouts.ProofOfPossession),
 		// US2 — dynamic Paladin node bring-up for the joining bank.
 		newGenTLSJoinStep(spokeID, deps.BankCode, dataDir),
 		newRenderConfigJoinStep(spokeID, deps.BankCode, dataDir, deps.BesuRPCPort, deps.BesuWSPort,
@@ -408,6 +415,17 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			APIPort: ports.APIGateway, AuthPort: ports.AuthGRPC, CompliancePort: ports.ComplianceGRPC, PaymentPort: ports.PaymentGRPC,
 			HealthTimeout: stackTO, HealthInterval: stackInt,
 		}),
+	)
+
+	// Governance-gated identity steps are LAST and off the critical path: the bank
+	// is fully provisioned above. proof-of-possession (participant registration) is
+	// performed by the CB on KYC approval; the CB-signed cert is issued after
+	// approval. proof-of-possession and receive-cert are soft (see RunJoin).
+	steps = append(steps,
+		newProofPossessionStep(deps.BankCode, b.Spec.Contracts.RegistryAddress, deps.BesuRPCURL, deps.KeyProvider, deps.Timeouts.ProofOfPossession),
+		newGenCSRStep(deps.BankCode, deps.Institution, dataDir),
+		newRequestCertStep(deps.BankCode, deps.Institution, dataDir, ep.cbCertEndpoint, deps.KeyProvider, deps.Timeouts.RequestCert),
+		newReceiveCertStep(deps.BankCode, dataDir, ep.cbCertEndpoint, deps.Timeouts.ReceiveCert, deps.Timeouts.ReceiveCertInterval, deps.Timeouts.RequestCert),
 	)
 	return steps
 }

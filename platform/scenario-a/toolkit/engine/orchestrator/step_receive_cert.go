@@ -22,6 +22,15 @@ import (
 var ErrAwaitingGovernanceApproval = errors.New(
 	"awaiting central bank governance KYC approval (Governance Portal); re-run apply after the bank is approved")
 
+// isDeferredOnboardingStep reports whether a mode:join step belongs to the
+// governance-gated identity flow (on-chain participant registration + CB-signed
+// cert). These run last, off the critical path, and a failure is non-fatal: the
+// bank is already fully provisioned, and these complete once a governance officer
+// approves the bank (Governance Portal). See RunJoin and CanonicalJoinStepOrder.
+func isDeferredOnboardingStep(name string) bool {
+	return name == StepProofPossession || name == StepReceiveCert
+}
+
 // receiveCertStep finalizes the certificate acquisition. If the request step
 // already obtained the cert synchronously (pending-cert staged), it stores it.
 // Otherwise the request is awaiting governance approval: the step reports that

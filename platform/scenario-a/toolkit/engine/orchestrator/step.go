@@ -79,26 +79,44 @@ const (
 	// Bilateral Pente context + FXAgreement deploy for the CB↔bank relationship (US3).
 	StepCreatePenteJoin = "create-pente-context"
 	StepDeployFXAJoin   = "deploy-fxa-pente"
-	StepStartBackend    = "start-backend"
+	// Commercial bank operational stack (feature 034 US2): dedicated infra +
+	// per-entity Keycloak + the 4 backend services, in commercial-bank mode.
+	StepRenderBankEnv         = "render-bank-env"
+	StepStartBankInfra        = "start-bank-infra"
+	StepProvisionBankKeycloak = "provision-bank-keycloak"
+	StepStartBackend          = "start-backend"
 )
 
 // CanonicalJoinStepOrder is the definitive execution sequence for mode:join.
 // After the bank is registered on-chain (proof-of-possession), its Paladin node
 // is brought up and registered dynamically (US2), then the backend starts.
+// The governance-gated identity steps run LAST, off the critical path, so the bank
+// fully provisions regardless of approval timing:
+//   - proof-of-possession registers the bank as a participant in IdentityRegistry,
+//     which is onlyRole(GOVERNANCE_ROLE) — performed by the CB on KYC approval
+//     (approve-kyc → setParticipant), not by the bank;
+//   - gen-csr → request-cert → receive-cert acquire the CB-signed PKI cert, a
+//     runtime identity credential issued only after a governance KYC approval.
+// None of these are consumed by any provisioning step (Paladin uses a self-signed
+// transport cert, the node self-registers via registerIdentity, the backend mounts
+// no bank CA). proof-of-possession and receive-cert are soft (see RunJoin).
 var CanonicalJoinStepOrder = []string{
 	StepWriteGenesis,
 	StepStartBesuJoin,
 	StepWaitSync,
 	StepVoteQBFT,
-	StepGenCSR,
-	StepRequestCert,
-	StepReceiveCert,
-	StepProofPossession,
 	StepGenTLSJoin,
 	StepRenderConfigJoin,
 	StepStartPaladinJoin,
 	StepRegisterPaladinNode,
 	StepCreatePenteJoin,
 	StepDeployFXAJoin,
+	StepRenderBankEnv,
+	StepStartBankInfra,
+	StepProvisionBankKeycloak,
 	StepStartBackend,
+	StepProofPossession,
+	StepGenCSR,
+	StepRequestCert,
+	StepReceiveCert,
 }
