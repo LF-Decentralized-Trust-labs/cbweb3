@@ -64,51 +64,49 @@ because the bank is already fully operational and none are consumed by the backe
   wallet created); `receive-cert` reports *awaiting governance KYC approval*.
   Re-running `apply` after approval resumes the flow.
 
-### 2. Bilateral Pente / FXAgreement (US3) — blocked by a Paladin behaviour
+### 2. Bilateral Pente / FXAgreement (US3)
 `create-pente-context` / `deploy-fxa-pente` create the bilateral CB↔bank Pente
-privacy group and deploy `FXAgreement` inside it. **Blocked** — see below.
+privacy group and deploy `FXAgreement` inside it. The cross-node transport that
+these need is now **working** (see resolved issue below). `create-pente-context`
+opens with a **peer-readiness gate** (`waitPentePeersReady`): it probes each member
+with `ptx_resolveVerifier` until the remote node's mTLS transport is up before
+creating the group, so the step no longer races the join's soft tail. The gate
+distinguishes transient transport errors (peer still connecting → retry until the
+step timeout) from permanent ones (e.g. a cert node-name mismatch → fail fast).
+Validated on the live two-spoke env: all four banks created their Pente group +
+deployed FXAgreement after the gate reported `Paladin peer … ready`.
 
-## Known issue: cross-node `pgroup_createGroup` (Paladin v0.15.0-rc.1)
+## Resolved: cross-node Paladin transport — cert CN ≠ node name (fixed 2026-06-30)
 
-**Symptom.** `pgroup_createGroup` on the bank's Paladin, with members
-`[funded_operator@<spoke>-cb, funded_operator@<spoke>-bank]`, hangs and never
-resolves the remote CB node.
+**Symptom (before fix).** `pgroup_createGroup` on the bank's Paladin with members
+`[funded_operator@<spoke>-cb, funded_operator@<spoke>-bank]` hung forever; a group
+with only the local member succeeded instantly. Any cross-node transport op
+(`ptx_resolveVerifier` to a remote identity) failed.
 
-**Ruled out (with evidence):**
-| Candidate | Finding |
-|-----------|---------|
-| Inter-Paladin network | both Paladins on the shared `cbweb3-<spoke>-besu` network, correct aliases |
-| TLS / cert SAN | match the advertised hostnames |
-| Paladin host ports | fixed (separate +1000 bands; no collision with the CB) |
-| On-chain node registration | `reg_queryEntries` returns both nodes |
-| CB transport endpoint | registered: `dns:///paladin-<spoke>-cb:9000` + issuer cert |
-| Client 30s timeout | removed (full 5-min context) — still fails |
-| Timing / Paladin restart | no change |
-| Block indexer lag | bank Besu, CB Besu and the Paladin indexer all at chain head |
-| Registry DB row | the bank's own `paladin.db` resolves the CB node |
-
-**The anomaly.** With everything above in order, the bank Paladin's
-`registrymanager` runs exactly:
-```sql
-SELECT * FROM reg_entries WHERE registry='evm-registry'
-  AND name='<spoke>-cb' AND parent_id IS NULL AND active IS TRUE LIMIT 1   -- rows:0
+**Root cause: the Paladin gRPC transport cert's TLS identity did not match the
+registered node name.** The transport authenticates a peer by matching the cert
+identity against the EXPECTED NODE NAME from the registry. The toolkit minted the
+cert with `CN = paladin-<spoke>-<node>` (the container hostname) while the node is
+registered as `<spoke>-<node>`, so the handshake was rejected:
 ```
-and gets **0 rows**, while the **same query on the bank's own `paladin.db`
-(including WAL) returns 1** (the row exists: `parent_id` NULL, `active=1`). The
-operation never proceeds to the transport step.
+PD030011: the TLS identity of the node 'paladin-spoke-brl-cb'
+          does not match the expected node 'spoke-brl-cb'
+```
+(The `tls: bad record MAC` / `EOF` lines previously seen in the CB log were noise
+from a plain `curl` probe with no matching client cert — `ptx_resolveVerifier`
+surfaced the real `PD030011`. Registry resolution, TCP reachability, and cert
+material were all already correct — the gap was purely the cert subject/SAN.)
+This was inherited from the spk-02 spike, whose T3 never ran a real cross-node
+group op and whose log grep did not match `PD030011`, so the gap went undetected.
 
-**Hypothesis.** A divergence between the `registrymanager`'s in-memory resolution
-view (derived from `IdentityRegistered` events, where `parentHash = zeroHash`) and
-the persisted state (`parent_id` NULL). Consistent with the restart not helping
-(the view is rebuilt from the same events). This path is not exercised by the
-spk-02 spike (which validated cross-node transport only via
-`reg_queryEntriesWithProps`, a read) nor by the Scenario B reference (which creates
-Pente groups among nodes local to one stack).
+**Fix.** `gen-tls` (CB) and `gen-tls-join` (bank) now set `CN = <node name>`
+(`cbNodeName` / `bankNodeName`) and keep the container hostname in the SAN
+(`[<node name>, paladin-<spoke>-<node>, localhost]`) so the `dns:///` dial still
+validates. See `step_gen_tls.go` / `step_gen_tls_join.go`.
 
-**Next steps (outside black-box trial-and-error):**
-1. Confirm cross-node member-resolution semantics with the Paladin source /
-   maintainers (open an issue with the evidence above).
-2. Test registering nodes with `parentIdentityHash` ≠ `zeroHash`.
-
-The bank's backend boots without the bilateral `FXAgreement`, so this does not
-gate provisioning; the toolkit reports `success` with these steps `pending`.
+**Validated (clean rebuild from scratch — images/volumes/data wiped, 2026-06-30):**
+- transport certs now carry `CN = spoke-brl-cb` / `CN = spoke-brl-bank-itau`;
+- `ptx_resolveVerifier` cross-node (CB↔itau) returns the eth address (was PD030011);
+- `pgroup_createGroup` `[funded_operator@spoke-brl-cb, funded_operator@spoke-brl-bank-itau]`
+  creates the group (was a hang);
+- no `handshake failed` / `bad record MAC` / `PD030011` in the Paladin logs.

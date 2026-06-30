@@ -104,11 +104,12 @@ const (
 // transport cert, the node self-registers via registerIdentity, the backend mounts
 // no bank CA). The deferred-tail steps are soft (see RunJoin):
 //   - create-pente-context / deploy-fxa-pente: the bilateral CB↔bank Pente group
-//     and FXAgreement. Cross-node Pente group creation is blocked by a Paladin
-//     v0.15.0-rc.1 registry-resolution behavior (the bank node's pgroup_createGroup
-//     cannot resolve the remote CB node despite it being registered and resolvable
-//     in the bank's own registry DB). The bank's backend boots without the bilateral
-//     FXAgreement, so this does not gate provisioning; tracked for Paladin follow-up.
+//     and FXAgreement. The cross-node Paladin transport these need now works (the
+//     gen-tls cert CN was fixed to equal the node name — see E2E-STATUS.md), and
+//     create-pente-context opens with a peer-readiness gate so it no longer races
+//     the soft tail (it waits for the remote Paladin transport before creating the
+//     group). They do not gate provisioning — the bank's backend boots without the
+//     bilateral FXAgreement.
 //   - proof-of-possession / receive-cert: governance-gated identity (see above).
 var CanonicalJoinStepOrder = []string{
 	StepWriteGenesis,
