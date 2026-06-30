@@ -37,6 +37,7 @@ const (
 	StepStartCBInfra      = "start-cb-infra"
 	StepProvisionKeycloak = "provision-keycloak"
 	StepStartCBBackend    = "start-cb-backend"
+	StepStartCBFrontend   = "start-cb-frontend"
 )
 
 // CanonicalStepOrder is the definitive execution sequence for mode:found.
@@ -58,6 +59,7 @@ var CanonicalStepOrder = []string{
 	StepStartCBInfra,
 	StepProvisionKeycloak,
 	StepStartCBBackend,
+	StepStartCBFrontend,
 }
 
 // Canonical step name constants for mode:join. Kept in a namespace distinct from
@@ -85,6 +87,7 @@ const (
 	StepStartBankInfra        = "start-bank-infra"
 	StepProvisionBankKeycloak = "provision-bank-keycloak"
 	StepStartBackend          = "start-backend"
+	StepStartBankFrontend     = "start-bank-frontend"
 )
 
 // CanonicalJoinStepOrder is the definitive execution sequence for mode:join.
@@ -120,6 +123,7 @@ var CanonicalJoinStepOrder = []string{
 	StepStartBankInfra,
 	StepProvisionBankKeycloak,
 	StepStartBackend,
+	StepStartBankFrontend,
 	StepCreatePenteJoin,
 	StepDeployFXAJoin,
 	StepProofPossession,

@@ -207,9 +207,31 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			APIPort: ports.APIGateway, AuthPort: ports.AuthGRPC, CompliancePort: ports.ComplianceGRPC, PaymentPort: ports.PaymentGRPC,
 			HealthTimeout: stackTO, HealthInterval: stackInt,
 		}),
+		newStartFrontendStackStep(StepStartCBFrontend, frontendStackParams{
+			EntityPrefix: prefix, NetName: net,
+			Context:     filepath.Join(root, "frontend"),
+			ComposePath: filepath.Join(templatesDir, "entity-frontend", "frontend-compose.yaml"),
+			Services: []frontendService{
+				{Service: "governance", Port: ports.FrontendPrimary},
+				{Service: "treasury", Port: ports.FrontendSecondary},
+				{Service: "supervisor", Port: ports.FrontendSupervisor},
+				{Service: "noc", Port: ports.FrontendNOC},
+			},
+			APIURL:        frontendAPIURL(ports.APIGateway),
+			APIBase:       frontendAPIBase(ports.APIGateway),
+			PortalOwner:   entity + "-operator", FiatSymbol: m.Spec.Spoke.Currency, Institution: entity,
+			KeycloakURL:   frontendAPIBase(ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "cbweb3-noc",
+			HealthTimeout: stackTO, HealthInterval: stackInt,
+		}),
 	)
 	return steps
 }
+
+// frontendAPIBase / frontendAPIURL are the host-published api-gateway URLs the
+// browser uses (frontends are SPAs served on the host). APIURL carries the /api/v1/
+// suffix the bank/governance/treasury portals expect; APIBase is the bare origin.
+func frontendAPIBase(port int) string { return fmt.Sprintf("http://localhost:%d", port) }
+func frontendAPIURL(port int) string  { return frontendAPIBase(port) + "/api/v1/" }
 
 // hostInternalURL rewrites a localhost URL to host.docker.internal so a container
 // can reach a host-published port (Paladin/Cacti run as separate compose stacks).
@@ -408,6 +430,15 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			BankCode:    bank,
 			PaladinURL:  hostInternalURL(bankPaladinURL(deps.BesuRPCPort)), PaladinIdentity: paladinIdentity(bankNodeName(spokeID, bank)),
 			APIPort: ports.APIGateway, AuthPort: ports.AuthGRPC, CompliancePort: ports.ComplianceGRPC, PaymentPort: ports.PaymentGRPC,
+			HealthTimeout: stackTO, HealthInterval: stackInt,
+		}),
+		newStartFrontendStackStep(StepStartBankFrontend, frontendStackParams{
+			EntityPrefix: prefix, NetName: net,
+			Context:     filepath.Join(root, "frontend"),
+			ComposePath: filepath.Join(templatesDir, "entity-frontend", "frontend-compose.yaml"),
+			Services:    []frontendService{{Service: "bank", Port: ports.FrontendPrimary}},
+			APIURL:      frontendAPIURL(ports.APIGateway), APIBase: frontendAPIBase(ports.APIGateway),
+			PortalOwner: bank + "-operator", FiatSymbol: b.Spec.Currency, Institution: bank,
 			HealthTimeout: stackTO, HealthInterval: stackInt,
 		}),
 	)
