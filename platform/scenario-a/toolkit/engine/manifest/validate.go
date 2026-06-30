@@ -155,7 +155,7 @@ func Validate(m *Manifest) error {
 // the engine provisions: a central bank hosts governance + treasury + the shared
 // NOC realm; a commercial bank hosts its bank realm.
 var requiredAdminRolesByEntity = map[string][]string{
-	"central-bank":    {"ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_NOC_ADMIN"},
+	"central-bank":    {"ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR", "ROLE_NOC_ADMIN"},
 	"commercial-bank": {"ROLE_BANK"},
 }
 
@@ -169,7 +169,7 @@ func validateAdminUsers(m *Manifest) []error {
 		errs = append(errs, errors.New(
 			"spec.adminUsers: required field is missing; "+
 				"declare one operator account per role the entity hosts "+
-				"(central-bank: ROLE_GOVERNANCE, ROLE_TREASURY, ROLE_NOC_ADMIN; commercial-bank: ROLE_BANK)",
+				"(central-bank: ROLE_GOVERNANCE, ROLE_TREASURY, ROLE_SUPERVISOR, ROLE_NOC_ADMIN; commercial-bank: ROLE_BANK)",
 		))
 		return errs
 	}

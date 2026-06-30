@@ -82,8 +82,8 @@ func nocRealmPlan() KeycloakRealmPlan {
 // centralBankRealmPlans returns the realms the CB Keycloak must host: the
 // central-bank realm (governance + treasury clients) plus the NOC realm. The
 // manifest's admin users are routed to the realm that defines their role:
-// ROLE_GOVERNANCE/ROLE_TREASURY into the central-bank realm, ROLE_NOC_ADMIN into the
-// shared cbweb3/NOC realm.
+// ROLE_GOVERNANCE/ROLE_TREASURY/ROLE_SUPERVISOR into the central-bank realm,
+// ROLE_NOC_ADMIN into the shared cbweb3/NOC realm.
 func centralBankRealmPlans(entity string, admins []manifest.AdminUser) []KeycloakRealmPlan {
 	noc := nocRealmPlan()
 	noc.Users = adminUsersForRealmRoles(admins, "ROLE_NOC_ADMIN", "ROLE_NOC_OPERATOR", "ROLE_NOC_VIEWER")
@@ -94,7 +94,7 @@ func centralBankRealmPlans(entity string, admins []manifest.AdminUser) []Keycloa
 				{ClientID: entity + "-client", Secret: entity + "-local-secret", Roles: []string{"ROLE_GOVERNANCE"}},
 				{ClientID: entity + "-treasury-client", Secret: entity + "-treasury-local-secret", Roles: []string{"ROLE_TREASURY"}},
 			},
-			Users: adminUsersForRealmRoles(admins, "ROLE_GOVERNANCE", "ROLE_TREASURY"),
+			Users: adminUsersForRealmRoles(admins, "ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR"),
 		},
 		noc,
 	}
