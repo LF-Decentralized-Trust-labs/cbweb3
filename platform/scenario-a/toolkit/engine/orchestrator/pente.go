@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -108,6 +109,85 @@ func createPenteGroup(ctx context.Context, paladinURL, name string, members []st
 		return "", fmt.Errorf("pente group genesis tx: %w", err)
 	}
 	return group.ID, nil
+}
+
+// resolveVerifier resolves a Paladin identity's verifier from paladinURL. For a
+// REMOTE identity this drives the cross-node gRPC transport (the mTLS handshake to
+// the peer node), so it doubles as a peer-readiness probe before pgroup_createGroup.
+func resolveVerifier(ctx context.Context, paladinURL, identity string) (*penteRPCError, error) {
+	var addr string
+	return penteRPCCall(ctx, paladinURL, "ptx_resolveVerifier",
+		[]interface{}{identity, "ecdsa:secp256k1", "eth_address"}, &addr)
+}
+
+// isTransientTransportErr reports whether a Paladin RPC error is a transient
+// cross-node transport failure (the peer node is not connected YET) worth retrying,
+// as opposed to a permanent fault. A node-identity mismatch (PD030011, e.g. a cert
+// CN ≠ node name) is deterministic, so it is treated as PERMANENT and surfaced
+// immediately instead of spinning until the deadline.
+func isTransientTransportErr(e *penteRPCError) bool {
+	if e == nil {
+		return false
+	}
+	if strings.Contains(e.Message, "PD030011") {
+		return false
+	}
+	for _, marker := range []string{
+		"PD011206",          // TRANSPORT grpc returned error
+		"PD030015",          // GRPC connection failed for endpoint
+		"Unavailable",       // gRPC status: peer not accepting connections
+		"connection error",  // dial in progress
+		"connection refused",
+		"handshake",         // TLS handshake mid-bring-up
+		"EOF",
+	} {
+		if strings.Contains(e.Message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// waitPentePeersReady blocks until every member identity resolves from paladinURL —
+// i.e. the cross-node Paladin transport (mTLS) to each member's node is established.
+// It is the peer-readiness gate for pgroup_createGroup: the create step runs in the
+// join's soft tail and can fire before the bank's Paladin has connected to the CB's.
+// Local members resolve instantly; remote members gate on the transport coming up.
+// A permanent transport fault (e.g. a cert node-name mismatch) is surfaced at once.
+func waitPentePeersReady(ctx context.Context, paladinURL string, members []string, interval time.Duration, log func(string)) error {
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	for _, member := range members {
+		for attempt := 0; ; attempt++ {
+			rpcErr, err := resolveVerifier(ctx, paladinURL, member)
+			if err == nil && rpcErr == nil {
+				break // resolved — transport to this member's node is up
+			}
+			if rpcErr != nil && !isTransientTransportErr(rpcErr) {
+				return fmt.Errorf("resolve peer %s: %s", member, rpcErr.Message)
+			}
+			if log != nil && attempt%5 == 0 { // throttle progress (~every 5 polls)
+				reason := "peer transport not ready"
+				switch {
+				case rpcErr != nil:
+					reason = rpcErr.Message
+				case err != nil:
+					reason = err.Error()
+				}
+				log(fmt.Sprintf("waiting for Paladin peer %s: %s", member, reason))
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("peer %s not ready: %w", member, ctx.Err())
+			case <-time.After(interval):
+			}
+		}
+		if log != nil {
+			log(fmt.Sprintf("Paladin peer %s ready", member))
+		}
+	}
+	return nil
 }
 
 // penteGroupExists returns true if a group with the given id is resolvable.

@@ -452,10 +452,10 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 
 	// Deferred-tail steps are LAST and off the critical path: the bank is fully
 	// provisioned above. All are soft (see RunJoin):
-	//   - create-pente/deploy-fxa: bilateral CB↔bank Pente + FXAgreement, blocked by
-	//     a Paladin cross-node registry-resolution behaviour (the bank node cannot
-	//     resolve the remote CB node in pgroup_createGroup); not consumed by the
-	//     backend, tracked for Paladin follow-up;
+	//   - create-pente/deploy-fxa: bilateral CB↔bank Pente + FXAgreement. The cross-node
+	//     Paladin transport now works (gen-tls cert CN fixed to the node name — see
+	//     E2E-STATUS.md), and create-pente-context gates on Paladin peer-readiness
+	//     before creating the group; not consumed by the backend;
 	//   - on-chain participant registration is NOT attempted from the join: it is
 	//     onlyRole(GOVERNANCE_ROLE) and must register the bank's runtime KMS wallet,
 	//     so the engine performs it CB-side via `cbweb3 register-participant` (signed
@@ -468,7 +468,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	// would create a second participant record keyed on the toolkit keyProvider wallet
 	// instead of the bank's runtime KMS wallet, colliding with the portal's record.
 	steps = append(steps,
-		newCreatePenteJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort), deps.Timeouts.VoteQBFT),
+		newCreatePenteJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort), deps.Timeouts.VoteQBFT, deps.Timeouts.VoteQBFTInterval, w),
 		newDeployFXAJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort),
 			filepath.Join(deps.ContractsOutDir, "FXAgreement.sol", "FXAgreement.json"),
 			b.Spec.Contracts.ParticipantRegistryAddress, deps.Timeouts.VoteQBFT),
