@@ -28,3 +28,8 @@ spec:
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed
+  # Operador do banco (login por papel via ROPC). O nome inclui o spoke (colombia).
+  adminUsers:
+    - role: ROLE_BANK
+      username: admin@davivienda.colombia.com
+      password: davivienda-bank-local

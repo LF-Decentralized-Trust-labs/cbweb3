@@ -2,7 +2,12 @@
 
 package orchestrator
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/manifest"
+)
 
 // (see renderRealmJSON below for the Keycloak realm-import document.)
 
@@ -24,10 +29,44 @@ type KeycloakClientPlan struct {
 	Roles    []string
 }
 
-// KeycloakRealmPlan describes one realm and its clients/roles to provision.
+// KeycloakUserPlan describes one human operator account (password grant) to
+// provision in a realm: the login username (email-style), its password, and the
+// realm roles it is granted. Portal/operator login uses these instead of the
+// confidential client credentials so audit logs carry a real actor.
+type KeycloakUserPlan struct {
+	Username string
+	Password string
+	Roles    []string
+}
+
+// KeycloakRealmPlan describes one realm and its clients/roles/users to provision.
 type KeycloakRealmPlan struct {
 	Realm   string
 	Clients []KeycloakClientPlan
+	Users   []KeycloakUserPlan
+}
+
+// adminUsersForRealmRoles selects the manifest admin users whose role is one of
+// the realm's roles, mapping each to a KeycloakUserPlan. This routes each admin
+// to the realm that actually defines its role (central-bank realm for
+// ROLE_GOVERNANCE/ROLE_TREASURY, the cbweb3/NOC realm for noc-admin, the bank
+// realm for ROLE_BANK).
+func adminUsersForRealmRoles(admins []manifest.AdminUser, realmRoles ...string) []KeycloakUserPlan {
+	want := map[string]bool{}
+	for _, r := range realmRoles {
+		want[r] = true
+	}
+	var users []KeycloakUserPlan
+	for _, a := range admins {
+		if want[strings.TrimSpace(a.Role)] {
+			users = append(users, KeycloakUserPlan{
+				Username: a.Username,
+				Password: a.Password,
+				Roles:    []string{a.Role},
+			})
+		}
+	}
+	return users
 }
 
 // nocRealmPlan is the NOC realm hosted on the central bank's Keycloak.
@@ -41,8 +80,13 @@ func nocRealmPlan() KeycloakRealmPlan {
 }
 
 // centralBankRealmPlans returns the realms the CB Keycloak must host: the
-// central-bank realm (governance + treasury clients) plus the NOC realm.
-func centralBankRealmPlans(entity string) []KeycloakRealmPlan {
+// central-bank realm (governance + treasury clients) plus the NOC realm. The
+// manifest's admin users are routed to the realm that defines their role:
+// ROLE_GOVERNANCE/ROLE_TREASURY into the central-bank realm, noc-admin into the
+// shared cbweb3/NOC realm.
+func centralBankRealmPlans(entity string, admins []manifest.AdminUser) []KeycloakRealmPlan {
+	noc := nocRealmPlan()
+	noc.Users = adminUsersForRealmRoles(admins, "noc-admin", "noc-operator", "noc-viewer")
 	return []KeycloakRealmPlan{
 		{
 			Realm: entity,
@@ -50,18 +94,21 @@ func centralBankRealmPlans(entity string) []KeycloakRealmPlan {
 				{ClientID: entity + "-client", Secret: entity + "-local-secret", Roles: []string{"ROLE_GOVERNANCE"}},
 				{ClientID: entity + "-treasury-client", Secret: entity + "-treasury-local-secret", Roles: []string{"ROLE_TREASURY"}},
 			},
+			Users: adminUsersForRealmRoles(admins, "ROLE_GOVERNANCE", "ROLE_TREASURY"),
 		},
-		nocRealmPlan(),
+		noc,
 	}
 }
 
-// commercialBankRealmPlan returns the realm/client for a commercial bank.
-func commercialBankRealmPlan(entity string) KeycloakRealmPlan {
+// commercialBankRealmPlan returns the realm/client for a commercial bank, with
+// the manifest's ROLE_BANK admin user provisioned for portal login.
+func commercialBankRealmPlan(entity string, admins []manifest.AdminUser) KeycloakRealmPlan {
 	return KeycloakRealmPlan{
 		Realm: entity,
 		Clients: []KeycloakClientPlan{
 			{ClientID: entity + "-client", Secret: entity + "-local-secret", Roles: []string{"ROLE_BANK"}},
 		},
+		Users: adminUsersForRealmRoles(admins, "ROLE_BANK"),
 	}
 }
 
@@ -122,6 +169,41 @@ func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
 		}
 		clients = append(clients, client)
 	}
+
+	// Human operator accounts (password grant). Each lands in this realm with its
+	// role(s) granted. Local profile: a non-temporary password read from the
+	// manifest. FUTURE: source the password from a secret store and set
+	// temporary=true (force reset on first login) for non-local environments.
+	for _, u := range plan.Users {
+		for _, r := range u.Roles {
+			if !roleSet[r] {
+				roleSet[r] = true
+				realmRoles = append(realmRoles, map[string]any{"name": r})
+			}
+		}
+		lastName := "Operator"
+		if len(u.Roles) > 0 {
+			lastName = u.Roles[0]
+		}
+		users = append(users, map[string]any{
+			"username":      u.Username,
+			"email":         u.Username,
+			"emailVerified": true,
+			"enabled":       true,
+			// firstName/lastName are required by the Keycloak 26 declarative user
+			// profile; without them the password grant fails with "Account is not
+			// fully set up". emailVerified=true avoids the verify-email required action;
+			// requiredActions=[] prevents any realm-default action from blocking login.
+			"firstName":       "Admin",
+			"lastName":        lastName,
+			"requiredActions": []string{},
+			"credentials": []map[string]any{
+				{"type": "password", "value": u.Password, "temporary": false},
+			},
+			"realmRoles": u.Roles,
+		})
+	}
+
 	realm := map[string]any{
 		"realm":   plan.Realm,
 		"enabled": true,

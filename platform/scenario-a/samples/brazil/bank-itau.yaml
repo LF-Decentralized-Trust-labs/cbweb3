@@ -31,3 +31,8 @@ spec:
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed
+  # Operador do banco (login por papel via ROPC). O nome inclui o spoke (brasil).
+  adminUsers:
+    - role: ROLE_BANK
+      username: admin@itau.brasil.com
+      password: itau-bank-local

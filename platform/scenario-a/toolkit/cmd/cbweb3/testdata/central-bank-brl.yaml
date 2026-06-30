@@ -28,3 +28,13 @@ spec:
   # Central bank credential-request endpoint, embedded into the emitted join
   # bundle so joining commercial banks know where to submit their CSR.
   cbEndpoint: http://cbweb3-api-gateway.central-bank-brazil:8080/api/v1/credential-request
+  adminUsers:
+    - role: ROLE_GOVERNANCE
+      username: admin@brasil.governance.gov
+      password: governance-local
+    - role: ROLE_TREASURY
+      username: admin@brasil.treasury.gov
+      password: treasury-local
+    - role: noc-admin
+      username: admin@brasil.noc.gov
+      password: noc-local

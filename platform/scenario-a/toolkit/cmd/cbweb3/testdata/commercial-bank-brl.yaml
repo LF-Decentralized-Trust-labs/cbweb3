@@ -25,3 +25,7 @@ spec:
   image: hyperledger/besu:25.8.0
   keyProvider: kms://local-emulator
   certSource: self-signed
+  adminUsers:
+    - role: ROLE_BANK
+      username: admin@bank.brl.com
+      password: bank-local

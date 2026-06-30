@@ -5,10 +5,88 @@ package orchestrator
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/manifest"
 )
 
+func TestCentralBankRealmPlans_RoutesAdminUsersByRole(t *testing.T) {
+	admins := []manifest.AdminUser{
+		{Role: "ROLE_GOVERNANCE", Username: "admin@brasil.governance.gov", Password: "gov-pw"},
+		{Role: "ROLE_TREASURY", Username: "admin@brasil.treasury.gov", Password: "trez-pw"},
+		{Role: "noc-admin", Username: "admin@brasil.noc.gov", Password: "noc-pw"},
+	}
+	plans := centralBankRealmPlans("central-bank-brazil", admins)
+	cb, noc := plans[0], plans[1]
+
+	// Governance + treasury admins land in the central-bank realm; the NOC admin
+	// lands in the shared cbweb3 realm.
+	if len(cb.Users) != 2 {
+		t.Fatalf("central-bank realm: want 2 admin users, got %d", len(cb.Users))
+	}
+	if len(noc.Users) != 1 || noc.Users[0].Username != "admin@brasil.noc.gov" {
+		t.Errorf("NOC realm admin user mismatch: %+v", noc.Users)
+	}
+
+	// The rendered governance admin carries a non-temporary password credential
+	// and the ROLE_GOVERNANCE realm role.
+	data, err := renderRealmJSON(cb)
+	if err != nil {
+		t.Fatalf("renderRealmJSON: %v", err)
+	}
+	var realm map[string]any
+	if err := json.Unmarshal(data, &realm); err != nil {
+		t.Fatalf("invalid realm JSON: %v", err)
+	}
+	var gov map[string]any
+	for _, u := range realm["users"].([]any) {
+		um := u.(map[string]any)
+		if um["username"] == "admin@brasil.governance.gov" {
+			gov = um
+		}
+	}
+	if gov == nil {
+		t.Fatal("governance admin user not rendered")
+	}
+	cred := gov["credentials"].([]any)[0].(map[string]any)
+	if cred["type"] != "password" || cred["value"] != "gov-pw" || cred["temporary"] != false {
+		t.Errorf("password credential mismatch: %v", cred)
+	}
+	roles := gov["realmRoles"].([]any)
+	if len(roles) != 1 || roles[0] != "ROLE_GOVERNANCE" {
+		t.Errorf("realmRoles = %v; want [ROLE_GOVERNANCE]", roles)
+	}
+	// Keycloak 26's declarative user profile requires firstName/lastName and a
+	// verified email; without them the password grant fails with
+	// "Account is not fully set up".
+	if gov["emailVerified"] != true {
+		t.Errorf("emailVerified = %v; want true", gov["emailVerified"])
+	}
+	if gov["firstName"] == "" || gov["firstName"] == nil {
+		t.Errorf("firstName must be set, got %v", gov["firstName"])
+	}
+	if gov["lastName"] == "" || gov["lastName"] == nil {
+		t.Errorf("lastName must be set, got %v", gov["lastName"])
+	}
+	if _, ok := gov["requiredActions"]; !ok {
+		t.Errorf("requiredActions must be present (empty) to avoid default actions blocking login")
+	}
+}
+
+func TestCommercialBankRealmPlan_AdminUser(t *testing.T) {
+	admins := []manifest.AdminUser{
+		{Role: "ROLE_BANK", Username: "admin@itau.brasil.com", Password: "bank-pw"},
+	}
+	p := commercialBankRealmPlan("bank-itau", admins)
+	if len(p.Users) != 1 || p.Users[0].Username != "admin@itau.brasil.com" {
+		t.Fatalf("bank realm admin user mismatch: %+v", p.Users)
+	}
+	if len(p.Users[0].Roles) != 1 || p.Users[0].Roles[0] != "ROLE_BANK" {
+		t.Errorf("bank admin roles = %v; want [ROLE_BANK]", p.Users[0].Roles)
+	}
+}
+
 func TestCentralBankRealmPlans_IncludeNOCAndTreasury(t *testing.T) {
-	plans := centralBankRealmPlans("central-bank-brazil")
+	plans := centralBankRealmPlans("central-bank-brazil", nil)
 	if len(plans) != 2 {
 		t.Fatalf("expected 2 realms (central-bank + cbweb3), got %d", len(plans))
 	}
@@ -31,7 +109,7 @@ func TestCentralBankRealmPlans_IncludeNOCAndTreasury(t *testing.T) {
 }
 
 func TestCommercialBankRealmPlan(t *testing.T) {
-	p := commercialBankRealmPlan("bank-itau")
+	p := commercialBankRealmPlan("bank-itau", nil)
 	if p.Realm != "bank-itau" {
 		t.Errorf("realm = %q; want bank-itau", p.Realm)
 	}
@@ -47,7 +125,7 @@ func TestGovernanceUserID(t *testing.T) {
 }
 
 func TestRenderRealmJSON_ClientsRolesSecret(t *testing.T) {
-	plans := centralBankRealmPlans("central-bank-brazil")
+	plans := centralBankRealmPlans("central-bank-brazil", nil)
 	data, err := renderRealmJSON(plans[0])
 	if err != nil {
 		t.Fatalf("renderRealmJSON: %v", err)

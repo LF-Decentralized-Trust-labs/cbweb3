@@ -21,7 +21,7 @@ func TestProvisionKeycloakStep_RendersRealmsAndEnv(t *testing.T) {
 		KCUser:       "default",
 		KCPassword:   "default",
 		HostPort:     24645,
-		Realms:       centralBankRealmPlans("central-bank-brazil"),
+		Realms:       centralBankRealmPlans("central-bank-brazil", nil),
 	}).(*provisionKeycloakStep)
 
 	// composeEnv carries the discriminating values.

@@ -51,6 +51,27 @@ type Spec struct {
 	// embedded into the emitted join bundle so a joining commercial bank knows
 	// where to submit its CSR. Required for a usable found→join chain.
 	CBEndpoint string `yaml:"cbEndpoint,omitempty"`
+	// AdminUsers are the per-role human operator accounts provisioned in the
+	// entity's Keycloak realm(s). Portal/operator login uses these (ROPC password
+	// grant) instead of the confidential client credentials, so audit logs carry a
+	// real actor. Required (one per role the entity hosts).
+	AdminUsers []AdminUser `yaml:"adminUsers"`
+}
+
+// AdminUser is a per-role operator account created in the entity's Keycloak realm.
+//
+// Role is the Keycloak realm role the user is granted and also selects the realm
+// the user lands in (central-bank realm for ROLE_GOVERNANCE/ROLE_TREASURY, the
+// shared cbweb3/NOC realm for noc-admin, the bank realm for ROLE_BANK).
+//
+// NOTE: Password is read from the manifest for the local profile. A future
+// iteration MUST source it from a secret store (KeyProvider/SecretSource) and use
+// a temporary password (force reset on first login) for non-local environments;
+// it must never be committed for staging/prod.
+type AdminUser struct {
+	Role     string `yaml:"role"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 }
 
 // Spoke identifies the blockchain network this participant belongs to.

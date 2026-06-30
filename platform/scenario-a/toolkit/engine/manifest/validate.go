@@ -144,5 +144,66 @@ func Validate(m *Manifest) error {
 		errs = append(errs, errors.New("spec.certSource: required field is missing"))
 	}
 
+	// spec.adminUsers — mandatory per-role operator accounts (portal login).
+	errs = append(errs, validateAdminUsers(m)...)
+
 	return errors.Join(errs...)
+}
+
+// requiredAdminRolesByEntity lists the Keycloak realm roles an entity must
+// provision an admin user for, keyed on spec.role. It mirrors the realms/clients
+// the engine provisions: a central bank hosts governance + treasury + the shared
+// NOC realm; a commercial bank hosts its bank realm.
+var requiredAdminRolesByEntity = map[string][]string{
+	"central-bank":    {"ROLE_GOVERNANCE", "ROLE_TREASURY", "noc-admin"},
+	"commercial-bank": {"ROLE_BANK"},
+}
+
+// validateAdminUsers enforces that spec.adminUsers is present, every entry has
+// role/username/password, and there is exactly one admin user per role the
+// entity hosts (login is per role).
+func validateAdminUsers(m *Manifest) []error {
+	var errs []error
+
+	if len(m.Spec.AdminUsers) == 0 {
+		errs = append(errs, errors.New(
+			"spec.adminUsers: required field is missing; "+
+				"declare one operator account per role the entity hosts "+
+				"(central-bank: ROLE_GOVERNANCE, ROLE_TREASURY, noc-admin; commercial-bank: ROLE_BANK)",
+		))
+		return errs
+	}
+
+	seen := map[string]bool{}
+	for i, u := range m.Spec.AdminUsers {
+		if u.Role == "" {
+			errs = append(errs, fmt.Errorf("spec.adminUsers[%d].role: required field is missing", i))
+		}
+		if u.Username == "" {
+			errs = append(errs, fmt.Errorf("spec.adminUsers[%d].username: required field is missing", i))
+		}
+		if u.Password == "" {
+			errs = append(errs, fmt.Errorf("spec.adminUsers[%d].password: required field is missing", i))
+		}
+		if u.Role != "" {
+			if seen[u.Role] {
+				errs = append(errs, fmt.Errorf("spec.adminUsers: duplicate admin user for role %q", u.Role))
+			}
+			seen[u.Role] = true
+		}
+	}
+
+	// Each role the entity hosts must have an admin user (login is per role).
+	if required, ok := requiredAdminRolesByEntity[m.Spec.Role]; ok {
+		for _, role := range required {
+			if !seen[role] {
+				errs = append(errs, fmt.Errorf(
+					"spec.adminUsers: missing required admin user for role %q (role %s hosts: %v)",
+					role, m.Spec.Role, required,
+				))
+			}
+		}
+	}
+
+	return errs
 }

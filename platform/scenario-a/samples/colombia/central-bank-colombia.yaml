@@ -32,3 +32,15 @@ spec:
   relay:
     endpoint: http://localhost:4000
   cbEndpoint: http://cbweb3-api-gateway.central-bank-colombia:8080/api/v1/onboarding/credential-request
+  # Operadores humanos (login por papel via ROPC). Obrigatório: um por papel.
+  # FUTURO: senha deve vir de um secret store (não do manifesto) em staging/prod.
+  adminUsers:
+    - role: ROLE_GOVERNANCE
+      username: admin@colombia.governance.gov
+      password: colombia-governance-local
+    - role: ROLE_TREASURY
+      username: admin@colombia.treasury.gov
+      password: colombia-treasury-local
+    - role: noc-admin
+      username: admin@colombia.noc.gov
+      password: colombia-noc-local

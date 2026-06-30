@@ -63,6 +63,7 @@ definitions:
       - image
       - keyProvider
       - certSource
+      - adminUsers
     additionalProperties: false
     properties:
       scenario:
@@ -131,6 +132,33 @@ definitions:
         type: string
         minLength: 1
         description: "Path to the join bundle YAML file produced by a 'found' deployment (e.g., ./bundles/spoke-brl.bundle.yaml). Contextually required when mode is 'join'; schema-level conditional enforcement is deferred (see TK-3)."
+
+      adminUsers:
+        type: array
+        minItems: 1
+        description: "Per-role human operator accounts provisioned in the entity's Keycloak realm(s). Portal/operator login uses these (password grant) instead of confidential client credentials, so audit logs carry a real actor. Required: one per role the entity hosts (central-bank: ROLE_GOVERNANCE, ROLE_TREASURY, noc-admin; commercial-bank: ROLE_BANK). FUTURE: source the password from a secret store, never commit it for staging/prod."
+        items:
+          $ref: "#/definitions/AdminUser"
+
+  AdminUser:
+    type: object
+    required:
+      - role
+      - username
+      - password
+    additionalProperties: false
+    properties:
+      role:
+        type: string
+        description: "Keycloak realm role granted to the user; also selects the realm (ROLE_GOVERNANCE/ROLE_TREASURY -> central-bank realm; noc-admin -> cbweb3/NOC realm; ROLE_BANK -> bank realm)."
+      username:
+        type: string
+        minLength: 1
+        description: "Login username (email-style; encode the spoke for commercial banks, e.g. admin@itau.brasil.com)."
+      password:
+        type: string
+        minLength: 1
+        description: "Local-profile password. FUTURE: source from a secret store and use a temporary password for staging/prod; never commit a real credential."
 
   Spoke:
     type: object

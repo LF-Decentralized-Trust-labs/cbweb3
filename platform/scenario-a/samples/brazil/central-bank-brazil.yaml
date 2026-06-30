@@ -36,3 +36,17 @@ spec:
   # Endpoint de credential-request do CB, embutido no join bundle para que os
   # bancos comerciais saibam onde submeter o CSR (mode: join).
   cbEndpoint: http://cbweb3-api-gateway.central-bank-brazil:8080/api/v1/onboarding/credential-request
+  # Operadores humanos (login por papel via ROPC). Substituem o login por
+  # client_credentials nos portais — o token passa a carregar identidade real
+  # (auditoria). Obrigatório: um por papel hospedado pela entidade.
+  # FUTURO: senha deve vir de um secret store (não do manifesto) em staging/prod.
+  adminUsers:
+    - role: ROLE_GOVERNANCE
+      username: admin@brasil.governance.gov
+      password: brasil-governance-local
+    - role: ROLE_TREASURY
+      username: admin@brasil.treasury.gov
+      password: brasil-treasury-local
+    - role: noc-admin
+      username: admin@brasil.noc.gov
+      password: brasil-noc-local
