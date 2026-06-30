@@ -25,15 +25,17 @@ var ErrAwaitingGovernanceApproval = errors.New(
 // isDeferredOnboardingStep reports whether a mode:join step runs in the deferred
 // tail, off the critical path, where a failure is non-fatal because the bank is
 // already fully provisioned. Two groups:
-//   - governance-gated identity: proof-of-possession (participant registration,
-//     done by the CB on KYC approval) and receive-cert (CB-signed cert, issued
-//     after approval in the Governance Portal);
 //   - bilateral privacy (US3): create-pente-context + deploy-fxa-pente, blocked by
 //     a Paladin cross-node registry-resolution behaviour and not consumed by the
 //     backend — tracked for Paladin follow-up.
+//
+// Cert issuance and on-chain participant registration are NOT join steps under
+// Option C: the Governance Portal issues the CB-signed cert on KYC approval, and
+// the engine whitelists the bank's runtime KMS wallet CB-side via
+// `cbweb3 register-participant` after onboarding.
 func isDeferredOnboardingStep(name string) bool {
 	switch name {
-	case StepProofPossession, StepReceiveCert, StepCreatePenteJoin, StepDeployFXAJoin:
+	case StepCreatePenteJoin, StepDeployFXAJoin:
 		return true
 	default:
 		return false

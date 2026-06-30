@@ -125,8 +125,5 @@ var CanonicalJoinStepOrder = []string{
 	StepStartBankFrontend,
 	StepCreatePenteJoin,
 	StepDeployFXAJoin,
-	StepProofPossession,
 	StepGenCSR,
-	StepRequestCert,
-	StepReceiveCert,
 }

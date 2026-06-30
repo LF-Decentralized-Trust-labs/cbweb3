@@ -97,6 +97,13 @@ cat <<'EOF'
     bank-bancolombia api http://localhost:18746 portal     http://localhost:25746
     bank-davivienda  api http://localhost:18747 portal     http://localhost:25747
 
-  Note: bilateral Pente/FXAgreement and the CB-signed certificate are governance-
-  gated steps that run in the join's soft tail (see toolkit/E2E-STATUS.md).
+  Note: a joining bank completes onboarding via its Governance Portal (KYC approval
+  + CB-signed certificate). On-chain IdentityRegistry whitelisting is then performed
+  CB-side by the engine:
+
+    cbweb3 register-participant -f <central-bank.yaml> --bank <bank-code>
+
+  (signed by the CB governance key; the bank wallet is resolved from the CB
+  api-gateway my-status, or pass --wallet 0x…). Bilateral Pente/FXAgreement remains
+  a governance-gated step in the join's soft tail (see toolkit/E2E-STATUS.md).
 EOF

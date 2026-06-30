@@ -428,6 +428,10 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		}),
 		newStartBackendStackStep(StepStartBackend, backendStackParams{
 			EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
+			// Mount the bank's <dataDir>/pki: gen-csr writes <bank>.csr here, which the
+			// onboarding smart proxy reads on initiate, and where it persists the issued
+			// <bank>-participant.crt on complete (instead of the shared repo pki).
+			PKIDir:      filepath.Join(dataDir, "pki"),
 			EnvFile:     cbEnvPath(dataDir, bank),
 			ComposePath: filepath.Join(templatesDir, "entity-backend", "backend-compose.yaml"),
 			BankCode:    bank,
@@ -452,17 +456,23 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	//     a Paladin cross-node registry-resolution behaviour (the bank node cannot
 	//     resolve the remote CB node in pgroup_createGroup); not consumed by the
 	//     backend, tracked for Paladin follow-up;
-	//   - proof-of-possession: participant registration, performed by the CB on KYC
-	//     approval; the CB-signed cert is issued after approval (Governance Portal).
+	//   - on-chain participant registration is NOT attempted from the join: it is
+	//     onlyRole(GOVERNANCE_ROLE) and must register the bank's runtime KMS wallet,
+	//     so the engine performs it CB-side via `cbweb3 register-participant` (signed
+	//     by the CB governance key) after the bank completes Governance Portal
+	//     onboarding; the CB-signed cert is issued by the portal on KYC approval.
+	//
+	// gen-csr stays: it produces <dataDir>/pki/<bank>.csr, which the bank's
+	// api-gateway reads at portal onboarding (initiate) and the CB signs at complete.
+	// The toolkit does NOT submit the CSR itself (no request-cert/receive-cert): that
+	// would create a second participant record keyed on the toolkit keyProvider wallet
+	// instead of the bank's runtime KMS wallet, colliding with the portal's record.
 	steps = append(steps,
 		newCreatePenteJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort), deps.Timeouts.VoteQBFT),
 		newDeployFXAJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort),
 			filepath.Join(deps.ContractsOutDir, "FXAgreement.sol", "FXAgreement.json"),
 			b.Spec.Contracts.ParticipantRegistryAddress, deps.Timeouts.VoteQBFT),
-		newProofPossessionStep(deps.BankCode, b.Spec.Contracts.RegistryAddress, deps.BesuRPCURL, deps.KeyProvider, deps.Timeouts.ProofOfPossession),
 		newGenCSRStep(deps.BankCode, deps.Institution, dataDir),
-		newRequestCertStep(deps.BankCode, deps.Institution, dataDir, ep.cbCertEndpoint, deps.KeyProvider, deps.Timeouts.RequestCert),
-		newReceiveCertStep(deps.BankCode, dataDir, ep.cbCertEndpoint, deps.Timeouts.ReceiveCert, deps.Timeouts.ReceiveCertInterval, deps.Timeouts.RequestCert),
 	)
 	return steps
 }

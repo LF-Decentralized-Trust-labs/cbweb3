@@ -24,7 +24,10 @@ import (
 
 const (
 	// identityRegistryABI is the minimal ABI for IdentityRegistry used by the engine.
-	// Includes: registerParticipant, isParticipant, setCertFingerprint.
+	// Includes: registerParticipant and canTransact (the membership check — the
+	// contract exposes canTransact/canGovern/getParticipant, not isParticipant).
+	// registerParticipant sets status=Verified, so canTransact returns true for a
+	// registered, non-NONE participant.
 	identityRegistryABI = `[
 		{
 			"name": "registerParticipant",
@@ -38,9 +41,9 @@ const (
 			"outputs": []
 		},
 		{
-			"name": "isParticipant",
+			"name": "canTransact",
 			"type": "function",
-			"inputs": [{"name": "wallet", "type": "address"}],
+			"inputs": [{"name": "account", "type": "address"}],
 			"outputs": [{"name": "", "type": "bool"}]
 		}
 	]`
@@ -104,22 +107,22 @@ func (s *onboardRegistryStep) Check(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("parse ABI: %w", err)
 	}
 
-	callData, err := parsedABI.Pack("isParticipant", common.HexToAddress(evmAddr))
+	callData, err := parsedABI.Pack("canTransact", common.HexToAddress(evmAddr))
 	if err != nil {
-		return false, fmt.Errorf("pack isParticipant: %w", err)
+		return false, fmt.Errorf("pack canTransact: %w", err)
 	}
 
 	contractAddr := common.HexToAddress(addrs.ParticipantRegistryAddress)
 	result, err := client.CallContract(ctx, ethereum.CallMsg{To: &contractAddr, Data: callData}, nil)
 	if err != nil {
-		return false, fmt.Errorf("call isParticipant: %w", err)
+		return false, fmt.Errorf("call canTransact: %w", err)
 	}
 
-	var isParticipant bool
-	if err := parsedABI.UnpackIntoInterface(&isParticipant, "isParticipant", result); err != nil {
-		return false, fmt.Errorf("unpack isParticipant: %w", err)
+	var registered bool
+	if err := parsedABI.UnpackIntoInterface(&registered, "canTransact", result); err != nil {
+		return false, fmt.Errorf("unpack canTransact: %w", err)
 	}
-	return isParticipant, nil
+	return registered, nil
 }
 
 func (s *onboardRegistryStep) Run(ctx context.Context) error {
