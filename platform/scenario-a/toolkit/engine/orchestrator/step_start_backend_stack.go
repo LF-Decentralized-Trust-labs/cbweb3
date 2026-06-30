@@ -96,6 +96,16 @@ func (s *startBackendStackStep) healthURL() string {
 }
 
 func (s *startBackendStackStep) Run(ctx context.Context) error {
+	// Pre-create the PKI dir as the host user BEFORE compose mounts it. Docker
+	// creates a missing bind-mount source as root, which would then deny the
+	// host-user gen-csr step (deferred tail) write access to <dataDir>/pki and
+	// leave the api-gateway proxy with no CSR to read at onboarding time.
+	if s.pkiDir != "" {
+		if err := os.MkdirAll(s.pkiDir, 0o755); err != nil {
+			return fmt.Errorf("create PKI dir %s: %w", s.pkiDir, err)
+		}
+	}
+
 	// Unique compose project per entity (shared template would otherwise reconcile
 	// and remove another entity's containers — see step_start_infra.go).
 	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.entityPrefix+"-backend", "-f", s.composePath, "up", "-d")
