@@ -379,7 +379,10 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		newStartBesuJoinStep(spokeID, deps.BankCode, dataDir, deps.ComposeTemplatePath, deps.BesuRPCURL,
 			ep.bootnodeEnode, m.Spec.Node.AdvertisedHost, besuImage, rpcPort, wsPort, p2pPort),
 		newWaitSyncStep(deps.BesuRPCURL, 1, deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval, w),
-		newVoteQBFTStep(spokeID, deps.BesuRPCURL, ep.validators, deps.Timeouts.VoteQBFT, deps.Timeouts.VoteQBFTInterval, w),
+		// Commercial banks join as full nodes (not QBFT validators): the central bank
+		// is the spoke's sole validator. This keeps consensus liveness independent of
+		// any bank's availability and lets many banks join without a validator-set
+		// majority vote. (vote-qbft is retained for a future validator-join mode.)
 		// US2 — dynamic Paladin node bring-up for the joining bank.
 		newGenTLSJoinStep(spokeID, deps.BankCode, dataDir),
 		newRenderConfigJoinStep(spokeID, deps.BankCode, dataDir, deps.BesuRPCPort, deps.BesuWSPort,

@@ -114,7 +114,6 @@ var CanonicalJoinStepOrder = []string{
 	StepWriteGenesis,
 	StepStartBesuJoin,
 	StepWaitSync,
-	StepVoteQBFT,
 	StepGenTLSJoin,
 	StepRenderConfigJoin,
 	StepStartPaladinJoin,
