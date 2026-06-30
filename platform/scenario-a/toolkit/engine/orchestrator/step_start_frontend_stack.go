@@ -98,7 +98,9 @@ func (s *startFrontendStackStep) Check(ctx context.Context) (bool, error) {
 }
 
 func (s *startFrontendStackStep) Run(ctx context.Context) error {
-	args := []string{"compose", "-f", s.composePath, "up", "-d"}
+	// Unique compose project per entity (shared template would otherwise reconcile
+	// and remove another entity's containers — see step_start_infra.go).
+	args := []string{"compose", "-p", s.entityPrefix + "-frontend", "-f", s.composePath, "up", "-d"}
 	for _, svc := range s.services {
 		args = append(args, svc.Service)
 	}

@@ -96,7 +96,9 @@ func (s *startBackendStackStep) healthURL() string {
 }
 
 func (s *startBackendStackStep) Run(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", s.composePath, "up", "-d")
+	// Unique compose project per entity (shared template would otherwise reconcile
+	// and remove another entity's containers — see step_start_infra.go).
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.entityPrefix+"-backend", "-f", s.composePath, "up", "-d")
 	cmd.Env = s.composeEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compose up backend: %w\noutput:\n%s", err, out)

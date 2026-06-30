@@ -55,7 +55,10 @@ func (s *startInfraStep) Check(ctx context.Context) (bool, error) {
 }
 
 func (s *startInfraStep) Run(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", s.composePath, "up", "-d", "--wait")
+	// Unique compose project per entity+stack: the template file is shared across
+	// entities, so without -p they share the default project name and bringing up
+	// one entity's stack would reconcile (and remove) another entity's containers.
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.entityPrefix+"-infra", "-f", s.composePath, "up", "-d", "--wait")
 	cmd.Env = s.composeEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compose up infra: %w\noutput:\n%s", err, out)
