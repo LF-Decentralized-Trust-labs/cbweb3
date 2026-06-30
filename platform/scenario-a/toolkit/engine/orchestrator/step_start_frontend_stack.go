@@ -100,7 +100,12 @@ func (s *startFrontendStackStep) Check(ctx context.Context) (bool, error) {
 func (s *startFrontendStackStep) Run(ctx context.Context) error {
 	// Unique compose project per entity (shared template would otherwise reconcile
 	// and remove another entity's containers — see step_start_infra.go).
-	args := []string{"compose", "-p", s.entityPrefix + "-frontend", "-f", s.composePath, "up", "-d"}
+	//
+	// --build: VITE_* are baked into the static bundle at build time, so the image
+	// must be (re)built per entity with this entity's args. Combined with a per-entity
+	// image tag (ImageTag), this prevents one entity's bundle — carrying its own
+	// api-gateway URL — from being reused by another and failing CORS in the browser.
+	args := []string{"compose", "-p", s.entityPrefix + "-frontend", "-f", s.composePath, "up", "-d", "--build"}
 	for _, svc := range s.services {
 		args = append(args, svc.Service)
 	}
