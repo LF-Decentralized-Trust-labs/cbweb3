@@ -1054,9 +1054,10 @@ func TestGetMyOnboardingStatusSuccess(t *testing.T) {
 	t.Parallel()
 	stub := onboardingManagerStub{
 		byBankResult: interfaces.OnboardingStatus{
-			RequestID: "req-uuid-001",
-			UserID:    "user-uuid-001",
-			Status:    "KYC_APPROVED",
+			RequestID:     "req-uuid-001",
+			UserID:        "user-uuid-001",
+			Status:        "KYC_APPROVED",
+			WalletAddress: "0xWALLET001",
 		},
 	}
 	handler := NewOnboardingHandler(stub)
@@ -1082,9 +1083,11 @@ func TestGetMyOnboardingStatusSuccess(t *testing.T) {
 	if body["status"] != "KYC_APPROVED" {
 		t.Errorf("expected status KYC_APPROVED, got %v", body["status"])
 	}
-	// wallet_address and pop_nonce are not included in this endpoint's response.
-	if _, exists := body["wallet_address"]; exists {
-		t.Errorf("wallet_address must be absent from my-status response, but it was present")
+	// wallet_address is exposed (public, on-chain) so the governance operator and the
+	// engine's register-participant step can resolve the approved bank's wallet by
+	// bank_code. pop_nonce stays absent — it is the PoP challenge and must not leak.
+	if body["wallet_address"] != "0xWALLET001" {
+		t.Errorf("expected wallet_address 0xWALLET001, got %v", body["wallet_address"])
 	}
 	if _, exists := body["pop_nonce"]; exists {
 		t.Errorf("pop_nonce must be absent from my-status response, but it was present")
@@ -1172,8 +1175,9 @@ func TestGetMyOnboardingStatusResponseShape(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decoding response: %v", err)
 	}
-	// Only request_id, user_id, status are returned.
-	for _, absent := range []string{"pop_nonce", "wallet_address"} {
+	// pop_nonce must never be exposed here (it is the PoP challenge). wallet_address
+	// is allowed (public, on-chain) for engine/governance wallet resolution.
+	for _, absent := range []string{"pop_nonce"} {
 		if _, exists := body[absent]; exists {
 			t.Errorf("%s must be absent from my-status response, but it was present", absent)
 		}

@@ -215,17 +215,15 @@ func (s *identityService) CompleteOnboarding(ctx context.Context, req *authv1.Co
 		return nil, status.Errorf(codes.Internal, "complete onboarding: sign CSR: %v", certErr)
 	}
 
-	// 6. Register on-chain.
-	// Only the Central Bank executes CompleteOnboarding — commercial banks
-	// proxy via CENTRAL_BANK_API_URL. Signing uses the static CB_PRIVATE_KEY.
-	var txHash string
-	if domain.RequiresOnChain(participant.Role) && participant.WalletAddress != "" {
-		hash, chainErr := s.blockchainClient.RegisterParticipant(ctx, participant.WalletAddress, participant.InstitutionName, participant.Role, [32]byte{})
-		if chainErr != nil {
-			return nil, status.Errorf(codes.Internal, "complete onboarding: on-chain registration: %v", chainErr)
-		}
-		txHash = hash
-	}
+	// 6. On-chain IdentityRegistry registration is performed by the provisioning
+	// engine (toolkit) using the central bank's governance key via the KeyProvider
+	// — registerParticipant is onlyRole(GOVERNANCE_ROLE), so it must be signed by
+	// the spoke's governance key, which the engine owns (concat.md: the engine owns
+	// onboarding/IdentityRegistry; no governance private key lives in the CB
+	// services). CompleteOnboarding therefore issues the cert and activates the
+	// participant; the engine whitelists the wallet on-chain (see the toolkit's
+	// register-participant step).
+	txHash := ""
 
 	// 7. Generate client secret.
 	rawBytes := make([]byte, 32)

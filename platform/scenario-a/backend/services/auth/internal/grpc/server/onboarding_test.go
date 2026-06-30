@@ -305,7 +305,10 @@ func TestCompleteOnboarding_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("complete: %v", err)
 	}
-	if resp.Status != string(domain.ParticipantStatusActive) || resp.CertPem != "signed-cert" || resp.TxHash != "0xtx" {
+	// CompleteOnboarding issues the cert and activates the participant; on-chain
+	// IdentityRegistry registration is performed by the provisioning engine (CB
+	// governance key), so the response carries no tx hash.
+	if resp.Status != string(domain.ParticipantStatusActive) || resp.CertPem != "signed-cert" || resp.TxHash != "" {
 		t.Errorf("unexpected resp %+v", resp)
 	}
 }
