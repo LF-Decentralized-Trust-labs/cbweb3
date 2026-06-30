@@ -74,4 +74,30 @@ func TestRenderRealmJSON_ClientsRolesSecret(t *testing.T) {
 	if len(roles) < 2 {
 		t.Errorf("expected ROLE_GOVERNANCE + ROLE_TREASURY realm roles, got %v", roles)
 	}
+
+	// The governance service account must carry ROLE_GOVERNANCE as a realm role, so
+	// the client_credentials login token authorizes RequireRole(ROLE_GOVERNANCE)
+	// (e.g. approve-kyc). Without this, the Governance Portal approval returns 403.
+	users := realm["users"].([]any)
+	var govSA map[string]any
+	for _, u := range users {
+		um := u.(map[string]any)
+		if um["serviceAccountClientId"] == "central-bank-brazil-client" {
+			govSA = um
+			break
+		}
+	}
+	if govSA == nil {
+		t.Fatal("governance service-account user not found in realm import")
+	}
+	realmRoles, _ := govSA["realmRoles"].([]any)
+	hasGov := false
+	for _, r := range realmRoles {
+		if r == "ROLE_GOVERNANCE" {
+			hasGov = true
+		}
+	}
+	if !hasGov {
+		t.Errorf("governance service account must have realmRoles=[ROLE_GOVERNANCE], got %v", govSA["realmRoles"])
+	}
 }

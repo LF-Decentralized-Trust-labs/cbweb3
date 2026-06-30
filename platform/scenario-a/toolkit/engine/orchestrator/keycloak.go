@@ -103,14 +103,22 @@ func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
 		}
 		if c.Secret != "" {
 			client["secret"] = c.Secret
-			users = append(users, map[string]any{
+			saUser := map[string]any{
 				"username":               "service-account-" + c.ClientID,
 				"enabled":                true,
 				"serviceAccountClientId": c.ClientID,
 				"clientRoles": map[string]any{
 					"realm-management": []string{"manage-users", "view-users", "query-users", "manage-clients"},
 				},
-			})
+			}
+			// Grant the client's realm roles (e.g. ROLE_GOVERNANCE) to its service
+			// account: portal login is a client_credentials grant, so the resulting
+			// token's realm_access.roles must carry these for RequireRole to pass
+			// (e.g. the Governance Portal's approve-kyc requires ROLE_GOVERNANCE).
+			if len(c.Roles) > 0 {
+				saUser["realmRoles"] = c.Roles
+			}
+			users = append(users, saUser)
 		}
 		clients = append(clients, client)
 	}
