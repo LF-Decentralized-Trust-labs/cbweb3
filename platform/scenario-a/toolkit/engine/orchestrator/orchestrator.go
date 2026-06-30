@@ -367,11 +367,6 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			deps.BesuRPCPort, deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval),
 		newRegisterPaladinNodeStep(spokeID, deps.BankCode, dataDir, deps.BesuRPCURL,
 			b.Spec.Contracts.RegistryAddress, deps.KeyProvider, deps.Timeouts.ProofOfPossession),
-		// US3 — bilateral Pente context + FXAgreement, against the bank's Paladin.
-		newCreatePenteJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort), deps.Timeouts.VoteQBFT),
-		newDeployFXAJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort),
-			filepath.Join(deps.ContractsOutDir, "FXAgreement.sol", "FXAgreement.json"),
-			b.Spec.Contracts.ParticipantRegistryAddress, deps.Timeouts.VoteQBFT),
 	}
 
 	// Commercial bank operational stack (feature 034 US2): dedicated infra +
@@ -417,11 +412,19 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		}),
 	)
 
-	// Governance-gated identity steps are LAST and off the critical path: the bank
-	// is fully provisioned above. proof-of-possession (participant registration) is
-	// performed by the CB on KYC approval; the CB-signed cert is issued after
-	// approval. proof-of-possession and receive-cert are soft (see RunJoin).
+	// Deferred-tail steps are LAST and off the critical path: the bank is fully
+	// provisioned above. All are soft (see RunJoin):
+	//   - create-pente/deploy-fxa: bilateral CB↔bank Pente + FXAgreement, blocked by
+	//     a Paladin cross-node registry-resolution behaviour (the bank node cannot
+	//     resolve the remote CB node in pgroup_createGroup); not consumed by the
+	//     backend, tracked for Paladin follow-up;
+	//   - proof-of-possession: participant registration, performed by the CB on KYC
+	//     approval; the CB-signed cert is issued after approval (Governance Portal).
 	steps = append(steps,
+		newCreatePenteJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort), deps.Timeouts.VoteQBFT),
+		newDeployFXAJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort),
+			filepath.Join(deps.ContractsOutDir, "FXAgreement.sol", "FXAgreement.json"),
+			b.Spec.Contracts.ParticipantRegistryAddress, deps.Timeouts.VoteQBFT),
 		newProofPossessionStep(deps.BankCode, b.Spec.Contracts.RegistryAddress, deps.BesuRPCURL, deps.KeyProvider, deps.Timeouts.ProofOfPossession),
 		newGenCSRStep(deps.BankCode, deps.Institution, dataDir),
 		newRequestCertStep(deps.BankCode, deps.Institution, dataDir, ep.cbCertEndpoint, deps.KeyProvider, deps.Timeouts.RequestCert),

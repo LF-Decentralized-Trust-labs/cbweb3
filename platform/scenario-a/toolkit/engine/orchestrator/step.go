@@ -99,7 +99,14 @@ const (
 //     runtime identity credential issued only after a governance KYC approval.
 // None of these are consumed by any provisioning step (Paladin uses a self-signed
 // transport cert, the node self-registers via registerIdentity, the backend mounts
-// no bank CA). proof-of-possession and receive-cert are soft (see RunJoin).
+// no bank CA). The deferred-tail steps are soft (see RunJoin):
+//   - create-pente-context / deploy-fxa-pente: the bilateral CB↔bank Pente group
+//     and FXAgreement. Cross-node Pente group creation is blocked by a Paladin
+//     v0.15.0-rc.1 registry-resolution behavior (the bank node's pgroup_createGroup
+//     cannot resolve the remote CB node despite it being registered and resolvable
+//     in the bank's own registry DB). The bank's backend boots without the bilateral
+//     FXAgreement, so this does not gate provisioning; tracked for Paladin follow-up.
+//   - proof-of-possession / receive-cert: governance-gated identity (see above).
 var CanonicalJoinStepOrder = []string{
 	StepWriteGenesis,
 	StepStartBesuJoin,
@@ -109,12 +116,12 @@ var CanonicalJoinStepOrder = []string{
 	StepRenderConfigJoin,
 	StepStartPaladinJoin,
 	StepRegisterPaladinNode,
-	StepCreatePenteJoin,
-	StepDeployFXAJoin,
 	StepRenderBankEnv,
 	StepStartBankInfra,
 	StepProvisionBankKeycloak,
 	StepStartBackend,
+	StepCreatePenteJoin,
+	StepDeployFXAJoin,
 	StepProofPossession,
 	StepGenCSR,
 	StepRequestCert,

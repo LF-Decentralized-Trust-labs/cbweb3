@@ -22,13 +22,22 @@ import (
 var ErrAwaitingGovernanceApproval = errors.New(
 	"awaiting central bank governance KYC approval (Governance Portal); re-run apply after the bank is approved")
 
-// isDeferredOnboardingStep reports whether a mode:join step belongs to the
-// governance-gated identity flow (on-chain participant registration + CB-signed
-// cert). These run last, off the critical path, and a failure is non-fatal: the
-// bank is already fully provisioned, and these complete once a governance officer
-// approves the bank (Governance Portal). See RunJoin and CanonicalJoinStepOrder.
+// isDeferredOnboardingStep reports whether a mode:join step runs in the deferred
+// tail, off the critical path, where a failure is non-fatal because the bank is
+// already fully provisioned. Two groups:
+//   - governance-gated identity: proof-of-possession (participant registration,
+//     done by the CB on KYC approval) and receive-cert (CB-signed cert, issued
+//     after approval in the Governance Portal);
+//   - bilateral privacy (US3): create-pente-context + deploy-fxa-pente, blocked by
+//     a Paladin cross-node registry-resolution behaviour and not consumed by the
+//     backend — tracked for Paladin follow-up.
 func isDeferredOnboardingStep(name string) bool {
-	return name == StepProofPossession || name == StepReceiveCert
+	switch name {
+	case StepProofPossession, StepReceiveCert, StepCreatePenteJoin, StepDeployFXAJoin:
+		return true
+	default:
+		return false
+	}
 }
 
 // receiveCertStep finalizes the certificate acquisition. If the request step
