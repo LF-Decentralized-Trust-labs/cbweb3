@@ -90,3 +90,7 @@ openspec/
 .github/prompts/*
 !.github/prompts/speckit*.prompt.md
 .github/skills/
+
+# sample deploy artifacts (toolkit CLI binary + emitted join bundles)
+/samples/.cbweb3
+/samples/bundles/*.bundle.yaml
