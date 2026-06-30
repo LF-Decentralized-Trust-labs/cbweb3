@@ -41,6 +41,6 @@ spec:
     - role: ROLE_TREASURY
       username: admin@colombia.treasury.gov
       password: colombia-treasury-local
-    - role: noc-admin
+    - role: ROLE_NOC_ADMIN
       username: admin@colombia.noc.gov
       password: colombia-noc-local

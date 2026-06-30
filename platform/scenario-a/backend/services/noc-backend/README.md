@@ -46,7 +46,7 @@ The **noc-backend** is the data hub for the Network Operations Center. It receiv
 
 | Role | Access |
 |------|--------|
-| `noc-admin` | Full access: read dashboard, manage agents/spokes/keys |
+| `ROLE_NOC_ADMIN` | Full access: read dashboard, manage agents/spokes/keys |
 | `noc-user` | Read-only: dashboard metrics and alerts |
 
 ### Key Endpoints

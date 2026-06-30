@@ -13,7 +13,7 @@ func TestCentralBankRealmPlans_RoutesAdminUsersByRole(t *testing.T) {
 	admins := []manifest.AdminUser{
 		{Role: "ROLE_GOVERNANCE", Username: "admin@brasil.governance.gov", Password: "gov-pw"},
 		{Role: "ROLE_TREASURY", Username: "admin@brasil.treasury.gov", Password: "trez-pw"},
-		{Role: "noc-admin", Username: "admin@brasil.noc.gov", Password: "noc-pw"},
+		{Role: "ROLE_NOC_ADMIN", Username: "admin@brasil.noc.gov", Password: "noc-pw"},
 	}
 	plans := centralBankRealmPlans("central-bank-brazil", admins)
 	cb, noc := plans[0], plans[1]

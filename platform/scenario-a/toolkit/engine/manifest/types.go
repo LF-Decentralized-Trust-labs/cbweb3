@@ -62,7 +62,7 @@ type Spec struct {
 //
 // Role is the Keycloak realm role the user is granted and also selects the realm
 // the user lands in (central-bank realm for ROLE_GOVERNANCE/ROLE_TREASURY, the
-// shared cbweb3/NOC realm for noc-admin, the bank realm for ROLE_BANK).
+// shared cbweb3/NOC realm for ROLE_NOC_ADMIN, the bank realm for ROLE_BANK).
 //
 // NOTE: Password is read from the manifest for the local profile. A future
 // iteration MUST source it from a secret store (KeyProvider/SecretSource) and use
