@@ -63,7 +63,8 @@ func (s *startPaladinJoinStep) Check(ctx context.Context) (bool, error) {
 }
 
 func (s *startPaladinJoinStep) Run(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", s.composePath, "up", "-d")
+	// Unique compose project per entity (shared commercial-bank Paladin template).
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.spokeID+"-"+s.bankID+"-paladin", "-f", s.composePath, "up", "-d")
 	cmd.Env = s.composeEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compose up: %w\noutput:\n%s", err, out)

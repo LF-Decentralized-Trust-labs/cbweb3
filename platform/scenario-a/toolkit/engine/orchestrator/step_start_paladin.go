@@ -114,8 +114,14 @@ func paladinHostPort(rawURL string, fallback int) int {
 	return fallback
 }
 
+// cbPaladinProject is the unique compose project for this spoke's CB Paladin. The
+// central-bank Paladin template is shared across spokes, so without -p every CB
+// Paladin shares one project and a second spoke's found would reconcile (and
+// remove) the first spoke's Paladin node. Used consistently by up/down/ps.
+func (s *startPaladinStep) cbPaladinProject() string { return s.spokeID + "-cb-paladin" }
+
 func (s *startPaladinStep) composeDown(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", s.composePath, "down")
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.cbPaladinProject(), "-f", s.composePath, "down")
 	cmd.Env = s.composeEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -141,7 +147,7 @@ func (s *startPaladinStep) removeVolumes(ctx context.Context) error {
 }
 
 func (s *startPaladinStep) composeUp(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", s.composePath, "up", "-d")
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.cbPaladinProject(), "-f", s.composePath, "up", "-d")
 	cmd.Env = s.composeEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -151,7 +157,7 @@ func (s *startPaladinStep) composeUp(ctx context.Context) error {
 }
 
 func (s *startPaladinStep) containerRunning(ctx context.Context) bool {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", s.composePath, "ps", "--format", "json")
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.cbPaladinProject(), "-f", s.composePath, "ps", "--format", "json")
 	cmd.Env = s.composeEnv()
 	out, err := cmd.Output()
 	if err != nil {

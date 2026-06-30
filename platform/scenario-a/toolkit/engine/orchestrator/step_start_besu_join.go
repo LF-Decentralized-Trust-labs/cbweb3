@@ -62,7 +62,10 @@ func (s *startBesuJoinStep) Run(ctx context.Context) error {
 	if s.bootnodeEnode == "" {
 		return fmt.Errorf("start-besu-join: BOOTNODE_ENODE is required for mode:join")
 	}
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", s.composePath, "up", "-d")
+	// Unique compose project per entity: the commercial-bank compose template is
+	// shared across banks, so without -p every bank shares one project and a later
+	// bank's join would reconcile (and remove) an earlier bank's Besu node.
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.spokeID+"-"+s.bankID+"-besu", "-f", s.composePath, "up", "-d")
 	cmd.Env = s.composeEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {

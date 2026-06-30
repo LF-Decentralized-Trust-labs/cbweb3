@@ -91,7 +91,10 @@ func (s *startBesuFoundStep) Run(ctx context.Context) error {
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", s.composePath, "up", "-d")
+	// Unique compose project per entity: the central-bank compose template is shared
+	// across spokes, so without -p every CB shares one project and a second spoke's
+	// found would reconcile (and remove) the first spoke's Besu node.
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.spokeID+"-cb-besu", "-f", s.composePath, "up", "-d")
 	cmd.Env = s.composeEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
