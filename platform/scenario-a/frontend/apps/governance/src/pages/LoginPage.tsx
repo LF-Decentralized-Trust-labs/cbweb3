@@ -23,10 +23,10 @@ import { useAuthStore } from "../stores";
 import { hasGovernanceAccess } from "../auth/authorization";
 
 const schema = z.object({
-  clientId: z.string().min(3, "Client ID must be at least 3 characters"),
-  clientSecret: z
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  password: z
     .string()
-    .min(6, "Client Secret must be at least 6 characters"),
+    .min(6, "Password must be at least 6 characters"),
 });
 
 type LoginForm = z.infer<typeof schema>;
@@ -39,8 +39,8 @@ export function LoginPage() {
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
     defaultValues: {
-      clientId: searchParams.get("username") ?? "",
-      clientSecret: "",
+      username: searchParams.get("username") ?? "",
+      password: "",
     },
   });
 
@@ -54,7 +54,7 @@ export function LoginPage() {
   }, [isAuthenticated, navigate, profile]);
 
   const onSubmit = form.handleSubmit(async (values) => {
-    await login(values.clientId, values.clientSecret);
+    await login(values.username, values.password);
   });
 
   return (
@@ -117,32 +117,32 @@ export function LoginPage() {
           <CardContent>
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="clientId">Client ID</Label>
+                <Label htmlFor="username">Username</Label>
                 <Input
-                  id="clientId"
-                  placeholder="central-bank-a-client"
-                  {...form.register("clientId")}
+                  id="username"
+                  placeholder="admin@brasil.governance.gov"
+                  {...form.register("username")}
                   autoComplete="username"
                 />
-                {form.formState.errors.clientId ? (
+                {form.formState.errors.username ? (
                   <p className="text-xs text-destructive">
-                    {form.formState.errors.clientId.message}
+                    {form.formState.errors.username.message}
                   </p>
                 ) : null}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="clientSecret">Client Secret</Label>
+                <Label htmlFor="password">Password</Label>
                 <Input
-                  id="clientSecret"
+                  id="password"
                   type="password"
-                  placeholder="Governance client secret"
-                  {...form.register("clientSecret")}
+                  placeholder="Password"
+                  {...form.register("password")}
                   autoComplete="current-password"
                 />
-                {form.formState.errors.clientSecret ? (
+                {form.formState.errors.password ? (
                   <p className="text-xs text-destructive">
-                    {form.formState.errors.clientSecret.message}
+                    {form.formState.errors.password.message}
                   </p>
                 ) : null}
               </div>

@@ -12,8 +12,8 @@ import { toast } from "@cbweb3/ui";
 import { hasBankAccess } from "../auth/authorization";
 
 const schema = z.object({
-  clientId: z.string().min(3, "Client ID must be at least 3 characters"),
-  clientSecret: z.string().min(6, "Client Secret must be at least 6 characters"),
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
 type LoginForm = z.infer<typeof schema>;
@@ -24,7 +24,7 @@ export function LoginPage() {
   const { login, status, error, isAuthenticated, profile } = useAuthStore();
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
-    defaultValues: { clientId: searchParams.get("username") ?? "", clientSecret: "" },
+    defaultValues: { username: searchParams.get("username") ?? "", password: "" },
   });
 
   useEffect(() => {
@@ -39,7 +39,7 @@ export function LoginPage() {
   }, [isAuthenticated, navigate, profile]);
 
   const onSubmit = form.handleSubmit(async (values) => {
-    await login(values.clientId, values.clientSecret);
+    await login(values.username, values.password);
   });
 
   return (
@@ -90,18 +90,18 @@ export function LoginPage() {
           <CardContent>
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="clientId">Client ID</Label>
-                <Input id="clientId" {...form.register("clientId")} autoComplete="username" />
-                {form.formState.errors.clientId ? (
-                  <p className="text-xs text-destructive">{form.formState.errors.clientId.message}</p>
+                <Label htmlFor="username">Username</Label>
+                <Input id="username" {...form.register("username")} autoComplete="username" />
+                {form.formState.errors.username ? (
+                  <p className="text-xs text-destructive">{form.formState.errors.username.message}</p>
                 ) : null}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="clientSecret">Client Secret</Label>
-                <Input id="clientSecret" type="password" {...form.register("clientSecret")} autoComplete="current-password" />
-                {form.formState.errors.clientSecret ? (
-                  <p className="text-xs text-destructive">{form.formState.errors.clientSecret.message}</p>
+                <Label htmlFor="password">Password</Label>
+                <Input id="password" type="password" {...form.register("password")} autoComplete="current-password" />
+                {form.formState.errors.password ? (
+                  <p className="text-xs text-destructive">{form.formState.errors.password.message}</p>
                 ) : null}
               </div>
 
