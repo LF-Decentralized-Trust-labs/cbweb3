@@ -54,15 +54,22 @@ func (s *genTLSJoinStep) Run(_ context.Context) error {
 	if err != nil {
 		return fmt.Errorf("generate serial: %w", err)
 	}
+	// The Paladin gRPC transport authenticates a peer by matching the cert's TLS
+	// identity against the EXPECTED NODE NAME from the registry (PD030011), not the
+	// dial hostname. The bank node is registered as bankNodeName (e.g.
+	// "spoke-brl-bank-itau"), so the cert CN must be that node name — using the
+	// container hostname ("paladin-spoke-brl-bank-itau") makes the mutual-TLS
+	// handshake fail. The hostname is kept in the SAN so the dns:/// dial validates.
+	node := bankNodeName(s.spokeID, s.bankID)
 	host := bankGrpcHostname(s.spokeID, s.bankID)
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			CommonName:         host,
+			CommonName:         node,
 			OrganizationalUnit: []string{"ROLE_COMMERCIAL_BANK"},
 			Organization:       []string{s.spokeID},
 		},
-		DNSNames:              []string{host, "localhost"},
+		DNSNames:              []string{node, host, "localhost"},
 		NotBefore:             time.Now().Add(-time.Minute),
 		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,

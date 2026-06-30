@@ -54,18 +54,23 @@ func TestGenTLSJoinStep_GeneratesBankCert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse cert: %v", err)
 	}
-	want := "paladin-spoke-brl-bank-itau"
-	if cert.Subject.CommonName != want {
-		t.Errorf("CN = %q; want %q", cert.Subject.CommonName, want)
+	// CN must be the registered NODE NAME (not the container hostname): the Paladin
+	// gRPC transport matches the peer's TLS identity against the expected node name
+	// (PD030011). The container hostname stays in the SAN for the dns:/// dial.
+	wantCN := "spoke-brl-bank-itau"
+	if cert.Subject.CommonName != wantCN {
+		t.Errorf("CN = %q; want %q", cert.Subject.CommonName, wantCN)
 	}
-	found := false
-	for _, d := range cert.DNSNames {
-		if d == want {
-			found = true
+	for _, want := range []string{"spoke-brl-bank-itau", "paladin-spoke-brl-bank-itau"} {
+		found := false
+		for _, d := range cert.DNSNames {
+			if d == want {
+				found = true
+			}
 		}
-	}
-	if !found {
-		t.Errorf("SAN missing %q; got %v", want, cert.DNSNames)
+		if !found {
+			t.Errorf("SAN missing %q; got %v", want, cert.DNSNames)
+		}
 	}
 
 	done, _ = step.Check(context.Background())

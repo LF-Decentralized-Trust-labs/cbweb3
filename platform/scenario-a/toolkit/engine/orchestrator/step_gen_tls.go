@@ -65,15 +65,22 @@ func (s *genTLSStep) Run(ctx context.Context) error {
 	// generates its own cert dynamically at join time (mode:join), per the
 	// dynamic-registration architecture (concat.md / spk-02 join-paladin.sh) —
 	// the found step must not bake in a fixed set of bank nodes.
+	// The Paladin gRPC transport authenticates a peer by matching the cert's TLS
+	// identity against the EXPECTED NODE NAME from the registry (PD030011), not the
+	// dial hostname. The node is registered as cbNodeName (e.g. "spoke-brl-cb"), so
+	// the cert CN must be that node name — using the container hostname
+	// ("paladin-spoke-brl-cb") makes the mutual-TLS handshake fail. The hostname is
+	// kept in the SAN so the dns:/// dial still validates.
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			CommonName:         "paladin-" + s.spokeID + "-cb",
+			CommonName:         cbNodeName(s.spokeID),
 			OrganizationalUnit: []string{"ROLE_CENTRAL_BANK"},
 			Organization:       []string{s.spokeID},
 		},
 		DNSNames: []string{
-			"paladin-" + s.spokeID + "-cb",
+			cbNodeName(s.spokeID),
+			cbGrpcHostname(s.spokeID),
 			"localhost",
 		},
 		NotBefore:             time.Now().Add(-time.Minute),
