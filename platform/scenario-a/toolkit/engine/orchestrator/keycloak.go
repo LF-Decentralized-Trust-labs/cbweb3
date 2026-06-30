@@ -49,7 +49,7 @@ type KeycloakRealmPlan struct {
 // adminUsersForRealmRoles selects the manifest admin users whose role is one of
 // the realm's roles, mapping each to a KeycloakUserPlan. This routes each admin
 // to the realm that actually defines its role (central-bank realm for
-// ROLE_GOVERNANCE/ROLE_TREASURY, the cbweb3/NOC realm for noc-admin, the bank
+// ROLE_GOVERNANCE/ROLE_TREASURY, the cbweb3/NOC realm for ROLE_NOC_ADMIN, the bank
 // realm for ROLE_BANK).
 func adminUsersForRealmRoles(admins []manifest.AdminUser, realmRoles ...string) []KeycloakUserPlan {
 	want := map[string]bool{}
@@ -74,7 +74,7 @@ func nocRealmPlan() KeycloakRealmPlan {
 	return KeycloakRealmPlan{
 		Realm: "cbweb3",
 		Clients: []KeycloakClientPlan{
-			{ClientID: "noc-portal", Secret: "", Roles: []string{"noc-viewer", "noc-operator", "noc-admin"}},
+			{ClientID: "noc-portal", Secret: "", Roles: []string{"ROLE_NOC_VIEWER", "ROLE_NOC_OPERATOR", "ROLE_NOC_ADMIN"}},
 		},
 	}
 }
@@ -82,11 +82,11 @@ func nocRealmPlan() KeycloakRealmPlan {
 // centralBankRealmPlans returns the realms the CB Keycloak must host: the
 // central-bank realm (governance + treasury clients) plus the NOC realm. The
 // manifest's admin users are routed to the realm that defines their role:
-// ROLE_GOVERNANCE/ROLE_TREASURY into the central-bank realm, noc-admin into the
-// shared cbweb3/NOC realm.
+// ROLE_GOVERNANCE/ROLE_TREASURY/ROLE_SUPERVISOR into the central-bank realm,
+// ROLE_NOC_ADMIN into the shared cbweb3/NOC realm.
 func centralBankRealmPlans(entity string, admins []manifest.AdminUser) []KeycloakRealmPlan {
 	noc := nocRealmPlan()
-	noc.Users = adminUsersForRealmRoles(admins, "noc-admin", "noc-operator", "noc-viewer")
+	noc.Users = adminUsersForRealmRoles(admins, "ROLE_NOC_ADMIN", "ROLE_NOC_OPERATOR", "ROLE_NOC_VIEWER")
 	return []KeycloakRealmPlan{
 		{
 			Realm: entity,
@@ -94,7 +94,7 @@ func centralBankRealmPlans(entity string, admins []manifest.AdminUser) []Keycloa
 				{ClientID: entity + "-client", Secret: entity + "-local-secret", Roles: []string{"ROLE_GOVERNANCE"}},
 				{ClientID: entity + "-treasury-client", Secret: entity + "-treasury-local-secret", Roles: []string{"ROLE_TREASURY"}},
 			},
-			Users: adminUsersForRealmRoles(admins, "ROLE_GOVERNANCE", "ROLE_TREASURY"),
+			Users: adminUsersForRealmRoles(admins, "ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR"),
 		},
 		noc,
 	}

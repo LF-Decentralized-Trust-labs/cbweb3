@@ -74,16 +74,16 @@ Para setup completo com registro de spokes e agents, consulte [DEPLOY.md](./DEPL
 
 | Role | Permissões |
 |------|-----------|
-| `noc-viewer` | Visualizar dashboards, alertas, logs |
-| `noc-operator` | `noc-viewer` + resolver alertas |
-| `noc-admin` | `noc-operator` + gerenciar spokes e agents |
+| `ROLE_NOC_VIEWER` | Visualizar dashboards, alertas, logs |
+| `ROLE_NOC_OPERATOR` | `ROLE_NOC_VIEWER` + resolver alertas |
+| `ROLE_NOC_ADMIN` | `ROLE_NOC_OPERATOR` + gerenciar spokes e agents |
 
 ### Usuário Padrão
 
 Após executar `setup-noc-realm.sh`:
 - Username: `noc-admin`
 - Password: `noc-admin`
-- Roles: `noc-admin`
+- Roles: `ROLE_NOC_ADMIN`
 
 ## 📊 Endpoints Principais
 
@@ -91,10 +91,10 @@ Após executar `setup-noc-realm.sh`:
 |----------|------|-----------|
 | `GET /api/v1/health` | Público | Health check |
 | `GET /api/v1/overview` | JWT | Overview completo da rede |
-| `POST /api/v1/admin/spokes` | noc-admin | Registrar spoke |
-| `POST /api/v1/admin/agents/provision-key` | noc-admin | Provisionar API key |
-| `GET /api/v1/alerts` | noc-viewer | Listar alertas |
-| `GET /api/v1/components/{id}/logs` | noc-viewer | Logs de componente |
+| `POST /api/v1/admin/spokes` | ROLE_NOC_ADMIN | Registrar spoke |
+| `POST /api/v1/admin/agents/provision-key` | ROLE_NOC_ADMIN | Provisionar API key |
+| `GET /api/v1/alerts` | ROLE_NOC_VIEWER | Listar alertas |
+| `GET /api/v1/components/{id}/logs` | ROLE_NOC_VIEWER | Logs de componente |
 
 ## 📝 Arquivos de Configuração
 

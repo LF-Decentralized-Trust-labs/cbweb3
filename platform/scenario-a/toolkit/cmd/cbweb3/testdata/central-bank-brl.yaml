@@ -35,6 +35,9 @@ spec:
     - role: ROLE_TREASURY
       username: admin@brasil.treasury.gov
       password: treasury-local
-    - role: noc-admin
+    - role: ROLE_SUPERVISOR
+      username: admin@brasil.supervisor.gov
+      password: supervisor-local
+    - role: ROLE_NOC_ADMIN
       username: admin@brasil.noc.gov
       password: noc-local

@@ -13,15 +13,25 @@ func TestCentralBankRealmPlans_RoutesAdminUsersByRole(t *testing.T) {
 	admins := []manifest.AdminUser{
 		{Role: "ROLE_GOVERNANCE", Username: "admin@brasil.governance.gov", Password: "gov-pw"},
 		{Role: "ROLE_TREASURY", Username: "admin@brasil.treasury.gov", Password: "trez-pw"},
-		{Role: "noc-admin", Username: "admin@brasil.noc.gov", Password: "noc-pw"},
+		{Role: "ROLE_SUPERVISOR", Username: "admin@brasil.supervisor.gov", Password: "sup-pw"},
+		{Role: "ROLE_NOC_ADMIN", Username: "admin@brasil.noc.gov", Password: "noc-pw"},
 	}
 	plans := centralBankRealmPlans("central-bank-brazil", admins)
 	cb, noc := plans[0], plans[1]
 
-	// Governance + treasury admins land in the central-bank realm; the NOC admin
-	// lands in the shared cbweb3 realm.
-	if len(cb.Users) != 2 {
-		t.Fatalf("central-bank realm: want 2 admin users, got %d", len(cb.Users))
+	// Governance + treasury + supervisor admins land in the central-bank realm; the
+	// NOC admin lands in the shared cbweb3 realm.
+	if len(cb.Users) != 3 {
+		t.Fatalf("central-bank realm: want 3 admin users, got %d", len(cb.Users))
+	}
+	var supervisorFound bool
+	for _, u := range cb.Users {
+		if u.Username == "admin@brasil.supervisor.gov" {
+			supervisorFound = len(u.Roles) == 1 && u.Roles[0] == "ROLE_SUPERVISOR"
+		}
+	}
+	if !supervisorFound {
+		t.Errorf("central-bank realm: ROLE_SUPERVISOR admin not routed correctly: %+v", cb.Users)
 	}
 	if len(noc.Users) != 1 || noc.Users[0].Username != "admin@brasil.noc.gov" {
 		t.Errorf("NOC realm admin user mismatch: %+v", noc.Users)

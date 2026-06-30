@@ -197,7 +197,7 @@ Set of specialized services that implement business logic.
 
 **Supported Roles:**
 - `treasury-operator` - Treasury operator
-- `noc-admin` - NOC administrator
+- `ROLE_NOC_ADMIN` - NOC administrator
 - `supervisor` - Regulatory supervisor
 - `governor` - Governor
 - `developer` - Integration developer

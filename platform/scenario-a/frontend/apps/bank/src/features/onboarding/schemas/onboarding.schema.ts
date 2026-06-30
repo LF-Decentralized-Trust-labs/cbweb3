@@ -10,7 +10,7 @@ export const institutionSchema = z.object({
     .max(8, "Bank code must contain up to 8 characters")
     .regex(/^[a-z0-9-]+$/, "Use lowercase letters, numbers, or hyphen"),
   country: z.string().length(2, "Country must be 2 characters (ISO 3166-1 alpha-2)"),
-  role: z.enum(["ROLE_COMMERCIAL_BANK", "ROLE_TREASURY_BANK"]),
+  role: z.enum(["ROLE_COMMERCIAL_BANK", "ROLE_TREASURY"]),
   email: z.string().email("Enter a valid email"),
   username: z
     .string()

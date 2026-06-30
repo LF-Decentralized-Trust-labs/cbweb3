@@ -70,7 +70,7 @@ fi
 
 # ── Create NOC roles ──────────────────────────────────────────────────────────
 echo -e "${BLUE}Creating NOC roles...${NC}"
-for role in noc-viewer noc-operator noc-admin SYS_ADMIN; do
+for role in ROLE_NOC_VIEWER ROLE_NOC_OPERATOR ROLE_NOC_ADMIN SYS_ADMIN; do
   if ${KCADM} get roles -r "${NOC_REALM}" --fields name \
       | grep -q "\"${role}\""; then
     echo -e "${YELLOW}  Role '${role}' already exists — skipping.${NC}"
@@ -121,8 +121,8 @@ else
 fi
 
 # ── Assign roles to user ──────────────────────────────────────────────────────
-echo -e "${BLUE}Assigning 'noc-admin' and 'SYS_ADMIN' roles to '${NOC_USER}'...${NC}"
-${KCADM} add-roles -r "${NOC_REALM}" --uusername "${NOC_USER}" --rolename noc-admin || true
+echo -e "${BLUE}Assigning 'ROLE_NOC_ADMIN' and 'SYS_ADMIN' roles to '${NOC_USER}'...${NC}"
+${KCADM} add-roles -r "${NOC_REALM}" --uusername "${NOC_USER}" --rolename ROLE_NOC_ADMIN || true
 ${KCADM} add-roles -r "${NOC_REALM}" --uusername "${NOC_USER}" --rolename SYS_ADMIN || true
 echo -e "${GREEN}  Roles assigned.${NC}"
 

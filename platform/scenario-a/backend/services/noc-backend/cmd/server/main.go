@@ -97,10 +97,10 @@ func main() {
 	// Routes — agent push (API key auth, no Keycloak)
 	pushHandler.Register(app)
 
-	// Routes — admin (Keycloak JWT + noc-admin role required)
+	// Routes — admin (Keycloak JWT + ROLE_NOC_ADMIN role required)
 	admin := app.Group("/api/v1/admin",
 		middleware.RequireAuth(kc),
-		middleware.RequireRole("noc-admin"),
+		middleware.RequireRole("ROLE_NOC_ADMIN"),
 	)
 	spokesHandler.Register(admin)
 	keysHandler.Register(admin)

@@ -81,8 +81,9 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 
 		RelaySecret: "cbweb3-relay-shared-secret",
 		// api-gateway sets AllowCredentials=true, which Fiber forbids with a wildcard
-		// origin. Use the entity's own frontend origins (the portals served locally).
-		CORSOrigins: fmt.Sprintf("http://localhost:%d,http://localhost:%d", ports.FrontendPrimary, ports.FrontendSecondary),
+		// origin. Whitelist all four CB portal origins (governance, treasury,
+		// supervisor, noc); omitting any makes that portal fail CORS at login.
+		CORSOrigins: cbCORSOrigins(ports),
 	}
 	return RenderEntityEnv(data, cbEnvPath(s.dataDir, s.entityName))
 }

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type OnboardingRole = "ROLE_COMMERCIAL_BANK" | "ROLE_TREASURY_BANK";
+// Participant-classification roles accepted by the backend onboarding flow
+// (compliance: ROLE_COMMERCIAL_BANK, ROLE_TREASURY, ...). ROLE_TREASURY_BANK is
+// not a backend role; treasury participants use ROLE_TREASURY.
+export type OnboardingRole = "ROLE_COMMERCIAL_BANK" | "ROLE_TREASURY";
 
 export type OnboardingRequestStatus =
   | "NONE"

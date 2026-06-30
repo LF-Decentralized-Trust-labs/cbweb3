@@ -46,7 +46,10 @@ spec:
     - role: ROLE_TREASURY
       username: admin@brasil.treasury.gov
       password: treasury-local
-    - role: noc-admin
+    - role: ROLE_SUPERVISOR
+      username: admin@brasil.supervisor.gov
+      password: supervisor-local
+    - role: ROLE_NOC_ADMIN
       username: admin@brasil.noc.gov
       password: noc-local
 `
@@ -77,7 +80,8 @@ func validManifest() *manifest.Manifest {
 			AdminUsers: []manifest.AdminUser{
 				{Role: "ROLE_GOVERNANCE", Username: "admin@brasil.governance.gov", Password: "governance-local"},
 				{Role: "ROLE_TREASURY", Username: "admin@brasil.treasury.gov", Password: "treasury-local"},
-				{Role: "noc-admin", Username: "admin@brasil.noc.gov", Password: "noc-local"},
+				{Role: "ROLE_SUPERVISOR", Username: "admin@brasil.supervisor.gov", Password: "supervisor-local"},
+				{Role: "ROLE_NOC_ADMIN", Username: "admin@brasil.noc.gov", Password: "noc-local"},
 			},
 		},
 	}
@@ -431,7 +435,7 @@ func TestValidate_AdminUsers(t *testing.T) {
 		// Drop the treasury admin → central-bank must still require ROLE_TREASURY.
 		m.Spec.AdminUsers = []manifest.AdminUser{
 			{Role: "ROLE_GOVERNANCE", Username: "admin@brasil.governance.gov", Password: "p"},
-			{Role: "noc-admin", Username: "admin@brasil.noc.gov", Password: "p"},
+			{Role: "ROLE_NOC_ADMIN", Username: "admin@brasil.noc.gov", Password: "p"},
 		}
 		err := manifest.Validate(m)
 		if err == nil || !strings.Contains(err.Error(), "ROLE_TREASURY") {

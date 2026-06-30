@@ -83,7 +83,7 @@ export function Step2InstitutionForm({ loading, error, onSubmit }: Step2Institut
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ROLE_COMMERCIAL_BANK">Commercial Bank</SelectItem>
-                    <SelectItem value="ROLE_TREASURY_BANK">Treasury Bank</SelectItem>
+                    <SelectItem value="ROLE_TREASURY">Treasury Bank</SelectItem>
                   </SelectContent>
                 </Select>
               )}
