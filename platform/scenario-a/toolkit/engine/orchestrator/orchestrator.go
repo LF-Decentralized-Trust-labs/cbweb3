@@ -233,6 +233,17 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 func frontendAPIBase(port int) string { return fmt.Sprintf("http://localhost:%d", port) }
 func frontendAPIURL(port int) string  { return frontendAPIBase(port) + "/api/v1/" }
 
+// cbCORSOrigins is the comma-separated browser origin list a central bank's
+// api-gateway must allow. A CB serves FOUR portals (governance, treasury,
+// supervisor, noc — see startCBFrontend in this file); every one calls the
+// gateway from the host, so all four origins must be whitelisted or the omitted
+// portals fail CORS at login. (A commercial bank serves only FrontendPrimary, so
+// its origin list is built inline in renderBankEnvStep.)
+func cbCORSOrigins(p EntityPorts) string {
+	return fmt.Sprintf("http://localhost:%d,http://localhost:%d,http://localhost:%d,http://localhost:%d",
+		p.FrontendPrimary, p.FrontendSecondary, p.FrontendSupervisor, p.FrontendNOC)
+}
+
 // hostInternalURL rewrites a localhost URL to host.docker.internal so a container
 // can reach a host-published port (Paladin/Cacti run as separate compose stacks).
 func hostInternalURL(url string) string {
