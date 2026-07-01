@@ -60,15 +60,20 @@ services:
       BOOTNODE_ENODE: ${BOOTNODE_ENODE:?BOOTNODE_ENODE is required for mode:join}
     entrypoint: ["/bin/sh", "/entry.sh"]
     healthcheck:
+      # The pinned hyperledger/besu image ships no curl/wget/nc, so an HTTP client
+      # cannot be shelled out to (the old curl-based probe always failed with
+      # "curl: not found", flapping the node to unhealthy despite a working RPC).
+      # The image does ship bash, so probe the JSON-RPC endpoint with a /dev/tcp
+      # POST and assert eth_blockNumber returns a "result".
       test:
         - CMD
-        - sh
+        - bash
         - -c
-        - >
-          curl -sf -X POST http://localhost:8545
-          -H 'Content-Type: application/json'
-          -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-          | grep -q '"result"'
+        - |
+          body='{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+          exec 3<>/dev/tcp/localhost/8545 || exit 1
+          printf 'POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' "${#body}" "$body" >&3
+          grep -q '"result"' <&3
       interval: 5s
       timeout: 3s
       retries: 24
