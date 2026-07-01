@@ -54,7 +54,9 @@ networks:
     external: true
 
 volumes:
-  # Named so the engine's removeVolumes (start-paladin) can target it as
-  # "<SPOKE_ID>_paladin_cb_data".
+  # Named (not anonymous) and never wiped by the engine's start-paladin step —
+  # indexed domain state (Zeto token instances, Pente privacy groups) must
+  # survive a Paladin restart, same as the legacy local stacks in
+  # deploy/local/paladin. A deliberate reset is a separate, explicit operation.
   cb_data:
     name: ${SPOKE_ID}_paladin_cb_data

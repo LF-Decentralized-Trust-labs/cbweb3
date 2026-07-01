@@ -50,13 +50,14 @@ func (s *startPaladinStep) Check(ctx context.Context) (bool, error) {
 }
 
 func (s *startPaladinStep) Run(ctx context.Context) error {
-	// Stop → clean volumes → start.
-	if err := s.composeDown(ctx); err != nil {
-		return fmt.Errorf("compose down: %w", err)
-	}
-	if err := s.removeVolumes(ctx); err != nil {
-		return fmt.Errorf("remove volumes: %w", err)
-	}
+	// Idempotent up: preserves the named data volume across restarts (mirrors the
+	// legacy local compose stacks in deploy/local/paladin). Wiping the volume on
+	// every run discarded indexed domain state (Zeto token instances, Pente
+	// privacy groups) on any restart where the container wasn't already healthy,
+	// while .deployed-addrs.env / .provisioning-state.yaml kept reporting those
+	// steps as done — leaving on-chain references that Paladin had never
+	// (re-)indexed. A deliberate reset is a separate, explicit operation, not a
+	// side effect of bringing the node back up.
 	if err := s.composeUp(ctx); err != nil {
 		return fmt.Errorf("compose up: %w", err)
 	}
@@ -119,32 +120,6 @@ func paladinHostPort(rawURL string, fallback int) int {
 // Paladin shares one project and a second spoke's found would reconcile (and
 // remove) the first spoke's Paladin node. Used consistently by up/down/ps.
 func (s *startPaladinStep) cbPaladinProject() string { return s.spokeID + "-cb-paladin" }
-
-func (s *startPaladinStep) composeDown(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.cbPaladinProject(), "-f", s.composePath, "down")
-	cmd.Env = s.composeEnv()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%w\noutput:\n%s", err, out)
-	}
-	return nil
-}
-
-func (s *startPaladinStep) removeVolumes(ctx context.Context) error {
-	// Remove Paladin data volumes for this spoke (block-indexer must re-sync from block 0).
-	volumes := []string{
-		s.spokeID + "_paladin_cb_data",
-		s.spokeID + "_paladin_bank_a_data",
-		s.spokeID + "_paladin_bank_c_data",
-	}
-	args := append([]string{"volume", "rm", "-f"}, volumes...)
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil && !strings.Contains(string(out), "No such volume") {
-		return fmt.Errorf("%w\noutput:\n%s", err, out)
-	}
-	return nil
-}
 
 func (s *startPaladinStep) composeUp(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.cbPaladinProject(), "-f", s.composePath, "up", "-d")
