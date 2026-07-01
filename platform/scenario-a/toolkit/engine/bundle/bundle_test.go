@@ -197,6 +197,8 @@ ZETO_TOKEN_ADDRESS=0xD
 PENTE_CONTEXT_GROUP_ID=0xE
 PENTE_CONTEXT_ADDRESS=0xF
 FX_AGREEMENT_DEPLOYED_AT=0x1
+FIAT_TOKEN_ADDRESS=0xF1A7
+HTLC_ADDRESS=0x47C
 `
 	os.WriteFile(filepath.Join(dir, ".deployed-addrs.env"), []byte(env), 0o644)
 
@@ -209,6 +211,12 @@ FX_AGREEMENT_DEPLOYED_AT=0x1
 	}
 	if spec.FXAgreementAddress != "0x1" {
 		t.Errorf("FXAgreementAddress = %q; want 0x1", spec.FXAgreementAddress)
+	}
+	if spec.FiatTokenAddress != "0xF1A7" {
+		t.Errorf("FiatTokenAddress = %q; want 0xF1A7", spec.FiatTokenAddress)
+	}
+	if spec.HTLCAddress != "0x47C" {
+		t.Errorf("HTLCAddress = %q; want 0x47C", spec.HTLCAddress)
 	}
 }
 

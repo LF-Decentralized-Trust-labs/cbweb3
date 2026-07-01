@@ -243,6 +243,10 @@ func readContracts(dataDir string) (ContractsSpec, error) {
 		PenteContextAddress:        a.PenteContextAddress,
 		FXAgreementAddress:         a.FXAgreementDeployedAt,
 		ParticipantRegistryAddress: a.ParticipantRegistryAddress,
+		// fCeBM + HTLC are deployed by found (deploy-fiat-token / deploy-htlc). Carried
+		// so mode:join can wire the bank backend's FIAT_TOKEN_ADDRESS / HTLC_ADDRESS.
+		FiatTokenAddress: a.FiatTokenAddress,
+		HTLCAddress:      a.HTLCAddress,
 	}, nil
 }
 

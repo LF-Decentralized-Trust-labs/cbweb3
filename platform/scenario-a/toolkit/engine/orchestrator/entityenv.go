@@ -57,6 +57,23 @@ type EntityEnvData struct {
 	TokenAddress               string
 	SpokeBridgeAddress         string
 
+	// BesuOperatorKey is the hex private key (no 0x) the payment-orchestrator signs
+	// Besu-layer transactions with (HTLC/fCeBM). Empty disables the Besu path. In
+	// local it is the well-known public dev operator key exported from the
+	// KeyProvider; prod wires the signing key via KMS/secrets, not this field.
+	BesuOperatorKey string
+	// EntityBesuAddress is this entity's on-chain wallet (derived from the operator
+	// key in local). The api-gateway escrow proxy stamps it as requester_besu_address
+	// on deposit/escrow/redeem, and it is the address fCeBM balances read against.
+	EntityBesuAddress string
+	// PaladinIdentity is this entity's Paladin identity (e.g. funded_operator@spoke-brl-bank-bradesco).
+	// The api-gateway escrow proxy stamps it as requester_paladin_identity — the Zeto
+	// mint recipient for reserve tokenisation (escrow). Also read by payment-orchestrator.
+	PaladinIdentity string
+	// CBPaladinIdentity is the central bank's Paladin identity — the Zeto transfer
+	// receiver a commercial bank targets on redeem. Empty for the CB itself.
+	CBPaladinIdentity string
+
 	// Central-bank only.
 	CBPrivateKey     string
 	GovernanceUserID string
@@ -113,6 +130,15 @@ FIAT_TOKEN_ADDRESS={{.FiatTokenAddress}}
 HTLC_ADDRESS={{.HTLCAddress}}
 TOKEN_ADDRESS={{.TokenAddress}}
 SPOKE_BRIDGE_ADDRESS={{.SpokeBridgeAddress}}
+
+# Besu-layer signing key (local dev operator; empty in prod — see BesuOperatorKey)
+BESU_OPERATOR_KEY={{.BesuOperatorKey}}
+# This entity's Besu wallet — escrow proxy stamps it as requester_besu_address
+ENTITY_BESU_ADDRESS={{.EntityBesuAddress}}
+# Paladin identities — escrow proxy stamps requester_paladin_identity (Zeto mint
+# recipient); CB identity is the redeem Zeto-transfer receiver.
+PALADIN_IDENTITY={{.PaladinIdentity}}
+CB_PALADIN_IDENTITY={{.CBPaladinIdentity}}
 
 # Interop
 INTERNAL_RELAY_AUTH_SECRET={{.RelaySecret}}

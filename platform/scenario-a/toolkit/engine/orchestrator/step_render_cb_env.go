@@ -14,15 +14,17 @@ import (
 // (populated by the network steps). It points the backend at the CB's dedicated
 // infra and Keycloak.
 type renderCBEnvStep struct {
-	spokeID     string
-	entityName  string
-	currency    string
-	besuRPCPort int
-	dataDir     string
+	spokeID         string
+	entityName      string
+	currency        string
+	besuRPCPort     int
+	chainID         int
+	dataDir         string
+	besuOperatorKey string
 }
 
-func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort int, dataDir string) Step {
-	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, dataDir: dataDir}
+func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort, chainID int, dataDir, besuOperatorKey string) Step {
+	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, chainID: chainID, dataDir: dataDir, besuOperatorKey: besuOperatorKey}
 }
 
 func (s *renderCBEnvStep) Name() string { return StepRenderCBEnv }
@@ -69,10 +71,21 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		CAKeyFile:  "/workspace/backend/config/pki/central-bank.key",
 
 		BesuRPCURL: fmt.Sprintf("http://host.docker.internal:%d", s.besuRPCPort),
-		ChainID:    0, // chain id is read from the manifest by the engine; not required by the backend env
+		// The backend's Besu-signing path (HTLC/fCeBM) needs the real chain id:
+		// go-ethereum's NewKeyedTransactorWithChainID panics on chainID 0.
+		ChainID: s.chainID,
 
 		ParticipantRegistryAddress: addrs.ParticipantRegistryAddress,
 		ZetoTokenAddress:           addrs.ZetoTokenAddress,
+		FiatTokenAddress:           addrs.FiatTokenAddress,
+		HTLCAddress:                addrs.HTLCAddress,
+		// Local: the operator key signs Besu-layer txs (HTLC/fCeBM). Empty leaves the
+		// Besu path off (prod, until KMS wiring). EntityBesuAddress is its wallet.
+		BesuOperatorKey:   s.besuOperatorKey,
+		EntityBesuAddress: operatorAddressFromHex(s.besuOperatorKey),
+		// The CB's own Paladin identity (escrow mint recipient is read from the escrow
+		// record, not here; rendered for consistency and any CB-side proxy use).
+		PaladinIdentity: paladinIdentity(cbNodeName(s.spokeID)),
 
 		GovernanceUserID: governanceUserID(s.entityName),
 		// CB_PRIVATE_KEY is intentionally NOT rendered: signing goes through the

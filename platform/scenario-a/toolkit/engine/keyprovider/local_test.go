@@ -20,6 +20,27 @@ import (
 // US1 — Provisionar sem chaves em arquivos (Priority: P1)
 // ============================================================
 
+func TestLocalKeyProvider_ExportPrivateKeyHex_Seeded(t *testing.T) {
+	p := keyprovider.NewLocalKeyProviderSeeded()
+
+	hexKey, err := p.ExportPrivateKeyHex(keyprovider.LocalOperatorKeyID)
+	if err != nil {
+		t.Fatalf("ExportPrivateKeyHex: %v", err)
+	}
+	// The seeded operator key is the well-known public Besu dev account; its hex
+	// must round-trip to a valid secp256k1 key.
+	if _, err := gethcrypto.HexToECDSA(hexKey); err != nil {
+		t.Errorf("exported hex is not a valid key: %v", err)
+	}
+}
+
+func TestLocalKeyProvider_ExportPrivateKeyHex_Unknown(t *testing.T) {
+	p := keyprovider.NewLocalKeyProvider()
+	if _, err := p.ExportPrivateKeyHex("nonexistent"); !errors.Is(err, keyprovider.ErrKeyNotFound) {
+		t.Errorf("want ErrKeyNotFound, got %v", err)
+	}
+}
+
 func TestLocalKeyProvider_GenerateKey(t *testing.T) {
 	p := keyprovider.NewLocalKeyProvider()
 	ctx := context.Background()

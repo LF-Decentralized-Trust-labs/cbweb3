@@ -101,6 +101,13 @@ type ContractsSpec struct {
 	// (deployed at found onboard, FR-018). Consumed by mode:join to set the
 	// FXAgreement constructor's _identityRegistry (US3).
 	ParticipantRegistryAddress string `yaml:"participantRegistryAddress,omitempty"`
+	// FiatTokenAddress is the FiatCentralBankMoney (fCeBM) ERC-20 (deployed at found
+	// by deploy-fiat-token). Consumed by mode:join to wire the bank backend's
+	// FIAT_TOKEN_ADDRESS (fiat-balance / mint / burn).
+	FiatTokenAddress string `yaml:"fiatTokenAddress,omitempty"`
+	// HTLCAddress is the HashTimeLockedContract (deployed at found by deploy-htlc).
+	// Consumed by mode:join to wire the bank backend's HTLC_ADDRESS.
+	HTLCAddress string `yaml:"htlcAddress,omitempty"`
 }
 
 // RelaySpec holds the relay endpoint for the spoke.

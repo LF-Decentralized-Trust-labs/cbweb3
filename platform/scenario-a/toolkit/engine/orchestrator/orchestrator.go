@@ -169,8 +169,20 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 		newOnboardRegistryStep(spokeID, dataDir, besuRPCURL, deps.KeyProvider,
 			filepath.Join(deps.ContractsOutDir, "IdentityRegistry.sol", "IdentityRegistry.json"),
 			deps.Timeouts.OnboardRegistry),
+		// Besu-layer settlement contracts (Scenario A): fCeBM + HTLC. deploy-htlc
+		// reads PARTICIPANT_REGISTRY_ADDRESS produced by onboard-registry above.
+		newDeployFiatTokenStep(spokeID, dataDir, besuRPCURL, m.Spec.Spoke.Currency, deps.KeyProvider,
+			filepath.Join(deps.ContractsOutDir, "FiatCentralBankMoney.sol", "FiatCentralBankMoney.json"),
+			deps.Timeouts.OnboardRegistry),
+		newDeployHTLCStep(dataDir, besuRPCURL, deps.KeyProvider,
+			filepath.Join(deps.ContractsOutDir, "HashTimeLockedContract.sol", "HashTimeLockedContract.json"),
+			deps.Timeouts.OnboardRegistry),
 		newRegisterRelayStep(spokeID, dataDir, deps.BesuRPCURL, deps.RelayRegistrar, deps.Timeouts.RelayRegistration),
 	}
+
+	// Local operator key wires the backend Besu-signing path (HTLC/fCeBM). Empty
+	// off local — leaves the path disabled, matching prior behaviour.
+	operatorKeyHex := resolveOperatorKeyHex(deps.KeyProvider)
 
 	// CB operational stack (feature 034 US1): dedicated infra + Keycloak + backend.
 	// Template/context paths are derived from the Scenario A root (ContractsOutDir
@@ -187,7 +199,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 	stackInt := deps.Timeouts.PaladinHealthCheckInterval
 
 	steps = append(steps,
-		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, dataDir),
+		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex),
 		newStartInfraStep(StepStartCBInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
 			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
@@ -204,7 +216,10 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			ComposePath: filepath.Join(templatesDir, "entity-backend", "backend-compose.yaml"),
 			BankCode:    entity,
 			PaladinURL:  hostInternalURL(deps.PaladinCBURL), PaladinIdentity: paladinIdentity(cbNodeName(spokeID)),
-			APIPort: ports.APIGateway, AuthPort: ports.AuthGRPC, CompliancePort: ports.ComplianceGRPC, PaymentPort: ports.PaymentGRPC,
+			// Un-gate the payment-orchestrator Besu path (HTLC/fCeBM) in local, where an
+			// operator key is available; the backend reaches Besu via host.docker.internal.
+			PaymentOrchBesuRPCURL: besuPathURL(operatorKeyHex, deps.BesuRPCURL),
+			APIPort:               ports.APIGateway, AuthPort: ports.AuthGRPC, CompliancePort: ports.ComplianceGRPC, PaymentPort: ports.PaymentGRPC,
 			HealthTimeout: stackTO, HealthInterval: stackInt,
 		}),
 		newStartFrontendStackStep(StepStartCBFrontend, frontendStackParams{
@@ -217,10 +232,10 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 				{Service: "supervisor", Port: ports.FrontendSupervisor},
 				{Service: "noc", Port: ports.FrontendNOC},
 			},
-			APIURL:        frontendAPIURL(ports.APIGateway),
-			APIBase:       frontendAPIBase(ports.APIGateway),
-			PortalOwner:   entity + "-operator", FiatSymbol: m.Spec.Spoke.Currency, Institution: entity,
-			KeycloakURL:   frontendAPIBase(ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "cbweb3-noc",
+			APIURL:      frontendAPIURL(ports.APIGateway),
+			APIBase:     frontendAPIBase(ports.APIGateway),
+			PortalOwner: entity + "-operator", FiatSymbol: m.Spec.Spoke.Currency, Institution: entity,
+			KeycloakURL: frontendAPIBase(ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "cbweb3-noc",
 			// Per-entity image tag: VITE_* are baked at build time, so a shared tag
 			// would let one entity's bundle (with its api-gateway URL) be reused by
 			// another, sending the browser to the wrong gateway and failing CORS.
@@ -252,6 +267,17 @@ func cbCORSOrigins(p EntityPorts) string {
 // can reach a host-published port (Paladin/Cacti run as separate compose stacks).
 func hostInternalURL(url string) string {
 	return strings.Replace(url, "localhost", "host.docker.internal", 1)
+}
+
+// besuPathURL returns the container-reachable Besu RPC URL to enable the backend's
+// Besu-signing path (HTLC/fCeBM), or "" when no operator key is available (prod),
+// which keeps the path disabled. Gating on operatorKeyHex ensures BESU_RPC_URL is
+// never set without the operator key the backend requires alongside it.
+func besuPathURL(operatorKeyHex, besuRPCURL string) string {
+	if operatorKeyHex == "" {
+		return ""
+	}
+	return hostInternalURL(besuRPCURL)
 }
 
 // ErrBundleNotFound is returned by RunJoin when the join bundle is nil.
@@ -424,13 +450,22 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	stackTO := deps.Timeouts.WaitSync
 	stackInt := deps.Timeouts.WaitSyncInterval
 
+	// Local operator key wires the bank backend Besu-signing path (HTLC/fCeBM). Empty
+	// off local — leaves the path disabled, matching prior behaviour.
+	operatorKeyHex := resolveOperatorKeyHex(deps.KeyProvider)
+
 	steps = append(steps,
 		newRenderBankEnvStep(bankEnvParams{
 			SpokeID: spokeID, BankCode: bank, Currency: b.Spec.Currency,
-			BesuRPCPort: deps.BesuRPCPort, BesuRPCURL: deps.BesuRPCURL, DataDir: dataDir,
+			BesuRPCPort: deps.BesuRPCPort, ChainID: b.Spec.ChainID, BesuRPCURL: deps.BesuRPCURL, DataDir: dataDir,
 			CentralBankAPIURL:          ep.cbAPIBaseForBank,
 			ZetoTokenAddress:           b.Spec.Contracts.ZetoTokenAddress,
 			ParticipantRegistryAddress: b.Spec.Contracts.ParticipantRegistryAddress,
+			// fCeBM + HTLC come from the bundle (deployed at found); operator key
+			// (local) enables the bank's Besu-signing path for fiat-balance.
+			FiatTokenAddress: b.Spec.Contracts.FiatTokenAddress,
+			HTLCAddress:      b.Spec.Contracts.HTLCAddress,
+			BesuOperatorKey:  operatorKeyHex,
 		}),
 		newStartInfraStep(StepStartBankInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
@@ -451,7 +486,10 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			ComposePath: filepath.Join(templatesDir, "entity-backend", "backend-compose.yaml"),
 			BankCode:    bank,
 			PaladinURL:  hostInternalURL(bankPaladinURL(deps.BesuRPCPort)), PaladinIdentity: paladinIdentity(bankNodeName(spokeID, bank)),
-			APIPort: ports.APIGateway, AuthPort: ports.AuthGRPC, CompliancePort: ports.ComplianceGRPC, PaymentPort: ports.PaymentGRPC,
+			// Un-gate the bank payment-orchestrator Besu path (HTLC/fCeBM) in local; it
+			// reaches its OWN Besu node (on the spoke chain) via host.docker.internal.
+			PaymentOrchBesuRPCURL: besuPathURL(operatorKeyHex, deps.BesuRPCURL),
+			APIPort:               ports.APIGateway, AuthPort: ports.AuthGRPC, CompliancePort: ports.ComplianceGRPC, PaymentPort: ports.PaymentGRPC,
 			HealthTimeout: stackTO, HealthInterval: stackInt,
 		}),
 		newStartFrontendStackStep(StepStartBankFrontend, frontendStackParams{

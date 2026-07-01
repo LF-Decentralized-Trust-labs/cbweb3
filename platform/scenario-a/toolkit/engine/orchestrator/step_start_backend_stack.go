@@ -30,56 +30,62 @@ type startBackendStackStep struct {
 	paladinIdentity string
 	cactiURL        string
 	imageTag        string
-	apiPort         int
-	authPort        int
-	compliancePort  int
-	paymentPort     int
-	healthTimeout   time.Duration
-	healthInterval  time.Duration
+	// paymentOrchBesuRPCURL, when non-empty, un-gates the payment-orchestrator's
+	// Besu-signing path (HTLC/fCeBM) by setting PAYMENT_ORCH_BESU_RPC_URL for the
+	// compose. Empty leaves the path off (the template defaults BESU_RPC_URL empty).
+	paymentOrchBesuRPCURL string
+	apiPort               int
+	authPort              int
+	compliancePort        int
+	paymentPort           int
+	healthTimeout         time.Duration
+	healthInterval        time.Duration
 }
 
 func newStartBackendStackStep(name string, p backendStackParams) Step {
 	return &startBackendStackStep{
-		name:            name,
-		entityPrefix:    p.EntityPrefix,
-		netName:         p.NetName,
-		backendContext:  p.BackendContext,
-		pkiDir:          p.PKIDir,
-		envFile:         p.EnvFile,
-		composePath:     p.ComposePath,
-		bankCode:        p.BankCode,
-		paladinURL:      p.PaladinURL,
-		paladinIdentity: p.PaladinIdentity,
-		cactiURL:        p.CactiURL,
-		imageTag:        p.ImageTag,
-		apiPort:         p.APIPort,
-		authPort:        p.AuthPort,
-		compliancePort:  p.CompliancePort,
-		paymentPort:     p.PaymentPort,
-		healthTimeout:   p.HealthTimeout,
-		healthInterval:  p.HealthInterval,
+		name:                  name,
+		entityPrefix:          p.EntityPrefix,
+		netName:               p.NetName,
+		backendContext:        p.BackendContext,
+		pkiDir:                p.PKIDir,
+		envFile:               p.EnvFile,
+		composePath:           p.ComposePath,
+		bankCode:              p.BankCode,
+		paladinURL:            p.PaladinURL,
+		paladinIdentity:       p.PaladinIdentity,
+		cactiURL:              p.CactiURL,
+		imageTag:              p.ImageTag,
+		paymentOrchBesuRPCURL: p.PaymentOrchBesuRPCURL,
+		apiPort:               p.APIPort,
+		authPort:              p.AuthPort,
+		compliancePort:        p.CompliancePort,
+		paymentPort:           p.PaymentPort,
+		healthTimeout:         p.HealthTimeout,
+		healthInterval:        p.HealthInterval,
 	}
 }
 
 // backendStackParams groups the (many) inputs to keep the constructor readable.
 type backendStackParams struct {
-	EntityPrefix    string
-	NetName         string
-	BackendContext  string
-	PKIDir          string
-	EnvFile         string
-	ComposePath     string
-	BankCode        string
-	PaladinURL      string
-	PaladinIdentity string
-	CactiURL        string
-	ImageTag        string
-	APIPort         int
-	AuthPort        int
-	CompliancePort  int
-	PaymentPort     int
-	HealthTimeout   time.Duration
-	HealthInterval  time.Duration
+	EntityPrefix          string
+	NetName               string
+	BackendContext        string
+	PKIDir                string
+	EnvFile               string
+	ComposePath           string
+	BankCode              string
+	PaladinURL            string
+	PaladinIdentity       string
+	CactiURL              string
+	ImageTag              string
+	PaymentOrchBesuRPCURL string
+	APIPort               int
+	AuthPort              int
+	CompliancePort        int
+	PaymentPort           int
+	HealthTimeout         time.Duration
+	HealthInterval        time.Duration
 }
 
 func (s *startBackendStackStep) Name() string { return s.name }
@@ -155,6 +161,12 @@ func (s *startBackendStackStep) composeEnv() []string {
 	// Mount the entity's own PKI dir (its CA from gen-tls) over the repo default.
 	if s.pkiDir != "" {
 		env = append(env, "ENTITY_PKI_DIR="+s.pkiDir)
+	}
+	// Un-gate the payment-orchestrator Besu path only when a signing URL is set
+	// (local). The compose defaults BESU_RPC_URL empty via ${PAYMENT_ORCH_BESU_RPC_URL-},
+	// so leaving this unset preserves the disabled-by-default behaviour.
+	if s.paymentOrchBesuRPCURL != "" {
+		env = append(env, "PAYMENT_ORCH_BESU_RPC_URL="+s.paymentOrchBesuRPCURL)
 	}
 	return env
 }
