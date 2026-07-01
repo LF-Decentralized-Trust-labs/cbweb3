@@ -128,7 +128,12 @@ export function loadSpokesConfig(log: Pick<Console, "warn">): SpokeConfig[] {
     return buildLegacyShim(log);
   }
 
-  throw new Error(
-    "Fatal: relay requires either CACTI_SPOKES_CONFIG or SPOKE_A_BESU_RPC + SPOKE_B_BESU_RPC",
+  // No static config: the relay is driven purely by the dynamic spoke registry
+  // (POST /api/v1/spokes). This is the normal path — founding central banks register their
+  // spokes at deploy time and watchers are reconciled from the persisted registry on startup.
+  log.warn(
+    "[relay] no static spoke config (CACTI_SPOKES_CONFIG / SPOKE_A_*+SPOKE_B_*) — " +
+      "watchers will be driven entirely by the dynamic /api/v1/spokes registry",
   );
+  return [];
 }

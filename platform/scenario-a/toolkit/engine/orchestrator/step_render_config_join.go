@@ -61,6 +61,9 @@ func (s *renderConfigJoinStep) Run(_ context.Context) error {
 		RegistryContractAddress: s.registryAddress,
 		ZetoFactoryAddress:      s.zetoFactoryAddr,
 		PenteFactoryAddress:     s.penteFactoryAddr,
+		// Unique per-bank base-ledger submitter key so co-located banks on the spoke's Besu do
+		// not collide on nonce (which wedges Pente deploys). See fundedOperatorKey.
+		FundedOperatorKey: fundedOperatorKey(s.spokeID, s.bankID),
 	}
 	outDir := filepath.Join(s.dataDir, "paladin", s.bankID)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {

@@ -81,6 +81,11 @@ services:
       BESU_RPC_URL: ${PAYMENT_ORCH_BESU_RPC_URL-}
     ports:
       - "${PAYMENT_PORT:?PAYMENT_PORT is required}:9094"
+    # Mount the entity PKI dir (same as api-gateway/compliance): the payment-orchestrator
+    # reads FX_CONTEXTS_FILE (default /workspace/backend/config/pki/fx-contexts.json) from here
+    # to resolve the bilateral Pente group/contract at propose time (feature 035 A6).
+    volumes:
+      - ${ENTITY_PKI_DIR:-${BACKEND_CONTEXT}/config/pki}:/workspace/backend/config/pki
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

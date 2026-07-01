@@ -125,6 +125,12 @@ func (s *renderBankEnvStep) Run(_ context.Context) error {
 		// Commercial bank: points at the central bank's api-gateway for onboarding/proxy.
 		CentralBankAPIURL: s.centralBankAPIURL,
 
+		// On-chain FXAgreement (Pente): the bank proposes into the CB↔bank group via its
+		// own Paladin. The in-group FXAgreement address is resolved at runtime (deploy-fxa
+		// runs after the backend starts), so it is left empty here.
+		PenteEnabled: true,
+		PenteBaseURL: hostInternalURL(bankPaladinURL(s.besuRPCPort)),
+
 		RelaySecret: "cbweb3-relay-shared-secret",
 		CORSOrigins: fmt.Sprintf("http://localhost:%d,http://localhost:%d", ports.FrontendPrimary, ports.FrontendSecondary),
 	}

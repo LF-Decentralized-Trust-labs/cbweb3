@@ -219,7 +219,11 @@ func waitPenteGroupReady(ctx context.Context, paladinURL, groupID string, timeou
 // pollPenteTxReceipt polls ptx_getTransactionFull until the receipt is available,
 // returning the deployed contract address (empty if none).
 func pollPenteTxReceipt(ctx context.Context, paladinURL, txID string) (string, error) {
-	for i := 0; i < 60; i++ {
+	// Poll until the receipt appears or ctx expires. The wait is bounded by the caller's step
+	// timeout (VoteQBFT, 5m) rather than a fixed iteration cap: a large contract (FXAgreement,
+	// IR-compiled) can take well over a minute to confirm in a Pente group on a busy second
+	// spoke, and a hard 60s cap produced a false "receipt timeout" that wedged deploy-fxa.
+	for {
 		var res struct {
 			Receipt *penteTxReceipt `json:"receipt"`
 		}
@@ -235,11 +239,10 @@ func pollPenteTxReceipt(ctx context.Context, paladinURL, txID string) (string, e
 		}
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return "", fmt.Errorf("transaction %s receipt wait: %w", txID, ctx.Err())
 		case <-time.After(1 * time.Second):
 		}
 	}
-	return "", fmt.Errorf("transaction %s receipt timeout", txID)
 }
 
 // fxaArtifact is the subset of the FXAgreement Foundry artifact we need.
@@ -250,22 +253,30 @@ type fxaArtifact struct {
 	} `json:"bytecode"`
 }
 
-// deployFXAInPente deploys FXAgreement inside the privacy group via
-// pgroup_sendTransaction (from = the calling node's identity), passing the
-// participant-registry address to the constructor, and returns its address.
-func deployFXAInPente(ctx context.Context, paladinURL, groupID, from, artifactPath, identityRegistryAddr string) (string, error) {
+// Participant roles in IdentityRegistryLibrary.ParticipantRole (enum order).
+const (
+	roleCentralBank    = 3 // CENTRAL_BANK — canGovern (proposeOnBehalf/settle)
+	roleCommercialBank = 4 // COMMERCIAL_BANK — canTransact (propose/accept)
+)
+
+// zeroBytes32 is the ABI zero value for a bytes32 (e.g. an unset zkPointer).
+const zeroBytes32 = "0x0000000000000000000000000000000000000000000000000000000000000000"
+
+// deployContractInPente deploys a Foundry-compiled contract inside the privacy group via
+// pgroup_sendTransaction (from = the deployer's node identity), passing ctorInput to the
+// constructor, and returns the deployed in-group address.
+func deployContractInPente(ctx context.Context, paladinURL, groupID, from, artifactPath string, ctorInput map[string]interface{}) (string, error) {
 	raw, err := os.ReadFile(artifactPath)
 	if err != nil {
-		return "", fmt.Errorf("read FXAgreement artifact %s: %w", artifactPath, err)
+		return "", fmt.Errorf("read artifact %s: %w", artifactPath, err)
 	}
 	var art fxaArtifact
 	if err := json.Unmarshal(raw, &art); err != nil {
-		return "", fmt.Errorf("parse FXAgreement artifact: %w", err)
+		return "", fmt.Errorf("parse artifact %s: %w", artifactPath, err)
 	}
 	if art.Bytecode.Object == "" {
-		return "", fmt.Errorf("FXAgreement bytecode is empty (run contracts.build)")
+		return "", fmt.Errorf("bytecode is empty for %s (run contracts.build)", artifactPath)
 	}
-	// Find the constructor ABI entry.
 	var constructorABI json.RawMessage
 	for _, e := range art.ABI {
 		var probe struct {
@@ -277,9 +288,8 @@ func deployFXAInPente(ctx context.Context, paladinURL, groupID, from, artifactPa
 		}
 	}
 	if constructorABI == nil {
-		return "", fmt.Errorf("no constructor in FXAgreement ABI")
+		return "", fmt.Errorf("no constructor in artifact %s", artifactPath)
 	}
-
 	tx := map[string]interface{}{
 		"domain":   penteDomain,
 		"group":    groupID,
@@ -287,7 +297,7 @@ func deployFXAInPente(ctx context.Context, paladinURL, groupID, from, artifactPa
 		"to":       nil,
 		"bytecode": art.Bytecode.Object,
 		"function": constructorABI,
-		"input":    map[string]interface{}{"_identityRegistry": identityRegistryAddr},
+		"input":    ctorInput,
 	}
 	var txID string
 	rpcErr, err := penteRPCCall(ctx, paladinURL, "pgroup_sendTransaction", []interface{}{tx}, &txID)
@@ -295,11 +305,163 @@ func deployFXAInPente(ctx context.Context, paladinURL, groupID, from, artifactPa
 		return "", err
 	}
 	if rpcErr != nil {
-		return "", fmt.Errorf("pgroup_sendTransaction: %s", rpcErr.Message)
+		return "", fmt.Errorf("pgroup_sendTransaction (deploy): %s", rpcErr.Message)
 	}
-	addr, err := pollPenteTxReceipt(ctx, paladinURL, txID)
+	// Confirm the tx succeeded (base receipt), then read the deployed contract address from the
+	// DOMAIN receipt — Pente private deploys do NOT expose contractAddress in the base receipt.
+	if _, err := pollPenteTxReceipt(ctx, paladinURL, txID); err != nil {
+		return "", err
+	}
+	return penteDeployedAddress(ctx, paladinURL, txID)
+}
+
+// penteDeployedAddress returns the in-group address of a contract deployed via
+// pgroup_sendTransaction, read from the Pente domain receipt (ptx_getDomainReceipt). The base
+// tx receipt does not carry contractAddress for private deploys, so this is polled until the
+// domain receipt populates.
+func penteDeployedAddress(ctx context.Context, paladinURL, txID string) (string, error) {
+	// Poll the domain receipt until the deployed address appears or ctx expires (bounded by the
+	// caller's step timeout, not a fixed iteration cap — see pollPenteTxReceipt).
+	for {
+		var res struct {
+			Receipt struct {
+				ContractAddress string `json:"contractAddress"`
+			} `json:"receipt"`
+		}
+		rpcErr, err := penteRPCCall(ctx, paladinURL, "ptx_getDomainReceipt", []interface{}{penteDomain, txID}, &res)
+		if err != nil {
+			return "", err
+		}
+		if rpcErr == nil && res.Receipt.ContractAddress != "" {
+			return res.Receipt.ContractAddress, nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("pente deploy %s: domain receipt wait: %w", txID, ctx.Err())
+		case <-time.After(1 * time.Second):
+		}
+	}
+}
+
+// deployFXAInPente deploys FXAgreement inside the privacy group, wiring its constructor to the
+// in-group IdentityRegistry address (which MUST have code in the group's private EVM — see
+// setupBilateralFXAContext; a base-ledger address reverts canTransact with empty 0x).
+func deployFXAInPente(ctx context.Context, paladinURL, groupID, from, artifactPath, identityRegistryAddr string) (string, error) {
+	return deployContractInPente(ctx, paladinURL, groupID, from, artifactPath,
+		map[string]interface{}{"_identityRegistry": identityRegistryAddr})
+}
+
+// resolveAddress resolves a Paladin identity to its eth address within reach of paladinURL.
+func resolveAddress(ctx context.Context, paladinURL, identity string) (string, error) {
+	var addr string
+	rpcErr, err := penteRPCCall(ctx, paladinURL, "ptx_resolveVerifier",
+		[]interface{}{identity, "ecdsa:secp256k1", "eth_address"}, &addr)
 	if err != nil {
 		return "", err
 	}
+	if rpcErr != nil {
+		return "", fmt.Errorf("ptx_resolveVerifier %s: %s", identity, rpcErr.Message)
+	}
+	if addr == "" {
+		return "", fmt.Errorf("ptx_resolveVerifier %s: empty address", identity)
+	}
 	return addr, nil
+}
+
+// registerParticipantInPente calls IdentityRegistry.registerParticipant inside the group,
+// marking account Verified with the given role. `from` MUST hold GOVERNANCE_ROLE (the registry
+// admin / deployer).
+func registerParticipantInPente(ctx context.Context, paladinURL, groupID, from, registryAddr, account, name string, role int) error {
+	fn := map[string]interface{}{
+		"type": "function", "name": "registerParticipant",
+		"inputs": []map[string]interface{}{
+			{"name": "account", "type": "address"},
+			{"name": "name", "type": "string"},
+			{"name": "role", "type": "uint8"},
+			{"name": "zkPointer", "type": "bytes32"},
+		},
+	}
+	tx := map[string]interface{}{
+		"domain":   penteDomain,
+		"group":    groupID,
+		"from":     from,
+		"to":       registryAddr,
+		"function": fn,
+		"input": map[string]interface{}{
+			"account": account, "name": name,
+			"role": fmt.Sprintf("%d", role), "zkPointer": zeroBytes32,
+		},
+	}
+	var txID string
+	rpcErr, err := penteRPCCall(ctx, paladinURL, "pgroup_sendTransaction", []interface{}{tx}, &txID)
+	if err != nil {
+		return err
+	}
+	if rpcErr != nil {
+		return fmt.Errorf("registerParticipant %s: %s", account, rpcErr.Message)
+	}
+	if _, err := pollPenteTxReceipt(ctx, paladinURL, txID); err != nil {
+		return fmt.Errorf("registerParticipant %s receipt: %w", account, err)
+	}
+	return nil
+}
+
+// penteMember is a party to a bilateral FX context: its Paladin identity, legal name, and role.
+type penteMember struct {
+	Identity string
+	Name     string
+	Role     int
+}
+
+// setupBilateralFXAContext deploys a self-contained on-chain FX context inside an existing
+// Pente group: (1) an IdentityRegistry with `deployer` as admin/governance, (2) each member
+// registered Verified with its role, (3) FXAgreement wired to that in-group registry. Returns
+// the registry and FXAgreement in-group addresses. This is what makes on-chain propose/accept/
+// settle actually succeed (the registry must live inside the group — see PLAN.md Phase 1a).
+func setupBilateralFXAContext(ctx context.Context, paladinURL, groupID, deployer, idRegistryArtifact, fxaArtifact string, members []penteMember) (registryAddr, fxaAddr string, err error) {
+	adminAddr, err := resolveAddress(ctx, paladinURL, deployer)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve deployer %s: %w", deployer, err)
+	}
+	registryAddr, err = deployContractInPente(ctx, paladinURL, groupID, deployer, idRegistryArtifact,
+		map[string]interface{}{"admin": adminAddr})
+	if err != nil {
+		return "", "", fmt.Errorf("deploy in-group IdentityRegistry: %w", err)
+	}
+	// Resolve members to in-group addresses and dedupe: in local, entities share the dev
+	// operator key, so multiple members can resolve to the SAME address. Registering it twice
+	// (CENTRAL_BANK then COMMERCIAL_BANK) would leave it COMMERCIAL_BANK → canGovern() false.
+	// Prefer the governing role on collision (CENTRAL_BANK also satisfies canTransact).
+	type memberReg struct {
+		name string
+		role int
+	}
+	byAddr := map[string]*memberReg{}
+	var order []string
+	for _, m := range members {
+		addr, err := resolveAddress(ctx, paladinURL, m.Identity)
+		if err != nil {
+			return "", "", fmt.Errorf("resolve member %s: %w", m.Identity, err)
+		}
+		if existing, ok := byAddr[addr]; ok {
+			if m.Role == roleCentralBank {
+				existing.role = roleCentralBank
+				existing.name = m.Name
+			}
+			continue
+		}
+		byAddr[addr] = &memberReg{name: m.Name, role: m.Role}
+		order = append(order, addr)
+	}
+	for _, addr := range order {
+		r := byAddr[addr]
+		if err := registerParticipantInPente(ctx, paladinURL, groupID, deployer, registryAddr, addr, r.name, r.role); err != nil {
+			return "", "", err
+		}
+	}
+	fxaAddr, err = deployFXAInPente(ctx, paladinURL, groupID, deployer, fxaArtifact, registryAddr)
+	if err != nil {
+		return "", "", fmt.Errorf("deploy FXAgreement: %w", err)
+	}
+	return registryAddr, fxaAddr, nil
 }

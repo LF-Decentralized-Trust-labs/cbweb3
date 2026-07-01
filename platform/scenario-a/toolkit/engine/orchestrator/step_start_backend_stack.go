@@ -114,7 +114,10 @@ func (s *startBackendStackStep) Run(ctx context.Context) error {
 
 	// Unique compose project per entity (shared template would otherwise reconcile
 	// and remove another entity's containers — see step_start_infra.go).
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.entityPrefix+"-backend", "-f", s.composePath, "up", "-d")
+	// --build forces the backend images to be rebuilt from current source: without it,
+	// `up -d` reuses a stale image tag from a prior deploy and silently ships old binaries
+	// (this bit the payment-orchestrator when its on-chain FX code changed).
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.entityPrefix+"-backend", "-f", s.composePath, "up", "-d", "--build")
 	cmd.Env = s.composeEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compose up backend: %w\noutput:\n%s", err, out)

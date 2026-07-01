@@ -92,6 +92,11 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		// KeyProvider. Left blank for the local backend bootstrap.
 		CBPrivateKey: "",
 
+		// On-chain FXAgreement (Pente): the CB executes proposeOnBehalf/accept/settle
+		// (canGovern). PENTE_BASE_URL is left empty and defaults to PALADIN_URL (set on the
+		// CB backend). The per-group FXAgreement address is resolved at runtime (A6 / indexer).
+		PenteEnabled: true,
+
 		RelaySecret: "cbweb3-relay-shared-secret",
 		// api-gateway sets AllowCredentials=true, which Fiber forbids with a wildcard
 		// origin. Whitelist all four CB portal origins (governance, treasury,

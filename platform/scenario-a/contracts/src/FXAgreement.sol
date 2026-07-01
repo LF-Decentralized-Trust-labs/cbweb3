@@ -18,6 +18,10 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
     /// @dev Stores FX agreements indexed by `tradeId`.
     mapping(bytes32 => FXAgreementLibrary.FxAgreement) private _agreements;
 
+    /// @dev Stores cross-spoke routing metadata (spoke IDs + Paladin identities) indexed by `tradeId`.
+    ///      Kept alongside the financial record so the group's central bank reads the full deal.
+    mapping(bytes32 => FXAgreementLibrary.Routing) private _routing;
+
     /// @notice Initializes the FXAgreement registry with the IdentityRegistry for clearance gates.
     /// @param _identityRegistry Address of the IdentityRegistry contract.
     constructor(address _identityRegistry) {
@@ -51,7 +55,8 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
         bytes32 originCurrency,
         bytes32 counterCurrency,
         uint256 rate,
-        uint256 expiryDate
+        uint256 expiryDate,
+        FXAgreementLibrary.Routing calldata routing
     ) external onlyVerified(msg.sender) {
         if (_agreements[tradeId].state != FXAgreementLibrary.AgreementState.INVALID) {
             revert FXA__TradeAlreadyExists();
@@ -87,6 +92,7 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
             expiryDate: expiryDate,
             state: FXAgreementLibrary.AgreementState.PROPOSED
         });
+        _routing[tradeId] = routing;
 
         emit AgreementProposed(
             tradeId,
@@ -118,7 +124,8 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
         bytes32 originCurrency,
         bytes32 counterCurrency,
         uint256 rate,
-        uint256 expiryDate
+        uint256 expiryDate,
+        FXAgreementLibrary.Routing calldata routing
     ) external {
         if (!IDENTITY_REGISTRY.canGovern(msg.sender)) {
             revert FXA__Unauthorized();
@@ -157,6 +164,7 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
             expiryDate: expiryDate,
             state: FXAgreementLibrary.AgreementState.PROPOSED
         });
+        _routing[tradeId] = routing;
 
         emit AgreementProposed(
             tradeId,
@@ -287,5 +295,14 @@ contract FXAgreement is IFXAgreement, ReentrancyGuard {
             revert FXA__TradeNotFound();
         }
         return agreement;
+    }
+
+    /// @inheritdoc IFXAgreement
+    /// @dev Reverts with FXA__TradeNotFound when the trade does not exist.
+    function getRouting(bytes32 tradeId) external view returns (FXAgreementLibrary.Routing memory) {
+        if (_agreements[tradeId].state == FXAgreementLibrary.AgreementState.INVALID) {
+            revert FXA__TradeNotFound();
+        }
+        return _routing[tradeId];
     }
 }

@@ -177,7 +177,6 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 		newDeployHTLCStep(dataDir, besuRPCURL, deps.KeyProvider,
 			filepath.Join(deps.ContractsOutDir, "HashTimeLockedContract.sol", "HashTimeLockedContract.json"),
 			deps.Timeouts.OnboardRegistry),
-		newRegisterRelayStep(spokeID, dataDir, deps.BesuRPCURL, deps.RelayRegistrar, deps.Timeouts.RelayRegistration),
 	}
 
 	// Local operator key wires the backend Besu-signing path (HTLC/fCeBM). Empty
@@ -242,6 +241,18 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			ImageTag:      entity,
 			HealthTimeout: stackTO, HealthInterval: stackInt,
 		}),
+	)
+
+	// Register the spoke with the relay LAST, once the CB coordinator endpoints exist. The relay
+	// reaches all of these via host.docker.internal on the host-published ports. It polls
+	// InternalApiURL for the CB's FX-agreement aggregate and drives the dest leg via GRPCEndpoint.
+	steps = append(steps,
+		newRegisterRelayStep(spokeID, dataDir,
+			hostInternalURL(deps.BesuRPCURL),
+			fmt.Sprintf("ws://host.docker.internal:%d", besuWSPort),
+			fmt.Sprintf("host.docker.internal:%d", ports.PaymentGRPC),
+			fmt.Sprintf("http://host.docker.internal:%d", ports.APIGateway),
+			deps.RelayRegistrar, deps.Timeouts.RelayRegistration),
 	)
 	return steps
 }
@@ -525,10 +536,14 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	// would create a second participant record keyed on the toolkit keyProvider wallet
 	// instead of the bank's runtime KMS wallet, colliding with the portal's record.
 	steps = append(steps,
-		newCreatePenteJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort), deps.Timeouts.VoteQBFT, deps.Timeouts.VoteQBFTInterval, w),
+		// Pente FX-context steps use PenteFXSetup (20m), not VoteQBFT (5m): they run several
+		// sequential cross-node-endorsed private txs, and one peer-transport reconnect during the
+		// node's initial mesh can stall an endorsement for minutes (observed: a registerParticipant
+		// that confirmed 7s after a 5m deadline). See JoinTimeouts.PenteFXSetup.
+		newCreatePenteJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort), deps.Timeouts.PenteFXSetup, deps.Timeouts.VoteQBFTInterval, w),
 		newDeployFXAJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort),
 			filepath.Join(deps.ContractsOutDir, "FXAgreement.sol", "FXAgreement.json"),
-			b.Spec.Contracts.ParticipantRegistryAddress, deps.Timeouts.VoteQBFT),
+			b.Spec.Contracts.ParticipantRegistryAddress, deps.Timeouts.PenteFXSetup),
 		newGenCSRStep(deps.BankCode, deps.Institution, dataDir),
 	)
 	return steps

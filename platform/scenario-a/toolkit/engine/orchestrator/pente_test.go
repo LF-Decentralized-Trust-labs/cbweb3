@@ -33,6 +33,9 @@ func fakePaladin(t *testing.T) *httptest.Server {
 			io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":"tx-deploy"}`)
 		case "ptx_getTransactionFull":
 			io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"receipt":{"success":true,"contractAddress":"0xFXA"}}}`)
+		case "ptx_getDomainReceipt":
+			// Pente private deploys expose the deployed address in the domain receipt.
+			io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"receipt":{"contractAddress":"0xFXA"}}}`)
 		case "ptx_resolveVerifier":
 			io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":"0xVERIFIER"}`)
 		default:

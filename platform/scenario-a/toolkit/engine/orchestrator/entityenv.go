@@ -74,6 +74,15 @@ type EntityEnvData struct {
 	// receiver a commercial bank targets on redeem. Empty for the CB itself.
 	CBPaladinIdentity string
 
+	// Pente (bilateral private FX — feature 035). PenteEnabled turns on the on-chain
+	// FXAgreement path in the payment-orchestrator; PenteBaseURL is the Paladin JSON-RPC
+	// the Pente client calls. FXAgreementPenteAddress is the in-group FXAgreement address —
+	// empty at render time (deploy-fxa runs in the join soft tail, after the backend starts),
+	// resolved at runtime via the Pente context / A6 registration. See PLAN.md.
+	PenteEnabled            bool
+	PenteBaseURL            string
+	FXAgreementPenteAddress string
+
 	// Central-bank only.
 	CBPrivateKey     string
 	GovernanceUserID string
@@ -144,6 +153,16 @@ CB_PALADIN_IDENTITY={{.CBPaladinIdentity}}
 INTERNAL_RELAY_AUTH_SECRET={{.RelaySecret}}
 FIAT_SYMBOL={{.FiatSymbol}}
 CORS_ALLOW_ORIGINS={{.CORSOrigins}}
+
+# Pente (bilateral private FXAgreement — feature 035)
+PENTE_ENABLED={{.PenteEnabled}}
+PENTE_BASE_URL={{.PenteBaseURL}}
+FX_AGREEMENT_PENTE_CONTRACT_ADDRESS={{.FXAgreementPenteAddress}}
+# FX indexer (feature 035): projects on-chain agreements from every bilateral Pente group this
+# node belongs to into fx_agreements. Enabled for BOTH the central bank (aggregate view) and each
+# commercial bank — a bank must see the destination-leg agreements proposed on_behalf into its
+# CB↔bank group so they surface in its portal for acceptance. Chain-driven; only reads own groups.
+FX_INDEXER_ENABLED=true
 {{if .IsCentralBank}}
 # Central bank only — governance bootstrap
 CB_PRIVATE_KEY={{.CBPrivateKey}}

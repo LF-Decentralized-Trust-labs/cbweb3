@@ -177,6 +177,13 @@ type JoinTimeouts struct {
 	ReceiveCertInterval time.Duration
 	// ProofOfPossession is the timeout for the IdentityRegistry transaction. Default: 2m.
 	ProofOfPossession time.Duration
+	// PenteFXSetup is the budget for the Pente FX-context steps (create-pente-context and
+	// deploy-fxa-pente). These run multiple SEQUENTIAL private transactions that each require
+	// cross-node endorsement (in-group IdentityRegistry deploy, two registerParticipant calls,
+	// FXAgreement deploy); a single Paladin peer-transport reconnect during the new node's initial
+	// mesh can stall one endorsement for minutes, so the whole sequence needs generous headroom.
+	// Default: 20m.
+	PenteFXSetup time.Duration
 }
 
 // DefaultJoinTimeouts returns the default per-step timeout configuration for mode:join.
@@ -190,6 +197,7 @@ func DefaultJoinTimeouts() JoinTimeouts {
 		ReceiveCert:         5 * time.Minute,
 		ReceiveCertInterval: 10 * time.Second,
 		ProofOfPossession:   2 * time.Minute,
+		PenteFXSetup:        20 * time.Minute,
 	}
 }
 
@@ -220,6 +228,9 @@ func (t JoinTimeouts) resolved() JoinTimeouts {
 	if t.ProofOfPossession == 0 {
 		t.ProofOfPossession = d.ProofOfPossession
 	}
+	if t.PenteFXSetup == 0 {
+		t.PenteFXSetup = d.PenteFXSetup
+	}
 	return t
 }
 
@@ -230,6 +241,11 @@ type SpokeInfo struct {
 	BesuWSURL    string `json:"besu_ws_url"`
 	HTLCAddress  string `json:"htlc_address"`
 	GRPCEndpoint string `json:"grpc_endpoint"`
+	// InternalApiURL is the spoke coordinator's (central bank) api-gateway base URL. The relay
+	// polls {InternalApiURL}/internal/v1/payments/fx/agreements for the CB's aggregate of its
+	// banks' on-chain FX agreements. GRPCEndpoint is the CB payment-orchestrator (for the
+	// on_behalf mirror of the destination leg).
+	InternalApiURL string `json:"internal_api_url"`
 }
 
 // RelayRegistrar abstracts spoke registration with the Cacti relay.

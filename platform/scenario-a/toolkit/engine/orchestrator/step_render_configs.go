@@ -4,6 +4,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +29,26 @@ type configTemplateData struct {
 	RegistryContractAddress string
 	ZetoFactoryAddress      string
 	PenteFactoryAddress     string
+	// FundedOperatorKey is the hex (no 0x) secp256k1 private key for this node's
+	// `funded_operator` base-ledger submitter. It MUST be unique per node — see fundedOperatorKey.
+	FundedOperatorKey string
+}
+
+// fundedOperatorKey derives a deterministic, per-node secp256k1 private key (hex, no 0x) for a
+// Paladin node's `funded_operator` base-ledger submitter.
+//
+// Every Paladin node on a spoke shares one Besu chain, so two nodes submitting public transactions
+// from the SAME account collide on nonce ("Nonce too low"), which silently wedges the Pente
+// transaction pipeline (a large deploy such as FXAgreement never receives a receipt and everything
+// queues behind it). Previously all commercial banks used the same hardcoded dev key
+// (0xf17f5215…), which manifested on the second spoke once two banks submitted concurrently.
+//
+// The derived account needs no genesis prefunding: the spoke genesis sets zeroBaseFee, so gas is
+// free. Derivation is deterministic (idempotent across redeploys) and effectively always a valid
+// secp256k1 scalar (a sha256 digest is < the curve order with overwhelming probability).
+func fundedOperatorKey(spokeID, nodeName string) string {
+	h := sha256.Sum256([]byte("cbweb3/funded_operator/" + spokeID + "/" + nodeName))
+	return hex.EncodeToString(h[:])
 }
 
 func newRenderConfigsStep(spokeID, dataDir string, besuRPCPort, besuWSPort int, configTemplateDir string) Step {
