@@ -15,7 +15,6 @@ export type OnboardingRequestStatus =
 
 export type InitiateOnboardingPayload = {
   institution_name: string;
-  bank_code: string;
   country: string;
   role: OnboardingRole;
   email: string;
