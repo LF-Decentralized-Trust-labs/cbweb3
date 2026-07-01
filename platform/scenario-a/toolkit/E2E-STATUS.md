@@ -18,11 +18,14 @@ Both run idempotently (re-running `apply` resumes from the first incomplete step
 
 ### `found` (central bank) — ✅ complete
 `start-besu → deploy-contracts → gen-tls → render-configs → register-nodes →
-start-paladin → create-zeto-token → onboard-registry → register-relay →
-render-cb-env → start-cb-infra → provision-keycloak → start-cb-backend`
+start-paladin → create-zeto-token → onboard-registry → deploy-fiat-token →
+deploy-htlc → register-relay → render-cb-env → start-cb-infra →
+provision-keycloak → start-cb-backend → start-cb-frontend`
 
 - Besu (QBFT) + Paladin up; spoke contracts + IdentityRegistry deployed; relay
   registered; join bundle emitted.
+- Besu-layer settlement contracts deployed and wired (see "Besu-layer settlement
+  path" below): `FiatCentralBankMoney` (fCeBM) + `HashTimeLockedContract` (HTLC).
 - CB operational stack: dedicated Postgres + Redis + Keycloak (central-bank +
   `cbweb3`/NOC realms) + the 4 backend services.
 - **api-gateway `/healthz` → 200.** No private keys in the rendered env
@@ -48,6 +51,37 @@ advertised host) are adapted on the join side:
   (validated: `peers ≥ 1`, sync, QBFT vote).
 - The host-run toolkit reaches the CB JSON-RPC / api-gateway via published host
   ports (`localhost`); the bank backend reaches the CB via `host.docker.internal`.
+
+### Besu-layer settlement path (fCeBM / HTLC) — ✅ deposit + reserve-tokenisation E2E
+
+The reference stack (`make contracts.deploy-all-with-sync` → `DeployCBWeb3Spoke`)
+deploys `FiatCentralBankMoney` (fCeBM) and `HashTimeLockedContract` (HTLC) on the
+spoke's Besu chain; the toolkit historically deployed only the Paladin-layer
+(Zeto/Pente) + IdentityRegistry, leaving the backend's Besu-signing path dormant.
+It is now wired for `environment: local`:
+
+- **`deploy-fiat-token` / `deploy-htlc`** (found) deploy fCeBM + HTLC (signed via the
+  KeyProvider), persist `FIAT_TOKEN_ADDRESS` / `HTLC_ADDRESS` to `.deployed-addrs.env`,
+  and the join bundle carries both to commercial banks.
+- The per-entity backend `.env` renders `BESU_OPERATOR_KEY` (the local public dev
+  operator key, exported only by the local emulator), `BESU_CHAIN_ID` (the real
+  spoke chain id — 0 makes go-ethereum's `NewKeyedTransactorWithChainID` panic),
+  `ENTITY_BESU_ADDRESS` (the escrow proxy's `requester_besu_address`), and
+  `PALADIN_IDENTITY` / `CB_PALADIN_IDENTITY` (the escrow proxy's
+  `requester_paladin_identity` = Zeto mint recipient). `start-cb-backend` /
+  `start-backend` set `PAYMENT_ORCH_BESU_RPC_URL` only when an operator key exists,
+  so the path stays OFF outside local (prod wires signing via KMS — FASE 4).
+- **Validated E2E (local, real Docker):**
+  - Deposit (issuance): bank `POST /payments/deposits` → treasury `approve` +
+    `fiat-exchange` → fCeBM minted to the bank wallet; `/token/fiat-balance` reflects it.
+  - Reserve tokenisation (escrow): bank `POST /payments/escrows` → treasury `approve`
+    → fCeBM burned on Besu + tCeBM minted via Zeto to the bank's Paladin identity
+    (cross-node recipient resolution via `ptx_resolveVerifier` works); `/token/balance`
+    reflects the minted tCeBM.
+
+Prod (staging) wiring of the operator signing key and per-entity funded wallets is
+FASE 4 (not implemented); in local all entities share the public dev operator key,
+so per-entity fiat balances are not independently meaningful.
 
 ## Deferred (soft, non-fatal — logged with an actionable message)
 
@@ -75,6 +109,38 @@ distinguishes transient transport errors (peer still connecting → retry until 
 step timeout) from permanent ones (e.g. a cert node-name mismatch → fail fast).
 Validated on the live two-spoke env: all four banks created their Pente group +
 deployed FXAgreement after the gate reported `Paladin peer … ready`.
+
+## Known issue: `ApproveEscrow` is not atomic — partial settlement on Zeto-mint failure
+
+**Where.** `payment-orchestrator` — `internal/grpc/server/escrow.go`, `ApproveEscrow`
+(reserve tokenisation). NOT a toolkit issue; surfaced while validating the escrow
+flow end-to-end after the Besu-layer wiring above.
+
+**Symptom.** `ApproveEscrow` performs two on-chain actions in sequence with no
+rollback and no idempotency guard:
+1. burn fCeBM from the bank's Besu wallet (`s.fiat.Burn`);
+2. mint tCeBM to the bank's Paladin identity via Zeto (`s.zeto.Mint`).
+
+If step 2 fails after step 1 commits, the fiat is destroyed but no private token is
+minted. Observed live when `requester_paladin_identity` was empty (before the
+`PALADIN_IDENTITY` wiring fix): the Zeto mint returned `PD210025: Parameter 'to' is
+required`, the backend logged `CRITICAL: fCeBM burned but Zeto mint failed — manual
+intervention required`, and 3000 fCeBM was burned with 0 tCeBM minted.
+
+**Aggravating factor — no idempotency guard.** On the mint failure the record is
+left `PENDING` (status is only advanced on full success), so a retried `approve`
+**burns again** (double-burn) rather than resuming after the burn.
+
+**Impact.** Violates the constitution's atomicity rule ("Partial settlement is
+forbidden in production paths; timeout/refund paths must be tested"). Safe to leave
+for local demos, but MUST be fixed before any production path.
+
+**Recommended remediation (not yet done):**
+- Reorder to mint-then-burn, or make the pair atomic/compensating (burn → on
+  mint-failure, re-mint/return the fCeBM), and
+- persist an intermediate `BURNED` state so a retry resumes at the mint instead of
+  re-burning (idempotency), and
+- add a failing test for the burn-ok/mint-fail path before implementing.
 
 ## Resolved: cross-node Paladin transport — cert CN ≠ node name (fixed 2026-06-30)
 
