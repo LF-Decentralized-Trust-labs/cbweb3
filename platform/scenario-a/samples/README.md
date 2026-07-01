@@ -56,12 +56,11 @@ Cada nó Besu precisa de portas de host distintas. Esta é a alocação usada no
 
 - Go 1.26+, Docker + Docker Compose v2, `jq`, `openssl`, `curl`.
 - Imagem `hyperledger/besu:25.8.0` disponível (puxada automaticamente no primeiro `up`).
-- Diretório de dados gravável. Os manifestos usam `/opt/cbweb3/data/<participante>`.
-  Crie-o com permissão para o seu usuário, ou ajuste `spec.node.dataDir` em cada manifesto:
-
-  ```bash
-  sudo mkdir -p /opt/cbweb3/data && sudo chown "$(id -u):$(id -g)" /opt/cbweb3/data
-  ```
+- Diretório de dados gravável. Os manifestos usam um `spec.node.dataDir` **relativo**
+  (`cbweb3-data/<participante>`), que o CLI resolve contra o diretório de trabalho
+  atual (CWD) e cria automaticamente. Rodando `./deploy-all.sh` a partir de `samples/`,
+  os dados e os join bundles ficam em `samples/cbweb3-data/` — sem `sudo` nem caminho
+  privilegiado. Para usar outro local, edite `spec.node.dataDir` (relativo ou absoluto).
 
 ---
 
@@ -95,8 +94,8 @@ CBWEB3="$(pwd)/cbweb3"
 ```
 
 > Sem `CBWEB3_OUTPUT_DIR`, o bundle é gravado no diretório-pai do `dataDir`
-> (`/opt/cbweb3/data/bundles/...`). Nesse caso, ajuste `joinBundleRef` nos
-> manifestos de join para o caminho absoluto correspondente.
+> (com os manifestos de exemplo: `<CWD>/cbweb3-data/bundles/...`). Nesse caso, ajuste
+> `joinBundleRef` nos manifestos de join para o caminho correspondente.
 
 ---
 

@@ -25,8 +25,11 @@ export CBWEB3_HOME="${SCENARIO_DIR}"
 
 BUNDLES_DIR="${SCRIPT_DIR}/bundles"
 # The toolkit emits bundles to <outputDir>/bundles, where outputDir defaults to the
-# parent of the manifest's node.dataDir (i.e. /opt/cbweb3/data for the samples).
-DATA_BUNDLES="${CBWEB3_OUTPUT_DIR:-/opt/cbweb3/data}/bundles"
+# parent of the manifest's node.dataDir. The sample manifests use a relative
+# node.dataDir (cbweb3-data/<entity>), which the CLI resolves against its CWD — so
+# data and bundles land under ${PWD}/cbweb3-data here. Override with CBWEB3_OUTPUT_DIR.
+DATA_ROOT="${CBWEB3_OUTPUT_DIR:-${PWD}/cbweb3-data}"
+DATA_BUNDLES="${DATA_ROOT}/bundles"
 
 log() { printf '\n\033[1;36m[deploy] %s\033[0m\n' "$*"; }
 
@@ -35,7 +38,8 @@ if [[ "${1:-}" == "--clean" ]]; then
   log "cleaning docker (containers + volumes) and data dirs…"
   docker rm -f $(docker ps -aq) 2>/dev/null || true
   docker volume rm $(docker volume ls -q) 2>/dev/null || true
-  docker run --rm -v /opt/cbweb3/data:/d alpine:latest sh -c 'rm -rf /d/* 2>/dev/null' || true
+  # Data lives under the user-owned ${DATA_ROOT} (no privileged /opt path, no sudo).
+  rm -rf "${DATA_ROOT}" 2>/dev/null || true
 fi
 
 # --- CLI binary ---------------------------------------------------------------
@@ -46,12 +50,40 @@ if [[ -z "${BIN}" ]]; then
   ( cd "${SCENARIO_DIR}/toolkit" && go build -o "${BIN}" ./cmd/cbweb3 )
 fi
 
+# field <json-line> <key> — extract a string value from a flat JSON log line.
+field() { printf '%s' "$1" | sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p"; }
+
 apply() { # <label> <manifest>
   log "$1"
-  "${BIN}" apply -f "$2" -o yaml | grep -E '^(spoke|mode|status|bundle|  *- name|  *status):' || true
+  # The engine streams its step lifecycle as structured JSON to stdout in real time
+  # (Go's stdout is unbuffered), then prints the final report at the end. Humanize the
+  # lifecycle events as they arrive so the terminal shows live progress, and pass the
+  # report (and anything unrecognized) through verbatim. Do NOT swallow output here:
+  # a previous version grep-filtered stdout, hiding both progress and errors.
+  local rc
+  set +e
+  "${BIN}" apply -f "$2" -o yaml | while IFS= read -r line; do
+    case "$line" in
+      *'"action":"step_started"'*)   printf '    -> %s\n'      "$(field "$line" step)" ;;
+      *'"action":"step_completed"'*) printf '    [ok]   %s\n'  "$(field "$line" step)" ;;
+      *'"action":"step_skipped"'*)   printf '    [skip] %s\n'  "$(field "$line" step)" ;;
+      *'"action":"step_detail"'*)    printf '       .. %s\n'   "$(field "$line" detail)" ;;
+      *'"action":"step_failed"'*)    printf '    [FAIL] %s: %s\n' "$(field "$line" step)" "$(field "$line" error)" ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done
+  rc=${PIPESTATUS[0]}
+  set -e
+  if [[ "${rc}" -ne 0 ]]; then
+    log "apply failed for $(basename "$2") (exit ${rc}) — see the report above; aborting."
+    exit "${rc}"
+  fi
 }
 
 copy_bundle() { # <spoke-id>
+  # The joining banks reference ../bundles/<spoke>.bundle.yaml (i.e. samples/bundles),
+  # which is gitignored and therefore absent on a clean checkout — create it first.
+  mkdir -p "${BUNDLES_DIR}"
   cp "${DATA_BUNDLES}/$1.bundle.yaml" "${BUNDLES_DIR}/"
   log "bundle $1 → samples/bundles/"
 }

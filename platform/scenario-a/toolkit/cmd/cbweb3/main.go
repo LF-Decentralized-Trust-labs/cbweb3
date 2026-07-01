@@ -80,6 +80,14 @@ func runApply(args []string) int {
 		return 1
 	}
 
+	// Resolve a relative spec.node.dataDir against the current working directory.
+	// Must happen before the profile derives OutputDir from filepath.Dir(dataDir)
+	// and before any step mounts it as SPOKE_DATA_DIR.
+	if err := manifest.ResolveDataDir(m); err != nil {
+		fmt.Fprintf(os.Stderr, "validation error: %v\n", err)
+		return 1
+	}
+
 	// Guard unsupported modes and environments.
 	if m.Spec.Mode != "found" && m.Spec.Mode != "join" {
 		fmt.Fprintf(os.Stderr, "mode: %s not supported (accepted: found, join)\n", m.Spec.Mode)

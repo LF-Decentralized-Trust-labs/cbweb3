@@ -24,7 +24,7 @@ spec:
       port: 8655
     p2p:
       port: 31303
-    dataDir: /opt/cbweb3/data/central-bank-brazil
+    dataDir: cbweb3-data/central-bank-brazil
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed

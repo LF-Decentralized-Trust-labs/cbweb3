@@ -215,9 +215,11 @@ definitions:
         type: string
         minLength: 1
         description: >
-          Absolute host path where the provisioning engine stores all spoke runtime
-          data: genesis files, TLS certs, Paladin configs, provisioning state, and
-          deployed contract addresses. Required for mode:found and mode:join.
+          Host path where the provisioning engine stores all spoke runtime data:
+          genesis files, TLS certs, Paladin configs, provisioning state, and deployed
+          contract addresses. May be absolute, or relative — relative paths are
+          resolved against the current working directory of the cbweb3 process.
+          Required for mode:found and mode:join.
 
   Port:
     type: object

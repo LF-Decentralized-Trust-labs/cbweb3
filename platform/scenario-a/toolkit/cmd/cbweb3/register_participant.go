@@ -72,6 +72,12 @@ func runRegisterParticipant(args []string) int {
 		fmt.Fprintf(os.Stderr, "validation error: %v\n", err)
 		return 1
 	}
+	// Resolve a relative spec.node.dataDir against the current working directory,
+	// matching the apply path so register-participant reads the same .deployed-addrs.env.
+	if err := manifest.ResolveDataDir(m); err != nil {
+		fmt.Fprintf(os.Stderr, "validation error: %v\n", err)
+		return 1
+	}
 	if m.Spec.Mode != "found" {
 		fmt.Fprintf(os.Stderr, "register-participant must run against a central bank (mode: found) manifest, got mode: %s\n", m.Spec.Mode)
 		return 1

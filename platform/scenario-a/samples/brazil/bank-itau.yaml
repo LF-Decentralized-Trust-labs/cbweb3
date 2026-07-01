@@ -27,7 +27,7 @@ spec:
       port: 8656
     p2p:
       port: 31304
-    dataDir: /opt/cbweb3/data/bank-itau
+    dataDir: cbweb3-data/bank-itau
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed

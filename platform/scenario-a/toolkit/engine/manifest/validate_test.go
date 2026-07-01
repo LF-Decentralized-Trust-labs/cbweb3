@@ -464,3 +464,43 @@ func TestValidate_AdminUsers(t *testing.T) {
 		}
 	})
 }
+
+// ── ResolveDataDir: relative node.dataDir is resolved against CWD ──────────────
+
+func TestResolveDataDir_RelativeBecomesAbsolute(t *testing.T) {
+	m := validManifest()
+	m.Spec.Node.DataDir = "cbweb3-data/central-bank-brazil"
+	if err := manifest.ResolveDataDir(m); err != nil {
+		t.Fatalf("ResolveDataDir: %v", err)
+	}
+	if !filepath.IsAbs(m.Spec.Node.DataDir) {
+		t.Errorf("dataDir should be absolute after resolution, got %q", m.Spec.Node.DataDir)
+	}
+	cwd, _ := os.Getwd()
+	want := filepath.Join(cwd, "cbweb3-data", "central-bank-brazil")
+	if m.Spec.Node.DataDir != want {
+		t.Errorf("dataDir = %q, want %q", m.Spec.Node.DataDir, want)
+	}
+}
+
+func TestResolveDataDir_AbsoluteUnchanged(t *testing.T) {
+	m := validManifest()
+	m.Spec.Node.DataDir = "/opt/cbweb3/data/central-bank-brazil"
+	if err := manifest.ResolveDataDir(m); err != nil {
+		t.Fatalf("ResolveDataDir: %v", err)
+	}
+	if m.Spec.Node.DataDir != "/opt/cbweb3/data/central-bank-brazil" {
+		t.Errorf("absolute dataDir must be left unchanged, got %q", m.Spec.Node.DataDir)
+	}
+}
+
+func TestResolveDataDir_EmptyIsNoOp(t *testing.T) {
+	m := validManifest()
+	m.Spec.Node.DataDir = ""
+	if err := manifest.ResolveDataDir(m); err != nil {
+		t.Fatalf("ResolveDataDir: %v", err)
+	}
+	if m.Spec.Node.DataDir != "" {
+		t.Errorf("empty dataDir must stay empty, got %q", m.Spec.Node.DataDir)
+	}
+}

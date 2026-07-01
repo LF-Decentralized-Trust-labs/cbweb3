@@ -25,7 +25,7 @@ spec:
       port: 8657
     p2p:
       port: 31305
-    dataDir: /opt/cbweb3/data/bank-bradesco
+    dataDir: cbweb3-data/bank-bradesco
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed

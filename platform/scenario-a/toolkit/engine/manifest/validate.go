@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -22,6 +23,24 @@ func Load(path string) (*Manifest, error) {
 		return nil, fmt.Errorf("parse manifest %q: %w", path, err)
 	}
 	return &m, nil
+}
+
+// ResolveDataDir rewrites m.Spec.Node.DataDir to an absolute path, resolving a
+// relative value against the current working directory. Callers must invoke this
+// before building engine inputs: spec.node.dataDir is mounted into containers as
+// SPOKE_DATA_DIR (a Docker bind-mount source, which must be absolute or it would
+// resolve against the compose-file directory), and the bundle OutputDir is derived
+// from filepath.Dir(dataDir). A no-op when the path is empty or already absolute.
+func ResolveDataDir(m *Manifest) error {
+	if m == nil || m.Spec.Node.DataDir == "" || filepath.IsAbs(m.Spec.Node.DataDir) {
+		return nil
+	}
+	abs, err := filepath.Abs(m.Spec.Node.DataDir)
+	if err != nil {
+		return fmt.Errorf("spec.node.dataDir: resolve %q to absolute path: %w", m.Spec.Node.DataDir, err)
+	}
+	m.Spec.Node.DataDir = abs
+	return nil
 }
 
 // Validate checks all required fields and enum constraints of m.
@@ -116,7 +135,8 @@ func Validate(m *Manifest) error {
 	if (m.Spec.Mode == "found" || m.Spec.Mode == "join") && m.Spec.Node.DataDir == "" {
 		errs = append(errs, fmt.Errorf(
 			"spec.node.dataDir: required field is missing for mode:%s; "+
-				"set it to the absolute path where the provisioning engine will store spoke runtime data",
+				"set it to the path where the provisioning engine will store spoke runtime data "+
+				"(relative paths are resolved against the current working directory)",
 			m.Spec.Mode,
 		))
 	}
@@ -124,7 +144,7 @@ func Validate(m *Manifest) error {
 	// spec.joinBundleRef — required when mode is "join"; the bundle drives the join flow.
 	if m.Spec.Mode == "join" && m.Spec.JoinBundleRef == "" {
 		errs = append(errs, errors.New(
-			"spec.joinBundleRef: required field is missing for mode:join; " +
+			"spec.joinBundleRef: required field is missing for mode:join; "+
 				"set it to the path of the join bundle emitted by the founding central bank (TK-6)",
 		))
 	}

@@ -24,7 +24,7 @@ spec:
       port: 8755
     p2p:
       port: 31403
-    dataDir: /opt/cbweb3/data/central-bank-colombia
+    dataDir: cbweb3-data/central-bank-colombia
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed

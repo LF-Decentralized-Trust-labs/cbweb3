@@ -24,7 +24,7 @@ spec:
       port: 8757
     p2p:
       port: 31405
-    dataDir: /opt/cbweb3/data/bank-davivienda
+    dataDir: cbweb3-data/bank-davivienda
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed
