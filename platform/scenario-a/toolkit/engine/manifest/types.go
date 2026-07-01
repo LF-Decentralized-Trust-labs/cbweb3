@@ -28,18 +28,34 @@ func (m *Manifest) BankCode() string {
 	return m.Metadata.Name
 }
 
+// DisplayNameOr returns the friendly institution label shown in the portal header:
+// spec.displayName when set, otherwise the provided fallback (the entity name for a
+// central bank, or the resolved bank code for a commercial bank). Cosmetic only —
+// it feeds VITE_INSTITUTION_NAME and nothing else (never the CSR/registry identity).
+func (m *Manifest) DisplayNameOr(fallback string) string {
+	if m.Spec.DisplayName != "" {
+		return m.Spec.DisplayName
+	}
+	return fallback
+}
+
 // Spec is the desired-state specification for the participant.
 // Secrets (private keys, passphrases, credentials) are never expressible here;
 // all key material is referenced via KeyProvider URI only.
 type Spec struct {
-	Scenario      string `yaml:"scenario"`
-	Environment   string `yaml:"environment,omitempty"`
-	Role          string `yaml:"role"`
-	Mode          string `yaml:"mode"`
+	Scenario    string `yaml:"scenario"`
+	Environment string `yaml:"environment,omitempty"`
+	Role        string `yaml:"role"`
+	Mode        string `yaml:"mode"`
 	// BankID identifies a commercial bank within a spoke (mode:join). Optional:
 	// when empty, the bank code is derived from metadata.name. It feeds the CSR
 	// subject CN, the IdentityRegistry name, and the BANK_ID compose variable.
-	BankID        string `yaml:"bankId,omitempty"`
+	BankID string `yaml:"bankId,omitempty"`
+	// DisplayName is the friendly institution label shown in the portal header
+	// (VITE_INSTITUTION_NAME), e.g. "Itaú" instead of the slug "bank-itau".
+	// Optional and purely cosmetic: when empty, the label falls back to the entity
+	// name (central bank) or the resolved bank code (commercial bank).
+	DisplayName   string `yaml:"displayName,omitempty"`
 	Spoke         Spoke  `yaml:"spoke"`
 	Node          Node   `yaml:"node"`
 	Image         string `yaml:"image"`

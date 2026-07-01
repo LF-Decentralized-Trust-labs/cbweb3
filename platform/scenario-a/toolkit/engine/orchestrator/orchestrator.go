@@ -234,7 +234,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			},
 			APIURL:      frontendAPIURL(ports.APIGateway),
 			APIBase:     frontendAPIBase(ports.APIGateway),
-			PortalOwner: entity + "-operator", FiatSymbol: m.Spec.Spoke.Currency, Institution: entity,
+			PortalOwner: entity + "-operator", FiatSymbol: m.Spec.Spoke.Currency, Institution: m.DisplayNameOr(entity),
 			KeycloakURL: frontendAPIBase(ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "cbweb3-noc",
 			// Per-entity image tag: VITE_* are baked at build time, so a shared tag
 			// would let one entity's bundle (with its api-gateway URL) be reused by
@@ -498,7 +498,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			ComposePath: filepath.Join(templatesDir, "entity-frontend", "frontend-compose.yaml"),
 			Services:    []frontendService{{Service: "bank", Port: ports.FrontendPrimary}},
 			APIURL:      frontendAPIURL(ports.APIGateway), APIBase: frontendAPIBase(ports.APIGateway),
-			PortalOwner: bank + "-operator", FiatSymbol: b.Spec.Currency, Institution: bank,
+			PortalOwner: bank + "-operator", FiatSymbol: b.Spec.Currency, Institution: m.DisplayNameOr(bank),
 			// Per-entity image tag: VITE_API_URL is baked at build time, so a shared
 			// tag would let one bank's bundle be reused by another, pointing the
 			// browser at the wrong bank's api-gateway and failing CORS.

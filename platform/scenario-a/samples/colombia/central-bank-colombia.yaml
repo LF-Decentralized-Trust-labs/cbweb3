@@ -12,6 +12,7 @@ spec:
   environment: local
   role: central-bank
   mode: found
+  displayName: Banco de la República
   spoke:
     id: spoke-cop
     chainId: 1338

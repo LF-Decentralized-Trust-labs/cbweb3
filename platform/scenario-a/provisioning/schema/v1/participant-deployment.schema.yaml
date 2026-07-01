@@ -99,6 +99,11 @@ definitions:
         minLength: 1
         description: "Commercial-bank identifier within a spoke (mode:join). Optional — defaults to metadata.name. Feeds the CSR subject CN, the IdentityRegistry name, and the BANK_ID compose variable."
 
+      displayName:
+        type: string
+        minLength: 1
+        description: "Friendly institution label shown in the portal header (VITE_INSTITUTION_NAME), e.g. 'Itaú' instead of the slug 'bank-itau'. Optional and purely cosmetic — when omitted, the label falls back to the entity name (central bank) or the resolved bank code (commercial bank). Does not affect the CSR/IdentityRegistry identity."
+
       cbEndpoint:
         type: string
         minLength: 1

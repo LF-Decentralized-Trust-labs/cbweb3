@@ -12,6 +12,7 @@ spec:
   environment: local
   role: central-bank
   mode: found
+  displayName: Banco Central do Brasil
   spoke:
     id: spoke-brl
     chainId: 1337

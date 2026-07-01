@@ -12,6 +12,7 @@ spec:
   role: commercial-bank
   mode: join
   bankId: bank-bradesco
+  displayName: Bradesco
   spoke:
     id: spoke-brl
     chainId: 1337

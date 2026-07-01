@@ -11,6 +11,7 @@ spec:
   role: commercial-bank
   mode: join
   bankId: bank-bancolombia
+  displayName: Bancolombia
   spoke:
     id: spoke-cop
     chainId: 1338
