@@ -31,7 +31,6 @@ export function Step2InstitutionForm({ loading, error, onSubmit }: Step2Institut
     resolver: zodResolver(institutionSchema),
     defaultValues: {
       institution_name: "",
-      bank_code: "",
       country: "BR",
       role: "ROLE_COMMERCIAL_BANK",
       email: "",
@@ -57,12 +56,6 @@ export function Step2InstitutionForm({ loading, error, onSubmit }: Step2Institut
             {form.formState.errors.institution_name ? (
               <p className="text-xs text-destructive">{form.formState.errors.institution_name.message}</p>
             ) : null}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="bank_code">Bank Code</Label>
-            <Input id="bank_code" {...form.register("bank_code")} />
-            {form.formState.errors.bank_code ? <p className="text-xs text-destructive">{form.formState.errors.bank_code.message}</p> : null}
           </div>
 
           <div className="space-y-2">
