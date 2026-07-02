@@ -1,51 +1,52 @@
-# Samples — Provisionamento de três spokes (Brasil, Colômbia e Argentina)
+# Samples — Provisioning three spokes (Brazil, Colombia and Argentina)
 
-> Para um passo a passo com os comandos `cbweb3` prontos para copiar e colar
-> (o mesmo que o `deploy-all.sh` executa, porém manualmente), veja
+> For a step-by-step walkthrough with copy-paste-ready `cbweb3` commands (the same
+> sequence `deploy-all.sh` runs, but by hand), see
 > [MANUAL-DEPLOYMENT.md](./MANUAL-DEPLOYMENT.md).
 
-Este diretório contém manifestos `ParticipantDeployment` prontos para uso com o
-toolkit `cbweb3`, demonstrando o cenário completo:
+This directory contains ready-to-use `ParticipantDeployment` manifests for the
+`cbweb3` toolkit, demonstrating the complete scenario:
 
-- **Três spokes independentes**, cada um fundado pelo seu próprio banco central:
-  - `spoke-brl` — fundado por `central-bank-brazil` (moeda BRL, chainId 1337)
-  - `spoke-cop` — fundado por `central-bank-colombia` (moeda COP, chainId 1338)
-  - `spoke-ars` — fundado por `central-bank-argentina` (moeda ARS, chainId 1339)
-- **Dois bancos comerciais por spoke**, cada um entrando via join bundle:
-  - Brasil: `bank-itau`, `bank-bradesco` → `spoke-brl`
-  - Colômbia: `bank-bancolombia`, `bank-davivienda` → `spoke-cop`
+- **Three independent spokes**, each founded by its own central bank:
+  - `spoke-brl` — founded by `central-bank-brazil` (currency BRL, chainId 1337)
+  - `spoke-cop` — founded by `central-bank-colombia` (currency COP, chainId 1338)
+  - `spoke-ars` — founded by `central-bank-argentina` (currency ARS, chainId 1339)
+- **Two commercial banks per spoke**, each joining via a join bundle:
+  - Brazil: `bank-itau`, `bank-bradesco` → `spoke-brl`
+  - Colombia: `bank-bancolombia`, `bank-davivienda` → `spoke-cop`
   - Argentina: `bank-galicia`, `bank-macro` → `spoke-ars`
 
-> Os nomes de banco são ilustrativos, apenas para exemplo de provisionamento.
+> The bank names are illustrative, used only to demonstrate provisioning.
 
-Tudo é provisionado **por configuração** (manifesto YAML), sem editar código e
-sem tocar na rede de referência (`deploy/local` + Makefile permanecem intactos).
+Everything is provisioned **by configuration** (YAML manifest), without editing
+code and without touching the reference network (`deploy/local` and the Makefile
+remain intact).
 
-Cobre as FASES 1B (toolkit `mode: found`) e 3 (`mode: join`). A **FASE 4**
-(staging/prod: KMS real, CA real, imagens de registry) **não está implementada** —
-por isso todos os manifestos usam `environment: local`, `keyProvider:
-kms://local-emulator` e `certSource: self-signed`.
+Covers PHASES 1B (toolkit `mode: found`) and 3 (`mode: join`). **PHASE 4**
+(staging/prod: real KMS, real CA, registry images) **is not implemented** — so
+every manifest uses `environment: local`, `keyProvider: kms://local-emulator`,
+and `certSource: self-signed`.
 
 ---
 
-## Automação (atalho)
+## Automation (shortcut)
 
-Os passos manuais abaixo estão automatizados em dois scripts idempotentes, que
-compilam o CLI, sobem o relay e aplicam todos os manifestos em ordem:
+The manual steps below are automated by two idempotent scripts that build the
+CLI, start the relay, and apply every manifest in order:
 
 ```bash
-./deploy-all.sh      # Brasil + Colômbia (2 spokes)
-./deploy-three.sh    # Brasil + Colômbia + Argentina (3 spokes)
+./deploy-all.sh      # Brazil + Colombia (2 spokes)
+./deploy-three.sh    # Brazil + Colombia + Argentina (3 spokes)
 ```
 
-O `deploy-three.sh` funda o spoke da Argentina assim que os bancos da Colômbia
-terminam. Passe `--clean` para limpar Docker (containers + volumes) e diretórios
-de dados antes de começar. O restante deste documento descreve o fluxo manual,
-passo a passo, equivalente ao que os scripts executam.
+`deploy-three.sh` founds the Argentina spoke as soon as the Colombian banks
+finish. Pass `--clean` to wipe Docker (containers + volumes) and data directories
+before starting. The rest of this document describes the equivalent manual,
+step-by-step flow that the scripts execute.
 
 ---
 
-## Estrutura
+## Structure
 
 ```
 samples/
@@ -61,16 +62,16 @@ samples/
     central-bank-argentina.yaml   # found  → spoke-ars
     bank-galicia.yaml             # join   → spoke-ars
     bank-macro.yaml               # join   → spoke-ars
-  bundles/                        # saída dos `apply` mode:found (não versionada)
-  deploy-all.sh                   # automatiza Brasil + Colômbia (2 spokes)
-  deploy-three.sh                 # automatiza Brasil + Colômbia + Argentina (3 spokes)
+  bundles/                        # output of the `apply` mode:found runs (not versioned)
+  deploy-all.sh                   # automates Brazil + Colombia (2 spokes)
+  deploy-three.sh                 # automates Brazil + Colombia + Argentina (3 spokes)
 ```
 
-## Matriz de portas (todos no mesmo host)
+## Port matrix (all on the same host)
 
-Cada nó Besu precisa de portas de host distintas. Esta é a alocação usada nos manifestos:
+Each Besu node needs distinct host ports. This is the allocation used by the manifests:
 
-| Participante            | Spoke      | Modo  | RPC  | WS   | P2P   | chainId |
+| Participant             | Spoke      | Mode  | RPC  | WS   | P2P   | chainId |
 |-------------------------|------------|-------|------|------|-------|---------|
 | central-bank-brazil     | spoke-brl  | found | 8645 | 8655 | 31303 | 1337    |
 | bank-itau               | spoke-brl  | join  | 8646 | 8656 | 31304 | 1337    |
@@ -84,57 +85,59 @@ Cada nó Besu precisa de portas de host distintas. Esta é a alocação usada no
 
 ---
 
-## Pré-requisitos
+## Prerequisites
 
 - Go 1.26+, Docker + Docker Compose v2, `jq`, `openssl`, `curl`.
-- Imagem `hyperledger/besu:25.8.0` disponível (puxada automaticamente no primeiro `up`).
-- Diretório de dados gravável. Os manifestos usam um `spec.node.dataDir` **relativo**
-  (`cbweb3-data/<participante>`), que o CLI resolve contra o diretório de trabalho
-  atual (CWD) e cria automaticamente. Rodando `./deploy-all.sh` a partir de `samples/`,
-  os dados e os join bundles ficam em `samples/cbweb3-data/` — sem `sudo` nem caminho
-  privilegiado. Para usar outro local, edite `spec.node.dataDir` (relativo ou absoluto).
+- Docker image `hyperledger/besu:25.8.0` available (pulled automatically on the first `up`).
+- A writable data directory. The manifests use a **relative** `spec.node.dataDir`
+  (`cbweb3-data/<participant>`), which the CLI resolves against the current working
+  directory (CWD) and creates automatically. Running `./deploy-all.sh` from
+  `samples/`, the node data and join bundles land under `samples/cbweb3-data/` — no
+  `sudo` and no privileged path. To use another location, edit `spec.node.dataDir`
+  (relative or absolute).
 
 ---
 
-## Passo 0 — Compilar o toolkit
+## Step 0 — Build the toolkit
 
 ```bash
 cd scenario-a/toolkit
 go build -o ./cbweb3 ./cmd/cbweb3
 ```
 
-O binário localiza a raiz do `scenario-a` automaticamente (busca por âncora a
-partir do executável e do diretório atual), então funciona de **qualquer lugar
-dentro do repositório** — inclusive rodando `./cbweb3` de dentro de `samples/`.
-Se rodar o binário **fora** do repositório, aponte a raiz com `CBWEB3_HOME`:
+The binary locates the `scenario-a` root automatically (anchor search from the
+executable and the current directory), so it works from **anywhere inside the
+repository** — including running `./cbweb3` from within `samples/`. If you run the
+binary **outside** the repository, point it at the root with `CBWEB3_HOME`:
 
 ```bash
-export CBWEB3_HOME="$(cd ../ && pwd)"   # raiz do scenario-a
+export CBWEB3_HOME="$(cd ../ && pwd)"   # scenario-a root
 ```
 
-> Os templates (`provisioning/templates/...`) e scripts (`deploy/local/...`) são
-> ativos canônicos do toolkit — não são copiados para `samples/`. O `deploy-contracts`
-> roda `go test` nesses scripts, então a engine sempre requer o repositório presente.
+> The templates (`provisioning/templates/...`) and scripts (`deploy/local/...`) are
+> canonical toolkit assets — they are not copied into `samples/`. `deploy-contracts`
+> runs `go test` against those scripts, so the engine always requires the repository
+> to be present.
 
-Defina, para toda a sessão, o diretório onde os join bundles serão emitidos —
-apontando para esta pasta `samples/`, de modo que os manifestos `mode: join`
-encontrem o bundle em `../bundles/`:
+For the whole session, set the directory where join bundles are emitted —
+pointing it at this `samples/` folder, so that `mode: join` manifests find the
+bundle at `../bundles/`:
 
 ```bash
 export CBWEB3_OUTPUT_DIR="$(cd ../samples && pwd)"
 CBWEB3="$(pwd)/cbweb3"
 ```
 
-> Sem `CBWEB3_OUTPUT_DIR`, o bundle é gravado no diretório-pai do `dataDir`
-> (com os manifestos de exemplo: `<CWD>/cbweb3-data/bundles/...`). Nesse caso, ajuste
-> `joinBundleRef` nos manifestos de join para o caminho correspondente.
+> Without `CBWEB3_OUTPUT_DIR`, the bundle is written to the parent directory of
+> `dataDir` (with the sample manifests: `<CWD>/cbweb3-data/bundles/...`). In that
+> case, adjust `joinBundleRef` in the join manifests to the matching path.
 
 ---
 
-## Passo 1 — Validar os manifestos (dry-run)
+## Step 1 — Validate the manifests (dry-run)
 
-O `--dry-run` valida schema, resolve o profile e mostra o plano de execução sem
-executar nada. Rode em todos antes de provisionar:
+`--dry-run` validates the schema, resolves the profile, and prints the execution
+plan without running anything. Run it against all of them before provisioning:
 
 ```bash
 for f in ../samples/brazil/*.yaml ../samples/colombia/*.yaml ../samples/argentina/*.yaml; do
@@ -143,191 +146,192 @@ for f in ../samples/brazil/*.yaml ../samples/colombia/*.yaml ../samples/argentin
 done
 ```
 
-Erros de manifesto (campo ausente, valor inválido) são reportados de uma vez,
-com mensagem clara, e o comando sai com código 1.
+Manifest errors (missing field, invalid value) are reported all at once, with a
+clear message, and the command exits with code 1.
 
 ---
 
-## Passo 2 — Subir o relay Cacti local
+## Step 2 — Start the local Cacti relay
 
-Os manifestos `mode: found` registram o spoke no relay, e `register-relay` é um
-passo **obrigatório** (hard): o relay precisa estar no ar **antes** do `apply`.
-Como a LNET não está disponível, suba um relay local:
+`mode: found` manifests register the spoke on the relay, and `register-relay` is a
+**mandatory** (hard) step: the relay must be up **before** the `apply`. Since LNET
+is not available, start a local relay:
 
 ```bash
 ../provisioning/scripts/start-cacti.sh
-# espera o health em http://localhost:4000/api/v1/health
+# waits for health at http://localhost:4000/api/v1/health
 ```
 
-O relay expõe os endpoints de registro (RL-1): o `found` faz
-`POST /api/v1/spokes` e o toolkit confirma via `GET /api/v1/spokes/<id>`. Os
-manifestos de exemplo já apontam `spec.relay.endpoint: http://localhost:4000`.
+The relay exposes the registration endpoints (RL-1): `found` performs
+`POST /api/v1/spokes` and the toolkit confirms via `GET /api/v1/spokes/<id>`. The
+sample manifests already point `spec.relay.endpoint` at `http://localhost:4000`.
 
 ---
 
-## Passo 3 — Fundar o spoke do Brasil (`mode: found`)
+## Step 3 — Found the Brazil spoke (`mode: found`)
 
 ```bash
 "$CBWEB3" apply -f ../samples/brazil/central-bank-brazil.yaml --output yaml
 ```
 
-O `found` é **CB-only**: cria a rede do país (banco central) a partir do
-manifesto — sem subir o Besu manualmente e **sem** nós de banco fixos. A engine
-executa a sequência idempotente de **9 passos**:
+`found` is **CB-only**: it creates the country network (central bank) from the
+manifest — without bringing up Besu manually and **without** fixed bank nodes. The
+engine runs the idempotent sequence of **9 steps**:
 
-1. `start-besu` — sobe o nó Besu bootnode e **gera o genesis** na 1ª execução (idempotente; nunca regenera)
-2. `deploy-contracts` — registry de nós Paladin, ZetoFactory, PenteFactory
-3. `gen-tls` — cert TLS do nó Paladin do CB (self-signed)
-4. `render-configs` — config do Paladin do CB
-5. `register-nodes` — registra **o nó Paladin do CB** on-chain (lógica nativa, parametrizada por spoke — sem fallback `spoke-a`)
-6. `start-paladin` — sobe o Paladin do CB + health-check
+1. `start-besu` — brings up the Besu bootnode and **generates the genesis** on the first run (idempotent; never regenerated)
+2. `deploy-contracts` — Paladin node registry, ZetoFactory, PenteFactory
+3. `gen-tls` — TLS cert for the CB's Paladin node (self-signed)
+4. `render-configs` — CB Paladin config
+5. `register-nodes` — registers **the CB's Paladin node** on-chain (native logic, parameterized per spoke — no `spoke-a` fallback)
+6. `start-paladin` — brings up the CB's Paladin + health-check
 7. `create-zeto-token`
-8. `onboard-registry` — deploya o `IdentityRegistry.sol` (whitelist de participantes) e registra o CB via chave de governança
-9. `register-relay` — registra o spoke no relay Cacti (hard: falha se o relay não responder)
+8. `onboard-registry` — deploys `IdentityRegistry.sol` (participant whitelist) and registers the CB via the governance key
+9. `register-relay` — registers the spoke on the Cacti relay (hard: fails if the relay does not respond)
 
-> O contexto **Pente** e o **FXAgreement** (bilaterais) **não** são criados no
-> found — eles são criados no `join`, no relacionamento CB↔banco (pairwise).
+> The **Pente** context and the **FXAgreement** (bilateral) are **not** created in
+> `found` — they are created in `join`, in the CB↔bank relationship (pairwise).
 
-Ao concluir, a rede do Brasil está **no ar e pronta para operar**, registrada no
-relay e aguardando os bancos comerciais. É emitido o **join bundle**:
+On completion, the Brazil network is **up and ready to operate**, registered on
+the relay and waiting for the commercial banks. The **join bundle** is emitted:
 
 ```
 samples/bundles/spoke-brl.bundle.yaml
 ```
 
-Ele contém o enode do bootnode, o genesis (hash + conteúdo), os endereços dos
-contratos de nível-spoke (registry de nós, ZetoFactory, PenteFactory, ZetoToken,
-e o whitelist de participantes), o conjunto de validadores QBFT, a CA do spoke
-(âncora de confiança) e o `cbEndpoint`. **Não contém chaves privadas.**
+It contains the bootnode enode, the genesis (hash + content), the spoke-level
+contract addresses (node registry, ZetoFactory, PenteFactory, ZetoToken, and the
+participant whitelist), the QBFT validator set, the spoke CA (trust anchor), and
+the `cbEndpoint`. **It contains no private keys.**
 
-> Idempotência: rodar `apply` de novo reexecuta apenas o que falta. O genesis
-> **nunca** é regenerado em um spoke já existente.
+> Idempotency: running `apply` again re-executes only what is missing. The genesis
+> is **never** regenerated on an existing spoke.
 
 ---
 
-## Passo 4 — Adicionar os bancos brasileiros (`mode: join`)
+## Step 4 — Add the Brazilian banks (`mode: join`)
 
-Com o bundle de `spoke-brl` emitido, provisione os dois bancos:
+With the `spoke-brl` bundle emitted, provision the two banks:
 
 ```bash
 "$CBWEB3" apply -f ../samples/brazil/bank-itau.yaml     --output yaml
 "$CBWEB3" apply -f ../samples/brazil/bank-bradesco.yaml --output yaml
 ```
 
-A engine de join executa **15 passos**, em três blocos:
+The join engine runs **15 steps**, in three blocks:
 
-- **Entrada na rede Besu (1–8):** escreve o genesis do bundle, sobe o Besu
-  sincronizando pelo enode do bootnode, aguarda sync, vota o validador QBFT, gera
-  par de chaves + CSR (via `keyProvider`), envia o CSR ao CB (via `cbEndpoint`),
-  recebe o cert assinado, faz proof-of-possession + registro no IdentityRegistry.
-- **Paladin do banco, dinâmico (9–12):** `gen-tls-join` (cert do nó Paladin do
-  banco, derivado de `bankId`), `render-config-join`, `start-paladin-join`
-  (sobe o Paladin do banco), `register-paladin-node` (registra a identidade do
-  nó on-chain — lógica nativa, sem nome de banco fixo).
-- **Relacionamento privado CB↔banco (13–15):** `create-pente-context` (grupo
-  Pente bilateral CB↔banco), `deploy-fxa-pente` (FXAgreement dentro do grupo),
+- **Entering the Besu network (1–8):** writes the bundle's genesis, brings up Besu
+  syncing via the bootnode enode, waits for sync, votes the QBFT validator,
+  generates a key pair + CSR (via `keyProvider`), sends the CSR to the CB (via
+  `cbEndpoint`), receives the signed cert, and performs proof-of-possession +
+  registration in the IdentityRegistry.
+- **Bank Paladin, dynamic (9–12):** `gen-tls-join` (cert for the bank's Paladin
+  node, derived from `bankId`), `render-config-join`, `start-paladin-join`
+  (brings up the bank's Paladin), `register-paladin-node` (registers the node
+  identity on-chain — native logic, no fixed bank name).
+- **Private CB↔bank relationship (13–15):** `create-pente-context` (bilateral
+  CB↔bank Pente group), `deploy-fxa-pente` (FXAgreement inside the group),
   `start-backend`.
 
-> **Pré-requisitos do join:**
-> 1. O passo `request-cert` faz POST do CSR ao `cbEndpoint`. O **backend do banco
->    central (api-gateway)** precisa estar no ar, senão o join falha (`ErrCBUnreachable`).
-> 2. Os passos de Pente exigem que **os dois nós Paladin (CB e banco) se enxerguem**
->    via transport mTLS na rede do spoke.
+> **Join prerequisites:**
+> 1. The `request-cert` step POSTs the CSR to `cbEndpoint`. The **central bank's
+>    backend (api-gateway)** must be up, otherwise the join fails (`ErrCBUnreachable`).
+> 2. The Pente steps require **both Paladin nodes (CB and bank) to see each other**
+>    via mTLS transport on the spoke network.
 >
-> A capacidade do toolkit subir automaticamente a stack de backend do CB e do
-> banco é um próximo incremento (hoje o backend é um pré-requisito externo).
+> The toolkit's ability to bring up the CB and bank backend stacks automatically is
+> a future increment (today the backend is an external prerequisite).
 
 ---
 
-## Passo 5 — Fundar o spoke da Colômbia e adicionar seus bancos
+## Step 5 — Found the Colombia spoke and add its banks
 
-Mesma sequência, manifestos da Colômbia. Como é um spoke independente, pode ser
-feito em paralelo ou após o do Brasil (o relay Cacti do Passo 2 já serve os dois
-spokes — cada um se registra com seu próprio id):
+Same sequence, Colombian manifests. Since it is an independent spoke, it can be
+done in parallel or after Brazil (the Cacti relay from Step 2 already serves all
+three spokes — each registers under its own id):
 
 ```bash
-# Paladin do CB em porta de host distinta (ver nota abaixo)
+# CB Paladin on a distinct host port (see the note below)
 export CBWEB3_PALADIN_CB_URL="http://localhost:31748"
 
-# Fundar spoke-cop
+# Found spoke-cop
 "$CBWEB3" apply -f ../samples/colombia/central-bank-colombia.yaml --output yaml
-# → emite samples/bundles/spoke-cop.bundle.yaml
+# → emits samples/bundles/spoke-cop.bundle.yaml
 
-# Adicionar os bancos colombianos
+# Add the Colombian banks
 "$CBWEB3" apply -f ../samples/colombia/bank-bancolombia.yaml --output yaml
 "$CBWEB3" apply -f ../samples/colombia/bank-davivienda.yaml  --output yaml
 ```
 
-> **Paladin em host único.** Todo banco central fundador aponta seu Paladin para a
-> porta de host `31648` por padrão. Em um único host, cada spoke adicional precisa
-> de uma porta distinta — exporte `CBWEB3_PALADIN_CB_URL` antes do `found`
-> (Colômbia: `http://localhost:31748`; Argentina: `http://localhost:31848`). Os
-> scripts `deploy-all.sh`/`deploy-three.sh` já fazem isso automaticamente.
+> **Paladin on a single host.** Every founding central bank points its Paladin at
+> host port `31648` by default. On a single host, each additional spoke needs a
+> distinct port — export `CBWEB3_PALADIN_CB_URL` before `found`
+> (Colombia: `http://localhost:31748`; Argentina: `http://localhost:31848`). The
+> `deploy-all.sh`/`deploy-three.sh` scripts already do this automatically.
 
 ---
 
-## Passo 6 — Fundar o spoke da Argentina e adicionar seus bancos
+## Step 6 — Found the Argentina spoke and add its banks
 
-Mesma sequência, manifestos da Argentina. Como é o terceiro spoke independente,
-pode ser feito após a Colômbia (o relay Cacti do Passo 2 serve os três spokes):
+Same sequence, Argentine manifests. As the third independent spoke, it can be done
+after Colombia (the Cacti relay from Step 2 serves all three spokes):
 
 ```bash
-# Paladin do CB em porta de host distinta (ver nota acima)
+# CB Paladin on a distinct host port (see the note above)
 export CBWEB3_PALADIN_CB_URL="http://localhost:31848"
 
-# Fundar spoke-ars
+# Found spoke-ars
 "$CBWEB3" apply -f ../samples/argentina/central-bank-argentina.yaml --output yaml
-# → emite samples/bundles/spoke-ars.bundle.yaml
+# → emits samples/bundles/spoke-ars.bundle.yaml
 
-# Adicionar os bancos argentinos
+# Add the Argentine banks
 "$CBWEB3" apply -f ../samples/argentina/bank-galicia.yaml --output yaml
 "$CBWEB3" apply -f ../samples/argentina/bank-macro.yaml   --output yaml
 ```
 
 ---
 
-## Verificação
+## Verification
 
-Consulte o número do bloco em cada nó pela porta RPC (matriz acima):
+Query the block number on each node by its RPC port (matrix above):
 
 ```bash
 for p in 8645 8646 8647 8745 8746 8747 8845 8846 8847; do
-  echo -n "porta $p: "
+  echo -n "port $p: "
   curl -s -X POST "http://localhost:$p" \
     -H 'Content-Type: application/json' \
     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | jq -r .result
 done
 ```
 
-Containers em execução:
+Running containers:
 
 ```bash
 docker ps --filter "name=cbweb3-spoke-"
 ```
 
-O relatório estruturado (`--output yaml|json`) do `apply` mostra o status de cada
-passo (`success` / `skipped` / `failed` / `pending`).
+The structured report (`--output yaml|json`) from `apply` shows the status of each
+step (`success` / `skipped` / `failed` / `pending`).
 
 ---
 
-## Observações
+## Notes
 
-- **Relay Cacti local (RL-1).** Sem a LNET, suba o relay local com
-  `provisioning/scripts/start-cacti.sh` (Passo 2). O `register-relay` é
-  **obrigatório**: o `found` falha se o relay (`spec.relay.endpoint`) não
-  responder. O registro é dinâmico via `POST /api/v1/spokes` e persiste no volume
-  do relay. Observação: o registro habilita a **descoberta** do spoke; para que o
-  relay também faça *polling* ativo de liquidação são necessários os dados
-  completos de conexão (besuWs, grpcEndpoint, internalApiUrl) na config de polling
-  do relay (`CACTI_SPOKES_CONFIG`) — isso é parte da generalização N-spokes (Fase 2).
-- **FASE 4 (staging/prod) não implementada.** Apenas `environment: local` é aceito
-  pelo CLI. As implementações prod de `keyProvider` (KMS real) e `certSource`
-  (CA real) são stubs que retornam `ErrNotImplemented`. Promover para prod
-  exigirá apenas valores diferentes no manifesto — sem mudanças na engine.
-- **Endereçamento cross-stack.** `advertisedHost` é sempre explícito, nunca
-  inferido de co-localização nem de IP de container (ver
-  `provisioning/docs/adr-001-cross-stack-enode-addressing.md`). Em deploy local
-  multi-stack, os participantes de um mesmo spoke compartilham a rede Docker
+- **Local Cacti relay (RL-1).** Without LNET, start the local relay with
+  `provisioning/scripts/start-cacti.sh` (Step 2). `register-relay` is
+  **mandatory**: `found` fails if the relay (`spec.relay.endpoint`) does not
+  respond. Registration is dynamic via `POST /api/v1/spokes` and persists in the
+  relay's volume. Note: registration enables spoke **discovery**; for the relay to
+  also actively *poll* for settlement, the complete connection data (besuWs,
+  grpcEndpoint, internalApiUrl) is required in the relay's polling config
+  (`CACTI_SPOKES_CONFIG`) — this is part of the N-spokes generalization (Phase 2).
+- **PHASE 4 (staging/prod) not implemented.** Only `environment: local` is accepted
+  by the CLI. The prod implementations of `keyProvider` (real KMS) and `certSource`
+  (real CA) are stubs that return `ErrNotImplemented`. Promoting to prod will
+  require only different values in the manifest — no engine changes.
+- **Cross-stack addressing.** `advertisedHost` is always explicit, never inferred
+  from co-location or container IP (see
+  `provisioning/docs/adr-001-cross-stack-enode-addressing.md`). In a multi-stack
+  local deployment, participants of the same spoke share the Docker network
   `cbweb3-<spoke-id>-besu`.
-- **Rede de referência intacta.** Este toolkit não modifica nem depende de
-  `deploy/local` ou `make/*.mk` — eles continuam como rede de amostra.
+- **Reference network untouched.** This toolkit does not modify or depend on
+  `deploy/local` or `make/*.mk` — they remain the sample network.
