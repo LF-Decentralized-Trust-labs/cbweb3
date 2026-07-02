@@ -1,4 +1,4 @@
-# Samples — Provisionamento de dois spokes (Brasil e Colômbia)
+# Samples — Provisionamento de três spokes (Brasil, Colômbia e Argentina)
 
 > Para um passo a passo com os comandos `cbweb3` prontos para copiar e colar
 > (o mesmo que o `deploy-all.sh` executa, porém manualmente), veja
@@ -7,12 +7,14 @@
 Este diretório contém manifestos `ParticipantDeployment` prontos para uso com o
 toolkit `cbweb3`, demonstrando o cenário completo:
 
-- **Dois spokes independentes**, cada um fundado pelo seu próprio banco central:
+- **Três spokes independentes**, cada um fundado pelo seu próprio banco central:
   - `spoke-brl` — fundado por `central-bank-brazil` (moeda BRL, chainId 1337)
   - `spoke-cop` — fundado por `central-bank-colombia` (moeda COP, chainId 1338)
+  - `spoke-ars` — fundado por `central-bank-argentina` (moeda ARS, chainId 1339)
 - **Dois bancos comerciais por spoke**, cada um entrando via join bundle:
   - Brasil: `bank-itau`, `bank-bradesco` → `spoke-brl`
   - Colômbia: `bank-bancolombia`, `bank-davivienda` → `spoke-cop`
+  - Argentina: `bank-galicia`, `bank-macro` → `spoke-ars`
 
 > Os nomes de banco são ilustrativos, apenas para exemplo de provisionamento.
 
@@ -23,6 +25,23 @@ Cobre as FASES 1B (toolkit `mode: found`) e 3 (`mode: join`). A **FASE 4**
 (staging/prod: KMS real, CA real, imagens de registry) **não está implementada** —
 por isso todos os manifestos usam `environment: local`, `keyProvider:
 kms://local-emulator` e `certSource: self-signed`.
+
+---
+
+## Automação (atalho)
+
+Os passos manuais abaixo estão automatizados em dois scripts idempotentes, que
+compilam o CLI, sobem o relay e aplicam todos os manifestos em ordem:
+
+```bash
+./deploy-all.sh      # Brasil + Colômbia (2 spokes)
+./deploy-three.sh    # Brasil + Colômbia + Argentina (3 spokes)
+```
+
+O `deploy-three.sh` funda o spoke da Argentina assim que os bancos da Colômbia
+terminam. Passe `--clean` para limpar Docker (containers + volumes) e diretórios
+de dados antes de começar. O restante deste documento descreve o fluxo manual,
+passo a passo, equivalente ao que os scripts executam.
 
 ---
 
@@ -38,7 +57,13 @@ samples/
     central-bank-colombia.yaml    # found  → spoke-cop
     bank-bancolombia.yaml         # join   → spoke-cop
     bank-davivienda.yaml          # join   → spoke-cop
+  argentina/
+    central-bank-argentina.yaml   # found  → spoke-ars
+    bank-galicia.yaml             # join   → spoke-ars
+    bank-macro.yaml               # join   → spoke-ars
   bundles/                        # saída dos `apply` mode:found (não versionada)
+  deploy-all.sh                   # automatiza Brasil + Colômbia (2 spokes)
+  deploy-three.sh                 # automatiza Brasil + Colômbia + Argentina (3 spokes)
 ```
 
 ## Matriz de portas (todos no mesmo host)
@@ -53,6 +78,9 @@ Cada nó Besu precisa de portas de host distintas. Esta é a alocação usada no
 | central-bank-colombia   | spoke-cop  | found | 8745 | 8755 | 31403 | 1338    |
 | bank-bancolombia        | spoke-cop  | join  | 8746 | 8756 | 31404 | 1338    |
 | bank-davivienda         | spoke-cop  | join  | 8747 | 8757 | 31405 | 1338    |
+| central-bank-argentina  | spoke-ars  | found | 8845 | 8855 | 31503 | 1339    |
+| bank-galicia            | spoke-ars  | join  | 8846 | 8856 | 31504 | 1339    |
+| bank-macro              | spoke-ars  | join  | 8847 | 8857 | 31505 | 1339    |
 
 ---
 
@@ -109,7 +137,7 @@ O `--dry-run` valida schema, resolve o profile e mostra o plano de execução se
 executar nada. Rode em todos antes de provisionar:
 
 ```bash
-for f in ../samples/brazil/*.yaml ../samples/colombia/*.yaml; do
+for f in ../samples/brazil/*.yaml ../samples/colombia/*.yaml ../samples/argentina/*.yaml; do
   echo "== $f =="
   "$CBWEB3" apply -f "$f" --dry-run --output yaml
 done
@@ -218,6 +246,9 @@ feito em paralelo ou após o do Brasil (o relay Cacti do Passo 2 já serve os do
 spokes — cada um se registra com seu próprio id):
 
 ```bash
+# Paladin do CB em porta de host distinta (ver nota abaixo)
+export CBWEB3_PALADIN_CB_URL="http://localhost:31748"
+
 # Fundar spoke-cop
 "$CBWEB3" apply -f ../samples/colombia/central-bank-colombia.yaml --output yaml
 # → emite samples/bundles/spoke-cop.bundle.yaml
@@ -227,6 +258,32 @@ spokes — cada um se registra com seu próprio id):
 "$CBWEB3" apply -f ../samples/colombia/bank-davivienda.yaml  --output yaml
 ```
 
+> **Paladin em host único.** Todo banco central fundador aponta seu Paladin para a
+> porta de host `31648` por padrão. Em um único host, cada spoke adicional precisa
+> de uma porta distinta — exporte `CBWEB3_PALADIN_CB_URL` antes do `found`
+> (Colômbia: `http://localhost:31748`; Argentina: `http://localhost:31848`). Os
+> scripts `deploy-all.sh`/`deploy-three.sh` já fazem isso automaticamente.
+
+---
+
+## Passo 6 — Fundar o spoke da Argentina e adicionar seus bancos
+
+Mesma sequência, manifestos da Argentina. Como é o terceiro spoke independente,
+pode ser feito após a Colômbia (o relay Cacti do Passo 2 serve os três spokes):
+
+```bash
+# Paladin do CB em porta de host distinta (ver nota acima)
+export CBWEB3_PALADIN_CB_URL="http://localhost:31848"
+
+# Fundar spoke-ars
+"$CBWEB3" apply -f ../samples/argentina/central-bank-argentina.yaml --output yaml
+# → emite samples/bundles/spoke-ars.bundle.yaml
+
+# Adicionar os bancos argentinos
+"$CBWEB3" apply -f ../samples/argentina/bank-galicia.yaml --output yaml
+"$CBWEB3" apply -f ../samples/argentina/bank-macro.yaml   --output yaml
+```
+
 ---
 
 ## Verificação
@@ -234,7 +291,7 @@ spokes — cada um se registra com seu próprio id):
 Consulte o número do bloco em cada nó pela porta RPC (matriz acima):
 
 ```bash
-for p in 8645 8646 8647 8745 8746 8747; do
+for p in 8645 8646 8647 8745 8746 8747 8845 8846 8847; do
   echo -n "porta $p: "
   curl -s -X POST "http://localhost:$p" \
     -H 'Content-Type: application/json' \

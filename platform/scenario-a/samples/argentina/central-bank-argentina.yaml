@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Banco central da Argentina — funda o spoke argentino (spoke-ars).
+# mode: found  → nó bootnode próprio, contratos próprios, join bundle próprio
+#                (samples/bundles/spoke-ars.bundle.yaml). Spoke independente do BRL/COP.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-argentina
+spec:
+  scenario: a
+  environment: local
+  role: central-bank
+  mode: found
+  displayName: Banco Central de la República Argentina
+  spoke:
+    id: spoke-ars
+    chainId: 1339
+    currency: ARS
+  node:
+    advertisedHost: cbweb3-spoke-ars-besu.central-bank-argentina
+    rpc:
+      port: 8845
+    ws:
+      port: 8855
+    p2p:
+      port: 31503
+    dataDir: cbweb3-data/central-bank-argentina
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  # Relay Cacti local (RL-1) — precisa estar no ar antes do apply (register-relay e hard).
+  relay:
+    endpoint: http://localhost:4000
+  cbEndpoint: http://cbweb3-api-gateway.central-bank-argentina:8080/api/v1/onboarding/credential-request
+  # Operadores humanos (login por papel via ROPC). Obrigatório: um por papel.
+  # FUTURO: senha deve vir de um secret store (não do manifesto) em staging/prod.
+  adminUsers:
+    - role: ROLE_GOVERNANCE
+      username: admin@argentina.governance.gov
+      password: argentina-governance-local
+    - role: ROLE_TREASURY
+      username: admin@argentina.treasury.gov
+      password: argentina-treasury-local
+    - role: ROLE_SUPERVISOR
+      username: admin@argentina.supervisor.gov
+      password: argentina-supervisor-local
+    - role: ROLE_NOC_ADMIN
+      username: admin@argentina.noc.gov
+      password: argentina-noc-local

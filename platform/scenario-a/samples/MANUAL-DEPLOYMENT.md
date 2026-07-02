@@ -1,15 +1,17 @@
 # Scenario A — Manual Deployment Tutorial
 
 This tutorial reproduces, **step by step and by hand**, exactly what
-[`deploy-all.sh`](./deploy-all.sh) does automatically. Run these commands in order
-to stand up the complete Scenario A sample environment through the `cbweb3` CLI:
-two independent spokes, each founded by its own central bank, with two commercial
-banks joining each spoke.
+[`deploy-all.sh`](./deploy-all.sh) (Brazil + Colombia) and
+[`deploy-three.sh`](./deploy-three.sh) (Brazil + Colombia + Argentina) do
+automatically. Run these commands in order to stand up the complete Scenario A
+sample environment through the `cbweb3` CLI: three independent spokes, each
+founded by its own central bank, with two commercial banks joining each spoke.
 
-| Spoke       | Founding central bank   | Commercial banks (join)        | Currency | chainId |
-|-------------|-------------------------|--------------------------------|----------|---------|
-| `spoke-brl` | `central-bank-brazil`   | `bank-itau`, `bank-bradesco`   | BRL      | 1337    |
-| `spoke-cop` | `central-bank-colombia` | `bank-bancolombia`, `bank-davivienda` | COP | 1338    |
+| Spoke       | Founding central bank    | Commercial banks (join)               | Currency | chainId |
+|-------------|--------------------------|---------------------------------------|----------|---------|
+| `spoke-brl` | `central-bank-brazil`    | `bank-itau`, `bank-bradesco`          | BRL      | 1337    |
+| `spoke-cop` | `central-bank-colombia`  | `bank-bancolombia`, `bank-davivienda` | COP      | 1338    |
+| `spoke-ars` | `central-bank-argentina` | `bank-galicia`, `bank-macro`          | ARS      | 1339    |
 
 > The bank names are illustrative, used only to demonstrate provisioning.
 
@@ -36,6 +38,9 @@ sample manifests.
 | `central-bank-colombia` | spoke-cop  | found | 8745     | 8755 | 31403 | 1338    |
 | `bank-bancolombia`      | spoke-cop  | join  | 8746     | 8756 | 31404 | 1338    |
 | `bank-davivienda`       | spoke-cop  | join  | 8747     | 8757 | 31405 | 1338    |
+| `central-bank-argentina`| spoke-ars  | found | 8845     | 8855 | 31503 | 1339    |
+| `bank-galicia`          | spoke-ars  | join  | 8846     | 8856 | 31504 | 1339    |
+| `bank-macro`            | spoke-ars  | join  | 8847     | 8857 | 31505 | 1339    |
 
 ---
 
@@ -99,7 +104,7 @@ execution plan without changing anything. Run it against every manifest before
 provisioning:
 
 ```bash
-for f in brazil/*.yaml colombia/*.yaml; do
+for f in brazil/*.yaml colombia/*.yaml argentina/*.yaml; do
   echo "== $f =="
   "$CBWEB3" apply -f "$f" --dry-run -o yaml
 done
@@ -128,7 +133,7 @@ endpoint. When it finishes, the relay is available at:
 - List spokes: `GET  http://localhost:4000/api/v1/spokes`
 
 The sample manifests already point `spec.relay.endpoint` at `http://localhost:4000`.
-A single relay serves both spokes; each registers under its own id.
+A single relay serves all three spokes; each registers under its own id.
 
 ---
 
@@ -183,10 +188,10 @@ and creates the bilateral CB↔bank Pente context with its FXAgreement.
 ## Step 5 — Found the Colombia spoke (`spoke-cop`)
 
 The Colombia spoke is independent of Brazil. It can be provisioned after Brazil
-(or in parallel); the relay from Step 2 already serves both.
+(or in parallel); the relay from Step 2 already serves all three spokes.
 
-**Single-host caveat — read before running.** Both founding central banks default
-their Paladin node to host port `31648`. On a single host the second spoke must
+**Single-host caveat — read before running.** Every founding central bank defaults
+its Paladin node to host port `31648`. On a single host each additional spoke must
 use a distinct port, so set the Paladin CB URL override **before** founding
 Colombia (Besu, backend, and frontend ports are already derived per-entity from
 each manifest and do not collide):
@@ -207,6 +212,34 @@ This emits `samples/bundles/spoke-cop.bundle.yaml`.
 "$CBWEB3" apply -f colombia/bank-davivienda.yaml  -o yaml
 ```
 
+Brazil and Colombia are now deployed — this is the point `deploy-all.sh` reaches.
+Continue to Step 7 to add the third spoke (Argentina), matching `deploy-three.sh`.
+
+---
+
+## Step 7 — Found the Argentina spoke (`spoke-ars`)
+
+The Argentina spoke is the third independent spoke, founded after Colombia; the
+relay from Step 2 already serves all three. On a single host it needs yet another
+distinct Paladin CB port, so set the override **before** founding Argentina
+(`31648` → `31748` → `31848`):
+
+```bash
+export CBWEB3_PALADIN_CB_URL="http://localhost:31848"
+"$CBWEB3" apply -f argentina/central-bank-argentina.yaml -o yaml
+```
+
+This emits `samples/bundles/spoke-ars.bundle.yaml`.
+
+---
+
+## Step 8 — Join the Argentine commercial banks
+
+```bash
+"$CBWEB3" apply -f argentina/bank-galicia.yaml -o yaml
+"$CBWEB3" apply -f argentina/bank-macro.yaml   -o yaml
+```
+
 The full sample environment is now deployed.
 
 ---
@@ -216,7 +249,7 @@ The full sample environment is now deployed.
 Query the block number on each Besu node by its RPC port:
 
 ```bash
-for p in 8645 8646 8647 8745 8746 8747; do
+for p in 8645 8646 8647 8745 8746 8747 8845 8846 8847; do
   echo -n "port $p: "
   curl -s -X POST "http://localhost:$p" \
     -H 'Content-Type: application/json' \
@@ -230,7 +263,7 @@ List the running spoke containers:
 docker ps --filter "name=cbweb3-spoke-"
 ```
 
-Confirm both spokes are registered on the relay:
+Confirm all three spokes are registered on the relay:
 
 ```bash
 curl -s http://localhost:4000/api/v1/spokes | jq
@@ -261,6 +294,14 @@ Every api-gateway exposes `/healthz`; every portal is served on `/`.
 | `bank-bancolombia` | `http://localhost:18746`   | bank portal `http://localhost:25746`                                                                                                 |
 | `bank-davivienda`  | `http://localhost:18747`   | bank portal `http://localhost:25747`                                                                                                 |
 
+### Argentina (`spoke-ars`)
+
+| Entity          | API (gateway)              | Portals                                                                                                                              |
+|-----------------|----------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| central bank    | `http://localhost:18845`   | governance `http://localhost:25845` · treasury `http://localhost:26845` · supervisor `http://localhost:30845` · noc `http://localhost:32845` |
+| `bank-galicia`  | `http://localhost:18846`   | bank portal `http://localhost:25846`                                                                                                 |
+| `bank-macro`    | `http://localhost:18847`   | bank portal `http://localhost:25847`                                                                                                 |
+
 ### Operator credentials (local only)
 
 These accounts are declared in the sample manifests for local use only. In
@@ -281,6 +322,12 @@ manifest.
 | central-bank-colombia | NOC        | `admin@colombia.noc.gov`          | `colombia-noc-local`         |
 | bank-bancolombia      | Bank       | `admin@bancolombia.colombia.com`  | `bancolombia-bank-local`     |
 | bank-davivienda       | Bank       | `admin@davivienda.colombia.com`   | `davivienda-bank-local`      |
+| central-bank-argentina| Governance | `admin@argentina.governance.gov`  | `argentina-governance-local` |
+| central-bank-argentina| Treasury   | `admin@argentina.treasury.gov`    | `argentina-treasury-local`   |
+| central-bank-argentina| Supervisor | `admin@argentina.supervisor.gov`  | `argentina-supervisor-local` |
+| central-bank-argentina| NOC        | `admin@argentina.noc.gov`         | `argentina-noc-local`        |
+| bank-galicia          | Bank       | `admin@galicia.argentina.com`     | `galicia-bank-local`         |
+| bank-macro            | Bank       | `admin@macro.argentina.com`       | `macro-bank-local`           |
 
 ---
 
@@ -323,9 +370,10 @@ rm -rf ./cbweb3-data
 - **Relay is a hard dependency.** `mode: found` fails if the relay at
   `spec.relay.endpoint` does not respond. Start it (Step 2) before founding a
   spoke.
-- **Single host, second spoke.** Export `CBWEB3_PALADIN_CB_URL=http://localhost:31748`
-  before founding Colombia (Step 5) so its Paladin node does not collide with the
-  Brazil default of `31648`.
+- **Single host, additional spokes.** Each founding central bank defaults its
+  Paladin node to host port `31648`. On a single host, export a distinct
+  `CBWEB3_PALADIN_CB_URL` before founding each additional spoke — Colombia
+  `http://localhost:31748` (Step 5), Argentina `http://localhost:31848` (Step 7).
 - **Backends and portals are automatic.** Both `found` and `join` now bring up the
   operational backend, Keycloak, and portals as part of the sequence — there is no
   separate manual backend start.
@@ -340,10 +388,11 @@ rm -rf ./cbweb3-data
 
 ## One-shot equivalent
 
-Every step above is what [`deploy-all.sh`](./deploy-all.sh) performs in one run.
-To automate the same sequence instead of running it by hand:
+Every step above is what the deploy scripts perform in one run. To automate the
+same sequence instead of running it by hand:
 
 ```bash
-./deploy-all.sh            # build CLI, start relay, deploy everything
-./deploy-all.sh --clean    # wipe Docker (containers + volumes) and data dirs first
+./deploy-all.sh              # Brazil + Colombia (Steps 3–6)
+./deploy-three.sh            # Brazil + Colombia + Argentina (Steps 3–8)
+./deploy-three.sh --clean    # wipe Docker (containers + volumes) and data dirs first
 ```
