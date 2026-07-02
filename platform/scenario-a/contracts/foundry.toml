@@ -7,6 +7,9 @@ evm_version = "paris"
 gas_reports = ["*"]
 optimizer = true
 optimizer_runs = 200
+# The FXAgreement propose path carries a 7-field Routing struct (cross-spoke identities),
+# which overflows the legacy codegen stack; IR-based codegen resolves it cleanly.
+via_ir = true
 fuzz = { runs = 10000 }
 
 [profile.ci]

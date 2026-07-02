@@ -1,0 +1,26 @@
+{
+  "genesis": {
+    "config": {
+      "chainId": 1337,
+      "londonBlock": 0,
+      "qbft": {
+        "blockperiodseconds": 2,
+        "epochlength": 30000,
+        "requesttimeoutseconds": 4
+      }
+    },
+    "nonce": "0x0",
+    "timestamp": "0x0",
+    "gasLimit": "0x1fffffffffffff",
+    "difficulty": "0x1",
+    "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "alloc": {}
+  },
+  "blockchain": {
+    "nodes": {
+      "generate": true,
+      "count": 1
+    }
+  }
+}

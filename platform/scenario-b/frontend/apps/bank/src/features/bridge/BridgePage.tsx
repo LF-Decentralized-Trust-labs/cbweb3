@@ -169,7 +169,7 @@ export function BridgePage() {
         <Card>
           <CardHeader>
             <CardTitle>Burn & Unlock</CardTitle>
-            <CardDescription>Burn mirrored position and unlock native CBDC in spoke.</CardDescription>
+            <CardDescription>Burn mirrored position and unlock native tCeBM in spoke.</CardDescription>
           </CardHeader>
           <CardContent>
             <form className="space-y-3" onSubmit={handleBurnUnlock}>

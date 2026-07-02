@@ -231,6 +231,6 @@ func NewNoOp() Client {
 func (n *noOpClient) ValidateToken(_ context.Context, _ string) (TokenClaims, error) {
 	return TokenClaims{
 		Subject: "dev-user",
-		Roles:   []string{"noc-admin", "noc-operator", "noc-viewer"},
+		Roles:   []string{"ROLE_NOC_ADMIN", "ROLE_NOC_OPERATOR", "ROLE_NOC_VIEWER"},
 	}, nil
 }

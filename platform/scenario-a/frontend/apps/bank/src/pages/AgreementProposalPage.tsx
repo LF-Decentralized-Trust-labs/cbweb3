@@ -20,7 +20,15 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 
-const CURRENCIES = ["BRL", "EUR", "ARS", "CLP", "MXN", "USD"];
+// Latin American settlement currencies (ISO 4217) selectable on the receive leg.
+const LATAM_CURRENCIES = [
+  "ARS", "BOB", "BRL", "CLP", "COP", "CRC", "CUP", "DOP", "GTQ",
+  "HNL", "MXN", "NIO", "PAB", "PEN", "PYG", "USD", "UYU", "VES",
+];
+
+// The send leg is fixed to this portal's own spoke currency, baked at build time
+// as VITE_FIAT_SYMBOL (e.g. BRL for a Brazilian spoke).
+const SPOKE_CURRENCY = (import.meta.env.VITE_FIAT_SYMBOL ?? "BRL").trim() || "BRL";
 
 const defaultExpiry = () => {
   const d = new Date();
@@ -37,12 +45,14 @@ export function AgreementProposalPage() {
   const [settlementAgent, setSettlementAgent] = useState("");
   const [custodian, setCustodian] = useState("");
   const [beneficiary, setBeneficiary] = useState("");
-  const [spokeAReceiver, setSpokeAReceiver] = useState("");
-  const [spokeBReceiver, setSpokeBReceiver] = useState("");
+  const [sourceSpokeId, setSourceSpokeId] = useState("");
+  const [destSpokeId, setDestSpokeId] = useState("");
+  const [sourceReceiver, setSourceReceiver] = useState("");
+  const [destReceiver, setDestReceiver] = useState("");
   const [originAmount, setOriginAmount] = useState("");
-  const [originCurrency, setOriginCurrency] = useState("USD");
+  const originCurrency = SPOKE_CURRENCY;
   const [counterAmount, setCounterAmount] = useState("");
-  const [counterCurrency, setCounterCurrency] = useState("BRL");
+  const [counterCurrency, setCounterCurrency] = useState("COP");
   const [expiryDateTime, setExpiryDateTime] = useState(defaultExpiry);
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -108,8 +118,10 @@ export function AgreementProposalPage() {
         counter_currency: counterCurrency,
         rate: rate,
         expiry_date: Math.floor(new Date(expiryDateTime).getTime() / 1000),
-        spoke_a_receiver: spokeAReceiver.trim() || undefined,
-        spoke_b_receiver: spokeBReceiver.trim() || undefined,
+        source_spoke_id: sourceSpokeId.trim() || undefined,
+        dest_spoke_id: destSpokeId.trim() || undefined,
+        source_receiver: sourceReceiver.trim() || undefined,
+        dest_receiver: destReceiver.trim() || undefined,
       });
       toast.success("Trade agreement proposed successfully.");
       navigate(`/agreements/${result.trade_id}`);
@@ -173,21 +185,39 @@ export function AgreementProposalPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="spoke-a-receiver">Spoke-A HTLC Receiver</Label>
+            <Label htmlFor="source-spoke-id">Source Spoke ID</Label>
             <Input
-              id="spoke-a-receiver"
-              placeholder="funded_operator@spoke-a-bank-c"
-              value={spokeAReceiver}
-              onChange={(e) => setSpokeAReceiver(e.target.value)}
+              id="source-spoke-id"
+              placeholder="spoke-brl"
+              value={sourceSpokeId}
+              onChange={(e) => setSourceSpokeId(e.target.value)}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="spoke-b-receiver">Spoke-B HTLC Receiver</Label>
+            <Label htmlFor="dest-spoke-id">Destination Spoke ID</Label>
             <Input
-              id="spoke-b-receiver"
-              placeholder="funded_operator@spoke-b-bank-b"
-              value={spokeBReceiver}
-              onChange={(e) => setSpokeBReceiver(e.target.value)}
+              id="dest-spoke-id"
+              placeholder="spoke-usd"
+              value={destSpokeId}
+              onChange={(e) => setDestSpokeId(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="source-receiver">Source Receiver</Label>
+            <Input
+              id="source-receiver"
+              placeholder="funded_operator@spoke-brl-bank-c"
+              value={sourceReceiver}
+              onChange={(e) => setSourceReceiver(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="dest-receiver">Destination Receiver</Label>
+            <Input
+              id="dest-receiver"
+              placeholder="funded_operator@spoke-usd-bank-b"
+              value={destReceiver}
+              onChange={(e) => setDestReceiver(e.target.value)}
             />
           </div>
         </CardContent>
@@ -214,18 +244,8 @@ export function AgreementProposalPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="origin-currency">Send Currency</Label>
-              <Select value={originCurrency} onValueChange={setOriginCurrency}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Currency" />
-                </SelectTrigger>
-                <SelectContent>
-                  {CURRENCIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input id="origin-currency" value={originCurrency} readOnly disabled />
+              <p className="text-xs text-muted-foreground">Fixed to this spoke&apos;s currency.</p>
             </div>
           </div>
 
@@ -249,7 +269,7 @@ export function AgreementProposalPage() {
                   <SelectValue placeholder="Currency" />
                 </SelectTrigger>
                 <SelectContent>
-                  {CURRENCIES.map((c) => (
+                  {LATAM_CURRENCIES.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
                     </SelectItem>

@@ -1,0 +1,102 @@
+# Per-entity frontend portals (feature 034). Each portal is a Vite SPA built into
+# nginx; VITE_* are BUILD-TIME args baked into the static bundle, so the API/Keycloak
+# URLs point at the entity's HOST-published ports (the browser runs on the host).
+# Reuses the existing per-app Dockerfiles as building blocks; does NOT modify the
+# legacy frontend/docker-compose.spoke-*.yml. The engine brings up only the services
+# an entity needs: CB → governance, treasury, supervisor, noc; bank → bank.
+#
+# REQUIRED env (set by the engine):
+#   FRONTEND_CONTEXT      path to the frontend/ build context
+#   ENTITY_PREFIX         container-name prefix, e.g. cbweb3-central-bank-brazil
+#   ENTITY_NET_NAME       per-entity network (external; from the infra step)
+#   VITE_API_URL          entity api-gateway, with /api/v1/ suffix (bank/governance/treasury)
+#   VITE_API_BASE         entity api-gateway, no suffix (supervisor, noc)
+#   VITE_PORTAL_OWNER / VITE_FIAT_SYMBOL / VITE_INSTITUTION_NAME
+#   VITE_KEYCLOAK_URL / VITE_KEYCLOAK_REALM / VITE_KEYCLOAK_CLIENT_ID   (noc)
+#   GOVERNANCE_PORT / TREASURY_PORT / SUPERVISOR_PORT / NOC_PORT / BANK_PORT   host ports
+#   FRONTEND_IMAGE_TAG    image tag suffix (build => local)
+
+services:
+  governance:
+    build:
+      context: ${FRONTEND_CONTEXT:?FRONTEND_CONTEXT is required}
+      dockerfile: apps/governance/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_PORTAL_OWNER: ${VITE_PORTAL_OWNER:-OPERATOR}
+        VITE_FIAT_SYMBOL: ${VITE_FIAT_SYMBOL:-BRL}
+        VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Central Bank}
+    image: cbweb3/governance-frontend:${FRONTEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX:?ENTITY_PREFIX is required}-governance-frontend
+    ports:
+      - "${GOVERNANCE_PORT:-0}:80"
+    networks:
+      - entity_net
+
+  treasury:
+    build:
+      context: ${FRONTEND_CONTEXT}
+      dockerfile: apps/treasury/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_PORTAL_OWNER: ${VITE_PORTAL_OWNER:-OPERATOR}
+        VITE_FIAT_SYMBOL: ${VITE_FIAT_SYMBOL:-BRL}
+        VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Central Bank}
+    image: cbweb3/treasury-frontend:${FRONTEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX}-treasury-frontend
+    ports:
+      - "${TREASURY_PORT:-0}:80"
+    networks:
+      - entity_net
+
+  supervisor:
+    build:
+      context: ${FRONTEND_CONTEXT}
+      dockerfile: apps/supervisor/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE}
+        VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Central Bank}
+    image: cbweb3/supervisor-frontend:${FRONTEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX}-supervisor-frontend
+    ports:
+      - "${SUPERVISOR_PORT:-0}:80"
+    networks:
+      - entity_net
+
+  noc:
+    build:
+      context: ${FRONTEND_CONTEXT}
+      dockerfile: apps/noc/Dockerfile
+      args:
+        VITE_NOC_BACKEND_URL: ${VITE_API_BASE}
+        VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL}
+        VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM:-cbweb3}
+        VITE_KEYCLOAK_CLIENT_ID: ${VITE_KEYCLOAK_CLIENT_ID:-cbweb3-noc}
+        VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Central Bank}
+    image: cbweb3/noc-frontend:${FRONTEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX}-noc-frontend
+    ports:
+      - "${NOC_PORT:-0}:80"
+    networks:
+      - entity_net
+
+  bank:
+    build:
+      context: ${FRONTEND_CONTEXT}
+      dockerfile: apps/bank/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_PORTAL_OWNER: ${VITE_PORTAL_OWNER:-OPERATOR}
+        VITE_FIAT_SYMBOL: ${VITE_FIAT_SYMBOL:-BRL}
+        VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Commercial Bank}
+    image: cbweb3/bank-frontend:${FRONTEND_IMAGE_TAG:-local}
+    container_name: ${ENTITY_PREFIX}-bank-frontend
+    ports:
+      - "${BANK_PORT:-0}:80"
+    networks:
+      - entity_net
+
+networks:
+  entity_net:
+    name: ${ENTITY_NET_NAME:?ENTITY_NET_NAME is required}
+    external: true

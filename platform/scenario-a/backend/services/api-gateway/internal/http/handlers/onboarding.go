@@ -163,6 +163,11 @@ func (h *OnboardingHandler) GetMyOnboardingStatus(c *fiber.Ctx) error {
 		"request_id": result.RequestID,
 		"user_id":    result.UserID,
 		"status":     result.Status,
+		// wallet_address lets the governance operator (and the provisioning engine's
+		// register-participant step) retrieve the approved bank's on-chain wallet
+		// keyed on bank_code, without the original request_id. On-chain whitelisting
+		// is performed by the engine using the CB governance key.
+		"wallet_address": result.WalletAddress,
 	}
 
 	return c.Status(fiber.StatusOK).JSON(resp)

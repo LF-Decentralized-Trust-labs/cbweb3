@@ -23,8 +23,8 @@ import { useAuthStore } from "../stores";
 import { hasTreasuryAccess } from "../auth/authorization";
 
 const schema = z.object({
-  clientId: z.string().min(3, "Client ID must be at least 3 characters"),
-  clientSecret: z.string().min(6, "Client Secret must be at least 6 characters"),
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
 type LoginForm = z.infer<typeof schema>;
@@ -37,8 +37,8 @@ export function LoginPage() {
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
     defaultValues: {
-      clientId: searchParams.get("username") ?? "",
-      clientSecret: "",
+      username: searchParams.get("username") ?? "",
+      password: "",
     },
   });
 
@@ -52,8 +52,10 @@ export function LoginPage() {
   }, [isAuthenticated, navigate, profile]);
 
   const onSubmit = form.handleSubmit(async (values) => {
-    await login(values.clientId, values.clientSecret);
+    await login(values.username, values.password);
   });
+
+  const institutionName = (import.meta.env.VITE_INSTITUTION_NAME ?? "Central Bank").trim() || "Central Bank";
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-primary/10 via-background to-background">
@@ -62,7 +64,7 @@ export function LoginPage() {
           <Badge variant="secondary" className="mb-4 w-fit">
             LNET · Treasury
           </Badge>
-          <h1 className="text-3xl font-semibold tracking-tight">Central Bank Treasury Portal</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">{institutionName} Portal</h1>
           <p className="mt-3 max-w-md text-sm text-muted-foreground">
             Manage tCeBM issuance, redemption, escrow approvals, HTLC settlement, and reserve reconciliation.
           </p>
@@ -97,35 +99,35 @@ export function LoginPage() {
             <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Building2 className="h-5 w-5" />
             </div>
-            <CardTitle>Sign in to Treasury Portal</CardTitle>
+            <CardTitle>Sign in to {institutionName} Portal</CardTitle>
             <CardDescription>Use institutional credentials to access treasury operations.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="clientId">Client ID</Label>
+                <Label htmlFor="username">Username</Label>
                 <Input
-                  id="clientId"
-                  placeholder="central-bank-a-treasury-client"
-                  {...form.register("clientId")}
+                  id="username"
+                  placeholder="admin@brasil.treasury.gov"
+                  {...form.register("username")}
                   autoComplete="username"
                 />
-                {form.formState.errors.clientId ? (
-                  <p className="text-xs text-destructive">{form.formState.errors.clientId.message}</p>
+                {form.formState.errors.username ? (
+                  <p className="text-xs text-destructive">{form.formState.errors.username.message}</p>
                 ) : null}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="clientSecret">Client Secret</Label>
+                <Label htmlFor="password">Password</Label>
                 <Input
-                  id="clientSecret"
+                  id="password"
                   type="password"
-                  placeholder="Treasury client secret"
-                  {...form.register("clientSecret")}
+                  placeholder="Password"
+                  {...form.register("password")}
                   autoComplete="current-password"
                 />
-                {form.formState.errors.clientSecret ? (
-                  <p className="text-xs text-destructive">{form.formState.errors.clientSecret.message}</p>
+                {form.formState.errors.password ? (
+                  <p className="text-xs text-destructive">{form.formState.errors.password.message}</p>
                 ) : null}
               </div>
 

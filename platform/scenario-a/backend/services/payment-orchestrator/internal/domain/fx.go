@@ -34,8 +34,10 @@ type FXAgreementRecord struct {
 	OriginCurrency  string
 	CounterCurrency string
 	Rate            string
-	SpokeAReceiver  string // Paladin identity that must receive the HTLC lock on Spoke-A
-	SpokeBReceiver  string // Paladin identity that must receive the HTLC lock on Spoke-B
+	SourceSpokeId  string // Spoke ID of the initiating leg (e.g. "spoke-brl")
+	DestSpokeId    string // Spoke ID of the receiving leg (e.g. "spoke-usd")
+	SourceReceiver string // Paladin identity on source spoke
+	DestReceiver   string // Paladin identity on dest spoke
 	ExpiryDate      uint64
 	State           FXState
 	OnChainTxHash   string

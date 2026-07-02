@@ -1,0 +1,19 @@
+services:
+  cacti-smoke:
+    image: curlimages/curl:8.11.1
+    container_name: spk01-cacti-smoke
+    networks:
+      - spk01_cacti_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - SPOKE_FOUND_RPC=http://host.docker.internal:${HOST_RPC_BOOT:-8645}
+      - SPOKE_JOIN_RPC=http://host.docker.internal:${HOST_RPC_JOIN:-8646}
+    volumes:
+      - ../scripts:/scripts:ro
+    entrypoint: ["/bin/sh", "/scripts/verify-cacti-rpc.sh"]
+
+networks:
+  spk01_cacti_net:
+    name: spk01_cacti_net
+    driver: bridge

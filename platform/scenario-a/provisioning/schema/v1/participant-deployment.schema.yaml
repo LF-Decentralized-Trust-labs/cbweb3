@@ -1,0 +1,250 @@
+# JSON Schema draft-07 for the ParticipantDeployment manifest (cbweb3/v1).
+#
+# Usage: add this header to any manifest YAML file to enable editor autocompletion
+# and inline error highlighting (VS Code + Red Hat YAML extension):
+#
+#   # yaml-language-server: $schema: ../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Adjust the relative path to match the manifest file's location.
+
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "cbweb3/v1/ParticipantDeployment"
+title: "ParticipantDeployment"
+description: >
+  Declarative manifest for provisioning a single cbweb3 Scenario A participant
+  (central bank or commercial bank). One file per participant; describes desired
+  deployment state without containing any private keys or credentials.
+type: object
+required:
+  - apiVersion
+  - kind
+  - metadata
+  - spec
+additionalProperties: false
+properties:
+  apiVersion:
+    type: string
+    enum:
+      - "cbweb3/v1"
+    description: "Schema version. Must be cbweb3/v1."
+
+  kind:
+    type: string
+    enum:
+      - "ParticipantDeployment"
+    description: "Resource type. Must be ParticipantDeployment."
+
+  metadata:
+    $ref: "#/definitions/Metadata"
+
+  spec:
+    $ref: "#/definitions/Spec"
+
+definitions:
+  Metadata:
+    type: object
+    required:
+      - name
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        minLength: 1
+        description: "Human-readable identifier for this deployment (e.g., central-bank-brazil)."
+
+  Spec:
+    type: object
+    required:
+      - scenario
+      - role
+      - mode
+      - spoke
+      - node
+      - image
+      - keyProvider
+      - certSource
+      - adminUsers
+    additionalProperties: false
+    properties:
+      scenario:
+        type: string
+        enum:
+          - "a"
+        description: "Scenario identifier. Must be 'a' (Scenario A — Enhanced Correspondent Banking). Scenario B is out of scope for this toolkit."
+
+      environment:
+        type: string
+        enum:
+          - "local"
+          - "staging"
+          - "prod"
+        description: "Named bundle of deployment defaults. Optional. 'local' uses container-network addressing, self-signed certificates, and a local KMS emulator. Overridden field-by-field by explicit values."
+
+      role:
+        type: string
+        enum:
+          - "central-bank"
+          - "commercial-bank"
+        description: "Role of this participant in the spoke. The central bank is the CA for the spoke and deploys contracts (mode: found). Commercial banks join an existing spoke (mode: join)."
+
+      mode:
+        type: string
+        enum:
+          - "found"
+          - "join"
+        description: "'found': this participant creates a new spoke, deploys contracts, and emits a join bundle. 'join': attaches to an existing spoke by consuming a join bundle at joinBundleRef."
+
+      bankId:
+        type: string
+        minLength: 1
+        description: "Commercial-bank identifier within a spoke (mode:join). Optional — defaults to metadata.name. Feeds the CSR subject CN, the IdentityRegistry name, and the BANK_ID compose variable."
+
+      displayName:
+        type: string
+        minLength: 1
+        description: "Friendly institution label shown in the portal header (VITE_INSTITUTION_NAME), e.g. 'Itaú' instead of the slug 'bank-itau'. Optional and purely cosmetic — when omitted, the label falls back to the entity name (central bank) or the resolved bank code (commercial bank). Does not affect the CSR/IdentityRegistry identity."
+
+      cbEndpoint:
+        type: string
+        minLength: 1
+        description: "Central bank's credential-request URL (mode:found). Embedded into the emitted join bundle so a joining commercial bank knows where to submit its CSR."
+
+      spoke:
+        $ref: "#/definitions/Spoke"
+
+      node:
+        $ref: "#/definitions/Node"
+
+      image:
+        type: string
+        minLength: 1
+        description: "Container image source. 'build' to build from source, or a registry image reference (e.g., registry.lnet.example.com/cbweb3/api-gateway:1.2.0)."
+
+      keyProvider:
+        type: string
+        minLength: 1
+        description: "Key provider URI. 'kms://local-emulator' for local development. 'kms://...' for a real KMS in staging/prod. All cryptographic keys are managed through this provider — never inlined in the manifest."
+
+      certSource:
+        type: string
+        minLength: 1
+        description: "'self-signed' for local development (CB generates its own CA and signs CSRs). 'ca://<endpoint>' for CA-signed certificates in staging/prod."
+
+      relay:
+        $ref: "#/definitions/Relay"
+
+      joinBundleRef:
+        type: string
+        minLength: 1
+        description: "Path to the join bundle YAML file produced by a 'found' deployment (e.g., ./bundles/spoke-brl.bundle.yaml). Contextually required when mode is 'join'; schema-level conditional enforcement is deferred (see TK-3)."
+
+      adminUsers:
+        type: array
+        minItems: 1
+        description: "Per-role human operator accounts provisioned in the entity's Keycloak realm(s). Portal/operator login uses these (password grant) instead of confidential client credentials, so audit logs carry a real actor. Required: one per role the entity hosts (central-bank: ROLE_GOVERNANCE, ROLE_TREASURY, ROLE_SUPERVISOR, ROLE_NOC_ADMIN; commercial-bank: ROLE_BANK). FUTURE: source the password from a secret store, never commit it for staging/prod."
+        items:
+          $ref: "#/definitions/AdminUser"
+
+  AdminUser:
+    type: object
+    required:
+      - role
+      - username
+      - password
+    additionalProperties: false
+    properties:
+      role:
+        type: string
+        description: "Keycloak realm role granted to the user; also selects the realm (ROLE_GOVERNANCE/ROLE_TREASURY/ROLE_SUPERVISOR -> central-bank realm; ROLE_NOC_ADMIN -> cbweb3/NOC realm; ROLE_BANK -> bank realm)."
+      username:
+        type: string
+        minLength: 1
+        description: "Login username (email-style; encode the spoke for commercial banks, e.g. admin@itau.brasil.com)."
+      password:
+        type: string
+        minLength: 1
+        description: "Local-profile password. FUTURE: source from a secret store and use a temporary password for staging/prod; never commit a real credential."
+
+  Spoke:
+    type: object
+    required:
+      - id
+      - chainId
+      - currency
+    additionalProperties: false
+    properties:
+      id:
+        type: string
+        minLength: 1
+        description: "Unique identifier for this spoke (e.g., spoke-brl). Used to key settlement legs and relay routing."
+
+      chainId:
+        type: integer
+        minimum: 1
+        description: "EVM chain ID for this spoke's Besu network (e.g., 1337 for local dev)."
+
+      currency:
+        type: string
+        minLength: 1
+        description: "ISO 4217 currency code for this spoke (e.g., BRL, USD, EUR)."
+
+  Node:
+    type: object
+    required:
+      - advertisedHost
+    additionalProperties: false
+    properties:
+      advertisedHost:
+        type: string
+        minLength: 1
+        description: >
+          Required. The externally reachable address of this Besu node used in the enode URL.
+          Must be set explicitly — NEVER inferred from co-location or container IP.
+          In local deployments, use the container DNS name
+          (e.g., cbweb3-spoke-brl-besu.central-bank-brazil).
+          In production, use the real public hostname or IP.
+
+      rpc:
+        $ref: "#/definitions/Port"
+        description: "JSON-RPC endpoint port. Defaults applied by the 'environment' preset when omitted."
+
+      ws:
+        $ref: "#/definitions/Port"
+        description: "WebSocket endpoint port. Defaults applied by the 'environment' preset when omitted."
+
+      p2p:
+        $ref: "#/definitions/Port"
+        description: "P2P (enode) port for Besu peer discovery. Defaults applied by the 'environment' preset when omitted."
+
+      dataDir:
+        type: string
+        minLength: 1
+        description: >
+          Host path where the provisioning engine stores all spoke runtime data:
+          genesis files, TLS certs, Paladin configs, provisioning state, and deployed
+          contract addresses. May be absolute, or relative — relative paths are
+          resolved against the current working directory of the cbweb3 process.
+          Required for mode:found and mode:join.
+
+  Port:
+    type: object
+    required:
+      - port
+    additionalProperties: false
+    properties:
+      port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        description: "TCP port number (1–65535)."
+
+  Relay:
+    type: object
+    required:
+      - endpoint
+    additionalProperties: false
+    properties:
+      endpoint:
+        type: string
+        minLength: 1
+        description: "HTTP(S) URL of the LNET-operated Cacti relay (e.g., http://cbweb3-cacti:4000). The relay is centrally operated by LNET; individual banks never run their own relay."

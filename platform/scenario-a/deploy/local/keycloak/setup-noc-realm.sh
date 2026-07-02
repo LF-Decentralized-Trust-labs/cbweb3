@@ -71,7 +71,7 @@ fi
 
 # ── Create realm roles ────────────────────────────────────────────────────────
 echo -e "${BLUE}Creating NOC roles...${NC}"
-for role in noc-viewer noc-operator noc-admin; do
+for role in ROLE_NOC_VIEWER ROLE_NOC_OPERATOR ROLE_NOC_ADMIN; do
   if ${KCADM} get roles -r "${NOC_REALM}" --fields name \
       | grep -q "\"${role}\""; then
     echo -e "${YELLOW}  Role '${role}' already exists — skipping.${NC}"
@@ -120,12 +120,12 @@ else
   echo -e "${GREEN}  User '${NOC_USER}' created.${NC}"
 fi
 
-# ── Assign noc-admin role to user ─────────────────────────────────────────────
-echo -e "${BLUE}Assigning 'noc-admin' role to '${NOC_USER}'...${NC}"
+# ── Assign ROLE_NOC_ADMIN role to user ────────────────────────────────────────
+echo -e "${BLUE}Assigning 'ROLE_NOC_ADMIN' role to '${NOC_USER}'...${NC}"
 ${KCADM} add-roles \
   -r "${NOC_REALM}" \
   --uusername "${NOC_USER}" \
-  --rolename noc-admin || true
+  --rolename ROLE_NOC_ADMIN || true
 echo -e "${GREEN}  Role assigned.${NC}"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "  Realm    : ${NOC_REALM}"
 echo -e "  Client   : ${NOC_CLIENT_ID}"
-echo -e "  Roles    : noc-viewer  noc-operator  noc-admin"
+echo -e "  Roles    : ROLE_NOC_VIEWER  ROLE_NOC_OPERATOR  ROLE_NOC_ADMIN"
 echo -e "  Username : ${NOC_USER}"
 echo -e "  Password : ${NOC_PASSWORD}"
 echo ""

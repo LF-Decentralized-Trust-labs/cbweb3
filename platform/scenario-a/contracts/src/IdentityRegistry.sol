@@ -34,13 +34,23 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
             revert InvalidIdentityData();
         }
 
+        // lastUpdate is intentionally NOT set to block.timestamp. This contract is also
+        // deployed inside Pente privacy groups, where every group member re-executes the
+        // transaction to endorse it. Pente derives block.timestamp from the executor's base
+        // block, so an assembler and an endorser that anchor to different base blocks (which
+        // happens whenever the base chain advances during a slow cross-node endorsement)
+        // compute different values, diverge on the resulting storage root, and the endorsement
+        // is rejected with "Execution state mismatch detected in endorsement" — wedging the
+        // private transaction forever. Any block.* value written into endorsed state is
+        // therefore forbidden here. The field is kept (as 0) to preserve the ABI; the audit
+        // timestamp is available off-chain from the ParticipantRegistered event's block.
         _participants[account] = IdentityRegistryLibrary.Participant({
             legalName: name,
             role: role,
             status: IdentityRegistryLibrary.KycStatus.Verified,
             zkPointer: zkPointer,
             certFingerprint: bytes32(0),
-            lastUpdate: block.timestamp
+            lastUpdate: 0
         });
 
         emit ParticipantRegistered(account, role, name);
@@ -86,7 +96,8 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
     {
         IdentityRegistryLibrary.KycStatus oldStatus = _participants[account].status;
         _participants[account].status = newStatus;
-        _participants[account].lastUpdate = block.timestamp;
+        // lastUpdate deliberately not written: block.timestamp is nondeterministic across
+        // Pente endorsers (see registerParticipant). Audit time is in the IdentityUpdated event.
 
         emit IdentityUpdated(account, oldStatus, newStatus);
     }
@@ -95,7 +106,8 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
     /// @dev Binds an X.509 certificate to a participant's on-chain identity.
     function setCertFingerprint(address account, bytes32 fingerprint) external override onlyRole(GOVERNANCE_ROLE) {
         _participants[account].certFingerprint = fingerprint;
-        _participants[account].lastUpdate = block.timestamp;
+        // lastUpdate deliberately not written: block.timestamp is nondeterministic across
+        // Pente endorsers (see registerParticipant). Audit time is in the CertificateRegistered event.
 
         emit CertificateRegistered(account, fingerprint);
     }

@@ -48,7 +48,7 @@ export function LoginPage() {
           <Badge variant="secondary" className="mb-4 w-fit">
             LNET · CBWeb3
           </Badge>
-          <h1 className="text-3xl font-semibold tracking-tight">Regional CBDC Bank Portal</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Regional tCeBM Bank Portal</h1>
           <p className="mt-3 max-w-md text-sm text-muted-foreground">
             Execute domestic liquidity operations, PvP settlements, and automated FX flows in a privacy-preserving environment.
           </p>

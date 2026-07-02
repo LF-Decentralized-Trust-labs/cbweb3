@@ -64,8 +64,10 @@ export interface FXProposalEvent {
   counterCurrency: string;
   rate: string;
   expiryDate: number;
-  spokeAReceiver: string;
-  spokenBReceiver: string;
+  sourceSpokeId: string;
+  destSpokeId: string;
+  sourceReceiver: string;
+  destReceiver: string;
   blockNumber: number;
   txHash: string;
   timestamp: number;
@@ -145,8 +147,10 @@ interface ProposeFXAgreementGrpcRequest {
   counter_currency: string;
   rate: string;
   expiry_date: number;
-  spoke_a_receiver: string;
-  spoke_b_receiver: string;
+  source_spoke_id: string;
+  dest_spoke_id: string;
+  source_receiver: string;
+  dest_receiver: string;
   on_behalf: boolean;
 }
 interface ProposeFXAgreementGrpcResponse { tx_hash: string; trade_id: string; }
@@ -237,12 +241,12 @@ function createGrpcClient(
 // ---------------------------------------------------------------------------
 
 export interface SpokeDep {
-  name: string;
+  id: string;
   besuRpc: string;
   besuWs: string;
   htlcAddress: string;
   internalApiUrl: string;
-  counterpartGrpc: string;
+  grpcEndpoint: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +273,12 @@ export class HtlcRelay {
   private readonly forwardedSecrets = new Set<string>();
   /** Tracks trade IDs already forwarded cross-spoke. Value = timestamp (ms). */
   private readonly forwardedTradeIds = new Map<string, number>();
+  /** gRPC client per spoke, keyed by spoke.id. Created on add and reused for all settlements. */
+  private readonly grpcClients = new Map<string, PaymentOrchestratorClient>();
+  /** Spokes currently being watched (a pollSpoke loop is running), keyed by id. */
+  private readonly watching = new Set<string>();
+  /** The lifecycle signal, captured in start() and reused by runtime addSpoke() calls. */
+  private signal?: AbortSignal;
 
   constructor(
     private readonly spokes: SpokeDep[],
@@ -277,6 +287,10 @@ export class HtlcRelay {
     private readonly relayAuthSecret: string,
     private readonly relayStore: RelayStore,
     private readonly cactiConnectors: Map<string, PluginLedgerConnectorBesu>,
+    // connectorFactory (re)creates a Besu connector for a spoke: used to attach a connector when
+    // a spoke is registered at runtime, and to reconnect after WS failures. Optional so unit
+    // tests that never poll can omit it.
+    private readonly connectorFactory?: (spoke: SpokeDep) => Promise<PluginLedgerConnectorBesu>,
     private readonly log: Pick<Console, "info" | "warn" | "error"> = console,
   ) {}
 
@@ -313,15 +327,54 @@ export class HtlcRelay {
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   /**
-   * Start polling all configured spokes. The provided AbortSignal is checked
-   * at each poll tick; cancel it to shut the relay down gracefully.
+   * Start the relay. Captures the lifecycle AbortSignal (cancel it to shut down) and begins
+   * watching any spokes supplied at construction. Additional spokes are attached at runtime via
+   * addSpoke() as they register — the watcher set is driven by the dynamic registry, not a fixed
+   * startup list.
    */
   start(signal: AbortSignal): void {
+    this.signal = signal;
+    signal.addEventListener("abort", () => {
+      for (const c of this.grpcClients.values()) c.close();
+    }, { once: true });
     for (const spoke of this.spokes) {
-      this.pollSpoke(spoke, signal).catch((err: unknown) => {
-        this.log.error(`[${spoke.name}] fatal poll error: ${String(err)}`);
-      });
+      void this.addSpoke(spoke);
     }
+  }
+
+  /**
+   * addSpoke begins watching a spoke: it ensures a Besu connector exists (creating one via
+   * connectorFactory when absent), creates the spoke's gRPC client, and launches its poll loop.
+   * Idempotent — a spoke already being watched is ignored (re-registration does not restart it).
+   * Safe to call before or after start(); requires start() to have captured the signal.
+   */
+  async addSpoke(spoke: SpokeDep): Promise<void> {
+    if (this.watching.has(spoke.id)) {
+      return;
+    }
+    if (!this.signal) {
+      this.log.error(`[${spoke.id}] addSpoke called before start() — ignored`);
+      return;
+    }
+    if (!this.cactiConnectors.has(spoke.id)) {
+      if (!this.connectorFactory) {
+        this.log.error(`[${spoke.id}] no Cacti connector and no connectorFactory — cannot watch`);
+        return;
+      }
+      try {
+        this.cactiConnectors.set(spoke.id, await this.connectorFactory(spoke));
+      } catch (err) {
+        this.log.error(`[${spoke.id}] connector init failed, will not watch: ${String(err)}`);
+        return;
+      }
+    }
+    this.watching.add(spoke.id);
+    this.grpcClients.set(spoke.id, createGrpcClient(spoke.grpcEndpoint, this.protoPath));
+    this.log.info(`[${spoke.id}] watcher started rpc=${spoke.besuRpc} htlc=${spoke.htlcAddress} internalApi=${spoke.internalApiUrl}`);
+    this.pollSpoke(spoke, this.signal).catch((err: unknown) => {
+      this.watching.delete(spoke.id);
+      this.log.error(`[${spoke.id}] fatal poll error: ${String(err)}`);
+    });
   }
 
   // ── Private helpers ────────────────────────────────────────────────────
@@ -330,15 +383,18 @@ export class HtlcRelay {
     spoke: SpokeDep,
     signal: AbortSignal,
   ): Promise<void> {
-    const connector = this.cactiConnectors.get(spoke.name);
+    let connector = this.cactiConnectors.get(spoke.id);
     if (!connector) {
-      this.log.error(`[${spoke.name}] no Cacti connector registered — cannot poll`);
+      this.log.error(`[${spoke.id}] no Cacti connector registered — cannot poll`);
       return;
     }
+    // Consecutive poll-cycle failures; after RECONNECT_AFTER we rebuild the Besu connector to
+    // recover from a dropped WebSocket ("connection not open on send()"), which never self-heals.
+    let failures = 0;
+    const RECONNECT_AFTER = 3;
 
     // ethers Interface used only for ABI decoding of raw EvmLog topics/data.
     const iface = new ethers.Interface(HTLC_ABI);
-    const grpcClient = createGrpcClient(spoke.counterpartGrpc, this.protoPath);
 
     // Compute event topic hashes for log filtering via Cacti getPastLogs.
     const topicLocked = ethers.id("LogHTLCLocked(bytes32,address,address,bytes32,uint256,bytes32)");
@@ -352,10 +408,10 @@ export class HtlcRelay {
         ? Number((blockResp.block as Record<string, unknown>)["number"] ?? 0)
         : 0;
     } catch (err) {
-      this.log.error(`[${spoke.name}] cannot get current block via Cacti: ${String(err)}`);
+      this.log.error(`[${spoke.id}] cannot get current block via Cacti: ${String(err)}`);
       fromBlock = 0;
     }
-    this.log.info(`[${spoke.name}] relay started at block ${fromBlock} (via Cacti connector)`);
+    this.log.info(`[${spoke.id}] relay started at block ${fromBlock} (via Cacti connector)`);
 
     while (!signal.aborted) {
       await sleep(this.pollIntervalMs);
@@ -392,7 +448,7 @@ export class HtlcRelay {
             const parsed = iface.parseLog({ topics: raw.topics, data: raw.data });
             if (!parsed) continue;
             const evt: LockEvent = {
-              spoke: spoke.name,
+              spoke: spoke.id,
               contractId: strip0x(parsed.args[0] as string),
               sender: parsed.args[1] as string,
               receiver: parsed.args[2] as string,
@@ -405,10 +461,10 @@ export class HtlcRelay {
             };
             pushRing(this.lockEvents, evt, MAX_EVENTS);
             this.log.info(
-              `[${spoke.name}] LogHTLCLocked contractId=${evt.contractId} block=${evt.blockNumber}`,
+              `[${spoke.id}] LogHTLCLocked contractId=${evt.contractId} block=${evt.blockNumber}`,
             );
           } catch (decodeErr) {
-            this.log.warn(`[${spoke.name}] failed to decode LogHTLCLocked: ${String(decodeErr)}`);
+            this.log.warn(`[${spoke.id}] failed to decode LogHTLCLocked: ${String(decodeErr)}`);
           }
         }
 
@@ -420,7 +476,7 @@ export class HtlcRelay {
             const contractId = strip0x(parsed.args[0] as string);
             const secret = strip0x(parsed.args[1] as string);
             const evt: SettleEvent = {
-              spoke: spoke.name,
+              spoke: spoke.id,
               contractId,
               secret,
               blockNumber: raw.blockNumber,
@@ -429,37 +485,37 @@ export class HtlcRelay {
             };
             pushRing(this.settleEvents, evt, MAX_EVENTS);
             this.log.info(
-              `[${spoke.name}] LogHTLCClaimed contractId=${contractId} block=${raw.blockNumber} tx=${raw.transactionHash}`,
+              `[${spoke.id}] LogHTLCClaimed contractId=${contractId} block=${raw.blockNumber} tx=${raw.transactionHash}`,
             );
 
             if (this.forwardedSecrets.has(secret)) {
               this.log.info(
-                `[${spoke.name}] skipping echo event for already-forwarded secret contractId=${contractId}`,
+                `[${spoke.id}] skipping echo event for already-forwarded secret contractId=${contractId}`,
               );
               continue;
             }
 
-            const counterpartId = this.resolveCounterpartContractId(
-              spoke.name,
-              contractId,
-            );
-
-            await this.settleOnCounterpart(
-              grpcClient,
-              spoke.name,
-              counterpartId,
-              secret,
-            );
+            const resolved = this.resolveCounterpart(spoke.id, contractId);
+            if (!resolved) {
+              this.log.warn(`[${spoke.id}] skipping settlement — could not resolve counterpart for contractId=${contractId}`);
+              continue;
+            }
+            const destClient = this.grpcClients.get(resolved.destSpokeId);
+            if (!destClient) {
+              this.log.error(`[${spoke.id}] settlement skipped: dest_spoke_id "${resolved.destSpokeId}" not in registry`);
+              continue;
+            }
+            await this.settleOnCounterpart(destClient, spoke.id, resolved.contractId, secret);
             this.forwardedSecrets.add(secret);
           } catch (decodeErr) {
-            this.log.warn(`[${spoke.name}] failed to decode LogHTLCClaimed: ${String(decodeErr)}`);
+            this.log.warn(`[${spoke.id}] failed to decode LogHTLCClaimed: ${String(decodeErr)}`);
           }
         }
 
         // ── FX Agreement polling (REST-based, no on-chain contract) ─────
         this.pruneForwardedTradeIds();
-        await this.processDueRetriesForSpoke(grpcClient, spoke.name);
-        await this.pollFXAgreementsRest(grpcClient, spoke);
+        await this.processDueRetriesForSpoke(spoke.id);
+        await this.pollFXAgreementsRest(spoke);
 
         const stats = this.relayStore.getRetryStats();
         if (stats.pending > 0) {
@@ -469,25 +525,34 @@ export class HtlcRelay {
         }
 
         fromBlock = toBlock + 1;
+        failures = 0;
       } catch (err) {
-        this.log.warn(`[${spoke.name}] poll cycle error: ${String(err)}`);
+        this.log.warn(`[${spoke.id}] poll cycle error: ${String(err)}`);
+        failures++;
+        if (failures >= RECONNECT_AFTER && this.connectorFactory) {
+          this.log.warn(`[${spoke.id}] reconnecting Besu connector after ${failures} consecutive failures`);
+          try {
+            const fresh = await this.connectorFactory(spoke);
+            try { await connector.shutdown(); } catch { /* best-effort */ }
+            connector = fresh;
+            this.cactiConnectors.set(spoke.id, fresh);
+            failures = 0;
+            this.log.info(`[${spoke.id}] Besu connector reconnected`);
+          } catch (reErr) {
+            this.log.error(`[${spoke.id}] reconnect failed: ${String(reErr)}`);
+          }
+        }
       }
     }
 
-    grpcClient.close();
-    this.log.info(`[${spoke.name}] relay stopped`);
+    this.watching.delete(spoke.id);
+    this.log.info(`[${spoke.id}] relay stopped`);
   }
 
-  /**
-   * Given a source spoke name and contractId, find the corresponding lock on
-   * the counterpart spoke by matching the hashLock field.
-   * Falls back to the source contractId (with a warning) when no matching
-   * counterpart lock is in the ring buffer yet.
-   */
-  private resolveCounterpartContractId(
+  private resolveCounterpart(
     spokeName: string,
     contractId: string,
-  ): string {
+  ): { destSpokeId: string; contractId: string } | undefined {
     // Walk backwards so we pick the most recent matching event.
     let sourceLock: LockEvent | undefined;
     for (let i = this.lockEvents.length - 1; i >= 0; i--) {
@@ -499,9 +564,9 @@ export class HtlcRelay {
     }
     if (!sourceLock) {
       this.log.warn(
-        `[${spokeName}] resolveCounterpart: source lock not found for contractId=${contractId}, forwarding as-is`,
+        `[${spokeName}] resolveCounterpart: source lock not found for contractId=${contractId}`,
       );
-      return contractId;
+      return undefined;
     }
 
     let counterpartLock: LockEvent | undefined;
@@ -514,15 +579,15 @@ export class HtlcRelay {
     }
     if (!counterpartLock) {
       this.log.warn(
-        `[${spokeName}] resolveCounterpart: no counterpart lock found for hashLock=${sourceLock.hashLock}, forwarding source contractId`,
+        `[${spokeName}] resolveCounterpart: no counterpart lock found for hashLock=${sourceLock.hashLock}`,
       );
-      return contractId;
+      return undefined;
     }
 
     this.log.info(
-      `[${spokeName}] resolveCounterpart: ${contractId} → ${counterpartLock.contractId} (spoke=${counterpartLock.spoke})`,
+      `[${spokeName}] resolveCounterpart: ${contractId} → ${counterpartLock.contractId} (destSpokeId=${counterpartLock.spoke})`,
     );
-    return counterpartLock.contractId;
+    return { destSpokeId: counterpartLock.spoke, contractId: counterpartLock.contractId };
   }
 
   private settleOnCounterpart(
@@ -561,7 +626,6 @@ export class HtlcRelay {
   }
 
   private async pollFXAgreementsRest(
-    client: PaymentOrchestratorClient,
     spoke: SpokeDep,
   ): Promise<void> {
     const url = `${spoke.internalApiUrl}/internal/v1/payments/fx/agreements`;
@@ -573,12 +637,12 @@ export class HtlcRelay {
         },
       });
       if (!res.ok) {
-        this.log.warn(`[${spoke.name}] FX REST poll failed: ${res.status}`);
+        this.log.warn(`[${spoke.id}] FX REST poll failed: ${res.status}`);
         return;
       }
       body = await res.json() as { agreements?: unknown[] };
     } catch (err) {
-      this.log.warn(`[${spoke.name}] FX REST poll error: ${String(err)}`);
+      this.log.warn(`[${spoke.id}] FX REST poll error: ${String(err)}`);
       return;
     }
 
@@ -590,8 +654,19 @@ export class HtlcRelay {
       if (!tradeId || !state) continue;
 
       if (state === "FX_STATE_PROPOSED" && !(await this.wasForwarded(`propose:${tradeId}`))) {
+        const destSpokeId = (a["dest_spoke_id"] as string) ?? "";
+        const sourceSpokeId = (a["source_spoke_id"] as string) ?? "";
+        if (!sourceSpokeId || !destSpokeId) {
+          this.log.error(`[${spoke.id}] FX REST: skipping proposal tradeId=${tradeId} — missing source_spoke_id or dest_spoke_id`);
+          continue;
+        }
+        const client = this.grpcClients.get(destSpokeId);
+        if (!client) {
+          this.log.error(`[${spoke.id}] FX REST: skipping proposal tradeId=${tradeId} — dest_spoke_id "${destSpokeId}" not in registry`);
+          continue;
+        }
         const evt: FXProposalEvent = {
-          spoke: spoke.name,
+          spoke: spoke.id,
           tradeId,
           originator: (a["originator"] as string) ?? "",
           counterpartyB: a["counterparty_b"] as string,
@@ -604,73 +679,109 @@ export class HtlcRelay {
           counterCurrency: a["counter_currency"] as string,
           rate: a["rate"] as string,
           expiryDate: a["expiry_date"] as number,
-          spokeAReceiver: (a["spoke_a_receiver"] as string) ?? "",
-          spokenBReceiver: (a["spoke_b_receiver"] as string) ?? "",
+          sourceSpokeId,
+          destSpokeId,
+          sourceReceiver: (a["source_receiver"] as string) ?? "",
+          destReceiver: (a["dest_receiver"] as string) ?? "",
           blockNumber: 0,
           txHash: "",
           timestamp: Date.now(),
         };
         pushRing(this.fxProposalEvents, evt, MAX_EVENTS);
-        this.log.info(`[${spoke.name}] FX REST: forwarding proposal tradeId=${tradeId}`);
-        await this.tryForwardFXAction("propose", spoke.name, tradeId, client, evt as unknown as Record<string, unknown>);
+        this.log.info(`[${spoke.id}] FX REST: forwarding proposal tradeId=${tradeId} sourceSpokeId=${sourceSpokeId} destSpokeId=${destSpokeId}`);
+        const payload = { ...(evt as unknown as Record<string, unknown>), destSpokeId };
+        await this.tryForwardFXAction("propose", spoke.id, tradeId, client, payload);
 
       } else if (state === "FX_STATE_ACCEPTED" && !(await this.wasForwarded(`accept:${tradeId}`))) {
+        const sourceSpokeId = a["source_spoke_id"] as string;
+        const client = this.grpcClients.get(sourceSpokeId);
+        if (!client) {
+          this.log.error(`[${spoke.id}] FX REST: skipping acceptance tradeId=${tradeId} — source_spoke_id "${sourceSpokeId}" not in registry`);
+          continue;
+        }
         const evt: FXAcceptanceEvent = {
-          spoke: spoke.name,
+          spoke: spoke.id,
           tradeId,
           blockNumber: 0,
           txHash: "",
           timestamp: Date.now(),
         };
         pushRing(this.fxAcceptanceEvents, evt, MAX_EVENTS);
-        this.log.info(`[${spoke.name}] FX REST: forwarding acceptance tradeId=${tradeId}`);
-        await this.tryForwardFXAction("accept", spoke.name, tradeId, client);
+        this.log.info(`[${spoke.id}] FX REST: forwarding acceptance tradeId=${tradeId}`);
+        await this.tryForwardFXAction("accept", spoke.id, tradeId, client, { destSpokeId: sourceSpokeId });
 
       } else if (state === "FX_STATE_REJECTED" && !(await this.wasForwarded(`reject:${tradeId}`))) {
+        const sourceSpokeId = a["source_spoke_id"] as string;
+        const client = this.grpcClients.get(sourceSpokeId);
+        if (!client) {
+          this.log.error(`[${spoke.id}] FX REST: skipping rejection tradeId=${tradeId} — source_spoke_id "${sourceSpokeId}" not in registry`);
+          continue;
+        }
         const evt: FXRejectionEvent = {
-          spoke: spoke.name,
+          spoke: spoke.id,
           tradeId,
           blockNumber: 0,
           txHash: "",
           timestamp: Date.now(),
         };
         pushRing(this.fxRejectionEvents, evt, MAX_EVENTS);
-        this.log.info(`[${spoke.name}] FX REST: forwarding rejection tradeId=${tradeId}`);
-        await this.tryForwardFXAction("reject", spoke.name, tradeId, client);
+        this.log.info(`[${spoke.id}] FX REST: forwarding rejection tradeId=${tradeId}`);
+        await this.tryForwardFXAction("reject", spoke.id, tradeId, client, { destSpokeId: sourceSpokeId });
 
       } else if (state === "FX_STATE_CANCELLED" && !(await this.wasForwarded(`cancel:${tradeId}`))) {
+        const sourceSpokeId = a["source_spoke_id"] as string;
+        const client = this.grpcClients.get(sourceSpokeId);
+        if (!client) {
+          this.log.error(`[${spoke.id}] FX REST: skipping cancellation tradeId=${tradeId} — source_spoke_id "${sourceSpokeId}" not in registry`);
+          continue;
+        }
         const evt: FXCancellationEvent = {
-          spoke: spoke.name,
+          spoke: spoke.id,
           tradeId,
           blockNumber: 0,
           txHash: "",
           timestamp: Date.now(),
         };
         pushRing(this.fxCancellationEvents, evt, MAX_EVENTS);
-        this.log.info(`[${spoke.name}] FX REST: forwarding cancellation tradeId=${tradeId}`);
-        await this.tryForwardFXAction("cancel", spoke.name, tradeId, client);
+        this.log.info(`[${spoke.id}] FX REST: forwarding cancellation tradeId=${tradeId}`);
+        await this.tryForwardFXAction("cancel", spoke.id, tradeId, client, { destSpokeId: sourceSpokeId });
 
       } else if (state === "FX_STATE_SETTLED" && !(await this.wasForwarded(`settle:${tradeId}`))) {
+        const sourceSpokeId = a["source_spoke_id"] as string;
+        const client = this.grpcClients.get(sourceSpokeId);
+        if (!client) {
+          this.log.error(`[${spoke.id}] FX REST: skipping settlement tradeId=${tradeId} — source_spoke_id "${sourceSpokeId}" not in registry`);
+          continue;
+        }
         const evt: FXSettlementEvent = {
-          spoke: spoke.name,
+          spoke: spoke.id,
           tradeId,
           blockNumber: 0,
           txHash: "",
           timestamp: Date.now(),
         };
         pushRing(this.fxSettlementEvents, evt, MAX_EVENTS);
-        this.log.info(`[${spoke.name}] FX REST: forwarding settlement tradeId=${tradeId}`);
-        await this.tryForwardFXAction("settle", spoke.name, tradeId, client);
+        this.log.info(`[${spoke.id}] FX REST: forwarding settlement tradeId=${tradeId}`);
+        await this.tryForwardFXAction("settle", spoke.id, tradeId, client, { destSpokeId: sourceSpokeId });
       }
     }
   }
 
   private async processDueRetriesForSpoke(
-    client: PaymentOrchestratorClient,
     spokeName: string,
   ): Promise<void> {
-    const due = this.relayStore.getDueRetries(spokeName);
+    const due = await this.relayStore.getDueRetries(spokeName);
     for (const item of due) {
+      const destSpokeId = item.payload?.["destSpokeId"] as string | undefined;
+      if (!destSpokeId) {
+        this.log.error(`[${spokeName}] retry skipped: no destSpokeId in payload for tradeId=${item.tradeId}`);
+        continue;
+      }
+      const client = this.grpcClients.get(destSpokeId);
+      if (!client) {
+        this.log.error(`[${spokeName}] retry skipped: dest_spoke_id "${destSpokeId}" not in registry for tradeId=${item.tradeId}`);
+        continue;
+      }
       await this.tryForwardFXAction(item.action, spokeName, item.tradeId, client, item.payload, item);
     }
   }
@@ -744,8 +855,10 @@ export class HtlcRelay {
           counter_currency: event.counterCurrency,
           rate: event.rate,
           expiry_date: event.expiryDate,
-          spoke_a_receiver: event.spokeAReceiver,
-          spoke_b_receiver: event.spokenBReceiver,
+          source_spoke_id: event.sourceSpokeId,
+          dest_spoke_id: event.destSpokeId,
+          source_receiver: event.sourceReceiver,
+          dest_receiver: event.destReceiver,
           on_behalf: true,
         },
         new grpc.Metadata(),

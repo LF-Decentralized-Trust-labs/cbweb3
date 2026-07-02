@@ -11,7 +11,7 @@ type AuthState = {
   initialized: boolean;
   status: AsyncStatus;
   error: string | null;
-  login: (clientId: string, clientSecret: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   forceLogout: () => void;
   bindWallet: (walletAddress: string) => Promise<void>;
@@ -24,11 +24,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   initialized: false,
   status: "idle",
   error: null,
-  login: async (clientId, clientSecret) => {
+  login: async (username, password) => {
     set({ status: "loading", error: null });
 
     try {
-      const loginResponse = await authApi.login(clientId, clientSecret);
+      const loginResponse = await authApi.login(username, password);
       if ("nonce" in loginResponse) {
         throw new Error("PKI authentication is not supported in the Bank Portal.");
       }

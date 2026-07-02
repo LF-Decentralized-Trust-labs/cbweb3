@@ -177,8 +177,10 @@ export function settlementScenario() {
     counter_currency: "BRL",
     rate: FX_RATE,
     expiry_date: Math.floor(Date.now() / 1000) + 3600,
-    spoke_a_receiver: ORIGIN_RECEIVER,
-    spoke_b_receiver: BENEFICIARY,
+    source_spoke_id: "spoke-a",
+    dest_spoke_id: "spoke-b",
+    source_receiver: ORIGIN_RECEIVER,
+    dest_receiver: BENEFICIARY,
     on_behalf: false,
   });
   const pr = http.post(`${ORIGINATOR_GW}/api/v1/payments/fx/agreements`, proposeBody, postOpts(ORIGINATOR_TOKEN, "fx-propose"));

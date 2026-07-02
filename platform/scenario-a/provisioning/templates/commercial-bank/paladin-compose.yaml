@@ -1,0 +1,60 @@
+# Paladin node compose template for a commercial bank (mode: join).
+# Brought up by the mode:join engine (feature 033 US2) after the bank's Besu node
+# is synced and the bank is registered on-chain. A single Paladin node attaches to
+# the spoke's existing external Besu network.
+#
+# Variables injected by the engine at runtime:
+#   SPOKE_ID                — spoke identifier (e.g. "spoke-brl")
+#   BANK_ID                 — commercial bank id within the spoke (e.g. "bank-itau")
+#   PALADIN_IMAGE           — Paladin Docker image
+#   PALADIN_BANK_RPC_PORT   — host port for the bank Paladin HTTP RPC
+#   PALADIN_BANK_WS_PORT    — host port for the bank Paladin WebSocket RPC
+#   PALADIN_BANK_GRPC_PORT  — host port for the bank Paladin gRPC transport
+#   SPOKE_DATA_DIR          — absolute path on host to the bank's runtime data
+#   SPOKE_NETWORK_NAME      — external Docker network shared with the spoke Besu stack
+
+services:
+  paladin-bank-data-init:
+    image: alpine:3.20
+    user: "0:0"
+    volumes:
+      - bank_data:/data/bank
+    command: ["sh", "-c", "mkdir -p /data/bank && chmod -R 777 /data/bank"]
+    restart: "no"
+
+  # Service key is fixed (Compose forbids ${...} in service names); the spoke and
+  # bank ids are carried in container_name.
+  paladin-bank:
+    image: ${PALADIN_IMAGE}
+    container_name: paladin-${SPOKE_ID}-${BANK_ID}
+    user: "${PALADIN_UID:-1000}:${PALADIN_GID:-1000}"
+    ports:
+      - "${PALADIN_BANK_RPC_PORT}:8548"
+      - "${PALADIN_BANK_WS_PORT}:8549"
+      - "${PALADIN_BANK_GRPC_PORT}:9000"
+    environment:
+      - PALADIN_LOG_LEVEL=debug
+    volumes:
+      - ${SPOKE_DATA_DIR}/paladin/${BANK_ID}:/etc/paladin
+      - bank_data:/data
+    tmpfs:
+      - /app/jna:exec,mode=1777
+      - /data/keystore:mode=0777
+    networks:
+      - spoke_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    depends_on:
+      paladin-bank-data-init:
+        condition: service_completed_successfully
+    command: ["/etc/paladin/config.yaml", "engine"]
+
+networks:
+  spoke_network:
+    name: ${SPOKE_NETWORK_NAME}
+    external: true
+
+volumes:
+  bank_data:
+    name: ${SPOKE_ID}_${BANK_ID}_paladin_data

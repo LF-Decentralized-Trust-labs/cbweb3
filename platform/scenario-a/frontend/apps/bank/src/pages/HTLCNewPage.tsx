@@ -90,13 +90,13 @@ export function HTLCNewPage() {
     if (role === "originator") {
       setMode("lock");
       setAgreementId(tradeId);
-      setLockReceiver(ag.spoke_a_receiver ?? "");
+      setLockReceiver(ag.source_receiver ?? "");
       setLockAmount(ag.origin_amount);
       setPrefillSource(tradeId);
     } else {
       setMode("lockWithHash");
       setHashAgreementId(tradeId);
-      setHashReceiver(ag.spoke_b_receiver ?? "");
+      setHashReceiver(ag.dest_receiver ?? "");
       setHashAmount(ag.counter_amount);
       setPrefillSource(tradeId);
     }
@@ -276,8 +276,8 @@ export function HTLCNewPage() {
               {selectedRole ? (
                 <p className="text-xs text-muted-foreground">
                   {selectedRole === "originator"
-                    ? `Pre-filling: receiver = ${selectedAgreement.spoke_a_receiver ?? "—"}, amount = ${selectedAgreement.origin_amount} ${selectedAgreement.origin_currency}`
-                    : `Pre-filling: receiver = ${selectedAgreement.spoke_b_receiver ?? "—"}, amount = ${selectedAgreement.counter_amount} ${selectedAgreement.counter_currency}`}
+                    ? `Pre-filling: receiver = ${selectedAgreement.source_receiver ?? "—"}, amount = ${selectedAgreement.origin_amount} ${selectedAgreement.origin_currency}`
+                    : `Pre-filling: receiver = ${selectedAgreement.dest_receiver ?? "—"}, amount = ${selectedAgreement.counter_amount} ${selectedAgreement.counter_currency}`}
                 </p>
               ) : null}
             </div>

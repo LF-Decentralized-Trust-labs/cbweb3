@@ -1,0 +1,62 @@
+# Paladin node compose template for central-bank (mode: found).
+# Variables injected by the provisioning engine at runtime:
+#   SPOKE_ID              — spoke identifier (e.g. "spoke-brl")
+#   PALADIN_CB_RPC_PORT   — host port for Paladin CB HTTP RPC
+#   PALADIN_CB_WS_PORT    — host port for Paladin CB WebSocket RPC
+#   PALADIN_CB_GRPC_PORT  — host port for Paladin CB gRPC transport
+#   PALADIN_IMAGE         — Docker image for Paladin nodes
+#   SPOKE_DATA_DIR        — absolute path on host to spoke runtime data
+#   SPOKE_NETWORK_NAME    — external Docker network shared with the Besu stack
+
+services:
+  paladin-data-init:
+    image: alpine:3.20
+    user: "0:0"
+    volumes:
+      - cb_data:/data/cb
+    command: ["sh", "-c", "mkdir -p /data/cb && chmod -R 777 /data/cb"]
+    restart: "no"
+
+  # Service keys are fixed (Compose forbids ${...} in service names); the spoke
+  # id is carried in container_name instead.
+  paladin-cb:
+    image: ${PALADIN_IMAGE}
+    container_name: paladin-${SPOKE_ID}-cb
+    user: "${PALADIN_UID:-1000}:${PALADIN_GID:-1000}"
+    ports:
+      - "${PALADIN_CB_RPC_PORT}:8548"
+      - "${PALADIN_CB_WS_PORT}:8549"
+      - "${PALADIN_CB_GRPC_PORT}:9000"
+    environment:
+      - PALADIN_LOG_LEVEL=debug
+    volumes:
+      - ${SPOKE_DATA_DIR}/paladin/central-bank:/etc/paladin
+      # Paladin DB on a named volume (writable; chmod'd by paladin-data-init) —
+      # a bind mount left /data root-owned and Paladin (uid 1000) could not open
+      # its SQLite database (PD010202). Matches the spk-02 found stack.
+      - cb_data:/data
+    tmpfs:
+      - /app/jna:exec,mode=1777
+      - /data/keystore:mode=0777
+    networks:
+      - spoke_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    depends_on:
+      paladin-data-init:
+        condition: service_completed_successfully
+    command: ["/etc/paladin/config.yaml", "engine"]
+
+networks:
+  spoke_network:
+    name: ${SPOKE_NETWORK_NAME}
+    external: true
+
+volumes:
+  # Named (not anonymous) and never wiped by the engine's start-paladin step —
+  # indexed domain state (Zeto token instances, Pente privacy groups) must
+  # survive a Paladin restart, same as the legacy local stacks in
+  # deploy/local/paladin. A deliberate reset is a separate, explicit operation.
+  cb_data:
+    name: ${SPOKE_ID}_paladin_cb_data

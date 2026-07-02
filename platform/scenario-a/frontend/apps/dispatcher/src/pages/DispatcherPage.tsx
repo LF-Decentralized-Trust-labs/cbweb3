@@ -123,7 +123,7 @@ export function DispatcherPage() {
             <Separator className="my-4" />
 
             <p className="text-center text-xs text-muted-foreground">
-              LACNet · CBWeb3 · Cross-border CBDC infrastructure
+              LACNet · CBWeb3 · Cross-border tCeBM infrastructure
             </p>
           </CardContent>
         </Card>

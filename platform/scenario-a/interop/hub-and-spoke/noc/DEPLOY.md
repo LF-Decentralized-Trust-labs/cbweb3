@@ -46,8 +46,8 @@ make noc.setup-keycloak
 This creates (idempotent — safe to rerun):
 - Realm `cbweb3` (if not already present)
 - Client `noc-portal` — public, ROPC enabled
-- Roles: `noc-viewer`, `noc-operator`, `noc-admin`
-- Default user: `noc-admin` / `noc-admin` with the `noc-admin` role
+- Roles: `ROLE_NOC_VIEWER`, `ROLE_NOC_OPERATOR`, `ROLE_NOC_ADMIN`
+- Default user: `noc-admin` / `noc-admin` with the `ROLE_NOC_ADMIN` role
 
 ---
 

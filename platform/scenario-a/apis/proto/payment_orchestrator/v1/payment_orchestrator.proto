@@ -45,13 +45,17 @@ message FXAgreement {
   string counter_amount = 14;
   string origin_currency = 15;     // ISO 4217
   string counter_currency = 16;    // ISO 4217
-  string spoke_a_receiver = 17;   // Paladin identity receiving lock on Spoke-A (e.g. funded_operator@spoke-a-bank-c)
-  string spoke_b_receiver = 18;   // Paladin identity receiving lock on Spoke-B (e.g. funded_operator@spoke-b-bank-b)
+  reserved 17, 18;
+  reserved "spoke_a_receiver", "spoke_b_receiver";
   string rate = 7;
   uint64 expiry_date = 8;
   FXAgreementState state = 9;
   string group_id = 19;
   string contract_address = 20;
+  string source_spoke_id = 21;   // Spoke ID of the initiating leg (e.g. "spoke-brl")
+  string dest_spoke_id = 22;     // Spoke ID of the receiving leg (e.g. "spoke-usd")
+  string source_receiver = 23;   // Paladin identity on source spoke (e.g. "funded_operator@spoke-brl-bank-c")
+  string dest_receiver = 24;     // Paladin identity on dest spoke (e.g. "funded_operator@spoke-usd-bank-b")
 }
 
 message ProposeFXAgreementRequest {
@@ -68,8 +72,12 @@ message ProposeFXAgreementRequest {
   string rate = 11;
   uint64 expiry_date = 12;
   bool on_behalf = 13;             // when true, calls proposeOnBehalf() via governance
-  string spoke_a_receiver = 14;   // Paladin identity receiving lock on Spoke-A
-  string spoke_b_receiver = 15;   // Paladin identity receiving lock on Spoke-B
+  reserved 14, 15;
+  reserved "spoke_a_receiver", "spoke_b_receiver";
+  string source_spoke_id = 16;   // Spoke ID of the initiating leg (e.g. "spoke-brl")
+  string dest_spoke_id = 17;     // Spoke ID of the receiving leg (e.g. "spoke-usd")
+  string source_receiver = 18;   // Paladin identity on source spoke
+  string dest_receiver = 19;     // Paladin identity on dest spoke
 }
 
 message ProposeFXAgreementResponse {

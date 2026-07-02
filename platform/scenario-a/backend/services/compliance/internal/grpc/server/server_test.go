@@ -307,7 +307,7 @@ func TestIssueParticipantCertificate_NoCA(t *testing.T) {
 	}
 }
 
-func TestSignParticipantCSR_Success_RegistersOnChain(t *testing.T) {
+func TestSignParticipantCSR_Success_NoChainCall(t *testing.T) {
 	t.Parallel()
 	svc, reg := newCATestService(t)
 	ctx := context.Background()
@@ -331,42 +331,9 @@ func TestSignParticipantCSR_Success_RegistersOnChain(t *testing.T) {
 	if resp.CertPem == "" {
 		t.Error("expected signed cert")
 	}
-	if reg.callCount() != 1 {
-		t.Errorf("expected on-chain registration call, got %d", reg.callCount())
-	}
-	if reg.lastInst != "Bank A" {
-		t.Errorf("expected institution preserved, got %q", reg.lastInst)
-	}
-}
-
-func TestSignParticipantCSR_NoWallet_SkipsChain(t *testing.T) {
-	t.Parallel()
-	svc, reg := newCATestService(t)
-	ctx := context.Background()
-	_, _ = svc.UpsertParticipant(ctx, &compliancv1.UpsertParticipantRequest{
-		Participant: &compliancv1.Participant{UserId: "bank-user", InstitutionName: "Bank A", Status: "PENDING"},
-	})
-	csrPEM, _, _ := pki.GenerateCSR("bank-user", "Bank A", "BANK", "BR")
-	_, err := svc.SignParticipantCSR(ctx, &compliancv1.SignParticipantCSRRequest{CsrPem: csrPEM, UserId: "bank-user", Role: "BANK"})
-	if err != nil {
-		t.Fatalf("sign CSR: %v", err)
-	}
+	// On-chain registration moved to ApproveKYC; CSR signing must not touch the chain.
 	if reg.callCount() != 0 {
-		t.Errorf("expected no chain call without wallet, got %d", reg.callCount())
-	}
-}
-
-func TestSignParticipantCSR_ChainErrorNonFatal(t *testing.T) {
-	t.Parallel()
-	svc, reg := newCATestService(t)
-	reg.returnErr = context.DeadlineExceeded
-	ctx := context.Background()
-	_, _ = svc.UpsertParticipant(ctx, &compliancv1.UpsertParticipantRequest{
-		Participant: &compliancv1.Participant{UserId: "bank-user", InstitutionName: "Bank A", WalletAddress: "0xabc", Status: "PENDING"},
-	})
-	csrPEM, _, _ := pki.GenerateCSR("bank-user", "Bank A", "BANK", "BR")
-	if _, err := svc.SignParticipantCSR(ctx, &compliancv1.SignParticipantCSRRequest{CsrPem: csrPEM, UserId: "bank-user", Role: "BANK"}); err != nil {
-		t.Fatalf("chain error should be non-fatal, got %v", err)
+		t.Errorf("expected no on-chain registration in CSR signing, got %d", reg.callCount())
 	}
 }
 
@@ -438,6 +405,64 @@ func TestApproveKYC_Validation(t *testing.T) {
 	})
 	if _, err := svc.ApproveKYC(ctx, &compliancv1.ApproveKYCRequest{Subject: "active-user"}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("expected FailedPrecondition, got %v", err)
+	}
+}
+
+func TestApproveKYC_RegistersOnChain(t *testing.T) {
+	t.Parallel()
+	svc, reg := newCATestService(t)
+	ctx := context.Background()
+	_, _ = svc.UpsertParticipant(ctx, &compliancv1.UpsertParticipantRequest{
+		Participant: &compliancv1.Participant{
+			UserId: "bank-user", InstitutionName: "Bank A", WalletAddress: "0xabc",
+			Role: "commercial_bank", Status: string(domain.StatusCredentialRequested),
+		},
+	})
+
+	if _, err := svc.ApproveKYC(ctx, &compliancv1.ApproveKYCRequest{Subject: "bank-user", ActorSubject: "cb", Reason: "ok"}); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if reg.callCount() != 1 {
+		t.Fatalf("expected on-chain registration at approval, got %d", reg.callCount())
+	}
+	if reg.lastAddr != "0xabc" || reg.lastRole != "commercial_bank" || reg.lastInst != "Bank A" {
+		t.Errorf("registered wrong participant: addr=%q role=%q inst=%q", reg.lastAddr, reg.lastRole, reg.lastInst)
+	}
+}
+
+func TestApproveKYC_NoWallet_SkipsChain(t *testing.T) {
+	t.Parallel()
+	svc, reg := newCATestService(t)
+	ctx := context.Background()
+	_, _ = svc.UpsertParticipant(ctx, &compliancv1.UpsertParticipantRequest{
+		Participant: &compliancv1.Participant{UserId: "bank-user", Status: string(domain.StatusCredentialRequested)},
+	})
+	if _, err := svc.ApproveKYC(ctx, &compliancv1.ApproveKYCRequest{Subject: "bank-user"}); err != nil {
+		t.Fatalf("approve should succeed without wallet, got %v", err)
+	}
+	if reg.callCount() != 0 {
+		t.Errorf("expected no chain call without wallet, got %d", reg.callCount())
+	}
+}
+
+func TestApproveKYC_ChainErrorFatal(t *testing.T) {
+	t.Parallel()
+	svc, reg := newCATestService(t)
+	reg.returnErr = context.DeadlineExceeded
+	ctx := context.Background()
+	_, _ = svc.UpsertParticipant(ctx, &compliancv1.UpsertParticipantRequest{
+		Participant: &compliancv1.Participant{
+			UserId: "bank-user", InstitutionName: "Bank A", WalletAddress: "0xabc",
+			Role: "commercial_bank", Status: string(domain.StatusCredentialRequested),
+		},
+	})
+	if _, err := svc.ApproveKYC(ctx, &compliancv1.ApproveKYCRequest{Subject: "bank-user"}); status.Code(err) != codes.Internal {
+		t.Fatalf("expected Internal on chain error, got %v", err)
+	}
+	// A failed registration must not mark the participant KYC_APPROVED.
+	got, _, _ := svc.repo.GetParticipantByUser(ctx, "bank-user")
+	if got.Status == string(domain.StatusKYCApproved) {
+		t.Error("participant should not be KYC_APPROVED after failed on-chain registration")
 	}
 }
 

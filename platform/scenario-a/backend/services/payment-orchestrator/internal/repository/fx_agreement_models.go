@@ -22,8 +22,10 @@ type FXAgreementModel struct {
 	OriginCurrency  string    `gorm:"not null;column:origin_currency"`
 	CounterCurrency string    `gorm:"not null;column:counter_currency"`
 	Rate            string    `gorm:"not null;column:rate"`
-	SpokeAReceiver  string    `gorm:"column:spoke_a_receiver"`
-	SpokeBReceiver  string    `gorm:"column:spoke_b_receiver"`
+	SourceSpokeId  string    `gorm:"column:source_spoke_id"`
+	DestSpokeId    string    `gorm:"column:dest_spoke_id"`
+	SourceReceiver string    `gorm:"column:source_receiver"`
+	DestReceiver   string    `gorm:"column:dest_receiver"`
 	ExpiryDate      uint64    `gorm:"not null;column:expiry_date"`
 	State           string    `gorm:"not null;column:state;index:idx_fx_agreements_state"`
 	OnChainTxHash   string    `gorm:"column:on_chain_tx_hash"`
@@ -85,8 +87,10 @@ func fxAgreementToModel(r *domain.FXAgreementRecord) FXAgreementModel {
 		OriginCurrency:  r.OriginCurrency,
 		CounterCurrency: r.CounterCurrency,
 		Rate:            r.Rate,
-		SpokeAReceiver:  r.SpokeAReceiver,
-		SpokeBReceiver:  r.SpokeBReceiver,
+		SourceSpokeId:   r.SourceSpokeId,
+		DestSpokeId:     r.DestSpokeId,
+		SourceReceiver:  r.SourceReceiver,
+		DestReceiver:    r.DestReceiver,
 		ExpiryDate:      r.ExpiryDate,
 		State:           string(r.State),
 		OnChainTxHash:   r.OnChainTxHash,
@@ -110,8 +114,10 @@ func fxAgreementFromModel(m FXAgreementModel) *domain.FXAgreementRecord {
 		OriginCurrency:  m.OriginCurrency,
 		CounterCurrency: m.CounterCurrency,
 		Rate:            m.Rate,
-		SpokeAReceiver:  m.SpokeAReceiver,
-		SpokeBReceiver:  m.SpokeBReceiver,
+		SourceSpokeId:   m.SourceSpokeId,
+		DestSpokeId:     m.DestSpokeId,
+		SourceReceiver:  m.SourceReceiver,
+		DestReceiver:    m.DestReceiver,
 		ExpiryDate:      m.ExpiryDate,
 		State:           domain.FXState(m.State),
 		OnChainTxHash:   m.OnChainTxHash,

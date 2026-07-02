@@ -34,7 +34,7 @@ Each module has its own README with purpose, architecture placement, key details
 | — api-gateway | [backend/services/api-gateway/README.md](backend/services/api-gateway/README.md) | REST entry point |
 | — auth | [backend/services/auth/README.md](backend/services/auth/README.md) | Identity, login, wallet, PKI |
 | — compliance | [backend/services/compliance/README.md](backend/services/compliance/README.md) | Onboarding/AML, participant registry |
-| — payment-orchestrator | [backend/services/payment-orchestrator/README.md](backend/services/payment-orchestrator/README.md) | HTLC, FX, Zeto, escrow |
+| — payment-orchestrator | [backend/services/payment-orchestrator/README.md](backend/services/payment-orchestrator/README.md) | HTLC, FX (spoke-keyed data model — Fully implemented), Zeto, escrow |
 | — noc-agent | [backend/services/noc-agent/README.md](backend/services/noc-agent/README.md) | Monitoring daemon |
 | — noc-backend | [backend/services/noc-backend/README.md](backend/services/noc-backend/README.md) | NOC dashboard API |
 | — fx | [backend/services/fx/README.md](backend/services/fx/README.md) | FX pricing service *(planned)* |

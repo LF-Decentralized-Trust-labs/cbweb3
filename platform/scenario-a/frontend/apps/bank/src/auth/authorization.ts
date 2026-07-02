@@ -3,6 +3,10 @@
 import type { UserProfile } from "../types";
 
 export const BANK_ALLOWED_ROLES = [
+  // ROLE_BANK is the realm role the provisioning actually issues to a commercial
+  // bank's operator (see toolkit commercialBankRealmPlan + sample manifests); it is
+  // what the login token carries (realm_access.roles), so it must be allowed here.
+  "ROLE_BANK",
   "ROLE_COMMERCIAL_BANK_OPERATOR",
   "ROLE_COMMERCIAL_BANK",
   "ROLE_GOVERNANCE",

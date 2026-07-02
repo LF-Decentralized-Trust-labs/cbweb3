@@ -77,11 +77,19 @@ func NewClient(cfg ClientConfig, logger *slog.Logger) (*Client, error) {
 }
 
 func (c *Client) Lock(ctx context.Context, params ports.HTLCLockParams) (string, error) {
-	// The receiver in the gRPC request is a Paladin identity (e.g. "funded_operator@spoke-a-bank-c"),
-	// not an Ethereum address. Fall back to the operator's own address for the on-chain coordination
-	// record, since the actual token recipient is tracked by Zeto/Paladin.
+	// The receiver in the gRPC request is usually a Paladin identity (e.g.
+	// "funded_operator@spoke-a-bank-c"), not an Ethereum address. In that case fall back to the
+	// operator's own (registry-verified) address for the on-chain coordination record — the actual
+	// token recipient is tracked privately by Zeto/Paladin, and the HTLC receiver field is only a
+	// public coordination marker.
+	//
+	// The predicate MUST be common.IsHexAddress(params.Receiver), NOT a zero-address check on the
+	// parsed value: common.HexToAddress is lenient and coerces a non-address string into a NON-zero
+	// garbage address (e.g. "funded_operator@…" -> 0x000…000F). A zero-address check therefore never
+	// fires for identity strings, and the garbage address — which is not a registered participant —
+	// makes the HTLC's onlyVerified(receiver) gate revert with HTLC__ParticipantNotVerified.
 	receiver := common.HexToAddress(params.Receiver)
-	if receiver == (common.Address{}) {
+	if !common.IsHexAddress(params.Receiver) {
 		receiver = c.fromAddress
 	}
 	data, err := c.htlcABI.Pack("lock",

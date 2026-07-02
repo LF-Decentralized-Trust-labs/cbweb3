@@ -221,8 +221,10 @@ func TestFullHappyPath(t *testing.T) {
 			"counter_currency": "BRL",
 			"rate":             "5.2",
 			"expiry_date":      time.Now().Add(time.Hour).Unix(),
-			"spoke_a_receiver": cfg.IdentityCorrespondentA,
-			"spoke_b_receiver": cfg.IdentityBankB,
+			"source_spoke_id": "spoke-a",
+			"dest_spoke_id":   "spoke-b",
+			"source_receiver": cfg.IdentityCorrespondentA,
+			"dest_receiver":   cfg.IdentityBankB,
 			"on_behalf":        false,
 		}
 		bankA.mustPost(t, "/api/v1/payments/fx/agreements", body, nil)

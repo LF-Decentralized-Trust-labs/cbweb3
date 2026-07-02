@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export type LoginRequest = {
-  clientId: string;
-  clientSecret: string;
+  username: string;
+  password: string;
 };
 
 export type TokenResponse = {

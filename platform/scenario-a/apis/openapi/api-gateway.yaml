@@ -4387,14 +4387,22 @@ components:
             Exchange rate (decimal string). Must satisfy:
             |counter_amount / origin_amount - rate| ≤ FX_RATE_TOLERANCE_PCT
           example: "0.85"
-        spoke_a_receiver:
+        source_spoke_id:
           type: string
-          description: Paladin identity receiving the HTLC lock on Spoke-A
-          example: "funded_operator@spoke-a-bank-c"
-        spoke_b_receiver:
+          description: Spoke ID of the initiating leg (e.g. "spoke-brl")
+          example: "spoke-brl"
+        dest_spoke_id:
           type: string
-          description: Paladin identity receiving the HTLC lock on Spoke-B
-          example: "funded_operator@spoke-b-bank-b"
+          description: Spoke ID of the receiving leg (e.g. "spoke-usd")
+          example: "spoke-usd"
+        source_receiver:
+          type: string
+          description: Paladin identity receiving the HTLC lock on the source spoke
+          example: "funded_operator@spoke-brl-bank-c"
+        dest_receiver:
+          type: string
+          description: Paladin identity receiving the HTLC lock on the destination spoke
+          example: "funded_operator@spoke-usd-bank-b"
         expiry_date:
           type: integer
           format: int64
@@ -4518,14 +4526,22 @@ components:
           type: boolean
           description: When true, calls proposeOnBehalf() via governance
           default: false
-        spoke_a_receiver:
+        source_spoke_id:
           type: string
-          description: Paladin identity receiving the HTLC lock on Spoke-A
-          example: "funded_operator@spoke-a-bank-c"
-        spoke_b_receiver:
+          description: Spoke ID of the initiating leg (e.g. "spoke-brl")
+          example: "spoke-brl"
+        dest_spoke_id:
           type: string
-          description: Paladin identity receiving the HTLC lock on Spoke-B
-          example: "funded_operator@spoke-b-bank-b"
+          description: Spoke ID of the receiving leg (e.g. "spoke-usd")
+          example: "spoke-usd"
+        source_receiver:
+          type: string
+          description: Paladin identity receiving the HTLC lock on the source spoke
+          example: "funded_operator@spoke-brl-bank-c"
+        dest_receiver:
+          type: string
+          description: Paladin identity receiving the HTLC lock on the destination spoke
+          example: "funded_operator@spoke-usd-bank-b"
 
     ProposeFXAgreementResponse:
       type: object

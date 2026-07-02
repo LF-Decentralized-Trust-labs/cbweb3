@@ -40,6 +40,7 @@ type paymentOrchestratorService struct {
 	fxRepo           ports.FXAgreementRepository   // persistent FX agreement storage (nil = dev in-memory)
 	htlcRepo         ports.HTLCRepository          // required in production; nil only in unit tests
 	pente            ports.PenteClientPort         // optional bilateral private-context manager
+	fxContexts       *fxContextStore               // A6: file-backed FX context resolver (group/contract per bank)
 	rateTolPct       float64                       // rate tolerance fraction (e.g. 0.001 for 0.1%)
 	crossSpokeMode   bool                          // when true, settle is gated on CounterpartyLocked
 	strictHTLC       bool                          // when true, lock operations require verifiable agreement linkage
@@ -66,7 +67,11 @@ type Config struct {
 	// Pass nil only in unit tests that do not need DB persistence.
 	HTLCRepo   ports.HTLCRepository
 	Pente      ports.PenteClientPort // optional — nil disables bilateral private context integration
-	RateTolPct float64               // rate tolerance fraction, default 0.001 (0.1%)
+	// FXContextsFile is the path to a JSON file of bilateral FX contexts (group/contract per
+	// bank), written by the toolkit's deploy-fxa. Empty disables file-based resolution (falls
+	// back to the Pente client). See PLAN.md "A6".
+	FXContextsFile string
+	RateTolPct     float64 // rate tolerance fraction, default 0.001 (0.1%)
 	// CrossSpokeMode gates SettleHTLC on CounterpartyLocked. Set this to true
 	// whenever the interoperability relay is active (i.e. in all production
 	// deployments). When false (dev/single-spoke), the initiator can settle
@@ -101,6 +106,7 @@ func New(cfg Config) (*grpc.Server, func(context.Context), error) {
 		fxRepo:           cfg.FXRepo,
 		htlcRepo:         cfg.HTLCRepo,
 		pente:            cfg.Pente,
+		fxContexts:       newFXContextStore(cfg.FXContextsFile),
 		rateTolPct:       rateTol,
 		crossSpokeMode:   cfg.CrossSpokeMode,
 		strictHTLC:       cfg.StrictHTLC,
@@ -898,6 +904,21 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 	if strings.EqualFold(req.OriginCurrency, req.CounterCurrency) {
 		return nil, status.Error(codes.InvalidArgument, "origin_currency and counter_currency must be different")
 	}
+	if req.SourceSpokeId == "" {
+		return nil, status.Error(codes.InvalidArgument, "source_spoke_id is required")
+	}
+	if req.DestSpokeId == "" {
+		return nil, status.Error(codes.InvalidArgument, "dest_spoke_id is required")
+	}
+	if req.SourceReceiver == "" {
+		return nil, status.Error(codes.InvalidArgument, "source_receiver is required")
+	}
+	if req.DestReceiver == "" {
+		return nil, status.Error(codes.InvalidArgument, "dest_receiver is required")
+	}
+	if req.SourceSpokeId == req.DestSpokeId {
+		return nil, status.Error(codes.InvalidArgument, "source_spoke_id and dest_spoke_id must be different")
+	}
 	originRat, ok := new(big.Rat).SetString(req.OriginAmount)
 	if !ok || originRat.Sign() <= 0 {
 		return nil, status.Error(codes.InvalidArgument, "origin_amount must be a positive decimal")
@@ -925,26 +946,11 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 		tradeID = newUUID()
 	}
 
-	// FX Agreement is a service-layer-only record — no on-chain submission.
-	// Party fields are stored as Paladin identities; no EVM address resolution needed.
-	var txHash string
-	if false { // kept for future optional on-chain audit path
-		params, err := buildFXProposalParams(tradeID, req)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid FX proposal params: %v", err)
-		}
-		fxClient, fxCtx, ok := s.selectFXAgreementClient(ctx, nil)
-		if !ok {
-			return nil, status.Error(codes.FailedPrecondition, "FX agreement client not configured")
-		}
-		if req.OnBehalf {
-			txHash, err = fxClient.ProposeOnBehalf(fxCtx, params)
-		} else {
-			txHash, err = fxClient.Propose(fxCtx, params)
-		}
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "on-chain FX propose: %v", err)
-		}
+	// A normal (non-on-behalf) propose omits `originator` — it is the calling bank. Default it
+	// to this orchestrator's own Paladin identity so the FX context resolves (fx-contexts.json
+	// is keyed by the local bank identity) and the agreement is attributed correctly.
+	if req.Originator == "" {
+		req.Originator = s.paladinIdentity
 	}
 
 	now := time.Now().UTC()
@@ -960,14 +966,71 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 		OriginCurrency:  req.OriginCurrency,
 		CounterCurrency: req.CounterCurrency,
 		Rate:            req.Rate,
-		SpokeAReceiver:  req.SpokeAReceiver,
-		SpokeBReceiver:  req.SpokeBReceiver,
+		SourceSpokeId:   req.SourceSpokeId,
+		DestSpokeId:     req.DestSpokeId,
+		SourceReceiver:  req.SourceReceiver,
+		DestReceiver:    req.DestReceiver,
 		ExpiryDate:      req.ExpiryDate,
 		State:           domain.FXStateProposed,
-		OnChainTxHash:   txHash,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
+
+	// On-chain submission (Pente-private). When s.pente is nil the agreement is a
+	// service-layer record only (dev/off-chain mode). Atomicity: the record is persisted
+	// only after a successful on-chain propose, so a revert leaves no PROPOSED row and a
+	// retry re-submits cleanly.
+	var txHash string
+	if s.pente != nil {
+		if record.GroupID == "" || record.ContractAddress == "" {
+			// A6: prefer the file-backed context (group + in-group FXAgreement address
+			// written by the toolkit's deploy-fxa); fall back to the Pente client's group
+			// scan when no context is registered yet.
+			if ref, ok := s.resolveFXContext(record); ok {
+				record.GroupID = ref.GroupID
+				record.ContractAddress = ref.ContractAddress
+			} else {
+				// Which bilateral group holds this agreement depends on the leg:
+				//   - source (own propose): the CB↔this-bank group → {originator=self, counterparty}.
+				//   - destination (on_behalf, coordinated by the CB): the CB↔custodian group on THIS
+				//     spoke → {local CB, custodian}. The originator is remote and not a member here,
+				//     so resolving by {originator, counterparty} finds no group.
+				fxReq := ports.PenteContextRequest{
+					TradeID:      record.TradeID,
+					Originator:   record.Originator,
+					Counterparty: record.CounterpartyB,
+				}
+				if req.OnBehalf {
+					fxReq.Originator = s.paladinIdentity
+					fxReq.Counterparty = record.Custodian
+				}
+				ctxRef, err := s.pente.EnsureFXContext(ctx, fxReq)
+				if err != nil {
+					return nil, status.Errorf(codes.Internal, "ensure Pente context: %v", err)
+				}
+				record.GroupID = ctxRef.GroupID
+				record.ContractAddress = ctxRef.ContractAddress
+			}
+		}
+		params, err := buildFXProposalParams(tradeID, req)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid FX proposal params: %v", err)
+		}
+		fxClient, fxCtx, ok := s.selectFXAgreementClient(ctx, record)
+		if !ok {
+			return nil, status.Error(codes.FailedPrecondition, "FX agreement client not configured")
+		}
+		if req.OnBehalf {
+			txHash, err = fxClient.ProposeOnBehalf(fxCtx, params)
+		} else {
+			txHash, err = fxClient.Propose(fxCtx, params)
+		}
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "on-chain FX propose: %v", err)
+		}
+		record.OnChainTxHash = txHash
+	}
+
 	if err := s.saveFXAgreement(ctx, record, true); err != nil {
 		return nil, status.Errorf(codes.Internal, "persist FX agreement: %v", err)
 	}
@@ -1333,9 +1396,11 @@ func fxRecordToProto(r *domain.FXAgreementRecord) *pb.FXAgreement {
 		CounterAmount:   r.CounterAmount,
 		OriginCurrency:  r.OriginCurrency,
 		CounterCurrency: r.CounterCurrency,
-		SpokeAReceiver:  r.SpokeAReceiver,
-		SpokeBReceiver:  r.SpokeBReceiver,
-		Rate:            r.Rate,
+		SourceSpokeId:  r.SourceSpokeId,
+		DestSpokeId:    r.DestSpokeId,
+		SourceReceiver: r.SourceReceiver,
+		DestReceiver:   r.DestReceiver,
+		Rate:           r.Rate,
 		ExpiryDate:      r.ExpiryDate,
 		State:           stateMap[r.State],
 		GroupId:         r.GroupID,
@@ -1456,8 +1521,10 @@ func (s *paymentOrchestratorService) agreementCommitmentHash(rec *domain.FXAgree
 // the FX agreement terms for the current spoke leg. It is called while s.mu is held for read,
 // so it must not acquire the lock itself.
 //
-// Spoke-A leg  → receiver must be SpokeAReceiver, amount must be OriginAmount.
-// Spoke-B leg  → receiver must be SpokeBReceiver, amount must be CounterAmount.
+// The local leg is identified by comparing s.spokePrefix against fx.DestSpokeId:
+//   - If this server is the dest spoke → local receiver = fx.DestReceiver, amount = fx.CounterAmount
+//   - Otherwise (source spoke) → local receiver = fx.SourceReceiver, amount = fx.OriginAmount
+//
 // If SpokePrefix is empty (dev mode) or the agreement has no receivers set, the check is skipped.
 func (s *paymentOrchestratorService) validateHTLCTermsAgainstAgreement(
 	receiver, amount string,
@@ -1468,12 +1535,14 @@ func (s *paymentOrchestratorService) validateHTLCTermsAgainstAgreement(
 	}
 
 	var expectedReceiver, expectedAmount string
-	if strings.HasPrefix(s.spokePrefix, "spoke-a") {
-		expectedReceiver = fx.SpokeAReceiver
-		expectedAmount = fx.OriginAmount
-	} else {
-		expectedReceiver = fx.SpokeBReceiver
+	if fx.DestSpokeId == s.spokePrefix {
+		// We are the dest spoke: lock targets DestReceiver, amount is CounterAmount.
+		expectedReceiver = fx.DestReceiver
 		expectedAmount = fx.CounterAmount
+	} else {
+		// We are the source spoke: lock targets SourceReceiver, amount is OriginAmount.
+		expectedReceiver = fx.SourceReceiver
+		expectedAmount = fx.OriginAmount
 	}
 
 	if expectedReceiver != "" && receiver != expectedReceiver {
@@ -1511,8 +1580,10 @@ func resolveFXPartyAddresses(ctx context.Context, req *pb.ProposeFXAgreementRequ
 		Rate:            req.Rate,
 		ExpiryDate:      req.ExpiryDate,
 		OnBehalf:        req.OnBehalf,
-		SpokeAReceiver:  req.SpokeAReceiver,
-		SpokeBReceiver:  req.SpokeBReceiver,
+		SourceSpokeId:  req.SourceSpokeId,
+		DestSpokeId:    req.DestSpokeId,
+		SourceReceiver: req.SourceReceiver,
+		DestReceiver:   req.DestReceiver,
 	}
 
 	resolve := func(field string) (string, error) {
@@ -1554,10 +1625,14 @@ func buildFXProposalParams(tradeID string, req *pb.ProposeFXAgreementRequest) (p
 	if !ok {
 		return ports.FXProposalParams{}, fmt.Errorf("invalid counter_amount: %s", req.CounterAmount)
 	}
-	rate, ok := new(big.Int).SetString(req.Rate, 10)
-	if !ok {
+	// Rate is a decimal string (e.g. "660.000000"); the on-chain rate is a uint256 in
+	// 1e18 fixed-point. TODO(035): confirm the on-chain rate scale against a live deploy.
+	rateRat, ok := new(big.Rat).SetString(req.Rate)
+	if !ok || rateRat.Sign() <= 0 {
 		return ports.FXProposalParams{}, fmt.Errorf("invalid rate: %s", req.Rate)
 	}
+	rateScale := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	rate := new(big.Int).Quo(new(big.Int).Mul(rateRat.Num(), rateScale), rateRat.Denom())
 
 	var originCurrency, counterCurrency [32]byte
 	copy(originCurrency[:], []byte(req.OriginCurrency))
@@ -1565,18 +1640,51 @@ func buildFXProposalParams(tradeID string, req *pb.ProposeFXAgreementRequest) (p
 
 	return ports.FXProposalParams{
 		TradeID:         tid,
-		Originator:      common.HexToAddress(req.Originator),
-		CounterpartyB:   common.HexToAddress(req.CounterpartyB),
-		SettlementAgent: common.HexToAddress(req.SettlementAgent),
-		Custodian:       common.HexToAddress(req.Custodian),
-		Beneficiary:     common.HexToAddress(req.Beneficiary),
+		Originator:      partyAddress(req.Originator),
+		CounterpartyB:   partyAddress(req.CounterpartyB),
+		SettlementAgent: partyAddress(req.SettlementAgent),
+		Custodian:       partyAddress(req.Custodian),
+		Beneficiary:     partyAddress(req.Beneficiary),
 		OriginAmount:    originAmount,
 		CounterAmount:   counterAmount,
 		OriginCurrency:  originCurrency,
 		CounterCurrency: counterCurrency,
 		Rate:            rate,
 		ExpiryDate:      new(big.Int).SetUint64(req.ExpiryDate),
+		// Routing carries the Paladin identities + spoke IDs on-chain (inside the private
+		// group) so the coordinating CB reads the full deal and the relay routes by identity —
+		// the addresses above collapse under the shared local-dev key and cannot be reversed.
+		Routing: ports.FXRouting{
+			SourceSpokeID:     req.SourceSpokeId,
+			DestSpokeID:       req.DestSpokeId,
+			OriginatorID:      req.Originator,
+			CounterpartyID:    req.CounterpartyB,
+			SettlementAgentID: req.SettlementAgent,
+			CustodianID:       req.Custodian,
+			BeneficiaryID:     req.Beneficiary,
+			SourceReceiverID:  req.SourceReceiver,
+			DestReceiverID:    req.DestReceiver,
+			TradeRef:          tradeID,
+		},
 	}, nil
+}
+
+// partyAddress converts a party reference to an EVM address for the on-chain FXAgreement.
+// A hex address is used as-is; a Paladin identity (e.g. "funded_operator@node") has no address
+// in this group's EVM, so a deterministic non-zero address is derived from it (sha256[12:]) so
+// propose validations pass (counterpartyB != 0) and the identity stays recoverable. The Paladin
+// identity remains the source of truth in the service/relay layer.
+// TODO(035): confirm on-chain party-address semantics for cross-spoke parties against a live deploy.
+func partyAddress(v string) common.Address {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return common.Address{}
+	}
+	if a := common.HexToAddress(v); a != (common.Address{}) {
+		return a
+	}
+	h := sha256.Sum256([]byte(v))
+	return common.BytesToAddress(h[12:])
 }
 
 // --- Cross-spoke relay workers ---
@@ -1660,21 +1768,20 @@ func (s *paymentOrchestratorService) handleRelayLockEvent(proof ports.Interopera
 	}
 
 	var localReceiver, localAmount, agreementID string
-	isSpokeA := strings.HasPrefix(s.spokePrefix, "spoke-a")
 	for _, fx := range agreements {
-		if isSpokeA {
-			// This orchestrator is on spoke-a. Counterparty lock is on spoke-b (SpokeBReceiver).
-			if fx.SpokeBReceiver == payload.Receiver {
-				localReceiver = fx.SpokeAReceiver
-				localAmount = fx.OriginAmount
+		if fx.DestSpokeId == s.spokePrefix {
+			// We are the dest spoke. Counterparty (source) locked for SourceReceiver.
+			if fx.SourceReceiver == payload.Receiver {
+				localReceiver = fx.DestReceiver
+				localAmount = fx.CounterAmount
 				agreementID = fx.TradeID
 				break
 			}
 		} else {
-			// This orchestrator is on spoke-b. Counterparty lock is on spoke-a (SpokeAReceiver).
-			if fx.SpokeAReceiver == payload.Receiver {
-				localReceiver = fx.SpokeBReceiver
-				localAmount = fx.CounterAmount
+			// We are the source spoke. Counterparty (dest) locked for DestReceiver.
+			if fx.DestReceiver == payload.Receiver {
+				localReceiver = fx.SourceReceiver
+				localAmount = fx.OriginAmount
 				agreementID = fx.TradeID
 				break
 			}

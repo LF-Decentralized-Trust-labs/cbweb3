@@ -22,12 +22,12 @@
 import http from "http";
 import express, { Request, Response } from "express";
 import { randomUUID, timingSafeEqual } from "crypto";
-import { Server as SocketIoServer } from "socket.io";
 import { PluginRegistry } from "@hyperledger/cactus-core";
 import { PluginLedgerConnectorBesu } from "@hyperledger/cactus-plugin-ledger-connector-besu";
 import { config } from "./config";
-import { HtlcRelay } from "./htlc-relay";
+import { HtlcRelay, SpokeDep } from "./htlc-relay";
 import { RelayStore } from "./relay-store";
+import { SpokeRegistry, normalizeSpokeRegistration, SpokeRegistrationError } from "./spoke-registry";
 
 // ---------------------------------------------------------------------------
 // In-memory proof store (RelayProof / VerifyProof for InteroperabilityPort)
@@ -63,61 +63,61 @@ function pruneProofs(): void {
 
 async function main(): Promise<void> {
   console.log("Cacti HTLC relay starting…");
-  console.log(`  Spoke-A RPC  : ${config.spokeA.besuRpc}`);
-  console.log(`  Spoke-A WS   : ${config.spokeA.besuWs}`);
-  console.log(`  Spoke-A HTLC : ${config.spokeA.htlcAddress}`);
-  console.log(`  Spoke-A API  : ${config.spokeA.internalApiUrl}`);
-  console.log(`  Spoke-B RPC  : ${config.spokeB.besuRpc}`);
-  console.log(`  Spoke-B WS   : ${config.spokeB.besuWs}`);
-  console.log(`  Spoke-B HTLC : ${config.spokeB.htlcAddress}`);
-  console.log(`  Spoke-B API  : ${config.spokeB.internalApiUrl}`);
   console.log(`  Poll interval: ${config.pollIntervalMs} ms`);
   console.log(`  API port     : ${config.apiPort}`);
   console.log(`  Store path   : ${config.relayStorePath}`);
+  console.log(`  Spokes       : ${config.spokes.length}`);
 
-  // ── Cacti PluginRegistry + Besu connectors ──────────────────────────────
+  // ── Cacti PluginRegistry + connector factory ────────────────────────────
+  // The factory (re)creates a Besu connector on demand: the relay calls it when a spoke is
+  // registered at runtime and again to reconnect after a dropped WebSocket. Connectors are used
+  // in-process (getPastLogs/getBlock) — no per-connector HTTP web services are exposed.
   const pluginRegistry = new PluginRegistry();
+  const connectors = new Map<string, PluginLedgerConnectorBesu>();
+  const connectorFactory = async (spoke: SpokeDep): Promise<PluginLedgerConnectorBesu> => {
+    const connector = new PluginLedgerConnectorBesu({
+      instanceId: `besu-connector-${spoke.id}-${randomUUID()}`,
+      rpcApiHttpHost: spoke.besuRpc,
+      rpcApiWsHost: spoke.besuWs,
+      pluginRegistry,
+      logLevel: "INFO",
+    });
+    await connector.onPluginInit();
+    return connector;
+  };
 
-  const connectorSpokeA = new PluginLedgerConnectorBesu({
-    instanceId: `besu-connector-spoke-a-${randomUUID()}`,
-    rpcApiHttpHost: config.spokeA.besuRpc,
-    rpcApiWsHost: config.spokeA.besuWs,
-    pluginRegistry,
-    logLevel: "INFO",
-  });
-
-  const connectorSpokeB = new PluginLedgerConnectorBesu({
-    instanceId: `besu-connector-spoke-b-${randomUUID()}`,
-    rpcApiHttpHost: config.spokeB.besuRpc,
-    rpcApiWsHost: config.spokeB.besuWs,
-    pluginRegistry,
-    logLevel: "INFO",
-  });
-
-  await connectorSpokeA.onPluginInit();
-  console.log(`[cacti] PluginLedgerConnectorBesu spoke-a initialized (${connectorSpokeA.getInstanceId()})`);
-
-  await connectorSpokeB.onPluginInit();
-  console.log(`[cacti] PluginLedgerConnectorBesu spoke-b initialized (${connectorSpokeB.getInstanceId()})`);
-
-  // ── Start HTLC relay ────────────────────────────────────────────────────
+  // ── Relay store + dynamic spoke registry ─────────────────────────────────
   const abortController = new AbortController();
   const relayStore = new RelayStore(config.relayStorePath);
   await relayStore.init();
 
-  const connectors = new Map<string, PluginLedgerConnectorBesu>();
-  connectors.set("spoke-a", connectorSpokeA);
-  connectors.set("spoke-b", connectorSpokeB);
+  // The registry is the single source of watched spokes. A founding central bank self-registers
+  // its spoke via POST /api/v1/spokes; registrations persist across restarts.
+  const spokeRegistry = new SpokeRegistry(config.spokeRegistryPath);
+  await spokeRegistry.load();
+  // Bootstrap: fold any legacy static spokes (env / CACTI_SPOKES_CONFIG) into the registry so a
+  // single code path drives every watcher. A previously-registered spoke of the same id wins.
+  for (const s of config.spokes) {
+    if (!spokeRegistry.has(s.id)) {
+      await spokeRegistry.register({ ...s, registeredAt: Date.now() });
+    }
+  }
 
+  // ── Start HTLC relay — watchers are driven by the registry, reconciled at startup and on
+  // every runtime registration (no restart, no static startup list). ──────────
   const relay = new HtlcRelay(
-    [config.spokeA, config.spokeB],
+    [],
     config.protoPath,
     config.pollIntervalMs,
     config.relayAuthSecret,
     relayStore,
     connectors,
+    connectorFactory,
   );
   relay.start(abortController.signal);
+  for (const s of spokeRegistry.list()) {
+    await relay.addSpoke(s);
+  }
 
   // ── Express REST API ────────────────────────────────────────────────────
   const app = express();
@@ -143,6 +143,58 @@ async function main(): Promise<void> {
   // Liveness / readiness
   app.get("/api/v1/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", uptime: process.uptime() });
+  });
+
+  // ── Spoke registration (RL-1) ────────────────────────────────────────────
+  // NOTE: these endpoints are intentionally outside the /api/v1/relay auth guard
+  // so the toolkit registrar (which posts without X-Relay-Auth) can reach them.
+  // In a multi-tenant deployment this should be hardened with mutual auth.
+
+  /**
+   * POST /api/v1/spokes
+   * Register (or re-register) a spoke. Accepts the snake_case body sent by the
+   * Go relay registrar. Idempotent: re-registering the same id updates it.
+   */
+  app.post("/api/v1/spokes", (req: Request, res: Response) => {
+    void (async () => {
+      try {
+        const spoke = normalizeSpokeRegistration((req.body ?? {}) as Record<string, unknown>);
+        await spokeRegistry.register(spoke);
+        // Start watching immediately — no relay restart. Idempotent for a known spoke.
+        await relay.addSpoke(spoke);
+        console.log(`[spoke-registry] registered + watching spoke=${spoke.id} rpc=${spoke.besuRpc}`);
+        res.status(201).json(spoke);
+      } catch (err) {
+        if (err instanceof SpokeRegistrationError) {
+          res.status(400).json({ error: err.message });
+          return;
+        }
+        console.error("[spoke-registry] register failed:", err);
+        res.status(500).json({ error: "failed to register spoke" });
+      }
+    })();
+  });
+
+  /**
+   * GET /api/v1/spokes
+   * List all registered spokes.
+   */
+  app.get("/api/v1/spokes", (_req: Request, res: Response) => {
+    res.json(spokeRegistry.list());
+  });
+
+  /**
+   * GET /api/v1/spokes/:id
+   * Return a registered spoke (200) or 404. Polled by the toolkit's
+   * RelayRegistrar.IsRegistered to confirm registration.
+   */
+  app.get("/api/v1/spokes/:id", (req: Request, res: Response) => {
+    const spoke = spokeRegistry.get(req.params["id"] ?? "");
+    if (!spoke) {
+      res.status(404).json({ error: "spoke not registered" });
+      return;
+    }
+    res.json(spoke);
   });
 
   /**
@@ -256,17 +308,9 @@ async function main(): Promise<void> {
   });
 
   // ── HTTP server ─────────────────────────────────────────────────────────
+  // Connectors are used in-process by the relay (getPastLogs/getBlock); no per-connector Cacti
+  // web services or Socket.IO stream are exposed.
   const httpServer = http.createServer(app);
-  const ioServer = new SocketIoServer(httpServer, {
-    cors: { origin: config.socketIoAllowedOrigins.length > 0 ? config.socketIoAllowedOrigins : false },
-    path: "/api/v1/plugins/socket.io/",
-  });
-
-  // Register Cacti connector web services (REST + watchBlocksV1 Socket.IO)
-  const endpointsA = await connectorSpokeA.registerWebServices(app, ioServer);
-  console.log(`[cacti] spoke-a registered ${endpointsA.length} web service endpoint(s)`);
-  const endpointsB = await connectorSpokeB.registerWebServices(app, ioServer);
-  console.log(`[cacti] spoke-b registered ${endpointsB.length} web service endpoint(s)`);
 
   httpServer.listen(config.apiPort, () => {
     console.log(`Cacti HTLC relay API listening on :${config.apiPort}`);
@@ -276,9 +320,9 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     console.log("Shutting down…");
     abortController.abort();
-    connectorSpokeA.shutdown().catch(() => {});
-    connectorSpokeB.shutdown().catch(() => {});
-    ioServer.close();
+    for (const connector of connectors.values()) {
+      connector.shutdown().catch(() => {});
+    }
     httpServer.close(() => process.exit(0));
   };
   process.on("SIGINT", shutdown);

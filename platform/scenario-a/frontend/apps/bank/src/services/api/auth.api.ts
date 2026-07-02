@@ -4,10 +4,10 @@ import type { LoginResponse, UserProfile } from "../../types";
 import { httpClient } from "./http-client";
 
 export const authApi = {
-  login: async (clientId: string, clientSecret: string): Promise<LoginResponse> => {
+  login: async (username: string, password: string): Promise<LoginResponse> => {
     const response = await httpClient.post<LoginResponse>("/auth/login", {
-      clientId,
-      clientSecret,
+      clientId: username,
+      clientSecret: password,
     });
 
     return response.data;

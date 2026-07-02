@@ -68,6 +68,7 @@ interface IFXAgreement {
     /// @param counterCurrency ISO 4217 code for the counter currency.
     /// @param rate Agreed exchange rate (scaled by 1e18).
     /// @param expiryDate Unix timestamp after which the proposal expires.
+    /// @param routing Cross-spoke routing metadata (spoke IDs + Paladin identities).
     function propose(
         bytes32 tradeId,
         address counterpartyB,
@@ -79,7 +80,8 @@ interface IFXAgreement {
         bytes32 originCurrency,
         bytes32 counterCurrency,
         uint256 rate,
-        uint256 expiryDate
+        uint256 expiryDate,
+        FXAgreementLibrary.Routing calldata routing
     ) external;
 
     /// @notice Creates a new FX agreement proposal on behalf of a remote originator (governance only).
@@ -95,6 +97,7 @@ interface IFXAgreement {
     /// @param counterCurrency ISO 4217 code for the counter currency.
     /// @param rate Agreed exchange rate (scaled by 1e18).
     /// @param expiryDate Unix timestamp after which the proposal expires.
+    /// @param routing Cross-spoke routing metadata (spoke IDs + Paladin identities).
     function proposeOnBehalf(
         bytes32 tradeId,
         address originator,
@@ -107,7 +110,8 @@ interface IFXAgreement {
         bytes32 originCurrency,
         bytes32 counterCurrency,
         uint256 rate,
-        uint256 expiryDate
+        uint256 expiryDate,
+        FXAgreementLibrary.Routing calldata routing
     ) external;
 
     /// @notice Governance accepts the proposed agreement on behalf of counterpartyB.
@@ -138,4 +142,9 @@ interface IFXAgreement {
     /// @param tradeId The trade to query.
     /// @return The FXAgreement struct.
     function getAgreement(bytes32 tradeId) external view returns (FXAgreementLibrary.FxAgreement memory);
+
+    /// @notice Returns the cross-spoke routing metadata for an FX agreement.
+    /// @param tradeId The trade to query.
+    /// @return The Routing struct (spoke IDs + Paladin identities).
+    function getRouting(bytes32 tradeId) external view returns (FXAgreementLibrary.Routing memory);
 }

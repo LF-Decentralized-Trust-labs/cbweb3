@@ -93,7 +93,7 @@ Every time the toolkit skips genesis generation because a genesis file already e
 - **SC-001**: Running the toolkit `apply` command twice on the same initialized spoke completes the second run without modifying any genesis or node-key file — verified by file checksum comparison before and after.
 - **SC-002**: Every toolkit execution that reaches the genesis-generation decision point produces exactly one structured guard log event (`genesis_skipped`, `genesis_proceed`, or `genesis_error`) within the first 5 seconds of startup.
 - **SC-003**: Attempting to regenerate genesis without the `--force-reinit` flag results in a non-zero exit code 100% of the time across all tested entry points (apply, init, converge).
-- **SC-004**: The existing sample network (`deploy/local/spoke-besu-a/startBesu.sh`) passes its own green-state check unchanged after this feature is delivered — confirmed by running `make scenario-b.test-contracts` or equivalent without modification.
+- **SC-004**: The existing sample network (`deploy/local/spoke-besu-a/startBesu.sh`) passes its own green-state check unchanged after this feature is delivered — confirmed by running the Scenario A contracts suite `make contracts.test` (or, for the toolkit itself, `cd scenario-a/toolkit && go test ./...`) without modification.
 - **SC-005**: An operator who receives the refusal error can, without consulting documentation beyond the error message itself, understand what path was detected and what flag to use for an intentional reinitialzation.
 
 ---
@@ -105,4 +105,4 @@ Every time the toolkit skips genesis generation because a genesis file already e
 - The toolkit's orchestration engine is implemented in Go (consistent with the project stack), so the `GenesisGuard` will be a Go function or package.
 - The `--force-reinit` flag is intended for development/test workflows only; it is not expected to be used in staging or production.
 - Structured log output follows the project convention: JSON to stdout with fields `event`, `spoke_id`, `timestamp`, `severity` (INFO/ERROR), and `service` = `provisioning-toolkit`.
-- TK-4 (manifest schema + compose template) and TK-5 (orchestration engine) are the implementation targets for this guard; no other toolkit layers are in scope for this fix.
+- TK-4 (central-bank compose template) and TK-5 (orchestration engine) are the implementation targets for this guard; no other toolkit layers are in scope for this fix.

@@ -237,8 +237,10 @@ propose_fx() {
     --arg ocur "USD" \
     --arg ccur "BRL" \
     --arg rate "5.2" \
-    --arg sra "$IDENTITY_BANK_A" \
-    --arg srb "$IDENTITY_BANK_B" \
+    --arg src_spoke "spoke-a" \
+    --arg dst_spoke "spoke-b" \
+    --arg src_recv "$IDENTITY_BANK_A" \
+    --arg dst_recv "$IDENTITY_BANK_B" \
     --argjson exp "$(( $(date +%s) + 3600 ))" \
     '{
       trade_id: $tid,
@@ -253,8 +255,10 @@ propose_fx() {
       counter_currency: $ccur,
       rate: $rate,
       expiry_date: $exp,
-      spoke_a_receiver: $sra,
-      spoke_b_receiver: $srb,
+      source_spoke_id: $src_spoke,
+      dest_spoke_id: $dst_spoke,
+      source_receiver: $src_recv,
+      dest_receiver: $dst_recv,
       on_behalf: false
     }')
 
