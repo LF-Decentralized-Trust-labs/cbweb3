@@ -1,5 +1,9 @@
 # Samples — Provisionamento de dois spokes (Brasil e Colômbia)
 
+> Para um passo a passo com os comandos `cbweb3` prontos para copiar e colar
+> (o mesmo que o `deploy-all.sh` executa, porém manualmente), veja
+> [MANUAL-DEPLOYMENT.md](./MANUAL-DEPLOYMENT.md).
+
 Este diretório contém manifestos `ParticipantDeployment` prontos para uso com o
 toolkit `cbweb3`, demonstrando o cenário completo:
 
