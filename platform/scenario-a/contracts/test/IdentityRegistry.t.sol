@@ -241,10 +241,12 @@ contract IdentityRegistryTest is Test {
         assertEq(uint256(p.status), uint256(IdentityRegistryLibrary.KycStatus.Verified));
     }
 
-    /// @notice Verifies that lastUpdate is set to block.timestamp on registerParticipant.
-    function test_RegisterParticipant_SetsLastUpdateTimestamp() public {
-        uint256 ts = 1_700_000_000;
-        vm.warp(ts);
+    /// @notice Verifies that lastUpdate is NOT set to block.timestamp on registerParticipant.
+    /// @dev block.timestamp is nondeterministic across Pente endorsers (it derives from the
+    /// executor's base block), so writing it into endorsed state wedges the private tx. The
+    /// field is kept at 0 for ABI stability; audit time is sourced from the emitted event.
+    function test_RegisterParticipant_DoesNotStoreBlockTimestamp() public {
+        vm.warp(1_700_000_000);
 
         vm.prank(admin);
         registry.registerParticipant(
@@ -252,23 +254,22 @@ contract IdentityRegistryTest is Test {
         );
 
         IdentityRegistryLibrary.Participant memory p = registry.getParticipant(bankA);
-        assertEq(p.lastUpdate, ts);
+        assertEq(p.lastUpdate, 0);
     }
 
-    /// @notice Verifies that lastUpdate is refreshed on updateStatus.
-    function test_UpdateStatus_RefreshesLastUpdateTimestamp() public {
+    /// @notice Verifies that updateStatus does NOT write block.timestamp into lastUpdate.
+    function test_UpdateStatus_DoesNotStoreBlockTimestamp() public {
         vm.prank(admin);
         registry.registerParticipant(
             bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
         );
 
-        uint256 laterTs = 1_800_000_000;
-        vm.warp(laterTs);
+        vm.warp(1_800_000_000);
         vm.prank(admin);
         registry.updateStatus(bankA, IdentityRegistryLibrary.KycStatus.Suspended);
 
         IdentityRegistryLibrary.Participant memory p = registry.getParticipant(bankA);
-        assertEq(p.lastUpdate, laterTs);
+        assertEq(p.lastUpdate, 0);
     }
 
     /// @notice Verifies that canGovern returns true for CENTRAL_BANK and GOVERNANCE roles when Verified.
