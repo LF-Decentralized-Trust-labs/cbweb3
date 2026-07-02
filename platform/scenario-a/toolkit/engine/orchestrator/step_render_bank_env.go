@@ -125,6 +125,12 @@ func (s *renderBankEnvStep) Run(_ context.Context) error {
 		// Commercial bank: points at the central bank's api-gateway for onboarding/proxy.
 		CentralBankAPIURL: s.centralBankAPIURL,
 
+		// Seed the bank's auth KMS with its operator key so onboarding (CreateOnboardingKey,
+		// keyed by bank code) returns the operator address. That address becomes the
+		// participant the CB verifies on KYC approval, so the HTLC signer passes onlyVerified.
+		KMSSeedKeyID:      s.bankCode,
+		KMSSeedPrivateKey: s.besuOperatorKey,
+
 		// On-chain FXAgreement (Pente): the bank proposes into the CB↔bank group via its
 		// own Paladin. The in-group FXAgreement address is resolved at runtime (deploy-fxa
 		// runs after the backend starts), so it is left empty here.

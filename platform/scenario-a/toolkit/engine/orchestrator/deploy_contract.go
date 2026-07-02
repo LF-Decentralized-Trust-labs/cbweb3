@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -48,6 +49,9 @@ type operatorKeyExporter interface {
 // resolveOperatorKeyHex returns the local operator key hex when the provider is the
 // local emulator, or "" otherwise (prod / export failure). Empty disables the
 // backend Besu-signing path — the correct default outside local.
+//
+// This is the CENTRAL BANK operator (the prefunded deployer/DEFAULT_ADMIN, 0xFE3B557E).
+// Commercial banks must NOT share it — see resolveBankOperatorKeyHex.
 func resolveOperatorKeyHex(provider kp.KeyProvider) string {
 	ex, ok := provider.(operatorKeyExporter)
 	if !ok {
@@ -58,6 +62,29 @@ func resolveOperatorKeyHex(provider kp.KeyProvider) string {
 		return ""
 	}
 	return hexKey
+}
+
+// resolveBankOperatorKeyHex returns a DISTINCT per-bank Besu operator key (hex, no
+// 0x) for the local profile, or "" for prod (the Besu path stays off until KMS
+// wiring, matching resolveOperatorKeyHex).
+//
+// Every commercial bank previously reused the single shared dev operator key
+// (0xFE3B557E via resolveOperatorKeyHex), so every bank's payment-orchestrator
+// signed HTLC/fCeBM transactions — and appeared on-chain — as the SAME identity.
+// That makes per-bank participant verification meaningless (one address stands in
+// for all banks) and mirrors, on the base ledger, the Paladin nonce collision that
+// fundedOperatorKey fixed for the private layer.
+//
+// The derived address is this bank's HTLC signer and the participant compliance
+// registers on KYC approval. Derivation is deterministic (idempotent across
+// redeploys, no in-memory GenerateKey state to lose) and the account needs no
+// genesis prefunding: the spoke genesis sets zeroBaseFee, so gas is free.
+func resolveBankOperatorKeyHex(provider kp.KeyProvider, spokeID, bankCode string) string {
+	if _, ok := provider.(operatorKeyExporter); !ok {
+		return "" // prod: Besu path off until KMS wiring
+	}
+	h := sha256.Sum256([]byte("cbweb3/besu_operator/" + spokeID + "/" + bankCode))
+	return hex.EncodeToString(h[:])
 }
 
 // forgeArtifactWithABI is the subset of a Foundry build artifact needed to deploy

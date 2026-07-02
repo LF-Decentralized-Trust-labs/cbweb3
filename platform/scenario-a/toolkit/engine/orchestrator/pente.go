@@ -105,7 +105,7 @@ func createPenteGroup(ctx context.Context, paladinURL, name string, members []st
 		return "", fmt.Errorf("pgroup_createGroup returned empty group id")
 	}
 	// The group is created asynchronously; wait for the genesis tx to confirm.
-	if _, err := pollPenteTxReceipt(ctx, paladinURL, group.GenesisTransaction); err != nil {
+	if _, err := pollPenteTxReceipt(ctx, paladinURL, group.GenesisTransaction, nil, "group genesis"); err != nil {
 		return "", fmt.Errorf("pente group genesis tx: %w", err)
 	}
 	return group.ID, nil
@@ -217,12 +217,16 @@ func waitPenteGroupReady(ctx context.Context, paladinURL, groupID string, timeou
 }
 
 // pollPenteTxReceipt polls ptx_getTransactionFull until the receipt is available,
-// returning the deployed contract address (empty if none).
-func pollPenteTxReceipt(ctx context.Context, paladinURL, txID string) (string, error) {
+// returning the deployed contract address (empty if none). progress (nil-safe) is
+// called with a heartbeat every ~5s while waiting so a long-running deploy step is
+// visibly making progress instead of looking hung; label names what is being waited on.
+func pollPenteTxReceipt(ctx context.Context, paladinURL, txID string, progress func(string), label string) (string, error) {
 	// Poll until the receipt appears or ctx expires. The wait is bounded by the caller's step
-	// timeout (VoteQBFT, 5m) rather than a fixed iteration cap: a large contract (FXAgreement,
+	// timeout (PenteFXSetup, 20m) rather than a fixed iteration cap: a large contract (FXAgreement,
 	// IR-compiled) can take well over a minute to confirm in a Pente group on a busy second
 	// spoke, and a hard 60s cap produced a false "receipt timeout" that wedged deploy-fxa.
+	start := time.Now()
+	nextBeat := 5 * time.Second
 	for {
 		var res struct {
 			Receipt *penteTxReceipt `json:"receipt"`
@@ -236,6 +240,10 @@ func pollPenteTxReceipt(ctx context.Context, paladinURL, txID string) (string, e
 				return "", fmt.Errorf("transaction failed: %s", res.Receipt.FailureMessage)
 			}
 			return res.Receipt.ContractAddress, nil
+		}
+		if progress != nil && time.Since(start) >= nextBeat {
+			progress(fmt.Sprintf("waiting for %s tx receipt (%ds elapsed)", label, int(time.Since(start).Seconds())))
+			nextBeat += 5 * time.Second
 		}
 		select {
 		case <-ctx.Done():
@@ -265,7 +273,7 @@ const zeroBytes32 = "0x000000000000000000000000000000000000000000000000000000000
 // deployContractInPente deploys a Foundry-compiled contract inside the privacy group via
 // pgroup_sendTransaction (from = the deployer's node identity), passing ctorInput to the
 // constructor, and returns the deployed in-group address.
-func deployContractInPente(ctx context.Context, paladinURL, groupID, from, artifactPath string, ctorInput map[string]interface{}) (string, error) {
+func deployContractInPente(ctx context.Context, paladinURL, groupID, from, artifactPath string, ctorInput map[string]interface{}, progress func(string), label string) (string, error) {
 	raw, err := os.ReadFile(artifactPath)
 	if err != nil {
 		return "", fmt.Errorf("read artifact %s: %w", artifactPath, err)
@@ -299,6 +307,9 @@ func deployContractInPente(ctx context.Context, paladinURL, groupID, from, artif
 		"function": constructorABI,
 		"input":    ctorInput,
 	}
+	if progress != nil {
+		progress(fmt.Sprintf("deploying %s in group…", label))
+	}
 	var txID string
 	rpcErr, err := penteRPCCall(ctx, paladinURL, "pgroup_sendTransaction", []interface{}{tx}, &txID)
 	if err != nil {
@@ -309,19 +320,21 @@ func deployContractInPente(ctx context.Context, paladinURL, groupID, from, artif
 	}
 	// Confirm the tx succeeded (base receipt), then read the deployed contract address from the
 	// DOMAIN receipt — Pente private deploys do NOT expose contractAddress in the base receipt.
-	if _, err := pollPenteTxReceipt(ctx, paladinURL, txID); err != nil {
+	if _, err := pollPenteTxReceipt(ctx, paladinURL, txID, progress, label); err != nil {
 		return "", err
 	}
-	return penteDeployedAddress(ctx, paladinURL, txID)
+	return penteDeployedAddress(ctx, paladinURL, txID, progress, label)
 }
 
 // penteDeployedAddress returns the in-group address of a contract deployed via
 // pgroup_sendTransaction, read from the Pente domain receipt (ptx_getDomainReceipt). The base
 // tx receipt does not carry contractAddress for private deploys, so this is polled until the
 // domain receipt populates.
-func penteDeployedAddress(ctx context.Context, paladinURL, txID string) (string, error) {
+func penteDeployedAddress(ctx context.Context, paladinURL, txID string, progress func(string), label string) (string, error) {
 	// Poll the domain receipt until the deployed address appears or ctx expires (bounded by the
 	// caller's step timeout, not a fixed iteration cap — see pollPenteTxReceipt).
+	start := time.Now()
+	nextBeat := 5 * time.Second
 	for {
 		var res struct {
 			Receipt struct {
@@ -335,6 +348,10 @@ func penteDeployedAddress(ctx context.Context, paladinURL, txID string) (string,
 		if rpcErr == nil && res.Receipt.ContractAddress != "" {
 			return res.Receipt.ContractAddress, nil
 		}
+		if progress != nil && time.Since(start) >= nextBeat {
+			progress(fmt.Sprintf("waiting for %s address (%ds elapsed)", label, int(time.Since(start).Seconds())))
+			nextBeat += 5 * time.Second
+		}
 		select {
 		case <-ctx.Done():
 			return "", fmt.Errorf("pente deploy %s: domain receipt wait: %w", txID, ctx.Err())
@@ -346,9 +363,9 @@ func penteDeployedAddress(ctx context.Context, paladinURL, txID string) (string,
 // deployFXAInPente deploys FXAgreement inside the privacy group, wiring its constructor to the
 // in-group IdentityRegistry address (which MUST have code in the group's private EVM — see
 // setupBilateralFXAContext; a base-ledger address reverts canTransact with empty 0x).
-func deployFXAInPente(ctx context.Context, paladinURL, groupID, from, artifactPath, identityRegistryAddr string) (string, error) {
+func deployFXAInPente(ctx context.Context, paladinURL, groupID, from, artifactPath, identityRegistryAddr string, progress func(string)) (string, error) {
 	return deployContractInPente(ctx, paladinURL, groupID, from, artifactPath,
-		map[string]interface{}{"_identityRegistry": identityRegistryAddr})
+		map[string]interface{}{"_identityRegistry": identityRegistryAddr}, progress, "FXAgreement")
 }
 
 // resolveAddress resolves a Paladin identity to its eth address within reach of paladinURL.
@@ -371,7 +388,10 @@ func resolveAddress(ctx context.Context, paladinURL, identity string) (string, e
 // registerParticipantInPente calls IdentityRegistry.registerParticipant inside the group,
 // marking account Verified with the given role. `from` MUST hold GOVERNANCE_ROLE (the registry
 // admin / deployer).
-func registerParticipantInPente(ctx context.Context, paladinURL, groupID, from, registryAddr, account, name string, role int) error {
+func registerParticipantInPente(ctx context.Context, paladinURL, groupID, from, registryAddr, account, name string, role int, progress func(string)) error {
+	if progress != nil {
+		progress(fmt.Sprintf("registering participant %s (role %d)…", name, role))
+	}
 	fn := map[string]interface{}{
 		"type": "function", "name": "registerParticipant",
 		"inputs": []map[string]interface{}{
@@ -400,7 +420,7 @@ func registerParticipantInPente(ctx context.Context, paladinURL, groupID, from, 
 	if rpcErr != nil {
 		return fmt.Errorf("registerParticipant %s: %s", account, rpcErr.Message)
 	}
-	if _, err := pollPenteTxReceipt(ctx, paladinURL, txID); err != nil {
+	if _, err := pollPenteTxReceipt(ctx, paladinURL, txID, progress, "registerParticipant "+name); err != nil {
 		return fmt.Errorf("registerParticipant %s receipt: %w", account, err)
 	}
 	return nil
@@ -418,16 +438,23 @@ type penteMember struct {
 // registered Verified with its role, (3) FXAgreement wired to that in-group registry. Returns
 // the registry and FXAgreement in-group addresses. This is what makes on-chain propose/accept/
 // settle actually succeed (the registry must live inside the group — see PLAN.md Phase 1a).
-func setupBilateralFXAContext(ctx context.Context, paladinURL, groupID, deployer, idRegistryArtifact, fxaArtifact string, members []penteMember) (registryAddr, fxaAddr string, err error) {
+func setupBilateralFXAContext(ctx context.Context, paladinURL, groupID, deployer, idRegistryArtifact, fxaArtifact string, members []penteMember, progress func(string)) (registryAddr, fxaAddr string, err error) {
+	emit := func(msg string) {
+		if progress != nil {
+			progress(msg)
+		}
+	}
 	adminAddr, err := resolveAddress(ctx, paladinURL, deployer)
 	if err != nil {
 		return "", "", fmt.Errorf("resolve deployer %s: %w", deployer, err)
 	}
+	emit("deploying in-group IdentityRegistry")
 	registryAddr, err = deployContractInPente(ctx, paladinURL, groupID, deployer, idRegistryArtifact,
-		map[string]interface{}{"admin": adminAddr})
+		map[string]interface{}{"admin": adminAddr}, progress, "IdentityRegistry")
 	if err != nil {
 		return "", "", fmt.Errorf("deploy in-group IdentityRegistry: %w", err)
 	}
+	emit(fmt.Sprintf("IdentityRegistry deployed at %s; registering %d participant(s)", registryAddr, len(members)))
 	// Resolve members to in-group addresses and dedupe: in local, entities share the dev
 	// operator key, so multiple members can resolve to the SAME address. Registering it twice
 	// (CENTRAL_BANK then COMMERCIAL_BANK) would leave it COMMERCIAL_BANK → canGovern() false.
@@ -455,11 +482,12 @@ func setupBilateralFXAContext(ctx context.Context, paladinURL, groupID, deployer
 	}
 	for _, addr := range order {
 		r := byAddr[addr]
-		if err := registerParticipantInPente(ctx, paladinURL, groupID, deployer, registryAddr, addr, r.name, r.role); err != nil {
+		if err := registerParticipantInPente(ctx, paladinURL, groupID, deployer, registryAddr, addr, r.name, r.role, progress); err != nil {
 			return "", "", err
 		}
 	}
-	fxaAddr, err = deployFXAInPente(ctx, paladinURL, groupID, deployer, fxaArtifact, registryAddr)
+	emit("deploying FXAgreement wired to the in-group registry")
+	fxaAddr, err = deployFXAInPente(ctx, paladinURL, groupID, deployer, fxaArtifact, registryAddr, progress)
 	if err != nil {
 		return "", "", fmt.Errorf("deploy FXAgreement: %w", err)
 	}

@@ -104,7 +104,7 @@ func TestSetupBilateralFXAContext(t *testing.T) {
 		{Identity: "cb@brl", Name: "Central Bank", Role: roleCentralBank},
 		{Identity: "itau@brl", Name: "Itau", Role: roleCommercialBank},
 	}
-	reg, fxa, err := setupBilateralFXAContext(context.Background(), srv.URL, "0xGROUP", "cb@brl", regArtifact, fxaArtifact, members)
+	reg, fxa, err := setupBilateralFXAContext(context.Background(), srv.URL, "0xGROUP", "cb@brl", regArtifact, fxaArtifact, members, nil)
 	if err != nil {
 		t.Fatalf("setupBilateralFXAContext: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestSetupBilateralFXAContext_SharedKey(t *testing.T) {
 		{Identity: "cb@brl", Name: "Central Bank", Role: roleCentralBank},
 		{Identity: "itau@brl", Name: "Itau", Role: roleCommercialBank},
 	}
-	if _, _, err := setupBilateralFXAContext(context.Background(), srv.URL, "0xGROUP", "cb@brl", regArtifact, fxaArtifact, members); err != nil {
+	if _, _, err := setupBilateralFXAContext(context.Background(), srv.URL, "0xGROUP", "cb@brl", regArtifact, fxaArtifact, members, nil); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	// registry deploy + ONE register + FXAgreement deploy = 3 sends (not 4).

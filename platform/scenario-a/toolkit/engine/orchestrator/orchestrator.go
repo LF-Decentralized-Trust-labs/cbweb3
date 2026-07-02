@@ -461,9 +461,10 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	stackTO := deps.Timeouts.WaitSync
 	stackInt := deps.Timeouts.WaitSyncInterval
 
-	// Local operator key wires the bank backend Besu-signing path (HTLC/fCeBM). Empty
-	// off local — leaves the path disabled, matching prior behaviour.
-	operatorKeyHex := resolveOperatorKeyHex(deps.KeyProvider)
+	// Per-bank operator key wires the bank backend Besu-signing path (HTLC/fCeBM).
+	// DISTINCT per bank (not the shared CB deployer) so each bank has its own on-chain
+	// HTLC signer / verified participant. Empty off local — path disabled, as before.
+	operatorKeyHex := resolveBankOperatorKeyHex(deps.KeyProvider, spokeID, bank)
 
 	steps = append(steps,
 		newRenderBankEnvStep(bankEnvParams{
@@ -526,9 +527,9 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	//     before creating the group; not consumed by the backend;
 	//   - on-chain participant registration is NOT attempted from the join: it is
 	//     onlyRole(GOVERNANCE_ROLE) and must register the bank's runtime KMS wallet,
-	//     so the engine performs it CB-side via `cbweb3 register-participant` (signed
-	//     by the CB governance key) after the bank completes Governance Portal
-	//     onboarding; the CB-signed cert is issued by the portal on KYC approval.
+	//     so the CB compliance service performs it (signed by the CB governance key,
+	//     CB_PRIVATE_KEY) when it approves the bank's KYC in the Governance Portal;
+	//     the CB-signed cert is issued by the portal on that same approval.
 	//
 	// gen-csr stays: it produces <dataDir>/pki/<bank>.csr, which the bank's
 	// api-gateway reads at portal onboarding (initiate) and the CB signs at complete.
@@ -543,7 +544,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		newCreatePenteJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort), deps.Timeouts.PenteFXSetup, deps.Timeouts.VoteQBFTInterval, w),
 		newDeployFXAJoinStep(spokeID, deps.BankCode, dataDir, bankPaladinURL(deps.BesuRPCPort),
 			filepath.Join(deps.ContractsOutDir, "FXAgreement.sol", "FXAgreement.json"),
-			b.Spec.Contracts.ParticipantRegistryAddress, deps.Timeouts.PenteFXSetup),
+			b.Spec.Contracts.ParticipantRegistryAddress, deps.Timeouts.PenteFXSetup, w),
 		newGenCSRStep(deps.BankCode, deps.Institution, dataDir),
 	)
 	return steps

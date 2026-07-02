@@ -81,7 +81,7 @@ func TestDeployFXAInPente_ReturnsAddress(t *testing.T) {
 	os.WriteFile(artifact, []byte(`{"abi":[{"type":"constructor","inputs":[{"name":"_identityRegistry","type":"address"}]}],"bytecode":{"object":"0x6080"}}`), 0o644)
 
 	addr, err := deployFXAInPente(context.Background(), srv.URL, "0xabc",
-		"funded_operator@spoke-brl-bank-itau", artifact, "0xREG")
+		"funded_operator@spoke-brl-bank-itau", artifact, "0xREG", nil)
 	if err != nil {
 		t.Fatalf("deployFXAInPente: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestDeployFXAInPente_ReturnsAddress(t *testing.T) {
 func TestDeployFXAInPente_ErrorsOnMissingArtifact(t *testing.T) {
 	srv := fakePaladin(t)
 	defer srv.Close()
-	_, err := deployFXAInPente(context.Background(), srv.URL, "0xabc", "id", "/nonexistent.json", "0xREG")
+	_, err := deployFXAInPente(context.Background(), srv.URL, "0xabc", "id", "/nonexistent.json", "0xREG", nil)
 	if err == nil {
 		t.Error("expected error for missing artifact")
 	}
@@ -173,7 +173,7 @@ func TestCreatePenteJoinStep_Check_StateDriven(t *testing.T) {
 
 func TestDeployFXAJoinStep_Check_StateDriven(t *testing.T) {
 	dir := t.TempDir()
-	step := newDeployFXAJoinStep("spoke-brl", "bank-itau", dir, "http://x", "/a.json", "0xREG", 0)
+	step := newDeployFXAJoinStep("spoke-brl", "bank-itau", dir, "http://x", "/a.json", "0xREG", 0, nil)
 	if done, _ := step.Check(context.Background()); done {
 		t.Error("Check should be false before deploy")
 	}

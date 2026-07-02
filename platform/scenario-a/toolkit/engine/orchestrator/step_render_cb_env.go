@@ -88,9 +88,14 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		PaladinIdentity: paladinIdentity(cbNodeName(s.spokeID)),
 
 		GovernanceUserID: governanceUserID(s.entityName),
-		// CB_PRIVATE_KEY is intentionally NOT rendered: signing goes through the
-		// KeyProvider. Left blank for the local backend bootstrap.
-		CBPrivateKey: "",
+		// CB_PRIVATE_KEY is the CB governance key the compliance service signs
+		// governance transactions with — notably registerParticipant (onlyRole
+		// GOVERNANCE_ROLE) when it approves a bank's KYC. It is the CB operator/deployer
+		// key (0xFE3B557E locally), which the IdentityRegistry constructor grants
+		// DEFAULT_ADMIN + GOVERNANCE. Empty in prod (compliance signs via KMS then).
+		// Without it, compliance falls back to the Noop registry client and on-chain
+		// participant registration silently no-ops.
+		CBPrivateKey: s.besuOperatorKey,
 
 		// On-chain FXAgreement (Pente): the CB executes proposeOnBehalf/accept/settle
 		// (canGovern). PENTE_BASE_URL is left empty and defaults to PALADIN_URL (set on the

@@ -90,6 +90,15 @@ type EntityEnvData struct {
 	// Commercial-bank only.
 	CentralBankAPIURL string
 
+	// KMS seed (commercial-bank only, local profile). Aligns the bank's onboarding
+	// KMS wallet with its Besu operator key so the onboarded+verified participant is
+	// the SAME address the payment-orchestrator signs HTLC txs with — otherwise the
+	// HTLC lock reverts onlyVerified. KMSSeedKeyID is the bank code (CreateOnboardingKey
+	// keys the KMS by bank code); KMSSeedPrivateKey is the bank's operator key. Empty
+	// for the CB and in prod (banks custody their own keys).
+	KMSSeedKeyID      string
+	KMSSeedPrivateKey string
+
 	RelaySecret string
 	CORSOrigins string
 }
@@ -170,6 +179,11 @@ GOVERNANCE_USER_ID={{.GovernanceUserID}}
 {{else}}
 # Commercial bank only — points to the central bank's api-gateway for onboarding/proxy
 CENTRAL_BANK_API_URL={{.CentralBankAPIURL}}
+# KMS seed (local dev): make the onboarding wallet == the bank's Besu operator key so
+# the onboarded+verified participant is the HTLC signer. auth reads these from env_file.
+# Empty in prod (bank-custodied keys).
+KMS_SEED_KEY_ID={{.KMSSeedKeyID}}
+KMS_SEED_PRIVATE_KEY={{.KMSSeedPrivateKey}}
 {{end}}`
 
 // RenderEntityEnv renders the per-entity .env to outPath (creating parent dirs).

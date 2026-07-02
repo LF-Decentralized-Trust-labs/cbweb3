@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -27,9 +28,10 @@ type deployFXAJoinStep struct {
 	artifactPath     string // FXAgreement Foundry artifact (…/out/FXAgreement.sol/FXAgreement.json)
 	identityRegistry string // deprecated: base-ledger whitelist from the bundle; superseded by the in-group registry
 	timeout          time.Duration
+	logw             io.Writer // progress logging (nil-safe)
 }
 
-func newDeployFXAJoinStep(spokeID, bankID, dataDir, paladinURL, artifactPath, identityRegistry string, timeout time.Duration) Step {
+func newDeployFXAJoinStep(spokeID, bankID, dataDir, paladinURL, artifactPath, identityRegistry string, timeout time.Duration, logw io.Writer) Step {
 	return &deployFXAJoinStep{
 		spokeID:          spokeID,
 		bankID:           bankID,
@@ -38,6 +40,7 @@ func newDeployFXAJoinStep(spokeID, bankID, dataDir, paladinURL, artifactPath, id
 		artifactPath:     artifactPath,
 		identityRegistry: identityRegistry,
 		timeout:          timeout,
+		logw:             logw,
 	}
 }
 
@@ -74,9 +77,10 @@ func (s *deployFXAJoinStep) Run(ctx context.Context) error {
 		{Identity: paladinIdentity(cbNodeName(s.spokeID)), Name: cbNodeName(s.spokeID), Role: roleCentralBank},
 		{Identity: deployer, Name: bankNodeName(s.spokeID, s.bankID), Role: roleCommercialBank},
 	}
+	progress := func(msg string) { logDetail(s.logw, s.spokeID, StepDeployFXAJoin, msg) }
 	registryAddr, fxaAddr, err := setupBilateralFXAContext(
 		ctx, s.paladinURL, addrs.PenteContextGroupID, deployer,
-		identityRegistryArtifact(s.artifactPath), s.artifactPath, members)
+		identityRegistryArtifact(s.artifactPath), s.artifactPath, members, progress)
 	if err != nil {
 		return fmt.Errorf("set up in-group FX context: %w", err)
 	}
