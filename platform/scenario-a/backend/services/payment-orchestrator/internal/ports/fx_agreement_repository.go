@@ -23,7 +23,8 @@ type FXAgreementFilter struct {
 //   - Terminal states (REJECTED, CANCELLED, SETTLED) cannot be overwritten.
 type FXAgreementRepository interface {
 	// CreateAgreement persists a new FX agreement record.
-	// Returns an error if a record with the same TradeID already exists.
+	// Idempotent on TradeID: a duplicate is a silent no-op, not an error (the synchronous
+	// propose handler and the FXIndexer can race to project the same on-chain agreement).
 	CreateAgreement(ctx context.Context, r *domain.FXAgreementRecord) error
 
 	// GetAgreement retrieves an FX agreement by trade_id.

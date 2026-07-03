@@ -347,6 +347,39 @@ func TestGormFXAgreementRepository_Lifecycle(t *testing.T) {
 	}
 }
 
+// TestGormFXAgreementRepository_CreateAgreement_DuplicateIsNoop covers the race between the
+// synchronous propose handler and the FXIndexer: both can call CreateAgreement for the same
+// trade_id. The second call must silently no-op (ON CONFLICT DO NOTHING), not return an error.
+func TestGormFXAgreementRepository_CreateAgreement_DuplicateIsNoop(t *testing.T) {
+	repo, err := repository.NewGormFXAgreementRepositoryFromDB(newTestDB(t))
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	rec := &domain.FXAgreementRecord{
+		TradeID: "T-DUP", Originator: "bank-a", CounterpartyB: "bank-b",
+		OriginAmount: "100", CounterAmount: "120", OriginCurrency: "USD",
+		CounterCurrency: "BRL", Rate: "1.2", ExpiryDate: uint64(now.Add(time.Hour).Unix()),
+		State: domain.FXStateProposed, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.CreateAgreement(ctx, rec); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+
+	// A second writer (e.g. the FXIndexer) racing to project the same on-chain agreement.
+	dup := *rec
+	if err := repo.CreateAgreement(ctx, &dup); err != nil {
+		t.Fatalf("duplicate create must no-op, got error: %v", err)
+	}
+
+	got, err := repo.GetAgreement(ctx, "T-DUP")
+	if err != nil || got == nil || got.State != domain.FXStateProposed {
+		t.Fatalf("get after duplicate: %+v err=%v", got, err)
+	}
+}
+
 func TestGormFXAgreementRepository_SpokeKeyedColumns(t *testing.T) {
 	repo, err := repository.NewGormFXAgreementRepositoryFromDB(newTestDB(t))
 	if err != nil {
