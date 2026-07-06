@@ -244,17 +244,31 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 	)
 
 	// Register the spoke with the relay LAST, once the CB coordinator endpoints exist. The relay
-	// reaches all of these via host.docker.internal on the host-published ports. It polls
-	// InternalApiURL for the CB's FX-agreement aggregate and drives the dest leg via GRPCEndpoint.
+	// reaches all of these on the host-published ports. It polls InternalApiURL for the CB's
+	// FX-agreement aggregate and drives the dest leg via GRPCEndpoint. The host defaults to
+	// host.docker.internal (relay co-located on this Docker host); spec.relay.advertisedHost
+	// overrides it with a routable IP/hostname when the relay runs elsewhere.
+	relayHost := relayAdvertisedHost(m)
 	steps = append(steps,
 		newRegisterRelayStep(spokeID, dataDir,
-			hostInternalURL(deps.BesuRPCURL),
-			fmt.Sprintf("ws://host.docker.internal:%d", besuWSPort),
-			fmt.Sprintf("host.docker.internal:%d", ports.PaymentGRPC),
-			fmt.Sprintf("http://host.docker.internal:%d", ports.APIGateway),
+			rewriteHost(deps.BesuRPCURL, relayHost),
+			fmt.Sprintf("ws://%s:%d", relayHost, besuWSPort),
+			fmt.Sprintf("%s:%d", relayHost, ports.PaymentGRPC),
+			fmt.Sprintf("http://%s:%d", relayHost, ports.APIGateway),
 			deps.RelayRegistrar, deps.Timeouts.RelayRegistration),
 	)
 	return steps
+}
+
+// relayAdvertisedHost returns the host the relay should use to reach this spoke's
+// host-published endpoints during register-relay. It is spec.relay.advertisedHost
+// when set, otherwise host.docker.internal (the relay is co-located on this Docker
+// host and reaches published ports via the host loopback).
+func relayAdvertisedHost(m *manifest.Manifest) string {
+	if m.Spec.Relay != nil && m.Spec.Relay.AdvertisedHost != "" {
+		return m.Spec.Relay.AdvertisedHost
+	}
+	return dockerHostAlias
 }
 
 // frontendAPIBase / frontendAPIURL are the host-published api-gateway URLs the
@@ -274,10 +288,21 @@ func cbCORSOrigins(p EntityPorts) string {
 		p.FrontendPrimary, p.FrontendSecondary, p.FrontendSupervisor, p.FrontendNOC)
 }
 
+// dockerHostAlias is the Docker special DNS name that resolves to the host from
+// inside a container, used to reach host-published ports when the relay/Paladin
+// run as separate compose stacks on the same Docker host.
+const dockerHostAlias = "host.docker.internal"
+
 // hostInternalURL rewrites a localhost URL to host.docker.internal so a container
 // can reach a host-published port (Paladin/Cacti run as separate compose stacks).
 func hostInternalURL(url string) string {
-	return strings.Replace(url, "localhost", "host.docker.internal", 1)
+	return rewriteHost(url, dockerHostAlias)
+}
+
+// rewriteHost rewrites the localhost in a URL to the given host, so a caller on a
+// different host (e.g. an off-host relay) can reach the spoke's host-published port.
+func rewriteHost(url, host string) string {
+	return strings.Replace(url, "localhost", host, 1)
 }
 
 // besuPathURL returns the container-reachable Besu RPC URL to enable the backend's

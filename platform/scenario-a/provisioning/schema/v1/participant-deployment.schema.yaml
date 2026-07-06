@@ -248,3 +248,14 @@ definitions:
         type: string
         minLength: 1
         description: "HTTP(S) URL of the LNET-operated Cacti relay (e.g., http://cbweb3-cacti:4000). The relay is centrally operated by LNET; individual banks never run their own relay."
+
+      advertisedHost:
+        type: string
+        minLength: 1
+        description: >
+          Optional. Host the relay uses to reach this spoke's host-published
+          endpoints (Besu RPC/WS, payment-orchestrator gRPC, CB api-gateway)
+          during register-relay. When omitted, defaults to host.docker.internal,
+          which only works when the relay is co-located on the same Docker host.
+          Set to a routable IP or hostname when the relay runs on a different
+          host. Only the host is overridden — the published ports are unchanged.

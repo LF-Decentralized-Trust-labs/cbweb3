@@ -120,4 +120,11 @@ type Port struct {
 // Relay holds the configuration for registering the spoke with the LNET-operated relay.
 type Relay struct {
 	Endpoint string `yaml:"endpoint"`
+	// AdvertisedHost overrides the host the relay uses to reach this spoke's
+	// host-published endpoints (Besu RPC/WS, payment-orchestrator gRPC, CB
+	// api-gateway) when register-relay runs. When empty it defaults to
+	// host.docker.internal, which only works when the relay is co-located on the
+	// same Docker host. Set it to a routable IP or hostname when the relay runs
+	// elsewhere. Only the host is overridden — the published ports are unchanged.
+	AdvertisedHost string `yaml:"advertisedHost,omitempty"`
 }

@@ -34,6 +34,11 @@ spec:
   # O toolkit roda no host, entao usa a porta publicada (localhost:4000).
   relay:
     endpoint: http://localhost:4000
+    # advertisedHost (opcional): host que o relay usa para alcancar os endpoints
+    # publicados deste spoke (Besu RPC/WS, gRPC do payment-orchestrator, api-gateway
+    # do CB) no register-relay. Omitido → host.docker.internal (relay no mesmo host
+    # Docker). Defina um IP/hostname roteavel quando o relay rodar em outro host.
+    # advertisedHost: 10.0.0.7
   # Endpoint de credential-request do CB, embutido no join bundle para que os
   # bancos comerciais saibam onde submeter o CSR (mode: join).
   cbEndpoint: http://cbweb3-api-gateway.central-bank-brazil:8080/api/v1/onboarding/credential-request

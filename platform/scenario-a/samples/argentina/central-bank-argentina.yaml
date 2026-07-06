@@ -32,6 +32,11 @@ spec:
   # Relay Cacti local (RL-1) — precisa estar no ar antes do apply (register-relay e hard).
   relay:
     endpoint: http://localhost:4000
+    # advertisedHost (opcional): host que o relay usa para alcancar os endpoints
+    # publicados deste spoke (Besu RPC/WS, gRPC do payment-orchestrator, api-gateway
+    # do CB) no register-relay. Omitido → host.docker.internal (relay no mesmo host
+    # Docker). Defina um IP/hostname roteavel quando o relay rodar em outro host.
+    # advertisedHost: 10.0.0.7
   cbEndpoint: http://cbweb3-api-gateway.central-bank-argentina:8080/api/v1/onboarding/credential-request
   # Operadores humanos (login por papel via ROPC). Obrigatório: um por papel.
   # FUTURO: senha deve vir de um secret store (não do manifesto) em staging/prod.
