@@ -198,7 +198,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 	stackInt := deps.Timeouts.PaladinHealthCheckInterval
 
 	steps = append(steps,
-		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex),
+		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex, frontendAdvertisedHost(m)),
 		newStartInfraStep(StepStartCBInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
 			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
@@ -231,10 +231,10 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 				{Service: "supervisor", Port: ports.FrontendSupervisor},
 				{Service: "noc", Port: ports.FrontendNOC},
 			},
-			APIURL:      frontendAPIURL(ports.APIGateway),
-			APIBase:     frontendAPIBase(ports.APIGateway),
+			APIURL:      frontendAPIURL(frontendAdvertisedHost(m), ports.APIGateway),
+			APIBase:     frontendAPIBase(frontendAdvertisedHost(m), ports.APIGateway),
 			PortalOwner: entity + "-operator", FiatSymbol: m.Spec.Spoke.Currency, Institution: m.DisplayNameOr(entity),
-			KeycloakURL: frontendAPIBase(ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "cbweb3-noc",
+			KeycloakURL: frontendAPIBase(frontendAdvertisedHost(m), ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "cbweb3-noc",
 			// Per-entity image tag: VITE_* are baked at build time, so a shared tag
 			// would let one entity's bundle (with its api-gateway URL) be reused by
 			// another, sending the browser to the wrong gateway and failing CORS.
@@ -271,21 +271,57 @@ func relayAdvertisedHost(m *manifest.Manifest) string {
 	return dockerHostAlias
 }
 
-// frontendAPIBase / frontendAPIURL are the host-published api-gateway URLs the
-// browser uses (frontends are SPAs served on the host). APIURL carries the /api/v1/
-// suffix the bank/governance/treasury portals expect; APIBase is the bare origin.
-func frontendAPIBase(port int) string { return fmt.Sprintf("http://localhost:%d", port) }
-func frontendAPIURL(port int) string  { return frontendAPIBase(port) + "/api/v1/" }
+// frontendAdvertisedHost returns the hostname baked into VITE_API_URL and
+// VITE_KEYCLOAK_URL at build time. It is spec.frontendHost when set, otherwise
+// "localhost" (which only works when the browser runs on the Docker host itself).
+// Set spec.frontendHost to a routable IP or DNS name for remote access.
+func frontendAdvertisedHost(m *manifest.Manifest) string {
+	if m.Spec.FrontendHost != "" {
+		return m.Spec.FrontendHost
+	}
+	return "localhost"
+}
+
+// frontendAPIBase / frontendAPIURL are the host-published api-gateway URLs baked
+// into the frontend SPA bundle at build time. APIURL carries the /api/v1/ suffix
+// the bank/governance/treasury portals expect; APIBase is the bare origin.
+func frontendAPIBase(host string, port int) string { return fmt.Sprintf("http://%s:%d", host, port) }
+func frontendAPIURL(host string, port int) string  { return frontendAPIBase(host, port) + "/api/v1/" }
 
 // cbCORSOrigins is the comma-separated browser origin list a central bank's
 // api-gateway must allow. A CB serves FOUR portals (governance, treasury,
 // supervisor, noc — see startCBFrontend in this file); every one calls the
 // gateway from the host, so all four origins must be whitelisted or the omitted
-// portals fail CORS at login. (A commercial bank serves only FrontendPrimary, so
-// its origin list is built inline in renderBankEnvStep.)
-func cbCORSOrigins(p EntityPorts) string {
-	return fmt.Sprintf("http://localhost:%d,http://localhost:%d,http://localhost:%d,http://localhost:%d",
+// portals fail CORS at login. When frontendHost differs from "localhost" (e.g.
+// a cloud VM with a public IP), both the localhost and the routable-host origins
+// are included so the same stack works from both the Docker host and remote browsers.
+// (A commercial bank serves only FrontendPrimary, so its list is built in
+// renderBankEnvStep.)
+func cbCORSOrigins(p EntityPorts, frontendHost string) string {
+	local := fmt.Sprintf("http://localhost:%d,http://localhost:%d,http://localhost:%d,http://localhost:%d",
 		p.FrontendPrimary, p.FrontendSecondary, p.FrontendSupervisor, p.FrontendNOC)
+	if frontendHost == "" || frontendHost == "localhost" {
+		return local
+	}
+	remote := fmt.Sprintf("http://%s:%d,http://%s:%d,http://%s:%d,http://%s:%d",
+		frontendHost, p.FrontendPrimary,
+		frontendHost, p.FrontendSecondary,
+		frontendHost, p.FrontendSupervisor,
+		frontendHost, p.FrontendNOC)
+	return local + "," + remote
+}
+
+// bankCORSOrigins is the comma-separated browser origin list a commercial bank's
+// api-gateway must allow. A bank serves one portal (bank/FrontendPrimary) and a
+// secondary (FrontendSecondary). When frontendHost is set, both the localhost and
+// the routable-host origins are included.
+func bankCORSOrigins(p EntityPorts, frontendHost string) string {
+	local := fmt.Sprintf("http://localhost:%d,http://localhost:%d", p.FrontendPrimary, p.FrontendSecondary)
+	if frontendHost == "" || frontendHost == "localhost" {
+		return local
+	}
+	remote := fmt.Sprintf("http://%s:%d,http://%s:%d", frontendHost, p.FrontendPrimary, frontendHost, p.FrontendSecondary)
+	return local + "," + remote
 }
 
 // dockerHostAlias is the Docker special DNS name that resolves to the host from
@@ -503,6 +539,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			FiatTokenAddress: b.Spec.Contracts.FiatTokenAddress,
 			HTLCAddress:      b.Spec.Contracts.HTLCAddress,
 			BesuOperatorKey:  operatorKeyHex,
+			FrontendHost:     frontendAdvertisedHost(m),
 		}),
 		newStartInfraStep(StepStartBankInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
@@ -534,7 +571,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			Context:     filepath.Join(root, "frontend"),
 			ComposePath: filepath.Join(templatesDir, "entity-frontend", "frontend-compose.yaml"),
 			Services:    []frontendService{{Service: "bank", Port: ports.FrontendPrimary}},
-			APIURL:      frontendAPIURL(ports.APIGateway), APIBase: frontendAPIBase(ports.APIGateway),
+			APIURL:      frontendAPIURL(frontendAdvertisedHost(m), ports.APIGateway), APIBase: frontendAPIBase(frontendAdvertisedHost(m), ports.APIGateway),
 			PortalOwner: bank + "-operator", FiatSymbol: b.Spec.Currency, Institution: m.DisplayNameOr(bank),
 			// Per-entity image tag: VITE_API_URL is baked at build time, so a shared
 			// tag would let one bank's bundle be reused by another, pointing the

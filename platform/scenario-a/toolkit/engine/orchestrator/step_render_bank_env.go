@@ -27,6 +27,7 @@ type renderBankEnvStep struct {
 	fiatTokenAddress           string
 	htlcAddress                string
 	besuOperatorKey            string
+	frontendHost               string
 }
 
 func newRenderBankEnvStep(p bankEnvParams) Step {
@@ -44,6 +45,7 @@ func newRenderBankEnvStep(p bankEnvParams) Step {
 		fiatTokenAddress:           p.FiatTokenAddress,
 		htlcAddress:                p.HTLCAddress,
 		besuOperatorKey:            p.BesuOperatorKey,
+		frontendHost:               p.FrontendHost,
 	}
 }
 
@@ -62,6 +64,7 @@ type bankEnvParams struct {
 	FiatTokenAddress           string
 	HTLCAddress                string
 	BesuOperatorKey            string
+	FrontendHost               string
 }
 
 func (s *renderBankEnvStep) Name() string { return StepRenderBankEnv }
@@ -138,7 +141,7 @@ func (s *renderBankEnvStep) Run(_ context.Context) error {
 		PenteBaseURL: hostInternalURL(bankPaladinURL(s.besuRPCPort)),
 
 		RelaySecret: "cbweb3-relay-shared-secret",
-		CORSOrigins: fmt.Sprintf("http://localhost:%d,http://localhost:%d", ports.FrontendPrimary, ports.FrontendSecondary),
+		CORSOrigins: bankCORSOrigins(ports, s.frontendHost),
 	}
 	return RenderEntityEnv(data, cbEnvPath(s.dataDir, s.bankCode))
 }
