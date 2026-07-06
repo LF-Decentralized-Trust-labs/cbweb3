@@ -13,6 +13,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type gormFXAgreementRepository struct {
@@ -49,10 +50,13 @@ func NewGormFXAgreementRepositoryFromDB(db *gorm.DB) (ports.FXAgreementRepositor
 	return &gormFXAgreementRepository{db: db}, nil
 }
 
-// CreateAgreement persists a new FX agreement. Returns an error if trade_id already exists.
+// CreateAgreement persists a new FX agreement. Idempotent on trade_id: the synchronous propose
+// handler and the FXIndexer (both enabled on commercial-bank nodes — see entityenv.go) can race
+// to project the same on-chain agreement, so a trade_id conflict is a benign duplicate, not an
+// error — ON CONFLICT DO NOTHING silently no-ops instead of surfacing a unique-violation.
 func (r *gormFXAgreementRepository) CreateAgreement(ctx context.Context, rec *domain.FXAgreementRecord) error {
 	m := fxAgreementToModel(rec)
-	return r.db.WithContext(ctx).Create(&m).Error
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&m).Error
 }
 
 // GetAgreement retrieves an FX agreement by trade_id. Returns (nil, nil) when not found.
