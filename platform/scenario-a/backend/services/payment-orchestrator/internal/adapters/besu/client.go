@@ -136,10 +136,16 @@ func (c *Client) sendTx(ctx context.Context, data []byte, method string) (string
 		return "", fmt.Errorf("get nonce: %w", err)
 	}
 
-	gasPrice, err := c.ethClient.SuggestGasPrice(ctx)
-	if err != nil {
-		return "", fmt.Errorf("suggest gas price: %w", err)
-	}
+	// Every spoke genesis sets zeroBaseFee and Besu runs with --min-gas-price=0
+	// (see step_start_besu_found.go), so gas is always free by design — operator
+	// accounts (including a freshly joined bank's, which no step ever funds
+	// natively) are expected to transact with zero balance. Do NOT use
+	// SuggestGasPrice/eth_gasPrice here: Besu's gas price oracle can return a
+	// non-zero default (e.g. 1 gwei) until enough zero-fee blocks accumulate
+	// after a spoke is founded, which fails eth_estimateGas's upfront-cost check
+	// (gasLimit * gasPrice > 0 balance) for any zero-balance account — a
+	// timing-dependent false rejection unrelated to actual funds availability.
+	gasPrice := big.NewInt(0)
 
 	auth, err := bind.NewKeyedTransactorWithChainID(c.privateKey, c.chainID)
 	if err != nil {
