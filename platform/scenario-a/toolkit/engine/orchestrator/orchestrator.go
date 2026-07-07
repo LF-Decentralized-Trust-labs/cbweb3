@@ -157,7 +157,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 	}
 
 	steps := []Step{
-		newStartBesuFoundStep(spokeID, m.Spec.Spoke.ChainID, dataDir, deps.CentralBankComposePath, besuRPCURL,
+		newStartBesuFoundStep(spokeID, m.Spec.Spoke.ChainID, deps.CentralBankComposePath, besuRPCURL,
 			m.Spec.Node.AdvertisedHost, besuImage, besuRPCPort, besuWSPort, besuP2PPort,
 			deps.Timeouts.PaladinHealthCheck, deps.Timeouts.PaladinHealthCheckInterval),
 		newDeployContractsStep(spokeID, dataDir, besuRPCURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
@@ -528,7 +528,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	}
 
 	steps := []Step{
-		newWriteGenesisStep(dataDir, b.Spec.Genesis.Content, b.Spec.Genesis.Hash),
+		newWriteGenesisStep(spokeID, deps.BankCode, b.Spec.Genesis.Content, b.Spec.Genesis.Hash),
 		newStartBesuJoinStep(spokeID, deps.BankCode, dataDir, deps.ComposeTemplatePath, deps.BesuRPCURL,
 			ep.bootnodeEnode, m.Spec.Node.AdvertisedHost, besuImage, rpcPort, wsPort, p2pPort),
 		newWaitSyncStep(deps.BesuRPCURL, 1, deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval, w),

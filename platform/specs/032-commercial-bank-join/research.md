@@ -84,14 +84,43 @@ type ValidatorSpec struct {
 
 | Aspecto | TK-4 (central-bank) | TK-8 (commercial-bank) |
 |---------|---------------------|------------------------|
-| `genesis-init` | Presente (gera genesis se não existe) | **Ausente** — genesis vem do bundle via bind mount |
+| `genesis-init` | Presente (gera genesis se não existe) | **Ausente** — genesis vem do bundle, gravado pelo motor no volume nomeado `genesis` |
 | `BOOTNODE_ENODE` | Opcional (vazio = este nó é o bootnode) | **Obrigatório** (falha explícita se ausente) |
-| Node data path | `nodes/central-bank/data` | `nodes/commercial-bank/data` |
+| Node data path | volume nomeado `${SPOKE_ID}_cb_besu_data` | volume nomeado `${SPOKE_ID}_${BANK_ID}_besu_data` |
 | Container name | `cbweb3-${SPOKE_ID}-besu.central-bank` | `cbweb3-${SPOKE_ID}-besu.${BANK_ID}` |
 
 `entry.sh` é reutilizado sem alteração (mesma lógica DOCKER/NONE NAT profile, ADR-001).
 
 **Rationale**: Preserva o invariante central do toolkit: genesis nunca é regenerado em um spoke existente. O banco comercial recebe o genesis pré-validado do bundle (com hash SHA-256 verificado pelo motor antes do `docker compose up`).
+
+> **Addendum (2026-07-07) — desvio de "Node data path" para volume Docker nomeado**:
+> Originalmente `${SPOKE_DATA_DIR}/nodes/commercial-bank/data` (bind mount, espelhando
+> o TK-4). Passou a ser o volume nomeado `${SPOKE_ID}_${BANK_ID}_besu_data`, montado em
+> `/opt/besu/data`. Mesmo racional do desvio equivalente em
+> `specs/026-tk4-compose-central-bank/plan.md`: paridade com Paladin (`bank_data`,
+> `paladin-compose.yaml`) e Postgres (`pg_data`), sem necessidade de inspeção do chain
+> data pelo host. Diferente do TK-4, aqui **não** é necessário um `besu-data-init`:
+> não há `genesis-init` (nem qualquer container rodando como usuário não-root) escrevendo
+> nesse caminho — o serviço `besu` não define `user:`, então um volume novo (root-owned)
+> funciona da mesma forma que o diretório bind-mount root-owned que o Docker criava
+> antes. Na época deste addendum, `genesis/` ainda era bind mount — ver o addendum
+> seguinte, que reverte também essa parte. Ver
+> `scenario-a/provisioning/templates/commercial-bank/docker-compose.yaml`.
+>
+> **Addendum 2 (2026-07-07) — genesis/genesis.json também migrado para volume**:
+> `${SPOKE_DATA_DIR}/genesis/genesis.json` (bind mount) passou a ser o volume
+> nomeado `${SPOKE_ID}_${BANK_ID}_genesis` (chave `genesis` no compose). O
+> `step_write_genesis.go` decodifica o conteúdo base64 do bundle e grava
+> diretamente no volume via `engine/dockervolume.WriteFile` — o conteúdo nunca
+> toca o filesystem do host. O invariante "genesis-once" (hash não pode divergir
+> de uma gravação anterior) passou a ser verificado lendo o volume
+> (`engine/dockervolume.ReadFile`) em vez do arquivo no host. Sem necessidade de
+> init container: nem o `step_write_genesis.go` (roda `docker run` como root) nem
+> o serviço `besu` (sem `user:` override) precisam de um volume mundialmente
+> gravável — ambos operam como root. Resultado: o template
+> `commercial-bank/docker-compose.yaml` não referencia mais `SPOKE_DATA_DIR` em
+> nenhum mount. Ver `scenario-a/toolkit/engine/orchestrator/step_write_genesis.go`
+> e `scenario-a/toolkit/engine/dockervolume/`.
 
 ---
 

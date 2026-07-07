@@ -15,7 +15,6 @@
 | `BESU_WS_PORT` | Porta host para RPC WS (interno: 8546) | `8756` |
 | `BESU_P2P_PORT` | Porta host para P2P (interno: 30303) | `31403` |
 | `BESU_IMAGE` | Imagem Docker do Besu | `hyperledger/besu:25.8.0` |
-| `SPOKE_DATA_DIR` | Diretório base de dados do banco | `/var/cbweb3/commercial-bank-alpha` |
 | `BESU_ADVERTISED_HOST` | Host anunciado no enode do banco | `cbweb3-spoke-brl-besu.commercial-bank-alpha` |
 | `BOOTNODE_ENODE` | Enode completo do bootnode do spoke | `enode://abc...@host:31303` |
 
@@ -31,11 +30,11 @@
 
 ## Diferenças em relação ao TK-4 (central-bank)
 
-1. **Sem `genesis-init` service**: O genesis é provido via bind mount de `SPOKE_DATA_DIR/genesis/genesis.json`. O motor TK-9 escreve e verifica o genesis ANTES de chamar `docker compose up`.
+1. **Sem `genesis-init` service**: O genesis é provido pelo bundle. O motor TK-9 grava e verifica o genesis (via `engine/dockervolume`, no volume nomeado `genesis` — não mais um bind mount de `SPOKE_DATA_DIR`, ver addendum 2 de `../research.md` D4) ANTES de chamar `docker compose up`. `SPOKE_DATA_DIR` deixou de ser uma variável do contrato deste template — nenhum mount do compose a referencia.
 
 2. **`BOOTNODE_ENODE` é obrigatório**: O `docker-compose.yaml` usa `${BOOTNODE_ENODE?BOOTNODE_ENODE is required}` — falha explícita se vazio.
 
-3. **Node data path**: `${SPOKE_DATA_DIR}/nodes/commercial-bank/data` (em vez de `central-bank/data`).
+3. **Node data path**: volume Docker nomeado `${SPOKE_ID}_${BANK_ID}_besu_data` (em vez de `${SPOKE_ID}_cb_besu_data`). Desvio pós-implementação de bind mount para volume nomeado — ver addendum em `../research.md` D4.
 
 4. **Container name**: `cbweb3-${SPOKE_ID}-besu.${BANK_ID}` (parametrizado por banco).
 
