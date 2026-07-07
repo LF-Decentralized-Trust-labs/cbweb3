@@ -102,7 +102,7 @@ func TestReadGenesis_Success(t *testing.T) {
 	os.MkdirAll(genesisDir, 0o755)
 	os.WriteFile(filepath.Join(genesisDir, "genesis.json"), []byte(genesisContent), 0o644)
 
-	spec, err := readGenesis(context.Background(), dir)
+	spec, err := readGenesis(context.Background(), dir, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestReadGenesis_Success(t *testing.T) {
 
 func TestReadGenesis_Missing(t *testing.T) {
 	dir := t.TempDir()
-	_, err := readGenesis(context.Background(), dir)
+	_, err := readGenesis(context.Background(), dir, "")
 	if !errors.Is(err, ErrGenesisNotFound) {
 		t.Errorf("expected ErrGenesisNotFound, got %v", err)
 	}
@@ -141,7 +141,7 @@ func TestReadCACert_ValidPEM(t *testing.T) {
 	caCert := "-----BEGIN CERTIFICATE-----\nMIIBIjANBg==\n-----END CERTIFICATE-----\n"
 	os.WriteFile(filepath.Join(tlsDir, "central-bank.crt"), []byte(caCert), 0o644)
 
-	spec, err := readCACert(dir)
+	spec, err := readCACert(context.Background(), dir, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestReadCACert_ContainsPrivateKey(t *testing.T) {
 	evil := "-----BEGIN CERTIFICATE-----\nMIIBIjANBg==\n-----END CERTIFICATE-----\n-----BEGIN PRIVATE KEY-----\nMIIEvgIB\n-----END PRIVATE KEY-----\n"
 	os.WriteFile(filepath.Join(tlsDir, "central-bank.crt"), []byte(evil), 0o644)
 
-	_, err := readCACert(dir)
+	_, err := readCACert(context.Background(), dir, "")
 	if !errors.Is(err, ErrCACertNotFound) {
 		t.Errorf("expected ErrCACertNotFound for private key material, got %v", err)
 	}
@@ -172,7 +172,7 @@ func TestReadCACert_NoPEMBlock(t *testing.T) {
 	os.MkdirAll(tlsDir, 0o755)
 	os.WriteFile(filepath.Join(tlsDir, "central-bank.crt"), []byte("not pem content\n"), 0o644)
 
-	_, err := readCACert(dir)
+	_, err := readCACert(context.Background(), dir, "")
 	if !errors.Is(err, ErrCACertNotFound) {
 		t.Errorf("expected ErrCACertNotFound for no PEM block, got %v", err)
 	}
@@ -180,7 +180,7 @@ func TestReadCACert_NoPEMBlock(t *testing.T) {
 
 func TestReadCACert_Missing(t *testing.T) {
 	dir := t.TempDir()
-	_, err := readCACert(dir)
+	_, err := readCACert(context.Background(), dir, "")
 	if !errors.Is(err, ErrCACertNotFound) {
 		t.Errorf("expected ErrCACertNotFound for missing file, got %v", err)
 	}
