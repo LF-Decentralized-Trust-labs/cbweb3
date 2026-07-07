@@ -165,6 +165,37 @@ type ValidatorSpec struct {
 > volume semeado (mesma técnica do CB), subiu e carregou `config.yaml` sem
 > nenhum erro de permissão. Ver
 > `scenario-a/provisioning/templates/commercial-bank/paladin-compose.yaml`.
+>
+> **Addendum 2 (2026-07-07) — `pki/fx-contexts.json` (feature 035 A6) isolado num
+> volume dedicado**: diferente do resto do `pki/` do banco (CSR/chave/certificado,
+> que continua bind mount pelo fluxo assíncrono de KYC), `fx-contexts.json`
+> (o contexto Pente bilateral — grupo + endereço do FXAgreement — que o
+> `payment-orchestrator` lê em `propose time`) é escrito **uma única vez**, de
+> forma síncrona, pelo `step_deploy_fxa_join.go` (US3, sem gate humano, sem
+> escritor em runtime) — mesma categoria do `paladin/${BANK_ID}/`, não do
+> `pki/` propriamente dito. `FX_CONTEXTS_FILE` já era configurável por env var e
+> usado só pelo `payment-orchestrator` (não pelos outros 3 serviços de
+> backend que montam `ENTITY_PKI_DIR`), o que permitiu isolar esse arquivo num
+> mount separado sem tocar no bind mount de `pki/` que os outros arquivos
+> continuam usando.
+>
+> `writeBankFXContext` passou a escrever via `engine/dockervolume.WriteFile` no
+> volume nomeado `${SPOKE_ID}_${BANK_ID}_fx_contexts` (mesma convenção de nomes
+> dos volumes do Paladin), montado em
+> `/workspace/backend/config/fx-contexts` só no `payment-orchestrator`. O
+> comentário original em `fxcontext.go` já observava que "the file is (re-)read
+> on each lookup" — isso é irrelevante para bind mount vs. volume: o container
+> já tem o mount aberto o tempo todo, então uma escrita posterior (de um
+> `docker run` efêmero do motor, ou de qualquer outro processo) fica visível
+> imediatamente para leituras seguintes, exatamente como um bind mount.
+>
+> O mesmo volume/env var é montado incondicionalmente também no
+> `payment-orchestrator` do **central bank** (mesmo template compartilhado),
+> mas fica vazio: não existe nenhum passo do toolkit que escreva
+> `fx-contexts.json` para o CB hoje (só bancos, via `deploy-fxa-join`) — mudança
+> sem efeito observável para o CB. Ver
+> `scenario-a/toolkit/engine/orchestrator/step_deploy_fxa_join.go` e
+> `scenario-a/provisioning/templates/entity-backend/backend-compose.yaml`.
 
 ---
 

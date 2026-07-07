@@ -88,13 +88,20 @@ services:
       # contract exists. At found (CB-only) it is OFF, so no operator key is needed.
       # The engine sets PAYMENT_ORCH_BESU_RPC_URL only when the besu path applies.
       BESU_RPC_URL: ${PAYMENT_ORCH_BESU_RPC_URL-}
+      # fx-contexts.json (feature 035 A6, bilateral Pente group/contract resolved
+      # at propose time) lives on its own named volume, not the shared PKI mount
+      # below — written by step_deploy_fxa_join.go via engine/dockervolume for
+      # commercial banks; nothing writes it for the central bank (see the
+      # addendum in specs/032-commercial-bank-join/research.md), so this stays
+      # an empty, harmless mount there.
+      FX_CONTEXTS_FILE: /workspace/backend/config/fx-contexts/fx-contexts.json
     ports:
       - "${PAYMENT_PORT:?PAYMENT_PORT is required}:9094"
-    # Mount the entity PKI dir (same as api-gateway/compliance): the payment-orchestrator
-    # reads FX_CONTEXTS_FILE (default /workspace/backend/config/pki/fx-contexts.json) from here
-    # to resolve the bilateral Pente group/contract at propose time (feature 035 A6).
+    # Mount the entity PKI dir (same as api-gateway/compliance) for CA/participant
+    # certs, plus the dedicated fx-contexts volume (see FX_CONTEXTS_FILE above).
     volumes:
       - ${ENTITY_PKI_DIR:-${BACKEND_CONTEXT}/config/pki}:/workspace/backend/config/pki
+      - fx_contexts:/workspace/backend/config/fx-contexts
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -144,3 +151,8 @@ volumes:
   # never instantiated. See entityPKIVolumeKey in step_start_backend_stack.go.
   cb_tls:
     name: ${SPOKE_ID}_cb_tls
+  # fx-contexts.json for payment-orchestrator (see FX_CONTEXTS_FILE above).
+  # Named per SPOKE_ID+BANK_CODE, matching step_deploy_fxa_join.go's
+  # fxContextsVolume() (${spokeID}_${bankID}_fx_contexts) for commercial banks.
+  fx_contexts:
+    name: ${SPOKE_ID}_${BANK_CODE}_fx_contexts

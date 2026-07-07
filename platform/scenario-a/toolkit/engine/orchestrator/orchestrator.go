@@ -594,7 +594,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			HostPort: ports.Keycloak, Realms: []KeycloakRealmPlan{commercialBankRealmPlan(bank, m.Spec.AdminUsers)}, Timeout: stackTO,
 		}),
 		newStartBackendStackStep(StepStartBackend, backendStackParams{
-			EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
+			SpokeID: spokeID, EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
 			// Mount the bank's <dataDir>/pki: gen-csr writes <bank>.csr here, which the
 			// onboarding smart proxy reads on initiate, and where it persists the issued
 			// <bank>-participant.crt on complete (instead of the shared repo pki).
