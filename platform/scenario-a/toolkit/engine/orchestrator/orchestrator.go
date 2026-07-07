@@ -215,6 +215,10 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			ComposePath: filepath.Join(templatesDir, "entity-backend", "backend-compose.yaml"),
 			BankCode:    entity,
 			PaladinURL:  hostInternalURL(deps.PaladinCBURL), PaladinIdentity: paladinIdentity(cbNodeName(spokeID)),
+			// Route payment-orchestrator → relay via spec.relay.endpoint so a remote
+			// relay (multi-host deployment) is reachable; falls back to host.docker.internal
+			// when the endpoint is empty or uses localhost (co-located relay).
+			CactiURL: cactiContainerURL(manifestRelayEndpoint(m)),
 			// Un-gate the payment-orchestrator Besu path (HTLC/fCeBM) in local, where an
 			// operator key is available; the backend reaches Besu via host.docker.internal.
 			PaymentOrchBesuRPCURL: besuPathURL(operatorKeyHex, deps.BesuRPCURL),
@@ -339,6 +343,42 @@ func hostInternalURL(url string) string {
 // different host (e.g. an off-host relay) can reach the spoke's host-published port.
 func rewriteHost(url, host string) string {
 	return strings.Replace(url, "localhost", host, 1)
+}
+
+// cactiContainerURL returns the relay URL that payment-orchestrator containers
+// should use to reach the Cacti relay (CACTI_API_URL).
+//
+// Rules:
+//   - Empty endpoint → co-located default (http://host.docker.internal:4000)
+//   - "localhost" in endpoint → rewritten to host.docker.internal so the
+//     container can reach a co-located relay via the Docker host gateway
+//   - External IP / hostname → used as-is (multi-host relay deployment)
+func cactiContainerURL(endpoint string) string {
+	if endpoint == "" {
+		return "http://" + dockerHostAlias + ":4000"
+	}
+	return hostInternalURL(endpoint) // localhost → host.docker.internal; external URL unchanged
+}
+
+// manifestRelayEndpoint returns spec.relay.endpoint from a manifest, or "" when
+// the relay section is absent.
+func manifestRelayEndpoint(m *manifest.Manifest) string {
+	if m.Spec.Relay != nil {
+		return m.Spec.Relay.Endpoint
+	}
+	return ""
+}
+
+// bundleRelayEndpoint returns the relay endpoint a commercial bank should use,
+// preferring an explicit override in the bank manifest over the bundle value.
+func bundleRelayEndpoint(m *manifest.Manifest, b *bundle.JoinBundle) string {
+	if m.Spec.Relay != nil && m.Spec.Relay.Endpoint != "" {
+		return m.Spec.Relay.Endpoint
+	}
+	if b.Spec.Relay != nil {
+		return b.Spec.Relay.Endpoint
+	}
+	return ""
 }
 
 // besuPathURL returns the container-reachable Besu RPC URL to enable the backend's
@@ -560,6 +600,9 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			ComposePath: filepath.Join(templatesDir, "entity-backend", "backend-compose.yaml"),
 			BankCode:    bank,
 			PaladinURL:  hostInternalURL(bankPaladinURL(deps.BesuRPCPort)), PaladinIdentity: paladinIdentity(bankNodeName(spokeID, bank)),
+			// Relay URL for the bank's payment-orchestrator: prefer the bank manifest's
+			// relay.endpoint if set; fall back to the bundle value (from the founding CB).
+			CactiURL: cactiContainerURL(bundleRelayEndpoint(m, b)),
 			// Un-gate the bank payment-orchestrator Besu path (HTLC/fCeBM) in local; it
 			// reaches its OWN Besu node (on the spoke chain) via host.docker.internal.
 			PaymentOrchBesuRPCURL: besuPathURL(operatorKeyHex, deps.BesuRPCURL),
