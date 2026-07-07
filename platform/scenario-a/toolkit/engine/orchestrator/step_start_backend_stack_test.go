@@ -43,6 +43,32 @@ func TestStartBackendStackStep_ComposeEnv(t *testing.T) {
 	}
 }
 
+// TestStartBackendStackStep_ComposeEnv_UseTLSVolume verifies the CB path: when
+// UseTLSVolume is set (instead of PKIDir), ENTITY_PKI_DIR resolves to the fixed
+// compose-local volume key (entityPKIVolumeKey), not a host path — the actual
+// per-spoke volume name comes from backend-compose.yaml's own
+// name: ${SPOKE_ID}_cb_tls, which is why SPOKE_ID must also be set.
+func TestStartBackendStackStep_ComposeEnv_UseTLSVolume(t *testing.T) {
+	s := newStartBackendStackStep("start-cb-backend", backendStackParams{
+		SpokeID:        "spoke-brl",
+		EntityPrefix:   "cbweb3-central-bank-brazil",
+		NetName:        "cbweb3-central-bank-brazil-net",
+		BackendContext: "/repo/scenario-a/backend",
+		UseTLSVolume:   true,
+		APIPort:        18645,
+	}).(*startBackendStackStep)
+
+	env := strings.Join(s.composeEnv(), "\n")
+	for _, want := range []string{
+		"SPOKE_ID=spoke-brl",
+		"ENTITY_PKI_DIR=" + entityPKIVolumeKey,
+	} {
+		if !strings.Contains(env, want) {
+			t.Errorf("composeEnv missing %q, got:\n%s", want, env)
+		}
+	}
+}
+
 // TestCactiContainerURL verifies that cactiContainerURL produces the correct
 // CACTI_API_URL for each deployment topology:
 //   - empty endpoint   → co-located default (host.docker.internal:4000)

@@ -4,14 +4,18 @@ package orchestrator
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
+func newTestGenTLSStep(spokeID string) *genTLSStep {
+	return &genTLSStep{spokeID: spokeID}
+}
+
 func TestGenTLSStep_Check_False_NoCert(t *testing.T) {
-	dir := t.TempDir()
-	step := newGenTLSStep("spoke-test", dir, nil, nil)
+	requireDocker(t)
+	step := newTestGenTLSStep("spoke-test-gentls-nocert")
+	cleanupVolume(t, step.tlsVolume())
+
 	done, err := step.Check(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -22,11 +26,13 @@ func TestGenTLSStep_Check_False_NoCert(t *testing.T) {
 }
 
 func TestGenTLSStep_Check_True_CertExists(t *testing.T) {
-	dir := t.TempDir()
-	tlsDir := filepath.Join(dir, "tls")
-	os.MkdirAll(tlsDir, 0o755)
-	os.WriteFile(filepath.Join(tlsDir, "central-bank.crt"), []byte("CERT"), 0o644)
-	step := newGenTLSStep("spoke-test", dir, nil, nil)
+	requireDocker(t)
+	step := newTestGenTLSStep("spoke-test-gentls-exists")
+	cleanupVolume(t, step.tlsVolume())
+
+	if err := writeVolumeFile(context.Background(), step.tlsVolume(), "central-bank.crt", []byte("CERT"), "0644"); err != nil {
+		t.Fatal(err)
+	}
 	done, err := step.Check(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -37,32 +43,39 @@ func TestGenTLSStep_Check_True_CertExists(t *testing.T) {
 }
 
 func TestGenTLSStep_Run_CreatesCertAndKey(t *testing.T) {
-	dir := t.TempDir()
-	step := newGenTLSStep("spoke-test", dir, nil, nil)
+	requireDocker(t)
+	step := newTestGenTLSStep("spoke-test-gentls-run")
+	cleanupVolume(t, step.tlsVolume())
+	cleanupVolume(t, step.paladinConfigVolume())
+
 	if err := step.Run(context.Background()); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
-	certPath := filepath.Join(dir, "tls", "central-bank.crt")
-	keyPath := filepath.Join(dir, "tls", "central-bank.key")
-
-	if _, err := os.Stat(certPath); err != nil {
-		t.Errorf("central-bank.crt not created: %v", err)
+	for _, f := range []string{"central-bank.crt", "central-bank.key"} {
+		if _, err := readVolumeFile(context.Background(), step.tlsVolume(), f); err != nil {
+			t.Errorf("%s not created in volume %s: %v", f, step.tlsVolume(), err)
+		}
 	}
-	if _, err := os.Stat(keyPath); err != nil {
-		t.Errorf("central-bank.key not created: %v", err)
+	for _, f := range []string{"tls.crt", "tls.key"} {
+		if _, err := readVolumeFile(context.Background(), step.paladinConfigVolume(), f); err != nil {
+			t.Errorf("%s not created in volume %s: %v", f, step.paladinConfigVolume(), err)
+		}
 	}
 }
 
 func TestGenTLSStep_Run_CertIsPEM(t *testing.T) {
-	dir := t.TempDir()
-	step := newGenTLSStep("spoke-test", dir, nil, nil)
+	requireDocker(t)
+	step := newTestGenTLSStep("spoke-test-gentls-pem")
+	cleanupVolume(t, step.tlsVolume())
+	cleanupVolume(t, step.paladinConfigVolume())
+
 	if err := step.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "tls", "central-bank.crt"))
+	data, err := readVolumeFile(context.Background(), step.tlsVolume(), "central-bank.crt")
 	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
+		t.Fatalf("read cert: %v", err)
 	}
 	if len(data) == 0 {
 		t.Error("central-bank.crt is empty")
@@ -73,8 +86,11 @@ func TestGenTLSStep_Run_CertIsPEM(t *testing.T) {
 }
 
 func TestGenTLSStep_Run_Idempotent_Check_TrueAfterRun(t *testing.T) {
-	dir := t.TempDir()
-	step := newGenTLSStep("spoke-test", dir, nil, nil)
+	requireDocker(t)
+	step := newTestGenTLSStep("spoke-test-gentls-idempotent")
+	cleanupVolume(t, step.tlsVolume())
+	cleanupVolume(t, step.paladinConfigVolume())
+
 	if err := step.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

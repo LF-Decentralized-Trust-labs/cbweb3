@@ -18,6 +18,15 @@
 #   PALADIN_URL / PALADIN_IDENTITY   the entity's Paladin RPC + identity
 #   CACTI_API_URL     relay URL (host.docker.internal:4000)
 #   BACKEND_IMAGE_TAG image tag suffix (build => local)
+#
+# ENTITY_PKI_DIR (optional, drives the PKI mount below) is either:
+#   - a host path (commercial banks — <dataDir>/pki; gen-csr's async KYC flow
+#     still needs host access, so this stays a bind mount for now), or
+#   - the literal string "cb_tls" (the central bank — resolves to the named
+#     volume cb_tls below, declared with name: ${SPOKE_ID}_cb_tls; requires
+#     SPOKE_ID to also be set). Deviation from the original bind-mount-only
+#     design; see specs/026-tk4-compose-central-bank/plan.md addendum.
+#   Falls back to ${BACKEND_CONTEXT}/config/pki (repo default) if unset.
 
 services:
   compliance:
@@ -126,3 +135,12 @@ networks:
   entity_net:
     name: ${ENTITY_NET_NAME:?ENTITY_NET_NAME is required}
     external: true
+
+volumes:
+  # Fixed local key — Compose does not interpolate ${VAR} inside map keys, so
+  # per-spoke uniqueness comes from name: below, not this key. Only referenced
+  # (and thus only ever created) when ENTITY_PKI_DIR=cb_tls (the CB); a bank's
+  # host-path ENTITY_PKI_DIR resolves to a bind mount instead and this entry is
+  # never instantiated. See entityPKIVolumeKey in step_start_backend_stack.go.
+  cb_tls:
+    name: ${SPOKE_ID}_cb_tls

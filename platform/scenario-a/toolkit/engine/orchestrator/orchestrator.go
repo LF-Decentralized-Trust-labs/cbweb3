@@ -161,7 +161,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			m.Spec.Node.AdvertisedHost, besuImage, besuRPCPort, besuWSPort, besuP2PPort,
 			deps.Timeouts.PaladinHealthCheck, deps.Timeouts.PaladinHealthCheckInterval),
 		newDeployContractsStep(spokeID, dataDir, besuRPCURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
-		newGenTLSStep(spokeID, dataDir, deps.CertSource, deps.KeyProvider),
+		newGenTLSStep(spokeID, deps.CertSource, deps.KeyProvider),
 		newRenderConfigsStep(spokeID, dataDir, besuRPCPort, besuWSPort, deps.PaladinConfigTemplateDir),
 		newRegisterNodesStep(spokeID, dataDir, besuRPCURL, deps.KeyProvider, deps.Timeouts.OnboardRegistry),
 		newStartPaladinStep(spokeID, dataDir, deps.ComposeTemplatePath, deps.PaladinCBURL, deps.PaladinImage, deps.Timeouts.PaladinHealthCheck, deps.Timeouts.PaladinHealthCheckInterval),
@@ -209,9 +209,12 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			HostPort: ports.Keycloak, Realms: centralBankRealmPlans(entity, m.Spec.AdminUsers), Timeout: stackTO,
 		}),
 		newStartBackendStackStep(StepStartCBBackend, backendStackParams{
-			EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
-			PKIDir:      filepath.Join(dataDir, "tls"),
-			EnvFile:     cbEnvPath(dataDir, entity),
+			SpokeID: spokeID, EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
+			// tls/central-bank.{crt,key} (gen-tls) lives in the named volume
+			// ${SPOKE_ID}_cb_tls, not a SPOKE_DATA_DIR bind mount — see the addendum
+			// in specs/026-tk4-compose-central-bank/plan.md.
+			UseTLSVolume: true,
+			EnvFile:      cbEnvPath(dataDir, entity),
 			ComposePath: filepath.Join(templatesDir, "entity-backend", "backend-compose.yaml"),
 			BankCode:    entity,
 			PaladinURL:  hostInternalURL(deps.PaladinCBURL), PaladinIdentity: paladinIdentity(cbNodeName(spokeID)),

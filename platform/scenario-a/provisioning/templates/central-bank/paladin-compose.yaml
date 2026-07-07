@@ -5,8 +5,12 @@
 #   PALADIN_CB_WS_PORT    — host port for Paladin CB WebSocket RPC
 #   PALADIN_CB_GRPC_PORT  — host port for Paladin CB gRPC transport
 #   PALADIN_IMAGE         — Docker image for Paladin nodes
-#   SPOKE_DATA_DIR        — absolute path on host to spoke runtime data
 #   SPOKE_NETWORK_NAME    — external Docker network shared with the Besu stack
+#
+# STORAGE: config.yaml + tls.{crt,key} live on the named volume cb_paladin_config
+# (seeded by step_render_configs.go / step_gen_tls.go via engine/dockervolume) —
+# no SPOKE_DATA_DIR bind mount. Deviation from the original design; see the
+# addendum in specs/026-tk4-compose-central-bank/plan.md.
 
 services:
   paladin-data-init:
@@ -30,7 +34,10 @@ services:
     environment:
       - PALADIN_LOG_LEVEL=debug
     volumes:
-      - ${SPOKE_DATA_DIR}/paladin/central-bank:/etc/paladin
+      # Read-only in practice (Paladin only reads config.yaml/tls.{crt,key} at
+      # startup); seeded root-owned 0644/0755 by writeVolumeFile, so no init
+      # container is needed for uid 1000 to read it (unlike cb_data below).
+      - cb_paladin_config:/etc/paladin
       # Paladin DB on a named volume (writable; chmod'd by paladin-data-init) —
       # a bind mount left /data root-owned and Paladin (uid 1000) could not open
       # its SQLite database (PD010202). Matches the spk-02 found stack.
@@ -60,3 +67,8 @@ volumes:
   # deploy/local/paladin. A deliberate reset is a separate, explicit operation.
   cb_data:
     name: ${SPOKE_ID}_paladin_cb_data
+  # config.yaml + tls.{crt,key} — deviation from the original SPOKE_DATA_DIR
+  # bind-mount design (specs/026-tk4-compose-central-bank/plan.md addendum).
+  # Naming mirrors besu_data: ${SPOKE_ID}_cb_<artifact>.
+  cb_paladin_config:
+    name: ${SPOKE_ID}_cb_paladin_config
