@@ -10,8 +10,12 @@
 #   PALADIN_BANK_RPC_PORT   — host port for the bank Paladin HTTP RPC
 #   PALADIN_BANK_WS_PORT    — host port for the bank Paladin WebSocket RPC
 #   PALADIN_BANK_GRPC_PORT  — host port for the bank Paladin gRPC transport
-#   SPOKE_DATA_DIR          — absolute path on host to the bank's runtime data
 #   SPOKE_NETWORK_NAME      — external Docker network shared with the spoke Besu stack
+#
+# STORAGE: config.yaml + tls.{crt,key} live on the named volume
+# bank_paladin_config (seeded by step_render_config_join.go / step_gen_tls_join.go
+# via engine/dockervolume) — no SPOKE_DATA_DIR bind mount. Mirrors the central-bank
+# found-mode template; see the addendum in specs/032-commercial-bank-join/research.md.
 
 services:
   paladin-bank-data-init:
@@ -35,7 +39,10 @@ services:
     environment:
       - PALADIN_LOG_LEVEL=debug
     volumes:
-      - ${SPOKE_DATA_DIR}/paladin/${BANK_ID}:/etc/paladin
+      # Read-only in practice (Paladin only reads config.yaml/tls.{crt,key} at
+      # startup); seeded root-owned 0644/0755 by writeVolumeFile, so no init
+      # container is needed for uid 1000 to read it (unlike bank_data below).
+      - bank_paladin_config:/etc/paladin
       - bank_data:/data
     tmpfs:
       - /app/jna:exec,mode=1777
@@ -58,3 +65,5 @@ networks:
 volumes:
   bank_data:
     name: ${SPOKE_ID}_${BANK_ID}_paladin_data
+  bank_paladin_config:
+    name: ${SPOKE_ID}_${BANK_ID}_paladin_config

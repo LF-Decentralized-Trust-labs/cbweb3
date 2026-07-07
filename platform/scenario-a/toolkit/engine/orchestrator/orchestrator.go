@@ -540,8 +540,8 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		// any bank's availability and lets many banks join without a validator-set
 		// majority vote. (vote-qbft is retained for a future validator-join mode.)
 		// US2 — dynamic Paladin node bring-up for the joining bank.
-		newGenTLSJoinStep(spokeID, deps.BankCode, dataDir),
-		newRenderConfigJoinStep(spokeID, deps.BankCode, dataDir, deps.BesuRPCPort, deps.BesuWSPort,
+		newGenTLSJoinStep(spokeID, deps.BankCode),
+		newRenderConfigJoinStep(spokeID, deps.BankCode, deps.BesuRPCPort, deps.BesuWSPort,
 			b.Spec.Contracts.RegistryAddress, b.Spec.Contracts.ZetoFactoryAddress, b.Spec.Contracts.PenteFactoryAddress,
 			deps.PaladinConfigTemplateDir),
 		newStartPaladinJoinStep(spokeID, deps.BankCode, dataDir, deps.PaladinComposePath, deps.PaladinImage,

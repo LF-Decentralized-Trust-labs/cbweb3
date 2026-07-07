@@ -134,6 +134,38 @@ type ValidatorSpec struct {
 - Paladin como compose separado (fora do TK-8) — rejeitado; o template deve ser auto-suficiente para o operador do banco.
 - Paladin sem `paladin-bx-data-init` — rejeitado; o init container de permissões é necessário conforme validado no SP-02.
 
+> **Addendum (2026-07-07) — `paladin/${BANK_ID}/` migrado para volume**:
+> `${SPOKE_DATA_DIR}/paladin/${BANK_ID}/{config.yaml,tls.crt,tls.key}` (bind mount)
+> passou a ser o volume nomeado `bank_paladin_config`
+> (`${SPOKE_ID}_${BANK_ID}_paladin_config`), montado em `/etc/paladin`. Mesmo
+> racional e mesmo padrão do equivalente no CB (`cb_paladin_config`, ver o
+> addendum 3 em `specs/026-tk4-compose-central-bank/plan.md`): geração síncrona,
+> sem gate humano, sem escritor em runtime — diferente do `pki/` do banco (que
+> continua bind mount, ver `step_receive_cert.go`/`step_request_cert.go` e o
+> racional de fluxo assíncrono de KYC).
+>
+> `step_gen_tls_join.go` e `step_render_config_join.go` passaram a escrever via
+> `engine/dockervolume.WriteFile`; `step_register_paladin_node.go` (a releitura
+> de `tls.crt` para registrar o nó on-chain) passou a usar
+> `engine/dockervolume.ReadFile` — `Check()` já usava `.provisioning-state.yaml`
+> (`LoadState`), então não mudou. A mesma migração corrigiu um bug real: as
+> chaves privadas (`tls.key`) eram gravadas com permissão `0600` — como
+> `engine/dockervolume.WriteFile` sempre grava como root (o container efêmero de
+> seed), e o Paladin roda como um uid não-root (`PALADIN_UID`, default 1000),
+> um arquivo `0600` root-owned é ilegível pelo Paladin. Isso passou despercebido
+> no bind mount original porque só "funcionava" quando o uid do host que rodava
+> a CLI coincidia com o uid do container — não é garantido, e bateu ao vivo
+> (`PD020402: open /etc/paladin/tls.key: permission denied`) num deploy real de
+> `bank-itau`. Corrigido para `0644` (mesmo racional do addendum 3 em
+> `specs/026-tk4-compose-central-bank/plan.md`). Sem necessidade de init
+> container: o volume só é lido (nunca escrito) pelo `paladin-bank`, e arquivos
+> `0644`/diretórios `0755` já são legíveis por qualquer uid.
+>
+> Validado ao vivo: um Paladin de banco real, apontando `/etc/paladin` para o
+> volume semeado (mesma técnica do CB), subiu e carregou `config.yaml` sem
+> nenhum erro de permissão. Ver
+> `scenario-a/provisioning/templates/commercial-bank/paladin-compose.yaml`.
+
 ---
 
 ## D6 — Roteamento em `apply.go` para `mode: join`
