@@ -203,7 +203,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
 			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
 		newProvisionKeycloakStep(StepProvisionKeycloak, keycloakStepParams{
-			EntityPrefix: prefix, NetName: net, DataDir: dataDir,
+			EntityPrefix: prefix, NetName: net,
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
 			KCDBURL:     kcDBURL, KCUser: "default", KCPassword: "default",
 			HostPort: ports.Keycloak, Realms: centralBankRealmPlans(entity, m.Spec.AdminUsers), Timeout: stackTO,
@@ -585,7 +585,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
 			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
 		newProvisionKeycloakStep(StepProvisionBankKeycloak, keycloakStepParams{
-			EntityPrefix: prefix, NetName: net, DataDir: dataDir,
+			EntityPrefix: prefix, NetName: net,
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
 			KCDBURL:     kcDBURL, KCUser: "default", KCPassword: "default",
 			HostPort: ports.Keycloak, Realms: []KeycloakRealmPlan{commercialBankRealmPlan(bank, m.Spec.AdminUsers)}, Timeout: stackTO,
