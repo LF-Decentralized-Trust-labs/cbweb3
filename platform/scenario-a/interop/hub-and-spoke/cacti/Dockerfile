@@ -9,11 +9,13 @@ COPY apis/proto/payment_orchestrator/v1/payment_orchestrator.proto \
 # Build tools required by native addons (bufferutil, utf-8-validate)
 RUN apk add --no-cache python3 make g++
 
-# Install dependencies
+# Install dependencies from the committed lockfile — reproducible and resilient to the
+# transient resolution failures of a lockfile-less `npm install` on cold builds.
 COPY interop/hub-and-spoke/cacti/package.json \
+     interop/hub-and-spoke/cacti/package-lock.json \
      interop/hub-and-spoke/cacti/tsconfig.json \
      ./
-RUN npm install
+RUN npm ci
 
 # Compile TypeScript
 COPY interop/hub-and-spoke/cacti/src/ ./src/

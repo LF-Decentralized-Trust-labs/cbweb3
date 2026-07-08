@@ -20,18 +20,16 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "Usage: cbweb3 <subcommand> [flags]")
-		fmt.Fprintln(os.Stderr, "  Subcommands: apply, register-participant")
+		fmt.Fprintln(os.Stderr, "  Subcommands: apply")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "apply":
 		os.Exit(runApply(os.Args[2:]))
-	case "register-participant":
-		os.Exit(runRegisterParticipant(os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", os.Args[1])
-		fmt.Fprintln(os.Stderr, "  Subcommands: apply, register-participant")
+		fmt.Fprintln(os.Stderr, "  Subcommands: apply")
 		os.Exit(1)
 	}
 }

@@ -31,6 +31,11 @@ const (
 	StepCreatePente     = "create-pente-context"
 	StepDeployFXAPente  = "deploy-fxa-pente"
 	StepOnboardRegistry = "onboard-registry"
+	// Besu-layer settlement contracts (Scenario A): fCeBM ERC-20 + HTLC. Deployed
+	// after onboard-registry because HTLC's constructor takes the IdentityRegistry
+	// (PARTICIPANT_REGISTRY_ADDRESS) that step produces.
+	StepDeployFiatToken = "deploy-fiat-token"
+	StepDeployHTLC      = "deploy-htlc"
 	StepRegisterRelay   = "register-relay"
 	// CB operational stack (feature 034 US1): dedicated infra + Keycloak + backend.
 	StepRenderCBEnv       = "render-cb-env"
@@ -54,6 +59,8 @@ var CanonicalStepOrder = []string{
 	StepStartPaladin,
 	StepCreateZetoToken,
 	StepOnboardRegistry,
+	StepDeployFiatToken,
+	StepDeployHTLC,
 	StepRegisterRelay,
 	StepRenderCBEnv,
 	StepStartCBInfra,
@@ -100,6 +107,7 @@ const (
 //     (approve-kyc → setParticipant), not by the bank;
 //   - gen-csr → request-cert → receive-cert acquire the CB-signed PKI cert, a
 //     runtime identity credential issued only after a governance KYC approval.
+//
 // None of these are consumed by any provisioning step (Paladin uses a self-signed
 // transport cert, the node self-registers via registerIdentity, the backend mounts
 // no bank CA). The deferred-tail steps are soft (see RunJoin):

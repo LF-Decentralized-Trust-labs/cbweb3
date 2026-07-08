@@ -132,6 +132,7 @@ func main() {
 
 	// Pente bilateral private context integration (optional; controlled via env).
 	var pente ports.PenteClientPort
+	var fxChainReader ports.FXChainReaderPort
 	penteEnabled := parseBoolEnv("PENTE_ENABLED", false)
 	if penteEnabled {
 		penteURL := getEnv("PENTE_BASE_URL", os.Getenv("PALADIN_URL"))
@@ -145,6 +146,7 @@ func main() {
 		})
 		pente = penteClient
 		fxAgreementPente = penteClient
+		fxChainReader = penteClient
 		logger.Info("pente client configured", "url", penteURL)
 	} else {
 		logger.Warn("Pente integration disabled (PENTE_ENABLED=false)")
@@ -247,6 +249,7 @@ func main() {
 		FXAgreementPente: fxAgreementPente,
 		FXRepo:           fxRepo,
 		Pente:            pente,
+		FXContextsFile:   getEnv("FX_CONTEXTS_FILE", "/workspace/backend/config/pki/fx-contexts.json"),
 		RateTolPct:       rateTolPct,
 		CrossSpokeMode:   true, // relay is always active in production (CACTI_API_URL is required)
 		StrictHTLC:       strictHTLC,
@@ -265,6 +268,24 @@ func main() {
 
 	go expiryWorker.Start(ctx)
 	go startRelayWorkers(ctx)
+
+	// FX aggregation indexer — central-bank only. Projects on-chain FX agreements from every
+	// bilateral Pente group the node belongs to into fx_agreements, so the CB exposes an
+	// aggregate the relay polls. Chain-driven; no context file. Gated so commercial-bank nodes
+	// (which are members of a single group and don't aggregate) do not run it.
+	if parseBoolEnv("FX_INDEXER_ENABLED", false) {
+		if fxChainReader == nil {
+			logger.Warn("FX_INDEXER_ENABLED=true but Pente is disabled — indexer not started")
+		} else {
+			indexerSec := uint64(15)
+			if v, err := strconv.ParseUint(getEnv("FX_INDEXER_INTERVAL_SEC", "15"), 10, 32); err == nil && v > 0 {
+				indexerSec = v
+			}
+			//#nosec G115 -- interval is a small positive value from config, fits int64 Duration
+			go workers.NewFXIndexer(fxChainReader, fxRepo, time.Duration(indexerSec)*time.Second, logger).Start(ctx)
+			logger.Info("fx indexer enabled", "interval_sec", indexerSec)
+		}
+	}
 
 	// Set up graceful shutdown on SIGTERM/SIGINT
 	sigChan := make(chan os.Signal, 1)

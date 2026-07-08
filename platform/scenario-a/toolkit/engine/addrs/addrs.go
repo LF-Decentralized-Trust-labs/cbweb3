@@ -25,6 +25,12 @@ type DeployedAddrs struct {
 	// deployed by onboard-registry — distinct from RegistryContractAddress, which is
 	// the Paladin node registry. PARTICIPANT_REGISTRY_ADDRESS.
 	ParticipantRegistryAddress string
+	// FiatTokenAddress is the FiatCentralBankMoney (fCeBM) ERC-20 deployed on the
+	// spoke's Besu chain by deploy-fiat-token. FIAT_TOKEN_ADDRESS.
+	FiatTokenAddress string
+	// HTLCAddress is the HashTimeLockedContract deployed on the spoke's Besu chain by
+	// deploy-htlc (Scenario A domestic settlement leg). HTLC_ADDRESS.
+	HTLCAddress string
 }
 
 // ParseDeployedAddrs reads a KEY=VALUE env file from path and populates DeployedAddrs.
@@ -67,6 +73,8 @@ func ParseDeployedAddrs(path string) (DeployedAddrs, error) {
 		PenteContextAddress:        kv["PENTE_CONTEXT_ADDRESS"],
 		FXAgreementDeployedAt:      kv["FX_AGREEMENT_DEPLOYED_AT"],
 		ParticipantRegistryAddress: kv["PARTICIPANT_REGISTRY_ADDRESS"],
+		FiatTokenAddress:           kv["FIAT_TOKEN_ADDRESS"],
+		HTLCAddress:                kv["HTLC_ADDRESS"],
 	}, nil
 }
 

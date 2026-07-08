@@ -5,17 +5,17 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 )
 
 // renderConfigJoinStep renders the commercial bank's Paladin config.yaml from the
 // bank template, parametrized by bank id and the spoke contract addresses carried
-// in the join bundle. Writes to <dataDir>/paladin/<bankId>/config.yaml.
+// in the join bundle. Seeded directly into the named volume
+// ${spokeID}_${bankID}_paladin_config — no host filesystem involved (mirrors the
+// central-bank found-mode equivalent, renderConfigsStep).
 type renderConfigJoinStep struct {
 	spokeID           string
 	bankID            string
-	dataDir           string
 	besuRPCPort       int
 	besuWSPort        int
 	registryAddress   string
@@ -24,11 +24,10 @@ type renderConfigJoinStep struct {
 	configTemplateDir string
 }
 
-func newRenderConfigJoinStep(spokeID, bankID, dataDir string, besuRPCPort, besuWSPort int, registryAddress, zetoFactoryAddr, penteFactoryAddr, configTemplateDir string) Step {
+func newRenderConfigJoinStep(spokeID, bankID string, besuRPCPort, besuWSPort int, registryAddress, zetoFactoryAddr, penteFactoryAddr, configTemplateDir string) Step {
 	return &renderConfigJoinStep{
 		spokeID:           spokeID,
 		bankID:            bankID,
-		dataDir:           dataDir,
 		besuRPCPort:       besuRPCPort,
 		besuWSPort:        besuWSPort,
 		registryAddress:   registryAddress,
@@ -40,18 +39,17 @@ func newRenderConfigJoinStep(spokeID, bankID, dataDir string, besuRPCPort, besuW
 
 func (s *renderConfigJoinStep) Name() string { return StepRenderConfigJoin }
 
-func (s *renderConfigJoinStep) Check(_ context.Context) (bool, error) {
-	_, err := os.Stat(filepath.Join(s.dataDir, "paladin", s.bankID, "config.yaml"))
-	if err == nil {
-		return true, nil
-	}
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return false, err
+// paladinConfigVolume mirrors genTLSJoinStep's — config.yaml and tls.{crt,key}
+// share the same volume, mounted at /etc/paladin by commercial-bank/paladin-compose.yaml.
+func (s *renderConfigJoinStep) paladinConfigVolume() string {
+	return s.spokeID + "_" + s.bankID + "_paladin_config"
 }
 
-func (s *renderConfigJoinStep) Run(_ context.Context) error {
+func (s *renderConfigJoinStep) Check(ctx context.Context) (bool, error) {
+	return volumeFileExists(ctx, s.paladinConfigVolume(), "config.yaml")
+}
+
+func (s *renderConfigJoinStep) Run(ctx context.Context) error {
 	tmplPath := filepath.Join(s.configTemplateDir, "bank", "config.yaml.tmpl")
 	data := configTemplateData{
 		SpokeID:                 s.spokeID,
@@ -61,14 +59,16 @@ func (s *renderConfigJoinStep) Run(_ context.Context) error {
 		RegistryContractAddress: s.registryAddress,
 		ZetoFactoryAddress:      s.zetoFactoryAddr,
 		PenteFactoryAddress:     s.penteFactoryAddr,
+		// Unique per-bank base-ledger submitter key so co-located banks on the spoke's Besu do
+		// not collide on nonce (which wedges Pente deploys). See fundedOperatorKey.
+		FundedOperatorKey: fundedOperatorKey(s.spokeID, s.bankID),
 	}
-	outDir := filepath.Join(s.dataDir, "paladin", s.bankID)
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", outDir, err)
-	}
-	outPath := filepath.Join(outDir, "config.yaml")
-	if err := renderTemplate(tmplPath, outPath, data); err != nil {
+	rendered, err := renderTemplateToBytes(tmplPath, data)
+	if err != nil {
 		return fmt.Errorf("render bank config: %w", err)
+	}
+	if err := writeVolumeFile(ctx, s.paladinConfigVolume(), "config.yaml", rendered, "0644"); err != nil {
+		return fmt.Errorf("write bank config to volume %s: %w", s.paladinConfigVolume(), err)
 	}
 	return nil
 }

@@ -37,7 +37,17 @@ func strReaderRaw(s string) io.Reader { return strings.NewReader(s) }
 
 func TestPaymentProxy_RegisterAndList(t *testing.T) {
 	t.Parallel()
+
+	const entityBesuAddr = "0xbesu"
+
+	// Capture the query strings seen by the fake Central Bank for list operations.
+	type listCall struct{ path, query string }
+	var listCalls []listCall
+
 	cb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			listCalls = append(listCalls, listCall{r.URL.Path, r.URL.RawQuery})
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
@@ -45,7 +55,7 @@ func TestPaymentProxy_RegisterAndList(t *testing.T) {
 	t.Cleanup(cb.Close)
 
 	ph := startFakePaymentBackend(t, &fakePaymentServer{zeto: &pb.InitiateZetoTransferResponse{TxHash: "ztx"}})
-	h := NewPaymentProxyHandler(cb.URL, ph.payment, "0xbesu", "pal", "cbpal", "relay-secret")
+	h := NewPaymentProxyHandler(cb.URL, ph.payment, entityBesuAddr, "pal", "cbpal", "relay-secret")
 
 	app := fiber.New()
 	app.Post("/deposits", h.RegisterDeposit)
@@ -64,9 +74,21 @@ func TestPaymentProxy_RegisterAndList(t *testing.T) {
 	if resp := postJSON(t, app, "/redeems", map[string]any{"amount": "1"}); resp.StatusCode != http.StatusOK {
 		t.Errorf("request redeem: want 200, got %d", resp.StatusCode)
 	}
-	for _, p := range []string{"/deposits?requester_id=x", "/escrows", "/redeems"} {
+
+	// List endpoints must return 200 and must always forward the entity's own Besu address
+	// as requester_id — ignoring any requester_id that a client may try to inject.
+	for _, p := range []string{"/deposits", "/deposits?requester_id=other-bank", "/escrows", "/redeems"} {
 		if resp, _ := app.Test(httptest.NewRequest(http.MethodGet, p, nil)); resp.StatusCode != http.StatusOK {
 			t.Errorf("GET %s: want 200, got %d", p, resp.StatusCode)
+		}
+	}
+
+	// Verify the CB always received requester_id=entityBesuAddr for every list call.
+	for _, call := range listCalls {
+		got := call.query
+		want := "requester_id=" + entityBesuAddr
+		if got != want {
+			t.Errorf("CB received query %q for path %s; want %q — commercial bank isolation broken", got, call.path, want)
 		}
 	}
 }

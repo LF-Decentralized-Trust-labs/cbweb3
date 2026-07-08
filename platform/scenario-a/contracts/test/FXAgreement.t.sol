@@ -37,6 +37,24 @@ contract FXAgreementTest is Test {
     uint256 public rate = 5_500 * 10 ** 15; // 5.5 BRL/EUR scaled by 1e18
     uint256 public expiryDate;
 
+    /// @notice Default cross-spoke routing metadata used by the propose/proposeOnBehalf tests.
+    /// @dev Kept in a helper so the many call sites stay readable; individual tests can pass a
+    ///      literal Routing when they assert on specific fields.
+    function _routing() internal pure returns (FXAgreementLibrary.Routing memory) {
+        return FXAgreementLibrary.Routing({
+            sourceSpokeId: "spoke-brl",
+            destSpokeId: "spoke-eur",
+            originatorId: "funded_operator@spoke-brl-bank-a",
+            counterpartyId: "funded_operator@spoke-eur-bank-b",
+            settlementAgentId: "funded_operator@spoke-brl-bank-c",
+            custodianId: "funded_operator@spoke-eur-bank-d",
+            beneficiaryId: "funded_operator@spoke-eur-bank-b",
+            sourceReceiverId: "funded_operator@spoke-brl-bank-c",
+            destReceiverId: "funded_operator@spoke-eur-bank-b",
+            tradeRef: "FX_DEAL_001"
+        });
+    }
+
     function setUp() public {
         /// @dev 1. Deploy IdentityRegistry and register test participants
         identityRegistry = new IdentityRegistry(admin);
@@ -72,7 +90,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         FXAgreementLibrary.FxAgreement memory agreement = fxAgreement.getAgreement(tradeId);
@@ -90,6 +109,41 @@ contract FXAgreementTest is Test {
         assertEq(agreement.expiryDate, expiryDate);
     }
 
+    function test_Propose_PersistsRouting() public {
+        vm.prank(counterpartyA);
+        fxAgreement.propose(
+            tradeId,
+            counterpartyB,
+            settlementAgent,
+            custodian,
+            beneficiary,
+            originAmount,
+            counterAmount,
+            originCurrency,
+            counterCurrency,
+            rate,
+            expiryDate,
+            _routing()
+        );
+
+        FXAgreementLibrary.Routing memory r = fxAgreement.getRouting(tradeId);
+        assertEq(r.sourceSpokeId, "spoke-brl");
+        assertEq(r.destSpokeId, "spoke-eur");
+        assertEq(r.originatorId, "funded_operator@spoke-brl-bank-a");
+        assertEq(r.counterpartyId, "funded_operator@spoke-eur-bank-b");
+        assertEq(r.settlementAgentId, "funded_operator@spoke-brl-bank-c");
+        assertEq(r.custodianId, "funded_operator@spoke-eur-bank-d");
+        assertEq(r.beneficiaryId, "funded_operator@spoke-eur-bank-b");
+        assertEq(r.sourceReceiverId, "funded_operator@spoke-brl-bank-c");
+        assertEq(r.destReceiverId, "funded_operator@spoke-eur-bank-b");
+        assertEq(r.tradeRef, "FX_DEAL_001");
+    }
+
+    function test_Revert_GetRouting_NotFound() public {
+        vm.expectRevert(IFXAgreement.FXA__TradeNotFound.selector);
+        fxAgreement.getRouting(keccak256("NON_EXISTENT"));
+    }
+
     function test_Revert_Propose_DuplicateTradeID() public {
         vm.prank(counterpartyA);
         fxAgreement.propose(
@@ -103,7 +157,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(counterpartyA);
@@ -119,7 +174,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -137,7 +193,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -155,7 +212,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -173,7 +231,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -191,7 +250,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            block.timestamp - 1
+            block.timestamp - 1,
+            _routing()
         );
     }
 
@@ -208,7 +268,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(counterpartyB);
@@ -231,7 +292,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(counterpartyA);
@@ -258,7 +320,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.warp(expiryDate + 1);
@@ -281,7 +344,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(counterpartyB);
@@ -304,7 +368,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(counterpartyA);
@@ -325,7 +390,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(counterpartyA);
@@ -348,7 +414,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(counterpartyB);
@@ -369,7 +436,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(counterpartyB);
@@ -393,7 +461,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(counterpartyB);
@@ -419,7 +488,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(counterpartyB);
@@ -443,7 +513,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(centralBank);
@@ -465,7 +536,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         FXAgreementLibrary.FxAgreement memory agreement = fxAgreement.getAgreement(tradeId);
@@ -498,7 +570,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -515,7 +588,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(centralBank);
@@ -538,7 +612,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(counterpartyA);
@@ -565,7 +640,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.warp(expiryDate + 1);
@@ -588,7 +664,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(centralBank);
@@ -611,7 +688,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(counterpartyA);
@@ -645,7 +723,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -663,7 +742,8 @@ contract FXAgreementTest is Test {
             bytes32(0),
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -681,7 +761,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             bytes32(0),
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -699,7 +780,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             0,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -719,7 +801,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         vm.prank(centralBank);
@@ -736,7 +819,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -755,7 +839,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -774,7 +859,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -793,7 +879,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -812,7 +899,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -831,7 +919,8 @@ contract FXAgreementTest is Test {
             bytes32(0),
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -850,7 +939,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             bytes32(0),
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -869,7 +959,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             0,
-            expiryDate
+            expiryDate,
+            _routing()
         );
     }
 
@@ -888,7 +979,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            block.timestamp - 1
+            block.timestamp - 1,
+            _routing()
         );
     }
 
@@ -909,7 +1001,8 @@ contract FXAgreementTest is Test {
             originCurrency,
             counterCurrency,
             rate,
-            expiryDate
+            expiryDate,
+            _routing()
         );
 
         // Not warped past expiry: expiryDate>0 true but block.timestamp>expiryDate false → no revert.

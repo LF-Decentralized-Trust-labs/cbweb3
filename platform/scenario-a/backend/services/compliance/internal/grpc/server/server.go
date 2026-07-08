@@ -216,9 +216,9 @@ func (s *complianceService) IssueParticipantCertificate(ctx context.Context, req
 	}, nil
 }
 
-// SignParticipantCSR signs a PKCS#10 CSR submitted by a participant, updates
-// only the certificate fields in the participant record, and (best-effort)
-// registers on the blockchain using the wallet address set during onboarding.
+// SignParticipantCSR signs a PKCS#10 CSR submitted by a participant and updates
+// only the certificate fields in the participant record. On-chain registration is
+// NOT performed here — it happens at ApproveKYC.
 //
 // The participant's wallet address is set by the KMS during OnboardParticipant
 // and must be preserved here — it is NOT derived from CB_PRIVATE_KEY.
@@ -245,7 +245,7 @@ func (s *complianceService) SignParticipantCSR(ctx context.Context, req *complia
 		return nil, status.Errorf(codes.NotFound, "participant %q not found; call POST /compliance/register first", req.UserId)
 	}
 	if existing.WalletAddress == "" {
-		log.Printf("WARN: SignParticipantCSR: participant %s has no wallet address — ApproveKYC will fail until wallet is set", req.UserId)
+		log.Printf("WARN: SignParticipantCSR: participant %s has no wallet address — it should have been registered on-chain at ApproveKYC", req.UserId)
 	}
 
 	expiresAt := time.Now().UTC().AddDate(1, 0, 0).Format(time.RFC3339)
@@ -277,11 +277,9 @@ func (s *complianceService) SignParticipantCSR(ctx context.Context, req *complia
 		return nil, status.Errorf(codes.Internal, "upsert participant: %v", err)
 	}
 
-	if existing.WalletAddress != "" {
-		if _, err := s.blockchain.RegisterParticipant(ctx, existing.WalletAddress, institutionName, req.Role, [32]byte{}); err != nil {
-			log.Printf("WARN: SignParticipantCSR: on-chain registration failed (non-fatal): %v", err)
-		}
-	}
+	// On-chain participant registration is NOT done here: it happens at ApproveKYC
+	// (the CB's governance authorization). SignParticipantCSR only issues the leaf
+	// certificate against the wallet already whitelisted at approval.
 
 	s.emitAudit(ctx, "SIGN_CSR", actorFromCtx(ctx), "", req.UserId,
 		correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS",
@@ -301,12 +299,12 @@ func (s *complianceService) SignParticipantCSR(ctx context.Context, req *complia
 // onboarding within this window.
 const popNonceTTL = 72 * time.Hour
 
-// ApproveKYC sets the participant status to KYC_APPROVED and generates a PoP
-// nonce for the commercial bank to sign with its secp256k1 key.
-//
-// Unlike the legacy flow, ApproveKYC no longer activates the participant
-// on-chain or sets status to ACTIVE. On-chain registration happens in
-// CompleteOnboarding after the bank proves wallet ownership.
+// ApproveKYC is the central bank's governance decision to admit a bank: it
+// whitelists the bank's wallet in the IdentityRegistry on-chain (GOVERNANCE_ROLE),
+// sets the status to KYC_APPROVED, and generates a PoP nonce for the bank to sign
+// with its secp256k1 key. On-chain registration is performed here (not via an
+// out-of-band CLI) because approval is the point at which the CB authorizes the
+// bank to transact.
 func (s *complianceService) ApproveKYC(ctx context.Context, req *compliancv1.ApproveKYCRequest) (*compliancv1.ApproveKYCResponse, error) {
 	if req.Subject == "" {
 		return nil, status.Error(codes.InvalidArgument, "subject is required")
@@ -323,6 +321,23 @@ func (s *complianceService) ApproveKYC(ctx context.Context, req *compliancv1.App
 	if p.Status != string(domain.StatusCredentialRequested) && p.Status != string(domain.StatusPending) {
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"participant %q has status %q; expected CREDENTIAL_REQUESTED or PENDING", req.Subject, p.Status)
+	}
+
+	// On-chain registration is the CB governance action authorized by KYC approval:
+	// whitelist the bank's onboarding wallet in the IdentityRegistry so its
+	// payment-orchestrator (which signs HTLC txs from this address) passes the
+	// contracts' onlyVerified checks. registerParticipant is onlyRole(GOVERNANCE_ROLE);
+	// the signer is the CB governance key (CB_PRIVATE_KEY -> StaticKeySigner). The call
+	// is idempotent on-chain (it overwrites the participant entry) and BLOCKING: a
+	// failed registration fails the approval, so no bank is ever marked KYC_APPROVED
+	// while missing on-chain. A Noop client (no governance key / prod-until-KMS) returns
+	// success and skips the write. Replaces the former `cbweb3 register-participant` CLI.
+	if p.WalletAddress != "" {
+		if _, regErr := s.blockchain.RegisterParticipant(ctx, p.WalletAddress, p.InstitutionName, p.Role, [32]byte{}); regErr != nil {
+			return nil, status.Errorf(codes.Internal, "on-chain participant registration: %v", regErr)
+		}
+	} else {
+		log.Printf("WARN: ApproveKYC: participant %s has no wallet address — skipping on-chain registration", req.Subject)
 	}
 
 	// Generate 32-byte PoP nonce for the commercial bank to sign with secp256k1.

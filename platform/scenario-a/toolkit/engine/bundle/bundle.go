@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/addrs"
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/dockervolume"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/manifest"
 	"gopkg.in/yaml.v3"
 )
@@ -26,9 +28,12 @@ import (
 // Preconditions (validated before any I/O beyond manifest inspection):
 //   - manifest.Spec.Mode == "found"
 //   - manifest.Spec.Node.P2P.Port > 0
-//   - <dataDir>/genesis/genesis.json exists
+//   - genesis.json exists at <dataDir>/genesis/genesis.json, or (production) in
+//     the GenesisVolume named Docker volume when GenesisVolume is set
 //   - <dataDir>/.deployed-addrs.env contains all 7 required addresses
-//   - <dataDir>/tls/central-bank.crt contains a valid PEM CERTIFICATE block
+//   - central-bank.crt (at <dataDir>/tls/central-bank.crt, or in the TLSVolume
+//     named Docker volume when TLSVolume is set) contains a valid PEM
+//     CERTIFICATE block
 //   - in.EnodeProvider.NodeInfo returns a well-formed enode string
 func EmitBundle(ctx context.Context, in BundleInput) (*JoinBundle, error) {
 	if in.Manifest == nil {
@@ -53,13 +58,13 @@ func EmitBundle(ctx context.Context, in BundleInput) (*JoinBundle, error) {
 	spokeID := in.Manifest.Spec.Spoke.ID
 	slog.InfoContext(ctx, "bundle: emitting", "spoke_id", spokeID)
 
-	genesis, err := readGenesis(ctx, in.DataDir)
+	genesis, err := readGenesis(ctx, in.DataDir, in.GenesisVolume)
 	if err != nil {
 		slog.ErrorContext(ctx, "bundle: failed", "spoke_id", spokeID, "error", err)
 		return nil, err
 	}
 
-	trust, err := readCACert(in.DataDir)
+	trust, err := readCACert(ctx, in.DataDir, in.TLSVolume)
 	if err != nil {
 		slog.ErrorContext(ctx, "bundle: failed", "spoke_id", spokeID, "error", err)
 		return nil, err
@@ -161,16 +166,31 @@ func rpcPortOf(m *manifest.Manifest) int {
 	return 8545
 }
 
-// readGenesis reads genesis/genesis.json from dataDir, computes its SHA-256 hash,
-// and base64-encodes its content (RFC 4648, no padding newlines).
-func readGenesis(ctx context.Context, dataDir string) (GenesisSpec, error) {
-	genesisPath := filepath.Join(dataDir, "genesis", "genesis.json")
-	genesisBytes, err := os.ReadFile(genesisPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return GenesisSpec{}, ErrGenesisNotFound
+// readGenesis reads genesis.json, computes its SHA-256 hash, and base64-encodes
+// its content (RFC 4648, no padding newlines). If genesisVolume is set, it reads
+// from that named Docker volume (engine/dockervolume) instead of
+// <dataDir>/genesis/genesis.json — see the GenesisVolume field doc on BundleInput.
+func readGenesis(ctx context.Context, dataDir, genesisVolume string) (GenesisSpec, error) {
+	var genesisBytes []byte
+	if genesisVolume != "" {
+		b, err := dockervolume.ReadFile(ctx, genesisVolume, "genesis.json")
+		if err != nil {
+			if errors.Is(err, dockervolume.ErrNotFound) {
+				return GenesisSpec{}, ErrGenesisNotFound
+			}
+			return GenesisSpec{}, fmt.Errorf("read genesis from volume %s: %w", genesisVolume, err)
 		}
-		return GenesisSpec{}, fmt.Errorf("read genesis: %w", err)
+		genesisBytes = b
+	} else {
+		genesisPath := filepath.Join(dataDir, "genesis", "genesis.json")
+		b, err := os.ReadFile(genesisPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return GenesisSpec{}, ErrGenesisNotFound
+			}
+			return GenesisSpec{}, fmt.Errorf("read genesis: %w", err)
+		}
+		genesisBytes = b
 	}
 	if len(genesisBytes) > 1<<20 {
 		slog.WarnContext(ctx, "bundle: genesis exceeds 1 MB", "bytes", len(genesisBytes))
@@ -182,16 +202,32 @@ func readGenesis(ctx context.Context, dataDir string) (GenesisSpec, error) {
 	}, nil
 }
 
-// readCACert reads tls/central-bank.crt from dataDir, validates it contains a
-// PEM CERTIFICATE block, and rejects any file that contains private key material.
-func readCACert(dataDir string) (TrustSpec, error) {
-	certPath := filepath.Join(dataDir, "tls", "central-bank.crt")
-	certBytes, err := os.ReadFile(certPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return TrustSpec{}, fmt.Errorf("%w: file not found at %s", ErrCACertNotFound, certPath)
+// readCACert reads central-bank.crt, validates it contains a PEM CERTIFICATE
+// block, and rejects any file that contains private key material. If
+// tlsVolume is set, it reads from that named Docker volume (engine/dockervolume)
+// instead of <dataDir>/tls/central-bank.crt — see the TLSVolume field doc on
+// BundleInput.
+func readCACert(ctx context.Context, dataDir, tlsVolume string) (TrustSpec, error) {
+	var certBytes []byte
+	if tlsVolume != "" {
+		b, err := dockervolume.ReadFile(ctx, tlsVolume, "central-bank.crt")
+		if err != nil {
+			if errors.Is(err, dockervolume.ErrNotFound) {
+				return TrustSpec{}, fmt.Errorf("%w: not found in volume %s", ErrCACertNotFound, tlsVolume)
+			}
+			return TrustSpec{}, fmt.Errorf("read CA cert from volume %s: %w", tlsVolume, err)
 		}
-		return TrustSpec{}, fmt.Errorf("read CA cert: %w", err)
+		certBytes = b
+	} else {
+		certPath := filepath.Join(dataDir, "tls", "central-bank.crt")
+		b, err := os.ReadFile(certPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return TrustSpec{}, fmt.Errorf("%w: file not found at %s", ErrCACertNotFound, certPath)
+			}
+			return TrustSpec{}, fmt.Errorf("read CA cert: %w", err)
+		}
+		certBytes = b
 	}
 
 	content := string(certBytes)
@@ -243,6 +279,10 @@ func readContracts(dataDir string) (ContractsSpec, error) {
 		PenteContextAddress:        a.PenteContextAddress,
 		FXAgreementAddress:         a.FXAgreementDeployedAt,
 		ParticipantRegistryAddress: a.ParticipantRegistryAddress,
+		// fCeBM + HTLC are deployed by found (deploy-fiat-token / deploy-htlc). Carried
+		// so mode:join can wire the bank backend's FIAT_TOKEN_ADDRESS / HTLC_ADDRESS.
+		FiatTokenAddress: a.FiatTokenAddress,
+		HTLCAddress:      a.HTLCAddress,
 	}, nil
 }
 

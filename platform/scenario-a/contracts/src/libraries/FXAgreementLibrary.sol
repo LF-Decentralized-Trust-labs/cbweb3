@@ -44,4 +44,37 @@ library FXAgreementLibrary {
         uint256 expiryDate;
         AgreementState state;
     }
+
+    /// @notice Cross-spoke routing metadata for a bilateral FX deal.
+    /// @dev Carries the network topology (spoke IDs) and the off-chain-addressable Paladin
+    ///      identities for each party. These are held on-chain *inside the private Pente group*
+    ///      (never on the public ledger) so the coordinating central bank — a member of the
+    ///      group — reads the full deal without an out-of-band channel, and the relay can route
+    ///      the destination leg by identity string (robust to the shared-key address collision
+    ///      in local dev, where distinct parties resolve to one address).
+    /// @param sourceSpokeId Spoke where the deal originates (e.g. "spoke-brl").
+    /// @param destSpokeId Spoke where the counter leg settles (e.g. "spoke-cop").
+    /// @param originatorId Paladin identity of the originator on the source spoke.
+    /// @param counterpartyId Paladin identity of the accepting counterparty on the dest spoke.
+    /// @param settlementAgentId Paladin identity of the settlement agent.
+    /// @param custodianId Paladin identity of the custodian on the dest spoke.
+    /// @param beneficiaryId Paladin identity of the beneficiary.
+    /// @param sourceReceiverId Paladin identity that receives the source-spoke leg.
+    /// @param destReceiverId Paladin identity that receives the dest-spoke leg.
+    /// @param tradeRef Off-chain trade reference (the UUID string). The mapping key `tradeId` is
+    ///        `sha256(tradeRef)` — a one-way hash — so the reference is stored here to let the
+    ///        coordinating central bank recover the original id from chain state alone (the relay
+    ///        reuses it end-to-end for idempotent cross-spoke redelivery).
+    struct Routing {
+        string sourceSpokeId;
+        string destSpokeId;
+        string originatorId;
+        string counterpartyId;
+        string settlementAgentId;
+        string custodianId;
+        string beneficiaryId;
+        string sourceReceiverId;
+        string destReceiverId;
+        string tradeRef;
+    }
 }

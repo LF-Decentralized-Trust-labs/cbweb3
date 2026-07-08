@@ -5,6 +5,7 @@ package keyprovider
 import (
 	"context"
 	"crypto/ecdsa"
+	"encoding/hex"
 	"sync"
 
 	gethcrypto "github.com/ethereum/go-ethereum/crypto"
@@ -89,6 +90,25 @@ func (p *LocalKeyProvider) Sign(_ context.Context, id string, digest []byte) ([]
 		return nil, ErrKeyNotFound
 	}
 	return gethcrypto.Sign(digest, key)
+}
+
+// ExportPrivateKeyHex returns the hex-encoded (no 0x prefix) private key for id.
+// Returns ErrKeyNotFound if no key exists for id.
+//
+// This exists ONLY on the local emulator: the local funded operator key is a
+// public Besu test vector (see localFundedOperatorKeyHex), and the local backend
+// stack — like the legacy local compose (CB_PRIVATE_KEY in .env.infra) — needs a
+// raw operator key to sign Besu-layer transactions (HTLC/fCeBM). The prod provider
+// does NOT implement this: prod key material never leaves the KMS boundary, and the
+// engine gates the Besu-signing env wiring on this method being available.
+func (p *LocalKeyProvider) ExportPrivateKeyHex(id string) (string, error) {
+	p.mu.RLock()
+	key, ok := p.keys[id]
+	p.mu.RUnlock()
+	if !ok {
+		return "", ErrKeyNotFound
+	}
+	return hex.EncodeToString(gethcrypto.FromECDSA(key)), nil
 }
 
 // GetPublicKey returns the uncompressed 65-byte public key for id.

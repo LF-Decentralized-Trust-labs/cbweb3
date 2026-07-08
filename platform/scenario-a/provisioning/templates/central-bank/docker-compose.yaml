@@ -10,9 +10,14 @@
 #   BESU_WS_PORT          Host port mapped to Besu RPC WS  (internal: 8546)
 #   BESU_P2P_PORT         Host port mapped to Besu P2P     (internal: 30303)
 #   BESU_IMAGE            Besu Docker image (e.g. hyperledger/besu:25.8.0)
-#   SPOKE_DATA_DIR        Base directory for all spoke data (bind mounts)
 #   HOST_UID              Host user ID for genesis-init (prevents root-owned files)
 #   HOST_GID              Host group ID for genesis-init
+#
+# STORAGE: no SPOKE_DATA_DIR bind mount — all spoke state (config, genesis, chain
+# data) lives on named Docker volumes, seeded directly from the orchestration
+# engine's memory via engine/dockervolume (no host filesystem involved). This is a
+# deviation from the original TK-4 design; see the addendum in
+# specs/026-tk4-compose-central-bank/plan.md.
 #
 # OPTIONAL variables (with sensible defaults):
 #   BOOTNODE_ENODE        Enode of the network bootnode. Empty = this node IS the bootnode (mode: found).
@@ -32,20 +37,51 @@
 
 services:
 
+  # ─── Volume permissions init ────────────────────────────────────────────────
+  # besu_data, cb_genesis and cb_scratch are fresh named volumes owned by root by
+  # default. genesis-init runs as HOST_UID:HOST_GID (see below) and must write
+  # into all three (chain data, genesis, and the generate-blockchain-config
+  # scratch output), so they all need to be world-writable first. Same pattern as
+  # paladin-data-init (commercial-bank/paladin-compose.yaml,
+  # central-bank/paladin-compose.yaml).
+  besu-volumes-init:
+    image: alpine:3.20
+    user: "0:0"
+    volumes:
+      - besu_data:/data/besu
+      - cb_genesis:/data/genesis
+      - cb_scratch:/data/scratch
+    command: ["sh", "-c", "chmod -R 777 /data/besu /data/genesis /data/scratch"]
+    restart: "no"
+
   # ─── Genesis init container ────────────────────────────────────────────────
   # Runs once. Generates genesis + validator keys only if genesis.json does not
   # already exist. On subsequent runs, exits 0 immediately (idempotency guard).
   # The 'besu' service starts only after this completes successfully.
+  #
+  # config/qbftConfigFile.json is seeded into cb_config by the engine
+  # (step_start_besu_found.go) BEFORE `docker compose up` runs — no bind mount, no
+  # separate seed service needed here.
   genesis-init:
     image: ${BESU_IMAGE?BESU_IMAGE is required (e.g. hyperledger/besu:25.8.0)}
     container_name: ${BESU_CONTAINER_NAME:-cbweb3-${SPOKE_ID}-besu}-genesis-init
     restart: "no"
+    depends_on:
+      besu-volumes-init:
+        condition: service_completed_successfully
     # Run as the host user to avoid genesis files owned by root (T028 / ADR-001)
     user: "${HOST_UID?HOST_UID is required (use: id -u)}:${HOST_GID?HOST_GID is required (use: id -g)}"
     volumes:
-      - ${SPOKE_DATA_DIR?SPOKE_DATA_DIR is required}/config:/config:ro
-      - ${SPOKE_DATA_DIR}/genesis:/genesis
-      - ${SPOKE_DATA_DIR}/nodes:/nodes
+      - cb_config:/config:ro
+      - cb_genesis:/genesis
+      # Scratch space for `besu operator generate-blockchain-config` output
+      # (networkFiles/). Purely intermediate — nothing outside this container's
+      # single run ever reads it, so it needs no host visibility either.
+      - cb_scratch:/nodes
+      # Shadows /nodes/central-bank/data with the named volume the besu service
+      # reads its data dir from, so the validator key copied below lands where
+      # besu actually looks for it.
+      - besu_data:/nodes/central-bank/data
     command:
       - sh
       - -c
@@ -75,7 +111,7 @@ services:
           KEY_DIR=$$(ls -d /nodes/networkFiles/keys/*/ 2>/dev/null | head -1)
           if [ -n "$$KEY_DIR" ]; then
             if [ ! -d /nodes/central-bank/data ]; then
-              echo "[genesis-init][spoke=${SPOKE_ID}] ERROR: /nodes/central-bank/data does not exist — check SPOKE_DATA_DIR mount."
+              echo "[genesis-init][spoke=${SPOKE_ID}] ERROR: /nodes/central-bank/data does not exist — check the besu_data volume mount."
               exit 1
             fi
             cp "$$KEY_DIR/key" /nodes/central-bank/data/key
@@ -95,8 +131,8 @@ services:
       genesis-init:
         condition: service_completed_successfully
     volumes:
-      - ${SPOKE_DATA_DIR}/nodes/central-bank/data:/opt/besu/data
-      - ${SPOKE_DATA_DIR}/genesis:/opt/besu/genesis:ro
+      - besu_data:/opt/besu/data
+      - cb_genesis:/opt/besu/genesis:ro
       - ./scripts/entry.sh:/entry.sh:ro
     ports:
       - "${BESU_RPC_PORT?BESU_RPC_PORT is required}:8545"
@@ -147,3 +183,18 @@ networks:
   spoke_besu:
     name: ${SPOKE_NETWORK_NAME:-cbweb3-${SPOKE_ID}-besu}
     driver: bridge
+
+volumes:
+  # Named (not a SPOKE_DATA_DIR bind mount) — deviation from the original TK-4
+  # design (specs/026-tk4-compose-central-bank/plan.md, data-model.md), which chose
+  # bind mounts for host-visible/portable spoke state. None of config/genesis/chain
+  # data need host-side inspection, so all four follow the same named-volume
+  # pattern already used for Paladin (cb_data/bank_data) and Postgres (pg_data).
+  besu_data:
+    name: ${SPOKE_ID}_cb_besu_data
+  cb_config:
+    name: ${SPOKE_ID}_cb_config
+  cb_genesis:
+    name: ${SPOKE_ID}_cb_genesis
+  cb_scratch:
+    name: ${SPOKE_ID}_cb_scratch

@@ -55,6 +55,8 @@ export function LoginPage() {
     await login(values.username, values.password);
   });
 
+  const institutionName = (import.meta.env.VITE_INSTITUTION_NAME ?? "Central Bank").trim() || "Central Bank";
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-primary/10 via-background to-background">
       <div className="mx-auto grid min-h-screen max-w-6xl gap-8 px-4 py-8 lg:grid-cols-2 lg:items-center">
@@ -62,7 +64,7 @@ export function LoginPage() {
           <Badge variant="secondary" className="mb-4 w-fit">
             LNET · Treasury
           </Badge>
-          <h1 className="text-3xl font-semibold tracking-tight">Central Bank Treasury Portal</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">{institutionName} Portal</h1>
           <p className="mt-3 max-w-md text-sm text-muted-foreground">
             Manage tCeBM issuance, redemption, escrow approvals, HTLC settlement, and reserve reconciliation.
           </p>
@@ -97,7 +99,7 @@ export function LoginPage() {
             <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Building2 className="h-5 w-5" />
             </div>
-            <CardTitle>Sign in to Treasury Portal</CardTitle>
+            <CardTitle>Sign in to {institutionName} Portal</CardTitle>
             <CardDescription>Use institutional credentials to access treasury operations.</CardDescription>
           </CardHeader>
           <CardContent>

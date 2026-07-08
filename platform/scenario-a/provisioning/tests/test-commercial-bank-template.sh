@@ -38,7 +38,6 @@ base_env() {
     export SPOKE_ID="spoke-test" \
            BANK_ID="commercial-bank-alpha" \
            BESU_IMAGE="hyperledger/besu:25.8.0" \
-           SPOKE_DATA_DIR="/tmp/tk8-test-data" \
            BESU_ADVERTISED_HOST="cbweb3-spoke-test-besu.commercial-bank-alpha" \
            BESU_RPC_PORT="18746" \
            BESU_WS_PORT="18756" \

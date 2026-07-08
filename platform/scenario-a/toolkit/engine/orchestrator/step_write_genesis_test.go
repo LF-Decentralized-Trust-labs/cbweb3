@@ -7,8 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -21,9 +19,10 @@ func genesisFixture() (content []byte, b64, hash string) {
 }
 
 func TestWriteGenesisStep_NewFile(t *testing.T) {
-	dir := t.TempDir()
+	requireDocker(t)
 	content, b64, hash := genesisFixture()
-	step := newWriteGenesisStep(dir, b64, hash)
+	step := &writeGenesisStep{spokeID: "spoke-test", bankID: "bank-write-genesis-new", genesisB64: b64, genesisHash: hash}
+	cleanupVolume(t, step.genesisVolume())
 
 	done, err := step.Check(context.Background())
 	if err != nil || done {
@@ -32,9 +31,9 @@ func TestWriteGenesisStep_NewFile(t *testing.T) {
 	if err := step.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	got, err := os.ReadFile(filepath.Join(dir, "genesis", "genesis.json"))
+	got, err := readVolumeFile(context.Background(), step.genesisVolume(), "genesis.json")
 	if err != nil {
-		t.Fatalf("genesis.json not written: %v", err)
+		t.Fatalf("genesis.json not written to volume: %v", err)
 	}
 	if string(got) != string(content) {
 		t.Errorf("genesis content mismatch")
@@ -46,13 +45,14 @@ func TestWriteGenesisStep_NewFile(t *testing.T) {
 }
 
 func TestWriteGenesisStep_ExistingHashMatch(t *testing.T) {
-	dir := t.TempDir()
+	requireDocker(t)
 	content, b64, hash := genesisFixture()
-	gdir := filepath.Join(dir, "genesis")
-	os.MkdirAll(gdir, 0o755)
-	os.WriteFile(filepath.Join(gdir, "genesis.json"), content, 0o644)
+	step := &writeGenesisStep{spokeID: "spoke-test", bankID: "bank-write-genesis-match", genesisB64: b64, genesisHash: hash}
+	cleanupVolume(t, step.genesisVolume())
+	if err := writeVolumeFile(context.Background(), step.genesisVolume(), "genesis.json", content, "0644"); err != nil {
+		t.Fatal(err)
+	}
 
-	step := newWriteGenesisStep(dir, b64, hash)
 	done, err := step.Check(context.Background())
 	if err != nil {
 		t.Fatalf("Check: unexpected error: %v", err)
@@ -63,21 +63,23 @@ func TestWriteGenesisStep_ExistingHashMatch(t *testing.T) {
 }
 
 func TestWriteGenesisStep_ExistingHashMismatch(t *testing.T) {
-	dir := t.TempDir()
+	requireDocker(t)
 	_, b64, hash := genesisFixture()
-	gdir := filepath.Join(dir, "genesis")
-	os.MkdirAll(gdir, 0o755)
-	// Write a DIFFERENT genesis.
-	os.WriteFile(filepath.Join(gdir, "genesis.json"), []byte(`{"config":{"chainId":999}}`), 0o644)
+	step := &writeGenesisStep{spokeID: "spoke-test", bankID: "bank-write-genesis-mismatch", genesisB64: b64, genesisHash: hash}
+	cleanupVolume(t, step.genesisVolume())
+	// Write a DIFFERENT genesis into the volume.
+	divergent := []byte(`{"config":{"chainId":999}}`)
+	if err := writeVolumeFile(context.Background(), step.genesisVolume(), "genesis.json", divergent, "0644"); err != nil {
+		t.Fatal(err)
+	}
 
-	step := newWriteGenesisStep(dir, b64, hash)
 	_, err := step.Check(context.Background())
 	if err == nil {
 		t.Fatal("Check should error when existing genesis hash diverges (genesis-once invariant)")
 	}
 	// Ensure the divergent file is NOT overwritten.
-	got, _ := os.ReadFile(filepath.Join(gdir, "genesis.json"))
-	if string(got) != `{"config":{"chainId":999}}` {
+	got, _ := readVolumeFile(context.Background(), step.genesisVolume(), "genesis.json")
+	if string(got) != string(divergent) {
 		t.Error("divergent genesis must not be overwritten")
 	}
 }

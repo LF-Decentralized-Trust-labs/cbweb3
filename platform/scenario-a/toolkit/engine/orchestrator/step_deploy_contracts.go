@@ -44,6 +44,19 @@ func (s *deployContractsStep) Run(ctx context.Context) error {
 	if err := os.MkdirAll(addrDir, 0o755); err != nil {
 		return fmt.Errorf("create deployed-addrs dir %q: %w", addrDir, err)
 	}
+	// This file lives in the repo working tree, not in dataDir, so a data-dir
+	// wipe (fresh found) never clears it: a stale key from an earlier spoke
+	// epoch (e.g. ZETO_TOKEN_ADDRESS from a prior create-zeto-token run) would
+	// otherwise survive and get copied into the new dataDir below, making the
+	// downstream step's idempotency Check() see it as already done and skip
+	// re-creating it against the fresh chain/Paladin. Reaching Run() here only
+	// happens when dataDir's own addrs file lacks the registry/factory
+	// addresses — i.e. this genuinely is a fresh provisioning of the spoke —
+	// so resetting the shared scratch file at this point is safe.
+	legacyAddrsFile := filepath.Join(addrDir, ".deployed-addrs.env")
+	if err := os.Remove(legacyAddrsFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reset deployed-addrs %q: %w", legacyAddrsFile, err)
+	}
 
 	for _, testName := range []string{"TestDeployEVMRegistry", "TestDeployZetoFactory", "TestDeployPenteFactory"} {
 		if err := s.runGoTest(ctx, testName); err != nil {

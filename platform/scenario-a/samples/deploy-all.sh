@@ -129,13 +129,10 @@ cat <<'EOF'
     bank-bancolombia api http://localhost:18746 portal     http://localhost:25746
     bank-davivienda  api http://localhost:18747 portal     http://localhost:25747
 
-  Note: a joining bank completes onboarding via its Governance Portal (KYC approval
-  + CB-signed certificate). On-chain IdentityRegistry whitelisting is then performed
-  CB-side by the engine:
-
-    cbweb3 register-participant -f <central-bank.yaml> --bank <bank-code>
-
-  (signed by the CB governance key; the bank wallet is resolved from the CB
-  api-gateway my-status, or pass --wallet 0x…). Bilateral Pente/FXAgreement remains
-  a governance-gated step in the join's soft tail (see toolkit/E2E-STATUS.md).
+  Note: a joining bank completes onboarding via its Governance Portal. On KYC
+  approval the CB compliance service both issues the CB-signed certificate and
+  whitelists the bank's wallet in the on-chain IdentityRegistry (registerParticipant,
+  onlyRole GOVERNANCE_ROLE), signed by the CB governance key (CB_PRIVATE_KEY). No
+  manual CLI step is required. Bilateral Pente/FXAgreement remains a governance-gated
+  step in the join's soft tail (see toolkit/E2E-STATUS.md).
 EOF

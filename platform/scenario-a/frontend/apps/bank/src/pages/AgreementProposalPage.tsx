@@ -20,7 +20,15 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 
-const CURRENCIES = ["BRL", "EUR", "ARS", "CLP", "MXN", "USD"];
+// Latin American settlement currencies (ISO 4217) selectable on the receive leg.
+const LATAM_CURRENCIES = [
+  "ARS", "BOB", "BRL", "CLP", "COP", "CRC", "CUP", "DOP", "GTQ",
+  "HNL", "MXN", "NIO", "PAB", "PEN", "PYG", "USD", "UYU", "VES",
+];
+
+// The send leg is fixed to this portal's own spoke currency, baked at build time
+// as VITE_FIAT_SYMBOL (e.g. BRL for a Brazilian spoke).
+const SPOKE_CURRENCY = (import.meta.env.VITE_FIAT_SYMBOL ?? "BRL").trim() || "BRL";
 
 const defaultExpiry = () => {
   const d = new Date();
@@ -42,9 +50,9 @@ export function AgreementProposalPage() {
   const [sourceReceiver, setSourceReceiver] = useState("");
   const [destReceiver, setDestReceiver] = useState("");
   const [originAmount, setOriginAmount] = useState("");
-  const [originCurrency, setOriginCurrency] = useState("USD");
+  const originCurrency = SPOKE_CURRENCY;
   const [counterAmount, setCounterAmount] = useState("");
-  const [counterCurrency, setCounterCurrency] = useState("BRL");
+  const [counterCurrency, setCounterCurrency] = useState("COP");
   const [expiryDateTime, setExpiryDateTime] = useState(defaultExpiry);
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -236,18 +244,8 @@ export function AgreementProposalPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="origin-currency">Send Currency</Label>
-              <Select value={originCurrency} onValueChange={setOriginCurrency}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Currency" />
-                </SelectTrigger>
-                <SelectContent>
-                  {CURRENCIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input id="origin-currency" value={originCurrency} readOnly disabled />
+              <p className="text-xs text-muted-foreground">Fixed to this spoke&apos;s currency.</p>
             </div>
           </div>
 
@@ -271,7 +269,7 @@ export function AgreementProposalPage() {
                   <SelectValue placeholder="Currency" />
                 </SelectTrigger>
                 <SelectContent>
-                  {CURRENCIES.map((c) => (
+                  {LATAM_CURRENCIES.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
                     </SelectItem>

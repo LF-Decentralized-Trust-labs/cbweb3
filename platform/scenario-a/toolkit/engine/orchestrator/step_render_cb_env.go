@@ -14,15 +14,18 @@ import (
 // (populated by the network steps). It points the backend at the CB's dedicated
 // infra and Keycloak.
 type renderCBEnvStep struct {
-	spokeID     string
-	entityName  string
-	currency    string
-	besuRPCPort int
-	dataDir     string
+	spokeID         string
+	entityName      string
+	currency        string
+	besuRPCPort     int
+	chainID         int
+	dataDir         string
+	besuOperatorKey string
+	frontendHost    string
 }
 
-func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort int, dataDir string) Step {
-	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, dataDir: dataDir}
+func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort, chainID int, dataDir, besuOperatorKey, frontendHost string) Step {
+	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, chainID: chainID, dataDir: dataDir, besuOperatorKey: besuOperatorKey, frontendHost: frontendHost}
 }
 
 func (s *renderCBEnvStep) Name() string { return StepRenderCBEnv }
@@ -69,21 +72,42 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		CAKeyFile:  "/workspace/backend/config/pki/central-bank.key",
 
 		BesuRPCURL: fmt.Sprintf("http://host.docker.internal:%d", s.besuRPCPort),
-		ChainID:    0, // chain id is read from the manifest by the engine; not required by the backend env
+		// The backend's Besu-signing path (HTLC/fCeBM) needs the real chain id:
+		// go-ethereum's NewKeyedTransactorWithChainID panics on chainID 0.
+		ChainID: s.chainID,
 
 		ParticipantRegistryAddress: addrs.ParticipantRegistryAddress,
 		ZetoTokenAddress:           addrs.ZetoTokenAddress,
+		FiatTokenAddress:           addrs.FiatTokenAddress,
+		HTLCAddress:                addrs.HTLCAddress,
+		// Local: the operator key signs Besu-layer txs (HTLC/fCeBM). Empty leaves the
+		// Besu path off (prod, until KMS wiring). EntityBesuAddress is its wallet.
+		BesuOperatorKey:   s.besuOperatorKey,
+		EntityBesuAddress: operatorAddressFromHex(s.besuOperatorKey),
+		// The CB's own Paladin identity (escrow mint recipient is read from the escrow
+		// record, not here; rendered for consistency and any CB-side proxy use).
+		PaladinIdentity: paladinIdentity(cbNodeName(s.spokeID)),
 
 		GovernanceUserID: governanceUserID(s.entityName),
-		// CB_PRIVATE_KEY is intentionally NOT rendered: signing goes through the
-		// KeyProvider. Left blank for the local backend bootstrap.
-		CBPrivateKey: "",
+		// CB_PRIVATE_KEY is the CB governance key the compliance service signs
+		// governance transactions with — notably registerParticipant (onlyRole
+		// GOVERNANCE_ROLE) when it approves a bank's KYC. It is the CB operator/deployer
+		// key (0xFE3B557E locally), which the IdentityRegistry constructor grants
+		// DEFAULT_ADMIN + GOVERNANCE. Empty in prod (compliance signs via KMS then).
+		// Without it, compliance falls back to the Noop registry client and on-chain
+		// participant registration silently no-ops.
+		CBPrivateKey: s.besuOperatorKey,
+
+		// On-chain FXAgreement (Pente): the CB executes proposeOnBehalf/accept/settle
+		// (canGovern). PENTE_BASE_URL is left empty and defaults to PALADIN_URL (set on the
+		// CB backend). The per-group FXAgreement address is resolved at runtime (A6 / indexer).
+		PenteEnabled: true,
 
 		RelaySecret: "cbweb3-relay-shared-secret",
 		// api-gateway sets AllowCredentials=true, which Fiber forbids with a wildcard
 		// origin. Whitelist all four CB portal origins (governance, treasury,
 		// supervisor, noc); omitting any makes that portal fail CORS at login.
-		CORSOrigins: cbCORSOrigins(ports),
+		CORSOrigins: cbCORSOrigins(ports, s.frontendHost),
 	}
 	return RenderEntityEnv(data, cbEnvPath(s.dataDir, s.entityName))
 }

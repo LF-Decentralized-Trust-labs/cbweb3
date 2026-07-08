@@ -57,12 +57,47 @@ type EntityEnvData struct {
 	TokenAddress               string
 	SpokeBridgeAddress         string
 
+	// BesuOperatorKey is the hex private key (no 0x) the payment-orchestrator signs
+	// Besu-layer transactions with (HTLC/fCeBM). Empty disables the Besu path. In
+	// local it is the well-known public dev operator key exported from the
+	// KeyProvider; prod wires the signing key via KMS/secrets, not this field.
+	BesuOperatorKey string
+	// EntityBesuAddress is this entity's on-chain wallet (derived from the operator
+	// key in local). The api-gateway escrow proxy stamps it as requester_besu_address
+	// on deposit/escrow/redeem, and it is the address fCeBM balances read against.
+	EntityBesuAddress string
+	// PaladinIdentity is this entity's Paladin identity (e.g. funded_operator@spoke-brl-bank-bradesco).
+	// The api-gateway escrow proxy stamps it as requester_paladin_identity — the Zeto
+	// mint recipient for reserve tokenisation (escrow). Also read by payment-orchestrator.
+	PaladinIdentity string
+	// CBPaladinIdentity is the central bank's Paladin identity — the Zeto transfer
+	// receiver a commercial bank targets on redeem. Empty for the CB itself.
+	CBPaladinIdentity string
+
+	// Pente (bilateral private FX — feature 035). PenteEnabled turns on the on-chain
+	// FXAgreement path in the payment-orchestrator; PenteBaseURL is the Paladin JSON-RPC
+	// the Pente client calls. FXAgreementPenteAddress is the in-group FXAgreement address —
+	// empty at render time (deploy-fxa runs in the join soft tail, after the backend starts),
+	// resolved at runtime via the Pente context / A6 registration. See PLAN.md.
+	PenteEnabled            bool
+	PenteBaseURL            string
+	FXAgreementPenteAddress string
+
 	// Central-bank only.
 	CBPrivateKey     string
 	GovernanceUserID string
 
 	// Commercial-bank only.
 	CentralBankAPIURL string
+
+	// KMS seed (commercial-bank only, local profile). Aligns the bank's onboarding
+	// KMS wallet with its Besu operator key so the onboarded+verified participant is
+	// the SAME address the payment-orchestrator signs HTLC txs with — otherwise the
+	// HTLC lock reverts onlyVerified. KMSSeedKeyID is the bank code (CreateOnboardingKey
+	// keys the KMS by bank code); KMSSeedPrivateKey is the bank's operator key. Empty
+	// for the CB and in prod (banks custody their own keys).
+	KMSSeedKeyID      string
+	KMSSeedPrivateKey string
 
 	RelaySecret string
 	CORSOrigins string
@@ -114,10 +149,29 @@ HTLC_ADDRESS={{.HTLCAddress}}
 TOKEN_ADDRESS={{.TokenAddress}}
 SPOKE_BRIDGE_ADDRESS={{.SpokeBridgeAddress}}
 
+# Besu-layer signing key (local dev operator; empty in prod — see BesuOperatorKey)
+BESU_OPERATOR_KEY={{.BesuOperatorKey}}
+# This entity's Besu wallet — escrow proxy stamps it as requester_besu_address
+ENTITY_BESU_ADDRESS={{.EntityBesuAddress}}
+# Paladin identities — escrow proxy stamps requester_paladin_identity (Zeto mint
+# recipient); CB identity is the redeem Zeto-transfer receiver.
+PALADIN_IDENTITY={{.PaladinIdentity}}
+CB_PALADIN_IDENTITY={{.CBPaladinIdentity}}
+
 # Interop
 INTERNAL_RELAY_AUTH_SECRET={{.RelaySecret}}
 FIAT_SYMBOL={{.FiatSymbol}}
 CORS_ALLOW_ORIGINS={{.CORSOrigins}}
+
+# Pente (bilateral private FXAgreement — feature 035)
+PENTE_ENABLED={{.PenteEnabled}}
+PENTE_BASE_URL={{.PenteBaseURL}}
+FX_AGREEMENT_PENTE_CONTRACT_ADDRESS={{.FXAgreementPenteAddress}}
+# FX indexer (feature 035): projects on-chain agreements from every bilateral Pente group this
+# node belongs to into fx_agreements. Enabled for BOTH the central bank (aggregate view) and each
+# commercial bank — a bank must see the destination-leg agreements proposed on_behalf into its
+# CB↔bank group so they surface in its portal for acceptance. Chain-driven; only reads own groups.
+FX_INDEXER_ENABLED=true
 {{if .IsCentralBank}}
 # Central bank only — governance bootstrap
 CB_PRIVATE_KEY={{.CBPrivateKey}}
@@ -125,6 +179,11 @@ GOVERNANCE_USER_ID={{.GovernanceUserID}}
 {{else}}
 # Commercial bank only — points to the central bank's api-gateway for onboarding/proxy
 CENTRAL_BANK_API_URL={{.CentralBankAPIURL}}
+# KMS seed (local dev): make the onboarding wallet == the bank's Besu operator key so
+# the onboarded+verified participant is the HTLC signer. auth reads these from env_file.
+# Empty in prod (bank-custodied keys).
+KMS_SEED_KEY_ID={{.KMSSeedKeyID}}
+KMS_SEED_PRIVATE_KEY={{.KMSSeedPrivateKey}}
 {{end}}`
 
 // RenderEntityEnv renders the per-entity .env to outPath (creating parent dirs).

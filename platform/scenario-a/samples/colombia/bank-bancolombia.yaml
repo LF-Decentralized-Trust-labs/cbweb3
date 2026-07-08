@@ -11,6 +11,7 @@ spec:
   role: commercial-bank
   mode: join
   bankId: bank-bancolombia
+  displayName: Bancolombia
   spoke:
     id: spoke-cop
     chainId: 1338
@@ -28,6 +29,11 @@ spec:
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed
+  # frontendHost (opcional): hostname/IP embutido em VITE_API_URL e VITE_KEYCLOAK_URL
+  # no build do frontend. Omitido → "localhost" (só funciona quando o browser roda na
+  # mesma máquina do host Docker). Defina um IP/DNS roteável quando o frontend for
+  # acessado de uma máquina remota (ex.: uma VM na nuvem com IP público 3.84.201.14).
+  # frontendHost: 3.84.201.14
   # Operador do banco (login por papel via ROPC). O nome inclui o spoke (colombia).
   adminUsers:
     - role: ROLE_BANK

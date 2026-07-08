@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -239,15 +240,61 @@ func TestFX_PentePath(t *testing.T) {
 	}
 }
 
+// TestFX_Propose_DefaultsOriginatorAndResolvesFromFile reproduces a browser-originated propose
+// (no `originator` field): the orchestrator must default it to its own identity so the FX
+// context resolves from the file store — without falling back to the Pente client.
+func TestFX_Propose_DefaultsOriginatorAndResolvesFromFile(t *testing.T) {
+	dir := t.TempDir()
+	ctxFile := filepath.Join(dir, "fx-contexts.json")
+	// Keyed by the PO's own identity (testPaladinIdentity = funded_operator@spoke-a-bank-a).
+	body := `[{"spoke_id":"spoke-a","group_id":"0xGRP","contract_address":"0xFXA",` +
+		`"bank_identity":"funded_operator@spoke-a-bank-a","cb_identity":"funded_operator@spoke-a-cb"}]`
+	if err := os.WriteFile(ctxFile, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	repo := newMemFXRepo()
+	pente := &fakePente{} // fallback resolver — must NOT be used when the file resolves
+	besu := &fakeFXClient{}
+	env := setupFXChainEnv(t, server.Config{
+		FXRepo: repo, Pente: pente, FXAgreementBesu: besu, FXAgreementPente: besu, FXContextsFile: ctxFile,
+	})
+
+	resp, err := env.client.ProposeFXAgreement(context.Background(), &pb.ProposeFXAgreementRequest{
+		TradeId: "T-NOORIG", // originator intentionally omitted (as the browser form sends it)
+		CounterpartyB: "funded_operator@spoke-cop-bank-x", Custodian: "funded_operator@spoke-cop-bank-x",
+		Beneficiary: "funded_operator@spoke-cop-bank-y",
+		OriginAmount: "1000", CounterAmount: "5000", OriginCurrency: "BRL", CounterCurrency: "COP",
+		Rate: "5.0", ExpiryDate: uint64(time.Now().Add(time.Hour).Unix()),
+		SourceSpokeId: "spoke-a", DestSpokeId: "spoke-cop",
+		SourceReceiver: "recv@a", DestReceiver: "recv@b",
+	})
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if pente.called != 0 {
+		t.Errorf("EnsureFXContext must NOT be called when the file resolves; got %d", pente.called)
+	}
+	got, _ := env.client.GetFXAgreement(context.Background(), &pb.GetFXAgreementRequest{TradeId: resp.TradeId})
+	if got.Agreement.GroupId != "0xGRP" || got.Agreement.ContractAddress != "0xFXA" {
+		t.Errorf("context not resolved from file (originator default failed?): %+v", got.Agreement)
+	}
+}
+
 func TestFX_PenteEnsureError(t *testing.T) {
 	repo := newMemFXRepo()
 	pente := &fakePente{err: errors.New("pente down")}
-	env := setupFXChainEnv(t, server.Config{FXRepo: repo, Pente: pente, FXAgreementBesu: &fakeFXClient{}})
-	ctx := context.Background()
-	tid := proposeChain(t, env.client, "T-PENTE-ERR")
-	_, err := env.client.AcceptFXAgreement(ctx, &pb.AcceptFXAgreementRequest{TradeId: tid})
+	env := setupFXChainEnv(t, server.Config{FXRepo: repo, Pente: pente, FXAgreementBesu: &fakeFXClient{}, FXAgreementPente: &fakeFXClient{}})
+	// With on-chain propose enabled, EnsureFXContext runs at propose time, so a Pente
+	// failure surfaces there (Internal) and no PROPOSED record is persisted (atomicity).
+	_, err := env.client.ProposeFXAgreement(context.Background(), &pb.ProposeFXAgreementRequest{
+		TradeId: "T-PENTE-ERR", Originator: "bank-a", CounterpartyB: "bank-b",
+		OriginAmount: "100", CounterAmount: "120", OriginCurrency: "USD", CounterCurrency: "BRL",
+		Rate: "1.2", ExpiryDate: uint64(time.Now().Add(time.Hour).Unix()),
+		SourceSpokeId: "spoke-a", DestSpokeId: "spoke-b",
+		SourceReceiver: "recv@spoke-a-bank-a", DestReceiver: "recv@spoke-b-bank-b",
+	})
 	if status.Code(err) != codes.Internal {
-		t.Errorf("expected Internal on Pente ensure failure, got %v", err)
+		t.Errorf("expected Internal on Pente ensure failure at propose, got %v", err)
 	}
 }
 

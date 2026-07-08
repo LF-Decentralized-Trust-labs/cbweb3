@@ -273,8 +273,12 @@ export class HtlcRelay {
   private readonly forwardedSecrets = new Set<string>();
   /** Tracks trade IDs already forwarded cross-spoke. Value = timestamp (ms). */
   private readonly forwardedTradeIds = new Map<string, number>();
-  /** gRPC client per spoke, keyed by spoke.id. Created in start() and reused for all settlements. */
+  /** gRPC client per spoke, keyed by spoke.id. Created on add and reused for all settlements. */
   private readonly grpcClients = new Map<string, PaymentOrchestratorClient>();
+  /** Spokes currently being watched (a pollSpoke loop is running), keyed by id. */
+  private readonly watching = new Set<string>();
+  /** The lifecycle signal, captured in start() and reused by runtime addSpoke() calls. */
+  private signal?: AbortSignal;
 
   constructor(
     private readonly spokes: SpokeDep[],
@@ -283,6 +287,10 @@ export class HtlcRelay {
     private readonly relayAuthSecret: string,
     private readonly relayStore: RelayStore,
     private readonly cactiConnectors: Map<string, PluginLedgerConnectorBesu>,
+    // connectorFactory (re)creates a Besu connector for a spoke: used to attach a connector when
+    // a spoke is registered at runtime, and to reconnect after WS failures. Optional so unit
+    // tests that never poll can omit it.
+    private readonly connectorFactory?: (spoke: SpokeDep) => Promise<PluginLedgerConnectorBesu>,
     private readonly log: Pick<Console, "info" | "warn" | "error"> = console,
   ) {}
 
@@ -319,21 +327,54 @@ export class HtlcRelay {
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   /**
-   * Start polling all configured spokes. The provided AbortSignal is checked
-   * at each poll tick; cancel it to shut the relay down gracefully.
+   * Start the relay. Captures the lifecycle AbortSignal (cancel it to shut down) and begins
+   * watching any spokes supplied at construction. Additional spokes are attached at runtime via
+   * addSpoke() as they register — the watcher set is driven by the dynamic registry, not a fixed
+   * startup list.
    */
   start(signal: AbortSignal): void {
-    for (const spoke of this.spokes) {
-      this.grpcClients.set(spoke.id, createGrpcClient(spoke.grpcEndpoint, this.protoPath));
-    }
+    this.signal = signal;
     signal.addEventListener("abort", () => {
       for (const c of this.grpcClients.values()) c.close();
     }, { once: true });
     for (const spoke of this.spokes) {
-      this.pollSpoke(spoke, signal).catch((err: unknown) => {
-        this.log.error(`[${spoke.id}] fatal poll error: ${String(err)}`);
-      });
+      void this.addSpoke(spoke);
     }
+  }
+
+  /**
+   * addSpoke begins watching a spoke: it ensures a Besu connector exists (creating one via
+   * connectorFactory when absent), creates the spoke's gRPC client, and launches its poll loop.
+   * Idempotent — a spoke already being watched is ignored (re-registration does not restart it).
+   * Safe to call before or after start(); requires start() to have captured the signal.
+   */
+  async addSpoke(spoke: SpokeDep): Promise<void> {
+    if (this.watching.has(spoke.id)) {
+      return;
+    }
+    if (!this.signal) {
+      this.log.error(`[${spoke.id}] addSpoke called before start() — ignored`);
+      return;
+    }
+    if (!this.cactiConnectors.has(spoke.id)) {
+      if (!this.connectorFactory) {
+        this.log.error(`[${spoke.id}] no Cacti connector and no connectorFactory — cannot watch`);
+        return;
+      }
+      try {
+        this.cactiConnectors.set(spoke.id, await this.connectorFactory(spoke));
+      } catch (err) {
+        this.log.error(`[${spoke.id}] connector init failed, will not watch: ${String(err)}`);
+        return;
+      }
+    }
+    this.watching.add(spoke.id);
+    this.grpcClients.set(spoke.id, createGrpcClient(spoke.grpcEndpoint, this.protoPath));
+    this.log.info(`[${spoke.id}] watcher started rpc=${spoke.besuRpc} htlc=${spoke.htlcAddress} internalApi=${spoke.internalApiUrl}`);
+    this.pollSpoke(spoke, this.signal).catch((err: unknown) => {
+      this.watching.delete(spoke.id);
+      this.log.error(`[${spoke.id}] fatal poll error: ${String(err)}`);
+    });
   }
 
   // ── Private helpers ────────────────────────────────────────────────────
@@ -342,11 +383,15 @@ export class HtlcRelay {
     spoke: SpokeDep,
     signal: AbortSignal,
   ): Promise<void> {
-    const connector = this.cactiConnectors.get(spoke.id);
+    let connector = this.cactiConnectors.get(spoke.id);
     if (!connector) {
       this.log.error(`[${spoke.id}] no Cacti connector registered — cannot poll`);
       return;
     }
+    // Consecutive poll-cycle failures; after RECONNECT_AFTER we rebuild the Besu connector to
+    // recover from a dropped WebSocket ("connection not open on send()"), which never self-heals.
+    let failures = 0;
+    const RECONNECT_AFTER = 3;
 
     // ethers Interface used only for ABI decoding of raw EvmLog topics/data.
     const iface = new ethers.Interface(HTLC_ABI);
@@ -480,11 +525,27 @@ export class HtlcRelay {
         }
 
         fromBlock = toBlock + 1;
+        failures = 0;
       } catch (err) {
         this.log.warn(`[${spoke.id}] poll cycle error: ${String(err)}`);
+        failures++;
+        if (failures >= RECONNECT_AFTER && this.connectorFactory) {
+          this.log.warn(`[${spoke.id}] reconnecting Besu connector after ${failures} consecutive failures`);
+          try {
+            const fresh = await this.connectorFactory(spoke);
+            try { await connector.shutdown(); } catch { /* best-effort */ }
+            connector = fresh;
+            this.cactiConnectors.set(spoke.id, fresh);
+            failures = 0;
+            this.log.info(`[${spoke.id}] Besu connector reconnected`);
+          } catch (reErr) {
+            this.log.error(`[${spoke.id}] reconnect failed: ${String(reErr)}`);
+          }
+        }
       }
     }
 
+    this.watching.delete(spoke.id);
     this.log.info(`[${spoke.id}] relay stopped`);
   }
 

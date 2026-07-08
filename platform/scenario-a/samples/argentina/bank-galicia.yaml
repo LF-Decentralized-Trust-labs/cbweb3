@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Banco comercial argentino (ilustrativo) — junta-se ao spoke-ars.
+# mode: join  → consome o join bundle emitido pelo central-bank-argentina.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-galicia
+spec:
+  scenario: a
+  environment: local
+  role: commercial-bank
+  mode: join
+  bankId: bank-galicia
+  displayName: Banco Galicia
+  spoke:
+    id: spoke-ars
+    chainId: 1339
+    currency: ARS
+  joinBundleRef: ../bundles/spoke-ars.bundle.yaml
+  node:
+    advertisedHost: cbweb3-spoke-ars-besu.bank-galicia
+    rpc:
+      port: 8846
+    ws:
+      port: 8856
+    p2p:
+      port: 31504
+    dataDir: cbweb3-data/bank-galicia
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  # frontendHost (opcional): hostname/IP embutido em VITE_API_URL e VITE_KEYCLOAK_URL
+  # no build do frontend. Omitido → "localhost" (só funciona quando o browser roda na
+  # mesma máquina do host Docker). Defina um IP/DNS roteável quando o frontend for
+  # acessado de uma máquina remota (ex.: uma VM na nuvem com IP público 3.84.201.14).
+  # frontendHost: 3.84.201.14
+  # Operador do banco (login por papel via ROPC). O nome inclui o spoke (argentina).
+  adminUsers:
+    - role: ROLE_BANK
+      username: admin@galicia.argentina.com
+      password: galicia-bank-local

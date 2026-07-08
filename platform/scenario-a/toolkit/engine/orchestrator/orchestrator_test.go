@@ -166,8 +166,8 @@ func TestRunFound_AllStepsMockSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
-	if len(state.Steps) != 14 {
-		t.Errorf("expected 14 steps in state, got %d", len(state.Steps))
+	if len(state.Steps) != len(CanonicalStepOrder) {
+		t.Errorf("expected %d steps in state, got %d", len(CanonicalStepOrder), len(state.Steps))
 	}
 	for _, s := range state.Steps {
 		if s.Status != "done" {

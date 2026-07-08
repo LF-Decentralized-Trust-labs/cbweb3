@@ -28,18 +28,34 @@ func (m *Manifest) BankCode() string {
 	return m.Metadata.Name
 }
 
+// DisplayNameOr returns the friendly institution label shown in the portal header:
+// spec.displayName when set, otherwise the provided fallback (the entity name for a
+// central bank, or the resolved bank code for a commercial bank). Cosmetic only —
+// it feeds VITE_INSTITUTION_NAME and nothing else (never the CSR/registry identity).
+func (m *Manifest) DisplayNameOr(fallback string) string {
+	if m.Spec.DisplayName != "" {
+		return m.Spec.DisplayName
+	}
+	return fallback
+}
+
 // Spec is the desired-state specification for the participant.
 // Secrets (private keys, passphrases, credentials) are never expressible here;
 // all key material is referenced via KeyProvider URI only.
 type Spec struct {
-	Scenario      string `yaml:"scenario"`
-	Environment   string `yaml:"environment,omitempty"`
-	Role          string `yaml:"role"`
-	Mode          string `yaml:"mode"`
+	Scenario    string `yaml:"scenario"`
+	Environment string `yaml:"environment,omitempty"`
+	Role        string `yaml:"role"`
+	Mode        string `yaml:"mode"`
 	// BankID identifies a commercial bank within a spoke (mode:join). Optional:
 	// when empty, the bank code is derived from metadata.name. It feeds the CSR
 	// subject CN, the IdentityRegistry name, and the BANK_ID compose variable.
-	BankID        string `yaml:"bankId,omitempty"`
+	BankID string `yaml:"bankId,omitempty"`
+	// DisplayName is the friendly institution label shown in the portal header
+	// (VITE_INSTITUTION_NAME), e.g. "Itaú" instead of the slug "bank-itau".
+	// Optional and purely cosmetic: when empty, the label falls back to the entity
+	// name (central bank) or the resolved bank code (commercial bank).
+	DisplayName   string `yaml:"displayName,omitempty"`
 	Spoke         Spoke  `yaml:"spoke"`
 	Node          Node   `yaml:"node"`
 	Image         string `yaml:"image"`
@@ -51,6 +67,12 @@ type Spec struct {
 	// embedded into the emitted join bundle so a joining commercial bank knows
 	// where to submit its CSR. Required for a usable found→join chain.
 	CBEndpoint string `yaml:"cbEndpoint,omitempty"`
+	// FrontendHost overrides the hostname baked into VITE_API_URL and
+	// VITE_KEYCLOAK_URL at frontend build time. When empty the engine defaults to
+	// "localhost", which works only when the browser runs on the same machine as
+	// the Docker host. Set this to a routable IP or DNS name when the frontend is
+	// accessed from a remote machine (e.g. a cloud VM with a public IP).
+	FrontendHost string `yaml:"frontendHost,omitempty"`
 	// AdminUsers are the per-role human operator accounts provisioned in the
 	// entity's Keycloak realm(s). Portal/operator login uses these (ROPC password
 	// grant) instead of the confidential client credentials, so audit logs carry a
@@ -104,4 +126,11 @@ type Port struct {
 // Relay holds the configuration for registering the spoke with the LNET-operated relay.
 type Relay struct {
 	Endpoint string `yaml:"endpoint"`
+	// AdvertisedHost overrides the host the relay uses to reach this spoke's
+	// host-published endpoints (Besu RPC/WS, payment-orchestrator gRPC, CB
+	// api-gateway) when register-relay runs. When empty it defaults to
+	// host.docker.internal, which only works when the relay is co-located on the
+	// same Docker host. Set it to a routable IP or hostname when the relay runs
+	// elsewhere. Only the host is overridden — the published ports are unchanged.
+	AdvertisedHost string `yaml:"advertisedHost,omitempty"`
 }

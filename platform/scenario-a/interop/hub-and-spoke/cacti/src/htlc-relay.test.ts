@@ -354,3 +354,53 @@ describe("settlement routing", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 4 — dynamic spoke lifecycle (registry-driven watchers)
+// ---------------------------------------------------------------------------
+
+describe("dynamic spoke lifecycle", () => {
+  const spokeA = {
+    id: "spoke-a", besuRpc: "http://a:8645", besuWs: "ws://a:8655",
+    htlcAddress: "0xaaaa", internalApiUrl: "http://a:18080", grpcEndpoint: "a:19094",
+  };
+
+  function relayWithFactory(factory?: (s: any) => Promise<any>) {
+    return new HtlcRelay(
+      [], "/fake/proto", 3000, "secret",
+      makeMockRelayStore() as any,
+      new Map(),
+      factory as any,
+    );
+  }
+
+  it("(a) addSpoke before start() does not begin watching", async () => {
+    const factory = vi.fn();
+    const relay = relayWithFactory(factory as any);
+    (relay as any).log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    await relay.addSpoke(spokeA);
+    expect((relay as any).watching.has("spoke-a")).toBe(false);
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("(b) addSpoke with no connector and no factory does not watch", async () => {
+    const relay = relayWithFactory(undefined);
+    const mockLog = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    (relay as any).log = mockLog;
+    relay.start(new AbortController().signal);
+    await relay.addSpoke(spokeA);
+    expect((relay as any).watching.has("spoke-a")).toBe(false);
+    expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining("no Cacti connector"));
+  });
+
+  it("(c) addSpoke is idempotent — a spoke already watched is not re-added", async () => {
+    const factory = vi.fn();
+    const relay = relayWithFactory(factory as any);
+    (relay as any).log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    relay.start(new AbortController().signal);
+    (relay as any).watching.add("spoke-a"); // simulate an active watcher
+    await relay.addSpoke(spokeA);
+    expect(factory).not.toHaveBeenCalled(); // returned early; no connector created
+    expect((relay as any).grpcClients.has("spoke-a")).toBe(false);
+  });
+});

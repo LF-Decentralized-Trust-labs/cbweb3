@@ -12,6 +12,15 @@ import (
 	"time"
 )
 
+// entityPKIVolumeKey is the FIXED local key backend-compose.yaml declares under
+// its top-level volumes: section (see cb_tls there). Compose does not
+// interpolate ${VAR} inside map keys, so the compose-local key must stay a
+// literal string; per-spoke uniqueness comes from that entry's own
+// name: ${SPOKE_ID}_cb_tls field instead. ENTITY_PKI_DIR is set to this literal
+// key (not the real volume name) so Compose's short-syntax volume detection
+// resolves it as a named-volume reference.
+const entityPKIVolumeKey = "cb_tls"
+
 // startBackendStackStep brings up an entity's 4 backend services (feature 034)
 // from the per-entity backend compose template, then waits for the api-gateway
 // health endpoint. Reused by the CB (found) and commercial banks (join). It reads
@@ -19,10 +28,12 @@ import (
 // container name on the entity network.
 type startBackendStackStep struct {
 	name            string
+	spokeID         string
 	entityPrefix    string
 	netName         string
 	backendContext  string
 	pkiDir          string
+	useTLSVolume    bool
 	envFile         string
 	composePath     string
 	bankCode        string
@@ -30,56 +41,66 @@ type startBackendStackStep struct {
 	paladinIdentity string
 	cactiURL        string
 	imageTag        string
-	apiPort         int
-	authPort        int
-	compliancePort  int
-	paymentPort     int
-	healthTimeout   time.Duration
-	healthInterval  time.Duration
+	// paymentOrchBesuRPCURL, when non-empty, un-gates the payment-orchestrator's
+	// Besu-signing path (HTLC/fCeBM) by setting PAYMENT_ORCH_BESU_RPC_URL for the
+	// compose. Empty leaves the path off (the template defaults BESU_RPC_URL empty).
+	paymentOrchBesuRPCURL string
+	apiPort               int
+	authPort              int
+	compliancePort        int
+	paymentPort           int
+	healthTimeout         time.Duration
+	healthInterval        time.Duration
 }
 
 func newStartBackendStackStep(name string, p backendStackParams) Step {
 	return &startBackendStackStep{
-		name:            name,
-		entityPrefix:    p.EntityPrefix,
-		netName:         p.NetName,
-		backendContext:  p.BackendContext,
-		pkiDir:          p.PKIDir,
-		envFile:         p.EnvFile,
-		composePath:     p.ComposePath,
-		bankCode:        p.BankCode,
-		paladinURL:      p.PaladinURL,
-		paladinIdentity: p.PaladinIdentity,
-		cactiURL:        p.CactiURL,
-		imageTag:        p.ImageTag,
-		apiPort:         p.APIPort,
-		authPort:        p.AuthPort,
-		compliancePort:  p.CompliancePort,
-		paymentPort:     p.PaymentPort,
-		healthTimeout:   p.HealthTimeout,
-		healthInterval:  p.HealthInterval,
+		name:                  name,
+		spokeID:               p.SpokeID,
+		entityPrefix:          p.EntityPrefix,
+		netName:               p.NetName,
+		backendContext:        p.BackendContext,
+		pkiDir:                p.PKIDir,
+		useTLSVolume:          p.UseTLSVolume,
+		envFile:               p.EnvFile,
+		composePath:           p.ComposePath,
+		bankCode:              p.BankCode,
+		paladinURL:            p.PaladinURL,
+		paladinIdentity:       p.PaladinIdentity,
+		cactiURL:              p.CactiURL,
+		imageTag:              p.ImageTag,
+		paymentOrchBesuRPCURL: p.PaymentOrchBesuRPCURL,
+		apiPort:               p.APIPort,
+		authPort:              p.AuthPort,
+		compliancePort:        p.CompliancePort,
+		paymentPort:           p.PaymentPort,
+		healthTimeout:         p.HealthTimeout,
+		healthInterval:        p.HealthInterval,
 	}
 }
 
 // backendStackParams groups the (many) inputs to keep the constructor readable.
 type backendStackParams struct {
-	EntityPrefix    string
-	NetName         string
-	BackendContext  string
-	PKIDir          string
-	EnvFile         string
-	ComposePath     string
-	BankCode        string
-	PaladinURL      string
-	PaladinIdentity string
-	CactiURL        string
-	ImageTag        string
-	APIPort         int
-	AuthPort        int
-	CompliancePort  int
-	PaymentPort     int
-	HealthTimeout   time.Duration
-	HealthInterval  time.Duration
+	SpokeID               string
+	EntityPrefix          string
+	NetName               string
+	BackendContext        string
+	PKIDir                string
+	UseTLSVolume          bool
+	EnvFile               string
+	ComposePath           string
+	BankCode              string
+	PaladinURL            string
+	PaladinIdentity       string
+	CactiURL              string
+	ImageTag              string
+	PaymentOrchBesuRPCURL string
+	APIPort               int
+	AuthPort              int
+	CompliancePort        int
+	PaymentPort           int
+	HealthTimeout         time.Duration
+	HealthInterval        time.Duration
 }
 
 func (s *startBackendStackStep) Name() string { return s.name }
@@ -108,7 +129,10 @@ func (s *startBackendStackStep) Run(ctx context.Context) error {
 
 	// Unique compose project per entity (shared template would otherwise reconcile
 	// and remove another entity's containers — see step_start_infra.go).
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.entityPrefix+"-backend", "-f", s.composePath, "up", "-d")
+	// --build forces the backend images to be rebuilt from current source: without it,
+	// `up -d` reuses a stale image tag from a prior deploy and silently ships old binaries
+	// (this bit the payment-orchestrator when its on-chain FX code changed).
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.entityPrefix+"-backend", "-f", s.composePath, "up", "-d", "--build")
 	cmd.Env = s.composeEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compose up backend: %w\noutput:\n%s", err, out)
@@ -138,6 +162,7 @@ func (s *startBackendStackStep) composeEnv() []string {
 		tag = "local"
 	}
 	env := append(os.Environ(),
+		"SPOKE_ID="+s.spokeID,
 		"ENTITY_PREFIX="+s.entityPrefix,
 		"ENTITY_NET_NAME="+s.netName,
 		"BACKEND_CONTEXT="+s.backendContext,
@@ -152,9 +177,23 @@ func (s *startBackendStackStep) composeEnv() []string {
 		"COMPLIANCE_PORT="+strconv.Itoa(s.compliancePort),
 		"PAYMENT_PORT="+strconv.Itoa(s.paymentPort),
 	)
-	// Mount the entity's own PKI dir (its CA from gen-tls) over the repo default.
-	if s.pkiDir != "" {
+	// Mount the entity's own PKI over the repo default: a bind mount for banks
+	// (pkiDir, a host path — gen-csr's async KYC flow still needs host access), or
+	// a named Docker volume for the CB (useTLSVolume — cb_tls, seeded by gen-tls via
+	// engine/dockervolume; see specs/026-tk4-compose-central-bank/plan.md addendum).
+	// entity-backend/backend-compose.yaml's ${ENTITY_PKI_DIR}:/workspace/... mount
+	// resolves to a bind mount or a named-volume reference based on this value.
+	switch {
+	case s.pkiDir != "":
 		env = append(env, "ENTITY_PKI_DIR="+s.pkiDir)
+	case s.useTLSVolume:
+		env = append(env, "ENTITY_PKI_DIR="+entityPKIVolumeKey)
+	}
+	// Un-gate the payment-orchestrator Besu path only when a signing URL is set
+	// (local). The compose defaults BESU_RPC_URL empty via ${PAYMENT_ORCH_BESU_RPC_URL-},
+	// so leaving this unset preserves the disabled-by-default behaviour.
+	if s.paymentOrchBesuRPCURL != "" {
+		env = append(env, "PAYMENT_ORCH_BESU_RPC_URL="+s.paymentOrchBesuRPCURL)
 	}
 	return env
 }

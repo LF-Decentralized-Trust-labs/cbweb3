@@ -18,11 +18,16 @@ type renderBankEnvStep struct {
 	bankCode                   string
 	currency                   string
 	besuRPCPort                int
+	chainID                    int
 	besuRPCURL                 string
 	dataDir                    string
 	centralBankAPIURL          string
 	zetoTokenAddress           string
 	participantRegistryAddress string
+	fiatTokenAddress           string
+	htlcAddress                string
+	besuOperatorKey            string
+	frontendHost               string
 }
 
 func newRenderBankEnvStep(p bankEnvParams) Step {
@@ -31,11 +36,16 @@ func newRenderBankEnvStep(p bankEnvParams) Step {
 		bankCode:                   p.BankCode,
 		currency:                   p.Currency,
 		besuRPCPort:                p.BesuRPCPort,
+		chainID:                    p.ChainID,
 		besuRPCURL:                 p.BesuRPCURL,
 		dataDir:                    p.DataDir,
 		centralBankAPIURL:          p.CentralBankAPIURL,
 		zetoTokenAddress:           p.ZetoTokenAddress,
 		participantRegistryAddress: p.ParticipantRegistryAddress,
+		fiatTokenAddress:           p.FiatTokenAddress,
+		htlcAddress:                p.HTLCAddress,
+		besuOperatorKey:            p.BesuOperatorKey,
+		frontendHost:               p.FrontendHost,
 	}
 }
 
@@ -45,11 +55,16 @@ type bankEnvParams struct {
 	BankCode                   string
 	Currency                   string
 	BesuRPCPort                int
+	ChainID                    int
 	BesuRPCURL                 string
 	DataDir                    string
 	CentralBankAPIURL          string
 	ZetoTokenAddress           string
 	ParticipantRegistryAddress string
+	FiatTokenAddress           string
+	HTLCAddress                string
+	BesuOperatorKey            string
+	FrontendHost               string
 }
 
 func (s *renderBankEnvStep) Name() string { return StepRenderBankEnv }
@@ -92,16 +107,41 @@ func (s *renderBankEnvStep) Run(_ context.Context) error {
 
 		// Reached from inside the container; the bank's Besu is published on the host.
 		BesuRPCURL: hostInternalURL(s.besuRPCURL),
-		ChainID:    0,
+		// The backend's Besu-signing path (HTLC/fCeBM) needs the real chain id:
+		// go-ethereum's NewKeyedTransactorWithChainID panics on chainID 0.
+		ChainID: s.chainID,
 
 		ParticipantRegistryAddress: s.participantRegistryAddress,
 		ZetoTokenAddress:           s.zetoTokenAddress,
+		FiatTokenAddress:           s.fiatTokenAddress,
+		HTLCAddress:                s.htlcAddress,
+		// Local: operator key signs the bank's Besu-layer txs (HTLC/fCeBM). Empty
+		// leaves the Besu path off. EntityBesuAddress is the bank's wallet, stamped by
+		// the escrow proxy as requester_besu_address on deposit/escrow/redeem.
+		BesuOperatorKey:   s.besuOperatorKey,
+		EntityBesuAddress: operatorAddressFromHex(s.besuOperatorKey),
+		// The bank's Paladin identity is stamped as requester_paladin_identity (Zeto
+		// mint recipient for reserve tokenisation); CB identity is the redeem receiver.
+		PaladinIdentity:   paladinIdentity(bankNodeName(s.spokeID, s.bankCode)),
+		CBPaladinIdentity: paladinIdentity(cbNodeName(s.spokeID)),
 
 		// Commercial bank: points at the central bank's api-gateway for onboarding/proxy.
 		CentralBankAPIURL: s.centralBankAPIURL,
 
+		// Seed the bank's auth KMS with its operator key so onboarding (CreateOnboardingKey,
+		// keyed by bank code) returns the operator address. That address becomes the
+		// participant the CB verifies on KYC approval, so the HTLC signer passes onlyVerified.
+		KMSSeedKeyID:      s.bankCode,
+		KMSSeedPrivateKey: s.besuOperatorKey,
+
+		// On-chain FXAgreement (Pente): the bank proposes into the CB↔bank group via its
+		// own Paladin. The in-group FXAgreement address is resolved at runtime (deploy-fxa
+		// runs after the backend starts), so it is left empty here.
+		PenteEnabled: true,
+		PenteBaseURL: hostInternalURL(bankPaladinURL(s.besuRPCPort)),
+
 		RelaySecret: "cbweb3-relay-shared-secret",
-		CORSOrigins: fmt.Sprintf("http://localhost:%d,http://localhost:%d", ports.FrontendPrimary, ports.FrontendSecondary),
+		CORSOrigins: bankCORSOrigins(ports, s.frontendHost),
 	}
 	return RenderEntityEnv(data, cbEnvPath(s.dataDir, s.bankCode))
 }

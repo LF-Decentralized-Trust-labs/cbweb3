@@ -93,7 +93,9 @@ wallets:
           keys:
             funded_operator:
               encoding: hex
-              inline: "ae6ae8e5ccbfb04590405997ee2d52d2b330726137b875053c36d94e974d162f"
+              # Per-bank unique base-ledger submitter key (rendered by fundedOperatorKey): a shared
+              # key collides on nonce with co-located banks on the spoke's Besu and wedges deploys.
+              inline: "{{.FundedOperatorKey}}"
       keyDerivation:
         type: direct
   - name: "hd_wallet"
@@ -110,8 +112,12 @@ publicTxManager:
   gasLimit:
     gasEstimateFactor: 2.0
   gasPrice:
+    # Zero gas price so the per-bank funded_operator (a unique, unfunded key — see
+    # fundedOperatorKey) can submit base-ledger txs. The spoke genesis sets zeroBaseFee and Besu
+    # runs with --min-gas-price=0, so a 0-price tx is valid; with a non-zero maxFeePerGas Paladin's
+    # publicTxManager computes a cost and rejects the unfunded account with "insufficient funds".
     fixedGasPrice:
-      maxFeePerGas: "1000000000"
+      maxFeePerGas: "0"
       maxPriorityFeePerGas: "0"
 
 persistence:

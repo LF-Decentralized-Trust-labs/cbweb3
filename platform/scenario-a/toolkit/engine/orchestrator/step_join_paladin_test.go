@@ -6,8 +6,6 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,8 +22,14 @@ func TestBankNodeName_DerivedFromSpokeAndBank(t *testing.T) {
 }
 
 func TestGenTLSJoinStep_GeneratesBankCert(t *testing.T) {
-	dir := t.TempDir()
-	step := newGenTLSJoinStep("spoke-brl", "bank-itau", dir)
+	requireDocker(t)
+	// Distinct spokeID/bankID from any real sample/demo entity (e.g. "spoke-brl" /
+	// "bank-itau") — those map to real named volumes that may be live and mounted
+	// by a running Paladin container; colliding here would risk clobbering (or, if
+	// this test's Check() short-circuits like it once did, silently no-op'ing
+	// against) a real deployment's cert.
+	step := newGenTLSJoinStep("spoke-test-gentlsjoin", "bank-test-gentlsjoin").(*genTLSJoinStep)
+	cleanupVolume(t, step.paladinConfigVolume())
 
 	done, _ := step.Check(context.Background())
 	if done {
@@ -35,13 +39,11 @@ func TestGenTLSJoinStep_GeneratesBankCert(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	certPath := filepath.Join(dir, "paladin", "bank-itau", "tls.crt")
-	keyPath := filepath.Join(dir, "paladin", "bank-itau", "tls.key")
-	certPEM, err := os.ReadFile(certPath)
+	certPEM, err := readVolumeFile(context.Background(), step.paladinConfigVolume(), "tls.crt")
 	if err != nil {
 		t.Fatalf("read cert: %v", err)
 	}
-	if _, err := os.Stat(keyPath); err != nil {
+	if _, err := readVolumeFile(context.Background(), step.paladinConfigVolume(), "tls.key"); err != nil {
 		t.Errorf("tls.key missing: %v", err)
 	}
 
@@ -57,11 +59,11 @@ func TestGenTLSJoinStep_GeneratesBankCert(t *testing.T) {
 	// CN must be the registered NODE NAME (not the container hostname): the Paladin
 	// gRPC transport matches the peer's TLS identity against the expected node name
 	// (PD030011). The container hostname stays in the SAN for the dns:/// dial.
-	wantCN := "spoke-brl-bank-itau"
+	wantCN := "spoke-test-gentlsjoin-bank-test-gentlsjoin"
 	if cert.Subject.CommonName != wantCN {
 		t.Errorf("CN = %q; want %q", cert.Subject.CommonName, wantCN)
 	}
-	for _, want := range []string{"spoke-brl-bank-itau", "paladin-spoke-brl-bank-itau"} {
+	for _, want := range []string{wantCN, "paladin-" + wantCN} {
 		found := false
 		for _, d := range cert.DNSNames {
 			if d == want {
@@ -80,15 +82,17 @@ func TestGenTLSJoinStep_GeneratesBankCert(t *testing.T) {
 }
 
 func TestRenderConfigJoinStep_Check(t *testing.T) {
-	dir := t.TempDir()
-	step := newRenderConfigJoinStep("spoke-brl", "bank-itau", dir, 8746, 8756, "0xREG", "0xZF", "0xPF", "/tmpl")
+	requireDocker(t)
+	step := newRenderConfigJoinStep("spoke-brl", "bank-itau-renderconfig", 8746, 8756, "0xREG", "0xZF", "0xPF", "/tmpl").(*renderConfigJoinStep)
+	cleanupVolume(t, step.paladinConfigVolume())
+
 	done, _ := step.Check(context.Background())
 	if done {
 		t.Error("Check should be false when config.yaml absent")
 	}
-	cfgDir := filepath.Join(dir, "paladin", "bank-itau")
-	os.MkdirAll(cfgDir, 0o755)
-	os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte("x"), 0o644)
+	if err := writeVolumeFile(context.Background(), step.paladinConfigVolume(), "config.yaml", []byte("x"), "0644"); err != nil {
+		t.Fatal(err)
+	}
 	done, _ = step.Check(context.Background())
 	if !done {
 		t.Error("Check should be true when config.yaml present")
@@ -137,8 +141,10 @@ func TestRegisterPaladinNodeStep_Check_StateDriven(t *testing.T) {
 }
 
 func TestRegisterPaladinNodeStep_Run_ErrorsOnMissingCert(t *testing.T) {
+	requireDocker(t)
 	dir := t.TempDir()
-	step := newRegisterPaladinNodeStep("spoke-brl", "bank-itau", dir, "http://localhost:8746", "0xREG", keyprovider.NewLocalKeyProviderSeeded(), 0)
+	cleanupVolume(t, "spoke-brl_bank-itau-missingcert_paladin_config")
+	step := newRegisterPaladinNodeStep("spoke-brl", "bank-itau-missingcert", dir, "http://localhost:8746", "0xREG", keyprovider.NewLocalKeyProviderSeeded(), 0)
 	if err := step.Run(context.Background()); err == nil {
 		t.Error("Run should error when the bank Paladin cert is missing")
 	}

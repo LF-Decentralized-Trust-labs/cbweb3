@@ -8,20 +8,19 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-// newTestStartBesuFoundStep builds a *startBesuFoundStep with the given RPC URL
-// and data dir, suitable for unit tests (no Docker required for Check/scaffold).
-func newTestStartBesuFoundStep(rpcURL, dataDir string, chainID int) *startBesuFoundStep {
+// newTestStartBesuFoundStep builds a *startBesuFoundStep with the given RPC URL,
+// suitable for unit tests. Check/ComposeEnv tests need no Docker; Scaffold tests
+// exercise the real cb_config named volume and are skipped if Docker is absent
+// (see requireDocker in volumefs_test.go).
+func newTestStartBesuFoundStep(rpcURL string, chainID int) *startBesuFoundStep {
 	return &startBesuFoundStep{
 		spokeID:        "spoke-test",
 		chainID:        chainID,
-		dataDir:        dataDir,
 		composePath:    "/nonexistent/central-bank/docker-compose.yaml",
 		besuRPCURL:     rpcURL,
 		advertisedHost: "cbweb3-spoke-test-besu.central-bank-test",
@@ -44,7 +43,7 @@ func TestStartBesuFoundStep_Check_NodeUp_True(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := newTestStartBesuFoundStep(srv.URL, t.TempDir(), 1337)
+	s := newTestStartBesuFoundStep(srv.URL, 1337)
 	done, err := s.Check(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -55,7 +54,7 @@ func TestStartBesuFoundStep_Check_NodeUp_True(t *testing.T) {
 }
 
 func TestStartBesuFoundStep_Check_NodeDown_False(t *testing.T) {
-	s := newTestStartBesuFoundStep("http://127.0.0.1:1", t.TempDir(), 1337)
+	s := newTestStartBesuFoundStep("http://127.0.0.1:1", 1337)
 	done, err := s.Check(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -66,25 +65,20 @@ func TestStartBesuFoundStep_Check_NodeDown_False(t *testing.T) {
 }
 
 func TestStartBesuFoundStep_Scaffold_RendersQBFTWithChainID(t *testing.T) {
-	dataDir := t.TempDir()
-	s := newTestStartBesuFoundStep("http://127.0.0.1:1", dataDir, 1338)
+	requireDocker(t)
+	s := newTestStartBesuFoundStep("http://127.0.0.1:1", 1338)
+	s.spokeID = "spoke-test-scaffold-render"
+	cleanupVolume(t, s.configVolume())
 
-	if err := s.scaffold(); err != nil {
+	if err := s.scaffold(context.Background()); err != nil {
 		t.Fatalf("scaffold: %v", err)
 	}
 
-	// Required directories created.
-	for _, sub := range []string{"config", "genesis", filepath.Join("nodes", "central-bank", "data")} {
-		if _, err := os.Stat(filepath.Join(dataDir, sub)); err != nil {
-			t.Errorf("expected dir %q to exist: %v", sub, err)
-		}
-	}
-
-	// qbftConfigFile.json rendered with the manifest chainId.
-	qbftPath := filepath.Join(dataDir, "config", "qbftConfigFile.json")
-	data, err := os.ReadFile(qbftPath)
+	// qbftConfigFile.json seeded into the volume — no host filesystem involved
+	// (deviation from the original SPOKE_DATA_DIR bind-mount design).
+	data, err := readVolumeFile(context.Background(), s.configVolume(), "qbftConfigFile.json")
 	if err != nil {
-		t.Fatalf("read qbft config: %v", err)
+		t.Fatalf("read qbft config from volume: %v", err)
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(data, &doc); err != nil {
@@ -113,24 +107,22 @@ func TestStartBesuFoundStep_Scaffold_RendersQBFTWithChainID(t *testing.T) {
 }
 
 func TestStartBesuFoundStep_Scaffold_PreservesExistingQBFT(t *testing.T) {
-	dataDir := t.TempDir()
-	s := newTestStartBesuFoundStep("http://127.0.0.1:1", dataDir, 1337)
+	requireDocker(t)
+	s := newTestStartBesuFoundStep("http://127.0.0.1:1", 1337)
+	s.spokeID = "spoke-test-scaffold-preserve"
+	cleanupVolume(t, s.configVolume())
 
 	// Pre-existing custom config must NOT be overwritten (non-destructive).
-	configDir := filepath.Join(dataDir, "config")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	custom := []byte(`{"custom":true}`)
-	if err := os.WriteFile(filepath.Join(configDir, "qbftConfigFile.json"), custom, 0o644); err != nil {
+	if err := writeVolumeFile(context.Background(), s.configVolume(), "qbftConfigFile.json", custom, "0644"); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := s.scaffold(); err != nil {
+	if err := s.scaffold(context.Background()); err != nil {
 		t.Fatalf("scaffold: %v", err)
 	}
 
-	got, err := os.ReadFile(filepath.Join(configDir, "qbftConfigFile.json"))
+	got, err := readVolumeFile(context.Background(), s.configVolume(), "qbftConfigFile.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +132,7 @@ func TestStartBesuFoundStep_Scaffold_PreservesExistingQBFT(t *testing.T) {
 }
 
 func TestStartBesuFoundStep_ComposeEnv_NoBootnode(t *testing.T) {
-	s := newTestStartBesuFoundStep("http://127.0.0.1:1", t.TempDir(), 1337)
+	s := newTestStartBesuFoundStep("http://127.0.0.1:1", 1337)
 	env := strings.Join(s.composeEnv(), "\n")
 
 	for _, want := range []string{
@@ -156,6 +148,12 @@ func TestStartBesuFoundStep_ComposeEnv_NoBootnode(t *testing.T) {
 		if !strings.Contains(env, want) {
 			t.Errorf("composeEnv missing %q", want)
 		}
+	}
+
+	// SPOKE_DATA_DIR is no longer consumed by the central-bank compose template
+	// (config/genesis moved to named volumes cb_config/cb_genesis) — must not be set.
+	if strings.Contains(env, "SPOKE_DATA_DIR=") {
+		t.Error("composeEnv must not set SPOKE_DATA_DIR (unused since the volume migration)")
 	}
 
 	// The central bank IS the bootnode — it must never receive BOOTNODE_ENODE.

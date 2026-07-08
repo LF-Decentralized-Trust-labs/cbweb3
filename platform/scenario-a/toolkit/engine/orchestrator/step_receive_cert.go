@@ -31,8 +31,8 @@ var ErrAwaitingGovernanceApproval = errors.New(
 //
 // Cert issuance and on-chain participant registration are NOT join steps under
 // Option C: the Governance Portal issues the CB-signed cert on KYC approval, and
-// the engine whitelists the bank's runtime KMS wallet CB-side via
-// `cbweb3 register-participant` after onboarding.
+// the CB compliance service whitelists the bank's runtime KMS wallet on-chain
+// (CB_PRIVATE_KEY governance signer) as part of that same KYC approval.
 func isDeferredOnboardingStep(name string) bool {
 	switch name {
 	case StepCreatePenteJoin, StepDeployFXAJoin:
