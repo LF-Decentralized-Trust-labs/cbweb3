@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -52,12 +53,11 @@ func (h *PaymentProxyHandler) RegisterDeposit(c *fiber.Ctx) error {
 	return h.proxyWithEntityEnrichment(c, http.MethodPost, "/internal/v1/payments/deposits")
 }
 
-// ListDeposits proxies GET /payments/deposits to the Central Bank.
+// ListDeposits proxies GET /payments/deposits to the Central Bank,
+// always scoped to this entity's Besu address so commercial banks only
+// see their own issuance requests.
 func (h *PaymentProxyHandler) ListDeposits(c *fiber.Ctx) error {
-	path := "/internal/v1/payments/deposits"
-	if q := c.Request().URI().QueryString(); len(q) > 0 {
-		path += "?" + string(q)
-	}
+	path := "/internal/v1/payments/deposits?requester_id=" + url.QueryEscape(h.entityBesuAddress)
 	return h.proxy(c, http.MethodGet, path, nil)
 }
 
@@ -66,12 +66,11 @@ func (h *PaymentProxyHandler) RequestEscrow(c *fiber.Ctx) error {
 	return h.proxyWithEntityEnrichment(c, http.MethodPost, "/internal/v1/payments/escrows")
 }
 
-// ListEscrows proxies GET /payments/escrows to the Central Bank.
+// ListEscrows proxies GET /payments/escrows to the Central Bank,
+// always scoped to this entity's Besu address so commercial banks only
+// see their own reserve tokenisation requests.
 func (h *PaymentProxyHandler) ListEscrows(c *fiber.Ctx) error {
-	path := "/internal/v1/payments/escrows"
-	if q := c.Request().URI().QueryString(); len(q) > 0 {
-		path += "?" + string(q)
-	}
+	path := "/internal/v1/payments/escrows?requester_id=" + url.QueryEscape(h.entityBesuAddress)
 	return h.proxy(c, http.MethodGet, path, nil)
 }
 
@@ -113,12 +112,11 @@ func (h *PaymentProxyHandler) RequestRedeem(c *fiber.Ctx) error {
 	return h.proxy(c, http.MethodPost, "/internal/v1/payments/redeems", enriched)
 }
 
-// ListRedeems proxies GET /payments/redeems to the Central Bank.
+// ListRedeems proxies GET /payments/redeems to the Central Bank,
+// always scoped to this entity's Besu address so commercial banks only
+// see their own redeem requests.
 func (h *PaymentProxyHandler) ListRedeems(c *fiber.Ctx) error {
-	path := "/internal/v1/payments/redeems"
-	if q := c.Request().URI().QueryString(); len(q) > 0 {
-		path += "?" + string(q)
-	}
+	path := "/internal/v1/payments/redeems?requester_id=" + url.QueryEscape(h.entityBesuAddress)
 	return h.proxy(c, http.MethodGet, path, nil)
 }
 

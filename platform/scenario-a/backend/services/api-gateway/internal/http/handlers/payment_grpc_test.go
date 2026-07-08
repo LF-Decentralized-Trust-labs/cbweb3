@@ -586,6 +586,8 @@ func TestFXAgreementEndpoints(t *testing.T) {
 	}
 	h := startFakePaymentBackend(t, fake)
 	app := fiber.New()
+	// Accept and Reject require authenticated claims to enforce originator-cannot-self-accept.
+	app.Use(authedClaims("bank-b"))
 	app.Post("/fx", h.ProposeFXAgreement)
 	app.Post("/fx/:tradeId/accept", h.AcceptFXAgreement)
 	app.Post("/fx/:tradeId/reject", h.RejectFXAgreement)
@@ -616,6 +618,16 @@ func TestFXAgreementEndpoints(t *testing.T) {
 			t.Errorf("GET %s: want 200, got %d", p, resp.StatusCode)
 		}
 	}
+
+	// Accept/Reject without claims → 401.
+	appNoClaims := fiber.New()
+	appNoClaims.Post("/fx/:tradeId/accept", h.AcceptFXAgreement)
+	appNoClaims.Post("/fx/:tradeId/reject", h.RejectFXAgreement)
+	for _, p := range []string{"/fx/t1/accept", "/fx/t1/reject"} {
+		if resp := postJSON(t, appNoClaims, p, map[string]any{}); resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("no-claims %s: want 401, got %d", p, resp.StatusCode)
+		}
+	}
 }
 
 func TestFXAgreement_ErrorMapping(t *testing.T) {
@@ -627,6 +639,7 @@ func TestFXAgreement_ErrorMapping(t *testing.T) {
 		{codes.NotFound, http.StatusNotFound},
 		{codes.InvalidArgument, http.StatusBadRequest},
 		{codes.FailedPrecondition, http.StatusConflict},
+		{codes.PermissionDenied, http.StatusForbidden},
 		{codes.Unavailable, http.StatusServiceUnavailable},
 		{codes.Internal, http.StatusInternalServerError},
 	}

@@ -7,6 +7,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -301,6 +302,73 @@ func TestMe(t *testing.T) {
 	app2.Get("/me", h.Me) // no claims
 	if resp, _ := app2.Test(httptest.NewRequest(http.MethodGet, "/me", nil)); resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("want 401, got %d", resp.StatusCode)
+	}
+}
+
+// TestMe_BankCodeFallback verifies that /me returns bankId using the entity's
+// configured bank code when the JWT does not carry a bank_id custom claim.
+// This covers the scenario where the Keycloak realm has no bank_id token mapper,
+// preventing commercial-bank portals from incorrectly displaying Accept/Reject
+// buttons to the originator of an FX Agreement.
+func TestMe_BankCodeFallback(t *testing.T) {
+	t.Parallel()
+
+	h := NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false, "bank-macro")
+	app := fiber.New()
+
+	// Claims without BankID — simulates a Keycloak JWT without bank_id mapper.
+	app.Get("/me", func(c *fiber.Ctx) error {
+		c.Locals("claims", domain.TokenClaims{
+			Subject: "funded_operator",
+			Issuer:  "http://keycloak:8080/realms/bank-macro",
+			Roles:   []string{"ROLE_COMMERCIAL_BANK"},
+		})
+		return h.Me(c)
+	})
+
+	resp, _ := app.Test(httptest.NewRequest(http.MethodGet, "/me", nil))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["bankId"] != "bank-macro" {
+		t.Errorf("bankId: got %v, want bank-macro", body["bankId"])
+	}
+}
+
+// TestMe_BankIDClaimTakesPrecedence verifies that the JWT bank_id claim wins
+// over the entity's configured bank code when both are present.
+func TestMe_BankIDClaimTakesPrecedence(t *testing.T) {
+	t.Parallel()
+
+	h := NewAuthHandler(authProviderStub{}, kycCheckerStub{}, false, "entity-default")
+	app := fiber.New()
+
+	app.Get("/me", func(c *fiber.Ctx) error {
+		c.Locals("claims", domain.TokenClaims{
+			Subject: "u",
+			Issuer:  "iss",
+			Roles:   []string{"ROLE_COMMERCIAL_BANK"},
+			BankID:  "jwt-bank-id",
+		})
+		return h.Me(c)
+	})
+
+	resp, _ := app.Test(httptest.NewRequest(http.MethodGet, "/me", nil))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["bankId"] != "jwt-bank-id" {
+		t.Errorf("bankId: got %v, want jwt-bank-id (JWT claim must take precedence)", body["bankId"])
 	}
 }
 
