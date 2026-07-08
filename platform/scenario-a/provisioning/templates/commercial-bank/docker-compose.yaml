@@ -78,7 +78,7 @@ services:
         - |
           body='{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
           exec 3<>/dev/tcp/localhost/8545 || exit 1
-          printf 'POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' "${#body}" "$body" >&3
+          printf 'POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' "$${#body}" "$$body" >&3
           grep -q '"result"' <&3
       interval: 5s
       timeout: 3s
