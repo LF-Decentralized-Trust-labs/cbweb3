@@ -281,11 +281,15 @@ type DepositRecord struct {
 	RequesterID              string `json:"requester_id"`
 	RequesterBesuAddress     string `json:"requester_besu_address"`
 	RequesterPaladinIdentity string `json:"requester_paladin_identity"`
-	Amount                   string `json:"amount"`
-	Status                   string `json:"status"`
-	MintTxHash               string `json:"mint_tx_hash,omitempty"`
-	RejectionReason          string `json:"rejection_reason,omitempty"`
-	CreatedAt                string `json:"created_at"`
+	// RequesterName is the resolved institution name for RequesterBesuAddress.
+	// Populated by the api-gateway handler via the compliance participant registry;
+	// empty when the address has no registered participant.
+	RequesterName   string `json:"requester_name,omitempty"`
+	Amount          string `json:"amount"`
+	Status          string `json:"status"`
+	MintTxHash      string `json:"mint_tx_hash,omitempty"`
+	RejectionReason string `json:"rejection_reason,omitempty"`
+	CreatedAt       string `json:"created_at"`
 }
 
 func (a *GRPCAdapter) ListDeposits(ctx context.Context, requesterID string) ([]DepositRecord, error) {
@@ -351,12 +355,15 @@ type EscrowRecord struct {
 	RequesterID              string `json:"requester_id"`
 	RequesterBesuAddress     string `json:"requester_besu_address"`
 	RequesterPaladinIdentity string `json:"requester_paladin_identity"`
-	Amount                   string `json:"amount"`
-	Status                   string `json:"status"`
-	BurnTxHash               string `json:"burn_tx_hash,omitempty"`
-	MintTxHash               string `json:"mint_tx_hash,omitempty"`
-	RejectionReason          string `json:"rejection_reason,omitempty"`
-	CreatedAt                string `json:"created_at"`
+	// RequesterName is the resolved institution name for RequesterBesuAddress
+	// (see DepositRecord.RequesterName).
+	RequesterName   string `json:"requester_name,omitempty"`
+	Amount          string `json:"amount"`
+	Status          string `json:"status"`
+	BurnTxHash      string `json:"burn_tx_hash,omitempty"`
+	MintTxHash      string `json:"mint_tx_hash,omitempty"`
+	RejectionReason string `json:"rejection_reason,omitempty"`
+	CreatedAt       string `json:"created_at"`
 }
 
 func (a *GRPCAdapter) ListEscrows(ctx context.Context, requesterID string) ([]EscrowRecord, error) {
@@ -438,12 +445,15 @@ type RedeemRecord struct {
 	RequesterID              string `json:"requester_id"`
 	RequesterBesuAddress     string `json:"requester_besu_address"`
 	RequesterPaladinIdentity string `json:"requester_paladin_identity"`
-	Amount                   string `json:"amount"`
-	Status                   string `json:"status"`
-	ZetoTransferTxHash       string `json:"zeto_transfer_tx_hash,omitempty"`
-	FiatMintTxHash           string `json:"fiat_mint_tx_hash,omitempty"`
-	RejectionReason          string `json:"rejection_reason,omitempty"`
-	CreatedAt                string `json:"created_at"`
+	// RequesterName is the resolved institution name for RequesterBesuAddress
+	// (see DepositRecord.RequesterName).
+	RequesterName      string `json:"requester_name,omitempty"`
+	Amount             string `json:"amount"`
+	Status             string `json:"status"`
+	ZetoTransferTxHash string `json:"zeto_transfer_tx_hash,omitempty"`
+	FiatMintTxHash     string `json:"fiat_mint_tx_hash,omitempty"`
+	RejectionReason    string `json:"rejection_reason,omitempty"`
+	CreatedAt          string `json:"created_at"`
 }
 
 func (a *GRPCAdapter) ListRedeems(ctx context.Context, requesterID string) ([]RedeemRecord, error) {

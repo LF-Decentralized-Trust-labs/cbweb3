@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
@@ -663,5 +664,122 @@ func TestFXAgreement_MissingTradeID(t *testing.T) {
 	app.Post("/fx//accept", h.AcceptFXAgreement)
 	if resp, _ := app.Test(httptest.NewRequest(http.MethodGet, "/fx/", nil)); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("get missing tradeId: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// fakeParticipantResolver is a configurable stand-in for the compliance adapter,
+// used to test requester-name enrichment without a live compliance backend.
+type fakeParticipantResolver struct {
+	participants []complianceadapter.Participant
+	err          error
+}
+
+func (f *fakeParticipantResolver) ListParticipants(_ context.Context, _, _ string) ([]complianceadapter.Participant, error) {
+	return f.participants, f.err
+}
+
+// requesterNameOf pulls the requester_name of the first record out of a list
+// response shaped as {"<key>": [ {..., "requester_name": "..."} ]}.
+func requesterNameOf(t *testing.T, resp *http.Response, key string) string {
+	t.Helper()
+	var body map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode %s: %v", key, err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(body[key], &rows); err != nil {
+		t.Fatalf("decode %s rows: %v", key, err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("%s: expected at least one row", key)
+	}
+	name, _ := rows[0]["requester_name"].(string)
+	return name
+}
+
+func TestListRecords_RequesterNameEnrichment(t *testing.T) {
+	t.Parallel()
+	// The record's on-chain address is stored checksummed; the participant
+	// wallet_address is lowercase. Enrichment must match case-insensitively.
+	fake := &fakePaymentServer{
+		deposits: &pb.ListDepositsResponse{Deposits: []*pb.DepositRecord{{Id: "d1", RequesterBesuAddress: "0xAbC123"}}},
+		escrows:  &pb.ListEscrowsResponse{Escrows: []*pb.EscrowRecord{{Id: "e1", RequesterBesuAddress: "0xAbC123"}}},
+		redeems:  &pb.ListRedeemsResponse{Redeems: []*pb.RedeemRecord{{Id: "r1", RequesterBesuAddress: "0xAbC123"}}},
+	}
+	h := startFakePaymentBackend(t, fake)
+	h = h.WithParticipantResolver(&fakeParticipantResolver{
+		participants: []complianceadapter.Participant{
+			{WalletAddress: "0xabc123", InstitutionName: "Banco Alpha"},
+			{WalletAddress: "0xdef456", InstitutionName: "Banco Beta"},
+		},
+	})
+
+	app := fiber.New()
+	app.Get("/deposits", h.ListDeposits)
+	app.Get("/escrows", h.ListEscrows)
+	app.Get("/redeems", h.ListRedeems)
+
+	cases := []struct{ path, key string }{
+		{"/deposits", "deposits"},
+		{"/escrows", "escrows"},
+		{"/redeems", "redeems"},
+	}
+	for _, tc := range cases {
+		resp, _ := app.Test(httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s: want 200, got %d", tc.path, resp.StatusCode)
+		}
+		if got := requesterNameOf(t, resp, tc.key); got != "Banco Alpha" {
+			t.Errorf("GET %s: requester_name = %q, want %q", tc.path, got, "Banco Alpha")
+		}
+	}
+}
+
+func TestListRecords_RequesterNameUnresolved(t *testing.T) {
+	t.Parallel()
+	fake := &fakePaymentServer{
+		deposits: &pb.ListDepositsResponse{Deposits: []*pb.DepositRecord{{Id: "d1", RequesterBesuAddress: "0xNoMatch"}}},
+	}
+	h := startFakePaymentBackend(t, fake)
+	h = h.WithParticipantResolver(&fakeParticipantResolver{
+		participants: []complianceadapter.Participant{{WalletAddress: "0xabc123", InstitutionName: "Banco Alpha"}},
+	})
+
+	app := fiber.New()
+	app.Get("/deposits", h.ListDeposits)
+	resp, _ := app.Test(httptest.NewRequest(http.MethodGet, "/deposits", nil))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if got := requesterNameOf(t, resp, "deposits"); got != "" {
+		t.Errorf("unmatched wallet: requester_name = %q, want empty", got)
+	}
+}
+
+func TestListRecords_ResolverAbsentOrFailing(t *testing.T) {
+	t.Parallel()
+	fake := &fakePaymentServer{
+		deposits: &pb.ListDepositsResponse{Deposits: []*pb.DepositRecord{{Id: "d1", RequesterBesuAddress: "0xabc123"}}},
+	}
+
+	// No resolver configured: listing still succeeds, name stays empty.
+	hNoResolver := startFakePaymentBackend(t, fake)
+	appNo := fiber.New()
+	appNo.Get("/deposits", hNoResolver.ListDeposits)
+	if resp, _ := appNo.Test(httptest.NewRequest(http.MethodGet, "/deposits", nil)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("no resolver: want 200, got %d", resp.StatusCode)
+	}
+
+	// Resolver error is non-fatal: listing still succeeds, name stays empty.
+	hErr := startFakePaymentBackend(t, fake)
+	hErr = hErr.WithParticipantResolver(&fakeParticipantResolver{err: status.Error(codes.Unavailable, "down")})
+	appErr := fiber.New()
+	appErr.Get("/deposits", hErr.ListDeposits)
+	resp, _ := appErr.Test(httptest.NewRequest(http.MethodGet, "/deposits", nil))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resolver error: want 200, got %d", resp.StatusCode)
+	}
+	if got := requesterNameOf(t, resp, "deposits"); got != "" {
+		t.Errorf("resolver error: requester_name = %q, want empty", got)
 	}
 }
