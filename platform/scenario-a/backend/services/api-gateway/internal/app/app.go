@@ -134,6 +134,9 @@ func New(cfg config.Config) (*App, error) {
 		}
 		closers = append(closers, paymentGRPC)
 		ph := handlers.NewPaymentHandler(paymentGRPC, cfg.BankCode)
+		// Resolve requester institution names for deposit/escrow/redeem listings
+		// (Treasury portal auditing) via the compliance participant registry.
+		ph = ph.WithParticipantResolver(complianceGRPC)
 		if cfg.FiatSymbol != "" {
 			limitComplianceGRPC := complianceGRPC
 			// Commercial banks point their limit checks at the central bank's compliance service,
