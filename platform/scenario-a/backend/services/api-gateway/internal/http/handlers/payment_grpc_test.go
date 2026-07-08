@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	besuscanner "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/besu"
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
@@ -781,5 +782,36 @@ func TestListRecords_ResolverAbsentOrFailing(t *testing.T) {
 	}
 	if got := requesterNameOf(t, resp, "deposits"); got != "" {
 		t.Errorf("resolver error: requester_name = %q, want empty", got)
+	}
+}
+
+func TestEnrichScanResultNames(t *testing.T) {
+	t.Parallel()
+	// Scan results carry checksummed EVM addresses; the name map is keyed lowercase.
+	results := []besuscanner.HTLCScanResult{
+		{ContractID: "c1", Sender: "0xAbC123", Receiver: "0xDeF456"},
+		{ContractID: "c2", Sender: "0x999", Receiver: "0xAbC123"}, // sender unknown, receiver known
+	}
+	names := map[string]string{
+		"0xabc123": "Banco Alpha",
+		"0xdef456": "Banco Beta",
+	}
+	enrichScanResultNames(results, names)
+
+	if results[0].SenderName != "Banco Alpha" || results[0].ReceiverName != "Banco Beta" {
+		t.Errorf("row0: got sender=%q receiver=%q", results[0].SenderName, results[0].ReceiverName)
+	}
+	if results[1].SenderName != "" {
+		t.Errorf("row1: unmatched sender should be empty, got %q", results[1].SenderName)
+	}
+	if results[1].ReceiverName != "Banco Alpha" {
+		t.Errorf("row1: got receiver=%q, want %q", results[1].ReceiverName, "Banco Alpha")
+	}
+
+	// Nil/empty name map must be a no-op (no panic, names stay empty).
+	clean := []besuscanner.HTLCScanResult{{Sender: "0xabc123"}}
+	enrichScanResultNames(clean, nil)
+	if clean[0].SenderName != "" {
+		t.Errorf("nil map: want empty, got %q", clean[0].SenderName)
 	}
 }

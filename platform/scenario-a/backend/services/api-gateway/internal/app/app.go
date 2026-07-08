@@ -84,7 +84,9 @@ func New(cfg config.Config) (*App, error) {
 	}
 	closers = append(closers, complianceGRPC)
 	governanceHandler := handlers.NewGovernanceHandler(complianceGRPC)
-	supervisorHandler := handlers.NewSupervisorHandler(complianceGRPC)
+	// Resolve the actor's institution name for audit log entries (Auditor Portal)
+	// via the compliance participant registry.
+	supervisorHandler := handlers.NewSupervisorHandler(complianceGRPC).WithParticipantResolver(complianceGRPC)
 
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure, cfg.BankCode)
 	complianceHandler := handlers.NewComplianceHandler(identityManager, complianceGRPC)

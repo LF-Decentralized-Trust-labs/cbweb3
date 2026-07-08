@@ -77,6 +77,19 @@ func (h *PaymentHandler) participantNamesByWallet(ctx context.Context) map[strin
 	return names
 }
 
+// enrichScanResultNames fills SenderName/ReceiverName on each scan result by
+// matching the (checksummed) EVM addresses against a lowercase-wallet → name
+// map. No-op when names is nil/empty; unmatched addresses stay unnamed.
+func enrichScanResultNames(results []besuscanner.HTLCScanResult, names map[string]string) {
+	if len(names) == 0 {
+		return
+	}
+	for i := range results {
+		results[i].SenderName = names[strings.ToLower(results[i].Sender)]
+		results[i].ReceiverName = names[strings.ToLower(results[i].Receiver)]
+	}
+}
+
 // SetHTLCScanner wires an on-chain scanner; when set, supervisor HTLC searches bypass the orchestrator.
 func (h *PaymentHandler) SetHTLCScanner(s *besuscanner.HTLCScanner) {
 	h.htlcScanner = s
@@ -241,6 +254,7 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 		if err != nil {
 			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "on-chain scan failed: " + err.Error()})
 		}
+		enrichScanResultNames(scanResults, h.participantNamesByWallet(c.UserContext()))
 		return c.JSON(fiber.Map{"locks": scanResults, "total": len(scanResults)})
 	}
 
