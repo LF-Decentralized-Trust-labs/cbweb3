@@ -592,7 +592,18 @@ func (h *PaymentHandler) AcceptFXAgreement(c *fiber.Ctx) error {
 		OnBehalf bool `json:"on_behalf"`
 	}
 	_ = c.BodyParser(&req)
-	result, err := h.payment.AcceptFXAgreement(c.Context(), tradeID, req.OnBehalf)
+
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok || claims.Subject == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
+	}
+	callerBankID := claims.BankID
+	if callerBankID == "" {
+		callerBankID = h.bankCode
+	}
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
+
+	result, err := h.payment.AcceptFXAgreement(ctx, tradeID, req.OnBehalf)
 	if err != nil {
 		return grpcErrorToHTTP(c, err)
 	}
@@ -608,7 +619,18 @@ func (h *PaymentHandler) RejectFXAgreement(c *fiber.Ctx) error {
 		OnBehalf bool `json:"on_behalf"`
 	}
 	_ = c.BodyParser(&req)
-	result, err := h.payment.RejectFXAgreement(c.Context(), tradeID, req.OnBehalf)
+
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok || claims.Subject == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
+	}
+	callerBankID := claims.BankID
+	if callerBankID == "" {
+		callerBankID = h.bankCode
+	}
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
+
+	result, err := h.payment.RejectFXAgreement(ctx, tradeID, req.OnBehalf)
 	if err != nil {
 		return grpcErrorToHTTP(c, err)
 	}
@@ -712,6 +734,8 @@ func grpcErrorToHTTP(c *fiber.Ctx, err error) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	case codes.FailedPrecondition:
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+	case codes.PermissionDenied:
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 	case codes.Unavailable:
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
 	default:

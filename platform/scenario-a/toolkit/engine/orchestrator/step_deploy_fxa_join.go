@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"time"
 )
@@ -105,12 +104,14 @@ func (s *deployFXAJoinStep) Run(ctx context.Context) error {
 	}
 
 	// A6: write the bilateral FX context (group + in-group FXAgreement address) into the
-	// bank's PKI dir, which is bind-mounted into its payment-orchestrator at
-	// /workspace/backend/config/pki. The backend reads it at propose time to resolve the
-	// on-chain target — the address is unknown at env-render time (deploy-fxa runs after
-	// the backend starts). See PLAN.md "A6".
+	// named volume mounted into the bank's payment-orchestrator at
+	// /workspace/backend/config/fx-contexts (no host filesystem involved — deviation
+	// from the original SPOKE_DATA_DIR bind-mount design; see the addendum in
+	// specs/032-commercial-bank-join/research.md). The backend reads it at propose
+	// time to resolve the on-chain target — the address is unknown at env-render time
+	// (deploy-fxa runs after the backend starts). See PLAN.md "A6".
 	if fxaAddr != "" {
-		if err := writeBankFXContext(s.dataDir, fxContextEntry{
+		if err := writeBankFXContext(ctx, s.fxContextsVolume(), fxContextEntry{
 			SpokeID:         s.spokeID,
 			GroupID:         addrs.PenteContextGroupID,
 			ContractAddress: fxaAddr,
@@ -123,6 +124,13 @@ func (s *deployFXAJoinStep) Run(ctx context.Context) error {
 	return nil
 }
 
+// fxContextsVolume is mounted at /workspace/backend/config/fx-contexts by
+// entity-backend/backend-compose.yaml, read-only-in-practice by payment-orchestrator
+// (FX_CONTEXTS_FILE). Naming mirrors the Paladin volumes: ${SPOKE_ID}_${BANK_ID}_<artifact>.
+func (s *deployFXAJoinStep) fxContextsVolume() string {
+	return s.spokeID + "_" + s.bankID + "_fx_contexts"
+}
+
 // fxContextEntry mirrors the backend's fxContext JSON (payment-orchestrator reads it).
 type fxContextEntry struct {
 	SpokeID         string `json:"spoke_id"`
@@ -132,18 +140,14 @@ type fxContextEntry struct {
 	CBIdentity      string `json:"cb_identity"`
 }
 
-// writeBankFXContext writes the bank's single FX context as a one-element JSON array into
-// <dataDir>/pki/fx-contexts.json (the bind-mounted backend PKI dir).
-func writeBankFXContext(dataDir string, entry fxContextEntry) error {
-	dir := filepath.Join(dataDir, "pki")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
+// writeBankFXContext writes the bank's single FX context as a one-element JSON
+// array into fx-contexts.json in the named volume — no host filesystem involved.
+func writeBankFXContext(ctx context.Context, volume string, entry fxContextEntry) error {
 	data, err := json.MarshalIndent([]fxContextEntry{entry}, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "fx-contexts.json"), data, 0o644)
+	return writeVolumeFile(ctx, volume, "fx-contexts.json", data, "0644")
 }
 
 // identityRegistryArtifact derives the IdentityRegistry Foundry artifact path from the

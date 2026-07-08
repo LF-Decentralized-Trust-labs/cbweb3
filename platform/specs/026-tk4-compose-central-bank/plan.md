@@ -70,6 +70,105 @@ Após a conclusão do `data-model.md` e `research.md`:
 - Nenhum desvio de princípio identificado.
 - O uso de bind mounts (sem named volumes) é intencional: garante que o estado do spoke seja visível no host e portável entre ambientes sem acoplamento ao driver de volume Docker.
 
+> **Addendum (2026-07-07) — desvio desta decisão para o chain data do Besu**:
+> `nodes/central-bank/data/` (banco RocksDB + chave do validador) passou a ser o
+> volume Docker nomeado `besu_data` (`${SPOKE_ID}_cb_besu_data`), em vez de bind
+> mount via `SPOKE_DATA_DIR`. Alternativas consideradas e rejeitadas:
+> - **Manter bind mount** (rejeitado): mantém a inconsistência com Paladin/Postgres,
+>   que já usam volume nomeado pelo mesmo motivo (estado interno de um serviço,
+>   sem necessidade de inspeção manual pelo host).
+> - **Volume nomeado sem init container** (rejeitado): `genesis-init` roda como
+>   `HOST_UID:HOST_GID` (não-root) e precisa gravar `key`/`key.pub` no volume; um
+>   volume novo é criado root-owned, então falharia por permissão sem um passo de
+>   `chmod` prévio.
+> **Trade-off aceito**: perde-se a inspeção direta do chain data pelo host
+> (`ls`/`du`/backup manual do diretório) — quem precisar inspecionar usa
+> `docker run --rm -v besu_data:/data alpine ...` ou `docker cp`. Em troca, ganha-se
+> paridade de padrão com Paladin/Postgres e elimina o único bind mount de dado de
+> serviço (não-configuração) restante no template. Na época deste addendum,
+> `config/` e `genesis/` ainda permaneciam bind mounts — ver o addendum seguinte,
+> que reverte também essa parte. Ver
+> `scenario-a/provisioning/templates/central-bank/docker-compose.yaml` e o serviço
+> `besu-data-init` (mesma receita do `paladin-data-init`).
+>
+> **Addendum 2 (2026-07-07) — config/qbftConfigFile.json e genesis/genesis.json
+> também migrados para volume**: o racional acima ("config/genesis são pequenos e
+> `genesis.json` precisa ser lido pelo host para o join bundle") foi revisto.
+> `qbftConfigFile.json` é escrito pelo motor (`step_start_besu_found.go`) e nunca
+> mais é lido por ninguém depois que `genesis.json` existe — não há razão para
+> ficar em `SPOKE_DATA_DIR` nem em volume por muito tempo, mas foi movido para o
+> volume nomeado `cb_config` por consistência (o motor grava via
+> `engine/dockervolume`, pipe direto de memória para o container, sem tocar
+> disco do host). `genesis.json` é gerado **pelo próprio container**
+> `genesis-init` (não pelo motor) e gravado diretamente no volume nomeado
+> `cb_genesis` — o motor nunca precisou tocar no conteúdo desse arquivo em modo
+> `found`. A única leitura do host que restava era o `EmitBundle` (TK-6): agora
+> ele aceita um `BundleInput.GenesisVolume` opcional e, quando setado (produção
+> sempre seta), lê `genesis.json` de dentro do volume via
+> `engine/dockervolume.ReadFile` em vez de `SPOKE_DATA_DIR/genesis/genesis.json`
+> — os testes existentes de `EmitBundle` continuam cobrindo o caminho antigo
+> (campo vazio) sem precisar de Docker. O scratch intermediário do
+> `genesis-init` (`/nodes/networkFiles`, usado só dentro da própria execução do
+> container) também virou volume nomeado (`cb_scratch`) em vez de bind mount —
+> nada fora dessa única execução do container jamais o lê. Resultado: o
+> template `central-bank/docker-compose.yaml` não referencia mais
+> `SPOKE_DATA_DIR` em nenhum mount. Ver
+> `scenario-a/toolkit/engine/dockervolume/`,
+> `scenario-a/toolkit/engine/bundle/bundle.go` (`readGenesis`) e
+> `scenario-a/provisioning/tests/test-central-bank-template.sh` (atualizado para
+> semear/ler os volumes em vez do `SPOKE_DATA_DIR`).
+>
+> **Addendum 3 (2026-07-07) — `paladin/central-bank/` e `tls/` do CB também
+> migrados para volume**: diferente do `pki/`/`tls/` de um banco comercial (que
+> tem um fluxo assíncrono de KYC e um serviço em runtime — o onboarding smart
+> proxy — escrevendo ali depois do provisionamento), o `paladin/central-bank/` e
+> o `tls/` do **central bank** são gerados de forma síncrona, sem gate humano,
+> pelo `step_render_configs.go` (config.yaml) e `step_gen_tls.go`
+> (tls.crt/tls.key, tanto o "legado" `tls/central-bank.{crt,key}` quanto a cópia
+> em `paladin/central-bank/tls.{crt,key}`) — mesmo padrão do `genesis.json`. Os
+> dois passam a ser os volumes nomeados `cb_paladin_config`
+> (`${SPOKE_ID}_cb_paladin_config`, montado em `/etc/paladin` por
+> `paladin-compose.yaml`) e `cb_tls` (`${SPOKE_ID}_cb_tls`).
+>
+> A única releitura pelo host era `step_register_nodes.go` (lê `tls.crt` para
+> registrar o nó Paladin on-chain) — já usava `.provisioning-state.yaml` para
+> idempotência (`Check()` não mudou), só a leitura em `Run()` passou a usar
+> `engine/dockervolume.ReadFile`. `EmitBundle` ganhou o mesmo tratamento do
+> `GenesisVolume`: um campo opcional `TLSVolume` em `BundleInput`, lendo
+> `central-bank.crt` do volume `cb_tls` quando setado (produção sempre seta),
+> com fallback para `DataDir` nos testes existentes (sem Docker).
+>
+> **`ENTITY_PKI_DIR` vira polimórfico**: o mount
+> `${ENTITY_PKI_DIR}:/workspace/backend/config/pki` em
+> `entity-backend/backend-compose.yaml` já existia para montar o `tls/`/`pki/`
+> nos 3 serviços de backend que precisam de PKI (compliance, payment-orchestrator,
+> api-gateway). O Compose decide bind-mount vs. volume nomeado pela FORMA do
+> valor: um caminho de host (como o banco comercial ainda usa,
+> `PKIDir: filepath.Join(dataDir, "pki")`) vira bind mount; a chave literal fixa
+> `cb_tls` (usada só pelo CB, via `PKIVolume` em `backendStackParams`) casa com o
+> volume nomeado `cb_tls: name: ${SPOKE_ID}_cb_tls` declarado no template e vira
+> um volume nomeado — validado com `docker compose config` nos dois cenários.
+> Compose NÃO interpola `${VAR}` dentro de chaves de mapa, por isso a chave local
+> é uma string fixa (`entityPKIVolumeKey` em `step_start_backend_stack.go`) e a
+> unicidade por spoke vem do campo `name:`, não da chave. Um volume declarado mas
+> nunca referenciado (caso do banco) não é criado — verificado empiricamente.
+> Nenhum init container é necessário para `cb_paladin_config`/`cb_tls`: ambos são
+> só lidos (nunca escritos) pelos containers que os montam, e o
+> `engine/dockervolume.WriteFile` grava como root com `chmod 0644`/dirs `0755`
+> (mundialmente legível), suficiente para o Paladin (uid 1000) e os backends
+> lerem sem precisar de um passo de permissão como o `besu-volumes-init`.
+> Validado ao vivo: um Paladin real, apontando `/etc/paladin` para o volume
+> semeado, subiu e leu `config.yaml`/`tls.crt`/`tls.key` sem nenhum erro de
+> permissão ou arquivo ausente.
+>
+> **Fora de escopo, deliberadamente**: `pki/` e o `tls/{bankCode}.crt` de um
+> banco comercial — ver `specs/032-commercial-bank-join/research.md` para o
+> racional de por que esse caso é diferente (fluxo assíncrono de KYC + escritor
+> em runtime). Ver `scenario-a/toolkit/engine/orchestrator/step_gen_tls.go`,
+> `step_render_configs.go`, `step_register_nodes.go`, `step_start_backend_stack.go`,
+> `scenario-a/toolkit/engine/bundle/bundle.go` (`readCACert`) e os templates
+> `central-bank/paladin-compose.yaml` / `entity-backend/backend-compose.yaml`.
+
 ## Project Structure
 
 ### Documentation (this feature)

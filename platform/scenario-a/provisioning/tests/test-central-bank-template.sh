@@ -9,7 +9,15 @@
 #       regardless of --nat-method (verified in spk-01 verify-enode.sh:10).
 #       The real enode verification is deferred to the join bundle (TK-6).
 #       Here we verify RPC reachability + block production.
-#   (d) cleanup: all containers and temp data removed
+#   (d) cleanup: all containers and named volumes removed
+#
+# STORAGE: config/genesis/chain-data all live on named Docker volumes, not on a
+# SPOKE_DATA_DIR bind mount (see the deviation addendum in
+# specs/026-tk4-compose-central-bank/plan.md). This script mirrors what the
+# orchestration engine does in production: qbftConfigFile.json is piped directly
+# into the cb_config volume (never touches this script's own filesystem beyond a
+# heredoc), and genesis.json is read back from the cb_genesis volume via a
+# throwaway container — matching engine/dockervolume.
 
 set -euo pipefail
 
@@ -18,8 +26,9 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 TEMPLATE="${REPO_ROOT}/scenario-a/provisioning/templates/central-bank/docker-compose.yaml"
 PROJECT_NAME="tk4test$$$(date +%s | tail -c 6)"
 BESU_IMAGE="${BESU_IMAGE:-hyperledger/besu:25.8.0}"
-DATA_DIR="$(mktemp -d)"
 SPOKE_ID="spoke-test"
+CONFIG_VOLUME="${SPOKE_ID}_cb_config"
+GENESIS_VOLUME="${SPOKE_ID}_cb_genesis"
 RPC_PORT=18645
 WS_PORT=18655
 P2P_PORT=31503
@@ -30,16 +39,16 @@ log() { echo "[tk4-test] $*"; }
 pass() { log "PASS $1"; PASS=$((PASS + 1)); }
 fail() { log "FAIL $1: $2"; FAIL=$((FAIL + 1)); }
 
+# read_genesis_hash prints sha256(genesis.json) from the cb_genesis volume, or
+# nothing if the file/volume does not exist yet.
+read_genesis_hash() {
+    docker run --rm -v "${GENESIS_VOLUME}:/target:ro" alpine:3.20 \
+        sh -c 'sha256sum /target/genesis.json 2>/dev/null | cut -d" " -f1' || true
+}
+
 cleanup() {
     log "Cleaning up..."
     docker compose -f "${TEMPLATE}" --project-name "${PROJECT_NAME}" down -v 2>/dev/null || true
-    # Besu writes database files as its own container user (not HOST_UID). Use the image
-    # itself to remove them so we don't need sudo on the host.
-    docker run --rm --user root \
-        -v "${DATA_DIR}:/data" \
-        "${BESU_IMAGE:-hyperledger/besu:25.8.0}" \
-        sh -c 'rm -rf /data' 2>/dev/null || true
-    rm -rf "${DATA_DIR}" 2>/dev/null || true
     log "Cleanup complete."
 }
 trap cleanup EXIT
@@ -51,14 +60,11 @@ if [ ! -f "${TEMPLATE}" ]; then
     exit 1
 fi
 
-# Prepare data directory structure
-mkdir -p \
-    "${DATA_DIR}/config" \
-    "${DATA_DIR}/genesis" \
-    "${DATA_DIR}/nodes/central-bank/data"
-
-# Render minimal qbftConfigFile.json (chainId 1337, 1 validator, QBFT)
-cat > "${DATA_DIR}/config/qbftConfigFile.json" << 'QBFT_EOF'
+# Seed qbftConfigFile.json (chainId 1337, 1 validator, QBFT) directly into the
+# cb_config named volume — piped via stdin, no host file involved (mirrors
+# step_start_besu_found.go's scaffold()).
+docker run --rm -i -v "${CONFIG_VOLUME}:/target" alpine:3.20 \
+    sh -c 'mkdir -p /target && cat > /target/qbftConfigFile.json' << 'QBFT_EOF'
 {
   "genesis": {
     "config": {
@@ -93,7 +99,6 @@ export SPOKE_ID \
        BESU_WS_PORT="${WS_PORT}" \
        BESU_P2P_PORT="${P2P_PORT}" \
        BESU_IMAGE \
-       SPOKE_DATA_DIR="${DATA_DIR}" \
        HOST_UID="$(id -u)" \
        HOST_GID="$(id -g)"
 
@@ -130,13 +135,12 @@ else
     fail "(a)" "Besu RPC did not respond after 90s"
 fi
 
-if [ -f "${DATA_DIR}/genesis/genesis.json" ]; then
-    pass "(a) genesis.json created"
+GENESIS_HASH_1="$(read_genesis_hash)"
+if [ -n "${GENESIS_HASH_1}" ]; then
+    pass "(a) genesis.json created in volume ${GENESIS_VOLUME}"
 else
-    fail "(a)" "genesis.json not found after first run"
+    fail "(a)" "genesis.json not found in volume ${GENESIS_VOLUME} after first run"
 fi
-
-GENESIS_HASH_1=$(sha256sum "${DATA_DIR}/genesis/genesis.json" | cut -d' ' -f1)
 
 # --- Test (b): 2nd run preserves genesis (idempotency) ---
 log "Test (b): Second run — genesis must NOT be regenerated"
@@ -161,7 +165,7 @@ if ! $RPC_OK; then
     fail "(b)" "Besu RPC did not respond after 90s on second run"
 fi
 
-GENESIS_HASH_2=$(sha256sum "${DATA_DIR}/genesis/genesis.json" | cut -d' ' -f1)
+GENESIS_HASH_2="$(read_genesis_hash)"
 
 if [ "${GENESIS_HASH_1}" = "${GENESIS_HASH_2}" ]; then
     pass "(b) genesis hash unchanged: ${GENESIS_HASH_1}"

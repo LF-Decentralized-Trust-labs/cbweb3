@@ -70,11 +70,13 @@ func adminUsersForRealmRoles(admins []manifest.AdminUser, realmRoles ...string) 
 }
 
 // nocRealmPlan is the NOC realm hosted on the central bank's Keycloak.
+// The client ID must match the VITE_KEYCLOAK_CLIENT_ID baked into the NOC
+// frontend at build time (see orchestrator.go: KeycloakClient: "cbweb3-noc").
 func nocRealmPlan() KeycloakRealmPlan {
 	return KeycloakRealmPlan{
 		Realm: "cbweb3",
 		Clients: []KeycloakClientPlan{
-			{ClientID: "noc-portal", Secret: "", Roles: []string{"ROLE_NOC_VIEWER", "ROLE_NOC_OPERATOR", "ROLE_NOC_ADMIN"}},
+			{ClientID: "cbweb3-noc", Secret: "", Roles: []string{"ROLE_NOC_VIEWER", "ROLE_NOC_OPERATOR", "ROLE_NOC_ADMIN"}},
 		},
 	}
 }
@@ -207,8 +209,12 @@ func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
 	realm := map[string]any{
 		"realm":   plan.Realm,
 		"enabled": true,
-		"roles":   map[string]any{"realm": realmRoles},
-		"clients": clients,
+		// sslRequired "none" allows HTTP access from browsers in local/dev
+		// deployments. External (prod) deployments must place a TLS terminator
+		// in front; this flag must be changed to "external" or "all" there.
+		"sslRequired": "none",
+		"roles":       map[string]any{"realm": realmRoles},
+		"clients":     clients,
 	}
 	if len(users) > 0 {
 		realm["users"] = users

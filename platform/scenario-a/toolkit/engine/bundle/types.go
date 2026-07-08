@@ -32,6 +32,22 @@ type BundleInput struct {
 	Validators []ValidatorSpec
 	// CBEndpoint is the central bank's credential-request URL embedded in the bundle.
 	CBEndpoint string
+	// GenesisVolume, if set, sources spec.genesis.content from this named Docker
+	// volume's genesis.json (engine/dockervolume) instead of
+	// <DataDir>/genesis/genesis.json. Production sets this to "${spokeID}_cb_genesis"
+	// because genesis-init writes genesis.json directly into that volume — it never
+	// touches the host filesystem (deviation from the original SPOKE_DATA_DIR
+	// bind-mount design; see specs/026-tk4-compose-central-bank/plan.md addendum).
+	// Left empty, EmitBundle falls back to the DataDir path — used by tests that
+	// don't need Docker.
+	GenesisVolume string
+	// TLSVolume, if set, sources spec.trust.caCertPEM from this named Docker
+	// volume's central-bank.crt (engine/dockervolume) instead of
+	// <DataDir>/tls/central-bank.crt. Production sets this to "${spokeID}_cb_tls"
+	// because gen-tls writes central-bank.crt directly into that volume. Left
+	// empty, EmitBundle falls back to the DataDir path — used by tests that don't
+	// need Docker.
+	TLSVolume string
 }
 
 // JoinBundle is the top-level YAML document emitted by EmitBundle.

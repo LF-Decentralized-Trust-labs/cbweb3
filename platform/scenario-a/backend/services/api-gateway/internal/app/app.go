@@ -86,7 +86,7 @@ func New(cfg config.Config) (*App, error) {
 	governanceHandler := handlers.NewGovernanceHandler(complianceGRPC)
 	supervisorHandler := handlers.NewSupervisorHandler(complianceGRPC)
 
-	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure)
+	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure, cfg.BankCode)
 	complianceHandler := handlers.NewComplianceHandler(identityManager, complianceGRPC)
 
 	// Investigation Module: open a separate DB connection for the OversightService (optional).

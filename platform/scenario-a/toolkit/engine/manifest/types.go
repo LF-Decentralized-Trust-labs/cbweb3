@@ -67,6 +67,12 @@ type Spec struct {
 	// embedded into the emitted join bundle so a joining commercial bank knows
 	// where to submit its CSR. Required for a usable found→join chain.
 	CBEndpoint string `yaml:"cbEndpoint,omitempty"`
+	// FrontendHost overrides the hostname baked into VITE_API_URL and
+	// VITE_KEYCLOAK_URL at frontend build time. When empty the engine defaults to
+	// "localhost", which works only when the browser runs on the same machine as
+	// the Docker host. Set this to a routable IP or DNS name when the frontend is
+	// accessed from a remote machine (e.g. a cloud VM with a public IP).
+	FrontendHost string `yaml:"frontendHost,omitempty"`
 	// AdminUsers are the per-role human operator accounts provisioned in the
 	// entity's Keycloak realm(s). Portal/operator login uses these (ROPC password
 	// grant) instead of the confidential client credentials, so audit logs carry a
@@ -120,4 +126,11 @@ type Port struct {
 // Relay holds the configuration for registering the spoke with the LNET-operated relay.
 type Relay struct {
 	Endpoint string `yaml:"endpoint"`
+	// AdvertisedHost overrides the host the relay uses to reach this spoke's
+	// host-published endpoints (Besu RPC/WS, payment-orchestrator gRPC, CB
+	// api-gateway) when register-relay runs. When empty it defaults to
+	// host.docker.internal, which only works when the relay is co-located on the
+	// same Docker host. Set it to a routable IP or hostname when the relay runs
+	// elsewhere. Only the host is overridden — the published ports are unchanged.
+	AdvertisedHost string `yaml:"advertisedHost,omitempty"`
 }

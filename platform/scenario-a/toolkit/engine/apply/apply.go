@@ -114,6 +114,12 @@ func runFoundMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyRes
 		OutputDir:     in.OutputDir,
 		EnodeProvider: enodeProvider,
 		CBEndpoint:    m.Spec.CBEndpoint,
+		// genesis-init writes genesis.json directly into this named volume, and
+		// gen-tls writes central-bank.crt into this one — neither touches DataDir
+		// (see specs/026-tk4-compose-central-bank/plan.md addendum). Naming mirrors
+		// besu_data: ${SPOKE_ID}_cb_<artifact>.
+		GenesisVolume: spokeID + "_cb_genesis",
+		TLSVolume:     spokeID + "_cb_tls",
 	}
 	emittedBundle, bundleErr := fns.emitBundle(ctx, bundleInput)
 	if bundleErr != nil {

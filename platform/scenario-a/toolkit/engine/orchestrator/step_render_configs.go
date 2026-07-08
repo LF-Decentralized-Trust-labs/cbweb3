@@ -3,6 +3,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -63,18 +64,15 @@ func newRenderConfigsStep(spokeID, dataDir string, besuRPCPort, besuWSPort int, 
 
 func (s *renderConfigsStep) Name() string { return StepRenderConfigs }
 
-func (s *renderConfigsStep) Check(_ context.Context) (bool, error) {
-	_, err := os.Stat(filepath.Join(s.dataDir, "paladin", "central-bank", "config.yaml"))
-	if err == nil {
-		return true, nil
-	}
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return false, err
+// paladinConfigVolume mirrors genTLSStep's — config.yaml and tls.{crt,key} share
+// the same volume, mounted at /etc/paladin by paladin-compose.yaml.
+func (s *renderConfigsStep) paladinConfigVolume() string { return s.spokeID + "_cb_paladin_config" }
+
+func (s *renderConfigsStep) Check(ctx context.Context) (bool, error) {
+	return volumeFileExists(ctx, s.paladinConfigVolume(), "config.yaml")
 }
 
-func (s *renderConfigsStep) Run(_ context.Context) error {
+func (s *renderConfigsStep) Run(ctx context.Context) error {
 	addrs, err := parseDeployedAddrs(filepath.Join(s.dataDir, ".deployed-addrs.env"))
 	if err != nil {
 		return fmt.Errorf("read deployed-addrs: %w", err)
@@ -101,14 +99,12 @@ func (s *renderConfigsStep) Run(_ context.Context) error {
 			PenteFactoryAddress:     addrs.PenteFactoryAddress,
 		}
 
-		outDir := filepath.Join(s.dataDir, "paladin", node.name)
-		if err := os.MkdirAll(outDir, 0o755); err != nil {
-			return fmt.Errorf("mkdir %s: %w", node.name, err)
-		}
-
-		outPath := filepath.Join(outDir, "config.yaml")
-		if err := renderTemplate(tmplPath, outPath, data); err != nil {
+		rendered, err := renderTemplateToBytes(tmplPath, data)
+		if err != nil {
 			return fmt.Errorf("render config for %s: %w", node.name, err)
+		}
+		if err := writeVolumeFile(ctx, s.paladinConfigVolume(), "config.yaml", rendered, "0644"); err != nil {
+			return fmt.Errorf("write config for %s to volume %s: %w", node.name, s.paladinConfigVolume(), err)
 		}
 	}
 	return nil
@@ -130,4 +126,19 @@ func renderTemplate(tmplPath, outPath string, data any) error {
 		return fmt.Errorf("execute template: %w", err)
 	}
 	return nil
+}
+
+// renderTemplateToBytes is renderTemplate's volume-backed counterpart: it
+// executes the template into memory instead of a host file, for callers that
+// then seed the result into a named Docker volume (writeVolumeFile).
+func renderTemplateToBytes(tmplPath string, data any) ([]byte, error) {
+	tmpl, err := template.ParseFiles(tmplPath)
+	if err != nil {
+		return nil, fmt.Errorf("parse template %s: %w", tmplPath, err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("execute template: %w", err)
+	}
+	return buf.Bytes(), nil
 }

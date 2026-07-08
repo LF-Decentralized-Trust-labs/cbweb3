@@ -5,9 +5,10 @@
 # without setting all required variables.
 #
 # DIFFERENCE FROM TK-4 (central-bank): there is NO genesis-init service. The
-# genesis is supplied by the join bundle (TK-6) and written to
-# ${SPOKE_DATA_DIR}/genesis/genesis.json by the engine BEFORE `docker compose up`.
-# This node is a JOINER: it requires BOOTNODE_ENODE and syncs from the spoke.
+# genesis is supplied by the join bundle (TK-6) and seeded by the engine directly
+# into the genesis named volume (engine/dockervolume, step_write_genesis.go)
+# BEFORE `docker compose up` runs. This node is a JOINER: it requires
+# BOOTNODE_ENODE and syncs from the spoke.
 #
 # REQUIRED variables (no default — docker compose fails explicitly if absent):
 #   SPOKE_ID              Spoke identifier (e.g. spoke-brl)
@@ -16,9 +17,13 @@
 #   BESU_WS_PORT          Host port mapped to Besu RPC WS  (internal: 8546)
 #   BESU_P2P_PORT         Host port mapped to Besu P2P     (internal: 30303)
 #   BESU_IMAGE            Besu Docker image (e.g. hyperledger/besu:25.8.0)
-#   SPOKE_DATA_DIR        Base directory for all bank data (bind mounts)
 #   BESU_ADVERTISED_HOST  Host declared for this node's enode (never inferred)
 #   BOOTNODE_ENODE        Enode of the spoke bootnode (REQUIRED — this is a joiner)
+#
+# STORAGE: no SPOKE_DATA_DIR bind mount — genesis and Besu chain data both live on
+# named Docker volumes (besu_data, genesis), seeded/written by containers or by
+# the engine via engine/dockervolume; no host filesystem involved. See the
+# deviation addendum in specs/032-commercial-bank-join/research.md.
 #
 # OPTIONAL variables (with sensible defaults):
 #   SPOKE_NETWORK_NAME    Docker network name (default: cbweb3-${SPOKE_ID}-besu)
@@ -31,14 +36,15 @@
 services:
 
   # ─── Besu node (commercial-bank / joiner) ──────────────────────────────────
-  # No genesis-init: the genesis.json is written from the join bundle by TK-9.
+  # No genesis-init: the genesis.json is written from the join bundle by TK-9
+  # (step_write_genesis.go) directly into the genesis named volume below.
   besu:
     image: ${BESU_IMAGE?BESU_IMAGE is required (e.g. hyperledger/besu:25.8.0)}
     container_name: ${BESU_CONTAINER_NAME:-cbweb3-${SPOKE_ID}-besu.${BANK_ID}}
     restart: always
     volumes:
-      - ${SPOKE_DATA_DIR?SPOKE_DATA_DIR is required}/nodes/commercial-bank/data:/opt/besu/data
-      - ${SPOKE_DATA_DIR}/genesis:/opt/besu/genesis:ro
+      - besu_data:/opt/besu/data
+      - genesis:/opt/besu/genesis:ro
       - ./scripts/entry.sh:/entry.sh:ro
     ports:
       - "${BESU_RPC_PORT?BESU_RPC_PORT is required}:8545"
@@ -80,3 +86,17 @@ networks:
   spoke_besu:
     name: ${SPOKE_NETWORK_NAME:-cbweb3-${SPOKE_ID}-besu}
     driver: bridge
+
+volumes:
+  # Named (not a SPOKE_DATA_DIR bind mount) — deviation from the original TK-8
+  # design (specs/032-commercial-bank-join/research.md, contracts/compose-template.md),
+  # which mirrored TK-4's bind-mount choice. No init container is needed for either
+  # volume: nothing writes into these paths as a non-root host user — the besu
+  # service has no `user:` override (root by default) and step_write_genesis.go
+  # writes via engine/dockervolume, which also runs its throwaway container as
+  # root — so a root-owned fresh volume works the same way the root-owned
+  # bind-mount directory did before.
+  besu_data:
+    name: ${SPOKE_ID}_${BANK_ID}_besu_data
+  genesis:
+    name: ${SPOKE_ID}_${BANK_ID}_genesis

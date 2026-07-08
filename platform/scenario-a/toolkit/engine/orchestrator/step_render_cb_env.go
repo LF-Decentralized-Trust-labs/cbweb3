@@ -21,10 +21,11 @@ type renderCBEnvStep struct {
 	chainID         int
 	dataDir         string
 	besuOperatorKey string
+	frontendHost    string
 }
 
-func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort, chainID int, dataDir, besuOperatorKey string) Step {
-	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, chainID: chainID, dataDir: dataDir, besuOperatorKey: besuOperatorKey}
+func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort, chainID int, dataDir, besuOperatorKey, frontendHost string) Step {
+	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, chainID: chainID, dataDir: dataDir, besuOperatorKey: besuOperatorKey, frontendHost: frontendHost}
 }
 
 func (s *renderCBEnvStep) Name() string { return StepRenderCBEnv }
@@ -106,7 +107,7 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		// api-gateway sets AllowCredentials=true, which Fiber forbids with a wildcard
 		// origin. Whitelist all four CB portal origins (governance, treasury,
 		// supervisor, noc); omitting any makes that portal fail CORS at login.
-		CORSOrigins: cbCORSOrigins(ports),
+		CORSOrigins: cbCORSOrigins(ports, s.frontendHost),
 	}
 	return RenderEntityEnv(data, cbEnvPath(s.dataDir, s.entityName))
 }

@@ -10,8 +10,13 @@
 #   KC_DB_URL             jdbc url to the entity's Postgres (e.g. jdbc:postgresql://<prefix>-postgres:5432/<db>)
 #   KC_DB_USERNAME / KC_DB_PASSWORD
 #   KEYCLOAK_IMAGE        Keycloak image (pinned)
-#   KEYCLOAK_IMPORT_DIR   host dir with the rendered realm JSON files
 # OPTIONAL: KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD (default admin/admin)
+#
+# STORAGE: the rendered realm JSON files are seeded by the engine directly into
+# the ${ENTITY_INFRA_PREFIX}_keycloak_import named volume (engine/dockervolume,
+# step_provision_keycloak.go) — no host filesystem, no KEYCLOAK_IMPORT_DIR bind
+# mount. Deviation from the original design; see the addendum in
+# specs/026-tk4-compose-central-bank/plan.md.
 
 services:
   keycloak:
@@ -30,7 +35,7 @@ services:
     ports:
       - "${KEYCLOAK_HOST_PORT:?KEYCLOAK_HOST_PORT is required}:8080"
     volumes:
-      - ${KEYCLOAK_IMPORT_DIR:?KEYCLOAK_IMPORT_DIR is required}:/opt/keycloak/data/import:ro
+      - keycloak_import:/opt/keycloak/data/import:ro
     # Keycloak 26 (ubi9-micro) has no curl/wget; use the shell's /dev/tcp. The
     # request MUST be HTTP/1.1 with a Host header — Keycloak rejects HTTP/1.0 with
     # no Host (returns an error, not 200). A 200 on /realms/master means the master
@@ -49,3 +54,7 @@ networks:
   entity_net:
     name: ${ENTITY_NET_NAME:?ENTITY_NET_NAME is required}
     external: true
+
+volumes:
+  keycloak_import:
+    name: ${ENTITY_INFRA_PREFIX}_keycloak_import

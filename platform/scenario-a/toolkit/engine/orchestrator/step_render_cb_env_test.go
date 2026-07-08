@@ -14,7 +14,7 @@ import (
 // noc). Omitting supervisor/noc previously made those portals fail CORS at login.
 func TestCBCORSOrigins_AllFourPortals(t *testing.T) {
 	ports := entityPorts(8645) // Brazil CB sample Besu RPC port
-	got := cbCORSOrigins(ports)
+	got := cbCORSOrigins(ports, "")
 
 	for _, want := range []string{
 		"http://localhost:25645", // governance (FrontendPrimary, +17000)
@@ -28,11 +28,31 @@ func TestCBCORSOrigins_AllFourPortals(t *testing.T) {
 	}
 }
 
+// TestCBCORSOrigins_FrontendHostAddsRemoteOrigins verifica que quando frontendHost é
+// um IP público, as origens remotas são adicionadas às locais.
+func TestCBCORSOrigins_FrontendHostAddsRemoteOrigins(t *testing.T) {
+	ports := entityPorts(8645)
+	got := cbCORSOrigins(ports, "1.2.3.4")
+
+	for _, want := range []string{
+		"http://localhost:25645",
+		"http://localhost:32645",
+		"http://1.2.3.4:25645",
+		"http://1.2.3.4:26645",
+		"http://1.2.3.4:30645",
+		"http://1.2.3.4:32645",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("cbCORSOrigins missing %q; got %q", want, got)
+		}
+	}
+}
+
 // TestRenderCBEnvStep_CORSCoversAllPortals renders a CB backend env and asserts the
 // CORS_ALLOW_ORIGINS line lists all four portal origins (concrete, never wildcard).
 func TestRenderCBEnvStep_CORSCoversAllPortals(t *testing.T) {
 	dir := t.TempDir()
-	s := newRenderCBEnvStep("spoke-brl", "central-bank-brazil", "BRL", 8645, 1337, dir, "8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63")
+	s := newRenderCBEnvStep("spoke-brl", "central-bank-brazil", "BRL", 8645, 1337, dir, "8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63", "")
 
 	if err := s.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
