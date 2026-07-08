@@ -15,6 +15,10 @@ export interface HTLCSummary {
   hashLock: string;
   zetoLockRef: string;
   expiresAt: string;
+  sender: string;
+  receiver: string;
+  senderName?: string;
+  receiverName?: string;
 }
 
 export interface CircuitBreakerRequest {
