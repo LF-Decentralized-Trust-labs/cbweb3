@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -15,11 +14,15 @@ import (
 // provisionKeycloakStep brings up the entity's Keycloak (feature 034), backed by
 // the entity's dedicated Postgres, importing the realm JSONs rendered from the
 // per-entity plan. The CB instance hosts the central-bank + cbweb3 (NOC) realms.
+//
+// The rendered realm JSONs are seeded directly into the named volume
+// ${entityPrefix}_keycloak_import (engine/dockervolume) — no host filesystem
+// involved (deviation from the original SPOKE_DATA_DIR bind-mount design; see
+// specs/026-tk4-compose-central-bank/plan.md addendum).
 type provisionKeycloakStep struct {
 	name          string
 	entityPrefix  string
 	netName       string
-	dataDir       string
 	composePath   string
 	kcDBURL       string
 	kcUser        string
@@ -35,7 +38,6 @@ func newProvisionKeycloakStep(name string, p keycloakStepParams) Step {
 		name:          name,
 		entityPrefix:  p.EntityPrefix,
 		netName:       p.NetName,
-		dataDir:       p.DataDir,
 		composePath:   p.ComposePath,
 		kcDBURL:       p.KCDBURL,
 		kcUser:        p.KCUser,
@@ -51,7 +53,6 @@ func newProvisionKeycloakStep(name string, p keycloakStepParams) Step {
 type keycloakStepParams struct {
 	EntityPrefix  string
 	NetName       string
-	DataDir       string
 	ComposePath   string
 	KCDBURL       string
 	KCUser        string
@@ -75,19 +76,16 @@ func (s *provisionKeycloakStep) readyURL() string {
 }
 
 func (s *provisionKeycloakStep) Run(ctx context.Context) error {
-	// Render the realm import JSONs the Keycloak container imports on startup.
-	importDir := s.importDir()
-	if err := os.MkdirAll(importDir, 0o755); err != nil {
-		return fmt.Errorf("mkdir keycloak import: %w", err)
-	}
+	// Seed the realm import JSONs the Keycloak container imports on startup
+	// directly into the named volume — no host filesystem involved.
 	for _, plan := range s.realms {
 		data, err := renderRealmJSON(plan)
 		if err != nil {
 			return fmt.Errorf("render realm %s: %w", plan.Realm, err)
 		}
-		out := filepath.Join(importDir, plan.Realm+"-realm.json")
-		if err := os.WriteFile(out, data, 0o644); err != nil {
-			return fmt.Errorf("write realm %s: %w", plan.Realm, err)
+		name := plan.Realm + "-realm.json"
+		if err := writeVolumeFile(ctx, s.importVolume(), name, data, "0644"); err != nil {
+			return fmt.Errorf("write realm %s to volume %s: %w", plan.Realm, s.importVolume(), err)
 		}
 	}
 
@@ -116,9 +114,9 @@ func (s *provisionKeycloakStep) Run(ctx context.Context) error {
 	return fmt.Errorf("keycloak readiness check timed out after %s", s.timeout)
 }
 
-func (s *provisionKeycloakStep) importDir() string {
-	return filepath.Join(s.dataDir, "keycloak-import")
-}
+// importVolume is the named volume holding the rendered realm JSONs, mounted
+// read-only by the keycloak-compose.yaml template at /opt/keycloak/data/import.
+func (s *provisionKeycloakStep) importVolume() string { return s.entityPrefix + "_keycloak_import" }
 
 func (s *provisionKeycloakStep) composeEnv() []string {
 	user := s.kcUser
@@ -141,6 +139,5 @@ func (s *provisionKeycloakStep) composeEnv() []string {
 		"KC_DB_USERNAME="+user,
 		"KC_DB_PASSWORD="+pass,
 		"KEYCLOAK_IMAGE="+img,
-		"KEYCLOAK_IMPORT_DIR="+s.importDir(),
 	)
 }

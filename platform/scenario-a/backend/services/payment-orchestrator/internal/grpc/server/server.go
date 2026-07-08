@@ -1060,6 +1060,18 @@ func (s *paymentOrchestratorService) AcceptFXAgreement(ctx context.Context, req 
 		return nil, status.Errorf(codes.FailedPrecondition, "FX agreement %q is in state %s, expected PROPOSED", req.TradeId, record.State)
 	}
 
+	// Prevent self-acceptance: the originator may not accept their own proposal.
+	// on_behalf flows (coordinated by the CB relay) are exempt from this check.
+	if !req.OnBehalf {
+		callerBankID := callerIdentityFromContext(ctx)
+		if callerBankID != "" {
+			originatorBank, parseErr := identity.BankID(record.Originator)
+			if parseErr == nil && originatorBank == callerBankID {
+				return nil, status.Error(codes.PermissionDenied, "originator cannot accept their own FX agreement — only the counterparty may accept")
+			}
+		}
+	}
+
 	if s.pente != nil && (record.GroupID == "" || record.ContractAddress == "") {
 		ctxRef, err := s.pente.EnsureFXContext(ctx, ports.PenteContextRequest{
 			TradeID:      record.TradeID,
@@ -1121,6 +1133,18 @@ func (s *paymentOrchestratorService) RejectFXAgreement(ctx context.Context, req 
 	}
 	if record.State != domain.FXStateProposed {
 		return nil, status.Errorf(codes.FailedPrecondition, "FX agreement %q is in state %s, expected PROPOSED", req.TradeId, record.State)
+	}
+
+	// Prevent self-rejection: the originator may not reject their own proposal.
+	// Use Cancel to withdraw a proposal. on_behalf flows are exempt.
+	if !req.OnBehalf {
+		callerBankID := callerIdentityFromContext(ctx)
+		if callerBankID != "" {
+			originatorBank, parseErr := identity.BankID(record.Originator)
+			if parseErr == nil && originatorBank == callerBankID {
+				return nil, status.Error(codes.PermissionDenied, "originator cannot reject their own FX agreement — use cancel to withdraw a proposal")
+			}
+		}
 	}
 
 	var txHash string

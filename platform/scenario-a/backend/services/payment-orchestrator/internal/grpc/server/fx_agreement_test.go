@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -423,5 +424,131 @@ func TestFX_RepoListError(t *testing.T) {
 	_, err := env.client.ListFXAgreements(ctx, &pb.ListFXAgreementsRequest{})
 	if status.Code(err) != codes.Internal {
 		t.Errorf("expected Internal on list error, got %v", err)
+	}
+}
+
+// proposeWithPaladinOriginator proposes a valid FX agreement using a full Paladin identity
+// as the originator, which is required for the self-acceptance guard to be exercised.
+func proposeWithPaladinOriginator(t *testing.T, env *fxEnv, tradeID, originator, counterparty string) string {
+	t.Helper()
+	resp, err := env.client.ProposeFXAgreement(context.Background(), &pb.ProposeFXAgreementRequest{
+		TradeId:        tradeID,
+		Originator:     originator,
+		CounterpartyB:  counterparty,
+		OriginAmount:   "100",
+		CounterAmount:  "120",
+		OriginCurrency: "USD",
+		CounterCurrency: "BRL",
+		Rate:           "1.2",
+		ExpiryDate:     uint64(time.Now().Add(time.Hour).Unix()),
+		SourceSpokeId:  "spoke-a",
+		DestSpokeId:    "spoke-b",
+		SourceReceiver: "recv@spoke-a-bank-a",
+		DestReceiver:   "recv@spoke-b-bank-b",
+	})
+	if err != nil {
+		t.Fatalf("proposeWithPaladinOriginator: %v", err)
+	}
+	return resp.TradeId
+}
+
+// ctxWithCallerIdentity returns a context that carries the x-caller-identity gRPC metadata,
+// simulating what the API gateway injects from the authenticated bank's JWT claims.
+func ctxWithCallerIdentity(bankID string) context.Context {
+	return metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-caller-identity", bankID))
+}
+
+// TestFX_AcceptByOriginator_Denied verifies that the originator cannot accept their own
+// FX agreement (PermissionDenied) while the counterparty can.
+func TestFX_AcceptByOriginator_Denied(t *testing.T) {
+	env := setupFXEnv(t, "")
+
+	const (
+		originatorIdentity = "funded_operator@spoke-a-bank-a"
+		originatorBankID   = "bank-a"
+		counterpartyBankID = "bank-b"
+	)
+
+	tid := proposeWithPaladinOriginator(t, env, "T-SELF-ACCEPT", originatorIdentity, "funded_operator@spoke-b-bank-b")
+
+	// Originator tries to accept their own proposal → must be denied.
+	_, err := env.client.AcceptFXAgreement(
+		ctxWithCallerIdentity(originatorBankID),
+		&pb.AcceptFXAgreementRequest{TradeId: tid},
+	)
+	if status.Code(err) != codes.PermissionDenied {
+		t.Errorf("originator self-accept: expected PermissionDenied, got %v", err)
+	}
+
+	// Counterparty accepts → must succeed.
+	_, err = env.client.AcceptFXAgreement(
+		ctxWithCallerIdentity(counterpartyBankID),
+		&pb.AcceptFXAgreementRequest{TradeId: tid},
+	)
+	if err != nil {
+		t.Errorf("counterparty accept: unexpected error: %v", err)
+	}
+
+	// Verify the agreement is now ACCEPTED.
+	got, err := env.client.GetFXAgreement(context.Background(), &pb.GetFXAgreementRequest{TradeId: tid})
+	if err != nil || got.Agreement.State != pb.FXAgreementState_FX_STATE_ACCEPTED {
+		t.Errorf("expected ACCEPTED after counterparty accept, got state=%v err=%v", got.Agreement.State, err)
+	}
+}
+
+// TestFX_RejectByOriginator_Denied verifies that the originator cannot reject their own
+// FX agreement (PermissionDenied); they must use cancel to withdraw a proposal.
+func TestFX_RejectByOriginator_Denied(t *testing.T) {
+	env := setupFXEnv(t, "")
+
+	const (
+		originatorIdentity = "funded_operator@spoke-a-bank-a"
+		originatorBankID   = "bank-a"
+		counterpartyBankID = "bank-b"
+	)
+
+	tid := proposeWithPaladinOriginator(t, env, "T-SELF-REJECT", originatorIdentity, "funded_operator@spoke-b-bank-b")
+
+	// Originator tries to reject their own proposal → must be denied.
+	_, err := env.client.RejectFXAgreement(
+		ctxWithCallerIdentity(originatorBankID),
+		&pb.RejectFXAgreementRequest{TradeId: tid},
+	)
+	if status.Code(err) != codes.PermissionDenied {
+		t.Errorf("originator self-reject: expected PermissionDenied, got %v", err)
+	}
+
+	// Counterparty rejects → must succeed.
+	_, err = env.client.RejectFXAgreement(
+		ctxWithCallerIdentity(counterpartyBankID),
+		&pb.RejectFXAgreementRequest{TradeId: tid},
+	)
+	if err != nil {
+		t.Errorf("counterparty reject: unexpected error: %v", err)
+	}
+
+	// Verify the agreement is now REJECTED.
+	got, err := env.client.GetFXAgreement(context.Background(), &pb.GetFXAgreementRequest{TradeId: tid})
+	if err != nil || got.Agreement.State != pb.FXAgreementState_FX_STATE_REJECTED {
+		t.Errorf("expected REJECTED after counterparty reject, got state=%v err=%v", got.Agreement.State, err)
+	}
+}
+
+// TestFX_AcceptOnBehalf_ExemptFromOriginatorCheck verifies that on_behalf flows
+// (used by the CB relay) bypass the self-acceptance guard.
+func TestFX_AcceptOnBehalf_ExemptFromOriginatorCheck(t *testing.T) {
+	env := setupFXEnv(t, "")
+
+	const originatorIdentity = "funded_operator@spoke-a-bank-a"
+
+	tid := proposeWithPaladinOriginator(t, env, "T-ONBEHALF", originatorIdentity, "funded_operator@spoke-b-bank-b")
+
+	// on_behalf=true should bypass the originator guard even from the same bank.
+	_, err := env.client.AcceptFXAgreement(
+		ctxWithCallerIdentity("bank-a"),
+		&pb.AcceptFXAgreementRequest{TradeId: tid, OnBehalf: true},
+	)
+	if err != nil {
+		t.Errorf("on_behalf accept by originator bank: unexpected error: %v", err)
 	}
 }

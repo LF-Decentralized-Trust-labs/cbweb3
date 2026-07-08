@@ -5,7 +5,6 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -59,11 +58,13 @@ func (s *registerNodesStep) Run(ctx context.Context) error {
 		return fmt.Errorf("REGISTRY_CONTRACT_ADDRESS missing in .deployed-addrs.env")
 	}
 
-	// CB Paladin node TLS cert written by gen-tls.
-	certPath := filepath.Join(s.dataDir, "paladin", "central-bank", "tls.crt")
-	certPEM, err := os.ReadFile(certPath)
+	// CB Paladin node TLS cert written by gen-tls into the named volume — no host
+	// filesystem involved (deviation from the original SPOKE_DATA_DIR bind-mount
+	// design; see specs/026-tk4-compose-central-bank/plan.md addendum).
+	paladinConfigVolume := s.spokeID + "_cb_paladin_config"
+	certPEM, err := readVolumeFile(ctx, paladinConfigVolume, "tls.crt")
 	if err != nil {
-		return fmt.Errorf("read CB Paladin cert %s: %w", certPath, err)
+		return fmt.Errorf("read CB Paladin cert from volume %s: %w", paladinConfigVolume, err)
 	}
 
 	return registerPaladinNode(ctx, s.besuRPCURL, paladinNodeRegistration{

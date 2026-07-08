@@ -20,7 +20,8 @@ type AuthHandler struct {
 	clientSecretChanger interfaces.IClientSecretChanger // optional; nil if not supported
 	kycChecker          interfaces.KYCChecker
 	kycManager          interfaces.KYCManager
-	cookieSecure        bool // mirrors COOKIE_SECURE env var; true = HTTPS only
+	cookieSecure        bool   // mirrors COOKIE_SECURE env var; true = HTTPS only
+	bankCode            string // entity bank code; returned from /me when JWT lacks bank_id claim
 }
 
 type loginRequest struct {
@@ -31,10 +32,13 @@ type loginRequest struct {
 // NewAuthHandler builds an AuthHandler with its required dependencies.
 // cookieSecure should be true when the gateway is served over HTTPS so that
 // auth cookies are sent with the Secure flag; use false for plain HTTP (local dev).
+// bankCode is optional: pass the entity's BANK_CODE so it is included in /me
+// responses even when the Keycloak JWT does not carry a bank_id custom claim.
 func NewAuthHandler(
 	authProvider interfaces.IAuthProvider,
 	kycChecker interfaces.KYCChecker,
 	cookieSecure bool,
+	bankCode ...string,
 ) *AuthHandler {
 	var kycMgr interfaces.KYCManager
 	var pkiProvider interfaces.IPKIAuthProvider
@@ -48,6 +52,10 @@ func NewAuthHandler(
 	if sc, ok := authProvider.(interfaces.IClientSecretChanger); ok {
 		secretChanger = sc
 	}
+	code := ""
+	if len(bankCode) > 0 {
+		code = bankCode[0]
+	}
 	return &AuthHandler{
 		authProvider:        authProvider,
 		pkiAuthProvider:     pkiProvider,
@@ -55,6 +63,7 @@ func NewAuthHandler(
 		kycChecker:          kycChecker,
 		kycManager:          kycMgr,
 		cookieSecure:        cookieSecure,
+		bankCode:            code,
 	}
 }
 
@@ -327,8 +336,15 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 	if claims.Country != "" {
 		resp["country"] = claims.Country
 	}
-	if claims.BankID != "" {
-		resp["bankId"] = claims.BankID
+	// Prefer the bank ID from the JWT claim; fall back to the entity's configured
+	// bank code so that /me always carries bankId for commercial-bank portals even
+	// when the Keycloak realm has no custom bank_id mapper configured.
+	bankID := claims.BankID
+	if bankID == "" {
+		bankID = h.bankCode
+	}
+	if bankID != "" {
+		resp["bankId"] = bankID
 	}
 	if claims.PrivacyGroup != "" {
 		resp["privacyGroup"] = claims.PrivacyGroup

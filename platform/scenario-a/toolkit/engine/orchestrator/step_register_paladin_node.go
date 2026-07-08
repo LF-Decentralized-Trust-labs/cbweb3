@@ -5,8 +5,6 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -58,10 +56,13 @@ func (s *registerPaladinNodeStep) Run(ctx context.Context) error {
 	if s.registryAddr == "" {
 		return fmt.Errorf("bundle registry address is empty")
 	}
-	certPath := filepath.Join(s.dataDir, "paladin", s.bankID, "tls.crt")
-	certPEM, err := os.ReadFile(certPath)
+	// Written by gen-tls-join into the named volume — no host filesystem
+	// involved (deviation from the original SPOKE_DATA_DIR bind-mount design;
+	// see specs/032-commercial-bank-join/research.md addendum).
+	paladinConfigVolume := s.spokeID + "_" + s.bankID + "_paladin_config"
+	certPEM, err := readVolumeFile(ctx, paladinConfigVolume, "tls.crt")
 	if err != nil {
-		return fmt.Errorf("read bank Paladin cert %s: %w", certPath, err)
+		return fmt.Errorf("read bank Paladin cert from volume %s: %w", paladinConfigVolume, err)
 	}
 
 	return registerPaladinNode(ctx, s.besuRPCURL, paladinNodeRegistration{

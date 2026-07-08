@@ -36,24 +36,47 @@ O motor de orquestração renderiza essas variáveis antes de invocar `docker co
 
 ---
 
-## Estrutura de diretórios em `SPOKE_DATA_DIR`
+## Estrutura de diretórios em `SPOKE_DATA_DIR` (histórico) → volumes Docker (atual)
 
-O motor de orquestração (TK-5) garante que esta estrutura exista antes de invocar o Compose.
+O desenho original desta seção descrevia `${SPOKE_DATA_DIR}/config/qbftConfigFile.json`
+e `${SPOKE_DATA_DIR}/genesis/genesis.json` como bind mounts renderizados pelo TK-5
+antes do `docker compose up`. Isso não é mais verdade — ver os dois addenda abaixo.
+O template `central-bank/docker-compose.yaml` não referencia `SPOKE_DATA_DIR` em
+nenhum mount.
 
-```text
-${SPOKE_DATA_DIR}/
-  config/
-    qbftConfigFile.json     ← renderizado por TK-5 antes do `docker compose up`
-  genesis/
-    genesis.json            ← criado pelo genesis-init na 1ª execução; nunca sobrescrito
-  nodes/
-    central-bank/
-      data/
-        key                 ← chave privada do validador (gerada pelo genesis-init)
-        key.pub             ← chave pública correspondente
-```
+> **Desvio de design 1 (pós-implementação)**: `nodes/central-bank/data/` (chave do
+> validador `key`/`key.pub` + banco RocksDB do Besu) passou a ser o volume Docker
+> nomeado `besu_data` (`${SPOKE_ID}_cb_besu_data`), montado em `/opt/besu/data` no
+> serviço `besu`. Motivo: o chain data do Besu não precisa ser inspecionado/portado
+> manualmente pelo host — segue o mesmo padrão já usado para o Paladin (`cb_data`) e
+> o Postgres (`pg_data`).
+>
+> **Desvio de design 2 (pós-implementação)**: `config/qbftConfigFile.json` e
+> `genesis/genesis.json` também deixaram de ser bind mounts. `qbftConfigFile.json` é
+> semeado pelo motor (`step_start_besu_found.go`, via `engine/dockervolume` — pipe
+> direto de memória, sem tocar disco do host) no volume nomeado `cb_config`.
+> `genesis.json` é gravado pelo próprio `genesis-init` diretamente no volume nomeado
+> `cb_genesis` (nunca precisou de escrita pelo host em modo `found`). A única
+> releitura pelo host (o `EmitBundle`/TK-6) passou a usar
+> `engine/dockervolume.ReadFile` sobre `cb_genesis` em vez de ler
+> `SPOKE_DATA_DIR/genesis/genesis.json`. O scratch intermediário do `genesis-init`
+> (`networkFiles/`, nunca lido fora da própria execução do container) também virou
+> volume nomeado (`cb_scratch`).
+>
+> Um serviço `besu-volumes-init` (mesma receita do `paladin-data-init`) garante que
+> `besu_data` e `cb_genesis` — criados root-owned — sejam graváveis pelo
+> `genesis-init` (que roda como `HOST_UID:HOST_GID`). `cb_config` não precisa desse
+> tratamento: só é lido, nunca escrito, pelo `genesis-init`.
+>
+> Ver `scenario-a/provisioning/templates/central-bank/docker-compose.yaml`,
+> `scenario-a/toolkit/engine/dockervolume/` e
+> `scenario-a/toolkit/engine/bundle/bundle.go` (`readGenesis`).
 
-**Invariante**: O `genesis-init` NÃO cria o diretório `${SPOKE_DATA_DIR}`. Ele assume que os subdiretórios `config/`, `genesis/`, `nodes/central-bank/data/` já existem com as permissões corretas.
+**Invariante**: O `genesis-init` não depende de nenhum diretório do host. Ele assume
+que os volumes nomeados `cb_config`, `cb_genesis`, `cb_scratch` e `besu_data` já
+existem (criados pelo `docker compose up`; `besu_data`/`cb_genesis` inicializados
+pelo `besu-volumes-init`) e que `cb_config/qbftConfigFile.json` já foi semeado pelo
+motor antes do `up`.
 
 ---
 
@@ -62,12 +85,14 @@ ${SPOKE_DATA_DIR}/
 ```text
 docker-compose.yaml (central-bank template)
   services:
+    besu-data-init        restart: no   → chmod no volume besu_data recém-criado; encerra
     genesis-init          restart: no   → verifica/gera genesis; encerra
     besu                  restart: always → nó Besu; inicia após genesis-init OK
   networks:
     ${SPOKE_NETWORK_NAME} driver: bridge → rede isolada por spoke
   volumes:
-    (bind mounts via SPOKE_DATA_DIR; sem named volumes)
+    config/ e genesis/    → bind mounts via SPOKE_DATA_DIR
+    besu_data             → volume Docker nomeado (desvio; ver nota acima)
 ```
 
 ---
@@ -78,16 +103,19 @@ docker-compose.yaml (central-bank template)
 Motor TK-5
   │
   ├─► renderiza qbftConfigFile.json → ${SPOKE_DATA_DIR}/config/
-  ├─► cria estrutura de diretórios em SPOKE_DATA_DIR
+  ├─► cria estrutura de diretórios em SPOKE_DATA_DIR (config/, genesis/)
   └─► docker compose up
          │
-         ├─► genesis-init (restart: no)
+         ├─► besu-data-init (restart: no) → chmod 777 no volume besu_data
+         │
+         ├─► genesis-init (depends_on besu-data-init; restart: no)
          │     ├─[genesis existe?]─ sim → exit 0
          │     └─[genesis existe?]─ não → besu operator generate → exit 0
+         │                              → grava key/key.pub em besu_data
          │
          └─► besu (depends_on genesis-init: service_completed_successfully)
-               ├─► monta genesis/genesis.json (read-only)
-               ├─► monta nodes/central-bank/data/ (read-write)
+               ├─► monta genesis/genesis.json (read-only, bind mount)
+               ├─► monta besu_data em /opt/besu/data (read-write, volume nomeado)
                └─► inicia daemon com --p2p-host=${BESU_ADVERTISED_HOST}
 ```
 

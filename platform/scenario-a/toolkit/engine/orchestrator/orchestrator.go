@@ -157,11 +157,11 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 	}
 
 	steps := []Step{
-		newStartBesuFoundStep(spokeID, m.Spec.Spoke.ChainID, dataDir, deps.CentralBankComposePath, besuRPCURL,
+		newStartBesuFoundStep(spokeID, m.Spec.Spoke.ChainID, deps.CentralBankComposePath, besuRPCURL,
 			m.Spec.Node.AdvertisedHost, besuImage, besuRPCPort, besuWSPort, besuP2PPort,
 			deps.Timeouts.PaladinHealthCheck, deps.Timeouts.PaladinHealthCheckInterval),
 		newDeployContractsStep(spokeID, dataDir, besuRPCURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
-		newGenTLSStep(spokeID, dataDir, deps.CertSource, deps.KeyProvider),
+		newGenTLSStep(spokeID, deps.CertSource, deps.KeyProvider),
 		newRenderConfigsStep(spokeID, dataDir, besuRPCPort, besuWSPort, deps.PaladinConfigTemplateDir),
 		newRegisterNodesStep(spokeID, dataDir, besuRPCURL, deps.KeyProvider, deps.Timeouts.OnboardRegistry),
 		newStartPaladinStep(spokeID, dataDir, deps.ComposeTemplatePath, deps.PaladinCBURL, deps.PaladinImage, deps.Timeouts.PaladinHealthCheck, deps.Timeouts.PaladinHealthCheckInterval),
@@ -203,15 +203,18 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
 			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
 		newProvisionKeycloakStep(StepProvisionKeycloak, keycloakStepParams{
-			EntityPrefix: prefix, NetName: net, DataDir: dataDir,
+			EntityPrefix: prefix, NetName: net,
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
 			KCDBURL:     kcDBURL, KCUser: "default", KCPassword: "default",
 			HostPort: ports.Keycloak, Realms: centralBankRealmPlans(entity, m.Spec.AdminUsers), Timeout: stackTO,
 		}),
 		newStartBackendStackStep(StepStartCBBackend, backendStackParams{
-			EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
-			PKIDir:      filepath.Join(dataDir, "tls"),
-			EnvFile:     cbEnvPath(dataDir, entity),
+			SpokeID: spokeID, EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
+			// tls/central-bank.{crt,key} (gen-tls) lives in the named volume
+			// ${SPOKE_ID}_cb_tls, not a SPOKE_DATA_DIR bind mount — see the addendum
+			// in specs/026-tk4-compose-central-bank/plan.md.
+			UseTLSVolume: true,
+			EnvFile:      cbEnvPath(dataDir, entity),
 			ComposePath: filepath.Join(templatesDir, "entity-backend", "backend-compose.yaml"),
 			BankCode:    entity,
 			PaladinURL:  hostInternalURL(deps.PaladinCBURL), PaladinIdentity: paladinIdentity(cbNodeName(spokeID)),
@@ -528,7 +531,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	}
 
 	steps := []Step{
-		newWriteGenesisStep(dataDir, b.Spec.Genesis.Content, b.Spec.Genesis.Hash),
+		newWriteGenesisStep(spokeID, deps.BankCode, b.Spec.Genesis.Content, b.Spec.Genesis.Hash),
 		newStartBesuJoinStep(spokeID, deps.BankCode, dataDir, deps.ComposeTemplatePath, deps.BesuRPCURL,
 			ep.bootnodeEnode, m.Spec.Node.AdvertisedHost, besuImage, rpcPort, wsPort, p2pPort),
 		newWaitSyncStep(deps.BesuRPCURL, 1, deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval, w),
@@ -537,8 +540,8 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		// any bank's availability and lets many banks join without a validator-set
 		// majority vote. (vote-qbft is retained for a future validator-join mode.)
 		// US2 — dynamic Paladin node bring-up for the joining bank.
-		newGenTLSJoinStep(spokeID, deps.BankCode, dataDir),
-		newRenderConfigJoinStep(spokeID, deps.BankCode, dataDir, deps.BesuRPCPort, deps.BesuWSPort,
+		newGenTLSJoinStep(spokeID, deps.BankCode),
+		newRenderConfigJoinStep(spokeID, deps.BankCode, deps.BesuRPCPort, deps.BesuWSPort,
 			b.Spec.Contracts.RegistryAddress, b.Spec.Contracts.ZetoFactoryAddress, b.Spec.Contracts.PenteFactoryAddress,
 			deps.PaladinConfigTemplateDir),
 		newStartPaladinJoinStep(spokeID, deps.BankCode, dataDir, deps.PaladinComposePath, deps.PaladinImage,
@@ -585,13 +588,13 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
 			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
 		newProvisionKeycloakStep(StepProvisionBankKeycloak, keycloakStepParams{
-			EntityPrefix: prefix, NetName: net, DataDir: dataDir,
+			EntityPrefix: prefix, NetName: net,
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
 			KCDBURL:     kcDBURL, KCUser: "default", KCPassword: "default",
 			HostPort: ports.Keycloak, Realms: []KeycloakRealmPlan{commercialBankRealmPlan(bank, m.Spec.AdminUsers)}, Timeout: stackTO,
 		}),
 		newStartBackendStackStep(StepStartBackend, backendStackParams{
-			EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
+			SpokeID: spokeID, EntityPrefix: prefix, NetName: net, BackendContext: filepath.Join(root, "backend"),
 			// Mount the bank's <dataDir>/pki: gen-csr writes <bank>.csr here, which the
 			// onboarding smart proxy reads on initiate, and where it persists the issued
 			// <bank>-participant.crt on complete (instead of the shared repo pki).

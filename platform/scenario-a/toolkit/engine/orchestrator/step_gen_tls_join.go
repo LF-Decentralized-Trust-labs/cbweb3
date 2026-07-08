@@ -12,8 +12,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
-	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -22,30 +20,33 @@ import (
 // this is a self-signed cert for the bank's Paladin gRPC transport, CN/SAN derived
 // from the bank id. Each joining bank generates its own cert dynamically — there is
 // no shared cert and no fixed bank list (concat.md / spk-02 generate-paladin-certs).
+//
+// Seeded directly into the named volume ${spokeID}_${bankID}_paladin_config — no
+// host filesystem involved (deviation from the original SPOKE_DATA_DIR bind-mount
+// design; mirrors the central-bank found-mode equivalent, see the addendum in
+// specs/026-tk4-compose-central-bank/plan.md).
 type genTLSJoinStep struct {
 	spokeID string
 	bankID  string
-	dataDir string
 }
 
-func newGenTLSJoinStep(spokeID, bankID, dataDir string) Step {
-	return &genTLSJoinStep{spokeID: spokeID, bankID: bankID, dataDir: dataDir}
+func newGenTLSJoinStep(spokeID, bankID string) Step {
+	return &genTLSJoinStep{spokeID: spokeID, bankID: bankID}
 }
 
 func (s *genTLSJoinStep) Name() string { return StepGenTLSJoin }
 
-func (s *genTLSJoinStep) Check(_ context.Context) (bool, error) {
-	_, err := os.Stat(filepath.Join(s.dataDir, "paladin", s.bankID, "tls.crt"))
-	if err == nil {
-		return true, nil
-	}
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return false, err
+// paladinConfigVolume mirrors genTLSStep's naming for the CB
+// (${spokeID}_cb_paladin_config): here scoped per bank.
+func (s *genTLSJoinStep) paladinConfigVolume() string {
+	return s.spokeID + "_" + s.bankID + "_paladin_config"
 }
 
-func (s *genTLSJoinStep) Run(_ context.Context) error {
+func (s *genTLSJoinStep) Check(ctx context.Context) (bool, error) {
+	return volumeFileExists(ctx, s.paladinConfigVolume(), "tls.crt")
+}
+
+func (s *genTLSJoinStep) Run(ctx context.Context) error {
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return fmt.Errorf("generate TLS key: %w", err)
@@ -87,15 +88,15 @@ func (s *genTLSJoinStep) Run(_ context.Context) error {
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 
-	dir := filepath.Join(s.dataDir, "paladin", s.bankID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
+	// 0644, not the conventional 0600, for the same reason as genTLSStep (CB):
+	// writeVolumeFile always writes as root, but Paladin reads as a different,
+	// non-root uid — a root-owned 0600 key is unreadable by it (this bit a live
+	// join: PD020402 open /etc/paladin/tls.key: permission denied).
+	if err := writeVolumeFile(ctx, s.paladinConfigVolume(), "tls.crt", certPEM, "0644"); err != nil {
+		return fmt.Errorf("write tls.crt to volume %s: %w", s.paladinConfigVolume(), err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "tls.crt"), certPEM, 0o644); err != nil {
-		return fmt.Errorf("write tls.crt: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "tls.key"), keyPEM, 0o600); err != nil {
-		return fmt.Errorf("write tls.key: %w", err)
+	if err := writeVolumeFile(ctx, s.paladinConfigVolume(), "tls.key", keyPEM, "0644"); err != nil {
+		return fmt.Errorf("write tls.key to volume %s: %w", s.paladinConfigVolume(), err)
 	}
 	return nil
 }

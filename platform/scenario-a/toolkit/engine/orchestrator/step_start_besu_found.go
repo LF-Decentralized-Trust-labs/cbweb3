@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -27,9 +26,12 @@ const defaultPaladinImage = "docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
 // step of the found sequence and owns the full Besu lifecycle so mode:found
 // needs no externally pre-started node:
 //
-//  1. it stages the data-dir scaffold the compose's genesis-init service expects
-//     (config/qbftConfigFile.json with the manifest chainId, and the
-//     nodes/central-bank/data directory),
+//  1. it seeds config/qbftConfigFile.json (with the manifest chainId) directly
+//     into the named volume cb_config — no host filesystem involved (deviation
+//     from the original SPOKE_DATA_DIR bind-mount design; see
+//     specs/026-tk4-compose-central-bank/plan.md). Besu chain data and the
+//     genesis produced by genesis-init live on their own named volumes
+//     (besu_data, cb_genesis), created by the compose file,
 //  2. it drives `docker compose up -d` directly (no internal shell script,
 //     mirroring startPaladinStep), and
 //  3. it polls eth_blockNumber until the node is producing blocks.
@@ -39,7 +41,6 @@ const defaultPaladinImage = "docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1
 type startBesuFoundStep struct {
 	spokeID        string
 	chainID        int
-	dataDir        string
 	composePath    string
 	besuRPCURL     string
 	advertisedHost string
@@ -54,11 +55,10 @@ type startBesuFoundStep struct {
 	httpClient     *http.Client
 }
 
-func newStartBesuFoundStep(spokeID string, chainID int, dataDir, composePath, besuRPCURL, advertisedHost, besuImage string, rpcPort, wsPort, p2pPort int, healthTimeout, healthInterval time.Duration) Step {
+func newStartBesuFoundStep(spokeID string, chainID int, composePath, besuRPCURL, advertisedHost, besuImage string, rpcPort, wsPort, p2pPort int, healthTimeout, healthInterval time.Duration) Step {
 	return &startBesuFoundStep{
 		spokeID:        spokeID,
 		chainID:        chainID,
-		dataDir:        dataDir,
 		composePath:    composePath,
 		besuRPCURL:     besuRPCURL,
 		advertisedHost: advertisedHost,
@@ -74,6 +74,11 @@ func newStartBesuFoundStep(spokeID string, chainID int, dataDir, composePath, be
 	}
 }
 
+// configVolume is the named volume holding config/qbftConfigFile.json, mounted
+// read-only by genesis-init at /config. Naming mirrors besu_data (TK-4/TK-8
+// central-bank convention: ${SPOKE_ID}_cb_<artifact>).
+func (s *startBesuFoundStep) configVolume() string { return s.spokeID + "_cb_config" }
+
 func (s *startBesuFoundStep) Name() string { return StepStartBesu }
 
 // Check returns true if the bootnode already responds to eth_blockNumber.
@@ -87,7 +92,7 @@ func (s *startBesuFoundStep) Check(ctx context.Context) (bool, error) {
 }
 
 func (s *startBesuFoundStep) Run(ctx context.Context) error {
-	if err := s.scaffold(); err != nil {
+	if err := s.scaffold(ctx); err != nil {
 		return err
 	}
 
@@ -120,33 +125,26 @@ func (s *startBesuFoundStep) Run(ctx context.Context) error {
 	return fmt.Errorf("besu health check timed out after %s", s.healthTimeout)
 }
 
-// scaffold creates the data-dir layout the genesis-init service bind-mounts and
-// renders config/qbftConfigFile.json (with the spoke chainId) if absent. It is
-// non-destructive: an existing qbftConfigFile.json is never overwritten.
-func (s *startBesuFoundStep) scaffold() error {
-	for _, sub := range []string{
-		filepath.Join(s.dataDir, "config"),
-		filepath.Join(s.dataDir, "genesis"),
-		filepath.Join(s.dataDir, "nodes", "central-bank", "data"),
-	} {
-		if err := os.MkdirAll(sub, 0o755); err != nil {
-			return fmt.Errorf("scaffold mkdir %s: %w", sub, err)
-		}
+// scaffold seeds config/qbftConfigFile.json (with the spoke chainId) into the
+// cb_config named volume if absent. It is non-destructive: an existing
+// operator-provided qbftConfigFile.json is never overwritten. No host
+// filesystem path is involved — content goes straight from memory into the
+// volume (see specs/026-tk4-compose-central-bank/plan.md addendum).
+func (s *startBesuFoundStep) scaffold(ctx context.Context) error {
+	exists, err := volumeFileExists(ctx, s.configVolume(), "qbftConfigFile.json")
+	if err != nil {
+		return fmt.Errorf("scaffold: check qbft config in volume %s: %w", s.configVolume(), err)
 	}
-
-	qbftPath := filepath.Join(s.dataDir, "config", "qbftConfigFile.json")
-	if _, err := os.Stat(qbftPath); err == nil {
+	if exists {
 		return nil // preserve operator-provided config
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("scaffold stat %s: %w", qbftPath, err)
 	}
 
 	data, err := s.renderQBFTConfig()
 	if err != nil {
 		return fmt.Errorf("render qbft config: %w", err)
 	}
-	if err := os.WriteFile(qbftPath, data, 0o644); err != nil {
-		return fmt.Errorf("write qbft config: %w", err)
+	if err := writeVolumeFile(ctx, s.configVolume(), "qbftConfigFile.json", data, "0644"); err != nil {
+		return fmt.Errorf("write qbft config to volume %s: %w", s.configVolume(), err)
 	}
 	return nil
 }
@@ -239,7 +237,6 @@ func (s *startBesuFoundStep) renderQBFTConfig() ([]byte, error) {
 func (s *startBesuFoundStep) composeEnv() []string {
 	return append(os.Environ(),
 		"SPOKE_ID="+s.spokeID,
-		"SPOKE_DATA_DIR="+s.dataDir,
 		"BESU_IMAGE="+s.besuImage,
 		"BESU_ADVERTISED_HOST="+s.advertisedHost,
 		"BESU_RPC_PORT="+strconv.Itoa(s.rpcPort),
