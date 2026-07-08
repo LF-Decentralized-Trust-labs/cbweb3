@@ -5,10 +5,12 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	besuscanner "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/besu"
+	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
@@ -25,6 +27,12 @@ type TransferLimitChecker interface {
 	RestoreTransferLimit(ctx context.Context, payerBankID, currency, amountHuman string) error
 }
 
+// ParticipantResolver resolves registered participants so deposit/escrow/redeem
+// listings can surface the requesting institution's name instead of a raw address.
+type ParticipantResolver interface {
+	ListParticipants(ctx context.Context, statusFilter, search string) ([]complianceadapter.Participant, error)
+}
+
 // PaymentHandler exposes the payment-orchestrator operations as REST endpoints.
 type PaymentHandler struct {
 	payment      *paymentadapter.GRPCAdapter
@@ -32,11 +40,41 @@ type PaymentHandler struct {
 	htlcScanner  *besuscanner.HTLCScanner
 	fiatSymbol   string // currency for transfer limit checks (e.g. "BRL", "ARS"); empty = skip check
 	limitChecker TransferLimitChecker
+	participants ParticipantResolver // optional; enables requester-name enrichment on listings
 }
 
 // NewPaymentHandler creates a new PaymentHandler.
 func NewPaymentHandler(payment *paymentadapter.GRPCAdapter, bankCode string) *PaymentHandler {
 	return &PaymentHandler{payment: payment, bankCode: bankCode}
+}
+
+// WithParticipantResolver attaches a compliance participant resolver used to
+// enrich deposit/escrow/redeem listings with the requester's institution name.
+func (h *PaymentHandler) WithParticipantResolver(resolver ParticipantResolver) *PaymentHandler {
+	h.participants = resolver
+	return h
+}
+
+// participantNamesByWallet builds a lowercase-wallet-address → institution-name
+// map from the compliance registry. Returns nil when no resolver is configured
+// or the lookup fails; enrichment is best-effort and never blocks a listing.
+func (h *PaymentHandler) participantNamesByWallet(ctx context.Context) map[string]string {
+	if h.participants == nil {
+		return nil
+	}
+	participants, err := h.participants.ListParticipants(ctx, "", "")
+	if err != nil {
+		log.Printf("[payment] WARNING: requester-name enrichment skipped, participant lookup failed: %v", err)
+		return nil
+	}
+	names := make(map[string]string, len(participants))
+	for _, p := range participants {
+		if p.WalletAddress == "" || p.InstitutionName == "" {
+			continue
+		}
+		names[strings.ToLower(p.WalletAddress)] = p.InstitutionName
+	}
+	return names
 }
 
 // SetHTLCScanner wires an on-chain scanner; when set, supervisor HTLC searches bypass the orchestrator.
@@ -415,6 +453,11 @@ func (h *PaymentHandler) ListDeposits(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
+	if names := h.participantNamesByWallet(c.Context()); names != nil {
+		for i := range deposits {
+			deposits[i].RequesterName = names[strings.ToLower(deposits[i].RequesterBesuAddress)]
+		}
+	}
 	return c.JSON(fiber.Map{"deposits": deposits, "total": len(deposits)})
 }
 
@@ -469,6 +512,11 @@ func (h *PaymentHandler) ListEscrows(c *fiber.Ctx) error {
 	escrows, err := h.payment.ListEscrows(c.Context(), requesterID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	if names := h.participantNamesByWallet(c.Context()); names != nil {
+		for i := range escrows {
+			escrows[i].RequesterName = names[strings.ToLower(escrows[i].RequesterBesuAddress)]
+		}
 	}
 	return c.JSON(fiber.Map{"escrows": escrows, "total": len(escrows)})
 }
@@ -525,6 +573,11 @@ func (h *PaymentHandler) ListRedeems(c *fiber.Ctx) error {
 	redeems, err := h.payment.ListRedeems(c.Context(), requesterID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	if names := h.participantNamesByWallet(c.Context()); names != nil {
+		for i := range redeems {
+			redeems[i].RequesterName = names[strings.ToLower(redeems[i].RequesterBesuAddress)]
+		}
 	}
 	return c.JSON(fiber.Map{"redeems": redeems, "total": len(redeems)})
 }
