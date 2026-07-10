@@ -1,0 +1,32 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-a
+spec:
+  scenario: "b"
+  environment: local
+  mode: join
+  topology:
+    role: commercial-bank
+  bankId: bank-a
+  displayName: "Bank A"
+  spoke:
+    id: spoke-a
+    chainId: 1338
+    currency: BRL
+  joinBundleRef: ./bundles/spoke-a.bundle.yaml
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 8646 }
+    ws:   { port: 8656 }
+    p2p:  { port: 31304 }
+    dataDir: ./.data/spoke-a/bank-a
+    validator: false              # full node não-validador (validator: true → warning)
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: ca://central-bank-a
+  relay:
+    endpoint: http://host.docker.internal:4000
+  frontendHost: localhost
+  adminUsers:
+    - { role: BANK, username: bank-a-admin, password: <local-only-bootstrap> }

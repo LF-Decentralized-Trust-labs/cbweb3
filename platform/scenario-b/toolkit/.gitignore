@@ -1,0 +1,12 @@
+# Go
+*.exe
+*.test
+*.out
+vendor/
+/cbweb3b
+/bin/
+
+# Local
+.env*
+*.log
+.DS_Store
