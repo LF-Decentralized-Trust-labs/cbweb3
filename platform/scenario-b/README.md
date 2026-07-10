@@ -233,9 +233,25 @@ cbweb3-platform/
 ├── tests/                  Test harnesses (unit, integration, e2e, performance)
 ├── docs/                   Architecture, design, governance, runbooks
 ├── make/                   Makefile includes (modular targets)
+├── toolkit/                Declarative provisioning toolkit (Go: cmd/cbweb3b + engine/manifest)
+├── provisioning/           Provisioning assets (schema/v1 JSON-Schema)
 ├── tryouts/                Per-entity tryout scripts
 └── tryout-htlc-cross-spoke.sh  Cross-spoke HTLC demo
 ```
+
+---
+
+## Toolkit (provisioning)
+
+Declarative provisioning toolkit for the Scenario B hub-and-spoke topology.
+
+| Component | Status |
+|-----------|--------|
+| Manifest schema & validation (`ParticipantDeployment`, `cbweb3b/v1`) — TK-B1 | In progress |
+| Provisioning engine, bundles, compose templates, execution — TK-B2+ | Planned |
+
+The manifest model and validation are the toolkit's entry point: parse + validate +
+report only, no execution. See `toolkit/README.md` for usage.
 
 ---
 
