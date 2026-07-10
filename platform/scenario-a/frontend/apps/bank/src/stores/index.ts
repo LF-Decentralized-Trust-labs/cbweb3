@@ -9,3 +9,4 @@ export * from "./websocket.store";
 export * from "./payment.store";
 export * from "./fx-agreement.store";
 export * from "./identity.store";
+export * from "./statement.store";

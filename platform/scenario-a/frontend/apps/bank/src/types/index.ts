@@ -11,3 +11,4 @@ export * from "./onboarding.types";
 export * from "./payment.types";
 export * from "./fx-agreement.types";
 export * from "./identity.types";
+export * from "./statement.types";

@@ -159,7 +159,7 @@ func New(cfg config.Config) (*App, error) {
 
 		// Commercial bank: wire escrow proxy that forwards to the Central Bank.
 		if cfg.CentralBankAPIURL != "" {
-			deps.PaymentProxyHandler = handlers.NewPaymentProxyHandler(
+			proxy := handlers.NewPaymentProxyHandler(
 				cfg.CentralBankAPIURL,
 				paymentGRPC,
 				cfg.EntityBesuAddress,
@@ -167,6 +167,10 @@ func New(cfg config.Config) (*App, error) {
 				cfg.CBPaladinIdentity,
 				cfg.RelayAuthSecret,
 			)
+			deps.PaymentProxyHandler = proxy
+			// Statement (extrato) consolidates this bank's deposit/tokenisation/redeem
+			// records, sourced from the Central Bank via the same proxy.
+			deps.StatementHandler = handlers.NewStatementHandler(proxy)
 		}
 	}
 

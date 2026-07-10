@@ -10,6 +10,7 @@ import {
   Handshake,
   LayoutDashboard,
   Lock,
+  ReceiptText,
   // Scale,
   // Settings,
   // ShieldCheck,
@@ -18,6 +19,7 @@ import {
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/statement", label: "Statement", icon: ReceiptText },
   // { to: "/liquidity", label: "Liquidity & Transfers", icon: Coins },
   { to: "/deposits", label: "Issuance Requests", icon: ArrowDownToLine },
   { to: "/escrows", label: "Reserve Tokenisation", icon: Lock },

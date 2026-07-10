@@ -26,6 +26,7 @@ type Dependencies struct {
 	OnboardingHandler      *handlers.OnboardingHandler      // Central Bank: processes onboarding locally
 	OnboardingProxyHandler *handlers.OnboardingProxyHandler // Commercial Bank: proxies onboarding to CB
 	IdentityHandler        *handlers.IdentityHandler        // Paladin identity choices for the FX agreement form
+	StatementHandler       *handlers.StatementHandler       // Commercial Bank: consolidated fCeBM/tCeBM statement (extrato)
 	AuthProvider           interfaces.IAuthProvider
 }
 
@@ -149,6 +150,12 @@ func Setup(app *fiber.App, deps Dependencies) {
 	if deps.IdentityHandler != nil {
 		identityGroup := app.Group("/api/v1/identities", middleware.RequireCookieAuth(deps.AuthProvider))
 		identityGroup.Get("", deps.IdentityHandler.ListIdentities)
+	}
+
+	// --- Statement / Extrato (commercial bank only) ---
+	if deps.StatementHandler != nil {
+		statementGroup := app.Group("/api/v1/statement", middleware.RequireCookieAuth(deps.AuthProvider))
+		statementGroup.Get("", deps.StatementHandler.GetStatement)
 	}
 
 	// --- Payment Orchestrator (HTLC + Token) ---
