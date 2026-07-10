@@ -1,0 +1,28 @@
+# relay template (TK-B4) — Cacti-based hub-and-spoke relay.
+# Derived from interop/hub-and-spoke/cacti/docker-compose.yaml. NO fixed spokes
+# (runtime spoke registration is TK-B5). Reaches the hub cross-stack.
+# Parametrized; state in a named volume; no secrets embedded.
+services:
+  relay:
+    image: "${RELAY_IMAGE:-cbweb3b/cacti-relay:local}"
+    container_name: "${RELAY_CONTAINER_NAME:?}"
+    environment:
+      RELAY_PORT: "${RELAY_PORT:?}"
+      HUB_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${RELAY_PORT:?}:9000"
+    volumes:
+      - relay_data:/data
+    networks:
+      - relay_network
+    restart: always
+
+networks:
+  relay_network:
+    name: "${RELAY_NET_PREFIX:?}_network"
+
+volumes:
+  relay_data:
+    name: "${RELAY_VOLUME_PREFIX:?}_relay_data"

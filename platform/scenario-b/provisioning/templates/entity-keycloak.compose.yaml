@@ -1,0 +1,24 @@
+# entity-keycloak template (TK-B4) — per-entity Keycloak (OIDC).
+# Derived from deploy/local/compose.yml. Joins the entity infra network
+# (external). Parametrized; no secrets embedded (credentials via ${...}).
+services:
+  keycloak:
+    image: "quay.io/keycloak/keycloak:${KEYCLOAK_IMAGE_TAG:-26.0}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-keycloak"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: "${KC_ADMIN_USER:?}"
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_ADMIN_PASSWORD:?}"
+      KC_DB: postgres
+      KC_DB_URL: "${KC_DB_URL:?}"
+      KC_DB_USERNAME: "${POSTGRES_USER:?}"
+      KC_DB_PASSWORD: "${POSTGRES_PASSWORD:?}"
+    ports:
+      - "${KEYCLOAK_PORT:?}:8080"
+    networks:
+      - entity_infra_network
+    restart: always
+
+networks:
+  entity_infra_network:
+    name: "${ENTITY_NET_PREFIX:?}_infra_network"
+    external: true

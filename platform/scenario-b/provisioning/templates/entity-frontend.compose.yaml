@@ -1,0 +1,17 @@
+# entity-frontend template (TK-B4) — per-entity frontend app.
+# Parametrized; stateless; no secrets embedded.
+services:
+  frontend:
+    image: "${FRONTEND_IMAGE:-cbweb3b/bank-frontend:local}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-frontend"
+    environment:
+      GATEWAY_URL: "${GATEWAY_URL:?}"
+    ports:
+      - "${FRONTEND_PORT:?}:3000"
+    networks:
+      - entity_frontend_network
+    restart: always
+
+networks:
+  entity_frontend_network:
+    name: "${ENTITY_NET_PREFIX:?}_frontend_network"

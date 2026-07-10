@@ -1,0 +1,44 @@
+# Hub template (TK-B4) — neutral hub: sole QBFT validator / bootnode.
+# Parametrized; node state in named volumes. Derived from
+# deploy/local/hub-besu/startBesu.sh (docker run -> compose service).
+# deploy/local is NOT modified. No secrets embedded.
+services:
+  hub-validator:
+    image: "${BESU_IMAGE:-hyperledger/besu:25.8.0}"
+    container_name: "${HUB_CONTAINER_PREFIX:?}-hub-validator"
+    command:
+      - "--data-path=data"
+      - "--genesis-file=genesis/genesis.json"
+      - "--min-gas-price=0"
+      - "--rpc-http-enabled"
+      - "--rpc-http-api=ETH,NET,QBFT"
+      - "--rpc-ws-enabled"
+      - "--rpc-ws-api=ETH,NET,QBFT"
+      - "--host-allowlist=*"
+      - "--rpc-http-cors-origins=all"
+      - "--rpc-http-host=0.0.0.0"
+      - "--rpc-ws-host=0.0.0.0"
+      - "--rpc-http-port=8545"
+      - "--rpc-ws-port=8546"
+      - "--p2p-port=30303"
+    ports:
+      - "${HUB_RPC_PORT:?}:8545"
+      - "${HUB_WS_PORT:?}:8546"
+      - "${HUB_P2P_PORT:?}:30303"
+      - "${HUB_P2P_PORT:?}:30303/udp"
+    volumes:
+      - hub_besu_data:/opt/besu/data
+      - hub_genesis:/opt/besu/genesis
+    networks:
+      - hub_besu_network
+    restart: always
+
+networks:
+  hub_besu_network:
+    name: "${HUB_NET_PREFIX:?}_besu_network"
+
+volumes:
+  hub_besu_data:
+    name: "${HUB_VOLUME_PREFIX:?}_besu_data"
+  hub_genesis:
+    name: "${HUB_VOLUME_PREFIX:?}_genesis"
