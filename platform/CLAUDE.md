@@ -124,6 +124,8 @@ Proto:
 - Filesystem — `SPOKE_DATA_DIR/genesis/genesis.json` (leitura do bundle; nunca regenerado), `SPOKE_DATA_DIR/tls/commercial-bank.{crt,key}`, `SPOKE_DATA_DIR/.provisioning-state.yaml`, `SPOKE_DATA_DIR/.provisioning.lock` (032-commercial-bank-join)
 - Go 1.26+ + `gopkg.in/yaml.v3` (YAML parse); Go-side validation is source of truth, JSON-Schema for editor/CI (033-tk-b1-manifest-schema)
 - Filesystem/none — stateless validation (reads one manifest or a set; writes no state) (033-tk-b1-manifest-schema)
+- Go 1.26+ + `github.com/ethereum/go-ethereum` (secp256k1 + EVM address), stdlib `crypto/{ecdsa,elliptic,x509,rand}` + `encoding/pem` (CertSource + CSR) (034-tk-b2-keyprovider-certsource)
+- None — KeyProvider keys and per-spoke CA live in memory only; nothing persisted (no-secrets invariant) (034-tk-b2-keyprovider-certsource)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components

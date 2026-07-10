@@ -586,8 +586,12 @@ A ordem respeita as dependências reais: o **relay generalizado vem antes do `fo
 emitter** fica na fase de quem o emite; o **`join`** é separado do fluxo **bilateral de par
 soberano** (que exige dois spokes prontos + relay).
 
-1. **TK-B1** — spec + schema de manifesto (três modos) + validação.
-2. **TK-B2 / B3** — KeyProvider + CertSource.
+1. **TK-B1** — spec + schema de manifesto (três modos) + validação. **[Implementado]**
+2. **TK-B2 / B3** — KeyProvider + CertSource. **[Implementado]** — pacotes
+   `engine/keyprovider` (secp256k1/EVM via go-ethereum, local determinístico + stub de prod,
+   factory `kms://`) e `engine/certsource` (CA P-256 por spoke em memória, emissão de leaf a
+   partir de CSR, factory `self-signed`/`ca://`), mais `engine/pki` (`GenerateBankCSR`).
+   Chaves privadas nunca em manifesto/estado/bundle; produção é stub.
 3. **TK-B4** — templates de compose parametrizados (hub + entity-* + relay + NOC).
 4. **TK-B5** — **relay generalizado**: boot neutro (≥0 spokes) + registro em runtime
    (`POST /api/v1/spokes`) + conectores/watchers e roteamento por spoke (§14.B/§14.D). Vem antes

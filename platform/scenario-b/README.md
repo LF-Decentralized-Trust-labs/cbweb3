@@ -248,10 +248,20 @@ Declarative provisioning toolkit for the Scenario B hub-and-spoke topology.
 | Component | Status |
 |-----------|--------|
 | Manifest schema & validation (`ParticipantDeployment`, `cbweb3b/v1`) — TK-B1 | In progress |
-| Provisioning engine, bundles, compose templates, execution — TK-B2+ | Planned |
+| Custody boundaries: `KeyProvider` (`kms://`) + `CertSource` (`self-signed`/`ca://`) — TK-B2/B3 | In progress |
+| Provisioning engine, bundles, compose templates, execution — TK-B4+ | Planned |
 
 The manifest model and validation are the toolkit's entry point: parse + validate +
-report only, no execution. See `toolkit/README.md` for usage.
+report only, no execution. The custody boundaries provide per-entity blockchain keys and the
+CB-as-CA leaf issuance, with local in-memory implementations and production stubs behind URI
+factories; no private key material ever enters a manifest, state file, or bundle. See
+`toolkit/README.md` for usage.
+
+**Runtime dependency justification (Technology Stack Constraints):** the toolkit module adds
+`github.com/ethereum/go-ethereum` (v1.17.1, already standard across the repository). It is
+required by the `KeyProvider` for **secp256k1** key handling and EVM address derivation — the
+curve used to sign Besu/QBFT transactions, which is outside the Go standard library's
+`crypto/ecdsa`.
 
 ---
 
