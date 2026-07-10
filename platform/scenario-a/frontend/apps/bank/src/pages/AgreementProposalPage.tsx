@@ -21,39 +21,50 @@ import { Link, useNavigate } from "react-router-dom";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
 import { useIdentityStore } from "../stores/identity.store";
 
-// Dropdown of available Paladin identities, shared by every party field so a
-// typo or a non-member identity can no longer reach the on-chain propose call.
-function IdentitySelect({
+// Dropdown of string options, shared by the party and spoke fields so a typo
+// or a non-member value can no longer reach the on-chain propose call. Options
+// are derived from the available Paladin identities (single source of truth).
+function OptionSelect({
   id,
   value,
   onChange,
-  identities,
+  options,
+  placeholder,
 }: {
   id: string;
   value: string;
   onChange: (value: string) => void;
-  identities: string[];
+  options: string[];
+  placeholder: string;
 }) {
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger id={id}>
-        <SelectValue placeholder="Select a Paladin identity" />
+        <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
-        {identities.length ? (
-          identities.map((identity) => (
-            <SelectItem key={identity} value={identity}>
-              {identity}
+        {options.length ? (
+          options.map((option) => (
+            <SelectItem key={option} value={option}>
+              {option}
             </SelectItem>
           ))
         ) : (
           <SelectItem value="__none__" disabled>
-            No identities available
+            No options available
           </SelectItem>
         )}
       </SelectContent>
     </Select>
   );
+}
+
+// Derive the spoke id (e.g. "spoke-brl") from a Paladin identity such as
+// "funded_operator@spoke-brl-bank-itau".
+function spokeFromIdentity(identity: string): string {
+  const node = identity.includes("@") ? identity.slice(identity.indexOf("@") + 1) : identity;
+  const parts = node.split("-");
+  return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : node;
 }
 
 // Latin American settlement currencies (ISO 4217) selectable on the receive leg.
@@ -82,6 +93,12 @@ export function AgreementProposalPage() {
   useEffect(() => {
     void fetchIdentities();
   }, [fetchIdentities]);
+
+  // Unique spoke ids derived from the identity roster, sorted.
+  const spokes = useMemo(
+    () => Array.from(new Set(identities.map(spokeFromIdentity))).sort(),
+    [identities],
+  );
 
   const [counterpartyB, setCounterpartyB] = useState("");
   const [settlementAgent, setSettlementAgent] = useState("");
@@ -192,45 +209,35 @@ export function AgreementProposalPage() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="counterparty-b">Counterparty B Identity</Label>
-            <IdentitySelect id="counterparty-b" value={counterpartyB} onChange={setCounterpartyB} identities={identities} />
+            <OptionSelect id="counterparty-b" value={counterpartyB} onChange={setCounterpartyB} options={identities} placeholder="Select a Paladin identity" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="settlement-agent">Settlement Agent Identity</Label>
-            <IdentitySelect id="settlement-agent" value={settlementAgent} onChange={setSettlementAgent} identities={identities} />
+            <OptionSelect id="settlement-agent" value={settlementAgent} onChange={setSettlementAgent} options={identities} placeholder="Select a Paladin identity" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="custodian">Custodian Identity</Label>
-            <IdentitySelect id="custodian" value={custodian} onChange={setCustodian} identities={identities} />
+            <OptionSelect id="custodian" value={custodian} onChange={setCustodian} options={identities} placeholder="Select a Paladin identity" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="beneficiary">Beneficiary Identity</Label>
-            <IdentitySelect id="beneficiary" value={beneficiary} onChange={setBeneficiary} identities={identities} />
+            <OptionSelect id="beneficiary" value={beneficiary} onChange={setBeneficiary} options={identities} placeholder="Select a Paladin identity" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="source-spoke-id">Source Spoke ID</Label>
-            <Input
-              id="source-spoke-id"
-              placeholder="spoke-brl"
-              value={sourceSpokeId}
-              onChange={(e) => setSourceSpokeId(e.target.value)}
-            />
+            <OptionSelect id="source-spoke-id" value={sourceSpokeId} onChange={setSourceSpokeId} options={spokes} placeholder="Select a spoke" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="dest-spoke-id">Destination Spoke ID</Label>
-            <Input
-              id="dest-spoke-id"
-              placeholder="spoke-usd"
-              value={destSpokeId}
-              onChange={(e) => setDestSpokeId(e.target.value)}
-            />
+            <OptionSelect id="dest-spoke-id" value={destSpokeId} onChange={setDestSpokeId} options={spokes} placeholder="Select a spoke" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="source-receiver">Source Receiver</Label>
-            <IdentitySelect id="source-receiver" value={sourceReceiver} onChange={setSourceReceiver} identities={identities} />
+            <OptionSelect id="source-receiver" value={sourceReceiver} onChange={setSourceReceiver} options={identities} placeholder="Select a Paladin identity" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="dest-receiver">Destination Receiver</Label>
-            <IdentitySelect id="dest-receiver" value={destReceiver} onChange={setDestReceiver} identities={identities} />
+            <OptionSelect id="dest-receiver" value={destReceiver} onChange={setDestReceiver} options={identities} placeholder="Select a Paladin identity" />
           </div>
         </CardContent>
       </Card>
