@@ -49,7 +49,7 @@ export function Sidebar() {
   const navItems = isScenarioB ? scenarioBNavItems : scenarioANavItems;
 
   return (
-    <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:border-b-0 md:border-r">
+    <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:shrink-0 md:border-b-0 md:border-r">
       <div className="mb-3 space-y-2">
         {/* <PlatformLogo imageClassName="h-7" /> */}
         <div className="flex items-center justify-between">
