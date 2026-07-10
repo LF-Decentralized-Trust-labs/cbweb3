@@ -592,7 +592,12 @@ soberano** (que exige dois spokes prontos + relay).
    factory `kms://`) e `engine/certsource` (CA P-256 por spoke em memória, emissão de leaf a
    partir de CSR, factory `self-signed`/`ca://`), mais `engine/pki` (`GenerateBankCSR`).
    Chaves privadas nunca em manifesto/estado/bundle; produção é stub.
-3. **TK-B4** — templates de compose parametrizados (hub + entity-* + relay + NOC).
+3. **TK-B4** — templates de compose parametrizados (hub + entity-besu + entity-* + relay + NOC).
+   **[Implementado]** — 8 templates sob `scenario-b/provisioning/templates/` (+ `vars/*.env.example`
+   e `NAMING.md`), com valores discriminantes por env, named volumes determinísticos (exceção
+   `pki/`), portas por offset e cross-stack; validados pelo pacote `engine/composetemplate`
+   (interpolação, sem segredos, named volumes, sem colisão) e por `docker compose config`. O
+   `entity-besu` foi acrescentado ao resolver o achado C1. `deploy/local` intocado.
 4. **TK-B5** — **relay generalizado**: boot neutro (≥0 spokes) + registro em runtime
    (`POST /api/v1/spokes`) + conectores/watchers e roteamento por spoke (§14.B/§14.D). Vem antes
    do `found-hub`/`found-spoke` porque ambos dependem dele.

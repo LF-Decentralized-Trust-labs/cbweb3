@@ -126,6 +126,8 @@ Proto:
 - Filesystem/none — stateless validation (reads one manifest or a set; writes no state) (033-tk-b1-manifest-schema)
 - Go 1.26+ + `github.com/ethereum/go-ethereum` (secp256k1 + EVM address), stdlib `crypto/{ecdsa,elliptic,x509,rand}` + `encoding/pem` (CertSource + CSR) (034-tk-b2-keyprovider-certsource)
 - None — KeyProvider keys and per-spoke CA live in memory only; nothing persisted (no-secrets invariant) (034-tk-b2-keyprovider-certsource)
+- Go 1.26 (validation/tests) + `gopkg.in/yaml.v3` (already in toolkit/go.mod); compose templates (YAML) under scenario-b/provisioning/; Docker Compose v2 optional (test-only) (035-tk-b4-parametrized)
+- None — compose templates are files under provisioning/; validation is stateless (reads template + example env, returns result) (035-tk-b4-parametrized)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components

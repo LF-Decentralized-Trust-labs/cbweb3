@@ -249,7 +249,8 @@ Declarative provisioning toolkit for the Scenario B hub-and-spoke topology.
 |-----------|--------|
 | Manifest schema & validation (`ParticipantDeployment`, `cbweb3b/v1`) — TK-B1 | In progress |
 | Custody boundaries: `KeyProvider` (`kms://`) + `CertSource` (`self-signed`/`ca://`) — TK-B2/B3 | In progress |
-| Provisioning engine, bundles, compose templates, execution — TK-B4+ | Planned |
+| Parametrized compose templates (hub, entity-besu, entity-*, relay, NOC) under `provisioning/templates/` + validation — TK-B4 | In progress |
+| Provisioning engine, bundles, execution — TK-B5+ | Planned |
 
 The manifest model and validation are the toolkit's entry point: parse + validate +
 report only, no execution. The custody boundaries provide per-entity blockchain keys and the
