@@ -31,6 +31,50 @@ func TestGetEnvIntFallback(t *testing.T) {
 	}
 }
 
+func TestGetEnvInt_InvalidFallsBackToDefault(t *testing.T) {
+	t.Setenv("BAD_INT_VALUE", "not-a-number")
+	if got := getEnvInt("BAD_INT_VALUE", 7); got != 7 {
+		t.Fatalf("expected fallback 7 for unparseable value, got %d", got)
+	}
+}
+
+func TestGetEnvInt_ValidOverride(t *testing.T) {
+	t.Setenv("GOOD_INT_VALUE", "42")
+	if got := getEnvInt("GOOD_INT_VALUE", 7); got != 42 {
+		t.Fatalf("expected parsed value 42, got %d", got)
+	}
+}
+
+func TestGetEnvBool(t *testing.T) {
+	cases := []struct {
+		name     string
+		set      bool
+		value    string
+		fallback bool
+		want     bool
+	}{
+		{name: "unset returns fallback true", set: false, fallback: true, want: true},
+		{name: "unset returns fallback false", set: false, fallback: false, want: false},
+		{name: "true literal", set: true, value: "true", fallback: false, want: true},
+		{name: "one literal", set: true, value: "1", fallback: false, want: true},
+		{name: "false literal", set: true, value: "false", fallback: true, want: false},
+		{name: "unrecognised value is false", set: true, value: "yes", fallback: true, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			const key = "SOME_BOOL_VALUE"
+			if tc.set {
+				t.Setenv(key, tc.value)
+			} else {
+				_ = os.Unsetenv(key)
+			}
+			if got := getEnvBool(key, tc.fallback); got != tc.want {
+				t.Fatalf("getEnvBool(%q, %v) = %v, want %v", tc.value, tc.fallback, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadFiatSymbol(t *testing.T) {
 	t.Setenv("FIAT_SYMBOL", "BRL")
 
