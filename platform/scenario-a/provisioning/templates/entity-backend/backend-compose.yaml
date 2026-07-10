@@ -16,6 +16,8 @@
 #   API_GATEWAY_PORT / AUTH_PORT / COMPLIANCE_PORT / PAYMENT_PORT   host ports
 #   BANK_CODE         entity code
 #   PALADIN_URL / PALADIN_IDENTITY   the entity's Paladin RPC + identity
+#   PALADIN_IDENTITIES (optional) comma-separated network identity roster for the
+#                     FX agreement party dropdowns; empty => built-in reference list
 #   CACTI_API_URL     relay URL (host.docker.internal:4000)
 #   BACKEND_IMAGE_TAG image tag suffix (build => local)
 #
@@ -125,6 +127,10 @@ services:
       PKI_DIR: /workspace/backend/config/pki
       BANK_CODE: ${BANK_CODE:?BANK_CODE is required}
       PALADIN_URL: ${PALADIN_URL}
+      # Comma-separated Paladin identities offered as party choices in the FX
+      # agreement form. Set this to the full network roster; when empty the
+      # gateway falls back to the built-in reference (BRL+COP) list.
+      PALADIN_IDENTITIES: ${PALADIN_IDENTITIES:-}
     volumes:
       - ${ENTITY_PKI_DIR:-${BACKEND_CONTEXT}/config/pki}:/workspace/backend/config/pki
     ports:

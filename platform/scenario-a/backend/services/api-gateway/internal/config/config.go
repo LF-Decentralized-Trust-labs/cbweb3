@@ -33,6 +33,22 @@ type Config struct {
 	PaladinURL          string // Paladin JSON-RPC endpoint; enables transaction decryption for supervisors (PALADIN_URL env var)
 	FiatSymbol                  string // currency symbol for transfer limit matching (e.g. "BRL", "ARS"); from FIAT_SYMBOL
 	TransferLimitComplianceAddr string // when set, limit-enforcement checks are sent to this compliance address instead of ComplianceGRPCAddr; allows commercial-bank gateways to query the central bank's compliance service
+	PaladinIdentities           []string // available Paladin identities offered as party choices in the FX agreement form; from PALADIN_IDENTITIES (comma-separated)
+}
+
+// defaultPaladinIdentities lists the Paladin identities of the reference
+// BRL+COP network (see samples/cbweb3-data) so the FX agreement form offers
+// valid party choices out of the box. This is demo/reference data only — every
+// deployment MUST override it with its own roster via PALADIN_IDENTITIES
+// (comma-separated), since identities are per-network and cannot be enumerated
+// from a single runtime source.
+var defaultPaladinIdentities = []string{
+	"funded_operator@spoke-brl-cb",
+	"funded_operator@spoke-brl-bank-itau",
+	"funded_operator@spoke-brl-bank-bradesco",
+	"funded_operator@spoke-cop-cb",
+	"funded_operator@spoke-cop-bank-bancolombia",
+	"funded_operator@spoke-cop-bank-davivienda",
 }
 
 // Load reads environment variables and returns a fully populated Config.
@@ -61,7 +77,28 @@ func Load() Config {
 		PaladinURL:                  getEnv("PALADIN_URL", ""),
 		FiatSymbol:                  getEnv("FIAT_SYMBOL", ""),
 		TransferLimitComplianceAddr: getEnv("TRANSFER_LIMIT_COMPLIANCE_ADDR", ""),
+		PaladinIdentities:           getEnvList("PALADIN_IDENTITIES", defaultPaladinIdentities),
 	}
+}
+
+// getEnvList parses a comma-separated environment variable into a trimmed,
+// non-empty string slice, returning the fallback when unset or blank.
+func getEnvList(name string, fallback []string) []string {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	if len(out) == 0 {
+		return fallback
+	}
+	return out
 }
 
 // getEnv returns an environment variable or a fallback if missing/blank.

@@ -119,6 +119,7 @@ func New(cfg config.Config) (*App, error) {
 		GovernanceHandler: governanceHandler,
 		SupervisorHandler: supervisorHandler,
 		OversightHandler:  oversightHandler,
+		IdentityHandler:   handlers.NewIdentityHandler(cfg.PaladinIdentities),
 		AuthProvider:      identityGRPCProvider,
 	}
 

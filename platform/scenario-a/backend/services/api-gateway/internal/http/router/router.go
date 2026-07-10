@@ -25,6 +25,7 @@ type Dependencies struct {
 	PaymentProxyHandler    *handlers.PaymentProxyHandler    // Commercial Bank: proxies escrow requests to CB
 	OnboardingHandler      *handlers.OnboardingHandler      // Central Bank: processes onboarding locally
 	OnboardingProxyHandler *handlers.OnboardingProxyHandler // Commercial Bank: proxies onboarding to CB
+	IdentityHandler        *handlers.IdentityHandler        // Paladin identity choices for the FX agreement form
 	AuthProvider           interfaces.IAuthProvider
 }
 
@@ -142,6 +143,12 @@ func Setup(app *fiber.App, deps Dependencies) {
 		tlGroup.Post("", deps.TransferLimitHandler.CreateTransferLimit)
 		tlGroup.Get("", deps.TransferLimitHandler.ListTransferLimits)
 		tlGroup.Delete("/:id", deps.TransferLimitHandler.DeleteTransferLimit)
+	}
+
+	// --- Paladin identities (FX agreement party choices) ---
+	if deps.IdentityHandler != nil {
+		identityGroup := app.Group("/api/v1/identities", middleware.RequireCookieAuth(deps.AuthProvider))
+		identityGroup.Get("", deps.IdentityHandler.ListIdentities)
 	}
 
 	// --- Payment Orchestrator (HTLC + Token) ---

@@ -16,9 +16,45 @@ import {
   SelectValue,
   toast,
 } from "@cbweb3/ui";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
+import { useIdentityStore } from "../stores/identity.store";
+
+// Dropdown of available Paladin identities, shared by every party field so a
+// typo or a non-member identity can no longer reach the on-chain propose call.
+function IdentitySelect({
+  id,
+  value,
+  onChange,
+  identities,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  identities: string[];
+}) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger id={id}>
+        <SelectValue placeholder="Select a Paladin identity" />
+      </SelectTrigger>
+      <SelectContent>
+        {identities.length ? (
+          identities.map((identity) => (
+            <SelectItem key={identity} value={identity}>
+              {identity}
+            </SelectItem>
+          ))
+        ) : (
+          <SelectItem value="__none__" disabled>
+            No identities available
+          </SelectItem>
+        )}
+      </SelectContent>
+    </Select>
+  );
+}
 
 // Latin American settlement currencies (ISO 4217) selectable on the receive leg.
 const LATAM_CURRENCIES = [
@@ -40,6 +76,12 @@ export function AgreementProposalPage() {
   const navigate = useNavigate();
   const propose = useFxAgreementStore((s) => s.propose);
   const status = useFxAgreementStore((s) => s.status);
+  const identities = useIdentityStore((s) => s.identities);
+  const fetchIdentities = useIdentityStore((s) => s.fetchAll);
+
+  useEffect(() => {
+    void fetchIdentities();
+  }, [fetchIdentities]);
 
   const [counterpartyB, setCounterpartyB] = useState("");
   const [settlementAgent, setSettlementAgent] = useState("");
@@ -150,39 +192,19 @@ export function AgreementProposalPage() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="counterparty-b">Counterparty B Identity</Label>
-            <Input
-              id="counterparty-b"
-              placeholder="funded_operator@spoke-b-bank-d"
-              value={counterpartyB}
-              onChange={(e) => setCounterpartyB(e.target.value)}
-            />
+            <IdentitySelect id="counterparty-b" value={counterpartyB} onChange={setCounterpartyB} identities={identities} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="settlement-agent">Settlement Agent Identity</Label>
-            <Input
-              id="settlement-agent"
-              placeholder="funded_operator@spoke-a-cb"
-              value={settlementAgent}
-              onChange={(e) => setSettlementAgent(e.target.value)}
-            />
+            <IdentitySelect id="settlement-agent" value={settlementAgent} onChange={setSettlementAgent} identities={identities} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="custodian">Custodian Identity</Label>
-            <Input
-              id="custodian"
-              placeholder="funded_operator@spoke-b-bank-d"
-              value={custodian}
-              onChange={(e) => setCustodian(e.target.value)}
-            />
+            <IdentitySelect id="custodian" value={custodian} onChange={setCustodian} identities={identities} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="beneficiary">Beneficiary Identity</Label>
-            <Input
-              id="beneficiary"
-              placeholder="funded_operator@spoke-b-bank-b"
-              value={beneficiary}
-              onChange={(e) => setBeneficiary(e.target.value)}
-            />
+            <IdentitySelect id="beneficiary" value={beneficiary} onChange={setBeneficiary} identities={identities} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="source-spoke-id">Source Spoke ID</Label>
@@ -204,21 +226,11 @@ export function AgreementProposalPage() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="source-receiver">Source Receiver</Label>
-            <Input
-              id="source-receiver"
-              placeholder="funded_operator@spoke-brl-bank-c"
-              value={sourceReceiver}
-              onChange={(e) => setSourceReceiver(e.target.value)}
-            />
+            <IdentitySelect id="source-receiver" value={sourceReceiver} onChange={setSourceReceiver} identities={identities} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="dest-receiver">Destination Receiver</Label>
-            <Input
-              id="dest-receiver"
-              placeholder="funded_operator@spoke-usd-bank-b"
-              value={destReceiver}
-              onChange={(e) => setDestReceiver(e.target.value)}
-            />
+            <IdentitySelect id="dest-receiver" value={destReceiver} onChange={setDestReceiver} identities={identities} />
           </div>
         </CardContent>
       </Card>
