@@ -122,6 +122,8 @@ Proto:
 - Nenhum novo. `RelayStore` (arquivo JSON existente) é preservado. (031-relay-spoke-registry)
 - Go 1.26+ (orchestrator, bundle, manifest, pki packages); Docker Compose v2 + YAML 3.8+ (TK-8 template) + `gopkg.in/yaml.v3` (bundle/manifest parsing), `net/http` (CSR HTTP POST + polling), `github.com/ethereum/go-ethereum v1.17.1` (QBFT JSON-RPC, IdentityRegistry), `os/signal`+`syscall` (file lock), `flag` (CLI) — todos presentes em `toolkit/go.mod`; Docker Compose v2 plugin; `hyperledger/besu:25.8.0` (pinned) (032-commercial-bank-join)
 - Filesystem — `SPOKE_DATA_DIR/genesis/genesis.json` (leitura do bundle; nunca regenerado), `SPOKE_DATA_DIR/tls/commercial-bank.{crt,key}`, `SPOKE_DATA_DIR/.provisioning-state.yaml`, `SPOKE_DATA_DIR/.provisioning.lock` (032-commercial-bank-join)
+- Go 1.26+ + `gopkg.in/yaml.v3` (YAML parse); Go-side validation is source of truth, JSON-Schema for editor/CI (033-tk-b1-manifest-schema)
+- Filesystem/none — stateless validation (reads one manifest or a set; writes no state) (033-tk-b1-manifest-schema)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
