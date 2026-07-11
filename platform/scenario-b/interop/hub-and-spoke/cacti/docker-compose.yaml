@@ -10,12 +10,11 @@ services:
       - path: .env
         required: false  # populated by contracts.sync-addresses; uses inline defaults until then
     environment:
-      # Spoke-A: Besu RPC
-      SPOKE_A_BESU_RPC: "${SPOKE_A_BESU_RPC:-http://host.docker.internal:8645}"
-      SPOKE_A_BESU_WS: "${SPOKE_A_BESU_WS:-ws://host.docker.internal:8655}"
-      # Spoke-B: Besu RPC
-      SPOKE_B_BESU_RPC: "${SPOKE_B_BESU_RPC:-http://host.docker.internal:8745}"
-      SPOKE_B_BESU_WS: "${SPOKE_B_BESU_WS:-ws://host.docker.internal:8755}"
+      # TK-B5: dynamic N-spokes — the relay boots NEUTRAL (no fixed SPOKE_A/B).
+      # Spokes register at runtime (POST /api/v1/spokes) and persist here.
+      RELAY_STORE_PATH: "${RELAY_STORE_PATH:-/data/relay-spokes.json}"
+      # Optional boot seed (JSON array); empty by default.
+      SPOKES_JSON: "${SPOKES_JSON:-}"
       # Cacti REST API port
       CACTI_API_PORT: "${CACTI_API_PORT:-4000}"
       # Poll interval in milliseconds
@@ -29,13 +28,13 @@ services:
       INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-cbweb3-relay-shared-secret}"
       HUB_BESU_RPC: "${HUB_BESU_RPC:-http://host.docker.internal:8645}"
       LCR_WATCHER_START_BLOCK: "${LCR_WATCHER_START_BLOCK:-0}"
-      # 009-commercial-cross-currency-swap: CrossCurrencySwapRelay — CB-B gateway URL.
-      # Set to the internal URL of CB-B's api-gateway so the relay can forward bridge-out
-      # notifications from CB-A to CB-B.
-      # e.g. "http://host.docker.internal:60080"
-      CB_B_GATEWAY_URL: "${CB_B_GATEWAY_URL:-}"
+      # Cross-currency bridge-out (TK-B5): destination resolved per request by
+      # lookup of `spoke_out` in the dynamic registry — no fixed CB_B_GATEWAY_URL.
+      # Before forwarding, the relay reads isPaused() on-chain on `amm_address`.
     ports:
       - "${CACTI_API_PORT:-4000}:4000"
+    volumes:
+      - relay_data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -45,3 +44,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+
+volumes:
+  relay_data:
+    name: "${RELAY_VOLUME_PREFIX:-cbweb3-relay}_data"

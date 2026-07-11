@@ -2,15 +2,17 @@
 # Cacti Liquidity Relay Configuration (Scenario B)
 # ============================================================================
 
-# ── Spoke Configuration (required) ──────────────────────────────────────────
+# ── Spoke Configuration (TK-B5: dynamic, N spokes) ──────────────────────────
+#
+# The relay boots NEUTRAL (zero spokes). Spokes are registered at runtime via
+# POST /api/v1/spokes and persisted in RELAY_STORE_PATH (survives restarts).
+# SPOKE_A/B_BESU_RPC are GONE — no fixed two-spoke config, no fatal on absence.
+#
+# Optional seed (JSON array) applied at boot in addition to the persisted store:
+# SPOKES_JSON=[{"spokeId":"spoke-br","besuRpc":"http://host.docker.internal:8855","besuWs":"ws://host.docker.internal:8856","gatewayUrl":"http://host.docker.internal:8090"}]
 
-# Spoke-A Besu connection
-SPOKE_A_BESU_RPC=http://host.docker.internal:8645
-SPOKE_A_BESU_WS=ws://host.docker.internal:8655
-
-# Spoke-B Besu connection
-SPOKE_B_BESU_RPC=http://host.docker.internal:8745
-SPOKE_B_BESU_WS=ws://host.docker.internal:8755
+# Persisted spoke registry (named-volume path inside the container).
+RELAY_STORE_PATH=/data/relay-spokes.json
 
 # ── LiquidityCommitWatcher Configuration ────────────────────────────────────
 
@@ -38,6 +40,10 @@ CACTI_API_PORT=4000
 # Poll interval for event watching (milliseconds)
 POLL_INTERVAL_MS=3000
 
-# 009-commercial-cross-currency-swap: CrossCurrencySwapRelay
-# Internal URL of CB-B api-gateway so Cacti can forward bridge-out notifications from CB-A.
-CB_B_GATEWAY_URL=http://host.docker.internal:60080
+# Cross-currency bridge-out relay (TK-B5): the destination gateway is resolved
+# per request by lookup of `spoke_out` in the dynamic spoke registry — there is
+# NO fixed CB_B_GATEWAY_URL anymore. Before forwarding, the relay reads
+# isPaused() on-chain on the payload's `amm_address` (circuit breaker, fail-safe).
+#
+# Auth: shared secret above (INTERNAL_RELAY_AUTH_SECRET). Per-CB auth is out of
+# scope (roadmap §14.D — pending project-lead approval).
