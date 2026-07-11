@@ -5,6 +5,7 @@ services:
   keycloak:
     image: "quay.io/keycloak/keycloak:${KEYCLOAK_IMAGE_TAG:-26.0}"
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-keycloak"
+    command: ["start-dev"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: "${KC_ADMIN_USER:?}"
       KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_ADMIN_PASSWORD:?}"
@@ -12,6 +13,9 @@ services:
       KC_DB_URL: "${KC_DB_URL:?}"
       KC_DB_USERNAME: "${POSTGRES_USER:?}"
       KC_DB_PASSWORD: "${POSTGRES_PASSWORD:?}"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
     ports:
       - "${KEYCLOAK_PORT:?}:8080"
     networks:

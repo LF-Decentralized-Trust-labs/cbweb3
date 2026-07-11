@@ -71,13 +71,13 @@ func (c *HubConfig) WithDefaults() {
 		c.WaitRPC = func(ctx context.Context) error { return waitRPC(ctx, c.HubRPC, 60*time.Second) }
 	}
 	if c.WaitKeycloak == nil {
-		c.WaitKeycloak = func(ctx context.Context) error { return nil } // template healthcheck gates it
+		c.WaitKeycloak = func(ctx context.Context) error {
+			return waitHTTPOK(ctx, fmt.Sprintf("http://localhost:%d/realms/master", c.keycloakPort()), 180*time.Second)
+		}
 	}
 	if c.ReadClientSecret == nil {
-		c.ReadClientSecret = func(ctx context.Context) (string, error) {
-			out, err := c.Runner.Run(ctx, "docker", "exec", "keycloak", "cat", "/tmp/hub-client-secret")
-			return string(bytes.TrimSpace(out)), err
-		}
+		// The client is created with a fixed local secret (provisionKeycloakRealm).
+		c.ReadClientSecret = func(context.Context) (string, error) { return hubKeycloakSecret, nil }
 	}
 }
 
@@ -92,6 +92,33 @@ func (c HubConfig) template(name string) string {
 
 func (c HubConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
 func (c HubConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
+func (c HubConfig) keycloakPort() int      { return c.RPCPort + 7000 }
+func (c HubConfig) keycloakContainer() string {
+	return c.ContainerPrefix + "-hub-keycloak"
+}
+
+// Local Keycloak realm/client provisioned by found-hub (OIDC for the hub
+// backend). The client secret is a fixed local-dev value written back into the
+// hub .env; production issues real secrets via the CB/KMS (deferred).
+const (
+	hubKeycloakRealm  = "cbweb3"
+	hubKeycloakClient = "hub-backend"
+	hubKeycloakSecret = "hub-backend-local-secret" // local-only, not a real secret
+)
+
+// provisionKeycloakRealm creates (idempotently) the realm + client with a fixed
+// local secret via kcadm inside the running Keycloak container.
+func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
+	kc := "/opt/keycloak/bin/kcadm.sh"
+	script := fmt.Sprintf(
+		"%[1]s config credentials --server http://localhost:8080 --realm master --user %[2]s --password %[3]s && "+
+			"(%[1]s create realms -s realm=%[4]s -s enabled=true || true) && "+
+			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
+			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true)",
+		kc, "admin", "admin", hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret)
+	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", script)
+	return err
+}
 
 // renderHubComposeEnv writes ALL hub compose-template interpolation vars into
 // HubEnvFile (besu + infra + keycloak + backend/frontend/relay/noc), so every
@@ -241,6 +268,9 @@ func FoundHubSteps(c HubConfig) []Step {
 				if err := c.WaitKeycloak(ctx); err != nil {
 					return err
 				}
+				if err := c.provisionKeycloakRealm(ctx); err != nil {
+					return err
+				}
 				secret, err := c.ReadClientSecret(ctx)
 				if err != nil {
 					return err
@@ -363,6 +393,33 @@ func waitRPC(ctx context.Context, rpcURL string, timeout time.Duration) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// waitHTTPOK polls a GET endpoint until it returns a 2xx, or the timeout elapses
+// (used to gate on Keycloak readiness). Empty url is a no-op.
+func waitHTTPOK(ctx context.Context, url string, timeout time.Duration) error {
+	if url == "" {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("endpoint %s not ready within %s", url, timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
 		}
 	}
 }
