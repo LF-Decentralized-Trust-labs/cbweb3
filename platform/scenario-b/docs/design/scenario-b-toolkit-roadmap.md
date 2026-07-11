@@ -637,7 +637,17 @@ soberano** (que exige dois spokes prontos + relay).
    validador) permanece capacidade diferida (ADR-002). Unidade com FakeRunner; suíte E2E sob build tag
    `e2e`.
 8. **TK-B9** — par soberano (`open-sovereign-pair`) + liquidez cooperativa (commit-reveal) +
-   `seed-oracle`.
+   `seed-oracle`. **[Implementado]** — cauda **soft** do `found-spoke`, disparada por `spec.pair`:
+   `open-sovereign-pair` (proponente: scaffolding — W-tokens dedup-por-moeda + AMM + LCR +
+   `setCentralBankOf` + grant ao relayer — com a chave de **admin do hub**, depois `proposePair` com a
+   chave do **CB corrente**; confirmador: `confirmPair`) → `commit-liquidity` (cada CB contribui só a
+   própria moeda via `registerCommit`; o relay casa `CommitMatched`) → `seed-oracle` (`setRate` no
+   `ManualOracle`, local-only). Idempotência **on-chain** via `cast call getPair(pairId)`
+   (`PROPOSED`/`ACTIVE`). **Soberania estrita**: cada `apply` assina só o ato do seu CB (nenhum run
+   detém a chave da contraparte) — por isso o `SeedNewSovereignPair.s.sol` (exige ambas as chaves)
+   **não** é reusado; os atos são dirigidos discretamente por `cast`/`forge create` (sem alterar
+   contratos). Steps soft não bloqueiam o found-spoke nem o spoke bundle. Breaker opção A; W-token
+   dedup por moeda. Unidade com FakeRunner; suíte E2E sob build tag `e2e`.
 9. **TK-B10** — E2E + baseline.
 
 ---

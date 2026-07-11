@@ -52,6 +52,27 @@ func TestApplyFoundSpokeDryRun(t *testing.T) {
 	}
 }
 
+// TK-B9: found-spoke with spec.pair plans the soft sovereign tail (dry-run).
+func TestApplyFoundSpokeSovereignTailDryRun(t *testing.T) {
+	rep, err := Apply(context.Background(), Options{
+		ManifestPath: filepath.Join(fixtures, "found-spoke.yaml"),
+		DataDir:      t.TempDir(),
+		DryRun:       true,
+	})
+	if err != nil {
+		t.Fatalf("apply found-spoke dry-run: %v", err)
+	}
+	names := map[string]bool{}
+	for _, s := range rep.Steps {
+		names[s.Name] = true
+	}
+	for _, want := range []string{"open-sovereign-pair", "commit-liquidity", "seed-oracle"} {
+		if !names[want] {
+			t.Errorf("spec.pair present: expected %q in the plan; steps=%v", want, names)
+		}
+	}
+}
+
 // TK-B8/SC-001: join dry-run plans the canonical steps (spoke bundle validated,
 // no effects).
 func TestApplyJoinDryRun(t *testing.T) {

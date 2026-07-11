@@ -36,12 +36,39 @@ type SpokeConfig struct {
 	GatewayURL     string
 	Registrar      relayregistrar.RelayRegistrar
 
+	// Sovereign-pair tail (TK-B9): non-nil enables the soft open-sovereign-pair
+	// / commit-liquidity / seed-oracle steps.
+	Pair                *PairConfig
+	Environment         string // seed-oracle is local-only; gates pending
+	HubPairRegistry     string // from the hub bundle
+	HubManualOracle     string // from the hub bundle
+	HubIdentityRegistry string // from the hub bundle (AMM/LCR ctor, setCentralBankOf)
+	RelayerAddr         string // grant CENTRAL_BANK_ROLE to the relayer on the sovereign tokens
+	HubAdminKey         string // scaffolding acts (deploy/grants) — hub admin
+	CBHubKey            string // current CB's sovereign act (propose/confirm/commit)
+
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
 	WaitKeycloak     func(ctx context.Context) error
 	ReadClientSecret func(ctx context.Context) (string, error)
 	EnodeReader      EnodeReader
 	CBRegistered     func(ctx context.Context) (bool, error) // idempotency for register-cb
+	PairStatus       func(ctx context.Context, pairID string) (status string, exists bool, err error)
+}
+
+// PairConfig carries the sovereign-pair block (spec.pair) plus the local-only
+// inputs (rate, commit amounts) sourced from flags.
+type PairConfig struct {
+	ProposerCB         string
+	ConfirmerCB        string
+	ProposerCBAddress  string // EVM address of the proposer CB (setCentralBankOf tokenA)
+	ConfirmerCBAddress string // EVM address of the confirmer CB (setCentralBankOf tokenB)
+	SymbolA            string
+	SymbolB            string
+	CurrentCB          string // the CB of this spoke (discriminates the role this run)
+	Rate               string // seed-oracle rate (local-only; from --pair-rate)
+	AmountA            string // CB-A's commit amount (local-only; from --commit-amount-a)
+	AmountB            string // CB-B's commit amount (local-only; from --commit-amount-b)
 }
 
 func (c *SpokeConfig) WithDefaults() {
@@ -92,7 +119,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 		}
 	}
 
-	return []Step{
+	steps := []Step{
 		{
 			Name: "consume-hub-bundle",
 			Run: func(context.Context) error {
@@ -269,31 +296,42 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			Soft: true, // observability — non-blocking
 			Run:  compose("noc"),
 		},
-		{
-			Name: "emit-spoke-bundle",
-			Deps: []string{"deploy-spoke-contracts", "start-besu-spoke"},
-			Check: func(context.Context) (bool, error) {
-				_, err := os.Stat(filepath.Join(c.OutDir, "bundles", "spoke-"+c.SpokeID+".bundle.yaml"))
-				return err == nil, nil
-			},
-			Run: func(context.Context) error {
-				m, err := spokeContractMap(c.spokeBroadcastPath())
-				if err != nil {
-					return err
-				}
-				genesisBytes, err := os.ReadFile(filepath.Join(c.GenesisDir, "genesis.json"))
-				if err != nil {
-					return err
-				}
-				b := bundle.SpokeBundle{
-					SpokeID: c.SpokeID, ChainID: c.SpokeChainID, Enode: capturedEnode,
-					SpokeRPC: c.SpokeRPC, SpokeWS: c.SpokeWS, Genesis: string(genesisBytes), Contracts: m,
-				}
-				_, err = bundle.EmitSpoke(b, c.OutDir)
-				return err
-			},
-		},
 	}
+
+	// TK-B9: sovereign-pair tail (soft) — only when spec.pair is present. Ordered
+	// after add-noc-agent and before emit-spoke-bundle (insertion order preserves
+	// this among independents in topoSort).
+	emitDeps := []string{"deploy-spoke-contracts", "start-besu-spoke"}
+	if c.Pair != nil {
+		steps = append(steps, sovereignPairSteps(c)...)
+		emitDeps = append(emitDeps, "open-sovereign-pair", "commit-liquidity", "seed-oracle")
+	}
+
+	steps = append(steps, Step{
+		Name: "emit-spoke-bundle",
+		Deps: emitDeps,
+		Check: func(context.Context) (bool, error) {
+			_, err := os.Stat(filepath.Join(c.OutDir, "bundles", "spoke-"+c.SpokeID+".bundle.yaml"))
+			return err == nil, nil
+		},
+		Run: func(context.Context) error {
+			m, err := spokeContractMap(c.spokeBroadcastPath())
+			if err != nil {
+				return err
+			}
+			genesisBytes, err := os.ReadFile(filepath.Join(c.GenesisDir, "genesis.json"))
+			if err != nil {
+				return err
+			}
+			b := bundle.SpokeBundle{
+				SpokeID: c.SpokeID, ChainID: c.SpokeChainID, Enode: capturedEnode,
+				SpokeRPC: c.SpokeRPC, SpokeWS: c.SpokeWS, Genesis: string(genesisBytes), Contracts: m,
+			}
+			_, err = bundle.EmitSpoke(b, c.OutDir)
+			return err
+		},
+	})
+	return steps
 }
 
 // spokeContractMap maps the CBWeb3Spoke broadcast deployments to bundle keys.

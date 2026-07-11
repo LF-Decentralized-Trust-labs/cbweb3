@@ -111,6 +111,8 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 func runApply(args []string, stdout, stderr io.Writer) int {
 	var files fileList
 	var output, dataDir, outDir, repoRoot, hubRPC, hubWS, spokeRPC, spokeWS, gatewayURL, cbAddr, relay string
+	var relayerAddr, hubAdminKey, cbHubKey, pairRate, commitAmountA, commitAmountB string
+	var proposerCBAddr, confirmerCBAddr string
 	var dryRun bool
 	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -129,6 +131,14 @@ func runApply(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&gatewayURL, "gateway-url", "", "spoke gateway URL (found-spoke → relay)")
 	fs.StringVar(&cbAddr, "cb-address", "", "central bank address (found-spoke → register-cb)")
 	fs.StringVar(&relay, "relay", "", "RelayRegistrar URI (default local; e.g. relay://host:4000)")
+	fs.StringVar(&relayerAddr, "relayer-addr", "", "relayer address to grant CENTRAL_BANK_ROLE (sovereign pair)")
+	fs.StringVar(&hubAdminKey, "hub-admin-key", "", "hub admin key for sovereign-pair scaffolding (local)")
+	fs.StringVar(&cbHubKey, "cb-hub-key", "", "current CB hub key for sovereign acts propose/confirm/commit (local)")
+	fs.StringVar(&pairRate, "pair-rate", "", "seed-oracle rate for the sovereign pair (local)")
+	fs.StringVar(&commitAmountA, "commit-amount-a", "", "CB-A liquidity commit amount (local)")
+	fs.StringVar(&commitAmountB, "commit-amount-b", "", "CB-B liquidity commit amount (local)")
+	fs.StringVar(&proposerCBAddr, "proposer-cb-address", "", "proposer CB EVM address (setCentralBankOf tokenA; defaults to --cb-address)")
+	fs.StringVar(&confirmerCBAddr, "confirmer-cb-address", "", "confirmer CB EVM address (setCentralBankOf tokenB)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -146,19 +156,27 @@ func runApply(args []string, stdout, stderr io.Writer) int {
 	defer stop()
 
 	rep, err := apply.Apply(ctx, apply.Options{
-		ManifestPath: files[0],
-		RepoRoot:     repoRoot,
-		DataDir:      dataDir,
-		OutDir:       outDir,
-		HubRPC:       hubRPC,
-		HubWS:        hubWS,
-		SpokeRPC:     spokeRPC,
-		SpokeWS:      spokeWS,
-		GatewayURL:   gatewayURL,
-		CBAddress:    cbAddr,
-		Relay:        relay,
-		Format:       output,
-		DryRun:       dryRun,
+		ManifestPath:       files[0],
+		RepoRoot:           repoRoot,
+		DataDir:            dataDir,
+		OutDir:             outDir,
+		HubRPC:             hubRPC,
+		HubWS:              hubWS,
+		SpokeRPC:           spokeRPC,
+		SpokeWS:            spokeWS,
+		GatewayURL:         gatewayURL,
+		CBAddress:          cbAddr,
+		Relay:              relay,
+		RelayerAddr:        relayerAddr,
+		HubAdminKey:        hubAdminKey,
+		CBHubKey:           cbHubKey,
+		PairRate:           pairRate,
+		CommitAmountA:      commitAmountA,
+		CommitAmountB:      commitAmountB,
+		ProposerCBAddress:  proposerCBAddr,
+		ConfirmerCBAddress: confirmerCBAddr,
+		Format:             output,
+		DryRun:             dryRun,
 	})
 
 	// Emit whatever report we have (partial on failure/interruption).

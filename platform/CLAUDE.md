@@ -136,6 +136,8 @@ Proto:
 - Spoke bundle at `<outDir>/bundles/spoke-<id>.bundle.yaml` includes genesis + enode + chainId + spoke contract addresses (public, no secrets); consumed by join (TK-B8) (038-tk-b7-found)
 - Go 1.26 (toolkit) — no new Go deps; join mode reuses the TK-B6/B7 engine/exec/addrs/bundle (LoadSpoke) + pki.GenerateBankCSR; new wait-sync gate via eth_syncing; canonical flow has no relay/noc step (039-tk-b8-join)
 - Bank joins as a non-validating full node (CB is the sole QBFT validator): write-genesis copies the spoke bundle genesis (non-destructive + sha256 guard), wait-sync blocks on eth_syncing, gen-csr is the only PKI step (key 0600, OU=ROLE_COMMERCIAL_BANK, zero CA material; signing/registration are runtime) (039-tk-b8-join)
+- Go 1.26 (toolkit) — no new Go deps; sovereign-pair tail (open-sovereign-pair/commit-liquidity/seed-oracle) is a SOFT tail of found-spoke, triggered by spec.pair; idempotency is on-chain via cast call getPair status (040-tk-b9-sovereign-pair)
+- Strict sovereignty: each apply signs only the current CB's act (CB-A scaffolds + proposePair; a separate CB-B found-spoke confirmPair); no run holds the counterparty key, so SeedNewSovereignPair.s.sol (needs both keys) is NOT reused — acts driven discretely via cast/forge create; seed-oracle is local-only (040-tk-b9-sovereign-pair)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components
