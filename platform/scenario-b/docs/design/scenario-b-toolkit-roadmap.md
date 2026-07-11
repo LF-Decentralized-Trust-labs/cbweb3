@@ -600,7 +600,12 @@ soberano** (que exige dois spokes prontos + relay).
    `entity-besu` foi acrescentado ao resolver o achado C1. `deploy/local` intocado.
 4. **TK-B5** — **relay generalizado**: boot neutro (≥0 spokes) + registro em runtime
    (`POST /api/v1/spokes`) + conectores/watchers e roteamento por spoke (§14.B/§14.D). Vem antes
-   do `found-hub`/`found-spoke` porque ambos dependem dele.
+   do `found-hub`/`found-spoke` porque ambos dependem dele. **[Implementado]** — relay Cacti
+   generalizado (registry dinâmico, RelayStore JSON persistido, `POST /api/v1/spokes` idempotente,
+   roteamento por `spoke_out`, gate `isPaused` on-chain via `amm_address` com falha segura) +
+   interface Go `engine/relayregistrar` (local in-memory + stub HTTP + factory por URI). Auth-por-CB
+   (§14.D) permanece fora de escopo (segredo compartilhado como fallback). Lógica coberta por
+   `node:test` (24) e `go test` (4).
 5. **TK-B6** — motor de orquestração + steps `found-hub` (`start-relay`, `start-noc`, Keycloak
    write-back) + **hub bundle emitter** + comando **`apply`** (CLI sobre o motor).
 6. **TK-B7** — `found-spoke` (`register-cb` + contratos de spoke + Keycloak write-back +
