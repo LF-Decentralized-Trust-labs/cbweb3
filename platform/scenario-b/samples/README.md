@@ -4,7 +4,10 @@ Ready-to-use `ParticipantDeployment` manifests for the **Scenario B** toolkit
 (`cbweb3b`), demonstrating the complete hub-and-spoke topology:
 
 - **One neutral interoperability hub**, founded once (`mode: found-hub`):
-  - `hub-cbweb3` — base `tCeBM` reserve tokens + registries + relay + NOC (chainId 1337)
+  - `hub-cbweb3` — base `tCeBM` reserve tokens + registries + NOC (chainId 1337)
+- **One external Cacti liquidity relay**, deployed outside the toolkit
+  (`start-cacti.sh`) and reached via each manifest's `spec.relay.endpoint`
+  (`http://localhost:4000`); spokes register on it dynamically at `found-spoke`.
 - **Sovereign spokes**, each founded by its own central bank (`mode: found-spoke`):
   - `spoke-brl` — `central-bank-brazil`    (BRL, chainId 1338)
   - `spoke-ars` — `central-bank-argentina` (ARS, chainId 1339)
@@ -36,9 +39,11 @@ Two idempotent scripts build the CLI and apply every manifest in order:
 ./deploy-three.sh    # + Colombia (a third spoke, no corridor)
 ```
 
-Pass `--clean` to wipe Docker (containers + volumes) and the data directories
-first. Unlike Scenario A, **no separate relay step is needed** — `found-hub`
-starts the shared Cacti relay itself.
+Pass `--clean` to wipe Docker (containers + volumes + networks) and the data
+directories first. The scripts start the **external Cacti relay**
+(`provisioning/scripts/start-cacti.sh`) before the first `apply` — same strategy
+as Scenario A: the relay is deployed outside the toolkit and its address reaches
+the toolkit via each manifest's `spec.relay.endpoint`.
 
 ---
 
@@ -47,7 +52,7 @@ starts the shared Cacti relay itself.
 ```
 samples/
   hub/
-    hub-cbweb3.yaml                 # found-hub → the neutral hub (starts the relay)
+    hub-cbweb3.yaml                 # found-hub → the neutral hub (contracts + NOC)
   brazil/
     central-bank-brazil.yaml        # found-spoke → spoke-brl (proposes W-BRL-ARS)
     bank-itau.yaml                  # join → spoke-brl
@@ -100,6 +105,11 @@ samples/
   `Source "dependencies/forge-std-…/src/Test.sol" not found`. The deploy scripts
   run `forge soldeer install` automatically (idempotent), so `./deploy-all.sh`
   works from a clean checkout.
+- **External Cacti relay.** The relay is NOT started by the toolkit — bring it up
+  first with `scenario-b/provisioning/scripts/start-cacti.sh` (the deploy scripts
+  do this automatically). Each manifest's `spec.relay.endpoint`
+  (`http://localhost:4000`) tells the toolkit where to register the spoke; a
+  founding CB registers dynamically via `POST /api/v1/spokes` (`register-relay-spoke`).
 - The manifests use a **relative** `spec.node.dataDir` (`cbweb3-data/<entity>`).
   The deploy scripts `cd` into `samples/` first, so state and bundles land under
   `samples/cbweb3-data/` and `samples/bundles/` — no `sudo`, no privileged path.
@@ -127,7 +137,11 @@ for f in hub/*.yaml brazil/*.yaml argentina/*.yaml colombia/*.yaml; do
   "$BIN" validate -f "$f" -o yaml
 done
 
-# 1) found the hub (starts the relay; emits bundles/hub.bundle.yaml)
+# 0.5) start the EXTERNAL Cacti relay (hard prerequisite of register-relay-spoke).
+#      Its address is read from each manifest's spec.relay.endpoint (localhost:4000).
+bash "$ROOT/scenario-b/provisioning/scripts/start-cacti.sh"
+
+# 1) found the hub (emits bundles/hub.bundle.yaml)
 "$BIN" apply -f hub/hub-cbweb3.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD"
 
 # 2) found spoke-brl (consumes hub.bundle.yaml; proposes the pair; emits spoke-brl.bundle.yaml)
@@ -196,9 +210,15 @@ status (`done` / `skipped` / `failed` / `soft-failed` / `planned`).
 
 ## Notes
 
-- **`found-hub` starts the relay.** Unlike Scenario A (which needs a separate
-  `start-cacti.sh`), the Scenario B hub brings up the shared Cacti relay as part of
-  `found-hub`. The spokes register on it at runtime via `register-relay-spoke`.
+- **External relay (Scenario A strategy).** The Cacti relay is deployed outside
+  the toolkit (`start-cacti.sh`), before any `apply`; its address is passed in via
+  each manifest's `spec.relay.endpoint`. Each founding CB registers its spoke on it
+  at runtime via `register-relay-spoke` (`POST /api/v1/spokes`) — confirmed by the
+  relay health showing the registered `spokes` count.
+- **One Docker network per entity.** Every entity's services (besu + infra +
+  keycloak + backend + frontend + NOC) share a single `<prefix>_net` network
+  (created by the entity's besu compose; the rest join it as external) — mirrors
+  Scenario A and keeps Docker's address pool from being exhausted at N entities.
 - **One hub, N spokes.** Entities reach the hub by RPC (they do not join the hub's
   P2P network); the hub bundle carries the hub contract addresses consumed by each
   `found-spoke`.
