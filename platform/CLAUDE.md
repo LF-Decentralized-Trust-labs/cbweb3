@@ -130,6 +130,8 @@ Proto:
 - None — compose templates are files under provisioning/; validation is stateless (reads template + example env, returns result) (035-tk-b4-parametrized)
 - TypeScript 5.4 (relay Cacti, Node 20) + Go 1.26 (`RelayRegistrar` in toolkit); relay reuses express/ethers v6/cactus-besu (no new runtime deps); tests via node:test + ts-node; Go stdlib only (036-tk-b5-generalized)
 - Relay RelayStore = persisted JSON file on the relay volume (loaded at boot, saved per registration); Go local registrar is in-memory (036-tk-b5-generalized)
+- Go 1.26 (toolkit) — no new Go deps (go-ethereum RPC probes + yaml.v3 already present); os/exec CommandRunner (real/fake) for docker compose + forge + Keycloak; E2E needs Docker/Foundry/Besu (skip-with-warning) (037-tk-b6-orchestration)
+- State per step in `<dataDir>/.provisioning-state.yaml` + flock lock; hub bundle at `<outDir>/bundles/hub.bundle.yaml` (public, no secrets); contract addresses from Foundry broadcast JSON (037-tk-b6-orchestration)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components

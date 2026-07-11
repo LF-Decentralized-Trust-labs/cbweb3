@@ -607,7 +607,14 @@ soberano** (que exige dois spokes prontos + relay).
    (§14.D) permanece fora de escopo (segredo compartilhado como fallback). Lógica coberta por
    `node:test` (24) e `go test` (4).
 5. **TK-B6** — motor de orquestração + steps `found-hub` (`start-relay`, `start-noc`, Keycloak
-   write-back) + **hub bundle emitter** + comando **`apply`** (CLI sobre o motor).
+   write-back) + **hub bundle emitter** + comando **`apply`** (CLI sobre o motor). **[Implementado]**
+   — motor idempotente (`engine/orchestrator`: Step/Check-Run, estado YAML, `flock`, dry-run, report),
+   executor injetável (`engine/exec`), steps do `found-hub` (build → **gen-genesis-hub** (QBFT via
+   `besu operator generate-blockchain-config`) → besu-hub → deploy via `CBWeb3Hub.s.sol` → keycloak +
+   write-back → render-env → infra/backend/frontend → relay → noc → emit), `engine/addrs`
+   (broadcast Foundry), `engine/bundle` (hub bundle público) e o subcomando
+   `apply -f … [--dry-run] [-o json|yaml]`. Unidade com FakeRunner; suíte E2E sob build tag `e2e`
+   (skip-com-aviso). Keycloak mantido (governança + NOC + gate IV).
 6. **TK-B7** — `found-spoke` (`register-cb` + contratos de spoke + Keycloak write-back +
    `register-relay-spoke` + `add-noc-agent`) + **spoke bundle emitter**.
 7. **TK-B8** — `join` (full node não-validador).
