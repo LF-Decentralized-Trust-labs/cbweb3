@@ -106,6 +106,47 @@ const (
 	hubKeycloakSecret = "hub-backend-local-secret" // local-only, not a real secret
 )
 
+// Local images the toolkit builds (image: build) for the hub services.
+const (
+	hubBackendImage    = "cbweb3b/api-gateway:local"
+	hubFrontendImage   = "cbweb3b/governance-frontend:local"
+	hubRelayImage      = "cbweb3b/cacti-relay:local"
+	hubNocBackendImage = "cbweb3b/noc-backend:local"
+	hubNocAgentImage   = "cbweb3b/noc-agent:local"
+	hubNocPortalImage  = "cbweb3b/noc-portal:local"
+
+	// spokeFrontendImage is the per-entity (bank/CB) frontend image built for a
+	// spoke; distinct from the hub's governance frontend.
+	spokeFrontendImage = "cbweb3b/bank-frontend:local"
+)
+
+// scenarioBDir is <repo>/scenario-b (parent of ContractsDir), the docker build
+// context root for the services.
+func (c HubConfig) scenarioBDir() string { return filepath.Dir(c.ContractsDir) }
+
+// imageExists reports whether a local image is present (via the runner).
+func (c HubConfig) imageExists(ctx context.Context, image string) bool {
+	_, err := c.Runner.Run(ctx, "docker", "image", "inspect", image)
+	return err == nil
+}
+
+// buildImage builds image from dockerfileRel within contextRel (both relative to
+// scenario-b), skipping when the image already exists.
+func (c HubConfig) buildImage(ctx context.Context, image, dockerfileRel, contextRel string) error {
+	if c.imageExists(ctx, image) {
+		return nil
+	}
+	base := c.scenarioBDir()
+	_, err := c.Runner.Run(ctx, "docker", "build", "-t", image,
+		"-f", filepath.Join(base, dockerfileRel), filepath.Join(base, contextRel))
+	return err
+}
+
+// buildBackendImage builds the api-gateway image (context: scenario-b/backend).
+func (c HubConfig) buildBackendImage(ctx context.Context) error {
+	return c.buildImage(ctx, hubBackendImage, "backend/services/api-gateway/Dockerfile", "backend")
+}
+
 // provisionKeycloakRealm creates (idempotently) the realm + client with a fixed
 // local secret via kcadm inside the running Keycloak container.
 func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
@@ -155,24 +196,24 @@ func (c HubConfig) renderHubComposeEnv() error {
 		// backend / frontend / relay / noc (images must be pre-built locally)
 		"GATEWAY_PORT":         itoa(c.RPCPort + 8000),
 		"GATEWAY_URL":          fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
-		"BACKEND_IMAGE":        "cbweb3b-hub-backend:local",
-		"FRONTEND_IMAGE":       "cbweb3b-hub-frontend:local",
+		"BACKEND_IMAGE":        hubBackendImage,
+		"FRONTEND_IMAGE":       hubFrontendImage,
 		"FRONTEND_PORT":        itoa(c.RPCPort + 9000),
-		"RELAY_IMAGE":          "cbweb3b-relay:local",
+		"RELAY_IMAGE":          hubRelayImage,
 		"RELAY_CONTAINER_NAME": e + "-relay",
 		"RELAY_NET_PREFIX":     c.NetPrefix,
 		"RELAY_VOLUME_PREFIX":  c.VolumePrefix,
 		"RELAY_PORT":           "4000",
 		"NOC_AGENT_BESU_RPC":   fmt.Sprintf("http://%s-hub-validator:8545", e),
 		"NOC_AGENT_ENTITY":     "hub",
-		"NOC_AGENT_IMAGE":      "cbweb3b-noc-agent:local",
-		"NOC_BACKEND_IMAGE":    "cbweb3b-noc-backend:local",
+		"NOC_AGENT_IMAGE":      hubNocAgentImage,
+		"NOC_BACKEND_IMAGE":    hubNocBackendImage,
 		"NOC_BACKEND_PORT":     itoa(c.RPCPort + 11000),
 		"NOC_DB_NAME":          "noc",
 		"NOC_DB_USER":          "cbweb3",
 		"NOC_DB_PASSWORD":      "cbweb3",
 		"NOC_NET_PREFIX":       c.NetPrefix,
-		"NOC_PORTAL_IMAGE":     "cbweb3b-noc-portal:local",
+		"NOC_PORTAL_IMAGE":     hubNocPortalImage,
 		"NOC_PORTAL_PORT":      itoa(c.RPCPort + 12000),
 		"NOC_VOLUME_PREFIX":    c.VolumePrefix,
 	}
@@ -207,7 +248,10 @@ func FoundHubSteps(c HubConfig) []Step {
 		{
 			Name: "render-hub-compose-env",
 			Deps: []string{"gen-genesis-hub"},
-			Run:  func(context.Context) error { return c.renderHubComposeEnv() },
+			// Always re-render (never state-skipped): config/ports/images must be
+			// fresh in the .env before every compose, and AppendAddr is an upsert.
+			Check: func(context.Context) (bool, error) { return false, nil },
+			Run:   func(context.Context) error { return c.renderHubComposeEnv() },
 		},
 		{
 			Name: "start-besu-hub",
@@ -286,6 +330,9 @@ func FoundHubSteps(c HubConfig) []Step {
 		{
 			Name: "render-hub-env",
 			Deps: []string{"deploy-hub-contracts"},
+			// Always re-render: backend env (contract addresses, secrets) must be
+			// fresh before every backend start; AppendAddr upserts.
+			Check: func(context.Context) (bool, error) { return false, nil },
 			Run: func(context.Context) error {
 				m, err := hubContractMap(c.broadcastPath())
 				if err != nil {
@@ -307,10 +354,51 @@ func FoundHubSteps(c HubConfig) []Step {
 				return nil
 			},
 		},
-		{Name: "start-hub-backend", Deps: []string{"start-hub-infra", "render-hub-env", "provision-keycloak-hub"}, Run: compose("entity-backend")},
-		{Name: "start-hub-frontend", Deps: []string{"start-hub-backend"}, Run: compose("entity-frontend")},
-		{Name: "start-relay", Deps: []string{"deploy-hub-contracts"}, Run: compose("relay")},
-		{Name: "start-noc", Deps: []string{"start-relay", "start-hub-infra"}, Run: compose("noc")},
+		{
+			Name: "build-hub-backend-image",
+			Check: func(ctx context.Context) (bool, error) {
+				_, err := c.Runner.Run(ctx, "docker", "image", "inspect", hubBackendImage)
+				return err == nil, nil
+			},
+			Run: func(ctx context.Context) error { return c.buildBackendImage(ctx) },
+		},
+		{Name: "start-hub-backend", Deps: []string{"start-hub-infra", "render-hub-env", "provision-keycloak-hub", "build-hub-backend-image"}, Run: compose("entity-backend")},
+		// UI / relay / NOC are SOFT (non-fatal): they build heavier Node/React
+		// images on demand; a build/start failure never blocks the hub's
+		// operational core (besu + contracts + infra + keycloak + backend).
+		{
+			Name: "start-hub-frontend", Deps: []string{"start-hub-backend"}, Soft: true,
+			Run: func(ctx context.Context) error {
+				if err := c.buildImage(ctx, hubFrontendImage, "frontend/apps/governance/Dockerfile", "frontend"); err != nil {
+					return err
+				}
+				return compose("entity-frontend")(ctx)
+			},
+		},
+		{
+			Name: "start-relay", Deps: []string{"deploy-hub-contracts"}, Soft: true,
+			Run: func(ctx context.Context) error {
+				if err := c.buildImage(ctx, hubRelayImage, "interop/hub-and-spoke/cacti/Dockerfile", "."); err != nil {
+					return err
+				}
+				return compose("relay")(ctx)
+			},
+		},
+		{
+			Name: "start-noc", Deps: []string{"start-relay", "start-hub-infra"}, Soft: true,
+			Run: func(ctx context.Context) error {
+				if err := c.buildImage(ctx, hubNocBackendImage, "backend/services/noc-backend/Dockerfile", "backend"); err != nil {
+					return err
+				}
+				if err := c.buildImage(ctx, hubNocAgentImage, "backend/services/noc-agent/Dockerfile", "backend"); err != nil {
+					return err
+				}
+				if err := c.buildImage(ctx, hubNocPortalImage, "frontend/apps/noc/Dockerfile", "frontend"); err != nil {
+					return err
+				}
+				return compose("noc")(ctx)
+			},
+		},
 		{
 			Name: "emit-hub-bundle",
 			Deps: []string{"deploy-hub-contracts"},

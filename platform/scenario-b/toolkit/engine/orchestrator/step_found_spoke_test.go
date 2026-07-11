@@ -104,12 +104,13 @@ func TestDeploySpokeInvokesScript(t *testing.T) {
 	_ = step.Run(context.Background())
 	found := false
 	for _, c := range fake.Calls {
-		if c.Name == "forge" && strings.Contains(strings.Join(c.Args, " "), "CBWeb3Spoke.s.sol:DeployCBWeb3Spoke") {
+		joined := c.Name + " " + strings.Join(c.Args, " ")
+		if strings.Contains(joined, "CBWeb3Spoke.s.sol:DeployCBWeb3Spoke") && strings.Contains(joined, "--legacy") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("deploy-spoke-contracts must invoke CBWeb3Spoke; calls=%+v", fake.Calls)
+		t.Fatalf("deploy-spoke-contracts must invoke CBWeb3Spoke with --legacy; calls=%+v", fake.Calls)
 	}
 }
 
@@ -186,8 +187,13 @@ func TestFoundSpokeOrder(t *testing.T) {
 		}
 	}
 	must("consume-hub-bundle", "register-cb")
+	must("gen-genesis-spoke", "render-spoke-compose-env")
+	must("render-spoke-compose-env", "start-besu-spoke")
 	must("gen-genesis-spoke", "start-besu-spoke")
 	must("start-besu-spoke", "deploy-spoke-contracts")
 	must("deploy-spoke-contracts", "emit-spoke-bundle")
 	must("start-besu-spoke", "register-relay-spoke")
+	// Infra creates the network/DB that keycloak + backend join → before them.
+	must("start-spoke-infra", "provision-keycloak-spoke")
+	must("provision-keycloak-spoke", "start-spoke-backend")
 }

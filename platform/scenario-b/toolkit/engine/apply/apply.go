@@ -107,22 +107,32 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		runner = exec.NewReal(root, nil)
 	}
 
+	rpcPort, wsPort, p2pPort := nodePorts(pd.Spec.Node)
+	prefix := sanitizePrefix(pd.Metadata.Name) // e.g. "central-bank-brazil"
 	cfg := orchestrator.SpokeConfig{
-		Runner:        runner,
-		ContractsDir:  filepath.Join(root, "scenario-b", "contracts"),
-		TemplatesDir:  filepath.Join(root, "scenario-b", "provisioning", "templates"),
-		OutDir:        outDir,
-		SpokeID:       pd.Spec.Spoke.ID,
-		SpokeChainID:  uint64(pd.Spec.Spoke.ChainID),
-		SpokeRPC:      o.SpokeRPC,
-		SpokeWS:       o.SpokeWS, // FR-008: first-class spoke WS (relay registration + bundle)
-		CBAddress:     o.CBAddress,
-		HubBundlePath: hubBundlePath,
-		HubRPC:        hubRPC,
-		SpokeEnvFile:  filepath.Join(dataDir, ".env.spoke"),
-		KeycloakEnv:   []string{filepath.Join(dataDir, ".env.spoke")},
-		GatewayURL:    o.GatewayURL,
-		Registrar:     reg,
+		Runner:          runner,
+		ContractsDir:    filepath.Join(root, "scenario-b", "contracts"),
+		TemplatesDir:    filepath.Join(root, "scenario-b", "provisioning", "templates"),
+		OutDir:          outDir,
+		SpokeID:         pd.Spec.Spoke.ID,
+		SpokeChainID:    uint64(pd.Spec.Spoke.ChainID),
+		SpokeRPC:        firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)),
+		SpokeWS:         firstNonEmpty(o.SpokeWS, localWS(wsPort)), // FR-008: first-class spoke WS (relay registration + bundle)
+		CBAddress:       o.CBAddress,
+		HubBundlePath:   hubBundlePath,
+		HubRPC:          hubRPC,
+		SpokeEnvFile:    filepath.Join(dataDir, ".env.spoke"),
+		KeycloakEnv:     []string{filepath.Join(dataDir, ".env.spoke")},
+		GatewayURL:      o.GatewayURL,
+		Registrar:       reg,
+		VolumePrefix:    prefix,
+		ContainerPrefix: "cbweb3-" + prefix,
+		NetPrefix:       prefix,
+		Entity:          firstNonEmpty(pd.Spec.Topology.Role, "central-bank"),
+		RPCPort:         rpcPort,
+		WSPort:          wsPort,
+		P2PPort:         p2pPort,
+		Currency:        pd.Spec.Spoke.Currency,
 	}
 
 	// TK-B9: sovereign-pair tail (soft) — populated only when spec.pair is present.
