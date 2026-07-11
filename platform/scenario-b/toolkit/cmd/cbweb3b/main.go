@@ -10,9 +10,9 @@
 //	                 [--hub-rpc <url>] [--hub-ws <url>]
 //
 // `validate` parses/validates manifests and reports (no effects). `apply` runs
-// the orchestrator for the manifest's mode (found-hub in this phase): with
-// --dry-run it plans without effects; without it, it executes. found-spoke/join
-// are not supported yet (TK-B7/B8).
+// the orchestrator for the manifest's mode (found-hub or found-spoke): with
+// --dry-run it plans without effects; without it, it executes. join is not
+// supported yet (TK-B8).
 //
 // Exit codes: 0 = success (valid / all steps done|skipped|planned);
 // 1 = validation/config error or a failed step; 2 = usage/parse error.
@@ -111,7 +111,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 
 func runApply(args []string, stdout, stderr io.Writer) int {
 	var files fileList
-	var output, dataDir, outDir, repoRoot, hubRPC, hubWS string
+	var output, dataDir, outDir, repoRoot, hubRPC, hubWS, spokeRPC, spokeWS, gatewayURL, cbAddr, relay string
 	var dryRun bool
 	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -125,6 +125,11 @@ func runApply(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&repoRoot, "repo-root", ".", "repository root (for contracts/templates)")
 	fs.StringVar(&hubRPC, "hub-rpc", "", "hub RPC URL (readiness gate)")
 	fs.StringVar(&hubWS, "hub-ws", "", "hub WS URL")
+	fs.StringVar(&spokeRPC, "spoke-rpc", "", "spoke RPC URL (found-spoke)")
+	fs.StringVar(&spokeWS, "spoke-ws", "", "spoke WS URL (found-spoke → relay registration + spoke bundle)")
+	fs.StringVar(&gatewayURL, "gateway-url", "", "spoke gateway URL (found-spoke → relay)")
+	fs.StringVar(&cbAddr, "cb-address", "", "central bank address (found-spoke → register-cb)")
+	fs.StringVar(&relay, "relay", "", "RelayRegistrar URI (default local; e.g. relay://host:4000)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -148,6 +153,11 @@ func runApply(args []string, stdout, stderr io.Writer) int {
 		OutDir:       outDir,
 		HubRPC:       hubRPC,
 		HubWS:        hubWS,
+		SpokeRPC:     spokeRPC,
+		SpokeWS:      spokeWS,
+		GatewayURL:   gatewayURL,
+		CBAddress:    cbAddr,
+		Relay:        relay,
 		Format:       output,
 		DryRun:       dryRun,
 	})
@@ -232,8 +242,8 @@ Usage:
                    [--hub-rpc <url>] [--hub-ws <url>]
 
 validate: parse/validate manifests and report (no effects).
-apply:    run the orchestrator for the manifest mode (found-hub); --dry-run
-          plans without effects. found-spoke/join are not supported yet.
+apply:    run the orchestrator for the manifest mode (found-hub | found-spoke);
+          --dry-run plans without effects. join is not supported yet (TK-B8).
 
 Exit codes: 0 success, 1 validation/config error or failed step, 2 usage/parse error
 `)

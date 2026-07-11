@@ -11,3 +11,17 @@ type HubBundle struct {
 	HubWS     string            `yaml:"hubWs" json:"hubWs"`
 	Contracts map[string]string `yaml:"contracts" json:"contracts"` // name -> 0x-address
 }
+
+// SpokeBundle is the versioned public artifact describing a founded spoke.
+// Unlike the hub bundle (RPC-only), it carries genesis + enode so commercial
+// banks can join the spoke (TK-B8). Public network data only — no secrets.
+type SpokeBundle struct {
+	Version   string            `yaml:"version" json:"version"`
+	SpokeID   string            `yaml:"spokeId" json:"spokeId"`
+	ChainID   uint64            `yaml:"chainId" json:"chainId"`
+	Enode     string            `yaml:"enode" json:"enode"`
+	SpokeRPC  string            `yaml:"spokeRpc" json:"spokeRpc"`
+	SpokeWS   string            `yaml:"spokeWs" json:"spokeWs"`
+	Genesis   string            `yaml:"genesis" json:"genesis"` // genesis.json contents (network config)
+	Contracts map[string]string `yaml:"contracts" json:"contracts"`
+}

@@ -6,17 +6,32 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/exec"
 )
 
-// genGenesisHubStep generates the hub's QBFT genesis (via
-// `besu operator generate-blockchain-config`) and seeds genesis.json into
-// GenesisDir, which the hub template mounts. Idempotent: skipped if genesis.json
-// already exists. Reproduces deploy/local/hub-besu/startBesu.sh's genesis step.
+// genGenesisHubStep generates the hub's QBFT genesis. Thin wrapper over the
+// generalized genGenesisStep (used by both hub and spoke).
 func genGenesisHubStep(c HubConfig) Step {
-	genesisFile := filepath.Join(c.GenesisDir, "genesis.json")
-	workDir := filepath.Join(c.GenesisDir, ".work")
+	return genGenesisStep("gen-genesis-hub", c.ChainID, c.GenesisDir, c.ValidatorCount, c.Runner, c.BesuImage)
+}
+
+// genGenesisStep generates a QBFT genesis (via `besu operator
+// generate-blockchain-config`) and seeds genesis.json into genesisDir, which the
+// node template mounts. Idempotent: skipped if genesis.json already exists.
+// Reproduces the genesis step of deploy/local/*-besu/startBesu.sh. Reused by hub
+// and spoke (parametrized by name/chainID/genesisDir).
+func genGenesisStep(name string, chainID uint64, genesisDir string, validators int, runner exec.CommandRunner, image string) Step {
+	if validators < 1 {
+		validators = 1
+	}
+	if image == "" {
+		image = "hyperledger/besu:25.8.0"
+	}
+	genesisFile := filepath.Join(genesisDir, "genesis.json")
+	workDir := filepath.Join(genesisDir, ".work")
 	return Step{
-		Name: "gen-genesis-hub",
+		Name: name,
 		Check: func(context.Context) (bool, error) {
 			_, err := os.Stat(genesisFile)
 			return err == nil, nil
@@ -26,17 +41,16 @@ func genGenesisHubStep(c HubConfig) Step {
 				return err
 			}
 			cfgPath := filepath.Join(workDir, "qbftConfig.json")
-			if err := os.WriteFile(cfgPath, qbftConfig(c.ChainID, c.ValidatorCount), 0o644); err != nil {
+			if err := os.WriteFile(cfgPath, qbftConfig(chainID, validators), 0o644); err != nil {
 				return err
 			}
-			// besu operator generate-blockchain-config → workDir/networkFiles/genesis.json
-			if _, err := c.Runner.Run(ctx, "docker", "run", "--rm",
-				"-v", workDir+":/work", c.BesuImage,
+			if _, err := runner.Run(ctx, "docker", "run", "--rm",
+				"-v", workDir+":/work", image,
 				"operator", "generate-blockchain-config",
 				"--config-file=/work/qbftConfig.json", "--to=/work/networkFiles"); err != nil {
 				return err
 			}
-			if err := os.MkdirAll(c.GenesisDir, 0o755); err != nil {
+			if err := os.MkdirAll(genesisDir, 0o755); err != nil {
 				return err
 			}
 			return copyFile(filepath.Join(workDir, "networkFiles", "genesis.json"), genesisFile)

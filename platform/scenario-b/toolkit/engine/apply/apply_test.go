@@ -31,10 +31,30 @@ func TestApplyFoundHubDryRun(t *testing.T) {
 	}
 }
 
-// SC-008: unsupported mode is rejected with a clear error.
-func TestApplyUnsupportedMode(t *testing.T) {
-	_, err := Apply(context.Background(), Options{
+// TK-B7: found-spoke dry-run plans the steps (hub bundle validated, no effects).
+func TestApplyFoundSpokeDryRun(t *testing.T) {
+	rep, err := Apply(context.Background(), Options{
 		ManifestPath: filepath.Join(fixtures, "found-spoke.yaml"),
+		DataDir:      t.TempDir(),
+		DryRun:       true,
+	})
+	if err != nil {
+		t.Fatalf("apply found-spoke dry-run: %v", err)
+	}
+	if rep.Mode != "found-spoke" || len(rep.Steps) == 0 {
+		t.Fatalf("unexpected report: %+v", rep)
+	}
+	for _, s := range rep.Steps {
+		if s.Status != orchestrator.StatusPlanned && s.Status != orchestrator.StatusSkipped {
+			t.Fatalf("dry-run step %s status %s", s.Name, s.Status)
+		}
+	}
+}
+
+// SC-008: join mode is rejected with a clear error.
+func TestApplyJoinUnsupported(t *testing.T) {
+	_, err := Apply(context.Background(), Options{
+		ManifestPath: filepath.Join(fixtures, "join.yaml"),
 		DataDir:      t.TempDir(),
 		DryRun:       true,
 	})

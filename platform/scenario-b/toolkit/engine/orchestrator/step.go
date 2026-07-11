@@ -10,18 +10,21 @@ import "context"
 type Status string
 
 const (
-	StatusDone    Status = "done"
-	StatusSkipped Status = "skipped"
-	StatusFailed  Status = "failed"
-	StatusPlanned Status = "planned"
+	StatusDone       Status = "done"
+	StatusSkipped    Status = "skipped"
+	StatusFailed     Status = "failed"
+	StatusPlanned    Status = "planned"
+	StatusSoftFailed Status = "soft-failed"
 )
 
 // Step is a unit of work: Check reports whether it is already satisfied
 // (idempotency), Run performs the effect. Deps are step names that must run
-// before it.
+// before it. A Soft step whose Run fails is reported as soft-failed and does
+// NOT interrupt the run (e.g. add-noc-agent — observability, non-blocking).
 type Step struct {
 	Name  string
 	Deps  []string
+	Soft  bool
 	Check func(ctx context.Context) (bool, error)
 	Run   func(ctx context.Context) error
 }

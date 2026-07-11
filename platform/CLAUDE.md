@@ -132,6 +132,8 @@ Proto:
 - Relay RelayStore = persisted JSON file on the relay volume (loaded at boot, saved per registration); Go local registrar is in-memory (036-tk-b5-generalized)
 - Go 1.26 (toolkit) — no new Go deps (go-ethereum RPC probes + yaml.v3 already present); os/exec CommandRunner (real/fake) for docker compose + forge + Keycloak; E2E needs Docker/Foundry/Besu (skip-with-warning) (037-tk-b6-orchestration)
 - State per step in `<dataDir>/.provisioning-state.yaml` + flock lock; hub bundle at `<outDir>/bundles/hub.bundle.yaml` (public, no secrets); contract addresses from Foundry broadcast JSON (037-tk-b6-orchestration)
+- Go 1.26 (toolkit) — no new Go deps; found-spoke mode reuses the TK-B6 engine/exec/addrs/bundle + KeyProvider/CertSource/RelayRegistrar; enode via admin_nodeInfo; soft steps (add-noc-agent) (038-tk-b7-found)
+- Spoke bundle at `<outDir>/bundles/spoke-<id>.bundle.yaml` includes genesis + enode + chainId + spoke contract addresses (public, no secrets); consumed by join (TK-B8) (038-tk-b7-found)
 
 ## Recent Changes
 - 014-supervisor-portal: Added Go 1.26+ (backend), TypeScript / React 18 (frontend) + Fiber v2 (HTTP), GORM + Postgres (persistence), Keycloak OIDC (auth), Zustand (frontend state), TanStack Query (data fetching), shadcn/ui components

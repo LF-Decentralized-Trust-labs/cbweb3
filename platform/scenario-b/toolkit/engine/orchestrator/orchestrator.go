@@ -59,6 +59,13 @@ func (o *Orchestrator) Run(ctx context.Context) (Report, error) {
 		}
 
 		if rerr := st.Run(ctx); rerr != nil {
+			if st.Soft {
+				// Non-fatal: record and continue (e.g. add-noc-agent).
+				res.Status, res.Detail = StatusSoftFailed, rerr.Error()
+				rep.Steps = append(rep.Steps, res)
+				_ = o.state.Set(st.Name, StatusSoftFailed)
+				continue
+			}
 			res.Status, res.Detail = StatusFailed, rerr.Error()
 			rep.Steps = append(rep.Steps, res)
 			_ = o.state.Set(st.Name, StatusFailed)

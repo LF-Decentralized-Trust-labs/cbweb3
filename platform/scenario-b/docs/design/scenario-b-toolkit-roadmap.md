@@ -616,7 +616,14 @@ soberano** (que exige dois spokes prontos + relay).
    `apply -f … [--dry-run] [-o json|yaml]`. Unidade com FakeRunner; suíte E2E sob build tag `e2e`
    (skip-com-aviso). Keycloak mantido (governança + NOC + gate IV).
 6. **TK-B7** — `found-spoke` (`register-cb` + contratos de spoke + Keycloak write-back +
-   `register-relay-spoke` + `add-noc-agent`) + **spoke bundle emitter**.
+   `register-relay-spoke` + `add-noc-agent`) + **spoke bundle emitter**. **[Implementado]** — modo
+   `found-spoke` no motor: consume-hub-bundle → register-cb (registerParticipant + grantLiquidityProvider
+   automático, idempotentes) → gen-genesis-spoke → start-besu-spoke (captura enode) → deploy via
+   `CBWeb3Spoke.s.sol` → wire-hub-addresses → keycloak (+write-back) → infra/backend/frontend →
+   register-relay-spoke (via `RelayRegistrar`) → add-noc-agent (**soft**) → emit-spoke-bundle
+   (`engine/bundle.SpokeBundle`: genesis + enode + endereços). Extensões do motor: `Step.Soft` +
+   captura de enode (`admin_nodeInfo`). Unidade com FakeRunner; suíte E2E sob build tag `e2e`. Par
+   soberano/liquidez/oracle e auth-por-CB permanecem fora de escopo (TK-B9/§14.D).
 7. **TK-B8** — `join` (full node não-validador).
 8. **TK-B9** — par soberano (`open-sovereign-pair`) + liquidez cooperativa (commit-reveal) +
    `seed-oracle`.

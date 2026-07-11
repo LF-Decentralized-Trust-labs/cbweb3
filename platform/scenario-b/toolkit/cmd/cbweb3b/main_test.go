@@ -94,15 +94,27 @@ func TestApplyFoundHubDryRun(t *testing.T) {
 	}
 }
 
-// TK-B6: found-spoke/join modes are not supported yet → exit 1.
+// TK-B7: found-hub and found-spoke are supported; join is not yet → exit 1.
 func TestApplyUnsupportedModeExits(t *testing.T) {
-	f := filepath.Join(fixtureDir, "found-spoke.yaml")
+	f := filepath.Join(fixtureDir, "join.yaml")
 	code, _, errb := runCLI(t, "apply", "-f", f, "--dry-run", "--data-dir", t.TempDir())
 	if code != exitInvalid {
-		t.Fatalf("apply found-spoke: expected exit 1, got %d", code)
+		t.Fatalf("apply join: expected exit 1, got %d", code)
 	}
 	if !strings.Contains(errb, "not supported yet") {
 		t.Errorf("expected 'not supported yet' error, got: %s", errb)
+	}
+}
+
+// TK-B7: found-spoke dry-run plans the steps (exit 0).
+func TestApplyFoundSpokeDryRunCLI(t *testing.T) {
+	f := filepath.Join(fixtureDir, "found-spoke.yaml")
+	code, out, errb := runCLI(t, "apply", "-f", f, "--dry-run", "--data-dir", t.TempDir())
+	if code != exitValid {
+		t.Fatalf("apply found-spoke dry-run: expected 0, got %d (err=%s)", code, errb)
+	}
+	if !strings.Contains(out, "found-spoke") {
+		t.Errorf("expected found-spoke report, got:\n%s", out)
 	}
 }
 
