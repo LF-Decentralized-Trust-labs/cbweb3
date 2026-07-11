@@ -55,7 +55,9 @@ func ValidateSpoke(b SpokeBundle) error {
 	return nil
 }
 
-// EmitSpoke writes the bundle to <outDir>/bundles/spoke-<id>.bundle.yaml (atomic).
+// EmitSpoke writes the bundle to <outDir>/bundles/<spokeId>.bundle.yaml (atomic).
+// The spoke id is used verbatim (ids are already like "spoke-brl"), so a joining
+// bank's joinBundleRef points straight at <spokeId>.bundle.yaml.
 func EmitSpoke(b SpokeBundle, outDir string) (string, error) {
 	if b.Version == "" {
 		b.Version = SpokeBundleVersion
@@ -67,7 +69,7 @@ func EmitSpoke(b SpokeBundle, outDir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	p := filepath.Join(dir, "spoke-"+b.SpokeID+".bundle.yaml")
+	p := filepath.Join(dir, b.SpokeID+".bundle.yaml")
 	raw, err := yaml.Marshal(b)
 	if err != nil {
 		return "", err

@@ -35,6 +35,7 @@ type SpokeConfig struct {
 	RPCPort         int    // host port -> besu 8545; other service ports derive by offset
 	WSPort          int    // host port -> besu 8546
 	P2PPort         int    // host port -> besu 30303
+	AdvertisedHost  string // externally reachable host for the spoke bundle enode (default host.docker.internal)
 	Currency        string // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
 	TokenName       string // tCeBM name (default "Tokenized <Currency>")
 	TokenSymbol     string // tCeBM symbol (default "t<Currency>")
@@ -114,6 +115,9 @@ func (c *SpokeConfig) WithDefaults() {
 	}
 	if c.P2PPort == 0 {
 		c.P2PPort = 30303
+	}
+	if c.AdvertisedHost == "" {
+		c.AdvertisedHost = "host.docker.internal"
 	}
 	if c.GatewayURL == "" {
 		c.GatewayURL = fmt.Sprintf("http://localhost:%d", c.RPCPort+8000)
@@ -263,7 +267,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 
 	compose := func(tmpl string) func(context.Context) error {
 		return func(ctx context.Context) error {
-			_, err := c.Runner.Run(ctx, "docker", "compose", "-f", c.spokeTemplate(tmpl), "--env-file", c.SpokeEnvFile, "up", "-d")
+			_, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix, "-f", c.spokeTemplate(tmpl), "--env-file", c.SpokeEnvFile, "up", "-d")
 			return err
 		}
 	}
@@ -333,7 +337,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				// The founding CB is the spoke's sole validator and its own bootnode,
 				// so it uses the bootnode-less founder template (later banks join via
 				// entity-besu with BOOTNODE_ENODE from the spoke bundle).
-				if _, err := c.Runner.Run(ctx, "docker", "compose", "-f", c.spokeTemplate("entity-besu-founder"), "--env-file", c.SpokeEnvFile, "up", "-d"); err != nil {
+				if _, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix, "-f", c.spokeTemplate("entity-besu-founder"), "--env-file", c.SpokeEnvFile, "up", "-d"); err != nil {
 					return err
 				}
 				if err := c.WaitRPC(ctx); err != nil {
@@ -350,9 +354,19 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 		{
 			Name: "deploy-spoke-contracts",
 			Deps: []string{"build-contracts", "start-besu-spoke"},
-			Check: func(context.Context) (bool, error) {
-				_, err := addrs.ParseBroadcastList(c.spokeBroadcastPath())
-				return err == nil, nil
+			// Skip only when the broadcast parses AND its identityRegistry actually
+			// has code on the live spoke chain — a stale broadcast over a recreated
+			// volume must re-deploy, not skip.
+			Check: func(ctx context.Context) (bool, error) {
+				m, err := spokeContractMap(c.spokeBroadcastPath())
+				if err != nil || m["identityRegistry"] == "" {
+					return false, nil
+				}
+				has, err := contractHasCode(ctx, c.SpokeRPC, m["identityRegistry"])
+				if err != nil {
+					return false, nil // chain unreachable → re-deploy (safe)
+				}
+				return has, nil
 			},
 			Run: func(ctx context.Context) error {
 				if err := c.WaitRPC(ctx); err != nil {
@@ -413,7 +427,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				return true, nil
 			},
 			Run: func(ctx context.Context) error {
-				if _, err := c.Runner.Run(ctx, "docker", "compose", "-f", c.spokeTemplate("entity-keycloak"), "--env-file", c.SpokeEnvFile, "up", "-d"); err != nil {
+				if _, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix, "-f", c.spokeTemplate("entity-keycloak"), "--env-file", c.SpokeEnvFile, "up", "-d"); err != nil {
 					return err
 				}
 				if err := c.WaitKeycloak(ctx); err != nil {
@@ -491,7 +505,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 		Name: "emit-spoke-bundle",
 		Deps: emitDeps,
 		Check: func(context.Context) (bool, error) {
-			_, err := os.Stat(filepath.Join(c.OutDir, "bundles", "spoke-"+c.SpokeID+".bundle.yaml"))
+			_, err := os.Stat(filepath.Join(c.OutDir, "bundles", c.SpokeID+".bundle.yaml"))
 			return err == nil, nil
 		},
 		Run: func(ctx context.Context) error {
@@ -512,6 +526,21 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				if err != nil {
 					return err
 				}
+			}
+			// admin_nodeInfo advertises 127.0.0.1:30303; rewrite to the externally
+			// reachable endpoint so a joining bank can dial it as --bootnodes. A
+			// hostname (or the placeholder host.docker.internal) is not accepted by
+			// besu's --bootnodes, so resolve the host's LAN IP (scenario-a parity).
+			advHost := c.AdvertisedHost
+			if advHost == "" || advHost == "host.docker.internal" {
+				advHost, err = resolveHostIP()
+				if err != nil {
+					return err
+				}
+			}
+			enode = rewriteEnodeHost(enode, advHost, c.P2PPort)
+			if privateDockerIP.MatchString(enode) {
+				return fmt.Errorf("spoke bundle enode %q is loopback/docker-internal (unusable cross-stack); set HOST_IP or node.advertisedHost", enode)
 			}
 			b := bundle.SpokeBundle{
 				SpokeID: c.SpokeID, ChainID: c.SpokeChainID, Enode: enode,

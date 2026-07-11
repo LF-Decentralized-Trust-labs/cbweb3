@@ -1,0 +1,52 @@
+# entity-besu-join template — commercial bank joining an existing spoke.
+# A non-validating full node: it is NOT in the spoke's QBFT validator set (the
+# genesis lists only the CB), so it syncs without producing blocks. Unlike the
+# founder it takes --bootnodes = the CB's advertised enode (from the spoke
+# bundle). Node state lives in named volumes; zero-gas. No secrets embedded.
+services:
+  besu:
+    image: "${BESU_IMAGE:-hyperledger/besu:25.8.0}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-besu"
+    command:
+      - "--data-path=data"
+      - "--genesis-file=genesis/genesis.json"
+      - "--min-gas-price=0"
+      # Small QBFT network: the CB is the only peer, so full-sync from a single
+      # peer (besu defaults to SNAP sync waiting for 5 peers and never starts).
+      - "--sync-mode=FULL"
+      - "--sync-min-peers=1"
+      # BOOTNODE_ENODE is the CB's advertised enode with the host LAN IP (numeric),
+      # which besu accepts directly — no DNS/extra_hosts needed for P2P.
+      - "--bootnodes=${BOOTNODE_ENODE:?}"
+      - "--rpc-http-enabled"
+      - "--rpc-http-api=ETH,NET,QBFT,ADMIN"
+      - "--rpc-ws-enabled"
+      - "--rpc-ws-api=ETH,NET,QBFT,ADMIN"
+      - "--host-allowlist=*"
+      - "--rpc-http-cors-origins=all"
+      - "--rpc-http-host=0.0.0.0"
+      - "--rpc-ws-host=0.0.0.0"
+      - "--rpc-http-port=8545"
+      - "--rpc-ws-port=8546"
+      - "--p2p-port=30303"
+    ports:
+      - "${ENTITY_RPC_PORT:?}:8545"
+      - "${ENTITY_WS_PORT:?}:8546"
+      - "${ENTITY_P2P_PORT:?}:30303"
+      - "${ENTITY_P2P_PORT:?}:30303/udp"
+    volumes:
+      - entity_besu_data:/opt/besu/data
+      - entity_genesis:/opt/besu/genesis
+    networks:
+      - entity_besu_network
+    restart: always
+
+networks:
+  entity_besu_network:
+    name: "${ENTITY_NET_PREFIX:?}_besu_network"
+
+volumes:
+  entity_besu_data:
+    name: "${ENTITY_VOLUME_PREFIX:?}_besu_data"
+  entity_genesis:
+    name: "${ENTITY_VOLUME_PREFIX:?}_genesis"

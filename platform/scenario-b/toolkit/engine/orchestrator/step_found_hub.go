@@ -230,7 +230,7 @@ func FoundHubSteps(c HubConfig) []Step {
 	c.WithDefaults()
 	compose := func(tmpl string) func(context.Context) error {
 		return func(ctx context.Context) error {
-			_, err := c.Runner.Run(ctx, "docker", "compose", "-f", c.template(tmpl), "--env-file", c.HubEnvFile, "up", "-d")
+			_, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix, "-f", c.template(tmpl), "--env-file", c.HubEnvFile, "up", "-d")
 			return err
 		}
 	}
@@ -257,7 +257,7 @@ func FoundHubSteps(c HubConfig) []Step {
 			Name: "start-besu-hub",
 			Deps: []string{"render-hub-compose-env"},
 			Run: func(ctx context.Context) error {
-				if _, err := c.Runner.Run(ctx, "docker", "compose", "-f", c.template("hub"), "--env-file", c.HubEnvFile, "up", "-d"); err != nil {
+				if _, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix, "-f", c.template("hub"), "--env-file", c.HubEnvFile, "up", "-d"); err != nil {
 					return err
 				}
 				return c.WaitRPC(ctx)
@@ -266,9 +266,19 @@ func FoundHubSteps(c HubConfig) []Step {
 		{
 			Name: "deploy-hub-contracts",
 			Deps: []string{"build-contracts", "start-besu-hub"},
-			Check: func(context.Context) (bool, error) {
-				_, err := addrs.ParseBroadcastList(c.broadcastPath())
-				return err == nil, nil
+			// Skip only when the broadcast parses AND its identityRegistry actually
+			// has code on the live chain — a stale broadcast over a recreated volume
+			// must re-deploy, not skip.
+			Check: func(ctx context.Context) (bool, error) {
+				m, err := hubContractMap(c.broadcastPath())
+				if err != nil || m["identityRegistry"] == "" {
+					return false, nil
+				}
+				has, err := contractHasCode(ctx, c.HubRPC, m["identityRegistry"])
+				if err != nil {
+					return false, nil // chain unreachable → re-deploy (safe)
+				}
+				return has, nil
 			},
 			Run: func(ctx context.Context) error {
 				if err := c.WaitRPC(ctx); err != nil { // readiness gate
@@ -306,7 +316,7 @@ func FoundHubSteps(c HubConfig) []Step {
 				return true, nil
 			},
 			Run: func(ctx context.Context) error {
-				if _, err := c.Runner.Run(ctx, "docker", "compose", "-f", c.template("entity-keycloak"), "--env-file", c.HubEnvFile, "up", "-d"); err != nil {
+				if _, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix, "-f", c.template("entity-keycloak"), "--env-file", c.HubEnvFile, "up", "-d"); err != nil {
 					return err
 				}
 				if err := c.WaitKeycloak(ctx); err != nil {

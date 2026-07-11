@@ -52,7 +52,11 @@ func TestConsumeSpokeBundleFailsOnInvalid(t *testing.T) {
 // US1/SC-002: write-genesis writes the bundle genesis; re-run with matching
 // content skips (Check true); a divergent on-disk genesis is a hard error.
 func TestWriteGenesisGuard(t *testing.T) {
-	cfg := testJoinCfg(t, &exec.FakeRunner{})
+	// Node state lives in a named volume: Run stages the bundle genesis to the host
+	// scratch then copies it into the volume; Check reads it back via the runner
+	// (docker cat → fake Outputs["docker"]).
+	fake := &exec.FakeRunner{Outputs: map[string][]byte{"docker": []byte(testGenesis)}}
+	cfg := testJoinCfg(t, fake)
 	step := findStep(JoinSteps(cfg), "write-genesis")
 
 	if err := step.Run(context.Background()); err != nil {
@@ -60,15 +64,15 @@ func TestWriteGenesisGuard(t *testing.T) {
 	}
 	got, _ := os.ReadFile(filepath.Join(cfg.GenesisDir, "genesis.json"))
 	if string(got) != testGenesis {
-		t.Fatalf("genesis not written from bundle:\n%s", got)
+		t.Fatalf("genesis not staged from bundle:\n%s", got)
 	}
-	// Matching content → Check skips.
+	// Matching content in the volume → Check skips.
 	skip, err := step.Check(context.Background())
 	if err != nil || !skip {
 		t.Fatalf("matching genesis should skip: skip=%v err=%v", skip, err)
 	}
-	// Divergent content → Check errors (non-destructive guard).
-	_ = os.WriteFile(filepath.Join(cfg.GenesisDir, "genesis.json"), []byte(`{"config":{"chainId":9999}}`), 0o644)
+	// Divergent volume content → Check errors (non-destructive guard).
+	fake.Outputs["docker"] = []byte(`{"config":{"chainId":9999}}`)
 	if _, err := step.Check(context.Background()); err == nil {
 		t.Fatal("divergent genesis must be a hard error")
 	}
@@ -183,7 +187,7 @@ func TestJoinStepsOrder(t *testing.T) {
 	}
 	for _, want := range []string{
 		"consume-spoke-bundle", "write-genesis", "start-besu-join", "wait-sync",
-		"wire-addresses", "provision-keycloak-bank", "render-bank-env",
+		"wire-addresses", "provision-keycloak-bank", "render-bank-compose-env",
 		"start-bank-infra", "start-bank-backend", "start-bank-frontend", "gen-csr",
 	} {
 		if !names[want] {

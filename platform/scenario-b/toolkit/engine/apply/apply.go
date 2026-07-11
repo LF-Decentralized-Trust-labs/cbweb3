@@ -132,6 +132,7 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		RPCPort:         rpcPort,
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
+		AdvertisedHost:  pd.Spec.Node.AdvertisedHost,
 		Currency:        pd.Spec.Spoke.Currency,
 	}
 
@@ -208,6 +209,8 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		runner = exec.NewReal(root, nil)
 	}
 
+	rpcPort, wsPort, p2pPort := nodePorts(pd.Spec.Node)
+	prefix := sanitizePrefix(pd.Metadata.Name) // e.g. "bank-itau"
 	cfg := orchestrator.JoinConfig{
 		Runner:          runner,
 		TemplatesDir:    filepath.Join(root, "scenario-b", "provisioning", "templates"),
@@ -216,11 +219,19 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		Institution:     firstNonEmpty(pd.Spec.DisplayName, pd.Spec.BankID),
 		SpokeID:         pd.Spec.Spoke.ID,
 		SpokeChainID:    uint64(pd.Spec.Spoke.ChainID),
-		BankRPC:         o.SpokeRPC, // RPC of the bank's own node (wait-sync gate)
+		BankRPC:         firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)), // RPC of the bank's own node (wait-sync gate)
 		SpokeBundlePath: bundlePath,
 		DataDir:         dataDir,
 		BankEnvFile:     filepath.Join(dataDir, ".env.bank"),
 		KeycloakEnv:     []string{filepath.Join(dataDir, ".env.bank")},
+		VolumePrefix:    prefix,
+		ContainerPrefix: "cbweb3-" + prefix,
+		NetPrefix:       prefix,
+		Entity:          prefix,
+		RPCPort:         rpcPort,
+		WSPort:          wsPort,
+		P2PPort:         p2pPort,
+		HubRPC:          o.HubRPC,
 	}
 	steps := orchestrator.JoinSteps(cfg)
 	return orchestrator.New("join", steps, state, o.DryRun).Run(ctx)

@@ -58,7 +58,8 @@ func testSpokeCfg(t *testing.T, fake *exec.FakeRunner) SpokeConfig {
 		Runner: fake, ContractsDir: contracts, TemplatesDir: filepath.Join(dir, "tmpl"), OutDir: dir,
 		SpokeID: "spoke-a", SpokeChainID: 1338, SpokeRPC: "http://spoke:8545", SpokeWS: "ws://spoke:8546",
 		CBAddress: "0xCB", GenesisDir: filepath.Join(dir, "genesis"), HubBundlePath: hp, HubRPC: "http://hub:8545",
-		SpokeEnvFile: env, KeycloakEnv: []string{env}, GatewayURL: "http://gw", Registrar: reg,
+		AdvertisedHost: "10.0.0.5", // explicit → deterministic enode (no host-IP resolution)
+		SpokeEnvFile:   env, KeycloakEnv: []string{env}, GatewayURL: "http://gw", Registrar: reg,
 		WaitRPC:          func(context.Context) error { return nil },
 		WaitKeycloak:     func(context.Context) error { return nil },
 		ReadClientSecret: func(context.Context) (string, error) { return "s3cr3t", nil },
@@ -162,11 +163,13 @@ func TestEmitSpokeBundle(t *testing.T) {
 	if err := findStep(steps, "emit-spoke-bundle").Run(context.Background()); err != nil {
 		t.Fatalf("emit-spoke-bundle: %v", err)
 	}
-	b, err := bundle.LoadSpoke(filepath.Join(cfg.OutDir, "bundles", "spoke-spoke-a.bundle.yaml"))
+	b, err := bundle.LoadSpoke(filepath.Join(cfg.OutDir, "bundles", "spoke-a.bundle.yaml"))
 	if err != nil {
 		t.Fatalf("load spoke bundle: %v", err)
 	}
-	if b.Enode != "enode://cb@spoke:30303" || b.ChainID != 1338 || b.Contracts["spokeBridge"] != "0xs3" {
+	// emit rewrites the enode host to the advertised endpoint (the configured
+	// AdvertisedHost + P2P port) so a joining bank can dial it as --bootnodes.
+	if b.Enode != "enode://cb@10.0.0.5:30303" || b.ChainID != 1338 || b.Contracts["spokeBridge"] != "0xs3" {
 		t.Fatalf("spoke bundle mismatch: %+v", b)
 	}
 }

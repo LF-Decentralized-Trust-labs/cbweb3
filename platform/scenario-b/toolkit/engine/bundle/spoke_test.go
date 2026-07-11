@@ -25,7 +25,7 @@ func TestEmitLoadSpokeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EmitSpoke: %v", err)
 	}
-	if !strings.HasSuffix(p, "spoke-spoke-a.bundle.yaml") {
+	if !strings.HasSuffix(p, "spoke-a.bundle.yaml") {
 		t.Fatalf("path = %s", p)
 	}
 	got, err := LoadSpoke(p)
