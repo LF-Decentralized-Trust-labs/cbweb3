@@ -189,6 +189,10 @@ func (c JoinConfig) bankTemplate(name string) string {
 	return filepath.Join(c.TemplatesDir, name+".compose.yaml")
 }
 
+// scenarioBDir is <repo>/scenario-b, the docker build context root for the bank's
+// soft service images. Derived from TemplatesDir (<scenario-b>/provisioning/templates).
+func (c JoinConfig) scenarioBDir() string { return filepath.Dir(filepath.Dir(c.TemplatesDir)) }
+
 func (c JoinConfig) genesisPath() string {
 	return filepath.Join(c.GenesisDir, "genesis.json")
 }
@@ -337,7 +341,12 @@ func JoinSteps(c JoinConfig) []Step {
 		},
 		{Name: "start-bank-infra", Deps: []string{"render-bank-compose-env", "wait-sync"}, Run: compose("entity-infra")},
 		{Name: "start-bank-backend", Deps: []string{"start-bank-infra", "wire-addresses", "provision-keycloak-bank"}, Run: compose("entity-backend")},
-		{Name: "start-bank-frontend", Deps: []string{"start-bank-backend"}, Soft: true, Run: compose("entity-frontend")},
+		{Name: "start-bank-frontend", Deps: []string{"start-bank-backend"}, Soft: true, Run: func(ctx context.Context) error {
+			if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), spokeFrontendImage, "frontend/apps/bank/Dockerfile", "frontend"); err != nil {
+				return err
+			}
+			return compose("entity-frontend")(ctx)
+		}},
 		{
 			// Deferred PKI tail: the ONLY PKI step of the toolkit. Generates the
 			// bank keypair + CSR locally (key 0600, never transmitted). The

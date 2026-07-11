@@ -7,12 +7,15 @@
 #   • Brazil    (spoke-brl)   : central-bank-brazil    + bank-itau, bank-bradesco
 #   • Argentina (spoke-ars)   : central-bank-argentina + bank-galicia, bank-macro
 #
-# found-hub founds the hub (Besu + base contracts) and STARTS the shared relay.
-# Each central bank FOUNDS its spoke (CB is the sole QBFT validator), registers on
-# the hub, and — when its manifest carries `spec.pair` — runs the soft sovereign
-# tail (open-sovereign-pair / commit-liquidity / seed-oracle). Brazil proposes the
-# BRL<->ARS pair; Argentina confirms it. Each commercial bank JOINS as a
-# non-validating full node.
+# The Cacti relay is deployed EXTERNALLY (provisioning/scripts/start-cacti.sh)
+# before any apply — its address reaches the toolkit via each manifest's
+# spec.relay.endpoint (http://localhost:4000). found-hub founds the hub (Besu +
+# base contracts). Each central bank FOUNDS its spoke (CB is the sole QBFT
+# validator), registers on the hub, dynamically registers its spoke with the relay
+# (POST /api/v1/spokes), and — when its manifest carries `spec.pair` — runs the
+# soft sovereign tail (open-sovereign-pair / commit-liquidity / seed-oracle).
+# Brazil proposes the BRL<->ARS pair; Argentina confirms it. Each commercial bank
+# JOINS as a non-validating full node.
 #
 # Idempotent: re-running resumes from the first incomplete step per entity
 # (per-entity state under cbweb3-data/<entity>).
@@ -37,6 +40,7 @@ if [[ "${1:-}" == "--clean" ]]; then
   log "cleaning docker (containers + volumes) and data dirs…"
   docker rm -f $(docker ps -aq) 2>/dev/null || true
   docker volume rm $(docker volume ls -q) 2>/dev/null || true
+  docker network prune -f 2>/dev/null || true   # free address pools (one net per entity)
   rm -rf "${SCRIPT_DIR}/cbweb3-data" "${SCRIPT_DIR}/bundles" 2>/dev/null || true
 fi
 
@@ -67,7 +71,12 @@ apply() {
     "$@"
 }
 
-# --- hub (starts the shared relay) --------------------------------------------
+# --- relay (external; hard prerequisite of register-relay-spoke) --------------
+# Deployed outside the toolkit and reached via each manifest's spec.relay.endpoint.
+log "starting Cacti relay (external)…"
+bash "${SCENARIO_DIR}/provisioning/scripts/start-cacti.sh"
+
+# --- hub -----------------------------------------------------------------------
 apply "Hub — found-hub hub-cbweb3" "${SCRIPT_DIR}/hub/hub-cbweb3.yaml"
 
 # --- Brazil spoke (proposes the BRL<->ARS pair) -------------------------------

@@ -18,37 +18,38 @@ import (
 // relay registrar are injectable so the step set is testable without a live
 // Besu/Keycloak/relay.
 type SpokeConfig struct {
-	Runner          exec.CommandRunner
-	ContractsDir    string
-	TemplatesDir    string
-	OutDir          string
-	SpokeID         string
-	SpokeChainID    uint64
-	SpokeRPC        string
-	SpokeWS         string
-	CBAddress       string
-	GenesisDir      string
-	VolumePrefix    string // <p>_genesis, <p>_besu_data (node state in named volumes)
-	ContainerPrefix string // container name prefix (<p>-<entity>-besu, ...)
-	NetPrefix       string // docker network name prefix (<p>_besu_network, <p>_infra_network)
-	Entity          string // compose ENTITY label (e.g. "central-bank")
-	RPCPort         int    // host port -> besu 8545; other service ports derive by offset
-	WSPort          int    // host port -> besu 8546
-	P2PPort         int    // host port -> besu 30303
-	AdvertisedHost  string // externally reachable host for the spoke bundle enode (default host.docker.internal)
-	Currency        string // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
-	TokenName       string // tCeBM name (default "Tokenized <Currency>")
-	TokenSymbol     string // tCeBM symbol (default "t<Currency>")
-	FiatTokenName   string // fCeBM name (default "Fiat <Currency>")
-	FiatTokenSymbol string // fCeBM symbol (default "f<Currency>")
-	ValidatorCount  int
-	BesuImage       string
-	HubBundlePath   string
-	HubRPC          string // hub RPC (from the bundle unless overridden)
-	SpokeEnvFile    string
-	KeycloakEnv     []string
-	GatewayURL      string
-	Registrar       relayregistrar.RelayRegistrar
+	Runner              exec.CommandRunner
+	ContractsDir        string
+	TemplatesDir        string
+	OutDir              string
+	SpokeID             string
+	SpokeChainID        uint64
+	SpokeRPC            string
+	SpokeWS             string
+	CBAddress           string
+	GenesisDir          string
+	VolumePrefix        string // <p>_genesis, <p>_besu_data (node state in named volumes)
+	ContainerPrefix     string // container name prefix (<p>-<entity>-besu, ...)
+	NetPrefix           string // docker network name prefix (<p>_besu_network, <p>_infra_network)
+	Entity              string // compose ENTITY label (e.g. "central-bank")
+	RPCPort             int    // host port -> besu 8545; other service ports derive by offset
+	WSPort              int    // host port -> besu 8546
+	P2PPort             int    // host port -> besu 30303
+	AdvertisedHost      string // externally reachable host for the spoke bundle enode (default host.docker.internal)
+	RelayAdvertisedHost string // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
+	Currency            string // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
+	TokenName           string // tCeBM name (default "Tokenized <Currency>")
+	TokenSymbol         string // tCeBM symbol (default "t<Currency>")
+	FiatTokenName       string // fCeBM name (default "Fiat <Currency>")
+	FiatTokenSymbol     string // fCeBM symbol (default "f<Currency>")
+	ValidatorCount      int
+	BesuImage           string
+	HubBundlePath       string
+	HubRPC              string // hub RPC (from the bundle unless overridden)
+	SpokeEnvFile        string
+	KeycloakEnv         []string
+	GatewayURL          string
+	Registrar           relayregistrar.RelayRegistrar
 
 	// Sovereign-pair tail (TK-B9): non-nil enables the soft open-sovereign-pair
 	// / commit-liquidity / seed-oracle steps.
@@ -119,6 +120,9 @@ func (c *SpokeConfig) WithDefaults() {
 	if c.AdvertisedHost == "" {
 		c.AdvertisedHost = "host.docker.internal"
 	}
+	if c.RelayAdvertisedHost == "" {
+		c.RelayAdvertisedHost = "host.docker.internal"
+	}
 	if c.GatewayURL == "" {
 		c.GatewayURL = fmt.Sprintf("http://localhost:%d", c.RPCPort+8000)
 	}
@@ -155,6 +159,10 @@ func (c *SpokeConfig) WithDefaults() {
 
 func (c SpokeConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
 func (c SpokeConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
+
+// scenarioBDir is <repo>/scenario-b (parent of ContractsDir), the docker build
+// context root for the entity's soft service images.
+func (c SpokeConfig) scenarioBDir() string { return filepath.Dir(c.ContractsDir) }
 
 func (c SpokeConfig) keycloakPort() int { return c.RPCPort + 7000 }
 
@@ -471,7 +479,12 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 		},
 		{Name: "start-spoke-infra", Deps: []string{"render-spoke-env"}, Run: compose("entity-infra")},
 		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke"}, Run: compose("entity-backend")},
-		{Name: "start-spoke-frontend", Deps: []string{"start-spoke-backend"}, Soft: true, Run: compose("entity-frontend")},
+		{Name: "start-spoke-frontend", Deps: []string{"start-spoke-backend"}, Soft: true, Run: func(ctx context.Context) error {
+			if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), spokeFrontendImage, "frontend/apps/bank/Dockerfile", "frontend"); err != nil {
+				return err
+			}
+			return compose("entity-frontend")(ctx)
+		}},
 		{
 			Name: "register-relay-spoke",
 			Deps: []string{"start-besu-spoke"},
@@ -479,8 +492,16 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				if c.Registrar == nil {
 					return fmt.Errorf("register-relay-spoke: no RelayRegistrar configured")
 				}
+				// Register endpoints the (external) relay can actually reach: the
+				// toolkit runs on the host so its SpokeRPC is localhost, but the relay
+				// runs in its own stack, so advertise host.docker.internal:<port>
+				// (RelayAdvertisedHost). Mirrors scenario-a's register-relay.
+				h := c.RelayAdvertisedHost
 				return c.Registrar.Register(ctx, relayregistrar.Spoke{
-					ID: c.SpokeID, BesuRPC: c.SpokeRPC, BesuWS: c.SpokeWS, GatewayURL: c.GatewayURL,
+					ID:         c.SpokeID,
+					BesuRPC:    fmt.Sprintf("http://%s:%d", h, c.RPCPort),
+					BesuWS:     fmt.Sprintf("ws://%s:%d", h, c.WSPort),
+					GatewayURL: fmt.Sprintf("http://%s:%d", h, c.RPCPort+8000),
 				})
 			},
 		},
@@ -488,7 +509,14 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			Name: "add-noc-agent",
 			Deps: []string{"start-besu-spoke"},
 			Soft: true, // observability — non-blocking
-			Run:  compose("noc"),
+			Run: func(ctx context.Context) error {
+				for _, b := range nocImages {
+					if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), b.image, b.dockerfile, b.context); err != nil {
+						return err
+					}
+				}
+				return compose("noc")(ctx)
+			},
 		},
 	}
 

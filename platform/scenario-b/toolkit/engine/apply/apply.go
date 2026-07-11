@@ -69,11 +69,11 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	if pd.Spec.Spoke == nil {
 		return orchestrator.Report{}, fmt.Errorf("found-spoke: spec.spoke is required")
 	}
-	dataDir := firstNonEmpty(o.DataDir, pd.Spec.Node.DataDir, ".")
+	dataDir := absOr(firstNonEmpty(o.DataDir, pd.Spec.Node.DataDir, "."))
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return orchestrator.Report{}, err
 	}
-	outDir := firstNonEmpty(o.OutDir, dataDir)
+	outDir := absOr(firstNonEmpty(o.OutDir, dataDir))
 	root := absOr(firstNonEmpty(o.RepoRoot, "."))
 
 	// FR-001: consume + validate the hub bundle BEFORE any effect.
@@ -84,7 +84,10 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	}
 	hubRPC := firstNonEmpty(o.HubRPC, hub.HubRPC)
 
-	reg, err := relayregistrar.New(firstNonEmpty(o.Relay, "local"))
+	// Relay is external (scenario-a strategy): its address comes from the manifest
+	// spec.relay.endpoint (an --relay flag overrides). Absent → local in-memory.
+	relayURI := firstNonEmpty(o.Relay, manifestRelayEndpoint(pd), "local")
+	reg, err := relayregistrar.New(relayURI)
 	if err != nil {
 		return orchestrator.Report{}, err
 	}
@@ -110,30 +113,31 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	rpcPort, wsPort, p2pPort := nodePorts(pd.Spec.Node)
 	prefix := sanitizePrefix(pd.Metadata.Name) // e.g. "central-bank-brazil"
 	cfg := orchestrator.SpokeConfig{
-		Runner:          runner,
-		ContractsDir:    filepath.Join(root, "scenario-b", "contracts"),
-		TemplatesDir:    filepath.Join(root, "scenario-b", "provisioning", "templates"),
-		OutDir:          outDir,
-		SpokeID:         pd.Spec.Spoke.ID,
-		SpokeChainID:    uint64(pd.Spec.Spoke.ChainID),
-		SpokeRPC:        firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)),
-		SpokeWS:         firstNonEmpty(o.SpokeWS, localWS(wsPort)), // FR-008: first-class spoke WS (relay registration + bundle)
-		CBAddress:       o.CBAddress,
-		HubBundlePath:   hubBundlePath,
-		HubRPC:          hubRPC,
-		SpokeEnvFile:    filepath.Join(dataDir, ".env.spoke"),
-		KeycloakEnv:     []string{filepath.Join(dataDir, ".env.spoke")},
-		GatewayURL:      o.GatewayURL,
-		Registrar:       reg,
-		VolumePrefix:    prefix,
-		ContainerPrefix: "cbweb3-" + prefix,
-		NetPrefix:       prefix,
-		Entity:          firstNonEmpty(pd.Spec.Topology.Role, "central-bank"),
-		RPCPort:         rpcPort,
-		WSPort:          wsPort,
-		P2PPort:         p2pPort,
-		AdvertisedHost:  pd.Spec.Node.AdvertisedHost,
-		Currency:        pd.Spec.Spoke.Currency,
+		Runner:              runner,
+		ContractsDir:        filepath.Join(root, "scenario-b", "contracts"),
+		TemplatesDir:        filepath.Join(root, "scenario-b", "provisioning", "templates"),
+		OutDir:              outDir,
+		SpokeID:             pd.Spec.Spoke.ID,
+		SpokeChainID:        uint64(pd.Spec.Spoke.ChainID),
+		SpokeRPC:            firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)),
+		SpokeWS:             firstNonEmpty(o.SpokeWS, localWS(wsPort)), // FR-008: first-class spoke WS (relay registration + bundle)
+		CBAddress:           o.CBAddress,
+		HubBundlePath:       hubBundlePath,
+		HubRPC:              hubRPC,
+		SpokeEnvFile:        filepath.Join(dataDir, ".env.spoke"),
+		KeycloakEnv:         []string{filepath.Join(dataDir, ".env.spoke")},
+		GatewayURL:          o.GatewayURL,
+		Registrar:           reg,
+		VolumePrefix:        prefix,
+		ContainerPrefix:     "cbweb3-" + prefix,
+		NetPrefix:           prefix,
+		Entity:              firstNonEmpty(pd.Spec.Topology.Role, "central-bank"),
+		RPCPort:             rpcPort,
+		WSPort:              wsPort,
+		P2PPort:             p2pPort,
+		AdvertisedHost:      pd.Spec.Node.AdvertisedHost,
+		RelayAdvertisedHost: manifestRelayAdvHost(pd),
+		Currency:            pd.Spec.Spoke.Currency,
 	}
 
 	// TK-B9: sovereign-pair tail (soft) — populated only when spec.pair is present.
@@ -178,11 +182,11 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 	if pd.Spec.Spoke == nil {
 		return orchestrator.Report{}, fmt.Errorf("join: spec.spoke is required")
 	}
-	dataDir := firstNonEmpty(o.DataDir, pd.Spec.Node.DataDir, ".")
+	dataDir := absOr(firstNonEmpty(o.DataDir, pd.Spec.Node.DataDir, "."))
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return orchestrator.Report{}, err
 	}
-	outDir := firstNonEmpty(o.OutDir, dataDir)
+	outDir := absOr(firstNonEmpty(o.OutDir, dataDir))
 	root := absOr(firstNonEmpty(o.RepoRoot, "."))
 
 	// FR-001: consume + validate the spoke bundle BEFORE any effect.
@@ -256,11 +260,11 @@ func resolveHubBundle(ref, manifestPath string) string {
 }
 
 func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeployment) (orchestrator.Report, error) {
-	dataDir := firstNonEmpty(o.DataDir, pd.Spec.Node.DataDir, ".")
+	dataDir := absOr(firstNonEmpty(o.DataDir, pd.Spec.Node.DataDir, "."))
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return orchestrator.Report{}, err
 	}
-	outDir := firstNonEmpty(o.OutDir, dataDir)
+	outDir := absOr(firstNonEmpty(o.OutDir, dataDir))
 	root := absOr(firstNonEmpty(o.RepoRoot, "."))
 
 	lock, err := orchestrator.AcquireLock(dataDir)
@@ -352,6 +356,25 @@ func absOr(p string) string {
 		return abs
 	}
 	return p
+}
+
+// manifestRelayEndpoint returns spec.relay.endpoint (the external relay address),
+// or "" when no relay block is present.
+func manifestRelayEndpoint(pd *manifest.ParticipantDeployment) string {
+	if pd.Spec.Relay == nil {
+		return ""
+	}
+	return pd.Spec.Relay.Endpoint
+}
+
+// manifestRelayAdvHost returns spec.relay.advertisedHost — the host the external
+// relay uses to reach this spoke's published endpoints — defaulting to
+// host.docker.internal (relay co-located on the same Docker host).
+func manifestRelayAdvHost(pd *manifest.ParticipantDeployment) string {
+	if pd.Spec.Relay != nil && pd.Spec.Relay.AdvertisedHost != "" {
+		return pd.Spec.Relay.AdvertisedHost
+	}
+	return "host.docker.internal"
 }
 
 func firstNonEmpty(vals ...string) string {

@@ -124,22 +124,10 @@ const (
 // context root for the services.
 func (c HubConfig) scenarioBDir() string { return filepath.Dir(c.ContractsDir) }
 
-// imageExists reports whether a local image is present (via the runner).
-func (c HubConfig) imageExists(ctx context.Context, image string) bool {
-	_, err := c.Runner.Run(ctx, "docker", "image", "inspect", image)
-	return err == nil
-}
-
 // buildImage builds image from dockerfileRel within contextRel (both relative to
 // scenario-b), skipping when the image already exists.
 func (c HubConfig) buildImage(ctx context.Context, image, dockerfileRel, contextRel string) error {
-	if c.imageExists(ctx, image) {
-		return nil
-	}
-	base := c.scenarioBDir()
-	_, err := c.Runner.Run(ctx, "docker", "build", "-t", image,
-		"-f", filepath.Join(base, dockerfileRel), filepath.Join(base, contextRel))
-	return err
+	return buildImageIn(ctx, c.Runner, c.scenarioBDir(), image, dockerfileRel, contextRel)
 }
 
 // buildBackendImage builds the api-gateway image (context: scenario-b/backend).
@@ -385,26 +373,17 @@ func FoundHubSteps(c HubConfig) []Step {
 				return compose("entity-frontend")(ctx)
 			},
 		},
+		// NOTE: the Cacti relay is NOT started by the toolkit (scenario-a strategy):
+		// it is deployed externally (see provisioning/scripts/start-cacti.sh) and its
+		// address is provided via each manifest's spec.relay.endpoint; spokes register
+		// dynamically at found-spoke (register-relay-spoke → POST /api/v1/spokes).
 		{
-			Name: "start-relay", Deps: []string{"deploy-hub-contracts"}, Soft: true,
+			Name: "start-noc", Deps: []string{"start-hub-infra"}, Soft: true,
 			Run: func(ctx context.Context) error {
-				if err := c.buildImage(ctx, hubRelayImage, "interop/hub-and-spoke/cacti/Dockerfile", "."); err != nil {
-					return err
-				}
-				return compose("relay")(ctx)
-			},
-		},
-		{
-			Name: "start-noc", Deps: []string{"start-relay", "start-hub-infra"}, Soft: true,
-			Run: func(ctx context.Context) error {
-				if err := c.buildImage(ctx, hubNocBackendImage, "backend/services/noc-backend/Dockerfile", "backend"); err != nil {
-					return err
-				}
-				if err := c.buildImage(ctx, hubNocAgentImage, "backend/services/noc-agent/Dockerfile", "backend"); err != nil {
-					return err
-				}
-				if err := c.buildImage(ctx, hubNocPortalImage, "frontend/apps/noc/Dockerfile", "frontend"); err != nil {
-					return err
+				for _, b := range nocImages {
+					if err := c.buildImage(ctx, b.image, b.dockerfile, b.context); err != nil {
+						return err
+					}
 				}
 				return compose("noc")(ctx)
 			},

@@ -11,8 +11,10 @@ services:
       HUB_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # The relay app listens on RELAY_PORT inside the container, so map host:port
+    # to the same container port (previously hard-coded 9000 → API unreachable).
     ports:
-      - "${RELAY_PORT:?}:9000"
+      - "${RELAY_PORT:?}:${RELAY_PORT:?}"
     volumes:
       - relay_data:/data
     networks:
