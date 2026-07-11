@@ -127,7 +127,7 @@ func (c SpokeConfig) scaffoldPair(ctx context.Context, pid string) error {
 		}
 		out, err := c.Runner.Run(ctx, "forge", "create",
 			"src/TokenizedCentralBankMoney.sol:TokenizedCentralBankMoney",
-			"--rpc-url", c.HubRPC, "--private-key", c.HubAdminKey,
+			"--root", c.ContractsDir, "--rpc-url", c.HubRPC, "--private-key", c.HubAdminKey,
 			"--constructor-args", "W-"+sym, "W-"+sym, c.HubIdentityRegistry)
 		if err != nil {
 			return err
@@ -142,7 +142,7 @@ func (c SpokeConfig) scaffoldPair(ctx context.Context, pid string) error {
 	// AMM for the pair (carries its own circuit breaker).
 	ammOut, err := c.Runner.Run(ctx, "forge", "create",
 		"src/AutomatedMarketMaker.sol:AutomatedMarketMaker",
-		"--rpc-url", c.HubRPC, "--private-key", c.HubAdminKey,
+		"--root", c.ContractsDir, "--rpc-url", c.HubRPC, "--private-key", c.HubAdminKey,
 		"--constructor-args", tokenA, tokenB, c.HubIdentityRegistry)
 	if err != nil {
 		return err
@@ -155,7 +155,7 @@ func (c SpokeConfig) scaffoldPair(ctx context.Context, pid string) error {
 	if !addrs.HasAddrKey(c.SpokeEnvFile, "LIQUIDITY_COMMIT_REGISTRY_ADDRESS") {
 		lcrOut, err := c.Runner.Run(ctx, "forge", "create",
 			"src/LiquidityCommitRegistry.sol:LiquidityCommitRegistry",
-			"--rpc-url", c.HubRPC, "--private-key", c.HubAdminKey,
+			"--root", c.ContractsDir, "--rpc-url", c.HubRPC, "--private-key", c.HubAdminKey,
 			"--constructor-args", c.HubIdentityRegistry)
 		if err != nil {
 			return err
