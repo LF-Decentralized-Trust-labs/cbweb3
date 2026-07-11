@@ -100,32 +100,19 @@ func singleKeyRelPath(workDir string) (string, error) {
 	return "", fmt.Errorf("no node key generated under %s", keysDir)
 }
 
-// devGenesisAllocAddresses are the standard Besu dev accounts the reference
-// network pre-funds in genesis. The deploy scripts deploy from 0xFE3B557E…, so
-// it must be funded; the rest match the reference set. Only balances are written
-// — never private keys.
-var devGenesisAllocAddresses = []string{
-	"fe3b557e8fb62b89f4916b721be55ceb828dbd73",
-	"c5fdf4076b8f3a5357c5e395ab970b5b54098fef",
-	"c110089385bad5026e5083443c3b443806da42df",
-	"627306090abab3a6e1400e9345bc60c78a8bef57",
-	"f17f52151ebef6c7334fad080c5704d77216b732",
-	"a2ef7fad3fb7705424b7cc27d21526828dc08ae8",
-}
-
-// devGenesisBalance is 10,000 ETH in wei — the reference per-account funding.
-const devGenesisBalance = "10000000000000000000000"
-
 // qbftConfig builds the besu operator config for a zero-gas QBFT network: all
 // forks at block 0 + shanghaiTime/cancunTime (so modern Solidity/PUSH0 deploys)
-// + zeroBaseFee (gasPrice 0), pre-funding the dev accounts.
+// + zeroBaseFee (gasPrice 0). No dev wallets are pre-funded in genesis — the
+// network is zero-gas, so any account (deployer, CB, and each commercial bank's
+// runtime-generated key) transacts without a balance. This mirrors scenario-a,
+// whose genesis carries no pre-funded accounts and lets each entity create its
+// wallet at runtime. The single 0x…01 alloc is a conventional placeholder.
 func qbftConfig(chainID uint64, validators int) ([]byte, error) {
 	if validators < 1 {
 		validators = 1
 	}
-	alloc := make(map[string]any, len(devGenesisAllocAddresses))
-	for _, addr := range devGenesisAllocAddresses {
-		alloc[addr] = map[string]any{"balance": devGenesisBalance}
+	alloc := map[string]any{
+		"0x0000000000000000000000000000000000000001": map[string]any{"balance": "0x0"},
 	}
 	cfg := map[string]any{
 		"genesis": map[string]any{

@@ -35,8 +35,9 @@ func TestGenGenesisIdempotent(t *testing.T) {
 	}
 }
 
-// The zero-gas QBFT genesis carries the chainId, zeroBaseFee, all forks at 0, and
-// pre-funds the deployer dev account so contracts deploy with gasPrice 0.
+// The zero-gas QBFT genesis carries the chainId, zeroBaseFee, and all forks at 0.
+// It pre-funds NO dev wallets (scenario-a parity): the network is zero-gas, so
+// the deployer/CB/each bank's runtime key transacts without a genesis balance.
 func TestQBFTConfigZeroGas(t *testing.T) {
 	out, err := qbftConfig(1337, 1)
 	if err != nil {
@@ -47,11 +48,14 @@ func TestQBFTConfigZeroGas(t *testing.T) {
 		"\"chainId\": 1337",
 		"\"zeroBaseFee\": true",
 		"\"shanghaiTime\": 0",
-		devDeployerAddr[2:], // funded deployer (without 0x)
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("qbftConfig missing %q:\n%s", want, s)
 		}
+	}
+	// No pre-funded dev wallets — the deployer dev account must NOT be in alloc.
+	if strings.Contains(s, devDeployerAddr[2:]) {
+		t.Errorf("qbftConfig must not pre-fund dev wallets, found %s:\n%s", devDeployerAddr, s)
 	}
 }
 
