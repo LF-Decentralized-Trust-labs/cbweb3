@@ -1,11 +1,16 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/addrs"
@@ -51,39 +56,12 @@ type SpokeConfig struct {
 	GatewayURL          string
 	Registrar           relayregistrar.RelayRegistrar
 
-	// Sovereign-pair tail (TK-B9): non-nil enables the soft open-sovereign-pair
-	// / commit-liquidity / seed-oracle steps.
-	Pair                *PairConfig
-	Environment         string // seed-oracle is local-only; gates pending
-	HubPairRegistry     string // from the hub bundle
-	HubManualOracle     string // from the hub bundle
-	HubIdentityRegistry string // from the hub bundle (AMM/LCR ctor, setCentralBankOf)
-	RelayerAddr         string // grant CENTRAL_BANK_ROLE to the relayer on the sovereign tokens
-	HubAdminKey         string // scaffolding acts (deploy/grants) — hub admin
-	CBHubKey            string // current CB's sovereign act (propose/confirm/commit)
-
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
 	WaitKeycloak     func(ctx context.Context) error
 	ReadClientSecret func(ctx context.Context) (string, error)
 	EnodeReader      EnodeReader
 	CBRegistered     func(ctx context.Context) (bool, error) // idempotency for register-cb
-	PairStatus       func(ctx context.Context, pairID string) (status string, exists bool, err error)
-}
-
-// PairConfig carries the sovereign-pair block (spec.pair) plus the local-only
-// inputs (rate, commit amounts) sourced from flags.
-type PairConfig struct {
-	ProposerCB         string
-	ConfirmerCB        string
-	ProposerCBAddress  string // EVM address of the proposer CB (setCentralBankOf tokenA)
-	ConfirmerCBAddress string // EVM address of the confirmer CB (setCentralBankOf tokenB)
-	SymbolA            string
-	SymbolB            string
-	CurrentCB          string // the CB of this spoke (discriminates the role this run)
-	Rate               string // seed-oracle rate (local-only; from --pair-rate)
-	AmountA            string // CB-A's commit amount (local-only; from --commit-amount-a)
-	AmountB            string // CB-B's commit amount (local-only; from --commit-amount-b)
 }
 
 func (c *SpokeConfig) WithDefaults() {
@@ -298,25 +276,96 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				return false, nil
 			},
 			Run: func(ctx context.Context) error {
+				// Self-registration via the hub API (no direct cast/forge): the hub
+				// compliance service holds the GOVERNANCE signer and performs the
+				// on-chain registerParticipant. Idempotent + guarded by X-Relay-Auth.
 				hub, err := bundle.LoadHub(c.HubBundlePath)
 				if err != nil {
 					return err
 				}
-				// (a) registerParticipant on the hub IdentityRegistry — fatal. Runs
-				// inside the contracts project with the hub admin key (holds
-				// GOVERNANCE_ROLE) and --legacy for the zero-gas hub chain.
-				cmd := fmt.Sprintf("cd %q && "+
-					"ADMIN_PRIVATE_KEY=%s IDENTITY_REGISTRY=%s "+
-					"forge script script/RegisterParticipants.s.sol:RegisterParticipants "+
-					"--rpc-url %s --broadcast --legacy",
-					c.ContractsDir, devDeployerKey, hub.Contracts["identityRegistry"], c.HubRPC)
-				if _, err := c.Runner.Run(ctx, "sh", "-c", cmd); err != nil {
+				if hub.HubGateway == "" {
+					return fmt.Errorf("register-cb: hub bundle has no hubGateway URL")
+				}
+				cbAddr := c.CBAddress
+				if cbAddr == "" {
+					cbAddr = devDeployerAddr
+				}
+				payload, err := json.Marshal(map[string]string{
+					"spoke_id":         c.SpokeID,
+					"cb_address":       cbAddr,
+					"institution_name": c.SpokeID,
+					"role":             "ROLE_CENTRAL_BANK",
+					"bank_code":        c.SpokeID,
+				})
+				if err != nil {
 					return err
 				}
-				// (b) grantLiquidityProvider — attempted automatically; non-fatal if no permission.
-				if _, err := c.Runner.Run(ctx, "cast", "send", hub.Contracts["identityRegistry"],
-					"grantLiquidityProvider(address)", c.CBAddress, "--rpc-url", c.HubRPC); err != nil {
-					fmt.Printf("[found-spoke] grantLiquidityProvider pending (needs hub admin/governance): %v\n", err)
+				url := strings.TrimRight(hub.HubGateway, "/") + "/internal/v1/spokes/register"
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+				if err != nil {
+					return err
+				}
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("X-Relay-Auth", hubRelayAuthSecret)
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					return fmt.Errorf("register-cb: POST %s: %w", url, err)
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+					b, _ := io.ReadAll(resp.Body)
+					return fmt.Errorf("register-cb: hub returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+				}
+				return nil
+			},
+		},
+		{
+			// Ask the HUB to create this spoke's sovereign BRIDGE TOKEN (W-tCeBM_<CUR>)
+			// and register the currency. The hub compliance service — which operates
+			// the hub chain and holds the governance key — deploys the W-token +
+			// setCentralBankOf + registerCurrency on the hub. The spoke NEVER touches
+			// the hub chain directly, so this works across a split topology (the spoke
+			// need not reach the hub RPC — only the hub gateway). Idempotent.
+			// This is the hub-side counterpart of the spoke's SpokeBridge (lock on the
+			// spoke → mint W-token on the hub). The FX pair + cooperative liquidity are
+			// NOT created here — a CB opens the corridor later from its portal.
+			Name: "register-currency",
+			Deps: []string{"register-cb"},
+			Run: func(ctx context.Context) error {
+				hub, err := bundle.LoadHub(c.HubBundlePath)
+				if err != nil {
+					return err
+				}
+				if hub.HubGateway == "" {
+					return fmt.Errorf("register-currency: hub bundle has no hubGateway URL")
+				}
+				cbAddr := c.CBAddress
+				if cbAddr == "" {
+					cbAddr = devDeployerAddr
+				}
+				payload, err := json.Marshal(map[string]string{
+					"currency":   c.Currency,
+					"cb_address": cbAddr,
+					"spoke_id":   c.SpokeID,
+				})
+				if err != nil {
+					return err
+				}
+				url := strings.TrimRight(hub.HubGateway, "/") + "/internal/v1/spokes/register-currency"
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+				if err != nil {
+					return err
+				}
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("X-Relay-Auth", hubRelayAuthSecret)
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					return fmt.Errorf("register-currency: POST %s: %w", url, err)
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+					b, _ := io.ReadAll(resp.Body)
+					return fmt.Errorf("register-currency: hub returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 				}
 				return nil
 			},
@@ -520,18 +569,15 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 		},
 	}
 
-	// TK-B9: sovereign-pair tail (soft) — only when spec.pair is present. Ordered
-	// after add-noc-agent and before emit-spoke-bundle (insertion order preserves
-	// this among independents in topoSort).
-	emitDeps := []string{"deploy-spoke-contracts", "start-besu-spoke"}
-	if c.Pair != nil {
-		steps = append(steps, sovereignPairSteps(c)...)
-		emitDeps = append(emitDeps, "open-sovereign-pair", "commit-liquidity", "seed-oracle")
-	}
-
+	// The sovereign FX corridor (propose/confirm pair + cooperative liquidity +
+	// oracle rate) is NOT part of provisioning: it is opened at runtime by each
+	// central bank through its governance portal (POST /api/v2/amm/pairs/propose
+	// + /confirm, /api/v2/amm/liquidity/*, /api/v2/hub/currencies — CB-role, via
+	// Keycloak). spec.pair documents the intended corridor; the toolkit never
+	// holds sovereign signing keys.
 	steps = append(steps, Step{
 		Name: "emit-spoke-bundle",
-		Deps: emitDeps,
+		Deps: []string{"deploy-spoke-contracts", "start-besu-spoke"},
 		Check: func(context.Context) (bool, error) {
 			_, err := os.Stat(filepath.Join(c.OutDir, "bundles", c.SpokeID+".bundle.yaml"))
 			return err == nil, nil

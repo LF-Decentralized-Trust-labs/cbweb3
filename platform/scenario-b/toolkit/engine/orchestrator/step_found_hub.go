@@ -114,6 +114,11 @@ const (
 	hubNocBackendImage = "cbweb3b/noc-backend:local"
 	hubNocAgentImage   = "cbweb3b/noc-agent:local"
 	hubNocPortalImage  = "cbweb3b/noc-portal:local"
+	hubComplianceImage = "cbweb3b/compliance:local"
+
+	// hubRelayAuthSecret guards the hub's internal spoke self-registration
+	// endpoint (X-Relay-Auth); local-dev value, shared with the toolkit caller.
+	hubRelayAuthSecret = "cbweb3-relay-shared-secret"
 
 	// spokeFrontendImage is the per-entity (bank/CB) frontend image built for a
 	// spoke; distinct from the hub's governance frontend.
@@ -182,28 +187,34 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"KC_DB_URL":         "jdbc:postgresql://" + e + "-hub-postgres:5432/keycloak",
 		"KEYCLOAK_PORT":     itoa(c.RPCPort + 7000),
 		// backend / frontend / relay / noc (images must be pre-built locally)
-		"GATEWAY_PORT":         itoa(c.RPCPort + 8000),
-		"GATEWAY_URL":          fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
-		"BACKEND_IMAGE":        hubBackendImage,
-		"FRONTEND_IMAGE":       hubFrontendImage,
-		"FRONTEND_PORT":        itoa(c.RPCPort + 9000),
-		"RELAY_IMAGE":          hubRelayImage,
-		"RELAY_CONTAINER_NAME": e + "-relay",
-		"RELAY_NET_PREFIX":     c.NetPrefix,
-		"RELAY_VOLUME_PREFIX":  c.VolumePrefix,
-		"RELAY_PORT":           "4000",
-		"NOC_AGENT_BESU_RPC":   fmt.Sprintf("http://%s-hub-validator:8545", e),
-		"NOC_AGENT_ENTITY":     "hub",
-		"NOC_AGENT_IMAGE":      hubNocAgentImage,
-		"NOC_BACKEND_IMAGE":    hubNocBackendImage,
-		"NOC_BACKEND_PORT":     itoa(c.RPCPort + 11000),
-		"NOC_DB_NAME":          "noc",
-		"NOC_DB_USER":          "cbweb3",
-		"NOC_DB_PASSWORD":      "cbweb3",
-		"NOC_NET_PREFIX":       c.NetPrefix,
-		"NOC_PORTAL_IMAGE":     hubNocPortalImage,
-		"NOC_PORTAL_PORT":      itoa(c.RPCPort + 12000),
-		"NOC_VOLUME_PREFIX":    c.VolumePrefix,
+		"GATEWAY_PORT":  itoa(c.RPCPort + 8000),
+		"GATEWAY_URL":   fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
+		"BACKEND_IMAGE": hubBackendImage,
+		// compliance (hub self-registration of spokes on the IdentityRegistry)
+		"COMPLIANCE_IMAGE":           hubComplianceImage,
+		"COMPLIANCE_GRPC_ADDR":       e + "-hub-compliance:9093",
+		"HUB_CHAIN_ID":               itoa(int(c.ChainID)),
+		"HUB_ADMIN_PRIVATE_KEY":      devDeployerKey, // holds GOVERNANCE_ROLE on the hub registry
+		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
+		"FRONTEND_IMAGE":             hubFrontendImage,
+		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
+		"RELAY_IMAGE":                hubRelayImage,
+		"RELAY_CONTAINER_NAME":       e + "-relay",
+		"RELAY_NET_PREFIX":           c.NetPrefix,
+		"RELAY_VOLUME_PREFIX":        c.VolumePrefix,
+		"RELAY_PORT":                 "4000",
+		"NOC_AGENT_BESU_RPC":         fmt.Sprintf("http://%s-hub-validator:8545", e),
+		"NOC_AGENT_ENTITY":           "hub",
+		"NOC_AGENT_IMAGE":            hubNocAgentImage,
+		"NOC_BACKEND_IMAGE":          hubNocBackendImage,
+		"NOC_BACKEND_PORT":           itoa(c.RPCPort + 11000),
+		"NOC_DB_NAME":                "noc",
+		"NOC_DB_USER":                "cbweb3",
+		"NOC_DB_PASSWORD":            "cbweb3",
+		"NOC_NET_PREFIX":             c.NetPrefix,
+		"NOC_PORTAL_IMAGE":           hubNocPortalImage,
+		"NOC_PORTAL_PORT":            itoa(c.RPCPort + 12000),
+		"NOC_VOLUME_PREFIX":          c.VolumePrefix,
 	}
 	for k, v := range vars {
 		if err := addrs.AppendAddr(c.HubEnvFile, k, v); err != nil {
@@ -360,7 +371,21 @@ func FoundHubSteps(c HubConfig) []Step {
 			},
 			Run: func(ctx context.Context) error { return c.buildBackendImage(ctx) },
 		},
-		{Name: "start-hub-backend", Deps: []string{"start-hub-infra", "render-hub-env", "provision-keycloak-hub", "build-hub-backend-image"}, Run: compose("entity-backend")},
+		{
+			// Compliance holds the GOVERNANCE signer and performs the on-chain
+			// registerParticipant when a spoke self-registers (POST
+			// /internal/v1/spokes/register). Needs the deployed IdentityRegistry
+			// address (render-hub-env) and the shared network (start-besu-hub).
+			Name: "start-hub-compliance",
+			Deps: []string{"render-hub-env", "start-besu-hub"},
+			Run: func(ctx context.Context) error {
+				if err := c.buildImage(ctx, hubComplianceImage, "backend/services/compliance/Dockerfile", "backend"); err != nil {
+					return err
+				}
+				return compose("entity-compliance")(ctx)
+			},
+		},
+		{Name: "start-hub-backend", Deps: []string{"start-hub-infra", "render-hub-env", "provision-keycloak-hub", "build-hub-backend-image", "start-hub-compliance"}, Run: compose("entity-backend")},
 		// UI / relay / NOC are SOFT (non-fatal): they build heavier Node/React
 		// images on demand; a build/start failure never blocks the hub's
 		// operational core (besu + contracts + infra + keycloak + backend).
@@ -400,7 +425,12 @@ func FoundHubSteps(c HubConfig) []Step {
 				if err != nil {
 					return err
 				}
-				b := bundle.HubBundle{ChainID: c.ChainID, HubRPC: c.HubRPC, HubWS: c.HubWS, Contracts: m}
+				b := bundle.HubBundle{
+					ChainID: c.ChainID, HubRPC: c.HubRPC, HubWS: c.HubWS,
+					// Hub API gateway (spoke self-registration endpoint); host-published.
+					HubGateway: fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
+					Contracts:  m,
+				}
 				_, err = bundle.EmitHub(b, c.OutDir)
 				return err
 			},

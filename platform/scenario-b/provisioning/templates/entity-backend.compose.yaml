@@ -10,6 +10,10 @@ services:
       HUB_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
       ENTITY_BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
       GATEWAY_PORT: "${GATEWAY_PORT:?}"
+      # Compliance gRPC + internal-relay secret: set on the hub (spoke
+      # self-registration endpoint); default to no-op values on other entities.
+      COMPLIANCE_GRPC_ADDR: "${COMPLIANCE_GRPC_ADDR:-localhost:9093}"
+      INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

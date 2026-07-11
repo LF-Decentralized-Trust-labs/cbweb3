@@ -2,6 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,25 +70,66 @@ func testSpokeCfg(t *testing.T, fake *exec.FakeRunner) SpokeConfig {
 	}
 }
 
-// US1: register-cb invokes RegisterParticipants + grantLiquidityProvider; a failing grant is non-fatal.
-func TestRegisterCBActionsAndGrantBestEffort(t *testing.T) {
-	fake := &exec.FakeRunner{Errs: map[string]error{"cast": context.DeadlineExceeded}} // grant fails
-	step := findStep(FoundSpokeSteps(testSpokeCfg(t, fake)), "register-cb")
-	if err := step.Run(context.Background()); err != nil {
-		t.Fatalf("register-cb must not fail when only the grant fails: %v", err)
+// register-cb self-registers the CB via the hub API (POST /internal/v1/spokes/register
+// with X-Relay-Auth) — no direct cast/forge. The hub compliance does the on-chain work.
+func TestRegisterCBSelfRegistersViaHub(t *testing.T) {
+	var gotAuth, gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("X-Relay-Auth")
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"already_registered":false,"tx_hash":"0xabc"}`))
+	}))
+	defer srv.Close()
+
+	cfg := testSpokeCfg(t, &exec.FakeRunner{})
+	// Emit a hub bundle whose gateway points at the test server.
+	hp, err := bundle.EmitHub(bundle.HubBundle{
+		ChainID: 1337, HubRPC: "http://hub:8545", HubWS: "ws://hub:8546", HubGateway: srv.URL,
+		Contracts: map[string]string{
+			"identityRegistry": "0xh1", "tCeBM_BRL": "0xh2", "tCeBM_EUR": "0xh3",
+			"fxAgreement": "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
+		},
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
-	var forgeOK, castOK bool
-	for _, c := range fake.Calls {
-		joined := c.Name + " " + strings.Join(c.Args, " ")
-		if strings.Contains(joined, "RegisterParticipants.s.sol:RegisterParticipants") {
-			forgeOK = true
-		}
-		if c.Name == "cast" && strings.Contains(joined, "grantLiquidityProvider") {
-			castOK = true
-		}
+	cfg.HubBundlePath = hp
+
+	if err := findStep(FoundSpokeSteps(cfg), "register-cb").Run(context.Background()); err != nil {
+		t.Fatalf("register-cb: %v", err)
 	}
-	if !forgeOK || !castOK {
-		t.Fatalf("register-cb must invoke RegisterParticipants and grantLiquidityProvider; calls=%+v", fake.Calls)
+	if gotPath != "/internal/v1/spokes/register" {
+		t.Fatalf("wrong path: %s", gotPath)
+	}
+	if gotAuth != hubRelayAuthSecret {
+		t.Fatalf("X-Relay-Auth = %q, want %q", gotAuth, hubRelayAuthSecret)
+	}
+	if !strings.Contains(gotBody, "ROLE_CENTRAL_BANK") || !strings.Contains(gotBody, "cb_address") {
+		t.Fatalf("payload missing fields: %s", gotBody)
+	}
+}
+
+// register-cb fails when the hub returns a non-2xx (registration is a hard step).
+func TestRegisterCBFailsOnHubError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":"compliance down"}`))
+	}))
+	defer srv.Close()
+	cfg := testSpokeCfg(t, &exec.FakeRunner{})
+	hp, _ := bundle.EmitHub(bundle.HubBundle{
+		ChainID: 1337, HubRPC: "http://hub:8545", HubWS: "ws://hub:8546", HubGateway: srv.URL,
+		Contracts: map[string]string{
+			"identityRegistry": "0xh1", "tCeBM_BRL": "0xh2", "tCeBM_EUR": "0xh3",
+			"fxAgreement": "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
+		},
+	}, t.TempDir())
+	cfg.HubBundlePath = hp
+	if err := findStep(FoundSpokeSteps(cfg), "register-cb").Run(context.Background()); err == nil {
+		t.Fatal("register-cb must fail when the hub returns non-2xx")
 	}
 }
 
@@ -190,6 +234,7 @@ func TestFoundSpokeOrder(t *testing.T) {
 		}
 	}
 	must("consume-hub-bundle", "register-cb")
+	must("register-cb", "register-currency")
 	must("gen-genesis-spoke", "render-spoke-compose-env")
 	must("render-spoke-compose-env", "start-besu-spoke")
 	must("gen-genesis-spoke", "start-besu-spoke")

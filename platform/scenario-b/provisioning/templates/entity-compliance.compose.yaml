@@ -1,0 +1,28 @@
+# entity-compliance template — Compliance service (gRPC) for on-chain participant
+# registration. Wired on the hub: it holds the GOVERNANCE signer key and turns a
+# spoke self-registration API call into an on-chain registerParticipant on the
+# hub IdentityRegistry. Joins the shared entity network; reaches the hub Besu via
+# the published host port. No secrets embedded beyond the local-dev signer key.
+services:
+  compliance:
+    image: "${COMPLIANCE_IMAGE:-cbweb3b/compliance:local}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-compliance"
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+      BLOCKCHAIN_CLIENT: "besu"
+      BESU_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
+      BESU_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
+      PARTICIPANT_REGISTRY_ADDRESS: "${HUB_IDENTITY_REGISTRY_ADDRESS:?}"
+      CURRENCY_REGISTRY_ADDRESS: "${CURRENCY_REGISTRY_ADDRESS:?}"
+      CB_PRIVATE_KEY: "${HUB_ADMIN_PRIVATE_KEY:?}"
+      # POSTGRES_DSN intentionally unset → in-memory repo (on-chain register still works).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+    restart: always
+
+networks:
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
+    external: true

@@ -53,7 +53,10 @@ func TestApplyFoundSpokeDryRun(t *testing.T) {
 }
 
 // TK-B9: found-spoke with spec.pair plans the soft sovereign tail (dry-run).
-func TestApplyFoundSpokeSovereignTailDryRun(t *testing.T) {
+// The sovereign FX corridor is opened at runtime via the CB governance portal,
+// NOT at provisioning time — so found-spoke never plans sovereign-tail steps,
+// even when spec.pair is present.
+func TestApplyFoundSpokeHasNoSovereignTail(t *testing.T) {
 	rep, err := Apply(context.Background(), Options{
 		ManifestPath: filepath.Join(fixtures, "found-spoke.yaml"),
 		DataDir:      t.TempDir(),
@@ -66,10 +69,14 @@ func TestApplyFoundSpokeSovereignTailDryRun(t *testing.T) {
 	for _, s := range rep.Steps {
 		names[s.Name] = true
 	}
-	for _, want := range []string{"open-sovereign-pair", "commit-liquidity", "seed-oracle"} {
-		if !names[want] {
-			t.Errorf("spec.pair present: expected %q in the plan; steps=%v", want, names)
+	for _, forbidden := range []string{"open-sovereign-pair", "commit-liquidity", "seed-oracle"} {
+		if names[forbidden] {
+			t.Errorf("provisioning must not plan the sovereign step %q (opened via the CB portal); steps=%v", forbidden, names)
 		}
+	}
+	// emit-spoke-bundle still closes the flow.
+	if !names["emit-spoke-bundle"] {
+		t.Errorf("expected emit-spoke-bundle in the plan; steps=%v", names)
 	}
 }
 

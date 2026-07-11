@@ -30,17 +30,8 @@ type Options struct {
 	GatewayURL   string // spoke gateway URL (found-spoke → relay registration)
 	CBAddress    string // central bank address (found-spoke → register-cb)
 	Relay        string // RelayRegistrar URI (default "local"; e.g. relay://host:4000)
-	// Sovereign-pair tail (TK-B9; local-only inputs + keys). Empty is fine in dry-run.
-	RelayerAddr        string // grant CENTRAL_BANK_ROLE to the relayer on the sovereign tokens
-	HubAdminKey        string // scaffolding acts (deploy/grants)
-	CBHubKey           string // current CB's sovereign act (propose/confirm/commit)
-	ProposerCBAddress  string // proposer CB EVM address (setCentralBankOf tokenA); defaults to CBAddress
-	ConfirmerCBAddress string // confirmer CB EVM address (setCentralBankOf tokenB)
-	PairRate           string // seed-oracle rate (local)
-	CommitAmountA      string // CB-A commit amount (local)
-	CommitAmountB      string // CB-B commit amount (local)
-	Format             string // json | yaml
-	DryRun             bool
+	Format       string // json | yaml
+	DryRun       bool
 }
 
 // Apply loads+validates the manifest and dispatches by mode.
@@ -140,28 +131,9 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		Currency:            pd.Spec.Spoke.Currency,
 	}
 
-	// TK-B9: sovereign-pair tail (soft) — populated only when spec.pair is present.
-	if pd.Spec.Pair != nil {
-		cfg.Environment = pd.Spec.Environment
-		cfg.HubPairRegistry = hub.Contracts["pairRegistry"]
-		cfg.HubManualOracle = hub.Contracts["manualOracle"]
-		cfg.HubIdentityRegistry = hub.Contracts["identityRegistry"]
-		cfg.RelayerAddr = o.RelayerAddr
-		cfg.HubAdminKey = o.HubAdminKey
-		cfg.CBHubKey = o.CBHubKey
-		cfg.Pair = &orchestrator.PairConfig{
-			ProposerCB:         pd.Spec.Pair.ProposerCB,
-			ConfirmerCB:        pd.Spec.Pair.ConfirmerCB,
-			ProposerCBAddress:  o.ProposerCBAddress,
-			ConfirmerCBAddress: o.ConfirmerCBAddress,
-			SymbolA:            pd.Spec.Pair.SymbolA,
-			SymbolB:            pd.Spec.Pair.SymbolB,
-			CurrentCB:          pd.Metadata.Name, // this run's CB (matches proposerCB/confirmerCB)
-			Rate:               o.PairRate,
-			AmountA:            o.CommitAmountA,
-			AmountB:            o.CommitAmountB,
-		}
-	}
+	// The sovereign FX corridor (spec.pair) is opened at runtime via each CB's
+	// governance portal (propose/confirm pair + cooperative liquidity), not at
+	// provisioning time — the toolkit holds no sovereign signing keys.
 
 	// FR-002/SC-002: wire register-cb's idempotency Check to a live hub probe so
 	// a re-apply skips re-registration. Not in dry-run (Check runs before the

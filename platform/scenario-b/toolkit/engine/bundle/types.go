@@ -5,11 +5,12 @@ package bundle
 
 // HubBundle is the versioned public artifact describing the founded hub.
 type HubBundle struct {
-	Version   string            `yaml:"version" json:"version"`
-	ChainID   uint64            `yaml:"chainId" json:"chainId"`
-	HubRPC    string            `yaml:"hubRpc" json:"hubRpc"`
-	HubWS     string            `yaml:"hubWs" json:"hubWs"`
-	Contracts map[string]string `yaml:"contracts" json:"contracts"` // name -> 0x-address
+	Version    string            `yaml:"version" json:"version"`
+	ChainID    uint64            `yaml:"chainId" json:"chainId"`
+	HubRPC     string            `yaml:"hubRpc" json:"hubRpc"`
+	HubWS      string            `yaml:"hubWs" json:"hubWs"`
+	HubGateway string            `yaml:"hubGateway,omitempty" json:"hubGateway,omitempty"` // hub API gateway URL (spoke self-registration)
+	Contracts  map[string]string `yaml:"contracts" json:"contracts"`                       // name -> 0x-address
 }
 
 // SpokeBundle is the versioned public artifact describing a founded spoke.
