@@ -1,30 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Command cbweb3b is the Scenario B toolkit CLI. In this phase (TK-B1) it only
-// parses, validates, and reports on ParticipantDeployment manifests — it does
-// not execute any provisioning steps.
+// Command cbweb3b is the Scenario B toolkit CLI.
 //
 // Usage:
 //
 //	cbweb3b validate -f <manifest.yaml> [-f <manifest.yaml> ...] [-o json|yaml]
-//	cbweb3b apply    -f <manifest.yaml> [-f <manifest.yaml> ...] --dry-run [-o json|yaml]
+//	cbweb3b apply    -f <manifest.yaml> [--dry-run] [-o json|yaml]
+//	                 [--data-dir <dir>] [--out-dir <dir>] [--repo-root <dir>]
+//	                 [--hub-rpc <url>] [--hub-ws <url>]
 //
-// validate and apply --dry-run are equivalent in this phase. apply without
-// --dry-run is not implemented yet and exits non-zero.
+// `validate` parses/validates manifests and reports (no effects). `apply` runs
+// the orchestrator for the manifest's mode (found-hub in this phase): with
+// --dry-run it plans without effects; without it, it executes. found-spoke/join
+// are not supported yet (TK-B7/B8).
 //
-// Exit codes: 0 = all manifests valid (warnings allowed); 1 = one or more
-// validation errors; 2 = usage/parse error.
+// Exit codes: 0 = success (valid / all steps done|skipped|planned);
+// 1 = validation/config error or a failed step; 2 = usage/parse error.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/apply"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/manifest"
 )
 
@@ -34,7 +40,6 @@ const (
 	exitUsage   = 2
 )
 
-// fileList is a repeatable -f/--file flag.
 type fileList []string
 
 func (f *fileList) String() string { return fmt.Sprintf("%v", []string(*f)) }
@@ -52,35 +57,33 @@ func run(args []string, stdout, stderr io.Writer) int {
 		usage(stderr)
 		return exitUsage
 	}
-
-	cmd := args[0]
-	switch cmd {
-	case "validate", "apply":
+	switch args[0] {
+	case "validate":
+		return runValidate(args[1:], stdout, stderr)
+	case "apply":
+		return runApply(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
 		usage(stdout)
 		return exitValid
 	default:
-		fmt.Fprintf(stderr, "cbweb3b: unknown command %q\n", cmd)
+		fmt.Fprintf(stderr, "cbweb3b: unknown command %q\n", args[0])
 		usage(stderr)
 		return exitUsage
 	}
+}
 
+func runValidate(args []string, stdout, stderr io.Writer) int {
 	var files fileList
 	var output string
-	var dryRun bool
-
-	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Var(&files, "f", "manifest file (repeatable)")
 	fs.Var(&files, "file", "manifest file (repeatable)")
 	fs.StringVar(&output, "o", "yaml", "output format: json|yaml")
 	fs.StringVar(&output, "output", "yaml", "output format: json|yaml")
-	fs.BoolVar(&dryRun, "dry-run", false, "validate only (apply): no steps are executed")
-
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
-
 	if output != "json" && output != "yaml" {
 		fmt.Fprintf(stderr, "cbweb3b: invalid -o value %q; must be json or yaml\n", output)
 		return exitUsage
@@ -90,39 +93,85 @@ func run(args []string, stdout, stderr io.Writer) int {
 		usage(stderr)
 		return exitUsage
 	}
-	if cmd == "apply" && !dryRun {
-		fmt.Fprintln(stderr, "cbweb3b: apply without --dry-run is not implemented in TK-B1")
-		return exitInvalid
-	}
-
-	// Parse (usage/parse errors → exit 2).
 	manifests, err := manifest.LoadSet(files)
 	if err != nil {
 		fmt.Fprintf(stderr, "cbweb3b: %v\n", err)
 		return exitUsage
 	}
-
 	report := buildReport(files, manifests)
-
 	if err := emit(stdout, output, report); err != nil {
 		fmt.Fprintf(stderr, "cbweb3b: %v\n", err)
 		return exitUsage
 	}
-
 	if report.Valid {
 		return exitValid
 	}
 	return exitInvalid
 }
 
-// Report is the CLI output document.
+func runApply(args []string, stdout, stderr io.Writer) int {
+	var files fileList
+	var output, dataDir, outDir, repoRoot, hubRPC, hubWS string
+	var dryRun bool
+	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Var(&files, "f", "manifest file")
+	fs.Var(&files, "file", "manifest file")
+	fs.StringVar(&output, "o", "yaml", "output format: json|yaml")
+	fs.StringVar(&output, "output", "yaml", "output format: json|yaml")
+	fs.BoolVar(&dryRun, "dry-run", false, "plan the steps without executing effects")
+	fs.StringVar(&dataDir, "data-dir", "", "state/lock directory (default: manifest node.dataDir)")
+	fs.StringVar(&outDir, "out-dir", "", "bundle output directory (default: data-dir)")
+	fs.StringVar(&repoRoot, "repo-root", ".", "repository root (for contracts/templates)")
+	fs.StringVar(&hubRPC, "hub-rpc", "", "hub RPC URL (readiness gate)")
+	fs.StringVar(&hubWS, "hub-ws", "", "hub WS URL")
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if output != "json" && output != "yaml" {
+		fmt.Fprintf(stderr, "cbweb3b: invalid -o value %q; must be json or yaml\n", output)
+		return exitUsage
+	}
+	if len(files) != 1 {
+		fmt.Fprintln(stderr, "cbweb3b: apply requires exactly one -f/--file")
+		return exitUsage
+	}
+
+	// Partial report on interruption.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	rep, err := apply.Apply(ctx, apply.Options{
+		ManifestPath: files[0],
+		RepoRoot:     repoRoot,
+		DataDir:      dataDir,
+		OutDir:       outDir,
+		HubRPC:       hubRPC,
+		HubWS:        hubWS,
+		Format:       output,
+		DryRun:       dryRun,
+	})
+
+	// Emit whatever report we have (partial on failure/interruption).
+	if len(rep.Steps) > 0 || rep.Mode != "" {
+		if out, rerr := apply.Render(rep, output); rerr == nil {
+			fmt.Fprintln(stdout, string(out))
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "cbweb3b: %v\n", err)
+		return exitInvalid
+	}
+	return exitValid
+}
+
+// Report is the `validate` output document.
 type Report struct {
 	Manifests []ManifestReport   `yaml:"manifests" json:"manifests"`
 	SetErrors []manifest.Finding `yaml:"setErrors,omitempty" json:"setErrors,omitempty"`
 	Valid     bool               `yaml:"valid" json:"valid"`
 }
 
-// ManifestReport is the per-manifest validation report.
 type ManifestReport struct {
 	File     string             `yaml:"file" json:"file"`
 	Name     string             `yaml:"name" json:"name"`
@@ -134,7 +183,6 @@ type ManifestReport struct {
 
 func buildReport(files []string, manifests []*manifest.ParticipantDeployment) Report {
 	rep := Report{Valid: true}
-
 	for i, pd := range manifests {
 		res := manifest.Validate(pd)
 		mr := ManifestReport{
@@ -150,8 +198,6 @@ func buildReport(files []string, manifests []*manifest.ParticipantDeployment) Re
 		}
 		rep.Manifests = append(rep.Manifests, mr)
 	}
-
-	// Set-level collision checks only make sense for 2+ manifests.
 	if len(manifests) > 1 {
 		set := manifest.ValidateSet(manifests)
 		if !set.Valid() {
@@ -159,7 +205,6 @@ func buildReport(files []string, manifests []*manifest.ParticipantDeployment) Re
 			rep.Valid = false
 		}
 	}
-
 	return rep
 }
 
@@ -178,17 +223,18 @@ func emit(w io.Writer, format string, rep Report) error {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `cbweb3b — Scenario B toolkit (TK-B1: validate only)
+	fmt.Fprint(w, `cbweb3b — Scenario B toolkit
 
 Usage:
-  cbweb3b validate -f <manifest.yaml> [-f <manifest.yaml> ...] [-o json|yaml]
-  cbweb3b apply    -f <manifest.yaml> [-f <manifest.yaml> ...] --dry-run [-o json|yaml]
+  cbweb3b validate -f <manifest.yaml> [-f ...] [-o json|yaml]
+  cbweb3b apply    -f <manifest.yaml> [--dry-run] [-o json|yaml]
+                   [--data-dir <dir>] [--out-dir <dir>] [--repo-root <dir>]
+                   [--hub-rpc <url>] [--hub-ws <url>]
 
-Flags:
-  -f, --file     manifest file (repeatable; multiple files enable collision checks)
-  -o, --output   output format: json|yaml (default yaml)
-      --dry-run  apply: validate only, no steps executed (required in this phase)
+validate: parse/validate manifests and report (no effects).
+apply:    run the orchestrator for the manifest mode (found-hub); --dry-run
+          plans without effects. found-spoke/join are not supported yet.
 
-Exit codes: 0 valid, 1 validation errors, 2 usage/parse error
+Exit codes: 0 success, 1 validation/config error or failed step, 2 usage/parse error
 `)
 }

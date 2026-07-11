@@ -82,13 +82,34 @@ func TestUsageErrors(t *testing.T) {
 	}
 }
 
-func TestApplyRequiresDryRun(t *testing.T) {
+// TK-B6: `apply --dry-run` plans the found-hub steps (exit 0, no effects).
+func TestApplyFoundHubDryRun(t *testing.T) {
 	f := filepath.Join(fixtureDir, "found-hub.yaml")
-	if code, _, _ := runCLI(t, "apply", "-f", f); code != exitInvalid {
-		t.Errorf("apply without --dry-run: expected non-zero, got %d", code)
+	code, out, errb := runCLI(t, "apply", "-f", f, "--dry-run", "--data-dir", t.TempDir())
+	if code != exitValid {
+		t.Fatalf("apply --dry-run found-hub: expected exit 0, got %d (err=%s)", code, errb)
 	}
-	if code, _, _ := runCLI(t, "apply", "-f", f, "--dry-run"); code != exitValid {
-		t.Errorf("apply --dry-run on valid manifest: expected exit 0, got %d", code)
+	if !strings.Contains(out, "planned") && !strings.Contains(out, "skipped") {
+		t.Errorf("expected a planned/skipped report, got:\n%s", out)
+	}
+}
+
+// TK-B6: found-spoke/join modes are not supported yet → exit 1.
+func TestApplyUnsupportedModeExits(t *testing.T) {
+	f := filepath.Join(fixtureDir, "found-spoke.yaml")
+	code, _, errb := runCLI(t, "apply", "-f", f, "--dry-run", "--data-dir", t.TempDir())
+	if code != exitInvalid {
+		t.Fatalf("apply found-spoke: expected exit 1, got %d", code)
+	}
+	if !strings.Contains(errb, "not supported yet") {
+		t.Errorf("expected 'not supported yet' error, got: %s", errb)
+	}
+}
+
+// apply requires exactly one -f.
+func TestApplyRequiresOneFile(t *testing.T) {
+	if code, _, _ := runCLI(t, "apply", "--dry-run"); code != exitUsage {
+		t.Errorf("apply without -f: expected exit 2, got %d", code)
 	}
 }
 
