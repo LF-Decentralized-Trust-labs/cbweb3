@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/bundle"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/exec"
@@ -73,7 +74,7 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		return orchestrator.Report{}, err
 	}
 	outDir := firstNonEmpty(o.OutDir, dataDir)
-	root := firstNonEmpty(o.RepoRoot, ".")
+	root := absOr(firstNonEmpty(o.RepoRoot, "."))
 
 	// FR-001: consume + validate the hub bundle BEFORE any effect.
 	hubBundlePath := resolveHubBundle(pd.Spec.HubBundleRef, o.ManifestPath)
@@ -171,7 +172,7 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		return orchestrator.Report{}, err
 	}
 	outDir := firstNonEmpty(o.OutDir, dataDir)
-	root := firstNonEmpty(o.RepoRoot, ".")
+	root := absOr(firstNonEmpty(o.RepoRoot, "."))
 
 	// FR-001: consume + validate the spoke bundle BEFORE any effect.
 	bundlePath := resolveBundle(pd.Spec.JoinBundleRef, o.ManifestPath)
@@ -239,7 +240,7 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 		return orchestrator.Report{}, err
 	}
 	outDir := firstNonEmpty(o.OutDir, dataDir)
-	root := firstNonEmpty(o.RepoRoot, ".")
+	root := absOr(firstNonEmpty(o.RepoRoot, "."))
 
 	lock, err := orchestrator.AcquireLock(dataDir)
 	if err != nil {
@@ -259,19 +260,77 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 		runner = exec.NewReal(root, nil)
 	}
 
+	rpcPort, wsPort, p2pPort := nodePorts(pd.Spec.Node)
+	prefix := sanitizePrefix(pd.Metadata.Name) // e.g. "hub-cbweb3"
 	cfg := orchestrator.HubConfig{
-		Runner:       runner,
-		ContractsDir: filepath.Join(root, "scenario-b", "contracts"),
-		TemplatesDir: filepath.Join(root, "scenario-b", "provisioning", "templates"),
-		OutDir:       outDir,
-		ChainID:      uint64(pd.Spec.Hub.ChainID),
-		HubRPC:       o.HubRPC,
-		HubWS:        o.HubWS,
-		HubEnvFile:   filepath.Join(dataDir, ".env.hub"),
-		KeycloakEnv:  []string{filepath.Join(dataDir, ".env.hub")},
+		Runner:          runner,
+		ContractsDir:    filepath.Join(root, "scenario-b", "contracts"),
+		TemplatesDir:    filepath.Join(root, "scenario-b", "provisioning", "templates"),
+		OutDir:          outDir,
+		ChainID:         uint64(pd.Spec.Hub.ChainID),
+		HubRPC:          firstNonEmpty(o.HubRPC, localRPC(rpcPort)),
+		HubWS:           firstNonEmpty(o.HubWS, localWS(wsPort)),
+		HubEnvFile:      filepath.Join(dataDir, ".env.hub"),
+		KeycloakEnv:     []string{filepath.Join(dataDir, ".env.hub")},
+		VolumePrefix:    prefix,
+		ContainerPrefix: "cbweb3-" + prefix,
+		NetPrefix:       prefix,
+		RPCPort:         rpcPort,
+		WSPort:          wsPort,
+		P2PPort:         p2pPort,
 	}
 	steps := orchestrator.FoundHubSteps(cfg)
 	return orchestrator.New("found-hub", steps, state, o.DryRun).Run(ctx)
+}
+
+// nodePorts extracts the host RPC/WS/P2P ports from the manifest node (0 when unset).
+func nodePorts(n *manifest.Node) (rpc, ws, p2p int) {
+	if n == nil {
+		return 0, 0, 0
+	}
+	if n.RPC != nil {
+		rpc = n.RPC.Port
+	}
+	if n.WS != nil {
+		ws = n.WS.Port
+	}
+	if n.P2P != nil {
+		p2p = n.P2P.Port
+	}
+	return rpc, ws, p2p
+}
+
+// sanitizePrefix makes a metadata name safe for volume/network/container names.
+func sanitizePrefix(name string) string {
+	s := strings.ToLower(strings.TrimSpace(name))
+	s = strings.NewReplacer(" ", "-", "_", "-", "/", "-").Replace(s)
+	if s == "" {
+		return "cbweb3"
+	}
+	return s
+}
+
+func localRPC(port int) string {
+	if port == 0 {
+		return ""
+	}
+	return fmt.Sprintf("http://localhost:%d", port)
+}
+
+func localWS(port int) string {
+	if port == 0 {
+		return ""
+	}
+	return fmt.Sprintf("ws://localhost:%d", port)
+}
+
+// absOr resolves p to an absolute path (so it works both as a Go file path and
+// as an exec arg regardless of the runner's cwd); returns p unchanged on error.
+func absOr(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
 }
 
 func firstNonEmpty(vals ...string) string {

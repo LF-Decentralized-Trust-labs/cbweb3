@@ -1,0 +1,29 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: hub-cbweb3
+spec:
+  scenario: "b"
+  environment: local
+  mode: found-hub
+  topology:
+    role: hub
+  displayName: "CBWeb3 Interoperability Hub"
+  hub:
+    chainId: 1337
+    currency: [BRL, ARS, COP]      # base tCeBM reserve tokens
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 8845 }
+    ws:   { port: 8855 }
+    p2p:  { port: 31503 }
+    dataDir: cbweb3-data/hub
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  relay:
+    endpoint: http://host.docker.internal:4000
+  frontendHost: localhost
+  adminUsers:
+    - { role: GOVERNANCE, username: hub-governance, password: <local-only-bootstrap> }
+    - { role: NOC_ADMIN,  username: hub-noc,        password: <local-only-bootstrap> }

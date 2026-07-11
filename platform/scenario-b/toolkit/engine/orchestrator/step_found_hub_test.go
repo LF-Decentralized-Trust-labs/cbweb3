@@ -73,10 +73,13 @@ func TestFoundHubStepOrder(t *testing.T) {
 		}
 	}
 	must("build-contracts", "deploy-hub-contracts")
+	must("render-hub-compose-env", "start-besu-hub")
 	must("start-besu-hub", "deploy-hub-contracts")
-	must("deploy-hub-contracts", "provision-keycloak-hub")
 	must("deploy-hub-contracts", "emit-hub-bundle")
-	must("render-hub-env", "start-hub-infra")
+	// Infra creates the network/DB that keycloak + backend join → before them.
+	must("start-hub-infra", "provision-keycloak-hub")
+	must("start-hub-infra", "start-hub-backend")
+	must("provision-keycloak-hub", "start-hub-backend")
 	must("start-relay", "start-noc")
 }
 
@@ -95,12 +98,13 @@ func TestDeployInvokesCBWeb3HubScript(t *testing.T) {
 	}
 	found := false
 	for _, c := range fake.Calls {
-		if c.Name == "forge" && strings.Contains(strings.Join(c.Args, " "), "CBWeb3Hub.s.sol:DeployCBWeb3Hub") {
+		joined := c.Name + " " + strings.Join(c.Args, " ")
+		if strings.Contains(joined, "CBWeb3Hub.s.sol:DeployCBWeb3Hub") && strings.Contains(joined, "--legacy") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("deploy did not invoke CBWeb3Hub forge script; calls=%+v", fake.Calls)
+		t.Fatalf("deploy did not invoke the CBWeb3Hub forge script with --legacy; calls=%+v", fake.Calls)
 	}
 }
 

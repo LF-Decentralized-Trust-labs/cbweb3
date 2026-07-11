@@ -27,6 +27,7 @@ type SpokeConfig struct {
 	SpokeWS        string
 	CBAddress      string
 	GenesisDir     string
+	VolumePrefix   string // <p>_genesis, <p>_besu_data (node state in named volumes)
 	ValidatorCount int
 	BesuImage      string
 	HubBundlePath  string
@@ -81,6 +82,9 @@ func (c *SpokeConfig) WithDefaults() {
 	if c.GenesisDir == "" {
 		c.GenesisDir = filepath.Join(c.OutDir, "genesis-"+c.SpokeID)
 	}
+	if c.VolumePrefix == "" {
+		c.VolumePrefix = c.SpokeID + "_central-bank"
+	}
 	if c.WaitRPC == nil {
 		c.WaitRPC = func(ctx context.Context) error { return waitRPC(ctx, c.SpokeRPC, 60*time.Second) }
 	}
@@ -97,6 +101,9 @@ func (c *SpokeConfig) WithDefaults() {
 		}
 	}
 }
+
+func (c SpokeConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
+func (c SpokeConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
 
 func (c SpokeConfig) spokeTemplate(name string) string {
 	return filepath.Join(c.TemplatesDir, name+".compose.yaml")
@@ -163,7 +170,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				return err
 			},
 		},
-		genGenesisStep("gen-genesis-spoke", c.SpokeChainID, c.GenesisDir, c.ValidatorCount, c.Runner, c.BesuImage),
+		genGenesisStep("gen-genesis-spoke", c.SpokeChainID, c.genesisVolume(), c.besuDataVolume(), c.ValidatorCount, c.Runner, c.BesuImage),
 		{
 			Name: "start-besu-spoke",
 			Deps: []string{"gen-genesis-spoke"},
@@ -314,12 +321,12 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			_, err := os.Stat(filepath.Join(c.OutDir, "bundles", "spoke-"+c.SpokeID+".bundle.yaml"))
 			return err == nil, nil
 		},
-		Run: func(context.Context) error {
+		Run: func(ctx context.Context) error {
 			m, err := spokeContractMap(c.spokeBroadcastPath())
 			if err != nil {
 				return err
 			}
-			genesisBytes, err := os.ReadFile(filepath.Join(c.GenesisDir, "genesis.json"))
+			genesisBytes, err := readVolumeFile(ctx, c.Runner, c.genesisVolume(), "genesis.json")
 			if err != nil {
 				return err
 			}

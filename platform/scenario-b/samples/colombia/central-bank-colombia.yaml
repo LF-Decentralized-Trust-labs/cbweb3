@@ -1,0 +1,35 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-colombia
+spec:
+  scenario: "b"
+  environment: local
+  mode: found-spoke
+  topology:
+    role: central-bank
+  displayName: "Banco de la República (Colombia)"
+  spoke:
+    id: spoke-cop
+    chainId: 1340
+    currency: COP
+  hubBundleRef: ../bundles/hub.bundle.yaml
+  # No `pair` block: this spoke joins the hub without opening a sovereign corridor
+  # yet — demonstrating a plain found-spoke (the sovereign tail is not appended).
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 8945 }
+    ws:   { port: 8955 }
+    p2p:  { port: 31603 }
+    dataDir: cbweb3-data/central-bank-colombia
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  relay:
+    endpoint: http://host.docker.internal:4000
+  cbEndpoint: http://host.docker.internal:18945
+  frontendHost: localhost
+  adminUsers:
+    - { role: GOVERNANCE, username: co-governance, password: <local-only-bootstrap> }
+    - { role: TREASURY,   username: co-treasury,   password: <local-only-bootstrap> }
+    - { role: SUPERVISOR, username: co-supervisor, password: <local-only-bootstrap> }

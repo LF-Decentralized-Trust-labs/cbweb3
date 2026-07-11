@@ -1,0 +1,32 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-itau
+spec:
+  scenario: "b"
+  environment: local
+  mode: join
+  topology:
+    role: commercial-bank
+  bankId: bank-itau
+  displayName: "Itaú"
+  spoke:
+    id: spoke-brl
+    chainId: 1338
+    currency: BRL
+  joinBundleRef: ../bundles/spoke-brl.bundle.yaml
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 8646 }
+    ws:   { port: 8656 }
+    p2p:  { port: 31304 }
+    dataDir: cbweb3-data/bank-itau
+    validator: false               # non-validating full node
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: ca://central-bank-brazil
+  relay:
+    endpoint: http://host.docker.internal:4000
+  frontendHost: localhost
+  adminUsers:
+    - { role: BANK, username: itau-admin, password: <local-only-bootstrap> }

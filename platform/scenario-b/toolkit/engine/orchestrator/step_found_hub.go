@@ -28,9 +28,18 @@ type HubConfig struct {
 	HubEnvFile   string   // hub .env (render target)
 	KeycloakEnv  []string // backend .env files for client-secret write-back
 
-	GenesisDir     string // where genesis.json is seeded (mounted by the hub template)
+	GenesisDir     string // legacy; node state now lives in named volumes
 	ValidatorCount int    // QBFT validators (default 1)
 	BesuImage      string // besu image for genesis generation (default hyperledger/besu:25.8.0)
+
+	// Compose interpolation for the hub template (rendered into HubEnvFile before
+	// start-besu-hub). Node state is seeded into the `<VolumePrefix>_*` volumes.
+	VolumePrefix    string // e.g. "hub-cbweb3"  → <p>_genesis, <p>_besu_data
+	ContainerPrefix string // e.g. "cbweb3-hub"  → HUB_CONTAINER_PREFIX
+	NetPrefix       string // e.g. "hub-cbweb3"  → HUB_NET_PREFIX
+	RPCPort         int    // HUB_RPC_PORT (host)
+	WSPort          int    // HUB_WS_PORT (host)
+	P2PPort         int    // HUB_P2P_PORT (host)
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -48,6 +57,15 @@ func (c *HubConfig) WithDefaults() {
 	}
 	if c.GenesisDir == "" {
 		c.GenesisDir = filepath.Join(c.OutDir, "genesis")
+	}
+	if c.VolumePrefix == "" {
+		c.VolumePrefix = "hub-cbweb3"
+	}
+	if c.ContainerPrefix == "" {
+		c.ContainerPrefix = "cbweb3-hub"
+	}
+	if c.NetPrefix == "" {
+		c.NetPrefix = c.VolumePrefix
 	}
 	if c.WaitRPC == nil {
 		c.WaitRPC = func(ctx context.Context) error { return waitRPC(ctx, c.HubRPC, 60*time.Second) }
@@ -72,6 +90,73 @@ func (c HubConfig) template(name string) string {
 	return filepath.Join(c.TemplatesDir, name+".compose.yaml")
 }
 
+func (c HubConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
+func (c HubConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
+
+// renderHubComposeEnv writes ALL hub compose-template interpolation vars into
+// HubEnvFile (besu + infra + keycloak + backend/frontend/relay/noc), so every
+// `docker compose --env-file` step resolves its ${...}. Ports derive from the
+// besu RPC port by fixed offsets (single hub per host). Local dev creds only.
+func (c HubConfig) renderHubComposeEnv() error {
+	e := c.ContainerPrefix
+	vars := map[string]string{
+		// besu (hub template)
+		"BESU_IMAGE":           c.BesuImage,
+		"HUB_CONTAINER_PREFIX": c.ContainerPrefix,
+		"HUB_NET_PREFIX":       c.NetPrefix,
+		"HUB_VOLUME_PREFIX":    c.VolumePrefix,
+		"HUB_RPC_PORT":         itoa(c.RPCPort),
+		"HUB_WS_PORT":          itoa(c.WSPort),
+		"HUB_P2P_PORT":         itoa(c.P2PPort),
+		// shared entity vars (infra/keycloak/backend/frontend/noc)
+		"CONTAINER_PREFIX":     c.ContainerPrefix,
+		"ENTITY":               "hub",
+		"ENTITY_NET_PREFIX":    c.NetPrefix,
+		"ENTITY_VOLUME_PREFIX": c.VolumePrefix,
+		"ENTITY_RPC_PORT":      itoa(c.RPCPort),
+		// infra: postgres + redis (single DB doubles as the keycloak DB locally)
+		"POSTGRES_USER":     "cbweb3",
+		"POSTGRES_PASSWORD": "cbweb3",
+		"POSTGRES_DB":       "keycloak",
+		"POSTGRES_PORT":     itoa(c.RPCPort + 5000),
+		"REDIS_PORT":        itoa(c.RPCPort + 6000),
+		// keycloak (joins the entity infra network; DB is the infra postgres)
+		"KC_ADMIN_USER":     "admin",
+		"KC_ADMIN_PASSWORD": "admin",
+		"KC_DB_URL":         "jdbc:postgresql://" + e + "-hub-postgres:5432/keycloak",
+		"KEYCLOAK_PORT":     itoa(c.RPCPort + 7000),
+		// backend / frontend / relay / noc (images must be pre-built locally)
+		"GATEWAY_PORT":         itoa(c.RPCPort + 8000),
+		"GATEWAY_URL":          fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
+		"BACKEND_IMAGE":        "cbweb3b-hub-backend:local",
+		"FRONTEND_IMAGE":       "cbweb3b-hub-frontend:local",
+		"FRONTEND_PORT":        itoa(c.RPCPort + 9000),
+		"RELAY_IMAGE":          "cbweb3b-relay:local",
+		"RELAY_CONTAINER_NAME": e + "-relay",
+		"RELAY_NET_PREFIX":     c.NetPrefix,
+		"RELAY_VOLUME_PREFIX":  c.VolumePrefix,
+		"RELAY_PORT":           "4000",
+		"NOC_AGENT_BESU_RPC":   fmt.Sprintf("http://%s-hub-validator:8545", e),
+		"NOC_AGENT_ENTITY":     "hub",
+		"NOC_AGENT_IMAGE":      "cbweb3b-noc-agent:local",
+		"NOC_BACKEND_IMAGE":    "cbweb3b-noc-backend:local",
+		"NOC_BACKEND_PORT":     itoa(c.RPCPort + 11000),
+		"NOC_DB_NAME":          "noc",
+		"NOC_DB_USER":          "cbweb3",
+		"NOC_DB_PASSWORD":      "cbweb3",
+		"NOC_NET_PREFIX":       c.NetPrefix,
+		"NOC_PORTAL_IMAGE":     "cbweb3b-noc-portal:local",
+		"NOC_PORTAL_PORT":      itoa(c.RPCPort + 12000),
+		"NOC_VOLUME_PREFIX":    c.VolumePrefix,
+	}
+	for k, v := range vars {
+		if err := addrs.AppendAddr(c.HubEnvFile, k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // FoundHubSteps builds the ordered found-hub step set.
 func FoundHubSteps(c HubConfig) []Step {
 	c.WithDefaults()
@@ -93,8 +178,13 @@ func FoundHubSteps(c HubConfig) []Step {
 		},
 		genGenesisHubStep(c),
 		{
-			Name: "start-besu-hub",
+			Name: "render-hub-compose-env",
 			Deps: []string{"gen-genesis-hub"},
+			Run:  func(context.Context) error { return c.renderHubComposeEnv() },
+		},
+		{
+			Name: "start-besu-hub",
+			Deps: []string{"render-hub-compose-env"},
 			Run: func(ctx context.Context) error {
 				if _, err := c.Runner.Run(ctx, "docker", "compose", "-f", c.template("hub"), "--env-file", c.HubEnvFile, "up", "-d"); err != nil {
 					return err
@@ -113,16 +203,25 @@ func FoundHubSteps(c HubConfig) []Step {
 				if err := c.WaitRPC(ctx); err != nil { // readiness gate
 					return err
 				}
-				// Single forge script; the 7 contracts' order is internal to Solidity.
-				_, err := c.Runner.Run(ctx, "forge", "script",
-					"script/CBWeb3Hub.s.sol:DeployCBWeb3Hub",
-					"--root", c.ContractsDir, "--rpc-url", c.HubRPC, "--broadcast")
+				// Single forge script (the 7 contracts' order is internal to
+				// Solidity). Runs inside the contracts project, with the local dev
+				// deployer/admin/CB accounts, and --legacy for the zero-gas chain.
+				cmd := fmt.Sprintf("cd %q && "+
+					"DEPLOYER_PRIVATE_KEY=%s ADMIN_PRIVATE_KEY=%s ADMIN_ADDRESS=%s "+
+					"CENTRAL_BANK_ADDRESS=%s CENTRAL_BANK_B_ADDRESS=%s "+
+					"forge script script/CBWeb3Hub.s.sol:DeployCBWeb3Hub --rpc-url %s --broadcast --legacy",
+					c.ContractsDir, devDeployerKey, devDeployerKey, devDeployerAddr,
+					devDeployerAddr, devCBBAddr, c.HubRPC)
+				_, err := c.Runner.Run(ctx, "sh", "-c", cmd)
 				return err
 			},
 		},
+		// Infra (postgres + redis) creates the entity_infra_network + DB that
+		// keycloak/backend join — must come BEFORE them.
+		{Name: "start-hub-infra", Deps: []string{"render-hub-compose-env"}, Run: compose("entity-infra")},
 		{
 			Name: "provision-keycloak-hub",
-			Deps: []string{"deploy-hub-contracts"},
+			Deps: []string{"start-hub-infra"},
 			Check: func(context.Context) (bool, error) {
 				// idempotent: skip if the secret is already written to all targets
 				if len(c.KeycloakEnv) == 0 {
@@ -156,7 +255,7 @@ func FoundHubSteps(c HubConfig) []Step {
 		},
 		{
 			Name: "render-hub-env",
-			Deps: []string{"deploy-hub-contracts", "provision-keycloak-hub"},
+			Deps: []string{"deploy-hub-contracts"},
 			Run: func(context.Context) error {
 				m, err := hubContractMap(c.broadcastPath())
 				if err != nil {
@@ -178,11 +277,10 @@ func FoundHubSteps(c HubConfig) []Step {
 				return nil
 			},
 		},
-		{Name: "start-hub-infra", Deps: []string{"render-hub-env"}, Run: compose("entity-infra")},
-		{Name: "start-hub-backend", Deps: []string{"start-hub-infra", "render-hub-env"}, Run: compose("entity-backend")},
+		{Name: "start-hub-backend", Deps: []string{"start-hub-infra", "render-hub-env", "provision-keycloak-hub"}, Run: compose("entity-backend")},
 		{Name: "start-hub-frontend", Deps: []string{"start-hub-backend"}, Run: compose("entity-frontend")},
 		{Name: "start-relay", Deps: []string{"deploy-hub-contracts"}, Run: compose("relay")},
-		{Name: "start-noc", Deps: []string{"start-relay"}, Run: compose("noc")},
+		{Name: "start-noc", Deps: []string{"start-relay", "start-hub-infra"}, Run: compose("noc")},
 		{
 			Name: "emit-hub-bundle",
 			Deps: []string{"deploy-hub-contracts"},

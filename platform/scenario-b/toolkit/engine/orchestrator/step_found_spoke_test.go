@@ -147,11 +147,11 @@ func TestRegisterRelaySpokeAndSoftNoc(t *testing.T) {
 
 // US5: emit-spoke-bundle produces a valid spoke bundle (genesis + enode + contracts).
 func TestEmitSpokeBundle(t *testing.T) {
-	fake := &exec.FakeRunner{}
+	// The genesis is read from the named volume via the runner (docker cat), so
+	// the fake returns it for the docker call in emit-spoke-bundle.
+	fake := &exec.FakeRunner{Outputs: map[string][]byte{"docker": []byte(`{"config":{"chainId":1338}}`)}}
 	cfg := testSpokeCfg(t, fake)
 	writeSpokeBroadcast(t, cfg.ContractsDir)
-	_ = os.MkdirAll(cfg.GenesisDir, 0o755)
-	_ = os.WriteFile(filepath.Join(cfg.GenesisDir, "genesis.json"), []byte(`{"config":{"chainId":1338}}`), 0o644)
 
 	steps := FoundSpokeSteps(cfg)
 	// start-besu-spoke captures the enode (shared closure) before emit.

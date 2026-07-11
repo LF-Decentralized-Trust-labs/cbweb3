@@ -1,0 +1,41 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-brazil
+spec:
+  scenario: "b"
+  environment: local
+  mode: found-spoke
+  topology:
+    role: central-bank
+  displayName: "Banco Central do Brasil"
+  spoke:
+    id: spoke-brl
+    chainId: 1338
+    currency: BRL
+  hubBundleRef: ../bundles/hub.bundle.yaml
+  # Sovereign corridor BRL <-> ARS. Brazil is the proposer; Argentina confirms
+  # (from its own found-spoke run). The sovereign tail is SOFT: without the local
+  # signing keys (see README) it stays pending and never blocks the spoke.
+  pair:
+    proposerCB: central-bank-brazil
+    confirmerCB: central-bank-argentina
+    symbolA: BRL
+    symbolB: ARS
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 8645 }
+    ws:   { port: 8655 }
+    p2p:  { port: 31303 }
+    dataDir: cbweb3-data/central-bank-brazil
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed          # the CB is the CA of its spoke
+  relay:
+    endpoint: http://host.docker.internal:4000
+  cbEndpoint: http://host.docker.internal:18645
+  frontendHost: localhost
+  adminUsers:
+    - { role: GOVERNANCE, username: br-governance, password: <local-only-bootstrap> }
+    - { role: TREASURY,   username: br-treasury,   password: <local-only-bootstrap> }
+    - { role: SUPERVISOR, username: br-supervisor, password: <local-only-bootstrap> }

@@ -2,8 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -21,62 +19,39 @@ func genesisStep(t *testing.T, cfg HubConfig) Step {
 	return Step{}
 }
 
-// gen-genesis-hub is idempotent: skipped when genesis.json already exists.
+// gen-genesis-hub is idempotent: skipped when genesis.json already exists in the
+// `<prefix>_genesis` named volume (probed via the runner, so it is neutralized by
+// the DryRunner). The probe emits "YES" when the file exists.
 func TestGenGenesisIdempotent(t *testing.T) {
-	cfg := testHubConfig(t, &exec.FakeRunner{})
-	cfg.GenesisDir = filepath.Join(t.TempDir(), "genesis")
-	step := genesisStep(t, cfg)
-
-	ok, _ := step.Check(context.Background())
-	if ok {
-		t.Fatal("Check should be false before genesis exists")
+	// Absent: the probe returns no output → Check false.
+	absent := genesisStep(t, testHubConfig(t, &exec.FakeRunner{}))
+	if ok, _ := absent.Check(context.Background()); ok {
+		t.Fatal("Check should be false when the volume has no genesis.json")
 	}
-	// Seed genesis.json → Check true (idempotent skip).
-	_ = os.MkdirAll(cfg.GenesisDir, 0o755)
-	_ = os.WriteFile(filepath.Join(cfg.GenesisDir, "genesis.json"), []byte("{}"), 0o644)
-	ok, _ = step.Check(context.Background())
-	if !ok {
-		t.Fatal("Check should be true after genesis.json exists (idempotent)")
+	// Present: the probe returns "YES" → Check true (idempotent skip).
+	present := genesisStep(t, testHubConfig(t, &exec.FakeRunner{Outputs: map[string][]byte{"docker": []byte("YES\n")}}))
+	if ok, _ := present.Check(context.Background()); !ok {
+		t.Fatal("Check should be true when the volume already has genesis.json")
 	}
 }
 
-// Run writes the QBFT config, invokes besu operator generate-blockchain-config,
-// and seeds genesis.json into GenesisDir.
-func TestGenGenesisRunInvokesBesu(t *testing.T) {
-	fake := &exec.FakeRunner{}
-	cfg := testHubConfig(t, fake)
-	cfg.GenesisDir = filepath.Join(t.TempDir(), "genesis")
-	cfg.ChainID = 1337
-	step := genesisStep(t, cfg)
-
-	// Simulate besu output: pre-create the networkFiles/genesis.json the runner
-	// would produce (FakeRunner does not execute).
-	work := filepath.Join(cfg.GenesisDir, ".work", "networkFiles")
-	_ = os.MkdirAll(work, 0o755)
-	_ = os.WriteFile(filepath.Join(work, "genesis.json"), []byte(`{"config":{"chainId":1337}}`), 0o644)
-
-	if err := step.Run(context.Background()); err != nil {
-		t.Fatalf("gen-genesis Run: %v", err)
+// The zero-gas QBFT genesis carries the chainId, zeroBaseFee, all forks at 0, and
+// pre-funds the deployer dev account so contracts deploy with gasPrice 0.
+func TestQBFTConfigZeroGas(t *testing.T) {
+	out, err := qbftConfig(1337, 1)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// besu operator generate-blockchain-config was invoked.
-	found := false
-	for _, c := range fake.Calls {
-		if c.Name == "docker" && strings.Contains(strings.Join(c.Args, " "), "operator generate-blockchain-config") {
-			found = true
+	s := string(out)
+	for _, want := range []string{
+		"\"chainId\": 1337",
+		"\"zeroBaseFee\": true",
+		"\"shanghaiTime\": 0",
+		devDeployerAddr[2:], // funded deployer (without 0x)
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("qbftConfig missing %q:\n%s", want, s)
 		}
-	}
-	if !found {
-		t.Fatalf("besu genesis generation not invoked; calls=%+v", fake.Calls)
-	}
-	// QBFT config carries the chainId.
-	cfgBytes, err := os.ReadFile(filepath.Join(cfg.GenesisDir, ".work", "qbftConfig.json"))
-	if err != nil || !strings.Contains(string(cfgBytes), "\"chainId\": 1337") {
-		t.Fatalf("qbftConfig missing chainId: %v\n%s", err, cfgBytes)
-	}
-	// genesis.json seeded into GenesisDir.
-	if _, err := os.Stat(filepath.Join(cfg.GenesisDir, "genesis.json")); err != nil {
-		t.Fatalf("genesis.json not seeded: %v", err)
 	}
 }
 

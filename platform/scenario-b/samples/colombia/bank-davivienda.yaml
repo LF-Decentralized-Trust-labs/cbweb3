@@ -1,0 +1,32 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-davivienda
+spec:
+  scenario: "b"
+  environment: local
+  mode: join
+  topology:
+    role: commercial-bank
+  bankId: bank-davivienda
+  displayName: "Davivienda"
+  spoke:
+    id: spoke-cop
+    chainId: 1340
+    currency: COP
+  joinBundleRef: ../bundles/spoke-cop.bundle.yaml
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 8947 }
+    ws:   { port: 8957 }
+    p2p:  { port: 31605 }
+    dataDir: cbweb3-data/bank-davivienda
+    validator: false
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: ca://central-bank-colombia
+  relay:
+    endpoint: http://host.docker.internal:4000
+  frontendHost: localhost
+  adminUsers:
+    - { role: BANK, username: davivienda-admin, password: <local-only-bootstrap> }

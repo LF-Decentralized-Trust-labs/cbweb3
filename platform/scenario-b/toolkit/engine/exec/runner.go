@@ -7,8 +7,10 @@ package exec
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // CommandRunner runs an external command and returns its combined output.
@@ -46,7 +48,16 @@ func (r *realRunner) Run(ctx context.Context, name string, args ...string) ([]by
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	err := cmd.Run()
-	return out.Bytes(), err
+	if err != nil {
+		// Surface the command output in the error (Principle VI: no silent
+		// swallowing) so a failed step's report explains WHY, not just "exit 1".
+		trimmed := strings.TrimSpace(out.String())
+		if trimmed != "" {
+			return out.Bytes(), fmt.Errorf("%s %s: %w\n%s", name, strings.Join(args, " "), err, trimmed)
+		}
+		return out.Bytes(), fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return out.Bytes(), nil
 }
 
 // FakeRunner records calls and returns programmed outputs/errors keyed by

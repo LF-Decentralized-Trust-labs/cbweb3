@@ -1,0 +1,32 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-macro
+spec:
+  scenario: "b"
+  environment: local
+  mode: join
+  topology:
+    role: commercial-bank
+  bankId: bank-macro
+  displayName: "Banco Macro"
+  spoke:
+    id: spoke-ars
+    chainId: 1339
+    currency: ARS
+  joinBundleRef: ../bundles/spoke-ars.bundle.yaml
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 8747 }
+    ws:   { port: 8757 }
+    p2p:  { port: 31405 }
+    dataDir: cbweb3-data/bank-macro
+    validator: false
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: ca://central-bank-argentina
+  relay:
+    endpoint: http://host.docker.internal:4000
+  frontendHost: localhost
+  adminUsers:
+    - { role: BANK, username: macro-admin, password: <local-only-bootstrap> }
