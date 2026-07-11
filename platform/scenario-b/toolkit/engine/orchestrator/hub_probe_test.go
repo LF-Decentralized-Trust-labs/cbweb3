@@ -86,3 +86,27 @@ func TestHubCBRegisteredRPCError(t *testing.T) {
 		t.Fatal("expected error on RPC error response")
 	}
 }
+
+// codeServer mocks eth_getCode, returning the given result string verbatim.
+func codeServer(t *testing.T, result string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": 1, "result": result})
+	}))
+}
+
+// contractHasCode is the self-healing gate for the deploy Checks: bytecode ⇒ true
+// (skip deploy), "0x" ⇒ false (a stale broadcast over a fresh chain re-deploys).
+func TestContractHasCode(t *testing.T) {
+	withCode := codeServer(t, "0x60806040")
+	defer withCode.Close()
+	if has, err := contractHasCode(context.Background(), withCode.URL, "0xabc"); err != nil || !has {
+		t.Fatalf("bytecode present must be true: has=%v err=%v", has, err)
+	}
+
+	empty := codeServer(t, "0x")
+	defer empty.Close()
+	if has, err := contractHasCode(context.Background(), empty.URL, "0xabc"); err != nil || has {
+		t.Fatalf("empty code must be false: has=%v err=%v", has, err)
+	}
+}
