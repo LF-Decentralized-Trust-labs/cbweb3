@@ -255,7 +255,8 @@ Declarative provisioning toolkit for the Scenario B hub-and-spoke topology.
 | `found-spoke` mode (register-cb + spoke contracts + Keycloak + register-relay-spoke + soft add-noc-agent) + spoke bundle emitter — TK-B7 | In progress |
 | `join` mode (non-validating full node: write-genesis + wait-sync + gen-csr; canonical flow, no relay/noc) — TK-B8 | In progress |
 | Sovereign-pair tail (open-sovereign-pair + commit-liquidity + seed-oracle; soft, driven by spec.pair, strict sovereignty) — TK-B9 | In progress |
-| E2E + performance baseline, auth-per-CB relay — TK-B10+ | Planned |
+| Full-pipeline E2E (swap + breaker + SpokeBridge) + toolkit-native perf baseline + E2E-STATUS — TK-B10 | In progress |
+| Production CertSource/KeyProvider (KMS/CA), auth-per-CB relay, threshold-gated baseline | Planned |
 
 The manifest model and validation are the toolkit's entry point: parse + validate +
 report only, no execution. The custody boundaries provide per-entity blockchain keys and the

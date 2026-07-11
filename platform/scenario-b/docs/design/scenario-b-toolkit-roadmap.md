@@ -648,7 +648,16 @@ soberano** (que exige dois spokes prontos + relay).
    **não** é reusado; os atos são dirigidos discretamente por `cast`/`forge create` (sem alterar
    contratos). Steps soft não bloqueiam o found-spoke nem o spoke bundle. Breaker opção A; W-token
    dedup por moeda. Unidade com FakeRunner; suíte E2E sob build tag `e2e`.
-9. **TK-B10** — E2E + baseline.
+9. **TK-B10** — E2E + baseline. **[Implementado]** — fase de verificação (testes + doc): um **E2E de
+   pipeline completo** (`tests/e2e/pipeline_e2e_test.go`, tag `e2e`) que compõe os modos via
+   `apply.Apply` (found-hub → found-spoke ×2 → join → cauda soberana) e exercita o caminho de negócio —
+   **swap** (`swapTokensForExactTokens`), **circuit breaker** (`pause`/`signResume` quorum 2/`isPaused`)
+   e **`SpokeBridge`** (`lock`/`release`) — mais **idempotência** (re-`apply` converge). Sub-testes
+   skip-com-aviso: `TestPipeline_HubMint` (mint relay-mediado, poll de saldo) e `TestPipeline_BridgeRefund`
+   (`release` como refund; não há timeout on-chain). **Baseline toolkit-native** em Go
+   (`tests/perf/baseline_test.go`, tag `perf`): p95 de quote/swap (informativo, sem gate). Doc
+   **`toolkit/E2E-STATUS.md`** (espelho do Cenário A). Todo E2E/baseline faz **skip-com-aviso** sem
+   ambiente (nunca falso verde). Sem novos contratos/deps; não altera Makefiles/`deploy/local`.
 
 ---
 
