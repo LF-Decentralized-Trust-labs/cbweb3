@@ -11,11 +11,11 @@
 # before any apply — its address reaches the toolkit via each manifest's
 # spec.relay.endpoint (http://localhost:4000). found-hub founds the hub (Besu +
 # base contracts). Each central bank FOUNDS its spoke (CB is the sole QBFT
-# validator), registers on the hub, dynamically registers its spoke with the relay
-# (POST /api/v1/spokes), and — when its manifest carries `spec.pair` — runs the
-# soft sovereign tail (open-sovereign-pair / commit-liquidity / seed-oracle).
-# Brazil proposes the BRL<->ARS pair; Argentina confirms it. Each commercial bank
-# JOINS as a non-validating full node.
+# validator), registers on the hub, and dynamically registers its spoke with the
+# relay (POST /api/v1/spokes). Each commercial bank JOINS as a non-validating full
+# node. The sovereign FX corridor (spec.pair, e.g. BRL<->ARS) is NOT opened here:
+# each CB opens it at runtime from its governance portal (propose/confirm pair +
+# cooperative liquidity), so provisioning never handles sovereign signing keys.
 #
 # Idempotent: re-running resumes from the first incomplete step per entity
 # (per-entity state under cbweb3-data/<entity>).
@@ -79,13 +79,13 @@ bash "${SCENARIO_DIR}/provisioning/scripts/start-cacti.sh"
 # --- hub -----------------------------------------------------------------------
 apply "Hub — found-hub hub-cbweb3" "${SCRIPT_DIR}/hub/hub-cbweb3.yaml"
 
-# --- Brazil spoke (proposes the BRL<->ARS pair) -------------------------------
+# --- Brazil spoke (spoke-brl) -------------------------------------------------
 apply "Brazil — found-spoke central-bank-brazil (spoke-brl)" \
   "${SCRIPT_DIR}/brazil/central-bank-brazil.yaml" --spoke-rpc http://localhost:8645
 apply "Brazil — join bank-itau"     "${SCRIPT_DIR}/brazil/bank-itau.yaml"     --spoke-rpc http://localhost:8646
 apply "Brazil — join bank-bradesco" "${SCRIPT_DIR}/brazil/bank-bradesco.yaml" --spoke-rpc http://localhost:8647
 
-# --- Argentina spoke (confirms the pair -> ACTIVE) ----------------------------
+# --- Argentina spoke (spoke-ars) ----------------------------------------------
 apply "Argentina — found-spoke central-bank-argentina (spoke-ars)" \
   "${SCRIPT_DIR}/argentina/central-bank-argentina.yaml" --spoke-rpc http://localhost:8745
 apply "Argentina — join bank-galicia" "${SCRIPT_DIR}/argentina/bank-galicia.yaml" --spoke-rpc http://localhost:8746
@@ -95,13 +95,12 @@ log "done. Node RPC ports: hub 8845 | brazil 8645/8646/8647 | argentina 8745/874
 log "bundles emitted under samples/bundles/ ; per-entity state under samples/cbweb3-data/"
 cat <<'EOF'
 
-  Sovereign corridor: W-BRL-ARS (central-bank-brazil proposes, central-bank-argentina confirms).
-  The sovereign tail is SOFT — without local signing keys it stays pending (non-blocking).
-  To open the corridor fully, pass the local keys/addresses on the found-spoke applies, e.g.:
-
-    --hub-admin-key 0x...  --cb-hub-key 0x...  --relayer-addr 0x... \
-    --proposer-cb-address 0x...  --confirmer-cb-address 0x... \
-    --pair-rate 5000000  --commit-amount-a 1000  --commit-amount-b 1000
+  Sovereign corridor (BRL<->ARS): opened at RUNTIME from the CB governance portal,
+  not by this script. Once the stacks are up, each central bank uses its portal
+  (Cooperative Liquidity wizard) or the v2 API to register its currency, propose/
+  confirm the pair, and add liquidity — CB-role, authenticated, no raw keys:
+    POST /api/v2/hub/currencies · /api/v2/amm/pairs/propose · /confirm
+    POST /api/v2/amm/liquidity/add
 
   Verify block height per node:
     for p in 8845 8645 8646 8647 8745 8746 8747; do

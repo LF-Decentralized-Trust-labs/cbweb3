@@ -16,9 +16,9 @@ Ready-to-use `ParticipantDeployment` manifests for the **Scenario B** toolkit
   - Brazil: `bank-itau`, `bank-bradesco` → `spoke-brl`
   - Argentina: `bank-galicia`, `bank-macro` → `spoke-ars`
   - Colombia: `bank-bancolombia`, `bank-davivienda` → `spoke-cop`
-- **One sovereign FX corridor** `W-BRL-ARS`: `central-bank-brazil` proposes and
-  `central-bank-argentina` confirms (the soft sovereign tail of `found-spoke`).
-  Colombia joins the hub **without** opening a corridor (a plain `found-spoke`).
+- **One sovereign FX corridor** `W-BRL-ARS` between Brazil and Argentina — opened
+  at runtime from the CB governance portal (not by provisioning; see below).
+  Colombia joins the hub **without** opening a corridor.
 
 > The bank names are illustrative, used only to demonstrate provisioning.
 
@@ -54,11 +54,11 @@ samples/
   hub/
     hub-cbweb3.yaml                 # found-hub → the neutral hub (contracts + NOC)
   brazil/
-    central-bank-brazil.yaml        # found-spoke → spoke-brl (proposes W-BRL-ARS)
+    central-bank-brazil.yaml        # found-spoke → spoke-brl
     bank-itau.yaml                  # join → spoke-brl
     bank-bradesco.yaml              # join → spoke-brl
   argentina/
-    central-bank-argentina.yaml     # found-spoke → spoke-ars (confirms W-BRL-ARS)
+    central-bank-argentina.yaml     # found-spoke → spoke-ars
     bank-galicia.yaml               # join → spoke-ars
     bank-macro.yaml                 # join → spoke-ars
   colombia/
@@ -144,7 +144,7 @@ bash "$ROOT/scenario-b/provisioning/scripts/start-cacti.sh"
 # 1) found the hub (emits bundles/hub.bundle.yaml)
 "$BIN" apply -f hub/hub-cbweb3.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD"
 
-# 2) found spoke-brl (consumes hub.bundle.yaml; proposes the pair; emits spoke-brl.bundle.yaml)
+# 2) found spoke-brl (consumes hub.bundle.yaml; emits spoke-brl.bundle.yaml)
 "$BIN" apply -f brazil/central-bank-brazil.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" \
   --spoke-rpc http://localhost:8645
 
@@ -152,7 +152,7 @@ bash "$ROOT/scenario-b/provisioning/scripts/start-cacti.sh"
 "$BIN" apply -f brazil/bank-itau.yaml     -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8646
 "$BIN" apply -f brazil/bank-bradesco.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8647
 
-# 4) found spoke-ars (confirms the pair -> ACTIVE) and join its banks
+# 4) found spoke-ars and join its banks
 "$BIN" apply -f argentina/central-bank-argentina.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8745
 "$BIN" apply -f argentina/bank-galicia.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8746
 "$BIN" apply -f argentina/bank-macro.yaml   -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8747
@@ -163,29 +163,22 @@ never regenerated, and an `ACTIVE` pair is left untouched.
 
 ---
 
-## Sovereign corridor (BRL ↔ ARS) — soft tail
+## Sovereign corridor (BRL ↔ ARS) — opened at runtime via the CB portal
 
-When a `found-spoke` manifest carries `spec.pair`, the toolkit appends the **soft**
-sovereign tail: `open-sovereign-pair` → `commit-liquidity` → `seed-oracle`. It runs
-after the spoke is up and **never blocks** the spoke (a failure/pending is
-non-fatal). Strict sovereignty: each `apply` signs only the current CB's act —
-Brazil (proposer) scaffolds the W-tokens/AMM and calls `proposePair`; Argentina
-(confirmer), on its own run, calls `confirmPair` and the pair goes `PROPOSED →
-ACTIVE`.
+Provisioning does **not** open the FX corridor. `spec.pair` only documents the
+intended corridor; the toolkit never holds sovereign signing keys. Once the
+stacks are up, each central bank opens the corridor from its **governance portal**
+(the *Cooperative Liquidity* wizard) — or the v2 API directly — authenticated by
+its `ROLE_CENTRAL_BANK` Keycloak session:
 
-The on-chain acts need local signing keys/addresses (never in the manifest). To
-open the corridor fully in local, pass them on the `found-spoke` applies:
+- `POST /api/v2/hub/currencies` — register the currency (W-token).
+- `POST /api/v2/amm/pairs/propose` — the CB of token A proposes the pair.
+- `POST /api/v2/amm/pairs/confirm` — the CB of token B confirms → `PROPOSED → ACTIVE`.
+- `POST /api/v2/amm/liquidity/add` — each CB adds its cooperative liquidity.
 
-```bash
-"$BIN" apply -f brazil/central-bank-brazil.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" \
-  --spoke-rpc http://localhost:8645 \
-  --hub-admin-key 0x... --cb-hub-key 0x... --relayer-addr 0x... \
-  --proposer-cb-address 0x... --confirmer-cb-address 0x... \
-  --pair-rate 5000000 --commit-amount-a 1000 --commit-amount-b 1000
-```
-
-Without them, the sovereign tail stays **pending** (soft) and the spokes still
-come up normally. Colombia has no `spec.pair`, so its tail is not appended.
+Strict sovereignty holds: each CB signs only its own act, through its own portal
+session — no counterparty key, no raw keys in the toolkit or the manifest.
+Colombia simply never opens a corridor.
 
 ---
 
