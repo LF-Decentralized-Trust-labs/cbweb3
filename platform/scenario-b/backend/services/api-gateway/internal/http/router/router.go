@@ -22,6 +22,8 @@ type Dependencies struct {
 	SupervisorHandler      *handlers.SupervisorHandler
 	OnboardingHandler      *handlers.OnboardingHandler
 	OnboardingProxyHandler *handlers.OnboardingProxyHandler
+	// SpokesHandler serves the internal spoke self-registration endpoint (hub only).
+	SpokesHandler *handlers.SpokesHandler
 	AuthProvider           interfaces.IAuthProvider
 	// PaymentProxyHandler proxies /api/v1/payments/* to the Central Bank gateway.
 	// Only wired when CENTRAL_BANK_API_URL is set (commercial bank gateways).
@@ -157,6 +159,16 @@ func Setup(app *fiber.App, deps Dependencies) {
 		internalPayments.Get("/escrows", deps.PaymentHandler.ListEscrows)
 		internalPayments.Post("/redeems", deps.PaymentHandler.RequestRedeem)
 		internalPayments.Get("/redeems", deps.PaymentHandler.ListRedeems)
+	}
+
+	// --- Internal spoke self-registration (hub only) ---
+	// A founding central bank registers its spoke on the hub IdentityRegistry via
+	// the hub compliance service. Machine-to-machine, guarded by X-Relay-Auth.
+	if deps.SpokesHandler != nil {
+		relaySecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
+		spokes := app.Group("/internal/v1", middleware.RequireRelayAuth(relaySecret))
+		spokes.Post("/spokes/register", deps.SpokesHandler.RegisterSpoke)
+		spokes.Post("/spokes/register-currency", deps.SpokesHandler.RegisterSpokeCurrency)
 	}
 
 	// --- Scenario B API v2 ---

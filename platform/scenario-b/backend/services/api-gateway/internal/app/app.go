@@ -117,6 +117,7 @@ func New(cfg config.Config) (*App, error) {
 		ComplianceHandler: complianceHandler,
 		GovernanceHandler: governanceHandler,
 		SupervisorHandler: supervisorHandler,
+		SpokesHandler:     handlers.NewSpokesHandler(complianceGRPC),
 		AuthProvider:      identityGRPCProvider,
 		V2Deps:            v2Deps,
 	}

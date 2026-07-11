@@ -216,6 +216,99 @@ func (s *complianceService) IssueParticipantCertificate(ctx context.Context, req
 	}, nil
 }
 
+// RegisterParticipantOnChain registers a wallet on the IdentityRegistry directly
+// (the configured signer must hold GOVERNANCE_ROLE). It is the machine-to-machine
+// self-registration path — no CSR nor prior DB record required — used e.g. by a
+// founding central bank registering its spoke on the neutral hub. Idempotent:
+// skips when the wallet can already transact. Mirrors the participant into the
+// repo for audit (best-effort).
+func (s *complianceService) RegisterParticipantOnChain(ctx context.Context, req *compliancv1.RegisterParticipantOnChainRequest) (*compliancv1.RegisterParticipantOnChainResponse, error) {
+	wallet := strings.TrimSpace(req.WalletAddress)
+	if wallet == "" {
+		return nil, status.Error(codes.InvalidArgument, "wallet_address is required")
+	}
+	role := strings.TrimSpace(req.Role)
+	if role == "" {
+		role = "ROLE_CENTRAL_BANK"
+	}
+	// Idempotent: an already-transacting wallet is treated as registered. The
+	// live Besu client also implements RegistryReader; the noop client does not.
+	if reader, ok := s.blockchain.(registry.RegistryReader); ok {
+		if can, err := reader.CanTransact(ctx, wallet); err == nil && can {
+			return &compliancv1.RegisterParticipantOnChainResponse{AlreadyRegistered: true}, nil
+		}
+	}
+	txHash, err := s.blockchain.RegisterParticipant(ctx, wallet, req.InstitutionName, role, [32]byte{})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "on-chain registerParticipant: %v", err)
+	}
+	// Best-effort DB mirror (never fails the on-chain result).
+	_ = s.repo.UpsertParticipant(ctx, repository.Participant{
+		UserID:          wallet,
+		InstitutionName: req.InstitutionName,
+		Role:            role,
+		Status:          "ACTIVE",
+		WalletAddress:   wallet,
+		BankCode:        req.BankCode,
+	})
+	return &compliancv1.RegisterParticipantOnChainResponse{TxHash: txHash}, nil
+}
+
+// currencyRegistrar is the subset of the live Besu client used for sovereign
+// currency registration. It is satisfied by the concrete *registry.BesuClient
+// but NOT by the noop client, so a type assertion lets the RPC degrade
+// gracefully (codes.Unimplemented) in dev/test mode.
+type currencyRegistrar interface {
+	RegisterCurrency(ctx context.Context, tokenName, tokenSymbol, countryName, proposerCB, cbAddress string) (tokenAddr string, txHash string, err error)
+	IsCurrencyRegistered(ctx context.Context, symbol string) (bool, error)
+}
+
+// RegisterCurrencyOnChain deploys a founding central bank's bridge token
+// (W-token) and registers its sovereign currency on-chain. Mirrors
+// RegisterParticipantOnChain: the hub compliance signer (hub admin == the CB in
+// local) performs the on-chain work. Idempotent by W-token symbol.
+func (s *complianceService) RegisterCurrencyOnChain(ctx context.Context, req *compliancv1.RegisterCurrencyOnChainRequest) (*compliancv1.RegisterCurrencyOnChainResponse, error) {
+	cbAddress := strings.TrimSpace(req.CbAddress)
+	if cbAddress == "" {
+		return nil, status.Error(codes.InvalidArgument, "cb_address is required")
+	}
+	currency := strings.TrimSpace(req.Currency)
+	if currency == "" {
+		return nil, status.Error(codes.InvalidArgument, "currency is required")
+	}
+
+	symbol := "W-tCeBM_" + currency
+	name := "Wrapped tCeBM " + currency
+	country := "Sovereign " + currency
+	proposerCB := strings.TrimSpace(req.SpokeId)
+	if proposerCB == "" {
+		proposerCB = currency
+	}
+
+	// The blockchain field is a write-only RegistryWriter; the currency methods
+	// live on the concrete Besu client only. The noop client does not implement
+	// currencyRegistrar → return Unimplemented in dev/test mode.
+	reg, ok := s.blockchain.(currencyRegistrar)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "currency registration is not available (no on-chain signer configured)")
+	}
+
+	// Idempotent: skip when the currency is already registered on-chain.
+	if already, err := reg.IsCurrencyRegistered(ctx, symbol); err == nil && already {
+		return &compliancv1.RegisterCurrencyOnChainResponse{Symbol: symbol, AlreadyRegistered: true}, nil
+	}
+
+	tokenAddr, txHash, err := reg.RegisterCurrency(ctx, name, symbol, country, proposerCB, cbAddress)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "on-chain registerCurrency: %v", err)
+	}
+	return &compliancv1.RegisterCurrencyOnChainResponse{
+		Symbol:       symbol,
+		TokenAddress: tokenAddr,
+		TxHash:       txHash,
+	}, nil
+}
+
 // SignParticipantCSR signs a PKCS#10 CSR submitted by a participant, updates
 // only the certificate fields in the participant record, and (best-effort)
 // registers on the blockchain using the wallet address set during onboarding.
