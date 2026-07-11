@@ -10,9 +10,8 @@
 //	                 [--hub-rpc <url>] [--hub-ws <url>]
 //
 // `validate` parses/validates manifests and reports (no effects). `apply` runs
-// the orchestrator for the manifest's mode (found-hub or found-spoke): with
-// --dry-run it plans without effects; without it, it executes. join is not
-// supported yet (TK-B8).
+// the orchestrator for the manifest's mode (found-hub, found-spoke, or join):
+// with --dry-run it plans without effects; without it, it executes.
 //
 // Exit codes: 0 = success (valid / all steps done|skipped|planned);
 // 1 = validation/config error or a failed step; 2 = usage/parse error.
@@ -242,8 +241,8 @@ Usage:
                    [--hub-rpc <url>] [--hub-ws <url>]
 
 validate: parse/validate manifests and report (no effects).
-apply:    run the orchestrator for the manifest mode (found-hub | found-spoke);
-          --dry-run plans without effects. join is not supported yet (TK-B8).
+apply:    run the orchestrator for the manifest mode (found-hub | found-spoke |
+          join); --dry-run plans without effects.
 
 Exit codes: 0 success, 1 validation/config error or failed step, 2 usage/parse error
 `)

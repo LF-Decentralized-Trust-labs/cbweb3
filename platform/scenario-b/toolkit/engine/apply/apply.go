@@ -49,7 +49,7 @@ func Apply(ctx context.Context, o Options) (orchestrator.Report, error) {
 	case "found-spoke":
 		return applyFoundSpoke(ctx, o, pd)
 	case "join":
-		return orchestrator.Report{}, fmt.Errorf("mode %q not supported yet (TK-B8)", pd.Spec.Mode)
+		return applyJoin(ctx, o, pd)
 	default:
 		return orchestrator.Report{}, fmt.Errorf("unknown mode %q", pd.Spec.Mode)
 	}
@@ -128,6 +128,68 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 
 	steps := orchestrator.FoundSpokeSteps(cfg)
 	return orchestrator.New("found-spoke", steps, state, o.DryRun).Run(ctx)
+}
+
+func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeployment) (orchestrator.Report, error) {
+	if pd.Spec.Spoke == nil {
+		return orchestrator.Report{}, fmt.Errorf("join: spec.spoke is required")
+	}
+	dataDir := firstNonEmpty(o.DataDir, pd.Spec.Node.DataDir, ".")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return orchestrator.Report{}, err
+	}
+	outDir := firstNonEmpty(o.OutDir, dataDir)
+	root := firstNonEmpty(o.RepoRoot, ".")
+
+	// FR-001: consume + validate the spoke bundle BEFORE any effect.
+	bundlePath := resolveBundle(pd.Spec.JoinBundleRef, o.ManifestPath)
+	if _, err := bundle.LoadSpoke(bundlePath); err != nil {
+		return orchestrator.Report{}, fmt.Errorf("join: invalid spoke bundle %q: %w", bundlePath, err)
+	}
+
+	lock, err := orchestrator.AcquireLock(dataDir)
+	if err != nil {
+		return orchestrator.Report{}, err
+	}
+	defer func() { _ = lock.Release() }()
+
+	state, err := orchestrator.LoadState(dataDir)
+	if err != nil {
+		return orchestrator.Report{}, err
+	}
+
+	var runner exec.CommandRunner
+	if o.DryRun {
+		runner = &exec.DryRunner{}
+	} else {
+		runner = exec.NewReal(root, nil)
+	}
+
+	cfg := orchestrator.JoinConfig{
+		Runner:          runner,
+		TemplatesDir:    filepath.Join(root, "scenario-b", "provisioning", "templates"),
+		OutDir:          outDir,
+		BankID:          pd.Spec.BankID,
+		Institution:     firstNonEmpty(pd.Spec.DisplayName, pd.Spec.BankID),
+		SpokeID:         pd.Spec.Spoke.ID,
+		SpokeChainID:    uint64(pd.Spec.Spoke.ChainID),
+		BankRPC:         o.SpokeRPC, // RPC of the bank's own node (wait-sync gate)
+		SpokeBundlePath: bundlePath,
+		DataDir:         dataDir,
+		BankEnvFile:     filepath.Join(dataDir, ".env.bank"),
+		KeycloakEnv:     []string{filepath.Join(dataDir, ".env.bank")},
+	}
+	steps := orchestrator.JoinSteps(cfg)
+	return orchestrator.New("join", steps, state, o.DryRun).Run(ctx)
+}
+
+// resolveBundle resolves a (possibly relative) bundle ref against the manifest's
+// directory.
+func resolveBundle(ref, manifestPath string) string {
+	if ref == "" || filepath.IsAbs(ref) {
+		return ref
+	}
+	return filepath.Join(filepath.Dir(manifestPath), ref)
 }
 
 // resolveHubBundle resolves a (possibly relative) hub bundle ref against the

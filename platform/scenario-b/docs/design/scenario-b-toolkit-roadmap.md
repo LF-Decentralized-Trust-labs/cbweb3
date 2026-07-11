@@ -624,7 +624,18 @@ soberano** (que exige dois spokes prontos + relay).
    (`engine/bundle.SpokeBundle`: genesis + enode + endereços). Extensões do motor: `Step.Soft` +
    captura de enode (`admin_nodeInfo`). Unidade com FakeRunner; suíte E2E sob build tag `e2e`. Par
    soberano/liquidez/oracle e auth-por-CB permanecem fora de escopo (TK-B9/§14.D).
-7. **TK-B8** — `join` (full node não-validador).
+7. **TK-B8** — `join` (full node não-validador). **[Implementado]** — modo `join` no motor (fluxo
+   canônico §6): consume-spoke-bundle → write-genesis (copia o genesis do bundle; guard não-destrutivo
+   + checagem `sha256`, **não** regenera) → start-besu-join (full node **não-validador**: o genesis
+   CB-only garante que o banco não entra no validator set QBFT) → wait-sync (`eth_syncing` até
+   sincronizar) → wire-addresses (endereços de spoke do bundle) → provision-keycloak-bank (+write-back)
+   → render/infra/backend/frontend → **gen-csr** (cauda diferida; o **único** step de PKI: par de
+   chaves + CSR local via `pki.GenerateBankCSR`, chave `0600`, nunca transmitida, **zero** material de
+   CA; pré-cria `pki/` como usuário do host). Assinatura do CSR, emissão gated por KYC e registro
+   on-chain permanecem **runtime**. Extensão de motor: gate `wait-sync` (`eth_syncing`). **Sem** step
+   de relay nem de noc-agent (a cadeia já é observada desde o `found-spoke`). `vote-qbft` (promoção a
+   validador) permanece capacidade diferida (ADR-002). Unidade com FakeRunner; suíte E2E sob build tag
+   `e2e`.
 8. **TK-B9** — par soberano (`open-sovereign-pair`) + liquidez cooperativa (commit-reveal) +
    `seed-oracle`.
 9. **TK-B10** — E2E + baseline.

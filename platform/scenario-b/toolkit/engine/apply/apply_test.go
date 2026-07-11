@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -51,15 +52,54 @@ func TestApplyFoundSpokeDryRun(t *testing.T) {
 	}
 }
 
-// SC-008: join mode is rejected with a clear error.
-func TestApplyJoinUnsupported(t *testing.T) {
-	_, err := Apply(context.Background(), Options{
+// TK-B8/SC-001: join dry-run plans the canonical steps (spoke bundle validated,
+// no effects).
+func TestApplyJoinDryRun(t *testing.T) {
+	rep, err := Apply(context.Background(), Options{
 		ManifestPath: filepath.Join(fixtures, "join.yaml"),
 		DataDir:      t.TempDir(),
 		DryRun:       true,
 	})
-	if err == nil || !strings.Contains(err.Error(), "not supported yet") {
-		t.Fatalf("expected 'not supported yet', got %v", err)
+	if err != nil {
+		t.Fatalf("apply join dry-run: %v", err)
+	}
+	if rep.Mode != "join" || len(rep.Steps) == 0 {
+		t.Fatalf("unexpected report: %+v", rep)
+	}
+	for _, s := range rep.Steps {
+		if s.Status != orchestrator.StatusPlanned && s.Status != orchestrator.StatusSkipped {
+			t.Fatalf("dry-run step %s status %s", s.Name, s.Status)
+		}
+	}
+}
+
+// SC-001: an invalid/missing spoke bundle is rejected before any effect.
+func TestApplyJoinInvalidBundle(t *testing.T) {
+	dir := t.TempDir()
+	// A join manifest whose joinBundleRef points nowhere.
+	m := filepath.Join(dir, "join-bad.yaml")
+	if err := os.WriteFile(m, []byte(`apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata: { name: bank-x }
+spec:
+  scenario: "b"
+  environment: local
+  mode: join
+  topology: { role: commercial-bank }
+  bankId: bank-x
+  spoke: { id: spoke-a, chainId: 1338, currency: BRL }
+  joinBundleRef: ./bundles/does-not-exist.bundle.yaml
+  node: { advertisedHost: host.docker.internal, dataDir: `+dir+` }
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: ca://central-bank-a
+  frontendHost: localhost
+  adminUsers: [ { role: BANK, username: x, password: y } ]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(context.Background(), Options{ManifestPath: m, DataDir: dir, DryRun: true}); err == nil {
+		t.Fatal("expected error for invalid spoke bundle")
 	}
 }
 
