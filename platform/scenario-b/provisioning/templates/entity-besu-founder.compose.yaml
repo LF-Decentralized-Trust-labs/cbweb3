@@ -34,12 +34,14 @@ services:
       - entity_besu_data:/opt/besu/data
       - entity_genesis:/opt/besu/genesis
     networks:
-      - entity_besu_network
+      - entity_net
     restart: always
 
 networks:
-  entity_besu_network:
-    name: "${ENTITY_NET_PREFIX:?}_besu_network"
+  # Single shared network per entity (created here; infra/keycloak/backend/
+  # frontend/noc join it as external). Mirrors scenario-a's one-net-per-entity.
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
 
 volumes:
   entity_besu_data:

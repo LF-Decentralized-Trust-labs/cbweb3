@@ -19,10 +19,10 @@ services:
     ports:
       - "${KEYCLOAK_PORT:?}:8080"
     networks:
-      - entity_infra_network
+      - entity_net
     restart: always
 
 networks:
-  entity_infra_network:
-    name: "${ENTITY_NET_PREFIX:?}_infra_network"
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
     external: true

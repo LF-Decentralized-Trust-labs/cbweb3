@@ -30,12 +30,15 @@ services:
       - hub_besu_data:/opt/besu/data
       - hub_genesis:/opt/besu/genesis
     networks:
-      - hub_besu_network
+      - hub_net
     restart: always
 
 networks:
-  hub_besu_network:
-    name: "${HUB_NET_PREFIX:?}_besu_network"
+  # Single shared network per entity (created here; infra/keycloak/backend/
+  # frontend/noc join it as external). Mirrors scenario-a's one-net-per-entity
+  # and avoids exhausting Docker's address pool at N entities.
+  hub_net:
+    name: "${HUB_NET_PREFIX:?}_net"
 
 volumes:
   hub_besu_data:

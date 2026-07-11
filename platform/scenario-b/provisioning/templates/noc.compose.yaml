@@ -13,7 +13,7 @@ services:
     volumes:
       - noc_db_data:/var/lib/postgresql/data
     networks:
-      - noc_network
+      - entity_net
     restart: always
 
   noc-backend:
@@ -24,7 +24,7 @@ services:
     ports:
       - "${NOC_BACKEND_PORT:?}:8080"
     networks:
-      - noc_network
+      - entity_net
     restart: always
 
   noc-portal:
@@ -33,7 +33,7 @@ services:
     ports:
       - "${NOC_PORTAL_PORT:?}:3000"
     networks:
-      - noc_network
+      - entity_net
     restart: always
 
   noc-agent:
@@ -45,12 +45,13 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - noc_network
+      - entity_net
     restart: always
 
 networks:
-  noc_network:
-    name: "${NOC_NET_PREFIX:?}_network"
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
+    external: true
 
 volumes:
   noc_db_data:

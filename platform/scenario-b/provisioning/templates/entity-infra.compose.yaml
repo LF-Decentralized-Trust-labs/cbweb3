@@ -14,7 +14,7 @@ services:
     volumes:
       - entity_pg_data:/var/lib/postgresql/data
     networks:
-      - entity_infra_network
+      - entity_net
     restart: always
 
   redis:
@@ -23,12 +23,14 @@ services:
     ports:
       - "${REDIS_PORT:?}:6379"
     networks:
-      - entity_infra_network
+      - entity_net
     restart: always
 
 networks:
-  entity_infra_network:
-    name: "${ENTITY_NET_PREFIX:?}_infra_network"
+  # Shared entity network, created by the entity's besu compose; joined here.
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
+    external: true
 
 volumes:
   entity_pg_data:
