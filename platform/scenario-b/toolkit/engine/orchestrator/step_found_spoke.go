@@ -682,11 +682,23 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			if privateDockerIP.MatchString(enode) {
 				return fmt.Errorf("spoke bundle enode %q is loopback/docker-internal (unusable cross-stack); set HOST_IP or node.advertisedHost", enode)
 			}
+			// Publish the hub contract addresses + RPC port so a joining bank can run
+			// the same on-chain per-pair AMM resolver (dynamic swap on any corridor).
+			hubForBundle, err := bundle.LoadHub(c.HubBundlePath)
+			if err != nil {
+				return err
+			}
+			hubPort := "8545"
+			if u, perr := url.Parse(c.HubRPC); perr == nil && u.Port() != "" {
+				hubPort = u.Port()
+			}
 			b := bundle.SpokeBundle{
 				SpokeID: c.SpokeID, ChainID: c.SpokeChainID, Enode: enode,
 				SpokeRPC: c.SpokeRPC, SpokeWS: c.SpokeWS, Genesis: string(genesisBytes), Contracts: m,
 				// Container-reachable CB gateway for a joining bank's CENTRAL_BANK_API_URL.
-				CBGateway: fmt.Sprintf("http://host.docker.internal:%d", c.RPCPort+8000),
+				CBGateway:    fmt.Sprintf("http://host.docker.internal:%d", c.RPCPort+8000),
+				HubContracts: hubForBundle.Contracts,
+				HubRPCPort:   hubPort,
 			}
 			_, err = bundle.EmitSpoke(b, c.OutDir)
 			return err

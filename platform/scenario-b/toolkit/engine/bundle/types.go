@@ -29,4 +29,10 @@ type SpokeBundle struct {
 	// used by a joining bank as CENTRAL_BANK_API_URL to resolve the sovereign AMM
 	// + pool status from its CB (the bank holds no hub contract addresses).
 	CBGateway string `yaml:"cbGateway,omitempty" json:"cbGateway,omitempty"`
+	// HubContracts carries the hub contract addresses (identityRegistry,
+	// pairRegistry, currencyRegistry, amm, tCeBM_*) so a joining bank can run the
+	// same on-chain per-pair AMM resolver as its CB (dynamic swap on any corridor).
+	// The bank reaches the hub RPC via host.docker.internal (HubRPCPort).
+	HubContracts map[string]string `yaml:"hubContracts,omitempty" json:"hubContracts,omitempty"`
+	HubRPCPort   string            `yaml:"hubRpcPort,omitempty" json:"hubRpcPort,omitempty"`
 }
