@@ -260,6 +260,9 @@ func (c SpokeConfig) ComposeEnv() []string {
 		"ENTITY_PKI_DIR": "cb_tls", // named volume (holds the generated CA)
 		"CA_CERT_FILE":   "/workspace/backend/config/pki/central-bank.crt",
 		"CA_KEY_FILE":    "/workspace/backend/config/pki/central-bank.key",
+		// Shared secret for the hub-mediated M2M endpoints + cross-currency bridge
+		// delegation (a bank delegates bridge-in lock-mint to its CB; bridge-out to CB-B).
+		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
 		// noc (observability — soft)
 		"NOC_AGENT_BESU_RPC": fmt.Sprintf("http://%s-%s-besu:8545", e, c.Entity),
 		"NOC_AGENT_ENTITY":   c.Entity,
