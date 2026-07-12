@@ -2,12 +2,12 @@
 # Parametrized; stateless; no secrets embedded.
 services:
   frontend:
+    # The api-gateway URL is baked into the SPA at build time (VITE_API_URL), so the
+    # toolkit builds a per-entity image; nginx serves it on container port 80.
     image: "${FRONTEND_IMAGE:-cbweb3b/bank-frontend:local}"
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-frontend"
-    environment:
-      GATEWAY_URL: "${GATEWAY_URL:?}"
     ports:
-      - "${FRONTEND_PORT:?}:3000"
+      - "${FRONTEND_PORT:?}:80"
     networks:
       - entity_net
     restart: always

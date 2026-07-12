@@ -201,7 +201,7 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"HUB_CHAIN_ID":               itoa(int(c.ChainID)),
 		"HUB_ADMIN_PRIVATE_KEY":      devDeployerKey, // holds GOVERNANCE_ROLE on the hub registry
 		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
-		"FRONTEND_IMAGE":             hubFrontendImage,
+		"FRONTEND_IMAGE":             cbFrontendImage("governance", c.RPCPort+8000),
 		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
 		"RELAY_IMAGE":                hubRelayImage,
 		"RELAY_CONTAINER_NAME":       e + "-relay",
@@ -403,7 +403,11 @@ func FoundHubSteps(c HubConfig) []Step {
 		{
 			Name: "start-hub-frontend", Deps: []string{"start-hub-backend"}, Soft: true,
 			Run: func(ctx context.Context) error {
-				if err := c.buildImage(ctx, hubFrontendImage, "frontend/apps/governance/Dockerfile", "frontend"); err != nil {
+				// The hub governance portal bakes the hub api-gateway URL (browser reaches
+				// it on the host at localhost:<gwPort>); build a per-entity image, then run.
+				gwPort := c.RPCPort + 8000
+				if err := buildFrontendImage(ctx, c.Runner, c.scenarioBDir(), cbFrontendImage("governance", gwPort), "governance",
+					map[string]string{"VITE_API_URL": fmt.Sprintf("http://localhost:%d", gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": "hub"}); err != nil {
 					return err
 				}
 				return compose("entity-frontend")(ctx)

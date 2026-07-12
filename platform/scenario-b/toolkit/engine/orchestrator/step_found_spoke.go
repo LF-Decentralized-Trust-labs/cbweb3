@@ -43,7 +43,8 @@ type SpokeConfig struct {
 	P2PPort             int    // host port -> besu 30303
 	AdvertisedHost      string // externally reachable host for the spoke bundle enode (default host.docker.internal)
 	RelayAdvertisedHost string // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
-	Currency            string // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
+	AdminUsers          []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
+	Currency            string      // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
 	TokenName           string // tCeBM name (default "Tokenized <Currency>")
 	TokenSymbol         string // tCeBM symbol (default "t<Currency>")
 	FiatTokenName       string // fCeBM name (default "Fiat <Currency>")
@@ -199,22 +200,46 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
 		"--cclientid realm-management --rolename manage-users --rolename view-users || true) && ",
 		kc, spokeKeycloakRealm, spokeKeycloakClient)
-	// Realm roles the api-gateway checks (created idempotently).
-	for _, r := range spokeCBRoles {
-		fmt.Fprintf(&b, "(%[1]s create roles -r %[2]s -s name=%[3]s || true) && ", kc, spokeKeycloakRealm, r)
+	// Per-role operator accounts from the manifest (spec.adminUsers). Fall back to a
+	// single default CB admin when the manifest declares none. Each user's manifest
+	// role maps to the realm roles the api-gateway checks (realmRolesForAdminRole).
+	users := c.AdminUsers
+	if len(users) == 0 {
+		users = []AdminUser{{Role: "GOVERNANCE", Username: spokeCBUser, Password: spokeCBPass}}
 	}
-	// CB login user + password + role grants. email/firstName/lastName +
-	// emailVerified are REQUIRED: Keycloak 26's declarative user profile rejects a
-	// password grant for an incomplete profile ("Account is not fully set up").
-	fmt.Fprintf(&b, "(%[1]s create users -r %[2]s -s username=%[3]s -s enabled=true "+
-		"-s emailVerified=true -s email=%[3]s@cb.local -s firstName=CentralBank -s lastName=Admin || true) && ",
-		kc, spokeKeycloakRealm, spokeCBUser)
-	fmt.Fprintf(&b, "(%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || true)", kc, spokeKeycloakRealm, spokeCBUser, spokeCBPass)
-	for _, r := range spokeCBRoles {
-		fmt.Fprintf(&b, " && (%[1]s add-roles -r %[2]s --uusername %[3]s --rolename %[4]s || true)", kc, spokeKeycloakRealm, spokeCBUser, r)
-	}
+	appendKeycloakUsers(&b, kc, spokeKeycloakRealm, users)
 	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
 	return err
+}
+
+// appendKeycloakUsers appends idempotent kcadm commands that create each admin user
+// (username == email; firstName/lastName/emailVerified are REQUIRED so Keycloak 26's
+// declarative user profile accepts the password grant), set its password, and grant
+// the realm roles mapped from its manifest role. Roles are created idempotently first.
+func appendKeycloakUsers(b *strings.Builder, kc, realm string, users []AdminUser) {
+	seen := map[string]bool{}
+	for _, u := range users {
+		for _, r := range realmRolesForAdminRole(u.Role) {
+			if !seen[r] {
+				seen[r] = true
+				fmt.Fprintf(b, "(%[1]s create roles -r %[2]s -s name=%[3]s || true) && ", kc, realm, r)
+			}
+		}
+	}
+	for _, u := range users {
+		fmt.Fprintf(b, "(%[1]s create users -r %[2]s -s username=%[3]s -s enabled=true "+
+			"-s emailVerified=true -s email=%[3]s -s firstName=%[4]s -s lastName=Operator || true) && ",
+			kc, realm, u.Username, strings.ToLower(u.Role))
+		fmt.Fprintf(b, "(%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || true)", kc, realm, u.Username, u.Password)
+		for _, r := range realmRolesForAdminRole(u.Role) {
+			fmt.Fprintf(b, " && (%[1]s add-roles -r %[2]s --uusername %[3]s --rolename %[4]s || true)", kc, realm, u.Username, r)
+		}
+		fmt.Fprintf(b, " && ")
+	}
+	// Trim the trailing " && " so the command chain is well-formed.
+	s := b.String()
+	b.Reset()
+	b.WriteString(strings.TrimSuffix(s, " && "))
 }
 
 // ComposeEnv returns the spoke's compose-template interpolation vars as process
@@ -265,8 +290,15 @@ func (c SpokeConfig) ComposeEnv() []string {
 		"COMPLIANCE_IMAGE":           hubComplianceImage,
 		"AUTH_IMAGE":                 hubAuthImage,
 		"PAYMENT_ORCHESTRATOR_IMAGE": hubPaymentOrchestratorImage,
-		"FRONTEND_IMAGE":   spokeFrontendImage,
-		"FRONTEND_PORT":    itoa(c.RPCPort + 9000),
+		// CB operator portals (governance/treasury/supervisor). Each SPA bakes the CB
+		// api-gateway URL at build time, so the image is tagged per gateway port. The
+		// NOC portal is deployed by the noc template.
+		"GOVERNANCE_FRONTEND_IMAGE":  cbFrontendImage("governance", c.RPCPort+8000),
+		"GOVERNANCE_FRONTEND_PORT":   itoa(c.RPCPort + 9000),
+		"TREASURY_FRONTEND_IMAGE":    cbFrontendImage("treasury", c.RPCPort+8000),
+		"TREASURY_FRONTEND_PORT":     itoa(c.RPCPort + 13000),
+		"SUPERVISOR_FRONTEND_IMAGE":  cbFrontendImage("supervisor", c.RPCPort+8000),
+		"SUPERVISOR_FRONTEND_PORT":   itoa(c.RPCPort + 14000),
 		// app stack (compliance + auth): the CB is the local signer/deployer, and
 		// the Keycloak realm/client are provisioned by provision-keycloak-spoke.
 		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
@@ -654,10 +686,24 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			},
 		},
 		{Name: "start-spoke-frontend", Deps: []string{"start-spoke-backend"}, Soft: true, Run: func(ctx context.Context) error {
-			if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), spokeFrontendImage, "frontend/apps/bank/Dockerfile", "frontend"); err != nil {
+			// CB operator portals: governance/treasury/supervisor, each baking this CB's
+			// api-gateway URL (browser reaches it on the host at localhost:<gwPort>).
+			gwPort := c.RPCPort + 8000
+			api := fmt.Sprintf("http://localhost:%d", gwPort)
+			sb := c.scenarioBDir()
+			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("governance", gwPort), "governance",
+				map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
 				return err
 			}
-			return compose("entity-frontend")(ctx)
+			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("treasury", gwPort), "treasury",
+				map[string]string{"VITE_API_BASE_URL": api, "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
+				return err
+			}
+			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("supervisor", gwPort), "supervisor",
+				map[string]string{"VITE_API_BASE_URL": api, "VITE_SPOKE_NAME": c.SpokeID}); err != nil {
+				return err
+			}
+			return compose("cb-frontend")(ctx)
 		}},
 		{
 			Name: "register-relay-spoke",

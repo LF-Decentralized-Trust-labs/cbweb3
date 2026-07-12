@@ -26,6 +26,7 @@ type JoinConfig struct {
 	OutDir          string
 	BankID          string
 	Institution     string
+	AdminUsers      []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
 	SpokeID         string
 	SpokeChainID    uint64
 	BankRPC         string // RPC of the bank's own node (wait-sync gate)
@@ -140,18 +141,13 @@ func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
 		"--cclientid realm-management --rolename manage-users --rolename view-users || true) && ",
 		kc, bankKeycloakRealm, bankKeycloakClient)
-	for _, r := range bankRoles {
-		fmt.Fprintf(&b, "(%[1]s create roles -r %[2]s -s name=%[3]s || true) && ", kc, bankKeycloakRealm, r)
+	// Per-role operator accounts from the manifest (spec.adminUsers); fall back to a
+	// single default bank admin when none are declared.
+	users := c.AdminUsers
+	if len(users) == 0 {
+		users = []AdminUser{{Role: "BANK", Username: bankUser, Password: bankPass}}
 	}
-	// email/firstName/lastName + emailVerified are REQUIRED (Keycloak 26 declarative
-	// user profile rejects a password grant for an incomplete profile).
-	fmt.Fprintf(&b, "(%[1]s create users -r %[2]s -s username=%[3]s -s enabled=true "+
-		"-s emailVerified=true -s email=%[3]s@bank.local -s firstName=Bank -s lastName=Admin || true) && ",
-		kc, bankKeycloakRealm, bankUser)
-	fmt.Fprintf(&b, "(%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || true)", kc, bankKeycloakRealm, bankUser, bankPass)
-	for _, r := range bankRoles {
-		fmt.Fprintf(&b, " && (%[1]s add-roles -r %[2]s --uusername %[3]s --rolename %[4]s || true)", kc, bankKeycloakRealm, bankUser, r)
-	}
+	appendKeycloakUsers(&b, kc, bankKeycloakRealm, users)
 	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
 	return err
 }
@@ -217,7 +213,7 @@ func (c JoinConfig) ComposeEnv() []string {
 		"BACKEND_IMAGE":    hubBackendImage,
 		"COMPLIANCE_IMAGE": hubComplianceImage,
 		"AUTH_IMAGE":       hubAuthImage,
-		"FRONTEND_IMAGE":   spokeFrontendImage,
+		"FRONTEND_IMAGE":   cbFrontendImage("bank", c.RPCPort+8000),
 		"FRONTEND_PORT":    itoa(c.RPCPort + 9000),
 		// app stack (compliance + auth): the bank is the local signer; the Keycloak
 		// realm/client are provisioned by provision-keycloak-bank.
@@ -427,7 +423,11 @@ func JoinSteps(c JoinConfig) []Step {
 		// later fails to write (the known join gen-csr permission bug).
 		{Name: "start-bank-backend", Deps: []string{"start-bank-infra", "wire-addresses", "provision-keycloak-bank", "gen-csr"}, Run: compose("entity-backend")},
 		{Name: "start-bank-frontend", Deps: []string{"start-bank-backend"}, Soft: true, Run: func(ctx context.Context) error {
-			if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), spokeFrontendImage, "frontend/apps/bank/Dockerfile", "frontend"); err != nil {
+			// The bank portal bakes this bank's api-gateway URL (browser reaches it on
+			// the host at localhost:<gwPort>); build a per-entity image, then run it.
+			gwPort := c.RPCPort + 8000
+			if err := buildFrontendImage(ctx, c.Runner, c.scenarioBDir(), cbFrontendImage("bank", gwPort), "bank",
+				map[string]string{"VITE_API_URL": fmt.Sprintf("http://localhost:%d", gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
 				return err
 			}
 			return compose("entity-frontend")(ctx)
