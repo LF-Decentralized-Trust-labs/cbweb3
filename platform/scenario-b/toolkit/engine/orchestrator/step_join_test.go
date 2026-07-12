@@ -31,12 +31,31 @@ func testJoinCfg(t *testing.T, fake *exec.FakeRunner) JoinConfig {
 	return JoinConfig{
 		Runner: fake, TemplatesDir: filepath.Join(dir, "tmpl"), OutDir: dir,
 		BankID: "bank-a", Institution: "Bank A", SpokeID: "spoke-a", SpokeChainID: 1338,
-		BankRPC: "http://bank:8646", SpokeBundlePath: bp, GenesisDir: filepath.Join(dir, "genesis"),
+		BankRPC: "http://bank:8646", SpokeBundlePath: bp,
 		DataDir: dir, BankEnvFile: env, KeycloakEnv: []string{env},
 		WaitRPC:          func(context.Context) error { return nil },
 		WaitSync:         func(context.Context) error { return nil },
 		WaitKeycloak:     func(context.Context) error { return nil },
 		ReadClientSecret: func(context.Context) (string, error) { return "s3cr3t", nil },
+	}
+}
+
+// ComposeEnv carries plumbing (images/prefixes/ports/bootnode/static infra
+// creds) for the runner's process env, and NEVER the runtime-discovered values
+// (contract addresses, Keycloak client secret) that live in the slim .env.bank.
+func TestJoinComposeEnvCarriesPlumbingNotRuntimeState(t *testing.T) {
+	cfg := testJoinCfg(t, &exec.FakeRunner{})
+	cfg.WithDefaults()
+	env := strings.Join(cfg.ComposeEnv(), "\n")
+	for _, want := range []string{"CONTAINER_PREFIX=", "ENTITY_RPC_PORT=", "BESU_IMAGE=", "BOOTNODE_ENODE=", "POSTGRES_PASSWORD="} {
+		if !strings.Contains(env, want) {
+			t.Errorf("ComposeEnv missing plumbing %q:\n%s", want, env)
+		}
+	}
+	for _, forbidden := range []string{"SPOKE_TCEBM_ADDRESS=", "KEYCLOAK_CLIENT_SECRET="} {
+		if strings.Contains(env, forbidden) {
+			t.Errorf("ComposeEnv must not carry runtime-discovered value %q", forbidden)
+		}
 	}
 }
 
@@ -49,12 +68,13 @@ func TestConsumeSpokeBundleFailsOnInvalid(t *testing.T) {
 	}
 }
 
-// US1/SC-002: write-genesis writes the bundle genesis; re-run with matching
-// content skips (Check true); a divergent on-disk genesis is a hard error.
+// US1/SC-002: write-genesis seeds the bundle genesis STRAIGHT INTO the named
+// volume (no host file); re-run with matching content skips (Check true); a
+// divergent volume genesis is a hard error.
 func TestWriteGenesisGuard(t *testing.T) {
-	// Node state lives in a named volume: Run stages the bundle genesis to the host
-	// scratch then copies it into the volume; Check reads it back via the runner
-	// (docker cat → fake Outputs["docker"]).
+	// Node state lives only in the named volume: Run seeds it from memory via the
+	// runner (docker run … base64 -d); Check reads it back (docker cat → fake
+	// Outputs["docker"]). No host genesis file is written.
 	fake := &exec.FakeRunner{Outputs: map[string][]byte{"docker": []byte(testGenesis)}}
 	cfg := testJoinCfg(t, fake)
 	step := findStep(JoinSteps(cfg), "write-genesis")
@@ -62,9 +82,21 @@ func TestWriteGenesisGuard(t *testing.T) {
 	if err := step.Run(context.Background()); err != nil {
 		t.Fatalf("write-genesis run: %v", err)
 	}
-	got, _ := os.ReadFile(filepath.Join(cfg.GenesisDir, "genesis.json"))
-	if string(got) != testGenesis {
-		t.Fatalf("genesis not staged from bundle:\n%s", got)
+	// The genesis must NOT be staged on the host — only in the volume.
+	if fileExists(filepath.Join(cfg.DataDir, "genesis", "genesis.json")) {
+		t.Fatal("write-genesis must not write a host genesis file (volume-only)")
+	}
+	// Run must seed the volume from memory: a docker call carrying the genesis
+	// volume + base64 decode into genesis.json.
+	seeded := false
+	for _, c := range fake.Calls {
+		joined := c.Name + " " + strings.Join(c.Args, " ")
+		if strings.Contains(joined, cfg.genesisVolume()) && strings.Contains(joined, "base64 -d") && strings.Contains(joined, "genesis.json") {
+			seeded = true
+		}
+	}
+	if !seeded {
+		t.Fatalf("write-genesis must seed the volume from memory; calls=%+v", fake.Calls)
 	}
 	// Matching content in the volume → Check skips.
 	skip, err := step.Check(context.Background())
@@ -187,7 +219,7 @@ func TestJoinStepsOrder(t *testing.T) {
 	}
 	for _, want := range []string{
 		"consume-spoke-bundle", "write-genesis", "start-besu-join", "wait-sync",
-		"wire-addresses", "provision-keycloak-bank", "render-bank-compose-env",
+		"wire-addresses", "provision-keycloak-bank",
 		"start-bank-infra", "start-bank-backend", "start-bank-frontend", "gen-csr",
 	} {
 		if !names[want] {

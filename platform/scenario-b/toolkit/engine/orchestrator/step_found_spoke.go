@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -172,13 +173,17 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	return err
 }
 
-// renderSpokeComposeEnv writes ALL spoke compose-template interpolation vars into
-// SpokeEnvFile (founder besu + infra + keycloak + backend/frontend/noc), so every
-// `docker compose --env-file` step resolves its ${...}. Mirrors the hub renderer;
-// the founding CB is its own bootnode so no BOOTNODE_ENODE is emitted (the founder
-// besu template omits --bootnodes). Ports derive from RPCPort by fixed offsets.
-// Local dev creds only — no secrets.
-func (c SpokeConfig) renderSpokeComposeEnv() error {
+// ComposeEnv returns the spoke's compose-template interpolation vars as process
+// environment (KEY=VALUE), handed to the runner so `docker compose` resolves
+// every ${...} WITHOUT persisting plumbing to disk (scenario-a parity: plumbing
+// via cmd.Env, state via a slim env file). It carries image names,
+// container/network/volume prefixes, host port mappings, and static local infra
+// credentials — none discovered at runtime. Runtime-discovered values (contract
+// addresses, the Keycloak client secret) are NOT here: those are written to
+// SpokeEnvFile mid-run and merged via `--env-file`. The founding CB is its own
+// bootnode, so no BOOTNODE_ENODE is emitted (the founder besu template omits
+// --bootnodes). Ports derive from RPCPort by fixed offsets.
+func (c SpokeConfig) ComposeEnv() []string {
 	e := c.ContainerPrefix
 	// The spoke backend reaches the hub via host.docker.internal:<HUB_RPC_PORT>;
 	// derive the hub's host port from the hub RPC URL (default 8545).
@@ -229,12 +234,25 @@ func (c SpokeConfig) renderSpokeComposeEnv() error {
 		"NOC_PORTAL_PORT":    itoa(c.RPCPort + 12000),
 		"NOC_VOLUME_PREFIX":  c.VolumePrefix,
 	}
+	env := make([]string, 0, len(vars))
 	for k, v := range vars {
-		if err := addrs.AppendAddr(c.SpokeEnvFile, k, v); err != nil {
-			return err
-		}
+		env = append(env, k+"="+v)
 	}
-	return nil
+	sort.Strings(env) // deterministic order (stable across runs / for tests)
+	return env
+}
+
+// composeUpArgs builds `compose -p <prefix> -f <tmpl> [--env-file <file>] up -d`.
+// The --env-file is added only once SpokeEnvFile exists (it holds runtime-
+// discovered addresses + the Keycloak client secret); all plumbing comes from
+// the runner's process env (ComposeEnv), so the founder besu can start before
+// the file is ever written.
+func (c SpokeConfig) composeUpArgs(tmpl string) []string {
+	args := []string{"compose", "-p", c.ContainerPrefix, "-f", c.spokeTemplate(tmpl)}
+	if fileExists(c.SpokeEnvFile) {
+		args = append(args, "--env-file", c.SpokeEnvFile)
+	}
+	return append(args, "up", "-d")
 }
 
 func (c SpokeConfig) spokeTemplate(name string) string {
@@ -253,7 +271,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 
 	compose := func(tmpl string) func(context.Context) error {
 		return func(ctx context.Context) error {
-			_, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix, "-f", c.spokeTemplate(tmpl), "--env-file", c.SpokeEnvFile, "up", "-d")
+			_, err := c.Runner.Run(ctx, "docker", c.composeUpArgs(tmpl)...)
 			return err
 		}
 	}
@@ -380,21 +398,14 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 		},
 		genGenesisStep("gen-genesis-spoke", c.SpokeChainID, c.genesisVolume(), c.besuDataVolume(), c.ValidatorCount, c.Runner, c.BesuImage),
 		{
-			Name: "render-spoke-compose-env",
-			Deps: []string{"gen-genesis-spoke"},
-			// Always re-render (never state-skipped): config/ports/images must be
-			// fresh in the .env before every compose; AppendAddr upserts.
-			Check: func(context.Context) (bool, error) { return false, nil },
-			Run:   func(context.Context) error { return c.renderSpokeComposeEnv() },
-		},
-		{
 			Name: "start-besu-spoke",
-			Deps: []string{"gen-genesis-spoke", "render-spoke-compose-env"},
+			Deps: []string{"gen-genesis-spoke"},
 			Run: func(ctx context.Context) error {
 				// The founding CB is the spoke's sole validator and its own bootnode,
 				// so it uses the bootnode-less founder template (later banks join via
-				// entity-besu with BOOTNODE_ENODE from the spoke bundle).
-				if _, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix, "-f", c.spokeTemplate("entity-besu-founder"), "--env-file", c.SpokeEnvFile, "up", "-d"); err != nil {
+				// entity-besu with BOOTNODE_ENODE from the spoke bundle). Plumbing
+				// (${...}) comes from the runner's process env (ComposeEnv).
+				if _, err := c.Runner.Run(ctx, "docker", c.composeUpArgs("entity-besu-founder")...); err != nil {
 					return err
 				}
 				if err := c.WaitRPC(ctx); err != nil {
@@ -484,7 +495,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				return true, nil
 			},
 			Run: func(ctx context.Context) error {
-				if _, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix, "-f", c.spokeTemplate("entity-keycloak"), "--env-file", c.SpokeEnvFile, "up", "-d"); err != nil {
+				if _, err := c.Runner.Run(ctx, "docker", c.composeUpArgs("entity-keycloak")...); err != nil {
 					return err
 				}
 				if err := c.WaitKeycloak(ctx); err != nil {

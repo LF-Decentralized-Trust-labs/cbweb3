@@ -218,6 +218,41 @@ func TestEmitSpokeBundle(t *testing.T) {
 	}
 }
 
+// ComposeEnv carries plumbing (images/prefixes/ports/static infra creds) for the
+// runner's process env, and NEVER the runtime-discovered values (contract
+// addresses, Keycloak client secret) that live in the slim .env.spoke file.
+func TestComposeEnvCarriesPlumbingNotRuntimeState(t *testing.T) {
+	cfg := testSpokeCfg(t, &exec.FakeRunner{})
+	cfg.WithDefaults()
+	env := strings.Join(cfg.ComposeEnv(), "\n")
+	for _, want := range []string{"CONTAINER_PREFIX=", "ENTITY_RPC_PORT=", "BESU_IMAGE=", "POSTGRES_PASSWORD=", "HUB_RPC_PORT="} {
+		if !strings.Contains(env, want) {
+			t.Errorf("ComposeEnv missing plumbing %q:\n%s", want, env)
+		}
+	}
+	for _, forbidden := range []string{"SPOKE_TCEBM_ADDRESS=", "HUB_IDENTITY_REGISTRY_ADDRESS=", "KEYCLOAK_CLIENT_SECRET="} {
+		if strings.Contains(env, forbidden) {
+			t.Errorf("ComposeEnv must not carry runtime-discovered value %q", forbidden)
+		}
+	}
+}
+
+// composeUpArgs adds --env-file only once the state file exists (founder besu
+// starts before any AppendAddr writes it; the backend gets it afterwards).
+func TestComposeUpArgsGuardsEnvFile(t *testing.T) {
+	cfg := testSpokeCfg(t, &exec.FakeRunner{})
+	cfg.WithDefaults()
+	if strings.Contains(strings.Join(cfg.composeUpArgs("entity-besu-founder"), " "), "--env-file") {
+		t.Fatal("no --env-file expected before the state file exists")
+	}
+	if err := os.WriteFile(cfg.SpokeEnvFile, []byte("SPOKE_TCEBM_ADDRESS=0x1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(cfg.composeUpArgs("entity-backend"), " "), "--env-file") {
+		t.Fatal("--env-file expected once the state file exists")
+	}
+}
+
 // Integration: FoundSpokeSteps assembles in dependency order.
 func TestFoundSpokeOrder(t *testing.T) {
 	ordered, err := topoSort(FoundSpokeSteps(testSpokeCfg(t, &exec.FakeRunner{})))
@@ -235,8 +270,6 @@ func TestFoundSpokeOrder(t *testing.T) {
 	}
 	must("consume-hub-bundle", "register-cb")
 	must("register-cb", "register-currency")
-	must("gen-genesis-spoke", "render-spoke-compose-env")
-	must("render-spoke-compose-env", "start-besu-spoke")
 	must("gen-genesis-spoke", "start-besu-spoke")
 	must("start-besu-spoke", "deploy-spoke-contracts")
 	must("deploy-spoke-contracts", "emit-spoke-bundle")

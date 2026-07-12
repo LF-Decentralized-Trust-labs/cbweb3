@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/base64"
 	"strings"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/exec"
@@ -42,6 +43,22 @@ func copyHostFileToVolume(ctx context.Context, r exec.CommandRunner, srcHostDir,
 	_, err := r.Run(ctx, "docker", "run", "--rm",
 		"-v", srcHostDir+":/src:ro", "-v", volume+":/dst",
 		volHelperImage, "sh", "-c", script)
+	return err
+}
+
+// writeVolumeFile seeds content into <volume>/<filePath> straight from memory —
+// no host file. The Runner has no stdin, so the content is base64-embedded in
+// the helper's shell command and decoded inside a throwaway container. This
+// keeps node state (e.g. a joining bank's genesis) in the named volume only,
+// honoring the file-level invariant (nothing on the host but the bank pki/ dir).
+// Testable with a FakeRunner; neutralized by the DryRunner in --dry-run.
+func writeVolumeFile(ctx context.Context, r exec.CommandRunner, volume, filePath string, content []byte, mode string) error {
+	if mode == "" {
+		mode = "0644"
+	}
+	b64 := base64.StdEncoding.EncodeToString(content)
+	script := "mkdir -p \"$(dirname /t/" + filePath + ")\" && printf %s '" + b64 + "' | base64 -d > /t/" + filePath + " && chmod " + mode + " /t/" + filePath
+	_, err := r.Run(ctx, "docker", "run", "--rm", "-v", volume+":/t", volHelperImage, "sh", "-c", script)
 	return err
 }
 

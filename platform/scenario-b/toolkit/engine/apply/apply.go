@@ -94,17 +94,9 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		return orchestrator.Report{}, err
 	}
 
-	var runner exec.CommandRunner
-	if o.DryRun {
-		runner = &exec.DryRunner{}
-	} else {
-		runner = exec.NewReal(root, nil)
-	}
-
 	rpcPort, wsPort, p2pPort := nodePorts(pd.Spec.Node)
 	prefix := sanitizePrefix(pd.Metadata.Name) // e.g. "central-bank-brazil"
 	cfg := orchestrator.SpokeConfig{
-		Runner:              runner,
 		ContractsDir:        filepath.Join(root, "scenario-b", "contracts"),
 		TemplatesDir:        filepath.Join(root, "scenario-b", "provisioning", "templates"),
 		OutDir:              outDir,
@@ -129,6 +121,17 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		AdvertisedHost:      pd.Spec.Node.AdvertisedHost,
 		RelayAdvertisedHost: manifestRelayAdvHost(pd),
 		Currency:            pd.Spec.Spoke.Currency,
+	}
+	cfg.WithDefaults()
+	if o.DryRun {
+		cfg.Runner = &exec.DryRunner{}
+	} else {
+		// Plumbing (image names, container/network/volume prefixes, host port
+		// mappings, static local infra creds) rides on the runner's process env so
+		// `docker compose` resolves every ${...} without persisting it to disk;
+		// only runtime-discovered values (contract addresses, Keycloak client
+		// secret) land in .env.spoke (scenario-a parity).
+		cfg.Runner = exec.NewReal(root, cfg.ComposeEnv())
 	}
 
 	// The sovereign FX corridor (spec.pair) is opened at runtime via each CB's
@@ -178,17 +181,9 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		return orchestrator.Report{}, err
 	}
 
-	var runner exec.CommandRunner
-	if o.DryRun {
-		runner = &exec.DryRunner{}
-	} else {
-		runner = exec.NewReal(root, nil)
-	}
-
 	rpcPort, wsPort, p2pPort := nodePorts(pd.Spec.Node)
 	prefix := sanitizePrefix(pd.Metadata.Name) // e.g. "bank-itau"
 	cfg := orchestrator.JoinConfig{
-		Runner:          runner,
 		TemplatesDir:    filepath.Join(root, "scenario-b", "provisioning", "templates"),
 		OutDir:          outDir,
 		BankID:          pd.Spec.BankID,
@@ -208,6 +203,17 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
 		HubRPC:          o.HubRPC,
+	}
+	cfg.WithDefaults()
+	if o.DryRun {
+		cfg.Runner = &exec.DryRunner{}
+	} else {
+		// Plumbing (image names, container/network/volume prefixes, host port
+		// mappings, the CB bootnode enode, static local infra creds) rides on the
+		// runner's process env so `docker compose` resolves every ${...} without
+		// persisting it to disk; only runtime-discovered values (contract
+		// addresses, Keycloak client secret) land in .env.bank (scenario-a parity).
+		cfg.Runner = exec.NewReal(root, cfg.ComposeEnv())
 	}
 	steps := orchestrator.JoinSteps(cfg)
 	return orchestrator.New("join", steps, state, o.DryRun).Run(ctx)

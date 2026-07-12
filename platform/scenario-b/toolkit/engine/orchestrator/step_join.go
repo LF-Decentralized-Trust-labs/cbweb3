@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/addrs"
@@ -28,7 +29,6 @@ type JoinConfig struct {
 	SpokeChainID    uint64
 	BankRPC         string // RPC of the bank's own node (wait-sync gate)
 	SpokeBundlePath string
-	GenesisDir      string
 	DataDir         string
 	BankEnvFile     string
 	KeycloakEnv     []string
@@ -52,9 +52,6 @@ type JoinConfig struct {
 }
 
 func (c *JoinConfig) WithDefaults() {
-	if c.GenesisDir == "" {
-		c.GenesisDir = filepath.Join(c.DataDir, "genesis")
-	}
 	if c.BesuImage == "" {
 		c.BesuImage = "hyperledger/besu:25.8.0"
 	}
@@ -132,14 +129,22 @@ func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 	return err
 }
 
-// renderBankComposeEnv writes ALL bank compose-template interpolation vars into
-// BankEnvFile (join besu + infra + keycloak + backend/frontend). The founding
-// CB's advertised enode (from the spoke bundle) is the --bootnodes value. Ports
-// derive from RPCPort by fixed offsets. Local dev creds only — no secrets.
-func (c JoinConfig) renderBankComposeEnv() error {
+// ComposeEnv returns the bank's compose-template interpolation vars as process
+// environment (KEY=VALUE), handed to the runner so `docker compose` resolves
+// every ${...} WITHOUT persisting plumbing to disk (scenario-a parity: plumbing
+// via cmd.Env, state via a slim env file). It carries image names,
+// container/network/volume prefixes, host port mappings, the CB's advertised
+// enode (--bootnodes, from the spoke bundle), and static local infra creds —
+// none discovered at runtime. Runtime-discovered values (contract addresses,
+// the Keycloak client secret) are NOT here: those land in BankEnvFile mid-run
+// and merge via `--env-file`. Ports derive from RPCPort by fixed offsets.
+func (c JoinConfig) ComposeEnv() []string {
 	b, err := bundle.LoadSpoke(c.SpokeBundlePath)
 	if err != nil {
-		return err
+		// The spoke bundle is validated by consume-spoke-bundle before any compose
+		// runs; a read failure here leaves BOOTNODE_ENODE empty (besu then fails
+		// fast with a clear error) rather than aborting env assembly.
+		b = bundle.SpokeBundle{}
 	}
 	e := c.ContainerPrefix
 	hubPort := "8545"
@@ -177,25 +182,34 @@ func (c JoinConfig) renderBankComposeEnv() error {
 		"FRONTEND_IMAGE": spokeFrontendImage,
 		"FRONTEND_PORT":  itoa(c.RPCPort + 9000),
 	}
+	env := make([]string, 0, len(vars))
 	for k, v := range vars {
-		if err := addrs.AppendAddr(c.BankEnvFile, k, v); err != nil {
-			return err
-		}
+		env = append(env, k+"="+v)
 	}
-	return nil
+	sort.Strings(env) // deterministic order (stable across runs / for tests)
+	return env
 }
 
 func (c JoinConfig) bankTemplate(name string) string {
 	return filepath.Join(c.TemplatesDir, name+".compose.yaml")
 }
 
+// composeUpArgs builds `compose -p <prefix> -f <tmpl> [--env-file <file>] up -d`.
+// The --env-file is added only once BankEnvFile exists (it holds runtime-
+// discovered addresses + the Keycloak client secret); all plumbing comes from
+// the runner's process env (ComposeEnv), so the join besu can start before the
+// file is ever written.
+func (c JoinConfig) composeUpArgs(tmpl string) []string {
+	args := []string{"compose", "-p", c.ContainerPrefix, "-f", c.bankTemplate(tmpl)}
+	if fileExists(c.BankEnvFile) {
+		args = append(args, "--env-file", c.BankEnvFile)
+	}
+	return append(args, "up", "-d")
+}
+
 // scenarioBDir is <repo>/scenario-b, the docker build context root for the bank's
 // soft service images. Derived from TemplatesDir (<scenario-b>/provisioning/templates).
 func (c JoinConfig) scenarioBDir() string { return filepath.Dir(filepath.Dir(c.TemplatesDir)) }
-
-func (c JoinConfig) genesisPath() string {
-	return filepath.Join(c.GenesisDir, "genesis.json")
-}
 
 // JoinSteps builds the ordered join step set (canonical flow, roadmap §6):
 // no relay/noc step — the spoke chain is already observed since found-spoke.
@@ -204,7 +218,7 @@ func JoinSteps(c JoinConfig) []Step {
 
 	compose := func(tmpl string) func(context.Context) error {
 		return func(ctx context.Context) error {
-			_, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix, "-f", c.bankTemplate(tmpl), "--env-file", c.BankEnvFile, "up", "-d")
+			_, err := c.Runner.Run(ctx, "docker", c.composeUpArgs(tmpl)...)
 			return err
 		}
 	}
@@ -216,14 +230,6 @@ func JoinSteps(c JoinConfig) []Step {
 				_, err := bundle.LoadSpoke(c.SpokeBundlePath)
 				return err
 			},
-		},
-		{
-			Name: "render-bank-compose-env",
-			Deps: []string{"consume-spoke-bundle"},
-			// Always re-render (never state-skipped): config/ports/images/bootnode
-			// must be fresh in the .env before every compose; AppendAddr upserts.
-			Check: func(context.Context) (bool, error) { return false, nil },
-			Run:   func(context.Context) error { return c.renderBankComposeEnv() },
 		},
 		{
 			Name: "write-genesis",
@@ -253,24 +259,22 @@ func JoinSteps(c JoinConfig) []Step {
 				if err != nil {
 					return err
 				}
-				if err := os.MkdirAll(c.GenesisDir, 0o755); err != nil {
-					return err
-				}
-				if err := writeFileAtomic(c.genesisPath(), []byte(b.Genesis), 0o644); err != nil {
-					return err
-				}
-				return copyHostFileToVolume(ctx, c.Runner, c.GenesisDir, "genesis.json", c.genesisVolume(), "genesis.json", "0644")
+				// Seed straight into the named volume from memory — no host genesis
+				// file (volumefs invariant: node state lives only in the volume; the
+				// only host bind mount is the bank pki/ dir).
+				return writeVolumeFile(ctx, c.Runner, c.genesisVolume(), "genesis.json", []byte(b.Genesis), "0644")
 			},
 		},
 		{
 			// Non-validating full node: the node is not in the spoke's QBFT
 			// validator set (genesis lists only the CB), so it syncs without
 			// producing blocks — no besu "non-validator" flag is needed. Uses the
-			// join template (--bootnodes = the CB's advertised enode).
+			// join template (--bootnodes = the CB's advertised enode). Plumbing
+			// (${...}) comes from the runner's process env (ComposeEnv).
 			Name: "start-besu-join",
-			Deps: []string{"write-genesis", "render-bank-compose-env"},
+			Deps: []string{"write-genesis"},
 			Run: func(ctx context.Context) error {
-				if _, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix, "-f", c.bankTemplate("entity-besu-join"), "--env-file", c.BankEnvFile, "up", "-d"); err != nil {
+				if _, err := c.Runner.Run(ctx, "docker", c.composeUpArgs("entity-besu-join")...); err != nil {
 					return err
 				}
 				return c.WaitRPC(ctx)
@@ -318,7 +322,7 @@ func JoinSteps(c JoinConfig) []Step {
 				return true, nil
 			},
 			Run: func(ctx context.Context) error {
-				if _, err := c.Runner.Run(ctx, "docker", "compose", "-p", c.ContainerPrefix, "-f", c.bankTemplate("entity-keycloak"), "--env-file", c.BankEnvFile, "up", "-d"); err != nil {
+				if _, err := c.Runner.Run(ctx, "docker", c.composeUpArgs("entity-keycloak")...); err != nil {
 					return err
 				}
 				if err := c.WaitKeycloak(ctx); err != nil {
@@ -339,7 +343,7 @@ func JoinSteps(c JoinConfig) []Step {
 				return nil
 			},
 		},
-		{Name: "start-bank-infra", Deps: []string{"render-bank-compose-env", "wait-sync"}, Run: compose("entity-infra")},
+		{Name: "start-bank-infra", Deps: []string{"wait-sync"}, Run: compose("entity-infra")},
 		{Name: "start-bank-backend", Deps: []string{"start-bank-infra", "wire-addresses", "provision-keycloak-bank"}, Run: compose("entity-backend")},
 		{Name: "start-bank-frontend", Deps: []string{"start-bank-backend"}, Soft: true, Run: func(ctx context.Context) error {
 			if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), spokeFrontendImage, "frontend/apps/bank/Dockerfile", "frontend"); err != nil {
@@ -376,13 +380,4 @@ func (c JoinConfig) pkiDir() string { return filepath.Join(c.DataDir, "pki") }
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
-}
-
-// writeFileAtomic writes via a temp file + rename.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }
