@@ -24,6 +24,7 @@ HUB="http://localhost:16845"          # hub-cbweb3
 BR_CB="http://localhost:16645"        # central-bank-brazil   (issues W-tCeBM_BRL)
 AR_CB="http://localhost:16745"        # central-bank-argentina (issues W-tCeBM_ARS)
 ITAU="http://localhost:16646"         # bank-itau (Brazil) — the swapping bank
+MACRO="http://localhost:16747"        # bank-macro (Argentina) — the beneficiary bank
 
 # ── seeded login credentials (username / password) ─────────────────────────────
 CB_USER="cb-admin";   CB_PASS="cb-admin-local"        # ROLE central_bank + governance
@@ -39,13 +40,10 @@ CC_OUT="5000000000000000000"                  # want 5 W-ARS delivered on Spoke-
 CC_MAX_IN="6000000000000000000"               # accept up to 6 W-BRL in
 
 # ── beneficiary (Argentina) ──────────────────────────────────────────────────────
-# The ARS bank that receives the swapped W-ARS. It must be an ACTIVE participant at
-# its own central bank (CB-B) so the bridge-out can resolve its on-chain address.
+# The ARS bank that receives the swapped W-ARS. It onboards through the governance
+# portal at its own central bank (CB-B) — the onboarding derives its distinct on-chain
+# wallet — so the bridge-out can resolve it as an ACTIVE participant.
 BENEF_BANK="bank-macro"
-# A distinct, valid EVM address for the beneficiary's Spoke-B wallet (must be unique
-# in CB-B's participants table). In hub-only local mode the Spoke-B release is skipped,
-# so any valid distinct address works for the walkthrough.
-BENEF_ADDR="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 # ── output helpers ─────────────────────────────────────────────────────────────
 RED=$'\033[31m'; GREEN=$'\033[32m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; RST=$'\033[0m'
@@ -104,13 +102,52 @@ login() {
 # pool_status TOKEN — echoes the pool status string (EMPTY/ACTIVE/…) for $POOL.
 pool_status() { try GET "$BR_CB/api/v2/amm/pool/$POOL/status" "$1"; printf '%s' "$BODY" | jget pool_status; }
 
+# onboard LABEL BANK_URL BANK_TOK CB_URL CB_TOK INSTITUTION COUNTRY EMAIL USERNAME
+# Drives the governance-portal onboarding (mirrors scenario-a): the bank initiates
+# (the api-gateway smart proxy injects the CSR + KMS key), the CB approves KYC, and
+# the bank completes (PoP signature → CB-signed cert → on-chain participant). The bank
+# ends ACTIVE with its own distinct on-chain wallet. Idempotent: skips if already ACTIVE.
+onboard() {
+  local label=$1 bank_url=$2 bank_tok=$3 cb_url=$4 cb_tok=$5 inst=$6 country=$7 email=$8 user=$9 subj
+  try GET "$bank_url/api/v1/onboarding/my-status" "$bank_tok"
+  [[ $(printf '%s' "$BODY" | jget status) == ACTIVE ]] && { ok "$label already ACTIVE — skipping onboarding"; return 0; }
+  # initiate; on 409 (Keycloak user already exists from a partial run) recover the subject.
+  try POST "$bank_url/api/v1/onboarding/initiate" "$bank_tok" \
+    "{\"institution_name\":\"$inst\",\"country\":\"$country\",\"role\":\"ROLE_COMMERCIAL_BANK\",\"email\":\"$email\",\"username\":\"$user\"}"
+  if [[ -n $CODE && $CODE -ge 200 && $CODE -lt 300 ]]; then
+    subj=$(printf '%s' "$BODY" | jget user_id)
+  elif [[ $CODE -eq 409 ]]; then
+    try GET "$bank_url/api/v1/onboarding/my-status" "$bank_tok"; subj=$(printf '%s' "$BODY" | jget user_id)
+  else
+    die "$label initiate HTTP $CODE: $BODY"
+  fi
+  [[ -n $subj ]] || die "$label onboarding: no subject/user_id"
+  ok "$label credential requested (subject=$subj, wallet=$(printf '%s' "$BODY" | jget wallet_address))"
+  # CB governance approves KYC (route lives under /compliance/ in scenario-b).
+  call POST "$cb_url/api/v1/compliance/approve-kyc" "$cb_tok" "{\"subject\":\"$subj\",\"reason\":\"sample-tryout onboarding approval\"}"
+  ok "$label KYC approved by its central bank"
+  # Bank completes: PoP signature → CB signs the CSR + registers the participant on-chain.
+  call POST "$bank_url/api/v1/onboarding/complete" "$bank_tok" "{\"request_id\":\"$subj\",\"user_id\":\"$subj\"}"
+  ok "$label onboarding COMPLETE — participant ACTIVE with its own wallet"
+}
+
 printf '%s%s cbweb3 Scenario B — sample tryout (cross-currency swap) %s\n' "$BOLD" "════════" "$RST"
 
 # ═══════════════════════════════ LOGIN ══════════════════════════════════════════
 step "Login — Brazil CB, Argentina CB, and bank-itau"
 BR_TOK=$(login "$BR_CB" "$CB_USER" "$CB_PASS");   ok "logged in at Brazil CB"
 AR_TOK=$(login "$AR_CB" "$CB_USER" "$CB_PASS");   ok "logged in at Argentina CB"
-ITAU_TOK=$(login "$ITAU" "$BANK_USER" "$BANK_PASS"); ok "logged in as bank-itau (commercial_bank)"
+ITAU_TOK=$(login "$ITAU" "$BANK_USER" "$BANK_PASS");   ok "logged in as bank-itau (commercial_bank, Brazil)"
+MACRO_TOK=$(login "$MACRO" "$BANK_USER" "$BANK_PASS"); ok "logged in as bank-macro (commercial_bank, Argentina)"
+
+# ═══════════════════════════════ ONBOARDING ═════════════════════════════════════
+# Each commercial bank onboards through its central bank's governance portal before
+# transacting (mirrors scenario-a): initiate → CB approve-kyc → complete → ACTIVE.
+# bank-itau is the swap initiator (Brazil); bank-macro is the beneficiary (Argentina)
+# whose ACTIVE participant record lets the bridge-out resolve its on-chain wallet.
+step "Onboard the commercial banks through their central banks' governance portals"
+onboard "bank-itau"  "$ITAU"  "$ITAU_TOK"  "$BR_CB" "$BR_TOK" "Banco Itau"  "BR" "ops@itau.br"      "bank-itau-user"
+onboard "bank-macro" "$MACRO" "$MACRO_TOK" "$AR_CB" "$AR_TOK" "Banco Macro" "AR" "ops@macro.ar"     "bank-macro-user"
 
 # ═══════════════════════════════ CURRENCIES ═════════════════════════════════════
 # W-tokens are deployed + registered at found-spoke by the hub compliance service,
@@ -158,23 +195,6 @@ done
 [[ $ST == ACTIVE ]] || die "pool $POOL not ACTIVE (status=$ST)"
 call GET "$BR_CB/api/v2/amm/pool/$POOL/status" "$BR_TOK"
 ok "pool ACTIVE — reserves A=$(printf '%s' "$BODY" | jget reserve_a) B=$(printf '%s' "$BODY" | jget reserve_b)"
-
-# ═══════════════════════════ REGISTER THE BENEFICIARY ═══════════════════════════
-# The cross-currency swap delivers W-${CUR_B} to an ARS bank. CB-B (Argentina) is the
-# sovereign authority for its member banks: it must know the beneficiary's on-chain
-# address, so the beneficiary is an ACTIVE participant in CB-B's registry. In a full
-# deployment this comes from onboarding (initiate → approve-kyc); here the CB registers
-# it directly. Idempotent: a duplicate (already registered) is tolerated.
-step "Register the beneficiary ${BENEF_BANK} as an ACTIVE participant at the Argentina CB"
-try POST "$AR_CB/api/v1/governance/participants" "$AR_TOK" \
-  "{\"user_id\":\"$BENEF_BANK\",\"role\":\"ROLE_COMMERCIAL_BANK\",\"bank_code\":\"$BENEF_BANK\",\"institution_name\":\"$BENEF_BANK\",\"country_code\":\"${CUR_B:0:2}\",\"wallet_address\":\"$BENEF_ADDR\",\"status\":\"ACTIVE\"}"
-if [[ $CODE -ge 200 && $CODE -lt 300 ]]; then
-  ok "$BENEF_BANK registered ACTIVE at the Argentina CB"
-elif [[ $CODE -eq 500 && $BODY == *"duplicate"* ]] || [[ $CODE -eq 409 ]]; then
-  ok "$BENEF_BANK already registered at the Argentina CB — continuing"
-else
-  die "HTTP $CODE registering $BENEF_BANK: $BODY"
-fi
 
 # ═══════════════════════════ CROSS-CURRENCY SWAP (BRIDGE) ════════════════════════
 # The full lifecycle, orchestrated by bank-itau's gateway:
