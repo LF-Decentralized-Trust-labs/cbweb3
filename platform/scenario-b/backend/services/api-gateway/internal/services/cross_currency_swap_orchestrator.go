@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
@@ -134,6 +135,17 @@ type CrossCurrencySwapOrchestrator struct {
 	hubSignerAddress string
 	// transferLimitChecker enforces configurable CB daily transfer limits (R1-10.1).
 	transferLimitChecker TransferLimitCheckerIface
+	// ammAddrResolver resolves a pool_pair to its on-chain AMM address (dynamic
+	// per-pair model). Step 3 sends it to the Cacti relay so the relay can read
+	// isPaused() on the correct AMM for its circuit-breaker gate.
+	ammAddrResolver AMMAddressResolver
+}
+
+// AMMAddressResolver resolves a pool_pair (e.g. "W-BRL-W-ARS") to the on-chain
+// address of its dedicated AMM, via the PairRegistry. Implemented in the app layer
+// over the shared per-pair resolver.
+type AMMAddressResolver interface {
+	AMMAddressFor(ctx context.Context, poolPair string) (string, error)
 }
 
 // NewCrossCurrencySwapOrchestrator creates an orchestrator.
@@ -183,6 +195,13 @@ func (o *CrossCurrencySwapOrchestrator) WithBridgeInRelay(relay BridgeInRelayIfa
 // where to burn from (CB-B has CENTRAL_BANK_ROLE = can burn from any address).
 func (o *CrossCurrencySwapOrchestrator) WithHubSignerAddress(addr string) *CrossCurrencySwapOrchestrator {
 	o.hubSignerAddress = addr
+	return o
+}
+
+// WithAMMAddressResolver attaches the per-pair AMM address resolver so Step 3 can
+// tell the Cacti relay which AMM to run its isPaused() circuit-breaker gate against.
+func (o *CrossCurrencySwapOrchestrator) WithAMMAddressResolver(r AMMAddressResolver) *CrossCurrencySwapOrchestrator {
+	o.ammAddrResolver = r
 	return o
 }
 
@@ -433,11 +452,24 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		req.CorrelationID, req.TargetCurrency, req.TargetCurrency)
 	_ = o.swapRepo.UpdateStatus(ctx, req.SwapID, domain.SwapStatusBridgeOutProgress)
 
-	spokeOut := "spoke-b"
+	// Dynamic per-pair model: the beneficiary spoke id follows the "spoke-<currency>"
+	// convention (spoke-brl, spoke-ars, spoke-cop) the toolkit registers in the relay.
+	spokeOut := "spoke-" + strings.ToLower(req.TargetCurrency)
 	var bridgeOutPositionID string
 
 	if o.cactiRelay != nil {
 		// ── Path A: sovereign model via Cacti relay ──────────────────────────
+		// Resolve the pair's on-chain AMM (dynamic per-pair model) so the relay can
+		// run its isPaused() circuit-breaker gate against the correct AMM. Best-effort:
+		// on failure the field is empty and the relay fails safe (refuses the burn).
+		ammAddr := ""
+		if o.ammAddrResolver != nil {
+			if a, aErr := o.ammAddrResolver.AMMAddressFor(ctx, req.PoolPair); aErr == nil {
+				ammAddr = a
+			} else {
+				log.Printf("[correlation_id=%s] WARNING: could not resolve AMM address for pool %s: %v", req.CorrelationID, req.PoolPair, aErr)
+			}
+		}
 		relayReq := CactiCrossCurrencyBridgeOutRequest{
 			CorrelationID:     req.CorrelationID,
 			SwapTxHash:        swapResult.TxHash,
@@ -445,6 +477,7 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			AmountOut:         req.AmountOut,
 			BeneficiaryBankID: req.BeneficiaryBankID,
 			SpokeOut:          spokeOut,
+			AmmAddress:        ammAddr,
 			// WrappedTargetToken is informational; CB-B uses its own configured address.
 			WrappedTargetToken: func() string {
 				if o.bridgeAssets != nil {

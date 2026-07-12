@@ -280,7 +280,12 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		cbPoolClient = services.NewCentralBankPoolClient(cfg.CentralBankAPIURL, cfg.RequestTimeout)
 		hubCfg, err := cbPoolClient.GetHubLiquidityConfig(context.Background())
 		if err != nil {
-			log.Printf("warning: could not resolve hub liquidity from CB at %s: %v", cfg.CentralBankAPIURL, err)
+			// The CB publishes no static single-AMM config (the dynamic per-pair
+			// model): drop the static client so pool status, the pool gate and the
+			// cross-currency quote reserve reader all fall through to the on-chain
+			// PairRegistry resolver instead of a fixed sovereign AMM.
+			log.Printf("warning: could not resolve hub liquidity from CB at %s: %v; using dynamic per-pair resolution", cfg.CentralBankAPIURL, err)
+			cbPoolClient = nil
 		} else {
 			resolvedHubCfg = hubCfg
 			ammAddr = hubCfg.SovereignAMMAddress
@@ -613,6 +618,11 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		if transferLimitChecker != nil {
 			orchestrator = orchestrator.WithTransferLimitChecker(transferLimitChecker)
 		}
+		// Dynamic per-pair model: let Step 3 tell the Cacti relay which AMM to run
+		// its isPaused() gate against, resolved from the on-chain PairRegistry.
+		if pairResolver != nil {
+			orchestrator = orchestrator.WithAMMAddressResolver(&ammAddrResolverAdapter{r: pairResolver})
+		}
 		deps.CrossCurrencySwapOrchestrator = orchestrator
 
 		// 009-commercial-cross-currency-swap: Wire quote generator with 15s TTL (T030/T031).
@@ -794,7 +804,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		// consume each swap_tx_hash at most once. Without an AMM client the bridge-out
 		// endpoint fails closed rather than minting on the relay's word.
 		if ammClient != nil {
-			deps.CrossCurrencySwapVerifier = &swapVerifierAdapter{c: ammClient}
+			deps.CrossCurrencySwapVerifier = &swapVerifierAdapter{c: ammClient, resolver: pairResolver}
 		} else {
 			log.Printf("[app] WARNING: AMM client unavailable (AMM_CONTRACT_ADDRESS / HUB_BESU_RPC_URL) — cross-currency bridge-out will fail closed")
 		}
@@ -856,12 +866,26 @@ func (a *bridgeLockMintAdapter) LockAndEnqueue(ctx context.Context, ownerBankID,
 }
 
 // swapVerifierAdapter adapts ammclient SwapByTxHash to the handler's VerifiedSwap type (R2-CR-6).
+// In the dynamic per-pair model it resolves the pool's dedicated AMM from the
+// PairRegistry and verifies the LogSwap against THAT AMM; it falls back to the
+// client's configured AMM only when no pair/resolver is available.
 type swapVerifierAdapter struct {
-	c *ammclient.Client
+	c        *ammclient.Client
+	resolver *pairAMMResolver
 }
 
-func (a *swapVerifierAdapter) VerifySwap(ctx context.Context, txHash string) (*handlers.VerifiedSwap, error) {
-	vs, err := a.c.SwapByTxHash(ctx, txHash)
+func (a *swapVerifierAdapter) VerifySwap(ctx context.Context, txHash, poolPair string) (*handlers.VerifiedSwap, error) {
+	var vs *ammclient.VerifiedSwap
+	var err error
+	if a.resolver != nil && poolPair != "" {
+		ammAddr, rErr := a.resolver.ammAddressFor(ctx, poolPair)
+		if rErr != nil {
+			return nil, fmt.Errorf("resolve AMM for pool %s: %w", poolPair, rErr)
+		}
+		vs, err = a.c.SwapByTxHashAt(ctx, txHash, ammAddr)
+	} else {
+		vs, err = a.c.SwapByTxHash(ctx, txHash)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -906,4 +930,14 @@ func (a *ammQuoteAdapter) GetPoolReserves(ctx context.Context, pair string) (str
 
 func (a *ammQuoteAdapter) GetFeeBps(ctx context.Context, pair string) (uint16, error) {
 	return a.adapter.GetFeeBpsForPair(ctx, pair)
+}
+
+// ammAddrResolverAdapter exposes the per-pair resolver's on-chain AMM address
+// lookup to the cross-currency swap orchestrator (services.AMMAddressResolver).
+type ammAddrResolverAdapter struct {
+	r *pairAMMResolver
+}
+
+func (a *ammAddrResolverAdapter) AMMAddressFor(ctx context.Context, poolPair string) (string, error) {
+	return a.r.ammAddressFor(ctx, poolPair)
 }

@@ -380,11 +380,11 @@ func (c *Client) ensureUnlimitedApproval(ctx context.Context, token common.Addre
 	c.approvalMu.Lock()
 	defer c.approvalMu.Unlock()
 
-	if c.approved[token] {
-		return nil
-	}
-
-	// Read on-chain allowance — catches a large approval left from a previous run.
+	// Always read the on-chain allowance — the `approved` cache is only a fast-path
+	// hint, never authoritative: another path (mint-and-approve, addLiquidity) can
+	// have reset the allowance to a FINITE amount via approve(n), which overwrites a
+	// prior unlimited approval. Trusting a stale cached `true` would skip the needed
+	// re-approval and make the next swap revert with ERC20InsufficientAllowance.
 	allowance := new(big.Int)
 	if err := evm.Call(ctx, c.ec, token, c.erc20ABI, "allowance",
 		[]interface{}{c.signer.Address(), c.contract}, allowance); err != nil {
