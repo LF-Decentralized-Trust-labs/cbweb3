@@ -132,6 +132,11 @@ func (b *BesuClient) RegisterParticipant(ctx context.Context, wallet, name, role
 	solidityRole := RoleToSolidityEnum(role)
 	account := common.HexToAddress(wallet)
 
+	// Pin an explicit, generous gas limit: eth_estimateGas underestimates this
+	// storage-writing call on the local QBFT/zero-gas chain (observed OutOfGas at
+	// ~40k), and gas is free on the local genesis, so over-provisioning is safe.
+	opts.GasLimit = 500000
+
 	tx, err := b.contract.RegisterParticipant(opts, account, name, solidityRole, zkPointer)
 	if err != nil {
 		return "", fmt.Errorf("registry: registerParticipant tx: %w", err)
