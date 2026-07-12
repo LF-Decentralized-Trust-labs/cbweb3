@@ -165,16 +165,19 @@ never regenerated, and an `ACTIVE` pair is left untouched.
 
 ## Sovereign corridor (BRL ↔ ARS) — opened at runtime via the CB portal
 
-Provisioning does **not** open the FX corridor. `spec.pair` only documents the
-intended corridor; the toolkit never holds sovereign signing keys. Once the
-stacks are up, each central bank opens the corridor from its **governance portal**
-(the *Cooperative Liquidity* wizard) — or the v2 API directly — authenticated by
-its `ROLE_CENTRAL_BANK` Keycloak session:
+Each sovereign currency (W-token) is already deployed and registered on the hub
+by `found-spoke` (via the hub compliance service) — so no runtime currency step
+is needed. Provisioning does **not** open the FX corridor, however: `spec.pair`
+only documents the intended corridor, and the toolkit never holds sovereign
+signing keys. Once the stacks are up, each central bank opens the corridor from
+its **governance portal** (the *Cooperative Liquidity* wizard) — or the v2 API
+directly — authenticated by its `ROLE_CENTRAL_BANK` Keycloak session:
 
-- `POST /api/v2/hub/currencies` — register the currency (W-token).
 - `POST /api/v2/amm/pairs/propose` — the CB of token A proposes the pair.
 - `POST /api/v2/amm/pairs/confirm` — the CB of token B confirms → `PROPOSED → ACTIVE`.
 - `POST /api/v2/amm/liquidity/add` — each CB adds its cooperative liquidity.
+
+(Registered currencies are listable at `GET /api/v2/hub/currencies`.)
 
 Strict sovereignty holds: each CB signs only its own act, through its own portal
 session — no counterparty key, no raw keys in the toolkit or the manifest.
@@ -184,15 +187,7 @@ Colombia simply never opens a corridor.
 
 ## Verification
 
-Block height per node (RPC ports from the matrix):
-
 ```bash
-for p in 8845 8645 8646 8647 8745 8746 8747 8945 8946 8947; do
-  echo -n "port $p: "
-  curl -s -X POST "http://localhost:$p" -H 'Content-Type: application/json' \
-    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | jq -r .result
-done
-
 docker ps --filter "name=spoke-" --filter "name=hub"
 ```
 

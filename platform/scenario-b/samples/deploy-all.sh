@@ -95,17 +95,14 @@ log "done. Node RPC ports: hub 8845 | brazil 8645/8646/8647 | argentina 8745/874
 log "bundles emitted under samples/bundles/ ; per-entity state under samples/cbweb3-data/"
 cat <<'EOF'
 
-  Sovereign corridor (BRL<->ARS): opened at RUNTIME from the CB governance portal,
-  not by this script. Once the stacks are up, each central bank uses its portal
-  (Cooperative Liquidity wizard) or the v2 API to register its currency, propose/
-  confirm the pair, and add liquidity — CB-role, authenticated, no raw keys:
-    POST /api/v2/hub/currencies · /api/v2/amm/pairs/propose · /confirm
-    POST /api/v2/amm/liquidity/add
+  Sovereign currencies (W-tCeBM_BRL, W-tCeBM_ARS): already deployed and registered
+  on the hub by found-spoke (via the hub compliance service) — no runtime step.
 
-  Verify block height per node:
-    for p in 8845 8645 8646 8647 8745 8746 8747; do
-      echo -n "port $p: "
-      curl -s -X POST "http://localhost:$p" -H 'Content-Type: application/json' \
-        -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | jq -r .result
-    done
+  Sovereign FX corridor (BRL<->ARS): opened at RUNTIME from the CB governance portal,
+  not by this script. Once the stacks are up, each central bank uses its portal
+  (Cooperative Liquidity wizard) or the v2 API to propose/confirm the pair and add
+  liquidity — CB-role, authenticated, no raw keys:
+    POST /api/v2/amm/pairs/propose · /api/v2/amm/pairs/confirm
+    POST /api/v2/amm/liquidity/add
+  (currencies are listable at GET /api/v2/hub/currencies)
 EOF
