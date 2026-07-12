@@ -2,12 +2,18 @@
 #
 # deploy-three.sh — bring up the full Scenario B sample via the cbweb3b CLI.
 #
-# Same flow as deploy-all.sh, extended with a third spoke (Colombia) that joins
-# the hub WITHOUT opening a sovereign corridor (a plain found-spoke):
+# Same flow as deploy-all.sh, extended with a third spoke (Colombia):
 #   • hub       (found-hub) : hub-cbweb3
-#   • Brazil    (spoke-brl) : central-bank-brazil    + bank-itau, bank-bradesco     [pair BRL<->ARS: proposer]
-#   • Argentina (spoke-ars) : central-bank-argentina + bank-galicia, bank-macro     [pair BRL<->ARS: confirmer]
-#   • Colombia  (spoke-cop) : central-bank-colombia  + bank-bancolombia, bank-davivienda  [no pair]
+#   • Brazil    (spoke-brl) : central-bank-brazil    + bank-itau, bank-bradesco
+#   • Argentina (spoke-ars) : central-bank-argentina + bank-galicia, bank-macro
+#   • Colombia  (spoke-cop) : central-bank-colombia  + bank-bancolombia, bank-davivienda
+#
+# The Cacti relay is deployed EXTERNALLY (provisioning/scripts/start-cacti.sh)
+# before any apply — its address reaches the toolkit via each manifest's
+# spec.relay.endpoint (http://localhost:4000). The sovereign FX corridor
+# (BRL<->ARS) is NOT opened here: each CB opens it at runtime from its governance
+# portal (propose/confirm pair + cooperative liquidity), so provisioning never
+# handles sovereign signing keys. Colombia simply never opens a corridor.
 #
 # Idempotent: re-running resumes from the first incomplete step per entity.
 #
@@ -30,6 +36,7 @@ if [[ "${1:-}" == "--clean" ]]; then
   log "cleaning docker (containers + volumes) and data dirs…"
   docker rm -f $(docker ps -aq) 2>/dev/null || true
   docker volume rm $(docker volume ls -q) 2>/dev/null || true
+  docker network prune -f 2>/dev/null || true   # free address pools (one net per entity)
   rm -rf "${SCRIPT_DIR}/cbweb3-data" "${SCRIPT_DIR}/bundles" 2>/dev/null || true
 fi
 
@@ -56,7 +63,12 @@ apply() {
     "$@"
 }
 
-# --- hub (starts the shared relay) --------------------------------------------
+# --- relay (external; hard prerequisite of register-relay-spoke) --------------
+# Deployed outside the toolkit and reached via each manifest's spec.relay.endpoint.
+log "starting Cacti relay (external)…"
+bash "${SCENARIO_DIR}/provisioning/scripts/start-cacti.sh"
+
+# --- hub -----------------------------------------------------------------------
 apply "Hub — found-hub hub-cbweb3" "${SCRIPT_DIR}/hub/hub-cbweb3.yaml"
 
 # --- Brazil spoke (proposes the BRL<->ARS pair) -------------------------------
@@ -79,3 +91,18 @@ apply "Colombia — join bank-davivienda"  "${SCRIPT_DIR}/colombia/bank-davivien
 
 log "done. RPC ports: hub 8845 | BR 8645-8647 | AR 8745-8747 | CO 8945-8947"
 log "bundles under samples/bundles/ ; per-entity state under samples/cbweb3-data/"
+cat <<'EOF'
+
+  Sovereign currencies (W-tCeBM_BRL, W-tCeBM_ARS, W-tCeBM_COP): already deployed
+  and registered on the hub by found-spoke (via the hub compliance service) — no
+  runtime step.
+
+  Sovereign FX corridor (BRL<->ARS): opened at RUNTIME from the CB governance portal,
+  not by this script. Once the stacks are up, each central bank uses its portal
+  (Cooperative Liquidity wizard) or the v2 API to propose/confirm the pair and add
+  liquidity — CB-role, authenticated, no raw keys:
+    POST /api/v2/amm/pairs/propose · /api/v2/amm/pairs/confirm
+    POST /api/v2/amm/liquidity/add
+  (currencies are listable at GET /api/v2/hub/currencies)
+  Colombia (spoke-cop) joins the hub but opens no corridor.
+EOF
