@@ -57,6 +57,12 @@ services:
       BESU_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
       PARTICIPANT_REGISTRY_ADDRESS: "${SPOKE_IDENTITY_REGISTRY_ADDRESS:-}"
       CB_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      # KMS seed for governance-portal onboarding (mirrors scenario-a): the bank's
+      # auth acts as the KMS; CreateOnboardingKey returns this per-bank key so the
+      # bank onboards as a DISTINCT on-chain participant. Empty on a CB (no self-
+      # onboarding); set per-bank by the toolkit join.
+      KMS_SEED_KEY_ID: "${KMS_SEED_KEY_ID:-}"
+      KMS_SEED_PRIVATE_KEY: "${KMS_SEED_PRIVATE_KEY:-}"
     depends_on:
       - compliance
     extra_hosts:
@@ -108,6 +114,15 @@ services:
       # a cross-currency bridge-out (it enqueues the W-<target> burn for its spoke).
       SPOKE_NETWORK: "${SPOKE_NETWORK:-}"
       NATIVE_ASSET_SYMBOL: "${NATIVE_ASSET_SYMBOL:-}"
+      # Governance-portal onboarding smart proxy (mirrors scenario-a): reads the
+      # bank's CSR from PKI_DIR/<bankCode>.csr (the mount below) before forwarding
+      # the credential request to its CB. Empty on a CB (no smart-proxy).
+      PKI_DIR: "${PKI_DIR:-}"
+    volumes:
+      # Same PKI material the compliance service mounts: on a bank this is the host
+      # pki dir holding its gen-csr {bankCode}.csr/.key (read by the smart proxy);
+      # on a CB it is the cb_tls volume (the CA). Mirrors scenario-a.
+      - "${ENTITY_PKI_DIR:?}:/workspace/backend/config/pki"
     depends_on:
       - auth
       - compliance

@@ -192,6 +192,13 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
 		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true) && ",
 		kc, spokeKeycloakRealm, spokeKeycloakClient, spokeKeycloakSecret)
+	// Grant the client's service account the realm-management roles the auth service
+	// needs: GetAdminToken uses client_credentials, and onboarding creates + manages
+	// the commercial bank's Keycloak user (manage-users) + resolves users on login
+	// (view-users). Without this the CB-side credential request 403s at create-user.
+	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
+		"--cclientid realm-management --rolename manage-users --rolename view-users || true) && ",
+		kc, spokeKeycloakRealm, spokeKeycloakClient)
 	// Realm roles the api-gateway checks (created idempotently).
 	for _, r := range spokeCBRoles {
 		fmt.Fprintf(&b, "(%[1]s create roles -r %[2]s -s name=%[3]s || true) && ", kc, spokeKeycloakRealm, r)

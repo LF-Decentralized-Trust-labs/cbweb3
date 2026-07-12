@@ -135,6 +135,11 @@ func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
 		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true) && ",
 		kc, bankKeycloakRealm, bankKeycloakClient, bankKeycloakSecret)
+	// The bank auth's GetAdminToken (client_credentials) resolves users on login, so
+	// its service account needs the realm-management view/manage user roles.
+	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
+		"--cclientid realm-management --rolename manage-users --rolename view-users || true) && ",
+		kc, bankKeycloakRealm, bankKeycloakClient)
 	for _, r := range bankRoles {
 		fmt.Fprintf(&b, "(%[1]s create roles -r %[2]s -s name=%[3]s || true) && ", kc, bankKeycloakRealm, r)
 	}
@@ -169,6 +174,9 @@ func (c JoinConfig) ComposeEnv() []string {
 		b = bundle.SpokeBundle{}
 	}
 	e := c.ContainerPrefix
+	// Per-bank onboarding key (deterministic; seeds the auth KMS so the bank onboards
+	// as a distinct on-chain participant — mirrors scenario-a).
+	bankKey, _ := deriveBankKey(c.Entity)
 	// Prefer the hub RPC port published in the spoke bundle (the CB knows the hub's
 	// real port); fall back to the join HubRPC / default. Without this the bank's
 	// per-pair resolver dials the wrong hub port and swaps fail.
@@ -245,6 +253,12 @@ func (c JoinConfig) ComposeEnv() []string {
 		"CACTI_API_URL": "http://host.docker.internal:4000",
 		// The bank's own spoke id (for bridge lock-mint derivation).
 		"SPOKE_NETWORK": b.SpokeID,
+		// Governance-portal onboarding (mirrors scenario-a): the api-gateway smart
+		// proxy reads the bank's CSR from PKI_DIR/<bankCode>.csr, and the bank's auth
+		// KMS is seeded with a per-bank key so onboarding registers a DISTINCT wallet.
+		"PKI_DIR":              "/workspace/backend/config/pki",
+		"KMS_SEED_KEY_ID":      c.Entity,
+		"KMS_SEED_PRIVATE_KEY": bankKey,
 	}
 	env := make([]string, 0, len(vars))
 	for k, v := range vars {
