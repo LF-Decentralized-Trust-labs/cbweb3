@@ -344,6 +344,32 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		}
 	}
 
+	// Dynamic per-pair resolver: quote/swap/liquidity/mint resolve the AMM +
+	// W-tokens for a pool_pair from the on-chain PairRegistry, so a corridor opened
+	// at runtime (e.g. a new spoke) works with no gateway env/restart.
+	var pairResolver *pairAMMResolver
+	if pairRegistryAddr != "" && hubRPC != "" {
+		hubChainID := int64(0)
+		if chainIDStr != "" {
+			bid := new(big.Int)
+			if _, ok := bid.SetString(chainIDStr, 10); ok {
+				hubChainID = bid.Int64()
+			}
+		}
+		if pr, err := NewPairRegistryClient(context.Background(), PairRegistryConfig{
+			RPCURL:          hubRPC,
+			ContractAddress: pairRegistryAddr,
+			ChainID:         hubChainID,
+			PrivateKeyHex:   signerKey,
+			Timeout:         15 * time.Second,
+		}); err != nil {
+			log.Printf("warning: pair AMM resolver init failed: %v", err)
+		} else {
+			pairResolver = newPairAMMResolver(pr, hubRPC, hubChainID, signerKey, 15*time.Second)
+			log.Printf("dynamic per-pair AMM resolution enabled (PairRegistry %s)", pairRegistryAddr)
+		}
+	}
+
 	// US1 services: Quote, Swap, Pool Status
 	var swapSvc *services.SwapService
 	var poolGate services.PoolStatusGate
@@ -357,7 +383,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		log.Printf("pool status: using Central Bank API at %s", cfg.CentralBankAPIURL)
 	}
 	if ammClient != nil {
-		adapter := &ammAdapter{c: ammClient}
+		adapter := &ammAdapter{c: ammClient, resolver: pairResolver}
 		deps.QuoteService = services.NewQuoteService(adapter)
 		if cbPoolClient == nil {
 			poolSvc := services.NewPoolStatusService(adapter)
@@ -407,7 +433,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		if errA != nil || errB != nil {
 			log.Printf("warning: Hub tCeBM client init failed: tokenA=%v tokenB=%v", errA, errB)
 		} else {
-			tp, errTP := NewTokenPrepareAdapter(context.Background(), tA, tB, ammAddr)
+			tp, errTP := NewTokenPrepareAdapter(context.Background(), tA, tB, ammAddr, pairResolver)
 			if errTP != nil {
 				log.Printf("warning: Hub tokenPrepareAdapter init failed (hasRole check): %v", errTP)
 			} else {
@@ -428,7 +454,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		deps.BridgePositionReader = services.NewBridgePositionReader(db)
 	}
 	if db != nil && ammClient != nil {
-		adapter := &ammAdapter{c: ammClient}
+		adapter := &ammAdapter{c: ammClient, resolver: pairResolver}
 		commitRepo := NewPoolCommitRepository(db)
 		feeRepo := NewLPFeeEventRepository(db)
 		liquiditySvc := services.NewLiquidityProvisionServiceWithRepos(db, adapter, commitRepo, feeRepo)
@@ -447,7 +473,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 
 	// US3 services: Circuit Breaker + Oversight
 	if db != nil && ammClient != nil {
-		adapter := &ammAdapter{c: ammClient}
+		adapter := &ammAdapter{c: ammClient, resolver: pairResolver}
 		deps.CircuitBreakerService = services.NewCircuitBreakerService(db, adapter)
 	}
 	if db != nil {
@@ -482,7 +508,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 
 	// 009-commercial-cross-currency-swap: Wire orchestrator for cross-currency swaps (T014).
 	if db != nil && swapSvc != nil && bridgeLockMintSvc != nil && bridgeBurnUnlockSvc != nil && ammClient != nil {
-		adapter := &ammAdapter{c: ammClient}
+		adapter := &ammAdapter{c: ammClient, resolver: pairResolver}
 		swapRepo := newCrossCurrencySwapRepository(db)
 		quoteRepo := newSwapQuoteRepository(db)
 		rollbackRepo := newSwapRollbackLogRepository(db)
@@ -695,7 +721,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			lpRepo := newLPPositionRepository(db)
 			var sovereignAmm *ammAdapter
 			if ammClient != nil {
-				sovereignAmm = &ammAdapter{c: ammClient}
+				sovereignAmm = &ammAdapter{c: ammClient, resolver: pairResolver}
 			}
 			sovereignSvc, errSov := services.NewSovereignLiquidityServiceFromEnv(db, sovereignAmm, commitRepo, lpRepo)
 			if errSov != nil {
