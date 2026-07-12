@@ -86,6 +86,37 @@ samples/
 | bank-bancolombia        | spoke-cop | join        | 8946 | 8956 | 31604 | 1340    |
 | bank-davivienda         | spoke-cop | join        | 8947 | 8957 | 31605 | 1340    |
 
+The service host ports derive from each entity's RPC port by a fixed offset:
+
+| Service         | Offset  | Example (central-bank-brazil, RPC 8645) |
+|-----------------|---------|-----------------------------------------|
+| api-gateway     | +8000   | 16645                                   |
+| Keycloak        | +7000   | 15645                                   |
+| governance / bank portal | +9000 | 17645 (bank apps also use +9000)   |
+| NOC portal      | +12000  | 20645                                   |
+| treasury portal | +13000  | 21645  (CB only)                        |
+| supervisor portal | +14000 | 22645  (CB only)                       |
+
+A Central Bank brings up governance + treasury + supervisor operator portals (plus
+the NOC portal); a commercial bank brings up the bank portal; the hub the governance
+portal. Each SPA is built per entity with its own api-gateway URL baked in.
+
+## Operator credentials
+
+Each entity seeds its Keycloak operators from its manifest's `spec.adminUsers`
+(scenario-a naming). Log in with `POST /api/v1/auth/login {"clientId":<username>,
+"clientSecret":<password>}`:
+
+- Central Bank: `admin@<country>.<role>.gov` / `<country>-<role>-local`
+  (roles GOVERNANCE, TREASURY, SUPERVISOR) — e.g. `admin@brasil.governance.gov` /
+  `brasil-governance-local`. The governance operator carries `central_bank` +
+  `ROLE_GOVERNANCE` (drives the sovereign AMM and KYC approval).
+- Commercial bank: `admin@<bank>.<country>.com` / `<bank>-bank-local` (role BANK,
+  i.e. `commercial_bank`) — e.g. `admin@itau.brasil.com` / `itau-bank-local`.
+
+`sample-tryout.sh` uses these to onboard both banks through the governance portal and
+settle a cross-currency swap.
+
 ---
 
 ## Prerequisites
@@ -171,7 +202,8 @@ is needed. Provisioning does **not** open the FX corridor, however: `spec.pair`
 only documents the intended corridor, and the toolkit never holds sovereign
 signing keys. Once the stacks are up, each central bank opens the corridor from
 its **governance portal** (the *Cooperative Liquidity* wizard) — or the v2 API
-directly — authenticated by its `ROLE_CENTRAL_BANK` Keycloak session:
+directly — authenticated by its governance operator's Keycloak session
+(`central_bank` + `ROLE_GOVERNANCE`):
 
 - `POST /api/v2/amm/pairs/propose` — the CB of token A proposes the pair.
 - `POST /api/v2/amm/pairs/confirm` — the CB of token B confirms → `PROPOSED → ACTIVE`.
