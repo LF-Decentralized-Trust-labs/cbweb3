@@ -116,6 +116,10 @@ const (
 	hubNocPortalImage  = "cbweb3b/noc-portal:local"
 	hubComplianceImage = "cbweb3b/compliance:local"
 	hubAuthImage       = "cbweb3b/auth:local"
+	// hubPaymentOrchestratorImage runs the bridge RelayerWorker (Scenario B): it
+	// polls the shared bridge outbox and drives positions LOCKING→ACTIVE by minting
+	// the W-<source> on the hub (hub-only mode). Deployed per CB (found-spoke).
+	hubPaymentOrchestratorImage = "cbweb3b/payment-orchestrator:local"
 
 	// hubRelayAuthSecret guards the hub's internal spoke self-registration
 	// endpoint (X-Relay-Auth); local-dev value, shared with the toolkit caller.

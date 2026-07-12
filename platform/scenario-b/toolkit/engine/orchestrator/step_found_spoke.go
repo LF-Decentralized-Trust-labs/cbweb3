@@ -146,6 +146,18 @@ func (c SpokeConfig) scenarioBDir() string { return filepath.Dir(c.ContractsDir)
 
 func (c SpokeConfig) keycloakPort() int { return c.RPCPort + 7000 }
 
+// cactiAPIURL is the Cacti relay REST endpoint a backend container uses to reach
+// the (external) relay. The relay runs in its own stack on the fixed port 4000;
+// containers reach it via the advertised host (default host.docker.internal),
+// the same host the relay uses to reach this spoke's published endpoints.
+func (c SpokeConfig) cactiAPIURL() string {
+	host := c.RelayAdvertisedHost
+	if host == "" {
+		host = "host.docker.internal"
+	}
+	return fmt.Sprintf("http://%s:4000", host)
+}
+
 // keycloakContainer matches entity-keycloak.compose.yaml's container_name
 // (${CONTAINER_PREFIX}-${ENTITY}-keycloak).
 func (c SpokeConfig) keycloakContainer() string {
@@ -242,9 +254,10 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// backend / frontend (images shared with the hub; must be pre-built)
 		"GATEWAY_PORT":     itoa(c.RPCPort + 8000),
 		"GATEWAY_URL":      fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
-		"BACKEND_IMAGE":    hubBackendImage,
-		"COMPLIANCE_IMAGE": hubComplianceImage,
-		"AUTH_IMAGE":       hubAuthImage,
+		"BACKEND_IMAGE":              hubBackendImage,
+		"COMPLIANCE_IMAGE":           hubComplianceImage,
+		"AUTH_IMAGE":                 hubAuthImage,
+		"PAYMENT_ORCHESTRATOR_IMAGE": hubPaymentOrchestratorImage,
 		"FRONTEND_IMAGE":   spokeFrontendImage,
 		"FRONTEND_PORT":    itoa(c.RPCPort + 9000),
 		// app stack (compliance + auth): the CB is the local signer/deployer, and
@@ -263,6 +276,14 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// Shared secret for the hub-mediated M2M endpoints + cross-currency bridge
 		// delegation (a bank delegates bridge-in lock-mint to its CB; bridge-out to CB-B).
 		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
+		// Cacti relay endpoint: the cross-currency swap orchestrator delegates the
+		// Step 3 bridge-out to the beneficiary CB (CB-B) through it. The relay runs
+		// in its own stack, reached from a container via host.docker.internal.
+		"CACTI_API_URL": c.cactiAPIURL(),
+		// This CB's own spoke id + native tCeBM symbol: the bridge-out receiver
+		// enqueues the W-<target> burn against its spoke (e.g. spoke-ars / tCeBM_ARS).
+		"SPOKE_NETWORK":       c.SpokeID,
+		"NATIVE_ASSET_SYMBOL": "tCeBM_" + c.Currency,
 		// noc (observability — soft)
 		"NOC_AGENT_BESU_RPC": fmt.Sprintf("http://%s-%s-besu:8545", e, c.Entity),
 		"NOC_AGENT_ENTITY":   c.Entity,
@@ -610,6 +631,21 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 		},
 		{Name: "start-spoke-infra", Deps: []string{"render-spoke-env"}, Run: compose("entity-infra")},
 		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke", "gen-tls-spoke"}, Run: compose("entity-backend")},
+		{
+			// Bridge RelayerWorker (CB-only): shares the spoke's Postgres DB with the
+			// api-gateway and drives cross-currency bridge positions LOCKING→ACTIVE by
+			// minting the W-<source> on the hub (hub-only mode). A joining bank has no
+			// relayer — it delegates bridge-in lock-mint to its CB.
+			Name: "start-spoke-relayer",
+			Deps: []string{"start-spoke-backend"},
+			Run: func(ctx context.Context) error {
+				if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), hubPaymentOrchestratorImage,
+					"backend/services/payment-orchestrator/Dockerfile", "backend"); err != nil {
+					return err
+				}
+				return compose("entity-relayer")(ctx)
+			},
+		},
 		{Name: "start-spoke-frontend", Deps: []string{"start-spoke-backend"}, Soft: true, Run: func(ctx context.Context) error {
 			if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), spokeFrontendImage, "frontend/apps/bank/Dockerfile", "frontend"); err != nil {
 				return err

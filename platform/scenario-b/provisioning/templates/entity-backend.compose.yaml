@@ -98,6 +98,16 @@ services:
       # Commercial banks resolve the sovereign AMM from their CB (empty on a CB).
       CENTRAL_BANK_API_URL: "${CENTRAL_BANK_API_URL:-}"
       INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-}"
+      # Cross-currency bridge-out delegation (Step 3): the initiating bank's swap
+      # orchestrator notifies the Cacti relay, which routes the burn-unlock to the
+      # beneficiary's CB (CB-B) by spoke_out. Without it, Step 3 falls back to a
+      # local enqueue that no bank-side relayer can process. Empty disables it.
+      CACTI_API_URL: "${CACTI_API_URL:-}"
+      # Bridge lock-mint / burn-unlock derivation: the entity's own spoke network id
+      # (spoke-brl, spoke-ars) and native tCeBM symbol. Required on a CB that receives
+      # a cross-currency bridge-out (it enqueues the W-<target> burn for its spoke).
+      SPOKE_NETWORK: "${SPOKE_NETWORK:-}"
+      NATIVE_ASSET_SYMBOL: "${NATIVE_ASSET_SYMBOL:-}"
     depends_on:
       - auth
       - compliance

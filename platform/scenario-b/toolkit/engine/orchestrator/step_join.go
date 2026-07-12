@@ -239,6 +239,12 @@ func (c JoinConfig) ComposeEnv() []string {
 		// Shared secret so the bank delegates the cross-currency bridge-in lock-mint
 		// to its CB (only CBs hold CENTRAL_BANK_ROLE to mint W-tokens) and bridge-out.
 		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
+		// Cacti relay endpoint: the bank's cross-currency swap orchestrator delegates
+		// the Step 3 bridge-out to the beneficiary CB (CB-B) through it. Fixed relay
+		// port 4000, reached from a container via host.docker.internal.
+		"CACTI_API_URL": "http://host.docker.internal:4000",
+		// The bank's own spoke id (for bridge lock-mint derivation).
+		"SPOKE_NETWORK": b.SpokeID,
 	}
 	env := make([]string, 0, len(vars))
 	for k, v := range vars {

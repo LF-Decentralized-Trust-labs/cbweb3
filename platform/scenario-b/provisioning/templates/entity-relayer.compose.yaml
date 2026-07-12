@@ -1,0 +1,49 @@
+# entity-relayer template — the bridge RelayerWorker (payment-orchestrator) for a
+# central bank. Deployed only by found-spoke (a CB), NOT by join (a bank): a bank
+# delegates its cross-currency bridge-in lock-mint to its CB, and the CB is the
+# holder of CENTRAL_BANK_ROLE on the W-<source> token, so only the CB mints.
+#
+# The RelayerWorker shares the entity's Postgres DB with the api-gateway: the
+# gateway ENQUEUES bridge positions (bridged_asset_positions + relayer_queue_items,
+# LOCKING) and this worker PROCESSES them — minting the W-<source> on the hub and
+# marking the position ACTIVE (bridge-in), then burning the W-<target> on the hub
+# (bridge-out). Both services map the identical GORM models to the same tables.
+#
+# Hub-only mode (BRIDGE_SKIP_SPOKE_LOCK=true): the spoke lock/release legs are
+# skipped for local dev, so the worker does not need the bank to hold tokenized
+# reserves on the spoke — it mints the mirrored asset straight to the position's
+# MintToHubAddress (the swap signer that executes the AMM swap in Step 2).
+#
+# Interpolation vars come from the runner's process env (ComposeEnv). No secrets
+# are baked into this file.
+services:
+  payment-orchestrator:
+    image: "${PAYMENT_ORCHESTRATOR_IMAGE:-cbweb3b/payment-orchestrator:local}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-payment-orchestrator"
+    environment:
+      PAYMENT_GRPC_PORT: "9094"
+      # Cacti relay endpoint — required at boot. In hub-only mode the bridge-in
+      # mint path never dials it (hub mint only); it is used for the spoke legs
+      # when the spoke is configured, which local dev skips.
+      CACTI_API_URL: "${CACTI_API_URL:-http://host.docker.internal:4000}"
+      # Shared DB with the api-gateway: the outbox the gateway enqueues to.
+      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
+      # Hub signing: the CB holds CENTRAL_BANK_ROLE on the W-<source> token and
+      # mints it on the hub. Chain id defaults to the hub's (1337 locally).
+      HUB_BESU_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
+      SIGNER_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
+      SPOKE_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
+      # Local dev: skip the SpokeBridge.lock/release legs; mint straight to the
+      # position's MintToHubAddress (the initiating swap signer).
+      BRIDGE_SKIP_SPOKE_LOCK: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+    restart: always
+
+networks:
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
+    external: true
