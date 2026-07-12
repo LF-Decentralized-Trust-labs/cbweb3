@@ -424,9 +424,19 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					return fmt.Errorf("register-currency: POST %s: %w", url, err)
 				}
 				defer resp.Body.Close()
+				body, _ := io.ReadAll(resp.Body)
 				if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-					b, _ := io.ReadAll(resp.Body)
-					return fmt.Errorf("register-currency: hub returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+					return fmt.Errorf("register-currency: hub returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+				}
+				// Capture the sovereign W-token address so the CB gateway can wire
+				// W_TOKEN_ADDRESS (the source→W-token to mint on the hub bridge-in).
+				var out struct {
+					TokenAddress string `json:"token_address"`
+				}
+				if json.Unmarshal(body, &out) == nil && out.TokenAddress != "" {
+					if err := addrs.AppendAddr(c.SpokeEnvFile, "W_TOKEN_ADDRESS", out.TokenAddress); err != nil {
+						return err
+					}
 				}
 				return nil
 			},

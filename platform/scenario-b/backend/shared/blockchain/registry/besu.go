@@ -268,6 +268,19 @@ func (b *BesuClient) IsCurrencyRegistered(ctx context.Context, symbol string) (b
 	return entry.TokenAddress != (common.Address{}), nil
 }
 
+// CurrencyTokenAddress resolves a registered currency symbol to its W-token
+// address ("0x…") via the CurrencyRegistry. Returns "" when absent/unconfigured.
+func (b *BesuClient) CurrencyTokenAddress(ctx context.Context, symbol string) (string, error) {
+	if strings.TrimSpace(b.cfg.CurrencyRegistryAddress) == "" {
+		return "", errors.New("registry: CURRENCY_REGISTRY_ADDRESS is required")
+	}
+	addr, err := b.currencyTokenAddress(ctx, symbol)
+	if err != nil {
+		return "", err
+	}
+	return addr.Hex(), nil
+}
+
 // currencyTokenAddress resolves a registered currency symbol to its W-token
 // address via the CurrencyRegistry (returns an error when absent).
 func (b *BesuClient) currencyTokenAddress(ctx context.Context, symbol string) (common.Address, error) {

@@ -261,6 +261,7 @@ func (s *complianceService) RegisterParticipantOnChain(ctx context.Context, req 
 type currencyRegistrar interface {
 	RegisterCurrency(ctx context.Context, tokenName, tokenSymbol, countryName, proposerCB, cbAddress string) (tokenAddr string, txHash string, err error)
 	IsCurrencyRegistered(ctx context.Context, symbol string) (bool, error)
+	CurrencyTokenAddress(ctx context.Context, symbol string) (string, error)
 }
 
 // RegisterCurrencyOnChain deploys a founding central bank's bridge token
@@ -293,9 +294,11 @@ func (s *complianceService) RegisterCurrencyOnChain(ctx context.Context, req *co
 		return nil, status.Error(codes.Unimplemented, "currency registration is not available (no on-chain signer configured)")
 	}
 
-	// Idempotent: skip when the currency is already registered on-chain.
+	// Idempotent: skip when the currency is already registered on-chain — but still
+	// resolve + return the token address so callers can wire W_TOKEN_ADDRESS on re-runs.
 	if already, err := reg.IsCurrencyRegistered(ctx, symbol); err == nil && already {
-		return &compliancv1.RegisterCurrencyOnChainResponse{Symbol: symbol, AlreadyRegistered: true}, nil
+		addr, _ := reg.CurrencyTokenAddress(ctx, symbol)
+		return &compliancv1.RegisterCurrencyOnChainResponse{Symbol: symbol, TokenAddress: addr, AlreadyRegistered: true}, nil
 	}
 
 	tokenAddr, txHash, err := reg.RegisterCurrency(ctx, name, symbol, country, proposerCB, cbAddress)
