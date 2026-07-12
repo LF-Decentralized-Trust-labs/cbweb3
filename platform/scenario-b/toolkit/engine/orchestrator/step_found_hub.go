@@ -478,6 +478,10 @@ func hubContractMap(broadcastPath string) (map[string]string, error) {
 			// wire AMM_CONTRACT_ADDRESS into its api-gateway (v2 AMM routes) and
 			// serve as the base for the sovereign-pair AMM opened at runtime.
 			out["amm"] = d.Address
+		case "LiquidityCommitRegistry":
+			// Hub-wide LCR — enables SovereignLiquidityService, which gates the
+			// sovereign-add + cross-currency bridge-in/out endpoints.
+			out["liquidityCommitRegistry"] = d.Address
 		}
 	}
 	return out, nil

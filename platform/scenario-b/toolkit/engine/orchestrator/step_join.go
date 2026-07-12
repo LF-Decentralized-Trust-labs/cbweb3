@@ -235,6 +235,7 @@ func (c JoinConfig) ComposeEnv() []string {
 		"PAIR_REGISTRY_CONTRACT_ADDRESS":     b.HubContracts["pairRegistry"],
 		"CURRENCY_REGISTRY_CONTRACT_ADDRESS": b.HubContracts["currencyRegistry"],
 		"HUB_IDENTITY_REGISTRY_ADDRESS":      b.HubContracts["identityRegistry"],
+		"LIQUIDITY_COMMIT_REGISTRY_ADDRESS":  b.HubContracts["liquidityCommitRegistry"],
 		// Shared secret so the bank delegates the cross-currency bridge-in lock-mint
 		// to its CB (only CBs hold CENTRAL_BANK_ROLE to mint W-tokens) and bridge-out.
 		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,

@@ -529,6 +529,9 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					// without AMM_CONTRACT_ADDRESS the AMM client is nil and the routes
 					// are skipped. The sovereign-pair AMM is resolved at runtime.
 					"AMM_CONTRACT_ADDRESS": hub.Contracts["amm"],
+					// Enables SovereignLiquidityService → the sovereign-add + cross-currency
+					// bridge-in/out endpoints (registerSovereignRoutes gates on it).
+					"LIQUIDITY_COMMIT_REGISTRY_ADDRESS": hub.Contracts["liquidityCommitRegistry"],
 				} {
 					if err := addrs.AppendAddr(c.SpokeEnvFile, key, addr); err != nil {
 						return err

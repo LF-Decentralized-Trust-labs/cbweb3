@@ -91,6 +91,9 @@ services:
       # hub (W_TOKEN_ADDRESS, captured at register-currency). Empty on a bank.
       TOKEN_ADDRESS: "${SPOKE_TCEBM_ADDRESS:-}"
       W_TOKEN_ADDRESS: "${W_TOKEN_ADDRESS:-}"
+      # Hub-wide LCR → enables SovereignLiquidityService (sovereign-add +
+      # cross-currency bridge-in/out endpoints).
+      LIQUIDITY_COMMIT_REGISTRY_ADDRESS: "${LIQUIDITY_COMMIT_REGISTRY_ADDRESS:-}"
       DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
       # Commercial banks resolve the sovereign AMM from their CB (empty on a CB).
       CENTRAL_BANK_API_URL: "${CENTRAL_BANK_API_URL:-}"
