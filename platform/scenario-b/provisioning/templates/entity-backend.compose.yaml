@@ -1,19 +1,98 @@
-# entity-backend template (TK-B4) — per-entity backend (API gateway et al.).
-# Reaches the hub cross-stack via host-gateway. Stateless (no node state here;
-# that lives in entity-besu). Parametrized; no secrets embedded.
+# entity-backend template — per-entity application stack for the toolkit sample.
+# Runs compliance + auth + api-gateway on the entity network (mirrors scenario-a's
+# backend stack; no payment-orchestrator — swaps go through the AMM v2 API, not the
+# PvP/HTLC path). Postgres + Redis come from entity-infra. Node state is NOT here.
+#
+# Interpolation vars come from the runner's process env (ComposeEnv) except the
+# runtime-discovered contract addresses + Keycloak client secret, which arrive via
+# --env-file (.env.spoke/.env.bank). No secrets are baked into this file.
 services:
+  compliance:
+    image: "${COMPLIANCE_IMAGE:-cbweb3b/compliance:local}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-compliance"
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+      BLOCKCHAIN_CLIENT: "besu"
+      BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
+      BESU_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
+      # Onboarding/participant registration targets the spoke IdentityRegistry.
+      PARTICIPANT_REGISTRY_ADDRESS: "${SPOKE_IDENTITY_REGISTRY_ADDRESS:-}"
+      CURRENCY_REGISTRY_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"
+      CB_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
+      BANK_CODE: "${ENTITY}"
+      # CA (scenario-a standard): the CB seeds central-bank.crt/.key into cb_tls;
+      # compliance signs participant CSRs with it. Empty on a bank → dev mode
+      # (certificate issuance disabled), which the swap/approve-kyc path does not need.
+      CA_CERT_FILE: "${CA_CERT_FILE:-}"
+      CA_KEY_FILE: "${CA_KEY_FILE:-}"
+    volumes:
+      # ENTITY_PKI_DIR is "cb_tls" on the CB (the named volume below, holding the
+      # generated CA) and the bank's host pki dir on a commercial bank (its
+      # gen-csr key/csr; no CA → compliance dev mode). Mirrors scenario-a.
+      - "${ENTITY_PKI_DIR:?}:/workspace/backend/config/pki"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+    restart: always
+
+  auth:
+    image: "${AUTH_IMAGE:-cbweb3b/auth:local}"
+    container_name: "${CONTAINER_PREFIX}-${ENTITY}-auth"
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      COMPLIANCE_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-compliance:9093"
+      # Internal JWT minted locally (no external issuer); Keycloak validates the
+      # user's password grant (first factor). PKI second-factor is not required
+      # for the sample login (IssueLoginNonce falls through to password).
+      INTERNAL_JWT_ISSUER: "identity-internal"
+      KEYCLOAK_BASE_URL: "http://${CONTAINER_PREFIX}-${ENTITY}-keycloak:8080"
+      KEYCLOAK_REALM: "${KEYCLOAK_REALM:-cbweb3}"
+      KEYCLOAK_CLIENT_ID: "${KEYCLOAK_CLIENT_ID:-spoke-backend}"
+      KEYCLOAK_CLIENT_SECRET: "${KEYCLOAK_CLIENT_SECRET:?}"
+      REDIS_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-redis:6379"
+      BLOCKCHAIN_CLIENT: "besu"
+      BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
+      BESU_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
+      PARTICIPANT_REGISTRY_ADDRESS: "${SPOKE_IDENTITY_REGISTRY_ADDRESS:-}"
+      CB_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+    depends_on:
+      - compliance
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+    restart: always
+
   api-gateway:
     image: "${BACKEND_IMAGE:-cbweb3b/api-gateway:local}"
-    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-api-gateway"
+    container_name: "${CONTAINER_PREFIX}-${ENTITY}-api-gateway"
     environment:
-      ENTITY: "${ENTITY:?}"
-      HUB_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
-      ENTITY_BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
-      GATEWAY_PORT: "${GATEWAY_PORT:?}"
-      # Compliance gRPC + internal-relay secret: set on the hub (spoke
-      # self-registration endpoint); default to no-op values on other entities.
-      COMPLIANCE_GRPC_ADDR: "${COMPLIANCE_GRPC_ADDR:-localhost:9093}"
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "30"
+      ENTITY: "${ENTITY}"
+      BANK_CODE: "${ENTITY}"
+      COOKIE_SECURE: "false"
+      AUTH_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-auth:9091"
+      COMPLIANCE_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-compliance:9093"
+      # Hub AMM / swap wiring — presence of AMM_CONTRACT_ADDRESS + HUB_BESU_RPC_URL
+      # registers the v2 AMM routes (quote/swap/pairs/liquidity/currencies).
+      HUB_BESU_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
+      SIGNER_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      AMM_CONTRACT_ADDRESS: "${AMM_CONTRACT_ADDRESS:-}"
+      PAIR_REGISTRY_CONTRACT_ADDRESS: "${PAIR_REGISTRY_CONTRACT_ADDRESS:-}"
+      CURRENCY_REGISTRY_CONTRACT_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"
+      HUB_TOKEN_A_ADDRESS: "${HUB_TOKEN_A_ADDRESS:-}"
+      HUB_TOKEN_B_ADDRESS: "${HUB_TOKEN_B_ADDRESS:-}"
+      HUB_IDENTITY_REGISTRY_ADDRESS: "${HUB_IDENTITY_REGISTRY_ADDRESS:-}"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
+      # Commercial banks resolve the sovereign AMM from their CB (empty on a CB).
+      CENTRAL_BANK_API_URL: "${CENTRAL_BANK_API_URL:-}"
       INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-}"
+    depends_on:
+      - auth
+      - compliance
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -26,3 +105,11 @@ networks:
   entity_net:
     name: "${ENTITY_NET_PREFIX:?}_net"
     external: true
+
+volumes:
+  # CB CA material seeded by gen-tls (found-spoke) via a throwaway container; the
+  # explicit name binds to that exact volume (no compose project prefix). Only
+  # referenced (thus only created) when ENTITY_PKI_DIR=cb_tls (the CB); a bank's
+  # host-path ENTITY_PKI_DIR resolves to a bind mount and this stays uninstantiated.
+  cb_tls:
+    name: "${CA_VOLUME:?}"

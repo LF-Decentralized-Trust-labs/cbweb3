@@ -14,6 +14,7 @@ services:
       BESU_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
       PARTICIPANT_REGISTRY_ADDRESS: "${HUB_IDENTITY_REGISTRY_ADDRESS:?}"
       CURRENCY_REGISTRY_ADDRESS: "${CURRENCY_REGISTRY_ADDRESS:?}"
+      PAIR_REGISTRY_ADDRESS: "${PAIR_REGISTRY_CONTRACT_ADDRESS:-}"
       CB_PRIVATE_KEY: "${HUB_ADMIN_PRIVATE_KEY:?}"
       # POSTGRES_DSN intentionally unset → in-memory repo (on-chain register still works).
     extra_hosts:
