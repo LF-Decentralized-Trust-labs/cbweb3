@@ -30,6 +30,6 @@ spec:
   cbEndpoint: http://host.docker.internal:18945
   frontendHost: localhost
   adminUsers:
-    - { role: GOVERNANCE, username: co-governance, password: <local-only-bootstrap> }
-    - { role: TREASURY,   username: co-treasury,   password: <local-only-bootstrap> }
-    - { role: SUPERVISOR, username: co-supervisor, password: <local-only-bootstrap> }
+    - { role: GOVERNANCE, username: admin@colombia.governance.gov, password: colombia-governance-local }
+    - { role: TREASURY,   username: admin@colombia.treasury.gov,   password: colombia-treasury-local }
+    - { role: SUPERVISOR, username: admin@colombia.supervisor.gov, password: colombia-supervisor-local }

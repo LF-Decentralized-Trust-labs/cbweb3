@@ -36,6 +36,6 @@ spec:
   cbEndpoint: http://host.docker.internal:18745
   frontendHost: localhost
   adminUsers:
-    - { role: GOVERNANCE, username: ar-governance, password: <local-only-bootstrap> }
-    - { role: TREASURY,   username: ar-treasury,   password: <local-only-bootstrap> }
-    - { role: SUPERVISOR, username: ar-supervisor, password: <local-only-bootstrap> }
+    - { role: GOVERNANCE, username: admin@argentina.governance.gov, password: argentina-governance-local }
+    - { role: TREASURY,   username: admin@argentina.treasury.gov,   password: argentina-treasury-local }
+    - { role: SUPERVISOR, username: admin@argentina.supervisor.gov, password: argentina-supervisor-local }

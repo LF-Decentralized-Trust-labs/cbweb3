@@ -26,9 +26,14 @@ AR_CB="http://localhost:16745"        # central-bank-argentina (issues W-tCeBM_A
 ITAU="http://localhost:16646"         # bank-itau (Brazil) — the swapping bank
 MACRO="http://localhost:16747"        # bank-macro (Argentina) — the beneficiary bank
 
-# ── seeded login credentials (username / password) ─────────────────────────────
-CB_USER="cb-admin";   CB_PASS="cb-admin-local"        # ROLE central_bank + governance
-BANK_USER="bank-admin"; BANK_PASS="bank-admin-local"  # ROLE commercial_bank
+# ── seeded login credentials (username / password) — per-entity, from each
+# manifest's spec.adminUsers (scenario-a naming). The CB governance operator carries
+# the central_bank + ROLE_GOVERNANCE roles (drives the sovereign AMM + KYC); the bank
+# operator carries commercial_bank + ROLE_COMMERCIAL_BANK.
+BR_CB_USER="admin@brasil.governance.gov";     BR_CB_PASS="brasil-governance-local"
+AR_CB_USER="admin@argentina.governance.gov";  AR_CB_PASS="argentina-governance-local"
+ITAU_USER="admin@itau.brasil.com";            ITAU_PASS="itau-bank-local"
+MACRO_USER="admin@macro.argentina.com";       MACRO_PASS="macro-bank-local"
 
 # ── corridor parameters ─────────────────────────────────────────────────────────
 CUR_A="BRL"; CUR_B="ARS"
@@ -135,10 +140,10 @@ printf '%s%s cbweb3 Scenario B — sample tryout (cross-currency swap) %s\n' "$B
 
 # ═══════════════════════════════ LOGIN ══════════════════════════════════════════
 step "Login — Brazil CB, Argentina CB, and bank-itau"
-BR_TOK=$(login "$BR_CB" "$CB_USER" "$CB_PASS");   ok "logged in at Brazil CB"
-AR_TOK=$(login "$AR_CB" "$CB_USER" "$CB_PASS");   ok "logged in at Argentina CB"
-ITAU_TOK=$(login "$ITAU" "$BANK_USER" "$BANK_PASS");   ok "logged in as bank-itau (commercial_bank, Brazil)"
-MACRO_TOK=$(login "$MACRO" "$BANK_USER" "$BANK_PASS"); ok "logged in as bank-macro (commercial_bank, Argentina)"
+BR_TOK=$(login "$BR_CB" "$BR_CB_USER" "$BR_CB_PASS");   ok "logged in at Brazil CB (governance)"
+AR_TOK=$(login "$AR_CB" "$AR_CB_USER" "$AR_CB_PASS");   ok "logged in at Argentina CB (governance)"
+ITAU_TOK=$(login "$ITAU" "$ITAU_USER" "$ITAU_PASS");    ok "logged in as bank-itau (commercial_bank, Brazil)"
+MACRO_TOK=$(login "$MACRO" "$MACRO_USER" "$MACRO_PASS"); ok "logged in as bank-macro (commercial_bank, Argentina)"
 
 # ═══════════════════════════════ ONBOARDING ═════════════════════════════════════
 # Each commercial bank onboards through its central bank's governance portal before

@@ -36,6 +36,6 @@ spec:
   cbEndpoint: http://host.docker.internal:18645
   frontendHost: localhost
   adminUsers:
-    - { role: GOVERNANCE, username: br-governance, password: <local-only-bootstrap> }
-    - { role: TREASURY,   username: br-treasury,   password: <local-only-bootstrap> }
-    - { role: SUPERVISOR, username: br-supervisor, password: <local-only-bootstrap> }
+    - { role: GOVERNANCE, username: admin@brasil.governance.gov, password: brasil-governance-local }
+    - { role: TREASURY,   username: admin@brasil.treasury.gov,   password: brasil-treasury-local }
+    - { role: SUPERVISOR, username: admin@brasil.supervisor.gov, password: brasil-supervisor-local }
