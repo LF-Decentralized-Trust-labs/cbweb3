@@ -10,6 +10,7 @@ import {PairRegistry} from "../src/PairRegistry.sol";
 import {CurrencyRegistry} from "../src/CurrencyRegistry.sol";
 import {FXAgreement} from "../src/FXAgreement.sol";
 import {ManualOracle} from "../src/ManualOracle.sol";
+import {LiquidityCommitRegistry} from "../src/LiquidityCommitRegistry.sol";
 
 /// @title DeployCBWeb3Hub
 /// @notice Hub deployment script - deploys all core platform contracts on the hub ledger.
@@ -42,6 +43,10 @@ contract DeployCBWeb3Hub is Script {
 
     /// @notice Manual FX rate oracle (CB-set rates)
     ManualOracle public oracle;
+
+    /// @notice Hub-wide registry for cooperative sovereign-liquidity commits +
+    /// the cross-currency bridge lock-mint / burn-release positions.
+    LiquidityCommitRegistry public liquidityCommitRegistry;
 
     /// @notice Admin address used during deployment (for test assertions)
     address public adminAddress;
@@ -97,6 +102,12 @@ contract DeployCBWeb3Hub is Script {
 
         /// @dev 6: Deploy Manual FX Oracle (REQ-FX-002)
         oracle = new ManualOracle(adminAddress, centralBankAddress);
+
+        /// @dev 7: Deploy the hub-wide LiquidityCommitRegistry (cooperative sovereign
+        ///         liquidity + cross-currency bridge positions). Appended last so the
+        ///         addresses of the contracts above are unchanged.
+        liquidityCommitRegistry = new LiquidityCommitRegistry(address(identityRegistry));
+        console.log("LiquidityCommitRegistry:", address(liquidityCommitRegistry));
 
         vm.stopBroadcast();
 

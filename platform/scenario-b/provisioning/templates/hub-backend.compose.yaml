@@ -1,0 +1,30 @@
+# hub-backend template — the hub's api-gateway only. The hub runs its compliance
+# service separately (entity-compliance.compose.yaml) for spoke self-registration
+# + sovereign currency registration, and needs no auth/login (the swap's auth
+# happens on the CB + commercial-bank gateways). Spoke/bank entities use the
+# 3-service entity-backend.compose.yaml instead.
+services:
+  api-gateway:
+    image: "${BACKEND_IMAGE:-cbweb3b/api-gateway:local}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-api-gateway"
+    environment:
+      ENTITY: "${ENTITY:?}"
+      HUB_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
+      ENTITY_BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
+      GATEWAY_PORT: "${GATEWAY_PORT:?}"
+      # Compliance gRPC + internal-relay secret drive the spoke self-registration
+      # endpoint (POST /internal/v1/spokes/register).
+      COMPLIANCE_GRPC_ADDR: "${COMPLIANCE_GRPC_ADDR:-localhost:9093}"
+      INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${GATEWAY_PORT:?}:8080"
+    networks:
+      - entity_net
+    restart: always
+
+networks:
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
+    external: true

@@ -104,6 +104,7 @@ func newBlockchainClient() registry.RegistryWriter {
 			RPCURL:                  os.Getenv("BESU_RPC_URL"),
 			RegistryAddress:         os.Getenv("PARTICIPANT_REGISTRY_ADDRESS"),
 			CurrencyRegistryAddress: os.Getenv("CURRENCY_REGISTRY_ADDRESS"),
+			PairRegistryAddress:     os.Getenv("PAIR_REGISTRY_ADDRESS"),
 			ChainID:                 chainID,
 			RequestTimeout:          time.Duration(15) * time.Second,
 		}, signer)

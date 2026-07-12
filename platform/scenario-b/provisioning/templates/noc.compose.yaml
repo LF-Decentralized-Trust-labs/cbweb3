@@ -21,6 +21,13 @@ services:
     container_name: "${CONTAINER_PREFIX:?}-noc-backend"
     depends_on:
       - noc-db
+    environment:
+      # Listen on 8080 to match the container-side of the port mapping below.
+      NOC_BACKEND_PORT: "8080"
+      DATABASE_URL: "postgres://${NOC_DB_USER}:${NOC_DB_PASSWORD}@${CONTAINER_PREFIX}-noc-db:5432/${NOC_DB_NAME:-noc}?sslmode=disable"
+      # Local dev: no Keycloak NOC realm is provisioned by the toolkit, so bypass
+      # JWT validation (NEVER in production).
+      NOC_SKIP_AUTH: "true"
     ports:
       - "${NOC_BACKEND_PORT:?}:8080"
     networks:
@@ -31,7 +38,7 @@ services:
     image: "${NOC_PORTAL_IMAGE:-cbweb3b/noc-portal:local}"
     container_name: "${CONTAINER_PREFIX:?}-noc-portal"
     ports:
-      - "${NOC_PORTAL_PORT:?}:3000"
+      - "${NOC_PORTAL_PORT:?}:80"
     networks:
       - entity_net
     restart: always
@@ -42,6 +49,10 @@ services:
     environment:
       AGENT_ENTITY: "${NOC_AGENT_ENTITY:?}"
       BESU_RPC_URL: "${NOC_AGENT_BESU_RPC:?}"
+      # Env-based agent config (no agent.yaml is mounted in the toolkit deploy): the
+      # agent pushes health to its entity's noc-backend with a local dev api key.
+      NOC_BACKEND_URL: "http://${CONTAINER_PREFIX}-noc-backend:8080"
+      AGENT_API_KEY: "${NOC_AGENT_API_KEY:-noc-agent-local-key}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

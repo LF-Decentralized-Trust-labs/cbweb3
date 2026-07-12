@@ -161,6 +161,21 @@ message RegisterCurrencyOnChainResponse {
   string tx_hash = 4; // last on-chain tx hash
 }
 
+// RegisterPairOnChain deploys the sovereign-pair AMM over the two already-
+// registered W-tokens and registers the pair (proposePair + confirmPair) via the
+// hub compliance signer. The CBs never touch the hub chain. Idempotent by pair id.
+message RegisterPairOnChainRequest {
+  string currency_a = 1; // e.g. "BRL" (resolves symbol "W-tCeBM_BRL")
+  string currency_b = 2; // e.g. "ARS"
+  string pair_id = 3; // e.g. "W-BRL-ARS"
+}
+
+message RegisterPairOnChainResponse {
+  string amm_address = 1; // deployed sovereign-pair AMM (empty when already registered)
+  bool already_registered = 2;
+  string tx_hash = 3; // last on-chain tx hash
+}
+
 // ─── Governance ───────────────────────────────────────────────────────────
 
 message ApproveKYCRequest {
@@ -248,6 +263,11 @@ service ComplianceService {
   // (W-token) and registers its sovereign currency on-chain via the hub
   // compliance signer (hub admin). Idempotent by currency symbol.
   rpc RegisterCurrencyOnChain(RegisterCurrencyOnChainRequest) returns (RegisterCurrencyOnChainResponse);
+
+  // RegisterPairOnChain deploys the sovereign-pair AMM over two registered
+  // W-tokens and registers the pair (proposePair + confirmPair) via the hub
+  // compliance signer. Idempotent by pair id.
+  rpc RegisterPairOnChain(RegisterPairOnChainRequest) returns (RegisterPairOnChainResponse);
 
   rpc ApproveKYC(ApproveKYCRequest) returns (ApproveKYCResponse);
   rpc ManageParticipantStatus(ManageParticipantStatusRequest) returns (ManageParticipantStatusResponse);

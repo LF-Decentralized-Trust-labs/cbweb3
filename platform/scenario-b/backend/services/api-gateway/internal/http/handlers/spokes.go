@@ -16,6 +16,9 @@ type SpokeRegistrar interface {
 	// RegisterCurrencyOnChain asks the hub to deploy a founding central bank's
 	// bridge token (W-token) and register its sovereign currency on-chain.
 	RegisterCurrencyOnChain(ctx context.Context, currency, cbAddress, spokeID string) (symbol, tokenAddr string, alreadyRegistered bool, txHash string, err error)
+	// RegisterPairOnChain asks the hub to deploy the sovereign-pair AMM over two
+	// registered W-tokens and register the pair (proposePair + confirmPair).
+	RegisterPairOnChain(ctx context.Context, currencyA, currencyB, pairID string) (ammAddr string, alreadyRegistered bool, txHash string, err error)
 }
 
 // SpokesHandler serves the internal machine-to-machine spoke self-registration
@@ -91,6 +94,35 @@ func (h *SpokesHandler) RegisterSpokeCurrency(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"symbol":             symbol,
 		"token_address":      tokenAddr,
+		"already_registered": already,
+		"tx_hash":            txHash,
+	})
+}
+
+// RegisterSpokePair handles POST /internal/v1/spokes/register-pair. The hub
+// deploys the sovereign-pair AMM over two registered W-tokens and registers the
+// pair (proposePair + confirmPair) — the corridor both CBs agreed to open.
+// Idempotent.
+func (h *SpokesHandler) RegisterSpokePair(c *fiber.Ctx) error {
+	var body struct {
+		CurrencyA string `json:"currency_a"`
+		CurrencyB string `json:"currency_b"`
+		PairID    string `json:"pair_id"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if body.CurrencyA == "" || body.CurrencyB == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "currency_a and currency_b are required"})
+	}
+	ammAddr, already, txHash, err := h.registrar.RegisterPairOnChain(
+		c.UserContext(), body.CurrencyA, body.CurrencyB, body.PairID)
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"pair_id":            body.PairID,
+		"amm_address":        ammAddr,
 		"already_registered": already,
 		"tx_hash":            txHash,
 	})

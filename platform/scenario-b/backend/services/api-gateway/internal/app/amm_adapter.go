@@ -16,14 +16,31 @@ import (
 
 // ammAdapter wraps amm.Client to satisfy the service interfaces:
 // AMMQuoter, AMMPoolReader, AMMSwapper, AMLiquidityAdder, AMMCircuitBreakerCaller.
+//
+// When resolver != nil, pair-carrying methods resolve the AMM client DYNAMICALLY
+// from the on-chain PairRegistry (per pool_pair), so a corridor opened at runtime
+// works without gateway env/restart. `c` is the fallback (single-pair) client used
+// by pairless methods and when the resolver can't resolve a pair.
 type ammAdapter struct {
-	c *ammclient.Client
+	c        *ammclient.Client
+	resolver *pairAMMResolver
+}
+
+// clientFor resolves the AMM client for pair (dynamic per-pair), falling back to
+// the configured default client when no resolver is wired or the pair is absent.
+func (a *ammAdapter) clientFor(ctx context.Context, pair string) *ammclient.Client {
+	if a.resolver != nil && pair != "" {
+		if c, err := a.resolver.ammFor(ctx, pair); err == nil && c != nil {
+			return c
+		}
+	}
+	return a.c
 }
 
 // --- AMMQuoter ---
 
 func (a *ammAdapter) QuoteExactOutput(ctx context.Context, pair, amountOut string) (string, string, int64, error) {
-	res, err := a.c.QuoteExactOutput(ctx, pair, amountOut)
+	res, err := a.clientFor(ctx, pair).QuoteExactOutput(ctx, pair, amountOut)
 	if err != nil {
 		return "", "", 0, err
 	}
@@ -33,7 +50,7 @@ func (a *ammAdapter) QuoteExactOutput(ctx context.Context, pair, amountOut strin
 // --- AMMPoolReader ---
 
 func (a *ammAdapter) GetPoolReserves(ctx context.Context, pair string) (string, string, float64, error) {
-	rA, rB, err := a.c.Reserves(ctx)
+	rA, rB, err := a.clientFor(ctx, pair).Reserves(ctx)
 	if err != nil {
 		return "", "", 0, err
 	}
@@ -60,10 +77,11 @@ func (a *ammAdapter) GetFeeBps(ctx context.Context) (uint64, error) {
 // GetFeeBpsForPair reads the swap fee for a specific pair (009-commercial-cross-currency-swap).
 // Currently returns the global fee (single-pair AMM), but signature supports future multi-pair.
 func (a *ammAdapter) GetFeeBpsForPair(ctx context.Context, pair string) (uint16, error) {
-	bps, err := a.GetFeeBps(ctx)
+	bpsBig, err := a.clientFor(ctx, pair).FeeBps(ctx)
 	if err != nil {
 		return 0, err
 	}
+	bps := bpsBig.Uint64()
 	// #nosec G115 -- fee is basis points, bounded to [0,10000] by the AMM contract; fits uint16.
 	return uint16(bps), nil
 }
@@ -71,7 +89,7 @@ func (a *ammAdapter) GetFeeBpsForPair(ctx context.Context, pair string) (uint16,
 // --- AMMSwapper ---
 
 func (a *ammAdapter) SwapExactOutput(ctx context.Context, pair, amountOut, maxAmountIn, payerID, beneficiaryID, zkPayer, zkBeneficiary string) (string, string, string, error) {
-	res, err := a.c.SwapExactOutput(ctx, ammclient.SwapRequest{
+	res, err := a.clientFor(ctx, pair).SwapExactOutput(ctx, ammclient.SwapRequest{
 		AmountOut:            amountOut,
 		MaxAmountIn:          maxAmountIn,
 		PayerID:              payerID,
@@ -96,7 +114,7 @@ func (a *ammAdapter) AddLiquidity(ctx context.Context, pair, providerID, tokenAA
 	if !ok {
 		return "", fmt.Errorf("invalid token_b_amount: %s", tokenBAmount)
 	}
-	if _, err := a.c.AddLiquidity(ctx, amtA, amtB); err != nil {
+	if _, err := a.clientFor(ctx, pair).AddLiquidity(ctx, amtA, amtB); err != nil {
 		return "", err
 	}
 
@@ -235,11 +253,48 @@ type tokenPrepareAdapter struct {
 	ammAddr string
 	sideIsA bool // true → signer is issuer of TOKEN_A; false → TOKEN_B
 	isCB    bool // true → signer holds CENTRAL_BANK_ROLE on some token
+	// resolver enables DYNAMIC per-pair mint/approve: when a caller passes a
+	// non-empty pool_pair, the pair's W-tokens + AMM are resolved on-chain from
+	// the PairRegistry instead of the env-configured single pair.
+	resolver *pairAMMResolver
+}
+
+// tokenForPair resolves the (token client, amm address) for poolPair + side via
+// the on-chain PairRegistry. Falls back to the legacy env-configured single pair
+// when poolPair is empty or no resolver is wired.
+func (a *tokenPrepareAdapter) tokenForPair(ctx context.Context, poolPair, side string) (*tcebmclient.Client, string, error) {
+	if poolPair != "" && a.resolver != nil {
+		tokA, tokB, err := a.resolver.tokensFor(ctx, poolPair)
+		if err != nil {
+			return nil, "", err
+		}
+		ammAddr, err := a.resolver.ammAddressFor(ctx, poolPair)
+		if err != nil {
+			return nil, "", err
+		}
+		switch side {
+		case "B":
+			return tokB, ammAddr, nil
+		case "A", "":
+			return tokA, ammAddr, nil
+		default:
+			return nil, "", fmt.Errorf("token_prepare: side must be 'A' or 'B', got %q", side)
+		}
+	}
+	// Legacy single-pair: pick the side the signer is CB of.
+	if !a.isCB {
+		return nil, "", fmt.Errorf("token_prepare: signer has no CENTRAL_BANK_ROLE on configured tokens")
+	}
+	tok := a.tokenB
+	if a.sideIsA {
+		tok = a.tokenA
+	}
+	return tok, a.ammAddr, nil
 }
 
 // NewTokenPrepareAdapter constructs a tokenPrepareAdapter and detects which token
 // the signer is the central bank of by calling HasCentralBankRole on both contracts.
-func NewTokenPrepareAdapter(ctx context.Context, tokenA, tokenB *tcebmclient.Client, ammAddr string) (*tokenPrepareAdapter, error) {
+func NewTokenPrepareAdapter(ctx context.Context, tokenA, tokenB *tcebmclient.Client, ammAddr string, resolver *pairAMMResolver) (*tokenPrepareAdapter, error) {
 	isA, err := tokenA.HasCentralBankRole(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("token_prepare: check CENTRAL_BANK_ROLE on TOKEN_A: %w", err)
@@ -249,25 +304,18 @@ func NewTokenPrepareAdapter(ctx context.Context, tokenA, tokenB *tcebmclient.Cli
 		return nil, fmt.Errorf("token_prepare: check CENTRAL_BANK_ROLE on TOKEN_B: %w", err)
 	}
 	return &tokenPrepareAdapter{
-		tokenA:  tokenA,
-		tokenB:  tokenB,
-		ammAddr: ammAddr,
-		sideIsA: isA,
-		isCB:    isA || isB,
+		tokenA:   tokenA,
+		tokenB:   tokenB,
+		ammAddr:  ammAddr,
+		sideIsA:  isA,
+		isCB:     isA || isB,
+		resolver: resolver,
 	}, nil
 }
 
-// MintAndApproveForAMM mints `amount` of the token the signer holds CENTRAL_BANK_ROLE on,
-// then approves the AMM contract to spend that amount. (FR-018)
-func (a *tokenPrepareAdapter) MintAndApproveForAMM(ctx context.Context, amount string) error {
-	signerAddr := a.tokenA.SignerAddress()
-	if signerAddr == "" {
-		return fmt.Errorf("token_prepare: signer key not configured")
-	}
-	if !a.isCB {
-		return fmt.Errorf("token_prepare: signer has no CENTRAL_BANK_ROLE on configured tokens")
-	}
-
+// MintAndApproveForAMM mints `amount` of poolPair's `side` token to the signer,
+// then approves that pair's AMM to spend it. (FR-018; dynamic per-pair)
+func (a *tokenPrepareAdapter) MintAndApproveForAMM(ctx context.Context, poolPair, side, amount string) error {
 	amt, ok := new(big.Int).SetString(amount, 10)
 	if !ok {
 		return fmt.Errorf("token_prepare: invalid amount %q", amount)
@@ -275,26 +323,26 @@ func (a *tokenPrepareAdapter) MintAndApproveForAMM(ctx context.Context, amount s
 	if amt.Sign() <= 0 {
 		return nil
 	}
-
-	tok := a.tokenB
-	if a.sideIsA {
-		tok = a.tokenA
+	tok, ammAddr, err := a.tokenForPair(ctx, poolPair, side)
+	if err != nil {
+		return err
+	}
+	signerAddr := tok.SignerAddress()
+	if signerAddr == "" {
+		return fmt.Errorf("token_prepare: signer key not configured")
 	}
 	if _, err := tok.Mint(ctx, signerAddr, amt); err != nil {
 		return fmt.Errorf("token_prepare: mint: %w", err)
 	}
-	if _, err := tok.Approve(ctx, a.ammAddr, amt); err != nil {
+	if _, err := tok.Approve(ctx, ammAddr, amt); err != nil {
 		return fmt.Errorf("token_prepare: approve: %w", err)
 	}
 	return nil
 }
 
-// MintToForAMM mints `amount` of the token the signer holds CENTRAL_BANK_ROLE on
-// directly to the recipient address. The recipient must call approve-amm separately. (FR-018)
-func (a *tokenPrepareAdapter) MintToForAMM(ctx context.Context, recipient, amount string) error {
-	if !a.isCB {
-		return fmt.Errorf("token_prepare: signer has no CENTRAL_BANK_ROLE on configured tokens")
-	}
+// MintToForAMM mints `amount` of poolPair's `side` token directly to recipient.
+// The recipient must call approve-amm separately. (FR-018)
+func (a *tokenPrepareAdapter) MintToForAMM(ctx context.Context, poolPair, side, recipient, amount string) error {
 	amt, ok := new(big.Int).SetString(amount, 10)
 	if !ok {
 		return fmt.Errorf("token_prepare: invalid amount %q", amount)
@@ -302,9 +350,9 @@ func (a *tokenPrepareAdapter) MintToForAMM(ctx context.Context, recipient, amoun
 	if amt.Sign() <= 0 {
 		return nil
 	}
-	tok := a.tokenB
-	if a.sideIsA {
-		tok = a.tokenA
+	tok, _, err := a.tokenForPair(ctx, poolPair, side)
+	if err != nil {
+		return err
 	}
 	if _, err := tok.Mint(ctx, recipient, amt); err != nil {
 		return fmt.Errorf("token_prepare: mint to %s: %w", recipient, err)
@@ -312,34 +360,27 @@ func (a *tokenPrepareAdapter) MintToForAMM(ctx context.Context, recipient, amoun
 	return nil
 }
 
-// ApproveAMM approves the AMM contract to spend `amount` of the token indicated by side.
-// side must be "A", "B", or "" (auto-detect via sideIsA — valid only for CBs). (FR-018)
-func (a *tokenPrepareAdapter) ApproveAMM(ctx context.Context, amount, side string) error {
+// ApproveAMM approves poolPair's AMM to spend `amount` of the token indicated by
+// side ("A"/"B", or "" to auto-detect on legacy single-pair CBs). (FR-018)
+func (a *tokenPrepareAdapter) ApproveAMM(ctx context.Context, poolPair, amount, side string) error {
 	amt, ok := new(big.Int).SetString(amount, 10)
 	if !ok {
 		return fmt.Errorf("token_prepare: invalid amount %q", amount)
 	}
-
-	var tok *tcebmclient.Client
-	switch side {
-	case "A":
-		tok = a.tokenA
-	case "B":
-		tok = a.tokenB
-	case "":
-		if !a.isCB {
+	// Legacy single-pair: preserve the "side required for non-CB" contract.
+	if poolPair == "" || a.resolver == nil {
+		if side == "" && !a.isCB {
 			return fmt.Errorf("token_prepare: side is required for non-central-bank callers")
 		}
-		if a.sideIsA {
-			tok = a.tokenA
-		} else {
-			tok = a.tokenB
+		if side != "" && side != "A" && side != "B" {
+			return fmt.Errorf("token_prepare: side must be 'A' or 'B', got %q", side)
 		}
-	default:
-		return fmt.Errorf("token_prepare: side must be 'A' or 'B', got %q", side)
 	}
-
-	if _, err := tok.Approve(ctx, a.ammAddr, amt); err != nil {
+	tok, ammAddr, err := a.tokenForPair(ctx, poolPair, side)
+	if err != nil {
+		return err
+	}
+	if _, err := tok.Approve(ctx, ammAddr, amt); err != nil {
 		return fmt.Errorf("token_prepare: approve: %w", err)
 	}
 	return nil

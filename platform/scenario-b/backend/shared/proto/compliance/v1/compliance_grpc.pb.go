@@ -29,6 +29,7 @@ const (
 	ComplianceService_SignParticipantCSR_FullMethodName          = "/compliance.v1.ComplianceService/SignParticipantCSR"
 	ComplianceService_RegisterParticipantOnChain_FullMethodName  = "/compliance.v1.ComplianceService/RegisterParticipantOnChain"
 	ComplianceService_RegisterCurrencyOnChain_FullMethodName     = "/compliance.v1.ComplianceService/RegisterCurrencyOnChain"
+	ComplianceService_RegisterPairOnChain_FullMethodName         = "/compliance.v1.ComplianceService/RegisterPairOnChain"
 	ComplianceService_ApproveKYC_FullMethodName                  = "/compliance.v1.ComplianceService/ApproveKYC"
 	ComplianceService_ManageParticipantStatus_FullMethodName     = "/compliance.v1.ComplianceService/ManageParticipantStatus"
 	ComplianceService_GetCircuitBreakerStatus_FullMethodName     = "/compliance.v1.ComplianceService/GetCircuitBreakerStatus"
@@ -57,6 +58,10 @@ type ComplianceServiceClient interface {
 	// (W-token) and registers its sovereign currency on-chain via the hub
 	// compliance signer (hub admin). Idempotent by currency symbol.
 	RegisterCurrencyOnChain(ctx context.Context, in *RegisterCurrencyOnChainRequest, opts ...grpc.CallOption) (*RegisterCurrencyOnChainResponse, error)
+	// RegisterPairOnChain deploys the sovereign-pair AMM over two registered
+	// W-tokens and registers the pair (proposePair + confirmPair) via the hub
+	// compliance signer. Idempotent by pair id.
+	RegisterPairOnChain(ctx context.Context, in *RegisterPairOnChainRequest, opts ...grpc.CallOption) (*RegisterPairOnChainResponse, error)
 	ApproveKYC(ctx context.Context, in *ApproveKYCRequest, opts ...grpc.CallOption) (*ApproveKYCResponse, error)
 	ManageParticipantStatus(ctx context.Context, in *ManageParticipantStatusRequest, opts ...grpc.CallOption) (*ManageParticipantStatusResponse, error)
 	GetCircuitBreakerStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GetCircuitBreakerStatusResponse, error)
@@ -163,6 +168,16 @@ func (c *complianceServiceClient) RegisterCurrencyOnChain(ctx context.Context, i
 	return out, nil
 }
 
+func (c *complianceServiceClient) RegisterPairOnChain(ctx context.Context, in *RegisterPairOnChainRequest, opts ...grpc.CallOption) (*RegisterPairOnChainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterPairOnChainResponse)
+	err := c.cc.Invoke(ctx, ComplianceService_RegisterPairOnChain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *complianceServiceClient) ApproveKYC(ctx context.Context, in *ApproveKYCRequest, opts ...grpc.CallOption) (*ApproveKYCResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ApproveKYCResponse)
@@ -243,6 +258,10 @@ type ComplianceServiceServer interface {
 	// (W-token) and registers its sovereign currency on-chain via the hub
 	// compliance signer (hub admin). Idempotent by currency symbol.
 	RegisterCurrencyOnChain(context.Context, *RegisterCurrencyOnChainRequest) (*RegisterCurrencyOnChainResponse, error)
+	// RegisterPairOnChain deploys the sovereign-pair AMM over two registered
+	// W-tokens and registers the pair (proposePair + confirmPair) via the hub
+	// compliance signer. Idempotent by pair id.
+	RegisterPairOnChain(context.Context, *RegisterPairOnChainRequest) (*RegisterPairOnChainResponse, error)
 	ApproveKYC(context.Context, *ApproveKYCRequest) (*ApproveKYCResponse, error)
 	ManageParticipantStatus(context.Context, *ManageParticipantStatusRequest) (*ManageParticipantStatusResponse, error)
 	GetCircuitBreakerStatus(context.Context, *emptypb.Empty) (*GetCircuitBreakerStatusResponse, error)
@@ -284,6 +303,9 @@ func (UnimplementedComplianceServiceServer) RegisterParticipantOnChain(context.C
 }
 func (UnimplementedComplianceServiceServer) RegisterCurrencyOnChain(context.Context, *RegisterCurrencyOnChainRequest) (*RegisterCurrencyOnChainResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RegisterCurrencyOnChain not implemented")
+}
+func (UnimplementedComplianceServiceServer) RegisterPairOnChain(context.Context, *RegisterPairOnChainRequest) (*RegisterPairOnChainResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RegisterPairOnChain not implemented")
 }
 func (UnimplementedComplianceServiceServer) ApproveKYC(context.Context, *ApproveKYCRequest) (*ApproveKYCResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ApproveKYC not implemented")
@@ -485,6 +507,24 @@ func _ComplianceService_RegisterCurrencyOnChain_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ComplianceService_RegisterPairOnChain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterPairOnChainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ComplianceServiceServer).RegisterPairOnChain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ComplianceService_RegisterPairOnChain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ComplianceServiceServer).RegisterPairOnChain(ctx, req.(*RegisterPairOnChainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ComplianceService_ApproveKYC_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ApproveKYCRequest)
 	if err := dec(in); err != nil {
@@ -635,6 +675,10 @@ var ComplianceService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterCurrencyOnChain",
 			Handler:    _ComplianceService_RegisterCurrencyOnChain_Handler,
+		},
+		{
+			MethodName: "RegisterPairOnChain",
+			Handler:    _ComplianceService_RegisterPairOnChain_Handler,
 		},
 		{
 			MethodName: "ApproveKYC",

@@ -25,5 +25,5 @@ spec:
     endpoint: http://localhost:4000
   frontendHost: localhost
   adminUsers:
-    - { role: GOVERNANCE, username: hub-governance, password: <local-only-bootstrap> }
-    - { role: NOC_ADMIN,  username: hub-noc,        password: <local-only-bootstrap> }
+    - { role: GOVERNANCE, username: admin@hub.governance.gov, password: hub-governance-local }
+    - { role: NOC_ADMIN,  username: admin@hub.noc.gov,        password: hub-noc-local }

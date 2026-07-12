@@ -169,6 +169,7 @@ func Setup(app *fiber.App, deps Dependencies) {
 		spokes := app.Group("/internal/v1", middleware.RequireRelayAuth(relaySecret))
 		spokes.Post("/spokes/register", deps.SpokesHandler.RegisterSpoke)
 		spokes.Post("/spokes/register-currency", deps.SpokesHandler.RegisterSpokeCurrency)
+		spokes.Post("/spokes/register-pair", deps.SpokesHandler.RegisterSpokePair)
 	}
 
 	// --- Scenario B API v2 ---

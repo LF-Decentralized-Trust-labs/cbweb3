@@ -121,6 +121,7 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		AdvertisedHost:      pd.Spec.Node.AdvertisedHost,
 		RelayAdvertisedHost: manifestRelayAdvHost(pd),
 		Currency:            pd.Spec.Spoke.Currency,
+		AdminUsers:          toOrchestratorAdminUsers(pd.Spec.AdminUsers),
 	}
 	cfg.WithDefaults()
 	if o.DryRun {
@@ -203,6 +204,7 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
 		HubRPC:          o.HubRPC,
+		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
 	}
 	cfg.WithDefaults()
 	if o.DryRun {
@@ -353,6 +355,16 @@ func manifestRelayAdvHost(pd *manifest.ParticipantDeployment) string {
 		return pd.Spec.Relay.AdvertisedHost
 	}
 	return "host.docker.internal"
+}
+
+// toOrchestratorAdminUsers converts the manifest's spec.adminUsers into the
+// orchestrator's AdminUser type (the toolkit seeds one Keycloak account per entry).
+func toOrchestratorAdminUsers(users []manifest.AdminUser) []orchestrator.AdminUser {
+	out := make([]orchestrator.AdminUser, 0, len(users))
+	for _, u := range users {
+		out = append(out, orchestrator.AdminUser{Role: u.Role, Username: u.Username, Password: u.Password})
+	}
+	return out
 }
 
 func firstNonEmpty(vals ...string) string {

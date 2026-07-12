@@ -115,6 +115,11 @@ const (
 	hubNocAgentImage   = "cbweb3b/noc-agent:local"
 	hubNocPortalImage  = "cbweb3b/noc-portal:local"
 	hubComplianceImage = "cbweb3b/compliance:local"
+	hubAuthImage       = "cbweb3b/auth:local"
+	// hubPaymentOrchestratorImage runs the bridge RelayerWorker (Scenario B): it
+	// polls the shared bridge outbox and drives positions LOCKING→ACTIVE by minting
+	// the W-<source> on the hub (hub-only mode). Deployed per CB (found-spoke).
+	hubPaymentOrchestratorImage = "cbweb3b/payment-orchestrator:local"
 
 	// hubRelayAuthSecret guards the hub's internal spoke self-registration
 	// endpoint (X-Relay-Auth); local-dev value, shared with the toolkit caller.
@@ -196,7 +201,7 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"HUB_CHAIN_ID":               itoa(int(c.ChainID)),
 		"HUB_ADMIN_PRIVATE_KEY":      devDeployerKey, // holds GOVERNANCE_ROLE on the hub registry
 		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
-		"FRONTEND_IMAGE":             hubFrontendImage,
+		"FRONTEND_IMAGE":             cbFrontendImage("governance", c.RPCPort+8000),
 		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
 		"RELAY_IMAGE":                hubRelayImage,
 		"RELAY_CONTAINER_NAME":       e + "-relay",
@@ -382,17 +387,27 @@ func FoundHubSteps(c HubConfig) []Step {
 				if err := c.buildImage(ctx, hubComplianceImage, "backend/services/compliance/Dockerfile", "backend"); err != nil {
 					return err
 				}
+				// Build the auth image here too (shared): the hub does not run auth,
+				// but every spoke/bank backend does, and images are built once on the
+				// hub host before spokes/banks start.
+				if err := c.buildImage(ctx, hubAuthImage, "backend/services/auth/Dockerfile", "backend"); err != nil {
+					return err
+				}
 				return compose("entity-compliance")(ctx)
 			},
 		},
-		{Name: "start-hub-backend", Deps: []string{"start-hub-infra", "render-hub-env", "provision-keycloak-hub", "build-hub-backend-image", "start-hub-compliance"}, Run: compose("entity-backend")},
+		{Name: "start-hub-backend", Deps: []string{"start-hub-infra", "render-hub-env", "provision-keycloak-hub", "build-hub-backend-image", "start-hub-compliance"}, Run: compose("hub-backend")},
 		// UI / relay / NOC are SOFT (non-fatal): they build heavier Node/React
 		// images on demand; a build/start failure never blocks the hub's
 		// operational core (besu + contracts + infra + keycloak + backend).
 		{
 			Name: "start-hub-frontend", Deps: []string{"start-hub-backend"}, Soft: true,
 			Run: func(ctx context.Context) error {
-				if err := c.buildImage(ctx, hubFrontendImage, "frontend/apps/governance/Dockerfile", "frontend"); err != nil {
+				// The hub governance portal bakes the hub api-gateway URL (browser reaches
+				// it on the host at localhost:<gwPort>); build a per-entity image, then run.
+				gwPort := c.RPCPort + 8000
+				if err := buildFrontendImage(ctx, c.Runner, c.scenarioBDir(), cbFrontendImage("governance", gwPort), "governance",
+					map[string]string{"VITE_API_URL": fmt.Sprintf("http://localhost:%d", gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": "hub"}); err != nil {
 					return err
 				}
 				return compose("entity-frontend")(ctx)
@@ -466,6 +481,15 @@ func hubContractMap(broadcastPath string) (map[string]string, error) {
 			out["currencyRegistry"] = d.Address
 		case "ManualOracle":
 			out["manualOracle"] = d.Address
+		case "AutomatedMarketMaker":
+			// The hub AMM (default tCeBM_BRL/EUR pair). Propagated so a spoke can
+			// wire AMM_CONTRACT_ADDRESS into its api-gateway (v2 AMM routes) and
+			// serve as the base for the sovereign-pair AMM opened at runtime.
+			out["amm"] = d.Address
+		case "LiquidityCommitRegistry":
+			// Hub-wide LCR — enables SovereignLiquidityService, which gates the
+			// sovereign-add + cross-currency bridge-in/out endpoints.
+			out["liquidityCommitRegistry"] = d.Address
 		}
 	}
 	return out, nil

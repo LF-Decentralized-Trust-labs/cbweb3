@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/addrs"
@@ -25,6 +26,7 @@ type JoinConfig struct {
 	OutDir          string
 	BankID          string
 	Institution     string
+	AdminUsers      []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
 	SpokeID         string
 	SpokeChainID    uint64
 	BankRPC         string // RPC of the bank's own node (wait-sync gate)
@@ -101,6 +103,7 @@ func (c *JoinConfig) WithDefaults() {
 }
 
 func (c JoinConfig) genesisVolume() string { return c.VolumePrefix + "_genesis" }
+func (c JoinConfig) caVolume() string      { return c.VolumePrefix + "_cb_tls" }
 func (c JoinConfig) keycloakPort() int     { return c.RPCPort + 7000 }
 
 // keycloakContainer matches entity-keycloak.compose.yaml's container_name.
@@ -113,19 +116,39 @@ const (
 	bankKeycloakRealm  = "cbweb3"
 	bankKeycloakClient = "bank-backend"
 	bankKeycloakSecret = "bank-backend-local-secret" // local-only, not a real secret
+	// Commercial-bank login user seeded into the realm. Holds commercial_bank,
+	// the role the v2 AMM swap routes require. Local-dev credentials only.
+	bankUser = "bank-admin"
+	bankPass = "bank-admin-local"
 )
+
+// bankRoles are the realm roles granted to the bank login user: commercial_bank
+// (v2 AMM swap/quote) plus ROLE_COMMERCIAL_BANK for the v1 onboarding path.
+var bankRoles = []string{"commercial_bank", "ROLE_COMMERCIAL_BANK"}
 
 // provisionKeycloakRealm creates the realm + confidential client via kcadm
 // (idempotent: create failures are ignored).
 func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 	kc := "/opt/keycloak/bin/kcadm.sh"
-	script := fmt.Sprintf(
-		"%[1]s config credentials --server http://localhost:8080 --realm master --user %[2]s --password %[3]s && "+
-			"(%[1]s create realms -s realm=%[4]s -s enabled=true || true) && "+
-			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
-			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true)",
-		kc, "admin", "admin", bankKeycloakRealm, bankKeycloakClient, bankKeycloakSecret)
-	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", script)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password admin && ", kc)
+	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || true) && ", kc, bankKeycloakRealm)
+	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
+		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true) && ",
+		kc, bankKeycloakRealm, bankKeycloakClient, bankKeycloakSecret)
+	// The bank auth's GetAdminToken (client_credentials) resolves users on login, so
+	// its service account needs the realm-management view/manage user roles.
+	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
+		"--cclientid realm-management --rolename manage-users --rolename view-users || true) && ",
+		kc, bankKeycloakRealm, bankKeycloakClient)
+	// Per-role operator accounts from the manifest (spec.adminUsers); fall back to a
+	// single default bank admin when none are declared.
+	users := c.AdminUsers
+	if len(users) == 0 {
+		users = []AdminUser{{Role: "BANK", Username: bankUser, Password: bankPass}}
+	}
+	appendKeycloakUsers(&b, kc, bankKeycloakRealm, users)
+	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
 	return err
 }
 
@@ -147,9 +170,18 @@ func (c JoinConfig) ComposeEnv() []string {
 		b = bundle.SpokeBundle{}
 	}
 	e := c.ContainerPrefix
-	hubPort := "8545"
-	if u, err := url.Parse(c.HubRPC); err == nil && u.Port() != "" {
-		hubPort = u.Port()
+	// Per-bank onboarding key (deterministic; seeds the auth KMS so the bank onboards
+	// as a distinct on-chain participant — mirrors scenario-a).
+	bankKey, _ := deriveBankKey(c.Entity)
+	// Prefer the hub RPC port published in the spoke bundle (the CB knows the hub's
+	// real port); fall back to the join HubRPC / default. Without this the bank's
+	// per-pair resolver dials the wrong hub port and swaps fail.
+	hubPort := b.HubRPCPort
+	if hubPort == "" {
+		hubPort = "8545"
+		if u, err := url.Parse(c.HubRPC); err == nil && u.Port() != "" {
+			hubPort = u.Port()
+		}
 	}
 	vars := map[string]string{
 		// besu (join template)
@@ -175,12 +207,54 @@ func (c JoinConfig) ComposeEnv() []string {
 		"KC_ADMIN_PASSWORD": "admin",
 		"KC_DB_URL":         "jdbc:postgresql://" + e + "-" + c.Entity + "-postgres:5432/keycloak",
 		"KEYCLOAK_PORT":     itoa(c.keycloakPort()),
-		// backend / frontend (api-gateway image shared; must be pre-built)
-		"GATEWAY_PORT":   itoa(c.RPCPort + 8000),
-		"GATEWAY_URL":    c.GatewayURL,
-		"BACKEND_IMAGE":  hubBackendImage,
-		"FRONTEND_IMAGE": spokeFrontendImage,
-		"FRONTEND_PORT":  itoa(c.RPCPort + 9000),
+		// backend / frontend (images shared with the hub; must be pre-built)
+		"GATEWAY_PORT":     itoa(c.RPCPort + 8000),
+		"GATEWAY_URL":      c.GatewayURL,
+		"BACKEND_IMAGE":    hubBackendImage,
+		"COMPLIANCE_IMAGE": hubComplianceImage,
+		"AUTH_IMAGE":       hubAuthImage,
+		"FRONTEND_IMAGE":   cbFrontendImage("bank", c.RPCPort+8000),
+		"FRONTEND_PORT":    itoa(c.RPCPort + 9000),
+		// app stack (compliance + auth): the bank is the local signer; the Keycloak
+		// realm/client are provisioned by provision-keycloak-bank.
+		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
+		"CB_PRIVATE_KEY":     devDeployerKey,
+		"KEYCLOAK_REALM":     bankKeycloakRealm,
+		"KEYCLOAK_CLIENT_ID": bankKeycloakClient,
+		// CA (scenario-a commercial-bank strategy): the bank has NO CA (only the CB
+		// CA signs). Compliance mounts the bank's own host pki dir (its gen-csr
+		// key/csr) and runs in dev mode (CA_CERT_FILE empty). CA_VOLUME is still set
+		// so the template's cb_tls volume decl interpolates, but it stays
+		// uninstantiated (ENTITY_PKI_DIR is a host bind, not the named volume).
+		"CA_VOLUME":      c.caVolume(),
+		"ENTITY_PKI_DIR": c.pkiDir(),
+		// Commercial banks resolve the sovereign AMM from their CB gateway.
+		"CENTRAL_BANK_API_URL": b.CBGateway,
+		// Hub contract addresses (published by the CB in the spoke bundle) so the
+		// bank runs the same on-chain per-pair AMM resolver as its CB — dynamic swap
+		// on any corridor. AMM_CONTRACT_ADDRESS only bootstraps the v2 routes; the
+		// resolver overrides both the AMM and its tokens per pool_pair, so no fixed
+		// HUB_TOKEN_A/B is wired here (the bank does not mint — only quote + swap).
+		"AMM_CONTRACT_ADDRESS":               b.HubContracts["amm"],
+		"PAIR_REGISTRY_CONTRACT_ADDRESS":     b.HubContracts["pairRegistry"],
+		"CURRENCY_REGISTRY_CONTRACT_ADDRESS": b.HubContracts["currencyRegistry"],
+		"HUB_IDENTITY_REGISTRY_ADDRESS":      b.HubContracts["identityRegistry"],
+		"LIQUIDITY_COMMIT_REGISTRY_ADDRESS":  b.HubContracts["liquidityCommitRegistry"],
+		// Shared secret so the bank delegates the cross-currency bridge-in lock-mint
+		// to its CB (only CBs hold CENTRAL_BANK_ROLE to mint W-tokens) and bridge-out.
+		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
+		// Cacti relay endpoint: the bank's cross-currency swap orchestrator delegates
+		// the Step 3 bridge-out to the beneficiary CB (CB-B) through it. Fixed relay
+		// port 4000, reached from a container via host.docker.internal.
+		"CACTI_API_URL": "http://host.docker.internal:4000",
+		// The bank's own spoke id (for bridge lock-mint derivation).
+		"SPOKE_NETWORK": b.SpokeID,
+		// Governance-portal onboarding (mirrors scenario-a): the api-gateway smart
+		// proxy reads the bank's CSR from PKI_DIR/<bankCode>.csr, and the bank's auth
+		// KMS is seeded with a per-bank key so onboarding registers a DISTINCT wallet.
+		"PKI_DIR":              "/workspace/backend/config/pki",
+		"KMS_SEED_KEY_ID":      c.Entity,
+		"KMS_SEED_PRIVATE_KEY": bankKey,
 	}
 	env := make([]string, 0, len(vars))
 	for k, v := range vars {
@@ -344,9 +418,16 @@ func JoinSteps(c JoinConfig) []Step {
 			},
 		},
 		{Name: "start-bank-infra", Deps: []string{"wait-sync"}, Run: compose("entity-infra")},
-		{Name: "start-bank-backend", Deps: []string{"start-bank-infra", "wire-addresses", "provision-keycloak-bank"}, Run: compose("entity-backend")},
+		// Deps gen-csr so the host pki dir exists (host-owned) BEFORE compliance
+		// bind-mounts it; otherwise Docker auto-creates it root-owned and gen-csr
+		// later fails to write (the known join gen-csr permission bug).
+		{Name: "start-bank-backend", Deps: []string{"start-bank-infra", "wire-addresses", "provision-keycloak-bank", "gen-csr"}, Run: compose("entity-backend")},
 		{Name: "start-bank-frontend", Deps: []string{"start-bank-backend"}, Soft: true, Run: func(ctx context.Context) error {
-			if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), spokeFrontendImage, "frontend/apps/bank/Dockerfile", "frontend"); err != nil {
+			// The bank portal bakes this bank's api-gateway URL (browser reaches it on
+			// the host at localhost:<gwPort>); build a per-entity image, then run it.
+			gwPort := c.RPCPort + 8000
+			if err := buildFrontendImage(ctx, c.Runner, c.scenarioBDir(), cbFrontendImage("bank", gwPort), "bank",
+				map[string]string{"VITE_API_URL": fmt.Sprintf("http://localhost:%d", gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
 				return err
 			}
 			return compose("entity-frontend")(ctx)

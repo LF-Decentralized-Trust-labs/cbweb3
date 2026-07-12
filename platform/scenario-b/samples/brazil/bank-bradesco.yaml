@@ -29,4 +29,4 @@ spec:
     endpoint: http://localhost:4000
   frontendHost: localhost
   adminUsers:
-    - { role: BANK, username: bradesco-admin, password: <local-only-bootstrap> }
+    - { role: BANK, username: admin@bradesco.brasil.com, password: bradesco-bank-local }

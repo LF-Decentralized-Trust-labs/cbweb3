@@ -261,6 +261,7 @@ func (s *complianceService) RegisterParticipantOnChain(ctx context.Context, req 
 type currencyRegistrar interface {
 	RegisterCurrency(ctx context.Context, tokenName, tokenSymbol, countryName, proposerCB, cbAddress string) (tokenAddr string, txHash string, err error)
 	IsCurrencyRegistered(ctx context.Context, symbol string) (bool, error)
+	CurrencyTokenAddress(ctx context.Context, symbol string) (string, error)
 }
 
 // RegisterCurrencyOnChain deploys a founding central bank's bridge token
@@ -293,9 +294,11 @@ func (s *complianceService) RegisterCurrencyOnChain(ctx context.Context, req *co
 		return nil, status.Error(codes.Unimplemented, "currency registration is not available (no on-chain signer configured)")
 	}
 
-	// Idempotent: skip when the currency is already registered on-chain.
+	// Idempotent: skip when the currency is already registered on-chain — but still
+	// resolve + return the token address so callers can wire W_TOKEN_ADDRESS on re-runs.
 	if already, err := reg.IsCurrencyRegistered(ctx, symbol); err == nil && already {
-		return &compliancv1.RegisterCurrencyOnChainResponse{Symbol: symbol, AlreadyRegistered: true}, nil
+		addr, _ := reg.CurrencyTokenAddress(ctx, symbol)
+		return &compliancv1.RegisterCurrencyOnChainResponse{Symbol: symbol, TokenAddress: addr, AlreadyRegistered: true}, nil
 	}
 
 	tokenAddr, txHash, err := reg.RegisterCurrency(ctx, name, symbol, country, proposerCB, cbAddress)
@@ -306,6 +309,53 @@ func (s *complianceService) RegisterCurrencyOnChain(ctx context.Context, req *co
 		Symbol:       symbol,
 		TokenAddress: tokenAddr,
 		TxHash:       txHash,
+	}, nil
+}
+
+// pairRegistrar is the subset of the live Besu client used for sovereign-pair
+// registration (deploy AMM + proposePair + confirmPair). Satisfied by the
+// concrete *registry.BesuClient but not the noop client.
+type pairRegistrar interface {
+	RegisterPair(ctx context.Context, symbolA, symbolB, pairID string) (ammAddr string, txHash string, err error)
+	IsPairRegistered(ctx context.Context, pairID string) (bool, error)
+}
+
+// RegisterPairOnChain deploys the sovereign-pair AMM over the two already-
+// registered W-tokens and registers the pair (proposePair + confirmPair) via the
+// hub compliance signer. Idempotent by pair id. Mirrors RegisterCurrencyOnChain.
+func (s *complianceService) RegisterPairOnChain(ctx context.Context, req *compliancv1.RegisterPairOnChainRequest) (*compliancv1.RegisterPairOnChainResponse, error) {
+	ca := strings.TrimSpace(req.CurrencyA)
+	cb := strings.TrimSpace(req.CurrencyB)
+	if ca == "" || cb == "" {
+		return nil, status.Error(codes.InvalidArgument, "currency_a and currency_b are required")
+	}
+	pairID := strings.TrimSpace(req.PairId)
+	if pairID == "" {
+		// Convention W-{source}-W-{target} — must match the swap/quote path
+		// (swap_quote_generator builds "W-%s-W-%s"), else the on-chain per-pair
+		// resolver misses the pool.
+		pairID = "W-" + ca + "-W-" + cb
+	}
+	symbolA := "W-tCeBM_" + ca
+	symbolB := "W-tCeBM_" + cb
+
+	reg, ok := s.blockchain.(pairRegistrar)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "pair registration is not available (no on-chain signer configured)")
+	}
+
+	// Idempotent: skip when the pair already exists on-chain.
+	if already, err := reg.IsPairRegistered(ctx, pairID); err == nil && already {
+		return &compliancv1.RegisterPairOnChainResponse{AlreadyRegistered: true}, nil
+	}
+
+	ammAddr, txHash, err := reg.RegisterPair(ctx, symbolA, symbolB, pairID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "on-chain registerPair: %v", err)
+	}
+	return &compliancv1.RegisterPairOnChainResponse{
+		AmmAddress: ammAddr,
+		TxHash:     txHash,
 	}, nil
 }
 

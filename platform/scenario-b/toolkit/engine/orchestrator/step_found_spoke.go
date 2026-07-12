@@ -43,7 +43,8 @@ type SpokeConfig struct {
 	P2PPort             int    // host port -> besu 30303
 	AdvertisedHost      string // externally reachable host for the spoke bundle enode (default host.docker.internal)
 	RelayAdvertisedHost string // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
-	Currency            string // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
+	AdminUsers          []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
+	Currency            string      // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
 	TokenName           string // tCeBM name (default "Tokenized <Currency>")
 	TokenSymbol         string // tCeBM symbol (default "t<Currency>")
 	FiatTokenName       string // fCeBM name (default "Fiat <Currency>")
@@ -138,12 +139,25 @@ func (c *SpokeConfig) WithDefaults() {
 
 func (c SpokeConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
 func (c SpokeConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
+func (c SpokeConfig) caVolume() string       { return c.VolumePrefix + "_cb_tls" }
 
 // scenarioBDir is <repo>/scenario-b (parent of ContractsDir), the docker build
 // context root for the entity's soft service images.
 func (c SpokeConfig) scenarioBDir() string { return filepath.Dir(c.ContractsDir) }
 
 func (c SpokeConfig) keycloakPort() int { return c.RPCPort + 7000 }
+
+// cactiAPIURL is the Cacti relay REST endpoint a backend container uses to reach
+// the (external) relay. The relay runs in its own stack on the fixed port 4000;
+// containers reach it via the advertised host (default host.docker.internal),
+// the same host the relay uses to reach this spoke's published endpoints.
+func (c SpokeConfig) cactiAPIURL() string {
+	host := c.RelayAdvertisedHost
+	if host == "" {
+		host = "host.docker.internal"
+	}
+	return fmt.Sprintf("http://%s:4000", host)
+}
 
 // keycloakContainer matches entity-keycloak.compose.yaml's container_name
 // (${CONTAINER_PREFIX}-${ENTITY}-keycloak).
@@ -157,20 +171,75 @@ const (
 	spokeKeycloakRealm  = "cbweb3"
 	spokeKeycloakClient = "spoke-backend"
 	spokeKeycloakSecret = "spoke-backend-local-secret" // local-only, not a real secret
+	// Central-bank login user seeded into the realm (password grant via the
+	// confidential client). Holds the roles the v2 AMM routes + governance
+	// approve-kyc require. Local-dev credentials only.
+	spokeCBUser = "cb-admin"
+	spokeCBPass = "cb-admin-local"
 )
+
+// spokeCBRoles are the realm roles granted to the CB login user: central_bank
+// (v2 AMM pairs/liquidity/currencies), plus ROLE_GOVERNANCE/ROLE_TREASURY for
+// governance approve-kyc and treasury operations.
+var spokeCBRoles = []string{"central_bank", "ROLE_GOVERNANCE", "ROLE_TREASURY"}
 
 // provisionKeycloakRealm creates the realm + confidential client inside the
 // running Keycloak container via kcadm (idempotent: create failures are ignored).
 func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	kc := "/opt/keycloak/bin/kcadm.sh"
-	script := fmt.Sprintf(
-		"%[1]s config credentials --server http://localhost:8080 --realm master --user %[2]s --password %[3]s && "+
-			"(%[1]s create realms -s realm=%[4]s -s enabled=true || true) && "+
-			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
-			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true)",
-		kc, "admin", "admin", spokeKeycloakRealm, spokeKeycloakClient, spokeKeycloakSecret)
-	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", script)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password admin && ", kc)
+	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || true) && ", kc, spokeKeycloakRealm)
+	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
+		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true) && ",
+		kc, spokeKeycloakRealm, spokeKeycloakClient, spokeKeycloakSecret)
+	// Grant the client's service account the realm-management roles the auth service
+	// needs: GetAdminToken uses client_credentials, and onboarding creates + manages
+	// the commercial bank's Keycloak user (manage-users) + resolves users on login
+	// (view-users). Without this the CB-side credential request 403s at create-user.
+	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
+		"--cclientid realm-management --rolename manage-users --rolename view-users || true) && ",
+		kc, spokeKeycloakRealm, spokeKeycloakClient)
+	// Per-role operator accounts from the manifest (spec.adminUsers). Fall back to a
+	// single default CB admin when the manifest declares none. Each user's manifest
+	// role maps to the realm roles the api-gateway checks (realmRolesForAdminRole).
+	users := c.AdminUsers
+	if len(users) == 0 {
+		users = []AdminUser{{Role: "GOVERNANCE", Username: spokeCBUser, Password: spokeCBPass}}
+	}
+	appendKeycloakUsers(&b, kc, spokeKeycloakRealm, users)
+	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
 	return err
+}
+
+// appendKeycloakUsers appends idempotent kcadm commands that create each admin user
+// (username == email; firstName/lastName/emailVerified are REQUIRED so Keycloak 26's
+// declarative user profile accepts the password grant), set its password, and grant
+// the realm roles mapped from its manifest role. Roles are created idempotently first.
+func appendKeycloakUsers(b *strings.Builder, kc, realm string, users []AdminUser) {
+	seen := map[string]bool{}
+	for _, u := range users {
+		for _, r := range realmRolesForAdminRole(u.Role) {
+			if !seen[r] {
+				seen[r] = true
+				fmt.Fprintf(b, "(%[1]s create roles -r %[2]s -s name=%[3]s || true) && ", kc, realm, r)
+			}
+		}
+	}
+	for _, u := range users {
+		fmt.Fprintf(b, "(%[1]s create users -r %[2]s -s username=%[3]s -s enabled=true "+
+			"-s emailVerified=true -s email=%[3]s -s firstName=%[4]s -s lastName=Operator || true) && ",
+			kc, realm, u.Username, strings.ToLower(u.Role))
+		fmt.Fprintf(b, "(%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || true)", kc, realm, u.Username, u.Password)
+		for _, r := range realmRolesForAdminRole(u.Role) {
+			fmt.Fprintf(b, " && (%[1]s add-roles -r %[2]s --uusername %[3]s --rolename %[4]s || true)", kc, realm, u.Username, r)
+		}
+		fmt.Fprintf(b, " && ")
+	}
+	// Trim the trailing " && " so the command chain is well-formed.
+	s := b.String()
+	b.Reset()
+	b.WriteString(strings.TrimSuffix(s, " && "))
 }
 
 // ComposeEnv returns the spoke's compose-template interpolation vars as process
@@ -214,12 +283,46 @@ func (c SpokeConfig) ComposeEnv() []string {
 		"KC_ADMIN_PASSWORD": "admin",
 		"KC_DB_URL":         "jdbc:postgresql://" + e + "-" + c.Entity + "-postgres:5432/keycloak",
 		"KEYCLOAK_PORT":     itoa(c.RPCPort + 7000),
-		// backend / frontend (api-gateway image shared with the hub; must be pre-built)
-		"GATEWAY_PORT":   itoa(c.RPCPort + 8000),
-		"GATEWAY_URL":    fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
-		"BACKEND_IMAGE":  hubBackendImage,
-		"FRONTEND_IMAGE": spokeFrontendImage,
-		"FRONTEND_PORT":  itoa(c.RPCPort + 9000),
+		// backend / frontend (images shared with the hub; must be pre-built)
+		"GATEWAY_PORT":     itoa(c.RPCPort + 8000),
+		"GATEWAY_URL":      fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
+		"BACKEND_IMAGE":              hubBackendImage,
+		"COMPLIANCE_IMAGE":           hubComplianceImage,
+		"AUTH_IMAGE":                 hubAuthImage,
+		"PAYMENT_ORCHESTRATOR_IMAGE": hubPaymentOrchestratorImage,
+		// CB operator portals (governance/treasury/supervisor). Each SPA bakes the CB
+		// api-gateway URL at build time, so the image is tagged per gateway port. The
+		// NOC portal is deployed by the noc template.
+		"GOVERNANCE_FRONTEND_IMAGE":  cbFrontendImage("governance", c.RPCPort+8000),
+		"GOVERNANCE_FRONTEND_PORT":   itoa(c.RPCPort + 9000),
+		"TREASURY_FRONTEND_IMAGE":    cbFrontendImage("treasury", c.RPCPort+8000),
+		"TREASURY_FRONTEND_PORT":     itoa(c.RPCPort + 13000),
+		"SUPERVISOR_FRONTEND_IMAGE":  cbFrontendImage("supervisor", c.RPCPort+8000),
+		"SUPERVISOR_FRONTEND_PORT":   itoa(c.RPCPort + 14000),
+		// app stack (compliance + auth): the CB is the local signer/deployer, and
+		// the Keycloak realm/client are provisioned by provision-keycloak-spoke.
+		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
+		"CB_PRIVATE_KEY":     devDeployerKey,
+		"KEYCLOAK_REALM":     spokeKeycloakRealm,
+		"KEYCLOAK_CLIENT_ID": spokeKeycloakClient,
+		// CA (scenario-a standard): the CB CA lives in the cb_tls volume, mounted
+		// into compliance at /workspace/backend/config/pki; compliance signs
+		// participant CSRs with it.
+		"CA_VOLUME":      c.caVolume(),
+		"ENTITY_PKI_DIR": "cb_tls", // named volume (holds the generated CA)
+		"CA_CERT_FILE":   "/workspace/backend/config/pki/central-bank.crt",
+		"CA_KEY_FILE":    "/workspace/backend/config/pki/central-bank.key",
+		// Shared secret for the hub-mediated M2M endpoints + cross-currency bridge
+		// delegation (a bank delegates bridge-in lock-mint to its CB; bridge-out to CB-B).
+		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
+		// Cacti relay endpoint: the cross-currency swap orchestrator delegates the
+		// Step 3 bridge-out to the beneficiary CB (CB-B) through it. The relay runs
+		// in its own stack, reached from a container via host.docker.internal.
+		"CACTI_API_URL": c.cactiAPIURL(),
+		// This CB's own spoke id + native tCeBM symbol: the bridge-out receiver
+		// enqueues the W-<target> burn against its spoke (e.g. spoke-ars / tCeBM_ARS).
+		"SPOKE_NETWORK":       c.SpokeID,
+		"NATIVE_ASSET_SYMBOL": "tCeBM_" + c.Currency,
 		// noc (observability — soft)
 		"NOC_AGENT_BESU_RPC": fmt.Sprintf("http://%s-%s-besu:8545", e, c.Entity),
 		"NOC_AGENT_ENTITY":   c.Entity,
@@ -381,9 +484,19 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					return fmt.Errorf("register-currency: POST %s: %w", url, err)
 				}
 				defer resp.Body.Close()
+				body, _ := io.ReadAll(resp.Body)
 				if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-					b, _ := io.ReadAll(resp.Body)
-					return fmt.Errorf("register-currency: hub returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+					return fmt.Errorf("register-currency: hub returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+				}
+				// Capture the sovereign W-token address so the CB gateway can wire
+				// W_TOKEN_ADDRESS (the source→W-token to mint on the hub bridge-in).
+				var out struct {
+					TokenAddress string `json:"token_address"`
+				}
+				if json.Unmarshal(body, &out) == nil && out.TokenAddress != "" {
+					if err := addrs.AppendAddr(c.SpokeEnvFile, "W_TOKEN_ADDRESS", out.TokenAddress); err != nil {
+						return err
+					}
 				}
 				return nil
 			},
@@ -466,11 +579,19 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					return err
 				}
 				for key, addr := range map[string]string{
-					"HUB_IDENTITY_REGISTRY_ADDRESS":  hub.Contracts["identityRegistry"],
-					"HUB_TOKEN_A_ADDRESS":            hub.Contracts["tCeBM_BRL"],
-					"HUB_TOKEN_B_ADDRESS":            hub.Contracts["tCeBM_EUR"],
-					"FX_AGREEMENT_CONTRACT_ADDRESS":  hub.Contracts["fxAgreement"],
-					"PAIR_REGISTRY_CONTRACT_ADDRESS": hub.Contracts["pairRegistry"],
+					"HUB_IDENTITY_REGISTRY_ADDRESS":      hub.Contracts["identityRegistry"],
+					"HUB_TOKEN_A_ADDRESS":                hub.Contracts["tCeBM_BRL"],
+					"HUB_TOKEN_B_ADDRESS":                hub.Contracts["tCeBM_EUR"],
+					"FX_AGREEMENT_CONTRACT_ADDRESS":      hub.Contracts["fxAgreement"],
+					"PAIR_REGISTRY_CONTRACT_ADDRESS":     hub.Contracts["pairRegistry"],
+					"CURRENCY_REGISTRY_CONTRACT_ADDRESS": hub.Contracts["currencyRegistry"],
+					// Enables the api-gateway v2 AMM routes (quote/swap/pairs/liquidity):
+					// without AMM_CONTRACT_ADDRESS the AMM client is nil and the routes
+					// are skipped. The sovereign-pair AMM is resolved at runtime.
+					"AMM_CONTRACT_ADDRESS": hub.Contracts["amm"],
+					// Enables SovereignLiquidityService → the sovereign-add + cross-currency
+					// bridge-in/out endpoints (registerSovereignRoutes gates on it).
+					"LIQUIDITY_COMMIT_REGISTRY_ADDRESS": hub.Contracts["liquidityCommitRegistry"],
 				} {
 					if err := addrs.AppendAddr(c.SpokeEnvFile, key, addr); err != nil {
 						return err
@@ -537,13 +658,52 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				return nil
 			},
 		},
+		{
+			// CB CA (scenario-a standard): seeded into the cb_tls volume, mounted
+			// into compliance for CSR signing. Non-destructive (preserves an
+			// existing CA); volume-only (no host file).
+			Name: "gen-tls-spoke",
+			Check: func(ctx context.Context) (bool, error) {
+				return volumeHasFile(ctx, c.Runner, c.caVolume(), "central-bank.crt"), nil
+			},
+			Run: func(ctx context.Context) error { return genCBCA(ctx, c.Runner, c.caVolume()) },
+		},
 		{Name: "start-spoke-infra", Deps: []string{"render-spoke-env"}, Run: compose("entity-infra")},
-		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke"}, Run: compose("entity-backend")},
+		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke", "gen-tls-spoke"}, Run: compose("entity-backend")},
+		{
+			// Bridge RelayerWorker (CB-only): shares the spoke's Postgres DB with the
+			// api-gateway and drives cross-currency bridge positions LOCKING→ACTIVE by
+			// minting the W-<source> on the hub (hub-only mode). A joining bank has no
+			// relayer — it delegates bridge-in lock-mint to its CB.
+			Name: "start-spoke-relayer",
+			Deps: []string{"start-spoke-backend"},
+			Run: func(ctx context.Context) error {
+				if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), hubPaymentOrchestratorImage,
+					"backend/services/payment-orchestrator/Dockerfile", "backend"); err != nil {
+					return err
+				}
+				return compose("entity-relayer")(ctx)
+			},
+		},
 		{Name: "start-spoke-frontend", Deps: []string{"start-spoke-backend"}, Soft: true, Run: func(ctx context.Context) error {
-			if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), spokeFrontendImage, "frontend/apps/bank/Dockerfile", "frontend"); err != nil {
+			// CB operator portals: governance/treasury/supervisor, each baking this CB's
+			// api-gateway URL (browser reaches it on the host at localhost:<gwPort>).
+			gwPort := c.RPCPort + 8000
+			api := fmt.Sprintf("http://localhost:%d", gwPort)
+			sb := c.scenarioBDir()
+			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("governance", gwPort), "governance",
+				map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
 				return err
 			}
-			return compose("entity-frontend")(ctx)
+			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("treasury", gwPort), "treasury",
+				map[string]string{"VITE_API_BASE_URL": api, "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
+				return err
+			}
+			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("supervisor", gwPort), "supervisor",
+				map[string]string{"VITE_API_BASE_URL": api, "VITE_SPOKE_NAME": c.SpokeID}); err != nil {
+				return err
+			}
+			return compose("cb-frontend")(ctx)
 		}},
 		{
 			Name: "register-relay-spoke",
@@ -627,9 +787,23 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			if privateDockerIP.MatchString(enode) {
 				return fmt.Errorf("spoke bundle enode %q is loopback/docker-internal (unusable cross-stack); set HOST_IP or node.advertisedHost", enode)
 			}
+			// Publish the hub contract addresses + RPC port so a joining bank can run
+			// the same on-chain per-pair AMM resolver (dynamic swap on any corridor).
+			hubForBundle, err := bundle.LoadHub(c.HubBundlePath)
+			if err != nil {
+				return err
+			}
+			hubPort := "8545"
+			if u, perr := url.Parse(c.HubRPC); perr == nil && u.Port() != "" {
+				hubPort = u.Port()
+			}
 			b := bundle.SpokeBundle{
 				SpokeID: c.SpokeID, ChainID: c.SpokeChainID, Enode: enode,
 				SpokeRPC: c.SpokeRPC, SpokeWS: c.SpokeWS, Genesis: string(genesisBytes), Contracts: m,
+				// Container-reachable CB gateway for a joining bank's CENTRAL_BANK_API_URL.
+				CBGateway:    fmt.Sprintf("http://host.docker.internal:%d", c.RPCPort+8000),
+				HubContracts: hubForBundle.Contracts,
+				HubRPCPort:   hubPort,
 			}
 			_, err = bundle.EmitSpoke(b, c.OutDir)
 			return err
