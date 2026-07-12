@@ -328,7 +328,10 @@ func (s *complianceService) RegisterPairOnChain(ctx context.Context, req *compli
 	}
 	pairID := strings.TrimSpace(req.PairId)
 	if pairID == "" {
-		pairID = "W-" + ca + "-" + cb
+		// Convention W-{source}-W-{target} — must match the swap/quote path
+		// (swap_quote_generator builds "W-%s-W-%s"), else the on-chain per-pair
+		// resolver misses the pool.
+		pairID = "W-" + ca + "-W-" + cb
 	}
 	symbolA := "W-tCeBM_" + ca
 	symbolB := "W-tCeBM_" + cb
