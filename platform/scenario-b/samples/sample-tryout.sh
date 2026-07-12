@@ -2,11 +2,13 @@
 #
 # sample-tryout.sh — end-to-end walkthrough of the deployed Scenario B sample via
 # REAL api-gateway REST calls (no portal clicking). Drives the sovereign FX
-# corridor lifecycle and a cross-currency SWAP:
+# corridor lifecycle and a full cross-currency SWAP (bridge-in → AMM → bridge-out):
 #   login (CBs + a commercial bank) → verify registered currencies → open the
 #   BRL↔ARS corridor (the hub deploys the sovereign AMM + registers the pair) →
-#   central bank adds cooperative liquidity → wait pool ACTIVE → the commercial
-#   bank quotes and executes a W-BRL → W-ARS swap on the sovereign pool.
+#   central bank adds cooperative liquidity → wait pool ACTIVE → register the ARS
+#   beneficiary at its CB → the commercial bank runs an end-to-end cross-currency
+#   swap: CB-A relayer mints W-BRL (bridge-in), the sovereign AMM swaps to W-ARS,
+#   and CB-B's relayer burns W-ARS (bridge-out) for the beneficiary.
 #
 # Everything resolves the sovereign AMM DYNAMICALLY per pool_pair from the
 # on-chain PairRegistry, so a corridor opened at runtime works with no config.
@@ -32,9 +34,18 @@ CUR_A="BRL"; CUR_B="ARS"
 POOL="W-${CUR_A}-W-${CUR_B}"                  # pair id convention: W-{source}-W-{target}
 RELAY_SECRET="cbweb3-relay-shared-secret"     # X-Relay-Auth for the hub M2M endpoints
 LIQ="1000000000000000000000"                  # 1000 tokens per side (18 decimals)
-SWAP_OUT="10000000000000000000"               # want 10 W-ARS
-SWAP_MAX_IN="11000000000000000000"            # accept up to 11 W-BRL in
-SWAP_FUND="100000000000000000000"             # 100 W-BRL funded to the bank for the swap
+# Cross-currency swap: exact 5 W-ARS out for the ARS beneficiary, accept up to 6 W-BRL.
+CC_OUT="5000000000000000000"                  # want 5 W-ARS delivered on Spoke-B
+CC_MAX_IN="6000000000000000000"               # accept up to 6 W-BRL in
+
+# ── beneficiary (Argentina) ──────────────────────────────────────────────────────
+# The ARS bank that receives the swapped W-ARS. It must be an ACTIVE participant at
+# its own central bank (CB-B) so the bridge-out can resolve its on-chain address.
+BENEF_BANK="bank-macro"
+# A distinct, valid EVM address for the beneficiary's Spoke-B wallet (must be unique
+# in CB-B's participants table). In hub-only local mode the Spoke-B release is skipped,
+# so any valid distinct address works for the walkthrough.
+BENEF_ADDR="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 # ── output helpers ─────────────────────────────────────────────────────────────
 RED=$'\033[31m'; GREEN=$'\033[32m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; RST=$'\033[0m'
@@ -148,29 +159,46 @@ done
 call GET "$BR_CB/api/v2/amm/pool/$POOL/status" "$BR_TOK"
 ok "pool ACTIVE — reserves A=$(printf '%s' "$BODY" | jget reserve_a) B=$(printf '%s' "$BODY" | jget reserve_b)"
 
-# ═══════════════════════════════ FUND THE BANK ══════════════════════════════════
-# The commercial bank pays W-${CUR_A} into the swap. In production it obtains it by
-# bridging in (lock ${CUR_A} on its spoke → mint W-${CUR_A} on the hub via its CB).
-# In this AMM-focused sample the issuing CB mints W-${CUR_A} to the swapper and
-# approves the pool's AMM, standing in for the bridge-in leg.
-step "Fund bank-itau with W-${CUR_A} for the swap (stands in for bridge-in)"
-call POST "$BR_CB/api/v2/amm/token/mint-and-approve" "$BR_TOK" \
-  "{\"pool_pair\":\"$POOL\",\"amount\":\"$SWAP_FUND\",\"side\":\"A\"}"
-ok "funded + approved $SWAP_FUND W-${CUR_A}"
+# ═══════════════════════════ REGISTER THE BENEFICIARY ═══════════════════════════
+# The cross-currency swap delivers W-${CUR_B} to an ARS bank. CB-B (Argentina) is the
+# sovereign authority for its member banks: it must know the beneficiary's on-chain
+# address, so the beneficiary is an ACTIVE participant in CB-B's registry. In a full
+# deployment this comes from onboarding (initiate → approve-kyc); here the CB registers
+# it directly. Idempotent: a duplicate (already registered) is tolerated.
+step "Register the beneficiary ${BENEF_BANK} as an ACTIVE participant at the Argentina CB"
+try POST "$AR_CB/api/v1/governance/participants" "$AR_TOK" \
+  "{\"user_id\":\"$BENEF_BANK\",\"role\":\"ROLE_COMMERCIAL_BANK\",\"bank_code\":\"$BENEF_BANK\",\"institution_name\":\"$BENEF_BANK\",\"country_code\":\"${CUR_B:0:2}\",\"wallet_address\":\"$BENEF_ADDR\",\"status\":\"ACTIVE\"}"
+if [[ $CODE -ge 200 && $CODE -lt 300 ]]; then
+  ok "$BENEF_BANK registered ACTIVE at the Argentina CB"
+elif [[ $CODE -eq 500 && $BODY == *"duplicate"* ]] || [[ $CODE -eq 409 ]]; then
+  ok "$BENEF_BANK already registered at the Argentina CB — continuing"
+else
+  die "HTTP $CODE registering $BENEF_BANK: $BODY"
+fi
 
-# ═══════════════════════════════ QUOTE + SWAP ═══════════════════════════════════
-step "bank-itau quotes ${CUR_A} → ${CUR_B} (exact output $SWAP_OUT W-${CUR_B})"
-call GET "$ITAU/api/v2/amm/quote/cross-currency?source_currency=${CUR_A}&target_currency=${CUR_B}&amount_out=${SWAP_OUT}&max_slippage_pct=0.05" "$ITAU_TOK"
-QIN=$(printf '%s' "$BODY" | jget amount_in)
-ok "quote: pay $QIN W-${CUR_A} for $SWAP_OUT W-${CUR_B} (rate=$(printf '%s' "$BODY" | jget effective_rate))"
+# ═══════════════════════════ CROSS-CURRENCY SWAP (BRIDGE) ════════════════════════
+# The full lifecycle, orchestrated by bank-itau's gateway:
+#   Step 1 Bridge-In  — delegated to CB-A; CB-A's relayer mints W-${CUR_A} on the hub.
+#   Step 2 AMM Swap   — W-${CUR_A} → W-${CUR_B} on the sovereign pool.
+#   Step 3 Bridge-Out — via the Cacti relay to CB-B; CB-B's relayer burns W-${CUR_B}
+#                       and releases to the beneficiary on Spoke-B (release skipped in
+#                       hub-only local mode).
+step "bank-itau quotes ${CUR_A} → ${CUR_B} (exact output $CC_OUT W-${CUR_B})"
+call GET "$ITAU/api/v2/amm/quote/cross-currency?source_currency=${CUR_A}&target_currency=${CUR_B}&amount_out=${CC_OUT}&max_slippage_pct=0.05" "$ITAU_TOK"
+ok "quote: pay $(printf '%s' "$BODY" | jget amount_in) W-${CUR_A} for $CC_OUT W-${CUR_B} (rate=$(printf '%s' "$BODY" | jget effective_rate))"
 
-step "bank-itau executes the swap on the sovereign pool"
-call POST "$ITAU/api/v2/amm/swap/exact-output" "$ITAU_TOK" \
-  "{\"pair\":\"$POOL\",\"amount_out\":\"$SWAP_OUT\",\"max_amount_in\":\"$SWAP_MAX_IN\",\"payer_id\":\"bank-itau\",\"beneficiary_id\":\"bank-itau\"}"
-ok "swap $(printf '%s' "$BODY" | jget state): amount_in=$(printf '%s' "$BODY" | jget amount_in) tx=$(printf '%s' "$BODY" | jget tx_hash)"
+step "bank-itau executes the end-to-end cross-currency swap (bridge-in → swap → bridge-out)"
+call POST "$ITAU/api/v2/amm/swap/cross-currency" "$ITAU_TOK" \
+  "{\"source_currency\":\"$CUR_A\",\"target_currency\":\"$CUR_B\",\"pool_pair\":\"$POOL\",\"amount_out\":\"$CC_OUT\",\"max_amount_in\":\"$CC_MAX_IN\",\"beneficiary_bank_id\":\"$BENEF_BANK\"}"
+SWAP_STATUS=$(printf '%s' "$BODY" | jget status)
+[[ $SWAP_STATUS == COMPLETED ]] || die "cross-currency swap not COMPLETED (status=$SWAP_STATUS): $BODY"
+ok "swap COMPLETED: in=$(printf '%s' "$BODY" | jget amount_in) out=$(printf '%s' "$BODY" | jget amount_out)"
+ok "  bridge-in position=$(printf '%s' "$BODY" | jget bridge_in_position_id)"
+ok "  hub AMM swap tx=$(printf '%s' "$BODY" | jget swap_tx_hash)"
+ok "  bridge-out position=$(printf '%s' "$BODY" | jget bridge_out_position_id)"
 
 step "Confirm the pool reserves moved (constant-product swap)"
 call GET "$BR_CB/api/v2/amm/pool/$POOL/status" "$BR_TOK"
 ok "reserves now A=$(printf '%s' "$BODY" | jget reserve_a) B=$(printf '%s' "$BODY" | jget reserve_b)"
 
-printf '\n%s✓ tryout complete — %s corridor opened via the hub, liquidity seeded, and a cross-currency swap settled on the sovereign AMM%s\n' "$GREEN$BOLD" "$POOL" "$RST"
+printf '\n%s✓ tryout complete — %s corridor opened via the hub, liquidity seeded, and an end-to-end cross-currency swap (bridge-in → AMM → bridge-out) settled across both sovereign networks%s\n' "$GREEN$BOLD" "$POOL" "$RST"
