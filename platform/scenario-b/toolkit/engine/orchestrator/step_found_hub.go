@@ -115,6 +115,7 @@ const (
 	hubNocAgentImage   = "cbweb3b/noc-agent:local"
 	hubNocPortalImage  = "cbweb3b/noc-portal:local"
 	hubComplianceImage = "cbweb3b/compliance:local"
+	hubAuthImage       = "cbweb3b/auth:local"
 
 	// hubRelayAuthSecret guards the hub's internal spoke self-registration
 	// endpoint (X-Relay-Auth); local-dev value, shared with the toolkit caller.
@@ -382,10 +383,16 @@ func FoundHubSteps(c HubConfig) []Step {
 				if err := c.buildImage(ctx, hubComplianceImage, "backend/services/compliance/Dockerfile", "backend"); err != nil {
 					return err
 				}
+				// Build the auth image here too (shared): the hub does not run auth,
+				// but every spoke/bank backend does, and images are built once on the
+				// hub host before spokes/banks start.
+				if err := c.buildImage(ctx, hubAuthImage, "backend/services/auth/Dockerfile", "backend"); err != nil {
+					return err
+				}
 				return compose("entity-compliance")(ctx)
 			},
 		},
-		{Name: "start-hub-backend", Deps: []string{"start-hub-infra", "render-hub-env", "provision-keycloak-hub", "build-hub-backend-image", "start-hub-compliance"}, Run: compose("entity-backend")},
+		{Name: "start-hub-backend", Deps: []string{"start-hub-infra", "render-hub-env", "provision-keycloak-hub", "build-hub-backend-image", "start-hub-compliance"}, Run: compose("hub-backend")},
 		// UI / relay / NOC are SOFT (non-fatal): they build heavier Node/React
 		// images on demand; a build/start failure never blocks the hub's
 		// operational core (besu + contracts + infra + keycloak + backend).
@@ -466,6 +473,11 @@ func hubContractMap(broadcastPath string) (map[string]string, error) {
 			out["currencyRegistry"] = d.Address
 		case "ManualOracle":
 			out["manualOracle"] = d.Address
+		case "AutomatedMarketMaker":
+			// The hub AMM (default tCeBM_BRL/EUR pair). Propagated so a spoke can
+			// wire AMM_CONTRACT_ADDRESS into its api-gateway (v2 AMM routes) and
+			// serve as the base for the sovereign-pair AMM opened at runtime.
+			out["amm"] = d.Address
 		}
 	}
 	return out, nil

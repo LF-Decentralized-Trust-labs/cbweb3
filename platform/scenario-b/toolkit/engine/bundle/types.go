@@ -25,4 +25,8 @@ type SpokeBundle struct {
 	SpokeWS   string            `yaml:"spokeWs" json:"spokeWs"`
 	Genesis   string            `yaml:"genesis" json:"genesis"` // genesis.json contents (network config)
 	Contracts map[string]string `yaml:"contracts" json:"contracts"`
+	// CBGateway is the founding CB's api-gateway URL (host.docker.internal form),
+	// used by a joining bank as CENTRAL_BANK_API_URL to resolve the sovereign AMM
+	// + pool status from its CB (the bank holds no hub contract addresses).
+	CBGateway string `yaml:"cbGateway,omitempty" json:"cbGateway,omitempty"`
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/addrs"
@@ -101,6 +102,7 @@ func (c *JoinConfig) WithDefaults() {
 }
 
 func (c JoinConfig) genesisVolume() string { return c.VolumePrefix + "_genesis" }
+func (c JoinConfig) caVolume() string      { return c.VolumePrefix + "_cb_tls" }
 func (c JoinConfig) keycloakPort() int     { return c.RPCPort + 7000 }
 
 // keycloakContainer matches entity-keycloak.compose.yaml's container_name.
@@ -113,19 +115,39 @@ const (
 	bankKeycloakRealm  = "cbweb3"
 	bankKeycloakClient = "bank-backend"
 	bankKeycloakSecret = "bank-backend-local-secret" // local-only, not a real secret
+	// Commercial-bank login user seeded into the realm. Holds commercial_bank,
+	// the role the v2 AMM swap routes require. Local-dev credentials only.
+	bankUser = "bank-admin"
+	bankPass = "bank-admin-local"
 )
+
+// bankRoles are the realm roles granted to the bank login user: commercial_bank
+// (v2 AMM swap/quote) plus ROLE_COMMERCIAL_BANK for the v1 onboarding path.
+var bankRoles = []string{"commercial_bank", "ROLE_COMMERCIAL_BANK"}
 
 // provisionKeycloakRealm creates the realm + confidential client via kcadm
 // (idempotent: create failures are ignored).
 func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 	kc := "/opt/keycloak/bin/kcadm.sh"
-	script := fmt.Sprintf(
-		"%[1]s config credentials --server http://localhost:8080 --realm master --user %[2]s --password %[3]s && "+
-			"(%[1]s create realms -s realm=%[4]s -s enabled=true || true) && "+
-			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
-			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true)",
-		kc, "admin", "admin", bankKeycloakRealm, bankKeycloakClient, bankKeycloakSecret)
-	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", script)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password admin && ", kc)
+	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || true) && ", kc, bankKeycloakRealm)
+	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
+		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true) && ",
+		kc, bankKeycloakRealm, bankKeycloakClient, bankKeycloakSecret)
+	for _, r := range bankRoles {
+		fmt.Fprintf(&b, "(%[1]s create roles -r %[2]s -s name=%[3]s || true) && ", kc, bankKeycloakRealm, r)
+	}
+	// email/firstName/lastName + emailVerified are REQUIRED (Keycloak 26 declarative
+	// user profile rejects a password grant for an incomplete profile).
+	fmt.Fprintf(&b, "(%[1]s create users -r %[2]s -s username=%[3]s -s enabled=true "+
+		"-s emailVerified=true -s email=%[3]s@bank.local -s firstName=Bank -s lastName=Admin || true) && ",
+		kc, bankKeycloakRealm, bankUser)
+	fmt.Fprintf(&b, "(%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || true)", kc, bankKeycloakRealm, bankUser, bankPass)
+	for _, r := range bankRoles {
+		fmt.Fprintf(&b, " && (%[1]s add-roles -r %[2]s --uusername %[3]s --rolename %[4]s || true)", kc, bankKeycloakRealm, bankUser, r)
+	}
+	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
 	return err
 }
 
@@ -175,12 +197,29 @@ func (c JoinConfig) ComposeEnv() []string {
 		"KC_ADMIN_PASSWORD": "admin",
 		"KC_DB_URL":         "jdbc:postgresql://" + e + "-" + c.Entity + "-postgres:5432/keycloak",
 		"KEYCLOAK_PORT":     itoa(c.keycloakPort()),
-		// backend / frontend (api-gateway image shared; must be pre-built)
-		"GATEWAY_PORT":   itoa(c.RPCPort + 8000),
-		"GATEWAY_URL":    c.GatewayURL,
-		"BACKEND_IMAGE":  hubBackendImage,
-		"FRONTEND_IMAGE": spokeFrontendImage,
-		"FRONTEND_PORT":  itoa(c.RPCPort + 9000),
+		// backend / frontend (images shared with the hub; must be pre-built)
+		"GATEWAY_PORT":     itoa(c.RPCPort + 8000),
+		"GATEWAY_URL":      c.GatewayURL,
+		"BACKEND_IMAGE":    hubBackendImage,
+		"COMPLIANCE_IMAGE": hubComplianceImage,
+		"AUTH_IMAGE":       hubAuthImage,
+		"FRONTEND_IMAGE":   spokeFrontendImage,
+		"FRONTEND_PORT":    itoa(c.RPCPort + 9000),
+		// app stack (compliance + auth): the bank is the local signer; the Keycloak
+		// realm/client are provisioned by provision-keycloak-bank.
+		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
+		"CB_PRIVATE_KEY":     devDeployerKey,
+		"KEYCLOAK_REALM":     bankKeycloakRealm,
+		"KEYCLOAK_CLIENT_ID": bankKeycloakClient,
+		// CA (scenario-a commercial-bank strategy): the bank has NO CA (only the CB
+		// CA signs). Compliance mounts the bank's own host pki dir (its gen-csr
+		// key/csr) and runs in dev mode (CA_CERT_FILE empty). CA_VOLUME is still set
+		// so the template's cb_tls volume decl interpolates, but it stays
+		// uninstantiated (ENTITY_PKI_DIR is a host bind, not the named volume).
+		"CA_VOLUME":      c.caVolume(),
+		"ENTITY_PKI_DIR": c.pkiDir(),
+		// Commercial banks resolve the sovereign AMM from their CB gateway.
+		"CENTRAL_BANK_API_URL": b.CBGateway,
 	}
 	env := make([]string, 0, len(vars))
 	for k, v := range vars {
@@ -344,7 +383,10 @@ func JoinSteps(c JoinConfig) []Step {
 			},
 		},
 		{Name: "start-bank-infra", Deps: []string{"wait-sync"}, Run: compose("entity-infra")},
-		{Name: "start-bank-backend", Deps: []string{"start-bank-infra", "wire-addresses", "provision-keycloak-bank"}, Run: compose("entity-backend")},
+		// Deps gen-csr so the host pki dir exists (host-owned) BEFORE compliance
+		// bind-mounts it; otherwise Docker auto-creates it root-owned and gen-csr
+		// later fails to write (the known join gen-csr permission bug).
+		{Name: "start-bank-backend", Deps: []string{"start-bank-infra", "wire-addresses", "provision-keycloak-bank", "gen-csr"}, Run: compose("entity-backend")},
 		{Name: "start-bank-frontend", Deps: []string{"start-bank-backend"}, Soft: true, Run: func(ctx context.Context) error {
 			if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), spokeFrontendImage, "frontend/apps/bank/Dockerfile", "frontend"); err != nil {
 				return err

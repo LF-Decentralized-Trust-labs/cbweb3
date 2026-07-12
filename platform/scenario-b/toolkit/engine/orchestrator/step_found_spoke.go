@@ -138,6 +138,7 @@ func (c *SpokeConfig) WithDefaults() {
 
 func (c SpokeConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
 func (c SpokeConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
+func (c SpokeConfig) caVolume() string       { return c.VolumePrefix + "_cb_tls" }
 
 // scenarioBDir is <repo>/scenario-b (parent of ContractsDir), the docker build
 // context root for the entity's soft service images.
@@ -157,19 +158,43 @@ const (
 	spokeKeycloakRealm  = "cbweb3"
 	spokeKeycloakClient = "spoke-backend"
 	spokeKeycloakSecret = "spoke-backend-local-secret" // local-only, not a real secret
+	// Central-bank login user seeded into the realm (password grant via the
+	// confidential client). Holds the roles the v2 AMM routes + governance
+	// approve-kyc require. Local-dev credentials only.
+	spokeCBUser = "cb-admin"
+	spokeCBPass = "cb-admin-local"
 )
+
+// spokeCBRoles are the realm roles granted to the CB login user: central_bank
+// (v2 AMM pairs/liquidity/currencies), plus ROLE_GOVERNANCE/ROLE_TREASURY for
+// governance approve-kyc and treasury operations.
+var spokeCBRoles = []string{"central_bank", "ROLE_GOVERNANCE", "ROLE_TREASURY"}
 
 // provisionKeycloakRealm creates the realm + confidential client inside the
 // running Keycloak container via kcadm (idempotent: create failures are ignored).
 func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	kc := "/opt/keycloak/bin/kcadm.sh"
-	script := fmt.Sprintf(
-		"%[1]s config credentials --server http://localhost:8080 --realm master --user %[2]s --password %[3]s && "+
-			"(%[1]s create realms -s realm=%[4]s -s enabled=true || true) && "+
-			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
-			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true)",
-		kc, "admin", "admin", spokeKeycloakRealm, spokeKeycloakClient, spokeKeycloakSecret)
-	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", script)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password admin && ", kc)
+	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || true) && ", kc, spokeKeycloakRealm)
+	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
+		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true) && ",
+		kc, spokeKeycloakRealm, spokeKeycloakClient, spokeKeycloakSecret)
+	// Realm roles the api-gateway checks (created idempotently).
+	for _, r := range spokeCBRoles {
+		fmt.Fprintf(&b, "(%[1]s create roles -r %[2]s -s name=%[3]s || true) && ", kc, spokeKeycloakRealm, r)
+	}
+	// CB login user + password + role grants. email/firstName/lastName +
+	// emailVerified are REQUIRED: Keycloak 26's declarative user profile rejects a
+	// password grant for an incomplete profile ("Account is not fully set up").
+	fmt.Fprintf(&b, "(%[1]s create users -r %[2]s -s username=%[3]s -s enabled=true "+
+		"-s emailVerified=true -s email=%[3]s@cb.local -s firstName=CentralBank -s lastName=Admin || true) && ",
+		kc, spokeKeycloakRealm, spokeCBUser)
+	fmt.Fprintf(&b, "(%[1]s set-password -r %[2]s --username %[3]s --new-password %[4]s || true)", kc, spokeKeycloakRealm, spokeCBUser, spokeCBPass)
+	for _, r := range spokeCBRoles {
+		fmt.Fprintf(&b, " && (%[1]s add-roles -r %[2]s --uusername %[3]s --rolename %[4]s || true)", kc, spokeKeycloakRealm, spokeCBUser, r)
+	}
+	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
 	return err
 }
 
@@ -214,12 +239,27 @@ func (c SpokeConfig) ComposeEnv() []string {
 		"KC_ADMIN_PASSWORD": "admin",
 		"KC_DB_URL":         "jdbc:postgresql://" + e + "-" + c.Entity + "-postgres:5432/keycloak",
 		"KEYCLOAK_PORT":     itoa(c.RPCPort + 7000),
-		// backend / frontend (api-gateway image shared with the hub; must be pre-built)
-		"GATEWAY_PORT":   itoa(c.RPCPort + 8000),
-		"GATEWAY_URL":    fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
-		"BACKEND_IMAGE":  hubBackendImage,
-		"FRONTEND_IMAGE": spokeFrontendImage,
-		"FRONTEND_PORT":  itoa(c.RPCPort + 9000),
+		// backend / frontend (images shared with the hub; must be pre-built)
+		"GATEWAY_PORT":     itoa(c.RPCPort + 8000),
+		"GATEWAY_URL":      fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
+		"BACKEND_IMAGE":    hubBackendImage,
+		"COMPLIANCE_IMAGE": hubComplianceImage,
+		"AUTH_IMAGE":       hubAuthImage,
+		"FRONTEND_IMAGE":   spokeFrontendImage,
+		"FRONTEND_PORT":    itoa(c.RPCPort + 9000),
+		// app stack (compliance + auth): the CB is the local signer/deployer, and
+		// the Keycloak realm/client are provisioned by provision-keycloak-spoke.
+		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
+		"CB_PRIVATE_KEY":     devDeployerKey,
+		"KEYCLOAK_REALM":     spokeKeycloakRealm,
+		"KEYCLOAK_CLIENT_ID": spokeKeycloakClient,
+		// CA (scenario-a standard): the CB CA lives in the cb_tls volume, mounted
+		// into compliance at /workspace/backend/config/pki; compliance signs
+		// participant CSRs with it.
+		"CA_VOLUME":      c.caVolume(),
+		"ENTITY_PKI_DIR": "cb_tls", // named volume (holds the generated CA)
+		"CA_CERT_FILE":   "/workspace/backend/config/pki/central-bank.crt",
+		"CA_KEY_FILE":    "/workspace/backend/config/pki/central-bank.key",
 		// noc (observability — soft)
 		"NOC_AGENT_BESU_RPC": fmt.Sprintf("http://%s-%s-besu:8545", e, c.Entity),
 		"NOC_AGENT_ENTITY":   c.Entity,
@@ -466,11 +506,16 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					return err
 				}
 				for key, addr := range map[string]string{
-					"HUB_IDENTITY_REGISTRY_ADDRESS":  hub.Contracts["identityRegistry"],
-					"HUB_TOKEN_A_ADDRESS":            hub.Contracts["tCeBM_BRL"],
-					"HUB_TOKEN_B_ADDRESS":            hub.Contracts["tCeBM_EUR"],
-					"FX_AGREEMENT_CONTRACT_ADDRESS":  hub.Contracts["fxAgreement"],
-					"PAIR_REGISTRY_CONTRACT_ADDRESS": hub.Contracts["pairRegistry"],
+					"HUB_IDENTITY_REGISTRY_ADDRESS":      hub.Contracts["identityRegistry"],
+					"HUB_TOKEN_A_ADDRESS":                hub.Contracts["tCeBM_BRL"],
+					"HUB_TOKEN_B_ADDRESS":                hub.Contracts["tCeBM_EUR"],
+					"FX_AGREEMENT_CONTRACT_ADDRESS":      hub.Contracts["fxAgreement"],
+					"PAIR_REGISTRY_CONTRACT_ADDRESS":     hub.Contracts["pairRegistry"],
+					"CURRENCY_REGISTRY_CONTRACT_ADDRESS": hub.Contracts["currencyRegistry"],
+					// Enables the api-gateway v2 AMM routes (quote/swap/pairs/liquidity):
+					// without AMM_CONTRACT_ADDRESS the AMM client is nil and the routes
+					// are skipped. The sovereign-pair AMM is resolved at runtime.
+					"AMM_CONTRACT_ADDRESS": hub.Contracts["amm"],
 				} {
 					if err := addrs.AppendAddr(c.SpokeEnvFile, key, addr); err != nil {
 						return err
@@ -537,8 +582,18 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				return nil
 			},
 		},
+		{
+			// CB CA (scenario-a standard): seeded into the cb_tls volume, mounted
+			// into compliance for CSR signing. Non-destructive (preserves an
+			// existing CA); volume-only (no host file).
+			Name: "gen-tls-spoke",
+			Check: func(ctx context.Context) (bool, error) {
+				return volumeHasFile(ctx, c.Runner, c.caVolume(), "central-bank.crt"), nil
+			},
+			Run: func(ctx context.Context) error { return genCBCA(ctx, c.Runner, c.caVolume()) },
+		},
 		{Name: "start-spoke-infra", Deps: []string{"render-spoke-env"}, Run: compose("entity-infra")},
-		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke"}, Run: compose("entity-backend")},
+		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke", "gen-tls-spoke"}, Run: compose("entity-backend")},
 		{Name: "start-spoke-frontend", Deps: []string{"start-spoke-backend"}, Soft: true, Run: func(ctx context.Context) error {
 			if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), spokeFrontendImage, "frontend/apps/bank/Dockerfile", "frontend"); err != nil {
 				return err
@@ -630,6 +685,8 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			b := bundle.SpokeBundle{
 				SpokeID: c.SpokeID, ChainID: c.SpokeChainID, Enode: enode,
 				SpokeRPC: c.SpokeRPC, SpokeWS: c.SpokeWS, Genesis: string(genesisBytes), Contracts: m,
+				// Container-reachable CB gateway for a joining bank's CENTRAL_BANK_API_URL.
+				CBGateway: fmt.Sprintf("http://host.docker.internal:%d", c.RPCPort+8000),
 			}
 			_, err = bundle.EmitSpoke(b, c.OutDir)
 			return err
