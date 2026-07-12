@@ -309,6 +309,50 @@ func (s *complianceService) RegisterCurrencyOnChain(ctx context.Context, req *co
 	}, nil
 }
 
+// pairRegistrar is the subset of the live Besu client used for sovereign-pair
+// registration (deploy AMM + proposePair + confirmPair). Satisfied by the
+// concrete *registry.BesuClient but not the noop client.
+type pairRegistrar interface {
+	RegisterPair(ctx context.Context, symbolA, symbolB, pairID string) (ammAddr string, txHash string, err error)
+	IsPairRegistered(ctx context.Context, pairID string) (bool, error)
+}
+
+// RegisterPairOnChain deploys the sovereign-pair AMM over the two already-
+// registered W-tokens and registers the pair (proposePair + confirmPair) via the
+// hub compliance signer. Idempotent by pair id. Mirrors RegisterCurrencyOnChain.
+func (s *complianceService) RegisterPairOnChain(ctx context.Context, req *compliancv1.RegisterPairOnChainRequest) (*compliancv1.RegisterPairOnChainResponse, error) {
+	ca := strings.TrimSpace(req.CurrencyA)
+	cb := strings.TrimSpace(req.CurrencyB)
+	if ca == "" || cb == "" {
+		return nil, status.Error(codes.InvalidArgument, "currency_a and currency_b are required")
+	}
+	pairID := strings.TrimSpace(req.PairId)
+	if pairID == "" {
+		pairID = "W-" + ca + "-" + cb
+	}
+	symbolA := "W-tCeBM_" + ca
+	symbolB := "W-tCeBM_" + cb
+
+	reg, ok := s.blockchain.(pairRegistrar)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "pair registration is not available (no on-chain signer configured)")
+	}
+
+	// Idempotent: skip when the pair already exists on-chain.
+	if already, err := reg.IsPairRegistered(ctx, pairID); err == nil && already {
+		return &compliancv1.RegisterPairOnChainResponse{AlreadyRegistered: true}, nil
+	}
+
+	ammAddr, txHash, err := reg.RegisterPair(ctx, symbolA, symbolB, pairID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "on-chain registerPair: %v", err)
+	}
+	return &compliancv1.RegisterPairOnChainResponse{
+		AmmAddress: ammAddr,
+		TxHash:     txHash,
+	}, nil
+}
+
 // SignParticipantCSR signs a PKCS#10 CSR submitted by a participant, updates
 // only the certificate fields in the participant record, and (best-effort)
 // registers on the blockchain using the wallet address set during onboarding.

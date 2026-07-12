@@ -183,6 +183,22 @@ func (a *GRPCAdapter) RegisterCurrencyOnChain(ctx context.Context, currency, cbA
 	return resp.Symbol, resp.TokenAddress, resp.AlreadyRegistered, resp.TxHash, nil
 }
 
+// RegisterPairOnChain asks the hub compliance service to deploy the sovereign-
+// pair AMM over two already-registered W-tokens and register the pair
+// (proposePair + confirmPair). Returns the deployed AMM address (empty when
+// already registered), the already-registered flag, and the last tx hash.
+func (a *GRPCAdapter) RegisterPairOnChain(ctx context.Context, currencyA, currencyB, pairID string) (ammAddr string, alreadyRegistered bool, txHash string, err error) {
+	resp, err := a.cc.RegisterPairOnChain(ctx, &compliancv1.RegisterPairOnChainRequest{
+		CurrencyA: currencyA,
+		CurrencyB: currencyB,
+		PairId:    pairID,
+	})
+	if err != nil {
+		return "", false, "", err
+	}
+	return resp.AmmAddress, resp.AlreadyRegistered, resp.TxHash, nil
+}
+
 // SignParticipantCSR submits a PKCS#10 CSR to the compliance-orchestrator for
 // signing by the CA. The participant record is created/updated automatically.
 func (a *GRPCAdapter) SignParticipantCSR(ctx context.Context, csrPEM, userID, role, institutionName, legal_entity_id string) (SignedCSRResult, error) {

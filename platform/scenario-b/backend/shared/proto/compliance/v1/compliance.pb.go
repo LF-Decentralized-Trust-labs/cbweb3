@@ -1415,6 +1415,129 @@ func (x *RegisterCurrencyOnChainResponse) GetTxHash() string {
 	return ""
 }
 
+// RegisterPairOnChain deploys the sovereign-pair AMM over the two already-
+// registered W-tokens and registers the pair (proposePair + confirmPair) via the
+// hub compliance signer. The CBs never touch the hub chain. Idempotent by pair id.
+type RegisterPairOnChainRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CurrencyA     string                 `protobuf:"bytes,1,opt,name=currency_a,json=currencyA,proto3" json:"currency_a,omitempty"` // e.g. "BRL" (resolves symbol "W-tCeBM_BRL")
+	CurrencyB     string                 `protobuf:"bytes,2,opt,name=currency_b,json=currencyB,proto3" json:"currency_b,omitempty"` // e.g. "ARS"
+	PairId        string                 `protobuf:"bytes,3,opt,name=pair_id,json=pairId,proto3" json:"pair_id,omitempty"`          // e.g. "W-BRL-ARS"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterPairOnChainRequest) Reset() {
+	*x = RegisterPairOnChainRequest{}
+	mi := &file_compliance_v1_compliance_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterPairOnChainRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterPairOnChainRequest) ProtoMessage() {}
+
+func (x *RegisterPairOnChainRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_compliance_v1_compliance_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterPairOnChainRequest.ProtoReflect.Descriptor instead.
+func (*RegisterPairOnChainRequest) Descriptor() ([]byte, []int) {
+	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *RegisterPairOnChainRequest) GetCurrencyA() string {
+	if x != nil {
+		return x.CurrencyA
+	}
+	return ""
+}
+
+func (x *RegisterPairOnChainRequest) GetCurrencyB() string {
+	if x != nil {
+		return x.CurrencyB
+	}
+	return ""
+}
+
+func (x *RegisterPairOnChainRequest) GetPairId() string {
+	if x != nil {
+		return x.PairId
+	}
+	return ""
+}
+
+type RegisterPairOnChainResponse struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	AmmAddress        string                 `protobuf:"bytes,1,opt,name=amm_address,json=ammAddress,proto3" json:"amm_address,omitempty"` // deployed sovereign-pair AMM (empty when already registered)
+	AlreadyRegistered bool                   `protobuf:"varint,2,opt,name=already_registered,json=alreadyRegistered,proto3" json:"already_registered,omitempty"`
+	TxHash            string                 `protobuf:"bytes,3,opt,name=tx_hash,json=txHash,proto3" json:"tx_hash,omitempty"` // last on-chain tx hash
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *RegisterPairOnChainResponse) Reset() {
+	*x = RegisterPairOnChainResponse{}
+	mi := &file_compliance_v1_compliance_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterPairOnChainResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterPairOnChainResponse) ProtoMessage() {}
+
+func (x *RegisterPairOnChainResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_compliance_v1_compliance_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterPairOnChainResponse.ProtoReflect.Descriptor instead.
+func (*RegisterPairOnChainResponse) Descriptor() ([]byte, []int) {
+	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *RegisterPairOnChainResponse) GetAmmAddress() string {
+	if x != nil {
+		return x.AmmAddress
+	}
+	return ""
+}
+
+func (x *RegisterPairOnChainResponse) GetAlreadyRegistered() bool {
+	if x != nil {
+		return x.AlreadyRegistered
+	}
+	return false
+}
+
+func (x *RegisterPairOnChainResponse) GetTxHash() string {
+	if x != nil {
+		return x.TxHash
+	}
+	return ""
+}
+
 type ApproveKYCRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Subject       string                 `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`                               // Keycloak user ID
@@ -1426,7 +1549,7 @@ type ApproveKYCRequest struct {
 
 func (x *ApproveKYCRequest) Reset() {
 	*x = ApproveKYCRequest{}
-	mi := &file_compliance_v1_compliance_proto_msgTypes[21]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1438,7 +1561,7 @@ func (x *ApproveKYCRequest) String() string {
 func (*ApproveKYCRequest) ProtoMessage() {}
 
 func (x *ApproveKYCRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_compliance_v1_compliance_proto_msgTypes[21]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1451,7 +1574,7 @@ func (x *ApproveKYCRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveKYCRequest.ProtoReflect.Descriptor instead.
 func (*ApproveKYCRequest) Descriptor() ([]byte, []int) {
-	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{21}
+	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ApproveKYCRequest) GetSubject() string {
@@ -1489,7 +1612,7 @@ type ApproveKYCResponse struct {
 
 func (x *ApproveKYCResponse) Reset() {
 	*x = ApproveKYCResponse{}
-	mi := &file_compliance_v1_compliance_proto_msgTypes[22]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1501,7 +1624,7 @@ func (x *ApproveKYCResponse) String() string {
 func (*ApproveKYCResponse) ProtoMessage() {}
 
 func (x *ApproveKYCResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_compliance_v1_compliance_proto_msgTypes[22]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1514,7 +1637,7 @@ func (x *ApproveKYCResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveKYCResponse.ProtoReflect.Descriptor instead.
 func (*ApproveKYCResponse) Descriptor() ([]byte, []int) {
-	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{22}
+	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ApproveKYCResponse) GetSubject() string {
@@ -1556,7 +1679,7 @@ type ManageParticipantStatusRequest struct {
 
 func (x *ManageParticipantStatusRequest) Reset() {
 	*x = ManageParticipantStatusRequest{}
-	mi := &file_compliance_v1_compliance_proto_msgTypes[23]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1568,7 +1691,7 @@ func (x *ManageParticipantStatusRequest) String() string {
 func (*ManageParticipantStatusRequest) ProtoMessage() {}
 
 func (x *ManageParticipantStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_compliance_v1_compliance_proto_msgTypes[23]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1581,7 +1704,7 @@ func (x *ManageParticipantStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManageParticipantStatusRequest.ProtoReflect.Descriptor instead.
 func (*ManageParticipantStatusRequest) Descriptor() ([]byte, []int) {
-	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{23}
+	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ManageParticipantStatusRequest) GetSubject() string {
@@ -1615,7 +1738,7 @@ type ManageParticipantStatusResponse struct {
 
 func (x *ManageParticipantStatusResponse) Reset() {
 	*x = ManageParticipantStatusResponse{}
-	mi := &file_compliance_v1_compliance_proto_msgTypes[24]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1627,7 +1750,7 @@ func (x *ManageParticipantStatusResponse) String() string {
 func (*ManageParticipantStatusResponse) ProtoMessage() {}
 
 func (x *ManageParticipantStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_compliance_v1_compliance_proto_msgTypes[24]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1640,7 +1763,7 @@ func (x *ManageParticipantStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManageParticipantStatusResponse.ProtoReflect.Descriptor instead.
 func (*ManageParticipantStatusResponse) Descriptor() ([]byte, []int) {
-	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{24}
+	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ManageParticipantStatusResponse) GetSubject() string {
@@ -1668,7 +1791,7 @@ type GetCircuitBreakerStatusResponse struct {
 
 func (x *GetCircuitBreakerStatusResponse) Reset() {
 	*x = GetCircuitBreakerStatusResponse{}
-	mi := &file_compliance_v1_compliance_proto_msgTypes[25]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1680,7 +1803,7 @@ func (x *GetCircuitBreakerStatusResponse) String() string {
 func (*GetCircuitBreakerStatusResponse) ProtoMessage() {}
 
 func (x *GetCircuitBreakerStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_compliance_v1_compliance_proto_msgTypes[25]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1693,7 +1816,7 @@ func (x *GetCircuitBreakerStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCircuitBreakerStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetCircuitBreakerStatusResponse) Descriptor() ([]byte, []int) {
-	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{25}
+	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *GetCircuitBreakerStatusResponse) GetIsPaused() bool {
@@ -1727,7 +1850,7 @@ type ToggleCircuitBreakerRequest struct {
 
 func (x *ToggleCircuitBreakerRequest) Reset() {
 	*x = ToggleCircuitBreakerRequest{}
-	mi := &file_compliance_v1_compliance_proto_msgTypes[26]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1739,7 +1862,7 @@ func (x *ToggleCircuitBreakerRequest) String() string {
 func (*ToggleCircuitBreakerRequest) ProtoMessage() {}
 
 func (x *ToggleCircuitBreakerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_compliance_v1_compliance_proto_msgTypes[26]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1752,7 +1875,7 @@ func (x *ToggleCircuitBreakerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToggleCircuitBreakerRequest.ProtoReflect.Descriptor instead.
 func (*ToggleCircuitBreakerRequest) Descriptor() ([]byte, []int) {
-	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{26}
+	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ToggleCircuitBreakerRequest) GetPause() bool {
@@ -1779,7 +1902,7 @@ type ToggleCircuitBreakerResponse struct {
 
 func (x *ToggleCircuitBreakerResponse) Reset() {
 	*x = ToggleCircuitBreakerResponse{}
-	mi := &file_compliance_v1_compliance_proto_msgTypes[27]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1791,7 +1914,7 @@ func (x *ToggleCircuitBreakerResponse) String() string {
 func (*ToggleCircuitBreakerResponse) ProtoMessage() {}
 
 func (x *ToggleCircuitBreakerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_compliance_v1_compliance_proto_msgTypes[27]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1804,7 +1927,7 @@ func (x *ToggleCircuitBreakerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToggleCircuitBreakerResponse.ProtoReflect.Descriptor instead.
 func (*ToggleCircuitBreakerResponse) Descriptor() ([]byte, []int) {
-	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{27}
+	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ToggleCircuitBreakerResponse) GetIsPaused() bool {
@@ -1833,7 +1956,7 @@ type GetSystemParametersResponse struct {
 
 func (x *GetSystemParametersResponse) Reset() {
 	*x = GetSystemParametersResponse{}
-	mi := &file_compliance_v1_compliance_proto_msgTypes[28]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1845,7 +1968,7 @@ func (x *GetSystemParametersResponse) String() string {
 func (*GetSystemParametersResponse) ProtoMessage() {}
 
 func (x *GetSystemParametersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_compliance_v1_compliance_proto_msgTypes[28]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1858,7 +1981,7 @@ func (x *GetSystemParametersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSystemParametersResponse.ProtoReflect.Descriptor instead.
 func (*GetSystemParametersResponse) Descriptor() ([]byte, []int) {
-	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{28}
+	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *GetSystemParametersResponse) GetTransactionMinimum() string {
@@ -1903,7 +2026,7 @@ type UpdateSystemParametersRequest struct {
 
 func (x *UpdateSystemParametersRequest) Reset() {
 	*x = UpdateSystemParametersRequest{}
-	mi := &file_compliance_v1_compliance_proto_msgTypes[29]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1915,7 +2038,7 @@ func (x *UpdateSystemParametersRequest) String() string {
 func (*UpdateSystemParametersRequest) ProtoMessage() {}
 
 func (x *UpdateSystemParametersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_compliance_v1_compliance_proto_msgTypes[29]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1928,7 +2051,7 @@ func (x *UpdateSystemParametersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateSystemParametersRequest.ProtoReflect.Descriptor instead.
 func (*UpdateSystemParametersRequest) Descriptor() ([]byte, []int) {
-	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{29}
+	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *UpdateSystemParametersRequest) GetTransactionMinimum() string {
@@ -1982,7 +2105,7 @@ type UpdateSystemParametersResponse struct {
 
 func (x *UpdateSystemParametersResponse) Reset() {
 	*x = UpdateSystemParametersResponse{}
-	mi := &file_compliance_v1_compliance_proto_msgTypes[30]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1994,7 +2117,7 @@ func (x *UpdateSystemParametersResponse) String() string {
 func (*UpdateSystemParametersResponse) ProtoMessage() {}
 
 func (x *UpdateSystemParametersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_compliance_v1_compliance_proto_msgTypes[30]
+	mi := &file_compliance_v1_compliance_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2007,7 +2130,7 @@ func (x *UpdateSystemParametersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateSystemParametersResponse.ProtoReflect.Descriptor instead.
 func (*UpdateSystemParametersResponse) Descriptor() ([]byte, []int) {
-	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{30}
+	return file_compliance_v1_compliance_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *UpdateSystemParametersResponse) GetSuccess() bool {
@@ -2133,7 +2256,18 @@ const file_compliance_v1_compliance_proto_rawDesc = "" +
 	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12#\n" +
 	"\rtoken_address\x18\x02 \x01(\tR\ftokenAddress\x12-\n" +
 	"\x12already_registered\x18\x03 \x01(\bR\x11alreadyRegistered\x12\x17\n" +
-	"\atx_hash\x18\x04 \x01(\tR\x06txHash\"j\n" +
+	"\atx_hash\x18\x04 \x01(\tR\x06txHash\"s\n" +
+	"\x1aRegisterPairOnChainRequest\x12\x1d\n" +
+	"\n" +
+	"currency_a\x18\x01 \x01(\tR\tcurrencyA\x12\x1d\n" +
+	"\n" +
+	"currency_b\x18\x02 \x01(\tR\tcurrencyB\x12\x17\n" +
+	"\apair_id\x18\x03 \x01(\tR\x06pairId\"\x86\x01\n" +
+	"\x1bRegisterPairOnChainResponse\x12\x1f\n" +
+	"\vamm_address\x18\x01 \x01(\tR\n" +
+	"ammAddress\x12-\n" +
+	"\x12already_registered\x18\x02 \x01(\bR\x11alreadyRegistered\x12\x17\n" +
+	"\atx_hash\x18\x03 \x01(\tR\x06txHash\"j\n" +
 	"\x11ApproveKYCRequest\x12\x18\n" +
 	"\asubject\x18\x01 \x01(\tR\asubject\x12#\n" +
 	"\ractor_subject\x18\x02 \x01(\tR\factorSubject\x12\x16\n" +
@@ -2175,7 +2309,7 @@ const file_compliance_v1_compliance_proto_rawDesc = "" +
 	"\x06reason\x18\x05 \x01(\tR\x06reason\x12#\n" +
 	"\ractor_subject\x18\x06 \x01(\tR\factorSubject\":\n" +
 	"\x1eUpdateSystemParametersResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess2\xec\f\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess2\xda\r\n" +
 	"\x11ComplianceService\x12f\n" +
 	"\x11UpsertParticipant\x12'.compliance.v1.UpsertParticipantRequest\x1a(.compliance.v1.UpsertParticipantResponse\x12o\n" +
 	"\x14GetParticipantByUser\x12*.compliance.v1.GetParticipantByUserRequest\x1a+.compliance.v1.GetParticipantByUserResponse\x12c\n" +
@@ -2185,7 +2319,8 @@ const file_compliance_v1_compliance_proto_rawDesc = "" +
 	"\x1bIssueParticipantCertificate\x121.compliance.v1.IssueParticipantCertificateRequest\x1a2.compliance.v1.IssueParticipantCertificateResponse\x12i\n" +
 	"\x12SignParticipantCSR\x12(.compliance.v1.SignParticipantCSRRequest\x1a).compliance.v1.SignParticipantCSRResponse\x12\x81\x01\n" +
 	"\x1aRegisterParticipantOnChain\x120.compliance.v1.RegisterParticipantOnChainRequest\x1a1.compliance.v1.RegisterParticipantOnChainResponse\x12x\n" +
-	"\x17RegisterCurrencyOnChain\x12-.compliance.v1.RegisterCurrencyOnChainRequest\x1a..compliance.v1.RegisterCurrencyOnChainResponse\x12Q\n" +
+	"\x17RegisterCurrencyOnChain\x12-.compliance.v1.RegisterCurrencyOnChainRequest\x1a..compliance.v1.RegisterCurrencyOnChainResponse\x12l\n" +
+	"\x13RegisterPairOnChain\x12).compliance.v1.RegisterPairOnChainRequest\x1a*.compliance.v1.RegisterPairOnChainResponse\x12Q\n" +
 	"\n" +
 	"ApproveKYC\x12 .compliance.v1.ApproveKYCRequest\x1a!.compliance.v1.ApproveKYCResponse\x12x\n" +
 	"\x17ManageParticipantStatus\x12-.compliance.v1.ManageParticipantStatusRequest\x1a..compliance.v1.ManageParticipantStatusResponse\x12a\n" +
@@ -2206,7 +2341,7 @@ func file_compliance_v1_compliance_proto_rawDescGZIP() []byte {
 	return file_compliance_v1_compliance_proto_rawDescData
 }
 
-var file_compliance_v1_compliance_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_compliance_v1_compliance_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_compliance_v1_compliance_proto_goTypes = []any{
 	(*Participant)(nil),                         // 0: compliance.v1.Participant
 	(*UpsertParticipantRequest)(nil),            // 1: compliance.v1.UpsertParticipantRequest
@@ -2229,22 +2364,24 @@ var file_compliance_v1_compliance_proto_goTypes = []any{
 	(*RegisterParticipantOnChainResponse)(nil),  // 18: compliance.v1.RegisterParticipantOnChainResponse
 	(*RegisterCurrencyOnChainRequest)(nil),      // 19: compliance.v1.RegisterCurrencyOnChainRequest
 	(*RegisterCurrencyOnChainResponse)(nil),     // 20: compliance.v1.RegisterCurrencyOnChainResponse
-	(*ApproveKYCRequest)(nil),                   // 21: compliance.v1.ApproveKYCRequest
-	(*ApproveKYCResponse)(nil),                  // 22: compliance.v1.ApproveKYCResponse
-	(*ManageParticipantStatusRequest)(nil),      // 23: compliance.v1.ManageParticipantStatusRequest
-	(*ManageParticipantStatusResponse)(nil),     // 24: compliance.v1.ManageParticipantStatusResponse
-	(*GetCircuitBreakerStatusResponse)(nil),     // 25: compliance.v1.GetCircuitBreakerStatusResponse
-	(*ToggleCircuitBreakerRequest)(nil),         // 26: compliance.v1.ToggleCircuitBreakerRequest
-	(*ToggleCircuitBreakerResponse)(nil),        // 27: compliance.v1.ToggleCircuitBreakerResponse
-	(*GetSystemParametersResponse)(nil),         // 28: compliance.v1.GetSystemParametersResponse
-	(*UpdateSystemParametersRequest)(nil),       // 29: compliance.v1.UpdateSystemParametersRequest
-	(*UpdateSystemParametersResponse)(nil),      // 30: compliance.v1.UpdateSystemParametersResponse
-	(*timestamppb.Timestamp)(nil),               // 31: google.protobuf.Timestamp
-	(*emptypb.Empty)(nil),                       // 32: google.protobuf.Empty
+	(*RegisterPairOnChainRequest)(nil),          // 21: compliance.v1.RegisterPairOnChainRequest
+	(*RegisterPairOnChainResponse)(nil),         // 22: compliance.v1.RegisterPairOnChainResponse
+	(*ApproveKYCRequest)(nil),                   // 23: compliance.v1.ApproveKYCRequest
+	(*ApproveKYCResponse)(nil),                  // 24: compliance.v1.ApproveKYCResponse
+	(*ManageParticipantStatusRequest)(nil),      // 25: compliance.v1.ManageParticipantStatusRequest
+	(*ManageParticipantStatusResponse)(nil),     // 26: compliance.v1.ManageParticipantStatusResponse
+	(*GetCircuitBreakerStatusResponse)(nil),     // 27: compliance.v1.GetCircuitBreakerStatusResponse
+	(*ToggleCircuitBreakerRequest)(nil),         // 28: compliance.v1.ToggleCircuitBreakerRequest
+	(*ToggleCircuitBreakerResponse)(nil),        // 29: compliance.v1.ToggleCircuitBreakerResponse
+	(*GetSystemParametersResponse)(nil),         // 30: compliance.v1.GetSystemParametersResponse
+	(*UpdateSystemParametersRequest)(nil),       // 31: compliance.v1.UpdateSystemParametersRequest
+	(*UpdateSystemParametersResponse)(nil),      // 32: compliance.v1.UpdateSystemParametersResponse
+	(*timestamppb.Timestamp)(nil),               // 33: google.protobuf.Timestamp
+	(*emptypb.Empty)(nil),                       // 34: google.protobuf.Empty
 }
 var file_compliance_v1_compliance_proto_depIdxs = []int32{
-	31, // 0: compliance.v1.Participant.certificate_expiry:type_name -> google.protobuf.Timestamp
-	31, // 1: compliance.v1.Participant.pop_nonce_expires_at:type_name -> google.protobuf.Timestamp
+	33, // 0: compliance.v1.Participant.certificate_expiry:type_name -> google.protobuf.Timestamp
+	33, // 1: compliance.v1.Participant.pop_nonce_expires_at:type_name -> google.protobuf.Timestamp
 	0,  // 2: compliance.v1.UpsertParticipantRequest.participant:type_name -> compliance.v1.Participant
 	0,  // 3: compliance.v1.GetParticipantByUserResponse.participant:type_name -> compliance.v1.Participant
 	0,  // 4: compliance.v1.ListParticipantsResponse.participants:type_name -> compliance.v1.Participant
@@ -2259,29 +2396,31 @@ var file_compliance_v1_compliance_proto_depIdxs = []int32{
 	15, // 13: compliance.v1.ComplianceService.SignParticipantCSR:input_type -> compliance.v1.SignParticipantCSRRequest
 	17, // 14: compliance.v1.ComplianceService.RegisterParticipantOnChain:input_type -> compliance.v1.RegisterParticipantOnChainRequest
 	19, // 15: compliance.v1.ComplianceService.RegisterCurrencyOnChain:input_type -> compliance.v1.RegisterCurrencyOnChainRequest
-	21, // 16: compliance.v1.ComplianceService.ApproveKYC:input_type -> compliance.v1.ApproveKYCRequest
-	23, // 17: compliance.v1.ComplianceService.ManageParticipantStatus:input_type -> compliance.v1.ManageParticipantStatusRequest
-	32, // 18: compliance.v1.ComplianceService.GetCircuitBreakerStatus:input_type -> google.protobuf.Empty
-	26, // 19: compliance.v1.ComplianceService.ToggleCircuitBreaker:input_type -> compliance.v1.ToggleCircuitBreakerRequest
-	32, // 20: compliance.v1.ComplianceService.GetSystemParameters:input_type -> google.protobuf.Empty
-	29, // 21: compliance.v1.ComplianceService.UpdateSystemParameters:input_type -> compliance.v1.UpdateSystemParametersRequest
-	2,  // 22: compliance.v1.ComplianceService.UpsertParticipant:output_type -> compliance.v1.UpsertParticipantResponse
-	4,  // 23: compliance.v1.ComplianceService.GetParticipantByUser:output_type -> compliance.v1.GetParticipantByUserResponse
-	6,  // 24: compliance.v1.ComplianceService.ListParticipants:output_type -> compliance.v1.ListParticipantsResponse
-	9,  // 25: compliance.v1.ComplianceService.CreateAuditLog:output_type -> compliance.v1.CreateAuditLogResponse
-	12, // 26: compliance.v1.ComplianceService.GetAuditLogs:output_type -> compliance.v1.GetAuditLogsResponse
-	14, // 27: compliance.v1.ComplianceService.IssueParticipantCertificate:output_type -> compliance.v1.IssueParticipantCertificateResponse
-	16, // 28: compliance.v1.ComplianceService.SignParticipantCSR:output_type -> compliance.v1.SignParticipantCSRResponse
-	18, // 29: compliance.v1.ComplianceService.RegisterParticipantOnChain:output_type -> compliance.v1.RegisterParticipantOnChainResponse
-	20, // 30: compliance.v1.ComplianceService.RegisterCurrencyOnChain:output_type -> compliance.v1.RegisterCurrencyOnChainResponse
-	22, // 31: compliance.v1.ComplianceService.ApproveKYC:output_type -> compliance.v1.ApproveKYCResponse
-	24, // 32: compliance.v1.ComplianceService.ManageParticipantStatus:output_type -> compliance.v1.ManageParticipantStatusResponse
-	25, // 33: compliance.v1.ComplianceService.GetCircuitBreakerStatus:output_type -> compliance.v1.GetCircuitBreakerStatusResponse
-	27, // 34: compliance.v1.ComplianceService.ToggleCircuitBreaker:output_type -> compliance.v1.ToggleCircuitBreakerResponse
-	28, // 35: compliance.v1.ComplianceService.GetSystemParameters:output_type -> compliance.v1.GetSystemParametersResponse
-	30, // 36: compliance.v1.ComplianceService.UpdateSystemParameters:output_type -> compliance.v1.UpdateSystemParametersResponse
-	22, // [22:37] is the sub-list for method output_type
-	7,  // [7:22] is the sub-list for method input_type
+	21, // 16: compliance.v1.ComplianceService.RegisterPairOnChain:input_type -> compliance.v1.RegisterPairOnChainRequest
+	23, // 17: compliance.v1.ComplianceService.ApproveKYC:input_type -> compliance.v1.ApproveKYCRequest
+	25, // 18: compliance.v1.ComplianceService.ManageParticipantStatus:input_type -> compliance.v1.ManageParticipantStatusRequest
+	34, // 19: compliance.v1.ComplianceService.GetCircuitBreakerStatus:input_type -> google.protobuf.Empty
+	28, // 20: compliance.v1.ComplianceService.ToggleCircuitBreaker:input_type -> compliance.v1.ToggleCircuitBreakerRequest
+	34, // 21: compliance.v1.ComplianceService.GetSystemParameters:input_type -> google.protobuf.Empty
+	31, // 22: compliance.v1.ComplianceService.UpdateSystemParameters:input_type -> compliance.v1.UpdateSystemParametersRequest
+	2,  // 23: compliance.v1.ComplianceService.UpsertParticipant:output_type -> compliance.v1.UpsertParticipantResponse
+	4,  // 24: compliance.v1.ComplianceService.GetParticipantByUser:output_type -> compliance.v1.GetParticipantByUserResponse
+	6,  // 25: compliance.v1.ComplianceService.ListParticipants:output_type -> compliance.v1.ListParticipantsResponse
+	9,  // 26: compliance.v1.ComplianceService.CreateAuditLog:output_type -> compliance.v1.CreateAuditLogResponse
+	12, // 27: compliance.v1.ComplianceService.GetAuditLogs:output_type -> compliance.v1.GetAuditLogsResponse
+	14, // 28: compliance.v1.ComplianceService.IssueParticipantCertificate:output_type -> compliance.v1.IssueParticipantCertificateResponse
+	16, // 29: compliance.v1.ComplianceService.SignParticipantCSR:output_type -> compliance.v1.SignParticipantCSRResponse
+	18, // 30: compliance.v1.ComplianceService.RegisterParticipantOnChain:output_type -> compliance.v1.RegisterParticipantOnChainResponse
+	20, // 31: compliance.v1.ComplianceService.RegisterCurrencyOnChain:output_type -> compliance.v1.RegisterCurrencyOnChainResponse
+	22, // 32: compliance.v1.ComplianceService.RegisterPairOnChain:output_type -> compliance.v1.RegisterPairOnChainResponse
+	24, // 33: compliance.v1.ComplianceService.ApproveKYC:output_type -> compliance.v1.ApproveKYCResponse
+	26, // 34: compliance.v1.ComplianceService.ManageParticipantStatus:output_type -> compliance.v1.ManageParticipantStatusResponse
+	27, // 35: compliance.v1.ComplianceService.GetCircuitBreakerStatus:output_type -> compliance.v1.GetCircuitBreakerStatusResponse
+	29, // 36: compliance.v1.ComplianceService.ToggleCircuitBreaker:output_type -> compliance.v1.ToggleCircuitBreakerResponse
+	30, // 37: compliance.v1.ComplianceService.GetSystemParameters:output_type -> compliance.v1.GetSystemParametersResponse
+	32, // 38: compliance.v1.ComplianceService.UpdateSystemParameters:output_type -> compliance.v1.UpdateSystemParametersResponse
+	23, // [23:39] is the sub-list for method output_type
+	7,  // [7:23] is the sub-list for method input_type
 	7,  // [7:7] is the sub-list for extension type_name
 	7,  // [7:7] is the sub-list for extension extendee
 	0,  // [0:7] is the sub-list for field type_name
@@ -2299,7 +2438,7 @@ func file_compliance_v1_compliance_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_compliance_v1_compliance_proto_rawDesc), len(file_compliance_v1_compliance_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   31,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
