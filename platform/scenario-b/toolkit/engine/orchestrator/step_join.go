@@ -169,9 +169,15 @@ func (c JoinConfig) ComposeEnv() []string {
 		b = bundle.SpokeBundle{}
 	}
 	e := c.ContainerPrefix
-	hubPort := "8545"
-	if u, err := url.Parse(c.HubRPC); err == nil && u.Port() != "" {
-		hubPort = u.Port()
+	// Prefer the hub RPC port published in the spoke bundle (the CB knows the hub's
+	// real port); fall back to the join HubRPC / default. Without this the bank's
+	// per-pair resolver dials the wrong hub port and swaps fail.
+	hubPort := b.HubRPCPort
+	if hubPort == "" {
+		hubPort = "8545"
+		if u, err := url.Parse(c.HubRPC); err == nil && u.Port() != "" {
+			hubPort = u.Port()
+		}
 	}
 	vars := map[string]string{
 		// besu (join template)
