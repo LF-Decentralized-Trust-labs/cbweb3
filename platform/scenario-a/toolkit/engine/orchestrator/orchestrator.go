@@ -264,6 +264,12 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			fmt.Sprintf("http://%s:%d", relayHost, ports.APIGateway),
 			deps.RelayRegistrar, deps.Timeouts.RelayRegistration),
 	)
+
+	// Per-entity launcher (distributed A/B entry point): writes this scenario's portal
+	// fragment for the central bank and runs the generic launcher image once (soft).
+	steps = append(steps, newLauncherStep(
+		m.Spec.Launcher, m.Spec.Role, m.DisplayNameOr(entity),
+		frontendAdvertisedHost(m), besuRPCPort, m.Spec.LauncherPort))
 	return steps
 }
 
@@ -655,6 +661,12 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			b.Spec.Contracts.ParticipantRegistryAddress, deps.Timeouts.PenteFXSetup, w),
 		newGenCSRStep(deps.BankCode, deps.Institution, dataDir),
 	)
+
+	// Per-entity launcher (distributed A/B entry point): writes this scenario's portal
+	// fragment for the commercial bank and runs the generic launcher image once (soft).
+	steps = append(steps, newLauncherStep(
+		m.Spec.Launcher, m.Spec.Role, m.DisplayNameOr(deps.BankCode),
+		frontendAdvertisedHost(m), rpcPort, m.Spec.LauncherPort))
 	return steps
 }
 

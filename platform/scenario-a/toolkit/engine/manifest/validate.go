@@ -167,6 +167,17 @@ func Validate(m *Manifest) error {
 	// spec.adminUsers — mandatory per-role operator accounts (portal login).
 	errs = append(errs, validateAdminUsers(m)...)
 
+	// spec.launcher — optional per-entity launcher toggle.
+	switch m.Spec.Launcher {
+	case "", "enable", "disable":
+	default:
+		errs = append(errs, fmt.Errorf("spec.launcher: invalid value %q; accepted values are: enable, disable", m.Spec.Launcher))
+	}
+	// spec.launcherPort — optional; a valid TCP port when set.
+	if m.Spec.LauncherPort != 0 && (m.Spec.LauncherPort < 1 || m.Spec.LauncherPort > 65535) {
+		errs = append(errs, fmt.Errorf("spec.launcherPort: invalid value %d; must be a TCP port (1-65535)", m.Spec.LauncherPort))
+	}
+
 	return errors.Join(errs...)
 }
 
