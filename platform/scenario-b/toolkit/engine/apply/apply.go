@@ -151,7 +151,23 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	}
 
 	steps := orchestrator.FoundSpokeSteps(cfg)
+	steps = append(steps, launcherStep(pd, cfg.Runner, rpcPort))
 	return orchestrator.New("found-spoke", steps, state, o.DryRun).Run(ctx)
+}
+
+// launcherStep builds the per-entity launcher step from the manifest: it enables/
+// disables THIS entity's launcher (distributed A/B entry point) with this scenario's
+// portal fragment. TopoRole selects the entity's portals; host + rpcPort derive URLs.
+func launcherStep(pd *manifest.ParticipantDeployment, runner exec.CommandRunner, rpcPort int) orchestrator.Step {
+	return orchestrator.NewLauncherStep(orchestrator.LauncherParams{
+		Runner:   runner,
+		Mode:     pd.Spec.Launcher,
+		TopoRole: pd.Spec.Topology.Role,
+		Entity:   firstNonEmpty(pd.Spec.DisplayName, pd.Metadata.Name),
+		Host:     pd.Spec.FrontendHost,
+		RPCPort:  rpcPort,
+		Port:     pd.Spec.LauncherPort,
+	})
 }
 
 func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeployment) (orchestrator.Report, error) {
@@ -218,6 +234,7 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		cfg.Runner = exec.NewReal(root, cfg.ComposeEnv())
 	}
 	steps := orchestrator.JoinSteps(cfg)
+	steps = append(steps, launcherStep(pd, cfg.Runner, rpcPort))
 	return orchestrator.New("join", steps, state, o.DryRun).Run(ctx)
 }
 
@@ -284,6 +301,9 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
 	}
+	// No launcher on the hub: the launcher is the per-entity A/B entry point for
+	// commercial banks and central banks (found-spoke / join), not for the network
+	// operator's hub (Scenario B only).
 	steps := orchestrator.FoundHubSteps(cfg)
 	return orchestrator.New("found-hub", steps, state, o.DryRun).Run(ctx)
 }

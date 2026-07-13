@@ -67,6 +67,18 @@ type Spec struct {
 	CBEndpoint   string      `yaml:"cbEndpoint,omitempty" json:"cbEndpoint,omitempty"`
 	FrontendHost string      `yaml:"frontendHost" json:"frontendHost"`
 	AdminUsers   []AdminUser `yaml:"adminUsers" json:"adminUsers"`
+	// Launcher controls the per-entity "launcher" SPA on this entity's host (the
+	// distributed A/B entry point). "enable" runs the generic launcher image (if not
+	// already up) and writes this scenario's portal fragment; "disable" removes the
+	// fragment and tears the launcher down when no scenario fragment remains. Empty
+	// (absent) is treated as "disable". Applies to commercial banks and central banks
+	// (found-spoke / join); it is ignored for the network operator's hub.
+	Launcher string `yaml:"launcher,omitempty" json:"launcher,omitempty"`
+	// LauncherPort is the host port this entity's launcher is published on. One
+	// launcher per host, so each entity on a shared host declares a distinct port
+	// (both scenarios of the same entity use the same port and share one launcher).
+	// Optional: 0/absent falls back to the LAUNCHER_PORT env, then 5190.
+	LauncherPort int `yaml:"launcherPort,omitempty" json:"launcherPort,omitempty"`
 }
 
 // Topology carries the participant's role discriminator.

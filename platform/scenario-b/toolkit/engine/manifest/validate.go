@@ -132,6 +132,15 @@ func Validate(pd *ParticipantDeployment) Result {
 	}
 	validateAdminUsers(spec.AdminUsers, &r)
 
+	// Launcher (optional): enable | disable when present.
+	if spec.Launcher != "" && spec.Launcher != "enable" && spec.Launcher != "disable" {
+		r.AddError("spec.launcher", fmt.Sprintf("invalid value %q; accepted values are: enable, disable", spec.Launcher))
+	}
+	// LauncherPort (optional): a valid TCP port when set.
+	if spec.LauncherPort != 0 && (spec.LauncherPort < 1 || spec.LauncherPort > 65535) {
+		r.AddError("spec.launcherPort", fmt.Sprintf("invalid value %d; must be a TCP port (1-65535)", spec.LauncherPort))
+	}
+
 	// FR-003: per-mode required + forbidden presence.
 	if contains(Modes, spec.Mode) {
 		validateModeMatrix(pd, &r)

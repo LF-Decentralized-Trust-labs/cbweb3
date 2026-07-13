@@ -85,6 +85,10 @@ properties:
             role: { type: string }
             username: { type: string }
             password: { type: string }
+      # Per-entity launcher (distributed A/B entry point). Optional.
+      launcher: { type: string, enum: [enable, disable] }
+      # Host port for this entity's launcher (one per host; distinct per entity).
+      launcherPort: { type: integer, minimum: 1, maximum: 65535 }
     # Regras condicionais por modo (estruturais)
     allOf:
       - if:  { properties: { mode: { const: found-hub } } }
