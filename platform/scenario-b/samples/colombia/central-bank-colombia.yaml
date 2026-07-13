@@ -29,6 +29,8 @@ spec:
     endpoint: http://localhost:4000
   cbEndpoint: http://host.docker.internal:18945
   frontendHost: localhost
+  launcher: enable
+  launcherPort: 5197
   adminUsers:
     - { role: GOVERNANCE, username: admin@colombia.governance.gov, password: colombia-governance-local }
     - { role: TREASURY,   username: admin@colombia.treasury.gov,   password: colombia-treasury-local }

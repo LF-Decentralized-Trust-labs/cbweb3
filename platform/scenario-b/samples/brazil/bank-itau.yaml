@@ -28,5 +28,7 @@ spec:
   relay:
     endpoint: http://localhost:4000
   frontendHost: localhost
+  launcher: enable
+  launcherPort: 5192
   adminUsers:
     - { role: BANK, username: admin@itau.brasil.com, password: itau-bank-local }

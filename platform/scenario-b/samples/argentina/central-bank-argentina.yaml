@@ -35,6 +35,8 @@ spec:
     endpoint: http://localhost:4000
   cbEndpoint: http://host.docker.internal:18745
   frontendHost: localhost
+  launcher: enable
+  launcherPort: 5194
   adminUsers:
     - { role: GOVERNANCE, username: admin@argentina.governance.gov, password: argentina-governance-local }
     - { role: TREASURY,   username: admin@argentina.treasury.gov,   password: argentina-treasury-local }

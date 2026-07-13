@@ -24,6 +24,8 @@ spec:
   relay:
     endpoint: http://localhost:4000
   frontendHost: localhost
+  # No launcher on the hub: the per-entity launcher (distributed A/B entry point) is for
+  # commercial banks and central banks, not the network operator's hub.
   adminUsers:
     - { role: GOVERNANCE, username: admin@hub.governance.gov, password: hub-governance-local }
     - { role: NOC_ADMIN,  username: admin@hub.noc.gov,        password: hub-noc-local }

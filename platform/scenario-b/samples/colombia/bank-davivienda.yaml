@@ -28,5 +28,7 @@ spec:
   relay:
     endpoint: http://localhost:4000
   frontendHost: localhost
+  launcher: enable
+  launcherPort: 5199
   adminUsers:
     - { role: BANK, username: admin@davivienda.colombia.com, password: davivienda-bank-local }

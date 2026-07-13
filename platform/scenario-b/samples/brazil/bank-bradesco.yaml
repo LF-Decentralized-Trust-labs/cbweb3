@@ -28,5 +28,7 @@ spec:
   relay:
     endpoint: http://localhost:4000
   frontendHost: localhost
+  launcher: enable
+  launcherPort: 5193
   adminUsers:
     - { role: BANK, username: admin@bradesco.brasil.com, password: bradesco-bank-local }

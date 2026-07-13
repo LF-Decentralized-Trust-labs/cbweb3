@@ -28,5 +28,7 @@ spec:
   relay:
     endpoint: http://localhost:4000
   frontendHost: localhost
+  launcher: enable
+  launcherPort: 5195
   adminUsers:
     - { role: BANK, username: admin@galicia.argentina.com, password: galicia-bank-local }

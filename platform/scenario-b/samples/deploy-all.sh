@@ -105,16 +105,25 @@ cat <<'EOF'
                                                  treasury   http://localhost:21645
                                                  supervisor http://localhost:22645
                                                  noc        http://localhost:20645
+                                                 launcher   http://localhost:5191
     bank-itau      api http://localhost:16646   portal     http://localhost:17646
+                                                 launcher   http://localhost:5192
     bank-bradesco  api http://localhost:16647   portal     http://localhost:17647
+                                                 launcher   http://localhost:5193
 
   Argentina (spoke-ars)
     central-bank   api http://localhost:16745   governance http://localhost:17745
                                                  treasury   http://localhost:21745
                                                  supervisor http://localhost:22745
                                                  noc        http://localhost:20745
+                                                 launcher   http://localhost:5194
     bank-galicia   api http://localhost:16746   portal     http://localhost:17746
+                                                 launcher   http://localhost:5195
     bank-macro     api http://localhost:16747   portal     http://localhost:17747
+                                                 launcher   http://localhost:5196
+
+  The launcher (per entity) is the A/B entry point; it lists that entity's Scenario A
+  and B portals. Build the image once: ( cd ../../launcher && ./build.sh ).
 EOF
 
 cat <<'EOF'
