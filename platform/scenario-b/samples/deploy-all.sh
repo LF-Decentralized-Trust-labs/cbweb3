@@ -93,6 +93,30 @@ apply "Argentina — join bank-macro"   "${SCRIPT_DIR}/argentina/bank-macro.yaml
 
 log "done. Node RPC ports: hub 8845 | brazil 8645/8646/8647 | argentina 8745/8746/8747"
 log "bundles emitted under samples/bundles/ ; per-entity state under samples/cbweb3-data/"
+
+log "all stacks up. Endpoints (api-gateway + operator portals, on the host):"
+cat <<'EOF'
+
+  Hub (hub-cbweb3)
+    hub            api http://localhost:16845   governance http://localhost:17845
+
+  Brazil (spoke-brl)
+    central-bank   api http://localhost:16645   governance http://localhost:17645
+                                                 treasury   http://localhost:21645
+                                                 supervisor http://localhost:22645
+                                                 noc        http://localhost:20645
+    bank-itau      api http://localhost:16646   portal     http://localhost:17646
+    bank-bradesco  api http://localhost:16647   portal     http://localhost:17647
+
+  Argentina (spoke-ars)
+    central-bank   api http://localhost:16745   governance http://localhost:17745
+                                                 treasury   http://localhost:21745
+                                                 supervisor http://localhost:22745
+                                                 noc        http://localhost:20745
+    bank-galicia   api http://localhost:16746   portal     http://localhost:17746
+    bank-macro     api http://localhost:16747   portal     http://localhost:17747
+EOF
+
 cat <<'EOF'
 
   Sovereign currencies (W-tCeBM_BRL, W-tCeBM_ARS): already deployed and registered
