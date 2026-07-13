@@ -4,7 +4,7 @@ Ready-to-use `ParticipantDeployment` manifests for the **Scenario B** toolkit
 (`cbweb3b`), demonstrating the complete hub-and-spoke topology:
 
 - **One neutral interoperability hub**, founded once (`mode: found-hub`):
-  - `hub-cbweb3` — base `tCeBM` reserve tokens + registries + NOC (chainId 1337)
+  - `hub-cbweb3` — base `tCeBM` reserve tokens + registries + AMM + LCR + NOC (chainId 1337)
 - **One external Cacti liquidity relay**, deployed outside the toolkit
   (`start-cacti.sh`) and reached via each manifest's `spec.relay.endpoint`
   (`http://localhost:4000`); spokes register on it dynamically at `found-spoke`.
@@ -16,23 +16,23 @@ Ready-to-use `ParticipantDeployment` manifests for the **Scenario B** toolkit
   - Brazil: `bank-itau`, `bank-bradesco` → `spoke-brl`
   - Argentina: `bank-galicia`, `bank-macro` → `spoke-ars`
   - Colombia: `bank-bancolombia`, `bank-davivienda` → `spoke-cop`
-- **One sovereign FX corridor** `W-BRL-ARS` between Brazil and Argentina — opened
+- **One sovereign FX corridor** `W-BRL-W-ARS` between Brazil and Argentina — opened
   at runtime from the CB governance portal (not by provisioning; see below).
   Colombia joins the hub **without** opening a corridor.
 
 > The bank names are illustrative, used only to demonstrate provisioning.
 
 Everything is provisioned **by configuration** (YAML manifest), without editing
-code and without touching the reference network (`deploy/local` and the Makefile
-remain intact). Every manifest uses `environment: local`,
-`keyProvider: kms://local-emulator`, and `certSource: self-signed` / `ca://…`
-(production KMS/CA is deferred — see the toolkit roadmap).
+code. Every manifest uses `environment: local`, `keyProvider: kms://local-emulator`,
+and `certSource: self-signed` / `ca://…` (production KMS/CA is deferred — see the
+toolkit roadmap).
 
 ---
 
 ## Automation (shortcut)
 
-Two idempotent scripts build the CLI and apply every manifest in order:
+Two idempotent scripts do everything below for you — build the CLI, install the
+contract dependencies, start the relay, and apply every manifest in order:
 
 ```bash
 ./deploy-all.sh      # hub + Brazil + Argentina (the BRL<->ARS corridor)
@@ -40,10 +40,10 @@ Two idempotent scripts build the CLI and apply every manifest in order:
 ```
 
 Pass `--clean` to wipe Docker (containers + volumes + networks) and the data
-directories first. The scripts start the **external Cacti relay**
-(`provisioning/scripts/start-cacti.sh`) before the first `apply` — same strategy
-as Scenario A: the relay is deployed outside the toolkit and its address reaches
-the toolkit via each manifest's `spec.relay.endpoint`.
+directories first. **The rest of this document is the equivalent manual,
+step-by-step flow** those scripts run — command by command, calling the toolkit by
+hand. After the stacks are up, `./sample-tryout.sh` walks a full onboarding +
+cross-currency swap over the REST API.
 
 ---
 
@@ -52,7 +52,7 @@ the toolkit via each manifest's `spec.relay.endpoint`.
 ```
 samples/
   hub/
-    hub-cbweb3.yaml                 # found-hub → the neutral hub (contracts + NOC)
+    hub-cbweb3.yaml                 # found-hub → the neutral hub (contracts + AMM + NOC)
   brazil/
     central-bank-brazil.yaml        # found-spoke → spoke-brl
     bank-itau.yaml                  # join → spoke-brl
@@ -69,6 +69,7 @@ samples/
   cbweb3-data/                      # per-entity state + PKI (gitignored)
   deploy-all.sh                     # hub + Brazil + Argentina
   deploy-three.sh                   # + Colombia
+  sample-tryout.sh                  # end-to-end onboarding + cross-currency swap
 ```
 
 ## Port matrix (all on the same host)
@@ -88,109 +89,203 @@ samples/
 
 The service host ports derive from each entity's RPC port by a fixed offset:
 
-| Service         | Offset  | Example (central-bank-brazil, RPC 8645) |
-|-----------------|---------|-----------------------------------------|
-| api-gateway     | +8000   | 16645                                   |
-| Keycloak        | +7000   | 15645                                   |
+| Service           | Offset  | Example (central-bank-brazil, RPC 8645) |
+|-------------------|---------|-----------------------------------------|
+| api-gateway       | +8000   | 16645                                   |
+| Keycloak          | +7000   | 15645                                   |
 | governance / bank portal | +9000 | 17645 (bank apps also use +9000)   |
-| NOC portal      | +12000  | 20645                                   |
-| treasury portal | +13000  | 21645  (CB only)                        |
-| supervisor portal | +14000 | 22645  (CB only)                       |
+| NOC portal        | +12000  | 20645                                   |
+| treasury portal   | +13000  | 21645  (CB only)                        |
+| supervisor portal | +14000  | 22645  (CB only)                        |
 
 A Central Bank brings up governance + treasury + supervisor operator portals (plus
 the NOC portal); a commercial bank brings up the bank portal; the hub the governance
 portal. Each SPA is built per entity with its own api-gateway URL baked in.
 
+---
+
+## Prerequisites (dependencies)
+
+Install these **before** provisioning — the manual steps below assume they are present:
+
+| Dependency | Used for | Check |
+|------------|----------|-------|
+| **Go 1.26+** | building the `cbweb3b` CLI (the toolkit) | `go version` |
+| **Docker + Docker Compose v2** | every entity's Besu node + backend + frontend + NOC | `docker compose version` |
+| **Foundry (`forge`/`cast`)** | **compiling and deploying the Solidity contracts** | `forge --version` |
+| **`jq`, `curl`** | the verification + tryout scripts | `jq --version` |
+| Docker image `hyperledger/besu:25.8.0` | pinned Besu; pulled automatically on the first node `up` | — |
+
+Notes:
+
+- The manifests use a **relative** `spec.node.dataDir` (`cbweb3-data/<entity>`),
+  resolved against the current working directory. Run the commands **from
+  `samples/`** so state and bundles land under `samples/cbweb3-data/` and
+  `samples/bundles/` — no `sudo`, no privileged path.
+- `--repo-root` must point at the **repository root**: the toolkit reads
+  `scenario-b/contracts/` (to build/deploy contracts) and
+  `scenario-b/provisioning/templates/` (the compose templates) from there.
+
+---
+
+## Contract build (highlight)
+
+The Solidity contracts (`FXAgreement`, `AutomatedMarketMaker`, `LiquidityCommitRegistry`,
+`HTLC`, `tCeBM`, `ZetoToken`, `NotoToken`, `IdentityRegistry`, …) are built with
+**Foundry**, in two parts:
+
+1. **Dependencies — one-time (you run this).** Foundry needs the Soldeer
+   dependencies (`forge-std`, OpenZeppelin) present under `contracts/dependencies/`.
+   Install them once:
+
+   ```bash
+   cd scenario-b/contracts && forge soldeer install   # == `make contracts.setup`
+   ```
+
+   Without this, the first `apply` fails at the `build-contracts` step with
+   `Source "dependencies/forge-std-…/src/Test.sol" not found`.
+
+2. **Compile + deploy — automatic (the toolkit runs this).** `found-hub` and
+   `found-spoke` run a `build-contracts` step (`forge build`) and then deploy the
+   contracts via Foundry scripts (`forge script … --broadcast`), reading the
+   addresses back from the broadcast JSON. The hub deploys the base tokens +
+   registries + AMM + LCR; each spoke deploys its own tCeBM/fCeBM/HTLC/IdentityRegistry
+   and registers its sovereign W-token on the hub. You do **not** run `forge` for
+   this — it happens inside the `apply`.
+
+---
+
+## Manual, step-by-step deployment
+
+Run everything from `samples/`. Set two shell variables for the session:
+
+```bash
+cd scenario-b/samples
+ROOT="$(cd ../.. && pwd)"   # repository root (for --repo-root)
+BIN="$PWD/.cbweb3b"         # the CLI we build in Step 1
+```
+
+### Step 0 — Install the contract dependencies (one-time)
+
+```bash
+( cd "$ROOT/scenario-b/contracts" && forge soldeer install )
+```
+
+### Step 1 — Build the toolkit CLI
+
+```bash
+( cd "$ROOT/scenario-b/toolkit" && go build -o "$BIN" ./cmd/cbweb3b )
+"$BIN" --help
+```
+
+### Step 2 — Validate the manifests (pre-flight, schema only)
+
+`validate` checks the schema without needing any bundle, so it works before
+anything is provisioned. (`apply --dry-run` for a found-spoke/join needs the bundle
+it consumes, so it only works after the producing step has run.)
+
+```bash
+for f in hub/*.yaml brazil/*.yaml argentina/*.yaml colombia/*.yaml; do
+  echo "== $f =="; "$BIN" validate -f "$f" -o yaml
+done
+```
+
+### Step 3 — Start the external Cacti relay (hard prerequisite)
+
+`found-spoke` registers the spoke on the relay (`register-relay-spoke`), a
+**mandatory** step, so the relay must be up first. It is deployed outside the
+toolkit; its address reaches the toolkit via each manifest's `spec.relay.endpoint`
+(`http://localhost:4000`).
+
+```bash
+bash "$ROOT/scenario-b/provisioning/scripts/start-cacti.sh"
+# waits for health at http://localhost:4000/api/v1/health
+```
+
+### Step 4 — Found the hub (`mode: found-hub`)
+
+Brings up the hub Besu (generates the genesis on first run), builds + deploys the
+base contracts (reserve tokens, registries, **AMM**, **LiquidityCommitRegistry**),
+and starts the hub infra + api-gateway + governance portal + NOC. Emits the hub
+bundle consumed by every spoke.
+
+```bash
+"$BIN" apply -f hub/hub-cbweb3.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD"
+# → emits bundles/hub.bundle.yaml  (contracts + hub RPC port; no private keys)
+```
+
+### Step 5 — Found the Brazil spoke (`mode: found-spoke`)
+
+CB-only: brings up the spoke Besu (CB is the sole QBFT validator), deploys the
+spoke contracts, registers the sovereign W-token on the hub, seeds the CB's CA +
+Keycloak operators (from `spec.adminUsers`), starts the app stack
+(compliance + auth + api-gateway), the **bridge relayer** (payment-orchestrator),
+the operator portals, and registers the spoke on the relay. Emits the spoke bundle
+the banks consume.
+
+```bash
+"$BIN" apply -f brazil/central-bank-brazil.yaml -o yaml \
+  --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8645
+# → emits bundles/spoke-brl.bundle.yaml
+```
+
+> `--spoke-rpc` is the RPC of the node this `apply` operates on (used for gates like
+> block-height / sync checks); it matches the entity's RPC port in the matrix above.
+
+### Step 6 — Join the Brazilian banks (`mode: join`)
+
+Each bank consumes `spoke-brl.bundle.yaml`, syncs the spoke genesis as a
+non-validating full node, provisions its Keycloak operator, starts its app stack +
+bank portal, and generates its key + CSR (`gen-csr`). The CB signs the CSR and
+registers the bank on-chain at **runtime** (onboarding portal), not as a toolkit step.
+
+```bash
+"$BIN" apply -f brazil/bank-itau.yaml     -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8646
+"$BIN" apply -f brazil/bank-bradesco.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8647
+```
+
+### Step 7 — Found the Argentina spoke and join its banks
+
+Same sequence with the Argentine manifests (the relay from Step 3 already serves
+all spokes; each registers under its own id):
+
+```bash
+"$BIN" apply -f argentina/central-bank-argentina.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8745
+"$BIN" apply -f argentina/bank-galicia.yaml           -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8746
+"$BIN" apply -f argentina/bank-macro.yaml             -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8747
+```
+
+### Step 8 — (optional) Found the Colombia spoke
+
+A third independent spoke that joins the hub **without** opening a corridor:
+
+```bash
+"$BIN" apply -f colombia/central-bank-colombia.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8945
+"$BIN" apply -f colombia/bank-bancolombia.yaml      -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8946
+"$BIN" apply -f colombia/bank-davivienda.yaml       -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8947
+```
+
+> **Idempotency.** Re-running any `apply` converges — completed steps are skipped,
+> the genesis is never regenerated, and an `ACTIVE` pair is left untouched. State is
+> per entity under `cbweb3-data/<entity>/.provisioning-state.yaml`.
+
+---
+
 ## Operator credentials
 
 Each entity seeds its Keycloak operators from its manifest's `spec.adminUsers`
 (scenario-a naming). Log in with `POST /api/v1/auth/login {"clientId":<username>,
-"clientSecret":<password>}`:
+"clientSecret":<password>}` at the entity's api-gateway port:
 
-- Central Bank: `admin@<country>.<role>.gov` / `<country>-<role>-local`
+- **Central Bank:** `admin@<country>.<role>.gov` / `<country>-<role>-local`
   (roles GOVERNANCE, TREASURY, SUPERVISOR) — e.g. `admin@brasil.governance.gov` /
   `brasil-governance-local`. The governance operator carries `central_bank` +
   `ROLE_GOVERNANCE` (drives the sovereign AMM and KYC approval).
-- Commercial bank: `admin@<bank>.<country>.com` / `<bank>-bank-local` (role BANK,
+- **Commercial bank:** `admin@<bank>.<country>.com` / `<bank>-bank-local` (role BANK,
   i.e. `commercial_bank`) — e.g. `admin@itau.brasil.com` / `itau-bank-local`.
 
 `sample-tryout.sh` uses these to onboard both banks through the governance portal and
 settle a cross-currency swap.
-
----
-
-## Prerequisites
-
-- Go 1.26+, Docker + Docker Compose v2, Foundry (`forge`/`cast`), `jq`, `curl`.
-- Docker image `hyperledger/besu:25.8.0` (pulled on first `up`).
-- **Contract dependencies installed** (one-time). The `found-hub`/`found-spoke`
-  `build-contracts` step runs `forge build`, which needs the Soldeer dependencies
-  (`forge-std`, OpenZeppelin) present under `contracts/dependencies/`. Install them
-  once from the contracts project:
-
-  ```bash
-  cd scenario-b/contracts && forge soldeer install   # == `make contracts.setup`
-  ```
-
-  Without this, the first `apply` fails at `build-contracts` with
-  `Source "dependencies/forge-std-…/src/Test.sol" not found`. The deploy scripts
-  run `forge soldeer install` automatically (idempotent), so `./deploy-all.sh`
-  works from a clean checkout.
-- **External Cacti relay.** The relay is NOT started by the toolkit — bring it up
-  first with `scenario-b/provisioning/scripts/start-cacti.sh` (the deploy scripts
-  do this automatically). Each manifest's `spec.relay.endpoint`
-  (`http://localhost:4000`) tells the toolkit where to register the spoke; a
-  founding CB registers dynamically via `POST /api/v1/spokes` (`register-relay-spoke`).
-- The manifests use a **relative** `spec.node.dataDir` (`cbweb3-data/<entity>`).
-  The deploy scripts `cd` into `samples/` first, so state and bundles land under
-  `samples/cbweb3-data/` and `samples/bundles/` — no `sudo`, no privileged path.
-
----
-
-## Manual flow (what the scripts run)
-
-Build the CLI and run each `apply` with `--repo-root <repo>` (the CLI needs the
-repo for `contracts/` + `provisioning/templates/`) and `--out-dir samples` (so
-bundles land in `samples/bundles/`, matching the `../bundles/…` refs):
-
-```bash
-# one-time: install the Foundry/Soldeer contract dependencies (forge-std, OZ)
-cd scenario-b/contracts && forge soldeer install
-
-cd ../toolkit && go build -o ../samples/.cbweb3b ./cmd/cbweb3b
-cd ../samples
-BIN=./.cbweb3b ; ROOT="$(cd ../.. && pwd)"
-
-# 0) validate every manifest first (schema only; no bundle needed).
-#    (`apply --dry-run` for a found-spoke/join needs the bundle it consumes, so it
-#     only works after the producing step has run — use `validate` for pre-flight.)
-for f in hub/*.yaml brazil/*.yaml argentina/*.yaml colombia/*.yaml; do
-  "$BIN" validate -f "$f" -o yaml
-done
-
-# 0.5) start the EXTERNAL Cacti relay (hard prerequisite of register-relay-spoke).
-#      Its address is read from each manifest's spec.relay.endpoint (localhost:4000).
-bash "$ROOT/scenario-b/provisioning/scripts/start-cacti.sh"
-
-# 1) found the hub (emits bundles/hub.bundle.yaml)
-"$BIN" apply -f hub/hub-cbweb3.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD"
-
-# 2) found spoke-brl (consumes hub.bundle.yaml; emits spoke-brl.bundle.yaml)
-"$BIN" apply -f brazil/central-bank-brazil.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" \
-  --spoke-rpc http://localhost:8645
-
-# 3) join the Brazilian banks (consume spoke-brl.bundle.yaml)
-"$BIN" apply -f brazil/bank-itau.yaml     -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8646
-"$BIN" apply -f brazil/bank-bradesco.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8647
-
-# 4) found spoke-ars and join its banks
-"$BIN" apply -f argentina/central-bank-argentina.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8745
-"$BIN" apply -f argentina/bank-galicia.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8746
-"$BIN" apply -f argentina/bank-macro.yaml   -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8747
-```
-
-Re-running any `apply` converges (completed steps are skipped) — the genesis is
-never regenerated, and an `ACTIVE` pair is left untouched.
 
 ---
 
@@ -219,8 +314,20 @@ Colombia simply never opens a corridor.
 
 ## Verification
 
+Block height on each node (RPC ports from the matrix):
+
 ```bash
-docker ps --filter "name=spoke-" --filter "name=hub"
+for p in 8845 8645 8646 8647 8745 8746 8747; do
+  echo -n "port $p: "
+  curl -s -X POST "http://localhost:$p" -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | jq -r .result
+done
+```
+
+Running containers:
+
+```bash
+docker ps --filter "name=cbweb3-"
 ```
 
 The structured report (`--output yaml|json`) from each `apply` shows every step's
@@ -233,21 +340,17 @@ status (`done` / `skipped` / `failed` / `soft-failed` / `planned`).
 - **External relay (Scenario A strategy).** The Cacti relay is deployed outside
   the toolkit (`start-cacti.sh`), before any `apply`; its address is passed in via
   each manifest's `spec.relay.endpoint`. Each founding CB registers its spoke on it
-  at runtime via `register-relay-spoke` (`POST /api/v1/spokes`) — confirmed by the
-  relay health showing the registered `spokes` count.
+  at runtime via `register-relay-spoke` (`POST /api/v1/spokes`).
 - **One Docker network per entity.** Every entity's services (besu + infra +
-  keycloak + backend + frontend + NOC) share a single `<prefix>_net` network
-  (created by the entity's besu compose; the rest join it as external) — mirrors
-  Scenario A and keeps Docker's address pool from being exhausted at N entities.
+  keycloak + backend + frontend + NOC) share a single `<prefix>_net` network,
+  keeping Docker's address pool from being exhausted at N entities.
 - **One hub, N spokes.** Entities reach the hub by RPC (they do not join the hub's
   P2P network); the hub bundle carries the hub contract addresses consumed by each
   `found-spoke`.
 - **Non-validating banks.** A joining bank syncs the spoke genesis as a full node;
-  the CB is the sole QBFT validator (`node.validator: true` would only warn).
+  the CB is the sole QBFT validator.
 - **PKI.** `join` performs only `gen-csr` (keypair + CSR under
   `cbweb3-data/<bank>/pki/`); the CB signs the CSR and registers the bank on-chain
-  at runtime (not a toolkit step).
-- **Reference network untouched.** This sample does not modify or depend on
-  `deploy/local` or `make/*.mk`.
+  at runtime (onboarding portal), not a toolkit step.
 - **End-to-end test suite.** For the automated pipeline E2E + performance baseline,
   see `scenario-b/toolkit/E2E-STATUS.md` (`go test -tags e2e ./tests/e2e/...`).
