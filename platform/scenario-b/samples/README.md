@@ -225,12 +225,14 @@ the banks consume.
 
 ```bash
 "$BIN" apply -f brazil/central-bank-brazil.yaml -o yaml \
-  --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8645
+  --repo-root "$ROOT" --out-dir "$PWD"
 # → emits bundles/spoke-brl.bundle.yaml
 ```
 
-> `--spoke-rpc` is the RPC of the node this `apply` operates on (used for gates like
-> block-height / sync checks); it matches the entity's RPC port in the matrix above.
+> The toolkit reaches the spoke's own Besu node (readiness/enode/contract gates) at
+> `http://localhost:<node.rpc.port>`, taken from the manifest — for
+> `central-bank-brazil`, `8645`. Override it only for a non-default host/port with
+> `--spoke-rpc <url>`.
 
 ### Step 6 — Join the Brazilian banks (`mode: join`)
 
@@ -240,8 +242,8 @@ bank portal, and generates its key + CSR (`gen-csr`). The CB signs the CSR and
 registers the bank on-chain at **runtime** (onboarding portal), not as a toolkit step.
 
 ```bash
-"$BIN" apply -f brazil/bank-itau.yaml     -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8646
-"$BIN" apply -f brazil/bank-bradesco.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8647
+"$BIN" apply -f brazil/bank-itau.yaml     -o yaml --repo-root "$ROOT" --out-dir "$PWD"
+"$BIN" apply -f brazil/bank-bradesco.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD"
 ```
 
 ### Step 7 — Found the Argentina spoke and join its banks
@@ -250,9 +252,9 @@ Same sequence with the Argentine manifests (the relay from Step 3 already serves
 all spokes; each registers under its own id):
 
 ```bash
-"$BIN" apply -f argentina/central-bank-argentina.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8745
-"$BIN" apply -f argentina/bank-galicia.yaml           -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8746
-"$BIN" apply -f argentina/bank-macro.yaml             -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8747
+"$BIN" apply -f argentina/central-bank-argentina.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD"
+"$BIN" apply -f argentina/bank-galicia.yaml           -o yaml --repo-root "$ROOT" --out-dir "$PWD"
+"$BIN" apply -f argentina/bank-macro.yaml             -o yaml --repo-root "$ROOT" --out-dir "$PWD"
 ```
 
 ### Step 8 — (optional) Found the Colombia spoke
@@ -260,9 +262,9 @@ all spokes; each registers under its own id):
 A third independent spoke that joins the hub **without** opening a corridor:
 
 ```bash
-"$BIN" apply -f colombia/central-bank-colombia.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8945
-"$BIN" apply -f colombia/bank-bancolombia.yaml      -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8946
-"$BIN" apply -f colombia/bank-davivienda.yaml       -o yaml --repo-root "$ROOT" --out-dir "$PWD" --spoke-rpc http://localhost:8947
+"$BIN" apply -f colombia/central-bank-colombia.yaml -o yaml --repo-root "$ROOT" --out-dir "$PWD"
+"$BIN" apply -f colombia/bank-bancolombia.yaml      -o yaml --repo-root "$ROOT" --out-dir "$PWD"
+"$BIN" apply -f colombia/bank-davivienda.yaml       -o yaml --repo-root "$ROOT" --out-dir "$PWD"
 ```
 
 > **Idempotency.** Re-running any `apply` converges — completed steps are skipped,
