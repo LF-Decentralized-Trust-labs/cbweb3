@@ -215,6 +215,8 @@ func (c JoinConfig) ComposeEnv() []string {
 		"AUTH_IMAGE":       hubAuthImage,
 		"FRONTEND_IMAGE":   cbFrontendImage("bank", c.RPCPort+8000),
 		"FRONTEND_PORT":    itoa(c.RPCPort + 9000),
+		// Browser CORS: allow this bank's portal origin on its gateway.
+		"CORS_ALLOW_ORIGINS": corsOriginSingle(c.RPCPort),
 		// app stack (compliance + auth): the bank is the local signer; the Keycloak
 		// realm/client are provisioned by provision-keycloak-bank.
 		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),

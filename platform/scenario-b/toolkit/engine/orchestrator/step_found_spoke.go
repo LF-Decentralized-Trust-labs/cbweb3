@@ -295,6 +295,8 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// NOC portal is deployed by the noc template.
 		"GOVERNANCE_FRONTEND_IMAGE":  cbFrontendImage("governance", c.RPCPort+8000),
 		"GOVERNANCE_FRONTEND_PORT":   itoa(c.RPCPort + 9000),
+		// Browser CORS: allow this CB's four operator-portal origins on its gateway.
+		"CORS_ALLOW_ORIGINS": corsOriginsCB(c.RPCPort),
 		"TREASURY_FRONTEND_IMAGE":    cbFrontendImage("treasury", c.RPCPort+8000),
 		"TREASURY_FRONTEND_PORT":     itoa(c.RPCPort + 13000),
 		"SUPERVISOR_FRONTEND_IMAGE":  cbFrontendImage("supervisor", c.RPCPort+8000),

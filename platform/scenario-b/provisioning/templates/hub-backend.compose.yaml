@@ -16,6 +16,9 @@ services:
       # endpoint (POST /internal/v1/spokes/register).
       COMPLIANCE_GRPC_ADDR: "${COMPLIANCE_GRPC_ADDR:-localhost:9093}"
       INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-}"
+      # Browser CORS: the hub governance portal calls this gateway with credentials,
+      # so its exact origin must be allowed ("*" is invalid with credentials).
+      CORS_ALLOW_ORIGINS: "${CORS_ALLOW_ORIGINS:-}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

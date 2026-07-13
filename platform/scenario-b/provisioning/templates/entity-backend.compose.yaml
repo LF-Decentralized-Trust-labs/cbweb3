@@ -118,6 +118,11 @@ services:
       # bank's CSR from PKI_DIR/<bankCode>.csr (the mount below) before forwarding
       # the credential request to its CB. Empty on a CB (no smart-proxy).
       PKI_DIR: "${PKI_DIR:-}"
+      # Browser CORS: the operator portals are served on distinct host ports and call
+      # this gateway with credentials, so the exact portal origins must be allowed
+      # ("*" is invalid with credentials). The toolkit sets the entity's portal
+      # origins; empty leaves CORS disabled.
+      CORS_ALLOW_ORIGINS: "${CORS_ALLOW_ORIGINS:-}"
     volumes:
       # Same PKI material the compliance service mounts: on a bank this is the host
       # pki dir holding its gen-csr {bankCode}.csr/.key (read by the smart proxy);

@@ -203,6 +203,8 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
 		"FRONTEND_IMAGE":             cbFrontendImage("governance", c.RPCPort+8000),
 		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
+		// Browser CORS: allow the hub governance portal origin on the hub gateway.
+		"CORS_ALLOW_ORIGINS": corsOriginSingle(c.RPCPort),
 		"RELAY_IMAGE":                hubRelayImage,
 		"RELAY_CONTAINER_NAME":       e + "-relay",
 		"RELAY_NET_PREFIX":           c.NetPrefix,
