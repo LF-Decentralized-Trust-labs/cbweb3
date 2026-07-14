@@ -591,10 +591,9 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					"FX_AGREEMENT_CONTRACT_ADDRESS":      hub.Contracts["fxAgreement"],
 					"PAIR_REGISTRY_CONTRACT_ADDRESS":     hub.Contracts["pairRegistry"],
 					"CURRENCY_REGISTRY_CONTRACT_ADDRESS": hub.Contracts["currencyRegistry"],
-					// Enables the api-gateway v2 AMM routes (quote/swap/pairs/liquidity):
-					// without AMM_CONTRACT_ADDRESS the AMM client is nil and the routes
-					// are skipped. The sovereign-pair AMM is resolved at runtime.
-					"AMM_CONTRACT_ADDRESS": hub.Contracts["amm"],
+					// TD-001: no default AMM. The v2 AMM routes are enabled by the
+					// PairRegistry (above) and every corridor's AMM is resolved per
+					// pool_pair at runtime.
 					// Enables SovereignLiquidityService → the sovereign-add + cross-currency
 					// bridge-in/out endpoints (registerSovereignRoutes gates on it).
 					"LIQUIDITY_COMMIT_REGISTRY_ADDRESS": hub.Contracts["liquidityCommitRegistry"],

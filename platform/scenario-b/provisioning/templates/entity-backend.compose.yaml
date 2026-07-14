@@ -95,11 +95,11 @@ services:
       # The entity's own on-chain (Besu) address. The payment proxy injects it as
       # requester_besu_address so the CB registers the deposit against this bank.
       ENTITY_BESU_ADDRESS: "${ENTITY_BESU_ADDRESS:-}"
-      # Hub AMM / swap wiring — presence of AMM_CONTRACT_ADDRESS + HUB_BESU_RPC_URL
-      # registers the v2 AMM routes (quote/swap/pairs/liquidity/currencies).
+      # Hub AMM / swap wiring — TD-001: no default AMM. The v2 AMM routes are
+      # enabled by PAIR_REGISTRY_CONTRACT_ADDRESS + HUB_BESU_RPC_URL and every
+      # corridor's AMM is resolved per pool_pair from the on-chain PairRegistry.
       HUB_BESU_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
       SIGNER_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
-      AMM_CONTRACT_ADDRESS: "${AMM_CONTRACT_ADDRESS:-}"
       PAIR_REGISTRY_CONTRACT_ADDRESS: "${PAIR_REGISTRY_CONTRACT_ADDRESS:-}"
       CURRENCY_REGISTRY_CONTRACT_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"
       HUB_TOKEN_A_ADDRESS: "${HUB_TOKEN_A_ADDRESS:-}"
