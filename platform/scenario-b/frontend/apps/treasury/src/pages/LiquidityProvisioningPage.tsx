@@ -40,7 +40,6 @@ export function LiquidityProvisioningPage() {
   const [currencies, setCurrencies] = useState<HubCurrency[]>([]);
   const [currenciesLoading, setCurrenciesLoading] = useState(false);
   // Fallback Hub AMM address when no pair exists yet (from GET /amm/hub-config).
-  const [hubConfigAmm, setHubConfigAmm] = useState("");
 
   // --- Register Currency (advanced / optional — currencies are normally pre-registered) ---
   const [registerOpen, setRegisterOpen] = useState(false);
@@ -106,18 +105,9 @@ export function LiquidityProvisioningPage() {
   };
 
   // Fetch the currencies list once; it is reused across Propose / Confirm.
-  // Hub config provides the fallback AMM address when no pair exists yet.
   useEffect(() => {
     void loadPairs();
     void loadCurrencies();
-    void (async () => {
-      try {
-        const config = await hubLiquidityApi.getHubConfig();
-        setHubConfigAmm(config.amm_address ?? "");
-      } catch {
-        // hub-config is optional (older gateways) — pre-fill just falls back to empty.
-      }
-    })();
   }, []);
 
   // Keep the provider bank id in sync with the logged-in operator once the session loads.
@@ -126,16 +116,6 @@ export function LiquidityProvisioningPage() {
       setSeedProviderBankId((current) => current || defaultProviderBankId);
     }
   }, [defaultProviderBankId]);
-
-  // Pre-fill the Hub AMM address. Priority: (1) an existing pair's amm_address (all pairs
-  // share the hub AMM), else (2) hub-config's amm_address. Empty leaves the field editable.
-  useEffect(() => {
-    const existingAmm = pairs.find((pair) => pair.amm_address)?.amm_address;
-    const derivedAmm = existingAmm || hubConfigAmm;
-    if (derivedAmm) {
-      setProposeAmmAddress((current) => current || derivedAmm);
-    }
-  }, [pairs, hubConfigAmm]);
 
   const currencyBySymbol = (symbol: string) => currencies.find((currency) => currency.symbol === symbol);
   const currencyByAddress = (address: string) =>
@@ -215,16 +195,15 @@ export function LiquidityProvisioningPage() {
       toast.error("Pair ID is required");
       return;
     }
-    if (!proposeAmmAddress.trim()) {
-      toast.error("Hub AMM address is required");
-      return;
-    }
     if (!proposeProposerCb.trim()) {
       toast.error("Proposer CB could not be derived — set it under Advanced");
       return;
     }
     setProposing(true);
     try {
+      // amm_address is left empty by default: the gateway deploys a dedicated,
+      // per-pair AMM bound to the two W-tokens. Only send an address when the
+      // operator explicitly overrides it under Advanced.
       const result = await hubLiquidityApi.proposePair({
         pair_id: proposePairId.trim(),
         token_a_address: proposeTokenA.trim(),
@@ -232,7 +211,8 @@ export function LiquidityProvisioningPage() {
         amm_address: proposeAmmAddress.trim(),
         proposer_cb: proposeProposerCb.trim(),
       });
-      toast.success(`Pair ${result.pair_id} proposed (${result.status}) — tx ${result.tx_hash}`);
+      const ammNote = result.amm_address ? ` — AMM ${result.amm_address}` : "";
+      toast.success(`Pair ${result.pair_id} proposed (${result.status})${ammNote}`);
       void loadPairs();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to propose pair");
@@ -386,12 +366,12 @@ export function LiquidityProvisioningPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="propose-amm-address">Hub AMM address</Label>
+            <Label htmlFor="propose-amm-address">Dedicated AMM address (optional)</Label>
             <Input
               id="propose-amm-address"
               value={proposeAmmAddress}
               onChange={(event) => setProposeAmmAddress(event.target.value)}
-              placeholder="0x... (pre-filled from existing pairs)"
+              placeholder="leave blank — a dedicated per-pair AMM is deployed automatically"
             />
           </div>
 

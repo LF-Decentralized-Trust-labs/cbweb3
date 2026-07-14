@@ -37,7 +37,8 @@ export interface ProposePairRequest {
   pair_id: string;
   token_a_address: string;
   token_b_address: string;
-  amm_address: string;
+  /** Optional override. Leave empty to let the gateway deploy a dedicated per-pair AMM. */
+  amm_address?: string;
   proposer_cb: string;
 }
 
@@ -45,6 +46,8 @@ export interface ProposePairResponse {
   pair_id: string;
   status: string;
   tx_hash: string;
+  /** Address of the dedicated AMM the gateway deployed (or the supplied override). */
+  amm_address?: string;
 }
 
 export interface ConfirmPairRequest {
