@@ -12,7 +12,14 @@ import (
 
 	ammclient "github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/amm"
 	tcebmclient "github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/tcebm"
+	"github.com/ethereum/go-ethereum/crypto"
 )
+
+// commitIDForPair derives the shared escrow commit id from the pool_pair string, so both
+// sovereign CBs deposit against the same id without a registry: keccak256(pool_pair).
+func commitIDForPair(poolPair string) [32]byte {
+	return crypto.Keccak256Hash([]byte(poolPair))
+}
 
 // ammAdapter satisfies the service interfaces (AMMQuoter, AMMPoolReader, AMMSwapper,
 // AMLiquidityAdder, AMMCircuitBreakerCaller) by resolving the AMM client for a given
@@ -247,6 +254,92 @@ func (a *ammAdapter) TokenBalanceAt(ctx context.Context, ammAddress string, isTo
 		return nil, err
 	}
 	return c.TokenBalanceAt(ctx, ammAddress, isTokenA, holderAddr)
+}
+
+// --- Sovereign per-pair escrow seed (simplified commit-reveal, no LCR) ---
+// Each CB deposits ONLY its own side against the deterministic commit id
+// keccak256(pool_pair); finalize funds reserves atomically once both sides are in;
+// a CB can reclaim its own pending side before finalize. Side is auto-resolved.
+
+// DepositSideForCommit escrows the caller CB's own side of poolPair (the token it is the
+// central bank of) against the shared commit id. The W-token must already be minted to
+// the signer (see AMMTokenPreparer). Returns the resolved side ("A"/"B").
+func (a *ammAdapter) DepositSideForCommit(ctx context.Context, poolPair string, amount *big.Int) (string, error) {
+	if a.resolver == nil {
+		return "", fmt.Errorf("amm: no pair resolver configured")
+	}
+	side, err := a.resolver.SideForSigner(ctx, poolPair)
+	if err != nil {
+		return "", err
+	}
+	ammAddr, err := a.resolver.ammAddressFor(ctx, poolPair)
+	if err != nil {
+		return "", err
+	}
+	c, err := a.clientFor(ctx, poolPair)
+	if err != nil {
+		return "", err
+	}
+	if err := c.DepositForCommitAt(ctx, ammAddr, commitIDForPair(poolPair), side == "A", amount, ""); err != nil {
+		return "", err
+	}
+	return side, nil
+}
+
+// FinalizeCommitForPair finalizes the escrow for poolPair once both sides are deposited,
+// funding the pool reserves and minting LP shares to each side's depositor.
+func (a *ammAdapter) FinalizeCommitForPair(ctx context.Context, poolPair string) (*ammclient.FinalizeResult, error) {
+	if a.resolver == nil {
+		return nil, fmt.Errorf("amm: no pair resolver configured")
+	}
+	ammAddr, err := a.resolver.ammAddressFor(ctx, poolPair)
+	if err != nil {
+		return nil, err
+	}
+	c, err := a.clientFor(ctx, poolPair)
+	if err != nil {
+		return nil, err
+	}
+	return c.FinalizeCommitAt(ctx, ammAddr, commitIDForPair(poolPair))
+}
+
+// CancelSideForCommit reclaims the caller CB's own pending side of poolPair (before finalize).
+func (a *ammAdapter) CancelSideForCommit(ctx context.Context, poolPair string) (string, error) {
+	if a.resolver == nil {
+		return "", fmt.Errorf("amm: no pair resolver configured")
+	}
+	side, err := a.resolver.SideForSigner(ctx, poolPair)
+	if err != nil {
+		return "", err
+	}
+	ammAddr, err := a.resolver.ammAddressFor(ctx, poolPair)
+	if err != nil {
+		return "", err
+	}
+	c, err := a.clientFor(ctx, poolPair)
+	if err != nil {
+		return "", err
+	}
+	if err := c.CancelCommitDepositAt(ctx, ammAddr, commitIDForPair(poolPair), side == "A"); err != nil {
+		return "", err
+	}
+	return side, nil
+}
+
+// GetCommitEscrow reads the escrow state for poolPair's shared commit id (for UI status).
+func (a *ammAdapter) GetCommitEscrow(ctx context.Context, poolPair string) (*ammclient.EscrowState, error) {
+	if a.resolver == nil {
+		return nil, fmt.Errorf("amm: no pair resolver configured")
+	}
+	ammAddr, err := a.resolver.ammAddressFor(ctx, poolPair)
+	if err != nil {
+		return nil, err
+	}
+	c, err := a.clientFor(ctx, poolPair)
+	if err != nil {
+		return nil, err
+	}
+	return c.GetEscrowAt(ctx, ammAddr, commitIDForPair(poolPair))
 }
 
 // --- AMMCircuitBreakerCaller ---

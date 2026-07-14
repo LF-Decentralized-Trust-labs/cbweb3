@@ -609,6 +609,50 @@ func (c *Client) TokenBalanceAt(ctx context.Context, ammAddress string, isTokenA
 	return balance, nil
 }
 
+// CancelCommitDepositAt reclaims the signer's escrowed side of `commitID` on an arbitrary AMM
+// (sovereign flow: a CB pulls its own pending deposit back when the counterpart has not committed).
+// The on-chain guard enforces msg.sender == the side's depositor and reverts once finalized.
+func (c *Client) CancelCommitDepositAt(ctx context.Context, ammAddress string, commitID [32]byte, isTokenA bool) error {
+	if c.signer == nil {
+		return errors.New("amm: cancelCommitDepositAt requires a signing key")
+	}
+	contract := common.HexToAddress(ammAddress)
+	if _, err := evm.SubmitTx(ctx, c.ec, c.signer, contract, c.abi, "cancelCommitDeposit", commitID, isTokenA); err != nil {
+		return fmt.Errorf("cancelCommitDepositAt %s: %w", ammAddress, err)
+	}
+	return nil
+}
+
+// EscrowState is the on-chain escrow for a commit on an AMM (which sides are deposited + finalized).
+type EscrowState struct {
+	DepositorA common.Address
+	DepositorB common.Address
+	RecipientA common.Address
+	RecipientB common.Address
+	AmountA    *big.Int
+	AmountB    *big.Int
+	Finalized  bool
+}
+
+// GetEscrowAt reads the escrow state of `commitID` on an arbitrary AMM (view call, no gas).
+func (c *Client) GetEscrowAt(ctx context.Context, ammAddress string, commitID [32]byte) (*EscrowState, error) {
+	contract := common.HexToAddress(ammAddress)
+	var (
+		depA, depB, recA, recB common.Address
+		amtA                   = new(big.Int)
+		amtB                   = new(big.Int)
+		finalized              bool
+	)
+	if err := evm.Call(ctx, c.ec, contract, c.abi, "getEscrow", []interface{}{commitID},
+		&depA, &depB, &recA, &recB, amtA, amtB, &finalized); err != nil {
+		return nil, fmt.Errorf("getEscrow %s: %w", ammAddress, err)
+	}
+	return &EscrowState{
+		DepositorA: depA, DepositorB: depB, RecipientA: recA, RecipientB: recB,
+		AmountA: amtA, AmountB: amtB, Finalized: finalized,
+	}, nil
+}
+
 // FeeBps returns the current fee rate in basis points from the contract.
 func (c *Client) FeeBps(ctx context.Context) (*big.Int, error) {
 	out := new(big.Int)

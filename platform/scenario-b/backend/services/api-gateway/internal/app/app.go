@@ -339,6 +339,9 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		} else {
 			pairResolver = newPairAMMResolver(pr, hubRPC, hubChainID, signerKey, 15*time.Second)
 			deps.PairSideResolver = pairResolver
+			// Sovereign seeding driver (escrow-and-finalize, no LCR): resolves side + AMM +
+			// commit id per pair and drives depositForCommit/finalizeCommit/cancelCommitDeposit.
+			deps.SovereignSeed = &sovereignSeedAdapter{a: &ammAdapter{resolver: pairResolver}}
 			log.Printf("dynamic per-pair AMM resolution enabled (PairRegistry %s)", pairRegistryAddr)
 		}
 	}
