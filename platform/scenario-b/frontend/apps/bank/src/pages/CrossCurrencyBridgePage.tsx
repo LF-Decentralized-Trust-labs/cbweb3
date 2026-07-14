@@ -55,7 +55,7 @@ function currencyCode(symbol: string): string {
   return parts[parts.length - 1] || symbol;
 }
 
-export function SwapPage() {
+export function CrossCurrencyBridgePage() {
   const poolStatus = useCrossCurrencySwapStore((state) => state.poolStatus);
   const quote = useCrossCurrencySwapStore((state) => state.quote);
   const quoteExpiresAt = useCrossCurrencySwapStore((state) => state.quoteExpiresAt);

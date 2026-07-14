@@ -9,7 +9,6 @@ import { AgreementDetailPage } from "../pages/AgreementDetailPage";
 import { AgreementInboxPage } from "../pages/AgreementInboxPage";
 import { AgreementProposalPage } from "../pages/AgreementProposalPage";
 import { AMMTradingPage } from "../pages/AMMTradingPage";
-import { ApproveAmmPage } from "../pages/ApproveAmmPage";
 import { ComplianceCenterPage } from "../pages/ComplianceCenterPage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { DepositsPage } from "../pages/DepositsPage";
@@ -19,7 +18,7 @@ import { LoginPage } from "../pages/LoginPage";
 import { OnboardingPage } from "../pages/OnboardingPage";
 import { RedeemsPage } from "../pages/RedeemsPage";
 import { SettingsPage } from "../pages/SettingsPage";
-import { SwapPage } from "../pages/SwapPage";
+import { CrossCurrencyBridgePage } from "../pages/CrossCurrencyBridgePage";
 import { TransferPage } from "../pages/TransferPage";
 
 const scenarioAChildren: RouteObject[] = [
@@ -44,13 +43,12 @@ const scenarioAChildren: RouteObject[] = [
 
 const scenarioBChildren: RouteObject[] = [
   { index: true, element: <DashboardPage /> },
-  // Cross-currency bridge (formerly "Swap"): the SwapPage component drives the
-  // sovereign-pool cross-currency flow; the legacy BridgePage was outdated and removed.
-  { path: "bridge", element: <SwapPage /> },
+  // Cross-currency bridge (formerly "Swap"): drives the sovereign-pool cross-currency
+  // flow. The legacy features/bridge BridgePage was outdated and has been removed.
+  { path: "bridge", element: <CrossCurrencyBridgePage /> },
   { path: "transfer", element: <TransferPage /> },
   { path: "deposits", element: <DepositsPage /> },
   { path: "escrows", element: <EscrowsPage /> },
-  { path: "approve-amm", element: <ApproveAmmPage /> },
   { path: "redeems", element: <RedeemsPage /> },
   { path: "amm", element: <AMMTradingPage /> },
   { path: "compliance", element: <ComplianceCenterPage /> },
