@@ -55,7 +55,6 @@ export function LiquidityProvisioningPage() {
   const [proposeSymbolA, setProposeSymbolA] = useState("");
   const [proposeSymbolB, setProposeSymbolB] = useState("");
   const [proposePairId, setProposePairId] = useState("");
-  const [proposeAmmAddress, setProposeAmmAddress] = useState("");
   const [proposeTokenA, setProposeTokenA] = useState("");
   const [proposeTokenB, setProposeTokenB] = useState("");
   const [proposeProposerCb, setProposeProposerCb] = useState("");
@@ -208,14 +207,12 @@ export function LiquidityProvisioningPage() {
     }
     setProposing(true);
     try {
-      // amm_address is left empty by default: the gateway deploys a dedicated,
-      // per-pair AMM bound to the two W-tokens. Only send an address when the
-      // operator explicitly overrides it under Advanced.
+      // The gateway always deploys a dedicated, per-pair AMM bound to the two
+      // W-tokens; there is no operator-supplied AMM address anymore.
       const result = await hubLiquidityApi.proposePair({
         pair_id: proposePairId.trim(),
         token_a_address: proposeTokenA.trim(),
         token_b_address: proposeTokenB.trim(),
-        amm_address: proposeAmmAddress.trim(),
         proposer_cb: proposeProposerCb.trim(),
       });
       const ammNote = result.amm_address ? ` — AMM ${result.amm_address}` : "";
@@ -365,15 +362,6 @@ export function LiquidityProvisioningPage() {
               value={proposePairId}
               onChange={(event) => setProposePairId(event.target.value)}
               placeholder="auto-derived from the two symbols"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="propose-amm-address">Dedicated AMM address (optional)</Label>
-            <Input
-              id="propose-amm-address"
-              value={proposeAmmAddress}
-              onChange={(event) => setProposeAmmAddress(event.target.value)}
-              placeholder="leave blank — a dedicated per-pair AMM is deployed automatically"
             />
           </div>
 
