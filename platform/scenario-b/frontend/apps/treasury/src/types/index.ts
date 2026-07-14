@@ -7,3 +7,4 @@ export type { EventType, TreasuryEvent } from "./events.types";
 export type { TransferLimit, CreateTransferLimitPayload } from "./transfer-limits.types";
 export * from "./payment.types";
 export * from "./liquidity.types";
+export * from "./hub-liquidity.types";
