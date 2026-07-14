@@ -338,6 +338,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			log.Printf("warning: pair AMM resolver init failed: %v", err)
 		} else {
 			pairResolver = newPairAMMResolver(pr, hubRPC, hubChainID, signerKey, 15*time.Second)
+			deps.PairSideResolver = pairResolver
 			log.Printf("dynamic per-pair AMM resolution enabled (PairRegistry %s)", pairRegistryAddr)
 		}
 	}

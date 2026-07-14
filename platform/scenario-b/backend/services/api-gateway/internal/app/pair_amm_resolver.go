@@ -127,6 +127,36 @@ func (r *pairAMMResolver) ammFor(ctx context.Context, poolPair string) (*ammclie
 	return c, nil
 }
 
+// SideForSigner determines which side ("A" or "B") of poolPair this gateway's
+// signer is the central bank of, by checking CENTRAL_BANK_ROLE on the pair's two
+// W-tokens. This makes the side an on-chain property of (pair, CB) — no manual
+// picker, no brittle BANK_CODE mapping. A CB is the issuer of exactly one side of
+// a sovereign corridor; an error is returned if it is neither (or both).
+func (r *pairAMMResolver) SideForSigner(ctx context.Context, poolPair string) (string, error) {
+	tokA, tokB, err := r.tokensFor(ctx, poolPair)
+	if err != nil {
+		return "", err
+	}
+	isA, err := tokA.HasCentralBankRole(ctx)
+	if err != nil {
+		return "", fmt.Errorf("side resolve: role check on token A: %w", err)
+	}
+	isB, err := tokB.HasCentralBankRole(ctx)
+	if err != nil {
+		return "", fmt.Errorf("side resolve: role check on token B: %w", err)
+	}
+	switch {
+	case isA && !isB:
+		return "A", nil
+	case isB && !isA:
+		return "B", nil
+	case isA && isB:
+		return "", fmt.Errorf("side resolve: signer is central bank of BOTH sides of %q — sovereignty violated", poolPair)
+	default:
+		return "", fmt.Errorf("side resolve: signer is not the central bank of either side of %q", poolPair)
+	}
+}
+
 // tokensFor returns the W-token clients (A, B) for poolPair.
 func (r *pairAMMResolver) tokensFor(ctx context.Context, poolPair string) (*tcebmclient.Client, *tcebmclient.Client, error) {
 	pa, err := r.lookupPair(ctx, poolPair)

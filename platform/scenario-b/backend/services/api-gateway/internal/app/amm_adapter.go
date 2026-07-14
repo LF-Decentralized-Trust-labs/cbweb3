@@ -330,10 +330,19 @@ func (a *tokenPrepareAdapter) tokenForPair(ctx context.Context, poolPair, side s
 		if err != nil {
 			return nil, "", err
 		}
+		// Auto-derive the side from the pair when the caller does not pin one: a CB
+		// operates only its own currency, so the side is the token it is the central
+		// bank of (on-chain CENTRAL_BANK_ROLE). No manual side picker needed.
+		if side == "" {
+			side, err = a.resolver.SideForSigner(ctx, poolPair)
+			if err != nil {
+				return nil, "", err
+			}
+		}
 		switch side {
 		case "B":
 			return tokB, ammAddr, nil
-		case "A", "":
+		case "A":
 			return tokA, ammAddr, nil
 		default:
 			return nil, "", fmt.Errorf("token_prepare: side must be 'A' or 'B', got %q", side)

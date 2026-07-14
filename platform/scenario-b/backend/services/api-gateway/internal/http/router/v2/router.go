@@ -90,6 +90,9 @@ type Dependencies struct {
 	LPPositionRepo handlers.LPPositionReaderIface
 	// LPBalanceReader enables GET /api/v2/amm/lp-balance — the CB's live on-chain CBW3-LP position (013).
 	LPBalanceReader handlers.LPBalanceReaderIface
+	// PairSideResolver derives the CB's side ("A"/"B") for a pool_pair from the on-chain
+	// CENTRAL_BANK_ROLE, replacing the BANK_CODE→side mapping (nil ⇒ fall back to config).
+	PairSideResolver handlers.PairSideResolverIface
 	// Simplified API config (008-fix-cb-liquidity)
 	SpokeNetwork      string // spoke-a, spoke-b (for bridge lock-mint derivation)
 	NativeAssetSymbol string // tCeBM_BRL, tCeBM_ARS (for bridge lock-mint derivation)
@@ -291,9 +294,9 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 				deps.CommitSide,       // NEW: derived from BANK_CODE
 				deps.WTokenAddress,    // NEW: from config
 				deps.LocalCBHubSigner, // NEW: LOCAL_CB_HUB_SIGNER for balance checks
-			).SetFallbackBankCode(deps.BankCode)
+			).SetFallbackBankCode(deps.BankCode).WithSideResolver(deps.PairSideResolver)
 		} else {
-			lh = handlers.NewLiquidityHandler(deps.LiquidityService)
+			lh = handlers.NewLiquidityHandler(deps.LiquidityService).WithSideResolver(deps.PairSideResolver)
 		}
 		// Legacy dual-sided liquidity provisioning (used by tryouts and frontend governance).
 		// For sovereign CB flow, use commit-reveal + bridge-based approach instead.
@@ -491,7 +494,7 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 		deps.CommitSide,       // NEW: derived from BANK_CODE
 		deps.WTokenAddress,    // NEW: from config
 		deps.LocalCBHubSigner, // NEW: LOCAL_CB_HUB_SIGNER for balance checks
-	).SetFallbackBankCode(deps.BankCode)
+	).SetFallbackBankCode(deps.BankCode).WithSideResolver(deps.PairSideResolver)
 	app.Post("/internal/amm/execute-matched-commit",
 		middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 		lh.ExecuteMatchedCommit,
