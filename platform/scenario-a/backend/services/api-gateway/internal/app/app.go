@@ -140,6 +140,10 @@ func New(cfg config.Config) (*App, error) {
 		// Resolve requester institution names for deposit/escrow/redeem listings
 		// (Treasury portal auditing) via the compliance participant registry.
 		ph = ph.WithParticipantResolver(complianceGRPC)
+		// Validate FX agreement party identities against the configured Paladin
+		// roster at propose time, so an off-roster identity is rejected with a
+		// clear 400 instead of a cryptic on-chain Pente failure.
+		ph = ph.WithIdentityRoster(cfg.PaladinIdentities)
 		if cfg.FiatSymbol != "" {
 			limitComplianceGRPC := complianceGRPC
 			// Commercial banks point their limit checks at the central bank's compliance service,

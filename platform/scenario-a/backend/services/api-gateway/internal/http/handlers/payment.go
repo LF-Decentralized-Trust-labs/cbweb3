@@ -41,6 +41,10 @@ type PaymentHandler struct {
 	fiatSymbol   string // currency for transfer limit checks (e.g. "BRL", "ARS"); empty = skip check
 	limitChecker TransferLimitChecker
 	participants ParticipantResolver // optional; enables requester-name enrichment on listings
+	// identityRoster is the set of Paladin identities valid as FX agreement
+	// parties. When non-empty, ProposeFXAgreement rejects any party identity not
+	// in the set with a 400 (fail fast, before the on-chain Pente propose).
+	identityRoster map[string]struct{}
 }
 
 // NewPaymentHandler creates a new PaymentHandler.
@@ -53,6 +57,49 @@ func NewPaymentHandler(payment *paymentadapter.GRPCAdapter, bankCode string) *Pa
 func (h *PaymentHandler) WithParticipantResolver(resolver ParticipantResolver) *PaymentHandler {
 	h.participants = resolver
 	return h
+}
+
+// WithIdentityRoster configures the Paladin identities accepted as FX agreement
+// parties. An empty roster disables validation (nothing to validate against).
+func (h *PaymentHandler) WithIdentityRoster(identities []string) *PaymentHandler {
+	if len(identities) == 0 {
+		h.identityRoster = nil
+		return h
+	}
+	roster := make(map[string]struct{}, len(identities))
+	for _, id := range identities {
+		if trimmed := strings.TrimSpace(id); trimmed != "" {
+			roster[trimmed] = struct{}{}
+		}
+	}
+	h.identityRoster = roster
+	return h
+}
+
+// unknownIdentities returns the non-empty party identities, in the given order
+// and de-duplicated, that are not present in the configured Paladin roster.
+// Returns nil when no roster is configured (validation disabled) or all
+// identities are valid.
+func (h *PaymentHandler) unknownIdentities(identities ...string) []string {
+	if len(h.identityRoster) == 0 {
+		return nil
+	}
+	var invalid []string
+	seen := make(map[string]struct{}, len(identities))
+	for _, id := range identities {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			continue
+		}
+		if _, dup := seen[trimmed]; dup {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		if _, ok := h.identityRoster[trimmed]; !ok {
+			invalid = append(invalid, trimmed)
+		}
+	}
+	return invalid
 }
 
 // participantNamesByWallet builds a lowercase-wallet-address → institution-name
@@ -624,6 +671,22 @@ func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
 	if req.CounterpartyB == "" || req.OriginAmount == "" || req.CounterAmount == "" ||
 		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "counterparty_b, origin_amount, counter_amount, origin_currency, counter_currency, rate, and expiry_date are required"})
+	}
+	// Reject any party identity that is not in the configured Paladin roster
+	// before reaching the on-chain propose, which would otherwise fail with a
+	// cryptic Pente membership error (PD011814).
+	if invalid := h.unknownIdentities(
+		req.CounterpartyB,
+		req.SettlementAgent,
+		req.Custodian,
+		req.Beneficiary,
+		req.SourceReceiver,
+		req.DestReceiver,
+	); len(invalid) > 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":              "one or more party identities are not in the Paladin roster: " + strings.Join(invalid, ", "),
+			"invalid_identities": invalid,
+		})
 	}
 	result, err := h.payment.ProposeFXAgreement(c.Context(), &pb.ProposeFXAgreementRequest{
 		TradeId:         req.TradeID,

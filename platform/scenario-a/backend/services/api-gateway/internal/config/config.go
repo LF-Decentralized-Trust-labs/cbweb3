@@ -58,6 +58,16 @@ func Load() Config {
 		log.Warnf("no .env (.env) file(s) found, using environment variables: function error: %s", err.Error())
 	}
 
+	// PALADIN_IDENTITIES gates the FX agreement party roster. When it is unset we
+	// fall back to the reference BRL+COP demo identities, which belong to another
+	// network — every propose then fails on-chain. Warn loudly so a deployment
+	// that forgot to configure the roster is not left guessing.
+	if strings.TrimSpace(os.Getenv("PALADIN_IDENTITIES")) == "" {
+		log.Warnf("PALADIN_IDENTITIES is not set; serving the reference BRL+COP demo roster. " +
+			"Set PALADIN_IDENTITIES (comma-separated) to this network's real Paladin identities, " +
+			"otherwise FX agreement proposals will fail with a Pente membership error.")
+	}
+
 	return Config{
 		AppPort:            getEnv("APP_PORT", "8080"),
 		RequestTimeout:     time.Duration(getEnvInt("REQUEST_TIMEOUT_SEC", 5)) * time.Second,

@@ -632,6 +632,45 @@ func TestFXAgreementEndpoints(t *testing.T) {
 	}
 }
 
+func TestProposeFXAgreement_RosterValidation(t *testing.T) {
+	t.Parallel()
+	fake := &fakePaymentServer{fxPropose: &pb.ProposeFXAgreementResponse{TradeId: "t1", TxHash: "tx"}}
+	h := startFakePaymentBackend(t, fake).
+		WithIdentityRoster([]string{"alice@spoke-a-bank-a", "bob@spoke-b-bank-b"})
+	app := fiber.New()
+	app.Use(authedClaims("bank-a"))
+	app.Post("/fx", h.ProposeFXAgreement)
+
+	terms := func(counterparty, beneficiary string) map[string]any {
+		return map[string]any{
+			"counterparty_b": counterparty, "beneficiary": beneficiary,
+			"origin_amount": "1", "counter_amount": "2",
+			"origin_currency": "BRL", "counter_currency": "ARS", "rate": "2", "expiry_date": 99,
+		}
+	}
+
+	// Off-roster identity → 400 before the on-chain propose, listing the offender.
+	resp := postJSON(t, app, "/fx", terms("carol@spoke-x-bank-c", "alice@spoke-a-bank-a"))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("off-roster propose: want 400, got %d", resp.StatusCode)
+	}
+	var body struct {
+		InvalidIdentities []string `json:"invalid_identities"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	_ = resp.Body.Close()
+	if len(body.InvalidIdentities) != 1 || body.InvalidIdentities[0] != "carol@spoke-x-bank-c" {
+		t.Errorf("invalid_identities = %v, want [carol@spoke-x-bank-c]", body.InvalidIdentities)
+	}
+
+	// All parties on the roster → reaches the backend and returns 201.
+	if resp := postJSON(t, app, "/fx", terms("alice@spoke-a-bank-a", "bob@spoke-b-bank-b")); resp.StatusCode != http.StatusCreated {
+		t.Errorf("on-roster propose: want 201, got %d", resp.StatusCode)
+	}
+}
+
 func TestFXAgreement_ErrorMapping(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
