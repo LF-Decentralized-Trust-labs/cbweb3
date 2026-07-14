@@ -31,7 +31,7 @@ type AMMSwapper interface {
 
 // AMMFeeReader reads the current swap fee rate from the AMM contract (T058 / FR-006).
 type AMMFeeReader interface {
-	GetFeeBps(ctx context.Context) (uint64, error)
+	GetFeeBps(ctx context.Context, pair string) (uint64, error)
 }
 
 // SwapFeeRecorder distributes swap fees to active LP positions synchronously (T058 / FR-006 / D14).
@@ -80,7 +80,7 @@ func (e *ZKValidationError) Error() string { return e.Msg }
 type SwapService struct {
 	swapper     AMMSwapper
 	gates       SwapGates
-	feeReader   AMMFeeReader   // optional: reads feeBps for fee distribution (T058)
+	feeReader   AMMFeeReader    // optional: reads feeBps for fee distribution (T058)
 	feeRecorder SwapFeeRecorder // optional: distributes fees to LPs after swap (T058)
 }
 
@@ -186,7 +186,7 @@ func (s *SwapService) Execute(ctx context.Context, req SwapRequest) (*SwapResult
 	// D14 / FR-006: Distribute swap fee to active LPs synchronously.
 	// Failure is non-blocking — logged as warning, does not affect the swap response.
 	if s.feeRecorder != nil && s.feeReader != nil {
-		if feeBps, feeErr := s.feeReader.GetFeeBps(ctx); feeErr == nil && feeBps > 0 {
+		if feeBps, feeErr := s.feeReader.GetFeeBps(ctx, req.Pair); feeErr == nil && feeBps > 0 {
 			if amtIn, ok := new(big.Int).SetString(amountIn, 10); ok {
 				feeA := new(big.Int).Mul(amtIn, new(big.Int).SetUint64(feeBps))
 				feeA.Div(feeA, big.NewInt(10000))

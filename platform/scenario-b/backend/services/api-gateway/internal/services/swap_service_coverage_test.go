@@ -66,7 +66,7 @@ type fakeFeeReader struct {
 	err    error
 }
 
-func (f fakeFeeReader) GetFeeBps(_ context.Context) (uint64, error) { return f.feeBps, f.err }
+func (f fakeFeeReader) GetFeeBps(_ context.Context, _ string) (uint64, error) { return f.feeBps, f.err }
 
 type fakeFeeRecorder struct {
 	called bool

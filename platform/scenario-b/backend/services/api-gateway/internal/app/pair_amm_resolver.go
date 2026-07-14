@@ -79,6 +79,23 @@ func (r *pairAMMResolver) lookupPair(ctx context.Context, poolPair string) (pair
 	return pa, nil
 }
 
+// primaryClient returns an AMM client bound to the FIRST active pair. It backs the
+// genuinely pairless legacy operations (LP-share balance read, withdrawal, and the
+// sovereign commit calls whose target AMM address is passed explicitly) now that no
+// default/bootstrap AMM exists. With a single corridor this is exactly that pool;
+// with multiple corridors it is a documented limitation (see TD-001) — those callers
+// predate multi-pair and do not carry a pool_pair. Errors when no active pair exists.
+func (r *pairAMMResolver) primaryClient(ctx context.Context) (*ammclient.Client, error) {
+	entries, err := r.pr.GetAllActivePairs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("resolve primary AMM: %w", err)
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("resolve primary AMM: no active pairs")
+	}
+	return r.ammFor(ctx, entries[0].PairID)
+}
+
 // ammFor returns an AMM client bound to poolPair's on-chain AMM + W-tokens.
 func (r *pairAMMResolver) ammFor(ctx context.Context, poolPair string) (*ammclient.Client, error) {
 	pa, err := r.lookupPair(ctx, poolPair)
