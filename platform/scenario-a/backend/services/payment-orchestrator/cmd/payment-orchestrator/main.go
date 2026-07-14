@@ -249,6 +249,7 @@ func main() {
 		FXAgreementPente: fxAgreementPente,
 		FXRepo:           fxRepo,
 		Pente:            pente,
+		FXChainReader:    fxChainReader,
 		FXContextsFile:   getEnv("FX_CONTEXTS_FILE", "/workspace/backend/config/pki/fx-contexts.json"),
 		RateTolPct:       rateTolPct,
 		CrossSpokeMode:   true, // relay is always active in production (CACTI_API_URL is required)

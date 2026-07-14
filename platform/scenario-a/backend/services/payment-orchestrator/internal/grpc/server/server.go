@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +41,7 @@ type paymentOrchestratorService struct {
 	fxRepo           ports.FXAgreementRepository   // persistent FX agreement storage (nil = dev in-memory)
 	htlcRepo         ports.HTLCRepository          // required in production; nil only in unit tests
 	pente            ports.PenteClientPort         // optional bilateral private-context manager
+	fxChainReader    ports.FXChainReaderPort       // optional — lists Pente groups for the participant roster
 	fxContexts       *fxContextStore               // A6: file-backed FX context resolver (group/contract per bank)
 	rateTolPct       float64                       // rate tolerance fraction (e.g. 0.001 for 0.1%)
 	crossSpokeMode   bool                          // when true, settle is gated on CounterpartyLocked
@@ -66,7 +68,8 @@ type Config struct {
 	// HTLCRepo is required in production for durable HTLC state across restarts.
 	// Pass nil only in unit tests that do not need DB persistence.
 	HTLCRepo   ports.HTLCRepository
-	Pente      ports.PenteClientPort // optional — nil disables bilateral private context integration
+	Pente      ports.PenteClientPort   // optional — nil disables bilateral private context integration
+	FXChainReader ports.FXChainReaderPort // optional — nil disables the live participant roster
 	// FXContextsFile is the path to a JSON file of bilateral FX contexts (group/contract per
 	// bank), written by the toolkit's deploy-fxa. Empty disables file-based resolution (falls
 	// back to the Pente client). See PLAN.md "A6".
@@ -106,6 +109,7 @@ func New(cfg Config) (*grpc.Server, func(context.Context), error) {
 		fxRepo:           cfg.FXRepo,
 		htlcRepo:         cfg.HTLCRepo,
 		pente:            cfg.Pente,
+		fxChainReader:    cfg.FXChainReader,
 		fxContexts:       newFXContextStore(cfg.FXContextsFile),
 		rateTolPct:       rateTol,
 		crossSpokeMode:   cfg.CrossSpokeMode,
@@ -1330,6 +1334,37 @@ func (s *paymentOrchestratorService) ListFXAgreementEvents(ctx context.Context, 
 	}
 
 	return &pb.ListFXAgreementEventsResponse{Events: pbEvents}, nil
+}
+
+// ListParticipantIdentities returns the distinct Paladin identities across every
+// bilateral Pente group this node belongs to — the real FX-party roster. When no
+// chain reader is configured (Pente disabled) it returns an empty list rather
+// than an error, so the caller can surface "roster not configured".
+func (s *paymentOrchestratorService) ListParticipantIdentities(ctx context.Context, _ *pb.ListParticipantIdentitiesRequest) (*pb.ListParticipantIdentitiesResponse, error) {
+	if s.fxChainReader == nil {
+		return &pb.ListParticipantIdentitiesResponse{}, nil
+	}
+	groups, err := s.fxChainReader.QueryGroups(ctx, 0)
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "query pente groups: %v", err)
+	}
+	seen := make(map[string]struct{})
+	identities := make([]string, 0)
+	for _, g := range groups {
+		for _, member := range g.Members {
+			member = strings.TrimSpace(member)
+			if member == "" {
+				continue
+			}
+			if _, dup := seen[member]; dup {
+				continue
+			}
+			seen[member] = struct{}{}
+			identities = append(identities, member)
+		}
+	}
+	sort.Strings(identities)
+	return &pb.ListParticipantIdentitiesResponse{Identities: identities}, nil
 }
 
 func (s *paymentOrchestratorService) hasFXAgreementClient(record *domain.FXAgreementRecord) bool {

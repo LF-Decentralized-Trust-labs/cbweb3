@@ -157,6 +157,12 @@ message ListFXAgreementEventsResponse {
   repeated FXAgreementEvent events = 1;    // Ordered by occurred_at_unix ASC
 }
 
+message ListParticipantIdentitiesRequest {}
+
+message ListParticipantIdentitiesResponse {
+  repeated string identities = 1; // distinct Paladin identities, sorted
+}
+
 // ─── HTLC Messages ──────────────────────────────────────────────────────
 
 message HTLCLock {
@@ -509,6 +515,11 @@ service PaymentOrchestratorService {
   rpc GetFXAgreement(GetFXAgreementRequest) returns (GetFXAgreementResponse);
   rpc ListFXAgreements(ListFXAgreementsRequest) returns (ListFXAgreementsResponse);
   rpc ListFXAgreementEvents(ListFXAgreementEventsRequest) returns (ListFXAgreementEventsResponse);
+
+  // ListParticipantIdentities returns the distinct Paladin identities across all
+  // bilateral Pente groups this node belongs to — the real FX-party roster,
+  // derived from live membership rather than a static list.
+  rpc ListParticipantIdentities(ListParticipantIdentitiesRequest) returns (ListParticipantIdentitiesResponse);
 
   // HTLC dual-layer operations (public coordination + private Zeto lock)
   rpc LockHTLC(LockHTLCRequest) returns (LockHTLCResponse);
