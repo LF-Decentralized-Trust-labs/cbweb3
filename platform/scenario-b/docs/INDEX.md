@@ -202,11 +202,3 @@ Scenario A (Enhanced Correspondent Banking — bilateral HTLC, no hub) is docume
 | Runbooks | fx-agreement-reconciliation.md, onboarding-novo-cb-soberano.md | Available |
 | Design | cooperative-liquidity.md, fx-agreement-hybrid-design.md | Available |
 | External | scenario-b.md, glossary.md | Available |
-
----
-
-## Technical Debt
-
-| Item | Status | Description |
-|------|--------|-------------|
-| [tech-debt/TD-001-remove-default-amm.md](tech-debt/TD-001-remove-default-amm.md) | **RESOLVED** | Removed the phantom default (bootstrap) AMM. Every AMM op (quote/swap/pool/liquidity/mint/fee/breaker) resolves per pool_pair from the on-chain PairRegistry; the hub no longer deploys a default AMM and the gateway no longer needs `AMM_CONTRACT_ADDRESS`. Validated E2E on a clean deploy. |
