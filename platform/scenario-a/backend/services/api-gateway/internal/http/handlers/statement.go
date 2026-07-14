@@ -9,7 +9,9 @@ import (
 	"time"
 
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/gofiber/fiber/v2"
+	"google.golang.org/grpc/metadata"
 )
 
 // Token types surfaced on a statement movement.
@@ -24,6 +26,14 @@ const (
 	directionDebit  = "debit"  // money sent
 )
 
+// Movement kinds.
+const (
+	kindDeposit      = "deposit"
+	kindTokenisation = "tokenisation"
+	kindRedeem       = "redeem"
+	kindPvP          = "pvp_settlement" // inter-bank HTLC PvP settlement leg
+)
+
 // MovementSource supplies a commercial bank's persisted payment records so the
 // statement handler can consolidate them into a single credit/debit ledger.
 // PaymentProxyHandler implements it (records are fetched from the Central Bank,
@@ -32,6 +42,14 @@ type MovementSource interface {
 	FetchDeposits(ctx context.Context) ([]paymentadapter.DepositRecord, error)
 	FetchEscrows(ctx context.Context) ([]paymentadapter.EscrowRecord, error)
 	FetchRedeems(ctx context.Context) ([]paymentadapter.RedeemRecord, error)
+}
+
+// HTLCSource supplies the inter-bank HTLC PvP records visible to this entity's
+// payment-orchestrator, so the statement can add the settled PvP legs (sent =
+// debit, received = credit) alongside the deposit/tokenisation/redeem movements.
+// *paymentadapter.GRPCAdapter implements it.
+type HTLCSource interface {
+	SearchHTLC(ctx context.Context, agreementID, sender, receiver, state string) ([]paymentadapter.HTLCStatus, error)
 }
 
 // Movement is a single credit/debit line on the bank statement.
@@ -49,12 +67,23 @@ type Movement struct {
 // chronological consolidation of tokenized-fiat and tCeBM movements derived
 // from the bank's deposit, reserve-tokenisation and redeem records.
 type StatementHandler struct {
-	source MovementSource
+	source   MovementSource
+	htlc     HTLCSource // optional; enables inter-bank PvP settlement movements
+	bankCode string     // institution fallback when the JWT lacks BankID
 }
 
 // NewStatementHandler creates a StatementHandler over the given movement source.
 func NewStatementHandler(source MovementSource) *StatementHandler {
 	return &StatementHandler{source: source}
+}
+
+// WithHTLCSource attaches the payment-orchestrator HTLC search used to
+// consolidate inter-bank PvP settlement legs into the statement. bankCode is the
+// institution fallback applied when the caller's JWT carries no BankID.
+func (h *StatementHandler) WithHTLCSource(htlc HTLCSource, bankCode string) *StatementHandler {
+	h.htlc = htlc
+	h.bankCode = bankCode
+	return h
 }
 
 // GetStatement returns the bank's movements, most recent first.
@@ -151,6 +180,12 @@ func (h *StatementHandler) GetStatement(c *fiber.Ctx) error {
 		)
 	}
 
+	pvp, err := h.pvpMovements(c)
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "statement: load pvp settlements: " + err.Error()})
+	}
+	movements = append(movements, pvp...)
+
 	sort.SliceStable(movements, func(i, j int) bool {
 		return parseTimestamp(movements[i].Timestamp).After(parseTimestamp(movements[j].Timestamp))
 	})
@@ -158,10 +193,78 @@ func (h *StatementHandler) GetStatement(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"movements": movements, "total": len(movements)})
 }
 
+// pvpMovements consolidates this bank's settled inter-bank HTLC PvP legs into
+// statement movements: a leg where the bank is the sender is a debit (value
+// sent), one where it is the receiver is a credit (value received). Value moves
+// as tokenized fiat (fCeBM). Returns an empty slice when no HTLC source is
+// configured (e.g. the central-bank gateway, or tests).
+func (h *StatementHandler) pvpMovements(c *fiber.Ctx) ([]Movement, error) {
+	if h.htlc == nil {
+		return nil, nil
+	}
+
+	callerBankID := h.bankCode
+	if claims, ok := c.Locals("claims").(domain.TokenClaims); ok && claims.BankID != "" {
+		callerBankID = claims.BankID
+	}
+	if callerBankID == "" {
+		return nil, nil
+	}
+
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
+	locks, err := h.htlc.SearchHTLC(ctx, "", "", "", "")
+	if err != nil {
+		return nil, err
+	}
+
+	movements := make([]Movement, 0, len(locks))
+	for _, l := range locks {
+		if !isHTLCSettled(l.State) {
+			continue
+		}
+		senderBank, sErr := bankIDFromIdentity(l.Sender)
+		receiverBank, rErr := bankIDFromIdentity(l.Receiver)
+		if sErr != nil || rErr != nil {
+			// Unparseable identity: skip rather than misattribute a movement.
+			continue
+		}
+		if senderBank == callerBankID {
+			movements = append(movements, Movement{
+				ID:        "pvp:" + l.ContractID + ":debit",
+				Timestamp: l.CreatedAt,
+				Direction: directionDebit,
+				Token:     tokenFiat,
+				Amount:    l.Amount,
+				Kind:      kindPvP,
+				Reference: l.ContractID,
+			})
+		}
+		if receiverBank == callerBankID {
+			movements = append(movements, Movement{
+				ID:        "pvp:" + l.ContractID + ":credit",
+				Timestamp: l.CreatedAt,
+				Direction: directionCredit,
+				Token:     tokenFiat,
+				Amount:    l.Amount,
+				Kind:      kindPvP,
+				Reference: l.ContractID,
+			})
+		}
+	}
+	return movements, nil
+}
+
 // isSettled reports whether a record's status (a proto enum string such as
 // "DEPOSIT_STATUS_APPROVED") represents a completed, money-moving operation.
 func isSettled(status string) bool {
 	return strings.HasSuffix(strings.ToUpper(strings.TrimSpace(status)), "APPROVED")
+}
+
+// isHTLCSettled reports whether an HTLC state (proto enum string such as
+// "HTLC_STATE_SETTLED") represents a completed PvP settlement. The transient
+// "HTLC_STATE_SETTLING" is excluded (it does not end with "SETTLED").
+func isHTLCSettled(state string) bool {
+	return strings.HasSuffix(strings.ToUpper(strings.TrimSpace(state)), "SETTLED")
 }
 
 // parseTimestamp parses an RFC3339 timestamp; unparseable/empty values sort last.

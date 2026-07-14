@@ -11,8 +11,18 @@ import (
 	"testing"
 
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/gofiber/fiber/v2"
 )
+
+type fakeHTLCSource struct {
+	locks []paymentadapter.HTLCStatus
+	err   error
+}
+
+func (f *fakeHTLCSource) SearchHTLC(context.Context, string, string, string, string) ([]paymentadapter.HTLCStatus, error) {
+	return f.locks, f.err
+}
 
 type fakeMovementSource struct {
 	deposits []paymentadapter.DepositRecord
@@ -110,6 +120,90 @@ func TestStatement_ConsolidatesAndClassifies(t *testing.T) {
 	}
 	if !sawRedeemDebitTcebm || !sawRedeemCreditFiat {
 		t.Error("redeem should debit tCeBM and credit fCeBM")
+	}
+}
+
+func TestStatement_IncludesSettledPvPLegs(t *testing.T) {
+	htlc := &fakeHTLCSource{locks: []paymentadapter.HTLCStatus{
+		// bank-a is the sender → value sent (debit).
+		{ContractID: "c1", Sender: "alice@spoke-a-bank-a", Receiver: "bob@spoke-b-bank-b", State: "HTLC_STATE_SETTLED", Amount: "700", CreatedAt: "2026-07-11T10:00:00Z"},
+		// bank-a is the receiver → value received (credit).
+		{ContractID: "c2", Sender: "carol@spoke-b-bank-c", Receiver: "dave@spoke-a-bank-a", State: "HTLC_STATE_SETTLED", Amount: "300", CreatedAt: "2026-07-11T11:00:00Z"},
+		// Not settled → excluded.
+		{ContractID: "c3", Sender: "x@spoke-a-bank-a", Receiver: "y@spoke-b-bank-b", State: "HTLC_STATE_LOCKED", Amount: "50", CreatedAt: "2026-07-11T12:00:00Z"},
+		// bank-a not a counterparty → excluded.
+		{ContractID: "c4", Sender: "p@spoke-a-bank-x", Receiver: "q@spoke-b-bank-y", State: "HTLC_STATE_SETTLED", Amount: "99", CreatedAt: "2026-07-11T13:00:00Z"},
+	}}
+
+	h := NewStatementHandler(&fakeMovementSource{}).WithHTLCSource(htlc, "bank-a")
+	app := fiber.New()
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals("claims", domain.TokenClaims{Subject: "u", BankID: "bank-a"})
+		return c.Next()
+	})
+	app.Get("/api/v1/statement", h.GetStatement)
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/statement", nil))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Movements []Movement `json:"movements"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Only c1 (debit) and c2 (credit) qualify.
+	if len(body.Movements) != 2 {
+		t.Fatalf("expected 2 pvp movements, got %d: %+v", len(body.Movements), body.Movements)
+	}
+	var sawDebit, sawCredit bool
+	for _, m := range body.Movements {
+		if m.Kind != kindPvP {
+			t.Errorf("unexpected kind %q", m.Kind)
+		}
+		if m.Token != tokenFiat {
+			t.Errorf("pvp movement token = %q, want %q", m.Token, tokenFiat)
+		}
+		switch m.Reference {
+		case "c1":
+			sawDebit = m.Direction == directionDebit && m.Amount == "700"
+		case "c2":
+			sawCredit = m.Direction == directionCredit && m.Amount == "300"
+		default:
+			t.Errorf("unexpected pvp reference %q", m.Reference)
+		}
+	}
+	if !sawDebit {
+		t.Error("expected a debit leg for c1 (bank-a as sender)")
+	}
+	if !sawCredit {
+		t.Error("expected a credit leg for c2 (bank-a as receiver)")
+	}
+}
+
+func TestStatement_PvPSourceErrorReturns502(t *testing.T) {
+	h := NewStatementHandler(&fakeMovementSource{}).
+		WithHTLCSource(&fakeHTLCSource{err: errors.New("orchestrator down")}, "bank-a")
+	app := fiber.New()
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals("claims", domain.TokenClaims{Subject: "u", BankID: "bank-a"})
+		return c.Next()
+	})
+	app.Get("/api/v1/statement", h.GetStatement)
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/statement", nil))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
 	}
 }
 

@@ -2,7 +2,7 @@
 
 export type MovementDirection = "credit" | "debit";
 export type MovementToken = "fCeBM" | "tCeBM";
-export type MovementKind = "deposit" | "tokenisation" | "redeem";
+export type MovementKind = "deposit" | "tokenisation" | "redeem" | "pvp_settlement";
 
 // A single credit/debit line on the commercial bank statement (extrato).
 export interface Movement {

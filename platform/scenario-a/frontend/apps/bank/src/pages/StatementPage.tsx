@@ -25,6 +25,7 @@ const kindLabel: Record<string, string> = {
   deposit: "Deposit",
   tokenisation: "Reserve Tokenisation",
   redeem: "Redeem",
+  pvp_settlement: "PvP Settlement",
 };
 
 const tokenLabel: Record<string, string> = {

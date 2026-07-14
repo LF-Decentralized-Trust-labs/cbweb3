@@ -169,8 +169,9 @@ func New(cfg config.Config) (*App, error) {
 			)
 			deps.PaymentProxyHandler = proxy
 			// Statement (extrato) consolidates this bank's deposit/tokenisation/redeem
-			// records, sourced from the Central Bank via the same proxy.
-			deps.StatementHandler = handlers.NewStatementHandler(proxy)
+			// records (sourced from the Central Bank via the same proxy) plus its
+			// settled inter-bank HTLC PvP legs (from this entity's orchestrator).
+			deps.StatementHandler = handlers.NewStatementHandler(proxy).WithHTLCSource(paymentGRPC, cfg.BankCode)
 		}
 	}
 
