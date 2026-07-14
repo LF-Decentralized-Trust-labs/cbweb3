@@ -34,13 +34,12 @@ const scenarioALinks = [
 
 const scenarioBLinks = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/swap", label: "Swap", icon: Repeat },
+  { to: "/bridge", label: "Bridge", icon: Repeat },
   { to: "/transfer", label: "Transfer", icon: ArrowRightLeft },
   { to: "/deposits", label: "Issuance Requests", icon: ArrowDownToLine },
   { to: "/escrows", label: "Reserve Tokenisation", icon: Lock },
   { to: "/approve-amm", label: "Approve AMM", icon: Scale },
   { to: "/redeems", label: "Redeems", icon: ArrowUpFromLine },
-  { to: "/bridge", label: "Bridge", icon: ArrowRightLeft },
   { to: "/compliance", label: "Compliance", icon: ShieldCheck },
   { to: "/onboarding", label: "Onboarding", icon: ClipboardList },
   { to: "/settings", label: "Settings", icon: Settings },

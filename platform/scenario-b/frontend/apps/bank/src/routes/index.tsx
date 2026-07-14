@@ -5,7 +5,6 @@ import { Navigate } from "react-router-dom";
 import { ProtectedRoute } from "../components/auth/ProtectedRoute";
 import { AppLayout } from "../components/layout/AppLayout";
 import { isScenarioB } from "../config/scenario";
-import { BridgePage } from "../features/bridge/BridgePage";
 import { AgreementDetailPage } from "../pages/AgreementDetailPage";
 import { AgreementInboxPage } from "../pages/AgreementInboxPage";
 import { AgreementProposalPage } from "../pages/AgreementProposalPage";
@@ -45,13 +44,14 @@ const scenarioAChildren: RouteObject[] = [
 
 const scenarioBChildren: RouteObject[] = [
   { index: true, element: <DashboardPage /> },
-  { path: "swap", element: <SwapPage /> },
+  // Cross-currency bridge (formerly "Swap"): the SwapPage component drives the
+  // sovereign-pool cross-currency flow; the legacy BridgePage was outdated and removed.
+  { path: "bridge", element: <SwapPage /> },
   { path: "transfer", element: <TransferPage /> },
   { path: "deposits", element: <DepositsPage /> },
   { path: "escrows", element: <EscrowsPage /> },
   { path: "approve-amm", element: <ApproveAmmPage /> },
   { path: "redeems", element: <RedeemsPage /> },
-  { path: "bridge", element: <BridgePage /> },
   { path: "amm", element: <AMMTradingPage /> },
   { path: "compliance", element: <ComplianceCenterPage /> },
   { path: "onboarding", element: <OnboardingPage /> },

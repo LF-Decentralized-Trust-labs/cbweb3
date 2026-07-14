@@ -181,7 +181,7 @@ export function SwapPage() {
       if (!amountOut || !sourceCurrency || !targetCurrency) {
         return;
       }
-      void fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals));
+      void fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals), selectedPair?.pair_id);
     },
     CROSS_CURRENCY_QUOTE_REFRESH_MS,
     step === "idle" && quote !== null && amountOut.length > 0,
@@ -217,7 +217,7 @@ export function SwapPage() {
   const handleGetQuote = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     clearQuoteRefreshedNotice();
-    await fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals));
+    await fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals), selectedPair?.pair_id);
   };
 
   const handleExecuteSwap = async (event: FormEvent<HTMLFormElement>) => {
@@ -244,9 +244,9 @@ export function SwapPage() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Swap</CardTitle>
+          <CardTitle>Bridge</CardTitle>
           <CardDescription>
-            Cross-currency swap over a liquidity pool provisioned by the Central Banks. Select a pool, get a
+            Cross-currency bridge over a liquidity pool provisioned by the Central Banks. Select a pool, get a
             quote, and execute. Requires tokenised reserves (see Reserve Tokenisation).
           </CardDescription>
         </CardHeader>
@@ -399,7 +399,7 @@ export function SwapPage() {
       {quote ? (
         <Card>
           <CardHeader>
-            <CardTitle>Step 3: Execute Swap</CardTitle>
+            <CardTitle>Step 3: Execute Bridge</CardTitle>
             <CardDescription>Provide max input amount and beneficiary bank, then confirm.</CardDescription>
           </CardHeader>
           <CardContent>
@@ -445,7 +445,7 @@ export function SwapPage() {
                 disabled={isExecuteDisabled}
                 title={isQuoteExpired ? "Quote expired - click Get Quote to refresh" : undefined}
               >
-                Execute Swap
+                Execute Bridge
               </Button>
             </form>
           </CardContent>
@@ -455,7 +455,7 @@ export function SwapPage() {
       {step === "submitting" || step === "polling" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Swap Progress</CardTitle>
+            <CardTitle>Bridge Progress</CardTitle>
           </CardHeader>
           <CardContent>
             <ol className="grid gap-2 md:grid-cols-4">
@@ -477,15 +477,15 @@ export function SwapPage() {
       {step === "completed" && swapResult ? (
         <Card>
           <CardHeader>
-            <CardTitle>Swap Completed</CardTitle>
+            <CardTitle>Bridge Completed</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <p>Swap Tx Hash: {swapResult.swap_tx_hash ?? "-"}</p>
+            <p>Bridge Tx Hash: {swapResult.swap_tx_hash ?? "-"}</p>
             <p>Amount In: {weiToDisplay(swapResult.amount_in ?? "", tokenDecimals)} {sourceCurrency}</p>
             <p>Amount Out: {weiToDisplay(swapResult.amount_out ?? "", tokenDecimals)} {targetCurrency}</p>
             <p>Correlation ID: {swapResult.correlation_id ?? "-"}</p>
             <Button type="button" variant="outline" onClick={reset}>
-              New Swap
+              New Bridge
             </Button>
           </CardContent>
         </Card>
@@ -494,7 +494,7 @@ export function SwapPage() {
       {step === "failed" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Swap Failed</CardTitle>
+            <CardTitle>Bridge Failed</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <p className="text-destructive">
