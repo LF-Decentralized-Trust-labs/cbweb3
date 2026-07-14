@@ -33,22 +33,7 @@ type Config struct {
 	PaladinURL          string // Paladin JSON-RPC endpoint; enables transaction decryption for supervisors (PALADIN_URL env var)
 	FiatSymbol                  string // currency symbol for transfer limit matching (e.g. "BRL", "ARS"); from FIAT_SYMBOL
 	TransferLimitComplianceAddr string // when set, limit-enforcement checks are sent to this compliance address instead of ComplianceGRPCAddr; allows commercial-bank gateways to query the central bank's compliance service
-	PaladinIdentities           []string // available Paladin identities offered as party choices in the FX agreement form; from PALADIN_IDENTITIES (comma-separated)
-}
-
-// defaultPaladinIdentities lists the Paladin identities of the reference
-// BRL+COP network (see samples/cbweb3-data) so the FX agreement form offers
-// valid party choices out of the box. This is demo/reference data only — every
-// deployment MUST override it with its own roster via PALADIN_IDENTITIES
-// (comma-separated), since identities are per-network and cannot be enumerated
-// from a single runtime source.
-var defaultPaladinIdentities = []string{
-	"funded_operator@spoke-brl-cb",
-	"funded_operator@spoke-brl-bank-itau",
-	"funded_operator@spoke-brl-bank-bradesco",
-	"funded_operator@spoke-cop-cb",
-	"funded_operator@spoke-cop-bank-bancolombia",
-	"funded_operator@spoke-cop-bank-davivienda",
+	PaladinIdentities           []string // optional static override for the FX party roster; from PALADIN_IDENTITIES (comma-separated). Empty = source live Pente membership.
 }
 
 // Load reads environment variables and returns a fully populated Config.
@@ -58,14 +43,14 @@ func Load() Config {
 		log.Warnf("no .env (.env) file(s) found, using environment variables: function error: %s", err.Error())
 	}
 
-	// PALADIN_IDENTITIES gates the FX agreement party roster. When it is unset we
-	// fall back to the reference BRL+COP demo identities, which belong to another
-	// network — every propose then fails on-chain. Warn loudly so a deployment
-	// that forgot to configure the roster is not left guessing.
-	if strings.TrimSpace(os.Getenv("PALADIN_IDENTITIES")) == "" {
-		log.Warnf("PALADIN_IDENTITIES is not set; serving the reference BRL+COP demo roster. " +
-			"Set PALADIN_IDENTITIES (comma-separated) to this network's real Paladin identities, " +
-			"otherwise FX agreement proposals will fail with a Pente membership error.")
+	// PALADIN_IDENTITIES is now only an optional explicit override for the FX
+	// agreement party roster. When unset, the roster is sourced from real Pente
+	// group membership via the payment-orchestrator. There is no demo fallback,
+	// so a misconfigured deployment offers an empty roster ("not configured")
+	// instead of silently offering identities from another network.
+	if raw := strings.TrimSpace(os.Getenv("PALADIN_IDENTITIES")); raw != "" {
+		log.Warnf("PALADIN_IDENTITIES override is set; the FX party roster is pinned to this static list " +
+			"instead of live Pente membership. Unset it to track real membership.")
 	}
 
 	return Config{
@@ -87,7 +72,7 @@ func Load() Config {
 		PaladinURL:                  getEnv("PALADIN_URL", ""),
 		FiatSymbol:                  getEnv("FIAT_SYMBOL", ""),
 		TransferLimitComplianceAddr: getEnv("TRANSFER_LIMIT_COMPLIANCE_ADDR", ""),
-		PaladinIdentities:           getEnvList("PALADIN_IDENTITIES", defaultPaladinIdentities),
+		PaladinIdentities:           getEnvList("PALADIN_IDENTITIES", nil),
 	}
 }
 

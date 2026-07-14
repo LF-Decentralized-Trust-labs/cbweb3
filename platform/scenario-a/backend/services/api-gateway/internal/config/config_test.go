@@ -94,15 +94,13 @@ func TestLoadFiatSymbol_DefaultEmpty(t *testing.T) {
 	}
 }
 
-func TestLoadPaladinIdentities_Default(t *testing.T) {
+func TestLoadPaladinIdentities_EmptyWhenUnset(t *testing.T) {
 	_ = os.Unsetenv("PALADIN_IDENTITIES")
 	cfg := Load()
-	if len(cfg.PaladinIdentities) != len(defaultPaladinIdentities) {
-		t.Fatalf("expected %d default identities, got %d", len(defaultPaladinIdentities), len(cfg.PaladinIdentities))
-	}
-	// Guard against the default drifting back to placeholder spoke-a/spoke-b data.
-	if cfg.PaladinIdentities[0] != "funded_operator@spoke-brl-cb" {
-		t.Errorf("first default identity = %q, want funded_operator@spoke-brl-cb", cfg.PaladinIdentities[0])
+	// No demo fallback: an unset override yields an empty roster so the gateway
+	// sources live Pente membership instead of another network's identities.
+	if len(cfg.PaladinIdentities) != 0 {
+		t.Fatalf("expected empty roster when PALADIN_IDENTITIES unset, got %v", cfg.PaladinIdentities)
 	}
 }
 

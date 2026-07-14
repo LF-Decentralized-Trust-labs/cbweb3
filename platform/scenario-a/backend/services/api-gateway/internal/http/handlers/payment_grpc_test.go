@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -636,7 +637,7 @@ func TestProposeFXAgreement_RosterValidation(t *testing.T) {
 	t.Parallel()
 	fake := &fakePaymentServer{fxPropose: &pb.ProposeFXAgreementResponse{TradeId: "t1", TxHash: "tx"}}
 	h := startFakePaymentBackend(t, fake).
-		WithIdentityRoster([]string{"alice@spoke-a-bank-a", "bob@spoke-b-bank-b"})
+		WithIdentityRoster(NewIdentityRoster([]string{"alice@spoke-a-bank-a", "bob@spoke-b-bank-b"}, nil))
 	app := fiber.New()
 	app.Use(authedClaims("bank-a"))
 	app.Post("/fx", h.ProposeFXAgreement)
@@ -668,6 +669,65 @@ func TestProposeFXAgreement_RosterValidation(t *testing.T) {
 	// All parties on the roster → reaches the backend and returns 201.
 	if resp := postJSON(t, app, "/fx", terms("alice@spoke-a-bank-a", "bob@spoke-b-bank-b")); resp.StatusCode != http.StatusCreated {
 		t.Errorf("on-roster propose: want 201, got %d", resp.StatusCode)
+	}
+}
+
+// flakyRosterProvider errors a fixed number of times before returning identities,
+// to exercise the fail-closed retry-until-resolved path.
+type flakyRosterProvider struct {
+	failsLeft  int
+	identities []string
+}
+
+func (p *flakyRosterProvider) ListParticipantIdentities(context.Context) ([]string, error) {
+	if p.failsLeft > 0 {
+		p.failsLeft--
+		return nil, errors.New("orchestrator unavailable")
+	}
+	return p.identities, nil
+}
+
+func fxTerms(counterparty string) map[string]any {
+	return map[string]any{
+		"counterparty_b": counterparty,
+		"origin_amount":  "1", "counter_amount": "2",
+		"origin_currency": "BRL", "counter_currency": "ARS", "rate": "2", "expiry_date": 99,
+	}
+}
+
+func TestProposeFXAgreement_FailsClosedWhenRosterUnavailable(t *testing.T) {
+	t.Parallel()
+	fake := &fakePaymentServer{fxPropose: &pb.ProposeFXAgreementResponse{TradeId: "t1", TxHash: "tx"}}
+	h := startFakePaymentBackend(t, fake).
+		WithIdentityRoster(NewIdentityRoster(nil, &fakeRosterProvider{err: errors.New("down")}))
+	h.rosterRetryInitial = time.Millisecond
+	h.rosterRetryMax = 30 * time.Millisecond // keep the test fast; still bounded fail-closed
+	app := fiber.New()
+	app.Use(authedClaims("bank-a"))
+	app.Post("/fx", h.ProposeFXAgreement)
+
+	// Roster never resolves → propose must be blocked (503), not proposed on-chain.
+	if resp := postJSON(t, app, "/fx", fxTerms("alice@spoke-a-bank-a")); resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unresolved roster: want 503, got %d", resp.StatusCode)
+	}
+}
+
+func TestProposeFXAgreement_RetriesUntilRosterResolves(t *testing.T) {
+	t.Parallel()
+	fake := &fakePaymentServer{fxPropose: &pb.ProposeFXAgreementResponse{TradeId: "t1", TxHash: "tx"}}
+	prov := &flakyRosterProvider{failsLeft: 2, identities: []string{"alice@spoke-a-bank-a"}}
+	h := startFakePaymentBackend(t, fake).WithIdentityRoster(NewIdentityRoster(nil, prov))
+	h.rosterRetryInitial = time.Millisecond
+	app := fiber.New()
+	app.Use(authedClaims("bank-a"))
+	app.Post("/fx", h.ProposeFXAgreement)
+
+	// Two transient failures, then the roster resolves and the (valid) party passes.
+	if resp := postJSON(t, app, "/fx", fxTerms("alice@spoke-a-bank-a")); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("retry-then-resolve: want 201, got %d", resp.StatusCode)
+	}
+	if prov.failsLeft != 0 {
+		t.Errorf("expected all transient failures consumed, %d left", prov.failsLeft)
 	}
 }
 

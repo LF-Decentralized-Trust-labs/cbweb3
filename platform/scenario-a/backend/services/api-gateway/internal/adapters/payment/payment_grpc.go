@@ -592,6 +592,16 @@ func (a *GRPCAdapter) ListFXAgreementEvents(ctx context.Context, tradeID string)
 	return result, nil
 }
 
+// ListParticipantIdentities returns the live FX-party roster (distinct Paladin
+// identities across the node's bilateral Pente groups) from the orchestrator.
+func (a *GRPCAdapter) ListParticipantIdentities(ctx context.Context) ([]string, error) {
+	resp, err := a.cc.ListParticipantIdentities(ctx, &pb.ListParticipantIdentitiesRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Identities, nil
+}
+
 func fxAgreementToResult(ag *pb.FXAgreement) *FXAgreementResult {
 	if ag == nil {
 		return &FXAgreementResult{}

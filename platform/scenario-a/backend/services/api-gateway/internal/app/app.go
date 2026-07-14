@@ -119,7 +119,10 @@ func New(cfg config.Config) (*App, error) {
 		GovernanceHandler: governanceHandler,
 		SupervisorHandler: supervisorHandler,
 		OversightHandler:  oversightHandler,
-		IdentityHandler:   handlers.NewIdentityHandler(cfg.PaladinIdentities),
+		// Default roster: static override only (no live Pente source). When a
+		// payment-orchestrator is wired below, this is replaced with a
+		// membership-backed roster.
+		IdentityHandler: handlers.NewIdentityHandler(handlers.NewIdentityRoster(cfg.PaladinIdentities, nil)),
 		AuthProvider:      identityGRPCProvider,
 	}
 
@@ -140,10 +143,14 @@ func New(cfg config.Config) (*App, error) {
 		// Resolve requester institution names for deposit/escrow/redeem listings
 		// (Treasury portal auditing) via the compliance participant registry.
 		ph = ph.WithParticipantResolver(complianceGRPC)
-		// Validate FX agreement party identities against the configured Paladin
-		// roster at propose time, so an off-roster identity is rejected with a
-		// clear 400 instead of a cryptic on-chain Pente failure.
-		ph = ph.WithIdentityRoster(cfg.PaladinIdentities)
+		// FX party roster sourced from real Pente membership (via the orchestrator),
+		// with PALADIN_IDENTITIES as an optional static override. Shared by the
+		// identities endpoint and propose-time validation, so an identity that is
+		// not a real member is rejected with a clear 400 instead of a cryptic
+		// on-chain Pente failure.
+		roster := handlers.NewIdentityRoster(cfg.PaladinIdentities, paymentGRPC)
+		deps.IdentityHandler = handlers.NewIdentityHandler(roster)
+		ph = ph.WithIdentityRoster(roster)
 		if cfg.FiatSymbol != "" {
 			limitComplianceGRPC := complianceGRPC
 			// Commercial banks point their limit checks at the central bank's compliance service,

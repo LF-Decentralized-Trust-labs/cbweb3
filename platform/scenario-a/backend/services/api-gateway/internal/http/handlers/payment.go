@@ -41,15 +41,27 @@ type PaymentHandler struct {
 	fiatSymbol   string // currency for transfer limit checks (e.g. "BRL", "ARS"); empty = skip check
 	limitChecker TransferLimitChecker
 	participants ParticipantResolver // optional; enables requester-name enrichment on listings
-	// identityRoster is the set of Paladin identities valid as FX agreement
-	// parties. When non-empty, ProposeFXAgreement rejects any party identity not
-	// in the set with a 400 (fail fast, before the on-chain Pente propose).
-	identityRoster map[string]struct{}
+	// identityRoster resolves the Paladin identities valid as FX agreement
+	// parties (from real Pente membership, or an explicit override). When set and
+	// non-empty, ProposeFXAgreement rejects any party identity not in it with a
+	// 400 (fail fast, before the on-chain Pente propose).
+	identityRoster *IdentityRoster
+	// rosterRetryInitial/rosterRetryMax bound the fail-closed retry of roster
+	// resolution at propose time: on a resolution error we retry with exponential
+	// backoff (starting at rosterRetryInitial) until the roster resolves or the
+	// window (min(request deadline, rosterRetryMax)) elapses, then reject.
+	rosterRetryInitial time.Duration
+	rosterRetryMax     time.Duration
 }
 
 // NewPaymentHandler creates a new PaymentHandler.
 func NewPaymentHandler(payment *paymentadapter.GRPCAdapter, bankCode string) *PaymentHandler {
-	return &PaymentHandler{payment: payment, bankCode: bankCode}
+	return &PaymentHandler{
+		payment:            payment,
+		bankCode:           bankCode,
+		rosterRetryInitial: 100 * time.Millisecond,
+		rosterRetryMax:     15 * time.Second,
+	}
 }
 
 // WithParticipantResolver attaches a compliance participant resolver used to
@@ -61,28 +73,69 @@ func (h *PaymentHandler) WithParticipantResolver(resolver ParticipantResolver) *
 
 // WithIdentityRoster configures the Paladin identities accepted as FX agreement
 // parties. An empty roster disables validation (nothing to validate against).
-func (h *PaymentHandler) WithIdentityRoster(identities []string) *PaymentHandler {
-	if len(identities) == 0 {
-		h.identityRoster = nil
-		return h
-	}
-	roster := make(map[string]struct{}, len(identities))
-	for _, id := range identities {
-		if trimmed := strings.TrimSpace(id); trimmed != "" {
-			roster[trimmed] = struct{}{}
-		}
-	}
+func (h *PaymentHandler) WithIdentityRoster(roster *IdentityRoster) *PaymentHandler {
 	h.identityRoster = roster
 	return h
 }
 
-// unknownIdentities returns the non-empty party identities, in the given order
-// and de-duplicated, that are not present in the configured Paladin roster.
-// Returns nil when no roster is configured (validation disabled) or all
-// identities are valid.
-func (h *PaymentHandler) unknownIdentities(identities ...string) []string {
-	if len(h.identityRoster) == 0 {
+// resolveRosterForPropose resolves the FX-party roster for propose-time
+// validation, fail-closed: on a resolution error it retries with exponential
+// backoff (honoring ctx) until the roster resolves or the retry window elapses,
+// then returns the error so the caller rejects the trade rather than reaching
+// the on-chain propose blind. Returns (nil, nil) when no roster is configured
+// (validation disabled). A successfully-resolved empty roster is not an error.
+func (h *PaymentHandler) resolveRosterForPropose(parent context.Context) ([]string, error) {
+	if h.identityRoster == nil {
+		return nil, nil
+	}
+
+	ctx := parent
+	// Bound the retry window even when the request context carries no deadline,
+	// so a persistently-unavailable roster cannot hang the request forever.
+	if _, hasDeadline := parent.Deadline(); !hasDeadline && h.rosterRetryMax > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(parent, h.rosterRetryMax)
+		defer cancel()
+	}
+
+	backoff := h.rosterRetryInitial
+	if backoff <= 0 {
+		backoff = 100 * time.Millisecond
+	}
+	const maxBackoff = time.Second
+
+	for attempt := 1; ; attempt++ {
+		roster, err := h.identityRoster.Identities(ctx)
+		if err == nil {
+			return roster, nil
+		}
+		log.Printf("warning: FX party roster resolution attempt %d failed: %v", attempt, err)
+
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("roster unresolved after %d attempt(s): %w", attempt, err)
+		case <-timer.C:
+		}
+		if backoff < maxBackoff {
+			if backoff *= 2; backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+}
+
+// unknownIdentities returns the non-empty identities, in the given order and
+// de-duplicated, that are not present in roster. An empty roster means
+// "nothing to validate against" and yields no unknowns.
+func unknownIdentities(roster []string, identities ...string) []string {
+	if len(roster) == 0 {
 		return nil
+	}
+	valid := make(map[string]struct{}, len(roster))
+	for _, id := range roster {
+		valid[strings.TrimSpace(id)] = struct{}{}
 	}
 	var invalid []string
 	seen := make(map[string]struct{}, len(identities))
@@ -95,7 +148,7 @@ func (h *PaymentHandler) unknownIdentities(identities ...string) []string {
 			continue
 		}
 		seen[trimmed] = struct{}{}
-		if _, ok := h.identityRoster[trimmed]; !ok {
+		if _, ok := valid[trimmed]; !ok {
 			invalid = append(invalid, trimmed)
 		}
 	}
@@ -672,10 +725,20 @@ func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
 		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "counterparty_b, origin_amount, counter_amount, origin_currency, counter_currency, rate, and expiry_date are required"})
 	}
-	// Reject any party identity that is not in the configured Paladin roster
-	// before reaching the on-chain propose, which would otherwise fail with a
-	// cryptic Pente membership error (PD011814).
-	if invalid := h.unknownIdentities(
+	// Reject any party identity that is not a real Pente member before reaching
+	// the on-chain propose, which would otherwise fail with a cryptic Pente
+	// membership error (PD011814). Fail-closed: if the roster cannot be resolved
+	// (orchestrator unreachable) we retry until it resolves or the window
+	// elapses, then reject with 503 rather than propose without verifying
+	// membership.
+	roster, rosterErr := h.resolveRosterForPropose(c.UserContext())
+	if rosterErr != nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "could not verify party membership: Paladin roster unavailable, please retry: " + rosterErr.Error(),
+		})
+	}
+	if invalid := unknownIdentities(
+		roster,
 		req.CounterpartyB,
 		req.SettlementAgent,
 		req.Custodian,
@@ -684,7 +747,7 @@ func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
 		req.DestReceiver,
 	); len(invalid) > 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error":              "one or more party identities are not in the Paladin roster: " + strings.Join(invalid, ", "),
+			"error":              "one or more party identities are not members of the Paladin roster: " + strings.Join(invalid, ", "),
 			"invalid_identities": invalid,
 		})
 	}
