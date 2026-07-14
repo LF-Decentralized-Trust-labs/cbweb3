@@ -23,6 +23,12 @@ import { useEffect, useMemo, useState } from "react";
 import { hubLiquidityApi } from "../services/api";
 import { useAuthStore } from "../stores";
 import type { HubCurrency, HubPair, PoolSide } from "../types";
+import { displayToBase, parseAmountInput } from "../types/payment.types";
+
+// Hub W-tCeBM tokens use 18 decimals. Operators enter whole-token amounts
+// (e.g. "1000"); the backend expects raw base units, so convert on the way out.
+// Without this, "1000" reaches the chain as 1000 wei (~0 tokens) and swaps starve.
+const HUB_TOKEN_DECIMALS = 18;
 
 const SELECT_CLASS =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
@@ -250,8 +256,8 @@ export function LiquidityProvisioningPage() {
       toast.error("Amount is required");
       return;
     }
-    if (!/^\d+$/.test(mintAmount.trim())) {
-      toast.error("Amount must be a non-negative integer");
+    if (!/^\d+(\.\d+)?$/.test(parseAmountInput(mintAmount.trim()))) {
+      toast.error("Amount must be a non-negative number");
       return;
     }
     if (!mintPoolPair.trim()) {
@@ -261,7 +267,7 @@ export function LiquidityProvisioningPage() {
     setMinting(true);
     try {
       const result = await hubLiquidityApi.mintAndApprove({
-        amount: mintAmount.trim(),
+        amount: displayToBase(parseAmountInput(mintAmount.trim()), HUB_TOKEN_DECIMALS),
         pool_pair: mintPoolPair.trim(),
         side: mintSide,
         recipient: mintRecipient.trim() || undefined,
@@ -297,8 +303,8 @@ export function LiquidityProvisioningPage() {
       const result = await hubLiquidityApi.addLiquidity({
         pool_pair: seedPoolPair.trim(),
         provider_bank_id: seedProviderBankId.trim(),
-        token_a_amount: tokenAAmount.trim(),
-        token_b_amount: tokenBAmount.trim(),
+        token_a_amount: displayToBase(parseAmountInput(tokenAAmount.trim()), HUB_TOKEN_DECIMALS),
+        token_b_amount: displayToBase(parseAmountInput(tokenBAmount.trim()), HUB_TOKEN_DECIMALS),
       });
       const ok = result.success ?? true;
       toast.success(`Liquidity seeded — ${result.status ?? (ok ? "ok" : "submitted")}`);
@@ -514,15 +520,15 @@ export function LiquidityProvisioningPage() {
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="mint-amount">Amount</Label>
+            <Label htmlFor="mint-amount">Amount (whole tokens)</Label>
             <Input
               id="mint-amount"
               value={mintAmount}
               onChange={(event) => setMintAmount(event.target.value)}
-              inputMode="numeric"
-              pattern="[0-9]*"
-              placeholder="e.g. 1000000"
+              inputMode="decimal"
+              placeholder="e.g. 1000"
             />
+            <p className="text-xs text-muted-foreground">Whole tokens — converted to 18-decimal base units on submit.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="mint-side">Side</Label>
@@ -604,24 +610,25 @@ export function LiquidityProvisioningPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="token-a-amount">Token A Amount</Label>
+            <Label htmlFor="token-a-amount">Token A Amount (whole tokens)</Label>
             <Input
               id="token-a-amount"
               value={tokenAAmount}
               onChange={(event) => setTokenAAmount(event.target.value)}
-              inputMode="numeric"
-              placeholder="e.g. 1000000"
+              inputMode="decimal"
+              placeholder="e.g. 1000"
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="token-b-amount">Token B Amount</Label>
+            <Label htmlFor="token-b-amount">Token B Amount (whole tokens)</Label>
             <Input
               id="token-b-amount"
               value={tokenBAmount}
               onChange={(event) => setTokenBAmount(event.target.value)}
-              inputMode="numeric"
-              placeholder="e.g. 1000000"
+              inputMode="decimal"
+              placeholder="e.g. 1000"
             />
+            <p className="text-xs text-muted-foreground">Whole tokens — converted to 18-decimal base units on submit.</p>
           </div>
           <div className="md:col-span-2">
             <Button onClick={() => void onSeedLiquidity()} disabled={seeding}>
