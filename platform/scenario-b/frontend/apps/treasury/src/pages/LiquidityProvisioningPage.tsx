@@ -18,11 +18,10 @@ import {
   TableRow,
   toast,
 } from "@cbweb3/ui";
-import { BadgeCheck, ChevronDown, ChevronRight, Coins, Droplets, FilePlus2, Landmark, RefreshCw } from "lucide-react";
+import { BadgeCheck, ChevronDown, ChevronRight, Droplets, FilePlus2, Landmark, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { hubLiquidityApi } from "../services/api";
-import { useAuthStore } from "../stores";
-import type { HubCurrency, HubPair, PoolSide } from "../types";
+import type { EscrowStatus, HubCurrency, HubPair } from "../types";
 import { displayToBase, parseAmountInput } from "../types/payment.types";
 
 // Hub W-tCeBM tokens use 18 decimals. Operators enter whole-token amounts
@@ -38,9 +37,6 @@ const shortAddress = (value: string) => (value ? `${value.slice(0, 8)}...${value
 const sameAddress = (a: string, b: string) => Boolean(a) && Boolean(b) && a.toLowerCase() === b.toLowerCase();
 
 export function LiquidityProvisioningPage() {
-  const user = useAuthStore((state) => state.user);
-  const defaultProviderBankId = user?.institutionId || user?.walletAddress || "";
-
   const [pairs, setPairs] = useState<HubPair[]>([]);
   const [pairsLoading, setPairsLoading] = useState(false);
   const [currencies, setCurrencies] = useState<HubCurrency[]>([]);
@@ -72,19 +68,13 @@ export function LiquidityProvisioningPage() {
   const [confirmAdvanced, setConfirmAdvanced] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
-  // --- Mint & Approve form state ---
-  const [mintAmount, setMintAmount] = useState("");
-  const [mintPoolPair, setMintPoolPair] = useState("");
-  const [mintSide, setMintSide] = useState<PoolSide>("A");
-  const [mintRecipient, setMintRecipient] = useState("");
-  const [minting, setMinting] = useState(false);
-
-  // --- Seed Liquidity form state ---
+  // --- Sovereign seed state (escrow-and-finalize, no LCR) ---
   const [seedPoolPair, setSeedPoolPair] = useState("");
-  const [seedProviderBankId, setSeedProviderBankId] = useState(defaultProviderBankId);
-  const [tokenAAmount, setTokenAAmount] = useState("");
-  const [tokenBAmount, setTokenBAmount] = useState("");
+  const [seedAmount, setSeedAmount] = useState("");
   const [seeding, setSeeding] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+  const [reclaiming, setReclaiming] = useState(false);
+  const [escrow, setEscrow] = useState<EscrowStatus | null>(null);
 
   const loadPairs = async () => {
     setPairsLoading(true);
@@ -116,12 +106,23 @@ export function LiquidityProvisioningPage() {
     void loadCurrencies();
   }, []);
 
-  // Keep the provider bank id in sync with the logged-in operator once the session loads.
-  useEffect(() => {
-    if (defaultProviderBankId) {
-      setSeedProviderBankId((current) => current || defaultProviderBankId);
+  const loadEscrow = async (poolPair: string) => {
+    if (!poolPair) {
+      setEscrow(null);
+      return;
     }
-  }, [defaultProviderBankId]);
+    try {
+      setEscrow(await hubLiquidityApi.getEscrow(poolPair));
+    } catch {
+      setEscrow(null);
+    }
+  };
+
+  // Refresh the escrow status whenever the selected pool changes.
+  useEffect(() => {
+    void loadEscrow(seedPoolPair);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedPoolPair]);
 
   const currencyBySymbol = (symbol: string) => currencies.find((currency) => currency.symbol === symbol);
   const currencyByAddress = (address: string) =>
@@ -251,68 +252,63 @@ export function LiquidityProvisioningPage() {
     }
   };
 
-  const onMintAndApprove = async () => {
-    if (!mintAmount.trim()) {
-      toast.error("Amount is required");
-      return;
-    }
-    if (!/^\d+(\.\d+)?$/.test(parseAmountInput(mintAmount.trim()))) {
-      toast.error("Amount must be a non-negative number");
-      return;
-    }
-    if (!mintPoolPair.trim()) {
-      toast.error("Pool pair is required");
-      return;
-    }
-    setMinting(true);
-    try {
-      const result = await hubLiquidityApi.mintAndApprove({
-        amount: displayToBase(parseAmountInput(mintAmount.trim()), HUB_TOKEN_DECIMALS),
-        pool_pair: mintPoolPair.trim(),
-        side: mintSide,
-        recipient: mintRecipient.trim() || undefined,
-      });
-      toast.success(
-        `Mint & approve ${result.status ?? "ok"} — ${result.amount}${
-          result.recipient ? ` to ${result.recipient}` : " for the AMM"
-        }`,
-      );
-      void loadPairs();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to mint & approve tokens");
-    } finally {
-      setMinting(false);
-    }
-  };
-
-  const onSeedLiquidity = async () => {
+  // Deposit ONLY this CB's own side into the pool's escrow (side auto-resolved on-chain).
+  const onDepositSide = async () => {
     if (!seedPoolPair.trim()) {
       toast.error("Pool pair is required");
       return;
     }
-    if (!seedProviderBankId.trim()) {
-      toast.error("Provider bank ID is required");
-      return;
-    }
-    if (!tokenAAmount.trim() || !tokenBAmount.trim()) {
-      toast.error("Both token amounts are required");
+    if (!/^\d+(\.\d+)?$/.test(parseAmountInput(seedAmount.trim()))) {
+      toast.error("Amount must be a non-negative number");
       return;
     }
     setSeeding(true);
     try {
-      const result = await hubLiquidityApi.addLiquidity({
+      const result = await hubLiquidityApi.depositSide({
         pool_pair: seedPoolPair.trim(),
-        provider_bank_id: seedProviderBankId.trim(),
-        token_a_amount: displayToBase(parseAmountInput(tokenAAmount.trim()), HUB_TOKEN_DECIMALS),
-        token_b_amount: displayToBase(parseAmountInput(tokenBAmount.trim()), HUB_TOKEN_DECIMALS),
+        amount: displayToBase(parseAmountInput(seedAmount.trim()), HUB_TOKEN_DECIMALS),
       });
-      const ok = result.success ?? true;
-      toast.success(`Liquidity seeded — ${result.status ?? (ok ? "ok" : "submitted")}`);
-      void loadPairs();
+      toast.success(`Deposited side ${result.side} for ${result.pool_pair}`);
+      await loadEscrow(seedPoolPair);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to seed liquidity");
+      toast.error(error instanceof Error ? error.message : "Unable to deposit side");
     } finally {
       setSeeding(false);
+    }
+  };
+
+  // Finalize once BOTH sides are escrowed — funds the pool reserves atomically.
+  const onFinalize = async () => {
+    if (!seedPoolPair.trim()) {
+      return;
+    }
+    setFinalizing(true);
+    try {
+      const result = await hubLiquidityApi.finalizeSeed(seedPoolPair.trim());
+      toast.success(`Pool finalized — shares A ${result.shares_a} / B ${result.shares_b}`);
+      await loadEscrow(seedPoolPair);
+      void loadPairs();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Finalize failed (both sides must be deposited)");
+    } finally {
+      setFinalizing(false);
+    }
+  };
+
+  // Reclaim this CB's own pending side (before finalize).
+  const onReclaim = async () => {
+    if (!seedPoolPair.trim()) {
+      return;
+    }
+    setReclaiming(true);
+    try {
+      const result = await hubLiquidityApi.reclaimSide(seedPoolPair.trim());
+      toast.success(`Reclaimed side ${result.side} for ${result.pool_pair}`);
+      await loadEscrow(seedPoolPair);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to reclaim side");
+    } finally {
+      setReclaiming(false);
     }
   };
 
@@ -510,78 +506,14 @@ export function LiquidityProvisioningPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Coins className="h-5 w-5" />
-            Mint &amp; Approve
+            <Droplets className="h-5 w-5" />
+            Seed Liquidity (sovereign)
           </CardTitle>
           <CardDescription>
-            Mint and approve tokens for the AMM for a given pool and side. Leave the recipient blank to mint &amp;
-            approve for the AMM itself.
+            Each central bank deposits ONLY its own currency. Your side is auto-detected from the pair (no picker).
+            When both sides are escrowed, anyone finalizes to fund the pool atomically. You can reclaim your own
+            pending side any time before finalize.
           </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="mint-amount">Amount (whole tokens)</Label>
-            <Input
-              id="mint-amount"
-              value={mintAmount}
-              onChange={(event) => setMintAmount(event.target.value)}
-              inputMode="decimal"
-              placeholder="e.g. 1000"
-            />
-            <p className="text-xs text-muted-foreground">Whole tokens — converted to 18-decimal base units on submit.</p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="mint-side">Side</Label>
-            <select
-              id="mint-side"
-              className={SELECT_CLASS}
-              value={mintSide}
-              onChange={(event) => setMintSide(event.target.value as PoolSide)}
-            >
-              <option value="A">A</option>
-              <option value="B">B</option>
-            </select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="mint-pool-pair-select">Pool Pair</Label>
-            <select
-              id="mint-pool-pair-select"
-              className={SELECT_CLASS}
-              value={pairOptions.includes(mintPoolPair) ? mintPoolPair : ""}
-              onChange={(event) => setMintPoolPair(event.target.value)}
-            >
-              <option value="">Select a pair...</option>
-              {pairOptions.map((pairId) => (
-                <option key={pairId} value={pairId}>
-                  {pairId}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="mint-recipient">Recipient (optional)</Label>
-            <Input
-              id="mint-recipient"
-              value={mintRecipient}
-              onChange={(event) => setMintRecipient(event.target.value)}
-              placeholder="0x... (leave blank to mint for the AMM)"
-            />
-          </div>
-          <div className="md:col-span-2">
-            <Button onClick={() => void onMintAndApprove()} disabled={minting}>
-              {minting ? "Submitting..." : "Mint & Approve"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Droplets className="h-5 w-5" />
-            Seed Liquidity
-          </CardTitle>
-          <CardDescription>Add initial liquidity to the pool for both sides.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
@@ -601,38 +533,50 @@ export function LiquidityProvisioningPage() {
             </select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="seed-provider-bank-id">Provider Bank ID</Label>
+            <Label htmlFor="seed-amount">Amount (whole tokens, your currency)</Label>
             <Input
-              id="seed-provider-bank-id"
-              value={seedProviderBankId}
-              onChange={(event) => setSeedProviderBankId(event.target.value)}
-              placeholder="this central bank's identity"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="token-a-amount">Token A Amount (whole tokens)</Label>
-            <Input
-              id="token-a-amount"
-              value={tokenAAmount}
-              onChange={(event) => setTokenAAmount(event.target.value)}
-              inputMode="decimal"
-              placeholder="e.g. 1000"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="token-b-amount">Token B Amount (whole tokens)</Label>
-            <Input
-              id="token-b-amount"
-              value={tokenBAmount}
-              onChange={(event) => setTokenBAmount(event.target.value)}
+              id="seed-amount"
+              value={seedAmount}
+              onChange={(event) => setSeedAmount(event.target.value)}
               inputMode="decimal"
               placeholder="e.g. 1000"
             />
             <p className="text-xs text-muted-foreground">Whole tokens — converted to 18-decimal base units on submit.</p>
           </div>
-          <div className="md:col-span-2">
-            <Button onClick={() => void onSeedLiquidity()} disabled={seeding}>
-              {seeding ? "Submitting..." : "Seed Liquidity"}
+
+          {seedPoolPair ? (
+            <div className="md:col-span-2 rounded-md border border-border p-3 text-sm">
+              <p className="font-medium">Escrow status — {seedPoolPair}</p>
+              {escrow ? (
+                <div className="mt-1 grid gap-1 text-xs text-muted-foreground md:grid-cols-3">
+                  <span>Side A deposited: {escrow.side_a_deposited ? "✓" : "—"}</span>
+                  <span>Side B deposited: {escrow.side_b_deposited ? "✓" : "—"}</span>
+                  <span>Finalized: {escrow.finalized ? "✓" : "—"}</span>
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-muted-foreground">No escrow yet — deposit your side to start.</p>
+              )}
+            </div>
+          ) : null}
+
+          <div className="md:col-span-2 flex flex-wrap gap-2">
+            <Button onClick={() => void onDepositSide()} disabled={seeding || !seedPoolPair || !seedAmount.trim()}>
+              {seeding ? "Depositing..." : "Deposit My Side"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => void onFinalize()}
+              disabled={finalizing || !escrow || !escrow.side_a_deposited || !escrow.side_b_deposited || escrow.finalized}
+              title={escrow && (!escrow.side_a_deposited || !escrow.side_b_deposited) ? "Both sides must be deposited" : undefined}
+            >
+              {finalizing ? "Finalizing..." : "Finalize Pool"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => void onReclaim()}
+              disabled={reclaiming || !escrow || escrow.finalized}
+            >
+              {reclaiming ? "Reclaiming..." : "Reclaim My Side"}
             </Button>
           </div>
         </CardContent>
