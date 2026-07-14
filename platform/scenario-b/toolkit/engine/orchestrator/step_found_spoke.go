@@ -305,8 +305,12 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// the Keycloak realm/client are provisioned by provision-keycloak-spoke.
 		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
 		"CB_PRIVATE_KEY":     devDeployerKey,
-		"KEYCLOAK_REALM":     spokeKeycloakRealm,
-		"KEYCLOAK_CLIENT_ID": spokeKeycloakClient,
+		// The CB's own on-chain address (the dev deployer). Wired into the api-gateway
+		// so its payment routes (backed by the entity-relayer orchestrator via
+		// PAYMENT_GRPC_ADDR) resolve the CB's account.
+		"ENTITY_BESU_ADDRESS": devDeployerAddr,
+		"KEYCLOAK_REALM":      spokeKeycloakRealm,
+		"KEYCLOAK_CLIENT_ID":  spokeKeycloakClient,
 		// CA (scenario-a standard): the CB CA lives in the cb_tls volume, mounted
 		// into compliance at /workspace/backend/config/pki; compliance signs
 		// participant CSRs with it.

@@ -171,8 +171,10 @@ func (c JoinConfig) ComposeEnv() []string {
 	}
 	e := c.ContainerPrefix
 	// Per-bank onboarding key (deterministic; seeds the auth KMS so the bank onboards
-	// as a distinct on-chain participant — mirrors scenario-a).
-	bankKey, _ := deriveBankKey(c.Entity)
+	// as a distinct on-chain participant — mirrors scenario-a). The derived address is
+	// the bank's on-chain identity, injected by the payment proxy as
+	// requester_besu_address (ENTITY_BESU_ADDRESS).
+	bankKey, bankAddr := deriveBankKey(c.Entity)
 	// Prefer the hub RPC port published in the spoke bundle (the CB knows the hub's
 	// real port); fall back to the join HubRPC / default. Without this the bank's
 	// per-pair resolver dials the wrong hub port and swaps fail.
@@ -210,9 +212,10 @@ func (c JoinConfig) ComposeEnv() []string {
 		// backend / frontend (images shared with the hub; must be pre-built)
 		"GATEWAY_PORT":     itoa(c.RPCPort + 8000),
 		"GATEWAY_URL":      c.GatewayURL,
-		"BACKEND_IMAGE":    hubBackendImage,
-		"COMPLIANCE_IMAGE": hubComplianceImage,
-		"AUTH_IMAGE":       hubAuthImage,
+		"BACKEND_IMAGE":              hubBackendImage,
+		"COMPLIANCE_IMAGE":           hubComplianceImage,
+		"AUTH_IMAGE":                 hubAuthImage,
+		"PAYMENT_ORCHESTRATOR_IMAGE": hubPaymentOrchestratorImage,
 		"FRONTEND_IMAGE":   cbFrontendImage("bank", c.RPCPort+8000),
 		"FRONTEND_PORT":    itoa(c.RPCPort + 9000),
 		// Browser CORS: allow this bank's portal origin on its gateway.
@@ -232,6 +235,13 @@ func (c JoinConfig) ComposeEnv() []string {
 		"ENTITY_PKI_DIR": c.pkiDir(),
 		// Commercial banks resolve the sovereign AMM from their CB gateway.
 		"CENTRAL_BANK_API_URL": b.CBGateway,
+		// The bank's own on-chain address — the payment proxy stamps it as
+		// requester_besu_address so the CB registers the deposit against this bank.
+		"ENTITY_BESU_ADDRESS": bankAddr,
+		// The bank's operator key for its payment-orchestrator's read-only token
+		// clients (fCeBM/tCeBM balance). The bank never mints — this only signs the
+		// From field of balance calls; it is the bank's derived on-chain key.
+		"ENTITY_BESU_OPERATOR_KEY": bankKey,
 		// Hub contract addresses (published by the CB in the spoke bundle) so the
 		// bank runs the same on-chain per-pair AMM resolver as its CB — dynamic swap
 		// on any corridor. AMM_CONTRACT_ADDRESS only bootstraps the v2 routes; the
@@ -420,10 +430,26 @@ func JoinSteps(c JoinConfig) []Step {
 			},
 		},
 		{Name: "start-bank-infra", Deps: []string{"wait-sync"}, Run: compose("entity-infra")},
+		// The bank's payment-orchestrator backs the api-gateway's payment gRPC so the
+		// deposit/redeem/escrow proxy routes register. No Hub relayer (bank mints
+		// nothing — the CB does); image is shared with the hub, built on demand.
+		{
+			Name: "start-bank-payment",
+			// wire-addresses populates SPOKE_FCEBM_ADDRESS/SPOKE_TCEBM_ADDRESS in the
+			// bank env-file, which the orchestrator's read-path token clients need.
+			Deps: []string{"start-bank-infra", "wire-addresses"},
+			Run: func(ctx context.Context) error {
+				if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), hubPaymentOrchestratorImage,
+					"backend/services/payment-orchestrator/Dockerfile", "backend"); err != nil {
+					return err
+				}
+				return compose("entity-payment")(ctx)
+			},
+		},
 		// Deps gen-csr so the host pki dir exists (host-owned) BEFORE compliance
 		// bind-mounts it; otherwise Docker auto-creates it root-owned and gen-csr
 		// later fails to write (the known join gen-csr permission bug).
-		{Name: "start-bank-backend", Deps: []string{"start-bank-infra", "wire-addresses", "provision-keycloak-bank", "gen-csr"}, Run: compose("entity-backend")},
+		{Name: "start-bank-backend", Deps: []string{"start-bank-infra", "start-bank-payment", "wire-addresses", "provision-keycloak-bank", "gen-csr"}, Run: compose("entity-backend")},
 		{Name: "start-bank-frontend", Deps: []string{"start-bank-backend"}, Soft: true, Run: func(ctx context.Context) error {
 			// The bank portal bakes this bank's api-gateway URL (browser reaches it on
 			// the host at localhost:<gwPort>); build a per-entity image, then run it.
