@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // renderCBEnvStep renders the central bank's backend .env (feature 034 US1) into
@@ -22,10 +23,11 @@ type renderCBEnvStep struct {
 	dataDir         string
 	besuOperatorKey string
 	frontendHost    string
+	fxPartyRoster   []string
 }
 
-func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort, chainID int, dataDir, besuOperatorKey, frontendHost string) Step {
-	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, chainID: chainID, dataDir: dataDir, besuOperatorKey: besuOperatorKey, frontendHost: frontendHost}
+func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort, chainID int, dataDir, besuOperatorKey, frontendHost string, fxPartyRoster []string) Step {
+	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, chainID: chainID, dataDir: dataDir, besuOperatorKey: besuOperatorKey, frontendHost: frontendHost, fxPartyRoster: fxPartyRoster}
 }
 
 func (s *renderCBEnvStep) Name() string { return StepRenderCBEnv }
@@ -87,6 +89,8 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		// The CB's own Paladin identity (escrow mint recipient is read from the escrow
 		// record, not here; rendered for consistency and any CB-side proxy use).
 		PaladinIdentity: paladinIdentity(cbNodeName(s.spokeID)),
+		// Consortium FX-party roster (cross-spoke identities) from the manifest.
+		PaladinIdentities: strings.Join(s.fxPartyRoster, ","),
 
 		GovernanceUserID: governanceUserID(s.entityName),
 		// CB_PRIVATE_KEY is the CB governance key the compliance service signs

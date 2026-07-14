@@ -73,6 +73,10 @@ type EntityEnvData struct {
 	// CBPaladinIdentity is the central bank's Paladin identity — the Zeto transfer
 	// receiver a commercial bank targets on redeem. Empty for the CB itself.
 	CBPaladinIdentity string
+	// PaladinIdentities is the comma-separated consortium FX-party roster rendered
+	// as PALADIN_IDENTITIES (the manifest's fxPartyRoster). Empty leaves the gateway
+	// to serve only live local Pente membership.
+	PaladinIdentities string
 
 	// Pente (bilateral private FX — feature 035). PenteEnabled turns on the on-chain
 	// FXAgreement path in the payment-orchestrator; PenteBaseURL is the Paladin JSON-RPC
@@ -157,6 +161,10 @@ ENTITY_BESU_ADDRESS={{.EntityBesuAddress}}
 # recipient); CB identity is the redeem Zeto-transfer receiver.
 PALADIN_IDENTITY={{.PaladinIdentity}}
 CB_PALADIN_IDENTITY={{.CBPaladinIdentity}}
+# Consortium-wide FX party roster (all spokes) offered in the identity dropdowns.
+# Cross-spoke identities cannot be enumerated on-chain, so they come from the
+# manifest's fxPartyRoster. Empty -> gateway serves only live local Pente membership.
+PALADIN_IDENTITIES={{.PaladinIdentities}}
 
 # Interop
 INTERNAL_RELAY_AUTH_SECRET={{.RelaySecret}}

@@ -148,6 +148,19 @@ definitions:
           Set this to a routable IP or DNS name when the frontend is accessed from
           a remote machine (e.g. a cloud VM with a public IP such as 3.84.201.14).
 
+      fxPartyRoster:
+        type: array
+        minItems: 1
+        description: >
+          Optional. Consortium-wide Paladin identities offered as FX agreement
+          party choices (rendered as PALADIN_IDENTITIES). Cross-spoke identities
+          cannot be enumerated on-chain (FX groups are bilateral and node-local),
+          so the identities of remote spokes this entity trades with are declared
+          here. Omit to have the gateway serve only live local Pente membership.
+        items:
+          type: string
+          minLength: 1
+
       adminUsers:
         type: array
         minItems: 1

@@ -198,7 +198,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 	stackInt := deps.Timeouts.PaladinHealthCheckInterval
 
 	steps = append(steps,
-		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex, frontendAdvertisedHost(m)),
+		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex, frontendAdvertisedHost(m), m.Spec.FXPartyRoster),
 		newStartInfraStep(StepStartCBInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
 			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
@@ -583,6 +583,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			HTLCAddress:      b.Spec.Contracts.HTLCAddress,
 			BesuOperatorKey:  operatorKeyHex,
 			FrontendHost:     frontendAdvertisedHost(m),
+			FXPartyRoster:    m.Spec.FXPartyRoster,
 		}),
 		newStartInfraStep(StepStartBankInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),

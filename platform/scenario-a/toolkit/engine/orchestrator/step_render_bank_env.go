@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // renderBankEnvStep renders a commercial bank's backend .env (feature 034 US2)
@@ -28,6 +29,7 @@ type renderBankEnvStep struct {
 	htlcAddress                string
 	besuOperatorKey            string
 	frontendHost               string
+	fxPartyRoster              []string
 }
 
 func newRenderBankEnvStep(p bankEnvParams) Step {
@@ -46,6 +48,7 @@ func newRenderBankEnvStep(p bankEnvParams) Step {
 		htlcAddress:                p.HTLCAddress,
 		besuOperatorKey:            p.BesuOperatorKey,
 		frontendHost:               p.FrontendHost,
+		fxPartyRoster:              p.FXPartyRoster,
 	}
 }
 
@@ -65,6 +68,7 @@ type bankEnvParams struct {
 	HTLCAddress                string
 	BesuOperatorKey            string
 	FrontendHost               string
+	FXPartyRoster              []string
 }
 
 func (s *renderBankEnvStep) Name() string { return StepRenderBankEnv }
@@ -124,6 +128,8 @@ func (s *renderBankEnvStep) Run(_ context.Context) error {
 		// mint recipient for reserve tokenisation); CB identity is the redeem receiver.
 		PaladinIdentity:   paladinIdentity(bankNodeName(s.spokeID, s.bankCode)),
 		CBPaladinIdentity: paladinIdentity(cbNodeName(s.spokeID)),
+		// Consortium FX-party roster (cross-spoke identities) from the manifest.
+		PaladinIdentities: strings.Join(s.fxPartyRoster, ","),
 
 		// Commercial bank: points at the central bank's api-gateway for onboarding/proxy.
 		CentralBankAPIURL: s.centralBankAPIURL,

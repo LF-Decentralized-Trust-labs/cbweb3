@@ -52,7 +52,7 @@ func TestCBCORSOrigins_FrontendHostAddsRemoteOrigins(t *testing.T) {
 // CORS_ALLOW_ORIGINS line lists all four portal origins (concrete, never wildcard).
 func TestRenderCBEnvStep_CORSCoversAllPortals(t *testing.T) {
 	dir := t.TempDir()
-	s := newRenderCBEnvStep("spoke-brl", "central-bank-brazil", "BRL", 8645, 1337, dir, "8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63", "")
+	s := newRenderCBEnvStep("spoke-brl", "central-bank-brazil", "BRL", 8645, 1337, dir, "8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63", "", nil)
 
 	if err := s.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
