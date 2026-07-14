@@ -8,3 +8,7 @@ scenario-a/samples/bundles
 scenario-a/samples/cbweb3
 scenario-b/samples/.cbweb3b
 scenario-b/toolkit/samples/.cbweb3b
+
+# Local MCP server config + Playwright MCP session captures (developer-local, not source).
+.mcp.json
+.playwright-mcp/
