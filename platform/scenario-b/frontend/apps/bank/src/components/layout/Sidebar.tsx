@@ -10,6 +10,7 @@ import {
   Handshake,
   LayoutDashboard,
   Lock,
+  Repeat,
   Scale,
   Settings,
   ShieldCheck,
@@ -33,6 +34,7 @@ const scenarioALinks = [
 
 const scenarioBLinks = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/swap", label: "Swap", icon: Repeat },
   { to: "/transfer", label: "Transfer", icon: ArrowRightLeft },
   { to: "/deposits", label: "Issuance Requests", icon: ArrowDownToLine },
   { to: "/escrows", label: "Reserve Tokenisation", icon: Lock },

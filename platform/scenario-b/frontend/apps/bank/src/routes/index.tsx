@@ -20,6 +20,7 @@ import { LoginPage } from "../pages/LoginPage";
 import { OnboardingPage } from "../pages/OnboardingPage";
 import { RedeemsPage } from "../pages/RedeemsPage";
 import { SettingsPage } from "../pages/SettingsPage";
+import { SwapPage } from "../pages/SwapPage";
 import { TransferPage } from "../pages/TransferPage";
 
 const scenarioAChildren: RouteObject[] = [
@@ -44,6 +45,7 @@ const scenarioAChildren: RouteObject[] = [
 
 const scenarioBChildren: RouteObject[] = [
   { index: true, element: <DashboardPage /> },
+  { path: "swap", element: <SwapPage /> },
   { path: "transfer", element: <TransferPage /> },
   { path: "deposits", element: <DepositsPage /> },
   { path: "escrows", element: <EscrowsPage /> },
