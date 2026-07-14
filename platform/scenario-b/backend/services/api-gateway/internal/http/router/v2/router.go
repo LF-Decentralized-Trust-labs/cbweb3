@@ -152,6 +152,11 @@ func Register(app *fiber.App, deps Dependencies) {
 	registerCurrencyRegistryRoutes(app, deps)
 	registerSovereignRoutes(app, deps)
 	registerTransferLimitInternalRoutes(app, deps)
+
+	// Hub contract config is discovery metadata (AMM + registry addresses). It must be
+	// available regardless of which AMM services are wired on this gateway, so it is
+	// registered here rather than inside the (conditionally-gated) AMM route group.
+	app.Group("/api/v2/amm").Get("/hub-config", handlers.GetHubContractsConfig)
 }
 
 // registerTransferLimitInternalRoutes registers the CB-internal pre-auth endpoints (R1-10.1 Option A).

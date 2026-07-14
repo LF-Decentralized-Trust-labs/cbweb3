@@ -169,6 +169,9 @@ func (f *fakePairClient) ConfirmPair(_ context.Context, _ string) (string, error
 func (f *fakePairClient) GetAllActivePairs(_ context.Context) ([]domain.PairEntry, error) {
 	return f.active, f.activeErr
 }
+func (f *fakePairClient) GetAllPairs(_ context.Context) ([]domain.PairEntry, error) {
+	return f.active, f.activeErr
+}
 
 type fakePairRepo struct {
 	byID        *domain.PairProposal

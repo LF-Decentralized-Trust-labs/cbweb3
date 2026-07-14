@@ -67,6 +67,8 @@ type PairRegistryClientIface interface {
 	ProposePair(ctx context.Context, pairID, tokenA, tokenB, ammAddress string) (string, error)
 	ConfirmPair(ctx context.Context, pairID string) (string, error)
 	GetAllActivePairs(ctx context.Context) ([]domain.PairEntry, error)
+	// GetAllPairs returns every on-chain pair regardless of status (PROPOSED and ACTIVE).
+	GetAllPairs(ctx context.Context) ([]domain.PairEntry, error)
 }
 
 // PairRepositoryIface abstracts DB persistence for PairService.
@@ -197,80 +199,58 @@ func (s *PairService) ConfirmPair(ctx context.Context, req PairConfirmRequest) (
 	return &PairConfirmResult{PairID: req.PairID, Status: domain.PairStatusActive, TxHash: txHash}, nil
 }
 
-// ListActivePairs returns all pairs from the DB, syncing any PROPOSED pairs that are already
-// ACTIVE on-chain (cross-gateway lazy sync: pair proposed via gateway A, confirmed via gateway B).
+// ListActivePairs returns the full set of pairs, using the on-chain PairRegistry as the
+// source of truth for pair existence and status (PROPOSED and ACTIVE). This enables cross-CB
+// discovery: a pair proposed via one Central Bank gateway is visible to the counterparty CB
+// even before it is confirmed. Local DB rows are merged in by PairID to supply human labels
+// (proposer/confirmer CB names, timestamps). When the on-chain call fails, the method falls
+// back to the DB-only view. When no client is configured, DB-only behaviour is preserved.
 func (s *PairService) ListActivePairs(ctx context.Context) ([]domain.PairProposal, error) {
-	pairs, err := s.repo.ListAll(ctx)
+	dbPairs, err := s.repo.ListAll(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Lazy on-chain sync: only when the client is configured and there are PROPOSED rows.
+	// No on-chain client: preserve legacy DB-only behaviour.
 	if s.client == nil {
-		return pairs, nil
-	}
-	hasPending := false
-	for _, p := range pairs {
-		if p.Status == domain.PairStatusProposed {
-			hasPending = true
-			break
-		}
-	}
-	if !hasPending {
-		return pairs, nil
+		return dbPairs, nil
 	}
 
-	activePairs, cerr := s.client.GetAllActivePairs(ctx)
+	onChain, cerr := s.client.GetAllPairs(ctx)
 	if cerr != nil {
-		return pairs, nil // on-chain unavailable — return stale DB view
-	}
-	onChainActive := make(map[string]domain.PairEntry, len(activePairs))
-	for _, ap := range activePairs {
-		onChainActive[ap.PairID] = ap
+		return dbPairs, nil // on-chain unavailable — return DB view
 	}
 
-	now := time.Now().UTC()
-	syncedIDs := make(map[string]bool)
-	for i, p := range pairs {
-		if p.Status == domain.PairStatusProposed {
-			if _, ok := onChainActive[p.PairID]; ok {
-				_ = s.repo.Activate(ctx, p.PairID, "", now)
-				pairs[i].Status = domain.PairStatusActive
-				syncedIDs[p.PairID] = true
-			}
+	// Index DB rows by PairID to enrich on-chain entries with human labels.
+	dbByID := make(map[string]domain.PairProposal, len(dbPairs))
+	for _, p := range dbPairs {
+		dbByID[p.PairID] = p
+	}
+
+	result := make([]domain.PairProposal, 0, len(onChain))
+	for _, e := range onChain {
+		status := e.Status
+		if status == "" {
+			status = domain.PairStatusActive // defensive: treat unlabelled on-chain entries as ACTIVE
 		}
-	}
-
-	// Add any on-chain ACTIVE pairs not present in local DB at all.
-	knownIDs := make(map[string]bool, len(pairs))
-	for _, p := range pairs {
-		knownIDs[p.PairID] = true
-	}
-	for _, ap := range activePairs {
-		if !knownIDs[ap.PairID] {
-			np := &domain.PairProposal{
-				PairID:        ap.PairID,
-				ProposerCB:    "",
-				TokenAAddress: ap.TokenA,
-				TokenBAddress: ap.TokenB,
-				AMMAddress:    ap.AMMAddress,
-				Status:        domain.PairStatusProposed,
-				ProposedAt:    now,
-			}
-			_ = s.repo.Create(ctx, np)
-			_ = s.repo.Activate(ctx, ap.PairID, "", now)
-			pairs = append(pairs, domain.PairProposal{
-				PairID:        ap.PairID,
-				TokenAAddress: ap.TokenA,
-				TokenBAddress: ap.TokenB,
-				AMMAddress:    ap.AMMAddress,
-				Status:        domain.PairStatusActive,
-				ProposedAt:    now,
-			})
+		proposal := domain.PairProposal{
+			PairID:        e.PairID,
+			TokenAAddress: e.TokenA,
+			TokenBAddress: e.TokenB,
+			AMMAddress:    e.AMMAddress,
+			Status:        status,
 		}
+		// Merge DB-supplied human labels / timestamps when available.
+		if db, ok := dbByID[e.PairID]; ok {
+			proposal.ProposerCB = db.ProposerCB
+			proposal.ConfirmerCB = db.ConfirmerCB
+			proposal.ProposedAt = db.ProposedAt
+			proposal.ConfirmedAt = db.ConfirmedAt
+		}
+		result = append(result, proposal)
 	}
 
-	return pairs, nil
+	return result, nil
 }
 
 func mapOnChainProposePairError(err error) error {

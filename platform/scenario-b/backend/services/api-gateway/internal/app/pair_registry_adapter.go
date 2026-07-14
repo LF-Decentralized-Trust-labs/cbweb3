@@ -45,6 +45,17 @@ const pairRegistryABI = `[
     {"name":"confirmer","type":"address"}
   ]}
 ]},
+{"type":"function","name":"getAllPairs","stateMutability":"view","inputs":[],"outputs":[
+  {"name":"","type":"tuple[]","components":[
+    {"name":"pairId","type":"string"},
+    {"name":"ammAddress","type":"address"},
+    {"name":"tokenA","type":"address"},
+    {"name":"tokenB","type":"address"},
+    {"name":"status","type":"uint8"},
+    {"name":"proposer","type":"address"},
+    {"name":"confirmer","type":"address"}
+  ]}
+]},
 {"type":"event","name":"PairRegistered","anonymous":false,"inputs":[
   {"name":"pairId","type":"string","indexed":true},
   {"name":"ammAddress","type":"address","indexed":true},
@@ -210,6 +221,80 @@ func (c *PairRegistryClient) GetAllActivePairs(ctx context.Context) ([]domain.Pa
 		})
 	}
 	return result, nil
+}
+
+// GetAllPairs reads every registered pair from on-chain, regardless of status
+// (PROPOSED and ACTIVE). It backs cross-CB discovery: a pair proposed via one
+// Central Bank gateway is visible to the counterparty CB before confirmation.
+// The on-chain status enum (0=PROPOSED, 1=ACTIVE) is mapped into PairEntry.Status.
+func (c *PairRegistryClient) GetAllPairs(ctx context.Context) ([]domain.PairEntry, error) {
+	input, err := c.parsed.Pack("getAllPairs")
+	if err != nil {
+		return nil, fmt.Errorf("pair registry getAllPairs pack: %w", err)
+	}
+	msg := ethereum.CallMsg{To: &c.contract, Data: input}
+	raw, err := c.ec.CallContract(ctx, msg, nil)
+	if err != nil {
+		return nil, fmt.Errorf("pair registry getAllPairs call: %w", err)
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+
+	method := c.parsed.Methods["getAllPairs"]
+	entries, err := method.Outputs.Unpack(raw)
+	if err != nil {
+		return nil, fmt.Errorf("pair registry getAllPairs unpack: %w", err)
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+
+	// go-ethereum unpacks tuple[] as a slice of anonymous structs via reflection.
+	// Type-asserting to a named struct always fails; use reflect to extract fields.
+	rv := reflect.ValueOf(entries[0])
+	if rv.Kind() != reflect.Slice {
+		return nil, fmt.Errorf("pair registry getAllPairs: unexpected output type %T", entries[0])
+	}
+
+	result := make([]domain.PairEntry, 0, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		item := rv.Index(i)
+		if item.Kind() == reflect.Ptr {
+			item = item.Elem()
+		}
+		pairId := item.FieldByName("PairId")
+		ammAddr := item.FieldByName("AmmAddress")
+		tokenA := item.FieldByName("TokenA")
+		tokenB := item.FieldByName("TokenB")
+		if !pairId.IsValid() || !ammAddr.IsValid() || !tokenA.IsValid() || !tokenB.IsValid() {
+			continue
+		}
+		result = append(result, domain.PairEntry{
+			PairID:     pairId.String(),
+			AMMAddress: strings.ToLower(ammAddr.Interface().(common.Address).Hex()),
+			TokenA:     strings.ToLower(tokenA.Interface().(common.Address).Hex()),
+			TokenB:     strings.ToLower(tokenB.Interface().(common.Address).Hex()),
+			Status:     pairStatusString(item.FieldByName("Status")),
+		})
+	}
+	return result, nil
+}
+
+// pairStatusString maps the on-chain PairStatus enum (uint8) to its string label.
+// Mirrors PairRegistry.sol: 0=PROPOSED, 1=ACTIVE.
+func pairStatusString(v reflect.Value) string {
+	if !v.IsValid() || !v.CanUint() {
+		return ""
+	}
+	switch v.Uint() {
+	case 0:
+		return domain.PairStatusProposed
+	case 1:
+		return domain.PairStatusActive
+	default:
+		return ""
+	}
 }
 
 // SubscribePairRegistered opens an event filter for PairRegistered logs.
