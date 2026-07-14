@@ -337,7 +337,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		}); err != nil {
 			log.Printf("warning: pair AMM resolver init failed: %v", err)
 		} else {
-			pairResolver = newPairAMMResolver(pr, hubRPC, hubChainID, signerKey, 15*time.Second)
+			pairResolver = newPairAMMResolver(pr, hubRPC, hubChainID, signerKey, 15*time.Second, currencyCodeFromSymbol(os.Getenv("NATIVE_ASSET_SYMBOL")))
 			deps.PairSideResolver = pairResolver
 			// Sovereign seeding driver (escrow-and-finalize, no LCR): resolves side + AMM +
 			// commit id per pair and drives depositForCommit/finalizeCommit/cancelCommitDeposit.
