@@ -1516,6 +1516,8 @@ type HTLCLock struct {
 	ZetoLockRef        string                 `protobuf:"bytes,7,opt,name=zeto_lock_ref,json=zetoLockRef,proto3" json:"zeto_lock_ref,omitempty"`
 	State              HTLCState              `protobuf:"varint,8,opt,name=state,proto3,enum=payment_orchestrator.v1.HTLCState" json:"state,omitempty"`
 	CounterpartyLocked bool                   `protobuf:"varint,9,opt,name=counterparty_locked,json=counterpartyLocked,proto3" json:"counterparty_locked,omitempty"` // true once the relay confirms the counterparty spoke has locked its matching leg
+	Amount             string                 `protobuf:"bytes,10,opt,name=amount,proto3" json:"amount,omitempty"`                                                   // locked amount, integer units (as persisted by the orchestrator)
+	CreatedAt          string                 `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`                            // RFC3339 creation timestamp
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -1604,6 +1606,20 @@ func (x *HTLCLock) GetCounterpartyLocked() bool {
 		return x.CounterpartyLocked
 	}
 	return false
+}
+
+func (x *HTLCLock) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
+}
+
+func (x *HTLCLock) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
 }
 
 type LockHTLCRequest struct {
@@ -4507,7 +4523,7 @@ const file_payment_orchestrator_v1_payment_orchestrator_proto_rawDesc = "" +
 	"\x1cListFXAgreementEventsRequest\x12\x19\n" +
 	"\btrade_id\x18\x01 \x01(\tR\atradeId\"b\n" +
 	"\x1dListFXAgreementEventsResponse\x12A\n" +
-	"\x06events\x18\x01 \x03(\v2).payment_orchestrator.v1.FXAgreementEventR\x06events\"\xb6\x02\n" +
+	"\x06events\x18\x01 \x03(\v2).payment_orchestrator.v1.FXAgreementEventR\x06events\"\xed\x02\n" +
 	"\bHTLCLock\x12\x1f\n" +
 	"\vcontract_id\x18\x01 \x01(\tR\n" +
 	"contractId\x12\x16\n" +
@@ -4517,7 +4533,11 @@ const file_payment_orchestrator_v1_payment_orchestrator_proto_rawDesc = "" +
 	"\ttime_lock\x18\x05 \x01(\x04R\btimeLock\x12\"\n" +
 	"\rzeto_lock_ref\x18\a \x01(\tR\vzetoLockRef\x128\n" +
 	"\x05state\x18\b \x01(\x0e2\".payment_orchestrator.v1.HTLCStateR\x05state\x12/\n" +
-	"\x13counterparty_locked\x18\t \x01(\bR\x12counterpartyLockedJ\x04\b\x06\x10\aR\x06secret\"\x85\x01\n" +
+	"\x13counterparty_locked\x18\t \x01(\bR\x12counterpartyLocked\x12\x16\n" +
+	"\x06amount\x18\n" +
+	" \x01(\tR\x06amount\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\v \x01(\tR\tcreatedAtJ\x04\b\x06\x10\aR\x06secret\"\x85\x01\n" +
 	"\x0fLockHTLCRequest\x12!\n" +
 	"\fagreement_id\x18\x01 \x01(\tR\vagreementId\x12\x1a\n" +
 	"\breceiver\x18\x02 \x01(\tR\breceiver\x12\x16\n" +

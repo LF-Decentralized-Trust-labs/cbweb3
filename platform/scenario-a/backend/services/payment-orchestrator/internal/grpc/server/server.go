@@ -1388,6 +1388,10 @@ func recordToProto(r *domain.HTLCRecord) *pb.HTLCLock {
 		domain.HTLCStateSettling:  pb.HTLCState_HTLC_STATE_SETTLING,
 		domain.HTLCStateRefunding: pb.HTLCState_HTLC_STATE_REFUNDING,
 	}
+	var createdAt string
+	if !r.CreatedAt.IsZero() {
+		createdAt = r.CreatedAt.UTC().Format(time.RFC3339)
+	}
 	return &pb.HTLCLock{
 		ContractId:         r.ContractID,
 		Sender:             r.Sender,
@@ -1397,6 +1401,8 @@ func recordToProto(r *domain.HTLCRecord) *pb.HTLCLock {
 		ZetoLockRef:        r.ZetoLockRef,
 		State:              stateMap[r.State],
 		CounterpartyLocked: r.CounterpartyLocked,
+		Amount:             r.Amount,
+		CreatedAt:          createdAt,
 	}
 }
 

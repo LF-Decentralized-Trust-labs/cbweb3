@@ -170,6 +170,8 @@ message HTLCLock {
   string zeto_lock_ref = 7;
   HTLCState state = 8;
   bool counterparty_locked = 9; // true once the relay confirms the counterparty spoke has locked its matching leg
+  string amount = 10; // locked amount, integer units (as persisted by the orchestrator)
+  string created_at = 11; // RFC3339 creation timestamp
 }
 
 message LockHTLCRequest {

@@ -137,6 +137,8 @@ type HTLCStatus struct {
 	ZetoLockRef        string `json:"zeto_lock_ref"`
 	State              string `json:"state"`
 	CounterpartyLocked bool   `json:"counterparty_locked"`
+	Amount             string `json:"amount"`
+	CreatedAt          string `json:"created_at"` // RFC3339
 }
 
 func (a *GRPCAdapter) GetHTLCStatus(ctx context.Context, contractID string) (*HTLCStatus, error) {
@@ -233,6 +235,8 @@ func lockToStatus(l *pb.HTLCLock) *HTLCStatus {
 		ZetoLockRef:        l.ZetoLockRef,
 		State:              l.State.String(),
 		CounterpartyLocked: l.CounterpartyLocked,
+		Amount:             l.Amount,
+		CreatedAt:          l.CreatedAt,
 	}
 }
 
