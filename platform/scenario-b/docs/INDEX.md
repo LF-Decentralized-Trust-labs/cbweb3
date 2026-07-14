@@ -202,3 +202,11 @@ Scenario A (Enhanced Correspondent Banking — bilateral HTLC, no hub) is docume
 | Runbooks | fx-agreement-reconciliation.md, onboarding-novo-cb-soberano.md | Available |
 | Design | cooperative-liquidity.md, fx-agreement-hybrid-design.md | Available |
 | External | scenario-b.md, glossary.md | Available |
+
+---
+
+## Technical Debt
+
+| Item | Status | Description |
+|------|--------|-------------|
+| [tech-debt/TD-001-remove-default-amm.md](tech-debt/TD-001-remove-default-amm.md) | **OPEN** | Remove the phantom default (bootstrap) AMM. Corridors now use dedicated per-pair AMMs; the default is still load-bearing for swap-fee reads, the circuit breaker, and LP reads, so removal requires making fee/breaker/LP per-pair (breaker change needs lead approval). |
