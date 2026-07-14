@@ -652,6 +652,8 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			ChainID:         chainID,
 			PrivateKeyHex:   signerKey,
 			Timeout:         15 * time.Second,
+			// Enables ProposePair to deploy a dedicated per-pair AMM (empty amm_address path).
+			IdentityRegistryAddress: os.Getenv("HUB_IDENTITY_REGISTRY_ADDRESS"),
 		})
 		if err != nil {
 			log.Printf("warning: PairRegistry client init failed: %v", err)

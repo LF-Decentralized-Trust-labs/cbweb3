@@ -27,9 +27,10 @@ type PairProposeRequest struct {
 
 // PairProposeResult is the response body for a successful propose.
 type PairProposeResult struct {
-	PairID string `json:"pair_id"`
-	Status string `json:"status"`
-	TxHash string `json:"tx_hash"`
+	PairID     string `json:"pair_id"`
+	Status     string `json:"status"`
+	TxHash     string `json:"tx_hash"`
+	AMMAddress string `json:"amm_address"`
 }
 
 // PairConfirmRequest carries the input for POST /api/v2/amm/pairs/confirm.
@@ -69,6 +70,10 @@ type PairRegistryClientIface interface {
 	GetAllActivePairs(ctx context.Context) ([]domain.PairEntry, error)
 	// GetAllPairs returns every on-chain pair regardless of status (PROPOSED and ACTIVE).
 	GetAllPairs(ctx context.Context) ([]domain.PairEntry, error)
+	// DeployDedicatedAMM deploys a fresh per-pair AMM over (tokenA, tokenB) and
+	// returns its address, signed by the proposing CB's hub key. Used by
+	// ProposePair when the caller supplies no amm_address.
+	DeployDedicatedAMM(ctx context.Context, tokenA, tokenB string) (string, error)
 }
 
 // PairRepositoryIface abstracts DB persistence for PairService.
@@ -111,6 +116,17 @@ func (s *PairService) ProposePair(ctx context.Context, req PairProposeRequest) (
 			ErrPairAlreadyExists, existing.Status)
 	}
 
+	// A corridor MUST own a dedicated AMM whose immutable TOKEN_A/TOKEN_B are the
+	// pair's own tokens. When the caller supplies no amm_address, deploy one now
+	// (signed by the proposing CB's hub key) instead of binding a shared AMM.
+	if strings.TrimSpace(req.AMMAddress) == "" {
+		ammAddr, derr := s.client.DeployDedicatedAMM(ctx, req.TokenAAddress, req.TokenBAddress)
+		if derr != nil {
+			return nil, fmt.Errorf("pair service: deploy dedicated AMM: %w", derr)
+		}
+		req.AMMAddress = ammAddr
+	}
+
 	txHash, err := s.client.ProposePair(ctx, req.PairID, req.TokenAAddress, req.TokenBAddress, req.AMMAddress)
 	if err != nil {
 		// Check if pair is already on-chain ACTIVE (idempotent: DB was cleared but chain is source of truth)
@@ -135,7 +151,7 @@ func (s *PairService) ProposePair(ctx context.Context, req PairProposeRequest) (
 	}
 	_ = s.repo.Create(ctx, proposal) // best-effort; on-chain is source of truth
 
-	return &PairProposeResult{PairID: req.PairID, Status: domain.PairStatusProposed, TxHash: txHash}, nil
+	return &PairProposeResult{PairID: req.PairID, Status: domain.PairStatusProposed, TxHash: txHash, AMMAddress: req.AMMAddress}, nil
 }
 
 // ConfirmPair submits an on-chain confirmPair transaction and updates the DB record to ACTIVE.
