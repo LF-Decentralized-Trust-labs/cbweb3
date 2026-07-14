@@ -484,9 +484,9 @@ func hubContractMap(broadcastPath string) (map[string]string, error) {
 		case "ManualOracle":
 			out["manualOracle"] = d.Address
 		case "AutomatedMarketMaker":
-			// The hub AMM (default tCeBM_BRL/EUR pair). Propagated so a spoke can
-			// wire AMM_CONTRACT_ADDRESS into its api-gateway (v2 AMM routes) and
-			// serve as the base for the sovereign-pair AMM opened at runtime.
+			// TD-001: the hub no longer deploys a default AMM, so this case is
+			// normally not hit. Kept for backward compatibility with older broadcasts;
+			// corridor AMMs are deployed per-pair at propose time and resolved at runtime.
 			out["amm"] = d.Address
 		case "LiquidityCommitRegistry":
 			// Hub-wide LCR — enables SovereignLiquidityService, which gates the

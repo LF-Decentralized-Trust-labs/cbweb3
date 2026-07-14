@@ -244,10 +244,9 @@ func (c JoinConfig) ComposeEnv() []string {
 		"ENTITY_BESU_OPERATOR_KEY": bankKey,
 		// Hub contract addresses (published by the CB in the spoke bundle) so the
 		// bank runs the same on-chain per-pair AMM resolver as its CB — dynamic swap
-		// on any corridor. AMM_CONTRACT_ADDRESS only bootstraps the v2 routes; the
-		// resolver overrides both the AMM and its tokens per pool_pair, so no fixed
-		// HUB_TOKEN_A/B is wired here (the bank does not mint — only quote + swap).
-		"AMM_CONTRACT_ADDRESS":               b.HubContracts["amm"],
+		// on any corridor. TD-001: there is no default AMM; the PairRegistry enables
+		// the v2 routes and the resolver picks the AMM + tokens per pool_pair, so no
+		// fixed HUB_TOKEN_A/B is wired here (the bank does not mint — only quote + swap).
 		"PAIR_REGISTRY_CONTRACT_ADDRESS":     b.HubContracts["pairRegistry"],
 		"CURRENCY_REGISTRY_CONTRACT_ADDRESS": b.HubContracts["currencyRegistry"],
 		"HUB_IDENTITY_REGISTRY_ADDRESS":      b.HubContracts["identityRegistry"],

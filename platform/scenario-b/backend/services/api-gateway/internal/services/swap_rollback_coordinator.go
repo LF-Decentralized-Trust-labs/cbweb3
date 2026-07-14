@@ -76,13 +76,13 @@ func (c *SwapRollbackCoordinator) ReverseBridge(ctx context.Context, swapOperati
 			if err := c.rollbackRepo.UpdateStatus(ctx, rollbackLog.RollbackID, domain.RollbackStatusCompleted); err != nil {
 				log.Printf("warning: failed to update rollback status to COMPLETED: %v", err)
 			}
-			log.Printf("rollback successful for swap_operation_id=%s (bridge_position=%s, attempt=%d)", 
+			log.Printf("rollback successful for swap_operation_id=%s (bridge_position=%s, attempt=%d)",
 				swapOperationID, bridgeInPositionID, attempt+1)
 			return nil
 		}
 
 		lastErr = err
-		log.Printf("rollback attempt %d/%d failed for swap_operation_id=%s: %v", 
+		log.Printf("rollback attempt %d/%d failed for swap_operation_id=%s: %v",
 			attempt+1, 3, swapOperationID, err)
 
 		// Increment retry count

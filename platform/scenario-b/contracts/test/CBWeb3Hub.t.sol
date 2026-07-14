@@ -8,7 +8,6 @@ import {IIdentityRegistry} from "../src/interfaces/IIdentityRegistry.sol";
 import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
 import {HashTimeLockedContract} from "../src/HashTimeLockedContract.sol";
 import {HashTimeLockedContractLibrary} from "../src/libraries/HashTimeLockedContractLibrary.sol";
-import {AutomatedMarketMaker} from "../src/AutomatedMarketMaker.sol";
 import {FXAgreement} from "../src/FXAgreement.sol";
 import {ManualOracle} from "../src/ManualOracle.sol";
 
@@ -72,7 +71,6 @@ contract DeployCBWeb3HubTest is Test {
         TokenizedCentralBankMoney tokenBrl = deployScript.tokenBrl();
         TokenizedCentralBankMoney tokenEur = deployScript.tokenEur();
         HashTimeLockedContract htlc = deployScript.htlc();
-        AutomatedMarketMaker amm = deployScript.amm();
         FXAgreement fxAgreement = deployScript.fxAgreement();
         ManualOracle oracle = deployScript.oracle();
 
@@ -81,7 +79,6 @@ contract DeployCBWeb3HubTest is Test {
         assertTrue(address(tokenBrl) != address(0), "TokenBRL was not deployed");
         assertTrue(address(tokenEur) != address(0), "TokenEUR was not deployed");
         assertTrue(address(htlc) != address(0), "HTLC was not deployed");
-        assertTrue(address(amm) != address(0), "AMM was not deployed");
         assertTrue(address(fxAgreement) != address(0), "FXAgreement was not deployed");
         assertTrue(address(oracle) != address(0), "ManualOracle was not deployed");
 
@@ -90,7 +87,6 @@ contract DeployCBWeb3HubTest is Test {
         assertGt(address(tokenBrl).code.length, 0, "TokenBRL has no runtime bytecode");
         assertGt(address(tokenEur).code.length, 0, "TokenEUR has no runtime bytecode");
         assertGt(address(htlc).code.length, 0, "HTLC has no runtime bytecode");
-        assertGt(address(amm).code.length, 0, "AMM has no runtime bytecode");
         assertGt(address(fxAgreement).code.length, 0, "FXAgreement has no runtime bytecode");
         assertGt(address(oracle).code.length, 0, "ManualOracle has no runtime bytecode");
 
@@ -126,21 +122,8 @@ contract DeployCBWeb3HubTest is Test {
             "TokenEUR central bank role not granted"
         );
 
-        /// @dev Assert: AMM configuration with deployed tokens
-        assertEq(address(amm.TOKEN_A()), address(tokenBrl), "AMM TokenA should be TokenBRL");
-        assertEq(address(amm.TOKEN_B()), address(tokenEur), "AMM TokenB should be TokenEUR");
-
-        /// @dev Assert: AMM initial state
-        assertEq(amm.reserveA(), 0, "AMM initial reserveA should be zero");
-        assertEq(amm.reserveB(), 0, "AMM initial reserveB should be zero");
-        assertFalse(amm.isPaused(), "AMM should not be paused initially");
-
-        /// @dev Assert: AMM and HTLC are wired to the IdentityRegistry
-        assertEq(
-            address(amm.IDENTITY_REGISTRY()),
-            address(identityRegistry),
-            "AMM should reference the deployed IdentityRegistry"
-        );
+        /// @dev Assert: HTLC is wired to the IdentityRegistry (no default AMM — TD-001;
+        ///      corridor AMMs are deployed per-pair at propose time).
         assertEq(
             address(htlc.IDENTITY_REGISTRY()),
             address(identityRegistry),

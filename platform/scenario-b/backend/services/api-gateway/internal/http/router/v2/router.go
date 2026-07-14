@@ -90,6 +90,12 @@ type Dependencies struct {
 	LPPositionRepo handlers.LPPositionReaderIface
 	// LPBalanceReader enables GET /api/v2/amm/lp-balance — the CB's live on-chain CBW3-LP position (013).
 	LPBalanceReader handlers.LPBalanceReaderIface
+	// PairSideResolver derives the CB's side ("A"/"B") for a pool_pair from the on-chain
+	// CENTRAL_BANK_ROLE, replacing the BANK_CODE→side mapping (nil ⇒ fall back to config).
+	PairSideResolver handlers.PairSideResolverIface
+	// SovereignSeed drives the AMM escrow-and-finalize seeding (each CB deposits only its
+	// own side; finalize funds reserves atomically; reclaim before finalize). No LCR.
+	SovereignSeed handlers.SovereignSeedEscrow
 	// Simplified API config (008-fix-cb-liquidity)
 	SpokeNetwork      string // spoke-a, spoke-b (for bridge lock-mint derivation)
 	NativeAssetSymbol string // tCeBM_BRL, tCeBM_ARS (for bridge lock-mint derivation)
@@ -291,17 +297,38 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 				deps.CommitSide,       // NEW: derived from BANK_CODE
 				deps.WTokenAddress,    // NEW: from config
 				deps.LocalCBHubSigner, // NEW: LOCAL_CB_HUB_SIGNER for balance checks
-			).SetFallbackBankCode(deps.BankCode)
+			).SetFallbackBankCode(deps.BankCode).WithSideResolver(deps.PairSideResolver)
 		} else {
-			lh = handlers.NewLiquidityHandler(deps.LiquidityService)
+			lh = handlers.NewLiquidityHandler(deps.LiquidityService).WithSideResolver(deps.PairSideResolver)
 		}
-		// Legacy dual-sided liquidity provisioning (used by tryouts and frontend governance).
-		// For sovereign CB flow, use commit-reveal + bridge-based approach instead.
-		amm.Post("/liquidity/add",
-			middleware.RequireCookieAuth(deps.AuthProvider),
-			middleware.RequireLiquidityProviderRole(),
-			lh.AddLiquidity,
-		)
+		// Sovereign seeding (escrow-and-finalize, no LCR — TD legacy removal): each CB
+		// deposits ONLY its own side against the pool's shared commit; finalize funds the
+		// reserves atomically once both sides are in; a CB can reclaim its pending side
+		// before finalize. Side is auto-resolved on-chain (no picker). Replaces the legacy
+		// dual-sided /liquidity/add, which let one CB supply both sides (sovereignty breach).
+		if deps.SovereignSeed != nil && deps.TokenPreparer != nil {
+			ssh := handlers.NewSovereignSeedHandler(deps.TokenPreparer, deps.SovereignSeed)
+			amm.Post("/liquidity/deposit-side",
+				middleware.RequireCookieAuth(deps.AuthProvider),
+				middleware.RequireLiquidityProviderRole(),
+				ssh.DepositSide,
+			)
+			amm.Post("/liquidity/finalize",
+				middleware.RequireCookieAuth(deps.AuthProvider),
+				middleware.RequireLiquidityProviderRole(),
+				ssh.Finalize,
+			)
+			amm.Post("/liquidity/reclaim-side",
+				middleware.RequireCookieAuth(deps.AuthProvider),
+				middleware.RequireLiquidityProviderRole(),
+				ssh.ReclaimSide,
+			)
+			amm.Get("/liquidity/escrow",
+				middleware.RequireCookieAuth(deps.AuthProvider),
+				middleware.RequireLiquidityProviderRole(),
+				ssh.EscrowState,
+			)
+		}
 		// D7/013: withdrawal is a sovereign CB operation — RequireAnyAuth so CB M2M
 		// (bearer) clients can withdraw, mirroring /liquidity/commit.
 		amm.Post("/liquidity/remove",
@@ -491,7 +518,7 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 		deps.CommitSide,       // NEW: derived from BANK_CODE
 		deps.WTokenAddress,    // NEW: from config
 		deps.LocalCBHubSigner, // NEW: LOCAL_CB_HUB_SIGNER for balance checks
-	).SetFallbackBankCode(deps.BankCode)
+	).SetFallbackBankCode(deps.BankCode).WithSideResolver(deps.PairSideResolver)
 	app.Post("/internal/amm/execute-matched-commit",
 		middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 		lh.ExecuteMatchedCommit,

@@ -61,33 +61,41 @@ export interface ConfirmPairResponse {
   tx_hash: string;
 }
 
-export interface MintAndApproveRequest {
-  /** Non-negative integer amount, as a decimal string. */
-  amount: string;
+// --- Sovereign seeding (escrow-and-finalize, no LCR) ---
+
+export interface DepositSideRequest {
   pool_pair: string;
-  side: PoolSide;
-  /** Optional — omit to mint & approve for the AMM itself; if set, mints to that address. */
-  recipient?: string;
+  /** Raw base-unit (wei) amount of THIS CB's own currency to escrow. */
+  amount: string;
 }
 
-export interface MintAndApproveResponse {
+export interface DepositSideResponse {
+  pool_pair: string;
+  side: string; // A or B, auto-resolved on-chain
+  amount: string;
   status: string;
-  amount: string;
-  recipient?: string;
 }
 
-export interface AddLiquidityRequest {
+export interface FinalizeSeedResponse {
   pool_pair: string;
-  provider_bank_id: string;
-  token_a_amount: string;
-  token_b_amount: string;
+  status: string;
+  shares_a: string;
+  shares_b: string;
 }
 
-/** Liquidity result object — treated as opaque; only status/success are surfaced. */
-export interface AddLiquidityResponse {
-  status?: string;
-  success?: boolean;
-  [key: string]: unknown;
+export interface ReclaimSideResponse {
+  pool_pair: string;
+  side: string;
+  status: string;
+}
+
+/** On-chain escrow commit state for a pool (which sides deposited + finalized). */
+export interface EscrowStatus {
+  side_a_deposited: boolean;
+  side_b_deposited: boolean;
+  amount_a: string;
+  amount_b: string;
+  finalized: boolean;
 }
 
 export interface HubPair {

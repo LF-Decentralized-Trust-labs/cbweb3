@@ -15,10 +15,10 @@ import (
 
 // AMMCircuitBreakerCaller is the interface for on-chain circuit breaker operations.
 type AMMCircuitBreakerCaller interface {
-	PauseCircuitBreaker(ctx context.Context, signature []byte) (string, error)
-	ProposeResume(ctx context.Context, signature []byte) (string, error)
-	SignResume(ctx context.Context, requestID string, signature []byte) error
-	ExecuteResume(ctx context.Context, requestID string) error
+	PauseCircuitBreaker(ctx context.Context, pair string, signature []byte) (string, error)
+	ProposeResume(ctx context.Context, pair string, signature []byte) (string, error)
+	SignResume(ctx context.Context, pair, requestID string, signature []byte) error
+	ExecuteResume(ctx context.Context, pair, requestID string) error
 }
 
 // CircuitBreakerService manages the asymmetric circuit breaker lifecycle (FR-030 / FR-044).
@@ -34,7 +34,7 @@ func NewCircuitBreakerService(db *gorm.DB, ammCaller AMMCircuitBreakerCaller) *C
 
 // Pause performs a 1-of-N pause of the AMM circuit breaker (FR-030).
 func (s *CircuitBreakerService) Pause(ctx context.Context, pair, bankID, reasonCode string, signature []byte) error {
-	txRef, err := s.ammCaller.PauseCircuitBreaker(ctx, signature)
+	txRef, err := s.ammCaller.PauseCircuitBreaker(ctx, pair, signature)
 	if err != nil {
 		return fmt.Errorf("on-chain pause failed: %w", err)
 	}
@@ -66,7 +66,7 @@ func (s *CircuitBreakerService) Pause(ctx context.Context, pair, bankID, reasonC
 
 // ProposeResume submits a resume proposal requiring quorum 2-of-N (FR-030 / FR-044).
 func (s *CircuitBreakerService) ProposeResume(ctx context.Context, pair, bankID string, sig []byte) (string, error) {
-	requestID, err := s.ammCaller.ProposeResume(ctx, sig)
+	requestID, err := s.ammCaller.ProposeResume(ctx, pair, sig)
 	if err != nil {
 		return "", fmt.Errorf("on-chain resume proposal failed: %w", err)
 	}
@@ -98,7 +98,7 @@ func (s *CircuitBreakerService) ProposeResume(ctx context.Context, pair, bankID 
 
 // SignResume adds a signature to an existing resume request.
 func (s *CircuitBreakerService) SignResume(ctx context.Context, pair, requestID, bankID string, sig []byte) error {
-	if err := s.ammCaller.SignResume(ctx, requestID, sig); err != nil {
+	if err := s.ammCaller.SignResume(ctx, pair, requestID, sig); err != nil {
 		return fmt.Errorf("on-chain sign resume failed: %w", err)
 	}
 
@@ -117,7 +117,7 @@ func (s *CircuitBreakerService) SignResume(ctx context.Context, pair, requestID,
 
 // ExecuteResume finalises the resume on-chain; requires quorum 2-of-N.
 func (s *CircuitBreakerService) ExecuteResume(ctx context.Context, pair, requestID string) error {
-	if err := s.ammCaller.ExecuteResume(ctx, requestID); err != nil {
+	if err := s.ammCaller.ExecuteResume(ctx, pair, requestID); err != nil {
 		return fmt.Errorf("on-chain execute resume failed: %w", err)
 	}
 	return s.db.WithContext(ctx).

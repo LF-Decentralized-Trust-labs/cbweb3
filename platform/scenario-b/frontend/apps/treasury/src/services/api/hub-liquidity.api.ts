@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type {
-  AddLiquidityRequest,
-  AddLiquidityResponse,
   ConfirmPairRequest,
   ConfirmPairResponse,
+  DepositSideRequest,
+  DepositSideResponse,
+  EscrowStatus,
+  FinalizeSeedResponse,
   HubConfig,
   HubCurrenciesResponse,
   HubPairsResponse,
-  MintAndApproveRequest,
-  MintAndApproveResponse,
   ProposePairRequest,
   ProposePairResponse,
+  ReclaimSideResponse,
   RegisterCurrencyRequest,
   RegisterCurrencyResponse,
 } from "../../types/hub-liquidity.types";
@@ -46,14 +47,26 @@ export const hubLiquidityApi = {
     const response = await httpClientV2.post<ConfirmPairResponse>("/amm/pairs/confirm", payload);
     return response.data;
   },
-  // Mint & approve tokens for the AMM (per pool + side).
-  mintAndApprove: async (payload: MintAndApproveRequest): Promise<MintAndApproveResponse> => {
-    const response = await httpClientV2.post<MintAndApproveResponse>("/amm/token/mint-and-approve", payload);
+  // Sovereign seeding (escrow-and-finalize, no LCR): this CB deposits ONLY its own side.
+  // The backend mints the CB's own W-token and escrows it against the pool's shared commit;
+  // the side is auto-resolved on-chain (no picker).
+  depositSide: async (payload: DepositSideRequest): Promise<DepositSideResponse> => {
+    const response = await httpClientV2.post<DepositSideResponse>("/amm/liquidity/deposit-side", payload);
     return response.data;
   },
-  // Seed / add initial liquidity to the pool.
-  addLiquidity: async (payload: AddLiquidityRequest): Promise<AddLiquidityResponse> => {
-    const response = await httpClientV2.post<AddLiquidityResponse>("/amm/liquidity/add", payload);
+  // Finalize the pool once BOTH sides are escrowed (funds reserves atomically).
+  finalizeSeed: async (poolPair: string): Promise<FinalizeSeedResponse> => {
+    const response = await httpClientV2.post<FinalizeSeedResponse>("/amm/liquidity/finalize", { pool_pair: poolPair });
+    return response.data;
+  },
+  // Reclaim this CB's own pending side (before finalize).
+  reclaimSide: async (poolPair: string): Promise<ReclaimSideResponse> => {
+    const response = await httpClientV2.post<ReclaimSideResponse>("/amm/liquidity/reclaim-side", { pool_pair: poolPair });
+    return response.data;
+  },
+  // Read the escrow commit state for a pool (which sides deposited + finalized).
+  getEscrow: async (poolPair: string): Promise<EscrowStatus> => {
+    const response = await httpClientV2.get<EscrowStatus>("/amm/liquidity/escrow", { params: { pool_pair: poolPair } });
     return response.data;
   },
   // List existing pairs so the operator can pick the pool_pair.

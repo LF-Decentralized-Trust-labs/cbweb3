@@ -27,6 +27,10 @@ type pairAMMResolver struct {
 	chainID   int64
 	signerKey string
 	timeout   time.Duration
+	// homeCurrency is this gateway's own sovereign currency code (e.g. "BRL"), derived
+	// from NATIVE_ASSET_SYMBOL. Used to resolve which side of a pair this CB operates —
+	// robust in local dev where the signer may hold CENTRAL_BANK_ROLE on both W-tokens.
+	homeCurrency string
 
 	mu       sync.Mutex
 	pairs    map[string]pairAddrs           // pairId → resolved addresses
@@ -40,17 +44,25 @@ type pairAddrs struct {
 	tokenB string
 }
 
-func newPairAMMResolver(pr *PairRegistryClient, rpcURL string, chainID int64, signerKey string, timeout time.Duration) *pairAMMResolver {
+func newPairAMMResolver(pr *PairRegistryClient, rpcURL string, chainID int64, signerKey string, timeout time.Duration, homeCurrency string) *pairAMMResolver {
 	return &pairAMMResolver{
-		pr:        pr,
-		rpcURL:    rpcURL,
-		chainID:   chainID,
-		signerKey: signerKey,
-		timeout:   timeout,
-		pairs:     map[string]pairAddrs{},
-		ammCache:  map[string]*ammclient.Client{},
-		tokCache:  map[string]*tcebmclient.Client{},
+		pr:           pr,
+		rpcURL:       rpcURL,
+		chainID:      chainID,
+		signerKey:    signerKey,
+		timeout:      timeout,
+		homeCurrency: strings.ToUpper(strings.TrimSpace(homeCurrency)),
+		pairs:        map[string]pairAddrs{},
+		ammCache:     map[string]*ammclient.Client{},
+		tokCache:     map[string]*tcebmclient.Client{},
 	}
+}
+
+// currencyCodeFromSymbol strips a token symbol to its base ISO code:
+// "W-tCeBM_BRL" → "BRL", "tCeBM_ARS" → "ARS".
+func currencyCodeFromSymbol(symbol string) string {
+	parts := strings.Split(symbol, "_")
+	return strings.ToUpper(strings.TrimSpace(parts[len(parts)-1]))
 }
 
 // lookupPair returns the resolved addresses for poolPair, refreshing the cache
@@ -77,6 +89,23 @@ func (r *pairAMMResolver) lookupPair(ctx context.Context, poolPair string) (pair
 		return pairAddrs{}, fmt.Errorf("resolve pair %q: not found among active pairs", poolPair)
 	}
 	return pa, nil
+}
+
+// primaryClient returns an AMM client bound to the FIRST active pair. It backs the
+// genuinely pairless legacy operations (LP-share balance read, withdrawal, and the
+// sovereign commit calls whose target AMM address is passed explicitly) now that no
+// default/bootstrap AMM exists. With a single corridor this is exactly that pool;
+// with multiple corridors it is a documented limitation (see TD-001) — those callers
+// predate multi-pair and do not carry a pool_pair. Errors when no active pair exists.
+func (r *pairAMMResolver) primaryClient(ctx context.Context) (*ammclient.Client, error) {
+	entries, err := r.pr.GetAllActivePairs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("resolve primary AMM: %w", err)
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("resolve primary AMM: no active pairs")
+	}
+	return r.ammFor(ctx, entries[0].PairID)
 }
 
 // ammFor returns an AMM client bound to poolPair's on-chain AMM + W-tokens.
@@ -108,6 +137,38 @@ func (r *pairAMMResolver) ammFor(ctx context.Context, poolPair string) (*ammclie
 	r.ammCache[key] = c
 	r.mu.Unlock()
 	return c, nil
+}
+
+// SideForSigner determines which side ("A" or "B") of poolPair this gateway's
+// signer is the central bank of, by checking CENTRAL_BANK_ROLE on the pair's two
+// W-tokens. This makes the side an on-chain property of (pair, CB) — no manual
+// picker, no brittle BANK_CODE mapping. A CB is the issuer of exactly one side of
+// a sovereign corridor; an error is returned if it is neither (or both).
+func (r *pairAMMResolver) SideForSigner(ctx context.Context, poolPair string) (string, error) {
+	if r.homeCurrency == "" {
+		return "", fmt.Errorf("side resolve: home currency not configured (NATIVE_ASSET_SYMBOL)")
+	}
+	tokA, tokB, err := r.tokensFor(ctx, poolPair)
+	if err != nil {
+		return "", err
+	}
+	symA, err := tokA.Symbol(ctx)
+	if err != nil {
+		return "", fmt.Errorf("side resolve: symbol of token A: %w", err)
+	}
+	symB, err := tokB.Symbol(ctx)
+	if err != nil {
+		return "", fmt.Errorf("side resolve: symbol of token B: %w", err)
+	}
+	codeA, codeB := currencyCodeFromSymbol(symA), currencyCodeFromSymbol(symB)
+	switch r.homeCurrency {
+	case codeA:
+		return "A", nil
+	case codeB:
+		return "B", nil
+	default:
+		return "", fmt.Errorf("side resolve: this CB's currency %q is not a side of %q (%s/%s)", r.homeCurrency, poolPair, codeA, codeB)
+	}
 }
 
 // tokensFor returns the W-token clients (A, B) for poolPair.
