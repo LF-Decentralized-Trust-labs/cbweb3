@@ -1,6 +1,33 @@
 # TD-001 — Remove the default (bootstrap) AMM
 
-Status: **OPEN** · Scenario B · Component: api-gateway + hub contracts · Raised: 2026-07-14
+Status: **RESOLVED** (2026-07-14, branch `feat/scenario-b-remove-default-amm`) · Scenario B · Component: api-gateway + hub contracts · Raised: 2026-07-14
+
+## Resolution
+
+The default AMM was removed and every AMM operation now resolves per pool_pair:
+
+- **api-gateway** (`refactor: resolve every AMM op per-pair`): `ammAdapter` holds only the
+  PairRegistry resolver; `clientFor(pair)` resolves the pool's dedicated AMM (or the primary
+  pool — the first active pair — for the few pairless legacy ops) and returns an error instead
+  of dereferencing a nil default. v2 AMM services gate on the pair resolver; swap-fee and the
+  circuit breaker are per-pair; TokenPreparer resolves the AMM per pool_pair.
+- **contracts/toolkit** (`refactor: stop deploying the default AMM at hub setup`): `CBWeb3Hub.s.sol`
+  no longer deploys the phantom AMM (tCeBM_BRL/EUR base assets kept as Hub reserve tokens);
+  the toolkit no longer wires `AMM_CONTRACT_ADDRESS` — the v2 routes are enabled by
+  `PAIR_REGISTRY_CONTRACT_ADDRESS`.
+
+**Validated** on a clean `deploy-all` (no default AMM): api-gateway + 288 contract tests pass;
+E2E 15/15 — `AMM_CONTRACT_ADDRESS` unset, PairRegistry empty at start, propose(no amm) deploys a
+dedicated AMM, confirm→ACTIVE, mint&approve+seed, swap itau→macro COMPLETED, and a governance
+circuit-breaker pause flips the pair's **dedicated** AMM `isPaused()==true` on-chain.
+
+Follow-up (not blocking): the genuinely pairless LP-share read (`/amm/lp-balance`), withdrawal,
+and sovereign-commit ops resolve to the "primary" pool (first active pair). Multi-corridor
+deployments should give those a pool_pair — tracked separately if/when a second corridor ships.
+
+---
+
+_Original problem statement (for reference):_
 
 ## Summary
 

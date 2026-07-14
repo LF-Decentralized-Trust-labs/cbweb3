@@ -209,4 +209,4 @@ Scenario A (Enhanced Correspondent Banking — bilateral HTLC, no hub) is docume
 
 | Item | Status | Description |
 |------|--------|-------------|
-| [tech-debt/TD-001-remove-default-amm.md](tech-debt/TD-001-remove-default-amm.md) | **OPEN** | Remove the phantom default (bootstrap) AMM. Corridors now use dedicated per-pair AMMs; the default is still load-bearing for swap-fee reads, the circuit breaker, and LP reads, so removal requires making fee/breaker/LP per-pair (breaker change needs lead approval). |
+| [tech-debt/TD-001-remove-default-amm.md](tech-debt/TD-001-remove-default-amm.md) | **RESOLVED** | Removed the phantom default (bootstrap) AMM. Every AMM op (quote/swap/pool/liquidity/mint/fee/breaker) resolves per pool_pair from the on-chain PairRegistry; the hub no longer deploys a default AMM and the gateway no longer needs `AMM_CONTRACT_ADDRESS`. Validated E2E on a clean deploy. |
