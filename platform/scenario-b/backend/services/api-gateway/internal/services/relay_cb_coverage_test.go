@@ -107,22 +107,22 @@ func TestCactiRelay_NotifyBridgeOut_ConnError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type fakeCBCaller struct {
-	pauseTx        string
-	pauseErr       error
-	proposeReqID   string
-	proposeErr     error
-	signErr        error
-	executeErr     error
+	pauseTx      string
+	pauseErr     error
+	proposeReqID string
+	proposeErr   error
+	signErr      error
+	executeErr   error
 }
 
-func (f *fakeCBCaller) PauseCircuitBreaker(_ context.Context, _ []byte) (string, error) {
+func (f *fakeCBCaller) PauseCircuitBreaker(_ context.Context, _ string, _ []byte) (string, error) {
 	return f.pauseTx, f.pauseErr
 }
-func (f *fakeCBCaller) ProposeResume(_ context.Context, _ []byte) (string, error) {
+func (f *fakeCBCaller) ProposeResume(_ context.Context, _ string, _ []byte) (string, error) {
 	return f.proposeReqID, f.proposeErr
 }
-func (f *fakeCBCaller) SignResume(_ context.Context, _ string, _ []byte) error { return f.signErr }
-func (f *fakeCBCaller) ExecuteResume(_ context.Context, _ string) error        { return f.executeErr }
+func (f *fakeCBCaller) SignResume(_ context.Context, _, _ string, _ []byte) error { return f.signErr }
+func (f *fakeCBCaller) ExecuteResume(_ context.Context, _, _ string) error        { return f.executeErr }
 
 func TestCircuitBreakerService_Lifecycle(t *testing.T) {
 	db := newTestDB(t, &domain.ScenarioBRiskControlState{}, &domain.CircuitBreakerSignature{})

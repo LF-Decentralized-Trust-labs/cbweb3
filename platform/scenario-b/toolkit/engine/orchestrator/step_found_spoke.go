@@ -305,8 +305,12 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// the Keycloak realm/client are provisioned by provision-keycloak-spoke.
 		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
 		"CB_PRIVATE_KEY":     devDeployerKey,
-		"KEYCLOAK_REALM":     spokeKeycloakRealm,
-		"KEYCLOAK_CLIENT_ID": spokeKeycloakClient,
+		// The CB's own on-chain address (the dev deployer). Wired into the api-gateway
+		// so its payment routes (backed by the entity-relayer orchestrator via
+		// PAYMENT_GRPC_ADDR) resolve the CB's account.
+		"ENTITY_BESU_ADDRESS": devDeployerAddr,
+		"KEYCLOAK_REALM":      spokeKeycloakRealm,
+		"KEYCLOAK_CLIENT_ID":  spokeKeycloakClient,
 		// CA (scenario-a standard): the CB CA lives in the cb_tls volume, mounted
 		// into compliance at /workspace/backend/config/pki; compliance signs
 		// participant CSRs with it.
@@ -587,10 +591,9 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					"FX_AGREEMENT_CONTRACT_ADDRESS":      hub.Contracts["fxAgreement"],
 					"PAIR_REGISTRY_CONTRACT_ADDRESS":     hub.Contracts["pairRegistry"],
 					"CURRENCY_REGISTRY_CONTRACT_ADDRESS": hub.Contracts["currencyRegistry"],
-					// Enables the api-gateway v2 AMM routes (quote/swap/pairs/liquidity):
-					// without AMM_CONTRACT_ADDRESS the AMM client is nil and the routes
-					// are skipped. The sovereign-pair AMM is resolved at runtime.
-					"AMM_CONTRACT_ADDRESS": hub.Contracts["amm"],
+					// TD-001: no default AMM. The v2 AMM routes are enabled by the
+					// PairRegistry (above) and every corridor's AMM is resolved per
+					// pool_pair at runtime.
 					// Enables SovereignLiquidityService → the sovereign-add + cross-currency
 					// bridge-in/out endpoints (registerSovereignRoutes gates on it).
 					"LIQUIDITY_COMMIT_REGISTRY_ADDRESS": hub.Contracts["liquidityCommitRegistry"],

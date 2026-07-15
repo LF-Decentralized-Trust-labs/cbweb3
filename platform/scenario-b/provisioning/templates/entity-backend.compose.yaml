@@ -1,7 +1,11 @@
 # entity-backend template — per-entity application stack for the toolkit sample.
 # Runs compliance + auth + api-gateway on the entity network (mirrors scenario-a's
-# backend stack; no payment-orchestrator — swaps go through the AMM v2 API, not the
-# PvP/HTLC path). Postgres + Redis come from entity-infra. Node state is NOT here.
+# backend stack). Postgres + Redis come from entity-infra. Node state is NOT here.
+#
+# The api-gateway points PAYMENT_GRPC_ADDR at the entity's payment-orchestrator
+# (9094), which enables the deposit/escrow/redeem HTTP surface in addition to the
+# AMM v2 swap path. The orchestrator container comes from a sibling template:
+# entity-relayer on a CB (found-spoke) and entity-payment on a bank (join).
 #
 # Interpolation vars come from the runner's process env (ComposeEnv) except the
 # runtime-discovered contract addresses + Keycloak client secret, which arrive via
@@ -82,11 +86,20 @@ services:
       COOKIE_SECURE: "false"
       AUTH_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-auth:9091"
       COMPLIANCE_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-compliance:9093"
-      # Hub AMM / swap wiring — presence of AMM_CONTRACT_ADDRESS + HUB_BESU_RPC_URL
-      # registers the v2 AMM routes (quote/swap/pairs/liquidity/currencies).
+      # Payment orchestrator (deposit/escrow/redeem). Presence of PAYMENT_GRPC_ADDR
+      # registers the payment routes: on a CB (CENTRAL_BANK_API_URL empty) the direct
+      # PaymentHandler + /internal/v1 relay routes; on a bank (CENTRAL_BANK_API_URL
+      # set) the PaymentProxyHandler that forwards to its CB. The gRPC dial is lazy,
+      # so the gateway boots even before the orchestrator is reachable.
+      PAYMENT_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-payment-orchestrator:9094"
+      # The entity's own on-chain (Besu) address. The payment proxy injects it as
+      # requester_besu_address so the CB registers the deposit against this bank.
+      ENTITY_BESU_ADDRESS: "${ENTITY_BESU_ADDRESS:-}"
+      # Hub AMM / swap wiring — TD-001: no default AMM. The v2 AMM routes are
+      # enabled by PAIR_REGISTRY_CONTRACT_ADDRESS + HUB_BESU_RPC_URL and every
+      # corridor's AMM is resolved per pool_pair from the on-chain PairRegistry.
       HUB_BESU_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
       SIGNER_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
-      AMM_CONTRACT_ADDRESS: "${AMM_CONTRACT_ADDRESS:-}"
       PAIR_REGISTRY_CONTRACT_ADDRESS: "${PAIR_REGISTRY_CONTRACT_ADDRESS:-}"
       CURRENCY_REGISTRY_CONTRACT_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"
       HUB_TOKEN_A_ADDRESS: "${HUB_TOKEN_A_ADDRESS:-}"

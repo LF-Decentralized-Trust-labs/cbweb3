@@ -56,6 +56,28 @@ function truncateAddress(value?: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
 
+// prettifyLabel turns kebab/snake identifiers into a human label:
+// "bank-itau" → "Bank Itau", "COMMERCIAL_BANK" → "Commercial Bank".
+function prettifyLabel(value: string): string {
+  return value
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+// The institution name is baked at build time (per-entity image); /auth/me only
+// carries the Keycloak subject (a UUID), so use this for a friendly greeting.
+const INSTITUTION_NAME = (import.meta.env.VITE_INSTITUTION_NAME ?? "").trim();
+
+// businessRoles keeps only the RBAC role(s) that matter to the operator, dropping
+// Keycloak noise (default-roles-*, offline_access, uma_authorization, lowercase dups).
+function businessRoles(roles?: string[]): string[] {
+  return (roles ?? [])
+    .filter((role) => role.startsWith("ROLE_"))
+    .map((role) => prettifyLabel(role.replace(/^ROLE_/, "")));
+}
+
 type BadgeVariant = "warning" | "success" | "destructive" | "default" | "outline";
 
 function lifecycleVariant(status: string): BadgeVariant {
@@ -260,10 +282,19 @@ export function DashboardPage() {
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
           <div>
-            <CardTitle>Welcome, {profile?.bankId ?? profile?.subject ?? "Bank"}</CardTitle>
+            <CardTitle>
+              Welcome, {INSTITUTION_NAME ? prettifyLabel(INSTITUTION_NAME) : (profile?.bankId ?? profile?.subject ?? "Bank")}
+            </CardTitle>
             <CardDescription>
-              {profile?.country ? `${profile.country} · ` : ""}Wallet {truncateAddress(profile?.wallet)}
-              {profile?.roles?.length ? ` · ${profile.roles.join(", ")}` : ""}
+              {(() => {
+                const roles = businessRoles(profile?.roles);
+                const parts = [
+                  profile?.country || null,
+                  profile?.wallet ? `Wallet ${truncateAddress(profile.wallet)}` : null,
+                  roles.length ? roles.join(", ") : null,
+                ].filter(Boolean);
+                return parts.length ? parts.join(" · ") : "Commercial bank operator";
+              })()}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">

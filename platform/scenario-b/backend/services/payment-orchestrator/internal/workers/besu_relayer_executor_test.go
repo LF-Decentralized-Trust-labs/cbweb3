@@ -27,6 +27,37 @@ func TestDeriveSpokeTxID_DeterministicAndUnique(t *testing.T) {
 	}
 }
 
+// planSpokeDelivery encodes the bridge-out gating rule. The load-bearing case is
+// (skipSpokeLock=true, beneficiary set) → MINT: cross-currency delivery must NOT be
+// suppressed by SkipSpokeLock, otherwise the hub W-token is burned but the beneficiary is
+// never credited (the half-settlement this fix closes). The legacy release path stays gated.
+func TestPlanSpokeDelivery(t *testing.T) {
+	const bene = "0x27187c765127eC4e957A0Be20Bfd66C4C6d75bE6"
+	tests := []struct {
+		name           string
+		spokeConfigured bool
+		skipSpokeLock  bool
+		beneficiary    string
+		want           spokeDeliveryAction
+	}{
+		{"cross-currency mints even when skipping lock", true, true, bene, spokeDeliveryMint},
+		{"cross-currency mints when not skipping", true, false, bene, spokeDeliveryMint},
+		{"cross-currency mint ignores blank-padded beneficiary", true, true, "  " + bene + " ", spokeDeliveryMint},
+		{"standard release runs when not skipping", true, false, "", spokeDeliveryRelease},
+		{"standard release suppressed by skip", true, true, "", spokeDeliveryNone},
+		{"no spoke configured → none even with beneficiary", false, false, bene, spokeDeliveryNone},
+		{"no spoke configured → none", false, true, "", spokeDeliveryNone},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := planSpokeDelivery(tc.spokeConfigured, tc.skipSpokeLock, tc.beneficiary); got != tc.want {
+				t.Errorf("planSpokeDelivery(spoke=%v, skip=%v, bene=%q) = %d, want %d",
+					tc.spokeConfigured, tc.skipSpokeLock, tc.beneficiary, got, tc.want)
+			}
+		})
+	}
+}
+
 // NewBesuRelayerExecutor rejects missing required Hub configuration before any dial.
 func TestNewBesuRelayerExecutor_RequiresHubConfig(t *testing.T) {
 	tests := []struct {

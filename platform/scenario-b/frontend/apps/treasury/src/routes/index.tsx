@@ -9,6 +9,7 @@ import { AuditPage } from "../pages/AuditPage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { DepositsApprovalPage } from "../pages/DepositsApprovalPage";
 import { EscrowsApprovalPage } from "../pages/EscrowsApprovalPage";
+import { LiquidityProvisioningPage } from "../pages/LiquidityProvisioningPage";
 import { LoginPage } from "../pages/LoginPage";
 import { RedeemsApprovalPage } from "../pages/RedeemsApprovalPage";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -31,6 +32,7 @@ export const routes: RouteObject[] = [
           { path: "escrows-approval", element: <EscrowsApprovalPage /> },
           { path: "redeems-approval", element: <RedeemsApprovalPage /> },
           { path: "liquidity", element: <LiquidityManagementPage /> },
+          { path: "liquidity-provisioning", element: <LiquidityProvisioningPage /> },
           { path: "transfer-limits", element: <TransferLimitsPage /> },
           { path: "audit", element: <AuditPage /> },
           { path: "settings", element: <SettingsPage /> },

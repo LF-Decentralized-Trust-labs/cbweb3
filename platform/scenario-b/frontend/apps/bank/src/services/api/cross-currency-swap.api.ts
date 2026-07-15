@@ -26,12 +26,16 @@ export const crossCurrencySwapApi = {
     sourceCurrency: string,
     targetCurrency: string,
     amountOut: string,
+    poolPair?: string,
   ): Promise<CrossCurrencyQuote> => {
     const response = await httpClientV2.get<CrossCurrencyQuote>("/amm/quote/cross-currency", {
       params: {
         source_currency: sourceCurrency,
         target_currency: targetCurrency,
         amount_out: amountOut,
+        // Pass the exact pair_id so the quote resolves the right pool (pair ids do
+        // not always follow the derived "W-{source}-W-{target}" convention).
+        ...(poolPair ? { pool_pair: poolPair } : {}),
       },
     });
     return response.data;

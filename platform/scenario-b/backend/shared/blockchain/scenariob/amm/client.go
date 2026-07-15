@@ -129,8 +129,12 @@ type QuoteResult struct {
 
 // SwapRequest carries parameters for a swap-exact-output call.
 type SwapRequest struct {
-	TokenIn              string
-	TokenOut             string
+	TokenIn  string
+	TokenOut string
+	// OutputIsTokenA selects the swap direction when TokenIn/TokenOut are not set
+	// explicitly: false (default) = A→B (output TOKEN_B); true = B→A (output TOKEN_A).
+	// The AMM contract is bidirectional; this drives which pool token is bought.
+	OutputIsTokenA       bool
 	AmountOut            string
 	MaxAmountIn          string
 	To                   string
@@ -268,14 +272,20 @@ func (c *Client) ResumeSignatures(ctx context.Context, proposalID [32]byte) (*bi
 // `pair` parameter is used only for bookkeeping; the on-chain formula uses reserves.
 // Returns the grossAmountIn (with fee-in-reserve applied) so callers can use it
 // directly as max_amount_in without triggering AMM__SlippageExceeded.
-func (c *Client) QuoteExactOutput(ctx context.Context, pair, amountOut string) (*QuoteResult, error) {
+func (c *Client) QuoteExactOutput(ctx context.Context, pair, amountOut string, outputIsTokenA bool) (*QuoteResult, error) {
 	amt, ok := new(big.Int).SetString(strings.TrimSpace(amountOut), 10)
 	if !ok {
 		return nil, fmt.Errorf("invalid amountOut %q", amountOut)
 	}
-	reserveIn, reserveOut, err := c.Reserves(ctx)
+	reserveA, reserveB, err := c.Reserves(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// getAmountIn(reserveIn, reserveOut, amountOut): orient reserves by direction.
+	// A→B (default): reserveIn=A, reserveOut=B. B→A (outputIsTokenA): reserveIn=B, reserveOut=A.
+	reserveIn, reserveOut := reserveA, reserveB
+	if outputIsTokenA {
+		reserveIn, reserveOut = reserveB, reserveA
 	}
 	amountIn := new(big.Int)
 	if err := evm.Call(ctx, c.ec, c.contract, c.abi, "getAmountIn",
@@ -313,9 +323,14 @@ func (c *Client) SwapExactOutput(ctx context.Context, req SwapRequest) (*SwapRes
 	if !ok {
 		return nil, fmt.Errorf("invalid MaxAmountIn %q", req.MaxAmountIn)
 	}
-	// Resolve token addresses: default to config values if not explicitly provided.
+	// Resolve token addresses. Direction default is A→B (output TOKEN_B); when
+	// OutputIsTokenA is set the swap is reversed (B→A, output TOKEN_A). Explicit
+	// TokenIn/TokenOut still override both. The AMM contract accepts either order.
 	tokenIn := c.tokenA
 	tokenOut := c.tokenB
+	if req.OutputIsTokenA {
+		tokenIn, tokenOut = c.tokenB, c.tokenA
+	}
 	if req.TokenIn != "" {
 		tokenIn = common.HexToAddress(req.TokenIn)
 	}
@@ -607,6 +622,50 @@ func (c *Client) TokenBalanceAt(ctx context.Context, ammAddress string, isTokenA
 		return nil, fmt.Errorf("amm: balanceOf(%s) on token %s: %w", holderAddr, token.Hex(), err)
 	}
 	return balance, nil
+}
+
+// CancelCommitDepositAt reclaims the signer's escrowed side of `commitID` on an arbitrary AMM
+// (sovereign flow: a CB pulls its own pending deposit back when the counterpart has not committed).
+// The on-chain guard enforces msg.sender == the side's depositor and reverts once finalized.
+func (c *Client) CancelCommitDepositAt(ctx context.Context, ammAddress string, commitID [32]byte, isTokenA bool) error {
+	if c.signer == nil {
+		return errors.New("amm: cancelCommitDepositAt requires a signing key")
+	}
+	contract := common.HexToAddress(ammAddress)
+	if _, err := evm.SubmitTx(ctx, c.ec, c.signer, contract, c.abi, "cancelCommitDeposit", commitID, isTokenA); err != nil {
+		return fmt.Errorf("cancelCommitDepositAt %s: %w", ammAddress, err)
+	}
+	return nil
+}
+
+// EscrowState is the on-chain escrow for a commit on an AMM (which sides are deposited + finalized).
+type EscrowState struct {
+	DepositorA common.Address
+	DepositorB common.Address
+	RecipientA common.Address
+	RecipientB common.Address
+	AmountA    *big.Int
+	AmountB    *big.Int
+	Finalized  bool
+}
+
+// GetEscrowAt reads the escrow state of `commitID` on an arbitrary AMM (view call, no gas).
+func (c *Client) GetEscrowAt(ctx context.Context, ammAddress string, commitID [32]byte) (*EscrowState, error) {
+	contract := common.HexToAddress(ammAddress)
+	var (
+		depA, depB, recA, recB common.Address
+		amtA                   = new(big.Int)
+		amtB                   = new(big.Int)
+		finalized              bool
+	)
+	if err := evm.Call(ctx, c.ec, contract, c.abi, "getEscrow", []interface{}{commitID},
+		&depA, &depB, &recA, &recB, amtA, amtB, &finalized); err != nil {
+		return nil, fmt.Errorf("getEscrow %s: %w", ammAddress, err)
+	}
+	return &EscrowState{
+		DepositorA: depA, DepositorB: depB, RecipientA: recA, RecipientB: recB,
+		AmountA: amtA, AmountB: amtB, Finalized: finalized,
+	}, nil
 }
 
 // FeeBps returns the current fee rate in basis points from the contract.

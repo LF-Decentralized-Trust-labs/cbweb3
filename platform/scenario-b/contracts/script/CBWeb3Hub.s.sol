@@ -4,7 +4,6 @@ pragma solidity ^0.8.20;
 import {Script, console} from "forge-std/Script.sol";
 import {TokenizedCentralBankMoney} from "../src/TokenizedCentralBankMoney.sol";
 import {HashTimeLockedContract} from "../src/HashTimeLockedContract.sol";
-import {AutomatedMarketMaker} from "../src/AutomatedMarketMaker.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {PairRegistry} from "../src/PairRegistry.sol";
 import {CurrencyRegistry} from "../src/CurrencyRegistry.sol";
@@ -28,9 +27,6 @@ contract DeployCBWeb3Hub is Script {
 
     /// @notice Hash Time Locked Contract for atomic cross-border settlements
     HashTimeLockedContract public htlc;
-
-    /// @notice Automated Market Maker for liquidity pool operations
-    AutomatedMarketMaker public amm;
 
     /// @notice PairRegistry for multi-pair AMM routing (D9 — 005-cooperative-liquidity)
     PairRegistry public pairRegistry;
@@ -86,8 +82,10 @@ contract DeployCBWeb3Hub is Script {
         /// @dev 4: Deploy HTLC (Scenario A - Correspondent Banking, with FX Agreement gate)
         htlc = new HashTimeLockedContract(address(identityRegistry), address(fxAgreement), address(0));
 
-        /// @dev 5: Deploy AMM (Scenario B - Liquidity Pool)
-        amm = new AutomatedMarketMaker(address(tokenBrl), address(tokenEur), address(identityRegistry));
+        /// @dev 5: No default AMM (TD-001). Each corridor gets a dedicated per-pair
+        ///      AutomatedMarketMaker deployed at propose time (PairRegistry.proposePair);
+        ///      the api-gateway resolves it per pool_pair. The tCeBM_BRL/EUR base assets
+        ///      above remain as the Hub reserve tokens used by the token preparer.
 
         /// @dev 5b: Deploy PairRegistry (multi-pair routing — D9 / 005-cooperative-liquidity)
         /// @notice PairRegistry authorises new AMM pairs via bilateral CB approval.
@@ -161,7 +159,6 @@ contract DeployCBWeb3Hub is Script {
         console.log("tCeBM_BRL Address: ", address(tokenBrl));
         console.log("tCeBM_EUR Address: ", address(tokenEur));
         console.log("HTLC Address:      ", address(htlc));
-        console.log("AMM Address:       ", address(amm));
         console.log("PairRegistry:      ", address(pairRegistry));
         console.log("CurrencyRegistry:  ", address(currencyRegistry));
         console.log("FX Agreement:      ", address(fxAgreement));

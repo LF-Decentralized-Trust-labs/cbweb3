@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry/bindings"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -35,6 +37,17 @@ const pairRegistryABI = `[
   {"name":"pairId","type":"string"}
 ],"outputs":[]},
 {"type":"function","name":"getAllActivePairs","stateMutability":"view","inputs":[],"outputs":[
+  {"name":"","type":"tuple[]","components":[
+    {"name":"pairId","type":"string"},
+    {"name":"ammAddress","type":"address"},
+    {"name":"tokenA","type":"address"},
+    {"name":"tokenB","type":"address"},
+    {"name":"status","type":"uint8"},
+    {"name":"proposer","type":"address"},
+    {"name":"confirmer","type":"address"}
+  ]}
+]},
+{"type":"function","name":"getAllPairs","stateMutability":"view","inputs":[],"outputs":[
   {"name":"","type":"tuple[]","components":[
     {"name":"pairId","type":"string"},
     {"name":"ammAddress","type":"address"},
@@ -69,11 +82,12 @@ type PairRegisteredEvent struct {
 
 // PairRegistryClient is an EVM client for PairRegistry.sol.
 type PairRegistryClient struct {
-	contract common.Address
-	ec       *ethclient.Client
-	parsed   abi.ABI
-	signer   *evm.Signer
-	timeout  time.Duration
+	contract         common.Address
+	ec               *ethclient.Client
+	parsed           abi.ABI
+	signer           *evm.Signer
+	timeout          time.Duration
+	identityRegistry common.Address
 }
 
 // PairRegistryConfig holds connection parameters for the PairRegistry EVM client.
@@ -83,6 +97,10 @@ type PairRegistryConfig struct {
 	ChainID         int64
 	PrivateKeyHex   string
 	Timeout         time.Duration
+	// IdentityRegistryAddress is the Hub IdentityRegistry passed to the
+	// AutomatedMarketMaker constructor when ProposePair deploys a dedicated,
+	// per-pair AMM (empty amm_address path). Optional for read-only clients.
+	IdentityRegistryAddress string
 }
 
 // NewPairRegistryClient constructs a PairRegistryClient from configuration.
@@ -107,6 +125,9 @@ func NewPairRegistryClient(ctx context.Context, cfg PairRegistryConfig) (*PairRe
 		ec:       ec,
 		parsed:   parsed,
 		timeout:  cfg.Timeout,
+	}
+	if cfg.IdentityRegistryAddress != "" {
+		c.identityRegistry = common.HexToAddress(cfg.IdentityRegistryAddress)
 	}
 	if cfg.PrivateKeyHex != "" {
 		signer, sigErr := evm.NewSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
@@ -144,6 +165,46 @@ func (c *PairRegistryClient) ProposePair(
 		return "", fmt.Errorf("pair registry proposePair: %w", err)
 	}
 	return txHash, nil
+}
+
+// DeployDedicatedAMM deploys a fresh AutomatedMarketMaker bound to (tokenA, tokenB)
+// and the Hub IdentityRegistry, returning its address. This is the per-pair pool a
+// corridor must own: the AMM's TOKEN_A/TOKEN_B are immutable, so a pair MUST be
+// backed by an AMM constructed over its own tokens — never the shared bootstrap AMM
+// (whose tokens are unrelated), which is why add-liquidity against a mis-bound pair
+// reverts. Mirrors the compliance-service RegisterPair deploy path (besu.go) so both
+// the internal relay and the CB-authenticated v2 propose flow produce identical pools.
+func (c *PairRegistryClient) DeployDedicatedAMM(ctx context.Context, tokenA, tokenB string) (string, error) {
+	if c.signer == nil {
+		return "", fmt.Errorf("pair registry: deploy AMM requires a signing key")
+	}
+	if (c.identityRegistry == common.Address{}) {
+		return "", fmt.Errorf("pair registry: deploy AMM requires HUB_IDENTITY_REGISTRY_ADDRESS")
+	}
+	opts, err := c.signer.TransactOpts(ctx)
+	if err != nil {
+		return "", fmt.Errorf("pair registry: deploy AMM opts: %w", err)
+	}
+	if gasPrice, gerr := c.ec.SuggestGasPrice(ctx); gerr == nil {
+		opts.GasPrice = gasPrice
+	}
+	ammAddr, deployTx, _, err := bindings.DeployAutomatedMarketMaker(
+		opts, c.ec,
+		common.HexToAddress(tokenA),
+		common.HexToAddress(tokenB),
+		c.identityRegistry,
+	)
+	if err != nil {
+		return "", fmt.Errorf("pair registry: deploy AMM: %w", err)
+	}
+	receipt, err := bind.WaitMined(ctx, c.ec, deployTx)
+	if err != nil {
+		return "", fmt.Errorf("pair registry: deploy AMM wait: %w", err)
+	}
+	if receipt.Status == 0 {
+		return "", fmt.Errorf("pair registry: deploy AMM reverted (tx=%s)", deployTx.Hash().Hex())
+	}
+	return ammAddr.Hex(), nil
 }
 
 // ConfirmPair submits a confirmPair transaction.
@@ -210,6 +271,80 @@ func (c *PairRegistryClient) GetAllActivePairs(ctx context.Context) ([]domain.Pa
 		})
 	}
 	return result, nil
+}
+
+// GetAllPairs reads every registered pair from on-chain, regardless of status
+// (PROPOSED and ACTIVE). It backs cross-CB discovery: a pair proposed via one
+// Central Bank gateway is visible to the counterparty CB before confirmation.
+// The on-chain status enum (0=PROPOSED, 1=ACTIVE) is mapped into PairEntry.Status.
+func (c *PairRegistryClient) GetAllPairs(ctx context.Context) ([]domain.PairEntry, error) {
+	input, err := c.parsed.Pack("getAllPairs")
+	if err != nil {
+		return nil, fmt.Errorf("pair registry getAllPairs pack: %w", err)
+	}
+	msg := ethereum.CallMsg{To: &c.contract, Data: input}
+	raw, err := c.ec.CallContract(ctx, msg, nil)
+	if err != nil {
+		return nil, fmt.Errorf("pair registry getAllPairs call: %w", err)
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+
+	method := c.parsed.Methods["getAllPairs"]
+	entries, err := method.Outputs.Unpack(raw)
+	if err != nil {
+		return nil, fmt.Errorf("pair registry getAllPairs unpack: %w", err)
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+
+	// go-ethereum unpacks tuple[] as a slice of anonymous structs via reflection.
+	// Type-asserting to a named struct always fails; use reflect to extract fields.
+	rv := reflect.ValueOf(entries[0])
+	if rv.Kind() != reflect.Slice {
+		return nil, fmt.Errorf("pair registry getAllPairs: unexpected output type %T", entries[0])
+	}
+
+	result := make([]domain.PairEntry, 0, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		item := rv.Index(i)
+		if item.Kind() == reflect.Ptr {
+			item = item.Elem()
+		}
+		pairId := item.FieldByName("PairId")
+		ammAddr := item.FieldByName("AmmAddress")
+		tokenA := item.FieldByName("TokenA")
+		tokenB := item.FieldByName("TokenB")
+		if !pairId.IsValid() || !ammAddr.IsValid() || !tokenA.IsValid() || !tokenB.IsValid() {
+			continue
+		}
+		result = append(result, domain.PairEntry{
+			PairID:     pairId.String(),
+			AMMAddress: strings.ToLower(ammAddr.Interface().(common.Address).Hex()),
+			TokenA:     strings.ToLower(tokenA.Interface().(common.Address).Hex()),
+			TokenB:     strings.ToLower(tokenB.Interface().(common.Address).Hex()),
+			Status:     pairStatusString(item.FieldByName("Status")),
+		})
+	}
+	return result, nil
+}
+
+// pairStatusString maps the on-chain PairStatus enum (uint8) to its string label.
+// Mirrors PairRegistry.sol: 0=PROPOSED, 1=ACTIVE.
+func pairStatusString(v reflect.Value) string {
+	if !v.IsValid() || !v.CanUint() {
+		return ""
+	}
+	switch v.Uint() {
+	case 0:
+		return domain.PairStatusProposed
+	case 1:
+		return domain.PairStatusActive
+	default:
+		return ""
+	}
 }
 
 // SubscribePairRegistered opens an event filter for PairRegistered logs.

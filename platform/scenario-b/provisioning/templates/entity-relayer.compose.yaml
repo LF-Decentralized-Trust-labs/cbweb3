@@ -34,8 +34,26 @@ services:
       SIGNER_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
       HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
       SPOKE_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
-      # Local dev: skip the SpokeBridge.lock/release legs; mint straight to the
-      # position's MintToHubAddress (the initiating swap signer).
+      # Spoke token clients — the deposit/escrow/redeem flow. On deposit APPROVAL the
+      # CB mints fCeBM to the requesting bank (ApproveDeposit → fiat.Mint); escrow and
+      # redeem mint/burn tCeBM. BESU_RPC_URL is this CB's own spoke node; the operator
+      # key is the CB signer, which holds admin + CENTRAL_BANK_ROLE on both tokens
+      # (deployed by this CB on the spoke). Empty token addresses disable the clients.
+      BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
+      BESU_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
+      BESU_OPERATOR_KEY: "${CB_PRIVATE_KEY:?}"
+      FIAT_TOKEN_ADDRESS: "${SPOKE_FCEBM_ADDRESS:-}"
+      TOKEN_ADDRESS: "${SPOKE_TCEBM_ADDRESS:-}"
+      # Spoke bridge legs for the RelayerWorker. A commercial-bank cross-currency
+      # bridge-in BURNS the bank's pre-tokenised tCeBM on the spoke (CENTRAL_BANK_ROLE)
+      # before minting W-<source> on the hub — this path is NOT covered by
+      # BRIDGE_SKIP_SPOKE_LOCK, so the relayer needs the spoke wired or the burn fails
+      # ("spoke chain not configured"). SPOKE_SIGNER_KEY falls back to BESU_OPERATOR_KEY.
+      SPOKE_BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
+      SPOKE_BRIDGE_ADDRESS: "${SPOKE_BRIDGE_ADDRESS:-}"
+      SPOKE_SIGNER_KEY: "${CB_PRIVATE_KEY:?}"
+      # Local dev: skip the SpokeBridge.lock leg for the CB's OWN sovereign liquidity
+      # positions (hub-only mint); the commercial-bank burn-from path above still runs.
       BRIDGE_SKIP_SPOKE_LOCK: "true"
     extra_hosts:
       - "host.docker.internal:host-gateway"
