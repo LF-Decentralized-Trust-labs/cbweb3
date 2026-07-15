@@ -156,7 +156,7 @@ func (c SpokeConfig) cactiAPIURL() string {
 	if host == "" {
 		host = "host.docker.internal"
 	}
-	return fmt.Sprintf("http://%s:4000", host)
+	return fmt.Sprintf("http://%s:7000", host)
 }
 
 // keycloakContainer matches entity-keycloak.compose.yaml's container_name

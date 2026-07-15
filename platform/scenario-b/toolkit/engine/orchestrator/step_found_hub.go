@@ -209,7 +209,7 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"RELAY_CONTAINER_NAME":       e + "-relay",
 		"RELAY_NET_PREFIX":           c.NetPrefix,
 		"RELAY_VOLUME_PREFIX":        c.VolumePrefix,
-		"RELAY_PORT":                 "4000",
+		"RELAY_PORT":                 "7000",
 		"NOC_AGENT_BESU_RPC":         fmt.Sprintf("http://%s-hub-validator:8545", e),
 		"NOC_AGENT_ENTITY":           "hub",
 		"NOC_AGENT_IMAGE":            hubNocAgentImage,

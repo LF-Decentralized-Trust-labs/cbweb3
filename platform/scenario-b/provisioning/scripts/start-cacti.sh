@@ -9,11 +9,11 @@
 #
 # Usage:
 #   provisioning/scripts/start-cacti.sh            # up (build) + wait for health
-#   CACTI_PORT=4000 provisioning/scripts/start-cacti.sh
+#   CACTI_PORT=7000 provisioning/scripts/start-cacti.sh
 #   provisioning/scripts/start-cacti.sh --down     # tear the relay down
 #
 # Environment overrides:
-#   CACTI_PORT      Host port for the relay REST API (default: 4000)
+#   CACTI_PORT      Host port for the relay REST API (default: 7000)
 #   CACTI_COMPOSE   Path to the relay docker-compose.yaml (default: repo path)
 #   TIMEOUT_SECS    Max seconds to wait for the health endpoint (default: 120)
 
@@ -24,7 +24,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCENARIO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 CACTI_COMPOSE="${CACTI_COMPOSE:-${SCENARIO_DIR}/interop/hub-and-spoke/cacti/docker-compose.yaml}"
-CACTI_PORT="${CACTI_PORT:-4000}"
+CACTI_PORT="${CACTI_PORT:-7000}"
 CACTI_URL="http://localhost:${CACTI_PORT}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-120}"
 

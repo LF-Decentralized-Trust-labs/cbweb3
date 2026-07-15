@@ -7,7 +7,7 @@ Ready-to-use `ParticipantDeployment` manifests for the **Scenario B** toolkit
   - `hub-cbweb3` — base `tCeBM` reserve tokens + registries + AMM + LCR + NOC (chainId 1337)
 - **One external Cacti liquidity relay**, deployed outside the toolkit
   (`start-cacti.sh`) and reached via each manifest's `spec.relay.endpoint`
-  (`http://localhost:4000`); spokes register on it dynamically at `found-spoke`.
+  (`http://localhost:7000`); spokes register on it dynamically at `found-spoke`.
 - **Sovereign spokes**, each founded by its own central bank (`mode: found-spoke`):
   - `spoke-brl` — `central-bank-brazil`    (BRL, chainId 1338)
   - `spoke-ars` — `central-bank-argentina` (ARS, chainId 1339)
@@ -233,11 +233,11 @@ done
 `found-spoke` registers the spoke on the relay (`register-relay-spoke`), a
 **mandatory** step, so the relay must be up first. It is deployed outside the
 toolkit; its address reaches the toolkit via each manifest's `spec.relay.endpoint`
-(`http://localhost:4000`).
+(`http://localhost:7000`).
 
 ```bash
 bash "$ROOT/scenario-b/provisioning/scripts/start-cacti.sh"
-# waits for health at http://localhost:4000/api/v1/health
+# waits for health at http://localhost:7000/api/v1/health
 ```
 
 ### Step 4 — Found the hub (`mode: found-hub`)

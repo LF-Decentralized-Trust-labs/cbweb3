@@ -151,7 +151,7 @@ Cacti Liquidity Relay starting (Scenario B)…
 [cacti] LiquidityCommitWatcher started
 [cacti] spoke-a registered 3 web service endpoint(s)
 [cacti] spoke-b registered 3 web service endpoint(s)
-Cacti Liquidity Relay API listening on :4000
+Cacti Liquidity Relay API listening on :7000
 ```
 
 ### Watcher Não Configurado
