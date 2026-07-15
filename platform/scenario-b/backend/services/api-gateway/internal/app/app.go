@@ -506,11 +506,15 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 
 		var bridgeAssets *services.CrossCurrencyBridgeAssets
 		if resolvedHubCfg != nil {
+			// Derive this gateway's own sovereign currency from its native token symbol
+			// (e.g. tCeBM_BRL -> BRL) instead of hardcoding BRL/ARS; the source spoke follows
+			// the toolkit's "spoke-<currency>" convention. Generalizes to any sovereign spoke.
+			selfCurrency := currencyCodeFromSymbol(os.Getenv("NATIVE_ASSET_SYMBOL"))
 			bridgeAssets = services.CrossCurrencyBridgeAssetsFromHub(
 				resolvedHubCfg,
-				"BRL", "ARS",
+				selfCurrency, "",
 				os.Getenv("TOKEN_ADDRESS"),
-				"spoke-a",
+				"spoke-"+strings.ToLower(selfCurrency),
 			)
 		}
 		var bridgePoller services.BridgePositionPoller

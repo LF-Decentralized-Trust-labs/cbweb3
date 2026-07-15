@@ -309,13 +309,16 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		req.CorrelationID, req.SourceCurrency, req.SourceCurrency)
 	_ = o.swapRepo.UpdateStatus(ctx, req.SwapID, domain.SwapStatusBridgeInProgress)
 
-	spokeIn := "spoke-a"
+	// Source spoke is derived from the source currency (symmetric to spokeOut below):
+	// "spoke-<currency>" is the convention the toolkit registers per spoke, so this
+	// generalizes to any sovereign spoke (N currencies) with no BRL/ARS hardcode.
+	spokeIn := "spoke-" + strings.ToLower(req.SourceCurrency)
 	nativeAsset := req.SourceCurrency
 	mirroredAsset := "W-" + req.SourceCurrency
 	if o.bridgeAssets != nil {
-		if o.bridgeAssets.SpokeInNetwork != "" {
-			spokeIn = o.bridgeAssets.SpokeInNetwork
-		}
+		// Local (non-sovereign) dev path may pin the native/wrapped source token
+		// addresses. The sovereign path ignores these (the issuing CB resolves its own
+		// tokens from its per-CB config) and only needs spokeIn, derived above.
 		if o.bridgeAssets.NativeSourceToken != "" {
 			nativeAsset = o.bridgeAssets.NativeSourceToken
 		}
