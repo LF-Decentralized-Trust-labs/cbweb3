@@ -914,3 +914,86 @@ func TestEnrichScanResultNames(t *testing.T) {
 		t.Errorf("nil map: want empty, got %q", clean[0].SenderName)
 	}
 }
+
+// TestListSettledPvPCredits verifies the central-bank derivation of a receiving
+// bank's incoming PvP legs from its aggregated SETTLED FX agreements: the origin
+// leg credits SourceReceiver (OriginAmount), the counter leg credits DestReceiver
+// (CounterAmount); non-settled agreements and non-receiver banks are excluded.
+func TestListSettledPvPCredits(t *testing.T) {
+	const settledUnix = int64(1752570000)
+	fake := &fakePaymentServer{
+		fxList: &pb.ListFXAgreementsResponse{Agreements: []*pb.FXAgreement{
+			{
+				TradeId:        "trade-1",
+				State:          pb.FXAgreementState_FX_STATE_SETTLED,
+				Originator:     "op@spoke-a-bank-a",
+				Custodian:      "op@spoke-b-bank-d",
+				SourceReceiver: "corr@spoke-a-bank-c",
+				DestReceiver:   "ben@spoke-b-bank-b",
+				OriginAmount:   "700",
+				CounterAmount:  "300",
+			},
+			// Not settled → excluded even though bank-c is the source receiver.
+			{
+				TradeId:        "trade-2",
+				State:          pb.FXAgreementState_FX_STATE_ACCEPTED,
+				SourceReceiver: "corr@spoke-a-bank-c",
+				OriginAmount:   "999",
+			},
+		}},
+		fxEvents: &pb.ListFXAgreementEventsResponse{Events: []*pb.FXAgreementEvent{
+			{Id: 1, TradeId: "trade-1", ToState: pb.FXAgreementState_FX_STATE_SETTLED, OccurredAtUnix: settledUnix},
+		}},
+	}
+	h := startFakePaymentBackend(t, fake)
+	app := fiber.New()
+	app.Get("/pvp-credits", h.ListSettledPvPCredits)
+
+	fetch := func(bankID string) []PvPCredit {
+		t.Helper()
+		url := "/pvp-credits"
+		if bankID != "" {
+			url += "?bank_id=" + bankID
+		}
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, url, nil))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("bank %q: status = %d, want 200", bankID, resp.StatusCode)
+		}
+		var body struct {
+			Credits []PvPCredit `json:"credits"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return body.Credits
+	}
+
+	wantSettledAt := time.Unix(settledUnix, 0).UTC().Format(time.RFC3339)
+
+	// bank-c is the origin-leg receiver → one credit of 700.
+	if got := fetch("bank-c"); len(got) != 1 || got[0].Reference != "trade-1" || got[0].Amount != "700" || got[0].SettledAt != wantSettledAt {
+		t.Errorf("bank-c credits = %+v, want one trade-1/700/%s", got, wantSettledAt)
+	}
+	// bank-b is the counter-leg receiver → one credit of 300.
+	if got := fetch("bank-b"); len(got) != 1 || got[0].Reference != "trade-1" || got[0].Amount != "300" {
+		t.Errorf("bank-b credits = %+v, want one trade-1/300", got)
+	}
+	// bank-a is only a sender → no credit.
+	if got := fetch("bank-a"); len(got) != 0 {
+		t.Errorf("bank-a credits = %+v, want none", got)
+	}
+
+	// Missing bank_id → 400.
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/pvp-credits", nil))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("missing bank_id: status = %d, want 400", resp.StatusCode)
+	}
+}

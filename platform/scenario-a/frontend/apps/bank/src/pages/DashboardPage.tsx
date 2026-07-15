@@ -40,6 +40,7 @@ const kindLabel: Record<string, string> = {
   deposit: "Deposit",
   tokenisation: "Reserve Tokenisation",
   redeem: "Redeem",
+  pvp_settlement: "PvP Settlement",
 };
 
 // Amounts are integer units; format per token with a directional sign.

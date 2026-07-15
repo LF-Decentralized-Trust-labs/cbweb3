@@ -89,10 +89,21 @@ export function AgreementProposalPage() {
   const status = useFxAgreementStore((s) => s.status);
   const identities = useIdentityStore((s) => s.identities);
   const fetchIdentities = useIdentityStore((s) => s.fetchAll);
+  const identityStatus = useIdentityStore((s) => s.status);
+  const identityError = useIdentityStore((s) => s.error);
+  const rosterConfigured = useIdentityStore((s) => s.configured);
 
   useEffect(() => {
     void fetchIdentities();
   }, [fetchIdentities]);
+
+  // Distinguish a failed/unconfigured roster from a genuinely empty one so the
+  // operator is not left with a silent empty dropdown and no explanation.
+  const rosterUnavailable = identityStatus === "error" || !rosterConfigured;
+  const rosterMessage =
+    identityStatus === "error"
+      ? identityError ?? "Unable to load the identity roster. Check the API gateway and try again."
+      : "The Paladin identity roster is not configured. Set PALADIN_IDENTITIES or enable Pente group membership on the API gateway, then reload.";
 
   // Unique spoke ids derived from the identity roster, sorted.
   const spokes = useMemo(
@@ -124,19 +135,19 @@ export function AgreementProposalPage() {
 
   const validate = () => {
     if (!counterpartyB.trim()) {
-      toast.error("Counterparty address is required.");
+      toast.error("Counterparty identity is required.");
       return false;
     }
     if (!settlementAgent.trim()) {
-      toast.error("Settlement agent address is required.");
+      toast.error("Settlement agent identity is required.");
       return false;
     }
     if (!custodian.trim()) {
-      toast.error("Custodian address is required.");
+      toast.error("Custodian identity is required.");
       return false;
     }
     if (!beneficiary.trim()) {
-      toast.error("Beneficiary address is required.");
+      toast.error("Beneficiary identity is required.");
       return false;
     }
     if (!originAmount || parseFloat(originAmount) <= 0) {
@@ -201,10 +212,24 @@ export function AgreementProposalPage() {
         </Button>
       </div>
 
+      {rosterUnavailable ? (
+        <Card className="border-destructive">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-destructive">Identity roster unavailable</CardTitle>
+              <CardDescription>{rosterMessage}</CardDescription>
+            </div>
+            <Button variant="outline" onClick={() => void fetchIdentities()} disabled={identityStatus === "loading"}>
+              {identityStatus === "loading" ? "Loading..." : "Retry"}
+            </Button>
+          </CardHeader>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Parties</CardTitle>
-          <CardDescription>Specify the counterparty and intermediary addresses.</CardDescription>
+          <CardDescription>Select the counterparty and intermediary identities.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -321,9 +346,14 @@ export function AgreementProposalPage() {
             />
           </div>
 
-          <Button onClick={onPrepare} disabled={status === "loading"}>
+          <Button onClick={onPrepare} disabled={status === "loading" || rosterUnavailable}>
             {status === "loading" ? "Submitting..." : "Review Agreement"}
           </Button>
+          {rosterUnavailable ? (
+            <p className="text-xs text-destructive">
+              Resolve the identity roster above before proposing an agreement.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -338,6 +368,10 @@ export function AgreementProposalPage() {
             <p className="text-sm">Settlement Agent: {settlementAgent}</p>
             <p className="text-sm">Custodian: {custodian}</p>
             <p className="text-sm">Beneficiary: {beneficiary}</p>
+            <p className="text-sm">Source Spoke: {sourceSpokeId || "—"}</p>
+            <p className="text-sm">Destination Spoke: {destSpokeId || "—"}</p>
+            <p className="text-sm">Source Receiver: {sourceReceiver || "—"}</p>
+            <p className="text-sm">Destination Receiver: {destReceiver || "—"}</p>
             <p className="text-sm">
               Send: {originAmount} {originCurrency}
             </p>

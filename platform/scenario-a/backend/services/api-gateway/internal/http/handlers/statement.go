@@ -44,32 +44,53 @@ type MovementSource interface {
 	FetchRedeems(ctx context.Context) ([]paymentadapter.RedeemRecord, error)
 }
 
-// HTLCSource supplies the inter-bank HTLC PvP records visible to this entity's
-// payment-orchestrator, so the statement can add the settled PvP legs (sent =
-// debit, received = credit) alongside the deposit/tokenisation/redeem movements.
-// *paymentadapter.GRPCAdapter implements it.
+// HTLCSource supplies the inter-bank HTLC PvP records held by this entity's own
+// payment-orchestrator. An orchestrator only holds the legs it locked (records
+// where it is the sender), so this source surfaces the caller's *sent* legs
+// (debits). The receiver side never lands here — each bank runs its own
+// orchestrator — so credits are sourced from the Central Bank instead (see
+// PvPCreditSource). *paymentadapter.GRPCAdapter implements it.
 type HTLCSource interface {
 	SearchHTLC(ctx context.Context, agreementID, sender, receiver, state string) ([]paymentadapter.HTLCStatus, error)
+}
+
+// PvPCredit is one incoming inter-bank PvP settlement leg for which this bank is
+// the receiver, as aggregated by the Central Bank from a SETTLED FX agreement.
+type PvPCredit struct {
+	Reference string `json:"reference"`  // FX agreement trade id
+	Amount    string `json:"amount"`     // integer units (tCeBM), the leg amount
+	SettledAt string `json:"settled_at"` // RFC3339 of the FX agreement SETTLED transition
+}
+
+// PvPCreditSource supplies the settled PvP legs on which this bank is the
+// receiver. A receiving bank's own orchestrator has no record of an incoming
+// leg (the counterparty locked it on a different orchestrator, and the amount is
+// private Zeto value), so the credits are derived at the Central Bank from the
+// aggregated FX agreements it settles, scoped to this bank. PaymentProxyHandler
+// implements it.
+type PvPCreditSource interface {
+	FetchPvPCredits(ctx context.Context, bankID string) ([]PvPCredit, error)
 }
 
 // Movement is a single credit/debit line on the bank statement.
 type Movement struct {
 	ID        string `json:"id"`
-	Timestamp string `json:"timestamp"`        // RFC3339
-	Direction string `json:"direction"`        // "credit" (received) | "debit" (sent)
-	Token     string `json:"token"`            // "fCeBM" (tokenized fiat) | "tCeBM"
-	Amount    string `json:"amount"`           // integer units, as persisted
-	Kind      string `json:"kind"`             // "deposit" | "tokenisation" | "redeem"
-	Reference string `json:"reference,omitempty"` // settlement tx hash
+	Timestamp string `json:"timestamp"`           // RFC3339
+	Direction string `json:"direction"`           // "credit" (received) | "debit" (sent)
+	Token     string `json:"token"`               // "fCeBM" (tokenized fiat) | "tCeBM" (reserve)
+	Amount    string `json:"amount"`              // integer units, as persisted
+	Kind      string `json:"kind"`                // "deposit" | "tokenisation" | "redeem" | "pvp_settlement"
+	Reference string `json:"reference,omitempty"` // settlement tx hash or FX trade id
 }
 
 // StatementHandler serves the commercial bank statement (extrato): a
 // chronological consolidation of tokenized-fiat and tCeBM movements derived
 // from the bank's deposit, reserve-tokenisation and redeem records.
 type StatementHandler struct {
-	source   MovementSource
-	htlc     HTLCSource // optional; enables inter-bank PvP settlement movements
-	bankCode string     // institution fallback when the JWT lacks BankID
+	source     MovementSource
+	htlc       HTLCSource      // optional; surfaces the caller's sent PvP legs (debits)
+	pvpCredits PvPCreditSource // optional; surfaces the caller's received PvP legs (credits)
+	bankCode   string          // institution fallback when the JWT lacks BankID
 }
 
 // NewStatementHandler creates a StatementHandler over the given movement source.
@@ -77,12 +98,23 @@ func NewStatementHandler(source MovementSource) *StatementHandler {
 	return &StatementHandler{source: source}
 }
 
-// WithHTLCSource attaches the payment-orchestrator HTLC search used to
-// consolidate inter-bank PvP settlement legs into the statement. bankCode is the
-// institution fallback applied when the caller's JWT carries no BankID.
+// WithHTLCSource attaches the payment-orchestrator HTLC search used to surface
+// this bank's *sent* inter-bank PvP legs (debits). bankCode is the institution
+// fallback applied when the caller's JWT carries no BankID.
 func (h *StatementHandler) WithHTLCSource(htlc HTLCSource, bankCode string) *StatementHandler {
 	h.htlc = htlc
 	h.bankCode = bankCode
+	return h
+}
+
+// WithPvPCreditSource attaches the Central Bank-derived source of this bank's
+// *received* inter-bank PvP legs (credits). bankCode is the institution fallback
+// applied when the caller's JWT carries no BankID.
+func (h *StatementHandler) WithPvPCreditSource(src PvPCreditSource, bankCode string) *StatementHandler {
+	h.pvpCredits = src
+	if bankCode != "" {
+		h.bankCode = bankCode
+	}
 	return h
 }
 
@@ -180,11 +212,23 @@ func (h *StatementHandler) GetStatement(c *fiber.Ctx) error {
 		)
 	}
 
-	pvp, err := h.pvpMovements(c)
+	callerBankID := h.callerBankID(c)
+
+	// Sent PvP legs (debits) — this bank's own orchestrator holds the legs it locked.
+	pvpDebits, err := h.pvpDebitMovements(c, callerBankID)
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "statement: load pvp settlements: " + err.Error()})
 	}
-	movements = append(movements, pvp...)
+	movements = append(movements, pvpDebits...)
+
+	// Received PvP legs (credits) — derived at the Central Bank from settled FX
+	// agreements, scoped to this bank (the receiving side is never on the local
+	// orchestrator).
+	pvpCredits, err := h.pvpCreditMovements(c, callerBankID)
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "statement: load pvp credits: " + err.Error()})
+	}
+	movements = append(movements, pvpCredits...)
 
 	sort.SliceStable(movements, func(i, j int) bool {
 		return parseTimestamp(movements[i].Timestamp).After(parseTimestamp(movements[j].Timestamp))
@@ -193,21 +237,24 @@ func (h *StatementHandler) GetStatement(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"movements": movements, "total": len(movements)})
 }
 
-// pvpMovements consolidates this bank's settled inter-bank HTLC PvP legs into
-// statement movements: a leg where the bank is the sender is a debit (value
-// sent), one where it is the receiver is a credit (value received). Value moves
-// as tokenized fiat (fCeBM). Returns an empty slice when no HTLC source is
-// configured (e.g. the central-bank gateway, or tests).
-func (h *StatementHandler) pvpMovements(c *fiber.Ctx) ([]Movement, error) {
-	if h.htlc == nil {
-		return nil, nil
-	}
-
-	callerBankID := h.bankCode
+// callerBankID resolves the bank the statement is scoped to: the JWT BankID when
+// present, else the configured institution fallback. Empty means unscoped.
+func (h *StatementHandler) callerBankID(c *fiber.Ctx) string {
 	if claims, ok := c.Locals("claims").(domain.TokenClaims); ok && claims.BankID != "" {
-		callerBankID = claims.BankID
+		return claims.BankID
 	}
-	if callerBankID == "" {
+	return h.bankCode
+}
+
+// pvpDebitMovements surfaces this bank's *sent* inter-bank PvP legs as debits.
+// The bank's own payment-orchestrator only holds the legs it locked (Sender ==
+// this bank), so only the sender branch ever matches here; the received side is
+// sourced from the Central Bank (see pvpCreditMovements). An inter-bank PvP
+// settlement moves tokenized reserve value, so legs are denominated in tCeBM (not
+// tokenized fiat). Returns nil when no HTLC source is configured (e.g. the
+// central-bank gateway, or tests).
+func (h *StatementHandler) pvpDebitMovements(c *fiber.Ctx, callerBankID string) ([]Movement, error) {
+	if h.htlc == nil || callerBankID == "" {
 		return nil, nil
 	}
 
@@ -222,34 +269,52 @@ func (h *StatementHandler) pvpMovements(c *fiber.Ctx) ([]Movement, error) {
 		if !isHTLCSettled(l.State) {
 			continue
 		}
-		senderBank, sErr := bankIDFromIdentity(l.Sender)
-		receiverBank, rErr := bankIDFromIdentity(l.Receiver)
-		if sErr != nil || rErr != nil {
+		senderBank, err := bankIDFromIdentity(l.Sender)
+		if err != nil {
 			// Unparseable identity: skip rather than misattribute a movement.
 			continue
 		}
-		if senderBank == callerBankID {
-			movements = append(movements, Movement{
-				ID:        "pvp:" + l.ContractID + ":debit",
-				Timestamp: l.CreatedAt,
-				Direction: directionDebit,
-				Token:     tokenFiat,
-				Amount:    l.Amount,
-				Kind:      kindPvP,
-				Reference: l.ContractID,
-			})
+		if senderBank != callerBankID {
+			continue
 		}
-		if receiverBank == callerBankID {
-			movements = append(movements, Movement{
-				ID:        "pvp:" + l.ContractID + ":credit",
-				Timestamp: l.CreatedAt,
-				Direction: directionCredit,
-				Token:     tokenFiat,
-				Amount:    l.Amount,
-				Kind:      kindPvP,
-				Reference: l.ContractID,
-			})
-		}
+		movements = append(movements, Movement{
+			ID:        "pvp:" + l.ContractID + ":debit",
+			Timestamp: l.CreatedAt,
+			Direction: directionDebit,
+			Token:     tokenTCeBM,
+			Amount:    l.Amount,
+			Kind:      kindPvP,
+			Reference: l.ContractID,
+		})
+	}
+	return movements, nil
+}
+
+// pvpCreditMovements surfaces this bank's *received* inter-bank PvP legs as
+// credits, sourced from the Central Bank (which aggregates the settled FX
+// agreements and derives the receiver legs for this bank). Returns nil when no
+// credit source is configured (e.g. the central-bank gateway, or tests).
+func (h *StatementHandler) pvpCreditMovements(c *fiber.Ctx, callerBankID string) ([]Movement, error) {
+	if h.pvpCredits == nil || callerBankID == "" {
+		return nil, nil
+	}
+
+	credits, err := h.pvpCredits.FetchPvPCredits(c.UserContext(), callerBankID)
+	if err != nil {
+		return nil, err
+	}
+
+	movements := make([]Movement, 0, len(credits))
+	for _, cr := range credits {
+		movements = append(movements, Movement{
+			ID:        "pvp:" + cr.Reference + ":credit",
+			Timestamp: cr.SettledAt,
+			Direction: directionCredit,
+			Token:     tokenTCeBM,
+			Amount:    cr.Amount,
+			Kind:      kindPvP,
+			Reference: cr.Reference,
+		})
 	}
 	return movements, nil
 }

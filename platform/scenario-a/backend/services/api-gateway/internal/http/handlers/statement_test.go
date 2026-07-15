@@ -24,6 +24,15 @@ func (f *fakeHTLCSource) SearchHTLC(context.Context, string, string, string, str
 	return f.locks, f.err
 }
 
+type fakePvPCreditSource struct {
+	credits []PvPCredit
+	err     error
+}
+
+func (f *fakePvPCreditSource) FetchPvPCredits(context.Context, string) ([]PvPCredit, error) {
+	return f.credits, f.err
+}
+
 type fakeMovementSource struct {
 	deposits []paymentadapter.DepositRecord
 	escrows  []paymentadapter.EscrowRecord
@@ -123,22 +132,93 @@ func TestStatement_ConsolidatesAndClassifies(t *testing.T) {
 	}
 }
 
-func TestStatement_IncludesSettledPvPLegs(t *testing.T) {
+// The local orchestrator source surfaces only the caller's SENT legs (debits):
+// an orchestrator holds only the legs it locked, so the receiver side never lands
+// here. Received legs (credits) come from the Central Bank instead — see
+// TestStatement_IncludesReceivedPvPCredits.
+func TestStatement_IncludesSentPvPLegsAsDebits(t *testing.T) {
 	htlc := &fakeHTLCSource{locks: []paymentadapter.HTLCStatus{
 		// bank-a is the sender → value sent (debit).
 		{ContractID: "c1", Sender: "alice@spoke-a-bank-a", Receiver: "bob@spoke-b-bank-b", State: "HTLC_STATE_SETTLED", Amount: "700", CreatedAt: "2026-07-11T10:00:00Z"},
-		// bank-a is the receiver → value received (credit).
+		// bank-a is the receiver → NOT surfaced by the local source (credits come from the CB).
 		{ContractID: "c2", Sender: "carol@spoke-b-bank-c", Receiver: "dave@spoke-a-bank-a", State: "HTLC_STATE_SETTLED", Amount: "300", CreatedAt: "2026-07-11T11:00:00Z"},
 		// Not settled → excluded.
 		{ContractID: "c3", Sender: "x@spoke-a-bank-a", Receiver: "y@spoke-b-bank-b", State: "HTLC_STATE_LOCKED", Amount: "50", CreatedAt: "2026-07-11T12:00:00Z"},
-		// bank-a not a counterparty → excluded.
+		// bank-a not the sender → excluded.
 		{ContractID: "c4", Sender: "p@spoke-a-bank-x", Receiver: "q@spoke-b-bank-y", State: "HTLC_STATE_SETTLED", Amount: "99", CreatedAt: "2026-07-11T13:00:00Z"},
 	}}
 
 	h := NewStatementHandler(&fakeMovementSource{}).WithHTLCSource(htlc, "bank-a")
+	movements := doStatementWithClaims(t, h, "bank-a")
+
+	// Only c1 (bank-a as sender) qualifies as a debit.
+	if len(movements) != 1 {
+		t.Fatalf("expected 1 pvp debit, got %d: %+v", len(movements), movements)
+	}
+	m := movements[0]
+	if m.Kind != kindPvP {
+		t.Errorf("unexpected kind %q", m.Kind)
+	}
+	// An inter-bank PvP settlement moves tokenized reserve value → tCeBM.
+	if m.Token != tokenTCeBM {
+		t.Errorf("pvp movement token = %q, want %q", m.Token, tokenTCeBM)
+	}
+	if m.Reference != "c1" || m.Direction != directionDebit || m.Amount != "700" {
+		t.Errorf("unexpected debit leg: %+v", m)
+	}
+}
+
+// Received legs (credits) are sourced from the Central Bank, which derives them
+// from the settled FX agreements it aggregates, scoped to this bank.
+func TestStatement_IncludesReceivedPvPCredits(t *testing.T) {
+	credits := &fakePvPCreditSource{credits: []PvPCredit{
+		{Reference: "trade-1", Amount: "700", SettledAt: "2026-07-11T10:05:00Z"},
+		{Reference: "trade-2", Amount: "300", SettledAt: "2026-07-11T11:05:00Z"},
+	}}
+
+	h := NewStatementHandler(&fakeMovementSource{}).WithPvPCreditSource(credits, "bank-c")
+	movements := doStatementWithClaims(t, h, "bank-c")
+
+	if len(movements) != 2 {
+		t.Fatalf("expected 2 pvp credits, got %d: %+v", len(movements), movements)
+	}
+	seen := map[string]Movement{}
+	for _, m := range movements {
+		if m.Kind != kindPvP {
+			t.Errorf("unexpected kind %q", m.Kind)
+		}
+		if m.Token != tokenTCeBM {
+			t.Errorf("credit token = %q, want %q", m.Token, tokenTCeBM)
+		}
+		if m.Direction != directionCredit {
+			t.Errorf("expected credit, got %q for %q", m.Direction, m.Reference)
+		}
+		seen[m.Reference] = m
+	}
+	if seen["trade-1"].Amount != "700" || seen["trade-2"].Amount != "300" {
+		t.Errorf("unexpected credit amounts: %+v", seen)
+	}
+}
+
+func TestStatement_PvPDebitSourceErrorReturns502(t *testing.T) {
+	h := NewStatementHandler(&fakeMovementSource{}).
+		WithHTLCSource(&fakeHTLCSource{err: errors.New("orchestrator down")}, "bank-a")
+	assertStatementStatus(t, h, "bank-a", http.StatusBadGateway)
+}
+
+func TestStatement_PvPCreditSourceErrorReturns502(t *testing.T) {
+	h := NewStatementHandler(&fakeMovementSource{}).
+		WithPvPCreditSource(&fakePvPCreditSource{err: errors.New("central bank down")}, "bank-c")
+	assertStatementStatus(t, h, "bank-c", http.StatusBadGateway)
+}
+
+// doStatementWithClaims drives GetStatement with a BankID claim and returns the
+// decoded movements, asserting a 200.
+func doStatementWithClaims(t *testing.T, h *StatementHandler, bankID string) []Movement {
+	t.Helper()
 	app := fiber.New()
 	app.Use(func(c *fiber.Ctx) error {
-		c.Locals("claims", domain.TokenClaims{Subject: "u", BankID: "bank-a"})
+		c.Locals("claims", domain.TokenClaims{Subject: "u", BankID: bankID})
 		return c.Next()
 	})
 	app.Get("/api/v1/statement", h.GetStatement)
@@ -157,42 +237,16 @@ func TestStatement_IncludesSettledPvPLegs(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-
-	// Only c1 (debit) and c2 (credit) qualify.
-	if len(body.Movements) != 2 {
-		t.Fatalf("expected 2 pvp movements, got %d: %+v", len(body.Movements), body.Movements)
-	}
-	var sawDebit, sawCredit bool
-	for _, m := range body.Movements {
-		if m.Kind != kindPvP {
-			t.Errorf("unexpected kind %q", m.Kind)
-		}
-		if m.Token != tokenFiat {
-			t.Errorf("pvp movement token = %q, want %q", m.Token, tokenFiat)
-		}
-		switch m.Reference {
-		case "c1":
-			sawDebit = m.Direction == directionDebit && m.Amount == "700"
-		case "c2":
-			sawCredit = m.Direction == directionCredit && m.Amount == "300"
-		default:
-			t.Errorf("unexpected pvp reference %q", m.Reference)
-		}
-	}
-	if !sawDebit {
-		t.Error("expected a debit leg for c1 (bank-a as sender)")
-	}
-	if !sawCredit {
-		t.Error("expected a credit leg for c2 (bank-a as receiver)")
-	}
+	return body.Movements
 }
 
-func TestStatement_PvPSourceErrorReturns502(t *testing.T) {
-	h := NewStatementHandler(&fakeMovementSource{}).
-		WithHTLCSource(&fakeHTLCSource{err: errors.New("orchestrator down")}, "bank-a")
+// assertStatementStatus drives GetStatement with a BankID claim and asserts the
+// HTTP status code.
+func assertStatementStatus(t *testing.T, h *StatementHandler, bankID string, want int) {
+	t.Helper()
 	app := fiber.New()
 	app.Use(func(c *fiber.Ctx) error {
-		c.Locals("claims", domain.TokenClaims{Subject: "u", BankID: "bank-a"})
+		c.Locals("claims", domain.TokenClaims{Subject: "u", BankID: bankID})
 		return c.Next()
 	})
 	app.Get("/api/v1/statement", h.GetStatement)
@@ -202,8 +256,8 @@ func TestStatement_PvPSourceErrorReturns502(t *testing.T) {
 		t.Fatalf("request failed: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Errorf("status = %d, want 502", resp.StatusCode)
+	if resp.StatusCode != want {
+		t.Errorf("status = %d, want %d", resp.StatusCode, want)
 	}
 }
 

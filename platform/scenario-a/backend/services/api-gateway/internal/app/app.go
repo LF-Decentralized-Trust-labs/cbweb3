@@ -123,7 +123,7 @@ func New(cfg config.Config) (*App, error) {
 		// payment-orchestrator is wired below, this is replaced with a
 		// membership-backed roster.
 		IdentityHandler: handlers.NewIdentityHandler(handlers.NewIdentityRoster(cfg.PaladinIdentities, nil)),
-		AuthProvider:      identityGRPCProvider,
+		AuthProvider:    identityGRPCProvider,
 	}
 
 	// Transfer Limits (R1-10.1): CB only — commercial banks do not manage limits.
@@ -180,9 +180,13 @@ func New(cfg config.Config) (*App, error) {
 			)
 			deps.PaymentProxyHandler = proxy
 			// Statement (extrato) consolidates this bank's deposit/tokenisation/redeem
-			// records (sourced from the Central Bank via the same proxy) plus its
-			// settled inter-bank HTLC PvP legs (from this entity's orchestrator).
-			deps.StatementHandler = handlers.NewStatementHandler(proxy).WithHTLCSource(paymentGRPC, cfg.BankCode)
+			// records (sourced from the Central Bank via the same proxy), its sent
+			// inter-bank PvP legs as debits (from this entity's orchestrator), and its
+			// received PvP legs as credits (derived at the Central Bank from settled FX
+			// agreements — the receiving side is never on the local orchestrator).
+			deps.StatementHandler = handlers.NewStatementHandler(proxy).
+				WithHTLCSource(paymentGRPC, cfg.BankCode).
+				WithPvPCreditSource(proxy, cfg.BankCode)
 		}
 	}
 

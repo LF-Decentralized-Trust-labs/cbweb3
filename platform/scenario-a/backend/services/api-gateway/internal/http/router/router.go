@@ -216,6 +216,12 @@ func Setup(app *fiber.App, deps Dependencies) {
 			intRedeems.Post("", deps.PaymentHandler.RequestRedeem)
 			intRedeems.Get("", deps.PaymentHandler.ListRedeems)
 
+			// Settled inter-bank PvP credits, derived from aggregated FX agreements
+			// and scoped to bank_id — consumed by commercial-bank gateways to build
+			// the credit side of the statement.
+			intPvP := app.Group("/internal/v1/payments/pvp-credits", middleware.RequireRelayAuth(relayAuthSecret))
+			intPvP.Get("", deps.PaymentHandler.ListSettledPvPCredits)
+
 			// Operational approvals — ROLE_TREASURY (treasury portal).
 			depositGroup := payGroup.Group("/payments/deposits")
 			depositGroup.Post("/approve", middleware.RequireRole(domain.RoleTreasury), deps.PaymentHandler.ApproveDeposit)

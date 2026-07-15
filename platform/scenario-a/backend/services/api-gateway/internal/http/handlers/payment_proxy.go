@@ -161,6 +161,22 @@ func (h *PaymentProxyHandler) FetchRedeems(ctx context.Context) ([]paymentadapte
 	return env.Redeems, nil
 }
 
+// FetchPvPCredits retrieves the incoming inter-bank PvP settlement legs on which
+// this bank is the receiver, derived by the Central Bank from its aggregated
+// SETTLED FX agreements, scoped to bankID. Used by the statement handler to build
+// the credit side of the PvP settlements: the receiving bank's own orchestrator
+// has no record of an incoming leg.
+func (h *PaymentProxyHandler) FetchPvPCredits(ctx context.Context, bankID string) ([]PvPCredit, error) {
+	var env struct {
+		Credits []PvPCredit `json:"credits"`
+	}
+	path := "/internal/v1/payments/pvp-credits?bank_id=" + url.QueryEscape(bankID)
+	if err := h.getInternalJSON(ctx, path, &env); err != nil {
+		return nil, err
+	}
+	return env.Credits, nil
+}
+
 // getInternalJSON performs a relay-authenticated GET against the Central Bank's
 // internal API and decodes the JSON response into out.
 func (h *PaymentProxyHandler) getInternalJSON(ctx context.Context, path string, out interface{}) error {
