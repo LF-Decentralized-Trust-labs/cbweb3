@@ -24,15 +24,15 @@ spec:
     symbolB: ARS
   node:
     advertisedHost: host.docker.internal
-    rpc:  { port: 8745 }
-    ws:   { port: 8755 }
-    p2p:  { port: 31403 }
+    rpc:  { port: 33745 }
+    ws:   { port: 33755 }
+    p2p:  { port: 56403 }
     dataDir: cbweb3-data/central-bank-argentina
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed
   relay:
-    endpoint: http://localhost:4000
+    endpoint: http://localhost:7000
   cbEndpoint: http://host.docker.internal:18745
   frontendHost: localhost
   launcher: enable

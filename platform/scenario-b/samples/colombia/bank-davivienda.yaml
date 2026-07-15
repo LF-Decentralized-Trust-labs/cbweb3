@@ -17,16 +17,16 @@ spec:
   joinBundleRef: ../bundles/spoke-cop.bundle.yaml
   node:
     advertisedHost: host.docker.internal
-    rpc:  { port: 8947 }
-    ws:   { port: 8957 }
-    p2p:  { port: 31605 }
+    rpc:  { port: 33947 }
+    ws:   { port: 33957 }
+    p2p:  { port: 56605 }
     dataDir: cbweb3-data/bank-davivienda
     validator: false
   image: build
   keyProvider: kms://local-emulator
   certSource: ca://central-bank-colombia
   relay:
-    endpoint: http://localhost:4000
+    endpoint: http://localhost:7000
   frontendHost: localhost
   launcher: enable
   launcherPort: 5199
