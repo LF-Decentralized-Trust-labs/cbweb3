@@ -10,12 +10,10 @@ import {
 } from "./config";
 
 // The launcher is a thin, scenario-agnostic entry point deployed per entity: it lists
-// THIS entity's local portals (grouped by scenario) and redirects (full navigation) to
-// the chosen one. Login happens on the destination portal, so the launcher never
+// THIS entity's local portals (grouped by scenario). Each portal is a real link, so the
+// browser handles navigation natively (Ctrl/Cmd/middle-click opens a new tab, and the
+// context menu works). Login happens on the destination portal, so the launcher never
 // imports scenario code and holds no other institution's addresses.
-function go(url: string): void {
-  window.location.href = url;
-}
 
 const SCENARIO_ORDER: Scenario[] = ["A", "B"];
 
@@ -44,15 +42,15 @@ const FEATURES: { title: string; sub: string }[] = [
   { title: "Login on the portal", sub: "Credentials are entered on the destination portal, never here." },
 ];
 
-function PortalButton({ p }: { p: Portal }): React.JSX.Element {
+function PortalLink({ p }: { p: Portal }): React.JSX.Element {
   return (
-    <button type="button" className="portal-btn" onClick={() => go(p.url)}>
+    <a className="portal-btn" href={p.url}>
       <span className="portal-main">
         <span className="portal-label">{p.label}</span>
         <span className="portal-role">{p.role}</span>
       </span>
       <span className="portal-cta" aria-hidden="true">Open →</span>
-    </button>
+    </a>
   );
 }
 
@@ -125,16 +123,34 @@ export default function App(): React.JSX.Element {
               );
               const current = scenarios.includes(active) ? active : scenarios[0];
               const portals = config.portals.filter((p) => p.scenario === current);
+              // Roving-tabindex keyboard nav for the scenario tablist (WAI-ARIA).
+              const onTabKey = (e: React.KeyboardEvent): void => {
+                const i = scenarios.indexOf(current);
+                let next: Scenario | undefined;
+                if (e.key === "ArrowRight" || e.key === "ArrowDown") next = scenarios[(i + 1) % scenarios.length];
+                else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = scenarios[(i - 1 + scenarios.length) % scenarios.length];
+                else if (e.key === "Home") next = scenarios[0];
+                else if (e.key === "End") next = scenarios[scenarios.length - 1];
+                if (next && next !== current) {
+                  e.preventDefault();
+                  const target = next;
+                  setActive(target);
+                  requestAnimationFrame(() => document.getElementById(`lt-tab-${target}`)?.focus());
+                }
+              };
               return (
                 <>
                   {scenarios.length > 1 ? (
-                    <div className="tabs" role="tablist">
+                    <div className="tabs" role="tablist" aria-label="Scenario" onKeyDown={onTabKey}>
                       {scenarios.map((s) => (
                         <button
                           key={s}
+                          id={`lt-tab-${s}`}
                           type="button"
                           role="tab"
                           aria-selected={s === current}
+                          aria-controls="lt-panel"
+                          tabIndex={s === current ? 0 : -1}
                           className="tab"
                           onClick={() => setActive(s)}
                         >
@@ -143,11 +159,13 @@ export default function App(): React.JSX.Element {
                       ))}
                     </div>
                   ) : null}
-                  <p className="group-desc">{SCENARIO_META[current].description}</p>
-                  <div className="portal-list">
-                    {portals.map((p) => (
-                      <PortalButton key={`${p.scenario}-${p.role}`} p={p} />
-                    ))}
+                  <div id="lt-panel" role="tabpanel" aria-labelledby={`lt-tab-${current}`}>
+                    <p className="group-desc">{SCENARIO_META[current].description}</p>
+                    <div className="portal-list">
+                      {portals.map((p) => (
+                        <PortalLink key={`${p.scenario}-${p.role}`} p={p} />
+                      ))}
+                    </div>
                   </div>
                 </>
               );
