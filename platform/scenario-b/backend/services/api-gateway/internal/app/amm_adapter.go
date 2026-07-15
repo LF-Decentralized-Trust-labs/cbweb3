@@ -47,12 +47,12 @@ func (a *ammAdapter) clientFor(ctx context.Context, pair string) (*ammclient.Cli
 
 // --- AMMQuoter ---
 
-func (a *ammAdapter) QuoteExactOutput(ctx context.Context, pair, amountOut string) (string, string, int64, error) {
+func (a *ammAdapter) QuoteExactOutput(ctx context.Context, pair, amountOut string, outputIsTokenA bool) (string, string, int64, error) {
 	c, err := a.clientFor(ctx, pair)
 	if err != nil {
 		return "", "", 0, err
 	}
-	res, err := c.QuoteExactOutput(ctx, pair, amountOut)
+	res, err := c.QuoteExactOutput(ctx, pair, amountOut, outputIsTokenA)
 	if err != nil {
 		return "", "", 0, err
 	}
@@ -113,7 +113,7 @@ func (a *ammAdapter) GetFeeBpsForPair(ctx context.Context, pair string) (uint16,
 
 // --- AMMSwapper ---
 
-func (a *ammAdapter) SwapExactOutput(ctx context.Context, pair, amountOut, maxAmountIn, payerID, beneficiaryID, zkPayer, zkBeneficiary string) (string, string, string, error) {
+func (a *ammAdapter) SwapExactOutput(ctx context.Context, pair, amountOut, maxAmountIn, payerID, beneficiaryID, zkPayer, zkBeneficiary string, outputIsTokenA bool) (string, string, string, error) {
 	c, err := a.clientFor(ctx, pair)
 	if err != nil {
 		return "", "", "", err
@@ -121,6 +121,7 @@ func (a *ammAdapter) SwapExactOutput(ctx context.Context, pair, amountOut, maxAm
 	res, err := c.SwapExactOutput(ctx, ammclient.SwapRequest{
 		AmountOut:            amountOut,
 		MaxAmountIn:          maxAmountIn,
+		OutputIsTokenA:       outputIsTokenA,
 		PayerID:              payerID,
 		BeneficiaryID:        beneficiaryID,
 		ZKPointerPayer:       zkPayer,

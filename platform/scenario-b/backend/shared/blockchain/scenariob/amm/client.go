@@ -129,8 +129,12 @@ type QuoteResult struct {
 
 // SwapRequest carries parameters for a swap-exact-output call.
 type SwapRequest struct {
-	TokenIn              string
-	TokenOut             string
+	TokenIn  string
+	TokenOut string
+	// OutputIsTokenA selects the swap direction when TokenIn/TokenOut are not set
+	// explicitly: false (default) = A→B (output TOKEN_B); true = B→A (output TOKEN_A).
+	// The AMM contract is bidirectional; this drives which pool token is bought.
+	OutputIsTokenA       bool
 	AmountOut            string
 	MaxAmountIn          string
 	To                   string
@@ -268,14 +272,20 @@ func (c *Client) ResumeSignatures(ctx context.Context, proposalID [32]byte) (*bi
 // `pair` parameter is used only for bookkeeping; the on-chain formula uses reserves.
 // Returns the grossAmountIn (with fee-in-reserve applied) so callers can use it
 // directly as max_amount_in without triggering AMM__SlippageExceeded.
-func (c *Client) QuoteExactOutput(ctx context.Context, pair, amountOut string) (*QuoteResult, error) {
+func (c *Client) QuoteExactOutput(ctx context.Context, pair, amountOut string, outputIsTokenA bool) (*QuoteResult, error) {
 	amt, ok := new(big.Int).SetString(strings.TrimSpace(amountOut), 10)
 	if !ok {
 		return nil, fmt.Errorf("invalid amountOut %q", amountOut)
 	}
-	reserveIn, reserveOut, err := c.Reserves(ctx)
+	reserveA, reserveB, err := c.Reserves(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// getAmountIn(reserveIn, reserveOut, amountOut): orient reserves by direction.
+	// A→B (default): reserveIn=A, reserveOut=B. B→A (outputIsTokenA): reserveIn=B, reserveOut=A.
+	reserveIn, reserveOut := reserveA, reserveB
+	if outputIsTokenA {
+		reserveIn, reserveOut = reserveB, reserveA
 	}
 	amountIn := new(big.Int)
 	if err := evm.Call(ctx, c.ec, c.contract, c.abi, "getAmountIn",
@@ -313,9 +323,14 @@ func (c *Client) SwapExactOutput(ctx context.Context, req SwapRequest) (*SwapRes
 	if !ok {
 		return nil, fmt.Errorf("invalid MaxAmountIn %q", req.MaxAmountIn)
 	}
-	// Resolve token addresses: default to config values if not explicitly provided.
+	// Resolve token addresses. Direction default is A→B (output TOKEN_B); when
+	// OutputIsTokenA is set the swap is reversed (B→A, output TOKEN_A). Explicit
+	// TokenIn/TokenOut still override both. The AMM contract accepts either order.
 	tokenIn := c.tokenA
 	tokenOut := c.tokenB
+	if req.OutputIsTokenA {
+		tokenIn, tokenOut = c.tokenB, c.tokenA
+	}
 	if req.TokenIn != "" {
 		tokenIn = common.HexToAddress(req.TokenIn)
 	}

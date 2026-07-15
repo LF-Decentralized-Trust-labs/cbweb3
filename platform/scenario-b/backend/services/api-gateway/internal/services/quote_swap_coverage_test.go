@@ -24,7 +24,7 @@ type fakeAMMQuoter struct {
 	gotAmount string
 }
 
-func (f *fakeAMMQuoter) QuoteExactOutput(_ context.Context, pair, amountOut string) (string, string, int64, error) {
+func (f *fakeAMMQuoter) QuoteExactOutput(_ context.Context, pair, amountOut string, _ bool) (string, string, int64, error) {
 	f.gotPair = pair
 	f.gotAmount = amountOut
 	return f.input, f.impact, f.ts, f.err
@@ -71,16 +71,21 @@ func TestQuoteService_GetExactOutputQuote_QuoterError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type fakeReserveReader struct {
-	reserveA   string
-	reserveB   string
-	feeBps     uint16
-	reserveErr error
-	feeErr     error
+	reserveA       string
+	reserveB       string
+	feeBps         uint16
+	outputIsTokenA bool
+	reserveErr     error
+	feeErr         error
 }
 
 func (f *fakeReserveReader) GetPoolReserves(_ context.Context, _ string) (string, string, float64, error) {
 	return f.reserveA, f.reserveB, 0, f.reserveErr
 }
+func (f *fakeReserveReader) OutputIsTokenA(_ context.Context, _, _ string) (bool, error) {
+	return f.outputIsTokenA, nil
+}
+
 func (f *fakeReserveReader) GetFeeBps(_ context.Context, _ string) (uint16, error) {
 	return f.feeBps, f.feeErr
 }
@@ -129,6 +134,45 @@ func TestSwapQuoteGenerator_Success(t *testing.T) {
 	}
 	if res.ValidUntil.Before(res.CreatedAt) {
 		t.Fatal("valid_until should be after created_at")
+	}
+}
+
+// A reverse-direction quote (target is the pair's TOKEN_A, e.g. COP→BRL on a BRL↔COP
+// pair) must orient the constant-product formula with reserveB as the input reserve and
+// reserveA as the output reserve. With reserveA=10000, reserveB=20000, amountOut=1000,
+// fee=0: A→B costs 10000*1000/(20000-1000)=526, while B→A costs 20000*1000/(10000-1000)=2222.
+func TestSwapQuoteGenerator_ReverseDirectionOrientsReserves(t *testing.T) {
+	repo := &fakeQuoteRepo{}
+	fwd := &fakeReserveReader{reserveA: "10000", reserveB: "20000", feeBps: 0, outputIsTokenA: false}
+	rev := &fakeReserveReader{reserveA: "10000", reserveB: "20000", feeBps: 0, outputIsTokenA: true}
+
+	fwdRes, err := NewSwapQuoteGenerator(fwd, repo).GenerateQuote(context.Background(),
+		QuoteRequest{SourceCurrency: "ARS", TargetCurrency: "BRL", AmountOut: "1000", PoolPair: "W-tCeBM_BRL-W-tCeBM_ARS"})
+	if err != nil {
+		t.Fatalf("forward quote error: %v", err)
+	}
+	revRes, err := NewSwapQuoteGenerator(rev, repo).GenerateQuote(context.Background(),
+		QuoteRequest{SourceCurrency: "COP", TargetCurrency: "BRL", AmountOut: "1000", PoolPair: "W-tCeBM_BRL-W-tCeBM_COP"})
+	if err != nil {
+		t.Fatalf("reverse quote error: %v", err)
+	}
+	if fwdRes.AmountIn != "526" {
+		t.Errorf("forward (A→B) amount_in = %s, want 526", fwdRes.AmountIn)
+	}
+	if revRes.AmountIn != "2222" {
+		t.Errorf("reverse (B→A) amount_in = %s, want 2222", revRes.AmountIn)
+	}
+}
+
+// Reverse direction validates against the OUTPUT reserve (reserveA), not reserveB:
+// amountOut just below reserveA must be accepted even when it exceeds reserveB.
+func TestSwapQuoteGenerator_ReverseDirectionUsesOutputReserveForLiquidityCheck(t *testing.T) {
+	// reserveA=20000 (output), reserveB=10000 (input). amountOut=15000 > reserveB but < reserveA.
+	rev := &fakeReserveReader{reserveA: "20000", reserveB: "10000", feeBps: 0, outputIsTokenA: true}
+	_, err := NewSwapQuoteGenerator(rev, &fakeQuoteRepo{}).GenerateQuote(context.Background(),
+		QuoteRequest{SourceCurrency: "COP", TargetCurrency: "BRL", AmountOut: "15000", PoolPair: "W-tCeBM_BRL-W-tCeBM_COP"})
+	if err != nil {
+		t.Fatalf("reverse quote should accept amountOut<reserveA: %v", err)
 	}
 }
 

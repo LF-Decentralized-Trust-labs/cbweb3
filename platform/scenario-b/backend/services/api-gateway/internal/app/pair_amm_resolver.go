@@ -171,6 +171,36 @@ func (r *pairAMMResolver) SideForSigner(ctx context.Context, poolPair string) (s
 	}
 }
 
+// OutputIsTokenA reports whether a swap that BUYS targetCurrency on poolPair must
+// output the pair's TOKEN_A. It resolves the pair's two token currencies on-chain
+// (via their symbols) and matches targetCurrency against them. This lets the swap be
+// bidirectional (A→B or B→A) over a single sovereign pair, driven by the requested
+// target — no BRL/ARS orientation assumptions. Errors when targetCurrency is neither side.
+func (r *pairAMMResolver) OutputIsTokenA(ctx context.Context, poolPair, targetCurrency string) (bool, error) {
+	tokA, tokB, err := r.tokensFor(ctx, poolPair)
+	if err != nil {
+		return false, err
+	}
+	symA, err := tokA.Symbol(ctx)
+	if err != nil {
+		return false, fmt.Errorf("output side: symbol of token A: %w", err)
+	}
+	symB, err := tokB.Symbol(ctx)
+	if err != nil {
+		return false, fmt.Errorf("output side: symbol of token B: %w", err)
+	}
+	target := strings.ToUpper(strings.TrimSpace(targetCurrency))
+	codeA, codeB := currencyCodeFromSymbol(symA), currencyCodeFromSymbol(symB)
+	switch target {
+	case codeA:
+		return true, nil
+	case codeB:
+		return false, nil
+	default:
+		return false, fmt.Errorf("output side: target currency %q is not a side of %q (%s/%s)", target, poolPair, codeA, codeB)
+	}
+}
+
 // tokensFor returns the W-token clients (A, B) for poolPair.
 func (r *pairAMMResolver) tokensFor(ctx context.Context, poolPair string) (*tcebmclient.Client, *tcebmclient.Client, error) {
 	pa, err := r.lookupPair(ctx, poolPair)
