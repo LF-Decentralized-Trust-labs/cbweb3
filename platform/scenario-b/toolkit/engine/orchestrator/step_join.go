@@ -61,7 +61,7 @@ func (c *JoinConfig) WithDefaults() {
 		c.VolumePrefix = c.BankID
 	}
 	if c.ContainerPrefix == "" {
-		c.ContainerPrefix = "cbweb3-" + c.BankID
+		c.ContainerPrefix = "sc-b-cbweb3-" + c.BankID
 	}
 	if c.NetPrefix == "" {
 		c.NetPrefix = c.VolumePrefix

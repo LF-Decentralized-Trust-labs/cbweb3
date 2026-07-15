@@ -35,7 +35,7 @@ type HubConfig struct {
 	// Compose interpolation for the hub template (rendered into HubEnvFile before
 	// start-besu-hub). Node state is seeded into the `<VolumePrefix>_*` volumes.
 	VolumePrefix    string // e.g. "hub-cbweb3"  → <p>_genesis, <p>_besu_data
-	ContainerPrefix string // e.g. "cbweb3-hub"  → HUB_CONTAINER_PREFIX
+	ContainerPrefix string // e.g. "sc-b-cbweb3-hub"  → HUB_CONTAINER_PREFIX
 	NetPrefix       string // e.g. "hub-cbweb3"  → HUB_NET_PREFIX
 	RPCPort         int    // HUB_RPC_PORT (host)
 	WSPort          int    // HUB_WS_PORT (host)
@@ -62,7 +62,7 @@ func (c *HubConfig) WithDefaults() {
 		c.VolumePrefix = "hub-cbweb3"
 	}
 	if c.ContainerPrefix == "" {
-		c.ContainerPrefix = "cbweb3-hub"
+		c.ContainerPrefix = "sc-b-cbweb3-hub"
 	}
 	if c.NetPrefix == "" {
 		c.NetPrefix = c.VolumePrefix

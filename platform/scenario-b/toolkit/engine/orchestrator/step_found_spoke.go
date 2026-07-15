@@ -80,7 +80,7 @@ func (c *SpokeConfig) WithDefaults() {
 		c.VolumePrefix = c.SpokeID + "_central-bank"
 	}
 	if c.ContainerPrefix == "" {
-		c.ContainerPrefix = "cbweb3-" + c.SpokeID
+		c.ContainerPrefix = "sc-b-cbweb3-" + c.SpokeID
 	}
 	if c.NetPrefix == "" {
 		c.NetPrefix = c.VolumePrefix
