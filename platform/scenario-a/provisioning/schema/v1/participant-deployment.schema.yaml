@@ -152,11 +152,15 @@ definitions:
         type: array
         minItems: 1
         description: >
-          Optional. Consortium-wide Paladin identities offered as FX agreement
-          party choices (rendered as PALADIN_IDENTITIES). Cross-spoke identities
-          cannot be enumerated on-chain (FX groups are bilateral and node-local),
-          so the identities of remote spokes this entity trades with are declared
-          here. Omit to have the gateway serve only live local Pente membership.
+          Optional static override for the FX-party roster (rendered as
+          PALADIN_IDENTITIES). The gateway normally federates the roster across
+          every spoke in the relay's registry (RELAY_URL): each spoke's central
+          bank gateway is queried for its local Pente membership, so cross-spoke
+          identities are discovered automatically and a new spoke appears
+          network-wide with no manifest edit. Set this only to pin/augment the
+          list explicitly (e.g. when no relay is reachable). Omit in normal
+          deployments — the union of this list, live local membership, and the
+          federated peers is served.
         items:
           type: string
           minLength: 1

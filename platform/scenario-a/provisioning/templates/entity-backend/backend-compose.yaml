@@ -127,10 +127,11 @@ services:
       PKI_DIR: /workspace/backend/config/pki
       BANK_CODE: ${BANK_CODE:?BANK_CODE is required}
       PALADIN_URL: ${PALADIN_URL}
-      # PALADIN_IDENTITIES (the consortium-wide FX party roster) is supplied by the
-      # entity env_file (.env.infra), not here: it is per-network data, and there
-      # is no on-chain source for cross-spoke identities. When unset the gateway
-      # serves an empty roster ("not configured") rather than demo identities.
+      # RELAY_URL and PALADIN_IDENTITIES come from the entity env_file (.env.infra),
+      # not here (per-network data). RELAY_URL lets the gateway federate the FX
+      # party roster across every spoke in the relay's registry; PALADIN_IDENTITIES
+      # is an optional static override. With neither, the gateway serves only its
+      # local Pente membership.
     volumes:
       - ${ENTITY_PKI_DIR:-${BACKEND_CONTEXT}/config/pki}:/workspace/backend/config/pki
     ports:

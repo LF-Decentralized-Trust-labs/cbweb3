@@ -24,10 +24,11 @@ type renderCBEnvStep struct {
 	besuOperatorKey string
 	frontendHost    string
 	fxPartyRoster   []string
+	relayURL        string
 }
 
-func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort, chainID int, dataDir, besuOperatorKey, frontendHost string, fxPartyRoster []string) Step {
-	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, chainID: chainID, dataDir: dataDir, besuOperatorKey: besuOperatorKey, frontendHost: frontendHost, fxPartyRoster: fxPartyRoster}
+func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort, chainID int, dataDir, besuOperatorKey, frontendHost string, fxPartyRoster []string, relayURL string) Step {
+	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, chainID: chainID, dataDir: dataDir, besuOperatorKey: besuOperatorKey, frontendHost: frontendHost, fxPartyRoster: fxPartyRoster, relayURL: relayURL}
 }
 
 func (s *renderCBEnvStep) Name() string { return StepRenderCBEnv }
@@ -108,6 +109,10 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		PenteEnabled: true,
 
 		RelaySecret: "cbweb3-relay-shared-secret",
+		// Container-reachable relay URL: the api-gateway federates the FX-party
+		// roster across every spoke the relay knows, so cross-spoke identities need
+		// no static fxPartyRoster.
+		RelayURL: s.relayURL,
 		// api-gateway sets AllowCredentials=true, which Fiber forbids with a wildcard
 		// origin. Whitelist all four CB portal origins (governance, treasury,
 		// supervisor, noc); omitting any makes that portal fail CORS at login.

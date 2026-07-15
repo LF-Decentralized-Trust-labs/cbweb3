@@ -38,13 +38,6 @@ spec:
   # acessado de uma máquina remota (ex.: uma VM na nuvem com IP público 3.84.201.14).
   # frontendHost: 3.84.201.14
   # Operador do banco (login por papel via ROPC). O nome inclui o spoke (brasil).
-  fxPartyRoster:
-    - funded_operator@spoke-brl-cb
-    - funded_operator@spoke-brl-bank-itau
-    - funded_operator@spoke-brl-bank-bradesco
-    - funded_operator@spoke-cop-cb
-    - funded_operator@spoke-cop-bank-bancolombia
-    - funded_operator@spoke-cop-bank-davivienda
   adminUsers:
     - role: ROLE_BANK
       username: admin@itau.brasil.com

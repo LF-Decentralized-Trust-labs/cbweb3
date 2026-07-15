@@ -30,6 +30,7 @@ type renderBankEnvStep struct {
 	besuOperatorKey            string
 	frontendHost               string
 	fxPartyRoster              []string
+	relayURL                   string
 }
 
 func newRenderBankEnvStep(p bankEnvParams) Step {
@@ -49,6 +50,7 @@ func newRenderBankEnvStep(p bankEnvParams) Step {
 		besuOperatorKey:            p.BesuOperatorKey,
 		frontendHost:               p.FrontendHost,
 		fxPartyRoster:              p.FXPartyRoster,
+		relayURL:                   p.RelayURL,
 	}
 }
 
@@ -69,6 +71,7 @@ type bankEnvParams struct {
 	BesuOperatorKey            string
 	FrontendHost               string
 	FXPartyRoster              []string
+	RelayURL                   string
 }
 
 func (s *renderBankEnvStep) Name() string { return StepRenderBankEnv }
@@ -147,6 +150,10 @@ func (s *renderBankEnvStep) Run(_ context.Context) error {
 		PenteBaseURL: hostInternalURL(bankPaladinURL(s.besuRPCPort)),
 
 		RelaySecret: "cbweb3-relay-shared-secret",
+		// Container-reachable relay URL: the bank's api-gateway federates the
+		// FX-party roster across every spoke the relay knows (including remote
+		// spokes it must trade with), so no static fxPartyRoster is needed.
+		RelayURL:    s.relayURL,
 		CORSOrigins: bankCORSOrigins(ports, s.frontendHost),
 	}
 	return RenderEntityEnv(data, cbEnvPath(s.dataDir, s.bankCode))

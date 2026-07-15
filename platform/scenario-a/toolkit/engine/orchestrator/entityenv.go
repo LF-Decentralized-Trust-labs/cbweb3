@@ -105,6 +105,13 @@ type EntityEnvData struct {
 
 	RelaySecret string
 	CORSOrigins string
+
+	// RelayURL is the Cacti relay base URL reachable from inside the container
+	// (host.docker.internal:4000 for a co-located relay). The api-gateway uses it
+	// to federate the FX-party roster across every spoke in the relay's registry,
+	// so cross-spoke identities need no static fxPartyRoster. Empty leaves the
+	// gateway on local Pente membership only.
+	RelayURL string
 }
 
 const entityEnvTemplate = `# Rendered by cbweb3 toolkit (feature 034) — do NOT edit by hand.
@@ -161,13 +168,18 @@ ENTITY_BESU_ADDRESS={{.EntityBesuAddress}}
 # recipient); CB identity is the redeem Zeto-transfer receiver.
 PALADIN_IDENTITY={{.PaladinIdentity}}
 CB_PALADIN_IDENTITY={{.CBPaladinIdentity}}
-# Consortium-wide FX party roster (all spokes) offered in the identity dropdowns.
-# Cross-spoke identities cannot be enumerated on-chain, so they come from the
-# manifest's fxPartyRoster. Empty -> gateway serves only live local Pente membership.
+# Optional static override for the FX party roster (manifest's fxPartyRoster).
+# The network-wide roster is normally federated via RELAY_URL (below); this only
+# pins/augments it. Empty -> roster = live local membership ∪ federated peers.
 PALADIN_IDENTITIES={{.PaladinIdentities}}
 
 # Interop
 INTERNAL_RELAY_AUTH_SECRET={{.RelaySecret}}
+# Cacti relay base URL. When set, the api-gateway federates the FX-party roster
+# across every spoke in the relay's registry (each spoke's CB gateway is queried
+# for its local roster), so a new spoke appears network-wide with no manifest
+# edit. Empty -> local Pente membership only.
+RELAY_URL={{.RelayURL}}
 FIAT_SYMBOL={{.FiatSymbol}}
 CORS_ALLOW_ORIGINS={{.CORSOrigins}}
 

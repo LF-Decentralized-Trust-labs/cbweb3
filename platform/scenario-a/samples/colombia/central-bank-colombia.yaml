@@ -45,13 +45,6 @@ spec:
   # mesma máquina do host Docker). Defina um IP/DNS roteável quando o frontend for
   # acessado de uma máquina remota (ex.: uma VM na nuvem com IP público 3.84.201.14).
   # frontendHost: 3.84.201.14
-  fxPartyRoster:
-    - funded_operator@spoke-brl-cb
-    - funded_operator@spoke-brl-bank-itau
-    - funded_operator@spoke-brl-bank-bradesco
-    - funded_operator@spoke-cop-cb
-    - funded_operator@spoke-cop-bank-bancolombia
-    - funded_operator@spoke-cop-bank-davivienda
   adminUsers:
     - role: ROLE_GOVERNANCE
       username: admin@colombia.governance.gov

@@ -150,6 +150,13 @@ func Setup(app *fiber.App, deps Dependencies) {
 	if deps.IdentityHandler != nil {
 		identityGroup := app.Group("/api/v1/identities", middleware.RequireCookieAuth(deps.AuthProvider))
 		identityGroup.Get("", deps.IdentityHandler.ListIdentities)
+
+		// Internal gateway-to-gateway endpoint: peer gateways fetch this spoke's
+		// LOCAL roster here during roster federation. Protected by the shared
+		// X-Relay-Auth secret (a peer gateway has no user cookie), and it returns
+		// only local membership so the network-wide lookup does not recurse.
+		intIdentities := app.Group("/internal/v1/identities", middleware.RequireRelayAuth(os.Getenv("INTERNAL_RELAY_AUTH_SECRET")))
+		intIdentities.Get("", deps.IdentityHandler.ListLocalIdentities)
 	}
 
 	// --- Statement / Extrato (commercial bank only) ---

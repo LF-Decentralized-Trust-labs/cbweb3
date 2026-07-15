@@ -85,7 +85,7 @@ func TestIdentityRoster_UnionOfConfigAndLive(t *testing.T) {
 	override := []string{"funded_operator@spoke-brl-cb", "funded_operator@spoke-cop-cb"}
 	live := &fakeRosterProvider{identities: []string{
 		"funded_operator@spoke-brl-cb",         // dup of config → dropped
-		"funded_operator@spoke-brl-bank-newco",  // new local member
+		"funded_operator@spoke-brl-bank-newco", // new local member
 	}}
 	r := NewIdentityRoster(override, live)
 
@@ -159,5 +159,45 @@ func TestNewIdentityRoster_CopiesOverride(t *testing.T) {
 	}
 	if len(ids) != 1 || ids[0] != "funded_operator@spoke-a-cb" {
 		t.Errorf("roster leaked caller slice: got %v", ids)
+	}
+}
+
+func TestFederatedIdentityHandler_ScopeLocalUsesLocalRoster(t *testing.T) {
+	// The federated (default) roster carries the network-wide view; the local
+	// roster carries only this spoke. ?scope=local must return the local roster —
+	// the recursion guard that keeps a peer lookup from re-federating.
+	federated := NewIdentityRoster([]string{"funded_operator@spoke-brl-cb", "funded_operator@spoke-cop-cb"}, nil)
+	local := NewIdentityRoster([]string{"funded_operator@spoke-brl-cb"}, nil)
+	h := NewFederatedIdentityHandler(federated, local)
+
+	app := fiber.New()
+	app.Get("/api/v1/identities", h.ListIdentities)
+
+	// Default: network-wide (both spokes).
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/identities", nil))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	var netBody struct {
+		Identities []string `json:"identities"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&netBody)
+	resp.Body.Close()
+	if len(netBody.Identities) != 2 {
+		t.Errorf("default roster = %v, want 2 (network-wide)", netBody.Identities)
+	}
+
+	// scope=local: only the local spoke.
+	resp2, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/identities?scope=local", nil))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp2.Body.Close()
+	var locBody struct {
+		Identities []string `json:"identities"`
+	}
+	_ = json.NewDecoder(resp2.Body).Decode(&locBody)
+	if len(locBody.Identities) != 1 || locBody.Identities[0] != "funded_operator@spoke-brl-cb" {
+		t.Errorf("scope=local roster = %v, want only the local entry", locBody.Identities)
 	}
 }

@@ -84,23 +84,64 @@ func (r *IdentityRoster) Identities(ctx context.Context) ([]string, error) {
 // IdentityHandler exposes the Paladin identities available as party choices in
 // the FX agreement form. The list reflects real Pente membership (see
 // IdentityRoster) rather than a hand-maintained static list.
+//
+// The default roster is network-wide (federated across every spoke). localRoster,
+// when set, is this spoke's LOCAL-only roster and is served for ?scope=local — the
+// endpoint peer gateways call during federation. Serving the local roster there is
+// the recursion guard: a peer lookup must not itself fan out across the network.
 type IdentityHandler struct {
-	roster *IdentityRoster
+	roster      *IdentityRoster
+	localRoster *IdentityRoster
 }
 
-// NewIdentityHandler creates an IdentityHandler over the given roster.
+// NewIdentityHandler creates an IdentityHandler over the given roster. The same
+// roster answers both the default and the ?scope=local request (used when the
+// roster is not federated, so local and network-wide are identical).
 func NewIdentityHandler(roster *IdentityRoster) *IdentityHandler {
-	return &IdentityHandler{roster: roster}
+	return &IdentityHandler{roster: roster, localRoster: roster}
+}
+
+// NewFederatedIdentityHandler creates a handler whose default request returns the
+// network-wide (federated) roster and whose ?scope=local request returns the
+// local-only roster.
+func NewFederatedIdentityHandler(federated, local *IdentityRoster) *IdentityHandler {
+	return &IdentityHandler{roster: federated, localRoster: local}
 }
 
 // ListIdentities returns the available Paladin identities.
 //
-//	GET /api/v1/identities -> { "identities": ["funded_operator@spoke-a-cb", ...], "configured": true }
+//	GET /api/v1/identities              -> network-wide (federated) roster
+//	GET /api/v1/identities?scope=local  -> this spoke's local-only roster
+//
+//	{ "identities": ["funded_operator@spoke-a-cb", ...], "configured": true }
 //
 // When the roster is empty, "configured" is false so the UI can surface
 // "roster not configured" rather than presenting a misleading empty dropdown.
 func (h *IdentityHandler) ListIdentities(c *fiber.Ctx) error {
-	identities, err := h.roster.Identities(c.UserContext())
+	roster := h.roster
+	if c.Query("scope") == "local" && h.localRoster != nil {
+		roster = h.localRoster
+	}
+	return h.respond(c, roster)
+}
+
+// ListLocalIdentities serves this spoke's LOCAL-only roster. It backs the
+// internal gateway-to-gateway endpoint peers call during federation (protected
+// by X-Relay-Auth, not a user cookie). Returning the local roster is the
+// recursion guard: a network-wide lookup fans out to peers' local rosters, which
+// must not themselves federate.
+//
+//	GET /internal/v1/identities -> { "identities": [...], "configured": true }
+func (h *IdentityHandler) ListLocalIdentities(c *fiber.Ctx) error {
+	roster := h.localRoster
+	if roster == nil {
+		roster = h.roster
+	}
+	return h.respond(c, roster)
+}
+
+func (h *IdentityHandler) respond(c *fiber.Ctx, roster *IdentityRoster) error {
+	identities, err := roster.Identities(c.UserContext())
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "list identities: " + err.Error()})
 	}

@@ -17,6 +17,7 @@ import (
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
 	paladinadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/paladin"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
+	relayadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/relay"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
 	dbinit "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/db/init"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
@@ -152,8 +153,23 @@ func New(cfg config.Config) (*App, error) {
 		// identities endpoint and propose-time validation, so an identity that is
 		// not a real member is rejected with a clear 400 instead of a cryptic
 		// on-chain Pente failure.
-		roster := handlers.NewIdentityRoster(cfg.PaladinIdentities, paymentGRPC)
-		deps.IdentityHandler = handlers.NewIdentityHandler(roster)
+		//
+		// localRoster is this spoke's own view (local Pente membership ∪ override);
+		// it answers GET /identities?scope=local and gates propose-time validation
+		// against the LOCAL leg. When RELAY_URL is set, the default (network-wide)
+		// roster is federated across every spoke the relay registry knows: each
+		// spoke's CB gateway is queried for its local roster, so a new spoke that
+		// registers with the relay appears in every portal with no manifest edit.
+		// Without RELAY_URL the two rosters are identical (pre-federation behaviour).
+		localRoster := handlers.NewIdentityRoster(cfg.PaladinIdentities, paymentGRPC)
+		roster := localRoster
+		if cfg.RelayURL != "" {
+			relayClient := relayadapter.NewClient(cfg.RelayURL, cfg.RelayAuthSecret, cfg.RequestTimeout)
+			federated := relayadapter.NewFederatedRoster(paymentGRPC, relayClient, relayClient, 0)
+			roster = handlers.NewIdentityRoster(cfg.PaladinIdentities, federated)
+			log.Printf("FX party roster federated across the relay's spoke registry (relay: %s)", cfg.RelayURL)
+		}
+		deps.IdentityHandler = handlers.NewFederatedIdentityHandler(roster, localRoster)
 		ph = ph.WithIdentityRoster(roster)
 		if cfg.FiatSymbol != "" {
 			limitComplianceGRPC := complianceGRPC
