@@ -24,6 +24,9 @@ type SwapQuoteGenerator struct {
 type AMMReserveReader interface {
 	GetPoolReserves(ctx context.Context, pair string) (string, string, float64, error)
 	GetFeeBps(ctx context.Context, pair string) (uint16, error)
+	// OutputIsTokenA reports whether buying targetCurrency on pair outputs TOKEN_A,
+	// so the quote is oriented to the requested direction (bidirectional pair).
+	OutputIsTokenA(ctx context.Context, pair, targetCurrency string) (bool, error)
 }
 
 // SwapQuoteRepository persists and reads swap quotes (T031, T034, T036).
@@ -111,14 +114,22 @@ func (g *SwapQuoteGenerator) GenerateQuote(ctx context.Context, req QuoteRequest
 		return nil, fmt.Errorf("invalid amount_out: %s", req.AmountOut)
 	}
 
+	// Orient reserves by swap direction. amount_out is always in the TARGET token; when the
+	// target is the pair's TOKEN_A (reverse corridor, e.g. COP→BRL on a BRL↔COP pair) the
+	// input reserve is B and the output reserve is A. Defaults to A→B when unresolved.
+	reserveIn, reserveOut := reserveA, reserveB
+	if isA, dErr := g.ammAdapter.OutputIsTokenA(ctx, poolPair, req.TargetCurrency); dErr == nil && isA {
+		reserveIn, reserveOut = reserveB, reserveA
+	}
+
 	// Validate amount_out < reserve_out (can't drain pool)
-	if amountOut.Cmp(reserveB) >= 0 {
-		return nil, fmt.Errorf("amount_out %s >= reserve_b %s (insufficient liquidity)", req.AmountOut, reserveBStr)
+	if amountOut.Cmp(reserveOut) >= 0 {
+		return nil, fmt.Errorf("amount_out %s >= output reserve %s (insufficient liquidity)", req.AmountOut, reserveOut.String())
 	}
 
 	// Calculate amount_in_no_fee: (reserve_in × amount_out) / (reserve_out - amount_out)
-	numerator := new(big.Int).Mul(reserveA, amountOut)
-	denominator := new(big.Int).Sub(reserveB, amountOut)
+	numerator := new(big.Int).Mul(reserveIn, amountOut)
+	denominator := new(big.Int).Sub(reserveOut, amountOut)
 	amountInNoFee := new(big.Int).Div(numerator, denominator)
 
 	// Clamp to minimum 1: integer division can round to 0 when the swap amount is very

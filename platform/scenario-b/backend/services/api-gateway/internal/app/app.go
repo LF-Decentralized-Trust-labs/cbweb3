@@ -506,11 +506,15 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 
 		var bridgeAssets *services.CrossCurrencyBridgeAssets
 		if resolvedHubCfg != nil {
+			// Derive this gateway's own sovereign currency from its native token symbol
+			// (e.g. tCeBM_BRL -> BRL) instead of hardcoding BRL/ARS; the source spoke follows
+			// the toolkit's "spoke-<currency>" convention. Generalizes to any sovereign spoke.
+			selfCurrency := currencyCodeFromSymbol(os.Getenv("NATIVE_ASSET_SYMBOL"))
 			bridgeAssets = services.CrossCurrencyBridgeAssetsFromHub(
 				resolvedHubCfg,
-				"BRL", "ARS",
+				selfCurrency, "",
 				os.Getenv("TOKEN_ADDRESS"),
-				"spoke-a",
+				"spoke-"+strings.ToLower(selfCurrency),
 			)
 		}
 		var bridgePoller services.BridgePositionPoller
@@ -906,6 +910,12 @@ func (a *ammQuoteAdapter) GetFeeBps(ctx context.Context, pair string) (uint16, e
 	return a.adapter.GetFeeBpsForPair(ctx, pair)
 }
 
+// OutputIsTokenA reports whether buying targetCurrency on pair outputs TOKEN_A, so the
+// cross-currency quote is oriented to the requested direction (bidirectional pair).
+func (a *ammQuoteAdapter) OutputIsTokenA(ctx context.Context, pair, targetCurrency string) (bool, error) {
+	return a.adapter.resolver.OutputIsTokenA(ctx, pair, targetCurrency)
+}
+
 // ammAddrResolverAdapter exposes the per-pair resolver's on-chain AMM address
 // lookup to the cross-currency swap orchestrator (services.AMMAddressResolver).
 type ammAddrResolverAdapter struct {
@@ -914,4 +924,10 @@ type ammAddrResolverAdapter struct {
 
 func (a *ammAddrResolverAdapter) AMMAddressFor(ctx context.Context, poolPair string) (string, error) {
 	return a.r.ammAddressFor(ctx, poolPair)
+}
+
+// OutputIsTokenA reports whether buying targetCurrency on poolPair outputs TOKEN_A,
+// so the cross-currency swap can run in either direction over one sovereign pair.
+func (a *ammAddrResolverAdapter) OutputIsTokenA(ctx context.Context, poolPair, targetCurrency string) (bool, error) {
+	return a.r.OutputIsTokenA(ctx, poolPair, targetCurrency)
 }

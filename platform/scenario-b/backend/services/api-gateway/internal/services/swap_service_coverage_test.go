@@ -27,10 +27,10 @@ type fakeAMMSwapper struct {
 	swapCalled bool
 }
 
-func (f *fakeAMMSwapper) QuoteExactOutput(_ context.Context, _, _ string) (string, string, int64, error) {
+func (f *fakeAMMSwapper) QuoteExactOutput(_ context.Context, _, _ string, _ bool) (string, string, int64, error) {
 	return f.quoteInput, "0", 0, f.quoteErr
 }
-func (f *fakeAMMSwapper) SwapExactOutput(_ context.Context, _, _, _, _, _, _, _ string) (string, string, string, error) {
+func (f *fakeAMMSwapper) SwapExactOutput(_ context.Context, _, _, _, _, _, _, _ string, _ bool) (string, string, string, error) {
 	f.swapCalled = true
 	return f.orderID, f.txHash, f.amountIn, f.swapErr
 }

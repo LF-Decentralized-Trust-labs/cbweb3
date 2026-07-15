@@ -146,6 +146,9 @@ type CrossCurrencySwapOrchestrator struct {
 // over the shared per-pair resolver.
 type AMMAddressResolver interface {
 	AMMAddressFor(ctx context.Context, poolPair string) (string, error)
+	// OutputIsTokenA reports whether buying targetCurrency on poolPair outputs the
+	// pair's TOKEN_A, so Step 2 can swap in either direction over one sovereign pair.
+	OutputIsTokenA(ctx context.Context, poolPair, targetCurrency string) (bool, error)
 }
 
 // NewCrossCurrencySwapOrchestrator creates an orchestrator.
@@ -309,13 +312,16 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		req.CorrelationID, req.SourceCurrency, req.SourceCurrency)
 	_ = o.swapRepo.UpdateStatus(ctx, req.SwapID, domain.SwapStatusBridgeInProgress)
 
-	spokeIn := "spoke-a"
+	// Source spoke is derived from the source currency (symmetric to spokeOut below):
+	// "spoke-<currency>" is the convention the toolkit registers per spoke, so this
+	// generalizes to any sovereign spoke (N currencies) with no BRL/ARS hardcode.
+	spokeIn := "spoke-" + strings.ToLower(req.SourceCurrency)
 	nativeAsset := req.SourceCurrency
 	mirroredAsset := "W-" + req.SourceCurrency
 	if o.bridgeAssets != nil {
-		if o.bridgeAssets.SpokeInNetwork != "" {
-			spokeIn = o.bridgeAssets.SpokeInNetwork
-		}
+		// Local (non-sovereign) dev path may pin the native/wrapped source token
+		// addresses. The sovereign path ignores these (the issuing CB resolves its own
+		// tokens from its per-CB config) and only needs spokeIn, derived above.
 		if o.bridgeAssets.NativeSourceToken != "" {
 			nativeAsset = o.bridgeAssets.NativeSourceToken
 		}
@@ -384,12 +390,26 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		req.CorrelationID, req.SourceCurrency, req.TargetCurrency)
 	_ = o.swapRepo.UpdateStatus(ctx, req.SwapID, domain.SwapStatusSwapInProgress)
 
+	// Resolve the swap direction from the requested target currency vs the pair's
+	// token orientation, so a single sovereign pair serves both directions (e.g. the
+	// BRL↔COP pair handles both BRL→COP and COP→BRL). Defaults to A→B when unresolved.
+	outputIsTokenA := false
+	if o.ammAddrResolver != nil {
+		if isA, dErr := o.ammAddrResolver.OutputIsTokenA(ctx, req.PoolPair, req.TargetCurrency); dErr == nil {
+			outputIsTokenA = isA
+		} else {
+			log.Printf("[correlation_id=%s] WARNING: could not resolve swap direction for pool %s target %s: %v (defaulting A→B)",
+				req.CorrelationID, req.PoolPair, req.TargetCurrency, dErr)
+		}
+	}
+
 	swapReq := SwapRequest{
-		Pair:          req.PoolPair,
-		AmountOut:     req.AmountOut,
-		MaxAmountIn:   req.MaxAmountIn,
-		PayerID:       req.PayerBankID,
-		BeneficiaryID: req.BeneficiaryBankID,
+		Pair:           req.PoolPair,
+		AmountOut:      req.AmountOut,
+		MaxAmountIn:    req.MaxAmountIn,
+		PayerID:        req.PayerBankID,
+		BeneficiaryID:  req.BeneficiaryBankID,
+		OutputIsTokenA: outputIsTokenA,
 	}
 	swapResult, err := o.swapService.Execute(ctx, swapReq)
 	if err != nil {

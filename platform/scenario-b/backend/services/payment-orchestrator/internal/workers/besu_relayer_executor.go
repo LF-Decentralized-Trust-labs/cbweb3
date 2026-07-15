@@ -265,30 +265,62 @@ func (e *BesuRelayerExecutor) SubmitBurnEvent(ctx context.Context, _ /*idempoten
 		}
 	}
 
-	// Spoke-side operation (optional — skipped when spoke is not configured or SkipSpokeLock).
-	//
-	// For cross-currency bridge-out (BeneficiarySpokeAddress is set): CB-B has CENTRAL_BANK_ROLE
-	// on the spoke tCeBM token, so it can mint directly — no prior lock is needed.
-	//
-	// For standard bridge-out (BeneficiarySpokeAddress is empty): use SpokeBridge.release(),
-	// which transfers tokens locked in a prior SpokeBridge.lock() call.
-	if e.spokeEC != nil && !e.cfg.SkipSpokeLock {
-		if beneficiary := strings.TrimSpace(pos.BeneficiarySpokeAddress); beneficiary != "" {
-			// Cross-currency: mint tCeBM on Spoke-B to the beneficiary address.
-			if mintErr := e.spokeMint(ctx, beneficiary, pos.NativeAsset, amount); mintErr != nil {
-				return fmt.Errorf("spoke mint (position=%s beneficiary=%s): %w", positionID, beneficiary, mintErr)
-			}
-		} else {
-			txID := deriveSpokeTxID(positionID)
-			if releaseErr := e.spokeRelease(ctx, txID); releaseErr != nil {
-				return fmt.Errorf("spoke release (position=%s): %w", positionID, releaseErr)
-			}
+	// Spoke-side delivery of the native asset to the beneficiary. The action is decided by
+	// planSpokeDelivery so the gating rule is unit-testable without a live chain.
+	beneficiary := strings.TrimSpace(pos.BeneficiarySpokeAddress)
+	switch planSpokeDelivery(e.spokeEC != nil, e.cfg.SkipSpokeLock, beneficiary) {
+	case spokeDeliveryMint:
+		// Cross-currency: mint tCeBM on Spoke-B to the beneficiary address.
+		if mintErr := e.spokeMint(ctx, beneficiary, pos.NativeAsset, amount); mintErr != nil {
+			return fmt.Errorf("spoke mint (position=%s beneficiary=%s): %w", positionID, beneficiary, mintErr)
 		}
+	case spokeDeliveryRelease:
+		txID := deriveSpokeTxID(positionID)
+		if releaseErr := e.spokeRelease(ctx, txID); releaseErr != nil {
+			return fmt.Errorf("spoke release (position=%s): %w", positionID, releaseErr)
+		}
+	case spokeDeliveryNone:
+		// No spoke-side leg (spoke not configured, or legacy release suppressed by SkipSpokeLock).
 	}
 
 	log.Printf("[BesuRelayerExecutor] burn-unlock ok — positionID=%s token=%s amount=%s signer=%s",
 		positionID, pos.MirroredAsset, pos.MirroredAmount, e.hubSigner.Address().Hex())
 	return nil
+}
+
+// spokeDeliveryAction is the spoke-side settlement leg chosen for a bridge-out.
+type spokeDeliveryAction int
+
+const (
+	// spokeDeliveryNone performs no spoke-side leg (spoke not configured, or the legacy
+	// release-from-lock path suppressed by SkipSpokeLock).
+	spokeDeliveryNone spokeDeliveryAction = iota
+	// spokeDeliveryMint mints native tCeBM to the beneficiary (cross-currency bridge-out).
+	spokeDeliveryMint
+	// spokeDeliveryRelease returns tokens locked by a prior SpokeBridge.lock() (standard bridge-out).
+	spokeDeliveryRelease
+)
+
+// planSpokeDelivery decides the spoke-side settlement leg for a bridge-out.
+//
+// Cross-currency bridge-out (beneficiary set) always MINTS native tCeBM when the spoke is
+// configured: it involves no SpokeBridge.lock() to unwind, so SkipSpokeLock — which only
+// governs the SpokeBridge lock/release dance — must never suppress it. Suppressing it is what
+// burns the hub W-token yet leaves the beneficiary uncredited (silent half-settlement,
+// forbidden by the atomicity rule). This mirrors the commercial-bank bridge-in burn, which is
+// likewise ungated. The legacy release-from-lock path (no beneficiary) stays gated by
+// SkipSpokeLock.
+func planSpokeDelivery(spokeConfigured, skipSpokeLock bool, beneficiary string) spokeDeliveryAction {
+	if !spokeConfigured {
+		return spokeDeliveryNone
+	}
+	if strings.TrimSpace(beneficiary) != "" {
+		return spokeDeliveryMint
+	}
+	if skipSpokeLock {
+		return spokeDeliveryNone
+	}
+	return spokeDeliveryRelease
 }
 
 // spokeBurnFrom calls tCeBM.burn(from, amount) on the Spoke chain using the CB signer.
