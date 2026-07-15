@@ -1,0 +1,219 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Launcher styling — mirrors the operator-portal login page (packages/ui theme
+   tokens) so the entry point matches the project's visual language. No Tailwind
+   here (standalone app), so the shadcn tokens are inlined as CSS variables. */
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 8%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 8%;
+  --primary: 225 100% 62.5%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 220 100% 97%;
+  --secondary-foreground: 225 40% 16%;
+  --muted: 220 50% 96%;
+  --muted-foreground: 220 10% 38%;
+  --border: 220 32% 88%;
+  --radius: 0.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: 220 18% 8%;
+    --foreground: 0 0% 98%;
+    --card: 220 18% 10%;
+    --card-foreground: 0 0% 98%;
+    --secondary: 225 34% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 220 18% 14%;
+    --muted-foreground: 220 8% 70%;
+    --border: 220 16% 24%;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+  -webkit-font-smoothing: antialiased;
+}
+
+/* full-height gradient backdrop — mirrors bg-gradient-to-b from-primary/10 via/to background */
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(
+    to bottom,
+    hsl(var(--primary) / 0.10),
+    hsl(var(--background)) 45%,
+    hsl(var(--background))
+  );
+}
+
+.container {
+  width: 100%;
+  max-width: 72rem;
+  display: grid;
+  gap: 2rem;
+  padding: 2rem 1rem;
+  /* stretch both columns to the same (taller) height */
+  align-items: stretch;
+}
+@media (min-width: 1024px) {
+  .container { grid-template-columns: 1fr 1fr; }
+}
+
+/* ---- left brand panel (hidden on small screens, like the login) ---- */
+.brand {
+  display: none;
+  border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: 1rem;
+  background: hsl(var(--card) / 0.7);
+  backdrop-filter: blur(6px);
+  padding: 2rem;
+}
+@media (min-width: 1024px) { .brand { display: block; } }
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  background: hsl(var(--secondary));
+  color: hsl(var(--secondary-foreground));
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.65rem;
+  margin-bottom: 1rem;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 1.875rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.brand-lead {
+  margin: 0.75rem 0 0;
+  max-width: 28rem;
+  font-size: 0.875rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.features { margin-top: 2rem; display: grid; gap: 1rem; }
+.feature {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  border: 1px solid hsl(var(--border) / 0.8);
+  border-radius: calc(var(--radius) + 0.125rem);
+  background: hsl(var(--background) / 0.8);
+  padding: 1rem;
+}
+.feature svg { flex: none; margin-top: 0.1rem; color: hsl(var(--primary)); }
+.feature-title { margin: 0; font-size: 0.875rem; font-weight: 500; }
+.feature-sub { margin: 0.15rem 0 0; font-size: 0.75rem; color: hsl(var(--muted-foreground)); }
+
+/* ---- right card: the portal list (replaces the login form) ---- */
+.card {
+  margin: 0 auto;
+  width: 100%;
+  max-width: 30rem;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid hsl(var(--border) / 0.8);
+  border-radius: 0.75rem;
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.12), 0 8px 10px -6px rgb(0 0 0 / 0.08);
+}
+.card-header { padding: 1.5rem 1.5rem 0.5rem; }
+.card-icon {
+  display: flex;
+  height: 2.5rem;
+  width: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  background: hsl(var(--primary) / 0.10);
+  color: hsl(var(--primary));
+  margin-bottom: 0.5rem;
+}
+.card-title { margin: 0; font-size: 1.125rem; font-weight: 600; }
+.card-desc { margin: 0.35rem 0 0; font-size: 0.875rem; color: hsl(var(--muted-foreground)); }
+.card-body { padding: 1rem 1.5rem 1.5rem; flex: 1; display: flex; flex-direction: column; }
+
+/* scenario tabs (shadcn-like segmented control) */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  background: hsl(var(--muted));
+  border-radius: var(--radius);
+  padding: 0.25rem;
+  margin-bottom: 0.9rem;
+}
+.tab {
+  flex: 1;
+  padding: 0.4rem 0.5rem;
+  border: 0;
+  border-radius: calc(var(--radius) - 0.125rem);
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.tab[aria-selected="true"] {
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.10);
+}
+.group-desc { margin: 0 0 0.6rem; font-size: 0.75rem; color: hsl(var(--muted-foreground)); }
+
+.portal-list { display: flex; flex-direction: column; gap: 0.5rem; }
+
+/* each portal = a full-width list row button (mirrors the login inputs/button feel) */
+.portal-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.portal-btn:hover {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.06);
+}
+.portal-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.5);
+}
+.portal-main { display: flex; flex-direction: column; }
+.portal-label { font-size: 0.95rem; font-weight: 600; }
+.portal-role { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: hsl(var(--muted-foreground)); }
+.portal-cta { flex: none; font-weight: 600; color: hsl(var(--primary)); }
+
+.separator { height: 1px; background: hsl(var(--border)); margin: 1.25rem 0 1rem; border: 0; margin-top: auto; }
+.card-foot { text-align: center; font-size: 0.75rem; color: hsl(var(--muted-foreground)); }
+
+/* loading / error states */
+.state { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; }
+.state-inner { text-align: center; max-width: 32rem; }
+.state-inner h1 { margin: 0; font-size: 1.5rem; font-weight: 600; }
+.state-inner p { margin: 0.5rem 0 0; color: hsl(var(--muted-foreground)); }
+.state-error { margin-top: 0.75rem; font-family: ui-monospace, monospace; font-size: 0.8rem; color: hsl(0 72% 55%); }

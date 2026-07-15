@@ -19,12 +19,39 @@ function go(url: string): void {
 
 const SCENARIO_ORDER: Scenario[] = ["A", "B"];
 
+// Minimal inline icons (no icon dependency in this standalone app).
+function BuildingIcon(): React.JSX.Element {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="2" width="16" height="20" rx="2" />
+      <path d="M9 22v-4h6v4M8 6h.01M16 6h.01M8 10h.01M16 10h.01M8 14h.01M16 14h.01" />
+    </svg>
+  );
+}
+function DotIcon(): React.JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+const FEATURES: { title: string; sub: string }[] = [
+  { title: "One entry point per entity", sub: "A single launcher lists every portal this institution runs." },
+  { title: "Scenario A & B side by side", sub: "Correspondent Banking and International Hub portals in one place." },
+  { title: "Login on the portal", sub: "Credentials are entered on the destination portal, never here." },
+];
+
 function PortalButton({ p }: { p: Portal }): React.JSX.Element {
   return (
-    <button type="button" style={styles.card} onClick={() => go(p.url)}>
-      <span style={styles.cardName}>{p.label}</span>
-      <span style={styles.cardRole}>{p.role}</span>
-      <span style={styles.cardCta}>Open →</span>
+    <button type="button" className="portal-btn" onClick={() => go(p.url)}>
+      <span className="portal-main">
+        <span className="portal-label">{p.label}</span>
+        <span className="portal-role">{p.role}</span>
+      </span>
+      <span className="portal-cta" aria-hidden="true">Open →</span>
     </button>
   );
 }
@@ -32,6 +59,7 @@ function PortalButton({ p }: { p: Portal }): React.JSX.Element {
 export default function App(): React.JSX.Element {
   const [config, setConfig] = useState<LauncherConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [active, setActive] = useState<Scenario>("A");
 
   useEffect(() => {
     loadConfig()
@@ -41,11 +69,11 @@ export default function App(): React.JSX.Element {
 
   if (error) {
     return (
-      <main style={styles.page}>
-        <div style={styles.header}>
-          <h1 style={styles.title}>CBWeb3 Platform</h1>
-          <p style={styles.subtitle}>Could not load this entity's portal configuration.</p>
-          <p style={styles.errorText}>{error}</p>
+      <main className="state">
+        <div className="state-inner">
+          <h1>CBWeb3 Platform</h1>
+          <p>Could not load this entity's portal configuration.</p>
+          <p className="state-error">{error}</p>
         </div>
       </main>
     );
@@ -53,81 +81,82 @@ export default function App(): React.JSX.Element {
 
   if (!config) {
     return (
-      <main style={styles.page}>
-        <p style={styles.subtitle}>Loading…</p>
+      <main className="state">
+        <div className="state-inner"><p>Loading…</p></div>
       </main>
     );
   }
 
   return (
-    <main style={styles.page}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>{config.entity}</h1>
-        <p style={styles.subtitle}>Choose a scenario and portal to continue.</p>
+    <main className="page">
+      <div className="container">
+        {/* left: brand panel (mirrors the login's left column) */}
+        <section className="brand">
+          <span className="badge">LNET · Launcher</span>
+          <h1>{config.entity}</h1>
+          <p className="brand-lead">
+            Entry point for this institution's operator portals. Pick a scenario
+            and role to continue — you will sign in on the portal itself.
+          </p>
+          <div className="features">
+            {FEATURES.map((f) => (
+              <div className="feature" key={f.title}>
+                <DotIcon />
+                <div>
+                  <p className="feature-title">{f.title}</p>
+                  <p className="feature-sub">{f.sub}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* right: the portal list (replaces the login form) */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-icon"><BuildingIcon /></div>
+            <h2 className="card-title">Choose a portal</h2>
+            <p className="card-desc">Select a scenario and role to open its portal.</p>
+          </div>
+          <div className="card-body">
+            {(() => {
+              const scenarios = SCENARIO_ORDER.filter((s) =>
+                config.portals.some((p) => p.scenario === s),
+              );
+              const current = scenarios.includes(active) ? active : scenarios[0];
+              const portals = config.portals.filter((p) => p.scenario === current);
+              return (
+                <>
+                  {scenarios.length > 1 ? (
+                    <div className="tabs" role="tablist">
+                      {scenarios.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          role="tab"
+                          aria-selected={s === current}
+                          className="tab"
+                          onClick={() => setActive(s)}
+                        >
+                          {SCENARIO_META[s].name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  <p className="group-desc">{SCENARIO_META[current].description}</p>
+                  <div className="portal-list">
+                    {portals.map((p) => (
+                      <PortalButton key={`${p.scenario}-${p.role}`} p={p} />
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+            <hr className="separator" />
+            <p className="card-foot">Distributed per-entity launcher · one host, every scenario</p>
+          </div>
+        </div>
       </div>
-      {SCENARIO_ORDER.map((scenario) => {
-        const portals = config.portals.filter((p) => p.scenario === scenario);
-        if (portals.length === 0) return null;
-        const meta = SCENARIO_META[scenario];
-        return (
-          <section key={scenario} style={styles.section}>
-            <div style={styles.sectionHead}>
-              <h2 style={styles.sectionTitle}>{meta.name}</h2>
-              <p style={styles.sectionDesc}>{meta.description}</p>
-            </div>
-            <div style={styles.grid}>
-              {portals.map((p) => (
-                <PortalButton key={`${p.scenario}-${p.role}`} p={p} />
-              ))}
-            </div>
-          </section>
-        );
-      })}
     </main>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "2rem",
-    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-    background: "#0b1220",
-    color: "#e5e7eb",
-    padding: "2rem",
-  },
-  header: { textAlign: "center" },
-  title: { margin: 0, fontSize: "2rem", fontWeight: 700 },
-  subtitle: { margin: "0.5rem 0 0", color: "#94a3b8" },
-  errorText: { margin: "0.75rem 0 0", color: "#f87171", fontFamily: "monospace", fontSize: "0.85rem" },
-  section: { width: "100%", maxWidth: "720px" },
-  sectionHead: { marginBottom: "0.75rem" },
-  sectionTitle: { margin: 0, fontSize: "1.1rem", fontWeight: 600 },
-  sectionDesc: { margin: "0.25rem 0 0", color: "#94a3b8", fontSize: "0.85rem" },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: "1rem",
-    width: "100%",
-  },
-  card: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.35rem",
-    textAlign: "left",
-    padding: "1.25rem",
-    borderRadius: "12px",
-    border: "1px solid #1e293b",
-    background: "#111a2e",
-    color: "inherit",
-    cursor: "pointer",
-    font: "inherit",
-  },
-  cardName: { fontSize: "1.1rem", fontWeight: 600 },
-  cardRole: { color: "#94a3b8", fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.05em" },
-  cardCta: { marginTop: "0.35rem", color: "#60a5fa", fontWeight: 600 },
-};
