@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"github.com/gofiber/fiber/v2"
 	"google.golang.org/grpc"
@@ -915,47 +917,98 @@ func TestEnrichScanResultNames(t *testing.T) {
 	}
 }
 
-// TestListSettledPvPCredits verifies the central-bank derivation of a receiving
-// bank's incoming PvP legs from its aggregated SETTLED FX agreements: the origin
-// leg credits SourceReceiver (OriginAmount), the counter leg credits DestReceiver
-// (CounterAmount); non-settled agreements and non-receiver banks are excluded.
-func TestListSettledPvPCredits(t *testing.T) {
-	const settledUnix = int64(1752570000)
-	fake := &fakePaymentServer{
-		fxList: &pb.ListFXAgreementsResponse{Agreements: []*pb.FXAgreement{
-			{
-				TradeId:        "trade-1",
-				State:          pb.FXAgreementState_FX_STATE_SETTLED,
-				Originator:     "op@spoke-a-bank-a",
-				Custodian:      "op@spoke-b-bank-d",
-				SourceReceiver: "corr@spoke-a-bank-c",
-				DestReceiver:   "ben@spoke-b-bank-b",
-				OriginAmount:   "700",
-				CounterAmount:  "300",
-			},
-			// Not settled → excluded even though bank-c is the source receiver.
-			{
-				TradeId:        "trade-2",
-				State:          pb.FXAgreementState_FX_STATE_ACCEPTED,
-				SourceReceiver: "corr@spoke-a-bank-c",
-				OriginAmount:   "999",
-			},
-		}},
-		fxEvents: &pb.ListFXAgreementEventsResponse{Events: []*pb.FXAgreementEvent{
-			{Id: 1, TradeId: "trade-1", ToState: pb.FXAgreementState_FX_STATE_SETTLED, OccurredAtUnix: settledUnix},
-		}},
+// fakePvPLedger is an in-memory PvPLedger for handler tests.
+type fakePvPLedger struct {
+	recorded []services.SettledLegInput
+	credits  map[string][]services.PvPCreditRow
+	recErr   error
+	listErr  error
+}
+
+func (f *fakePvPLedger) RecordLeg(_ context.Context, in services.SettledLegInput) error {
+	if f.recErr != nil {
+		return f.recErr
 	}
-	h := startFakePaymentBackend(t, fake)
+	f.recorded = append(f.recorded, in)
+	return nil
+}
+
+func (f *fakePvPLedger) ListCreditsForBank(_ context.Context, bankID string) ([]services.PvPCreditRow, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.credits[bankID], nil
+}
+
+// TestRecordSettledPvPLeg verifies the CB ingests a reported leg, parses the
+// receiver bank id from the identity, and rejects bad input.
+func TestRecordSettledPvPLeg(t *testing.T) {
+	ledger := &fakePvPLedger{}
+	h := startFakePaymentBackend(t, &fakePaymentServer{}).WithPvPLedger(ledger)
+	app := fiber.New()
+	app.Post("/pvp-legs", h.RecordSettledPvPLeg)
+
+	body := `{"trade_id":"trade-1","contract_id":"c1","sender":"op@spoke-a-bank-a","receiver":"corr@spoke-a-bank-c","amount":"700","settled_at":"2026-07-11T10:00:00Z"}`
+	req := httptest.NewRequest(http.MethodPost, "/pvp-legs", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	if len(ledger.recorded) != 1 {
+		t.Fatalf("recorded %d legs, want 1", len(ledger.recorded))
+	}
+	got := ledger.recorded[0]
+	if got.ContractID != "c1" || got.ReceiverBankID != "bank-c" || got.Amount != "700" || got.TradeID != "trade-1" {
+		t.Errorf("unexpected recorded leg: %+v", got)
+	}
+	if got.SettledAt.UTC().Format(time.RFC3339) != "2026-07-11T10:00:00Z" {
+		t.Errorf("settled_at = %v", got.SettledAt)
+	}
+
+	postJSONBody := func(payload string) *http.Response {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodPost, "/pvp-legs", strings.NewReader(payload))
+		r.Header.Set("Content-Type", "application/json")
+		resp, reqErr := app.Test(r)
+		if reqErr != nil {
+			t.Fatalf("request failed: %v", reqErr)
+		}
+		return resp
+	}
+
+	// Missing contract_id → 400.
+	r2 := postJSONBody(`{"receiver":"corr@spoke-a-bank-c"}`)
+	defer r2.Body.Close()
+	if r2.StatusCode != http.StatusBadRequest {
+		t.Errorf("missing contract_id: status = %d, want 400", r2.StatusCode)
+	}
+
+	// Unparseable receiver → 400.
+	r3 := postJSONBody(`{"contract_id":"c2","receiver":"not-an-identity"}`)
+	defer r3.Body.Close()
+	if r3.StatusCode != http.StatusBadRequest {
+		t.Errorf("unparseable receiver: status = %d, want 400", r3.StatusCode)
+	}
+}
+
+// TestListSettledPvPCredits verifies the CB serves a bank its recorded incoming
+// legs, scoped to bank_id, and requires bank_id.
+func TestListSettledPvPCredits(t *testing.T) {
+	ledger := &fakePvPLedger{credits: map[string][]services.PvPCreditRow{
+		"bank-c": {{Reference: "c1", Amount: "700", SettledAt: "2026-07-11T10:00:00Z"}},
+	}}
+	h := startFakePaymentBackend(t, &fakePaymentServer{}).WithPvPLedger(ledger)
 	app := fiber.New()
 	app.Get("/pvp-credits", h.ListSettledPvPCredits)
 
 	fetch := func(bankID string) []PvPCredit {
 		t.Helper()
-		url := "/pvp-credits"
-		if bankID != "" {
-			url += "?bank_id=" + bankID
-		}
-		resp, err := app.Test(httptest.NewRequest(http.MethodGet, url, nil))
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/pvp-credits?bank_id="+bankID, nil))
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -972,26 +1025,15 @@ func TestListSettledPvPCredits(t *testing.T) {
 		return body.Credits
 	}
 
-	wantSettledAt := time.Unix(settledUnix, 0).UTC().Format(time.RFC3339)
-
-	// bank-c is the origin-leg receiver → one credit of 700.
-	if got := fetch("bank-c"); len(got) != 1 || got[0].Reference != "trade-1" || got[0].Amount != "700" || got[0].SettledAt != wantSettledAt {
-		t.Errorf("bank-c credits = %+v, want one trade-1/700/%s", got, wantSettledAt)
+	if got := fetch("bank-c"); len(got) != 1 || got[0].Reference != "c1" || got[0].Amount != "700" {
+		t.Errorf("bank-c credits = %+v, want one c1/700", got)
 	}
-	// bank-b is the counter-leg receiver → one credit of 300.
-	if got := fetch("bank-b"); len(got) != 1 || got[0].Reference != "trade-1" || got[0].Amount != "300" {
-		t.Errorf("bank-b credits = %+v, want one trade-1/300", got)
-	}
-	// bank-a is only a sender → no credit.
 	if got := fetch("bank-a"); len(got) != 0 {
 		t.Errorf("bank-a credits = %+v, want none", got)
 	}
 
 	// Missing bank_id → 400.
-	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/pvp-credits", nil))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
+	resp, _ := app.Test(httptest.NewRequest(http.MethodGet, "/pvp-credits", nil))
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("missing bank_id: status = %d, want 400", resp.StatusCode)

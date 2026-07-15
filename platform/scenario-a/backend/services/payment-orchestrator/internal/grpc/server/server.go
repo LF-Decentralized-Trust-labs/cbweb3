@@ -31,24 +31,25 @@ import (
 
 type paymentOrchestratorService struct {
 	pb.UnimplementedPaymentOrchestratorServiceServer
-	zeto             ports.ZetoOperator
-	htlc             ports.HTLCContractPort // on-chain HTLC coordination (may be nil)
-	relay            ports.InteroperabilityPort
-	fiat             ports.FiatTokenPort           // on-chain fCeBM operations (may be nil)
-	escrowRepo       ports.EscrowRepository        // escrow flow persistence
-	fxAgreementBesu  ports.FXAgreementContractPort // FX agreement on Besu (optional)
-	fxAgreementPente ports.FXAgreementContractPort // FX agreement on Pente private context (optional)
-	fxRepo           ports.FXAgreementRepository   // persistent FX agreement storage (nil = dev in-memory)
-	htlcRepo         ports.HTLCRepository          // required in production; nil only in unit tests
-	pente            ports.PenteClientPort         // optional bilateral private-context manager
-	fxChainReader    ports.FXChainReaderPort       // optional — lists Pente groups for the participant roster
-	fxContexts       *fxContextStore               // A6: file-backed FX context resolver (group/contract per bank)
-	rateTolPct       float64                       // rate tolerance fraction (e.g. 0.001 for 0.1%)
-	crossSpokeMode   bool                          // when true, settle is gated on CounterpartyLocked
-	strictHTLC       bool                          // when true, lock operations require verifiable agreement linkage
-	spokePrefix      string                        // e.g. "spoke-a" — extracted from PALADIN_IDENTITY
-	paladinIdentity  string                        // full identity, e.g. "funded_operator@spoke-a-bank-a"
-	logger           *slog.Logger
+	zeto               ports.ZetoOperator
+	htlc               ports.HTLCContractPort // on-chain HTLC coordination (may be nil)
+	relay              ports.InteroperabilityPort
+	fiat               ports.FiatTokenPort           // on-chain fCeBM operations (may be nil)
+	escrowRepo         ports.EscrowRepository        // escrow flow persistence
+	fxAgreementBesu    ports.FXAgreementContractPort // FX agreement on Besu (optional)
+	fxAgreementPente   ports.FXAgreementContractPort // FX agreement on Pente private context (optional)
+	fxRepo             ports.FXAgreementRepository   // persistent FX agreement storage (nil = dev in-memory)
+	htlcRepo           ports.HTLCRepository          // required in production; nil only in unit tests
+	pente              ports.PenteClientPort         // optional bilateral private-context manager
+	fxChainReader      ports.FXChainReaderPort       // optional — lists Pente groups for the participant roster
+	fxContexts         *fxContextStore               // A6: file-backed FX context resolver (group/contract per bank)
+	rateTolPct         float64                       // rate tolerance fraction (e.g. 0.001 for 0.1%)
+	crossSpokeMode     bool                          // when true, settle is gated on CounterpartyLocked
+	strictHTLC         bool                          // when true, lock operations require verifiable agreement linkage
+	spokePrefix        string                        // e.g. "spoke-a" — extracted from PALADIN_IDENTITY
+	paladinIdentity    string                        // full identity, e.g. "funded_operator@spoke-a-bank-a"
+	settlementReporter ports.SettlementReporter      // optional — reports settled PvP legs to the CB (nil disables)
+	logger             *slog.Logger
 
 	mu           sync.RWMutex
 	htlcs        map[string]*domain.HTLCRecord
@@ -67,8 +68,8 @@ type Config struct {
 	FXRepo           ports.FXAgreementRepository   // optional — nil falls back to in-memory map (dev)
 	// HTLCRepo is required in production for durable HTLC state across restarts.
 	// Pass nil only in unit tests that do not need DB persistence.
-	HTLCRepo   ports.HTLCRepository
-	Pente      ports.PenteClientPort   // optional — nil disables bilateral private context integration
+	HTLCRepo      ports.HTLCRepository
+	Pente         ports.PenteClientPort   // optional — nil disables bilateral private context integration
 	FXChainReader ports.FXChainReaderPort // optional — nil disables the live participant roster
 	// FXContextsFile is the path to a JSON file of bilateral FX contexts (group/contract per
 	// bank), written by the toolkit's deploy-fxa. Empty disables file-based resolution (falls
@@ -85,7 +86,10 @@ type Config struct {
 	StrictHTLC      bool   // strict Agreement-HTLC enforcement mode
 	SpokePrefix     string // e.g. "spoke-a" — empty disables receiver locality check
 	PaladinIdentity string // full identity, e.g. "funded_operator@spoke-a-bank-a"
-	Logger          *slog.Logger
+	// SettlementReporter forwards settled PvP legs to the Central Bank so the
+	// receiving bank can see the incoming credit. Optional — nil disables reporting.
+	SettlementReporter ports.SettlementReporter
+	Logger             *slog.Logger
 }
 
 // New builds a configured gRPC server with all payment-orchestrator handlers.
@@ -99,26 +103,27 @@ func New(cfg Config) (*grpc.Server, func(context.Context), error) {
 		rateTol = 0.001 // default 0.1%
 	}
 	svc := &paymentOrchestratorService{
-		zeto:             cfg.Zeto,
-		htlc:             cfg.HTLC,
-		relay:            cfg.Relay,
-		fiat:             cfg.Fiat,
-		escrowRepo:       cfg.EscrowRepo,
-		fxAgreementBesu:  cfg.FXAgreementBesu,
-		fxAgreementPente: cfg.FXAgreementPente,
-		fxRepo:           cfg.FXRepo,
-		htlcRepo:         cfg.HTLCRepo,
-		pente:            cfg.Pente,
-		fxChainReader:    cfg.FXChainReader,
-		fxContexts:       newFXContextStore(cfg.FXContextsFile),
-		rateTolPct:       rateTol,
-		crossSpokeMode:   cfg.CrossSpokeMode,
-		strictHTLC:       cfg.StrictHTLC,
-		spokePrefix:      cfg.SpokePrefix,
-		paladinIdentity:  cfg.PaladinIdentity,
-		logger:           cfg.Logger,
-		htlcs:            make(map[string]*domain.HTLCRecord),
-		fxAgreements:     make(map[string]*domain.FXAgreementRecord),
+		zeto:               cfg.Zeto,
+		htlc:               cfg.HTLC,
+		relay:              cfg.Relay,
+		fiat:               cfg.Fiat,
+		escrowRepo:         cfg.EscrowRepo,
+		fxAgreementBesu:    cfg.FXAgreementBesu,
+		fxAgreementPente:   cfg.FXAgreementPente,
+		fxRepo:             cfg.FXRepo,
+		htlcRepo:           cfg.HTLCRepo,
+		pente:              cfg.Pente,
+		fxChainReader:      cfg.FXChainReader,
+		fxContexts:         newFXContextStore(cfg.FXContextsFile),
+		rateTolPct:         rateTol,
+		crossSpokeMode:     cfg.CrossSpokeMode,
+		strictHTLC:         cfg.StrictHTLC,
+		spokePrefix:        cfg.SpokePrefix,
+		paladinIdentity:    cfg.PaladinIdentity,
+		settlementReporter: cfg.SettlementReporter,
+		logger:             cfg.Logger,
+		htlcs:              make(map[string]*domain.HTLCRecord),
+		fxAgreements:       make(map[string]*domain.FXAgreementRecord),
 	}
 	if err := svc.loadHTLCsFromDB(context.Background()); err != nil {
 		return nil, nil, err
@@ -614,10 +619,37 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 
 	s.logger.Info("HTLC settled", "contract_id", record.ContractID, "zeto_tx_hash", zetoTxHash, "htlc_tx_hash", htlcTxHash)
 
+	// Best-effort: report the settled leg to the Central Bank so the receiving
+	// bank sees the incoming credit (its own orchestrator holds no record of the
+	// leg). Failures are logged and never undo the settlement.
+	s.reportSettledLeg(record)
+
 	return &pb.SettleHTLCResponse{
 		HtlcTxHash: htlcTxHash,
 		ZetoTxHash: zetoTxHash,
 	}, nil
+}
+
+// reportSettledLeg forwards a settled inter-bank PvP leg to the Central Bank via
+// the configured SettlementReporter. It is a no-op when no reporter is configured
+// or the leg is not agreement-backed. The report is detached from the request so
+// a slow Central Bank cannot delay the settle response; errors are logged only.
+func (s *paymentOrchestratorService) reportSettledLeg(record *domain.HTLCRecord) {
+	if s.settlementReporter == nil || record.AgreementID == "" {
+		return
+	}
+	leg := ports.SettledLeg{
+		TradeID:    record.AgreementID,
+		ContractID: record.ContractID,
+		Sender:     record.Sender,
+		Receiver:   record.Receiver,
+		Amount:     record.Amount,
+		SettledAt:  record.UpdatedAt,
+	}
+	if err := s.settlementReporter.ReportSettledLeg(context.Background(), leg); err != nil {
+		s.logger.Warn("failed to report settled PvP leg to central bank",
+			"contract_id", record.ContractID, "trade_id", record.AgreementID, "error", err)
+	}
 }
 
 func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.RefundHTLCRequest) (*pb.RefundHTLCResponse, error) {
@@ -1461,11 +1493,11 @@ func fxRecordToProto(r *domain.FXAgreementRecord) *pb.FXAgreement {
 		CounterAmount:   r.CounterAmount,
 		OriginCurrency:  r.OriginCurrency,
 		CounterCurrency: r.CounterCurrency,
-		SourceSpokeId:  r.SourceSpokeId,
-		DestSpokeId:    r.DestSpokeId,
-		SourceReceiver: r.SourceReceiver,
-		DestReceiver:   r.DestReceiver,
-		Rate:           r.Rate,
+		SourceSpokeId:   r.SourceSpokeId,
+		DestSpokeId:     r.DestSpokeId,
+		SourceReceiver:  r.SourceReceiver,
+		DestReceiver:    r.DestReceiver,
+		Rate:            r.Rate,
 		ExpiryDate:      r.ExpiryDate,
 		State:           stateMap[r.State],
 		GroupId:         r.GroupID,
@@ -1645,10 +1677,10 @@ func resolveFXPartyAddresses(ctx context.Context, req *pb.ProposeFXAgreementRequ
 		Rate:            req.Rate,
 		ExpiryDate:      req.ExpiryDate,
 		OnBehalf:        req.OnBehalf,
-		SourceSpokeId:  req.SourceSpokeId,
-		DestSpokeId:    req.DestSpokeId,
-		SourceReceiver: req.SourceReceiver,
-		DestReceiver:   req.DestReceiver,
+		SourceSpokeId:   req.SourceSpokeId,
+		DestSpokeId:     req.DestSpokeId,
+		SourceReceiver:  req.SourceReceiver,
+		DestReceiver:    req.DestReceiver,
 	}
 
 	resolve := func(field string) (string, error) {

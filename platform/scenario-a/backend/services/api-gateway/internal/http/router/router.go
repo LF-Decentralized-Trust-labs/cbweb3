@@ -216,9 +216,12 @@ func Setup(app *fiber.App, deps Dependencies) {
 			intRedeems.Post("", deps.PaymentHandler.RequestRedeem)
 			intRedeems.Get("", deps.PaymentHandler.ListRedeems)
 
-			// Settled inter-bank PvP credits, derived from aggregated FX agreements
-			// and scoped to bank_id — consumed by commercial-bank gateways to build
-			// the credit side of the statement.
+			// Settled inter-bank PvP legs: settling orchestrators POST each leg here;
+			// commercial-bank gateways GET the credits scoped to bank_id to build the
+			// credit side of the statement. Central-bank gateway only.
+			intPvPLegs := app.Group("/internal/v1/payments/pvp-legs", middleware.RequireRelayAuth(relayAuthSecret))
+			intPvPLegs.Post("", deps.PaymentHandler.RecordSettledPvPLeg)
+
 			intPvP := app.Group("/internal/v1/payments/pvp-credits", middleware.RequireRelayAuth(relayAuthSecret))
 			intPvP.Get("", deps.PaymentHandler.ListSettledPvPCredits)
 

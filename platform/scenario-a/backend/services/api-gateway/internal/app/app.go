@@ -91,14 +91,18 @@ func New(cfg config.Config) (*App, error) {
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure, cfg.BankCode)
 	complianceHandler := handlers.NewComplianceHandler(identityManager, complianceGRPC)
 
-	// Investigation Module: open a separate DB connection for the OversightService (optional).
+	// Shared api-gateway DB connection (optional). Backs the Investigation Module
+	// (OversightService) and the Central Bank PvP ledger. AutoMigrate covers all
+	// api-gateway-owned tables.
+	var appDB *gorm.DB
 	var oversightHandler *handlers.OversightHandler
 	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
-		if oversightDB, dbErr := gorm.Open(postgres.Open(dbURL), &gorm.Config{}); dbErr == nil {
-			if migrateErr := dbinit.RunAutoMigrate(oversightDB); migrateErr != nil {
-				log.Printf("warning: oversight schema migration failed (%v); disclosure endpoints disabled", migrateErr)
+		if db, dbErr := gorm.Open(postgres.Open(dbURL), &gorm.Config{}); dbErr == nil {
+			if migrateErr := dbinit.RunAutoMigrate(db); migrateErr != nil {
+				log.Printf("warning: api-gateway schema migration failed (%v); DB-backed endpoints disabled", migrateErr)
 			} else {
-				oversightSvc := services.NewOversightService(oversightDB)
+				appDB = db
+				oversightSvc := services.NewOversightService(db)
 				oversightHandler = handlers.NewOversightHandler(oversightSvc)
 
 				// Decrypt endpoint: wire Paladin client and oversight quorum gate into SupervisorHandler.
@@ -109,7 +113,7 @@ func New(cfg config.Config) (*App, error) {
 				}
 			}
 		} else {
-			log.Printf("warning: oversight DB unavailable (%v); disclosure endpoints disabled", dbErr)
+			log.Printf("warning: api-gateway DB unavailable (%v); DB-backed endpoints disabled", dbErr)
 		}
 	}
 
@@ -165,6 +169,12 @@ func New(cfg config.Config) (*App, error) {
 				limitComplianceGRPC = tlConn
 			}
 			ph = ph.WithLimitChecker(limitComplianceGRPC, cfg.FiatSymbol)
+		}
+		// Central Bank gateway (no proxy): wire the PvP ledger so settling
+		// orchestrators can report settled legs and receiving banks can read their
+		// incoming credits. Requires DATABASE_URL for durable storage.
+		if cfg.CentralBankAPIURL == "" && appDB != nil {
+			ph = ph.WithPvPLedger(services.NewPvPLedgerService(appDB))
 		}
 		deps.PaymentHandler = ph
 

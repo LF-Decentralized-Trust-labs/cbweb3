@@ -14,5 +14,8 @@ func RunAutoMigrate(db *gorm.DB) error {
 		// Investigation Module: disclosure requests + co-signatures (FR-034 / FR-035 / FR-036)
 		&apidomain.DisclosureRequest{},
 		&apidomain.DisclosureSignature{},
+		// Central Bank: settled inter-bank PvP legs reported by settling orchestrators,
+		// serving the credit side of commercial-bank statements.
+		&apidomain.PvPSettledLeg{},
 	)
 }
