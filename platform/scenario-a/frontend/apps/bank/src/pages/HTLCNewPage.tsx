@@ -263,14 +263,14 @@ export function HTLCNewPage() {
                   variant={selectedRole === "originator" ? "default" : "outline"}
                   onClick={() => onSelectRole("originator")}
                 >
-                  I am the Originator (Spoke-A)
+                  I am the Originator
                 </Button>
                 <Button
                   size="sm"
                   variant={selectedRole === "counterparty" ? "default" : "outline"}
                   onClick={() => onSelectRole("counterparty")}
                 >
-                  I am the Counterparty (Spoke-B)
+                  I am the Counterparty
                 </Button>
               </div>
               {selectedRole ? (

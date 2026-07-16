@@ -20,7 +20,7 @@ export function AppLayout() {
       <Header />
       <div className="mx-auto flex min-h-[calc(100vh-65px)] w-full max-w-7xl flex-col md:flex-row">
         <Sidebar />
-        <main className="min-h-full flex-1 p-4">
+        <main className="min-w-0 min-h-full flex-1 p-4">
           <Outlet />
         </main>
       </div>

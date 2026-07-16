@@ -3,6 +3,7 @@
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@cbweb3/ui";
 import { useEffect } from "react";
 import { CopyableValue } from "../components/common/CopyableValue";
+import { PartyCell } from "../components/common/PartyCell";
 import { useNetworkStore, useStabilityStore } from "../stores";
 
 const badgeFromState = (state: string): "default" | "secondary" | "destructive" | "warning" => {
@@ -54,6 +55,8 @@ export function DashboardPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Contract ID</TableHead>
+                <TableHead>Sender</TableHead>
+                <TableHead>Receiver</TableHead>
                 <TableHead>Hash Lock</TableHead>
                 <TableHead>Zeto Ref</TableHead>
                 <TableHead>Expires</TableHead>
@@ -64,6 +67,8 @@ export function DashboardPage() {
               {htlcs.map((h) => (
                 <TableRow key={h.id}>
                   <TableCell><CopyableValue value={h.id} truncate={14} /></TableCell>
+                  <TableCell><PartyCell address={h.sender} name={h.senderName} /></TableCell>
+                  <TableCell><PartyCell address={h.receiver} name={h.receiverName} /></TableCell>
                   <TableCell><CopyableValue value={h.hashLock} truncate={14} /></TableCell>
                   <TableCell><CopyableValue value={h.zetoLockRef} truncate={14} /></TableCell>
                   <TableCell className="text-xs">{h.expiresAt ? new Date(h.expiresAt).toLocaleString() : "—"}</TableCell>
@@ -74,7 +79,7 @@ export function DashboardPage() {
               ))}
               {!htlcs.length ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">No active HTLCs</TableCell>
+                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">No active HTLCs</TableCell>
                 </TableRow>
               ) : null}
             </TableBody>

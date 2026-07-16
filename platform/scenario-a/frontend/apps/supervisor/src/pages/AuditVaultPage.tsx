@@ -21,6 +21,7 @@ import {
 } from "@cbweb3/ui";
 import { useEffect, useState } from "react";
 import { CopyableValue } from "../components/common/CopyableValue";
+import { PartyCell } from "../components/common/PartyCell";
 import { KYCStatusPanel } from "../components/supervisor/KYCStatusPanel";
 import { useAuditStore } from "../stores";
 
@@ -166,7 +167,9 @@ export function AuditVaultPage() {
               {logs.map((log) => (
                 <TableRow key={log.log_id}>
                   <TableCell>{new Date(log.timestamp).toLocaleString()}</TableCell>
-                  <TableCell className="max-w-[180px]"><CopyableValue value={log.actor} truncate={18} /></TableCell>
+                  <TableCell className="max-w-[180px]">
+                    <PartyCell address={log.actor} name={log.actor_name} truncate={18} />
+                  </TableCell>
                   <TableCell>{log.action}</TableCell>
                   <TableCell>{log.category}</TableCell>
                   <TableCell>

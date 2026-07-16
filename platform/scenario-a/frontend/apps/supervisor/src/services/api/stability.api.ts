@@ -9,6 +9,10 @@ interface HTLCLock {
   zeto_lock_ref: string;
   time_lock: number;
   state: string;
+  sender: string;
+  receiver: string;
+  sender_name?: string;
+  receiver_name?: string;
 }
 
 interface HTLCSearchResponse {
@@ -23,6 +27,10 @@ function toHTLCSummary(lock: HTLCLock): HTLCSummary {
     hashLock: lock.hash_lock ?? "",
     zetoLockRef: lock.zeto_lock_ref ?? "",
     expiresAt: lock.time_lock ? new Date(lock.time_lock * 1000).toISOString() : "",
+    sender: lock.sender ?? "",
+    receiver: lock.receiver ?? "",
+    senderName: lock.sender_name,
+    receiverName: lock.receiver_name,
   };
 }
 

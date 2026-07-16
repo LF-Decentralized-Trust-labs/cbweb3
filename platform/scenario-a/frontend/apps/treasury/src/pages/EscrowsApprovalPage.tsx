@@ -107,6 +107,7 @@ export function EscrowsApprovalPage() {
               <TableRow>
                 <TableHead>ID</TableHead>
                 <TableHead>Requester</TableHead>
+                <TableHead>Requester Name</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Redemption ID</TableHead>
@@ -120,6 +121,7 @@ export function EscrowsApprovalPage() {
                 <TableRow key={escrow.id}>
                   <TableCell className="font-mono font-medium" title={escrow.id}>{shortHash(escrow.id)}</TableCell>
                   <TableCell className="font-mono" title={escrow.requester_id}>{shortHash(escrow.requester_id)}</TableCell>
+                  <TableCell title={escrow.requester_besu_address}>{escrow.requester_name || "—"}</TableCell>
                   <TableCell>{formatCeBM(escrow.amount)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(escrow.status)}>{getPaymentStatusLabel(escrow.status)}</Badge>

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // renderCBEnvStep renders the central bank's backend .env (feature 034 US1) into
@@ -22,10 +23,12 @@ type renderCBEnvStep struct {
 	dataDir         string
 	besuOperatorKey string
 	frontendHost    string
+	fxPartyRoster   []string
+	relayURL        string
 }
 
-func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort, chainID int, dataDir, besuOperatorKey, frontendHost string) Step {
-	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, chainID: chainID, dataDir: dataDir, besuOperatorKey: besuOperatorKey, frontendHost: frontendHost}
+func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort, chainID int, dataDir, besuOperatorKey, frontendHost string, fxPartyRoster []string, relayURL string) Step {
+	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, chainID: chainID, dataDir: dataDir, besuOperatorKey: besuOperatorKey, frontendHost: frontendHost, fxPartyRoster: fxPartyRoster, relayURL: relayURL}
 }
 
 func (s *renderCBEnvStep) Name() string { return StepRenderCBEnv }
@@ -87,6 +90,8 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		// The CB's own Paladin identity (escrow mint recipient is read from the escrow
 		// record, not here; rendered for consistency and any CB-side proxy use).
 		PaladinIdentity: paladinIdentity(cbNodeName(s.spokeID)),
+		// Consortium FX-party roster (cross-spoke identities) from the manifest.
+		PaladinIdentities: strings.Join(s.fxPartyRoster, ","),
 
 		GovernanceUserID: governanceUserID(s.entityName),
 		// CB_PRIVATE_KEY is the CB governance key the compliance service signs
@@ -104,6 +109,10 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		PenteEnabled: true,
 
 		RelaySecret: "cbweb3-relay-shared-secret",
+		// Container-reachable relay URL: the api-gateway federates the FX-party
+		// roster across every spoke the relay knows, so cross-spoke identities need
+		// no static fxPartyRoster.
+		RelayURL: s.relayURL,
 		// api-gateway sets AllowCredentials=true, which Fiber forbids with a wildcard
 		// origin. Whitelist all four CB portal origins (governance, treasury,
 		// supervisor, noc); omitting any makes that portal fail CORS at login.

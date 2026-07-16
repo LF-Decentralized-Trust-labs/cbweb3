@@ -212,3 +212,53 @@ func TestSupervisorHandler_GetAuditLogs_UpstreamError(t *testing.T) {
 		t.Fatalf("expected error message in body, got: %s", string(payload))
 	}
 }
+
+// (h) actor institution name is resolved best-effort from the participant registry.
+func TestSupervisorHandler_GetAuditLogs_ActorNameEnrichment(t *testing.T) {
+	t.Parallel()
+	stub := &supervisorAuditStub{
+		logs: []complianceadapter.AuditRecord{
+			{LogID: "l-1", ActorSubject: "user-alpha"},   // matches a participant
+			{LogID: "l-2", ActorSubject: "unknown-user"}, // no participant → no name
+		},
+	}
+	// fakeParticipantResolver is defined in payment_grpc_test.go (same package).
+	h := NewSupervisorHandler(stub).WithParticipantResolver(&fakeParticipantResolver{
+		participants: []complianceadapter.Participant{
+			{UserID: "user-alpha", InstitutionName: "Banco Alpha"},
+		},
+	})
+	app := fiber.New()
+	app.Get("/audit/logs", func(c *fiber.Ctx) error {
+		c.Locals("claims", domain.TokenClaims{Subject: "sup-1", Roles: []string{domain.RoleSupervisor}})
+		return h.GetAuditLogs(c)
+	})
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/audit/logs", nil))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Logs []struct {
+			LogID     string `json:"log_id"`
+			ActorName string `json:"actor_name"`
+		} `json:"logs"`
+	}
+	payload, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if len(body.Logs) != 2 {
+		t.Fatalf("expected 2 logs, got %d", len(body.Logs))
+	}
+	if body.Logs[0].ActorName != "Banco Alpha" {
+		t.Errorf("log l-1: actor_name = %q, want %q", body.Logs[0].ActorName, "Banco Alpha")
+	}
+	if body.Logs[1].ActorName != "" {
+		t.Errorf("log l-2: unmatched actor should have empty actor_name, got %q", body.Logs[1].ActorName)
+	}
+}

@@ -28,6 +28,11 @@ type HTLCScanResult struct {
 	ContractID         string `json:"contract_id"`
 	Sender             string `json:"sender"`
 	Receiver           string `json:"receiver"`
+	// SenderName/ReceiverName are the resolved institution names for the
+	// Sender/Receiver EVM addresses. Populated best-effort by the api-gateway
+	// handler from the compliance participant registry; empty when unresolved.
+	SenderName         string `json:"sender_name,omitempty"`
+	ReceiverName       string `json:"receiver_name,omitempty"`
 	HashLock           string `json:"hash_lock"`
 	TimeLock           uint64 `json:"time_lock"`
 	ZetoLockRef        string `json:"zeto_lock_ref"`

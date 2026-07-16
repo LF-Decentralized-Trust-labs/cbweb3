@@ -16,6 +16,7 @@ export interface DepositRecord {
   requester_id: string;
   requester_besu_address: string;
   requester_paladin_identity: string;
+  requester_name?: string;
   amount: string;
   status: PaymentStatus | string | number;
   mint_tx_hash: string;
@@ -28,6 +29,7 @@ export interface EscrowRecord {
   requester_id: string;
   requester_besu_address: string;
   requester_paladin_identity: string;
+  requester_name?: string;
   amount: string;
   status: PaymentStatus | string | number;
   burn_tx_hash: string;
@@ -41,6 +43,7 @@ export interface RedeemRecord {
   requester_id: string;
   requester_besu_address: string;
   requester_paladin_identity: string;
+  requester_name?: string;
   amount: string;
   status: PaymentStatus | string | number;
   zeto_transfer_tx_hash: string;

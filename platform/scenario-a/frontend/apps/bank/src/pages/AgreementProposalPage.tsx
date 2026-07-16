@@ -16,9 +16,56 @@ import {
   SelectValue,
   toast,
 } from "@cbweb3/ui";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useFxAgreementStore } from "../stores/fx-agreement.store";
+import { useIdentityStore } from "../stores/identity.store";
+
+// Dropdown of string options, shared by the party and spoke fields so a typo
+// or a non-member value can no longer reach the on-chain propose call. Options
+// are derived from the available Paladin identities (single source of truth).
+function OptionSelect({
+  id,
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder: string;
+}) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger id={id}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {options.length ? (
+          options.map((option) => (
+            <SelectItem key={option} value={option}>
+              {option}
+            </SelectItem>
+          ))
+        ) : (
+          <SelectItem value="__none__" disabled>
+            No options available
+          </SelectItem>
+        )}
+      </SelectContent>
+    </Select>
+  );
+}
+
+// Derive the spoke id (e.g. "spoke-brl") from a Paladin identity such as
+// "funded_operator@spoke-brl-bank-itau".
+function spokeFromIdentity(identity: string): string {
+  const node = identity.includes("@") ? identity.slice(identity.indexOf("@") + 1) : identity;
+  const parts = node.split("-");
+  return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : node;
+}
 
 // Latin American settlement currencies (ISO 4217) selectable on the receive leg.
 const LATAM_CURRENCIES = [
@@ -40,6 +87,29 @@ export function AgreementProposalPage() {
   const navigate = useNavigate();
   const propose = useFxAgreementStore((s) => s.propose);
   const status = useFxAgreementStore((s) => s.status);
+  const identities = useIdentityStore((s) => s.identities);
+  const fetchIdentities = useIdentityStore((s) => s.fetchAll);
+  const identityStatus = useIdentityStore((s) => s.status);
+  const identityError = useIdentityStore((s) => s.error);
+  const rosterConfigured = useIdentityStore((s) => s.configured);
+
+  useEffect(() => {
+    void fetchIdentities();
+  }, [fetchIdentities]);
+
+  // Distinguish a failed/unconfigured roster from a genuinely empty one so the
+  // operator is not left with a silent empty dropdown and no explanation.
+  const rosterUnavailable = identityStatus === "error" || !rosterConfigured;
+  const rosterMessage =
+    identityStatus === "error"
+      ? identityError ?? "Unable to load the identity roster. Check the API gateway and try again."
+      : "The Paladin identity roster is not configured. Set PALADIN_IDENTITIES or enable Pente group membership on the API gateway, then reload.";
+
+  // Unique spoke ids derived from the identity roster, sorted.
+  const spokes = useMemo(
+    () => Array.from(new Set(identities.map(spokeFromIdentity))).sort(),
+    [identities],
+  );
 
   const [counterpartyB, setCounterpartyB] = useState("");
   const [settlementAgent, setSettlementAgent] = useState("");
@@ -65,19 +135,19 @@ export function AgreementProposalPage() {
 
   const validate = () => {
     if (!counterpartyB.trim()) {
-      toast.error("Counterparty address is required.");
+      toast.error("Counterparty identity is required.");
       return false;
     }
     if (!settlementAgent.trim()) {
-      toast.error("Settlement agent address is required.");
+      toast.error("Settlement agent identity is required.");
       return false;
     }
     if (!custodian.trim()) {
-      toast.error("Custodian address is required.");
+      toast.error("Custodian identity is required.");
       return false;
     }
     if (!beneficiary.trim()) {
-      toast.error("Beneficiary address is required.");
+      toast.error("Beneficiary identity is required.");
       return false;
     }
     if (!originAmount || parseFloat(originAmount) <= 0) {
@@ -142,83 +212,57 @@ export function AgreementProposalPage() {
         </Button>
       </div>
 
+      {rosterUnavailable ? (
+        <Card className="border-destructive">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-destructive">Identity roster unavailable</CardTitle>
+              <CardDescription>{rosterMessage}</CardDescription>
+            </div>
+            <Button variant="outline" onClick={() => void fetchIdentities()} disabled={identityStatus === "loading"}>
+              {identityStatus === "loading" ? "Loading..." : "Retry"}
+            </Button>
+          </CardHeader>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Parties</CardTitle>
-          <CardDescription>Specify the counterparty and intermediary addresses.</CardDescription>
+          <CardDescription>Select the counterparty and intermediary identities.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="counterparty-b">Counterparty B Identity</Label>
-            <Input
-              id="counterparty-b"
-              placeholder="funded_operator@spoke-b-bank-d"
-              value={counterpartyB}
-              onChange={(e) => setCounterpartyB(e.target.value)}
-            />
+            <OptionSelect id="counterparty-b" value={counterpartyB} onChange={setCounterpartyB} options={identities} placeholder="Select a Paladin identity" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="settlement-agent">Settlement Agent Identity</Label>
-            <Input
-              id="settlement-agent"
-              placeholder="funded_operator@spoke-a-cb"
-              value={settlementAgent}
-              onChange={(e) => setSettlementAgent(e.target.value)}
-            />
+            <OptionSelect id="settlement-agent" value={settlementAgent} onChange={setSettlementAgent} options={identities} placeholder="Select a Paladin identity" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="custodian">Custodian Identity</Label>
-            <Input
-              id="custodian"
-              placeholder="funded_operator@spoke-b-bank-d"
-              value={custodian}
-              onChange={(e) => setCustodian(e.target.value)}
-            />
+            <OptionSelect id="custodian" value={custodian} onChange={setCustodian} options={identities} placeholder="Select a Paladin identity" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="beneficiary">Beneficiary Identity</Label>
-            <Input
-              id="beneficiary"
-              placeholder="funded_operator@spoke-b-bank-b"
-              value={beneficiary}
-              onChange={(e) => setBeneficiary(e.target.value)}
-            />
+            <OptionSelect id="beneficiary" value={beneficiary} onChange={setBeneficiary} options={identities} placeholder="Select a Paladin identity" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="source-spoke-id">Source Spoke ID</Label>
-            <Input
-              id="source-spoke-id"
-              placeholder="spoke-brl"
-              value={sourceSpokeId}
-              onChange={(e) => setSourceSpokeId(e.target.value)}
-            />
+            <OptionSelect id="source-spoke-id" value={sourceSpokeId} onChange={setSourceSpokeId} options={spokes} placeholder="Select a spoke" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="dest-spoke-id">Destination Spoke ID</Label>
-            <Input
-              id="dest-spoke-id"
-              placeholder="spoke-usd"
-              value={destSpokeId}
-              onChange={(e) => setDestSpokeId(e.target.value)}
-            />
+            <OptionSelect id="dest-spoke-id" value={destSpokeId} onChange={setDestSpokeId} options={spokes} placeholder="Select a spoke" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="source-receiver">Source Receiver</Label>
-            <Input
-              id="source-receiver"
-              placeholder="funded_operator@spoke-brl-bank-c"
-              value={sourceReceiver}
-              onChange={(e) => setSourceReceiver(e.target.value)}
-            />
+            <OptionSelect id="source-receiver" value={sourceReceiver} onChange={setSourceReceiver} options={identities} placeholder="Select a Paladin identity" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="dest-receiver">Destination Receiver</Label>
-            <Input
-              id="dest-receiver"
-              placeholder="funded_operator@spoke-usd-bank-b"
-              value={destReceiver}
-              onChange={(e) => setDestReceiver(e.target.value)}
-            />
+            <OptionSelect id="dest-receiver" value={destReceiver} onChange={setDestReceiver} options={identities} placeholder="Select a Paladin identity" />
           </div>
         </CardContent>
       </Card>
@@ -302,9 +346,14 @@ export function AgreementProposalPage() {
             />
           </div>
 
-          <Button onClick={onPrepare} disabled={status === "loading"}>
+          <Button onClick={onPrepare} disabled={status === "loading" || rosterUnavailable}>
             {status === "loading" ? "Submitting..." : "Review Agreement"}
           </Button>
+          {rosterUnavailable ? (
+            <p className="text-xs text-destructive">
+              Resolve the identity roster above before proposing an agreement.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -319,6 +368,10 @@ export function AgreementProposalPage() {
             <p className="text-sm">Settlement Agent: {settlementAgent}</p>
             <p className="text-sm">Custodian: {custodian}</p>
             <p className="text-sm">Beneficiary: {beneficiary}</p>
+            <p className="text-sm">Source Spoke: {sourceSpokeId || "—"}</p>
+            <p className="text-sm">Destination Spoke: {destSpokeId || "—"}</p>
+            <p className="text-sm">Source Receiver: {sourceReceiver || "—"}</p>
+            <p className="text-sm">Destination Receiver: {destReceiver || "—"}</p>
             <p className="text-sm">
               Send: {originAmount} {originCurrency}
             </p>

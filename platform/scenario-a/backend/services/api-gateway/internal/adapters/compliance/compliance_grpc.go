@@ -35,6 +35,10 @@ type AuditRecord struct {
 	Timestamp     string `json:"timestamp"`
 	ActorSubject  string `json:"actor"`
 	ActorAddress  string `json:"actor_address"`
+	// ActorName is the resolved institution name for ActorSubject (a user_id).
+	// Populated best-effort by the api-gateway; empty when the actor is not a
+	// registered participant.
+	ActorName     string `json:"actor_name,omitempty"`
 	ActionType    string `json:"action"`
 	TargetSubject string `json:"target_subject,omitempty"`
 	Category      string `json:"category"`

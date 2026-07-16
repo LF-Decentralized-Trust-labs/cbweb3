@@ -17,6 +17,7 @@ import (
 	identityadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/identity"
 	paladinadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/paladin"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
+	relayadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/relay"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
 	dbinit "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/db/init"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
@@ -84,19 +85,25 @@ func New(cfg config.Config) (*App, error) {
 	}
 	closers = append(closers, complianceGRPC)
 	governanceHandler := handlers.NewGovernanceHandler(complianceGRPC)
-	supervisorHandler := handlers.NewSupervisorHandler(complianceGRPC)
+	// Resolve the actor's institution name for audit log entries (Auditor Portal)
+	// via the compliance participant registry.
+	supervisorHandler := handlers.NewSupervisorHandler(complianceGRPC).WithParticipantResolver(complianceGRPC)
 
 	authHandler := handlers.NewAuthHandler(identityGRPCProvider, identityManager, cfg.CookieSecure, cfg.BankCode)
 	complianceHandler := handlers.NewComplianceHandler(identityManager, complianceGRPC)
 
-	// Investigation Module: open a separate DB connection for the OversightService (optional).
+	// Shared api-gateway DB connection (optional). Backs the Investigation Module
+	// (OversightService) and the Central Bank PvP ledger. AutoMigrate covers all
+	// api-gateway-owned tables.
+	var appDB *gorm.DB
 	var oversightHandler *handlers.OversightHandler
 	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
-		if oversightDB, dbErr := gorm.Open(postgres.Open(dbURL), &gorm.Config{}); dbErr == nil {
-			if migrateErr := dbinit.RunAutoMigrate(oversightDB); migrateErr != nil {
-				log.Printf("warning: oversight schema migration failed (%v); disclosure endpoints disabled", migrateErr)
+		if db, dbErr := gorm.Open(postgres.Open(dbURL), &gorm.Config{}); dbErr == nil {
+			if migrateErr := dbinit.RunAutoMigrate(db); migrateErr != nil {
+				log.Printf("warning: api-gateway schema migration failed (%v); DB-backed endpoints disabled", migrateErr)
 			} else {
-				oversightSvc := services.NewOversightService(oversightDB)
+				appDB = db
+				oversightSvc := services.NewOversightService(db)
 				oversightHandler = handlers.NewOversightHandler(oversightSvc)
 
 				// Decrypt endpoint: wire Paladin client and oversight quorum gate into SupervisorHandler.
@@ -107,7 +114,7 @@ func New(cfg config.Config) (*App, error) {
 				}
 			}
 		} else {
-			log.Printf("warning: oversight DB unavailable (%v); disclosure endpoints disabled", dbErr)
+			log.Printf("warning: api-gateway DB unavailable (%v); DB-backed endpoints disabled", dbErr)
 		}
 	}
 
@@ -117,7 +124,11 @@ func New(cfg config.Config) (*App, error) {
 		GovernanceHandler: governanceHandler,
 		SupervisorHandler: supervisorHandler,
 		OversightHandler:  oversightHandler,
-		AuthProvider:      identityGRPCProvider,
+		// Default roster: static override only (no live Pente source). When a
+		// payment-orchestrator is wired below, this is replaced with a
+		// membership-backed roster.
+		IdentityHandler: handlers.NewIdentityHandler(handlers.NewIdentityRoster(cfg.PaladinIdentities, nil)),
+		AuthProvider:    identityGRPCProvider,
 	}
 
 	// Transfer Limits (R1-10.1): CB only — commercial banks do not manage limits.
@@ -134,6 +145,32 @@ func New(cfg config.Config) (*App, error) {
 		}
 		closers = append(closers, paymentGRPC)
 		ph := handlers.NewPaymentHandler(paymentGRPC, cfg.BankCode)
+		// Resolve requester institution names for deposit/escrow/redeem listings
+		// (Treasury portal auditing) via the compliance participant registry.
+		ph = ph.WithParticipantResolver(complianceGRPC)
+		// FX party roster sourced from real Pente membership (via the orchestrator),
+		// with PALADIN_IDENTITIES as an optional static override. Shared by the
+		// identities endpoint and propose-time validation, so an identity that is
+		// not a real member is rejected with a clear 400 instead of a cryptic
+		// on-chain Pente failure.
+		//
+		// localRoster is this spoke's own view (local Pente membership ∪ override);
+		// it answers GET /identities?scope=local and gates propose-time validation
+		// against the LOCAL leg. When RELAY_URL is set, the default (network-wide)
+		// roster is federated across every spoke the relay registry knows: each
+		// spoke's CB gateway is queried for its local roster, so a new spoke that
+		// registers with the relay appears in every portal with no manifest edit.
+		// Without RELAY_URL the two rosters are identical (pre-federation behaviour).
+		localRoster := handlers.NewIdentityRoster(cfg.PaladinIdentities, paymentGRPC)
+		roster := localRoster
+		if cfg.RelayURL != "" {
+			relayClient := relayadapter.NewClient(cfg.RelayURL, cfg.RelayAuthSecret, cfg.RequestTimeout)
+			federated := relayadapter.NewFederatedRoster(paymentGRPC, relayClient, relayClient, 0)
+			roster = handlers.NewIdentityRoster(cfg.PaladinIdentities, federated)
+			log.Printf("FX party roster federated across the relay's spoke registry (relay: %s)", cfg.RelayURL)
+		}
+		deps.IdentityHandler = handlers.NewFederatedIdentityHandler(roster, localRoster)
+		ph = ph.WithIdentityRoster(roster)
 		if cfg.FiatSymbol != "" {
 			limitComplianceGRPC := complianceGRPC
 			// Commercial banks point their limit checks at the central bank's compliance service,
@@ -149,11 +186,17 @@ func New(cfg config.Config) (*App, error) {
 			}
 			ph = ph.WithLimitChecker(limitComplianceGRPC, cfg.FiatSymbol)
 		}
+		// Central Bank gateway (no proxy): wire the PvP ledger so settling
+		// orchestrators can report settled legs and receiving banks can read their
+		// incoming credits. Requires DATABASE_URL for durable storage.
+		if cfg.CentralBankAPIURL == "" && appDB != nil {
+			ph = ph.WithPvPLedger(services.NewPvPLedgerService(appDB))
+		}
 		deps.PaymentHandler = ph
 
 		// Commercial bank: wire escrow proxy that forwards to the Central Bank.
 		if cfg.CentralBankAPIURL != "" {
-			deps.PaymentProxyHandler = handlers.NewPaymentProxyHandler(
+			proxy := handlers.NewPaymentProxyHandler(
 				cfg.CentralBankAPIURL,
 				paymentGRPC,
 				cfg.EntityBesuAddress,
@@ -161,6 +204,15 @@ func New(cfg config.Config) (*App, error) {
 				cfg.CBPaladinIdentity,
 				cfg.RelayAuthSecret,
 			)
+			deps.PaymentProxyHandler = proxy
+			// Statement (extrato) consolidates this bank's deposit/tokenisation/redeem
+			// records (sourced from the Central Bank via the same proxy), its sent
+			// inter-bank PvP legs as debits (from this entity's orchestrator), and its
+			// received PvP legs as credits (derived at the Central Bank from settled FX
+			// agreements — the receiving side is never on the local orchestrator).
+			deps.StatementHandler = handlers.NewStatementHandler(proxy).
+				WithHTLCSource(paymentGRPC, cfg.BankCode).
+				WithPvPCreditSource(proxy, cfg.BankCode)
 		}
 	}
 
