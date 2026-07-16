@@ -18,19 +18,8 @@
   --radius: 0.5rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: 220 18% 8%;
-    --foreground: 0 0% 98%;
-    --card: 220 18% 10%;
-    --card-foreground: 0 0% 98%;
-    --secondary: 225 34% 16%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 220 18% 14%;
-    --muted-foreground: 220 8% 70%;
-    --border: 220 16% 24%;
-  }
-}
+/* Always render the light theme — the launcher does not follow the system's
+   prefers-color-scheme (dark mode) setting. */
 
 * { box-sizing: border-box; }
 
