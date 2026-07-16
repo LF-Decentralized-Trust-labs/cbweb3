@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -118,6 +119,86 @@ func (h *PaymentProxyHandler) RequestRedeem(c *fiber.Ctx) error {
 func (h *PaymentProxyHandler) ListRedeems(c *fiber.Ctx) error {
 	path := "/internal/v1/payments/redeems?requester_id=" + url.QueryEscape(h.entityBesuAddress)
 	return h.proxy(c, http.MethodGet, path, nil)
+}
+
+// FetchDeposits retrieves this entity's deposit records from the Central Bank
+// (decoded, unlike the passthrough ListDeposits handler), scoped to the entity's
+// own Besu address. Used by the statement handler to consolidate movements.
+func (h *PaymentProxyHandler) FetchDeposits(ctx context.Context) ([]paymentadapter.DepositRecord, error) {
+	var env struct {
+		Deposits []paymentadapter.DepositRecord `json:"deposits"`
+	}
+	path := "/internal/v1/payments/deposits?requester_id=" + url.QueryEscape(h.entityBesuAddress)
+	if err := h.getInternalJSON(ctx, path, &env); err != nil {
+		return nil, err
+	}
+	return env.Deposits, nil
+}
+
+// FetchEscrows retrieves this entity's reserve-tokenisation records from the
+// Central Bank, scoped to the entity's own Besu address.
+func (h *PaymentProxyHandler) FetchEscrows(ctx context.Context) ([]paymentadapter.EscrowRecord, error) {
+	var env struct {
+		Escrows []paymentadapter.EscrowRecord `json:"escrows"`
+	}
+	path := "/internal/v1/payments/escrows?requester_id=" + url.QueryEscape(h.entityBesuAddress)
+	if err := h.getInternalJSON(ctx, path, &env); err != nil {
+		return nil, err
+	}
+	return env.Escrows, nil
+}
+
+// FetchRedeems retrieves this entity's redeem records from the Central Bank,
+// scoped to the entity's own Besu address.
+func (h *PaymentProxyHandler) FetchRedeems(ctx context.Context) ([]paymentadapter.RedeemRecord, error) {
+	var env struct {
+		Redeems []paymentadapter.RedeemRecord `json:"redeems"`
+	}
+	path := "/internal/v1/payments/redeems?requester_id=" + url.QueryEscape(h.entityBesuAddress)
+	if err := h.getInternalJSON(ctx, path, &env); err != nil {
+		return nil, err
+	}
+	return env.Redeems, nil
+}
+
+// FetchPvPCredits retrieves the incoming inter-bank PvP settlement legs on which
+// this bank is the receiver, derived by the Central Bank from its aggregated
+// SETTLED FX agreements, scoped to bankID. Used by the statement handler to build
+// the credit side of the PvP settlements: the receiving bank's own orchestrator
+// has no record of an incoming leg.
+func (h *PaymentProxyHandler) FetchPvPCredits(ctx context.Context, bankID string) ([]PvPCredit, error) {
+	var env struct {
+		Credits []PvPCredit `json:"credits"`
+	}
+	path := "/internal/v1/payments/pvp-credits?bank_id=" + url.QueryEscape(bankID)
+	if err := h.getInternalJSON(ctx, path, &env); err != nil {
+		return nil, err
+	}
+	return env.Credits, nil
+}
+
+// getInternalJSON performs a relay-authenticated GET against the Central Bank's
+// internal API and decodes the JSON response into out.
+func (h *PaymentProxyHandler) getInternalJSON(ctx context.Context, path string, out interface{}) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	if h.relayAuthSecret != "" {
+		req.Header.Set("X-Relay-Auth", h.relayAuthSecret)
+	}
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("central bank unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("central bank returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 // proxyWithEntityEnrichment injects entity Besu address and Paladin identity

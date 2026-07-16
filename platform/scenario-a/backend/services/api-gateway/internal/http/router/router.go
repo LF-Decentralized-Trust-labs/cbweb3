@@ -25,6 +25,8 @@ type Dependencies struct {
 	PaymentProxyHandler    *handlers.PaymentProxyHandler    // Commercial Bank: proxies escrow requests to CB
 	OnboardingHandler      *handlers.OnboardingHandler      // Central Bank: processes onboarding locally
 	OnboardingProxyHandler *handlers.OnboardingProxyHandler // Commercial Bank: proxies onboarding to CB
+	IdentityHandler        *handlers.IdentityHandler        // Paladin identity choices for the FX agreement form
+	StatementHandler       *handlers.StatementHandler       // Commercial Bank: consolidated fCeBM/tCeBM statement (extrato)
 	AuthProvider           interfaces.IAuthProvider
 }
 
@@ -144,6 +146,25 @@ func Setup(app *fiber.App, deps Dependencies) {
 		tlGroup.Delete("/:id", deps.TransferLimitHandler.DeleteTransferLimit)
 	}
 
+	// --- Paladin identities (FX agreement party choices) ---
+	if deps.IdentityHandler != nil {
+		identityGroup := app.Group("/api/v1/identities", middleware.RequireCookieAuth(deps.AuthProvider))
+		identityGroup.Get("", deps.IdentityHandler.ListIdentities)
+
+		// Internal gateway-to-gateway endpoint: peer gateways fetch this spoke's
+		// LOCAL roster here during roster federation. Protected by the shared
+		// X-Relay-Auth secret (a peer gateway has no user cookie), and it returns
+		// only local membership so the network-wide lookup does not recurse.
+		intIdentities := app.Group("/internal/v1/identities", middleware.RequireRelayAuth(os.Getenv("INTERNAL_RELAY_AUTH_SECRET")))
+		intIdentities.Get("", deps.IdentityHandler.ListLocalIdentities)
+	}
+
+	// --- Statement / Extrato (commercial bank only) ---
+	if deps.StatementHandler != nil {
+		statementGroup := app.Group("/api/v1/statement", middleware.RequireCookieAuth(deps.AuthProvider))
+		statementGroup.Get("", deps.StatementHandler.GetStatement)
+	}
+
 	// --- Payment Orchestrator (HTLC + Token) ---
 	if deps.PaymentHandler != nil {
 		payGroup := app.Group("/api/v1", middleware.RequireCookieAuth(deps.AuthProvider))
@@ -201,6 +222,15 @@ func Setup(app *fiber.App, deps Dependencies) {
 			intRedeems := app.Group("/internal/v1/payments/redeems", middleware.RequireRelayAuth(relayAuthSecret))
 			intRedeems.Post("", deps.PaymentHandler.RequestRedeem)
 			intRedeems.Get("", deps.PaymentHandler.ListRedeems)
+
+			// Settled inter-bank PvP legs: settling orchestrators POST each leg here;
+			// commercial-bank gateways GET the credits scoped to bank_id to build the
+			// credit side of the statement. Central-bank gateway only.
+			intPvPLegs := app.Group("/internal/v1/payments/pvp-legs", middleware.RequireRelayAuth(relayAuthSecret))
+			intPvPLegs.Post("", deps.PaymentHandler.RecordSettledPvPLeg)
+
+			intPvP := app.Group("/internal/v1/payments/pvp-credits", middleware.RequireRelayAuth(relayAuthSecret))
+			intPvP.Get("", deps.PaymentHandler.ListSettledPvPCredits)
 
 			// Operational approvals — ROLE_TREASURY (treasury portal).
 			depositGroup := payGroup.Group("/payments/deposits")

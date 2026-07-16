@@ -10,6 +10,7 @@ import {
   Handshake,
   LayoutDashboard,
   Lock,
+  ReceiptText,
   // Scale,
   // Settings,
   // ShieldCheck,
@@ -18,6 +19,7 @@ import {
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/statement", label: "Statement", icon: ReceiptText },
   // { to: "/liquidity", label: "Liquidity & Transfers", icon: Coins },
   { to: "/deposits", label: "Issuance Requests", icon: ArrowDownToLine },
   { to: "/escrows", label: "Reserve Tokenisation", icon: Lock },
@@ -32,7 +34,7 @@ const links = [
 
 export function Sidebar() {
   return (
-    <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:border-b-0 md:border-r">
+    <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:shrink-0 md:border-b-0 md:border-r">
       <div className="mb-3 space-y-1">
         {/* <PlatformLogo imageClassName="h-7" /> */}
         <p className="text-xs uppercase tracking-wide text-muted-foreground">LNET</p>

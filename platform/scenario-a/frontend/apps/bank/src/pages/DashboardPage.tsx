@@ -31,9 +31,23 @@ import {
   useAmmStore,
   useHtlcStore,
   usePaymentStore,
+  useStatementStore,
   useTokenStore,
 } from "../stores";
-import { PaymentStatus, formatFiatUnits, normalizePaymentStatus } from "../types";
+import { type Movement, PaymentStatus, formatCeBM, formatFiatUnits, normalizePaymentStatus } from "../types";
+
+const kindLabel: Record<string, string> = {
+  deposit: "Deposit",
+  tokenisation: "Reserve Tokenisation",
+  redeem: "Redeem",
+  pvp_settlement: "PvP Settlement",
+};
+
+// Amounts are integer units; format per token with a directional sign.
+function formatMovementAmount(movement: Movement): string {
+  const formatted = movement.token === "tCeBM" ? formatCeBM(movement.amount) : formatFiatUnits(movement.amount);
+  return `${movement.direction === "credit" ? "+" : "-"} ${formatted}`;
+}
 
 // const statusVariant = (status: string): "warning" | "default" | "success" | "destructive" | "outline" => {
 //   const variants: Record<string, "warning" | "default" | "success" | "destructive"> = {
@@ -65,12 +79,16 @@ export function DashboardPage() {
   const escrows = usePaymentStore((state) => state.escrows);
   const redeems = usePaymentStore((state) => state.redeems);
 
+  const fetchStatement = useStatementStore((state) => state.fetchAll);
+  const movements = useStatementStore((state) => state.movements);
+
   useEffect(() => {
     void fetchToken();
     void fetchHtlc();
     void refreshPool();
     void fetchPayments();
-  }, [fetchToken, fetchHtlc, refreshPool, fetchPayments]);
+    void fetchStatement();
+  }, [fetchToken, fetchHtlc, refreshPool, fetchPayments, fetchStatement]);
 
   // const liquidityData = [
   //   { name: "Public", value: Number(tokenBalance?.publicBalance ?? 0) },
@@ -330,6 +348,41 @@ export function DashboardPage() {
         {!tokenTransactions.length ? <p className="pt-2 text-sm text-muted-foreground">No transactions yet.</p> : null}
         </CardContent>
       </Card> */}
+
+      <Card className="md:col-span-2">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Recent Movements</CardTitle>
+            <CardDescription>Latest tokenized-fiat and tCeBM movements</CardDescription>
+          </div>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/statement">View statement</Link>
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {movements.slice(0, 5).map((movement) => (
+              <div
+                key={movement.id}
+                className="flex items-center justify-between rounded border border-border px-3 py-2 text-sm"
+              >
+                <span className="text-muted-foreground">
+                  {new Date(movement.timestamp).toLocaleString()} · {kindLabel[movement.kind] ?? movement.kind} · {movement.token}
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="font-medium">{formatMovementAmount(movement)}</span>
+                  <Badge variant={movement.direction === "credit" ? "success" : "destructive"}>
+                    {movement.direction === "credit" ? "Credit" : "Debit"}
+                  </Badge>
+                </span>
+              </div>
+            ))}
+            {!movements.length ? (
+              <p className="text-sm text-muted-foreground">No movements yet.</p>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className="md:col-span-2">
         <CardHeader>

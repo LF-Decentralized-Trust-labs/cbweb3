@@ -137,6 +137,8 @@ type HTLCStatus struct {
 	ZetoLockRef        string `json:"zeto_lock_ref"`
 	State              string `json:"state"`
 	CounterpartyLocked bool   `json:"counterparty_locked"`
+	Amount             string `json:"amount"`
+	CreatedAt          string `json:"created_at"` // RFC3339
 }
 
 func (a *GRPCAdapter) GetHTLCStatus(ctx context.Context, contractID string) (*HTLCStatus, error) {
@@ -233,6 +235,8 @@ func lockToStatus(l *pb.HTLCLock) *HTLCStatus {
 		ZetoLockRef:        l.ZetoLockRef,
 		State:              l.State.String(),
 		CounterpartyLocked: l.CounterpartyLocked,
+		Amount:             l.Amount,
+		CreatedAt:          l.CreatedAt,
 	}
 }
 
@@ -281,11 +285,15 @@ type DepositRecord struct {
 	RequesterID              string `json:"requester_id"`
 	RequesterBesuAddress     string `json:"requester_besu_address"`
 	RequesterPaladinIdentity string `json:"requester_paladin_identity"`
-	Amount                   string `json:"amount"`
-	Status                   string `json:"status"`
-	MintTxHash               string `json:"mint_tx_hash,omitempty"`
-	RejectionReason          string `json:"rejection_reason,omitempty"`
-	CreatedAt                string `json:"created_at"`
+	// RequesterName is the resolved institution name for RequesterBesuAddress.
+	// Populated by the api-gateway handler via the compliance participant registry;
+	// empty when the address has no registered participant.
+	RequesterName   string `json:"requester_name,omitempty"`
+	Amount          string `json:"amount"`
+	Status          string `json:"status"`
+	MintTxHash      string `json:"mint_tx_hash,omitempty"`
+	RejectionReason string `json:"rejection_reason,omitempty"`
+	CreatedAt       string `json:"created_at"`
 }
 
 func (a *GRPCAdapter) ListDeposits(ctx context.Context, requesterID string) ([]DepositRecord, error) {
@@ -351,12 +359,15 @@ type EscrowRecord struct {
 	RequesterID              string `json:"requester_id"`
 	RequesterBesuAddress     string `json:"requester_besu_address"`
 	RequesterPaladinIdentity string `json:"requester_paladin_identity"`
-	Amount                   string `json:"amount"`
-	Status                   string `json:"status"`
-	BurnTxHash               string `json:"burn_tx_hash,omitempty"`
-	MintTxHash               string `json:"mint_tx_hash,omitempty"`
-	RejectionReason          string `json:"rejection_reason,omitempty"`
-	CreatedAt                string `json:"created_at"`
+	// RequesterName is the resolved institution name for RequesterBesuAddress
+	// (see DepositRecord.RequesterName).
+	RequesterName   string `json:"requester_name,omitempty"`
+	Amount          string `json:"amount"`
+	Status          string `json:"status"`
+	BurnTxHash      string `json:"burn_tx_hash,omitempty"`
+	MintTxHash      string `json:"mint_tx_hash,omitempty"`
+	RejectionReason string `json:"rejection_reason,omitempty"`
+	CreatedAt       string `json:"created_at"`
 }
 
 func (a *GRPCAdapter) ListEscrows(ctx context.Context, requesterID string) ([]EscrowRecord, error) {
@@ -438,12 +449,15 @@ type RedeemRecord struct {
 	RequesterID              string `json:"requester_id"`
 	RequesterBesuAddress     string `json:"requester_besu_address"`
 	RequesterPaladinIdentity string `json:"requester_paladin_identity"`
-	Amount                   string `json:"amount"`
-	Status                   string `json:"status"`
-	ZetoTransferTxHash       string `json:"zeto_transfer_tx_hash,omitempty"`
-	FiatMintTxHash           string `json:"fiat_mint_tx_hash,omitempty"`
-	RejectionReason          string `json:"rejection_reason,omitempty"`
-	CreatedAt                string `json:"created_at"`
+	// RequesterName is the resolved institution name for RequesterBesuAddress
+	// (see DepositRecord.RequesterName).
+	RequesterName      string `json:"requester_name,omitempty"`
+	Amount             string `json:"amount"`
+	Status             string `json:"status"`
+	ZetoTransferTxHash string `json:"zeto_transfer_tx_hash,omitempty"`
+	FiatMintTxHash     string `json:"fiat_mint_tx_hash,omitempty"`
+	RejectionReason    string `json:"rejection_reason,omitempty"`
+	CreatedAt          string `json:"created_at"`
 }
 
 func (a *GRPCAdapter) ListRedeems(ctx context.Context, requesterID string) ([]RedeemRecord, error) {
@@ -576,6 +590,16 @@ func (a *GRPCAdapter) ListFXAgreementEvents(ctx context.Context, tradeID string)
 		result = append(result, *fxAgreementEventToResult(ev))
 	}
 	return result, nil
+}
+
+// ListParticipantIdentities returns the live FX-party roster (distinct Paladin
+// identities across the node's bilateral Pente groups) from the orchestrator.
+func (a *GRPCAdapter) ListParticipantIdentities(ctx context.Context) ([]string, error) {
+	resp, err := a.cc.ListParticipantIdentities(ctx, &pb.ListParticipantIdentitiesRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Identities, nil
 }
 
 func fxAgreementToResult(ag *pb.FXAgreement) *FXAgreementResult {

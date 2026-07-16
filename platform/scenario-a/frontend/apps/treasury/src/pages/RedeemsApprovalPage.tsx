@@ -107,6 +107,7 @@ export function RedeemsApprovalPage() {
               <TableRow>
                 <TableHead>ID</TableHead>
                 <TableHead>Requester</TableHead>
+                <TableHead>Requester Name</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Zeto Transfer Tx Hash</TableHead>
@@ -120,6 +121,7 @@ export function RedeemsApprovalPage() {
                 <TableRow key={redeem.id}>
                   <TableCell className="font-mono font-medium" title={redeem.id}>{shortHash(redeem.id)}</TableCell>
                   <TableCell className="font-mono" title={redeem.requester_id}>{shortHash(redeem.requester_id)}</TableCell>
+                  <TableCell title={redeem.requester_besu_address}>{redeem.requester_name || "—"}</TableCell>
                   <TableCell>{formatCeBM(redeem.amount)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(redeem.status)}>{getPaymentStatusLabel(redeem.status)}</Badge>

@@ -9,14 +9,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	besuscanner "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/besu"
+	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"github.com/gofiber/fiber/v2"
 	"google.golang.org/grpc"
@@ -630,6 +635,104 @@ func TestFXAgreementEndpoints(t *testing.T) {
 	}
 }
 
+func TestProposeFXAgreement_RosterValidation(t *testing.T) {
+	t.Parallel()
+	fake := &fakePaymentServer{fxPropose: &pb.ProposeFXAgreementResponse{TradeId: "t1", TxHash: "tx"}}
+	h := startFakePaymentBackend(t, fake).
+		WithIdentityRoster(NewIdentityRoster([]string{"alice@spoke-a-bank-a", "bob@spoke-b-bank-b"}, nil))
+	app := fiber.New()
+	app.Use(authedClaims("bank-a"))
+	app.Post("/fx", h.ProposeFXAgreement)
+
+	terms := func(counterparty, beneficiary string) map[string]any {
+		return map[string]any{
+			"counterparty_b": counterparty, "beneficiary": beneficiary,
+			"origin_amount": "1", "counter_amount": "2",
+			"origin_currency": "BRL", "counter_currency": "ARS", "rate": "2", "expiry_date": 99,
+		}
+	}
+
+	// Off-roster identity → 400 before the on-chain propose, listing the offender.
+	resp := postJSON(t, app, "/fx", terms("carol@spoke-x-bank-c", "alice@spoke-a-bank-a"))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("off-roster propose: want 400, got %d", resp.StatusCode)
+	}
+	var body struct {
+		InvalidIdentities []string `json:"invalid_identities"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	_ = resp.Body.Close()
+	if len(body.InvalidIdentities) != 1 || body.InvalidIdentities[0] != "carol@spoke-x-bank-c" {
+		t.Errorf("invalid_identities = %v, want [carol@spoke-x-bank-c]", body.InvalidIdentities)
+	}
+
+	// All parties on the roster → reaches the backend and returns 201.
+	if resp := postJSON(t, app, "/fx", terms("alice@spoke-a-bank-a", "bob@spoke-b-bank-b")); resp.StatusCode != http.StatusCreated {
+		t.Errorf("on-roster propose: want 201, got %d", resp.StatusCode)
+	}
+}
+
+// flakyRosterProvider errors a fixed number of times before returning identities,
+// to exercise the fail-closed retry-until-resolved path.
+type flakyRosterProvider struct {
+	failsLeft  int
+	identities []string
+}
+
+func (p *flakyRosterProvider) ListParticipantIdentities(context.Context) ([]string, error) {
+	if p.failsLeft > 0 {
+		p.failsLeft--
+		return nil, errors.New("orchestrator unavailable")
+	}
+	return p.identities, nil
+}
+
+func fxTerms(counterparty string) map[string]any {
+	return map[string]any{
+		"counterparty_b": counterparty,
+		"origin_amount":  "1", "counter_amount": "2",
+		"origin_currency": "BRL", "counter_currency": "ARS", "rate": "2", "expiry_date": 99,
+	}
+}
+
+func TestProposeFXAgreement_FailsClosedWhenRosterUnavailable(t *testing.T) {
+	t.Parallel()
+	fake := &fakePaymentServer{fxPropose: &pb.ProposeFXAgreementResponse{TradeId: "t1", TxHash: "tx"}}
+	h := startFakePaymentBackend(t, fake).
+		WithIdentityRoster(NewIdentityRoster(nil, &fakeRosterProvider{err: errors.New("down")}))
+	h.rosterRetryInitial = time.Millisecond
+	h.rosterRetryMax = 30 * time.Millisecond // keep the test fast; still bounded fail-closed
+	app := fiber.New()
+	app.Use(authedClaims("bank-a"))
+	app.Post("/fx", h.ProposeFXAgreement)
+
+	// Roster never resolves → propose must be blocked (503), not proposed on-chain.
+	if resp := postJSON(t, app, "/fx", fxTerms("alice@spoke-a-bank-a")); resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unresolved roster: want 503, got %d", resp.StatusCode)
+	}
+}
+
+func TestProposeFXAgreement_RetriesUntilRosterResolves(t *testing.T) {
+	t.Parallel()
+	fake := &fakePaymentServer{fxPropose: &pb.ProposeFXAgreementResponse{TradeId: "t1", TxHash: "tx"}}
+	prov := &flakyRosterProvider{failsLeft: 2, identities: []string{"alice@spoke-a-bank-a"}}
+	h := startFakePaymentBackend(t, fake).WithIdentityRoster(NewIdentityRoster(nil, prov))
+	h.rosterRetryInitial = time.Millisecond
+	app := fiber.New()
+	app.Use(authedClaims("bank-a"))
+	app.Post("/fx", h.ProposeFXAgreement)
+
+	// Two transient failures, then the roster resolves and the (valid) party passes.
+	if resp := postJSON(t, app, "/fx", fxTerms("alice@spoke-a-bank-a")); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("retry-then-resolve: want 201, got %d", resp.StatusCode)
+	}
+	if prov.failsLeft != 0 {
+		t.Errorf("expected all transient failures consumed, %d left", prov.failsLeft)
+	}
+}
+
 func TestFXAgreement_ErrorMapping(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -663,5 +766,276 @@ func TestFXAgreement_MissingTradeID(t *testing.T) {
 	app.Post("/fx//accept", h.AcceptFXAgreement)
 	if resp, _ := app.Test(httptest.NewRequest(http.MethodGet, "/fx/", nil)); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("get missing tradeId: want 400, got %d", resp.StatusCode)
+	}
+}
+
+// fakeParticipantResolver is a configurable stand-in for the compliance adapter,
+// used to test requester-name enrichment without a live compliance backend.
+type fakeParticipantResolver struct {
+	participants []complianceadapter.Participant
+	err          error
+}
+
+func (f *fakeParticipantResolver) ListParticipants(_ context.Context, _, _ string) ([]complianceadapter.Participant, error) {
+	return f.participants, f.err
+}
+
+// requesterNameOf pulls the requester_name of the first record out of a list
+// response shaped as {"<key>": [ {..., "requester_name": "..."} ]}.
+func requesterNameOf(t *testing.T, resp *http.Response, key string) string {
+	t.Helper()
+	var body map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode %s: %v", key, err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(body[key], &rows); err != nil {
+		t.Fatalf("decode %s rows: %v", key, err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("%s: expected at least one row", key)
+	}
+	name, _ := rows[0]["requester_name"].(string)
+	return name
+}
+
+func TestListRecords_RequesterNameEnrichment(t *testing.T) {
+	t.Parallel()
+	// The record's on-chain address is stored checksummed; the participant
+	// wallet_address is lowercase. Enrichment must match case-insensitively.
+	fake := &fakePaymentServer{
+		deposits: &pb.ListDepositsResponse{Deposits: []*pb.DepositRecord{{Id: "d1", RequesterBesuAddress: "0xAbC123"}}},
+		escrows:  &pb.ListEscrowsResponse{Escrows: []*pb.EscrowRecord{{Id: "e1", RequesterBesuAddress: "0xAbC123"}}},
+		redeems:  &pb.ListRedeemsResponse{Redeems: []*pb.RedeemRecord{{Id: "r1", RequesterBesuAddress: "0xAbC123"}}},
+	}
+	h := startFakePaymentBackend(t, fake)
+	h = h.WithParticipantResolver(&fakeParticipantResolver{
+		participants: []complianceadapter.Participant{
+			{WalletAddress: "0xabc123", InstitutionName: "Banco Alpha"},
+			{WalletAddress: "0xdef456", InstitutionName: "Banco Beta"},
+		},
+	})
+
+	app := fiber.New()
+	app.Get("/deposits", h.ListDeposits)
+	app.Get("/escrows", h.ListEscrows)
+	app.Get("/redeems", h.ListRedeems)
+
+	cases := []struct{ path, key string }{
+		{"/deposits", "deposits"},
+		{"/escrows", "escrows"},
+		{"/redeems", "redeems"},
+	}
+	for _, tc := range cases {
+		resp, _ := app.Test(httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s: want 200, got %d", tc.path, resp.StatusCode)
+		}
+		if got := requesterNameOf(t, resp, tc.key); got != "Banco Alpha" {
+			t.Errorf("GET %s: requester_name = %q, want %q", tc.path, got, "Banco Alpha")
+		}
+	}
+}
+
+func TestListRecords_RequesterNameUnresolved(t *testing.T) {
+	t.Parallel()
+	fake := &fakePaymentServer{
+		deposits: &pb.ListDepositsResponse{Deposits: []*pb.DepositRecord{{Id: "d1", RequesterBesuAddress: "0xNoMatch"}}},
+	}
+	h := startFakePaymentBackend(t, fake)
+	h = h.WithParticipantResolver(&fakeParticipantResolver{
+		participants: []complianceadapter.Participant{{WalletAddress: "0xabc123", InstitutionName: "Banco Alpha"}},
+	})
+
+	app := fiber.New()
+	app.Get("/deposits", h.ListDeposits)
+	resp, _ := app.Test(httptest.NewRequest(http.MethodGet, "/deposits", nil))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+	if got := requesterNameOf(t, resp, "deposits"); got != "" {
+		t.Errorf("unmatched wallet: requester_name = %q, want empty", got)
+	}
+}
+
+func TestListRecords_ResolverAbsentOrFailing(t *testing.T) {
+	t.Parallel()
+	fake := &fakePaymentServer{
+		deposits: &pb.ListDepositsResponse{Deposits: []*pb.DepositRecord{{Id: "d1", RequesterBesuAddress: "0xabc123"}}},
+	}
+
+	// No resolver configured: listing still succeeds, name stays empty.
+	hNoResolver := startFakePaymentBackend(t, fake)
+	appNo := fiber.New()
+	appNo.Get("/deposits", hNoResolver.ListDeposits)
+	if resp, _ := appNo.Test(httptest.NewRequest(http.MethodGet, "/deposits", nil)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("no resolver: want 200, got %d", resp.StatusCode)
+	}
+
+	// Resolver error is non-fatal: listing still succeeds, name stays empty.
+	hErr := startFakePaymentBackend(t, fake)
+	hErr = hErr.WithParticipantResolver(&fakeParticipantResolver{err: status.Error(codes.Unavailable, "down")})
+	appErr := fiber.New()
+	appErr.Get("/deposits", hErr.ListDeposits)
+	resp, _ := appErr.Test(httptest.NewRequest(http.MethodGet, "/deposits", nil))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resolver error: want 200, got %d", resp.StatusCode)
+	}
+	if got := requesterNameOf(t, resp, "deposits"); got != "" {
+		t.Errorf("resolver error: requester_name = %q, want empty", got)
+	}
+}
+
+func TestEnrichScanResultNames(t *testing.T) {
+	t.Parallel()
+	// Scan results carry checksummed EVM addresses; the name map is keyed lowercase.
+	results := []besuscanner.HTLCScanResult{
+		{ContractID: "c1", Sender: "0xAbC123", Receiver: "0xDeF456"},
+		{ContractID: "c2", Sender: "0x999", Receiver: "0xAbC123"}, // sender unknown, receiver known
+	}
+	names := map[string]string{
+		"0xabc123": "Banco Alpha",
+		"0xdef456": "Banco Beta",
+	}
+	enrichScanResultNames(results, names)
+
+	if results[0].SenderName != "Banco Alpha" || results[0].ReceiverName != "Banco Beta" {
+		t.Errorf("row0: got sender=%q receiver=%q", results[0].SenderName, results[0].ReceiverName)
+	}
+	if results[1].SenderName != "" {
+		t.Errorf("row1: unmatched sender should be empty, got %q", results[1].SenderName)
+	}
+	if results[1].ReceiverName != "Banco Alpha" {
+		t.Errorf("row1: got receiver=%q, want %q", results[1].ReceiverName, "Banco Alpha")
+	}
+
+	// Nil/empty name map must be a no-op (no panic, names stay empty).
+	clean := []besuscanner.HTLCScanResult{{Sender: "0xabc123"}}
+	enrichScanResultNames(clean, nil)
+	if clean[0].SenderName != "" {
+		t.Errorf("nil map: want empty, got %q", clean[0].SenderName)
+	}
+}
+
+// fakePvPLedger is an in-memory PvPLedger for handler tests.
+type fakePvPLedger struct {
+	recorded []services.SettledLegInput
+	credits  map[string][]services.PvPCreditRow
+	recErr   error
+	listErr  error
+}
+
+func (f *fakePvPLedger) RecordLeg(_ context.Context, in services.SettledLegInput) error {
+	if f.recErr != nil {
+		return f.recErr
+	}
+	f.recorded = append(f.recorded, in)
+	return nil
+}
+
+func (f *fakePvPLedger) ListCreditsForBank(_ context.Context, bankID string) ([]services.PvPCreditRow, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.credits[bankID], nil
+}
+
+// TestRecordSettledPvPLeg verifies the CB ingests a reported leg, parses the
+// receiver bank id from the identity, and rejects bad input.
+func TestRecordSettledPvPLeg(t *testing.T) {
+	ledger := &fakePvPLedger{}
+	h := startFakePaymentBackend(t, &fakePaymentServer{}).WithPvPLedger(ledger)
+	app := fiber.New()
+	app.Post("/pvp-legs", h.RecordSettledPvPLeg)
+
+	body := `{"trade_id":"trade-1","contract_id":"c1","sender":"op@spoke-a-bank-a","receiver":"corr@spoke-a-bank-c","amount":"700","settled_at":"2026-07-11T10:00:00Z"}`
+	req := httptest.NewRequest(http.MethodPost, "/pvp-legs", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	if len(ledger.recorded) != 1 {
+		t.Fatalf("recorded %d legs, want 1", len(ledger.recorded))
+	}
+	got := ledger.recorded[0]
+	if got.ContractID != "c1" || got.ReceiverBankID != "bank-c" || got.Amount != "700" || got.TradeID != "trade-1" {
+		t.Errorf("unexpected recorded leg: %+v", got)
+	}
+	if got.SettledAt.UTC().Format(time.RFC3339) != "2026-07-11T10:00:00Z" {
+		t.Errorf("settled_at = %v", got.SettledAt)
+	}
+
+	postJSONBody := func(payload string) *http.Response {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodPost, "/pvp-legs", strings.NewReader(payload))
+		r.Header.Set("Content-Type", "application/json")
+		resp, reqErr := app.Test(r)
+		if reqErr != nil {
+			t.Fatalf("request failed: %v", reqErr)
+		}
+		return resp
+	}
+
+	// Missing contract_id → 400.
+	r2 := postJSONBody(`{"receiver":"corr@spoke-a-bank-c"}`)
+	defer r2.Body.Close()
+	if r2.StatusCode != http.StatusBadRequest {
+		t.Errorf("missing contract_id: status = %d, want 400", r2.StatusCode)
+	}
+
+	// Unparseable receiver → 400.
+	r3 := postJSONBody(`{"contract_id":"c2","receiver":"not-an-identity"}`)
+	defer r3.Body.Close()
+	if r3.StatusCode != http.StatusBadRequest {
+		t.Errorf("unparseable receiver: status = %d, want 400", r3.StatusCode)
+	}
+}
+
+// TestListSettledPvPCredits verifies the CB serves a bank its recorded incoming
+// legs, scoped to bank_id, and requires bank_id.
+func TestListSettledPvPCredits(t *testing.T) {
+	ledger := &fakePvPLedger{credits: map[string][]services.PvPCreditRow{
+		"bank-c": {{Reference: "c1", Amount: "700", SettledAt: "2026-07-11T10:00:00Z"}},
+	}}
+	h := startFakePaymentBackend(t, &fakePaymentServer{}).WithPvPLedger(ledger)
+	app := fiber.New()
+	app.Get("/pvp-credits", h.ListSettledPvPCredits)
+
+	fetch := func(bankID string) []PvPCredit {
+		t.Helper()
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/pvp-credits?bank_id="+bankID, nil))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("bank %q: status = %d, want 200", bankID, resp.StatusCode)
+		}
+		var body struct {
+			Credits []PvPCredit `json:"credits"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return body.Credits
+	}
+
+	if got := fetch("bank-c"); len(got) != 1 || got[0].Reference != "c1" || got[0].Amount != "700" {
+		t.Errorf("bank-c credits = %+v, want one c1/700", got)
+	}
+	if got := fetch("bank-a"); len(got) != 0 {
+		t.Errorf("bank-a credits = %+v, want none", got)
+	}
+
+	// Missing bank_id → 400.
+	resp, _ := app.Test(httptest.NewRequest(http.MethodGet, "/pvp-credits", nil))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("missing bank_id: status = %d, want 400", resp.StatusCode)
 	}
 }

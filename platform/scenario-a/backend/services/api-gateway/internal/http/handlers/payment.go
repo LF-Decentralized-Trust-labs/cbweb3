@@ -5,12 +5,15 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	besuscanner "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/besu"
+	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -25,6 +28,21 @@ type TransferLimitChecker interface {
 	RestoreTransferLimit(ctx context.Context, payerBankID, currency, amountHuman string) error
 }
 
+// ParticipantResolver resolves registered participants so deposit/escrow/redeem
+// listings can surface the requesting institution's name instead of a raw address.
+type ParticipantResolver interface {
+	ListParticipants(ctx context.Context, statusFilter, search string) ([]complianceadapter.Participant, error)
+}
+
+// PvPLedger persists settled inter-bank PvP legs at the Central Bank and serves
+// each bank the legs on which it is the receiver (the credit side of its
+// statement). *services.PvPLedgerService implements it. Only the central-bank
+// gateway wires this in.
+type PvPLedger interface {
+	RecordLeg(ctx context.Context, in services.SettledLegInput) error
+	ListCreditsForBank(ctx context.Context, bankID string) ([]services.PvPCreditRow, error)
+}
+
 // PaymentHandler exposes the payment-orchestrator operations as REST endpoints.
 type PaymentHandler struct {
 	payment      *paymentadapter.GRPCAdapter
@@ -32,11 +50,163 @@ type PaymentHandler struct {
 	htlcScanner  *besuscanner.HTLCScanner
 	fiatSymbol   string // currency for transfer limit checks (e.g. "BRL", "ARS"); empty = skip check
 	limitChecker TransferLimitChecker
+	participants ParticipantResolver // optional; enables requester-name enrichment on listings
+	// identityRoster resolves the Paladin identities valid as FX agreement
+	// parties (from real Pente membership, or an explicit override). When set and
+	// non-empty, ProposeFXAgreement rejects any party identity not in it with a
+	// 400 (fail fast, before the on-chain Pente propose).
+	identityRoster *IdentityRoster
+	// rosterRetryInitial/rosterRetryMax bound the fail-closed retry of roster
+	// resolution at propose time: on a resolution error we retry with exponential
+	// backoff (starting at rosterRetryInitial) until the roster resolves or the
+	// window (min(request deadline, rosterRetryMax)) elapses, then reject.
+	rosterRetryInitial time.Duration
+	rosterRetryMax     time.Duration
+	// pvpLedger persists/serves settled inter-bank PvP legs. Central-bank gateway only.
+	pvpLedger PvPLedger
 }
 
 // NewPaymentHandler creates a new PaymentHandler.
 func NewPaymentHandler(payment *paymentadapter.GRPCAdapter, bankCode string) *PaymentHandler {
-	return &PaymentHandler{payment: payment, bankCode: bankCode}
+	return &PaymentHandler{
+		payment:            payment,
+		bankCode:           bankCode,
+		rosterRetryInitial: 100 * time.Millisecond,
+		rosterRetryMax:     15 * time.Second,
+	}
+}
+
+// WithParticipantResolver attaches a compliance participant resolver used to
+// enrich deposit/escrow/redeem listings with the requester's institution name.
+func (h *PaymentHandler) WithParticipantResolver(resolver ParticipantResolver) *PaymentHandler {
+	h.participants = resolver
+	return h
+}
+
+// WithIdentityRoster configures the Paladin identities accepted as FX agreement
+// parties. An empty roster disables validation (nothing to validate against).
+func (h *PaymentHandler) WithIdentityRoster(roster *IdentityRoster) *PaymentHandler {
+	h.identityRoster = roster
+	return h
+}
+
+// WithPvPLedger attaches the Central Bank PvP ledger used to ingest settled legs
+// and serve each bank its incoming credits. Central-bank gateway only.
+func (h *PaymentHandler) WithPvPLedger(ledger PvPLedger) *PaymentHandler {
+	h.pvpLedger = ledger
+	return h
+}
+
+// resolveRosterForPropose resolves the FX-party roster for propose-time
+// validation, fail-closed: on a resolution error it retries with exponential
+// backoff (honoring ctx) until the roster resolves or the retry window elapses,
+// then returns the error so the caller rejects the trade rather than reaching
+// the on-chain propose blind. Returns (nil, nil) when no roster is configured
+// (validation disabled). A successfully-resolved empty roster is not an error.
+func (h *PaymentHandler) resolveRosterForPropose(parent context.Context) ([]string, error) {
+	if h.identityRoster == nil {
+		return nil, nil
+	}
+
+	ctx := parent
+	// Bound the retry window even when the request context carries no deadline,
+	// so a persistently-unavailable roster cannot hang the request forever.
+	if _, hasDeadline := parent.Deadline(); !hasDeadline && h.rosterRetryMax > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(parent, h.rosterRetryMax)
+		defer cancel()
+	}
+
+	backoff := h.rosterRetryInitial
+	if backoff <= 0 {
+		backoff = 100 * time.Millisecond
+	}
+	const maxBackoff = time.Second
+
+	for attempt := 1; ; attempt++ {
+		roster, err := h.identityRoster.Identities(ctx)
+		if err == nil {
+			return roster, nil
+		}
+		log.Printf("warning: FX party roster resolution attempt %d failed: %v", attempt, err)
+
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("roster unresolved after %d attempt(s): %w", attempt, err)
+		case <-timer.C:
+		}
+		if backoff < maxBackoff {
+			if backoff *= 2; backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+}
+
+// unknownIdentities returns the non-empty identities, in the given order and
+// de-duplicated, that are not present in roster. An empty roster means
+// "nothing to validate against" and yields no unknowns.
+func unknownIdentities(roster []string, identities ...string) []string {
+	if len(roster) == 0 {
+		return nil
+	}
+	valid := make(map[string]struct{}, len(roster))
+	for _, id := range roster {
+		valid[strings.TrimSpace(id)] = struct{}{}
+	}
+	var invalid []string
+	seen := make(map[string]struct{}, len(identities))
+	for _, id := range identities {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			continue
+		}
+		if _, dup := seen[trimmed]; dup {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		if _, ok := valid[trimmed]; !ok {
+			invalid = append(invalid, trimmed)
+		}
+	}
+	return invalid
+}
+
+// participantNamesByWallet builds a lowercase-wallet-address → institution-name
+// map from the compliance registry. Returns nil when no resolver is configured
+// or the lookup fails; enrichment is best-effort and never blocks a listing.
+func (h *PaymentHandler) participantNamesByWallet(ctx context.Context) map[string]string {
+	if h.participants == nil {
+		return nil
+	}
+	participants, err := h.participants.ListParticipants(ctx, "", "")
+	if err != nil {
+		log.Printf("[payment] WARNING: requester-name enrichment skipped, participant lookup failed: %v", err)
+		return nil
+	}
+	names := make(map[string]string, len(participants))
+	for _, p := range participants {
+		if p.WalletAddress == "" || p.InstitutionName == "" {
+			continue
+		}
+		names[strings.ToLower(p.WalletAddress)] = p.InstitutionName
+	}
+	return names
+}
+
+// enrichScanResultNames fills SenderName/ReceiverName on each scan result by
+// matching the (checksummed) EVM addresses against a lowercase-wallet → name
+// map. No-op when names is nil/empty; unmatched addresses stay unnamed.
+func enrichScanResultNames(results []besuscanner.HTLCScanResult, names map[string]string) {
+	if len(names) == 0 {
+		return
+	}
+	for i := range results {
+		results[i].SenderName = names[strings.ToLower(results[i].Sender)]
+		results[i].ReceiverName = names[strings.ToLower(results[i].Receiver)]
+	}
 }
 
 // SetHTLCScanner wires an on-chain scanner; when set, supervisor HTLC searches bypass the orchestrator.
@@ -203,6 +373,7 @@ func (h *PaymentHandler) SearchHTLC(c *fiber.Ctx) error {
 		if err != nil {
 			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "on-chain scan failed: " + err.Error()})
 		}
+		enrichScanResultNames(scanResults, h.participantNamesByWallet(c.UserContext()))
 		return c.JSON(fiber.Map{"locks": scanResults, "total": len(scanResults)})
 	}
 
@@ -415,6 +586,11 @@ func (h *PaymentHandler) ListDeposits(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
+	if names := h.participantNamesByWallet(c.Context()); names != nil {
+		for i := range deposits {
+			deposits[i].RequesterName = names[strings.ToLower(deposits[i].RequesterBesuAddress)]
+		}
+	}
 	return c.JSON(fiber.Map{"deposits": deposits, "total": len(deposits)})
 }
 
@@ -469,6 +645,11 @@ func (h *PaymentHandler) ListEscrows(c *fiber.Ctx) error {
 	escrows, err := h.payment.ListEscrows(c.Context(), requesterID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	if names := h.participantNamesByWallet(c.Context()); names != nil {
+		for i := range escrows {
+			escrows[i].RequesterName = names[strings.ToLower(escrows[i].RequesterBesuAddress)]
+		}
 	}
 	return c.JSON(fiber.Map{"escrows": escrows, "total": len(escrows)})
 }
@@ -526,6 +707,11 @@ func (h *PaymentHandler) ListRedeems(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
+	if names := h.participantNamesByWallet(c.Context()); names != nil {
+		for i := range redeems {
+			redeems[i].RequesterName = names[strings.ToLower(redeems[i].RequesterBesuAddress)]
+		}
+	}
 	return c.JSON(fiber.Map{"redeems": redeems, "total": len(redeems)})
 }
 
@@ -557,6 +743,32 @@ func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
 	if req.CounterpartyB == "" || req.OriginAmount == "" || req.CounterAmount == "" ||
 		req.OriginCurrency == "" || req.CounterCurrency == "" || req.Rate == "" || req.ExpiryDate == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "counterparty_b, origin_amount, counter_amount, origin_currency, counter_currency, rate, and expiry_date are required"})
+	}
+	// Reject any party identity that is not a real Pente member before reaching
+	// the on-chain propose, which would otherwise fail with a cryptic Pente
+	// membership error (PD011814). Fail-closed: if the roster cannot be resolved
+	// (orchestrator unreachable) we retry until it resolves or the window
+	// elapses, then reject with 503 rather than propose without verifying
+	// membership.
+	roster, rosterErr := h.resolveRosterForPropose(c.UserContext())
+	if rosterErr != nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "could not verify party membership: Paladin roster unavailable, please retry: " + rosterErr.Error(),
+		})
+	}
+	if invalid := unknownIdentities(
+		roster,
+		req.CounterpartyB,
+		req.SettlementAgent,
+		req.Custodian,
+		req.Beneficiary,
+		req.SourceReceiver,
+		req.DestReceiver,
+	); len(invalid) > 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":              "one or more party identities are not members of the Paladin roster: " + strings.Join(invalid, ", "),
+			"invalid_identities": invalid,
+		})
 	}
 	result, err := h.payment.ProposeFXAgreement(c.Context(), &pb.ProposeFXAgreementRequest{
 		TradeId:         req.TradeID,
@@ -691,6 +903,86 @@ func (h *PaymentHandler) ListFXAgreementEvents(c *fiber.Ctx) error {
 		return grpcErrorToHTTP(c, err)
 	}
 	return c.JSON(fiber.Map{"events": results, "total": len(results)})
+}
+
+// RecordSettledPvPLeg ingests a settled inter-bank PvP leg reported by a settling
+// orchestrator and persists it in the Central Bank's PvP ledger. It is an
+// internal, relay-authenticated endpoint served only by the central-bank gateway.
+// The leg is keyed by contract_id so settle retries / relay redelivery upsert
+// idempotently. The receiver bank id is parsed here from the receiver identity.
+//
+//	POST /internal/v1/payments/pvp-legs
+//	  { "trade_id","contract_id","sender","receiver","amount","settled_at" }
+func (h *PaymentHandler) RecordSettledPvPLeg(c *fiber.Ctx) error {
+	if h.pvpLedger == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "pvp ledger not configured"})
+	}
+	var body struct {
+		TradeID    string `json:"trade_id"`
+		ContractID string `json:"contract_id"`
+		Sender     string `json:"sender"`
+		Receiver   string `json:"receiver"`
+		Amount     string `json:"amount"`
+		SettledAt  string `json:"settled_at"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if body.ContractID == "" || body.Receiver == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "contract_id and receiver are required"})
+	}
+	receiverBankID, err := bankIDFromIdentity(body.Receiver)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "unparseable receiver identity: " + err.Error()})
+	}
+	settledAt, err := time.Parse(time.RFC3339, body.SettledAt)
+	if err != nil {
+		settledAt = time.Now().UTC() // tolerate a missing/invalid timestamp rather than reject the leg
+	}
+	if err := h.pvpLedger.RecordLeg(c.Context(), services.SettledLegInput{
+		ContractID:     body.ContractID,
+		TradeID:        body.TradeID,
+		Sender:         body.Sender,
+		Receiver:       body.Receiver,
+		ReceiverBankID: receiverBankID,
+		Amount:         body.Amount,
+		SettledAt:      settledAt,
+	}); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.SendStatus(fiber.StatusCreated)
+}
+
+// ListSettledPvPCredits returns the incoming inter-bank PvP settlement legs on
+// which the given bank is the receiver, read from the Central Bank's PvP ledger
+// (populated by settling orchestrators, keyed on the same HTLC-settlement event
+// that produces the sender's debit). This is an internal, relay-authenticated
+// endpoint served only by the central-bank gateway. Commercial-bank gateways
+// consume it to build the credit side of the statement: a receiving bank's own
+// orchestrator holds no record of an incoming leg (the counterparty locked it on
+// a different orchestrator, and the amount is private Zeto value). Results are
+// scoped to bank_id so a bank never sees legs it is not party to. Legs are
+// denominated in tCeBM (reserve value) at the statement layer.
+//
+//	GET /internal/v1/payments/pvp-credits?bank_id=bank-c
+//	  -> { "credits": [ { "reference": "<contractId>", "amount": "700", "settled_at": "..." } ], "total": N }
+func (h *PaymentHandler) ListSettledPvPCredits(c *fiber.Ctx) error {
+	bankID := strings.TrimSpace(c.Query("bank_id"))
+	if bankID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bank_id is required"})
+	}
+	if h.pvpLedger == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "pvp ledger not configured"})
+	}
+	rows, err := h.pvpLedger.ListCreditsForBank(c.Context(), bankID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	credits := make([]PvPCredit, 0, len(rows))
+	for _, r := range rows {
+		credits = append(credits, PvPCredit{Reference: r.Reference, Amount: r.Amount, SettledAt: r.SettledAt})
+	}
+	return c.JSON(fiber.Map{"credits": credits, "total": len(credits)})
 }
 
 // checkAndDeductLimit enforces the CB daily transfer limit before an HTLC lock.

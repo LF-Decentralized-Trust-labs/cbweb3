@@ -198,7 +198,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 	stackInt := deps.Timeouts.PaladinHealthCheckInterval
 
 	steps = append(steps,
-		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex, frontendAdvertisedHost(m)),
+		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex, frontendAdvertisedHost(m), m.Spec.FXPartyRoster, cactiContainerURL(manifestRelayEndpoint(m))),
 		newStartInfraStep(StepStartCBInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
 			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
@@ -215,9 +215,9 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			// in specs/026-tk4-compose-central-bank/plan.md.
 			UseTLSVolume: true,
 			EnvFile:      cbEnvPath(dataDir, entity),
-			ComposePath: filepath.Join(templatesDir, "entity-backend", "backend-compose.yaml"),
-			BankCode:    entity,
-			PaladinURL:  hostInternalURL(deps.PaladinCBURL), PaladinIdentity: paladinIdentity(cbNodeName(spokeID)),
+			ComposePath:  filepath.Join(templatesDir, "entity-backend", "backend-compose.yaml"),
+			BankCode:     entity,
+			PaladinURL:   hostInternalURL(deps.PaladinCBURL), PaladinIdentity: paladinIdentity(cbNodeName(spokeID)),
 			// Route payment-orchestrator → relay via spec.relay.endpoint so a remote
 			// relay (multi-host deployment) is reachable; falls back to host.docker.internal
 			// when the endpoint is empty or uses localhost (co-located relay).
@@ -589,6 +589,8 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			HTLCAddress:      b.Spec.Contracts.HTLCAddress,
 			BesuOperatorKey:  operatorKeyHex,
 			FrontendHost:     frontendAdvertisedHost(m),
+			FXPartyRoster:    m.Spec.FXPartyRoster,
+			RelayURL:         cactiContainerURL(bundleRelayEndpoint(m, b)),
 		}),
 		newStartInfraStep(StepStartBankInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),

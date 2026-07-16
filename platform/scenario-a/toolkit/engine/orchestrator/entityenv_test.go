@@ -62,10 +62,13 @@ func TestRenderEntityEnv_CommercialBank(t *testing.T) {
 		DBName:            "cbweb3_bank_itau",
 		BesuRPCURL:        "http://localhost:8646",
 		CentralBankAPIURL: "http://cbweb3-api-gateway.central-bank-brazil:8080",
+		PaladinIdentities: "funded_operator@spoke-brl-cb,funded_operator@spoke-cop-cb",
 	})
 
 	mustContain(t, env, "CENTRAL_BANK_API_URL=http://cbweb3-api-gateway.central-bank-brazil:8080")
 	mustContain(t, env, "DB_NAME=cbweb3_bank_itau")
+	// Consortium FX roster (cross-spoke identities) is rendered as PALADIN_IDENTITIES.
+	mustContain(t, env, "PALADIN_IDENTITIES=funded_operator@spoke-brl-cb,funded_operator@spoke-cop-cb")
 	if strings.Contains(env, "CB_PRIVATE_KEY=") {
 		t.Error("commercial-bank env must NOT contain CB_PRIVATE_KEY")
 	}

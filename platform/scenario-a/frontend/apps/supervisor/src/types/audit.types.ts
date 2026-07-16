@@ -21,6 +21,7 @@ export interface AuditLogEntry {
   timestamp: string;
   actor: string;
   actor_address?: string;
+  actor_name?: string;
   action: string;
   target_subject?: string;
   category: string;

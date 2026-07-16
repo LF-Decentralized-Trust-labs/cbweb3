@@ -159,6 +159,7 @@ export function DepositsApprovalPage() {
               <TableRow>
                 <TableHead>ID</TableHead>
                 <TableHead>Requester</TableHead>
+                <TableHead>Requester Name</TableHead>
                 <TableHead>Fiat Amount</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Issuance Reference</TableHead>
@@ -171,6 +172,7 @@ export function DepositsApprovalPage() {
                 <TableRow key={deposit.id}>
                   <TableCell className="font-mono font-medium" title={deposit.id}>{shortHash(deposit.id)}</TableCell>
                   <TableCell className="font-mono" title={deposit.requester_id}>{shortHash(deposit.requester_id)}</TableCell>
+                  <TableCell title={deposit.requester_besu_address}>{deposit.requester_name || "—"}</TableCell>
                   <TableCell>{formatFiatUnits(deposit.amount)}</TableCell>
                   <TableCell>
                     <Badge variant={getPaymentStatusVariant(deposit.status)}>{getPaymentStatusLabel(deposit.status)}</Badge>

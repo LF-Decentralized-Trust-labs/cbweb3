@@ -37,15 +37,45 @@ type htlcLookup interface {
 
 // SupervisorHandler exposes supervisor-only endpoints (ROLE_SUPERVISOR required at the router level).
 type SupervisorHandler struct {
-	lister  ComplianceAuditLister
-	paladin *paladinadapter.Client // nil if PALADIN_URL not configured
-	gate    decryptGate            // nil if oversight DB not available
-	scanner htlcLookup             // nil if Besu scanner not configured
+	lister       ComplianceAuditLister
+	paladin      *paladinadapter.Client // nil if PALADIN_URL not configured
+	gate         decryptGate            // nil if oversight DB not available
+	scanner      htlcLookup             // nil if Besu scanner not configured
+	participants ParticipantResolver    // nil if not wired; enables actor-name enrichment
 }
 
 // NewSupervisorHandler creates a SupervisorHandler.
 func NewSupervisorHandler(lister ComplianceAuditLister) *SupervisorHandler {
 	return &SupervisorHandler{lister: lister}
+}
+
+// WithParticipantResolver attaches a compliance participant resolver used to
+// enrich audit log entries with the actor's institution name.
+func (h *SupervisorHandler) WithParticipantResolver(resolver ParticipantResolver) *SupervisorHandler {
+	h.participants = resolver
+	return h
+}
+
+// participantNamesByUserID builds a user_id → institution-name map from the
+// compliance registry. Returns nil when no resolver is configured or the lookup
+// fails; enrichment is best-effort and never blocks the audit log listing.
+func (h *SupervisorHandler) participantNamesByUserID(ctx context.Context) map[string]string {
+	if h.participants == nil {
+		return nil
+	}
+	participants, err := h.participants.ListParticipants(ctx, "", "")
+	if err != nil {
+		log.Printf("[supervisor] WARNING: actor-name enrichment skipped, participant lookup failed: %v", err)
+		return nil
+	}
+	names := make(map[string]string, len(participants))
+	for _, p := range participants {
+		if p.UserID == "" || p.InstitutionName == "" {
+			continue
+		}
+		names[p.UserID] = p.InstitutionName
+	}
+	return names
 }
 
 // SetDecryptDeps wires the Paladin client and disclosure gate used by DecryptTransaction.
@@ -86,6 +116,12 @@ func (h *SupervisorHandler) GetAuditLogs(c *fiber.Ctx) error {
 
 	if logs == nil {
 		logs = []complianceadapter.AuditRecord{}
+	}
+
+	if names := h.participantNamesByUserID(c.UserContext()); names != nil {
+		for i := range logs {
+			logs[i].ActorName = names[logs[i].ActorSubject]
+		}
 	}
 
 	return c.JSON(fiber.Map{

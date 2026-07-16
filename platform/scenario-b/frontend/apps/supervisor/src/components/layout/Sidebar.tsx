@@ -15,7 +15,7 @@ const links = [
 
 export function Sidebar() {
   return (
-    <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:border-b-0 md:border-r">
+    <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:shrink-0 md:border-b-0 md:border-r">
       <div className="mb-3 px-1">
         <p className="text-sm font-semibold text-foreground">Supervisor Portal</p>
       </div>

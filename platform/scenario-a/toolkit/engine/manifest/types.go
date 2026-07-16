@@ -73,6 +73,12 @@ type Spec struct {
 	// the Docker host. Set this to a routable IP or DNS name when the frontend is
 	// accessed from a remote machine (e.g. a cloud VM with a public IP).
 	FrontendHost string `yaml:"frontendHost,omitempty"`
+	// FXPartyRoster is the consortium-wide list of Paladin identities offered as FX
+	// agreement party choices (rendered as PALADIN_IDENTITIES). Cross-spoke
+	// identities cannot be enumerated on-chain — FX groups are bilateral and
+	// node-local — so the remote-spoke parties this entity trades with are declared
+	// here. Optional: when empty the gateway serves only live local Pente membership.
+	FXPartyRoster []string `yaml:"fxPartyRoster,omitempty"`
 	// AdminUsers are the per-role human operator accounts provisioned in the
 	// entity's Keycloak realm(s). Portal/operator login uses these (ROPC password
 	// grant) instead of the confidential client credentials, so audit logs carry a

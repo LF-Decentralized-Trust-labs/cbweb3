@@ -17,6 +17,7 @@ import (
 
 	besuAdapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/besu"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/cacti"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/cbreport"
 	paladinAdapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/paladin"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/grpc/server"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/identity"
@@ -238,24 +239,38 @@ func main() {
 		logger.Warn("could not extract spoke prefix from PALADIN_IDENTITY — receiver locality check disabled")
 	}
 
+	// Settlement reporter: forwards settled PvP legs to the Central Bank gateway
+	// so the receiving bank sees the incoming credit on its statement. Enabled
+	// only when CB_INTERNAL_API_URL is set (commercial-bank orchestrators);
+	// authenticated with the shared INTERNAL_RELAY_AUTH_SECRET.
+	var settlementReporter ports.SettlementReporter
+	if cbURL := getEnv("CB_INTERNAL_API_URL", ""); cbURL != "" {
+		settlementReporter = cbreport.New(cbURL, os.Getenv("INTERNAL_RELAY_AUTH_SECRET"))
+		logger.Info("settlement reporter configured", "cb_url", cbURL)
+	} else {
+		logger.Warn("CB_INTERNAL_API_URL not set — settled PvP legs will not be reported to the central bank (receiver credits will not appear)")
+	}
+
 	grpcServer, startRelayWorkers, err := server.New(server.Config{
-		Zeto:             zeto,
-		HTLC:             htlc,
-		Relay:            relay,
-		Fiat:             fiat,
-		EscrowRepo:       escrowRepo,
-		HTLCRepo:         htlcRepo,
-		FXAgreementBesu:  fxAgreementBesu,
-		FXAgreementPente: fxAgreementPente,
-		FXRepo:           fxRepo,
-		Pente:            pente,
-		FXContextsFile:   getEnv("FX_CONTEXTS_FILE", "/workspace/backend/config/pki/fx-contexts.json"),
-		RateTolPct:       rateTolPct,
-		CrossSpokeMode:   true, // relay is always active in production (CACTI_API_URL is required)
-		StrictHTLC:       strictHTLC,
-		SpokePrefix:      spokePrefix,
-		PaladinIdentity:  paladinIdentity,
-		Logger:           logger,
+		Zeto:               zeto,
+		HTLC:               htlc,
+		Relay:              relay,
+		Fiat:               fiat,
+		EscrowRepo:         escrowRepo,
+		HTLCRepo:           htlcRepo,
+		FXAgreementBesu:    fxAgreementBesu,
+		FXAgreementPente:   fxAgreementPente,
+		FXRepo:             fxRepo,
+		Pente:              pente,
+		FXChainReader:      fxChainReader,
+		FXContextsFile:     getEnv("FX_CONTEXTS_FILE", "/workspace/backend/config/pki/fx-contexts.json"),
+		RateTolPct:         rateTolPct,
+		CrossSpokeMode:     true, // relay is always active in production (CACTI_API_URL is required)
+		StrictHTLC:         strictHTLC,
+		SpokePrefix:        spokePrefix,
+		PaladinIdentity:    paladinIdentity,
+		SettlementReporter: settlementReporter,
+		Logger:             logger,
 	})
 	if err != nil {
 		log.Fatalf("FATAL: payment-orchestrator server: %v", err)

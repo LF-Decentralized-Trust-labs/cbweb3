@@ -8,3 +8,5 @@ export * from "./compliance.api";
 export * from "./onboarding.api";
 export * from "./payment.api";
 export * from "./fx-agreement.api";
+export * from "./identity.api";
+export * from "./statement.api";

@@ -16,6 +16,7 @@ import { HTLCNewPage } from "../pages/HTLCNewPage";
 import { LoginPage } from "../pages/LoginPage";
 import { OnboardingPage } from "../pages/OnboardingPage";
 import { RedeemsPage } from "../pages/RedeemsPage";
+import { StatementPage } from "../pages/StatementPage";
 
 export const routes: RouteObject[] = [
   {
@@ -31,6 +32,7 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, element: <DashboardPage /> },
           // { path: "liquidity", element: <LiquidityTransfersPage /> },
+          { path: "statement", element: <StatementPage /> },
           { path: "deposits", element: <DepositsPage /> },
           { path: "escrows", element: <EscrowsPage /> },
           { path: "redeems", element: <RedeemsPage /> },
