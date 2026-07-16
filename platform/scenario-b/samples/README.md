@@ -7,7 +7,7 @@ Ready-to-use `ParticipantDeployment` manifests for the **Scenario B** toolkit
   - `hub-cbweb3` — base `tCeBM` reserve tokens + registries + AMM + LCR + NOC (chainId 1337)
 - **One external Cacti liquidity relay**, deployed outside the toolkit
   (`start-cacti.sh`) and reached via each manifest's `spec.relay.endpoint`
-  (`http://localhost:4000`); spokes register on it dynamically at `found-spoke`.
+  (`http://localhost:7000`); spokes register on it dynamically at `found-spoke`.
 - **Sovereign spokes**, each founded by its own central bank (`mode: found-spoke`):
   - `spoke-brl` — `central-bank-brazil`    (BRL, chainId 1338)
   - `spoke-ars` — `central-bank-argentina` (ARS, chainId 1339)
@@ -44,6 +44,14 @@ directories first. **The rest of this document is the equivalent manual,
 step-by-step flow** those scripts run — command by command, calling the toolkit by
 hand. After the stacks are up, `./sample-tryout.sh` walks a full onboarding +
 cross-currency swap over the REST API.
+
+Each CB/bank manifest has `launcher: enable`, so every entity also gets its per-entity
+launcher (see the Port matrix). Build the generic launcher image once first, or the
+launcher step just logs a hint and is skipped:
+
+```bash
+( cd ../../launcher && ./build.sh )   # → cbweb3/launcher:local
+```
 
 ---
 
@@ -101,6 +109,36 @@ The service host ports derive from each entity's RPC port by a fixed offset:
 A Central Bank brings up governance + treasury + supervisor operator portals (plus
 the NOC portal); a commercial bank brings up the bank portal; the hub the governance
 portal. Each SPA is built per entity with its own api-gateway URL baked in.
+
+### Per-entity launcher (distributed A/B entry point)
+
+Each **commercial bank and central bank** also gets a **launcher** — a small SPA that
+lists that entity's own portals, grouped by Scenario A / Scenario B, and redirects to the
+chosen one (login happens on the destination portal). It is the per-entity entry point in
+the distributed model (one entity per host); the **hub has no launcher**.
+
+The toolkit deploys it when the entity's manifest sets `launcher: enable`, on the host
+port `spec.launcherPort`. Since this sample runs every entity on one host, each declares a
+distinct port — and the **same** port in Scenario A and B, so both scenarios share that
+entity's launcher (which merges its A and B portal fragments):
+
+| Entity | launcherPort | Entity | launcherPort |
+|--------|:---:|--------|:---:|
+| central-bank-brazil    | 5191 | central-bank-colombia | 5197 |
+| bank-itau              | 5192 | bank-bancolombia      | 5198 |
+| bank-bradesco          | 5193 | bank-davivienda       | 5199 |
+| central-bank-argentina | 5194 | bank-galicia          | 5195 |
+| bank-macro             | 5196 |                       |      |
+
+The launcher image is **generic** and built once (platform step) **before** deploying:
+
+```bash
+( cd ../../launcher && ./build.sh )   # → cbweb3/launcher:local
+```
+
+`launcher: disable` (or omitting it) removes this scenario's fragment and tears the
+launcher container down when no scenario fragment remains. The launcher step is soft: a
+missing image only logs a hint and never blocks the entity's deploy.
 
 ---
 
@@ -195,11 +233,11 @@ done
 `found-spoke` registers the spoke on the relay (`register-relay-spoke`), a
 **mandatory** step, so the relay must be up first. It is deployed outside the
 toolkit; its address reaches the toolkit via each manifest's `spec.relay.endpoint`
-(`http://localhost:4000`).
+(`http://localhost:7000`).
 
 ```bash
 bash "$ROOT/scenario-b/provisioning/scripts/start-cacti.sh"
-# waits for health at http://localhost:4000/api/v1/health
+# waits for health at http://localhost:7000/api/v1/health
 ```
 
 ### Step 4 — Found the hub (`mode: found-hub`)

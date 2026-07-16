@@ -78,6 +78,17 @@ type Spec struct {
 	// grant) instead of the confidential client credentials, so audit logs carry a
 	// real actor. Required (one per role the entity hosts).
 	AdminUsers []AdminUser `yaml:"adminUsers"`
+	// Launcher controls the per-entity "launcher" SPA on this entity's host (the
+	// distributed A/B entry point). "enable" runs the generic launcher image (if not
+	// already up) and writes this scenario's portal fragment; "disable" removes the
+	// fragment and tears the launcher down when no scenario fragment remains. Empty
+	// (absent) is treated as "disable".
+	Launcher string `yaml:"launcher,omitempty"`
+	// LauncherPort is the host port this entity's launcher is published on. One
+	// launcher per host, so each entity on a shared host declares a distinct port
+	// (both scenarios of the same entity use the same port and share one launcher).
+	// Optional: 0/absent falls back to the LAUNCHER_PORT env, then 5190.
+	LauncherPort int `yaml:"launcherPort,omitempty"`
 }
 
 // AdminUser is a per-role operator account created in the entity's Keycloak realm.

@@ -36,6 +36,8 @@ spec:
   # acessado de uma máquina remota (ex.: uma VM na nuvem com IP público 3.84.201.14).
   # frontendHost: 3.84.201.14
   # Operador do banco (login por papel via ROPC). O nome inclui o spoke (argentina).
+  launcher: enable
+  launcherPort: 5196
   adminUsers:
     - role: ROLE_BANK
       username: admin@macro.argentina.com

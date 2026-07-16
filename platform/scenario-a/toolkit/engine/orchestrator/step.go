@@ -43,6 +43,8 @@ const (
 	StepProvisionKeycloak = "provision-keycloak"
 	StepStartCBBackend    = "start-cb-backend"
 	StepStartCBFrontend   = "start-cb-frontend"
+	// Per-entity launcher (distributed A/B entry point). Runs in both modes.
+	StepStartLauncher = "start-launcher"
 )
 
 // CanonicalStepOrder is the definitive execution sequence for mode:found.
@@ -67,6 +69,7 @@ var CanonicalStepOrder = []string{
 	StepProvisionKeycloak,
 	StepStartCBBackend,
 	StepStartCBFrontend,
+	StepStartLauncher,
 }
 
 // Canonical step name constants for mode:join. Kept in a namespace distinct from
@@ -135,4 +138,5 @@ var CanonicalJoinStepOrder = []string{
 	StepCreatePenteJoin,
 	StepDeployFXAJoin,
 	StepGenCSR,
+	StepStartLauncher,
 }

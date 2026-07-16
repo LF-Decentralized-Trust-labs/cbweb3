@@ -61,7 +61,7 @@ func (c *JoinConfig) WithDefaults() {
 		c.VolumePrefix = c.BankID
 	}
 	if c.ContainerPrefix == "" {
-		c.ContainerPrefix = "cbweb3-" + c.BankID
+		c.ContainerPrefix = "sc-b-cbweb3-" + c.BankID
 	}
 	if c.NetPrefix == "" {
 		c.NetPrefix = c.VolumePrefix
@@ -256,8 +256,8 @@ func (c JoinConfig) ComposeEnv() []string {
 		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
 		// Cacti relay endpoint: the bank's cross-currency swap orchestrator delegates
 		// the Step 3 bridge-out to the beneficiary CB (CB-B) through it. Fixed relay
-		// port 4000, reached from a container via host.docker.internal.
-		"CACTI_API_URL": "http://host.docker.internal:4000",
+		// port 7000, reached from a container via host.docker.internal.
+		"CACTI_API_URL": "http://host.docker.internal:7000",
 		// The bank's own spoke id (for bridge lock-mint derivation).
 		"SPOKE_NETWORK": b.SpokeID,
 		// Governance-portal onboarding (mirrors scenario-a): the api-gateway smart

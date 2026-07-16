@@ -129,24 +129,36 @@ cat <<'EOF'
                                                  treasury   http://localhost:26645
                                                  supervisor http://localhost:30645
                                                  noc        http://localhost:32645
+                                                 launcher   http://localhost:5191
     bank-itau      api http://localhost:18646   portal     http://localhost:25646
+                                                 launcher   http://localhost:5192
     bank-bradesco  api http://localhost:18647   portal     http://localhost:25647
+                                                 launcher   http://localhost:5193
 
   Colombia (spoke-cop)
     central-bank   api http://localhost:18745   governance http://localhost:25745
                                                  treasury   http://localhost:26745
                                                  supervisor http://localhost:30745
                                                  noc        http://localhost:32745
+                                                 launcher   http://localhost:5197
     bank-bancolombia api http://localhost:18746 portal     http://localhost:25746
+                                                 launcher   http://localhost:5198
     bank-davivienda  api http://localhost:18747 portal     http://localhost:25747
+                                                 launcher   http://localhost:5199
 
   Argentina (spoke-ars)
     central-bank   api http://localhost:18845   governance http://localhost:25845
                                                  treasury   http://localhost:26845
                                                  supervisor http://localhost:30845
                                                  noc        http://localhost:32845
+                                                 launcher   http://localhost:5194
     bank-galicia   api http://localhost:18846   portal     http://localhost:25846
+                                                 launcher   http://localhost:5195
     bank-macro     api http://localhost:18847   portal     http://localhost:25847
+                                                 launcher   http://localhost:5196
+
+  The launcher (per entity) is the A/B entry point; it lists that entity's Scenario A
+  and B portals. Build the image once: ( cd ../../launcher && ./build.sh ).
 
   Note: a joining bank completes onboarding via its Governance Portal. On KYC
   approval the CB compliance service both issues the CB-signed certificate and

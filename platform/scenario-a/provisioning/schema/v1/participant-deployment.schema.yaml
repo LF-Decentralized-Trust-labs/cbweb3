@@ -155,6 +155,17 @@ definitions:
         items:
           $ref: "#/definitions/AdminUser"
 
+      launcher:
+        type: string
+        enum: [enable, disable]
+        description: "Per-entity launcher (distributed A/B entry point on this entity's host). 'enable' runs the generic launcher image and writes this scenario's portal fragment; 'disable' removes it and tears the launcher down when no scenario fragment remains. Optional."
+
+      launcherPort:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        description: "Host port for this entity's launcher (one launcher per host; distinct per entity, same value in A and B so both scenarios share it). Optional: falls back to the LAUNCHER_PORT env, then 5190."
+
   AdminUser:
     type: object
     required:

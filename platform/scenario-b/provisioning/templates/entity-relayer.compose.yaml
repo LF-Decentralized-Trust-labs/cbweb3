@@ -25,7 +25,7 @@ services:
       # Cacti relay endpoint — required at boot. In hub-only mode the bridge-in
       # mint path never dials it (hub mint only); it is used for the spoke legs
       # when the spoke is configured, which local dev skips.
-      CACTI_API_URL: "${CACTI_API_URL:-http://host.docker.internal:4000}"
+      CACTI_API_URL: "${CACTI_API_URL:-http://host.docker.internal:7000}"
       # Shared DB with the api-gateway: the outbox the gateway enqueues to.
       DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
       # Hub signing: the CB holds CENTRAL_BANK_ROLE on the W-<source> token and

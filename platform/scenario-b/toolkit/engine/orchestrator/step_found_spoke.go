@@ -80,7 +80,7 @@ func (c *SpokeConfig) WithDefaults() {
 		c.VolumePrefix = c.SpokeID + "_central-bank"
 	}
 	if c.ContainerPrefix == "" {
-		c.ContainerPrefix = "cbweb3-" + c.SpokeID
+		c.ContainerPrefix = "sc-b-cbweb3-" + c.SpokeID
 	}
 	if c.NetPrefix == "" {
 		c.NetPrefix = c.VolumePrefix
@@ -156,7 +156,7 @@ func (c SpokeConfig) cactiAPIURL() string {
 	if host == "" {
 		host = "host.docker.internal"
 	}
-	return fmt.Sprintf("http://%s:4000", host)
+	return fmt.Sprintf("http://%s:7000", host)
 }
 
 // keycloakContainer matches entity-keycloak.compose.yaml's container_name

@@ -16,7 +16,7 @@ services:
       # Optional boot seed (JSON array); empty by default.
       SPOKES_JSON: "${SPOKES_JSON:-}"
       # Cacti REST API port
-      CACTI_API_PORT: "${CACTI_API_PORT:-4000}"
+      CACTI_API_PORT: "${CACTI_API_PORT:-7000}"
       # Poll interval in milliseconds
       POLL_INTERVAL_MS: "${POLL_INTERVAL_MS:-3000}"
       # LiquidityCommitWatcher configuration (Scenario B)
@@ -28,21 +28,22 @@ services:
       INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-cbweb3-relay-shared-secret}"
       # Hub Besu RPC — the LiquidityCommitWatcher and the cross-currency bridge-out
       # circuit-breaker gate (isPaused() on the pair's AMM) read the HUB, not a spoke.
-      # The sample hub listens on 8845.
-      HUB_BESU_RPC: "${HUB_BESU_RPC:-http://host.docker.internal:8845}"
+      # The sample hub listens on 33845 (Scenario B host ports shifted +25000
+      # so both scenarios coexist on one host).
+      HUB_BESU_RPC: "${HUB_BESU_RPC:-http://host.docker.internal:33845}"
       LCR_WATCHER_START_BLOCK: "${LCR_WATCHER_START_BLOCK:-0}"
       # Cross-currency bridge-out (TK-B5): destination resolved per request by
       # lookup of `spoke_out` in the dynamic registry — no fixed CB_B_GATEWAY_URL.
       # Before forwarding, the relay reads isPaused() on-chain on `amm_address`.
     ports:
-      - "${CACTI_API_PORT:-4000}:4000"
+      - "${CACTI_API_PORT:-7000}:${CACTI_API_PORT:-7000}"
     volumes:
       - relay_data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/v1/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:7000/api/v1/health"]
       interval: 10s
       timeout: 5s
       retries: 5

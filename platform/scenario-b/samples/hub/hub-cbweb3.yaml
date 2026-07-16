@@ -14,16 +14,18 @@ spec:
     currency: [BRL, ARS, COP]      # base tCeBM reserve tokens
   node:
     advertisedHost: host.docker.internal
-    rpc:  { port: 8845 }
-    ws:   { port: 8855 }
-    p2p:  { port: 31503 }
+    rpc:  { port: 33845 }
+    ws:   { port: 33855 }
+    p2p:  { port: 56503 }
     dataDir: cbweb3-data/hub
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed
   relay:
-    endpoint: http://localhost:4000
+    endpoint: http://localhost:7000
   frontendHost: localhost
+  # No launcher on the hub: the per-entity launcher (distributed A/B entry point) is for
+  # commercial banks and central banks, not the network operator's hub.
   adminUsers:
     - { role: GOVERNANCE, username: admin@hub.governance.gov, password: hub-governance-local }
     - { role: NOC_ADMIN,  username: admin@hub.noc.gov,        password: hub-noc-local }

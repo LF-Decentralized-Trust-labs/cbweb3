@@ -9,7 +9,7 @@
 #
 # The Cacti relay is deployed EXTERNALLY (provisioning/scripts/start-cacti.sh)
 # before any apply — its address reaches the toolkit via each manifest's
-# spec.relay.endpoint (http://localhost:4000). found-hub founds the hub (Besu +
+# spec.relay.endpoint (http://localhost:7000). found-hub founds the hub (Besu +
 # base contracts). Each central bank FOUNDS its spoke (CB is the sole QBFT
 # validator), registers on the hub, and dynamically registers its spoke with the
 # relay (POST /api/v1/spokes). Each commercial bank JOINS as a non-validating full
@@ -81,40 +81,49 @@ apply "Hub — found-hub hub-cbweb3" "${SCRIPT_DIR}/hub/hub-cbweb3.yaml"
 
 # --- Brazil spoke (spoke-brl) -------------------------------------------------
 apply "Brazil — found-spoke central-bank-brazil (spoke-brl)" \
-  "${SCRIPT_DIR}/brazil/central-bank-brazil.yaml" --spoke-rpc http://localhost:8645
-apply "Brazil — join bank-itau"     "${SCRIPT_DIR}/brazil/bank-itau.yaml"     --spoke-rpc http://localhost:8646
-apply "Brazil — join bank-bradesco" "${SCRIPT_DIR}/brazil/bank-bradesco.yaml" --spoke-rpc http://localhost:8647
+  "${SCRIPT_DIR}/brazil/central-bank-brazil.yaml" --spoke-rpc http://localhost:33645
+apply "Brazil — join bank-itau"     "${SCRIPT_DIR}/brazil/bank-itau.yaml"     --spoke-rpc http://localhost:33646
+apply "Brazil — join bank-bradesco" "${SCRIPT_DIR}/brazil/bank-bradesco.yaml" --spoke-rpc http://localhost:33647
 
 # --- Argentina spoke (spoke-ars) ----------------------------------------------
 apply "Argentina — found-spoke central-bank-argentina (spoke-ars)" \
-  "${SCRIPT_DIR}/argentina/central-bank-argentina.yaml" --spoke-rpc http://localhost:8745
-apply "Argentina — join bank-galicia" "${SCRIPT_DIR}/argentina/bank-galicia.yaml" --spoke-rpc http://localhost:8746
-apply "Argentina — join bank-macro"   "${SCRIPT_DIR}/argentina/bank-macro.yaml"   --spoke-rpc http://localhost:8747
+  "${SCRIPT_DIR}/argentina/central-bank-argentina.yaml" --spoke-rpc http://localhost:33745
+apply "Argentina — join bank-galicia" "${SCRIPT_DIR}/argentina/bank-galicia.yaml" --spoke-rpc http://localhost:33746
+apply "Argentina — join bank-macro"   "${SCRIPT_DIR}/argentina/bank-macro.yaml"   --spoke-rpc http://localhost:33747
 
-log "done. Node RPC ports: hub 8845 | brazil 8645/8646/8647 | argentina 8745/8746/8747"
+log "done. Node RPC ports: hub 33845 | brazil 33645/33646/33647 | argentina 33745/33746/33747"
 log "bundles emitted under samples/bundles/ ; per-entity state under samples/cbweb3-data/"
 
 log "all stacks up. Endpoints (api-gateway + operator portals, on the host):"
 cat <<'EOF'
 
   Hub (hub-cbweb3)
-    hub            api http://localhost:16845   governance http://localhost:17845
+    hub            api http://localhost:41845   governance http://localhost:42845
 
   Brazil (spoke-brl)
-    central-bank   api http://localhost:16645   governance http://localhost:17645
-                                                 treasury   http://localhost:21645
-                                                 supervisor http://localhost:22645
-                                                 noc        http://localhost:20645
-    bank-itau      api http://localhost:16646   portal     http://localhost:17646
-    bank-bradesco  api http://localhost:16647   portal     http://localhost:17647
+    central-bank   api http://localhost:41645   governance http://localhost:42645
+                                                 treasury   http://localhost:46645
+                                                 supervisor http://localhost:47645
+                                                 noc        http://localhost:45645
+                                                 launcher   http://localhost:5191
+    bank-itau      api http://localhost:41646   portal     http://localhost:42646
+                                                 launcher   http://localhost:5192
+    bank-bradesco  api http://localhost:41647   portal     http://localhost:42647
+                                                 launcher   http://localhost:5193
 
   Argentina (spoke-ars)
-    central-bank   api http://localhost:16745   governance http://localhost:17745
-                                                 treasury   http://localhost:21745
-                                                 supervisor http://localhost:22745
-                                                 noc        http://localhost:20745
-    bank-galicia   api http://localhost:16746   portal     http://localhost:17746
-    bank-macro     api http://localhost:16747   portal     http://localhost:17747
+    central-bank   api http://localhost:41745   governance http://localhost:42745
+                                                 treasury   http://localhost:46745
+                                                 supervisor http://localhost:47745
+                                                 noc        http://localhost:45745
+                                                 launcher   http://localhost:5194
+    bank-galicia   api http://localhost:41746   portal     http://localhost:42746
+                                                 launcher   http://localhost:5195
+    bank-macro     api http://localhost:41747   portal     http://localhost:42747
+                                                 launcher   http://localhost:5196
+
+  The launcher (per entity) is the A/B entry point; it lists that entity's Scenario A
+  and B portals. Build the image once: ( cd ../../launcher && ./build.sh ).
 EOF
 
 cat <<'EOF'
