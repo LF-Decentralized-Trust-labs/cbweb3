@@ -1,6 +1,7 @@
-# yaml-language-server: $schema=../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
+# yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
 # LNET deploy — Scenario B (International Hub). VM ${IP_HUB} — HUB + Cacti relay (shared .20 infra).
-# Emits <dataDir>/bundles/hub.bundle.yaml; scp it into deploy-lnet/bundles/ (root) so both CB spokes consume it.
+# Manifests live under hub/manifests/; bundles (dataDir + hub.bundle.yaml) under deploy-lnet/bundles/hub/.
+# Spokes consume via hubBundleRef: ../../bundles/hub/hub.bundle.yaml.
 apiVersion: cbweb3b/v1
 kind: ParticipantDeployment
 metadata:
@@ -20,7 +21,7 @@ spec:
     rpc: { port: 8845 }
     ws:  { port: 8846 }
     p2p: { port: 30304 }           # Scenario B uses 30304 so it never clashes with Scenario A's 30303
-    dataDir: /opt/cbweb3/data/scenario-b/hub
+    dataDir: bundles/hub             # under deploy-lnet/ (state + hub.bundle.yaml drop-zone)
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed

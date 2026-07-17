@@ -114,13 +114,13 @@ export BESU_NAT_PROFILE=NONE
 # Emits: /opt/cbweb3/data/scenario-a/bundles/spoke-brazil.bundle.yaml   (out dir = dirname(dataDir))
 ```
 
-Copy the emitted bundle into each Brazil bank VM's `deploy-lnet/scenario-a/bundles/`:
+Copy the emitted bundle into each Brazil bank VM's `deploy-lnet/bundles/scenario-a/`:
 
 ```bash
 scp /opt/cbweb3/data/scenario-a/bundles/spoke-brazil.bundle.yaml \
-    op@10.10.0.22:<repo>/deploy-lnet/scenario-a/bundles/
+    op@10.10.0.22:<repo>/deploy-lnet/bundles/scenario-a/
 scp /opt/cbweb3/data/scenario-a/bundles/spoke-brazil.bundle.yaml \
-    op@10.10.0.23:<repo>/deploy-lnet/scenario-a/bundles/
+    op@10.10.0.23:<repo>/deploy-lnet/bundles/scenario-a/
 ```
 
 ### 3 — VMs 10.10.0.22 / 10.10.0.23 — cb1 / cb2 (join Brazil)
@@ -131,8 +131,8 @@ export BESU_NAT_PROFILE=NONE
 ./toolkit/cbweb3 apply -f ../deploy-lnet/scenario-a/manifests/cb1.yaml     # .22 ; cb2.yaml on .23
 ```
 
-`joinBundleRef` (`../bundles/spoke-brazil.bundle.yaml`) resolves relative to the manifest file, i.e.
-`deploy-lnet/scenario-a/bundles/spoke-brazil.bundle.yaml` — the scp target above.
+`joinBundleRef` (`../../bundles/scenario-a/spoke-brazil.bundle.yaml`) resolves relative to the manifest
+file, i.e. `deploy-lnet/bundles/scenario-a/spoke-brazil.bundle.yaml` — the scp target above.
 
 ### 4 — VM 10.10.0.24 — Central Bank Colombia (founder)
 

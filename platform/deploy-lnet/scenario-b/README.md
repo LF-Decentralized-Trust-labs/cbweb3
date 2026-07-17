@@ -5,15 +5,15 @@ LiquidityCommitRegistry, relay + circuit breaker)** across the LNET 6-VM lab. On
 chain plus two sovereign spokes (Brazil, Colombia); commercial banks join their spoke; a Cacti
 relay federates cross-currency corridors.
 
-The Scenario-B **hub** manifest and both Cacti relays are shared VM `.20` infra and live at the
-[deploy-lnet root](../README.md) (`deploy-lnet/hub.yaml`). This folder covers Scenario B's spokes and
-banks (VMs .21–.26).
+The Scenario-B **hub** lives under [`../hub/`](../hub/) (`hub/manifests/`); shared bundles live under
+[`../bundles/`](../bundles/) (`bundles/hub/`, `bundles/scenario-b/`). Both Cacti relays are started from
+the [deploy-lnet root](../README.md). This folder covers Scenario B's spokes and banks (VMs .21–.26).
 
 ## Topology
 
 | VM | Role | Spoke | bank-id | Launcher FQDN | Manifest |
 |----|------|-------|---------|---------------|----------|
-| 10.10.0.20 | Hub (found-hub) + Cacti relay | hub (chainId 1337) | — | — | [../hub.yaml](../hub.yaml) |
+| 10.10.0.20 | Hub (found-hub) + Cacti relay | hub (chainId 1337) | — | — | [../hub/manifests/hub.yaml](../hub/manifests/hub.yaml) |
 | 10.10.0.21 | Central Bank Brazil (found-spoke) | spoke-brazil (BRL, chainId 2022) | — | cb-brazil.cbweb3.lnet.io | [manifests/cb-brazil.yaml](manifests/cb-brazil.yaml) |
 | 10.10.0.22 | Commercial bank (join) | spoke-brazil | cb1 | cb1-brazil.cbweb3.lnet.io | [manifests/cb1.yaml](manifests/cb1.yaml) |
 | 10.10.0.23 | Commercial bank (join) | spoke-brazil | cb2 | cb2-brazil.cbweb3.lnet.io | [manifests/cb2.yaml](manifests/cb2.yaml) |
@@ -50,7 +50,7 @@ DNS: point each launcher FQDN at the matching VM IP.
 
 ## Manifests are templates
 
-The hub manifest (`../hub.yaml`) and `manifests/*.yaml` are **generated** from `*.yaml.tmpl` by
+The hub manifest (`../hub/manifests/hub.yaml`) and `manifests/*.yaml` are **generated** from `*.yaml.tmpl` by
 substituting the `${IP_*}` address markers from [`../addresses.env`](../addresses.env) (the toolkit
 does not expand env vars). Render them first, or let the wrapper do render + apply in one step:
 
@@ -89,20 +89,20 @@ deploy-lnet/deploy.sh cacti
 
 # Found the hub (render + apply):
 deploy-lnet/deploy.sh b hub
-#   -> emits /opt/cbweb3/data/scenario-b/hub/bundles/hub.bundle.yaml
+#   -> emits deploy-lnet/bundles/hub/hub.bundle.yaml
 ```
 
-Patch the hub bundle's cross-host URLs (emitted as `localhost`), then copy into `deploy-lnet/bundles/`
-(root) on both CB spoke VMs:
+Patch the hub bundle's cross-host URLs (emitted as `localhost`), then copy into
+`deploy-lnet/bundles/hub/` on both CB spoke VMs:
 
 ```bash
 sed -i 's#http://localhost:8845#http://10.10.0.20:8845#; \
         s#ws://localhost:8846#ws://10.10.0.20:8846#; \
         s#http://localhost:16845#http://10.10.0.20:16845#' \
-  /opt/cbweb3/data/scenario-b/hub/bundles/hub.bundle.yaml
+  $REPO/deploy-lnet/bundles/hub/hub.bundle.yaml
 
-scp /opt/cbweb3/data/scenario-b/hub/bundles/hub.bundle.yaml op@10.10.0.21:$REPO/deploy-lnet/bundles/
-scp /opt/cbweb3/data/scenario-b/hub/bundles/hub.bundle.yaml op@10.10.0.24:$REPO/deploy-lnet/bundles/
+scp $REPO/deploy-lnet/bundles/hub/hub.bundle.yaml op@10.10.0.21:$REPO/deploy-lnet/bundles/hub/
+scp $REPO/deploy-lnet/bundles/hub/hub.bundle.yaml op@10.10.0.24:$REPO/deploy-lnet/bundles/hub/
 ```
 
 ### 2 — VM 10.10.0.21 — Central Bank Brazil (found-spoke)
@@ -120,15 +120,15 @@ go run ./scenario-b/toolkit/cmd/cbweb3b apply \
 #      (enode host = 10.10.0.21:30304, dialable cross-VM)
 ```
 
-The spoke manifest reads the hub bundle via `hubBundleRef: ../../bundles/hub.bundle.yaml` (the root
-drop-zone). Patch the emitted spoke bundle's `cbGateway` (emitted as `host.docker.internal`), then copy
-to the bank VMs:
+The spoke manifest reads the hub bundle via `hubBundleRef: ../../bundles/hub/hub.bundle.yaml`
+(the central drop-zone under `bundles/hub/`). Patch the emitted spoke bundle's `cbGateway` (emitted as
+`host.docker.internal`), then copy to the bank VMs:
 
 ```bash
 sed -i 's#http://host.docker.internal:16845#http://10.10.0.21:16845#' \
   /opt/cbweb3/data/scenario-b/spoke-brazil/bundles/spoke-brazil.bundle.yaml
-scp /opt/cbweb3/data/scenario-b/spoke-brazil/bundles/spoke-brazil.bundle.yaml op@10.10.0.22:$REPO/deploy-lnet/scenario-b/bundles/
-scp /opt/cbweb3/data/scenario-b/spoke-brazil/bundles/spoke-brazil.bundle.yaml op@10.10.0.23:$REPO/deploy-lnet/scenario-b/bundles/
+scp /opt/cbweb3/data/scenario-b/spoke-brazil/bundles/spoke-brazil.bundle.yaml op@10.10.0.22:$REPO/deploy-lnet/bundles/scenario-b/
+scp /opt/cbweb3/data/scenario-b/spoke-brazil/bundles/spoke-brazil.bundle.yaml op@10.10.0.23:$REPO/deploy-lnet/bundles/scenario-b/
 ```
 
 ### 3 — VMs 10.10.0.22 / 10.10.0.23 — cb1 / cb2 (join Brazil)
@@ -142,15 +142,15 @@ go run ./scenario-b/toolkit/cmd/cbweb3b apply    -f deploy-lnet/scenario-b/manif
 #      -> wait-sync (eth_syncing) -> gateway/keycloak/backend -> gen-csr
 ```
 
-`joinBundleRef` (`../bundles/spoke-brazil.bundle.yaml`) resolves relative to the manifest file, i.e.
-`deploy-lnet/scenario-b/bundles/spoke-brazil.bundle.yaml`. The CSR (`<dataDir>/pki/cb1.csr`) is
+`joinBundleRef` (`../../bundles/scenario-b/spoke-brazil.bundle.yaml`) resolves relative to the manifest
+file, i.e. `deploy-lnet/bundles/scenario-b/spoke-brazil.bundle.yaml`. The CSR (`<dataDir>/pki/cb1.csr`) is
 generated locally and never transmitted; signing / on-chain registration are runtime steps handled via
 the CB governance portal.
 
 ### 4 — VM 10.10.0.24 — Central Bank Colombia (found-spoke)
 
 Same as step 2 with `cb-colombia.yaml`; emits `spoke-colombia.bundle.yaml`; scp it to `.25` and `.26`
-(into `deploy-lnet/scenario-b/bundles/`).
+(into `deploy-lnet/bundles/scenario-b/`).
 
 ### 5 — VMs 10.10.0.25 / 10.10.0.26 — cb3 / cb4 (join Colombia)
 

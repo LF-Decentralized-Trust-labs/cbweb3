@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
 # LNET deploy — Scenario B. VM ${IP_CB_BRAZIL} — Central Bank Brazil, FOUNDS spoke-brazil (BRL).
-# Consumes ../bundles/hub.bundle.yaml (scp'd from ${IP_HUB}).
+# Consumes ../../bundles/hub/hub.bundle.yaml (scp'd from ${IP_HUB}).
 # Emits ./bundles/spoke-brazil.bundle.yaml for cb1/cb2 to join.
 apiVersion: cbweb3b/v1
 kind: ParticipantDeployment
@@ -17,7 +17,7 @@ spec:
     id: spoke-brazil
     chainId: 2022
     currency: BRL
-  hubBundleRef: ../../bundles/hub.bundle.yaml
+  hubBundleRef: ../../bundles/hub/hub.bundle.yaml
   node:
     advertisedHost: ${IP_CB_BRAZIL}       # routable VM IP -> spoke-bundle enode dialable by cb1/cb2
     rpc: { port: 8845 }
