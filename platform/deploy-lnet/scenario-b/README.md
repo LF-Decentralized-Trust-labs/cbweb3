@@ -117,12 +117,11 @@ scp $REPO/deploy-lnet/bundles/hub/hub.bundle.yaml op@10.10.0.24:$REPO/deploy-lne
 ```
 
 The spoke manifest reads the hub bundle via `hubBundleRef: ../../bundles/hub/hub.bundle.yaml`
-(the central drop-zone under `bundles/hub/`). Patch the emitted spoke bundle's `cbGateway` (emitted as
-`host.docker.internal`), then copy to the bank VMs:
+(the central drop-zone under `bundles/hub/`). With a current toolkit, `emit-spoke-bundle` already
+bakes `node.advertisedHost` into `spokeRpc` / `spokeWs` / `cbGateway` — no `sed` needed for those.
+Copy the bundle to the bank VMs:
 
 ```bash
-sed -i 's#http://host.docker.internal:16845#http://10.10.0.21:16845#' \
-  $REPO/deploy-lnet/bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml
 scp $REPO/deploy-lnet/bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml \
     op@10.10.0.22:$REPO/deploy-lnet/bundles/scenario-b/spoke-brazil/
 scp $REPO/deploy-lnet/bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml \
