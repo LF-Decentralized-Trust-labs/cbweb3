@@ -14,3 +14,6 @@
 
 # Optional local address override
 /addresses.local.env
+
+# Local ship.sh config — may hold hosts/keys/passwords. The tracked sample is .env.sample.
+/.env
