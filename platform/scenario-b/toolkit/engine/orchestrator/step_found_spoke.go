@@ -674,7 +674,23 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			Run: func(ctx context.Context) error { return genCBCA(ctx, c.Runner, c.caVolume()) },
 		},
 		{Name: "start-spoke-infra", Deps: []string{"render-spoke-env"}, Run: compose("entity-infra")},
-		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke", "gen-tls-spoke"}, Run: compose("entity-backend")},
+		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke", "gen-tls-spoke"}, Run: func(ctx context.Context) error {
+			// Build the backend images before `compose up`. The hub host builds these
+			// too, but a spoke on a SEPARATE Docker daemon (multi-VM lab) never has
+			// them, so compose would try to PULL a local-only tag and fail. Idempotent
+			// via imageExists, so this is a no-op when the hub already built them
+			// (single-host). Mirrors start-spoke-relayer / start-spoke-frontend.
+			for _, b := range []struct{ image, dockerfile, context string }{
+				{hubComplianceImage, "backend/services/compliance/Dockerfile", "backend"},
+				{hubAuthImage, "backend/services/auth/Dockerfile", "backend"},
+				{hubBackendImage, "backend/services/api-gateway/Dockerfile", "backend"},
+			} {
+				if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), b.image, b.dockerfile, b.context); err != nil {
+					return err
+				}
+			}
+			return compose("entity-backend")(ctx)
+		}},
 		{
 			// Bridge RelayerWorker (CB-only): shares the spoke's Postgres DB with the
 			// api-gateway and drives cross-currency bridge positions LOCKING→ACTIVE by
