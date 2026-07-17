@@ -137,9 +137,13 @@ func TestKeycloakWriteBackIdempotent(t *testing.T) {
 }
 
 // emit-hub-bundle produces a valid bundle with the two tCeBM distinguished.
+// When AdvertisedHost is set, public RPC/WS/gateway URLs use that host (not localhost).
 func TestEmitHubBundleFromBroadcast(t *testing.T) {
 	fake := &exec.FakeRunner{}
 	cfg := testHubConfig(t, fake)
+	cfg.AdvertisedHost = "10.10.0.20"
+	cfg.RPCPort = 8845
+	cfg.WSPort = 8846
 	writeBroadcast(t, cfg.ContractsDir, cfg.ChainID)
 	var emit Step
 	for _, s := range FoundHubSteps(cfg) {
@@ -159,5 +163,49 @@ func TestEmitHubBundleFromBroadcast(t *testing.T) {
 	}
 	if b.Contracts["identityRegistry"] != "0xa1" || b.Contracts["manualOracle"] != "0xf1" {
 		t.Fatalf("contract mapping wrong: %+v", b.Contracts)
+	}
+	if b.HubRPC != "http://10.10.0.20:8845" {
+		t.Fatalf("HubRPC want http://10.10.0.20:8845, got %q", b.HubRPC)
+	}
+	if b.HubWS != "ws://10.10.0.20:8846" {
+		t.Fatalf("HubWS want ws://10.10.0.20:8846, got %q", b.HubWS)
+	}
+	if b.HubGateway != "http://10.10.0.20:16845" {
+		t.Fatalf("HubGateway want http://10.10.0.20:16845, got %q", b.HubGateway)
+	}
+}
+
+// emit-hub-bundle Check re-runs when an on-disk bundle still has localhost but
+// AdvertisedHost is set (stale LNET artifact from an older toolkit).
+func TestEmitHubBundleCheckRewritesLocalhost(t *testing.T) {
+	fake := &exec.FakeRunner{}
+	cfg := testHubConfig(t, fake)
+	cfg.RPCPort = 8845
+	cfg.WSPort = 8846
+	writeBroadcast(t, cfg.ContractsDir, cfg.ChainID)
+
+	// Emit a localhost bundle (no AdvertisedHost), then set AdvertisedHost and
+	// expect Check to force a re-emit.
+	var emit Step
+	for _, s := range FoundHubSteps(cfg) {
+		if s.Name == "emit-hub-bundle" {
+			emit = s
+		}
+	}
+	if err := emit.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cfg.AdvertisedHost = "18.216.221.177"
+	for _, s := range FoundHubSteps(cfg) {
+		if s.Name == "emit-hub-bundle" {
+			emit = s
+		}
+	}
+	ok, err := emit.Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("Check should be false for stale localhost bundle when AdvertisedHost is set")
 	}
 }

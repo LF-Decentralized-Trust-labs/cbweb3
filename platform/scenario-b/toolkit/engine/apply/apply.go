@@ -284,6 +284,10 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 
 	rpcPort, wsPort, p2pPort := nodePorts(pd.Spec.Node)
 	prefix := sanitizePrefix(pd.Metadata.Name) // e.g. "hub-cbweb3"
+	var advertisedHost string
+	if pd.Spec.Node != nil {
+		advertisedHost = pd.Spec.Node.AdvertisedHost
+	}
 	cfg := orchestrator.HubConfig{
 		Runner:          runner,
 		ContractsDir:    filepath.Join(root, "scenario-b", "contracts"),
@@ -300,6 +304,7 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 		RPCPort:         rpcPort,
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
+		AdvertisedHost:  advertisedHost,
 	}
 	// No launcher on the hub: the launcher is the per-entity A/B entry point for
 	// commercial banks and central banks (found-spoke / join), not for the network
