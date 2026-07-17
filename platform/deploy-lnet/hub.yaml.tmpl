@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario B (International Hub). VM ${IP_HUB} — HUB + Cacti relay (shared .20 infra).
+# Emits <dataDir>/bundles/hub.bundle.yaml; scp it into deploy-lnet/bundles/ (root) so both CB spokes consume it.
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: hub-cbweb3
+spec:
+  scenario: "b"
+  environment: local
+  mode: found-hub
+  topology:
+    role: hub
+  displayName: CBWeb3 International Hub
+  hub:
+    chainId: 1337
+    currency: [BRL, COP]           # positional -> tCeBM_BRL / tCeBM_EUR bundle keys (map keys only)
+  node:
+    advertisedHost: ${IP_HUB}
+    rpc: { port: 8845 }
+    ws:  { port: 8846 }
+    p2p: { port: 30304 }           # Scenario B uses 30304 so it never clashes with Scenario A's 30303
+    dataDir: /opt/cbweb3/data/scenario-b/hub
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  relay:
+    endpoint: http://${IP_HUB}:7000   # Scenario B Cacti relay (co-located on the hub VM)
+  frontendHost: cbweb3.lnet.io
+  adminUsers:
+    - { role: GOVERNANCE, username: governance@hub.lnet.io, password: change-me-local }
+    - { role: NOC_ADMIN,  username: noc@hub.lnet.io,        password: change-me-local }

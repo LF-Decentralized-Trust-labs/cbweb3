@@ -1,0 +1,16 @@
+# Rendered manifests — generated from *.yaml.tmpl by render.sh / deploy.sh.
+# The *.yaml.tmpl templates are the source of truth; never commit the rendered output.
+/hub.yaml
+/scenario-a/manifests/*.yaml
+/scenario-b/manifests/*.yaml
+
+# Local toolkit binaries built by deploy.sh
+/.bin/
+
+# Bundles transferred between hosts at runtime (public, but host-specific / large)
+/bundles/*.bundle.yaml
+/scenario-a/bundles/*.bundle.yaml
+/scenario-b/bundles/*.bundle.yaml
+
+# Optional local address override
+/addresses.local.env

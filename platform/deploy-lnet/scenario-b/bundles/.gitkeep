@@ -1,0 +1,4 @@
+# Drop-zone for bundles emitted by the toolkit and transferred between hosts.
+# hub.bundle.yaml            -> scp'd from 10.10.0.20 (hub), consumed by both CB spokes
+# spoke-brazil.bundle.yaml   -> scp'd from 10.10.0.21 (CB Brazil),   consumed by cb1/cb2
+# spoke-colombia.bundle.yaml -> scp'd from 10.10.0.24 (CB Colombia), consumed by cb3/cb4

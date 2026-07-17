@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=../../../scenario-a/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario A (Enhanced Correspondent Banking)
+# VM ${IP_CB_BRAZIL} — Central Bank Brazil, FOUNDS spoke-brazil (BRL).
+# Emits ./bundles/spoke-brazil.bundle.yaml (out dir = dirname(dataDir)) for cb1/cb2 to join.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-brazil
+spec:
+  scenario: a
+  environment: local
+  role: central-bank
+  mode: found
+  displayName: Banco Central do Brasil
+  spoke:
+    id: spoke-brazil
+    chainId: 2021
+    currency: BRL
+  node:
+    advertisedHost: ${IP_CB_BRAZIL}        # routable VM IP -> spoke-bundle enode dialable by cb1/cb2
+    rpc: { port: 8645 }
+    ws:  { port: 8655 }
+    p2p: { port: 30303 }              # Scenario A join localizes the enode to container port 30303;
+                                      # the CB MUST publish host 30303 for cross-VM peering.
+    dataDir: /opt/cbweb3/data/scenario-a/spoke-brazil
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed://local     # the CB is its own spoke CA
+  relay:
+    endpoint: http://${IP_HUB}:4000  # Scenario A Cacti relay on the hub/cacti VM
+    advertisedHost: ${IP_CB_BRAZIL}        # host the relay uses to reach this spoke's published ports
+  cbEndpoint: http://${IP_CB_BRAZIL}:18645/api/v1/credential-request  # api-gateway = rpc+10000
+  frontendHost: cb-brazil.cbweb3.lnet.io
+  launcher: enable
+  launcherPort: 5190
+  adminUsers:
+    - { role: ROLE_GOVERNANCE, username: governance@cb-brazil.lnet.io, password: change-me-local }
+    - { role: ROLE_TREASURY,   username: treasury@cb-brazil.lnet.io,   password: change-me-local }
+    - { role: ROLE_SUPERVISOR, username: supervisor@cb-brazil.lnet.io, password: change-me-local }
+    - { role: ROLE_NOC_ADMIN,  username: noc@cb-brazil.lnet.io,        password: change-me-local }

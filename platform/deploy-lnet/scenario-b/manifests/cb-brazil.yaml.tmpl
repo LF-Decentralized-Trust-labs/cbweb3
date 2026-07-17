@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario B. VM ${IP_CB_BRAZIL} — Central Bank Brazil, FOUNDS spoke-brazil (BRL).
+# Consumes ../bundles/hub.bundle.yaml (scp'd from ${IP_HUB}).
+# Emits ./bundles/spoke-brazil.bundle.yaml for cb1/cb2 to join.
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-brazil
+spec:
+  scenario: "b"
+  environment: local
+  mode: found-spoke
+  topology:
+    role: central-bank
+  displayName: Banco Central do Brasil
+  spoke:
+    id: spoke-brazil
+    chainId: 2022
+    currency: BRL
+  hubBundleRef: ../../bundles/hub.bundle.yaml
+  node:
+    advertisedHost: ${IP_CB_BRAZIL}       # routable VM IP -> spoke-bundle enode dialable by cb1/cb2
+    rpc: { port: 8845 }
+    ws:  { port: 8846 }
+    p2p: { port: 30304 }
+    dataDir: /opt/cbweb3/data/scenario-b/spoke-brazil
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed            # the CB is the CA of its own spoke
+  relay:
+    endpoint: http://${IP_HUB}:7000
+    advertisedHost: ${IP_CB_BRAZIL}       # host the relay on .20 uses to reach this spoke
+  cbEndpoint: http://${IP_CB_BRAZIL}:16845   # api-gateway = rpc+8000
+  frontendHost: cb-brazil.cbweb3.lnet.io
+  launcher: enable
+  launcherPort: 5190
+  adminUsers:
+    - { role: GOVERNANCE, username: governance@cb-brazil.lnet.io, password: change-me-local }
+    - { role: TREASURY,   username: treasury@cb-brazil.lnet.io,   password: change-me-local }
+    - { role: SUPERVISOR, username: supervisor@cb-brazil.lnet.io, password: change-me-local }

@@ -1,0 +1,3 @@
+# Drop-zone for join bundles emitted by the founding central banks.
+# spoke-brazil.bundle.yaml   -> scp'd from 10.10.0.21 (CB Brazil), consumed by cb1/cb2
+# spoke-colombia.bundle.yaml -> scp'd from 10.10.0.24 (CB Colombia), consumed by cb3/cb4

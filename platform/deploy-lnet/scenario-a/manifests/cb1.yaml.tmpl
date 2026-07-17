@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../../scenario-a/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario A. VM ${IP_CB1} — commercial bank cb1, JOINS spoke-brazil.
+# joinBundleRef resolves relative to THIS file -> deploy-lnet/scenario-a/bundles/spoke-brazil.bundle.yaml
+# (scp the bundle emitted on ${IP_CB_BRAZIL} into deploy-lnet/scenario-a/bundles/ before apply).
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-cb1-brazil
+spec:
+  scenario: a
+  environment: local
+  role: commercial-bank
+  mode: join
+  bankId: cb1
+  displayName: Commercial Bank cb1 (Brazil)
+  spoke:
+    id: spoke-brazil
+    chainId: 2021
+    currency: BRL
+  joinBundleRef: ../bundles/spoke-brazil.bundle.yaml
+  node:
+    advertisedHost: ${IP_CB1}
+    rpc: { port: 8645 }
+    ws:  { port: 8655 }
+    p2p: { port: 30303 }
+    dataDir: /opt/cbweb3/data/scenario-a/cb1
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  relay:
+    endpoint: http://${IP_HUB}:4000
+  frontendHost: cb1-brazil.cbweb3.lnet.io
+  launcher: enable
+  launcherPort: 5190
+  adminUsers:
+    - { role: ROLE_BANK, username: admin@cb1.lnet.io, password: change-me-local }
