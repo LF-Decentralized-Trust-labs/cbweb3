@@ -20,28 +20,32 @@ import (
 // healthy. Mirrors startPaladinStep but for a single bank node attaching to the
 // spoke's external Besu network.
 type startPaladinJoinStep struct {
-	spokeID        string
-	bankID         string
-	dataDir        string
-	composePath    string
-	paladinImage   string
-	paladinRPCURL  string
-	besuRPCPort    int
-	healthTimeout  time.Duration
-	healthInterval time.Duration
+	spokeID             string
+	bankID              string
+	dataDir             string
+	composePath         string
+	routableComposePath string // extra_hosts override, applied when cbPaladinHost is routable
+	cbPaladinHost       string // CB routable host (bundle bootnode advertised host)
+	paladinImage        string
+	paladinRPCURL       string
+	besuRPCPort         int
+	healthTimeout       time.Duration
+	healthInterval      time.Duration
 }
 
-func newStartPaladinJoinStep(spokeID, bankID, dataDir, composePath, paladinImage string, besuRPCPort int, healthTimeout, healthInterval time.Duration) Step {
+func newStartPaladinJoinStep(spokeID, bankID, dataDir, composePath, routableComposePath, cbPaladinHost, paladinImage string, besuRPCPort int, healthTimeout, healthInterval time.Duration) Step {
 	return &startPaladinJoinStep{
-		spokeID:        spokeID,
-		bankID:         bankID,
-		dataDir:        dataDir,
-		composePath:    composePath,
-		paladinImage:   paladinImage,
-		paladinRPCURL:  fmt.Sprintf("http://localhost:%d", besuRPCPort+bankPaladinRPCPortOffset),
-		besuRPCPort:    besuRPCPort,
-		healthTimeout:  healthTimeout,
-		healthInterval: healthInterval,
+		spokeID:             spokeID,
+		bankID:              bankID,
+		dataDir:             dataDir,
+		composePath:         composePath,
+		routableComposePath: routableComposePath,
+		cbPaladinHost:       cbPaladinHost,
+		paladinImage:        paladinImage,
+		paladinRPCURL:       fmt.Sprintf("http://localhost:%d", besuRPCPort+bankPaladinRPCPortOffset),
+		besuRPCPort:         besuRPCPort,
+		healthTimeout:       healthTimeout,
+		healthInterval:      healthInterval,
 	}
 }
 
@@ -64,7 +68,17 @@ func (s *startPaladinJoinStep) Check(ctx context.Context) (bool, error) {
 
 func (s *startPaladinJoinStep) Run(ctx context.Context) error {
 	// Unique compose project per entity (shared commercial-bank Paladin template).
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", s.spokeID+"-"+s.bankID+"-paladin", "-f", s.composePath, "up", "-d")
+	args := []string{"compose", "-p", s.spokeID + "-" + s.bankID + "-paladin", "-f", s.composePath}
+	// Cross-VM: overlay the routable extra_hosts file so the bank's Paladin resolves
+	// the CB Paladin's on-chain hostname (paladin-<spoke>-cb) to the CB's routable
+	// host. Keeping the CB container name as the hostname preserves the mutual-TLS
+	// authority match against the CB Paladin cert CN. Skipped on single-host (the
+	// shared spoke network resolves the name natively).
+	if isRoutableHost(s.cbPaladinHost) && s.routableComposePath != "" {
+		args = append(args, "-f", s.routableComposePath)
+	}
+	args = append(args, "up", "-d")
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Env = s.composeEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("compose up: %w\noutput:\n%s", err, out)
@@ -97,6 +111,8 @@ func (s *startPaladinJoinStep) composeEnv() []string {
 		"PALADIN_BANK_WS_PORT="+strconv.Itoa(s.besuRPCPort+bankPaladinWSPortOffset),
 		"PALADIN_BANK_GRPC_PORT="+strconv.Itoa(s.besuRPCPort+bankPaladinGRPCPortOffset),
 		"SPOKE_NETWORK_NAME=cbweb3-"+s.spokeID+"-besu",
+		// Consumed by the routable extra_hosts override (paladin-compose.routable.yaml).
+		"CB_PALADIN_HOST="+s.cbPaladinHost,
 		"PALADIN_UID="+strconv.Itoa(os.Getuid()),
 		"PALADIN_GID="+strconv.Itoa(os.Getgid()),
 	)

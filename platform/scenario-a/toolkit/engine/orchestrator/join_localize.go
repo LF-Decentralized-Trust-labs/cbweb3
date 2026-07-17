@@ -127,6 +127,20 @@ func rewriteURLHost(raw, newHost string, newPort int) (string, error) {
 	return u.String(), nil
 }
 
+// isRoutableHost reports whether h is an externally routable host (a real IP or
+// DNS name) rather than a loopback / docker-internal name that only resolves on
+// the same Docker host. It gates the cross-VM Paladin transport wiring: when the
+// CB advertised host is routable, the CB exposes its Paladin gRPC on the fixed
+// peer port 9000 and joining banks add an extra_hosts entry pointing the CB
+// Paladin's on-chain hostname (its container name) at that routable host.
+func isRoutableHost(h string) bool {
+	switch strings.ToLower(strings.TrimSpace(h)) {
+	case "", "localhost", "127.0.0.1", "::1", "host.docker.internal", "host-gateway":
+		return false
+	}
+	return true
+}
+
 // setEnodePort replaces the port in an enode URI (enode://<id>@<host>:<port>),
 // preserving the host (which resolves on the shared spoke network).
 func setEnodePort(enode string, port int) (string, error) {
