@@ -61,6 +61,17 @@ if ! docker image inspect cbweb3/launcher:local >/dev/null 2>&1; then
   "$ROOT/launcher/build.sh"
 fi
 
+# 1c) Ensure the scenario's Solidity artifacts exist. `out/` is gitignored, so a
+# fresh checkout has none. Scenario A's deploy/onboard-registry steps read the
+# compiled IdentityRegistry artifact straight off disk and fail without it
+# (scenario B's toolkit compiles in-band, so building here is a cached no-op).
+# Skip when out/ already holds artifacts (forge's own cache makes rebuilds cheap).
+contracts_dir="$ROOT/scenario-$SCENARIO/contracts"
+if [[ -d "$contracts_dir" ]] && ! find "$contracts_dir/out" -type f -name '*.json' 2>/dev/null | grep -q .; then
+  echo "[deploy] compiling scenario-$SCENARIO contracts (out/ empty or missing)"
+  ( cd "$contracts_dir" && forge build )
+fi
+
 # 2) Build the scenario's toolkit binary (go caches; fast on repeat).
 mkdir -p "$HERE/.bin"
 export BESU_NAT_PROFILE=NONE   # routable enode advertisement (required by Scenario A, harmless for B)
