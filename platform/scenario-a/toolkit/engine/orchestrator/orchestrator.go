@@ -552,7 +552,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			deps.PaladinConfigTemplateDir),
 		newStartPaladinJoinStep(spokeID, deps.BankCode, dataDir, deps.PaladinComposePath,
 			filepath.Join(filepath.Dir(deps.PaladinComposePath), "paladin-compose.routable.yaml"),
-			b.Spec.Bootnode.AdvertisedHost, deps.PaladinImage,
+			b.Spec.Bootnode.AdvertisedHost, m.Spec.Node.AdvertisedHost, deps.PaladinImage,
 			deps.BesuRPCPort, deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval),
 		newRegisterPaladinNodeStep(spokeID, deps.BankCode, dataDir, deps.BesuRPCURL,
 			b.Spec.Contracts.RegistryAddress, m.Spec.Node.AdvertisedHost, deps.KeyProvider, deps.Timeouts.ProofOfPossession),

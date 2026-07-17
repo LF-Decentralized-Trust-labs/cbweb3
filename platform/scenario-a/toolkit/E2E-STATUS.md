@@ -209,3 +209,18 @@ so single-host keeps the container-name behavior byte-for-byte. See `paladinDial
 `addTransportSAN` and the `gen-tls` / `gen-tls-join` / `register-nodes` /
 `register-paladin-node` steps. `paladin-compose.routable.yaml` is retained so a CB
 registered by an older toolkit stays reachable.
+
+**Second half — publish gRPC on 9000 (the bank join side).** Advertising `:9000` is only
+half the fix: the node must also *listen* there. The routable CB founder already published
+its Paladin gRPC on host `9000` (`startPaladinStep`), but the **bank join** step
+(`startPaladinJoinStep`) always published in the per-bank `+21000` band (e.g. besu 8645 →
+`29645`). So a routable bank registered `dns:///<ip>:9000` while its container was reachable
+only on `29645`, and the CB's resolve-reply dial failed with:
+```
+PD030015: GRPC connection failed for endpoint 'dns:///10.10.0.22:9000':
+... dial tcp 10.10.0.22:9000: connect: connection refused
+```
+Fix: `startPaladinJoinStep` now publishes gRPC on `9000` when the bank's own
+`advertisedHost` is routable (mirroring the CB); single-host keeps the `+21000` band
+(collision-free when banks share a host). Requires `9000/tcp` open **both** directions
+between the CB and each bank VM.

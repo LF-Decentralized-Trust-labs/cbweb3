@@ -26,6 +26,7 @@ type startPaladinJoinStep struct {
 	composePath         string
 	routableComposePath string // extra_hosts override, applied when cbPaladinHost is routable
 	cbPaladinHost       string // CB routable host (bundle bootnode advertised host)
+	advertisedHost      string // the bank's OWN routable host; when routable, publish gRPC on 9000
 	paladinImage        string
 	paladinRPCURL       string
 	besuRPCPort         int
@@ -33,7 +34,7 @@ type startPaladinJoinStep struct {
 	healthInterval      time.Duration
 }
 
-func newStartPaladinJoinStep(spokeID, bankID, dataDir, composePath, routableComposePath, cbPaladinHost, paladinImage string, besuRPCPort int, healthTimeout, healthInterval time.Duration) Step {
+func newStartPaladinJoinStep(spokeID, bankID, dataDir, composePath, routableComposePath, cbPaladinHost, advertisedHost, paladinImage string, besuRPCPort int, healthTimeout, healthInterval time.Duration) Step {
 	return &startPaladinJoinStep{
 		spokeID:             spokeID,
 		bankID:              bankID,
@@ -41,6 +42,7 @@ func newStartPaladinJoinStep(spokeID, bankID, dataDir, composePath, routableComp
 		composePath:         composePath,
 		routableComposePath: routableComposePath,
 		cbPaladinHost:       cbPaladinHost,
+		advertisedHost:      advertisedHost,
 		paladinImage:        paladinImage,
 		paladinRPCURL:       fmt.Sprintf("http://localhost:%d", besuRPCPort+bankPaladinRPCPortOffset),
 		besuRPCPort:         besuRPCPort,
@@ -102,6 +104,17 @@ func (s *startPaladinJoinStep) composeEnv() []string {
 	if image == "" {
 		image = defaultPaladinImage
 	}
+	// gRPC PEER port: single-host banks share the host and reach each other by
+	// container name over the shared spoke network, so the host-published gRPC port
+	// stays in the per-bank +21000 band (collision-free). A routable bank (multi-VM),
+	// however, is dialed by the CB at the on-chain endpoint dns:///<advertisedHost>:9000
+	// (register-paladin-node), so — exactly like the routable CB (startPaladinStep) —
+	// it must publish that exact port 9000 on its routable host, else the CB's
+	// resolve-reply dial hits "connection refused" and create-pente-context hangs.
+	grpcHostPort := s.besuRPCPort + bankPaladinGRPCPortOffset
+	if isRoutableHost(s.advertisedHost) {
+		grpcHostPort = paladinPeerGRPCPort
+	}
 	return append(os.Environ(),
 		"SPOKE_ID="+s.spokeID,
 		"BANK_ID="+s.bankID,
@@ -109,7 +122,7 @@ func (s *startPaladinJoinStep) composeEnv() []string {
 		"PALADIN_IMAGE="+image,
 		"PALADIN_BANK_RPC_PORT="+strconv.Itoa(s.besuRPCPort+bankPaladinRPCPortOffset),
 		"PALADIN_BANK_WS_PORT="+strconv.Itoa(s.besuRPCPort+bankPaladinWSPortOffset),
-		"PALADIN_BANK_GRPC_PORT="+strconv.Itoa(s.besuRPCPort+bankPaladinGRPCPortOffset),
+		"PALADIN_BANK_GRPC_PORT="+strconv.Itoa(grpcHostPort),
 		"SPOKE_NETWORK_NAME=cbweb3-"+s.spokeID+"-besu",
 		// Consumed by the routable extra_hosts override (paladin-compose.routable.yaml).
 		"CB_PALADIN_HOST="+s.cbPaladinHost,
