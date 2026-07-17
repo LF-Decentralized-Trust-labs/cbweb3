@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../../../scenario-a/provisioning/schema/v1/participant-deployment.schema.yaml
 # LNET deploy — Scenario A. VM ${IP_CB_COLOMBIA} — Central Bank Colombia, FOUNDS spoke-colombia (COP).
 # Independent spoke; the Cacti relay on ${IP_HUB} bridges Brazil <-> Colombia (correspondent banking).
-# Emits ./bundles/spoke-colombia.bundle.yaml for cb3/cb4 to join.
+# dataDir + emitted join bundle under deploy-lnet/bundles/scenario-a/spoke-colombia/
 apiVersion: cbweb3/v1
 kind: ParticipantDeployment
 metadata:
@@ -21,7 +21,7 @@ spec:
     rpc: { port: 8645 }
     ws:  { port: 8655 }
     p2p: { port: 30303 }
-    dataDir: /opt/cbweb3/data/scenario-a/spoke-colombia
+    dataDir: ../deploy-lnet/bundles/scenario-a/spoke-colombia
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed://local

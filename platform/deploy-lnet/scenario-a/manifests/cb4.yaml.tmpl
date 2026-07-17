@@ -15,13 +15,13 @@ spec:
     id: spoke-colombia
     chainId: 2024
     currency: COP
-  joinBundleRef: ../../bundles/scenario-a/spoke-colombia.bundle.yaml
+  joinBundleRef: ../../bundles/scenario-a/spoke-colombia/spoke-colombia.bundle.yaml
   node:
     advertisedHost: ${IP_CB4}
     rpc: { port: 8645 }
     ws:  { port: 8655 }
     p2p: { port: 30303 }
-    dataDir: /opt/cbweb3/data/scenario-a/cb4
+    dataDir: ../deploy-lnet/bundles/scenario-a/spoke-colombia
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed

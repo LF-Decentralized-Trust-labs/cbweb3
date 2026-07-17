@@ -9,7 +9,7 @@ deploy-lnet/
   addresses.env       # the per-VM IPs (edit here or override via exported env)
   render.sh           # substitute ${IP_*} markers: *.yaml.tmpl -> *.yaml
   deploy.sh           # render + run the toolkit for one target host
-  bundles/            # central drop-zone: hub/ + scenario-a/ + scenario-b/
+  bundles/            # hub/ + scenario-{a,b}/<spoke>/ (+ <spoke>.bundle.yaml)
   hub/manifests/      # VM .20 — Scenario B found-hub
   scenario-a/         # Enhanced Correspondent Banking (dual-layer HTLC) — VMs .21–.26
   scenario-b/         # International Hub spokes/banks — VMs .21–.26

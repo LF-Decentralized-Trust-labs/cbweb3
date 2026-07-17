@@ -1,4 +1,4 @@
-# Scenario B spoke join bundles.
-# spoke-brazil.bundle.yaml   → scp'd from CB Brazil,   consumed by cb1/cb2
-# spoke-colombia.bundle.yaml → scp'd from CB Colombia, consumed by cb3/cb4
+# Scenario B spoke layout (one folder per spoke = dataDir + join bundle):
+#   spoke-brazil/spoke-brazil.bundle.yaml
+#   spoke-colombia/spoke-colombia.bundle.yaml
 # (hub.bundle.yaml lives at ../hub/ — see ../hub/.gitkeep)

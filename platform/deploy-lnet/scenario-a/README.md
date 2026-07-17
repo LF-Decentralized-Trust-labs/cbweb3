@@ -107,36 +107,36 @@ CACTI_PORT=4000 provisioning/scripts/start-cacti.sh
 ### 2 — VM 10.10.0.21 — Central Bank Brazil (founder)
 
 ```bash
-cd scenario-a
-export BESU_NAT_PROFILE=NONE
-./toolkit/cbweb3 apply -f ../deploy-lnet/scenario-a/manifests/cb-brazil.yaml --dry-run   # preview the 17-step plan
-./toolkit/cbweb3 apply -f ../deploy-lnet/scenario-a/manifests/cb-brazil.yaml
-# Emits: /opt/cbweb3/data/scenario-a/bundles/spoke-brazil.bundle.yaml   (out dir = dirname(dataDir))
+# Preferred: render + apply via the LNET wrapper (creates dataDir under bundles/)
+../deploy.sh a cb-brazil --dry-run   # preview
+../deploy.sh a cb-brazil
+# dataDir:  deploy-lnet/bundles/scenario-a/spoke-brazil/
+# Emits → relocates: deploy-lnet/bundles/scenario-a/spoke-brazil/spoke-brazil.bundle.yaml
 ```
 
-Copy the emitted bundle into each Brazil bank VM's `deploy-lnet/bundles/scenario-a/`:
+Copy the emitted bundle into each Brazil bank VM (same path):
 
 ```bash
-scp /opt/cbweb3/data/scenario-a/bundles/spoke-brazil.bundle.yaml \
-    op@10.10.0.22:<repo>/deploy-lnet/bundles/scenario-a/
-scp /opt/cbweb3/data/scenario-a/bundles/spoke-brazil.bundle.yaml \
-    op@10.10.0.23:<repo>/deploy-lnet/bundles/scenario-a/
+scp $REPO/deploy-lnet/bundles/scenario-a/spoke-brazil/spoke-brazil.bundle.yaml \
+    op@10.10.0.22:$REPO/deploy-lnet/bundles/scenario-a/spoke-brazil/
+scp $REPO/deploy-lnet/bundles/scenario-a/spoke-brazil/spoke-brazil.bundle.yaml \
+    op@10.10.0.23:$REPO/deploy-lnet/bundles/scenario-a/spoke-brazil/
 ```
 
 ### 3 — VMs 10.10.0.22 / 10.10.0.23 — cb1 / cb2 (join Brazil)
 
 ```bash
-cd scenario-a
-export BESU_NAT_PROFILE=NONE
-./toolkit/cbweb3 apply -f ../deploy-lnet/scenario-a/manifests/cb1.yaml     # .22 ; cb2.yaml on .23
+../deploy.sh a cb1     # .22 ; use `a cb2` on .23
 ```
 
-`joinBundleRef` (`../../bundles/scenario-a/spoke-brazil.bundle.yaml`) resolves relative to the manifest
-file, i.e. `deploy-lnet/bundles/scenario-a/spoke-brazil.bundle.yaml` — the scp target above.
+`joinBundleRef` (`../../bundles/scenario-a/spoke-brazil/spoke-brazil.bundle.yaml`) resolves relative
+to the manifest file — the scp target above. Bank dataDir (per VM):
+`deploy-lnet/bundles/scenario-a/spoke-brazil/`.
 
 ### 4 — VM 10.10.0.24 — Central Bank Colombia (founder)
 
-Same as step 2 with `cb-colombia.yaml`; emits `spoke-colombia.bundle.yaml`. scp it to `.25` and `.26`.
+Same as step 2 with `a cb-colombia`; emits `spoke-colombia/spoke-colombia.bundle.yaml`. scp it into
+`deploy-lnet/bundles/scenario-a/spoke-colombia/` on `.25` and `.26`.
 
 ### 5 — VMs 10.10.0.25 / 10.10.0.26 — cb3 / cb4 (join Colombia)
 

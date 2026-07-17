@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
 # LNET deploy — Scenario B. VM ${IP_CB_BRAZIL} — Central Bank Brazil, FOUNDS spoke-brazil (BRL).
 # Consumes ../../bundles/hub/hub.bundle.yaml (scp'd from ${IP_HUB}).
-# Emits ./bundles/spoke-brazil.bundle.yaml for cb1/cb2 to join.
+# dataDir + emitted join bundle under deploy-lnet/bundles/scenario-b/spoke-brazil/
 apiVersion: cbweb3b/v1
 kind: ParticipantDeployment
 metadata:
@@ -23,7 +23,8 @@ spec:
     rpc: { port: 8845 }
     ws:  { port: 8846 }
     p2p: { port: 30304 }
-    dataDir: /opt/cbweb3/data/scenario-b/spoke-brazil
+    # Relative to deploy-lnet/ (deploy.sh --data-dir overrides to the absolute path).
+    dataDir: bundles/scenario-b/spoke-brazil
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed            # the CB is the CA of its own spoke

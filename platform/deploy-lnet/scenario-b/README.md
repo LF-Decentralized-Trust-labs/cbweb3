@@ -6,7 +6,7 @@ chain plus two sovereign spokes (Brazil, Colombia); commercial banks join their 
 relay federates cross-currency corridors.
 
 The Scenario-B **hub** lives under [`../hub/`](../hub/) (`hub/manifests/`); shared bundles live under
-[`../bundles/`](../bundles/) (`bundles/hub/`, `bundles/scenario-b/`). Both Cacti relays are started from
+[`../bundles/`](../bundles/) (`bundles/hub/`, `bundles/scenario-b/<spoke>/`). Both Cacti relays are started from
 the [deploy-lnet root](../README.md). This folder covers Scenario B's spokes and banks (VMs .21–.26).
 
 ## Topology
@@ -108,16 +108,12 @@ scp $REPO/deploy-lnet/bundles/hub/hub.bundle.yaml op@10.10.0.24:$REPO/deploy-lne
 ### 2 — VM 10.10.0.21 — Central Bank Brazil (found-spoke)
 
 ```bash
-cd $REPO
-export BESU_NAT_PROFILE=NONE
-go run ./scenario-b/toolkit/cmd/cbweb3b validate -f deploy-lnet/scenario-b/manifests/cb-brazil.yaml
-# --hub-rpc overrides the (localhost) readiness gate carried in the bundle
-go run ./scenario-b/toolkit/cmd/cbweb3b apply \
-  -f deploy-lnet/scenario-b/manifests/cb-brazil.yaml --repo-root . \
-  --hub-rpc http://10.10.0.20:8845
-#   -> registers CB on the hub, registers spoke with the relay (advertising 10.10.0.21),
-#      emits /opt/cbweb3/data/scenario-b/spoke-brazil/bundles/spoke-brazil.bundle.yaml
-#      (enode host = 10.10.0.21:30304, dialable cross-VM)
+# Preferred: render + apply via the LNET wrapper (creates dataDir under bundles/)
+./deploy-lnet/deploy.sh b cb-brazil --dry-run   # preview
+./deploy-lnet/deploy.sh b cb-brazil
+# dataDir:  deploy-lnet/bundles/scenario-b/spoke-brazil/
+# Emits → relocates: deploy-lnet/bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml
+# (--hub-rpc is added automatically by deploy.sh)
 ```
 
 The spoke manifest reads the hub bundle via `hubBundleRef: ../../bundles/hub/hub.bundle.yaml`
@@ -126,31 +122,31 @@ The spoke manifest reads the hub bundle via `hubBundleRef: ../../bundles/hub/hub
 
 ```bash
 sed -i 's#http://host.docker.internal:16845#http://10.10.0.21:16845#' \
-  /opt/cbweb3/data/scenario-b/spoke-brazil/bundles/spoke-brazil.bundle.yaml
-scp /opt/cbweb3/data/scenario-b/spoke-brazil/bundles/spoke-brazil.bundle.yaml op@10.10.0.22:$REPO/deploy-lnet/bundles/scenario-b/
-scp /opt/cbweb3/data/scenario-b/spoke-brazil/bundles/spoke-brazil.bundle.yaml op@10.10.0.23:$REPO/deploy-lnet/bundles/scenario-b/
+  $REPO/deploy-lnet/bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml
+scp $REPO/deploy-lnet/bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml \
+    op@10.10.0.22:$REPO/deploy-lnet/bundles/scenario-b/spoke-brazil/
+scp $REPO/deploy-lnet/bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml \
+    op@10.10.0.23:$REPO/deploy-lnet/bundles/scenario-b/spoke-brazil/
 ```
 
 ### 3 — VMs 10.10.0.22 / 10.10.0.23 — cb1 / cb2 (join Brazil)
 
 ```bash
-cd $REPO
-export BESU_NAT_PROFILE=NONE
-go run ./scenario-b/toolkit/cmd/cbweb3b validate -f deploy-lnet/scenario-b/manifests/cb1.yaml
-go run ./scenario-b/toolkit/cmd/cbweb3b apply    -f deploy-lnet/scenario-b/manifests/cb1.yaml --repo-root .
-#   -> write-genesis (from bundle) -> start-besu-join (--bootnodes=10.10.0.21:30304)
+./deploy-lnet/deploy.sh b cb1     # .22 ; use `b cb2` on .23
+#   -> write-genesis (from bundle) -> start-besu-join (--bootnodes=<CB>:30304)
 #      -> wait-sync (eth_syncing) -> gateway/keycloak/backend -> gen-csr
 ```
 
-`joinBundleRef` (`../../bundles/scenario-b/spoke-brazil.bundle.yaml`) resolves relative to the manifest
-file, i.e. `deploy-lnet/bundles/scenario-b/spoke-brazil.bundle.yaml`. The CSR (`<dataDir>/pki/cb1.csr`) is
+`joinBundleRef` (`../../bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml`) resolves relative
+to the manifest — the scp target above. Bank dataDir (per VM):
+`deploy-lnet/bundles/scenario-b/spoke-brazil/`. The CSR (`<dataDir>/pki/cb1.csr`) is
 generated locally and never transmitted; signing / on-chain registration are runtime steps handled via
 the CB governance portal.
 
 ### 4 — VM 10.10.0.24 — Central Bank Colombia (found-spoke)
 
-Same as step 2 with `cb-colombia.yaml`; emits `spoke-colombia.bundle.yaml`; scp it to `.25` and `.26`
-(into `deploy-lnet/bundles/scenario-b/`).
+Same as step 2 with `cb-colombia`; emits `spoke-colombia/spoke-colombia.bundle.yaml`; scp it to `.25`
+and `.26` (into `deploy-lnet/bundles/scenario-b/spoke-colombia/`).
 
 ### 5 — VMs 10.10.0.25 / 10.10.0.26 — cb3 / cb4 (join Colombia)
 

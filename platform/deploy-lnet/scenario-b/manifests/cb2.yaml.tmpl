@@ -16,13 +16,13 @@ spec:
     id: spoke-brazil
     chainId: 2022
     currency: BRL
-  joinBundleRef: ../../bundles/scenario-b/spoke-brazil.bundle.yaml
+  joinBundleRef: ../../bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml
   node:
     advertisedHost: ${IP_CB2}
     rpc: { port: 8845 }
     ws:  { port: 8846 }
     p2p: { port: 30304 }
-    dataDir: /opt/cbweb3/data/scenario-b/cb2
+    dataDir: bundles/scenario-b/spoke-brazil
     validator: false
   image: build
   keyProvider: kms://local-emulator

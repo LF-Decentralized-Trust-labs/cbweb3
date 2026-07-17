@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
 # LNET deploy — Scenario B. VM ${IP_CB1} — commercial bank cb1, JOINS spoke-brazil.
-# joinBundleRef resolves relative to THIS file -> deploy-lnet/bundles/scenario-b/spoke-brazil.bundle.yaml
-# (scp the bundle emitted on ${IP_CB_BRAZIL} into deploy-lnet/bundles/scenario-b/ before apply).
+# joinBundleRef -> deploy-lnet/bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml
+# (scp the bundle emitted on ${IP_CB_BRAZIL} into that path before apply).
 apiVersion: cbweb3b/v1
 kind: ParticipantDeployment
 metadata:
@@ -18,13 +18,13 @@ spec:
     id: spoke-brazil
     chainId: 2022
     currency: BRL
-  joinBundleRef: ../../bundles/scenario-b/spoke-brazil.bundle.yaml
+  joinBundleRef: ../../bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml
   node:
     advertisedHost: ${IP_CB1}
     rpc: { port: 8845 }
     ws:  { port: 8846 }
     p2p: { port: 30304 }
-    dataDir: /opt/cbweb3/data/scenario-b/cb1
+    dataDir: bundles/scenario-b/spoke-brazil
     validator: false
   image: build
   keyProvider: kms://local-emulator

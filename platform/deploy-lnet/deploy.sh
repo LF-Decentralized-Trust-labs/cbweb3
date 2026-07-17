@@ -120,16 +120,44 @@ fi
 mkdir -p "$HERE/.bin"
 export BESU_NAT_PROFILE=NONE   # routable enode advertisement (required by Scenario A, harmless for B)
 
+# Map a spoke/bank target to its spoke id (used for bundles/<scenario>/<spoke>/).
+spoke_id_for() {
+  case "$1" in
+    cb-brazil|cb1|cb2) echo "spoke-brazil" ;;
+    cb-colombia|cb3|cb4) echo "spoke-colombia" ;;
+    *) echo "" ;;
+  esac
+}
+
 log "Step 4/5 — building toolkit binary"
 case "$SCENARIO" in
   a)
     man="$HERE/scenario-a/manifests/${TARGET}.yaml"
     [[ -f "$man" ]] || { echo "unknown scenario-a target: $TARGET" >&2; exit 2; }
+    spoke_id="$(spoke_id_for "$TARGET")"
+    [[ -n "$spoke_id" ]] || { echo "unknown scenario-a target: $TARGET" >&2; exit 2; }
+    # dataDir = bundles/scenario-a/<spoke>/ (writable, same pattern as hub/).
+    # Founders emit <outDir>/bundles/<spoke>.bundle.yaml; CBWEB3_OUTPUT_DIR=$HERE
+    # then relocate into that spoke folder.
+    data_dir="$HERE/bundles/scenario-a/$spoke_id"
+    mkdir -p "$data_dir"
     log "building cbweb3 → $HERE/.bin/cbweb3"
     ( cd "$ROOT/scenario-a/toolkit" && go build -o "$HERE/.bin/cbweb3" ./cmd/cbweb3 )
     log "Step 5/5 — applying Scenario A manifest: $man"
+    log "data-dir=$data_dir  (bundle → bundles/scenario-a/$spoke_id/$spoke_id.bundle.yaml)"
     # cbweb3 locates its templates by walking up from cwd -> run from scenario-a/.
-    ( cd "$ROOT/scenario-a" && "$HERE/.bin/cbweb3" apply -f "$man" "${EXTRA[@]}" )
+    # Manifest dataDir is relative to scenario-a/; CBWEB3_OUTPUT_DIR forces emit under deploy-lnet/.
+    ( cd "$ROOT/scenario-a" && \
+        CBWEB3_OUTPUT_DIR="$HERE" \
+        "$HERE/.bin/cbweb3" apply -f "$man" "${EXTRA[@]}" )
+    if [[ "$TARGET" == "cb-brazil" || "$TARGET" == "cb-colombia" ]]; then
+      src="$HERE/bundles/${spoke_id}.bundle.yaml"
+      dst="$HERE/bundles/scenario-a/$spoke_id/${spoke_id}.bundle.yaml"
+      if [[ -f "$src" ]]; then
+        mv -f "$src" "$dst"
+        log "spoke bundle relocated → $dst"
+      fi
+    fi
     log "Scenario A apply finished for target=$TARGET"
     ;;
   b)
@@ -137,6 +165,7 @@ case "$SCENARIO" in
     ( cd "$ROOT/scenario-b/toolkit" && go build -o "$HERE/.bin/cbweb3b" ./cmd/cbweb3b )
     hubrpc=()
     outdir=()
+    spoke_id=""
     if [[ "$TARGET" == "hub" ]]; then
       man="$HERE/hub/manifests/hub.yaml"
       # Manifests under hub/manifests/; dataDir + bundle under bundles/hub/.
@@ -150,16 +179,31 @@ case "$SCENARIO" in
     else
       man="$HERE/scenario-b/manifests/${TARGET}.yaml"
       [[ -f "$man" ]] || { echo "unknown scenario-b target: $TARGET" >&2; exit 2; }
+      spoke_id="$(spoke_id_for "$TARGET")"
+      [[ -n "$spoke_id" ]] || { echo "unknown scenario-b target: $TARGET" >&2; exit 2; }
+      # dataDir = bundles/scenario-b/<spoke>/; EmitSpoke writes
+      # <outDir>/bundles/<spoke>.bundle.yaml → relocate into the spoke folder.
+      data_dir="$HERE/bundles/scenario-b/$spoke_id"
+      mkdir -p "$data_dir"
+      outdir=(--data-dir "$data_dir" --out-dir "$HERE")
       # found-spoke needs the hub RPC readiness gate pointed at the real hub VM.
       case "$TARGET" in
         cb-brazil|cb-colombia) hubrpc=(--hub-rpc "http://${IP_HUB}:8845") ;;
       esac
       log "Step 5/5 — applying Scenario B manifest: $man"
+      log "data-dir=$data_dir  (bundle → bundles/scenario-b/$spoke_id/$spoke_id.bundle.yaml)"
     fi
     "$HERE/.bin/cbweb3b" apply -f "$man" --repo-root "$ROOT" "${hubrpc[@]}" "${outdir[@]}" "${EXTRA[@]}"
     if [[ "$TARGET" == "hub" && -f "$HERE/bundles/hub.bundle.yaml" ]]; then
       mv -f "$HERE/bundles/hub.bundle.yaml" "$HERE/bundles/hub/hub.bundle.yaml"
       log "hub bundle relocated → $HERE/bundles/hub/hub.bundle.yaml"
+    elif [[ -n "$spoke_id" && ( "$TARGET" == "cb-brazil" || "$TARGET" == "cb-colombia" ) ]]; then
+      src="$HERE/bundles/${spoke_id}.bundle.yaml"
+      dst="$HERE/bundles/scenario-b/$spoke_id/${spoke_id}.bundle.yaml"
+      if [[ -f "$src" ]]; then
+        mv -f "$src" "$dst"
+        log "spoke bundle relocated → $dst"
+      fi
     fi
     log "Scenario B apply finished for target=$TARGET"
     ;;
