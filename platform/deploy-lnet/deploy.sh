@@ -52,6 +52,15 @@ EXTRA=("$@")
 # 1) Always render first so this target and every bundle-ref stay consistent.
 "$HERE/render.sh"
 
+# 1b) Build the platform launcher image once per host. It is scenario-neutral
+# (both toolkits only `docker run` it, mounting each entity's config fragments),
+# so every entity with `launcher: enable` needs it present locally or its
+# start-launcher step soft-fails. Idempotent: skip when already built.
+if ! docker image inspect cbweb3/launcher:local >/dev/null 2>&1; then
+  echo "[deploy] launcher image cbweb3/launcher:local not found — building it"
+  "$ROOT/launcher/build.sh"
+fi
+
 # 2) Build the scenario's toolkit binary (go caches; fast on repeat).
 mkdir -p "$HERE/.bin"
 export BESU_NAT_PROFILE=NONE   # routable enode advertisement (required by Scenario A, harmless for B)
