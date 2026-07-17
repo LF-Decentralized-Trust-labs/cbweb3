@@ -448,7 +448,22 @@ func JoinSteps(c JoinConfig) []Step {
 		// Deps gen-csr so the host pki dir exists (host-owned) BEFORE compliance
 		// bind-mounts it; otherwise Docker auto-creates it root-owned and gen-csr
 		// later fails to write (the known join gen-csr permission bug).
-		{Name: "start-bank-backend", Deps: []string{"start-bank-infra", "start-bank-payment", "wire-addresses", "provision-keycloak-bank", "gen-csr"}, Run: compose("entity-backend")},
+		{Name: "start-bank-backend", Deps: []string{"start-bank-infra", "start-bank-payment", "wire-addresses", "provision-keycloak-bank", "gen-csr"}, Run: func(ctx context.Context) error {
+			// Build the backend images before `compose up`. A joining bank runs on its
+			// own Docker daemon (multi-VM lab) and never had the hub build these, so
+			// compose would try to PULL a local-only tag and fail. Idempotent via
+			// imageExists (no-op on a single-host lab). Mirrors start-bank-payment.
+			for _, b := range []struct{ image, dockerfile, context string }{
+				{hubComplianceImage, "backend/services/compliance/Dockerfile", "backend"},
+				{hubAuthImage, "backend/services/auth/Dockerfile", "backend"},
+				{hubBackendImage, "backend/services/api-gateway/Dockerfile", "backend"},
+			} {
+				if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), b.image, b.dockerfile, b.context); err != nil {
+					return err
+				}
+			}
+			return compose("entity-backend")(ctx)
+		}},
 		{Name: "start-bank-frontend", Deps: []string{"start-bank-backend"}, Soft: true, Run: func(ctx context.Context) error {
 			// The bank portal bakes this bank's api-gateway URL (browser reaches it on
 			// the host at localhost:<gwPort>); build a per-entity image, then run it.
