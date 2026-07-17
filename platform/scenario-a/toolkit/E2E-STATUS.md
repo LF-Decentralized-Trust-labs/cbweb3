@@ -207,8 +207,11 @@ dial the routable host directly — no per-peer `extra_hosts`. The `PD030011` no
 check is on the cert **CN** (= node name), which is unchanged. Gated on `isRoutableHost`,
 so single-host keeps the container-name behavior byte-for-byte. See `paladinDialHost` /
 `addTransportSAN` and the `gen-tls` / `gen-tls-join` / `register-nodes` /
-`register-paladin-node` steps. `paladin-compose.routable.yaml` is retained so a CB
-registered by an older toolkit stays reachable.
+`register-paladin-node` steps. Because every node now advertises its own routable
+host, the bank dials the CB by IP/host and never by container name — so the old
+one-directional `extra_hosts` overlay (`paladin-compose.routable.yaml` + `cbPaladinHost`
+wiring) became dead code and was removed. Cross-VM peering requires only that
+`9000/tcp` be open both directions between each CB↔bank pair.
 
 **Second half — publish gRPC on 9000 (the bank join side).** Advertising `:9000` is only
 half the fix: the node must also *listen* there. The routable CB founder already published

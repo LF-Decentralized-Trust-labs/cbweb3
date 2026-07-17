@@ -148,7 +148,7 @@ func TestRenderConfigJoinStep_Check(t *testing.T) {
 func TestStartPaladinJoinStep_ComposeEnvAndPorts(t *testing.T) {
 	// Single-host bank (empty advertisedHost): gRPC host port stays in the +21000 band.
 	step := newStartPaladinJoinStep("spoke-brl", "bank-itau", t.TempDir(), "/nonexistent/compose.yaml",
-		"/nonexistent/compose.routable.yaml", "", "", "paladin:test", 8746, 0, 0).(*startPaladinJoinStep)
+		"", "paladin:test", 8746, 0, 0).(*startPaladinJoinStep)
 
 	// Ports derived from the bank Besu RPC port (8746), each in its own +1000 band:
 	// RPC=+19000, WS=+20000, gRPC=+21000.
@@ -177,7 +177,7 @@ func TestStartPaladinJoinStep_ComposeEnvAndPorts(t *testing.T) {
 // dial gets "connection refused" and create-pente-context hangs.
 func TestStartPaladinJoinStep_RoutablePublishesGRPC9000(t *testing.T) {
 	step := newStartPaladinJoinStep("spoke-brl", "bank-itau", t.TempDir(), "/nonexistent/compose.yaml",
-		"/nonexistent/compose.routable.yaml", "10.10.0.21", "10.10.0.22", "paladin:test", 8746, 0, 0).(*startPaladinJoinStep)
+		"10.10.0.22", "paladin:test", 8746, 0, 0).(*startPaladinJoinStep)
 	env := strings.Join(step.composeEnv(), "\n")
 	if !strings.Contains(env, "PALADIN_BANK_GRPC_PORT=9000") {
 		t.Errorf("routable bank must publish gRPC on 9000; got:\n%s", env)
@@ -185,25 +185,6 @@ func TestStartPaladinJoinStep_RoutablePublishesGRPC9000(t *testing.T) {
 	// RPC/WS stay in their per-bank bands (only the peer gRPC port is fixed to 9000).
 	if !strings.Contains(env, "PALADIN_BANK_RPC_PORT=27746") {
 		t.Errorf("routable bank RPC port should stay 27746; got:\n%s", env)
-	}
-}
-
-func TestStartPaladinJoinStep_RoutableCBHost(t *testing.T) {
-	// Routable CB host: composeEnv publishes CB_PALADIN_HOST for the extra_hosts
-	// override so the bank can reach the CB Paladin cross-VM.
-	step := newStartPaladinJoinStep("spoke-brl", "bank-itau", t.TempDir(), "/nonexistent/compose.yaml",
-		"/nonexistent/compose.routable.yaml", "10.10.0.21", "10.10.0.22", "paladin:test", 8746, 0, 0).(*startPaladinJoinStep)
-	if env := strings.Join(step.composeEnv(), "\n"); !strings.Contains(env, "CB_PALADIN_HOST=10.10.0.21") {
-		t.Errorf("composeEnv missing CB_PALADIN_HOST=10.10.0.21, got:\n%s", env)
-	}
-	if !isRoutableHost(step.cbPaladinHost) {
-		t.Errorf("cbPaladinHost %q should be routable", step.cbPaladinHost)
-	}
-	// Single-host (empty CB host): no routable wiring, extra_hosts override skipped.
-	local := newStartPaladinJoinStep("spoke-brl", "bank-itau", t.TempDir(), "/nonexistent/compose.yaml",
-		"/nonexistent/compose.routable.yaml", "", "", "paladin:test", 8746, 0, 0).(*startPaladinJoinStep)
-	if isRoutableHost(local.cbPaladinHost) {
-		t.Error("empty cbPaladinHost should not be routable")
 	}
 }
 
