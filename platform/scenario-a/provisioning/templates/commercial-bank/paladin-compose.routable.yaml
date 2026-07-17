@@ -1,0 +1,17 @@
+# Routable (cross-VM) override for the commercial-bank Paladin node.
+#
+# Overlaid on paladin-compose.yaml (docker compose -f base -f this) ONLY when the
+# CB advertised host is routable (see startPaladinJoinStep). The CB publishes its
+# Paladin transport on-chain as dns:///paladin-<spoke>-cb:9000 — the CB container
+# name plus the fixed peer port. On a single host that name resolves over the
+# shared spoke network; across VMs it does not, so we map it to the CB's routable
+# host via extra_hosts. The CB container NAME is kept as the hostname (not a bare
+# IP) so the mutual-TLS authority still matches the CB Paladin cert CN.
+#
+# The full extra_hosts set is restated here (not just the CB entry) so the result
+# is correct whether compose merges or replaces the base list.
+services:
+  paladin-bank:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "paladin-${SPOKE_ID}-cb:${CB_PALADIN_HOST}"
