@@ -12,8 +12,8 @@ func validHub() HubBundle {
 		HubRPC:  "http://host.docker.internal:8845",
 		HubWS:   "ws://host.docker.internal:8846",
 		Contracts: map[string]string{
-			"identityRegistry": "0x01", "tCeBM_BRL": "0x02", "tCeBM_EUR": "0x03",
-			"fxAgreement": "0x04", "pairRegistry": "0x05", "currencyRegistry": "0x06",
+			"identityRegistry": "0x01",
+			"fxAgreement":      "0x04", "pairRegistry": "0x05", "currencyRegistry": "0x06",
 			"manualOracle": "0x07",
 		},
 	}

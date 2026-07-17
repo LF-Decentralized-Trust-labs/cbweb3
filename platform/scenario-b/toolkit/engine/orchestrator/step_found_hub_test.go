@@ -21,12 +21,11 @@ func writeBroadcast(t *testing.T, contractsDir string, chainID uint64) {
 	}
 	json := `{"transactions":[
 	 {"transactionType":"CREATE","contractName":"IdentityRegistry","contractAddress":"0xa1"},
-	 {"transactionType":"CREATE","contractName":"TokenizedCentralBankMoney","contractAddress":"0xb1"},
-	 {"transactionType":"CREATE","contractName":"TokenizedCentralBankMoney","contractAddress":"0xb2"},
 	 {"transactionType":"CREATE","contractName":"FXAgreement","contractAddress":"0xc1"},
 	 {"transactionType":"CREATE","contractName":"PairRegistry","contractAddress":"0xd1"},
 	 {"transactionType":"CREATE","contractName":"CurrencyRegistry","contractAddress":"0xe1"},
-	 {"transactionType":"CREATE","contractName":"ManualOracle","contractAddress":"0xf1"}
+	 {"transactionType":"CREATE","contractName":"ManualOracle","contractAddress":"0xf1"},
+	 {"transactionType":"CREATE","contractName":"LiquidityCommitRegistry","contractAddress":"0xf2"}
 	]}`
 	if err := os.WriteFile(filepath.Join(dir, "run-latest.json"), []byte(json), 0o644); err != nil {
 		t.Fatal(err)
@@ -158,11 +157,14 @@ func TestEmitHubBundleFromBroadcast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load emitted bundle: %v", err)
 	}
-	if b.Contracts["tCeBM_BRL"] != "0xb1" || b.Contracts["tCeBM_EUR"] != "0xb2" {
-		t.Fatalf("tCeBM mapping wrong: %+v", b.Contracts)
-	}
 	if b.Contracts["identityRegistry"] != "0xa1" || b.Contracts["manualOracle"] != "0xf1" {
 		t.Fatalf("contract mapping wrong: %+v", b.Contracts)
+	}
+	if _, ok := b.Contracts["tCeBM_BRL"]; ok {
+		t.Fatalf("tCeBM_BRL must not be in hub bundle at found-hub: %+v", b.Contracts)
+	}
+	if b.Contracts["liquidityCommitRegistry"] != "0xf2" {
+		t.Fatalf("liquidityCommitRegistry mapping wrong: %+v", b.Contracts)
 	}
 	if b.HubRPC != "http://10.10.0.20:8845" {
 		t.Fatalf("HubRPC want http://10.10.0.20:8845, got %q", b.HubRPC)

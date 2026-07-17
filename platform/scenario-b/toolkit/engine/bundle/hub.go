@@ -14,11 +14,10 @@ import (
 const HubBundleVersion = "cbweb3b/hub-bundle/v1"
 
 // RequiredContracts are the hub contracts that must be present in the bundle
-// (deployed by CBWeb3Hub.s.sol, in Solidity-internal order).
+// (deployed by CBWeb3Hub.s.sol). tCeBM_* tokens are optional — they are
+// deployed later when each CB registers a currency, not at found-hub.
 var RequiredContracts = []string{
 	"identityRegistry",
-	"tCeBM_BRL",
-	"tCeBM_EUR",
 	"fxAgreement",
 	"pairRegistry",
 	"currencyRegistry",

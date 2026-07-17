@@ -586,7 +586,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				}
 				for key, addr := range map[string]string{
 					"HUB_IDENTITY_REGISTRY_ADDRESS":      hub.Contracts["identityRegistry"],
-					"HUB_TOKEN_A_ADDRESS":                hub.Contracts["tCeBM_BRL"],
+					"HUB_TOKEN_A_ADDRESS":                hub.Contracts["tCeBM_BRL"], // optional until CB registers currency
 					"HUB_TOKEN_B_ADDRESS":                hub.Contracts["tCeBM_EUR"],
 					"FX_AGREEMENT_CONTRACT_ADDRESS":      hub.Contracts["fxAgreement"],
 					"PAIR_REGISTRY_CONTRACT_ADDRESS":     hub.Contracts["pairRegistry"],
@@ -598,6 +598,9 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					// bridge-in/out endpoints (registerSovereignRoutes gates on it).
 					"LIQUIDITY_COMMIT_REGISTRY_ADDRESS": hub.Contracts["liquidityCommitRegistry"],
 				} {
+					if addr == "" {
+						continue
+					}
 					if err := addrs.AppendAddr(c.SpokeEnvFile, key, addr); err != nil {
 						return err
 					}

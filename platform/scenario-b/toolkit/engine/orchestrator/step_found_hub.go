@@ -391,13 +391,16 @@ func FoundHubSteps(c HubConfig) []Step {
 				}
 				for key, addr := range map[string]string{
 					"HUB_IDENTITY_REGISTRY_ADDRESS":  m["identityRegistry"],
-					"HUB_TOKEN_A_ADDRESS":            m["tCeBM_BRL"],
+					"HUB_TOKEN_A_ADDRESS":            m["tCeBM_BRL"], // optional — set later when tCeBM is deployed
 					"HUB_TOKEN_B_ADDRESS":            m["tCeBM_EUR"],
 					"FX_AGREEMENT_CONTRACT_ADDRESS":  m["fxAgreement"],
 					"PAIR_REGISTRY_CONTRACT_ADDRESS": m["pairRegistry"],
 					"CURRENCY_REGISTRY_ADDRESS":      m["currencyRegistry"],
 					"MANUAL_ORACLE_ADDRESS":          m["manualOracle"],
 				} {
+					if addr == "" {
+						continue // tCeBM not deployed at found-hub
+					}
 					if err := addrs.AppendAddr(c.HubEnvFile, key, addr); err != nil {
 						return err
 					}
@@ -500,8 +503,9 @@ func FoundHubSteps(c HubConfig) []Step {
 	}
 }
 
-// hubContractMap maps the CBWeb3Hub broadcast deployments to bundle keys. The
-// two TokenizedCentralBankMoney deployments are BRL then EUR (Solidity order).
+// hubContractMap maps the CBWeb3Hub broadcast deployments to bundle keys.
+// TokenizedCentralBankMoney is optional (not deployed at found-hub anymore;
+// kept for backward compatibility with older broadcasts that still include them).
 func hubContractMap(broadcastPath string) (map[string]string, error) {
 	list, err := addrs.ParseBroadcastList(broadcastPath)
 	if err != nil {
@@ -514,6 +518,7 @@ func hubContractMap(broadcastPath string) (map[string]string, error) {
 		case "IdentityRegistry":
 			out["identityRegistry"] = d.Address
 		case "TokenizedCentralBankMoney":
+			// Legacy broadcasts only — current CBWeb3Hub.s.sol does not deploy tCeBM.
 			if tcebmSeen == 0 {
 				out["tCeBM_BRL"] = d.Address
 			} else {
