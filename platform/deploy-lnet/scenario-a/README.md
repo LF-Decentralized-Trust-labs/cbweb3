@@ -130,8 +130,9 @@ scp $REPO/deploy-lnet/bundles/scenario-a/spoke-brazil/spoke-brazil.bundle.yaml \
 ```
 
 `joinBundleRef` (`../../bundles/scenario-a/spoke-brazil/spoke-brazil.bundle.yaml`) resolves relative
-to the manifest file — the scp target above. Bank dataDir (per VM):
-`deploy-lnet/bundles/scenario-a/spoke-brazil/`.
+to the manifest file — the scp target above (spoke drop-zone). Bank **dataDir** is per bank id so
+provisioning state never mixes with the CB spoke:
+`deploy-lnet/bundles/scenario-a/cb1/` (or `cb2/`).
 
 ### 4 — VM 10.10.0.24 — Central Bank Colombia (founder)
 

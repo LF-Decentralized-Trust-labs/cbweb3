@@ -2,6 +2,7 @@
 # LNET deploy — Scenario A. VM ${IP_CB1} — commercial bank cb1, JOINS spoke-brazil.
 # joinBundleRef -> deploy-lnet/bundles/scenario-a/spoke-brazil/spoke-brazil.bundle.yaml
 # (scp the bundle emitted on ${IP_CB_BRAZIL} into that path before apply).
+# dataDir is per-bank so .provisioning-state.yaml never mixes with the CB spoke.
 apiVersion: cbweb3/v1
 kind: ParticipantDeployment
 metadata:
@@ -23,7 +24,7 @@ spec:
     rpc: { port: 8645 }
     ws:  { port: 8655 }
     p2p: { port: 30303 }
-    dataDir: ../deploy-lnet/bundles/scenario-a/spoke-brazil
+    dataDir: ../deploy-lnet/bundles/scenario-a/cb1
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed

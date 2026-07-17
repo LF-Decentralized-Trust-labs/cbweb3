@@ -1,3 +1,4 @@
-# Scenario A spoke layout (one folder per spoke = dataDir + join bundle):
-#   spoke-brazil/spoke-brazil.bundle.yaml
+# Scenario A layout under bundles/scenario-a/:
+#   spoke-brazil/spoke-brazil.bundle.yaml     — CB found dataDir + join bundle
 #   spoke-colombia/spoke-colombia.bundle.yaml
+#   cb1/ … cb4/                              — commercial-bank dataDir (state isolated)

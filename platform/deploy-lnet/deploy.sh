@@ -120,12 +120,24 @@ fi
 mkdir -p "$HERE/.bin"
 export BESU_NAT_PROFILE=NONE   # routable enode advertisement (required by Scenario A, harmless for B)
 
-# Map a spoke/bank target to its spoke id (used for bundles/<scenario>/<spoke>/).
+# Map a spoke/bank target to its spoke id (join bundle drop-zone under
+# bundles/<scenario>/<spoke>/). Commercial banks still join that spoke, but their
+# writable dataDir is per-bank (see entity_dir_for) so state never mixes with the CB.
 spoke_id_for() {
   case "$1" in
     cb-brazil|cb1|cb2) echo "spoke-brazil" ;;
     cb-colombia|cb3|cb4) echo "spoke-colombia" ;;
     *) echo "" ;;
+  esac
+}
+
+# Writable dataDir folder name under bundles/scenario-{a,b}/:
+#   founders (cb-brazil, cb-colombia) → spoke id (also holds <spoke>.bundle.yaml)
+#   everything else (commercial banks) → target name (= bankId), so state is isolated
+entity_dir_for() {
+  case "$1" in
+    cb-brazil|cb-colombia) spoke_id_for "$1" ;;
+    *) echo "$1" ;;
   esac
 }
 
@@ -135,16 +147,20 @@ case "$SCENARIO" in
     man="$HERE/scenario-a/manifests/${TARGET}.yaml"
     [[ -f "$man" ]] || { echo "unknown scenario-a target: $TARGET" >&2; exit 2; }
     spoke_id="$(spoke_id_for "$TARGET")"
-    [[ -n "$spoke_id" ]] || { echo "unknown scenario-a target: $TARGET" >&2; exit 2; }
-    # dataDir = bundles/scenario-a/<spoke>/ (writable, same pattern as hub/).
+    entity_dir="$(entity_dir_for "$TARGET")"
+    [[ -n "$spoke_id" && -n "$entity_dir" ]] || { echo "unknown scenario-a target: $TARGET" >&2; exit 2; }
+    # dataDir = bundles/scenario-a/<spoke|bank>/ (writable).
     # Founders emit <outDir>/bundles/<spoke>.bundle.yaml; CBWEB3_OUTPUT_DIR=$HERE
-    # then relocate into that spoke folder.
-    data_dir="$HERE/bundles/scenario-a/$spoke_id"
+    # then relocate into the spoke folder (not the bank folder).
+    data_dir="$HERE/bundles/scenario-a/$entity_dir"
     mkdir -p "$data_dir"
+    # Banks still need the spoke join bundle on disk (joinBundleRef); ensure the
+    # drop-zone exists even when dataDir is the per-bank folder.
+    mkdir -p "$HERE/bundles/scenario-a/$spoke_id"
     log "building cbweb3 → $HERE/.bin/cbweb3"
     ( cd "$ROOT/scenario-a/toolkit" && go build -o "$HERE/.bin/cbweb3" ./cmd/cbweb3 )
     log "Step 5/5 — applying Scenario A manifest: $man"
-    log "data-dir=$data_dir  (bundle → bundles/scenario-a/$spoke_id/$spoke_id.bundle.yaml)"
+    log "data-dir=$data_dir  (join bundle drop-zone → bundles/scenario-a/$spoke_id/$spoke_id.bundle.yaml)"
     # cbweb3 locates its templates by walking up from cwd -> run from scenario-a/.
     # Manifest dataDir is relative to scenario-a/; CBWEB3_OUTPUT_DIR forces emit under deploy-lnet/.
     ( cd "$ROOT/scenario-a" && \
@@ -166,6 +182,7 @@ case "$SCENARIO" in
     hubrpc=()
     outdir=()
     spoke_id=""
+    entity_dir=""
     if [[ "$TARGET" == "hub" ]]; then
       man="$HERE/hub/manifests/hub.yaml"
       # Manifests under hub/manifests/; dataDir + bundle under bundles/hub/.
@@ -180,18 +197,20 @@ case "$SCENARIO" in
       man="$HERE/scenario-b/manifests/${TARGET}.yaml"
       [[ -f "$man" ]] || { echo "unknown scenario-b target: $TARGET" >&2; exit 2; }
       spoke_id="$(spoke_id_for "$TARGET")"
-      [[ -n "$spoke_id" ]] || { echo "unknown scenario-b target: $TARGET" >&2; exit 2; }
-      # dataDir = bundles/scenario-b/<spoke>/; EmitSpoke writes
+      entity_dir="$(entity_dir_for "$TARGET")"
+      [[ -n "$spoke_id" && -n "$entity_dir" ]] || { echo "unknown scenario-b target: $TARGET" >&2; exit 2; }
+      # dataDir = bundles/scenario-b/<spoke|bank>/; EmitSpoke writes
       # <outDir>/bundles/<spoke>.bundle.yaml → relocate into the spoke folder.
-      data_dir="$HERE/bundles/scenario-b/$spoke_id"
+      data_dir="$HERE/bundles/scenario-b/$entity_dir"
       mkdir -p "$data_dir"
+      mkdir -p "$HERE/bundles/scenario-b/$spoke_id"
       outdir=(--data-dir "$data_dir" --out-dir "$HERE")
       # found-spoke needs the hub RPC readiness gate pointed at the real hub VM.
       case "$TARGET" in
         cb-brazil|cb-colombia) hubrpc=(--hub-rpc "http://${IP_HUB}:8845") ;;
       esac
       log "Step 5/5 — applying Scenario B manifest: $man"
-      log "data-dir=$data_dir  (bundle → bundles/scenario-b/$spoke_id/$spoke_id.bundle.yaml)"
+      log "data-dir=$data_dir  (join bundle drop-zone → bundles/scenario-b/$spoke_id/$spoke_id.bundle.yaml)"
     fi
     "$HERE/.bin/cbweb3b" apply -f "$man" --repo-root "$ROOT" "${hubrpc[@]}" "${outdir[@]}" "${EXTRA[@]}"
     if [[ "$TARGET" == "hub" && -f "$HERE/bundles/hub.bundle.yaml" ]]; then

@@ -6,7 +6,7 @@ chain plus two sovereign spokes (Brazil, Colombia); commercial banks join their 
 relay federates cross-currency corridors.
 
 The Scenario-B **hub** lives under [`../hub/`](../hub/) (`hub/manifests/`); shared bundles live under
-[`../bundles/`](../bundles/) (`bundles/hub/`, `bundles/scenario-b/<spoke>/`). Both Cacti relays are started from
+[`../bundles/`](../bundles/) (`bundles/hub/`, `bundles/scenario-b/<spoke>/`, `bundles/scenario-b/<bankId>/`). Both Cacti relays are started from
 the [deploy-lnet root](../README.md). This folder covers Scenario B's spokes and banks (VMs .21–.26).
 
 ## Topology
@@ -137,8 +137,9 @@ scp $REPO/deploy-lnet/bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml \
 ```
 
 `joinBundleRef` (`../../bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml`) resolves relative
-to the manifest — the scp target above. Bank dataDir (per VM):
-`deploy-lnet/bundles/scenario-b/spoke-brazil/`. The CSR (`<dataDir>/pki/cb1.csr`) is
+to the manifest — the scp target above (spoke drop-zone). Bank **dataDir** is per bank id so
+provisioning state never mixes with the CB spoke:
+`deploy-lnet/bundles/scenario-b/cb1/` (or `cb2/`). The CSR (`<dataDir>/pki/cb1.csr`) is
 generated locally and never transmitted; signing / on-chain registration are runtime steps handled via
 the CB governance portal.
 
