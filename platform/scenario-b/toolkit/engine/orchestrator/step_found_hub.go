@@ -520,7 +520,9 @@ func waitRPC(ctx context.Context, rpcURL string, timeout time.Duration) error {
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("hub RPC %s not ready within %s", rpcURL, timeout)
+			// Shared by hub, spoke and join gates — name only the URL so a spoke's
+			// own Besu (e.g. found-spoke's SpokeRPC) is never mislabeled "hub RPC".
+			return fmt.Errorf("RPC %s not ready within %s", rpcURL, timeout)
 		}
 		select {
 		case <-ctx.Done():
