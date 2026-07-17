@@ -176,3 +176,36 @@ validates. See `step_gen_tls.go` / `step_gen_tls_join.go`.
 - `pgroup_createGroup` `[funded_operator@spoke-brl-cb, funded_operator@spoke-brl-bank-itau]`
   creates the group (was a hang);
 - no `handshake failed` / `bad record MAC` / `PD030011` in the Paladin logs.
+
+## Resolved: cross-VM Paladin transport — one-directional routable wiring (fixed 2026-07-17)
+
+**Symptom (before fix).** On the multi-VM LNET lab (CB and bank on different hosts),
+`create-pente-context` hung and the orchestrator logged, every ~30s:
+```
+waiting for Paladin peer funded_operator@spoke-brazil-cb: POST ptx_resolveVerifier:
+Post "http://localhost:27645": context deadline exceeded (Client.Timeout exceeded ...)
+```
+A **transport-level** timeout (not a Paladin RPC error), so the bank's local Paladin
+was up but its resolve call blocked server-side. TCP to the CB Paladin `:9000`, the
+`extra_hosts` override, and the port publish were all correct — the request leg was fine.
+
+**Root cause: the routable-host wiring was one-directional.** Paladin's reliable
+transport is bidirectional — resolving a remote verifier is a request AND a reply, so
+BOTH nodes must dial each other's on-chain endpoint. The routable override (feat
+c3075acd) gave only the *bank* an `extra_hosts` entry for the CB (request leg). Each
+node still registered its **container name** as its endpoint (`dns:///paladin-<node>:9000`),
+so the CB, sending the reply, tried to dial `paladin-spoke-brazil-cb1` — which does not
+resolve on the CB VM (no reciprocal `extra_hosts`). The reply never returned and the
+bank's `ptx_resolveVerifier` timed out. It worked single-host because the shared spoke
+Docker network resolves every container name in both directions.
+
+**Fix (Option B — routable endpoint + cert SAN).** When a node's `advertisedHost` is
+routable, it now registers `dns:///<advertisedHost>:9000` (its routable host, not the
+container name) and carries that host in the transport cert SAN (IP → IPAddresses,
+DNS → DNSNames) so the `dns:///` mutual-TLS handshake still validates. Peers on any VM
+dial the routable host directly — no per-peer `extra_hosts`. The `PD030011` node-identity
+check is on the cert **CN** (= node name), which is unchanged. Gated on `isRoutableHost`,
+so single-host keeps the container-name behavior byte-for-byte. See `paladinDialHost` /
+`addTransportSAN` and the `gen-tls` / `gen-tls-join` / `register-nodes` /
+`register-paladin-node` steps. `paladin-compose.routable.yaml` is retained so a CB
+registered by an older toolkit stays reachable.

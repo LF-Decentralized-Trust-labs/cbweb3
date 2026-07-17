@@ -17,24 +17,26 @@ import (
 // node — parametrized by spoke id and bank id, no hardcoded bank list. Mirrors
 // spk-02 register-paladin-nodes for the joiner.
 type registerPaladinNodeStep struct {
-	spokeID      string
-	bankID       string
-	dataDir      string
-	besuRPCURL   string
-	registryAddr string
-	keyProvider  kp.KeyProvider
-	timeout      time.Duration
+	spokeID        string
+	bankID         string
+	dataDir        string
+	besuRPCURL     string
+	registryAddr   string
+	advertisedHost string // bank routable host; when routable, published as the transport endpoint
+	keyProvider    kp.KeyProvider
+	timeout        time.Duration
 }
 
-func newRegisterPaladinNodeStep(spokeID, bankID, dataDir, besuRPCURL, registryAddr string, keyProvider kp.KeyProvider, timeout time.Duration) Step {
+func newRegisterPaladinNodeStep(spokeID, bankID, dataDir, besuRPCURL, registryAddr, advertisedHost string, keyProvider kp.KeyProvider, timeout time.Duration) Step {
 	return &registerPaladinNodeStep{
-		spokeID:      spokeID,
-		bankID:       bankID,
-		dataDir:      dataDir,
-		besuRPCURL:   besuRPCURL,
-		registryAddr: registryAddr,
-		keyProvider:  keyProvider,
-		timeout:      timeout,
+		spokeID:        spokeID,
+		bankID:         bankID,
+		dataDir:        dataDir,
+		besuRPCURL:     besuRPCURL,
+		registryAddr:   registryAddr,
+		advertisedHost: advertisedHost,
+		keyProvider:    keyProvider,
+		timeout:        timeout,
 	}
 }
 
@@ -68,7 +70,7 @@ func (s *registerPaladinNodeStep) Run(ctx context.Context) error {
 	return registerPaladinNode(ctx, s.besuRPCURL, paladinNodeRegistration{
 		registry:     common.HexToAddress(s.registryAddr),
 		nodeName:     bankNodeName(s.spokeID, s.bankID),
-		grpcHostname: bankGrpcHostname(s.spokeID, s.bankID),
+		grpcHostname: paladinDialHost(s.advertisedHost, bankGrpcHostname(s.spokeID, s.bankID)),
 		certPEM:      certPEM,
 		provider:     s.keyProvider,
 		signerKeyID:  kp.LocalOperatorKeyID,

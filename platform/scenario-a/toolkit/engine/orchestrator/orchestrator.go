@@ -161,9 +161,9 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			m.Spec.Node.AdvertisedHost, besuImage, besuRPCPort, besuWSPort, besuP2PPort,
 			deps.Timeouts.PaladinHealthCheck, deps.Timeouts.PaladinHealthCheckInterval),
 		newDeployContractsStep(spokeID, dataDir, besuRPCURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
-		newGenTLSStep(spokeID, deps.CertSource, deps.KeyProvider),
+		newGenTLSStep(spokeID, m.Spec.Node.AdvertisedHost, deps.KeyProvider),
 		newRenderConfigsStep(spokeID, dataDir, besuRPCPort, besuWSPort, deps.PaladinConfigTemplateDir),
-		newRegisterNodesStep(spokeID, dataDir, besuRPCURL, deps.KeyProvider, deps.Timeouts.OnboardRegistry),
+		newRegisterNodesStep(spokeID, dataDir, besuRPCURL, m.Spec.Node.AdvertisedHost, deps.KeyProvider, deps.Timeouts.OnboardRegistry),
 		newStartPaladinStep(spokeID, dataDir, deps.ComposeTemplatePath, deps.PaladinCBURL, deps.PaladinImage, m.Spec.Node.AdvertisedHost, deps.Timeouts.PaladinHealthCheck, deps.Timeouts.PaladinHealthCheckInterval),
 		newCreateZetoStep(spokeID, dataDir, deps.PaladinCBURL, deps.ScriptsDir, deps.Timeouts.GoTestStep),
 		newOnboardRegistryStep(spokeID, dataDir, besuRPCURL, deps.KeyProvider,
@@ -546,7 +546,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		// any bank's availability and lets many banks join without a validator-set
 		// majority vote. (vote-qbft is retained for a future validator-join mode.)
 		// US2 — dynamic Paladin node bring-up for the joining bank.
-		newGenTLSJoinStep(spokeID, deps.BankCode),
+		newGenTLSJoinStep(spokeID, deps.BankCode, m.Spec.Node.AdvertisedHost),
 		newRenderConfigJoinStep(spokeID, deps.BankCode, deps.BesuRPCPort, deps.BesuWSPort,
 			b.Spec.Contracts.RegistryAddress, b.Spec.Contracts.ZetoFactoryAddress, b.Spec.Contracts.PenteFactoryAddress,
 			deps.PaladinConfigTemplateDir),
@@ -555,7 +555,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			b.Spec.Bootnode.AdvertisedHost, deps.PaladinImage,
 			deps.BesuRPCPort, deps.Timeouts.WaitSync, deps.Timeouts.WaitSyncInterval),
 		newRegisterPaladinNodeStep(spokeID, deps.BankCode, dataDir, deps.BesuRPCURL,
-			b.Spec.Contracts.RegistryAddress, deps.KeyProvider, deps.Timeouts.ProofOfPossession),
+			b.Spec.Contracts.RegistryAddress, m.Spec.Node.AdvertisedHost, deps.KeyProvider, deps.Timeouts.ProofOfPossession),
 	}
 
 	// Commercial bank operational stack (feature 034 US2): dedicated infra +

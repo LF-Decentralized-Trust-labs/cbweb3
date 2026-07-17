@@ -28,7 +28,7 @@ func TestGenTLSJoinStep_GeneratesBankCert(t *testing.T) {
 	// by a running Paladin container; colliding here would risk clobbering (or, if
 	// this test's Check() short-circuits like it once did, silently no-op'ing
 	// against) a real deployment's cert.
-	step := newGenTLSJoinStep("spoke-test-gentlsjoin", "bank-test-gentlsjoin").(*genTLSJoinStep)
+	step := newGenTLSJoinStep("spoke-test-gentlsjoin", "bank-test-gentlsjoin", "").(*genTLSJoinStep)
 	cleanupVolume(t, step.paladinConfigVolume())
 
 	done, _ := step.Check(context.Background())
@@ -78,6 +78,52 @@ func TestGenTLSJoinStep_GeneratesBankCert(t *testing.T) {
 	done, _ = step.Check(context.Background())
 	if !done {
 		t.Error("Check should be true after Run (idempotent)")
+	}
+}
+
+// TestGenTLSJoinStep_RoutableHostInSAN asserts the cross-VM path: a routable
+// advertisedHost is carried in the cert as an IP SAN so the CB's reply-leg dial to
+// dns:///<advertisedHost>:9000 validates. Regression guard for the one-directional
+// routable wiring that hung create-pente-context across VMs.
+func TestGenTLSJoinStep_RoutableHostInSAN(t *testing.T) {
+	requireDocker(t)
+	step := newGenTLSJoinStep("spoke-test-gentlssan", "bank-test-gentlssan", "10.10.0.22").(*genTLSJoinStep)
+	cleanupVolume(t, step.paladinConfigVolume())
+
+	if err := step.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	certPEM, err := readVolumeFile(context.Background(), step.paladinConfigVolume(), "tls.crt")
+	if err != nil {
+		t.Fatalf("read cert: %v", err)
+	}
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		t.Fatal("cert is not valid PEM")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("parse cert: %v", err)
+	}
+	foundIP := false
+	for _, ip := range cert.IPAddresses {
+		if ip.String() == "10.10.0.22" {
+			foundIP = true
+		}
+	}
+	if !foundIP {
+		t.Errorf("cert IP SANs = %v; want them to include the routable advertisedHost 10.10.0.22", cert.IPAddresses)
+	}
+	// The container-name DNS SAN must remain (single-host / extra_hosts dial still valid).
+	wantDNS := "paladin-spoke-test-gentlssan-bank-test-gentlssan"
+	foundDNS := false
+	for _, d := range cert.DNSNames {
+		if d == wantDNS {
+			foundDNS = true
+		}
+	}
+	if !foundDNS {
+		t.Errorf("cert DNS SANs = %v; want them to still include %q", cert.DNSNames, wantDNS)
 	}
 }
 
@@ -145,7 +191,7 @@ func TestStartPaladinJoinStep_RoutableCBHost(t *testing.T) {
 
 func TestRegisterPaladinNodeStep_Check_StateDriven(t *testing.T) {
 	dir := t.TempDir()
-	step := newRegisterPaladinNodeStep("spoke-brl", "bank-itau", dir, "http://localhost:8746", "0xREG", keyprovider.NewLocalKeyProviderSeeded(), 0)
+	step := newRegisterPaladinNodeStep("spoke-brl", "bank-itau", dir, "http://localhost:8746", "0xREG", "", keyprovider.NewLocalKeyProviderSeeded(), 0)
 	done, _ := step.Check(context.Background())
 	if done {
 		t.Error("Check should be false with no state")
@@ -163,7 +209,7 @@ func TestRegisterPaladinNodeStep_Run_ErrorsOnMissingCert(t *testing.T) {
 	requireDocker(t)
 	dir := t.TempDir()
 	cleanupVolume(t, "spoke-brl_bank-itau-missingcert_paladin_config")
-	step := newRegisterPaladinNodeStep("spoke-brl", "bank-itau-missingcert", dir, "http://localhost:8746", "0xREG", keyprovider.NewLocalKeyProviderSeeded(), 0)
+	step := newRegisterPaladinNodeStep("spoke-brl", "bank-itau-missingcert", dir, "http://localhost:8746", "0xREG", "", keyprovider.NewLocalKeyProviderSeeded(), 0)
 	if err := step.Run(context.Background()); err == nil {
 		t.Error("Run should error when the bank Paladin cert is missing")
 	}

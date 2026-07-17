@@ -35,7 +35,7 @@ const identityRegistryABIJSON = `[
 type paladinNodeRegistration struct {
 	registry     common.Address
 	nodeName     string // e.g. "spoke-brl-cb"
-	grpcHostname string // e.g. "paladin-spoke-brl-cb"
+	grpcHostname string // dial host for dns:///<host>:9000 — container name (single-host) or routable advertisedHost (cross-VM); see paladinDialHost
 	certPEM      []byte
 	provider     kp.KeyProvider
 	signerKeyID  string

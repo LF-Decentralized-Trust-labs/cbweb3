@@ -32,7 +32,16 @@ The manifests here are wired for genuinely separate VMs, but be aware of the sea
    the clash.
 2. **Export `BESU_NAT_PROFILE=NONE`** in the shell before `apply` on every VM, so Besu advertises
    the routable `advertisedHost` instead of the Docker-bridge address.
-3. **HTTP integration flows are NOT turnkey cross-VM.** In the `local` join path the bank→central-bank
+3. **Paladin cross-node transport needs `9000/tcp` open between every CB↔bank pair.** The bilateral
+   Pente step (`create-pente-context`) drives Paladin's mutual-TLS gRPC transport on port **9000**.
+   The transport is bidirectional (request AND reply), so `9000/tcp` must be reachable **both**
+   directions between the CB VM and each bank VM. When `node.advertisedHost` is a routable IP/DNS
+   (as in these manifests), each node advertises that host as its on-chain transport endpoint and
+   carries it in its cert SAN, so no per-peer `extra_hosts` is needed — but the firewall/security
+   group must allow `9000/tcp` (just like `30303/tcp` for Besu P2P). Symptom when blocked or when a
+   node was provisioned by an older toolkit that advertised its container name: `create-pente-context`
+   logs `POST ptx_resolveVerifier: ... context deadline exceeded` every ~30s and never completes.
+4. **HTTP integration flows are NOT turnkey cross-VM.** In the `local` join path the bank→central-bank
    api-gateway URL is localized to `host.docker.internal` (i.e. the bank's *own* host), so the
    credential/onboarding call does not reach a remote CB unmodified. The bank still comes up and syncs
    the chain; the governance-gated CSR signing / on-chain registration are runtime steps done through

@@ -141,6 +141,27 @@ func isRoutableHost(h string) bool {
 	return true
 }
 
+// paladinDialHost returns the host a peer publishes on-chain as its Paladin gRPC
+// transport endpoint (dns:///<host>:9000), and that other nodes dial to reach it.
+//
+// Paladin's reliable transport is bidirectional: resolving a remote verifier is a
+// request AND a reply, so BOTH nodes must be able to dial each other's registered
+// endpoint. On a single host every node's container name resolves over the shared
+// spoke Docker network, so the container hostname works in both directions. Across
+// VMs it does not — and giving only the joining bank an extra_hosts entry for the
+// CB (the one-directional routable override) fixes the request leg but not the CB's
+// reply leg, so create-pente-context hangs. Advertising the node's own routable
+// host instead makes the endpoint dialable from any host with no per-peer
+// extra_hosts; the host is added to the transport cert SAN (see addTransportSAN)
+// so the dns:/// TLS handshake still validates. Non-routable (single-host)
+// advertisedHost keeps the container hostname — unchanged behavior.
+func paladinDialHost(advertisedHost, containerHostname string) string {
+	if isRoutableHost(advertisedHost) {
+		return strings.TrimSpace(advertisedHost)
+	}
+	return containerHostname
+}
+
 // setEnodePort replaces the port in an enode URI (enode://<id>@<host>:<port>),
 // preserving the host (which resolves on the shared spoke network).
 func setEnodePort(enode string, port int) (string, error) {
