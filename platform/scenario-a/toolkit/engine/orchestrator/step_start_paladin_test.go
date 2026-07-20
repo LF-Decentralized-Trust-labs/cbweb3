@@ -39,7 +39,7 @@ func TestIsRoutableHost(t *testing.T) {
 		{"host-gateway", false},
 		{"  LOCALHOST  ", false},
 		{"10.10.0.21", true},
-		{"cb-brazil.cbweb3.lnet.io", true},
+		{"cb-brazil.cbweb3.l-net.io", true},
 	} {
 		if got := isRoutableHost(tc.host); got != tc.want {
 			t.Errorf("isRoutableHost(%q) = %v; want %v", tc.host, got, tc.want)

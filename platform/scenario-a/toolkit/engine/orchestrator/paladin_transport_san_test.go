@@ -22,7 +22,7 @@ func TestPaladinDialHost_RoutablePrefersAdvertisedHost(t *testing.T) {
 		want           string
 	}{
 		{"routable ip", "10.10.0.22", "paladin-spoke-brazil-cb1", "10.10.0.22"},
-		{"routable dns", "cb1-brazil.cbweb3.lnet.io", "paladin-spoke-brazil-cb1", "cb1-brazil.cbweb3.lnet.io"},
+		{"routable dns", "cb1-brazil.cbweb3.l-net.io", "paladin-spoke-brazil-cb1", "cb1-brazil.cbweb3.l-net.io"},
 		{"routable ip padded", "  10.10.0.21 ", "paladin-spoke-brazil-cb", "10.10.0.21"},
 		{"empty falls back to container", "", "paladin-spoke-brazil-cb", "paladin-spoke-brazil-cb"},
 		{"localhost falls back to container", "localhost", "paladin-spoke-brazil-cb", "paladin-spoke-brazil-cb"},
@@ -50,18 +50,18 @@ func TestAddTransportSAN_IPGoesToIPAddresses(t *testing.T) {
 
 func TestAddTransportSAN_DNSGoesToDNSNames(t *testing.T) {
 	tmpl := &x509.Certificate{DNSNames: []string{"spoke-brazil-cb1"}}
-	addTransportSAN(tmpl, "cb1-brazil.cbweb3.lnet.io")
+	addTransportSAN(tmpl, "cb1-brazil.cbweb3.l-net.io")
 	if len(tmpl.IPAddresses) != 0 {
 		t.Errorf("IPAddresses should be empty for a DNS SAN; got %v", tmpl.IPAddresses)
 	}
 	found := false
 	for _, d := range tmpl.DNSNames {
-		if d == "cb1-brazil.cbweb3.lnet.io" {
+		if d == "cb1-brazil.cbweb3.l-net.io" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("DNSNames = %v; want it to include cb1-brazil.cbweb3.lnet.io", tmpl.DNSNames)
+		t.Errorf("DNSNames = %v; want it to include cb1-brazil.cbweb3.l-net.io", tmpl.DNSNames)
 	}
 }
 

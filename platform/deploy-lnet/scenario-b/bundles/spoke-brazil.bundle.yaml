@@ -1,0 +1,59 @@
+version: cbweb3b/spoke-bundle/v1
+spokeId: spoke-brazil
+chainId: 2022
+enode: enode://3c92e10a704dba3f821e63fbd011a4613c19bafc8a9b3fbff2751bf4a33734a077469d7d07f6c0baf82176941d2cd4931b2c2f6b1d417a419e9e5b1f9ecd49e7@10.10.0.21:30304
+spokeRpc: http://10.10.0.21:8845
+spokeWs: ws://10.10.0.21:8846
+genesis: |-
+    {
+      "alloc" : {
+        "0x0000000000000000000000000000000000000001" : {
+          "balance" : "0x0"
+        }
+      },
+      "coinbase" : "0x0000000000000000000000000000000000000000",
+      "config" : {
+        "berlinBlock" : 0,
+        "byzantiumBlock" : 0,
+        "cancunTime" : 0,
+        "chainId" : 2022,
+        "constantinopleBlock" : 0,
+        "eip150Block" : 0,
+        "eip155Block" : 0,
+        "eip158Block" : 0,
+        "homesteadBlock" : 0,
+        "istanbulBlock" : 0,
+        "londonBlock" : 0,
+        "petersburgBlock" : 0,
+        "preMergeForkBlock" : 0,
+        "qbft" : {
+          "blockperiodseconds" : 2,
+          "epochlength" : 30000,
+          "requesttimeoutseconds" : 4
+        },
+        "shanghaiTime" : 0,
+        "zeroBaseFee" : true
+      },
+      "difficulty" : "0x1",
+      "gasLimit" : "0x1c9c380",
+      "mixHash" : "0x63746963616c2062797a616e74696e65206661756c7420746f6c6572616e6365",
+      "nonce" : "0x0",
+      "timestamp" : "0x58ee40ba",
+      "extraData" : "0xf83aa00000000000000000000000000000000000000000000000000000000000000000d594200f56f4b750a469e303e36753af8a7831800e93c080c0"
+    }
+contracts:
+    fCeBM: 0x2e1f232a9439c3d459fceca0beef13acc8259dd8
+    identityRegistry: 0x42699a7612a82f1d9c36148af9c77354759b210b
+    spokeBridge: 0x9b8397f1b0fecd3a1a40cdd5e8221fa461898517
+    tCeBM: 0xa50a51c09a5c451c52bb714527e1974b686d8e77
+cbGateway: http://10.10.0.21:16845
+hubContracts:
+    currencyRegistry: 0xfeae27388a65ee984f452f86effed42aabd438fd
+    fxAgreement: 0x9b8397f1b0fecd3a1a40cdd5e8221fa461898517
+    identityRegistry: 0x42699a7612a82f1d9c36148af9c77354759b210b
+    liquidityCommitRegistry: 0xc9bc439c8723c5c6fdbbe14e5ff3a1224f8a0f7c
+    manualOracle: 0xe135783649bfa7c9c4c6f8e528c7f56166efc8a6
+    pairRegistry: 0x05d91b9031a655d08e654177336d08543ac4b711
+    tCeBM_BRL: 0xa50a51c09a5c451c52bb714527e1974b686d8e77
+    tCeBM_EUR: 0x9a3dbca554e9f6b9257aaa24010da8377c57c17e
+hubRpcPort: "8845"

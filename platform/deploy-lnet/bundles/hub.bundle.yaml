@@ -1,0 +1,14 @@
+version: cbweb3b/hub-bundle/v1
+chainId: 1337
+hubRpc: http://10.10.0.20:8845
+hubWs: ws://10.10.0.20:8846
+hubGateway: http://10.10.0.20:16845
+contracts:
+    currencyRegistry: 0xfeae27388a65ee984f452f86effed42aabd438fd
+    fxAgreement: 0x9b8397f1b0fecd3a1a40cdd5e8221fa461898517
+    identityRegistry: 0x42699a7612a82f1d9c36148af9c77354759b210b
+    liquidityCommitRegistry: 0xc9bc439c8723c5c6fdbbe14e5ff3a1224f8a0f7c
+    manualOracle: 0xe135783649bfa7c9c4c6f8e528c7f56166efc8a6
+    pairRegistry: 0x05d91b9031a655d08e654177336d08543ac4b711
+    tCeBM_BRL: 0xa50a51c09a5c451c52bb714527e1974b686d8e77
+    tCeBM_EUR: 0x9a3dbca554e9f6b9257aaa24010da8377c57c17e
