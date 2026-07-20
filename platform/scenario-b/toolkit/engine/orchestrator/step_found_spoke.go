@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -146,6 +145,32 @@ func (c SpokeConfig) caVolume() string       { return c.VolumePrefix + "_cb_tls"
 func (c SpokeConfig) scenarioBDir() string { return filepath.Dir(c.ContractsDir) }
 
 func (c SpokeConfig) keycloakPort() int { return c.RPCPort + 7000 }
+
+// bundlePublicHost is the host remote commercial banks use to reach this spoke.
+// Prefers node.advertisedHost when it is a routable value; when empty /
+// host.docker.internal / loopback, resolves the host LAN IP (same path as the
+// enode rewrite). Local orchestration continues to use SpokeRPC (localhost).
+func (c SpokeConfig) bundlePublicHost() (string, error) {
+	h := strings.TrimSpace(c.AdvertisedHost)
+	if h == "" || h == "host.docker.internal" || h == "127.0.0.1" || h == "localhost" {
+		return resolveHostIP()
+	}
+	return h, nil
+}
+
+// publicSpokeRPC / publicSpokeWS / publicCBGateway are the URLs written into the
+// spoke join bundle (cross-host). Mirrors HubConfig.publicHub*.
+func (c SpokeConfig) publicSpokeRPC(host string) string {
+	return fmt.Sprintf("http://%s:%d", host, c.RPCPort)
+}
+
+func (c SpokeConfig) publicSpokeWS(host string) string {
+	return fmt.Sprintf("ws://%s:%d", host, c.WSPort)
+}
+
+func (c SpokeConfig) publicCBGateway(host string) string {
+	return fmt.Sprintf("http://%s:%d", host, c.RPCPort+8000)
+}
 
 // cactiAPIURL is the Cacti relay REST endpoint a backend container uses to reach
 // the (external) relay. The relay runs in its own stack on the fixed port 4000;
@@ -586,7 +611,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				}
 				for key, addr := range map[string]string{
 					"HUB_IDENTITY_REGISTRY_ADDRESS":      hub.Contracts["identityRegistry"],
-					"HUB_TOKEN_A_ADDRESS":                hub.Contracts["tCeBM_BRL"],
+					"HUB_TOKEN_A_ADDRESS":                hub.Contracts["tCeBM_BRL"], // optional until CB registers currency
 					"HUB_TOKEN_B_ADDRESS":                hub.Contracts["tCeBM_EUR"],
 					"FX_AGREEMENT_CONTRACT_ADDRESS":      hub.Contracts["fxAgreement"],
 					"PAIR_REGISTRY_CONTRACT_ADDRESS":     hub.Contracts["pairRegistry"],
@@ -598,6 +623,9 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					// bridge-in/out endpoints (registerSovereignRoutes gates on it).
 					"LIQUIDITY_COMMIT_REGISTRY_ADDRESS": hub.Contracts["liquidityCommitRegistry"],
 				} {
+					if addr == "" {
+						continue
+					}
 					if err := addrs.AppendAddr(c.SpokeEnvFile, key, addr); err != nil {
 						return err
 					}
@@ -770,9 +798,21 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 	steps = append(steps, Step{
 		Name: "emit-spoke-bundle",
 		Deps: []string{"deploy-spoke-contracts", "start-besu-spoke"},
+		// Skip only when the on-disk bundle already carries the public endpoints
+		// (AdvertisedHost). A stale localhost / host.docker.internal bundle from an
+		// older toolkit must re-emit so remote banks can dial the CB.
 		Check: func(context.Context) (bool, error) {
-			_, err := os.Stat(filepath.Join(c.OutDir, "bundles", c.SpokeID+".bundle.yaml"))
-			return err == nil, nil
+			b, err := bundle.LoadSpoke(filepath.Join(c.OutDir, "bundles", c.SpokeID+".bundle.yaml"))
+			if err != nil {
+				return false, nil
+			}
+			host, err := c.bundlePublicHost()
+			if err != nil {
+				return false, nil
+			}
+			return b.SpokeRPC == c.publicSpokeRPC(host) &&
+				b.SpokeWS == c.publicSpokeWS(host) &&
+				b.CBGateway == c.publicCBGateway(host), nil
 		},
 		Run: func(ctx context.Context) error {
 			m, err := spokeContractMap(c.spokeBroadcastPath())
@@ -797,12 +837,10 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			// reachable endpoint so a joining bank can dial it as --bootnodes. A
 			// hostname (or the placeholder host.docker.internal) is not accepted by
 			// besu's --bootnodes, so resolve the host's LAN IP (scenario-a parity).
-			advHost := c.AdvertisedHost
-			if advHost == "" || advHost == "host.docker.internal" {
-				advHost, err = resolveHostIP()
-				if err != nil {
-					return err
-				}
+			// The same host is baked into spokeRpc / spokeWs / cbGateway.
+			advHost, err := c.bundlePublicHost()
+			if err != nil {
+				return err
 			}
 			enode = rewriteEnodeHost(enode, advHost, c.P2PPort)
 			if privateDockerIP.MatchString(enode) {
@@ -820,9 +858,11 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			}
 			b := bundle.SpokeBundle{
 				SpokeID: c.SpokeID, ChainID: c.SpokeChainID, Enode: enode,
-				SpokeRPC: c.SpokeRPC, SpokeWS: c.SpokeWS, Genesis: string(genesisBytes), Contracts: m,
-				// Container-reachable CB gateway for a joining bank's CENTRAL_BANK_API_URL.
-				CBGateway:    fmt.Sprintf("http://host.docker.internal:%d", c.RPCPort+8000),
+				// Public endpoints for remote banks (node.advertisedHost). Local
+				// orchestration keeps using c.SpokeRPC (typically localhost).
+				SpokeRPC: c.publicSpokeRPC(advHost), SpokeWS: c.publicSpokeWS(advHost),
+				Genesis: string(genesisBytes), Contracts: m,
+				CBGateway:    c.publicCBGateway(advHost),
 				HubContracts: hubForBundle.Contracts,
 				HubRPCPort:   hubPort,
 			}

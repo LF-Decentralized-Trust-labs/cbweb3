@@ -192,11 +192,14 @@ func TestRegisterRelaySpokeAndSoftNoc(t *testing.T) {
 }
 
 // US5: emit-spoke-bundle produces a valid spoke bundle (genesis + enode + contracts).
+// When AdvertisedHost is set, public RPC/WS/gateway URLs use that host (not localhost).
 func TestEmitSpokeBundle(t *testing.T) {
 	// The genesis is read from the named volume via the runner (docker cat), so
 	// the fake returns it for the docker call in emit-spoke-bundle.
 	fake := &exec.FakeRunner{Outputs: map[string][]byte{"docker": []byte(`{"config":{"chainId":1338}}`)}}
 	cfg := testSpokeCfg(t, fake)
+	cfg.RPCPort = 8845
+	cfg.WSPort = 8846
 	writeSpokeBroadcast(t, cfg.ContractsDir)
 
 	steps := FoundSpokeSteps(cfg)
@@ -215,6 +218,54 @@ func TestEmitSpokeBundle(t *testing.T) {
 	// AdvertisedHost + P2P port) so a joining bank can dial it as --bootnodes.
 	if b.Enode != "enode://cb@10.0.0.5:30303" || b.ChainID != 1338 || b.Contracts["spokeBridge"] != "0xs3" {
 		t.Fatalf("spoke bundle mismatch: %+v", b)
+	}
+	if b.SpokeRPC != "http://10.0.0.5:8845" {
+		t.Fatalf("SpokeRPC want http://10.0.0.5:8845, got %q", b.SpokeRPC)
+	}
+	if b.SpokeWS != "ws://10.0.0.5:8846" {
+		t.Fatalf("SpokeWS want ws://10.0.0.5:8846, got %q", b.SpokeWS)
+	}
+	if b.CBGateway != "http://10.0.0.5:16845" {
+		t.Fatalf("CBGateway want http://10.0.0.5:16845, got %q", b.CBGateway)
+	}
+}
+
+// emit-spoke-bundle Check re-runs when an on-disk bundle still has localhost /
+// host.docker.internal but AdvertisedHost is a routable IP (stale LNET artifact).
+func TestEmitSpokeBundleCheckRewritesLocalhost(t *testing.T) {
+	fake := &exec.FakeRunner{Outputs: map[string][]byte{"docker": []byte(`{"config":{"chainId":1338}}`)}}
+	cfg := testSpokeCfg(t, fake)
+	cfg.RPCPort = 8845
+	cfg.WSPort = 8846
+	writeSpokeBroadcast(t, cfg.ContractsDir)
+
+	steps := FoundSpokeSteps(cfg)
+	if err := findStep(steps, "start-besu-spoke").Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := findStep(steps, "emit-spoke-bundle").Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Overwrite with a stale localhost / host.docker.internal bundle.
+	stalePath := filepath.Join(cfg.OutDir, "bundles", "spoke-a.bundle.yaml")
+	stale, err := bundle.LoadSpoke(stalePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.SpokeRPC = "http://localhost:8845"
+	stale.SpokeWS = "ws://localhost:8846"
+	stale.CBGateway = "http://host.docker.internal:16845"
+	if _, err := bundle.EmitSpoke(stale, cfg.OutDir); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := findStep(FoundSpokeSteps(cfg), "emit-spoke-bundle").Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("Check should be false for stale localhost bundle when AdvertisedHost is set")
 	}
 }
 

@@ -1,7 +1,8 @@
 # yaml-language-server: $schema=../../../scenario-a/provisioning/schema/v1/participant-deployment.schema.yaml
 # LNET deploy — Scenario A (Enhanced Correspondent Banking)
 # VM ${IP_CB_BRAZIL} — Central Bank Brazil, FOUNDS spoke-brazil (BRL).
-# Emits ./bundles/spoke-brazil.bundle.yaml (out dir = dirname(dataDir)) for cb1/cb2 to join.
+# dataDir + emitted join bundle under deploy-lnet/bundles/scenario-a/spoke-brazil/
+# (deploy.sh sets CBWEB3_OUTPUT_DIR and relocates spoke-brazil.bundle.yaml next to dataDir).
 apiVersion: cbweb3/v1
 kind: ParticipantDeployment
 metadata:
@@ -22,7 +23,8 @@ spec:
     ws:  { port: 8655 }
     p2p: { port: 30303 }              # Scenario A join localizes the enode to container port 30303;
                                       # the CB MUST publish host 30303 for cross-VM peering.
-    dataDir: /opt/cbweb3/data/scenario-a/spoke-brazil
+    # Relative to scenario-a/ cwd (deploy.sh applies from there).
+    dataDir: ../deploy-lnet/bundles/scenario-a/spoke-brazil
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed://local     # the CB is its own spoke CA

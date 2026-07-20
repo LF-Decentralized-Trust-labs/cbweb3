@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/addrs"
@@ -40,6 +41,10 @@ type HubConfig struct {
 	RPCPort         int    // HUB_RPC_PORT (host)
 	WSPort          int    // HUB_WS_PORT (host)
 	P2PPort         int    // HUB_P2P_PORT (host)
+	// AdvertisedHost is the routable host baked into the hub bundle for remote
+	// spokes (from manifest node.advertisedHost). Local WaitRPC / forge keep
+	// using HubRPC (typically localhost on the hub VM).
+	AdvertisedHost string
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -95,6 +100,36 @@ func (c HubConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data
 func (c HubConfig) keycloakPort() int      { return c.RPCPort + 7000 }
 func (c HubConfig) keycloakContainer() string {
 	return c.ContainerPrefix + "-hub-keycloak"
+}
+
+// publicHost is the host remote spokes use to reach this hub. Prefers
+// AdvertisedHost; falls back to localhost when unset (single-host labs).
+func (c HubConfig) publicHost() string {
+	h := strings.TrimSpace(c.AdvertisedHost)
+	if h == "" || h == "127.0.0.1" {
+		return "localhost"
+	}
+	return h
+}
+
+// publicHubRPC / publicHubWS / publicHubGateway are the URLs written into the
+// hub bundle (cross-host). Local orchestration continues to use c.HubRPC.
+func (c HubConfig) publicHubRPC() string {
+	if c.RPCPort == 0 {
+		return c.HubRPC
+	}
+	return fmt.Sprintf("http://%s:%d", c.publicHost(), c.RPCPort)
+}
+
+func (c HubConfig) publicHubWS() string {
+	if c.WSPort == 0 {
+		return c.HubWS
+	}
+	return fmt.Sprintf("ws://%s:%d", c.publicHost(), c.WSPort)
+}
+
+func (c HubConfig) publicHubGateway() string {
+	return fmt.Sprintf("http://%s:%d", c.publicHost(), c.RPCPort+8000)
 }
 
 // Local Keycloak realm/client provisioned by found-hub (OIDC for the hub
@@ -356,13 +391,16 @@ func FoundHubSteps(c HubConfig) []Step {
 				}
 				for key, addr := range map[string]string{
 					"HUB_IDENTITY_REGISTRY_ADDRESS":  m["identityRegistry"],
-					"HUB_TOKEN_A_ADDRESS":            m["tCeBM_BRL"],
+					"HUB_TOKEN_A_ADDRESS":            m["tCeBM_BRL"], // optional — set later when tCeBM is deployed
 					"HUB_TOKEN_B_ADDRESS":            m["tCeBM_EUR"],
 					"FX_AGREEMENT_CONTRACT_ADDRESS":  m["fxAgreement"],
 					"PAIR_REGISTRY_CONTRACT_ADDRESS": m["pairRegistry"],
 					"CURRENCY_REGISTRY_ADDRESS":      m["currencyRegistry"],
 					"MANUAL_ORACLE_ADDRESS":          m["manualOracle"],
 				} {
+					if addr == "" {
+						continue // tCeBM not deployed at found-hub
+					}
 					if err := addrs.AppendAddr(c.HubEnvFile, key, addr); err != nil {
 						return err
 					}
@@ -433,9 +471,17 @@ func FoundHubSteps(c HubConfig) []Step {
 		{
 			Name: "emit-hub-bundle",
 			Deps: []string{"deploy-hub-contracts"},
+			// Skip only when the on-disk bundle already carries the public
+			// endpoints (AdvertisedHost). A stale localhost bundle from an older
+			// toolkit must re-emit so remote spokes can dial the hub.
 			Check: func(context.Context) (bool, error) {
-				_, err := os.Stat(filepath.Join(c.OutDir, "bundles", "hub.bundle.yaml"))
-				return err == nil, nil
+				b, err := bundle.LoadHub(filepath.Join(c.OutDir, "bundles", "hub.bundle.yaml"))
+				if err != nil {
+					return false, nil
+				}
+				return b.HubRPC == c.publicHubRPC() &&
+					b.HubWS == c.publicHubWS() &&
+					b.HubGateway == c.publicHubGateway(), nil
 			},
 			Run: func(context.Context) error {
 				m, err := hubContractMap(c.broadcastPath())
@@ -443,9 +489,11 @@ func FoundHubSteps(c HubConfig) []Step {
 					return err
 				}
 				b := bundle.HubBundle{
-					ChainID: c.ChainID, HubRPC: c.HubRPC, HubWS: c.HubWS,
-					// Hub API gateway (spoke self-registration endpoint); host-published.
-					HubGateway: fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
+					ChainID: c.ChainID,
+					// Public endpoints for remote spokes (node.advertisedHost).
+					HubRPC:     c.publicHubRPC(),
+					HubWS:      c.publicHubWS(),
+					HubGateway: c.publicHubGateway(),
 					Contracts:  m,
 				}
 				_, err = bundle.EmitHub(b, c.OutDir)
@@ -455,8 +503,9 @@ func FoundHubSteps(c HubConfig) []Step {
 	}
 }
 
-// hubContractMap maps the CBWeb3Hub broadcast deployments to bundle keys. The
-// two TokenizedCentralBankMoney deployments are BRL then EUR (Solidity order).
+// hubContractMap maps the CBWeb3Hub broadcast deployments to bundle keys.
+// TokenizedCentralBankMoney is optional (not deployed at found-hub anymore;
+// kept for backward compatibility with older broadcasts that still include them).
 func hubContractMap(broadcastPath string) (map[string]string, error) {
 	list, err := addrs.ParseBroadcastList(broadcastPath)
 	if err != nil {
@@ -469,6 +518,7 @@ func hubContractMap(broadcastPath string) (map[string]string, error) {
 		case "IdentityRegistry":
 			out["identityRegistry"] = d.Address
 		case "TokenizedCentralBankMoney":
+			// Legacy broadcasts only — current CBWeb3Hub.s.sol does not deploy tCeBM.
 			if tcebmSeen == 0 {
 				out["tCeBM_BRL"] = d.Address
 			} else {

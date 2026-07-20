@@ -21,12 +21,11 @@ func writeBroadcast(t *testing.T, contractsDir string, chainID uint64) {
 	}
 	json := `{"transactions":[
 	 {"transactionType":"CREATE","contractName":"IdentityRegistry","contractAddress":"0xa1"},
-	 {"transactionType":"CREATE","contractName":"TokenizedCentralBankMoney","contractAddress":"0xb1"},
-	 {"transactionType":"CREATE","contractName":"TokenizedCentralBankMoney","contractAddress":"0xb2"},
 	 {"transactionType":"CREATE","contractName":"FXAgreement","contractAddress":"0xc1"},
 	 {"transactionType":"CREATE","contractName":"PairRegistry","contractAddress":"0xd1"},
 	 {"transactionType":"CREATE","contractName":"CurrencyRegistry","contractAddress":"0xe1"},
-	 {"transactionType":"CREATE","contractName":"ManualOracle","contractAddress":"0xf1"}
+	 {"transactionType":"CREATE","contractName":"ManualOracle","contractAddress":"0xf1"},
+	 {"transactionType":"CREATE","contractName":"LiquidityCommitRegistry","contractAddress":"0xf2"}
 	]}`
 	if err := os.WriteFile(filepath.Join(dir, "run-latest.json"), []byte(json), 0o644); err != nil {
 		t.Fatal(err)
@@ -137,9 +136,13 @@ func TestKeycloakWriteBackIdempotent(t *testing.T) {
 }
 
 // emit-hub-bundle produces a valid bundle with the two tCeBM distinguished.
+// When AdvertisedHost is set, public RPC/WS/gateway URLs use that host (not localhost).
 func TestEmitHubBundleFromBroadcast(t *testing.T) {
 	fake := &exec.FakeRunner{}
 	cfg := testHubConfig(t, fake)
+	cfg.AdvertisedHost = "10.10.0.20"
+	cfg.RPCPort = 8845
+	cfg.WSPort = 8846
 	writeBroadcast(t, cfg.ContractsDir, cfg.ChainID)
 	var emit Step
 	for _, s := range FoundHubSteps(cfg) {
@@ -154,10 +157,57 @@ func TestEmitHubBundleFromBroadcast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load emitted bundle: %v", err)
 	}
-	if b.Contracts["tCeBM_BRL"] != "0xb1" || b.Contracts["tCeBM_EUR"] != "0xb2" {
-		t.Fatalf("tCeBM mapping wrong: %+v", b.Contracts)
-	}
 	if b.Contracts["identityRegistry"] != "0xa1" || b.Contracts["manualOracle"] != "0xf1" {
 		t.Fatalf("contract mapping wrong: %+v", b.Contracts)
+	}
+	if _, ok := b.Contracts["tCeBM_BRL"]; ok {
+		t.Fatalf("tCeBM_BRL must not be in hub bundle at found-hub: %+v", b.Contracts)
+	}
+	if b.Contracts["liquidityCommitRegistry"] != "0xf2" {
+		t.Fatalf("liquidityCommitRegistry mapping wrong: %+v", b.Contracts)
+	}
+	if b.HubRPC != "http://10.10.0.20:8845" {
+		t.Fatalf("HubRPC want http://10.10.0.20:8845, got %q", b.HubRPC)
+	}
+	if b.HubWS != "ws://10.10.0.20:8846" {
+		t.Fatalf("HubWS want ws://10.10.0.20:8846, got %q", b.HubWS)
+	}
+	if b.HubGateway != "http://10.10.0.20:16845" {
+		t.Fatalf("HubGateway want http://10.10.0.20:16845, got %q", b.HubGateway)
+	}
+}
+
+// emit-hub-bundle Check re-runs when an on-disk bundle still has localhost but
+// AdvertisedHost is set (stale LNET artifact from an older toolkit).
+func TestEmitHubBundleCheckRewritesLocalhost(t *testing.T) {
+	fake := &exec.FakeRunner{}
+	cfg := testHubConfig(t, fake)
+	cfg.RPCPort = 8845
+	cfg.WSPort = 8846
+	writeBroadcast(t, cfg.ContractsDir, cfg.ChainID)
+
+	// Emit a localhost bundle (no AdvertisedHost), then set AdvertisedHost and
+	// expect Check to force a re-emit.
+	var emit Step
+	for _, s := range FoundHubSteps(cfg) {
+		if s.Name == "emit-hub-bundle" {
+			emit = s
+		}
+	}
+	if err := emit.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cfg.AdvertisedHost = "18.216.221.177"
+	for _, s := range FoundHubSteps(cfg) {
+		if s.Name == "emit-hub-bundle" {
+			emit = s
+		}
+	}
+	ok, err := emit.Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("Check should be false for stale localhost bundle when AdvertisedHost is set")
 	}
 }

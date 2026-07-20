@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
 # LNET deploy — Scenario B. VM ${IP_CB_COLOMBIA} — Central Bank Colombia, FOUNDS spoke-colombia (COP).
-# Consumes ../bundles/hub.bundle.yaml (scp'd from ${IP_HUB}).
-# Emits ./bundles/spoke-colombia.bundle.yaml for cb3/cb4 to join.
+# Consumes ../../bundles/hub/hub.bundle.yaml (scp'd from ${IP_HUB}).
+# dataDir + emitted join bundle under deploy-lnet/bundles/scenario-b/spoke-colombia/
 # NOTE: sovereign pair (BRL/COP corridor + AMM) is deferred — opened later via the governance portal.
 apiVersion: cbweb3b/v1
 kind: ParticipantDeployment
@@ -18,13 +18,13 @@ spec:
     id: spoke-colombia
     chainId: 2025
     currency: COP
-  hubBundleRef: ../../bundles/hub.bundle.yaml
+  hubBundleRef: ../../bundles/hub/hub.bundle.yaml
   node:
     advertisedHost: ${IP_CB_COLOMBIA}
     rpc: { port: 8845 }
     ws:  { port: 8846 }
     p2p: { port: 30304 }
-    dataDir: /opt/cbweb3/data/scenario-b/spoke-colombia
+    dataDir: bundles/scenario-b/spoke-colombia
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed

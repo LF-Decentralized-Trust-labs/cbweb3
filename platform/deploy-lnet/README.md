@@ -9,10 +9,10 @@ deploy-lnet/
   addresses.env       # the per-VM IPs (edit here or override via exported env)
   render.sh           # substitute ${IP_*} markers: *.yaml.tmpl -> *.yaml
   deploy.sh           # render + run the toolkit for one target host
-  hub.yaml.tmpl       # VM 10.10.0.20 — Scenario B found-hub template (shared .20 infra)
-  bundles/            # hub.bundle.yaml drop-zone (produced on .20, consumed by both CB spokes)
+  bundles/            # hub/ + scenario-{a,b}/<spoke|bankId>/ (+ <spoke>.bundle.yaml)
+  hub/manifests/      # VM .20 — Scenario B found-hub
   scenario-a/         # Enhanced Correspondent Banking (dual-layer HTLC) — VMs .21–.26
-  scenario-b/         # International Hub (FXAgreement + AMM + circuit breaker) — VMs .21–.26
+  scenario-b/         # International Hub spokes/banks — VMs .21–.26
 ```
 
 Read the per-scenario runbooks for the full step-by-step:
@@ -85,7 +85,7 @@ deploy-lnet/deploy.sh cacti
 
 # 2. Scenario-B hub (found-hub) — render + apply in one step
 deploy-lnet/deploy.sh b hub
-#   -> emits <dataDir>/bundles/hub.bundle.yaml   (dataDir = /opt/cbweb3/data/scenario-b/hub)
+#   -> emits deploy-lnet/bundles/hub/hub.bundle.yaml
 ```
 
 Both relays boot **neutral** (no fixed spokes); each founding CB self-registers its spoke at
@@ -96,9 +96,9 @@ BRL/COP pair** is opened (deferred). For the initial bring-up they can stay unse
 `scenario-b/interop/hub-and-spoke/cacti/.env`, e.g. `HUB_BESU_RPC=http://host.docker.internal:8845`)
 when you activate the corridor.
 
-Patch the hub bundle's cross-host URLs, then copy it into `deploy-lnet/bundles/` on both CB spoke VMs
-(see [scenario-b/README.md](scenario-b/README.md) step 1 for the exact `sed` + `scp`). Scenario A has
-no hub — its `.20` role is only the Cacti relay.
+Patch the hub bundle's cross-host URLs, then `scp` `deploy-lnet/bundles/hub/hub.bundle.yaml` onto both CB
+spoke VMs (see [scenario-b/README.md](scenario-b/README.md) step 1 for the exact `sed` + `scp`).
+Scenario A has no hub — its `.20` role is only the Cacti relay.
 
 ## Coexistence on a shared VM
 
