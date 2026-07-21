@@ -95,6 +95,14 @@ type Spec struct {
 	// (both scenarios of the same entity use the same port and share one launcher).
 	// Optional: 0/absent falls back to the LAUNCHER_PORT env, then 5190.
 	LauncherPort int `yaml:"launcherPort,omitempty"`
+	// Proxy controls the per-host reverse proxy (Caddy) that fronts this entity's
+	// portals + api-gateway on port 80 with path-based routing (/<scenario>/<role>/,
+	// /<scenario>/api/), so nothing is reached by port. "enable" runs the generic proxy
+	// image (if not already up), writes this scenario's route fragment and reloads;
+	// "disable" removes the fragment and tears the proxy down when no fragment remains.
+	// Empty (absent) is treated as "disable". When enabled, the entity's portal SPAs are
+	// built base-path-aware and their api/CORS/launcher URLs point at spec.frontendHost.
+	Proxy string `yaml:"proxy,omitempty"`
 }
 
 // AdminUser is a per-role operator account created in the entity's Keycloak realm.

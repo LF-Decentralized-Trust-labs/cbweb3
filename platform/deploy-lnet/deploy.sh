@@ -81,6 +81,18 @@ else
   fi
 fi
 
+# 1b') Reverse-proxy image (Caddy): the per-host :80 entrypoint that fronts this
+# entity's portals + api-gateway by path. Built once per host (every target, hub
+# included). Only used when a manifest sets `proxy: enable`; the proxy step
+# soft-fails if the image is missing, so an unbuilt image never blocks a deploy.
+log "Step 2b/5 — checking proxy image cbweb3/proxy:local"
+if ! docker image inspect cbweb3/proxy:local >/dev/null 2>&1; then
+  log "proxy image not found — building it now"
+  "$ROOT/proxy/build.sh"
+else
+  log "proxy image already present — skipping build"
+fi
+
 # 1c) Contract deps (Soldeer) + forge build. `dependencies/` and `out/` are
 # gitignored, so a fresh checkout has neither. Soldeer must run before forge
 # build (forge-std + OpenZeppelin). Scenario A's deploy/onboard-registry steps

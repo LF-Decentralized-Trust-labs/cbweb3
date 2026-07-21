@@ -140,6 +140,10 @@ func Validate(pd *ParticipantDeployment) Result {
 	if spec.LauncherPort != 0 && (spec.LauncherPort < 1 || spec.LauncherPort > 65535) {
 		r.AddError("spec.launcherPort", fmt.Sprintf("invalid value %d; must be a TCP port (1-65535)", spec.LauncherPort))
 	}
+	// Proxy (optional): enable | disable when present.
+	if spec.Proxy != "" && spec.Proxy != "enable" && spec.Proxy != "disable" {
+		r.AddError("spec.proxy", fmt.Sprintf("invalid value %q; accepted values are: enable, disable", spec.Proxy))
+	}
 
 	// FR-003: per-mode required + forbidden presence.
 	if contains(Modes, spec.Mode) {

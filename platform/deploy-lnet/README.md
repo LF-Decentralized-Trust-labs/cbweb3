@@ -116,6 +116,37 @@ Both scenarios run on the same hosts, so their ports are kept disjoint:
 
 
 
+## Reverse proxy — port-free, path-based portal access
+
+Every entity manifest sets `proxy: enable`, so each VM runs one **Caddy** reverse proxy on
+**port 80** (image `cbweb3/proxy:local`, built once per host by `deploy.sh`). Portals and the
+api-gateway are then reached by **path — no port** — on the entity's `frontendHost`:
+
+```
+http://cb-brazil.cbweb3.l-net.io/              -> launcher (the A/B landing page)
+http://cb-brazil.cbweb3.l-net.io/a/governance/ -> Governance  (Scenario A)
+http://cb-brazil.cbweb3.l-net.io/a/treasury/   -> Treasury    (Scenario A)
+http://cb-brazil.cbweb3.l-net.io/a/supervisor/ -> Supervisor  (Scenario A)
+http://cb-brazil.cbweb3.l-net.io/b/governance/ -> Governance  (Scenario B)  … etc.
+http://cb1-brazil.cbweb3.l-net.io/a/bank/      -> Bank portal (commercial bank, Scenario A)
+http://hub.cbweb3.l-net.io/                    -> hub governance (root redirect; hub has no launcher)
+```
+
+Both scenarios of an entity share the one proxy container on that host: each scenario's toolkit
+writes its own route fragment (`caddy.a.conf` / `caddy.b.conf`) into a shared conf dir and the proxy
+attaches to both entity Docker networks. Requirements per VM:
+
+- **DNS:** one `A` record per entity → its VM IP (e.g. `cb-brazil.cbweb3.l-net.io → 10.10.0.21`).
+  No wildcard needed (single hostname per entity).
+- **Firewall:** open `:80`. The high per-portal host ports no longer need to be exposed externally
+  (the proxy reaches each portal container on the internal network).
+- **TLS:** HTTP only for now (`:443` deferred). To disable, set `proxy: disable` in the manifest —
+  the entity falls back to the legacy host-port URLs.
+
+**NOC exception:** the NOC portal is hub-owned and stays **port-based** (its browser-side Keycloak
+OIDC redirect URIs are unchanged); it is intentionally excluded from proxy path routing and from the
+proxy-mode launcher for now.
+
 ## ⚠️ Multi-VM caveat (applies to both scenarios)
 
 The toolkit only executes `environment: local`, a profile validated all-on-one-host. The **Besu/P2P**

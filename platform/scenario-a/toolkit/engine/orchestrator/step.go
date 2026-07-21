@@ -45,6 +45,8 @@ const (
 	StepStartCBFrontend   = "start-cb-frontend"
 	// Per-entity launcher (distributed A/B entry point). Runs in both modes.
 	StepStartLauncher = "start-launcher"
+	// Per-host reverse proxy (Caddy): one :80 entrypoint routing portals + api by path.
+	StepStartProxy = "start-proxy"
 )
 
 // CanonicalStepOrder is the definitive execution sequence for mode:found.

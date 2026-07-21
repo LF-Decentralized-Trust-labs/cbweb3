@@ -197,8 +197,28 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 	stackTO := deps.Timeouts.PaladinHealthCheck
 	stackInt := deps.Timeouts.PaladinHealthCheckInterval
 
+	// Reverse proxy (spec.proxy): when enabled, this CB's portals + api-gateway are served
+	// on :80 by path (/a/<role>/, /a/api/); the SPAs are built base-path-aware and their
+	// api/CORS/launcher URLs point at frontendHost. fHost defaults to localhost.
+	proxyEnabled := m.Spec.Proxy == "enable"
+	fHost := frontendAdvertisedHost(m)
+	cbAPIURL := frontendAPIURL(fHost, ports.APIGateway)
+	cbAPIBase := frontendAPIBase(fHost, ports.APIGateway)
+	var cbBasePaths map[string]string
+	cbImageTag := entity
+	if proxyEnabled {
+		cbAPIURL = proxyAPIURL(hostOrLocalhost(fHost))
+		cbAPIBase = proxyAPIBase(hostOrLocalhost(fHost))
+		cbBasePaths = map[string]string{
+			"governance": proxyPortalBase("governance"),
+			"treasury":   proxyPortalBase("treasury"),
+			"supervisor": proxyPortalBase("supervisor"),
+		}
+		cbImageTag = entity + proxyImageVariant
+	}
+
 	steps = append(steps,
-		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex, frontendAdvertisedHost(m), m.Spec.FXPartyRoster, cactiContainerURL(manifestRelayEndpoint(m))),
+		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex, frontendAdvertisedHost(m), m.Spec.FXPartyRoster, cactiContainerURL(manifestRelayEndpoint(m)), proxyEnabled),
 		newStartInfraStep(StepStartCBInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
 			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
@@ -238,14 +258,18 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 				{Service: "supervisor", Port: ports.FrontendSupervisor},
 				{Service: "noc", Port: ports.FrontendNOC},
 			},
-			APIURL:      frontendAPIURL(frontendAdvertisedHost(m), ports.APIGateway),
-			APIBase:     frontendAPIBase(frontendAdvertisedHost(m), ports.APIGateway),
+			APIURL:      cbAPIURL,
+			APIBase:     cbAPIBase,
+			BasePaths:   cbBasePaths,
 			PortalOwner: entity + "-operator", FiatSymbol: m.Spec.Spoke.Currency, Institution: m.DisplayNameOr(entity),
+			// NOC is not proxied (hub-owned; stays port-based), so its Keycloak URL keeps
+			// the host-port origin even behind the proxy.
 			KeycloakURL: frontendAPIBase(frontendAdvertisedHost(m), ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "cbweb3-noc",
 			// Per-entity image tag: VITE_* are baked at build time, so a shared tag
 			// would let one entity's bundle (with its api-gateway URL) be reused by
-			// another, sending the browser to the wrong gateway and failing CORS.
-			ImageTag:      entity,
+			// another, sending the browser to the wrong gateway and failing CORS. The
+			// proxy variant keeps base-path-aware bundles distinct from host-port ones.
+			ImageTag:      cbImageTag,
 			HealthTimeout: stackTO, HealthInterval: stackInt,
 		}),
 	)
@@ -269,7 +293,17 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 	// fragment for the central bank and runs the generic launcher image once (soft).
 	steps = append(steps, newLauncherStep(
 		m.Spec.Launcher, m.Spec.Role, m.DisplayNameOr(entity),
-		frontendAdvertisedHost(m), besuRPCPort, m.Spec.LauncherPort))
+		frontendAdvertisedHost(m), besuRPCPort, m.Spec.LauncherPort, proxyEnabled))
+
+	// Per-host reverse proxy (soft): route this CB's portals + api-gateway by path on :80.
+	if proxyEnabled {
+		steps = append(steps, newProxyStep(m.Spec.Proxy, m.Spec.LauncherPort, []string{net}, []ProxyRoute{
+			{Segment: "governance", Upstream: prefix + "-governance-frontend:80"},
+			{Segment: "treasury", Upstream: prefix + "-treasury-frontend:80"},
+			{Segment: "supervisor", Upstream: prefix + "-supervisor-frontend:80"},
+			{Segment: "api", Upstream: prefix + "-api-gateway:8080", IsAPI: true},
+		}, ""))
+	}
 	return steps
 }
 
@@ -335,6 +369,32 @@ func bankCORSOrigins(p EntityPorts, frontendHost string) string {
 	}
 	remote := fmt.Sprintf("http://%s:%d,http://%s:%d", frontendHost, p.FrontendPrimary, frontendHost, p.FrontendSecondary)
 	return local + "," + remote
+}
+
+// cbCORSOriginsFor / bankCORSOriginsFor return the api-gateway's allowed origins for a
+// central / commercial bank. Behind the reverse proxy every portal is served from the
+// single frontendHost origin (path routing), so one origin suffices; otherwise the
+// per-portal host-port origins apply (cbCORSOrigins / bankCORSOrigins).
+func cbCORSOriginsFor(p EntityPorts, frontendHost string, proxy bool) string {
+	if proxy {
+		return proxyOrigin(hostOrLocalhost(frontendHost))
+	}
+	return cbCORSOrigins(p, frontendHost)
+}
+
+func bankCORSOriginsFor(p EntityPorts, frontendHost string, proxy bool) string {
+	if proxy {
+		return proxyOrigin(hostOrLocalhost(frontendHost))
+	}
+	return bankCORSOrigins(p, frontendHost)
+}
+
+// hostOrLocalhost defaults an empty browser-facing host to localhost.
+func hostOrLocalhost(h string) string {
+	if h == "" {
+		return "localhost"
+	}
+	return h
 }
 
 // dockerHostAlias is the Docker special DNS name that resolves to the host from
@@ -577,6 +637,21 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	// HTLC signer / verified participant. Empty off local — path disabled, as before.
 	operatorKeyHex := resolveBankOperatorKeyHex(deps.KeyProvider, spokeID, bank)
 
+	// Reverse proxy (spec.proxy): when enabled, this bank's portal + api-gateway are served
+	// on :80 by path (/a/bank/, /a/api/); the SPA is built base-path-aware.
+	proxyEnabled := m.Spec.Proxy == "enable"
+	fHost := frontendAdvertisedHost(m)
+	bankAPIURL := frontendAPIURL(fHost, ports.APIGateway)
+	bankAPIBase := frontendAPIBase(fHost, ports.APIGateway)
+	var bankBasePaths map[string]string
+	bankImageTag := bank
+	if proxyEnabled {
+		bankAPIURL = proxyAPIURL(hostOrLocalhost(fHost))
+		bankAPIBase = proxyAPIBase(hostOrLocalhost(fHost))
+		bankBasePaths = map[string]string{"bank": proxyPortalBase("bank")}
+		bankImageTag = bank + proxyImageVariant
+	}
+
 	steps = append(steps,
 		newRenderBankEnvStep(bankEnvParams{
 			SpokeID: spokeID, BankCode: bank, Currency: b.Spec.Currency,
@@ -590,6 +665,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			HTLCAddress:      b.Spec.Contracts.HTLCAddress,
 			BesuOperatorKey:  operatorKeyHex,
 			FrontendHost:     frontendAdvertisedHost(m),
+			Proxy:            proxyEnabled,
 			FXPartyRoster:    m.Spec.FXPartyRoster,
 			RelayURL:         cactiContainerURL(bundleRelayEndpoint(m, b)),
 		}),
@@ -626,12 +702,13 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			Context:     filepath.Join(root, "frontend"),
 			ComposePath: filepath.Join(templatesDir, "entity-frontend", "frontend-compose.yaml"),
 			Services:    []frontendService{{Service: "bank", Port: ports.FrontendPrimary}},
-			APIURL:      frontendAPIURL(frontendAdvertisedHost(m), ports.APIGateway), APIBase: frontendAPIBase(frontendAdvertisedHost(m), ports.APIGateway),
+			APIURL:      bankAPIURL, APIBase: bankAPIBase, BasePaths: bankBasePaths,
 			PortalOwner: bank + "-operator", FiatSymbol: b.Spec.Currency, Institution: m.DisplayNameOr(bank),
 			// Per-entity image tag: VITE_API_URL is baked at build time, so a shared
 			// tag would let one bank's bundle be reused by another, pointing the
-			// browser at the wrong bank's api-gateway and failing CORS.
-			ImageTag:      bank,
+			// browser at the wrong bank's api-gateway and failing CORS. The proxy variant
+			// keeps base-path-aware bundles distinct from host-port ones.
+			ImageTag:      bankImageTag,
 			HealthTimeout: stackTO, HealthInterval: stackInt,
 		}),
 	)
@@ -669,7 +746,15 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 	// fragment for the commercial bank and runs the generic launcher image once (soft).
 	steps = append(steps, newLauncherStep(
 		m.Spec.Launcher, m.Spec.Role, m.DisplayNameOr(deps.BankCode),
-		frontendAdvertisedHost(m), rpcPort, m.Spec.LauncherPort))
+		frontendAdvertisedHost(m), rpcPort, m.Spec.LauncherPort, proxyEnabled))
+
+	// Per-host reverse proxy (soft): route this bank's portal + api-gateway by path on :80.
+	if proxyEnabled {
+		steps = append(steps, newProxyStep(m.Spec.Proxy, m.Spec.LauncherPort, []string{net}, []ProxyRoute{
+			{Segment: "bank", Upstream: prefix + "-bank-frontend:80"},
+			{Segment: "api", Upstream: prefix + "-api-gateway:8080", IsAPI: true},
+		}, ""))
+	}
 	return steps
 }
 

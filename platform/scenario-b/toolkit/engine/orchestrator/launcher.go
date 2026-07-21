@@ -112,7 +112,8 @@ type LauncherParams struct {
 	Entity   string // display label shown in the launcher header
 	Host     string // browser-facing host baked into portal URLs (default localhost)
 	RPCPort  int
-	Port     int // launcher host port from the manifest (spec.launcherPort); 0 → env/default
+	Port     int  // launcher host port from the manifest (spec.launcherPort); 0 → env/default
+	Proxy    bool // spec.proxy == enable: portal links are path-based (/<scn>/<role>/) on :80, not host:port
 }
 
 // NewLauncherStep builds the SOFT per-entity launcher step. It never blocks the entity's
@@ -148,6 +149,20 @@ func runLauncherB(ctx context.Context, p LauncherParams) error {
 	}
 	portals := make([]launcherPortalJSON, 0)
 	for _, rp := range launcherRolesB(p.TopoRole) {
+		// Behind the proxy every portal is on :80 under a path (/<scn>/<role>/); NOC is
+		// not proxied yet (hub-owned), so it is dropped from the proxy-mode launcher.
+		if p.Proxy {
+			if rp.role == "noc" {
+				continue
+			}
+			portals = append(portals, launcherPortalJSON{
+				Scenario: launcherScenarioUpper,
+				Role:     rp.role,
+				Label:    rp.label,
+				URL:      "http://" + host + proxyPortalBase(rp.role),
+			})
+			continue
+		}
 		portals = append(portals, launcherPortalJSON{
 			Scenario: launcherScenarioUpper,
 			Role:     rp.role,

@@ -1,0 +1,31 @@
+# CBWeb3 reverse proxy — a single HTTP entrypoint per entity host.
+#
+# Path-based routing: each portal is served under /<scenario>/<role>/ (e.g.
+# /a/governance/, /b/bank/) and each scenario's api-gateway under /<scenario>/api/.
+# Per-scenario route fragments are written by each scenario's toolkit into
+# /etc/caddy/conf.d/caddy.<scenario>.conf and imported here; the per-entity launcher
+# landing page answers everything else at the site root.
+#
+# The image is GENERIC — no per-entity hosts or ports are baked in. Both scenarios of
+# an entity share ONE proxy container on that host (one :80 per host).
+#
+# HTTP only for now (TLS / :443 deferred). auto_https is disabled so Caddy never tries
+# to provision certificates for the bare :80 site.
+{
+	auto_https off
+}
+
+:80 {
+	# Per-scenario portal + api routes (caddy.a.conf, caddy.b.conf). Each fragment
+	# uses `handle_path` / `handle` blocks with explicit path matchers, so they are
+	# evaluated before the match-all launcher fallback below. A zero-match glob is not
+	# an error, so a host running only one scenario still starts cleanly.
+	import /etc/caddy/conf.d/*.conf
+
+	# Fallback (matcher-less `handle` = matched last): the per-entity launcher. Its own
+	# step publishes it on the host, so the proxy reaches it via host.docker.internal.
+	# Override with LAUNCHER_UPSTREAM when the launcher port differs from the default.
+	handle {
+		reverse_proxy {$LAUNCHER_UPSTREAM:host.docker.internal:5190}
+	}
+}

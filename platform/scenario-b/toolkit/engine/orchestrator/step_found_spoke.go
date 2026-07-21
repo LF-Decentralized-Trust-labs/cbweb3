@@ -42,6 +42,8 @@ type SpokeConfig struct {
 	P2PPort             int    // host port -> besu 30303
 	AdvertisedHost      string // externally reachable host for the spoke bundle enode (default host.docker.internal)
 	RelayAdvertisedHost string // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
+	FrontendHost        string // browser-facing host (spec.frontendHost) — used for proxy path URLs
+	ProxyEnabled        bool   // spec.proxy == enable: serve portals + api behind the per-host reverse proxy
 	AdminUsers          []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
 	Currency            string      // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
 	TokenName           string // tCeBM name (default "Tokenized <Currency>")
@@ -277,6 +279,55 @@ func appendKeycloakUsers(b *strings.Builder, kc, realm string, users []AdminUser
 // SpokeEnvFile mid-run and merged via `--env-file`. The founding CB is its own
 // bootnode, so no BOOTNODE_ENODE is emitted (the founder besu template omits
 // --bootnodes). Ports derive from RPCPort by fixed offsets.
+// useProxy reports whether this entity serves its portals + api behind the per-host
+// reverse proxy (spec.proxy == enable and a browser-facing host is known).
+func (c SpokeConfig) useProxy() bool { return c.ProxyEnabled && c.FrontendHost != "" }
+
+// frontendVariant tags a per-entity frontend image so a proxy (base-path-aware) build
+// is never confused with a non-proxy one under the same gateway-port tag.
+func (c SpokeConfig) frontendVariant() string {
+	if c.useProxy() {
+		return proxyImageVariant
+	}
+	return ""
+}
+
+// corsOrigins is the CB api-gateway's allowed browser origins: the single proxy origin
+// when behind the proxy (all portals share it), else the four host-port portal origins.
+func (c SpokeConfig) corsOrigins() string {
+	if c.useProxy() {
+		return proxyOrigin(c.FrontendHost)
+	}
+	return corsOriginsCB(c.RPCPort)
+}
+
+// NetName is this entity's external docker network (created by the infra step).
+func (c SpokeConfig) NetName() string { return c.NetPrefix + "_net" }
+
+// frontendContainer is the container name of a CB operator portal on the entity network
+// (must match cb-frontend.compose.yaml: <CONTAINER_PREFIX>-<ENTITY>-<role>-frontend).
+func (c SpokeConfig) frontendContainer(role string) string {
+	return fmt.Sprintf("%s-%s-%s-frontend", c.ContainerPrefix, c.Entity, role)
+}
+
+// apiGatewayContainer is the api-gateway container name on the entity network
+// (must match entity-backend.compose.yaml: <CONTAINER_PREFIX>-<ENTITY>-api-gateway).
+func (c SpokeConfig) apiGatewayContainer() string {
+	return fmt.Sprintf("%s-%s-api-gateway", c.ContainerPrefix, c.Entity)
+}
+
+// ProxyRoutes are the path routes the reverse proxy exposes for this CB: its three
+// operator portals + the api-gateway. NOC is intentionally excluded (hub-owned, still
+// port-based); see proxy step docs.
+func (c SpokeConfig) ProxyRoutes() []ProxyRoute {
+	return []ProxyRoute{
+		{Segment: "governance", Upstream: c.frontendContainer("governance") + ":80"},
+		{Segment: "treasury", Upstream: c.frontendContainer("treasury") + ":80"},
+		{Segment: "supervisor", Upstream: c.frontendContainer("supervisor") + ":80"},
+		{Segment: "api", Upstream: c.apiGatewayContainer() + ":8080", IsAPI: true},
+	}
+}
+
 func (c SpokeConfig) ComposeEnv() []string {
 	e := c.ContainerPrefix
 	// The spoke backend reaches the hub via host.docker.internal:<HUB_RPC_PORT>;
@@ -318,13 +369,14 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// CB operator portals (governance/treasury/supervisor). Each SPA bakes the CB
 		// api-gateway URL at build time, so the image is tagged per gateway port. The
 		// NOC portal is deployed by the noc template.
-		"GOVERNANCE_FRONTEND_IMAGE":  cbFrontendImage("governance", c.RPCPort+8000),
+		"GOVERNANCE_FRONTEND_IMAGE":  cbFrontendImage("governance", c.RPCPort+8000, c.frontendVariant()),
 		"GOVERNANCE_FRONTEND_PORT":   itoa(c.RPCPort + 9000),
-		// Browser CORS: allow this CB's four operator-portal origins on its gateway.
-		"CORS_ALLOW_ORIGINS": corsOriginsCB(c.RPCPort),
-		"TREASURY_FRONTEND_IMAGE":    cbFrontendImage("treasury", c.RPCPort+8000),
+		// Browser CORS: the single proxy origin (path routing) or the four operator-portal
+		// host-port origins when not behind the proxy.
+		"CORS_ALLOW_ORIGINS": c.corsOrigins(),
+		"TREASURY_FRONTEND_IMAGE":    cbFrontendImage("treasury", c.RPCPort+8000, c.frontendVariant()),
 		"TREASURY_FRONTEND_PORT":     itoa(c.RPCPort + 13000),
-		"SUPERVISOR_FRONTEND_IMAGE":  cbFrontendImage("supervisor", c.RPCPort+8000),
+		"SUPERVISOR_FRONTEND_IMAGE":  cbFrontendImage("supervisor", c.RPCPort+8000, c.frontendVariant()),
 		"SUPERVISOR_FRONTEND_PORT":   itoa(c.RPCPort + 14000),
 		// app stack (compliance + auth): the CB is the local signer/deployer, and
 		// the Keycloak realm/client are provisioned by provision-keycloak-spoke.
@@ -736,20 +788,33 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 		},
 		{Name: "start-spoke-frontend", Deps: []string{"start-spoke-backend"}, Soft: true, Run: func(ctx context.Context) error {
 			// CB operator portals: governance/treasury/supervisor, each baking this CB's
-			// api-gateway URL (browser reaches it on the host at localhost:<gwPort>).
+			// api-gateway URL at build time. Without the proxy the browser reaches the
+			// gateway on the host at localhost:<gwPort>; behind the proxy every portal is
+			// same-origin and calls it at http://<frontendHost>/<scn>/api/v1/, and the SPA
+			// is built base-path-aware (VITE_BASE_PATH) so it is served under /<scn>/<role>/.
 			gwPort := c.RPCPort + 8000
 			api := fmt.Sprintf("http://localhost:%d", gwPort)
+			variant := c.frontendVariant()
 			sb := c.scenarioBDir()
-			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("governance", gwPort), "governance",
-				map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
+			gov := map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}
+			tre := map[string]string{"VITE_API_BASE_URL": api, "VITE_INSTITUTION_NAME": c.Entity}
+			sup := map[string]string{"VITE_API_BASE_URL": api, "VITE_SPOKE_NAME": c.SpokeID}
+			if c.useProxy() {
+				api = proxyAPIURL(c.FrontendHost)
+				gov["VITE_API_URL"] = api
+				tre["VITE_API_BASE_URL"] = api
+				sup["VITE_API_BASE_URL"] = api
+				gov["VITE_BASE_PATH"] = proxyPortalBase("governance")
+				tre["VITE_BASE_PATH"] = proxyPortalBase("treasury")
+				sup["VITE_BASE_PATH"] = proxyPortalBase("supervisor")
+			}
+			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("governance", gwPort, variant), "governance", gov); err != nil {
 				return err
 			}
-			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("treasury", gwPort), "treasury",
-				map[string]string{"VITE_API_BASE_URL": api, "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
+			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("treasury", gwPort, variant), "treasury", tre); err != nil {
 				return err
 			}
-			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("supervisor", gwPort), "supervisor",
-				map[string]string{"VITE_API_BASE_URL": api, "VITE_SPOKE_NAME": c.SpokeID}); err != nil {
+			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("supervisor", gwPort, variant), "supervisor", sup); err != nil {
 				return err
 			}
 			return compose("cb-frontend")(ctx)

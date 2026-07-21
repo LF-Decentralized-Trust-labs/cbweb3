@@ -122,6 +122,8 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		RelayAdvertisedHost: manifestRelayAdvHost(pd),
 		Currency:            pd.Spec.Spoke.Currency,
 		AdminUsers:          toOrchestratorAdminUsers(pd.Spec.AdminUsers),
+		FrontendHost:        pd.Spec.FrontendHost,
+		ProxyEnabled:        pd.Spec.Proxy == "enable",
 	}
 	cfg.WithDefaults()
 	if o.DryRun {
@@ -152,6 +154,15 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 
 	steps := orchestrator.FoundSpokeSteps(cfg)
 	steps = append(steps, launcherStep(pd, cfg.Runner, rpcPort))
+	if cfg.ProxyEnabled {
+		steps = append(steps, orchestrator.NewProxyStep(orchestrator.ProxyParams{
+			Runner:       cfg.Runner,
+			Mode:         pd.Spec.Proxy,
+			LauncherPort: pd.Spec.LauncherPort,
+			Networks:     []string{cfg.NetName()},
+			Routes:       cfg.ProxyRoutes(),
+		}))
+	}
 	return orchestrator.New("found-spoke", steps, state, o.DryRun).Run(ctx)
 }
 
@@ -167,6 +178,7 @@ func launcherStep(pd *manifest.ParticipantDeployment, runner exec.CommandRunner,
 		Host:     pd.Spec.FrontendHost,
 		RPCPort:  rpcPort,
 		Port:     pd.Spec.LauncherPort,
+		Proxy:    pd.Spec.Proxy == "enable",
 	})
 }
 
@@ -221,6 +233,8 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		P2PPort:         p2pPort,
 		HubRPC:          o.HubRPC,
 		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
+		FrontendHost:    pd.Spec.FrontendHost,
+		ProxyEnabled:    pd.Spec.Proxy == "enable",
 	}
 	cfg.WithDefaults()
 	if o.DryRun {
@@ -235,6 +249,15 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 	}
 	steps := orchestrator.JoinSteps(cfg)
 	steps = append(steps, launcherStep(pd, cfg.Runner, rpcPort))
+	if cfg.ProxyEnabled {
+		steps = append(steps, orchestrator.NewProxyStep(orchestrator.ProxyParams{
+			Runner:       cfg.Runner,
+			Mode:         pd.Spec.Proxy,
+			LauncherPort: pd.Spec.LauncherPort,
+			Networks:     []string{cfg.NetName()},
+			Routes:       cfg.ProxyRoutes(),
+		}))
+	}
 	return orchestrator.New("join", steps, state, o.DryRun).Run(ctx)
 }
 
@@ -305,11 +328,23 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
 		AdvertisedHost:  advertisedHost,
+		FrontendHost:    pd.Spec.FrontendHost,
+		ProxyEnabled:    pd.Spec.Proxy == "enable",
 	}
 	// No launcher on the hub: the launcher is the per-entity A/B entry point for
 	// commercial banks and central banks (found-spoke / join), not for the network
 	// operator's hub (Scenario B only).
 	steps := orchestrator.FoundHubSteps(cfg)
+	if cfg.ProxyEnabled {
+		// The hub has no launcher landing page, so root redirects to its governance portal.
+		steps = append(steps, orchestrator.NewProxyStep(orchestrator.ProxyParams{
+			Runner:       runner,
+			Mode:         pd.Spec.Proxy,
+			Networks:     []string{cfg.NetName()},
+			Routes:       cfg.ProxyRoutes(),
+			RootRedirect: "/b/governance/",
+		}))
+	}
 	return orchestrator.New("found-hub", steps, state, o.DryRun).Run(ctx)
 }
 

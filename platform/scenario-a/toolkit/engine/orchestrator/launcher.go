@@ -115,11 +115,12 @@ type launcherStep struct {
 	entity   string // display label
 	host     string // browser-facing host (default localhost)
 	rpcPort  int
-	port     int // launcher host port from the manifest (spec.launcherPort); 0 → env/default
+	port     int  // launcher host port from the manifest (spec.launcherPort); 0 → env/default
+	proxy    bool // spec.proxy == enable: portal links are path-based (/<scn>/<role>/) on :80, not host:port
 }
 
-func newLauncherStep(mode, specRole, entity, host string, rpcPort, port int) Step {
-	return &launcherStep{mode: mode, specRole: specRole, entity: entity, host: host, rpcPort: rpcPort, port: port}
+func newLauncherStep(mode, specRole, entity, host string, rpcPort, port int, proxy bool) Step {
+	return &launcherStep{mode: mode, specRole: specRole, entity: entity, host: host, rpcPort: rpcPort, port: port, proxy: proxy}
 }
 
 func (s *launcherStep) Name() string { return StepStartLauncher }
@@ -153,6 +154,20 @@ func (s *launcherStep) Run(ctx context.Context) error {
 	}
 	portals := make([]launcherPortalJSON, 0, len(roles))
 	for _, rp := range roles {
+		// Behind the proxy every portal is on :80 under a path (/<scn>/<role>/); NOC is
+		// not proxied yet (hub-owned), so it is dropped from the proxy-mode launcher.
+		if s.proxy {
+			if rp.role == "noc" {
+				continue
+			}
+			portals = append(portals, launcherPortalJSON{
+				Scenario: launcherScenarioUpper,
+				Role:     rp.role,
+				Label:    rp.label,
+				URL:      "http://" + host + proxyPortalBase(rp.role),
+			})
+			continue
+		}
 		portals = append(portals, launcherPortalJSON{
 			Scenario: launcherScenarioUpper,
 			Role:     rp.role,

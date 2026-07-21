@@ -29,6 +29,7 @@ type renderBankEnvStep struct {
 	htlcAddress                string
 	besuOperatorKey            string
 	frontendHost               string
+	proxy                      bool
 	fxPartyRoster              []string
 	relayURL                   string
 }
@@ -49,6 +50,7 @@ func newRenderBankEnvStep(p bankEnvParams) Step {
 		htlcAddress:                p.HTLCAddress,
 		besuOperatorKey:            p.BesuOperatorKey,
 		frontendHost:               p.FrontendHost,
+		proxy:                      p.Proxy,
 		fxPartyRoster:              p.FXPartyRoster,
 		relayURL:                   p.RelayURL,
 	}
@@ -70,6 +72,7 @@ type bankEnvParams struct {
 	HTLCAddress                string
 	BesuOperatorKey            string
 	FrontendHost               string
+	Proxy                      bool
 	FXPartyRoster              []string
 	RelayURL                   string
 }
@@ -154,7 +157,7 @@ func (s *renderBankEnvStep) Run(_ context.Context) error {
 		// FX-party roster across every spoke the relay knows (including remote
 		// spokes it must trade with), so no static fxPartyRoster is needed.
 		RelayURL:    s.relayURL,
-		CORSOrigins: bankCORSOrigins(ports, s.frontendHost),
+		CORSOrigins: bankCORSOriginsFor(ports, s.frontendHost, s.proxy),
 	}
 	return RenderEntityEnv(data, cbEnvPath(s.dataDir, s.bankCode))
 }
