@@ -45,6 +45,9 @@ type HubConfig struct {
 	// spokes (from manifest node.advertisedHost). Local WaitRPC / forge keep
 	// using HubRPC (typically localhost on the hub VM).
 	AdvertisedHost string
+	// FrontendHost is the browser-facing host baked into the hub governance portal's
+	// VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost).
+	FrontendHost string
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -239,7 +242,7 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"FRONTEND_IMAGE":             cbFrontendImage("governance", c.RPCPort+8000),
 		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
 		// Browser CORS: allow the hub governance portal origin on the hub gateway.
-		"CORS_ALLOW_ORIGINS": corsOriginSingle(c.RPCPort),
+		"CORS_ALLOW_ORIGINS": corsOriginSingle(c.RPCPort, c.FrontendHost),
 		"RELAY_IMAGE":                hubRelayImage,
 		"RELAY_CONTAINER_NAME":       e + "-relay",
 		"RELAY_NET_PREFIX":           c.NetPrefix,
@@ -443,11 +446,13 @@ func FoundHubSteps(c HubConfig) []Step {
 		{
 			Name: "start-hub-frontend", Deps: []string{"start-hub-backend"}, Soft: true,
 			Run: func(ctx context.Context) error {
-				// The hub governance portal bakes the hub api-gateway URL (browser reaches
-				// it on the host at localhost:<gwPort>); build a per-entity image, then run.
+				// The hub governance portal bakes the hub api-gateway URL. The browser reaches
+				// the gateway at frontendHost:<gwPort> (spec.frontendHost — a routable IP/DNS
+				// for remote access, else localhost); build a per-entity image, then run.
 				gwPort := c.RPCPort + 8000
+				api := fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort)
 				if err := buildFrontendImage(ctx, c.Runner, c.scenarioBDir(), cbFrontendImage("governance", gwPort), "governance",
-					map[string]string{"VITE_API_URL": fmt.Sprintf("http://localhost:%d", gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": "hub"}); err != nil {
+					map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": "hub"}); err != nil {
 					return err
 				}
 				return compose("entity-frontend")(ctx)

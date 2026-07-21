@@ -120,6 +120,7 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		P2PPort:             p2pPort,
 		AdvertisedHost:      pd.Spec.Node.AdvertisedHost,
 		RelayAdvertisedHost: manifestRelayAdvHost(pd),
+		FrontendHost:        pd.Spec.FrontendHost,
 		Currency:            pd.Spec.Spoke.Currency,
 		AdminUsers:          toOrchestratorAdminUsers(pd.Spec.AdminUsers),
 	}
@@ -220,6 +221,7 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
 		HubRPC:          o.HubRPC,
+		FrontendHost:    pd.Spec.FrontendHost,
 		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
 	}
 	cfg.WithDefaults()
@@ -305,6 +307,7 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
 		AdvertisedHost:  advertisedHost,
+		FrontendHost:    pd.Spec.FrontendHost,
 	}
 	// No launcher on the hub: the launcher is the per-entity A/B entry point for
 	// commercial banks and central banks (found-spoke / join), not for the network

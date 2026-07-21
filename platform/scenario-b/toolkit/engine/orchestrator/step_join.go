@@ -44,6 +44,7 @@ type JoinConfig struct {
 	HubRPC          string // hub RPC (spoke backend reaches the hub via host.docker.internal:<port>)
 	BesuImage       string
 	GatewayURL      string
+	FrontendHost    string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -219,7 +220,7 @@ func (c JoinConfig) ComposeEnv() []string {
 		"FRONTEND_IMAGE":   cbFrontendImage("bank", c.RPCPort+8000),
 		"FRONTEND_PORT":    itoa(c.RPCPort + 9000),
 		// Browser CORS: allow this bank's portal origin on its gateway.
-		"CORS_ALLOW_ORIGINS": corsOriginSingle(c.RPCPort),
+		"CORS_ALLOW_ORIGINS": corsOriginSingle(c.RPCPort, c.FrontendHost),
 		// app stack (compliance + auth): the bank is the local signer; the Keycloak
 		// realm/client are provisioned by provision-keycloak-bank.
 		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
@@ -465,11 +466,13 @@ func JoinSteps(c JoinConfig) []Step {
 			return compose("entity-backend")(ctx)
 		}},
 		{Name: "start-bank-frontend", Deps: []string{"start-bank-backend"}, Soft: true, Run: func(ctx context.Context) error {
-			// The bank portal bakes this bank's api-gateway URL (browser reaches it on
-			// the host at localhost:<gwPort>); build a per-entity image, then run it.
+			// The bank portal bakes this bank's api-gateway URL. The browser reaches the
+			// gateway at frontendHost:<gwPort> (spec.frontendHost — a routable IP/DNS for
+			// remote access, else localhost); build a per-entity image, then run it.
 			gwPort := c.RPCPort + 8000
+			api := fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort)
 			if err := buildFrontendImage(ctx, c.Runner, c.scenarioBDir(), cbFrontendImage("bank", gwPort), "bank",
-				map[string]string{"VITE_API_URL": fmt.Sprintf("http://localhost:%d", gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
+				map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
 				return err
 			}
 			return compose("entity-frontend")(ctx)

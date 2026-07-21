@@ -42,6 +42,7 @@ type SpokeConfig struct {
 	P2PPort             int    // host port -> besu 30303
 	AdvertisedHost      string // externally reachable host for the spoke bundle enode (default host.docker.internal)
 	RelayAdvertisedHost string // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
+	FrontendHost        string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
 	AdminUsers          []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
 	Currency            string      // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
 	TokenName           string // tCeBM name (default "Tokenized <Currency>")
@@ -321,7 +322,7 @@ func (c SpokeConfig) ComposeEnv() []string {
 		"GOVERNANCE_FRONTEND_IMAGE":  cbFrontendImage("governance", c.RPCPort+8000),
 		"GOVERNANCE_FRONTEND_PORT":   itoa(c.RPCPort + 9000),
 		// Browser CORS: allow this CB's four operator-portal origins on its gateway.
-		"CORS_ALLOW_ORIGINS": corsOriginsCB(c.RPCPort),
+		"CORS_ALLOW_ORIGINS": corsOriginsCB(c.RPCPort, c.FrontendHost),
 		"TREASURY_FRONTEND_IMAGE":    cbFrontendImage("treasury", c.RPCPort+8000),
 		"TREASURY_FRONTEND_PORT":     itoa(c.RPCPort + 13000),
 		"SUPERVISOR_FRONTEND_IMAGE":  cbFrontendImage("supervisor", c.RPCPort+8000),
@@ -736,9 +737,10 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 		},
 		{Name: "start-spoke-frontend", Deps: []string{"start-spoke-backend"}, Soft: true, Run: func(ctx context.Context) error {
 			// CB operator portals: governance/treasury/supervisor, each baking this CB's
-			// api-gateway URL (browser reaches it on the host at localhost:<gwPort>).
+			// api-gateway URL. The browser reaches the gateway at frontendHost:<gwPort>
+			// (spec.frontendHost — a routable IP/DNS for remote access, else localhost).
 			gwPort := c.RPCPort + 8000
-			api := fmt.Sprintf("http://localhost:%d", gwPort)
+			api := fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort)
 			sb := c.scenarioBDir()
 			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("governance", gwPort), "governance",
 				map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
