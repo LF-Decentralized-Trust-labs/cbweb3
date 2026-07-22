@@ -33,7 +33,10 @@ type Dependencies struct {
 	TokenPreparer           handlers.AMMTokenPreparer
 	// US3
 	CircuitBreakerService handlers.CircuitBreakerServiceIface
-	OversightService      handlers.OversightServiceIface
+	// CircuitBreakerSigner produces the off-chain institutional attestation for CB actions
+	// server-side (CB PKI key). Optional; nil = empty attestation (on-chain auth unaffected).
+	CircuitBreakerSigner handlers.CircuitBreakerSigner
+	OversightService     handlers.OversightServiceIface
 	// Phase 8 — PairRegistry multi-pair (005-cooperative-liquidity / FR-017)
 	PairService services.PairServiceIface
 	// 006-hub-currency-registry — hub currency discovery
@@ -407,6 +410,9 @@ func registerUS3Routes(app *fiber.App, deps Dependencies) {
 
 	if deps.CircuitBreakerService != nil {
 		gh := handlers.NewGovernanceScenarioBHandler(deps.CircuitBreakerService)
+		if deps.CircuitBreakerSigner != nil {
+			gh = gh.WithSigner(deps.CircuitBreakerSigner)
+		}
 		gov.Post("/circuit-breaker/pause",
 			middleware.RequireCookieAuth(deps.AuthProvider),
 			middleware.RequireCentralBankRole(),

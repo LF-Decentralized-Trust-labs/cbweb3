@@ -14,19 +14,22 @@ export interface CircuitBreakerV2Status {
   pause_initiator: string | null;
   pause_reason: string | null;
   resume_request_id: string | null;
+  // 2-of-N progress of an in-flight resume proposal (surfaced on-chain to every CB).
+  resume_signatures?: number;
+  resume_quorum?: number;
 }
 
+// The institutional signature is generated server-side (CB PKI key), so it is not part
+// of these request payloads anymore.
 export interface PauseRequest {
   pair: string;
   bank_id: string;
   reason_code: string;
-  signature: string;
 }
 
 export interface ProposeResumeRequest {
   pair: string;
   bank_id: string;
-  signature: string;
 }
 
 export interface ProposeResumeResponse {
@@ -38,7 +41,6 @@ export interface SignResumeRequest {
   pair: string;
   request_id: string;
   bank_id: string;
-  signature: string;
 }
 
 export interface CircuitBreakerOperationalStatus {

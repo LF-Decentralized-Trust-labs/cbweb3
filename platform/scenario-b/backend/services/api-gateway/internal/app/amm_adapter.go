@@ -389,6 +389,40 @@ func (a *ammAdapter) ExecuteResume(ctx context.Context, pair, requestID string) 
 	return nil
 }
 
+// IsPaused reads the pair's AMM on-chain circuit-breaker state — the shared source of
+// truth across all Central Banks (the per-gateway DB projection only reflects actions
+// taken through that gateway).
+func (a *ammAdapter) IsPaused(ctx context.Context, pair string) (bool, error) {
+	c, err := a.clientFor(ctx, pair)
+	if err != nil {
+		return false, err
+	}
+	return c.IsPaused(ctx)
+}
+
+// ActiveResumeProposal returns the on-chain resume proposal for pair (id + collected
+// signatures + required quorum), discovered from LogResumeProposed. requestID is empty
+// when no proposal exists. This lets a non-proposing CB see and co-sign the 2-of-N resume.
+func (a *ammAdapter) ActiveResumeProposal(ctx context.Context, pair string) (string, int, int, error) {
+	c, err := a.clientFor(ctx, pair)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	pid, found, err := c.LatestResumeProposal(ctx)
+	if err != nil || !found {
+		return "", 0, 0, err
+	}
+	sigs, err := c.ResumeSignatures(ctx, pid)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	quorum, err := c.ResumeQuorum(ctx)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	return "0x" + hex.EncodeToString(pid[:]), int(sigs.Int64()), int(quorum.Int64()), nil
+}
+
 // --- tokenPrepareAdapter ---
 
 // tokenPrepareAdapter implements the AMMTokenPreparer interface used by the token

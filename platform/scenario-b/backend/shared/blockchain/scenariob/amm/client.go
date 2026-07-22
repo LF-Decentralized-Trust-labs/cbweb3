@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -266,6 +267,38 @@ func (c *Client) ResumeSignatures(ctx context.Context, proposalID [32]byte) (*bi
 		return nil, err
 	}
 	return out, nil
+}
+
+// LatestResumeProposal discovers the most recent resume proposal id from the on-chain
+// LogResumeProposed events, so a Central Bank that did NOT propose (and thus never held
+// the id from a tx receipt) can still see and co-sign it. Returns found=false when no
+// proposal has ever been emitted for this pair's AMM.
+func (c *Client) LatestResumeProposal(ctx context.Context) ([32]byte, bool, error) {
+	var zero [32]byte
+	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	eventSig := crypto.Keccak256Hash([]byte("LogResumeProposed(bytes32,address,uint256)"))
+	logs, err := c.ec.FilterLogs(cctx, ethereum.FilterQuery{
+		FromBlock: big.NewInt(0),
+		Addresses: []common.Address{c.contract},
+		Topics:    [][]common.Hash{{eventSig}},
+	})
+	if err != nil {
+		return zero, false, err
+	}
+	if len(logs) == 0 {
+		return zero, false, nil
+	}
+	last := logs[0]
+	for _, lg := range logs[1:] {
+		if lg.BlockNumber > last.BlockNumber || (lg.BlockNumber == last.BlockNumber && lg.Index > last.Index) {
+			last = lg
+		}
+	}
+	if len(last.Topics) < 2 {
+		return zero, false, nil
+	}
+	return last.Topics[1], true, nil
 }
 
 // QuoteExactOutput retrieves the required input amount for an exact-output swap. The
