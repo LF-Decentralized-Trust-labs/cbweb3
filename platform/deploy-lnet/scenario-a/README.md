@@ -12,12 +12,12 @@ Shared VM `.20` infrastructure (both Cacti relays; the Scenario-B hub) is docume
 | VM | Role | Spoke | bank-id | Launcher FQDN | Manifest |
 |----|------|-------|---------|---------------|----------|
 | 10.10.0.20 | Cacti relay (Scenario A) | — | — | — | *(no manifest — see root README)* |
-| 10.10.0.21 | Central Bank Brazil (found) | spoke-brazil (BRL, chainId 2021) | — | cb-brazil.cbweb3.lnet.io | [manifests/cb-brazil.yaml](manifests/cb-brazil.yaml) |
-| 10.10.0.22 | Commercial bank (join) | spoke-brazil | cb1 | cb1-brazil.cbweb3.lnet.io | [manifests/cb1.yaml](manifests/cb1.yaml) |
-| 10.10.0.23 | Commercial bank (join) | spoke-brazil | cb2 | cb2-brazil.cbweb3.lnet.io | [manifests/cb2.yaml](manifests/cb2.yaml) |
-| 10.10.0.24 | Central Bank Colombia (found) | spoke-colombia (COP, chainId 2024) | — | cb-colombia.cbweb3.lnet.io | [manifests/cb-colombia.yaml](manifests/cb-colombia.yaml) |
-| 10.10.0.25 | Commercial bank (join) | spoke-colombia | cb3 | cb3-colombia.cbweb3.lnet.io | [manifests/cb3.yaml](manifests/cb3.yaml) |
-| 10.10.0.26 | Commercial bank (join) | spoke-colombia | cb4 | cb4-colombia.cbweb3.lnet.io | [manifests/cb4.yaml](manifests/cb4.yaml) |
+| 10.10.0.21 | Central Bank Brazil (found) | spoke-brazil (BRL, chainId 2021) | — | cb-brazil.cbweb3.l-net.io | [manifests/cb-brazil.yaml](manifests/cb-brazil.yaml) |
+| 10.10.0.22 | Commercial bank (join) | spoke-brazil | cb1 | cb1-brazil.cbweb3.l-net.io | [manifests/cb1.yaml](manifests/cb1.yaml) |
+| 10.10.0.23 | Commercial bank (join) | spoke-brazil | cb2 | cb2-brazil.cbweb3.l-net.io | [manifests/cb2.yaml](manifests/cb2.yaml) |
+| 10.10.0.24 | Central Bank Colombia (found) | spoke-colombia (COP, chainId 2024) | — | cb-colombia.cbweb3.l-net.io | [manifests/cb-colombia.yaml](manifests/cb-colombia.yaml) |
+| 10.10.0.25 | Commercial bank (join) | spoke-colombia | cb3 | cb3-colombia.cbweb3.l-net.io | [manifests/cb3.yaml](manifests/cb3.yaml) |
+| 10.10.0.26 | Commercial bank (join) | spoke-colombia | cb4 | cb4-colombia.cbweb3.l-net.io | [manifests/cb4.yaml](manifests/cb4.yaml) |
 
 ## ⚠️ Read before deploying: multi-VM reality
 
@@ -50,7 +50,7 @@ The manifests here are wired for genuinely separate VMs, but be aware of the sea
    `../../scenario-a/provisioning/templates/*/docker-compose.yaml`) or provide a flat routable overlay.
    This is an operator-patched path, not a toolkit feature.
 
-DNS: point each launcher FQDN (`cb-brazil.cbweb3.lnet.io`, `cb1-brazil...`, etc.) at the matching VM IP.
+DNS: point each launcher FQDN (`cb-brazil.cbweb3.l-net.io`, `cb1-brazil...`, etc.) at the matching VM IP.
 
 ## Manifests are templates
 

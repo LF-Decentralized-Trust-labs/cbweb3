@@ -60,12 +60,12 @@ The rendered `*.yaml` and the transferred bundles are git-ignored; the `*.yaml.t
 | VM         | Shared / .20 infra                              | Scenario A          | Scenario B                | Launcher FQDN               |
 | ---------- | ----------------------------------------------- | ------------------- | ------------------------- | --------------------------- |
 | 10.10.0.20 | **hub (B) + Cacti A (:4000) + Cacti B (:7000)** | Cacti relay         | hub + Cacti relay         | —                           |
-| 10.10.0.21 | —                                               | CB Brazil (found)   | CB Brazil (found-spoke)   | cb-brazil.cbweb3.lnet.io    |
-| 10.10.0.22 | —                                               | cb1 (join)          | cb1 (join)                | cb1-brazil.cbweb3.lnet.io   |
-| 10.10.0.23 | —                                               | cb2 (join)          | cb2 (join)                | cb2-brazil.cbweb3.lnet.io   |
-| 10.10.0.24 | —                                               | CB Colombia (found) | CB Colombia (found-spoke) | cb-colombia.cbweb3.lnet.io  |
-| 10.10.0.25 | —                                               | cb3 (join)          | cb3 (join)                | cb3-colombia.cbweb3.lnet.io |
-| 10.10.0.26 | —                                               | cb4 (join)          | cb4 (join)                | cb4-colombia.cbweb3.lnet.io |
+| 10.10.0.21 | —                                               | CB Brazil (found)   | CB Brazil (found-spoke)   | cb-brazil.cbweb3.l-net.io    |
+| 10.10.0.22 | —                                               | cb1 (join)          | cb1 (join)                | cb1-brazil.cbweb3.l-net.io   |
+| 10.10.0.23 | —                                               | cb2 (join)          | cb2 (join)                | cb2-brazil.cbweb3.l-net.io   |
+| 10.10.0.24 | —                                               | CB Colombia (found) | CB Colombia (found-spoke) | cb-colombia.cbweb3.l-net.io  |
+| 10.10.0.25 | —                                               | cb3 (join)          | cb3 (join)                | cb3-colombia.cbweb3.l-net.io |
+| 10.10.0.26 | —                                               | cb4 (join)          | cb4 (join)                | cb4-colombia.cbweb3.l-net.io |
 
 
 

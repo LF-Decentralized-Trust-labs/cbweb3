@@ -14,12 +14,12 @@ the [deploy-lnet root](../README.md). This folder covers Scenario B's spokes and
 | VM | Role | Spoke | bank-id | Launcher FQDN | Manifest |
 |----|------|-------|---------|---------------|----------|
 | 10.10.0.20 | Hub (found-hub) + Cacti relay | hub (chainId 1337) | — | — | [../hub/manifests/hub.yaml](../hub/manifests/hub.yaml) |
-| 10.10.0.21 | Central Bank Brazil (found-spoke) | spoke-brazil (BRL, chainId 2022) | — | cb-brazil.cbweb3.lnet.io | [manifests/cb-brazil.yaml](manifests/cb-brazil.yaml) |
-| 10.10.0.22 | Commercial bank (join) | spoke-brazil | cb1 | cb1-brazil.cbweb3.lnet.io | [manifests/cb1.yaml](manifests/cb1.yaml) |
-| 10.10.0.23 | Commercial bank (join) | spoke-brazil | cb2 | cb2-brazil.cbweb3.lnet.io | [manifests/cb2.yaml](manifests/cb2.yaml) |
-| 10.10.0.24 | Central Bank Colombia (found-spoke) | spoke-colombia (COP, chainId 2025) | — | cb-colombia.cbweb3.lnet.io | [manifests/cb-colombia.yaml](manifests/cb-colombia.yaml) |
-| 10.10.0.25 | Commercial bank (join) | spoke-colombia | cb3 | cb3-colombia.cbweb3.lnet.io | [manifests/cb3.yaml](manifests/cb3.yaml) |
-| 10.10.0.26 | Commercial bank (join) | spoke-colombia | cb4 | cb4-colombia.cbweb3.lnet.io | [manifests/cb4.yaml](manifests/cb4.yaml) |
+| 10.10.0.21 | Central Bank Brazil (found-spoke) | spoke-brazil (BRL, chainId 2022) | — | cb-brazil.cbweb3.l-net.io | [manifests/cb-brazil.yaml](manifests/cb-brazil.yaml) |
+| 10.10.0.22 | Commercial bank (join) | spoke-brazil | cb1 | cb1-brazil.cbweb3.l-net.io | [manifests/cb1.yaml](manifests/cb1.yaml) |
+| 10.10.0.23 | Commercial bank (join) | spoke-brazil | cb2 | cb2-brazil.cbweb3.l-net.io | [manifests/cb2.yaml](manifests/cb2.yaml) |
+| 10.10.0.24 | Central Bank Colombia (found-spoke) | spoke-colombia (COP, chainId 2025) | — | cb-colombia.cbweb3.l-net.io | [manifests/cb-colombia.yaml](manifests/cb-colombia.yaml) |
+| 10.10.0.25 | Commercial bank (join) | spoke-colombia | cb3 | cb3-colombia.cbweb3.l-net.io | [manifests/cb3.yaml](manifests/cb3.yaml) |
+| 10.10.0.26 | Commercial bank (join) | spoke-colombia | cb4 | cb4-colombia.cbweb3.l-net.io | [manifests/cb4.yaml](manifests/cb4.yaml) |
 
 The **sovereign BRL/COP pair (corridor + AMM liquidity)** is intentionally **not** provisioned here.
 It is opened at runtime through the CB governance portals after the network is up. (`spec.pair` is
