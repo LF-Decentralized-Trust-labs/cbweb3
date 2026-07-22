@@ -155,7 +155,7 @@ func TestSpokeConfigProxyDisabledFallsBack(t *testing.T) {
 	if c.frontendVariant() != "" {
 		t.Fatalf("frontendVariant should be empty, got %q", c.frontendVariant())
 	}
-	if got := c.corsOrigins(); got != corsOriginsCB(8845) {
+	if got := c.corsOrigins(); got != corsOriginsCB(8845, "") {
 		t.Fatalf("corsOrigins should fall back to host-port origins, got %q", got)
 	}
 }

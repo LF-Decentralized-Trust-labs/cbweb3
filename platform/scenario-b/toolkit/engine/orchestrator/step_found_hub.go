@@ -45,8 +45,10 @@ type HubConfig struct {
 	// spokes (from manifest node.advertisedHost). Local WaitRPC / forge keep
 	// using HubRPC (typically localhost on the hub VM).
 	AdvertisedHost string
-	FrontendHost   string // browser-facing host (spec.frontendHost) — used for proxy path URLs
-	ProxyEnabled   bool   // spec.proxy == enable: serve the hub governance portal + api behind the per-host reverse proxy
+	// FrontendHost is the browser-facing host baked into the hub governance portal's
+	// VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost).
+	FrontendHost string
+	ProxyEnabled bool // spec.proxy == enable: serve the hub governance portal + api behind the per-host reverse proxy
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -188,7 +190,7 @@ func (c HubConfig) corsOrigins() string {
 	if c.useProxy() {
 		return proxyOrigin(c.FrontendHost)
 	}
-	return corsOriginSingle(c.RPCPort)
+	return corsOriginSingle(c.RPCPort, c.FrontendHost)
 }
 
 // NetName is the hub's external docker network (created by the infra step).
@@ -274,8 +276,8 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
 		"FRONTEND_IMAGE":             cbFrontendImage("governance", c.RPCPort+8000, c.frontendVariant()),
 		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
-		// Browser CORS: the single proxy origin (path routing) or the hub governance
-		// portal's host-port origin when not behind the proxy.
+		// Browser CORS: the single proxy origin (path routing), else the hub governance
+		// portal origin(s) on the hub gateway (host-port; routable host when set).
 		"CORS_ALLOW_ORIGINS": c.corsOrigins(),
 		"RELAY_IMAGE":                hubRelayImage,
 		"RELAY_CONTAINER_NAME":       e + "-relay",
@@ -480,13 +482,14 @@ func FoundHubSteps(c HubConfig) []Step {
 		{
 			Name: "start-hub-frontend", Deps: []string{"start-hub-backend"}, Soft: true,
 			Run: func(ctx context.Context) error {
-				// The hub governance portal bakes the hub api-gateway URL at build time.
-				// Without the proxy the browser reaches the gateway on the host at
-				// localhost:<gwPort>; behind the proxy it is same-origin at
-				// http://<frontendHost>/<scn>/api/v1/ and the SPA is built base-path-aware
-				// (VITE_BASE_PATH) under /<scn>/governance/.
+				// The hub governance portal bakes the hub api-gateway URL at build time. The
+				// browser reaches the gateway at frontendHost:<gwPort> (spec.frontendHost — a
+				// routable IP/DNS for remote access, else localhost); behind the proxy it is
+				// instead same-origin at http://<frontendHost>/<scn>/api/v1/ and the SPA is
+				// built base-path-aware (VITE_BASE_PATH) under /<scn>/governance/.
 				gwPort := c.RPCPort + 8000
-				args := map[string]string{"VITE_API_URL": fmt.Sprintf("http://localhost:%d", gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": "hub"}
+				api := fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort)
+				args := map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": "hub"}
 				if c.useProxy() {
 					args["VITE_API_URL"] = proxyAPIURL(c.FrontendHost)
 					args["VITE_BASE_PATH"] = proxyPortalBase("governance")

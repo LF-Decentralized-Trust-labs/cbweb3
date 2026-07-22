@@ -42,7 +42,7 @@ type SpokeConfig struct {
 	P2PPort             int    // host port -> besu 30303
 	AdvertisedHost      string // externally reachable host for the spoke bundle enode (default host.docker.internal)
 	RelayAdvertisedHost string // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
-	FrontendHost        string // browser-facing host (spec.frontendHost) — used for proxy path URLs
+	FrontendHost        string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
 	ProxyEnabled        bool   // spec.proxy == enable: serve portals + api behind the per-host reverse proxy
 	AdminUsers          []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
 	Currency            string      // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
@@ -298,7 +298,7 @@ func (c SpokeConfig) corsOrigins() string {
 	if c.useProxy() {
 		return proxyOrigin(c.FrontendHost)
 	}
-	return corsOriginsCB(c.RPCPort)
+	return corsOriginsCB(c.RPCPort, c.FrontendHost)
 }
 
 // NetName is this entity's external docker network (created by the infra step).
@@ -372,7 +372,7 @@ func (c SpokeConfig) ComposeEnv() []string {
 		"GOVERNANCE_FRONTEND_IMAGE":  cbFrontendImage("governance", c.RPCPort+8000, c.frontendVariant()),
 		"GOVERNANCE_FRONTEND_PORT":   itoa(c.RPCPort + 9000),
 		// Browser CORS: the single proxy origin (path routing) or the four operator-portal
-		// host-port origins when not behind the proxy.
+		// host-port origins (routable host when set) when not behind the proxy.
 		"CORS_ALLOW_ORIGINS": c.corsOrigins(),
 		"TREASURY_FRONTEND_IMAGE":    cbFrontendImage("treasury", c.RPCPort+8000, c.frontendVariant()),
 		"TREASURY_FRONTEND_PORT":     itoa(c.RPCPort + 13000),
@@ -788,12 +788,13 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 		},
 		{Name: "start-spoke-frontend", Deps: []string{"start-spoke-backend"}, Soft: true, Run: func(ctx context.Context) error {
 			// CB operator portals: governance/treasury/supervisor, each baking this CB's
-			// api-gateway URL at build time. Without the proxy the browser reaches the
-			// gateway on the host at localhost:<gwPort>; behind the proxy every portal is
-			// same-origin and calls it at http://<frontendHost>/<scn>/api/v1/, and the SPA
-			// is built base-path-aware (VITE_BASE_PATH) so it is served under /<scn>/<role>/.
+			// api-gateway URL at build time. The browser reaches the gateway at
+			// frontendHost:<gwPort> (spec.frontendHost — a routable IP/DNS for remote
+			// access, else localhost); behind the proxy every portal is instead same-origin
+			// at http://<frontendHost>/<scn>/api/v1/ and each SPA is built base-path-aware
+			// (VITE_BASE_PATH) so it is served under /<scn>/<role>/.
 			gwPort := c.RPCPort + 8000
-			api := fmt.Sprintf("http://localhost:%d", gwPort)
+			api := fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort)
 			variant := c.frontendVariant()
 			sb := c.scenarioBDir()
 			gov := map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}

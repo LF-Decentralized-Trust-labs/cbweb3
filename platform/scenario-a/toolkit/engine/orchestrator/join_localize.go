@@ -80,6 +80,21 @@ func localizeBundleEndpoints(b *bundle.JoinBundle) (localizedEndpoints, error) {
 	}
 	out.bootnodeEnode = enode
 
+	// The CB's onboarding HTTP endpoints are only rewritten to the single-host
+	// aliases when the bundle carries an in-Docker CB endpoint (a compose service
+	// name on the in-container port). In a cross-VM deploy (environment: local but
+	// the CB and the joining bank on separate hosts) the founding CB bakes its
+	// routable host and host-published api-gateway port into the bundle; both
+	// "localhost" (host-run toolkit) and "host.docker.internal" (bank backend
+	// container) would then loop back to the joining host — the bank's own gateway
+	// — instead of reaching the CB, so the onboarding request never lands at the
+	// CB (my-status returns "no onboarding request found"). Keep the routable
+	// endpoints from rawEndpoints in that case. This mirrors scenario-b, which
+	// bakes a routable CBGateway into the join bundle and consumes it verbatim.
+	if isCrossHostCBEndpoint(b.Spec.CBEndpoint) {
+		return out, nil
+	}
+
 	cert, err := rewriteURLHost(b.Spec.CBEndpoint, "localhost", cbAPIPort)
 	if err != nil {
 		return out, fmt.Errorf("localize cb endpoint: %w", err)
@@ -93,6 +108,26 @@ func localizeBundleEndpoints(b *bundle.JoinBundle) (localizedEndpoints, error) {
 	out.cbAPIBaseForBank = apiBase
 
 	return out, nil
+}
+
+// isCrossHostCBEndpoint reports whether the CB endpoint in the join bundle is a
+// cross-host (routable) endpoint that must be used verbatim, versus an in-Docker
+// single-host endpoint (a compose service name on the in-container port) that
+// must be localized to localhost / host.docker.internal.
+//
+// The discriminator is a non-loopback numeric IP host: the founding CB bakes a
+// routable IP (from node.advertisedHost, or the resolved host LAN IP — same path
+// as the enode rewrite) when the deployment spans hosts, whereas the canonical
+// single-host bundle carries a Docker compose service name (never an IP). A CB
+// host given as a DNS name is treated as single-host (localized); express the CB
+// as a routable IP to deploy across hosts.
+func isCrossHostCBEndpoint(cbEndpoint string) bool {
+	u, err := url.Parse(cbEndpoint)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(u.Hostname())
+	return ip != nil && !ip.IsLoopback()
 }
 
 // portFromURL extracts the numeric port from a URL.

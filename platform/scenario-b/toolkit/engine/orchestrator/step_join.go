@@ -44,7 +44,7 @@ type JoinConfig struct {
 	HubRPC          string // hub RPC (spoke backend reaches the hub via host.docker.internal:<port>)
 	BesuImage       string
 	GatewayURL      string
-	FrontendHost    string // browser-facing host (spec.frontendHost) — used for proxy path URLs
+	FrontendHost    string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
 	ProxyEnabled    bool   // spec.proxy == enable: serve the bank portal + api behind the per-host reverse proxy
 
 	// Injectable seams (defaults wired by WithDefaults).
@@ -172,7 +172,7 @@ func (c JoinConfig) corsOrigins() string {
 	if c.useProxy() {
 		return proxyOrigin(c.FrontendHost)
 	}
-	return corsOriginSingle(c.RPCPort)
+	return corsOriginSingle(c.RPCPort, c.FrontendHost)
 }
 
 // NetName is this bank's external docker network (created by the infra step).
@@ -264,7 +264,8 @@ func (c JoinConfig) ComposeEnv() []string {
 		"PAYMENT_ORCHESTRATOR_IMAGE": hubPaymentOrchestratorImage,
 		"FRONTEND_IMAGE":   cbFrontendImage("bank", c.RPCPort+8000, c.frontendVariant()),
 		"FRONTEND_PORT":    itoa(c.RPCPort + 9000),
-		// Browser CORS: allow this bank's portal origin on its gateway.
+		// Browser CORS: the single proxy origin (path routing) or this bank's portal
+		// origin (host-port; routable host when set) when not behind the proxy.
 		"CORS_ALLOW_ORIGINS": c.corsOrigins(),
 		// app stack (compliance + auth): the bank is the local signer; the Keycloak
 		// realm/client are provisioned by provision-keycloak-bank.
@@ -511,12 +512,13 @@ func JoinSteps(c JoinConfig) []Step {
 			return compose("entity-backend")(ctx)
 		}},
 		{Name: "start-bank-frontend", Deps: []string{"start-bank-backend"}, Soft: true, Run: func(ctx context.Context) error {
-			// The bank portal bakes this bank's api-gateway URL at build time. Without the
-			// proxy the browser reaches the gateway on the host at localhost:<gwPort>;
-			// behind the proxy it is same-origin at http://<frontendHost>/<scn>/api/v1/ and
-			// the SPA is built base-path-aware (VITE_BASE_PATH) under /<scn>/bank/.
+			// The bank portal bakes this bank's api-gateway URL at build time. The browser
+			// reaches the gateway at frontendHost:<gwPort> (spec.frontendHost — a routable
+			// IP/DNS for remote access, else localhost); behind the proxy it is instead
+			// same-origin at http://<frontendHost>/<scn>/api/v1/ and the SPA is built
+			// base-path-aware (VITE_BASE_PATH) under /<scn>/bank/.
 			gwPort := c.RPCPort + 8000
-			args := map[string]string{"VITE_API_URL": fmt.Sprintf("http://localhost:%d", gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}
+			args := map[string]string{"VITE_API_URL": fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}
 			if c.useProxy() {
 				args["VITE_API_URL"] = proxyAPIURL(c.FrontendHost)
 				args["VITE_BASE_PATH"] = proxyPortalBase("bank")

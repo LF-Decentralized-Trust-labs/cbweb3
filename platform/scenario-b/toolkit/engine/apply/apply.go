@@ -120,9 +120,9 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		P2PPort:             p2pPort,
 		AdvertisedHost:      pd.Spec.Node.AdvertisedHost,
 		RelayAdvertisedHost: manifestRelayAdvHost(pd),
+		FrontendHost:        pd.Spec.FrontendHost,
 		Currency:            pd.Spec.Spoke.Currency,
 		AdminUsers:          toOrchestratorAdminUsers(pd.Spec.AdminUsers),
-		FrontendHost:        pd.Spec.FrontendHost,
 		ProxyEnabled:        pd.Spec.Proxy == "enable",
 	}
 	cfg.WithDefaults()
@@ -232,8 +232,8 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
 		HubRPC:          o.HubRPC,
-		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
 		FrontendHost:    pd.Spec.FrontendHost,
+		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
 		ProxyEnabled:    pd.Spec.Proxy == "enable",
 	}
 	cfg.WithDefaults()
