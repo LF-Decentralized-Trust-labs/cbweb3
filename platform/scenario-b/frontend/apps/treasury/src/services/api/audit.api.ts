@@ -3,10 +3,10 @@
 import type { AuditFilter, AuditLogEntry } from "../../types";
 import { httpClient } from "./http-client";
 
-// Wire shape returned by GET /api/v1/governance/audit/logs.
-// Mirrors the gateway AuditRecord JSON tags (compliance_grpc.go) — the same
-// endpoint the governance portal consumes. There is no separate /treasury/audit
-// backend; treasury and governance share one audit log via the same Keycloak client.
+// Wire shape returned by GET /api/v1/audit/logs — the shared, role-broadened audit
+// read (ROLE_GOVERNANCE/TREASURY/SUPERVISOR). Mirrors the gateway AuditRecord JSON tags
+// (compliance_grpc.go). The /governance/audit/logs path is ROLE_GOVERNANCE-only (Fiber
+// group middleware is prefix-scoped), so treasury consumes the standalone /audit/logs.
 type AuditLogApi = {
   log_id: string;
   timestamp: string;
@@ -41,7 +41,7 @@ export const auditApi = {
     if (filter?.category) params.category = filter.category;
     if (filter?.severity) params.severity = filter.severity;
 
-    const response = await httpClient.get<AuditLogsResponse>("/governance/audit/logs", { params });
+    const response = await httpClient.get<AuditLogsResponse>("/audit/logs", { params });
     return (response.data.logs ?? []).map(mapEntry);
   },
 };
