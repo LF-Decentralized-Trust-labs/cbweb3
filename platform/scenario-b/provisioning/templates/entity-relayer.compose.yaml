@@ -30,7 +30,10 @@ services:
       DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
       # Hub signing: the CB holds CENTRAL_BANK_ROLE on the W-<source> token and
       # mints it on the hub. Chain id defaults to the hub's (1337 locally).
-      HUB_BESU_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
+      # Routable hub RPC (set by the toolkit from the hub bundle) so the bridge
+      # RelayerWorker mints/burns on the hub cross-VM; single-host fallback keeps
+      # host.docker.internal:<published-port>. Wrong host here → "Wrong chainId".
+      HUB_BESU_RPC_URL: "${HUB_BESU_RPC_URL:-http://host.docker.internal:${HUB_RPC_PORT}}"
       SIGNER_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
       HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
       SPOKE_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"

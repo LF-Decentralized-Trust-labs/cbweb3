@@ -36,4 +36,9 @@ type SpokeBundle struct {
 	// the compose extra_hosts map is remapped cross-VM.
 	HubContracts map[string]string `yaml:"hubContracts,omitempty" json:"hubContracts,omitempty"`
 	HubRPCPort   string            `yaml:"hubRpcPort,omitempty" json:"hubRpcPort,omitempty"`
+	// HubRPC is the ROUTABLE hub Besu RPC URL (from the hub bundle, e.g.
+	// http://<hub-host>:8845). A joining bank uses it for HUB_BESU_RPC_URL so it
+	// reaches the hub cross-VM instead of the single-host host.docker.internal
+	// fallback (HubRPCPort). Empty on old bundles → bank falls back to HubRPCPort.
+	HubRPC string `yaml:"hubRpc,omitempty" json:"hubRpc,omitempty"`
 }
