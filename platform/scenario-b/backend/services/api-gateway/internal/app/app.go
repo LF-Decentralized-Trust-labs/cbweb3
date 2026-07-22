@@ -476,7 +476,13 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			volumeRepo := newTransferVolumeRepository(db)
 			localChecker := services.NewTransferLimitChecker(limitRepo, volumeRepo)
 			transferLimitChecker = localChecker
-			deps.TransferLimitHandler = handlers.NewTransferLimitHandler(limitRepo)
+			sovereignCurrency := cfg.FiatSymbol
+			if sovereignCurrency == "" {
+				sovereignCurrency = os.Getenv("NATIVE_ASSET_SYMBOL")
+			}
+			deps.TransferLimitHandler = handlers.NewTransferLimitHandler(limitRepo).
+				WithFallbackBankCode(cfg.BankCode).
+				WithSovereignCurrency(sovereignCurrency)
 			deps.TransferLimitInternalHandler = handlers.NewTransferLimitInternalHandler(localChecker)
 		}
 	} else {
