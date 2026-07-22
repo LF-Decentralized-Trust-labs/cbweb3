@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Badge, Button, PlatformLogo, goToLauncher } from "@cbweb3/ui";
+import { Button, PlatformLogo, goToLauncher } from "@cbweb3/ui";
 import { useNavigate } from "react-router-dom";
-import { useAuth, useCircuitBreaker } from "../../hooks";
+import { useAuth } from "../../hooks";
 
 export function Header() {
   const navigate = useNavigate();
   const { profile, logout } = useAuth();
-  const { circuitBreaker } = useCircuitBreaker();
   const institutionName = (import.meta.env.VITE_INSTITUTION_NAME ?? "Central Bank Portal").trim() || "Central Bank Portal";
-
-  const isHalted = circuitBreaker?.state === "HALTED";
 
   const onLogout = async () => {
     await logout();
@@ -28,9 +25,6 @@ export function Header() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <Badge variant={isHalted ? "destructive" : "default"}>
-            Circuit Breaker: {circuitBreaker?.state ?? "LIVE"}
-          </Badge>
           <span className="text-xs text-muted-foreground">{profile?.subject ?? "Unknown operator"}</span>
           <Button variant="ghost" size="sm" onClick={() => void onLogout()}>
             Sign out
