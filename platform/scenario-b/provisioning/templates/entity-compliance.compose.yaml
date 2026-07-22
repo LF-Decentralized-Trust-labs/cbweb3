@@ -10,7 +10,9 @@ services:
     environment:
       COMPLIANCE_GRPC_PORT: "9093"
       BLOCKCHAIN_CLIENT: "besu"
-      BESU_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
+      # Compliance reads the hub (IdentityRegistry/CurrencyRegistry): use the
+      # routable hub RPC (toolkit-provided) with the single-host published-port fallback.
+      BESU_RPC_URL: "${HUB_BESU_RPC_URL:-http://host.docker.internal:${HUB_RPC_PORT}}"
       BESU_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
       PARTICIPANT_REGISTRY_ADDRESS: "${HUB_IDENTITY_REGISTRY_ADDRESS:?}"
       CURRENCY_REGISTRY_ADDRESS: "${CURRENCY_REGISTRY_ADDRESS:?}"

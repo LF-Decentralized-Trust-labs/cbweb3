@@ -42,6 +42,7 @@ type SpokeConfig struct {
 	P2PPort             int    // host port -> besu 30303
 	AdvertisedHost      string // externally reachable host for the spoke bundle enode (default host.docker.internal)
 	RelayAdvertisedHost string // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
+	RelayEndpoint       string // the relay's OWN REST endpoint (spec.relay.endpoint, e.g. http://<hub>:7000) → CACTI_API_URL
 	FrontendHost        string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
 	ProxyEnabled        bool   // spec.proxy == enable: serve portals + api behind the per-host reverse proxy
 	AdminUsers          []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
@@ -174,16 +175,58 @@ func (c SpokeConfig) publicCBGateway(host string) string {
 	return fmt.Sprintf("http://%s:%d", host, c.RPCPort+8000)
 }
 
-// cactiAPIURL is the Cacti relay REST endpoint a backend container uses to reach
-// the (external) relay. The relay runs in its own stack on the fixed port 4000;
-// containers reach it via the advertised host (default host.docker.internal),
-// the same host the relay uses to reach this spoke's published endpoints.
-func (c SpokeConfig) cactiAPIURL() string {
-	host := c.RelayAdvertisedHost
-	if host == "" {
-		host = "host.docker.internal"
+// containerReachable rewrites a URL's host to host.docker.internal ONLY when it
+// is a loopback host (localhost/127.0.0.1/empty), so a container can reach a
+// service the toolkit knows by a host-local URL (single-host dev). A routable
+// host (LAN/public IP or DNS name) is returned unchanged — this is what lets a
+// multi-host deploy point at the real hub/relay instead of the local machine.
+func containerReachable(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return raw
 	}
-	return fmt.Sprintf("http://%s:7000", host)
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "":
+		host := "host.docker.internal"
+		if p := u.Port(); p != "" {
+			host += ":" + p
+		}
+		u.Host = host
+		return u.String()
+	default:
+		return raw
+	}
+}
+
+// cactiAPIURL is the Cacti relay REST endpoint a backend container uses to reach
+// the (external) relay. It is the relay's OWN endpoint (spec.relay.endpoint →
+// RelayEndpoint), NOT the host the relay uses to reach this spoke — the relay
+// commonly runs on the hub, a different host. Falls back to the single-host
+// default when no endpoint is configured.
+func (c SpokeConfig) cactiAPIURL() string {
+	return relayCactiURL(c.RelayEndpoint)
+}
+
+// relayCactiURL maps a relay endpoint (spec.relay.endpoint) to the CACTI_API_URL a
+// backend container uses. Container-reachable when routable; single-host default
+// when empty. Shared by found-spoke and join.
+func relayCactiURL(relayEndpoint string) string {
+	if ep := strings.TrimSpace(relayEndpoint); ep != "" {
+		return containerReachable(ep)
+	}
+	return "http://host.docker.internal:7000"
+}
+
+// relaySpokeID is the key the relay is registered under for cross-currency
+// routing. The api-gateway derives spoke_out/spoke_in as "spoke-<currency>"
+// (cross_currency_swap_orchestrator.go), so the relay registration MUST use that
+// same convention — NOT the country-based spoke.id — or bridge-out lookups fail
+// with "unknown spoke_out". Falls back to SpokeID when no currency is set.
+func (c SpokeConfig) relaySpokeID() string {
+	if cur := strings.TrimSpace(c.Currency); cur != "" {
+		return "spoke-" + strings.ToLower(cur)
+	}
+	return c.SpokeID
 }
 
 // keycloakContainer matches entity-keycloak.compose.yaml's container_name
@@ -346,8 +389,11 @@ func (c SpokeConfig) ComposeEnv() []string {
 		"ENTITY_RPC_PORT":      itoa(c.RPCPort),
 		"ENTITY_WS_PORT":       itoa(c.WSPort),
 		"ENTITY_P2P_PORT":      itoa(c.P2PPort),
-		// hub RPC (spoke backend → hub via host.docker.internal:<HUB_RPC_PORT>)
-		"HUB_RPC_PORT": hubPort,
+		// hub RPC: HUB_BESU_RPC_URL is the routable hub RPC (from the hub bundle),
+		// mapped container-reachable — this works cross-VM. HUB_RPC_PORT stays for
+		// the single-host host.docker.internal fallback in the compose templates.
+		"HUB_RPC_PORT":     hubPort,
+		"HUB_BESU_RPC_URL": containerReachable(c.HubRPC),
 		// infra: postgres + redis (single DB doubles as the keycloak DB locally)
 		"POSTGRES_USER":     "cbweb3",
 		"POSTGRES_PASSWORD": "cbweb3",
@@ -833,7 +879,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				// (RelayAdvertisedHost). Mirrors scenario-a's register-relay.
 				h := c.RelayAdvertisedHost
 				return c.Registrar.Register(ctx, relayregistrar.Spoke{
-					ID:         c.SpokeID,
+					ID:         c.relaySpokeID(),
 					BesuRPC:    fmt.Sprintf("http://%s:%d", h, c.RPCPort),
 					BesuWS:     fmt.Sprintf("ws://%s:%d", h, c.WSPort),
 					GatewayURL: fmt.Sprintf("http://%s:%d", h, c.RPCPort+8000),
@@ -931,6 +977,9 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				CBGateway:    c.publicCBGateway(advHost),
 				HubContracts: hubForBundle.Contracts,
 				HubRPCPort:   hubPort,
+				// Routable hub RPC (from the hub bundle) so a joining bank reaches the
+				// hub cross-VM (HUB_BESU_RPC_URL) instead of host.docker.internal.
+				HubRPC: hubForBundle.HubRPC,
 			}
 			_, err = bundle.EmitSpoke(b, c.OutDir)
 			return err

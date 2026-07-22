@@ -91,14 +91,23 @@ services:
       # PaymentHandler + /internal/v1 relay routes; on a bank (CENTRAL_BANK_API_URL
       # set) the PaymentProxyHandler that forwards to its CB. The gRPC dial is lazy,
       # so the gateway boots even before the orchestrator is reachable.
-      PAYMENT_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-payment-orchestrator:9094"
+      # Uses the compose SERVICE alias "payment-orchestrator" (same entity network)
+      # instead of the full container name: for a CB the full name
+      # "${CONTAINER_PREFIX}-${ENTITY}-payment-orchestrator" exceeds the 63-char DNS
+      # label limit (e.g. sc-b-cbweb3-central-bank-brazil-central-bank-payment-orchestrator
+      # = 65 chars) and Docker's embedded DNS returns "no such host". The short alias
+      # always resolves and is unique per entity network.
+      PAYMENT_GRPC_ADDR: "payment-orchestrator:9094"
       # The entity's own on-chain (Besu) address. The payment proxy injects it as
       # requester_besu_address so the CB registers the deposit against this bank.
       ENTITY_BESU_ADDRESS: "${ENTITY_BESU_ADDRESS:-}"
       # Hub AMM / swap wiring — TD-001: no default AMM. The v2 AMM routes are
       # enabled by PAIR_REGISTRY_CONTRACT_ADDRESS + HUB_BESU_RPC_URL and every
       # corridor's AMM is resolved per pool_pair from the on-chain PairRegistry.
-      HUB_BESU_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
+      # Routable hub RPC (set by the toolkit from the hub/spoke bundle) so this
+      # reaches the hub cross-VM; falls back to the single-host host.docker.internal
+      # published port when the toolkit did not provide a routable URL.
+      HUB_BESU_RPC_URL: "${HUB_BESU_RPC_URL:-http://host.docker.internal:${HUB_RPC_PORT}}"
       SIGNER_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
       PAIR_REGISTRY_CONTRACT_ADDRESS: "${PAIR_REGISTRY_CONTRACT_ADDRESS:-}"
       CURRENCY_REGISTRY_CONTRACT_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"

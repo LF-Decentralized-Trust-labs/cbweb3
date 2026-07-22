@@ -418,6 +418,16 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		}
 	}
 
+	// Sovereign dynamic model: when no static HUB_TOKEN_A/B_ADDRESS is configured
+	// (the per-pair sovereign deploy), still expose a token preparer backed only by
+	// the on-chain PairRegistry resolver. Every mint/approve resolves the pair's
+	// W-tokens + AMM from pool_pair, so the sovereign-seed (/liquidity/deposit-side)
+	// and token routes register without pinning a fixed pair via env.
+	if deps.TokenPreparer == nil && pairResolver != nil && signerKey != "" {
+		deps.TokenPreparer = NewDynamicTokenPrepareAdapter(pairResolver)
+		log.Printf("token preparer: dynamic per-pair mode (on-chain PairRegistry; no static HUB_TOKEN_A/B)")
+	}
+
 	// US2 services: Bridge + Liquidity Provision
 	var bridgeLockMintSvc *services.BridgeLockMintService
 	var bridgeBurnUnlockSvc *services.BridgeBurnUnlockService

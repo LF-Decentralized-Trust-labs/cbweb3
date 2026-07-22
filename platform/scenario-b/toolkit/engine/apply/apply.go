@@ -120,6 +120,7 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		P2PPort:             p2pPort,
 		AdvertisedHost:      pd.Spec.Node.AdvertisedHost,
 		RelayAdvertisedHost: manifestRelayAdvHost(pd),
+		RelayEndpoint:       manifestRelayEndpoint(pd), // relay's own REST endpoint → CACTI_API_URL
 		FrontendHost:        pd.Spec.FrontendHost,
 		Currency:            pd.Spec.Spoke.Currency,
 		AdminUsers:          toOrchestratorAdminUsers(pd.Spec.AdminUsers),
@@ -195,7 +196,8 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 
 	// FR-001: consume + validate the spoke bundle BEFORE any effect.
 	bundlePath := resolveBundle(pd.Spec.JoinBundleRef, o.ManifestPath)
-	if _, err := bundle.LoadSpoke(bundlePath); err != nil {
+	sb, err := bundle.LoadSpoke(bundlePath)
+	if err != nil {
 		return orchestrator.Report{}, fmt.Errorf("join: invalid spoke bundle %q: %w", bundlePath, err)
 	}
 
@@ -231,7 +233,8 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		RPCPort:         rpcPort,
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
-		HubRPC:          o.HubRPC,
+		HubRPC:          firstNonEmpty(o.HubRPC, sb.HubRPC), // routable hub RPC from the spoke bundle
+		RelayEndpoint:   manifestRelayEndpoint(pd),         // the relay's own REST endpoint → CACTI_API_URL
 		FrontendHost:    pd.Spec.FrontendHost,
 		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
 		ProxyEnabled:    pd.Spec.Proxy == "enable",

@@ -41,7 +41,8 @@ type JoinConfig struct {
 	RPCPort         int    // host port -> besu 8545; other service ports derive by offset
 	WSPort          int    // host port -> besu 8546
 	P2PPort         int    // host port -> besu 30303
-	HubRPC          string // hub RPC (spoke backend reaches the hub via host.docker.internal:<port>)
+	HubRPC          string // hub RPC (routable, from the spoke bundle) → HUB_BESU_RPC_URL
+	RelayEndpoint   string // the relay's OWN REST endpoint (spec.relay.endpoint, e.g. http://<hub>:7000) → CACTI_API_URL
 	BesuImage       string
 	GatewayURL      string
 	FrontendHost    string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
@@ -242,8 +243,11 @@ func (c JoinConfig) ComposeEnv() []string {
 		"ENTITY_WS_PORT":       itoa(c.WSPort),
 		"ENTITY_P2P_PORT":      itoa(c.P2PPort),
 		"BOOTNODE_ENODE":       b.Enode,
-		// hub RPC (bank backend → hub via host.docker.internal:<HUB_RPC_PORT>)
-		"HUB_RPC_PORT": hubPort,
+		// hub RPC: HUB_BESU_RPC_URL is the routable hub RPC (from the spoke bundle),
+		// mapped container-reachable — works cross-VM. HUB_RPC_PORT stays for the
+		// single-host host.docker.internal fallback in the compose templates.
+		"HUB_RPC_PORT":     hubPort,
+		"HUB_BESU_RPC_URL": containerReachable(c.HubRPC),
 		// infra: postgres + redis (single DB doubles as the keycloak DB locally)
 		"POSTGRES_USER":     "cbweb3",
 		"POSTGRES_PASSWORD": "cbweb3",
@@ -303,8 +307,10 @@ func (c JoinConfig) ComposeEnv() []string {
 		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
 		// Cacti relay endpoint: the bank's cross-currency swap orchestrator delegates
 		// the Step 3 bridge-out to the beneficiary CB (CB-B) through it. Fixed relay
-		// port 7000, reached from a container via host.docker.internal.
-		"CACTI_API_URL": "http://host.docker.internal:7000",
+		// Cacti relay REST endpoint: the relay's OWN endpoint (spec.relay.endpoint,
+		// commonly on the hub), mapped container-reachable — NOT the local host.
+		// Falls back to the single-host default when no endpoint is configured.
+		"CACTI_API_URL": relayCactiURL(c.RelayEndpoint),
 		// The bank's own spoke id (for bridge lock-mint derivation).
 		"SPOKE_NETWORK": b.SpokeID,
 		// Governance-portal onboarding (mirrors scenario-a): the api-gateway smart

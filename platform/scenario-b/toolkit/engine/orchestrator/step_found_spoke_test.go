@@ -178,12 +178,15 @@ func TestWireHubAddresses(t *testing.T) {
 // US4: register-relay-spoke registers via the local registrar; add-noc-agent is Soft.
 func TestRegisterRelaySpokeAndSoftNoc(t *testing.T) {
 	cfg := testSpokeCfg(t, &exec.FakeRunner{})
+	cfg.Currency = "BRL" // relay id follows the api-gateway's spoke-<currency> convention
 	steps := FoundSpokeSteps(cfg)
 	if err := findStep(steps, "register-relay-spoke").Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	lr := cfg.Registrar.(relayregistrar.LocalRegistry)
-	if len(lr.List()) != 1 || lr.List()[0].ID != "spoke-a" {
+	// The relay is keyed by "spoke-<currency>" (matches spoke_out/spoke_in derived
+	// by the gateway), NOT the country-based spoke.id ("spoke-a").
+	if len(lr.List()) != 1 || lr.List()[0].ID != "spoke-brl" {
 		t.Fatalf("relay registry = %+v", lr.List())
 	}
 	if !findStep(steps, "add-noc-agent").Soft {
@@ -227,6 +230,11 @@ func TestEmitSpokeBundle(t *testing.T) {
 	}
 	if b.CBGateway != "http://10.0.0.5:16845" {
 		t.Fatalf("CBGateway want http://10.0.0.5:16845, got %q", b.CBGateway)
+	}
+	// The routable hub RPC (from the hub bundle) is published so a joining bank
+	// reaches the hub cross-VM (HUB_BESU_RPC_URL) instead of host.docker.internal.
+	if b.HubRPC != "http://hub:8545" {
+		t.Fatalf("bundle HubRPC want http://hub:8545, got %q", b.HubRPC)
 	}
 }
 
