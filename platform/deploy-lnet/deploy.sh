@@ -39,7 +39,13 @@ if [[ "$SCENARIO" == "cacti" ]]; then
   COMPOSE_PROJECT_NAME=cbweb3-cacti-a CACTI_PORT="${CACTI_PORT_A:-4000}" \
     "$ROOT/scenario-a/provisioning/scripts/start-cacti.sh" "${downflag[@]}"
   echo "[deploy] Scenario B Cacti (liquidity relay) — host port ${CACTI_PORT_B:-7000}"
+  # The liquidity relay reads isPaused() on-chain (circuit breaker) and mints/burns
+  # via HUB_BESU_RPC. On the LNET hub VM the hub Besu is published on 8845 (the
+  # compose default 33845 is the single-host +25000 sample). Wrong host/port here →
+  # the breaker read fails and every bridge-out is refused with a 409 (fail-safe).
   COMPOSE_PROJECT_NAME=cbweb3-cacti-b CACTI_PORT="${CACTI_PORT_B:-7000}" \
+    HUB_BESU_RPC="${HUB_BESU_RPC:-http://host.docker.internal:8845}" \
+    HUB_BESU_WS="${HUB_BESU_WS:-ws://host.docker.internal:8846}" \
     "$ROOT/scenario-b/provisioning/scripts/start-cacti.sh" "${downflag[@]}"
   exit 0
 fi
