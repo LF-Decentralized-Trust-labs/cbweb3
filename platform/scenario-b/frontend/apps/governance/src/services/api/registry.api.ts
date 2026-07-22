@@ -13,6 +13,21 @@ import { mockDb } from "../mocks/mock-db";
 import { httpClient, useMocks } from "./http-client";
 
 export const registryApi = {
+  // Lightweight participant options for pickers: the spoke's registered banks, keyed by
+  // bank_code (the identifier matched against the payer's BankID at enforcement).
+  // Deduped by bank_code; entries without a bank_code (non-bank participants) are skipped.
+  listParticipants: async (): Promise<{ bankCode: string; name: string; status: string }[]> => {
+    const response = await httpClient.get<PendingKycApiResponse>("/compliance/participants");
+    const seen = new Set<string>();
+    const out: { bankCode: string; name: string; status: string }[] = [];
+    for (const p of response.data.participants ?? []) {
+      const bankCode = (p.bank_code ?? "").trim();
+      if (!bankCode || seen.has(bankCode)) continue;
+      seen.add(bankCode);
+      out.push({ bankCode, name: p.institution_name ?? bankCode, status: p.status });
+    }
+    return out;
+  },
   list: async (): Promise<Participant[]> => {
     const response = await httpClient.get<PendingKycApiResponse>(
       "/compliance/participants",

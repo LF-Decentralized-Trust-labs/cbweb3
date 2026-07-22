@@ -8,6 +8,7 @@ import {
   ListChecks,
   Settings,
   ShieldAlert,
+  SlidersHorizontal,
   Users,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -18,6 +19,7 @@ const scenarioANavItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/registry", label: "Registry", icon: ClipboardCheck },
   { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
+  { to: "/transfer-limits", label: "Transfer Limits", icon: SlidersHorizontal },
   { to: "/accounts", label: "Accounts", icon: Users },
   { to: "/audit", label: "Audit", icon: ClipboardCheck },
   { to: "/settings", label: "Settings", icon: Settings },
@@ -29,6 +31,7 @@ const scenarioBNavItems = [
   { to: "/accounts", label: "Accounts", icon: Users },
   { to: "/swap-monitor", label: "Swap Monitor", icon: ListChecks },
   { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
+  { to: "/transfer-limits", label: "Transfer Limits", icon: SlidersHorizontal },
   { to: "/oversight", label: "Oversight", icon: Eye },
   { to: "/audit", label: "Audit", icon: ClipboardCheck },
   { to: "/settings", label: "Settings", icon: Settings },

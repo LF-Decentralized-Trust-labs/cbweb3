@@ -26,11 +26,15 @@ export function attachAuthInterceptor(httpClient: AxiosInstance) {
       requestConfig._isRetrying = true;
 
       try {
+        // The refresh endpoint lives only under /api/v1/auth — derive it from the
+        // client's baseURL so a v2 client (baseURL /api/v2) does not POST to a
+        // non-existent /api/v2/auth/refresh (404 → spurious forceLogout).
+        const authBaseUrl = (httpClient.defaults.baseURL ?? "").replace(/\/api\/v\d+$/i, "/api/v1");
         await axios.post(
           REFRESH_PATH,
           {},
           {
-            baseURL: httpClient.defaults.baseURL,
+            baseURL: authBaseUrl,
             withCredentials: true,
           },
         );
