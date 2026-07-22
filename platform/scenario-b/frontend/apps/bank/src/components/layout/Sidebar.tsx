@@ -7,7 +7,9 @@ import {
   ArrowUpFromLine,
   ClipboardList,
   Coins,
+  Droplets,
   Handshake,
+  History,
   LayoutDashboard,
   Lock,
   Repeat,
@@ -35,11 +37,11 @@ const scenarioALinks = [
 const scenarioBLinks = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/bridge", label: "Bridge", icon: Repeat },
-  { to: "/transfer", label: "Transfer", icon: ArrowRightLeft },
+  { to: "/bridge/history", label: "Bridge History", icon: History },
+  { to: "/pools", label: "Liquidity Pools", icon: Droplets },
   { to: "/deposits", label: "Issuance Requests", icon: ArrowDownToLine },
   { to: "/escrows", label: "Reserve Tokenisation", icon: Lock },
   { to: "/redeems", label: "Redeems", icon: ArrowUpFromLine },
-  { to: "/compliance", label: "Compliance", icon: ShieldCheck },
   { to: "/onboarding", label: "Onboarding", icon: ClipboardList },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
@@ -59,7 +61,10 @@ export function Sidebar() {
           <NavLink
             key={link.to}
             to={link.to}
-            end={link.to === "/"}
+            // Exact match only: otherwise a parent path (e.g. "/bridge") would also
+            // highlight on nested routes ("/bridge/history"). Each sidebar entry maps
+            // to a distinct leaf route, so exact matching is correct for all of them.
+            end
             className={({ isActive }) =>
               `flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
                 isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-accent hover:text-foreground"

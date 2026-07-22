@@ -16,10 +16,11 @@ import { EscrowsPage } from "../pages/EscrowsPage";
 import { LiquidityTransfersPage } from "../pages/LiquidityTransfersPage";
 import { LoginPage } from "../pages/LoginPage";
 import { OnboardingPage } from "../pages/OnboardingPage";
+import { PoolsPage } from "../pages/PoolsPage";
 import { RedeemsPage } from "../pages/RedeemsPage";
 import { SettingsPage } from "../pages/SettingsPage";
+import { BridgeHistoryPage } from "../pages/BridgeHistoryPage";
 import { CrossCurrencyBridgePage } from "../pages/CrossCurrencyBridgePage";
-import { TransferPage } from "../pages/TransferPage";
 
 const scenarioAChildren: RouteObject[] = [
   { index: true, element: <DashboardPage /> },
@@ -46,11 +47,11 @@ const scenarioBChildren: RouteObject[] = [
   // Cross-currency bridge (formerly "Swap"): drives the sovereign-pool cross-currency
   // flow. The legacy features/bridge BridgePage was outdated and has been removed.
   { path: "bridge", element: <CrossCurrencyBridgePage /> },
-  { path: "transfer", element: <TransferPage /> },
+  { path: "bridge/history", element: <BridgeHistoryPage /> },
+  { path: "pools", element: <PoolsPage /> },
   { path: "deposits", element: <DepositsPage /> },
   { path: "escrows", element: <EscrowsPage /> },
   { path: "redeems", element: <RedeemsPage /> },
-  { path: "amm", element: <AMMTradingPage /> },
   { path: "compliance", element: <ComplianceCenterPage /> },
   { path: "onboarding", element: <OnboardingPage /> },
   { path: "settings", element: <SettingsPage /> },

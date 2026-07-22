@@ -23,6 +23,8 @@ type Dependencies struct {
 	// 009-commercial-cross-currency-swap — orchestrated cross-currency swap + quote generator
 	CrossCurrencySwapOrchestrator crossCurrencySwapOrchestratorIface
 	SwapQuoteGenerator            swapQuoteGeneratorIface
+	// CrossCurrencySwapLister enables GET /amm/swap/cross-currency (paginated swap history).
+	CrossCurrencySwapLister handlers.CrossCurrencySwapListerIface
 	// US2
 	BridgeLockMintService   bridgeLockMintServiceIface
 	BridgeBurnUnlockService bridgeBurnUnlockServiceIface
@@ -208,10 +210,20 @@ func registerUS1Routes(app *fiber.App, deps Dependencies) {
 	// POST initiates the swap; GET :id polls status for async flows.
 	if deps.CrossCurrencySwapOrchestrator != nil && deps.AuthProvider != nil {
 		crossCurrencySwapHandler := handlers.NewCrossCurrencySwapHandler(deps.CrossCurrencySwapOrchestrator, deps.BankCode)
+		if deps.CrossCurrencySwapLister != nil {
+			crossCurrencySwapHandler = crossCurrencySwapHandler.WithLister(deps.CrossCurrencySwapLister)
+		}
 		amm.Post("/swap/cross-currency",
 			middleware.RequireCookieAuth(deps.AuthProvider),
 			middleware.RequireCommercialBankRole(),
 			crossCurrencySwapHandler.SwapCrossCurrency,
+		)
+		// Paginated, date-filtered history of the authenticated bank's own swaps.
+		// Registered before the ":id" route so the collection path is unambiguous.
+		amm.Get("/swap/cross-currency",
+			middleware.RequireCookieAuth(deps.AuthProvider),
+			middleware.RequireCommercialBankRole(),
+			crossCurrencySwapHandler.ListSwaps,
 		)
 		amm.Get("/swap/cross-currency/:id",
 			middleware.RequireCookieAuth(deps.AuthProvider),

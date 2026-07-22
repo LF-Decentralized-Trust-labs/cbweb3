@@ -609,6 +609,8 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			orchestrator = orchestrator.WithAMMAddressResolver(&ammAddrResolverAdapter{r: pairResolver})
 		}
 		deps.CrossCurrencySwapOrchestrator = orchestrator
+		// Expose the swap repository for the paginated history endpoint (GET /amm/swap/cross-currency).
+		deps.CrossCurrencySwapLister = swapRepo
 
 		// 009-commercial-cross-currency-swap: Wire quote generator with 15s TTL (T030/T031).
 		var quoteReserve services.AMMReserveReader
