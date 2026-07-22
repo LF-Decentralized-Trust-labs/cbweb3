@@ -330,7 +330,7 @@ func (c SpokeConfig) useProxy() bool { return c.ProxyEnabled && c.FrontendHost !
 // is never confused with a non-proxy one under the same gateway-port tag.
 func (c SpokeConfig) frontendVariant() string {
 	if c.useProxy() {
-		return proxyImageVariant
+		return proxyImageVariant(c.FrontendHost)
 	}
 	return ""
 }

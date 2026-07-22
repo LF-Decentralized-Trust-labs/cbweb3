@@ -1,4 +1,4 @@
-# CBWeb3 reverse proxy — a single HTTP entrypoint per entity host.
+# CBWeb3 reverse proxy — a single HTTP(S) entrypoint per entity host.
 #
 # Path-based routing: each portal is served under /<scenario>/<role>/ (e.g.
 # /a/governance/, /b/bank/) and each scenario's api-gateway under /<scenario>/api/.
@@ -7,19 +7,26 @@
 # landing page answers everything else at the site root.
 #
 # The image is GENERIC — no per-entity hosts or ports are baked in. Both scenarios of
-# an entity share ONE proxy container on that host (one :80 per host).
+# an entity share ONE proxy container on that host.
 #
-# HTTP only for now (TLS / :443 deferred). auto_https is disabled so Caddy never tries
-# to provision certificates for the bare :80 site.
-{
-	auto_https off
-}
+# TLS: set PROXY_SITE to the entity's public host (spec.frontendHost) to serve HTTPS on
+# :443 with an automatic :80→:443 redirect. The certificate source is PROXY_TLS_DIRECTIVE:
+#   ""                                        → automatic ACME / Let's Encrypt (the host
+#                                                must be reachable from the internet on 80/443)
+#   "tls internal"                            → Caddy's local CA (self-signed; browsers warn
+#                                                until the CA root is trusted). Default.
+#   "tls /certs/proxy.crt /certs/proxy.key"   → operator-provided certificate (mount /certs)
+# Leave PROXY_SITE unset (default :80) to serve plain HTTP only — no TLS.
 
-:80 {
-	# Per-scenario portal + api routes (caddy.a.conf, caddy.b.conf). Each fragment
-	# uses `handle_path` / `handle` blocks with explicit path matchers, so they are
-	# evaluated before the match-all launcher fallback below. A zero-match glob is not
-	# an error, so a host running only one scenario still starts cleanly.
+{$PROXY_SITE::80} {
+	# TLS source (empty ⇒ automatic ACME for the site host); injected verbatim by the
+	# toolkit. A blank line here when unset is intentional and valid.
+	{$PROXY_TLS_DIRECTIVE:}
+
+	# Per-scenario portal + api routes (caddy.a.conf, caddy.b.conf). Each fragment uses
+	# `handle_path` / `handle` blocks with explicit path matchers, so they are evaluated
+	# before the match-all launcher fallback below. A zero-match glob is not an error, so
+	# a host running only one scenario still starts cleanly.
 	import /etc/caddy/conf.d/*.conf
 
 	# Fallback (matcher-less `handle` = matched last): the per-entity launcher. Its own

@@ -162,7 +162,7 @@ func (c JoinConfig) useProxy() bool { return c.ProxyEnabled && c.FrontendHost !=
 // never confused with a non-proxy one under the same gateway-port tag.
 func (c JoinConfig) frontendVariant() string {
 	if c.useProxy() {
-		return proxyImageVariant
+		return proxyImageVariant(c.FrontendHost)
 	}
 	return ""
 }

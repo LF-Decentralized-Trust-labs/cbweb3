@@ -15,14 +15,21 @@ func TestProxyPathHelpersA(t *testing.T) {
 	if got := proxyPortalBase("governance"); got != "/a/governance/" {
 		t.Fatalf("proxyPortalBase = %q, want /a/governance/", got)
 	}
-	if got := proxyAPIURL("cb.example"); got != "http://cb.example/a/api/v1/" {
+	// A real host ⇒ TLS on ⇒ https-scheme URLs (no mixed content under HTTPS).
+	t.Setenv("PROXY_TLS_MODE", "internal")
+	if got := proxyAPIURL("cb.example"); got != "https://cb.example/a/api/v1/" {
 		t.Fatalf("proxyAPIURL = %q", got)
 	}
-	if got := proxyAPIBase("cb.example"); got != "http://cb.example/a" {
+	if got := proxyAPIBase("cb.example"); got != "https://cb.example/a" {
 		t.Fatalf("proxyAPIBase = %q", got)
 	}
-	if got := proxyOrigin("cb.example"); got != "http://cb.example" {
+	if got := proxyOrigin("cb.example"); got != "https://cb.example" {
 		t.Fatalf("proxyOrigin = %q", got)
+	}
+	// PROXY_TLS_MODE=off ⇒ http; localhost ⇒ http.
+	t.Setenv("PROXY_TLS_MODE", "off")
+	if got := proxyOrigin("cb.example"); got != "http://cb.example" {
+		t.Fatalf("proxyOrigin(off) = %q", got)
 	}
 }
 
@@ -40,15 +47,16 @@ func TestRenderProxyFragmentA(t *testing.T) {
 }
 
 func TestCORSOriginsForProxy(t *testing.T) {
+	t.Setenv("PROXY_TLS_MODE", "internal") // real host ⇒ TLS on ⇒ https origin
 	p := entityPorts(8645)
 	// Proxy on → single origin regardless of per-portal ports.
-	if got := cbCORSOriginsFor(p, "cb-brazil.example", true); got != "http://cb-brazil.example" {
+	if got := cbCORSOriginsFor(p, "cb-brazil.example", true); got != "https://cb-brazil.example" {
 		t.Errorf("cbCORSOriginsFor(proxy) = %q", got)
 	}
-	if got := bankCORSOriginsFor(p, "itau.example", true); got != "http://itau.example" {
+	if got := bankCORSOriginsFor(p, "itau.example", true); got != "https://itau.example" {
 		t.Errorf("bankCORSOriginsFor(proxy) = %q", got)
 	}
-	// Proxy on with empty host → defaults to localhost origin.
+	// Proxy on with empty host → defaults to localhost origin (http; localhost never TLS).
 	if got := cbCORSOriginsFor(p, "", true); got != "http://localhost" {
 		t.Errorf("cbCORSOriginsFor(proxy, empty host) = %q", got)
 	}
@@ -62,6 +70,7 @@ func TestCORSOriginsForProxy(t *testing.T) {
 // drops NOC when proxy mode is on. Run writes the fragment before touching docker (which
 // fails gracefully in a test env), so no container is created.
 func TestLauncherProxyModeURLs(t *testing.T) {
+	t.Setenv("PROXY_TLS_MODE", "internal") // real host ⇒ TLS on ⇒ https links
 	dir := t.TempDir()
 	t.Setenv("LAUNCHER_STATE_DIR", dir)
 	step := newLauncherStep("enable", "central-bank", "Central Bank of Brazil",
@@ -83,7 +92,7 @@ func TestLauncherProxyModeURLs(t *testing.T) {
 	for _, p := range frag.Portals {
 		byRole[p.Role] = p.URL
 	}
-	if got := byRole["governance"]; got != "http://cb-brazil.example/a/governance/" {
+	if got := byRole["governance"]; got != "https://cb-brazil.example/a/governance/" {
 		t.Errorf("governance URL = %q", got)
 	}
 	if _, ok := byRole["noc"]; ok {

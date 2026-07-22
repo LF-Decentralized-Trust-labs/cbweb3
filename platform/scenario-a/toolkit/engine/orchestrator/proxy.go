@@ -24,31 +24,75 @@ import (
 const (
 	proxyContainerName    = "cbweb3-proxy"
 	proxyImage            = "cbweb3/proxy:local"
+	proxyDataVolume       = "cbweb3-proxy-data"
 	proxyDefaultHTTPPort  = 80
 	proxyScenario         = "a"
 	proxyFragmentFile     = "caddy.a.conf"
 	proxyContainerConfDir = "/etc/caddy/conf.d"
+	proxyContainerCertDir = "/certs"
 	proxyCaddyfile        = "/etc/caddy/Caddyfile"
-	// proxyImageVariant marks a per-entity frontend image tag as a base-path-aware
-	// (proxy) build so it is never confused with a non-proxy build of the same entity.
-	proxyImageVariant = "-proxy"
 )
+
+// proxyTLSEnabled reports whether the proxy serves this entity over HTTPS. TLS is on when
+// the browser-facing host is a real, routable name (not localhost) — the LNET deploy case —
+// unless PROXY_TLS_MODE=off forces plain HTTP (e.g. an external edge terminates TLS).
+func proxyTLSEnabled(host string) bool {
+	switch host {
+	case "", "localhost", "127.0.0.1":
+		return false
+	}
+	return os.Getenv("PROXY_TLS_MODE") != "off"
+}
+
+// proxyScheme is "https" when the proxy terminates TLS for host, else "http". Baked into
+// the SPA's api URL + CORS origin so an HTTPS page never makes a blocked mixed-content call.
+func proxyScheme(host string) string {
+	if proxyTLSEnabled(host) {
+		return "https"
+	}
+	return "http"
+}
+
+// proxyImageVariant tags a per-entity frontend image by its baked-URL flavour (http vs
+// https build), so toggling TLS never reuses a stale image cached under the same tag.
+func proxyImageVariant(host string) string {
+	if proxyTLSEnabled(host) {
+		return "-proxytls"
+	}
+	return "-proxy"
+}
+
+// proxyTLSDirective renders the Caddy `tls` directive for PROXY_TLS_MODE: "internal"
+// (default; Caddy local CA), "acme" (empty ⇒ automatic Let's Encrypt), or "custom"
+// (operator cert mounted at /certs).
+func proxyTLSDirective() string {
+	switch os.Getenv("PROXY_TLS_MODE") {
+	case "acme":
+		return ""
+	case "custom":
+		return "tls " + proxyContainerCertDir + "/proxy.crt " + proxyContainerCertDir + "/proxy.key"
+	default:
+		return "tls internal"
+	}
+}
 
 // proxyPortalBase is the URL base path a portal SPA is served under behind the reverse
 // proxy, e.g. "/a/governance/" (baked into the SPA as VITE_BASE_PATH).
 func proxyPortalBase(role string) string { return "/" + proxyScenario + "/" + role + "/" }
 
 // proxyAPIURL is the api-gateway URL (with the /api/v1/ suffix) a portal calls behind the
-// proxy, e.g. "http://cb.example/a/api/v1/".
-func proxyAPIURL(host string) string { return "http://" + host + "/" + proxyScenario + "/api/v1/" }
+// proxy, e.g. "https://cb.example/a/api/v1/".
+func proxyAPIURL(host string) string {
+	return proxyScheme(host) + "://" + host + "/" + proxyScenario + "/api/v1/"
+}
 
 // proxyAPIBase is the bare api-gateway prefix (no /api/v1/) for SPAs that append their own
-// path (e.g. the supervisor's apiFetch), e.g. "http://cb.example/a".
-func proxyAPIBase(host string) string { return "http://" + host + "/" + proxyScenario }
+// path (e.g. the supervisor's apiFetch), e.g. "https://cb.example/a".
+func proxyAPIBase(host string) string { return proxyScheme(host) + "://" + host + "/" + proxyScenario }
 
 // proxyOrigin is the single browser origin all of an entity's portals + its api-gateway
-// share behind the proxy, e.g. "http://cb.example".
-func proxyOrigin(host string) string { return "http://" + host }
+// share behind the proxy, e.g. "https://cb.example".
+func proxyOrigin(host string) string { return proxyScheme(host) + "://" + host }
 
 // ProxyRoute is one path route the proxy exposes for this entity: a portal SPA or the
 // api-gateway. Segment is the path element under /<scenario>/ (e.g. "governance", "bank",
@@ -65,14 +109,15 @@ type ProxyRoute struct {
 // entity's operational deploy is never blocked by this accessory.
 type proxyStep struct {
 	mode         string // "enable" | "disable" | "" (== disable)
+	siteHost     string // browser-facing host (spec.frontendHost); a real host ⇒ serve HTTPS on :443
 	launcherPort int    // launcher host port → proxy's root fallback upstream
 	networks     []string
 	routes       []ProxyRoute
 	rootRedirect string // when set (hub-less roots), redirect "/" here
 }
 
-func newProxyStep(mode string, launcherPort int, networks []string, routes []ProxyRoute, rootRedirect string) Step {
-	return &proxyStep{mode: mode, launcherPort: launcherPort, networks: networks, routes: routes, rootRedirect: rootRedirect}
+func newProxyStep(mode, siteHost string, launcherPort int, networks []string, routes []ProxyRoute, rootRedirect string) Step {
+	return &proxyStep{mode: mode, siteHost: siteHost, launcherPort: launcherPort, networks: networks, routes: routes, rootRedirect: rootRedirect}
 }
 
 func (s *proxyStep) Name() string { return StepStartProxy }
@@ -103,22 +148,43 @@ func (s *proxyStep) Run(ctx context.Context) error {
 
 	// Ensure the single per-host proxy container is running (soft: log and continue on
 	// failure). It reads fragments at runtime; if already up (possibly started by the
-	// other scenario), the reload below picks up the new fragment.
-	if !proxyContainerExists(ctx) {
+	// other scenario), the reload below picks up the new fragment. When TLS is wanted but
+	// the running container predates it (no :443 binding), recreate it so it serves HTTPS;
+	// each scenario re-attaches its own network on its next apply.
+	tls := proxyTLSEnabled(s.siteHost)
+	needCreate := !proxyContainerExists(ctx)
+	if !needCreate && tls && !proxyPublishes(ctx, "443") {
+		_ = exec.CommandContext(ctx, "docker", "rm", "-f", proxyContainerName).Run()
+		needCreate = true
+	}
+	if needCreate {
 		if !proxyImageExists(ctx) {
 			fmt.Fprintf(os.Stderr, "proxy: image %q not found; build it with proxy/build.sh, then re-apply\n", proxyImage)
 			return nil
 		}
 		launcherUpstream := fmt.Sprintf("host.docker.internal:%d", launcherPort(s.launcherPort))
-		cmd := exec.CommandContext(ctx, "docker", "run", "-d",
+		args := []string{"run", "-d",
 			"--name", proxyContainerName,
 			"--restart", "always",
-			"-p", fmt.Sprintf("%d:80", proxyHTTPPort()),
 			"--add-host", "host.docker.internal:host-gateway",
-			"-e", "LAUNCHER_UPSTREAM="+launcherUpstream,
-			"-v", confDir+":"+proxyContainerConfDir+":ro",
-			proxyImage)
-		if out, err := cmd.CombinedOutput(); err != nil {
+			"-e", "LAUNCHER_UPSTREAM=" + launcherUpstream,
+			"-v", confDir + ":" + proxyContainerConfDir + ":ro"}
+		if tls {
+			// HTTPS: publish :80 (ACME challenge + →:443 redirect) and :443; persist the
+			// cert store (ACME / internal CA root) in a named volume across restarts.
+			args = append(args,
+				"-p", "80:80", "-p", "443:443",
+				"-e", "PROXY_SITE="+s.siteHost,
+				"-e", "PROXY_TLS_DIRECTIVE="+proxyTLSDirective(),
+				"-v", proxyDataVolume+":/data")
+			if dir := os.Getenv("PROXY_CERT_DIR"); dir != "" {
+				args = append(args, "-v", dir+":"+proxyContainerCertDir+":ro")
+			}
+		} else {
+			args = append(args, "-p", fmt.Sprintf("%d:80", proxyHTTPPort()))
+		}
+		args = append(args, proxyImage)
+		if out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "proxy: docker run failed (non-fatal): %v\n%s\n", err, out)
 			return nil
 		}
@@ -205,6 +271,13 @@ func proxyContainerExists(ctx context.Context) bool {
 
 func proxyImageExists(ctx context.Context) bool {
 	return exec.CommandContext(ctx, "docker", "image", "inspect", proxyImage).Run() == nil
+}
+
+// proxyPublishes reports whether the running proxy container publishes the given host
+// port (used to detect an HTTP-only proxy that predates a TLS enable and must be recreated).
+func proxyPublishes(ctx context.Context, port string) bool {
+	out, err := exec.CommandContext(ctx, "docker", "port", proxyContainerName, port+"/tcp").Output()
+	return err == nil && len(strings.TrimSpace(string(out))) > 0
 }
 
 // proxyNoFragments reports whether confDir holds no caddy.*.conf fragment.

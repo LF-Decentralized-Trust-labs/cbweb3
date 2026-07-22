@@ -23,15 +23,56 @@ import (
 const (
 	proxyContainerName    = "cbweb3-proxy"
 	proxyImage            = "cbweb3/proxy:local"
+	proxyDataVolume       = "cbweb3-proxy-data"
 	proxyDefaultHTTPPort  = 80
 	proxyScenario         = "b"
 	proxyContainerConfDir = "/etc/caddy/conf.d"
+	proxyContainerCertDir = "/certs"
 	proxyCaddyfile        = "/etc/caddy/Caddyfile"
-	// proxyImageVariant is appended to a per-entity frontend image tag when the SPA is
-	// built base-path-aware for the proxy, so a proxy build never reuses a non-proxy
-	// image cached under the same gateway-port tag (and vice versa).
-	proxyImageVariant = "-proxy"
 )
+
+// proxyTLSEnabled reports whether the proxy serves this entity over HTTPS. TLS is on when
+// the browser-facing host is a real, routable name (not localhost) — the LNET deploy case —
+// unless PROXY_TLS_MODE=off forces plain HTTP (e.g. an external edge terminates TLS).
+func proxyTLSEnabled(host string) bool {
+	switch host {
+	case "", "localhost", "127.0.0.1":
+		return false
+	}
+	return os.Getenv("PROXY_TLS_MODE") != "off"
+}
+
+// proxyScheme is "https" when the proxy terminates TLS for host, else "http". Baked into
+// the SPA's api URL + CORS origin so an HTTPS page never makes a blocked mixed-content call.
+func proxyScheme(host string) string {
+	if proxyTLSEnabled(host) {
+		return "https"
+	}
+	return "http"
+}
+
+// proxyImageVariant tags a per-entity frontend image by its baked-URL flavour (http vs
+// https build), so toggling TLS never reuses a stale image cached under the same tag.
+func proxyImageVariant(host string) string {
+	if proxyTLSEnabled(host) {
+		return "-proxytls"
+	}
+	return "-proxy"
+}
+
+// proxyTLSDirective renders the Caddy `tls` directive for PROXY_TLS_MODE: "internal"
+// (default; Caddy local CA), "acme" (empty ⇒ automatic Let's Encrypt), or "custom"
+// (operator cert mounted at /certs).
+func proxyTLSDirective() string {
+	switch os.Getenv("PROXY_TLS_MODE") {
+	case "acme":
+		return ""
+	case "custom":
+		return "tls " + proxyContainerCertDir + "/proxy.crt " + proxyContainerCertDir + "/proxy.key"
+	default:
+		return "tls internal"
+	}
+}
 
 // proxyPortalBase is the URL base path a portal SPA is served under behind the reverse
 // proxy, e.g. "/b/governance/". Baked into the SPA (VITE_BASE_PATH) so its assets and
@@ -39,12 +80,14 @@ const (
 func proxyPortalBase(role string) string { return "/" + proxyScenario + "/" + role + "/" }
 
 // proxyAPIURL is the api-gateway URL a portal SPA calls behind the proxy, e.g.
-// "http://cb-brazil.example/b/api/v1/" — same origin as the portals (one CORS origin).
-func proxyAPIURL(host string) string { return "http://" + host + "/" + proxyScenario + "/api/v1/" }
+// "https://cb-brazil.example/b/api/v1/" — same origin as the portals (one CORS origin).
+func proxyAPIURL(host string) string {
+	return proxyScheme(host) + "://" + host + "/" + proxyScenario + "/api/v1/"
+}
 
 // proxyOrigin is the single browser origin all of an entity's portals + its api-gateway
-// share behind the proxy, e.g. "http://cb-brazil.example".
-func proxyOrigin(host string) string { return "http://" + host }
+// share behind the proxy, e.g. "https://cb-brazil.example".
+func proxyOrigin(host string) string { return proxyScheme(host) + "://" + host }
 
 // ProxyRoute is one path route the proxy exposes for this entity: a portal SPA or the
 // api-gateway. Segment is the path element under /<scenario>/ (e.g. "governance", "noc",
@@ -59,6 +102,7 @@ type ProxyRoute struct {
 type ProxyParams struct {
 	Runner       exec.CommandRunner
 	Mode         string   // "enable" | "disable" | "" (== disable)
+	SiteHost     string   // browser-facing host (spec.frontendHost); a real host ⇒ serve HTTPS on :443
 	LauncherPort int      // launcher host port → proxy's root fallback upstream (host.docker.internal:<port>)
 	Networks     []string // entity docker networks to attach the proxy to (reach upstreams by name)
 	Routes       []ProxyRoute
@@ -125,20 +169,42 @@ func runProxyB(ctx context.Context, p ProxyParams) error {
 
 	// Ensure the single per-host proxy container is running. It reads fragments at
 	// runtime; if it is already up (possibly started by the other scenario) there is
-	// nothing to create — the reload below picks up the new fragment.
-	if !proxyContainerExists(ctx, p.Runner) {
+	// nothing to create — the reload below picks up the new fragment. When TLS is wanted
+	// but the running container predates it (no :443 binding), recreate it so it serves
+	// HTTPS; each scenario re-attaches its own network on its next apply.
+	tls := proxyTLSEnabled(p.SiteHost)
+	needCreate := !proxyContainerExists(ctx, p.Runner)
+	if !needCreate && tls && !proxyPublishes(ctx, p.Runner, "443") {
+		_, _ = p.Runner.Run(ctx, "docker", "rm", "-f", proxyContainerName)
+		needCreate = true
+	}
+	if needCreate {
 		if !imageExists(ctx, p.Runner, proxyImage) {
 			return fmt.Errorf("proxy image %q not found; build it first with proxy/build.sh", proxyImage)
 		}
 		launcherUpstream := fmt.Sprintf("host.docker.internal:%d", launcherPort(p.LauncherPort))
-		if _, err := p.Runner.Run(ctx, "docker", "run", "-d",
+		args := []string{"run", "-d",
 			"--name", proxyContainerName,
 			"--restart", "always",
-			"-p", fmt.Sprintf("%d:80", proxyHTTPPort()),
 			"--add-host", "host.docker.internal:host-gateway",
-			"-e", "LAUNCHER_UPSTREAM="+launcherUpstream,
-			"-v", confDir+":"+proxyContainerConfDir+":ro",
-			proxyImage); err != nil {
+			"-e", "LAUNCHER_UPSTREAM=" + launcherUpstream,
+			"-v", confDir + ":" + proxyContainerConfDir + ":ro"}
+		if tls {
+			// HTTPS: publish :80 (ACME challenge + →:443 redirect) and :443; persist the
+			// cert store (ACME/internal CA root) in a named volume so restarts reuse it.
+			args = append(args,
+				"-p", "80:80", "-p", "443:443",
+				"-e", "PROXY_SITE="+p.SiteHost,
+				"-e", "PROXY_TLS_DIRECTIVE="+proxyTLSDirective(),
+				"-v", proxyDataVolume+":/data")
+			if dir := os.Getenv("PROXY_CERT_DIR"); dir != "" {
+				args = append(args, "-v", dir+":"+proxyContainerCertDir+":ro")
+			}
+		} else {
+			args = append(args, "-p", fmt.Sprintf("%d:80", proxyHTTPPort()))
+		}
+		args = append(args, proxyImage)
+		if _, err := p.Runner.Run(ctx, "docker", args...); err != nil {
 			return err
 		}
 	}
@@ -198,6 +264,13 @@ func renderProxyFragment(scenario string, routes []ProxyRoute, rootRedirect stri
 func proxyContainerExists(ctx context.Context, r exec.CommandRunner) bool {
 	_, err := r.Run(ctx, "docker", "container", "inspect", proxyContainerName)
 	return err == nil
+}
+
+// proxyPublishes reports whether the running proxy container publishes the given host
+// port (used to detect an HTTP-only proxy that predates a TLS enable and must be recreated).
+func proxyPublishes(ctx context.Context, r exec.CommandRunner, port string) bool {
+	out, err := r.Run(ctx, "docker", "port", proxyContainerName, port+"/tcp")
+	return err == nil && len(strings.TrimSpace(string(out))) > 0
 }
 
 // proxyNoFragments reports whether confDir holds no caddy.*.conf fragment (so the proxy

@@ -180,7 +180,7 @@ func (c HubConfig) useProxy() bool { return c.ProxyEnabled && c.FrontendHost != 
 // never confused with a non-proxy one under the same gateway-port tag.
 func (c HubConfig) frontendVariant() string {
 	if c.useProxy() {
-		return proxyImageVariant
+		return proxyImageVariant(c.FrontendHost)
 	}
 	return ""
 }

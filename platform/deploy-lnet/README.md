@@ -138,10 +138,26 @@ attaches to both entity Docker networks. Requirements per VM:
 
 - **DNS:** one `A` record per entity → its VM IP (e.g. `cb-brazil.cbweb3.l-net.io → 10.10.0.21`).
   No wildcard needed (single hostname per entity).
-- **Firewall:** open `:80`. The high per-portal host ports no longer need to be exposed externally
-  (the proxy reaches each portal container on the internal network).
-- **TLS:** HTTP only for now (`:443` deferred). To disable, set `proxy: disable` in the manifest —
-  the entity falls back to the legacy host-port URLs.
+- **Firewall:** open `:80` and `:443`. The high per-portal host ports no longer need to be exposed
+  externally (the proxy reaches each portal container on the internal network).
+- **TLS:** enabled automatically whenever `frontendHost` is a real host (not `localhost`). The proxy
+  serves **HTTPS on `:443`** (with an automatic `:80`→`:443` redirect), and the portal SPAs are built
+  with `https://` api/CORS/launcher URLs so there is no mixed content. Certificate source is chosen by
+  the `PROXY_TLS_MODE` env on the deploy host:
+  - `internal` (**default**) — Caddy's local CA (self-signed). Works with no external reachability
+    (suits a permissioned network); browsers warn until the CA root is trusted. Trust it with the
+    root at `docker cp cbweb3-proxy:/data/caddy/pki/authorities/local/root.crt .`.
+  - `acme` — automatic Let's Encrypt; requires the host reachable from the internet on `:80`/`:443`.
+  - `custom` — operator cert: set `PROXY_CERT_DIR=/path` (must contain `proxy.crt` + `proxy.key`).
+  - `off` — no TLS; serve plain HTTP on `:80` (use when an external edge terminates TLS and forwards
+    to `:80` — the SPAs are then built with `http://` URLs).
+- **Enabling/switching TLS on an already-running proxy:** the proxy container is recreated to pick up
+  `:443`, and each scenario re-attaches its own Docker network on apply — so after changing TLS,
+  **re-apply both scenarios on that host** (e.g. `deploy.sh a cb-brazil` and `deploy.sh b cb-brazil`)
+  so the proxy is attached to both entity networks. To force a clean recreate: `docker rm -f cbweb3-proxy`
+  then re-apply.
+- To turn the proxy off entirely, set `proxy: disable` in the manifest — the entity falls back to the
+  legacy host-port URLs.
 
 **NOC exception:** the NOC portal is hub-owned and stays **port-based** (its browser-side Keycloak
 OIDC redirect URIs are unchanged); it is intentionally excluded from proxy path routing and from the

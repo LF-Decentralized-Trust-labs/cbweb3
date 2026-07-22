@@ -214,7 +214,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			"treasury":   proxyPortalBase("treasury"),
 			"supervisor": proxyPortalBase("supervisor"),
 		}
-		cbImageTag = entity + proxyImageVariant
+		cbImageTag = entity + proxyImageVariant(fHost)
 	}
 
 	steps = append(steps,
@@ -297,7 +297,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 
 	// Per-host reverse proxy (soft): route this CB's portals + api-gateway by path on :80.
 	if proxyEnabled {
-		steps = append(steps, newProxyStep(m.Spec.Proxy, m.Spec.LauncherPort, []string{net}, []ProxyRoute{
+		steps = append(steps, newProxyStep(m.Spec.Proxy, fHost, m.Spec.LauncherPort, []string{net}, []ProxyRoute{
 			{Segment: "governance", Upstream: prefix + "-governance-frontend:80"},
 			{Segment: "treasury", Upstream: prefix + "-treasury-frontend:80"},
 			{Segment: "supervisor", Upstream: prefix + "-supervisor-frontend:80"},
@@ -649,7 +649,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		bankAPIURL = proxyAPIURL(hostOrLocalhost(fHost))
 		bankAPIBase = proxyAPIBase(hostOrLocalhost(fHost))
 		bankBasePaths = map[string]string{"bank": proxyPortalBase("bank")}
-		bankImageTag = bank + proxyImageVariant
+		bankImageTag = bank + proxyImageVariant(fHost)
 	}
 
 	steps = append(steps,
@@ -750,7 +750,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 
 	// Per-host reverse proxy (soft): route this bank's portal + api-gateway by path on :80.
 	if proxyEnabled {
-		steps = append(steps, newProxyStep(m.Spec.Proxy, m.Spec.LauncherPort, []string{net}, []ProxyRoute{
+		steps = append(steps, newProxyStep(m.Spec.Proxy, fHost, m.Spec.LauncherPort, []string{net}, []ProxyRoute{
 			{Segment: "bank", Upstream: prefix + "-bank-frontend:80"},
 			{Segment: "api", Upstream: prefix + "-api-gateway:8080", IsAPI: true},
 		}, ""))

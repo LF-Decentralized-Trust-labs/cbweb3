@@ -164,7 +164,7 @@ func (s *launcherStep) Run(ctx context.Context) error {
 				Scenario: launcherScenarioUpper,
 				Role:     rp.role,
 				Label:    rp.label,
-				URL:      "http://" + host + proxyPortalBase(rp.role),
+				URL:      proxyScheme(host) + "://" + host + proxyPortalBase(rp.role),
 			})
 			continue
 		}

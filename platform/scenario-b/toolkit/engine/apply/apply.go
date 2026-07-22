@@ -159,6 +159,7 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		steps = append(steps, orchestrator.NewProxyStep(orchestrator.ProxyParams{
 			Runner:       cfg.Runner,
 			Mode:         pd.Spec.Proxy,
+			SiteHost:     pd.Spec.FrontendHost,
 			LauncherPort: pd.Spec.LauncherPort,
 			Networks:     []string{cfg.NetName()},
 			Routes:       cfg.ProxyRoutes(),
@@ -256,6 +257,7 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		steps = append(steps, orchestrator.NewProxyStep(orchestrator.ProxyParams{
 			Runner:       cfg.Runner,
 			Mode:         pd.Spec.Proxy,
+			SiteHost:     pd.Spec.FrontendHost,
 			LauncherPort: pd.Spec.LauncherPort,
 			Networks:     []string{cfg.NetName()},
 			Routes:       cfg.ProxyRoutes(),
@@ -343,6 +345,7 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 		steps = append(steps, orchestrator.NewProxyStep(orchestrator.ProxyParams{
 			Runner:       runner,
 			Mode:         pd.Spec.Proxy,
+			SiteHost:     pd.Spec.FrontendHost,
 			Networks:     []string{cfg.NetName()},
 			Routes:       cfg.ProxyRoutes(),
 			RootRedirect: "/b/governance/",

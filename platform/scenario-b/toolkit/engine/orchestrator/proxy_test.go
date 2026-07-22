@@ -14,11 +14,21 @@ func TestProxyPathHelpers(t *testing.T) {
 	if got := proxyPortalBase("governance"); got != "/b/governance/" {
 		t.Fatalf("proxyPortalBase = %q, want /b/governance/", got)
 	}
-	if got := proxyAPIURL("cb.example"); got != "http://cb.example/b/api/v1/" {
+	// A real host ⇒ TLS on ⇒ https-scheme URLs (no mixed content under HTTPS).
+	t.Setenv("PROXY_TLS_MODE", "internal")
+	if got := proxyAPIURL("cb.example"); got != "https://cb.example/b/api/v1/" {
 		t.Fatalf("proxyAPIURL = %q", got)
 	}
-	if got := proxyOrigin("cb.example"); got != "http://cb.example" {
+	if got := proxyOrigin("cb.example"); got != "https://cb.example" {
 		t.Fatalf("proxyOrigin = %q", got)
+	}
+	// PROXY_TLS_MODE=off (external TLS edge) ⇒ http scheme; localhost ⇒ http.
+	t.Setenv("PROXY_TLS_MODE", "off")
+	if got := proxyAPIURL("cb.example"); got != "http://cb.example/b/api/v1/" {
+		t.Fatalf("proxyAPIURL(off) = %q", got)
+	}
+	if got := proxyScheme("localhost"); got != "http" {
+		t.Fatalf("proxyScheme(localhost) = %q", got)
 	}
 }
 
@@ -120,15 +130,16 @@ func TestProxyStepDisableRemovesFragmentAndTearsDown(t *testing.T) {
 }
 
 func TestSpokeConfigProxyWiring(t *testing.T) {
+	t.Setenv("PROXY_TLS_MODE", "internal") // real host ⇒ TLS on
 	c := SpokeConfig{ContainerPrefix: "sc-b-cbweb3-central-bank-brazil", Entity: "central-bank",
 		NetPrefix: "central-bank-brazil", RPCPort: 8845, FrontendHost: "cb-brazil.example", ProxyEnabled: true}
 	if !c.useProxy() {
 		t.Fatal("useProxy should be true")
 	}
-	if c.frontendVariant() != proxyImageVariant {
-		t.Fatalf("frontendVariant = %q", c.frontendVariant())
+	if c.frontendVariant() != "-proxytls" {
+		t.Fatalf("frontendVariant = %q, want -proxytls", c.frontendVariant())
 	}
-	if c.corsOrigins() != "http://cb-brazil.example" {
+	if c.corsOrigins() != "https://cb-brazil.example" {
 		t.Fatalf("corsOrigins = %q", c.corsOrigins())
 	}
 	if c.NetName() != "central-bank-brazil_net" {
@@ -161,6 +172,7 @@ func TestSpokeConfigProxyDisabledFallsBack(t *testing.T) {
 }
 
 func TestJoinConfigProxyRoutes(t *testing.T) {
+	t.Setenv("PROXY_TLS_MODE", "internal") // real host ⇒ TLS on
 	c := JoinConfig{ContainerPrefix: "sc-b-cbweb3-bank-itau", Entity: "bank-itau",
 		NetPrefix: "bank-itau", RPCPort: 10545, FrontendHost: "itau.example", ProxyEnabled: true}
 	routes := c.ProxyRoutes()
@@ -168,7 +180,7 @@ func TestJoinConfigProxyRoutes(t *testing.T) {
 		routes[0].Upstream != "sc-b-cbweb3-bank-itau-bank-itau-frontend:80" {
 		t.Fatalf("bank routes = %+v", routes)
 	}
-	if c.corsOrigins() != "http://itau.example" {
+	if c.corsOrigins() != "https://itau.example" {
 		t.Fatalf("corsOrigins = %q", c.corsOrigins())
 	}
 }
