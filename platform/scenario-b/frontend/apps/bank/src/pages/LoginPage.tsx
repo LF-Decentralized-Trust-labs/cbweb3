@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Separator } from "@cbweb3/ui";
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Separator, BackToLauncherButton } from "@cbweb3/ui";
 import { Building2, LockKeyhole, ShieldCheck, Wallet } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -80,6 +80,7 @@ export function LoginPage() {
 
         <Card className="mx-auto w-full max-w-md border-border/80 shadow-lg">
           <CardHeader>
+            <BackToLauncherButton className="-ml-2 mb-2 self-start" />
             <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Building2 className="h-5 w-5" />
             </div>

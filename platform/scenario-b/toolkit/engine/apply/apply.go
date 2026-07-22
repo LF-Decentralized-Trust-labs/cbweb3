@@ -122,6 +122,8 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		RelayAdvertisedHost: manifestRelayAdvHost(pd),
 		RelayEndpoint:       manifestRelayEndpoint(pd), // relay's own REST endpoint → CACTI_API_URL
 		FrontendHost:        pd.Spec.FrontendHost,
+		LauncherEnabled:     pd.Spec.Launcher == "enable",
+		LauncherPort:        pd.Spec.LauncherPort,
 		Currency:            pd.Spec.Spoke.Currency,
 		AdminUsers:          toOrchestratorAdminUsers(pd.Spec.AdminUsers),
 	}
@@ -225,6 +227,8 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		HubRPC:          firstNonEmpty(o.HubRPC, sb.HubRPC), // routable hub RPC from the spoke bundle
 		RelayEndpoint:   manifestRelayEndpoint(pd),         // the relay's own REST endpoint → CACTI_API_URL
 		FrontendHost:    pd.Spec.FrontendHost,
+		LauncherEnabled: pd.Spec.Launcher == "enable",
+		LauncherPort:    pd.Spec.LauncherPort,
 		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
 	}
 	cfg.WithDefaults()

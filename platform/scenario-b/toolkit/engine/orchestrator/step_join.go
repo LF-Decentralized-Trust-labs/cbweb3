@@ -46,6 +46,8 @@ type JoinConfig struct {
 	BesuImage       string
 	GatewayURL      string
 	FrontendHost    string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
+	LauncherEnabled bool   // spec.launcher == "enable": bake VITE_LAUNCHER_URL into the bank portal
+	LauncherPort    int    // spec.launcherPort: launcher host port (0 → env/default); host = FrontendHost
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -477,8 +479,9 @@ func JoinSteps(c JoinConfig) []Step {
 			// remote access, else localhost); build a per-entity image, then run it.
 			gwPort := c.RPCPort + 8000
 			api := fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort)
+			lu := frontendLauncherURL(c.LauncherEnabled, c.FrontendHost, c.LauncherPort)
 			if err := buildFrontendImage(ctx, c.Runner, c.scenarioBDir(), cbFrontendImage("bank", gwPort), "bank",
-				map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
+				map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu}); err != nil {
 				return err
 			}
 			return compose("entity-frontend")(ctx)

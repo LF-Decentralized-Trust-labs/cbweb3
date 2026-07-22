@@ -44,6 +44,8 @@ type SpokeConfig struct {
 	RelayAdvertisedHost string // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
 	RelayEndpoint       string // the relay's OWN REST endpoint (spec.relay.endpoint, e.g. http://<hub>:7000) → CACTI_API_URL
 	FrontendHost        string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
+	LauncherEnabled     bool   // spec.launcher == "enable": bake VITE_LAUNCHER_URL into the CB portals
+	LauncherPort        int    // spec.launcherPort: launcher host port (0 → env/default); host = FrontendHost
 	AdminUsers          []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
 	Currency            string      // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
 	TokenName           string // tCeBM name (default "Tokenized <Currency>")
@@ -787,17 +789,18 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			// (spec.frontendHost — a routable IP/DNS for remote access, else localhost).
 			gwPort := c.RPCPort + 8000
 			api := fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort)
+			lu := frontendLauncherURL(c.LauncherEnabled, c.FrontendHost, c.LauncherPort)
 			sb := c.scenarioBDir()
 			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("governance", gwPort), "governance",
-				map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
+				map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu}); err != nil {
 				return err
 			}
 			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("treasury", gwPort), "treasury",
-				map[string]string{"VITE_API_BASE_URL": api, "VITE_INSTITUTION_NAME": c.Entity}); err != nil {
+				map[string]string{"VITE_API_BASE_URL": api, "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu}); err != nil {
 				return err
 			}
 			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("supervisor", gwPort), "supervisor",
-				map[string]string{"VITE_API_BASE_URL": api, "VITE_SPOKE_NAME": c.SpokeID}); err != nil {
+				map[string]string{"VITE_API_BASE_URL": api, "VITE_SPOKE_NAME": c.SpokeID, "VITE_LAUNCHER_URL": lu}); err != nil {
 				return err
 			}
 			return compose("cb-frontend")(ctx)

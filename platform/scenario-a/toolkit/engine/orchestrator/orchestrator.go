@@ -242,6 +242,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			APIBase:     frontendAPIBase(frontendAdvertisedHost(m), ports.APIGateway),
 			PortalOwner: entity + "-operator", FiatSymbol: m.Spec.Spoke.Currency, Institution: m.DisplayNameOr(entity),
 			KeycloakURL: frontendAPIBase(frontendAdvertisedHost(m), ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "cbweb3-noc",
+			LauncherURL: launcherURLForManifest(m),
 			// Per-entity image tag: VITE_* are baked at build time, so a shared tag
 			// would let one entity's bundle (with its api-gateway URL) be reused by
 			// another, sending the browser to the wrong gateway and failing CORS.
@@ -293,6 +294,18 @@ func frontendAdvertisedHost(m *manifest.Manifest) string {
 		return m.Spec.FrontendHost
 	}
 	return "localhost"
+}
+
+// launcherURLForManifest is the browser-facing URL of this entity's launcher, baked into
+// the frontend bundle as VITE_LAUNCHER_URL so the portals can offer a "back to launcher"
+// affordance and redirect there on logout. It returns "" when the launcher is not enabled
+// for this entity, so the frontend simply hides the affordance and keeps /login behaviour.
+// Host and port match the launcher step exactly (frontendAdvertisedHost + launcherPort).
+func launcherURLForManifest(m *manifest.Manifest) string {
+	if m.Spec.Launcher != "enable" {
+		return ""
+	}
+	return fmt.Sprintf("http://%s:%d", frontendAdvertisedHost(m), launcherPort(m.Spec.LauncherPort))
 }
 
 // frontendAPIBase / frontendAPIURL are the host-published api-gateway URLs baked
@@ -628,6 +641,7 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 			Services:    []frontendService{{Service: "bank", Port: ports.FrontendPrimary}},
 			APIURL:      frontendAPIURL(frontendAdvertisedHost(m), ports.APIGateway), APIBase: frontendAPIBase(frontendAdvertisedHost(m), ports.APIGateway),
 			PortalOwner: bank + "-operator", FiatSymbol: b.Spec.Currency, Institution: m.DisplayNameOr(bank),
+			LauncherURL: launcherURLForManifest(m),
 			// Per-entity image tag: VITE_API_URL is baked at build time, so a shared
 			// tag would let one bank's bundle be reused by another, pointing the
 			// browser at the wrong bank's api-gateway and failing CORS.

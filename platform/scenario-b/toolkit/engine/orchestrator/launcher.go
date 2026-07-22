@@ -44,6 +44,18 @@ func launcherPort(manifestPort int) int {
 	return launcherDefaultPort
 }
 
+// frontendLauncherURL is the browser-facing URL of this entity's launcher, baked into the
+// frontend bundle as VITE_LAUNCHER_URL so the portals can offer a "back to launcher"
+// affordance and redirect there on logout. Returns "" when the launcher is not enabled for
+// this entity (frontend hides the affordance, keeps /login). Host + port match the launcher
+// step exactly (frontendHostOrLocal + launcherPort).
+func frontendLauncherURL(enabled bool, host string, port int) string {
+	if !enabled {
+		return ""
+	}
+	return fmt.Sprintf("http://%s:%d", frontendHostOrLocal(host), launcherPort(port))
+}
+
 // launcherContainerName derives the container name from the port so distinct ports
 // yield distinct containers (no name clash on one host), while both scenarios of the
 // same entity — same port — share one container.

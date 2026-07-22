@@ -13,6 +13,7 @@
 #   VITE_API_BASE         entity api-gateway, no suffix (supervisor, noc)
 #   VITE_PORTAL_OWNER / VITE_FIAT_SYMBOL / VITE_INSTITUTION_NAME
 #   VITE_KEYCLOAK_URL / VITE_KEYCLOAK_REALM / VITE_KEYCLOAK_CLIENT_ID   (noc)
+#   VITE_LAUNCHER_URL     per-entity launcher URL (optional; empty => no "back to launcher")
 #   GOVERNANCE_PORT / TREASURY_PORT / SUPERVISOR_PORT / NOC_PORT / BANK_PORT   host ports
 #   FRONTEND_IMAGE_TAG    image tag suffix (build => local)
 
@@ -26,6 +27,7 @@ services:
         VITE_PORTAL_OWNER: ${VITE_PORTAL_OWNER:-OPERATOR}
         VITE_FIAT_SYMBOL: ${VITE_FIAT_SYMBOL:-BRL}
         VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Central Bank}
+        VITE_LAUNCHER_URL: ${VITE_LAUNCHER_URL:-}
     image: cbweb3/governance-frontend:${FRONTEND_IMAGE_TAG:-local}
     container_name: ${ENTITY_PREFIX:?ENTITY_PREFIX is required}-governance-frontend
     ports:
@@ -42,6 +44,7 @@ services:
         VITE_PORTAL_OWNER: ${VITE_PORTAL_OWNER:-OPERATOR}
         VITE_FIAT_SYMBOL: ${VITE_FIAT_SYMBOL:-BRL}
         VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Central Bank}
+        VITE_LAUNCHER_URL: ${VITE_LAUNCHER_URL:-}
     image: cbweb3/treasury-frontend:${FRONTEND_IMAGE_TAG:-local}
     container_name: ${ENTITY_PREFIX}-treasury-frontend
     ports:
@@ -56,6 +59,7 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE}
         VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Central Bank}
+        VITE_LAUNCHER_URL: ${VITE_LAUNCHER_URL:-}
     image: cbweb3/supervisor-frontend:${FRONTEND_IMAGE_TAG:-local}
     container_name: ${ENTITY_PREFIX}-supervisor-frontend
     ports:
@@ -73,6 +77,7 @@ services:
         VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM:-cbweb3}
         VITE_KEYCLOAK_CLIENT_ID: ${VITE_KEYCLOAK_CLIENT_ID:-cbweb3-noc}
         VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Central Bank}
+        VITE_LAUNCHER_URL: ${VITE_LAUNCHER_URL:-}
     image: cbweb3/noc-frontend:${FRONTEND_IMAGE_TAG:-local}
     container_name: ${ENTITY_PREFIX}-noc-frontend
     ports:
@@ -89,6 +94,7 @@ services:
         VITE_PORTAL_OWNER: ${VITE_PORTAL_OWNER:-OPERATOR}
         VITE_FIAT_SYMBOL: ${VITE_FIAT_SYMBOL:-BRL}
         VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Commercial Bank}
+        VITE_LAUNCHER_URL: ${VITE_LAUNCHER_URL:-}
     image: cbweb3/bank-frontend:${FRONTEND_IMAGE_TAG:-local}
     container_name: ${ENTITY_PREFIX}-bank-frontend
     ports:

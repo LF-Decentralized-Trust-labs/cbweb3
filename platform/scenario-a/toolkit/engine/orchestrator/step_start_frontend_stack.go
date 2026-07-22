@@ -38,6 +38,7 @@ type startFrontendStackStep struct {
 	keycloakURL    string
 	keycloakRealm  string
 	keycloakClient string
+	launcherURL    string
 	imageTag       string
 	healthTimeout  time.Duration
 	healthInterval time.Duration
@@ -59,6 +60,7 @@ func newStartFrontendStackStep(name string, p frontendStackParams) Step {
 		keycloakURL:    p.KeycloakURL,
 		keycloakRealm:  p.KeycloakRealm,
 		keycloakClient: p.KeycloakClient,
+		launcherURL:    p.LauncherURL,
 		imageTag:       p.ImageTag,
 		healthTimeout:  p.HealthTimeout,
 		healthInterval: p.HealthInterval,
@@ -80,6 +82,7 @@ type frontendStackParams struct {
 	KeycloakURL    string
 	KeycloakRealm  string
 	KeycloakClient string
+	LauncherURL    string
 	ImageTag       string
 	HealthTimeout  time.Duration
 	HealthInterval time.Duration
@@ -146,6 +149,7 @@ func (s *startFrontendStackStep) composeEnv() []string {
 		"VITE_KEYCLOAK_URL="+s.keycloakURL,
 		"VITE_KEYCLOAK_REALM="+s.keycloakRealm,
 		"VITE_KEYCLOAK_CLIENT_ID="+s.keycloakClient,
+		"VITE_LAUNCHER_URL="+s.launcherURL,
 		"FRONTEND_IMAGE_TAG="+tag,
 	)
 	// Publish only the selected portals' ports; others default to 0 (unpublished).
