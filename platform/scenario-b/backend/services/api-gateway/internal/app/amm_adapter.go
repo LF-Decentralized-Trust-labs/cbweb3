@@ -474,6 +474,19 @@ func NewTokenPrepareAdapter(ctx context.Context, tokenA, tokenB *tcebmclient.Cli
 	}, nil
 }
 
+// NewDynamicTokenPrepareAdapter builds a token preparer for the sovereign dynamic
+// model: it holds no static TOKEN_A/B clients and resolves the pair's W-tokens +
+// AMM on-chain per pool_pair via the resolver. Every mint/approve therefore
+// requires a non-empty pool_pair (the legacy static-side path is unavailable).
+// Used when no HUB_TOKEN_A/B_ADDRESS is configured but the PairRegistry resolver
+// is available, so the sovereign-seed and token routes still register.
+func NewDynamicTokenPrepareAdapter(resolver *pairAMMResolver) *tokenPrepareAdapter {
+	return &tokenPrepareAdapter{
+		isCB:     true, // dynamic path derives the side per-pair via SideForSigner
+		resolver: resolver,
+	}
+}
+
 // MintAndApproveForAMM mints `amount` of poolPair's `side` token to the signer,
 // then approves that pair's AMM to spend it. (FR-018; dynamic per-pair)
 func (a *tokenPrepareAdapter) MintAndApproveForAMM(ctx context.Context, poolPair, side, amount string) error {
