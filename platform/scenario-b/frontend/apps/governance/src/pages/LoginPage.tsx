@@ -24,10 +24,10 @@ import { useAuthStore } from "../stores";
 import { hasGovernanceAccess } from "../auth/authorization";
 
 const schema = z.object({
-  clientId: z.string().min(3, "Client ID must be at least 3 characters"),
+  clientId: z.string().min(3, "Username must be at least 3 characters"),
   clientSecret: z
     .string()
-    .min(6, "Client Secret must be at least 6 characters"),
+    .min(6, "Password must be at least 6 characters"),
 });
 
 type LoginForm = z.infer<typeof schema>;
@@ -118,7 +118,7 @@ export function LoginPage() {
           <CardContent>
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="clientId">Client ID</Label>
+                <Label htmlFor="clientId">Username</Label>
                 <Input
                   id="clientId"
                   {...form.register("clientId")}
@@ -132,7 +132,7 @@ export function LoginPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="clientSecret">Client Secret</Label>
+                <Label htmlFor="clientSecret">Password</Label>
                 <Input
                   id="clientSecret"
                   type="password"

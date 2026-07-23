@@ -23,8 +23,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores";
 
 const schema = z.object({
-  clientId: z.string().min(3, "Client ID must be at least 3 characters"),
-  clientSecret: z.string().min(6, "Client secret must be at least 6 characters"),
+  clientId: z.string().min(3, "Username must be at least 3 characters"),
+  clientSecret: z.string().min(6, "Password must be at least 6 characters"),
 });
 
 type LoginForm = z.infer<typeof schema>;
@@ -100,18 +100,18 @@ export function LoginPage() {
               <Building2 className="h-5 w-5" />
             </div>
             <CardTitle>Sign in to Treasury Portal</CardTitle>
-            <CardDescription>Use institutional client credentials to access treasury operations.</CardDescription>
+            <CardDescription>Use institutional credentials to access treasury operations.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="clientId">Client ID</Label>
+                <Label htmlFor="clientId">Username</Label>
                 <Input id="clientId" {...form.register("clientId")} autoComplete="username" />
                 {form.formState.errors.clientId ? <p className="text-xs text-destructive">{form.formState.errors.clientId.message}</p> : null}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="clientSecret">Client Secret</Label>
+                <Label htmlFor="clientSecret">Password</Label>
                 <Input id="clientSecret" type="password" {...form.register("clientSecret")} autoComplete="current-password" />
                 {form.formState.errors.clientSecret ? <p className="text-xs text-destructive">{form.formState.errors.clientSecret.message}</p> : null}
               </div>
