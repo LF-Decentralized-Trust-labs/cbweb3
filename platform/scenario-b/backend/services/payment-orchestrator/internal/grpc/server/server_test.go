@@ -154,12 +154,15 @@ func setupTestEnvFull(t *testing.T, fiat *mockFiat, token *mockToken) *testEnv {
 		token = &mockToken{balance: "1000000"}
 	}
 
-	grpcServer := server.New(server.Config{
+	grpcServer, newErr := server.New(server.Config{
 		Token:  token,
 		Relay:  noopRelay{},
 		Fiat:   fiatPort,
 		Logger: logger,
 	})
+	if newErr != nil {
+		t.Fatalf("server.New: %v", newErr)
+	}
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

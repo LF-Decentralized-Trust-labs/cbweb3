@@ -71,7 +71,10 @@ func main() {
 		}
 	}
 
-	grpcServer := server.New(repo, ca, bc)
+	grpcServer, err := server.New(repo, ca, bc)
+	if err != nil {
+		log.Fatalf("compliance: configure gRPC server: %v", err)
+	}
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
 	if err != nil {

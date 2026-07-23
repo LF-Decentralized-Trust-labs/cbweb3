@@ -151,7 +151,7 @@ func main() {
 	}
 	logger.Info("fx expiry check interval configured", "seconds", fxExpiryCheckIntervalU)
 
-	grpcServer := server.New(server.Config{
+	grpcServer, err := server.New(server.Config{
 		Token:           token,
 		Fiat:            fiatToken,
 		Relay:           relay,
@@ -161,6 +161,9 @@ func main() {
 		RateTolPct:      rateTolPct,
 		Logger:          logger,
 	})
+	if err != nil {
+		log.Fatalf("FATAL: configure gRPC server: %v", err)
+	}
 
 	expiryWorker := workers.NewFXExpirationWorker(fxRepo, time.Duration(fxExpiryCheckIntervalU)*time.Second, logger) // #nosec G115 -- interval parsed from config as bounded positive uint64, fits int64
 	ctx, cancel := context.WithCancel(context.Background())

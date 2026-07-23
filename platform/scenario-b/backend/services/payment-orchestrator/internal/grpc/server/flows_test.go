@@ -32,7 +32,10 @@ func setupFlowEnv(t *testing.T, cfg server.Config) *flowEnv {
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg.Relay = noopRelay{}
 
-	grpcServer := server.New(cfg)
+	grpcServer, newErr := server.New(cfg)
+	if newErr != nil {
+		t.Fatalf("server.New: %v", newErr)
+	}
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)

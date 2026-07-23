@@ -17,6 +17,7 @@ import (
 	compliancepki "github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/pki"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/repository"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -35,14 +36,23 @@ type complianceService struct {
 
 // New builds a configured gRPC server with all compliance handlers.
 // bc may be nil; when nil, a NoopRegistryClient is used (dev/test mode).
-func New(repo repository.Repository, ca *compliancepki.CA, bc registry.RegistryWriter) *grpc.Server {
+//
+// R2-H-8: the server installs authorization interceptors (and mutual TLS when the
+// GRPC_MTLS_* env vars are set). It defaults to audit mode over the existing
+// transport; set GRPC_AUTHZ_ENFORCE to reject unauthenticated callers. An error
+// is returned only when TLS material is misconfigured.
+func New(repo repository.Repository, ca *compliancepki.CA, bc registry.RegistryWriter) (*grpc.Server, error) {
 	if bc == nil {
 		bc = registry.NoopRegistryClient{}
 	}
 	svc := &complianceService{repo: repo, ca: ca, blockchain: bc}
-	grpcServer := grpc.NewServer()
+	serverOpts, err := authz.ServerOptionsFromEnv(nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("configure gRPC security: %w", err)
+	}
+	grpcServer := grpc.NewServer(serverOpts...)
 	compliancv1.RegisterComplianceServiceServer(grpcServer, svc)
-	return grpcServer
+	return grpcServer, nil
 }
 
 // --- Participant ---
@@ -345,7 +355,7 @@ func (s *complianceService) ApproveKYC(ctx context.Context, req *compliancv1.App
 		"status": string(domain.StatusKYCApproved),
 		"reason": req.Reason,
 	})
-	s.emitAudit(ctx, "KYC_APPROVED", req.ActorSubject, "", req.Subject,
+	s.emitAudit(ctx, "KYC_APPROVED", actorForAudit(ctx, req.ActorSubject), "", req.Subject,
 		correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS",
 		string(domain.CategoryCredential), string(domain.SeverityInfo), string(detailsJSON))
 
@@ -460,10 +470,9 @@ func (s *complianceService) UpdateSystemParameters(ctx context.Context, req *com
 	if req.Reason == "" {
 		return nil, status.Error(codes.InvalidArgument, "reason is required")
 	}
-	actor := req.ActorSubject
-	if actor == "" {
-		actor = actorFromCtx(ctx)
-	}
+	// R2-H-8: prefer the authenticated caller identity over the payload actor,
+	// which is spoofable.
+	actor := actorForAudit(ctx, req.ActorSubject)
 
 	params := []repository.SystemParameter{
 		{Key: paramTxMinimum, Value: req.TransactionMinimum, UpdatedBy: actor},
@@ -528,13 +537,32 @@ func ipAddressFromCtx(ctx context.Context) string {
 	return ""
 }
 
+// actorFromCtx returns the caller identity for audit attribution. It prefers the
+// identity authenticated by the gRPC authz interceptor (mTLS peer certificate, or
+// the trusted metadata header in transitional mode); only when no authenticated
+// identity is present does it fall back to the legacy x-actor-subject header.
 func actorFromCtx(ctx context.Context) string {
+	if a := authz.Actor(ctx); a != "" {
+		return a
+	}
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		if vals := md.Get("x-actor-subject"); len(vals) > 0 {
 			return vals[0]
 		}
 	}
 	return ""
+}
+
+// actorForAudit derives the audit actor, preferring the authenticated caller
+// identity over any actor value supplied in the request payload. R2-H-8: the
+// payload actor is caller-controlled and therefore spoofable; it is used only as
+// a last-resort fallback during the pre-mTLS transition. Under enforcement + mTLS
+// the authenticated identity is always present, so the payload value is ignored.
+func actorForAudit(ctx context.Context, payloadActor string) string {
+	if a := actorFromCtx(ctx); a != "" {
+		return a
+	}
+	return payloadActor
 }
 
 func boolStr(b bool) string {

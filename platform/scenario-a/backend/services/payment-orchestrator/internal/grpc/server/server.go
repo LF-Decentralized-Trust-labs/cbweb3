@@ -19,6 +19,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/identity"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"github.com/ethereum/go-ethereum/common"
 	gethcrypto "github.com/ethereum/go-ethereum/crypto"
@@ -128,7 +129,14 @@ func New(cfg Config) (*grpc.Server, func(context.Context), error) {
 	if err := svc.loadHTLCsFromDB(context.Background()); err != nil {
 		return nil, nil, err
 	}
-	grpcServer := grpc.NewServer()
+	// R2-H-8: authenticate the caller and authorize the RPC. Defaults to audit
+	// mode + header identity over the existing transport; set GRPC_AUTHZ_ENFORCE
+	// and the GRPC_MTLS_* vars to enforce mutual TLS in production.
+	serverOpts, err := authz.ServerOptionsFromEnv(cfg.Logger, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("configure gRPC security: %w", err)
+	}
+	grpcServer := grpc.NewServer(serverOpts...)
 	pb.RegisterPaymentOrchestratorServiceServer(grpcServer, svc)
 	return grpcServer, svc.startRelayWorkers, nil
 }

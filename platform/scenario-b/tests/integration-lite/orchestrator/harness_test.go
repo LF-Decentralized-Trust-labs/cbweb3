@@ -90,13 +90,16 @@ func newOrchestratorEnv(t *testing.T) *orchestratorEnv {
 	fiat := &spyFiat{balance: "1000000"}
 	relay := &spyRelay{}
 
-	srv := server.New(server.Config{
+	srv, err := server.New(server.Config{
 		Token:      token,
 		Fiat:       fiat,
 		Relay:      relay,
 		EscrowRepo: newInMemEscrowRepo(),
 		Logger:     testLogger(),
 	})
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
 	conn := dialBufconn(t, srv)
 	return &orchestratorEnv{
 		client: pb.NewPaymentOrchestratorServiceClient(conn),

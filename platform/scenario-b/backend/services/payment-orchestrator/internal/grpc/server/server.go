@@ -15,6 +15,7 @@ import (
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/google/uuid"
@@ -25,8 +26,8 @@ import (
 
 type paymentOrchestratorService struct {
 	pb.UnimplementedPaymentOrchestratorServiceServer
-	token           ports.TCeBMPort              // on-chain tCeBM ERC-20 operations
-	fiat            ports.FiatTokenPort           // on-chain fCeBM ERC-20 operations
+	token           ports.TCeBMPort     // on-chain tCeBM ERC-20 operations
+	fiat            ports.FiatTokenPort // on-chain fCeBM ERC-20 operations
 	relay           ports.InteroperabilityPort
 	escrowRepo      ports.EscrowRepository        // escrow flow persistence
 	fxAgreementBesu ports.FXAgreementContractPort // FX agreement on Besu (optional)
@@ -40,8 +41,8 @@ type paymentOrchestratorService struct {
 
 // Config holds the dependencies for the gRPC server.
 type Config struct {
-	Token           ports.TCeBMPort              // tCeBM ERC-20 adapter (required for escrow/redeem)
-	Fiat            ports.FiatTokenPort           // fCeBM ERC-20 adapter (required for deposit approval)
+	Token           ports.TCeBMPort     // tCeBM ERC-20 adapter (required for escrow/redeem)
+	Fiat            ports.FiatTokenPort // fCeBM ERC-20 adapter (required for deposit approval)
 	Relay           ports.InteroperabilityPort
 	EscrowRepo      ports.EscrowRepository        // optional — nil disables escrow flow
 	FXAgreementBesu ports.FXAgreementContractPort // optional — nil disables Besu FXAgreement path
@@ -51,7 +52,11 @@ type Config struct {
 }
 
 // New builds a configured gRPC server with all payment-orchestrator handlers.
-func New(cfg Config) *grpc.Server {
+// R2-H-8: the returned server installs authorization interceptors (and mutual
+// TLS when the GRPC_MTLS_* env vars are set). It defaults to audit mode over the
+// existing transport; set GRPC_AUTHZ_ENFORCE to reject unauthenticated callers.
+// An error is returned only when TLS material is misconfigured.
+func New(cfg Config) (*grpc.Server, error) {
 	rateTol := cfg.RateTolPct
 	if rateTol <= 0 {
 		rateTol = 0.001 // default 0.1%
@@ -67,9 +72,13 @@ func New(cfg Config) *grpc.Server {
 		logger:          cfg.Logger,
 		fxAgreements:    make(map[string]*domain.FXAgreementRecord),
 	}
-	grpcServer := grpc.NewServer()
+	serverOpts, err := authz.ServerOptionsFromEnv(cfg.Logger, nil)
+	if err != nil {
+		return nil, fmt.Errorf("configure gRPC security: %w", err)
+	}
+	grpcServer := grpc.NewServer(serverOpts...)
 	pb.RegisterPaymentOrchestratorServiceServer(grpcServer, svc)
-	return grpcServer
+	return grpcServer, nil
 }
 
 func generateID() string {
