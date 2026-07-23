@@ -1,0 +1,57 @@
+# gitleaks configuration — cbweb3-platform
+#
+# Finding R2-11.3: secret-scan gate in CI.
+#
+# We extend the bundled default ruleset (do NOT replace it) and add a focused
+# allowlist so the gate stays useful while not blocking on the well-known
+# PUBLIC development keys that ship inside local-only Besu/Paladin templates and
+# `.env.*.example` files. None of the values below protect any real asset: they
+# are the canonical Besu dev-network keypairs and fixed local-CA/dev signers
+# used exclusively by `make *.up` local stacks. They must never be reused for
+# testnet or production, and production key material is delivered at runtime
+# (env/secret manager), never committed.
+
+title = "cbweb3-platform gitleaks config"
+
+[extend]
+# Inherit gitleaks' built-in rules (AWS, GCP, PEM private keys, generic
+# high-entropy secrets, etc.). The allowlist below only carves out documented
+# local-dev exceptions.
+useDefault = true
+
+[allowlist]
+description = "Public local-development keys and example env files (not real secrets)"
+
+# Files that, by design, contain public dev key material or placeholder secrets.
+# These are consumed only by local Docker Compose stacks.
+paths = [
+  # Besu QBFT local network config templates (nodeKey/privateKey per validator).
+  '''.*/config/configTemplate\.json$''',
+  # SPK-02 live-join spike genesis config (local dev validators).
+  '''.*/genesis-config\.json$''',
+  # Committed example env files — placeholders and public dev signer keys.
+  '''.*\.env\.example$''',
+  '''.*\.env\..*\.example$''',
+  # This config file itself lists the dev keys as allowlist entries.
+  '''\.gitleaks\.toml$''',
+]
+
+# Explicit public dev private keys known to appear across templates and the
+# docker-compose backend files. Listing them by value keeps the gate strict for
+# every OTHER 64-hex secret while silencing these documented false positives.
+# `8f2a5594...` and `f8f8a2f4...` are the canonical Besu dev-network keys.
+regexes = [
+  '''027c7c15318e6ad5155041943c7f2a047111e205813d6befd3bc6ecde7154f97''',
+  '''0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1''',
+  '''5b02fc9b19facc6de72b514a03db7f7fbd9f46b6ad6ffb24b8df575593ae87f1''',
+  '''808757b2a58565d728ad93093521bc6542fb3cf13a887669f7addf7a82ef085c''',
+  '''8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63''',
+  '''92f407740816a68b070375ff77002e3c44e577cfa4174be1ffabd7d74381b746''',
+  '''ad7f423fe95b75d2d5492ee3fd75d2eaa3e191779e0385b18eac14aa586e9f1e''',
+  '''ae6ae8e5ccbfb04590405997ee2d52d2b330726137b875053c36d94e974d162f''',
+  '''c87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3''',
+  '''c88b703fb08cbea894b6aeff5a544fb92e78a18e19814cd85da83b71f772aa6f''',
+  '''c93fa4edf409b4dc98d0982235f75ac4b9c72d970986474508a08adc3f7ab7a9''',
+  '''cd9cad007753ac89f39b72af18244e05b5fdc29b100b78b9bdd00a3946047c08''',
+  '''f8f8a2f43c8376ccb0871305060d7b27b0554d2cc72bccf41b2705608452f315''',
+]

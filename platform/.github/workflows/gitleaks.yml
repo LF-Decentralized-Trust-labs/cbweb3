@@ -1,0 +1,40 @@
+name: Secret Scan — gitleaks
+
+# Finding R2-11.3: secret-scan gate.
+# Must live DIRECTLY under .github/workflows/ (not a subfolder) so GitHub
+# Actions discovers it — see finding R2-11.2 / H-14.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  gitleaks:
+    name: gitleaks secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so pushes scan every new commit, not just the tip.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Pinned to the v2 major of the official action. The job FAILS (gate) when
+      # gitleaks exits non-zero, i.e. when a secret is detected. Configuration
+      # (default ruleset + local-dev allowlist) is read from .gitleaks.toml.
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: ${{ github.workspace }}/.gitleaks.toml
+          # Required only for GitHub Organizations by gitleaks-action v2. Set the
+          # GITLEAKS_LICENSE repo/org secret; free for public repos and individuals.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
