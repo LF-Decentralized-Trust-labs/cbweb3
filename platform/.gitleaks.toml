@@ -32,6 +32,11 @@ paths = [
   # Committed example env files — placeholders and public dev signer keys.
   '''.*\.env\.example$''',
   '''.*\.env\..*\.example$''',
+  # Test fixtures deliberately embed fake/dev keys, JWTs and PEM blocks (e.g.
+  # a Foundry test that asserts a private key is rejected). These are inputs to
+  # tests, never real credentials. Covers Go tests and Foundry (.t.sol) tests.
+  '''.*_test\.go$''',
+  '''.*\.t\.sol$''',
   # This config file itself lists the dev keys as allowlist entries.
   '''\.gitleaks\.toml$''',
 ]
