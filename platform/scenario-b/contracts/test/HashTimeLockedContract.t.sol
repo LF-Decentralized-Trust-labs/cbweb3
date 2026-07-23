@@ -175,6 +175,28 @@ contract HashTimeLockedContractTest is Test {
         htlc.refund(nonExistingContractId);
     }
 
+    function test_Revert_Refund_NotSender() public {
+        // R2-H-1: only the original lock sender may trigger the refund. A third
+        // party calling refund() after expiry must revert, otherwise the public
+        // coordination layer can be desynchronized from the private Zeto layer.
+        vm.prank(sender);
+        htlc.lock(contractId, receiver, hashLock, timeLock, zetoLockRef, bytes32(0));
+
+        vm.warp(timeLock + 1 seconds);
+
+        address attacker = makeAddr("refundAttacker");
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSelector(IHashTimeLockedContract.HTLC__NotSender.selector, attacker));
+        htlc.refund(contractId);
+
+        // Control: the original sender can still refund after the third-party attempt.
+        vm.prank(sender);
+        htlc.refund(contractId);
+
+        HashTimeLockedContractLibrary.LockDetails memory details = htlc.getLockDetails(contractId);
+        assertEq(uint256(details.state), uint256(HashTimeLockedContractLibrary.HTLCState.REFUNDED));
+    }
+
     function test_Revert_Lock_UnverifiedSender() public {
         address unverified = makeAddr("unverifiedSender");
         bytes32 newContractId = keccak256("FX_AGREEMENT_UNVERIFIED_SENDER");

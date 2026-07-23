@@ -30,6 +30,7 @@ interface IHashTimeLockedContract {
     error HTLC__InvalidSecret();
     error HTLC__TimeLockNotExpired();
     error HTLC__TimeLockExpired();
+    error HTLC__NotSender(address caller);
     error HTLC__ParticipantNotVerified(address account);
     error HTLC__AgreementNotAccepted();
     error HTLC__AgreementExpired();

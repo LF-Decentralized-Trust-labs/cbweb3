@@ -134,6 +134,13 @@ contract HashTimeLockedContract is IHashTimeLockedContract {
             revert HTLC__TimeLockNotExpired();
         }
 
+        // R2-H-1: restrict refund to the original lock sender. Without this gate any
+        // address could trigger the refund after expiry, desynchronizing this public
+        // coordination layer from the private Zeto lock/unlock on the Paladin sidecar.
+        if (msg.sender != lockDetails.sender) {
+            revert HTLC__NotSender(msg.sender);
+        }
+
         lockDetails.state = HashTimeLockedContractLibrary.HTLCState.REFUNDED;
 
         emit LogHTLCRefunded(contractId);
