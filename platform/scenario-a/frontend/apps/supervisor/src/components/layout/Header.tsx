@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Button, Badge, PlatformLogo, goToLauncher } from "@cbweb3/ui";
+import { Button, Badge, BackToLauncherButton, PlatformLogo, goToLauncher } from "@cbweb3/ui";
 import { useAuthStore, useWebsocketStore } from "../../stores";
 
 export function Header() {
@@ -22,6 +22,7 @@ export function Header() {
       <div className="flex items-center gap-3">
         <Badge variant={connected ? "success" : "destructive"}>{connected ? "SSE Connected" : "SSE Disconnected"}</Badge>
         <span className="text-xs text-muted-foreground">Alerts: {alerts.length}</span>
+        <BackToLauncherButton />
         <Button variant="ghost" onClick={() => void logout().then(() => goToLauncher())}>
           Logout
         </Button>

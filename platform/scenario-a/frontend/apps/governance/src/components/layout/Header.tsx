@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Badge, Button, PlatformLogo, goToLauncher } from "@cbweb3/ui";
+import { Badge, BackToLauncherButton, Button, PlatformLogo, goToLauncher } from "@cbweb3/ui";
 import { useNavigate } from "react-router-dom";
 import { useAuth, useCircuitBreaker } from "../../hooks";
 
@@ -32,6 +32,7 @@ export function Header() {
             Circuit Breaker: {circuitBreaker?.state ?? "LIVE"}
           </Badge>
           <span className="text-xs text-muted-foreground">{profile?.subject ?? "Unknown operator"}</span>
+          <BackToLauncherButton />
           <Button variant="ghost" size="sm" onClick={() => void onLogout()}>
             Sign out
           </Button>

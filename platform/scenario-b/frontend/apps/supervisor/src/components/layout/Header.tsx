@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Button, PlatformLogo, goToLauncher } from "@cbweb3/ui";
+import { BackToLauncherButton, Button, PlatformLogo, goToLauncher } from "@cbweb3/ui";
 import { useAuthStore } from "../../stores";
 
 export function Header() {
@@ -17,9 +17,12 @@ export function Header() {
             <p className="text-xs text-muted-foreground">Institution: {user?.institutionName ?? "-"}</p>
           </div>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => void logout().then(() => goToLauncher())}>
-          Sign out
-        </Button>
+        <div className="flex items-center gap-3">
+          <BackToLauncherButton />
+          <Button variant="ghost" size="sm" onClick={() => void logout().then(() => goToLauncher())}>
+            Sign out
+          </Button>
+        </div>
       </div>
     </header>
   );
