@@ -27,12 +27,22 @@ contract AutomatedMarketMakerTest is Test {
     address public admin = makeAddr("admin");
     address public centralBank = makeAddr("centralBank");
     address public governance = makeAddr("governance");
+    address public governance2 = makeAddr("governance2");
     address public liquidityProvider = makeAddr("liquidityProvider");
     address public swapper = makeAddr("swapper");
 
     /// @notice Default amounts for test scenarios
     uint256 public constant INITIAL_LIQUIDITY = 100_000 * 10 ** 18;
     uint256 public constant SWAPPER_BALANCE = 10_000 * 10 ** 18;
+
+    /// @notice Default swap fee (0.3%) charged by the ported fee model.
+    uint256 public constant FEE_BPS = 30;
+
+    /// @dev Grosses up a pre-fee constant-product input by the swap fee, mirroring the contract:
+    ///      grossIn = (preFeeIn * 10000) / (10000 - feeBps) + 1. The fee stays in the reserves.
+    function _grossIn(uint256 preFeeIn) internal pure returns (uint256) {
+        return (preFeeIn * 10000) / (10000 - FEE_BPS) + 1;
+    }
 
     /// @notice Deploys and configures test fixtures for AMM flows.
     /// @dev Mints tokens to liquidity provider and swapper, sets allowances for the AMM contract.
@@ -52,6 +62,9 @@ contract AutomatedMarketMakerTest is Test {
         );
         identityRegistry.registerParticipant(
             governance, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
+        );
+        identityRegistry.registerParticipant(
+            governance2, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
         vm.stopPrank();
 
@@ -123,8 +136,10 @@ contract AutomatedMarketMakerTest is Test {
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
 
         uint256 amountOutDesired = 1_000 * 10 ** 18;
-        uint256 calculatedAmountIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
-        uint256 maxAmountIn = calculatedAmountIn;
+        uint256 preFeeAmountIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
+        /// @dev With the 0.3% fee, the user pays the grossed-up input; the fee remains in the reserves.
+        uint256 expectedGrossIn = _grossIn(preFeeAmountIn);
+        uint256 maxAmountIn = expectedGrossIn;
 
         uint256 swapperBalanceBef = tokenA.balanceOf(swapper);
         uint256 swapperBalanceOutBef = tokenB.balanceOf(swapper);
@@ -135,7 +150,8 @@ contract AutomatedMarketMakerTest is Test {
             amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOutDesired, maxAmountIn, swapper);
 
         /// @dev Assertions
-        assertEq(actualIn, calculatedAmountIn, "Amount In mismatch");
+        assertEq(actualIn, expectedGrossIn, "Amount In mismatch");
+        assertGt(actualIn, preFeeAmountIn, "Gross input must exceed the pre-fee input");
         assertEq(tokenA.balanceOf(swapper), swapperBalanceBef - actualIn, "Sender TokenA balance incorrect");
         assertEq(tokenB.balanceOf(swapper), swapperBalanceOutBef + amountOutDesired, "Sender TokenB balance incorrect");
         assertEq(amm.reserveA(), INITIAL_LIQUIDITY + actualIn, "ReserveA not updated");
@@ -148,16 +164,15 @@ contract AutomatedMarketMakerTest is Test {
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
 
         uint256 amountOutDesired = 1_000 * 10 ** 18;
-        uint256 calculatedAmountIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
+        uint256 preFeeAmountIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
+        uint256 expectedGrossIn = _grossIn(preFeeAmountIn);
 
-        /// @dev Simulate user only accepting less than market requires
-        uint256 maxAmountIn = calculatedAmountIn - 1;
+        /// @dev Simulate user only accepting less than the fee-inclusive market price
+        uint256 maxAmountIn = expectedGrossIn - 1;
 
         vm.prank(swapper);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                IAutomatedMarketMaker.AMM__SlippageExceeded.selector, calculatedAmountIn, maxAmountIn
-            )
+            abi.encodeWithSelector(IAutomatedMarketMaker.AMM__SlippageExceeded.selector, expectedGrossIn, maxAmountIn)
         );
         amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOutDesired, maxAmountIn, swapper);
     }
@@ -169,45 +184,151 @@ contract AutomatedMarketMakerTest is Test {
         amm.swapTokensForExactTokens(address(tokenA), address(tokenA), 100, 100, swapper);
     }
 
-    /// @dev Test that circuit breaker pauses the contract successfully.
-    function test_CircuitBreaker_Pause_Success() public {
-        /// @dev Pause the contract using the governance account
+    /// @dev Circuit breaker pause is a 1-of-N fail-safe: a single Central Bank can pause everything.
+    function test_CircuitBreaker_Pause_ByOneGovernor() public {
         vm.prank(governance);
-        amm.setPause(true);
+        amm.pause("liquidity anomaly");
 
-        assertTrue(amm.paused());
+        assertTrue(amm.paused(), "AMM should be paused");
+        assertTrue(amm.isPaused(), "isPaused() should mirror paused()");
 
-        /// @dev Attempting to add liquidity should fail with OpenZeppelin's EnforcedPause error
+        /// @dev Attempting to add liquidity should fail while paused.
         vm.prank(liquidityProvider);
         vm.expectRevert();
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
     }
 
-    /// @dev Test that circuit breaker unpauses the contract successfully.
-    function test_CircuitBreaker_Unpause_Success() public {
-        /// @dev First pause the contract
-        vm.startPrank(governance);
-        amm.setPause(true);
-        assertTrue(amm.paused());
+    /// @dev Only governance-capable participants may pause (swapper is COMMERCIAL_BANK).
+    function test_Revert_CircuitBreaker_Pause_Unauthorized() public {
+        vm.prank(swapper);
+        vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__NotGovernance.selector, swapper));
+        amm.pause("unauthorized attempt");
+    }
 
-        /// @dev Then unpause it
-        amm.setPause(false);
-        vm.stopPrank();
+    /// @dev A single governor CANNOT resume: proposing a resume alone leaves the AMM paused (quorum = 2).
+    function test_Revert_SingleGovernor_CannotResume() public {
+        vm.prank(governance);
+        amm.pause("halt");
 
-        assertFalse(amm.paused());
+        vm.prank(governance);
+        bytes32 proposalId = amm.proposeResume();
 
-        /// @dev Verify operations work again
+        /// @dev One signature is not enough — the breaker stays engaged.
+        assertTrue(amm.paused(), "AMM must remain paused with only one signature");
+        assertEq(amm.resumeSignatures(proposalId), 1, "Proposal should carry the proposer's single signature");
+        assertEq(amm.resumeQuorum(), 2, "Resume quorum must be 2-of-N");
+    }
+
+    /// @dev Resume requires a SECOND distinct governor to sign; quorum (2) auto-resumes the AMM.
+    function test_CircuitBreaker_Resume_RequiresTwoSignatures() public {
+        vm.prank(governance);
+        amm.pause("halt");
+
+        vm.prank(governance);
+        bytes32 proposalId = amm.proposeResume();
+        assertTrue(amm.paused(), "Still paused after first signature");
+
+        /// @dev Second, distinct Central Bank signs → quorum reached → AMM resumes.
+        vm.prank(governance2);
+        amm.signResume(proposalId);
+
+        assertFalse(amm.paused(), "AMM should resume once quorum is reached");
+        assertEq(amm.resumeSignatures(proposalId), 2, "Proposal should hold two signatures");
+
+        /// @dev Operations work again after resume.
         vm.prank(liquidityProvider);
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
         assertEq(amm.reserveA(), INITIAL_LIQUIDITY);
     }
 
-    /// @dev Test that circuit breaker reverts when called by unauthorised account.
-    function test_Revert_CircuitBreaker_Unauthorized() public {
-        /// @dev Attempt to pause with a non-governance account (swapper is COMMERCIAL_BANK)
+    /// @dev The same governor cannot sign a resume proposal twice (no self-quorum).
+    function test_Revert_Resume_DoubleSignBySameGovernor() public {
+        vm.prank(governance);
+        amm.pause("halt");
+
+        vm.prank(governance);
+        bytes32 proposalId = amm.proposeResume();
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAutomatedMarketMaker.AMM__AlreadySigned.selector, proposalId, governance)
+        );
+        amm.signResume(proposalId);
+
+        assertTrue(amm.paused(), "AMM must remain paused; a governor cannot form quorum alone");
+    }
+
+    /// @dev Signing a non-existent proposal reverts.
+    function test_Revert_SignResume_ProposalNotFound() public {
+        vm.prank(governance);
+        amm.pause("halt");
+
+        bytes32 bogus = keccak256("does-not-exist");
+        vm.prank(governance2);
+        vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__ProposalNotFound.selector, bogus));
+        amm.signResume(bogus);
+    }
+
+    /// @dev A non-governance account cannot propose a resume.
+    function test_Revert_ProposeResume_Unauthorized() public {
+        vm.prank(governance);
+        amm.pause("halt");
+
         vm.prank(swapper);
         vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__NotGovernance.selector, swapper));
-        amm.setPause(true);
+        amm.proposeResume();
+    }
+
+    // ============================================================================
+    //                       FEE MODEL (0.3% swap fee)
+    // ============================================================================
+
+    /// @dev The swap fee accumulates inside the pool: reserves (and k) grow by the full gross input,
+    ///      including the fee portion, so LPs earn the fee.
+    function test_Swap_FeeAccumulatesInPool() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        assertEq(amm.feeBps(), FEE_BPS, "Default fee should be 0.3%");
+
+        uint256 amountOutDesired = 1_000 * 10 ** 18;
+        uint256 preFeeAmountIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
+        uint256 expectedGrossIn = _grossIn(preFeeAmountIn);
+        uint256 feePortion = expectedGrossIn - preFeeAmountIn;
+
+        uint256 kBefore = amm.reserveA() * amm.reserveB();
+
+        vm.prank(swapper);
+        uint256 actualIn =
+            amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOutDesired, expectedGrossIn, swapper);
+
+        /// @dev The full gross input (fee included) is pulled into the reserves.
+        assertEq(actualIn, expectedGrossIn, "Swapper must pay the fee-inclusive input");
+        assertGt(feePortion, 0, "Fee portion must be non-zero at 0.3%");
+        assertEq(amm.reserveA(), INITIAL_LIQUIDITY + expectedGrossIn, "Fee must accrue into reserveA");
+        assertEq(tokenA.balanceOf(address(amm)), INITIAL_LIQUIDITY + expectedGrossIn, "Pool balance must hold the fee");
+
+        /// @dev k strictly increases because the fee stays in the pool.
+        uint256 kAfter = amm.reserveA() * amm.reserveB();
+        assertGt(kAfter, kBefore, "Constant-product k must grow as the fee accrues");
+    }
+
+    /// @dev Governance can update the fee rate; a non-governance caller cannot.
+    function test_SetFeeBps_GovernanceOnly() public {
+        vm.prank(governance);
+        amm.setFeeBps(50);
+        assertEq(amm.feeBps(), 50, "Fee should update to 0.5%");
+
+        vm.prank(swapper);
+        vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__NotGovernance.selector, swapper));
+        amm.setFeeBps(10);
+    }
+
+    /// @dev The fee rate is capped at MAX_FEE_BPS (10%).
+    function test_Revert_SetFeeBps_TooHigh() public {
+        vm.prank(governance);
+        vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__FeeBpsTooHigh.selector, 1001, 1000));
+        amm.setFeeBps(1001);
     }
 
     /// @dev Test that swap reverts when amountOut is zero.
@@ -227,8 +348,9 @@ contract AutomatedMarketMakerTest is Test {
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
 
         uint256 amountOutDesired = 1_000 * 10 ** 18;
-        uint256 calculatedAmountIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
-        uint256 maxAmountIn = calculatedAmountIn;
+        uint256 preFeeAmountIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
+        uint256 expectedGrossIn = _grossIn(preFeeAmountIn);
+        uint256 maxAmountIn = expectedGrossIn;
 
         uint256 swapperBalanceBBef = tokenB.balanceOf(swapper);
         uint256 swapperBalanceABef = tokenA.balanceOf(swapper);
@@ -239,7 +361,7 @@ contract AutomatedMarketMakerTest is Test {
             amm.swapTokensForExactTokens(address(tokenB), address(tokenA), amountOutDesired, maxAmountIn, swapper);
 
         /// @dev Assertions
-        assertEq(actualIn, calculatedAmountIn, "Amount In mismatch");
+        assertEq(actualIn, expectedGrossIn, "Amount In mismatch");
         assertEq(tokenB.balanceOf(swapper), swapperBalanceBBef - actualIn, "Sender TokenB balance incorrect");
         assertEq(tokenA.balanceOf(swapper), swapperBalanceABef + amountOutDesired, "Sender TokenA balance incorrect");
         assertEq(amm.reserveB(), INITIAL_LIQUIDITY + actualIn, "ReserveB not updated");

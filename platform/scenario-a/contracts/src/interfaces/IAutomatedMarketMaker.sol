@@ -12,6 +12,21 @@ interface IAutomatedMarketMaker {
         address indexed user, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut
     );
 
+    /// @notice Emitted when a Central Bank triggers the Circuit Breaker pause (1-of-N).
+    event LogCircuitBreakerPaused(address indexed pausedBy, uint256 timestamp, string reason);
+
+    /// @notice Emitted when a Central Bank proposes to resume operations.
+    event LogResumeProposed(bytes32 indexed proposalId, address indexed proposedBy, uint256 timestamp);
+
+    /// @notice Emitted when a Central Bank signs a resume proposal.
+    event LogResumeSigned(bytes32 indexed proposalId, address indexed signer, uint256 signaturesCount);
+
+    /// @notice Emitted when a resume proposal reaches quorum (2-of-N) and operations restart.
+    event LogCircuitBreakerResumed(bytes32 indexed proposalId, uint256 timestamp);
+
+    /// @notice Emitted when the swap fee rate is updated by governance.
+    event LogFeeRateUpdated(uint256 oldFeeBps, uint256 newFeeBps);
+
     /// @dev Custom errors for exact-output pricing and pool interactions.
     error AMM__ZeroAddress();
     error AMM__ZeroAmount();
@@ -21,6 +36,12 @@ interface IAutomatedMarketMaker {
     error AMM__SlippageExceeded(uint256 requiredAmountIn, uint256 maxAmountIn);
     error AMM__ParticipantNotVerified(address account);
     error AMM__NotGovernance(address account);
+    /// @dev Resume proposal id has never been created (or was mistyped).
+    error AMM__ProposalNotFound(bytes32 proposalId);
+    /// @dev The signer has already signed this resume proposal (no self-quorum).
+    error AMM__AlreadySigned(bytes32 proposalId, address signer);
+    /// @dev New fee value exceeds the allowed maximum (1000 = 10%).
+    error AMM__FeeBpsTooHigh(uint256 provided, uint256 max);
 
     /// @notice Adds initial or subsequent liquidity to the pool.
     /// @param amountA The amount of token A to add.
@@ -52,4 +73,38 @@ interface IAutomatedMarketMaker {
         external
         pure
         returns (uint256 amountIn);
+
+    // ============================================================================
+    //                    ASYMMETRIC CIRCUIT BREAKER (FR-043 / FR-044)
+    // ============================================================================
+
+    /// @notice Emergency pause invoked by a single Central Bank (1-of-N fail-safe).
+    /// @param reason Free-text justification recorded on-chain for auditability.
+    function pause(string calldata reason) external;
+
+    /// @notice Propose a resume action; creates a proposal awaiting 2-of-N signatures.
+    /// @return proposalId The identifier of the created resume proposal (proposer counts as 1 signature).
+    function proposeResume() external returns (bytes32 proposalId);
+
+    /// @notice Central Bank signs a resume proposal; auto-executes resume when quorum is reached.
+    function signResume(bytes32 proposalId) external;
+
+    /// @notice Returns the current pause state of the AMM.
+    function isPaused() external view returns (bool);
+
+    /// @notice Returns the minimum quorum required to resume operations (2-of-N).
+    function resumeQuorum() external view returns (uint256);
+
+    /// @notice Returns the number of signatures collected for a resume proposal.
+    function resumeSignatures(bytes32 proposalId) external view returns (uint256);
+
+    // ============================================================================
+    //                       FEE MODEL (governance-configurable)
+    // ============================================================================
+
+    /// @notice Returns the current swap fee rate in basis points (default 30 = 0.3%).
+    function feeBps() external view returns (uint256);
+
+    /// @notice Updates the swap fee rate. Restricted to governance. Max 1000 (10%).
+    function setFeeBps(uint256 newFeeBps) external;
 }
