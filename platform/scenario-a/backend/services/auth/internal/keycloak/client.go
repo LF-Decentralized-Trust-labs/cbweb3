@@ -99,6 +99,13 @@ func (c *keycloakClient) certsURL() string {
 	return fmt.Sprintf("%s/realms/%s/protocol/openid-connect/certs", c.cfg.BaseURL, c.cfg.Realm)
 }
 
+// issuerURL returns the expected "iss" claim for tokens minted by this realm.
+// Keycloak sets iss to "{BaseURL}/realms/{Realm}", so it is derived from config
+// rather than configured separately.
+func (c *keycloakClient) issuerURL() string {
+	return fmt.Sprintf("%s/realms/%s", c.cfg.BaseURL, c.cfg.Realm)
+}
+
 // Login authenticates and returns tokens.
 //
 // Login authenticates a human operator via the OIDC Resource Owner Password
@@ -175,9 +182,18 @@ func (c *keycloakClient) ValidateToken(ctx context.Context, accessToken string) 
 		return c.rsaKeyForKID(ctx, kid)
 	}
 
-	token, err := jwt.Parse(accessToken, keyFunc,
+	// Enforce issuer and audience in addition to the signing method. The
+	// issuer is always checked against the realm URL; the audience is checked
+	// only when configured (empty audience disables that specific check).
+	parseOpts := []jwt.ParserOption{
 		jwt.WithValidMethods([]string{"RS256"}),
-	)
+		jwt.WithIssuer(c.issuerURL()),
+	}
+	if aud := strings.TrimSpace(c.cfg.Audience); aud != "" {
+		parseOpts = append(parseOpts, jwt.WithAudience(aud))
+	}
+
+	token, err := jwt.Parse(accessToken, keyFunc, parseOpts...)
 	if err != nil {
 		return domain.TokenClaims{}, fmt.Errorf("keycloak: invalid token: %w", err)
 	}

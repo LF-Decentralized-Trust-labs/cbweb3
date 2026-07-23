@@ -47,6 +47,7 @@ func main() {
 		Realm:          getEnv("KEYCLOAK_REALM", "cbweb3"),
 		ClientID:       getEnv("KEYCLOAK_CLIENT_ID", "cbweb3-auth"),
 		ClientSecret:   getEnv("KEYCLOAK_CLIENT_SECRET", ""),
+		Audience:       getEnv("KEYCLOAK_AUDIENCE", getEnv("KEYCLOAK_CLIENT_ID", "cbweb3-auth")),
 		JWKSCacheTTL:   time.Duration(getEnvInt("KEYCLOAK_JWKS_CACHE_TTL_SEC", 300)) * time.Second,
 		RequestTimeout: time.Duration(getEnvInt("KEYCLOAK_REQUEST_TIMEOUT_SEC", 10)) * time.Second,
 	})

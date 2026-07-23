@@ -40,10 +40,16 @@ type jwksResponse struct {
 
 // Config holds connection parameters for the Keycloak client.
 type Config struct {
-	BaseURL        string
-	Realm          string
-	ClientID       string
-	ClientSecret   string
+	BaseURL      string
+	Realm        string
+	ClientID     string
+	ClientSecret string
+	// Audience is the expected value of the "aud" claim on access tokens
+	// validated by ValidateToken. When empty, audience validation is skipped;
+	// callers should set it (typically to the OIDC client ID) so tokens minted
+	// for a different client are rejected. The expected issuer is derived from
+	// BaseURL + Realm and is always enforced.
+	Audience       string
 	JWKSCacheTTL   time.Duration
 	RequestTimeout time.Duration
 }
