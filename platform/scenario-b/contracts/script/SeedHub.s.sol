@@ -129,7 +129,10 @@ contract SeedHub is Script {
             console.log("[Hub] Already registered:", name);
             return;
         }
+        // Two-step onboarding: register (Pending) then verify (Pending -> Verified). The admin
+        // broadcast key holds both GOVERNANCE_ROLE and VERIFIER_ROLE in local dev.
         registry.registerParticipant(account, name, role, bytes32(0));
-        console.log("[Hub] Registered:", name);
+        registry.verifyParticipant(account);
+        console.log("[Hub] Registered and verified:", name);
     }
 }

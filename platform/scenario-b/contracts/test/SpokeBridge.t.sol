@@ -43,9 +43,11 @@ contract SpokeBridgeTest is Test {
         registry.registerParticipant(
             alice, "Alice Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        registry.verifyParticipant(alice);
         registry.registerParticipant(
             bob, "Bob Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        registry.verifyParticipant(bob);
         vm.stopPrank();
 
         // Deploy token

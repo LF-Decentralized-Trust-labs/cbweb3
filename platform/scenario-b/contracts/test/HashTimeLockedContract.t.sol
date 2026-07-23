@@ -44,9 +44,11 @@ contract HashTimeLockedContractTest is Test {
         identityRegistry.registerParticipant(
             sender, "Commercial Bank A", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(sender);
         identityRegistry.registerParticipant(
             receiver, "Commercial Bank B", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(receiver);
         vm.stopPrank();
 
         fxAgreement = new FXAgreement(address(identityRegistry));

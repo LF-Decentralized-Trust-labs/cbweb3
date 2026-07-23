@@ -44,12 +44,15 @@ contract FXAgreementTest is Test {
         identityRegistry.registerParticipant(
             counterpartyA, "Commercial Bank A", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(counterpartyA);
         identityRegistry.registerParticipant(
             counterpartyB, "Commercial Bank B", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(counterpartyB);
         identityRegistry.registerParticipant(
             centralBank, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(centralBank);
         vm.stopPrank();
 
         /// @dev 2. Deploy FXAgreement
@@ -545,10 +548,12 @@ contract FXAgreementTest is Test {
     ///      the second reverts. Settlement is applied at most once (idempotent under concurrency).
     function test_Revert_Settle_ConcurrentGovernors_OnlyFirstWins() public {
         address centralBankB = makeAddr("centralBankB");
-        vm.prank(admin);
+        vm.startPrank(admin);
         identityRegistry.registerParticipant(
             centralBankB, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(centralBankB);
+        vm.stopPrank();
 
         vm.prank(counterpartyA);
         fxAgreement.propose(

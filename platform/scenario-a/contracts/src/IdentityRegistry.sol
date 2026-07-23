@@ -12,18 +12,27 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
     /// @dev Internal storage mapping addresses to their institutional profiles.
     mapping(address => IdentityRegistryLibrary.Participant) private _participants;
 
-    /// @notice Role definition for governance administrators (Central Banks).
+    /// @notice Role definition for governance administrators (Central Banks) who register participants.
     bytes32 public constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");
 
+    /// @notice Role definition for compliance authorities who verify (approve) registered participants.
+    /// @dev Separation of duties: registration (GOVERNANCE_ROLE) and verification (VERIFIER_ROLE) are
+    ///      distinct roles so the entity that onboards a participant is not necessarily the one that
+    ///      approves it for transacting. In production these SHOULD be held by different entities. The
+    ///      bootstrap admin is granted both so single-operator/local-dev flows keep working.
+    bytes32 public constant VERIFIER_ROLE = keccak256("VERIFIER_ROLE");
+
     /// @notice Initializes the registry and assigns the primary administrator.
-    /// @param admin The address granted initial governance and admin rights.
+    /// @param admin The address granted initial governance, verifier and admin rights.
     constructor(address admin) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(GOVERNANCE_ROLE, admin);
+        _grantRole(VERIFIER_ROLE, admin);
     }
 
     /// @inheritdoc IIdentityRegistry
-    /// @dev Registration is restricted to GOVERNANCE_ROLE holders.
+    /// @dev Registration is restricted to GOVERNANCE_ROLE holders. The participant is created in
+    ///      the Pending state; a separate verifyParticipant call is required before it can transact.
     function registerParticipant(
         address account,
         string calldata name,
@@ -47,13 +56,29 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
         _participants[account] = IdentityRegistryLibrary.Participant({
             legalName: name,
             role: role,
-            status: IdentityRegistryLibrary.KycStatus.Verified,
+            status: IdentityRegistryLibrary.KycStatus.Pending,
             zkPointer: zkPointer,
             certFingerprint: bytes32(0),
             lastUpdate: 0
         });
 
         emit ParticipantRegistered(account, role, name);
+    }
+
+    /// @inheritdoc IIdentityRegistry
+    /// @dev Step 2 of onboarding. Restricted to VERIFIER_ROLE holders (distinct from the
+    ///      GOVERNANCE_ROLE that registers). Only a Pending participant may be verified.
+    function verifyParticipant(address account) external override onlyRole(VERIFIER_ROLE) {
+        if (_participants[account].status != IdentityRegistryLibrary.KycStatus.Pending) {
+            revert ParticipantNotPending(account);
+        }
+        _participants[account].status = IdentityRegistryLibrary.KycStatus.Verified;
+        // lastUpdate deliberately not written: block.timestamp is nondeterministic across
+        // Pente endorsers (see registerParticipant). Audit time is in the IdentityUpdated event.
+
+        emit IdentityUpdated(
+            account, IdentityRegistryLibrary.KycStatus.Pending, IdentityRegistryLibrary.KycStatus.Verified
+        );
     }
 
     /// @inheritdoc IIdentityRegistry

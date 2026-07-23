@@ -106,13 +106,17 @@ contract RegisterParticipants is Script {
                 console.log("Already registered:", participants[i].name, participants[i].account);
                 continue;
             }
+            // Two-step onboarding: registerParticipant creates the participant in Pending;
+            // verifyParticipant (VERIFIER_ROLE) promotes it to Verified so canTransact returns true.
+            // The ADMIN key holds both GOVERNANCE_ROLE and VERIFIER_ROLE in local dev.
             registry.registerParticipant(
                 participants[i].account,
                 participants[i].name,
                 participants[i].role,
                 keccak256(abi.encodePacked("local_dev_", participants[i].name))
             );
-            console.log("Registered:", participants[i].name, participants[i].account);
+            registry.verifyParticipant(participants[i].account);
+            console.log("Registered and verified:", participants[i].name, participants[i].account);
         }
 
         vm.stopBroadcast();
@@ -139,7 +143,8 @@ contract RegisterParticipants is Script {
                 participants[i].role,
                 keccak256(abi.encodePacked("hub_local_dev_", participants[i].name))
             );
-            console.log("[Hub] Registered:", participants[i].name, participants[i].account);
+            hubRegistry.verifyParticipant(participants[i].account);
+            console.log("[Hub] Registered and verified:", participants[i].name, participants[i].account);
         }
 
         vm.stopBroadcast();

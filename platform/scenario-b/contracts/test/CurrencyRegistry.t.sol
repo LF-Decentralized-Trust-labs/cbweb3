@@ -34,9 +34,11 @@ contract CurrencyRegistryTest is Test {
         identityRegistry.registerParticipant(
             cbA, "Central Bank A", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(cbA);
         identityRegistry.registerParticipant(
             cbB, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(cbB);
         vm.stopPrank();
 
         // Deploy tCeBM tokens (minter = admin for setup simplicity).

@@ -47,12 +47,15 @@ contract AutomatedMarketMakerTest is Test {
         identityRegistry.registerParticipant(
             liquidityProvider, "LP Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(liquidityProvider);
         identityRegistry.registerParticipant(
             swapper, "Commercial Bank A", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(swapper);
         identityRegistry.registerParticipant(
             governance, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(governance);
         vm.stopPrank();
 
         /// @dev 3. Deploy the AMM

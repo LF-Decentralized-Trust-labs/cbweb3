@@ -8,7 +8,8 @@ import {IdentityRegistryLibrary} from "../src/libraries/IdentityRegistryLibrary.
 
 /// @title IdentityRegistryTest
 /// @notice Unit tests for the IdentityRegistry contract.
-/// @dev Implements tests for onboarding, RBAC, and status management.
+/// @dev Implements tests for the two-step onboarding (Pending -> Verified), RBAC,
+///      and status management.
 contract IdentityRegistryTest is Test {
     /// @dev Local event redeclarations for vm.expectEmit assertions (Forge pattern).
     event ParticipantRegistered(address indexed account, IdentityRegistryLibrary.ParticipantRole role, string name);
@@ -24,6 +25,8 @@ contract IdentityRegistryTest is Test {
     address public admin = address(0x1);
     address public bankA = address(0x2);
     address public maliciousUser = address(0x3);
+    address public registrar = address(0x20); // holds GOVERNANCE_ROLE only
+    address public verifier = address(0x21); // holds VERIFIER_ROLE only
 
     // Test Data
     string public constant BANK_NAME = "Commercial Bank Alpha";
@@ -35,12 +38,150 @@ contract IdentityRegistryTest is Test {
         registry = new IdentityRegistry(admin);
     }
 
-    /// @notice Verifies that a participant can be registered by an admin.
-    function test_RegisterParticipant_Success() public {
+    /// @dev Helper: registers then verifies `account` as `admin` (who holds both roles).
+    function _registerAndVerify(address account, string memory name, IdentityRegistryLibrary.ParticipantRole role)
+        internal
+    {
+        vm.startPrank(admin);
+        registry.registerParticipant(account, name, role, ZK_POINTER);
+        registry.verifyParticipant(account);
+        vm.stopPrank();
+    }
+
+    // =========================================================================
+    //                      TWO-STEP ONBOARDING (R2-10.6)
+    // =========================================================================
+
+    /// @notice registerParticipant MUST create the participant in Pending, not Verified.
+    /// @dev A single governance call must not produce a transactable participant.
+    function test_RegisterParticipant_CreatesPending() public {
         vm.prank(admin);
         registry.registerParticipant(
             bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
         );
+
+        IdentityRegistryLibrary.Participant memory p = registry.getParticipant(bankA);
+        assertEq(uint256(p.status), uint256(IdentityRegistryLibrary.KycStatus.Pending));
+
+        // A Pending participant is neither whitelisted nor able to transact.
+        assertFalse(registry.isWhitelisted(bankA));
+        assertFalse(registry.canTransact(bankA));
+    }
+
+    /// @notice Only verifyParticipant may move a participant Pending -> Verified.
+    function test_VerifyParticipant_MovesPendingToVerified() public {
+        vm.prank(admin);
+        registry.registerParticipant(
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+        );
+        assertFalse(registry.canTransact(bankA));
+
+        vm.prank(admin);
+        registry.verifyParticipant(bankA);
+
+        IdentityRegistryLibrary.Participant memory p = registry.getParticipant(bankA);
+        assertEq(uint256(p.status), uint256(IdentityRegistryLibrary.KycStatus.Verified));
+        assertTrue(registry.isWhitelisted(bankA));
+        assertTrue(registry.canTransact(bankA));
+    }
+
+    /// @notice verifyParticipant emits IdentityUpdated(Pending -> Verified).
+    function test_VerifyParticipant_EmitsIdentityUpdated() public {
+        vm.prank(admin);
+        registry.registerParticipant(
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+        );
+
+        vm.expectEmit(true, false, false, true);
+        emit IdentityUpdated(
+            bankA, IdentityRegistryLibrary.KycStatus.Pending, IdentityRegistryLibrary.KycStatus.Verified
+        );
+        vm.prank(admin);
+        registry.verifyParticipant(bankA);
+    }
+
+    /// @notice verifyParticipant reverts when the participant is not Pending (e.g., never
+    ///         registered, or already Verified) — enforcing the state machine.
+    function test_VerifyParticipant_RevertIf_NotPending() public {
+        // Never registered => status None.
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSelector(IIdentityRegistry.ParticipantNotPending.selector, bankA));
+        registry.verifyParticipant(bankA);
+
+        // Register + verify once, then a second verify must revert (no longer Pending).
+        _registerAndVerify(bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK);
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSelector(IIdentityRegistry.ParticipantNotPending.selector, bankA));
+        registry.verifyParticipant(bankA);
+    }
+
+    /// @notice verifyParticipant is restricted to VERIFIER_ROLE holders.
+    function test_VerifyParticipant_RevertIf_NotVerifier() public {
+        vm.prank(admin);
+        registry.registerParticipant(
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+        );
+
+        vm.prank(maliciousUser);
+        vm.expectRevert();
+        registry.verifyParticipant(bankA);
+    }
+
+    /// @notice Segregation of duties: a registrar (GOVERNANCE_ROLE only) cannot verify, and a
+    ///         verifier (VERIFIER_ROLE only) cannot register. Registrar != verifier.
+    function test_TwoStep_SeparationOfDuties() public {
+        vm.startPrank(admin);
+        registry.grantRole(registry.GOVERNANCE_ROLE(), registrar);
+        registry.grantRole(registry.VERIFIER_ROLE(), verifier);
+        vm.stopPrank();
+
+        // Registrar can register (Pending) but cannot verify.
+        vm.prank(registrar);
+        registry.registerParticipant(
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+        );
+        assertFalse(registry.canTransact(bankA));
+
+        vm.prank(registrar);
+        vm.expectRevert();
+        registry.verifyParticipant(bankA);
+
+        // Verifier cannot register.
+        vm.prank(verifier);
+        vm.expectRevert();
+        registry.registerParticipant(
+            maliciousUser, "X", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+        );
+
+        // Verifier can move the registrar-created participant to Verified.
+        vm.prank(verifier);
+        registry.verifyParticipant(bankA);
+        assertTrue(registry.canTransact(bankA));
+    }
+
+    /// @notice verifyParticipant refreshes lastUpdate to block.timestamp.
+    function test_VerifyParticipant_SetsLastUpdateTimestamp() public {
+        vm.prank(admin);
+        registry.registerParticipant(
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+        );
+
+        uint256 verifyTs = 1_900_000_000;
+        vm.warp(verifyTs);
+        vm.prank(admin);
+        registry.verifyParticipant(bankA);
+
+        IdentityRegistryLibrary.Participant memory p = registry.getParticipant(bankA);
+        assertEq(p.lastUpdate, verifyTs);
+    }
+
+    // =========================================================================
+    //                            REGISTRATION / RBAC
+    // =========================================================================
+
+    /// @notice Verifies that a participant can be registered and verified by an admin.
+    function test_RegisterParticipant_Success() public {
+        _registerAndVerify(bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK);
 
         assertTrue(registry.isWhitelisted(bankA));
         assertTrue(registry.canTransact(bankA));
@@ -64,11 +205,9 @@ contract IdentityRegistryTest is Test {
 
     /// @notice Verifies that an identity can be suspended and blocked from transacting.
     function test_UpdateStatus_Suspension() public {
-        // 1. Onboard
-        vm.prank(admin);
-        registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
-        );
+        // 1. Onboard (register + verify)
+        _registerAndVerify(bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK);
+        assertTrue(registry.canTransact(bankA));
 
         // 2. Suspend
         vm.prank(admin);
@@ -86,16 +225,16 @@ contract IdentityRegistryTest is Test {
     function test_CanTransact_RoleValidation() public {
         vm.startPrank(admin);
 
-        // Register with role NONE (should not be able to transact)
+        // Register with role NONE and verify: still cannot transact (role gate).
         registry.registerParticipant(bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.NONE, ZK_POINTER);
-
+        registry.verifyParticipant(bankA);
         assertFalse(registry.canTransact(bankA));
 
-        // Update to Commercial Bank
+        // Re-register as Commercial Bank (resets to Pending) then verify.
         registry.registerParticipant(
             bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
         );
-
+        registry.verifyParticipant(bankA);
         assertTrue(registry.canTransact(bankA));
         vm.stopPrank();
     }
@@ -111,40 +250,34 @@ contract IdentityRegistryTest is Test {
 
     /// @notice Verifies that non-governance addresses cannot update participant status.
     function test_UpdateStatus_RevertIf_NotGovernance() public {
-        vm.prank(admin);
-        registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
-        );
+        _registerAndVerify(bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK);
 
         vm.prank(maliciousUser);
         vm.expectRevert();
         registry.updateStatus(bankA, IdentityRegistryLibrary.KycStatus.Suspended);
     }
 
-    /// @notice Verifies that a suspended participant can be re-activated (Suspended → Verified).
+    /// @notice Verifies that a suspended participant can be re-activated (Suspended -> Verified).
     function test_UpdateStatus_Reactivation() public {
-        vm.startPrank(admin);
-        registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
-        );
+        _registerAndVerify(bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK);
+
+        vm.prank(admin);
         registry.updateStatus(bankA, IdentityRegistryLibrary.KycStatus.Suspended);
         assertFalse(registry.canTransact(bankA));
 
+        vm.prank(admin);
         registry.updateStatus(bankA, IdentityRegistryLibrary.KycStatus.Verified);
-        vm.stopPrank();
 
         assertTrue(registry.isWhitelisted(bankA));
         assertTrue(registry.canTransact(bankA));
     }
 
-    /// @notice Verifies that a participant with KycStatus.Pending cannot transact or be whitelisted.
+    /// @notice Verifies that a participant left in Pending cannot transact or be whitelisted.
     function test_CanTransact_PendingStatus() public {
-        vm.startPrank(admin);
+        vm.prank(admin);
         registry.registerParticipant(
             bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
         );
-        registry.updateStatus(bankA, IdentityRegistryLibrary.KycStatus.Pending);
-        vm.stopPrank();
 
         assertFalse(registry.isWhitelisted(bankA));
         assertFalse(registry.canTransact(bankA));
@@ -152,12 +285,9 @@ contract IdentityRegistryTest is Test {
 
     /// @notice Verifies that a participant with KycStatus.Expired cannot transact or be whitelisted.
     function test_CanTransact_ExpiredStatus() public {
-        vm.startPrank(admin);
-        registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
-        );
+        _registerAndVerify(bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK);
+        vm.prank(admin);
         registry.updateStatus(bankA, IdentityRegistryLibrary.KycStatus.Expired);
-        vm.stopPrank();
 
         assertFalse(registry.isWhitelisted(bankA));
         assertFalse(registry.canTransact(bankA));
@@ -184,14 +314,8 @@ contract IdentityRegistryTest is Test {
         address centralBankAddr = address(0x4);
         address lpAddr = address(0x5);
 
-        vm.startPrank(admin);
-        registry.registerParticipant(
-            centralBankAddr, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, ZK_POINTER
-        );
-        registry.registerParticipant(
-            lpAddr, "Liquidity Provider", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
-        );
-        vm.stopPrank();
+        _registerAndVerify(centralBankAddr, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK);
+        _registerAndVerify(lpAddr, "Liquidity Provider", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK);
 
         assertTrue(registry.canTransact(centralBankAddr));
         assertTrue(registry.canTransact(lpAddr));
@@ -209,36 +333,34 @@ contract IdentityRegistryTest is Test {
 
     /// @notice Verifies that IdentityUpdated event is emitted on status change.
     function test_UpdateStatus_EmitsEvent() public {
-        vm.startPrank(admin);
-        registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
-        );
+        _registerAndVerify(bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK);
 
         vm.expectEmit(true, false, false, true);
         emit IdentityUpdated(
             bankA, IdentityRegistryLibrary.KycStatus.Verified, IdentityRegistryLibrary.KycStatus.Suspended
         );
+        vm.prank(admin);
         registry.updateStatus(bankA, IdentityRegistryLibrary.KycStatus.Suspended);
-        vm.stopPrank();
     }
 
-    /// @notice Verifies that re-registering an existing participant overwrites their data.
+    /// @notice Verifies that re-registering an existing participant resets them to Pending.
+    /// @dev Re-registration re-opens verification: a previously Verified participant must be
+    ///      re-verified after their profile is rewritten.
     function test_RegisterParticipant_Overwrite() public {
-        vm.startPrank(admin);
-        registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
-        );
+        _registerAndVerify(bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK);
+
         bytes32 newPointer = keccak256("new_proof");
+        vm.prank(admin);
         registry.registerParticipant(
             bankA, "Updated Bank Name", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, newPointer
         );
-        vm.stopPrank();
 
         IdentityRegistryLibrary.Participant memory p = registry.getParticipant(bankA);
         assertEq(p.legalName, "Updated Bank Name");
         assertEq(uint256(p.role), uint256(IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK));
         assertEq(p.zkPointer, newPointer);
-        assertEq(uint256(p.status), uint256(IdentityRegistryLibrary.KycStatus.Verified));
+        assertEq(uint256(p.status), uint256(IdentityRegistryLibrary.KycStatus.Pending));
+        assertFalse(registry.canTransact(bankA));
     }
 
     /// @notice Verifies that lastUpdate is set to block.timestamp on registerParticipant.
@@ -276,14 +398,8 @@ contract IdentityRegistryTest is Test {
         address centralBankAddr = address(0x10);
         address governanceAddr = address(0x11);
 
-        vm.startPrank(admin);
-        registry.registerParticipant(
-            centralBankAddr, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, ZK_POINTER
-        );
-        registry.registerParticipant(
-            governanceAddr, "Governance Entity", IdentityRegistryLibrary.ParticipantRole.GOVERNANCE, ZK_POINTER
-        );
-        vm.stopPrank();
+        _registerAndVerify(centralBankAddr, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK);
+        _registerAndVerify(governanceAddr, "Governance Entity", IdentityRegistryLibrary.ParticipantRole.GOVERNANCE);
 
         assertTrue(registry.canGovern(centralBankAddr));
         assertTrue(registry.canGovern(governanceAddr));
@@ -291,10 +407,7 @@ contract IdentityRegistryTest is Test {
 
     /// @notice Verifies that canGovern returns false for non-governance roles.
     function test_CanGovern_ReturnsFalseForNonGovernanceRoles() public {
-        vm.prank(admin);
-        registry.registerParticipant(
-            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
-        );
+        _registerAndVerify(bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK);
 
         assertFalse(registry.canGovern(bankA));
     }
@@ -303,12 +416,9 @@ contract IdentityRegistryTest is Test {
     function test_CanGovern_ReturnsFalseWhenSuspended() public {
         address centralBankAddr = address(0x10);
 
-        vm.startPrank(admin);
-        registry.registerParticipant(
-            centralBankAddr, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, ZK_POINTER
-        );
+        _registerAndVerify(centralBankAddr, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK);
+        vm.prank(admin);
         registry.updateStatus(centralBankAddr, IdentityRegistryLibrary.KycStatus.Suspended);
-        vm.stopPrank();
 
         assertFalse(registry.canGovern(centralBankAddr));
     }
@@ -318,9 +428,10 @@ contract IdentityRegistryTest is Test {
         assertFalse(registry.canGovern(maliciousUser));
     }
 
-    /// @notice Verifies that the constructor grants both DEFAULT_ADMIN_ROLE and GOVERNANCE_ROLE to admin.
+    /// @notice Verifies that the constructor grants DEFAULT_ADMIN_ROLE, GOVERNANCE_ROLE and VERIFIER_ROLE to admin.
     function test_Constructor_AdminRoles() public view {
         assertTrue(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), admin));
         assertTrue(registry.hasRole(registry.GOVERNANCE_ROLE(), admin));
+        assertTrue(registry.hasRole(registry.VERIFIER_ROLE(), admin));
     }
 }
