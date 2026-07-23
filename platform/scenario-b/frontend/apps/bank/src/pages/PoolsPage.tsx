@@ -14,31 +14,33 @@ import {
 } from "@cbweb3/ui";
 import { ArrowLeftRight, Copy, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { usePolling } from "../../hooks/usePolling";
-import { circuitBreakerApi, hubLiquidityApi, liquidityApi, paymentApi } from "../../services/api";
-import { currencyFromTokenSymbol, formatTokenAmount } from "../../types";
-import type { CircuitBreakerStatus } from "../../types/circuit-breaker.types";
-import type { PoolStatus } from "../../types/liquidity.types";
-import type { HubCurrency, HubPair } from "../../types/hub-liquidity.types";
+import { usePolling } from "../hooks/usePolling";
+import { circuitBreakerStatusApi } from "../services/api/circuit-breaker-status.api";
+import { ammV2Api } from "../services/api/amm-v2.api";
+import { weiToDisplay } from "../services/api/cross-currency-swap.api";
+import { usePaymentStore } from "../stores";
+import type { HubCurrency, HubPair, PoolStatus } from "../types/amm-v2.types";
 
 const POOL_REFRESH_MS = 15_000;
 
+type BreakerStatus = Awaited<ReturnType<typeof circuitBreakerStatusApi.getStatus>>;
+
 type BadgeVariant = "success" | "warning" | "destructive" | "outline" | "default";
+
+// currencyCode strips the sovereign W-token prefix down to the base ISO code:
+// "W-tCeBM_BRL" -> "BRL". Codes are resolved from token addresses via /hub/currencies.
+function currencyCode(symbol: string): string {
+  const parts = symbol.split("_");
+  return parts[parts.length - 1] || symbol;
+}
 
 function truncate(value?: string): string {
   if (!value) return "—";
   return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
 
-// codesFromPairId extracts the currency codes encoded in a pair id, in order.
-// e.g. "W-tCeBM_BRL-W-tCeBM_COP" -> ["BRL", "COP"]. Used as a fallback when the
-// on-chain currency registry does not map a token address to a code.
-function codesFromPairId(pairId: string): string[] {
-  return (pairId.match(/_([A-Za-z0-9]{2,})/g) ?? []).map((s) => s.slice(1));
-}
-
 // reserveNumber converts a wei reserve to a float for proportion math only
-// (display values go through formatTokenAmount, which keeps full precision).
+// (display values always go through weiToDisplay, which keeps full precision).
 function reserveNumber(wei: string, decimals: number): number {
   if (!wei || !/^\d+$/.test(wei)) return 0;
   try {
@@ -94,8 +96,9 @@ async function copyToClipboard(value: string, label: string) {
   }
 }
 
-// The circuit breaker is per-pair (one AMM instance per pair). Treasury only reads it;
-// pausing/resuming stays in the governance portal.
+// Breaker presentation: the asymmetric circuit breaker is per-pair (one AMM
+// instance per pair). LIVE = swappable, HALTED = paused by a Central Bank,
+// RESUME_PENDING = a resume proposal is collecting the 2-of-N quorum.
 function breakerView(state?: string): {
   variant: BadgeVariant;
   label: string;
@@ -139,87 +142,92 @@ function breakerView(state?: string): {
   }
 }
 
-export function LiquidityManagementPage() {
+export function PoolsPage() {
+  const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
+  const tCeBMSymbol = usePaymentStore((state) => state.tCeBMSymbol);
+  const fetchBalances = usePaymentStore((state) => state.fetchAll);
+  const tokenDecimals = tCeBMDecimals ?? 18;
+
   const [pairs, setPairs] = useState<HubPair[]>([]);
   const [currencies, setCurrencies] = useState<HubCurrency[]>([]);
   const [poolByPair, setPoolByPair] = useState<Record<string, PoolStatus>>({});
-  const [breakerByPair, setBreakerByPair] = useState<Record<string, CircuitBreakerStatus>>({});
+  const [breakerByPair, setBreakerByPair] = useState<Record<string, BreakerStatus>>({});
   const [selectedPairId, setSelectedPairId] = useState("");
-  const [nationalCurrency, setNationalCurrency] = useState("");
-  const [tokenDecimals, setTokenDecimals] = useState(18);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Registry data (pairs + currencies) + this CB's own token (for the national currency
-  // sovereignty filter and reserve decimals) — fetched once.
+  // Static registry data (pairs + currencies) — fetched once.
   useEffect(() => {
+    if (!tCeBMSymbol) void fetchBalances();
     void (async () => {
       try {
-        const [pairsRes, currenciesRes] = await Promise.all([
-          hubLiquidityApi.listPairs(),
-          hubLiquidityApi.listCurrencies(),
-        ]);
-        setPairs(pairsRes.pairs ?? []);
-        setCurrencies(currenciesRes.currencies ?? []);
+        const [allPairs, allCurrencies] = await Promise.all([ammV2Api.getPairs(), ammV2Api.getCurrencies()]);
+        setPairs(allPairs);
+        setCurrencies(allCurrencies);
       } catch {
-        setError("Unable to load liquidity pools. Please try again.");
+        setError("Unable to load liquidity pools. Contact your Central Bank.");
       } finally {
         setLoading(false);
       }
-      try {
-        const bal = await paymentApi.getBalance();
-        setNationalCurrency(currencyFromTokenSymbol(bal.symbol));
-        setTokenDecimals(bal.decimals ?? 18);
-      } catch {
-        /* balance optional — falls back to showing all pools */
-      }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const addressToCode = useMemo(() => {
     const map = new Map<string, string>();
-    for (const c of currencies) map.set(c.token_address.toLowerCase(), currencyFromTokenSymbol(c.symbol));
+    for (const c of currencies) map.set(c.token_address.toLowerCase(), currencyCode(c.symbol));
     return map;
   }, [currencies]);
 
   const codeOf = (addr: string) => addressToCode.get(addr.toLowerCase()) ?? "";
 
-  const pairLabel = (p: HubPair): { a: string; b: string } => {
-    const codes = codesFromPairId(p.pair_id);
-    return {
-      a: codeOf(p.token_a_address) || codes[0] || truncate(p.token_a_address),
-      b: codeOf(p.token_b_address) || codes[1] || truncate(p.token_b_address),
-    };
-  };
+  const knownCodes = useMemo(
+    () => Array.from(new Set(currencies.map((c) => currencyCode(c.symbol)))),
+    [currencies],
+  );
 
-  // Sovereignty filter: only pools that include this Central Bank's national currency
-  // (the corridors it provisions). Pairs without it are not managed here.
-  const isNationalPair = (p: HubPair) => {
-    if (!nationalCurrency) return false;
+  // The bank's sovereign currency = the code of its own spoke tCeBM.
+  const homeCurrency = useMemo(() => {
+    const sym = (tCeBMSymbol ?? "").toUpperCase();
+    return knownCodes.find((code) => code && sym.endsWith(code.toUpperCase())) ?? "";
+  }, [knownCodes, tCeBMSymbol]);
+
+  // pairLabel resolves the two currency codes for a pair (falls back to the id).
+  const pairLabel = (p: HubPair): { a: string; b: string } => ({
+    a: codeOf(p.token_a_address) || truncate(p.token_a_address),
+    b: codeOf(p.token_b_address) || truncate(p.token_b_address),
+  });
+
+  // Sovereignty filter: pools that include this bank's own currency.
+  const isSpokePair = (p: HubPair) => {
+    if (!homeCurrency) return false;
     const { a, b } = pairLabel(p);
-    return a === nationalCurrency || b === nationalCurrency;
+    return a === homeCurrency || b === homeCurrency;
   };
 
-  // Filter to the CB's national-currency corridors. If the national currency cannot be
-  // determined (balance/symbol unavailable), fall back to showing all pools rather than
-  // hiding everything.
+  // Only pools operable from this spoke are listed: a pair is operable iff one side is
+  // the bank's own sovereign currency (i.e. its spoke's Central Bank created/confirmed
+  // it). Pairs that do not involve this currency cannot be swapped from here, so they
+  // are never shown.
   const visiblePairs = useMemo(() => {
-    const list = nationalCurrency ? pairs.filter(isNationalPair) : pairs;
+    const list = homeCurrency ? pairs.filter(isSpokePair) : [];
+    // ACTIVE pools first, then by label for a stable, scannable order.
     return [...list].sort((x, y) => {
       if (x.status === y.status) return pairLabel(x).a.localeCompare(pairLabel(y).a);
       return x.status === "ACTIVE" ? -1 : 1;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pairs, nationalCurrency, addressToCode]);
+  }, [pairs, homeCurrency, addressToCode]);
 
+  // Live per-pool data (status + breaker) for the currently visible pools.
   const refreshLiveData = useMemo(
     () => async () => {
       if (visiblePairs.length === 0) return;
       const entries = await Promise.all(
         visiblePairs.map(async (p) => {
           const [pool, breaker] = await Promise.all([
-            liquidityApi.getPoolStatus(p.pair_id).catch(() => null),
-            circuitBreakerApi.getStatus(p.pair_id).catch(() => null),
+            ammV2Api.getPoolStatus(p.pair_id).catch(() => null),
+            circuitBreakerStatusApi.getStatus(p.pair_id).catch(() => null),
           ]);
           return { pairId: p.pair_id, pool, breaker };
         }),
@@ -240,6 +248,7 @@ export function LiquidityManagementPage() {
 
   usePolling(() => void refreshLiveData(), POOL_REFRESH_MS, visiblePairs.length > 0);
 
+  // Keep a valid selection as filters/data change.
   useEffect(() => {
     if (visiblePairs.length === 0) {
       setSelectedPairId("");
@@ -262,10 +271,10 @@ export function LiquidityManagementPage() {
       {/* Header */}
       <Card>
         <CardHeader>
-          <CardTitle>Liquidity Management</CardTitle>
+          <CardTitle>Liquidity Pools</CardTitle>
           <CardDescription>
-            Cross-currency pools this Central Bank provisions{nationalCurrency ? ` (${nationalCurrency})` : ""} — only
-            pairs that include your national currency. Read-only view.
+            Cross-currency pools your spoke{homeCurrency ? ` (${homeCurrency})` : ""} can operate — only pairs
+            whose Central Bank created a corridor with your currency. Read-only view.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -274,7 +283,7 @@ export function LiquidityManagementPage() {
       <section className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Pools managed</CardDescription>
+            <CardDescription>Pools listed</CardDescription>
             <CardTitle className="text-2xl">{visiblePairs.length}</CardTitle>
           </CardHeader>
         </Card>
@@ -294,6 +303,7 @@ export function LiquidityManagementPage() {
         </Card>
       </section>
 
+
       {error ? (
         <Card>
           <CardContent className="py-6 text-sm text-destructive">{error}</CardContent>
@@ -305,9 +315,8 @@ export function LiquidityManagementPage() {
       ) : visiblePairs.length === 0 ? (
         <Card>
           <CardContent className="py-6 text-sm text-muted-foreground">
-            {pairs.length === 0
-              ? "No liquidity pools have been created on the hub yet."
-              : `No pools include your national currency${nationalCurrency ? ` (${nationalCurrency})` : ""} yet. Propose a pair in Liquidity Provisioning.`}
+            No pools your spoke can operate yet. Your Central Bank has not created a corridor
+            {homeCurrency ? ` involving ${homeCurrency}` : " for your currency"}.
           </CardContent>
         </Card>
       ) : (
@@ -381,7 +390,7 @@ function PoolDetail({
   pair: HubPair;
   label: { a: string; b: string };
   pool?: PoolStatus;
-  breaker?: CircuitBreakerStatus;
+  breaker?: BreakerStatus;
   tokenDecimals: number;
 }) {
   const bv = breakerView(breaker?.state);
@@ -438,10 +447,10 @@ function PoolDetail({
           <Progress value={pctA} className="h-2" />
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>
-              {label.a}: <span className="font-mono">{pool ? formatTokenAmount(pool.reserve_a, tokenDecimals) : "—"}</span>
+              {label.a}: <span className="font-mono">{weiToDisplay(pool?.reserve_a ?? "", tokenDecimals)}</span>
             </span>
             <span>
-              {label.b}: <span className="font-mono">{pool ? formatTokenAmount(pool.reserve_b, tokenDecimals) : "—"}</span>
+              {label.b}: <span className="font-mono">{weiToDisplay(pool?.reserve_b ?? "", tokenDecimals)}</span>
             </span>
           </div>
         </div>

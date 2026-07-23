@@ -25,6 +25,15 @@ VPS do Itaú                          VPS do CB Brasil
   (só conhece a si)                     (só conhece a si)
 ```
 
+## Return path (portal → launcher)
+
+Each scenario's portals close the loop back to here: their login screen shows a "back to
+launcher" button and, on logout, the browser is redirected to the launcher. The launcher
+URL is **not hardcoded** — each scenario's toolkit bakes it into the portal bundle at build
+time as `VITE_LAUNCHER_URL` (`http://<frontendHost>:<launcherPort>`) whenever the entity has
+`launcher: enable`. When it is absent (launcher disabled), the button is hidden and logout
+falls back to the local `/login` route.
+
 ## Configuration (runtime, not build-time)
 
 The image is **generic** — no URLs are baked in. Each entity's portal list is loaded at

@@ -33,24 +33,26 @@ type SpokeConfig struct {
 	SpokeWS             string
 	CBAddress           string
 	GenesisDir          string
-	VolumePrefix        string // <p>_genesis, <p>_besu_data (node state in named volumes)
-	ContainerPrefix     string // container name prefix (<p>-<entity>-besu, ...)
-	NetPrefix           string // docker network name prefix (<p>_besu_network, <p>_infra_network)
-	Entity              string // compose ENTITY label (e.g. "central-bank")
-	RPCPort             int    // host port -> besu 8545; other service ports derive by offset
-	WSPort              int    // host port -> besu 8546
-	P2PPort             int    // host port -> besu 30303
-	AdvertisedHost      string // externally reachable host for the spoke bundle enode (default host.docker.internal)
-	RelayAdvertisedHost string // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
-	RelayEndpoint       string // the relay's OWN REST endpoint (spec.relay.endpoint, e.g. http://<hub>:7000) → CACTI_API_URL
-	FrontendHost        string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
-	ProxyEnabled        bool   // spec.proxy == enable: serve portals + api behind the per-host reverse proxy
+	VolumePrefix        string      // <p>_genesis, <p>_besu_data (node state in named volumes)
+	ContainerPrefix     string      // container name prefix (<p>-<entity>-besu, ...)
+	NetPrefix           string      // docker network name prefix (<p>_besu_network, <p>_infra_network)
+	Entity              string      // compose ENTITY label (e.g. "central-bank")
+	RPCPort             int         // host port -> besu 8545; other service ports derive by offset
+	WSPort              int         // host port -> besu 8546
+	P2PPort             int         // host port -> besu 30303
+	AdvertisedHost      string      // externally reachable host for the spoke bundle enode (default host.docker.internal)
+	RelayAdvertisedHost string      // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
+	RelayEndpoint       string      // the relay's OWN REST endpoint (spec.relay.endpoint, e.g. http://<hub>:7000) → CACTI_API_URL
+	FrontendHost        string      // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
+	ProxyEnabled        bool        // spec.proxy == enable: serve portals + api behind the per-host reverse proxy
+	LauncherEnabled     bool        // spec.launcher == "enable": bake VITE_LAUNCHER_URL into the CB portals
+	LauncherPort        int         // spec.launcherPort: launcher host port (0 → env/default); host = FrontendHost
 	AdminUsers          []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
 	Currency            string      // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
-	TokenName           string // tCeBM name (default "Tokenized <Currency>")
-	TokenSymbol         string // tCeBM symbol (default "t<Currency>")
-	FiatTokenName       string // fCeBM name (default "Fiat <Currency>")
-	FiatTokenSymbol     string // fCeBM symbol (default "f<Currency>")
+	TokenName           string      // tCeBM name (default "Tokenized <Currency>")
+	TokenSymbol         string      // tCeBM symbol (default "t<Currency>")
+	FiatTokenName       string      // fCeBM name (default "Fiat <Currency>")
+	FiatTokenSymbol     string      // fCeBM symbol (default "f<Currency>")
 	ValidatorCount      int
 	BesuImage           string
 	HubBundlePath       string
@@ -406,8 +408,8 @@ func (c SpokeConfig) ComposeEnv() []string {
 		"KC_DB_URL":         "jdbc:postgresql://" + e + "-" + c.Entity + "-postgres:5432/keycloak",
 		"KEYCLOAK_PORT":     itoa(c.RPCPort + 7000),
 		// backend / frontend (images shared with the hub; must be pre-built)
-		"GATEWAY_PORT":     itoa(c.RPCPort + 8000),
-		"GATEWAY_URL":      fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
+		"GATEWAY_PORT":               itoa(c.RPCPort + 8000),
+		"GATEWAY_URL":                fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
 		"BACKEND_IMAGE":              hubBackendImage,
 		"COMPLIANCE_IMAGE":           hubComplianceImage,
 		"AUTH_IMAGE":                 hubAuthImage,
@@ -415,19 +417,19 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// CB operator portals (governance/treasury/supervisor). Each SPA bakes the CB
 		// api-gateway URL at build time, so the image is tagged per gateway port. The
 		// NOC portal is deployed by the noc template.
-		"GOVERNANCE_FRONTEND_IMAGE":  cbFrontendImage("governance", c.RPCPort+8000, c.frontendVariant()),
-		"GOVERNANCE_FRONTEND_PORT":   itoa(c.RPCPort + 9000),
+		"GOVERNANCE_FRONTEND_IMAGE": cbFrontendImage("governance", c.RPCPort+8000, c.frontendVariant()),
+		"GOVERNANCE_FRONTEND_PORT":  itoa(c.RPCPort + 9000),
 		// Browser CORS: the single proxy origin (path routing) or the four operator-portal
 		// host-port origins (routable host when set) when not behind the proxy.
-		"CORS_ALLOW_ORIGINS": c.corsOrigins(),
-		"TREASURY_FRONTEND_IMAGE":    cbFrontendImage("treasury", c.RPCPort+8000, c.frontendVariant()),
-		"TREASURY_FRONTEND_PORT":     itoa(c.RPCPort + 13000),
-		"SUPERVISOR_FRONTEND_IMAGE":  cbFrontendImage("supervisor", c.RPCPort+8000, c.frontendVariant()),
-		"SUPERVISOR_FRONTEND_PORT":   itoa(c.RPCPort + 14000),
+		"CORS_ALLOW_ORIGINS":        c.corsOrigins(),
+		"TREASURY_FRONTEND_IMAGE":   cbFrontendImage("treasury", c.RPCPort+8000, c.frontendVariant()),
+		"TREASURY_FRONTEND_PORT":    itoa(c.RPCPort + 13000),
+		"SUPERVISOR_FRONTEND_IMAGE": cbFrontendImage("supervisor", c.RPCPort+8000, c.frontendVariant()),
+		"SUPERVISOR_FRONTEND_PORT":  itoa(c.RPCPort + 14000),
 		// app stack (compliance + auth): the CB is the local signer/deployer, and
 		// the Keycloak realm/client are provisioned by provision-keycloak-spoke.
-		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
-		"CB_PRIVATE_KEY":     devDeployerKey,
+		"SPOKE_CHAIN_ID": fmt.Sprintf("%d", c.SpokeChainID),
+		"CB_PRIVATE_KEY": devDeployerKey,
 		// The CB's own on-chain address (the dev deployer). Wired into the api-gateway
 		// so its payment routes (backed by the entity-relayer orchestrator via
 		// PAYMENT_GRPC_ADDR) resolve the CB's account.
@@ -842,10 +844,11 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			gwPort := c.RPCPort + 8000
 			api := fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort)
 			variant := c.frontendVariant()
+			lu := frontendLauncherURL(c.LauncherEnabled, c.useProxy(), c.FrontendHost, c.LauncherPort)
 			sb := c.scenarioBDir()
-			gov := map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}
-			tre := map[string]string{"VITE_API_BASE_URL": api, "VITE_INSTITUTION_NAME": c.Entity}
-			sup := map[string]string{"VITE_API_BASE_URL": api, "VITE_SPOKE_NAME": c.SpokeID}
+			gov := map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu}
+			tre := map[string]string{"VITE_API_BASE_URL": api, "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu}
+			sup := map[string]string{"VITE_API_BASE_URL": api, "VITE_SPOKE_NAME": c.SpokeID, "VITE_LAUNCHER_URL": lu}
 			if c.useProxy() {
 				api = proxyAPIURL(c.FrontendHost)
 				gov["VITE_API_URL"] = api

@@ -47,6 +47,8 @@ type JoinConfig struct {
 	GatewayURL      string
 	FrontendHost    string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
 	ProxyEnabled    bool   // spec.proxy == enable: serve the bank portal + api behind the per-host reverse proxy
+	LauncherEnabled bool   // spec.launcher == "enable": bake VITE_LAUNCHER_URL into the bank portal
+	LauncherPort    int    // spec.launcherPort: launcher host port (0 → env/default); host = FrontendHost
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -260,14 +262,14 @@ func (c JoinConfig) ComposeEnv() []string {
 		"KC_DB_URL":         "jdbc:postgresql://" + e + "-" + c.Entity + "-postgres:5432/keycloak",
 		"KEYCLOAK_PORT":     itoa(c.keycloakPort()),
 		// backend / frontend (images shared with the hub; must be pre-built)
-		"GATEWAY_PORT":     itoa(c.RPCPort + 8000),
-		"GATEWAY_URL":      c.GatewayURL,
+		"GATEWAY_PORT":               itoa(c.RPCPort + 8000),
+		"GATEWAY_URL":                c.GatewayURL,
 		"BACKEND_IMAGE":              hubBackendImage,
 		"COMPLIANCE_IMAGE":           hubComplianceImage,
 		"AUTH_IMAGE":                 hubAuthImage,
 		"PAYMENT_ORCHESTRATOR_IMAGE": hubPaymentOrchestratorImage,
-		"FRONTEND_IMAGE":   cbFrontendImage("bank", c.RPCPort+8000, c.frontendVariant()),
-		"FRONTEND_PORT":    itoa(c.RPCPort + 9000),
+		"FRONTEND_IMAGE":             cbFrontendImage("bank", c.RPCPort+8000, c.frontendVariant()),
+		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
 		// Browser CORS: the single proxy origin (path routing) or this bank's portal
 		// origin (host-port; routable host when set) when not behind the proxy.
 		"CORS_ALLOW_ORIGINS": c.corsOrigins(),
@@ -524,7 +526,8 @@ func JoinSteps(c JoinConfig) []Step {
 			// same-origin at http://<frontendHost>/<scn>/api/v1/ and the SPA is built
 			// base-path-aware (VITE_BASE_PATH) under /<scn>/bank/.
 			gwPort := c.RPCPort + 8000
-			args := map[string]string{"VITE_API_URL": fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity}
+			lu := frontendLauncherURL(c.LauncherEnabled, c.useProxy(), c.FrontendHost, c.LauncherPort)
+			args := map[string]string{"VITE_API_URL": fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu}
 			if c.useProxy() {
 				args["VITE_API_URL"] = proxyAPIURL(c.FrontendHost)
 				args["VITE_BASE_PATH"] = proxyPortalBase("bank")

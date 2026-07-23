@@ -13,7 +13,6 @@ import { LiquidityProvisioningPage } from "../pages/LiquidityProvisioningPage";
 import { LoginPage } from "../pages/LoginPage";
 import { RedeemsApprovalPage } from "../pages/RedeemsApprovalPage";
 import { SettingsPage } from "../pages/SettingsPage";
-import { TransferLimitsPage } from "../pages/TransferLimitsPage";
 
 export const routes: RouteObject[] = [
   {
@@ -33,7 +32,6 @@ export const routes: RouteObject[] = [
           { path: "redeems-approval", element: <RedeemsApprovalPage /> },
           { path: "liquidity", element: <LiquidityManagementPage /> },
           { path: "liquidity-provisioning", element: <LiquidityProvisioningPage /> },
-          { path: "transfer-limits", element: <TransferLimitsPage /> },
           { path: "audit", element: <AuditPage /> },
           { path: "settings", element: <SettingsPage /> },
         ],

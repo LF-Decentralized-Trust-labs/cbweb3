@@ -462,6 +462,15 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		adapter := &ammAdapter{resolver: pairResolver}
 		deps.CircuitBreakerService = services.NewCircuitBreakerService(db, adapter)
 	}
+	// Circuit-breaker institutional attestation is signed server-side with the CB's PKI
+	// key (PKI_DIR/<BANK_CODE>.key), so operators never supply a signature by hand.
+	if cfg.PKIDir != "" && cfg.BankCode != "" {
+		if cbSigner, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.BankCode); sErr == nil {
+			deps.CircuitBreakerSigner = cbSigner
+		} else {
+			log.Printf("[app] circuit-breaker attestation key unavailable for %q: %v (attestation left empty)", cfg.BankCode, sErr)
+		}
+	}
 	if db != nil {
 		deps.OversightService = services.NewOversightService(db)
 	}
@@ -476,7 +485,13 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			volumeRepo := newTransferVolumeRepository(db)
 			localChecker := services.NewTransferLimitChecker(limitRepo, volumeRepo)
 			transferLimitChecker = localChecker
-			deps.TransferLimitHandler = handlers.NewTransferLimitHandler(limitRepo)
+			sovereignCurrency := cfg.FiatSymbol
+			if sovereignCurrency == "" {
+				sovereignCurrency = os.Getenv("NATIVE_ASSET_SYMBOL")
+			}
+			deps.TransferLimitHandler = handlers.NewTransferLimitHandler(limitRepo).
+				WithFallbackBankCode(cfg.BankCode).
+				WithSovereignCurrency(sovereignCurrency)
 			deps.TransferLimitInternalHandler = handlers.NewTransferLimitInternalHandler(localChecker)
 		}
 	} else {
@@ -609,6 +624,8 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			orchestrator = orchestrator.WithAMMAddressResolver(&ammAddrResolverAdapter{r: pairResolver})
 		}
 		deps.CrossCurrencySwapOrchestrator = orchestrator
+		// Expose the swap repository for the paginated history endpoint (GET /amm/swap/cross-currency).
+		deps.CrossCurrencySwapLister = swapRepo
 
 		// 009-commercial-cross-currency-swap: Wire quote generator with 15s TTL (T030/T031).
 		var quoteReserve services.AMMReserveReader

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Badge, Button, PlatformLogo } from "@cbweb3/ui";
+import { Badge, Button, PlatformLogo, goToLauncher } from "@cbweb3/ui";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 
@@ -10,7 +10,7 @@ export function Header() {
 
   const onLogout = async () => {
     await logout();
-    navigate("/login", { replace: true });
+    if (!goToLauncher()) navigate("/login", { replace: true });
   };
 
   return (

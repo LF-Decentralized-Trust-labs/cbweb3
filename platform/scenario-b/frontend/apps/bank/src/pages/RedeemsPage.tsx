@@ -18,6 +18,7 @@ import {
   TableRow,
   toast,
 } from "@cbweb3/ui";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { usePaymentStore } from "../stores";
@@ -34,6 +35,8 @@ import {
 const shortHash = (value: string) =>
   value ? `${value.slice(0, 10)}...${value.slice(-8)}` : "-";
 
+const PAGE_SIZE = 10;
+
 export function RedeemsPage() {
   const fetchAll = usePaymentStore((state) => state.fetchAll);
   const requestRedeem = usePaymentStore((state) => state.requestRedeem);
@@ -48,6 +51,7 @@ export function RedeemsPage() {
 
   const [amount, setAmount] = useState("0");
   const [confirmRequest, setConfirmRequest] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     void fetchAll();
@@ -60,6 +64,17 @@ export function RedeemsPage() {
       ).length,
     [redeems],
   );
+
+  const total = redeems.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  const pagedRedeems = useMemo(() => redeems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [redeems, page]);
+  const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(page * PAGE_SIZE, total);
 
   const onSubmit = async () => {
     if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
@@ -181,7 +196,7 @@ export function RedeemsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {redeems.map((redeem) => (
+              {pagedRedeems.map((redeem) => (
                 <TableRow key={redeem.id}>
                   <TableCell className="font-medium">{redeem.id}</TableCell>
                   <TableCell>{formatCeBM(redeem.amount, decimals, tCeBMSymbol)}</TableCell>
@@ -201,11 +216,36 @@ export function RedeemsPage() {
               ))}
             </TableBody>
           </Table>
-          {!redeems.length ? (
+          {!total ? (
             <p className="pt-3 text-sm text-muted-foreground">
               No redeems found.
             </p>
           ) : null}
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between gap-2 pt-4">
+            <span className="text-xs text-muted-foreground">
+              {total === 0 ? "—" : `Showing ${rangeStart}–${rangeEnd} of ${total}`}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                <ChevronLeft className="h-4 w-4" />
+                Prev
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Page {page} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>
