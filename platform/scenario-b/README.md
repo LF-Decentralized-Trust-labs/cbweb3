@@ -1,7 +1,8 @@
-# CBWeb3 Platform
+# Scenario B — International Hub with FX Liquidity
 
-A monorepo implementing a **hub-and-spoke wholesale CBDC platform** for cross-network interoperability. The system runs two independent Besu blockchain networks (spokes), each operated by a central bank and commercial banks, with privacy-preserving transactions via **Paladin/Zeto** (zero-knowledge proofs) and cross-spoke atomic swaps via **HTLC + relay**.
+A wholesale CBDC interoperability model built around a dedicated **international hub** network. The hub runs an AMM-based foreign-exchange liquidity pool; two sovereign spoke networks, each operated by a central bank and a commercial bank, settle cross-currency transactions through it. Value moves between a spoke and the hub via a lock-and-mint / burn-and-unlock bridge, is exchanged on the hub AMM, and bridges back. A Cacti-based relay observes events across all three networks and a governance-controlled circuit breaker can pause and resume the pool.
 
+> This README describes **Scenario B only**. Repository-wide context and the comparison between Scenario A and Scenario B live in the [root README](../README.md).
 
 ---
 
@@ -11,9 +12,10 @@ A monorepo implementing a **hub-and-spoke wholesale CBDC platform** for cross-ne
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
-- [Running the Cross-Spoke HTLC Demo](#running-the-cross-spoke-htlc-demo)
+- [Running the Scenario B Walkthrough](#running-the-scenario-b-walkthrough)
 - [Frontend](#frontend)
-- [Repository Structure](#repository-structure)
+- [Directory Structure](#directory-structure)
+- [Toolkit (Provisioning)](#toolkit-provisioning)
 - [Smart Contracts](#smart-contracts)
 - [Backend Services](#backend-services)
 - [Infrastructure](#infrastructure)
@@ -26,41 +28,48 @@ A monorepo implementing a **hub-and-spoke wholesale CBDC platform** for cross-ne
 
 ## Overview
 
-**CBWeb3** models a Central Bank Digital Currency (CBDC) ecosystem where:
+Scenario B models a hub-and-spoke wholesale CBDC ecosystem centred on an **international hub**:
 
-- **Spoke-A** (chain 1338) — operated by **Central-Bank-A**, with commercial banks **Bank-A** and **Bank-C**.
-- **Spoke-B** (chain 1339) — operated by **Central-Bank-B**, with commercial banks **Bank-B** and **Bank-D**.
+- **Hub** (chain 1337) — an independent Besu QBFT network operating the FX liquidity pool. It hosts the AMM, the FX agreement contract, the liquidity/pair/currency registries, the spoke bridge, and hub-wrapped tokens (W-tCeBM).
+- **Spoke-A** (chain 1338) — operated by **Central-Bank-A** with commercial bank **Bank-A**.
+- **Spoke-B** (chain 1339) — operated by **Central-Bank-B** with commercial bank **Bank-B**.
 
-Each spoke runs its own Besu QBFT network, Paladin privacy nodes, and a full backend service stack. A **interop service** bridges HTLC secrets across spokes to enable atomic cross-network settlement.
-
-### Scenarios
-
-The platform is designed around two interoperability scenarios:
-
-- **Scenario A — Enhanced Correspondent Banking** — Cross-spoke atomic swaps via dual-layer HTLC. An initiator bank locks funds on one spoke while a responder bank locks on the other; a relay bridges the secret to achieve atomic settlement without a shared ledger.
-- **Scenario B — International Hub with FX Liquidity Pool** — A dedicated international hub network operating an AMM-based liquidity pool for foreign exchange. The Hub runs as an **independent Besu/QBFT network** (chain 1337, port 8845), separate from both spokes. Spokes settle cross-currency transactions through the hub, which provides continuous FX pricing and pooled liquidity. The smart contracts (`AutomatedMarketMaker.sol`, `ManualOracle.sol`, `FXAgreement.sol`) are deployed to the Hub; the full Hub network, contract deployment, service configuration, and end-to-end flows are **fully implemented**.
+Each spoke runs its own Besu QBFT network and a full backend service stack; the four entities also peer on the hub network. Cross-currency settlement works as **lock → mint (bridge in) → swap on the AMM → burn → unlock (bridge out)**, coordinated by the backend orchestrator and observed by a Cacti relay.
 
 ### Key Capabilities
 
-- **Tokenized Central Bank Money (tCeBM)** — ERC-20 CBDC tokens minted by central banks
-- **Privacy-preserving transfers** — Zeto ZKP tokens via Paladin for confidential intra-spoke payments
-- **Cross-spoke atomic swaps** — Hash Time-Locked Contracts (HTLC) with automatic relay settlement
-- **Identity & compliance** — On-chain IdentityRegistry, PKI certificates, Keycloak OIDC, KYC/AML checks
-- **FX settlement** — Automated Market Maker (AMM) and manual oracle for cross-currency pricing *(Scenario B — planned)*
+| Capability | Status |
+|------------|--------|
+| **Hub AMM (FX liquidity pool)** — constant-product AMM with slippage bounds, fee math, and a governance circuit breaker (pause/resume) | Implemented |
+| **FX Agreement** — bilateral OTC FX settlement lifecycle on the hub (`PROPOSED → ACCEPTED → SETTLED`, plus reject/cancel and on-behalf variants) | Implemented |
+| **Cooperative liquidity** — `PairRegistry` bilateral currency-pair activation + `LiquidityCommitRegistry` commit-reveal provisioning | Implemented |
+| **Spoke bridge** — `SpokeBridge` lock-and-mint / burn-and-unlock between a spoke tCeBM and hub W-tCeBM | Implemented |
+| **Cross-currency swap orchestration** — backend orchestrator wiring bridge-in → AMM swap → bridge-out, with a rollback coordinator and a `RECONCILIATION_REQUIRED` state for stuck bridge positions | Implemented |
+| **Commercial-bank direct swap (US3)** — end-to-end swap driven directly by a commercial bank | Partial — the governance-driven path works; the commercial-bank direct-authentication path is in progress |
+| **Manual FX oracle** — `ManualOracle` rate feed, fed locally by a mock rate feeder | Implemented |
+| **Identity & compliance** — on-chain `IdentityRegistry`, PKI certificates, Keycloak OIDC, KYC/AML gate at the API gateway | Implemented |
+| **NOC** — Network Operations Center portal + backend + monitoring agents for the hub and both spokes | Implemented |
+| **Privacy on the spokes** — Paladin/Zeto ZKP execution for confidential intra-spoke tCeBM transfers | Implemented (spokes only) |
+
+**Not part of Scenario B today:**
+
+- **No privacy on the hub.** The hub is a plaintext Besu QBFT network; hub-side value is held as wrapped tCeBM (W-tCeBM) ERC-20. Paladin/Zeto runs on the spokes only.
+- **No staging/production environment.** Scenario B ships a local Docker Compose deployment only; the provisioning toolkit (below) targets self-managed multi-host deployments, not a hosted environment.
 
 ---
 
 ## Architecture
 
-The platform is organized in layers:
+The scenario is organized in layers:
 
 | Layer | Components |
 |-------|------------|
-| **Frontend** | Bank Portal, Governance Portal, Supervisor, Treasury, NOC |
+| **Frontend** | Bank Portal, Governance Portal, Treasury, Supervisor, NOC Portal |
 | **API** | REST API Gateway (per entity) |
-| **Microservices** | Auth (gRPC), Compliance (gRPC), Payment Orchestrator (gRPC) |
-| **Interoperability** | HTLC relay, SpokeBridge, AMM, FX Oracle |
-| **Privacy** | Paladin Core, Zeto Domain (ZKP tokens), Noto Domain |
+| **Microservices** | Auth (gRPC), Compliance (gRPC), Payment Orchestrator (gRPC), FX, Ledger Gateway |
+| **Interoperability** | Cacti HTLC/event relay, SpokeBridge, cross-currency swap orchestrator + rollback coordinator |
+| **FX** | AutomatedMarketMaker, ManualOracle, FXAgreement, PairRegistry, LiquidityCommitRegistry, CurrencyRegistry, circuit breaker |
+| **Privacy (spokes only)** | Paladin Core, Zeto Domain (ZKP tokens) |
 | **Blockchain** | Besu QBFT networks (hub: chain 1337, spoke-a: chain 1338, spoke-b: chain 1339) |
 
 ---
@@ -71,107 +80,92 @@ The platform is organized in layers:
 |------|---------|
 | **Docker & Docker Compose** | Container orchestration for all services |
 | **GNU Make** | Build automation (`make` targets) |
-| **Go** (1.22+) | Backend services and Paladin tooling |
-| **Node.js** (22+) & npm | Frontend applications |
+| **Go** (1.26+) | Backend services and Paladin tooling |
+| **Node.js** (22+) & npm | Frontend applications and the Cacti relay |
 | **Foundry** (forge, cast) | Solidity contract compilation, testing, deployment |
 | **jq** | JSON processing in shell scripts |
 | **openssl** | PKI certificate generation |
 
-> **Note:** Ensure Docker has sufficient resources allocated (recommended: 8+ GB RAM, 4+ CPUs) since the full platform runs ~30 containers.
+> **Note:** Ensure Docker has sufficient resources allocated (recommended: 8+ GB RAM, 4+ CPUs) since the full stack runs the hub, two spokes, Paladin nodes, shared infra, and per-entity backend stacks.
+
+All commands below are run from the `scenario-b/` directory.
 
 ---
 
 ## Quick Start
 
-Deploy both spokes with all infrastructure, smart contracts, Paladin privacy nodes, and backend services:
+Bring up the entire Scenario B stack — PKI, shared infrastructure, all three Besu networks, contracts, relay, backend services, the FX rate feeder, and the NOC:
 
 ```bash
-make spoke-all
+make scenario-b.up
 ```
 
-This single command executes the following for each spoke:
+This target runs, in order:
 
-1. **PKI generation** — Creates X.509 certificates for all entities (idempotent, skipped if they exist)
-2. **Infrastructure** — Starts Keycloak (OIDC), PostgreSQL, and Redis (shared across spokes)
-3. **Besu network** — Launches 3 Besu QBFT validator nodes per spoke
-4. **Smart contracts** — Compiles and deploys tCeBM, HTLC, AMM, IdentityRegistry, SpokeBridge
-5. **Participant registration** — Registers banks on-chain via IdentityRegistry
-6. **Paladin setup** — Deploys privacy contracts, generates certs, registers nodes, starts Paladin
-7. **Zeto token** — Creates the ZKP-based tCeBM token instance
-8. **Backend services** — Starts api-gateway, auth, compliance, and payment-orchestrator per entity
-9. **Relay** — Starts the HTLC cross-spoke relay service
+1. **PKI** (`prepare-pki`) — generates X.509 certificate material for all entities (idempotent).
+2. **Infrastructure + Besu** (`up-infra`) — starts Keycloak, PostgreSQL, and Redis, then the hub and both spoke Besu QBFT networks.
+3. **Contracts** (`deploy-contracts`) — builds and deploys the hub and spoke contracts, syncs addresses to backends/frontends, registers participants, seeds the sovereign currency pair, and grants liquidity-provider roles.
+4. **Relay** (`up-relayer`) — starts the Cacti cross-network relay.
+5. **Backend** (`up-backend`) — starts api-gateway, auth, compliance, and payment-orchestrator per entity.
+6. **FX feeder** — starts the mock BRL/ARS rate feeder that writes into the hub `ManualOracle`.
+7. **NOC** — configures Keycloak, starts the NOC portal/backend, and starts the monitoring agents.
 
-Once complete, all 6 entities are running with their full service stacks.
+A perf-lean variant without the NOC portal is available as `make scenario-b.up-perf`.
+
+Once complete, the four entities (central-bank-a + bank-a on spoke-a, central-bank-b + bank-b on spoke-b) are running with their full service stacks.
 
 ---
 
-## Running the Cross-Spoke HTLC Demo
+## Running the Scenario B Walkthrough
 
-After `make spoke-all` completes, run the end-to-end cross-spoke atomic swap:
+After `make scenario-b.up` completes, run the end-to-end walkthrough. It covers six user stories; pass a story id or `all`:
 
 ```bash
-./tryout-htlc-cross-spoke.sh
+bash tryouts/tryout-scenario-b-e2e.sh all      # every story
+bash tryouts/tryout-scenario-b-e2e.sh us1      # a single story
 ```
 
-This script executes a **16-step demo across 6 phases**:
+Convenience targets are also available:
 
-| Phase | Steps | Description |
-|-------|-------|-------------|
-| **1 — Authentication** | 1–4 | Login all 4 bank operators via Keycloak OIDC |
-| **2 — Minting & Balances** | 5–7 | Central banks mint tCeBM for Bank-A and Bank-B; check initial balances |
-| **3 — Initiator Lock (Spoke-A)** | 8–9 | Bank-A locks funds for Bank-C with a secret + hashLock |
-| **4 — Responder Lock (Spoke-B)** | 10–11 | Bank-B locks funds for Bank-D using the same hashLock |
-| **5 — Settlement** | 12–14 | Bank-A reveals the secret on Spoke-A; relay auto-settles on Spoke-B |
-| **6 — Verification** | 15–16 | Confirm final balances and search settled HTLCs |
+```bash
+make scenario-b.tryout          # all stories
+make scenario-b.tryout-us1      # cooperative liquidity pair formation
+make scenario-b.tryout-us2      # MLP bilateral liquidity provisioning
+make scenario-b.tryout-us3      # commercial-bank FX swap via the AMM
+```
 
-### Environment Variables (optional overrides)
+| Story | Description | Status |
+|-------|-------------|--------|
+| **US1** | Central banks cooperatively form a currency pair (PairRegistry) and match liquidity commits (LiquidityCommitRegistry) | Implemented |
+| **US2** | A market liquidity provider registers matched commits on both sides; the relay executes dual-sided provisioning | Implemented |
+| **US3** | A commercial bank performs a cross-currency swap via the hub AMM (quote → bridge in → swap → bridge out) | Partial — governance path works; commercial-bank direct-auth path in progress |
+| **US4** | Two banks execute a full FX Agreement lifecycle on the hub (propose → accept → settle) | Implemented |
+| **US5** | Two central banks activate a currency pair through bilateral PairRegistry approval | Implemented |
+| **US6** | A commercial bank bridges spoke tCeBM to the hub and back (lock-and-mint / burn-and-unlock), conserving total supply | Implemented |
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BANK_A_URL` | `http://localhost:18080/api/v1` | Bank-A API gateway |
-| `BANK_B_URL` | `http://localhost:28080/api/v1` | Bank-B API gateway |
-| `BANK_C_URL` | `http://localhost:48080/api/v1` | Bank-C API gateway |
-| `BANK_D_URL` | `http://localhost:58080/api/v1` | Bank-D API gateway |
-| `CB_A_URL` | `http://localhost:38080/api/v1` | Central-Bank-A API gateway |
-| `CB_B_URL` | `http://localhost:60080/api/v1` | Central-Bank-B API gateway |
-| `MINT_AMOUNT` | `10000000` | Amount minted per bank |
-| `LOCK_AMOUNT` | `1000000` | Amount locked per HTLC |
-| `RELAY_SETTLE_TIMEOUT` | `30` | Seconds to wait for relay auto-settlement |
+Focused scripts for individual flows live under `tryouts/`, including `tryout-commercial-swap-e2e.sh` and `tryout-cross-currency-full-lifecycle.sh`. See [`tests/TEST-CATALOG.md`](tests/TEST-CATALOG.md) for the full, per-test status inventory.
 
 ---
 
 ## Frontend
 
-Build and start the frontend containers for all entities:
+Build and start the Scenario B frontend containers:
 
 ```bash
-make frontend-spoke-all
+make frontend-scenario-b        # build + start
+make frontend-scenario-b-down   # stop
+make frontend-scenario-b-logs   # tail logs
 ```
 
-This builds and launches 6 frontend containers (one per entity), each served via nginx.
+### Frontend Apps
 
-| Entity | App | URL |
-|--------|-----|-----|
-| Bank-A | Bank Portal | http://localhost:5173 |
-| Bank-B | Bank Portal | http://localhost:5174 |
-| Bank-C | Bank Portal | http://localhost:5175 |
-| Bank-D | Bank Portal | http://localhost:5176 |
-| Central-Bank-A | Governance Portal | http://localhost:5177 |
-| Central-Bank-B | Governance Portal | http://localhost:5178 |
-
-### Frontend Commands
-
-```bash
-make frontend-spoke-a          # Start spoke-a frontends only (Bank-A, Bank-C, CB-A)
-make frontend-spoke-b          # Start spoke-b frontends only (Bank-B, Bank-D, CB-B)
-make frontend-spoke-all        # Start all frontends
-
-make frontend-spoke-a-down     # Stop spoke-a frontends
-make frontend-spoke-b-down     # Stop spoke-b frontends
-make frontend-spoke-all-down   # Stop all frontends
-
-make frontend-spoke-all-logs   # Tail frontend logs
-```
+| App | Path | Description | Status |
+|-----|------|-------------|--------|
+| `bank` | `frontend/apps/bank/` | Commercial bank operator portal | Implemented |
+| `governance` | `frontend/apps/governance/` | Central bank governance console | Implemented |
+| `treasury` | `frontend/apps/treasury/` | Central bank treasury management | Implemented |
+| `supervisor` | `frontend/apps/supervisor/` | Operations supervisor dashboard | In progress |
+| `noc` | `frontend/apps/noc/` | Network Operations Center portal | Implemented |
 
 ### Frontend Tech Stack
 
@@ -180,111 +174,101 @@ make frontend-spoke-all-logs   # Tail frontend logs
 - **Tailwind CSS v4**
 - npm workspaces monorepo (`apps/*` and `packages/*`)
 
-### Frontend Apps
-
-| App | Path | Description |
-|-----|------|-------------|
-| `bank` | `frontend/apps/bank/` | Commercial bank operator portal |
-| `governance` | `frontend/apps/governance/` | Central bank governance console |
-| `supervisor` | `frontend/apps/supervisor/` | Operations supervisor dashboard — Supervisor Portal — In progress |
-| `treasury` | `frontend/apps/treasury/` | Treasury management |
-| `noc` | `frontend/apps/noc/` | Network Operations Center |
+Container host ports are defined in `frontend/.env` (see `frontend/.env.example`). Defaults: Bank-A `5173`, Bank-B `5174`, Central-Bank-A governance `5177`, Central-Bank-B governance `5178`, Supervisor Spoke-A `5179`, Supervisor Spoke-B `5180`, Central-Bank-A treasury `5181`, Central-Bank-B treasury `5182`, NOC portal `5910`.
 
 ---
 
-## Repository Structure
+## Directory Structure
 
 ```
-cbweb3-platform/
+scenario-b/
 ├── contracts/              Solidity smart contracts (Foundry)
 │   ├── src/                Contract sources
 │   ├── test/               Foundry tests
 │   └── script/             Deployment scripts
 ├── backend/
 │   ├── services/           Go microservices
-│   │   ├── api-gateway/    REST gateway (per entity)
+│   │   ├── api-gateway/    REST gateway (per entity), AMM/FX/bridge/liquidity APIs
 │   │   ├── auth/           gRPC auth service (Keycloak OIDC)
 │   │   ├── compliance/     gRPC compliance (KYC/AML)
-│   │   ├── payment-orchestrator/  gRPC payment & HTLC orchestration
+│   │   ├── payment-orchestrator/  gRPC payment, bridge, and swap orchestration
 │   │   ├── payments/       Payment domain logic
-│   │   ├── fx/             FX pricing & settlement
-│   │   └── ledger-gateway/ Blockchain RPC/WS client
-│   ├── shared/             Shared Go libraries (blockchain, identity, proto)
+│   │   ├── fx/             FX pricing helpers
+│   │   ├── ledger-gateway/ Blockchain RPC/WS client
+│   │   ├── noc-agent/      Per-network monitoring agent
+│   │   └── noc-backend/    NOC portal backend
+│   ├── shared/             Shared Go libraries
 │   └── config/             PKI certs and per-entity .env files
 ├── frontend/
-│   ├── apps/               React applications (bank, governance, supervisor, treasury, noc)
-│   ├── packages/           Shared UI components and config
-│   └── nginx/              Production nginx config
-├── apis/
-│   ├── openapi/            OpenAPI specs
-│   ├── proto/              Protobuf/gRPC definitions
-│   └── sdk/                Auto-generated clients (TS, Python, Java)
+│   ├── apps/               React apps (bank, governance, treasury, supervisor, noc)
+│   └── packages/           Shared UI components and config
+├── apis/                   OpenAPI specs, protobuf/gRPC definitions, generated SDKs
 ├── interop/
-│   ├── hub-and-spoke/      Cross-spoke connectors (relay, cacti, ccip)
-│   └── single-ledger/      Intra-network orchestration
+│   └── hub-and-spoke/      Cross-network interop
+│       ├── cacti/          Cacti-based event/HTLC relay
+│       ├── ccip/           CCIP experiments
+│       └── noc/            NOC agent configs (hub, spoke-a, spoke-b)
 ├── deploy/
 │   └── local/              Docker Compose infrastructure
-│       ├── spoke-besu-a/   Besu nodes for spoke-a
-│       ├── spoke-besu-b/   Besu nodes for spoke-b
+│       ├── hub-besu/       Besu nodes for the hub (chain 1337)
+│       ├── spoke-besu-a/   Besu nodes for spoke-a (chain 1338)
+│       ├── spoke-besu-b/   Besu nodes for spoke-b (chain 1339)
+│       ├── paladin/        Privacy nodes (Zeto) — spokes only
 │       ├── keycloak/       OIDC identity provider
 │       ├── postgres/       Multi-database init
-│       ├── paladin/        Privacy nodes (Zeto/Noto)
-│       └── compose.yml     Shared infrastructure compose
-├── tests/                  Test harnesses (unit, integration, e2e, performance)
-├── docs/                   Architecture, design, governance, runbooks
-├── make/                   Makefile includes (modular targets)
-├── toolkit/                Declarative provisioning toolkit (Go: cmd/cbweb3b + engine/manifest)
-├── provisioning/           Provisioning assets (schema/v1 JSON-Schema)
-├── tryouts/                Per-entity tryout scripts
-└── tryout-htlc-cross-spoke.sh  Cross-spoke HTLC demo
+│       ├── compose.yml     Shared infrastructure compose
+│       └── compose.noc.yml NOC stack compose
+├── make/                   Modular Makefile includes
+├── toolkit/                Declarative provisioning toolkit (Go: cmd/cbweb3b + engine/*)
+├── provisioning/           Provisioning assets (schema/v1 + compose templates)
+├── tests/                  Unit, integration, E2E, and performance harnesses
+├── tryouts/                E2E walkthrough and per-flow scripts
+└── docs/                   Architecture, design, governance, runbooks
 ```
 
 ---
 
-## Toolkit (provisioning)
+## Toolkit (Provisioning)
 
-Declarative provisioning toolkit for the Scenario B hub-and-spoke topology.
+Declarative provisioning toolkit for the Scenario B hub-and-spoke topology, used to stand up and join hub and spoke networks across self-managed hosts. The single-host `make scenario-b.up` stack above remains the local path. The Go toolkit lives in `toolkit/` (`cmd/cbweb3b` + `engine/*`); its compose templates and the `ParticipantDeployment` JSON-Schema live in `provisioning/`.
 
 | Component | Status |
 |-----------|--------|
-| Manifest schema & validation (`ParticipantDeployment`, `cbweb3b/v1`) — TK-B1 | In progress |
-| Custody boundaries: `KeyProvider` (`kms://`) + `CertSource` (`self-signed`/`ca://`) — TK-B2/B3 | In progress |
-| Parametrized compose templates (hub, entity-besu, entity-*, relay, NOC) under `provisioning/templates/` + validation — TK-B4 | In progress |
-| Generalized relay (dynamic N-spokes, runtime registration, `isPaused` gate) + `RelayRegistrar` (`relay://`) — TK-B5 | In progress |
-| Orchestration engine + `found-hub` steps + hub bundle + `apply` CLI — TK-B6 | In progress |
-| `found-spoke` mode (register-cb + spoke contracts + Keycloak + register-relay-spoke + soft add-noc-agent) + spoke bundle emitter — TK-B7 | In progress |
-| `join` mode (non-validating full node: write-genesis + wait-sync + gen-csr; canonical flow, no relay/noc) — TK-B8 | In progress |
-| Sovereign-pair tail (open-sovereign-pair + commit-liquidity + seed-oracle; soft, driven by spec.pair, strict sovereignty) — TK-B9 | In progress |
-| Full-pipeline E2E (swap + breaker + SpokeBridge) + toolkit-native perf baseline + E2E-STATUS — TK-B10 | In progress |
-| Production CertSource/KeyProvider (KMS/CA), auth-per-CB relay, threshold-gated baseline | Planned |
+| Manifest schema & validation (`ParticipantDeployment`, `cbweb3b/v1`) — TK-B1 | Implemented |
+| Custody boundaries: `KeyProvider` (`kms://`) + `CertSource` (`self-signed`/`ca://`) — TK-B2/B3 | Implemented |
+| Parametrized compose templates (hub, entity-besu, entity-*, relay, NOC) under `provisioning/templates/` + validation — TK-B4 | Implemented |
+| Generalized relay (dynamic N-spokes, runtime registration, `isPaused` gate) + `RelayRegistrar` (`relay://`) — TK-B5 | Implemented |
+| Orchestration engine + `found-hub` steps + hub bundle + `apply` CLI — TK-B6 | Implemented |
+| `found-spoke` mode (register-cb + spoke contracts + Keycloak + register-relay-spoke + soft add-noc-agent) + spoke bundle emitter — TK-B7 | Implemented |
+| `join` mode (non-validating full node: write-genesis + wait-sync + gen-csr; canonical flow, no relay/noc) — TK-B8 | Implemented |
+| Sovereign-pair tail (open-sovereign-pair + commit-liquidity + seed-oracle; soft, driven by `spec.pair`, strict sovereignty) — TK-B9 | Implemented |
+| Full-pipeline E2E (swap + breaker + SpokeBridge) + toolkit-native perf baseline + E2E-STATUS — TK-B10 | Implemented |
+| NOC observability integration (`observe` mode) — TK-B11 | Implemented |
+| Production `CertSource`/`KeyProvider` (KMS/CA), auth-per-CB relay, threshold-gated baseline | Planned |
 
-The manifest model and validation are the toolkit's entry point: parse + validate +
-report only, no execution. The custody boundaries provide per-entity blockchain keys and the
-CB-as-CA leaf issuance, with local in-memory implementations and production stubs behind URI
-factories; no private key material ever enters a manifest, state file, or bundle. See
-`toolkit/README.md` for usage.
+The manifest model and validation are the toolkit's entry point: parse + validate + report only, no execution. The custody boundaries provide per-entity blockchain keys and the CB-as-CA leaf issuance, with local in-memory implementations and production stubs behind URI factories; no private key material ever enters a manifest, state file, or bundle. See [`toolkit/README.md`](toolkit/README.md) and [`toolkit/E2E-STATUS.md`](toolkit/E2E-STATUS.md) for usage and pipeline status.
 
-**Runtime dependency justification (Technology Stack Constraints):** the toolkit module adds
-`github.com/ethereum/go-ethereum` (v1.17.1, already standard across the repository). It is
-required by the `KeyProvider` for **secp256k1** key handling and EVM address derivation — the
-curve used to sign Besu/QBFT transactions, which is outside the Go standard library's
-`crypto/ecdsa`.
+**Runtime dependency justification (Technology Stack Constraints):** the toolkit module adds `github.com/ethereum/go-ethereum` (v1.17.1, already standard across the repository). It is required by the `KeyProvider` for **secp256k1** key handling and EVM address derivation — the curve used to sign Besu/QBFT transactions, which is outside the Go standard library's `crypto/ecdsa`.
 
 ---
 
 ## Smart Contracts
 
-Built with **Foundry** (Solidity 0.8.20, OpenZeppelin 5.0.2).
+Built with **Foundry**. Foundry unit tests exist for every contract below (see [`tests/TEST-CATALOG.md`](tests/TEST-CATALOG.md), Section 1).
 
 | Contract | Description |
 |----------|-------------|
-| `TokenizedCentralBankMoney.sol` | ERC-20 tCeBM token with role-based minting (central bank only) |
-| `HashTimeLockedContract.sol` | HTLC for atomic cross-spoke swaps (LOCKED → SETTLED / REFUNDED) |
-| `AutomatedMarketMaker.sol` | Constant-product AMM for FX liquidity pools |
-| `IdentityRegistry.sol` | On-chain participant registry with governance RBAC |
-| `SpokeBridge.sol` | Cross-spoke bridge contract |
+| `TokenizedCentralBankMoney.sol` | ERC-20 tCeBM with role-based minting (central bank only); wrapped as W-tCeBM on the hub |
+| `HashTimeLockedContract.sol` | Hub-side HTLC for hub-native settlement (LOCKED → SETTLED / REFUNDED) |
+| `AutomatedMarketMaker.sol` | Constant-product AMM for FX liquidity pools, with circuit breaker and fee math |
+| `SpokeBridge.sol` | Lock-and-mint / burn-and-unlock bridge between a spoke tCeBM and hub W-tCeBM |
+| `FXAgreement.sol` | Bilateral OTC FX settlement agreement lifecycle |
+| `PairRegistry.sol` | Bilateral currency-pair proposal and activation |
+| `LiquidityCommitRegistry.sol` | Commit-reveal liquidity provisioning with matching and TTL expiry |
+| `CurrencyRegistry.sol` | Registry of currencies and their issuing central banks |
+| `CommitmentHashRegistry.sol` | On-chain commitment hash registry |
 | `ManualOracle.sol` | Manual FX price oracle |
-| `FXAgreement.sol` | FX pricing and settlement agreement |
+| `IdentityRegistry.sol` | On-chain participant registry with governance RBAC |
 
 ### Contract Commands
 
@@ -295,8 +279,6 @@ make contracts.test        # Run Foundry unit tests
 make contracts.coverage    # Coverage report
 make contracts.fmt         # Format Solidity sources
 make contracts.lint        # Lint checks
-make contracts.slither     # Static security analysis (Trail of Bits Slither)
-make contracts.full-check  # Build + fmt + lint + test + coverage + slither
 make contracts.gen-doc     # Generate Forge documentation
 ```
 
@@ -308,100 +290,97 @@ All backend services are written in **Go** and communicate via **gRPC** internal
 
 | Service | Protocol | Description |
 |---------|----------|-------------|
-| **api-gateway** | REST | External entry point, routes to gRPC services |
+| **api-gateway** | REST | External entry point; hosts the AMM, FX agreement, bridge, and liquidity endpoints and the cross-currency swap orchestrator + rollback coordinator |
 | **auth** | gRPC | OIDC/JWT validation, Keycloak integration, RBAC, nonce management |
 | **compliance** | gRPC | KYC/AML checks, on-chain IdentityRegistry queries, audit logging |
-| **payment-orchestrator** | gRPC | Payment coordination, Paladin integration, HTLC flow management |
+| **payment-orchestrator** | gRPC | Payment coordination, bridge position tracking (including `RECONCILIATION_REQUIRED`), relayer worker |
+| **payments** | — | Payment domain logic |
+| **fx** | — | FX pricing helpers |
+| **ledger-gateway** | — | Blockchain RPC/WS client |
+| **noc-agent** | — | Per-network monitoring agent (hub, spoke-a, spoke-b) |
+| **noc-backend** | REST | NOC portal backend |
 
-Each entity (bank-a, bank-b, bank-c, bank-d, central-bank-a, central-bank-b) runs its own isolated instance of every service with dedicated Docker networks.
+Each entity (bank-a, bank-b, central-bank-a, central-bank-b) runs its own isolated instance of the core services with dedicated Docker networks.
 
 ---
 
 ## Infrastructure
 
-The local deployment uses Docker Compose for all infrastructure components.
+The local deployment uses Docker Compose for all infrastructure components. See [`deploy/local/README.md`](deploy/local/README.md) for the authoritative topology.
 
 ### Besu Networks
 
 | Network | Chain ID | Nodes | Docker Network |
 |---------|----------|-------|----------------|
-| hub | 1337 | hub-validator (single-validator sandbox) | `hub_besu_network` |
-| spoke-a | 1338 | central-bank-a, bank-a, bank-c | `spoke_a_besu_network` |
-| spoke-b | 1339 | central-bank-b, bank-b, bank-d | `spoke_b_besu_network` |
+| hub | 1337 | hub-validator + one peer per entity (central-bank-a, bank-a, central-bank-b, bank-b) | `hub_besu_network` |
+| spoke-a | 1338 | central-bank-a, bank-a | `spoke_a_besu_network` |
+| spoke-b | 1339 | central-bank-b, bank-b | `spoke_b_besu_network` |
 
 ### Shared Services
 
 | Service | Container | Port | Purpose |
 |---------|-----------|------|---------|
-| Keycloak | `cbweb3-keycloak` | 8081 | OIDC identity provider (6 realms) |
-| PostgreSQL | `cbweb3-postgres` | 5432 | 7 databases (one per entity + keycloak) |
-| Redis | `cbweb3-redis` | 6379 | Cache/session store (6 logical DBs) |
+| Keycloak | `cbweb3-keycloak` | 8081 | OIDC identity provider (4 realms) |
+| PostgreSQL | `cbweb3-postgres` | 5432 | 6 databases (four entities + MLP + Keycloak) |
+| Redis | `cbweb3-redis` | 6379 | Cache/session store (4 logical DBs) |
 
-### Paladin Privacy Nodes
+### Paladin Privacy Nodes (spokes only)
 
-Each spoke runs 3 Paladin nodes (1:1 mapping with Besu validators), providing Zeto ZKP token support for privacy-preserving tCeBM transfers.
+Each spoke runs Paladin nodes (1:1 with its Besu validators) providing Zeto ZKP support for privacy-preserving intra-spoke tCeBM transfers. The hub network does not run Paladin.
+
+### NOC Stack
+
+The NOC stack (`deploy/local/compose.noc.yml`) runs a dedicated Postgres, the NOC backend, the NOC portal, and one monitoring agent per network (hub, spoke-a, spoke-b).
 
 ---
 
 ## Port Reference
 
-### API Gateways (REST)
+### API Gateways (REST) and gRPC services
 
-| Entity | API Gateway | Auth gRPC | Compliance gRPC | Payment gRPC |
-|--------|-------------|-----------|-----------------|--------------|
-| bank-a | 18080 | 19091 | 19093 | 19094 |
-| bank-b | 28080 | 29091 | 29093 | 29094 |
-| central-bank-a | 38080 | 39091 | 39093 | 39094 |
-| bank-c | 48080 | 49091 | 49093 | 49094 |
-| bank-d | 58080 | 59091 | 59093 | 59094 |
-| central-bank-b | 60080 | 60091 | 60093 | 60094 |
+| Entity | Spoke | API Gateway | Auth gRPC | Compliance gRPC |
+|--------|-------|-------------|-----------|-----------------|
+| bank-a | spoke-a | 18080 | 19091 | 19093 |
+| bank-b | spoke-b | 28080 | 29091 | 29093 |
+| central-bank-a | spoke-a | 38080 | 39091 | 39093 |
+| central-bank-b | spoke-b | 60080 | 60091 | 60093 |
 
 ### Besu RPC
 
-| Node | Host RPC Port |
-|------|---------------|
-| hub-validator (hub) | 8845 |
-| central-bank-a (spoke-a) | 8645 |
-| bank-a (spoke-a) | 8646 |
-| bank-c (spoke-a) | 8647 |
-| central-bank-b (spoke-b) | 8745 |
-| bank-b (spoke-b) | 8746 |
-| bank-d (spoke-b) | 8747 |
-
-### Frontends
-
-| Entity | Port |
-|--------|------|
-| Bank-A | 5173 |
-| Bank-B | 5174 |
-| Bank-C | 5175 |
-| Bank-D | 5176 |
-| Central-Bank-A | 5177 |
-| Central-Bank-B | 5178 |
+| Node | Network | Host RPC Port |
+|------|---------|---------------|
+| hub-validator | hub | 8845 |
+| central-bank-a (peer) | hub | 8846 |
+| bank-a (peer) | hub | 8847 |
+| central-bank-b (peer) | hub | 8848 |
+| bank-b (peer) | hub | 8849 |
+| central-bank-a | spoke-a | 8645 |
+| bank-a | spoke-a | 8646 |
+| central-bank-b | spoke-b | 8745 |
+| bank-b | spoke-b | 8746 |
 
 ---
 
 ## Testing
 
 ```bash
-make test.api-gateway    # Go tests for api-gateway
-make test.auth           # Go tests for auth service
-make test.compliance     # Go tests for compliance service
-make test.all            # Run all backend tests
-
-make contracts.test      # Foundry unit tests for smart contracts
-make contracts.coverage  # Solidity coverage report
+make scenario-b.test             # contracts + backend
+make scenario-b.test-contracts   # Foundry unit tests (AMM, Hub, SpokeBridge, ...)
+make scenario-b.test-backend     # Go tests (api-gateway, payment-orchestrator, compliance)
+make scenario-b.test-integration # full happy-path API integration test against a live stack
 ```
 
-### Tryout Scripts
+Foundry unit tests are fully implemented across all Scenario B contracts. Backend unit tests and integration coverage are partially implemented; several integration and E2E areas are still Planned — see [`tests/TEST-CATALOG.md`](tests/TEST-CATALOG.md) and [`docs/test-execution-plan.md`](docs/test-execution-plan.md).
 
-Per-entity onboarding and payment demos are available under `tryouts/`:
+### Tryout / E2E Scripts
+
+E2E walkthroughs and per-flow demos live under `tryouts/`, including:
 
 ```bash
-./tryouts/tryout-spoke-a-bank-a.sh   # Bank-A + Central-Bank-A flow
-./tryouts/tryout-spoke-a-bank-c.sh   # Bank-C + Central-Bank-A flow
-./tryouts/tryout-spoke-b-bank-b.sh   # Bank-B + Central-Bank-B flow
-./tryouts/tryout-spoke-b-bank-d.sh   # Bank-D + Central-Bank-B flow
+bash tryouts/tryout-scenario-b-e2e.sh all          # US1–US6 walkthrough
+bash tryouts/tryout-commercial-swap-e2e.sh         # commercial-bank swap flow
+bash tryouts/tryout-cross-currency-full-lifecycle.sh
+bash tryouts/tryout-cacti-interop.sh               # relay interop
 ```
 
 ---
@@ -409,16 +388,9 @@ Per-entity onboarding and payment demos are available under `tryouts/`:
 ## Teardown
 
 ```bash
-make spoke-all-down            # Stop both spokes + relay (shared infra left running)
-make frontend-spoke-all-down   # Stop all frontends
-make deploy.down-infra         # Stop Keycloak, PostgreSQL, Redis
-```
-
-To tear down a single spoke:
-
-```bash
-make spoke-a-down              # Stop spoke-a backend, Paladin, and Besu
-make spoke-b-down              # Stop spoke-b backend, Paladin, and Besu
+make scenario-b.down            # Stop backend, relay, NOC, and infra
+make scenario-b.nuke            # Full wipe (containers + Postgres volume + chain data)
+make frontend-scenario-b-down   # Stop all frontends
 ```
 
 ---
@@ -428,7 +400,7 @@ make spoke-b-down              # Stop spoke-b backend, Paladin, and Besu
 ### PKI
 
 ```bash
-make pki.gen-all               # Generate all certificates
+make scenario-b.prepare-pki    # Generate all certificate material (pki.gen-all)
 make pki.check                 # Verify certificate status
 make pki.clean                 # Remove generated certificates
 ```
@@ -437,25 +409,33 @@ make pki.clean                 # Remove generated certificates
 
 ```bash
 make deploy.up-infra           # Start Keycloak + PostgreSQL + Redis
-make deploy.up-hub-besu        # Start Hub Besu network only (chain 1337)
-make deploy.up-besu            # Start Hub + both Spoke Besu networks
-make deploy.up                 # Infrastructure + Besu
-```
-
-### Paladin
-
-```bash
-make paladin.start-spoke-a     # Start Paladin nodes for spoke-a
-make paladin.start-spoke-b     # Start Paladin nodes for spoke-b
-make paladin.stop-spoke-a      # Stop Paladin nodes for spoke-a
-make paladin.stop-spoke-b      # Stop Paladin nodes for spoke-b
+make deploy.up-hub-besu        # Start the hub Besu network only (chain 1337)
+make deploy.up-besu            # Start hub + both spoke Besu networks
+make scenario-b.up-infra       # Infrastructure + all Besu networks
 ```
 
 ### Relay
 
 ```bash
-make relay-up                  # Start HTLC cross-spoke relay
-make relay-down                # Stop relay
+make scenario-b.up-relayer     # Start the Cacti cross-network relay
+make scenario-b.down-relayer   # Stop the relay
+```
+
+### NOC
+
+```bash
+make noc.setup-keycloak        # Configure NOC Keycloak client
+make noc.up                    # Start the NOC portal + backend + agents
+make noc.setup-agents          # Register the monitoring agents
+make noc.down                  # Stop the NOC stack
+make noc.logs                  # Tail NOC logs
+```
+
+### FX Rate Feeder
+
+```bash
+make scenario-b.up-fx-feeder   # Start the mock BRL/ARS rate feeder (Hub ManualOracle)
+make scenario-b.down-fx-feeder # Stop the feeder
 ```
 
 ### Protobuf
