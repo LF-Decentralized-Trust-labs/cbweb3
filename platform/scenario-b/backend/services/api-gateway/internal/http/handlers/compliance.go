@@ -6,6 +6,7 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
@@ -86,7 +87,24 @@ func (h *ComplianceHandler) AMLScreen(c *fiber.Ctx) error {
 	if h.kycMgr != nil {
 		s, err := h.kycMgr.GetKYCStatus(c.UserContext(), body.Subject)
 		if err != nil {
-			s = domain.KYCStatus(h.kyc.GetStatus(body.Subject))
+			// REQ-COM-007 fail-closed (finding R2-H-7): a failure of the
+			// compliance dependency must BLOCK the transaction. Never fall
+			// back to the permissive in-memory checker, which would let an
+			// unscreened subject through and return 200. Log the dependency
+			// error (silent swallowing is prohibited) and fail closed with
+			// 503 Service Unavailable.
+			slog.Error("aml screen failed closed: compliance dependency unavailable",
+				"service", "api-gateway",
+				"event", "aml_screen",
+				"subject", body.Subject,
+				"error", err.Error(),
+			)
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"subject":    body.Subject,
+				"sanctioned": true,
+				"error":      "compliance dependency unavailable; AML screening cannot be completed",
+				"code":       "COMPLIANCE_UNAVAILABLE",
+			})
 		}
 		kycStatus = s
 	} else {

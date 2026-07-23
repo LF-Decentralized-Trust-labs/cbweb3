@@ -422,6 +422,39 @@ func TestAMLScreenMissingSubject(t *testing.T) {
 	}
 }
 
+// TestAMLScreenFailsClosedOnDependencyError enforces the fail-closed contract
+// of REQ-COM-007 (finding R2-H-7). When the compliance dependency
+// (KYCManager.GetKYCStatus) returns an error, the AML gate must NOT fall back
+// to the permissive in-memory checker and let the transaction through. It must
+// fail closed: block the request with 503 Service Unavailable.
+func TestAMLScreenFailsClosedOnDependencyError(t *testing.T) {
+	t.Parallel()
+	// status is APPROVED (non-sanctioned) so that a permissive fallback would
+	// wrongly return 200; err forces the primary dependency to fail.
+	stub := kycManagerStub{status: domain.KYCApproved, err: errors.New("compliance backend unavailable")}
+	handler := NewComplianceHandler(stub, nil)
+	app := fiber.New()
+	app.Post("/compliance/aml/screen", handler.AMLScreen)
+
+	body, _ := json.Marshal(map[string]string{"subject": "bank-a"})
+	req := httptest.NewRequest(http.MethodPost, "/compliance/aml/screen", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("AML gate must fail closed on dependency error: expected 503, got %d", resp.StatusCode)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if sanctioned, ok := payload["sanctioned"].(bool); ok && !sanctioned {
+		t.Fatalf("fail-closed response must not report the subject as cleared (sanctioned=false)")
+	}
+}
+
 func TestProvisionParticipantSuccess(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{}
