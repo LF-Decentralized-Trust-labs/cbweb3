@@ -79,7 +79,7 @@ func TestFoundHubStepOrder(t *testing.T) {
 	must("start-hub-infra", "provision-keycloak-hub")
 	must("start-hub-infra", "start-hub-backend")
 	must("provision-keycloak-hub", "start-hub-backend")
-	must("start-relay", "start-noc")
+	must("start-besu-hub", "add-noc-agent")
 }
 
 // deploy-hub-contracts invokes the single CBWeb3Hub forge script.

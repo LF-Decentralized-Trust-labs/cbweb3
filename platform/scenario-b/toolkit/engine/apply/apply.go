@@ -51,9 +51,67 @@ func Apply(ctx context.Context, o Options) (orchestrator.Report, error) {
 		return applyFoundSpoke(ctx, o, pd)
 	case "join":
 		return applyJoin(ctx, o, pd)
+	case "observe":
+		return applyObserve(ctx, o, pd)
 	default:
 		return orchestrator.Report{}, fmt.Errorf("unknown mode %q", pd.Spec.Mode)
 	}
+}
+
+// applyObserve stands up an observe-mode NOC deployment: it consumes the NOC
+// bundle (the monitoring topology emitted by a CB's found-spoke / the hub's
+// found-hub), brings up the NOC control plane (db + backend + portal), then
+// registers the spoke and provisions the founding agent's key. It stands up no
+// Besu node, so spec.node is absent — never dereference it here.
+func applyObserve(ctx context.Context, o Options, pd *manifest.ParticipantDeployment) (orchestrator.Report, error) {
+	if pd.Spec.NOCBundleRef == "" {
+		return orchestrator.Report{}, fmt.Errorf("observe: spec.nocBundleRef is required")
+	}
+	dataDir := absOr(firstNonEmpty(o.DataDir, "."))
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return orchestrator.Report{}, err
+	}
+	root := absOr(firstNonEmpty(o.RepoRoot, "."))
+
+	// FR-001: consume + validate the NOC bundle BEFORE any effect.
+	bundlePath := resolveBundle(pd.Spec.NOCBundleRef, o.ManifestPath)
+	nb, err := bundle.LoadNOC(bundlePath)
+	if err != nil {
+		return orchestrator.Report{}, fmt.Errorf("observe: invalid noc bundle %q: %w", bundlePath, err)
+	}
+
+	lock, err := orchestrator.AcquireLock(dataDir)
+	if err != nil {
+		return orchestrator.Report{}, err
+	}
+	defer func() { _ = lock.Release() }()
+
+	state, err := orchestrator.LoadState(dataDir)
+	if err != nil {
+		return orchestrator.Report{}, err
+	}
+
+	prefix := sanitizePrefix(pd.Metadata.Name) // e.g. "noc-brazil"
+	cfg := orchestrator.ObserveConfig{
+		ScenarioBDir:    filepath.Join(root, "scenario-b"),
+		TemplatesDir:    filepath.Join(root, "scenario-b", "provisioning", "templates"),
+		Bundle:          nb,
+		ContainerPrefix: "sc-b-cbweb3-" + prefix,
+		NetPrefix:       prefix,
+		VolumePrefix:    prefix,
+		FrontendHost:    pd.Spec.FrontendHost,
+		// BackendPort/PortalPort fall back to the local convention in WithDefaults;
+		// spec.noc may carry explicit ports in a later phase.
+	}
+	cfg.WithDefaults()
+	if o.DryRun {
+		cfg.Runner = &exec.DryRunner{}
+	} else {
+		cfg.Runner = exec.NewReal(root, cfg.ComposeEnv())
+	}
+
+	steps := orchestrator.ObserveSteps(cfg)
+	return orchestrator.New("observe", steps, state, o.DryRun).Run(ctx)
 }
 
 func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDeployment) (orchestrator.Report, error) {
@@ -126,6 +184,7 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		LauncherPort:        pd.Spec.LauncherPort,
 		Currency:            pd.Spec.Spoke.Currency,
 		AdminUsers:          toOrchestratorAdminUsers(pd.Spec.AdminUsers),
+		NOCBackendURL:       manifestNOCBackendURL(pd), // where this CB's noc-agent pushes
 	}
 	cfg.WithDefaults()
 	if o.DryRun {
@@ -225,7 +284,8 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
 		HubRPC:          firstNonEmpty(o.HubRPC, sb.HubRPC), // routable hub RPC from the spoke bundle
-		RelayEndpoint:   manifestRelayEndpoint(pd),         // the relay's own REST endpoint → CACTI_API_URL
+		RelayEndpoint:   manifestRelayEndpoint(pd),          // the relay's own REST endpoint → CACTI_API_URL
+		NOCBackendURL:   manifestNOCBackendURL(pd),          // where this bank's noc-agent pushes
 		FrontendHost:    pd.Spec.FrontendHost,
 		LauncherEnabled: pd.Spec.Launcher == "enable",
 		LauncherPort:    pd.Spec.LauncherPort,
@@ -390,6 +450,15 @@ func manifestRelayAdvHost(pd *manifest.ParticipantDeployment) string {
 		return pd.Spec.Relay.AdvertisedHost
 	}
 	return "host.docker.internal"
+}
+
+// manifestNOCBackendURL returns spec.noc.backendURL (where this entity's
+// noc-agent pushes), or "" to fall back to the local single-host convention.
+func manifestNOCBackendURL(pd *manifest.ParticipantDeployment) string {
+	if pd.Spec.NOC == nil {
+		return ""
+	}
+	return pd.Spec.NOC.BackendURL
 }
 
 // toOrchestratorAdminUsers converts the manifest's spec.adminUsers into the

@@ -92,7 +92,7 @@ func TestSchemaParity(t *testing.T) {
 // satisfy the schema's declared per-mode required/forbidden fields (a
 // lightweight parity check over the concrete examples).
 func TestSchemaParityOnFixtures(t *testing.T) {
-	for _, name := range []string{"found-hub.yaml", "found-spoke.yaml", "join.yaml"} {
+	for _, name := range []string{"found-hub.yaml", "found-spoke.yaml", "join.yaml", "observe.yaml"} {
 		pd := mustLoad(t, name)
 		if !Validate(pd).Valid() {
 			t.Fatalf("%s: expected Go-valid fixture", name)

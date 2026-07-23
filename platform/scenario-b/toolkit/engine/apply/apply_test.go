@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/bundle"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/orchestrator"
 )
 
@@ -128,6 +129,78 @@ spec:
 	}
 	if _, err := Apply(context.Background(), Options{ManifestPath: m, DataDir: dir, DryRun: true}); err == nil {
 		t.Fatal("expected error for invalid spoke bundle")
+	}
+}
+
+// TK-B11: observe dry-run plans the NOC control-plane steps (NOC bundle
+// validated, no effects). No node/relay is required for observe.
+func TestApplyObserveDryRun(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := bundle.EmitNOC(bundle.NOCBundle{
+		SpokeID: "spoke-a", SpokeUUID: "b1000000-0000-0000-0000-000000000001",
+		Name: "spoke-a", CurrencyCode: "BRL", Jurisdiction: "spoke-a",
+		Components: []bundle.NOCComponent{
+			{Name: "besu-cb", Type: "BESU", Endpoint: "http://cb-besu:8545", ContainerName: "cb-besu"},
+		},
+	}, dir); err != nil {
+		t.Fatal(err)
+	}
+	m := filepath.Join(dir, "noc.yaml")
+	if err := os.WriteFile(m, []byte(`apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata: { name: noc-brazil }
+spec:
+  scenario: "b"
+  environment: local
+  mode: observe
+  topology: { role: noc }
+  nocBundleRef: ./bundles/spoke-a.noc.bundle.yaml
+  frontendHost: localhost
+  adminUsers: [ { role: ROLE_NOC_ADMIN, username: a, password: b } ]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Apply(context.Background(), Options{ManifestPath: m, DataDir: dir, DryRun: true})
+	if err != nil {
+		t.Fatalf("apply observe dry-run: %v", err)
+	}
+	if rep.Mode != "observe" || len(rep.Steps) == 0 {
+		t.Fatalf("unexpected report: %+v", rep)
+	}
+	names := map[string]bool{}
+	for _, s := range rep.Steps {
+		if s.Status != orchestrator.StatusPlanned && s.Status != orchestrator.StatusSkipped {
+			t.Fatalf("dry-run step %s status %s", s.Name, s.Status)
+		}
+		names[s.Name] = true
+	}
+	for _, want := range []string{"start-noc-stack", "register-noc-spoke", "provision-noc-key"} {
+		if !names[want] {
+			t.Errorf("expected step %q in observe plan; steps=%v", want, names)
+		}
+	}
+}
+
+// observe with a missing NOC bundle is rejected before any effect.
+func TestApplyObserveMissingBundle(t *testing.T) {
+	dir := t.TempDir()
+	m := filepath.Join(dir, "noc-bad.yaml")
+	if err := os.WriteFile(m, []byte(`apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata: { name: noc-x }
+spec:
+  scenario: "b"
+  environment: local
+  mode: observe
+  topology: { role: noc }
+  nocBundleRef: ./bundles/does-not-exist.noc.bundle.yaml
+  frontendHost: localhost
+  adminUsers: [ { role: ROLE_NOC_ADMIN, username: a, password: b } ]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(context.Background(), Options{ManifestPath: m, DataDir: dir, DryRun: true}); err == nil {
+		t.Fatal("expected error for missing NOC bundle")
 	}
 }
 

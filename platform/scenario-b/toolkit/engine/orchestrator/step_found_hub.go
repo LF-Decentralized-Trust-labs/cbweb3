@@ -48,6 +48,9 @@ type HubConfig struct {
 	// FrontendHost is the browser-facing host baked into the hub governance portal's
 	// VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost).
 	FrontendHost string
+	// NOCBackendURL is where the hub's noc-agent pushes (spec.noc.backendURL;
+	// default host.docker.internal:8090).
+	NOCBackendURL string
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -75,6 +78,9 @@ func (c *HubConfig) WithDefaults() {
 	if c.NetPrefix == "" {
 		c.NetPrefix = c.VolumePrefix
 	}
+	if c.NOCBackendURL == "" {
+		c.NOCBackendURL = "http://host.docker.internal:8090"
+	}
 	if c.WaitRPC == nil {
 		c.WaitRPC = func(ctx context.Context) error { return waitRPC(ctx, c.HubRPC, 60*time.Second) }
 	}
@@ -100,6 +106,7 @@ func (c HubConfig) template(name string) string {
 
 func (c HubConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
 func (c HubConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
+func (c HubConfig) nocAgentVolume() string { return c.VolumePrefix + "_noc_agent_cfg" }
 func (c HubConfig) keycloakPort() int      { return c.RPCPort + 7000 }
 func (c HubConfig) keycloakContainer() string {
 	return c.ContainerPrefix + "-hub-keycloak"
@@ -242,24 +249,25 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"FRONTEND_IMAGE":             cbFrontendImage("governance", c.RPCPort+8000),
 		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
 		// Browser CORS: allow the hub governance portal origin on the hub gateway.
-		"CORS_ALLOW_ORIGINS": corsOriginSingle(c.RPCPort, c.FrontendHost),
-		"RELAY_IMAGE":                hubRelayImage,
-		"RELAY_CONTAINER_NAME":       e + "-relay",
-		"RELAY_NET_PREFIX":           c.NetPrefix,
-		"RELAY_VOLUME_PREFIX":        c.VolumePrefix,
-		"RELAY_PORT":                 "7000",
-		"NOC_AGENT_BESU_RPC":         fmt.Sprintf("http://%s-hub-validator:8545", e),
-		"NOC_AGENT_ENTITY":           "hub",
-		"NOC_AGENT_IMAGE":            hubNocAgentImage,
-		"NOC_BACKEND_IMAGE":          hubNocBackendImage,
-		"NOC_BACKEND_PORT":           itoa(c.RPCPort + 11000),
-		"NOC_DB_NAME":                "noc",
-		"NOC_DB_USER":                "cbweb3",
-		"NOC_DB_PASSWORD":            "cbweb3",
-		"NOC_NET_PREFIX":             c.NetPrefix,
-		"NOC_PORTAL_IMAGE":           hubNocPortalImage,
-		"NOC_PORTAL_PORT":            itoa(c.RPCPort + 12000),
-		"NOC_VOLUME_PREFIX":          c.VolumePrefix,
+		"CORS_ALLOW_ORIGINS":   corsOriginSingle(c.RPCPort, c.FrontendHost),
+		"RELAY_IMAGE":          hubRelayImage,
+		"RELAY_CONTAINER_NAME": e + "-relay",
+		"RELAY_NET_PREFIX":     c.NetPrefix,
+		"RELAY_VOLUME_PREFIX":  c.VolumePrefix,
+		"RELAY_PORT":           "7000",
+		"NOC_AGENT_BESU_RPC":   fmt.Sprintf("http://%s-hub-validator:8545", e),
+		"NOC_AGENT_ENTITY":     "hub",
+		"NOC_AGENT_VOLUME":     c.nocAgentVolume(),
+		"NOC_AGENT_IMAGE":      hubNocAgentImage,
+		"NOC_BACKEND_IMAGE":    hubNocBackendImage,
+		"NOC_BACKEND_PORT":     itoa(c.RPCPort + 11000),
+		"NOC_DB_NAME":          "noc",
+		"NOC_DB_USER":          "cbweb3",
+		"NOC_DB_PASSWORD":      "cbweb3",
+		"NOC_NET_PREFIX":       c.NetPrefix,
+		"NOC_PORTAL_IMAGE":     hubNocPortalImage,
+		"NOC_PORTAL_PORT":      itoa(c.RPCPort + 12000),
+		"NOC_VOLUME_PREFIX":    c.VolumePrefix,
 	}
 	for k, v := range vars {
 		if err := addrs.AppendAddr(c.HubEnvFile, k, v); err != nil {
@@ -463,14 +471,25 @@ func FoundHubSteps(c HubConfig) []Step {
 		// address is provided via each manifest's spec.relay.endpoint; spokes register
 		// dynamically at found-spoke (register-relay-spoke → POST /api/v1/spokes).
 		{
-			Name: "start-noc", Deps: []string{"start-hub-infra"}, Soft: true,
+			// add-noc-agent runs the hub's own noc-agent (monitors the hub validator
+			// besu), pushing to the observe NOC backend. The NOC control plane
+			// (db+backend+portal) is a dedicated observe deployment, not the hub.
+			// Soft: observability never blocks provisioning.
+			Name: "add-noc-agent", Deps: []string{"start-besu-hub"}, Soft: true,
 			Run: func(ctx context.Context) error {
-				for _, b := range nocImages {
-					if err := c.buildImage(ctx, b.image, b.dockerfile, b.context); err != nil {
-						return err
-					}
+				if err := c.buildImage(ctx, hubNocAgentImage,
+					"backend/services/noc-agent/Dockerfile", "backend/services/noc-agent"); err != nil {
+					return err
 				}
-				return compose("noc")(ctx)
+				agentCfg, err := renderAgentYAML(c.nocBundle(), c.NOCBackendURL,
+					deterministicAgentKey("hub", nocFoundingAgentLabel), 15)
+				if err != nil {
+					return err
+				}
+				if err := writeVolumeFile(ctx, c.Runner, c.nocAgentVolume(), "agent.yaml", agentCfg, "0644"); err != nil {
+					return err
+				}
+				return compose("noc-agent")(ctx)
 			},
 		},
 		{
@@ -502,6 +521,25 @@ func FoundHubSteps(c HubConfig) []Step {
 					Contracts:  m,
 				}
 				_, err = bundle.EmitHub(b, c.OutDir)
+				return err
+			},
+		},
+		{
+			// emit-noc-bundle publishes the hub's monitoring topology (public,
+			// no-secrets) so an observe-mode NOC deployment can register the hub
+			// and drive its agent. Pure config; Soft (observability never blocks).
+			Name: "emit-noc-bundle",
+			Deps: []string{"start-hub-infra"},
+			Soft: true,
+			Check: func(context.Context) (bool, error) {
+				b, err := bundle.LoadNOC(filepath.Join(c.OutDir, "bundles", "hub.noc.bundle.yaml"))
+				if err != nil {
+					return false, nil
+				}
+				return b.SpokeUUID == deterministicUUID("hub"), nil
+			},
+			Run: func(context.Context) error {
+				_, err := bundle.EmitNOC(c.nocBundle(), c.OutDir)
 				return err
 			},
 		},

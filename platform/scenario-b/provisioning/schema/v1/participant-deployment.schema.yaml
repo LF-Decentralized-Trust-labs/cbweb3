@@ -19,16 +19,19 @@ properties:
       name: { type: string, minLength: 1 }
   spec:
     type: object
-    required: [scenario, environment, mode, topology, node, image, keyProvider, certSource, relay, frontendHost, adminUsers]
+    # node/image/keyProvider/certSource/relay são obrigatórios apenas nos modos
+    # que sobem um nó Besu (found-hub/found-spoke/join) — ver allOf abaixo. O modo
+    # observe (stack de observabilidade NOC) não sobe nó, então não os exige.
+    required: [scenario, environment, mode, topology, frontendHost, adminUsers]
     properties:
       scenario: { const: "b" }
       environment: { enum: [local] }          # staging/prod rejeitados nesta fase
-      mode: { enum: [found-hub, found-spoke, join] }
+      mode: { enum: [found-hub, found-spoke, join, observe] }
       topology:
         type: object
         required: [role]
         properties:
-          role: { enum: [hub, central-bank, commercial-bank] }
+          role: { enum: [hub, central-bank, commercial-bank, noc] }
       displayName: { type: string }
       hub:
         type: object
@@ -45,6 +48,7 @@ properties:
           currency: { type: string }
       hubBundleRef: { type: string }
       joinBundleRef: { type: string }
+      nocBundleRef: { type: string }
       bankId: { type: string }
       pair:
         type: object
@@ -74,6 +78,14 @@ properties:
           endpoint: { type: string }
           advertisedHost: { type: string }
       cbEndpoint: { type: string }
+      # NOC bundle reference (obrigatório em observe; ver allOf).
+      # Bloco NOC opcional em qualquer modo (nunca carrega segredos).
+      noc:
+        type: object
+        properties:
+          backendURL: { type: string }
+          pushIntervalSeconds: { type: integer, minimum: 0 }
+          components: { type: array, items: { enum: [BESU, CACTI_RELAY, PALADIN] } }
       frontendHost: { type: string }
       adminUsers:
         type: array
@@ -91,15 +103,27 @@ properties:
       launcherPort: { type: integer, minimum: 1, maximum: 65535 }
     # Regras condicionais por modo (estruturais)
     allOf:
+      # Campos de provisionamento de nó: obrigatórios apenas nos modos que sobem
+      # um nó Besu. Guardado por `enum` (não `const`) de propósito — o teste de
+      # paridade (schema_parity_test.go) só processa cláusulas com mode.const, e
+      # a matriz obrigatório/proibido por modo lá é apenas dos campos que
+      # DISCRIMINAM o modo, não destes campos estruturais.
+      - if:  { properties: { mode: { enum: [found-hub, found-spoke, join] } } }
+        then:
+          required: [node, image, keyProvider, certSource, relay]
       - if:  { properties: { mode: { const: found-hub } } }
         then:
           required: [hub]
-          not: { anyOf: [ {required: [spoke]}, {required: [hubBundleRef]}, {required: [joinBundleRef]}, {required: [bankId]}, {required: [pair]} ] }
+          not: { anyOf: [ {required: [spoke]}, {required: [hubBundleRef]}, {required: [joinBundleRef]}, {required: [bankId]}, {required: [pair]}, {required: [nocBundleRef]} ] }
       - if:  { properties: { mode: { const: found-spoke } } }
         then:
           required: [spoke, hubBundleRef]
-          not: { anyOf: [ {required: [hub]}, {required: [joinBundleRef]}, {required: [bankId]} ] }
+          not: { anyOf: [ {required: [hub]}, {required: [joinBundleRef]}, {required: [bankId]}, {required: [nocBundleRef]} ] }
       - if:  { properties: { mode: { const: join } } }
         then:
           required: [spoke, joinBundleRef, bankId]
-          not: { anyOf: [ {required: [hub]}, {required: [hubBundleRef]}, {required: [pair]}, {required: [cbEndpoint]} ] }
+          not: { anyOf: [ {required: [hub]}, {required: [hubBundleRef]}, {required: [pair]}, {required: [cbEndpoint]}, {required: [nocBundleRef]} ] }
+      - if:  { properties: { mode: { const: observe } } }
+        then:
+          required: [nocBundleRef]
+          not: { anyOf: [ {required: [hub]}, {required: [spoke]}, {required: [hubBundleRef]}, {required: [joinBundleRef]}, {required: [bankId]}, {required: [pair]}, {required: [cbEndpoint]} ] }

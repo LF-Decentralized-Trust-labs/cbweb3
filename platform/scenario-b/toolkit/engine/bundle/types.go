@@ -42,3 +42,31 @@ type SpokeBundle struct {
 	// fallback (HubRPCPort). Empty on old bundles → bank falls back to HubRPCPort.
 	HubRPC string `yaml:"hubRpc,omitempty" json:"hubRpc,omitempty"`
 }
+
+// NOCComponent describes a single monitorable component (a Besu node, a Cacti
+// relay, a Paladin node) that the NOC agent probes and reports on. It carries
+// only public addressing — never keys or credentials.
+type NOCComponent struct {
+	Name          string `yaml:"name" json:"name"`
+	Type          string `yaml:"type" json:"type"` // BESU | CACTI_RELAY | PALADIN
+	Endpoint      string `yaml:"endpoint" json:"endpoint"`
+	ContainerName string `yaml:"containerName,omitempty" json:"containerName,omitempty"` // Docker container for log collection
+}
+
+// NOCBundle is the versioned public artifact describing a spoke's (or the hub's)
+// monitoring topology. It is emitted by found-hub/found-spoke and consumed by an
+// observe-mode NOC deployment to register the spoke and drive its agent config.
+// Public data only — no secrets (no keys, no agent API keys).
+type NOCBundle struct {
+	Version string `yaml:"version" json:"version"`
+	// SpokeID is the logical id ("spoke-brl", "hub"); used for the bundle filename.
+	SpokeID string `yaml:"spokeId" json:"spokeId"`
+	// SpokeUUID is the deterministic UUID the NOC backend registers the spoke
+	// under, derived from SpokeID so every participant (CB, bank, NOC) agrees on
+	// the same id without exchanging it.
+	SpokeUUID    string         `yaml:"spokeUuid" json:"spokeUuid"`
+	Name         string         `yaml:"name" json:"name"`
+	CurrencyCode string         `yaml:"currencyCode" json:"currencyCode"`
+	Jurisdiction string         `yaml:"jurisdiction" json:"jurisdiction"`
+	Components   []NOCComponent `yaml:"components" json:"components"`
+}

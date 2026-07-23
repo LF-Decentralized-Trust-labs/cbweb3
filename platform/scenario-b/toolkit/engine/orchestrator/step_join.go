@@ -43,6 +43,7 @@ type JoinConfig struct {
 	P2PPort         int    // host port -> besu 30303
 	HubRPC          string // hub RPC (routable, from the spoke bundle) → HUB_BESU_RPC_URL
 	RelayEndpoint   string // the relay's OWN REST endpoint (spec.relay.endpoint, e.g. http://<hub>:7000) → CACTI_API_URL
+	NOCBackendURL   string // where this bank's noc-agent pushes (spec.noc.backendURL; default host.docker.internal:8090)
 	BesuImage       string
 	GatewayURL      string
 	FrontendHost    string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
@@ -72,6 +73,9 @@ func (c *JoinConfig) WithDefaults() {
 	}
 	if c.Entity == "" {
 		c.Entity = c.BankID
+	}
+	if c.NOCBackendURL == "" {
+		c.NOCBackendURL = "http://host.docker.internal:8090"
 	}
 	if c.RPCPort == 0 {
 		c.RPCPort = 10545
@@ -217,14 +221,14 @@ func (c JoinConfig) ComposeEnv() []string {
 		"KC_DB_URL":         "jdbc:postgresql://" + e + "-" + c.Entity + "-postgres:5432/keycloak",
 		"KEYCLOAK_PORT":     itoa(c.keycloakPort()),
 		// backend / frontend (images shared with the hub; must be pre-built)
-		"GATEWAY_PORT":     itoa(c.RPCPort + 8000),
-		"GATEWAY_URL":      c.GatewayURL,
+		"GATEWAY_PORT":               itoa(c.RPCPort + 8000),
+		"GATEWAY_URL":                c.GatewayURL,
 		"BACKEND_IMAGE":              hubBackendImage,
 		"COMPLIANCE_IMAGE":           hubComplianceImage,
 		"AUTH_IMAGE":                 hubAuthImage,
 		"PAYMENT_ORCHESTRATOR_IMAGE": hubPaymentOrchestratorImage,
-		"FRONTEND_IMAGE":   cbFrontendImage("bank", c.RPCPort+8000),
-		"FRONTEND_PORT":    itoa(c.RPCPort + 9000),
+		"FRONTEND_IMAGE":             cbFrontendImage("bank", c.RPCPort+8000),
+		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
 		// Browser CORS: allow this bank's portal origin on its gateway.
 		"CORS_ALLOW_ORIGINS": corsOriginSingle(c.RPCPort, c.FrontendHost),
 		// app stack (compliance + auth): the bank is the local signer; the Keycloak
@@ -275,6 +279,12 @@ func (c JoinConfig) ComposeEnv() []string {
 		"PKI_DIR":              "/workspace/backend/config/pki",
 		"KMS_SEED_KEY_ID":      c.Entity,
 		"KMS_SEED_PRIVATE_KEY": bankKey,
+		// noc (observability — soft). The bank runs its own agent (node-level
+		// monitoring), mounting a rendered agent.yaml from NOC_AGENT_VOLUME and
+		// joining its own ENTITY_NET_PREFIX network to probe besu by container DNS.
+		"NOC_AGENT_ENTITY": c.Entity,
+		"NOC_AGENT_VOLUME": c.nocAgentVolume(),
+		"NOC_AGENT_IMAGE":  hubNocAgentImage,
 	}
 	env := make([]string, 0, len(vars))
 	for k, v := range vars {
@@ -305,8 +315,12 @@ func (c JoinConfig) composeUpArgs(tmpl string) []string {
 // soft service images. Derived from TemplatesDir (<scenario-b>/provisioning/templates).
 func (c JoinConfig) scenarioBDir() string { return filepath.Dir(filepath.Dir(c.TemplatesDir)) }
 
-// JoinSteps builds the ordered join step set (canonical flow, roadmap §6):
-// no relay/noc step — the spoke chain is already observed since found-spoke.
+func (c JoinConfig) nocAgentVolume() string { return c.VolumePrefix + "_noc_agent_cfg" }
+
+// JoinSteps builds the ordered join step set (canonical flow, roadmap §6): no
+// relay step (the spoke chain is registered at found-spoke), plus a Soft
+// add-noc-agent so the bank's OWN node is monitored (node-level, not just the
+// shared chain via the CB's agent).
 func JoinSteps(c JoinConfig) []Step {
 	c.WithDefaults()
 
@@ -505,6 +519,38 @@ func JoinSteps(c JoinConfig) []Step {
 				}
 				_, _, err := pki.GenerateBankCSR(c.BankID, c.Institution, c.pkiDir())
 				return err
+			},
+		},
+		{
+			// add-noc-agent runs the BANK's own noc-agent (node-level monitoring of
+			// the bank's Besu, distinct from the CB's). The bank self-provisions its
+			// per-entity key against the observe NOC backend (idempotent), renders a
+			// multi-component agent.yaml, and starts the agent. It pushes under the
+			// SAME spoke UUID as the CB (multi-agent per spoke). Soft: a NOC backend
+			// that is not up yet (observe not run) never blocks the bank join.
+			Name: "add-noc-agent",
+			Deps: []string{"wait-sync"},
+			Soft: true,
+			Run: func(ctx context.Context) error {
+				if err := nocProvisionAgentKey(ctx, nocHostURL(c.NOCBackendURL),
+					deterministicUUID(c.SpokeID),
+					deterministicAgentKey(c.SpokeID, c.BankID),
+					c.SpokeID+"-"+c.BankID); err != nil {
+					return err
+				}
+				if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), hubNocAgentImage,
+					"backend/services/noc-agent/Dockerfile", "backend/services/noc-agent"); err != nil {
+					return err
+				}
+				agentCfg, err := renderAgentYAML(c.nocBundle(), c.NOCBackendURL,
+					deterministicAgentKey(c.SpokeID, c.BankID), 15)
+				if err != nil {
+					return err
+				}
+				if err := writeVolumeFile(ctx, c.Runner, c.nocAgentVolume(), "agent.yaml", agentCfg, "0644"); err != nil {
+					return err
+				}
+				return compose("noc-agent")(ctx)
 			},
 		},
 	}

@@ -19,13 +19,14 @@ const (
 	ModeFoundHub   = "found-hub"
 	ModeFoundSpoke = "found-spoke"
 	ModeJoin       = "join"
+	ModeObserve    = "observe"
 )
 
 // Modes lists the recognized spec.mode values.
-var Modes = []string{ModeFoundHub, ModeFoundSpoke, ModeJoin}
+var Modes = []string{ModeFoundHub, ModeFoundSpoke, ModeJoin, ModeObserve}
 
 // Roles lists the recognized spec.topology.role values.
-var Roles = []string{"hub", "central-bank", "commercial-bank"}
+var Roles = []string{"hub", "central-bank", "commercial-bank", "noc"}
 
 // RequiredByMode is the per-mode set of spec fields that MUST be present.
 // It is the source of truth for the required half of the per-mode matrix and is
@@ -34,15 +35,17 @@ var RequiredByMode = map[string][]string{
 	ModeFoundHub:   {"hub"},
 	ModeFoundSpoke: {"spoke", "hubBundleRef"},
 	ModeJoin:       {"spoke", "joinBundleRef", "bankId"},
+	ModeObserve:    {"nocBundleRef"},
 }
 
 // ForbiddenByMode is the per-mode set of spec fields that MUST NOT be present.
 // It is the source of truth for the forbidden half of the per-mode matrix and
 // is compared against the published JSON-Schema by the parity test (SC-004).
 var ForbiddenByMode = map[string][]string{
-	ModeFoundHub:   {"spoke", "hubBundleRef", "joinBundleRef", "bankId", "pair"},
-	ModeFoundSpoke: {"hub", "joinBundleRef", "bankId"},
-	ModeJoin:       {"hub", "hubBundleRef", "pair", "cbEndpoint"},
+	ModeFoundHub:   {"spoke", "hubBundleRef", "joinBundleRef", "bankId", "pair", "nocBundleRef"},
+	ModeFoundSpoke: {"hub", "joinBundleRef", "bankId", "nocBundleRef"},
+	ModeJoin:       {"hub", "hubBundleRef", "pair", "cbEndpoint", "nocBundleRef"},
+	ModeObserve:    {"hub", "spoke", "hubBundleRef", "joinBundleRef", "bankId", "pair", "cbEndpoint"},
 }
 
 var (
@@ -108,29 +111,40 @@ func Validate(pd *ParticipantDeployment) Result {
 		r.AddError("spec.environment", fmt.Sprintf("invalid value %q; only %q is supported in this phase (staging/prod are rejected)", spec.Environment, wantEnv))
 	}
 
-	// FR-004: node addressing.
-	validateNode(spec.Node, &r)
+	// Node-provisioning fields (node addressing, Besu image, key/cert material,
+	// relay registration) apply only to modes that stand up an on-chain node.
+	// The observe mode deploys the NOC observability stack (no Besu node), so
+	// these are skipped for it. Any other/empty mode still validates them, so an
+	// invalid mode surfaces the full set of findings as before (FR-011).
+	if spec.Mode != ModeObserve {
+		// FR-004: node addressing.
+		validateNode(spec.Node, &r)
 
-	// Always-required scalar/object fields (structural, mirrored by schema).
-	if spec.Image == "" {
-		r.AddError("spec.image", "required field is missing")
+		// Always-required scalar/object fields (structural, mirrored by schema).
+		if spec.Image == "" {
+			r.AddError("spec.image", "required field is missing")
+		}
+		// FR-007: keyProvider / certSource URIs.
+		if spec.KeyProvider == "" {
+			r.AddError("spec.keyProvider", "required field is missing")
+		} else if !keyProviderRe.MatchString(spec.KeyProvider) {
+			r.AddError("spec.keyProvider", fmt.Sprintf("invalid value %q; must match kms://…", spec.KeyProvider))
+		}
+		if spec.CertSource == "" {
+			r.AddError("spec.certSource", "required field is missing")
+		} else if !certSourceRe.MatchString(spec.CertSource) {
+			r.AddError("spec.certSource", fmt.Sprintf("invalid value %q; must be self-signed, self-signed://… or ca://…", spec.CertSource))
+		}
+		validateRelay(spec.Relay, &r)
 	}
-	// FR-007: keyProvider / certSource URIs.
-	if spec.KeyProvider == "" {
-		r.AddError("spec.keyProvider", "required field is missing")
-	} else if !keyProviderRe.MatchString(spec.KeyProvider) {
-		r.AddError("spec.keyProvider", fmt.Sprintf("invalid value %q; must match kms://…", spec.KeyProvider))
-	}
-	if spec.CertSource == "" {
-		r.AddError("spec.certSource", "required field is missing")
-	} else if !certSourceRe.MatchString(spec.CertSource) {
-		r.AddError("spec.certSource", fmt.Sprintf("invalid value %q; must be self-signed, self-signed://… or ca://…", spec.CertSource))
-	}
-	validateRelay(spec.Relay, &r)
+
+	// frontendHost + adminUsers apply to every mode (the NOC has a portal and
+	// operator accounts too).
 	if spec.FrontendHost == "" {
 		r.AddError("spec.frontendHost", "required field is missing")
 	}
 	validateAdminUsers(spec.AdminUsers, &r)
+	validateNOC(spec.NOC, &r)
 
 	// Launcher (optional): enable | disable when present.
 	if spec.Launcher != "" && spec.Launcher != "enable" && spec.Launcher != "disable" {
@@ -255,10 +269,35 @@ func specFieldPresent(pd *ParticipantDeployment, field string) bool {
 		return s.BankID != ""
 	case "cbEndpoint":
 		return s.CBEndpoint != ""
+	case "nocBundleRef":
+		return s.NOCBundleRef != ""
 	default:
 		return false
 	}
 }
+
+// validateNOC checks the optional NOC block. It is present in observe (tuning
+// the NOC deployment) and optionally in found-*/join (configuring the entity's
+// agent). All fields are optional; only obviously-invalid values are rejected.
+func validateNOC(n *NOC, r *Result) {
+	if n == nil {
+		return
+	}
+	if n.PushIntervalSeconds < 0 {
+		r.AddError("spec.noc.pushIntervalSeconds",
+			fmt.Sprintf("invalid value %d; must be a non-negative number of seconds", n.PushIntervalSeconds))
+	}
+	for i, c := range n.Components {
+		if !contains(NOCComponentTypes, c) {
+			r.AddError(fmt.Sprintf("spec.noc.components[%d]", i),
+				fmt.Sprintf("invalid value %q; accepted values are: %s", c, strings.Join(NOCComponentTypes, ", ")))
+		}
+	}
+}
+
+// NOCComponentTypes are the component types the noc-agent knows how to probe.
+// Mirrors bundle.NOCComponentTypes (kept local to avoid a manifest→bundle dep).
+var NOCComponentTypes = []string{"BESU", "CACTI_RELAY", "PALADIN"}
 
 // validatePair enforces FR-012 when the sovereign pair is present.
 func validatePair(p *Pair, r *Result) {

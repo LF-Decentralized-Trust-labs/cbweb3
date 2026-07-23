@@ -33,25 +33,25 @@ type SpokeConfig struct {
 	SpokeWS             string
 	CBAddress           string
 	GenesisDir          string
-	VolumePrefix        string // <p>_genesis, <p>_besu_data (node state in named volumes)
-	ContainerPrefix     string // container name prefix (<p>-<entity>-besu, ...)
-	NetPrefix           string // docker network name prefix (<p>_besu_network, <p>_infra_network)
-	Entity              string // compose ENTITY label (e.g. "central-bank")
-	RPCPort             int    // host port -> besu 8545; other service ports derive by offset
-	WSPort              int    // host port -> besu 8546
-	P2PPort             int    // host port -> besu 30303
-	AdvertisedHost      string // externally reachable host for the spoke bundle enode (default host.docker.internal)
-	RelayAdvertisedHost string // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
-	RelayEndpoint       string // the relay's OWN REST endpoint (spec.relay.endpoint, e.g. http://<hub>:7000) → CACTI_API_URL
-	FrontendHost        string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
-	LauncherEnabled     bool   // spec.launcher == "enable": bake VITE_LAUNCHER_URL into the CB portals
-	LauncherPort        int    // spec.launcherPort: launcher host port (0 → env/default); host = FrontendHost
+	VolumePrefix        string      // <p>_genesis, <p>_besu_data (node state in named volumes)
+	ContainerPrefix     string      // container name prefix (<p>-<entity>-besu, ...)
+	NetPrefix           string      // docker network name prefix (<p>_besu_network, <p>_infra_network)
+	Entity              string      // compose ENTITY label (e.g. "central-bank")
+	RPCPort             int         // host port -> besu 8545; other service ports derive by offset
+	WSPort              int         // host port -> besu 8546
+	P2PPort             int         // host port -> besu 30303
+	AdvertisedHost      string      // externally reachable host for the spoke bundle enode (default host.docker.internal)
+	RelayAdvertisedHost string      // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
+	RelayEndpoint       string      // the relay's OWN REST endpoint (spec.relay.endpoint, e.g. http://<hub>:7000) → CACTI_API_URL
+	FrontendHost        string      // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
+	LauncherEnabled     bool        // spec.launcher == "enable": bake VITE_LAUNCHER_URL into the CB portals
+	LauncherPort        int         // spec.launcherPort: launcher host port (0 → env/default); host = FrontendHost
 	AdminUsers          []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
 	Currency            string      // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
-	TokenName           string // tCeBM name (default "Tokenized <Currency>")
-	TokenSymbol         string // tCeBM symbol (default "t<Currency>")
-	FiatTokenName       string // fCeBM name (default "Fiat <Currency>")
-	FiatTokenSymbol     string // fCeBM symbol (default "f<Currency>")
+	TokenName           string      // tCeBM name (default "Tokenized <Currency>")
+	TokenSymbol         string      // tCeBM symbol (default "t<Currency>")
+	FiatTokenName       string      // fCeBM name (default "Fiat <Currency>")
+	FiatTokenSymbol     string      // fCeBM symbol (default "f<Currency>")
 	ValidatorCount      int
 	BesuImage           string
 	HubBundlePath       string
@@ -59,6 +59,7 @@ type SpokeConfig struct {
 	SpokeEnvFile        string
 	KeycloakEnv         []string
 	GatewayURL          string
+	NOCBackendURL       string // where this CB's noc-agent pushes (spec.noc.backendURL; default host.docker.internal:8090)
 	Registrar           relayregistrar.RelayRegistrar
 
 	// Injectable seams (defaults wired by WithDefaults).
@@ -112,6 +113,11 @@ func (c *SpokeConfig) WithDefaults() {
 	if c.Currency == "" {
 		c.Currency = "LOC"
 	}
+	if c.NOCBackendURL == "" {
+		// Single-host default: the entity's noc-agent reaches the observe NOC
+		// backend published on the host (default observe backend port 8090).
+		c.NOCBackendURL = "http://host.docker.internal:8090"
+	}
 	if c.TokenSymbol == "" {
 		c.TokenSymbol = "t" + c.Currency
 	}
@@ -143,6 +149,7 @@ func (c *SpokeConfig) WithDefaults() {
 func (c SpokeConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
 func (c SpokeConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
 func (c SpokeConfig) caVolume() string       { return c.VolumePrefix + "_cb_tls" }
+func (c SpokeConfig) nocAgentVolume() string { return c.VolumePrefix + "_noc_agent_cfg" }
 
 // scenarioBDir is <repo>/scenario-b (parent of ContractsDir), the docker build
 // context root for the entity's soft service images.
@@ -358,8 +365,8 @@ func (c SpokeConfig) ComposeEnv() []string {
 		"KC_DB_URL":         "jdbc:postgresql://" + e + "-" + c.Entity + "-postgres:5432/keycloak",
 		"KEYCLOAK_PORT":     itoa(c.RPCPort + 7000),
 		// backend / frontend (images shared with the hub; must be pre-built)
-		"GATEWAY_PORT":     itoa(c.RPCPort + 8000),
-		"GATEWAY_URL":      fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
+		"GATEWAY_PORT":               itoa(c.RPCPort + 8000),
+		"GATEWAY_URL":                fmt.Sprintf("http://localhost:%d", c.RPCPort+8000),
 		"BACKEND_IMAGE":              hubBackendImage,
 		"COMPLIANCE_IMAGE":           hubComplianceImage,
 		"AUTH_IMAGE":                 hubAuthImage,
@@ -367,18 +374,18 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// CB operator portals (governance/treasury/supervisor). Each SPA bakes the CB
 		// api-gateway URL at build time, so the image is tagged per gateway port. The
 		// NOC portal is deployed by the noc template.
-		"GOVERNANCE_FRONTEND_IMAGE":  cbFrontendImage("governance", c.RPCPort+8000),
-		"GOVERNANCE_FRONTEND_PORT":   itoa(c.RPCPort + 9000),
+		"GOVERNANCE_FRONTEND_IMAGE": cbFrontendImage("governance", c.RPCPort+8000),
+		"GOVERNANCE_FRONTEND_PORT":  itoa(c.RPCPort + 9000),
 		// Browser CORS: allow this CB's four operator-portal origins on its gateway.
-		"CORS_ALLOW_ORIGINS": corsOriginsCB(c.RPCPort, c.FrontendHost),
-		"TREASURY_FRONTEND_IMAGE":    cbFrontendImage("treasury", c.RPCPort+8000),
-		"TREASURY_FRONTEND_PORT":     itoa(c.RPCPort + 13000),
-		"SUPERVISOR_FRONTEND_IMAGE":  cbFrontendImage("supervisor", c.RPCPort+8000),
-		"SUPERVISOR_FRONTEND_PORT":   itoa(c.RPCPort + 14000),
+		"CORS_ALLOW_ORIGINS":        corsOriginsCB(c.RPCPort, c.FrontendHost),
+		"TREASURY_FRONTEND_IMAGE":   cbFrontendImage("treasury", c.RPCPort+8000),
+		"TREASURY_FRONTEND_PORT":    itoa(c.RPCPort + 13000),
+		"SUPERVISOR_FRONTEND_IMAGE": cbFrontendImage("supervisor", c.RPCPort+8000),
+		"SUPERVISOR_FRONTEND_PORT":  itoa(c.RPCPort + 14000),
 		// app stack (compliance + auth): the CB is the local signer/deployer, and
 		// the Keycloak realm/client are provisioned by provision-keycloak-spoke.
-		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
-		"CB_PRIVATE_KEY":     devDeployerKey,
+		"SPOKE_CHAIN_ID": fmt.Sprintf("%d", c.SpokeChainID),
+		"CB_PRIVATE_KEY": devDeployerKey,
 		// The CB's own on-chain address (the dev deployer). Wired into the api-gateway
 		// so its payment routes (backed by the entity-relayer orchestrator via
 		// PAYMENT_GRPC_ADDR) resolve the CB's account.
@@ -403,9 +410,12 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// enqueues the W-<target> burn against its spoke (e.g. spoke-ars / tCeBM_ARS).
 		"SPOKE_NETWORK":       c.SpokeID,
 		"NATIVE_ASSET_SYMBOL": "tCeBM_" + c.Currency,
-		// noc (observability — soft)
+		// noc (observability — soft). The agent config is a rendered agent.yaml
+		// mounted from NOC_AGENT_VOLUME (seeded by add-noc-agent); the entity joins
+		// its own ENTITY_NET_PREFIX network to probe besu by container DNS.
 		"NOC_AGENT_BESU_RPC": fmt.Sprintf("http://%s-%s-besu:8545", e, c.Entity),
 		"NOC_AGENT_ENTITY":   c.Entity,
+		"NOC_AGENT_VOLUME":   c.nocAgentVolume(),
 		"NOC_AGENT_IMAGE":    hubNocAgentImage,
 		"NOC_BACKEND_IMAGE":  hubNocBackendImage,
 		"NOC_BACKEND_PORT":   itoa(c.RPCPort + 11000),
@@ -826,16 +836,28 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			},
 		},
 		{
+			// add-noc-agent runs THIS CB's own noc-agent: it renders a
+			// multi-component agent.yaml from the spoke's NOC bundle (spoke UUID +
+			// the CB's deterministic agent key), seeds it into a named volume, and
+			// starts the agent, which pushes to the observe NOC backend. Node-level
+			// monitoring of the CB; Soft (observability never blocks provisioning).
 			Name: "add-noc-agent",
 			Deps: []string{"start-besu-spoke"},
-			Soft: true, // observability — non-blocking
+			Soft: true,
 			Run: func(ctx context.Context) error {
-				for _, b := range nocImages {
-					if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), b.image, b.dockerfile, b.context); err != nil {
-						return err
-					}
+				if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), hubNocAgentImage,
+					"backend/services/noc-agent/Dockerfile", "backend/services/noc-agent"); err != nil {
+					return err
 				}
-				return compose("noc")(ctx)
+				agentCfg, err := renderAgentYAML(c.nocBundle(), c.NOCBackendURL,
+					deterministicAgentKey(c.SpokeID, nocFoundingAgentLabel), 15)
+				if err != nil {
+					return err
+				}
+				if err := writeVolumeFile(ctx, c.Runner, c.nocAgentVolume(), "agent.yaml", agentCfg, "0644"); err != nil {
+					return err
+				}
+				return compose("noc-agent")(ctx)
 			},
 		},
 	}
@@ -921,6 +943,27 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				HubRPC: hubForBundle.HubRPC,
 			}
 			_, err = bundle.EmitSpoke(b, c.OutDir)
+			return err
+		},
+	})
+
+	// emit-noc-bundle publishes this spoke's monitoring topology (the public,
+	// no-secrets NOC bundle) so an observe-mode NOC deployment can register the
+	// spoke and drive its agent. Pure config → no runtime deps beyond the node
+	// being up; Soft (observability never blocks provisioning).
+	steps = append(steps, Step{
+		Name: "emit-noc-bundle",
+		Deps: []string{"start-besu-spoke"},
+		Soft: true,
+		Check: func(context.Context) (bool, error) {
+			b, err := bundle.LoadNOC(filepath.Join(c.OutDir, "bundles", c.SpokeID+".noc.bundle.yaml"))
+			if err != nil {
+				return false, nil
+			}
+			return b.SpokeUUID == deterministicUUID(c.SpokeID), nil
+		},
+		Run: func(context.Context) error {
+			_, err := bundle.EmitNOC(c.nocBundle(), c.OutDir)
 			return err
 		},
 	})

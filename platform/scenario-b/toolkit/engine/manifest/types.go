@@ -57,6 +57,14 @@ type Spec struct {
 	BankID string `yaml:"bankId,omitempty" json:"bankId,omitempty"`
 	// Pair is optional in found-spoke, forbidden in the other modes.
 	Pair *Pair `yaml:"pair,omitempty" json:"pair,omitempty"`
+	// NOCBundleRef is required in observe, forbidden in the other modes. It points
+	// at the NOC bundle emitted by a CB's found-spoke (or found-hub) describing the
+	// monitoring topology this NOC deployment consumes.
+	NOCBundleRef string `yaml:"nocBundleRef,omitempty" json:"nocBundleRef,omitempty"`
+	// NOC is the optional NOC observability block. In observe it tunes the NOC
+	// deployment; in found-*/join it tells this entity's agent where to push
+	// (backendURL). Absent falls back to the local single-host convention.
+	NOC *NOC `yaml:"noc,omitempty" json:"noc,omitempty"`
 
 	Node        *Node  `yaml:"node,omitempty" json:"node,omitempty"`
 	Image       string `yaml:"image" json:"image"`
@@ -105,6 +113,21 @@ type Pair struct {
 	ConfirmerCB string `yaml:"confirmerCB" json:"confirmerCB"`
 	SymbolA     string `yaml:"symbolA" json:"symbolA"`
 	SymbolB     string `yaml:"symbolB" json:"symbolB"`
+}
+
+// NOC configures the NOC observability integration. Optional in every mode and
+// never carries secrets. In observe mode it tunes the NOC deployment that
+// consumes the referenced bundle; in found-*/join it configures this entity's
+// noc-agent (where to push, how often, which components to report).
+type NOC struct {
+	// BackendURL is the noc-backend this entity's agent pushes to. Empty falls
+	// back to the local single-host convention (host.docker.internal:<port>).
+	BackendURL string `yaml:"backendURL,omitempty" json:"backendURL,omitempty"`
+	// PushIntervalSeconds overrides the agent push cadence (default 15).
+	PushIntervalSeconds int `yaml:"pushIntervalSeconds,omitempty" json:"pushIntervalSeconds,omitempty"`
+	// Components optionally filters the monitored component set by type
+	// (BESU, CACTI_RELAY, PALADIN). Empty means "all components in the bundle".
+	Components []string `yaml:"components,omitempty" json:"components,omitempty"`
 }
 
 // Node holds the network addressing configuration for the Besu node.

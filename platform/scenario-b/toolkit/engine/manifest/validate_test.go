@@ -38,9 +38,9 @@ func findWarn(r Result, field string) bool {
 
 func boolPtr(b bool) *bool { return &b }
 
-// SC-001: the three roadmap examples validate without errors.
+// SC-001: the roadmap examples validate without errors.
 func TestValidExamples(t *testing.T) {
-	for _, name := range []string{"found-hub.yaml", "found-spoke.yaml", "join.yaml"} {
+	for _, name := range []string{"found-hub.yaml", "found-spoke.yaml", "join.yaml", "observe.yaml"} {
 		t.Run(name, func(t *testing.T) {
 			pd := mustLoad(t, name)
 			res := Validate(pd)
@@ -227,6 +227,69 @@ func TestJoinValidatorWarning(t *testing.T) {
 	}
 	if !findWarn(res, "spec.node.validator") {
 		t.Errorf("expected spec.node.validator warning, got %+v", res.Warnings)
+	}
+}
+
+// observe: node-provisioning fields are NOT required (no Besu node), but the
+// discriminating fields of other modes are forbidden.
+func TestObserveMode(t *testing.T) {
+	t.Run("valid without node/keyProvider/relay", func(t *testing.T) {
+		pd := mustLoad(t, "observe.yaml")
+		res := Validate(pd)
+		if !res.Valid() {
+			t.Fatalf("expected valid observe manifest, got errors: %+v", res.Errors)
+		}
+		// The fixture deliberately omits node/image/keyProvider/certSource/relay.
+		for _, f := range []string{"spec.node", "spec.image", "spec.keyProvider", "spec.certSource", "spec.relay"} {
+			if findErr(res, f) {
+				t.Errorf("observe must not require %s, got error", f)
+			}
+		}
+	})
+	t.Run("missing nocBundleRef", func(t *testing.T) {
+		pd := mustLoad(t, "observe.yaml")
+		pd.Spec.NOCBundleRef = ""
+		res := Validate(pd)
+		if !findErr(res, "spec.nocBundleRef") {
+			t.Errorf("expected spec.nocBundleRef required error, got %+v", res.Errors)
+		}
+	})
+	t.Run("forbidden spoke", func(t *testing.T) {
+		pd := mustLoad(t, "observe.yaml")
+		pd.Spec.Spoke = &Spoke{ID: "spoke-a", ChainID: 1338, Currency: "BRL"}
+		res := Validate(pd)
+		if !findErr(res, "spec.spoke") {
+			t.Errorf("expected spec.spoke forbidden error, got %+v", res.Errors)
+		}
+	})
+	t.Run("still requires frontendHost + adminUsers", func(t *testing.T) {
+		pd := mustLoad(t, "observe.yaml")
+		pd.Spec.FrontendHost = ""
+		pd.Spec.AdminUsers = nil
+		res := Validate(pd)
+		if !findErr(res, "spec.frontendHost") || !findErr(res, "spec.adminUsers") {
+			t.Errorf("expected frontendHost + adminUsers required, got %+v", res.Errors)
+		}
+	})
+	t.Run("bad noc component type", func(t *testing.T) {
+		pd := mustLoad(t, "observe.yaml")
+		pd.Spec.NOC.Components = []string{"BESU", "NONSENSE"}
+		res := Validate(pd)
+		if !findErr(res, "spec.noc.components[1]") {
+			t.Errorf("expected noc.components[1] error, got %+v", res.Errors)
+		}
+	})
+}
+
+// nocBundleRef is forbidden in the node modes.
+func TestNOCBundleRefForbiddenInNodeModes(t *testing.T) {
+	for _, name := range []string{"found-hub.yaml", "found-spoke.yaml", "join.yaml"} {
+		pd := mustLoad(t, name)
+		pd.Spec.NOCBundleRef = "./bundles/spoke-a.noc.bundle.yaml"
+		res := Validate(pd)
+		if !findErr(res, "spec.nocBundleRef") {
+			t.Errorf("%s: expected spec.nocBundleRef forbidden error, got %+v", name, res.Errors)
+		}
 	}
 }
 

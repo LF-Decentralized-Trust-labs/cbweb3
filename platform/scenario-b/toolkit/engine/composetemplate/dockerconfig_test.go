@@ -14,7 +14,7 @@ func TestDockerComposeConfig(t *testing.T) {
 	}
 	names := []string{
 		"hub", "entity-besu", "entity-infra", "entity-keycloak",
-		"entity-backend", "entity-frontend", "relay", "noc",
+		"entity-backend", "entity-frontend", "relay", "noc-stack", "noc-agent",
 	}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {

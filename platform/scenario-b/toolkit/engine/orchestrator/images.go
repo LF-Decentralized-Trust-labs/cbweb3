@@ -17,16 +17,6 @@ func cbFrontendImage(app string, gatewayPort int) string {
 	return fmt.Sprintf("cbweb3b/%s-frontend:gw%d", app, gatewayPort)
 }
 
-// nocImages are the NOC observability service images, built before `docker
-// compose` for the noc stack. The Go services (noc-backend/noc-agent) build from
-// their own service dir (self-contained go.mod/go.sum); the portal is a Node app
-// built from the frontend mono dir. Shared by hub and spoke.
-var nocImages = []struct{ image, dockerfile, context string }{
-	{hubNocBackendImage, "backend/services/noc-backend/Dockerfile", "backend/services/noc-backend"},
-	{hubNocAgentImage, "backend/services/noc-agent/Dockerfile", "backend/services/noc-agent"},
-	{hubNocPortalImage, "frontend/apps/noc/Dockerfile", "frontend"},
-}
-
 // imageExists reports whether a local image is present (via the runner).
 func imageExists(ctx context.Context, r exec.CommandRunner, image string) bool {
 	_, err := r.Run(ctx, "docker", "image", "inspect", image)

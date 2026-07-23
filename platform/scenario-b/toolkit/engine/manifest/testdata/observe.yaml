@@ -1,0 +1,21 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: noc-brazil
+spec:
+  scenario: "b"
+  environment: local
+  mode: observe
+  topology:
+    role: noc
+  displayName: "NOC Brazil"
+  # Topologia de monitoramento emitida pelo found-spoke do CB Brazil.
+  nocBundleRef: ./bundles/spoke-a.noc.bundle.yaml
+  noc:
+    pushIntervalSeconds: 15
+    components: [BESU, CACTI_RELAY]
+  frontendHost: localhost
+  adminUsers:
+    - { role: ROLE_NOC_ADMIN,    username: noc-admin,    password: <local-only-bootstrap> }
+    - { role: ROLE_NOC_OPERATOR, username: noc-operator, password: <local-only-bootstrap> }
+    - { role: ROLE_NOC_VIEWER,   username: noc-viewer,   password: <local-only-bootstrap> }

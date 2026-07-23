@@ -7,7 +7,7 @@ import (
 
 // US4: relay and noc templates validate and carry no fixed spoke identifier.
 func TestUS4RelayAndNoc(t *testing.T) {
-	for _, name := range []string{"relay", "noc"} {
+	for _, name := range []string{"relay", "noc-stack", "noc-agent"} {
 		t.Run(name, func(t *testing.T) {
 			tpl, env := loadTemplateAndEnv(t, name)
 			if r := Validate(tpl, env); !r.OK {

@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario B. NOC (Network Operations Center) for spoke-brazil,
+# CO-LOCATED on the Central Bank Brazil VM (${IP_CB_BRAZIL}) — no dedicated VM.
+# Consumes the NOC bundle emitted by central-bank-brazil's found-spoke (local on
+# this VM) and stands up the NOC control plane (Postgres + noc-backend on :8090
+# + noc-portal on :3030) in its own docker network. It runs NO on-chain node.
+#
+# The agents live WITH each entity, not here: central-bank-brazil (found-spoke,
+# same VM → default host.docker.internal:8090) and each joining bank (cb1/cb2,
+# other VMs → spec.noc.backendURL: http://${IP_CB_BRAZIL}:8090) push their own
+# node health to this backend.
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: noc-brazil
+spec:
+  scenario: "b"
+  environment: local
+  mode: observe
+  topology:
+    role: noc
+  displayName: NOC — spoke-brazil
+  # NOC bundle emitted by central-bank-brazil (found-spoke) under its dataDir's
+  # bundles/ — local on this VM since the NOC is co-located with the CB.
+  nocBundleRef: ../../bundles/scenario-b/spoke-brazil/bundles/spoke-brazil.noc.bundle.yaml
+  # Optional tuning; agents default to a 15s push cadence and all bundle components.
+  noc:
+    pushIntervalSeconds: 15
+    components: [BESU, CACTI_RELAY]
+  frontendHost: ${IP_CB_BRAZIL}
+  adminUsers:
+    - { role: ROLE_NOC_ADMIN,    username: noc-admin@noc-brazil.l-net.io,    password: change-me-local }
+    - { role: ROLE_NOC_OPERATOR, username: noc-operator@noc-brazil.l-net.io, password: change-me-local }
+    - { role: ROLE_NOC_VIEWER,   username: noc-viewer@noc-brazil.l-net.io,   password: change-me-local }

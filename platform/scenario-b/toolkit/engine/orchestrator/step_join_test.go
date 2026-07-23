@@ -2,6 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -221,14 +225,64 @@ func TestJoinStepsOrder(t *testing.T) {
 		"consume-spoke-bundle", "write-genesis", "start-besu-join", "wait-sync",
 		"wire-addresses", "provision-keycloak-bank",
 		"start-bank-infra", "start-bank-backend", "start-bank-frontend", "gen-csr",
+		"add-noc-agent", // node-level monitoring of the bank's own node
 	} {
 		if !names[want] {
 			t.Errorf("missing canonical step %q", want)
 		}
 	}
-	for _, forbidden := range []string{"register-relay-bank", "register-relay-spoke", "add-noc-agent"} {
+	for _, forbidden := range []string{"register-relay-bank", "register-relay-spoke"} {
 		if names[forbidden] {
 			t.Errorf("join must not include %q (canonical flow)", forbidden)
 		}
+	}
+}
+
+// The bank runs its OWN noc-agent (node-level): self-provision its per-entity
+// key against the observe backend, render a multi-component agent.yaml under the
+// SAME spoke UUID as the CB, seed it, and start the agent.
+func TestJoinAddNOCAgent(t *testing.T) {
+	var provReq map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/admin/agents/provision-key" {
+			b, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(b, &provReq)
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	fake := &exec.FakeRunner{}
+	cfg := testJoinCfg(t, fake)
+	cfg.NOCBackendURL = srv.URL // host-reachable in the test (no host.docker.internal)
+	step := findStep(JoinSteps(cfg), "add-noc-agent")
+	if step.Name == "" || !step.Soft {
+		t.Fatal("add-noc-agent must exist and be Soft")
+	}
+	if err := step.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// Self-provisioned this bank's per-entity key, bound to the shared spoke UUID.
+	if provReq["spoke_id"] != deterministicUUID("spoke-a") {
+		t.Errorf("provision spoke_id = %q, want CB's spoke UUID", provReq["spoke_id"])
+	}
+	if provReq["raw_key"] != deterministicAgentKey("spoke-a", "bank-a") {
+		t.Errorf("provision raw_key = %q, want bank per-entity key", provReq["raw_key"])
+	}
+	// Seeded the bank's agent.yaml and brought up the noc-agent compose.
+	var sawSeed, sawCompose bool
+	for _, c := range fake.Calls {
+		joined := c.Name + " " + strings.Join(c.Args, " ")
+		if strings.Contains(joined, "run") && strings.Contains(joined, "_noc_agent_cfg:/t") {
+			sawSeed = true
+		}
+		if strings.Contains(joined, "noc-agent.compose.yaml") && strings.Contains(joined, "up -d") {
+			sawCompose = true
+		}
+	}
+	if !sawSeed || !sawCompose {
+		t.Fatalf("missing actions: seed=%v compose=%v", sawSeed, sawCompose)
 	}
 }
