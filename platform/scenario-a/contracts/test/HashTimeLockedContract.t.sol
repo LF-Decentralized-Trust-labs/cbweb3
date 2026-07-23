@@ -252,7 +252,18 @@ contract HashTimeLockedContractTest is Test {
             bytes32("EUR"),
             5e18,
             fxExpiry,
-            FXAgreementLibrary.Routing({sourceSpokeId: "", destSpokeId: "", originatorId: "", counterpartyId: "", settlementAgentId: "", custodianId: "", beneficiaryId: "", sourceReceiverId: "", destReceiverId: "", tradeRef: ""})
+            FXAgreementLibrary.Routing({
+                sourceSpokeId: "",
+                destSpokeId: "",
+                originatorId: "",
+                counterpartyId: "",
+                settlementAgentId: "",
+                custodianId: "",
+                beneficiaryId: "",
+                sourceReceiverId: "",
+                destReceiverId: "",
+                tradeRef: ""
+            })
         );
 
         vm.prank(receiver);
@@ -283,7 +294,18 @@ contract HashTimeLockedContractTest is Test {
             bytes32("EUR"),
             5e18,
             fxExpiry,
-            FXAgreementLibrary.Routing({sourceSpokeId: "", destSpokeId: "", originatorId: "", counterpartyId: "", settlementAgentId: "", custodianId: "", beneficiaryId: "", sourceReceiverId: "", destReceiverId: "", tradeRef: ""})
+            FXAgreementLibrary.Routing({
+                sourceSpokeId: "",
+                destSpokeId: "",
+                originatorId: "",
+                counterpartyId: "",
+                settlementAgentId: "",
+                custodianId: "",
+                beneficiaryId: "",
+                sourceReceiverId: "",
+                destReceiverId: "",
+                tradeRef: ""
+            })
         );
 
         vm.prank(sender);
@@ -309,7 +331,18 @@ contract HashTimeLockedContractTest is Test {
             bytes32("EUR"),
             5e18,
             fxExpiry,
-            FXAgreementLibrary.Routing({sourceSpokeId: "", destSpokeId: "", originatorId: "", counterpartyId: "", settlementAgentId: "", custodianId: "", beneficiaryId: "", sourceReceiverId: "", destReceiverId: "", tradeRef: ""})
+            FXAgreementLibrary.Routing({
+                sourceSpokeId: "",
+                destSpokeId: "",
+                originatorId: "",
+                counterpartyId: "",
+                settlementAgentId: "",
+                custodianId: "",
+                beneficiaryId: "",
+                sourceReceiverId: "",
+                destReceiverId: "",
+                tradeRef: ""
+            })
         );
 
         vm.prank(receiver);
