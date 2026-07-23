@@ -312,9 +312,17 @@ func TestPaymentHTLCEndpoints_HappyPaths(t *testing.T) {
 		htlcLock:   &pb.LockHTLCResponse{ContractId: "c1", HashLock: "h1"},
 		htlcSettle: &pb.SettleHTLCResponse{HtlcTxHash: "tx"},
 		htlcRefund: &pb.RefundHTLCResponse{HtlcTxHash: "tx"},
+		// Settle/Refund now enforce counterparty ownership by fetching the HTLC;
+		// bank-a is the sender, so the authenticated caller is a counterparty.
+		htlcStatus: &pb.GetHTLCStatusResponse{Lock: &pb.HTLCLock{
+			ContractId: "c1",
+			Sender:     "op@spoke-a-bank-a",
+			Receiver:   "op@spoke-b-bank-b",
+		}},
 	}
 	h := startFakePaymentBackend(t, fake)
 	app := fiber.New()
+	app.Use(authedClaims("bank-a")) // settle/refund require authenticated claims
 	app.Post("/lock", h.LockHTLC)
 	app.Post("/lock-hash", h.LockHTLCWithHashLock)
 	app.Post("/settle", h.SettleHTLC)
@@ -343,6 +351,7 @@ func TestPaymentHTLCEndpoints_DownstreamError(t *testing.T) {
 	fake := &fakePaymentServer{err: status.Error(codes.Internal, "boom")}
 	h := startFakePaymentBackend(t, fake)
 	app := fiber.New()
+	app.Use(authedClaims("bank-a")) // settle/refund require authenticated claims; the fetch then returns the Internal error
 	app.Post("/lock", h.LockHTLC)
 	app.Post("/settle", h.SettleHTLC)
 	app.Post("/refund", h.RefundHTLC)
@@ -481,6 +490,7 @@ func TestTokenEndpoints(t *testing.T) {
 	}
 	h := startFakePaymentBackend(t, fake)
 	app := fiber.New()
+	app.Use(authedClaims("bank-a")) // transfer now requires authenticated claims
 	app.Post("/mint", h.MintToken)
 	app.Post("/burn", h.BurnToken)
 	app.Post("/transfer", h.TransferToken)

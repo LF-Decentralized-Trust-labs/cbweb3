@@ -58,6 +58,18 @@ func (h *SwapHandler) SwapExactOutput(c *fiber.Ctx) error {
 		})
 	}
 
+	// R2-H-9 / R2-H-10: the payer is the party being debited, so its identity must
+	// be the authenticated caller — never trusted from the request body. Reject a
+	// swap whose payer_id diverges from the JWT BankID, mirroring RemoveLiquidity.
+	if claims, ok := c.Locals("claims").(domain.TokenClaims); ok && claims.BankID != "" {
+		if req.PayerID != claims.BankID {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error":      "payer_id mismatch — must match authenticated identity",
+				"error_code": "PAYER_ID_MISMATCH",
+			})
+		}
+	}
+
 	result, err := h.svc.Execute(c.Context(), services.SwapRequest{
 		Pair:                 req.Pair,
 		AmountOut:            req.AmountOut,

@@ -395,6 +395,20 @@ func (h *LiquidityHandler) CancelCommit(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "commit_id required"})
 	}
 	providerID := c.Query("provider_id")
+
+	// R2-H-9 / R2-H-10: derive the provider identity from the authenticated JWT
+	// (claims.BankID) rather than trusting the query parameter — mirroring
+	// CommitLiquidity/RemoveLiquidity. A query provider_id that diverges from the
+	// authenticated identity is rejected; otherwise it is set authoritatively.
+	if claims, ok := c.Locals("claims").(domain.TokenClaims); ok && claims.BankID != "" {
+		if providerID != "" && providerID != claims.BankID {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "provider_id mismatch — must match authenticated identity",
+				"code":  "PROVIDER_ID_MISMATCH",
+			})
+		}
+		providerID = claims.BankID
+	}
 	if providerID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "provider_id query parameter required"})
 	}
