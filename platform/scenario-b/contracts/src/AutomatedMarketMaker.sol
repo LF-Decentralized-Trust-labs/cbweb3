@@ -489,28 +489,35 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ERC20, ReentrancyGuard {
         uint256 reserveIn = isAIn ? reserveA : reserveB;
         uint256 reserveOut = isAIn ? reserveB : reserveA;
 
-        amountIn = getAmountIn(reserveIn, reserveOut, amountOut);
+        if (amountOut >= reserveOut) revert AMM__InsufficientLiquidity();
 
-        // Apply fee-in-reserve: user pays grossAmountIn; the fee stays in the reserves.
-        uint256 grossAmountIn = (amountIn * 10000) / (10000 - feeBps) + 1;
+        // R2-H-3: fold the exact-output constant-product quote AND the fee gross-up into a SINGLE
+        // ceiling division. The prior two-step form rounded up twice — once in getAmountIn
+        // (`+1`) and again in the fee gross-up (`+1`) — over-charging the caller and stranding the
+        // excess in the reserves. One ceiling division rounds up exactly once and still favors the
+        // pool (k never decreases):
+        //   amountIn = ceil( reserveIn * amountOut * 10000 / ((reserveOut - amountOut) * (10000 - feeBps)) )
+        // The `amountIn` the caller pays is inclusive of the fee, which stays in the reserves.
+        amountIn =
+            Math.mulDiv(reserveIn * amountOut, 10000, (reserveOut - amountOut) * (10000 - feeBps), Math.Rounding.Ceil);
 
-        if (grossAmountIn > maxAmountIn) {
-            revert AMM__SlippageExceeded(grossAmountIn, maxAmountIn);
+        if (amountIn > maxAmountIn) {
+            revert AMM__SlippageExceeded(amountIn, maxAmountIn);
         }
 
         if (isAIn) {
-            reserveA += grossAmountIn;
+            reserveA += amountIn;
             reserveB -= amountOut;
         } else {
-            reserveB += grossAmountIn;
+            reserveB += amountIn;
             reserveA -= amountOut;
         }
 
-        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), grossAmountIn);
+        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
         IERC20(tokenOut).safeTransfer(to, amountOut);
 
-        emit LogSwap(msg.sender, tokenIn, tokenOut, grossAmountIn, amountOut);
-        return grossAmountIn;
+        emit LogSwap(msg.sender, tokenIn, tokenOut, amountIn, amountOut);
+        return amountIn;
     }
 
     // ============================================================================
