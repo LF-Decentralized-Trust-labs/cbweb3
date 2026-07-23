@@ -123,7 +123,7 @@ func TestFXExpirationWorker_StartRunsOnceThenStops(t *testing.T) {
 	go func() { w.Start(ctx); close(done) }()
 
 	deadline := time.After(2 * time.Second)
-	for len(repo.updated) == 0 {
+	for repo.numUpdated() == 0 {
 		select {
 		case <-deadline:
 			cancel()
