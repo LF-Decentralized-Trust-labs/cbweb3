@@ -53,6 +53,13 @@ type BridgedAssetPosition struct {
 	// Unique when set (partial index, owned by the api-gateway migration): each on-chain
 	// swap can be consumed by exactly one burn/mint — replay protection.
 	SwapTxHash string `gorm:"column:swap_tx_hash;default:''"`
+	// HubBurnTxHash is the confirmed Hub burn transaction for this bridge-out position (R2-H-12).
+	// It is persisted only after the burn transaction is mined with a successful receipt, and it
+	// is the idempotency key for burn retries: a non-empty value means the Hub burn is confirmed
+	// on-chain, so a retry skips the burn and resumes at the spoke release/mint step. Native value
+	// is never released on the spoke while this is empty. Mirrors the swap_tx_hash replay guard
+	// (R2-CR-6) — completion is tracked by persisted receipt, never inferred from token balance.
+	HubBurnTxHash string `gorm:"column:hub_burn_tx_hash;default:''"`
 	// CorrelationID links the position to the cross-currency swap operation (009) for tracing.
 	CorrelationID string    `gorm:"column:correlation_id;default:''"`
 	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime"`

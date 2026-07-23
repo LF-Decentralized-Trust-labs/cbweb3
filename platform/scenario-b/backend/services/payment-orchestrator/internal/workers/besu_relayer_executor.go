@@ -78,6 +78,16 @@ type BesuRelayerExecutor struct {
 	spokeEC     *ethclient.Client // nil when spoke is not configured
 	spokeSigner *evm.Signer       // nil when spoke is not configured
 	spokeABI    abi.ABI
+
+	// spokeReady reports whether spoke-side lock/release/mint operations are configured.
+	spokeReady bool
+
+	// On-chain seams for the burn flow. NewBesuRelayerExecutor wires these to the real
+	// go-ethereum implementations; tests override them to exercise the R2-H-12 burn
+	// idempotency contract without a live chain.
+	hubBurnFn      func(ctx context.Context, token, from common.Address, amount *big.Int) (string, error)
+	spokeMintFn    func(ctx context.Context, to, nativeAsset string, amount *big.Int) error
+	spokeReleaseFn func(ctx context.Context, txID [32]byte) error
 }
 
 // NewBesuRelayerExecutor dials the Hub (and optionally Spoke) chain and returns a ready executor.
@@ -111,6 +121,7 @@ func NewBesuRelayerExecutor(ctx context.Context, db *gorm.DB, cfg BesuRelayerCon
 		hubSigner: hubSigner,
 		hubABI:    parsedHubABI,
 	}
+	ex.hubBurnFn = ex.hubBurnOnChain
 
 	if cfg.SpokeRPCURL != "" && cfg.SpokeBridgeAddr != "" {
 		spokeEC, dialErr := evm.Dial(ctx, cfg.SpokeRPCURL, 10*time.Second)
@@ -140,6 +151,9 @@ func NewBesuRelayerExecutor(ctx context.Context, db *gorm.DB, cfg BesuRelayerCon
 		ex.spokeEC = spokeEC
 		ex.spokeSigner = spokeSigner
 		ex.spokeABI = parsedSpokeABI
+		ex.spokeReady = true
+		ex.spokeMintFn = ex.spokeMint
+		ex.spokeReleaseFn = ex.spokeRelease
 
 		log.Printf("[BesuRelayerExecutor] spoke bridge configured: rpc=%s contract=%s", cfg.SpokeRPCURL, cfg.SpokeBridgeAddr)
 	} else {
@@ -244,43 +258,45 @@ func (e *BesuRelayerExecutor) SubmitBurnEvent(ctx context.Context, _ /*idempoten
 	}
 	mirroredAddr := common.HexToAddress(pos.MirroredAsset)
 
-	// Idempotency: if burnFrom balance < amount, the burn already happened on a prior
-	// attempt. Skip hubBurn and proceed directly to spokeRelease.
-	skipBurn := false
-	var curBal big.Int
-	if balErr := evm.Call(ctx, e.hubEC, mirroredAddr, e.hubABI, "balanceOf",
-		[]interface{}{burnFrom}, &curBal,
-	); balErr == nil && curBal.Cmp(amount) < 0 {
-		log.Printf("[BesuRelayerExecutor] idempotency: burnFrom=%s balance=%s < amount=%s — hub burn already done, skipping",
-			burnFrom.Hex(), curBal.String(), amount.String())
-		skipBurn = true
-	}
-
-	if !skipBurn {
-		if _, burnErr := evm.SubmitTx(ctx, e.hubEC, e.hubSigner, mirroredAddr, e.hubABI,
-			"burn", burnFrom, amount,
-		); burnErr != nil {
+	// Idempotency (R2-H-12): the Hub burn counts as done ONLY when its confirmed transaction
+	// hash is persisted on the position. Completion is never inferred from token balance — a
+	// low balance can arise from causes other than this burn, and acting on it would release
+	// native value on the spoke without a confirmed Hub burn. This mirrors the bridge-out
+	// replay guard keyed on swap_tx_hash (R2-CR-6): idempotency is tracked by persisted state.
+	if pos.HubBurnTxHash == "" {
+		txHash, burnErr := e.hubBurnFn(ctx, mirroredAddr, burnFrom, amount)
+		if burnErr != nil {
 			return fmt.Errorf("hub burn (token=%s amount=%s position=%s): %w",
 				pos.MirroredAsset, pos.MirroredAmount, positionID, burnErr)
 		}
+		// evm.SubmitTx only returns nil after a successful receipt, so the burn is now
+		// confirmed on-chain. Persist it BEFORE any spoke-side value movement so a retry after
+		// a spoke failure resumes at the spoke step instead of re-burning.
+		if perr := e.markHubBurnConfirmed(ctx, pos, txHash); perr != nil {
+			return fmt.Errorf("persist hub burn confirmation (position=%s tx=%s): %w", positionID, txHash, perr)
+		}
+		log.Printf("[BesuRelayerExecutor] hub burn confirmed — position=%s burnFrom=%s amount=%s tx=%s",
+			positionID, burnFrom.Hex(), amount.String(), txHash)
+	} else {
+		log.Printf("[BesuRelayerExecutor] idempotency: hub burn already confirmed for position=%s (tx=%s) — skipping burn",
+			positionID, pos.HubBurnTxHash)
 	}
 
-	// Spoke-side operation (optional — skipped when spoke is not configured or SkipSpokeLock).
+	// The Hub burn is confirmed on-chain (this attempt or a prior one). Only now may native
+	// value move on the spoke.
 	//
-	// For cross-currency bridge-out (BeneficiarySpokeAddress is set): CB-B has CENTRAL_BANK_ROLE
-	// on the spoke tCeBM token, so it can mint directly — no prior lock is needed.
-	//
-	// For standard bridge-out (BeneficiarySpokeAddress is empty): use SpokeBridge.release(),
-	// which transfers tokens locked in a prior SpokeBridge.lock() call.
-	if e.spokeEC != nil && !e.cfg.SkipSpokeLock {
+	// For cross-currency bridge-out (BeneficiarySpokeAddress set): CB-B holds CENTRAL_BANK_ROLE
+	// on the spoke tCeBM token and mints directly — no prior lock is needed.
+	// For standard bridge-out (BeneficiarySpokeAddress empty): use SpokeBridge.release(), which
+	// transfers tokens locked in a prior SpokeBridge.lock() call.
+	if e.spokeReady && !e.cfg.SkipSpokeLock {
 		if beneficiary := strings.TrimSpace(pos.BeneficiarySpokeAddress); beneficiary != "" {
-			// Cross-currency: mint tCeBM on Spoke-B to the beneficiary address.
-			if mintErr := e.spokeMint(ctx, beneficiary, pos.NativeAsset, amount); mintErr != nil {
+			if mintErr := e.spokeMintFn(ctx, beneficiary, pos.NativeAsset, amount); mintErr != nil {
 				return fmt.Errorf("spoke mint (position=%s beneficiary=%s): %w", positionID, beneficiary, mintErr)
 			}
 		} else {
 			txID := deriveSpokeTxID(positionID)
-			if releaseErr := e.spokeRelease(ctx, txID); releaseErr != nil {
+			if releaseErr := e.spokeReleaseFn(ctx, txID); releaseErr != nil {
 				return fmt.Errorf("spoke release (position=%s): %w", positionID, releaseErr)
 			}
 		}
@@ -288,6 +304,30 @@ func (e *BesuRelayerExecutor) SubmitBurnEvent(ctx context.Context, _ /*idempoten
 
 	log.Printf("[BesuRelayerExecutor] burn-unlock ok — positionID=%s token=%s amount=%s signer=%s",
 		positionID, pos.MirroredAsset, pos.MirroredAmount, e.hubSigner.Address().Hex())
+	return nil
+}
+
+// hubBurnOnChain burns W-tCeBM on the Hub and returns the confirmed transaction hash.
+// evm.SubmitTx waits for the receipt and returns an error when the transaction reverts
+// (receipt.Status == 0), so a nil error means the burn is confirmed on-chain.
+func (e *BesuRelayerExecutor) hubBurnOnChain(ctx context.Context, token, from common.Address, amount *big.Int) (string, error) {
+	return evm.SubmitTx(ctx, e.hubEC, e.hubSigner, token, e.hubABI, "burn", from, amount)
+}
+
+// markHubBurnConfirmed persists the confirmed Hub burn transaction hash on the position and
+// advances bridge_state to BURNED. The persisted hash is the idempotency key consulted by
+// SubmitBurnEvent on retries (R2-H-12).
+func (e *BesuRelayerExecutor) markHubBurnConfirmed(ctx context.Context, pos *podmain.BridgedAssetPosition, txHash string) error {
+	if err := e.db.WithContext(ctx).Model(&podmain.BridgedAssetPosition{}).
+		Where("position_id = ?", pos.PositionID).
+		Updates(map[string]interface{}{
+			"hub_burn_tx_hash": txHash,
+			"bridge_state":     podmain.BridgeStateBurned,
+		}).Error; err != nil {
+		return err
+	}
+	pos.HubBurnTxHash = txHash
+	pos.BridgeState = podmain.BridgeStateBurned
 	return nil
 }
 
