@@ -30,17 +30,25 @@ type CactiRelay struct {
 	authSecret   string
 	pollInterval time.Duration
 	httpClient   *http.Client
+	watermarks   ports.RelayWatermarkStore
 	logger       *slog.Logger
 }
 
 // NewCactiRelay creates a CactiRelay that calls the Cacti service at baseURL
 // (e.g. "http://localhost:4000"). authSecret is sent as X-Relay-Auth on every request.
-func NewCactiRelay(baseURL string, authSecret string, logger *slog.Logger) *CactiRelay {
+//
+// watermarks persists the per-stream event cursor so the poller resumes from the
+// last processed timestamp after a restart instead of resetting to time.Now()
+// (which would silently drop events observed while the process was down — finding
+// R2-H-11). It may be nil, in which case the poller falls back to time.Now() and
+// no cursor is persisted.
+func NewCactiRelay(baseURL string, authSecret string, watermarks ports.RelayWatermarkStore, logger *slog.Logger) *CactiRelay {
 	return &CactiRelay{
 		baseURL:      baseURL,
 		authSecret:   authSecret,
 		pollInterval: defaultPollInterval,
 		httpClient:   &http.Client{Timeout: defaultHTTPTimeout},
+		watermarks:   watermarks,
 		logger:       logger,
 	}
 }
@@ -168,8 +176,10 @@ type cactiLockEvent struct {
 }
 
 func (c *CactiRelay) pollEvents(ctx context.Context, kind string, handler func(ports.InteroperabilityProof) error) {
-	// Track the last seen timestamp to avoid re-delivering events.
-	var lastSeen int64 = time.Now().UnixMilli()
+	// Track the last seen timestamp to avoid re-delivering events. Resume from the
+	// persisted watermark so events observed while this process was down are not
+	// skipped (finding R2-H-11); fall back to now when no watermark is available.
+	lastSeen := c.loadWatermark(ctx, kind)
 	ticker := time.NewTicker(c.pollInterval)
 	defer ticker.Stop()
 
@@ -190,8 +200,40 @@ func (c *CactiRelay) pollEvents(ctx context.Context, kind string, handler func(p
 			}
 			if since > lastSeen {
 				lastSeen = since
+				c.saveWatermark(ctx, kind, lastSeen)
 			}
 		}
+	}
+}
+
+// loadWatermark returns the resume cursor for kind: the persisted watermark when
+// one exists, otherwise the current time (preserving the historical behaviour when
+// no store is wired or nothing has been recorded yet).
+func (c *CactiRelay) loadWatermark(ctx context.Context, kind string) int64 {
+	if c.watermarks == nil {
+		return time.Now().UnixMilli()
+	}
+	value, found, err := c.watermarks.GetWatermark(ctx, kind)
+	if err != nil {
+		c.logger.Warn("cacti: watermark load failed; starting from now", "kind", kind, "error", err)
+		return time.Now().UnixMilli()
+	}
+	if !found {
+		return time.Now().UnixMilli()
+	}
+	c.logger.Info("cacti: resuming from persisted watermark", "kind", kind, "sinceMs", value)
+	return value
+}
+
+// saveWatermark persists the latest processed cursor for kind. Failures are logged
+// but not fatal: a lost write only risks re-delivering already-handled events on the
+// next restart, which downstream dedup absorbs.
+func (c *CactiRelay) saveWatermark(ctx context.Context, kind string, value int64) {
+	if c.watermarks == nil {
+		return
+	}
+	if err := c.watermarks.SetWatermark(ctx, kind, value); err != nil {
+		c.logger.Warn("cacti: watermark persist failed", "kind", kind, "sinceMs", value, "error", err)
 	}
 }
 

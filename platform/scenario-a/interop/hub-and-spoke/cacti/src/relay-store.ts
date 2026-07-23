@@ -20,9 +20,13 @@ export interface RelayRetryItem {
 interface RelayStoreState {
   delivered: Record<string, number>;
   retries: RelayRetryItem[];
+  // Last processed block per spoke id. Lets the poller resume after a restart
+  // instead of starting at the chain head and skipping events mined during
+  // downtime (finding R2-H-11).
+  watermarks: Record<string, number>;
 }
 
-const DEFAULT_STATE: RelayStoreState = { delivered: {}, retries: [] };
+const DEFAULT_STATE: RelayStoreState = { delivered: {}, retries: [], watermarks: {} };
 
 export class RelayStore {
   private state: RelayStoreState = { ...DEFAULT_STATE };
@@ -40,9 +44,10 @@ export class RelayStore {
       this.state = {
         delivered: parsed.delivered ?? {},
         retries: parsed.retries ?? [],
+        watermarks: parsed.watermarks ?? {},
       };
       this.log.info(
-        `[relay-store] loaded delivered=${Object.keys(this.state.delivered).length} retries=${this.state.retries.length}`,
+        `[relay-store] loaded delivered=${Object.keys(this.state.delivered).length} retries=${this.state.retries.length} watermarks=${Object.keys(this.state.watermarks).length}`,
       );
     } catch (err) {
       this.log.warn(`[relay-store] starting with empty state: ${String(err)}`);
@@ -109,6 +114,20 @@ export class RelayStore {
       }
     }
     return { pending: this.state.retries.length, maxLagMs };
+  }
+
+  /**
+   * Last processed block for a spoke, or undefined if none has been recorded.
+   * The poller uses this to resume after a restart (finding R2-H-11).
+   */
+  getWatermark(spokeId: string): number | undefined {
+    return this.state.watermarks[spokeId];
+  }
+
+  /** Record the last processed block for a spoke and persist it. */
+  async setWatermark(spokeId: string, block: number): Promise<void> {
+    this.state.watermarks[spokeId] = block;
+    await this.persist();
   }
 
   private computeBackoffMs(attempt: number): number {

@@ -400,18 +400,26 @@ export class HtlcRelay {
     const topicLocked = ethers.id("LogHTLCLocked(bytes32,address,address,bytes32,uint256,bytes32)");
     const topicClaimed = ethers.id("LogHTLCClaimed(bytes32,bytes32)");
 
-    // Determine the starting block via the Cacti connector's getBlock.
+    // Determine the starting block. Resume from the persisted watermark so events
+    // mined while the relay was down are not skipped (finding R2-H-11); only fall
+    // back to the chain head on a first-ever start with no recorded watermark.
     let fromBlock: number;
-    try {
-      const blockResp = await connector.getBlock({ blockHashOrBlockNumber: "latest" });
-      fromBlock = typeof blockResp.block === "object" && blockResp.block !== null
-        ? Number((blockResp.block as Record<string, unknown>)["number"] ?? 0)
-        : 0;
-    } catch (err) {
-      this.log.error(`[${spoke.id}] cannot get current block via Cacti: ${String(err)}`);
-      fromBlock = 0;
+    const persisted = this.relayStore.getWatermark(spoke.id);
+    if (persisted !== undefined) {
+      fromBlock = persisted + 1;
+      this.log.info(`[${spoke.id}] relay resuming from persisted watermark block ${fromBlock}`);
+    } else {
+      try {
+        const blockResp = await connector.getBlock({ blockHashOrBlockNumber: "latest" });
+        fromBlock = typeof blockResp.block === "object" && blockResp.block !== null
+          ? Number((blockResp.block as Record<string, unknown>)["number"] ?? 0)
+          : 0;
+      } catch (err) {
+        this.log.error(`[${spoke.id}] cannot get current block via Cacti: ${String(err)}`);
+        fromBlock = 0;
+      }
+      this.log.info(`[${spoke.id}] relay started at block ${fromBlock} (via Cacti connector, no persisted watermark)`);
     }
-    this.log.info(`[${spoke.id}] relay started at block ${fromBlock} (via Cacti connector)`);
 
     while (!signal.aborted) {
       await sleep(this.pollIntervalMs);
@@ -524,6 +532,9 @@ export class HtlcRelay {
           );
         }
 
+        // Persist the watermark before advancing so a restart resumes here
+        // instead of at the chain head (finding R2-H-11).
+        await this.relayStore.setWatermark(spoke.id, toBlock);
         fromBlock = toBlock + 1;
         failures = 0;
       } catch (err) {

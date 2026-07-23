@@ -16,11 +16,15 @@
  *                                        (e.g. "http://gateway-a:18080,http://gateway-b:18081")
  *   INTERNAL_RELAY_AUTH_SECRET         — Shared secret for X-Relay-Auth header
  *   POLL_INTERVAL_MS                   — Event poll interval (default: 5000)
- *   LCR_WATCHER_START_BLOCK            — Block to start watching from (default: 0)
+ *   LCR_WATCHER_START_BLOCK            — Block to start watching from on first run (default: 0)
+ *   LCR_WATCHER_STORE_PATH             — JSON file persisting the last processed block so the
+ *                                        watcher resumes after a restart instead of resetting to
+ *                                        the start block (default: /tmp/lcr-watcher-store.json)
  */
 
 import { ethers } from "ethers";
 import type { PluginLedgerConnectorBesu } from "@hyperledger/cactus-plugin-ledger-connector-besu";
+import { BlockWatermarkStore } from "./block-watermark-store";
 
 // ---------------------------------------------------------------------------
 // ABI — only the CommitMatched event is needed for watching.
@@ -72,6 +76,12 @@ export class LiquidityCommitWatcher {
   private lastProcessedBlock: number;
   private running = false;
   private abortSignal?: AbortSignal;
+  // Optional durable store for lastProcessedBlock. When present, the watcher resumes from the
+  // persisted block after a restart instead of resetting to startBlock (finding R2-H-11).
+  private readonly watermarkStore?: BlockWatermarkStore;
+  // Key under which this watcher's block is stored (defaults to the contract address, so
+  // multiple watchers sharing a store file do not collide).
+  private readonly watermarkKey: string;
 
   // Optional Cacti connector for Besu integration.
   private readonly connector?: PluginLedgerConnectorBesu;
@@ -97,6 +107,7 @@ export class LiquidityCommitWatcher {
     connector?: PluginLedgerConnectorBesu;
     hubRpc?: string;
     requestTimeoutMs?: number;
+    watermarkStore?: BlockWatermarkStore;
   }) {
     this.iface           = new ethers.Interface(COMMIT_MATCHED_ABI);
     this.contractAddress = opts.contractAddress.toLowerCase();
@@ -108,6 +119,8 @@ export class LiquidityCommitWatcher {
     this.connector       = opts.connector;
     this.hubRpc          = opts.hubRpc;
     this.requestTimeoutMs = opts.requestTimeoutMs ?? 20_000;
+    this.watermarkStore  = opts.watermarkStore;
+    this.watermarkKey    = this.contractAddress;
     if (!opts.connector && opts.hubRpc) {
       this.provider = this.buildProvider();
     }
@@ -176,6 +189,25 @@ export class LiquidityCommitWatcher {
   private async pollLoop(): Promise<void> {
     const commitMatchedTopic = this.iface.getEvent("CommitMatched")!.topicHash;
 
+    // Resume from the persisted block so events mined during downtime are not skipped
+    // (finding R2-H-11). Falls back to startBlock on a first-ever run.
+    if (this.watermarkStore) {
+      try {
+        await this.watermarkStore.init();
+        const persisted = this.watermarkStore.get(this.watermarkKey);
+        if (persisted !== undefined) {
+          this.lastProcessedBlock = persisted;
+          console.log(
+            `[LiquidityCommitWatcher] resuming from persisted block ${persisted}`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `[LiquidityCommitWatcher] could not load persisted watermark, using startBlock ${this.startBlock}: ${String(err)}`,
+        );
+      }
+    }
+
     while (this.running && !this.abortSignal?.aborted) {
       try {
         const toBlock = await this.getLatestBlock();
@@ -194,6 +226,16 @@ export class LiquidityCommitWatcher {
             }
           }
           this.lastProcessedBlock = toBlock;
+          // Persist progress so a restart resumes here instead of at startBlock (R2-H-11).
+          if (this.watermarkStore) {
+            try {
+              await this.watermarkStore.set(this.watermarkKey, toBlock);
+            } catch (err) {
+              console.warn(
+                `[LiquidityCommitWatcher] failed to persist watermark block ${toBlock}: ${String(err)}`,
+              );
+            }
+          }
         }
         // Successful poll — clear the failure streak.
         this.consecutiveFailures = 0;
@@ -397,6 +439,7 @@ export function createLiquidityCommitWatcherFromEnv(
   const pollIntervalMs  = parseInt(process.env["POLL_INTERVAL_MS"] ?? "5000", 10);
   const startBlock      = parseInt(process.env["LCR_WATCHER_START_BLOCK"] ?? "0", 10);
   const requestTimeoutMs = parseInt(process.env["RPC_REQUEST_TIMEOUT_MS"] ?? "20000", 10);
+  const watermarkStorePath = process.env["LCR_WATCHER_STORE_PATH"] ?? "/tmp/lcr-watcher-store.json";
 
   if (!contractAddress) {
     console.log(
@@ -426,5 +469,6 @@ export function createLiquidityCommitWatcherFromEnv(
     connector,
     hubRpc,
     requestTimeoutMs: isNaN(requestTimeoutMs) ? 20_000 : requestTimeoutMs,
+    watermarkStore: new BlockWatermarkStore(watermarkStorePath),
   });
 }
