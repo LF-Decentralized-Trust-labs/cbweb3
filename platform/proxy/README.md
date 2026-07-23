@@ -28,7 +28,7 @@ auth cookies are same-origin.
 ## Configuration (runtime, not build-time)
 
 The image ships only the base [`Caddyfile`](./Caddyfile), which `import`s per-scenario route
-fragments from `/etc/caddy/conf.d/*.caddy` and falls back to the launcher at the site root.
+fragments from `/etc/caddy/conf.d/*.conf` and falls back to the launcher at the site root.
 Each scenario's toolkit writes ONLY its own fragment (`caddy.a.conf` / `caddy.b.conf`) into a
 shared, neutral conf dir on the host and bind-mounts it read-only — the same distributed,
 one-per-host model the launcher uses. A missing scenario simply contributes no fragment.
@@ -72,5 +72,18 @@ docker run -d --name cbweb3-proxy --restart always \
 
 ## TLS
 
-HTTP only for now (`auto_https off`, `:80`). HTTPS on `:443` is a later step — it will add a
-TLS block (internal CA or ACME) without changing the routing fragments.
+When `PROXY_SITE` is set to the entity host, the proxy serves **HTTPS on `:443`** with an
+automatic `:80`→`:443` redirect. The certificate source is chosen by `PROXY_TLS_MODE` on the
+deploy host (the toolkits set this and the matching env for you):
+
+| `PROXY_TLS_MODE` | Certificate | Notes |
+|---|---|---|
+| `internal` (default) | Caddy local CA (self-signed) | Offline; browsers warn until the CA root is trusted. |
+| `cloudflare` | Let's Encrypt via ACME **DNS-01** | **Publicly trusted on hosts with no inbound reachability.** Needs `CF_API_TOKEN` (scoped Cloudflare token) and outbound access to Let's Encrypt + the Cloudflare API. The image bundles the `caddy-dns/cloudflare` module (built by `build.sh` via `xcaddy`). |
+| `acme` | Let's Encrypt via HTTP/TLS-ALPN | Requires the host reachable from the internet on `:80`/`:443`. |
+| `custom` | Operator-provided cert | Mount a dir with `proxy.crt` + `proxy.key`; set `PROXY_CERT_DIR`. |
+| `off` | none | Plain HTTP on `:80` (for an external TLS edge). |
+
+The cert store (certs, keys, ACME account key) is persisted in the `cbweb3-proxy-data` volume.
+Snapshot/restore it on the host with [`backup-certs.sh`](./backup-certs.sh) — useful before
+wiping an environment, so certificates survive a token revocation or a redeploy.

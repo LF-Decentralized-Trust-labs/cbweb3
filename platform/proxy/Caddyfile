@@ -11,12 +11,18 @@
 #
 # TLS: set PROXY_SITE to the entity's public host (spec.frontendHost) to serve HTTPS on
 # :443 with an automatic :80→:443 redirect. The certificate source is PROXY_TLS_DIRECTIVE:
-#   ""                                        → automatic ACME / Let's Encrypt (the host
-#                                                must be reachable from the internet on 80/443)
+#   ""                                        → automatic ACME (see PROXY_GLOBAL_OPTIONS)
 #   "tls internal"                            → Caddy's local CA (self-signed; browsers warn
 #                                                until the CA root is trusted). Default.
 #   "tls /certs/proxy.crt /certs/proxy.key"   → operator-provided certificate (mount /certs)
+# PROXY_GLOBAL_OPTIONS carries global Caddy options; for PROXY_TLS_MODE=cloudflare it is
+# "acme_dns cloudflare {env.CF_API_TOKEN}", which makes ACME use the DNS-01 challenge via
+# Cloudflare (for hosts that are not publicly reachable). Empty for every other mode — an
+# empty global-options block is valid and a no-op.
 # Leave PROXY_SITE unset (default :80) to serve plain HTTP only — no TLS.
+{
+	{$PROXY_GLOBAL_OPTIONS:}
+}
 
 {$PROXY_SITE::80} {
 	# TLS source (empty ⇒ automatic ACME for the site host); injected verbatim by the

@@ -61,11 +61,12 @@ func proxyImageVariant(host string) string {
 }
 
 // proxyTLSDirective renders the Caddy `tls` directive for PROXY_TLS_MODE: "internal"
-// (default; Caddy local CA), "acme" (empty ⇒ automatic Let's Encrypt), or "custom"
-// (operator cert mounted at /certs).
+// (default; Caddy local CA), "acme" (empty ⇒ automatic Let's Encrypt via HTTP/TLS-ALPN),
+// "cloudflare" (empty ⇒ automatic Let's Encrypt via the DNS-01 challenge; the challenge
+// provider is set globally by proxyGlobalOptions), or "custom" (operator cert at /certs).
 func proxyTLSDirective() string {
 	switch os.Getenv("PROXY_TLS_MODE") {
-	case "acme":
+	case "acme", "cloudflare":
 		return ""
 	case "custom":
 		return "tls " + proxyContainerCertDir + "/proxy.crt " + proxyContainerCertDir + "/proxy.key"
@@ -73,6 +74,22 @@ func proxyTLSDirective() string {
 		return "tls internal"
 	}
 }
+
+// proxyGlobalOptions returns the Caddy global-options line for the current TLS mode. For
+// "cloudflare" it enables the ACME DNS-01 challenge via the Cloudflare provider, reading
+// the API token from the container's CF_API_TOKEN at runtime — this is what lets a host
+// that is not publicly reachable (the LNET/VPN case) obtain a publicly trusted certificate.
+// Empty for every other mode (an empty global-options block is valid and a no-op).
+func proxyGlobalOptions() string {
+	if os.Getenv("PROXY_TLS_MODE") == "cloudflare" {
+		return "acme_dns cloudflare {env.CF_API_TOKEN}"
+	}
+	return ""
+}
+
+// proxyCFToken is the Cloudflare API token (scoped to the DNS zone) used by the DNS-01
+// challenge in "cloudflare" mode. Set CF_API_TOKEN on the deploy host before apply.
+func proxyCFToken() string { return os.Getenv("CF_API_TOKEN") }
 
 // proxyPortalBase is the URL base path a portal SPA is served under behind the reverse
 // proxy, e.g. "/b/governance/". Baked into the SPA (VITE_BASE_PATH) so its assets and
@@ -197,6 +214,17 @@ func runProxyB(ctx context.Context, p ProxyParams) error {
 				"-e", "PROXY_SITE="+p.SiteHost,
 				"-e", "PROXY_TLS_DIRECTIVE="+proxyTLSDirective(),
 				"-v", proxyDataVolume+":/data")
+			if os.Getenv("PROXY_TLS_MODE") == "cloudflare" {
+				// DNS-01 via Cloudflare: enable the challenge globally and hand the scoped
+				// API token to the container. Warn (soft) if the token is missing so the
+				// operator fixes it rather than silently falling back.
+				if proxyCFToken() == "" {
+					fmt.Fprintln(os.Stderr, "proxy: PROXY_TLS_MODE=cloudflare but CF_API_TOKEN is empty; set it on the deploy host before apply")
+				}
+				args = append(args,
+					"-e", "PROXY_GLOBAL_OPTIONS="+proxyGlobalOptions(),
+					"-e", "CF_API_TOKEN="+proxyCFToken())
+			}
 			if dir := os.Getenv("PROXY_CERT_DIR"); dir != "" {
 				args = append(args, "-v", dir+":"+proxyContainerCertDir+":ro")
 			}

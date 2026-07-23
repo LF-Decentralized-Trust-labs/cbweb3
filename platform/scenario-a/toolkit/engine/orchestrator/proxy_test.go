@@ -99,3 +99,30 @@ func TestLauncherProxyModeURLs(t *testing.T) {
 		t.Errorf("NOC should be dropped in proxy mode, got %q", byRole["noc"])
 	}
 }
+
+func TestProxyCloudflareModeA(t *testing.T) {
+	t.Setenv("PROXY_TLS_MODE", "cloudflare")
+	t.Setenv("CF_API_TOKEN", "tkn")
+	// cloudflare ⇒ automatic ACME (empty tls directive) + DNS-01 global option + token.
+	if got := proxyTLSDirective(); got != "" {
+		t.Errorf("proxyTLSDirective(cloudflare) = %q, want empty", got)
+	}
+	if got := proxyGlobalOptions(); got != "acme_dns cloudflare {env.CF_API_TOKEN}" {
+		t.Errorf("proxyGlobalOptions(cloudflare) = %q", got)
+	}
+	if got := proxyCFToken(); got != "tkn" {
+		t.Errorf("proxyCFToken = %q", got)
+	}
+	// cloudflare is a TLS mode ⇒ https scheme + proxytls image variant (like internal).
+	if got := proxyScheme("cb.example"); got != "https" {
+		t.Errorf("proxyScheme(cloudflare) = %q, want https", got)
+	}
+	if got := proxyImageVariant("cb.example"); got != "-proxytls" {
+		t.Errorf("proxyImageVariant(cloudflare) = %q, want -proxytls", got)
+	}
+	// Non-cloudflare modes emit no global options (empty block is a no-op).
+	t.Setenv("PROXY_TLS_MODE", "internal")
+	if got := proxyGlobalOptions(); got != "" {
+		t.Errorf("proxyGlobalOptions(internal) = %q, want empty", got)
+	}
+}

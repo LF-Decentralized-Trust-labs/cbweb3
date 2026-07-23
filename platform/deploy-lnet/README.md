@@ -147,10 +147,34 @@ attaches to both entity Docker networks. Requirements per VM:
   - `internal` (**default**) — Caddy's local CA (self-signed). Works with no external reachability
     (suits a permissioned network); browsers warn until the CA root is trusted. Trust it with the
     root at `docker cp cbweb3-proxy:/data/caddy/pki/authorities/local/root.crt .`.
-  - `acme` — automatic Let's Encrypt; requires the host reachable from the internet on `:80`/`:443`.
+  - `acme` — automatic Let's Encrypt via the HTTP/TLS-ALPN challenge; requires the host reachable from
+    the internet on `:80`/`:443`.
+  - `cloudflare` — **publicly trusted Let's Encrypt on VPN-internal hosts.** Uses the ACME **DNS-01**
+    challenge via Cloudflare, so the host needs no inbound reachability — only outbound access to
+    Let's Encrypt and the Cloudflare API, plus a scoped API token. This is the LNET setup (the
+    `l-net.io` zone is on Cloudflare). Certificates are publicly trusted, so **testers see no warning
+    and configure nothing.** Set on the deploy host before apply:
+    ```bash
+    export PROXY_TLS_MODE=cloudflare
+    export CF_API_TOKEN=<scoped Cloudflare token: Zone → DNS → Edit on l-net.io>
+    deploy-lnet/deploy.sh a cb-brazil   # and b, per host
+    ```
+    The proxy image must include the Cloudflare DNS module — `proxy/build.sh` builds it in via
+    `xcaddy` (rebuild the image if it predates this: `docker rmi cbweb3/proxy:local` then re-apply).
+    Caddy renews automatically (~30 days before expiry) with no operator action. If the token is later
+    revoked, existing certs keep serving until expiry as long as the `cbweb3-proxy-data` volume
+    persists — see the cert backup note below.
   - `custom` — operator cert: set `PROXY_CERT_DIR=/path` (must contain `proxy.crt` + `proxy.key`).
   - `off` — no TLS; serve plain HTTP on `:80` (use when an external edge terminates TLS and forwards
     to `:80` — the SPAs are then built with `http://` URLs).
+- **Test deployments without public certificates:** leave `PROXY_TLS_MODE` unset (→ `internal`,
+  self-signed) or set it to `off`. No token or Cloudflare access is needed; the `cloudflare` mode is
+  strictly opt-in, so nothing about a normal test deploy changes.
+- **Backing up the certificates:** the cert store (issued certs, keys, and the ACME account key) lives
+  in the `cbweb3-proxy-data` volume. Snapshot it to the VM's disk with
+  `proxy/backup-certs.sh backup` (default target `/opt/cbweb3/proxy-cert-backups`), and restore with
+  `proxy/backup-certs.sh restore <file.tgz>`. Keep a snapshot before wiping an environment: restoring
+  it brings back valid certificates (and the same Let's Encrypt account) without needing a live token.
 - **Enabling/switching TLS on an already-running proxy:** the proxy container is recreated to pick up
   `:443`, and each scenario re-attaches its own Docker network on apply — so after changing TLS,
   **re-apply both scenarios on that host** (e.g. `deploy.sh a cb-brazil` and `deploy.sh b cb-brazil`)
