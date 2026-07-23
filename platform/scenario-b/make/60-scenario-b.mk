@@ -325,11 +325,22 @@ scenario-b.perf-soak:
 	 DURATION=$${DURATION:-12h} \
 	 bash tests/performance/run-soak.sh
 
-# ── OpenAPI validation (T108) ────────────────────────────────────────────────
+# ── API artifacts: OpenAPI validation + Postman generation (T108, R1-§8) ─────
 
+# Lint the served/embedded OpenAPI spec — the single source of truth that the
+# gateway serves at /openapi.yaml + /docs. The previous target pointed at the
+# unwired openapi/v2/scenario-b.yaml fragment and, because of the `||` guard,
+# skipped linting entirely whenever redocly was already installed. The minimal
+# ruleset gates on structural OpenAPI 3.0 compliance (parse failures, broken
+# $ref) without failing the build on pre-existing stylistic warnings.
 scenario-b.validate-openapi:
-	@command -v redocly >/dev/null 2>&1 || npx --yes @redocly/cli@latest lint \
-		backend/services/api-gateway/openapi/v2/scenario-b.yaml
+	@npx --yes @redocly/cli@latest lint --extends minimal \
+		backend/services/api-gateway/docs/openapi.yaml
+
+# Regenerate the Postman collection from the served OpenAPI spec so it stays in
+# sync with the delivered API surface. Runs fully locally (no CDN/hosted svc).
+scenario-b.gen-postman:
+	@bash apis/postman/generate.sh
 
 .PHONY: \
 	scenario-b.up-infra scenario-b.down-infra \
@@ -343,6 +354,6 @@ scenario-b.validate-openapi:
 	scenario-b.test-contracts scenario-b.test-backend scenario-b.test \
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
 	scenario-b.test-integration evidence.e2e-b \
-	scenario-b.perf-baseline scenario-b.validate-openapi \
+	scenario-b.perf-baseline scenario-b.validate-openapi scenario-b.gen-postman \
 	scenario-b.perf-amm-throughput scenario-b.perf-transfer \
 	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all scenario-b.perf-smoke

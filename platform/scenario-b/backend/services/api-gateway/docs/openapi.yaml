@@ -3984,10 +3984,6 @@ components:
           type: string
           description: Besu address of the depositor (injected by proxy for commercial banks)
           example: "0x1234abcd..."
-        requester_besu_address:
-          type: string
-          description: Paladin identity of the depositor
-          example: "funded_operator@spoke-a-bank-a"
         amount:
           type: string
           description: Fiat amount to deposit (big integer as string)
@@ -4018,7 +4014,7 @@ components:
       properties:
         id:
           type: string
-        requester_besu_address:
+        requester_id:
           type: string
         requester_besu_address:
           type: string
@@ -4053,10 +4049,10 @@ components:
           type: string
           description: Besu address of the requester
           example: "0x1234abcd..."
-        requester_besu_address:
+        deposit_id:
           type: string
-          description: Paladin identity of the requester
-          example: "funded_operator@spoke-a-bank-a"
+          description: Identifier of the approved deposit being tokenized
+          example: "dep-a1b2c3d4"
         amount:
           type: string
           description: Amount of tCeBM to convert into tCeBM (big integer as string)
@@ -4090,9 +4086,11 @@ components:
       properties:
         id:
           type: string
-        requester_besu_address:
+        requester_id:
           type: string
-        requester_besu_address:
+        besu_address:
+          type: string
+        deposit_id:
           type: string
         amount:
           type: string
@@ -4127,10 +4125,6 @@ components:
           type: string
           description: Besu address to receive minted tCeBM
           example: "0x1234abcd..."
-        requester_besu_address:
-          type: string
-          description: Paladin identity that transferred tCeBM to the Central Bank
-          example: "funded_operator@spoke-a-bank-a"
         amount:
           type: string
           description: Amount of tCeBM to redeem (big integer as string)
@@ -4164,7 +4158,7 @@ components:
       properties:
         id:
           type: string
-        requester_besu_address:
+        requester_id:
           type: string
         requester_besu_address:
           type: string
