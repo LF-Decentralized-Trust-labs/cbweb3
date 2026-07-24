@@ -39,7 +39,9 @@ export IP_CB_BRAZIL=10.20.0.31        # (optional) override just this VM
 ./deploy.sh cacti                     # VM .20  — both Cacti relays (A :4000 + B :7000)
 ./deploy.sh cacti --down              # VM .20  — tear both relays down
 ./deploy.sh b hub                     # VM .20  — Scenario B found-hub
+./deploy.sh b noc-hub                 # VM .20  — Scenario B NOC portal for the hub (after b hub)
 ./deploy.sh b cb-brazil --dry-run     # VM .21  — Scenario B found-spoke (adds --hub-rpc), preview
+./deploy.sh b noc-brazil              # VM .21  — Scenario B NOC portal for spoke-brazil (after b cb-brazil)
 ./deploy.sh a cb1                     # VM .22  — Scenario A join
 ```
 
@@ -50,6 +52,7 @@ export IP_CB_BRAZIL=10.20.0.31        # (optional) override just this VM
 | `deploy.sh cacti [--down]` | VM .20 — start (or stop) **both** Cacti relays: Scenario A HTLC on `:4000` + Scenario B liquidity on `:7000`, each with a distinct `COMPOSE_PROJECT_NAME`. |
 | `deploy.sh render` | Render every `*.yaml.tmpl` → `*.yaml` (no toolkit call). |
 | `deploy.sh <a\|b> <target>` | Render, build the scenario's toolkit binary, and run `apply` with the right flags/cwd. `target` ∈ `hub` (B only), `cb-brazil`, `cb1`, `cb2`, `cb-colombia`, `cb3`, `cb4`. Extra flags (e.g. `--dry-run`) pass straight through. |
+| `deploy.sh b noc-<x>` | Bring up the NOC control plane (portal + backend) for one spoke: `noc-hub`, `noc-brazil`, `noc-colombia` (B only). Runs `observe` mode — skips launcher/contracts, no bundle emit. Run **after** that spoke's `found-*` on the same VM. |
 
 The rendered `*.yaml` and the transferred bundles are git-ignored; the `*.yaml.tmpl` templates and
 `addresses.env` are the tracked source of truth.
@@ -86,6 +89,11 @@ deploy-lnet/deploy.sh cacti
 # 2. Scenario-B hub (found-hub) — render + apply in one step
 deploy-lnet/deploy.sh b hub
 #   -> emits deploy-lnet/bundles/hub/hub.bundle.yaml
+#   -> also emits deploy-lnet/bundles/hub.noc.bundle.yaml + starts the hub's noc-agent
+
+# 3. NOC portal for the hub (observe) — brings up noc-backend :8090 + noc-portal :3030
+deploy-lnet/deploy.sh b noc-hub
+#   -> portal at http://${IP_HUB}:3030 ; registers the "hub" spoke + provisions the agent key
 ```
 
 Both relays boot **neutral** (no fixed spokes); each founding CB self-registers its spoke at
@@ -100,6 +108,36 @@ Patch the hub bundle's cross-host URLs, then `scp` `deploy-lnet/bundles/hub/hub.
 spoke VMs (see [scenario-b/README.md](scenario-b/README.md) step 1 for the exact `sed` + `scp`).
 Scenario A has no hub — its `.20` role is only the Cacti relay.
 
+## NOC observability (per spoke + hub)
+
+The NOC is **individualized per spoke and per hub** (client requirement): each
+gets its own portal + backend, co-located on that spoke's founding VM. There is
+no central NOC.
+
+| NOC deployment | VM | Monitors | Command (after `found-*`) |
+|----------------|----|----------|---------------------------|
+| `noc-hub`      | .20 (hub)          | the hub node                    | `deploy.sh b noc-hub`      |
+| `noc-brazil`   | .21 (CB Brazil)    | spoke-brazil (CB + cb1 + cb2)   | `deploy.sh b noc-brazil`   |
+| `noc-colombia` | .24 (CB Colombia)  | spoke-colombia (CB + cb3 + cb4) | `deploy.sh b noc-colombia` |
+
+How it fits the flow:
+
+- **`found-hub` / `found-spoke` already do the agent side automatically**: each
+  emits a `*.noc.bundle.yaml` (into `deploy-lnet/bundles/`) and starts that
+  entity's own `noc-agent`. No extra step for the CB/hub agent.
+- **`deploy.sh b noc-<x>`** then stands up the portal + backend (`observe` mode)
+  on the same VM and registers the spoke. Run it **after** the spoke's `found-*`
+  on that VM. Portal: `http://<VM-IP>:3030`, backend: `:8090`.
+- **Commercial banks need no NOC step**: `join` starts the bank's own `noc-agent`
+  and it pushes to its CB's NOC via `spec.noc.backendURL` (already set in the
+  `cb1`–`cb4` manifests → `http://${IP_CB_<region>}:8090`). Same-VM entities
+  (the CB/hub) use the `host.docker.internal:8090` default, so they set no
+  `backendURL`.
+
+> Order per VM: `found-*` → `noc-*`. The agent that `found-*` started keeps
+> retrying; once `noc-<x>` registers the spoke and provisions the key, its
+> pushes authenticate (self-healing, non-blocking).
+
 ## Coexistence on a shared VM
 
 Both scenarios run on the same hosts, so their ports are kept disjoint:
@@ -111,6 +149,7 @@ Both scenarios run on the same hosts, so their ports are kept disjoint:
 | Besu P2P (host)            | **30303** (forced by the join localize) | **30304**    |
 | Service ports              | suffix `645`                            | suffix `845` |
 | Cacti (VM .20)             | :4000                                   | :7000        |
+| NOC portal / backend       | —                                       | 3030 / 8090  |
 | Launcher (shared per host) | 5190                                    | 5190         |
 
 
