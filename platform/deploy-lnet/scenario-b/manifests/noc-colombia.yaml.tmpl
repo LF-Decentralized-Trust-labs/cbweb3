@@ -20,7 +20,9 @@ spec:
   topology:
     role: noc
   displayName: NOC — spoke-colombia
-  nocBundleRef: ../../bundles/scenario-b/spoke-colombia/bundles/spoke-colombia.noc.bundle.yaml
+  # deploy.sh applies found-spoke with --out-dir deploy-lnet → EmitNOC writes to
+  # deploy-lnet/bundles/ (flat; only spoke-colombia.bundle.yaml is relocated).
+  nocBundleRef: ../../bundles/spoke-colombia.noc.bundle.yaml
   noc:
     pushIntervalSeconds: 15
     components: [BESU, CACTI_RELAY]
