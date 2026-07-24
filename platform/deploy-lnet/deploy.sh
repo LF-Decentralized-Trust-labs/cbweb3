@@ -8,11 +8,14 @@
 #
 #   scenario : a | b
 #   target   : hub (scenario b only) | cb-brazil | cb1 | cb2 | cb-colombia | cb3 | cb4
+#              | noc-hub | noc-brazil | noc-colombia (scenario b only — NOC portal)
 #
 # Examples (run each on its own VM):
 #   ./deploy.sh cacti                 # VM .20  — start both Cacti relays
 #   ./deploy.sh b hub                 # VM .20  — Scenario B found-hub
+#   ./deploy.sh b noc-hub             # VM .20  — Scenario B NOC portal (after b hub)
 #   ./deploy.sh b cb-brazil           # VM .21  — Scenario B found-spoke (adds --hub-rpc)
+#   ./deploy.sh b noc-brazil          # VM .21  — Scenario B NOC portal (after b cb-brazil)
 #   ./deploy.sh b cb1 --dry-run       # VM .22  — Scenario B join, preview only
 #   ./deploy.sh a cb-brazil           # VM .21  — Scenario A found
 #   ./deploy.sh a cb3                 # VM .25  — Scenario A join
@@ -55,6 +58,12 @@ if [[ -z "$SCENARIO" || -z "$TARGET" ]]; then usage; exit 2; fi
 shift 2
 EXTRA=("$@")
 
+# NOC observe targets (noc-hub / noc-brazil / noc-colombia) deploy the NOC control
+# plane (portal + backend). Unlike found/join they build no contracts, run no
+# launcher, and emit/relocate no bundle — they only consume a NOC bundle.
+IS_NOC=false
+case "$TARGET" in noc-*) IS_NOC=true ;; esac
+
 log() { echo "[deploy] $*"; }
 
 log "=== scenario-$SCENARIO / target=$TARGET ==="
@@ -75,8 +84,8 @@ fi
 # 1b) Build the platform launcher image once per host — only for targets that
 # enable it. The hub has no launcher; every spoke/bank manifest sets
 # `launcher: enable` and soft-fails start-launcher if the image is missing.
-if [[ "$TARGET" == "hub" ]]; then
-  log "Step 2/5 — skipping launcher image (hub has no launcher)"
+if [[ "$TARGET" == "hub" || "$IS_NOC" == true ]]; then
+  log "Step 2/5 — skipping launcher image (hub/NOC has no launcher)"
 else
   log "Step 2/5 — checking launcher image cbweb3/launcher:local"
   if ! docker image inspect cbweb3/launcher:local >/dev/null 2>&1; then
@@ -92,6 +101,9 @@ fi
 # build (forge-std + OpenZeppelin). Scenario A's deploy/onboard-registry steps
 # read compiled artifacts off disk; Scenario B's toolkit also compiles in-band,
 # so a successful pre-build here is a cached no-op later.
+if [[ "$IS_NOC" == true ]]; then
+  log "Step 3/5 — skipping contracts (observe/NOC deploys no on-chain node)"
+else
 contracts_dir="$ROOT/scenario-$SCENARIO/contracts"
 log "Step 3/5 — preparing scenario-$SCENARIO contracts ($contracts_dir)"
 if [[ -d "$contracts_dir" ]]; then
@@ -120,6 +132,7 @@ if [[ -d "$contracts_dir" ]]; then
   fi
 else
   log "WARNING: contracts directory not found at $contracts_dir — skipping contract setup"
+fi
 fi
 
 # 2) Build the scenario's toolkit binary (go caches; fast on repeat).
@@ -185,6 +198,19 @@ case "$SCENARIO" in
   b)
     log "building cbweb3b → $HERE/.bin/cbweb3b"
     ( cd "$ROOT/scenario-b/toolkit" && go build -o "$HERE/.bin/cbweb3b" ./cmd/cbweb3b )
+    if [[ "$IS_NOC" == true ]]; then
+      # observe (NOC control plane): own state dir, no --out-dir/bundle relocation,
+      # no --hub-rpc. The nocBundleRef resolves against the manifest's own dir
+      # (../../bundles/<spoke>.noc.bundle.yaml, emitted by the prior found-* apply).
+      man="$HERE/scenario-b/manifests/${TARGET}.yaml"
+      [[ -f "$man" ]] || { echo "unknown scenario-b target: $TARGET" >&2; exit 2; }
+      noc_dir="$HERE/bundles/${TARGET}"
+      mkdir -p "$noc_dir"
+      log "Step 5/5 — applying Scenario B observe (NOC portal+backend): $man"
+      log "data-dir=$noc_dir"
+      "$HERE/.bin/cbweb3b" apply -f "$man" --repo-root "$ROOT" --data-dir "$noc_dir" "${EXTRA[@]}"
+      log "Scenario B apply finished for target=$TARGET"
+    else
     hubrpc=()
     outdir=()
     spoke_id=""
@@ -231,6 +257,7 @@ case "$SCENARIO" in
       fi
     fi
     log "Scenario B apply finished for target=$TARGET"
+    fi
     ;;
   *)
     usage; exit 2 ;;
