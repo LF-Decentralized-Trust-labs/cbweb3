@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario B. NOC (Network Operations Center) for spoke-colombia,
+# CO-LOCATED on the Central Bank Colombia VM (${IP_CB_COLOMBIA}) — one NOC portal
+# per spoke (client requirement). Consumes the NOC bundle emitted by
+# central-bank-colombia's found-spoke (local on this VM) and stands up the NOC
+# control plane (Postgres + noc-backend :8090 + noc-portal :3030) in its own
+# docker network. It runs NO on-chain node.
+#
+# The agents live WITH each entity: central-bank-colombia (found-spoke, same VM →
+# default host.docker.internal:8090) and each joining bank (cb3/cb4, other VMs →
+# spec.noc.backendURL: http://${IP_CB_COLOMBIA}:8090) push their own node health here.
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: noc-colombia
+spec:
+  scenario: "b"
+  environment: local
+  mode: observe
+  topology:
+    role: noc
+  displayName: NOC — spoke-colombia
+  nocBundleRef: ../../bundles/scenario-b/spoke-colombia/bundles/spoke-colombia.noc.bundle.yaml
+  noc:
+    pushIntervalSeconds: 15
+    components: [BESU, CACTI_RELAY]
+  frontendHost: ${IP_CB_COLOMBIA}
+  adminUsers:
+    - { role: ROLE_NOC_ADMIN,    username: noc-admin@noc-colombia.l-net.io,    password: change-me-local }
+    - { role: ROLE_NOC_OPERATOR, username: noc-operator@noc-colombia.l-net.io, password: change-me-local }
+    - { role: ROLE_NOC_VIEWER,   username: noc-viewer@noc-colombia.l-net.io,   password: change-me-local }
