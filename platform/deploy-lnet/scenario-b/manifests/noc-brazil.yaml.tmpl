@@ -20,10 +20,10 @@ spec:
   topology:
     role: noc
   displayName: NOC — spoke-brazil
-  # NOC bundle emitted by central-bank-brazil (found-spoke). deploy.sh applies
-  # found-spoke with --out-dir deploy-lnet, so EmitNOC writes it to
-  # deploy-lnet/bundles/ (flat; only spoke-brazil.bundle.yaml is relocated).
-  nocBundleRef: ../../bundles/spoke-brazil.noc.bundle.yaml
+  # NOC bundle emitted by central-bank-brazil (found-spoke) and relocated by
+  # deploy.sh into the scenario-b spoke folder (scenario-scoped, so a Scenario A
+  # spoke-brazil NOC bundle never overwrites it). Local on this VM (co-located).
+  nocBundleRef: ../../bundles/scenario-b/spoke-brazil/spoke-brazil.noc.bundle.yaml
   # Optional tuning; agents default to a 15s push cadence and all bundle components.
   noc:
     pushIntervalSeconds: 15

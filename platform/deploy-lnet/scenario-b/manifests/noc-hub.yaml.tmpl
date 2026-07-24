@@ -20,10 +20,9 @@ spec:
   topology:
     role: noc
   displayName: NOC — hub
-  # NOC bundle emitted by the hub's found-hub. deploy.sh applies found-hub with
-  # --out-dir deploy-lnet, so EmitNOC writes it to deploy-lnet/bundles/ (flat;
-  # only hub.bundle.yaml is relocated). Local on this VM (NOC co-located).
-  nocBundleRef: ../../bundles/hub.noc.bundle.yaml
+  # NOC bundle emitted by the hub's found-hub and relocated by deploy.sh into
+  # bundles/hub/ (alongside hub.bundle.yaml). Local on this VM (NOC co-located).
+  nocBundleRef: ../../bundles/hub/hub.noc.bundle.yaml
   noc:
     pushIntervalSeconds: 15
     components: [BESU]

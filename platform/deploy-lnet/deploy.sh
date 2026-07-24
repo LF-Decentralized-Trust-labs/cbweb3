@@ -200,11 +200,12 @@ case "$SCENARIO" in
     ( cd "$ROOT/scenario-b/toolkit" && go build -o "$HERE/.bin/cbweb3b" ./cmd/cbweb3b )
     if [[ "$IS_NOC" == true ]]; then
       # observe (NOC control plane): own state dir, no --out-dir/bundle relocation,
-      # no --hub-rpc. The nocBundleRef resolves against the manifest's own dir
-      # (../../bundles/<spoke>.noc.bundle.yaml, emitted by the prior found-* apply).
+      # no --hub-rpc. State lives under bundles/scenario-b/ so it never collides
+      # with a same-named Scenario A NOC. The nocBundleRef resolves against the
+      # manifest's own dir (the found-* apply relocated the NOC bundle there).
       man="$HERE/scenario-b/manifests/${TARGET}.yaml"
       [[ -f "$man" ]] || { echo "unknown scenario-b target: $TARGET" >&2; exit 2; }
-      noc_dir="$HERE/bundles/${TARGET}"
+      noc_dir="$HERE/bundles/scenario-b/${TARGET}"
       mkdir -p "$noc_dir"
       log "Step 5/5 — applying Scenario B observe (NOC portal+backend): $man"
       log "data-dir=$noc_dir"
@@ -248,12 +249,25 @@ case "$SCENARIO" in
     if [[ "$TARGET" == "hub" && -f "$HERE/bundles/hub.bundle.yaml" ]]; then
       mv -f "$HERE/bundles/hub.bundle.yaml" "$HERE/bundles/hub/hub.bundle.yaml"
       log "hub bundle relocated → $HERE/bundles/hub/hub.bundle.yaml"
+      # NOC bundle rides along into bundles/hub/ (hub is Scenario B-only).
+      if [[ -f "$HERE/bundles/hub.noc.bundle.yaml" ]]; then
+        mv -f "$HERE/bundles/hub.noc.bundle.yaml" "$HERE/bundles/hub/hub.noc.bundle.yaml"
+        log "hub NOC bundle relocated → $HERE/bundles/hub/hub.noc.bundle.yaml"
+      fi
     elif [[ -n "$spoke_id" && ( "$TARGET" == "cb-brazil" || "$TARGET" == "cb-colombia" ) ]]; then
       src="$HERE/bundles/${spoke_id}.bundle.yaml"
       dst="$HERE/bundles/scenario-b/$spoke_id/${spoke_id}.bundle.yaml"
       if [[ -f "$src" ]]; then
         mv -f "$src" "$dst"
         log "spoke bundle relocated → $dst"
+      fi
+      # NOC bundle rides along into the scenario-b spoke folder (scenario-scoped,
+      # so a Scenario A spoke-<x>.noc.bundle.yaml never overwrites it).
+      noc_src="$HERE/bundles/${spoke_id}.noc.bundle.yaml"
+      noc_dst="$HERE/bundles/scenario-b/$spoke_id/${spoke_id}.noc.bundle.yaml"
+      if [[ -f "$noc_src" ]]; then
+        mv -f "$noc_src" "$noc_dst"
+        log "spoke NOC bundle relocated → $noc_dst"
       fi
     fi
     log "Scenario B apply finished for target=$TARGET"

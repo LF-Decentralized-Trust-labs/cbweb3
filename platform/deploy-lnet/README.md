@@ -123,8 +123,10 @@ no central NOC.
 How it fits the flow:
 
 - **`found-hub` / `found-spoke` already do the agent side automatically**: each
-  emits a `*.noc.bundle.yaml` (into `deploy-lnet/bundles/`) and starts that
-  entity's own `noc-agent`. No extra step for the CB/hub agent.
+  emits a `*.noc.bundle.yaml` (relocated next to the main bundle — `bundles/hub/`
+  for the hub, `bundles/scenario-b/<spoke>/` for a spoke, so it is scenario-
+  scoped) and starts that entity's own `noc-agent`. No extra step for the CB/hub
+  agent. The `observe` state also lives under `bundles/scenario-b/<noc-x>/`.
 - **`deploy.sh b noc-<x>`** then stands up the portal + backend (`observe` mode)
   on the same VM and registers the spoke. Run it **after** the spoke's `found-*`
   on that VM. Portal: `http://<VM-IP>:3030`, backend: `:8090`.
