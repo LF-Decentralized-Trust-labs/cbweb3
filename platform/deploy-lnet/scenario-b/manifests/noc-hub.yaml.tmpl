@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario B. NOC (Network Operations Center) for the HUB spoke,
+# CO-LOCATED on the hub VM (${IP_HUB}) — the network operator's own NOC.
+# Consumes the NOC bundle emitted by the hub's found-hub (local on this VM) and
+# stands up the NOC control plane (Postgres + noc-backend :8090 + noc-portal
+# :3030) in its own docker network. It runs NO on-chain node.
+#
+# The hub runs its own noc-agent (added by found-hub's add-noc-agent) which
+# pushes to host.docker.internal:8090 on THIS VM — so the hub manifest needs NO
+# spec.noc.backendURL (the NOC is co-located). Only entities on OTHER VMs need a
+# spec.noc.backendURL pointing at their NOC's host.
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: noc-hub
+spec:
+  scenario: "b"
+  environment: local
+  mode: observe
+  topology:
+    role: noc
+  displayName: NOC — hub
+  # NOC bundle emitted by the hub's found-hub under its dataDir (bundles/hub)
+  # bundles/ — local on this VM since the NOC is co-located with the hub.
+  nocBundleRef: ../../bundles/hub/bundles/hub.noc.bundle.yaml
+  noc:
+    pushIntervalSeconds: 15
+    components: [BESU]
+  frontendHost: ${IP_HUB}
+  adminUsers:
+    - { role: ROLE_NOC_ADMIN,    username: noc-admin@hub.l-net.io,    password: change-me-local }
+    - { role: ROLE_NOC_OPERATOR, username: noc-operator@hub.l-net.io, password: change-me-local }
+    - { role: ROLE_NOC_VIEWER,   username: noc-viewer@hub.l-net.io,   password: change-me-local }
