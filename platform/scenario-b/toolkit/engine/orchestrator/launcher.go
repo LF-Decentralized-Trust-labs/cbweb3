@@ -79,17 +79,20 @@ func launcherStateDir(port int) string {
 }
 
 // launcherPortalOffsetB is the host-port offset of each role portal over the entity's
-// Besu RPC port (Scenario B frontend bands; see step_found_hub/spoke/join).
+// Besu RPC port (Scenario B frontend bands; see step_found_hub/spoke/join). The NOC
+// is NOT here: it is a standalone observe deployment whose portal listens on a fixed
+// port (defaultNOCPortalPort), not RPCPort+offset — see runLauncherB.
 var launcherPortalOffsetB = map[string]int{
-	"governance": 9000, "bank": 9000, "treasury": 13000, "supervisor": 14000, "noc": 12000,
+	"governance": 9000, "bank": 9000, "treasury": 13000, "supervisor": 14000,
 }
 
 type launcherRolePortal struct{ role, label string }
 
 // launcherRolesB returns the portals a Scenario B entity exposes, by topology role.
 // Only commercial banks and central banks get a launcher (the network operator's hub
-// is not an A/B entity). A spoke central bank brings up governance + treasury +
-// supervisor + a local NOC portal (found-spoke also deploys the NOC stack).
+// is not an A/B entity). A spoke central bank lists governance + treasury +
+// supervisor + its NOC portal; the NOC portal is stood up separately by the
+// co-located observe deployment (`deploy.sh b noc-<spoke>`), not by found-spoke.
 func launcherRolesB(topoRole string) []launcherRolePortal {
 	switch topoRole {
 	case "central-bank":
@@ -160,11 +163,18 @@ func runLauncherB(ctx context.Context, p LauncherParams) error {
 	}
 	portals := make([]launcherPortalJSON, 0)
 	for _, rp := range launcherRolesB(p.TopoRole) {
+		// Operator portals live at RPCPort+offset (baked per entity). The NOC is a
+		// separate observe deployment: its portal listens on the fixed
+		// defaultNOCPortalPort, co-located on this entity's host.
+		port := p.RPCPort + launcherPortalOffsetB[rp.role]
+		if rp.role == "noc" {
+			port = defaultNOCPortalPort
+		}
 		portals = append(portals, launcherPortalJSON{
 			Scenario: launcherScenarioUpper,
 			Role:     rp.role,
 			Label:    rp.label,
-			URL:      fmt.Sprintf("http://%s:%d", host, p.RPCPort+launcherPortalOffsetB[rp.role]),
+			URL:      fmt.Sprintf("http://%s:%d", host, port),
 		})
 	}
 	if len(portals) == 0 {

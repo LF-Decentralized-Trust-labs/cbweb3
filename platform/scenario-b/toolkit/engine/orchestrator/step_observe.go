@@ -26,6 +26,13 @@ const (
 	// hub's) agent key. observe (which provisions it) and found-* (which uses it)
 	// both derive the SAME key from the spoke id + this label, with no exchange.
 	nocFoundingAgentLabel = "cb"
+
+	// defaultNOCBackendPort / defaultNOCPortalPort are the fixed host ports the
+	// observe NOC control plane publishes (one NOC per host). They are fixed (not
+	// derived from a spoke's Besu RPC port) because the NOC is a standalone
+	// participant; the per-entity launcher links the NOC portal at this port.
+	defaultNOCBackendPort = 8090
+	defaultNOCPortalPort  = 3030
 )
 
 // observeImages are the NOC control-plane images an observe deployment builds.
@@ -73,10 +80,10 @@ func (c *ObserveConfig) WithDefaults() {
 		c.VolumePrefix = c.ContainerPrefix
 	}
 	if c.BackendPort == 0 {
-		c.BackendPort = 8090
+		c.BackendPort = defaultNOCBackendPort
 	}
 	if c.PortalPort == 0 {
-		c.PortalPort = 3030
+		c.PortalPort = defaultNOCPortalPort
 	}
 	if c.FrontendHost == "" {
 		c.FrontendHost = "localhost"
