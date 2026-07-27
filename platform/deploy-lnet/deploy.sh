@@ -8,7 +8,7 @@
 #
 #   scenario : a | b
 #   target   : hub (scenario b only) | cb-brazil | cb1 | cb2 | cb-colombia | cb3 | cb4
-#              | noc-hub | noc-brazil | noc-colombia (scenario b only — NOC portal)
+#              | noc-hub (scenario b only) | noc-brazil | noc-colombia (NOC — both scenarios)
 #
 # Examples (run each on its own VM):
 #   ./deploy.sh cacti                 # VM .20  — start both Cacti relays
@@ -18,6 +18,7 @@
 #   ./deploy.sh b noc-brazil          # VM .21  — Scenario B NOC portal (after b cb-brazil)
 #   ./deploy.sh b cb1 --dry-run       # VM .22  — Scenario B join, preview only
 #   ./deploy.sh a cb-brazil           # VM .21  — Scenario A found
+#   ./deploy.sh a noc-brazil          # VM .21  — Scenario A NOC data plane (after a cb-brazil)
 #   ./deploy.sh a cb3                 # VM .25  — Scenario A join
 #
 # Addresses come from addresses.env (override by exporting IP_* before running).
@@ -165,6 +166,24 @@ case "$SCENARIO" in
   a)
     man="$HERE/scenario-a/manifests/${TARGET}.yaml"
     [[ -f "$man" ]] || { echo "unknown scenario-a target: $TARGET" >&2; exit 2; }
+    log "building cbweb3 → $HERE/.bin/cbweb3"
+    ( cd "$ROOT/scenario-a/toolkit" && go build -o "$HERE/.bin/cbweb3" ./cmd/cbweb3 )
+    if [[ "$IS_NOC" == true ]]; then
+      # observe (NOC data plane): no on-chain node, no spoke_id/bundle relocation.
+      # State lives under bundles/scenario-a/<target> so it never collides with a
+      # same-named Scenario B NOC. The nocBundleRef resolves against the manifest's
+      # own dir (central-bank-brazil's found relocated the NOC bundle there).
+      data_dir="$HERE/bundles/scenario-a/$TARGET"
+      mkdir -p "$data_dir"
+      log "Step 5/5 — applying Scenario A observe (NOC data plane): $man"
+      log "data-dir=$data_dir"
+      # cbweb3 locates templates + repo root by walking up from cwd -> run from
+      # scenario-a/. CBWEB3_OUTPUT_DIR is unused by observe (no bundle emit).
+      ( cd "$ROOT/scenario-a" && \
+          CBWEB3_OUTPUT_DIR="$HERE" \
+          "$HERE/.bin/cbweb3" apply -f "$man" "${EXTRA[@]}" )
+      log "Scenario A apply finished for target=$TARGET"
+    else
     spoke_id="$(spoke_id_for "$TARGET")"
     entity_dir="$(entity_dir_for "$TARGET")"
     [[ -n "$spoke_id" && -n "$entity_dir" ]] || { echo "unknown scenario-a target: $TARGET" >&2; exit 2; }
@@ -176,8 +195,6 @@ case "$SCENARIO" in
     # Banks still need the spoke join bundle on disk (joinBundleRef); ensure the
     # drop-zone exists even when dataDir is the per-bank folder.
     mkdir -p "$HERE/bundles/scenario-a/$spoke_id"
-    log "building cbweb3 → $HERE/.bin/cbweb3"
-    ( cd "$ROOT/scenario-a/toolkit" && go build -o "$HERE/.bin/cbweb3" ./cmd/cbweb3 )
     log "Step 5/5 — applying Scenario A manifest: $man"
     log "data-dir=$data_dir  (join bundle drop-zone → bundles/scenario-a/$spoke_id/$spoke_id.bundle.yaml)"
     # cbweb3 locates its templates by walking up from cwd -> run from scenario-a/.
@@ -192,8 +209,18 @@ case "$SCENARIO" in
         mv -f "$src" "$dst"
         log "spoke bundle relocated → $dst"
       fi
+      # NOC bundle rides along into the scenario-a spoke folder (scenario-scoped,
+      # so a Scenario B spoke-<x>.noc.bundle.yaml never overwrites it). observe
+      # (a noc-<x> target) consumes it from there via nocBundleRef.
+      noc_src="$HERE/bundles/${spoke_id}.noc.bundle.yaml"
+      noc_dst="$HERE/bundles/scenario-a/$spoke_id/${spoke_id}.noc.bundle.yaml"
+      if [[ -f "$noc_src" ]]; then
+        mv -f "$noc_src" "$noc_dst"
+        log "spoke NOC bundle relocated → $noc_dst"
+      fi
     fi
     log "Scenario A apply finished for target=$TARGET"
+    fi
     ;;
   b)
     log "building cbweb3b → $HERE/.bin/cbweb3b"

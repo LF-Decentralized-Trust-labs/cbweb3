@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -85,9 +86,9 @@ func Validate(m *Manifest) error {
 		errs = append(errs, errors.New("spec.role: required field is missing"))
 	} else {
 		switch m.Spec.Role {
-		case "central-bank", "commercial-bank":
+		case "central-bank", "commercial-bank", "noc":
 		default:
-			errs = append(errs, fmt.Errorf("spec.role: invalid value %q; accepted values are: central-bank, commercial-bank", m.Spec.Role))
+			errs = append(errs, fmt.Errorf("spec.role: invalid value %q; accepted values are: central-bank, commercial-bank, noc", m.Spec.Role))
 		}
 	}
 
@@ -96,9 +97,9 @@ func Validate(m *Manifest) error {
 		errs = append(errs, errors.New("spec.mode: required field is missing"))
 	} else {
 		switch m.Spec.Mode {
-		case "found", "join":
+		case "found", "join", "observe":
 		default:
-			errs = append(errs, fmt.Errorf("spec.mode: invalid value %q; accepted values are: found, join", m.Spec.Mode))
+			errs = append(errs, fmt.Errorf("spec.mode: invalid value %q; accepted values are: found, join, observe", m.Spec.Mode))
 		}
 	}
 
@@ -111,61 +112,81 @@ func Validate(m *Manifest) error {
 		}
 	}
 
-	// spec.spoke
-	if m.Spec.Spoke.ID == "" {
-		errs = append(errs, errors.New("spec.spoke.id: required field is missing"))
-	}
-	if m.Spec.Spoke.ChainID == 0 {
-		errs = append(errs, errors.New("spec.spoke.chainId: required field is missing"))
-	}
-	if m.Spec.Spoke.Currency == "" {
-		errs = append(errs, errors.New("spec.spoke.currency: required field is missing"))
-	}
+	// Node-provisioning fields (spoke, node, image, keys, adminUsers) apply to the
+	// modes that stand up an on-chain node (found/join). The observe mode deploys
+	// the NOC control plane (no Besu node, no keys, users live in the CB realm), so
+	// they are skipped for it.
+	if m.Spec.Mode != "observe" {
 
-	// spec.node.advertisedHost — special message per FR-003
-	if m.Spec.Node.AdvertisedHost == "" {
-		errs = append(errs, errors.New(
-			"spec.node.advertisedHost: required field is missing; "+
-				"this field must be set explicitly and is never inferred from co-location",
-		))
-	}
+		// spec.spoke
+		if m.Spec.Spoke.ID == "" {
+			errs = append(errs, errors.New("spec.spoke.id: required field is missing"))
+		}
+		if m.Spec.Spoke.ChainID == 0 {
+			errs = append(errs, errors.New("spec.spoke.chainId: required field is missing"))
+		}
+		if m.Spec.Spoke.Currency == "" {
+			errs = append(errs, errors.New("spec.spoke.currency: required field is missing"))
+		}
 
-	// spec.node.dataDir — required for both modes; the engine uses this as SPOKE_DATA_DIR
-	// (genesis, TLS, provisioning state, lock). mode:join also relies on it.
-	if (m.Spec.Mode == "found" || m.Spec.Mode == "join") && m.Spec.Node.DataDir == "" {
-		errs = append(errs, fmt.Errorf(
-			"spec.node.dataDir: required field is missing for mode:%s; "+
-				"set it to the path where the provisioning engine will store spoke runtime data "+
-				"(relative paths are resolved against the current working directory)",
-			m.Spec.Mode,
-		))
-	}
+		// spec.node.advertisedHost — special message per FR-003
+		if m.Spec.Node.AdvertisedHost == "" {
+			errs = append(errs, errors.New(
+				"spec.node.advertisedHost: required field is missing; "+
+					"this field must be set explicitly and is never inferred from co-location",
+			))
+		}
 
-	// spec.joinBundleRef — required when mode is "join"; the bundle drives the join flow.
-	if m.Spec.Mode == "join" && m.Spec.JoinBundleRef == "" {
-		errs = append(errs, errors.New(
-			"spec.joinBundleRef: required field is missing for mode:join; "+
-				"set it to the path of the join bundle emitted by the founding central bank (TK-6)",
-		))
-	}
+		// spec.node.dataDir — required for both modes; the engine uses this as SPOKE_DATA_DIR
+		// (genesis, TLS, provisioning state, lock). mode:join also relies on it.
+		if (m.Spec.Mode == "found" || m.Spec.Mode == "join") && m.Spec.Node.DataDir == "" {
+			errs = append(errs, fmt.Errorf(
+				"spec.node.dataDir: required field is missing for mode:%s; "+
+					"set it to the path where the provisioning engine will store spoke runtime data "+
+					"(relative paths are resolved against the current working directory)",
+				m.Spec.Mode,
+			))
+		}
 
-	// spec.image
-	if m.Spec.Image == "" {
-		errs = append(errs, errors.New("spec.image: required field is missing"))
-	}
+		// spec.joinBundleRef — required when mode is "join"; the bundle drives the join flow.
+		if m.Spec.Mode == "join" && m.Spec.JoinBundleRef == "" {
+			errs = append(errs, errors.New(
+				"spec.joinBundleRef: required field is missing for mode:join; "+
+					"set it to the path of the join bundle emitted by the founding central bank (TK-6)",
+			))
+		}
 
-	// spec.keyProvider
-	if m.Spec.KeyProvider == "" {
-		errs = append(errs, errors.New("spec.keyProvider: required field is missing"))
-	}
+		// spec.image
+		if m.Spec.Image == "" {
+			errs = append(errs, errors.New("spec.image: required field is missing"))
+		}
 
-	// spec.certSource
-	if m.Spec.CertSource == "" {
-		errs = append(errs, errors.New("spec.certSource: required field is missing"))
-	}
+		// spec.keyProvider
+		if m.Spec.KeyProvider == "" {
+			errs = append(errs, errors.New("spec.keyProvider: required field is missing"))
+		}
 
-	// spec.adminUsers — mandatory per-role operator accounts (portal login).
-	errs = append(errs, validateAdminUsers(m)...)
+		// spec.certSource
+		if m.Spec.CertSource == "" {
+			errs = append(errs, errors.New("spec.certSource: required field is missing"))
+		}
+
+		// spec.adminUsers — mandatory per-role operator accounts (portal login).
+		errs = append(errs, validateAdminUsers(m)...)
+
+	} // end node-mode checks
+
+	// spec.nocBundleRef — required in observe, forbidden otherwise. The NOC users
+	// live in the CB realm (provisioned by the CB's found), so observe declares no
+	// adminUsers/node/keys.
+	if m.Spec.Mode == "observe" {
+		if m.Spec.NOCBundleRef == "" {
+			errs = append(errs, errors.New("spec.nocBundleRef: required field is missing for mode:observe"))
+		}
+	} else if m.Spec.NOCBundleRef != "" {
+		errs = append(errs, fmt.Errorf("spec.nocBundleRef: field is not allowed for mode:%s", m.Spec.Mode))
+	}
+	errs = append(errs, validateNOC(m)...)
 
 	// spec.launcher — optional per-entity launcher toggle.
 	switch m.Spec.Launcher {
@@ -179,6 +200,35 @@ func Validate(m *Manifest) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// nocComponentTypes are the component types the noc-agent knows how to probe.
+var nocComponentTypes = []string{"BESU", "PALADIN", "CACTI_RELAY"}
+
+// validateNOC checks the optional NOC block (present in observe to tune the NOC
+// deployment, optionally in found/join to configure the agent). All fields are
+// optional; only obviously-invalid values are rejected.
+func validateNOC(m *Manifest) []error {
+	var errs []error
+	if m.Spec.NOC == nil {
+		return errs
+	}
+	if m.Spec.NOC.PushIntervalSeconds < 0 {
+		errs = append(errs, fmt.Errorf("spec.noc.pushIntervalSeconds: invalid value %d; must be non-negative", m.Spec.NOC.PushIntervalSeconds))
+	}
+	for i, c := range m.Spec.NOC.Components {
+		ok := false
+		for _, t := range nocComponentTypes {
+			if c == t {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			errs = append(errs, fmt.Errorf("spec.noc.components[%d]: invalid value %q; accepted values are: %s", i, c, strings.Join(nocComponentTypes, ", ")))
+		}
+	}
+	return errs
 }
 
 // requiredAdminRolesByEntity lists the Keycloak realm roles an entity must

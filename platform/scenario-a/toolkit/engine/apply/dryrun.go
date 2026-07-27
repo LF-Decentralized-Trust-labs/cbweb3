@@ -10,8 +10,14 @@ import (
 
 // DryRun reads current provisioning state and returns a plan report.
 // No side effects: no files written, no engine called, no Besu accessed.
-func DryRun(_ context.Context, in ApplyInput) (ApplyResult, error) {
+func DryRun(ctx context.Context, in ApplyInput) (ApplyResult, error) {
 	m := in.Manifest
+
+	// observe has no on-chain node/state file; report its linear plan directly.
+	if m.Spec.Mode == "observe" {
+		in.DryRun = true
+		return runObserveMode(ctx, in)
+	}
 
 	result := ApplyResult{
 		Spoke:  m.Spec.Spoke.ID,

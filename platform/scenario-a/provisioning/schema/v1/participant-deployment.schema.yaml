@@ -85,14 +85,16 @@ definitions:
         enum:
           - "central-bank"
           - "commercial-bank"
-        description: "Role of this participant in the spoke. The central bank is the CA for the spoke and deploys contracts (mode: found). Commercial banks join an existing spoke (mode: join)."
+          - "noc"
+        description: "Role of this participant in the spoke. central-bank founds (mode: found), commercial-bank joins (mode: join), noc deploys the NOC control plane (mode: observe)."
 
       mode:
         type: string
         enum:
           - "found"
           - "join"
-        description: "'found': this participant creates a new spoke, deploys contracts, and emits a join bundle. 'join': attaches to an existing spoke by consuming a join bundle at joinBundleRef."
+          - "observe"
+        description: "'found': creates a spoke + emits a join bundle. 'join': attaches to an existing spoke via joinBundleRef. 'observe': deploys the NOC control plane (portal + backend) consuming a nocBundleRef."
 
       bankId:
         type: string
@@ -137,6 +139,23 @@ definitions:
         type: string
         minLength: 1
         description: "Path to the join bundle YAML file produced by a 'found' deployment (e.g., ./bundles/spoke-brl.bundle.yaml). Contextually required when mode is 'join'; schema-level conditional enforcement is deferred (see TK-3)."
+
+      nocBundleRef:
+        type: string
+        description: "Path to the NOC bundle emitted by a central bank's found. Required when mode is 'observe'; forbidden otherwise."
+
+      noc:
+        type: object
+        description: "NOC observability config (optional). In observe it tunes the deployment; in found/join it configures the entity's noc-agent."
+        properties:
+          backendURL: { type: string }
+          keycloakURL: { type: string }
+          launcherURL: { type: string }
+          pushIntervalSeconds: { type: integer, minimum: 0 }
+          components:
+            type: array
+            items:
+              enum: ["BESU", "PALADIN", "CACTI_RELAY"]
 
       frontendHost:
         type: string

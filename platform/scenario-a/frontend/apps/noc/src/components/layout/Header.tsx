@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Badge, Button, PlatformLogo, goToLauncher } from "@cbweb3/ui";
+import { BackToLauncherButton, Badge, Button, PlatformLogo, goToLauncher } from "@cbweb3/ui";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { useAlertStore, useUiStore } from "../../stores";
@@ -34,6 +34,7 @@ export function Header() {
             <Badge variant="destructive">{criticalCount} CRITICAL</Badge>
           )}
           <p className="hidden text-sm text-muted-foreground md:block">{user?.name ?? "Unknown user"}</p>
+          <BackToLauncherButton />
           <Button variant="ghost" size="sm" onClick={() => void onLogout()} disabled={status === "loading"}>
             Sign out
           </Button>

@@ -42,7 +42,9 @@ export IP_CB_BRAZIL=10.20.0.31        # (optional) override just this VM
 ./deploy.sh b noc-hub                 # VM .20  — Scenario B NOC portal for the hub (after b hub)
 ./deploy.sh b cb-brazil --dry-run     # VM .21  — Scenario B found-spoke (adds --hub-rpc), preview
 ./deploy.sh b noc-brazil              # VM .21  — Scenario B NOC portal for spoke-brazil (after b cb-brazil)
-./deploy.sh a cb1                     # VM .22  — Scenario A join
+./deploy.sh a cb-brazil               # VM .21  — Scenario A found
+./deploy.sh a noc-brazil              # VM .21  — Scenario A NOC data plane for spoke-brazil (after a cb-brazil)
+./deploy.sh a cb1                     # VM .22  — Scenario A join (also brings up the bank's noc-agent)
 ```
 
 `deploy.sh` commands:
@@ -52,7 +54,7 @@ export IP_CB_BRAZIL=10.20.0.31        # (optional) override just this VM
 | `deploy.sh cacti [--down]` | VM .20 — start (or stop) **both** Cacti relays: Scenario A HTLC on `:4000` + Scenario B liquidity on `:7000`, each with a distinct `COMPOSE_PROJECT_NAME`. |
 | `deploy.sh render` | Render every `*.yaml.tmpl` → `*.yaml` (no toolkit call). |
 | `deploy.sh <a\|b> <target>` | Render, build the scenario's toolkit binary, and run `apply` with the right flags/cwd. `target` ∈ `hub` (B only), `cb-brazil`, `cb1`, `cb2`, `cb-colombia`, `cb3`, `cb4`. Extra flags (e.g. `--dry-run`) pass straight through. |
-| `deploy.sh b noc-<x>` | Bring up the NOC control plane (portal + backend) for one spoke: `noc-hub`, `noc-brazil`, `noc-colombia` (B only). Runs `observe` mode — skips launcher/contracts, no bundle emit. Run **after** that spoke's `found-*` on the same VM. |
+| `deploy.sh <a\|b> noc-<x>` | Bring up the NOC control plane for one spoke via `observe` mode (skips launcher/contracts, no bundle emit). Targets: `noc-hub` (B only — A has no hub), `noc-brazil`, `noc-colombia`. Run **after** that spoke's `found-*` on the same VM. **B** stands up portal (`:3030`) + backend (`:8090`). **A** stands up backend (`:28645`) + the CB's `noc-agent` only — the portal is already built by A's `found` (see below). The ports are disjoint so both scenarios' NOCs coexist on one founding VM. |
 
 The rendered `*.yaml` and the transferred bundles are git-ignored; the `*.yaml.tmpl` templates and
 `addresses.env` are the tracked source of truth.
@@ -111,34 +113,49 @@ Scenario A has no hub — its `.20` role is only the Cacti relay.
 ## NOC observability (per spoke + hub)
 
 The NOC is **individualized per spoke and per hub** (client requirement): each
-gets its own portal + backend, co-located on that spoke's founding VM. There is
-no central NOC.
+gets its own backend, co-located on that spoke's founding VM. There is no central
+NOC. **Both scenarios ship it** — the difference is who owns the *portal*:
 
-| NOC deployment | VM | Monitors | Command (after `found-*`) |
-|----------------|----|----------|---------------------------|
-| `noc-hub`      | .20 (hub)          | the hub node                    | `deploy.sh b noc-hub`      |
-| `noc-brazil`   | .21 (CB Brazil)    | spoke-brazil (CB + cb1 + cb2)   | `deploy.sh b noc-brazil`   |
-| `noc-colombia` | .24 (CB Colombia)  | spoke-colombia (CB + cb3 + cb4) | `deploy.sh b noc-colombia` |
+- **Scenario B** — `observe` (`b noc-<x>`) deploys the portal **and** the backend.
+- **Scenario A** — `found` already builds the NOC portal (its 4th frontend, wired
+  to `:28645` via `VITE_NOC_BACKEND_URL`) and provisions the `cbweb3` Keycloak
+  realm + `noc-portal` client. `observe` (`a noc-<x>`) then adds only the **data
+  plane** (Postgres + backend `:28645`) and the CB's own `noc-agent`. Scenario A
+  has **no hub**, so there is no `a noc-hub`. The `:28645` backend (vs B's
+  `:8090`) is what lets both scenarios' NOCs share one founding VM.
+
+| NOC deployment | VM | Monitors | Scenario B | Scenario A |
+|----------------|----|----------|------------|------------|
+| `noc-hub`      | .20 (hub)          | the hub node                    | `deploy.sh b noc-hub`      | — (no hub) |
+| `noc-brazil`   | .21 (CB Brazil)    | spoke-brazil (CB + cb1 + cb2)   | `deploy.sh b noc-brazil`   | `deploy.sh a noc-brazil`   |
+| `noc-colombia` | .24 (CB Colombia)  | spoke-colombia (CB + cb3 + cb4) | `deploy.sh b noc-colombia` | `deploy.sh a noc-colombia` |
 
 How it fits the flow:
 
-- **`found-hub` / `found-spoke` already do the agent side automatically**: each
-  emits a `*.noc.bundle.yaml` (relocated next to the main bundle — `bundles/hub/`
-  for the hub, `bundles/scenario-b/<spoke>/` for a spoke, so it is scenario-
-  scoped) and starts that entity's own `noc-agent`. No extra step for the CB/hub
-  agent. The `observe` state also lives under `bundles/scenario-b/<noc-x>/`.
-- **`deploy.sh b noc-<x>`** then stands up the portal + backend (`observe` mode)
-  on the same VM and registers the spoke. Run it **after** the spoke's `found-*`
-  on that VM. Portal: `http://<VM-IP>:3030`, backend: `:8090`.
+- **`found-*` already does the agent side automatically**: each `found` /
+  `found-hub` / `found-spoke` emits a `*.noc.bundle.yaml` (relocated next to the
+  main bundle — `bundles/hub/` for the hub, `bundles/scenario-{a,b}/<spoke>/` for
+  a spoke, so it is scenario-scoped). In **B** that founding agent also starts at
+  `found`; in **A** the founding CB's agent is started by its `observe` run
+  (co-located, same VM). The `observe` state lives under
+  `bundles/scenario-{a,b}/<noc-x>/`.
+- **`deploy.sh <a|b> noc-<x>`** stands up the backend (`observe` mode) on the
+  same VM and registers the spoke under a deterministic UUID. Run it **after**
+  the spoke's `found-*` on that VM. Backend: `:8090` (B) / `:28645` (A). Portal:
+  `:3030` (B) / the `found`-built frontend on `:32645` (A, = Besu RPC `8645` +
+  24000).
 - **Commercial banks need no NOC step**: `join` starts the bank's own `noc-agent`
   and it pushes to its CB's NOC via `spec.noc.backendURL` (already set in the
-  `cb1`–`cb4` manifests → `http://${IP_CB_<region>}:8090`). Same-VM entities
-  (the CB/hub) use the `host.docker.internal:8090` default, so they set no
-  `backendURL`.
+  `cb1`–`cb4` manifests → `http://${IP_CB_<region>}:28645` for A, `:8090` for B).
+  The bank provisions its own deterministic key against that backend's admin API
+  before pushing. Same-VM entities (the CB/hub) use the `host.docker.internal`
+  default on that scenario's backend port, so they set no `backendURL`.
 
-> Order per VM: `found-*` → `noc-*`. The agent that `found-*` started keeps
-> retrying; once `noc-<x>` registers the spoke and provisions the key, its
-> pushes authenticate (self-healing, non-blocking).
+> Order per VM: `found-*` → `noc-*`. The agent keeps retrying until `noc-<x>`
+> registers the spoke and provisions the key, after which its pushes authenticate
+> (self-healing, non-blocking). Note: agent pushes (`/internal/v1/push`) always
+> require a provisioned key — `NOC_SKIP_AUTH` relaxes only the portal/admin
+> (Keycloak) auth, never the agent ingest.
 
 ## Coexistence on a shared VM
 
@@ -151,8 +168,18 @@ Both scenarios run on the same hosts, so their ports are kept disjoint:
 | Besu P2P (host)            | **30303** (forced by the join localize) | **30304**    |
 | Service ports              | suffix `645`                            | suffix `845` |
 | Cacti (VM .20)             | :4000                                   | :7000        |
-| NOC portal / backend       | —                                       | 3030 / 8090  |
+| NOC portal                 | 32645 (`found` frontend, RPC+24000)     | 3030         |
+| NOC backend                | **28645** (RPC+20000)                   | **8090**     |
 | Launcher (shared per host) | 5190                                    | 5190         |
+
+> **NOC backends are disjoint**, so a single founding VM runs **both** scenarios'
+> NOC data planes side by side (e.g. spoke-brazil on VM `.21` serves a Scenario A
+> portal on `:32645`/backend `:28645` **and** a Scenario B portal on `:3030`/
+> backend `:8090`). Scenario A's port is the single source of truth
+> `orchestrator.NOCBackendPort = 28645` — both the `observe` backend publish and
+> the `found` portal's `VITE_NOC_BACKEND_URL` derive from it; changing it is a
+> code edit, not a deploy flag. It must be reachable cross-VM for remote bank
+> agents (open in the founding VM's security group, like `:8090`).
 
 
 

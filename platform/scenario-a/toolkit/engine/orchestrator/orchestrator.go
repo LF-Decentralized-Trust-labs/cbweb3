@@ -241,8 +241,12 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			APIURL:      frontendAPIURL(frontendAdvertisedHost(m), ports.APIGateway),
 			APIBase:     frontendAPIBase(frontendAdvertisedHost(m), ports.APIGateway),
 			PortalOwner: entity + "-operator", FiatSymbol: m.Spec.Spoke.Currency, Institution: m.DisplayNameOr(entity),
-			KeycloakURL: frontendAPIBase(frontendAdvertisedHost(m), ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "cbweb3-noc",
+			KeycloakURL: frontendAPIBase(frontendAdvertisedHost(m), ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "noc-portal",
 			LauncherURL: launcherURLForManifest(m),
+			// The NOC portal (co-located, built here) talks to the observe-deployed NOC
+			// backend on the fixed host port, not the api-gateway. Path suffix /api/v1
+			// matches the backend routes and the portal's http-client fallback.
+			NOCBackendURL: fmt.Sprintf("http://%s:%d/api/v1", frontendAdvertisedHost(m), NOCBackendPort),
 			// Per-entity image tag: VITE_* are baked at build time, so a shared tag
 			// would let one entity's bundle (with its api-gateway URL) be reused by
 			// another, sending the browser to the wrong gateway and failing CORS.

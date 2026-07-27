@@ -39,6 +39,7 @@ type startFrontendStackStep struct {
 	keycloakRealm  string
 	keycloakClient string
 	launcherURL    string
+	nocBackendURL  string // VITE_NOC_BACKEND_URL for the co-located NOC portal (observe backend)
 	imageTag       string
 	healthTimeout  time.Duration
 	healthInterval time.Duration
@@ -61,6 +62,7 @@ func newStartFrontendStackStep(name string, p frontendStackParams) Step {
 		keycloakRealm:  p.KeycloakRealm,
 		keycloakClient: p.KeycloakClient,
 		launcherURL:    p.LauncherURL,
+		nocBackendURL:  p.NOCBackendURL,
 		imageTag:       p.ImageTag,
 		healthTimeout:  p.HealthTimeout,
 		healthInterval: p.HealthInterval,
@@ -83,6 +85,7 @@ type frontendStackParams struct {
 	KeycloakRealm  string
 	KeycloakClient string
 	LauncherURL    string
+	NOCBackendURL  string
 	ImageTag       string
 	HealthTimeout  time.Duration
 	HealthInterval time.Duration
@@ -150,6 +153,7 @@ func (s *startFrontendStackStep) composeEnv() []string {
 		"VITE_KEYCLOAK_REALM="+s.keycloakRealm,
 		"VITE_KEYCLOAK_CLIENT_ID="+s.keycloakClient,
 		"VITE_LAUNCHER_URL="+s.launcherURL,
+		"VITE_NOC_BACKEND_URL="+s.nocBackendURL,
 		"FRONTEND_IMAGE_TAG="+tag,
 	)
 	// Publish only the selected portals' ports; others default to 0 (unpublished).
