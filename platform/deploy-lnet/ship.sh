@@ -7,6 +7,7 @@
 #   DEPLOY_HOST=10.10.0.20 ./ship.sh
 #   DEPLOY_HOST=10.10.0.20 DEPLOY_AUTH=key DEPLOY_KEY=~/.ssh/lnet ./ship.sh
 #   DEPLOY_HOST=10.10.0.20 DEPLOY_AUTH=password DEPLOY_PASSWORD=secret ./ship.sh
+#   DEPLOY_HOST=10.10.0.20 DEPLOY_CLEAN=yes ./ship.sh   # wipe remote dest first
 #   ./ship.sh --dry-run                          # build the tarball, skip transfer
 #
 # Environment variables:
@@ -21,11 +22,26 @@
 #   DEPLOY_PASSWORD    SSH/sudo password                (password auth; needs sshpass)
 #   DEPLOY_STRICT_HOST_KEY   yes | no | accept-new      (default: accept-new)
 #   DEPLOY_EXTRA_EXCLUDES    space-separated extra tar --exclude patterns
+#   DEPLOY_CLEAN       when truthy (1/yes/true), wipe the remote DEPLOY_DEST
+#                      before extracting (rm -rf) for a clean mirror. Default: no
+#                      (extraction overlays onto existing contents).
+#   DEPLOY_DOCKER_CLEAN  when truthy, run deploy-lnet/cleanDocker.sh on the
+#                      remote as the LAST step (after extract) to wipe all Docker
+#                      state (containers/images/volumes/networks + prune) for an
+#                      interference-free deploy. Host-wide. Default: no.
+#   DEPLOY_DOCKER_SUDO   when truthy, tell the remote cleanDocker.sh to prefix
+#                      docker with sudo (forwarded as DOCKER_SUDO). Default: no.
 #
 # Notes:
 #   - Password auth requires `sshpass` on this machine (brew install hudochenkov/sshpass/sshpass).
 #   - Heavy/generated trees (.git, node_modules, build output, local binaries) are
 #     excluded by default; add more with DEPLOY_EXTRA_EXCLUDES.
+#   - By default the tarball is extracted ON TOP of whatever is already in
+#     DEPLOY_DEST (overlay): matching paths are overwritten, unmatched remote
+#     files are left in place. Set DEPLOY_CLEAN=yes for a clean mirror instead —
+#     it runs `rm -rf` on DEPLOY_DEST first, so remote-only files (including
+#     excluded/generated trees such as node_modules, .git, dist) are removed too.
+#     Unsafe targets ("", "/", "~", ".", "./", "..") are refused.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,6 +70,25 @@ DEPLOY_PORT="${DEPLOY_PORT:-22}"
 # .env: it would expand to the LOCAL home before being sent to the remote.
 DEPLOY_DEST="${DEPLOY_DEST:-cbweb3-platform}"
 DEPLOY_STRICT_HOST_KEY="${DEPLOY_STRICT_HOST_KEY:-accept-new}"
+
+# Wipe the remote destination before extracting when DEPLOY_CLEAN is truthy.
+DEPLOY_CLEAN="${DEPLOY_CLEAN:-no}"
+case "${DEPLOY_CLEAN,,}" in
+  1|yes|true|on) DEPLOY_CLEAN=yes ;;
+  *)             DEPLOY_CLEAN=no ;;
+esac
+
+# Run cleanDocker.sh on the remote as the last step when DEPLOY_DOCKER_CLEAN is truthy.
+DEPLOY_DOCKER_CLEAN="${DEPLOY_DOCKER_CLEAN:-no}"
+case "${DEPLOY_DOCKER_CLEAN,,}" in
+  1|yes|true|on) DEPLOY_DOCKER_CLEAN=yes ;;
+  *)             DEPLOY_DOCKER_CLEAN=no ;;
+esac
+DEPLOY_DOCKER_SUDO="${DEPLOY_DOCKER_SUDO:-no}"
+case "${DEPLOY_DOCKER_SUDO,,}" in
+  1|yes|true|on) DEPLOY_DOCKER_SUDO=yes ;;
+  *)             DEPLOY_DOCKER_SUDO=no ;;
+esac
 
 if [[ "$DRY_RUN" == "no" && -z "$DEPLOY_HOST" ]]; then
   echo "[ship] DEPLOY_HOST is required (see header for usage)" >&2
@@ -143,8 +178,28 @@ REMOTE_TMP="/tmp/cbweb3-platform.$$.tar.gz"
 echo "[ship] copying tarball to ${REMOTE}:${REMOTE_TMP}"
 "${SSH_PREFIX[@]}" scp "${SCP_OPTS[@]}" "$TARBALL" "${REMOTE}:${REMOTE_TMP}"
 
+REMOTE_CLEAN=""
+if [[ "$DEPLOY_CLEAN" == "yes" ]]; then
+  # Refuse obviously dangerous targets before issuing rm -rf on the remote.
+  case "$DEPLOY_DEST" in
+    ""|"/"|"~"|"."|"./"|"..") echo "[ship] refusing to clean unsafe DEPLOY_DEST: '$DEPLOY_DEST'" >&2; exit 2 ;;
+  esac
+  echo "[ship] DEPLOY_CLEAN=yes — wiping ${REMOTE}:${DEPLOY_DEST} before extract"
+  REMOTE_CLEAN="rm -rf -- ${DEPLOY_DEST};"
+fi
+
 echo "[ship] extracting into ${REMOTE}:${DEPLOY_DEST}"
 "${SSH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$REMOTE" \
-  "set -e; mkdir -p ${DEPLOY_DEST}; tar -xzf ${REMOTE_TMP} -C ${DEPLOY_DEST}; rm -f ${REMOTE_TMP}; echo '[remote] extracted to' \$(cd ${DEPLOY_DEST} && pwd)"
+  "set -e; ${REMOTE_CLEAN} mkdir -p ${DEPLOY_DEST}; tar -xzf ${REMOTE_TMP} -C ${DEPLOY_DEST}; rm -f ${REMOTE_TMP}; echo '[remote] extracted to' \$(cd ${DEPLOY_DEST} && pwd)"
 
 echo "[ship] done — codebase deployed to ${REMOTE}:${DEPLOY_DEST}"
+
+# --- last step: clean Docker on the remote ----------------------------------
+if [[ "$DEPLOY_DOCKER_CLEAN" == "yes" ]]; then
+  REMOTE_SUDO=""
+  [[ "$DEPLOY_DOCKER_SUDO" == "yes" ]] && REMOTE_SUDO="DOCKER_SUDO=yes "
+  echo "[ship] DEPLOY_DOCKER_CLEAN=yes — running cleanDocker.sh on ${REMOTE} (last step)"
+  "${SSH_PREFIX[@]}" ssh "${SSH_OPTS[@]}" "$REMOTE" \
+    "set -e; cd ${DEPLOY_DEST}/deploy-lnet && ${REMOTE_SUDO}bash ./cleanDocker.sh --yes"
+  echo "[ship] done — remote Docker environment cleaned"
+fi
