@@ -26,6 +26,9 @@ spec:
   noc:
     pushIntervalSeconds: 15
     components: [BESU, CACTI_RELAY]
+    # Portal auth: CB Colombia's Keycloak realm (co-located, 15845) + launcher (5190).
+    keycloakURL: http://${IP_CB_COLOMBIA}:15845
+    launcherURL: http://${IP_CB_COLOMBIA}:5190
   frontendHost: ${IP_CB_COLOMBIA}
   adminUsers:
     - { role: ROLE_NOC_ADMIN,    username: noc-admin@noc-colombia.l-net.io,    password: change-me-local }

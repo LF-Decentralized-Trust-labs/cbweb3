@@ -26,6 +26,10 @@ spec:
   noc:
     pushIntervalSeconds: 15
     components: [BESU]
+    # Portal auth: hub's Keycloak realm (co-located, 15845). No launcherURL — the
+    # hub has no launcher. NOTE: found-hub creates the noc-portal client but no
+    # operator users yet, so hub NOC login needs a user provisioned separately.
+    keycloakURL: http://${IP_HUB}:15845
   frontendHost: ${IP_HUB}
   adminUsers:
     - { role: ROLE_NOC_ADMIN,    username: noc-admin@hub.l-net.io,    password: change-me-local }

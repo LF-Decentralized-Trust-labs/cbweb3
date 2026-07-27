@@ -28,6 +28,10 @@ spec:
   noc:
     pushIntervalSeconds: 15
     components: [BESU, CACTI_RELAY]
+    # Portal auth: CB Brazil's Keycloak realm (co-located, RPC 8845 + 7000 = 15845)
+    # and back-to-launcher target (CB launcher on 5190).
+    keycloakURL: http://${IP_CB_BRAZIL}:15845
+    launcherURL: http://${IP_CB_BRAZIL}:5190
   frontendHost: ${IP_CB_BRAZIL}
   adminUsers:
     - { role: ROLE_NOC_ADMIN,    username: noc-admin@noc-brazil.l-net.io,    password: change-me-local }
