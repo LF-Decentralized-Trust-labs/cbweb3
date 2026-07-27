@@ -32,6 +32,8 @@ spec:
   certSource: ca://central-bank-brazil
   relay:
     endpoint: http://${IP_HUB}:7000
+  noc:
+    backendURL: http://${IP_CB_BRAZIL}:8090
   frontendHost: cb1-brazil.cbweb3.l-net.io
   launcher: enable
   launcherPort: 5190

@@ -29,6 +29,8 @@ spec:
   certSource: ca://central-bank-colombia
   relay:
     endpoint: http://${IP_HUB}:7000
+  noc:
+    backendURL: http://${IP_CB_COLOMBIA}:8090
   frontendHost: cb3-colombia.cbweb3.l-net.io
   launcher: enable
   launcherPort: 5190
