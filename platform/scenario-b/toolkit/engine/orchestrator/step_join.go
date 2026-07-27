@@ -58,6 +58,20 @@ type JoinConfig struct {
 	EthSyncing       EthSyncing
 }
 
+// joinWaitSyncTimeout is how long the join waits for the bank's Besu to peer with the
+// CB bootnode and import its first block. Peering is via UDP discovery (--bootnodes),
+// and on a busy single host the SECOND+ bank can take a few minutes to bond its first
+// peer, so the default is generous (10m). Override with CBWEB3_WAIT_SYNC_TIMEOUT (a Go
+// duration, e.g. "20m") for very loaded hosts.
+func joinWaitSyncTimeout() time.Duration {
+	if v := os.Getenv("CBWEB3_WAIT_SYNC_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 10 * time.Minute
+}
+
 func (c *JoinConfig) WithDefaults() {
 	if c.BesuImage == "" {
 		c.BesuImage = "hyperledger/besu:25.8.0"
@@ -94,7 +108,7 @@ func (c *JoinConfig) WithDefaults() {
 	}
 	if c.WaitSync == nil {
 		c.WaitSync = func(ctx context.Context) error {
-			return waitSync(ctx, c.BankRPC, 300*time.Second, 2*time.Second, c.EthSyncing)
+			return waitSync(ctx, c.BankRPC, joinWaitSyncTimeout(), 2*time.Second, c.EthSyncing)
 		}
 	}
 	if c.WaitKeycloak == nil {
@@ -107,9 +121,10 @@ func (c *JoinConfig) WithDefaults() {
 	}
 }
 
-func (c JoinConfig) genesisVolume() string { return c.VolumePrefix + "_genesis" }
-func (c JoinConfig) caVolume() string      { return c.VolumePrefix + "_cb_tls" }
-func (c JoinConfig) keycloakPort() int     { return c.RPCPort + 7000 }
+func (c JoinConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
+func (c JoinConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
+func (c JoinConfig) caVolume() string       { return c.VolumePrefix + "_cb_tls" }
+func (c JoinConfig) keycloakPort() int      { return c.RPCPort + 7000 }
 
 // keycloakContainer matches entity-keycloak.compose.yaml's container_name.
 func (c JoinConfig) keycloakContainer() string {
@@ -406,13 +421,47 @@ func JoinSteps(c JoinConfig) []Step {
 			},
 		},
 		{
+			// Static peer: seed static-nodes.json (the CB's enode, from the spoke
+			// bundle) into the Besu DATA volume so the bank holds a DIRECT, persistent
+			// connection to the CB — Besu reads <data-path>/static-nodes.json on start.
+			// The join otherwise relies only on UDP discovery (--bootnodes), and on a
+			// busy single host that can take minutes to bond the 2nd+ bank's first peer
+			// (every node advertises 127.0.0.1 in its discovery record, so the churn
+			// wastes bonding cycles) — long enough to race the wait-sync gate. A static
+			// node connects immediately, so the node syncs deterministically. Must be
+			// written BEFORE start-besu-join so it is present at first boot (a fresh/
+			// --clean run); an already-running besu picks it up on its next recreate.
+			Name: "write-static-nodes",
+			Deps: []string{"write-genesis"},
+			Check: func(ctx context.Context) (bool, error) {
+				b, err := bundle.LoadSpoke(c.SpokeBundlePath)
+				if err != nil {
+					return false, err
+				}
+				existing, err := readVolumeFile(ctx, c.Runner, c.besuDataVolume(), "static-nodes.json")
+				if err != nil || len(existing) == 0 {
+					return false, nil
+				}
+				return strings.Contains(string(existing), b.Enode), nil
+			},
+			Run: func(ctx context.Context) error {
+				b, err := bundle.LoadSpoke(c.SpokeBundlePath)
+				if err != nil {
+					return err
+				}
+				content := fmt.Sprintf("[%q]\n", b.Enode)
+				return writeVolumeFile(ctx, c.Runner, c.besuDataVolume(), "static-nodes.json", []byte(content), "0644")
+			},
+		},
+		{
 			// Non-validating full node: the node is not in the spoke's QBFT
 			// validator set (genesis lists only the CB), so it syncs without
 			// producing blocks — no besu "non-validator" flag is needed. Uses the
-			// join template (--bootnodes = the CB's advertised enode). Plumbing
-			// (${...}) comes from the runner's process env (ComposeEnv).
+			// join template (--bootnodes = the CB's advertised enode) plus the
+			// static-nodes.json seeded above for a deterministic direct connection.
+			// Plumbing (${...}) comes from the runner's process env (ComposeEnv).
 			Name: "start-besu-join",
-			Deps: []string{"write-genesis"},
+			Deps: []string{"write-static-nodes"},
 			Run: func(ctx context.Context) error {
 				if _, err := c.Runner.Run(ctx, "docker", c.composeUpArgs("entity-besu-join")...); err != nil {
 					return err

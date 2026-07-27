@@ -150,8 +150,12 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	// RPC + CB address are known.
 	if !o.DryRun && hubRPC != "" && o.CBAddress != "" {
 		identityRegistry := hub.Contracts["identityRegistry"]
+		// The probe runs in the HOST toolkit process, so localize the bundle's
+		// host.docker.internal hub RPC (a container sentinel) to localhost; a routable
+		// multi-VM hub RPC is left unchanged.
+		hubProbeRPC := orchestrator.HostReachable(hubRPC)
 		cfg.CBRegistered = func(ctx context.Context) (bool, error) {
-			return orchestrator.HubCBRegistered(ctx, hubRPC, identityRegistry, o.CBAddress)
+			return orchestrator.HubCBRegistered(ctx, hubProbeRPC, identityRegistry, o.CBAddress)
 		}
 	}
 
@@ -237,7 +241,7 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
 		HubRPC:          firstNonEmpty(o.HubRPC, sb.HubRPC), // routable hub RPC from the spoke bundle
-		RelayEndpoint:   manifestRelayEndpoint(pd),         // the relay's own REST endpoint → CACTI_API_URL
+		RelayEndpoint:   manifestRelayEndpoint(pd),          // the relay's own REST endpoint → CACTI_API_URL
 		FrontendHost:    pd.Spec.FrontendHost,
 		LauncherEnabled: pd.Spec.Launcher == "enable",
 		LauncherPort:    pd.Spec.LauncherPort,

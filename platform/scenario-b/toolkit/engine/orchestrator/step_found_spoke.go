@@ -200,6 +200,31 @@ func containerReachable(raw string) string {
 	}
 }
 
+// HostReachable is the opposite of containerReachable: it rewrites a URL's host to
+// localhost ONLY when it is the single-host container sentinel (host.docker.internal /
+// host-gateway), so the HOST-RUN toolkit can reach a service published on the local
+// host. That name resolves inside containers (via --add-host host-gateway) but NOT
+// from the host process, so a host-run call (register-cb / register-currency posting to
+// the hub gateway) must use localhost. A routable host (a real IP/DNS — a multi-VM hub)
+// is returned unchanged, so a split topology still reaches the hub at its real address.
+func HostReachable(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	switch u.Hostname() {
+	case "host.docker.internal", "host-gateway":
+		host := "localhost"
+		if p := u.Port(); p != "" {
+			host += ":" + p
+		}
+		u.Host = host
+		return u.String()
+	default:
+		return raw
+	}
+}
+
 // cactiAPIURL is the Cacti relay REST endpoint a backend container uses to reach
 // the (external) relay. It is the relay's OWN endpoint (spec.relay.endpoint →
 // RelayEndpoint), NOT the host the relay uses to reach this spoke — the relay
@@ -552,7 +577,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				if err != nil {
 					return err
 				}
-				url := strings.TrimRight(hub.HubGateway, "/") + "/internal/v1/spokes/register"
+				url := strings.TrimRight(HostReachable(hub.HubGateway), "/") + "/internal/v1/spokes/register"
 				req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 				if err != nil {
 					return err
@@ -603,7 +628,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				if err != nil {
 					return err
 				}
-				url := strings.TrimRight(hub.HubGateway, "/") + "/internal/v1/spokes/register-currency"
+				url := strings.TrimRight(HostReachable(hub.HubGateway), "/") + "/internal/v1/spokes/register-currency"
 				req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 				if err != nil {
 					return err
