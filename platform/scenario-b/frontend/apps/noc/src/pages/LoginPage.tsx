@@ -35,8 +35,8 @@ export function LoginPage() {
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
     defaultValues: {
-      username: "noc.admin",
-      password: "NOCAdmin2026!",
+      username: "",
+      password: "",
     },
   });
 
@@ -111,10 +111,6 @@ export function LoginPage() {
                 <Label htmlFor="password">Password</Label>
                 <Input id="password" type="password" {...form.register("password")} autoComplete="current-password" />
                 {form.formState.errors.password ? <p className="text-xs text-destructive">{form.formState.errors.password.message}</p> : null}
-              </div>
-
-              <div className="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-                Demo credentials are prefilled for local structural testing.
               </div>
 
               {error ? <p className="text-sm text-destructive">{error}</p> : null}

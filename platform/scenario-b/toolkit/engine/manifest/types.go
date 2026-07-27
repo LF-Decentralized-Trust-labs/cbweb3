@@ -128,6 +128,13 @@ type NOC struct {
 	// Components optionally filters the monitored component set by type
 	// (BESU, CACTI_RELAY, PALADIN). Empty means "all components in the bundle".
 	Components []string `yaml:"components,omitempty" json:"components,omitempty"`
+	// KeycloakURL is the routable Keycloak the NOC portal password-grants against
+	// (the co-located CB/hub realm, e.g. http://<host>:15845). observe bakes it as
+	// the portal's VITE_KEYCLOAK_URL. Empty → portal login is unconfigured.
+	KeycloakURL string `yaml:"keycloakURL,omitempty" json:"keycloakURL,omitempty"`
+	// LauncherURL is the launcher the NOC portal's "back to launcher" affordance
+	// returns to (VITE_LAUNCHER_URL). Empty → the affordance hides.
+	LauncherURL string `yaml:"launcherURL,omitempty" json:"launcherURL,omitempty"`
 }
 
 // Node holds the network addressing configuration for the Besu node.

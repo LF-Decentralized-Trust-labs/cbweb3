@@ -249,6 +249,10 @@ const (
 	spokeKeycloakRealm  = "cbweb3"
 	spokeKeycloakClient = "spoke-backend"
 	spokeKeycloakSecret = "spoke-backend-local-secret" // local-only, not a real secret
+	// nocKeycloakClient is the PUBLIC client the co-located NOC portal uses for its
+	// direct password grant (no secret). Created in the same realm so a NOC user
+	// (adminUsers role: NOC → ROLE_NOC_ADMIN) can log into the portal.
+	nocKeycloakClient = "noc-portal"
 	// Central-bank login user seeded into the realm (password grant via the
 	// confidential client). Holds the roles the v2 AMM routes + governance
 	// approve-kyc require. Local-dev credentials only.
@@ -268,6 +272,10 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password admin && ", kc)
 	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || true) && ", kc, spokeKeycloakRealm)
+	// Local lab uses plain HTTP; the NOC portal does a browser-direct password
+	// grant from the entity's IP, which Keycloak's default sslRequired=external
+	// rejects with "HTTPS required". Relax it for local (never in production).
+	fmt.Fprintf(&b, "(%[1]s update realms/%[2]s -s sslRequired=NONE || true) && ", kc, spokeKeycloakRealm)
 	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
 		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true) && ",
 		kc, spokeKeycloakRealm, spokeKeycloakClient, spokeKeycloakSecret)
@@ -278,6 +286,7 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
 		"--cclientid realm-management --rolename manage-users --rolename view-users || true) && ",
 		kc, spokeKeycloakRealm, spokeKeycloakClient)
+	appendNOCPortalClient(&b, kc, spokeKeycloakRealm)
 	// Per-role operator accounts from the manifest (spec.adminUsers). Fall back to a
 	// single default CB admin when the manifest declares none. Each user's manifest
 	// role maps to the realm roles the api-gateway checks (realmRolesForAdminRole).
@@ -288,6 +297,18 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	appendKeycloakUsers(&b, kc, spokeKeycloakRealm, users)
 	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
 	return err
+}
+
+// appendNOCPortalClient appends an idempotent kcadm command creating the PUBLIC
+// noc-portal client used by the co-located NOC portal's browser password grant.
+// publicClient + directAccessGrants (password grant, no secret); webOrigins=* so
+// the browser token fetch passes Keycloak's CORS. Shared by found-spoke and
+// found-hub (same realm: cbweb3).
+func appendNOCPortalClient(b *strings.Builder, kc, realm string) {
+	fmt.Fprintf(b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s enabled=true "+
+		"-s publicClient=true -s standardFlowEnabled=false -s directAccessGrantsEnabled=true "+
+		"-s 'webOrigins=[\"*\"]' || true) && ",
+		kc, realm, nocKeycloakClient)
 }
 
 // appendKeycloakUsers appends idempotent kcadm commands that create each admin user

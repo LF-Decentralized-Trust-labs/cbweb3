@@ -100,6 +100,8 @@ func applyObserve(ctx context.Context, o Options, pd *manifest.ParticipantDeploy
 		NetPrefix:       prefix,
 		VolumePrefix:    prefix,
 		FrontendHost:    pd.Spec.FrontendHost,
+		KeycloakURL:     manifestNOCKeycloakURL(pd), // portal VITE_KEYCLOAK_URL (CB/hub realm)
+		LauncherURL:     manifestNOCLauncherURL(pd), // portal VITE_LAUNCHER_URL (back-to-launcher)
 		// BackendPort/PortalPort fall back to the local convention in WithDefaults;
 		// spec.noc may carry explicit ports in a later phase.
 	}
@@ -459,6 +461,24 @@ func manifestNOCBackendURL(pd *manifest.ParticipantDeployment) string {
 		return ""
 	}
 	return pd.Spec.NOC.BackendURL
+}
+
+// manifestNOCKeycloakURL returns spec.noc.keycloakURL (the CB/hub Keycloak the
+// NOC portal password-grants against), or "" when unset.
+func manifestNOCKeycloakURL(pd *manifest.ParticipantDeployment) string {
+	if pd.Spec.NOC == nil {
+		return ""
+	}
+	return pd.Spec.NOC.KeycloakURL
+}
+
+// manifestNOCLauncherURL returns spec.noc.launcherURL (the NOC portal's
+// back-to-launcher target), or "" when unset.
+func manifestNOCLauncherURL(pd *manifest.ParticipantDeployment) string {
+	if pd.Spec.NOC == nil {
+		return ""
+	}
+	return pd.Spec.NOC.LauncherURL
 }
 
 // toOrchestratorAdminUsers converts the manifest's spec.adminUsers into the

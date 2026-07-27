@@ -84,6 +84,8 @@ properties:
         type: object
         properties:
           backendURL: { type: string }
+          keycloakURL: { type: string }
+          launcherURL: { type: string }
           pushIntervalSeconds: { type: integer, minimum: 0 }
           components: { type: array, items: { enum: [BESU, CACTI_RELAY, PALADIN] } }
       frontendHost: { type: string }

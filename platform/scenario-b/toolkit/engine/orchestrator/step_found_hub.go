@@ -194,12 +194,21 @@ func (c HubConfig) buildBackendImage(ctx context.Context) error {
 // local secret via kcadm inside the running Keycloak container.
 func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
 	kc := "/opt/keycloak/bin/kcadm.sh"
-	script := fmt.Sprintf(
+	var b strings.Builder
+	fmt.Fprintf(&b,
 		"%[1]s config credentials --server http://localhost:8080 --realm master --user %[2]s --password %[3]s && "+
 			"(%[1]s create realms -s realm=%[4]s -s enabled=true || true) && "+
+			// Local lab HTTP: relax sslRequired so the browser-direct NOC portal
+			// password grant is not rejected with "HTTPS required" (never in prod).
+			"(%[1]s update realms/%[4]s -s sslRequired=NONE || true) && "+
 			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
-			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true)",
+			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true) && ",
 		kc, "admin", "admin", hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret)
+	// Public noc-portal client so the hub's co-located NOC portal can password-grant
+	// against this realm (hub NOC operator users are a separate follow-up — found-hub
+	// does not yet provision operator accounts).
+	appendNOCPortalClient(&b, kc, hubKeycloakRealm)
+	script := strings.TrimSuffix(b.String(), " && ")
 	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", script)
 	return err
 }

@@ -160,7 +160,10 @@ func checkNamedVolumes(interpolated string, res *Result) {
 			if i := strings.Index(vol, ":"); i >= 0 {
 				src = vol[:i]
 			}
-			if isHostBind(src) && !strings.Contains(vol, "pki") {
+			// Host binds are rejected (state belongs in named volumes) except two
+			// well-known, non-secret cases: the bank PKI dir, and the read-only
+			// Docker socket the NOC agent needs to tail container logs.
+			if isHostBind(src) && !strings.Contains(vol, "pki") && !strings.Contains(vol, "/var/run/docker.sock") {
 				res.add("named-volumes", "host bind mount in service '"+svc+"': "+vol)
 			}
 		}

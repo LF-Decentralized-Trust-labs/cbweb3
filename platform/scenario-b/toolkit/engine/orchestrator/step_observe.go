@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,14 +37,6 @@ const (
 	defaultNOCPortalPort  = 3030
 )
 
-// observeImages are the NOC control-plane images an observe deployment builds.
-// The agent image is NOT built here: agents run with each entity (found-*/join)
-// and push to this backend.
-var observeImages = []struct{ image, dockerfile, context string }{
-	{hubNocBackendImage, "backend/services/noc-backend/Dockerfile", "backend/services/noc-backend"},
-	{hubNocPortalImage, "frontend/apps/noc/Dockerfile", "frontend"},
-}
-
 // ObserveConfig drives an observe-mode NOC deployment: it stands up the NOC
 // control plane (db + backend + portal), then registers the spoke described by
 // the consumed NOC bundle and provisions the founding agent's key. Agents run
@@ -58,6 +52,11 @@ type ObserveConfig struct {
 	BackendPort     int
 	PortalPort      int
 	FrontendHost    string
+	// KeycloakURL is the routable CB/hub Keycloak the portal password-grants
+	// against (spec.noc.keycloakURL). Baked as the portal's VITE_KEYCLOAK_URL.
+	KeycloakURL string
+	// LauncherURL is baked as the portal's VITE_LAUNCHER_URL (back-to-launcher).
+	LauncherURL string
 
 	// BackendURL is where the toolkit reaches the backend to register/provision
 	// (default http://localhost:<BackendPort>). Injectable for tests.
@@ -112,7 +111,7 @@ func (c ObserveConfig) ComposeEnv() []string {
 		"NOC_NET_PREFIX":    c.NetPrefix,
 		"NOC_VOLUME_PREFIX": c.VolumePrefix,
 		"NOC_BACKEND_IMAGE": hubNocBackendImage,
-		"NOC_PORTAL_IMAGE":  hubNocPortalImage,
+		"NOC_PORTAL_IMAGE":  c.portalImage(),
 	}
 	out := make([]string, 0, len(vars))
 	for k, v := range vars {
@@ -120,6 +119,40 @@ func (c ObserveConfig) ComposeEnv() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// portalViteArgs are the build args baked into the NOC portal SPA (read at build
+// time). The backend URL is the BROWSER-reachable one (FrontendHost + published
+// port), distinct from BackendURL (the toolkit's localhost admin path).
+func (c ObserveConfig) portalViteArgs() map[string]string {
+	return map[string]string{
+		"VITE_NOC_BACKEND_URL":    fmt.Sprintf("http://%s:%d/api/v1", c.FrontendHost, c.BackendPort),
+		"VITE_KEYCLOAK_URL":       c.KeycloakURL,
+		"VITE_KEYCLOAK_REALM":     spokeKeycloakRealm,
+		"VITE_KEYCLOAK_CLIENT_ID": nocKeycloakClient,
+		"VITE_LAUNCHER_URL":       c.LauncherURL,
+	}
+}
+
+// portalImage tags the NOC portal image by a hash of its baked VITE args, so
+// changing any URL forces a rebuild (buildFrontendImage skips when the exact tag
+// already exists — a fixed tag would keep a stale, wrongly-baked image).
+func (c ObserveConfig) portalImage() string {
+	return "cbweb3b/noc-portal:" + shortHashArgs(c.portalViteArgs())
+}
+
+// shortHashArgs is a stable 10-hex digest of a string map (sorted key=value).
+func shortHashArgs(m map[string]string) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	for _, k := range keys {
+		h.Write([]byte(k + "=" + m[k] + ";"))
+	}
+	return hex.EncodeToString(h.Sum(nil))[:10]
 }
 
 func (c ObserveConfig) template(name string) string {
@@ -135,22 +168,20 @@ func ObserveSteps(c ObserveConfig) []Step {
 	c.WithDefaults()
 	return []Step{
 		{
+			// Backend from its own service dir (buildImageIn, no args). Portal via
+			// buildFrontendImage so the VITE_* (backend/keycloak/launcher) are baked;
+			// the agent image is NOT built here (agents run with each entity).
 			Name: "build-noc-images",
 			Check: func(ctx context.Context) (bool, error) {
-				for _, b := range observeImages {
-					if !imageExists(ctx, c.Runner, b.image) {
-						return false, nil
-					}
-				}
-				return true, nil
+				return imageExists(ctx, c.Runner, hubNocBackendImage) &&
+					imageExists(ctx, c.Runner, c.portalImage()), nil
 			},
 			Run: func(ctx context.Context) error {
-				for _, b := range observeImages {
-					if err := buildImageIn(ctx, c.Runner, c.ScenarioBDir, b.image, b.dockerfile, b.context); err != nil {
-						return err
-					}
+				if err := buildImageIn(ctx, c.Runner, c.ScenarioBDir, hubNocBackendImage,
+					"backend/services/noc-backend/Dockerfile", "backend/services/noc-backend"); err != nil {
+					return err
 				}
-				return nil
+				return buildFrontendImage(ctx, c.Runner, c.ScenarioBDir, c.portalImage(), "noc", c.portalViteArgs())
 			},
 		},
 		{
