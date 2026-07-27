@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
@@ -169,6 +170,15 @@ func rewriteURLHost(raw, newHost string, newPort int) (string, error) {
 // peer port 9000 and joining banks add an extra_hosts entry pointing the CB
 // Paladin's on-chain hostname (its container name) at that routable host.
 func isRoutableHost(h string) bool {
+	// Single-host override: when every entity shares ONE Docker host (the samples'
+	// deploy-all, where node.advertisedHost is a per-entity container network alias, not
+	// a real cross-VM host), no advertised host is externally routable. Force the
+	// container-name Paladin transport + derived, per-entity gRPC ports so several
+	// entities do not fight over the fixed peer port 9000. Multi-VM deploys leave
+	// CBWEB3_SINGLE_HOST unset and keep the routable behavior (real IP/FQDN → :9000).
+	if os.Getenv("CBWEB3_SINGLE_HOST") != "" {
+		return false
+	}
 	switch strings.ToLower(strings.TrimSpace(h)) {
 	case "", "localhost", "127.0.0.1", "::1", "host.docker.internal", "host-gateway":
 		return false
