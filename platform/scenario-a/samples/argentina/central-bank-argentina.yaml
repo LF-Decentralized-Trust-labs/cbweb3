@@ -60,3 +60,6 @@ spec:
     - role: ROLE_NOC_ADMIN
       username: admin@argentina.noc.gov
       password: argentina-noc-local
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

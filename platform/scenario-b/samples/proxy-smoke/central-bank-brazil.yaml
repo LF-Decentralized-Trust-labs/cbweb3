@@ -1,0 +1,57 @@
+# Single-host REVERSE-PROXY smoke test (Scenario B).
+#
+# Same central-bank-brazil found-spoke as ../brazil/, but with the per-host Caddy
+# reverse proxy ENABLED, so the portals + api-gateway are reached path-based on
+# :80/:443 instead of per-portal host ports:
+#   https://cb-brazil.localtest.me/b/governance/ -> Governance
+#   https://cb-brazil.localtest.me/b/treasury/   -> Treasury
+#   https://cb-brazil.localtest.me/b/supervisor/ -> Supervisor
+#   https://cb-brazil.localtest.me/b/api/v1/…    -> api-gateway
+#
+# frontendHost is `cb-brazil.localtest.me`, a public name that resolves to 127.0.0.1,
+# so the browser reaches the proxy on THIS host with no /etc/hosts edit. Run with the
+# SAME frontendHost as scenario-a/samples/proxy-smoke to have ONE proxy serve both /a/*
+# and /b/* for this entity. Driven by ../proxy-smoke.sh (hub + this CB).
+#
+# The sovereign FX pair block is intentionally omitted — this smoke exercises the proxy,
+# not the corridor.
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-brazil
+spec:
+  scenario: "b"
+  environment: local
+  mode: found-spoke
+  topology:
+    role: central-bank
+  displayName: "Banco Central do Brasil"
+  spoke:
+    id: spoke-brl
+    chainId: 1338
+    currency: BRL
+  # Relative to THIS manifest file; ../proxy-smoke.sh emits the hub bundle here.
+  hubBundleRef: bundles/hub.bundle.yaml
+  node:
+    advertisedHost: host.docker.internal
+    rpc: { port: 33645 }
+    ws: { port: 33655 }
+    p2p: { port: 56303 }
+    dataDir: cbweb3-data/central-bank-brazil
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  relay:
+    endpoint: http://localhost:7000
+  cbEndpoint: http://host.docker.internal:18645
+  # Reverse proxy on this host. localtest.me resolves to 127.0.0.1 so the browser on
+  # this machine reaches the proxy. TLS mode via PROXY_TLS_MODE (proxy-smoke.sh default
+  # `internal` = self-signed; set `off` for plain HTTP on :80).
+  frontendHost: cb-brazil.localtest.me
+  proxy: enable
+  launcher: enable
+  launcherPort: 5190
+  adminUsers:
+    - { role: GOVERNANCE, username: admin@brasil.governance.gov, password: brasil-governance-local }
+    - { role: TREASURY,   username: admin@brasil.treasury.gov,   password: brasil-treasury-local }
+    - { role: SUPERVISOR, username: admin@brasil.supervisor.gov, password: brasil-supervisor-local }
