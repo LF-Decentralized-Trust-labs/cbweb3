@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -35,7 +36,7 @@ const identityRegistryABIJSON = `[
 type paladinNodeRegistration struct {
 	registry     common.Address
 	nodeName     string // e.g. "spoke-brl-cb"
-	grpcHostname string // e.g. "paladin-spoke-brl-cb"
+	grpcHostname string // dial host for dns:///<host>:9000 — container name (single-host) or routable advertisedHost (cross-VM); see paladinDialHost
 	certPEM      []byte
 	provider     kp.KeyProvider
 	signerKeyID  string
@@ -114,6 +115,10 @@ func registerPaladinNode(ctx context.Context, rpcURL string, r paladinNodeRegist
 	}
 
 	// Phase 1 — registerIdentity (owner = the operator address).
+	// Idempotent: a prior attempt may have mined registerIdentity successfully
+	// while the step still failed (e.g. interrupted before state mark, or
+	// setIdentityProperty failed). On "Name already taken", recover the hash
+	// from IdentityRegistered logs and continue to phase 2.
 	nonce, err := client.PendingNonceAt(ctx, operatorAddr)
 	if err != nil {
 		return fmt.Errorf("operator nonce: %w", err)
@@ -123,22 +128,34 @@ func registerPaladinNode(ctx context.Context, rpcURL string, r paladinNodeRegist
 	if err != nil {
 		return fmt.Errorf("encode registerIdentity(%s): %w", r.nodeName, err)
 	}
-	receipt, err := send("registerIdentity("+r.nodeName+")", nonce, regData)
-	if err != nil {
-		return err
-	}
 
 	var nodeHash [32]byte
-	for _, lg := range receipt.Logs {
-		if len(lg.Topics) == 0 || lg.Topics[0] != evt.ID {
-			continue
+	receipt, err := send("registerIdentity("+r.nodeName+")", nonce, regData)
+	if err != nil {
+		existing, lookupErr := lookupIdentityHashByName(ctx, client, r.registry, evt, r.nodeName)
+		if lookupErr != nil {
+			return fmt.Errorf("%w (and lookup existing identity: %v)", err, lookupErr)
 		}
-		ed, err := evt.Inputs.Unpack(lg.Data)
-		if err == nil && len(ed) >= 2 {
-			if h, ok := ed[1].([32]byte); ok {
-				nodeHash = h
-				break
+		nodeHash = existing
+	} else {
+		for _, lg := range receipt.Logs {
+			if len(lg.Topics) == 0 || lg.Topics[0] != evt.ID {
+				continue
 			}
+			ed, unpackErr := evt.Inputs.Unpack(lg.Data)
+			if unpackErr == nil && len(ed) >= 2 {
+				if h, ok := ed[1].([32]byte); ok {
+					nodeHash = h
+					break
+				}
+			}
+		}
+		if nodeHash == [32]byte{} {
+			existing, lookupErr := lookupIdentityHashByName(ctx, client, r.registry, evt, r.nodeName)
+			if lookupErr != nil {
+				return fmt.Errorf("registerIdentity(%s) mined but identity hash not found: %w", r.nodeName, lookupErr)
+			}
+			nodeHash = existing
 		}
 	}
 
@@ -166,6 +183,42 @@ func registerPaladinNode(ctx context.Context, rpcURL string, r paladinNodeRegist
 		return err
 	}
 	return nil
+}
+
+// lookupIdentityHashByName scans IdentityRegistered logs for nodeName and
+// returns the most recent identityHash. Used to resume after a partial
+// registerIdentity (name already taken on-chain).
+func lookupIdentityHashByName(ctx context.Context, client *ethclient.Client, registry common.Address, evt abi.Event, nodeName string) ([32]byte, error) {
+	var zero [32]byte
+	logs, err := client.FilterLogs(ctx, ethereum.FilterQuery{
+		Addresses: []common.Address{registry},
+		Topics:    [][]common.Hash{{evt.ID}},
+	})
+	if err != nil {
+		return zero, fmt.Errorf("filter IdentityRegistered: %w", err)
+	}
+	var found [32]byte
+	ok := false
+	for _, lg := range logs {
+		ed, unpackErr := evt.Inputs.Unpack(lg.Data)
+		if unpackErr != nil || len(ed) < 3 {
+			continue
+		}
+		name, _ := ed[2].(string)
+		if name != nodeName {
+			continue
+		}
+		h, hashOK := ed[1].([32]byte)
+		if !hashOK {
+			continue
+		}
+		found = h
+		ok = true
+	}
+	if !ok {
+		return zero, fmt.Errorf("no IdentityRegistered event for %q", nodeName)
+	}
+	return found, nil
 }
 
 // cbNodeName / cbGrpcHostname derive the central-bank Paladin node identity from

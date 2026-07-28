@@ -12,6 +12,7 @@ import {
   Label,
   Separator,
   toast,
+  BackToLauncherButton,
 } from "@cbweb3/ui";
 import { Building2, LockKeyhole, ShieldCheck } from "lucide-react";
 import { useEffect } from "react";
@@ -22,8 +23,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores";
 
 const schema = z.object({
-  username: z.string().min(3, "Client ID must be at least 3 characters"),
-  password: z.string().min(6, "Client Secret must be at least 6 characters"),
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
 type LoginForm = z.infer<typeof schema>;
@@ -84,6 +85,7 @@ export function LoginPage() {
 
         <Card className="mx-auto w-full max-w-md border-border/80 shadow-lg">
           <CardHeader>
+            <BackToLauncherButton className="-ml-2 mb-2 self-start" />
             <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Building2 className="h-5 w-5" />
             </div>
@@ -93,16 +95,16 @@ export function LoginPage() {
           <CardContent>
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="username">Client ID</Label>
-                <Input id="username" placeholder="central-bank-a-supervisor-client" {...form.register("username")} autoComplete="username" />
+                <Label htmlFor="username">Username</Label>
+                <Input id="username" placeholder="Supervisor username" {...form.register("username")} autoComplete="username" />
                 {form.formState.errors.username ? (
                   <p className="text-xs text-destructive">{form.formState.errors.username.message}</p>
                 ) : null}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password">Client Secret</Label>
-                <Input id="password" type="password" placeholder="Supervisor client secret" {...form.register("password")} autoComplete="current-password" />
+                <Label htmlFor="password">Password</Label>
+                <Input id="password" type="password" placeholder="Supervisor password" {...form.register("password")} autoComplete="current-password" />
                 {form.formState.errors.password ? (
                   <p className="text-xs text-destructive">{form.formState.errors.password.message}</p>
                 ) : null}

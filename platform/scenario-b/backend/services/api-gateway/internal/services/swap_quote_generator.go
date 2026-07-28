@@ -15,15 +15,18 @@ import (
 // SwapQuoteGenerator generates swap quotes with 15s TTL (T030).
 // Calculates required amount_in via x·y=k + fee from pool reserves.
 type SwapQuoteGenerator struct {
-	ammAdapter    AMMReserveReader
-	quoteRepo     SwapQuoteRepository
-	quoteTTL      time.Duration
+	ammAdapter AMMReserveReader
+	quoteRepo  SwapQuoteRepository
+	quoteTTL   time.Duration
 }
 
 // AMMReserveReader reads current pool reserves for quote calculation.
 type AMMReserveReader interface {
 	GetPoolReserves(ctx context.Context, pair string) (string, string, float64, error)
 	GetFeeBps(ctx context.Context, pair string) (uint16, error)
+	// OutputIsTokenA reports whether buying targetCurrency on pair outputs TOKEN_A,
+	// so the quote is oriented to the requested direction (bidirectional pair).
+	OutputIsTokenA(ctx context.Context, pair, targetCurrency string) (bool, error)
 }
 
 // SwapQuoteRepository persists and reads swap quotes (T031, T034, T036).
@@ -44,35 +47,44 @@ func NewSwapQuoteGenerator(ammAdapter AMMReserveReader, quoteRepo SwapQuoteRepos
 
 // QuoteRequest contains quote generation parameters.
 type QuoteRequest struct {
-	SourceCurrency   string // Native spoke currency (e.g., "BRL")
-	TargetCurrency   string // Native spoke currency (e.g., "ARS")
-	AmountOut        string // Exact amount beneficiary receives (wei)
-	MaxSlippagePct   float64 // Tolerance (e.g., 0.01 = 1%)
+	SourceCurrency string  // Native spoke currency (e.g., "BRL")
+	TargetCurrency string  // Native spoke currency (e.g., "ARS")
+	AmountOut      string  // Exact amount beneficiary receives (wei)
+	MaxSlippagePct float64 // Tolerance (e.g., 0.01 = 1%)
+	// PoolPair is the exact on-chain pair_id to quote against. When empty, it is
+	// derived as "W-{source}-W-{target}" for backward compatibility, but callers
+	// that know the registered pair_id (e.g. the bank Swap page) should pass it —
+	// pair ids do not always follow the derived convention (e.g. "W-tCeBM_BRL-...").
+	PoolPair string
 }
 
 // QuoteResult contains the generated quote with TTL.
 type QuoteResult struct {
-	QuoteID            string  // UUID for tracking
-	PoolPair           string  // W-BRL-W-ARS
-	AmountOut          string  // Requested amount (wei)
-	AmountIn           string  // Required input (wei, including fee)
-	EffectiveRate      float64 // amount_out / amount_in
-	FeeBps             uint16  // Pool fee in basis points
-	MaxSlippagePct     float64 // User tolerance
-	ReserveASnapshot   string  // Reserve A at quote time
-	ReserveBSnapshot   string  // Reserve B at quote time
-	CreatedAt          time.Time
-	ValidUntil         time.Time
+	QuoteID              string  // UUID for tracking
+	PoolPair             string  // W-BRL-W-ARS
+	AmountOut            string  // Requested amount (wei)
+	AmountIn             string  // Required input (wei, including fee)
+	EffectiveRate        float64 // amount_out / amount_in
+	FeeBps               uint16  // Pool fee in basis points
+	MaxSlippagePct       float64 // User tolerance
+	ReserveASnapshot     string  // Reserve A at quote time
+	ReserveBSnapshot     string  // Reserve B at quote time
+	CreatedAt            time.Time
+	ValidUntil           time.Time
 	TimeRemainingSeconds int // Time until expiry
 }
 
 // GenerateQuote creates a new swap quote with 15s TTL (T030).
 // Calculates amount_in using constant-product formula x·y=k with fees:
-//   amount_in_no_fee = (reserve_in × amount_out) / (reserve_out - amount_out)
-//   amount_in = amount_in_no_fee × (1 + fee_bps / 10000)
+//
+//	amount_in_no_fee = (reserve_in × amount_out) / (reserve_out - amount_out)
+//	amount_in = amount_in_no_fee × (1 + fee_bps / 10000)
 func (g *SwapQuoteGenerator) GenerateQuote(ctx context.Context, req QuoteRequest) (*QuoteResult, error) {
-	// Construct pool pair: W-{source}-W-{target}
-	poolPair := fmt.Sprintf("W-%s-W-%s", req.SourceCurrency, req.TargetCurrency)
+	// Use the explicit pair_id when provided; otherwise derive W-{source}-W-{target}.
+	poolPair := req.PoolPair
+	if poolPair == "" {
+		poolPair = fmt.Sprintf("W-%s-W-%s", req.SourceCurrency, req.TargetCurrency)
+	}
 
 	// Fetch current pool reserves
 	reserveAStr, reserveBStr, _, err := g.ammAdapter.GetPoolReserves(ctx, poolPair)
@@ -102,14 +114,22 @@ func (g *SwapQuoteGenerator) GenerateQuote(ctx context.Context, req QuoteRequest
 		return nil, fmt.Errorf("invalid amount_out: %s", req.AmountOut)
 	}
 
+	// Orient reserves by swap direction. amount_out is always in the TARGET token; when the
+	// target is the pair's TOKEN_A (reverse corridor, e.g. COP→BRL on a BRL↔COP pair) the
+	// input reserve is B and the output reserve is A. Defaults to A→B when unresolved.
+	reserveIn, reserveOut := reserveA, reserveB
+	if isA, dErr := g.ammAdapter.OutputIsTokenA(ctx, poolPair, req.TargetCurrency); dErr == nil && isA {
+		reserveIn, reserveOut = reserveB, reserveA
+	}
+
 	// Validate amount_out < reserve_out (can't drain pool)
-	if amountOut.Cmp(reserveB) >= 0 {
-		return nil, fmt.Errorf("amount_out %s >= reserve_b %s (insufficient liquidity)", req.AmountOut, reserveBStr)
+	if amountOut.Cmp(reserveOut) >= 0 {
+		return nil, fmt.Errorf("amount_out %s >= output reserve %s (insufficient liquidity)", req.AmountOut, reserveOut.String())
 	}
 
 	// Calculate amount_in_no_fee: (reserve_in × amount_out) / (reserve_out - amount_out)
-	numerator := new(big.Int).Mul(reserveA, amountOut)
-	denominator := new(big.Int).Sub(reserveB, amountOut)
+	numerator := new(big.Int).Mul(reserveIn, amountOut)
+	denominator := new(big.Int).Sub(reserveOut, amountOut)
 	amountInNoFee := new(big.Int).Div(numerator, denominator)
 
 	// Clamp to minimum 1: integer division can round to 0 when the swap amount is very
@@ -143,17 +163,17 @@ func (g *SwapQuoteGenerator) GenerateQuote(ctx context.Context, req QuoteRequest
 
 	// Create domain entity
 	quote := &apidomain.SwapQuote{
-		QuoteID:           quoteID,
-		PoolPair:          poolPair,
-		AmountOut:         req.AmountOut,
-		AmountIn:          amountInWithFee.String(),
-		EffectiveRate:     effectiveRate,
-		FeeBps:            int(feeBps),
-		MaxSlippagePct:    req.MaxSlippagePct,
-		ReserveASnapshot:  reserveAStr,
-		ReserveBSnapshot:  reserveBStr,
-		CreatedAt:         createdAt,
-		ValidUntil:        validUntil,
+		QuoteID:          quoteID,
+		PoolPair:         poolPair,
+		AmountOut:        req.AmountOut,
+		AmountIn:         amountInWithFee.String(),
+		EffectiveRate:    effectiveRate,
+		FeeBps:           int(feeBps),
+		MaxSlippagePct:   req.MaxSlippagePct,
+		ReserveASnapshot: reserveAStr,
+		ReserveBSnapshot: reserveBStr,
+		CreatedAt:        createdAt,
+		ValidUntil:       validUntil,
 	}
 
 	// Persist to database (T031)
@@ -163,17 +183,17 @@ func (g *SwapQuoteGenerator) GenerateQuote(ctx context.Context, req QuoteRequest
 
 	// Return result
 	return &QuoteResult{
-		QuoteID:            quoteID,
-		PoolPair:           poolPair,
-		AmountOut:          req.AmountOut,
-		AmountIn:           amountInWithFee.String(),
-		EffectiveRate:      effectiveRate,
-		FeeBps:             feeBps,
-		MaxSlippagePct:     req.MaxSlippagePct,
-		ReserveASnapshot:   reserveAStr,
-		ReserveBSnapshot:   reserveBStr,
-		CreatedAt:          createdAt,
-		ValidUntil:         validUntil,
+		QuoteID:              quoteID,
+		PoolPair:             poolPair,
+		AmountOut:            req.AmountOut,
+		AmountIn:             amountInWithFee.String(),
+		EffectiveRate:        effectiveRate,
+		FeeBps:               feeBps,
+		MaxSlippagePct:       req.MaxSlippagePct,
+		ReserveASnapshot:     reserveAStr,
+		ReserveBSnapshot:     reserveBStr,
+		CreatedAt:            createdAt,
+		ValidUntil:           validUntil,
 		TimeRemainingSeconds: timeRemaining,
 	}, nil
 }

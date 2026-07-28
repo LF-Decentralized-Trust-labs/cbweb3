@@ -89,3 +89,4 @@ tests/
 docker-compose*.yml
 Makefile
 Dockerfile*
+.mcp.json

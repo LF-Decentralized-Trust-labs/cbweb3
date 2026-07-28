@@ -45,6 +45,8 @@ spec:
   # mesma máquina do host Docker). Defina um IP/DNS roteável quando o frontend for
   # acessado de uma máquina remota (ex.: uma VM na nuvem com IP público 3.84.201.14).
   # frontendHost: 3.84.201.14
+  launcher: enable
+  launcherPort: 5194
   adminUsers:
     - role: ROLE_GOVERNANCE
       username: admin@argentina.governance.gov
@@ -58,3 +60,6 @@ spec:
     - role: ROLE_NOC_ADMIN
       username: admin@argentina.noc.gov
       password: argentina-noc-local
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

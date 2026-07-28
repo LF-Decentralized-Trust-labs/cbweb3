@@ -7,6 +7,9 @@ export type AccountEntry = {
   frozen: boolean;
   frozenAt: string | null;
   frozenReason: string | null;
+  // Participant role (e.g. ROLE_CENTRAL_BANK). Used to protect the Central Bank
+  // itself — the admin — from being frozen/unfrozen. Optional (absent in mocks).
+  role?: string;
 };
 
 export type FreezePayload = {

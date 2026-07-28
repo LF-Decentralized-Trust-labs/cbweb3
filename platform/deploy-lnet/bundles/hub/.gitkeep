@@ -1,0 +1,5 @@
+# Hub dataDir + hub.bundle.yaml drop-zone.
+# Produced on VM .20 by: ./deploy.sh b hub
+#   → bundles/hub/hub.bundle.yaml
+#   → bundles/hub/.env.hub, .provisioning-state.yaml, …
+# Consumed by both CB spokes via hubBundleRef: ../../bundles/hub/hub.bundle.yaml

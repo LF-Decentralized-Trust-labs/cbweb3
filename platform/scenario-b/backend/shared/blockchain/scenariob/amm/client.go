@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -129,8 +130,12 @@ type QuoteResult struct {
 
 // SwapRequest carries parameters for a swap-exact-output call.
 type SwapRequest struct {
-	TokenIn              string
-	TokenOut             string
+	TokenIn  string
+	TokenOut string
+	// OutputIsTokenA selects the swap direction when TokenIn/TokenOut are not set
+	// explicitly: false (default) = A→B (output TOKEN_B); true = B→A (output TOKEN_A).
+	// The AMM contract is bidirectional; this drives which pool token is bought.
+	OutputIsTokenA       bool
 	AmountOut            string
 	MaxAmountIn          string
 	To                   string
@@ -264,18 +269,56 @@ func (c *Client) ResumeSignatures(ctx context.Context, proposalID [32]byte) (*bi
 	return out, nil
 }
 
+// LatestResumeProposal discovers the most recent resume proposal id from the on-chain
+// LogResumeProposed events, so a Central Bank that did NOT propose (and thus never held
+// the id from a tx receipt) can still see and co-sign it. Returns found=false when no
+// proposal has ever been emitted for this pair's AMM.
+func (c *Client) LatestResumeProposal(ctx context.Context) ([32]byte, bool, error) {
+	var zero [32]byte
+	cctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	eventSig := crypto.Keccak256Hash([]byte("LogResumeProposed(bytes32,address,uint256)"))
+	logs, err := c.ec.FilterLogs(cctx, ethereum.FilterQuery{
+		FromBlock: big.NewInt(0),
+		Addresses: []common.Address{c.contract},
+		Topics:    [][]common.Hash{{eventSig}},
+	})
+	if err != nil {
+		return zero, false, err
+	}
+	if len(logs) == 0 {
+		return zero, false, nil
+	}
+	last := logs[0]
+	for _, lg := range logs[1:] {
+		if lg.BlockNumber > last.BlockNumber || (lg.BlockNumber == last.BlockNumber && lg.Index > last.Index) {
+			last = lg
+		}
+	}
+	if len(last.Topics) < 2 {
+		return zero, false, nil
+	}
+	return last.Topics[1], true, nil
+}
+
 // QuoteExactOutput retrieves the required input amount for an exact-output swap. The
 // `pair` parameter is used only for bookkeeping; the on-chain formula uses reserves.
 // Returns the grossAmountIn (with fee-in-reserve applied) so callers can use it
 // directly as max_amount_in without triggering AMM__SlippageExceeded.
-func (c *Client) QuoteExactOutput(ctx context.Context, pair, amountOut string) (*QuoteResult, error) {
+func (c *Client) QuoteExactOutput(ctx context.Context, pair, amountOut string, outputIsTokenA bool) (*QuoteResult, error) {
 	amt, ok := new(big.Int).SetString(strings.TrimSpace(amountOut), 10)
 	if !ok {
 		return nil, fmt.Errorf("invalid amountOut %q", amountOut)
 	}
-	reserveIn, reserveOut, err := c.Reserves(ctx)
+	reserveA, reserveB, err := c.Reserves(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// getAmountIn(reserveIn, reserveOut, amountOut): orient reserves by direction.
+	// A→B (default): reserveIn=A, reserveOut=B. B→A (outputIsTokenA): reserveIn=B, reserveOut=A.
+	reserveIn, reserveOut := reserveA, reserveB
+	if outputIsTokenA {
+		reserveIn, reserveOut = reserveB, reserveA
 	}
 	amountIn := new(big.Int)
 	if err := evm.Call(ctx, c.ec, c.contract, c.abi, "getAmountIn",
@@ -313,9 +356,14 @@ func (c *Client) SwapExactOutput(ctx context.Context, req SwapRequest) (*SwapRes
 	if !ok {
 		return nil, fmt.Errorf("invalid MaxAmountIn %q", req.MaxAmountIn)
 	}
-	// Resolve token addresses: default to config values if not explicitly provided.
+	// Resolve token addresses. Direction default is A→B (output TOKEN_B); when
+	// OutputIsTokenA is set the swap is reversed (B→A, output TOKEN_A). Explicit
+	// TokenIn/TokenOut still override both. The AMM contract accepts either order.
 	tokenIn := c.tokenA
 	tokenOut := c.tokenB
+	if req.OutputIsTokenA {
+		tokenIn, tokenOut = c.tokenB, c.tokenA
+	}
 	if req.TokenIn != "" {
 		tokenIn = common.HexToAddress(req.TokenIn)
 	}
@@ -380,11 +428,11 @@ func (c *Client) ensureUnlimitedApproval(ctx context.Context, token common.Addre
 	c.approvalMu.Lock()
 	defer c.approvalMu.Unlock()
 
-	if c.approved[token] {
-		return nil
-	}
-
-	// Read on-chain allowance — catches a large approval left from a previous run.
+	// Always read the on-chain allowance — the `approved` cache is only a fast-path
+	// hint, never authoritative: another path (mint-and-approve, addLiquidity) can
+	// have reset the allowance to a FINITE amount via approve(n), which overwrites a
+	// prior unlimited approval. Trusting a stale cached `true` would skip the needed
+	// re-approval and make the next swap revert with ERC20InsufficientAllowance.
 	allowance := new(big.Int)
 	if err := evm.Call(ctx, c.ec, token, c.erc20ABI, "allowance",
 		[]interface{}{c.signer.Address(), c.contract}, allowance); err != nil {
@@ -607,6 +655,50 @@ func (c *Client) TokenBalanceAt(ctx context.Context, ammAddress string, isTokenA
 		return nil, fmt.Errorf("amm: balanceOf(%s) on token %s: %w", holderAddr, token.Hex(), err)
 	}
 	return balance, nil
+}
+
+// CancelCommitDepositAt reclaims the signer's escrowed side of `commitID` on an arbitrary AMM
+// (sovereign flow: a CB pulls its own pending deposit back when the counterpart has not committed).
+// The on-chain guard enforces msg.sender == the side's depositor and reverts once finalized.
+func (c *Client) CancelCommitDepositAt(ctx context.Context, ammAddress string, commitID [32]byte, isTokenA bool) error {
+	if c.signer == nil {
+		return errors.New("amm: cancelCommitDepositAt requires a signing key")
+	}
+	contract := common.HexToAddress(ammAddress)
+	if _, err := evm.SubmitTx(ctx, c.ec, c.signer, contract, c.abi, "cancelCommitDeposit", commitID, isTokenA); err != nil {
+		return fmt.Errorf("cancelCommitDepositAt %s: %w", ammAddress, err)
+	}
+	return nil
+}
+
+// EscrowState is the on-chain escrow for a commit on an AMM (which sides are deposited + finalized).
+type EscrowState struct {
+	DepositorA common.Address
+	DepositorB common.Address
+	RecipientA common.Address
+	RecipientB common.Address
+	AmountA    *big.Int
+	AmountB    *big.Int
+	Finalized  bool
+}
+
+// GetEscrowAt reads the escrow state of `commitID` on an arbitrary AMM (view call, no gas).
+func (c *Client) GetEscrowAt(ctx context.Context, ammAddress string, commitID [32]byte) (*EscrowState, error) {
+	contract := common.HexToAddress(ammAddress)
+	var (
+		depA, depB, recA, recB common.Address
+		amtA                   = new(big.Int)
+		amtB                   = new(big.Int)
+		finalized              bool
+	)
+	if err := evm.Call(ctx, c.ec, contract, c.abi, "getEscrow", []interface{}{commitID},
+		&depA, &depB, &recA, &recB, amtA, amtB, &finalized); err != nil {
+		return nil, fmt.Errorf("getEscrow %s: %w", ammAddress, err)
+	}
+	return &EscrowState{
+		DepositorA: depA, DepositorB: depB, RecipientA: recA, RecipientB: recB,
+		AmountA: amtA, AmountB: amtB, Finalized: finalized,
+	}, nil
 }
 
 // FeeBps returns the current fee rate in basis points from the contract.

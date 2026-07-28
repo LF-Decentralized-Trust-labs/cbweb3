@@ -26,12 +26,13 @@ import (
 // design; mirrors the central-bank found-mode equivalent, see the addendum in
 // specs/026-tk4-compose-central-bank/plan.md).
 type genTLSJoinStep struct {
-	spokeID string
-	bankID  string
+	spokeID        string
+	bankID         string
+	advertisedHost string // bank routable host; when routable, added to the transport cert SAN
 }
 
-func newGenTLSJoinStep(spokeID, bankID string) Step {
-	return &genTLSJoinStep{spokeID: spokeID, bankID: bankID}
+func newGenTLSJoinStep(spokeID, bankID, advertisedHost string) Step {
+	return &genTLSJoinStep{spokeID: spokeID, bankID: bankID, advertisedHost: advertisedHost}
 }
 
 func (s *genTLSJoinStep) Name() string { return StepGenTLSJoin }
@@ -76,6 +77,13 @@ func (s *genTLSJoinStep) Run(ctx context.Context) error {
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
+	}
+	// Cross-VM: the CB dials this bank at its routable advertisedHost to send the
+	// resolve reply (register-paladin-node publishes dns:///<advertisedHost>:9000 via
+	// paladinDialHost), so that host must be in the SAN for the CB→bank mutual-TLS
+	// handshake to validate. Single-host keeps only the container-name SAN above.
+	if isRoutableHost(s.advertisedHost) {
+		addTransportSAN(tmpl, s.advertisedHost)
 	}
 	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &privKey.PublicKey, privKey)
 	if err != nil {

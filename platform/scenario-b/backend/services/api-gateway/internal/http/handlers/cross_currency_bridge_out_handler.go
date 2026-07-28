@@ -61,8 +61,10 @@ type VerifiedSwap struct {
 }
 
 // SwapVerifierIface verifies a swap transaction on the Hub and returns its on-chain facts.
+// poolPair identifies the pair whose dedicated AMM must have emitted the LogSwap
+// (dynamic per-pair model); the verifier resolves that AMM from the PairRegistry.
 type SwapVerifierIface interface {
-	VerifySwap(ctx context.Context, txHash string) (*VerifiedSwap, error)
+	VerifySwap(ctx context.Context, txHash, poolPair string) (*VerifiedSwap, error)
 }
 
 // BridgeOutDuplicateFinderIface looks up an existing bridge-out position by swap_tx_hash.
@@ -191,7 +193,7 @@ func (h *CrossCurrencyBridgeOutHandler) HandleBridgeOut(c *fiber.Ctx) error {
 
 	// Verify the swap on the Hub: receipt exists, succeeded, and contains a LogSwap
 	// emitted by the trusted AMM contract.
-	verified, err := h.swapVerifier.VerifySwap(c.Context(), req.SwapTxHash)
+	verified, err := h.swapVerifier.VerifySwap(c.Context(), req.SwapTxHash, req.PoolPair)
 	if err != nil {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": "swap not verified on Hub: " + err.Error(),

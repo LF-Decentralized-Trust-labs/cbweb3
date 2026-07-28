@@ -7,8 +7,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "node --require ts-node/register --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.10.0",
@@ -25,7 +24,6 @@
     "@types/express": "^4.17.21",
     "@types/node": "^20.11.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.4.0",
-    "vitest": "^2.0.0"
+    "typescript": "^5.4.0"
   }
 }

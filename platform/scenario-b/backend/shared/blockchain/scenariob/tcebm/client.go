@@ -22,6 +22,7 @@ import (
 // ABIJSON is the minimal ABI for TokenizedCentralBankMoney (ERC-20 + RBAC mint/burn).
 const ABIJSON = `[
 {"type":"function","name":"decimals","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"uint8"}]},
+{"type":"function","name":"symbol","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"string"}]},
 {"type":"function","name":"balanceOf","stateMutability":"view","inputs":[
   {"name":"account","type":"address"}
 ],"outputs":[{"name":"","type":"uint256"}]},
@@ -118,6 +119,16 @@ func (c *Client) Decimals(ctx context.Context) (uint8, error) {
 	var result uint8
 	if err := evm.Call(ctx, c.ec, c.contract, c.abi, "decimals", nil, &result); err != nil {
 		return 0, fmt.Errorf("tcebm: decimals: %w", err)
+	}
+	return result, nil
+}
+
+// Symbol returns the ERC-20 symbol (e.g. "W-tCeBM_BRL"), used to derive the
+// currency code of a pair's token for sovereign side resolution.
+func (c *Client) Symbol(ctx context.Context) (string, error) {
+	var result string
+	if err := evm.Call(ctx, c.ec, c.contract, c.abi, "symbol", nil, &result); err != nil {
+		return "", fmt.Errorf("tcebm: symbol: %w", err)
 	}
 	return result, nil
 }
