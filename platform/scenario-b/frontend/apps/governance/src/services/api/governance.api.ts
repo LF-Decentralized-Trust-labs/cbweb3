@@ -13,6 +13,30 @@ import type {
 import { mockDb } from "../mocks/mock-db";
 import { httpClient, useMocks } from "./http-client";
 
+// Shape returned by the Compliance participant registry (Go json tags).
+type RawParticipant = {
+  user_id: string;
+  institution_name: string;
+  bank_code: string;
+  country_code: string;
+  role: string;
+  wallet_address: string;
+  status: string;
+};
+
+// Map a registry participant to the account row the UI renders. frozen_at /
+// reason are not surfaced by the registry endpoint, so they stay null (the
+// action stays available; history lives in the Audit log).
+const toAccountEntry = (p: RawParticipant): AccountEntry => ({
+  id: p.user_id,
+  participantId: p.bank_code || p.user_id,
+  participantName: p.institution_name || p.bank_code || p.user_id,
+  frozen: (p.status ?? "").toUpperCase() === "FROZEN",
+  frozenAt: null,
+  frozenReason: null,
+  role: p.role,
+});
+
 export const governanceApi = {
   getCircuitBreaker: async (): Promise<CircuitBreakerState> => {
     if (useMocks) {
@@ -28,19 +52,21 @@ export const governanceApi = {
     const response = await httpClient.post<CircuitBreakerResult>("/amm/governance/circuit-breaker", payload);
     return response.data;
   },
+  // Accounts are always served from the real Compliance participant registry
+  // (GET /api/v1/governance/accounts), never mocked: this is the source of truth
+  // the Central Bank freezes/unfreezes against.
   listAccounts: async (): Promise<AccountEntry[]> => {
-    if (useMocks) {
-      return mockDb.listAccounts();
-    }
-    const response = await httpClient.get<AccountEntry[]>("/compliance/accounts");
-    return response.data;
+    const response = await httpClient.get<{ accounts?: RawParticipant[] }>("/governance/accounts");
+    return (response.data.accounts ?? []).map(toAccountEntry);
   },
   freezeAccount: async (payload: FreezePayload): Promise<FreezeResult> => {
-    if (useMocks) {
-      return mockDb.freezeAccount(payload);
-    }
-    const response = await httpClient.post<FreezeResult>("/compliance/accounts/freeze", payload);
-    return response.data;
+    // The backend keys the participant by `subject`; our AccountEntry.id carries it.
+    await httpClient.post("/governance/accounts/freeze", { subject: payload.accountId, reason: payload.reason });
+    return { success: true, accountId: payload.accountId, frozenAt: new Date().toISOString() };
+  },
+  unfreezeAccount: async (payload: FreezePayload): Promise<FreezeResult> => {
+    await httpClient.post("/governance/accounts/unfreeze", { subject: payload.accountId, reason: payload.reason });
+    return { success: true, accountId: payload.accountId, frozenAt: new Date().toISOString() };
   },
   getParameters: async (): Promise<GovernanceParameters> => {
     if (useMocks) {

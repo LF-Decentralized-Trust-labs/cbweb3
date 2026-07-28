@@ -18,6 +18,7 @@ import {
   TableRow,
   toast,
 } from "@cbweb3/ui";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { usePaymentStore } from "../stores";
 import {
@@ -29,6 +30,8 @@ import {
 } from "../types";
 
 const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.slice(-8)}` : "-");
+
+const PAGE_SIZE = 10;
 
 function getEscrowStatusLabel(status: unknown): string {
   if (typeof status === "number") {
@@ -72,6 +75,7 @@ export function EscrowsPage() {
   const [depositId, setDepositId] = useState("");
   const [amount, setAmount] = useState("0");
   const [confirmRequest, setConfirmRequest] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     void fetchAll();
@@ -81,6 +85,17 @@ export function EscrowsPage() {
     () => escrows.filter((e) => getEscrowStatusLabel(e.status) === "PENDING").length,
     [escrows],
   );
+
+  const total = escrows.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  const pagedEscrows = useMemo(() => escrows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [escrows, page]);
+  const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(page * PAGE_SIZE, total);
 
   const approvedDeposits = useMemo(
     () => deposits.filter((d) => {
@@ -224,7 +239,7 @@ export function EscrowsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {escrows.map((escrow) => (
+              {pagedEscrows.map((escrow) => (
                 <TableRow key={escrow.id}>
                   <TableCell className="font-medium">{escrow.id}</TableCell>
                   <TableCell>{escrow.deposit_id}</TableCell>
@@ -241,9 +256,34 @@ export function EscrowsPage() {
               ))}
             </TableBody>
           </Table>
-          {!escrows.length ? (
+          {!total ? (
             <p className="pt-3 text-sm text-muted-foreground">No tokenisation requests found.</p>
           ) : null}
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between gap-2 pt-4">
+            <span className="text-xs text-muted-foreground">
+              {total === 0 ? "—" : `Showing ${rangeStart}–${rangeEnd} of ${total}`}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                <ChevronLeft className="h-4 w-4" />
+                Prev
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Page {page} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

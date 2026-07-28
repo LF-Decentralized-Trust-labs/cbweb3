@@ -107,22 +107,42 @@ func TestCactiRelay_NotifyBridgeOut_ConnError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type fakeCBCaller struct {
-	pauseTx        string
-	pauseErr       error
-	proposeReqID   string
-	proposeErr     error
-	signErr        error
-	executeErr     error
+	pauseTx      string
+	pauseErr     error
+	proposeReqID string
+	proposeErr   error
+	signErr      error
+	executeErr   error
+	paused       bool
+	pausedErr    error
+	resumeID     string
+	resumeSigs   int
+	resumeQuorum int
+	resumeErr    error
 }
 
-func (f *fakeCBCaller) PauseCircuitBreaker(_ context.Context, _ []byte) (string, error) {
+func (f *fakeCBCaller) PauseCircuitBreaker(_ context.Context, _ string, _ []byte) (string, error) {
+	if f.pauseErr == nil {
+		f.paused = true // on-chain now reports paused
+	}
 	return f.pauseTx, f.pauseErr
 }
-func (f *fakeCBCaller) ProposeResume(_ context.Context, _ []byte) (string, error) {
+func (f *fakeCBCaller) ProposeResume(_ context.Context, _ string, _ []byte) (string, error) {
 	return f.proposeReqID, f.proposeErr
 }
-func (f *fakeCBCaller) SignResume(_ context.Context, _ string, _ []byte) error { return f.signErr }
-func (f *fakeCBCaller) ExecuteResume(_ context.Context, _ string) error        { return f.executeErr }
+func (f *fakeCBCaller) SignResume(_ context.Context, _, _ string, _ []byte) error {
+	if f.signErr == nil {
+		f.paused = false // quorum reached → AMM auto-unpauses
+	}
+	return f.signErr
+}
+func (f *fakeCBCaller) ExecuteResume(_ context.Context, _, _ string) error { return f.executeErr }
+func (f *fakeCBCaller) IsPaused(_ context.Context, _ string) (bool, error) {
+	return f.paused, f.pausedErr
+}
+func (f *fakeCBCaller) ActiveResumeProposal(_ context.Context, _ string) (string, int, int, error) {
+	return f.resumeID, f.resumeSigs, f.resumeQuorum, f.resumeErr
+}
 
 func TestCircuitBreakerService_Lifecycle(t *testing.T) {
 	db := newTestDB(t, &domain.ScenarioBRiskControlState{}, &domain.CircuitBreakerSignature{})

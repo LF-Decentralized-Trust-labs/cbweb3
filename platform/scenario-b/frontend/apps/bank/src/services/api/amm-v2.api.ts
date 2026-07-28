@@ -3,6 +3,8 @@
 import type {
   AMMQuote,
   ApproveAmmRequest,
+  HubCurrency,
+  HubPair,
   PoolStatus,
   SwapOrder,
   SwapRequest,
@@ -30,5 +32,15 @@ export const ammV2Api = {
   approveAmm: async (payload: ApproveAmmRequest): Promise<{ status: string }> => {
     const response = await httpClientV2.post<{ status: string }>("/amm/token/approve-amm", payload);
     return response.data;
+  },
+  // Liquidity pools proposed/confirmed by the Central Banks on the hub.
+  getPairs: async (): Promise<HubPair[]> => {
+    const response = await httpClientV2.get<{ pairs: HubPair[] }>("/amm/pairs");
+    return response.data.pairs ?? [];
+  },
+  // Sovereign currencies registered on the hub (for token-address → symbol mapping).
+  getCurrencies: async (): Promise<HubCurrency[]> => {
+    const response = await httpClientV2.get<{ currencies: HubCurrency[] }>("/hub/currencies");
+    return response.data.currencies ?? [];
   },
 };

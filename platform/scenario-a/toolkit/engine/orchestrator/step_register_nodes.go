@@ -22,15 +22,16 @@ import (
 // Commercial-bank Paladin nodes are registered dynamically at join time (TK-9 /
 // feature 033 US2).
 type registerNodesStep struct {
-	spokeID     string
-	dataDir     string
-	besuRPCURL  string
-	keyProvider kp.KeyProvider
-	timeout     time.Duration
+	spokeID        string
+	dataDir        string
+	besuRPCURL     string
+	advertisedHost string // CB routable host; when routable, published as the transport endpoint
+	keyProvider    kp.KeyProvider
+	timeout        time.Duration
 }
 
-func newRegisterNodesStep(spokeID, dataDir, besuRPCURL string, keyProvider kp.KeyProvider, timeout time.Duration) Step {
-	return &registerNodesStep{spokeID: spokeID, dataDir: dataDir, besuRPCURL: besuRPCURL, keyProvider: keyProvider, timeout: timeout}
+func newRegisterNodesStep(spokeID, dataDir, besuRPCURL, advertisedHost string, keyProvider kp.KeyProvider, timeout time.Duration) Step {
+	return &registerNodesStep{spokeID: spokeID, dataDir: dataDir, besuRPCURL: besuRPCURL, advertisedHost: advertisedHost, keyProvider: keyProvider, timeout: timeout}
 }
 
 func (s *registerNodesStep) Name() string { return StepRegisterNodes }
@@ -70,7 +71,7 @@ func (s *registerNodesStep) Run(ctx context.Context) error {
 	return registerPaladinNode(ctx, s.besuRPCURL, paladinNodeRegistration{
 		registry:     common.HexToAddress(addrs.RegistryContractAddress),
 		nodeName:     cbNodeName(s.spokeID),
-		grpcHostname: cbGrpcHostname(s.spokeID),
+		grpcHostname: paladinDialHost(s.advertisedHost, cbGrpcHostname(s.spokeID)),
 		certPEM:      certPEM,
 		provider:     s.keyProvider,
 		signerKeyID:  kp.LocalOperatorKeyID,

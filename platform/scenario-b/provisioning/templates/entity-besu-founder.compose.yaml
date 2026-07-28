@@ -1,0 +1,50 @@
+# entity-besu-founder template — founding central bank of a spoke.
+# The founding CB is the spoke's SOLE QBFT validator and its own bootnode, so
+# (unlike entity-besu) it takes NO --bootnodes flag. Mirrors hub.compose.yaml:
+# single validator, own besu network, node state in named volumes, zero-gas.
+# Later banks join this spoke via entity-besu.compose.yaml (with BOOTNODE_ENODE
+# = this node's enode, taken from the emitted spoke bundle). No secrets embedded.
+services:
+  besu:
+    image: "${BESU_IMAGE:-hyperledger/besu:25.8.0}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-besu"
+    command:
+      - "--data-path=data"
+      - "--genesis-file=genesis/genesis.json"
+      - "--min-gas-price=0"
+      - "--rpc-http-enabled"
+      # ADMIN is required so found-spoke can read this node's enode (admin_nodeInfo)
+      # for the spoke bundle — banks join via that enode as the bootnode.
+      - "--rpc-http-api=ETH,NET,QBFT,ADMIN"
+      - "--rpc-ws-enabled"
+      - "--rpc-ws-api=ETH,NET,QBFT,ADMIN"
+      - "--host-allowlist=*"
+      - "--rpc-http-cors-origins=all"
+      - "--rpc-http-host=0.0.0.0"
+      - "--rpc-ws-host=0.0.0.0"
+      - "--rpc-http-port=8545"
+      - "--rpc-ws-port=8546"
+      - "--p2p-port=30303"
+    ports:
+      - "${ENTITY_RPC_PORT:?}:8545"
+      - "${ENTITY_WS_PORT:?}:8546"
+      - "${ENTITY_P2P_PORT:?}:30303"
+      - "${ENTITY_P2P_PORT:?}:30303/udp"
+    volumes:
+      - entity_besu_data:/opt/besu/data
+      - entity_genesis:/opt/besu/genesis
+    networks:
+      - entity_net
+    restart: always
+
+networks:
+  # Single shared network per entity (created here; infra/keycloak/backend/
+  # frontend/noc join it as external). Mirrors scenario-a's one-net-per-entity.
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
+
+volumes:
+  entity_besu_data:
+    name: "${ENTITY_VOLUME_PREFIX:?}_besu_data"
+  entity_genesis:
+    name: "${ENTITY_VOLUME_PREFIX:?}_genesis"
