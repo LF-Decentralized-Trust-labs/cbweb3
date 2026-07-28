@@ -34,6 +34,15 @@ func DryRun(ctx context.Context, in ApplyInput) (ApplyResult, error) {
 	if m.Spec.Mode == "join" {
 		stepOrder = orchestrator.CanonicalJoinStepOrder
 	}
+	// The reverse-proxy step is soft-appended by the orchestrator ONLY when
+	// spec.proxy == "enable" (see buildSteps / buildJoinSteps). Mirror that here so
+	// the plan reflects it. Copy the shared canonical slice before appending — never
+	// mutate the package-level order.
+	if m.Spec.Proxy == "enable" {
+		order := make([]string, len(stepOrder), len(stepOrder)+1)
+		copy(order, stepOrder)
+		stepOrder = append(order, orchestrator.StepStartProxy)
+	}
 
 	steps := make([]StepResult, len(stepOrder))
 	for i, stepName := range stepOrder {

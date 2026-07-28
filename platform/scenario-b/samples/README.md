@@ -394,3 +394,35 @@ status (`done` / `skipped` / `failed` / `soft-failed` / `planned`).
   at runtime (onboarding portal), not a toolkit step.
 - **End-to-end test suite.** For the automated pipeline E2E + performance baseline,
   see `scenario-b/toolkit/E2E-STATUS.md` (`go test -tags e2e ./tests/e2e/...`).
+
+---
+
+## Reverse proxy — single-host smoke test
+
+`deploy-all.sh` / `deploy-three.sh` are **port-based** (many entities on one host, portals
+on host ports, one per-entity launcher). They do **not** enable the reverse proxy, and that
+is deliberate — the Caddy proxy is **one container per host with a single site and one
+route fragment per scenario**, i.e. one entity per host (the `deploy-lnet` multi-host
+model). Enabling it for the many-entity local deploy would make the entities collide.
+
+To exercise the proxy on one machine, use the dedicated smoke test, which brings up the
+**hub + a single spoke** (`central-bank-brazil` found-spoke) with `proxy: enable` on the CB:
+
+```bash
+./proxy-smoke.sh                 # self-signed TLS (internal CA) — one browser warning
+PROXY_TLS_MODE=off ./proxy-smoke.sh   # plain HTTP on :80 — no warning
+./proxy-smoke.sh --clean         # wipe docker + work dir first
+```
+
+It uses `frontendHost: cb-brazil.localtest.me` (resolves to `127.0.0.1`), so the portals are
+reachable path-based on this host with no `/etc/hosts` edit (browser **on this machine**):
+
+```
+https://cb-brazil.localtest.me/              -> launcher
+https://cb-brazil.localtest.me/b/governance/ -> Governance   (also /b/treasury/, /b/supervisor/)
+https://cb-brazil.localtest.me/b/api/v1/     -> api-gateway
+```
+
+The hub stays port-based (it is infra, not proxied). Run `scenario-a/samples/proxy-smoke.sh`
+with the same host and **one** proxy serves both `/a/*` and `/b/*`. Manifest:
+[proxy-smoke/central-bank-brazil.yaml](./proxy-smoke/central-bank-brazil.yaml).

@@ -28,6 +28,26 @@ func TestContainerReachable(t *testing.T) {
 	}
 }
 
+// HostReachable is the opposite of containerReachable: the host-run toolkit maps the
+// host.docker.internal container sentinel to localhost (single-host register-cb /
+// register-currency posting to the hub gateway) but leaves a routable multi-VM hub
+// unchanged.
+func TestHostReachable(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"http://host.docker.internal:41845", "http://localhost:41845"},
+		{"http://host.docker.internal:33845", "http://localhost:33845"},
+		{"http://13.59.73.155:41845", "http://13.59.73.155:41845"},                           // routable → unchanged
+		{"http://localhost:41845", "http://localhost:41845"},                                 // already host-reachable
+		{"http://cb-brazil.cbweb3.l-net.io:41845", "http://cb-brazil.cbweb3.l-net.io:41845"}, // routable DNS → unchanged
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := HostReachable(c.in); got != c.want {
+			t.Errorf("HostReachable(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // relayCactiURL uses the relay's own endpoint when set (container-reachable),
 // else the single-host default.
 func TestRelayCactiURL(t *testing.T) {

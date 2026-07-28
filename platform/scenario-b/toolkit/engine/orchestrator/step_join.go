@@ -47,6 +47,7 @@ type JoinConfig struct {
 	BesuImage       string
 	GatewayURL      string
 	FrontendHost    string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
+	ProxyEnabled    bool   // spec.proxy == enable: serve the bank portal + api behind the per-host reverse proxy
 	LauncherEnabled bool   // spec.launcher == "enable": bake VITE_LAUNCHER_URL into the bank portal
 	LauncherPort    int    // spec.launcherPort: launcher host port (0 → env/default); host = FrontendHost
 
@@ -56,6 +57,20 @@ type JoinConfig struct {
 	WaitKeycloak     func(ctx context.Context) error
 	ReadClientSecret func(ctx context.Context) (string, error)
 	EthSyncing       EthSyncing
+}
+
+// joinWaitSyncTimeout is how long the join waits for the bank's Besu to peer with the
+// CB bootnode and import its first block. Peering is via UDP discovery (--bootnodes),
+// and on a busy single host the SECOND+ bank can take a few minutes to bond its first
+// peer, so the default is generous (10m). Override with CBWEB3_WAIT_SYNC_TIMEOUT (a Go
+// duration, e.g. "20m") for very loaded hosts.
+func joinWaitSyncTimeout() time.Duration {
+	if v := os.Getenv("CBWEB3_WAIT_SYNC_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 10 * time.Minute
 }
 
 func (c *JoinConfig) WithDefaults() {
@@ -97,7 +112,7 @@ func (c *JoinConfig) WithDefaults() {
 	}
 	if c.WaitSync == nil {
 		c.WaitSync = func(ctx context.Context) error {
-			return waitSync(ctx, c.BankRPC, 300*time.Second, 2*time.Second, c.EthSyncing)
+			return waitSync(ctx, c.BankRPC, joinWaitSyncTimeout(), 2*time.Second, c.EthSyncing)
 		}
 	}
 	if c.WaitKeycloak == nil {
@@ -110,9 +125,10 @@ func (c *JoinConfig) WithDefaults() {
 	}
 }
 
-func (c JoinConfig) genesisVolume() string { return c.VolumePrefix + "_genesis" }
-func (c JoinConfig) caVolume() string      { return c.VolumePrefix + "_cb_tls" }
-func (c JoinConfig) keycloakPort() int     { return c.RPCPort + 7000 }
+func (c JoinConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
+func (c JoinConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
+func (c JoinConfig) caVolume() string       { return c.VolumePrefix + "_cb_tls" }
+func (c JoinConfig) keycloakPort() int      { return c.RPCPort + 7000 }
 
 // keycloakContainer matches entity-keycloak.compose.yaml's container_name.
 func (c JoinConfig) keycloakContainer() string {
@@ -158,6 +174,50 @@ func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 	appendKeycloakUsers(&b, kc, bankKeycloakRealm, users)
 	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", b.String())
 	return err
+}
+
+// useProxy reports whether the bank serves its portal + api behind the per-host proxy.
+func (c JoinConfig) useProxy() bool { return c.ProxyEnabled && c.FrontendHost != "" }
+
+// frontendVariant tags the bank frontend image so a proxy (base-path-aware) build is
+// never confused with a non-proxy one under the same gateway-port tag.
+func (c JoinConfig) frontendVariant() string {
+	if c.useProxy() {
+		return proxyImageVariant(c.FrontendHost)
+	}
+	return ""
+}
+
+// corsOrigins is the bank api-gateway's allowed browser origin(s): the single proxy
+// origin behind the proxy, else the bank portal's host-port origin.
+func (c JoinConfig) corsOrigins() string {
+	if c.useProxy() {
+		return proxyOrigin(c.FrontendHost)
+	}
+	return corsOriginSingle(c.RPCPort, c.FrontendHost)
+}
+
+// NetName is this bank's external docker network (created by the infra step).
+func (c JoinConfig) NetName() string { return c.NetPrefix + "_net" }
+
+// bankFrontendContainer is the bank portal container name on the entity network
+// (must match entity-frontend.compose.yaml: <CONTAINER_PREFIX>-<ENTITY>-frontend).
+func (c JoinConfig) bankFrontendContainer() string {
+	return fmt.Sprintf("%s-%s-frontend", c.ContainerPrefix, c.Entity)
+}
+
+// apiGatewayContainer is the api-gateway container name on the entity network.
+func (c JoinConfig) apiGatewayContainer() string {
+	return fmt.Sprintf("%s-%s-api-gateway", c.ContainerPrefix, c.Entity)
+}
+
+// ProxyRoutes are the path routes the reverse proxy exposes for this bank: its portal +
+// the api-gateway.
+func (c JoinConfig) ProxyRoutes() []ProxyRoute {
+	return []ProxyRoute{
+		{Segment: "bank", Upstream: c.bankFrontendContainer() + ":80"},
+		{Segment: "api", Upstream: c.apiGatewayContainer() + ":8080", IsAPI: true},
+	}
 }
 
 // ComposeEnv returns the bank's compose-template interpolation vars as process
@@ -227,10 +287,11 @@ func (c JoinConfig) ComposeEnv() []string {
 		"COMPLIANCE_IMAGE":           hubComplianceImage,
 		"AUTH_IMAGE":                 hubAuthImage,
 		"PAYMENT_ORCHESTRATOR_IMAGE": hubPaymentOrchestratorImage,
-		"FRONTEND_IMAGE":             cbFrontendImage("bank", c.RPCPort+8000),
+		"FRONTEND_IMAGE":             cbFrontendImage("bank", c.RPCPort+8000, c.frontendVariant()),
 		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
-		// Browser CORS: allow this bank's portal origin on its gateway.
-		"CORS_ALLOW_ORIGINS": corsOriginSingle(c.RPCPort, c.FrontendHost),
+		// Browser CORS: the single proxy origin (path routing) or this bank's portal
+		// origin (host-port; routable host when set) when not behind the proxy.
+		"CORS_ALLOW_ORIGINS": c.corsOrigins(),
 		// app stack (compliance + auth): the bank is the local signer; the Keycloak
 		// realm/client are provisioned by provision-keycloak-bank.
 		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
@@ -374,13 +435,47 @@ func JoinSteps(c JoinConfig) []Step {
 			},
 		},
 		{
+			// Static peer: seed static-nodes.json (the CB's enode, from the spoke
+			// bundle) into the Besu DATA volume so the bank holds a DIRECT, persistent
+			// connection to the CB — Besu reads <data-path>/static-nodes.json on start.
+			// The join otherwise relies only on UDP discovery (--bootnodes), and on a
+			// busy single host that can take minutes to bond the 2nd+ bank's first peer
+			// (every node advertises 127.0.0.1 in its discovery record, so the churn
+			// wastes bonding cycles) — long enough to race the wait-sync gate. A static
+			// node connects immediately, so the node syncs deterministically. Must be
+			// written BEFORE start-besu-join so it is present at first boot (a fresh/
+			// --clean run); an already-running besu picks it up on its next recreate.
+			Name: "write-static-nodes",
+			Deps: []string{"write-genesis"},
+			Check: func(ctx context.Context) (bool, error) {
+				b, err := bundle.LoadSpoke(c.SpokeBundlePath)
+				if err != nil {
+					return false, err
+				}
+				existing, err := readVolumeFile(ctx, c.Runner, c.besuDataVolume(), "static-nodes.json")
+				if err != nil || len(existing) == 0 {
+					return false, nil
+				}
+				return strings.Contains(string(existing), b.Enode), nil
+			},
+			Run: func(ctx context.Context) error {
+				b, err := bundle.LoadSpoke(c.SpokeBundlePath)
+				if err != nil {
+					return err
+				}
+				content := fmt.Sprintf("[%q]\n", b.Enode)
+				return writeVolumeFile(ctx, c.Runner, c.besuDataVolume(), "static-nodes.json", []byte(content), "0644")
+			},
+		},
+		{
 			// Non-validating full node: the node is not in the spoke's QBFT
 			// validator set (genesis lists only the CB), so it syncs without
 			// producing blocks — no besu "non-validator" flag is needed. Uses the
-			// join template (--bootnodes = the CB's advertised enode). Plumbing
-			// (${...}) comes from the runner's process env (ComposeEnv).
+			// join template (--bootnodes = the CB's advertised enode) plus the
+			// static-nodes.json seeded above for a deterministic direct connection.
+			// Plumbing (${...}) comes from the runner's process env (ComposeEnv).
 			Name: "start-besu-join",
-			Deps: []string{"write-genesis"},
+			Deps: []string{"write-static-nodes"},
 			Run: func(ctx context.Context) error {
 				if _, err := c.Runner.Run(ctx, "docker", c.composeUpArgs("entity-besu-join")...); err != nil {
 					return err
@@ -488,14 +583,19 @@ func JoinSteps(c JoinConfig) []Step {
 			return compose("entity-backend")(ctx)
 		}},
 		{Name: "start-bank-frontend", Deps: []string{"start-bank-backend"}, Soft: true, Run: func(ctx context.Context) error {
-			// The bank portal bakes this bank's api-gateway URL. The browser reaches the
-			// gateway at frontendHost:<gwPort> (spec.frontendHost — a routable IP/DNS for
-			// remote access, else localhost); build a per-entity image, then run it.
+			// The bank portal bakes this bank's api-gateway URL at build time. The browser
+			// reaches the gateway at frontendHost:<gwPort> (spec.frontendHost — a routable
+			// IP/DNS for remote access, else localhost); behind the proxy it is instead
+			// same-origin at http://<frontendHost>/<scn>/api/v1/ and the SPA is built
+			// base-path-aware (VITE_BASE_PATH) under /<scn>/bank/.
 			gwPort := c.RPCPort + 8000
-			api := fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort)
-			lu := frontendLauncherURL(c.LauncherEnabled, c.FrontendHost, c.LauncherPort)
-			if err := buildFrontendImage(ctx, c.Runner, c.scenarioBDir(), cbFrontendImage("bank", gwPort), "bank",
-				map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu}); err != nil {
+			lu := frontendLauncherURL(c.LauncherEnabled, c.useProxy(), c.FrontendHost, c.LauncherPort)
+			args := map[string]string{"VITE_API_URL": fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu}
+			if c.useProxy() {
+				args["VITE_API_URL"] = proxyAPIURL(c.FrontendHost)
+				args["VITE_BASE_PATH"] = proxyPortalBase("bank")
+			}
+			if err := buildFrontendImage(ctx, c.Runner, c.scenarioBDir(), cbFrontendImage("bank", gwPort, c.frontendVariant()), "bank", args); err != nil {
 				return err
 			}
 			return compose("entity-frontend")(ctx)

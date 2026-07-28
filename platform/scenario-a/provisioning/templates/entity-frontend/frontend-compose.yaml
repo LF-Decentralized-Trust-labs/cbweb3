@@ -24,6 +24,7 @@ services:
       dockerfile: apps/governance/Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL}
+        VITE_BASE_PATH: ${GOVERNANCE_BASE_PATH:-}
         VITE_PORTAL_OWNER: ${VITE_PORTAL_OWNER:-OPERATOR}
         VITE_FIAT_SYMBOL: ${VITE_FIAT_SYMBOL:-BRL}
         VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Central Bank}
@@ -41,6 +42,7 @@ services:
       dockerfile: apps/treasury/Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL}
+        VITE_BASE_PATH: ${TREASURY_BASE_PATH:-}
         VITE_PORTAL_OWNER: ${VITE_PORTAL_OWNER:-OPERATOR}
         VITE_FIAT_SYMBOL: ${VITE_FIAT_SYMBOL:-BRL}
         VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Central Bank}
@@ -58,6 +60,7 @@ services:
       dockerfile: apps/supervisor/Dockerfile
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE}
+        VITE_BASE_PATH: ${SUPERVISOR_BASE_PATH:-}
         VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Central Bank}
         VITE_LAUNCHER_URL: ${VITE_LAUNCHER_URL:-}
     image: cbweb3/supervisor-frontend:${FRONTEND_IMAGE_TAG:-local}
@@ -91,6 +94,7 @@ services:
       dockerfile: apps/bank/Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL}
+        VITE_BASE_PATH: ${BANK_BASE_PATH:-}
         VITE_PORTAL_OWNER: ${VITE_PORTAL_OWNER:-OPERATOR}
         VITE_FIAT_SYMBOL: ${VITE_FIAT_SYMBOL:-BRL}
         VITE_INSTITUTION_NAME: ${VITE_INSTITUTION_NAME:-Commercial Bank}

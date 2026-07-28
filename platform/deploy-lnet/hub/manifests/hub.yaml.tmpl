@@ -27,6 +27,7 @@ spec:
   relay:
     endpoint: http://${IP_HUB}:7000   # Scenario B Cacti relay (co-located on the hub VM)
   frontendHost: hub.cbweb3.l-net.io
+  proxy: enable
   adminUsers:
     - { role: GOVERNANCE, username: governance@hub.l-net.io, password: change-me-local }
     - { role: NOC_ADMIN,  username: noc@hub.l-net.io,        password: change-me-local }

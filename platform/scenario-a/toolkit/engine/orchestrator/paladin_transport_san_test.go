@@ -37,6 +37,22 @@ func TestPaladinDialHost_RoutablePrefersAdvertisedHost(t *testing.T) {
 	}
 }
 
+// CBWEB3_SINGLE_HOST forces the single-host container-name transport even for a
+// routable-looking advertisedHost, so several entities on one Docker host do not
+// fight over the fixed Paladin peer port 9000 (see isRoutableHost).
+func TestPaladinDialHost_SingleHostOverride(t *testing.T) {
+	t.Setenv("CBWEB3_SINGLE_HOST", "1")
+	// A container network alias (the scenario-a samples) — would be "routable" without
+	// the override — falls back to the container name.
+	if got := paladinDialHost("cbweb3-spoke-brl-besu.central-bank-brazil", "paladin-spoke-brl-cb"); got != "paladin-spoke-brl-cb" {
+		t.Errorf("with CBWEB3_SINGLE_HOST, dial host = %q; want the container name", got)
+	}
+	// Even a real IP is treated single-host under the override.
+	if got := paladinDialHost("10.10.0.22", "paladin-spoke-brl-cb"); got != "paladin-spoke-brl-cb" {
+		t.Errorf("with CBWEB3_SINGLE_HOST, dial host = %q; want the container name", got)
+	}
+}
+
 func TestAddTransportSAN_IPGoesToIPAddresses(t *testing.T) {
 	tmpl := &x509.Certificate{DNSNames: []string{"spoke-brazil-cb1", "paladin-spoke-brazil-cb1", "localhost"}}
 	addTransportSAN(tmpl, "10.10.0.22")

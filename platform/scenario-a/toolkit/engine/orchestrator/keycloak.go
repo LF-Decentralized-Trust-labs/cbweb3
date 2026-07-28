@@ -76,7 +76,7 @@ func nocRealmPlan() KeycloakRealmPlan {
 	return KeycloakRealmPlan{
 		Realm: "cbweb3",
 		Clients: []KeycloakClientPlan{
-			{ClientID: "noc-portal", Secret: "", Roles: []string{"ROLE_NOC_VIEWER", "ROLE_NOC_OPERATOR", "ROLE_NOC_ADMIN"}},
+			{ClientID: "cbweb3-noc", Secret: "", Roles: []string{"ROLE_NOC_VIEWER", "ROLE_NOC_OPERATOR", "ROLE_NOC_ADMIN"}},
 		},
 	}
 }

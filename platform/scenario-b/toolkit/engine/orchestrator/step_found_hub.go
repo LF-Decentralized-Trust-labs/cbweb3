@@ -51,6 +51,7 @@ type HubConfig struct {
 	// NOCBackendURL is where the hub's noc-agent pushes (spec.noc.backendURL;
 	// default host.docker.internal:8090).
 	NOCBackendURL string
+	ProxyEnabled  bool // spec.proxy == enable: serve the hub governance portal + api behind the per-host reverse proxy
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -179,6 +180,40 @@ const (
 // context root for the services.
 func (c HubConfig) scenarioBDir() string { return filepath.Dir(c.ContractsDir) }
 
+// useProxy reports whether the hub serves its portal + api behind the per-host proxy.
+func (c HubConfig) useProxy() bool { return c.ProxyEnabled && c.FrontendHost != "" }
+
+// frontendVariant tags the hub frontend image so a proxy (base-path-aware) build is
+// never confused with a non-proxy one under the same gateway-port tag.
+func (c HubConfig) frontendVariant() string {
+	if c.useProxy() {
+		return proxyImageVariant(c.FrontendHost)
+	}
+	return ""
+}
+
+// corsOrigins is the hub api-gateway's allowed browser origin(s).
+func (c HubConfig) corsOrigins() string {
+	if c.useProxy() {
+		return proxyOrigin(c.FrontendHost)
+	}
+	return corsOriginSingle(c.RPCPort, c.FrontendHost)
+}
+
+// NetName is the hub's external docker network (created by the infra step).
+func (c HubConfig) NetName() string { return c.NetPrefix + "_net" }
+
+// ProxyRoutes are the path routes the reverse proxy exposes for the hub: its governance
+// portal + the api-gateway (container names match entity-frontend/entity-backend with
+// ENTITY=hub). The hub has no launcher, so the proxy also root-redirects to governance.
+func (c HubConfig) ProxyRoutes() []ProxyRoute {
+	return []ProxyRoute{
+		// entity-frontend.compose.yaml has a single `frontend` service: <PREFIX>-hub-frontend.
+		{Segment: "governance", Upstream: fmt.Sprintf("%s-hub-frontend", c.ContainerPrefix) + ":80"},
+		{Segment: "api", Upstream: fmt.Sprintf("%s-hub-api-gateway", c.ContainerPrefix) + ":8080", IsAPI: true},
+	}
+}
+
 // buildImage builds image from dockerfileRel within contextRel (both relative to
 // scenario-b), skipping when the image already exists.
 func (c HubConfig) buildImage(ctx context.Context, image, dockerfileRel, contextRel string) error {
@@ -255,10 +290,11 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"HUB_CHAIN_ID":               itoa(int(c.ChainID)),
 		"HUB_ADMIN_PRIVATE_KEY":      devDeployerKey, // holds GOVERNANCE_ROLE on the hub registry
 		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
-		"FRONTEND_IMAGE":             cbFrontendImage("governance", c.RPCPort+8000),
+		"FRONTEND_IMAGE":             cbFrontendImage("governance", c.RPCPort+8000, c.frontendVariant()),
 		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
-		// Browser CORS: allow the hub governance portal origin on the hub gateway.
-		"CORS_ALLOW_ORIGINS":   corsOriginSingle(c.RPCPort, c.FrontendHost),
+		// Browser CORS: the single proxy origin (path routing), else the hub governance
+		// portal origin(s) on the hub gateway (host-port; routable host when set).
+		"CORS_ALLOW_ORIGINS":   c.corsOrigins(),
 		"RELAY_IMAGE":          hubRelayImage,
 		"RELAY_CONTAINER_NAME": e + "-relay",
 		"RELAY_NET_PREFIX":     c.NetPrefix,
@@ -463,13 +499,19 @@ func FoundHubSteps(c HubConfig) []Step {
 		{
 			Name: "start-hub-frontend", Deps: []string{"start-hub-backend"}, Soft: true,
 			Run: func(ctx context.Context) error {
-				// The hub governance portal bakes the hub api-gateway URL. The browser reaches
-				// the gateway at frontendHost:<gwPort> (spec.frontendHost — a routable IP/DNS
-				// for remote access, else localhost); build a per-entity image, then run.
+				// The hub governance portal bakes the hub api-gateway URL at build time. The
+				// browser reaches the gateway at frontendHost:<gwPort> (spec.frontendHost — a
+				// routable IP/DNS for remote access, else localhost); behind the proxy it is
+				// instead same-origin at http://<frontendHost>/<scn>/api/v1/ and the SPA is
+				// built base-path-aware (VITE_BASE_PATH) under /<scn>/governance/.
 				gwPort := c.RPCPort + 8000
 				api := fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort)
-				if err := buildFrontendImage(ctx, c.Runner, c.scenarioBDir(), cbFrontendImage("governance", gwPort), "governance",
-					map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": "hub"}); err != nil {
+				args := map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": "hub"}
+				if c.useProxy() {
+					args["VITE_API_URL"] = proxyAPIURL(c.FrontendHost)
+					args["VITE_BASE_PATH"] = proxyPortalBase("governance")
+				}
+				if err := buildFrontendImage(ctx, c.Runner, c.scenarioBDir(), cbFrontendImage("governance", gwPort, c.frontendVariant()), "governance", args); err != nil {
 					return err
 				}
 				return compose("entity-frontend")(ctx)

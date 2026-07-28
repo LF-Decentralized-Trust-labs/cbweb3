@@ -32,6 +32,7 @@ type startFrontendStackStep struct {
 	services       []frontendService
 	apiURL         string // with /api/v1/ suffix (bank/governance/treasury)
 	apiBase        string // no suffix (supervisor, noc)
+	basePaths      map[string]string // per-service Vite base path behind the proxy (service → /<scn>/<role>/); empty ⇒ served at /
 	portalOwner    string
 	fiatSymbol     string
 	institution    string
@@ -55,6 +56,7 @@ func newStartFrontendStackStep(name string, p frontendStackParams) Step {
 		services:       p.Services,
 		apiURL:         p.APIURL,
 		apiBase:        p.APIBase,
+		basePaths:      p.BasePaths,
 		portalOwner:    p.PortalOwner,
 		fiatSymbol:     p.FiatSymbol,
 		institution:    p.Institution,
@@ -78,6 +80,7 @@ type frontendStackParams struct {
 	Services       []frontendService
 	APIURL         string
 	APIBase        string
+	BasePaths      map[string]string // per-service Vite base path behind the proxy
 	PortalOwner    string
 	FiatSymbol     string
 	Institution    string
@@ -159,8 +162,30 @@ func (s *startFrontendStackStep) composeEnv() []string {
 	// Publish only the selected portals' ports; others default to 0 (unpublished).
 	for _, svc := range s.services {
 		env = append(env, frontendPortEnv(svc.Service)+"="+strconv.Itoa(svc.Port))
+		// Per-service Vite base path behind the proxy (baked at build time so assets and
+		// the client-side router resolve under /<scn>/<role>/). Empty ⇒ served at /.
+		env = append(env, frontendBasePathEnv(svc.Service)+"="+s.basePaths[svc.Service])
 	}
 	return env
+}
+
+// frontendBasePathEnv maps a compose service name to its base-path env var, consumed as a
+// VITE_BASE_PATH build arg in the frontend compose template.
+func frontendBasePathEnv(service string) string {
+	switch service {
+	case "governance":
+		return "GOVERNANCE_BASE_PATH"
+	case "treasury":
+		return "TREASURY_BASE_PATH"
+	case "supervisor":
+		return "SUPERVISOR_BASE_PATH"
+	case "noc":
+		return "NOC_BASE_PATH"
+	case "bank":
+		return "BANK_BASE_PATH"
+	default:
+		return "UNKNOWN_BASE_PATH"
+	}
 }
 
 // frontendPortEnv maps a compose service name to its host-port env var.

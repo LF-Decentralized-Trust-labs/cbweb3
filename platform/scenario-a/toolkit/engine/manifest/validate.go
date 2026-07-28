@@ -198,6 +198,12 @@ func Validate(m *Manifest) error {
 	if m.Spec.LauncherPort != 0 && (m.Spec.LauncherPort < 1 || m.Spec.LauncherPort > 65535) {
 		errs = append(errs, fmt.Errorf("spec.launcherPort: invalid value %d; must be a TCP port (1-65535)", m.Spec.LauncherPort))
 	}
+	// spec.proxy — optional per-host reverse-proxy toggle.
+	switch m.Spec.Proxy {
+	case "", "enable", "disable":
+	default:
+		errs = append(errs, fmt.Errorf("spec.proxy: invalid value %q; accepted values are: enable, disable", m.Spec.Proxy))
+	}
 
 	return errors.Join(errs...)
 }

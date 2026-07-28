@@ -102,6 +102,14 @@ type Spec struct {
 	// NOC is the optional NOC observability block. In observe it tunes the NOC
 	// deployment; in found/join it configures this entity's noc-agent.
 	NOC *NOC `yaml:"noc,omitempty"`
+	// Proxy controls the per-host reverse proxy (Caddy) that fronts this entity's
+	// portals + api-gateway on port 80 with path-based routing (/<scenario>/<role>/,
+	// /<scenario>/api/), so nothing is reached by port. "enable" runs the generic proxy
+	// image (if not already up), writes this scenario's route fragment and reloads;
+	// "disable" removes the fragment and tears the proxy down when no fragment remains.
+	// Empty (absent) is treated as "disable". When enabled, the entity's portal SPAs are
+	// built base-path-aware and their api/CORS/launcher URLs point at spec.frontendHost.
+	Proxy string `yaml:"proxy,omitempty"`
 }
 
 // NOC configures the NOC observability integration. Optional in every mode and

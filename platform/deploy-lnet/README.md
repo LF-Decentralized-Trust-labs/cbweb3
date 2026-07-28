@@ -119,7 +119,7 @@ NOC. **Both scenarios ship it** — the difference is who owns the *portal*:
 - **Scenario B** — `observe` (`b noc-<x>`) deploys the portal **and** the backend.
 - **Scenario A** — `found` already builds the NOC portal (its 4th frontend, wired
   to `:28645` via `VITE_NOC_BACKEND_URL`) and provisions the `cbweb3` Keycloak
-  realm + `noc-portal` client. `observe` (`a noc-<x>`) then adds only the **data
+  realm + `cbweb3-noc` client. `observe` (`a noc-<x>`) then adds only the **data
   plane** (Postgres + backend `:28645`) and the CB's own `noc-agent`. Scenario A
   has **no hub**, so there is no `a noc-hub`. The `:28645` backend (vs B's
   `:8090`) is what lets both scenarios' NOCs share one founding VM.
@@ -183,6 +183,77 @@ Both scenarios run on the same hosts, so their ports are kept disjoint:
 
 
 
+
+## Reverse proxy — port-free, path-based portal access
+
+Every entity manifest sets `proxy: enable`, so each VM runs one **Caddy** reverse proxy on
+**port 80** (image `cbweb3/proxy:local`, built once per host by `deploy.sh`). Portals and the
+api-gateway are then reached by **path — no port** — on the entity's `frontendHost`:
+
+```
+http://cb-brazil.cbweb3.l-net.io/              -> launcher (the A/B landing page)
+http://cb-brazil.cbweb3.l-net.io/a/governance/ -> Governance  (Scenario A)
+http://cb-brazil.cbweb3.l-net.io/a/treasury/   -> Treasury    (Scenario A)
+http://cb-brazil.cbweb3.l-net.io/a/supervisor/ -> Supervisor  (Scenario A)
+http://cb-brazil.cbweb3.l-net.io/b/governance/ -> Governance  (Scenario B)  … etc.
+http://cb1-brazil.cbweb3.l-net.io/a/bank/      -> Bank portal (commercial bank, Scenario A)
+http://hub.cbweb3.l-net.io/                    -> hub governance (root redirect; hub has no launcher)
+```
+
+Both scenarios of an entity share the one proxy container on that host: each scenario's toolkit
+writes its own route fragment (`caddy.a.conf` / `caddy.b.conf`) into a shared conf dir and the proxy
+attaches to both entity Docker networks. Requirements per VM:
+
+- **DNS:** one `A` record per entity → its VM IP (e.g. `cb-brazil.cbweb3.l-net.io → 10.10.0.21`).
+  No wildcard needed (single hostname per entity).
+- **Firewall:** open `:80` and `:443`. The high per-portal host ports no longer need to be exposed
+  externally (the proxy reaches each portal container on the internal network).
+- **TLS:** enabled automatically whenever `frontendHost` is a real host (not `localhost`). The proxy
+  serves **HTTPS on `:443`** (with an automatic `:80`→`:443` redirect), and the portal SPAs are built
+  with `https://` api/CORS/launcher URLs so there is no mixed content. Certificate source is chosen by
+  the `PROXY_TLS_MODE` env on the deploy host:
+  - `internal` (**default**) — Caddy's local CA (self-signed). Works with no external reachability
+    (suits a permissioned network); browsers warn until the CA root is trusted. Trust it with the
+    root at `docker cp cbweb3-proxy:/data/caddy/pki/authorities/local/root.crt .`.
+  - `acme` — automatic Let's Encrypt via the HTTP/TLS-ALPN challenge; requires the host reachable from
+    the internet on `:80`/`:443`.
+  - `cloudflare` — **publicly trusted Let's Encrypt on VPN-internal hosts.** Uses the ACME **DNS-01**
+    challenge via Cloudflare, so the host needs no inbound reachability — only outbound access to
+    Let's Encrypt and the Cloudflare API, plus a scoped API token. This is the LNET setup (the
+    `l-net.io` zone is on Cloudflare). Certificates are publicly trusted, so **testers see no warning
+    and configure nothing.** Set on the deploy host before apply:
+    ```bash
+    export PROXY_TLS_MODE=cloudflare
+    export CF_API_TOKEN=<scoped Cloudflare token: Zone → DNS → Edit on l-net.io>
+    deploy-lnet/deploy.sh a cb-brazil   # and b, per host
+    ```
+    The proxy image must include the Cloudflare DNS module — `proxy/build.sh` builds it in via
+    `xcaddy` (rebuild the image if it predates this: `docker rmi cbweb3/proxy:local` then re-apply).
+    Caddy renews automatically (~30 days before expiry) with no operator action. If the token is later
+    revoked, existing certs keep serving until expiry as long as the `cbweb3-proxy-data` volume
+    persists — see the cert backup note below.
+  - `custom` — operator cert: set `PROXY_CERT_DIR=/path` (must contain `proxy.crt` + `proxy.key`).
+  - `off` — no TLS; serve plain HTTP on `:80` (use when an external edge terminates TLS and forwards
+    to `:80` — the SPAs are then built with `http://` URLs).
+- **Test deployments without public certificates:** leave `PROXY_TLS_MODE` unset (→ `internal`,
+  self-signed) or set it to `off`. No token or Cloudflare access is needed; the `cloudflare` mode is
+  strictly opt-in, so nothing about a normal test deploy changes.
+- **Backing up the certificates:** the cert store (issued certs, keys, and the ACME account key) lives
+  in the `cbweb3-proxy-data` volume. Snapshot it to the VM's disk with
+  `proxy/backup-certs.sh backup` (default target `/opt/cbweb3/proxy-cert-backups`), and restore with
+  `proxy/backup-certs.sh restore <file.tgz>`. Keep a snapshot before wiping an environment: restoring
+  it brings back valid certificates (and the same Let's Encrypt account) without needing a live token.
+- **Enabling/switching TLS on an already-running proxy:** the proxy container is recreated to pick up
+  `:443`, and each scenario re-attaches its own Docker network on apply — so after changing TLS,
+  **re-apply both scenarios on that host** (e.g. `deploy.sh a cb-brazil` and `deploy.sh b cb-brazil`)
+  so the proxy is attached to both entity networks. To force a clean recreate: `docker rm -f cbweb3-proxy`
+  then re-apply.
+- To turn the proxy off entirely, set `proxy: disable` in the manifest — the entity falls back to the
+  legacy host-port URLs.
+
+**NOC exception:** the NOC portal is hub-owned and stays **port-based** (its browser-side Keycloak
+OIDC redirect URIs are unchanged); it is intentionally excluded from proxy path routing and from the
+proxy-mode launcher for now.
 
 ## ⚠️ Multi-VM caveat (applies to both scenarios)
 

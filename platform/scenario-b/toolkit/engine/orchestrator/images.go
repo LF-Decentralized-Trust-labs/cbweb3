@@ -12,9 +12,11 @@ import (
 // cbFrontendImage is the per-entity frontend image tag for a CB operator portal
 // (governance/treasury/supervisor). The api-gateway URL is baked into the SPA at
 // build time, so the tag encodes the gateway port to keep each entity's image
-// distinct (e.g. cbweb3b/governance-frontend:gw16645).
-func cbFrontendImage(app string, gatewayPort int) string {
-	return fmt.Sprintf("cbweb3b/%s-frontend:gw%d", app, gatewayPort)
+// distinct (e.g. cbweb3b/governance-frontend:gw16645). variant distinguishes builds
+// whose baked URLs differ under the same gateway port (e.g. "-proxy" for a
+// base-path-aware build); pass "" for the default host-port build.
+func cbFrontendImage(app string, gatewayPort int, variant string) string {
+	return fmt.Sprintf("cbweb3b/%s-frontend:gw%d%s", app, gatewayPort, variant)
 }
 
 // imageExists reports whether a local image is present (via the runner).

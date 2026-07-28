@@ -187,6 +187,7 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		Currency:            pd.Spec.Spoke.Currency,
 		AdminUsers:          toOrchestratorAdminUsers(pd.Spec.AdminUsers),
 		NOCBackendURL:       manifestNOCBackendURL(pd), // where this CB's noc-agent pushes
+		ProxyEnabled:        pd.Spec.Proxy == "enable",
 	}
 	cfg.WithDefaults()
 	if o.DryRun {
@@ -210,13 +211,27 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	// RPC + CB address are known.
 	if !o.DryRun && hubRPC != "" && o.CBAddress != "" {
 		identityRegistry := hub.Contracts["identityRegistry"]
+		// The probe runs in the HOST toolkit process, so localize the bundle's
+		// host.docker.internal hub RPC (a container sentinel) to localhost; a routable
+		// multi-VM hub RPC is left unchanged.
+		hubProbeRPC := orchestrator.HostReachable(hubRPC)
 		cfg.CBRegistered = func(ctx context.Context) (bool, error) {
-			return orchestrator.HubCBRegistered(ctx, hubRPC, identityRegistry, o.CBAddress)
+			return orchestrator.HubCBRegistered(ctx, hubProbeRPC, identityRegistry, o.CBAddress)
 		}
 	}
 
 	steps := orchestrator.FoundSpokeSteps(cfg)
 	steps = append(steps, launcherStep(pd, cfg.Runner, rpcPort))
+	if cfg.ProxyEnabled {
+		steps = append(steps, orchestrator.NewProxyStep(orchestrator.ProxyParams{
+			Runner:       cfg.Runner,
+			Mode:         pd.Spec.Proxy,
+			SiteHost:     pd.Spec.FrontendHost,
+			LauncherPort: pd.Spec.LauncherPort,
+			Networks:     []string{cfg.NetName()},
+			Routes:       cfg.ProxyRoutes(),
+		}))
+	}
 	return orchestrator.New("found-spoke", steps, state, o.DryRun).Run(ctx)
 }
 
@@ -232,6 +247,7 @@ func launcherStep(pd *manifest.ParticipantDeployment, runner exec.CommandRunner,
 		Host:     pd.Spec.FrontendHost,
 		RPCPort:  rpcPort,
 		Port:     pd.Spec.LauncherPort,
+		Proxy:    pd.Spec.Proxy == "enable",
 	})
 }
 
@@ -292,6 +308,7 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		LauncherEnabled: pd.Spec.Launcher == "enable",
 		LauncherPort:    pd.Spec.LauncherPort,
 		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
+		ProxyEnabled:    pd.Spec.Proxy == "enable",
 	}
 	cfg.WithDefaults()
 	if o.DryRun {
@@ -306,6 +323,16 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 	}
 	steps := orchestrator.JoinSteps(cfg)
 	steps = append(steps, launcherStep(pd, cfg.Runner, rpcPort))
+	if cfg.ProxyEnabled {
+		steps = append(steps, orchestrator.NewProxyStep(orchestrator.ProxyParams{
+			Runner:       cfg.Runner,
+			Mode:         pd.Spec.Proxy,
+			SiteHost:     pd.Spec.FrontendHost,
+			LauncherPort: pd.Spec.LauncherPort,
+			Networks:     []string{cfg.NetName()},
+			Routes:       cfg.ProxyRoutes(),
+		}))
+	}
 	return orchestrator.New("join", steps, state, o.DryRun).Run(ctx)
 }
 
@@ -377,11 +404,23 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 		P2PPort:         p2pPort,
 		AdvertisedHost:  advertisedHost,
 		FrontendHost:    pd.Spec.FrontendHost,
+		ProxyEnabled:    pd.Spec.Proxy == "enable",
 	}
 	// No launcher on the hub: the launcher is the per-entity A/B entry point for
 	// commercial banks and central banks (found-spoke / join), not for the network
 	// operator's hub (Scenario B only).
 	steps := orchestrator.FoundHubSteps(cfg)
+	if cfg.ProxyEnabled {
+		// The hub has no launcher landing page, so root redirects to its governance portal.
+		steps = append(steps, orchestrator.NewProxyStep(orchestrator.ProxyParams{
+			Runner:       runner,
+			Mode:         pd.Spec.Proxy,
+			SiteHost:     pd.Spec.FrontendHost,
+			Networks:     []string{cfg.NetName()},
+			Routes:       cfg.ProxyRoutes(),
+			RootRedirect: "/b/governance/",
+		}))
+	}
 	return orchestrator.New("found-hub", steps, state, o.DryRun).Run(ctx)
 }
 

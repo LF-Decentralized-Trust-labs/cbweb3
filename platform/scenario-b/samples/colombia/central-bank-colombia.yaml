@@ -35,3 +35,6 @@ spec:
     - { role: GOVERNANCE, username: admin@colombia.governance.gov, password: colombia-governance-local }
     - { role: TREASURY,   username: admin@colombia.treasury.gov,   password: colombia-treasury-local }
     - { role: SUPERVISOR, username: admin@colombia.supervisor.gov, password: colombia-supervisor-local }
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

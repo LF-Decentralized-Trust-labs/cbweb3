@@ -47,11 +47,18 @@ func launcherPort(manifestPort int) int {
 // frontendLauncherURL is the browser-facing URL of this entity's launcher, baked into the
 // frontend bundle as VITE_LAUNCHER_URL so the portals can offer a "back to launcher"
 // affordance and redirect there on logout. Returns "" when the launcher is not enabled for
-// this entity (frontend hides the affordance, keeps /login). Host + port match the launcher
-// step exactly (frontendHostOrLocal + launcherPort).
-func frontendLauncherURL(enabled bool, host string, port int) string {
+// this entity (frontend hides the affordance, keeps /login).
+//
+// Behind the reverse proxy the launcher answers at the site ROOT with the proxy scheme
+// (https when TLS is on), so the URL is proxyOrigin(host) — the direct launcher host port
+// is not exposed externally and would be the wrong scheme under HTTPS. Without the proxy it
+// is the direct host:port, matching the launcher step (frontendHostOrLocal + launcherPort).
+func frontendLauncherURL(enabled, proxy bool, host string, port int) string {
 	if !enabled {
 		return ""
+	}
+	if proxy {
+		return proxyOrigin(host)
 	}
 	return fmt.Sprintf("http://%s:%d", frontendHostOrLocal(host), launcherPort(port))
 }
@@ -127,7 +134,8 @@ type LauncherParams struct {
 	Entity   string // display label shown in the launcher header
 	Host     string // browser-facing host baked into portal URLs (default localhost)
 	RPCPort  int
-	Port     int // launcher host port from the manifest (spec.launcherPort); 0 → env/default
+	Port     int  // launcher host port from the manifest (spec.launcherPort); 0 → env/default
+	Proxy    bool // spec.proxy == enable: portal links are path-based (/<scn>/<role>/) on :80, not host:port
 }
 
 // NewLauncherStep builds the SOFT per-entity launcher step. It never blocks the entity's
@@ -163,6 +171,20 @@ func runLauncherB(ctx context.Context, p LauncherParams) error {
 	}
 	portals := make([]launcherPortalJSON, 0)
 	for _, rp := range launcherRolesB(p.TopoRole) {
+		// Behind the proxy every portal is on :80 under a path (/<scn>/<role>/); NOC is
+		// not proxied yet (hub-owned), so it is dropped from the proxy-mode launcher.
+		if p.Proxy {
+			if rp.role == "noc" {
+				continue
+			}
+			portals = append(portals, launcherPortalJSON{
+				Scenario: launcherScenarioUpper,
+				Role:     rp.role,
+				Label:    rp.label,
+				URL:      proxyScheme(host) + "://" + host + proxyPortalBase(rp.role),
+			})
+			continue
+		}
 		// Operator portals live at RPCPort+offset (baked per entity). The NOC is a
 		// separate observe deployment: its portal listens on the fixed
 		// defaultNOCPortalPort, co-located on this entity's host.

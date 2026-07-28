@@ -22,6 +22,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # .../scenario-a/samples
 SCENARIO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"               # .../scenario-a
 export CBWEB3_HOME="${SCENARIO_DIR}"
+# All entities share ONE Docker host here, so their per-entity container-alias
+# advertisedHosts are not externally routable: force the container-name Paladin
+# transport + derived gRPC ports so they do not collide on the fixed peer port 9000.
+export CBWEB3_SINGLE_HOST=1
 
 BUNDLES_DIR="${SCRIPT_DIR}/bundles"
 # The toolkit emits bundles to <outputDir>/bundles, where outputDir defaults to the

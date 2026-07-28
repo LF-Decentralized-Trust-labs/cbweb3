@@ -369,3 +369,36 @@ step (`success` / `skipped` / `failed` / `pending`).
   `cbweb3-<spoke-id>-besu`.
 - **Reference network untouched.** This toolkit does not modify or depend on
   `deploy/local` or `make/*.mk` — they remain the sample network.
+
+---
+
+## Reverse proxy — single-host smoke test
+
+`deploy-all.sh` / `deploy-three.sh` are **port-based**: many entities on one host, each
+portal on its own host port, one per-entity launcher (distinct `launcherPort`). They do
+**not** enable the reverse proxy, and that is deliberate — the Caddy proxy is **one
+container per host with a single site and one route fragment per scenario**, i.e. it maps
+to *one entity per host* (the multi-host `deploy-lnet` model). Enabling it for the
+many-entity local deploy would make the entities collide on the single proxy.
+
+To exercise the proxy on one machine, use the dedicated smoke test, which brings up a
+**single** entity (`central-bank-brazil`) with `proxy: enable`:
+
+```bash
+./proxy-smoke.sh                 # self-signed TLS (internal CA) — one browser warning
+PROXY_TLS_MODE=off ./proxy-smoke.sh   # plain HTTP on :80 — no warning
+./proxy-smoke.sh --clean         # wipe docker + work dir first
+```
+
+It uses `frontendHost: cb-brazil.localtest.me`, a public name that resolves to
+`127.0.0.1`, so the portals are reachable path-based on this host with no `/etc/hosts`
+edit (open them in a browser **on this machine**):
+
+```
+https://cb-brazil.localtest.me/              -> launcher
+https://cb-brazil.localtest.me/a/governance/ -> Governance   (also /a/treasury/, /a/supervisor/)
+https://cb-brazil.localtest.me/a/api/v1/     -> api-gateway
+```
+
+Run `scenario-b/samples/proxy-smoke.sh` with the same host and **one** proxy serves both
+`/a/*` and `/b/*` for the entity. Manifest: [proxy-smoke/central-bank-brazil.yaml](./proxy-smoke/central-bank-brazil.yaml).
