@@ -97,6 +97,28 @@ func proxyCFToken() string { return os.Getenv("CF_API_TOKEN") }
 // proxy, e.g. "/a/governance/" (baked into the SPA as VITE_BASE_PATH).
 func proxyPortalBase(role string) string { return "/" + proxyScenario + "/" + role + "/" }
 
+const (
+	// nocProxyFragment is the separate Caddy fragment file key (caddy.a-noc.conf) the
+	// observe deployment writes for the NOC backend route, so it never collides with the
+	// found operator fragment (caddy.a.conf) that carries the portal route.
+	nocProxyFragment = proxyScenario + "-noc"
+	// nocProxyPortalSegment / nocProxyAPISegment are the path segments the NOC portal
+	// (written by found; on the entity network) and its backend (written by observe; on the
+	// observe network) are served under behind the proxy (/a/noc/, /a/noc-api/).
+	nocProxyPortalSegment = "noc"
+	nocProxyAPISegment    = "noc-api"
+	// nocProxyAPIBase is the prefix Caddy strips (handle_path) before the noc-backend, so
+	// the browser calls <origin>/a/noc-api/api/v1/… and the backend still receives /api/v1/….
+	nocProxyAPIBase = "/" + proxyScenario + "/" + nocProxyAPISegment
+)
+
+// proxyNOCBackendURL is the browser-reachable NOC backend URL behind the proxy — same
+// origin as the portal, under /a/noc-api/ (Caddy strips the prefix, so the backend still
+// serves /api/v1/…). Baked into the NOC portal as VITE_NOC_BACKEND_URL.
+func proxyNOCBackendURL(host string) string {
+	return proxyOrigin(host) + nocProxyAPIBase + "/api/v1"
+}
+
 // proxyAPIURL is the api-gateway URL (with the /api/v1/ suffix) a portal calls behind the
 // proxy, e.g. "https://cb.example/a/api/v1/".
 func proxyAPIURL(host string) string {
@@ -131,11 +153,33 @@ type proxyStep struct {
 	networks     []string
 	routes       []ProxyRoute
 	rootRedirect string // when set (hub-less roots), redirect "/" here
+	fragment     string // fragment file key (caddy.<fragment>.conf); empty ⇒ the found operator fragment
 }
 
 func newProxyStep(mode, siteHost string, launcherPort int, networks []string, routes []ProxyRoute, rootRedirect string) Step {
 	return &proxyStep{mode: mode, siteHost: siteHost, launcherPort: launcherPort, networks: networks, routes: routes, rootRedirect: rootRedirect}
 }
+
+// NewNOCBackendProxyStep is the exported entry point the observe deployment uses to wire the
+// NOC backend into the per-host proxy: it writes the SEPARATE caddy.a-noc.conf fragment (route
+// /a/noc-api/ → the observe noc-backend, prefix stripped so the backend still serves /api/v1/…)
+// and attaches the proxy to the observe network. The portal route (/a/noc/) is owned by found,
+// which knows the entity network. Soft like every proxy step. Empty mode / "disable" removes
+// the NOC fragment (proxy torn down if none remain).
+func NewNOCBackendProxyStep(mode, siteHost, netName, backendContainer string) Step {
+	return &proxyStep{
+		mode:     mode,
+		siteHost: siteHost,
+		networks: []string{netName},
+		routes:   []ProxyRoute{{Segment: nocProxyAPISegment, Upstream: backendContainer}},
+		fragment: nocProxyFragment,
+	}
+}
+
+// ProxyOrigin is the browser origin the per-host proxy serves for host (https when TLS is on).
+// Exported for the apply package's observe path, which sets the NOC backend's CORS origin
+// (NOC_FRONTEND_ORIGIN) to match the single proxy origin the portal is served from.
+func ProxyOrigin(host string) string { return proxyOrigin(hostOrLocalhost(host)) }
 
 func (s *proxyStep) Name() string { return StepStartProxy }
 
@@ -145,7 +189,11 @@ func (s *proxyStep) Check(context.Context) (bool, error) { return false, nil }
 
 func (s *proxyStep) Run(ctx context.Context) error {
 	confDir := filepath.Join(proxyStateDir(), "conf.d")
-	fragPath := filepath.Join(confDir, proxyFragmentFile)
+	fragFile := proxyFragmentFile
+	if s.fragment != "" {
+		fragFile = "caddy." + s.fragment + ".conf"
+	}
+	fragPath := filepath.Join(confDir, fragFile)
 
 	// disable (or absent): drop our fragment; tear the proxy down if none remain.
 	if s.mode != "enable" {

@@ -57,6 +57,12 @@ type ObserveConfig struct {
 	KeycloakURL string
 	// LauncherURL is baked as the portal's VITE_LAUNCHER_URL (back-to-launcher).
 	LauncherURL string
+	// ProxyEnabled (spec.proxy == "enable") serves the NOC portal + its backend API
+	// behind the per-host reverse proxy under /b/noc/ and /b/noc-api/ on the single
+	// proxy origin. When false the portal + backend stay port-based (local default).
+	// The portal's Keycloak URL is unchanged either way — it is the operator-provided
+	// routable CB/hub realm (spec.noc.keycloakURL), reached on its own origin, not proxied.
+	ProxyEnabled bool
 
 	// BackendURL is where the toolkit reaches the backend to register/provision
 	// (default http://localhost:<BackendPort>). Injectable for tests.
@@ -113,6 +119,11 @@ func (c ObserveConfig) ComposeEnv() []string {
 		"NOC_BACKEND_IMAGE": hubNocBackendImage,
 		"NOC_PORTAL_IMAGE":  c.portalImage(),
 	}
+	if c.ProxyEnabled {
+		// Behind the proxy the portal is same-origin with the backend, so the backend's
+		// browser CORS collapses to the single proxy origin (vs the local "*" default).
+		vars["NOC_FRONTEND_ORIGIN"] = proxyOrigin(c.FrontendHost)
+	}
 	out := make([]string, 0, len(vars))
 	for k, v := range vars {
 		out = append(out, k+"="+v)
@@ -122,16 +133,27 @@ func (c ObserveConfig) ComposeEnv() []string {
 }
 
 // portalViteArgs are the build args baked into the NOC portal SPA (read at build
-// time). The backend URL is the BROWSER-reachable one (FrontendHost + published
-// port), distinct from BackendURL (the toolkit's localhost admin path).
+// time). The backend URL is the BROWSER-reachable one: the FrontendHost + published
+// port (port-based default), or the same-origin proxy path when ProxyEnabled — the
+// latter is what keeps an HTTPS page from making a blocked mixed-content call. It is
+// distinct from BackendURL (the toolkit's localhost admin path). VITE_KEYCLOAK_URL is
+// the operator-provided routable realm in both modes (never proxied).
 func (c ObserveConfig) portalViteArgs() map[string]string {
-	return map[string]string{
+	args := map[string]string{
 		"VITE_NOC_BACKEND_URL":    fmt.Sprintf("http://%s:%d/api/v1", c.FrontendHost, c.BackendPort),
 		"VITE_KEYCLOAK_URL":       c.KeycloakURL,
 		"VITE_KEYCLOAK_REALM":     spokeKeycloakRealm,
 		"VITE_KEYCLOAK_CLIENT_ID": nocKeycloakClient,
 		"VITE_LAUNCHER_URL":       c.LauncherURL,
 	}
+	if c.ProxyEnabled {
+		// Served under /b/noc/; assets + router resolve under the prefix.
+		args["VITE_BASE_PATH"] = proxyPortalBase("noc")
+		// Backend same-origin at /b/noc-api/…; the /b/noc-api prefix is stripped by
+		// Caddy (handle_path) so the backend still receives /api/v1/….
+		args["VITE_NOC_BACKEND_URL"] = proxyOrigin(c.FrontendHost) + nocProxyAPIBase + "/api/v1"
+	}
+	return args
 }
 
 // portalImage tags the NOC portal image by a hash of its baked VITE args, so
@@ -163,10 +185,36 @@ func (c ObserveConfig) composeUpArgs() []string {
 	return []string{"compose", "-p", c.ContainerPrefix, "-f", c.template("noc-stack"), "up", "-d"}
 }
 
+// nocNetName is the dedicated observe network the NOC stack owns (noc-stack.compose.yaml:
+// noc_net → <NOC_NET_PREFIX>_net). The proxy attaches to it to reach the portal + backend.
+func (c ObserveConfig) nocNetName() string { return c.NetPrefix + "_net" }
+
+// nocProxyStep (soft) wires the NOC portal + backend into the per-host reverse proxy: it
+// attaches the proxy to the NOC network and writes the caddy.b-noc.conf fragment with a
+// portal route (/b/noc/ → portal:80) and a backend route (/b/noc-api/ → backend:8080, the
+// prefix stripped so the backend still serves /api/v1/…). Runs after the stack is up so the
+// containers + network exist. Reuses the generic proxy runner, keyed to its own fragment.
+func nocProxyStep(c ObserveConfig) Step {
+	step := NewProxyStep(ProxyParams{
+		Runner:   c.Runner,
+		Mode:     "enable",
+		SiteHost: c.FrontendHost,
+		Fragment: nocProxyFragment,
+		Networks: []string{c.nocNetName()},
+		Routes: []ProxyRoute{
+			{Segment: nocProxyPortalSegment, Upstream: c.ContainerPrefix + "-noc-portal:80"},
+			{Segment: nocProxyAPISegment, Upstream: c.ContainerPrefix + "-noc-backend:8080"},
+		},
+	})
+	step.Name = "start-noc-proxy"
+	step.Deps = []string{"start-noc-stack"}
+	return step
+}
+
 // ObserveSteps assembles the observe-mode step DAG.
 func ObserveSteps(c ObserveConfig) []Step {
 	c.WithDefaults()
-	return []Step{
+	steps := []Step{
 		{
 			// Backend from its own service dir (buildImageIn, no args). Portal via
 			// buildFrontendImage so the VITE_* (backend/keycloak/launcher) are baked;
@@ -219,6 +267,12 @@ func ObserveSteps(c ObserveConfig) []Step {
 			},
 		},
 	}
+	// Behind the proxy (spec.proxy == enable): route the portal + backend on the single
+	// proxy origin. Additive + soft — the port-based deploy is unchanged when disabled.
+	if c.ProxyEnabled {
+		steps = append(steps, nocProxyStep(c))
+	}
+	return steps
 }
 
 // spokeRegistered reports whether the spoke already exists (idempotency gate).

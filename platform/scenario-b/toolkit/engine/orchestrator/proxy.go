@@ -96,6 +96,20 @@ func proxyCFToken() string { return os.Getenv("CF_API_TOKEN") }
 // client-side router resolve under the prefix.
 func proxyPortalBase(role string) string { return "/" + proxyScenario + "/" + role + "/" }
 
+const (
+	// nocProxyFragment is the separate Caddy fragment file key (caddy.b-noc.conf) the
+	// observe step writes for the NOC portal + backend routes, so it never collides with
+	// the found/join operator fragment (caddy.b.conf).
+	nocProxyFragment = proxyScenario + "-noc"
+	// nocProxyPortalSegment / nocProxyAPISegment are the path segments the NOC portal and
+	// its backend are served under behind the proxy (/b/noc/, /b/noc-api/).
+	nocProxyPortalSegment = "noc"
+	nocProxyAPISegment    = "noc-api"
+	// nocProxyAPIBase is the prefix Caddy strips (handle_path) before the noc-backend, so
+	// the browser calls <origin>/b/noc-api/api/v1/… and the backend still receives /api/v1/….
+	nocProxyAPIBase = "/" + proxyScenario + "/" + nocProxyAPISegment
+)
+
 // proxyAPIURL is the api-gateway URL a portal SPA calls behind the proxy, e.g.
 // "https://cb-brazil.example/b/api/v1/" — same origin as the portals (one CORS origin).
 func proxyAPIURL(host string) string {
@@ -126,6 +140,11 @@ type ProxyParams struct {
 	// RootRedirect, when set, redirects the site root "/" to this path. Used by the hub,
 	// which has no launcher landing page — root lands on its portal (e.g. "/b/governance/").
 	RootRedirect string
+	// Fragment names this scenario's route fragment file (caddy.<Fragment>.conf); empty
+	// defaults to the scenario key. observe writes a SEPARATE "b-noc" fragment so the NOC
+	// routes co-exist with the found/join operator fragment under the same imported dir
+	// without either owning the other's lifecycle.
+	Fragment string
 }
 
 // NewProxyStep builds the SOFT per-host reverse-proxy step. Like the launcher it never
@@ -164,8 +183,12 @@ func proxyStateDir() string {
 }
 
 func runProxyB(ctx context.Context, p ProxyParams) error {
+	fragKey := p.Fragment
+	if fragKey == "" {
+		fragKey = proxyScenario
+	}
 	confDir := filepath.Join(proxyStateDir(), "conf.d")
-	fragPath := filepath.Join(confDir, "caddy."+proxyScenario+".conf")
+	fragPath := filepath.Join(confDir, "caddy."+fragKey+".conf")
 
 	// disable (or absent): drop our fragment; tear the proxy down if none remain.
 	if p.Mode != "enable" {

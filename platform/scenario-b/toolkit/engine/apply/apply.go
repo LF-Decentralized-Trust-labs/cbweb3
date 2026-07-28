@@ -102,6 +102,7 @@ func applyObserve(ctx context.Context, o Options, pd *manifest.ParticipantDeploy
 		FrontendHost:    pd.Spec.FrontendHost,
 		KeycloakURL:     manifestNOCKeycloakURL(pd), // portal VITE_KEYCLOAK_URL (CB/hub realm)
 		LauncherURL:     manifestNOCLauncherURL(pd), // portal VITE_LAUNCHER_URL (back-to-launcher)
+		ProxyEnabled:    pd.Spec.Proxy == "enable",  // serve portal + backend under the per-host proxy
 		// BackendPort/PortalPort fall back to the local convention in WithDefaults;
 		// spec.noc may carry explicit ports in a later phase.
 	}

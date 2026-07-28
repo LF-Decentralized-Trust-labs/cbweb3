@@ -171,12 +171,9 @@ func runLauncherB(ctx context.Context, p LauncherParams) error {
 	}
 	portals := make([]launcherPortalJSON, 0)
 	for _, rp := range launcherRolesB(p.TopoRole) {
-		// Behind the proxy every portal is on :80 under a path (/<scn>/<role>/); NOC is
-		// not proxied yet (hub-owned), so it is dropped from the proxy-mode launcher.
+		// Behind the proxy every portal is on :80 under a path (/<scn>/<role>/), NOC
+		// included (its observe deployment attaches to the proxy under /b/noc/).
 		if p.Proxy {
-			if rp.role == "noc" {
-				continue
-			}
 			portals = append(portals, launcherPortalJSON{
 				Scenario: launcherScenarioUpper,
 				Role:     rp.role,

@@ -58,10 +58,19 @@ func runObserveMode(ctx context.Context, in ApplyInput) (ApplyResult, error) {
 	}
 	result.Spoke = nb.SpokeID
 
+	// Behind the per-host proxy (spec.proxy == enable) the NOC backend is routed same-origin
+	// under /a/noc-api/ (so an HTTPS portal makes no blocked mixed-content call). The portal
+	// route (/a/noc/) is owned by the CB's found; this deployment adds only the backend route.
+	proxyEnabled := m.Spec.Proxy == "enable"
+	fHost := m.Spec.FrontendHost
+
 	if in.DryRun {
 		result.Status = "dry-run"
 		for _, n := range observeStepOrder {
 			result.Steps = append(result.Steps, StepResult{Name: n, Status: "planned"})
+			if n == "start-noc-stack" && proxyEnabled {
+				result.Steps = append(result.Steps, StepResult{Name: "start-noc-proxy", Status: "planned"})
+			}
 		}
 		return result, nil
 	}
@@ -90,10 +99,26 @@ func runObserveMode(ctx context.Context, in ApplyInput) (ApplyResult, error) {
 		"NOC_NET_NAME="+prefix+"-net",
 		"NOC_VOLUME_PREFIX="+prefix,
 	)
+	if proxyEnabled {
+		// Backend CORS collapses to the single proxy origin (vs the local "*" default).
+		env = append(env, "NOC_FRONTEND_ORIGIN="+orchestrator.ProxyOrigin(fHost))
+	}
 	if err := steps.run(ctx, "start-noc-stack", func(ctx context.Context) error {
 		return runDocker(ctx, env, "compose", "-p", prefix, "-f", in.NOCStackComposePath, "up", "-d")
 	}); err != nil {
 		return result, err
+	}
+
+	// 2b) Behind the proxy: route the NOC backend same-origin under /a/noc-api/ and attach
+	// the proxy to this observe network so it can reach the backend by name. Soft — a proxy
+	// problem never fails observe. The portal route (/a/noc/) is written by the CB's found.
+	if proxyEnabled {
+		if err := steps.run(ctx, "start-noc-proxy", func(ctx context.Context) error {
+			return orchestrator.NewNOCBackendProxyStep(m.Spec.Proxy, fHost,
+				prefix+"-net", prefix+"-noc-backend:8080").Run(ctx)
+		}); err != nil {
+			return result, err
+		}
 	}
 
 	// 3) Wait for the backend to be ready.

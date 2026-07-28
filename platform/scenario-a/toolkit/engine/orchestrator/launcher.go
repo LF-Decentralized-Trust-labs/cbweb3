@@ -154,12 +154,9 @@ func (s *launcherStep) Run(ctx context.Context) error {
 	}
 	portals := make([]launcherPortalJSON, 0, len(roles))
 	for _, rp := range roles {
-		// Behind the proxy every portal is on :80 under a path (/<scn>/<role>/); NOC is
-		// not proxied yet (hub-owned), so it is dropped from the proxy-mode launcher.
+		// Behind the proxy every portal is on :80 under a path (/<scn>/<role>/), NOC
+		// included (its portal is served under /a/noc/; the observe backend under /a/noc-api/).
 		if s.proxy {
-			if rp.role == "noc" {
-				continue
-			}
 			portals = append(portals, launcherPortalJSON{
 				Scenario: launcherScenarioUpper,
 				Role:     rp.role,

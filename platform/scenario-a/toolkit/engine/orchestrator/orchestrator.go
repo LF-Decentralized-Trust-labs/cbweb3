@@ -213,6 +213,7 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			"governance": proxyPortalBase("governance"),
 			"treasury":   proxyPortalBase("treasury"),
 			"supervisor": proxyPortalBase("supervisor"),
+			"noc":        proxyPortalBase(nocProxyPortalSegment),
 		}
 		cbImageTag = entity + proxyImageVariant(fHost)
 	}
@@ -262,14 +263,16 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			APIBase:     cbAPIBase,
 			BasePaths:   cbBasePaths,
 			PortalOwner: entity + "-operator", FiatSymbol: m.Spec.Spoke.Currency, Institution: m.DisplayNameOr(entity),
-			// NOC is not proxied (hub-owned; stays port-based), so its Keycloak URL keeps
-			// the host-port origin even behind the proxy.
+			// The NOC portal password-grants directly against Keycloak in the browser, so its
+			// Keycloak URL stays the operator-provided host-port origin even behind the proxy
+			// (Keycloak is not proxied; under TLS the operator supplies an https realm URL).
 			KeycloakURL: frontendAPIBase(frontendAdvertisedHost(m), ports.Keycloak), KeycloakRealm: "cbweb3", KeycloakClient: "cbweb3-noc",
 			LauncherURL: launcherURLForManifest(m),
 			// The NOC portal (co-located, built here) talks to the observe-deployed NOC
-			// backend on the fixed host port, not the api-gateway. Path suffix /api/v1
-			// matches the backend routes and the portal's http-client fallback.
-			NOCBackendURL: fmt.Sprintf("http://%s:%d/api/v1", frontendAdvertisedHost(m), NOCBackendPort),
+			// backend on the fixed host port (path suffix /api/v1 matches the backend routes),
+			// or — behind the proxy — same-origin under /a/noc-api/ so an HTTPS page makes no
+			// blocked mixed-content call (Caddy strips the prefix; the backend still gets /api/v1).
+			NOCBackendURL: nocBackendURLForManifest(m, fHost, proxyEnabled),
 			// Per-entity image tag: VITE_* are baked at build time, so a shared tag
 			// would let one entity's bundle (with its api-gateway URL) be reused by
 			// another, sending the browser to the wrong gateway and failing CORS. The
@@ -306,6 +309,9 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			{Segment: "governance", Upstream: prefix + "-governance-frontend:80"},
 			{Segment: "treasury", Upstream: prefix + "-treasury-frontend:80"},
 			{Segment: "supervisor", Upstream: prefix + "-supervisor-frontend:80"},
+			// The NOC portal is co-located on the entity network (built here); its backend
+			// route (/a/noc-api/) is written separately by the observe deployment.
+			{Segment: nocProxyPortalSegment, Upstream: prefix + "-noc-frontend:80"},
 			{Segment: "api", Upstream: prefix + "-api-gateway:8080", IsAPI: true},
 		}, ""))
 	}
@@ -332,6 +338,17 @@ func frontendAdvertisedHost(m *manifest.Manifest) string {
 		return m.Spec.FrontendHost
 	}
 	return "localhost"
+}
+
+// nocBackendURLForManifest is the browser-reachable NOC backend URL baked into the NOC
+// portal (VITE_NOC_BACKEND_URL). Behind the proxy it is same-origin under /a/noc-api/ (no
+// mixed content under HTTPS); otherwise it is the observe backend's fixed host port. Both
+// keep the /api/v1 suffix the backend routes + the portal's http-client expect.
+func nocBackendURLForManifest(m *manifest.Manifest, fHost string, proxyEnabled bool) string {
+	if proxyEnabled {
+		return proxyNOCBackendURL(hostOrLocalhost(fHost))
+	}
+	return fmt.Sprintf("http://%s:%d/api/v1", frontendAdvertisedHost(m), NOCBackendPort)
 }
 
 // launcherURLForManifest is the browser-facing URL of this entity's launcher, baked into

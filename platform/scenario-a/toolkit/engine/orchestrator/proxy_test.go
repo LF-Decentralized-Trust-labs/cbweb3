@@ -67,8 +67,8 @@ func TestCORSOriginsForProxy(t *testing.T) {
 }
 
 // TestLauncherProxyModeURLs verifies the launcher fragment carries path-based URLs and
-// drops NOC when proxy mode is on. Run writes the fragment before touching docker (which
-// fails gracefully in a test env), so no container is created.
+// includes NOC (served under /a/noc/) when proxy mode is on. Run writes the fragment before
+// touching docker (which fails gracefully in a test env), so no container is created.
 func TestLauncherProxyModeURLs(t *testing.T) {
 	t.Setenv("PROXY_TLS_MODE", "internal") // real host ⇒ TLS on ⇒ https links
 	dir := t.TempDir()
@@ -95,8 +95,8 @@ func TestLauncherProxyModeURLs(t *testing.T) {
 	if got := byRole["governance"]; got != "https://cb-brazil.example/a/governance/" {
 		t.Errorf("governance URL = %q", got)
 	}
-	if _, ok := byRole["noc"]; ok {
-		t.Errorf("NOC should be dropped in proxy mode, got %q", byRole["noc"])
+	if got := byRole["noc"]; got != "https://cb-brazil.example/a/noc/" {
+		t.Errorf("NOC should be served under /a/noc/ in proxy mode, got %q", got)
 	}
 }
 
