@@ -43,3 +43,50 @@ test("BlockWatermarkStore survives a restart — a fresh store reloads the persi
   await second.init();
   assert.equal(second.get("0xabc"), 9999);
 });
+
+test("BlockWatermarkStore persists the delivered set and chain meta across restart", async () => {
+  const file = await tmpFile();
+  const first = new BlockWatermarkStore(file, silentLog);
+  await first.init();
+  await first.markDelivered("0xtx:0");
+  await first.setMeta("0xabc", "0xgenesis");
+  assert.equal(first.hasDelivered("0xtx:0"), true);
+  assert.equal(first.hasDelivered("0xtx:1"), false);
+
+  const second = new BlockWatermarkStore(file, silentLog);
+  await second.init();
+  assert.equal(second.hasDelivered("0xtx:0"), true);
+  assert.equal(second.getMeta("0xabc"), "0xgenesis");
+});
+
+test("BlockWatermarkStore.resetChain clears the delivered set and records new genesis", async () => {
+  const file = await tmpFile();
+  const store = new BlockWatermarkStore(file, silentLog);
+  await store.init();
+  await store.set("0xabc", 500);
+  await store.markDelivered("0xtx:0");
+
+  await store.resetChain("0xabc", 0, "0xnewgenesis");
+  assert.equal(store.get("0xabc"), 0);
+  assert.equal(store.hasDelivered("0xtx:0"), false, "delivered set dropped on chain reset");
+  assert.equal(store.getMeta("0xabc"), "0xnewgenesis");
+});
+
+test("BlockWatermarkStore writes atomically (no leftover .tmp file)", async () => {
+  const file = await tmpFile();
+  const store = new BlockWatermarkStore(file, silentLog);
+  await store.init();
+  await store.set("0xabc", 42);
+  assert.ok(await fs.stat(file), "final file exists");
+  await assert.rejects(() => fs.stat(`${file}.tmp`), "temp file renamed away");
+});
+
+test("BlockWatermarkStore reads the legacy flat block-map shape", async () => {
+  const file = await tmpFile();
+  // A file written by the pre-R2-H-11 store: a flat {key: block} map.
+  await fs.writeFile(file, JSON.stringify({ "0xabc": 777 }), "utf8");
+
+  const store = new BlockWatermarkStore(file, silentLog);
+  await store.init();
+  assert.equal(store.get("0xabc"), 777, "legacy watermark preserved across upgrade");
+});

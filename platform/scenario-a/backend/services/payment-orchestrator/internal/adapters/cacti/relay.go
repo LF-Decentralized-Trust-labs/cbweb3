@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
@@ -188,18 +189,30 @@ func (c *CactiRelay) pollEvents(ctx context.Context, kind string, handler func(p
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			proofs, since, err := c.fetchEvents(ctx, kind, lastSeen)
+			events, err := c.fetchEvents(ctx, kind, lastSeen)
 			if err != nil {
 				c.logger.Warn("cacti: poll events error", "kind", kind, "error", err)
 				continue
 			}
-			for _, p := range proofs {
-				if err := handler(p); err != nil {
-					c.logger.Error("cacti: event handler error", "kind", kind, "contractId", p.ContractID, "error", err)
+			// Advance the watermark only through events the handler actually processed. On the
+			// first handler failure we stop advancing so the failed event (and everything after
+			// it) is re-fetched on the next tick instead of being skipped forever — the watermark
+			// must mean "delivered", not "fetched" (finding R2-H-11). Events are sorted ascending
+			// so "everything after" is well defined even if the relay returns them out of order.
+			sort.Slice(events, func(i, j int) bool { return events[i].ts < events[j].ts })
+			advanced := false
+			for _, e := range events {
+				if err := handler(e.proof); err != nil {
+					c.logger.Error("cacti: event handler error; halting watermark advance for retry",
+						"kind", kind, "contractId", e.proof.ContractID, "error", err)
+					break
+				}
+				if e.ts > lastSeen {
+					lastSeen = e.ts
+					advanced = true
 				}
 			}
-			if since > lastSeen {
-				lastSeen = since
+			if advanced {
 				c.saveWatermark(ctx, kind, lastSeen)
 			}
 		}
@@ -237,76 +250,82 @@ func (c *CactiRelay) saveWatermark(ctx context.Context, kind string, value int64
 	}
 }
 
+// relayEvent pairs a converted proof with the timestamp the relay assigned it, so the poller can
+// advance its watermark to exactly the last successfully-handled event (finding R2-H-11).
+type relayEvent struct {
+	proof ports.InteroperabilityProof
+	ts    int64
+}
+
 // fetchEvents retrieves events from the Cacti service newer than sinceMs.
-// Returns converted proofs, the latest observed timestamp, and any error.
-func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceMs int64) ([]ports.InteroperabilityProof, int64, error) {
+// Returns each converted proof paired with its timestamp, and any error.
+func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceMs int64) ([]relayEvent, error) {
 	url := fmt.Sprintf("%s/api/v1/relay/events/%s?since=%d", c.baseURL, kind, sinceMs+1)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, sinceMs, err
+		return nil, err
 	}
 	req.Header.Set("X-Relay-Auth", c.authSecret)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, sinceMs, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
-		return nil, sinceMs, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, raw)
+		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, raw)
 	}
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, sinceMs, err
+		return nil, err
 	}
 
-	var proofs []ports.InteroperabilityProof
-	var maxTs int64 = sinceMs
+	var events []relayEvent
 
 	switch kind {
 	case "settle":
-		var events []cactiSettleEvent
-		if err := json.Unmarshal(raw, &events); err != nil {
-			return nil, sinceMs, err
+		var raws []cactiSettleEvent
+		if err := json.Unmarshal(raw, &raws); err != nil {
+			return nil, err
 		}
-		for _, e := range events {
-			proofs = append(proofs, ports.InteroperabilityProof{
-				SourceChain:   e.Spoke,
-				ContractID:    e.ContractID,
-				EventName:     "LogHTLCClaimed",
-				ProofPayload:  []byte(fmt.Sprintf(`{"secret":"%s","txHash":"%s","blockNumber":%d}`, e.Secret, e.TxHash, e.BlockNumber)),
-				CorrelationID: e.TxHash,
+		for _, e := range raws {
+			events = append(events, relayEvent{
+				proof: ports.InteroperabilityProof{
+					SourceChain:   e.Spoke,
+					ContractID:    e.ContractID,
+					EventName:     "LogHTLCClaimed",
+					ProofPayload:  []byte(fmt.Sprintf(`{"secret":"%s","txHash":"%s","blockNumber":%d}`, e.Secret, e.TxHash, e.BlockNumber)),
+					CorrelationID: e.TxHash,
+				},
+				ts: e.Timestamp,
 			})
-			if e.Timestamp > maxTs {
-				maxTs = e.Timestamp
-			}
 		}
 	case "lock":
-		var events []cactiLockEvent
-		if err := json.Unmarshal(raw, &events); err != nil {
-			return nil, sinceMs, err
+		var raws []cactiLockEvent
+		if err := json.Unmarshal(raw, &raws); err != nil {
+			return nil, err
 		}
-		for _, e := range events {
-			proofs = append(proofs, ports.InteroperabilityProof{
-				SourceChain:   e.Spoke,
-				ContractID:    e.ContractID,
-				EventName:     "LogHTLCLocked",
-				HashLock:      e.HashLock,
-				TimeLock:      e.TimeLock,
-				ZetoLockRef:   e.ZetoLockRef,
-				ProofPayload:  []byte(fmt.Sprintf(`{"sender":"%s","receiver":"%s","txHash":"%s","blockNumber":%d}`, e.Sender, e.Receiver, e.TxHash, e.BlockNumber)),
-				CorrelationID: e.TxHash,
+		for _, e := range raws {
+			events = append(events, relayEvent{
+				proof: ports.InteroperabilityProof{
+					SourceChain:   e.Spoke,
+					ContractID:    e.ContractID,
+					EventName:     "LogHTLCLocked",
+					HashLock:      e.HashLock,
+					TimeLock:      e.TimeLock,
+					ZetoLockRef:   e.ZetoLockRef,
+					ProofPayload:  []byte(fmt.Sprintf(`{"sender":"%s","receiver":"%s","txHash":"%s","blockNumber":%d}`, e.Sender, e.Receiver, e.TxHash, e.BlockNumber)),
+					CorrelationID: e.TxHash,
+				},
+				ts: e.Timestamp,
 			})
-			if e.Timestamp > maxTs {
-				maxTs = e.Timestamp
-			}
 		}
 	}
 
-	return proofs, maxTs, nil
+	return events, nil
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

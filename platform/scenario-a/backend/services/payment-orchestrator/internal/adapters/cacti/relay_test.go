@@ -164,6 +164,84 @@ func TestPollEvents_ResumesFromPersistedWatermark(t *testing.T) {
 	}
 }
 
+// TestPollEvents_HaltsWatermarkOnHandlerFailure proves the advance-after-delivery fix
+// (finding R2-H-11): when the handler fails on an event, the poller must NOT advance the
+// watermark past it. The earlier successfully-handled event is persisted; the failing event
+// is re-fetched every tick until it succeeds, never skipped.
+func TestPollEvents_HaltsWatermarkOnHandlerFailure(t *testing.T) {
+	const kind = "settle"
+	const persisted int64 = 1_000
+	const okTs int64 = 2_000  // c1 — handler succeeds
+	const badTs int64 = 3_000 // c2 — handler fails
+
+	// Server returns only events with timestamp >= since (mirrors the real relay filter).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+		var out []string
+		if okTs >= since {
+			out = append(out, fmt.Sprintf(`{"spoke":"spoke-a","contractId":"c1","secret":"s1","blockNumber":1,"txHash":"0x1","timestamp":%d}`, okTs))
+		}
+		if badTs >= since {
+			out = append(out, fmt.Sprintf(`{"spoke":"spoke-a","contractId":"c2","secret":"s2","blockNumber":2,"txHash":"0x2","timestamp":%d}`, badTs))
+		}
+		_, _ = io.WriteString(w, "["+joinCSV(out)+"]")
+	}))
+	defer srv.Close()
+
+	store := newMemWatermarkStore()
+	store.values[kind] = persisted
+
+	relay := NewCactiRelay(srv.URL, "test-secret", store, testLogger())
+	relay.pollInterval = 5 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var mu sync.Mutex
+	badCalls := 0
+	go relay.pollEvents(ctx, kind, func(p ports.InteroperabilityProof) error {
+		if p.ContractID == "c2" {
+			mu.Lock()
+			badCalls++
+			mu.Unlock()
+			return fmt.Errorf("simulated settle failure")
+		}
+		return nil
+	})
+
+	// Let several poll cycles run so the failing event is retried.
+	time.Sleep(150 * time.Millisecond)
+	cancel()
+
+	// The watermark must sit at the last GOOD event (okTs), never past the failed one.
+	last, ok := store.lastSet(kind)
+	if !ok {
+		t.Fatal("watermark was never persisted for the successfully-handled event")
+	}
+	if last != okTs {
+		t.Fatalf("persisted watermark = %d, want %d (must not advance past the failed event)", last, okTs)
+	}
+
+	// The failing event must have been retried, not skipped after the first failure.
+	mu.Lock()
+	got := badCalls
+	mu.Unlock()
+	if got < 2 {
+		t.Fatalf("failing event was retried %d time(s), want >= 2 (must keep retrying)", got)
+	}
+}
+
+func joinCSV(parts []string) string {
+	out := ""
+	for i, p := range parts {
+		if i > 0 {
+			out += ","
+		}
+		out += p
+	}
+	return out
+}
+
 // TestPollEvents_NoStoreFallsBackToNow ensures the poller degrades gracefully
 // when no watermark store is wired (nil): it must not panic and must start from
 // roughly time.Now().

@@ -24,9 +24,13 @@ interface RelayStoreState {
   // instead of starting at the chain head and skipping events mined during
   // downtime (finding R2-H-11).
   watermarks: Record<string, number>;
+  // Small per-spoke strings. Used to record the spoke chain's genesis-block hash so a
+  // chain reset (fresh genesis, stale watermark on the volume) is detected instead of the
+  // relay stalling silently with head below watermark (finding R2-H-11).
+  meta: Record<string, string>;
 }
 
-const DEFAULT_STATE: RelayStoreState = { delivered: {}, retries: [], watermarks: {} };
+const DEFAULT_STATE: RelayStoreState = { delivered: {}, retries: [], watermarks: {}, meta: {} };
 
 export class RelayStore {
   private state: RelayStoreState = { ...DEFAULT_STATE };
@@ -45,6 +49,7 @@ export class RelayStore {
         delivered: parsed.delivered ?? {},
         retries: parsed.retries ?? [],
         watermarks: parsed.watermarks ?? {},
+        meta: parsed.meta ?? {},
       };
       this.log.info(
         `[relay-store] loaded delivered=${Object.keys(this.state.delivered).length} retries=${this.state.retries.length} watermarks=${Object.keys(this.state.watermarks).length}`,
@@ -130,6 +135,34 @@ export class RelayStore {
     await this.persist();
   }
 
+  /** Chain-identity string previously recorded for a spoke (its genesis hash), or undefined. */
+  getMeta(spokeId: string): string | undefined {
+    return this.state.meta[spokeId];
+  }
+
+  /** Record a chain-identity string for a spoke and persist it. */
+  async setMeta(spokeId: string, value: string): Promise<void> {
+    this.state.meta[spokeId] = value;
+    await this.persist();
+  }
+
+  /**
+   * Reset a spoke after a detected chain reset: rewind its watermark to `block`, record the new
+   * genesis hash, and drop that spoke's HTLC dedup keys — both the per-event guard
+   * (`htlc-evt:${spokeId}:`) and the echo guard (`htlc-settled:${spokeId}:`) — since the previous
+   * chain's tx hashes and contract ids are meaningless on the new chain. FX delivered keys and
+   * other spokes are untouched. Persisted atomically (finding R2-H-11).
+   */
+  async resetSpokeChain(spokeId: string, block: number, genesisHash: string): Promise<void> {
+    this.state.watermarks[spokeId] = block;
+    this.state.meta[spokeId] = genesisHash;
+    const prefixes = [`htlc-evt:${spokeId}:`, `htlc-settled:${spokeId}:`];
+    for (const key of Object.keys(this.state.delivered)) {
+      if (prefixes.some((p) => key.startsWith(p))) delete this.state.delivered[key];
+    }
+    await this.persist();
+  }
+
   private computeBackoffMs(attempt: number): number {
     const base = 5_000;
     const max = 5 * 60_000;
@@ -137,6 +170,10 @@ export class RelayStore {
   }
 
   private async persist(): Promise<void> {
-    await fs.writeFile(this.filePath, JSON.stringify(this.state), "utf8");
+    // Atomic write: a torn in-place write would send init() into the empty-state fallback,
+    // wiping the delivered map and retry queue. Write to a temp file then rename (finding R2-H-11).
+    const tmp = `${this.filePath}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(this.state), "utf8");
+    await fs.rename(tmp, this.filePath);
   }
 }

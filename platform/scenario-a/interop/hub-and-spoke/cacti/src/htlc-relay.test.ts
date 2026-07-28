@@ -4,8 +4,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { ethers } from "ethers";
 import { loadSpokesConfig, buildLegacyShim } from "./spokes-config";
 import { HtlcRelay, LockEvent } from "./htlc-relay";
+import { RelayStore } from "./relay-store";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -402,5 +404,150 @@ describe("dynamic spoke lifecycle", () => {
     await relay.addSpoke(spokeA);
     expect(factory).not.toHaveBeenCalled(); // returned early; no connector created
     expect((relay as any).grpcClients.has("spoke-a")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R2-H-11 — HTLC settle path: persisted dedup + restart produces no duplicate settle
+// ---------------------------------------------------------------------------
+
+describe("HTLC settle persistence (R2-H-11)", () => {
+  const CLAIMED_TOPIC = ethers.id("LogHTLCClaimed(bytes32,bytes32)");
+  const CONTRACT_A = "0x" + "aa".repeat(32); // source contractId (spoke-a)
+  const CONTRACT_B = "bb".repeat(32);        // counterpart contractId (spoke-b), stripped form
+  const HASHLOCK = "deadbeef";
+  const TX = "0xtx";
+  const EVENT_BLOCK = 10;
+
+  let dir: string;
+  let file: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "htlc-settle-test-"));
+    file = join(dir, "store.json");
+    // Silence FX REST polling: pollSpoke calls fetch(internalApiUrl); return a benign non-OK.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    vi.unstubAllGlobals();
+  });
+
+  // A decodable LogHTLCClaimed(contractId, secret) log at EVENT_BLOCK.
+  function claimedLog() {
+    const data = ethers.AbiCoder.defaultAbiCoder().encode(["bytes32"], ["0x" + "11".repeat(32)]);
+    return {
+      topics: [CLAIMED_TOPIC, CONTRACT_A],
+      data,
+      blockNumber: EVENT_BLOCK,
+      transactionHash: TX,
+      logIndex: 0,
+    };
+  }
+
+  function fakeConnector() {
+    return {
+      async getBlock(req: { blockHashOrBlockNumber: string | number }) {
+        if (req.blockHashOrBlockNumber === 0) {
+          return { block: { number: 0, hash: "0xgenesis" } };
+        }
+        return { block: { number: EVENT_BLOCK } };
+      },
+      async getPastLogs(args: { topics: unknown }) {
+        const isClaimed = JSON.stringify(args.topics).includes(CLAIMED_TOPIC);
+        return { logs: isClaimed ? [claimedLog()] : [] };
+      },
+      async shutdown() {},
+    };
+  }
+
+  // Build a relay wired with the real store, a fake connector for spoke-a, a mock gRPC client
+  // for spoke-b, and the two counterpart lock events pre-seeded (as an already-running relay
+  // would have observed). Returns the relay and the SettleHTLC call counter.
+  async function makeWiredRelay(store: RelayStore) {
+    const spokes = [
+      { id: "spoke-a", besuRpc: "http://a", besuWs: "ws://a", htlcAddress: "0xaaaa", internalApiUrl: "http://a:18080", grpcEndpoint: "a:1" },
+      { id: "spoke-b", besuRpc: "http://b", besuWs: "ws://b", htlcAddress: "0xbbbb", internalApiUrl: "http://b:28080", grpcEndpoint: "b:1" },
+    ];
+    const connectors = new Map<string, any>([["spoke-a", fakeConnector()]]);
+    const relay = new HtlcRelay(spokes, "/fake/proto", 5, "secret", store as any, connectors);
+    (relay as any).log = { info: () => {}, warn: () => {}, error: () => {} };
+    (relay as any).signal = new AbortController().signal;
+
+    const settleCalls = { n: 0 };
+    const mockClientB = {
+      close: vi.fn(),
+      SettleHTLC: (_req: unknown, _m: unknown, _o: unknown, cb: (e: null, r: { htlc_tx_hash: string; zeto_tx_hash: string }) => void) => {
+        settleCalls.n++;
+        cb(null, { htlc_tx_hash: "0xh", zeto_tx_hash: "0xz" });
+      },
+    };
+    (relay as any).grpcClients.set("spoke-b", mockClientB);
+
+    // Pre-seed the counterpart lock pair so resolveCounterpart succeeds.
+    const lock = (spoke: string, contractId: string): LockEvent => ({
+      spoke, contractId, sender: "0x1", receiver: "0x2", hashLock: HASHLOCK,
+      timeLock: 9999999999, zetoLockRef: "00", blockNumber: 1, txHash: "0xl", timestamp: Date.now(),
+    });
+    (relay as any).lockEvents.push(lock("spoke-a", "aa".repeat(32)));
+    (relay as any).lockEvents.push(lock("spoke-b", CONTRACT_B));
+
+    return { relay, settleCalls };
+  }
+
+  async function waitFor(cond: () => boolean, timeoutMs = 1_500): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (cond()) return true;
+      await new Promise(r => setTimeout(r, 5));
+    }
+    return cond();
+  }
+
+  it("settles once and persists the dedup keys + watermark", async () => {
+    const store = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
+    await store.init();
+    const { relay, settleCalls } = await makeWiredRelay(store);
+
+    const controller = new AbortController();
+    (relay as any).signal = controller.signal;
+    void (relay as any).pollSpoke((relay as any).spokes[0], controller.signal);
+
+    await waitFor(() => settleCalls.n >= 1);
+    controller.abort();
+    await new Promise(r => setTimeout(r, 20));
+
+    expect(settleCalls.n).toBe(1);
+    // Both guards persisted, and the watermark advanced to the processed block.
+    const reloaded = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
+    await reloaded.init();
+    expect(reloaded.hasDelivered(`htlc-evt:spoke-a:${TX}:0`)).toBe(true);
+    expect(reloaded.hasDelivered(`htlc-settled:spoke-b:${CONTRACT_B}`)).toBe(true);
+    expect(reloaded.getWatermark("spoke-a")).toBe(EVENT_BLOCK);
+  });
+
+  it("does NOT re-settle after a restart when the claim was already delivered", async () => {
+    // Simulate a crash AFTER the settle was forwarded (dedup key persisted) but BEFORE the
+    // watermark advanced past the event's block — so the restart re-scans the same block.
+    const seed = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
+    await seed.init();
+    await seed.setWatermark("spoke-a", EVENT_BLOCK - 1); // watermark still behind the event
+    await seed.markDelivered(`htlc-evt:spoke-a:${TX}:0`); // but the event was already delivered
+
+    const store = new RelayStore(file, { info: () => {}, warn: () => {}, error: () => {} });
+    await store.init();
+    const { relay, settleCalls } = await makeWiredRelay(store);
+
+    const controller = new AbortController();
+    (relay as any).signal = controller.signal;
+    void (relay as any).pollSpoke((relay as any).spokes[0], controller.signal);
+
+    // Let several poll cycles run; the event is re-scanned but must be skipped.
+    await new Promise(r => setTimeout(r, 80));
+    controller.abort();
+    await new Promise(r => setTimeout(r, 20));
+
+    expect(settleCalls.n).toBe(0);
   });
 });
