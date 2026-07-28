@@ -13,6 +13,16 @@ spec:
     id: spoke-ars
     chainId: 1339
     currency: ARS
+    # ERC-20 metadata of THIS spoke's own tokens (tCeBM reserve + fCeBM fiat).
+    # Optional: absent, they derive from `currency` — exactly the values below.
+    # Declared explicitly so each sovereign spoke's token is auditable in config
+    # and changing it never requires touching code. Symbols must keep the
+    # "<prefix>_<ISO>" shape: portals and the api-gateway read the currency code
+    # from the segment after the last underscore.
+    tokenName: Tokenized ARS
+    tokenSymbol: tCeBM_ARS
+    fiatTokenName: Fiat ARS
+    fiatTokenSymbol: fCeBM_ARS
   hubBundleRef: ../bundles/hub.bundle.yaml
   # Same corridor BRL <-> ARS. Argentina is the confirmer: when it founds its
   # spoke after Brazil has proposed, its sovereign tail runs confirmPair and the

@@ -164,6 +164,9 @@ func Validate(pd *ParticipantDeployment) Result {
 		validateModeMatrix(pd, &r)
 	}
 
+	// Spoke token metadata overrides, when present.
+	validateSpokeTokens(spec.Mode, spec.Spoke, &r)
+
 	// FR-012: pair (found-spoke only), when present.
 	validatePair(spec.Pair, &r)
 
@@ -302,6 +305,70 @@ func validateNOC(n *NOC, r *Result) {
 // NOCComponentTypes are the component types the noc-agent knows how to probe.
 // Mirrors bundle.NOCComponentTypes (kept local to avoid a manifest→bundle dep).
 var NOCComponentTypes = []string{"BESU", "CACTI_RELAY", "PALADIN"}
+
+// validateSpokeTokens checks the optional per-spoke tCeBM/fCeBM metadata
+// overrides. They are presentation-only: spec.spoke.currency stays the routing
+// key (relay id, hub currency registration, mirrored "W-tCeBM_<ISO>"), so an
+// override must not smuggle a different currency in through the symbol.
+//
+// The "<prefix>_<ISO>" shape is load-bearing, not cosmetic: the api-gateway
+// (currencyCodeFromSymbol) and every portal (currencyFromTokenSymbol) derive the
+// displayed currency code from the segment after the last underscore. A symbol
+// without it degrades the portals to the generic "fiat units" label.
+func validateSpokeTokens(mode string, s *Spoke, r *Result) {
+	if s == nil {
+		return
+	}
+	// Only the founding CB deploys the spoke's tokens; a joining bank consumes
+	// whatever the CB deployed (published in the spoke bundle). Overrides in a join
+	// manifest are inert, so warn instead of silently ignoring them.
+	if mode == ModeJoin && (s.TokenName != "" || s.TokenSymbol != "" || s.FiatTokenName != "" || s.FiatTokenSymbol != "") {
+		r.AddWarning("spec.spoke",
+			"token name/symbol overrides are ignored in mode:join — the founding central bank deploys the spoke's tCeBM/fCeBM; a joining bank consumes the symbols published in the spoke bundle")
+	}
+	validateTokenName("spec.spoke.tokenName", s.TokenName, r)
+	validateTokenName("spec.spoke.fiatTokenName", s.FiatTokenName, r)
+	validateTokenSymbol("spec.spoke.tokenSymbol", s.TokenSymbol, s.Currency, r)
+	validateTokenSymbol("spec.spoke.fiatTokenSymbol", s.FiatTokenSymbol, s.Currency, r)
+}
+
+func validateTokenName(field, name string, r *Result) {
+	if name == "" {
+		return // absent → derived from spec.spoke.currency
+	}
+	if strings.TrimSpace(name) == "" {
+		r.AddError(field, "must not be blank when set; omit the field to derive it from spec.spoke.currency")
+	}
+}
+
+func validateTokenSymbol(field, symbol, currency string, r *Result) {
+	if symbol == "" {
+		return // absent → derived from spec.spoke.currency
+	}
+	if strings.TrimSpace(symbol) != symbol || strings.ContainsAny(symbol, " \t") {
+		r.AddError(field, fmt.Sprintf("invalid value %q; an ERC-20 symbol must not contain whitespace", symbol))
+		return
+	}
+	idx := strings.LastIndex(symbol, "_")
+	if idx < 0 || idx == len(symbol)-1 {
+		r.AddError(field, fmt.Sprintf(
+			"invalid value %q; the symbol must end in \"_<currency>\" (e.g. tCeBM_%s) — portals and the api-gateway derive the displayed currency code from the segment after the last underscore",
+			symbol, orPlaceholder(currency)))
+		return
+	}
+	if code := symbol[idx+1:]; currency != "" && !strings.EqualFold(code, currency) {
+		r.AddError(field, fmt.Sprintf(
+			"invalid value %q; its currency segment %q must match spec.spoke.currency %q — the currency code is the routing key and cannot be overridden by the symbol",
+			symbol, code, currency))
+	}
+}
+
+func orPlaceholder(currency string) string {
+	if currency == "" {
+		return "BRL"
+	}
+	return currency
+}
 
 // validatePair enforces FR-012 when the sovereign pair is present.
 func validatePair(p *Pair, r *Result) {

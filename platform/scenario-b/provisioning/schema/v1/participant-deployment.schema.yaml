@@ -46,6 +46,18 @@ properties:
           id: { type: string, minLength: 1 }
           chainId: { type: integer }
           currency: { type: string }
+          # Overrides opcionais dos metadados ERC-20 dos tokens do spoke. Ausentes,
+          # derivam de `currency`: "Tokenized <ISO>"/"tCeBM_<ISO>" (tCeBM) e
+          # "Fiat <ISO>"/"fCeBM_<ISO>" (fCeBM). O código ISO em `currency` continua
+          # sendo a ÚNICA chave de roteamento (id do relay "spoke-<currency>",
+          # registro de moeda no hub, token espelho "W-tCeBM_<ISO>").
+          # Os símbolos exigem o formato "<prefixo>_<ISO>": portais e api-gateway
+          # derivam a moeda exibida do segmento após o último underscore. A regra
+          # semântica (segmento == currency) é validada no Go (validateSpokeTokens).
+          tokenName: { type: string, minLength: 1 }
+          tokenSymbol: { type: string, pattern: "^[^\\s]+_[^\\s_]+$" }
+          fiatTokenName: { type: string, minLength: 1 }
+          fiatTokenSymbol: { type: string, pattern: "^[^\\s]+_[^\\s_]+$" }
       hubBundleRef: { type: string }
       joinBundleRef: { type: string }
       nocBundleRef: { type: string }

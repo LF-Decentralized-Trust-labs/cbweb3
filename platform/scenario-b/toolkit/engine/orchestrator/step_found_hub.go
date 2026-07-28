@@ -446,9 +446,11 @@ func FoundHubSteps(c HubConfig) []Step {
 					return err
 				}
 				for key, addr := range map[string]string{
-					"HUB_IDENTITY_REGISTRY_ADDRESS":  m["identityRegistry"],
-					"HUB_TOKEN_A_ADDRESS":            m["tCeBM_BRL"], // optional — set later when tCeBM is deployed
-					"HUB_TOKEN_B_ADDRESS":            m["tCeBM_EUR"],
+					"HUB_IDENTITY_REGISTRY_ADDRESS": m["identityRegistry"],
+					// No HUB_TOKEN_A/B_ADDRESS: found-hub deploys no tCeBM (see
+					// CBWeb3Hub.s.sol). Mirrored tokens are created per CB currency
+					// registration ("W-tCeBM_<ISO>") and resolved from the PairRegistry,
+					// so there is no fixed pair of currencies to wire here.
 					"FX_AGREEMENT_CONTRACT_ADDRESS":  m["fxAgreement"],
 					"PAIR_REGISTRY_CONTRACT_ADDRESS": m["pairRegistry"],
 					"CURRENCY_REGISTRY_ADDRESS":      m["currencyRegistry"],
@@ -613,11 +615,10 @@ func hubContractMap(broadcastPath string) (map[string]string, error) {
 			out["identityRegistry"] = d.Address
 		case "TokenizedCentralBankMoney":
 			// Legacy broadcasts only — current CBWeb3Hub.s.sol does not deploy tCeBM.
-			if tcebmSeen == 0 {
-				out["tCeBM_BRL"] = d.Address
-			} else {
-				out["tCeBM_EUR"] = d.Address
-			}
+			// Keyed by deployment order, never by currency: the hub is multi-currency
+			// (one mirrored token per CB registration), so naming these BRL/EUR would
+			// bake a bilateral assumption into the bundle. Nothing consumes them.
+			out[fmt.Sprintf("tCeBM_legacy_%d", tcebmSeen)] = d.Address
 			tcebmSeen++
 		case "FXAgreement":
 			out["fxAgreement"] = d.Address

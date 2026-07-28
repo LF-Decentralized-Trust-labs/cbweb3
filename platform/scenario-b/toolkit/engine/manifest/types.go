@@ -109,10 +109,27 @@ type Hub struct {
 }
 
 // Spoke identifies the spoke network this participant belongs to.
+//
+// Currency is the ISO 4217 code and remains the only routing key (relay id
+// "spoke-<currency>", hub currency registration, mirrored "W-tCeBM_<ISO>").
+// The four token fields are presentation-only overrides for the spoke's own
+// tCeBM/fCeBM ERC-20 metadata; absent, they derive from Currency as
+// "Tokenized <ISO>"/"tCeBM_<ISO>" and "Fiat <ISO>"/"fCeBM_<ISO>".
 type Spoke struct {
 	ID       string `yaml:"id" json:"id"`
 	ChainID  int    `yaml:"chainId" json:"chainId"`
 	Currency string `yaml:"currency" json:"currency"`
+	// TokenName overrides the tCeBM ERC-20 name (default "Tokenized <currency>").
+	TokenName string `yaml:"tokenName,omitempty" json:"tokenName,omitempty"`
+	// TokenSymbol overrides the tCeBM ERC-20 symbol (default "tCeBM_<currency>").
+	// Must keep the "<prefix>_<ISO>" shape: portals and the api-gateway derive the
+	// displayed currency code from the segment after the last underscore.
+	TokenSymbol string `yaml:"tokenSymbol,omitempty" json:"tokenSymbol,omitempty"`
+	// FiatTokenName overrides the fCeBM ERC-20 name (default "Fiat <currency>").
+	FiatTokenName string `yaml:"fiatTokenName,omitempty" json:"fiatTokenName,omitempty"`
+	// FiatTokenSymbol overrides the fCeBM ERC-20 symbol (default "fCeBM_<currency>");
+	// same "<prefix>_<ISO>" constraint as TokenSymbol.
+	FiatTokenSymbol string `yaml:"fiatTokenSymbol,omitempty" json:"fiatTokenSymbol,omitempty"`
 }
 
 // Pair describes the sovereign currency pair (optional, found-spoke).

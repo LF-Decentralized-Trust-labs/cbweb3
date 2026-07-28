@@ -13,6 +13,16 @@ spec:
     id: spoke-brl
     chainId: 1338
     currency: BRL
+    # ERC-20 metadata of THIS spoke's own tokens (tCeBM reserve + fCeBM fiat).
+    # Optional: absent, they derive from `currency` — exactly the values below.
+    # Declared explicitly so each sovereign spoke's token is auditable in config
+    # and changing it never requires touching code. Symbols must keep the
+    # "<prefix>_<ISO>" shape: portals and the api-gateway read the currency code
+    # from the segment after the last underscore.
+    tokenName: Tokenized BRL
+    tokenSymbol: tCeBM_BRL
+    fiatTokenName: Fiat BRL
+    fiatTokenSymbol: fCeBM_BRL
   hubBundleRef: ../bundles/hub.bundle.yaml
   # Sovereign corridor BRL <-> ARS. Brazil is the proposer; Argentina confirms
   # (from its own found-spoke run). The sovereign tail is SOFT: without the local
