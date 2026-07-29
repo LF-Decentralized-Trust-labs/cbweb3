@@ -27,6 +27,7 @@ import {
   fiatCurrencyLabel,
   formatCeBM,
   formatFiatUnits,
+  tokenUnitPrefix,
 } from "../types";
 
 const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.slice(-8)}` : "-");
@@ -67,6 +68,9 @@ export function EscrowsPage() {
   const fCeBMSymbol = usePaymentStore((state) => state.fCeBMSymbol);
   const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const tCeBMSymbol = usePaymentStore((state) => state.tCeBMSymbol);
+  // Instrument names follow the on-chain symbols (custom per spoke).
+  const tCeBMName = tokenUnitPrefix(tCeBMSymbol);
+  const fCeBMName = tokenUnitPrefix(fCeBMSymbol, "fCeBM");
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
   const fDecimals = fCeBMDecimals ?? 18;
@@ -138,7 +142,7 @@ export function EscrowsPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Fiat Reserve Balance (fCeBM)</CardDescription>
+            <CardDescription>Fiat Reserve Balance ({fCeBMName})</CardDescription>
             <CardTitle>
               {fiatBalance !== null ? formatFiatUnits(fiatBalance, fDecimals, fCeBMSymbol) : "—"}
             </CardTitle>
@@ -154,9 +158,9 @@ export function EscrowsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Request Tokenisation (fCeBM → tCeBM)</CardTitle>
+          <CardTitle>Request Tokenisation ({fCeBMName} → {tCeBMName})</CardTitle>
           <CardDescription>
-            Convert your fiat reserve (fCeBM) into tokenised central bank money (tCeBM).
+            Convert your fiat reserve ({fCeBMName}) into tokenised central bank money ({tCeBMName}).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -205,7 +209,7 @@ export function EscrowsPage() {
           <CardHeader>
             <CardTitle>Confirm Tokenisation Request</CardTitle>
             <CardDescription>
-              {formatFiatUnits(amount, fDecimals, fCeBMSymbol)} fCeBM will be submitted to the central bank for conversion to{" "}
+              {formatFiatUnits(amount, fDecimals, fCeBMSymbol)} held as {fCeBMName} will be submitted to the central bank for conversion to{" "}
               {formatCeBM(amount, tDecimals, tCeBMSymbol)}.
             </CardDescription>
           </CardHeader>
@@ -233,8 +237,8 @@ export function EscrowsPage() {
                 <TableHead>Deposit ID</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Burn Tx (fCeBM)</TableHead>
-                <TableHead>Mint Tx (tCeBM)</TableHead>
+                <TableHead>Burn Tx ({fCeBMName})</TableHead>
+                <TableHead>Mint Tx ({tCeBMName})</TableHead>
                 <TableHead>Created At</TableHead>
               </TableRow>
             </TableHeader>
