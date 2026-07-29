@@ -1013,15 +1013,23 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 	// oracle rate) is NOT part of provisioning: it is opened at runtime by each
 	// central bank through its governance portal (POST /api/v2/amm/pairs/propose
 	// + /confirm, /api/v2/amm/liquidity/*, /api/v2/hub/currencies — CB-role, via
-	// Keycloak). spec.pair documents the intended corridor; the toolkit never
-	// holds sovereign signing keys.
+	// Keycloak). The manifest declares no corridor: the toolkit never holds
+	// sovereign signing keys.
 	steps = append(steps, Step{
 		Name: "emit-spoke-bundle",
 		Deps: []string{"deploy-spoke-contracts", "start-besu-spoke"},
-		// Skip only when the on-disk bundle already carries the public endpoints
-		// (AdvertisedHost). A stale localhost / host.docker.internal bundle from an
-		// older toolkit must re-emit so remote banks can dial the CB.
-		Check: func(context.Context) (bool, error) {
+		// Skip only when the on-disk bundle matches the LIVE node: the public
+		// endpoints (AdvertisedHost), the genesis, and the node identity. A stale
+		// localhost / host.docker.internal bundle from an older toolkit must re-emit
+		// so remote banks can dial the CB.
+		//
+		// Endpoints alone are not enough. Re-founding a spoke keeps the same host and
+		// ports but produces a FRESH node key and genesis, and the emitted bundle
+		// lives outside the wiped Docker volumes — so it survives. A joining bank
+		// would then write the previous genesis (different genesis hash ⇒ peering is
+		// impossible) and dial a bootnode that no longer exists, and the only symptom
+		// is wait-sync timing out after 10 minutes at block 0 with no error.
+		Check: func(ctx context.Context) (bool, error) {
 			b, err := bundle.LoadSpoke(filepath.Join(c.OutDir, "bundles", c.SpokeID+".bundle.yaml"))
 			if err != nil {
 				return false, nil
@@ -1030,9 +1038,23 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			if err != nil {
 				return false, nil
 			}
-			return b.SpokeRPC == c.publicSpokeRPC(host) &&
-				b.SpokeWS == c.publicSpokeWS(host) &&
-				b.CBGateway == c.publicCBGateway(host), nil
+			if b.SpokeRPC != c.publicSpokeRPC(host) ||
+				b.SpokeWS != c.publicSpokeWS(host) ||
+				b.CBGateway != c.publicCBGateway(host) {
+				return false, nil
+			}
+			genesisBytes, err := readVolumeFile(ctx, c.Runner, c.genesisVolume(), "genesis.json")
+			if err != nil || len(genesisBytes) == 0 || string(genesisBytes) != b.Genesis {
+				return false, nil // unreadable or diverged → re-emit (safe)
+			}
+			live := capturedEnode
+			if live == "" {
+				if live, err = c.EnodeReader(ctx, c.SpokeRPC); err != nil {
+					return false, nil
+				}
+			}
+			id := enodeNodeID(live)
+			return id != "" && id == enodeNodeID(b.Enode), nil
 		},
 		Run: func(ctx context.Context) error {
 			m, err := spokeContractMap(c.spokeBroadcastPath())
@@ -1088,12 +1110,10 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				// Routable hub RPC (from the hub bundle) so a joining bank reaches the
 				// hub cross-VM (HUB_BESU_RPC_URL) instead of host.docker.internal.
 				HubRPC: hubForBundle.HubRPC,
-				// Sovereign currency + the ERC-20 symbols actually deployed here, so a
-				// joining bank labels balances with the CB's own symbols and the join
-				// can reject a manifest that claims a different currency.
-				Currency:        c.Currency,
-				TokenSymbol:     c.TokenSymbol,
-				FiatTokenSymbol: c.FiatTokenSymbol,
+				// Sovereign currency of this spoke: the join cross-checks it against the
+				// joining bank's manifest so a bank cannot attach to a BRL spoke while
+				// claiming another currency.
+				Currency: c.Currency,
 			}
 			_, err = bundle.EmitSpoke(b, c.OutDir)
 			return err

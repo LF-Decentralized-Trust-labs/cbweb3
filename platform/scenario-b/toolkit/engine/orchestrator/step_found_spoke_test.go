@@ -44,8 +44,8 @@ func testSpokeCfg(t *testing.T, fake *exec.FakeRunner) SpokeConfig {
 	hb := bundle.HubBundle{
 		ChainID: 1337, HubRPC: "http://hub:8545", HubWS: "ws://hub:8546",
 		Contracts: map[string]string{
-			"identityRegistry": "0xh1", "tCeBM_BRL": "0xh2", "tCeBM_EUR": "0xh3",
-			"fxAgreement": "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
+			"identityRegistry": "0xh1",
+			"fxAgreement":      "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
 		},
 	}
 	hp, err := bundle.EmitHub(hb, hubOut)
@@ -89,8 +89,8 @@ func TestRegisterCBSelfRegistersViaHub(t *testing.T) {
 	hp, err := bundle.EmitHub(bundle.HubBundle{
 		ChainID: 1337, HubRPC: "http://hub:8545", HubWS: "ws://hub:8546", HubGateway: srv.URL,
 		Contracts: map[string]string{
-			"identityRegistry": "0xh1", "tCeBM_BRL": "0xh2", "tCeBM_EUR": "0xh3",
-			"fxAgreement": "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
+			"identityRegistry": "0xh1",
+			"fxAgreement":      "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
 		},
 	}, t.TempDir())
 	if err != nil {
@@ -123,8 +123,8 @@ func TestRegisterCBFailsOnHubError(t *testing.T) {
 	hp, _ := bundle.EmitHub(bundle.HubBundle{
 		ChainID: 1337, HubRPC: "http://hub:8545", HubWS: "ws://hub:8546", HubGateway: srv.URL,
 		Contracts: map[string]string{
-			"identityRegistry": "0xh1", "tCeBM_BRL": "0xh2", "tCeBM_EUR": "0xh3",
-			"fxAgreement": "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
+			"identityRegistry": "0xh1",
+			"fxAgreement":      "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
 		},
 	}, t.TempDir())
 	cfg.HubBundlePath = hp
@@ -350,10 +350,9 @@ func TestEmitSpokeBundle(t *testing.T) {
 	}
 }
 
-// R1-10.3: the bundle publishes the spoke's currency + the symbols actually
-// deployed, so a joining bank labels balances with the CB's own symbols and the
-// join can reject a manifest claiming another currency.
-func TestEmitSpokeBundlePublishesCurrencyAndSymbols(t *testing.T) {
+// R1-10.3: the bundle publishes the spoke's sovereign currency so the join can
+// reject a bank manifest claiming another one.
+func TestEmitSpokeBundlePublishesCurrency(t *testing.T) {
 	fake := &exec.FakeRunner{Outputs: map[string][]byte{"docker": []byte(`{"config":{"chainId":1338}}`)}}
 	cfg := testSpokeCfg(t, fake)
 	cfg.Currency = "COP"
@@ -371,9 +370,8 @@ func TestEmitSpokeBundlePublishesCurrencyAndSymbols(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load spoke bundle: %v", err)
 	}
-	if b.Currency != "COP" || b.TokenSymbol != "tCeBM_COP" || b.FiatTokenSymbol != "fCeBM_COP" {
-		t.Fatalf("bundle currency/symbols = %q/%q/%q, want COP/tCeBM_COP/fCeBM_COP",
-			b.Currency, b.TokenSymbol, b.FiatTokenSymbol)
+	if b.Currency != "COP" {
+		t.Fatalf("bundle currency = %q, want COP", b.Currency)
 	}
 }
 
@@ -414,6 +412,69 @@ func TestEmitSpokeBundleCheckRewritesLocalhost(t *testing.T) {
 	if ok {
 		t.Fatal("Check should be false for stale localhost bundle when AdvertisedHost is set")
 	}
+}
+
+// REGRESSION LOCK: a bundle left over from a PREVIOUS founding of the same spoke
+// keeps the same host and ports, so endpoint equality alone would skip re-emission
+// — and a bank joining on that bundle writes the wrong genesis and dials a dead
+// bootnode, never peers, and only fails 10 minutes later in wait-sync. The Check
+// must re-emit whenever the genesis or the node identity diverges from the live node.
+func TestEmitSpokeBundleCheckDetectsRefoundedSpoke(t *testing.T) {
+	emitCurrent := func(t *testing.T) (SpokeConfig, *exec.FakeRunner) {
+		t.Helper()
+		fake := &exec.FakeRunner{Outputs: map[string][]byte{"docker": []byte(`{"config":{"chainId":1338}}`)}}
+		cfg := testSpokeCfg(t, fake)
+		cfg.RPCPort = 8845
+		cfg.WSPort = 8846
+		writeSpokeBroadcast(t, cfg.ContractsDir)
+		steps := FoundSpokeSteps(cfg)
+		if err := findStep(steps, "start-besu-spoke").Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if err := findStep(steps, "emit-spoke-bundle").Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		return cfg, fake
+	}
+
+	t.Run("matching bundle skips", func(t *testing.T) {
+		cfg, _ := emitCurrent(t)
+		ok, err := findStep(FoundSpokeSteps(cfg), "emit-spoke-bundle").Check(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Fatal("Check should be true when the bundle matches the live genesis + enode")
+		}
+	})
+
+	t.Run("re-founded genesis re-emits", func(t *testing.T) {
+		cfg, fake := emitCurrent(t)
+		// The spoke was re-founded: same host/ports, fresh genesis in the volume.
+		fake.Outputs["docker"] = []byte(`{"config":{"chainId":1338},"extraData":"0xfresh"}`)
+		ok, err := findStep(FoundSpokeSteps(cfg), "emit-spoke-bundle").Check(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			t.Fatal("Check must be false when the volume genesis diverges from the bundle")
+		}
+	})
+
+	t.Run("fresh node key re-emits", func(t *testing.T) {
+		cfg, _ := emitCurrent(t)
+		// The spoke was re-founded: same genesis content, but a new node identity.
+		cfg.EnodeReader = func(context.Context, string) (string, error) {
+			return "enode://freshnodekey@spoke:30303", nil
+		}
+		ok, err := findStep(FoundSpokeSteps(cfg), "emit-spoke-bundle").Check(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			t.Fatal("Check must be false when the live node id differs from the bundle enode")
+		}
+	})
 }
 
 // ComposeEnv carries plumbing (images/prefixes/ports/static infra creds) for the

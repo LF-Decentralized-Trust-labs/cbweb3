@@ -46,11 +46,6 @@ type SpokeBundle struct {
 	// the two so a bank cannot attach to a BRL spoke while claiming COP. Empty on
 	// bundles emitted before this field existed → the check is skipped.
 	Currency string `yaml:"currency,omitempty" json:"currency,omitempty"`
-	// TokenSymbol / FiatTokenSymbol are the ERC-20 symbols actually deployed on the
-	// spoke (tCeBM / fCeBM). Published so a joining bank labels balances with the
-	// same symbols the CB deployed instead of recomposing them from the currency.
-	TokenSymbol     string `yaml:"tokenSymbol,omitempty" json:"tokenSymbol,omitempty"`
-	FiatTokenSymbol string `yaml:"fiatTokenSymbol,omitempty" json:"fiatTokenSymbol,omitempty"`
 }
 
 // NOCComponent describes a single monitorable component (a Besu node, a Cacti
