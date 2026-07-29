@@ -127,25 +127,27 @@ func (g *SwapQuoteGenerator) GenerateQuote(ctx context.Context, req QuoteRequest
 		return nil, fmt.Errorf("amount_out %s >= output reserve %s (insufficient liquidity)", req.AmountOut, reserveOut.String())
 	}
 
-	// Calculate amount_in_no_fee: (reserve_in × amount_out) / (reserve_out - amount_out)
+	// R2-H-3: fee-aware exact-output quote as a SINGLE ceiling division, identical to the on-chain
+	// AutomatedMarketMaker.quoteExactOutput / swapTokensForExactTokens charge:
+	//   amount_in = ceil( reserve_in * amount_out * 10000 / ((reserve_out - amount_out) * (10000 - fee_bps)) )
+	// The prior two-step form took the FLOOR of the constant-product input and then grossed up by
+	// (10000 + fee)/10000 — the wrong direction — so the quote could land BELOW the on-chain
+	// charge. A client passing it straight through as max_amount_in would then revert with
+	// AMM__SlippageExceeded. One ceiling rounds up exactly once, in favor of the pool, so the
+	// quoted amount_in is always sufficient.
 	numerator := new(big.Int).Mul(reserveIn, amountOut)
+	numerator.Mul(numerator, big.NewInt(10000))
 	denominator := new(big.Int).Sub(reserveOut, amountOut)
-	amountInNoFee := new(big.Int).Div(numerator, denominator)
+	denominator.Mul(denominator, big.NewInt(int64(10000)-int64(feeBps)))
 
-	// Clamp to minimum 1: integer division can round to 0 when the swap amount is very
-	// small relative to the pool ratio (e.g. reserveA=10000, reserveB=20000, amountOut=1
-	// → numerator=10000 < denominator=19999 → floor=0). A swap always costs at least 1
-	// unit of the input token; this mirrors on-chain getAmountIn behaviour.
-	if amountInNoFee.Sign() == 0 && numerator.Sign() > 0 {
-		amountInNoFee.SetInt64(1)
-	}
+	// ceil(numerator / denominator) = (numerator + denominator - 1) / denominator. Both are > 0:
+	// amount_out < reserve_out was validated above, and fee_bps <= MAX_FEE_BPS (1000) keeps
+	// (10000 - fee_bps) >= 9000.
+	amountInWithFee := new(big.Int).Add(numerator, new(big.Int).Sub(denominator, big.NewInt(1)))
+	amountInWithFee.Div(amountInWithFee, denominator)
 
-	// Add fee: amount_in = amount_in_no_fee × (10000 + fee_bps) / 10000
-	feeMultiplier := big.NewInt(10000 + int64(feeBps))
-	amountInWithFee := new(big.Int).Mul(amountInNoFee, feeMultiplier)
-	amountInWithFee.Div(amountInWithFee, big.NewInt(10000))
-
-	// Ensure amountInWithFee is at least 1 after fee rounding (fee can round 1 → 0).
+	// A swap always costs at least 1 base unit of the input token. The ceiling already guarantees
+	// this for any positive amount_out; this only covers a degenerate amount_out == 0 quote.
 	if amountInWithFee.Sign() == 0 {
 		amountInWithFee.SetInt64(1)
 	}
