@@ -17,6 +17,13 @@ spec:
     id: spoke-brl
     chainId: 1337
     currency: BRL
+    # ERC-20 metadata of this spoke's own fCeBM (the public Besu-layer fiat token).
+    # Optional — absent, both derive from `currency` (exactly the values below).
+    # Declared explicitly so each spoke's token identity is auditable in config.
+    # The symbol must keep the "<prefix>_<ISO>" shape and end in this spoke's own
+    # currency; `currency` stays the semantic key the portals display.
+    fiatTokenName: Fiat BRL
+    fiatTokenSymbol: fCeBM_BRL
   node:
     advertisedHost: cbweb3-spoke-brl-besu.central-bank-brazil
     rpc:
