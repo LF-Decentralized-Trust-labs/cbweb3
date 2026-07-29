@@ -2,3 +2,5 @@
 cbweb3-data/
 bundles/
 .cbweb3b
+.provisioning-state.yaml
+.provisioning.lock

@@ -159,7 +159,8 @@ type cactiSettleEvent struct {
 	Secret      string `json:"secret"`
 	BlockNumber int64  `json:"blockNumber"`
 	TxHash      string `json:"txHash"`
-	Timestamp   int64  `json:"timestamp"` // Unix ms
+	Seq         int64  `json:"seq"`       // durable journal sequence — the resume cursor (R2-H-11)
+	Timestamp   int64  `json:"timestamp"` // Unix ms — informational only, no longer the cursor
 }
 
 // cactiLockEvent matches the JSON returned by GET /api/v1/relay/events/lock.
@@ -173,13 +174,15 @@ type cactiLockEvent struct {
 	ZetoLockRef string `json:"zetoLockRef"`
 	BlockNumber int64  `json:"blockNumber"`
 	TxHash      string `json:"txHash"`
-	Timestamp   int64  `json:"timestamp"` // Unix ms
+	Seq         int64  `json:"seq"`       // durable journal sequence — the resume cursor (R2-H-11)
+	Timestamp   int64  `json:"timestamp"` // Unix ms — informational only, no longer the cursor
 }
 
 func (c *CactiRelay) pollEvents(ctx context.Context, kind string, handler func(ports.InteroperabilityProof) error) {
-	// Track the last seen timestamp to avoid re-delivering events. Resume from the
-	// persisted watermark so events observed while this process was down are not
-	// skipped (finding R2-H-11); fall back to now when no watermark is available.
+	// Track the last processed journal sequence to avoid re-delivering events. The seq is a
+	// durable, restart-stable cursor assigned by the relay (finding R2-H-11): unlike the previous
+	// wall-clock-ms cursor it survives a relay restart and is never regenerated on re-decode, so
+	// this poller's persisted cursor composes exactly with the relay — no re-delivery, no loss.
 	lastSeen := c.loadWatermark(ctx, kind)
 	ticker := time.NewTicker(c.pollInterval)
 	defer ticker.Stop()
@@ -194,21 +197,21 @@ func (c *CactiRelay) pollEvents(ctx context.Context, kind string, handler func(p
 				c.logger.Warn("cacti: poll events error", "kind", kind, "error", err)
 				continue
 			}
-			// Advance the watermark only through events the handler actually processed. On the
-			// first handler failure we stop advancing so the failed event (and everything after
-			// it) is re-fetched on the next tick instead of being skipped forever — the watermark
-			// must mean "delivered", not "fetched" (finding R2-H-11). Events are sorted ascending
-			// so "everything after" is well defined even if the relay returns them out of order.
-			sort.Slice(events, func(i, j int) bool { return events[i].ts < events[j].ts })
+			// Advance the cursor only through events the handler actually processed. On the first
+			// handler failure we stop advancing so the failed event (and everything after it) is
+			// re-fetched on the next tick instead of being skipped forever — the cursor must mean
+			// "delivered", not "fetched" (finding R2-H-11). Events are sorted by seq so "everything
+			// after" is well defined even if the relay returns them out of order.
+			sort.Slice(events, func(i, j int) bool { return events[i].seq < events[j].seq })
 			advanced := false
 			for _, e := range events {
 				if err := handler(e.proof); err != nil {
-					c.logger.Error("cacti: event handler error; halting watermark advance for retry",
+					c.logger.Error("cacti: event handler error; halting cursor advance for retry",
 						"kind", kind, "contractId", e.proof.ContractID, "error", err)
 					break
 				}
-				if e.ts > lastSeen {
-					lastSeen = e.ts
+				if e.seq > lastSeen {
+					lastSeen = e.seq
 					advanced = true
 				}
 			}
@@ -219,48 +222,55 @@ func (c *CactiRelay) pollEvents(ctx context.Context, kind string, handler func(p
 	}
 }
 
-// loadWatermark returns the resume cursor for kind: the persisted watermark when
-// one exists, otherwise the current time (preserving the historical behaviour when
-// no store is wired or nothing has been recorded yet).
+// watermarkStoreKey namespaces the persisted cursor by cursor version. The cursor is now a
+// durable journal sequence (finding R2-H-11), not the wall-clock ms used previously; the ":seq"
+// suffix ensures a stale ms watermark left by an older process is never misread as a sequence
+// (which, being ~1.7e12, would skip the entire journal and silently stall the poller).
+func watermarkStoreKey(kind string) string { return kind + ":seq" }
+
+// loadWatermark returns the resume sequence for kind: the persisted seq when one exists,
+// otherwise 0 (start of the journal). There is no time.Now() fallback as with the old ms cursor —
+// the relay journal is durable and bounded, so seq 0 replays only what it still holds, once.
 func (c *CactiRelay) loadWatermark(ctx context.Context, kind string) int64 {
 	if c.watermarks == nil {
-		return time.Now().UnixMilli()
+		return 0
 	}
-	value, found, err := c.watermarks.GetWatermark(ctx, kind)
+	value, found, err := c.watermarks.GetWatermark(ctx, watermarkStoreKey(kind))
 	if err != nil {
-		c.logger.Warn("cacti: watermark load failed; starting from now", "kind", kind, "error", err)
-		return time.Now().UnixMilli()
+		c.logger.Warn("cacti: watermark load failed; starting from journal head (seq 0)", "kind", kind, "error", err)
+		return 0
 	}
 	if !found {
-		return time.Now().UnixMilli()
+		return 0
 	}
-	c.logger.Info("cacti: resuming from persisted watermark", "kind", kind, "sinceMs", value)
+	c.logger.Info("cacti: resuming from persisted seq", "kind", kind, "sinceSeq", value)
 	return value
 }
 
-// saveWatermark persists the latest processed cursor for kind. Failures are logged
-// but not fatal: a lost write only risks re-delivering already-handled events on the
-// next restart, which downstream dedup absorbs.
+// saveWatermark persists the latest processed sequence for kind. Failures are logged but not
+// fatal: a lost write only risks re-delivering already-handled events on the next restart, which
+// the downstream own-echo/idempotency checks absorb.
 func (c *CactiRelay) saveWatermark(ctx context.Context, kind string, value int64) {
 	if c.watermarks == nil {
 		return
 	}
-	if err := c.watermarks.SetWatermark(ctx, kind, value); err != nil {
-		c.logger.Warn("cacti: watermark persist failed", "kind", kind, "sinceMs", value, "error", err)
+	if err := c.watermarks.SetWatermark(ctx, watermarkStoreKey(kind), value); err != nil {
+		c.logger.Warn("cacti: watermark persist failed", "kind", kind, "sinceSeq", value, "error", err)
 	}
 }
 
-// relayEvent pairs a converted proof with the timestamp the relay assigned it, so the poller can
-// advance its watermark to exactly the last successfully-handled event (finding R2-H-11).
+// relayEvent pairs a converted proof with the journal seq the relay assigned it, so the poller can
+// advance its cursor to exactly the last successfully-handled event (finding R2-H-11).
 type relayEvent struct {
 	proof ports.InteroperabilityProof
-	ts    int64
+	seq   int64
 }
 
-// fetchEvents retrieves events from the Cacti service newer than sinceMs.
-// Returns each converted proof paired with its timestamp, and any error.
-func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceMs int64) ([]relayEvent, error) {
-	url := fmt.Sprintf("%s/api/v1/relay/events/%s?since=%d", c.baseURL, kind, sinceMs+1)
+// fetchEvents retrieves events from the Cacti service with a journal seq greater than sinceSeq.
+// Returns each converted proof paired with its seq, and any error.
+func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceSeq int64) ([]relayEvent, error) {
+	// The relay filters seq strictly greater than `since`, so pass the cursor as-is (no +1).
+	url := fmt.Sprintf("%s/api/v1/relay/events/%s?since=%d", c.baseURL, kind, sinceSeq)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -300,7 +310,7 @@ func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceMs int64
 					ProofPayload:  []byte(fmt.Sprintf(`{"secret":"%s","txHash":"%s","blockNumber":%d}`, e.Secret, e.TxHash, e.BlockNumber)),
 					CorrelationID: e.TxHash,
 				},
-				ts: e.Timestamp,
+				seq: e.Seq,
 			})
 		}
 	case "lock":
@@ -320,7 +330,7 @@ func (c *CactiRelay) fetchEvents(ctx context.Context, kind string, sinceMs int64
 					ProofPayload:  []byte(fmt.Sprintf(`{"sender":"%s","receiver":"%s","txHash":"%s","blockNumber":%d}`, e.Sender, e.Receiver, e.TxHash, e.BlockNumber)),
 					CorrelationID: e.TxHash,
 				},
-				ts: e.Timestamp,
+				seq: e.Seq,
 			})
 		}
 	}

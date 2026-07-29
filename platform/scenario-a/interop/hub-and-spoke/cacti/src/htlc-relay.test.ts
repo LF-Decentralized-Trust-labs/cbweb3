@@ -21,6 +21,8 @@ function makeMockRelayStore() {
     scheduleRetry: vi.fn().mockResolvedValue(undefined),
     getRetryStats: vi.fn().mockReturnValue({ pending: 0, maxLagMs: 0 }),
     init: vi.fn().mockResolvedValue(undefined),
+    appendEvent: vi.fn().mockResolvedValue(1),
+    getEventsSince: vi.fn().mockReturnValue([]),
   };
 }
 

@@ -133,3 +133,82 @@ describe("RelayStore block watermark (R2-H-11)", () => {
     expect(store.getMeta("spoke-a")).toBeUndefined();
   });
 });
+
+// The durable seq journal is the fix for finding 6 (cursor composition): the Go poller cursors on
+// a stable seq that survives a relay restart, instead of a wall-clock ms regenerated on re-decode.
+describe("RelayStore event journal (R2-H-11 cursor composition)", () => {
+  let dir: string;
+  let file: string;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "relay-journal-test-"));
+    file = path.join(dir, "store.json");
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("assigns a monotonic seq shared across kinds and serves events with seq > since", async () => {
+    const store = new RelayStore(file, silentLog);
+    await store.init();
+
+    const s1 = await store.appendEvent("settle", "spoke-a:0x1:0", { contractId: "c1" });
+    const l1 = await store.appendEvent("lock", "spoke-a:0x2:0", { contractId: "c2" });
+    const s2 = await store.appendEvent("settle", "spoke-a:0x3:0", { contractId: "c3" });
+    expect([s1, l1, s2]).toEqual([1, 2, 3]); // one monotonic counter across both kinds
+
+    // getEventsSince(0) returns everything of that kind, in seq order, each carrying its seq.
+    const settles = store.getEventsSince("settle", 0);
+    expect(settles.map((e) => e["seq"])).toEqual([1, 3]);
+    expect(settles.map((e) => e["contractId"])).toEqual(["c1", "c3"]);
+
+    // A cursor past the first settle only yields the later one.
+    expect(store.getEventsSince("settle", 1).map((e) => e["seq"])).toEqual([3]);
+    expect(store.getEventsSince("settle", 3)).toEqual([]);
+  });
+
+  it("dedups by chain identity: a re-decoded event keeps its original seq and is not duplicated", async () => {
+    const store = new RelayStore(file, silentLog);
+    await store.init();
+
+    const first = await store.appendEvent("settle", "spoke-a:0xtx:0", { contractId: "c1" });
+    const again = await store.appendEvent("settle", "spoke-a:0xtx:0", { contractId: "c1" });
+    expect(again).toBe(first); // same seq — this is what suppresses re-delivery after restart
+
+    // Only one entry exists, and a fresh event still gets the NEXT seq (no seq reuse).
+    expect(store.getEventsSince("settle", 0)).toHaveLength(1);
+    const next = await store.appendEvent("settle", "spoke-a:0xtx:1", { contractId: "c2" });
+    expect(next).toBe(first + 1);
+  });
+
+  it("survives a restart: journal entries and the seq counter persist", async () => {
+    const first = new RelayStore(file, silentLog);
+    await first.init();
+    await first.appendEvent("settle", "spoke-a:0xtx:0", { contractId: "c1" });
+
+    // Restart: a fresh instance reading the same file must resume the seq counter (not reuse 1)
+    // and still serve the persisted event.
+    const second = new RelayStore(file, silentLog);
+    await second.init();
+    expect(second.getEventsSince("settle", 0).map((e) => e["seq"])).toEqual([1]);
+    const next = await second.appendEvent("settle", "spoke-a:0xother:0", { contractId: "c2" });
+    expect(next).toBe(2); // monotonic across the restart — no collision with the persisted seq
+  });
+
+  it("resumes the seq counter past a legacy journal that has entries but no seq counter", async () => {
+    // A hand-rolled file whose journal has a max seq of 7 but no top-level `seq` field.
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        delivered: {}, retries: [], watermarks: {}, meta: {},
+        journal: { lock: [], settle: [{ seq: 7, id: "spoke-a:0x9:0", event: { contractId: "c9", seq: 7 } }] },
+      }),
+      "utf8",
+    );
+    const store = new RelayStore(file, silentLog);
+    await store.init();
+    const next = await store.appendEvent("settle", "spoke-a:0xnew:0", { contractId: "cN" });
+    expect(next).toBe(8); // resumes at maxSeq+1, never reissuing 7
+  });
+});

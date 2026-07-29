@@ -264,7 +264,9 @@ const MAX_EVENTS = 10_000;
 const MAX_BLOCK_RANGE = 5_000;
 
 export class HtlcRelay {
-  private readonly settleEvents: SettleEvent[] = [];
+  // Lock events are also kept in a small in-memory ring purely for resolveCounterpart's
+  // same-process hashLock lookup. The durable, seq-numbered copy served to the Go poller lives
+  // in the RelayStore journal (finding R2-H-11) — this ring is not the serving source of truth.
   private readonly lockEvents: LockEvent[] = [];
   private readonly fxProposalEvents: FXProposalEvent[] = [];
   private readonly fxAcceptanceEvents: FXAcceptanceEvent[] = [];
@@ -304,12 +306,16 @@ export class HtlcRelay {
 
   // ── Public accessors (used by REST API) ────────────────────────────────
 
-  getSettleEvents(sinceMs = 0): SettleEvent[] {
-    return this.settleEvents.filter((e) => e.timestamp >= sinceMs);
+  // Lock/settle events are served from the durable seq journal, not the in-memory ring: the
+  // caller (Go poller) passes the last seq it processed and receives events with a greater seq.
+  // The seq is stable across relay restarts, so the poller's persisted cursor composes exactly
+  // with the relay and never re-delivers or loses events (finding R2-H-11).
+  getSettleEvents(sinceSeq = 0): Record<string, unknown>[] {
+    return this.relayStore.getEventsSince("settle", sinceSeq);
   }
 
-  getLockEvents(sinceMs = 0): LockEvent[] {
-    return this.lockEvents.filter((e) => e.timestamp >= sinceMs);
+  getLockEvents(sinceSeq = 0): Record<string, unknown>[] {
+    return this.relayStore.getEventsSince("lock", sinceSeq);
   }
 
   getFXProposalEvents(sinceMs = 0): FXProposalEvent[] {
@@ -477,6 +483,7 @@ export class HtlcRelay {
           try {
             const parsed = iface.parseLog({ topics: raw.topics, data: raw.data });
             if (!parsed) continue;
+            const logIndex = Number((raw as unknown as Record<string, unknown>)["logIndex"] ?? 0);
             const evt: LockEvent = {
               spoke: spoke.id,
               contractId: strip0x(parsed.args[0] as string),
@@ -489,7 +496,14 @@ export class HtlcRelay {
               txHash: raw.transactionHash,
               timestamp: Date.now(),
             };
+            // Ring for resolveCounterpart's in-process lookup; journal (deduped by chain id) is the
+            // durable, seq-stable copy served to the Go poller (finding R2-H-11).
             pushRing(this.lockEvents, evt, MAX_EVENTS);
+            await this.relayStore.appendEvent(
+              "lock",
+              `${spoke.id}:${raw.transactionHash}:${logIndex}`,
+              evt as unknown as Record<string, unknown>,
+            );
             this.log.info(
               `[${spoke.id}] LogHTLCLocked contractId=${evt.contractId} block=${evt.blockNumber}`,
             );
@@ -517,7 +531,13 @@ export class HtlcRelay {
               txHash: raw.transactionHash,
               timestamp: Date.now(),
             };
-            pushRing(this.settleEvents, evt, MAX_EVENTS);
+            // Durable, seq-stable journal entry served to the Go poller (deduped by chain id so a
+            // re-decode after restart reuses the same seq — no re-delivery) (finding R2-H-11).
+            await this.relayStore.appendEvent(
+              "settle",
+              `${spoke.id}:${raw.transactionHash}:${logIndex}`,
+              evt as unknown as Record<string, unknown>,
+            );
             this.log.info(
               `[${spoke.id}] LogHTLCClaimed contractId=${contractId} block=${raw.blockNumber} tx=${raw.transactionHash}`,
             );

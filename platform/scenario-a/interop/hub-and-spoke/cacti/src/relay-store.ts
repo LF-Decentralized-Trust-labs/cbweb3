@@ -17,6 +17,18 @@ export interface RelayRetryItem {
   updatedAt: number;
 }
 
+/** A durable, sequenced record of one served relay event (finding R2-H-11 — cursor composition). */
+export interface JournalEntry {
+  /** Monotonic, gap-tolerant sequence assigned once by the relay and never reused. */
+  seq: number;
+  /** Stable chain identity `${spoke}:${txHash}:${logIndex}` — dedup key across re-decodes. */
+  id: string;
+  /** The event payload served over REST (shape defined by the relay accessor). */
+  event: Record<string, unknown>;
+}
+
+export type JournalKind = "lock" | "settle";
+
 interface RelayStoreState {
   delivered: Record<string, number>;
   retries: RelayRetryItem[];
@@ -28,12 +40,28 @@ interface RelayStoreState {
   // chain reset (fresh genesis, stale watermark on the volume) is detected instead of the
   // relay stalling silently with head below watermark (finding R2-H-11).
   meta: Record<string, string>;
+  // Durable, monotonically-sequenced journal of lock/settle events served to the Go poller.
+  // Replaces the old in-memory ring + wall-clock-ms cursor whose coordinates did not survive a
+  // relay restart: on re-decode the ring reassigned fresh timestamps (duplicate delivery) and a
+  // dropped ring lost events below the block watermark (silent loss). The journal gives each
+  // event a stable seq (assigned once, deduped by chain id) that survives restart, so the Go
+  // poller's persisted seq composes exactly with the relay (finding R2-H-11, cursor composition).
+  journal: { lock: JournalEntry[]; settle: JournalEntry[] };
+  // Next sequence to assign. Monotonic across restarts (never reset except on a fresh store).
+  seq: number;
 }
 
-const DEFAULT_STATE: RelayStoreState = { delivered: {}, retries: [], watermarks: {}, meta: {} };
+/** Fresh empty state. A factory — NOT a shared literal — so instances never alias each other's maps/arrays. */
+function emptyState(): RelayStoreState {
+  return { delivered: {}, retries: [], watermarks: {}, meta: {}, journal: { lock: [], settle: [] }, seq: 1 };
+}
+
+/** Max journal entries retained per kind. Older entries are trimmed; a consumer lagging beyond
+ * this many events would miss the trimmed tail (logged when it happens). */
+const MAX_JOURNAL = 10_000;
 
 export class RelayStore {
-  private state: RelayStoreState = { ...DEFAULT_STATE };
+  private state: RelayStoreState = emptyState();
 
   constructor(
     private readonly filePath: string,
@@ -44,19 +72,24 @@ export class RelayStore {
     try {
       await fs.mkdir(path.dirname(this.filePath), { recursive: true });
       const raw = await fs.readFile(this.filePath, "utf8");
-      const parsed = JSON.parse(raw) as RelayStoreState;
+      const parsed = JSON.parse(raw) as Partial<RelayStoreState>;
+      const journal = parsed.journal ?? { lock: [], settle: [] };
       this.state = {
         delivered: parsed.delivered ?? {},
         retries: parsed.retries ?? [],
         watermarks: parsed.watermarks ?? {},
         meta: parsed.meta ?? {},
+        journal: { lock: journal.lock ?? [], settle: journal.settle ?? [] },
+        // Resume seq monotonically. On a legacy file (no seq) start past whatever the journal
+        // already holds so a reused seq can never collide with a delivered one.
+        seq: parsed.seq ?? (maxSeq(journal.lock) > maxSeq(journal.settle) ? maxSeq(journal.lock) : maxSeq(journal.settle)) + 1,
       };
       this.log.info(
-        `[relay-store] loaded delivered=${Object.keys(this.state.delivered).length} retries=${this.state.retries.length} watermarks=${Object.keys(this.state.watermarks).length}`,
+        `[relay-store] loaded delivered=${Object.keys(this.state.delivered).length} retries=${this.state.retries.length} watermarks=${Object.keys(this.state.watermarks).length} journal=${this.state.journal.lock.length}+${this.state.journal.settle.length} nextSeq=${this.state.seq}`,
       );
     } catch (err) {
       this.log.warn(`[relay-store] starting with empty state: ${String(err)}`);
-      this.state = { ...DEFAULT_STATE };
+      this.state = emptyState();
       await this.persist();
     }
   }
@@ -163,6 +196,42 @@ export class RelayStore {
     await this.persist();
   }
 
+  /**
+   * Append an observed lock/settle event to the durable journal and return the seq assigned to it.
+   * Idempotent by chain identity `id`: if the same event was already journaled (e.g. re-decoded
+   * after a restart), returns the existing seq WITHOUT appending a duplicate — this is what lets
+   * the Go poller's persisted seq suppress re-delivery (finding R2-H-11). Persisted atomically.
+   */
+  async appendEvent(kind: JournalKind, id: string, event: Record<string, unknown>): Promise<number> {
+    const entries = this.state.journal[kind];
+    const existing = entries.find((e) => e.id === id);
+    if (existing) {
+      return existing.seq;
+    }
+    const seq = this.state.seq++;
+    entries.push({ seq, id, event: { ...event, seq } });
+    if (entries.length > MAX_JOURNAL) {
+      const dropped = entries.splice(0, entries.length - MAX_JOURNAL);
+      this.log.warn(
+        `[relay-store] journal '${kind}' trimmed ${dropped.length} oldest entries (cap ${MAX_JOURNAL}); a consumer lagging past this will miss them`,
+      );
+    }
+    await this.persist();
+    return seq;
+  }
+
+  /**
+   * Return journaled events of a kind with seq strictly greater than sinceSeq, in seq order.
+   * The returned payloads carry their `seq` so the consumer can advance its cursor. Read-only,
+   * synchronous (serves the REST poll off in-memory state).
+   */
+  getEventsSince(kind: JournalKind, sinceSeq: number): Record<string, unknown>[] {
+    return this.state.journal[kind]
+      .filter((e) => e.seq > sinceSeq)
+      .sort((a, b) => a.seq - b.seq)
+      .map((e) => e.event);
+  }
+
   private computeBackoffMs(attempt: number): number {
     const base = 5_000;
     const max = 5 * 60_000;
@@ -176,4 +245,13 @@ export class RelayStore {
     await fs.writeFile(tmp, JSON.stringify(this.state), "utf8");
     await fs.rename(tmp, this.filePath);
   }
+}
+
+/** Highest seq present in a journal slice (0 when empty). Used to resume seq on a legacy file. */
+function maxSeq(entries: JournalEntry[] | undefined): number {
+  let m = 0;
+  for (const e of entries ?? []) {
+    if (e.seq > m) m = e.seq;
+  }
+  return m;
 }

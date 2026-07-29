@@ -136,6 +136,7 @@ cat <<'EOF'
   (Cooperative Liquidity wizard) or the v2 API to propose/confirm the pair and add
   liquidity — CB-role, authenticated, no raw keys:
     POST /api/v2/amm/pairs/propose · /api/v2/amm/pairs/confirm
-    POST /api/v2/amm/liquidity/add
+    POST /api/v2/amm/liquidity/deposit-side  (each CB, its own side)
+    POST /api/v2/amm/liquidity/finalize      (funds both reserves atomically)
   (currencies are listable at GET /api/v2/hub/currencies)
 EOF

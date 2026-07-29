@@ -57,16 +57,17 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// TestPollEvents_ResumesFromPersistedWatermark proves the finding R2-H-11 fix:
-// on (re)start the poller must query the relay using the persisted cursor+1,
-// not time.Now(), so events observed during downtime are not skipped. It must
-// also persist the newest observed timestamp so a later restart resumes again.
-func TestPollEvents_ResumesFromPersistedWatermark(t *testing.T) {
+// TestPollEvents_ResumesFromPersistedSeq proves the finding R2-H-11 fix:
+// on (re)start the poller must query the relay using the persisted journal seq (not time.Now()),
+// so events observed during downtime are not skipped, and must persist the newest seq it handled
+// so a later restart resumes again. The cursor is a durable seq — the relay filters seq > since,
+// so the poller passes the cursor as-is (no +1).
+func TestPollEvents_ResumesFromPersistedSeq(t *testing.T) {
 	const kind = "settle"
-	// Watermark persisted before the (simulated) restart. An event at
-	// eventTs > persisted arrived while the poller was down.
+	// Seq persisted before the (simulated) restart. An event with a higher seq was journaled
+	// while the poller was down.
 	const persisted int64 = 1_000
-	const eventTs int64 = 5_000
+	const eventSeq int64 = 5_000
 
 	var (
 		mu        sync.Mutex
@@ -81,12 +82,12 @@ func TestPollEvents_ResumesFromPersistedWatermark(t *testing.T) {
 		sinceSeen = append(sinceSeen, since)
 		mu.Unlock()
 
-		// Deliver the event only when the poller asks for a window that includes it.
-		if since <= eventTs {
+		// The relay serves events with seq strictly greater than `since`.
+		if since < eventSeq {
 			once.Do(func() { close(firstDelivered) })
 			_, _ = io.WriteString(w, fmt.Sprintf(
-				`[{"spoke":"spoke-a","contractId":"c1","secret":"s1","blockNumber":42,"txHash":"0xabc","timestamp":%d}]`,
-				eventTs,
+				`[{"spoke":"spoke-a","contractId":"c1","secret":"s1","blockNumber":42,"txHash":"0xabc","seq":%d}]`,
+				eventSeq,
 			))
 			return
 		}
@@ -95,7 +96,7 @@ func TestPollEvents_ResumesFromPersistedWatermark(t *testing.T) {
 	defer srv.Close()
 
 	store := newMemWatermarkStore()
-	store.values[kind] = persisted // simulate state left by the previous process
+	store.values[watermarkStoreKey(kind)] = persisted // simulate state left by the previous process
 
 	relay := NewCactiRelay(srv.URL, "test-secret", store, testLogger())
 	relay.pollInterval = 5 * time.Millisecond
@@ -128,13 +129,11 @@ func TestPollEvents_ResumesFromPersistedWatermark(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("handler was never invoked for the downtime event")
 	}
-	// Give the loop a moment to persist the watermark after handling.
+	// Give the loop a moment to persist the cursor after handling.
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 
-	// 1) The very first request must resume from the persisted cursor (+1),
-	//    NOT from a fresh time.Now() (which would be far larger than persisted+1
-	//    and would have skipped the event).
+	// 1) The very first request must resume from the persisted seq exactly (no +1, no time.Now()).
 	mu.Lock()
 	if len(sinceSeen) == 0 {
 		mu.Unlock()
@@ -142,8 +141,8 @@ func TestPollEvents_ResumesFromPersistedWatermark(t *testing.T) {
 	}
 	first := sinceSeen[0]
 	mu.Unlock()
-	if first != persisted+1 {
-		t.Fatalf("first poll used since=%d, want %d (persisted watermark + 1)", first, persisted+1)
+	if first != persisted {
+		t.Fatalf("first poll used since=%d, want %d (persisted seq)", first, persisted)
 	}
 
 	// 2) The downtime event must have been delivered.
@@ -154,13 +153,13 @@ func TestPollEvents_ResumesFromPersistedWatermark(t *testing.T) {
 		t.Fatal("downtime event was lost — handler never received it")
 	}
 
-	// 3) The newest observed timestamp must be persisted for the next restart.
-	last, ok := store.lastSet(kind)
+	// 3) The newest handled seq must be persisted (under the versioned key) for the next restart.
+	last, ok := store.lastSet(watermarkStoreKey(kind))
 	if !ok {
-		t.Fatal("watermark was never persisted")
+		t.Fatal("cursor was never persisted")
 	}
-	if last != eventTs {
-		t.Fatalf("persisted watermark = %d, want %d (newest event timestamp)", last, eventTs)
+	if last != eventSeq {
+		t.Fatalf("persisted seq = %d, want %d (newest event seq)", last, eventSeq)
 	}
 }
 
@@ -171,25 +170,25 @@ func TestPollEvents_ResumesFromPersistedWatermark(t *testing.T) {
 func TestPollEvents_HaltsWatermarkOnHandlerFailure(t *testing.T) {
 	const kind = "settle"
 	const persisted int64 = 1_000
-	const okTs int64 = 2_000  // c1 — handler succeeds
-	const badTs int64 = 3_000 // c2 — handler fails
+	const okSeq int64 = 2_000  // c1 — handler succeeds
+	const badSeq int64 = 3_000 // c2 — handler fails
 
-	// Server returns only events with timestamp >= since (mirrors the real relay filter).
+	// Server returns events with seq strictly greater than since (mirrors the real relay filter).
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 		var out []string
-		if okTs >= since {
-			out = append(out, fmt.Sprintf(`{"spoke":"spoke-a","contractId":"c1","secret":"s1","blockNumber":1,"txHash":"0x1","timestamp":%d}`, okTs))
+		if okSeq > since {
+			out = append(out, fmt.Sprintf(`{"spoke":"spoke-a","contractId":"c1","secret":"s1","blockNumber":1,"txHash":"0x1","seq":%d}`, okSeq))
 		}
-		if badTs >= since {
-			out = append(out, fmt.Sprintf(`{"spoke":"spoke-a","contractId":"c2","secret":"s2","blockNumber":2,"txHash":"0x2","timestamp":%d}`, badTs))
+		if badSeq > since {
+			out = append(out, fmt.Sprintf(`{"spoke":"spoke-a","contractId":"c2","secret":"s2","blockNumber":2,"txHash":"0x2","seq":%d}`, badSeq))
 		}
 		_, _ = io.WriteString(w, "["+joinCSV(out)+"]")
 	}))
 	defer srv.Close()
 
 	store := newMemWatermarkStore()
-	store.values[kind] = persisted
+	store.values[watermarkStoreKey(kind)] = persisted
 
 	relay := NewCactiRelay(srv.URL, "test-secret", store, testLogger())
 	relay.pollInterval = 5 * time.Millisecond
@@ -213,13 +212,13 @@ func TestPollEvents_HaltsWatermarkOnHandlerFailure(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	cancel()
 
-	// The watermark must sit at the last GOOD event (okTs), never past the failed one.
-	last, ok := store.lastSet(kind)
+	// The cursor must sit at the last GOOD event (okSeq), never past the failed one.
+	last, ok := store.lastSet(watermarkStoreKey(kind))
 	if !ok {
-		t.Fatal("watermark was never persisted for the successfully-handled event")
+		t.Fatal("cursor was never persisted for the successfully-handled event")
 	}
-	if last != okTs {
-		t.Fatalf("persisted watermark = %d, want %d (must not advance past the failed event)", last, okTs)
+	if last != okSeq {
+		t.Fatalf("persisted seq = %d, want %d (must not advance past the failed event)", last, okSeq)
 	}
 
 	// The failing event must have been retried, not skipped after the first failure.
@@ -242,10 +241,11 @@ func joinCSV(parts []string) string {
 	return out
 }
 
-// TestPollEvents_NoStoreFallsBackToNow ensures the poller degrades gracefully
-// when no watermark store is wired (nil): it must not panic and must start from
-// roughly time.Now().
-func TestPollEvents_NoStoreFallsBackToNow(t *testing.T) {
+// TestPollEvents_NoStoreStartsAtJournalHead ensures the poller degrades gracefully when no
+// watermark store is wired (nil): it must not panic and must start from seq 0 (the journal head).
+// Unlike the old ms cursor there is no time.Now() fallback — the durable, bounded journal makes
+// seq 0 a safe "give me what you still hold" resume.
+func TestPollEvents_NoStoreStartsAtJournalHead(t *testing.T) {
 	var gotSince int64 = -1
 	done := make(chan struct{})
 	var once sync.Once
@@ -273,9 +273,7 @@ func TestPollEvents_NoStoreFallsBackToNow(t *testing.T) {
 	}
 	cancel()
 
-	nowMs := time.Now().UnixMilli()
-	// since = lastSeen+1 ≈ now; allow a generous window.
-	if gotSince < nowMs-60_000 || gotSince > nowMs+5_000 {
-		t.Fatalf("nil-store poll since=%d not near now=%d", gotSince, nowMs)
+	if gotSince != 0 {
+		t.Fatalf("nil-store poll since=%d, want 0 (journal head)", gotSince)
 	}
 }
