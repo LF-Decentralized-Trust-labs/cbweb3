@@ -32,6 +32,11 @@ services:
       # so both scenarios coexist on one host).
       HUB_BESU_RPC: "${HUB_BESU_RPC:-http://host.docker.internal:33845}"
       LCR_WATCHER_START_BLOCK: "${LCR_WATCHER_START_BLOCK:-0}"
+      # Durable path for the watcher's block watermark + delivered-event set. MUST live on the
+      # /data volume: on the ephemeral default (/tmp) a rebuild recreates the container, the
+      # watermark is lost, and the watcher rescans from block 0 re-forwarding every historical
+      # CommitMatched (duplicate liquidity execution — finding R2-H-11).
+      LCR_WATCHER_STORE_PATH: "${LCR_WATCHER_STORE_PATH:-/data/lcr-watcher-store.json}"
       # Cross-currency bridge-out (TK-B5): destination resolved per request by
       # lookup of `spoke_out` in the dynamic registry — no fixed CB_B_GATEWAY_URL.
       # Before forwarding, the relay reads isPaused() on-chain on `amm_address`.

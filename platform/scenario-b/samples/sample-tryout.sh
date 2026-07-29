@@ -5,10 +5,11 @@
 # corridor lifecycle and a full cross-currency SWAP (bridge-in → AMM → bridge-out):
 #   login (CBs + a commercial bank) → verify registered currencies → open the
 #   BRL↔ARS corridor (the hub deploys the sovereign AMM + registers the pair) →
-#   central bank adds cooperative liquidity → wait pool ACTIVE → register the ARS
-#   beneficiary at its CB → the commercial bank runs an end-to-end cross-currency
-#   swap: CB-A relayer mints W-BRL (bridge-in), the sovereign AMM swaps to W-ARS,
-#   and CB-B's relayer burns W-ARS (bridge-out) for the beneficiary.
+#   each central bank deposits its own side of liquidity → finalize → wait pool
+#   ACTIVE → bank-itau tokenises reserves (deposit → escrow → CB approve = tCeBM) →
+#   the commercial bank runs an end-to-end cross-currency swap: CB-A relayer mints
+#   W-BRL (bridge-in, backed by the tokenised reserves), the sovereign AMM swaps to
+#   W-ARS, and CB-B's relayer burns W-ARS (bridge-out) for the beneficiary.
 #
 # Everything resolves the sovereign AMM DYNAMICALLY per pool_pair from the
 # on-chain PairRegistry, so a corridor opened at runtime works with no config.
@@ -176,18 +177,23 @@ AMM=$(printf '%s' "$BODY" | jget amm_address)
 ok "corridor $POOL ready (amm=$AMM already_registered=$(printf '%s' "$BODY" | jget already_registered))"
 
 # ═══════════════════════════════ LIQUIDITY ══════════════════════════════════════
-# In this local sample the central bank issues both sovereign W-tokens, so it
-# seeds both sides of the pool. mint-and-approve + addLiquidity resolve the pair's
-# tokens + AMM dynamically from pool_pair.
-step "Central bank seeds cooperative liquidity into $POOL (both sides)"
-for side in A B; do
-  call POST "$BR_CB/api/v2/amm/token/mint-and-approve" "$BR_TOK" \
-    "{\"pool_pair\":\"$POOL\",\"amount\":\"$LIQ\",\"side\":\"$side\"}"
-  ok "minted + approved side $side ($LIQ)"
-done
-call POST "$BR_CB/api/v2/amm/liquidity/add" "$BR_TOK" \
-  "{\"pool_pair\":\"$POOL\",\"provider_bank_id\":\"central-bank\",\"token_a_amount\":\"$LIQ\",\"token_b_amount\":\"$LIQ\"}"
-ok "liquidity added (lp_id=$(printf '%s' "$BODY" | jget lp_id))"
+# Sovereign escrow-and-finalize seeding: each central bank deposits ONLY its own side
+# of the pool, then a single finalize funds both reserves atomically. This replaces the
+# legacy dual-sided /liquidity/add (removed — one CB seeding both sides breached
+# sovereignty). deposit-side mints + approves the caller CB's own W-token internally and
+# resolves the side on-chain from pool_pair, so no separate mint-and-approve step is needed.
+step "Each central bank sovereignly deposits its own side into $POOL"
+call POST "$BR_CB/api/v2/amm/liquidity/deposit-side" "$BR_TOK" \
+  "{\"pool_pair\":\"$POOL\",\"amount\":\"$LIQ\"}"
+ok "Brazil CB deposited side $(printf '%s' "$BODY" | jget side) ($LIQ)"
+call POST "$AR_CB/api/v2/amm/liquidity/deposit-side" "$AR_TOK" \
+  "{\"pool_pair\":\"$POOL\",\"amount\":\"$LIQ\"}"
+ok "Argentina CB deposited side $(printf '%s' "$BODY" | jget side) ($LIQ)"
+
+step "Finalize the pool once both sides are escrowed (funds reserves atomically)"
+call POST "$BR_CB/api/v2/amm/liquidity/finalize" "$BR_TOK" \
+  "{\"pool_pair\":\"$POOL\"}"
+ok "liquidity finalized (shares_a=$(printf '%s' "$BODY" | jget shares_a) shares_b=$(printf '%s' "$BODY" | jget shares_b))"
 
 step "Wait for the pool to be ACTIVE"
 ST=""
@@ -200,6 +206,39 @@ done
 [[ $ST == ACTIVE ]] || die "pool $POOL not ACTIVE (status=$ST)"
 call GET "$BR_CB/api/v2/amm/pool/$POOL/status" "$BR_TOK"
 ok "pool ACTIVE — reserves A=$(printf '%s' "$BODY" | jget reserve_a) B=$(printf '%s' "$BODY" | jget reserve_b)"
+
+# ═══════════════════════════ RESERVE TOKENISATION ═══════════════════════════════
+# The cross-currency bridge-in locks the payer bank's tCeBM to back the minted W-token
+# — it does NOT mint tCeBM on the fly (reserve backing is enforced). So bank-itau must
+# hold >= max_amount_in tCeBM_${CUR_A} BEFORE swapping. It gets there via the escrow
+# flow, all amounts 1:1 (18-decimal wei) and approvals synchronous:
+#   deposit fiat (bank) → CB approves = mint fCeBM → request escrow (bank) → CB approves
+#   = burn fCeBM + mint tCeBM. Steps run on the bank gateway (ITAU) and are approved on
+#   the central bank gateway (BR_CB governance operator).
+step "bank-itau tokenises reserves — register a fiat deposit ($CC_MAX_IN)"
+call POST "$ITAU/api/v1/payments/deposits" "$ITAU_TOK" "{\"amount\":\"$CC_MAX_IN\"}"
+DEP_ID=$(printf '%s' "$BODY" | jget deposit_id)
+[[ -n $DEP_ID ]] || die "no deposit_id in response: $BODY"
+ok "deposit registered (deposit_id=$DEP_ID)"
+
+call POST "$BR_CB/api/v1/payments/deposits/approve" "$BR_TOK" "{\"deposit_id\":\"$DEP_ID\"}"
+ok "Brazil CB approved the deposit — fCeBM minted (tx=$(printf '%s' "$BODY" | jget fiat_mint_tx_hash))"
+
+step "bank-itau escrows the fCeBM for tokenisation, and the CB approves (burn fCeBM → mint tCeBM)"
+call POST "$ITAU/api/v1/payments/escrows" "$ITAU_TOK" "{\"deposit_id\":\"$DEP_ID\",\"amount\":\"$CC_MAX_IN\"}"
+ESC_ID=$(printf '%s' "$BODY" | jget escrow_id)
+[[ -n $ESC_ID ]] || die "no escrow_id in response: $BODY"
+ok "escrow requested (escrow_id=$ESC_ID)"
+
+call POST "$BR_CB/api/v1/payments/escrows/approve" "$BR_TOK" "{\"escrow_id\":\"$ESC_ID\"}"
+ok "Brazil CB approved the escrow — tCeBM minted (burn=$(printf '%s' "$BODY" | jget burn_tx_hash) mint=$(printf '%s' "$BODY" | jget mint_tx_hash))"
+
+step "Verify bank-itau now holds enough tCeBM_${CUR_A} to back the bridge-in"
+call GET "$ITAU/api/v1/token/balance" "$ITAU_TOK"
+BAL=$(printf '%s' "$BODY" | jget balance)
+python3 -c "import sys; sys.exit(0 if int('${BAL:-0}') >= int('$CC_MAX_IN') else 1)" \
+  || die "bank-itau tCeBM balance $BAL < required $CC_MAX_IN — reserve tokenisation did not settle"
+ok "bank-itau holds $BAL $(printf '%s' "$BODY" | jget symbol) (>= $CC_MAX_IN required)"
 
 # ═══════════════════════════ CROSS-CURRENCY SWAP (BRIDGE) ════════════════════════
 # The full lifecycle, orchestrated by bank-itau's gateway:
