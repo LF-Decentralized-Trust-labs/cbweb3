@@ -61,7 +61,7 @@ type stubSwapVerifier struct {
 	calls int
 }
 
-func (s *stubSwapVerifier) VerifySwap(_ context.Context, _ string) (*handlers.VerifiedSwap, error) {
+func (s *stubSwapVerifier) VerifySwap(_ context.Context, _ string, _ string) (*handlers.VerifiedSwap, error) {
 	s.calls++
 	return s.swap, s.err
 }

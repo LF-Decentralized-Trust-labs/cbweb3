@@ -84,6 +84,51 @@ type Spec struct {
 	// grant) instead of the confidential client credentials, so audit logs carry a
 	// real actor. Required (one per role the entity hosts).
 	AdminUsers []AdminUser `yaml:"adminUsers"`
+	// Launcher controls the per-entity "launcher" SPA on this entity's host (the
+	// distributed A/B entry point). "enable" runs the generic launcher image (if not
+	// already up) and writes this scenario's portal fragment; "disable" removes the
+	// fragment and tears the launcher down when no scenario fragment remains. Empty
+	// (absent) is treated as "disable".
+	Launcher string `yaml:"launcher,omitempty"`
+	// LauncherPort is the host port this entity's launcher is published on. One
+	// launcher per host, so each entity on a shared host declares a distinct port
+	// (both scenarios of the same entity use the same port and share one launcher).
+	// Optional: 0/absent falls back to the LAUNCHER_PORT env, then 5190.
+	LauncherPort int `yaml:"launcherPort,omitempty"`
+	// NOCBundleRef is required in mode:observe, forbidden otherwise. It points at
+	// the NOC bundle emitted by a central bank's found describing the monitoring
+	// topology this NOC deployment consumes.
+	NOCBundleRef string `yaml:"nocBundleRef,omitempty"`
+	// NOC is the optional NOC observability block. In observe it tunes the NOC
+	// deployment; in found/join it configures this entity's noc-agent.
+	NOC *NOC `yaml:"noc,omitempty"`
+	// Proxy controls the per-host reverse proxy (Caddy) that fronts this entity's
+	// portals + api-gateway on port 80 with path-based routing (/<scenario>/<role>/,
+	// /<scenario>/api/), so nothing is reached by port. "enable" runs the generic proxy
+	// image (if not already up), writes this scenario's route fragment and reloads;
+	// "disable" removes the fragment and tears the proxy down when no fragment remains.
+	// Empty (absent) is treated as "disable". When enabled, the entity's portal SPAs are
+	// built base-path-aware and their api/CORS/launcher URLs point at spec.frontendHost.
+	Proxy string `yaml:"proxy,omitempty"`
+}
+
+// NOC configures the NOC observability integration. Optional in every mode and
+// never carries secrets. In observe it tunes the NOC deployment that consumes the
+// referenced bundle; in found/join it configures this entity's noc-agent.
+type NOC struct {
+	// BackendURL is the noc-backend this entity's agent pushes to. Empty falls
+	// back to the local single-host convention (host.docker.internal:<port>).
+	BackendURL string `yaml:"backendURL,omitempty"`
+	// KeycloakURL is the routable Keycloak the NOC portal password-grants against
+	// (the co-located CB realm). Baked as the portal's VITE_KEYCLOAK_URL.
+	KeycloakURL string `yaml:"keycloakURL,omitempty"`
+	// LauncherURL is baked as the portal's VITE_LAUNCHER_URL (back-to-launcher).
+	LauncherURL string `yaml:"launcherURL,omitempty"`
+	// PushIntervalSeconds overrides the agent push cadence (default 15).
+	PushIntervalSeconds int `yaml:"pushIntervalSeconds,omitempty"`
+	// Components optionally filters the monitored component set by type
+	// (BESU, PALADIN, CACTI_RELAY). Empty means "all components in the bundle".
+	Components []string `yaml:"components,omitempty"`
 }
 
 // AdminUser is a per-role operator account created in the entity's Keycloak realm.

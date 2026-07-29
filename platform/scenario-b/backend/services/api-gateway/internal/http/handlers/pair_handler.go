@@ -32,10 +32,14 @@ func (h *PairHandler) ProposePair(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
+	// amm_address is optional: when omitted, the service deploys a dedicated,
+	// per-pair AMM bound to (token_a, token_b). Supplying a shared/bootstrap AMM
+	// mis-binds the pool and makes add-liquidity revert, so the portal no longer
+	// pre-fills it.
 	if req.PairID == "" || req.TokenAAddress == "" || req.TokenBAddress == "" ||
-		req.AMMAddress == "" || req.ProposerCB == "" {
+		req.ProposerCB == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "pair_id, token_a_address, token_b_address, amm_address, proposer_cb are required",
+			"error": "pair_id, token_a_address, token_b_address, proposer_cb are required",
 		})
 	}
 

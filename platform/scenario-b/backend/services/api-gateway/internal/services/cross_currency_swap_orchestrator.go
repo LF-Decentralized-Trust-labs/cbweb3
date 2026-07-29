@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
@@ -134,6 +135,20 @@ type CrossCurrencySwapOrchestrator struct {
 	hubSignerAddress string
 	// transferLimitChecker enforces configurable CB daily transfer limits (R1-10.1).
 	transferLimitChecker TransferLimitCheckerIface
+	// ammAddrResolver resolves a pool_pair to its on-chain AMM address (dynamic
+	// per-pair model). Step 3 sends it to the Cacti relay so the relay can read
+	// isPaused() on the correct AMM for its circuit-breaker gate.
+	ammAddrResolver AMMAddressResolver
+}
+
+// AMMAddressResolver resolves a pool_pair (e.g. "W-BRL-W-ARS") to the on-chain
+// address of its dedicated AMM, via the PairRegistry. Implemented in the app layer
+// over the shared per-pair resolver.
+type AMMAddressResolver interface {
+	AMMAddressFor(ctx context.Context, poolPair string) (string, error)
+	// OutputIsTokenA reports whether buying targetCurrency on poolPair outputs the
+	// pair's TOKEN_A, so Step 2 can swap in either direction over one sovereign pair.
+	OutputIsTokenA(ctx context.Context, poolPair, targetCurrency string) (bool, error)
 }
 
 // NewCrossCurrencySwapOrchestrator creates an orchestrator.
@@ -183,6 +198,13 @@ func (o *CrossCurrencySwapOrchestrator) WithBridgeInRelay(relay BridgeInRelayIfa
 // where to burn from (CB-B has CENTRAL_BANK_ROLE = can burn from any address).
 func (o *CrossCurrencySwapOrchestrator) WithHubSignerAddress(addr string) *CrossCurrencySwapOrchestrator {
 	o.hubSignerAddress = addr
+	return o
+}
+
+// WithAMMAddressResolver attaches the per-pair AMM address resolver so Step 3 can
+// tell the Cacti relay which AMM to run its isPaused() circuit-breaker gate against.
+func (o *CrossCurrencySwapOrchestrator) WithAMMAddressResolver(r AMMAddressResolver) *CrossCurrencySwapOrchestrator {
+	o.ammAddrResolver = r
 	return o
 }
 
@@ -290,13 +312,16 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		req.CorrelationID, req.SourceCurrency, req.SourceCurrency)
 	_ = o.swapRepo.UpdateStatus(ctx, req.SwapID, domain.SwapStatusBridgeInProgress)
 
-	spokeIn := "spoke-a"
+	// Source spoke is derived from the source currency (symmetric to spokeOut below):
+	// "spoke-<currency>" is the convention the toolkit registers per spoke, so this
+	// generalizes to any sovereign spoke (N currencies) with no BRL/ARS hardcode.
+	spokeIn := "spoke-" + strings.ToLower(req.SourceCurrency)
 	nativeAsset := req.SourceCurrency
 	mirroredAsset := "W-" + req.SourceCurrency
 	if o.bridgeAssets != nil {
-		if o.bridgeAssets.SpokeInNetwork != "" {
-			spokeIn = o.bridgeAssets.SpokeInNetwork
-		}
+		// Local (non-sovereign) dev path may pin the native/wrapped source token
+		// addresses. The sovereign path ignores these (the issuing CB resolves its own
+		// tokens from its per-CB config) and only needs spokeIn, derived above.
 		if o.bridgeAssets.NativeSourceToken != "" {
 			nativeAsset = o.bridgeAssets.NativeSourceToken
 		}
@@ -365,12 +390,26 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		req.CorrelationID, req.SourceCurrency, req.TargetCurrency)
 	_ = o.swapRepo.UpdateStatus(ctx, req.SwapID, domain.SwapStatusSwapInProgress)
 
+	// Resolve the swap direction from the requested target currency vs the pair's
+	// token orientation, so a single sovereign pair serves both directions (e.g. the
+	// BRL↔COP pair handles both BRL→COP and COP→BRL). Defaults to A→B when unresolved.
+	outputIsTokenA := false
+	if o.ammAddrResolver != nil {
+		if isA, dErr := o.ammAddrResolver.OutputIsTokenA(ctx, req.PoolPair, req.TargetCurrency); dErr == nil {
+			outputIsTokenA = isA
+		} else {
+			log.Printf("[correlation_id=%s] WARNING: could not resolve swap direction for pool %s target %s: %v (defaulting A→B)",
+				req.CorrelationID, req.PoolPair, req.TargetCurrency, dErr)
+		}
+	}
+
 	swapReq := SwapRequest{
-		Pair:          req.PoolPair,
-		AmountOut:     req.AmountOut,
-		MaxAmountIn:   req.MaxAmountIn,
-		PayerID:       req.PayerBankID,
-		BeneficiaryID: req.BeneficiaryBankID,
+		Pair:           req.PoolPair,
+		AmountOut:      req.AmountOut,
+		MaxAmountIn:    req.MaxAmountIn,
+		PayerID:        req.PayerBankID,
+		BeneficiaryID:  req.BeneficiaryBankID,
+		OutputIsTokenA: outputIsTokenA,
 	}
 	swapResult, err := o.swapService.Execute(ctx, swapReq)
 	if err != nil {
@@ -433,11 +472,24 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		req.CorrelationID, req.TargetCurrency, req.TargetCurrency)
 	_ = o.swapRepo.UpdateStatus(ctx, req.SwapID, domain.SwapStatusBridgeOutProgress)
 
-	spokeOut := "spoke-b"
+	// Dynamic per-pair model: the beneficiary spoke id follows the "spoke-<currency>"
+	// convention (spoke-brl, spoke-ars, spoke-cop) the toolkit registers in the relay.
+	spokeOut := "spoke-" + strings.ToLower(req.TargetCurrency)
 	var bridgeOutPositionID string
 
 	if o.cactiRelay != nil {
 		// ── Path A: sovereign model via Cacti relay ──────────────────────────
+		// Resolve the pair's on-chain AMM (dynamic per-pair model) so the relay can
+		// run its isPaused() circuit-breaker gate against the correct AMM. Best-effort:
+		// on failure the field is empty and the relay fails safe (refuses the burn).
+		ammAddr := ""
+		if o.ammAddrResolver != nil {
+			if a, aErr := o.ammAddrResolver.AMMAddressFor(ctx, req.PoolPair); aErr == nil {
+				ammAddr = a
+			} else {
+				log.Printf("[correlation_id=%s] WARNING: could not resolve AMM address for pool %s: %v", req.CorrelationID, req.PoolPair, aErr)
+			}
+		}
 		relayReq := CactiCrossCurrencyBridgeOutRequest{
 			CorrelationID:     req.CorrelationID,
 			SwapTxHash:        swapResult.TxHash,
@@ -445,6 +497,7 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			AmountOut:         req.AmountOut,
 			BeneficiaryBankID: req.BeneficiaryBankID,
 			SpokeOut:          spokeOut,
+			AmmAddress:        ammAddr,
 			// WrappedTargetToken is informational; CB-B uses its own configured address.
 			WrappedTargetToken: func() string {
 				if o.bridgeAssets != nil {

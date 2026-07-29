@@ -233,9 +233,42 @@ cbweb3-platform/
 ├── tests/                  Test harnesses (unit, integration, e2e, performance)
 ├── docs/                   Architecture, design, governance, runbooks
 ├── make/                   Makefile includes (modular targets)
+├── toolkit/                Declarative provisioning toolkit (Go: cmd/cbweb3b + engine/manifest)
+├── provisioning/           Provisioning assets (schema/v1 JSON-Schema)
 ├── tryouts/                Per-entity tryout scripts
 └── tryout-htlc-cross-spoke.sh  Cross-spoke HTLC demo
 ```
+
+---
+
+## Toolkit (provisioning)
+
+Declarative provisioning toolkit for the Scenario B hub-and-spoke topology.
+
+| Component | Status |
+|-----------|--------|
+| Manifest schema & validation (`ParticipantDeployment`, `cbweb3b/v1`) — TK-B1 | In progress |
+| Custody boundaries: `KeyProvider` (`kms://`) + `CertSource` (`self-signed`/`ca://`) — TK-B2/B3 | In progress |
+| Parametrized compose templates (hub, entity-besu, entity-*, relay, NOC) under `provisioning/templates/` + validation — TK-B4 | In progress |
+| Generalized relay (dynamic N-spokes, runtime registration, `isPaused` gate) + `RelayRegistrar` (`relay://`) — TK-B5 | In progress |
+| Orchestration engine + `found-hub` steps + hub bundle + `apply` CLI — TK-B6 | In progress |
+| `found-spoke` mode (register-cb + spoke contracts + Keycloak + register-relay-spoke + soft add-noc-agent) + spoke bundle emitter — TK-B7 | In progress |
+| `join` mode (non-validating full node: write-genesis + wait-sync + gen-csr; canonical flow, no relay/noc) — TK-B8 | In progress |
+| Sovereign-pair tail (open-sovereign-pair + commit-liquidity + seed-oracle; soft, driven by spec.pair, strict sovereignty) — TK-B9 | In progress |
+| Full-pipeline E2E (swap + breaker + SpokeBridge) + toolkit-native perf baseline + E2E-STATUS — TK-B10 | In progress |
+| Production CertSource/KeyProvider (KMS/CA), auth-per-CB relay, threshold-gated baseline | Planned |
+
+The manifest model and validation are the toolkit's entry point: parse + validate +
+report only, no execution. The custody boundaries provide per-entity blockchain keys and the
+CB-as-CA leaf issuance, with local in-memory implementations and production stubs behind URI
+factories; no private key material ever enters a manifest, state file, or bundle. See
+`toolkit/README.md` for usage.
+
+**Runtime dependency justification (Technology Stack Constraints):** the toolkit module adds
+`github.com/ethereum/go-ethereum` (v1.17.1, already standard across the repository). It is
+required by the `KeyProvider` for **secp256k1** key handling and EVM address derivation — the
+curve used to sign Besu/QBFT transactions, which is outside the Go standard library's
+`crypto/ecdsa`.
 
 ---
 

@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+# Scenario B — NOC (Network Operations Center) for spoke-brl, co-located on the
+# same host as central-bank-brazil.
+#
+# Consumes the NOC bundle emitted by central-bank-brazil's found-spoke and stands
+# up the full NOC control plane (Postgres + noc-backend on :8090 + noc-portal on
+# :3030) in its own docker network. It runs NO on-chain node.
+#
+# Login: the portal password-grants against central-bank-brazil's spoke Keycloak
+# realm (http://localhost:40645 = spoke RPC 33645 + 7000) with the noc-portal
+# client and the NOC_ADMIN user provisioned by that CB's found-spoke
+# (admin@brasil.noc.gov — added to central-bank-brazil.yaml for this reason).
+#
+# Single-host scope: the NOC backend/portal ports (8090/3030) are fixed (one NOC
+# per host), so these samples stand up ONE NOC (Brazil). A per-spoke NOC for the
+# hub/Argentina needs another host (see deploy-lnet/) or per-entity NOC ports.
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: noc-brazil
+spec:
+  scenario: "b"
+  environment: local
+  mode: observe
+  topology:
+    role: noc
+  displayName: NOC — spoke-brl
+  # NOC bundle emitted by central-bank-brazil's found-spoke under samples/bundles/
+  # (deploy-all.sh runs found with --out-dir samples). Resolved relative to this file.
+  nocBundleRef: ../bundles/spoke-brl.noc.bundle.yaml
+  noc:
+    pushIntervalSeconds: 15
+    components: [BESU, CACTI_RELAY]
+    # Portal auth (baked into the SPA): central-bank-brazil's Keycloak realm
+    # (RPC 33645 + 7000 = 40645) and the CB's launcher (back-to-launcher target).
+    keycloakURL: http://localhost:40645
+    launcherURL: http://localhost:5191
+  frontendHost: localhost
+  # Schema requires at least one operator account. The working login is actually
+  # provisioned by central-bank-brazil's found-spoke (this observe run does not
+  # provision Keycloak); this entry mirrors that same NOC_ADMIN user.
+  adminUsers:
+    - { role: NOC_ADMIN, username: admin@brasil.noc.gov, password: brasil-noc-local }

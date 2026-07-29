@@ -1,0 +1,37 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: bank-bradesco
+spec:
+  scenario: "b"
+  environment: local
+  mode: join
+  topology:
+    role: commercial-bank
+  bankId: bank-bradesco
+  displayName: "Bradesco"
+  spoke:
+    id: spoke-brl
+    chainId: 1338
+    currency: BRL
+  joinBundleRef: ../bundles/spoke-brl.bundle.yaml
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 33647 }
+    ws:   { port: 33657 }
+    p2p:  { port: 56305 }
+    dataDir: cbweb3-data/bank-bradesco
+    validator: false
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: ca://central-bank-brazil
+  relay:
+    endpoint: http://localhost:7000
+  frontendHost: localhost
+  launcher: enable
+  launcherPort: 5193
+  adminUsers:
+    - { role: BANK, username: admin@bradesco.brasil.com, password: bradesco-bank-local }
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

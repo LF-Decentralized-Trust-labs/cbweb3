@@ -16,7 +16,7 @@ type stubReader struct {
 func (s stubReader) GetPoolReserves(_ context.Context, _ string) (string, string, float64, error) {
 	return s.a, s.b, s.ratio, nil
 }
-func (s stubReader) GetFeeBps(_ context.Context) (uint64, error) { return 30, nil }
+func (s stubReader) GetFeeBps(_ context.Context, _ string) (uint64, error) { return 30, nil }
 
 type stubCounterpart struct {
 	cp *CounterpartCommit

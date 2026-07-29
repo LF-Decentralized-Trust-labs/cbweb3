@@ -17,23 +17,31 @@ import (
 	"time"
 )
 
+// paladinPeerGRPCPort is the fixed in-container Paladin gRPC transport port. It is
+// the port every node publishes on-chain (dns:///<node>:9000), so cross-host peers
+// dial it directly — hence a routable CB must expose it on the host as 9000:9000
+// (not the per-spoke rpcPort+2 band, which is only for host-side access).
+const paladinPeerGRPCPort = 9000
+
 type startPaladinStep struct {
 	spokeID        string
 	dataDir        string
 	composePath    string
 	paladinCBURL   string
 	paladinImage   string
+	advertisedHost string // CB routable host; when routable, gRPC is exposed on 9000
 	healthTimeout  time.Duration
 	healthInterval time.Duration
 }
 
-func newStartPaladinStep(spokeID, dataDir, composePath, paladinCBURL, paladinImage string, healthTimeout, healthInterval time.Duration) Step {
+func newStartPaladinStep(spokeID, dataDir, composePath, paladinCBURL, paladinImage, advertisedHost string, healthTimeout, healthInterval time.Duration) Step {
 	return &startPaladinStep{
 		spokeID:        spokeID,
 		dataDir:        dataDir,
 		composePath:    composePath,
 		paladinCBURL:   paladinCBURL,
 		paladinImage:   paladinImage,
+		advertisedHost: advertisedHost,
 		healthTimeout:  healthTimeout,
 		healthInterval: healthInterval,
 	}
@@ -85,13 +93,23 @@ func (s *startPaladinStep) composeEnv() []string {
 	// deterministic and unique per spoke (the RPC port is per-spoke). Internal
 	// container ports (8548/8549/9000) are fixed by the template.
 	rpcPort := paladinHostPort(s.paladinCBURL, 31648)
+	// Single-host peers reach the CB Paladin by container name over the shared
+	// spoke network on the container port 9000, so the host-published gRPC port is
+	// vestigial and stays in the per-spoke rpcPort+2 band (collision-free when
+	// several spokes share one host). A routable CB (multi-VM), however, is dialed
+	// by joining banks at the on-chain endpoint dns:///paladin-<spoke>-cb:9000, so
+	// it must publish that exact port on its routable host.
+	grpcHostPort := rpcPort + 2
+	if isRoutableHost(s.advertisedHost) {
+		grpcHostPort = paladinPeerGRPCPort
+	}
 	return append(os.Environ(),
 		"SPOKE_ID="+s.spokeID,
 		"SPOKE_DATA_DIR="+s.dataDir,
 		"PALADIN_IMAGE="+image,
 		"PALADIN_CB_RPC_PORT="+strconv.Itoa(rpcPort),
 		"PALADIN_CB_WS_PORT="+strconv.Itoa(rpcPort+1),
-		"PALADIN_CB_GRPC_PORT="+strconv.Itoa(rpcPort+2),
+		"PALADIN_CB_GRPC_PORT="+strconv.Itoa(grpcHostPort),
 		// The Paladin nodes attach to the external Besu network created by the
 		// central-bank Besu compose (default name cbweb3-<spoke>-besu).
 		"SPOKE_NETWORK_NAME=cbweb3-"+s.spokeID+"-besu",

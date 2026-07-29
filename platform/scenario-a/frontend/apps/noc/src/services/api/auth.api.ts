@@ -4,7 +4,7 @@ import type { LoginResponse, SysAdminUser } from "../../types";
 
 const KEYCLOAK_URL = import.meta.env.VITE_KEYCLOAK_URL ?? "http://localhost:8080";
 const REALM = import.meta.env.VITE_KEYCLOAK_REALM ?? "cbweb3";
-const CLIENT_ID = import.meta.env.VITE_KEYCLOAK_CLIENT_ID ?? "noc-portal";
+const CLIENT_ID = import.meta.env.VITE_KEYCLOAK_CLIENT_ID ?? "cbweb3-noc";
 
 function parseJwtPayload(token: string): Record<string, unknown> {
   try {

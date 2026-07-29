@@ -26,10 +26,17 @@ type AgentConfig struct {
 	Components          []ComponentConfig `yaml:"components"`
 }
 
-// Load reads and validates the agent.yaml at the given path.
+// Load reads and validates the agent.yaml at the given path. When the file is
+// absent it falls back to environment variables (the toolkit's parametrized deploy
+// wires the agent per entity via env, with no per-entity agent.yaml to render/mount).
 func Load(path string) (*AgentConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			if cfg, ok := loadFromEnv(); ok {
+				return cfg, nil
+			}
+		}
 		return nil, fmt.Errorf("config: reading %s: %w", path, err)
 	}
 
@@ -52,6 +59,36 @@ func Load(path string) (*AgentConfig, error) {
 	}
 
 	return &cfg, nil
+}
+
+// loadFromEnv builds the agent config from environment variables, used when no
+// agent.yaml is mounted (toolkit deploy). SpokeID/backend/api_key are required; a
+// single BESU component is derived from BESU_RPC_URL when present.
+func loadFromEnv() (*AgentConfig, bool) {
+	spoke := os.Getenv("AGENT_ENTITY")
+	if spoke == "" {
+		spoke = os.Getenv("AGENT_SPOKE_ID")
+	}
+	backend := os.Getenv("NOC_BACKEND_URL")
+	apiKey := os.Getenv("AGENT_API_KEY")
+	if spoke == "" || backend == "" || apiKey == "" {
+		return nil, false
+	}
+	cfg := &AgentConfig{
+		SpokeID:             spoke,
+		NocBackendURL:       backend,
+		APIKey:              apiKey,
+		PushIntervalSeconds: 15,
+	}
+	if besu := os.Getenv("BESU_RPC_URL"); besu != "" {
+		cfg.Components = append(cfg.Components, ComponentConfig{
+			Name:          "besu",
+			Type:          "BESU",
+			Endpoint:      besu,
+			ContainerName: os.Getenv("AGENT_BESU_CONTAINER"),
+		})
+	}
+	return cfg, true
 }
 
 // ConfigPath returns the path to agent.yaml from the AGENT_CONFIG_PATH env var,

@@ -1,0 +1,99 @@
+# JSON-Schema v1 (contrato de editor/CI) — ParticipantDeployment (cbweb3b/v1)
+# Fonte de verdade das regras SEMÂNTICAS é a validação Go; este schema cobre as ESTRUTURAIS.
+# Rascunho de contrato; a versão publicada final vive em
+# scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://cbweb3/scenario-b/schema/v1/participant-deployment.schema.yaml"
+title: ParticipantDeployment
+type: object
+required: [apiVersion, kind, metadata, spec]
+properties:
+  apiVersion: { const: "cbweb3b/v1" }
+  kind: { const: "ParticipantDeployment" }
+  metadata:
+    type: object
+    required: [name]
+    properties:
+      name: { type: string, minLength: 1 }
+  spec:
+    type: object
+    required: [scenario, environment, mode, topology, node, image, keyProvider, certSource, relay, frontendHost, adminUsers]
+    properties:
+      scenario: { const: "b" }
+      environment: { enum: [local] }          # staging/prod rejeitados nesta fase
+      mode: { enum: [found-hub, found-spoke, join] }
+      topology:
+        type: object
+        required: [role]
+        properties:
+          role: { enum: [hub, central-bank, commercial-bank] }
+      displayName: { type: string }
+      hub:
+        type: object
+        required: [chainId, currency]
+        properties:
+          chainId: { type: integer }
+          currency: { type: array, items: { type: string }, minItems: 1 }
+      spoke:
+        type: object
+        required: [id, chainId, currency]
+        properties:
+          id: { type: string, minLength: 1 }
+          chainId: { type: integer }
+          currency: { type: string }
+      hubBundleRef: { type: string }
+      joinBundleRef: { type: string }
+      bankId: { type: string }
+      pair:
+        type: object
+        required: [proposerCB, confirmerCB, symbolA, symbolB]
+        properties:
+          proposerCB: { type: string }
+          confirmerCB: { type: string }
+          symbolA: { type: string }
+          symbolB: { type: string }
+      node:
+        type: object
+        required: [advertisedHost, rpc, ws, p2p, dataDir]
+        properties:
+          advertisedHost: { type: string, minLength: 1 }
+          rpc:  { type: object, required: [port], properties: { port: { type: integer } } }
+          ws:   { type: object, required: [port], properties: { port: { type: integer } } }
+          p2p:  { type: object, required: [port], properties: { port: { type: integer } } }
+          dataDir: { type: string }
+          validator: { type: boolean }        # join: true → warning (não erro)
+      image: { type: string, minLength: 1 }
+      keyProvider: { type: string, pattern: "^kms://" }
+      certSource: { type: string, pattern: "^(self-signed(://.*)?|ca://.+)$" }
+      relay:
+        type: object
+        required: [endpoint]
+        properties:
+          endpoint: { type: string }
+          advertisedHost: { type: string }
+      cbEndpoint: { type: string }
+      frontendHost: { type: string }
+      adminUsers:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          required: [role, username, password]
+          properties:
+            role: { type: string }
+            username: { type: string }
+            password: { type: string }
+    # Regras condicionais por modo (estruturais)
+    allOf:
+      - if:  { properties: { mode: { const: found-hub } } }
+        then:
+          required: [hub]
+          not: { anyOf: [ {required: [spoke]}, {required: [hubBundleRef]}, {required: [joinBundleRef]}, {required: [bankId]}, {required: [pair]} ] }
+      - if:  { properties: { mode: { const: found-spoke } } }
+        then:
+          required: [spoke, hubBundleRef]
+          not: { anyOf: [ {required: [hub]}, {required: [joinBundleRef]}, {required: [bankId]} ] }
+      - if:  { properties: { mode: { const: join } } }
+        then:
+          required: [spoke, joinBundleRef, bankId]
+          not: { anyOf: [ {required: [hub]}, {required: [hubBundleRef]}, {required: [pair]}, {required: [cbEndpoint]} ] }

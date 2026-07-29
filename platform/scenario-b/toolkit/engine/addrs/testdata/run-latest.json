@@ -1,0 +1,8 @@
+{
+  "transactions": [
+    { "transactionType": "CREATE", "contractName": "IdentityRegistry", "contractAddress": "0x1000000000000000000000000000000000000001" },
+    { "transactionType": "CREATE", "contractName": "TokenizedCentralBankMoney", "contractAddress": "0x1000000000000000000000000000000000000002" },
+    { "transactionType": "CREATE", "contractName": "FXAgreement", "contractAddress": "0x1000000000000000000000000000000000000004" },
+    { "transactionType": "CALL", "contractName": "IdentityRegistry", "contractAddress": "0x1000000000000000000000000000000000000001" }
+  ]
+}

@@ -1,0 +1,46 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-argentina
+spec:
+  scenario: "b"
+  environment: local
+  mode: found-spoke
+  topology:
+    role: central-bank
+  displayName: "Banco Central de la República Argentina"
+  spoke:
+    id: spoke-ars
+    chainId: 1339
+    currency: ARS
+  hubBundleRef: ../bundles/hub.bundle.yaml
+  # Same corridor BRL <-> ARS. Argentina is the confirmer: when it founds its
+  # spoke after Brazil has proposed, its sovereign tail runs confirmPair and the
+  # pair transitions PROPOSED -> ACTIVE (soft; pending without the signing keys).
+  pair:
+    proposerCB: central-bank-brazil
+    confirmerCB: central-bank-argentina
+    symbolA: BRL
+    symbolB: ARS
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 33745 }
+    ws:   { port: 33755 }
+    p2p:  { port: 56403 }
+    dataDir: cbweb3-data/central-bank-argentina
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  relay:
+    endpoint: http://localhost:7000
+  cbEndpoint: http://host.docker.internal:18745
+  frontendHost: localhost
+  launcher: enable
+  launcherPort: 5194
+  adminUsers:
+    - { role: GOVERNANCE, username: admin@argentina.governance.gov, password: argentina-governance-local }
+    - { role: TREASURY,   username: admin@argentina.treasury.gov,   password: argentina-treasury-local }
+    - { role: SUPERVISOR, username: admin@argentina.supervisor.gov, password: argentina-supervisor-local }
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

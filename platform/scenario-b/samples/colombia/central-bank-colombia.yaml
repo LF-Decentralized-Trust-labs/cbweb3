@@ -1,0 +1,40 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-colombia
+spec:
+  scenario: "b"
+  environment: local
+  mode: found-spoke
+  topology:
+    role: central-bank
+  displayName: "Banco de la República (Colombia)"
+  spoke:
+    id: spoke-cop
+    chainId: 1340
+    currency: COP
+  hubBundleRef: ../bundles/hub.bundle.yaml
+  # No `pair` block: this spoke joins the hub without opening a sovereign corridor
+  # yet — demonstrating a plain found-spoke (the sovereign tail is not appended).
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 33945 }
+    ws:   { port: 33955 }
+    p2p:  { port: 56603 }
+    dataDir: cbweb3-data/central-bank-colombia
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  relay:
+    endpoint: http://localhost:7000
+  cbEndpoint: http://host.docker.internal:18945
+  frontendHost: localhost
+  launcher: enable
+  launcherPort: 5197
+  adminUsers:
+    - { role: GOVERNANCE, username: admin@colombia.governance.gov, password: colombia-governance-local }
+    - { role: TREASURY,   username: admin@colombia.treasury.gov,   password: colombia-treasury-local }
+    - { role: SUPERVISOR, username: admin@colombia.supervisor.gov, password: colombia-supervisor-local }
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

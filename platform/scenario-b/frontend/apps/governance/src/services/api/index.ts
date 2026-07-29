@@ -8,5 +8,6 @@ export * from "./registry.api";
 export * from "./payment.api";
 export * from "./liquidity.api";
 export * from "./circuit-breaker-v2.api";
+export * from "./amm-pairs.api";
 export * from "./oversight.api";
 export * from "./transfer-limits.api";

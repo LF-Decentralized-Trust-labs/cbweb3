@@ -18,6 +18,7 @@ import {
   TableRow,
   toast,
 } from "@cbweb3/ui";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
 import { useAuthStore } from "../stores/auth.store";
@@ -27,10 +28,13 @@ import {
   displayToBase,
   fiatCurrencyLabel,
   formatFiatUnits,
+  formatTokenAmount,
   getPaymentStatusLabel,
   getPaymentStatusVariant,
   normalizePaymentStatus,
 } from "../types";
+
+const PAGE_SIZE = 10;
 
 const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.slice(-8)}` : "-");
 
@@ -53,6 +57,7 @@ export function DepositsPage() {
 
   const [amount, setAmount] = useState("0");
   const [confirmRequest, setConfirmRequest] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     void fetchAll();
@@ -62,6 +67,21 @@ export function DepositsPage() {
     () => deposits.filter((item) => normalizePaymentStatus(item.status) === PaymentStatus.PENDING).length,
     [deposits],
   );
+
+  const total = deposits.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // Keep the page in range when the list changes.
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  const pagedDeposits = useMemo(
+    () => deposits.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [deposits, page],
+  );
+  const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(page * PAGE_SIZE, total);
 
   const onSubmit = async () => {
     if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
@@ -90,11 +110,11 @@ export function DepositsPage() {
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-3">
-        <BalanceWidget balance={balance} decimals={tCeBMDecimals} symbol={tCeBMSymbol} loading={status === "loading" && balance === null} />
+        <BalanceWidget balance={balance} decimals={tCeBMDecimals} symbol={tCeBMSymbol} loading={status === "loading" && balance === null} hideSymbol />
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Fiat Reserve Balance (fCeBM)</CardDescription>
-            <CardTitle>{fiatBalance !== null ? formatFiatUnits(fiatBalance, fDecimals, fCeBMSymbol) : "—"}</CardTitle>
+            <CardTitle>{fiatBalance !== null ? formatTokenAmount(fiatBalance, fDecimals) : "—"}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -172,7 +192,7 @@ export function DepositsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {deposits.map((deposit) => (
+              {pagedDeposits.map((deposit) => (
                 <TableRow key={deposit.id}>
                   <TableCell className="font-medium">{deposit.id}</TableCell>
                   <TableCell>{formatFiatUnits(deposit.amount, fDecimals, fCeBMSymbol)}</TableCell>
@@ -186,7 +206,32 @@ export function DepositsPage() {
               ))}
             </TableBody>
           </Table>
-          {!deposits.length ? <p className="pt-3 text-sm text-muted-foreground">No issuance requests found.</p> : null}
+          {!total ? <p className="pt-3 text-sm text-muted-foreground">No issuance requests found.</p> : null}
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between gap-2 pt-4">
+            <span className="text-xs text-muted-foreground">
+              {total === 0 ? "—" : `Showing ${rangeStart}–${rangeEnd} of ${total}`}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                <ChevronLeft className="h-4 w-4" />
+                Prev
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Page {page} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>
