@@ -171,7 +171,11 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 			deps.Timeouts.OnboardRegistry),
 		// Besu-layer settlement contracts (Scenario A): fCeBM + HTLC. deploy-htlc
 		// reads PARTICIPANT_REGISTRY_ADDRESS produced by onboard-registry above.
-		newDeployFiatTokenStep(spokeID, dataDir, besuRPCURL, m.Spec.Spoke.Currency, deps.KeyProvider,
+		newDeployFiatTokenStep(spokeID, dataDir, besuRPCURL, FiatTokenMetadata{
+			Currency: m.Spec.Spoke.Currency,
+			Name:     m.Spec.Spoke.FiatTokenName,
+			Symbol:   m.Spec.Spoke.FiatTokenSymbol,
+		}, deps.KeyProvider,
 			filepath.Join(deps.ContractsOutDir, "FiatCentralBankMoney.sol", "FiatCentralBankMoney.json"),
 			deps.Timeouts.OnboardRegistry),
 		newDeployHTLCStep(dataDir, besuRPCURL, deps.KeyProvider,
