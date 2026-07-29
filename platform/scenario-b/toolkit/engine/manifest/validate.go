@@ -42,10 +42,10 @@ var RequiredByMode = map[string][]string{
 // It is the source of truth for the forbidden half of the per-mode matrix and
 // is compared against the published JSON-Schema by the parity test (SC-004).
 var ForbiddenByMode = map[string][]string{
-	ModeFoundHub:   {"spoke", "hubBundleRef", "joinBundleRef", "bankId", "pair", "nocBundleRef"},
+	ModeFoundHub:   {"spoke", "hubBundleRef", "joinBundleRef", "bankId", "nocBundleRef"},
 	ModeFoundSpoke: {"hub", "joinBundleRef", "bankId", "nocBundleRef"},
-	ModeJoin:       {"hub", "hubBundleRef", "pair", "cbEndpoint", "nocBundleRef"},
-	ModeObserve:    {"hub", "spoke", "hubBundleRef", "joinBundleRef", "bankId", "pair", "cbEndpoint"},
+	ModeJoin:       {"hub", "hubBundleRef", "cbEndpoint", "nocBundleRef"},
+	ModeObserve:    {"hub", "spoke", "hubBundleRef", "joinBundleRef", "bankId", "cbEndpoint"},
 }
 
 var (
@@ -167,9 +167,6 @@ func Validate(pd *ParticipantDeployment) Result {
 	// Spoke token metadata overrides, when present.
 	validateSpokeTokens(spec.Mode, spec.Spoke, &r)
 
-	// FR-012: pair (found-spoke only), when present.
-	validatePair(spec.Pair, &r)
-
 	// FR-013: join with node.validator: true → warning (not error).
 	if spec.Mode == ModeJoin && spec.Node != nil && spec.Node.Validator != nil && *spec.Node.Validator {
 		r.AddWarning("spec.node.validator",
@@ -257,8 +254,8 @@ func validateModeMatrix(pd *ParticipantDeployment, r *Result) {
 }
 
 // specFieldPresent reports whether a per-mode-controlled spec field is present.
-// Object fields (hub/spoke/pair) use pointer non-nil; scalar fields use a
-// non-empty value.
+// Object fields (hub/spoke) use pointer non-nil; scalar fields use a non-empty
+// value.
 func specFieldPresent(pd *ParticipantDeployment, field string) bool {
 	s := pd.Spec
 	switch field {
@@ -266,8 +263,6 @@ func specFieldPresent(pd *ParticipantDeployment, field string) bool {
 		return s.Hub != nil
 	case "spoke":
 		return s.Spoke != nil
-	case "pair":
-		return s.Pair != nil
 	case "hubBundleRef":
 		return s.HubBundleRef != ""
 	case "joinBundleRef":
@@ -368,31 +363,6 @@ func orPlaceholder(currency string) string {
 		return "BRL"
 	}
 	return currency
-}
-
-// validatePair enforces FR-012 when the sovereign pair is present.
-func validatePair(p *Pair, r *Result) {
-	if p == nil {
-		return
-	}
-	if p.ProposerCB == "" {
-		r.AddError("spec.pair.proposerCB", "required field is missing")
-	}
-	if p.ConfirmerCB == "" {
-		r.AddError("spec.pair.confirmerCB", "required field is missing")
-	}
-	if p.SymbolA == "" {
-		r.AddError("spec.pair.symbolA", "required field is missing")
-	}
-	if p.SymbolB == "" {
-		r.AddError("spec.pair.symbolB", "required field is missing")
-	}
-	if p.ProposerCB != "" && p.ProposerCB == p.ConfirmerCB {
-		r.AddError("spec.pair.confirmerCB", fmt.Sprintf("confirmerCB must differ from proposerCB (both %q)", p.ProposerCB))
-	}
-	if p.SymbolA != "" && p.SymbolA == p.SymbolB {
-		r.AddError("spec.pair.symbolB", fmt.Sprintf("symbolB must differ from symbolA (both %q)", p.SymbolA))
-	}
 }
 
 // scanSecrets walks every string value reachable from v and rejects any that

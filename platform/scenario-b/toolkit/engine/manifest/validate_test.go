@@ -197,26 +197,6 @@ func TestRejectForbiddenPerMode(t *testing.T) {
 	})
 }
 
-// FR-012: sovereign pair validation.
-func TestRejectBadPair(t *testing.T) {
-	t.Run("proposer==confirmer", func(t *testing.T) {
-		pd := mustLoad(t, "found-spoke.yaml")
-		pd.Spec.Pair.ConfirmerCB = pd.Spec.Pair.ProposerCB
-		res := Validate(pd)
-		if !findErr(res, "spec.pair.confirmerCB") {
-			t.Errorf("expected pair.confirmerCB error, got %+v", res.Errors)
-		}
-	})
-	t.Run("symbolA==symbolB", func(t *testing.T) {
-		pd := mustLoad(t, "found-spoke.yaml")
-		pd.Spec.Pair.SymbolB = pd.Spec.Pair.SymbolA
-		res := Validate(pd)
-		if !findErr(res, "spec.pair.symbolB") {
-			t.Errorf("expected pair.symbolB error, got %+v", res.Errors)
-		}
-	})
-}
-
 // FR-013: join with node.validator: true → warning, not error.
 func TestJoinValidatorWarning(t *testing.T) {
 	pd := mustLoad(t, "join.yaml")

@@ -14,11 +14,6 @@ spec:
     chainId: 1338
     currency: BRL
   hubBundleRef: ./bundles/hub-cbweb3.bundle.yaml
-  pair:
-    proposerCB: central-bank-a
-    confirmerCB: central-bank-b
-    symbolA: BRL
-    symbolB: ARS
   node:
     advertisedHost: host.docker.internal
     rpc:  { port: 8645 }

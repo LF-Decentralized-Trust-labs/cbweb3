@@ -62,14 +62,6 @@ properties:
       joinBundleRef: { type: string }
       nocBundleRef: { type: string }
       bankId: { type: string }
-      pair:
-        type: object
-        required: [proposerCB, confirmerCB, symbolA, symbolB]
-        properties:
-          proposerCB: { type: string }
-          confirmerCB: { type: string }
-          symbolA: { type: string }
-          symbolB: { type: string }
       node:
         type: object
         required: [advertisedHost, rpc, ws, p2p, dataDir]
@@ -128,7 +120,7 @@ properties:
       - if:  { properties: { mode: { const: found-hub } } }
         then:
           required: [hub]
-          not: { anyOf: [ {required: [spoke]}, {required: [hubBundleRef]}, {required: [joinBundleRef]}, {required: [bankId]}, {required: [pair]}, {required: [nocBundleRef]} ] }
+          not: { anyOf: [ {required: [spoke]}, {required: [hubBundleRef]}, {required: [joinBundleRef]}, {required: [bankId]}, {required: [nocBundleRef]} ] }
       - if:  { properties: { mode: { const: found-spoke } } }
         then:
           required: [spoke, hubBundleRef]
@@ -136,8 +128,8 @@ properties:
       - if:  { properties: { mode: { const: join } } }
         then:
           required: [spoke, joinBundleRef, bankId]
-          not: { anyOf: [ {required: [hub]}, {required: [hubBundleRef]}, {required: [pair]}, {required: [cbEndpoint]}, {required: [nocBundleRef]} ] }
+          not: { anyOf: [ {required: [hub]}, {required: [hubBundleRef]}, {required: [cbEndpoint]}, {required: [nocBundleRef]} ] }
       - if:  { properties: { mode: { const: observe } } }
         then:
           required: [nocBundleRef]
-          not: { anyOf: [ {required: [hub]}, {required: [spoke]}, {required: [hubBundleRef]}, {required: [joinBundleRef]}, {required: [bankId]}, {required: [pair]}, {required: [cbEndpoint]} ] }
+          not: { anyOf: [ {required: [hub]}, {required: [spoke]}, {required: [hubBundleRef]}, {required: [joinBundleRef]}, {required: [bankId]}, {required: [cbEndpoint]} ] }

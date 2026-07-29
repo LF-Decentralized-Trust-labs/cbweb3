@@ -160,8 +160,14 @@ func TestEmitHubBundleFromBroadcast(t *testing.T) {
 	if b.Contracts["identityRegistry"] != "0xa1" || b.Contracts["manualOracle"] != "0xf1" {
 		t.Fatalf("contract mapping wrong: %+v", b.Contracts)
 	}
-	if _, ok := b.Contracts["tCeBM_BRL"]; ok {
-		t.Fatalf("tCeBM_BRL must not be in hub bundle at found-hub: %+v", b.Contracts)
+	// The hub deploys no tCeBM: mirrored tokens are created per CB currency
+	// registration and resolved from the PairRegistry, so no tCeBM key of ANY
+	// currency may reach the bundle (a per-currency key would bake a fixed
+	// bilateral pair into a multi-currency hub).
+	for k := range b.Contracts {
+		if strings.HasPrefix(k, "tCeBM") {
+			t.Fatalf("no tCeBM key may be in the hub bundle, got %q: %+v", k, b.Contracts)
+		}
 	}
 	if b.Contracts["liquidityCommitRegistry"] != "0xf2" {
 		t.Fatalf("liquidityCommitRegistry mapping wrong: %+v", b.Contracts)

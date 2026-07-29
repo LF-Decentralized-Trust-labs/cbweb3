@@ -21,7 +21,7 @@ package manifest
 // ParticipantDeployment is the top-level parsed representation of a
 // ParticipantDeployment YAML document.
 //
-// Pointer fields (Hub, Spoke, Pair, Node, Relay) and empty-string scalar fields
+// Pointer fields (Hub, Spoke, Node, Relay) and empty-string scalar fields
 // are used to distinguish "absent" from "zero value", which the per-mode
 // required/forbidden matrix relies on.
 type ParticipantDeployment struct {
@@ -55,8 +55,6 @@ type Spec struct {
 	JoinBundleRef string `yaml:"joinBundleRef,omitempty" json:"joinBundleRef,omitempty"`
 	// BankID is required in join, forbidden in the other modes.
 	BankID string `yaml:"bankId,omitempty" json:"bankId,omitempty"`
-	// Pair is optional in found-spoke, forbidden in the other modes.
-	Pair *Pair `yaml:"pair,omitempty" json:"pair,omitempty"`
 	// NOCBundleRef is required in observe, forbidden in the other modes. It points
 	// at the NOC bundle emitted by a CB's found-spoke (or found-hub) describing the
 	// monitoring topology this NOC deployment consumes.
@@ -130,14 +128,6 @@ type Spoke struct {
 	// FiatTokenSymbol overrides the fCeBM ERC-20 symbol (default "fCeBM_<currency>");
 	// same "<prefix>_<ISO>" constraint as TokenSymbol.
 	FiatTokenSymbol string `yaml:"fiatTokenSymbol,omitempty" json:"fiatTokenSymbol,omitempty"`
-}
-
-// Pair describes the sovereign currency pair (optional, found-spoke).
-type Pair struct {
-	ProposerCB  string `yaml:"proposerCB" json:"proposerCB"`
-	ConfirmerCB string `yaml:"confirmerCB" json:"confirmerCB"`
-	SymbolA     string `yaml:"symbolA" json:"symbolA"`
-	SymbolB     string `yaml:"symbolB" json:"symbolB"`
 }
 
 // NOC configures the NOC observability integration. Optional in every mode and

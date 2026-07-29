@@ -600,26 +600,20 @@ func FoundHubSteps(c HubConfig) []Step {
 }
 
 // hubContractMap maps the CBWeb3Hub broadcast deployments to bundle keys.
-// TokenizedCentralBankMoney is optional (not deployed at found-hub anymore;
-// kept for backward compatibility with older broadcasts that still include them).
+// TokenizedCentralBankMoney deployments are ignored: the hub deploys no tCeBM
+// (CBWeb3Hub.s.sol) — the mirrored token of each currency is created per CB
+// registration and resolved from the PairRegistry at runtime, so an older
+// broadcast that still carries them has nothing to contribute to the bundle.
 func hubContractMap(broadcastPath string) (map[string]string, error) {
 	list, err := addrs.ParseBroadcastList(broadcastPath)
 	if err != nil {
 		return nil, err
 	}
 	out := map[string]string{}
-	tcebmSeen := 0
 	for _, d := range list {
 		switch d.Name {
 		case "IdentityRegistry":
 			out["identityRegistry"] = d.Address
-		case "TokenizedCentralBankMoney":
-			// Legacy broadcasts only — current CBWeb3Hub.s.sol does not deploy tCeBM.
-			// Keyed by deployment order, never by currency: the hub is multi-currency
-			// (one mirrored token per CB registration), so naming these BRL/EUR would
-			// bake a bilateral assumption into the bundle. Nothing consumes them.
-			out[fmt.Sprintf("tCeBM_legacy_%d", tcebmSeen)] = d.Address
-			tcebmSeen++
 		case "FXAgreement":
 			out["fxAgreement"] = d.Address
 		case "PairRegistry":
