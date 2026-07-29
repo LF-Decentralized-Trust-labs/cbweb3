@@ -466,6 +466,7 @@ contract AutomatedMarketMakerTest is Test {
     ///      plus fee (a single ceiling). Sufficiency `actualIn*D >= N` guarantees k; minimality
     ///      `(actualIn-1)*D < N` bounds the over-charge to < 1 base unit. FAILS against the buggy
     ///      contract, whose double round-up charges up to ~2 units too much.
+    /// forge-config: default.fuzz.runs = 10001
     function testFuzz_R2H3_SwapChargeIsMinimalCeiling(uint256 rA, uint256 rB, uint256 amountOut, uint256 fee, bool aToB)
         public
     {
@@ -496,6 +497,45 @@ contract AutomatedMarketMakerTest is Test {
         uint256 d = (reserveOut - amountOut) * (10000 - fee); // denominator
         assertGe(actualIn * d, n, "charge is sufficient (k preserved)");
         assertLt((actualIn - 1) * d, n, "charge is minimal (over-charge < 1 base unit)");
+
+        // R2-H-3 single source of truth: the public quote view returns the EXACT swap charge, so
+        // off-chain callers can size maxAmountIn from it without ever tripping AMM__SlippageExceeded.
+        assertEq(
+            amm.quoteExactOutput(reserveIn, reserveOut, amountOut, fee),
+            actualIn,
+            "quoteExactOutput mirrors the swap charge exactly"
+        );
+    }
+
+    /// @dev The public quote view equals the swap charge for concrete no-fee and with-fee cases,
+    ///      and its arithmetic matches the fixed single-ceiling helper.
+    function test_R2H3_QuoteExactOutput_MatchesSwapCharge() public {
+        vm.prank(governanceA);
+        amm.setFeeBps(30);
+
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        uint256 amountOut = 1_000 * 10 ** 18;
+        uint256 quoted = amm.quoteExactOutput(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, 30);
+        assertEq(quoted, _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, 30), "quote == single ceiling");
+
+        vm.prank(swapper);
+        uint256 actualIn =
+            amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOut, type(uint256).max, swapper);
+        assertEq(quoted, actualIn, "quote == realized swap charge");
+    }
+
+    /// @dev The quote view rejects the same degenerate inputs the swap does, with the same errors,
+    ///      so callers see one consistent contract for both.
+    function test_Revert_QuoteExactOutput_ZeroAmount() public {
+        vm.expectRevert(IAutomatedMarketMaker.AMM__ZeroAmount.selector);
+        amm.quoteExactOutput(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, 0, 30);
+    }
+
+    function test_Revert_QuoteExactOutput_OutputExceedsReserve() public {
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InsufficientLiquidity.selector);
+        amm.quoteExactOutput(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, 30);
     }
 
     // ---------- Fee accrual to share value ----------

@@ -63,6 +63,12 @@ const ABIJSON = `[
   {"name":"reserveOut","type":"uint256"},
   {"name":"feeBps_","type":"uint256"}
 ],"outputs":[{"type":"uint256"}]},
+{"type":"function","name":"quoteExactOutput","stateMutability":"pure","inputs":[
+  {"name":"reserveIn","type":"uint256"},
+  {"name":"reserveOut","type":"uint256"},
+  {"name":"amountOut","type":"uint256"},
+  {"name":"feeBps_","type":"uint256"}
+],"outputs":[{"type":"uint256"}]},
 {"type":"function","name":"swapTokensForExactTokens","stateMutability":"nonpayable","inputs":[
   {"name":"tokenIn","type":"address"},
   {"name":"tokenOut","type":"address"},
@@ -303,8 +309,14 @@ func (c *Client) LatestResumeProposal(ctx context.Context) ([32]byte, bool, erro
 
 // QuoteExactOutput retrieves the required input amount for an exact-output swap. The
 // `pair` parameter is used only for bookkeeping; the on-chain formula uses reserves.
-// Returns the grossAmountIn (with fee-in-reserve applied) so callers can use it
-// directly as max_amount_in without triggering AMM__SlippageExceeded.
+// Returns the fee-inclusive amountIn so callers can use it directly as max_amount_in
+// without triggering AMM__SlippageExceeded.
+//
+// R2-H-3: this delegates to the on-chain quoteExactOutput view — the SAME single ceiling
+// division swapTokensForExactTokens charges — so the quote is exact (never over- or
+// under-states). The prior two-step form (getAmountIn's floor+1 followed by a second
+// +1 gross-up) rounded up twice and over-stated the input by up to 2 base units,
+// inflating the stranded buffer in the payment orchestrator.
 func (c *Client) QuoteExactOutput(ctx context.Context, pair, amountOut string, outputIsTokenA bool) (*QuoteResult, error) {
 	amt, ok := new(big.Int).SetString(strings.TrimSpace(amountOut), 10)
 	if !ok {
@@ -314,30 +326,23 @@ func (c *Client) QuoteExactOutput(ctx context.Context, pair, amountOut string, o
 	if err != nil {
 		return nil, err
 	}
-	// getAmountIn(reserveIn, reserveOut, amountOut): orient reserves by direction.
+	// quoteExactOutput(reserveIn, reserveOut, amountOut, feeBps_): orient reserves by direction.
 	// A→B (default): reserveIn=A, reserveOut=B. B→A (outputIsTokenA): reserveIn=B, reserveOut=A.
 	reserveIn, reserveOut := reserveA, reserveB
 	if outputIsTokenA {
 		reserveIn, reserveOut = reserveB, reserveA
 	}
-	amountIn := new(big.Int)
-	if err := evm.Call(ctx, c.ec, c.contract, c.abi, "getAmountIn",
-		[]interface{}{reserveIn, reserveOut, amt}, amountIn); err != nil {
-		return nil, err
-	}
-	// Apply the same fee-in-reserve formula as swapTokensForExactTokens:
-	// grossAmountIn = (amountIn * 10000) / (10000 - feeBps) + 1
-	// so the returned value can be used directly as max_amount_in.
 	feeBps, err := c.FeeBps(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get feeBps for quote: %w", err)
 	}
-	divisor := new(big.Int).Sub(big.NewInt(10000), feeBps)
-	grossAmountIn := new(big.Int).Mul(amountIn, big.NewInt(10000))
-	grossAmountIn.Div(grossAmountIn, divisor)
-	grossAmountIn.Add(grossAmountIn, big.NewInt(1))
+	amountIn := new(big.Int)
+	if err := evm.Call(ctx, c.ec, c.contract, c.abi, "quoteExactOutput",
+		[]interface{}{reserveIn, reserveOut, amt, feeBps}, amountIn); err != nil {
+		return nil, err
+	}
 	return &QuoteResult{
-		RequiredInput:  grossAmountIn.String(),
+		RequiredInput:  amountIn.String(),
 		PriceImpact:    "0",
 		QuoteTimestamp: time.Now().Unix(),
 	}, nil

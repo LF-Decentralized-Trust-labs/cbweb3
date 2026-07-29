@@ -470,6 +470,27 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ERC20, ReentrancyGuard {
     }
 
     /// @inheritdoc IAutomatedMarketMaker
+    function quoteExactOutput(uint256 reserveIn, uint256 reserveOut, uint256 amountOut, uint256 feeBps_)
+        public
+        pure
+        returns (uint256 amountIn)
+    {
+        if (amountOut == 0) revert AMM__ZeroAmount();
+        if (amountOut >= reserveOut) revert AMM__InsufficientLiquidity();
+
+        // R2-H-3: fold the exact-output constant-product quote AND the fee gross-up into a SINGLE
+        // ceiling division. The prior two-step form rounded up twice — once in getAmountIn (`+1`)
+        // and again in the fee gross-up (`+1`) — over-charging the caller and stranding the excess
+        // in the reserves. One ceiling division rounds up exactly once and still favors the pool
+        // (k never decreases):
+        //   amountIn = ceil( reserveIn * amountOut * 10000 / ((reserveOut - amountOut) * (10000 - feeBps)) )
+        // The largest product (reserveIn * amountOut) stays inside Math.mulDiv's 512-bit
+        // intermediate. The returned amountIn is inclusive of the fee, which stays in the reserves.
+        amountIn =
+            Math.mulDiv(reserveIn, amountOut * 10000, (reserveOut - amountOut) * (10000 - feeBps_), Math.Rounding.Ceil);
+    }
+
+    /// @inheritdoc IAutomatedMarketMaker
     function swapTokensForExactTokens(
         address tokenIn,
         address tokenOut,
@@ -491,15 +512,10 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ERC20, ReentrancyGuard {
 
         if (amountOut >= reserveOut) revert AMM__InsufficientLiquidity();
 
-        // R2-H-3: fold the exact-output constant-product quote AND the fee gross-up into a SINGLE
-        // ceiling division. The prior two-step form rounded up twice — once in getAmountIn
-        // (`+1`) and again in the fee gross-up (`+1`) — over-charging the caller and stranding the
-        // excess in the reserves. One ceiling division rounds up exactly once and still favors the
-        // pool (k never decreases):
-        //   amountIn = ceil( reserveIn * amountOut * 10000 / ((reserveOut - amountOut) * (10000 - feeBps)) )
-        // The `amountIn` the caller pays is inclusive of the fee, which stays in the reserves.
-        amountIn =
-            Math.mulDiv(reserveIn * amountOut, 10000, (reserveOut - amountOut) * (10000 - feeBps), Math.Rounding.Ceil);
+        // R2-H-3: single source of truth. The on-chain quote a caller sizes `maxAmountIn` against
+        // IS the exact charge — swap and quote share one ceiling division (see quoteExactOutput).
+        // Fee-inclusive; the fee stays in the reserves.
+        amountIn = quoteExactOutput(reserveIn, reserveOut, amountOut, feeBps);
 
         if (amountIn > maxAmountIn) {
             revert AMM__SlippageExceeded(amountIn, maxAmountIn);
