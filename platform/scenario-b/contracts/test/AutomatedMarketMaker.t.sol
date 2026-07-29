@@ -518,7 +518,9 @@ contract AutomatedMarketMakerTest is Test {
 
         uint256 amountOut = 1_000 * 10 ** 18;
         uint256 quoted = amm.quoteExactOutput(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, 30);
-        assertEq(quoted, _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, 30), "quote == single ceiling");
+        assertEq(
+            quoted, _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, 30), "quote == single ceiling"
+        );
 
         vm.prank(swapper);
         uint256 actualIn =
