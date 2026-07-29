@@ -30,9 +30,11 @@ spec:
     id: spoke-brl
     chainId: 1338
     currency: BRL
-    # ERC-20 metadata of this spoke's own tokens; optional (absent, they derive
-    # from `currency`). Symbols must keep the "<prefix>_<ISO>" shape — portals and
-    # the api-gateway read the currency code after the last underscore.
+    # ERC-20 metadata of this spoke's own tokens (tCeBM reserve + fCeBM fiat).
+    # Optional — absent, all four derive from `currency` (exactly the values
+    # below). Declared explicitly so each sovereign token is auditable in config.
+    # Symbols must keep the "<prefix>_<ISO>" shape: portals and the api-gateway
+    # read the currency code from the segment after the last underscore.
     tokenName: Tokenized BRL
     tokenSymbol: tCeBM_BRL
     fiatTokenName: Fiat BRL
