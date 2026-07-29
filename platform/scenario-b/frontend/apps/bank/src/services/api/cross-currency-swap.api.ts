@@ -5,6 +5,8 @@ import type {
   CrossCurrencyQuote,
   CrossCurrencySwapRequest,
   CrossCurrencySwapResult,
+  SwapHistoryPage,
+  SwapHistoryQuery,
 } from "../../types/cross-currency-swap.types";
 import type { PoolStatus } from "../../types/amm-v2.types";
 import { attachAuthInterceptor } from "./interceptors/auth.interceptor";
@@ -26,12 +28,16 @@ export const crossCurrencySwapApi = {
     sourceCurrency: string,
     targetCurrency: string,
     amountOut: string,
+    poolPair?: string,
   ): Promise<CrossCurrencyQuote> => {
     const response = await httpClientV2.get<CrossCurrencyQuote>("/amm/quote/cross-currency", {
       params: {
         source_currency: sourceCurrency,
         target_currency: targetCurrency,
         amount_out: amountOut,
+        // Pass the exact pair_id so the quote resolves the right pool (pair ids do
+        // not always follow the derived "W-{source}-W-{target}" convention).
+        ...(poolPair ? { pool_pair: poolPair } : {}),
       },
     });
     return response.data;
@@ -46,6 +52,17 @@ export const crossCurrencySwapApi = {
   },
   getPoolStatus: async (pair: string): Promise<PoolStatus> => {
     const response = await httpClientV2.get<PoolStatus>(`/amm/pool/${pair}/status`);
+    return response.data;
+  },
+  // Paginated, date-filtered history of the authenticated bank's own cross-currency
+  // swap operations (payer). Backend scopes to the caller — no bank id is sent.
+  listHistory: async (query: SwapHistoryQuery = {}): Promise<SwapHistoryPage> => {
+    const params: Record<string, string | number> = {};
+    if (query.from) params.from = query.from;
+    if (query.to) params.to = query.to;
+    if (query.page) params.page = query.page;
+    if (query.pageSize) params.page_size = query.pageSize;
+    const response = await httpClientV2.get<SwapHistoryPage>("/amm/swap/cross-currency", { params });
     return response.data;
   },
 };

@@ -10,6 +10,7 @@ type AccountStore = {
   error: string | null;
   fetch: () => Promise<void>;
   freeze: (payload: FreezePayload) => Promise<void>;
+  unfreeze: (payload: FreezePayload) => Promise<void>;
 };
 
 export const useAccountStore = create<AccountStore>((set, get) => ({
@@ -33,6 +34,16 @@ export const useAccountStore = create<AccountStore>((set, get) => ({
       set({ status: "idle" });
     } catch (error) {
       set({ status: "error", error: error instanceof Error ? error.message : "Unable to freeze account" });
+    }
+  },
+  unfreeze: async (payload) => {
+    set({ status: "loading", error: null });
+    try {
+      await governanceApi.unfreezeAccount(payload);
+      await get().fetch();
+      set({ status: "idle" });
+    } catch (error) {
+      set({ status: "error", error: error instanceof Error ? error.message : "Unable to unfreeze account" });
     }
   },
 }));

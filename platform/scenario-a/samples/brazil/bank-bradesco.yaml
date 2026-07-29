@@ -36,7 +36,12 @@ spec:
   # acessado de uma máquina remota (ex.: uma VM na nuvem com IP público 3.84.201.14).
   # frontendHost: 3.84.201.14
   # Operador do banco (login por papel via ROPC). O nome inclui o spoke (brasil).
+  launcher: enable
+  launcherPort: 5193
   adminUsers:
     - role: ROLE_BANK
       username: admin@bradesco.brasil.com
       password: bradesco-bank-local
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

@@ -1,0 +1,6 @@
+# Runtime artifacts produced by the deploy scripts / cbweb3b apply — not versioned.
+cbweb3-data/
+bundles/
+.cbweb3b
+.provisioning-state.yaml
+.provisioning.lock

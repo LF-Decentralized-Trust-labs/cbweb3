@@ -166,6 +166,18 @@ contract PairRegistry {
         return result;
     }
 
+    /// @notice Returns every registered pair, regardless of status (PROPOSED and ACTIVE).
+    /// @dev Mirrors getAllActivePairs without the status filter. Used for cross-CB discovery:
+    ///      a pair PROPOSED by one Central Bank must be visible to the counterparty CB gateway
+    ///      before it is confirmed. On-chain state is the source of truth for pair existence.
+    function getAllPairs() external view returns (PairEntry[] memory) {
+        PairEntry[] memory result = new PairEntry[](_pairIds.length);
+        for (uint256 i; i < _pairIds.length; ++i) {
+            result[i] = _pairs[_key(_pairIds[i])];
+        }
+        return result;
+    }
+
     /// @notice Returns the full entry for a pair regardless of its status.
     /// @dev Reverts with PairRegistry__NotFound if the pairId was never proposed.
     function getPair(string calldata pairId) external view returns (PairEntry memory) {

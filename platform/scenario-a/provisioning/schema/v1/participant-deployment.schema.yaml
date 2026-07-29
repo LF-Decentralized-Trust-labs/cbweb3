@@ -85,14 +85,16 @@ definitions:
         enum:
           - "central-bank"
           - "commercial-bank"
-        description: "Role of this participant in the spoke. The central bank is the CA for the spoke and deploys contracts (mode: found). Commercial banks join an existing spoke (mode: join)."
+          - "noc"
+        description: "Role of this participant in the spoke. central-bank founds (mode: found), commercial-bank joins (mode: join), noc deploys the NOC control plane (mode: observe)."
 
       mode:
         type: string
         enum:
           - "found"
           - "join"
-        description: "'found': this participant creates a new spoke, deploys contracts, and emits a join bundle. 'join': attaches to an existing spoke by consuming a join bundle at joinBundleRef."
+          - "observe"
+        description: "'found': creates a spoke + emits a join bundle. 'join': attaches to an existing spoke via joinBundleRef. 'observe': deploys the NOC control plane (portal + backend) consuming a nocBundleRef."
 
       bankId:
         type: string
@@ -138,6 +140,23 @@ definitions:
         minLength: 1
         description: "Path to the join bundle YAML file produced by a 'found' deployment (e.g., ./bundles/spoke-brl.bundle.yaml). Contextually required when mode is 'join'; schema-level conditional enforcement is deferred (see TK-3)."
 
+      nocBundleRef:
+        type: string
+        description: "Path to the NOC bundle emitted by a central bank's found. Required when mode is 'observe'; forbidden otherwise."
+
+      noc:
+        type: object
+        description: "NOC observability config (optional). In observe it tunes the deployment; in found/join it configures the entity's noc-agent."
+        properties:
+          backendURL: { type: string }
+          keycloakURL: { type: string }
+          launcherURL: { type: string }
+          pushIntervalSeconds: { type: integer, minimum: 0 }
+          components:
+            type: array
+            items:
+              enum: ["BESU", "PALADIN", "CACTI_RELAY"]
+
       frontendHost:
         type: string
         minLength: 1
@@ -171,6 +190,17 @@ definitions:
         description: "Per-role human operator accounts provisioned in the entity's Keycloak realm(s). Portal/operator login uses these (password grant) instead of confidential client credentials, so audit logs carry a real actor. Required: one per role the entity hosts (central-bank: ROLE_GOVERNANCE, ROLE_TREASURY, ROLE_SUPERVISOR, ROLE_NOC_ADMIN; commercial-bank: ROLE_BANK). FUTURE: source the password from a secret store, never commit it for staging/prod."
         items:
           $ref: "#/definitions/AdminUser"
+
+      launcher:
+        type: string
+        enum: [enable, disable]
+        description: "Per-entity launcher (distributed A/B entry point on this entity's host). 'enable' runs the generic launcher image and writes this scenario's portal fragment; 'disable' removes it and tears the launcher down when no scenario fragment remains. Optional."
+
+      launcherPort:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        description: "Host port for this entity's launcher (one launcher per host; distinct per entity, same value in A and B so both scenarios share it). Optional: falls back to the LAUNCHER_PORT env, then 5190."
 
   AdminUser:
     type: object

@@ -267,6 +267,31 @@ func LoadSigner(pkiDir, keyID string) (*Signer, error) {
 	return &Signer{keyID: keyID, key: key}, nil
 }
 
+// KeyID returns the signer's key id (the entity/bank code).
+func (s *Signer) KeyID() string {
+	if s == nil {
+		return ""
+	}
+	return s.keyID
+}
+
+// SignAttestation signs an arbitrary canonical message with the entity's key and returns
+// the raw ASN.1 ECDSA signature bytes. Used for OFF-CHAIN governance attestations (e.g.
+// circuit-breaker pause/resume) — the on-chain authorization is the signer's address
+// (msg.sender), so this blob is an auditable institutional attestation, generated
+// server-side so operators never have to supply a signature by hand.
+func (s *Signer) SignAttestation(message string) ([]byte, error) {
+	if s == nil || s.key == nil {
+		return nil, fmt.Errorf("relayauth: nil signing key")
+	}
+	digest := sha256.Sum256([]byte(message))
+	sig, err := ecdsa.SignASN1(randReader, s.key, digest[:])
+	if err != nil {
+		return nil, fmt.Errorf("relayauth: sign attestation: %w", err)
+	}
+	return sig, nil
+}
+
 // HeadersFor returns the X-Relay-* headers authenticating (method, path, body) at
 // the given time. Callers set these on the outbound HTTP request.
 func (s *Signer) HeadersFor(method, path string, body []byte, now time.Time) (map[string]string, error) {

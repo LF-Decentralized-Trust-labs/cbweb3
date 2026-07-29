@@ -19,9 +19,11 @@ type fakePreparer struct {
 	approveErr     error
 }
 
-func (f *fakePreparer) MintAndApproveForAMM(_ context.Context, _ string) error { return f.mintApproveErr }
-func (f *fakePreparer) MintToForAMM(_ context.Context, _, _ string) error      { return f.mintToErr }
-func (f *fakePreparer) ApproveAMM(_ context.Context, _, _ string) error        { return f.approveErr }
+func (f *fakePreparer) MintAndApproveForAMM(_ context.Context, _, _, _ string) error {
+	return f.mintApproveErr
+}
+func (f *fakePreparer) MintToForAMM(_ context.Context, _, _, _, _ string) error { return f.mintToErr }
+func (f *fakePreparer) ApproveAMM(_ context.Context, _, _, _ string) error      { return f.approveErr }
 
 type fakeCBChecker struct {
 	isCB bool

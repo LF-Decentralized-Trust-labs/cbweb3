@@ -27,7 +27,6 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/relayauth"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
-	ammclient "github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/amm"
 	tcebmclient "github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/tcebm"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -117,6 +116,7 @@ func New(cfg config.Config) (*App, error) {
 		ComplianceHandler: complianceHandler,
 		GovernanceHandler: governanceHandler,
 		SupervisorHandler: supervisorHandler,
+		SpokesHandler:     handlers.NewSpokesHandler(complianceGRPC),
 		AuthProvider:      identityGRPCProvider,
 		V2Deps:            v2Deps,
 	}
@@ -250,14 +250,6 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	}
 
 	dbURL := os.Getenv("DATABASE_URL")
-	ammAddr := os.Getenv("AMM_CONTRACT_ADDRESS")
-	// Prefer SOVEREIGN_AMM_ADDRESS when set — CB entities use the sovereign AMM for
-	// pool status (PoolStatusService reads reserves from the correct on-chain pool).
-	// Commercial bank env files do not set SOVEREIGN_AMM_ADDRESS, so their behaviour
-	// is unchanged (they continue to use the regular Hub AMM).
-	if sovAMMAddr := os.Getenv("SOVEREIGN_AMM_ADDRESS"); sovAMMAddr != "" {
-		ammAddr = sovAMMAddr
-	}
 	hubRPC := os.Getenv("HUB_BESU_RPC_URL")
 	signerKey := os.Getenv("SIGNER_PRIVATE_KEY")
 	chainIDStr := resolveHubChainIDStr(log.New(os.Stderr, "", 0))
@@ -279,17 +271,21 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		cbPoolClient = services.NewCentralBankPoolClient(cfg.CentralBankAPIURL, cfg.RequestTimeout)
 		hubCfg, err := cbPoolClient.GetHubLiquidityConfig(context.Background())
 		if err != nil {
-			log.Printf("warning: could not resolve hub liquidity from CB at %s: %v", cfg.CentralBankAPIURL, err)
+			// The CB publishes no static single-AMM config (the dynamic per-pair
+			// model): drop the static client so pool status, the pool gate and the
+			// cross-currency quote reserve reader all fall through to the on-chain
+			// PairRegistry resolver instead of a fixed sovereign AMM.
+			log.Printf("warning: could not resolve hub liquidity from CB at %s: %v; using dynamic per-pair resolution", cfg.CentralBankAPIURL, err)
+			cbPoolClient = nil
 		} else {
 			resolvedHubCfg = hubCfg
-			ammAddr = hubCfg.SovereignAMMAddress
 			if hubCfg.SovereignHubTokenAAddress != "" {
 				hubTokenAAddr = hubCfg.SovereignHubTokenAAddress
 			}
 			if hubCfg.SovereignHubTokenBAddress != "" {
 				hubTokenBAddr = hubCfg.SovereignHubTokenBAddress
 			}
-			log.Printf("hub swap client: sovereign AMM %s resolved from CB (%s)", ammAddr, cfg.CentralBankAPIURL)
+			log.Printf("hub liquidity config resolved from CB (%s)", cfg.CentralBankAPIURL)
 		}
 	}
 
@@ -317,29 +313,36 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		}
 	}
 
-	// Wire AMM client when Hub EVM config is present.
-	var ammClient *ammclient.Client
-	if ammAddr != "" && hubRPC != "" {
-		chainID := int64(0)
+	// TD-001: there is no default/bootstrap AMM. Every AMM operation resolves the
+	// pool's dedicated contract per pool_pair via the on-chain PairRegistry (below).
+
+	// Dynamic per-pair resolver: quote/swap/liquidity/mint resolve the AMM +
+	// W-tokens for a pool_pair from the on-chain PairRegistry, so a corridor opened
+	// at runtime (e.g. a new spoke) works with no gateway env/restart.
+	var pairResolver *pairAMMResolver
+	if pairRegistryAddr != "" && hubRPC != "" {
+		hubChainID := int64(0)
 		if chainIDStr != "" {
 			bid := new(big.Int)
 			if _, ok := bid.SetString(chainIDStr, 10); ok {
-				chainID = bid.Int64()
+				hubChainID = bid.Int64()
 			}
 		}
-		c, err := ammclient.NewClient(context.Background(), ammclient.Config{
+		if pr, err := NewPairRegistryClient(context.Background(), PairRegistryConfig{
 			RPCURL:          hubRPC,
-			ContractAddress: ammAddr,
-			ChainID:         chainID,
+			ContractAddress: pairRegistryAddr,
+			ChainID:         hubChainID,
 			PrivateKeyHex:   signerKey,
 			Timeout:         15 * time.Second,
-			TokenAAddress:   hubTokenAAddr,
-			TokenBAddress:   hubTokenBAddr,
-		})
-		if err != nil {
-			log.Printf("warning: AMM client init failed: %v", err)
+		}); err != nil {
+			log.Printf("warning: pair AMM resolver init failed: %v", err)
 		} else {
-			ammClient = c
+			pairResolver = newPairAMMResolver(pr, hubRPC, hubChainID, signerKey, 15*time.Second, currencyCodeFromSymbol(os.Getenv("NATIVE_ASSET_SYMBOL")))
+			deps.PairSideResolver = pairResolver
+			// Sovereign seeding driver (escrow-and-finalize, no LCR): resolves side + AMM +
+			// commit id per pair and drives depositForCommit/finalizeCommit/cancelCommitDeposit.
+			deps.SovereignSeed = &sovereignSeedAdapter{a: &ammAdapter{resolver: pairResolver}}
+			log.Printf("dynamic per-pair AMM resolution enabled (PairRegistry %s)", pairRegistryAddr)
 		}
 	}
 
@@ -355,8 +358,8 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		poolGate = cbPoolClient
 		log.Printf("pool status: using Central Bank API at %s", cfg.CentralBankAPIURL)
 	}
-	if ammClient != nil {
-		adapter := &ammAdapter{c: ammClient}
+	if pairResolver != nil {
+		adapter := &ammAdapter{resolver: pairResolver}
 		deps.QuoteService = services.NewQuoteService(adapter)
 		if cbPoolClient == nil {
 			poolSvc := services.NewPoolStatusService(adapter)
@@ -383,7 +386,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	}
 
 	// Hub token clients for mint+approve (prerequisite for central-bank liquidity provision).
-	if hubTokenAAddr != "" && hubTokenBAddr != "" && hubRPC != "" && signerKey != "" && ammAddr != "" {
+	if hubTokenAAddr != "" && hubTokenBAddr != "" && hubRPC != "" && signerKey != "" {
 		chainID := int64(0)
 		if chainIDStr != "" {
 			bid := new(big.Int)
@@ -406,13 +409,23 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		if errA != nil || errB != nil {
 			log.Printf("warning: Hub tCeBM client init failed: tokenA=%v tokenB=%v", errA, errB)
 		} else {
-			tp, errTP := NewTokenPrepareAdapter(context.Background(), tA, tB, ammAddr)
+			tp, errTP := NewTokenPrepareAdapter(context.Background(), tA, tB, pairResolver)
 			if errTP != nil {
 				log.Printf("warning: Hub tokenPrepareAdapter init failed (hasRole check): %v", errTP)
 			} else {
 				deps.TokenPreparer = tp
 			}
 		}
+	}
+
+	// Sovereign dynamic model: when no static HUB_TOKEN_A/B_ADDRESS is configured
+	// (the per-pair sovereign deploy), still expose a token preparer backed only by
+	// the on-chain PairRegistry resolver. Every mint/approve resolves the pair's
+	// W-tokens + AMM from pool_pair, so the sovereign-seed (/liquidity/deposit-side)
+	// and token routes register without pinning a fixed pair via env.
+	if deps.TokenPreparer == nil && pairResolver != nil && signerKey != "" {
+		deps.TokenPreparer = NewDynamicTokenPrepareAdapter(pairResolver)
+		log.Printf("token preparer: dynamic per-pair mode (on-chain PairRegistry; no static HUB_TOKEN_A/B)")
 	}
 
 	// US2 services: Bridge + Liquidity Provision
@@ -426,8 +439,8 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		deps.BridgeBurnUnlockService = &bridgeBurnUnlockServiceWrapper{svc: bridgeBurnUnlockSvc}
 		deps.BridgePositionReader = services.NewBridgePositionReader(db)
 	}
-	if db != nil && ammClient != nil {
-		adapter := &ammAdapter{c: ammClient}
+	if db != nil && pairResolver != nil {
+		adapter := &ammAdapter{resolver: pairResolver}
 		commitRepo := NewPoolCommitRepository(db)
 		feeRepo := NewLPFeeEventRepository(db)
 		liquiditySvc := services.NewLiquidityProvisionServiceWithRepos(db, adapter, commitRepo, feeRepo)
@@ -445,9 +458,18 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	}
 
 	// US3 services: Circuit Breaker + Oversight
-	if db != nil && ammClient != nil {
-		adapter := &ammAdapter{c: ammClient}
+	if db != nil && pairResolver != nil {
+		adapter := &ammAdapter{resolver: pairResolver}
 		deps.CircuitBreakerService = services.NewCircuitBreakerService(db, adapter)
+	}
+	// Circuit-breaker institutional attestation is signed server-side with the CB's PKI
+	// key (PKI_DIR/<BANK_CODE>.key), so operators never supply a signature by hand.
+	if cfg.PKIDir != "" && cfg.BankCode != "" {
+		if cbSigner, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.BankCode); sErr == nil {
+			deps.CircuitBreakerSigner = cbSigner
+		} else {
+			log.Printf("[app] circuit-breaker attestation key unavailable for %q: %v (attestation left empty)", cfg.BankCode, sErr)
+		}
 	}
 	if db != nil {
 		deps.OversightService = services.NewOversightService(db)
@@ -463,7 +485,13 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			volumeRepo := newTransferVolumeRepository(db)
 			localChecker := services.NewTransferLimitChecker(limitRepo, volumeRepo)
 			transferLimitChecker = localChecker
-			deps.TransferLimitHandler = handlers.NewTransferLimitHandler(limitRepo)
+			sovereignCurrency := cfg.FiatSymbol
+			if sovereignCurrency == "" {
+				sovereignCurrency = os.Getenv("NATIVE_ASSET_SYMBOL")
+			}
+			deps.TransferLimitHandler = handlers.NewTransferLimitHandler(limitRepo).
+				WithFallbackBankCode(cfg.BankCode).
+				WithSovereignCurrency(sovereignCurrency)
 			deps.TransferLimitInternalHandler = handlers.NewTransferLimitInternalHandler(localChecker)
 		}
 	} else {
@@ -480,8 +508,8 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	}
 
 	// 009-commercial-cross-currency-swap: Wire orchestrator for cross-currency swaps (T014).
-	if db != nil && swapSvc != nil && bridgeLockMintSvc != nil && bridgeBurnUnlockSvc != nil && ammClient != nil {
-		adapter := &ammAdapter{c: ammClient}
+	if db != nil && swapSvc != nil && bridgeLockMintSvc != nil && bridgeBurnUnlockSvc != nil && pairResolver != nil {
+		adapter := &ammAdapter{resolver: pairResolver}
 		swapRepo := newCrossCurrencySwapRepository(db)
 		quoteRepo := newSwapQuoteRepository(db)
 		rollbackRepo := newSwapRollbackLogRepository(db)
@@ -503,11 +531,15 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 
 		var bridgeAssets *services.CrossCurrencyBridgeAssets
 		if resolvedHubCfg != nil {
+			// Derive this gateway's own sovereign currency from its native token symbol
+			// (e.g. tCeBM_BRL -> BRL) instead of hardcoding BRL/ARS; the source spoke follows
+			// the toolkit's "spoke-<currency>" convention. Generalizes to any sovereign spoke.
+			selfCurrency := currencyCodeFromSymbol(os.Getenv("NATIVE_ASSET_SYMBOL"))
 			bridgeAssets = services.CrossCurrencyBridgeAssetsFromHub(
 				resolvedHubCfg,
-				"BRL", "ARS",
+				selfCurrency, "",
 				os.Getenv("TOKEN_ADDRESS"),
-				"spoke-a",
+				"spoke-"+strings.ToLower(selfCurrency),
 			)
 		}
 		var bridgePoller services.BridgePositionPoller
@@ -586,7 +618,14 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		if transferLimitChecker != nil {
 			orchestrator = orchestrator.WithTransferLimitChecker(transferLimitChecker)
 		}
+		// Dynamic per-pair model: let Step 3 tell the Cacti relay which AMM to run
+		// its isPaused() gate against, resolved from the on-chain PairRegistry.
+		if pairResolver != nil {
+			orchestrator = orchestrator.WithAMMAddressResolver(&ammAddrResolverAdapter{r: pairResolver})
+		}
 		deps.CrossCurrencySwapOrchestrator = orchestrator
+		// Expose the swap repository for the paginated history endpoint (GET /amm/swap/cross-currency).
+		deps.CrossCurrencySwapLister = swapRepo
 
 		// 009-commercial-cross-currency-swap: Wire quote generator with 15s TTL (T030/T031).
 		var quoteReserve services.AMMReserveReader
@@ -615,6 +654,8 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			ChainID:         chainID,
 			PrivateKeyHex:   signerKey,
 			Timeout:         15 * time.Second,
+			// Enables ProposePair to deploy a dedicated per-pair AMM (empty amm_address path).
+			IdentityRegistryAddress: os.Getenv("HUB_IDENTITY_REGISTRY_ADDRESS"),
 		})
 		if err != nil {
 			log.Printf("warning: PairRegistry client init failed: %v", err)
@@ -693,8 +734,8 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			commitRepo := NewPoolCommitRepository(db)
 			lpRepo := newLPPositionRepository(db)
 			var sovereignAmm *ammAdapter
-			if ammClient != nil {
-				sovereignAmm = &ammAdapter{c: ammClient}
+			if pairResolver != nil {
+				sovereignAmm = &ammAdapter{resolver: pairResolver}
 			}
 			sovereignSvc, errSov := services.NewSovereignLiquidityServiceFromEnv(db, sovereignAmm, commitRepo, lpRepo)
 			if errSov != nil {
@@ -766,10 +807,10 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		// R2-CR-6: verify the relay-claimed swap on the Hub before any burn/mint, and
 		// consume each swap_tx_hash at most once. Without an AMM client the bridge-out
 		// endpoint fails closed rather than minting on the relay's word.
-		if ammClient != nil {
-			deps.CrossCurrencySwapVerifier = &swapVerifierAdapter{c: ammClient}
+		if pairResolver != nil {
+			deps.CrossCurrencySwapVerifier = &swapVerifierAdapter{resolver: pairResolver}
 		} else {
-			log.Printf("[app] WARNING: AMM client unavailable (AMM_CONTRACT_ADDRESS / HUB_BESU_RPC_URL) — cross-currency bridge-out will fail closed")
+			log.Printf("[app] WARNING: pair resolver unavailable (PAIR_REGISTRY_CONTRACT_ADDRESS / HUB_BESU_RPC_URL) — cross-currency bridge-out will fail closed")
 		}
 		deps.CrossCurrencyDuplicateFinder = bridgeBurnUnlockSvc
 	}
@@ -829,12 +870,27 @@ func (a *bridgeLockMintAdapter) LockAndEnqueue(ctx context.Context, ownerBankID,
 }
 
 // swapVerifierAdapter adapts ammclient SwapByTxHash to the handler's VerifiedSwap type (R2-CR-6).
+// In the dynamic per-pair model it resolves the pool's dedicated AMM from the
+// PairRegistry and verifies the LogSwap against THAT AMM; it falls back to the
+// client's configured AMM only when no pair/resolver is available.
 type swapVerifierAdapter struct {
-	c *ammclient.Client
+	resolver *pairAMMResolver
 }
 
-func (a *swapVerifierAdapter) VerifySwap(ctx context.Context, txHash string) (*handlers.VerifiedSwap, error) {
-	vs, err := a.c.SwapByTxHash(ctx, txHash)
+func (a *swapVerifierAdapter) VerifySwap(ctx context.Context, txHash, poolPair string) (*handlers.VerifiedSwap, error) {
+	if a.resolver == nil {
+		return nil, fmt.Errorf("swap verifier: no pair resolver configured")
+	}
+	// Resolve the pool's dedicated AMM (or the primary pool when no pool_pair is
+	// carried) and verify the LogSwap against THAT AMM — there is no default AMM.
+	c, err := a.resolver.ammFor(ctx, poolPair)
+	if poolPair == "" {
+		c, err = a.resolver.primaryClient(ctx)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("resolve AMM for pool %q: %w", poolPair, err)
+	}
+	vs, err := c.SwapByTxHash(ctx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -879,4 +935,26 @@ func (a *ammQuoteAdapter) GetPoolReserves(ctx context.Context, pair string) (str
 
 func (a *ammQuoteAdapter) GetFeeBps(ctx context.Context, pair string) (uint16, error) {
 	return a.adapter.GetFeeBpsForPair(ctx, pair)
+}
+
+// OutputIsTokenA reports whether buying targetCurrency on pair outputs TOKEN_A, so the
+// cross-currency quote is oriented to the requested direction (bidirectional pair).
+func (a *ammQuoteAdapter) OutputIsTokenA(ctx context.Context, pair, targetCurrency string) (bool, error) {
+	return a.adapter.resolver.OutputIsTokenA(ctx, pair, targetCurrency)
+}
+
+// ammAddrResolverAdapter exposes the per-pair resolver's on-chain AMM address
+// lookup to the cross-currency swap orchestrator (services.AMMAddressResolver).
+type ammAddrResolverAdapter struct {
+	r *pairAMMResolver
+}
+
+func (a *ammAddrResolverAdapter) AMMAddressFor(ctx context.Context, poolPair string) (string, error) {
+	return a.r.ammAddressFor(ctx, poolPair)
+}
+
+// OutputIsTokenA reports whether buying targetCurrency on poolPair outputs TOKEN_A,
+// so the cross-currency swap can run in either direction over one sovereign pair.
+func (a *ammAddrResolverAdapter) OutputIsTokenA(ctx context.Context, poolPair, targetCurrency string) (bool, error) {
+	return a.r.OutputIsTokenA(ctx, poolPair, targetCurrency)
 }
