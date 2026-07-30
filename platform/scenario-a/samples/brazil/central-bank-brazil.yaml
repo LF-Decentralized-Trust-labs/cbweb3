@@ -64,3 +64,13 @@ spec:
     - role: ROLE_NOC_ADMIN
       username: admin@brasil.noc.gov
       password: brasil-noc-local
+  # Per-entity launcher (distributed A/B entry point on this entity's host). "enable"
+  # runs the generic launcher image (pre-build once with launcher/build.sh) and writes
+  # this scenario's portal fragment; "disable" removes it. launcherPort is this entity's
+  # launcher host port — one launcher per host, so it is distinct per entity and the
+  # SAME value in Scenario A and B (so both scenarios share this entity's launcher).
+  launcher: enable
+  launcherPort: 5191
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

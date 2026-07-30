@@ -2,453 +2,510 @@
 
 import {
   Badge,
-  Button,
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-  Input,
-  Label,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Progress,
+  Separator,
+  cn,
+  toast,
 } from "@cbweb3/ui";
-import type { FormEvent } from "react";
-import { useEffect, useState } from "react";
+import { ArrowLeftRight, Copy, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { usePolling } from "../../hooks/usePolling";
-import { useAuthStore } from "../../stores/auth.store";
-import { usePaymentStore } from "../../stores";
-import { liquidityApi } from "../../services/api/liquidity.api";
-import { paymentApi } from "../../services/api";
-import type { LpBalanceResponse, PendingCommit } from "../../types/liquidity.types";
-import type { BalanceResponse } from "../../types/payment.types";
-import { currencyFromTokenSymbol, formatCeBM, formatTokenAmount } from "../../types";
-import type { MatchContext } from "./CooperativeLiquidityWizard";
-import { CooperativeLiquidityWizard } from "./CooperativeLiquidityWizard";
-import { classifyPoolSides, formatRemainingMs, poolSideInfo, remainingMsUntil, sideRoleLabel, truncateAddress } from "./format";
-import { useLiquidityStore } from "./liquidity.store";
+import { circuitBreakerApi, hubLiquidityApi, liquidityApi, paymentApi } from "../../services/api";
+import { currencyFromTokenSymbol, formatTokenAmount } from "../../types";
+import type { CircuitBreakerStatus } from "../../types/circuit-breaker.types";
+import type { PoolStatus } from "../../types/liquidity.types";
+import type { HubCurrency, HubPair } from "../../types/hub-liquidity.types";
 
-const configuredPoolPair = (import.meta.env.VITE_POOL_PAIR ?? "W-BRL-ARS").trim() || "W-BRL-ARS";
+const POOL_REFRESH_MS = 15_000;
+
+type BadgeVariant = "success" | "warning" | "destructive" | "outline" | "default";
+
+function truncate(value?: string): string {
+  if (!value) return "—";
+  return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+// codesFromPairId extracts the currency codes encoded in a pair id, in order.
+// e.g. "W-tCeBM_BRL-W-tCeBM_COP" -> ["BRL", "COP"]. Used as a fallback when the
+// on-chain currency registry does not map a token address to a code.
+function codesFromPairId(pairId: string): string[] {
+  return (pairId.match(/_([A-Za-z0-9]{2,})/g) ?? []).map((s) => s.slice(1));
+}
+
+// reserveNumber converts a wei reserve to a float for proportion math only
+// (display values go through formatTokenAmount, which keeps full precision).
+function reserveNumber(wei: string, decimals: number): number {
+  if (!wei || !/^\d+$/.test(wei)) return 0;
+  try {
+    return Number(BigInt(wei)) / 10 ** decimals;
+  } catch {
+    return 0;
+  }
+}
+
+function poolStatusVariant(status?: string): BadgeVariant {
+  switch (status) {
+    case "ACTIVE":
+      return "success";
+    case "PENDING_COUNTERPART":
+      return "warning";
+    default:
+      return "outline";
+  }
+}
+
+function poolStatusLabel(status?: string): string {
+  switch (status) {
+    case "ACTIVE":
+      return "Active";
+    case "PENDING_COUNTERPART":
+      return "Awaiting counterpart";
+    case "EMPTY":
+      return "Empty";
+    default:
+      return status ?? "Unknown";
+  }
+}
+
+function relativeTime(iso?: string): string {
+  if (!iso) return "—";
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "—";
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return new Date(then).toLocaleString();
+}
+
+async function copyToClipboard(value: string, label: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+    toast.success(`${label} copied`);
+  } catch {
+    toast.error("Could not copy to clipboard");
+  }
+}
+
+// The circuit breaker is per-pair (one AMM instance per pair). Treasury only reads it;
+// pausing/resuming stays in the governance portal.
+function breakerView(state?: string): {
+  variant: BadgeVariant;
+  label: string;
+  Icon: typeof ShieldCheck;
+  tone: string;
+  blurb: string;
+} {
+  switch (state) {
+    case "LIVE":
+      return {
+        variant: "success",
+        label: "Operational",
+        Icon: ShieldCheck,
+        tone: "text-emerald-600 dark:text-emerald-400",
+        blurb: "Swaps are open on this pool.",
+      };
+    case "HALTED":
+      return {
+        variant: "destructive",
+        label: "Paused",
+        Icon: ShieldAlert,
+        tone: "text-red-600 dark:text-red-400",
+        blurb: "A Central Bank triggered the circuit breaker. Swaps are suspended.",
+      };
+    case "RESUME_PENDING":
+      return {
+        variant: "warning",
+        label: "Resume pending",
+        Icon: ShieldQuestion,
+        tone: "text-amber-600 dark:text-amber-400",
+        blurb: "A resume proposal is awaiting the 2-of-N Central Bank quorum.",
+      };
+    default:
+      return {
+        variant: "outline",
+        label: "Unknown",
+        Icon: ShieldQuestion,
+        tone: "text-muted-foreground",
+        blurb: "Circuit breaker state is not available.",
+      };
+  }
+}
 
 export function LiquidityManagementPage() {
-  const poolStatus = useLiquidityStore((state) => state.poolStatus);
-  const lpPositions = useLiquidityStore((state) => state.lpPositions);
-  const status = useLiquidityStore((state) => state.status);
-  const error = useLiquidityStore((state) => state.error);
-  const fetchPoolStatus = useLiquidityStore((state) => state.fetchPoolStatus);
-  const removeLiquidity = useLiquidityStore((state) => state.removeLiquidity);
-  // const mintAndApprove = useLiquidityStore((state) => state.mintAndApprove);
-  const getOperationalSummary = useLiquidityStore((state) => state.getOperationalSummary);
-  const user = useAuthStore((state) => state.user);
-  const tokenDecimals = usePaymentStore((state) => state.tokenDecimals) ?? 18;
+  const [pairs, setPairs] = useState<HubPair[]>([]);
+  const [currencies, setCurrencies] = useState<HubCurrency[]>([]);
+  const [poolByPair, setPoolByPair] = useState<Record<string, PoolStatus>>({});
+  const [breakerByPair, setBreakerByPair] = useState<Record<string, CircuitBreakerStatus>>({});
+  const [selectedPairId, setSelectedPairId] = useState("");
+  const [nationalCurrency, setNationalCurrency] = useState("");
+  const [tokenDecimals, setTokenDecimals] = useState(18);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [removeLpId, setRemoveLpId] = useState("");
-  const [removePair, setRemovePair] = useState(configuredPoolPair);
-  const [removeProviderId, setRemoveProviderId] = useState("central-bank-a");
-
-  // const [approveAmount, setApproveAmount] = useState("");
-  // const [recipient, setRecipient] = useState("");
-  // const [showMintApprove, setShowMintApprove] = useState(false);
-  const [wizardOpen, setWizardOpen] = useState(false);
-  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
-  const [bannerCommit, setBannerCommit] = useState<PendingCommit | null>(null);
-  const [matchContext, setMatchContext] = useState<MatchContext | null>(null);
-
-  // Tick once per second so the coordination countdowns stay live between 5s polls.
-  const [nowMs, setNowMs] = useState(() => Date.now());
-
-  usePolling(
-    () => {
-      void fetchPoolStatus(configuredPoolPair);
-    },
-    5000,
-    true,
-  );
-
+  // Registry data (pairs + currencies) + this CB's own token (for the national currency
+  // sovereignty filter and reserve decimals) — fetched once.
   useEffect(() => {
-    const intervalId = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(intervalId);
-  }, []);
-
-  // On-chain CB position (013-amm-lp-shares): live CBW3-LP shares + the CB's own tCeBM balance.
-  const [lpBalance, setLpBalance] = useState<LpBalanceResponse | null>(null);
-  const [cbTokenBalance, setCbTokenBalance] = useState<BalanceResponse | null>(null);
-  useEffect(() => {
-    let active = true;
-    const load = async () => {
+    void (async () => {
       try {
-        const lp = await liquidityApi.getLpBalance();
-        if (active) setLpBalance(lp);
+        const [pairsRes, currenciesRes] = await Promise.all([
+          hubLiquidityApi.listPairs(),
+          hubLiquidityApi.listCurrencies(),
+        ]);
+        setPairs(pairsRes.pairs ?? []);
+        setCurrencies(currenciesRes.currencies ?? []);
       } catch {
-        // endpoint optional (older gateways) — card shows "-"
+        setError("Unable to load liquidity pools. Please try again.");
+      } finally {
+        setLoading(false);
       }
       try {
         const bal = await paymentApi.getBalance();
-        if (active) setCbTokenBalance(bal);
+        setNationalCurrency(currencyFromTokenSymbol(bal.symbol));
+        setTokenDecimals(bal.decimals ?? 18);
       } catch {
-        // payment-orchestrator unavailable — card shows "-"
+        /* balance optional — falls back to showing all pools */
       }
-    };
-    void load();
-    const id = window.setInterval(load, 15000);
-    return () => {
-      active = false;
-      window.clearInterval(id);
-    };
+    })();
   }, []);
 
-  // National currency is sourced on-chain from the CB's own tCeBM symbol (falls back to env
-  // VITE_FIAT_SYMBOL until the balance loads); the foreign side comes from the pair id. This
-  // classifies each pool side as National/Foreign relative to the viewing Central Bank.
-  const nationalCurrency = currencyFromTokenSymbol(cbTokenBalance?.symbol);
-  const poolSides = classifyPoolSides(configuredPoolPair, nationalCurrency);
+  const addressToCode = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of currencies) map.set(c.token_address.toLowerCase(), currencyFromTokenSymbol(c.symbol));
+    return map;
+  }, [currencies]);
 
-  const handleRemoveLiquidity = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    await removeLiquidity({
-      lp_id: removeLpId,
-      pool_pair: removePair,
-      provider_bank_id: removeProviderId,
+  const codeOf = (addr: string) => addressToCode.get(addr.toLowerCase()) ?? "";
+
+  const pairLabel = (p: HubPair): { a: string; b: string } => {
+    const codes = codesFromPairId(p.pair_id);
+    return {
+      a: codeOf(p.token_a_address) || codes[0] || truncate(p.token_a_address),
+      b: codeOf(p.token_b_address) || codes[1] || truncate(p.token_b_address),
+    };
+  };
+
+  // Sovereignty filter: only pools that include this Central Bank's national currency
+  // (the corridors it provisions). Pairs without it are not managed here.
+  const isNationalPair = (p: HubPair) => {
+    if (!nationalCurrency) return false;
+    const { a, b } = pairLabel(p);
+    return a === nationalCurrency || b === nationalCurrency;
+  };
+
+  // Filter to the CB's national-currency corridors. If the national currency cannot be
+  // determined (balance/symbol unavailable), fall back to showing all pools rather than
+  // hiding everything.
+  const visiblePairs = useMemo(() => {
+    const list = nationalCurrency ? pairs.filter(isNationalPair) : pairs;
+    return [...list].sort((x, y) => {
+      if (x.status === y.status) return pairLabel(x).a.localeCompare(pairLabel(y).a);
+      return x.status === "ACTIVE" ? -1 : 1;
     });
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairs, nationalCurrency, addressToCode]);
 
-  // const handleMintAndApprove = async (event: FormEvent<HTMLFormElement>) => {
-  //   event.preventDefault();
-  //   await mintAndApprove({
-  //     amount: approveAmount,
-  //     recipient: recipient.trim() || undefined,
-  //   });
-  // };
+  const refreshLiveData = useMemo(
+    () => async () => {
+      if (visiblePairs.length === 0) return;
+      const entries = await Promise.all(
+        visiblePairs.map(async (p) => {
+          const [pool, breaker] = await Promise.all([
+            liquidityApi.getPoolStatus(p.pair_id).catch(() => null),
+            circuitBreakerApi.getStatus(p.pair_id).catch(() => null),
+          ]);
+          return { pairId: p.pair_id, pool, breaker };
+        }),
+      );
+      setPoolByPair((prev) => {
+        const next = { ...prev };
+        for (const e of entries) if (e.pool) next[e.pairId] = e.pool;
+        return next;
+      });
+      setBreakerByPair((prev) => {
+        const next = { ...prev };
+        for (const e of entries) if (e.breaker) next[e.pairId] = e.breaker;
+        return next;
+      });
+    },
+    [visiblePairs],
+  );
 
-  const providerId = user?.institutionId ?? "";
-  const poolActive = poolStatus?.pool_status === "ACTIVE";
-  // Your own open commit (local DB, keyed by provider) — waiting for a counterpart.
-  const ownPendingCommit =
-    !poolActive
-      ? (poolStatus?.pending_commits ?? []).find((commit) => commit.provider_id === providerId) ?? null
-      : null;
-  // A counterpart CB's on-chain commit on the opposite side — waiting for you to match.
-  const counterpartCommit = !poolActive ? poolStatus?.counterpart_commit ?? null : null;
+  usePolling(() => void refreshLiveData(), POOL_REFRESH_MS, visiblePairs.length > 0);
 
-  const handleOpenWizard = () => {
-    setWizardOpen(true);
-    setWizardStep(1);
-    setBannerCommit(null);
-    setMatchContext(null);
-  };
-
-  const handleMonitorPendingCommit = () => {
-    if (!ownPendingCommit) {
+  useEffect(() => {
+    if (visiblePairs.length === 0) {
+      setSelectedPairId("");
       return;
     }
-    setBannerCommit(ownPendingCommit);
-    setMatchContext(null);
-    setWizardStep(3);
-    setWizardOpen(true);
-  };
-
-  const handleMatchCounterpart = () => {
-    if (!counterpartCommit) {
-      return;
+    if (!visiblePairs.some((p) => p.pair_id === selectedPairId)) {
+      setSelectedPairId(visiblePairs[0].pair_id);
     }
-    // Route the matcher through Lock-Mint first — their currency differs, so they must
-    // mint their own side's tokens before committing. Pre-fill the FX-suggested amount
-    // (editable); fall back to free entry when no oracle rate is available.
-    setMatchContext({
-      poolPair: configuredPoolPair,
-      suggestedAmount: counterpartCommit.suggested_match_amount ?? "",
-      counterpartAmount: counterpartCommit.amount,
-      counterpartSide: counterpartCommit.side,
-    });
-    setBannerCommit(null);
-    setWizardStep(1);
-    setWizardOpen(true);
-  };
+  }, [visiblePairs, selectedPairId]);
 
-  const handleSelectLpForRemoval = (lpId: string, poolPair: string, provider: string) => {
-    setRemoveLpId(lpId);
-    setRemovePair(poolPair);
-    setRemoveProviderId(provider || providerId || "central-bank-a");
-  };
+  const activeCount = visiblePairs.filter((p) => p.status === "ACTIVE").length;
+  const pausedCount = visiblePairs.filter((p) => breakerByPair[p.pair_id]?.state === "HALTED").length;
 
-  const handleWizardDone = () => {
-    setWizardOpen(false);
-    setWizardStep(1);
-    setBannerCommit(null);
-    setMatchContext(null);
-  };
-
-  const summary = getOperationalSummary();
+  const selected = visiblePairs.find((p) => p.pair_id === selectedPairId) ?? null;
+  const selectedPool = selected ? poolByPair[selected.pair_id] : undefined;
+  const selectedBreaker = selected ? breakerByPair[selected.pair_id] : undefined;
 
   return (
     <div className="space-y-4">
+      {/* Header */}
       <Card>
         <CardHeader>
-          <CardTitle>Pool Status</CardTitle>
-          <CardDescription>Real-time reserve and ratio state for {configuredPoolPair} pool.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {poolStatus?.imbalance_flag ? (
-            <Badge variant="warning">Pool imbalance detected</Badge>
-          ) : (
-            <Badge variant="success">Pool balanced</Badge>
-          )}
-          <p className="text-sm">Reserve — {sideRoleLabel(poolSides.a, { fallbackLabel: "Token A" })}: {poolStatus?.reserve_a ? formatTokenAmount(poolStatus.reserve_a, tokenDecimals) : "-"}</p>
-          <p className="text-sm">Reserve — {sideRoleLabel(poolSides.b, { fallbackLabel: "Token B" })}: {poolStatus?.reserve_b ? formatTokenAmount(poolStatus.reserve_b, tokenDecimals) : "-"}</p>
-          <p className="text-sm">Current ratio: {poolStatus?.current_ratio ?? "-"}</p>
-          <p className="text-xs text-muted-foreground">Updated at: {poolStatus?.updated_at ?? "-"}</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Central Bank On-Chain Position</CardTitle>
+          <CardTitle>Liquidity Management</CardTitle>
           <CardDescription>
-            Live from the Hub AMM contract — LP shares (CBW3-LP) are the on-chain source of truth for
-            pool ownership.
+            Cross-currency pools this Central Bank provisions{nationalCurrency ? ` (${nationalCurrency})` : ""} — only
+            pairs that include your national currency. Read-only view.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-2 sm:grid-cols-3">
-          <div>
-            <p className="text-xs text-muted-foreground">LP shares (CBW3-LP)</p>
-            <p className="text-sm font-medium">
-              {lpBalance ? formatTokenAmount(lpBalance.lp_shares, tokenDecimals) : "-"}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Pool ownership</p>
-            <p className="text-sm font-medium">
-              {lpBalance ? `${lpBalance.share_percentage.toFixed(2)}%` : "-"}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">tCeBM balance</p>
-            <p className="text-sm font-medium">
-              {cbTokenBalance
-                ? formatCeBM(cbTokenBalance.balance, cbTokenBalance.decimals ?? tokenDecimals, cbTokenBalance.symbol)
-                : "-"}
-            </p>
-          </div>
-        </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      {/* Summary */}
+      <section className="grid gap-4 md:grid-cols-3">
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Sovereign Phase</CardTitle>
+          <CardHeader className="pb-2">
+            <CardDescription>Pools managed</CardDescription>
+            <CardTitle className="text-2xl">{visiblePairs.length}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant="outline">{summary.phase}</Badge>
-          </CardContent>
         </Card>
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Commit Status</CardTitle>
+          <CardHeader className="pb-2">
+            <CardDescription>Active</CardDescription>
+            <CardTitle className="text-2xl text-emerald-600 dark:text-emerald-400">{activeCount}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Badge variant={summary.commitStatus === "EXECUTED" ? "success" : "outline"}>
-              {summary.commitStatus}
-            </Badge>
-          </CardContent>
         </Card>
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Recommended Action</CardTitle>
+          <CardHeader className="pb-2">
+            <CardDescription>Paused (circuit breaker)</CardDescription>
+            <CardTitle className={cn("text-2xl", pausedCount > 0 ? "text-red-600 dark:text-red-400" : "")}>
+              {pausedCount}
+            </CardTitle>
           </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              {summary.hint ??
-                (summary.poolStatus === "ACTIVE"
-                  ? "Pool is ACTIVE. Commercial swap flow can proceed."
-                  : "Wait for bridge/commit progression before activating the pool.")}
-            </p>
-          </CardContent>
         </Card>
-      </div>
+      </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Liquidity Coordination</CardTitle>
-          <CardDescription>Cross-CB commit state for {configuredPoolPair}, read live from the Hub.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {poolActive ? (
-            <div className="space-y-1">
-              <Badge variant="success">Pool ACTIVE</Badge>
-              <p className="text-sm">Both sides are funded. Reserves {sideRoleLabel(poolSides.a, { short: true, fallbackLabel: "A" })} {poolStatus?.reserve_a ? formatTokenAmount(poolStatus.reserve_a, tokenDecimals) : "-"} / {sideRoleLabel(poolSides.b, { short: true, fallbackLabel: "B" })} {poolStatus?.reserve_b ? formatTokenAmount(poolStatus.reserve_b, tokenDecimals) : "-"}.</p>
-            </div>
-          ) : counterpartCommit ? (
-            <div className="space-y-3 rounded border border-amber-300 bg-amber-50 p-3">
-              <Badge variant="warning">Counterpart waiting on you</Badge>
-              <p className="text-sm">
-                A counterpart central bank committed <strong>{formatTokenAmount(counterpartCommit.amount, tokenDecimals)} tCeBM</strong> to the{" "}
-                <strong>{sideRoleLabel(poolSideInfo(counterpartCommit.side, configuredPoolPair, nationalCurrency), { fallbackLabel: `side ${counterpartCommit.side}` })}</strong> side and is waiting for your matching deposit.
-              </p>
-              {counterpartCommit.suggested_match_amount ? (
-                <p className="text-sm">
-                  Suggested match on your side (at current FX rate):{" "}
-                  <strong>{formatTokenAmount(counterpartCommit.suggested_match_amount, tokenDecimals)} tCeBM</strong>
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  No FX rate available — you’ll set your own deposit amount.
-                </p>
-              )}
-              <p className="text-xs text-muted-foreground">
-                Signer {truncateAddress(counterpartCommit.signer_address)} · Expires in{" "}
-                {formatRemainingMs(remainingMsUntil(counterpartCommit.expires_at, nowMs))}
-              </p>
-              <Button onClick={handleMatchCounterpart}>Match & Activate Pool</Button>
-            </div>
-          ) : ownPendingCommit ? (
-            <div className="space-y-3">
-              <Badge variant="outline">Waiting for counterpart</Badge>
-              <p className="text-sm">
-                Your commit {ownPendingCommit.commit_id} ({sideRoleLabel(poolSideInfo(ownPendingCommit.side, configuredPoolPair, nationalCurrency), { fallbackLabel: `side ${ownPendingCommit.side}` })}) is registered and awaiting a
-                counterpart deposit.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Expires in {formatRemainingMs(remainingMsUntil(ownPendingCommit.expires_at, nowMs))}
-              </p>
-              <Button onClick={handleMonitorPendingCommit}>Monitor Pending Commit</Button>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No open liquidity intents for this pool. Start a commit to seed your side.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      {wizardOpen ? (
-        <CooperativeLiquidityWizard
-          initialStep={wizardStep}
-          pendingCommit={bannerCommit}
-          matchContext={matchContext}
-          onDone={handleWizardDone}
-          onSelectLpForRemoval={handleSelectLpForRemoval}
-        />
+      {error ? (
+        <Card>
+          <CardContent className="py-6 text-sm text-destructive">{error}</CardContent>
+        </Card>
+      ) : loading ? (
+        <Card>
+          <CardContent className="py-6 text-sm text-muted-foreground">Loading pools…</CardContent>
+        </Card>
+      ) : visiblePairs.length === 0 ? (
+        <Card>
+          <CardContent className="py-6 text-sm text-muted-foreground">
+            {pairs.length === 0
+              ? "No liquidity pools have been created on the hub yet."
+              : `No pools include your national currency${nationalCurrency ? ` (${nationalCurrency})` : ""} yet. Propose a pair in Liquidity Provisioning.`}
+          </CardContent>
+        </Card>
       ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle>Cooperative Liquidity</CardTitle>
-            <CardDescription>Use the guided wizard for Mint & Approve, Commit, Monitor, and Success.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={handleOpenWizard}>Add Cooperative Liquidity</Button>
-          </CardContent>
-        </Card>
+        <section className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_1fr]">
+          {/* Pool list */}
+          <div className="space-y-2">
+            {visiblePairs.map((p) => {
+              const { a, b } = pairLabel(p);
+              const breaker = breakerByPair[p.pair_id];
+              const isSelected = p.pair_id === selectedPairId;
+              const paused = breaker?.state === "HALTED";
+              return (
+                <button
+                  key={p.pair_id}
+                  type="button"
+                  onClick={() => setSelectedPairId(p.pair_id)}
+                  className={cn(
+                    "w-full rounded-lg border p-3 text-left transition-colors",
+                    isSelected
+                      ? "border-primary bg-primary/5 shadow-sm"
+                      : "border-border hover:border-primary/40 hover:bg-accent",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      {a} <ArrowLeftRight className="h-3.5 w-3.5 text-muted-foreground" /> {b}
+                    </span>
+                    <Badge variant={poolStatusVariant(p.status)}>{poolStatusLabel(p.status)}</Badge>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                    {paused ? (
+                      <span className="flex items-center gap-1 text-red-600 dark:text-red-400">
+                        <ShieldAlert className="h-3.5 w-3.5" /> Paused
+                      </span>
+                    ) : breaker?.state === "LIVE" ? (
+                      <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                        <ShieldCheck className="h-3.5 w-3.5" /> Live
+                      </span>
+                    ) : (
+                      <span>{breaker?.state ?? "…"}</span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Detail panel */}
+          {selected ? (
+            <PoolDetail
+              pair={selected}
+              label={pairLabel(selected)}
+              pool={selectedPool}
+              breaker={selectedBreaker}
+              tokenDecimals={tokenDecimals}
+            />
+          ) : null}
+        </section>
       )}
+    </div>
+  );
+}
 
-      <div className="grid gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Remove Liquidity</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form className="space-y-3" onSubmit={handleRemoveLiquidity}>
-              <div className="space-y-1">
-                <Label htmlFor="lp_id">LP ID</Label>
-                <Input id="lp_id" value={removeLpId} onChange={(event) => setRemoveLpId(event.target.value)} required />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="remove_pool_pair">Pool Pair</Label>
-                <Input id="remove_pool_pair" value={removePair} onChange={(event) => setRemovePair(event.target.value)} required />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="remove_provider_bank_id">Provider Bank ID</Label>
-                <Input id="remove_provider_bank_id" value={removeProviderId} onChange={(event) => setRemoveProviderId(event.target.value)} required />
-              </div>
-              <Button type="submit" variant="outline" disabled={status === "loading"}>
-                {status === "loading" ? "Submitting..." : "Remove Liquidity"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
+function PoolDetail({
+  pair,
+  label,
+  pool,
+  breaker,
+  tokenDecimals,
+}: {
+  pair: HubPair;
+  label: { a: string; b: string };
+  pool?: PoolStatus;
+  breaker?: CircuitBreakerStatus;
+  tokenDecimals: number;
+}) {
+  const bv = breakerView(breaker?.state);
+  const rA = reserveNumber(pool?.reserve_a ?? "0", tokenDecimals);
+  const rB = reserveNumber(pool?.reserve_b ?? "0", tokenDecimals);
+  const total = rA + rB;
+  const pctA = total > 0 ? Math.round((rA / total) * 100) : 0;
 
-      {/* <Card>
-        <CardHeader>
-          <CardTitle>MintAndApprove</CardTitle>
-          <CardDescription>Pre-fund and approve AMM spending for liquidity operations.</CardDescription>
-          <Button variant="outline" onClick={() => setShowMintApprove((value) => !value)}>
-            {showMintApprove ? "Hide Panel" : "Show Panel"}
-          </Button>
-        </CardHeader>
-        {showMintApprove ? (
-          <CardContent>
-            <form className="space-y-3" onSubmit={handleMintAndApprove}>
-              <div className="space-y-1">
-                <Label htmlFor="approve_amount">Amount</Label>
-                <Input id="approve_amount" value={approveAmount} onChange={(event) => setApproveAmount(event.target.value)} inputMode="numeric" pattern="[0-9]+" required />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="recipient">Recipient (optional)</Label>
-                <Input id="recipient" value={recipient} onChange={(event) => setRecipient(event.target.value)} />
-              </div>
-              <Button type="submit" disabled={status === "loading"}>
-                {status === "loading" ? "Submitting..." : "Submit MintAndApprove"}
-              </Button>
-            </form>
-          </CardContent>
-        ) : null}
-      </Card> */}
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-2xl">
+            {label.a} <ArrowLeftRight className="h-5 w-5 text-muted-foreground" /> {label.b}
+          </CardTitle>
+          <Badge variant={poolStatusVariant(pair.status)}>{poolStatusLabel(pair.status)}</Badge>
+        </div>
+        <CardDescription className="break-all">Pair id: {pair.pair_id}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* Circuit breaker banner */}
+        <div
+          className={cn(
+            "flex items-start gap-3 rounded-lg border p-3",
+            breaker?.state === "HALTED"
+              ? "border-red-500/30 bg-red-500/5"
+              : breaker?.state === "LIVE"
+                ? "border-emerald-500/30 bg-emerald-500/5"
+                : "border-border bg-muted/30",
+          )}
+        >
+          <bv.Icon className={cn("mt-0.5 h-5 w-5 shrink-0", bv.tone)} />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-medium">Circuit breaker</span>
+              <Badge variant={bv.variant}>{bv.label}</Badge>
+            </div>
+            <p className="mt-0.5 text-sm text-muted-foreground">{bv.blurb}</p>
+            {breaker?.state === "HALTED" ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {breaker.pause_reason ? `Reason: ${breaker.pause_reason}. ` : ""}
+                {breaker.pause_initiator ? `Initiated by ${breaker.pause_initiator}.` : ""}
+              </p>
+            ) : null}
+          </div>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>LP Positions (Session)</CardTitle>
-          <CardDescription>Positions are session-only and populated from Add Liquidity responses.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>LP ID</TableHead>
-                <TableHead>Pool Pair</TableHead>
-                <TableHead>Provider</TableHead>
-                <TableHead>{sideRoleLabel(poolSides.a, { fallbackLabel: "Token A" })}</TableHead>
-                <TableHead>{sideRoleLabel(poolSides.b, { fallbackLabel: "Token B" })}</TableHead>
-                <TableHead>LP Shares (on-chain)</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Added At</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {lpPositions.map((position) => (
-                <TableRow key={position.lp_id}>
-                  <TableCell className="font-mono text-xs">{position.lp_id}</TableCell>
-                  <TableCell>{position.pool_pair}</TableCell>
-                  <TableCell>{position.provider_bank_id}</TableCell>
-                  <TableCell>{formatTokenAmount(position.token_a_contributed, tokenDecimals)}</TableCell>
-                  <TableCell>{formatTokenAmount(position.token_b_contributed, tokenDecimals)}</TableCell>
-                  <TableCell>{formatTokenAmount(position.lp_shares, tokenDecimals)}</TableCell>
-                  <TableCell>
-                    <Badge variant={position.status === "ACTIVE" ? "success" : "outline"}>{position.status}</Badge>
-                  </TableCell>
-                  <TableCell>{position.added_at}</TableCell>
-                </TableRow>
-              ))}
-              {lpPositions.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground">
-                    No LP positions in this session.
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-          {error === "Position not found or already withdrawn" ? (
-            <p className="mt-3 text-sm text-destructive">Position not found or already withdrawn</p>
-          ) : null}
-          {error && error !== "Position not found or already withdrawn" ? (
-            <p className="mt-3 text-sm text-destructive">{error}</p>
-          ) : null}
-        </CardContent>
-      </Card>
+        {/* Reserves + balance bar */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium">Reserves</span>
+            {pool?.imbalance_flag ? <Badge variant="warning">Imbalanced</Badge> : null}
+          </div>
+          <Progress value={pctA} className="h-2" />
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>
+              {label.a}: <span className="font-mono">{pool ? formatTokenAmount(pool.reserve_a, tokenDecimals) : "—"}</span>
+            </span>
+            <span>
+              {label.b}: <span className="font-mono">{pool ? formatTokenAmount(pool.reserve_b, tokenDecimals) : "—"}</span>
+            </span>
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Metrics grid */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Metric label="Current ratio" value={pool?.current_ratio ?? "—"} />
+          <Metric
+            label="Fee rate"
+            value={pool?.fee_rate_bps != null ? `${(pool.fee_rate_bps / 100).toFixed(2)}%` : "—"}
+          />
+          <Metric label="Liquidity providers" value={pool?.total_lp_count != null ? String(pool.total_lp_count) : "—"} />
+          <Metric label="Pool state" value={poolStatusLabel(pool?.pool_status ?? pair.status)} />
+          <Metric label="Last updated" value={relativeTime(pool?.updated_at)} />
+        </div>
+
+        <Separator />
+
+        {/* On-chain references */}
+        <div className="space-y-2 text-sm">
+          <AddressRow label="AMM contract" value={pair.amm_address} />
+          <AddressRow label={`${label.a} token`} value={pair.token_a_address} />
+          <AddressRow label={`${label.b} token`} value={pair.token_b_address} />
+          {pair.proposer_cb ? <KeyVal label="Proposer CB" value={pair.proposer_cb} /> : null}
+          {pair.confirmer_cb ? <KeyVal label="Confirmer CB" value={pair.confirmer_cb} /> : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-0.5 font-mono text-sm font-medium">{value}</p>
+    </div>
+  );
+}
+
+function KeyVal({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium">{value}</span>
+    </div>
+  );
+}
+
+function AddressRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-muted-foreground">{label}</span>
+      <button
+        type="button"
+        onClick={() => void copyToClipboard(value, label)}
+        className="flex items-center gap-1 font-mono text-xs hover:text-primary"
+        title={value}
+      >
+        {truncate(value)}
+        <Copy className="h-3 w-3" />
+      </button>
     </div>
   );
 }

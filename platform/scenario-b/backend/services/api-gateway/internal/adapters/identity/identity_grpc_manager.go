@@ -5,6 +5,7 @@ package identity
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
@@ -63,9 +64,20 @@ func (m *IdentityGRPCManager) GetKYCStatus(ctx context.Context, subject string) 
 }
 
 // GetStatus satisfies KYCChecker (sync fallback — uses background context).
+// The KYCChecker signature has no error return, so a dependency failure cannot
+// be propagated here; it is logged (silent swallowing is prohibited) and mapped
+// to KYCPending, which the allowlist-based AML gate treats as "not cleared"
+// (fail-closed). Callers that must distinguish a dependency error from a real
+// PENDING status should use GetKYCStatus, which returns the error (R2-H-7).
 func (m *IdentityGRPCManager) GetStatus(subject string) domain.KYCStatus {
 	s, err := m.GetKYCStatus(context.Background(), subject)
 	if err != nil {
+		slog.Error("kyc status lookup failed; defaulting to PENDING (fail-closed)",
+			"service", "api-gateway",
+			"event", "kyc_status_lookup",
+			"subject", subject,
+			"error", err.Error(),
+		)
 		return domain.KYCPending
 	}
 	return s

@@ -22,12 +22,33 @@ type TransferLimitServiceIface interface {
 
 // TransferLimitHandler handles /api/v2/governance/transfer-limits endpoints.
 type TransferLimitHandler struct {
-	svc TransferLimitServiceIface
+	svc               TransferLimitServiceIface
+	fallbackBankCode  string
+	sovereignCurrency string
 }
 
 // NewTransferLimitHandler creates a TransferLimitHandler.
 func NewTransferLimitHandler(svc TransferLimitServiceIface) *TransferLimitHandler {
 	return &TransferLimitHandler{svc: svc}
+}
+
+// WithFallbackBankCode sets the central-bank identity to use when the token carries no
+// BankID. CB operator tokens (governance/treasury) authenticate via client credentials
+// and may omit a bankId claim; this gateway's own BANK_CODE identifies the central bank
+// it belongs to, so limits stay correctly scoped. Mirrors the cross-currency handler.
+func (h *TransferLimitHandler) WithFallbackBankCode(code string) *TransferLimitHandler {
+	h.fallbackBankCode = strings.TrimSpace(code)
+	return h
+}
+
+// WithSovereignCurrency sets this central bank's own currency (its spoke's sovereign
+// currency — FIAT_SYMBOL if configured, else NATIVE_ASSET_SYMBOL). It is used as the
+// default currency for new limits so a CB never has to type a foreign currency; the
+// value matches what the transfer-limit checker uses at enforcement. Also surfaced in
+// the list response so the UI can display it read-only.
+func (h *TransferLimitHandler) WithSovereignCurrency(currency string) *TransferLimitHandler {
+	h.sovereignCurrency = strings.TrimSpace(currency)
+	return h
 }
 
 // createTransferLimitRequest is the JSON body for POST /api/v2/governance/transfer-limits.
@@ -44,6 +65,9 @@ type createTransferLimitRequest struct {
 func (h *TransferLimitHandler) CreateTransferLimit(c *fiber.Ctx) error {
 	cbID := centralBankIDFromClaims(c)
 	if cbID == "" {
+		cbID = h.fallbackBankCode
+	}
+	if cbID == "" {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "central bank identity required"})
 	}
 
@@ -55,14 +79,21 @@ func (h *TransferLimitHandler) CreateTransferLimit(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "max_amount required"})
 	}
 
-	if req.ParticipantID != "" && !sameSuffix(cbID, req.ParticipantID) {
+	if req.ParticipantID != "" && differentSpoke(cbID, req.ParticipantID) {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error":      "participant does not belong to your spoke",
 			"error_code": "PARTICIPANT_SPOKE_MISMATCH",
 		})
 	}
 
-	limit, err := h.svc.Create(c.Context(), cbID, req.ParticipantID, req.Currency, req.MaxAmount)
+	// A CB only sets limits in its own sovereign currency; default to it when the
+	// client omits the field (the UI shows it read-only). Matches the checker's key.
+	currency := strings.TrimSpace(req.Currency)
+	if currency == "" {
+		currency = h.sovereignCurrency
+	}
+
+	limit, err := h.svc.Create(c.Context(), cbID, req.ParticipantID, currency, req.MaxAmount)
 	if err != nil {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -74,6 +105,9 @@ func (h *TransferLimitHandler) CreateTransferLimit(c *fiber.Ctx) error {
 func (h *TransferLimitHandler) ListTransferLimits(c *fiber.Ctx) error {
 	cbID := centralBankIDFromClaims(c)
 	if cbID == "" {
+		cbID = h.fallbackBankCode
+	}
+	if cbID == "" {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "central bank identity required"})
 	}
 
@@ -81,13 +115,16 @@ func (h *TransferLimitHandler) ListTransferLimits(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.JSON(fiber.Map{"limits": limits})
+	return c.JSON(fiber.Map{"limits": limits, "sovereign_currency": h.sovereignCurrency})
 }
 
 // DeleteTransferLimit handles DELETE /api/v2/governance/transfer-limits/:id.
 // Only the CB that created the limit may delete it.
 func (h *TransferLimitHandler) DeleteTransferLimit(c *fiber.Ctx) error {
 	cbID := centralBankIDFromClaims(c)
+	if cbID == "" {
+		cbID = h.fallbackBankCode
+	}
 	if cbID == "" {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "central bank identity required"})
 	}
@@ -115,8 +152,12 @@ func centralBankIDFromClaims(c *fiber.Ctx) string {
 	return strings.TrimSpace(claims.BankID)
 }
 
-// sameSuffix reports whether two bank codes share the same spoke suffix ("-a" or "-b").
-func sameSuffix(cbID, participantID string) bool {
+// differentSpoke reports whether two bank codes clearly belong to DIFFERENT spokes.
+// It only blocks the unambiguous demo case where both ids carry a "-a"/"-b" spoke
+// suffix and they differ. Real spoke ids (e.g. "cb3", "central-bank-colombia") carry
+// no such suffix, so they are allowed — the limit stays scoped to the CB's own id
+// (central_bank_id) and is only ever consulted for that CB at enforcement.
+func differentSpoke(cbID, participantID string) bool {
 	suffix := func(s string) string {
 		s = strings.ToLower(strings.TrimSpace(s))
 		if strings.HasSuffix(s, "-a") {
@@ -127,5 +168,6 @@ func sameSuffix(cbID, participantID string) bool {
 		}
 		return ""
 	}
-	return suffix(cbID) == suffix(participantID) && suffix(cbID) != ""
+	a, b := suffix(cbID), suffix(participantID)
+	return a != "" && b != "" && a != b
 }

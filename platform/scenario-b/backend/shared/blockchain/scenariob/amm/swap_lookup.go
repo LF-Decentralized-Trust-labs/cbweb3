@@ -53,6 +53,29 @@ func (c *Client) SwapByTxHash(ctx context.Context, txHash string) (*VerifiedSwap
 	return ParseSwapLogs(receipt.Logs, c.contract)
 }
 
+// SwapByTxHashAt is SwapByTxHash but verifies the LogSwap was emitted by the given
+// AMM address instead of the client's configured contract. Used by the dynamic
+// per-pair model, where the trusted AMM is the pool's dedicated AMM (resolved from
+// the PairRegistry), not a single fixed contract.
+func (c *Client) SwapByTxHashAt(ctx context.Context, txHash, ammAddress string) (*VerifiedSwap, error) {
+	h := strings.TrimSpace(txHash)
+	if !strings.HasPrefix(h, "0x") || len(h) != 66 {
+		return nil, fmt.Errorf("amm: invalid swap tx hash %q", txHash)
+	}
+	amm := strings.TrimSpace(ammAddress)
+	if !common.IsHexAddress(amm) {
+		return nil, fmt.Errorf("amm: invalid AMM address %q", ammAddress)
+	}
+	receipt, err := c.ec.TransactionReceipt(ctx, common.HexToHash(h))
+	if err != nil {
+		return nil, fmt.Errorf("amm: swap tx %s not found on Hub: %w", h, err)
+	}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		return nil, fmt.Errorf("amm: swap tx %s reverted", h)
+	}
+	return ParseSwapLogs(receipt.Logs, common.HexToAddress(amm))
+}
+
 // ParseSwapLogs extracts the swap facts from a receipt's logs.
 //
 // Only a LogSwap emitted by the trusted AMM address is accepted — any contract can

@@ -1,0 +1,18 @@
+version: cbweb3b/spoke-bundle/v1
+spokeId: spoke-a
+chainId: 1338
+enode: "enode://abc123@host.docker.internal:31303"
+spokeRpc: http://host.docker.internal:8645
+spokeWs: ws://host.docker.internal:8655
+genesis: |
+  {
+    "config": { "chainId": 1338, "qbft": { "epochlength": 30000, "blockperiodseconds": 2 } },
+    "gasLimit": "0x1fffffffffffff",
+    "difficulty": "0x1",
+    "alloc": {}
+  }
+contracts:
+  identityRegistry: "0x2000000000000000000000000000000000000001"
+  tCeBM: "0x2000000000000000000000000000000000000002"
+  spokeBridge: "0x2000000000000000000000000000000000000003"
+  fCeBM: "0x2000000000000000000000000000000000000004"

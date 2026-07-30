@@ -1,0 +1,38 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-a
+spec:
+  scenario: "b"
+  environment: local
+  mode: found-spoke
+  topology:
+    role: central-bank
+  displayName: "Central Bank A"
+  spoke:
+    id: spoke-a                   # exemplo; N spokes, sem conjunto fixo
+    chainId: 1338
+    currency: BRL
+  hubBundleRef: ./bundles/hub-cbweb3.bundle.yaml
+  pair:
+    proposerCB: central-bank-a
+    confirmerCB: central-bank-b
+    symbolA: BRL
+    symbolB: ARS
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 8645 }
+    ws:   { port: 8655 }
+    p2p:  { port: 31303 }
+    dataDir: ./.data/spoke-a/central-bank-a
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed         # o CB é a CA do seu spoke
+  relay:
+    endpoint: http://host.docker.internal:4000
+  cbEndpoint: http://host.docker.internal:18080
+  frontendHost: localhost
+  adminUsers:
+    - { role: GOVERNANCE, username: cb-a-governance, password: <local-only-bootstrap> }
+    - { role: TREASURY,   username: cb-a-treasury,   password: <local-only-bootstrap> }
+    - { role: SUPERVISOR, username: cb-a-supervisor, password: <local-only-bootstrap> }

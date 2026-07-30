@@ -36,4 +36,7 @@ type PairEntry struct {
 	AMMAddress string
 	TokenA     string
 	TokenB     string
+	// Status is the on-chain lifecycle state ("PROPOSED" or "ACTIVE").
+	// Populated by GetAllPairs; may be empty for entries sourced from getAllActivePairs.
+	Status string
 }

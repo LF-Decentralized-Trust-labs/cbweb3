@@ -1,0 +1,37 @@
+# cb-frontend template — the Central Bank operator portals (mirrors scenario-a's CB
+# frontends): governance + treasury + supervisor. The NOC portal is deployed by the
+# separate noc template. Each SPA bakes its api-gateway URL at BUILD time (VITE_*),
+# so the toolkit builds a per-entity image; here we only run it. All apps serve on
+# nginx container port 80. Stateless; no secrets.
+services:
+  governance-frontend:
+    image: "${GOVERNANCE_FRONTEND_IMAGE:?}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-governance-frontend"
+    ports:
+      - "${GOVERNANCE_FRONTEND_PORT:?}:80"
+    networks:
+      - entity_net
+    restart: always
+
+  treasury-frontend:
+    image: "${TREASURY_FRONTEND_IMAGE:?}"
+    container_name: "${CONTAINER_PREFIX}-${ENTITY}-treasury-frontend"
+    ports:
+      - "${TREASURY_FRONTEND_PORT:?}:80"
+    networks:
+      - entity_net
+    restart: always
+
+  supervisor-frontend:
+    image: "${SUPERVISOR_FRONTEND_IMAGE:?}"
+    container_name: "${CONTAINER_PREFIX}-${ENTITY}-supervisor-frontend"
+    ports:
+      - "${SUPERVISOR_FRONTEND_PORT:?}:80"
+    networks:
+      - entity_net
+    restart: always
+
+networks:
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
+    external: true

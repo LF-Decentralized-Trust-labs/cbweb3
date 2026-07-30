@@ -1,0 +1,44 @@
+# noc-stack (Scenario A, mode:observe) — NOC control plane data plane: db + backend.
+# The NOC PORTAL is deployed co-located by the CB's `found` (as a CB frontend); this
+# stack adds only the data plane the portal reads from + the agents push to. Own
+# network; DB state in a named volume; no secrets embedded.
+services:
+  noc-db:
+    image: "postgres:${NOC_DB_IMAGE_TAG:-15-alpine}"
+    container_name: "${NOC_PREFIX:?}-noc-db"
+    environment:
+      POSTGRES_USER: "${NOC_DB_USER:?}"
+      POSTGRES_PASSWORD: "${NOC_DB_PASSWORD:?}"
+      POSTGRES_DB: "${NOC_DB_NAME:-noc}"
+    volumes:
+      - noc_db_data:/var/lib/postgresql/data
+    networks:
+      - noc_net
+    restart: always
+
+  noc-backend:
+    image: "${NOC_BACKEND_IMAGE:-cbweb3/noc-backend:local}"
+    container_name: "${NOC_PREFIX:?}-noc-backend"
+    depends_on:
+      - noc-db
+    environment:
+      # Listen on 8080 (container side of the port mapping below).
+      NOC_BACKEND_PORT: "8080"
+      DATABASE_URL: "postgres://${NOC_DB_USER}:${NOC_DB_PASSWORD}@${NOC_PREFIX}-noc-db:5432/${NOC_DB_NAME:-noc}?sslmode=disable"
+      # Local lab: no NOC Keycloak realm is validated server-side (the portal login
+      # is real against the CB realm; JWT validation here is a prod hardening).
+      NOC_SKIP_AUTH: "true"
+      NOC_FRONTEND_ORIGIN: "${NOC_FRONTEND_ORIGIN:-*}"
+    ports:
+      - "${NOC_BACKEND_PORT:?}:8080"
+    networks:
+      - noc_net
+    restart: always
+
+networks:
+  noc_net:
+    name: "${NOC_NET_NAME:?}"
+
+volumes:
+  noc_db_data:
+    name: "${NOC_VOLUME_PREFIX:?}_noc_db_data"

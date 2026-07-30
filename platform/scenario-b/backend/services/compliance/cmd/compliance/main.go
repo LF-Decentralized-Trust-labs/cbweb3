@@ -101,10 +101,12 @@ func newBlockchainClient() registry.RegistryWriter {
 
 		chainID, _ := strconv.ParseInt(getEnv("BESU_CHAIN_ID", "1337"), 10, 64)
 		bc, err := registry.NewBesuClient(registry.BesuConfig{
-			RPCURL:          os.Getenv("BESU_RPC_URL"),
-			RegistryAddress: os.Getenv("PARTICIPANT_REGISTRY_ADDRESS"),
-			ChainID:         chainID,
-			RequestTimeout:  time.Duration(15) * time.Second,
+			RPCURL:                  os.Getenv("BESU_RPC_URL"),
+			RegistryAddress:         os.Getenv("PARTICIPANT_REGISTRY_ADDRESS"),
+			CurrencyRegistryAddress: os.Getenv("CURRENCY_REGISTRY_ADDRESS"),
+			PairRegistryAddress:     os.Getenv("PAIR_REGISTRY_ADDRESS"),
+			ChainID:                 chainID,
+			RequestTimeout:          time.Duration(15) * time.Second,
 		}, signer)
 		if err != nil {
 			log.Printf("WARN: blockchain client init failed: %v — using noop mode", err)

@@ -51,3 +51,24 @@ export interface ApproveAmmRequest {
   amount: string;
   side?: "A" | "B";
 }
+
+// HubPair mirrors an entry from GET /api/v2/amm/pairs — a liquidity pool the
+// Central Banks proposed/confirmed on the hub. Only ACTIVE pools are swappable.
+export interface HubPair {
+  pair_id: string;
+  amm_address: string;
+  token_a_address: string;
+  token_b_address: string;
+  status: string;
+  proposer_cb?: string;
+  confirmer_cb?: string;
+}
+
+// HubCurrency mirrors an entry from GET /api/v2/hub/currencies — a sovereign
+// currency registered on the hub (symbol like "W-tCeBM_BRL", token address).
+export interface HubCurrency {
+  symbol: string;
+  country_name: string;
+  token_address: string;
+  proposer_cb?: string;
+}

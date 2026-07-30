@@ -158,15 +158,23 @@ type fakePairClient struct {
 	confirmErr error
 	active     []domain.PairEntry
 	activeErr  error
+	deployAMM  string
+	deployErr  error
 }
 
 func (f *fakePairClient) ProposePair(_ context.Context, _, _, _, _ string) (string, error) {
 	return f.proposeTx, f.proposeErr
 }
+func (f *fakePairClient) DeployDedicatedAMM(_ context.Context, _, _ string) (string, error) {
+	return f.deployAMM, f.deployErr
+}
 func (f *fakePairClient) ConfirmPair(_ context.Context, _ string) (string, error) {
 	return f.confirmTx, f.confirmErr
 }
 func (f *fakePairClient) GetAllActivePairs(_ context.Context) ([]domain.PairEntry, error) {
+	return f.active, f.activeErr
+}
+func (f *fakePairClient) GetAllPairs(_ context.Context) ([]domain.PairEntry, error) {
 	return f.active, f.activeErr
 }
 

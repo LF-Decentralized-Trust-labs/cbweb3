@@ -285,21 +285,27 @@ func (e *BesuRelayerExecutor) SubmitBurnEvent(ctx context.Context, _ /*idempoten
 	// The Hub burn is confirmed on-chain (this attempt or a prior one). Only now may native
 	// value move on the spoke.
 	//
-	// For cross-currency bridge-out (BeneficiarySpokeAddress set): CB-B holds CENTRAL_BANK_ROLE
-	// on the spoke tCeBM token and mints directly — no prior lock is needed.
-	// For standard bridge-out (BeneficiarySpokeAddress empty): use SpokeBridge.release(), which
-	// transfers tokens locked in a prior SpokeBridge.lock() call.
-	if e.spokeReady && !e.cfg.SkipSpokeLock {
-		if beneficiary := strings.TrimSpace(pos.BeneficiarySpokeAddress); beneficiary != "" {
-			if mintErr := e.spokeMintFn(ctx, beneficiary, pos.NativeAsset, amount); mintErr != nil {
-				return fmt.Errorf("spoke mint (position=%s beneficiary=%s): %w", positionID, beneficiary, mintErr)
-			}
-		} else {
-			txID := deriveSpokeTxID(positionID)
-			if releaseErr := e.spokeReleaseFn(ctx, txID); releaseErr != nil {
-				return fmt.Errorf("spoke release (position=%s): %w", positionID, releaseErr)
-			}
+	// The action is decided by planSpokeDelivery so the gating rule is unit-testable without a
+	// live chain (develop refactor); execution goes through the spokeMintFn/spokeReleaseFn seams
+	// so the R2-H-12 burn-idempotency tests can stub the chain calls. Cross-currency bridge-out
+	// (BeneficiarySpokeAddress set) mints tCeBM directly — CB-B holds CENTRAL_BANK_ROLE, no prior
+	// lock to unwind — and must NOT be suppressed by SkipSpokeLock (doing so burns the Hub W-token
+	// yet leaves the beneficiary uncredited: silent half-settlement, forbidden by the atomicity
+	// rule). Standard bridge-out (no beneficiary) uses SpokeBridge.release() and stays gated by
+	// SkipSpokeLock.
+	beneficiary := strings.TrimSpace(pos.BeneficiarySpokeAddress)
+	switch planSpokeDelivery(e.spokeReady, e.cfg.SkipSpokeLock, beneficiary) {
+	case spokeDeliveryMint:
+		if mintErr := e.spokeMintFn(ctx, beneficiary, pos.NativeAsset, amount); mintErr != nil {
+			return fmt.Errorf("spoke mint (position=%s beneficiary=%s): %w", positionID, beneficiary, mintErr)
 		}
+	case spokeDeliveryRelease:
+		txID := deriveSpokeTxID(positionID)
+		if releaseErr := e.spokeReleaseFn(ctx, txID); releaseErr != nil {
+			return fmt.Errorf("spoke release (position=%s): %w", positionID, releaseErr)
+		}
+	case spokeDeliveryNone:
+		// No spoke-side leg (spoke not configured, or legacy release suppressed by SkipSpokeLock).
 	}
 
 	log.Printf("[BesuRelayerExecutor] burn-unlock ok — positionID=%s token=%s amount=%s signer=%s",
@@ -329,6 +335,41 @@ func (e *BesuRelayerExecutor) markHubBurnConfirmed(ctx context.Context, pos *pod
 	pos.HubBurnTxHash = txHash
 	pos.BridgeState = podmain.BridgeStateBurned
 	return nil
+}
+
+// spokeDeliveryAction is the spoke-side settlement leg chosen for a bridge-out.
+type spokeDeliveryAction int
+
+const (
+	// spokeDeliveryNone performs no spoke-side leg (spoke not configured, or the legacy
+	// release-from-lock path suppressed by SkipSpokeLock).
+	spokeDeliveryNone spokeDeliveryAction = iota
+	// spokeDeliveryMint mints native tCeBM to the beneficiary (cross-currency bridge-out).
+	spokeDeliveryMint
+	// spokeDeliveryRelease returns tokens locked by a prior SpokeBridge.lock() (standard bridge-out).
+	spokeDeliveryRelease
+)
+
+// planSpokeDelivery decides the spoke-side settlement leg for a bridge-out.
+//
+// Cross-currency bridge-out (beneficiary set) always MINTS native tCeBM when the spoke is
+// configured: it involves no SpokeBridge.lock() to unwind, so SkipSpokeLock — which only
+// governs the SpokeBridge lock/release dance — must never suppress it. Suppressing it is what
+// burns the hub W-token yet leaves the beneficiary uncredited (silent half-settlement,
+// forbidden by the atomicity rule). This mirrors the commercial-bank bridge-in burn, which is
+// likewise ungated. The legacy release-from-lock path (no beneficiary) stays gated by
+// SkipSpokeLock.
+func planSpokeDelivery(spokeConfigured, skipSpokeLock bool, beneficiary string) spokeDeliveryAction {
+	if !spokeConfigured {
+		return spokeDeliveryNone
+	}
+	if strings.TrimSpace(beneficiary) != "" {
+		return spokeDeliveryMint
+	}
+	if skipSpokeLock {
+		return spokeDeliveryNone
+	}
+	return spokeDeliveryRelease
 }
 
 // spokeBurnFrom calls tCeBM.burn(from, amount) on the Spoke chain using the CB signer.
