@@ -40,6 +40,8 @@ func run(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyResult, erro
 	switch in.Manifest.Spec.Mode {
 	case "join":
 		return runJoinMode(ctx, in, fns)
+	case "observe":
+		return runObserveMode(ctx, in)
 	case "found", "":
 		return runFoundMode(ctx, in, fns)
 	default:
@@ -136,6 +138,30 @@ func runFoundMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyRes
 		return result, err
 	}
 
+	// Emit the NOC bundle (observability topology; public, no secrets) so an
+	// observe-mode NOC deployment can register this spoke + drive its agent.
+	// Best-effort: a NOC emit failure never fails the CB found.
+	besuRPCPort := 0
+	if m.Spec.Node.RPC != nil {
+		besuRPCPort = m.Spec.Node.RPC.Port
+	}
+	nb := bundle.NOCBundle{
+		SpokeID:      spokeID,
+		SpokeUUID:    orchestrator.DeterministicUUID(spokeID),
+		Name:         spokeID,
+		CurrencyCode: m.Spec.Spoke.Currency,
+		Jurisdiction: spokeID,
+		Components: []bundle.NOCComponent{{
+			Name:          "besu-central-bank",
+			Type:          "BESU",
+			Endpoint:      fmt.Sprintf("http://host.docker.internal:%d", besuRPCPort),
+			ContainerName: fmt.Sprintf("cbweb3-%s-besu.central-bank", spokeID),
+		}},
+	}
+	if _, nerr := bundle.EmitNOC(nb, in.OutputDir); nerr != nil {
+		fmt.Fprintf(os.Stderr, "[apply] warning: NOC bundle emit failed (non-fatal): %v\n", nerr)
+	}
+
 	bundlePath := filepath.Join("bundles", spokeID+".bundle.yaml")
 	result.Status = "success"
 	result.Bundle = &BundleRef{Path: bundlePath}
@@ -204,6 +230,19 @@ func runJoinMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyResu
 		result.Status = "failed"
 		result.Error = runErr.Error()
 		return result, runErr
+	}
+
+	// Best-effort: bring up this bank's noc-agent so its own Besu node reports
+	// health + logs to the founding CB's NOC backend. Opt-in via spec.noc.backendURL
+	// (the CB VM's :8090). Never fails the join — the node is a healthy peer without it.
+	if m.Spec.NOC != nil && m.Spec.NOC.BackendURL != "" {
+		besuRPCPort := 0
+		if m.Spec.Node.RPC != nil {
+			besuRPCPort = m.Spec.Node.RPC.Port
+		}
+		if aerr := runJoinNOCAgent(ctx, in, spokeID, m.BankCode(), besuRPCPort); aerr != nil {
+			fmt.Fprintf(os.Stderr, "[apply] warning: NOC agent bring-up failed (non-fatal): %v\n", aerr)
+		}
 	}
 
 	result.Status = "success"

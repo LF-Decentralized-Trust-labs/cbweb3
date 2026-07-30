@@ -43,12 +43,16 @@ type mockToken struct {
 	err       error
 	symbol    string
 	symbolErr error
+	mintCalls int
+	burnCalls int
 }
 
 func (m *mockToken) Mint(_ context.Context, _, _ string) (string, error) {
+	m.mintCalls++
 	return "mock-mint-tx", nil
 }
 func (m *mockToken) Burn(_ context.Context, _, _ string) (string, error) {
+	m.burnCalls++
 	return "mock-burn-tx", nil
 }
 func (m *mockToken) BalanceOf(_ context.Context, _ string) (string, error) {
@@ -87,13 +91,17 @@ type mockFiat struct {
 	err           error
 	symbol        string
 	symbolErr     error
+	mintCalls     int
+	burnCalls     int
 }
 
 func (m *mockFiat) Mint(_ context.Context, _, _ string) (string, error) {
+	m.mintCalls++
 	return "mock-fiat-mint-tx", nil
 }
 
 func (m *mockFiat) Burn(_ context.Context, _, _ string) (string, error) {
+	m.burnCalls++
 	return "mock-fiat-burn-tx", nil
 }
 

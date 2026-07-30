@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
@@ -30,6 +31,9 @@ type CrossCurrencySwapRepository interface {
 	UpdateSwapResult(ctx context.Context, swapID string, txHash string, amountIn string) error
 	UpdateBridgeOutPositionID(ctx context.Context, swapID string, positionID string) error
 	UpdateFailureReason(ctx context.Context, swapID string, reason string) error
+	// UpdateResidue records the outcome of the residue return without touching `status`:
+	// the swap is already COMPLETED when Step 4 runs and a failed return must not reopen it.
+	UpdateResidue(ctx context.Context, swapID, amount, positionID string, status domain.ResidueReturnStatus) error
 }
 
 // BridgeLockMintServiceIface handles bridge Spoke-A → Hub (lock native, mint wrapped).
@@ -43,6 +47,23 @@ type BridgeLockMintServiceIface interface {
 type BridgeBurnUnlockServiceIface interface {
 	BurnAndEnqueue(ctx context.Context, positionID, correlationID string) (*BridgePositionResult, error)
 	EnqueueBurnAfterSwap(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string, extras ...string) (*BridgePositionResult, error)
+	// EnqueueResidueReturn gives the unspent bridge-in buffer back to the payer on the
+	// source spoke. Used by Step 4 on the local (CB self-service) path.
+	EnqueueResidueReturn(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string, burnFromHubAddress, beneficiarySpokeAddress, swapTxHash, parentPositionID string) (*BridgePositionResult, error)
+}
+
+// ResidueReturnRelayIface is an optional Step 4 relay that delegates the return of the
+// unspent slippage buffer to the issuing CB of the payer's spoke (sovereign model). Only
+// that CB may burn W-<source> and deliver tCeBM-<source>.
+type ResidueReturnRelayIface interface {
+	NotifyResidueReturn(ctx context.Context, req CrossCurrencyResidueReturnRequest) (string, error)
+}
+
+// SpokeWalletResolverIface resolves a bank_code to its on-chain wallet on this CB's spoke.
+// Needed on the local Step 4 path so the residue is minted back to the payer's own address
+// instead of the executor's default release path.
+type SpokeWalletResolverIface interface {
+	ResolveWalletAddress(ctx context.Context, bankCode string) (string, error)
 }
 
 // CactiCrossRelayIface is an optional bridge-out relay that routes through Cacti so CB-B
@@ -107,8 +128,15 @@ type CrossCurrencySwapResult struct {
 	SwapTxHash          string
 	BridgeOutPositionID string
 	FailureReason       string
-	CreatedAt           time.Time
-	CompletedAt         *time.Time
+	// ResidueAmount is MaxAmountIn − AmountIn: the slippage buffer bridge-in had to move
+	// and the swap did not consume. "0" when the swap consumed the full cap.
+	ResidueAmount string
+	// ResiduePositionID is the bridge position returning ResidueAmount to the payer.
+	// Empty when there was no residue or the return could not be enqueued.
+	ResiduePositionID string
+	ResidueStatus     domain.ResidueReturnStatus
+	CreatedAt         time.Time
+	CompletedAt       *time.Time
 }
 
 // CrossCurrencySwapOrchestrator coordinates the 3-step swap flow with pre-validation and rollback.
@@ -134,6 +162,26 @@ type CrossCurrencySwapOrchestrator struct {
 	hubSignerAddress string
 	// transferLimitChecker enforces configurable CB daily transfer limits (R1-10.1).
 	transferLimitChecker TransferLimitCheckerIface
+	// ammAddrResolver resolves a pool_pair to its on-chain AMM address (dynamic
+	// per-pair model). Step 3 sends it to the Cacti relay so the relay can read
+	// isPaused() on the correct AMM for its circuit-breaker gate.
+	ammAddrResolver AMMAddressResolver
+	// residueRelay is optional: when set, Step 4 delegates the residue return to the
+	// issuing CB of the payer's spoke (sovereign model), mirroring bridgeInRelay.
+	residueRelay ResidueReturnRelayIface
+	// payerWalletResolver resolves the payer's spoke wallet for the local Step 4 path.
+	// Only consulted when residueRelay is nil (this gateway is the issuing CB itself).
+	payerWalletResolver SpokeWalletResolverIface
+}
+
+// AMMAddressResolver resolves a pool_pair (e.g. "W-BRL-W-ARS") to the on-chain
+// address of its dedicated AMM, via the PairRegistry. Implemented in the app layer
+// over the shared per-pair resolver.
+type AMMAddressResolver interface {
+	AMMAddressFor(ctx context.Context, poolPair string) (string, error)
+	// OutputIsTokenA reports whether buying targetCurrency on poolPair outputs the
+	// pair's TOKEN_A, so Step 2 can swap in either direction over one sovereign pair.
+	OutputIsTokenA(ctx context.Context, poolPair, targetCurrency string) (bool, error)
 }
 
 // NewCrossCurrencySwapOrchestrator creates an orchestrator.
@@ -183,6 +231,27 @@ func (o *CrossCurrencySwapOrchestrator) WithBridgeInRelay(relay BridgeInRelayIfa
 // where to burn from (CB-B has CENTRAL_BANK_ROLE = can burn from any address).
 func (o *CrossCurrencySwapOrchestrator) WithHubSignerAddress(addr string) *CrossCurrencySwapOrchestrator {
 	o.hubSignerAddress = addr
+	return o
+}
+
+// WithAMMAddressResolver attaches the per-pair AMM address resolver so Step 3 can
+// tell the Cacti relay which AMM to run its isPaused() circuit-breaker gate against.
+func (o *CrossCurrencySwapOrchestrator) WithAMMAddressResolver(r AMMAddressResolver) *CrossCurrencySwapOrchestrator {
+	o.ammAddrResolver = r
+	return o
+}
+
+// WithResidueReturnRelay attaches the Step 4 relay for the sovereign residue return.
+// When set, the return is delegated to the issuing CB instead of enqueued locally.
+func (o *CrossCurrencySwapOrchestrator) WithResidueReturnRelay(relay ResidueReturnRelayIface) *CrossCurrencySwapOrchestrator {
+	o.residueRelay = relay
+	return o
+}
+
+// WithPayerWalletResolver attaches the resolver used by the local Step 4 path to find the
+// payer's spoke wallet, so the residue is minted back to the payer's own address.
+func (o *CrossCurrencySwapOrchestrator) WithPayerWalletResolver(r SpokeWalletResolverIface) *CrossCurrencySwapOrchestrator {
+	o.payerWalletResolver = r
 	return o
 }
 
@@ -266,6 +335,12 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		}
 	}
 
+	// quotaReleased tracks how much of the daily-limit reservation has already been given
+	// back, so the failure path below returns only the remainder. Without it, a swap that
+	// releases the unused slippage buffer (after the swap) and *then* fails in Step 3 would
+	// have the buffer restored twice — inflating the bank's remaining daily quota.
+	quotaReleased := new(big.Int)
+
 	// Pre-condition 3: Daily transfer limit check (R1-10.1).
 	// MaxAmountIn is the worst-case amount the payer will spend; use it for limit accounting.
 	if o.transferLimitChecker != nil {
@@ -279,7 +354,19 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			if recovered := o.swapRepo; recovered != nil {
 				op, fetchErr := recovered.GetByID(ctx, req.SwapID)
 				if fetchErr == nil && op != nil && op.Status == domain.SwapStatusFailed {
-					o.transferLimitChecker.Restore(ctx, req.PayerBankID, req.SourceCurrency, req.MaxAmountIn)
+					remaining := req.MaxAmountIn
+					if quotaReleased.Sign() > 0 {
+						reserved, ok := new(big.Int).SetString(req.MaxAmountIn, 10)
+						if !ok {
+							return
+						}
+						left := new(big.Int).Sub(reserved, quotaReleased)
+						if left.Sign() <= 0 {
+							return
+						}
+						remaining = left.String()
+					}
+					o.transferLimitChecker.Restore(ctx, req.PayerBankID, req.SourceCurrency, remaining)
 				}
 			}
 		}()
@@ -290,13 +377,16 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		req.CorrelationID, req.SourceCurrency, req.SourceCurrency)
 	_ = o.swapRepo.UpdateStatus(ctx, req.SwapID, domain.SwapStatusBridgeInProgress)
 
-	spokeIn := "spoke-a"
+	// Source spoke is derived from the source currency (symmetric to spokeOut below):
+	// "spoke-<currency>" is the convention the toolkit registers per spoke, so this
+	// generalizes to any sovereign spoke (N currencies) with no BRL/ARS hardcode.
+	spokeIn := "spoke-" + strings.ToLower(req.SourceCurrency)
 	nativeAsset := req.SourceCurrency
 	mirroredAsset := "W-" + req.SourceCurrency
 	if o.bridgeAssets != nil {
-		if o.bridgeAssets.SpokeInNetwork != "" {
-			spokeIn = o.bridgeAssets.SpokeInNetwork
-		}
+		// Local (non-sovereign) dev path may pin the native/wrapped source token
+		// addresses. The sovereign path ignores these (the issuing CB resolves its own
+		// tokens from its per-CB config) and only needs spokeIn, derived above.
 		if o.bridgeAssets.NativeSourceToken != "" {
 			nativeAsset = o.bridgeAssets.NativeSourceToken
 		}
@@ -316,9 +406,8 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			PayerBankID:    req.PayerBankID,
 			SourceCurrency: req.SourceCurrency,
 			// Bridge in the full cap: the worst-case amount_in must be reserved on the Hub
-			// before the swap runs, since the realized cost is only known afterwards.
-			// TODO(stranded-buffer): the residue (MaxAmountIn − realized amount_in) is left on
-			// the Hub signer with no automatic bridge-back. Tracked as a separate R2 follow-up.
+			// before the swap runs, since the realized cost is only known afterwards. Step 4
+			// returns the unspent part, so the payer's net debit is the realized amount_in.
 			Amount:  req.MaxAmountIn,
 			SpokeIn: spokeIn,
 			// Mint W-<source> to this gateway's swap signer so Step 2 can spend it (and
@@ -339,9 +428,8 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			spokeIn,
 			nativeAsset,
 			mirroredAsset,
-			// Bridge in the full cap (worst-case amount_in reserved before the swap runs).
-			// TODO(stranded-buffer): the residue (MaxAmountIn − realized amount_in) is left on
-			// the Hub signer with no automatic bridge-back. Tracked as a separate R2 follow-up.
+			// Bridge in the full cap (worst-case amount_in reserved before the swap runs);
+			// Step 4 returns the unspent part to the payer.
 			req.MaxAmountIn,
 			req.CorrelationID)
 		if err != nil {
@@ -365,12 +453,26 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		req.CorrelationID, req.SourceCurrency, req.TargetCurrency)
 	_ = o.swapRepo.UpdateStatus(ctx, req.SwapID, domain.SwapStatusSwapInProgress)
 
+	// Resolve the swap direction from the requested target currency vs the pair's
+	// token orientation, so a single sovereign pair serves both directions (e.g. the
+	// BRL↔COP pair handles both BRL→COP and COP→BRL). Defaults to A→B when unresolved.
+	outputIsTokenA := false
+	if o.ammAddrResolver != nil {
+		if isA, dErr := o.ammAddrResolver.OutputIsTokenA(ctx, req.PoolPair, req.TargetCurrency); dErr == nil {
+			outputIsTokenA = isA
+		} else {
+			log.Printf("[correlation_id=%s] WARNING: could not resolve swap direction for pool %s target %s: %v (defaulting A→B)",
+				req.CorrelationID, req.PoolPair, req.TargetCurrency, dErr)
+		}
+	}
+
 	swapReq := SwapRequest{
-		Pair:          req.PoolPair,
-		AmountOut:     req.AmountOut,
-		MaxAmountIn:   req.MaxAmountIn,
-		PayerID:       req.PayerBankID,
-		BeneficiaryID: req.BeneficiaryBankID,
+		Pair:           req.PoolPair,
+		AmountOut:      req.AmountOut,
+		MaxAmountIn:    req.MaxAmountIn,
+		PayerID:        req.PayerBankID,
+		BeneficiaryID:  req.BeneficiaryBankID,
+		OutputIsTokenA: outputIsTokenA,
 	}
 	swapResult, err := o.swapService.Execute(ctx, swapReq)
 	if err != nil {
@@ -417,6 +519,45 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 	log.Printf("[correlation_id=%s] slippage check passed: %s <= %s",
 		req.CorrelationID, swapResult.AmountIn, req.MaxAmountIn)
 
+	// The slippage buffer that bridge-in had to move but the swap did not consume. Step 4
+	// gives it back; until then it is W-<source> sitting on this gateway's Hub swap signer.
+	residue := new(big.Int).Sub(maxAmountIn, actualAmountIn)
+	if residue.Sign() > 0 {
+		log.Printf("[correlation_id=%s] slippage residue: %s (bridged %s, consumed %s)",
+			req.CorrelationID, residue.String(), req.MaxAmountIn, swapResult.AmountIn)
+	}
+
+	// Release the unused part of the daily quota. CheckAndDeduct reserved the worst case
+	// (MaxAmountIn) before Step 1 because the real cost was unknown; now it is known, so the
+	// bank must only be charged for what it actually spent. quotaReleased records this so the
+	// failure-path defer restores only the remainder instead of the buffer twice.
+	if o.transferLimitChecker != nil && residue.Sign() > 0 {
+		o.transferLimitChecker.Restore(ctx, req.PayerBankID, req.SourceCurrency, residue.String())
+		quotaReleased.Set(residue)
+		log.Printf("[correlation_id=%s] daily transfer quota: restored unused reservation %s %s",
+			req.CorrelationID, residue.String(), req.SourceCurrency)
+	}
+
+	// The residue return (Step 4) is bound here so every exit path after a successful swap
+	// runs it exactly once.
+	//
+	// It must also run when Step 3 fails: the unspent input was never owed to anyone, so it
+	// belongs to the payer whether or not the output was delivered. Skipping it on the
+	// bridge-out failure path would leave the payer debited for the full cap on top of an
+	// already-undelivered payment — the worst of both.
+	var (
+		residuePositionID string
+		residueStatus     domain.ResidueReturnStatus
+		residueReturned   bool
+	)
+	returnResidueOnce := func() {
+		if residueReturned {
+			return
+		}
+		residueReturned = true
+		residuePositionID, residueStatus = o.returnResidue(ctx, req, residue, bridgeInPositionID, swapResult.TxHash)
+	}
+
 	// Step 3: Bridge-Out (Hub → Spoke-B)
 	// Two paths depending on whether a sovereign Cacti relay is configured:
 	//
@@ -433,11 +574,24 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		req.CorrelationID, req.TargetCurrency, req.TargetCurrency)
 	_ = o.swapRepo.UpdateStatus(ctx, req.SwapID, domain.SwapStatusBridgeOutProgress)
 
-	spokeOut := "spoke-b"
+	// Dynamic per-pair model: the beneficiary spoke id follows the "spoke-<currency>"
+	// convention (spoke-brl, spoke-ars, spoke-cop) the toolkit registers in the relay.
+	spokeOut := "spoke-" + strings.ToLower(req.TargetCurrency)
 	var bridgeOutPositionID string
 
 	if o.cactiRelay != nil {
 		// ── Path A: sovereign model via Cacti relay ──────────────────────────
+		// Resolve the pair's on-chain AMM (dynamic per-pair model) so the relay can
+		// run its isPaused() circuit-breaker gate against the correct AMM. Best-effort:
+		// on failure the field is empty and the relay fails safe (refuses the burn).
+		ammAddr := ""
+		if o.ammAddrResolver != nil {
+			if a, aErr := o.ammAddrResolver.AMMAddressFor(ctx, req.PoolPair); aErr == nil {
+				ammAddr = a
+			} else {
+				log.Printf("[correlation_id=%s] WARNING: could not resolve AMM address for pool %s: %v", req.CorrelationID, req.PoolPair, aErr)
+			}
+		}
 		relayReq := CactiCrossCurrencyBridgeOutRequest{
 			CorrelationID:     req.CorrelationID,
 			SwapTxHash:        swapResult.TxHash,
@@ -445,6 +599,7 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			AmountOut:         req.AmountOut,
 			BeneficiaryBankID: req.BeneficiaryBankID,
 			SpokeOut:          spokeOut,
+			AmmAddress:        ammAddr,
 			// WrappedTargetToken is informational; CB-B uses its own configured address.
 			WrappedTargetToken: func() string {
 				if o.bridgeAssets != nil {
@@ -462,6 +617,8 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		if relayErr != nil {
 			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("cacti bridge-out relay failed (partial success): %v", relayErr))
 			log.Printf("[correlation_id=%s] CRITICAL: swap succeeded but Cacti relay failed (manual intervention required)", req.CorrelationID)
+			// The delivery leg is what needs intervention; the unspent input does not.
+			returnResidueOnce()
 			return nil, fmt.Errorf("cacti bridge-out relay failed (swap succeeded, manual intervention required): %w", relayErr)
 		}
 		bridgeOutPositionID = correlationBack // correlation_id echoed back by Cacti/CB-B
@@ -488,6 +645,7 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		if bridgeOutErr != nil {
 			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("bridge-out failed (partial success): %v", bridgeOutErr))
 			log.Printf("[correlation_id=%s] CRITICAL: swap succeeded but bridge-out failed (manual intervention required)", req.CorrelationID)
+			returnResidueOnce()
 			return nil, fmt.Errorf("bridge-out failed (swap succeeded, manual intervention required): %w", bridgeOutErr)
 		}
 		bridgeOutPositionID = bridgeOutResult.PositionID
@@ -496,6 +654,7 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		// Wait for bridge-out to become UNLOCKED (polling with 120s timeout)
 		if pollErr := o.waitForBridgeUnlocked(ctx, bridgeOutPositionID, 120*time.Second); pollErr != nil {
 			_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("bridge-out timeout: %v", pollErr))
+			returnResidueOnce()
 			return nil, fmt.Errorf("bridge-out timeout: %w", pollErr)
 		}
 	}
@@ -508,6 +667,14 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 	_ = o.swapRepo.UpdateStatus(ctx, req.SwapID, domain.SwapStatusCompleted)
 	log.Printf("[correlation_id=%s] cross-currency swap COMPLETED (total_duration=%v)",
 		req.CorrelationID, now.Sub(swapOp.CreatedAt))
+
+	// Step 4: Residue return (Hub → Spoke-A), soft and retryable.
+	//
+	// Never changes the swap's verdict: the payment has already settled, so a failure here is
+	// recorded for reconciliation instead of being returned to the caller. The value is not
+	// lost when it fails — it stays on the Hub swap signer — but the payer stays over-debited
+	// until the return succeeds.
+	returnResidueOnce()
 
 	// Calculate effective rate
 	effectiveRate := 0.0
@@ -526,9 +693,128 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		BridgeInPositionID:  bridgeInPositionID,
 		SwapTxHash:          swapResult.TxHash,
 		BridgeOutPositionID: bridgeOutPositionID,
+		ResidueAmount:       residue.String(),
+		ResiduePositionID:   residuePositionID,
+		ResidueStatus:       residueStatus,
 		CreatedAt:           swapOp.CreatedAt,
 		CompletedAt:         &now,
 	}, nil
+}
+
+// returnResidue gives the unspent slippage buffer back to the payer on the source spoke.
+//
+// Two paths, mirroring Step 1:
+//
+//	A) residueRelay != nil — sovereign model: delegate to the issuing CB of the payer's
+//	   spoke, the only holder of CENTRAL_BANK_ROLE on W-<source> and tCeBM-<source>. The CB
+//	   re-derives the amount from its own bridge-in position and the on-chain LogSwap, so
+//	   this call carries no amount at all.
+//
+//	B) residueRelay == nil — local CB self-service: this gateway is the issuing CB, so it
+//	   enqueues the burn-and-return on its own relayer.
+//
+// Never returns an error: the caller's swap is already COMPLETED. Every outcome is persisted
+// and logged so a stranded residue is visible rather than silent.
+func (o *CrossCurrencySwapOrchestrator) returnResidue(
+	ctx context.Context,
+	req CrossCurrencySwapRequest,
+	residue *big.Int,
+	bridgeInPositionID string,
+	swapTxHash string,
+) (string, domain.ResidueReturnStatus) {
+	if residue.Sign() <= 0 {
+		// The swap consumed the whole cap — nothing to give back.
+		_ = o.swapRepo.UpdateResidue(ctx, req.SwapID, "0", "", domain.ResidueNone)
+		return "", domain.ResidueNone
+	}
+
+	spokeIn := "spoke-" + strings.ToLower(req.SourceCurrency)
+	log.Printf("[correlation_id=%s] Step 4: Residue return (burn %s W-%s on Hub, return %s on %s)",
+		req.CorrelationID, residue.String(), req.SourceCurrency, req.SourceCurrency, spokeIn)
+
+	positionID, err := o.dispatchResidueReturn(ctx, req, residue, bridgeInPositionID, swapTxHash, spokeIn)
+	if err != nil {
+		// Deliberately not failSwap: the payment settled. Record it for reconciliation.
+		log.Printf("[correlation_id=%s] WARNING: residue return failed — %s W-%s remains on the Hub swap signer %s and the payer is over-debited until reconciled: %v",
+			req.CorrelationID, residue.String(), req.SourceCurrency, o.hubSignerAddress, err)
+		_ = o.swapRepo.UpdateResidue(ctx, req.SwapID, residue.String(), "", domain.ResidueReturnFailed)
+		return "", domain.ResidueReturnFailed
+	}
+
+	_ = o.swapRepo.UpdateResidue(ctx, req.SwapID, residue.String(), positionID, domain.ResidueReturnEnqueued)
+	log.Printf("[correlation_id=%s] residue return enqueued (position_or_correlation=%s, amount=%s)",
+		req.CorrelationID, positionID, residue.String())
+	return positionID, domain.ResidueReturnEnqueued
+}
+
+// dispatchResidueReturn picks the sovereign or local path and performs the return.
+func (o *CrossCurrencySwapOrchestrator) dispatchResidueReturn(
+	ctx context.Context,
+	req CrossCurrencySwapRequest,
+	residue *big.Int,
+	bridgeInPositionID string,
+	swapTxHash string,
+	spokeIn string,
+) (string, error) {
+	if o.residueRelay != nil {
+		// ── Path A: sovereign model — the issuing CB derives and executes the return ──
+		return o.residueRelay.NotifyResidueReturn(ctx, CrossCurrencyResidueReturnRequest{
+			CorrelationID:      req.CorrelationID,
+			SwapTxHash:         swapTxHash,
+			PoolPair:           req.PoolPair,
+			BridgeInPositionID: bridgeInPositionID,
+			PayerBankID:        req.PayerBankID,
+			SpokeIn:            spokeIn,
+		})
+	}
+
+	// ── Path B: local CB self-service ────────────────────────────────────────────
+	if o.bridgeBurnUnlock == nil {
+		return "", fmt.Errorf("no residue relay and no local burn-unlock service configured")
+	}
+
+	nativeAsset := req.SourceCurrency
+	mirroredAsset := "W-" + req.SourceCurrency
+	if o.bridgeAssets != nil {
+		if o.bridgeAssets.NativeSourceToken != "" {
+			nativeAsset = o.bridgeAssets.NativeSourceToken
+		}
+		if o.bridgeAssets.WrappedSourceToken != "" {
+			mirroredAsset = o.bridgeAssets.WrappedSourceToken
+		}
+	}
+
+	// Mint the residue back to the payer's own spoke wallet. Without a resolver the executor
+	// would fall back to its default release path, which needs a prior spoke lock that a
+	// residue return does not have — so say so instead of enqueuing something that cannot run.
+	payerWallet := ""
+	if o.payerWalletResolver != nil {
+		w, resolveErr := o.payerWalletResolver.ResolveWalletAddress(ctx, req.PayerBankID)
+		if resolveErr != nil {
+			return "", fmt.Errorf("resolve payer spoke wallet for residue return: %w", resolveErr)
+		}
+		payerWallet = w
+	} else {
+		log.Printf("[correlation_id=%s] WARNING: no payer wallet resolver configured — residue return will use the executor's default delivery path",
+			req.CorrelationID)
+	}
+
+	pos, err := o.bridgeBurnUnlock.EnqueueResidueReturn(ctx,
+		req.PayerBankID,
+		spokeIn,
+		nativeAsset,
+		mirroredAsset,
+		residue.String(),
+		req.CorrelationID,
+		o.hubSignerAddress, // burnFromHubAddress — where the unspent W-<source> sits
+		payerWallet,        // beneficiarySpokeAddress — back to the payer
+		swapTxHash,         // idempotency, scoped to the RESIDUE leg
+		bridgeInPositionID, // parent position this return corrects
+	)
+	if err != nil {
+		return "", err
+	}
+	return pos.PositionID, nil
 }
 
 // GetStatus retrieves the current state of a cross-currency swap operation by swap_id.
@@ -546,8 +832,13 @@ func (o *CrossCurrencySwapOrchestrator) GetStatus(ctx context.Context, swapID st
 		AmountIn:      op.AmountIn,
 		AmountOut:     op.AmountOut,
 		EffectiveRate: op.EffectiveRate,
+		ResidueAmount: op.ResidueAmount,
+		ResidueStatus: op.ResidueStatus,
 		CreatedAt:     op.CreatedAt,
 		CompletedAt:   op.CompletedAt,
+	}
+	if op.ResiduePositionID != nil {
+		result.ResiduePositionID = *op.ResiduePositionID
 	}
 	if op.BridgeInPositionID != nil {
 		result.BridgeInPositionID = *op.BridgeInPositionID

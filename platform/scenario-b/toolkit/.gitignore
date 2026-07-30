@@ -1,0 +1,18 @@
+# Go
+*.exe
+*.test
+*.out
+vendor/
+/cbweb3b
+/bin/
+
+# Local
+.env*
+*.log
+.DS_Store
+
+# Generated PKI material — never commit keys/CSRs/certs (no-secrets invariant)
+*.key
+*.csr
+*.crt
+*.pem

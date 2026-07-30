@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=../../../scenario-a/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario A (Enhanced Correspondent Banking)
+# VM ${IP_CB_BRAZIL} — Central Bank Brazil, FOUNDS spoke-brazil (BRL).
+# dataDir + emitted join bundle under deploy-lnet/bundles/scenario-a/spoke-brazil/
+# (deploy.sh sets CBWEB3_OUTPUT_DIR and relocates spoke-brazil.bundle.yaml next to dataDir).
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-brazil
+spec:
+  scenario: a
+  environment: local
+  role: central-bank
+  mode: found
+  displayName: Banco Central do Brasil
+  spoke:
+    id: spoke-brazil
+    chainId: 2021
+    currency: BRL
+    # ERC-20 metadata of this spoke's own fCeBM (the public Besu-layer fiat token).
+    # Optional — absent, both derive from `currency` (exactly the values below).
+    # Declared explicitly so each spoke's token identity is auditable in config.
+    # The symbol must keep the "<prefix>_<ISO>" shape and end in this spoke's own
+    # currency; `currency` stays the semantic key the portals display (FIAT_SYMBOL).
+    # Scenario A deploys no tCeBM: the tokenised side is a Zeto privacy token, which
+    # has no ERC-20 symbol — so fCeBM is the only configurable token identity here.
+    fiatTokenName: Fiat BRL
+    fiatTokenSymbol: fCeBM_BRL
+  node:
+    advertisedHost: ${IP_CB_BRAZIL}        # routable VM IP -> spoke-bundle enode dialable by cb1/cb2
+    rpc: { port: 8645 }
+    ws:  { port: 8655 }
+    p2p: { port: 30303 }              # Scenario A join localizes the enode to container port 30303;
+                                      # the CB MUST publish host 30303 for cross-VM peering.
+    # Relative to scenario-a/ cwd (deploy.sh applies from there).
+    dataDir: ../deploy-lnet/bundles/scenario-a/spoke-brazil
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed://local     # the CB is its own spoke CA
+  relay:
+    endpoint: http://${IP_HUB}:4000  # Scenario A Cacti relay on the hub/cacti VM
+    advertisedHost: ${IP_CB_BRAZIL}        # host the relay uses to reach this spoke's published ports
+  cbEndpoint: http://${IP_CB_BRAZIL}:18645/api/v1/credential-request  # api-gateway = rpc+10000
+  frontendHost: cb-brazil.cbweb3.l-net.io
+  launcher: enable
+  launcherPort: 5190
+  proxy: enable
+  adminUsers:
+    - { role: ROLE_GOVERNANCE, username: governance@cb-brazil.l-net.io, password: change-me-local }
+    - { role: ROLE_TREASURY,   username: treasury@cb-brazil.l-net.io,   password: change-me-local }
+    - { role: ROLE_SUPERVISOR, username: supervisor@cb-brazil.l-net.io, password: change-me-local }
+    - { role: ROLE_NOC_ADMIN,  username: noc@cb-brazil.l-net.io,        password: change-me-local }

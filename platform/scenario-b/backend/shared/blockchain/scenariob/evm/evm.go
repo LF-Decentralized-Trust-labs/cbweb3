@@ -144,7 +144,7 @@ func SubmitTx(
 	method string,
 	args ...interface{},
 ) (string, error) {
-	_, txHash, err := submitTxInternal(ctx, ec, signer, contract, parsedABI, method, args...)
+	_, txHash, err := submitTxInternal(ctx, ec, signer, contract, parsedABI, method, nil, args...)
 	return txHash, err
 }
 
@@ -159,7 +159,44 @@ func SubmitTxReceipt(
 	method string,
 	args ...interface{},
 ) (*types.Receipt, string, error) {
-	return submitTxInternal(ctx, ec, signer, contract, parsedABI, method, args...)
+	return submitTxInternal(ctx, ec, signer, contract, parsedABI, method, nil, args...)
+}
+
+// SubmitTxAwaitBroadcast is like SubmitTx but invokes onBroadcast with the transaction hash
+// as soon as the node accepts the transaction into its mempool — before waiting for the
+// receipt. This lets callers persist a pre-confirmation intent record so a process crash or
+// a WaitMined timeout on an already-broadcast transaction can be reconciled by hash on retry
+// (via TxMined) instead of blindly re-submitting a non-idempotent operation such as a burn or
+// mint. onBroadcast is a best-effort notification (it must handle and log its own errors); it
+// never aborts the wait, since the transaction is already in flight and the caller's
+// authoritative post-confirmation write is the source of truth. onBroadcast may be nil.
+func SubmitTxAwaitBroadcast(
+	ctx context.Context,
+	ec *ethclient.Client,
+	signer *Signer,
+	contract common.Address,
+	parsedABI abi.ABI,
+	method string,
+	onBroadcast func(txHash string),
+	args ...interface{},
+) (string, error) {
+	_, txHash, err := submitTxInternal(ctx, ec, signer, contract, parsedABI, method, onBroadcast, args...)
+	return txHash, err
+}
+
+// TxMined reports whether the transaction identified by txHash has a receipt yet, and if so
+// whether it succeeded (receipt.Status == 1). A not-yet-mined transaction returns
+// (false, false, nil) so callers can distinguish "still pending / dropped" from "mined and
+// reverted" and fail closed accordingly. It never re-broadcasts.
+func TxMined(ctx context.Context, ec *ethclient.Client, txHash string) (mined bool, success bool, err error) {
+	receipt, rerr := ec.TransactionReceipt(ctx, common.HexToHash(txHash))
+	if rerr != nil {
+		if errors.Is(rerr, ethereum.NotFound) {
+			return false, false, nil
+		}
+		return false, false, fmt.Errorf("get receipt %s: %w", txHash, rerr)
+	}
+	return true, receipt.Status == 1, nil
 }
 
 func submitTxInternal(
@@ -169,6 +206,7 @@ func submitTxInternal(
 	contract common.Address,
 	parsedABI abi.ABI,
 	method string,
+	onBroadcast func(txHash string),
 	args ...interface{},
 ) (*types.Receipt, string, error) {
 	input, err := parsedABI.Pack(method, args...)
@@ -192,6 +230,12 @@ func submitTxInternal(
 	signed, err := signer.signAndSend(ctx, ec, contract, gasLimit, gasPrice, input)
 	if err != nil {
 		return nil, "", err
+	}
+	// The transaction is now in the mempool. Notify the caller with the hash (best-effort,
+	// before the multi-second WaitMined) so it can record a pre-confirmation intent that makes
+	// a crash or timeout reconcilable by hash on retry instead of a blind re-submission.
+	if onBroadcast != nil {
+		onBroadcast(signed.Hash().Hex())
 	}
 	receipt, err := bind.WaitMined(ctx, ec, signed)
 	if err != nil {

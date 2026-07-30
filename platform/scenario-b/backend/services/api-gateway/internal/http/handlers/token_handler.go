@@ -11,15 +11,19 @@ import (
 
 // AMMTokenPreparer prepares Hub tCeBM tokens for an addLiquidity call.
 // FR-018: interface uses a single `amount` field; side detection is done by the adapter.
+// poolPair (when non-empty) selects the sovereign pair dynamically: the adapter
+// resolves that pair's W-tokens + AMM from the on-chain PairRegistry, so a
+// corridor opened at runtime works with no gateway env/restart. Empty poolPair
+// keeps the legacy single-pair (env-configured) behavior.
 type AMMTokenPreparer interface {
-	// MintAndApproveForAMM mints the token the signer holds CENTRAL_BANK_ROLE on
-	// to their own address and approves the AMM to spend it.
-	MintAndApproveForAMM(ctx context.Context, amount string) error
-	// MintToForAMM mints the token the signer holds CENTRAL_BANK_ROLE on to recipient.
-	MintToForAMM(ctx context.Context, recipient, amount string) error
-	// ApproveAMM approves the AMM contract to spend `amount` of the token indicated by side.
-	// side must be "A", "B", or "" (auto-detect; valid only for central bank callers).
-	ApproveAMM(ctx context.Context, amount, side string) error
+	// MintAndApproveForAMM mints the `side` token of poolPair to the signer's own
+	// address and approves that pair's AMM to spend it.
+	MintAndApproveForAMM(ctx context.Context, poolPair, side, amount string) error
+	// MintToForAMM mints the poolPair `side` token to recipient.
+	MintToForAMM(ctx context.Context, poolPair, side, recipient, amount string) error
+	// ApproveAMM approves poolPair's AMM to spend `amount` of the token indicated
+	// by side ("A"/"B", or "" to auto-detect on legacy single-pair CBs).
+	ApproveAMM(ctx context.Context, poolPair, amount, side string) error
 }
 
 // CentralBankChecker checks on-chain whether a given Ethereum address belongs to a CB
@@ -75,6 +79,8 @@ func (h *TokenHandler) MintAndApprove(c *fiber.Ctx) error {
 	var req struct {
 		Amount    string `json:"amount"`
 		Recipient string `json:"recipient"`
+		PoolPair  string `json:"pool_pair"`
+		Side      string `json:"side"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
@@ -101,9 +107,9 @@ func (h *TokenHandler) MintAndApprove(c *fiber.Ctx) error {
 
 	var err error
 	if req.Recipient != "" {
-		err = h.preparer.MintToForAMM(c.UserContext(), req.Recipient, req.Amount)
+		err = h.preparer.MintToForAMM(c.UserContext(), req.PoolPair, req.Side, req.Recipient, req.Amount)
 	} else {
-		err = h.preparer.MintAndApproveForAMM(c.UserContext(), req.Amount)
+		err = h.preparer.MintAndApproveForAMM(c.UserContext(), req.PoolPair, req.Side, req.Amount)
 	}
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "amm token prepare failed: " + err.Error()})
@@ -134,8 +140,9 @@ func (h *TokenHandler) ApproveAMM(c *fiber.Ctx) error {
 	}
 
 	var req struct {
-		Amount string `json:"amount"`
-		Side   string `json:"side"`
+		Amount   string `json:"amount"`
+		Side     string `json:"side"`
+		PoolPair string `json:"pool_pair"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
@@ -155,7 +162,7 @@ func (h *TokenHandler) ApproveAMM(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "side must be 'A' or 'B'"})
 	}
 
-	if err := h.preparer.ApproveAMM(c.UserContext(), req.Amount, side); err != nil {
+	if err := h.preparer.ApproveAMM(c.UserContext(), req.PoolPair, req.Amount, side); err != nil {
 		if err.Error() == "token_prepare: side is required for non-central-bank callers" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": "BANK_CODE not configured on this gateway — set BANK_CODE env var",

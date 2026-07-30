@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -27,13 +28,24 @@ func sanitizeLogField(s string) string {
 // pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint violation.
 const pgUniqueViolation = "23505"
 
-// isUniqueViolation reports whether err is a Postgres unique-constraint violation
-// (SQLSTATE 23505). Only such an error should trigger the swap_tx_hash idempotency
-// fallback; a transient connection error or deadlock must surface so the caller can
-// retry rather than masquerade as a duplicate swap.
+// isUniqueViolation reports whether err is a unique-constraint violation. Only such an error
+// should trigger the swap_tx_hash idempotency fallback; a transient connection error or
+// deadlock must surface so the caller can retry rather than masquerade as a duplicate swap.
+//
+// Driver-agnostic on purpose. Recognising only Postgres SQLSTATE 23505 would make the
+// concurrent-replay fallback silently inert on any other driver — a replay would surface as a
+// hard error instead of returning the winning position idempotently.
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == pgUniqueViolation
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	// SQLite (repository tests) reports "UNIQUE constraint failed: <table>.<column>" and has
+	// no error code to match on.
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 // BridgeLockMintService handles Lock on Spoke → Mint on Hub (FR-029 / SC-015).
@@ -182,17 +194,13 @@ func (s *BridgeBurnUnlockService) BurnAndEnqueue(ctx context.Context, positionID
 // instead of SpokeBridge.release() (which requires a prior lock on Spoke-B).
 //
 // extras[2] (swapTxHash) binds the position to the verified Hub swap transaction; a partial
-// unique index on swap_tx_hash makes each swap consumable at most once (R2-CR-6). On a
-// duplicate, the existing position is returned without enqueuing a second burn.
+// unique index on (swap_tx_hash, leg) makes each swap consumable at most once per leg
+// (R2-CR-6). On a duplicate, the existing position is returned without enqueuing a second burn.
 func (s *BridgeBurnUnlockService) EnqueueBurnAfterSwap(
 	ctx context.Context,
 	ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string,
 	burnFromHubAddress ...string,
 ) (*BridgePositionResult, error) {
-	if ownerBankID == "" || spokeNetwork == "" || mirroredAsset == "" || amount == "" {
-		return nil, fmt.Errorf("owner_bank_id, spoke_network, mirrored_asset, and amount are required")
-	}
-
 	burnFrom := ""
 	beneficiarySpoke := ""
 	swapTxHash := ""
@@ -205,41 +213,111 @@ func (s *BridgeBurnUnlockService) EnqueueBurnAfterSwap(
 	if len(burnFromHubAddress) > 2 {
 		swapTxHash = burnFromHubAddress[2]
 	}
+	return s.enqueueBurn(ctx, burnParams{
+		ownerBankID:      ownerBankID,
+		spokeNetwork:     spokeNetwork,
+		nativeAsset:      nativeAsset,
+		mirroredAsset:    mirroredAsset,
+		amount:           amount,
+		correlationID:    correlationID,
+		burnFrom:         burnFrom,
+		beneficiarySpoke: beneficiarySpoke,
+		swapTxHash:       swapTxHash,
+		leg:              domain.BridgeLegSettlement,
+	})
+}
+
+// EnqueueResidueReturn records the RESIDUE leg of a Hub swap: the slippage buffer that
+// bridge-in had to move before the real cost was known and that the swap did not consume.
+//
+// Mechanically it is the same operation as a bridge-out — burn the wrapped token on the Hub,
+// deliver the native token on a spoke — pointed back at the *source* spoke with the payer as
+// the beneficiary. It is a distinct leg so it neither collides with the settlement position
+// on the (swap_tx_hash, leg) index nor is mistaken for a replay of it.
+//
+// parentPositionID is the bridge-in position this return corrects; the pair of records is
+// what expresses the net amount consumed, since the parent's mirrored_amount is on-chain
+// truth and must not be rewritten.
+func (s *BridgeBurnUnlockService) EnqueueResidueReturn(
+	ctx context.Context,
+	ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string,
+	burnFromHubAddress, beneficiarySpokeAddress, swapTxHash, parentPositionID string,
+) (*BridgePositionResult, error) {
+	return s.enqueueBurn(ctx, burnParams{
+		ownerBankID:      ownerBankID,
+		spokeNetwork:     spokeNetwork,
+		nativeAsset:      nativeAsset,
+		mirroredAsset:    mirroredAsset,
+		amount:           amount,
+		correlationID:    correlationID,
+		burnFrom:         burnFromHubAddress,
+		beneficiarySpoke: beneficiarySpokeAddress,
+		swapTxHash:       swapTxHash,
+		leg:              domain.BridgeLegResidue,
+		parentPositionID: parentPositionID,
+	})
+}
+
+// burnParams carries the fields of a burn-side position. Used internally so the settlement
+// and residue legs share one persistence path instead of drifting apart.
+type burnParams struct {
+	ownerBankID      string
+	spokeNetwork     string
+	nativeAsset      string
+	mirroredAsset    string
+	amount           string
+	correlationID    string
+	burnFrom         string
+	beneficiarySpoke string
+	swapTxHash       string
+	leg              domain.BridgeLeg
+	parentPositionID string
+}
+
+func (s *BridgeBurnUnlockService) enqueueBurn(ctx context.Context, p burnParams) (*BridgePositionResult, error) {
+	if p.ownerBankID == "" || p.spokeNetwork == "" || p.mirroredAsset == "" || p.amount == "" {
+		return nil, fmt.Errorf("owner_bank_id, spoke_network, mirrored_asset, and amount are required")
+	}
+	if p.leg == "" {
+		p.leg = domain.BridgeLegSettlement
+	}
 
 	logPrefix := ""
-	if correlationID != "" {
-		logPrefix = fmt.Sprintf("[correlation_id=%s] ", sanitizeLogField(correlationID))
+	if p.correlationID != "" {
+		logPrefix = fmt.Sprintf("[correlation_id=%s] ", sanitizeLogField(p.correlationID))
 	}
 
 	positionID := uuid.NewString()
 	now := time.Now()
-	fmt.Printf("%sbridge-out enqueue: position_id=%s owner=%s wrapped=%s amount=%s burn_from=%s beneficiary=%s\n",
-		logPrefix, positionID, ownerBankID, mirroredAsset, amount, burnFrom, beneficiarySpoke)
+	fmt.Printf("%sbridge-out enqueue: position_id=%s leg=%s owner=%s wrapped=%s amount=%s burn_from=%s beneficiary=%s parent=%s\n",
+		logPrefix, positionID, p.leg, p.ownerBankID, p.mirroredAsset, p.amount, p.burnFrom, p.beneficiarySpoke, p.parentPositionID)
 
 	pos := &domain.BridgedAssetPosition{
 		PositionID:              positionID,
-		OwnerBankID:             ownerBankID,
-		SpokeNetwork:            spokeNetwork,
-		NativeAsset:             nativeAsset,
-		MirroredAsset:           mirroredAsset,
-		MirroredAmount:          amount,
+		OwnerBankID:             p.ownerBankID,
+		SpokeNetwork:            p.spokeNetwork,
+		NativeAsset:             p.nativeAsset,
+		MirroredAsset:           p.mirroredAsset,
+		MirroredAmount:          p.amount,
 		BridgeState:             domain.BridgeStateActive,
-		BurnFromHubAddress:      burnFrom,
-		BeneficiarySpokeAddress: beneficiarySpoke,
-		SwapTxHash:              swapTxHash,
-		CorrelationID:           correlationID,
+		BurnFromHubAddress:      p.burnFrom,
+		BeneficiarySpokeAddress: p.beneficiarySpoke,
+		SwapTxHash:              p.swapTxHash,
+		Leg:                     p.leg,
+		ParentPositionID:        p.parentPositionID,
+		CorrelationID:           p.correlationID,
 		FirstAttemptAt:          &now,
 		LastAttemptAt:           &now,
 	}
 	if err := s.db.WithContext(ctx).Create(pos).Error; err != nil {
-		// Unique-index race: a concurrent replay consumed this swap first. Return the
+		// Unique-index race: a concurrent replay consumed this swap leg first. Return the
 		// winning position so the caller's response stays idempotent. Only a unique
 		// violation (23505) means "duplicate swap"; any other error (connection drop,
 		// deadlock, etc.) must propagate so the caller can retry safely.
-		if swapTxHash != "" && isUniqueViolation(err) {
-			if existing, findErr := s.FindBySwapTxHash(ctx, swapTxHash); findErr == nil && existing != nil {
-				fmt.Printf("%sbridge-out duplicate swap_tx_hash=%s — returning existing position %s\n",
-					logPrefix, sanitizeLogField(swapTxHash), existing.PositionID)
+		if p.swapTxHash != "" && isUniqueViolation(err) {
+			if existing, findErr := s.findBySwapTxHashLeg(ctx, p.swapTxHash, p.leg); findErr == nil && existing != nil {
+				fmt.Printf("%sbridge-out duplicate swap_tx_hash=%s leg=%s — returning existing position %s\n",
+					logPrefix, sanitizeLogField(p.swapTxHash), p.leg, existing.PositionID)
 				return existing, nil
 			}
 		}
@@ -259,20 +337,41 @@ func (s *BridgeBurnUnlockService) EnqueueBurnAfterSwap(
 		return nil, fmt.Errorf("persist relayer queue item failed: %w", err)
 	}
 
-	fmt.Printf("%sbridge-out burn-unlock enqueued: position_id=%s\n", logPrefix, positionID)
+	fmt.Printf("%sbridge-out burn-unlock enqueued: position_id=%s leg=%s\n", logPrefix, positionID, p.leg)
 	return toPositionResult(pos), nil
 }
 
-// FindBySwapTxHash returns the bridge-out position that already consumed the given Hub
+// FindBySwapTxHash returns the SETTLEMENT position that already consumed the given Hub
 // swap transaction, or (nil, nil) when the swap has not been processed (R2-CR-6 replay
 // protection). Used by CrossCurrencyBridgeOutHandler before enqueuing a burn.
+//
+// Scoped to the settlement leg on purpose: a residue return carries the same swap_tx_hash,
+// and treating it as a prior settlement would make a legitimate payment look like a replay.
 func (s *BridgeBurnUnlockService) FindBySwapTxHash(ctx context.Context, swapTxHash string) (*BridgePositionResult, error) {
+	return s.findBySwapTxHashLeg(ctx, swapTxHash, domain.BridgeLegSettlement)
+}
+
+// FindResidueBySwapTxHash is the residue-leg counterpart, used by the residue-return
+// handler for its own replay protection.
+func (s *BridgeBurnUnlockService) FindResidueBySwapTxHash(ctx context.Context, swapTxHash string) (*BridgePositionResult, error) {
+	return s.findBySwapTxHashLeg(ctx, swapTxHash, domain.BridgeLegResidue)
+}
+
+func (s *BridgeBurnUnlockService) findBySwapTxHashLeg(ctx context.Context, swapTxHash string, leg domain.BridgeLeg) (*BridgePositionResult, error) {
 	if swapTxHash == "" {
 		return nil, nil
 	}
 	var pos domain.BridgedAssetPosition
-	err := s.db.WithContext(ctx).Where("swap_tx_hash = ?", swapTxHash).First(&pos).Error
-	if err != nil {
+	// Legacy rows predate the leg column; AutoMigrate backfills them to SETTLEMENT, but
+	// tolerate an empty value so a partially migrated table cannot silently lose replay
+	// protection on the settlement leg.
+	q := s.db.WithContext(ctx).Where("swap_tx_hash = ?", swapTxHash)
+	if leg == domain.BridgeLegSettlement {
+		q = q.Where("leg = ? OR leg = ''", leg)
+	} else {
+		q = q.Where("leg = ?", leg)
+	}
+	if err := q.First(&pos).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -319,6 +418,92 @@ func (s *BridgePositionReader) GetBridgeState(ctx context.Context, positionID st
 		return "", fmt.Errorf("position %s: %w", positionID, err)
 	}
 	return pos.BridgeState, nil
+}
+
+// GetPosition returns the internal detail of a bridge position. Used by the residue-return
+// handler to authorize a return against the bridge-in position the CB itself created: the
+// amount bridged in is read from here, never from the request body.
+//
+// Distinct from BridgePositionResult (the public JSON DTO) so Hub/spoke addresses stay off
+// the list endpoints.
+func (s *BridgePositionReader) GetPosition(ctx context.Context, positionID string) (*BridgePositionDetail, error) {
+	if positionID == "" {
+		return nil, fmt.Errorf("position_id is required")
+	}
+	var pos domain.BridgedAssetPosition
+	if err := s.db.WithContext(ctx).Where("position_id = ?", positionID).First(&pos).Error; err != nil {
+		return nil, fmt.Errorf("position %s: %w", positionID, err)
+	}
+	return &BridgePositionDetail{
+		PositionID:           pos.PositionID,
+		OwnerBankID:          pos.OwnerBankID,
+		SpokeNetwork:         pos.SpokeNetwork,
+		NativeAsset:          pos.NativeAsset,
+		MirroredAsset:        pos.MirroredAsset,
+		MirroredAmount:       pos.MirroredAmount,
+		BridgeState:          string(pos.BridgeState),
+		MintToHubAddress:     pos.MintToHubAddress,
+		BurnFromSpokeAddress: pos.BurnFromSpokeAddress,
+		Leg:                  string(pos.Leg),
+	}, nil
+}
+
+// NetConsumed reports how much of a bridge-in position the swap actually consumed:
+// mirrored_amount minus whatever its residue leg gives back.
+//
+// The bridge-in position's mirrored_amount is deliberately never rewritten — it records what
+// the chain did, and is audit evidence. The truth about consumption is the *pair* of records,
+// which is what this derives.
+//
+// A residue leg that has not reached RELEASED is still counted: the return is in flight, and
+// treating it as consumed would overstate the payer's debit.
+func (s *BridgePositionReader) NetConsumed(ctx context.Context, bridgeInPositionID string) (string, error) {
+	var parent domain.BridgedAssetPosition
+	if err := s.db.WithContext(ctx).Where("position_id = ?", bridgeInPositionID).First(&parent).Error; err != nil {
+		return "", fmt.Errorf("position %s: %w", bridgeInPositionID, err)
+	}
+	bridged, ok := new(big.Int).SetString(strings.TrimSpace(parent.MirroredAmount), 10)
+	if !ok {
+		return "", fmt.Errorf("position %s has an unparseable mirrored_amount %q", bridgeInPositionID, parent.MirroredAmount)
+	}
+
+	var legs []domain.BridgedAssetPosition
+	if err := s.db.WithContext(ctx).
+		Where("parent_position_id = ? AND leg = ?", bridgeInPositionID, domain.BridgeLegResidue).
+		Find(&legs).Error; err != nil {
+		return "", fmt.Errorf("list residue legs of %s: %w", bridgeInPositionID, err)
+	}
+
+	net := new(big.Int).Set(bridged)
+	for i := range legs {
+		returned, ok := new(big.Int).SetString(strings.TrimSpace(legs[i].MirroredAmount), 10)
+		if !ok {
+			return "", fmt.Errorf("residue leg %s has an unparseable mirrored_amount %q", legs[i].PositionID, legs[i].MirroredAmount)
+		}
+		net.Sub(net, returned)
+	}
+	if net.Sign() < 0 {
+		return "", fmt.Errorf("position %s: residue legs exceed the bridged amount — reconciliation required", bridgeInPositionID)
+	}
+	return net.String(), nil
+}
+
+// ListStrandedResidueLegs returns residue positions that have not reached RELEASED: value
+// burned or pending on the Hub that the payer has not received back yet. A growing result
+// set means slippage buffers are accumulating instead of being returned.
+func (s *BridgePositionReader) ListStrandedResidueLegs(ctx context.Context) ([]BridgePositionResult, error) {
+	var positions []domain.BridgedAssetPosition
+	if err := s.db.WithContext(ctx).
+		Where("leg = ? AND bridge_state <> ?", domain.BridgeLegResidue, domain.BridgeStateReleased).
+		Order("created_at ASC").
+		Find(&positions).Error; err != nil {
+		return nil, fmt.Errorf("list stranded residue legs: %w", err)
+	}
+	dtos := make([]BridgePositionResult, len(positions))
+	for i := range positions {
+		dtos[i] = *toPositionResult(&positions[i])
+	}
+	return dtos, nil
 }
 
 func (s *BridgePositionReader) HasActiveBridgePosition(ctx context.Context, ownerBankID string) (bool, error) {

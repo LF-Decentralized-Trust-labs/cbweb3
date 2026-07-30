@@ -17,6 +17,7 @@ import (
 
 	besuAdapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/besu"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/adapters/cacti"
+	dbinit "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/db/init"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/grpc/server"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/repository"
@@ -171,6 +172,10 @@ func main() {
 	// Bridge RelayerWorker (Scenario B — FR-031 / FR-039).
 	if bridgeDB, bridgeErr := gorm.Open(gormpg.Open(fxDSN), &gorm.Config{}); bridgeErr != nil {
 		logger.Warn("bridge relayer worker disabled — could not open bridge DB", "error", bridgeErr)
+	} else if migErr := dbinit.RunAutoMigrate(bridgeDB); migErr != nil {
+		// Defensive additive migration; the burn/mint confirmation writes must not race ahead of
+		// the schema (R2-H-12 #4). Fail closed rather than start the relayer against a stale schema.
+		log.Fatalf("FATAL: bridge schema migrate: %v", migErr)
 	} else {
 		hubRPC := getEnv("HUB_BESU_RPC_URL", "")
 		hubKey := getEnv("SIGNER_PRIVATE_KEY", "")

@@ -10,8 +10,9 @@ import (
 )
 
 // AMMQuoter is the interface for querying exact-output quotes from the Hub AMM.
+// outputIsTokenA selects the direction (false = A→B, output TOKEN_B; true = B→A).
 type AMMQuoter interface {
-	QuoteExactOutput(ctx context.Context, pair, amountOut string) (requiredInput, priceImpact string, quoteTimestamp int64, err error)
+	QuoteExactOutput(ctx context.Context, pair, amountOut string, outputIsTokenA bool) (requiredInput, priceImpact string, quoteTimestamp int64, err error)
 }
 
 // QuoteResponse holds the result of an exact-output quote request.
@@ -38,7 +39,9 @@ func (s *QuoteService) GetExactOutputQuote(ctx context.Context, pair, amountOut 
 		return nil, fmt.Errorf("pair and amount_out are required")
 	}
 
-	requiredInput, priceImpact, ts, err := s.quoter.QuoteExactOutput(ctx, pair, amountOut)
+	// Direct exact-output quote is pair-oriented (buy TOKEN_B); the cross-currency
+	// direction is handled by the swap quote generator / orchestrator instead.
+	requiredInput, priceImpact, ts, err := s.quoter.QuoteExactOutput(ctx, pair, amountOut, false)
 	if err != nil {
 		return nil, fmt.Errorf("amm quote failed: %w", err)
 	}

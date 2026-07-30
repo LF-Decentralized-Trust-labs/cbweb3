@@ -121,8 +121,8 @@ func TestRun_SuccessPath(t *testing.T) {
 	if result.Bundle == nil || result.Bundle.Path == "" {
 		t.Error("Bundle.Path should not be empty on success")
 	}
-	if len(result.Steps) != 16 {
-		t.Errorf("Steps len = %d; want 16", len(result.Steps))
+	if len(result.Steps) != 17 {
+		t.Errorf("Steps len = %d; want 17", len(result.Steps))
 	}
 	if !bundleCalled {
 		t.Error("emitBundle was not called on success path")

@@ -1,0 +1,443 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package manifest
+
+import (
+	"fmt"
+	"reflect"
+	"regexp"
+	"strings"
+)
+
+// Recognized enum values (also mirrored by the published JSON-Schema).
+const (
+	wantAPIVersion = "cbweb3b/v1"
+	wantKind       = "ParticipantDeployment"
+	wantScenario   = "b"
+	wantEnv        = "local"
+
+	ModeFoundHub   = "found-hub"
+	ModeFoundSpoke = "found-spoke"
+	ModeJoin       = "join"
+	ModeObserve    = "observe"
+)
+
+// Modes lists the recognized spec.mode values.
+var Modes = []string{ModeFoundHub, ModeFoundSpoke, ModeJoin, ModeObserve}
+
+// Roles lists the recognized spec.topology.role values.
+var Roles = []string{"hub", "central-bank", "commercial-bank", "noc"}
+
+// RequiredByMode is the per-mode set of spec fields that MUST be present.
+// It is the source of truth for the required half of the per-mode matrix and is
+// compared against the published JSON-Schema by the parity test (SC-004).
+var RequiredByMode = map[string][]string{
+	ModeFoundHub:   {"hub"},
+	ModeFoundSpoke: {"spoke", "hubBundleRef"},
+	ModeJoin:       {"spoke", "joinBundleRef", "bankId"},
+	ModeObserve:    {"nocBundleRef"},
+}
+
+// ForbiddenByMode is the per-mode set of spec fields that MUST NOT be present.
+// It is the source of truth for the forbidden half of the per-mode matrix and
+// is compared against the published JSON-Schema by the parity test (SC-004).
+var ForbiddenByMode = map[string][]string{
+	ModeFoundHub:   {"spoke", "hubBundleRef", "joinBundleRef", "bankId", "nocBundleRef"},
+	ModeFoundSpoke: {"hub", "joinBundleRef", "bankId", "nocBundleRef"},
+	ModeJoin:       {"hub", "hubBundleRef", "cbEndpoint", "nocBundleRef"},
+	ModeObserve:    {"hub", "spoke", "hubBundleRef", "joinBundleRef", "bankId", "cbEndpoint"},
+}
+
+var (
+	keyProviderRe = regexp.MustCompile(`^kms://`)
+	certSourceRe  = regexp.MustCompile(`^(self-signed(://.*)?|ca://.+)$`)
+	// hexKeyRe matches a bare or 0x-prefixed 64-hex-character private key.
+	hexKeyRe = regexp.MustCompile(`(?i)\b(0x)?[0-9a-f]{64}\b`)
+)
+
+// Validate checks a single manifest and returns all findings (errors +
+// warnings), collected in one pass (FR-011). A manifest is valid when the
+// returned Result has no errors; warnings do not make it invalid.
+func Validate(pd *ParticipantDeployment) Result {
+	var r Result
+	if pd == nil {
+		r.AddError("manifest", "nil manifest")
+		return r
+	}
+
+	// FR-001: apiVersion / kind. These gate everything else conceptually, but
+	// we still collect the remaining findings so the operator sees them at once.
+	if pd.APIVersion == "" {
+		r.AddError("apiVersion", "required field is missing")
+	} else if pd.APIVersion != wantAPIVersion {
+		r.AddError("apiVersion", fmt.Sprintf("invalid value %q; must be %q", pd.APIVersion, wantAPIVersion))
+	}
+	if pd.Kind == "" {
+		r.AddError("kind", "required field is missing")
+	} else if pd.Kind != wantKind {
+		r.AddError("kind", fmt.Sprintf("invalid value %q; must be %q", pd.Kind, wantKind))
+	}
+
+	// metadata.name
+	if pd.Metadata.Name == "" {
+		r.AddError("metadata.name", "required field is missing")
+	}
+
+	spec := pd.Spec
+
+	// FR-002 + scenario: scenario / mode / role discriminators.
+	if spec.Scenario == "" {
+		r.AddError("spec.scenario", "required field is missing")
+	} else if spec.Scenario != wantScenario {
+		r.AddError("spec.scenario", fmt.Sprintf("invalid value %q; must be %q", spec.Scenario, wantScenario))
+	}
+
+	if spec.Mode == "" {
+		r.AddError("spec.mode", "required field is missing")
+	} else if !contains(Modes, spec.Mode) {
+		r.AddError("spec.mode", fmt.Sprintf("invalid value %q; accepted values are: %s", spec.Mode, strings.Join(Modes, ", ")))
+	}
+
+	if spec.Topology.Role == "" {
+		r.AddError("spec.topology.role", "required field is missing")
+	} else if !contains(Roles, spec.Topology.Role) {
+		r.AddError("spec.topology.role", fmt.Sprintf("invalid value %q; accepted values are: %s", spec.Topology.Role, strings.Join(Roles, ", ")))
+	}
+
+	// FR-005: environment must be local in this phase.
+	if spec.Environment == "" {
+		r.AddError("spec.environment", "required field is missing")
+	} else if spec.Environment != wantEnv {
+		r.AddError("spec.environment", fmt.Sprintf("invalid value %q; only %q is supported in this phase (staging/prod are rejected)", spec.Environment, wantEnv))
+	}
+
+	// Node-provisioning fields (node addressing, Besu image, key/cert material,
+	// relay registration) apply only to modes that stand up an on-chain node.
+	// The observe mode deploys the NOC observability stack (no Besu node), so
+	// these are skipped for it. Any other/empty mode still validates them, so an
+	// invalid mode surfaces the full set of findings as before (FR-011).
+	if spec.Mode != ModeObserve {
+		// FR-004: node addressing.
+		validateNode(spec.Node, &r)
+
+		// Always-required scalar/object fields (structural, mirrored by schema).
+		if spec.Image == "" {
+			r.AddError("spec.image", "required field is missing")
+		}
+		// FR-007: keyProvider / certSource URIs.
+		if spec.KeyProvider == "" {
+			r.AddError("spec.keyProvider", "required field is missing")
+		} else if !keyProviderRe.MatchString(spec.KeyProvider) {
+			r.AddError("spec.keyProvider", fmt.Sprintf("invalid value %q; must match kms://…", spec.KeyProvider))
+		}
+		if spec.CertSource == "" {
+			r.AddError("spec.certSource", "required field is missing")
+		} else if !certSourceRe.MatchString(spec.CertSource) {
+			r.AddError("spec.certSource", fmt.Sprintf("invalid value %q; must be self-signed, self-signed://… or ca://…", spec.CertSource))
+		}
+		validateRelay(spec.Relay, &r)
+	}
+
+	// frontendHost + adminUsers apply to every mode (the NOC has a portal and
+	// operator accounts too).
+	if spec.FrontendHost == "" {
+		r.AddError("spec.frontendHost", "required field is missing")
+	}
+	validateAdminUsers(spec.AdminUsers, &r)
+	validateNOC(spec.NOC, &r)
+
+	// Launcher (optional): enable | disable when present.
+	if spec.Launcher != "" && spec.Launcher != "enable" && spec.Launcher != "disable" {
+		r.AddError("spec.launcher", fmt.Sprintf("invalid value %q; accepted values are: enable, disable", spec.Launcher))
+	}
+	// LauncherPort (optional): a valid TCP port when set.
+	if spec.LauncherPort != 0 && (spec.LauncherPort < 1 || spec.LauncherPort > 65535) {
+		r.AddError("spec.launcherPort", fmt.Sprintf("invalid value %d; must be a TCP port (1-65535)", spec.LauncherPort))
+	}
+	// Proxy (optional): enable | disable when present.
+	if spec.Proxy != "" && spec.Proxy != "enable" && spec.Proxy != "disable" {
+		r.AddError("spec.proxy", fmt.Sprintf("invalid value %q; accepted values are: enable, disable", spec.Proxy))
+	}
+
+	// FR-003: per-mode required + forbidden presence.
+	if contains(Modes, spec.Mode) {
+		validateModeMatrix(pd, &r)
+	}
+
+	// Spoke token metadata overrides, when present.
+	validateSpokeTokens(spec.Mode, spec.Spoke, &r)
+
+	// FR-013: join with node.validator: true → warning (not error).
+	if spec.Mode == ModeJoin && spec.Node != nil && spec.Node.Validator != nil && *spec.Node.Validator {
+		r.AddWarning("spec.node.validator",
+			"validator: true diverges from the join model (non-validating full node); "+
+				"accepted, but promotion to validator is deferred (vote-qbft)")
+	}
+
+	// FR-006: no secret material anywhere in the manifest.
+	scanSecrets("", reflect.ValueOf(pd), &r)
+
+	return r
+}
+
+// validateNode checks node addressing (FR-004).
+func validateNode(n *Node, r *Result) {
+	if n == nil {
+		r.AddError("spec.node", "required field is missing")
+		return
+	}
+	if n.AdvertisedHost == "" {
+		r.AddError("spec.node.advertisedHost",
+			"required field is missing; it must be set explicitly and is never inferred from co-location")
+	}
+	validatePort("spec.node.rpc", n.RPC, r)
+	validatePort("spec.node.ws", n.WS, r)
+	validatePort("spec.node.p2p", n.P2P, r)
+	if n.DataDir == "" {
+		r.AddError("spec.node.dataDir",
+			"required field is missing; set the host path where runtime data will be stored (relative paths resolve against the current working directory)")
+	}
+}
+
+func validatePort(field string, p *Port, r *Result) {
+	if p == nil {
+		r.AddError(field, "required field is missing")
+		return
+	}
+	if p.Port <= 0 {
+		r.AddError(field+".port", fmt.Sprintf("invalid value %d; must be a positive integer", p.Port))
+	}
+}
+
+func validateRelay(rel *Relay, r *Result) {
+	if rel == nil {
+		r.AddError("spec.relay", "required field is missing")
+		return
+	}
+	if rel.Endpoint == "" {
+		r.AddError("spec.relay.endpoint", "required field is missing")
+	}
+}
+
+func validateAdminUsers(users []AdminUser, r *Result) {
+	if len(users) == 0 {
+		r.AddError("spec.adminUsers", "required field is missing; declare at least one operator account")
+		return
+	}
+	for i, u := range users {
+		if u.Role == "" {
+			r.AddError(fmt.Sprintf("spec.adminUsers[%d].role", i), "required field is missing")
+		}
+		if u.Username == "" {
+			r.AddError(fmt.Sprintf("spec.adminUsers[%d].username", i), "required field is missing")
+		}
+		if u.Password == "" {
+			r.AddError(fmt.Sprintf("spec.adminUsers[%d].password", i), "required field is missing")
+		}
+	}
+}
+
+// validateModeMatrix enforces the per-mode required (FR-003) and forbidden
+// (FR-003) presence rules using the RequiredByMode / ForbiddenByMode tables.
+func validateModeMatrix(pd *ParticipantDeployment, r *Result) {
+	mode := pd.Spec.Mode
+	for _, field := range RequiredByMode[mode] {
+		if !specFieldPresent(pd, field) {
+			r.AddError("spec."+field, fmt.Sprintf("required field is missing for mode:%s", mode))
+		}
+	}
+	for _, field := range ForbiddenByMode[mode] {
+		if specFieldPresent(pd, field) {
+			r.AddError("spec."+field, fmt.Sprintf("field is not allowed for mode:%s", mode))
+		}
+	}
+}
+
+// specFieldPresent reports whether a per-mode-controlled spec field is present.
+// Object fields (hub/spoke) use pointer non-nil; scalar fields use a non-empty
+// value.
+func specFieldPresent(pd *ParticipantDeployment, field string) bool {
+	s := pd.Spec
+	switch field {
+	case "hub":
+		return s.Hub != nil
+	case "spoke":
+		return s.Spoke != nil
+	case "hubBundleRef":
+		return s.HubBundleRef != ""
+	case "joinBundleRef":
+		return s.JoinBundleRef != ""
+	case "bankId":
+		return s.BankID != ""
+	case "cbEndpoint":
+		return s.CBEndpoint != ""
+	case "nocBundleRef":
+		return s.NOCBundleRef != ""
+	default:
+		return false
+	}
+}
+
+// validateNOC checks the optional NOC block. It is present in observe (tuning
+// the NOC deployment) and optionally in found-*/join (configuring the entity's
+// agent). All fields are optional; only obviously-invalid values are rejected.
+func validateNOC(n *NOC, r *Result) {
+	if n == nil {
+		return
+	}
+	if n.PushIntervalSeconds < 0 {
+		r.AddError("spec.noc.pushIntervalSeconds",
+			fmt.Sprintf("invalid value %d; must be a non-negative number of seconds", n.PushIntervalSeconds))
+	}
+	for i, c := range n.Components {
+		if !contains(NOCComponentTypes, c) {
+			r.AddError(fmt.Sprintf("spec.noc.components[%d]", i),
+				fmt.Sprintf("invalid value %q; accepted values are: %s", c, strings.Join(NOCComponentTypes, ", ")))
+		}
+	}
+}
+
+// NOCComponentTypes are the component types the noc-agent knows how to probe.
+// Mirrors bundle.NOCComponentTypes (kept local to avoid a manifest→bundle dep).
+var NOCComponentTypes = []string{"BESU", "CACTI_RELAY", "PALADIN"}
+
+// validateSpokeTokens checks the optional per-spoke tCeBM/fCeBM metadata
+// overrides. They are presentation-only: spec.spoke.currency stays the routing
+// key (relay id, hub currency registration, mirrored "W-tCeBM_<ISO>"), so an
+// override must not smuggle a different currency in through the symbol.
+//
+// The "<prefix>_<ISO>" shape is load-bearing, not cosmetic: the api-gateway
+// (currencyCodeFromSymbol) and every portal (currencyFromTokenSymbol) derive the
+// displayed currency code from the segment after the last underscore. A symbol
+// without it degrades the portals to the generic "fiat units" label.
+func validateSpokeTokens(mode string, s *Spoke, r *Result) {
+	if s == nil {
+		return
+	}
+	// Only the founding CB deploys the spoke's tokens; a joining bank consumes
+	// whatever the CB deployed (published in the spoke bundle). Overrides in a join
+	// manifest are inert, so warn instead of silently ignoring them.
+	if mode == ModeJoin && (s.TokenName != "" || s.TokenSymbol != "" || s.FiatTokenName != "" || s.FiatTokenSymbol != "") {
+		r.AddWarning("spec.spoke",
+			"token name/symbol overrides are ignored in mode:join — the founding central bank deploys the spoke's tCeBM/fCeBM; a joining bank consumes the symbols published in the spoke bundle")
+	}
+	validateTokenName("spec.spoke.tokenName", s.TokenName, r)
+	validateTokenName("spec.spoke.fiatTokenName", s.FiatTokenName, r)
+	validateTokenSymbol("spec.spoke.tokenSymbol", s.TokenSymbol, s.Currency, r)
+	validateTokenSymbol("spec.spoke.fiatTokenSymbol", s.FiatTokenSymbol, s.Currency, r)
+}
+
+func validateTokenName(field, name string, r *Result) {
+	if name == "" {
+		return // absent → derived from spec.spoke.currency
+	}
+	if strings.TrimSpace(name) == "" {
+		r.AddError(field, "must not be blank when set; omit the field to derive it from spec.spoke.currency")
+	}
+}
+
+func validateTokenSymbol(field, symbol, currency string, r *Result) {
+	if symbol == "" {
+		return // absent → derived from spec.spoke.currency
+	}
+	if strings.TrimSpace(symbol) != symbol || strings.ContainsAny(symbol, " \t") {
+		r.AddError(field, fmt.Sprintf("invalid value %q; an ERC-20 symbol must not contain whitespace", symbol))
+		return
+	}
+	idx := strings.LastIndex(symbol, "_")
+	if idx < 0 || idx == len(symbol)-1 {
+		r.AddError(field, fmt.Sprintf(
+			"invalid value %q; the symbol must end in \"_<currency>\" (e.g. tCeBM_%s) — portals and the api-gateway derive the displayed currency code from the segment after the last underscore",
+			symbol, orPlaceholder(currency)))
+		return
+	}
+	if code := symbol[idx+1:]; currency != "" && !strings.EqualFold(code, currency) {
+		r.AddError(field, fmt.Sprintf(
+			"invalid value %q; its currency segment %q must match spec.spoke.currency %q — the currency code is the routing key and cannot be overridden by the symbol",
+			symbol, code, currency))
+	}
+}
+
+func orPlaceholder(currency string) string {
+	if currency == "" {
+		return "BRL"
+	}
+	return currency
+}
+
+// scanSecrets walks every string value reachable from v and rejects any that
+// carries private-key material (FR-006). The field path is built from yaml
+// tags so findings name the offending field.
+func scanSecrets(path string, v reflect.Value, r *Result) {
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if v.IsNil() {
+			return
+		}
+		scanSecrets(path, v.Elem(), r)
+	case reflect.Struct:
+		t := v.Type()
+		for i := 0; i < v.NumField(); i++ {
+			f := t.Field(i)
+			if !f.IsExported() {
+				continue
+			}
+			name := yamlFieldName(f)
+			if name == "-" {
+				continue
+			}
+			scanSecrets(joinPath(path, name), v.Field(i), r)
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			scanSecrets(fmt.Sprintf("%s[%d]", path, i), v.Index(i), r)
+		}
+	case reflect.Map:
+		for _, k := range v.MapKeys() {
+			scanSecrets(fmt.Sprintf("%s.%v", path, k.Interface()), v.MapIndex(k), r)
+		}
+	case reflect.String:
+		if hasSecret(v.String()) {
+			field := path
+			if field == "" {
+				field = "manifest"
+			}
+			r.AddError(field, "must not contain private-key material; key/cert material is referenced via keyProvider/certSource, never inline")
+		}
+	}
+}
+
+func hasSecret(s string) bool {
+	if strings.Contains(strings.ToUpper(s), "PRIVATE KEY") {
+		return true
+	}
+	return hexKeyRe.MatchString(s)
+}
+
+func yamlFieldName(f reflect.StructField) string {
+	tag := f.Tag.Get("yaml")
+	if tag == "" {
+		return f.Name
+	}
+	name := strings.Split(tag, ",")[0]
+	if name == "" {
+		return f.Name
+	}
+	return name
+}
+
+func joinPath(prefix, name string) string {
+	if prefix == "" {
+		return name
+	}
+	return prefix + "." + name
+}
+
+func contains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
