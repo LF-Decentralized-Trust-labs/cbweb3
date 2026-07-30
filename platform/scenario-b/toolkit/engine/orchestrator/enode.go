@@ -77,6 +77,18 @@ func resolveHostIP() (string, error) {
 // externally reachable endpoint (advertisedHost + the CB's published P2P port)
 // so a joining bank can use it as its --bootnodes. Returns the input unchanged
 // if it is not a parseable enode.
+// enodeNodeID returns the node public key of an enode URL ("enode://<id>@host:port"),
+// i.e. its stable node identity independent of the advertised endpoint. Empty when
+// the URL has no recognizable id. Used to detect a bundle whose bootnode belongs to
+// a node that no longer exists (spoke re-founded with a fresh key).
+func enodeNodeID(enode string) string {
+	at := strings.LastIndex(enode, "@")
+	if at < 0 {
+		return ""
+	}
+	return strings.TrimPrefix(enode[:at], "enode://")
+}
+
 func rewriteEnodeHost(enode, host string, port int) string {
 	at := strings.LastIndex(enode, "@")
 	if at < 0 {

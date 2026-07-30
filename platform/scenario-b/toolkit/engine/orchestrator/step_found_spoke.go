@@ -50,9 +50,9 @@ type SpokeConfig struct {
 	AdminUsers          []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
 	Currency            string      // domestic currency (e.g. BRL) → tCeBM/fCeBM token names
 	TokenName           string      // tCeBM name (default "Tokenized <Currency>")
-	TokenSymbol         string      // tCeBM symbol (default "t<Currency>")
+	TokenSymbol         string      // tCeBM symbol (default "tCeBM_<Currency>")
 	FiatTokenName       string      // fCeBM name (default "Fiat <Currency>")
-	FiatTokenSymbol     string      // fCeBM symbol (default "f<Currency>")
+	FiatTokenSymbol     string      // fCeBM symbol (default "fCeBM_<Currency>")
 	ValidatorCount      int
 	BesuImage           string
 	HubBundlePath       string
@@ -119,14 +119,20 @@ func (c *SpokeConfig) WithDefaults() {
 		// backend published on the host (default observe backend port 8090).
 		c.NOCBackendURL = "http://host.docker.internal:8090"
 	}
+	// Token symbols MUST carry the "<prefix>_<ISO>" shape: the currency code shown
+	// in every portal is derived from the on-chain ERC-20 symbol by taking the
+	// segment after the last underscore (backend: currencyCodeFromSymbol; frontend:
+	// currencyFromTokenSymbol). A symbol without "_" degrades the UI to the generic
+	// "fiat units" label and makes the backend read the whole symbol as the code.
+	// It is also the shape the hub uses for the mirrored token ("W-tCeBM_<ISO>").
 	if c.TokenSymbol == "" {
-		c.TokenSymbol = "t" + c.Currency
+		c.TokenSymbol = "tCeBM_" + c.Currency
 	}
 	if c.TokenName == "" {
 		c.TokenName = "Tokenized " + c.Currency
 	}
 	if c.FiatTokenSymbol == "" {
-		c.FiatTokenSymbol = "f" + c.Currency
+		c.FiatTokenSymbol = "fCeBM_" + c.Currency
 	}
 	if c.FiatTokenName == "" {
 		c.FiatTokenName = "Fiat " + c.Currency
@@ -426,6 +432,44 @@ func (c SpokeConfig) ProxyRoutes() []ProxyRoute {
 	}
 }
 
+// portalViteArgs are the build-time VITE_* args of this CB's three operator
+// portals (governance, treasury, supervisor). api is the browser-facing
+// api-gateway URL for a host-port deployment; behind the proxy every portal is
+// same-origin and base-path-aware instead.
+//
+// VITE_FIAT_SYMBOL is the portals' fallback currency label: the displayed code
+// normally comes from the on-chain token symbol returned with a balance, and
+// without this fallback the SPA shows the generic "fiat units" until (or unless)
+// that response arrives. The supervisor portal has no fiat label, so it is
+// deliberately not passed there.
+func (c SpokeConfig) portalViteArgs(api string) (gov, tre, sup map[string]string) {
+	lu := frontendLauncherURL(c.LauncherEnabled, c.useProxy(), c.FrontendHost, c.LauncherPort)
+	gov = map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu, "VITE_FIAT_SYMBOL": c.Currency}
+	tre = map[string]string{"VITE_API_BASE_URL": api, "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu, "VITE_FIAT_SYMBOL": c.Currency}
+	sup = map[string]string{"VITE_API_BASE_URL": api, "VITE_SPOKE_NAME": c.SpokeID, "VITE_LAUNCHER_URL": lu}
+	if c.useProxy() {
+		proxied := proxyAPIURL(c.FrontendHost)
+		gov["VITE_API_URL"] = proxied
+		tre["VITE_API_BASE_URL"] = proxied
+		sup["VITE_API_BASE_URL"] = proxied
+		gov["VITE_BASE_PATH"] = proxyPortalBase("governance")
+		tre["VITE_BASE_PATH"] = proxyPortalBase("treasury")
+		sup["VITE_BASE_PATH"] = proxyPortalBase("supervisor")
+	}
+	return gov, tre, sup
+}
+
+// nativeAssetSymbol is the ERC-20 symbol this spoke's tCeBM is actually deployed
+// with — the value the backend must see as NATIVE_ASSET_SYMBOL so env and chain
+// never disagree. Mirrors the WithDefaults derivation so a caller that builds a
+// SpokeConfig by hand (tests) still gets the "<prefix>_<ISO>" shape.
+func (c SpokeConfig) nativeAssetSymbol() string {
+	if s := strings.TrimSpace(c.TokenSymbol); s != "" {
+		return s
+	}
+	return "tCeBM_" + c.Currency
+}
+
 func (c SpokeConfig) ComposeEnv() []string {
 	e := c.ContainerPrefix
 	// The spoke backend reaches the hub via host.docker.internal:<HUB_RPC_PORT>;
@@ -505,8 +549,11 @@ func (c SpokeConfig) ComposeEnv() []string {
 		"CACTI_API_URL": c.cactiAPIURL(),
 		// This CB's own spoke id + native tCeBM symbol: the bridge-out receiver
 		// enqueues the W-<target> burn against its spoke (e.g. spoke-ars / tCeBM_ARS).
+		// The symbol MUST be the one actually deployed on-chain (TokenSymbol), not a
+		// string recomposed from the currency — otherwise the env and the ERC-20
+		// disagree whenever the manifest overrides spoke.tokenSymbol.
 		"SPOKE_NETWORK":       c.SpokeID,
-		"NATIVE_ASSET_SYMBOL": "tCeBM_" + c.Currency,
+		"NATIVE_ASSET_SYMBOL": c.nativeAssetSymbol(),
 		// noc (observability — soft). The agent config is a rendered agent.yaml
 		// mounted from NOC_AGENT_VOLUME (seeded by add-noc-agent); the entity joins
 		// its own ENTITY_NET_PREFIX network to probe besu by container DNS.
@@ -766,9 +813,11 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					return err
 				}
 				for key, addr := range map[string]string{
-					"HUB_IDENTITY_REGISTRY_ADDRESS":      hub.Contracts["identityRegistry"],
-					"HUB_TOKEN_A_ADDRESS":                hub.Contracts["tCeBM_BRL"], // optional until CB registers currency
-					"HUB_TOKEN_B_ADDRESS":                hub.Contracts["tCeBM_EUR"],
+					"HUB_IDENTITY_REGISTRY_ADDRESS": hub.Contracts["identityRegistry"],
+					// No HUB_TOKEN_A/B_ADDRESS: the hub deploys no tCeBM (CBWeb3Hub.s.sol),
+					// every corridor's mirrored tokens are created per currency registration
+					// and resolved from the PairRegistry at runtime. Wiring a fixed pair of
+					// currencies here would hardcode a bilateral BRL/EUR assumption.
 					"FX_AGREEMENT_CONTRACT_ADDRESS":      hub.Contracts["fxAgreement"],
 					"PAIR_REGISTRY_CONTRACT_ADDRESS":     hub.Contracts["pairRegistry"],
 					"CURRENCY_REGISTRY_CONTRACT_ADDRESS": hub.Contracts["currencyRegistry"],
@@ -900,20 +949,8 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			gwPort := c.RPCPort + 8000
 			api := fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort)
 			variant := c.frontendVariant()
-			lu := frontendLauncherURL(c.LauncherEnabled, c.useProxy(), c.FrontendHost, c.LauncherPort)
 			sb := c.scenarioBDir()
-			gov := map[string]string{"VITE_API_URL": api, "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu}
-			tre := map[string]string{"VITE_API_BASE_URL": api, "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu}
-			sup := map[string]string{"VITE_API_BASE_URL": api, "VITE_SPOKE_NAME": c.SpokeID, "VITE_LAUNCHER_URL": lu}
-			if c.useProxy() {
-				api = proxyAPIURL(c.FrontendHost)
-				gov["VITE_API_URL"] = api
-				tre["VITE_API_BASE_URL"] = api
-				sup["VITE_API_BASE_URL"] = api
-				gov["VITE_BASE_PATH"] = proxyPortalBase("governance")
-				tre["VITE_BASE_PATH"] = proxyPortalBase("treasury")
-				sup["VITE_BASE_PATH"] = proxyPortalBase("supervisor")
-			}
+			gov, tre, sup := c.portalViteArgs(api)
 			if err := buildFrontendImage(ctx, c.Runner, sb, cbFrontendImage("governance", gwPort, variant), "governance", gov); err != nil {
 				return err
 			}
@@ -976,15 +1013,23 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 	// oracle rate) is NOT part of provisioning: it is opened at runtime by each
 	// central bank through its governance portal (POST /api/v2/amm/pairs/propose
 	// + /confirm, /api/v2/amm/liquidity/*, /api/v2/hub/currencies — CB-role, via
-	// Keycloak). spec.pair documents the intended corridor; the toolkit never
-	// holds sovereign signing keys.
+	// Keycloak). The manifest declares no corridor: the toolkit never holds
+	// sovereign signing keys.
 	steps = append(steps, Step{
 		Name: "emit-spoke-bundle",
 		Deps: []string{"deploy-spoke-contracts", "start-besu-spoke"},
-		// Skip only when the on-disk bundle already carries the public endpoints
-		// (AdvertisedHost). A stale localhost / host.docker.internal bundle from an
-		// older toolkit must re-emit so remote banks can dial the CB.
-		Check: func(context.Context) (bool, error) {
+		// Skip only when the on-disk bundle matches the LIVE node: the public
+		// endpoints (AdvertisedHost), the genesis, and the node identity. A stale
+		// localhost / host.docker.internal bundle from an older toolkit must re-emit
+		// so remote banks can dial the CB.
+		//
+		// Endpoints alone are not enough. Re-founding a spoke keeps the same host and
+		// ports but produces a FRESH node key and genesis, and the emitted bundle
+		// lives outside the wiped Docker volumes — so it survives. A joining bank
+		// would then write the previous genesis (different genesis hash ⇒ peering is
+		// impossible) and dial a bootnode that no longer exists, and the only symptom
+		// is wait-sync timing out after 10 minutes at block 0 with no error.
+		Check: func(ctx context.Context) (bool, error) {
 			b, err := bundle.LoadSpoke(filepath.Join(c.OutDir, "bundles", c.SpokeID+".bundle.yaml"))
 			if err != nil {
 				return false, nil
@@ -993,9 +1038,23 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			if err != nil {
 				return false, nil
 			}
-			return b.SpokeRPC == c.publicSpokeRPC(host) &&
-				b.SpokeWS == c.publicSpokeWS(host) &&
-				b.CBGateway == c.publicCBGateway(host), nil
+			if b.SpokeRPC != c.publicSpokeRPC(host) ||
+				b.SpokeWS != c.publicSpokeWS(host) ||
+				b.CBGateway != c.publicCBGateway(host) {
+				return false, nil
+			}
+			genesisBytes, err := readVolumeFile(ctx, c.Runner, c.genesisVolume(), "genesis.json")
+			if err != nil || len(genesisBytes) == 0 || string(genesisBytes) != b.Genesis {
+				return false, nil // unreadable or diverged → re-emit (safe)
+			}
+			live := capturedEnode
+			if live == "" {
+				if live, err = c.EnodeReader(ctx, c.SpokeRPC); err != nil {
+					return false, nil
+				}
+			}
+			id := enodeNodeID(live)
+			return id != "" && id == enodeNodeID(b.Enode), nil
 		},
 		Run: func(ctx context.Context) error {
 			m, err := spokeContractMap(c.spokeBroadcastPath())
@@ -1051,6 +1110,10 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				// Routable hub RPC (from the hub bundle) so a joining bank reaches the
 				// hub cross-VM (HUB_BESU_RPC_URL) instead of host.docker.internal.
 				HubRPC: hubForBundle.HubRPC,
+				// Sovereign currency of this spoke: the join cross-checks it against the
+				// joining bank's manifest so a bank cannot attach to a BRL spoke while
+				// claiming another currency.
+				Currency: c.Currency,
 			}
 			_, err = bundle.EmitSpoke(b, c.OutDir)
 			return err

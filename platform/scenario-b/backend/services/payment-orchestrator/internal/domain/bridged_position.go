@@ -60,6 +60,21 @@ type BridgedAssetPosition struct {
 	Leg string `gorm:"column:leg;not null;default:'SETTLEMENT'"`
 	// ParentPositionID links a RESIDUE leg to the bridge-in position it corrects.
 	ParentPositionID string `gorm:"column:parent_position_id;default:''"`
+	// HubBurnTxHash is the confirmed Hub burn transaction for this bridge-out position (R2-H-12).
+	// It is persisted only after the burn transaction is mined with a successful receipt, and it
+	// is the idempotency key for burn retries: a non-empty value means the Hub burn is confirmed
+	// on-chain, so a retry skips the burn and resumes at the spoke release/mint step. Native value
+	// is never released on the spoke while this is empty. Mirrors the swap_tx_hash replay guard
+	// (R2-CR-6) — completion is tracked by persisted receipt, never inferred from token balance.
+	HubBurnTxHash string `gorm:"column:hub_burn_tx_hash;default:''"`
+	// SpokeMintTxHash is the confirmed Spoke-side mint transaction for a cross-currency
+	// bridge-out (R2-H-12 follow-up) — the spoke-leg mirror of HubBurnTxHash. A broadcast intent
+	// is persisted before the receipt wait; the value is authoritative once the mint is mined
+	// successfully. Non-empty means the beneficiary has been credited, so a retry reconciles by
+	// hash and skips the mint. Prevents a WaitMined timeout on a landed mint from minting
+	// unbacked tCeBM twice against a single Hub burn. Mirror field; the api-gateway owns the
+	// AutoMigrate for the shared bridged_asset_positions table.
+	SpokeMintTxHash string `gorm:"column:spoke_mint_tx_hash;default:''"`
 	// CorrelationID links the position to the cross-currency swap operation (009) for tracing.
 	CorrelationID string    `gorm:"column:correlation_id;default:''"`
 	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime"`

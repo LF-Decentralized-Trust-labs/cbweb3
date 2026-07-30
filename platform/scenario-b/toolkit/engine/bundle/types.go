@@ -41,6 +41,11 @@ type SpokeBundle struct {
 	// reaches the hub cross-VM instead of the single-host host.docker.internal
 	// fallback (HubRPCPort). Empty on old bundles → bank falls back to HubRPCPort.
 	HubRPC string `yaml:"hubRpc,omitempty" json:"hubRpc,omitempty"`
+	// Currency is the spoke's ISO 4217 code (the founding CB's spec.spoke.currency).
+	// A joining bank declares the same code in its own manifest; the join cross-checks
+	// the two so a bank cannot attach to a BRL spoke while claiming COP. Empty on
+	// bundles emitted before this field existed → the check is skipped.
+	Currency string `yaml:"currency,omitempty" json:"currency,omitempty"`
 }
 
 // NOCComponent describes a single monitorable component (a Besu node, a Cacti

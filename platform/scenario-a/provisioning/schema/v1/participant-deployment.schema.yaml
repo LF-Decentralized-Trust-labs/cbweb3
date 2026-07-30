@@ -245,6 +245,24 @@ definitions:
         minLength: 1
         description: "ISO 4217 currency code for this spoke (e.g., BRL, USD, EUR)."
 
+      fiatTokenName:
+        type: string
+        minLength: 1
+        description: >
+          Optional override for the ERC-20 name of this spoke's fCeBM. Absent, it
+          derives from `currency` as "Fiat <ISO>" (e.g. "Fiat BRL"). Presentation
+          only — `currency` remains the semantic key and is what the portals show.
+
+      fiatTokenSymbol:
+        type: string
+        pattern: "^[^\\s]+_[^\\s_]+$"
+        description: >
+          Optional override for the ERC-20 symbol of this spoke's fCeBM. Absent, it
+          derives from `currency` as "fCeBM_<ISO>" (e.g. "fCeBM_BRL"). It must keep
+          the "<prefix>_<ISO>" shape and end in this spoke's own currency; the
+          semantic rule (segment after the last underscore == currency) is enforced
+          by the Go validator.
+
   Node:
     type: object
     required:

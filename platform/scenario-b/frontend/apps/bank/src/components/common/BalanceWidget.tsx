@@ -6,15 +6,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@cbweb3/ui";
-import { formatCeBM, formatTokenAmount } from "../../types";
+import { formatCeBM, formatTokenAmount, tokenUnitPrefix } from "../../types";
 
 type BalanceWidgetProps = {
   balance: string | null;
   decimals: number | null;
   symbol?: string | null;
   loading?: boolean;
-  // When true, render just the numeric value (the card title already says
-  // "tCeBM Balance", so the trailing unit label is redundant).
+  // When true, render just the numeric value (the card description already names the
+  // token, so the trailing unit label is redundant).
   hideSymbol?: boolean;
 };
 
@@ -28,7 +28,7 @@ export function BalanceWidget({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardDescription>tCeBM Balance</CardDescription>
+        <CardDescription>{tokenUnitPrefix(symbol)} Balance</CardDescription>
         <CardTitle>
           {loading
             ? "Loading..."

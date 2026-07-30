@@ -71,19 +71,19 @@ bash "${SCENARIO_DIR}/provisioning/scripts/start-cacti.sh"
 # --- hub -----------------------------------------------------------------------
 apply "Hub — found-hub hub-cbweb3" "${SCRIPT_DIR}/hub/hub-cbweb3.yaml"
 
-# --- Brazil spoke (proposes the BRL<->ARS pair) -------------------------------
+# --- Brazil spoke --------------------------------------------------------------
 apply "Brazil — found-spoke central-bank-brazil (spoke-brl)" \
   "${SCRIPT_DIR}/brazil/central-bank-brazil.yaml" --spoke-rpc http://localhost:33645
 apply "Brazil — join bank-itau"     "${SCRIPT_DIR}/brazil/bank-itau.yaml"     --spoke-rpc http://localhost:33646
 apply "Brazil — join bank-bradesco" "${SCRIPT_DIR}/brazil/bank-bradesco.yaml" --spoke-rpc http://localhost:33647
 
-# --- Argentina spoke (confirms the pair -> ACTIVE) ----------------------------
+# --- Argentina spoke -----------------------------------------------------------
 apply "Argentina — found-spoke central-bank-argentina (spoke-ars)" \
   "${SCRIPT_DIR}/argentina/central-bank-argentina.yaml" --spoke-rpc http://localhost:33745
 apply "Argentina — join bank-galicia" "${SCRIPT_DIR}/argentina/bank-galicia.yaml" --spoke-rpc http://localhost:33746
 apply "Argentina — join bank-macro"   "${SCRIPT_DIR}/argentina/bank-macro.yaml"   --spoke-rpc http://localhost:33747
 
-# --- Colombia spoke (no sovereign pair) ---------------------------------------
+# --- Colombia spoke ------------------------------------------------------------
 apply "Colombia — found-spoke central-bank-colombia (spoke-cop)" \
   "${SCRIPT_DIR}/colombia/central-bank-colombia.yaml" --spoke-rpc http://localhost:33945
 apply "Colombia — join bank-bancolombia" "${SCRIPT_DIR}/colombia/bank-bancolombia.yaml" --spoke-rpc http://localhost:33946

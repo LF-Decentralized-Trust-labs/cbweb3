@@ -265,4 +265,50 @@ step "Confirm the pool reserves moved (constant-product swap)"
 call GET "$BR_CB/api/v2/amm/pool/$POOL/status" "$BR_TOK"
 ok "reserves now A=$(printf '%s' "$BODY" | jget reserve_a) B=$(printf '%s' "$BODY" | jget reserve_b)"
 
-printf '\n%s✓ tryout complete — %s corridor opened via the hub, liquidity seeded, and an end-to-end cross-currency swap (bridge-in → AMM → bridge-out) settled across both sovereign networks%s\n' "$GREEN$BOLD" "$POOL" "$RST"
+# ═══════════════════════════ REDEEM (DE-TOKENISATION) ════════════════════════════
+# Redeem is the exact inverse of the escrow tokenisation: on CB approval it BURNS the
+# bank's tCeBM and mints the equivalent fCeBM (fiat) back — so a redeem must DECREASE
+# the bank's tCeBM balance. This section is a regression guard for the reported bug
+# where redeem MINTED tCeBM instead (balance went UP). It is self-contained: bank-itau
+# tokenises a fresh amount, we snapshot its tCeBM balance, redeem part of it, and assert
+# the balance dropped by exactly the redeemed amount.
+REDEEM_FUND="4000000000000000000"   # tokenise 4 tCeBM of fresh headroom to redeem from
+REDEEM_AMT="1000000000000000000"    # de-tokenise (redeem) 1 tCeBM back to fiat
+
+step "bank-itau tokenises fresh reserves to redeem ($REDEEM_FUND)"
+call POST "$ITAU/api/v1/payments/deposits" "$ITAU_TOK" "{\"amount\":\"$REDEEM_FUND\"}"
+R_DEP_ID=$(printf '%s' "$BODY" | jget deposit_id)
+[[ -n $R_DEP_ID ]] || die "no deposit_id for redeem funding: $BODY"
+call POST "$BR_CB/api/v1/payments/deposits/approve" "$BR_TOK" "{\"deposit_id\":\"$R_DEP_ID\"}"
+call POST "$ITAU/api/v1/payments/escrows" "$ITAU_TOK" "{\"deposit_id\":\"$R_DEP_ID\",\"amount\":\"$REDEEM_FUND\"}"
+R_ESC_ID=$(printf '%s' "$BODY" | jget escrow_id)
+[[ -n $R_ESC_ID ]] || die "no escrow_id for redeem funding: $BODY"
+call POST "$BR_CB/api/v1/payments/escrows/approve" "$BR_TOK" "{\"escrow_id\":\"$R_ESC_ID\"}"
+ok "fresh tCeBM tokenised (deposit_id=$R_DEP_ID escrow_id=$R_ESC_ID)"
+
+step "Snapshot bank-itau tCeBM balance before the redeem"
+call GET "$ITAU/api/v1/token/balance" "$ITAU_TOK"
+BAL_BEFORE=$(printf '%s' "$BODY" | jget balance)
+[[ -n $BAL_BEFORE ]] || die "no tCeBM balance before redeem: $BODY"
+ok "tCeBM balance before redeem = $BAL_BEFORE"
+
+step "bank-itau requests a redeem (de-tokenisation) of $REDEEM_AMT tCeBM → fiat"
+call POST "$ITAU/api/v1/payments/redeems" "$ITAU_TOK" "{\"amount\":\"$REDEEM_AMT\"}"
+REDEEM_ID=$(printf '%s' "$BODY" | jget redeem_id)
+[[ -n $REDEEM_ID ]] || die "no redeem_id in response: $BODY"
+ok "redeem requested (redeem_id=$REDEEM_ID)"
+
+step "Brazil CB approves the redeem (burns tCeBM → mints fCeBM/fiat back)"
+call POST "$BR_CB/api/v1/payments/redeems/approve" "$BR_TOK" "{\"redeem_id\":\"$REDEEM_ID\"}"
+ok "redeem approved (fiat_mint_tx=$(printf '%s' "$BODY" | jget mint_tx_hash))"
+
+step "Verify the redeem BURNED tCeBM (balance went DOWN, not up)"
+call GET "$ITAU/api/v1/token/balance" "$ITAU_TOK"
+BAL_AFTER=$(printf '%s' "$BODY" | jget balance)
+[[ -n $BAL_AFTER ]] || die "no tCeBM balance after redeem: $BODY"
+info "tCeBM balance after redeem = $BAL_AFTER"
+python3 -c "import sys; sys.exit(0 if int('${BAL_AFTER:-0}') == int('${BAL_BEFORE:-0}') - int('$REDEEM_AMT') else 1)" \
+  || die "redeem did not burn tCeBM correctly: before=$BAL_BEFORE after=$BAL_AFTER (redeem must DECREASE tCeBM by $REDEEM_AMT, not increase it)"
+ok "redeem correctly burned $REDEEM_AMT tCeBM: $BAL_BEFORE → $BAL_AFTER (converted to fiat)"
+
+printf '\n%s✓ tryout complete — %s corridor opened via the hub, liquidity seeded, an end-to-end cross-currency swap (bridge-in → AMM → bridge-out) settled across both sovereign networks, and a redeem de-tokenised tCeBM back to fiat%s\n' "$GREEN$BOLD" "$POOL" "$RST"

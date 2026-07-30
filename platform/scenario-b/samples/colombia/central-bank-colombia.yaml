@@ -13,6 +13,15 @@ spec:
     id: spoke-cop
     chainId: 1340
     currency: COP
+    # ERC-20 metadata of this spoke's own tokens (tCeBM reserve + fCeBM fiat).
+    # Optional — absent, all four derive from `currency` (exactly the values
+    # below). Declared explicitly so each sovereign token is auditable in config.
+    # Symbols must keep the "<prefix>_<ISO>" shape: portals and the api-gateway
+    # read the currency code from the segment after the last underscore.
+    tokenName: Tokenized COP
+    tokenSymbol: tCeBM_COP
+    fiatTokenName: Fiat COP
+    fiatTokenSymbol: fCeBM_COP
   hubBundleRef: ../bundles/hub.bundle.yaml
   # No `pair` block: this spoke joins the hub without opening a sovereign corridor
   # yet — demonstrating a plain found-spoke (the sovereign tail is not appended).

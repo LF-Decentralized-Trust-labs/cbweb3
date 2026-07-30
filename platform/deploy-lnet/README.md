@@ -59,6 +59,37 @@ export IP_CB_BRAZIL=10.20.0.31        # (optional) override just this VM
 The rendered `*.yaml` and the transferred bundles are git-ignored; the `*.yaml.tmpl` templates and
 `addresses.env` are the tracked source of truth.
 
+## Per-spoke currency and token identity
+
+Every `found` / `found-spoke` manifest declares its own currency, and the ERC-20 identity of the
+spoke's tokens derives from it — nothing about a currency is hardcoded in either toolkit. The
+`cb-*.yaml.tmpl` templates state the values explicitly so each spoke's token is auditable by reading
+the manifest, without knowing the derivation rule:
+
+| | Scenario A | Scenario B |
+|---|---|---|
+| Configurable tokens | `fCeBM` only | `tCeBM` + `fCeBM` |
+| Fields under `spec.spoke` | `fiatTokenName`, `fiatTokenSymbol` | `tokenName`, `tokenSymbol`, `fiatTokenName`, `fiatTokenSymbol` |
+| Where the UI currency comes from | `FIAT_SYMBOL` env (the ISO code) | the on-chain ERC-20 symbol returned with each balance |
+| Tokenised side | Zeto privacy token (`Zeto_Anon`) — no ERC-20 symbol, nothing to configure | `tCeBM` ERC-20, per spoke |
+
+Rules that hold in both scenarios:
+
+- **`currency` is the key**, not the symbol. In B it also drives the relay id (`spoke-<currency>`), the
+  hub currency registration and the mirrored token (`W-tCeBM_<ISO>`); a symbol can never redefine it.
+- **Symbols must keep the `<prefix>_<ISO>` shape** and end in that spoke's own currency. Validation
+  rejects `fBRL` (no currency segment) and `fCeBM_COP` on a BRL spoke. In B this is load-bearing: the
+  portals and the api-gateway read the displayed currency code from the segment after the last
+  underscore.
+- **All token fields are optional.** Omitted, they derive as `Tokenized <ISO>` / `tCeBM_<ISO>` and
+  `Fiat <ISO>` / `fCeBM_<ISO>` — exactly the values the templates spell out.
+- **They are immutable after founding** (ERC-20 constructor arguments). Editing a template changes the
+  next clean founding, never a running spoke: the deployed contract keeps its original name and symbol.
+
+The LNET currencies are BRL on `cb-brazil` and COP on `cb-colombia`, in both scenarios. The join
+(`cb1`..`cb4`) and `noc-*` manifests carry no token fields: only the founding central bank deploys the
+spoke's tokens.
+
 ## VM map (both scenarios share the VMs)
 
 

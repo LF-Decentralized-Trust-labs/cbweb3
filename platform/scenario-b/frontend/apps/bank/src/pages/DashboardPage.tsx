@@ -35,6 +35,7 @@ import {
   formatTokenAmount,
   getPaymentStatusLabel,
   normalizePaymentStatus,
+  tokenUnitPrefix,
 } from "../types";
 
 const STATUS_REFRESH_MS = 30_000;
@@ -133,6 +134,10 @@ export function DashboardPage() {
   const fCeBMDecimals = usePaymentStore((state) => state.fCeBMDecimals);
   const tCeBMSymbol = usePaymentStore((state) => state.tCeBMSymbol);
   const fCeBMSymbol = usePaymentStore((state) => state.fCeBMSymbol);
+  // Instrument names shown on this screen come from the on-chain symbols, so a spoke
+  // with a custom symbol (spec.spoke.tokenSymbol) reads consistently everywhere.
+  const tCeBMName = tokenUnitPrefix(tCeBMSymbol);
+  const fCeBMName = tokenUnitPrefix(fCeBMSymbol, "fCeBM");
   const deposits = usePaymentStore((state) => state.deposits);
   const escrows = usePaymentStore((state) => state.escrows);
   const redeems = usePaymentStore((state) => state.redeems);
@@ -231,9 +236,11 @@ export function DashboardPage() {
       .slice(0, 8);
   }, [deposits, escrows, redeems, bridgePositions, fDecimals, tDecimals, fCeBMSymbol, tCeBMSymbol]);
 
+  // `key` is the stable series identity (drives the bar colour); `name` is the display
+  // label and follows the on-chain symbol.
   const balancesData = [
-    { name: "tCeBM", value: tCeBMNumber },
-    { name: "fCeBM reserve", value: fCeBMNumber },
+    { key: "tCeBM", name: tCeBMName, value: tCeBMNumber },
+    { key: "fCeBM", name: `${fCeBMName} reserve`, value: fCeBMNumber },
   ];
 
   const breakdownData = [
@@ -291,12 +298,12 @@ export function DashboardPage() {
       {/* KPI row */}
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="tCeBM Balance"
+          label={`${tCeBMName} Balance`}
           value={formatTokenAmount(tCeBMBalance ?? "0", tDecimals)}
           loading={balanceLoading}
         />
         <StatCard
-          label="Fiat Reserve (fCeBM)"
+          label={`Fiat Reserve (${fCeBMName})`}
           value={formatTokenAmount(fiatBalance ?? "0", fDecimals)}
           loading={balanceLoading}
         />
@@ -368,7 +375,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Tokenised vs Reserve</CardTitle>
-            <CardDescription>tCeBM in circulation vs fCeBM reserve</CardDescription>
+            <CardDescription>{tCeBMName} in circulation vs {fCeBMName} reserve</CardDescription>
           </CardHeader>
           <CardContent className="h-56">
             <ChartContainer config={chartConfig} className="h-full w-full">
@@ -380,8 +387,8 @@ export function DashboardPage() {
                 <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                   {balancesData.map((entry) => (
                     <Cell
-                      key={entry.name}
-                      fill={entry.name === "tCeBM" ? "hsl(var(--chart-1))" : "hsl(var(--chart-2))"}
+                      key={entry.key}
+                      fill={entry.key === "tCeBM" ? "hsl(var(--chart-1))" : "hsl(var(--chart-2))"}
                     />
                   ))}
                 </Bar>

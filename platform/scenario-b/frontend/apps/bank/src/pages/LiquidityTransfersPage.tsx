@@ -25,7 +25,7 @@ import {
   Textarea,
 } from "@cbweb3/ui";
 import { useEffect, useState } from "react";
-import { tCeBMUnitLabel } from "../types";
+import { tCeBMUnitLabel, tokenUnitPrefix } from "../types";
 import type { LiquidityRequestType, OnRampRequestStatus } from "../types";
 import { useTokenStore, usePaymentStore } from "../stores";
 
@@ -54,6 +54,7 @@ export function LiquidityTransfersPage() {
   const { balance, transactions, onRampRequests, fetch, requestOnRamp, transfer, status, error } = useTokenStore();
   const tCeBMSymbol = usePaymentStore((state) => state.tCeBMSymbol);
   const tCeBMLabel = tCeBMUnitLabel(tCeBMSymbol);
+  const tCeBMName = tokenUnitPrefix(tCeBMSymbol);
   const [toAddress, setToAddress] = useState("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed");
   const [transferAmount, setTransferAmount] = useState("250");
 
@@ -93,7 +94,7 @@ export function LiquidityTransfersPage() {
         <CardHeader>
           <CardTitle>Bank Scope Notice</CardTitle>
           <CardDescription>
-            Treasury controls tCeBM issuance. Bank Portal supports transfers and liquidity adjustment requests.
+            Treasury controls {tCeBMName} issuance. Bank Portal supports transfers and liquidity adjustment requests.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -101,7 +102,7 @@ export function LiquidityTransfersPage() {
       <div className="grid gap-4 xl:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardTitle>Transfer tCeBM</CardTitle>
+            <CardTitle>Transfer {tCeBMName}</CardTitle>
             <CardDescription>Execute public/shielded transfers from existing liquidity</CardDescription>
           </CardHeader>
           <CardContent>

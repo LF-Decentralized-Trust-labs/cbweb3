@@ -29,6 +29,7 @@ type JoinConfig struct {
 	AdminUsers      []AdminUser // per-role Keycloak operator accounts (from spec.adminUsers)
 	SpokeID         string
 	SpokeChainID    uint64
+	Currency        string // spoke's ISO 4217 code (spec.spoke.currency); cross-checked against the spoke bundle
 	BankRPC         string // RPC of the bank's own node (wait-sync gate)
 	SpokeBundlePath string
 	DataDir         string
@@ -186,6 +187,30 @@ func (c JoinConfig) frontendVariant() string {
 		return proxyImageVariant(c.FrontendHost)
 	}
 	return ""
+}
+
+// portalViteArgs are the build-time VITE_* args of the bank portal. gwPort is the
+// bank's api-gateway host port; behind the proxy the portal is same-origin and
+// base-path-aware instead.
+//
+// VITE_FIAT_SYMBOL is the portal's fallback currency label: the displayed code
+// normally comes from the on-chain token symbol returned with a balance, and
+// without this fallback the SPA shows the generic "fiat units" until (or unless)
+// that response arrives.
+func (c JoinConfig) portalViteArgs(gwPort int) map[string]string {
+	lu := frontendLauncherURL(c.LauncherEnabled, c.useProxy(), c.FrontendHost, c.LauncherPort)
+	args := map[string]string{
+		"VITE_API_URL":          fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort),
+		"VITE_SCENARIO":         "scenario-b",
+		"VITE_INSTITUTION_NAME": c.Entity,
+		"VITE_LAUNCHER_URL":     lu,
+		"VITE_FIAT_SYMBOL":      c.Currency,
+	}
+	if c.useProxy() {
+		args["VITE_API_URL"] = proxyAPIURL(c.FrontendHost)
+		args["VITE_BASE_PATH"] = proxyPortalBase("bank")
+	}
+	return args
 }
 
 // corsOrigins is the bank api-gateway's allowed browser origin(s): the single proxy
@@ -396,8 +421,20 @@ func JoinSteps(c JoinConfig) []Step {
 		{
 			Name: "consume-spoke-bundle",
 			Run: func(context.Context) error {
-				_, err := bundle.LoadSpoke(c.SpokeBundlePath)
-				return err
+				b, err := bundle.LoadSpoke(c.SpokeBundlePath)
+				if err != nil {
+					return err
+				}
+				// The currency is the routing key (relay id "spoke-<currency>", hub
+				// currency registration, mirrored "W-tCeBM_<ISO>"), so a bank claiming a
+				// currency other than the one its spoke was founded with would mislabel
+				// balances and route to a corridor that does not exist. Bundles emitted
+				// before the field existed carry no currency → nothing to check.
+				if b.Currency != "" && c.Currency != "" && !strings.EqualFold(b.Currency, c.Currency) {
+					return fmt.Errorf("consume-spoke-bundle: spec.spoke.currency %q does not match spoke %s currency %q (from %s)",
+						c.Currency, b.SpokeID, b.Currency, c.SpokeBundlePath)
+				}
+				return nil
 			},
 		},
 		{
@@ -589,12 +626,7 @@ func JoinSteps(c JoinConfig) []Step {
 			// same-origin at http://<frontendHost>/<scn>/api/v1/ and the SPA is built
 			// base-path-aware (VITE_BASE_PATH) under /<scn>/bank/.
 			gwPort := c.RPCPort + 8000
-			lu := frontendLauncherURL(c.LauncherEnabled, c.useProxy(), c.FrontendHost, c.LauncherPort)
-			args := map[string]string{"VITE_API_URL": fmt.Sprintf("http://%s:%d", frontendHostOrLocal(c.FrontendHost), gwPort), "VITE_SCENARIO": "scenario-b", "VITE_INSTITUTION_NAME": c.Entity, "VITE_LAUNCHER_URL": lu}
-			if c.useProxy() {
-				args["VITE_API_URL"] = proxyAPIURL(c.FrontendHost)
-				args["VITE_BASE_PATH"] = proxyPortalBase("bank")
-			}
+			args := c.portalViteArgs(gwPort)
 			if err := buildFrontendImage(ctx, c.Runner, c.scenarioBDir(), cbFrontendImage("bank", gwPort, c.frontendVariant()), "bank", args); err != nil {
 				return err
 			}

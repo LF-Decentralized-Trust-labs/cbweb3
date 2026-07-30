@@ -231,7 +231,9 @@ func TestRequestFiatExchange_RetriesMint(t *testing.T) {
 
 // --- Redeem lifecycle ---
 
-func TestRedeemLifecycle(t *testing.T) {
+// Redeem is de-tokenization (tCeBM → fiat): approval must BURN tCeBM and mint the
+// equivalent fCeBM back — never mint tCeBM (which would inflate the caller's balance).
+func TestRedeemLifecycle_BurnTCeBMThenMintFiat(t *testing.T) {
 	env := newFlowEnv(t)
 	ctx := context.Background()
 
@@ -243,8 +245,20 @@ func TestRedeemLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApproveRedeem: %v", err)
 	}
-	if ap.MintTxHash != "mock-mint-tx" {
-		t.Errorf("expected mint tx, got %q", ap.MintTxHash)
+	// The tx returned is the fCeBM (fiat) mint tx, not a tCeBM mint.
+	if ap.MintTxHash != "mock-fiat-mint-tx" {
+		t.Errorf("expected fCeBM mint tx, got %q", ap.MintTxHash)
+	}
+	// Regression guard for the "redeem inflates the balance" bug: tCeBM must be burned
+	// exactly once and NEVER minted; fCeBM must be minted exactly once.
+	if env.token.burnCalls != 1 {
+		t.Errorf("expected exactly 1 tCeBM burn, got %d", env.token.burnCalls)
+	}
+	if env.token.mintCalls != 0 {
+		t.Errorf("redeem must not mint tCeBM, got %d tCeBM mint(s)", env.token.mintCalls)
+	}
+	if env.fiat.mintCalls != 1 {
+		t.Errorf("expected exactly 1 fCeBM mint, got %d", env.fiat.mintCalls)
 	}
 	list, _ := env.client.ListRedeems(ctx, &pb.ListRedeemsRequest{})
 	if len(list.Redeems) != 1 || list.Redeems[0].Status != pb.RedeemStatus_REDEEM_STATUS_APPROVED {

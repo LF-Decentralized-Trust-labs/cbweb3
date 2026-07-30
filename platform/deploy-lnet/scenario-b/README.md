@@ -22,8 +22,8 @@ the [deploy-lnet root](../README.md). This folder covers Scenario B's spokes and
 | 10.10.0.26 | Commercial bank (join) | spoke-colombia | cb4 | cb4-colombia.cbweb3.l-net.io | [manifests/cb4.yaml](manifests/cb4.yaml) |
 
 The **sovereign BRL/COP pair (corridor + AMM liquidity)** is intentionally **not** provisioned here.
-It is opened at runtime through the CB governance portals after the network is up. (`spec.pair` is
-documentational only — the toolkit never opens a corridor — so it is omitted.)
+It is opened at runtime through the CB governance portals after the network is up — the manifests
+say nothing about corridors, and the toolkit never opens one.
 
 ## ⚠️ Read before deploying: multi-VM reality
 

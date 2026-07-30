@@ -21,7 +21,7 @@ package manifest
 // ParticipantDeployment is the top-level parsed representation of a
 // ParticipantDeployment YAML document.
 //
-// Pointer fields (Hub, Spoke, Pair, Node, Relay) and empty-string scalar fields
+// Pointer fields (Hub, Spoke, Node, Relay) and empty-string scalar fields
 // are used to distinguish "absent" from "zero value", which the per-mode
 // required/forbidden matrix relies on.
 type ParticipantDeployment struct {
@@ -55,8 +55,6 @@ type Spec struct {
 	JoinBundleRef string `yaml:"joinBundleRef,omitempty" json:"joinBundleRef,omitempty"`
 	// BankID is required in join, forbidden in the other modes.
 	BankID string `yaml:"bankId,omitempty" json:"bankId,omitempty"`
-	// Pair is optional in found-spoke, forbidden in the other modes.
-	Pair *Pair `yaml:"pair,omitempty" json:"pair,omitempty"`
 	// NOCBundleRef is required in observe, forbidden in the other modes. It points
 	// at the NOC bundle emitted by a CB's found-spoke (or found-hub) describing the
 	// monitoring topology this NOC deployment consumes.
@@ -109,18 +107,27 @@ type Hub struct {
 }
 
 // Spoke identifies the spoke network this participant belongs to.
+//
+// Currency is the ISO 4217 code and remains the only routing key (relay id
+// "spoke-<currency>", hub currency registration, mirrored "W-tCeBM_<ISO>").
+// The four token fields are presentation-only overrides for the spoke's own
+// tCeBM/fCeBM ERC-20 metadata; absent, they derive from Currency as
+// "Tokenized <ISO>"/"tCeBM_<ISO>" and "Fiat <ISO>"/"fCeBM_<ISO>".
 type Spoke struct {
 	ID       string `yaml:"id" json:"id"`
 	ChainID  int    `yaml:"chainId" json:"chainId"`
 	Currency string `yaml:"currency" json:"currency"`
-}
-
-// Pair describes the sovereign currency pair (optional, found-spoke).
-type Pair struct {
-	ProposerCB  string `yaml:"proposerCB" json:"proposerCB"`
-	ConfirmerCB string `yaml:"confirmerCB" json:"confirmerCB"`
-	SymbolA     string `yaml:"symbolA" json:"symbolA"`
-	SymbolB     string `yaml:"symbolB" json:"symbolB"`
+	// TokenName overrides the tCeBM ERC-20 name (default "Tokenized <currency>").
+	TokenName string `yaml:"tokenName,omitempty" json:"tokenName,omitempty"`
+	// TokenSymbol overrides the tCeBM ERC-20 symbol (default "tCeBM_<currency>").
+	// Must keep the "<prefix>_<ISO>" shape: portals and the api-gateway derive the
+	// displayed currency code from the segment after the last underscore.
+	TokenSymbol string `yaml:"tokenSymbol,omitempty" json:"tokenSymbol,omitempty"`
+	// FiatTokenName overrides the fCeBM ERC-20 name (default "Fiat <currency>").
+	FiatTokenName string `yaml:"fiatTokenName,omitempty" json:"fiatTokenName,omitempty"`
+	// FiatTokenSymbol overrides the fCeBM ERC-20 symbol (default "fCeBM_<currency>");
+	// same "<prefix>_<ISO>" constraint as TokenSymbol.
+	FiatTokenSymbol string `yaml:"fiatTokenSymbol,omitempty" json:"fiatTokenSymbol,omitempty"`
 }
 
 // NOC configures the NOC observability integration. Optional in every mode and

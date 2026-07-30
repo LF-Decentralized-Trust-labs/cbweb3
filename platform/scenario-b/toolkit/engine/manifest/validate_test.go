@@ -197,26 +197,6 @@ func TestRejectForbiddenPerMode(t *testing.T) {
 	})
 }
 
-// FR-012: sovereign pair validation.
-func TestRejectBadPair(t *testing.T) {
-	t.Run("proposer==confirmer", func(t *testing.T) {
-		pd := mustLoad(t, "found-spoke.yaml")
-		pd.Spec.Pair.ConfirmerCB = pd.Spec.Pair.ProposerCB
-		res := Validate(pd)
-		if !findErr(res, "spec.pair.confirmerCB") {
-			t.Errorf("expected pair.confirmerCB error, got %+v", res.Errors)
-		}
-	})
-	t.Run("symbolA==symbolB", func(t *testing.T) {
-		pd := mustLoad(t, "found-spoke.yaml")
-		pd.Spec.Pair.SymbolB = pd.Spec.Pair.SymbolA
-		res := Validate(pd)
-		if !findErr(res, "spec.pair.symbolB") {
-			t.Errorf("expected pair.symbolB error, got %+v", res.Errors)
-		}
-	})
-}
-
 // FR-013: join with node.validator: true → warning, not error.
 func TestJoinValidatorWarning(t *testing.T) {
 	pd := mustLoad(t, "join.yaml")
@@ -290,6 +270,83 @@ func TestNOCBundleRefForbiddenInNodeModes(t *testing.T) {
 		if !findErr(res, "spec.nocBundleRef") {
 			t.Errorf("%s: expected spec.nocBundleRef forbidden error, got %+v", name, res.Errors)
 		}
+	}
+}
+
+// R1-10.3: the per-spoke ERC-20 metadata overrides are optional and accepted
+// when they keep the "<prefix>_<ISO>" shape with the spoke's own currency.
+func TestSpokeTokenOverridesAccepted(t *testing.T) {
+	pd := mustLoad(t, "found-spoke.yaml")
+	pd.Spec.Spoke.TokenName = "Real Digital"
+	pd.Spec.Spoke.TokenSymbol = "tRD_BRL"
+	pd.Spec.Spoke.FiatTokenName = "Real"
+	pd.Spec.Spoke.FiatTokenSymbol = "fRD_BRL"
+	res := Validate(pd)
+	if !res.Valid() {
+		t.Fatalf("expected valid token overrides, got errors: %+v", res.Errors)
+	}
+}
+
+// A symbol without the "_<ISO>" tail is rejected: portals and the api-gateway
+// derive the displayed currency code from the segment after the last underscore.
+func TestRejectSpokeTokenSymbolWithoutCurrencySegment(t *testing.T) {
+	for _, tc := range []struct{ field, symbol string }{
+		{"spec.spoke.tokenSymbol", "tBRL"},
+		{"spec.spoke.fiatTokenSymbol", "fBRL"},
+		{"spec.spoke.tokenSymbol", "tCeBM_"},
+	} {
+		t.Run(tc.field+"/"+tc.symbol, func(t *testing.T) {
+			pd := mustLoad(t, "found-spoke.yaml")
+			if tc.field == "spec.spoke.tokenSymbol" {
+				pd.Spec.Spoke.TokenSymbol = tc.symbol
+			} else {
+				pd.Spec.Spoke.FiatTokenSymbol = tc.symbol
+			}
+			res := Validate(pd)
+			if !findErr(res, tc.field) {
+				t.Errorf("expected %s error for %q, got %+v", tc.field, tc.symbol, res.Errors)
+			}
+		})
+	}
+}
+
+// The currency code is the routing key, so a symbol may not smuggle in a
+// different one than spec.spoke.currency.
+func TestRejectSpokeTokenSymbolCurrencyMismatch(t *testing.T) {
+	pd := mustLoad(t, "found-spoke.yaml") // currency: BRL
+	pd.Spec.Spoke.TokenSymbol = "tCeBM_COP"
+	res := Validate(pd)
+	if !findErr(res, "spec.spoke.tokenSymbol") {
+		t.Errorf("expected spec.spoke.tokenSymbol error, got %+v", res.Errors)
+	}
+}
+
+// Whitespace is never valid in an ERC-20 symbol; a blank name is rejected too
+// (omit the field to derive it from the currency).
+func TestRejectSpokeTokenBlankAndWhitespace(t *testing.T) {
+	pd := mustLoad(t, "found-spoke.yaml")
+	pd.Spec.Spoke.TokenSymbol = "tCeBM BRL"
+	pd.Spec.Spoke.TokenName = "   "
+	res := Validate(pd)
+	if !findErr(res, "spec.spoke.tokenSymbol") {
+		t.Errorf("expected spec.spoke.tokenSymbol error, got %+v", res.Errors)
+	}
+	if !findErr(res, "spec.spoke.tokenName") {
+		t.Errorf("expected spec.spoke.tokenName error, got %+v", res.Errors)
+	}
+}
+
+// Only the founding CB deploys the spoke tokens, so overrides in a join manifest
+// are inert — warned about, never a hard error.
+func TestJoinTokenOverridesWarn(t *testing.T) {
+	pd := mustLoad(t, "join.yaml")
+	pd.Spec.Spoke.TokenSymbol = "tCeBM_" + pd.Spec.Spoke.Currency
+	res := Validate(pd)
+	if !res.Valid() {
+		t.Fatalf("expected valid (warning only), got errors: %+v", res.Errors)
+	}
+	if !findWarn(res, "spec.spoke") {
+		t.Errorf("expected spec.spoke warning, got %+v", res.Warnings)
 	}
 }
 
