@@ -128,6 +128,7 @@ func Validate(m *Manifest) error {
 		if m.Spec.Spoke.Currency == "" {
 			errs = append(errs, errors.New("spec.spoke.currency: required field is missing"))
 		}
+		errs = append(errs, validateFiatTokenMetadata(m.Spec.Spoke)...)
 
 		// spec.node.advertisedHost — special message per FR-003
 		if m.Spec.Node.AdvertisedHost == "" {
@@ -206,6 +207,47 @@ func Validate(m *Manifest) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// validateFiatTokenMetadata checks the optional per-spoke fCeBM metadata overrides.
+// They are presentation-only: spec.spoke.currency remains the semantic key (it is
+// what the portals display via FIAT_SYMBOL), so an override must not smuggle in a
+// different currency.
+//
+// The "<prefix>_<ISO>" symbol shape is a platform convention, not decoration: every
+// spoke token is named that way (fCeBM_BRL, fCeBM_COP), and tooling that reads a
+// currency out of a symbol takes the segment after the last underscore. Keeping the
+// shape enforced here means a custom symbol can never desynchronise from the
+// currency it settles in.
+func validateFiatTokenMetadata(s Spoke) []error {
+	var errs []error
+	if s.FiatTokenName != "" && strings.TrimSpace(s.FiatTokenName) == "" {
+		errs = append(errs, errors.New(
+			"spec.spoke.fiatTokenName: must not be blank when set; omit the field to derive it from spec.spoke.currency"))
+	}
+	sym := s.FiatTokenSymbol
+	if sym == "" {
+		return errs // absent → derived from the currency
+	}
+	if strings.TrimSpace(sym) != sym || strings.ContainsAny(sym, " \t") {
+		return append(errs, fmt.Errorf(
+			"spec.spoke.fiatTokenSymbol: invalid value %q; an ERC-20 symbol must not contain whitespace", sym))
+	}
+	idx := strings.LastIndex(sym, "_")
+	if idx < 0 || idx == len(sym)-1 {
+		want := s.Currency
+		if want == "" {
+			want = "BRL"
+		}
+		return append(errs, fmt.Errorf(
+			"spec.spoke.fiatTokenSymbol: invalid value %q; the symbol must end in \"_<currency>\" (e.g. fCeBM_%s)", sym, want))
+	}
+	if code := sym[idx+1:]; s.Currency != "" && !strings.EqualFold(code, s.Currency) {
+		errs = append(errs, fmt.Errorf(
+			"spec.spoke.fiatTokenSymbol: invalid value %q; its currency segment %q must match spec.spoke.currency %q",
+			sym, code, s.Currency))
+	}
+	return errs
 }
 
 // nocComponentTypes are the component types the noc-agent knows how to probe.

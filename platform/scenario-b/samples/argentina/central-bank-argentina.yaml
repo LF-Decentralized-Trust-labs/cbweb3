@@ -13,15 +13,20 @@ spec:
     id: spoke-ars
     chainId: 1339
     currency: ARS
+    # ERC-20 metadata of this spoke's own tokens (tCeBM reserve + fCeBM fiat).
+    # Optional — absent, all four derive from `currency` (exactly the values
+    # below). Declared explicitly so each sovereign token is auditable in config.
+    # Symbols must keep the "<prefix>_<ISO>" shape: portals and the api-gateway
+    # read the currency code from the segment after the last underscore.
+    tokenName: Tokenized ARS
+    tokenSymbol: tCeBM_ARS
+    fiatTokenName: Fiat ARS
+    fiatTokenSymbol: fCeBM_ARS
   hubBundleRef: ../bundles/hub.bundle.yaml
-  # Same corridor BRL <-> ARS. Argentina is the confirmer: when it founds its
-  # spoke after Brazil has proposed, its sovereign tail runs confirmPair and the
-  # pair transitions PROPOSED -> ACTIVE (soft; pending without the signing keys).
-  pair:
-    proposerCB: central-bank-brazil
-    confirmerCB: central-bank-argentina
-    symbolA: BRL
-    symbolB: ARS
+  # The sovereign corridor (BRL <-> ARS pair + AMM + liquidity) is NOT declared
+  # here and is not part of provisioning: each central bank opens it at runtime
+  # from its governance portal (propose/confirm pair + cooperative liquidity),
+  # since the toolkit holds no sovereign signing keys.
   node:
     advertisedHost: host.docker.internal
     rpc:  { port: 33745 }

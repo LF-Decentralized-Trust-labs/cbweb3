@@ -186,9 +186,15 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		LauncherEnabled:     pd.Spec.Launcher == "enable",
 		LauncherPort:        pd.Spec.LauncherPort,
 		Currency:            pd.Spec.Spoke.Currency,
-		AdminUsers:          toOrchestratorAdminUsers(pd.Spec.AdminUsers),
-		NOCBackendURL:       manifestNOCBackendURL(pd), // where this CB's noc-agent pushes
-		ProxyEnabled:        pd.Spec.Proxy == "enable",
+		// Optional ERC-20 metadata overrides; empty falls back to the currency-derived
+		// defaults ("Tokenized <ISO>"/"tCeBM_<ISO>", "Fiat <ISO>"/"fCeBM_<ISO>").
+		TokenName:       pd.Spec.Spoke.TokenName,
+		TokenSymbol:     pd.Spec.Spoke.TokenSymbol,
+		FiatTokenName:   pd.Spec.Spoke.FiatTokenName,
+		FiatTokenSymbol: pd.Spec.Spoke.FiatTokenSymbol,
+		AdminUsers:      toOrchestratorAdminUsers(pd.Spec.AdminUsers),
+		NOCBackendURL:   manifestNOCBackendURL(pd), // where this CB's noc-agent pushes
+		ProxyEnabled:    pd.Spec.Proxy == "enable",
 	}
 	cfg.WithDefaults()
 	if o.DryRun {
@@ -202,9 +208,10 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		cfg.Runner = exec.NewReal(root, cfg.ComposeEnv())
 	}
 
-	// The sovereign FX corridor (spec.pair) is opened at runtime via each CB's
-	// governance portal (propose/confirm pair + cooperative liquidity), not at
-	// provisioning time — the toolkit holds no sovereign signing keys.
+	// The sovereign FX corridor is opened at runtime via each CB's governance
+	// portal (propose/confirm pair + cooperative liquidity), not at provisioning
+	// time — the toolkit holds no sovereign signing keys, and the manifest
+	// therefore declares no corridor at all.
 
 	// FR-002/SC-002: wire register-cb's idempotency Check to a live hub probe so
 	// a re-apply skips re-registration. Not in dry-run (Check runs before the
@@ -290,6 +297,7 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		Institution:     firstNonEmpty(pd.Spec.DisplayName, pd.Spec.BankID),
 		SpokeID:         pd.Spec.Spoke.ID,
 		SpokeChainID:    uint64(pd.Spec.Spoke.ChainID),
+		Currency:        pd.Spec.Spoke.Currency,                       // cross-checked against the spoke bundle in consume-spoke-bundle
 		BankRPC:         firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)), // RPC of the bank's own node (wait-sync gate)
 		SpokeBundlePath: bundlePath,
 		DataDir:         dataDir,

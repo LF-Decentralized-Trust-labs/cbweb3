@@ -183,6 +183,40 @@ done
 Manifest errors (missing field, invalid value) are reported all at once, with a
 clear message, and the command exits with code 1.
 
+### Per-spoke currency and fCeBM metadata
+
+Each spoke declares its own currency, and the ERC-20 identity of its fCeBM (the
+public Besu-layer fiat token) derives from it — no currency is hardcoded in the
+toolkit:
+
+| Spoke | `currency` | fCeBM name | fCeBM symbol |
+|---|---|---|---|
+| `spoke-brl` | BRL | Fiat BRL | `fCeBM_BRL` |
+| `spoke-cop` | COP | Fiat COP | `fCeBM_COP` |
+| `spoke-ars` | ARS | Fiat ARS | `fCeBM_ARS` |
+
+Both can be overridden per spoke when a central bank brands its token
+differently:
+
+```yaml
+spoke:
+  id: spoke-brl
+  chainId: 1337
+  currency: BRL              # ISO 4217 — the semantic key (portals show it via FIAT_SYMBOL)
+  fiatTokenName: Real Digital # optional; derived as "Fiat <ISO>" when absent
+  fiatTokenSymbol: fRD_BRL    # optional; derived as "fCeBM_<ISO>" when absent
+```
+
+The symbol must keep the `<prefix>_<ISO>` shape and end in this spoke's own
+currency — validation rejects `fBRL` (no currency segment) and `fCeBM_COP` on a
+BRL spoke. `currency` stays the routing/display key and cannot be redefined
+through a symbol.
+
+Both fields are constructor arguments of the ERC-20, so they are **immutable
+after the spoke is founded**: changing them affects the next clean founding, not
+a running spoke. Note that the tokenised side of Scenario A is a Zeto privacy
+token (no ERC-20 symbol), so only fCeBM carries configurable metadata.
+
 ---
 
 ## Step 2 — Start the local Cacti relay

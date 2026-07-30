@@ -30,6 +30,7 @@ import {
   getPaymentStatusLabel,
   getPaymentStatusVariant,
   normalizePaymentStatus,
+  tokenUnitPrefix,
 } from "../types";
 
 const shortHash = (value: string) =>
@@ -45,6 +46,9 @@ export function RedeemsPage() {
   const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const tCeBMSymbol = usePaymentStore((state) => state.tCeBMSymbol);
   const fCeBMSymbol = usePaymentStore((state) => state.fCeBMSymbol);
+  // Instrument name follows the on-chain symbol (custom per spoke). The fiat side of a
+  // redeem is stated as the currency code (fiatCurrencyLabel), not as the fCeBM name.
+  const tCeBMName = tokenUnitPrefix(tCeBMSymbol);
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
   const decimals = tCeBMDecimals ?? 18;
@@ -110,6 +114,7 @@ export function RedeemsPage() {
         <BalanceWidget
           balance={balance}
           decimals={tCeBMDecimals}
+          symbol={tCeBMSymbol}
           loading={status === "loading" && balance === null}
         />
         <Card>
@@ -122,14 +127,14 @@ export function RedeemsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Redeem tCeBM (tCeBM to {fiatCurrencyLabel(fCeBMSymbol)})</CardTitle>
+          <CardTitle>Redeem {tCeBMName} ({tCeBMName} to {fiatCurrencyLabel(fCeBMSymbol)})</CardTitle>
           <CardDescription>
             Submit a redemption request to the central bank.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="redeem-amount">Amount (tCeBM)</Label>
+            <Label htmlFor="redeem-amount">Amount ({tCeBMName})</Label>
             <Input
               id="redeem-amount"
               type="number"

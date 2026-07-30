@@ -41,6 +41,40 @@ Secrets are never expressible in a manifest: key/cert material is referenced via
 mode stands up an observability control plane rather than an on-chain node, so
 `node`/`keyProvider`/`certSource`/`relay` are not required for it.
 
+## Sovereign currency and token metadata
+
+Each spoke declares its own currency in the manifest; nothing about a currency is
+hardcoded in the toolkit:
+
+```yaml
+spoke:
+  id: spoke-colombia
+  chainId: 2025
+  currency: COP              # ISO 4217 — the routing key
+  tokenName: Tokenized COP   # optional overrides (derived when absent)
+  tokenSymbol: tCeBM_COP
+  fiatTokenName: Fiat COP
+  fiatTokenSymbol: fCeBM_COP
+```
+
+- `currency` is the only **routing** key: the relay is registered as
+  `spoke-<currency>`, the hub registers the currency and mirrors it as
+  `W-tCeBM_<ISO>`, and the api-gateway derives `spoke_in`/`spoke_out` from it. A
+  token symbol can never override it.
+- The four token fields are **presentation** metadata for this spoke's own
+  `tCeBM`/`fCeBM` ERC-20s. Absent, they derive from `currency` as
+  `Tokenized <ISO>` / `tCeBM_<ISO>` and `Fiat <ISO>` / `fCeBM_<ISO>`.
+- Symbols must keep the `<prefix>_<ISO>` shape and end in the spoke's own
+  currency (validated). The displayed currency code is read from the segment
+  after the last underscore, in the api-gateway (`currencyCodeFromSymbol`) and in
+  every portal (`currencyFromTokenSymbol`); a symbol without it degrades the UI
+  to the generic "fiat units" label.
+- `found-spoke` deploys the tokens with these values and publishes
+  `currency`/`tokenSymbol`/`fiatTokenSymbol` in the spoke bundle. `join` rejects a
+  bank manifest whose `spoke.currency` differs from the bundle's, and warns that
+  token overrides in a `join` manifest are inert (only the founding CB deploys
+  tokens).
+
 ## NOC observability (`observe` mode)
 
 The NOC (Network Operations Center) is modelled as a first-class participant,

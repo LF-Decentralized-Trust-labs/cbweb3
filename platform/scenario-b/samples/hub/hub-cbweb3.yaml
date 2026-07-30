@@ -11,7 +11,10 @@ spec:
   displayName: "CBWeb3 Interoperability Hub"
   hub:
     chainId: 1337
-    currency: [BRL, ARS, COP]      # base tCeBM reserve tokens
+    # Declarative: the currencies this hub is expected to host. found-hub deploys
+    # NO token — each central bank registers its own currency at found-spoke, and
+    # the hub then creates that currency's mirrored token (W-tCeBM_<ISO>).
+    currency: [BRL, ARS, COP]
   node:
     advertisedHost: host.docker.internal
     rpc:  { port: 33845 }

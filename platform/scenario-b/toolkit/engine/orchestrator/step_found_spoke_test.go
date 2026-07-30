@@ -44,8 +44,8 @@ func testSpokeCfg(t *testing.T, fake *exec.FakeRunner) SpokeConfig {
 	hb := bundle.HubBundle{
 		ChainID: 1337, HubRPC: "http://hub:8545", HubWS: "ws://hub:8546",
 		Contracts: map[string]string{
-			"identityRegistry": "0xh1", "tCeBM_BRL": "0xh2", "tCeBM_EUR": "0xh3",
-			"fxAgreement": "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
+			"identityRegistry": "0xh1",
+			"fxAgreement":      "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
 		},
 	}
 	hp, err := bundle.EmitHub(hb, hubOut)
@@ -89,8 +89,8 @@ func TestRegisterCBSelfRegistersViaHub(t *testing.T) {
 	hp, err := bundle.EmitHub(bundle.HubBundle{
 		ChainID: 1337, HubRPC: "http://hub:8545", HubWS: "ws://hub:8546", HubGateway: srv.URL,
 		Contracts: map[string]string{
-			"identityRegistry": "0xh1", "tCeBM_BRL": "0xh2", "tCeBM_EUR": "0xh3",
-			"fxAgreement": "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
+			"identityRegistry": "0xh1",
+			"fxAgreement":      "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
 		},
 	}, t.TempDir())
 	if err != nil {
@@ -123,8 +123,8 @@ func TestRegisterCBFailsOnHubError(t *testing.T) {
 	hp, _ := bundle.EmitHub(bundle.HubBundle{
 		ChainID: 1337, HubRPC: "http://hub:8545", HubWS: "ws://hub:8546", HubGateway: srv.URL,
 		Contracts: map[string]string{
-			"identityRegistry": "0xh1", "tCeBM_BRL": "0xh2", "tCeBM_EUR": "0xh3",
-			"fxAgreement": "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
+			"identityRegistry": "0xh1",
+			"fxAgreement":      "0xh4", "pairRegistry": "0xh5", "currencyRegistry": "0xh6", "manualOracle": "0xh7",
 		},
 	}, t.TempDir())
 	cfg.HubBundlePath = hp
@@ -157,6 +157,118 @@ func TestDeploySpokeInvokesScript(t *testing.T) {
 	if !found {
 		t.Fatalf("deploy-spoke-contracts must invoke CBWeb3Spoke with --legacy; calls=%+v", fake.Calls)
 	}
+}
+
+// R1-10.3: token metadata is derived per spoke from the manifest currency and
+// keeps the "<prefix>_<ISO>" shape the portals/api-gateway parse the currency
+// code from. Two spokes with different currencies never share a symbol.
+func TestSpokeTokenDefaultsDeriveFromCurrency(t *testing.T) {
+	for _, currency := range []string{"BRL", "COP"} {
+		t.Run(currency, func(t *testing.T) {
+			cfg := testSpokeCfg(t, &exec.FakeRunner{})
+			cfg.Currency = currency
+			cfg.WithDefaults()
+			if want := "tCeBM_" + currency; cfg.TokenSymbol != want {
+				t.Errorf("TokenSymbol = %q, want %q", cfg.TokenSymbol, want)
+			}
+			if want := "fCeBM_" + currency; cfg.FiatTokenSymbol != want {
+				t.Errorf("FiatTokenSymbol = %q, want %q", cfg.FiatTokenSymbol, want)
+			}
+			if want := "Tokenized " + currency; cfg.TokenName != want {
+				t.Errorf("TokenName = %q, want %q", cfg.TokenName, want)
+			}
+			if want := "Fiat " + currency; cfg.FiatTokenName != want {
+				t.Errorf("FiatTokenName = %q, want %q", cfg.FiatTokenName, want)
+			}
+		})
+	}
+}
+
+// Manifest overrides reach the Foundry deploy script verbatim; the defaults are
+// only a fallback.
+func TestDeploySpokePassesTokenMetadata(t *testing.T) {
+	t.Run("derived from currency", func(t *testing.T) {
+		fake := &exec.FakeRunner{}
+		cfg := testSpokeCfg(t, fake)
+		cfg.Currency = "COP"
+		cfg.WithDefaults()
+		_ = findStep(FoundSpokeSteps(cfg), "deploy-spoke-contracts").Run(context.Background())
+		got := forgeSpokeCall(fake)
+		for _, want := range []string{`TOKEN_SYMBOL="tCeBM_COP"`, `FIAT_TOKEN_SYMBOL="fCeBM_COP"`, `TOKEN_NAME="Tokenized COP"`, `FIAT_TOKEN_NAME="Fiat COP"`} {
+			if !strings.Contains(got, want) {
+				t.Errorf("deploy call missing %s:\n%s", want, got)
+			}
+		}
+	})
+	t.Run("manifest override wins", func(t *testing.T) {
+		fake := &exec.FakeRunner{}
+		cfg := testSpokeCfg(t, fake)
+		cfg.Currency = "BRL"
+		cfg.TokenName = "Real Digital"
+		cfg.TokenSymbol = "tRD_BRL"
+		cfg.FiatTokenName = "Real"
+		cfg.FiatTokenSymbol = "fRD_BRL"
+		cfg.WithDefaults()
+		_ = findStep(FoundSpokeSteps(cfg), "deploy-spoke-contracts").Run(context.Background())
+		got := forgeSpokeCall(fake)
+		for _, want := range []string{`TOKEN_NAME="Real Digital"`, `TOKEN_SYMBOL="tRD_BRL"`, `FIAT_TOKEN_NAME="Real"`, `FIAT_TOKEN_SYMBOL="fRD_BRL"`} {
+			if !strings.Contains(got, want) {
+				t.Errorf("deploy call missing %s:\n%s", want, got)
+			}
+		}
+	})
+}
+
+// forgeSpokeCall returns the CBWeb3Spoke deploy invocation recorded by the fake.
+func forgeSpokeCall(fake *exec.FakeRunner) string {
+	for _, c := range fake.Calls {
+		joined := c.Name + " " + strings.Join(c.Args, " ")
+		if strings.Contains(joined, "CBWeb3Spoke.s.sol:DeployCBWeb3Spoke") {
+			return joined
+		}
+	}
+	return ""
+}
+
+// NATIVE_ASSET_SYMBOL must be the symbol actually deployed on-chain, not a
+// string recomposed from the currency — otherwise env and ERC-20 disagree
+// whenever the manifest overrides the symbol.
+func TestComposeEnvNativeAssetSymbolTracksDeployedSymbol(t *testing.T) {
+	cfg := testSpokeCfg(t, &exec.FakeRunner{})
+	cfg.Currency = "BRL"
+	cfg.TokenSymbol = "tRD_BRL"
+	cfg.WithDefaults()
+	if env := strings.Join(cfg.ComposeEnv(), "\n"); !strings.Contains(env, "NATIVE_ASSET_SYMBOL=tRD_BRL") {
+		t.Fatalf("NATIVE_ASSET_SYMBOL must mirror the deployed TokenSymbol:\n%s", env)
+	}
+}
+
+// The CB portals bake VITE_FIAT_SYMBOL so balances fall back to the sovereign
+// currency code instead of the generic "fiat units" label — in both the host-port
+// and the proxy build. The supervisor portal has no fiat label and is excluded.
+func TestCBPortalsBakeFiatSymbol(t *testing.T) {
+	cfg := testSpokeCfg(t, &exec.FakeRunner{})
+	cfg.Currency = "COP"
+	cfg.WithDefaults()
+
+	check := func(t *testing.T, label string) {
+		t.Helper()
+		gov, tre, sup := cfg.portalViteArgs("http://localhost:16845")
+		if got := gov["VITE_FIAT_SYMBOL"]; got != "COP" {
+			t.Errorf("%s governance VITE_FIAT_SYMBOL = %q, want COP", label, got)
+		}
+		if got := tre["VITE_FIAT_SYMBOL"]; got != "COP" {
+			t.Errorf("%s treasury VITE_FIAT_SYMBOL = %q, want COP", label, got)
+		}
+		if _, ok := sup["VITE_FIAT_SYMBOL"]; ok {
+			t.Errorf("%s supervisor portal has no fiat label; VITE_FIAT_SYMBOL must not be passed", label)
+		}
+	}
+	check(t, "host-port")
+
+	cfg.ProxyEnabled = true
+	cfg.FrontendHost = "cb-colombia.example"
+	check(t, "proxy")
 }
 
 // US3: wire-hub-addresses writes hub addresses idempotently.
@@ -238,6 +350,31 @@ func TestEmitSpokeBundle(t *testing.T) {
 	}
 }
 
+// R1-10.3: the bundle publishes the spoke's sovereign currency so the join can
+// reject a bank manifest claiming another one.
+func TestEmitSpokeBundlePublishesCurrency(t *testing.T) {
+	fake := &exec.FakeRunner{Outputs: map[string][]byte{"docker": []byte(`{"config":{"chainId":1338}}`)}}
+	cfg := testSpokeCfg(t, fake)
+	cfg.Currency = "COP"
+	cfg.WithDefaults()
+	writeSpokeBroadcast(t, cfg.ContractsDir)
+
+	steps := FoundSpokeSteps(cfg)
+	if err := findStep(steps, "start-besu-spoke").Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := findStep(steps, "emit-spoke-bundle").Run(context.Background()); err != nil {
+		t.Fatalf("emit-spoke-bundle: %v", err)
+	}
+	b, err := bundle.LoadSpoke(filepath.Join(cfg.OutDir, "bundles", "spoke-a.bundle.yaml"))
+	if err != nil {
+		t.Fatalf("load spoke bundle: %v", err)
+	}
+	if b.Currency != "COP" {
+		t.Fatalf("bundle currency = %q, want COP", b.Currency)
+	}
+}
+
 // emit-spoke-bundle Check re-runs when an on-disk bundle still has localhost /
 // host.docker.internal but AdvertisedHost is a routable IP (stale LNET artifact).
 func TestEmitSpokeBundleCheckRewritesLocalhost(t *testing.T) {
@@ -275,6 +412,69 @@ func TestEmitSpokeBundleCheckRewritesLocalhost(t *testing.T) {
 	if ok {
 		t.Fatal("Check should be false for stale localhost bundle when AdvertisedHost is set")
 	}
+}
+
+// REGRESSION LOCK: a bundle left over from a PREVIOUS founding of the same spoke
+// keeps the same host and ports, so endpoint equality alone would skip re-emission
+// — and a bank joining on that bundle writes the wrong genesis and dials a dead
+// bootnode, never peers, and only fails 10 minutes later in wait-sync. The Check
+// must re-emit whenever the genesis or the node identity diverges from the live node.
+func TestEmitSpokeBundleCheckDetectsRefoundedSpoke(t *testing.T) {
+	emitCurrent := func(t *testing.T) (SpokeConfig, *exec.FakeRunner) {
+		t.Helper()
+		fake := &exec.FakeRunner{Outputs: map[string][]byte{"docker": []byte(`{"config":{"chainId":1338}}`)}}
+		cfg := testSpokeCfg(t, fake)
+		cfg.RPCPort = 8845
+		cfg.WSPort = 8846
+		writeSpokeBroadcast(t, cfg.ContractsDir)
+		steps := FoundSpokeSteps(cfg)
+		if err := findStep(steps, "start-besu-spoke").Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if err := findStep(steps, "emit-spoke-bundle").Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		return cfg, fake
+	}
+
+	t.Run("matching bundle skips", func(t *testing.T) {
+		cfg, _ := emitCurrent(t)
+		ok, err := findStep(FoundSpokeSteps(cfg), "emit-spoke-bundle").Check(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Fatal("Check should be true when the bundle matches the live genesis + enode")
+		}
+	})
+
+	t.Run("re-founded genesis re-emits", func(t *testing.T) {
+		cfg, fake := emitCurrent(t)
+		// The spoke was re-founded: same host/ports, fresh genesis in the volume.
+		fake.Outputs["docker"] = []byte(`{"config":{"chainId":1338},"extraData":"0xfresh"}`)
+		ok, err := findStep(FoundSpokeSteps(cfg), "emit-spoke-bundle").Check(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			t.Fatal("Check must be false when the volume genesis diverges from the bundle")
+		}
+	})
+
+	t.Run("fresh node key re-emits", func(t *testing.T) {
+		cfg, _ := emitCurrent(t)
+		// The spoke was re-founded: same genesis content, but a new node identity.
+		cfg.EnodeReader = func(context.Context, string) (string, error) {
+			return "enode://freshnodekey@spoke:30303", nil
+		}
+		ok, err := findStep(FoundSpokeSteps(cfg), "emit-spoke-bundle").Check(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			t.Fatal("Check must be false when the live node id differs from the bundle enode")
+		}
+	})
 }
 
 // ComposeEnv carries plumbing (images/prefixes/ports/static infra creds) for the

@@ -17,6 +17,15 @@ spec:
     id: spoke-brazil
     chainId: 2021
     currency: BRL
+    # ERC-20 metadata of this spoke's own fCeBM (the public Besu-layer fiat token).
+    # Optional — absent, both derive from `currency` (exactly the values below).
+    # Declared explicitly so each spoke's token identity is auditable in config.
+    # The symbol must keep the "<prefix>_<ISO>" shape and end in this spoke's own
+    # currency; `currency` stays the semantic key the portals display (FIAT_SYMBOL).
+    # Scenario A deploys no tCeBM: the tokenised side is a Zeto privacy token, which
+    # has no ERC-20 symbol — so fCeBM is the only configurable token identity here.
+    fiatTokenName: Fiat BRL
+    fiatTokenSymbol: fCeBM_BRL
   node:
     advertisedHost: ${IP_CB_BRAZIL}        # routable VM IP -> spoke-bundle enode dialable by cb1/cb2
     rpc: { port: 8645 }

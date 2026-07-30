@@ -42,10 +42,10 @@ var RequiredByMode = map[string][]string{
 // It is the source of truth for the forbidden half of the per-mode matrix and
 // is compared against the published JSON-Schema by the parity test (SC-004).
 var ForbiddenByMode = map[string][]string{
-	ModeFoundHub:   {"spoke", "hubBundleRef", "joinBundleRef", "bankId", "pair", "nocBundleRef"},
+	ModeFoundHub:   {"spoke", "hubBundleRef", "joinBundleRef", "bankId", "nocBundleRef"},
 	ModeFoundSpoke: {"hub", "joinBundleRef", "bankId", "nocBundleRef"},
-	ModeJoin:       {"hub", "hubBundleRef", "pair", "cbEndpoint", "nocBundleRef"},
-	ModeObserve:    {"hub", "spoke", "hubBundleRef", "joinBundleRef", "bankId", "pair", "cbEndpoint"},
+	ModeJoin:       {"hub", "hubBundleRef", "cbEndpoint", "nocBundleRef"},
+	ModeObserve:    {"hub", "spoke", "hubBundleRef", "joinBundleRef", "bankId", "cbEndpoint"},
 }
 
 var (
@@ -164,8 +164,8 @@ func Validate(pd *ParticipantDeployment) Result {
 		validateModeMatrix(pd, &r)
 	}
 
-	// FR-012: pair (found-spoke only), when present.
-	validatePair(spec.Pair, &r)
+	// Spoke token metadata overrides, when present.
+	validateSpokeTokens(spec.Mode, spec.Spoke, &r)
 
 	// FR-013: join with node.validator: true → warning (not error).
 	if spec.Mode == ModeJoin && spec.Node != nil && spec.Node.Validator != nil && *spec.Node.Validator {
@@ -254,8 +254,8 @@ func validateModeMatrix(pd *ParticipantDeployment, r *Result) {
 }
 
 // specFieldPresent reports whether a per-mode-controlled spec field is present.
-// Object fields (hub/spoke/pair) use pointer non-nil; scalar fields use a
-// non-empty value.
+// Object fields (hub/spoke) use pointer non-nil; scalar fields use a non-empty
+// value.
 func specFieldPresent(pd *ParticipantDeployment, field string) bool {
 	s := pd.Spec
 	switch field {
@@ -263,8 +263,6 @@ func specFieldPresent(pd *ParticipantDeployment, field string) bool {
 		return s.Hub != nil
 	case "spoke":
 		return s.Spoke != nil
-	case "pair":
-		return s.Pair != nil
 	case "hubBundleRef":
 		return s.HubBundleRef != ""
 	case "joinBundleRef":
@@ -303,29 +301,68 @@ func validateNOC(n *NOC, r *Result) {
 // Mirrors bundle.NOCComponentTypes (kept local to avoid a manifest→bundle dep).
 var NOCComponentTypes = []string{"BESU", "CACTI_RELAY", "PALADIN"}
 
-// validatePair enforces FR-012 when the sovereign pair is present.
-func validatePair(p *Pair, r *Result) {
-	if p == nil {
+// validateSpokeTokens checks the optional per-spoke tCeBM/fCeBM metadata
+// overrides. They are presentation-only: spec.spoke.currency stays the routing
+// key (relay id, hub currency registration, mirrored "W-tCeBM_<ISO>"), so an
+// override must not smuggle a different currency in through the symbol.
+//
+// The "<prefix>_<ISO>" shape is load-bearing, not cosmetic: the api-gateway
+// (currencyCodeFromSymbol) and every portal (currencyFromTokenSymbol) derive the
+// displayed currency code from the segment after the last underscore. A symbol
+// without it degrades the portals to the generic "fiat units" label.
+func validateSpokeTokens(mode string, s *Spoke, r *Result) {
+	if s == nil {
 		return
 	}
-	if p.ProposerCB == "" {
-		r.AddError("spec.pair.proposerCB", "required field is missing")
+	// Only the founding CB deploys the spoke's tokens; a joining bank consumes
+	// whatever the CB deployed (published in the spoke bundle). Overrides in a join
+	// manifest are inert, so warn instead of silently ignoring them.
+	if mode == ModeJoin && (s.TokenName != "" || s.TokenSymbol != "" || s.FiatTokenName != "" || s.FiatTokenSymbol != "") {
+		r.AddWarning("spec.spoke",
+			"token name/symbol overrides are ignored in mode:join — the founding central bank deploys the spoke's tCeBM/fCeBM; a joining bank consumes the symbols published in the spoke bundle")
 	}
-	if p.ConfirmerCB == "" {
-		r.AddError("spec.pair.confirmerCB", "required field is missing")
+	validateTokenName("spec.spoke.tokenName", s.TokenName, r)
+	validateTokenName("spec.spoke.fiatTokenName", s.FiatTokenName, r)
+	validateTokenSymbol("spec.spoke.tokenSymbol", s.TokenSymbol, s.Currency, r)
+	validateTokenSymbol("spec.spoke.fiatTokenSymbol", s.FiatTokenSymbol, s.Currency, r)
+}
+
+func validateTokenName(field, name string, r *Result) {
+	if name == "" {
+		return // absent → derived from spec.spoke.currency
 	}
-	if p.SymbolA == "" {
-		r.AddError("spec.pair.symbolA", "required field is missing")
+	if strings.TrimSpace(name) == "" {
+		r.AddError(field, "must not be blank when set; omit the field to derive it from spec.spoke.currency")
 	}
-	if p.SymbolB == "" {
-		r.AddError("spec.pair.symbolB", "required field is missing")
+}
+
+func validateTokenSymbol(field, symbol, currency string, r *Result) {
+	if symbol == "" {
+		return // absent → derived from spec.spoke.currency
 	}
-	if p.ProposerCB != "" && p.ProposerCB == p.ConfirmerCB {
-		r.AddError("spec.pair.confirmerCB", fmt.Sprintf("confirmerCB must differ from proposerCB (both %q)", p.ProposerCB))
+	if strings.TrimSpace(symbol) != symbol || strings.ContainsAny(symbol, " \t") {
+		r.AddError(field, fmt.Sprintf("invalid value %q; an ERC-20 symbol must not contain whitespace", symbol))
+		return
 	}
-	if p.SymbolA != "" && p.SymbolA == p.SymbolB {
-		r.AddError("spec.pair.symbolB", fmt.Sprintf("symbolB must differ from symbolA (both %q)", p.SymbolA))
+	idx := strings.LastIndex(symbol, "_")
+	if idx < 0 || idx == len(symbol)-1 {
+		r.AddError(field, fmt.Sprintf(
+			"invalid value %q; the symbol must end in \"_<currency>\" (e.g. tCeBM_%s) — portals and the api-gateway derive the displayed currency code from the segment after the last underscore",
+			symbol, orPlaceholder(currency)))
+		return
 	}
+	if code := symbol[idx+1:]; currency != "" && !strings.EqualFold(code, currency) {
+		r.AddError(field, fmt.Sprintf(
+			"invalid value %q; its currency segment %q must match spec.spoke.currency %q — the currency code is the routing key and cannot be overridden by the symbol",
+			symbol, code, currency))
+	}
+}
+
+func orPlaceholder(currency string) string {
+	if currency == "" {
+		return "BRL"
+	}
+	return currency
 }
 
 // scanSecrets walks every string value reachable from v and rejects any that

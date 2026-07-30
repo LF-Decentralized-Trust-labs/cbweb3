@@ -329,12 +329,36 @@ settle a cross-currency swap.
 
 ---
 
+## Per-spoke currency and token metadata
+
+Every spoke declares its own currency; nothing about a currency is hardcoded in
+the toolkit. Each CB manifest carries:
+
+```yaml
+spoke:
+  currency: BRL              # ISO 4217 — the routing key
+  tokenName: Tokenized BRL   # optional; derived from `currency` when absent
+  tokenSymbol: tCeBM_BRL
+  fiatTokenName: Fiat BRL
+  fiatTokenSymbol: fCeBM_BRL
+```
+
+`currency` is the only **routing** key (relay id `spoke-<currency>`, hub currency
+registration, mirrored `W-tCeBM_<ISO>`). The four token fields are the spoke's own
+`tCeBM`/`fCeBM` ERC-20 metadata and must keep the `<prefix>_<ISO>` symbol shape —
+the portals and the api-gateway read the displayed currency code from the segment
+after the last underscore. A joining bank repeats `spoke.currency` in its own
+manifest and the join rejects it if it disagrees with the spoke bundle. See
+`toolkit/README.md` for the full contract.
+
+---
+
 ## Sovereign corridor (BRL ↔ ARS) — opened at runtime via the CB portal
 
 Each sovereign currency (W-token) is already deployed and registered on the hub
 by `found-spoke` (via the hub compliance service) — so no runtime currency step
-is needed. Provisioning does **not** open the FX corridor, however: `spec.pair`
-only documents the intended corridor, and the toolkit never holds sovereign
+is needed. Provisioning does **not** open the FX corridor, however, and the
+manifests deliberately say nothing about it: the toolkit never holds sovereign
 signing keys. Once the stacks are up, each central bank opens the corridor from
 its **governance portal** (the *Cooperative Liquidity* wizard) — or the v2 API
 directly — authenticated by its governance operator's Keycloak session

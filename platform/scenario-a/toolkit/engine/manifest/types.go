@@ -149,10 +149,22 @@ type AdminUser struct {
 }
 
 // Spoke identifies the blockchain network this participant belongs to.
+//
+// Currency is the ISO 4217 code and stays the semantic key: it names the spoke's
+// settlement currency and is what the portals display (FIAT_SYMBOL). The two
+// FiatToken fields are optional, presentation-only overrides for the ERC-20
+// metadata of this spoke's fCeBM; absent, they derive from Currency as
+// "Fiat <ISO>" / "fCeBM_<ISO>".
 type Spoke struct {
 	ID       string `yaml:"id"`
 	ChainID  int    `yaml:"chainId"`
 	Currency string `yaml:"currency"`
+	// FiatTokenName overrides the fCeBM ERC-20 name (default "Fiat <currency>").
+	FiatTokenName string `yaml:"fiatTokenName,omitempty"`
+	// FiatTokenSymbol overrides the fCeBM ERC-20 symbol (default "fCeBM_<currency>").
+	// It must keep the "<prefix>_<ISO>" shape, ending in this spoke's own currency:
+	// the currency code is the routing key and cannot be redefined by a symbol.
+	FiatTokenSymbol string `yaml:"fiatTokenSymbol,omitempty"`
 }
 
 // Node holds the network addressing configuration for the Besu node.

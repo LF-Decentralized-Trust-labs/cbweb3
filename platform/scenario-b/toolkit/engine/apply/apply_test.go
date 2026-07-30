@@ -53,10 +53,9 @@ func TestApplyFoundSpokeDryRun(t *testing.T) {
 	}
 }
 
-// TK-B9: found-spoke with spec.pair plans the soft sovereign tail (dry-run).
 // The sovereign FX corridor is opened at runtime via the CB governance portal,
-// NOT at provisioning time — so found-spoke never plans sovereign-tail steps,
-// even when spec.pair is present.
+// NOT at provisioning time: found-spoke never plans sovereign-tail steps, and
+// the manifest has no way to ask for one.
 func TestApplyFoundSpokeHasNoSovereignTail(t *testing.T) {
 	rep, err := Apply(context.Background(), Options{
 		ManifestPath: filepath.Join(fixtures, "found-spoke.yaml"),

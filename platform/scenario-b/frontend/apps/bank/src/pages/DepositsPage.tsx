@@ -32,6 +32,7 @@ import {
   getPaymentStatusLabel,
   getPaymentStatusVariant,
   normalizePaymentStatus,
+  tokenUnitPrefix,
 } from "../types";
 
 const PAGE_SIZE = 10;
@@ -48,6 +49,9 @@ export function DepositsPage() {
   const tCeBMSymbol = usePaymentStore((state) => state.tCeBMSymbol);
   const fCeBMDecimals = usePaymentStore((state) => state.fCeBMDecimals);
   const fCeBMSymbol = usePaymentStore((state) => state.fCeBMSymbol);
+  // Instrument names follow the on-chain symbols (custom per spoke).
+  const tCeBMName = tokenUnitPrefix(tCeBMSymbol);
+  const fCeBMName = tokenUnitPrefix(fCeBMSymbol, "fCeBM");
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
   const profile = useAuthStore((state) => state.profile);
@@ -113,7 +117,7 @@ export function DepositsPage() {
         <BalanceWidget balance={balance} decimals={tCeBMDecimals} symbol={tCeBMSymbol} loading={status === "loading" && balance === null} hideSymbol />
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Fiat Reserve Balance (fCeBM)</CardDescription>
+            <CardDescription>Fiat Reserve Balance ({fCeBMName})</CardDescription>
             <CardTitle>{fiatBalance !== null ? formatTokenAmount(fiatBalance, fDecimals) : "—"}</CardTitle>
           </CardHeader>
         </Card>
@@ -128,7 +132,7 @@ export function DepositsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Request Token Issuance</CardTitle>
-          <CardDescription>Submit fiat collateral proof to request tCeBM issuance by the central bank.</CardDescription>
+          <CardDescription>Submit fiat collateral proof to request {tCeBMName} issuance by the central bank.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">

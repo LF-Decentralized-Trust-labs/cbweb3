@@ -13,8 +13,8 @@
 # base contracts). Each central bank FOUNDS its spoke (CB is the sole QBFT
 # validator), registers on the hub, and dynamically registers its spoke with the
 # relay (POST /api/v1/spokes). Each commercial bank JOINS as a non-validating full
-# node. The sovereign FX corridor (spec.pair, e.g. BRL<->ARS) is NOT opened here:
-# each CB opens it at runtime from its governance portal (propose/confirm pair +
+# node. The sovereign FX corridor (e.g. BRL<->ARS) is NOT opened here: each CB
+# opens it at runtime from its governance portal (propose/confirm pair +
 # cooperative liquidity), so provisioning never handles sovereign signing keys.
 #
 # Idempotent: re-running resumes from the first incomplete step per entity

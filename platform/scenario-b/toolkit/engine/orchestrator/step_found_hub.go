@@ -446,9 +446,11 @@ func FoundHubSteps(c HubConfig) []Step {
 					return err
 				}
 				for key, addr := range map[string]string{
-					"HUB_IDENTITY_REGISTRY_ADDRESS":  m["identityRegistry"],
-					"HUB_TOKEN_A_ADDRESS":            m["tCeBM_BRL"], // optional — set later when tCeBM is deployed
-					"HUB_TOKEN_B_ADDRESS":            m["tCeBM_EUR"],
+					"HUB_IDENTITY_REGISTRY_ADDRESS": m["identityRegistry"],
+					// No HUB_TOKEN_A/B_ADDRESS: found-hub deploys no tCeBM (see
+					// CBWeb3Hub.s.sol). Mirrored tokens are created per CB currency
+					// registration ("W-tCeBM_<ISO>") and resolved from the PairRegistry,
+					// so there is no fixed pair of currencies to wire here.
 					"FX_AGREEMENT_CONTRACT_ADDRESS":  m["fxAgreement"],
 					"PAIR_REGISTRY_CONTRACT_ADDRESS": m["pairRegistry"],
 					"CURRENCY_REGISTRY_ADDRESS":      m["currencyRegistry"],
@@ -598,27 +600,20 @@ func FoundHubSteps(c HubConfig) []Step {
 }
 
 // hubContractMap maps the CBWeb3Hub broadcast deployments to bundle keys.
-// TokenizedCentralBankMoney is optional (not deployed at found-hub anymore;
-// kept for backward compatibility with older broadcasts that still include them).
+// TokenizedCentralBankMoney deployments are ignored: the hub deploys no tCeBM
+// (CBWeb3Hub.s.sol) — the mirrored token of each currency is created per CB
+// registration and resolved from the PairRegistry at runtime, so an older
+// broadcast that still carries them has nothing to contribute to the bundle.
 func hubContractMap(broadcastPath string) (map[string]string, error) {
 	list, err := addrs.ParseBroadcastList(broadcastPath)
 	if err != nil {
 		return nil, err
 	}
 	out := map[string]string{}
-	tcebmSeen := 0
 	for _, d := range list {
 		switch d.Name {
 		case "IdentityRegistry":
 			out["identityRegistry"] = d.Address
-		case "TokenizedCentralBankMoney":
-			// Legacy broadcasts only — current CBWeb3Hub.s.sol does not deploy tCeBM.
-			if tcebmSeen == 0 {
-				out["tCeBM_BRL"] = d.Address
-			} else {
-				out["tCeBM_EUR"] = d.Address
-			}
-			tcebmSeen++
 		case "FXAgreement":
 			out["fxAgreement"] = d.Address
 		case "PairRegistry":
