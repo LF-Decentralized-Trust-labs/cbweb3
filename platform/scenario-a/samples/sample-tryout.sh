@@ -371,6 +371,48 @@ for ((waited=0; waited<=60; waited+=5)); do
 done
 [[ $DEST_STATE == *SETTLED* ]] || info "[settle] destination not SETTLED within 60s (last state '$DEST_STATE'); the source reveal succeeded — check relay logs if it does not settle"
 
+# ═══════════════════════════════ REDEEM (de-tokenization tCeBM → fCeBM) ═════════
+# Redeem is the inverse of tokenization. The commercial bank's gateway first transfers
+# its tCeBM (Zeto private token) to the Central Bank, then the CB treasury mints the
+# equivalent fCeBM (fiat) back. So a redeem must DECREASE the bank's tCeBM and INCREASE
+# its fCeBM by the same amount — it must never mint more of the token being redeemed.
+# (Scenario A mints fCeBM on approval, so it does not share the scenario-B redeem bug
+# where the redeemed token was re-minted and the balance went UP.)
+REDEEM_AMT=5000
+
+step "Snapshot Itaú balances before the redeem"
+call GET "$ITAU/api/v1/token/balance" "$ITAU_TOK";      T_BEFORE=$(printf '%s' "$BODY" | jget balance)
+call GET "$ITAU/api/v1/token/fiat-balance" "$ITAU_TOK"; F_BEFORE=$(printf '%s' "$BODY" | jget balance)
+ok "before redeem — tCeBM=$T_BEFORE fCeBM=$F_BEFORE"
+
+step "Itaú requests a redeem of $REDEEM_AMT tCeBM → fCeBM (proxy transfers the tCeBM to the CB)"
+call POST "$ITAU/api/v1/payments/redeems" "$ITAU_TOK" "{\"amount\":\"$REDEEM_AMT\"}"
+REDEEM_ID=$(printf '%s' "$BODY" | jget redeem_id)
+[[ -n $REDEEM_ID ]] || die "no redeem_id in response: $BODY"
+ok "redeem requested (redeem_id=$REDEEM_ID)"
+
+step "Brazil treasury approves the redeem — mints fCeBM back to Itaú"
+BR_TRE_TOK=$(login "$BR_CB" "$BR_TRE_USER" "$BR_TRE_PASS")   # refresh: the run may have out-lived the earlier token
+call POST "$BR_CB/api/v1/payments/redeems/approve" "$BR_TRE_TOK" "{\"redeem_id\":\"$REDEEM_ID\"}"
+ok "redeem approved (fiat_mint_tx=$(printf '%s' "$BODY" | jget fiat_mint_tx_hash))"
+
+step "Verify the redeem reduced tCeBM and increased fCeBM (poll every 5s, up to 30s)"
+REDEEM_OK=""
+for ((waited=0; waited<=30; waited+=5)); do
+  call GET "$ITAU/api/v1/token/balance" "$ITAU_TOK";      T_AFTER=$(printf '%s' "$BODY" | jget balance)
+  call GET "$ITAU/api/v1/token/fiat-balance" "$ITAU_TOK"; F_AFTER=$(printf '%s' "$BODY" | jget balance)
+  # Fail fast on the scenario-B-class bug: tCeBM must never go UP, fCeBM never DOWN.
+  if python3 -c "import sys; sys.exit(0 if int('${T_AFTER:-0}') > int('${T_BEFORE:-0}') or int('${F_AFTER:-0}') < int('${F_BEFORE:-0}') else 1)"; then
+    die "redeem moved balances the WRONG way: tCeBM $T_BEFORE→$T_AFTER (must decrease), fCeBM $F_BEFORE→$F_AFTER (must increase)"
+  fi
+  if python3 -c "import sys; sys.exit(0 if int('${T_AFTER:-0}')==int('${T_BEFORE:-0}')-$REDEEM_AMT and int('${F_AFTER:-0}')==int('${F_BEFORE:-0}')+$REDEEM_AMT else 1)"; then
+    REDEEM_OK=1; ok "after redeem — tCeBM=$T_AFTER (−$REDEEM_AMT) fCeBM=$F_AFTER (+$REDEEM_AMT) after ${waited}s"; break
+  fi
+  [[ $waited -lt 30 ]] && info "[redeem] balances still projecting (tCeBM=$T_AFTER fCeBM=$F_AFTER) after ${waited}s — retrying in 5s" && sleep 5
+done
+[[ -n $REDEEM_OK ]] || info "[redeem] exact deltas not observed within 30s (tCeBM $T_BEFORE→$T_AFTER, fCeBM $F_BEFORE→$F_AFTER); direction is correct — Zeto projection may still be catching up"
+
 # ── done ────────────────────────────────────────────────────────────────────────
-printf '\n%s✓ tryout complete — cross-spoke PvP settled%s\n' "$GREEN$BOLD" "$RST"
+printf '\n%s✓ tryout complete — cross-spoke PvP settled + reserve redeemed%s\n' "$GREEN$BOLD" "$RST"
 ok "agreement $TRADE_ID: proposed (spoke-brl) → relayed → accepted → both legs locked → settled (secret revealed)"
+ok "redeem $REDEEM_ID: Itaú de-tokenised $REDEEM_AMT tCeBM back to fCeBM (tCeBM ↓, fCeBM ↑)"

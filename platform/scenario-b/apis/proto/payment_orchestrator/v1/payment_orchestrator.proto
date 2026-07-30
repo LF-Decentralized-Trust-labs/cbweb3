@@ -216,14 +216,15 @@ message EscrowRecord {
   string created_at       = 10;
 }
 
-// Persistent record for a redeem (de-tokenization) request.
+// Persistent record for a redeem (de-tokenization) request: tCeBM → fiat.
+// On approval, tCeBM is burned and the equivalent fCeBM (fiat) is minted back.
 message RedeemRecord {
   string id                     = 1;
   string requester_id           = 2;
   string requester_besu_address = 3;
   string amount                 = 5;
   RedeemStatus status           = 6;
-  string mint_tx_hash           = 8;
+  string mint_tx_hash           = 8; // fCeBM (fiat) mint tx produced on approval
   string rejection_reason       = 9;
   string created_at             = 10;
 }
@@ -277,7 +278,7 @@ message ListDepositsResponse {
 
 // ─── Redeem Messages ────────────────────────────────────────────────────
 
-// Commercial bank requests redemption of tCeBM (burn tCeBM, mint tCeBM back to bank).
+// Commercial bank requests redemption (de-tokenization) of tCeBM back to fiat.
 message RequestRedeemRequest {
   string requester_besu_address = 1;
   string amount                 = 3;
@@ -287,13 +288,13 @@ message RequestRedeemResponse {
   string redeem_id = 1;
 }
 
-// Central bank approves redeem: mints tCeBM to the commercial bank.
+// Central bank approves redeem: burns tCeBM and mints the equivalent fCeBM (fiat) back.
 message ApproveRedeemRequest {
   string redeem_id = 1;
 }
 
 message ApproveRedeemResponse {
-  string mint_tx_hash = 1;
+  string mint_tx_hash = 1; // tx hash of fCeBM (fiat) minted back on approval
 }
 
 // Central bank rejects a redeem request.
