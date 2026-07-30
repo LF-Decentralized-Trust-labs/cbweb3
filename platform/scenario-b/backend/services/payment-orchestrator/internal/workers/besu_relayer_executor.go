@@ -85,8 +85,15 @@ type BesuRelayerExecutor struct {
 	// On-chain seams for the burn flow. NewBesuRelayerExecutor wires these to the real
 	// go-ethereum implementations; tests override them to exercise the R2-H-12 burn
 	// idempotency contract without a live chain.
-	hubBurnFn      func(ctx context.Context, token, from common.Address, amount *big.Int) (string, error)
-	spokeMintFn    func(ctx context.Context, to, nativeAsset string, amount *big.Int) error
+	//
+	// hubBurnFn / spokeMintFn invoke recordIntent(txHash) once the transaction is accepted into
+	// the mempool — before confirmation — so the executor can persist a pre-confirmation intent
+	// record. The *TxMinedFn seams reconcile a previously broadcast transaction by hash so a
+	// crash or WaitMined timeout resumes without re-submitting a non-idempotent burn/mint.
+	hubBurnFn      func(ctx context.Context, token, from common.Address, amount *big.Int, recordIntent func(txHash string)) (string, error)
+	hubTxMinedFn   func(ctx context.Context, txHash string) (mined bool, success bool, err error)
+	spokeMintFn    func(ctx context.Context, to, nativeAsset string, amount *big.Int, recordIntent func(txHash string)) (string, error)
+	spokeTxMinedFn func(ctx context.Context, txHash string) (mined bool, success bool, err error)
 	spokeReleaseFn func(ctx context.Context, txID [32]byte) error
 }
 
@@ -122,6 +129,7 @@ func NewBesuRelayerExecutor(ctx context.Context, db *gorm.DB, cfg BesuRelayerCon
 		hubABI:    parsedHubABI,
 	}
 	ex.hubBurnFn = ex.hubBurnOnChain
+	ex.hubTxMinedFn = ex.hubTxMined
 
 	if cfg.SpokeRPCURL != "" && cfg.SpokeBridgeAddr != "" {
 		spokeEC, dialErr := evm.Dial(ctx, cfg.SpokeRPCURL, 10*time.Second)
@@ -153,6 +161,7 @@ func NewBesuRelayerExecutor(ctx context.Context, db *gorm.DB, cfg BesuRelayerCon
 		ex.spokeABI = parsedSpokeABI
 		ex.spokeReady = true
 		ex.spokeMintFn = ex.spokeMint
+		ex.spokeTxMinedFn = ex.spokeTxMined
 		ex.spokeReleaseFn = ex.spokeRelease
 
 		log.Printf("[BesuRelayerExecutor] spoke bridge configured: rpc=%s contract=%s", cfg.SpokeRPCURL, cfg.SpokeBridgeAddr)
@@ -258,27 +267,56 @@ func (e *BesuRelayerExecutor) SubmitBurnEvent(ctx context.Context, _ /*idempoten
 	}
 	mirroredAddr := common.HexToAddress(pos.MirroredAsset)
 
-	// Idempotency (R2-H-12): the Hub burn counts as done ONLY when its confirmed transaction
-	// hash is persisted on the position. Completion is never inferred from token balance — a
-	// low balance can arise from causes other than this burn, and acting on it would release
-	// native value on the spoke without a confirmed Hub burn. This mirrors the bridge-out
-	// replay guard keyed on swap_tx_hash (R2-CR-6): idempotency is tracked by persisted state.
+	// Idempotency (R2-H-12): the Hub burn counts as done ONLY when its transaction hash is
+	// persisted on the position. Completion is never inferred from token balance — a low balance
+	// can arise from causes other than this burn, and acting on it would release native value on
+	// the spoke without a confirmed Hub burn. This mirrors the bridge-out replay guard keyed on
+	// swap_tx_hash (R2-CR-6): idempotency is tracked by persisted state.
+	//
+	// The hash is persisted as an intent the moment the burn is broadcast (recordHubBurnIntent),
+	// before the multi-second receipt wait, so a crash or WaitMined timeout on an already-broadcast
+	// burn is reconciled by hash on retry (hubTxMinedFn) instead of re-burning (R2-H-12 #1). A
+	// re-burn would either destroy value against a single spoke release or leave the position stuck
+	// in BURNING with the tokens already burned.
 	if pos.HubBurnTxHash == "" {
-		txHash, burnErr := e.hubBurnFn(ctx, mirroredAddr, burnFrom, amount)
+		txHash, burnErr := e.hubBurnFn(ctx, mirroredAddr, burnFrom, amount, func(h string) {
+			e.recordHubBurnIntent(ctx, pos, h)
+		})
 		if burnErr != nil {
 			return fmt.Errorf("hub burn (token=%s amount=%s position=%s): %w",
 				pos.MirroredAsset, pos.MirroredAmount, positionID, burnErr)
 		}
-		// evm.SubmitTx only returns nil after a successful receipt, so the burn is now
-		// confirmed on-chain. Persist it BEFORE any spoke-side value movement so a retry after
-		// a spoke failure resumes at the spoke step instead of re-burning.
+		// SubmitTxAwaitBroadcast only returns nil after a successful receipt, so the burn is now
+		// confirmed on-chain. Persist authoritatively (state → BURNED) BEFORE any spoke movement.
 		if perr := e.markHubBurnConfirmed(ctx, pos, txHash); perr != nil {
 			return fmt.Errorf("persist hub burn confirmation (position=%s tx=%s): %w", positionID, txHash, perr)
 		}
 		log.Printf("[BesuRelayerExecutor] hub burn confirmed — position=%s burnFrom=%s amount=%s tx=%s",
 			positionID, burnFrom.Hex(), amount.String(), txHash)
 	} else {
-		log.Printf("[BesuRelayerExecutor] idempotency: hub burn already confirmed for position=%s (tx=%s) — skipping burn",
+		// A burn was already broadcast for this position (intent or confirmed). Reconcile by hash
+		// rather than re-burning: the burn is non-idempotent on-chain (no txId), so a blind retry
+		// double-burns.
+		mined, success, rerr := e.hubTxMinedFn(ctx, pos.HubBurnTxHash)
+		if rerr != nil {
+			return fmt.Errorf("reconcile hub burn tx %s (position=%s): %w", pos.HubBurnTxHash, positionID, rerr)
+		}
+		if !mined {
+			return fmt.Errorf("hub burn tx %s for position %s not yet mined — awaiting confirmation before spoke settlement",
+				pos.HubBurnTxHash, positionID)
+		}
+		if !success {
+			// The broadcast burn reverted: nothing was burned. Fail closed — auto-clearing the
+			// intent and re-burning is unsafe without operator review.
+			return fmt.Errorf("hub burn tx %s for position %s reverted on-chain — reconciliation required (no re-burn)",
+				pos.HubBurnTxHash, positionID)
+		}
+		if pos.BridgeState != podmain.BridgeStateBurned {
+			if perr := e.markHubBurnConfirmed(ctx, pos, pos.HubBurnTxHash); perr != nil {
+				return fmt.Errorf("persist reconciled hub burn (position=%s tx=%s): %w", positionID, pos.HubBurnTxHash, perr)
+			}
+		}
+		log.Printf("[BesuRelayerExecutor] idempotency: hub burn already broadcast and confirmed for position=%s (tx=%s) — skipping burn",
 			positionID, pos.HubBurnTxHash)
 	}
 
@@ -296,8 +334,34 @@ func (e *BesuRelayerExecutor) SubmitBurnEvent(ctx context.Context, _ /*idempoten
 	beneficiary := strings.TrimSpace(pos.BeneficiarySpokeAddress)
 	switch planSpokeDelivery(e.spokeReady, e.cfg.SkipSpokeLock, beneficiary) {
 	case spokeDeliveryMint:
-		if mintErr := e.spokeMintFn(ctx, beneficiary, pos.NativeAsset, amount); mintErr != nil {
-			return fmt.Errorf("spoke mint (position=%s beneficiary=%s): %w", positionID, beneficiary, mintErr)
+		// Cross-currency mint is non-idempotent on-chain (tCeBM.mint has no txId), so it gets the
+		// same intent + reconcile-by-hash discipline as the Hub burn (R2-H-12 #2). Without it, a
+		// WaitMined timeout on a landed mint re-mints on retry — unbacked issuance against one burn.
+		if pos.SpokeMintTxHash == "" {
+			mintTxHash, mintErr := e.spokeMintFn(ctx, beneficiary, pos.NativeAsset, amount, func(h string) {
+				e.recordSpokeMintIntent(ctx, pos, h)
+			})
+			if mintErr != nil {
+				return fmt.Errorf("spoke mint (position=%s beneficiary=%s): %w", positionID, beneficiary, mintErr)
+			}
+			if perr := e.markSpokeMintConfirmed(ctx, pos, mintTxHash); perr != nil {
+				return fmt.Errorf("persist spoke mint confirmation (position=%s tx=%s): %w", positionID, mintTxHash, perr)
+			}
+		} else {
+			mined, success, rerr := e.spokeTxMinedFn(ctx, pos.SpokeMintTxHash)
+			if rerr != nil {
+				return fmt.Errorf("reconcile spoke mint tx %s (position=%s): %w", pos.SpokeMintTxHash, positionID, rerr)
+			}
+			if !mined {
+				return fmt.Errorf("spoke mint tx %s for position %s not yet mined — awaiting confirmation",
+					pos.SpokeMintTxHash, positionID)
+			}
+			if !success {
+				return fmt.Errorf("spoke mint tx %s for position %s reverted on-chain — reconciliation required (no re-mint)",
+					pos.SpokeMintTxHash, positionID)
+			}
+			log.Printf("[BesuRelayerExecutor] idempotency: spoke mint already confirmed for position=%s (tx=%s) — skipping mint",
+				positionID, pos.SpokeMintTxHash)
 		}
 	case spokeDeliveryRelease:
 		txID := deriveSpokeTxID(positionID)
@@ -314,10 +378,36 @@ func (e *BesuRelayerExecutor) SubmitBurnEvent(ctx context.Context, _ /*idempoten
 }
 
 // hubBurnOnChain burns W-tCeBM on the Hub and returns the confirmed transaction hash.
-// evm.SubmitTx waits for the receipt and returns an error when the transaction reverts
-// (receipt.Status == 0), so a nil error means the burn is confirmed on-chain.
-func (e *BesuRelayerExecutor) hubBurnOnChain(ctx context.Context, token, from common.Address, amount *big.Int) (string, error) {
-	return evm.SubmitTx(ctx, e.hubEC, e.hubSigner, token, e.hubABI, "burn", from, amount)
+// evm.SubmitTxAwaitBroadcast waits for the receipt and returns an error when the transaction
+// reverts (receipt.Status == 0), so a nil error means the burn is confirmed on-chain. recordIntent
+// is invoked with the tx hash the moment it enters the mempool, before the receipt wait.
+func (e *BesuRelayerExecutor) hubBurnOnChain(ctx context.Context, token, from common.Address, amount *big.Int, recordIntent func(txHash string)) (string, error) {
+	return evm.SubmitTxAwaitBroadcast(ctx, e.hubEC, e.hubSigner, token, e.hubABI, "burn", recordIntent, from, amount)
+}
+
+// hubTxMined reports whether a previously broadcast Hub transaction is mined and, if so, whether
+// it succeeded. Used to reconcile a burn whose confirmation was interrupted (R2-H-12 #1).
+func (e *BesuRelayerExecutor) hubTxMined(ctx context.Context, txHash string) (mined bool, success bool, err error) {
+	return evm.TxMined(ctx, e.hubEC, txHash)
+}
+
+// recordHubBurnIntent persists the burn tx hash the moment it is broadcast, before the receipt
+// wait, so a crash or WaitMined timeout is reconcilable by hash on retry (R2-H-12 #1). The write
+// is conditional on an empty hash so it never clobbers a prior record, and best-effort: the
+// transaction is already in flight and the authoritative write is markHubBurnConfirmed, so a
+// transient DB error here is logged, not fatal (it must not abort the mined tx).
+func (e *BesuRelayerExecutor) recordHubBurnIntent(ctx context.Context, pos *podmain.BridgedAssetPosition, txHash string) {
+	res := e.db.WithContext(ctx).Model(&podmain.BridgedAssetPosition{}).
+		Where("position_id = ? AND hub_burn_tx_hash = ''", pos.PositionID).
+		Update("hub_burn_tx_hash", txHash)
+	if res.Error != nil {
+		log.Printf("[BesuRelayerExecutor] WARN record hub burn intent failed — position=%s tx=%s err=%v",
+			pos.PositionID, txHash, res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		pos.HubBurnTxHash = txHash
+	}
 }
 
 // markHubBurnConfirmed persists the confirmed Hub burn transaction hash on the position and
@@ -334,6 +424,35 @@ func (e *BesuRelayerExecutor) markHubBurnConfirmed(ctx context.Context, pos *pod
 	}
 	pos.HubBurnTxHash = txHash
 	pos.BridgeState = podmain.BridgeStateBurned
+	return nil
+}
+
+// recordSpokeMintIntent persists the spoke mint tx hash on broadcast, before the receipt wait, so
+// an interrupted mint reconciles by hash on retry instead of re-minting unbacked tCeBM (R2-H-12
+// #2). Conditional + best-effort, mirroring recordHubBurnIntent.
+func (e *BesuRelayerExecutor) recordSpokeMintIntent(ctx context.Context, pos *podmain.BridgedAssetPosition, txHash string) {
+	res := e.db.WithContext(ctx).Model(&podmain.BridgedAssetPosition{}).
+		Where("position_id = ? AND spoke_mint_tx_hash = ''", pos.PositionID).
+		Update("spoke_mint_tx_hash", txHash)
+	if res.Error != nil {
+		log.Printf("[BesuRelayerExecutor] WARN record spoke mint intent failed — position=%s tx=%s err=%v",
+			pos.PositionID, txHash, res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		pos.SpokeMintTxHash = txHash
+	}
+}
+
+// markSpokeMintConfirmed persists the confirmed spoke mint transaction hash on the position. It is
+// the idempotency key consulted by SubmitBurnEvent's mint leg on retries (R2-H-12 #2).
+func (e *BesuRelayerExecutor) markSpokeMintConfirmed(ctx context.Context, pos *podmain.BridgedAssetPosition, txHash string) error {
+	if err := e.db.WithContext(ctx).Model(&podmain.BridgedAssetPosition{}).
+		Where("position_id = ?", pos.PositionID).
+		Update("spoke_mint_tx_hash", txHash).Error; err != nil {
+		return err
+	}
+	pos.SpokeMintTxHash = txHash
 	return nil
 }
 
@@ -392,24 +511,31 @@ func (e *BesuRelayerExecutor) spokeBurnFrom(ctx context.Context, nativeAsset, fr
 	return nil
 }
 
-// spokeMint calls tCeBM.mint(to, amount) on the Spoke chain.
+// spokeMint calls tCeBM.mint(to, amount) on the Spoke chain and returns the confirmed tx hash.
 // Used for cross-currency bridge-out where there is no prior SpokeBridge.lock() on Spoke-B.
-// Requires CENTRAL_BANK_ROLE on the spoke fiat token (pos.NativeAsset).
-func (e *BesuRelayerExecutor) spokeMint(ctx context.Context, to, nativeAssetAddr string, amount *big.Int) error {
+// Requires CENTRAL_BANK_ROLE on the spoke fiat token (pos.NativeAsset). recordIntent is invoked
+// with the tx hash on broadcast, before the receipt wait.
+func (e *BesuRelayerExecutor) spokeMint(ctx context.Context, to, nativeAssetAddr string, amount *big.Int, recordIntent func(txHash string)) (string, error) {
 	toAddr := common.HexToAddress(to)
 	tokenAddr := common.HexToAddress(nativeAssetAddr)
 	signer := e.spokeSigner
 	if signer == nil {
 		signer = e.hubSigner
 	}
-	_, err := evm.SubmitTx(ctx, e.spokeEC, signer, tokenAddr, e.hubABI,
-		"mint", toAddr, amount,
+	txHash, err := evm.SubmitTxAwaitBroadcast(ctx, e.spokeEC, signer, tokenAddr, e.hubABI,
+		"mint", recordIntent, toAddr, amount,
 	)
 	if err != nil {
-		return fmt.Errorf("tCeBM.mint(to=%s token=%s amount=%s): %w", to, nativeAssetAddr, amount.String(), err)
+		return "", fmt.Errorf("tCeBM.mint(to=%s token=%s amount=%s): %w", to, nativeAssetAddr, amount.String(), err)
 	}
-	log.Printf("[BesuRelayerExecutor] spoke mint ok — to=%s token=%s amount=%s", to, nativeAssetAddr, amount.String())
-	return nil
+	log.Printf("[BesuRelayerExecutor] spoke mint ok — to=%s token=%s amount=%s tx=%s", to, nativeAssetAddr, amount.String(), txHash)
+	return txHash, nil
+}
+
+// spokeTxMined reports whether a previously broadcast Spoke transaction is mined and succeeded.
+// Used to reconcile a mint whose confirmation was interrupted (R2-H-12 #2).
+func (e *BesuRelayerExecutor) spokeTxMined(ctx context.Context, txHash string) (mined bool, success bool, err error) {
+	return evm.TxMined(ctx, e.spokeEC, txHash)
 }
 
 // ensureSpokeFunds guarantees the spoke signer holds at least `amount` of the native
