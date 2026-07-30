@@ -58,6 +58,21 @@ type BridgedAssetPosition struct {
 	// so replayed relay notifications cannot mint twice. Partial index because legacy
 	// flows (plain lock-mint, dev paths) have no associated swap.
 	SwapTxHash string `gorm:"column:swap_tx_hash;default:'';index:idx_bridge_swap_tx_hash,unique,where:swap_tx_hash <> ''"`
+	// HubBurnTxHash is the confirmed Hub burn transaction for a bridge-out position (R2-H-12).
+	// Written by the payment-orchestrator relayer executor only after the burn is mined with a
+	// successful receipt; it is the idempotency key for burn retries so native value is never
+	// released on the spoke without a confirmed Hub burn. Completion is tracked by this persisted
+	// receipt hash, never inferred from token balance. This column is created here because the
+	// gateway owns the AutoMigrate for the shared bridged_asset_positions table.
+	HubBurnTxHash string `gorm:"column:hub_burn_tx_hash;default:''"`
+	// SpokeMintTxHash is the confirmed Spoke-side mint transaction for a cross-currency
+	// bridge-out (R2-H-12 follow-up, mirror of HubBurnTxHash on the spoke leg). Written by the
+	// payment-orchestrator relayer executor: a broadcast intent is persisted before the receipt
+	// wait, and the value is authoritative once the mint is mined successfully. It is the
+	// idempotency key for the spoke mint so a WaitMined timeout on a landed mint cannot issue
+	// unbacked tCeBM to the beneficiary twice. Column created here because the gateway owns the
+	// AutoMigrate for the shared bridged_asset_positions table.
+	SpokeMintTxHash string `gorm:"column:spoke_mint_tx_hash;default:''"`
 	// CorrelationID links the position to the cross-currency swap operation (009) for
 	// tracing. Not unique: a rollback position legitimately shares the correlation of
 	// the bridge-in it reverses — replay protection is keyed on SwapTxHash.
