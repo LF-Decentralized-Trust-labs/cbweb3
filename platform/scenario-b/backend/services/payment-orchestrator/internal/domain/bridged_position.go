@@ -49,10 +49,17 @@ type BridgedAssetPosition struct {
 	// reserves (obtained via Reserve Tokenisation / ApproveEscrow) before a bridge-in can proceed.
 	// Empty string = sovereign CB self-service path (CB mints its own liquidity).
 	BurnFromSpokeAddress string `gorm:"column:burn_from_spoke_address;default:''"`
-	// SwapTxHash is the Hub AMM swap transaction this bridge-out settles (R2-CR-6).
-	// Unique when set (partial index, owned by the api-gateway migration): each on-chain
-	// swap can be consumed by exactly one burn/mint — replay protection.
+	// SwapTxHash is the Hub AMM swap transaction this position settles (R2-CR-6).
+	// Unique per (swap_tx_hash, leg) when set (partial composite index, owned by the
+	// api-gateway migration): each on-chain swap can be consumed by exactly one
+	// burn/mint per leg — replay protection.
 	SwapTxHash string `gorm:"column:swap_tx_hash;default:''"`
+	// Leg is SETTLEMENT (the payment) or RESIDUE (return of the unspent slippage buffer
+	// bridged in before the swap ran). The executor treats both the same way: a RESIDUE
+	// leg is a burn-on-Hub + mint-to-beneficiary, with the payer as the beneficiary.
+	Leg string `gorm:"column:leg;not null;default:'SETTLEMENT'"`
+	// ParentPositionID links a RESIDUE leg to the bridge-in position it corrects.
+	ParentPositionID string `gorm:"column:parent_position_id;default:''"`
 	// HubBurnTxHash is the confirmed Hub burn transaction for this bridge-out position (R2-H-12).
 	// It is persisted only after the burn transaction is mined with a successful receipt, and it
 	// is the idempotency key for burn retries: a non-empty value means the Hub burn is confirmed

@@ -128,6 +128,24 @@ func (r *crossCurrencySwapRepository) UpdateBridgeOutPositionID(ctx context.Cont
 		Update("bridge_out_position_id", positionID).Error
 }
 
+// UpdateResidue persists the outcome of the residue return (MaxAmountIn − realized amount_in)
+// in a single UPDATE. It deliberately does not touch `status`: the payment is already final
+// when the residue is handled, so a failed return records RETURN_FAILED for reconciliation
+// without reopening a COMPLETED swap.
+func (r *crossCurrencySwapRepository) UpdateResidue(ctx context.Context, swapID, amount, positionID string, status domain.ResidueReturnStatus) error {
+	updates := map[string]interface{}{
+		"residue_amount": amount,
+		"residue_status": status,
+	}
+	if positionID != "" {
+		updates["residue_position_id"] = positionID
+	}
+	return r.db.WithContext(ctx).
+		Model(&domain.CrossCurrencySwapOperation{}).
+		Where("swap_id = ?", swapID).
+		Updates(updates).Error
+}
+
 // UpdateFailureReason sets the failure_reason field when status=FAILED.
 func (r *crossCurrencySwapRepository) UpdateFailureReason(ctx context.Context, swapID string, reason string) error {
 	return r.db.WithContext(ctx).

@@ -599,6 +599,15 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 				}
 				orchestrator = orchestrator.WithBridgeInRelay(bridgeInRelay)
 				log.Printf("[app] CrossCurrencySwapOrchestrator: bridge-in relay wired (CB %s)", cbURL)
+
+				// Step 4 goes back to the same CB over the same channel: it bridged the
+				// slippage buffer in, so it is the one that can give the remainder back.
+				residueRelay := services.NewCrossCurrencyResidueRelay(cbURL, relaySecret)
+				if relaySigner != nil {
+					residueRelay = residueRelay.WithSigner(relaySigner)
+				}
+				orchestrator = orchestrator.WithResidueReturnRelay(residueRelay)
+				log.Printf("[app] CrossCurrencySwapOrchestrator: residue-return relay wired (CB %s)", cbURL)
 			} else {
 				log.Printf("[app] WARNING: CENTRAL_BANK_API_URL set but INTERNAL_RELAY_AUTH_SECRET empty — bridge-in cannot be delegated to the CB; commercial lock-mint will fail (no CENTRAL_BANK_ROLE)")
 			}
@@ -617,6 +626,11 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 
 		if transferLimitChecker != nil {
 			orchestrator = orchestrator.WithTransferLimitChecker(transferLimitChecker)
+		}
+		// Local Step 4 path (this gateway is the issuing CB): the residue must be minted back
+		// to the payer's own spoke wallet, resolved from the participants registry.
+		if db != nil {
+			orchestrator = orchestrator.WithPayerWalletResolver(services.NewParticipantResolver(db))
 		}
 		// Dynamic per-pair model: let Step 3 tell the Cacti relay which AMM to run
 		// its isPaused() gate against, resolved from the on-chain PairRegistry.
@@ -837,6 +851,21 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		} else {
 			log.Printf("[app] WARNING: PAYMENT_GRPC_ADDR not set — Reserve Tokenisation balance enforcement disabled on bridge-in handler")
 		}
+
+		// Step 4 receiver: the CB that bridged W-<source> in is also the only one that can
+		// give the unspent slippage buffer back. Wired on the same condition as bridge-in,
+		// since it is the mirror image of the same sovereign privilege.
+		if bridgeBurnUnlockSvc != nil {
+			deps.CrossCurrencyResidueEnqueuer = bridgeBurnUnlockSvc
+			deps.CrossCurrencyResidueDuplicateFinder = bridgeBurnUnlockSvc
+			deps.CrossCurrencyBridgePositionReader = services.NewBridgePositionReader(db)
+			if deps.CrossCurrencyBeneficiaryResolver == nil {
+				deps.CrossCurrencyBeneficiaryResolver = services.NewParticipantResolver(db)
+			}
+			log.Printf("[app] cross-currency residue return enabled (POST %s)", services.ResidueReturnPath)
+		} else {
+			log.Printf("[app] WARNING: no burn-unlock service — cross-currency residue return endpoint not registered; slippage buffers will strand on the Hub")
+		}
 	}
 
 	return deps
@@ -895,6 +924,8 @@ func (a *swapVerifierAdapter) VerifySwap(ctx context.Context, txHash, poolPair s
 		return nil, err
 	}
 	return &handlers.VerifiedSwap{
+		User:      vs.User,
+		TokenIn:   vs.TokenIn,
 		TokenOut:  vs.TokenOut,
 		AmountIn:  vs.AmountIn,
 		AmountOut: vs.AmountOut,
@@ -913,6 +944,11 @@ func (a *bridgeBurnUnlockAdapter) BurnAndEnqueue(ctx context.Context, positionID
 
 func (a *bridgeBurnUnlockAdapter) EnqueueBurnAfterSwap(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string, extras ...string) (*services.BridgePositionResult, error) {
 	return a.svc.EnqueueBurnAfterSwap(ctx, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID, extras...)
+}
+
+func (a *bridgeBurnUnlockAdapter) EnqueueResidueReturn(ctx context.Context, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID string, burnFromHubAddress, beneficiarySpokeAddress, swapTxHash, parentPositionID string) (*services.BridgePositionResult, error) {
+	return a.svc.EnqueueResidueReturn(ctx, ownerBankID, spokeNetwork, nativeAsset, mirroredAsset, amount, correlationID,
+		burnFromHubAddress, beneficiarySpokeAddress, swapTxHash, parentPositionID)
 }
 
 // swapServiceAdapter adapts SwapService to match orchestrator interface (009).
