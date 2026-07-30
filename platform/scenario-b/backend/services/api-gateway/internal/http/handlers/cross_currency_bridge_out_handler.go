@@ -54,6 +54,10 @@ type BeneficiaryResolverIface interface {
 // VerifiedSwap carries the on-chain facts of an executed AMM swap, decoded from the
 // transaction receipt on the Hub (mirrors ammclient.VerifiedSwap).
 type VerifiedSwap struct {
+	// User is msg.sender of the swap: the address the AMM pulled TokenIn from, and therefore
+	// the only address that can hold the unspent input. Used by the residue-return handler.
+	User      string
+	TokenIn   string // ERC-20 paid into the pool — must be the source CB's W-token
 	TokenOut  string // ERC-20 the pool paid out — must be this CB's W-token
 	AmountIn  string // gross input amount per LogSwap
 	AmountOut string // output amount per LogSwap

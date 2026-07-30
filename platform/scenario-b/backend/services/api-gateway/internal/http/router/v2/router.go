@@ -91,6 +91,15 @@ type Dependencies struct {
 	CrossCurrencyPayerBalanceChecker handlers.PayerBalanceCheckerIface
 	// CrossCurrencyPayerWalletResolver resolves payer bank_code → spoke wallet for the balance check.
 	CrossCurrencyPayerWalletResolver handlers.PayerWalletResolverIface
+	// CrossCurrencyResidueEnqueuer enables POST /internal/amm/cross-currency-residue-return.
+	// Set on the same CB gateways that issue bridge-in: only the issuing CB of the source
+	// currency can burn W-<source> and give tCeBM-<source> back to the payer.
+	CrossCurrencyResidueEnqueuer handlers.CrossCurrencyResidueEnqueuerIface
+	// CrossCurrencyBridgePositionReader reads the bridge-in position whose mirrored_amount is
+	// the authoritative bridged amount for the residue derivation.
+	CrossCurrencyBridgePositionReader handlers.BridgePositionDetailReaderIface
+	// CrossCurrencyResidueDuplicateFinder is the residue-leg idempotency lookup.
+	CrossCurrencyResidueDuplicateFinder handlers.ResidueDuplicateFinderIface
 	// LPPositionRepo enables GET /api/v2/amm/liquidity/positions (008-fix-cb-liquidity).
 	LPPositionRepo handlers.LPPositionReaderIface
 	// LPBalanceReader enables GET /api/v2/amm/lp-balance — the CB's live on-chain CBW3-LP position (013).
@@ -578,6 +587,24 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 		app.Post("/internal/amm/cross-currency-bridge-in",
 			middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 			ccbih.HandleBridgeIn,
+		)
+	}
+
+	// Residue return (Step 4) for the issuing CB: gives back the slippage buffer that
+	// bridge-in had to move but the swap did not consume. Same jurisdiction, same auth
+	// middleware, and the amount is derived on this side — never taken from the request.
+	if deps.CrossCurrencyResidueEnqueuer != nil && deps.CrossCurrencyBridgePositionReader != nil {
+		ccrh := handlers.NewCrossCurrencyResidueHandler(
+			deps.CrossCurrencyResidueEnqueuer,
+			deps.CrossCurrencyBridgePositionReader,
+			deps.CrossCurrencyBeneficiaryResolver,
+			deps.WTokenAddress,
+			deps.FiatTokenAddress,
+			deps.SpokeNetwork,
+		).WithSwapVerification(deps.CrossCurrencySwapVerifier, deps.CrossCurrencyResidueDuplicateFinder)
+		app.Post("/internal/amm/cross-currency-residue-return",
+			middleware.RequireRelayAuthMigrating(deps.RelayAuth),
+			ccrh.HandleResidueReturn,
 		)
 	}
 

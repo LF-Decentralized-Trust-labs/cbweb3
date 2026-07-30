@@ -28,6 +28,9 @@ func (stubSwapRepo) UpdateBridgeOutPositionID(context.Context, string, string) e
 	return nil
 }
 func (stubSwapRepo) UpdateFailureReason(context.Context, string, string) error { return nil }
+func (stubSwapRepo) UpdateResidue(context.Context, string, string, string, domain.ResidueReturnStatus) error {
+	return nil
+}
 
 type stubLockMint struct{ called bool }
 
@@ -42,6 +45,9 @@ func (stubBurnUnlock) BurnAndEnqueue(context.Context, string, string) (*BridgePo
 	return &BridgePositionResult{}, nil
 }
 func (stubBurnUnlock) EnqueueBurnAfterSwap(context.Context, string, string, string, string, string, string, ...string) (*BridgePositionResult, error) {
+	return &BridgePositionResult{}, nil
+}
+func (stubBurnUnlock) EnqueueResidueReturn(context.Context, string, string, string, string, string, string, string, string, string, string) (*BridgePositionResult, error) {
 	return &BridgePositionResult{}, nil
 }
 

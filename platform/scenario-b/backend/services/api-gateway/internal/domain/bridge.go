@@ -20,6 +20,21 @@ const (
 	BridgeStateReconciliationRequired BridgeState = "RECONCILIATION_REQUIRED"
 )
 
+// BridgeLeg distinguishes what a position settles for a given Hub swap. A single swap
+// produces up to two legs: the payment itself and the return of the unspent slippage
+// buffer. Both carry the same swap_tx_hash, so replay protection is keyed on the pair.
+type BridgeLeg string
+
+const (
+	// BridgeLegSettlement is the payment leg: the swap output delivered to the beneficiary.
+	// Default for every legacy position (plain lock-mint, dev paths, bridge-out).
+	BridgeLegSettlement BridgeLeg = "SETTLEMENT"
+	// BridgeLegResidue is the return of MaxAmountIn − realized amount_in to the payer.
+	// Bridge-in must move the worst-case input before the swap runs, so the unspent
+	// remainder is burned on the Hub and given back on the source spoke.
+	BridgeLegResidue BridgeLeg = "RESIDUE"
+)
+
 // BridgedAssetPosition tracks a cross-spoke bridging lifecycle (Lock→Active→Burn→Released).
 type BridgedAssetPosition struct {
 	PositionID      string      `gorm:"primaryKey;column:position_id;type:varchar(64)"`
@@ -53,11 +68,23 @@ type BridgedAssetPosition struct {
 	// auto-minting (ensureSpokeFunds). Enforces that bank-a must hold tokenized reserves
 	// obtained via Reserve Tokenisation before a cross-currency bridge-in can proceed.
 	BurnFromSpokeAddress string `gorm:"column:burn_from_spoke_address;default:''"`
-	// SwapTxHash is the Hub AMM swap transaction this bridge-out settles (R2-CR-6).
-	// Unique (when set): each on-chain swap can be consumed by exactly one burn/mint,
-	// so replayed relay notifications cannot mint twice. Partial index because legacy
-	// flows (plain lock-mint, dev paths) have no associated swap.
-	SwapTxHash string `gorm:"column:swap_tx_hash;default:'';index:idx_bridge_swap_tx_hash,unique,where:swap_tx_hash <> ''"`
+	// SwapTxHash is the Hub AMM swap transaction this position settles (R2-CR-6).
+	// Unique per (swap_tx_hash, leg) when set: each on-chain swap can be consumed by
+	// exactly one burn/mint *per leg*, so replayed notifications cannot mint twice.
+	// Partial index because legacy flows (plain lock-mint, dev paths) have no swap.
+	//
+	// The index is composite because a swap legitimately produces two positions — the
+	// settlement and the residue return — and in a single-CB deployment both land in the
+	// same table. Keying uniqueness on swap_tx_hash alone would make the residue leg look
+	// like a replay of the settlement and silently drop it.
+	SwapTxHash string `gorm:"column:swap_tx_hash;default:'';index:idx_bridge_swap_tx_leg,unique,priority:1,where:swap_tx_hash <> ''"`
+	// Leg is SETTLEMENT (the payment) or RESIDUE (return of the unspent slippage buffer).
+	// Legacy rows default to SETTLEMENT, which is what they are.
+	Leg BridgeLeg `gorm:"column:leg;not null;default:'SETTLEMENT';index:idx_bridge_swap_tx_leg,unique,priority:2"`
+	// ParentPositionID links a RESIDUE leg to the bridge-in position it corrects. The net
+	// amount actually consumed by the swap is parent.mirrored_amount − residue.mirrored_amount;
+	// the parent's mirrored_amount is never rewritten, since it records what the chain did.
+	ParentPositionID string `gorm:"column:parent_position_id;default:'';index:idx_bridge_parent_position_id"`
 	// CorrelationID links the position to the cross-currency swap operation (009) for
 	// tracing. Not unique: a rollback position legitimately shares the correlation of
 	// the bridge-in it reverses — replay protection is keyed on SwapTxHash.

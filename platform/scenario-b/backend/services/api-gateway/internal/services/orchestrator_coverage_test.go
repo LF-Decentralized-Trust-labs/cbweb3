@@ -66,6 +66,16 @@ func (r *statefulSwapRepo) UpdateFailureReason(_ context.Context, _, reason stri
 	}
 	return nil
 }
+func (r *statefulSwapRepo) UpdateResidue(_ context.Context, _, amount, positionID string, status domain.ResidueReturnStatus) error {
+	if r.op != nil {
+		r.op.ResidueAmount = amount
+		r.op.ResidueStatus = status
+		if positionID != "" {
+			r.op.ResiduePositionID = &positionID
+		}
+	}
+	return nil
+}
 
 func happyReq() CrossCurrencySwapRequest {
 	return CrossCurrencySwapRequest{

@@ -77,7 +77,13 @@ type crossCurrencySwapResponse struct {
 	BridgeInPositionID  string  `json:"bridge_in_position_id"`
 	SwapTxHash          string  `json:"swap_tx_hash,omitempty"`
 	BridgeOutPositionID string  `json:"bridge_out_position_id,omitempty"`
-	CreatedAt           string  `json:"created_at"`
+	// ResidueAmount is the slippage buffer the bridge-in had to move and the swap did not
+	// consume. It is returned to the payer by the residue leg below; the payer's net debit
+	// is amount_in, not max_amount_in.
+	ResidueAmount     string `json:"residue_amount,omitempty"`
+	ResiduePositionID string `json:"residue_position_id,omitempty"`
+	ResidueStatus     string `json:"residue_status,omitempty"`
+	CreatedAt         string `json:"created_at"`
 }
 
 // SwapCrossCurrency executes an end-to-end cross-currency swap (bridge-in → swap Hub → bridge-out).
@@ -155,6 +161,9 @@ func (h *CrossCurrencySwapHandler) SwapCrossCurrency(c *fiber.Ctx) error {
 		BridgeInPositionID:  result.BridgeInPositionID,
 		SwapTxHash:          result.SwapTxHash,
 		BridgeOutPositionID: result.BridgeOutPositionID,
+		ResidueAmount:       result.ResidueAmount,
+		ResiduePositionID:   result.ResiduePositionID,
+		ResidueStatus:       string(result.ResidueStatus),
 		CreatedAt:           result.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 
@@ -172,9 +181,14 @@ type crossCurrencySwapStatusResponse struct {
 	BridgeInPositionID  string  `json:"bridge_in_position_id,omitempty"`
 	SwapTxHash          string  `json:"swap_tx_hash,omitempty"`
 	BridgeOutPositionID string  `json:"bridge_out_position_id,omitempty"`
-	CreatedAt           string  `json:"created_at"`
-	CompletedAt         string  `json:"completed_at,omitempty"`
-	FailureReason       string  `json:"failure_reason,omitempty"`
+	// Residue fields make an over-debit visible: RETURN_FAILED means residue_amount is still
+	// stranded on the Hub swap signer and the payer has not been made whole yet.
+	ResidueAmount     string `json:"residue_amount,omitempty"`
+	ResiduePositionID string `json:"residue_position_id,omitempty"`
+	ResidueStatus     string `json:"residue_status,omitempty"`
+	CreatedAt         string `json:"created_at"`
+	CompletedAt       string `json:"completed_at,omitempty"`
+	FailureReason     string `json:"failure_reason,omitempty"`
 }
 
 // GetSwapStatus returns the current status of a cross-currency swap by swap_id.
@@ -214,6 +228,9 @@ func (h *CrossCurrencySwapHandler) GetSwapStatus(c *fiber.Ctx) error {
 		BridgeInPositionID:  result.BridgeInPositionID,
 		SwapTxHash:          result.SwapTxHash,
 		BridgeOutPositionID: result.BridgeOutPositionID,
+		ResidueAmount:       result.ResidueAmount,
+		ResiduePositionID:   result.ResiduePositionID,
+		ResidueStatus:       string(result.ResidueStatus),
 		FailureReason:       result.FailureReason,
 		CreatedAt:           result.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}

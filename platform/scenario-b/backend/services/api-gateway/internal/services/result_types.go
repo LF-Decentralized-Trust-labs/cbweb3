@@ -18,6 +18,25 @@ type BridgePositionResult struct {
 	RelayerErrorLog string `json:"relayer_error_log,omitempty"`
 }
 
+// BridgePositionDetail carries the internal fields of a bridge position, including the
+// Hub/spoke addresses that BridgePositionResult deliberately omits. Used to authorize a
+// residue return against the bridge-in position the CB created, so the amount and the
+// burn-from address come from the CB's own records rather than from a request body.
+//
+// Not serialized to any public endpoint.
+type BridgePositionDetail struct {
+	PositionID           string
+	OwnerBankID          string
+	SpokeNetwork         string
+	NativeAsset          string
+	MirroredAsset        string
+	MirroredAmount       string
+	BridgeState          string
+	MintToHubAddress     string
+	BurnFromSpokeAddress string
+	Leg                  string
+}
+
 // DisclosureResult is the service-level result for oversight disclosure operations.
 type DisclosureResult struct {
 	RequestID            string     `json:"request_id"`
