@@ -64,8 +64,10 @@ type DepositRecord struct {
 	CreatedAt            time.Time     `json:"created_at"`
 }
 
-// RedeemRecord is the off-chain representation of a redeem (de-tokenization) request
-// where the central bank mints tCeBM back to the commercial bank.
+// RedeemRecord is the off-chain representation of a redeem (de-tokenization) request.
+// On approval, the central bank burns tCeBM from the commercial bank's address and
+// mints the equivalent fCeBM (fiat) back to it — the inverse of an EscrowRecord.
+// MintTxHash holds the fCeBM (fiat) mint tx produced on approval.
 type RedeemRecord struct {
 	ID                   string       `json:"id"`
 	RequesterID          string       `json:"requester_id"`
