@@ -11,6 +11,7 @@ import (
 
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	"github.com/gofiber/fiber/v2"
 )
@@ -64,7 +65,20 @@ func (h *ComplianceHandler) GetKYCStatus(c *fiber.Ctx) error {
 	if h.kycMgr != nil {
 		kycStatus, err := h.kycMgr.GetKYCStatus(c.UserContext(), subject)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to get kyc status"})
+			// Fail-closed parity with AMLScreen (R2-H-7): a compliance-dependency
+			// failure is a 503, not a 500 — the subject's status is unknown, not a
+			// bug in this gateway. Log it (silent swallowing is prohibited).
+			slog.Error("get kyc status failed: compliance dependency unavailable",
+				"service", "api-gateway",
+				"event", "get_kyc_status",
+				"correlation_id", middleware.CorrelationIDFromContext(c.UserContext()),
+				"subject", subject,
+				"error", err.Error(),
+			)
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"error": "compliance dependency unavailable",
+				"code":  "COMPLIANCE_UNAVAILABLE",
+			})
 		}
 		return c.JSON(fiber.Map{"subject": subject, "status": kycStatus})
 	}
@@ -96,6 +110,7 @@ func (h *ComplianceHandler) AMLScreen(c *fiber.Ctx) error {
 			slog.Error("aml screen failed closed: compliance dependency unavailable",
 				"service", "api-gateway",
 				"event", "aml_screen",
+				"correlation_id", middleware.CorrelationIDFromContext(c.UserContext()),
 				"subject", body.Subject,
 				"error", err.Error(),
 			)
@@ -111,16 +126,35 @@ func (h *ComplianceHandler) AMLScreen(c *fiber.Ctx) error {
 		kycStatus = domain.KYCStatus(h.kyc.GetStatus(body.Subject))
 	}
 
-	sanctioned := kycStatus == domain.KYCRevoked || kycStatus == domain.KYCRejected || kycStatus == domain.KYCFrozen
+	// REQ-COM-007 (finding R2-H-7): AML clearance is an ALLOWLIST, not a
+	// denylist. Only an explicitly ACTIVE/APPROVED subject may proceed. Every
+	// other status is blocked — including PENDING, which is what the identity
+	// service returns for a subject it cannot find (unregistered or never
+	// screened). A denylist that cleared everything except REVOKED/REJECTED/
+	// FROZEN would let that unscreened PENDING subject through with a 200.
+	cleared := kycStatus == domain.KYCActive || kycStatus == domain.KYCApproved
 	resp := fiber.Map{
 		"subject":    body.Subject,
 		"status":     kycStatus,
-		"sanctioned": sanctioned,
+		"sanctioned": !cleared,
 	}
-	if sanctioned {
+	if !cleared {
+		resp["code"] = amlBlockCode(kycStatus)
 		return c.Status(fiber.StatusForbidden).JSON(resp)
 	}
 	return c.Status(fiber.StatusOK).JSON(resp)
+}
+
+// amlBlockCode classifies why an AML screen blocked a subject, distinguishing a
+// positive sanctions/enforcement match from a subject that simply has not
+// cleared screening yet (PENDING, empty, or unknown status).
+func amlBlockCode(s domain.KYCStatus) string {
+	switch s {
+	case domain.KYCFrozen, domain.KYCRevoked, domain.KYCRejected:
+		return "SANCTIONED"
+	default:
+		return "NOT_CLEARED"
+	}
 }
 
 // ProvisionParticipant sets the KYC status for a participant (CENTRAL_BANK only).
