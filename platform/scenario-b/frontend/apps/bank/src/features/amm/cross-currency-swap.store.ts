@@ -42,7 +42,7 @@ interface CrossCurrencySwapState {
 
 interface CrossCurrencySwapActions {
   fetchPoolStatus: (pair: string) => Promise<void>;
-  fetchQuote: (sourceCurrency: string, targetCurrency: string, amountOut: string) => Promise<void>;
+  fetchQuote: (sourceCurrency: string, targetCurrency: string, amountOut: string, poolPair?: string) => Promise<void>;
   executeSwap: (req: CrossCurrencySwapRequest) => Promise<void>;
   pollSwapStatus: (swapId: string) => Promise<void>;
   acknowledgeSwapError: () => void;
@@ -108,9 +108,9 @@ export const useCrossCurrencySwapStore = create<CrossCurrencySwapStore>((set, ge
       set({ error: parsed.message ?? "Unable to fetch pool status." });
     }
   },
-  fetchQuote: async (sourceCurrency, targetCurrency, amountOut) => {
+  fetchQuote: async (sourceCurrency, targetCurrency, amountOut, poolPair) => {
     try {
-      const quote = await crossCurrencySwapApi.getQuote(sourceCurrency, targetCurrency, amountOut);
+      const quote = await crossCurrencySwapApi.getQuote(sourceCurrency, targetCurrency, amountOut, poolPair);
       set({
         quote,
         quoteExpiresAt: Date.now() + CROSS_CURRENCY_QUOTE_TTL_MS,
@@ -133,7 +133,7 @@ export const useCrossCurrencySwapStore = create<CrossCurrencySwapStore>((set, ge
     let requestPayload = { ...req };
     const quoteExpiresAt = get().quoteExpiresAt;
     if (quoteExpiresAt !== null && Date.now() > quoteExpiresAt) {
-      await get().fetchQuote(req.source_currency, req.target_currency, req.amount_out);
+      await get().fetchQuote(req.source_currency, req.target_currency, req.amount_out, req.pool_pair);
       const refreshedQuote = get().quote;
       if (!refreshedQuote) {
         set({
@@ -175,7 +175,7 @@ export const useCrossCurrencySwapStore = create<CrossCurrencySwapStore>((set, ge
         const parsed = parseApiError(error);
 
         if (parsed.code === CROSS_CURRENCY_SWAP_ERROR.QUOTE_EXPIRED && allowRetryOnQuoteExpired) {
-          await get().fetchQuote(payload.source_currency, payload.target_currency, payload.amount_out);
+          await get().fetchQuote(payload.source_currency, payload.target_currency, payload.amount_out, payload.pool_pair);
           const refreshedQuote = get().quote;
           if (!refreshedQuote) {
             set({

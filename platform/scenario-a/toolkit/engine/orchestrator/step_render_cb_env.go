@@ -25,10 +25,11 @@ type renderCBEnvStep struct {
 	frontendHost    string
 	fxPartyRoster   []string
 	relayURL        string
+	proxy           bool // spec.proxy == enable: portals share one origin behind the proxy
 }
 
-func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort, chainID int, dataDir, besuOperatorKey, frontendHost string, fxPartyRoster []string, relayURL string) Step {
-	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, chainID: chainID, dataDir: dataDir, besuOperatorKey: besuOperatorKey, frontendHost: frontendHost, fxPartyRoster: fxPartyRoster, relayURL: relayURL}
+func newRenderCBEnvStep(spokeID, entityName, currency string, besuRPCPort, chainID int, dataDir, besuOperatorKey, frontendHost string, fxPartyRoster []string, relayURL string, proxy bool) Step {
+	return &renderCBEnvStep{spokeID: spokeID, entityName: entityName, currency: currency, besuRPCPort: besuRPCPort, chainID: chainID, dataDir: dataDir, besuOperatorKey: besuOperatorKey, frontendHost: frontendHost, fxPartyRoster: fxPartyRoster, relayURL: relayURL, proxy: proxy}
 }
 
 func (s *renderCBEnvStep) Name() string { return StepRenderCBEnv }
@@ -58,6 +59,7 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		KCRealm:        s.entityName,
 		KCClientID:     s.entityName + "-client",
 		KCClientSecret: s.entityName + "-local-secret",
+		KCAudience:     keycloakBackendAudience,
 
 		PostgresContainer: prefix + "-postgres",
 		PostgresPort:      ports.Postgres,
@@ -114,9 +116,10 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		// no static fxPartyRoster.
 		RelayURL: s.relayURL,
 		// api-gateway sets AllowCredentials=true, which Fiber forbids with a wildcard
-		// origin. Whitelist all four CB portal origins (governance, treasury,
-		// supervisor, noc); omitting any makes that portal fail CORS at login.
-		CORSOrigins: cbCORSOrigins(ports, s.frontendHost),
+		// origin. Behind the proxy every portal is same-origin (one entry); otherwise
+		// whitelist all four CB portal origins (governance, treasury, supervisor, noc),
+		// omitting any makes that portal fail CORS at login.
+		CORSOrigins: cbCORSOriginsFor(ports, s.frontendHost, s.proxy),
 	}
 	return RenderEntityEnv(data, cbEnvPath(s.dataDir, s.entityName))
 }

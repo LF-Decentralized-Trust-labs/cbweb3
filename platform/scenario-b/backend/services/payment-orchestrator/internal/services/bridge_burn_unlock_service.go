@@ -6,6 +6,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	podmain "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
@@ -74,8 +75,10 @@ func (s *BridgeBurnUnlockService) BurnAndEnqueue(ctx context.Context, positionID
 	}
 
 	if submitErr := s.relayer.SubmitBurnEvent(ctx, idempotencyKey, positionID); submitErr != nil {
-		// Non-fatal: relayer worker will retry from DB
-		_ = submitErr
+		// Non-fatal: the burn event is persisted, so the relayer worker will retry it from the DB.
+		// Log it rather than swallow it — silent error swallowing is prohibited (Constitution VI).
+		log.Printf("[BridgeBurnUnlockService] inline burn submit failed — position=%s idempotency_key=%s err=%v (relayer worker will retry from DB)",
+			positionID, idempotencyKey, submitErr)
 	}
 
 	return &pos, nil

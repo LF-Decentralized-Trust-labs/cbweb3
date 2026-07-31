@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "test": "node --require ts-node/register --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.10.0",

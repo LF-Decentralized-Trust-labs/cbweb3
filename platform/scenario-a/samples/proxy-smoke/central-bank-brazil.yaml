@@ -1,0 +1,75 @@
+# yaml-language-server: $schema=../../../provisioning/schema/v1/participant-deployment.schema.yaml
+#
+# Single-host REVERSE-PROXY smoke test (Scenario A).
+#
+# Same central-bank-brazil found as the port-based sample (../brazil/), but with the
+# per-host Caddy reverse proxy ENABLED, so the portals + api-gateway are reached
+# path-based on :80/:443 instead of per-portal host ports:
+#   https://cb-brazil.localtest.me/              -> launcher (A/B landing page)
+#   https://cb-brazil.localtest.me/a/governance/ -> Governance
+#   https://cb-brazil.localtest.me/a/treasury/   -> Treasury
+#   https://cb-brazil.localtest.me/a/supervisor/ -> Supervisor
+#   https://cb-brazil.localtest.me/a/api/v1/…    -> api-gateway
+#
+# frontendHost is `cb-brazil.localtest.me`, a public name that resolves to 127.0.0.1
+# (the localtest.me wildcard), so the browser reaches the proxy on THIS host with no
+# /etc/hosts edit. The proxy is one-container-per-host with a single site, so this test
+# runs ONE entity — do not mix it with deploy-all (many entities) on the same host.
+# Run ../proxy-smoke.sh, which drives this manifest.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-brazil
+spec:
+  scenario: a
+  environment: local
+  role: central-bank
+  mode: found
+  displayName: Banco Central do Brasil
+  spoke:
+    id: spoke-brl
+    chainId: 1337
+    currency: BRL
+    # ERC-20 metadata of this spoke's own fCeBM (the public Besu-layer fiat token).
+    # Optional — absent, both derive from `currency` (exactly the values below).
+    # Declared explicitly so each spoke's token identity is auditable in config.
+    # The symbol must keep the "<prefix>_<ISO>" shape and end in this spoke's own
+    # currency; `currency` stays the semantic key the portals display.
+    fiatTokenName: Fiat BRL
+    fiatTokenSymbol: fCeBM_BRL
+  node:
+    advertisedHost: cbweb3-spoke-brl-besu.central-bank-brazil
+    rpc:
+      port: 8645
+    ws:
+      port: 8655
+    p2p:
+      port: 31303
+    dataDir: cbweb3-data/central-bank-brazil
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  relay:
+    endpoint: http://localhost:4000
+  cbEndpoint: http://cbweb3-api-gateway.central-bank-brazil:8080/api/v1/onboarding/credential-request
+  # Reverse proxy on this host. frontendHost drives the baked https api/CORS/launcher
+  # URLs and the proxy site; localtest.me resolves to 127.0.0.1 so the browser on this
+  # machine reaches the proxy. TLS mode is chosen by PROXY_TLS_MODE on the deploy host
+  # (proxy-smoke.sh defaults to `internal` = self-signed; set `off` for plain HTTP :80).
+  frontendHost: cb-brazil.localtest.me
+  proxy: enable
+  launcher: enable
+  launcherPort: 5190
+  adminUsers:
+    - role: ROLE_GOVERNANCE
+      username: admin@brasil.governance.gov
+      password: brasil-governance-local
+    - role: ROLE_TREASURY
+      username: admin@brasil.treasury.gov
+      password: brasil-treasury-local
+    - role: ROLE_SUPERVISOR
+      username: admin@brasil.supervisor.gov
+      password: brasil-supervisor-local
+    - role: ROLE_NOC_ADMIN
+      username: admin@brasil.noc.gov
+      password: brasil-noc-local

@@ -256,21 +256,31 @@ export interface SpokeDep {
 /** Maximum number of events retained per category. Acts as a circular buffer. */
 const MAX_EVENTS = 10_000;
 
+/**
+ * Max blocks scanned per getPastLogs cycle. A long catch-up (relay down for many blocks) is
+ * walked one bounded chunk per poll so a single request cannot exceed the node's log-range
+ * limit or stall the loop (finding R2-H-11: range chunking for long catch-ups).
+ */
+const MAX_BLOCK_RANGE = 5_000;
+
 export class HtlcRelay {
-  private readonly settleEvents: SettleEvent[] = [];
+  // Lock events are also kept in a small in-memory ring purely for resolveCounterpart's
+  // same-process hashLock lookup. The durable, seq-numbered copy served to the Go poller lives
+  // in the RelayStore journal (finding R2-H-11) — this ring is not the serving source of truth.
   private readonly lockEvents: LockEvent[] = [];
   private readonly fxProposalEvents: FXProposalEvent[] = [];
   private readonly fxAcceptanceEvents: FXAcceptanceEvent[] = [];
   private readonly fxRejectionEvents: FXRejectionEvent[] = [];
   private readonly fxCancellationEvents: FXCancellationEvent[] = [];
   private readonly fxSettlementEvents: FXSettlementEvent[] = [];
-  /**
-   * Tracks secrets that this relay has already forwarded for settlement.
-   * Prevents feedback loops: when the relay settles on Spoke-B, the resulting
-   * on-chain LogHTLCClaimed event would be picked up again and erroneously
-   * forwarded back to Spoke-A (where the HTLC is already settled).
-   */
-  private readonly forwardedSecrets = new Set<string>();
+  // Feedback-loop and replay prevention are now PERSISTED in the RelayStore (finding R2-H-11),
+  // not in an in-memory Set that a restart would clear:
+  //   - `htlc-evt:${spoke}:${txHash}:${logIndex}` — this observed claim was already forwarded
+  //     (survives a crash between forwarding and the watermark advance, so no duplicate settle).
+  //   - `htlc-settled:${destSpoke}:${destContractId}` — this contract was settled BY this relay,
+  //     so the resulting LogHTLCClaimed echo on the destination must not be forwarded back.
+  // Echo prevention is keyed on the destination contract id, not the secret: a preimage may be
+  // legitimately reused across legs, so a secret is not a unique key (review R2-H-11).
   /** Tracks trade IDs already forwarded cross-spoke. Value = timestamp (ms). */
   private readonly forwardedTradeIds = new Map<string, number>();
   /** gRPC client per spoke, keyed by spoke.id. Created on add and reused for all settlements. */
@@ -296,12 +306,16 @@ export class HtlcRelay {
 
   // ── Public accessors (used by REST API) ────────────────────────────────
 
-  getSettleEvents(sinceMs = 0): SettleEvent[] {
-    return this.settleEvents.filter((e) => e.timestamp >= sinceMs);
+  // Lock/settle events are served from the durable seq journal, not the in-memory ring: the
+  // caller (Go poller) passes the last seq it processed and receives events with a greater seq.
+  // The seq is stable across relay restarts, so the poller's persisted cursor composes exactly
+  // with the relay and never re-delivers or loses events (finding R2-H-11).
+  getSettleEvents(sinceSeq = 0): Record<string, unknown>[] {
+    return this.relayStore.getEventsSince("settle", sinceSeq);
   }
 
-  getLockEvents(sinceMs = 0): LockEvent[] {
-    return this.lockEvents.filter((e) => e.timestamp >= sinceMs);
+  getLockEvents(sinceSeq = 0): Record<string, unknown>[] {
+    return this.relayStore.getEventsSince("lock", sinceSeq);
   }
 
   getFXProposalEvents(sinceMs = 0): FXProposalEvent[] {
@@ -400,18 +414,30 @@ export class HtlcRelay {
     const topicLocked = ethers.id("LogHTLCLocked(bytes32,address,address,bytes32,uint256,bytes32)");
     const topicClaimed = ethers.id("LogHTLCClaimed(bytes32,bytes32)");
 
-    // Determine the starting block via the Cacti connector's getBlock.
+    // Determine the starting block. Resume from the persisted watermark so events
+    // mined while the relay was down are not skipped (finding R2-H-11); only fall
+    // back to the chain head on a first-ever start with no recorded watermark.
     let fromBlock: number;
-    try {
-      const blockResp = await connector.getBlock({ blockHashOrBlockNumber: "latest" });
-      fromBlock = typeof blockResp.block === "object" && blockResp.block !== null
-        ? Number((blockResp.block as Record<string, unknown>)["number"] ?? 0)
-        : 0;
-    } catch (err) {
-      this.log.error(`[${spoke.id}] cannot get current block via Cacti: ${String(err)}`);
-      fromBlock = 0;
+    const persisted = this.relayStore.getWatermark(spoke.id);
+    if (persisted !== undefined) {
+      fromBlock = persisted + 1;
+      this.log.info(`[${spoke.id}] relay resuming from persisted watermark block ${fromBlock}`);
+    } else {
+      try {
+        const blockResp = await connector.getBlock({ blockHashOrBlockNumber: "latest" });
+        fromBlock = typeof blockResp.block === "object" && blockResp.block !== null
+          ? Number((blockResp.block as Record<string, unknown>)["number"] ?? 0)
+          : 0;
+      } catch (err) {
+        this.log.error(`[${spoke.id}] cannot get current block via Cacti: ${String(err)}`);
+        fromBlock = 0;
+      }
+      this.log.info(`[${spoke.id}] relay started at block ${fromBlock} (via Cacti connector, no persisted watermark)`);
     }
-    this.log.info(`[${spoke.id}] relay started at block ${fromBlock} (via Cacti connector)`);
+
+    // Detect a chain reset (fresh genesis under a stale on-volume watermark). Without this the
+    // relay would sit forever with head below watermark, silently forwarding nothing (R2-H-11).
+    fromBlock = await this.reconcileSpokeChain(connector, spoke, fromBlock);
 
     while (!signal.aborted) {
       await sleep(this.pollIntervalMs);
@@ -420,10 +446,20 @@ export class HtlcRelay {
       try {
         // Get latest block number via Cacti connector.
         const latestResp = await connector.getBlock({ blockHashOrBlockNumber: "latest" });
-        const toBlock = typeof latestResp.block === "object" && latestResp.block !== null
+        const latestBlock = typeof latestResp.block === "object" && latestResp.block !== null
           ? Number((latestResp.block as Record<string, unknown>)["number"] ?? 0)
           : 0;
-        if (toBlock < fromBlock) continue;
+        if (latestBlock < fromBlock) {
+          // Head is behind our resume point: either the chain has not produced new blocks yet, or
+          // (after a reset the genesis guard did not catch) the watermark is ahead of the chain.
+          // Never a silent no-op — warn so a stuck relay is visible (constitution: no silent failures).
+          this.log.warn(
+            `[${spoke.id}] chain head ${latestBlock} is behind resume block ${fromBlock} — waiting (no events forwarded)`,
+          );
+          continue;
+        }
+        // Walk at most MAX_BLOCK_RANGE blocks this cycle so a long catch-up is chunked.
+        const toBlock = Math.min(fromBlock + MAX_BLOCK_RANGE - 1, latestBlock);
 
         // Fetch logs via Cacti PluginLedgerConnectorBesu.getPastLogs — the
         // core integration point that replaces direct ethers.js provider usage.
@@ -447,6 +483,7 @@ export class HtlcRelay {
           try {
             const parsed = iface.parseLog({ topics: raw.topics, data: raw.data });
             if (!parsed) continue;
+            const logIndex = Number((raw as unknown as Record<string, unknown>)["logIndex"] ?? 0);
             const evt: LockEvent = {
               spoke: spoke.id,
               contractId: strip0x(parsed.args[0] as string),
@@ -459,7 +496,14 @@ export class HtlcRelay {
               txHash: raw.transactionHash,
               timestamp: Date.now(),
             };
+            // Ring for resolveCounterpart's in-process lookup; journal (deduped by chain id) is the
+            // durable, seq-stable copy served to the Go poller (finding R2-H-11).
             pushRing(this.lockEvents, evt, MAX_EVENTS);
+            await this.relayStore.appendEvent(
+              "lock",
+              `${spoke.id}:${raw.transactionHash}:${logIndex}`,
+              evt as unknown as Record<string, unknown>,
+            );
             this.log.info(
               `[${spoke.id}] LogHTLCLocked contractId=${evt.contractId} block=${evt.blockNumber}`,
             );
@@ -468,13 +512,17 @@ export class HtlcRelay {
           }
         }
 
-        // Process LogHTLCClaimed events — decode and forward settlement.
+        // Process LogHTLCClaimed events — decode and forward settlement. A settlement that fails
+        // to deliver must NOT let the watermark advance past its block, so the event is retried
+        // rather than silently dropped (finding R2-H-11). We track the lowest failed block here.
+        let minFailedBlock = Number.POSITIVE_INFINITY;
         for (const raw of claimedResp.logs) {
           try {
             const parsed = iface.parseLog({ topics: raw.topics, data: raw.data });
             if (!parsed) continue;
             const contractId = strip0x(parsed.args[0] as string);
             const secret = strip0x(parsed.args[1] as string);
+            const logIndex = Number((raw as unknown as Record<string, unknown>)["logIndex"] ?? 0);
             const evt: SettleEvent = {
               spoke: spoke.id,
               contractId,
@@ -483,20 +531,38 @@ export class HtlcRelay {
               txHash: raw.transactionHash,
               timestamp: Date.now(),
             };
-            pushRing(this.settleEvents, evt, MAX_EVENTS);
+            // Durable, seq-stable journal entry served to the Go poller (deduped by chain id so a
+            // re-decode after restart reuses the same seq — no re-delivery) (finding R2-H-11).
+            await this.relayStore.appendEvent(
+              "settle",
+              `${spoke.id}:${raw.transactionHash}:${logIndex}`,
+              evt as unknown as Record<string, unknown>,
+            );
             this.log.info(
               `[${spoke.id}] LogHTLCClaimed contractId=${contractId} block=${raw.blockNumber} tx=${raw.transactionHash}`,
             );
 
-            if (this.forwardedSecrets.has(secret)) {
+            // Per-event replay guard (survives restart): this exact observed claim was already
+            // forwarded. Keyed on txHash:logIndex — the stable event identity, not the secret.
+            const evtKey = `htlc-evt:${spoke.id}:${raw.transactionHash}:${logIndex}`;
+            if (this.relayStore.hasDelivered(evtKey)) {
+              continue;
+            }
+
+            // Echo guard: a claim for a contract THIS relay settled is the settlement's own event
+            // bouncing back; do not forward it to the origin (already claimed there).
+            if (this.relayStore.hasDelivered(`htlc-settled:${spoke.id}:${contractId}`)) {
               this.log.info(
-                `[${spoke.id}] skipping echo event for already-forwarded secret contractId=${contractId}`,
+                `[${spoke.id}] skipping echo claim for relay-settled contractId=${contractId}`,
               );
+              await this.relayStore.markDelivered(evtKey);
               continue;
             }
 
             const resolved = this.resolveCounterpart(spoke.id, contractId);
             if (!resolved) {
+              // Counterpart lock not observed (yet). Do not mark delivered — a later cycle that
+              // re-scans this block (e.g. after another failure) can still resolve and forward it.
               this.log.warn(`[${spoke.id}] skipping settlement — could not resolve counterpart for contractId=${contractId}`);
               continue;
             }
@@ -505,8 +571,14 @@ export class HtlcRelay {
               this.log.error(`[${spoke.id}] settlement skipped: dest_spoke_id "${resolved.destSpokeId}" not in registry`);
               continue;
             }
-            await this.settleOnCounterpart(destClient, spoke.id, resolved.contractId, secret);
-            this.forwardedSecrets.add(secret);
+            const settled = await this.settleOnCounterpart(destClient, spoke.id, resolved.contractId, secret);
+            if (settled) {
+              await this.relayStore.markDelivered(evtKey);
+              await this.relayStore.markDelivered(`htlc-settled:${resolved.destSpokeId}:${resolved.contractId}`);
+            } else {
+              // Hold the watermark at/below this block so the failed settlement is retried.
+              minFailedBlock = Math.min(minFailedBlock, raw.blockNumber);
+            }
           } catch (decodeErr) {
             this.log.warn(`[${spoke.id}] failed to decode LogHTLCClaimed: ${String(decodeErr)}`);
           }
@@ -524,7 +596,14 @@ export class HtlcRelay {
           );
         }
 
-        fromBlock = toBlock + 1;
+        // Advance the watermark only through the blocks whose settlements actually delivered.
+        // If a settlement failed at block N, stop at N-1 so [N, toBlock] is retried next cycle
+        // instead of being skipped (advance-after-delivery, not after-fetch — finding R2-H-11).
+        const deliveredThrough = minFailedBlock === Number.POSITIVE_INFINITY
+          ? toBlock
+          : minFailedBlock - 1;
+        await this.relayStore.setWatermark(spoke.id, deliveredThrough);
+        fromBlock = deliveredThrough + 1;
         failures = 0;
       } catch (err) {
         this.log.warn(`[${spoke.id}] poll cycle error: ${String(err)}`);
@@ -547,6 +626,45 @@ export class HtlcRelay {
 
     this.watching.delete(spoke.id);
     this.log.info(`[${spoke.id}] relay stopped`);
+  }
+
+  /**
+   * Guard against a chain reset that leaves a stale watermark on the relay volume. Record the
+   * spoke chain's genesis-block hash the first time; on a later boot, if the genesis hash differs
+   * the chain was reset — rewind the watermark to 0, drop this spoke's dedup keys, and re-sync
+   * from the new genesis instead of stalling with head permanently below watermark (R2-H-11).
+   * Returns the block to resume from (unchanged unless a reset was detected).
+   */
+  private async reconcileSpokeChain(
+    connector: PluginLedgerConnectorBesu,
+    spoke: SpokeDep,
+    fromBlock: number,
+  ): Promise<number> {
+    let genesisHash: string;
+    try {
+      const resp = await connector.getBlock({ blockHashOrBlockNumber: 0 });
+      const block = resp.block as Record<string, unknown> | undefined;
+      genesisHash = String(block?.["hash"] ?? "");
+    } catch (err) {
+      this.log.warn(`[${spoke.id}] could not read genesis hash for chain-reset guard: ${String(err)}`);
+      return fromBlock;
+    }
+    if (!genesisHash) return fromBlock;
+
+    const known = this.relayStore.getMeta(spoke.id);
+    if (known === undefined) {
+      await this.relayStore.setMeta(spoke.id, genesisHash);
+      return fromBlock;
+    }
+    if (known !== genesisHash) {
+      this.log.warn(
+        `[${spoke.id}] chain genesis changed (${known} -> ${genesisHash}) — chain was reset; ` +
+        `rewinding watermark to 0 and re-syncing`,
+      );
+      await this.relayStore.resetSpokeChain(spoke.id, 0, genesisHash);
+      return 0;
+    }
+    return fromBlock;
   }
 
   private resolveCounterpart(
@@ -590,12 +708,17 @@ export class HtlcRelay {
     return { destSpokeId: counterpartLock.spoke, contractId: counterpartLock.contractId };
   }
 
+  /**
+   * Settle on the counterpart spoke. Resolves true only when the gRPC call succeeded; a failure
+   * resolves false so the caller holds the watermark and retries instead of marking the event
+   * delivered (finding R2-H-11: the watermark must mean delivered, not merely attempted).
+   */
   private settleOnCounterpart(
     client: PaymentOrchestratorClient,
     spokeName: string,
     contractId: string,
     secret: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     return new Promise((resolve) => {
       const deadline = new Date(Date.now() + 30_000);
       client.SettleHTLC(
@@ -607,12 +730,13 @@ export class HtlcRelay {
             this.log.error(
               `[${spokeName}] SettleHTLC gRPC failed contractId=${contractId}: ${err.message}`,
             );
+            resolve(false);
           } else {
             this.log.info(
               `[${spokeName}] counterpart settled contractId=${contractId} htlcTx=${resp?.htlc_tx_hash} zetoTx=${resp?.zeto_tx_hash}`,
             );
+            resolve(true);
           }
-          resolve();
         },
       );
     });

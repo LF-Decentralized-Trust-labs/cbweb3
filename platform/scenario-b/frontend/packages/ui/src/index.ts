@@ -39,6 +39,7 @@ export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from ".
 export { SectionCard } from "./components/section-card";
 export { StatusBadge } from "./components/status-badge";
 export { PlatformLogo } from "./components/platform-logo";
+export { BackToLauncherButton } from "./components/launcher-button";
 export {
 	Select,
 	SelectGroup,
@@ -52,3 +53,4 @@ export {
 	SelectScrollDownButton,
 } from "./components/select";
 export { cn } from "./lib/utils";
+export { getLauncherUrl, goToLauncher } from "./lib/launcher";

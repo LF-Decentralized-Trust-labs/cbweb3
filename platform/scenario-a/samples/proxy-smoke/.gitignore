@@ -1,0 +1,5 @@
+# Runtime artifacts produced by proxy-smoke.sh — not versioned.
+work/
+cbweb3-data/
+bundles/
+.cbweb3

@@ -13,12 +13,29 @@ import "time"
 type SwapOperationStatus string
 
 const (
-	SwapStatusQuoting            SwapOperationStatus = "QUOTING"
-	SwapStatusBridgeInProgress   SwapOperationStatus = "BRIDGE_IN_PROGRESS"
-	SwapStatusSwapInProgress     SwapOperationStatus = "SWAP_IN_PROGRESS"
-	SwapStatusBridgeOutProgress  SwapOperationStatus = "BRIDGE_OUT_PROGRESS"
-	SwapStatusCompleted          SwapOperationStatus = "COMPLETED"
-	SwapStatusFailed             SwapOperationStatus = "FAILED"
+	SwapStatusQuoting           SwapOperationStatus = "QUOTING"
+	SwapStatusBridgeInProgress  SwapOperationStatus = "BRIDGE_IN_PROGRESS"
+	SwapStatusSwapInProgress    SwapOperationStatus = "SWAP_IN_PROGRESS"
+	SwapStatusBridgeOutProgress SwapOperationStatus = "BRIDGE_OUT_PROGRESS"
+	SwapStatusCompleted         SwapOperationStatus = "COMPLETED"
+	SwapStatusFailed            SwapOperationStatus = "FAILED"
+)
+
+// ResidueReturnStatus records what happened to the unspent slippage buffer
+// (MaxAmountIn − realized amount_in) after the swap settled. It is deliberately
+// independent of the swap status: the payment is already final when the residue is
+// handled, so a failed return must never reopen a COMPLETED swap.
+type ResidueReturnStatus string
+
+const (
+	// ResidueNone means there was nothing to return — the swap consumed the full cap.
+	ResidueNone ResidueReturnStatus = "NONE"
+	// ResidueReturnEnqueued means the return leg was accepted and is being driven by the
+	// relayer; its terminal state lives on the bridge position, not here.
+	ResidueReturnEnqueued ResidueReturnStatus = "RETURN_ENQUEUED"
+	// ResidueReturnFailed means the return could not be enqueued. The value is not lost —
+	// it sits on the Hub swap signer — but it needs reconciliation.
+	ResidueReturnFailed ResidueReturnStatus = "RETURN_FAILED"
 )
 
 // CrossCurrencySwapOperation tracks end-to-end cross-currency swap, linking
@@ -41,8 +58,15 @@ type CrossCurrencySwapOperation struct {
 	BridgeOutPositionID *string             `gorm:"column:bridge_out_position_id"`
 	QuoteID             *string             `gorm:"column:quote_id"`
 	FailureReason       *string             `gorm:"column:failure_reason"`
-	CreatedAt           time.Time           `gorm:"column:created_at;autoCreateTime;index"`
-	CompletedAt         *time.Time          `gorm:"column:completed_at"`
+	// ResidueAmount is MaxAmountIn − AmountIn: the slippage buffer the bridge-in had to
+	// move before the real cost was known, and which the swap did not consume.
+	ResidueAmount string `gorm:"column:residue_amount;default:''"`
+	// ResiduePositionID is the bridge position returning ResidueAmount to the payer.
+	ResiduePositionID *string `gorm:"column:residue_position_id"`
+	// ResidueStatus tracks whether that return was enqueued. Empty on legacy rows.
+	ResidueStatus ResidueReturnStatus `gorm:"column:residue_status;default:''"`
+	CreatedAt     time.Time           `gorm:"column:created_at;autoCreateTime;index"`
+	CompletedAt   *time.Time          `gorm:"column:completed_at"`
 }
 
 // TableName overrides GORM's default table name.

@@ -1,0 +1,51 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-argentina
+spec:
+  scenario: "b"
+  environment: local
+  mode: found-spoke
+  topology:
+    role: central-bank
+  displayName: "Banco Central de la República Argentina"
+  spoke:
+    id: spoke-ars
+    chainId: 1339
+    currency: ARS
+    # ERC-20 metadata of this spoke's own tokens (tCeBM reserve + fCeBM fiat).
+    # Optional — absent, all four derive from `currency` (exactly the values
+    # below). Declared explicitly so each sovereign token is auditable in config.
+    # Symbols must keep the "<prefix>_<ISO>" shape: portals and the api-gateway
+    # read the currency code from the segment after the last underscore.
+    tokenName: Tokenized ARS
+    tokenSymbol: tCeBM_ARS
+    fiatTokenName: Fiat ARS
+    fiatTokenSymbol: fCeBM_ARS
+  hubBundleRef: ../bundles/hub.bundle.yaml
+  # The sovereign corridor (BRL <-> ARS pair + AMM + liquidity) is NOT declared
+  # here and is not part of provisioning: each central bank opens it at runtime
+  # from its governance portal (propose/confirm pair + cooperative liquidity),
+  # since the toolkit holds no sovereign signing keys.
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 33745 }
+    ws:   { port: 33755 }
+    p2p:  { port: 56403 }
+    dataDir: cbweb3-data/central-bank-argentina
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed
+  relay:
+    endpoint: http://localhost:7000
+  cbEndpoint: http://host.docker.internal:18745
+  frontendHost: localhost
+  launcher: enable
+  launcherPort: 5194
+  adminUsers:
+    - { role: GOVERNANCE, username: admin@argentina.governance.gov, password: argentina-governance-local }
+    - { role: TREASURY,   username: admin@argentina.treasury.gov,   password: argentina-treasury-local }
+    - { role: SUPERVISOR, username: admin@argentina.supervisor.gov, password: argentina-supervisor-local }
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

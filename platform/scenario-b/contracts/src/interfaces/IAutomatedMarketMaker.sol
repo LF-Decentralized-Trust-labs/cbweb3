@@ -160,6 +160,21 @@ interface IAutomatedMarketMaker {
         pure
         returns (uint256 amountOut);
 
+    /// @notice Fee-aware exact-output quote: the EXACT input `swapTokensForExactTokens` will charge
+    ///         for `amountOut`, as a SINGLE ceiling division (constant-product input and fee gross-up
+    ///         folded, rounded up once in favor of the pool). Off-chain callers size `maxAmountIn`
+    ///         from this value to avoid AMM__SlippageExceeded. This is the shared source of truth the
+    ///         swap itself uses (R2-H-3).
+    /// @param reserveIn The reserve of the input token.
+    /// @param reserveOut The reserve of the output token.
+    /// @param amountOut The desired exact output amount.
+    /// @param feeBps_ The swap fee applied, in basis points.
+    /// @return amountIn The fee-inclusive input required.
+    function quoteExactOutput(uint256 reserveIn, uint256 reserveOut, uint256 amountOut, uint256 feeBps_)
+        external
+        pure
+        returns (uint256 amountIn);
+
     // ============================================================================
     //                    ASYMMETRIC CIRCUIT BREAKER (FR-043 / FR-044)
     // ============================================================================

@@ -23,15 +23,16 @@ type CircuitBreakerGate interface {
 	IsHalted(ctx context.Context, pair string) (bool, error)
 }
 
-// AMMSwapper executes an exact-output swap on the Hub AMM contract.
+// AMMSwapper executes an exact-output swap on the Hub AMM contract. outputIsTokenA
+// selects the swap direction: false = A→B (buy TOKEN_B), true = B→A (buy TOKEN_A).
 type AMMSwapper interface {
-	SwapExactOutput(ctx context.Context, pair, amountOut, maxAmountIn, payerID, beneficiaryID, zkPayer, zkBeneficiary string) (orderID, txHash, amountIn string, err error)
-	QuoteExactOutput(ctx context.Context, pair, amountOut string) (requiredInput, priceImpact string, quoteTimestamp int64, err error)
+	SwapExactOutput(ctx context.Context, pair, amountOut, maxAmountIn, payerID, beneficiaryID, zkPayer, zkBeneficiary string, outputIsTokenA bool) (orderID, txHash, amountIn string, err error)
+	QuoteExactOutput(ctx context.Context, pair, amountOut string, outputIsTokenA bool) (requiredInput, priceImpact string, quoteTimestamp int64, err error)
 }
 
 // AMMFeeReader reads the current swap fee rate from the AMM contract (T058 / FR-006).
 type AMMFeeReader interface {
-	GetFeeBps(ctx context.Context) (uint64, error)
+	GetFeeBps(ctx context.Context, pair string) (uint64, error)
 }
 
 // SwapFeeRecorder distributes swap fees to active LP positions synchronously (T058 / FR-006 / D14).
@@ -57,6 +58,10 @@ type SwapRequest struct {
 	ZKPointerPayer       string
 	ZKPointerBeneficiary string
 	CorrelationID        string // Optional: for tracing cross-currency swap flows (009-commercial-cross-currency-swap)
+	// OutputIsTokenA selects the swap direction: false (default) buys the pair's
+	// TOKEN_B (A→B); true buys TOKEN_A (B→A). Set by the cross-currency orchestrator
+	// from the requested target currency vs the pair's token orientation.
+	OutputIsTokenA bool
 }
 
 // SwapResult carries the outcome of a successful swap.
@@ -80,7 +85,7 @@ func (e *ZKValidationError) Error() string { return e.Msg }
 type SwapService struct {
 	swapper     AMMSwapper
 	gates       SwapGates
-	feeReader   AMMFeeReader   // optional: reads feeBps for fee distribution (T058)
+	feeReader   AMMFeeReader    // optional: reads feeBps for fee distribution (T058)
 	feeRecorder SwapFeeRecorder // optional: distributes fees to LPs after swap (T058)
 }
 
@@ -143,7 +148,7 @@ func (s *SwapService) Execute(ctx context.Context, req SwapRequest) (*SwapResult
 	}
 
 	// 3. AMM quote to get required input
-	requiredInput, _, _, err := s.swapper.QuoteExactOutput(ctx, req.Pair, req.AmountOut)
+	requiredInput, _, _, err := s.swapper.QuoteExactOutput(ctx, req.Pair, req.AmountOut, req.OutputIsTokenA)
 	if err != nil {
 		return nil, &domain.SwapExecError{Code: domain.ErrCodeInsufficientPoolLiquidity}
 	}
@@ -167,7 +172,7 @@ func (s *SwapService) Execute(ctx context.Context, req SwapRequest) (*SwapResult
 	orderID, txHash, amountIn, err := s.swapper.SwapExactOutput(ctx,
 		req.Pair, req.AmountOut, req.MaxAmountIn,
 		req.PayerID, req.BeneficiaryID,
-		req.ZKPointerPayer, req.ZKPointerBeneficiary)
+		req.ZKPointerPayer, req.ZKPointerBeneficiary, req.OutputIsTokenA)
 	if err != nil {
 		log.Printf("%sswap failed: %v", logPrefix, err)
 		return nil, fmt.Errorf("swap execution failed: %w", err)
@@ -186,7 +191,7 @@ func (s *SwapService) Execute(ctx context.Context, req SwapRequest) (*SwapResult
 	// D14 / FR-006: Distribute swap fee to active LPs synchronously.
 	// Failure is non-blocking — logged as warning, does not affect the swap response.
 	if s.feeRecorder != nil && s.feeReader != nil {
-		if feeBps, feeErr := s.feeReader.GetFeeBps(ctx); feeErr == nil && feeBps > 0 {
+		if feeBps, feeErr := s.feeReader.GetFeeBps(ctx, req.Pair); feeErr == nil && feeBps > 0 {
 			if amtIn, ok := new(big.Int).SetString(amountIn, 10); ok {
 				feeA := new(big.Int).Mul(amtIn, new(big.Int).SetUint64(feeBps))
 				feeA.Div(feeA, big.NewInt(10000))

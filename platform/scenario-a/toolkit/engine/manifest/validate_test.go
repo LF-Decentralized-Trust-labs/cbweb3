@@ -504,3 +504,56 @@ func TestResolveDataDir_EmptyIsNoOp(t *testing.T) {
 		t.Errorf("empty dataDir must stay empty, got %q", m.Spec.Node.DataDir)
 	}
 }
+
+// ── R1-10.3: per-spoke fCeBM metadata overrides ───────────────────────────────
+
+// The overrides are optional; declared, they are accepted when the symbol keeps the
+// "<prefix>_<ISO>" shape ending in this spoke's own currency.
+func TestValidate_FiatTokenOverrides_Accepted(t *testing.T) {
+	m := validManifest()
+	m.Spec.Spoke.FiatTokenName = "Real Digital"
+	m.Spec.Spoke.FiatTokenSymbol = "fRD_BRL"
+	if err := manifest.Validate(m); err != nil {
+		t.Fatalf("expected valid manifest, got: %v", err)
+	}
+}
+
+// Omitting them stays valid — the step derives "Fiat <ISO>" / "fCeBM_<ISO>".
+func TestValidate_FiatTokenOverrides_Omitted(t *testing.T) {
+	m := validManifest()
+	if err := manifest.Validate(m); err != nil {
+		t.Fatalf("expected valid manifest without overrides, got: %v", err)
+	}
+}
+
+func TestValidate_FiatTokenSymbol_Rejected(t *testing.T) {
+	tests := []struct {
+		name   string
+		symbol string
+	}{
+		{"no currency segment", "fBRL"},
+		{"trailing underscore", "fCeBM_"},
+		{"whitespace", "fCeBM BRL"},
+		{"currency mismatch", "fCeBM_COP"}, // validManifest settles in BRL
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := validManifest()
+			m.Spec.Spoke.FiatTokenSymbol = tc.symbol
+			err := manifest.Validate(m)
+			if err == nil || !strings.Contains(err.Error(), "spec.spoke.fiatTokenSymbol") {
+				t.Errorf("symbol %q must be rejected, got: %v", tc.symbol, err)
+			}
+		})
+	}
+}
+
+// A blank name is rejected: omit the field to derive it from the currency.
+func TestValidate_FiatTokenName_BlankRejected(t *testing.T) {
+	m := validManifest()
+	m.Spec.Spoke.FiatTokenName = "   "
+	err := manifest.Validate(m)
+	if err == nil || !strings.Contains(err.Error(), "spec.spoke.fiatTokenName") {
+		t.Errorf("blank fiatTokenName must be rejected, got: %v", err)
+	}
+}

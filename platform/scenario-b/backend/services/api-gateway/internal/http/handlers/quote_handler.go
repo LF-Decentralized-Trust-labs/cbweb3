@@ -22,8 +22,8 @@ type SwapQuoteGeneratorIface interface {
 
 // QuoteHandler handles GET /api/v2/amm/quote/exact-output and /quote/cross-currency.
 type QuoteHandler struct {
-	svc           QuoteServiceIface
-	quoteGen      SwapQuoteGeneratorIface
+	svc      QuoteServiceIface
+	quoteGen SwapQuoteGeneratorIface
 }
 
 // NewQuoteHandler creates a QuoteHandler.
@@ -68,6 +68,7 @@ func (h *QuoteHandler) GetCrossCurrencyQuote(c *fiber.Ctx) error {
 	sourceCurrency := c.Query("source_currency")
 	targetCurrency := c.Query("target_currency")
 	amountOut := c.Query("amount_out")
+	poolPair := c.Query("pool_pair")                         // optional — exact pair_id to quote against
 	maxSlippagePct := c.QueryFloat("max_slippage_pct", 0.01) // Default 1%
 
 	if sourceCurrency == "" || targetCurrency == "" || amountOut == "" {
@@ -82,6 +83,7 @@ func (h *QuoteHandler) GetCrossCurrencyQuote(c *fiber.Ctx) error {
 		TargetCurrency: targetCurrency,
 		AmountOut:      amountOut,
 		MaxSlippagePct: maxSlippagePct,
+		PoolPair:       poolPair,
 	}
 
 	result, err := h.quoteGen.GenerateQuote(c.Context(), req)
@@ -93,18 +95,17 @@ func (h *QuoteHandler) GetCrossCurrencyQuote(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"quote_id":              result.QuoteID,
-		"pool_pair":             result.PoolPair,
-		"amount_out":            result.AmountOut,
-		"amount_in":             result.AmountIn,
-		"effective_rate":        result.EffectiveRate,
-		"fee_bps":               result.FeeBps,
-		"max_slippage_pct":      result.MaxSlippagePct,
-		"reserve_a_snapshot":    result.ReserveASnapshot,
-		"reserve_b_snapshot":    result.ReserveBSnapshot,
-		"created_at":            result.CreatedAt.Unix(),
-		"valid_until":           result.ValidUntil.Unix(),
+		"quote_id":               result.QuoteID,
+		"pool_pair":              result.PoolPair,
+		"amount_out":             result.AmountOut,
+		"amount_in":              result.AmountIn,
+		"effective_rate":         result.EffectiveRate,
+		"fee_bps":                result.FeeBps,
+		"max_slippage_pct":       result.MaxSlippagePct,
+		"reserve_a_snapshot":     result.ReserveASnapshot,
+		"reserve_b_snapshot":     result.ReserveBSnapshot,
+		"created_at":             result.CreatedAt.Unix(),
+		"valid_until":            result.ValidUntil.Unix(),
 		"time_remaining_seconds": result.TimeRemainingSeconds,
 	})
 }
-

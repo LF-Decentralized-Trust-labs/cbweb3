@@ -12,22 +12,51 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/keyprovider"
 )
+
+// addTransportSAN adds host to a Paladin transport cert's SAN in the correct
+// field so a dns:///<host>:9000 dial validates: an IP literal goes in IPAddresses
+// (Go verifies an IP ServerName against the IP SAN), a DNS name in DNSNames. It is
+// a no-op for the empty string or a duplicate already present. Used to carry a
+// node's routable advertisedHost (see paladinDialHost) so cross-VM peers can dial
+// the on-chain endpoint directly without a per-peer extra_hosts entry.
+func addTransportSAN(tmpl *x509.Certificate, host string) {
+	if host == "" {
+		return
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		for _, existing := range tmpl.IPAddresses {
+			if existing.Equal(ip) {
+				return
+			}
+		}
+		tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
+		return
+	}
+	for _, d := range tmpl.DNSNames {
+		if d == host {
+			return
+		}
+	}
+	tmpl.DNSNames = append(tmpl.DNSNames, host)
+}
 
 // genTLSStep generates the central bank's self-signed TLS cert/key and seeds
 // them directly into named Docker volumes — no host filesystem involved
 // (deviation from the original SPOKE_DATA_DIR bind-mount design; see the
 // addendum in specs/026-tk4-compose-central-bank/plan.md).
 type genTLSStep struct {
-	spokeID     string
-	keyProvider keyprovider.KeyProvider
+	spokeID        string
+	advertisedHost string // CB routable host; when routable, added to the transport cert SAN
+	keyProvider    keyprovider.KeyProvider
 }
 
-func newGenTLSStep(spokeID string, _ interface{}, kp keyprovider.KeyProvider) Step {
-	return &genTLSStep{spokeID: spokeID, keyProvider: kp}
+func newGenTLSStep(spokeID, advertisedHost string, kp keyprovider.KeyProvider) Step {
+	return &genTLSStep{spokeID: spokeID, advertisedHost: advertisedHost, keyProvider: kp}
 }
 
 func (s *genTLSStep) Name() string { return StepGenTLS }
@@ -85,6 +114,13 @@ func (s *genTLSStep) Run(ctx context.Context) error {
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
+	}
+	// Cross-VM: peers dial this node at its routable advertisedHost (register-nodes
+	// publishes dns:///<advertisedHost>:9000 via paladinDialHost), so that host must
+	// be in the SAN for the mutual-TLS handshake to validate. Single-host keeps only
+	// the container-name SAN above.
+	if isRoutableHost(s.advertisedHost) {
+		addTransportSAN(tmpl, s.advertisedHost)
 	}
 	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &privKey.PublicKey, privKey)
 	if err != nil {

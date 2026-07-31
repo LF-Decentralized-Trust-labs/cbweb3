@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/auth/internal/blockchain"
@@ -42,16 +43,30 @@ func main() {
 		}
 	}
 
+	kcBaseURL := mustEnv("KEYCLOAK_BASE_URL")
+	kcRealm := getEnv("KEYCLOAK_REALM", "cbweb3")
+	// Audience is opt-in: the "aud" check runs only when KEYCLOAK_AUDIENCE is set
+	// explicitly. There is no client-id fallback, because Keycloak does not stamp
+	// the client id into "aud" without an audience mapper, so defaulting would
+	// reject every real token. The issuer is always derived and enforced.
+	kcAudience := getEnv("KEYCLOAK_AUDIENCE", "")
 	kcClient, err := keycloak.New(keycloak.Config{
-		BaseURL:        mustEnv("KEYCLOAK_BASE_URL"),
-		Realm:          getEnv("KEYCLOAK_REALM", "cbweb3"),
+		BaseURL:        kcBaseURL,
+		Realm:          kcRealm,
 		ClientID:       getEnv("KEYCLOAK_CLIENT_ID", "cbweb3-auth"),
 		ClientSecret:   getEnv("KEYCLOAK_CLIENT_SECRET", ""),
+		Audience:       kcAudience,
 		JWKSCacheTTL:   time.Duration(getEnvInt("KEYCLOAK_JWKS_CACHE_TTL_SEC", 300)) * time.Second,
 		RequestTimeout: time.Duration(getEnvInt("KEYCLOAK_REQUEST_TIMEOUT_SEC", 10)) * time.Second,
 	})
 	if err != nil {
 		log.Fatalf("keycloak: %v", err)
+	}
+	kcIssuer := strings.TrimRight(kcBaseURL, "/") + "/realms/" + kcRealm
+	if kcAudience == "" {
+		log.Printf("keycloak: token validation — issuer=%q, audience enforcement DISABLED (KEYCLOAK_AUDIENCE unset)", kcIssuer)
+	} else {
+		log.Printf("keycloak: token validation — issuer=%q, audience=%q", kcIssuer, kcAudience)
 	}
 
 	complianceClient, err := complianceclient.New(

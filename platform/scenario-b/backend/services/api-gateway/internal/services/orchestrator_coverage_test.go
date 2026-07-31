@@ -66,6 +66,16 @@ func (r *statefulSwapRepo) UpdateFailureReason(_ context.Context, _, reason stri
 	}
 	return nil
 }
+func (r *statefulSwapRepo) UpdateResidue(_ context.Context, _, amount, positionID string, status domain.ResidueReturnStatus) error {
+	if r.op != nil {
+		r.op.ResidueAmount = amount
+		r.op.ResidueStatus = status
+		if positionID != "" {
+			r.op.ResiduePositionID = &positionID
+		}
+	}
+	return nil
+}
 
 func happyReq() CrossCurrencySwapRequest {
 	return CrossCurrencySwapRequest{
@@ -308,9 +318,9 @@ func (reversoOK) BurnAndEnqueue(context.Context, string, string) (*BridgePositio
 
 type rollbackRepoStub struct{}
 
-func (rollbackRepoStub) Create(context.Context, *domain.SwapRollbackLog) error    { return nil }
+func (rollbackRepoStub) Create(context.Context, *domain.SwapRollbackLog) error { return nil }
 func (rollbackRepoStub) UpdateStatus(context.Context, string, domain.RollbackStatus) error {
 	return nil
 }
-func (rollbackRepoStub) IncrementRetryCount(context.Context, string) error           { return nil }
+func (rollbackRepoStub) IncrementRetryCount(context.Context, string) error            { return nil }
 func (rollbackRepoStub) UpdateTxHashes(context.Context, string, string, string) error { return nil }
