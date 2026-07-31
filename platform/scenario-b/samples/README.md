@@ -376,6 +376,43 @@ Colombia simply never opens a corridor.
 
 ---
 
+## Service-mesh mTLS (R2-H-8) — opt-in
+
+Inter-service gRPC (api-gateway → auth/compliance/payment-orchestrator, and
+auth → compliance) runs **plaintext by default**, unchanged. The toolkit always
+seeds a per-entity service-mesh CA + one leaf certificate per gRPC service into a
+`<prefix>_svc_tls` volume (`gen-svc-tls`), and every backend service mounts it at
+`/svc-tls` read-only — but the certificates are **only used when you opt in**.
+
+Enable mutual TLS (and, optionally, rejection of unauthenticated callers) by
+exporting two environment variables before the toolkit run — they flow through to
+the rendered compose. This works identically for the local samples and for
+`deploy-lnet` (which runs the same toolkit): each entity's gRPC services are
+co-located on one host, so the per-entity CA covers every internal hop.
+
+```bash
+# mutual TLS on all internal gRPC (services present + verify peer certs):
+export GRPC_MTLS_ENABLE=1
+# additionally reject unauthenticated/unauthorized callers (requires mTLS):
+export GRPC_AUTHZ_ENFORCE=true
+
+./deploy-all.sh          # (or deploy-lnet/deploy.sh …)
+```
+
+With `GRPC_MTLS_ENABLE` unset the `GRPC_MTLS_*` paths interpolate to empty and the
+transport stays plaintext — existing deployments are unaffected. Setting
+`GRPC_AUTHZ_ENFORCE=true` without `GRPC_MTLS_ENABLE=1` is refused at service start
+(enforcing over a plaintext, header-settable identity is a fail-open). Smoke test
+that plaintext is rejected once enabled: a plaintext gRPC dial to any service port
+must fail the TLS handshake; a portal round-trip (login → governance list) must
+still succeed over the mTLS mesh.
+
+> Cross-entity gRPC is not part of this mesh (there is none today — cross-VM
+> traffic is Besu JSON-RPC + HTTP). A federated/shared service CA would be needed
+> before any cross-entity gRPC hop could enforce mTLS.
+
+---
+
 ## Verification
 
 Block height on each node (RPC ports from the matrix):
