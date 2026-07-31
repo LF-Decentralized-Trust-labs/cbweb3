@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin-contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin-contracts/utils/Pausable.sol";
+import {Math} from "@openzeppelin-contracts/utils/math/Math.sol";
 
 /// @title Automated Market Maker (AMM)
 /// @dev Constant Product Liquidity Pool for Scenario A (Exact-Output pricing).
@@ -43,16 +44,26 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
     ///         the reserves (accrues to liquidity providers).
     uint256 public feeBps;
 
+    /// @notice Monotonic pause counter. Incremented on every {pause} and stamped onto resume proposals
+    ///         so that signatures gathered against one pause can never form quorum against a later one
+    ///         (R2-H-2 epoch binding — closes the abandoned-proposal single-governor resume path).
+    uint256 public pauseEpoch;
+
+    /// @notice Per-proposer nonce feeding the proposal id, so two proposals from the same proposer in
+    ///         the same block cannot collide (R2-H-2 LOW).
+    uint256 private _resumeNonce;
+
     /// @notice A resume proposal awaiting the 2-of-N quorum.
     struct ResumeProposal {
         address proposer;
         uint256 createdAt;
+        uint256 epoch;
         uint256 signatures;
         mapping(address => bool) signed;
         bool executed;
     }
 
-    /// @notice Resume proposals keyed by a hash derived from proposer + block.
+    /// @notice Resume proposals keyed by a hash derived from proposer + block + nonce.
     mapping(bytes32 => ResumeProposal) private _resumeProposals;
 
     /// @notice Initializes the AMM with the token pair and IdentityRegistry.
@@ -106,18 +117,24 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
     ///      via {proposeResume}/{signResume}. Reverts (OZ EnforcedPause) if already paused.
     /// @param reason Free-text justification recorded on-chain for auditability.
     function pause(string calldata reason) external onlyGovernance whenNotPaused {
+        // Each pause opens a fresh epoch; resume signatures are only ever valid within the epoch of the
+        // pause they answer, so a proposal abandoned under an earlier pause cannot be revived later.
+        pauseEpoch += 1;
         _pause();
         emit LogCircuitBreakerPaused(msg.sender, block.timestamp, reason);
     }
 
     /// @notice Create a resume proposal. The proposer's signature counts as the first signature.
-    /// @dev A single proposer is never enough to resume: quorum is {RESUME_QUORUM} (2-of-N).
+    /// @dev A single proposer is never enough to resume: quorum is {RESUME_QUORUM} (2-of-N). The proposal
+    ///      is stamped with the current {pauseEpoch}; signatures gathered here cannot outlive this pause.
     /// @return proposalId The identifier of the created resume proposal.
     function proposeResume() external onlyGovernance whenPaused returns (bytes32 proposalId) {
-        proposalId = keccak256(abi.encode(msg.sender, block.number, block.timestamp));
+        uint256 nonce = _resumeNonce++;
+        proposalId = keccak256(abi.encode(msg.sender, block.number, block.timestamp, nonce));
         ResumeProposal storage proposal = _resumeProposals[proposalId];
         proposal.proposer = msg.sender;
         proposal.createdAt = block.timestamp;
+        proposal.epoch = pauseEpoch;
         proposal.signatures = 1;
         proposal.signed[msg.sender] = true;
         emit LogResumeProposed(proposalId, msg.sender, block.timestamp);
@@ -125,11 +142,15 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
     }
 
     /// @notice Sign a resume proposal. When signatures reach {RESUME_QUORUM}, the AMM auto-resumes.
-    /// @dev A given signer may only sign once (no self-quorum). Reverts if the proposal is unknown.
+    /// @dev A given signer may only sign once (no self-quorum). Reverts if the proposal is unknown or was
+    ///      raised against a superseded pause epoch (R2-H-2) — enforcing a genuine 2-of-N per pause event.
     function signResume(bytes32 proposalId) external onlyGovernance whenPaused {
         ResumeProposal storage proposal = _resumeProposals[proposalId];
         if (proposal.createdAt == 0) {
             revert AMM__ProposalNotFound(proposalId);
+        }
+        if (proposal.epoch != pauseEpoch) {
+            revert AMM__ProposalExpired(proposalId, proposal.epoch, pauseEpoch);
         }
         if (proposal.signed[msg.sender]) {
             revert AMM__AlreadySigned(proposalId, msg.sender);
@@ -201,6 +222,27 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
     }
 
     /// @inheritdoc IAutomatedMarketMaker
+    function quoteExactOutput(uint256 reserveIn, uint256 reserveOut, uint256 amountOut, uint256 feeBps_)
+        public
+        pure
+        returns (uint256 amountIn)
+    {
+        if (amountOut == 0) revert AMM__ZeroAmount();
+        if (amountOut >= reserveOut) revert AMM__InsufficientLiquidity();
+
+        // R2-H-3: fold the exact-output constant-product quote AND the fee gross-up into a SINGLE
+        // ceiling division. The prior two-step form rounded up twice — once in getAmountIn (`+1`) and
+        // again in the fee gross-up (`+1`) — over-charging the caller and stranding the excess in the
+        // reserves. One ceiling division rounds up exactly once and still favors the pool (k never
+        // decreases):
+        //   amountIn = ceil( reserveIn * amountOut * 10000 / ((reserveOut - amountOut) * (10000 - feeBps)) )
+        // The largest product (reserveIn * amountOut) stays inside Math.mulDiv's 512-bit intermediate.
+        // The returned amountIn is inclusive of the fee, which stays in the reserves (accrues to LPs).
+        amountIn =
+            Math.mulDiv(reserveIn, amountOut * 10000, (reserveOut - amountOut) * (10000 - feeBps_), Math.Rounding.Ceil);
+    }
+
+    /// @inheritdoc IAutomatedMarketMaker
     function swapTokensForExactTokens(
         address tokenIn,
         address tokenOut,
@@ -220,12 +262,10 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
         uint256 reserveIn = isAIn ? reserveA : reserveB;
         uint256 reserveOut = isAIn ? reserveB : reserveA;
 
-        // Pre-fee constant-product input for the exact output requested.
-        uint256 baseAmountIn = getAmountIn(reserveIn, reserveOut, amountOut);
-
-        // Fee-in-reserve: the user pays a grossed-up input; the 0.3% fee stays in the reserves and
-        // accrues to liquidity providers. grossIn = base / (1 - fee); +1 rounds in favour of the pool.
-        amountIn = (baseAmountIn * 10000) / (10000 - feeBps) + 1;
+        // R2-H-3: single source of truth. The on-chain quote a caller sizes `maxAmountIn` against IS the
+        // exact charge — swap and quote share one ceiling division (see quoteExactOutput). Fee-inclusive;
+        // the fee stays in the reserves.
+        amountIn = quoteExactOutput(reserveIn, reserveOut, amountOut, feeBps);
 
         // Slippage Protection (checked against the fee-inclusive amount actually charged).
         if (amountIn > maxAmountIn) {
@@ -253,7 +293,9 @@ contract AutomatedMarketMaker is IAutomatedMarketMaker, ReentrancyGuard, Pausabl
     // ============================================================================
 
     /// @inheritdoc IAutomatedMarketMaker
-    function setFeeBps(uint256 newFeeBps) external onlyGovernance {
+    /// @dev Gated {whenNotPaused}: the fee schedule cannot be changed while the breaker is engaged, so a
+    ///      single governor cannot re-price the pool during a halt before the 2-of-N resume quorum runs.
+    function setFeeBps(uint256 newFeeBps) external onlyGovernance whenNotPaused {
         if (newFeeBps > MAX_FEE_BPS) revert AMM__FeeBpsTooHigh(newFeeBps, MAX_FEE_BPS);
         uint256 old = feeBps;
         feeBps = newFeeBps;

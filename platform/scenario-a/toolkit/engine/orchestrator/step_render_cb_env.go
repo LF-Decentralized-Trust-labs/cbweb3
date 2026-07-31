@@ -85,6 +85,9 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		ZetoTokenAddress:           addrs.ZetoTokenAddress,
 		FiatTokenAddress:           addrs.FiatTokenAddress,
 		HTLCAddress:                addrs.HTLCAddress,
+		// Optional: empty unless an AMM was deployed and recorded in .deployed-addrs.env.
+		// When present, compliance drives the on-chain 2-of-N circuit breaker.
+		AMMAddress: addrs.AMMAddress,
 		// Local: the operator key signs Besu-layer txs (HTLC/fCeBM). Empty leaves the
 		// Besu path off (prod, until KMS wiring). EntityBesuAddress is its wallet.
 		BesuOperatorKey:   s.besuOperatorKey,

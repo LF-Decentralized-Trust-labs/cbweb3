@@ -51,8 +51,8 @@ func (s *governanceComplianceStub) GetCircuitBreakerStatus(context.Context) (com
 	return complianceadapter.CircuitBreakerStatus{}, nil
 }
 
-func (s *governanceComplianceStub) ToggleCircuitBreaker(context.Context, bool, string) (bool, error) {
-	return false, nil
+func (s *governanceComplianceStub) ToggleCircuitBreaker(context.Context, bool, string) (bool, string, error) {
+	return false, "", nil
 }
 
 func (s *governanceComplianceStub) GetSystemParameters(context.Context) (complianceadapter.SystemParameters, error) {

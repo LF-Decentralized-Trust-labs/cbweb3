@@ -38,10 +38,13 @@ contract AutomatedMarketMakerTest is Test {
     /// @notice Default swap fee (0.3%) charged by the ported fee model.
     uint256 public constant FEE_BPS = 30;
 
-    /// @dev Grosses up a pre-fee constant-product input by the swap fee, mirroring the contract:
-    ///      grossIn = (preFeeIn * 10000) / (10000 - feeBps) + 1. The fee stays in the reserves.
-    function _grossIn(uint256 preFeeIn) internal pure returns (uint256) {
-        return (preFeeIn * 10000) / (10000 - FEE_BPS) + 1;
+    /// @dev Fee-inclusive exact-output quote, mirroring the contract's SINGLE ceiling division (R2-H-3):
+    ///      amountIn = ceil( reserveIn * amountOut * 10000 / ((reserveOut - amountOut) * (10000 - FEE_BPS)) ).
+    ///      Rounds up exactly once (unlike the old two-step gross-up), so the pool is never over-charged.
+    function _quoteIn(uint256 reserveIn, uint256 reserveOut, uint256 amountOut) internal pure returns (uint256) {
+        uint256 numerator = reserveIn * amountOut * 10000;
+        uint256 denominator = (reserveOut - amountOut) * (10000 - FEE_BPS);
+        return numerator / denominator + (numerator % denominator == 0 ? 0 : 1);
     }
 
     /// @notice Deploys and configures test fixtures for AMM flows.
@@ -137,8 +140,8 @@ contract AutomatedMarketMakerTest is Test {
 
         uint256 amountOutDesired = 1_000 * 10 ** 18;
         uint256 preFeeAmountIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
-        /// @dev With the 0.3% fee, the user pays the grossed-up input; the fee remains in the reserves.
-        uint256 expectedGrossIn = _grossIn(preFeeAmountIn);
+        /// @dev With the 0.3% fee, the user pays the fee-inclusive input; the fee remains in the reserves.
+        uint256 expectedGrossIn = _quoteIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
         uint256 maxAmountIn = expectedGrossIn;
 
         uint256 swapperBalanceBef = tokenA.balanceOf(swapper);
@@ -164,8 +167,7 @@ contract AutomatedMarketMakerTest is Test {
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
 
         uint256 amountOutDesired = 1_000 * 10 ** 18;
-        uint256 preFeeAmountIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
-        uint256 expectedGrossIn = _grossIn(preFeeAmountIn);
+        uint256 expectedGrossIn = _quoteIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
 
         /// @dev Simulate user only accepting less than the fee-inclusive market price
         uint256 maxAmountIn = expectedGrossIn - 1;
@@ -279,6 +281,68 @@ contract AutomatedMarketMakerTest is Test {
         amm.proposeResume();
     }
 
+    /// @dev Constitution III: the breaker must be validated BEFORE swaps. A paused AMM must reject
+    ///      swapTokensForExactTokens (not just addLiquidity), otherwise a halt would not stop trading.
+    function test_Revert_Swap_WhilePaused() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        vm.prank(governance);
+        amm.pause("halt trading");
+
+        uint256 amountOutDesired = 1_000 * 10 ** 18;
+        vm.prank(swapper);
+        vm.expectRevert(); // OZ Pausable EnforcedPause via whenNotPaused
+        amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOutDesired, type(uint256).max, swapper);
+    }
+
+    /// @dev R2-H-2 epoch binding: a resume proposal abandoned under one pause cannot be revived to reach
+    ///      quorum under a LATER, unrelated pause. Reproduces the reported single-governor resume path and
+    ///      asserts the fix (AMM__ProposalExpired) keeps the AMM paused.
+    function test_Revert_SignResume_ProposalFromSupersededEpoch() public {
+        // Epoch 1: governance pauses and raises a proposal P, then abandons it (only 1 signature).
+        vm.prank(governance);
+        amm.pause("first pause");
+        vm.prank(governance);
+        bytes32 abandoned = amm.proposeResume();
+
+        // The first pause is legitimately resumed through a DIFFERENT proposal (genuine 2-of-N).
+        vm.prank(governance2);
+        bytes32 genuine = amm.proposeResume();
+        vm.prank(governance);
+        amm.signResume(genuine);
+        assertFalse(amm.paused(), "First pause resumed via a genuine 2-of-N quorum");
+
+        // Epoch 2: governance2 raises a fresh emergency pause.
+        vm.prank(governance2);
+        amm.pause("second, unrelated pause");
+        assertEq(amm.pauseEpoch(), 2, "Second pause opens epoch 2");
+
+        // governance2 alone tries to resume by signing the epoch-1 abandoned proposal (which already
+        // carries governance's stale signature). Pre-fix this reached quorum; now it must revert.
+        vm.prank(governance2);
+        vm.expectRevert(abi.encodeWithSelector(IAutomatedMarketMaker.AMM__ProposalExpired.selector, abandoned, 1, 2));
+        amm.signResume(abandoned);
+
+        assertTrue(amm.paused(), "A stale-epoch signature must never resume the AMM");
+    }
+
+    /// @dev R2-H-2 (LOW): two proposals from the SAME proposer in the SAME block must not collide — the
+    ///      per-proposer nonce feeding the proposal id keeps them distinct.
+    function test_ProposeResume_SameBlockSameProposer_DistinctIds() public {
+        vm.prank(governance);
+        amm.pause("halt");
+
+        vm.prank(governance);
+        bytes32 first = amm.proposeResume();
+        vm.prank(governance);
+        bytes32 second = amm.proposeResume();
+
+        assertTrue(first != second, "Same-block proposals from one proposer must have distinct ids");
+        assertEq(amm.resumeSignatures(first), 1, "First proposal keeps its own single signature");
+        assertEq(amm.resumeSignatures(second), 1, "Second proposal keeps its own single signature");
+    }
+
     // ============================================================================
     //                       FEE MODEL (0.3% swap fee)
     // ============================================================================
@@ -293,7 +357,7 @@ contract AutomatedMarketMakerTest is Test {
 
         uint256 amountOutDesired = 1_000 * 10 ** 18;
         uint256 preFeeAmountIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
-        uint256 expectedGrossIn = _grossIn(preFeeAmountIn);
+        uint256 expectedGrossIn = _quoteIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
         uint256 feePortion = expectedGrossIn - preFeeAmountIn;
 
         uint256 kBefore = amm.reserveA() * amm.reserveB();
@@ -307,6 +371,15 @@ contract AutomatedMarketMakerTest is Test {
         assertGt(feePortion, 0, "Fee portion must be non-zero at 0.3%");
         assertEq(amm.reserveA(), INITIAL_LIQUIDITY + expectedGrossIn, "Fee must accrue into reserveA");
         assertEq(tokenA.balanceOf(address(amm)), INITIAL_LIQUIDITY + expectedGrossIn, "Pool balance must hold the fee");
+
+        /// @dev Independent (non-tautological) pin: the fee wedge over the zero-fee price must equal 0.3%
+        ///      of the input. We derive the zero-fee input from the raw constant-product quote — NOT the
+        ///      contract's fee path — so this asserts the fee magnitude against a value the contract's fee
+        ///      code never produces. amountIn = zeroFeeIn / (1 - f) ⇒ feeWedge = amountIn·f.
+        uint256 zeroFeeIn = ((INITIAL_LIQUIDITY * amountOutDesired) / (INITIAL_LIQUIDITY - amountOutDesired)) + 1;
+        uint256 feeWedge = actualIn - zeroFeeIn;
+        uint256 expectedFee = actualIn * FEE_BPS / 10000;
+        assertApproxEqRel(feeWedge, expectedFee, 1e15, "Fee wedge must equal 0.3% of the input (independent check)");
 
         /// @dev k strictly increases because the fee stays in the pool.
         uint256 kAfter = amm.reserveA() * amm.reserveB();
@@ -331,6 +404,17 @@ contract AutomatedMarketMakerTest is Test {
         amm.setFeeBps(1001);
     }
 
+    /// @dev R2-H-2 (LOW): the fee schedule is frozen while the breaker is engaged, so a lone governor
+    ///      cannot re-price the pool during a halt ahead of the 2-of-N resume quorum.
+    function test_Revert_SetFeeBps_WhilePaused() public {
+        vm.prank(governance);
+        amm.pause("halt");
+
+        vm.prank(governance);
+        vm.expectRevert(); // OZ Pausable EnforcedPause via whenNotPaused
+        amm.setFeeBps(50);
+    }
+
     /// @dev Test that swap reverts when amountOut is zero.
     function test_Revert_Swap_ZeroAmount() public {
         vm.prank(liquidityProvider);
@@ -348,8 +432,7 @@ contract AutomatedMarketMakerTest is Test {
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
 
         uint256 amountOutDesired = 1_000 * 10 ** 18;
-        uint256 preFeeAmountIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
-        uint256 expectedGrossIn = _grossIn(preFeeAmountIn);
+        uint256 expectedGrossIn = _quoteIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
         uint256 maxAmountIn = expectedGrossIn;
 
         uint256 swapperBalanceBBef = tokenB.balanceOf(swapper);

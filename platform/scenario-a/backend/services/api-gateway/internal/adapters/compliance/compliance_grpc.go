@@ -270,15 +270,15 @@ func (a *GRPCAdapter) GetCircuitBreakerStatus(ctx context.Context) (CircuitBreak
 	}, nil
 }
 
-func (a *GRPCAdapter) ToggleCircuitBreaker(ctx context.Context, pause bool, reason string) (bool, error) {
+func (a *GRPCAdapter) ToggleCircuitBreaker(ctx context.Context, pause bool, reason string) (bool, string, error) {
 	resp, err := a.cc.ToggleCircuitBreaker(ctx, &compliancv1.ToggleCircuitBreakerRequest{
 		Pause:  pause,
 		Reason: reason,
 	})
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
-	return resp.IsPaused, nil
+	return resp.IsPaused, resp.TxHash, nil
 }
 
 func (a *GRPCAdapter) GetSystemParameters(ctx context.Context) (SystemParameters, error) {

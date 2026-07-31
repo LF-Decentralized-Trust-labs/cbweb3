@@ -40,6 +40,9 @@ interface IAutomatedMarketMaker {
     error AMM__ProposalNotFound(bytes32 proposalId);
     /// @dev The signer has already signed this resume proposal (no self-quorum).
     error AMM__AlreadySigned(bytes32 proposalId, address signer);
+    /// @dev The resume proposal was raised against a stale pause epoch; a new pause has since occurred,
+    ///      so signatures collected against the old pause can no longer form quorum (R2-H-2 epoch binding).
+    error AMM__ProposalExpired(bytes32 proposalId, uint256 proposalEpoch, uint256 currentEpoch);
     /// @dev New fee value exceeds the allowed maximum (1000 = 10%).
     error AMM__FeeBpsTooHigh(uint256 provided, uint256 max);
 
@@ -74,6 +77,19 @@ interface IAutomatedMarketMaker {
         pure
         returns (uint256 amountIn);
 
+    /// @notice Fee-inclusive exact-output quote in a SINGLE ceiling division (R2-H-3 parity).
+    /// @dev The input a caller sizes `maxAmountIn` against IS the exact charge — swap and quote share
+    ///      this one ceiling division, so the caller is never over-charged by a second rounding step.
+    /// @param reserveIn The current reserve of the input token.
+    /// @param reserveOut The current reserve of the output token.
+    /// @param amountOut The exact amount of output tokens desired.
+    /// @param feeBps_ The swap fee in basis points to fold into the quote.
+    /// @return amountIn The fee-inclusive input amount (the fee stays in the reserves).
+    function quoteExactOutput(uint256 reserveIn, uint256 reserveOut, uint256 amountOut, uint256 feeBps_)
+        external
+        pure
+        returns (uint256 amountIn);
+
     // ============================================================================
     //                    ASYMMETRIC CIRCUIT BREAKER (FR-043 / FR-044)
     // ============================================================================
@@ -97,6 +113,10 @@ interface IAutomatedMarketMaker {
 
     /// @notice Returns the number of signatures collected for a resume proposal.
     function resumeSignatures(bytes32 proposalId) external view returns (uint256);
+
+    /// @notice Monotonic counter incremented on every {pause}. A resume proposal is bound to the epoch
+    ///         in which it was raised; signatures cannot carry across a later pause (R2-H-2 epoch binding).
+    function pauseEpoch() external view returns (uint256);
 
     // ============================================================================
     //                       FEE MODEL (governance-configurable)
