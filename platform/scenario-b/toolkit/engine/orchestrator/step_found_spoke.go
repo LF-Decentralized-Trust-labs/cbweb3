@@ -57,6 +57,7 @@ type SpokeConfig struct {
 	BesuImage           string
 	HubBundlePath       string
 	HubRPC              string // hub RPC (from the bundle unless overridden)
+	HubChainID          uint64 // hub chain id (from the bundle); 0 → template default
 	SpokeEnvFile        string
 	KeycloakEnv         []string
 	GatewayURL          string
@@ -156,7 +157,37 @@ func (c *SpokeConfig) WithDefaults() {
 func (c SpokeConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
 func (c SpokeConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
 func (c SpokeConfig) caVolume() string       { return c.VolumePrefix + "_cb_tls" }
-func (c SpokeConfig) svcTLSVolume() string    { return c.VolumePrefix + "_svc_tls" }
+func (c SpokeConfig) svcTLSVolume() string   { return c.VolumePrefix + "_svc_tls" }
+
+// cbHubKey / cbHubAddress are this CB's own identity on the HUB chain, derived
+// deterministically from the spoke id.
+//
+// The hub is the only chain every CB shares, so it is the only place where reusing one
+// key erases sovereignty: with a single key, every CB's swap carried the founding CB as
+// LogSwap.user and every sovereign W-token had the same CENTRAL_BANK_ROLE holder. Spoke
+// keys are deliberately untouched — each spoke is its own network, and the spoke deployer
+// holds roles granted at deploy time that a rotation would strand.
+//
+// CBAddress (the -cb-address flag) overrides the address when an operator supplies one,
+// but then the matching key must be supplied out of band too; the derived pair is the
+// self-consistent default.
+func (c SpokeConfig) cbHubKey() string {
+	key, _ := deriveCBHubKey(c.SpokeID)
+	return key
+}
+
+// CBHubAddress exposes this CB's hub identity to the apply layer, which needs it to probe
+// register-cb's idempotency against the address that will actually be registered.
+func (c SpokeConfig) CBHubAddress() string { return c.cbHubAddress() }
+
+func (c SpokeConfig) cbHubAddress() string {
+	if a := strings.TrimSpace(c.CBAddress); a != "" {
+		return a
+	}
+	_, addr := deriveCBHubKey(c.SpokeID)
+	return addr
+}
+
 func (c SpokeConfig) nocAgentVolume() string { return c.VolumePrefix + "_noc_agent_cfg" }
 
 // scenarioBDir is <repo>/scenario-b (parent of ContractsDir), the docker build
@@ -499,6 +530,15 @@ func (c SpokeConfig) nativeAssetSymbol() string {
 	return "tCeBM_" + c.Currency
 }
 
+// hubChainIDEnv renders the hub chain id for the compose env, leaving it empty when
+// unknown so the template default applies rather than a silent wrong value.
+func hubChainIDEnv(id uint64) string {
+	if id == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", id)
+}
+
 func (c SpokeConfig) ComposeEnv() []string {
 	e := c.ContainerPrefix
 	// The spoke backend reaches the hub via host.docker.internal:<HUB_RPC_PORT>;
@@ -522,6 +562,10 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// the single-host host.docker.internal fallback in the compose templates.
 		"HUB_RPC_PORT":     hubPort,
 		"HUB_BESU_RPC_URL": containerReachable(c.HubRPC),
+		// Hub chain id: needed so the gateway signs hub transactions for the right chain
+		// instead of assuming the local default. Empty when unknown (hand-built configs in
+		// tests) so the compose template's own default applies.
+		"HUB_CHAIN_ID": hubChainIDEnv(c.HubChainID),
 		// infra: postgres + redis (single DB doubles as the keycloak DB locally)
 		"POSTGRES_USER":     "cbweb3",
 		"POSTGRES_PASSWORD": "cbweb3",
@@ -556,6 +600,15 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// the Keycloak realm/client are provisioned by provision-keycloak-spoke.
 		"SPOKE_CHAIN_ID": fmt.Sprintf("%d", c.SpokeChainID),
 		"CB_PRIVATE_KEY": devDeployerKey,
+		// Hub signing key: a CB IS a verified Hub participant, so its gateway signs Hub acts
+		// directly — including the AMM swaps it executes on behalf of its member banks
+		// (POST /internal/amm/cross-currency-hub-swap). Per-CB and distinct from the spoke
+		// deployer key, so this CB's acts on the shared hub are attributable to it alone.
+		// Left empty on a bank.
+		"HUB_SIGNER_PRIVATE_KEY": c.cbHubKey(),
+		// The same identity as an address: the gateway grants it LiquidityProvider on the hub
+		// IdentityRegistry at boot (idempotent) and uses it for hub balance reads.
+		"LOCAL_CB_HUB_SIGNER": c.cbHubAddress(),
 		// The CB's own on-chain address (the dev deployer). Wired into the api-gateway
 		// so its payment routes (backed by the entity-relayer orchestrator via
 		// PAYMENT_GRPC_ADDR) resolve the CB's account.
@@ -675,10 +728,8 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				if hub.HubGateway == "" {
 					return fmt.Errorf("register-cb: hub bundle has no hubGateway URL")
 				}
-				cbAddr := c.CBAddress
-				if cbAddr == "" {
-					cbAddr = devDeployerAddr
-				}
+				// The hub registers THIS CB's own hub identity, not the founder's.
+				cbAddr := c.cbHubAddress()
 				payload, err := json.Marshal(map[string]string{
 					"spoke_id":         c.SpokeID,
 					"cb_address":       cbAddr,
@@ -728,10 +779,9 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				if hub.HubGateway == "" {
 					return fmt.Errorf("register-currency: hub bundle has no hubGateway URL")
 				}
-				cbAddr := c.CBAddress
-				if cbAddr == "" {
-					cbAddr = devDeployerAddr
-				}
+				// CENTRAL_BANK_ROLE on the sovereign W-token is handed to THIS CB's hub
+				// identity, so no other CB can mint or burn this currency.
+				cbAddr := c.cbHubAddress()
 				payload, err := json.Marshal(map[string]string{
 					"currency":   c.Currency,
 					"cb_address": cbAddr,
@@ -821,13 +871,12 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 				if err := c.WaitRPC(ctx); err != nil {
 					return err
 				}
-				// Local dev: the CB is admin+deployer unless a distinct CB address is
-				// supplied. --legacy for the zero-gas spoke chain; token names derive
-				// from the manifest currency.
-				cbAddr := c.CBAddress
-				if cbAddr == "" {
-					cbAddr = devDeployerAddr
-				}
+				// CENTRAL_BANK_ROLE on the SPOKE tokens must belong to the address that
+				// actually signs spoke transactions — the deployer, which is what the CB's
+				// relayer and gateway use (CB_PRIVATE_KEY / BESU_OPERATOR_KEY). This is NOT
+				// the CB's hub identity: granting it here would leave the relayer unable to
+				// mint or burn tCeBM on its own spoke. --legacy for the zero-gas chain.
+				cbAddr := devDeployerAddr
 				cmd := fmt.Sprintf("cd %q && "+
 					"DEPLOYER_PRIVATE_KEY=%s ADMIN_ADDRESS=%s CENTRAL_BANK_ADDRESS=%s "+
 					"TOKEN_NAME=%q TOKEN_SYMBOL=%q FIAT_TOKEN_NAME=%q FIAT_TOKEN_SYMBOL=%q "+

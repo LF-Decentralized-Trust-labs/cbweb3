@@ -169,6 +169,11 @@ type CrossCurrencySwapOrchestrator struct {
 	// residueRelay is optional: when set, Step 4 delegates the residue return to the
 	// issuing CB of the payer's spoke (sovereign model), mirroring bridgeInRelay.
 	residueRelay ResidueReturnRelayIface
+	// hubSwapRelay is optional: when set, Step 2 delegates the Hub AMM swap to the issuing
+	// CB instead of executing it locally. Only central banks hold a Hub identity, so a
+	// commercial gateway that swaps locally can only do so with the CB's key — the sovereign
+	// key outside the sovereign. With the relay wired, this gateway needs no Hub signer.
+	hubSwapRelay HubSwapRelayIface
 	// payerWalletResolver resolves the payer's spoke wallet for the local Step 4 path.
 	// Only consulted when residueRelay is nil (this gateway is the issuing CB itself).
 	payerWalletResolver SpokeWalletResolverIface
@@ -245,6 +250,14 @@ func (o *CrossCurrencySwapOrchestrator) WithAMMAddressResolver(r AMMAddressResol
 // When set, the return is delegated to the issuing CB instead of enqueued locally.
 func (o *CrossCurrencySwapOrchestrator) WithResidueReturnRelay(relay ResidueReturnRelayIface) *CrossCurrencySwapOrchestrator {
 	o.residueRelay = relay
+	return o
+}
+
+// WithHubSwapRelay attaches the Step 2 relay for the sovereign Hub AMM swap.
+// When set, the swap is executed by the issuing CB with its own signer instead of by this
+// gateway, so no Hub private key is needed here at all.
+func (o *CrossCurrencySwapOrchestrator) WithHubSwapRelay(relay HubSwapRelayIface) *CrossCurrencySwapOrchestrator {
+	o.hubSwapRelay = relay
 	return o
 }
 
@@ -453,28 +466,54 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 		req.CorrelationID, req.SourceCurrency, req.TargetCurrency)
 	_ = o.swapRepo.UpdateStatus(ctx, req.SwapID, domain.SwapStatusSwapInProgress)
 
-	// Resolve the swap direction from the requested target currency vs the pair's
-	// token orientation, so a single sovereign pair serves both directions (e.g. the
-	// BRL↔COP pair handles both BRL→COP and COP→BRL). Defaults to A→B when unresolved.
-	outputIsTokenA := false
-	if o.ammAddrResolver != nil {
-		if isA, dErr := o.ammAddrResolver.OutputIsTokenA(ctx, req.PoolPair, req.TargetCurrency); dErr == nil {
-			outputIsTokenA = isA
-		} else {
-			log.Printf("[correlation_id=%s] WARNING: could not resolve swap direction for pool %s target %s: %v (defaulting A→B)",
-				req.CorrelationID, req.PoolPair, req.TargetCurrency, dErr)
+	// Two paths, mirroring Step 1:
+	//
+	//	A) hubSwapRelay != nil — sovereign model: the issuing CB executes the trade with its
+	//	   own signer. The Hub AMM admits only verified Hub participants, and only CBs hold a
+	//	   Hub identity; swapping locally would mean this gateway holding the CB's key. The CB
+	//	   resolves the pair's AMM and the corridor direction from its own PairRegistry and
+	//	   bounds the spend by the bridge-in position it minted.
+	//
+	//	B) hubSwapRelay == nil — local: this gateway is the issuing CB itself (or a dev stack
+	//	   configured with a Hub signer), so it resolves the direction and swaps directly.
+	var (
+		swapResult *SwapResult
+		err        error
+	)
+	if o.hubSwapRelay != nil {
+		swapResult, err = o.hubSwapRelay.ExecuteHubSwap(ctx, CrossCurrencyHubSwapRequest{
+			CorrelationID:      req.CorrelationID,
+			PayerBankID:        req.PayerBankID,
+			BeneficiaryBankID:  req.BeneficiaryBankID,
+			BridgeInPositionID: bridgeInPositionID,
+			PoolPair:           req.PoolPair,
+			TargetCurrency:     req.TargetCurrency,
+			AmountOut:          req.AmountOut,
+			MaxAmountIn:        req.MaxAmountIn,
+		})
+	} else {
+		// Resolve the swap direction from the requested target currency vs the pair's
+		// token orientation, so a single sovereign pair serves both directions (e.g. the
+		// BRL↔COP pair handles both BRL→COP and COP→BRL). Defaults to A→B when unresolved.
+		outputIsTokenA := false
+		if o.ammAddrResolver != nil {
+			if isA, dErr := o.ammAddrResolver.OutputIsTokenA(ctx, req.PoolPair, req.TargetCurrency); dErr == nil {
+				outputIsTokenA = isA
+			} else {
+				log.Printf("[correlation_id=%s] WARNING: could not resolve swap direction for pool %s target %s: %v (defaulting A→B)",
+					req.CorrelationID, req.PoolPair, req.TargetCurrency, dErr)
+			}
 		}
-	}
 
-	swapReq := SwapRequest{
-		Pair:           req.PoolPair,
-		AmountOut:      req.AmountOut,
-		MaxAmountIn:    req.MaxAmountIn,
-		PayerID:        req.PayerBankID,
-		BeneficiaryID:  req.BeneficiaryBankID,
-		OutputIsTokenA: outputIsTokenA,
+		swapResult, err = o.swapService.Execute(ctx, SwapRequest{
+			Pair:           req.PoolPair,
+			AmountOut:      req.AmountOut,
+			MaxAmountIn:    req.MaxAmountIn,
+			PayerID:        req.PayerBankID,
+			BeneficiaryID:  req.BeneficiaryBankID,
+			OutputIsTokenA: outputIsTokenA,
+		})
 	}
-	swapResult, err := o.swapService.Execute(ctx, swapReq)
 	if err != nil {
 		// Swap failed after bridge-in — trigger automatic rollback
 		log.Printf("[correlation_id=%s] swap failed, triggering rollback: %v", req.CorrelationID, err)
@@ -486,6 +525,15 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			}
 		}
 		return nil, fmt.Errorf("swap failed: %w", err)
+	}
+
+	// The Hub address that now holds the swap output. When Step 2 was delegated, the trade ran
+	// as the issuing CB and the output sits on that CB's address — not on this gateway's, which
+	// in the delegated model may have no key at all. Step 3 and the local Step 4 must both use
+	// this address, or the beneficiary CB burns from the wrong place.
+	swapSenderAddress := o.hubSignerAddress
+	if swapResult.HubSenderAddress != "" {
+		swapSenderAddress = swapResult.HubSenderAddress
 	}
 
 	_ = o.swapRepo.UpdateSwapResult(ctx, req.SwapID, swapResult.TxHash, swapResult.AmountIn)
@@ -555,7 +603,7 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			return
 		}
 		residueReturned = true
-		residuePositionID, residueStatus = o.returnResidue(ctx, req, residue, bridgeInPositionID, swapResult.TxHash)
+		residuePositionID, residueStatus = o.returnResidue(ctx, req, residue, bridgeInPositionID, swapResult.TxHash, swapSenderAddress)
 	}
 
 	// Step 3: Bridge-Out (Hub → Spoke-B)
@@ -607,9 +655,10 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 				}
 				return ""
 			}(),
-			// SwapSenderAddress is where the W-ARS landed after the AMM swap.
+			// SwapSenderAddress is where the W-ARS landed after the AMM swap — the executing
+			// CB when Step 2 was delegated, this gateway's signer otherwise.
 			// CB-B burns from this address (CENTRAL_BANK_ROLE allows burn from any address).
-			SwapSenderAddress: o.hubSignerAddress,
+			SwapSenderAddress: swapSenderAddress,
 			// BeneficiarySpokeAddress is intentionally NOT sent — CB-B resolves
 			// the beneficiary address internally from its participants registry.
 		}
@@ -721,6 +770,7 @@ func (o *CrossCurrencySwapOrchestrator) returnResidue(
 	residue *big.Int,
 	bridgeInPositionID string,
 	swapTxHash string,
+	swapSenderAddress string,
 ) (string, domain.ResidueReturnStatus) {
 	if residue.Sign() <= 0 {
 		// The swap consumed the whole cap — nothing to give back.
@@ -732,11 +782,11 @@ func (o *CrossCurrencySwapOrchestrator) returnResidue(
 	log.Printf("[correlation_id=%s] Step 4: Residue return (burn %s W-%s on Hub, return %s on %s)",
 		req.CorrelationID, residue.String(), req.SourceCurrency, req.SourceCurrency, spokeIn)
 
-	positionID, err := o.dispatchResidueReturn(ctx, req, residue, bridgeInPositionID, swapTxHash, spokeIn)
+	positionID, err := o.dispatchResidueReturn(ctx, req, residue, bridgeInPositionID, swapTxHash, spokeIn, swapSenderAddress)
 	if err != nil {
 		// Deliberately not failSwap: the payment settled. Record it for reconciliation.
 		log.Printf("[correlation_id=%s] WARNING: residue return failed — %s W-%s remains on the Hub swap signer %s and the payer is over-debited until reconciled: %v",
-			req.CorrelationID, residue.String(), req.SourceCurrency, o.hubSignerAddress, err)
+			req.CorrelationID, residue.String(), req.SourceCurrency, swapSenderAddress, err)
 		_ = o.swapRepo.UpdateResidue(ctx, req.SwapID, residue.String(), "", domain.ResidueReturnFailed)
 		return "", domain.ResidueReturnFailed
 	}
@@ -755,6 +805,7 @@ func (o *CrossCurrencySwapOrchestrator) dispatchResidueReturn(
 	bridgeInPositionID string,
 	swapTxHash string,
 	spokeIn string,
+	swapSenderAddress string,
 ) (string, error) {
 	if o.residueRelay != nil {
 		// ── Path A: sovereign model — the issuing CB derives and executes the return ──
@@ -806,7 +857,7 @@ func (o *CrossCurrencySwapOrchestrator) dispatchResidueReturn(
 		mirroredAsset,
 		residue.String(),
 		req.CorrelationID,
-		o.hubSignerAddress, // burnFromHubAddress — where the unspent W-<source> sits
+		swapSenderAddress,  // burnFromHubAddress — where the unspent W-<source> sits
 		payerWallet,        // beneficiarySpokeAddress — back to the payer
 		swapTxHash,         // idempotency, scoped to the RESIDUE leg
 		bridgeInPositionID, // parent position this return corrects

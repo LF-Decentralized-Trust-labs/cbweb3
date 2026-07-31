@@ -29,12 +29,18 @@ type TransferVolumeRepo interface {
 }
 
 // TransferLimitCheckerIface is the interface consumed by the swap orchestrator and bridge handler.
+//
+// amountBase is in BASE UNITS (wei) — the same unit every caller already works in: the
+// cross-currency orchestrator passes max_amount_in straight from the API, the bridge handler
+// passes the lock-mint amount, and the CB-internal pre-auth forwards what the bank sent. The
+// configured limit, by contrast, is stored as a human decimal string and is converted here.
+// Converting BOTH was the bug: a payment of 3000000000000000000 was compared against a limit
+// of "1000", so any configured limit rejected every transfer.
 type TransferLimitCheckerIface interface {
 	// CheckAndDeduct validates the transfer against the applicable daily limit and records volume.
-	// amountHuman is a human-readable decimal string (e.g. "1000.50"); converted to wei internally.
-	CheckAndDeduct(ctx context.Context, payerBankID, currency, amountHuman string) error
+	CheckAndDeduct(ctx context.Context, payerBankID, currency, amountBase string) error
 	// Restore returns a previously deducted amount to the daily quota on synchronous failure.
-	Restore(ctx context.Context, payerBankID, currency, amountHuman string)
+	Restore(ctx context.Context, payerBankID, currency, amountBase string)
 }
 
 // ErrTransferLimitExceeded is returned when a transfer would breach the configured daily limit.
@@ -60,15 +66,16 @@ func NewTransferLimitChecker(limitRepo TransferLimitRepo, volumeRepo TransferVol
 }
 
 // CheckAndDeduct validates and records the transfer volume against the daily limit.
-func (c *TransferLimitChecker) CheckAndDeduct(ctx context.Context, payerBankID, currency, amountHuman string) error {
+func (c *TransferLimitChecker) CheckAndDeduct(ctx context.Context, payerBankID, currency, amountBase string) error {
 	cbID := centralBankIDForPayer(payerBankID)
 	if cbID == "" {
 		return nil
 	}
 
-	amountWei, err := humanToWei(amountHuman)
+	// The amount arrives in base units; only the configured limit needs converting.
+	amountWei, err := weiFromString(amountBase)
 	if err != nil {
-		return fmt.Errorf("invalid transfer amount %q: %w", amountHuman, err)
+		return fmt.Errorf("invalid transfer amount %q: %w", amountBase, err)
 	}
 
 	limit, err := c.limitRepo.FindApplicableLimit(ctx, cbID, payerBankID, currency)
@@ -110,8 +117,9 @@ func (c *TransferLimitChecker) CheckAndDeduct(ctx context.Context, payerBankID, 
 
 // Restore returns a previously deducted volume on synchronous failure.
 // Errors are swallowed — this is a best-effort compensation call.
-func (c *TransferLimitChecker) Restore(ctx context.Context, payerBankID, currency, amountHuman string) {
-	amountWei, err := humanToWei(amountHuman)
+func (c *TransferLimitChecker) Restore(ctx context.Context, payerBankID, currency, amountBase string) {
+	// Same unit as CheckAndDeduct deducted, or the quota would drift on every failure.
+	amountWei, err := weiFromString(amountBase)
 	if err != nil {
 		return
 	}

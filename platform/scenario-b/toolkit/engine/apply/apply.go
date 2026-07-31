@@ -168,6 +168,7 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		CBAddress:           o.CBAddress,
 		HubBundlePath:       hubBundlePath,
 		HubRPC:              hubRPC,
+		HubChainID:          hub.ChainID,
 		SpokeEnvFile:        filepath.Join(dataDir, ".env.spoke"),
 		KeycloakEnv:         []string{filepath.Join(dataDir, ".env.spoke")},
 		GatewayURL:          o.GatewayURL,
@@ -217,14 +218,19 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	// a re-apply skips re-registration. Not in dry-run (Check runs before the
 	// dry-run branch, so a live probe would be an effect) and only when the hub
 	// RPC + CB address are known.
-	if !o.DryRun && hubRPC != "" && o.CBAddress != "" {
+	// The probe must target the address register-cb will actually register: the CB's own
+	// derived hub identity, unless an operator pinned one via -cb-address. Probing the
+	// founder's address instead would report "already registered" for every CB and skip the
+	// registration of the one that matters.
+	if !o.DryRun && hubRPC != "" {
+		cbHubAddr := cfg.CBHubAddress()
 		identityRegistry := hub.Contracts["identityRegistry"]
 		// The probe runs in the HOST toolkit process, so localize the bundle's
 		// host.docker.internal hub RPC (a container sentinel) to localhost; a routable
 		// multi-VM hub RPC is left unchanged.
 		hubProbeRPC := orchestrator.HostReachable(hubRPC)
 		cfg.CBRegistered = func(ctx context.Context) (bool, error) {
-			return orchestrator.HubCBRegistered(ctx, hubProbeRPC, identityRegistry, o.CBAddress)
+			return orchestrator.HubCBRegistered(ctx, hubProbeRPC, identityRegistry, cbHubAddr)
 		}
 	}
 

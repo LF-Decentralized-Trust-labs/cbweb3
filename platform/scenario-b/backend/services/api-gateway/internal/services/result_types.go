@@ -37,6 +37,19 @@ type BridgePositionDetail struct {
 	Leg                  string
 }
 
+// HubSwapRecord is the CB's record of a Hub AMM swap it executed on behalf of a bank
+// (sovereign delegation of Step 2). Keyed on the funding bridge-in position, which backs
+// exactly one swap — the replay anchor for a retried delegation.
+type HubSwapRecord struct {
+	BridgeInPositionID string
+	CorrelationID      string
+	PayerBankID        string
+	PoolPair           string
+	AmountOut          string
+	AmountIn           string
+	SwapTxHash         string
+}
+
 // DisclosureResult is the service-level result for oversight disclosure operations.
 type DisclosureResult struct {
 	RequestID            string     `json:"request_id"`

@@ -100,6 +100,20 @@ type Dependencies struct {
 	CrossCurrencyBridgePositionReader handlers.BridgePositionDetailReaderIface
 	// CrossCurrencyResidueDuplicateFinder is the residue-leg idempotency lookup.
 	CrossCurrencyResidueDuplicateFinder handlers.ResidueDuplicateFinderIface
+	// CrossCurrencyHubSwapExecutor enables POST /internal/amm/cross-currency-hub-swap: the
+	// issuing CB runs the Step 2 Hub AMM trade with its own signer, so a commercial bank
+	// never needs a Hub key. Set only on CB gateways that hold a signing AMM client.
+	CrossCurrencyHubSwapExecutor handlers.HubSwapExecutorIface
+	// CrossCurrencyHubSwapRecorder is the replay guard for delegated swaps, keyed on the
+	// funding bridge-in position. The endpoint is not registered without it.
+	CrossCurrencyHubSwapRecorder handlers.HubSwapRecorderIface
+	// CrossCurrencyHubSwapDirection resolves the corridor direction for a pool_pair so one
+	// sovereign pair serves both ways. Optional (nil ⇒ A→B orientation).
+	CrossCurrencyHubSwapDirection handlers.SwapDirectionResolverIface
+	// HubSignerAddress is this gateway's own Hub address, derived from SIGNER_PRIVATE_KEY.
+	// A CB returns it on a delegated swap so the bank can tell the beneficiary CB where the
+	// swap output landed. Empty on a gateway with no Hub signing key (a delegating bank).
+	HubSignerAddress string
 	// LPPositionRepo enables GET /api/v2/amm/liquidity/positions (008-fix-cb-liquidity).
 	LPPositionRepo handlers.LPPositionReaderIface
 	// LPBalanceReader enables GET /api/v2/amm/lp-balance — the CB's live on-chain CBW3-LP position (013).
@@ -584,9 +598,32 @@ func registerSovereignRoutes(app *fiber.App, deps Dependencies) {
 				deps.CrossCurrencyPayerWalletResolver,
 			)
 		}
+		// Mint target for a delegating bank that names no Hub address (it holds no Hub key):
+		// this CB, which is what spends the W-<source> in the delegated Step 2.
+		ccbih = ccbih.WithHubSignerAddress(deps.HubSignerAddress)
 		app.Post("/internal/amm/cross-currency-bridge-in",
 			middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 			ccbih.HandleBridgeIn,
+		)
+	}
+
+	// Hub AMM swap (Step 2) for the issuing CB: the AMM admits only verified Hub participants
+	// and only CBs hold a Hub identity, so the CB executes the trade for the payer bank with
+	// its own signer. The alternative — the bank signing on the Hub — requires the CB's key to
+	// live in the bank's container, which is the opposite of sovereign concentration.
+	if deps.CrossCurrencyHubSwapExecutor != nil && deps.CrossCurrencyBridgePositionReader != nil &&
+		deps.CrossCurrencyHubSwapRecorder != nil {
+		cchsh := handlers.NewCrossCurrencyHubSwapHandler(
+			deps.CrossCurrencyHubSwapExecutor,
+			deps.CrossCurrencyBridgePositionReader,
+			deps.CrossCurrencyHubSwapRecorder,
+			deps.CrossCurrencyBeneficiaryResolver,
+			deps.WTokenAddress,
+			deps.HubSignerAddress,
+		).WithDirectionResolver(deps.CrossCurrencyHubSwapDirection)
+		app.Post(services.HubSwapPath,
+			middleware.RequireRelayAuthMigrating(deps.RelayAuth),
+			cchsh.HandleHubSwap,
 		)
 	}
 

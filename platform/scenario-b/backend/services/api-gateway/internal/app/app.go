@@ -258,6 +258,17 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	dbURL := os.Getenv("DATABASE_URL")
 	hubRPC := os.Getenv("HUB_BESU_RPC_URL")
 	signerKey := os.Getenv("SIGNER_PRIVATE_KEY")
+	// This gateway's own Hub address, derived once from SIGNER_PRIVATE_KEY. A CB needs it to
+	// tell a delegating bank where a swap output landed; a bank that delegates every Hub act
+	// has no signing key and leaves this empty.
+	hubSignerAddr := ""
+	if signerKey != "" {
+		if privKey, keyErr := crypto.HexToECDSA(strings.TrimPrefix(signerKey, "0x")); keyErr == nil {
+			hubSignerAddr = crypto.PubkeyToAddress(privKey.PublicKey).Hex()
+		} else {
+			log.Printf("warning: SIGNER_PRIVATE_KEY is not a valid secp256k1 key: %v — Hub signing disabled", keyErr)
+		}
+	}
 	chainIDStr := resolveHubChainIDStr(log.New(os.Stderr, "", 0))
 	// When SOVEREIGN_HUB_TOKEN_A/B_ADDRESS is set, use it for the token preparer
 	// (mint+approve). Falls back to HUB_TOKEN_A/B_ADDRESS for regular pairs.
@@ -606,6 +617,17 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 				orchestrator = orchestrator.WithBridgeInRelay(bridgeInRelay)
 				log.Printf("[app] CrossCurrencySwapOrchestrator: bridge-in relay wired (CB %s)", cbURL)
 
+				// Step 2 goes to the same CB over the same channel: the Hub AMM admits only
+				// verified Hub participants and this gateway is not one. Delegating the trade
+				// keeps the CB's key inside the CB — the alternative is signing on the Hub with
+				// a key this container should never hold.
+				hubSwapRelay := services.NewCrossCurrencyHubSwapRelay(cbURL, relaySecret)
+				if relaySigner != nil {
+					hubSwapRelay = hubSwapRelay.WithSigner(relaySigner)
+				}
+				orchestrator = orchestrator.WithHubSwapRelay(hubSwapRelay)
+				log.Printf("[app] CrossCurrencySwapOrchestrator: hub-swap relay wired (CB %s) — no Hub signing key needed on this gateway", cbURL)
+
 				// Step 4 goes back to the same CB over the same channel: it bridged the
 				// slippage buffer in, so it is the one that can give the remainder back.
 				residueRelay := services.NewCrossCurrencyResidueRelay(cbURL, relaySecret)
@@ -619,15 +641,12 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			}
 		}
 
-		// Derive the Hub signer address from SIGNER_PRIVATE_KEY so CB-B knows where
-		// W-ARS landed after the AMM swap.
-		if signerKey != "" {
-			rawKey := strings.TrimPrefix(signerKey, "0x")
-			if privKey, keyErr := crypto.HexToECDSA(rawKey); keyErr == nil {
-				addr := crypto.PubkeyToAddress(privKey.PublicKey)
-				orchestrator = orchestrator.WithHubSignerAddress(addr.Hex())
-				log.Printf("[app] CrossCurrencySwapOrchestrator: hub signer address = %s", addr.Hex())
-			}
+		// The Hub signer address (derived above) tells CB-B where W-<target> landed after a
+		// locally executed swap. When Step 2 is delegated, the executing CB reports its own
+		// address on the response instead — this gateway may hold no Hub key at all.
+		if hubSignerAddr != "" {
+			orchestrator = orchestrator.WithHubSignerAddress(hubSignerAddr)
+			log.Printf("[app] CrossCurrencySwapOrchestrator: hub signer address = %s", hubSignerAddr)
 		}
 
 		if transferLimitChecker != nil {
@@ -681,7 +700,10 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			log.Printf("warning: PairRegistry client init failed: %v", err)
 		} else {
 			pairRepo := NewPairRepository(db)
-			deps.PairService = services.NewPairService(prClient, pairRepo)
+			// The authority reader lets an unauthorized confirm be refused with its real reason
+			// instead of a reverted transaction and a generic message.
+			deps.PairService = services.NewPairService(prClient, pairRepo).
+				WithTokenAuthorityReader(prClient)
 		}
 	} else if db != nil {
 		// Read-only mode: ListActivePairs only (no on-chain calls).
@@ -812,6 +834,9 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	deps.ApproveSide = cfg.ApproveSide
 	// Fix: populate LOCAL_CB_HUB_SIGNER for balance checks (recipient of lock-mint tokens).
 	deps.LocalCBHubSigner = strings.ToLower(os.Getenv("LOCAL_CB_HUB_SIGNER"))
+	// This gateway's own Hub address: a CB reports it on a delegated swap so the bank knows
+	// where the output landed. Empty on a bank that holds no Hub key.
+	deps.HubSignerAddress = hubSignerAddr
 
 	// 009-commercial-cross-currency-swap: cross-currency bridge-out receiver (CB-B side).
 	// Register the internal Cacti relay endpoint when this gateway has a BridgeBurnUnlockService
@@ -856,6 +881,26 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			}
 		} else {
 			log.Printf("[app] WARNING: PAYMENT_GRPC_ADDR not set — Reserve Tokenisation balance enforcement disabled on bridge-in handler")
+		}
+
+		// Step 2 receiver: the Hub AMM admits only verified Hub participants, and only a CB
+		// holds a Hub identity — so the CB executes the trade for the bank instead of handing
+		// the bank its signing key. Requires a signing AMM client (pairResolver + signerKey)
+		// and the replay guard; without either the endpoint is not registered and a delegating
+		// bank sees a clean 404 rather than an unguarded swap.
+		if pairResolver != nil && signerKey != "" && swapSvc != nil {
+			deps.CrossCurrencyHubSwapExecutor = &swapServiceAdapter{svc: swapSvc}
+			deps.CrossCurrencyHubSwapRecorder = newCrossCurrencyHubSwapRepository(db)
+			deps.CrossCurrencyHubSwapDirection = &ammAddrResolverAdapter{r: pairResolver}
+			if deps.CrossCurrencyBridgePositionReader == nil {
+				deps.CrossCurrencyBridgePositionReader = services.NewBridgePositionReader(db)
+			}
+			if deps.CrossCurrencyBeneficiaryResolver == nil {
+				deps.CrossCurrencyBeneficiaryResolver = services.NewParticipantResolver(db)
+			}
+			log.Printf("[app] sovereign hub swap delegation enabled (POST %s)", services.HubSwapPath)
+		} else {
+			log.Printf("[app] WARNING: hub swap delegation not registered (needs PAIR_REGISTRY_CONTRACT_ADDRESS + HUB_BESU_RPC_URL + SIGNER_PRIVATE_KEY) — delegating banks will fall back to signing on the Hub themselves")
 		}
 
 		// Step 4 receiver: the CB that bridged W-<source> in is also the only one that can

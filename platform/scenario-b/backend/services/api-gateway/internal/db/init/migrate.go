@@ -92,6 +92,11 @@ func autoMigrateModels(db *gorm.DB) error {
 		&apidomain.SwapRollbackLog{},
 		&apidomain.SwapRateLimitCounter{},
 
+		// Sovereign delegation of the Hub AMM swap (Step 2): the CB records each swap it
+		// executed for a bank, keyed on the funding bridge-in position, so a retried
+		// delegation never runs the swap twice.
+		&apidomain.CrossCurrencyHubSwap{},
+
 		// R1-10.1: configurable CB transfer limits + daily volume tracking
 		&apidomain.TransferLimit{},
 		&apidomain.TransferVolumeLog{},

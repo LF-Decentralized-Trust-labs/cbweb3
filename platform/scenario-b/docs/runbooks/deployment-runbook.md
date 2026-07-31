@@ -17,6 +17,7 @@ This runbook describes the complete procedure for bringing up the CBWeb3 Scenari
 - [Scope](#scope)
 - [Prerequisites](#prerequisites)
 - [Command overview](#command-overview)
+- [Upgrade safety — irreversible steps](#upgrade-safety--irreversible-steps)
 - [Step-by-step deployment](#step-by-step-deployment)
   - [Phase 1 — PKI certificate generation](#phase-1--pki-certificate-generation)
   - [Phase 2 — Shared infrastructure](#phase-2--shared-infrastructure)
@@ -91,6 +92,159 @@ make scenario-b.up-backend       # Phase 6 — all 6 entity backends
 make scenario-b.up-backend-mlp   # Phase 7 — MLP stack (requires ENABLE_MLP=true)
 make scenario-b.up-relayer       # Phase 8 — Cacti LiquidityCommitWatcher
 ```
+
+---
+
+## Upgrade safety — irreversible steps
+
+This release contains **forward-only** steps. Once each has run, downgrading the binaries or the
+toolkit leaves the platform in a state the previous version cannot operate. There is no
+automated rollback. Read this section before deploying and take the snapshot in the checklist.
+
+### 1. Residue leg — replay-protection index
+
+**What changed.** The unique index on `bridged_asset_positions` moved from `swap_tx_hash` alone
+to `(swap_tx_hash, leg)`, with `leg ∈ {SETTLEMENT, RESIDUE}`. A single swap now legitimately
+produces two positions — the payment and the return of the unspent slippage buffer. The
+replacement index is created by `AutoMigrate` **before** the legacy one is dropped, and the drop
+is refused if the replacement is absent, so replay protection is never missing mid-migration.
+
+**Point of no return.** The first `RESIDUE` row.
+
+**What a downgrade breaks.** The previous binary queries `swap_tx_hash` without a leg filter, so
+a `RESIDUE` row reads as an already-consumed settlement and legitimate bridge-outs are rejected
+as replays. Payments stop settling.
+
+**Recovery.** None in place. Restore each CB's Postgres from a snapshot taken before the first
+residue return.
+
+### 2. Sovereign issuance-authority handover
+
+**What changed.** `register-currency` deploys the W-token, registers the currency with the hub
+signer as interim central bank (`CurrencyRegistry.registerCurrency` admits only
+`getCentralBankOf(token)` as caller), then transfers `CENTRAL_BANK_ROLE` to the CB's own hub
+address and **revokes it from the hub governance signer**. A sovereign currency must not be
+issuable by the hub.
+
+**Point of no return.** The revoke — per currency.
+
+**What a downgrade breaks.** An older toolkit provisions the CB's gateway and relayer with the
+spoke deployer key as their hub signer. That address holds no `CENTRAL_BANK_ROLE` on the
+W-token, and the hub's signer no longer holds it either, so **nobody** can mint or burn that
+currency: bridge-in and bridge-out both stop.
+
+**Verify (per W-token).**
+
+```bash
+TOKEN=$(curl -sS -b "access_token=$CB_TOKEN" "$CB_GW/api/v2/hub/currencies" \
+  | python3 -c 'import sys,json;print(next(c["token_address"] for c in json.load(sys.stdin)["currencies"] if c["symbol"]=="W-tCeBM_BRL"))')
+ROLE=$(cast call "$TOKEN" 'CENTRAL_BANK_ROLE()(bytes32)' --rpc-url "$HUB_RPC")
+
+# Expect true for the CB's own hub address, false for the hub governance signer.
+cast call "$TOKEN" 'hasRole(bytes32,address)(bool)' "$ROLE" "$CB_HUB_ADDR"  --rpc-url "$HUB_RPC"
+cast call "$TOKEN" 'hasRole(bytes32,address)(bool)' "$ROLE" "$HUB_ADMIN_ADDR" --rpc-url "$HUB_RPC"
+```
+
+**Recovery.** Re-run `apply` with the current toolkit: `EnsureCurrencyAuthority` reads the
+on-chain state and completes only the outstanding steps, so a run interrupted between
+registration and handover converges. Handing authority back to the hub is **not** automated — it
+requires an explicit `grantRole` signed with the token's `DEFAULT_ADMIN_ROLE`.
+
+### 3. Per-CB hub identity in the environment
+
+**What changed.** The hub signing key is per central bank and derived deterministically from the
+spoke id: `HUB_SIGNER_PRIVATE_KEY`, plus `LOCAL_CB_HUB_SIGNER` (the same identity as an address)
+and `HUB_CHAIN_ID`. A commercial bank's gateway receives an **empty** hub signing key by design —
+it delegates every hub act to its central bank. The spoke key (`CB_PRIVATE_KEY`) is unchanged: it
+holds the roles granted when that spoke's own contracts were deployed.
+
+**Point of no return.** Coupled with item 2 — the roles on-chain now follow the derived address.
+
+**Check after apply.**
+
+| Entity | `SIGNER_PRIVATE_KEY` in the api-gateway |
+|---|---|
+| Central bank | its derived hub identity (same as `LOCAL_CB_HUB_SIGNER`) |
+| Commercial bank | **empty** |
+
+A bank that still carries a hub key is a finding, not a convenience: that key is the CB's, and it
+is also the hub governance admin in local stacks.
+
+### 4. Corridor opening is bilateral (procedure change)
+
+**What changed.** No data migration — the procedure. `PairRegistry` admits only
+`getCentralBankOf(tokenA)` as proposer and `getCentralBankOf(tokenB)` as confirmer. Since each
+currency's authority now rests with its own CB, the hub is neither. The M2M shortcut
+`POST /internal/v1/spokes/register-pair` deploys the AMM and then refuses, returning
+`FailedPrecondition` naming the two addresses that owe each act.
+
+**New procedure.** The issuing CB of token A calls `POST /api/v2/amm/pairs/propose` (omit
+`amm_address` so the pair's dedicated AMM is deployed in the same signed call); the issuing CB of
+token B calls `POST /api/v2/amm/pairs/confirm`. Both are governance-portal actions.
+
+**If the old procedure is used.** The call fails and leaves an orphaned AMM — deployed but never
+registered. Harmless but wasteful; do not retry the endpoint in a loop, as each attempt deploys
+another one.
+
+### 5. Delegated-swap replay guard (additive)
+
+`cross_currency_hub_swaps` is created by `AutoMigrate` and keys each delegated Hub AMM swap on the
+bridge-in position that funded it, so a retried delegation cannot trade twice against the same
+bridged balance. Additive: an older binary ignores the table. Not a rollback blocker on its own,
+but a downgrade silently loses the guard.
+
+### Pre-deploy checklist
+
+- [ ] Postgres snapshot of every central bank — the only rollback path for item 1.
+- [ ] **No in-flight cross-currency swaps.** Drain them first: a position bridged in under the
+      previous code has its W-token on the old shared hub address, while after the upgrade
+      bridge-out is told to burn from the executing CB's own address. Mixing the two strands the
+      payment and needs manual reconciliation.
+- [ ] Record each CB's derived hub identity (it appears in the api-gateway boot log as
+      `hub signer address = 0x…`), so the on-chain role checks can be verified.
+- [ ] Confirm no daily transfer limits are configured with values you have not re-read since this
+      release: the limit comparison was fixed (amounts arrive in base units, only the configured
+      limit is a human decimal). Previously any configured limit rejected every transfer.
+
+### Verification after deploy
+
+Five checks, all reachable from the portals or with `cast`. The first two are the ones that
+distinguish a per-CB identity from the previous shared key — a flow that merely completes does
+not prove anything about whose identity signed.
+
+1. **The corridor is bilateral.** On a freshly PROPOSED pair, the proposing CB's own
+   `POST /api/v2/amm/pairs/confirm` must be **refused** (it is not the central bank of token B);
+   the issuing CB of token B must then succeed. While every CB shared one key, the first call
+   succeeded and a single holder closed both sides.
+2. **Each CB resolves its own side.** `POST /api/v2/amm/liquidity/deposit-side` must return
+   `side: A` for the token-A CB and `side: B` for the token-B CB. With one shared identity both
+   returned the same side and side B could never be escrowed.
+3. **Issuance authority is sovereign.** The `hasRole` checks in item 2 above: `true` for each
+   CB's own hub address, `false` for the hub governance signer, on every W-token.
+4. **No hub key on a bank.** `SIGNER_PRIVATE_KEY` empty in each commercial bank's api-gateway
+   (see the table in item 3), and the `LogSwap` sender of a completed cross-currency swap equal
+   to the source CB's hub address:
+
+   ```bash
+   cast receipt "$SWAP_TX_HASH" --rpc-url "$HUB_RPC" --json | python3 -c '
+   import sys, json
+   # LogSwap(address indexed user, address indexed tokenIn, ...) — match the event signature,
+   # since the receipt also carries ERC-20 Transfer logs whose first topic is a sender too.
+   SIG = "0x499f47d29fe8ad39124b5e7e7864cb954b8c73bb602f3853cac827a3128076d3"
+   for lg in json.load(sys.stdin).get("logs", []):
+       t = [x.lower() for x in lg.get("topics", [])]
+       if t and t[0] == SIG:
+           print("0x" + t[1][-40:]); break'
+   ```
+
+5. **The payer is not over-debited.** After a swap with a slippage buffer, the payer's tCeBM
+   balance must end down by the realized `amount_in`, not by `max_amount_in`. The residue leg
+   settles asynchronously (about 5–10 s on a local stack), so poll
+   `GET /api/v1/token/balance` rather than reading it once — an immediate read shows the
+   transient full-cap debit.
+
+A scripted version of these checks is kept outside version control (under `tmp/`), so this
+runbook does not depend on it.
 
 ---
 

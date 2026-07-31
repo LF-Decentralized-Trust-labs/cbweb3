@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -281,6 +282,9 @@ type currencyRegistrar interface {
 	RegisterCurrency(ctx context.Context, tokenName, tokenSymbol, countryName, proposerCB, cbAddress string) (tokenAddr string, txHash string, err error)
 	IsCurrencyRegistered(ctx context.Context, symbol string) (bool, error)
 	CurrencyTokenAddress(ctx context.Context, symbol string) (string, error)
+	// EnsureCurrencyAuthority completes the handover of an already-registered currency's
+	// issuance authority to its central bank. Idempotent; returns "" when nothing was due.
+	EnsureCurrencyAuthority(ctx context.Context, tokenAddress, cbAddress string) (string, error)
 }
 
 // RegisterCurrencyOnChain deploys a founding central bank's bridge token
@@ -317,6 +321,16 @@ func (s *complianceService) RegisterCurrencyOnChain(ctx context.Context, req *co
 	// resolve + return the token address so callers can wire W_TOKEN_ADDRESS on re-runs.
 	if already, err := reg.IsCurrencyRegistered(ctx, symbol); err == nil && already {
 		addr, _ := reg.CurrencyTokenAddress(ctx, symbol)
+		// Registration and the handover of issuance authority to the CB are separate
+		// transactions, so a run interrupted between them leaves a currency that only the hub
+		// can mint. Converge here instead of reporting success on a half-done handover.
+		if addr != "" {
+			if txHash, hErr := reg.EnsureCurrencyAuthority(ctx, addr, cbAddress); hErr != nil {
+				return nil, status.Errorf(codes.Internal, "currency %s is registered but its issuance authority is not with %s: %v", symbol, cbAddress, hErr)
+			} else if txHash != "" {
+				log.Printf("[compliance] currency %s: completed issuance-authority handover to %s (tx=%s)", symbol, cbAddress, txHash)
+			}
+		}
 		return &compliancv1.RegisterCurrencyOnChainResponse{Symbol: symbol, TokenAddress: addr, AlreadyRegistered: true}, nil
 	}
 
@@ -370,6 +384,15 @@ func (s *complianceService) RegisterPairOnChain(ctx context.Context, req *compli
 
 	ammAddr, txHash, err := reg.RegisterPair(ctx, symbolA, symbolB, pairID)
 	if err != nil {
+		// Once each currency's issuance authority rests with its own central bank, the
+		// PairRegistry admits only those two as proposer and confirmer — the hub is neither.
+		// FailedPrecondition (not Internal) with the AMM address and the addresses that owe
+		// each act, so the caller routes the request to the CBs' own
+		// POST /api/v2/amm/pairs/{propose,confirm} instead of retrying here.
+		var awaits *registry.PairAwaitsSovereignsError
+		if errors.As(err, &awaits) {
+			return nil, status.Errorf(codes.FailedPrecondition, "%v", awaits)
+		}
 		return nil, status.Errorf(codes.Internal, "on-chain registerPair: %v", err)
 	}
 	return &compliancv1.RegisterPairOnChainResponse{

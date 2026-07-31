@@ -25,7 +25,33 @@ const (
 	// bankKeyDerivationSalt namespaces the per-bank onboarding key derivation so a
 	// bank code can never collide with another derivation domain.
 	bankKeyDerivationSalt = "cbweb3-scenario-b-bank-key:"
+
+	// cbHubKeyDerivationSalt namespaces the per-CB HUB key derivation. A distinct
+	// domain from the bank salt so a spoke id and a bank code can never derive the
+	// same key.
+	cbHubKeyDerivationSalt = "cbweb3-scenario-b-cb-hub-key:"
 )
+
+// deriveCBHubKey deterministically derives a per-CB secp256k1 dev key for the HUB
+// chain from the spoke id, so each central bank acts on the shared hub under its own
+// identity.
+//
+// Why the hub specifically: every spoke is its own network, so reusing one key across
+// spokes is harmless there — the chains never meet. The hub is the one chain all CBs
+// share, and using a single key there made every CB's act appear on-chain as the founding
+// CB: same msg.sender on LogSwap, same CENTRAL_BANK_ROLE holder on every sovereign
+// W-token. Sovereignty was asserted in the topology but not observable on the ledger.
+//
+// The spoke-side key (CB_PRIVATE_KEY) is intentionally left alone: it is the deployer of
+// that spoke's own contracts, and rotating it would strand every role granted at deploy
+// time.
+//
+// Deterministic and stateless: a re-apply must derive the same address, or the hub-side
+// registration and role grants of the previous run would be orphaned. Zero-gas hub, so no
+// funding is needed. Dev keys, not secrets — production custody is the KeyProvider's job.
+func deriveCBHubKey(spokeID string) (privHex, addr string) {
+	return deriveKeyFromSalt(cbHubKeyDerivationSalt, spokeID)
+}
 
 // deriveBankKey deterministically derives a per-bank secp256k1 dev key from the
 // bank code, mirroring scenario-a where each commercial bank owns its key. The key
@@ -34,7 +60,14 @@ const (
 // No funding is needed: the local genesis is zero-gas. These are deterministic dev
 // keys, not secrets. Returns the 0x-prefixed private key hex and the EVM address.
 func deriveBankKey(bankCode string) (privHex, addr string) {
-	seed := crypto.Keccak256([]byte(bankKeyDerivationSalt + bankCode))
+	return deriveKeyFromSalt(bankKeyDerivationSalt, bankCode)
+}
+
+// deriveKeyFromSalt derives a deterministic secp256k1 key from a namespacing salt and an
+// id. The salt keeps derivation domains apart, so the same id in two roles never yields
+// the same key. Returns the 0x-prefixed private key hex and the EVM address.
+func deriveKeyFromSalt(salt, id string) (privHex, addr string) {
+	seed := crypto.Keccak256([]byte(salt + id))
 	for {
 		priv, err := crypto.ToECDSA(seed)
 		if err == nil {

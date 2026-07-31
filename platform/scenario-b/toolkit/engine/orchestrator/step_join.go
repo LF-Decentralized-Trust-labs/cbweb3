@@ -129,7 +129,7 @@ func (c *JoinConfig) WithDefaults() {
 func (c JoinConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
 func (c JoinConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
 func (c JoinConfig) caVolume() string       { return c.VolumePrefix + "_cb_tls" }
-func (c JoinConfig) svcTLSVolume() string    { return c.VolumePrefix + "_svc_tls" }
+func (c JoinConfig) svcTLSVolume() string   { return c.VolumePrefix + "_svc_tls" }
 func (c JoinConfig) keycloakPort() int      { return c.RPCPort + 7000 }
 
 // keycloakContainer matches entity-keycloak.compose.yaml's container_name.
@@ -320,10 +320,17 @@ func (c JoinConfig) ComposeEnv() []string {
 		"CORS_ALLOW_ORIGINS": c.corsOrigins(),
 		// app stack (compliance + auth): the bank is the local signer; the Keycloak
 		// realm/client are provisioned by provision-keycloak-bank.
-		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
-		"CB_PRIVATE_KEY":     devDeployerKey,
-		"KEYCLOAK_REALM":     bankKeycloakRealm,
-		"KEYCLOAK_CLIENT_ID": bankKeycloakClient,
+		"SPOKE_CHAIN_ID": fmt.Sprintf("%d", c.SpokeChainID),
+		"CB_PRIVATE_KEY": devDeployerKey,
+		// Hub signing key: deliberately EMPTY on a commercial bank. The Hub AMM admits only
+		// verified Hub participants and a bank is not one, so every Hub act (bridge-in mint,
+		// AMM swap, bridge-out burn, residue return) is delegated to its CB over the internal
+		// relay channel. Handing the bank the CB's key so it could sign on the Hub itself puts
+		// the sovereign key — which is also the Hub governance admin and CENTRAL_BANK_ROLE
+		// holder — inside a member bank's container. Quotes and reserve reads need no key.
+		"HUB_SIGNER_PRIVATE_KEY": "",
+		"KEYCLOAK_REALM":         bankKeycloakRealm,
+		"KEYCLOAK_CLIENT_ID":     bankKeycloakClient,
 		// CA (scenario-a commercial-bank strategy): the bank has NO CA (only the CB
 		// CA signs). Compliance mounts the bank's own host pki dir (its gen-csr
 		// key/csr) and runs in dev mode (CA_CERT_FILE empty). CA_VOLUME is still set

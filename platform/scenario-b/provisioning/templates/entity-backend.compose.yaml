@@ -133,7 +133,22 @@ services:
       # reaches the hub cross-VM; falls back to the single-host host.docker.internal
       # published port when the toolkit did not provide a routable URL.
       HUB_BESU_RPC_URL: "${HUB_BESU_RPC_URL:-http://host.docker.internal:${HUB_RPC_PORT}}"
-      SIGNER_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      # Hub signing key — set ONLY on a central bank. A commercial bank leaves it empty:
+      # the Hub AMM admits only verified Hub participants (onlyVerified(msg.sender)) and a
+      # bank has no Hub identity, so it delegates every Hub act to its CB over
+      # /internal/amm/cross-currency-{bridge-in,hub-swap,residue-return}. Giving the bank the
+      # CB's key so it could sign on the Hub itself is the sovereign key leaving the
+      # sovereign — the opposite of concentrating the corridor in the CB. Quotes and reserve
+      # reads need no key, so the AMM client still boots read-only.
+      SIGNER_PRIVATE_KEY: "${HUB_SIGNER_PRIVATE_KEY:-}"
+      # Hub chain id for signing hub transactions. Set by the toolkit from the hub bundle;
+      # the fallback matches the local hub, but a wrong chain id makes every hub tx fail
+      # with "Wrong chainId", so the real value is passed whenever it is known.
+      HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
+      # This CB's hub identity as an address (same key as SIGNER_PRIVATE_KEY above). The
+      # gateway grants it LiquidityProvider on the hub IdentityRegistry at boot (idempotent)
+      # and uses it for hub balance reads. Empty on a bank, which holds no hub identity.
+      LOCAL_CB_HUB_SIGNER: "${LOCAL_CB_HUB_SIGNER:-}"
       PAIR_REGISTRY_CONTRACT_ADDRESS: "${PAIR_REGISTRY_CONTRACT_ADDRESS:-}"
       CURRENCY_REGISTRY_CONTRACT_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"
       HUB_TOKEN_A_ADDRESS: "${HUB_TOKEN_A_ADDRESS:-}"
