@@ -11,9 +11,9 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	authv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
 
@@ -28,10 +28,14 @@ func NewIdentityGRPCManager(address string, timeout time.Duration) (*IdentityGRP
 	dialCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	credOpt, err := authz.ClientDialOptionFromEnv("auth")
+	if err != nil {
+		return nil, err
+	}
 	conn, err := grpc.DialContext( //nolint:staticcheck
 		dialCtx,
 		address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		credOpt,
 	)
 	if err != nil {
 		return nil, err

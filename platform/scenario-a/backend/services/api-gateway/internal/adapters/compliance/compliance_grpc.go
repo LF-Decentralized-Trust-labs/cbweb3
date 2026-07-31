@@ -9,9 +9,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -31,10 +31,10 @@ type Participant struct {
 }
 
 type AuditRecord struct {
-	LogID         string `json:"log_id"`
-	Timestamp     string `json:"timestamp"`
-	ActorSubject  string `json:"actor"`
-	ActorAddress  string `json:"actor_address"`
+	LogID        string `json:"log_id"`
+	Timestamp    string `json:"timestamp"`
+	ActorSubject string `json:"actor"`
+	ActorAddress string `json:"actor_address"`
 	// ActorName is the resolved institution name for ActorSubject (a user_id).
 	// Populated best-effort by the api-gateway; empty when the actor is not a
 	// registered participant.
@@ -85,11 +85,15 @@ func NewGRPCAdapter(address string, timeout time.Duration) (*GRPCAdapter, error)
 	dialCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	credOpt, err := authz.ClientDialOptionFromEnv("compliance")
+	if err != nil {
+		return nil, err
+	}
 	//nolint:staticcheck
 	conn, err := grpc.DialContext(
 		dialCtx,
 		address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		credOpt,
 	)
 	if err != nil {
 		return nil, err
