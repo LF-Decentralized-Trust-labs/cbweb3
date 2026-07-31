@@ -12,6 +12,12 @@
 #
 # Idempotent: re-running resumes from the first incomplete step per entity.
 #
+# JWT validation (R2-H-6): the api-gateway auth service enforces both the token
+# issuer (iss, derived from each entity's Keycloak URL + realm) and audience
+# (aud). The toolkit provisions an oidc-audience-mapper on every backend login
+# client so tokens carry aud=cbweb3-backend, and wires KEYCLOAK_AUDIENCE to match
+# — nothing to set here. NOC backends run NOC_SKIP_AUTH=true (unchanged).
+#
 # Usage:
 #   ./deploy-all.sh              # build CLI, start relay, deploy everything
 #   ./deploy-all.sh --clean      # wipe docker (containers+volumes) + data dirs first

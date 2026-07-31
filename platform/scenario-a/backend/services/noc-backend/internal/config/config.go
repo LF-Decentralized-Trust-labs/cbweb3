@@ -17,7 +17,10 @@ type Config struct {
 	KeycloakRealm        string
 	KeycloakClientID     string
 	KeycloakClientSecret string
-	JWKSCacheTTL         time.Duration
+	// KeycloakAudience is the expected "aud" claim (KEYCLOAK_AUDIENCE). Opt-in:
+	// empty disables the audience check. The issuer is always enforced.
+	KeycloakAudience string
+	JWKSCacheTTL     time.Duration
 	AgentGraceMultiplier int
 	FrontendOrigin       string
 	// SkipAuth disables Keycloak JWT validation for local development.
@@ -34,6 +37,7 @@ func Load() (*Config, error) {
 		KeycloakRealm:        getEnv("KEYCLOAK_REALM", "cbweb3"),
 		KeycloakClientID:     getEnv("KEYCLOAK_CLIENT_ID", "cbweb3-noc"),
 		KeycloakClientSecret: getEnv("KEYCLOAK_CLIENT_SECRET", ""),
+		KeycloakAudience:     getEnv("KEYCLOAK_AUDIENCE", ""),
 		JWKSCacheTTL:         5 * time.Minute,
 		FrontendOrigin:       getEnv("NOC_FRONTEND_ORIGIN", "http://localhost:5173"),
 		SkipAuth:             getEnv("NOC_SKIP_AUTH", "") == "true",

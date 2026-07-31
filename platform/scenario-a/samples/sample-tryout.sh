@@ -200,6 +200,10 @@ onboard "$ITAU" "$ITAU_TOK" "$BR_CB" "$BR_GOV_TOK" "Itau" BR admin@itau.brasil.c
 
 step "Login Bradesco + request onboarding"
 BRADESCO_TOK=$(login "$BRADESCO" "$BRADESCO_USER" "$BRADESCO_PASS"); ok "logged in as Bradesco"
+# Refresh the governance token: it was minted before Itaú's onboard and the access
+# token lifespan is 300s, so reusing it here can out-live the token on a slow stack
+# (approve-kyc would then 401 "invalid token"). Same pattern as the treasury refresh below.
+BR_GOV_TOK=$(login "$BR_CB" "$BR_GOV_USER" "$BR_GOV_PASS")
 onboard "$BRADESCO" "$BRADESCO_TOK" "$BR_CB" "$BR_GOV_TOK" "Bradesco" BR admin@bradesco.brasil.com bradesco_admin
 
 step "Brazil governance approved both (done inline above); verify onboarding status"
@@ -214,6 +218,9 @@ onboard "$BANCOLOMBIA" "$BANCOLOMBIA_TOK" "$CO_CB" "$CO_GOV_TOK" "Bancolombia" C
 
 step "Login Davivienda + request onboarding"
 DAVIVIENDA_TOK=$(login "$DAVIVIENDA" "$DAVIVIENDA_USER" "$DAVIVIENDA_PASS"); ok "logged in as Davivienda"
+# Refresh the governance token (see the Bradesco note): reused across two banks it
+# can out-live its 300s lifespan on a slow stack.
+CO_GOV_TOK=$(login "$CO_CB" "$CO_GOV_USER" "$CO_GOV_PASS")
 onboard "$DAVIVIENDA" "$DAVIVIENDA_TOK" "$CO_CB" "$CO_GOV_TOK" "Davivienda" CO admin@davivienda.colombia.com davivienda_admin
 
 step "Colombia governance approved both (done inline above); verify onboarding status"

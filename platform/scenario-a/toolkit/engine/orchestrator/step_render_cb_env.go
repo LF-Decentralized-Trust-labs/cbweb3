@@ -59,6 +59,7 @@ func (s *renderCBEnvStep) Run(_ context.Context) error {
 		KCRealm:        s.entityName,
 		KCClientID:     s.entityName + "-client",
 		KCClientSecret: s.entityName + "-local-secret",
+		KCAudience:     keycloakBackendAudience,
 
 		PostgresContainer: prefix + "-postgres",
 		PostgresPort:      ports.Postgres,

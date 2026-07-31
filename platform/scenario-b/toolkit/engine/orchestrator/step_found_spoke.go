@@ -290,7 +290,35 @@ const (
 	// approve-kyc require. Local-dev credentials only.
 	spokeCBUser = "cb-admin"
 	spokeCBPass = "cb-admin-local"
+
+	// keycloakBackendAudience is the fixed "aud" the api-gateway auth service
+	// enforces (KEYCLOAK_AUDIENCE). An oidc-audience-mapper on every backend
+	// login client (spoke-backend, hub-backend) stamps it into access tokens so
+	// a token minted for a DIFFERENT client in the same realm (e.g. noc-portal)
+	// is rejected at the gateway. Kept in sync with the KEYCLOAK_AUDIENCE default
+	// in provisioning/templates/entity-backend.compose.yaml.
+	keycloakBackendAudience = "cbweb3-backend"
+	// keycloakNOCAudience is stamped on the public noc-portal client so a future
+	// production NOC backend can enforce aud. The toolkit's LOCAL NOC runs with
+	// NOC_SKIP_AUTH=true and does not validate, so this is future-proofing only.
+	keycloakNOCAudience = "cbweb3-noc"
 )
+
+// audienceMapperArg returns the kcadm `-s` flag that attaches an
+// oidc-audience-mapper to a client AT CREATION TIME, stamping the given custom
+// audience into access tokens (not id tokens). Doing it inline with
+// `create clients` avoids a second admin round-trip that would need the client
+// UUID (kcadm's protocol-mappers endpoint is keyed by the internal id, not the
+// clientId). Enforced-issuer note: iss is already deterministic — the auth
+// service password-grants server-side against its configured KEYCLOAK_BASE_URL,
+// which is the exact host Keycloak stamps into iss.
+func audienceMapperArg(audience string) string {
+	return fmt.Sprintf(
+		`-s 'protocolMappers=[{"name":"cbweb3-audience","protocol":"openid-connect",`+
+			`"protocolMapper":"oidc-audience-mapper","config":{`+
+			`"included.custom.audience":"%s","access.token.claim":"true","id.token.claim":"false"}}]'`,
+		audience)
+}
 
 // spokeCBRoles are the realm roles granted to the CB login user: central_bank
 // (v2 AMM pairs/liquidity/currencies), plus ROLE_GOVERNANCE/ROLE_TREASURY for
@@ -309,8 +337,8 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	// rejects with "HTTPS required". Relax it for local (never in production).
 	fmt.Fprintf(&b, "(%[1]s update realms/%[2]s -s sslRequired=NONE || true) && ", kc, spokeKeycloakRealm)
 	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
-		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true) && ",
-		kc, spokeKeycloakRealm, spokeKeycloakClient, spokeKeycloakSecret)
+		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[5]s || true) && ",
+		kc, spokeKeycloakRealm, spokeKeycloakClient, spokeKeycloakSecret, audienceMapperArg(keycloakBackendAudience))
 	// Grant the client's service account the realm-management roles the auth service
 	// needs: GetAdminToken uses client_credentials, and onboarding creates + manages
 	// the commercial bank's Keycloak user (manage-users) + resolves users on login
@@ -339,8 +367,8 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 func appendNOCPortalClient(b *strings.Builder, kc, realm string) {
 	fmt.Fprintf(b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s enabled=true "+
 		"-s publicClient=true -s standardFlowEnabled=false -s directAccessGrantsEnabled=true "+
-		"-s 'webOrigins=[\"*\"]' || true) && ",
-		kc, realm, nocKeycloakClient)
+		"-s 'webOrigins=[\"*\"]' %[4]s || true) && ",
+		kc, realm, nocKeycloakClient, audienceMapperArg(keycloakNOCAudience))
 }
 
 // appendKeycloakUsers appends idempotent kcadm commands that create each admin user

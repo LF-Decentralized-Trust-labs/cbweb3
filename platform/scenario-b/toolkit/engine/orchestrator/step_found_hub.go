@@ -237,8 +237,8 @@ func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
 			// password grant is not rejected with "HTTPS required" (never in prod).
 			"(%[1]s update realms/%[4]s -s sslRequired=NONE || true) && "+
 			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
-			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true) && ",
-		kc, "admin", "admin", hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret)
+			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[7]s || true) && ",
+		kc, "admin", "admin", hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret, audienceMapperArg(keycloakBackendAudience))
 	// Public noc-portal client so the hub's co-located NOC portal can password-grant
 	// against this realm (hub NOC operator users are a separate follow-up — found-hub
 	// does not yet provision operator accounts).

@@ -55,6 +55,11 @@ services:
       KEYCLOAK_REALM: "${KEYCLOAK_REALM:-cbweb3}"
       KEYCLOAK_CLIENT_ID: "${KEYCLOAK_CLIENT_ID:-spoke-backend}"
       KEYCLOAK_CLIENT_SECRET: "${KEYCLOAK_CLIENT_SECRET:?}"
+      # Token validation enforces iss (derived from KEYCLOAK_BASE_URL + realm,
+      # always) and aud. The realm's backend login clients carry an
+      # oidc-audience-mapper stamping this exact value (see provisionKeycloakRealm);
+      # keep the default in sync with orchestrator.keycloakBackendAudience.
+      KEYCLOAK_AUDIENCE: "${KEYCLOAK_AUDIENCE:-cbweb3-backend}"
       REDIS_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-redis:6379"
       BLOCKCHAIN_CLIENT: "besu"
       BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"

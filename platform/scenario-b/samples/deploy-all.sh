@@ -20,6 +20,13 @@
 # Idempotent: re-running resumes from the first incomplete step per entity
 # (per-entity state under cbweb3-data/<entity>).
 #
+# JWT validation (R2-H-6): each api-gateway auth service enforces both the token
+# issuer (iss, derived from the entity/hub Keycloak URL + realm) and audience
+# (aud). The toolkit provisions an oidc-audience-mapper on the spoke-backend /
+# hub-backend login clients so tokens carry aud=cbweb3-backend, and wires
+# KEYCLOAK_AUDIENCE to match — nothing to set here. NOC backends run
+# NOC_SKIP_AUTH=true (unchanged).
+#
 # Usage:
 #   ./deploy-all.sh              # build CLI, deploy hub + Brazil + Argentina
 #   ./deploy-all.sh --clean      # wipe docker (containers+volumes) + data dirs first

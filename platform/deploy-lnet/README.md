@@ -20,6 +20,14 @@ Read the per-scenario runbooks for the full step-by-step:
 - [scenario-a/README.md](scenario-a/README.md)
 - [scenario-b/README.md](scenario-b/README.md)
 
+> **JWT validation (R2-H-6).** Deploys here run the same toolkit as the samples, so
+> the api-gateway auth service enforces both `iss` (derived from the entity's own
+> Keycloak URL + realm; the auth service password-grants server-side against that
+> same in-network URL, so the issuer matches) and `aud`. The toolkit provisions an
+> `oidc-audience-mapper` on every backend login client (`aud=cbweb3-backend`) and
+> wires `KEYCLOAK_AUDIENCE` to match — no per-VM configuration is required. NOC
+> backends deploy with `NOC_SKIP_AUTH=true` (production NOC is provisioned out of band).
+
 
 
 ## Addressing: templates + env substitution
