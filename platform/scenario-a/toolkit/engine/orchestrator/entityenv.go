@@ -60,6 +60,10 @@ type EntityEnvData struct {
 	HTLCAddress                string
 	TokenAddress               string
 	SpokeBridgeAddress         string
+	// AMMAddress is the optional AutomatedMarketMaker address. Empty unless an AMM is
+	// deployed and recorded; when set, the CB's compliance service drives the on-chain
+	// circuit breaker instead of a database-only toggle.
+	AMMAddress string
 
 	// BesuOperatorKey is the hex private key (no 0x) the payment-orchestrator signs
 	// Besu-layer transactions with (HTLC/fCeBM). Empty disables the Besu path. In
@@ -166,6 +170,9 @@ FIAT_TOKEN_ADDRESS={{.FiatTokenAddress}}
 HTLC_ADDRESS={{.HTLCAddress}}
 TOKEN_ADDRESS={{.TokenAddress}}
 SPOKE_BRIDGE_ADDRESS={{.SpokeBridgeAddress}}
+# AutomatedMarketMaker (optional). When set, the CB compliance service drives the
+# on-chain circuit breaker (pause 1-of-N / resume 2-of-N); empty -> DB-only toggle.
+AMM_ADDRESS={{.AMMAddress}}
 
 # Besu-layer signing key (local dev operator; empty in prod — see BesuOperatorKey)
 BESU_OPERATOR_KEY={{.BesuOperatorKey}}

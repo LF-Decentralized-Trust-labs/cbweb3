@@ -25,7 +25,7 @@ type GovernanceCompliance interface {
 	ManageParticipantStatus(ctx context.Context, subject, statusVal, reason string) error
 	GetAuditLogs(ctx context.Context, category, severity, fromDate, toDate string, page, limit int) ([]complianceadapter.AuditRecord, error)
 	GetCircuitBreakerStatus(ctx context.Context) (complianceadapter.CircuitBreakerStatus, error)
-	ToggleCircuitBreaker(ctx context.Context, pause bool, reason string) (bool, error)
+	ToggleCircuitBreaker(ctx context.Context, pause bool, reason string) (isPaused bool, txHash string, err error)
 	GetSystemParameters(ctx context.Context) (complianceadapter.SystemParameters, error)
 	UpdateSystemParameters(ctx context.Context, params complianceadapter.SystemParameters, reason, actorSubject string) error
 }
@@ -223,11 +223,11 @@ func (h *GovernanceHandler) ToggleCircuitBreaker(c *fiber.Ctx) error {
 	if req.Reason == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "reason is required"})
 	}
-	isPaused, err := h.compliance.ToggleCircuitBreaker(c.UserContext(), req.Pause, req.Reason)
+	isPaused, txHash, err := h.compliance.ToggleCircuitBreaker(c.UserContext(), req.Pause, req.Reason)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.Status(fiber.StatusOK).JSON(fiber.Map{"is_paused": isPaused})
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"is_paused": isPaused, "tx_hash": txHash})
 }
 
 // GetParameters handles GET /api/v1/governance/parameters.

@@ -31,6 +31,13 @@ type DeployedAddrs struct {
 	// HTLCAddress is the HashTimeLockedContract deployed on the spoke's Besu chain by
 	// deploy-htlc (Scenario A domestic settlement leg). HTLC_ADDRESS.
 	HTLCAddress string
+	// AMMAddress is the AutomatedMarketMaker address, when an AMM is deployed on the
+	// spoke. Optional: the toolkit does not deploy the AMM by default, so this is
+	// empty unless an operator records AMM_ADDRESS in .deployed-addrs.env. When set,
+	// the central bank's compliance service drives the on-chain circuit breaker
+	// (pause 1-of-N / resume 2-of-N); when empty, the breaker falls back to a
+	// database-only toggle. AMM_ADDRESS.
+	AMMAddress string
 }
 
 // ParseDeployedAddrs reads a KEY=VALUE env file from path and populates DeployedAddrs.
@@ -75,6 +82,7 @@ func ParseDeployedAddrs(path string) (DeployedAddrs, error) {
 		ParticipantRegistryAddress: kv["PARTICIPANT_REGISTRY_ADDRESS"],
 		FiatTokenAddress:           kv["FIAT_TOKEN_ADDRESS"],
 		HTLCAddress:                kv["HTLC_ADDRESS"],
+		AMMAddress:                 kv["AMM_ADDRESS"],
 	}, nil
 }
 

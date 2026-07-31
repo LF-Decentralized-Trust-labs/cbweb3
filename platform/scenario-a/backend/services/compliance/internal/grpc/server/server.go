@@ -18,6 +18,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/domain"
 	compliancepki "github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/pki"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/repository"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/amm"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
@@ -34,10 +35,18 @@ type complianceService struct {
 	repo       repository.Repository
 	ca         *compliancepki.CA
 	blockchain registry.RegistryWriter
+	// breaker drives the on-chain AutomatedMarketMaker circuit breaker. It is nil
+	// when no AMM is wired (dev/no-chain mode), in which case the circuit-breaker
+	// handlers fall back to a database-only toggle.
+	breaker amm.Breaker
 }
 
 // New builds a configured gRPC server with all compliance handlers.
 // bc may be nil; when nil, a NoopRegistryClient is used (dev/test mode).
+// breaker may be nil; when nil, the circuit-breaker handlers fall back to a
+// database-only toggle (dev/no-chain mode). When a chain-backed breaker is
+// supplied, the on-chain AMM state is the source of truth and resume is enforced
+// as a 2-of-N quorum (a single actor can never resume on its own).
 //
 // R2-H-8: the server installs authorization interceptors (and, when the
 // GRPC_MTLS_* env vars are set, mutual TLS). With nothing set it runs in audit
@@ -46,11 +55,11 @@ type complianceService struct {
 // (transitional). GRPC_AUTHZ_ENFORCE (which requires mTLS) rejects unauthenticated
 // callers. An error is returned on a fail-open misconfiguration (partial mTLS
 // material, or enforcement requested without mTLS).
-func New(repo repository.Repository, ca *compliancepki.CA, bc registry.RegistryWriter) (*grpc.Server, error) {
+func New(repo repository.Repository, ca *compliancepki.CA, bc registry.RegistryWriter, breaker amm.Breaker) (*grpc.Server, error) {
 	if bc == nil {
 		bc = registry.NoopRegistryClient{}
 	}
-	svc := &complianceService{repo: repo, ca: ca, blockchain: bc}
+	svc := &complianceService{repo: repo, ca: ca, blockchain: bc, breaker: breaker}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	serverOpts, err := authz.ServerOptionsFromEnv(logger, nil)
 	if err != nil {
@@ -432,8 +441,18 @@ func (s *complianceService) GetCircuitBreakerStatus(ctx context.Context, _ *empt
 	updatedBy, _, _ := s.repo.GetSystemParameter(ctx, paramCircuitBreakerUpdatedBy)
 	updatedAt, _, _ := s.repo.GetSystemParameter(ctx, paramCircuitBreakerUpdatedAt)
 
+	isPaused := paused == "true"
+	// When an on-chain breaker is wired, the AMM contract is the source of truth.
+	if s.breaker != nil {
+		if onChain, err := s.breaker.IsPaused(ctx); err != nil {
+			slog.Error("compliance: reading on-chain circuit-breaker state", "error", err)
+		} else {
+			isPaused = onChain
+		}
+	}
+
 	return &compliancv1.GetCircuitBreakerStatusResponse{
-		IsPaused:   paused == "true",
+		IsPaused:   isPaused,
 		LastUpdate: updatedAt,
 		UpdatedBy:  updatedBy,
 	}, nil
@@ -444,6 +463,58 @@ func (s *complianceService) ToggleCircuitBreaker(ctx context.Context, req *compl
 		return nil, status.Error(codes.InvalidArgument, "reason is required")
 	}
 
+	// No AMM wired (dev/no-chain mode): reflect the requested state in the database
+	// only. There is no on-chain quorum to enforce here.
+	if s.breaker == nil {
+		return s.toggleCircuitBreakerLocal(ctx, req)
+	}
+
+	actorSubject := actorFromCtx(ctx)
+
+	// pause = 1-of-N fail-safe; resume = 2-of-N quorum vote (never resumes alone).
+	var txHash string
+	var err error
+	if req.Pause {
+		txHash, err = s.breaker.Pause(ctx, req.Reason)
+	} else {
+		txHash, err = s.breaker.ResumeVote(ctx)
+	}
+	if err != nil {
+		detailsJSON, _ := json.Marshal(map[string]interface{}{"pause": req.Pause, "reason": req.Reason, "error": err.Error()})
+		s.emitAudit(ctx, "TOGGLE_CIRCUIT_BREAKER", actorSubject, "", "",
+			correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "FAILURE",
+			string(domain.CategoryCircuitBreaker), string(domain.SeverityCritical), string(detailsJSON))
+		return nil, status.Errorf(codes.FailedPrecondition, "on-chain circuit-breaker %s failed: %v", breakerVerb(req.Pause), err)
+	}
+
+	// The on-chain state is authoritative; a resume vote only clears the breaker
+	// once the 2-of-N quorum is reached, so IsPaused may still be true after a vote.
+	isPaused, err := s.breaker.IsPaused(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "reading on-chain circuit-breaker state: %v", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	_ = s.repo.UpsertSystemParameter(ctx, repository.SystemParameter{Key: paramCircuitBreakerPaused, Value: boolStr(isPaused), UpdatedBy: actorSubject})
+	_ = s.repo.UpsertSystemParameter(ctx, repository.SystemParameter{Key: paramCircuitBreakerUpdatedBy, Value: actorSubject, UpdatedBy: actorSubject})
+	_ = s.repo.UpsertSystemParameter(ctx, repository.SystemParameter{Key: paramCircuitBreakerUpdatedAt, Value: now, UpdatedBy: actorSubject})
+
+	sev := string(domain.SeverityWarning)
+	if req.Pause {
+		sev = string(domain.SeverityCritical)
+	}
+	detailsJSON, _ := json.Marshal(map[string]interface{}{"pause": req.Pause, "reason": req.Reason, "tx_hash": txHash, "on_chain_paused": isPaused})
+	s.emitAudit(ctx, "TOGGLE_CIRCUIT_BREAKER", actorSubject, "", "",
+		correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS",
+		string(domain.CategoryCircuitBreaker), sev, string(detailsJSON))
+
+	return &compliancv1.ToggleCircuitBreakerResponse{IsPaused: isPaused, TxHash: txHash}, nil
+}
+
+// toggleCircuitBreakerLocal is the database-only fallback used when no on-chain
+// breaker is configured (dev/no-chain mode). It preserves the historical behaviour
+// of mirroring the requested state directly into the system-parameter store.
+func (s *complianceService) toggleCircuitBreakerLocal(ctx context.Context, req *compliancv1.ToggleCircuitBreakerRequest) (*compliancv1.ToggleCircuitBreakerResponse, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	actorSubject := actorFromCtx(ctx)
 
@@ -461,6 +532,14 @@ func (s *complianceService) ToggleCircuitBreaker(ctx context.Context, req *compl
 		string(domain.CategoryCircuitBreaker), sev, string(detailsJSON))
 
 	return &compliancv1.ToggleCircuitBreakerResponse{IsPaused: req.Pause}, nil
+}
+
+// breakerVerb renders a human-readable verb for audit/error messages.
+func breakerVerb(pause bool) string {
+	if pause {
+		return "pause"
+	}
+	return "resume-vote"
 }
 
 func (s *complianceService) GetSystemParameters(ctx context.Context, _ *emptypb.Empty) (*compliancv1.GetSystemParametersResponse, error) {

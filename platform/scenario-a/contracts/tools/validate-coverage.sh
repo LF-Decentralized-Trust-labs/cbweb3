@@ -9,11 +9,13 @@ COVERAGE_THRESHOLD=80
 export FOUNDRY_FUZZ_RUNS="${FOUNDRY_FUZZ_RUNS:-256}"
 
 # Coverage exclusions (denominator filter):
-#   AutomatedMarketMaker* — AMM belongs to scenario B and is flagged for removal
-#     from scenario A; it is excluded from the coverage gate pending that removal.
+#   R2-H-2 decision: the AMM is MAINTAINED (not retired) in scenario A and hardened to
+#   match scenario B's breaker + fee model (asymmetric 2-of-N resume with pause-epoch
+#   binding, 0.3% single-ceiling fee). It is now folded INTO the coverage gate (backed
+#   by a dedicated 29-test suite), so it is no longer excluded here.
 #   script/             — deploy scripts are integration glue, not core business
 #     logic, and should not drag the gate.
-COVERAGE_NO_MATCH='(AutomatedMarketMaker|script/)'
+COVERAGE_NO_MATCH='(script/)'
 
 COVERAGE_OUTPUT=$(mktemp)
 
