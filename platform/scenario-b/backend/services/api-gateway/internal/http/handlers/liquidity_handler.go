@@ -136,23 +136,46 @@ func NewLiquidityHandlerSovereign(
 }
 
 // AddLiquidity handles POST /api/v2/amm/liquidity/add (FR-027).
+//
+// NOTE: this handler is not currently wired to any route — the dual-sided add was
+// replaced by the sovereign escrow-and-finalize flow (deposit-side/finalize). It is
+// kept defensively hardened so it cannot reintroduce the R2-H-9/H-10 defect if ever
+// re-mounted: the provider identity is derived from the authenticated JWT, never
+// from the body.
 func (h *LiquidityHandler) AddLiquidity(c *fiber.Ctx) error {
 	var req struct {
-		PoolPair       string `json:"pool_pair"`
-		ProviderBankID string `json:"provider_bank_id"`
-		TokenAAmount   string `json:"token_a_amount"`
-		TokenBAmount   string `json:"token_b_amount"`
+		PoolPair     string `json:"pool_pair"`
+		TokenAAmount string `json:"token_a_amount"`
+		TokenBAmount string `json:"token_b_amount"`
+		// Deprecated: provider_bank_id is derived from the authenticated JWT, never
+		// trusted from the body (R2-H-9/H-10).
+		ProviderBankID string `json:"provider_bank_id,omitempty"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
-	if req.PoolPair == "" || req.ProviderBankID == "" || req.TokenAAmount == "" || req.TokenBAmount == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "pool_pair, provider_bank_id, token_a_amount, token_b_amount required"})
+	if req.PoolPair == "" || req.TokenAAmount == "" || req.TokenBAmount == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "pool_pair, token_a_amount, token_b_amount required"})
+	}
+
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing authenticated claims"})
+	}
+	providerID := claims.BankID
+	if providerID == "" {
+		providerID = h.fallbackBankCode
+	}
+	if providerID == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing authenticated claims"})
+	}
+	if req.ProviderBankID != "" && req.ProviderBankID != providerID {
+		log.Printf("[liquidity] deprecated provider_bank_id payload (%s) ignored; using authenticated identity %s", req.ProviderBankID, providerID)
 	}
 
 	result, err := h.svc.AddLiquidity(c.Context(), services.LiquidityProvisionRequest{
 		PoolPair:       req.PoolPair,
-		ProviderBankID: req.ProviderBankID,
+		ProviderBankID: providerID,
 		TokenAAmount:   req.TokenAAmount,
 		TokenBAmount:   req.TokenBAmount,
 	})
@@ -422,9 +445,28 @@ func (h *LiquidityHandler) CancelCommit(c *fiber.Ctx) error {
 	if commitID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "commit_id required"})
 	}
-	providerID := c.Query("provider_id")
+
+	// R2-H-9 / R2-H-10: derive the provider identity from the authenticated JWT
+	// (claims.BankID), never from the query parameter — mirroring CommitLiquidity.
+	// CB service-account tokens carry no BankID, so fall back to the configured
+	// BANK_CODE; otherwise fail closed with 401. A divergent query provider_id is
+	// logged and ignored, not trusted.
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing authenticated claims"})
+	}
+	providerID := claims.BankID
 	if providerID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "provider_id query parameter required"})
+		providerID = h.fallbackBankCode
+		if providerID != "" {
+			log.Printf("[liquidity] BankID missing in claims; using configured BANK_CODE fallback: %s", providerID)
+		}
+	}
+	if providerID == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing authenticated claims"})
+	}
+	if q := c.Query("provider_id"); q != "" && q != providerID {
+		log.Printf("[liquidity] deprecated provider_id query (%s) ignored; using authenticated identity %s", q, providerID)
 	}
 
 	if err := h.svc.CancelCommit(c.Context(), commitID, providerID); err != nil {

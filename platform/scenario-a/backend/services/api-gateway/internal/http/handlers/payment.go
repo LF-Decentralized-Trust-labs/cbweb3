@@ -294,7 +294,13 @@ func (h *PaymentHandler) SettleHTLC(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
-	result, err := h.payment.SettleHTLC(c.Context(), req.ContractID, req.Secret)
+	// Only an HTLC counterparty may settle it, and the orchestrator re-checks via
+	// x-caller-identity. Reject unauthenticated callers and third parties (R2-H-9/H-10).
+	ctx, ok := h.authorizeHTLCCounterparty(c, req.ContractID)
+	if !ok {
+		return nil
+	}
+	result, err := h.payment.SettleHTLC(ctx, req.ContractID, req.Secret)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -308,11 +314,57 @@ func (h *PaymentHandler) RefundHTLC(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
-	result, err := h.payment.RefundHTLC(c.Context(), req.ContractID)
+	// Only an HTLC counterparty may refund it, and the orchestrator re-checks via
+	// x-caller-identity. Reject unauthenticated callers and third parties (R2-H-9/H-10).
+	ctx, ok := h.authorizeHTLCCounterparty(c, req.ContractID)
+	if !ok {
+		return nil
+	}
+	result, err := h.payment.RefundHTLC(ctx, req.ContractID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(result)
+}
+
+// authorizeHTLCCounterparty enforces that the authenticated caller is a
+// counterparty (sender or receiver) of the given HTLC before a mutating action
+// (settle/refund). It reads the JWT claims, propagates x-caller-identity to the
+// orchestrator (which re-checks server-side), fetches the HTLC and verifies
+// counterparty membership. On any failure it writes the appropriate response
+// (401 / 403 / 500) and returns ok=false; on success it returns the outgoing
+// context carrying x-caller-identity and ok=true. Fails closed.
+func (h *PaymentHandler) authorizeHTLCCounterparty(c *fiber.Ctx, contractID string) (context.Context, bool) {
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok || claims.Subject == "" {
+		_ = c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
+		return nil, false
+	}
+	callerBankID := claims.BankID
+	if callerBankID == "" {
+		callerBankID = h.bankCode
+	}
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
+
+	lock, err := h.payment.GetHTLCStatus(ctx, contractID)
+	if err != nil {
+		if st, ok2 := status.FromError(err); ok2 && st.Code() == codes.PermissionDenied {
+			_ = c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "not a counterparty of this HTLC"})
+			return nil, false
+		}
+		_ = c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		return nil, false
+	}
+	counterparty, parseErr := isHTLCCounterparty(lock.Sender, lock.Receiver, callerBankID)
+	if parseErr != nil {
+		_ = c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "identity format error: " + parseErr.Error()})
+		return nil, false
+	}
+	if !counterparty {
+		_ = c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "not a counterparty of this HTLC"})
+		return nil, false
+	}
+	return ctx, true
 }
 
 func (h *PaymentHandler) GetHTLCStatus(c *fiber.Ctx) error {
@@ -495,7 +547,19 @@ func (h *PaymentHandler) TransferToken(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
-	result, err := h.payment.TransferToken(c.Context(), req.To, req.Amount)
+	// A transfer debits the caller's own balance: derive the payer identity from
+	// the authenticated claims and propagate it so the orchestrator scopes the
+	// transfer to the caller rather than trusting the request blindly (R2-H-9/H-10).
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok || claims.Subject == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
+	}
+	callerBankID := claims.BankID
+	if callerBankID == "" {
+		callerBankID = h.bankCode
+	}
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
+	result, err := h.payment.TransferToken(ctx, req.To, req.Amount)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -770,7 +834,21 @@ func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
 			"invalid_identities": invalid,
 		})
 	}
-	result, err := h.payment.ProposeFXAgreement(c.Context(), &pb.ProposeFXAgreementRequest{
+	// Propagate the authenticated caller identity so the orchestrator binds the
+	// originator to the caller and rejects a client-supplied foreign originator
+	// (R2-H-9/H-10). on_behalf is a governance/relay operation (direct gRPC) and is
+	// never honored from this user-facing route.
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok || claims.Subject == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
+	}
+	callerBankID := claims.BankID
+	if callerBankID == "" {
+		callerBankID = h.bankCode
+	}
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
+
+	result, err := h.payment.ProposeFXAgreement(ctx, &pb.ProposeFXAgreementRequest{
 		TradeId:         req.TradeID,
 		CounterpartyB:   req.CounterpartyB,
 		Originator:      req.Originator,
@@ -787,7 +865,7 @@ func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
 		DestSpokeId:     req.DestSpokeID,
 		SourceReceiver:  req.SourceReceiver,
 		DestReceiver:    req.DestReceiver,
-		OnBehalf:        req.OnBehalf,
+		OnBehalf:        false,
 	})
 	if err != nil {
 		return grpcErrorToHTTP(c, err)
@@ -800,11 +878,10 @@ func (h *PaymentHandler) AcceptFXAgreement(c *fiber.Ctx) error {
 	if tradeID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tradeId is required"})
 	}
-	var req struct {
-		OnBehalf bool `json:"on_behalf"`
-	}
-	_ = c.BodyParser(&req)
-
+	// on_behalf is a governance operation (on-chain acceptOnBehalf, GOVERNANCE-only)
+	// driven by the CB relay over a direct gRPC call — never through this
+	// user-facing route. Do NOT read it from the client body: honoring it here would
+	// let any authenticated caller bypass the initiator≠acceptor check (R2-H-9/H-10).
 	claims, ok := c.Locals("claims").(domain.TokenClaims)
 	if !ok || claims.Subject == "" {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
@@ -815,7 +892,7 @@ func (h *PaymentHandler) AcceptFXAgreement(c *fiber.Ctx) error {
 	}
 	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
 
-	result, err := h.payment.AcceptFXAgreement(ctx, tradeID, req.OnBehalf)
+	result, err := h.payment.AcceptFXAgreement(ctx, tradeID, false)
 	if err != nil {
 		return grpcErrorToHTTP(c, err)
 	}
@@ -827,11 +904,9 @@ func (h *PaymentHandler) RejectFXAgreement(c *fiber.Ctx) error {
 	if tradeID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tradeId is required"})
 	}
-	var req struct {
-		OnBehalf bool `json:"on_behalf"`
-	}
-	_ = c.BodyParser(&req)
-
+	// on_behalf is a governance operation (on-chain rejectOnBehalf, GOVERNANCE-only)
+	// driven by the CB relay over a direct gRPC call — never through this
+	// user-facing route. Do NOT read it from the client body (R2-H-9/H-10).
 	claims, ok := c.Locals("claims").(domain.TokenClaims)
 	if !ok || claims.Subject == "" {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
@@ -842,7 +917,7 @@ func (h *PaymentHandler) RejectFXAgreement(c *fiber.Ctx) error {
 	}
 	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
 
-	result, err := h.payment.RejectFXAgreement(ctx, tradeID, req.OnBehalf)
+	result, err := h.payment.RejectFXAgreement(ctx, tradeID, false)
 	if err != nil {
 		return grpcErrorToHTTP(c, err)
 	}
@@ -854,7 +929,19 @@ func (h *PaymentHandler) CancelFXAgreement(c *fiber.Ctx) error {
 	if tradeID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tradeId is required"})
 	}
-	result, err := h.payment.CancelFXAgreement(c.Context(), tradeID)
+	// Require authentication and propagate the caller identity so the orchestrator
+	// enforces that only a party to the agreement may cancel it (R2-H-9/H-10).
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok || claims.Subject == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
+	}
+	callerBankID := claims.BankID
+	if callerBankID == "" {
+		callerBankID = h.bankCode
+	}
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
+
+	result, err := h.payment.CancelFXAgreement(ctx, tradeID)
 	if err != nil {
 		return grpcErrorToHTTP(c, err)
 	}
@@ -866,7 +953,19 @@ func (h *PaymentHandler) SettleFXAgreement(c *fiber.Ctx) error {
 	if tradeID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tradeId is required"})
 	}
-	result, err := h.payment.SettleFXAgreement(c.Context(), tradeID)
+	// Require authentication and propagate the caller identity so the orchestrator
+	// enforces that only a party to the agreement may settle it (R2-H-9/H-10).
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok || claims.Subject == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
+	}
+	callerBankID := claims.BankID
+	if callerBankID == "" {
+		callerBankID = h.bankCode
+	}
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
+
+	result, err := h.payment.SettleFXAgreement(ctx, tradeID)
 	if err != nil {
 		return grpcErrorToHTTP(c, err)
 	}

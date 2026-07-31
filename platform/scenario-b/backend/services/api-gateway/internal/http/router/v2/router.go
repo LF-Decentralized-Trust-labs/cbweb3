@@ -210,7 +210,7 @@ func registerUS1Routes(app *fiber.App, deps Dependencies) {
 	}
 
 	if deps.SwapService != nil && deps.AuthProvider != nil {
-		swapHandler := handlers.NewSwapHandler(deps.SwapService)
+		swapHandler := handlers.NewSwapHandler(deps.SwapService).SetFallbackBankCode(deps.BankCode)
 		amm.Post("/swap/exact-output",
 			middleware.RequireCookieAuth(deps.AuthProvider),
 			middleware.RequireCommercialBankRole(),
