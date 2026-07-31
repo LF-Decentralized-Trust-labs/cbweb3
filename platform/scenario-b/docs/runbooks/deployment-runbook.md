@@ -204,7 +204,33 @@ token B calls `POST /api/v2/amm/pairs/confirm`. Both are governance-portal actio
 registered. Harmless but wasteful; do not retry the endpoint in a loop, as each attempt deploys
 another one.
 
-### 5. Delegated-swap replay guard (additive)
+### 5. Residue returns are retried after upgrade (behaviour change on existing rows)
+
+**What changed.** A residue return whose *enqueue* failed used to stay `RETURN_FAILED` forever:
+no bridge position was created, so the relayer's queue had nothing to retry. A worker in the
+api-gateway now re-drives those, with exponential backoff, up to five attempts, then records
+`RETURN_ESCALATED`. Safe to automate because the issuing CB derives the amount from the
+bridge-in position plus the on-chain `LogSwap` and the endpoint is idempotent on
+`(swap_tx_hash, RESIDUE)`; a retry that turns out to be a duplicate is answered with the
+existing position, which also repairs a *false* `RETURN_FAILED` where only the response was lost.
+
+**What to expect on the first sweep.** Historical `RETURN_FAILED` rows have no schedule, so they
+are all due immediately. The sweep runs at start-up and then every `RESIDUE_RETRY_INTERVAL_SEC`
+(default 60s), bounded to 50 rows each. Backoff between attempts starts at 60s and doubles to a
+30-minute cap, so five attempts span hours, not minutes — a CB restart or deploy does not consume
+the budget. Old swaps whose inputs no longer resolve escalate to `RETURN_ESCALATED`: noisy in the
+log, harmless in effect, and the point — it turns a silently stranded balance into a named one.
+Grep `[residue-retry]` to follow it.
+
+A pair paused by governance defers its retries without consuming an attempt, so pausing a
+corridor also pauses the one unattended path that still moves value on it.
+
+**To postpone it,** set `RESIDUE_RETRY_INTERVAL_SEC=0` before the upgrade; the worker then does
+not start and the previous behaviour (no retry at all) is preserved. Additive schema only —
+`residue_attempts` and `residue_next_attempt_at` via `AutoMigrate` — so this is not a rollback
+blocker.
+
+### 6. Delegated-swap replay guard (additive)
 
 `cross_currency_hub_swaps` is created by `AutoMigrate` and keys each delegated Hub AMM swap on the
 bridge-in position that funded it, so a retried delegation cannot trade twice against the same

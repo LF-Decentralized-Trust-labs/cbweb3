@@ -668,6 +668,10 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		deps.CrossCurrencySwapOrchestrator = orchestrator
 		// Expose the swap repository for the paginated history endpoint (GET /amm/swap/cross-currency).
 		deps.CrossCurrencySwapLister = swapRepo
+		// Re-drive residue returns whose enqueue failed. A failed enqueue creates no bridge
+		// position, so the relayer queue has nothing to retry and the payer's unspent reserve
+		// would sit on the issuing CB's Hub address indefinitely.
+		startResidueRetryWorker(orchestrator, swapRepo)
 
 		// 009-commercial-cross-currency-swap: Wire quote generator with 15s TTL (T030/T031).
 		var quoteReserve services.AMMReserveReader

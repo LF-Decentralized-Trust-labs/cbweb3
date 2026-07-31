@@ -51,6 +51,12 @@ export interface SwapHistoryItem {
   swap_tx_hash?: string;
   beneficiary_bank_id?: string;
   failure_reason?: string;
+  // The slippage buffer the bridge-in had to move and the swap did not consume, and what
+  // became of its return. RETURN_ENQUEUED is on its way back; RETURN_FAILED is being retried;
+  // RETURN_ESCALATED means the retries gave up and the amount is still owed to this bank.
+  residue_amount?: string;
+  residue_status?: "NONE" | "RETURN_ENQUEUED" | "RETURN_FAILED" | "RETURN_ESCALATED";
+  residue_position_id?: string;
   created_at: string;
   completed_at?: string;
 }
