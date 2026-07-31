@@ -170,10 +170,21 @@ func Setup(app *fiber.App, deps Dependencies) {
 		payGroup := app.Group("/api/v1", middleware.RequireCookieAuth(deps.AuthProvider))
 
 		htlcGroup := payGroup.Group("/htlc")
-		htlcGroup.Post("/lock", deps.PaymentHandler.LockHTLC)
-		htlcGroup.Post("/lock-with-hash", deps.PaymentHandler.LockHTLCWithHashLock)
-		htlcGroup.Post("/settle", deps.PaymentHandler.SettleHTLC)
-		htlcGroup.Post("/refund", deps.PaymentHandler.RefundHTLC)
+		// HTLC lock/settle/refund are inter-bank payment operations, not oversight
+		// actions. Gate the mutating routes to payment-operator roles so an
+		// oversight-only session (supervisor/NOC) — or a role-less session that would
+		// otherwise fall back to the gateway's own bank id in the counterparty check —
+		// cannot drive a settle/refund (R2-H-1 follow-up). Read routes (status/search)
+		// stay open to any authenticated caller; the counterparty/bank-ownership check
+		// still applies in the handlers. Accepts both the Keycloak realm role
+		// (ROLE_BANK) and the compliance form (ROLE_COMMERCIAL_BANK) for banks.
+		htlcMutate := middleware.RequireRole(
+			domain.RoleBank, domain.RoleCommercialBank, domain.RoleTreasury, domain.RoleGovernance,
+		)
+		htlcGroup.Post("/lock", htlcMutate, deps.PaymentHandler.LockHTLC)
+		htlcGroup.Post("/lock-with-hash", htlcMutate, deps.PaymentHandler.LockHTLCWithHashLock)
+		htlcGroup.Post("/settle", htlcMutate, deps.PaymentHandler.SettleHTLC)
+		htlcGroup.Post("/refund", htlcMutate, deps.PaymentHandler.RefundHTLC)
 		htlcGroup.Get("/status/:contractId", deps.PaymentHandler.GetHTLCStatus)
 		htlcGroup.Get("/search", deps.PaymentHandler.SearchHTLC)
 

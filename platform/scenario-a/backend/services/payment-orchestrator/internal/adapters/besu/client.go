@@ -5,8 +5,11 @@
 package besu
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -19,13 +22,20 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	gethrpc "github.com/ethereum/go-ethereum/rpc"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 )
 
 var _ ports.HTLCContractPort = (*Client)(nil)
 
-const htlcABIJSON = `[{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"receiver","type":"address"},{"name":"hashLock","type":"bytes32"},{"name":"timeLock","type":"uint256"},{"name":"zetoLockRef","type":"bytes32"},{"name":"agreementId","type":"bytes32"}],"name":"lock","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"secret","type":"bytes32"}],"name":"settle","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"}],"name":"refund","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"commitment","type":"bytes32"}],"name":"registerAgreementCommitment","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
+// htlcABIJSON mirrors HashTimeLockedContract.sol's external surface. The custom
+// error entries (type:"error") let go-ethereum decode a revert selector returned
+// by eth_estimateGas back to a named error — e.g. HTLC__NotSender (R2-H-1) —
+// instead of surfacing an opaque "execution reverted" to operators
+// (Constitution Principle VI — observability). Keep these in sync with
+// IHashTimeLockedContract.sol.
+const htlcABIJSON = `[{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"receiver","type":"address"},{"name":"hashLock","type":"bytes32"},{"name":"timeLock","type":"uint256"},{"name":"zetoLockRef","type":"bytes32"},{"name":"agreementId","type":"bytes32"}],"name":"lock","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"},{"name":"secret","type":"bytes32"}],"name":"settle","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"contractId","type":"bytes32"}],"name":"refund","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"commitment","type":"bytes32"}],"name":"registerAgreementCommitment","outputs":[],"stateMutability":"nonpayable","type":"function"},{"type":"error","name":"HTLC__ContractAlreadyExists","inputs":[]},{"type":"error","name":"HTLC__ContractNotLocked","inputs":[]},{"type":"error","name":"HTLC__InvalidSecret","inputs":[]},{"type":"error","name":"HTLC__TimeLockNotExpired","inputs":[]},{"type":"error","name":"HTLC__TimeLockExpired","inputs":[]},{"type":"error","name":"HTLC__NotSender","inputs":[{"name":"caller","type":"address"}]},{"type":"error","name":"HTLC__ParticipantNotVerified","inputs":[{"name":"account","type":"address"}]},{"type":"error","name":"HTLC__AgreementNotAccepted","inputs":[]},{"type":"error","name":"HTLC__AgreementExpired","inputs":[]},{"type":"error","name":"HTLC__CommitmentNotAccepted","inputs":[]}]`
 
 // ClientConfig holds the configuration for the Besu HTLC client.
 type ClientConfig struct {
@@ -164,6 +174,9 @@ func (c *Client) sendTx(ctx context.Context, data []byte, method string) (string
 		Data:     data,
 	}
 	if estimatedGas, estErr := c.ethClient.EstimateGas(ctx, msg); estErr != nil {
+		if reason := c.decodeRevertReason(estErr); reason != "" {
+			return "", fmt.Errorf("%s call would revert (%s): %w", method, reason, estErr)
+		}
 		return "", fmt.Errorf("%s call would revert: %w", method, estErr)
 	} else {
 		auth.GasLimit = estimatedGas * 120 / 100 // 20% headroom
@@ -195,4 +208,36 @@ func (c *Client) sendTx(ctx context.Context, data []byte, method string) (string
 	)
 
 	return signedTx.Hash().Hex(), nil
+}
+
+// decodeRevertReason maps an EVM revert returned by eth_estimateGas to a named
+// HTLC custom error (e.g. "HTLC__NotSender(0x…)") using the error entries in the
+// ABI, so a rejected refund/settle surfaces its cause to operators instead of an
+// opaque "execution reverted" (Constitution Principle VI — observability).
+// Returns "" when the error carries no decodable revert data or the selector does
+// not match a known HTLC error. Best-effort only: never fails the call itself.
+func (c *Client) decodeRevertReason(err error) string {
+	var dataErr gethrpc.DataError
+	if !errors.As(err, &dataErr) {
+		return ""
+	}
+	raw, ok := dataErr.ErrorData().(string)
+	if !ok {
+		return ""
+	}
+	data, decErr := hex.DecodeString(strings.TrimPrefix(raw, "0x"))
+	if decErr != nil || len(data) < 4 {
+		return ""
+	}
+	for name, abiErr := range c.htlcABI.Errors {
+		if !bytes.Equal(abiErr.ID.Bytes()[:4], data[:4]) {
+			continue
+		}
+		// Include decoded args (e.g. the offending caller) when present.
+		if args, unpackErr := abiErr.Inputs.Unpack(data[4:]); unpackErr == nil && len(args) > 0 {
+			return fmt.Sprintf("%s%v", name, args)
+		}
+		return name
+	}
+	return ""
 }
