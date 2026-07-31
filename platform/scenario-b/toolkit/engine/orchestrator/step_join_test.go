@@ -244,6 +244,30 @@ func TestProvisionKeycloakBank(t *testing.T) {
 	}
 }
 
+// R2-H-6: the joining bank's confidential client must carry the audience mapper so
+// its access tokens stamp aud=cbweb3-backend — otherwise the bank's own auth service
+// (which enforces KEYCLOAK_AUDIENCE=cbweb3-backend) rejects every bank token (401).
+func TestProvisionKeycloakBankStampsAudience(t *testing.T) {
+	fake := &exec.FakeRunner{}
+	step := findStep(JoinSteps(testJoinCfg(t, fake)), "provision-keycloak-bank")
+	if err := step.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var script string
+	for _, c := range fake.Calls {
+		joined := strings.Join(c.Args, " ")
+		if strings.Contains(joined, "kcadm.sh") && strings.Contains(joined, "create clients") {
+			script = joined
+		}
+	}
+	if script == "" {
+		t.Fatalf("no kcadm client-create call captured; calls=%+v", fake.Calls)
+	}
+	if !strings.Contains(script, "oidc-audience-mapper") || !strings.Contains(script, keycloakBackendAudience) {
+		t.Errorf("bank-backend client must stamp audience %q via an oidc-audience-mapper; script=%s", keycloakBackendAudience, script)
+	}
+}
+
 // US3/SC-005: gen-csr creates key (0600) + csr (OU=ROLE_COMMERCIAL_BANK),
 // idempotent, zero CA material, pki dir pre-created.
 func TestGenCSR(t *testing.T) {

@@ -105,6 +105,19 @@ login() {
   printf '%s' "$tok"
 }
 
+# relogin — re-mint every access token from its username/password. The Keycloak
+# access token lifespan is ~300s, but this script's on-chain phases (onboarding,
+# liquidity seeding, and the cross-currency swap — which alone allows up to 180s)
+# can out-live a token minted at login, causing a mid-run 401 "invalid token".
+# A browser portal refreshes the token silently; a curl script has no such loop,
+# so we re-login explicitly at the start of each long phase.
+relogin() {
+  BR_TOK=$(login "$BR_CB" "$BR_CB_USER" "$BR_CB_PASS")
+  AR_TOK=$(login "$AR_CB" "$AR_CB_USER" "$AR_CB_PASS")
+  ITAU_TOK=$(login "$ITAU" "$ITAU_USER" "$ITAU_PASS")
+  MACRO_TOK=$(login "$MACRO" "$MACRO_USER" "$MACRO_PASS")
+}
+
 # pool_status TOKEN — echoes the pool status string (EMPTY/ACTIVE/…) for $POOL.
 pool_status() { try GET "$BR_CB/api/v2/amm/pool/$POOL/status" "$1"; printf '%s' "$BODY" | jget pool_status; }
 
@@ -153,12 +166,14 @@ MACRO_TOK=$(login "$MACRO" "$MACRO_USER" "$MACRO_PASS"); ok "logged in as bank-m
 # whose ACTIVE participant record lets the bridge-out resolve its on-chain wallet.
 step "Onboard the commercial banks through their central banks' governance portals"
 onboard "bank-itau"  "$ITAU"  "$ITAU_TOK"  "$BR_CB" "$BR_TOK" "Banco Itau"  "BR" "ops@itau.br"      "bank-itau-user"
+relogin  # itau's on-chain onboarding (approve-kyc + complete) may have aged the tokens
 onboard "bank-macro" "$MACRO" "$MACRO_TOK" "$AR_CB" "$AR_TOK" "Banco Macro" "AR" "ops@macro.ar"     "bank-macro-user"
 
 # ═══════════════════════════════ CURRENCIES ═════════════════════════════════════
 # W-tokens are deployed + registered at found-spoke by the hub compliance service,
 # so they already exist here — no runtime currency step.
 step "Verify the sovereign currencies are registered on the hub"
+relogin
 call GET "$BR_CB/api/v2/hub/currencies" "$BR_TOK"
 info "currencies: $BODY"
 printf '%s' "$BODY" | grep -q "W-tCeBM_${CUR_A}" || die "W-tCeBM_${CUR_A} not registered"
@@ -183,6 +198,7 @@ ok "corridor $POOL ready (amm=$AMM already_registered=$(printf '%s' "$BODY" | jg
 # sovereignty). deposit-side mints + approves the caller CB's own W-token internally and
 # resolves the side on-chain from pool_pair, so no separate mint-and-approve step is needed.
 step "Each central bank sovereignly deposits its own side into $POOL"
+relogin
 call POST "$BR_CB/api/v2/amm/liquidity/deposit-side" "$BR_TOK" \
   "{\"pool_pair\":\"$POOL\",\"amount\":\"$LIQ\"}"
 ok "Brazil CB deposited side $(printf '%s' "$BODY" | jget side) ($LIQ)"
@@ -216,6 +232,7 @@ ok "pool ACTIVE — reserves A=$(printf '%s' "$BODY" | jget reserve_a) B=$(print
 #   = burn fCeBM + mint tCeBM. Steps run on the bank gateway (ITAU) and are approved on
 #   the central bank gateway (BR_CB governance operator).
 step "bank-itau tokenises reserves — register a fiat deposit ($CC_MAX_IN)"
+relogin
 call POST "$ITAU/api/v1/payments/deposits" "$ITAU_TOK" "{\"amount\":\"$CC_MAX_IN\"}"
 DEP_ID=$(printf '%s' "$BODY" | jget deposit_id)
 [[ -n $DEP_ID ]] || die "no deposit_id in response: $BODY"
@@ -248,6 +265,7 @@ ok "bank-itau holds $BAL $(printf '%s' "$BODY" | jget symbol) (>= $CC_MAX_IN req
 #                       and releases to the beneficiary on Spoke-B (release skipped in
 #                       hub-only local mode).
 step "bank-itau quotes ${CUR_A} → ${CUR_B} (exact output $CC_OUT W-${CUR_B})"
+relogin  # the swap that follows may take up to 180s — start it with a fresh token
 call GET "$ITAU/api/v2/amm/quote/cross-currency?source_currency=${CUR_A}&target_currency=${CUR_B}&amount_out=${CC_OUT}&max_slippage_pct=0.05" "$ITAU_TOK"
 ok "quote: pay $(printf '%s' "$BODY" | jget amount_in) W-${CUR_A} for $CC_OUT W-${CUR_B} (rate=$(printf '%s' "$BODY" | jget effective_rate))"
 
@@ -276,6 +294,7 @@ REDEEM_FUND="4000000000000000000"   # tokenise 4 tCeBM of fresh headroom to rede
 REDEEM_AMT="1000000000000000000"    # de-tokenise (redeem) 1 tCeBM back to fiat
 
 step "bank-itau tokenises fresh reserves to redeem ($REDEEM_FUND)"
+relogin
 call POST "$ITAU/api/v1/payments/deposits" "$ITAU_TOK" "{\"amount\":\"$REDEEM_FUND\"}"
 R_DEP_ID=$(printf '%s' "$BODY" | jget deposit_id)
 [[ -n $R_DEP_ID ]] || die "no deposit_id for redeem funding: $BODY"

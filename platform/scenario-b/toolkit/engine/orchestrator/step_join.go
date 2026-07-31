@@ -159,8 +159,8 @@ func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password admin && ", kc)
 	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || true) && ", kc, bankKeycloakRealm)
 	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
-		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true || true) && ",
-		kc, bankKeycloakRealm, bankKeycloakClient, bankKeycloakSecret)
+		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[5]s || true) && ",
+		kc, bankKeycloakRealm, bankKeycloakClient, bankKeycloakSecret, audienceMapperArg(keycloakBackendAudience))
 	// The bank auth's GetAdminToken (client_credentials) resolves users on login, so
 	// its service account needs the realm-management view/manage user roles.
 	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
