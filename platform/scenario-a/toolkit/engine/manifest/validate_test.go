@@ -463,6 +463,37 @@ func TestValidate_AdminUsers(t *testing.T) {
 			t.Errorf("expected missing ROLE_BANK error, got %v", err)
 		}
 	})
+
+	t.Run("multiple accounts may share a role", func(t *testing.T) {
+		m := validManifest()
+		// A whole central-bank team, each granted the same set of CB roles, plus a
+		// supervisor-only regulator — all required roles are still covered.
+		m.Spec.AdminUsers = []manifest.AdminUser{
+			{Role: "ROLE_GOVERNANCE", Username: "a@bccr.fi.cr", Password: "p"},
+			{Role: "ROLE_TREASURY", Username: "a@bccr.fi.cr", Password: "p"},
+			{Role: "ROLE_SUPERVISOR", Username: "a@bccr.fi.cr", Password: "p"},
+			{Role: "ROLE_NOC_ADMIN", Username: "a@bccr.fi.cr", Password: "p"},
+			{Role: "ROLE_GOVERNANCE", Username: "b@bccr.fi.cr", Password: "p"},
+			{Role: "ROLE_TREASURY", Username: "b@bccr.fi.cr", Password: "p"},
+			{Role: "ROLE_SUPERVISOR", Username: "b@bccr.fi.cr", Password: "p"},
+			{Role: "ROLE_NOC_ADMIN", Username: "b@bccr.fi.cr", Password: "p"},
+			{Role: "ROLE_SUPERVISOR", Username: "reg@sugeval.fi.cr", Password: "p"},
+		}
+		if err := manifest.Validate(m); err != nil {
+			t.Errorf("multiple accounts per role should be allowed, got %v", err)
+		}
+	})
+
+	t.Run("same username with conflicting passwords is rejected", func(t *testing.T) {
+		m := validManifest()
+		m.Spec.AdminUsers = append(m.Spec.AdminUsers,
+			manifest.AdminUser{Role: "ROLE_TREASURY", Username: m.Spec.AdminUsers[0].Username, Password: "a-different-password"},
+		)
+		err := manifest.Validate(m)
+		if err == nil || !strings.Contains(err.Error(), "conflicting password") {
+			t.Errorf("expected conflicting-password error, got %v", err)
+		}
+	})
 }
 
 // ── ResolveDataDir: relative node.dataDir is resolved against CWD ──────────────

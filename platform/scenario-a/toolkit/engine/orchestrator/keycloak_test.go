@@ -82,6 +82,76 @@ func TestCentralBankRealmPlans_RoutesAdminUsersByRole(t *testing.T) {
 	}
 }
 
+// A single operator granted several roles (multiple spec.adminUsers entries
+// sharing one username) must collapse into ONE realm-import user per realm,
+// carrying every role that belongs to that realm — never a duplicate username
+// (which Keycloak realm import rejects). GOVERNANCE/TREASURY/SUPERVISOR route to
+// the central-bank realm; NOC_ADMIN routes to the shared cbweb3 realm.
+func TestCentralBankRealmPlans_GroupsMultiRoleUserByUsername(t *testing.T) {
+	admins := []manifest.AdminUser{
+		{Role: "ROLE_GOVERNANCE", Username: "user-governance@cb-costa-rica.l-net.io", Password: "pw"},
+		{Role: "ROLE_TREASURY", Username: "user-governance@cb-costa-rica.l-net.io", Password: "pw"},
+		{Role: "ROLE_SUPERVISOR", Username: "user-governance@cb-costa-rica.l-net.io", Password: "pw"},
+		{Role: "ROLE_NOC_ADMIN", Username: "user-governance@cb-costa-rica.l-net.io", Password: "pw"},
+		// A second operator with a single (supervisor-only) role, e.g. SUGEVAL.
+		{Role: "ROLE_SUPERVISOR", Username: "user-reg@example.test", Password: "pw2"},
+	}
+	plans := centralBankRealmPlans("central-bank-costa-rica", admins)
+	cb, noc := plans[0], plans[1]
+
+	// central-bank realm: exactly two users (one per username), the BCCR one
+	// carrying all three CB-realm roles, the SUGEVAL one just SUPERVISOR.
+	if len(cb.Users) != 2 {
+		t.Fatalf("central-bank realm: want 2 distinct users, got %d (%+v)", len(cb.Users), cb.Users)
+	}
+	var bccr *KeycloakUserPlan
+	for i := range cb.Users {
+		if cb.Users[i].Username == "user-governance@cb-costa-rica.l-net.io" {
+			bccr = &cb.Users[i]
+		}
+	}
+	if bccr == nil {
+		t.Fatalf("BCCR user not routed into the central-bank realm: %+v", cb.Users)
+	}
+	want := map[string]bool{"ROLE_GOVERNANCE": true, "ROLE_TREASURY": true, "ROLE_SUPERVISOR": true}
+	if len(bccr.Roles) != len(want) {
+		t.Fatalf("BCCR user roles = %v; want the 3 CB-realm roles", bccr.Roles)
+	}
+	for _, r := range bccr.Roles {
+		if !want[r] {
+			t.Errorf("unexpected role %q on BCCR user (NOC must route to cbweb3 realm)", r)
+		}
+	}
+
+	// NOC realm: the BCCR user again (grouped), carrying only ROLE_NOC_ADMIN.
+	if len(noc.Users) != 1 || noc.Users[0].Username != "user-governance@cb-costa-rica.l-net.io" {
+		t.Fatalf("NOC realm user mismatch: %+v", noc.Users)
+	}
+	if len(noc.Users[0].Roles) != 1 || noc.Users[0].Roles[0] != "ROLE_NOC_ADMIN" {
+		t.Errorf("NOC realm roles = %v; want [ROLE_NOC_ADMIN]", noc.Users[0].Roles)
+	}
+
+	// The rendered realm JSON must contain the BCCR username exactly once
+	// (duplicate usernames would fail Keycloak's realm import).
+	data, err := renderRealmJSON(cb)
+	if err != nil {
+		t.Fatalf("renderRealmJSON: %v", err)
+	}
+	var realm map[string]any
+	if err := json.Unmarshal(data, &realm); err != nil {
+		t.Fatalf("invalid realm JSON: %v", err)
+	}
+	count := 0
+	for _, u := range realm["users"].([]any) {
+		if u.(map[string]any)["username"] == "user-governance@cb-costa-rica.l-net.io" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("BCCR username rendered %d times in realm import; want exactly 1", count)
+	}
+}
+
 func TestCommercialBankRealmPlan_AdminUser(t *testing.T) {
 	admins := []manifest.AdminUser{
 		{Role: "ROLE_BANK", Username: "admin@itau.brasil.com", Password: "bank-pw"},

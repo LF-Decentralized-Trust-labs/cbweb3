@@ -1,31 +1,31 @@
 # yaml-language-server: $schema=../../../scenario-a/provisioning/schema/v1/participant-deployment.schema.yaml
 # LNET deploy — Scenario A (Enhanced Correspondent Banking).
-# NOC (Network Operations Center) DATA PLANE for spoke-brazil, CO-LOCATED on the
-# Central Bank Brazil VM (${IP_CB_BRAZIL}) — no dedicated VM.
+# NOC (Network Operations Center) DATA PLANE for spoke-peru, CO-LOCATED on the
+# Central Bank Peru VM (${IP_CB_PERU}) — no dedicated VM.
 #
-# Unlike Scenario B, the NOC PORTAL is deployed by central-bank-brazil's `found`
+# Unlike Scenario B, the NOC PORTAL is deployed by central-bank-peru's `found`
 # (it already builds the noc frontend + provisions the cbweb3 Keycloak realm and
 # points VITE_NOC_BACKEND_URL at this host's :28645). This observe run only stands
 # up the control-plane DATA PLANE — Postgres + noc-backend on :28645 in its own
 # docker network — plus the founding CB's noc-agent. It runs NO on-chain node.
 #
-# The agents live WITH each entity: central-bank-brazil (this observe run, same
-# VM → host.docker.internal:28645) and each joining bank (cb1/cb2, other VMs →
-# spec.noc.backendURL: http://${IP_CB_BRAZIL}:28645) push their own node health.
+# The agents live WITH each entity: central-bank-peru (this observe run, same
+# VM → host.docker.internal:28645) and each joining bank (cb5/cb6, other VMs →
+# spec.noc.backendURL: http://${IP_CB_PERU}:28645) push their own node health.
 apiVersion: cbweb3/v1
 kind: ParticipantDeployment
 metadata:
-  name: noc-brazil
+  name: noc-peru
 spec:
   scenario: a
   environment: local
   role: noc
   mode: observe
-  displayName: NOC — spoke-brazil
-  # NOC bundle emitted by central-bank-brazil (found) and relocated by deploy.sh
+  displayName: NOC — spoke-peru
+  # NOC bundle emitted by central-bank-peru (found) and relocated by deploy.sh
   # into the scenario-a spoke folder (scenario-scoped, so a Scenario B
-  # spoke-brazil NOC bundle never overwrites it). Local on this VM (co-located).
-  nocBundleRef: ../../bundles/scenario-a/spoke-brazil/spoke-brazil.noc.bundle.yaml
+  # spoke-peru NOC bundle never overwrites it). Local on this VM (co-located).
+  nocBundleRef: ../../bundles/scenario-a/spoke-peru/spoke-peru.noc.bundle.yaml
   # Optional tuning; the agent defaults to a 15s push cadence and all bundle
   # components. Scenario A's NOC bundle carries the CB Besu node only.
   noc:

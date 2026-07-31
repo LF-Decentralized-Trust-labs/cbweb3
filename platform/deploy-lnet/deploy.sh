@@ -7,19 +7,24 @@
 #   ./deploy.sh render                          # only render *.yaml.tmpl -> *.yaml
 #
 #   scenario : a | b
-#   target   : hub (scenario b only) | cb-brazil | cb1 | cb2 | cb-colombia | cb3 | cb4
-#              | noc-hub (scenario b only) | noc-brazil | noc-colombia (NOC — both scenarios)
+#   target   : hub (scenario b only)
+#              | cb-costa-rica | cb1 | cb2     (Costa Rica — CB + 2 banks)
+#              | cb-chile      | cb3 | cb4     (Chile      — CB + 2 banks)
+#              | cb-peru       | cb5 | cb6     (Peru       — CB + 2 banks)
+#              | noc-hub (scenario b only) | noc-costa-rica | noc-chile | noc-peru (NOC — both scenarios)
 #
 # Examples (run each on its own VM):
 #   ./deploy.sh cacti                 # VM .20  — start both Cacti relays
 #   ./deploy.sh b hub                 # VM .20  — Scenario B found-hub
 #   ./deploy.sh b noc-hub             # VM .20  — Scenario B NOC portal (after b hub)
-#   ./deploy.sh b cb-brazil           # VM .21  — Scenario B found-spoke (adds --hub-rpc)
-#   ./deploy.sh b noc-brazil          # VM .21  — Scenario B NOC portal (after b cb-brazil)
+#   ./deploy.sh b cb-costa-rica       # VM .21  — Scenario B found-spoke (adds --hub-rpc)
+#   ./deploy.sh b noc-costa-rica      # VM .21  — Scenario B NOC portal (after b cb-costa-rica)
 #   ./deploy.sh b cb1 --dry-run       # VM .22  — Scenario B join, preview only
-#   ./deploy.sh a cb-brazil           # VM .21  — Scenario A found
-#   ./deploy.sh a noc-brazil          # VM .21  — Scenario A NOC data plane (after a cb-brazil)
-#   ./deploy.sh a cb3                 # VM .25  — Scenario A join
+#   ./deploy.sh a cb-costa-rica       # VM .21  — Scenario A found
+#   ./deploy.sh a noc-costa-rica      # VM .21  — Scenario A NOC data plane (after a cb-costa-rica)
+#   ./deploy.sh a cb3                 # VM .25  — Scenario A join (Chile)
+#   ./deploy.sh a cb-peru             # VM .30  — Scenario A found (Peru)
+#   ./deploy.sh a cb5                 # VM .31  — Scenario A join (Peru)
 #
 # Addresses come from addresses.env (override by exporting IP_* before running).
 set -euo pipefail
@@ -29,7 +34,7 @@ ROOT="$(cd "$HERE/.." && pwd)"
 # shellcheck source=/dev/null
 source "$HERE/addresses.env"
 
-usage() { sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 SCENARIO="${1:-}"
 if [[ "$SCENARIO" == "render" ]]; then "$HERE/render.sh"; exit 0; fi
@@ -59,7 +64,7 @@ if [[ -z "$SCENARIO" || -z "$TARGET" ]]; then usage; exit 2; fi
 shift 2
 EXTRA=("$@")
 
-# NOC observe targets (noc-hub / noc-brazil / noc-colombia) deploy the NOC control
+# NOC observe targets (noc-hub / noc-costa-rica / noc-chile / noc-peru) deploy the NOC control
 # plane (portal + backend). Unlike found/join they build no contracts, run no
 # launcher, and emit/relocate no bundle — they only consume a NOC bundle.
 IS_NOC=false
@@ -157,18 +162,19 @@ export BESU_NAT_PROFILE=NONE   # routable enode advertisement (required by Scena
 # writable dataDir is per-bank (see entity_dir_for) so state never mixes with the CB.
 spoke_id_for() {
   case "$1" in
-    cb-brazil|cb1|cb2) echo "spoke-brazil" ;;
-    cb-colombia|cb3|cb4) echo "spoke-colombia" ;;
+    cb-costa-rica|cb1|cb2) echo "spoke-costa-rica" ;;
+    cb-chile|cb3|cb4) echo "spoke-chile" ;;
+    cb-peru|cb5|cb6) echo "spoke-peru" ;;
     *) echo "" ;;
   esac
 }
 
 # Writable dataDir folder name under bundles/scenario-{a,b}/:
-#   founders (cb-brazil, cb-colombia) → spoke id (also holds <spoke>.bundle.yaml)
+#   founders (cb-costa-rica, cb-chile, cb-peru) → spoke id (also holds <spoke>.bundle.yaml)
 #   everything else (commercial banks) → target name (= bankId), so state is isolated
 entity_dir_for() {
   case "$1" in
-    cb-brazil|cb-colombia) spoke_id_for "$1" ;;
+    cb-costa-rica|cb-chile|cb-peru) spoke_id_for "$1" ;;
     *) echo "$1" ;;
   esac
 }
@@ -184,7 +190,7 @@ case "$SCENARIO" in
       # observe (NOC data plane): no on-chain node, no spoke_id/bundle relocation.
       # State lives under bundles/scenario-a/<target> so it never collides with a
       # same-named Scenario B NOC. The nocBundleRef resolves against the manifest's
-      # own dir (central-bank-brazil's found relocated the NOC bundle there).
+      # own dir (the founding CB's found relocated the NOC bundle there).
       data_dir="$HERE/bundles/scenario-a/$TARGET"
       mkdir -p "$data_dir"
       log "Step 5/5 — applying Scenario A observe (NOC data plane): $man"
@@ -214,7 +220,7 @@ case "$SCENARIO" in
     ( cd "$ROOT/scenario-a" && \
         CBWEB3_OUTPUT_DIR="$HERE" \
         "$HERE/.bin/cbweb3" apply -f "$man" "${EXTRA[@]}" )
-    if [[ "$TARGET" == "cb-brazil" || "$TARGET" == "cb-colombia" ]]; then
+    if [[ "$TARGET" == "cb-costa-rica" || "$TARGET" == "cb-chile" || "$TARGET" == "cb-peru" ]]; then
       src="$HERE/bundles/${spoke_id}.bundle.yaml"
       dst="$HERE/bundles/scenario-a/$spoke_id/${spoke_id}.bundle.yaml"
       if [[ -f "$src" ]]; then
@@ -279,7 +285,7 @@ case "$SCENARIO" in
       outdir=(--data-dir "$data_dir" --out-dir "$HERE")
       # found-spoke needs the hub RPC readiness gate pointed at the real hub VM.
       case "$TARGET" in
-        cb-brazil|cb-colombia) hubrpc=(--hub-rpc "http://${IP_HUB}:8845") ;;
+        cb-costa-rica|cb-chile|cb-peru) hubrpc=(--hub-rpc "http://${IP_HUB}:8845") ;;
       esac
       log "Step 5/5 — applying Scenario B manifest: $man"
       log "data-dir=$data_dir  (join bundle drop-zone → bundles/scenario-b/$spoke_id/$spoke_id.bundle.yaml)"
@@ -293,7 +299,7 @@ case "$SCENARIO" in
         mv -f "$HERE/bundles/hub.noc.bundle.yaml" "$HERE/bundles/hub/hub.noc.bundle.yaml"
         log "hub NOC bundle relocated → $HERE/bundles/hub/hub.noc.bundle.yaml"
       fi
-    elif [[ -n "$spoke_id" && ( "$TARGET" == "cb-brazil" || "$TARGET" == "cb-colombia" ) ]]; then
+    elif [[ -n "$spoke_id" && ( "$TARGET" == "cb-costa-rica" || "$TARGET" == "cb-chile" || "$TARGET" == "cb-peru" ) ]]; then
       src="$HERE/bundles/${spoke_id}.bundle.yaml"
       dst="$HERE/bundles/scenario-b/$spoke_id/${spoke_id}.bundle.yaml"
       if [[ -f "$src" ]]; then

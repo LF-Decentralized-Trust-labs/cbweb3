@@ -1,21 +1,21 @@
 # yaml-language-server: $schema=../../../scenario-a/provisioning/schema/v1/participant-deployment.schema.yaml
-# LNET deploy — Scenario A. VM ${IP_CB4} — commercial bank cb4, JOINS spoke-colombia.
+# LNET deploy — Scenario A. VM ${IP_CB4} — commercial bank cb4, JOINS spoke-chile.
 apiVersion: cbweb3/v1
 kind: ParticipantDeployment
 metadata:
-  name: bank-cb4-colombia
+  name: bank-cb4-chile
 spec:
   scenario: a
   environment: local
   role: commercial-bank
   mode: join
   bankId: cb4
-  displayName: Commercial Bank cb4 (Colombia)
+  displayName: Commercial Bank cb4 (Chile)
   spoke:
-    id: spoke-colombia
+    id: spoke-chile
     chainId: 2024
-    currency: COP
-  joinBundleRef: ../../bundles/scenario-a/spoke-colombia/spoke-colombia.bundle.yaml
+    currency: CLP
+  joinBundleRef: ../../bundles/scenario-a/spoke-chile/spoke-chile.bundle.yaml
   node:
     advertisedHost: ${IP_CB4}
     rpc: { port: 8645 }
@@ -27,11 +27,11 @@ spec:
   certSource: self-signed
   relay:
     endpoint: http://${IP_HUB}:4000
-  frontendHost: cb4-colombia.cbweb3.l-net.io
+  frontendHost: cb4-chile.cbweb3.l-net.io
   launcher: enable
   launcherPort: 5190
   noc:
-    backendURL: http://${IP_CB_COLOMBIA}:28645
+    backendURL: http://${IP_CB_CHILE}:28645
     pushIntervalSeconds: 15
   proxy: enable
   adminUsers:

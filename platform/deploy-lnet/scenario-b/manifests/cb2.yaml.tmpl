@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
-# LNET deploy — Scenario B. VM ${IP_CB2} — commercial bank cb2, JOINS spoke-brazil.
+# LNET deploy — Scenario B. VM ${IP_CB2} — commercial bank cb2, JOINS spoke-costa-rica.
 apiVersion: cbweb3b/v1
 kind: ParticipantDeployment
 metadata:
@@ -11,12 +11,12 @@ spec:
   topology:
     role: commercial-bank
   bankId: cb2
-  displayName: Commercial Bank cb2 (Brazil)
+  displayName: Commercial Bank cb2 (Costa Rica)
   spoke:
-    id: spoke-brazil
+    id: spoke-costa-rica
     chainId: 2022
-    currency: BRL
-  joinBundleRef: ../../bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml
+    currency: CRC
+  joinBundleRef: ../../bundles/scenario-b/spoke-costa-rica/spoke-costa-rica.bundle.yaml
   node:
     advertisedHost: ${IP_CB2}
     rpc: { port: 8845 }
@@ -26,12 +26,12 @@ spec:
     validator: false
   image: build
   keyProvider: kms://local-emulator
-  certSource: ca://central-bank-brazil
+  certSource: ca://central-bank-costa-rica
   relay:
     endpoint: http://${IP_HUB}:7000
   noc:
-    backendURL: http://${IP_CB_BRAZIL}:8090
-  frontendHost: cb2-brazil.cbweb3.l-net.io
+    backendURL: http://${IP_CB_COSTA_RICA}:8090
+  frontendHost: cb2-costa-rica.cbweb3.l-net.io
   launcher: enable
   launcherPort: 5190
   proxy: enable

@@ -14,7 +14,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/addresses.env"
 
 # Restrict substitution to our known vars so nothing else in the YAML is touched.
-VARS='${IP_HUB} ${IP_CB_BRAZIL} ${IP_CB1} ${IP_CB2} ${IP_CB_COLOMBIA} ${IP_CB3} ${IP_CB4}'
+VARS='${IP_HUB} ${IP_CB_COSTA_RICA} ${IP_CB1} ${IP_CB2} ${IP_CB_CHILE} ${IP_CB3} ${IP_CB4} ${IP_CB_PERU} ${IP_CB5} ${IP_CB6}'
 
 count=0
 while IFS= read -r tmpl; do

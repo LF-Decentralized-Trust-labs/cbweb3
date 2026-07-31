@@ -1,21 +1,21 @@
 # yaml-language-server: $schema=../../../scenario-a/provisioning/schema/v1/participant-deployment.schema.yaml
-# LNET deploy — Scenario A. VM ${IP_CB_COLOMBIA} — Central Bank Colombia, FOUNDS spoke-colombia (COP).
-# Independent spoke; the Cacti relay on ${IP_HUB} bridges Brazil <-> Colombia (correspondent banking).
-# dataDir + emitted join bundle under deploy-lnet/bundles/scenario-a/spoke-colombia/
+# LNET deploy — Scenario A. VM ${IP_CB_CHILE} — Central Bank Chile, FOUNDS spoke-chile (CLP).
+# Independent spoke; the Cacti relay on ${IP_HUB} bridges the spokes (correspondent banking).
+# dataDir + emitted join bundle under deploy-lnet/bundles/scenario-a/spoke-chile/
 apiVersion: cbweb3/v1
 kind: ParticipantDeployment
 metadata:
-  name: central-bank-colombia
+  name: central-bank-chile
 spec:
   scenario: a
   environment: local
   role: central-bank
   mode: found
-  displayName: Banco de la República (Colombia)
+  displayName: Banco Central de Chile
   spoke:
-    id: spoke-colombia
+    id: spoke-chile
     chainId: 2024
-    currency: COP
+    currency: CLP
     # ERC-20 metadata of this spoke's own fCeBM (the public Besu-layer fiat token).
     # Optional — absent, both derive from `currency` (exactly the values below).
     # Declared explicitly so each spoke's token identity is auditable in config.
@@ -23,27 +23,27 @@ spec:
     # currency; `currency` stays the semantic key the portals display (FIAT_SYMBOL).
     # Scenario A deploys no tCeBM: the tokenised side is a Zeto privacy token, which
     # has no ERC-20 symbol — so fCeBM is the only configurable token identity here.
-    fiatTokenName: Fiat COP
-    fiatTokenSymbol: fCeBM_COP
+    fiatTokenName: Fiat CLP
+    fiatTokenSymbol: fCeBM_CLP
   node:
-    advertisedHost: ${IP_CB_COLOMBIA}
+    advertisedHost: ${IP_CB_CHILE}
     rpc: { port: 8645 }
     ws:  { port: 8655 }
     p2p: { port: 30303 }
-    dataDir: ../deploy-lnet/bundles/scenario-a/spoke-colombia
+    dataDir: ../deploy-lnet/bundles/scenario-a/spoke-chile
   image: build
   keyProvider: kms://local-emulator
   certSource: self-signed://local
   relay:
     endpoint: http://${IP_HUB}:4000
-    advertisedHost: ${IP_CB_COLOMBIA}
-  cbEndpoint: http://${IP_CB_COLOMBIA}:18645/api/v1/credential-request
-  frontendHost: cb-colombia.cbweb3.l-net.io
+    advertisedHost: ${IP_CB_CHILE}
+  cbEndpoint: http://${IP_CB_CHILE}:18645/api/v1/credential-request
+  frontendHost: cb-chile.cbweb3.l-net.io
   launcher: enable
   launcherPort: 5190
   proxy: enable
   adminUsers:
-    - { role: ROLE_GOVERNANCE, username: governance@cb-colombia.l-net.io, password: change-me-local }
-    - { role: ROLE_TREASURY,   username: treasury@cb-colombia.l-net.io,   password: change-me-local }
-    - { role: ROLE_SUPERVISOR, username: supervisor@cb-colombia.l-net.io, password: change-me-local }
-    - { role: ROLE_NOC_ADMIN,  username: noc@cb-colombia.l-net.io,        password: change-me-local }
+    - { role: ROLE_GOVERNANCE, username: governance@cb-chile.l-net.io, password: change-me-local }
+    - { role: ROLE_TREASURY,   username: treasury@cb-chile.l-net.io,   password: change-me-local }
+    - { role: ROLE_SUPERVISOR, username: supervisor@cb-chile.l-net.io, password: change-me-local }
+    - { role: ROLE_NOC_ADMIN,  username: noc@cb-chile.l-net.io,        password: change-me-local }
