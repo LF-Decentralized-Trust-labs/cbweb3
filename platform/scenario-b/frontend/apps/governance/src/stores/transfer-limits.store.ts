@@ -6,6 +6,7 @@ import type { AsyncStatus, CreateTransferLimitPayload, TransferLimit } from "../
 
 type TransferLimitsState = {
   limits: TransferLimit[];
+  sovereignCurrency: string;
   status: AsyncStatus;
   error: string | null;
   fetch: () => Promise<void>;
@@ -15,14 +16,15 @@ type TransferLimitsState = {
 
 export const useTransferLimitsStore = create<TransferLimitsState>((set) => ({
   limits: [],
+  sovereignCurrency: "",
   status: "idle",
   error: null,
 
   fetch: async () => {
     set({ status: "loading", error: null });
     try {
-      const limits = await transferLimitsApi.list();
-      set({ limits, status: "idle" });
+      const { limits, sovereignCurrency } = await transferLimitsApi.list();
+      set({ limits, sovereignCurrency, status: "idle" });
     } catch (error) {
       set({ status: "error", error: error instanceof Error ? error.message : "Unable to load transfer limits" });
     }
@@ -32,8 +34,8 @@ export const useTransferLimitsStore = create<TransferLimitsState>((set) => ({
     set({ status: "loading", error: null });
     try {
       await transferLimitsApi.create(payload);
-      const limits = await transferLimitsApi.list();
-      set({ limits, status: "idle" });
+      const { limits, sovereignCurrency } = await transferLimitsApi.list();
+      set({ limits, sovereignCurrency, status: "idle" });
     } catch (error) {
       set({ status: "error", error: error instanceof Error ? error.message : "Unable to create transfer limit" });
       throw error;
@@ -44,8 +46,8 @@ export const useTransferLimitsStore = create<TransferLimitsState>((set) => ({
     set({ status: "loading", error: null });
     try {
       await transferLimitsApi.remove(limitId);
-      const limits = await transferLimitsApi.list();
-      set({ limits, status: "idle" });
+      const { limits, sovereignCurrency } = await transferLimitsApi.list();
+      set({ limits, sovereignCurrency, status: "idle" });
     } catch (error) {
       set({ status: "error", error: error instanceof Error ? error.message : "Unable to remove transfer limit" });
     }

@@ -7,8 +7,8 @@
  * a REST API on CACTI_API_PORT (default 4000) so the CactiRelay Go adapter
  * inside each payment-orchestrator can:
  *
- *   GET  /api/v1/relay/events/settle?since=<unix_ms>   — poll settle events
- *   GET  /api/v1/relay/events/lock?since=<unix_ms>     — poll lock events
+ *   GET  /api/v1/relay/events/settle?since=<seq>       — poll settle events (durable seq cursor)
+ *   GET  /api/v1/relay/events/lock?since=<seq>         — poll lock events (durable seq cursor)
  *   POST /api/v1/relay/proof                           — store a relay proof
  *   GET  /api/v1/relay/proof/:correlationId            — retrieve a proof
  *   GET  /api/v1/health                                — liveness probe
@@ -198,23 +198,26 @@ async function main(): Promise<void> {
   });
 
   /**
-   * GET /api/v1/relay/events/settle?since=<unix_ms>
-   * Returns settle events observed since the given timestamp (0 = all).
+   * GET /api/v1/relay/events/settle?since=<seq>
+   * Returns settle events with a journal seq strictly greater than <seq> (0 = all), in seq order.
+   * The cursor is a durable, restart-stable sequence — NOT a wall-clock timestamp — so the Go
+   * poller's persisted cursor composes exactly with the relay (finding R2-H-11).
    * Used by CactiRelay.SubscribeSettleEvents polling loop in Go.
    */
   app.get("/api/v1/relay/events/settle", (req: Request, res: Response) => {
     const since = parseInt(String(req.query["since"] ?? "0"), 10);
-    res.json(relay.getSettleEvents(since));
+    res.json(relay.getSettleEvents(Number.isFinite(since) ? since : 0));
   });
 
   /**
-   * GET /api/v1/relay/events/lock?since=<unix_ms>
-   * Returns lock events observed since the given timestamp (0 = all).
+   * GET /api/v1/relay/events/lock?since=<seq>
+   * Returns lock events with a journal seq strictly greater than <seq> (0 = all), in seq order.
+   * Seq is the durable, restart-stable cursor (see settle endpoint) — finding R2-H-11.
    * Used by CactiRelay.SubscribeLockEvents polling loop in Go.
    */
   app.get("/api/v1/relay/events/lock", (req: Request, res: Response) => {
     const since = parseInt(String(req.query["since"] ?? "0"), 10);
-    res.json(relay.getLockEvents(since));
+    res.json(relay.getLockEvents(Number.isFinite(since) ? since : 0));
   });
 
   /**

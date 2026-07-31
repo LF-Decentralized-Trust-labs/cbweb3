@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
@@ -80,6 +81,21 @@ func localizeBundleEndpoints(b *bundle.JoinBundle) (localizedEndpoints, error) {
 	}
 	out.bootnodeEnode = enode
 
+	// The CB's onboarding HTTP endpoints are only rewritten to the single-host
+	// aliases when the bundle carries an in-Docker CB endpoint (a compose service
+	// name on the in-container port). In a cross-VM deploy (environment: local but
+	// the CB and the joining bank on separate hosts) the founding CB bakes its
+	// routable host and host-published api-gateway port into the bundle; both
+	// "localhost" (host-run toolkit) and "host.docker.internal" (bank backend
+	// container) would then loop back to the joining host — the bank's own gateway
+	// — instead of reaching the CB, so the onboarding request never lands at the
+	// CB (my-status returns "no onboarding request found"). Keep the routable
+	// endpoints from rawEndpoints in that case. This mirrors scenario-b, which
+	// bakes a routable CBGateway into the join bundle and consumes it verbatim.
+	if isCrossHostCBEndpoint(b.Spec.CBEndpoint) {
+		return out, nil
+	}
+
 	cert, err := rewriteURLHost(b.Spec.CBEndpoint, "localhost", cbAPIPort)
 	if err != nil {
 		return out, fmt.Errorf("localize cb endpoint: %w", err)
@@ -93,6 +109,26 @@ func localizeBundleEndpoints(b *bundle.JoinBundle) (localizedEndpoints, error) {
 	out.cbAPIBaseForBank = apiBase
 
 	return out, nil
+}
+
+// isCrossHostCBEndpoint reports whether the CB endpoint in the join bundle is a
+// cross-host (routable) endpoint that must be used verbatim, versus an in-Docker
+// single-host endpoint (a compose service name on the in-container port) that
+// must be localized to localhost / host.docker.internal.
+//
+// The discriminator is a non-loopback numeric IP host: the founding CB bakes a
+// routable IP (from node.advertisedHost, or the resolved host LAN IP — same path
+// as the enode rewrite) when the deployment spans hosts, whereas the canonical
+// single-host bundle carries a Docker compose service name (never an IP). A CB
+// host given as a DNS name is treated as single-host (localized); express the CB
+// as a routable IP to deploy across hosts.
+func isCrossHostCBEndpoint(cbEndpoint string) bool {
+	u, err := url.Parse(cbEndpoint)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(u.Hostname())
+	return ip != nil && !ip.IsLoopback()
 }
 
 // portFromURL extracts the numeric port from a URL.
@@ -125,6 +161,50 @@ func rewriteURLHost(raw, newHost string, newPort int) (string, error) {
 		u.Host = newHost
 	}
 	return u.String(), nil
+}
+
+// isRoutableHost reports whether h is an externally routable host (a real IP or
+// DNS name) rather than a loopback / docker-internal name that only resolves on
+// the same Docker host. It gates the cross-VM Paladin transport wiring: when the
+// CB advertised host is routable, the CB exposes its Paladin gRPC on the fixed
+// peer port 9000 and joining banks add an extra_hosts entry pointing the CB
+// Paladin's on-chain hostname (its container name) at that routable host.
+func isRoutableHost(h string) bool {
+	// Single-host override: when every entity shares ONE Docker host (the samples'
+	// deploy-all, where node.advertisedHost is a per-entity container network alias, not
+	// a real cross-VM host), no advertised host is externally routable. Force the
+	// container-name Paladin transport + derived, per-entity gRPC ports so several
+	// entities do not fight over the fixed peer port 9000. Multi-VM deploys leave
+	// CBWEB3_SINGLE_HOST unset and keep the routable behavior (real IP/FQDN → :9000).
+	if os.Getenv("CBWEB3_SINGLE_HOST") != "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(h)) {
+	case "", "localhost", "127.0.0.1", "::1", "host.docker.internal", "host-gateway":
+		return false
+	}
+	return true
+}
+
+// paladinDialHost returns the host a peer publishes on-chain as its Paladin gRPC
+// transport endpoint (dns:///<host>:9000), and that other nodes dial to reach it.
+//
+// Paladin's reliable transport is bidirectional: resolving a remote verifier is a
+// request AND a reply, so BOTH nodes must be able to dial each other's registered
+// endpoint. On a single host every node's container name resolves over the shared
+// spoke Docker network, so the container hostname works in both directions. Across
+// VMs it does not — and giving only the joining bank an extra_hosts entry for the
+// CB (the one-directional routable override) fixes the request leg but not the CB's
+// reply leg, so create-pente-context hangs. Advertising the node's own routable
+// host instead makes the endpoint dialable from any host with no per-peer
+// extra_hosts; the host is added to the transport cert SAN (see addTransportSAN)
+// so the dns:/// TLS handshake still validates. Non-routable (single-host)
+// advertisedHost keeps the container hostname — unchanged behavior.
+func paladinDialHost(advertisedHost, containerHostname string) string {
+	if isRoutableHost(advertisedHost) {
+		return strings.TrimSpace(advertisedHost)
+	}
+	return containerHostname
 }
 
 // setEnodePort replaces the port in an enode URI (enode://<id>@<host>:<port>),

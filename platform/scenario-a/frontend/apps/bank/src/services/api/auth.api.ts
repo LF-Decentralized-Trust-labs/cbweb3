@@ -16,8 +16,9 @@ export const authApi = {
     const response = await httpClient.get<UserProfile>("/auth/me");
     return response.data;
   },
-  refresh: async () => {
-    await httpClient.post("/auth/refresh", {});
+  refresh: async (): Promise<{ expiresIn: number }> => {
+    const response = await httpClient.post<{ expiresIn: number }>("/auth/refresh", {});
+    return response.data;
   },
   logout: async () => {
     await httpClient.post("/auth/logout", {});

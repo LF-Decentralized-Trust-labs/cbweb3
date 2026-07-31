@@ -1,0 +1,60 @@
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: central-bank-brazil
+spec:
+  scenario: "b"
+  environment: local
+  mode: found-spoke
+  topology:
+    role: central-bank
+  displayName: "Banco Central do Brasil"
+  spoke:
+    id: spoke-brl
+    chainId: 1338
+    currency: BRL
+    # ERC-20 metadata of this spoke's own tokens (tCeBM reserve + fCeBM fiat).
+    # Optional — absent, all four derive from `currency` (exactly the values
+    # below). Declared explicitly so each sovereign token is auditable in config.
+    # Symbols must keep the "<prefix>_<ISO>" shape: portals and the api-gateway
+    # read the currency code from the segment after the last underscore.
+    tokenName: Tokenized BRL
+    tokenSymbol: tCeBM_BRL
+    fiatTokenName: Fiat BRL
+    fiatTokenSymbol: fCeBM_BRL
+  hubBundleRef: ../bundles/hub.bundle.yaml
+  # The sovereign corridor (BRL <-> ARS pair + AMM + liquidity) is NOT declared
+  # here and is not part of provisioning: each central bank opens it at runtime
+  # from its governance portal (propose/confirm pair + cooperative liquidity),
+  # since the toolkit holds no sovereign signing keys.
+  node:
+    advertisedHost: host.docker.internal
+    rpc:  { port: 33645 }
+    ws:   { port: 33655 }
+    p2p:  { port: 56303 }
+    dataDir: cbweb3-data/central-bank-brazil
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: self-signed          # the CB is the CA of its spoke
+  relay:
+    endpoint: http://localhost:7000
+  cbEndpoint: http://host.docker.internal:18645
+  frontendHost: localhost
+  # Per-entity launcher (distributed A/B entry point on this entity's host). "enable"
+  # runs the generic launcher image (pre-build once with launcher/build.sh) and writes
+  # this scenario's portal fragment; "disable" removes it. launcherPort is this entity's
+  # launcher host port — one launcher per host, so it is distinct per entity and the
+  # SAME value in Scenario A and B (so both scenarios share this entity's launcher).
+  launcher: enable
+  launcherPort: 5191
+  adminUsers:
+    - { role: GOVERNANCE, username: admin@brasil.governance.gov, password: brasil-governance-local }
+    - { role: TREASURY,   username: admin@brasil.treasury.gov,   password: brasil-treasury-local }
+    - { role: SUPERVISOR, username: admin@brasil.supervisor.gov, password: brasil-supervisor-local }
+    # NOC operator for the co-located NOC portal (deployed by observe; see
+    # brazil/noc-brazil.yaml + deploy-all-with-noc.sh). found-spoke provisions this
+    # user in the spoke Keycloak realm; without it the NOC portal has no login.
+    - { role: NOC_ADMIN,  username: admin@brasil.noc.gov,        password: brasil-noc-local }
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

@@ -23,10 +23,10 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -48,15 +48,21 @@ func (a *App) Shutdown() error {
 	return firstErr
 }
 
-// dialGRPC establishes a gRPC client connection with the given timeout.
-func dialGRPC(address string, timeout time.Duration) (*grpc.ClientConn, error) {
+// dialGRPC establishes a gRPC client connection with the given timeout. serverName
+// is the logical name the peer certificate must present under mTLS (R2-H-8); it is
+// ignored when client mTLS is not configured (plaintext transitional default).
+func dialGRPC(address, serverName string, timeout time.Duration) (*grpc.ClientConn, error) {
 	dialCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	credOpt, err := authz.ClientDialOptionFromEnv(serverName)
+	if err != nil {
+		return nil, err
+	}
 	return grpc.DialContext( //nolint:staticcheck
 		dialCtx,
 		address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		credOpt,
 	)
 }
 
@@ -64,7 +70,7 @@ func New(cfg config.Config) (*App, error) {
 	var closers []io.Closer
 
 	// Single shared gRPC connection for auth + identity (same AUTH_GRPC_ADDR).
-	authConn, err := dialGRPC(cfg.AuthGRPCAddr, cfg.RequestTimeout)
+	authConn, err := dialGRPC(cfg.AuthGRPCAddr, "auth", cfg.RequestTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("auth gRPC unavailable at %s: %w", cfg.AuthGRPCAddr, err)
 	}

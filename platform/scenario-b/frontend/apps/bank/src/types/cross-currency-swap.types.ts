@@ -38,6 +38,39 @@ export interface CrossCurrencyQuote {
   created_at: number;
 }
 
+// SwapHistoryItem is one row from GET /amm/swap/cross-currency (paginated history).
+export interface SwapHistoryItem {
+  swap_id: string;
+  status: CrossCurrencySwapStatus;
+  source_currency: string;
+  target_currency: string;
+  pool_pair: string;
+  amount_in: string;
+  amount_out: string;
+  effective_rate: number;
+  swap_tx_hash?: string;
+  beneficiary_bank_id?: string;
+  failure_reason?: string;
+  created_at: string;
+  completed_at?: string;
+}
+
+export interface SwapHistoryPage {
+  operations: SwapHistoryItem[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+// SwapHistoryQuery are the filters for the history endpoint. from/to are ISO dates
+// (YYYY-MM-DD accepted by the backend); omit for an unbounded window.
+export interface SwapHistoryQuery {
+  from?: string;
+  to?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 export interface CrossCurrencySwapRequest {
   source_currency: string;
   target_currency: string;

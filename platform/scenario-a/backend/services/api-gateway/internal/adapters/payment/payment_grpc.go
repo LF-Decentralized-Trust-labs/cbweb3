@@ -7,9 +7,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // GRPCAdapter is the api-gateway adapter for the payment-orchestrator gRPC service.
@@ -23,11 +23,15 @@ func NewGRPCAdapter(address string, timeout time.Duration) (*GRPCAdapter, error)
 	dialCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	credOpt, err := authz.ClientDialOptionFromEnv("payment-orchestrator")
+	if err != nil {
+		return nil, err
+	}
 	//nolint:staticcheck
 	conn, err := grpc.DialContext(
 		dialCtx,
 		address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		credOpt,
 	)
 	if err != nil {
 		return nil, err

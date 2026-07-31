@@ -4,6 +4,26 @@
 
 O Cacti Liquidity Relay é um serviço especializado para o **Scenario B** da plataforma CBWeb3, focado em pools de liquidez cooperativos baseados em AMM (Automated Market Maker).
 
+## Relay generalizado — N spokes dinâmicos (TK-B5)
+
+O relay **boota neutro** (zero spokes) e opera com **N spokes** de um registry dinâmico, hidratado
+no boot a partir do **registro persistido** (`RELAY_STORE_PATH`, JSON) e da seed opcional
+`SPOKES_JSON`. Spokes novos são registrados **em runtime** via `POST /api/v1/spokes` (id, RPC/WS do
+Besu, URL do gateway) — o relay cria conector/watcher e a entrada de roteamento **sem reiniciar**, e
+o registro sobrevive a reinícios. O roteamento cross-currency (`bridge-out`) resolve o destino por
+**lookup do `spoke_out`** no registry (não há mais `CB_B_GATEWAY_URL` fixo). Antes de encaminhar, o
+relay lê **`isPaused()` on-chain** no `amm_address` do payload (circuit breaker, Princípio III);
+`amm_address` ausente/inválido ou leitura indisponível ⇒ **falha segura** (não encaminha).
+
+- **Autenticação**: permanece o **segredo compartilhado** (`X-Relay-Auth`,
+  `INTERNAL_RELAY_AUTH_SECRET`). A **auth por CB** (roadmap §14.D) está **fora de escopo** — é
+  sensível a compliance e requer aprovação do **project-lead**.
+- **Legado**: o arquivo plano `cacti-relay-store/cacti-relay-store.json` é **legado e não é usado**;
+  o registro persistido fica em `RELAY_STORE_PATH`.
+
+Testes da lógica (sem Besu): `npm test` (node:test). A interface Go `RelayRegistrar` (que o motor
+usa para chamar `POST /api/v1/spokes`) vive em `scenario-b/toolkit/engine/relayregistrar`.
+
 Este serviço substitui o HTLC relay (Scenario A) e fornece funcionalidades específicas para:
 - Observar eventos `CommitMatched` do contrato `LiquidityCommitRegistry`
 - Notificar gateways quando commits de liquidez são matched
@@ -131,7 +151,7 @@ Cacti Liquidity Relay starting (Scenario B)…
 [cacti] LiquidityCommitWatcher started
 [cacti] spoke-a registered 3 web service endpoint(s)
 [cacti] spoke-b registered 3 web service endpoint(s)
-Cacti Liquidity Relay API listening on :4000
+Cacti Liquidity Relay API listening on :7000
 ```
 
 ### Watcher Não Configurado

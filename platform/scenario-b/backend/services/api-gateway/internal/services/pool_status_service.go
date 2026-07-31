@@ -18,7 +18,7 @@ const ImbalanceThreshold = 0.70
 type AMMPoolReader interface {
 	GetPoolReserves(ctx context.Context, pair string) (reserveA, reserveB string, ratio float64, err error)
 	// GetFeeBps returns the current swap fee in basis points (e.g. 30 = 0.30%). T018 / FR-005.
-	GetFeeBps(ctx context.Context) (uint64, error)
+	GetFeeBps(ctx context.Context, pair string) (uint64, error)
 }
 
 // PoolStatusEnricher provides DB-backed counts for LP positions and pending commits (T018).
@@ -62,17 +62,17 @@ type CounterpartCommit struct {
 
 // PoolStatusResponse holds the current state of an AMM liquidity pool (T018 / FR-028).
 type PoolStatusResponse struct {
-	PoolPair       string                 `json:"pool_pair"`
+	PoolPair string `json:"pool_pair"`
 	// PoolStatus is derived from reserves (D8): EMPTY | PENDING_COUNTERPART | ACTIVE.
-	PoolStatus     string                 `json:"pool_status"`
-	ReserveA       string                 `json:"reserve_a"`
-	ReserveB       string                 `json:"reserve_b"`
-	CurrentRatio   float64                `json:"current_ratio"`
-	ImbalanceFlag  bool                   `json:"imbalance_flag"`
+	PoolStatus    string  `json:"pool_status"`
+	ReserveA      string  `json:"reserve_a"`
+	ReserveB      string  `json:"reserve_b"`
+	CurrentRatio  float64 `json:"current_ratio"`
+	ImbalanceFlag bool    `json:"imbalance_flag"`
 	// FeeRateBps is the current swap fee in basis points (FR-005 / T024).
-	FeeRateBps     uint64                 `json:"fee_rate_bps"`
+	FeeRateBps uint64 `json:"fee_rate_bps"`
 	// TotalLPCount is the number of ACTIVE LP positions in this pool.
-	TotalLPCount   int                    `json:"total_lp_count"`
+	TotalLPCount int `json:"total_lp_count"`
 	// PendingCommits lists commits awaiting a counterpart (PENDING status only).
 	PendingCommits []PendingCommitSummary `json:"pending_commits"`
 	// CounterpartCommit, when present, is a counterpart CB's on-chain PENDING commit
@@ -120,7 +120,7 @@ func (s *PoolStatusService) GetPoolStatus(ctx context.Context, pair string) (*Po
 
 	// fee_rate_bps — non-fatal: default to 0 if the call fails (contract may not have setFeeBps yet).
 	var feeBps uint64
-	if bps, err := s.reader.GetFeeBps(ctx); err == nil {
+	if bps, err := s.reader.GetFeeBps(ctx, pair); err == nil {
 		feeBps = bps
 	}
 

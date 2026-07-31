@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/keyprovider"
 )
@@ -56,5 +57,36 @@ func TestIdentityRegistryABI_Parses(t *testing.T) {
 	}
 	if _, ok := parsed.Events["IdentityRegistered"]; !ok {
 		t.Error("ABI missing event IdentityRegistered")
+	}
+}
+
+func TestLookupIdentityHashByName_EventLayout(t *testing.T) {
+	// Guard the IdentityRegistered unpack indices used by lookupIdentityHashByName:
+	// data = (parentIdentityHash, identityHash, name, owner) — name at [2], hash at [1].
+	parsed, err := abi.JSON(strings.NewReader(identityRegistryABIJSON))
+	if err != nil {
+		t.Fatalf("parse ABI: %v", err)
+	}
+	evt := parsed.Events["IdentityRegistered"]
+	var parent, idHash [32]byte
+	idHash[0] = 0xab
+	packed, err := evt.Inputs.Pack(parent, idHash, "spoke-brazil-cb1", common.HexToAddress("0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73"))
+	if err != nil {
+		t.Fatalf("pack: %v", err)
+	}
+	ed, err := evt.Inputs.Unpack(packed)
+	if err != nil {
+		t.Fatalf("unpack: %v", err)
+	}
+	if len(ed) < 3 {
+		t.Fatalf("want >=3 fields, got %d", len(ed))
+	}
+	h, ok := ed[1].([32]byte)
+	if !ok || h[0] != 0xab {
+		t.Errorf("identityHash at [1] = %v; want 0xab…", ed[1])
+	}
+	name, ok := ed[2].(string)
+	if !ok || name != "spoke-brazil-cb1" {
+		t.Errorf("name at [2] = %v; want spoke-brazil-cb1", ed[2])
 	}
 }

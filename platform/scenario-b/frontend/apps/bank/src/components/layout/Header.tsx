@@ -1,22 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Button, PlatformLogo } from "@cbweb3/ui";
+import { Button, PlatformLogo, goToLauncher } from "@cbweb3/ui";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
-import { useWebsocketStore } from "../../stores";
 
 export function Header() {
   const navigate = useNavigate();
   const { profile, logout } = useAuth();
-  const connected = useWebsocketStore((state) => state.connected);
-  const events = useWebsocketStore((state) => state.events);
   const institutionName =
     (import.meta.env.VITE_INSTITUTION_NAME ?? "Bank Portal").trim() ||
     "Bank Portal";
 
   const onLogout = async () => {
     await logout();
-    navigate("/login", { replace: true });
+    if (!goToLauncher()) navigate("/login", { replace: true });
   };
 
   return (
@@ -33,14 +30,6 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-3">
-          <span
-            className={`rounded px-2 py-1 text-xs ${connected ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
-          >
-            {connected ? "WS Connected" : "WS Disconnected"}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            Events: {events.length}
-          </span>
           <Button variant="ghost" onClick={() => void onLogout()}>
             Logout
           </Button>

@@ -403,6 +403,60 @@ func TestAMLScreenRevokedSanctioned(t *testing.T) {
 	}
 }
 
+// TestAMLScreenPendingBlocked enforces the allowlist semantics of REQ-COM-007
+// (finding R2-H-7 follow-up). PENDING is what the identity service returns for a
+// subject it cannot find (unregistered / never screened). A denylist would clear
+// it with a 200; the allowlist must block it with 403 and sanctioned=true.
+func TestAMLScreenPendingBlocked(t *testing.T) {
+	t.Parallel()
+	stub := kycManagerStub{status: domain.KYCPending}
+	handler := NewComplianceHandler(stub, nil)
+	app := fiber.New()
+	app.Post("/compliance/aml/screen", handler.AMLScreen)
+
+	body, _ := json.Marshal(map[string]string{"subject": "never-screened"})
+	req := httptest.NewRequest(http.MethodPost, "/compliance/aml/screen", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("PENDING must be blocked by the allowlist: expected 403, got %d", resp.StatusCode)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if sanctioned, _ := payload["sanctioned"].(bool); !sanctioned {
+		t.Fatalf("an unscreened PENDING subject must not be reported as cleared")
+	}
+	if code, _ := payload["code"].(string); code != "NOT_CLEARED" {
+		t.Fatalf("expected code NOT_CLEARED for a PENDING subject, got %q", code)
+	}
+}
+
+// TestAMLScreenActiveCleared confirms the allowlist clears the canonical ACTIVE
+// status (not just the legacy APPROVED alias).
+func TestAMLScreenActiveCleared(t *testing.T) {
+	t.Parallel()
+	stub := kycManagerStub{status: domain.KYCActive}
+	handler := NewComplianceHandler(stub, nil)
+	app := fiber.New()
+	app.Post("/compliance/aml/screen", handler.AMLScreen)
+
+	body, _ := json.Marshal(map[string]string{"subject": "bank-a"})
+	req := httptest.NewRequest(http.MethodPost, "/compliance/aml/screen", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("ACTIVE must be cleared: expected 200, got %d", resp.StatusCode)
+	}
+}
+
 func TestAMLScreenMissingSubject(t *testing.T) {
 	t.Parallel()
 	stub := kycManagerStub{}
@@ -419,6 +473,39 @@ func TestAMLScreenMissingSubject(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+// TestAMLScreenFailsClosedOnDependencyError enforces the fail-closed contract
+// of REQ-COM-007 (finding R2-H-7). When the compliance dependency
+// (KYCManager.GetKYCStatus) returns an error, the AML gate must NOT fall back
+// to the permissive in-memory checker and let the transaction through. It must
+// fail closed: block the request with 503 Service Unavailable.
+func TestAMLScreenFailsClosedOnDependencyError(t *testing.T) {
+	t.Parallel()
+	// status is APPROVED (non-sanctioned) so that a permissive fallback would
+	// wrongly return 200; err forces the primary dependency to fail.
+	stub := kycManagerStub{status: domain.KYCApproved, err: errors.New("compliance backend unavailable")}
+	handler := NewComplianceHandler(stub, nil)
+	app := fiber.New()
+	app.Post("/compliance/aml/screen", handler.AMLScreen)
+
+	body, _ := json.Marshal(map[string]string{"subject": "bank-a"})
+	req := httptest.NewRequest(http.MethodPost, "/compliance/aml/screen", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("AML gate must fail closed on dependency error: expected 503, got %d", resp.StatusCode)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if sanctioned, ok := payload["sanctioned"].(bool); ok && !sanctioned {
+		t.Fatalf("fail-closed response must not report the subject as cleared (sanctioned=false)")
 	}
 }
 

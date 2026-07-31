@@ -24,9 +24,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts";
 import { StatCard } from "../components/dashboard/StatCard";
-import { useAmmV2Store } from "../features/amm/amm-v2.store";
+import { ammV2Api } from "../services/api/amm-v2.api";
 import { bridgeApi, onboardingApi } from "../services/api";
-import { useAuthStore, useFxAgreementStore, usePaymentStore } from "../stores";
+import { useAuthStore, usePaymentStore } from "../stores";
 import type { BridgedAssetPosition } from "../types/bridge.types";
 import {
   PaymentStatus,
@@ -35,9 +35,9 @@ import {
   formatTokenAmount,
   getPaymentStatusLabel,
   normalizePaymentStatus,
+  tokenUnitPrefix,
 } from "../types";
 
-const POOL_PAIR = (import.meta.env.VITE_POOL_PAIR ?? "W-BRL-ARS").trim() || "W-BRL-ARS";
 const STATUS_REFRESH_MS = 30_000;
 
 // rawToNumber converts a base-unit token amount to a JS number for charts/ratios.
@@ -54,6 +54,28 @@ function rawToNumber(raw: string | null | undefined, decimals: number): number {
 function truncateAddress(value?: string): string {
   if (!value) return "-";
   return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+// prettifyLabel turns kebab/snake identifiers into a human label:
+// "bank-itau" → "Bank Itau", "COMMERCIAL_BANK" → "Commercial Bank".
+function prettifyLabel(value: string): string {
+  return value
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+// The institution name is baked at build time (per-entity image); /auth/me only
+// carries the Keycloak subject (a UUID), so use this for a friendly greeting.
+const INSTITUTION_NAME = (import.meta.env.VITE_INSTITUTION_NAME ?? "").trim();
+
+// businessRoles keeps only the RBAC role(s) that matter to the operator, dropping
+// Keycloak noise (default-roles-*, offline_access, uma_authorization, lowercase dups).
+function businessRoles(roles?: string[]): string[] {
+  return (roles ?? [])
+    .filter((role) => role.startsWith("ROLE_"))
+    .map((role) => prettifyLabel(role.replace(/^ROLE_/, "")));
 }
 
 type BadgeVariant = "warning" | "success" | "destructive" | "default" | "outline";
@@ -100,9 +122,7 @@ const chartConfig = {
 const QUICK_ACTIONS = [
   { to: "/deposits", label: "New Deposit" },
   { to: "/redeems", label: "Redeem" },
-  { to: "/transfer", label: "Cross-border Transfer" },
   { to: "/bridge", label: "Bridge to Hub" },
-  { to: "/amm", label: "AMM Trade" },
 ];
 
 export function DashboardPage() {
@@ -114,31 +134,36 @@ export function DashboardPage() {
   const fCeBMDecimals = usePaymentStore((state) => state.fCeBMDecimals);
   const tCeBMSymbol = usePaymentStore((state) => state.tCeBMSymbol);
   const fCeBMSymbol = usePaymentStore((state) => state.fCeBMSymbol);
+  // Instrument names shown on this screen come from the on-chain symbols, so a spoke
+  // with a custom symbol (spec.spoke.tokenSymbol) reads consistently everywhere.
+  const tCeBMName = tokenUnitPrefix(tCeBMSymbol);
+  const fCeBMName = tokenUnitPrefix(fCeBMSymbol, "fCeBM");
   const deposits = usePaymentStore((state) => state.deposits);
   const escrows = usePaymentStore((state) => state.escrows);
   const redeems = usePaymentStore((state) => state.redeems);
-
-  const poolStatus = useAmmV2Store((state) => state.poolStatus);
-  const circuitBreakerState = useAmmV2Store((state) => state.circuitBreakerState);
-  const fetchPoolStatus = useAmmV2Store((state) => state.fetchPoolStatus);
-  const fetchCircuitBreakerState = useAmmV2Store((state) => state.fetchCircuitBreakerState);
-
-  const agreements = useFxAgreementStore((state) => state.agreements);
-  const fetchAgreements = useFxAgreementStore((state) => state.fetchAll);
 
   const profile = useAuthStore((state) => state.profile);
 
   const [bridgePositions, setBridgePositions] = useState<BridgedAssetPosition[]>([]);
   const [onboardingState, setOnboardingState] = useState<string | null>(null);
+  const [poolsTotal, setPoolsTotal] = useState<number | null>(null);
+  const [poolsActive, setPoolsActive] = useState<number>(0);
 
   useEffect(() => {
     void fetchPayments();
-    void fetchAgreements();
 
     let active = true;
     const loadStatus = () => {
-      void fetchPoolStatus(POOL_PAIR);
-      void fetchCircuitBreakerState(POOL_PAIR);
+      ammV2Api
+        .getPairs()
+        .then((pairs) => {
+          if (!active) return;
+          setPoolsTotal(pairs.length);
+          setPoolsActive(pairs.filter((p) => p.status === "ACTIVE").length);
+        })
+        .catch(() => {
+          /* pools endpoint optional — card shows a dash */
+        });
       bridgeApi
         .listPositions()
         .then((positions) => {
@@ -163,7 +188,7 @@ export function DashboardPage() {
       active = false;
       window.clearInterval(id);
     };
-  }, [fetchPayments, fetchAgreements, fetchPoolStatus, fetchCircuitBreakerState]);
+  }, [fetchPayments]);
 
   const tDecimals = tCeBMDecimals ?? 18;
   const fDecimals = fCeBMDecimals ?? 18;
@@ -173,19 +198,6 @@ export function DashboardPage() {
   const fCeBMNumber = rawToNumber(fiatBalance, fDecimals);
 
   const pendingActions = pendingCount(deposits) + pendingCount(escrows) + pendingCount(redeems);
-  const fxProposals = agreements.filter((a) => a.state === "FX_STATE_PROPOSED").length;
-
-  const activeBridge = bridgePositions.filter((p) => p.bridge_state === "ACTIVE");
-  const bridgeNeedsAttention = bridgePositions.filter(
-    (p) => p.bridge_state === "RECONCILIATION_REQUIRED" || p.relayer_retries > 0,
-  ).length;
-  const hubValue = activeBridge.reduce((sum, p) => {
-    try {
-      return sum + BigInt(p.mirrored_amount);
-    } catch {
-      return sum;
-    }
-  }, 0n);
 
   const activity = useMemo(() => {
     const items = [
@@ -224,9 +236,11 @@ export function DashboardPage() {
       .slice(0, 8);
   }, [deposits, escrows, redeems, bridgePositions, fDecimals, tDecimals, fCeBMSymbol, tCeBMSymbol]);
 
+  // `key` is the stable series identity (drives the bar colour); `name` is the display
+  // label and follows the on-chain symbol.
   const balancesData = [
-    { name: "tCeBM", value: tCeBMNumber },
-    { name: "fCeBM reserve", value: fCeBMNumber },
+    { key: "tCeBM", name: tCeBMName, value: tCeBMNumber },
+    { key: "fCeBM", name: `${fCeBMName} reserve`, value: fCeBMNumber },
   ];
 
   const breakdownData = [
@@ -252,18 +266,25 @@ export function DashboardPage() {
     return days;
   }, [deposits, escrows, redeems]);
 
-  const poolLabel = poolStatus?.pool_status ?? "UNKNOWN";
-
   return (
     <div className="space-y-4">
       {/* Identity / context */}
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
           <div>
-            <CardTitle>Welcome, {profile?.bankId ?? profile?.subject ?? "Bank"}</CardTitle>
+            <CardTitle>
+              Welcome, {INSTITUTION_NAME ? prettifyLabel(INSTITUTION_NAME) : (profile?.bankId ?? profile?.subject ?? "Bank")}
+            </CardTitle>
             <CardDescription>
-              {profile?.country ? `${profile.country} · ` : ""}Wallet {truncateAddress(profile?.wallet)}
-              {profile?.roles?.length ? ` · ${profile.roles.join(", ")}` : ""}
+              {(() => {
+                const roles = businessRoles(profile?.roles);
+                const parts = [
+                  profile?.country || null,
+                  profile?.wallet ? `Wallet ${truncateAddress(profile.wallet)}` : null,
+                  roles.length ? roles.join(", ") : null,
+                ].filter(Boolean);
+                return parts.length ? parts.join(" · ") : "Commercial bank operator";
+              })()}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -277,13 +298,13 @@ export function DashboardPage() {
       {/* KPI row */}
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="tCeBM Balance"
-          value={formatCeBM(tCeBMBalance ?? "0", tDecimals, tCeBMSymbol)}
+          label={`${tCeBMName} Balance`}
+          value={formatTokenAmount(tCeBMBalance ?? "0", tDecimals)}
           loading={balanceLoading}
         />
         <StatCard
-          label="Fiat Reserve (fCeBM)"
-          value={formatFiatUnits(fiatBalance ?? "0", fDecimals, fCeBMSymbol)}
+          label={`Fiat Reserve (${fCeBMName})`}
+          value={formatTokenAmount(fiatBalance ?? "0", fDecimals)}
           loading={balanceLoading}
         />
         <StatCard
@@ -291,55 +312,14 @@ export function DashboardPage() {
           value={pendingActions}
           hint="Deposits · tokenisations · redeems"
         />
-        <StatCard
-          label="Bridged to Hub"
-          value={formatCeBM(hubValue.toString(), tDecimals, tCeBMSymbol)}
-          hint={`${activeBridge.length} active position${activeBridge.length === 1 ? "" : "s"}`}
-        />
-      </section>
-
-      {/* Status strip */}
-      <section className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Circuit Breaker</CardDescription>
-            <CardTitle className="text-lg">
-              <Badge variant={circuitBreakerState ? lifecycleVariant(circuitBreakerState) : "outline"}>
-                {circuitBreakerState ?? "UNKNOWN"}
-              </Badge>
-            </CardTitle>
-            <p className="text-xs text-muted-foreground">
-              {circuitBreakerState === "HALTED"
-                ? "Cross-border swaps are paused."
-                : circuitBreakerState === "LIVE"
-                  ? "Swaps operational."
-                  : "Awaiting status from the hub."}
-            </p>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Hub Pool ({POOL_PAIR})</CardDescription>
-            <CardTitle className="text-lg">
-              <Badge variant={lifecycleVariant(poolLabel)}>{poolLabel}</Badge>
-              {poolStatus?.imbalance_flag ? (
-                <Badge variant="warning" className="ml-2">
-                  Imbalanced
-                </Badge>
-              ) : null}
-            </CardTitle>
-            <p className="text-xs text-muted-foreground">
-              {poolStatus?.current_ratio ? `Current ratio ${poolStatus.current_ratio}` : "No reserves reported."}
-            </p>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>FX Proposals Awaiting You</CardDescription>
-            <CardTitle className="text-2xl">{fxProposals}</CardTitle>
-            <p className="text-xs text-muted-foreground">Proposed agreements pending accept/reject</p>
-          </CardHeader>
-        </Card>
+        <Link to="/pools" className="rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <StatCard
+            label="Available Pools"
+            value={poolsActive}
+            hint={poolsTotal === null ? "Loading…" : `${poolsTotal} total · view details`}
+            loading={poolsTotal === null}
+          />
+        </Link>
       </section>
 
       {/* Quick actions */}
@@ -351,9 +331,9 @@ export function DashboardPage() {
         ))}
       </div>
 
-      {/* Activity + bridge positions */}
-      <section className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+      {/* Recent activity */}
+      <section>
+        <Card>
           <CardHeader>
             <CardTitle>Recent Activity</CardTitle>
             <CardDescription>Latest deposits, tokenisations, redeems and bridge events</CardDescription>
@@ -388,31 +368,6 @@ export function DashboardPage() {
             ) : null}
           </CardContent>
         </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Bridge Positions</CardTitle>
-            <CardDescription>
-              Liquidity mirrored at the hub
-              {bridgeNeedsAttention > 0 ? ` · ${bridgeNeedsAttention} need attention` : ""}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {bridgePositions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No bridge positions.</p>
-            ) : (
-              bridgePositions.slice(0, 6).map((p) => (
-                <div key={p.position_id} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="truncate">
-                    {formatTokenAmount(p.mirrored_amount, tDecimals)}{" "}
-                    <span className="text-muted-foreground">{p.mirrored_asset}</span>
-                  </span>
-                  <Badge variant={lifecycleVariant(p.bridge_state)}>{p.bridge_state}</Badge>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
       </section>
 
       {/* Charts */}
@@ -420,7 +375,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Tokenised vs Reserve</CardTitle>
-            <CardDescription>tCeBM in circulation vs fCeBM reserve</CardDescription>
+            <CardDescription>{tCeBMName} in circulation vs {fCeBMName} reserve</CardDescription>
           </CardHeader>
           <CardContent className="h-56">
             <ChartContainer config={chartConfig} className="h-full w-full">
@@ -432,8 +387,8 @@ export function DashboardPage() {
                 <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                   {balancesData.map((entry) => (
                     <Cell
-                      key={entry.name}
-                      fill={entry.name === "tCeBM" ? "hsl(var(--chart-1))" : "hsl(var(--chart-2))"}
+                      key={entry.key}
+                      fill={entry.key === "tCeBM" ? "hsl(var(--chart-1))" : "hsl(var(--chart-2))"}
                     />
                   ))}
                 </Bar>

@@ -42,7 +42,7 @@ func (s *complianceService) CreateTransferLimit(ctx context.Context, req *compli
 		return nil, status.Errorf(codes.Internal, "create transfer limit: %v", err)
 	}
 
-	go s.emitAudit(ctx, "CREATE_TRANSFER_LIMIT", req.ActorSubject, "", limit.ParticipantID,
+	go s.emitAudit(ctx, "CREATE_TRANSFER_LIMIT", actorForAudit(ctx, req.ActorSubject), "", limit.ParticipantID,
 		correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS", "TRANSFER_LIMIT", "INFO",
 		fmt.Sprintf(`{"limit_id":%q,"max_amount":%q}`, limit.LimitID, limit.MaxAmount))
 
@@ -72,7 +72,7 @@ func (s *complianceService) DeleteTransferLimit(ctx context.Context, req *compli
 	if err := s.repo.DeleteTransferLimit(ctx, req.LimitId); err != nil {
 		return nil, status.Errorf(codes.Internal, "delete transfer limit: %v", err)
 	}
-	go s.emitAudit(ctx, "DELETE_TRANSFER_LIMIT", req.ActorSubject, "", req.LimitId,
+	go s.emitAudit(ctx, "DELETE_TRANSFER_LIMIT", actorForAudit(ctx, req.ActorSubject), "", req.LimitId,
 		correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS", "TRANSFER_LIMIT", "INFO",
 		fmt.Sprintf(`{"limit_id":%q}`, req.LimitId))
 	return &emptypb.Empty{}, nil

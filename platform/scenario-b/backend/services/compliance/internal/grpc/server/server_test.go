@@ -28,7 +28,10 @@ import (
 func newTestClient(t *testing.T, repo repository.Repository, ca *compliancepki.CA) (compliancv1.ComplianceServiceClient, context.Context) {
 	t.Helper()
 	lis := bufconn.Listen(1024 * 1024)
-	srv := New(repo, ca, nil) // nil bc -> NoopRegistryClient
+	srv, err := New(repo, ca, nil) // nil bc -> NoopRegistryClient
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
 

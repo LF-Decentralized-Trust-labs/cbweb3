@@ -87,8 +87,8 @@ func runApply(args []string) int {
 	}
 
 	// Guard unsupported modes and environments.
-	if m.Spec.Mode != "found" && m.Spec.Mode != "join" {
-		fmt.Fprintf(os.Stderr, "mode: %s not supported (accepted: found, join)\n", m.Spec.Mode)
+	if m.Spec.Mode != "found" && m.Spec.Mode != "join" && m.Spec.Mode != "observe" {
+		fmt.Fprintf(os.Stderr, "mode: %s not supported (accepted: found, join, observe)\n", m.Spec.Mode)
 		return 1
 	}
 	if m.Spec.Environment != "local" {
@@ -119,6 +119,15 @@ func runApply(args []string) int {
 		}
 	}
 
+	// Resolve the NOC bundle path relative to the manifest file (mode:observe).
+	nocBundlePath := ""
+	if m.Spec.Mode == "observe" && m.Spec.NOCBundleRef != "" {
+		nocBundlePath = m.Spec.NOCBundleRef
+		if !filepath.IsAbs(nocBundlePath) {
+			nocBundlePath = filepath.Join(filepath.Dir(manifestFile), nocBundlePath)
+		}
+	}
+
 	in := apply.ApplyInput{
 		Manifest:                         m,
 		DryRun:                           dryRun,
@@ -136,6 +145,9 @@ func runApply(args []string) int {
 		ScriptsDir:                       profile.ScriptsDir,
 		ComposeTemplatePath:              profile.ComposeTemplatePath,
 		PaladinConfigDir:                 profile.PaladinConfigDir,
+		RepoRoot:                         profile.Root,
+		NOCStackComposePath:              profile.NOCStackComposePath,
+		NOCBundlePath:                    nocBundlePath,
 	}
 
 	// Set up signal handling so Ctrl-C produces a partial report.

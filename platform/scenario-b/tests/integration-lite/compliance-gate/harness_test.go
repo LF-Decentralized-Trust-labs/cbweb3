@@ -79,7 +79,10 @@ func newComplianceEnv(t *testing.T) *complianceEnv {
 	t.Helper()
 	repo := repository.NewMemoryRepository()
 	// CA nil and registry nil are explicitly supported by server.New (dev/test mode).
-	srv := server.New(repo, nil, nil)
+	srv, err := server.New(repo, nil, nil)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
 	conn := dialBufconn(t, srv)
 	return &complianceEnv{
 		client: compliancv1.NewComplianceServiceClient(conn),

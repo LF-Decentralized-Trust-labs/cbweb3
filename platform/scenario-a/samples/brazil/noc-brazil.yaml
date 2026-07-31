@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../provisioning/schema/v1/participant-deployment.schema.yaml
+# Scenario A — NOC (Network Operations Center) DATA PLANE for spoke-brl.
+#
+# The NOC PORTAL is already built + deployed by central-bank-brazil's `found`
+# (its 4th frontend, on http://localhost:32645, pointing VITE_NOC_BACKEND_URL at
+# http://localhost:28645). This observe run adds only the control-plane DATA PLANE
+# — Postgres + noc-backend on :28645 in its own docker network — plus the founding
+# CB's noc-agent. It runs NO on-chain node.
+#
+# Login: the portal uses central-bank-brazil's cbweb3 Keycloak realm + cbweb3-noc
+# client and the ROLE_NOC_ADMIN user provisioned by that CB's found
+# (admin@brasil.noc.gov).
+#
+# Single-host note: the NOC backend port (28645) is fixed (one NOC per host), so
+# these samples stand up ONE NOC (Brazil). central-bank-colombia's NOC portal
+# (:32745) points at the same :28645 backend; a second, distinct NOC needs a
+# separate host (see deploy-lnet/) or per-entity NOC ports.
+apiVersion: cbweb3/v1
+kind: ParticipantDeployment
+metadata:
+  name: noc-brazil
+spec:
+  scenario: a
+  environment: local
+  role: noc
+  mode: observe
+  displayName: NOC — spoke-brl
+  # NOC bundle emitted by central-bank-brazil (found) and copied into samples/bundles/
+  # by deploy-all-with-noc.sh. Resolved relative to this manifest's directory.
+  nocBundleRef: ../bundles/spoke-brl.noc.bundle.yaml
+  # Optional tuning; the agent defaults to a 15s push cadence and all bundle
+  # components. Scenario A's NOC bundle carries the CB Besu node only.
+  noc:
+    pushIntervalSeconds: 15
+    components: [BESU]
