@@ -176,6 +176,14 @@ services:
       # beneficiary's CB (CB-B) by spoke_out. Without it, Step 3 falls back to a
       # local enqueue that no bank-side relayer can process. Empty disables it.
       CACTI_API_URL: "${CACTI_API_URL:-}"
+      # Background sweeps, both with in-code defaults — passed through so an operator can
+      # slow them down or switch them off without rebuilding the image. 0 disables.
+      #   residue retry: re-enqueues a slippage-buffer return whose enqueue failed, so the
+      #     payer's unspent reserves are not left with the CB.
+      #   hub reconciliation: reports W-token on this CB's Hub address that its own records
+      #     cannot attribute to a bank payment. Report-only; it never moves value.
+      RESIDUE_RETRY_INTERVAL_SEC: "${RESIDUE_RETRY_INTERVAL_SEC:-}"
+      HUB_RECONCILIATION_INTERVAL_SEC: "${HUB_RECONCILIATION_INTERVAL_SEC:-}"
       # Bridge lock-mint / burn-unlock derivation: the entity's own spoke network id
       # (spoke-brl, spoke-ars) and native tCeBM symbol. Required on a CB that receives
       # a cross-currency bridge-out (it enqueues the W-<target> burn for its spoke).

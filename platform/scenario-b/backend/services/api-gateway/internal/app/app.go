@@ -910,6 +910,29 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			log.Printf("[app] WARNING: hub swap delegation not registered (needs PAIR_REGISTRY_CONTRACT_ADDRESS + HUB_BESU_RPC_URL + SIGNER_PRIVATE_KEY) — delegating banks will fall back to signing on the Hub themselves")
 		}
 
+		// Hub reconciliation: this CB's own W-token balance against its own records. Wired on the
+		// same condition as bridge-in — it reconciles the money this CB minted for its banks, and
+		// only an issuing CB has that. Reports; never acts.
+		if hubRPC != "" && deps.WTokenAddress != "" && hubSignerAddr != "" {
+			// Process-lifetime, like the other Hub clients built here: buildV2Dependencies has no
+			// closer list, and the checker needs the connection for as long as it runs.
+			if reader := newHubBalanceReader(context.Background(), hubRPC, 15*time.Second); reader != nil {
+				// BANK_CODE on a CB gateway is the CB's own entity id, so it identifies the
+				// positions that are this CB's own money (liquidity it deployed) rather than an
+				// obligation toward a bank. Empty simply disables that exclusion.
+				reconciler := services.NewHubReconciliationService(
+					reader, newHubReconciliationRepository(db, hubSignerAddr, cfg.BankCode),
+					deps.WTokenAddress, hubSignerAddr)
+				if reconciler != nil {
+					deps.HubReconciler = reconciler
+					startHubReconciliationChecker(reconciler)
+					log.Printf("[app] hub reconciliation enabled for %s held at %s", deps.WTokenAddress, hubSignerAddr)
+				}
+			}
+		} else {
+			log.Printf("[app] hub reconciliation not enabled (needs HUB_BESU_RPC_URL, W_TOKEN_ADDRESS and a hub signer) — an unattributable Hub balance would go unnoticed")
+		}
+
 		// Step 4 receiver: the CB that bridged W-<source> in is also the only one that can
 		// give the unspent slippage buffer back. Wired on the same condition as bridge-in,
 		// since it is the mirror image of the same sovereign privilege.

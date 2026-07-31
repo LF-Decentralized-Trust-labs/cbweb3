@@ -110,6 +110,9 @@ type Dependencies struct {
 	// CrossCurrencyHubSwapDirection resolves the corridor direction for a pool_pair so one
 	// sovereign pair serves both ways. Optional (nil ⇒ A→B orientation).
 	CrossCurrencyHubSwapDirection handlers.SwapDirectionResolverIface
+	// HubReconciler reports what this central bank holds on the Hub for its banks and what part
+	// of it its own records cannot account for. Set only on an issuing CB with Hub access.
+	HubReconciler handlers.HubReconcilerIface
 	// HubSignerAddress is this gateway's own Hub address, derived from SIGNER_PRIVATE_KEY.
 	// A CB returns it on a delegated swap so the bank can tell the beneficiary CB where the
 	// swap output landed. Empty on a gateway with no Hub signing key (a delegating bank).
@@ -406,6 +409,18 @@ func registerUS2Routes(app *fiber.App, deps Dependencies) {
 			lh.WithLPBalanceReader(deps.LPBalanceReader)
 			amm.Get("/lp-balance", lh.GetLPBalance)
 		}
+	}
+
+	// Hub reconciliation: the CB's own obligation toward its banks, and the part of the on-chain
+	// balance its records cannot attribute. Treasury-facing, so it is gated on the CB role — the
+	// per-bank exposure it returns is the CB's own book, not a bank's own row.
+	if deps.HubReconciler != nil && deps.AuthProvider != nil {
+		hrh := handlers.NewHubReconciliationHandler(deps.HubReconciler)
+		app.Get("/api/v2/amm/hub-reconciliation",
+			middleware.RequireAnyAuth(deps.AuthProvider),
+			middleware.RequireCentralBankRole(),
+			hrh.GetReconciliation,
+		)
 	}
 
 	if deps.TokenPreparer != nil && deps.AuthProvider != nil {

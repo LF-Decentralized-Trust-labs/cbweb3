@@ -230,7 +230,65 @@ not start and the previous behaviour (no retry at all) is preserved. Additive sc
 `residue_attempts` and `residue_next_attempt_at` via `AutoMigrate` — so this is not a rollback
 blocker.
 
-### 6. Delegated-swap replay guard (additive)
+### 6. Hub reconciliation is now watched (new, additive)
+
+**What it is.** An issuing CB reconciles its own Hub W-token balance against its own records every
+`HUB_RECONCILIATION_INTERVAL_SEC` (default 300). The banks never hold W-token — it is minted to the
+CB, spent by the CB in the AMM trade and burned by the CB when the unspent part goes back — so that
+balance is the CB's **obligation** toward banks whose reserves were consumed and whose payments have
+not closed. The payment side of the balance is zero at rest, which makes the check one subtraction
+rather than a judgement:
+
+    on-chain balance − Σ(what each in-flight payment still legitimately has there)
+
+Whatever remains is reported as `unexplained`. Read it as "not attributable to a bank payment", not
+"money is missing": the value is on-chain and visible. The figure is **signed** — a negative
+`unexplained` is a *shortfall* against the records (value that should be on the address and is not),
+which is the more serious of the two findings.
+
+**Already-flagged positions are listed, not subtracted.** `stranded_total` and the `stranded` list
+are context for the operator. A residue the relayer gave up on is still sitting on the address *and*
+still inside its parent payment's in-flight amount, so deducting it as well would count the same
+money twice and drive the result negative exactly in the failure the report exists to name. Each
+item carries a `direction`: `OUT` means the value is on the address (a burn that never went
+through), `IN` means it never arrived (a mint that never landed).
+
+**Where to look.** `[hub-reconciliation]` in the CB gateway log — one line per cycle, structured
+JSON when it does not balance. Also `GET /api/v2/amm/hub-reconciliation` (CB role) and the
+"Hub obligation" card on the treasury Dashboard, which shows the figure, the per-bank split and the
+flagged positions. `per_bank` lists only banks with a **non-zero** exposure: a bridge-in stays
+`ACTIVE` for life and contributes zero once its payment settles, so listing them all would grow
+without bound and say nothing. A bank's absence means nothing is owed to it, not that it never
+transacted.
+
+**It only observes.** A mismatch is never acted on: halting payments over an accounting figure
+would turn a reportable condition into an outage, and the circuit breaker already exists for when
+stopping is deliberate. `HUB_RECONCILIATION_INTERVAL_SEC=0` disables the checker.
+
+**What it deliberately does not cover — read this before treating a non-zero figure as a defect.**
+
+- **Only this CB's own W-token.** A foreign W-token received as swap output is burned by the OTHER
+  CB on bridge-out — an act this CB does not record — so reconciling it from here would be guesswork.
+- **The CB's own liquidity is not netted off.** W-token this CB minted for itself and deployed into
+  an AMM pool comes back to the same address on withdrawal, and no path burns it down. Those
+  positions carry the CB's own `owner_bank_id` and are excluded from the expectation, so they show
+  up inside `unexplained`. A CB reading its own report knows its own liquidity; deducting it would
+  need a per-position record of pool deployments that does not exist, and inferring one from
+  balances is the heuristic this report replaces. **On a stack with committed liquidity, expect
+  `unexplained` to sit at roughly the CB's own undeployed/withdrawn W-token, not at zero.**
+- **A residue whose *enqueue* failed** leaves no position on the CB, so it appears inside
+  `unexplained` rather than as a named item; the payer's own gateway is what knows which swap it is
+  (`RETURN_ESCALATED` in its history).
+
+**Expect a non-zero figure on an upgraded stack** that has been running payments: anything stranded
+before item 5's retry existed shows up here. That is the feature working, not a regression.
+
+**Schema note.** The reconciliation adds a `direction` column to `bridged_asset_positions` and
+backfills it at startup (`IN`/`OUT`, derived from the relayer queue's event type for pre-existing
+rows), plus an index on `(mirrored_asset, leg, bridge_state)`. Both are additive and idempotent; the
+backfill only touches rows whose direction is empty, so a re-run and a rollback are both no-ops.
+
+### 7. Delegated-swap replay guard (additive)
 
 `cross_currency_hub_swaps` is created by `AutoMigrate` and keys each delegated Hub AMM swap on the
 bridge-in position that funded it, so a retried delegation cannot trade twice against the same

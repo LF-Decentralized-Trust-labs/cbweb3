@@ -5,6 +5,7 @@ package init
 
 import (
 	"fmt"
+	"log"
 
 	apidomain "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"gorm.io/gorm"
@@ -24,7 +25,44 @@ func RunAutoMigrate(db *gorm.DB) error {
 	if err := autoMigrateModels(db); err != nil {
 		return err
 	}
+	if err := backfillBridgeDirection(db); err != nil {
+		return err
+	}
 	return dropLegacySwapTxHashIndex(db)
+}
+
+// backfillBridgeDirection fills the direction of positions created before the column existed.
+//
+// Nothing on the position itself says which way it moved value — that is exactly the gap the
+// column closes — so the backfill reads the relayer queue, whose event type is the durable
+// record: BURN_UNLOCK means the position burns on the Hub, anything else mints. Rows with no
+// queue item at all fall back to IN, the only direction LockAndEnqueue produces.
+//
+// Idempotent: it only touches rows whose direction is still empty, so a re-run is a no-op and a
+// direction written at creation is never overwritten.
+func backfillBridgeDirection(db *gorm.DB) error {
+	m := db.Migrator()
+	pos := &apidomain.BridgedAssetPosition{}
+	if !m.HasColumn(pos, "direction") {
+		return nil
+	}
+	out := db.Model(pos).
+		Where("(direction IS NULL OR direction = '')").
+		Where("EXISTS (SELECT 1 FROM relayer_queue_items q WHERE q.position_id = bridged_asset_positions.position_id AND q.event_type = ?)", "BURN_UNLOCK").
+		Update("direction", apidomain.BridgeDirectionOut)
+	if out.Error != nil {
+		return fmt.Errorf("backfill bridge direction (OUT): %w", out.Error)
+	}
+	in := db.Model(pos).
+		Where("(direction IS NULL OR direction = '')").
+		Update("direction", apidomain.BridgeDirectionIn)
+	if in.Error != nil {
+		return fmt.Errorf("backfill bridge direction (IN): %w", in.Error)
+	}
+	if out.RowsAffected > 0 || in.RowsAffected > 0 {
+		log.Printf("[migrate] backfilled bridge direction: %d OUT, %d IN", out.RowsAffected, in.RowsAffected)
+	}
+	return nil
 }
 
 // dropLegacySwapTxHashIndex removes the single-column unique index once AutoMigrate has
