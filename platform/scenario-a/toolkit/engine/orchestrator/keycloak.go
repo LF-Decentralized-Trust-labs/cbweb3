@@ -22,11 +22,25 @@ import (
 // central-bank realm AND the `cbweb3` realm (NOC). Commercial banks use the CB's
 // instance in `shared` mode, or their own in `per-entity` mode.
 
+// Audience values stamped into access tokens via an oidc-audience-mapper so the
+// backends can enforce the "aud" claim (KEYCLOAK_AUDIENCE). Backend login clients
+// (governance/treasury/bank) carry keycloakBackendAudience, which the api-gateway
+// auth service expects; the NOC client carries keycloakNOCAudience. iss is already
+// deterministic — the auth service password-grants server-side against its
+// configured KEYCLOAK_BASE_URL, the exact host Keycloak stamps into iss.
+const (
+	keycloakBackendAudience = "cbweb3-backend"
+	keycloakNOCAudience     = "cbweb3-noc"
+)
+
 // KeycloakClientPlan describes one confidential service-account client.
 type KeycloakClientPlan struct {
 	ClientID string
 	Secret   string
 	Roles    []string
+	// Audience, when non-empty, adds an oidc-audience-mapper stamping this value
+	// into the client's access tokens (so a backend can enforce KEYCLOAK_AUDIENCE).
+	Audience string
 }
 
 // KeycloakUserPlan describes one human operator account (password grant) to
@@ -76,7 +90,7 @@ func nocRealmPlan() KeycloakRealmPlan {
 	return KeycloakRealmPlan{
 		Realm: "cbweb3",
 		Clients: []KeycloakClientPlan{
-			{ClientID: "cbweb3-noc", Secret: "", Roles: []string{"ROLE_NOC_VIEWER", "ROLE_NOC_OPERATOR", "ROLE_NOC_ADMIN"}},
+			{ClientID: "cbweb3-noc", Secret: "", Roles: []string{"ROLE_NOC_VIEWER", "ROLE_NOC_OPERATOR", "ROLE_NOC_ADMIN"}, Audience: keycloakNOCAudience},
 		},
 	}
 }
@@ -93,8 +107,8 @@ func centralBankRealmPlans(entity string, admins []manifest.AdminUser) []Keycloa
 		{
 			Realm: entity,
 			Clients: []KeycloakClientPlan{
-				{ClientID: entity + "-client", Secret: entity + "-local-secret", Roles: []string{"ROLE_GOVERNANCE"}},
-				{ClientID: entity + "-treasury-client", Secret: entity + "-treasury-local-secret", Roles: []string{"ROLE_TREASURY"}},
+				{ClientID: entity + "-client", Secret: entity + "-local-secret", Roles: []string{"ROLE_GOVERNANCE"}, Audience: keycloakBackendAudience},
+				{ClientID: entity + "-treasury-client", Secret: entity + "-treasury-local-secret", Roles: []string{"ROLE_TREASURY"}, Audience: keycloakBackendAudience},
 			},
 			Users: adminUsersForRealmRoles(admins, "ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR"),
 		},
@@ -108,7 +122,7 @@ func commercialBankRealmPlan(entity string, admins []manifest.AdminUser) Keycloa
 	return KeycloakRealmPlan{
 		Realm: entity,
 		Clients: []KeycloakClientPlan{
-			{ClientID: entity + "-client", Secret: entity + "-local-secret", Roles: []string{"ROLE_BANK"}},
+			{ClientID: entity + "-client", Secret: entity + "-local-secret", Roles: []string{"ROLE_BANK"}, Audience: keycloakBackendAudience},
 		},
 		Users: adminUsersForRealmRoles(admins, "ROLE_BANK"),
 	}
@@ -149,6 +163,21 @@ func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
 			"serviceAccountsEnabled":    c.Secret != "",
 			"redirectUris":              []string{"*"},
 			"webOrigins":                []string{"*"},
+		}
+		// Stamp a fixed "aud" via an audience mapper so the consuming backend can
+		// enforce KEYCLOAK_AUDIENCE. Without this Keycloak omits the client id from
+		// "aud" and aud enforcement would reject every token (fails closed).
+		if c.Audience != "" {
+			client["protocolMappers"] = []map[string]any{{
+				"name":           "cbweb3-audience",
+				"protocol":       "openid-connect",
+				"protocolMapper": "oidc-audience-mapper",
+				"config": map[string]any{
+					"included.custom.audience": c.Audience,
+					"access.token.claim":       "true",
+					"id.token.claim":           "false",
+				},
+			}}
 		}
 		if c.Secret != "" {
 			client["secret"] = c.Secret

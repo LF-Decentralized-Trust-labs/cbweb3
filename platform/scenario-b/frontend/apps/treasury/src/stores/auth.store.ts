@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { authApi } from "../services/api";
+import { cancelTokenRefresh, scheduleTokenRefresh } from "../services/api/token-refresh";
 import type { AsyncStatus, MeResponse, TreasuryUser } from "../types";
 
 type AuthState = {
@@ -12,6 +13,7 @@ type AuthState = {
   error: string | null;
   login: (clientId: string, clientSecret: string) => Promise<void>;
   logout: () => Promise<void>;
+  forceLogout: () => void;
   checkSession: () => Promise<void>;
 };
 
@@ -35,7 +37,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: async (clientId, clientSecret) => {
     set({ status: "loading", error: null });
     try {
-      await authApi.login(clientId, clientSecret);
+      const { expiresIn } = await authApi.login(clientId, clientSecret);
+      // Keep the short-lived access token renewed for the whole session.
+      scheduleTokenRefresh(expiresIn);
       const me = await authApi.me();
       set({ user: meToUser(me), isAuthenticated: true, initialized: true, status: "idle" });
     } catch (error) {
@@ -48,14 +52,25 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
   logout: async () => {
+    cancelTokenRefresh();
     await authApi.logout();
+    set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
+  },
+  forceLogout: () => {
+    cancelTokenRefresh();
     set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
   },
   checkSession: async () => {
     try {
       const me = await authApi.me();
       set({ user: meToUser(me), isAuthenticated: true, initialized: true, status: "idle" });
+      // Session restored on load — (re)arm proactive refresh (best-effort).
+      void authApi
+        .refresh()
+        .then((result) => scheduleTokenRefresh(result.expiresIn))
+        .catch(() => {});
     } catch {
+      cancelTokenRefresh();
       set({ user: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
     }
   },

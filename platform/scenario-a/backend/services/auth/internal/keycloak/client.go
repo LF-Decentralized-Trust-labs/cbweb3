@@ -75,6 +75,11 @@ func New(cfg Config) (Client, error) {
 	if strings.TrimSpace(cfg.Realm) == "" {
 		return nil, errors.New("keycloak: Realm is required")
 	}
+	// Normalise BaseURL so a configured trailing slash does not corrupt the
+	// derived issuer: KEYCLOAK_BASE_URL="http://kc:8080/" would otherwise yield
+	// "http://kc:8080//realms/<realm>", which the JWKS fetch tolerates but the
+	// exact "iss" string comparison rejects — failing every token closed.
+	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	if cfg.JWKSCacheTTL <= 0 {
 		cfg.JWKSCacheTTL = 5 * time.Minute
 	}
@@ -233,6 +238,17 @@ func (c *keycloakClient) rsaKeyForKID(ctx context.Context, kid string) (*rsa.Pub
 	if err != nil {
 		return nil, err
 	}
+	if k, ok := keys[kid]; ok {
+		return jwksKeyToRSA(k)
+	}
+	// The kid is absent from the cached JWKS. The realm may have rotated its
+	// signing keys since the cache was populated, so force a single refresh
+	// before rejecting — otherwise every token fails until the cache TTL
+	// expires (which is tens of minutes under a long KEYCLOAK_JWKS_CACHE_TTL).
+	keys, err = c.refreshJWKSForKID(ctx, kid)
+	if err != nil {
+		return nil, err
+	}
 	k, ok := keys[kid]
 	if !ok {
 		return nil, fmt.Errorf("keycloak: no JWKS key found for kid %q", kid)
@@ -257,7 +273,27 @@ func (c *keycloakClient) getJWKS(ctx context.Context) (map[string]jwksKey, error
 	if c.cache != nil && time.Since(c.cache.fetchedAt) < c.cfg.JWKSCacheTTL {
 		return c.cache.keys, nil
 	}
+	return c.fetchAndCacheLocked(ctx)
+}
 
+// refreshJWKSForKID forces a JWKS re-fetch when kid is missing from the cache,
+// recovering from a realm signing-key rotation without waiting for the cache
+// TTL. If a concurrent refresh already brought kid into the cache, that cache
+// is reused instead of issuing another request.
+func (c *keycloakClient) refreshJWKSForKID(ctx context.Context, kid string) (map[string]jwksKey, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cache != nil {
+		if _, ok := c.cache.keys[kid]; ok {
+			return c.cache.keys, nil
+		}
+	}
+	return c.fetchAndCacheLocked(ctx)
+}
+
+// fetchAndCacheLocked fetches the JWKS from Keycloak and replaces the cache.
+// The caller must hold c.mu for writing.
+func (c *keycloakClient) fetchAndCacheLocked(ctx context.Context) (map[string]jwksKey, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.certsURL(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("keycloak: building JWKS request: %w", err)

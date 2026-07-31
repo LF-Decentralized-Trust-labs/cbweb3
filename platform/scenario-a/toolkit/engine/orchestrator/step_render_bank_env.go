@@ -100,6 +100,7 @@ func (s *renderBankEnvStep) Run(_ context.Context) error {
 		KCRealm:        s.bankCode,
 		KCClientID:     s.bankCode + "-client",
 		KCClientSecret: s.bankCode + "-local-secret",
+		KCAudience:     keycloakBackendAudience,
 
 		PostgresContainer: prefix + "-postgres",
 		PostgresPort:      ports.Postgres,

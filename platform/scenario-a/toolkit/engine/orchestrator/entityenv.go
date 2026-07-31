@@ -30,6 +30,10 @@ type EntityEnvData struct {
 	KCRealm        string
 	KCClientID     string
 	KCClientSecret string
+	// KCAudience is the expected "aud" the auth service enforces (KEYCLOAK_AUDIENCE).
+	// The realm's backend login clients carry a matching audience mapper (see
+	// keycloak.go). Empty leaves aud enforcement off (iss is still enforced).
+	KCAudience string
 
 	// Dedicated infra (per-entity).
 	PostgresContainer string
@@ -142,6 +146,9 @@ KC_CLIENT_SECRET={{.KCClientSecret}}
 KEYCLOAK_REALM={{.KCRealm}}
 KEYCLOAK_CLIENT_ID={{.KCClientID}}
 KEYCLOAK_CLIENT_SECRET={{.KCClientSecret}}
+# Token validation: iss is derived from KEYCLOAK_BASE_URL + realm (always enforced);
+# aud is enforced when set. Backend login clients carry a matching audience mapper.
+KEYCLOAK_AUDIENCE={{.KCAudience}}
 
 # PKI (local dev)
 CA_CERT_FILE={{.CACertFile}}

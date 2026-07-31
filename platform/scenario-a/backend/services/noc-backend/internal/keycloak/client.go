@@ -34,8 +34,13 @@ type Client interface {
 
 // Config holds Keycloak connection parameters.
 type Config struct {
-	BaseURL        string
-	Realm          string
+	BaseURL string
+	Realm   string
+	// Audience is the expected "aud" claim. Opt-in: when empty, the audience
+	// check is skipped (set it only once the realm stamps this value into "aud"
+	// via an audience mapper — Keycloak does not add the client id to "aud" by
+	// default). The issuer is derived from BaseURL + Realm and always enforced.
+	Audience       string
 	JWKSCacheTTL   time.Duration
 	RequestTimeout time.Duration
 }
@@ -71,6 +76,10 @@ func New(cfg Config) (Client, error) {
 	if strings.TrimSpace(cfg.Realm) == "" {
 		return nil, errors.New("keycloak: Realm is required")
 	}
+	// Normalise BaseURL so a configured trailing slash does not corrupt the
+	// derived issuer: "http://kc:8080/" would otherwise yield a "//realms/..."
+	// issuer that the exact "iss" comparison rejects — failing every token.
+	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	if cfg.JWKSCacheTTL <= 0 {
 		cfg.JWKSCacheTTL = 5 * time.Minute
 	}
@@ -87,6 +96,12 @@ func (c *client) certsURL() string {
 	return fmt.Sprintf("%s/realms/%s/protocol/openid-connect/certs", c.cfg.BaseURL, c.cfg.Realm)
 }
 
+// issuerURL returns the expected "iss" claim for tokens minted by this realm.
+// Keycloak sets iss to "{BaseURL}/realms/{Realm}".
+func (c *client) issuerURL() string {
+	return fmt.Sprintf("%s/realms/%s", c.cfg.BaseURL, c.cfg.Realm)
+}
+
 // ValidateToken parses and validates an RS256 JWT, returning subject and realm roles.
 func (c *client) ValidateToken(ctx context.Context, accessToken string) (TokenClaims, error) {
 	keyFunc := func(token *jwt.Token) (any, error) {
@@ -100,7 +115,18 @@ func (c *client) ValidateToken(ctx context.Context, accessToken string) (TokenCl
 		return c.rsaKeyForKID(ctx, kid)
 	}
 
-	token, err := jwt.Parse(accessToken, keyFunc, jwt.WithValidMethods([]string{"RS256"}))
+	// Enforce the issuer in addition to the signing method so a token minted by
+	// a different Keycloak/realm (but signed with a key whose kid collides) is
+	// rejected. The audience is enforced only when configured (opt-in).
+	parseOpts := []jwt.ParserOption{
+		jwt.WithValidMethods([]string{"RS256"}),
+		jwt.WithIssuer(c.issuerURL()),
+	}
+	if aud := strings.TrimSpace(c.cfg.Audience); aud != "" {
+		parseOpts = append(parseOpts, jwt.WithAudience(aud))
+	}
+
+	token, err := jwt.Parse(accessToken, keyFunc, parseOpts...)
 	if err != nil {
 		return TokenClaims{}, fmt.Errorf("keycloak: invalid token: %w", err)
 	}
@@ -126,6 +152,16 @@ func (c *client) rsaKeyForKID(ctx context.Context, kid string) (*rsa.PublicKey, 
 	if err != nil {
 		return nil, err
 	}
+	if k, ok := keys[kid]; ok {
+		return jwksKeyToRSA(k)
+	}
+	// The kid is absent from the cached JWKS. The realm may have rotated its
+	// signing keys since the cache was populated, so force a single refresh
+	// before rejecting — otherwise every token fails until the cache TTL expires.
+	keys, err = c.refreshJWKSForKID(ctx, kid)
+	if err != nil {
+		return nil, err
+	}
 	k, ok := keys[kid]
 	if !ok {
 		return nil, fmt.Errorf("keycloak: no JWKS key found for kid %q", kid)
@@ -148,7 +184,26 @@ func (c *client) getJWKS(ctx context.Context) (map[string]jwksKey, error) {
 	if c.cache != nil && time.Since(c.cache.fetchedAt) < c.cfg.JWKSCacheTTL {
 		return c.cache.keys, nil
 	}
+	return c.fetchAndCacheLocked(ctx)
+}
 
+// refreshJWKSForKID forces a JWKS re-fetch when kid is missing from the cache,
+// recovering from a realm signing-key rotation without waiting for the cache
+// TTL. A concurrent refresh that already brought kid into the cache is reused.
+func (c *client) refreshJWKSForKID(ctx context.Context, kid string) (map[string]jwksKey, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cache != nil {
+		if _, ok := c.cache.keys[kid]; ok {
+			return c.cache.keys, nil
+		}
+	}
+	return c.fetchAndCacheLocked(ctx)
+}
+
+// fetchAndCacheLocked fetches the JWKS from Keycloak and replaces the cache.
+// The caller must hold c.mu for writing.
+func (c *client) fetchAndCacheLocked(ctx context.Context) (map[string]jwksKey, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.certsURL(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("keycloak: building JWKS request: %w", err)
