@@ -156,6 +156,7 @@ func (c *SpokeConfig) WithDefaults() {
 func (c SpokeConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
 func (c SpokeConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
 func (c SpokeConfig) caVolume() string       { return c.VolumePrefix + "_cb_tls" }
+func (c SpokeConfig) svcTLSVolume() string    { return c.VolumePrefix + "_svc_tls" }
 func (c SpokeConfig) nocAgentVolume() string { return c.VolumePrefix + "_noc_agent_cfg" }
 
 // scenarioBDir is <repo>/scenario-b (parent of ContractsDir), the docker build
@@ -566,6 +567,11 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// participant CSRs with it.
 		"CA_VOLUME":      c.caVolume(),
 		"ENTITY_PKI_DIR": "cb_tls", // named volume (holds the generated CA)
+		// R2-H-8 service-mesh mTLS: the per-entity service CA + leaf certs live in
+		// this volume, mounted read-only at /svc-tls in every backend container.
+		// mTLS activates only when GRPC_MTLS_ENABLE is exported (gated in the
+		// templates); default-off keeps the existing plaintext transport.
+		"SVC_TLS_VOLUME": c.svcTLSVolume(),
 		"CA_CERT_FILE":   "/workspace/backend/config/pki/central-bank.crt",
 		"CA_KEY_FILE":    "/workspace/backend/config/pki/central-bank.key",
 		// Shared secret for the hub-mediated M2M endpoints + cross-currency bridge
@@ -934,8 +940,18 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			},
 			Run: func(ctx context.Context) error { return genCBCA(ctx, c.Runner, c.caVolume()) },
 		},
+		{
+			// R2-H-8 service-mesh mTLS: per-entity service CA + one leaf per gRPC
+			// service, seeded into the svc_tls volume (mounted at /svc-tls). Harmless
+			// on its own — mTLS only activates when GRPC_MTLS_ENABLE is exported.
+			Name: "gen-svc-tls-spoke",
+			Check: func(ctx context.Context) (bool, error) {
+				return volumeHasFile(ctx, c.Runner, c.svcTLSVolume(), "svc-ca.crt"), nil
+			},
+			Run: func(ctx context.Context) error { return genServiceTLS(ctx, c.Runner, c.svcTLSVolume()) },
+		},
 		{Name: "start-spoke-infra", Deps: []string{"render-spoke-env"}, Run: compose("entity-infra")},
-		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke", "gen-tls-spoke"}, Run: func(ctx context.Context) error {
+		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke", "gen-tls-spoke", "gen-svc-tls-spoke"}, Run: func(ctx context.Context) error {
 			// Build the backend images before `compose up`. The hub host builds these
 			// too, but a spoke on a SEPARATE Docker daemon (multi-VM lab) never has
 			// them, so compose would try to PULL a local-only tag and fail. Idempotent

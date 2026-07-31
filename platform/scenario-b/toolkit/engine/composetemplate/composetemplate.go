@@ -91,11 +91,33 @@ func (r *Result) add(rule, detail string) {
 	r.OK = false
 }
 
+// interpolateToFixedPoint runs interpolate repeatedly until the output stops
+// changing (bounded), so nested compose references — e.g. a `:-` default that
+// itself contains `${...}` like "http://host:${HUB_RPC_PORT}" — resolve fully
+// instead of leaving a residual placeholder the single-pass regex can't reach.
+// Missing mandatory vars are accumulated across passes; the iteration cap guards
+// against a pathological self-referential template.
+func interpolateToFixedPoint(raw string, env map[string]string) (string, []string) {
+	missing := map[string]bool{}
+	out := raw
+	for i := 0; i < 10; i++ {
+		next, miss := interpolate(out, env)
+		for _, m := range miss {
+			missing[m] = true
+		}
+		if next == out {
+			break
+		}
+		out = next
+	}
+	return out, sortedKeys(missing)
+}
+
 // Validate checks a template against an env: interpolation (mandatory vars
 // present, no residual placeholder), no-secrets, and named-volumes.
 func Validate(t *Template, env map[string]string) Result {
 	res := Result{OK: true}
-	interpolated, missing := interpolate(t.Raw, env)
+	interpolated, missing := interpolateToFixedPoint(t.Raw, env)
 	for _, v := range missing {
 		res.add("interpolation", "mandatory variable missing: "+v)
 	}
