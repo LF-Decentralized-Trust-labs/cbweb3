@@ -40,12 +40,15 @@ contract PairRegistryTest is Test {
         identityRegistry.registerParticipant(
             cbBRL, "Banco Central do Brasil", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(cbBRL);
         identityRegistry.registerParticipant(
             cbUSD, "Federal Reserve", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(cbUSD);
         identityRegistry.registerParticipant(
             cbARS, "Banco Central de Argentina", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(cbARS);
         // Map each token to its issuing CB
         identityRegistry.setCentralBankOf(address(tokenBRL), cbBRL);
         identityRegistry.setCentralBankOf(address(tokenUSD), cbUSD);

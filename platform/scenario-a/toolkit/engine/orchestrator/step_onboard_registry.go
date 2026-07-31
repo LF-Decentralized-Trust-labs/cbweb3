@@ -24,10 +24,12 @@ import (
 
 const (
 	// identityRegistryABI is the minimal ABI for IdentityRegistry used by the engine.
-	// Includes: registerParticipant and canTransact (the membership check — the
-	// contract exposes canTransact/canGovern/getParticipant, not isParticipant).
-	// registerParticipant sets status=Verified, so canTransact returns true for a
-	// registered, non-NONE participant.
+	// Includes: registerParticipant, verifyParticipant and canTransact (the membership
+	// check — the contract exposes canTransact/canGovern/getParticipant, not isParticipant).
+	// Onboarding is now two-step: registerParticipant creates the participant in Pending,
+	// then verifyParticipant promotes it to Verified. Only after verifyParticipant does
+	// canTransact return true for a registered, non-NONE participant. The governance
+	// (operator) key holds both GOVERNANCE_ROLE and VERIFIER_ROLE, so it drives both steps.
 	identityRegistryABI = `[
 		{
 			"name": "registerParticipant",
@@ -38,6 +40,12 @@ const (
 				{"name": "role", "type": "uint8"},
 				{"name": "zkPointer", "type": "bytes32"}
 			],
+			"outputs": []
+		},
+		{
+			"name": "verifyParticipant",
+			"type": "function",
+			"inputs": [{"name": "account", "type": "address"}],
 			"outputs": []
 		},
 		{
@@ -234,6 +242,30 @@ func (s *onboardRegistryStep) Run(ctx context.Context) error {
 	}
 	if receipt.Status != 1 {
 		return fmt.Errorf("registerParticipant tx reverted")
+	}
+
+	// 6. Two-step onboarding: registerParticipant only creates the participant in Pending.
+	// A follow-up verifyParticipant (VERIFIER_ROLE) promotes it to Verified so canTransact
+	// returns true. The governance/operator key holds both roles, so it signs this too. The
+	// nonce is the register nonce + 1 (register consumed `nonce`).
+	verifyData, err := parsedABI.Pack("verifyParticipant", addr)
+	if err != nil {
+		return fmt.Errorf("pack verifyParticipant: %w", err)
+	}
+	verifyTx := types.NewTransaction(nonce+1, contractAddr, big.NewInt(0), 300000, gasPrice, verifyData)
+	signedVerifyTx, err := signTxViaKeyProvider(ctx, s.keyProvider, kp.LocalOperatorKeyID, signer, verifyTx)
+	if err != nil {
+		return fmt.Errorf("sign verifyParticipant: %w", err)
+	}
+	if err := client.SendTransaction(ctx, signedVerifyTx); err != nil {
+		return fmt.Errorf("send verifyParticipant tx: %w", err)
+	}
+	verifyReceipt, err := waitForReceipt(ctx, client, signedVerifyTx.Hash())
+	if err != nil {
+		return fmt.Errorf("wait for verifyParticipant receipt: %w", err)
+	}
+	if verifyReceipt.Status != 1 {
+		return fmt.Errorf("verifyParticipant tx reverted")
 	}
 
 	_ = ctx

@@ -62,12 +62,15 @@ contract FXAgreementTest is Test {
         identityRegistry.registerParticipant(
             counterpartyA, "Commercial Bank A", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(counterpartyA);
         identityRegistry.registerParticipant(
             counterpartyB, "Commercial Bank B", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(counterpartyB);
         identityRegistry.registerParticipant(
             centralBank, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(centralBank);
         vm.stopPrank();
 
         /// @dev 2. Deploy FXAgreement

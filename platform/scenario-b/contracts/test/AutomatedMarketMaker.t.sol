@@ -42,18 +42,23 @@ contract AutomatedMarketMakerTest is Test {
         identityRegistry.registerParticipant(
             liquidityProvider, "LP Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(liquidityProvider);
         identityRegistry.registerParticipant(
             swapper, "Commercial Bank A", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(swapper);
         identityRegistry.registerParticipant(
             governanceA, "Central Bank A", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(governanceA);
         identityRegistry.registerParticipant(
             governanceB, "Central Bank B", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(governanceB);
         identityRegistry.registerParticipant(
             governanceC, "Central Bank C", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(governanceC);
         vm.stopPrank();
 
         amm = new AutomatedMarketMaker(address(tokenA), address(tokenB), address(identityRegistry));
@@ -773,10 +778,12 @@ contract AutomatedMarketMakerTest is Test {
     /// @dev Registers and returns a verified COMMERCIAL_BANK participant for overflow-scale deposits.
     function _registerWhale() internal returns (address whale) {
         whale = makeAddr("whale");
-        vm.prank(admin);
+        vm.startPrank(admin);
         identityRegistry.registerParticipant(
             whale, "Whale Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(whale);
+        vm.stopPrank();
     }
 
     /// @dev Seeds the §2.2 worked-example pool: 5,000,000 (A/BRL) : 1,000,000 (B/EUR), price 5:1.

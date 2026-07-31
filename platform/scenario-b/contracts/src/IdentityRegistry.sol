@@ -19,8 +19,15 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
     /// @dev Populated via setCentralBankOf. Consumed by PairRegistry for bilateral authorization (D9).
     mapping(address => address) private _centralBankOf;
 
-    /// @notice Role definition for governance administrators (Central Banks).
+    /// @notice Role definition for governance administrators (Central Banks) who register participants.
     bytes32 public constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");
+
+    /// @notice Role definition for compliance authorities who verify (approve) registered participants.
+    /// @dev Separation of duties: registration (GOVERNANCE_ROLE) and verification (VERIFIER_ROLE) are
+    ///      distinct roles so the entity that onboards a participant is not necessarily the one that
+    ///      approves it for transacting. In production these SHOULD be held by different entities. The
+    ///      bootstrap admin is granted both so single-operator/local-dev flows keep working.
+    bytes32 public constant VERIFIER_ROLE = keccak256("VERIFIER_ROLE");
 
     /// @notice Emitted when an address is granted the Liquidity Provider role.
     event LogLiquidityProviderGranted(address indexed account);
@@ -36,10 +43,12 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
     constructor(address admin) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(GOVERNANCE_ROLE, admin);
+        _grantRole(VERIFIER_ROLE, admin);
     }
 
     /// @inheritdoc IIdentityRegistry
-    /// @dev Registration is restricted to GOVERNANCE_ROLE holders.
+    /// @dev Registration is restricted to GOVERNANCE_ROLE holders. The participant is created in
+    ///      the Pending state; a separate verifyParticipant call is required before it can transact.
     function registerParticipant(
         address account,
         string calldata name,
@@ -50,16 +59,41 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
             revert InvalidIdentityData();
         }
 
+        // lastUpdate is written from block.timestamp on purpose. Unlike Scenario A — whose
+        // IdentityRegistry is deployed INSIDE Pente privacy groups (see the payment-orchestrator
+        // `paladin` adapter and the toolkit's setupBilateralFXAContext) where any block.* value on
+        // an endorsed-state path diverges across endorsers and wedges the private tx — Scenario B's
+        // IdentityRegistry only ever lives on the base hub/spoke ledger. FXAgreement here is
+        // deployed on that same base ledger (CBWeb3Hub.s.sol: `new FXAgreement(identityRegistry)`),
+        // reached via the base-ledger `besu` adapter, and privacy is provided by Zeto/Noto tokens,
+        // not by putting this registry in a group. block.timestamp is therefore deterministic here
+        // and the on-chain audit timestamp is preserved. If this registry is ever deployed in a
+        // Pente group, switch these writes to the Scenario A convention (lastUpdate = 0).
         _participants[account] = IdentityRegistryLibrary.Participant({
             legalName: name,
             role: role,
-            status: IdentityRegistryLibrary.KycStatus.Verified,
+            status: IdentityRegistryLibrary.KycStatus.Pending,
             zkPointer: zkPointer,
             certFingerprint: bytes32(0),
             lastUpdate: block.timestamp
         });
 
         emit ParticipantRegistered(account, role, name);
+    }
+
+    /// @inheritdoc IIdentityRegistry
+    /// @dev Step 2 of onboarding. Restricted to VERIFIER_ROLE holders (distinct from the
+    ///      GOVERNANCE_ROLE that registers). Only a Pending participant may be verified.
+    function verifyParticipant(address account) external override onlyRole(VERIFIER_ROLE) {
+        if (_participants[account].status != IdentityRegistryLibrary.KycStatus.Pending) {
+            revert ParticipantNotPending(account);
+        }
+        _participants[account].status = IdentityRegistryLibrary.KycStatus.Verified;
+        _participants[account].lastUpdate = block.timestamp;
+
+        emit IdentityUpdated(
+            account, IdentityRegistryLibrary.KycStatus.Pending, IdentityRegistryLibrary.KycStatus.Verified
+        );
     }
 
     /// @inheritdoc IIdentityRegistry
@@ -95,11 +129,20 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
 
     /// @inheritdoc IIdentityRegistry
     /// @dev Critical for regulatory compliance and account freezing.
-    function updateStatus(address account, IdentityRegistryLibrary.KycStatus newStatus)
-        external
-        override
-        onlyRole(GOVERNANCE_ROLE)
-    {
+    ///      Separation of duties (R1-10.6 / R2-10.6): promoting an account TO Verified is a
+    ///      verification act and is reserved for VERIFIER_ROLE — the same authority gate as
+    ///      verifyParticipant. Every other transition (Suspended / Expired freezing, or
+    ///      Pending to re-open verification) is a governance/regulatory act under GOVERNANCE_ROLE.
+    ///      Without this split a GOVERNANCE_ROLE holder could mint Verified directly through
+    ///      updateStatus, bypassing the two-step onboarding control that registerParticipant +
+    ///      verifyParticipant enforce.
+    function updateStatus(address account, IdentityRegistryLibrary.KycStatus newStatus) external override {
+        if (newStatus == IdentityRegistryLibrary.KycStatus.Verified) {
+            _checkRole(VERIFIER_ROLE);
+        } else {
+            _checkRole(GOVERNANCE_ROLE);
+        }
+
         IdentityRegistryLibrary.KycStatus oldStatus = _participants[account].status;
         _participants[account].status = newStatus;
         _participants[account].lastUpdate = block.timestamp;

@@ -133,12 +133,12 @@ func isTransientTransportErr(e *penteRPCError) bool {
 		return false
 	}
 	for _, marker := range []string{
-		"PD011206",          // TRANSPORT grpc returned error
-		"PD030015",          // GRPC connection failed for endpoint
-		"Unavailable",       // gRPC status: peer not accepting connections
-		"connection error",  // dial in progress
+		"PD011206",         // TRANSPORT grpc returned error
+		"PD030015",         // GRPC connection failed for endpoint
+		"Unavailable",      // gRPC status: peer not accepting connections
+		"connection error", // dial in progress
 		"connection refused",
-		"handshake",         // TLS handshake mid-bring-up
+		"handshake", // TLS handshake mid-bring-up
 		"EOF",
 	} {
 		if strings.Contains(e.Message, marker) {
@@ -386,8 +386,9 @@ func resolveAddress(ctx context.Context, paladinURL, identity string) (string, e
 }
 
 // registerParticipantInPente calls IdentityRegistry.registerParticipant inside the group,
-// marking account Verified with the given role. `from` MUST hold GOVERNANCE_ROLE (the registry
-// admin / deployer).
+// creating account in Pending with the given role. `from` MUST hold GOVERNANCE_ROLE (the
+// registry admin / deployer). A follow-up verifyParticipantInPente is required to reach
+// Verified — see setupBilateralFXAContext.
 func registerParticipantInPente(ctx context.Context, paladinURL, groupID, from, registryAddr, account, name string, role int, progress func(string)) error {
 	if progress != nil {
 		progress(fmt.Sprintf("registering participant %s (role %d)…", name, role))
@@ -426,6 +427,43 @@ func registerParticipantInPente(ctx context.Context, paladinURL, groupID, from, 
 	return nil
 }
 
+// verifyParticipantInPente calls IdentityRegistry.verifyParticipant inside the group, promoting
+// a previously registered account from Pending to Verified (step 2 of the two-step onboarding).
+// `from` MUST hold VERIFIER_ROLE — the in-group registry grants it to the deployer/admin.
+func verifyParticipantInPente(ctx context.Context, paladinURL, groupID, from, registryAddr, account, name string, progress func(string)) error {
+	if progress != nil {
+		progress(fmt.Sprintf("verifying participant %s…", name))
+	}
+	fn := map[string]interface{}{
+		"type": "function", "name": "verifyParticipant",
+		"inputs": []map[string]interface{}{
+			{"name": "account", "type": "address"},
+		},
+	}
+	tx := map[string]interface{}{
+		"domain":   penteDomain,
+		"group":    groupID,
+		"from":     from,
+		"to":       registryAddr,
+		"function": fn,
+		"input": map[string]interface{}{
+			"account": account,
+		},
+	}
+	var txID string
+	rpcErr, err := penteRPCCall(ctx, paladinURL, "pgroup_sendTransaction", []interface{}{tx}, &txID)
+	if err != nil {
+		return err
+	}
+	if rpcErr != nil {
+		return fmt.Errorf("verifyParticipant %s: %s", account, rpcErr.Message)
+	}
+	if _, err := pollPenteTxReceipt(ctx, paladinURL, txID, progress, "verifyParticipant "+name); err != nil {
+		return fmt.Errorf("verifyParticipant %s receipt: %w", account, err)
+	}
+	return nil
+}
+
 // penteMember is a party to a bilateral FX context: its Paladin identity, legal name, and role.
 type penteMember struct {
 	Identity string
@@ -435,7 +473,8 @@ type penteMember struct {
 
 // setupBilateralFXAContext deploys a self-contained on-chain FX context inside an existing
 // Pente group: (1) an IdentityRegistry with `deployer` as admin/governance, (2) each member
-// registered Verified with its role, (3) FXAgreement wired to that in-group registry. Returns
+// registered then verified (two-step onboarding) with its role, (3) FXAgreement wired to that
+// in-group registry. Returns
 // the registry and FXAgreement in-group addresses. This is what makes on-chain propose/accept/
 // settle actually succeed (the registry must live inside the group — see PLAN.md Phase 1a).
 func setupBilateralFXAContext(ctx context.Context, paladinURL, groupID, deployer, idRegistryArtifact, fxaArtifact string, members []penteMember, progress func(string)) (registryAddr, fxaAddr string, err error) {
@@ -482,7 +521,13 @@ func setupBilateralFXAContext(ctx context.Context, paladinURL, groupID, deployer
 	}
 	for _, addr := range order {
 		r := byAddr[addr]
+		// Two-step onboarding: register (Pending) then verify (Pending -> Verified) so the member
+		// passes canTransact/canGovern in the in-group FXAgreement. The deployer holds both
+		// GOVERNANCE_ROLE and VERIFIER_ROLE (in-group registry constructor grants both to admin).
 		if err := registerParticipantInPente(ctx, paladinURL, groupID, deployer, registryAddr, addr, r.name, r.role, progress); err != nil {
+			return "", "", err
+		}
+		if err := verifyParticipantInPente(ctx, paladinURL, groupID, deployer, registryAddr, addr, r.name, progress); err != nil {
 			return "", "", err
 		}
 	}
