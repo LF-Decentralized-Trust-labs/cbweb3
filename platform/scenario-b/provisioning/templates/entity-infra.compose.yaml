@@ -1,0 +1,37 @@
+# entity-infra template (TK-B4) — per-entity Postgres + Redis.
+# Derived from deploy/local/compose.yml. Parametrized; DB state in a named
+# volume; no secrets embedded (credentials come from ${...}).
+services:
+  postgres:
+    image: "postgres:${POSTGRES_IMAGE_TAG:-17-alpine}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-postgres"
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:?}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
+      POSTGRES_DB: "${POSTGRES_DB:-postgres}"
+    ports:
+      - "${POSTGRES_PORT:?}:5432"
+    volumes:
+      - entity_pg_data:/var/lib/postgresql/data
+    networks:
+      - entity_net
+    restart: always
+
+  redis:
+    image: "redis:${REDIS_IMAGE_TAG:-7-alpine}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-redis"
+    ports:
+      - "${REDIS_PORT:?}:6379"
+    networks:
+      - entity_net
+    restart: always
+
+networks:
+  # Shared entity network, created by the entity's besu compose; joined here.
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
+    external: true
+
+volumes:
+  entity_pg_data:
+    name: "${ENTITY_VOLUME_PREFIX:?}_pg_data"

@@ -83,6 +83,40 @@ Each Besu node needs distinct host ports. This is the allocation used by the man
 | bank-galicia            | spoke-ars  | join  | 8846 | 8856 | 31504 | 1339    |
 | bank-macro              | spoke-ars  | join  | 8847 | 8857 | 31505 | 1339    |
 
+Each entity's operator portals derive from its RPC port by a fixed offset:
+governance/bank `+17000`, treasury `+18000`, supervisor `+22000`, NOC `+24000` (e.g.
+central-bank-brazil governance `25645`, bank-itau portal `25646`).
+
+### Per-entity launcher (distributed A/B entry point)
+
+Each **commercial bank and central bank** also gets a **launcher** — a small SPA that
+lists that entity's own portals, grouped by Scenario A / Scenario B, and redirects to the
+chosen one (login happens on the destination portal). It is the per-entity entry point in
+the distributed model (one entity per host).
+
+The toolkit deploys it when the entity's manifest sets `launcher: enable`, on the host
+port `spec.launcherPort`. Since this sample runs every entity on one host, each declares a
+distinct port — and the **same** port in Scenario A and B, so both scenarios share that
+entity's launcher (which merges its A and B portal fragments):
+
+| Entity | launcherPort | Entity | launcherPort |
+|--------|:---:|--------|:---:|
+| central-bank-brazil    | 5191 | central-bank-colombia | 5197 |
+| bank-itau              | 5192 | bank-bancolombia      | 5198 |
+| bank-bradesco          | 5193 | bank-davivienda       | 5199 |
+| central-bank-argentina | 5194 | bank-galicia          | 5195 |
+| bank-macro             | 5196 |                       |      |
+
+The launcher image is **generic** and built once (platform step) **before** deploying:
+
+```bash
+( cd ../../launcher && ./build.sh )   # → cbweb3/launcher:local
+```
+
+`launcher: disable` (or omitting it) removes this scenario's fragment and tears the
+launcher container down when no scenario fragment remains. The launcher step is soft: a
+missing image only logs a hint and never blocks the entity's deploy.
+
 ---
 
 ## Prerequisites
@@ -148,6 +182,40 @@ done
 
 Manifest errors (missing field, invalid value) are reported all at once, with a
 clear message, and the command exits with code 1.
+
+### Per-spoke currency and fCeBM metadata
+
+Each spoke declares its own currency, and the ERC-20 identity of its fCeBM (the
+public Besu-layer fiat token) derives from it — no currency is hardcoded in the
+toolkit:
+
+| Spoke | `currency` | fCeBM name | fCeBM symbol |
+|---|---|---|---|
+| `spoke-brl` | BRL | Fiat BRL | `fCeBM_BRL` |
+| `spoke-cop` | COP | Fiat COP | `fCeBM_COP` |
+| `spoke-ars` | ARS | Fiat ARS | `fCeBM_ARS` |
+
+Both can be overridden per spoke when a central bank brands its token
+differently:
+
+```yaml
+spoke:
+  id: spoke-brl
+  chainId: 1337
+  currency: BRL              # ISO 4217 — the semantic key (portals show it via FIAT_SYMBOL)
+  fiatTokenName: Real Digital # optional; derived as "Fiat <ISO>" when absent
+  fiatTokenSymbol: fRD_BRL    # optional; derived as "fCeBM_<ISO>" when absent
+```
+
+The symbol must keep the `<prefix>_<ISO>` shape and end in this spoke's own
+currency — validation rejects `fBRL` (no currency segment) and `fCeBM_COP` on a
+BRL spoke. `currency` stays the routing/display key and cannot be redefined
+through a symbol.
+
+Both fields are constructor arguments of the ERC-20, so they are **immutable
+after the spoke is founded**: changing them affects the next clean founding, not
+a running spoke. Note that the tokenised side of Scenario A is a Zeto privacy
+token (no ERC-20 symbol), so only fCeBM carries configurable metadata.
 
 ---
 
@@ -335,3 +403,36 @@ step (`success` / `skipped` / `failed` / `pending`).
   `cbweb3-<spoke-id>-besu`.
 - **Reference network untouched.** This toolkit does not modify or depend on
   `deploy/local` or `make/*.mk` — they remain the sample network.
+
+---
+
+## Reverse proxy — single-host smoke test
+
+`deploy-all.sh` / `deploy-three.sh` are **port-based**: many entities on one host, each
+portal on its own host port, one per-entity launcher (distinct `launcherPort`). They do
+**not** enable the reverse proxy, and that is deliberate — the Caddy proxy is **one
+container per host with a single site and one route fragment per scenario**, i.e. it maps
+to *one entity per host* (the multi-host `deploy-lnet` model). Enabling it for the
+many-entity local deploy would make the entities collide on the single proxy.
+
+To exercise the proxy on one machine, use the dedicated smoke test, which brings up a
+**single** entity (`central-bank-brazil`) with `proxy: enable`:
+
+```bash
+./proxy-smoke.sh                 # self-signed TLS (internal CA) — one browser warning
+PROXY_TLS_MODE=off ./proxy-smoke.sh   # plain HTTP on :80 — no warning
+./proxy-smoke.sh --clean         # wipe docker + work dir first
+```
+
+It uses `frontendHost: cb-brazil.localtest.me`, a public name that resolves to
+`127.0.0.1`, so the portals are reachable path-based on this host with no `/etc/hosts`
+edit (open them in a browser **on this machine**):
+
+```
+https://cb-brazil.localtest.me/              -> launcher
+https://cb-brazil.localtest.me/a/governance/ -> Governance   (also /a/treasury/, /a/supervisor/)
+https://cb-brazil.localtest.me/a/api/v1/     -> api-gateway
+```
+
+Run `scenario-b/samples/proxy-smoke.sh` with the same host and **one** proxy serves both
+`/a/*` and `/b/*` for the entity. Manifest: [proxy-smoke/central-bank-brazil.yaml](./proxy-smoke/central-bank-brazil.yaml).

@@ -21,17 +21,22 @@ import (
 )
 
 type mockSwapService struct {
-	resp *services.SwapResult
-	err  error
+	resp   *services.SwapResult
+	err    error
+	gotReq services.SwapRequest
 }
 
-func (m *mockSwapService) Execute(_ context.Context, _ services.SwapRequest) (*services.SwapResult, error) {
+func (m *mockSwapService) Execute(_ context.Context, req services.SwapRequest) (*services.SwapResult, error) {
+	m.gotReq = req
 	return m.resp, m.err
 }
 
+// newSwapTestFiber mounts the swap handler behind authenticated claims (bank-a),
+// mirroring production where the route is always behind RequireCookieAuth. The
+// handler now requires claims, so an unauthenticated context would 401.
 func newSwapTestFiber(h *handlers.SwapHandler) *fiber.App {
 	app := fiber.New()
-	app.Post("/api/v2/amm/swap/exact-output", h.SwapExactOutput)
+	app.Post("/api/v2/amm/swap/exact-output", injectBankClaims("bank-a"), h.SwapExactOutput)
 	return app
 }
 

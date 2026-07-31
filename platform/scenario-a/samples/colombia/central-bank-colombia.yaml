@@ -17,6 +17,13 @@ spec:
     id: spoke-cop
     chainId: 1338
     currency: COP
+    # ERC-20 metadata of this spoke's own fCeBM (the public Besu-layer fiat token).
+    # Optional — absent, both derive from `currency` (exactly the values below).
+    # Declared explicitly so each spoke's token identity is auditable in config.
+    # The symbol must keep the "<prefix>_<ISO>" shape and end in this spoke's own
+    # currency; `currency` stays the semantic key the portals display.
+    fiatTokenName: Fiat COP
+    fiatTokenSymbol: fCeBM_COP
   node:
     advertisedHost: cbweb3-spoke-cop-besu.central-bank-colombia
     rpc:
@@ -45,6 +52,8 @@ spec:
   # mesma máquina do host Docker). Defina um IP/DNS roteável quando o frontend for
   # acessado de uma máquina remota (ex.: uma VM na nuvem com IP público 3.84.201.14).
   # frontendHost: 3.84.201.14
+  launcher: enable
+  launcherPort: 5197
   adminUsers:
     - role: ROLE_GOVERNANCE
       username: admin@colombia.governance.gov
@@ -58,3 +67,6 @@ spec:
     - role: ROLE_NOC_ADMIN
       username: admin@colombia.noc.gov
       password: colombia-noc-local
+  # Reverse proxy off — these many-entity single-host samples are port-based via the
+  # per-entity launcher. Test the proxy separately with proxy-smoke.sh (one entity per host).
+  proxy: disable

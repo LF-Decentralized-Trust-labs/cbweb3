@@ -41,7 +41,7 @@ type IdentityRegistryLibraryParticipant struct {
 
 // IdentityRegistryMetaData contains all meta data concerning the IdentityRegistry contract.
 var IdentityRegistryMetaData = &bind.MetaData{
-	ABI: "[{\"type\":\"constructor\",\"inputs\":[{\"name\":\"admin\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"DEFAULT_ADMIN_ROLE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"GOVERNANCE_ROLE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"canGovern\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"canTransact\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getCertFingerprint\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getParticipant\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"tuple\",\"internalType\":\"structIdentityRegistryLibrary.Participant\",\"components\":[{\"name\":\"legalName\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"role\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.ParticipantRole\"},{\"name\":\"status\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"},{\"name\":\"zkPointer\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"certFingerprint\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"lastUpdate\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getRoleAdmin\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"grantRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"hasRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"isWhitelisted\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"registerParticipant\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"name\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"role\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.ParticipantRole\"},{\"name\":\"zkPointer\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"renounceRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"callerConfirmation\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"revokeRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"setCertFingerprint\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"fingerprint\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"supportsInterface\",\"inputs\":[{\"name\":\"interfaceId\",\"type\":\"bytes4\",\"internalType\":\"bytes4\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"updateStatus\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"newStatus\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"event\",\"name\":\"CertificateRegistered\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"certFingerprint\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"IdentityUpdated\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"oldStatus\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"},{\"name\":\"newStatus\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ParticipantRegistered\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"role\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumIdentityRegistryLibrary.ParticipantRole\"},{\"name\":\"name\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RoleAdminChanged\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"previousAdminRole\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"newAdminRole\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RoleGranted\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RoleRevoked\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"error\",\"name\":\"AccessControlBadConfirmation\",\"inputs\":[]},{\"type\":\"error\",\"name\":\"AccessControlUnauthorizedAccount\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"neededRole\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}]},{\"type\":\"error\",\"name\":\"InvalidIdentityData\",\"inputs\":[]},{\"type\":\"error\",\"name\":\"ParticipantNotVerified\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}]}]",
+	ABI: "[{\"type\":\"constructor\",\"inputs\":[{\"name\":\"admin\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"DEFAULT_ADMIN_ROLE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"GOVERNANCE_ROLE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"canGovern\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"canTransact\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getCentralBankOf\",\"inputs\":[{\"name\":\"token\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getCertFingerprint\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getParticipant\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"tuple\",\"internalType\":\"structIdentityRegistryLibrary.Participant\",\"components\":[{\"name\":\"legalName\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"role\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.ParticipantRole\"},{\"name\":\"status\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"},{\"name\":\"zkPointer\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"certFingerprint\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"lastUpdate\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getRoleAdmin\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"grantLiquidityProvider\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"grantRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"hasRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"isLiquidityProvider\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"isWhitelisted\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"registerParticipant\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"name\",\"type\":\"string\",\"internalType\":\"string\"},{\"name\":\"role\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.ParticipantRole\"},{\"name\":\"zkPointer\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"renounceRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"callerConfirmation\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"revokeLiquidityProvider\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"revokeRole\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"setCentralBankOf\",\"inputs\":[{\"name\":\"token\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"centralBank\",\"type\":\"address\",\"internalType\":\"address\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"setCertFingerprint\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"fingerprint\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"supportsInterface\",\"inputs\":[{\"name\":\"interfaceId\",\"type\":\"bytes4\",\"internalType\":\"bytes4\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"updateStatus\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"newStatus\",\"type\":\"uint8\",\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"event\",\"name\":\"CertificateRegistered\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"certFingerprint\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"IdentityUpdated\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"oldStatus\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"},{\"name\":\"newStatus\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumIdentityRegistryLibrary.KycStatus\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"LogCentralBankOfTokenSet\",\"inputs\":[{\"name\":\"token\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"centralBank\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"LogLiquidityProviderGranted\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"LogLiquidityProviderRevoked\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ParticipantRegistered\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"role\",\"type\":\"uint8\",\"indexed\":false,\"internalType\":\"enumIdentityRegistryLibrary.ParticipantRole\"},{\"name\":\"name\",\"type\":\"string\",\"indexed\":false,\"internalType\":\"string\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RoleAdminChanged\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"previousAdminRole\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"newAdminRole\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RoleGranted\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"RoleRevoked\",\"inputs\":[{\"name\":\"role\",\"type\":\"bytes32\",\"indexed\":true,\"internalType\":\"bytes32\"},{\"name\":\"account\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"error\",\"name\":\"AccessControlBadConfirmation\",\"inputs\":[]},{\"type\":\"error\",\"name\":\"AccessControlUnauthorizedAccount\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"},{\"name\":\"neededRole\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}]},{\"type\":\"error\",\"name\":\"InvalidIdentityData\",\"inputs\":[]},{\"type\":\"error\",\"name\":\"ParticipantNotVerified\",\"inputs\":[{\"name\":\"account\",\"type\":\"address\",\"internalType\":\"address\"}]}]",
 }
 
 // IdentityRegistryABI is the input ABI used to generate the binding from.
@@ -314,6 +314,37 @@ func (_IdentityRegistry *IdentityRegistryCallerSession) CanTransact(account comm
 	return _IdentityRegistry.Contract.CanTransact(&_IdentityRegistry.CallOpts, account)
 }
 
+// GetCentralBankOf is a free data retrieval call binding the contract method 0x41db05de.
+//
+// Solidity: function getCentralBankOf(address token) view returns(address)
+func (_IdentityRegistry *IdentityRegistryCaller) GetCentralBankOf(opts *bind.CallOpts, token common.Address) (common.Address, error) {
+	var out []interface{}
+	err := _IdentityRegistry.contract.Call(opts, &out, "getCentralBankOf", token)
+
+	if err != nil {
+		return *new(common.Address), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
+
+	return out0, err
+
+}
+
+// GetCentralBankOf is a free data retrieval call binding the contract method 0x41db05de.
+//
+// Solidity: function getCentralBankOf(address token) view returns(address)
+func (_IdentityRegistry *IdentityRegistrySession) GetCentralBankOf(token common.Address) (common.Address, error) {
+	return _IdentityRegistry.Contract.GetCentralBankOf(&_IdentityRegistry.CallOpts, token)
+}
+
+// GetCentralBankOf is a free data retrieval call binding the contract method 0x41db05de.
+//
+// Solidity: function getCentralBankOf(address token) view returns(address)
+func (_IdentityRegistry *IdentityRegistryCallerSession) GetCentralBankOf(token common.Address) (common.Address, error) {
+	return _IdentityRegistry.Contract.GetCentralBankOf(&_IdentityRegistry.CallOpts, token)
+}
+
 // GetCertFingerprint is a free data retrieval call binding the contract method 0x41489f5c.
 //
 // Solidity: function getCertFingerprint(address account) view returns(bytes32)
@@ -438,6 +469,37 @@ func (_IdentityRegistry *IdentityRegistryCallerSession) HasRole(role [32]byte, a
 	return _IdentityRegistry.Contract.HasRole(&_IdentityRegistry.CallOpts, role, account)
 }
 
+// IsLiquidityProvider is a free data retrieval call binding the contract method 0x99f7854a.
+//
+// Solidity: function isLiquidityProvider(address account) view returns(bool)
+func (_IdentityRegistry *IdentityRegistryCaller) IsLiquidityProvider(opts *bind.CallOpts, account common.Address) (bool, error) {
+	var out []interface{}
+	err := _IdentityRegistry.contract.Call(opts, &out, "isLiquidityProvider", account)
+
+	if err != nil {
+		return *new(bool), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(bool)).(*bool)
+
+	return out0, err
+
+}
+
+// IsLiquidityProvider is a free data retrieval call binding the contract method 0x99f7854a.
+//
+// Solidity: function isLiquidityProvider(address account) view returns(bool)
+func (_IdentityRegistry *IdentityRegistrySession) IsLiquidityProvider(account common.Address) (bool, error) {
+	return _IdentityRegistry.Contract.IsLiquidityProvider(&_IdentityRegistry.CallOpts, account)
+}
+
+// IsLiquidityProvider is a free data retrieval call binding the contract method 0x99f7854a.
+//
+// Solidity: function isLiquidityProvider(address account) view returns(bool)
+func (_IdentityRegistry *IdentityRegistryCallerSession) IsLiquidityProvider(account common.Address) (bool, error) {
+	return _IdentityRegistry.Contract.IsLiquidityProvider(&_IdentityRegistry.CallOpts, account)
+}
+
 // IsWhitelisted is a free data retrieval call binding the contract method 0x3af32abf.
 //
 // Solidity: function isWhitelisted(address account) view returns(bool)
@@ -498,6 +560,27 @@ func (_IdentityRegistry *IdentityRegistrySession) SupportsInterface(interfaceId 
 // Solidity: function supportsInterface(bytes4 interfaceId) view returns(bool)
 func (_IdentityRegistry *IdentityRegistryCallerSession) SupportsInterface(interfaceId [4]byte) (bool, error) {
 	return _IdentityRegistry.Contract.SupportsInterface(&_IdentityRegistry.CallOpts, interfaceId)
+}
+
+// GrantLiquidityProvider is a paid mutator transaction binding the contract method 0xbfc919cc.
+//
+// Solidity: function grantLiquidityProvider(address account) returns()
+func (_IdentityRegistry *IdentityRegistryTransactor) GrantLiquidityProvider(opts *bind.TransactOpts, account common.Address) (*types.Transaction, error) {
+	return _IdentityRegistry.contract.Transact(opts, "grantLiquidityProvider", account)
+}
+
+// GrantLiquidityProvider is a paid mutator transaction binding the contract method 0xbfc919cc.
+//
+// Solidity: function grantLiquidityProvider(address account) returns()
+func (_IdentityRegistry *IdentityRegistrySession) GrantLiquidityProvider(account common.Address) (*types.Transaction, error) {
+	return _IdentityRegistry.Contract.GrantLiquidityProvider(&_IdentityRegistry.TransactOpts, account)
+}
+
+// GrantLiquidityProvider is a paid mutator transaction binding the contract method 0xbfc919cc.
+//
+// Solidity: function grantLiquidityProvider(address account) returns()
+func (_IdentityRegistry *IdentityRegistryTransactorSession) GrantLiquidityProvider(account common.Address) (*types.Transaction, error) {
+	return _IdentityRegistry.Contract.GrantLiquidityProvider(&_IdentityRegistry.TransactOpts, account)
 }
 
 // GrantRole is a paid mutator transaction binding the contract method 0x2f2ff15d.
@@ -563,6 +646,27 @@ func (_IdentityRegistry *IdentityRegistryTransactorSession) RenounceRole(role [3
 	return _IdentityRegistry.Contract.RenounceRole(&_IdentityRegistry.TransactOpts, role, callerConfirmation)
 }
 
+// RevokeLiquidityProvider is a paid mutator transaction binding the contract method 0x5913a644.
+//
+// Solidity: function revokeLiquidityProvider(address account) returns()
+func (_IdentityRegistry *IdentityRegistryTransactor) RevokeLiquidityProvider(opts *bind.TransactOpts, account common.Address) (*types.Transaction, error) {
+	return _IdentityRegistry.contract.Transact(opts, "revokeLiquidityProvider", account)
+}
+
+// RevokeLiquidityProvider is a paid mutator transaction binding the contract method 0x5913a644.
+//
+// Solidity: function revokeLiquidityProvider(address account) returns()
+func (_IdentityRegistry *IdentityRegistrySession) RevokeLiquidityProvider(account common.Address) (*types.Transaction, error) {
+	return _IdentityRegistry.Contract.RevokeLiquidityProvider(&_IdentityRegistry.TransactOpts, account)
+}
+
+// RevokeLiquidityProvider is a paid mutator transaction binding the contract method 0x5913a644.
+//
+// Solidity: function revokeLiquidityProvider(address account) returns()
+func (_IdentityRegistry *IdentityRegistryTransactorSession) RevokeLiquidityProvider(account common.Address) (*types.Transaction, error) {
+	return _IdentityRegistry.Contract.RevokeLiquidityProvider(&_IdentityRegistry.TransactOpts, account)
+}
+
 // RevokeRole is a paid mutator transaction binding the contract method 0xd547741f.
 //
 // Solidity: function revokeRole(bytes32 role, address account) returns()
@@ -582,6 +686,27 @@ func (_IdentityRegistry *IdentityRegistrySession) RevokeRole(role [32]byte, acco
 // Solidity: function revokeRole(bytes32 role, address account) returns()
 func (_IdentityRegistry *IdentityRegistryTransactorSession) RevokeRole(role [32]byte, account common.Address) (*types.Transaction, error) {
 	return _IdentityRegistry.Contract.RevokeRole(&_IdentityRegistry.TransactOpts, role, account)
+}
+
+// SetCentralBankOf is a paid mutator transaction binding the contract method 0xf797b54c.
+//
+// Solidity: function setCentralBankOf(address token, address centralBank) returns()
+func (_IdentityRegistry *IdentityRegistryTransactor) SetCentralBankOf(opts *bind.TransactOpts, token common.Address, centralBank common.Address) (*types.Transaction, error) {
+	return _IdentityRegistry.contract.Transact(opts, "setCentralBankOf", token, centralBank)
+}
+
+// SetCentralBankOf is a paid mutator transaction binding the contract method 0xf797b54c.
+//
+// Solidity: function setCentralBankOf(address token, address centralBank) returns()
+func (_IdentityRegistry *IdentityRegistrySession) SetCentralBankOf(token common.Address, centralBank common.Address) (*types.Transaction, error) {
+	return _IdentityRegistry.Contract.SetCentralBankOf(&_IdentityRegistry.TransactOpts, token, centralBank)
+}
+
+// SetCentralBankOf is a paid mutator transaction binding the contract method 0xf797b54c.
+//
+// Solidity: function setCentralBankOf(address token, address centralBank) returns()
+func (_IdentityRegistry *IdentityRegistryTransactorSession) SetCentralBankOf(token common.Address, centralBank common.Address) (*types.Transaction, error) {
+	return _IdentityRegistry.Contract.SetCentralBankOf(&_IdentityRegistry.TransactOpts, token, centralBank)
 }
 
 // SetCertFingerprint is a paid mutator transaction binding the contract method 0xd9d1e737.
@@ -911,6 +1036,447 @@ func (_IdentityRegistry *IdentityRegistryFilterer) WatchIdentityUpdated(opts *bi
 func (_IdentityRegistry *IdentityRegistryFilterer) ParseIdentityUpdated(log types.Log) (*IdentityRegistryIdentityUpdated, error) {
 	event := new(IdentityRegistryIdentityUpdated)
 	if err := _IdentityRegistry.contract.UnpackLog(event, "IdentityUpdated", log); err != nil {
+		return nil, err
+	}
+	event.Raw = log
+	return event, nil
+}
+
+// IdentityRegistryLogCentralBankOfTokenSetIterator is returned from FilterLogCentralBankOfTokenSet and is used to iterate over the raw logs and unpacked data for LogCentralBankOfTokenSet events raised by the IdentityRegistry contract.
+type IdentityRegistryLogCentralBankOfTokenSetIterator struct {
+	Event *IdentityRegistryLogCentralBankOfTokenSet // Event containing the contract specifics and raw log
+
+	contract *bind.BoundContract // Generic contract to use for unpacking event data
+	event    string              // Event name to use for unpacking event data
+
+	logs chan types.Log        // Log channel receiving the found contract events
+	sub  ethereum.Subscription // Subscription for errors, completion and termination
+	done bool                  // Whether the subscription completed delivering logs
+	fail error                 // Occurred error to stop iteration
+}
+
+// Next advances the iterator to the subsequent event, returning whether there
+// are any more events found. In case of a retrieval or parsing error, false is
+// returned and Error() can be queried for the exact failure.
+func (it *IdentityRegistryLogCentralBankOfTokenSetIterator) Next() bool {
+	// If the iterator failed, stop iterating
+	if it.fail != nil {
+		return false
+	}
+	// If the iterator completed, deliver directly whatever's available
+	if it.done {
+		select {
+		case log := <-it.logs:
+			it.Event = new(IdentityRegistryLogCentralBankOfTokenSet)
+			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+				it.fail = err
+				return false
+			}
+			it.Event.Raw = log
+			return true
+
+		default:
+			return false
+		}
+	}
+	// Iterator still in progress, wait for either a data or an error event
+	select {
+	case log := <-it.logs:
+		it.Event = new(IdentityRegistryLogCentralBankOfTokenSet)
+		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+			it.fail = err
+			return false
+		}
+		it.Event.Raw = log
+		return true
+
+	case err := <-it.sub.Err():
+		it.done = true
+		it.fail = err
+		return it.Next()
+	}
+}
+
+// Error returns any retrieval or parsing error occurred during filtering.
+func (it *IdentityRegistryLogCentralBankOfTokenSetIterator) Error() error {
+	return it.fail
+}
+
+// Close terminates the iteration process, releasing any pending underlying
+// resources.
+func (it *IdentityRegistryLogCentralBankOfTokenSetIterator) Close() error {
+	it.sub.Unsubscribe()
+	return nil
+}
+
+// IdentityRegistryLogCentralBankOfTokenSet represents a LogCentralBankOfTokenSet event raised by the IdentityRegistry contract.
+type IdentityRegistryLogCentralBankOfTokenSet struct {
+	Token       common.Address
+	CentralBank common.Address
+	Raw         types.Log // Blockchain specific contextual infos
+}
+
+// FilterLogCentralBankOfTokenSet is a free log retrieval operation binding the contract event 0x37abf8fcdf4a6901160322939355317c9dfc995ee6dfb43e8196a42bb252b41a.
+//
+// Solidity: event LogCentralBankOfTokenSet(address indexed token, address indexed centralBank)
+func (_IdentityRegistry *IdentityRegistryFilterer) FilterLogCentralBankOfTokenSet(opts *bind.FilterOpts, token []common.Address, centralBank []common.Address) (*IdentityRegistryLogCentralBankOfTokenSetIterator, error) {
+
+	var tokenRule []interface{}
+	for _, tokenItem := range token {
+		tokenRule = append(tokenRule, tokenItem)
+	}
+	var centralBankRule []interface{}
+	for _, centralBankItem := range centralBank {
+		centralBankRule = append(centralBankRule, centralBankItem)
+	}
+
+	logs, sub, err := _IdentityRegistry.contract.FilterLogs(opts, "LogCentralBankOfTokenSet", tokenRule, centralBankRule)
+	if err != nil {
+		return nil, err
+	}
+	return &IdentityRegistryLogCentralBankOfTokenSetIterator{contract: _IdentityRegistry.contract, event: "LogCentralBankOfTokenSet", logs: logs, sub: sub}, nil
+}
+
+// WatchLogCentralBankOfTokenSet is a free log subscription operation binding the contract event 0x37abf8fcdf4a6901160322939355317c9dfc995ee6dfb43e8196a42bb252b41a.
+//
+// Solidity: event LogCentralBankOfTokenSet(address indexed token, address indexed centralBank)
+func (_IdentityRegistry *IdentityRegistryFilterer) WatchLogCentralBankOfTokenSet(opts *bind.WatchOpts, sink chan<- *IdentityRegistryLogCentralBankOfTokenSet, token []common.Address, centralBank []common.Address) (event.Subscription, error) {
+
+	var tokenRule []interface{}
+	for _, tokenItem := range token {
+		tokenRule = append(tokenRule, tokenItem)
+	}
+	var centralBankRule []interface{}
+	for _, centralBankItem := range centralBank {
+		centralBankRule = append(centralBankRule, centralBankItem)
+	}
+
+	logs, sub, err := _IdentityRegistry.contract.WatchLogs(opts, "LogCentralBankOfTokenSet", tokenRule, centralBankRule)
+	if err != nil {
+		return nil, err
+	}
+	return event.NewSubscription(func(quit <-chan struct{}) error {
+		defer sub.Unsubscribe()
+		for {
+			select {
+			case log := <-logs:
+				// New log arrived, parse the event and forward to the user
+				event := new(IdentityRegistryLogCentralBankOfTokenSet)
+				if err := _IdentityRegistry.contract.UnpackLog(event, "LogCentralBankOfTokenSet", log); err != nil {
+					return err
+				}
+				event.Raw = log
+
+				select {
+				case sink <- event:
+				case err := <-sub.Err():
+					return err
+				case <-quit:
+					return nil
+				}
+			case err := <-sub.Err():
+				return err
+			case <-quit:
+				return nil
+			}
+		}
+	}), nil
+}
+
+// ParseLogCentralBankOfTokenSet is a log parse operation binding the contract event 0x37abf8fcdf4a6901160322939355317c9dfc995ee6dfb43e8196a42bb252b41a.
+//
+// Solidity: event LogCentralBankOfTokenSet(address indexed token, address indexed centralBank)
+func (_IdentityRegistry *IdentityRegistryFilterer) ParseLogCentralBankOfTokenSet(log types.Log) (*IdentityRegistryLogCentralBankOfTokenSet, error) {
+	event := new(IdentityRegistryLogCentralBankOfTokenSet)
+	if err := _IdentityRegistry.contract.UnpackLog(event, "LogCentralBankOfTokenSet", log); err != nil {
+		return nil, err
+	}
+	event.Raw = log
+	return event, nil
+}
+
+// IdentityRegistryLogLiquidityProviderGrantedIterator is returned from FilterLogLiquidityProviderGranted and is used to iterate over the raw logs and unpacked data for LogLiquidityProviderGranted events raised by the IdentityRegistry contract.
+type IdentityRegistryLogLiquidityProviderGrantedIterator struct {
+	Event *IdentityRegistryLogLiquidityProviderGranted // Event containing the contract specifics and raw log
+
+	contract *bind.BoundContract // Generic contract to use for unpacking event data
+	event    string              // Event name to use for unpacking event data
+
+	logs chan types.Log        // Log channel receiving the found contract events
+	sub  ethereum.Subscription // Subscription for errors, completion and termination
+	done bool                  // Whether the subscription completed delivering logs
+	fail error                 // Occurred error to stop iteration
+}
+
+// Next advances the iterator to the subsequent event, returning whether there
+// are any more events found. In case of a retrieval or parsing error, false is
+// returned and Error() can be queried for the exact failure.
+func (it *IdentityRegistryLogLiquidityProviderGrantedIterator) Next() bool {
+	// If the iterator failed, stop iterating
+	if it.fail != nil {
+		return false
+	}
+	// If the iterator completed, deliver directly whatever's available
+	if it.done {
+		select {
+		case log := <-it.logs:
+			it.Event = new(IdentityRegistryLogLiquidityProviderGranted)
+			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+				it.fail = err
+				return false
+			}
+			it.Event.Raw = log
+			return true
+
+		default:
+			return false
+		}
+	}
+	// Iterator still in progress, wait for either a data or an error event
+	select {
+	case log := <-it.logs:
+		it.Event = new(IdentityRegistryLogLiquidityProviderGranted)
+		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+			it.fail = err
+			return false
+		}
+		it.Event.Raw = log
+		return true
+
+	case err := <-it.sub.Err():
+		it.done = true
+		it.fail = err
+		return it.Next()
+	}
+}
+
+// Error returns any retrieval or parsing error occurred during filtering.
+func (it *IdentityRegistryLogLiquidityProviderGrantedIterator) Error() error {
+	return it.fail
+}
+
+// Close terminates the iteration process, releasing any pending underlying
+// resources.
+func (it *IdentityRegistryLogLiquidityProviderGrantedIterator) Close() error {
+	it.sub.Unsubscribe()
+	return nil
+}
+
+// IdentityRegistryLogLiquidityProviderGranted represents a LogLiquidityProviderGranted event raised by the IdentityRegistry contract.
+type IdentityRegistryLogLiquidityProviderGranted struct {
+	Account common.Address
+	Raw     types.Log // Blockchain specific contextual infos
+}
+
+// FilterLogLiquidityProviderGranted is a free log retrieval operation binding the contract event 0x6575ca56ccddde4cd0dc0bebde475e383fac0713d1d87332bbcd254112adffda.
+//
+// Solidity: event LogLiquidityProviderGranted(address indexed account)
+func (_IdentityRegistry *IdentityRegistryFilterer) FilterLogLiquidityProviderGranted(opts *bind.FilterOpts, account []common.Address) (*IdentityRegistryLogLiquidityProviderGrantedIterator, error) {
+
+	var accountRule []interface{}
+	for _, accountItem := range account {
+		accountRule = append(accountRule, accountItem)
+	}
+
+	logs, sub, err := _IdentityRegistry.contract.FilterLogs(opts, "LogLiquidityProviderGranted", accountRule)
+	if err != nil {
+		return nil, err
+	}
+	return &IdentityRegistryLogLiquidityProviderGrantedIterator{contract: _IdentityRegistry.contract, event: "LogLiquidityProviderGranted", logs: logs, sub: sub}, nil
+}
+
+// WatchLogLiquidityProviderGranted is a free log subscription operation binding the contract event 0x6575ca56ccddde4cd0dc0bebde475e383fac0713d1d87332bbcd254112adffda.
+//
+// Solidity: event LogLiquidityProviderGranted(address indexed account)
+func (_IdentityRegistry *IdentityRegistryFilterer) WatchLogLiquidityProviderGranted(opts *bind.WatchOpts, sink chan<- *IdentityRegistryLogLiquidityProviderGranted, account []common.Address) (event.Subscription, error) {
+
+	var accountRule []interface{}
+	for _, accountItem := range account {
+		accountRule = append(accountRule, accountItem)
+	}
+
+	logs, sub, err := _IdentityRegistry.contract.WatchLogs(opts, "LogLiquidityProviderGranted", accountRule)
+	if err != nil {
+		return nil, err
+	}
+	return event.NewSubscription(func(quit <-chan struct{}) error {
+		defer sub.Unsubscribe()
+		for {
+			select {
+			case log := <-logs:
+				// New log arrived, parse the event and forward to the user
+				event := new(IdentityRegistryLogLiquidityProviderGranted)
+				if err := _IdentityRegistry.contract.UnpackLog(event, "LogLiquidityProviderGranted", log); err != nil {
+					return err
+				}
+				event.Raw = log
+
+				select {
+				case sink <- event:
+				case err := <-sub.Err():
+					return err
+				case <-quit:
+					return nil
+				}
+			case err := <-sub.Err():
+				return err
+			case <-quit:
+				return nil
+			}
+		}
+	}), nil
+}
+
+// ParseLogLiquidityProviderGranted is a log parse operation binding the contract event 0x6575ca56ccddde4cd0dc0bebde475e383fac0713d1d87332bbcd254112adffda.
+//
+// Solidity: event LogLiquidityProviderGranted(address indexed account)
+func (_IdentityRegistry *IdentityRegistryFilterer) ParseLogLiquidityProviderGranted(log types.Log) (*IdentityRegistryLogLiquidityProviderGranted, error) {
+	event := new(IdentityRegistryLogLiquidityProviderGranted)
+	if err := _IdentityRegistry.contract.UnpackLog(event, "LogLiquidityProviderGranted", log); err != nil {
+		return nil, err
+	}
+	event.Raw = log
+	return event, nil
+}
+
+// IdentityRegistryLogLiquidityProviderRevokedIterator is returned from FilterLogLiquidityProviderRevoked and is used to iterate over the raw logs and unpacked data for LogLiquidityProviderRevoked events raised by the IdentityRegistry contract.
+type IdentityRegistryLogLiquidityProviderRevokedIterator struct {
+	Event *IdentityRegistryLogLiquidityProviderRevoked // Event containing the contract specifics and raw log
+
+	contract *bind.BoundContract // Generic contract to use for unpacking event data
+	event    string              // Event name to use for unpacking event data
+
+	logs chan types.Log        // Log channel receiving the found contract events
+	sub  ethereum.Subscription // Subscription for errors, completion and termination
+	done bool                  // Whether the subscription completed delivering logs
+	fail error                 // Occurred error to stop iteration
+}
+
+// Next advances the iterator to the subsequent event, returning whether there
+// are any more events found. In case of a retrieval or parsing error, false is
+// returned and Error() can be queried for the exact failure.
+func (it *IdentityRegistryLogLiquidityProviderRevokedIterator) Next() bool {
+	// If the iterator failed, stop iterating
+	if it.fail != nil {
+		return false
+	}
+	// If the iterator completed, deliver directly whatever's available
+	if it.done {
+		select {
+		case log := <-it.logs:
+			it.Event = new(IdentityRegistryLogLiquidityProviderRevoked)
+			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+				it.fail = err
+				return false
+			}
+			it.Event.Raw = log
+			return true
+
+		default:
+			return false
+		}
+	}
+	// Iterator still in progress, wait for either a data or an error event
+	select {
+	case log := <-it.logs:
+		it.Event = new(IdentityRegistryLogLiquidityProviderRevoked)
+		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+			it.fail = err
+			return false
+		}
+		it.Event.Raw = log
+		return true
+
+	case err := <-it.sub.Err():
+		it.done = true
+		it.fail = err
+		return it.Next()
+	}
+}
+
+// Error returns any retrieval or parsing error occurred during filtering.
+func (it *IdentityRegistryLogLiquidityProviderRevokedIterator) Error() error {
+	return it.fail
+}
+
+// Close terminates the iteration process, releasing any pending underlying
+// resources.
+func (it *IdentityRegistryLogLiquidityProviderRevokedIterator) Close() error {
+	it.sub.Unsubscribe()
+	return nil
+}
+
+// IdentityRegistryLogLiquidityProviderRevoked represents a LogLiquidityProviderRevoked event raised by the IdentityRegistry contract.
+type IdentityRegistryLogLiquidityProviderRevoked struct {
+	Account common.Address
+	Raw     types.Log // Blockchain specific contextual infos
+}
+
+// FilterLogLiquidityProviderRevoked is a free log retrieval operation binding the contract event 0x69c93a581704e7fbbbf4f46952f8c65e0c091ae422af84bd0bbcc8eaf8584493.
+//
+// Solidity: event LogLiquidityProviderRevoked(address indexed account)
+func (_IdentityRegistry *IdentityRegistryFilterer) FilterLogLiquidityProviderRevoked(opts *bind.FilterOpts, account []common.Address) (*IdentityRegistryLogLiquidityProviderRevokedIterator, error) {
+
+	var accountRule []interface{}
+	for _, accountItem := range account {
+		accountRule = append(accountRule, accountItem)
+	}
+
+	logs, sub, err := _IdentityRegistry.contract.FilterLogs(opts, "LogLiquidityProviderRevoked", accountRule)
+	if err != nil {
+		return nil, err
+	}
+	return &IdentityRegistryLogLiquidityProviderRevokedIterator{contract: _IdentityRegistry.contract, event: "LogLiquidityProviderRevoked", logs: logs, sub: sub}, nil
+}
+
+// WatchLogLiquidityProviderRevoked is a free log subscription operation binding the contract event 0x69c93a581704e7fbbbf4f46952f8c65e0c091ae422af84bd0bbcc8eaf8584493.
+//
+// Solidity: event LogLiquidityProviderRevoked(address indexed account)
+func (_IdentityRegistry *IdentityRegistryFilterer) WatchLogLiquidityProviderRevoked(opts *bind.WatchOpts, sink chan<- *IdentityRegistryLogLiquidityProviderRevoked, account []common.Address) (event.Subscription, error) {
+
+	var accountRule []interface{}
+	for _, accountItem := range account {
+		accountRule = append(accountRule, accountItem)
+	}
+
+	logs, sub, err := _IdentityRegistry.contract.WatchLogs(opts, "LogLiquidityProviderRevoked", accountRule)
+	if err != nil {
+		return nil, err
+	}
+	return event.NewSubscription(func(quit <-chan struct{}) error {
+		defer sub.Unsubscribe()
+		for {
+			select {
+			case log := <-logs:
+				// New log arrived, parse the event and forward to the user
+				event := new(IdentityRegistryLogLiquidityProviderRevoked)
+				if err := _IdentityRegistry.contract.UnpackLog(event, "LogLiquidityProviderRevoked", log); err != nil {
+					return err
+				}
+				event.Raw = log
+
+				select {
+				case sink <- event:
+				case err := <-sub.Err():
+					return err
+				case <-quit:
+					return nil
+				}
+			case err := <-sub.Err():
+				return err
+			case <-quit:
+				return nil
+			}
+		}
+	}), nil
+}
+
+// ParseLogLiquidityProviderRevoked is a log parse operation binding the contract event 0x69c93a581704e7fbbbf4f46952f8c65e0c091ae422af84bd0bbcc8eaf8584493.
+//
+// Solidity: event LogLiquidityProviderRevoked(address indexed account)
+func (_IdentityRegistry *IdentityRegistryFilterer) ParseLogLiquidityProviderRevoked(log types.Log) (*IdentityRegistryLogLiquidityProviderRevoked, error) {
+	event := new(IdentityRegistryLogLiquidityProviderRevoked)
+	if err := _IdentityRegistry.contract.UnpackLog(event, "LogLiquidityProviderRevoked", log); err != nil {
 		return nil, err
 	}
 	event.Raw = log

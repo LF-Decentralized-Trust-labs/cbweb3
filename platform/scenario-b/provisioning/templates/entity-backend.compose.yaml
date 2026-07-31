@@ -1,0 +1,212 @@
+# entity-backend template — per-entity application stack for the toolkit sample.
+# Runs compliance + auth + api-gateway on the entity network (mirrors scenario-a's
+# backend stack). Postgres + Redis come from entity-infra. Node state is NOT here.
+#
+# The api-gateway points PAYMENT_GRPC_ADDR at the entity's payment-orchestrator
+# (9094), which enables the deposit/escrow/redeem HTTP surface in addition to the
+# AMM v2 swap path. The orchestrator container comes from a sibling template:
+# entity-relayer on a CB (found-spoke) and entity-payment on a bank (join).
+#
+# Interpolation vars come from the runner's process env (ComposeEnv) except the
+# runtime-discovered contract addresses + Keycloak client secret, which arrive via
+# --env-file (.env.spoke/.env.bank). No secrets are baked into this file.
+services:
+  compliance:
+    image: "${COMPLIANCE_IMAGE:-cbweb3b/compliance:local}"
+    container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-compliance"
+    environment:
+      COMPLIANCE_GRPC_PORT: "9093"
+      BLOCKCHAIN_CLIENT: "besu"
+      BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
+      BESU_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
+      # Onboarding/participant registration targets the spoke IdentityRegistry.
+      PARTICIPANT_REGISTRY_ADDRESS: "${SPOKE_IDENTITY_REGISTRY_ADDRESS:-}"
+      CURRENCY_REGISTRY_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"
+      CB_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
+      BANK_CODE: "${ENTITY}"
+      # CA (scenario-a standard): the CB seeds central-bank.crt/.key into cb_tls;
+      # compliance signs participant CSRs with it. Empty on a bank → dev mode
+      # (certificate issuance disabled), which the swap/approve-kyc path does not need.
+      CA_CERT_FILE: "${CA_CERT_FILE:-}"
+      CA_KEY_FILE: "${CA_KEY_FILE:-}"
+      # R2-H-8 service-mesh mTLS — opt-in via GRPC_MTLS_ENABLE (empty by default →
+      # existing plaintext transport, unchanged). When set, compliance presents its
+      # leaf and requires peer certs; GRPC_AUTHZ_ENFORCE additionally rejects
+      # unauthenticated/unauthorized calls (which itself requires mTLS).
+      GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/compliance.crt}"
+      GRPC_MTLS_KEY_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/compliance.key}"
+      GRPC_MTLS_CA_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/svc-ca.crt}"
+      GRPC_AUTHZ_ENFORCE: "${GRPC_AUTHZ_ENFORCE:-}"
+    volumes:
+      # ENTITY_PKI_DIR is "cb_tls" on the CB (the named volume below, holding the
+      # generated CA) and the bank's host pki dir on a commercial bank (its
+      # gen-csr key/csr; no CA → compliance dev mode). Mirrors scenario-a.
+      - "${ENTITY_PKI_DIR:?}:/workspace/backend/config/pki"
+      # Service-mesh CA + this entity's leaf certs (read-only). Seeded by
+      # gen-svc-tls; consumed only when GRPC_MTLS_ENABLE is set.
+      - "svc_tls:/svc-tls:ro"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+    restart: always
+
+  auth:
+    image: "${AUTH_IMAGE:-cbweb3b/auth:local}"
+    container_name: "${CONTAINER_PREFIX}-${ENTITY}-auth"
+    environment:
+      AUTH_GRPC_PORT: "9091"
+      COMPLIANCE_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-compliance:9093"
+      # Internal JWT minted locally (no external issuer); Keycloak validates the
+      # user's password grant (first factor). PKI second-factor is not required
+      # for the sample login (IssueLoginNonce falls through to password).
+      INTERNAL_JWT_ISSUER: "identity-internal"
+      KEYCLOAK_BASE_URL: "http://${CONTAINER_PREFIX}-${ENTITY}-keycloak:8080"
+      KEYCLOAK_REALM: "${KEYCLOAK_REALM:-cbweb3}"
+      KEYCLOAK_CLIENT_ID: "${KEYCLOAK_CLIENT_ID:-spoke-backend}"
+      KEYCLOAK_CLIENT_SECRET: "${KEYCLOAK_CLIENT_SECRET:?}"
+      # Token validation enforces iss (derived from KEYCLOAK_BASE_URL + realm,
+      # always) and aud. The realm's backend login clients carry an
+      # oidc-audience-mapper stamping this exact value (see provisionKeycloakRealm);
+      # keep the default in sync with orchestrator.keycloakBackendAudience.
+      KEYCLOAK_AUDIENCE: "${KEYCLOAK_AUDIENCE:-cbweb3-backend}"
+      REDIS_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-redis:6379"
+      BLOCKCHAIN_CLIENT: "besu"
+      BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
+      BESU_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
+      PARTICIPANT_REGISTRY_ADDRESS: "${SPOKE_IDENTITY_REGISTRY_ADDRESS:-}"
+      CB_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      # KMS seed for governance-portal onboarding (mirrors scenario-a): the bank's
+      # auth acts as the KMS; CreateOnboardingKey returns this per-bank key so the
+      # bank onboards as a DISTINCT on-chain participant. Empty on a CB (no self-
+      # onboarding); set per-bank by the toolkit join.
+      KMS_SEED_KEY_ID: "${KMS_SEED_KEY_ID:-}"
+      KMS_SEED_PRIVATE_KEY: "${KMS_SEED_PRIVATE_KEY:-}"
+      # R2-H-8 service-mesh mTLS — auth is both a server (gateway→auth) and a client
+      # (auth→compliance); it reuses one leaf for both roles. Opt-in via
+      # GRPC_MTLS_ENABLE (empty by default → plaintext, unchanged).
+      GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/auth.crt}"
+      GRPC_MTLS_KEY_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/auth.key}"
+      GRPC_MTLS_CA_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/svc-ca.crt}"
+      GRPC_AUTHZ_ENFORCE: "${GRPC_AUTHZ_ENFORCE:-}"
+    volumes:
+      - "svc_tls:/svc-tls:ro"
+    depends_on:
+      - compliance
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - entity_net
+    restart: always
+
+  api-gateway:
+    image: "${BACKEND_IMAGE:-cbweb3b/api-gateway:local}"
+    container_name: "${CONTAINER_PREFIX}-${ENTITY}-api-gateway"
+    environment:
+      APP_PORT: "8080"
+      REQUEST_TIMEOUT_SEC: "30"
+      ENTITY: "${ENTITY}"
+      BANK_CODE: "${ENTITY}"
+      COOKIE_SECURE: "false"
+      AUTH_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-auth:9091"
+      COMPLIANCE_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-compliance:9093"
+      # Payment orchestrator (deposit/escrow/redeem). Presence of PAYMENT_GRPC_ADDR
+      # registers the payment routes: on a CB (CENTRAL_BANK_API_URL empty) the direct
+      # PaymentHandler + /internal/v1 relay routes; on a bank (CENTRAL_BANK_API_URL
+      # set) the PaymentProxyHandler that forwards to its CB. The gRPC dial is lazy,
+      # so the gateway boots even before the orchestrator is reachable.
+      # Uses the compose SERVICE alias "payment-orchestrator" (same entity network)
+      # instead of the full container name: for a CB the full name
+      # "${CONTAINER_PREFIX}-${ENTITY}-payment-orchestrator" exceeds the 63-char DNS
+      # label limit (e.g. sc-b-cbweb3-central-bank-brazil-central-bank-payment-orchestrator
+      # = 65 chars) and Docker's embedded DNS returns "no such host". The short alias
+      # always resolves and is unique per entity network.
+      PAYMENT_GRPC_ADDR: "payment-orchestrator:9094"
+      # The entity's own on-chain (Besu) address. The payment proxy injects it as
+      # requester_besu_address so the CB registers the deposit against this bank.
+      ENTITY_BESU_ADDRESS: "${ENTITY_BESU_ADDRESS:-}"
+      # Hub AMM / swap wiring — TD-001: no default AMM. The v2 AMM routes are
+      # enabled by PAIR_REGISTRY_CONTRACT_ADDRESS + HUB_BESU_RPC_URL and every
+      # corridor's AMM is resolved per pool_pair from the on-chain PairRegistry.
+      # Routable hub RPC (set by the toolkit from the hub/spoke bundle) so this
+      # reaches the hub cross-VM; falls back to the single-host host.docker.internal
+      # published port when the toolkit did not provide a routable URL.
+      HUB_BESU_RPC_URL: "${HUB_BESU_RPC_URL:-http://host.docker.internal:${HUB_RPC_PORT}}"
+      SIGNER_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      PAIR_REGISTRY_CONTRACT_ADDRESS: "${PAIR_REGISTRY_CONTRACT_ADDRESS:-}"
+      CURRENCY_REGISTRY_CONTRACT_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"
+      HUB_TOKEN_A_ADDRESS: "${HUB_TOKEN_A_ADDRESS:-}"
+      HUB_TOKEN_B_ADDRESS: "${HUB_TOKEN_B_ADDRESS:-}"
+      HUB_IDENTITY_REGISTRY_ADDRESS: "${HUB_IDENTITY_REGISTRY_ADDRESS:-}"
+      # Cross-currency bridge-in issuer (CB side): the source token to lock on the
+      # spoke (TOKEN_ADDRESS = spoke tCeBM) and the sovereign W-token to mint on the
+      # hub (W_TOKEN_ADDRESS, captured at register-currency). Empty on a bank.
+      TOKEN_ADDRESS: "${SPOKE_TCEBM_ADDRESS:-}"
+      W_TOKEN_ADDRESS: "${W_TOKEN_ADDRESS:-}"
+      # Hub-wide LCR → enables SovereignLiquidityService (sovereign-add +
+      # cross-currency bridge-in/out endpoints).
+      LIQUIDITY_COMMIT_REGISTRY_ADDRESS: "${LIQUIDITY_COMMIT_REGISTRY_ADDRESS:-}"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
+      # Commercial banks resolve the sovereign AMM from their CB (empty on a CB).
+      CENTRAL_BANK_API_URL: "${CENTRAL_BANK_API_URL:-}"
+      INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-}"
+      # Cross-currency bridge-out delegation (Step 3): the initiating bank's swap
+      # orchestrator notifies the Cacti relay, which routes the burn-unlock to the
+      # beneficiary's CB (CB-B) by spoke_out. Without it, Step 3 falls back to a
+      # local enqueue that no bank-side relayer can process. Empty disables it.
+      CACTI_API_URL: "${CACTI_API_URL:-}"
+      # Bridge lock-mint / burn-unlock derivation: the entity's own spoke network id
+      # (spoke-brl, spoke-ars) and native tCeBM symbol. Required on a CB that receives
+      # a cross-currency bridge-out (it enqueues the W-<target> burn for its spoke).
+      SPOKE_NETWORK: "${SPOKE_NETWORK:-}"
+      NATIVE_ASSET_SYMBOL: "${NATIVE_ASSET_SYMBOL:-}"
+      # Governance-portal onboarding smart proxy (mirrors scenario-a): reads the
+      # bank's CSR from PKI_DIR/<bankCode>.csr (the mount below) before forwarding
+      # the credential request to its CB. Empty on a CB (no smart-proxy).
+      PKI_DIR: "${PKI_DIR:-}"
+      # Browser CORS: the operator portals are served on distinct host ports and call
+      # this gateway with credentials, so the exact portal origins must be allowed
+      # ("*" is invalid with credentials). The toolkit sets the entity's portal
+      # origins; empty leaves CORS disabled.
+      CORS_ALLOW_ORIGINS: "${CORS_ALLOW_ORIGINS:-}"
+      # R2-H-8 service-mesh mTLS — the gateway is a gRPC client only (HTTP server);
+      # it presents its leaf when dialing auth/compliance/payment-orchestrator.
+      # Opt-in via GRPC_MTLS_ENABLE (empty by default → plaintext, unchanged).
+      GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/api-gateway.crt}"
+      GRPC_MTLS_KEY_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/api-gateway.key}"
+      GRPC_MTLS_CA_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/svc-ca.crt}"
+    volumes:
+      # Same PKI material the compliance service mounts: on a bank this is the host
+      # pki dir holding its gen-csr {bankCode}.csr/.key (read by the smart proxy);
+      # on a CB it is the cb_tls volume (the CA). Mirrors scenario-a.
+      - "${ENTITY_PKI_DIR:?}:/workspace/backend/config/pki"
+      - "svc_tls:/svc-tls:ro"
+    depends_on:
+      - auth
+      - compliance
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${GATEWAY_PORT:?}:8080"
+    networks:
+      - entity_net
+    restart: always
+
+networks:
+  entity_net:
+    name: "${ENTITY_NET_PREFIX:?}_net"
+    external: true
+
+volumes:
+  # CB CA material seeded by gen-tls (found-spoke) via a throwaway container; the
+  # explicit name binds to that exact volume (no compose project prefix). Only
+  # referenced (thus only created) when ENTITY_PKI_DIR=cb_tls (the CB); a bank's
+  # host-path ENTITY_PKI_DIR resolves to a bind mount and this stays uninstantiated.
+  cb_tls:
+    name: "${CA_VOLUME:?}"
+  # Service-mesh mTLS material (svc-ca.crt + per-service leaves), seeded by
+  # gen-svc-tls into this named volume. Referenced read-only by every backend
+  # service; consumed only when GRPC_MTLS_ENABLE is set.
+  svc_tls:
+    name: "${SVC_TLS_VOLUME:?}"

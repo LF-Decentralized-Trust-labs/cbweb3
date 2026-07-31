@@ -45,6 +45,13 @@ type ApplyInput struct {
 	ScriptsDir          string
 	ComposeTemplatePath string
 	PaladinConfigDir    string
+
+	// Observe mode (NOC control plane). RepoRoot is the docker build context for
+	// the noc-backend image; NOCStackComposePath is the noc-stack template;
+	// NOCBundlePath is the resolved nocBundleRef.
+	RepoRoot            string
+	NOCStackComposePath string
+	NOCBundlePath       string
 }
 
 // ApplyResult is the structured execution report written to stdout.

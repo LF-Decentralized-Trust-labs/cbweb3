@@ -22,6 +22,8 @@ type Dependencies struct {
 	SupervisorHandler      *handlers.SupervisorHandler
 	OnboardingHandler      *handlers.OnboardingHandler
 	OnboardingProxyHandler *handlers.OnboardingProxyHandler
+	// SpokesHandler serves the internal spoke self-registration endpoint (hub only).
+	SpokesHandler *handlers.SpokesHandler
 	AuthProvider           interfaces.IAuthProvider
 	// PaymentProxyHandler proxies /api/v1/payments/* to the Central Bank gateway.
 	// Only wired when CENTRAL_BANK_API_URL is set (commercial bank gateways).
@@ -100,6 +102,17 @@ func Setup(app *fiber.App, deps Dependencies) {
 	govGroup.Put("/parameters", deps.GovernanceHandler.UpdateParameters)
 	govGroup.Get("/audit/logs", deps.GovernanceHandler.GetAuditLogs)
 	govGroup.Get("/users", deps.GovernanceHandler.ListUsers)
+
+	// Audit log READ is shared across the CB portals (treasury/supervisor also consume it).
+	// It is served on a dedicated path OUTSIDE the /governance group so the group's
+	// ROLE_GOVERNANCE guard does not apply — Fiber group middleware is PREFIX-scoped and
+	// would otherwise 403 non-governance callers on any /governance/* path. Read-only:
+	// does not weaken any compliance/write control (those stay ROLE_GOVERNANCE-only).
+	app.Get("/api/v1/audit/logs",
+		middleware.RequireCookieAuth(deps.AuthProvider),
+		middleware.RequireRole("ROLE_GOVERNANCE", "ROLE_TREASURY", "ROLE_SUPERVISOR"),
+		deps.GovernanceHandler.GetAuditLogs,
+	)
 	govGroup.Get("/users/:userId", deps.GovernanceHandler.GetUser)
 
 	// --- Payment Proxy (commercial bank → Central Bank) ---
@@ -157,6 +170,17 @@ func Setup(app *fiber.App, deps Dependencies) {
 		internalPayments.Get("/escrows", deps.PaymentHandler.ListEscrows)
 		internalPayments.Post("/redeems", deps.PaymentHandler.RequestRedeem)
 		internalPayments.Get("/redeems", deps.PaymentHandler.ListRedeems)
+	}
+
+	// --- Internal spoke self-registration (hub only) ---
+	// A founding central bank registers its spoke on the hub IdentityRegistry via
+	// the hub compliance service. Machine-to-machine, guarded by X-Relay-Auth.
+	if deps.SpokesHandler != nil {
+		relaySecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
+		spokes := app.Group("/internal/v1", middleware.RequireRelayAuth(relaySecret))
+		spokes.Post("/spokes/register", deps.SpokesHandler.RegisterSpoke)
+		spokes.Post("/spokes/register-currency", deps.SpokesHandler.RegisterSpokeCurrency)
+		spokes.Post("/spokes/register-pair", deps.SpokesHandler.RegisterSpokePair)
 	}
 
 	// --- Scenario B API v2 ---

@@ -18,6 +18,7 @@ import {
   TableRow,
   toast,
 } from "@cbweb3/ui";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { usePaymentStore } from "../stores";
 import {
@@ -26,9 +27,12 @@ import {
   fiatCurrencyLabel,
   formatCeBM,
   formatFiatUnits,
+  tokenUnitPrefix,
 } from "../types";
 
 const shortHash = (value: string) => (value ? `${value.slice(0, 10)}...${value.slice(-8)}` : "-");
+
+const PAGE_SIZE = 10;
 
 function getEscrowStatusLabel(status: unknown): string {
   if (typeof status === "number") {
@@ -64,6 +68,9 @@ export function EscrowsPage() {
   const fCeBMSymbol = usePaymentStore((state) => state.fCeBMSymbol);
   const tCeBMDecimals = usePaymentStore((state) => state.tCeBMDecimals);
   const tCeBMSymbol = usePaymentStore((state) => state.tCeBMSymbol);
+  // Instrument names follow the on-chain symbols (custom per spoke).
+  const tCeBMName = tokenUnitPrefix(tCeBMSymbol);
+  const fCeBMName = tokenUnitPrefix(fCeBMSymbol, "fCeBM");
   const status = usePaymentStore((state) => state.status);
   const error = usePaymentStore((state) => state.error);
   const fDecimals = fCeBMDecimals ?? 18;
@@ -72,6 +79,7 @@ export function EscrowsPage() {
   const [depositId, setDepositId] = useState("");
   const [amount, setAmount] = useState("0");
   const [confirmRequest, setConfirmRequest] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     void fetchAll();
@@ -81,6 +89,17 @@ export function EscrowsPage() {
     () => escrows.filter((e) => getEscrowStatusLabel(e.status) === "PENDING").length,
     [escrows],
   );
+
+  const total = escrows.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  const pagedEscrows = useMemo(() => escrows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [escrows, page]);
+  const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(page * PAGE_SIZE, total);
 
   const approvedDeposits = useMemo(
     () => deposits.filter((d) => {
@@ -123,7 +142,7 @@ export function EscrowsPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Fiat Reserve Balance (fCeBM)</CardDescription>
+            <CardDescription>Fiat Reserve Balance ({fCeBMName})</CardDescription>
             <CardTitle>
               {fiatBalance !== null ? formatFiatUnits(fiatBalance, fDecimals, fCeBMSymbol) : "—"}
             </CardTitle>
@@ -139,9 +158,9 @@ export function EscrowsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Request Tokenisation (fCeBM → tCeBM)</CardTitle>
+          <CardTitle>Request Tokenisation ({fCeBMName} → {tCeBMName})</CardTitle>
           <CardDescription>
-            Convert your fiat reserve (fCeBM) into tokenised central bank money (tCeBM).
+            Convert your fiat reserve ({fCeBMName}) into tokenised central bank money ({tCeBMName}).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -190,7 +209,7 @@ export function EscrowsPage() {
           <CardHeader>
             <CardTitle>Confirm Tokenisation Request</CardTitle>
             <CardDescription>
-              {formatFiatUnits(amount, fDecimals, fCeBMSymbol)} fCeBM will be submitted to the central bank for conversion to{" "}
+              {formatFiatUnits(amount, fDecimals, fCeBMSymbol)} held as {fCeBMName} will be submitted to the central bank for conversion to{" "}
               {formatCeBM(amount, tDecimals, tCeBMSymbol)}.
             </CardDescription>
           </CardHeader>
@@ -218,13 +237,13 @@ export function EscrowsPage() {
                 <TableHead>Deposit ID</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Burn Tx (fCeBM)</TableHead>
-                <TableHead>Mint Tx (tCeBM)</TableHead>
+                <TableHead>Burn Tx ({fCeBMName})</TableHead>
+                <TableHead>Mint Tx ({tCeBMName})</TableHead>
                 <TableHead>Created At</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {escrows.map((escrow) => (
+              {pagedEscrows.map((escrow) => (
                 <TableRow key={escrow.id}>
                   <TableCell className="font-medium">{escrow.id}</TableCell>
                   <TableCell>{escrow.deposit_id}</TableCell>
@@ -241,9 +260,34 @@ export function EscrowsPage() {
               ))}
             </TableBody>
           </Table>
-          {!escrows.length ? (
+          {!total ? (
             <p className="pt-3 text-sm text-muted-foreground">No tokenisation requests found.</p>
           ) : null}
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between gap-2 pt-4">
+            <span className="text-xs text-muted-foreground">
+              {total === 0 ? "—" : `Showing ${rangeStart}–${rangeEnd} of ${total}`}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                <ChevronLeft className="h-4 w-4" />
+                Prev
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Page {page} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

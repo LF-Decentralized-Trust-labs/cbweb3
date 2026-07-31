@@ -10,8 +10,14 @@ import (
 
 // DryRun reads current provisioning state and returns a plan report.
 // No side effects: no files written, no engine called, no Besu accessed.
-func DryRun(_ context.Context, in ApplyInput) (ApplyResult, error) {
+func DryRun(ctx context.Context, in ApplyInput) (ApplyResult, error) {
 	m := in.Manifest
+
+	// observe has no on-chain node/state file; report its linear plan directly.
+	if m.Spec.Mode == "observe" {
+		in.DryRun = true
+		return runObserveMode(ctx, in)
+	}
 
 	result := ApplyResult{
 		Spoke:  m.Spec.Spoke.ID,
@@ -27,6 +33,15 @@ func DryRun(_ context.Context, in ApplyInput) (ApplyResult, error) {
 	stepOrder := orchestrator.CanonicalStepOrder
 	if m.Spec.Mode == "join" {
 		stepOrder = orchestrator.CanonicalJoinStepOrder
+	}
+	// The reverse-proxy step is soft-appended by the orchestrator ONLY when
+	// spec.proxy == "enable" (see buildSteps / buildJoinSteps). Mirror that here so
+	// the plan reflects it. Copy the shared canonical slice before appending — never
+	// mutate the package-level order.
+	if m.Spec.Proxy == "enable" {
+		order := make([]string, len(stepOrder), len(stepOrder)+1)
+		copy(order, stepOrder)
+		stepOrder = append(order, orchestrator.StepStartProxy)
 	}
 
 	steps := make([]StepResult, len(stepOrder))

@@ -1,6 +1,7 @@
 # github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto v0.0.0 => ../../shared/proto
 ## explicit; go 1.24.0
 github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1
+github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz
 github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1
 github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1
 # github.com/Microsoft/go-winio v0.6.2

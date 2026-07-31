@@ -24,7 +24,7 @@ type fakePoolReader struct {
 func (f fakePoolReader) GetPoolReserves(_ context.Context, _ string) (string, string, float64, error) {
 	return f.rA, f.rB, 0, f.err
 }
-func (f fakePoolReader) GetFeeBps(_ context.Context) (uint64, error) { return 30, nil }
+func (f fakePoolReader) GetFeeBps(_ context.Context, _ string) (uint64, error) { return 30, nil }
 
 func TestPoolStatusGate_IsActive(t *testing.T) {
 	g := NewPoolStatusGate(fakePoolReader{rA: "100", rB: "200"})
@@ -87,10 +87,10 @@ func TestCircuitBreakerService_GetStatus(t *testing.T) {
 	}
 
 	db.Create(&domain.ScenarioBRiskControlState{
-		PoolPair:            "Q",
-		CircuitBreakerState: domain.CircuitBreakerHalted,
+		PoolPair:             "Q",
+		CircuitBreakerState:  domain.CircuitBreakerHalted,
 		PauseInitiatorBankID: "bank-a",
-		PauseReasonCode:     "FRAUD",
+		PauseReasonCode:      "FRAUD",
 	})
 	st, err = svc.GetStatus(context.Background(), "Q")
 	if err != nil || st.State != string(domain.CircuitBreakerHalted) || st.PauseInitiator != "bank-a" {

@@ -1,76 +1,67 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * CrossCurrencySwapRelay — Cacti module for 009-commercial-cross-currency-swap.
+ * CrossCurrencySwapRelay — generalized for N spokes (TK-B5).
  *
- * Receives a bridge-out notification from CB-A after the Hub AMM swap and
- * forwards it to the target CB gateway so that CB-B can:
- *   1. burn the W-ARS tokens on the Hub
- *   2. release (mint) tCeBM-ARS to Bank-B on Spoke-B
- *
- * The relay acts as the neutral cross-chain message bus: CB-A does not need to
- * know CB-B's internal URL; CB-B does not expose its URL to CB-A directly.
- *
- * Environment variables consumed:
- *   CB_B_GATEWAY_URL          — Internal URL of CB-B api-gateway
- *                               (e.g. "http://api-gateway-central-bank-b:8080")
- *   INTERNAL_RELAY_AUTH_SECRET — Shared secret for X-Relay-Auth header
- *
- * Endpoint registered in index.ts:
- *   POST /api/v1/cross-currency/bridge-out
+ * Receives a bridge-out notification after the Hub AMM swap and forwards it to
+ * the target spoke's gateway, resolved by **lookup of `spoke_out`** in the
+ * dynamic SpokeRegistry (no fixed CB-B). Before forwarding, it validates the
+ * pair's circuit breaker by reading `isPaused()` ON-CHAIN on `amm_address`
+ * (fail-safe: paused/unavailable ⇒ refuse). Auth remains the shared secret
+ * (`X-Relay-Auth`); per-CB auth is out of scope (§14.D, pending project-lead).
  */
 
 import { Request, Response } from "express";
-
-// ---------------------------------------------------------------------------
-// Payload types
-// ---------------------------------------------------------------------------
+import { SpokeRegistry } from "./spoke-registry";
 
 export interface CrossCurrencyBridgeOutPayload {
-  /** UUID correlating bridge-in + swap + bridge-out across CBs. */
   correlation_id: string;
-  /** On-chain tx hash of the Hub AMM swap (proof the swap happened). */
   swap_tx_hash: string;
-  /** Sovereign pool pair identifier (e.g. "W-BRL-ARS"). */
   pool_pair: string;
-  /** Amount in target currency (wei decimal string). */
   amount_out: string;
-  /** ID of the commercial bank that should receive the funds (e.g. "bank-b"). */
   beneficiary_bank_id: string;
-  /** Target spoke network (e.g. "spoke-b"). */
+  /** Target spoke id — used to look up the destination gateway. */
   spoke_out: string;
-  /** ERC-20 address of the wrapped target token on the Hub (e.g. W-ARS address). */
   wrapped_target_token: string;
-  /**
-   * Hub address that received W-ARS from the AMM swap (CB-A's signer).
-   * CB-B's executor burns from this address — it has CENTRAL_BANK_ROLE which
-   * grants burn authority over any address.
-   */
+  /** Address of the pair's AMM — read on-chain for the isPaused() gate (TK-B5). */
+  amm_address: string;
   swap_sender_address?: string;
-  // Note: beneficiary_spoke_address is intentionally absent from this payload.
-  // CB-B resolves the beneficiary on-chain address internally from its participants registry
-  // using beneficiary_bank_id — the frontend/CB-A never needs to know on-chain addresses of peers.
 }
 
-// ---------------------------------------------------------------------------
-// CrossCurrencySwapRelay
-// ---------------------------------------------------------------------------
+/** Gate: returns true only when it is SAFE to forward (AMM not paused). */
+export type NotPausedGate = (ammAddress: string | undefined) => Promise<boolean>;
+
+export interface CrossCurrencyRelayDeps {
+  registry: SpokeRegistry;
+  relayAuthSecret: string;
+  notPaused: NotPausedGate;
+  /** Injectable fetch for tests (defaults to global fetch). */
+  fetchFn?: typeof fetch;
+}
 
 export class CrossCurrencySwapRelay {
-  private readonly cbBGatewayUrl: string;
+  private readonly registry: SpokeRegistry;
   private readonly relayAuthSecret: string;
+  private readonly notPaused: NotPausedGate;
+  private readonly fetchFn: typeof fetch;
 
-  constructor(opts: { cbBGatewayUrl: string; relayAuthSecret: string }) {
-    this.cbBGatewayUrl = opts.cbBGatewayUrl.replace(/\/$/, "");
-    this.relayAuthSecret = opts.relayAuthSecret;
+  constructor(deps: CrossCurrencyRelayDeps) {
+    this.registry = deps.registry;
+    this.relayAuthSecret = deps.relayAuthSecret;
+    this.notPaused = deps.notPaused;
+    this.fetchFn = deps.fetchFn ?? fetch;
   }
 
-  /**
-   * Express request handler for POST /api/v1/cross-currency/bridge-out.
-   * Validates X-Relay-Auth, parses payload, and forwards to CB-B.
-   */
+  /** Resolve the destination gateway by spoke id; throws if not registered. */
+  resolveGateway(spokeOut: string): string {
+    const spoke = this.registry.get(spokeOut);
+    if (!spoke) {
+      throw new Error(`unknown spoke_out: "${spokeOut}" not registered`);
+    }
+    return spoke.gatewayUrl.replace(/\/$/, "");
+  }
+
   handleBridgeOut = async (req: Request, res: Response): Promise<void> => {
-    // Auth validation
     const provided = req.headers["x-relay-auth"];
     if (!provided || provided !== this.relayAuthSecret) {
       res.status(401).json({ error: "X-Relay-Auth invalid or missing" });
@@ -78,8 +69,6 @@ export class CrossCurrencySwapRelay {
     }
 
     const payload = req.body as Partial<CrossCurrencyBridgeOutPayload>;
-
-    // Validate required fields
     if (
       !payload.correlation_id ||
       !payload.swap_tx_hash ||
@@ -94,24 +83,50 @@ export class CrossCurrencySwapRelay {
       return;
     }
 
-    console.log(
-      `[CrossCurrencySwapRelay] bridge-out request — correlation_id=${payload.correlation_id} ` +
-        `amount_out=${payload.amount_out} beneficiary=${payload.beneficiary_bank_id} spoke=${payload.spoke_out}`,
-    );
+    // Circuit breaker (Constitution III): read isPaused() on-chain on amm_address.
+    if (!(await this.notPaused(payload.amm_address))) {
+      console.warn(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          service: "cacti-relay",
+          severity: "WARN",
+          event: "bridge_out_refused",
+          reason: "circuit_breaker",
+          correlation_id: payload.correlation_id,
+          spoke_out: payload.spoke_out,
+        }),
+      );
+      res
+        .status(409)
+        .json({ error: "circuit breaker: pair paused or unavailable (fail-safe)" });
+      return;
+    }
+
+    // Route by spoke_out → gateway lookup.
+    let gatewayUrl: string;
+    try {
+      gatewayUrl = this.resolveGateway(payload.spoke_out);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
 
     try {
-      await this.forwardToCBB(payload as CrossCurrencyBridgeOutPayload);
+      await this.forward(gatewayUrl, payload as CrossCurrencyBridgeOutPayload);
       res.json({ status: "accepted", correlation_id: payload.correlation_id });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[CrossCurrencySwapRelay] forward to CB-B failed: ${msg}`);
-      res.status(502).json({ error: `failed to forward to CB-B gateway: ${msg}` });
+      console.error(`[CrossCurrencySwapRelay] forward failed: ${msg}`);
+      res.status(502).json({ error: `failed to forward to spoke gateway: ${msg}` });
     }
   };
 
-  private async forwardToCBB(payload: CrossCurrencyBridgeOutPayload): Promise<void> {
-    const url = `${this.cbBGatewayUrl}/internal/amm/cross-currency-bridge-out`;
-    const resp = await fetch(url, {
+  private async forward(
+    gatewayUrl: string,
+    payload: CrossCurrencyBridgeOutPayload,
+  ): Promise<void> {
+    const url = `${gatewayUrl}/internal/amm/cross-currency-bridge-out`;
+    const resp = await this.fetchFn(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -119,40 +134,37 @@ export class CrossCurrencySwapRelay {
       },
       body: JSON.stringify(payload),
     });
-
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
       throw new Error(`HTTP ${resp.status} from ${url}: ${body}`);
     }
-
-    const json = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
     console.log(
-      `[CrossCurrencySwapRelay] CB-B accepted bridge-out — ` +
-        `correlation_id=${payload.correlation_id} position_id=${json["position_id"] ?? "unknown"}`,
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        service: "cacti-relay",
+        severity: "INFO",
+        event: "bridge_out_forwarded",
+        correlation_id: payload.correlation_id,
+        spoke_out: payload.spoke_out,
+      }),
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------
-
-export function createCrossCurrencySwapRelayFromEnv(): CrossCurrencySwapRelay | null {
-  const cbBGatewayUrl = process.env["CB_B_GATEWAY_URL"] ?? "";
+/**
+ * Factory: the registry and the isPaused gate are injected by index.ts (they are
+ * runtime state). Only the shared auth secret comes from env here.
+ */
+export function createCrossCurrencySwapRelay(
+  registry: SpokeRegistry,
+  notPaused: NotPausedGate,
+): CrossCurrencySwapRelay | null {
   const relayAuthSecret = process.env["INTERNAL_RELAY_AUTH_SECRET"] ?? "";
-
-  if (!cbBGatewayUrl) {
-    console.log(
-      "[CrossCurrencySwapRelay] CB_B_GATEWAY_URL not set — cross-currency relay disabled",
-    );
-    return null;
-  }
   if (!relayAuthSecret) {
     console.error(
       "[CrossCurrencySwapRelay] INTERNAL_RELAY_AUTH_SECRET not set — refusing to start (security)",
     );
     return null;
   }
-
-  return new CrossCurrencySwapRelay({ cbBGatewayUrl, relayAuthSecret });
+  return new CrossCurrencySwapRelay({ registry, relayAuthSecret, notPaused });
 }

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -46,10 +47,17 @@ func main() {
 		kc, err = keycloak.New(keycloak.Config{
 			BaseURL:      cfg.KeycloakURL,
 			Realm:        cfg.KeycloakRealm,
+			Audience:     cfg.KeycloakAudience,
 			JWKSCacheTTL: cfg.JWKSCacheTTL,
 		})
 		if err != nil {
 			log.Fatalf("keycloak: %v", err)
+		}
+		issuer := strings.TrimRight(cfg.KeycloakURL, "/") + "/realms/" + cfg.KeycloakRealm
+		if cfg.KeycloakAudience == "" {
+			log.Printf("keycloak: token validation — issuer=%q, audience enforcement DISABLED (KEYCLOAK_AUDIENCE unset)", issuer)
+		} else {
+			log.Printf("keycloak: token validation — issuer=%q, audience=%q", issuer, cfg.KeycloakAudience)
 		}
 	}
 

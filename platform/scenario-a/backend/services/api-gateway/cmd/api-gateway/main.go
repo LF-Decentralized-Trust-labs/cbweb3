@@ -5,6 +5,7 @@ package main
 
 import (
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,6 +15,13 @@ import (
 )
 
 func main() {
+	// Constitution (Observability): structured JSON logs to stdout. Set the
+	// default slog handler so package-level slog.* calls (e.g. the compliance
+	// fail-closed gate) emit JSON to stdout instead of text to stderr.
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
+
 	cfg := config.Load()
 
 	application, err := app.New(cfg)
