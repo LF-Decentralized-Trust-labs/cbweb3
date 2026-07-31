@@ -129,6 +129,7 @@ func (c *JoinConfig) WithDefaults() {
 func (c JoinConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
 func (c JoinConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
 func (c JoinConfig) caVolume() string       { return c.VolumePrefix + "_cb_tls" }
+func (c JoinConfig) svcTLSVolume() string    { return c.VolumePrefix + "_svc_tls" }
 func (c JoinConfig) keycloakPort() int      { return c.RPCPort + 7000 }
 
 // keycloakContainer matches entity-keycloak.compose.yaml's container_name.
@@ -330,6 +331,10 @@ func (c JoinConfig) ComposeEnv() []string {
 		// uninstantiated (ENTITY_PKI_DIR is a host bind, not the named volume).
 		"CA_VOLUME":      c.caVolume(),
 		"ENTITY_PKI_DIR": c.pkiDir(),
+		// R2-H-8 service-mesh mTLS: the bank's own service CA + leaf certs (separate
+		// from the consortium CA, which the bank does not hold) live in this volume,
+		// mounted at /svc-tls. mTLS activates only when GRPC_MTLS_ENABLE is exported.
+		"SVC_TLS_VOLUME": c.svcTLSVolume(),
 		// Commercial banks resolve the sovereign AMM from their CB gateway.
 		"CENTRAL_BANK_API_URL": b.CBGateway,
 		// The bank's own on-chain address — the payment proxy stamps it as
@@ -584,6 +589,15 @@ func JoinSteps(c JoinConfig) []Step {
 			},
 		},
 		{Name: "start-bank-infra", Deps: []string{"wait-sync"}, Run: compose("entity-infra")},
+		{
+			// R2-H-8 service-mesh mTLS: the bank generates its own service CA + leaf
+			// certs (it holds no consortium CA). Harmless until GRPC_MTLS_ENABLE is set.
+			Name: "gen-svc-tls-bank",
+			Check: func(ctx context.Context) (bool, error) {
+				return volumeHasFile(ctx, c.Runner, c.svcTLSVolume(), "svc-ca.crt"), nil
+			},
+			Run: func(ctx context.Context) error { return genServiceTLS(ctx, c.Runner, c.svcTLSVolume()) },
+		},
 		// The bank's payment-orchestrator backs the api-gateway's payment gRPC so the
 		// deposit/redeem/escrow proxy routes register. No Hub relayer (bank mints
 		// nothing — the CB does); image is shared with the hub, built on demand.
@@ -591,7 +605,7 @@ func JoinSteps(c JoinConfig) []Step {
 			Name: "start-bank-payment",
 			// wire-addresses populates SPOKE_FCEBM_ADDRESS/SPOKE_TCEBM_ADDRESS in the
 			// bank env-file, which the orchestrator's read-path token clients need.
-			Deps: []string{"start-bank-infra", "wire-addresses"},
+			Deps: []string{"start-bank-infra", "wire-addresses", "gen-svc-tls-bank"},
 			Run: func(ctx context.Context) error {
 				if err := buildImageIn(ctx, c.Runner, c.scenarioBDir(), hubPaymentOrchestratorImage,
 					"backend/services/payment-orchestrator/Dockerfile", "backend"); err != nil {

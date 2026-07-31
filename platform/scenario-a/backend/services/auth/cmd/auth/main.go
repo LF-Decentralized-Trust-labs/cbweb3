@@ -84,7 +84,10 @@ func main() {
 
 	ns := newNonceStore()
 
-	grpcServer := server.New(kcClient, kmsProvider, complianceClient, blockchainClient, caCertPEM, ns)
+	grpcServer, err := server.New(kcClient, kmsProvider, complianceClient, blockchainClient, caCertPEM, ns)
+	if err != nil {
+		log.Fatalf("configure gRPC server: %v", err)
+	}
 
 	port := getEnv("AUTH_GRPC_PORT", "9091")
 	lis, err := net.Listen("tcp", ":"+port)

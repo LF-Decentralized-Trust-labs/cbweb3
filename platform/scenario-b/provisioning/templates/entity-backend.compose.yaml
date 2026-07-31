@@ -30,11 +30,22 @@ services:
       # (certificate issuance disabled), which the swap/approve-kyc path does not need.
       CA_CERT_FILE: "${CA_CERT_FILE:-}"
       CA_KEY_FILE: "${CA_KEY_FILE:-}"
+      # R2-H-8 service-mesh mTLS — opt-in via GRPC_MTLS_ENABLE (empty by default →
+      # existing plaintext transport, unchanged). When set, compliance presents its
+      # leaf and requires peer certs; GRPC_AUTHZ_ENFORCE additionally rejects
+      # unauthenticated/unauthorized calls (which itself requires mTLS).
+      GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/compliance.crt}"
+      GRPC_MTLS_KEY_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/compliance.key}"
+      GRPC_MTLS_CA_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/svc-ca.crt}"
+      GRPC_AUTHZ_ENFORCE: "${GRPC_AUTHZ_ENFORCE:-}"
     volumes:
       # ENTITY_PKI_DIR is "cb_tls" on the CB (the named volume below, holding the
       # generated CA) and the bank's host pki dir on a commercial bank (its
       # gen-csr key/csr; no CA → compliance dev mode). Mirrors scenario-a.
       - "${ENTITY_PKI_DIR:?}:/workspace/backend/config/pki"
+      # Service-mesh CA + this entity's leaf certs (read-only). Seeded by
+      # gen-svc-tls; consumed only when GRPC_MTLS_ENABLE is set.
+      - "svc_tls:/svc-tls:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -72,6 +83,15 @@ services:
       # onboarding); set per-bank by the toolkit join.
       KMS_SEED_KEY_ID: "${KMS_SEED_KEY_ID:-}"
       KMS_SEED_PRIVATE_KEY: "${KMS_SEED_PRIVATE_KEY:-}"
+      # R2-H-8 service-mesh mTLS — auth is both a server (gateway→auth) and a client
+      # (auth→compliance); it reuses one leaf for both roles. Opt-in via
+      # GRPC_MTLS_ENABLE (empty by default → plaintext, unchanged).
+      GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/auth.crt}"
+      GRPC_MTLS_KEY_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/auth.key}"
+      GRPC_MTLS_CA_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/svc-ca.crt}"
+      GRPC_AUTHZ_ENFORCE: "${GRPC_AUTHZ_ENFORCE:-}"
+    volumes:
+      - "svc_tls:/svc-tls:ro"
     depends_on:
       - compliance
     extra_hosts:
@@ -150,11 +170,18 @@ services:
       # ("*" is invalid with credentials). The toolkit sets the entity's portal
       # origins; empty leaves CORS disabled.
       CORS_ALLOW_ORIGINS: "${CORS_ALLOW_ORIGINS:-}"
+      # R2-H-8 service-mesh mTLS — the gateway is a gRPC client only (HTTP server);
+      # it presents its leaf when dialing auth/compliance/payment-orchestrator.
+      # Opt-in via GRPC_MTLS_ENABLE (empty by default → plaintext, unchanged).
+      GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/api-gateway.crt}"
+      GRPC_MTLS_KEY_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/api-gateway.key}"
+      GRPC_MTLS_CA_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/svc-ca.crt}"
     volumes:
       # Same PKI material the compliance service mounts: on a bank this is the host
       # pki dir holding its gen-csr {bankCode}.csr/.key (read by the smart proxy);
       # on a CB it is the cb_tls volume (the CA). Mirrors scenario-a.
       - "${ENTITY_PKI_DIR:?}:/workspace/backend/config/pki"
+      - "svc_tls:/svc-tls:ro"
     depends_on:
       - auth
       - compliance
@@ -178,3 +205,8 @@ volumes:
   # host-path ENTITY_PKI_DIR resolves to a bind mount and this stays uninstantiated.
   cb_tls:
     name: "${CA_VOLUME:?}"
+  # Service-mesh mTLS material (svc-ca.crt + per-service leaves), seeded by
+  # gen-svc-tls into this named volume. Referenced read-only by every backend
+  # service; consumed only when GRPC_MTLS_ENABLE is set.
+  svc_tls:
+    name: "${SVC_TLS_VOLUME:?}"

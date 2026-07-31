@@ -19,6 +19,13 @@ services:
       # Browser CORS: the hub governance portal calls this gateway with credentials,
       # so its exact origin must be allowed ("*" is invalid with credentials).
       CORS_ALLOW_ORIGINS: "${CORS_ALLOW_ORIGINS:-}"
+      # R2-H-8 service-mesh mTLS — the hub gateway is a gRPC client (→hub compliance).
+      # Opt-in via GRPC_MTLS_ENABLE (empty by default → plaintext, unchanged).
+      GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/api-gateway.crt}"
+      GRPC_MTLS_KEY_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/api-gateway.key}"
+      GRPC_MTLS_CA_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/svc-ca.crt}"
+    volumes:
+      - "svc_tls:/svc-tls:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -31,3 +38,9 @@ networks:
   entity_net:
     name: "${ENTITY_NET_PREFIX:?}_net"
     external: true
+
+volumes:
+  # Service-mesh mTLS material shared with hub compliance (same named volume,
+  # seeded by gen-svc-tls-hub). Read-only; consumed only when GRPC_MTLS_ENABLE is set.
+  svc_tls:
+    name: "${SVC_TLS_VOLUME:?}"

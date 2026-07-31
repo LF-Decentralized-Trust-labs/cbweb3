@@ -108,6 +108,7 @@ func (c HubConfig) template(name string) string {
 func (c HubConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
 func (c HubConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
 func (c HubConfig) nocAgentVolume() string { return c.VolumePrefix + "_noc_agent_cfg" }
+func (c HubConfig) svcTLSVolume() string   { return c.VolumePrefix + "_svc_tls" }
 func (c HubConfig) keycloakPort() int      { return c.RPCPort + 7000 }
 func (c HubConfig) keycloakContainer() string {
 	return c.ContainerPrefix + "-hub-keycloak"
@@ -269,6 +270,10 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"ENTITY_NET_PREFIX":    c.NetPrefix,
 		"ENTITY_VOLUME_PREFIX": c.VolumePrefix,
 		"ENTITY_RPC_PORT":      itoa(c.RPCPort),
+		// R2-H-8 service-mesh mTLS: the hub's service CA + leaf certs, mounted at
+		// /svc-tls in hub-compliance + hub-backend. mTLS activates only when
+		// GRPC_MTLS_ENABLE is exported.
+		"SVC_TLS_VOLUME": c.svcTLSVolume(),
 		// infra: postgres + redis (single DB doubles as the keycloak DB locally)
 		"POSTGRES_USER":     "cbweb3",
 		"POSTGRES_PASSWORD": "cbweb3",
@@ -475,12 +480,21 @@ func FoundHubSteps(c HubConfig) []Step {
 			Run: func(ctx context.Context) error { return c.buildBackendImage(ctx) },
 		},
 		{
+			// R2-H-8 service-mesh mTLS: the hub's service CA + leaf certs (hub
+			// compliance + hub api-gateway). Harmless until GRPC_MTLS_ENABLE is set.
+			Name: "gen-svc-tls-hub",
+			Check: func(ctx context.Context) (bool, error) {
+				return volumeHasFile(ctx, c.Runner, c.svcTLSVolume(), "svc-ca.crt"), nil
+			},
+			Run: func(ctx context.Context) error { return genServiceTLS(ctx, c.Runner, c.svcTLSVolume()) },
+		},
+		{
 			// Compliance holds the GOVERNANCE signer and performs the on-chain
 			// registerParticipant when a spoke self-registers (POST
 			// /internal/v1/spokes/register). Needs the deployed IdentityRegistry
 			// address (render-hub-env) and the shared network (start-besu-hub).
 			Name: "start-hub-compliance",
-			Deps: []string{"render-hub-env", "start-besu-hub"},
+			Deps: []string{"render-hub-env", "start-besu-hub", "gen-svc-tls-hub"},
 			Run: func(ctx context.Context) error {
 				if err := c.buildImage(ctx, hubComplianceImage, "backend/services/compliance/Dockerfile", "backend"); err != nil {
 					return err

@@ -37,6 +37,14 @@ services:
       # Local dev: no spoke reserve lock — bridge-in mints the mirrored asset on the
       # hub (which is the CB's job, delegated via CENTRAL_BANK_API_URL, not here).
       BRIDGE_SKIP_SPOKE_LOCK: "true"
+      # R2-H-8 service-mesh mTLS — the orchestrator is a gRPC server (gateway→PO).
+      # Opt-in via GRPC_MTLS_ENABLE (empty by default → plaintext, unchanged).
+      GRPC_MTLS_CERT_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/payment-orchestrator.crt}"
+      GRPC_MTLS_KEY_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/payment-orchestrator.key}"
+      GRPC_MTLS_CA_FILE: "${GRPC_MTLS_ENABLE:+/svc-tls/svc-ca.crt}"
+      GRPC_AUTHZ_ENFORCE: "${GRPC_AUTHZ_ENFORCE:-}"
+    volumes:
+      - "svc_tls:/svc-tls:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -47,3 +55,9 @@ networks:
   entity_net:
     name: "${ENTITY_NET_PREFIX:?}_net"
     external: true
+
+volumes:
+  # Service-mesh mTLS material shared with the entity backend (same named volume,
+  # seeded by gen-svc-tls). Read-only; consumed only when GRPC_MTLS_ENABLE is set.
+  svc_tls:
+    name: "${SVC_TLS_VOLUME:?}"
