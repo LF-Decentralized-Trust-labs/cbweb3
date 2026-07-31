@@ -116,6 +116,9 @@ type stubRegistry struct{}
 func (s *stubRegistry) RegisterParticipant(_ context.Context, _, _, _ string, _ [32]byte) (string, error) {
 	return "", nil
 }
+func (s *stubRegistry) VerifyParticipant(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
 func (s *stubRegistry) UpdateStatus(_ context.Context, _ string, _ uint8) (string, error) {
 	return "", nil
 }

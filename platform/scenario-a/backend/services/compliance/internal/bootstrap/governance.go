@@ -69,9 +69,12 @@ func EnsureGovernanceParticipant(
 		return fmt.Errorf("bootstrap: upsert governance participant: %w", err)
 	}
 
-	// 4. Register on-chain (best-effort — never fails startup).
-	if _, err := bc.RegisterParticipant(ctx, walletAddr, "Banco Central", "ROLE_GOVERNANCE", [32]byte{}); err != nil {
-		log.Printf("bootstrap: on-chain registration failed (non-fatal): %v", err)
+	// 4. Register + verify on-chain (best-effort — never fails startup). Two-step onboarding
+	// (R1-10.6 / R2-10.6): registerParticipant alone would leave the CB in Pending, so canGovern
+	// would be false and every governance-gated call would revert. EnsureVerifiedParticipant
+	// completes the Pending->Verified promotion and is idempotent across restarts (no demotion).
+	if _, err := registry.EnsureVerifiedParticipant(ctx, bc, walletAddr, "Banco Central", "ROLE_GOVERNANCE", [32]byte{}); err != nil {
+		log.Printf("bootstrap: on-chain register+verify failed (non-fatal): %v", err)
 	}
 
 	// 5. Audit log.

@@ -254,9 +254,12 @@ func (s *complianceService) RegisterParticipantOnChain(ctx context.Context, req 
 			return &compliancv1.RegisterParticipantOnChainResponse{AlreadyRegistered: true}, nil
 		}
 	}
-	txHash, err := s.blockchain.RegisterParticipant(ctx, wallet, req.InstitutionName, role, [32]byte{})
+	// Two-step onboarding (R1-10.6 / R2-10.6): register (Pending) then verify (Verified) so the
+	// wallet can transact. EnsureVerifiedParticipant is idempotent and never demotes an already
+	// transactable wallet.
+	txHash, err := registry.EnsureVerifiedParticipant(ctx, s.blockchain, wallet, req.InstitutionName, role, [32]byte{})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "on-chain registerParticipant: %v", err)
+		return nil, status.Errorf(codes.Internal, "on-chain register+verify participant: %v", err)
 	}
 	// Best-effort DB mirror (never fails the on-chain result).
 	_ = s.repo.UpsertParticipant(ctx, repository.Participant{
@@ -437,8 +440,12 @@ func (s *complianceService) SignParticipantCSR(ctx context.Context, req *complia
 	}
 
 	if existing.WalletAddress != "" {
-		if _, err := s.blockchain.RegisterParticipant(ctx, existing.WalletAddress, institutionName, req.Role, [32]byte{}); err != nil {
-			log.Printf("WARN: SignParticipantCSR: on-chain registration failed (non-fatal): %v", err)
+		// Two-step onboarding (R1-10.6 / R2-10.6), best-effort: register (Pending) then verify
+		// (Verified). EnsureVerifiedParticipant is idempotent and never demotes — this path is
+		// re-run on repeated CSR signings ("may already be approved"), so a live, transactable
+		// wallet is left untouched rather than reset to Pending mid-flight.
+		if _, err := registry.EnsureVerifiedParticipant(ctx, s.blockchain, existing.WalletAddress, institutionName, req.Role, [32]byte{}); err != nil {
+			log.Printf("WARN: SignParticipantCSR: on-chain register+verify failed (non-fatal): %v", err)
 		}
 	}
 

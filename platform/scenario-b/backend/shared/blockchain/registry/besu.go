@@ -147,6 +147,31 @@ func (b *BesuClient) RegisterParticipant(ctx context.Context, wallet, name, role
 	return tx.Hash().Hex(), nil
 }
 
+// VerifyParticipant promotes a Pending participant to Verified on the
+// IdentityRegistry contract (step 2 of the two-step onboarding). The signer must
+// hold VERIFIER_ROLE. Blocks until the transaction is mined or the context is
+// cancelled. Reverts (tx status 0) if the participant is not currently Pending.
+func (b *BesuClient) VerifyParticipant(ctx context.Context, wallet string) (string, error) {
+	opts, err := b.transactOpts(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	account := common.HexToAddress(wallet)
+	// Match RegisterParticipant's explicit gas pin: eth_estimateGas underestimates
+	// this storage-writing call on the local zero-gas QBFT chain, and gas is free.
+	opts.GasLimit = 500000
+
+	tx, err := b.contract.VerifyParticipant(opts, account)
+	if err != nil {
+		return "", fmt.Errorf("registry: verifyParticipant tx: %w", err)
+	}
+	if err := b.waitMined(ctx, tx); err != nil {
+		return tx.Hash().Hex(), fmt.Errorf("registry: verifyParticipant wait: %w", err)
+	}
+	return tx.Hash().Hex(), nil
+}
+
 // UpdateStatus changes the KYC status of a participant on-chain.
 // Blocks until the transaction is mined or the context is cancelled.
 func (b *BesuClient) UpdateStatus(ctx context.Context, wallet string, status uint8) (string, error) {

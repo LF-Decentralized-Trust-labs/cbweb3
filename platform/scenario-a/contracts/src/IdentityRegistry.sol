@@ -114,11 +114,20 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
 
     /// @inheritdoc IIdentityRegistry
     /// @dev Critical for regulatory compliance and account freezing.
-    function updateStatus(address account, IdentityRegistryLibrary.KycStatus newStatus)
-        external
-        override
-        onlyRole(GOVERNANCE_ROLE)
-    {
+    ///      Separation of duties (R1-10.6 / R2-10.6): promoting an account TO Verified is a
+    ///      verification act and is reserved for VERIFIER_ROLE — the same authority gate as
+    ///      verifyParticipant. Every other transition (Suspended / Expired freezing, or
+    ///      Pending to re-open verification) is a governance/regulatory act under GOVERNANCE_ROLE.
+    ///      Without this split a GOVERNANCE_ROLE holder could mint Verified directly through
+    ///      updateStatus, bypassing the two-step onboarding control that registerParticipant +
+    ///      verifyParticipant enforce.
+    function updateStatus(address account, IdentityRegistryLibrary.KycStatus newStatus) external override {
+        if (newStatus == IdentityRegistryLibrary.KycStatus.Verified) {
+            _checkRole(VERIFIER_ROLE);
+        } else {
+            _checkRole(GOVERNANCE_ROLE);
+        }
+
         IdentityRegistryLibrary.KycStatus oldStatus = _participants[account].status;
         _participants[account].status = newStatus;
         // lastUpdate deliberately not written: block.timestamp is nondeterministic across

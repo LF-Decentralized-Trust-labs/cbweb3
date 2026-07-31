@@ -358,8 +358,19 @@ func (s *complianceService) ApproveKYC(ctx context.Context, req *compliancv1.App
 	// while missing on-chain. A Noop client (no governance key / prod-until-KMS) returns
 	// success and skips the write. Replaces the former `cbweb3 register-participant` CLI.
 	if p.WalletAddress != "" {
+		// Two-step onboarding (R1-10.6 / R2-10.6): registerParticipant alone only creates the
+		// participant in Pending, which does NOT pass HTLC's onlyVerified check — the bank's
+		// payment-orchestrator would revert on lock. A follow-up verifyParticipant (VERIFIER_ROLE)
+		// promotes it to Verified. Both are blocking: a failure fails the approval so no bank is
+		// ever marked KYC_APPROVED while not fully onboarded on-chain. Re-approval demotion is not
+		// a concern here — the status precondition above rejects any already-approved/active
+		// participant before this point. The CB governance key holds both roles in local/pilot
+		// (see docs/runbooks/identity-registry-role-separation.md).
 		if _, regErr := s.blockchain.RegisterParticipant(ctx, p.WalletAddress, p.InstitutionName, p.Role, [32]byte{}); regErr != nil {
 			return nil, status.Errorf(codes.Internal, "on-chain participant registration: %v", regErr)
+		}
+		if _, verifyErr := s.blockchain.VerifyParticipant(ctx, p.WalletAddress); verifyErr != nil {
+			return nil, status.Errorf(codes.Internal, "on-chain participant verification: %v", verifyErr)
 		}
 	} else {
 		log.Printf("WARN: ApproveKYC: participant %s has no wallet address — skipping on-chain registration", req.Subject)

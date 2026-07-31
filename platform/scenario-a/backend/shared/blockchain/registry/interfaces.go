@@ -14,6 +14,7 @@ package registry
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 )
 
@@ -48,8 +49,15 @@ type OnChainParticipant struct {
 // RegistryWriter covers write operations on the IdentityRegistry contract.
 type RegistryWriter interface {
 	// RegisterParticipant registers a new participant on-chain with the given
-	// wallet address, legal name, role, and zero-knowledge proof pointer.
+	// wallet address, legal name, role, and zero-knowledge proof pointer. The
+	// participant is created in the Pending state (step 1 of the two-step
+	// onboarding); VerifyParticipant is required before it can transact.
 	RegisterParticipant(ctx context.Context, wallet, name, role string, zkPointer [32]byte) (txHash string, err error)
+
+	// VerifyParticipant promotes a previously registered participant from Pending
+	// to Verified (step 2 of the two-step onboarding). The configured signer must
+	// hold VERIFIER_ROLE. Reverts if the participant is not currently Pending.
+	VerifyParticipant(ctx context.Context, wallet string) (txHash string, err error)
 
 	// UpdateStatus changes the KYC status of an on-chain participant.
 	UpdateStatus(ctx context.Context, wallet string, status uint8) (txHash string, err error)
@@ -73,4 +81,37 @@ type RegistryReader interface {
 	// GetCertFingerprint returns the SHA-256 fingerprint stored on-chain
 	// for the given address. Returns [32]byte{} if not set.
 	GetCertFingerprint(ctx context.Context, address string) ([32]byte, error)
+}
+
+// EnsureVerifiedParticipant runs the full two-step onboarding (register -> verify)
+// for a participant that has already cleared the off-chain compliance flow, so it
+// ends up Verified and able to transact. It is the single choke point services use
+// to onboard on-chain (R1-10.6 / R2-10.6): registerParticipant alone only creates a
+// Pending participant, which cannot transact (HTLC.lock reverts ParticipantNotVerified).
+//
+// It is idempotent and, critically, never demotes: a wallet that can already
+// transact is left untouched (re-running onboarding must not reset a live
+// participant to Pending and revert its in-flight HTLC locks/claims). For a wallet
+// that is registered-but-Pending, it re-registers (harmless — same state) and verifies.
+//
+// The signer must hold GOVERNANCE_ROLE (register) and VERIFIER_ROLE (verify). In
+// single-operator/local-dev the bootstrap admin holds both. In production these
+// SHOULD be separated (see docs/runbooks/identity-registry-role-separation.md); a
+// dedicated verifier signer is the residual required to make that split real
+// end-to-end from the Go services.
+func EnsureVerifiedParticipant(ctx context.Context, w RegistryWriter, wallet, name, role string, zkPointer [32]byte) (txHash string, err error) {
+	// No-demotion idempotency guard: skip entirely if already transactable.
+	if reader, ok := w.(RegistryReader); ok {
+		if can, cerr := reader.CanTransact(ctx, wallet); cerr == nil && can {
+			return "", nil
+		}
+	}
+	if _, err = w.RegisterParticipant(ctx, wallet, name, role, zkPointer); err != nil {
+		return "", err
+	}
+	txHash, err = w.VerifyParticipant(ctx, wallet)
+	if err != nil {
+		return txHash, fmt.Errorf("registry: verify after register for %s: %w", wallet, err)
+	}
+	return txHash, nil
 }

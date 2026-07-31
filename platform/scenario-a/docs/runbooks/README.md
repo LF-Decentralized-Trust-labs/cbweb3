@@ -32,6 +32,7 @@ curl http://localhost:8081/realms/master | jq .realm
 |----------|-------------|
 | [configuration-reference.md](configuration-reference.md) | Complete environment variable reference by component (infra, api-gateway, auth, contracts, frontend, NOC, Paladin) |
 | [contract-configuration.md](contract-configuration.md) | Contract deployment parameters, on-chain roles (IdentityRegistry, tCeBM), Keycloak permissions, PKI, and post-deployment checklist |
+| [identity-registry-role-separation.md](identity-registry-role-separation.md) | Two-step IdentityRegistry onboarding (Pending→Verified), GOVERNANCE_ROLE vs VERIFIER_ROLE separation of duties, and the production role-split runbook (R1-10.6 / R2-10.6) |
 
 ---
 

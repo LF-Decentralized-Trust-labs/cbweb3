@@ -35,6 +35,7 @@ curl http://localhost:8081/realms/master | jq .realm
 |----------|-------------|
 | [configuration-reference.md](configuration-reference.md) | Complete environment variable reference by component: per-entity common vars, hub/AMM-specific vars, MLP vars, Cacti relay vars |
 | [contract-configuration.md](contract-configuration.md) | Contract deployment parameters, hub and spoke contracts, on-chain roles, PairRegistry bilateral approval, AMM circuit breaker, LiquidityCommitRegistry TTL, Keycloak realms, PKI, post-deployment checklist |
+| [identity-registry-role-separation.md](identity-registry-role-separation.md) | Two-step IdentityRegistry onboarding (Pending→Verified), GOVERNANCE_ROLE vs VERIFIER_ROLE separation of duties, and the production role-split runbook (R1-10.6 / R2-10.6) |
 
 ---
 

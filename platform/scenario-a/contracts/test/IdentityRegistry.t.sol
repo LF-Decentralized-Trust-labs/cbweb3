@@ -272,6 +272,34 @@ contract IdentityRegistryTest is Test {
         assertTrue(registry.canTransact(bankA));
     }
 
+    /// @notice Regression (R1-10.6 / R2-10.6): a GOVERNANCE_ROLE holder that is NOT a verifier
+    ///         cannot mint Verified through updateStatus — that bypass would defeat the two-step
+    ///         onboarding control. Promotion to Verified requires VERIFIER_ROLE.
+    function test_UpdateStatus_RevertIf_GovernanceMintsVerified() public {
+        vm.startPrank(admin);
+        registry.grantRole(registry.GOVERNANCE_ROLE(), registrar);
+        registry.grantRole(registry.VERIFIER_ROLE(), verifier);
+        vm.stopPrank();
+
+        // registrar (GOVERNANCE_ROLE only) can register (-> Pending) but cannot promote to Verified.
+        vm.prank(registrar);
+        registry.registerParticipant(
+            bankA, BANK_NAME, IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, ZK_POINTER
+        );
+
+        vm.prank(registrar);
+        vm.expectRevert();
+        registry.updateStatus(bankA, IdentityRegistryLibrary.KycStatus.Verified);
+
+        // Sanity: still not transactable.
+        assertFalse(registry.canTransact(bankA));
+
+        // A VERIFIER_ROLE holder may promote via updateStatus (mirrors verifyParticipant).
+        vm.prank(verifier);
+        registry.updateStatus(bankA, IdentityRegistryLibrary.KycStatus.Verified);
+        assertTrue(registry.canTransact(bankA));
+    }
+
     /// @notice Verifies that a participant left in Pending cannot transact or be whitelisted.
     function test_CanTransact_PendingStatus() public {
         vm.prank(admin);

@@ -16,6 +16,10 @@ func (NoopRegistryClient) RegisterParticipant(_ context.Context, _, _, _ string,
 	return "0x0000000000000000000000000000000000000000000000000000000000000000", nil
 }
 
+func (NoopRegistryClient) VerifyParticipant(_ context.Context, _ string) (string, error) {
+	return "0x0000000000000000000000000000000000000000000000000000000000000000", nil
+}
+
 func (NoopRegistryClient) UpdateStatus(_ context.Context, _ string, _ uint8) (string, error) {
 	return "0x0000000000000000000000000000000000000000000000000000000000000000", nil
 }

@@ -311,9 +311,15 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *authv1.On
 	// static CB_PRIVATE_KEY (StaticKeySigner). Commercial banks do NOT
 	// perform on-chain registration directly; they proxy via CENTRAL_BANK_API_URL.
 	if domain.RequiresOnChain(req.Role) && resp.WalletAddress != "" {
+		// Two-step onboarding (R1-10.6 / R2-10.6): registerParticipant only creates the
+		// participant in Pending; a follow-up verifyParticipant (VERIFIER_ROLE) is required
+		// before it can transact. The CB signer holds both roles (see role-separation runbook).
 		txHash, chainErr := s.blockchainClient.RegisterParticipant(ctx, resp.WalletAddress, displayName, req.Role, [32]byte{})
 		if chainErr != nil {
 			return nil, status.Errorf(codes.Internal, "onboard: on-chain registration: %v", chainErr)
+		}
+		if _, verifyErr := s.blockchainClient.VerifyParticipant(ctx, resp.WalletAddress); verifyErr != nil {
+			return nil, status.Errorf(codes.Internal, "onboard: on-chain verification: %v", verifyErr)
 		}
 		resp.TxHash = txHash
 	}

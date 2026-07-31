@@ -26,12 +26,14 @@ import (
 // recordingRegistry captures RegisterParticipant calls and lets tests force an error.
 type recordingRegistry struct {
 	registry.NoopRegistryClient
-	mu        sync.Mutex
-	calls     int
-	lastAddr  string
-	lastInst  string
-	lastRole  string
-	returnErr error
+	mu           sync.Mutex
+	calls        int
+	verifyCalls  int
+	verifiedAddr string
+	lastAddr     string
+	lastInst     string
+	lastRole     string
+	returnErr    error
 }
 
 func (r *recordingRegistry) RegisterParticipant(_ context.Context, addr, inst, role string, _ [32]byte) (string, error) {
@@ -45,10 +47,28 @@ func (r *recordingRegistry) RegisterParticipant(_ context.Context, addr, inst, r
 	return "0xtx", nil
 }
 
+// VerifyParticipant records the second step of the two-step onboarding (R1-10.6).
+func (r *recordingRegistry) VerifyParticipant(_ context.Context, addr string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.verifyCalls++
+	r.verifiedAddr = addr
+	if r.returnErr != nil {
+		return "", r.returnErr
+	}
+	return "0xverify", nil
+}
+
 func (r *recordingRegistry) callCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.calls
+}
+
+func (r *recordingRegistry) verifyCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.verifyCalls
 }
 
 // errRepo wraps a Repository and forces selected methods to error.
@@ -427,6 +447,11 @@ func TestApproveKYC_RegistersOnChain(t *testing.T) {
 	}
 	if reg.callCount() != 1 {
 		t.Fatalf("expected on-chain registration at approval, got %d", reg.callCount())
+	}
+	// Two-step onboarding (R1-10.6): approval must ALSO verify, or the bank stays Pending
+	// and HTLC.lock reverts ParticipantNotVerified.
+	if reg.verifyCount() != 1 || reg.verifiedAddr != "0xabc" {
+		t.Fatalf("expected verifyParticipant(0xabc) at approval, got count=%d addr=%q", reg.verifyCount(), reg.verifiedAddr)
 	}
 	if reg.lastAddr != "0xabc" || reg.lastRole != "commercial_bank" || reg.lastInst != "Bank A" {
 		t.Errorf("registered wrong participant: addr=%q role=%q inst=%q", reg.lastAddr, reg.lastRole, reg.lastInst)

@@ -59,6 +59,16 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
             revert InvalidIdentityData();
         }
 
+        // lastUpdate is written from block.timestamp on purpose. Unlike Scenario A — whose
+        // IdentityRegistry is deployed INSIDE Pente privacy groups (see the payment-orchestrator
+        // `paladin` adapter and the toolkit's setupBilateralFXAContext) where any block.* value on
+        // an endorsed-state path diverges across endorsers and wedges the private tx — Scenario B's
+        // IdentityRegistry only ever lives on the base hub/spoke ledger. FXAgreement here is
+        // deployed on that same base ledger (CBWeb3Hub.s.sol: `new FXAgreement(identityRegistry)`),
+        // reached via the base-ledger `besu` adapter, and privacy is provided by Zeto/Noto tokens,
+        // not by putting this registry in a group. block.timestamp is therefore deterministic here
+        // and the on-chain audit timestamp is preserved. If this registry is ever deployed in a
+        // Pente group, switch these writes to the Scenario A convention (lastUpdate = 0).
         _participants[account] = IdentityRegistryLibrary.Participant({
             legalName: name,
             role: role,
@@ -119,11 +129,20 @@ contract IdentityRegistry is IIdentityRegistry, AccessControl {
 
     /// @inheritdoc IIdentityRegistry
     /// @dev Critical for regulatory compliance and account freezing.
-    function updateStatus(address account, IdentityRegistryLibrary.KycStatus newStatus)
-        external
-        override
-        onlyRole(GOVERNANCE_ROLE)
-    {
+    ///      Separation of duties (R1-10.6 / R2-10.6): promoting an account TO Verified is a
+    ///      verification act and is reserved for VERIFIER_ROLE — the same authority gate as
+    ///      verifyParticipant. Every other transition (Suspended / Expired freezing, or
+    ///      Pending to re-open verification) is a governance/regulatory act under GOVERNANCE_ROLE.
+    ///      Without this split a GOVERNANCE_ROLE holder could mint Verified directly through
+    ///      updateStatus, bypassing the two-step onboarding control that registerParticipant +
+    ///      verifyParticipant enforce.
+    function updateStatus(address account, IdentityRegistryLibrary.KycStatus newStatus) external override {
+        if (newStatus == IdentityRegistryLibrary.KycStatus.Verified) {
+            _checkRole(VERIFIER_ROLE);
+        } else {
+            _checkRole(GOVERNANCE_ROLE);
+        }
+
         IdentityRegistryLibrary.KycStatus oldStatus = _participants[account].status;
         _participants[account].status = newStatus;
         _participants[account].lastUpdate = block.timestamp;
