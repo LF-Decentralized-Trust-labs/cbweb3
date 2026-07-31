@@ -9,9 +9,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -81,11 +81,15 @@ func NewGRPCAdapter(address string, timeout time.Duration) (*GRPCAdapter, error)
 	dialCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	credOpt, err := authz.ClientDialOptionFromEnv("compliance")
+	if err != nil {
+		return nil, err
+	}
 	//nolint:staticcheck
 	conn, err := grpc.DialContext(
 		dialCtx,
 		address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		credOpt,
 	)
 	if err != nil {
 		return nil, err
@@ -148,6 +152,55 @@ func (a *GRPCAdapter) RegisterParticipant(ctx context.Context, p Participant) er
 	}
 	_, err := a.cc.UpsertParticipant(ctx, &compliancv1.UpsertParticipantRequest{Participant: participant})
 	return err
+}
+
+// RegisterParticipantOnChain registers a wallet on the IdentityRegistry via the
+// compliance service (the compliance signer must hold GOVERNANCE_ROLE). Returns
+// the tx hash (empty when the wallet was already registered) and the
+// already-registered flag. Machine-to-machine self-registration path.
+func (a *GRPCAdapter) RegisterParticipantOnChain(ctx context.Context, walletAddress, institutionName, role, bankCode string) (txHash string, alreadyRegistered bool, err error) {
+	resp, err := a.cc.RegisterParticipantOnChain(ctx, &compliancv1.RegisterParticipantOnChainRequest{
+		WalletAddress:   walletAddress,
+		InstitutionName: institutionName,
+		Role:            role,
+		BankCode:        bankCode,
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return resp.TxHash, resp.AlreadyRegistered, nil
+}
+
+// RegisterCurrencyOnChain asks the hub compliance service to deploy a founding
+// central bank's bridge token (W-token) and register its sovereign currency
+// on-chain. Returns the W-token symbol, deployed token address (empty when
+// already registered), the already-registered flag, and the last tx hash.
+func (a *GRPCAdapter) RegisterCurrencyOnChain(ctx context.Context, currency, cbAddress, spokeID string) (symbol, tokenAddr string, alreadyRegistered bool, txHash string, err error) {
+	resp, err := a.cc.RegisterCurrencyOnChain(ctx, &compliancv1.RegisterCurrencyOnChainRequest{
+		Currency:  currency,
+		CbAddress: cbAddress,
+		SpokeId:   spokeID,
+	})
+	if err != nil {
+		return "", "", false, "", err
+	}
+	return resp.Symbol, resp.TokenAddress, resp.AlreadyRegistered, resp.TxHash, nil
+}
+
+// RegisterPairOnChain asks the hub compliance service to deploy the sovereign-
+// pair AMM over two already-registered W-tokens and register the pair
+// (proposePair + confirmPair). Returns the deployed AMM address (empty when
+// already registered), the already-registered flag, and the last tx hash.
+func (a *GRPCAdapter) RegisterPairOnChain(ctx context.Context, currencyA, currencyB, pairID string) (ammAddr string, alreadyRegistered bool, txHash string, err error) {
+	resp, err := a.cc.RegisterPairOnChain(ctx, &compliancv1.RegisterPairOnChainRequest{
+		CurrencyA: currencyA,
+		CurrencyB: currencyB,
+		PairId:    pairID,
+	})
+	if err != nil {
+		return "", false, "", err
+	}
+	return resp.AmmAddress, resp.AlreadyRegistered, resp.TxHash, nil
 }
 
 // SignParticipantCSR submits a PKCS#10 CSR to the compliance-orchestrator for

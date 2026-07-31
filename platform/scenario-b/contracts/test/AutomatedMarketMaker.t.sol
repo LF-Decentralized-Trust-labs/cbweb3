@@ -10,6 +10,7 @@ import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryLibrary} from "../src/libraries/IdentityRegistryLibrary.sol";
 import {DeployAMM} from "../script/AutomatedMarketMaker.s.sol";
 import {IERC20Errors} from "@openzeppelin-contracts/interfaces/draft-IERC6093.sol";
+import {Math} from "@openzeppelin-contracts/utils/math/Math.sol";
 
 /// @title AutomatedMarketMakerTest
 /// @notice Unit tests for the LP-share AMM: proportional mint/burn, home-currency zap-out
@@ -293,8 +294,7 @@ contract AutomatedMarketMakerTest is Test {
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
 
         uint256 amountOutDesired = 1_000 * 10 ** 18;
-        uint256 baseIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
-        uint256 grossIn = (baseIn * 10000) / (10000 - amm.feeBps()) + 1; // fee-aware max
+        uint256 grossIn = _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired, amm.feeBps());
         uint256 swapperABef = tokenA.balanceOf(swapper);
         uint256 swapperBBef = tokenB.balanceOf(swapper);
 
@@ -314,8 +314,7 @@ contract AutomatedMarketMakerTest is Test {
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
 
         uint256 amountOutDesired = 1_000 * 10 ** 18;
-        uint256 baseIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
-        uint256 grossIn = (baseIn * 10000) / (10000 - amm.feeBps()) + 1;
+        uint256 grossIn = _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired, amm.feeBps());
 
         vm.prank(swapper);
         uint256 actualIn =
@@ -331,8 +330,7 @@ contract AutomatedMarketMakerTest is Test {
         amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
 
         uint256 amountOutDesired = 1_000 * 10 ** 18;
-        uint256 baseIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
-        uint256 grossIn = (baseIn * 10000) / (10000 - amm.feeBps()) + 1;
+        uint256 grossIn = _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired, amm.feeBps());
         uint256 maxAmountIn = grossIn - 1;
 
         vm.prank(swapper);
@@ -365,6 +363,188 @@ contract AutomatedMarketMakerTest is Test {
         amm.swapTokensForExactTokens(address(tokenA), address(tokenB), 0, 100, swapper);
     }
 
+    // ---------- R2-H-3: fee-rounding (single ceiling division) ----------
+
+    /// @dev Correct fee-aware exact-output quote: ONE ceiling division that folds the
+    ///      constant-product input and the fee gross-up. Rounds up exactly once, in favor of the
+    ///      pool. This mirrors `AutomatedMarketMaker.swapTokensForExactTokens` after R2-H-3.
+    function _expectedGrossIn(uint256 reserveIn, uint256 reserveOut, uint256 amountOut, uint256 fee)
+        internal
+        pure
+        returns (uint256)
+    {
+        return Math.mulDiv(reserveIn * amountOut, 10000, (reserveOut - amountOut) * (10000 - fee), Math.Rounding.Ceil);
+    }
+
+    /// @dev Legacy two-step form that rounded up TWICE (the R2-H-3 bug): once in getAmountIn
+    ///      (`+1`) and once in the fee gross-up (`+1`). Used only to prove the corrected charge is
+    ///      never larger and, at zero fee, strictly smaller.
+    function _legacyGrossIn(uint256 reserveIn, uint256 reserveOut, uint256 amountOut, uint256 fee)
+        internal
+        pure
+        returns (uint256)
+    {
+        uint256 baseIn = (reserveIn * amountOut) / (reserveOut - amountOut) + 1;
+        return (baseIn * 10000) / (10000 - fee) + 1;
+    }
+
+    /// @dev R2-H-3 over-charge (zero fee): the charge must be the single-ceiling amount, which is
+    ///      strictly below the old double-rounded amount. FAILS against the buggy contract.
+    function test_R2H3_SwapChargeIsSingleCeiling_NoFee() public {
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        uint256 amountOut = 1_000 * 10 ** 18;
+        uint256 fee = amm.feeBps(); // 0 by default
+        uint256 expected = _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, fee);
+        uint256 legacy = _legacyGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, fee);
+
+        vm.prank(swapper);
+        uint256 actualIn =
+            amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOut, type(uint256).max, swapper);
+
+        assertEq(actualIn, expected, "swap must charge the single-ceiling amount");
+        assertLt(actualIn, legacy, "double round-up removed: strictly less than the legacy charge");
+    }
+
+    /// @dev R2-H-3 over-charge (non-zero fee): corrected charge equals the single-ceiling amount and
+    ///      never exceeds the legacy double-rounded charge, while the fee still accrues to the pool.
+    function test_R2H3_SwapChargeIsSingleCeiling_WithFee() public {
+        vm.prank(governanceA);
+        amm.setFeeBps(30);
+
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        uint256 amountOut = 1_000 * 10 ** 18;
+        uint256 fee = 30;
+        uint256 expected = _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, fee);
+        uint256 legacy = _legacyGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, fee);
+        uint256 kBefore = amm.reserveA() * amm.reserveB();
+
+        vm.prank(swapper);
+        uint256 actualIn =
+            amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOut, type(uint256).max, swapper);
+
+        assertEq(actualIn, expected, "single-ceiling gross including fee");
+        assertLe(actualIn, legacy, "never charges more than the legacy double-rounded amount");
+        assertGt(amm.reserveA() * amm.reserveB(), kBefore, "fee still accrues to the pool (k grows)");
+    }
+
+    /// @dev Invariant baseline: for arbitrary reserves, output and fee, the constant product must
+    ///      never decrease after a swap — rounding always favors the pool. Holds for the buggy and
+    ///      the fixed contract (the fix keeps k monotonic while removing the over-charge).
+    function testFuzz_R2H3_SwapPreservesConstantProduct(
+        uint256 rA,
+        uint256 rB,
+        uint256 amountOut,
+        uint256 fee,
+        bool aToB
+    ) public {
+        rA = bound(rA, 1e12, 1e24);
+        rB = bound(rB, 1e12, 1e24);
+        fee = bound(fee, 0, amm.MAX_FEE_BPS());
+
+        vm.prank(governanceA);
+        amm.setFeeBps(fee);
+
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(rA, rB); // first deposit sets reserves exactly to (rA, rB)
+
+        uint256 reserveOut = aToB ? rB : rA;
+        amountOut = bound(amountOut, 1, reserveOut / 2); // <= 50% of the output reserve keeps input fundable
+
+        TokenizedCentralBankMoney tin = aToB ? tokenA : tokenB;
+        TokenizedCentralBankMoney tout = aToB ? tokenB : tokenA;
+        vm.prank(centralBank);
+        tin.mint(swapper, 1e26); // fund the gross input generously
+
+        uint256 kBefore = amm.reserveA() * amm.reserveB();
+
+        vm.prank(swapper);
+        amm.swapTokensForExactTokens(address(tin), address(tout), amountOut, type(uint256).max, swapper);
+
+        assertGe(amm.reserveA() * amm.reserveB(), kBefore, "k_after >= k_before");
+    }
+
+    /// @dev Bounded over-charge: the charged gross input is the MINIMAL integer that funds the swap
+    ///      plus fee (a single ceiling). Sufficiency `actualIn*D >= N` guarantees k; minimality
+    ///      `(actualIn-1)*D < N` bounds the over-charge to < 1 base unit. FAILS against the buggy
+    ///      contract, whose double round-up charges up to ~2 units too much.
+    /// forge-config: default.fuzz.runs = 10001
+    function testFuzz_R2H3_SwapChargeIsMinimalCeiling(uint256 rA, uint256 rB, uint256 amountOut, uint256 fee, bool aToB)
+        public
+    {
+        rA = bound(rA, 1e12, 1e24);
+        rB = bound(rB, 1e12, 1e24);
+        fee = bound(fee, 0, amm.MAX_FEE_BPS());
+
+        vm.prank(governanceA);
+        amm.setFeeBps(fee);
+
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(rA, rB);
+
+        uint256 reserveIn = aToB ? rA : rB;
+        uint256 reserveOut = aToB ? rB : rA;
+        amountOut = bound(amountOut, 1, reserveOut / 2);
+
+        TokenizedCentralBankMoney tin = aToB ? tokenA : tokenB;
+        TokenizedCentralBankMoney tout = aToB ? tokenB : tokenA;
+        vm.prank(centralBank);
+        tin.mint(swapper, 1e26);
+
+        vm.prank(swapper);
+        uint256 actualIn =
+            amm.swapTokensForExactTokens(address(tin), address(tout), amountOut, type(uint256).max, swapper);
+
+        uint256 n = reserveIn * amountOut * 10000; // fee-adjusted requirement numerator
+        uint256 d = (reserveOut - amountOut) * (10000 - fee); // denominator
+        assertGe(actualIn * d, n, "charge is sufficient (k preserved)");
+        assertLt((actualIn - 1) * d, n, "charge is minimal (over-charge < 1 base unit)");
+
+        // R2-H-3 single source of truth: the public quote view returns the EXACT swap charge, so
+        // off-chain callers can size maxAmountIn from it without ever tripping AMM__SlippageExceeded.
+        assertEq(
+            amm.quoteExactOutput(reserveIn, reserveOut, amountOut, fee),
+            actualIn,
+            "quoteExactOutput mirrors the swap charge exactly"
+        );
+    }
+
+    /// @dev The public quote view equals the swap charge for concrete no-fee and with-fee cases,
+    ///      and its arithmetic matches the fixed single-ceiling helper.
+    function test_R2H3_QuoteExactOutput_MatchesSwapCharge() public {
+        vm.prank(governanceA);
+        amm.setFeeBps(30);
+
+        vm.prank(liquidityProvider);
+        amm.addLiquidity(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY);
+
+        uint256 amountOut = 1_000 * 10 ** 18;
+        uint256 quoted = amm.quoteExactOutput(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, 30);
+        assertEq(
+            quoted, _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOut, 30), "quote == single ceiling"
+        );
+
+        vm.prank(swapper);
+        uint256 actualIn =
+            amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOut, type(uint256).max, swapper);
+        assertEq(quoted, actualIn, "quote == realized swap charge");
+    }
+
+    /// @dev The quote view rejects the same degenerate inputs the swap does, with the same errors,
+    ///      so callers see one consistent contract for both.
+    function test_Revert_QuoteExactOutput_ZeroAmount() public {
+        vm.expectRevert(IAutomatedMarketMaker.AMM__ZeroAmount.selector);
+        amm.quoteExactOutput(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, 0, 30);
+    }
+
+    function test_Revert_QuoteExactOutput_OutputExceedsReserve() public {
+        vm.expectRevert(IAutomatedMarketMaker.AMM__InsufficientLiquidity.selector);
+        amm.quoteExactOutput(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, 30);
+    }
+
     // ---------- Fee accrual to share value ----------
 
     function test_Fees_AccrueToShareValue() public {
@@ -379,8 +559,7 @@ contract AutomatedMarketMakerTest is Test {
         uint256 kBefore = amm.reserveA() * amm.reserveB();
 
         uint256 amountOutDesired = 1_000 * 10 ** 18;
-        uint256 baseIn = amm.getAmountIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired);
-        uint256 grossIn = (baseIn * 10000) / (10000 - amm.feeBps()) + 1;
+        uint256 grossIn = _expectedGrossIn(INITIAL_LIQUIDITY, INITIAL_LIQUIDITY, amountOutDesired, amm.feeBps());
         vm.prank(swapper);
         amm.swapTokensForExactTokens(address(tokenA), address(tokenB), amountOutDesired, grossIn, swapper);
 

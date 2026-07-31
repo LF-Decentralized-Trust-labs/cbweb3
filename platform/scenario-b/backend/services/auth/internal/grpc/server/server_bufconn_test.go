@@ -33,7 +33,10 @@ func TestNew_ServesOverBufconn(t *testing.T) {
 		auditFn: func(_ context.Context, _ complianceclient.AuditEntry) error { return nil },
 	}
 
-	srv := New(kc, &fakeKMS{}, comp, &fakeRegistry{}, "", &fakeNonce{})
+	srv, err := New(kc, &fakeKMS{}, comp, &fakeRegistry{}, "", &fakeNonce{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	lis := bufconn.Listen(1024 * 1024)
 	go func() { _ = srv.Serve(lis) }()

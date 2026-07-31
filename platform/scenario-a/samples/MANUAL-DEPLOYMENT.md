@@ -78,6 +78,10 @@ directory for every command that follows:
 export CBWEB3="$(pwd)/cbweb3"          # absolute path to the binary just built
 cd ../samples                          # working directory for all steps below
 export CBWEB3_HOME="$(cd .. && pwd)"   # Scenario A root (robust template/script resolution)
+# Single host: every entity's advertisedHost is a per-entity container alias (not a
+# real cross-VM host), so force the container-name Paladin transport + derived gRPC
+# ports — otherwise the entities collide on the fixed peer port 9000.
+export CBWEB3_SINGLE_HOST=1
 ```
 
 ### Where the join bundles are written

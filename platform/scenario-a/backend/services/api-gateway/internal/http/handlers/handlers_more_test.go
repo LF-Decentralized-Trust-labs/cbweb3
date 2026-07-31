@@ -413,8 +413,8 @@ func (s fullGovernanceStub) GetAuditLogs(context.Context, string, string, string
 func (s fullGovernanceStub) GetCircuitBreakerStatus(context.Context) (complianceadapter.CircuitBreakerStatus, error) {
 	return complianceadapter.CircuitBreakerStatus{}, s.err
 }
-func (s fullGovernanceStub) ToggleCircuitBreaker(context.Context, bool, string) (bool, error) {
-	return true, s.err
+func (s fullGovernanceStub) ToggleCircuitBreaker(context.Context, bool, string) (bool, string, error) {
+	return true, "0xtxhash", s.err
 }
 func (s fullGovernanceStub) GetSystemParameters(context.Context) (complianceadapter.SystemParameters, error) {
 	return complianceadapter.SystemParameters{}, s.err

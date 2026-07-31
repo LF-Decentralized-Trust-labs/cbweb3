@@ -203,6 +203,46 @@ contract PairRegistryTest is Test {
         assertEq(active.length, 2);
     }
 
+    // ──────────────────────── getAllPairs ─────────────────────────────
+
+    /// @notice getAllPairs returns every pair, including PROPOSED ones (no status filter).
+    function test_getAllPairs_includesProposed() public {
+        address fakeAMM2 = makeAddr("fakeAMM2");
+
+        // Propose BRL-USD and BRL-ARS
+        vm.prank(cbBRL);
+        pairRegistry.proposePair("BRL-USD", address(tokenBRL), address(tokenUSD), fakeAMM);
+        vm.prank(cbBRL);
+        pairRegistry.proposePair("BRL-ARS", address(tokenBRL), address(tokenARS), fakeAMM2);
+
+        // Confirm only BRL-USD; BRL-ARS stays PROPOSED
+        vm.prank(cbUSD);
+        pairRegistry.confirmPair("BRL-USD");
+
+        PairRegistry.PairEntry[] memory all = pairRegistry.getAllPairs();
+        assertEq(all.length, 2);
+
+        // getAllActivePairs would drop BRL-ARS; getAllPairs must keep it.
+        bool sawProposed;
+        bool sawActive;
+        for (uint256 i; i < all.length; ++i) {
+            if (keccak256(bytes(all[i].pairId)) == keccak256("BRL-ARS")) {
+                sawProposed = all[i].status == PairRegistry.PairStatus.PROPOSED;
+            }
+            if (keccak256(bytes(all[i].pairId)) == keccak256("BRL-USD")) {
+                sawActive = all[i].status == PairRegistry.PairStatus.ACTIVE;
+            }
+        }
+        assertTrue(sawProposed, "PROPOSED pair must be returned by getAllPairs");
+        assertTrue(sawActive, "ACTIVE pair must be returned by getAllPairs");
+    }
+
+    /// @notice getAllPairs returns an empty array when no pairs are registered.
+    function test_getAllPairs_emptyWhenNone() public view {
+        PairRegistry.PairEntry[] memory all = pairRegistry.getAllPairs();
+        assertEq(all.length, 0);
+    }
+
     // ─────────────────── getPair / constructor ────────────────────────
 
     /// @notice getPair reverts for an unknown pairId.

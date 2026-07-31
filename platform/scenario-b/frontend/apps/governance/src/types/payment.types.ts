@@ -27,11 +27,26 @@ export function currencyFromTokenSymbol(tokenSymbol: string | null | undefined):
   return fiatHasSymbol ? fiatUnitLabel : "";
 }
 
-// tCeBMUnitLabel renders "tCeBM (BRL)" / "tCeBM (ARS)" for the spoke's own token, with the
-// currency sourced from the on-chain token symbol (see currencyFromTokenSymbol).
+// tokenPrefixFromSymbol extracts the token part of an on-chain ERC-20 symbol — the
+// segment BEFORE the last underscore: "tCeBM_BRL" -> "tCeBM", "W-tCeBM_ARS" -> "W-tCeBM".
+// A spoke may deploy a custom symbol (spec.spoke.tokenSymbol), so the prefix is read from
+// the contract instead of assumed. Empty when no symbol is available yet.
+export function tokenPrefixFromSymbol(tokenSymbol?: string | null): string {
+  const s = tokenSymbol?.trim();
+  if (!s) return "";
+  const idx = s.lastIndexOf("_");
+  return idx > 0 ? s.slice(0, idx) : s;
+}
+
+// tCeBMUnitLabel renders "tCeBM (BRL)" / "tCeBM (ARS)" for the spoke's own token — and
+// "ztCeBM (ARS)" when that spoke deployed a custom symbol. BOTH the prefix and the currency
+// are sourced from the on-chain token symbol (see currencyFromTokenSymbol /
+// tokenPrefixFromSymbol); "tCeBM" is only the fallback asset-class name for when the
+// balance response has not arrived.
 export function tCeBMUnitLabel(tokenSymbol?: string | null): string {
   const code = currencyFromTokenSymbol(tokenSymbol);
-  return code ? `tCeBM (${code})` : "tCeBM";
+  const prefix = tokenPrefixFromSymbol(tokenSymbol) || "tCeBM";
+  return code ? `${prefix} (${code})` : prefix;
 }
 
 export type PaymentStatus = (typeof PaymentStatus)[keyof typeof PaymentStatus];

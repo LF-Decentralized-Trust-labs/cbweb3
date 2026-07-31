@@ -18,7 +18,13 @@ import {
   toast,
 } from "@cbweb3/ui";
 import { useEffect, useState } from "react";
+import { registryApi } from "../services/api";
 import { useTransferLimitsStore } from "../stores";
+
+const SELECT_CLASS =
+  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50";
+
+type ParticipantOption = { bankCode: string; name: string; status: string };
 
 function formatAmount(amount: string, currency: string): string {
   const num = parseFloat(amount);
@@ -28,15 +34,23 @@ function formatAmount(amount: string, currency: string): string {
 }
 
 export function TransferLimitsPage() {
-  const { limits, status, error, fetch, create, remove } = useTransferLimitsStore();
+  const { limits, sovereignCurrency, status, error, fetch, create, remove } = useTransferLimitsStore();
 
   const [participantId, setParticipantId] = useState("");
-  const [currency, setCurrency] = useState("");
   const [maxAmount, setMaxAmount] = useState("");
+  const [participants, setParticipants] = useState<ParticipantOption[]>([]);
 
   useEffect(() => {
     void fetch();
+    registryApi
+      .listParticipants()
+      .then(setParticipants)
+      .catch(() => setParticipants([]));
   }, [fetch]);
+
+  // A CB only sets limits in its own currency; show the human code (e.g. "COP" from
+  // "tCeBM_COP") read-only. The backend defaults the currency to the sovereign one.
+  const currencyLabel = sovereignCurrency ? sovereignCurrency.split("_").pop() || sovereignCurrency : "—";
 
   const onSubmit = async () => {
     if (!maxAmount.trim()) {
@@ -46,12 +60,10 @@ export function TransferLimitsPage() {
     try {
       await create({
         participant_id: participantId.trim() || undefined,
-        currency: currency.trim() || undefined,
         max_amount: maxAmount.trim(),
       });
       toast.success("Transfer limit created");
       setParticipantId("");
-      setCurrency("");
       setMaxAmount("");
     } catch {
       // error is set in store
@@ -69,28 +81,32 @@ export function TransferLimitsPage() {
         <CardHeader>
           <CardTitle>New Transfer Limit</CardTitle>
           <CardDescription>
-            Set a daily transfer limit for a participant and/or currency. Leave a field blank to apply the limit
-            broadly.
+            Set a daily transfer limit for a participant. Leave participant blank to apply broadly. Limits always
+            apply in your spoke&apos;s sovereign currency.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
           <div className="space-y-2">
-            <Label htmlFor="participant">Participant ID</Label>
-            <Input
+            <Label htmlFor="participant">Participant</Label>
+            <select
               id="participant"
+              className={SELECT_CLASS}
               value={participantId}
               onChange={(e) => setParticipantId(e.target.value)}
-              placeholder="bank-a (leave blank for all)"
-            />
+            >
+              <option value="">All participants</option>
+              {participants.map((p) => (
+                <option key={p.bankCode} value={p.bankCode}>
+                  {p.name} ({p.bankCode})
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">Registered banks on your spoke.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="currency">Currency</Label>
-            <Input
-              id="currency"
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-              placeholder="BRL (leave blank for all)"
-            />
+            <Input id="currency" value={currencyLabel} readOnly title={sovereignCurrency || undefined} />
+            <p className="text-xs text-muted-foreground">Your spoke&apos;s sovereign currency (fixed).</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="max-amount">Daily Max Amount</Label>

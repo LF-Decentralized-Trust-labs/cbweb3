@@ -211,7 +211,10 @@ func (s *paymentOrchestratorService) RequestRedeem(ctx context.Context, req *pb.
 	return &pb.RequestRedeemResponse{RedeemId: id}, nil
 }
 
-// ApproveRedeem mints tCeBM back to the commercial bank on Besu.
+// ApproveRedeem approves a redeem (de-tokenization) request: it burns tCeBM from the
+// commercial bank's address and mints the equivalent fCeBM (fiat) back to the same
+// address. This is the exact inverse of ApproveEscrow (fCeBM → tCeBM); redeeming must
+// DECREASE the caller's tCeBM balance, never mint more of it.
 func (s *paymentOrchestratorService) ApproveRedeem(ctx context.Context, req *pb.ApproveRedeemRequest) (*pb.ApproveRedeemResponse, error) {
 	if req.RedeemId == "" {
 		return nil, status.Error(codes.InvalidArgument, "redeem_id is required")
@@ -231,21 +234,32 @@ func (s *paymentOrchestratorService) ApproveRedeem(ctx context.Context, req *pb.
 	if s.token == nil {
 		return nil, status.Error(codes.Unavailable, "tCeBM token adapter not configured")
 	}
+	if s.fiat == nil {
+		return nil, status.Error(codes.Unavailable, "fCeBM token adapter not configured")
+	}
 
-	s.logger.Info("minting tCeBM for redeem", "to", record.RequesterBesuAddress, "amount", record.Amount)
-	txHash, err := s.token.Mint(ctx, record.RequesterBesuAddress, record.Amount)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "tCeBM mint: %v", err)
+	// Step 1: burn tCeBM from the commercial bank's address (de-tokenization).
+	s.logger.Info("burning tCeBM for redeem", "from", record.RequesterBesuAddress, "amount", record.Amount)
+	burnTxHash, burnErr := s.token.Burn(ctx, record.RequesterBesuAddress, record.Amount)
+	if burnErr != nil {
+		return nil, status.Errorf(codes.Internal, "tCeBM burn: %v", burnErr)
+	}
+
+	// Step 2: mint the equivalent fCeBM (fiat) back to the commercial bank's address.
+	s.logger.Info("minting fCeBM for redeem", "to", record.RequesterBesuAddress, "amount", record.Amount)
+	fiatMintTxHash, mintErr := s.fiat.Mint(ctx, record.RequesterBesuAddress, record.Amount)
+	if mintErr != nil {
+		return nil, status.Errorf(codes.Internal, "fCeBM mint: %v", mintErr)
 	}
 
 	record.Status = domain.RedeemStatusApproved
-	record.MintTxHash = txHash
+	record.MintTxHash = fiatMintTxHash
 	if err := s.escrowRepo.UpdateRedeem(ctx, record); err != nil {
 		return nil, status.Errorf(codes.Internal, "update redeem: %v", err)
 	}
 
-	s.logger.Info("redeem approved", "redeem_id", req.RedeemId, "mint_tx_hash", txHash)
-	return &pb.ApproveRedeemResponse{MintTxHash: txHash}, nil
+	s.logger.Info("redeem approved", "redeem_id", req.RedeemId, "tcebm_burn_tx_hash", burnTxHash, "fiat_mint_tx_hash", fiatMintTxHash)
+	return &pb.ApproveRedeemResponse{MintTxHash: fiatMintTxHash}, nil
 }
 
 // RejectRedeem rejects a pending redeem request.

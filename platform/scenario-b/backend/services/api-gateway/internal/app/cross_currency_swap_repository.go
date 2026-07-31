@@ -8,6 +8,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"gorm.io/gorm"
@@ -51,6 +52,44 @@ func (r *crossCurrencySwapRepository) FindByCorrelationID(ctx context.Context, c
 	return ops, err
 }
 
+// ListByPayer returns a page of swap operations initiated by payerBankID, newest first,
+// optionally bounded by [from, to] on created_at (nil = unbounded on that side). It also
+// returns the total row count matching the filter (for pagination). limit<=0 defaults to
+// 20; offset<0 becomes 0.
+func (r *crossCurrencySwapRepository) ListByPayer(
+	ctx context.Context,
+	payerBankID string,
+	from, to *time.Time,
+	limit, offset int,
+) ([]domain.CrossCurrencySwapOperation, int64, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	q := r.db.WithContext(ctx).
+		Model(&domain.CrossCurrencySwapOperation{}).
+		Where("payer_bank_id = ?", payerBankID)
+	if from != nil {
+		q = q.Where("created_at >= ?", *from)
+	}
+	if to != nil {
+		q = q.Where("created_at <= ?", *to)
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var ops []domain.CrossCurrencySwapOperation
+	if err := q.Order("created_at DESC").Limit(limit).Offset(offset).Find(&ops).Error; err != nil {
+		return nil, 0, err
+	}
+	return ops, total, nil
+}
+
 // UpdateStatus updates the status field of a CrossCurrencySwapOperation.
 func (r *crossCurrencySwapRepository) UpdateStatus(ctx context.Context, swapID string, status domain.SwapOperationStatus) error {
 	return r.db.WithContext(ctx).
@@ -87,6 +126,24 @@ func (r *crossCurrencySwapRepository) UpdateBridgeOutPositionID(ctx context.Cont
 		Model(&domain.CrossCurrencySwapOperation{}).
 		Where("swap_id = ?", swapID).
 		Update("bridge_out_position_id", positionID).Error
+}
+
+// UpdateResidue persists the outcome of the residue return (MaxAmountIn − realized amount_in)
+// in a single UPDATE. It deliberately does not touch `status`: the payment is already final
+// when the residue is handled, so a failed return records RETURN_FAILED for reconciliation
+// without reopening a COMPLETED swap.
+func (r *crossCurrencySwapRepository) UpdateResidue(ctx context.Context, swapID, amount, positionID string, status domain.ResidueReturnStatus) error {
+	updates := map[string]interface{}{
+		"residue_amount": amount,
+		"residue_status": status,
+	}
+	if positionID != "" {
+		updates["residue_position_id"] = positionID
+	}
+	return r.db.WithContext(ctx).
+		Model(&domain.CrossCurrencySwapOperation{}).
+		Where("swap_id = ?", swapID).
+		Updates(updates).Error
 }
 
 // UpdateFailureReason sets the failure_reason field when status=FAILED.

@@ -65,8 +65,8 @@ func main() {
 	if cactiAuthSecret == "" {
 		log.Fatal("FATAL: INTERNAL_RELAY_AUTH_SECRET is required")
 	}
-	relay := cacti.NewCactiRelay(cactiURL, cactiAuthSecret, logger)
-	logger.Info("cacti relay configured", "url", cactiURL)
+	// The relay is constructed below, after the shared DB is opened, so it can be
+	// given a durable watermark store (finding R2-H-11).
 
 	// Shared Besu config — used by HTLC, FiatToken, and FXAgreement adapters.
 	besuRPC := os.Getenv("BESU_RPC_URL")
@@ -193,6 +193,15 @@ func main() {
 		sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	}
 	logger.Info("database connection established", "dsn_source", "DATABASE_URL|FX_POSTGRES_DSN")
+
+	// Durable relay event-cursor store: lets the Cacti poller resume from the last
+	// processed timestamp after a restart instead of resetting to now (R2-H-11).
+	watermarkStore, err := repository.NewGormRelayWatermarkStoreFromDB(sharedDB)
+	if err != nil {
+		log.Fatalf("FATAL: relay watermark store: %v", err)
+	}
+	relay := cacti.NewCactiRelay(cactiURL, cactiAuthSecret, watermarkStore, logger)
+	logger.Info("cacti relay configured", "url", cactiURL)
 
 	fxRepo, err := repository.NewGormFXAgreementRepositoryFromDB(sharedDB)
 	if err != nil {

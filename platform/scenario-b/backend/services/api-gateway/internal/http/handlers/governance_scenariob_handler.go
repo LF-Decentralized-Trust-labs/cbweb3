@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"context"
+	"log"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	"github.com/gofiber/fiber/v2"
@@ -19,14 +20,48 @@ type CircuitBreakerServiceIface interface {
 	GetStatus(ctx context.Context, pair string) (*services.CircuitBreakerStatus, error)
 }
 
+// CircuitBreakerSigner produces the off-chain institutional attestation for a circuit
+// breaker action, signed with this Central Bank's own key. Implemented by relayauth.Signer.
+type CircuitBreakerSigner interface {
+	SignAttestation(message string) ([]byte, error)
+}
+
 // GovernanceScenarioBHandler handles Circuit Breaker governance endpoints.
 type GovernanceScenarioBHandler struct {
-	cbSvc CircuitBreakerServiceIface
+	cbSvc  CircuitBreakerServiceIface
+	signer CircuitBreakerSigner
 }
 
 // NewGovernanceScenarioBHandler creates a GovernanceScenarioBHandler.
 func NewGovernanceScenarioBHandler(cbSvc CircuitBreakerServiceIface) *GovernanceScenarioBHandler {
 	return &GovernanceScenarioBHandler{cbSvc: cbSvc}
+}
+
+// WithSigner attaches the CB key so the handler generates the institutional attestation
+// server-side (operators never supply a signature). When nil, the attestation is empty —
+// on-chain authorization is unaffected (it is the signer address / msg.sender).
+func (h *GovernanceScenarioBHandler) WithSigner(s CircuitBreakerSigner) *GovernanceScenarioBHandler {
+	h.signer = s
+	return h
+}
+
+// attest builds the canonical action message and signs it with the CB key. Returns nil
+// (and logs) when no signer is configured or signing fails — the action still proceeds;
+// on-chain auth does not depend on this blob.
+func (h *GovernanceScenarioBHandler) attest(parts ...string) []byte {
+	if h.signer == nil {
+		return nil
+	}
+	msg := "circuit-breaker"
+	for _, p := range parts {
+		msg += "|" + p
+	}
+	sig, err := h.signer.SignAttestation(msg)
+	if err != nil {
+		log.Printf("[circuit-breaker] attestation signing failed: %v", err)
+		return nil
+	}
+	return sig
 }
 
 // PauseCircuitBreaker handles POST /api/v2/governance/circuit-breaker/pause (1-of-N).
@@ -35,7 +70,6 @@ func (h *GovernanceScenarioBHandler) PauseCircuitBreaker(c *fiber.Ctx) error {
 		Pair       string `json:"pair"`
 		BankID     string `json:"bank_id"`
 		ReasonCode string `json:"reason_code"`
-		Signature  []byte `json:"signature"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
@@ -44,7 +78,10 @@ func (h *GovernanceScenarioBHandler) PauseCircuitBreaker(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "pair, bank_id, reason_code required"})
 	}
 
-	if err := h.cbSvc.Pause(c.Context(), req.Pair, req.BankID, req.ReasonCode, req.Signature); err != nil {
+	// Institutional attestation is generated server-side with the CB key (never supplied
+	// by the client). On-chain authorization is the gateway signer address.
+	signature := h.attest("pause", req.Pair, req.BankID, req.ReasonCode)
+	if err := h.cbSvc.Pause(c.Context(), req.Pair, req.BankID, req.ReasonCode, signature); err != nil {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"state": "HALTED", "pair": req.Pair})
@@ -53,15 +90,15 @@ func (h *GovernanceScenarioBHandler) PauseCircuitBreaker(c *fiber.Ctx) error {
 // ProposeResume handles POST /api/v2/governance/circuit-breaker/resume-request.
 func (h *GovernanceScenarioBHandler) ProposeResume(c *fiber.Ctx) error {
 	var req struct {
-		Pair      string `json:"pair"`
-		BankID    string `json:"bank_id"`
-		Signature []byte `json:"signature"`
+		Pair   string `json:"pair"`
+		BankID string `json:"bank_id"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
-	requestID, err := h.cbSvc.ProposeResume(c.Context(), req.Pair, req.BankID, req.Signature)
+	signature := h.attest("resume-propose", req.Pair, req.BankID)
+	requestID, err := h.cbSvc.ProposeResume(c.Context(), req.Pair, req.BankID, signature)
 	if err != nil {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -74,13 +111,13 @@ func (h *GovernanceScenarioBHandler) SignResume(c *fiber.Ctx) error {
 		Pair      string `json:"pair"`
 		RequestID string `json:"request_id"`
 		BankID    string `json:"bank_id"`
-		Signature []byte `json:"signature"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
-	if err := h.cbSvc.SignResume(c.Context(), req.Pair, req.RequestID, req.BankID, req.Signature); err != nil {
+	signature := h.attest("resume-sign", req.Pair, req.RequestID, req.BankID)
+	if err := h.cbSvc.SignResume(c.Context(), req.Pair, req.RequestID, req.BankID, signature); err != nil {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error":      err.Error(),
 			"error_code": "CIRCUIT_BREAKER_RESUME_DISPUTED",

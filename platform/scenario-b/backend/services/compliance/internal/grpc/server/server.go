@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +19,7 @@ import (
 	compliancepki "github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/pki"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance/internal/repository"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -35,14 +38,27 @@ type complianceService struct {
 
 // New builds a configured gRPC server with all compliance handlers.
 // bc may be nil; when nil, a NoopRegistryClient is used (dev/test mode).
-func New(repo repository.Repository, ca *compliancepki.CA, bc registry.RegistryWriter) *grpc.Server {
+//
+// R2-H-8: the server installs authorization interceptors (and mutual TLS when the
+// GRPC_MTLS_* env vars are set). With nothing set it runs in audit mode with NO
+// caller authentication so existing plaintext callers keep working; the
+// x-caller-identity header is trusted only under GRPC_AUTHZ_ALLOW_HEADER_IDENTITY
+// (transitional). GRPC_AUTHZ_ENFORCE (which requires mTLS) rejects unauthenticated
+// callers. An error is returned on a fail-open misconfiguration (partial mTLS
+// material, or enforcement requested without mTLS).
+func New(repo repository.Repository, ca *compliancepki.CA, bc registry.RegistryWriter) (*grpc.Server, error) {
 	if bc == nil {
 		bc = registry.NoopRegistryClient{}
 	}
 	svc := &complianceService{repo: repo, ca: ca, blockchain: bc}
-	grpcServer := grpc.NewServer()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	serverOpts, err := authz.ServerOptionsFromEnv(logger, nil)
+	if err != nil {
+		return nil, fmt.Errorf("configure gRPC security: %w", err)
+	}
+	grpcServer := grpc.NewServer(serverOpts...)
 	compliancv1.RegisterComplianceServiceServer(grpcServer, svc)
-	return grpcServer
+	return grpcServer, nil
 }
 
 // --- Participant ---
@@ -216,6 +232,149 @@ func (s *complianceService) IssueParticipantCertificate(ctx context.Context, req
 	}, nil
 }
 
+// RegisterParticipantOnChain registers a wallet on the IdentityRegistry directly
+// (the configured signer must hold GOVERNANCE_ROLE). It is the machine-to-machine
+// self-registration path — no CSR nor prior DB record required — used e.g. by a
+// founding central bank registering its spoke on the neutral hub. Idempotent:
+// skips when the wallet can already transact. Mirrors the participant into the
+// repo for audit (best-effort).
+func (s *complianceService) RegisterParticipantOnChain(ctx context.Context, req *compliancv1.RegisterParticipantOnChainRequest) (*compliancv1.RegisterParticipantOnChainResponse, error) {
+	wallet := strings.TrimSpace(req.WalletAddress)
+	if wallet == "" {
+		return nil, status.Error(codes.InvalidArgument, "wallet_address is required")
+	}
+	role := strings.TrimSpace(req.Role)
+	if role == "" {
+		role = "ROLE_CENTRAL_BANK"
+	}
+	// Idempotent: an already-transacting wallet is treated as registered. The
+	// live Besu client also implements RegistryReader; the noop client does not.
+	if reader, ok := s.blockchain.(registry.RegistryReader); ok {
+		if can, err := reader.CanTransact(ctx, wallet); err == nil && can {
+			return &compliancv1.RegisterParticipantOnChainResponse{AlreadyRegistered: true}, nil
+		}
+	}
+	txHash, err := s.blockchain.RegisterParticipant(ctx, wallet, req.InstitutionName, role, [32]byte{})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "on-chain registerParticipant: %v", err)
+	}
+	// Best-effort DB mirror (never fails the on-chain result).
+	_ = s.repo.UpsertParticipant(ctx, repository.Participant{
+		UserID:          wallet,
+		InstitutionName: req.InstitutionName,
+		Role:            role,
+		Status:          "ACTIVE",
+		WalletAddress:   wallet,
+		BankCode:        req.BankCode,
+	})
+	return &compliancv1.RegisterParticipantOnChainResponse{TxHash: txHash}, nil
+}
+
+// currencyRegistrar is the subset of the live Besu client used for sovereign
+// currency registration. It is satisfied by the concrete *registry.BesuClient
+// but NOT by the noop client, so a type assertion lets the RPC degrade
+// gracefully (codes.Unimplemented) in dev/test mode.
+type currencyRegistrar interface {
+	RegisterCurrency(ctx context.Context, tokenName, tokenSymbol, countryName, proposerCB, cbAddress string) (tokenAddr string, txHash string, err error)
+	IsCurrencyRegistered(ctx context.Context, symbol string) (bool, error)
+	CurrencyTokenAddress(ctx context.Context, symbol string) (string, error)
+}
+
+// RegisterCurrencyOnChain deploys a founding central bank's bridge token
+// (W-token) and registers its sovereign currency on-chain. Mirrors
+// RegisterParticipantOnChain: the hub compliance signer (hub admin == the CB in
+// local) performs the on-chain work. Idempotent by W-token symbol.
+func (s *complianceService) RegisterCurrencyOnChain(ctx context.Context, req *compliancv1.RegisterCurrencyOnChainRequest) (*compliancv1.RegisterCurrencyOnChainResponse, error) {
+	cbAddress := strings.TrimSpace(req.CbAddress)
+	if cbAddress == "" {
+		return nil, status.Error(codes.InvalidArgument, "cb_address is required")
+	}
+	currency := strings.TrimSpace(req.Currency)
+	if currency == "" {
+		return nil, status.Error(codes.InvalidArgument, "currency is required")
+	}
+
+	symbol := "W-tCeBM_" + currency
+	name := "Wrapped tCeBM " + currency
+	country := "Sovereign " + currency
+	proposerCB := strings.TrimSpace(req.SpokeId)
+	if proposerCB == "" {
+		proposerCB = currency
+	}
+
+	// The blockchain field is a write-only RegistryWriter; the currency methods
+	// live on the concrete Besu client only. The noop client does not implement
+	// currencyRegistrar → return Unimplemented in dev/test mode.
+	reg, ok := s.blockchain.(currencyRegistrar)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "currency registration is not available (no on-chain signer configured)")
+	}
+
+	// Idempotent: skip when the currency is already registered on-chain — but still
+	// resolve + return the token address so callers can wire W_TOKEN_ADDRESS on re-runs.
+	if already, err := reg.IsCurrencyRegistered(ctx, symbol); err == nil && already {
+		addr, _ := reg.CurrencyTokenAddress(ctx, symbol)
+		return &compliancv1.RegisterCurrencyOnChainResponse{Symbol: symbol, TokenAddress: addr, AlreadyRegistered: true}, nil
+	}
+
+	tokenAddr, txHash, err := reg.RegisterCurrency(ctx, name, symbol, country, proposerCB, cbAddress)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "on-chain registerCurrency: %v", err)
+	}
+	return &compliancv1.RegisterCurrencyOnChainResponse{
+		Symbol:       symbol,
+		TokenAddress: tokenAddr,
+		TxHash:       txHash,
+	}, nil
+}
+
+// pairRegistrar is the subset of the live Besu client used for sovereign-pair
+// registration (deploy AMM + proposePair + confirmPair). Satisfied by the
+// concrete *registry.BesuClient but not the noop client.
+type pairRegistrar interface {
+	RegisterPair(ctx context.Context, symbolA, symbolB, pairID string) (ammAddr string, txHash string, err error)
+	IsPairRegistered(ctx context.Context, pairID string) (bool, error)
+}
+
+// RegisterPairOnChain deploys the sovereign-pair AMM over the two already-
+// registered W-tokens and registers the pair (proposePair + confirmPair) via the
+// hub compliance signer. Idempotent by pair id. Mirrors RegisterCurrencyOnChain.
+func (s *complianceService) RegisterPairOnChain(ctx context.Context, req *compliancv1.RegisterPairOnChainRequest) (*compliancv1.RegisterPairOnChainResponse, error) {
+	ca := strings.TrimSpace(req.CurrencyA)
+	cb := strings.TrimSpace(req.CurrencyB)
+	if ca == "" || cb == "" {
+		return nil, status.Error(codes.InvalidArgument, "currency_a and currency_b are required")
+	}
+	pairID := strings.TrimSpace(req.PairId)
+	if pairID == "" {
+		// Convention W-{source}-W-{target} — must match the swap/quote path
+		// (swap_quote_generator builds "W-%s-W-%s"), else the on-chain per-pair
+		// resolver misses the pool.
+		pairID = "W-" + ca + "-W-" + cb
+	}
+	symbolA := "W-tCeBM_" + ca
+	symbolB := "W-tCeBM_" + cb
+
+	reg, ok := s.blockchain.(pairRegistrar)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "pair registration is not available (no on-chain signer configured)")
+	}
+
+	// Idempotent: skip when the pair already exists on-chain.
+	if already, err := reg.IsPairRegistered(ctx, pairID); err == nil && already {
+		return &compliancv1.RegisterPairOnChainResponse{AlreadyRegistered: true}, nil
+	}
+
+	ammAddr, txHash, err := reg.RegisterPair(ctx, symbolA, symbolB, pairID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "on-chain registerPair: %v", err)
+	}
+	return &compliancv1.RegisterPairOnChainResponse{
+		AmmAddress: ammAddr,
+		TxHash:     txHash,
+	}, nil
+}
+
 // SignParticipantCSR signs a PKCS#10 CSR submitted by a participant, updates
 // only the certificate fields in the participant record, and (best-effort)
 // registers on the blockchain using the wallet address set during onboarding.
@@ -345,7 +504,7 @@ func (s *complianceService) ApproveKYC(ctx context.Context, req *compliancv1.App
 		"status": string(domain.StatusKYCApproved),
 		"reason": req.Reason,
 	})
-	s.emitAudit(ctx, "KYC_APPROVED", req.ActorSubject, "", req.Subject,
+	s.emitAudit(ctx, "KYC_APPROVED", actorForAudit(ctx, req.ActorSubject), "", req.Subject,
 		correlationIDFromCtx(ctx), ipAddressFromCtx(ctx), "SUCCESS",
 		string(domain.CategoryCredential), string(domain.SeverityInfo), string(detailsJSON))
 
@@ -460,10 +619,9 @@ func (s *complianceService) UpdateSystemParameters(ctx context.Context, req *com
 	if req.Reason == "" {
 		return nil, status.Error(codes.InvalidArgument, "reason is required")
 	}
-	actor := req.ActorSubject
-	if actor == "" {
-		actor = actorFromCtx(ctx)
-	}
+	// R2-H-8: prefer the authenticated caller identity over the payload actor,
+	// which is spoofable.
+	actor := actorForAudit(ctx, req.ActorSubject)
 
 	params := []repository.SystemParameter{
 		{Key: paramTxMinimum, Value: req.TransactionMinimum, UpdatedBy: actor},
@@ -528,13 +686,32 @@ func ipAddressFromCtx(ctx context.Context) string {
 	return ""
 }
 
+// actorFromCtx returns the caller identity for audit attribution. It prefers the
+// identity authenticated by the gRPC authz interceptor (mTLS peer certificate, or
+// the trusted metadata header in transitional mode); only when no authenticated
+// identity is present does it fall back to the legacy x-actor-subject header.
 func actorFromCtx(ctx context.Context) string {
+	if a := authz.Actor(ctx); a != "" {
+		return a
+	}
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		if vals := md.Get("x-actor-subject"); len(vals) > 0 {
 			return vals[0]
 		}
 	}
 	return ""
+}
+
+// actorForAudit derives the audit actor, preferring the authenticated caller
+// identity over any actor value supplied in the request payload. R2-H-8: the
+// payload actor is caller-controlled and therefore spoofable; it is used only as
+// a last-resort fallback during the pre-mTLS transition. Under enforcement + mTLS
+// the authenticated identity is always present, so the payload value is ignored.
+func actorForAudit(ctx context.Context, payloadActor string) string {
+	if a := actorFromCtx(ctx); a != "" {
+		return a
+	}
+	return payloadActor
 }
 
 func boolStr(b bool) string {

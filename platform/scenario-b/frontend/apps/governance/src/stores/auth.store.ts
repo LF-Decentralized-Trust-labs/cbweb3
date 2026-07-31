@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { authApi } from "../services/api";
+import { cancelTokenRefresh, scheduleTokenRefresh } from "../services/api/token-refresh";
 import type { AsyncStatus, UserProfile } from "../types";
 import { GOVERNANCE_UNAUTHORIZED_MESSAGE, hasGovernanceAccess } from "../auth/authorization";
 
@@ -31,6 +32,9 @@ export const useAuthStore = create<AuthState>((set) => ({
         throw new Error("PKI authentication is required for this account and is not available in Governance login.");
       }
 
+      // Keep the short-lived access token renewed for the whole session.
+      scheduleTokenRefresh(loginResponse.expiresIn);
+
       const profile = await authApi.me();
       const authorized = hasGovernanceAccess(profile);
       set({
@@ -51,6 +55,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
   logout: async () => {
+    cancelTokenRefresh();
     try {
       await authApi.logout();
     } finally {
@@ -58,6 +63,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
   forceLogout: () => {
+    cancelTokenRefresh();
     set({ profile: null, isAuthenticated: false, initialized: true, status: "idle", error: null });
   },
   checkSession: async () => {
@@ -72,6 +78,11 @@ export const useAuthStore = create<AuthState>((set) => ({
         status: "idle",
         error: authorized ? null : GOVERNANCE_UNAUTHORIZED_MESSAGE,
       });
+      // Session restored on load — (re)arm proactive refresh (best-effort).
+      void authApi
+        .refresh()
+        .then((result) => scheduleTokenRefresh(result.expiresIn))
+        .catch(() => {});
     } catch {
       set({
         profile: null,

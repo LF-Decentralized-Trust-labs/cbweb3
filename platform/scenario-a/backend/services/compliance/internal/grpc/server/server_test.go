@@ -96,7 +96,10 @@ func newCATestService(t *testing.T) (*complianceService, *recordingRegistry) {
 
 func TestNew_NilBlockchainUsesNoop(t *testing.T) {
 	t.Parallel()
-	srv := New(repository.NewMemoryRepository(), nil, nil)
+	srv, err := New(repository.NewMemoryRepository(), nil, nil, nil)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
 	if srv == nil {
 		t.Fatal("expected non-nil grpc server")
 	}

@@ -39,6 +39,11 @@ type LocalProfile struct {
 	// CommercialBankPaladinComposePath is the commercial-bank Paladin compose
 	// template (mode:join Paladin node bring-up, feature 033 US2).
 	CommercialBankPaladinComposePath string
+
+	// Root is the resolved Scenario A repo root (docker build context for the NOC
+	// backend image). NOCStackComposePath is the observe-mode noc-stack template.
+	Root                string
+	NOCStackComposePath string
 }
 
 // scenarioMarker is a path, relative to the Scenario A root, that uniquely
@@ -128,6 +133,10 @@ func LocalProfileFromExDir(exDir, dataDir string, rpcPort int) LocalProfile {
 
 	p.CommercialBankPaladinComposePath = envOr("CBWEB3_COMMERCIAL_BANK_PALADIN_COMPOSE",
 		filepath.Join(root, "provisioning", "templates", "commercial-bank", "paladin-compose.yaml"))
+
+	p.Root = root
+	p.NOCStackComposePath = envOr("CBWEB3_NOC_STACK_COMPOSE",
+		filepath.Join(root, "provisioning", "templates", "noc-stack", "docker-compose.yaml"))
 
 	return p
 }

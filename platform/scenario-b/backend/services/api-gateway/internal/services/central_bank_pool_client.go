@@ -95,6 +95,17 @@ func (c *CentralBankPoolClient) GetPoolReserves(ctx context.Context, pair string
 	return st.ReserveA, st.ReserveB, st.CurrentRatio, nil
 }
 
+// OutputIsTokenA implements AMMReserveReader: reports whether buying targetCurrency on
+// pair outputs the pair's TOKEN_A. The commercial-bank gateway derives this from the
+// pair_id (symbolA-symbolB): the trailing "_<CODE>" is TOKEN_B's currency, so the target
+// is TOKEN_A whenever it differs. The swap EXECUTION resolves direction on-chain via the
+// PairRegistry — this is only for the bank-side quote display.
+func (c *CentralBankPoolClient) OutputIsTokenA(_ context.Context, pair, targetCurrency string) (bool, error) {
+	parts := strings.Split(pair, "_")
+	tokenBCode := strings.ToUpper(strings.TrimSpace(parts[len(parts)-1]))
+	return !strings.EqualFold(strings.TrimSpace(targetCurrency), tokenBCode), nil
+}
+
 // GetFeeBps implements AMMReserveReader for cross-currency quote generation.
 func (c *CentralBankPoolClient) GetFeeBps(ctx context.Context, pair string) (uint16, error) {
 	st, err := c.GetPoolStatus(ctx, pair)

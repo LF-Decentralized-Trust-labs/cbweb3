@@ -1,45 +1,50 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Configuration loader for the Cacti Liquidity Relay service (Scenario B).
- * All required environment variables are validated at startup; missing values
- * cause an immediate fatal error with a clear message.
+ * Configuration loader for the generalized Cacti relay (Scenario B, TK-B5).
+ *
+ * The relay boots NEUTRAL: with zero spokes and no fatal SPOKE_A/B_BESU_RPC.
+ * Spokes come from the persisted RelayStore (hydrated at boot) and/or the
+ * optional SPOKES_JSON env, and are added at runtime via POST /api/v1/spokes.
  */
 
-export interface SpokeConfig {
-  /** Human-readable name used in logs (e.g. "spoke-a"). */
-  name: string;
-  /** HTTP JSON-RPC URL for the Besu node (e.g. "http://host:8645"). */
-  besuRpc: string;
-  /** WebSocket JSON-RPC URL for the Besu node (e.g. "ws://host:8655"). */
-  besuWs: string;
+import { Spoke } from "./spoke-registry";
+
+function optionalEnv(key: string, fallback: string, env = process.env): string {
+  return env[key] ?? fallback;
 }
 
-function requireEnv(key: string): string {
-  const val = process.env[key];
-  if (!val) {
-    throw new Error(`Fatal: required environment variable "${key}" is not set`);
+/** Validate one spoke object parsed from external input (SPOKES_JSON / API). */
+export function validateSpoke(value: unknown): Spoke {
+  const v = value as Record<string, unknown>;
+  for (const key of ["spokeId", "besuRpc", "besuWs", "gatewayUrl"]) {
+    if (typeof v?.[key] !== "string" || (v[key] as string).trim() === "") {
+      throw new Error(`invalid spoke: "${key}" is required`);
+    }
   }
-  return val;
+  return {
+    spokeId: v.spokeId as string,
+    besuRpc: v.besuRpc as string,
+    besuWs: v.besuWs as string,
+    gatewayUrl: v.gatewayUrl as string,
+  };
 }
 
-function optionalEnv(key: string, fallback: string): string {
-  return process.env[key] ?? fallback;
+/**
+ * Load the optional seed list of spokes from SPOKES_JSON (a JSON array). Returns
+ * [] when unset/empty — boot neutro. Never throws on missing (only on malformed).
+ */
+export function loadSpokesFromEnv(env = process.env): Spoke[] {
+  const raw = env.SPOKES_JSON;
+  if (!raw || raw.trim() === "") return [];
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed)) {
+    throw new Error("SPOKES_JSON must be a JSON array");
+  }
+  return parsed.map(validateSpoke);
 }
 
 export const config = {
-  spokeA: {
-    name: "spoke-a",
-    besuRpc: requireEnv("SPOKE_A_BESU_RPC"),
-    besuWs: optionalEnv("SPOKE_A_BESU_WS", "ws://localhost:8655"),
-  } satisfies SpokeConfig,
-
-  spokeB: {
-    name: "spoke-b",
-    besuRpc: requireEnv("SPOKE_B_BESU_RPC"),
-    besuWs: optionalEnv("SPOKE_B_BESU_WS", "ws://localhost:8755"),
-  } satisfies SpokeConfig,
-
   /** Port for the Cacti REST API server (default: 4000). */
   apiPort: parseInt(optionalEnv("CACTI_API_PORT", "4000"), 10),
 };

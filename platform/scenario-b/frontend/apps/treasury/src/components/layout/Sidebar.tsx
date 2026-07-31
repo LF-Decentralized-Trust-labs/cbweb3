@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, ScrollText, Settings, Gauge, Landmark, Wallet, ListChecks, SlidersHorizontal } from "lucide-react";
+import { LayoutDashboard, ScrollText, Settings, Gauge, Landmark, Wallet, ListChecks, Droplets } from "lucide-react";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -9,7 +9,7 @@ const links = [
   { to: "/escrows-approval", label: "Tokenisation Approvals", icon: ListChecks },
   { to: "/redeems-approval", label: "Redeem Approvals", icon: Gauge },
   { to: "/liquidity", label: "Liquidity Management", icon: Landmark },
-  { to: "/transfer-limits", label: "Transfer Limits", icon: SlidersHorizontal },
+  { to: "/liquidity-provisioning", label: "Liquidity Provisioning", icon: Droplets },
   { to: "/audit", label: "Audit", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: Settings },
 ];

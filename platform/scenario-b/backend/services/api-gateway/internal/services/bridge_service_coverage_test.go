@@ -40,13 +40,13 @@ func TestBridgeBurnUnlock_BurnAndEnqueue(t *testing.T) {
 	db := newBridgeDB(t)
 	// Seed an ACTIVE position.
 	pos := &domain.BridgedAssetPosition{
-		PositionID:    "pos-1",
-		OwnerBankID:   "bank-a",
-		SpokeNetwork:  "spoke-b",
-		NativeAsset:   "ARS",
-		MirroredAsset: "W-ARS",
+		PositionID:     "pos-1",
+		OwnerBankID:    "bank-a",
+		SpokeNetwork:   "spoke-b",
+		NativeAsset:    "ARS",
+		MirroredAsset:  "W-ARS",
 		MirroredAmount: "500",
-		BridgeState:   domain.BridgeStateActive,
+		BridgeState:    domain.BridgeStateActive,
 	}
 	if err := db.Create(pos).Error; err != nil {
 		t.Fatalf("seed: %v", err)

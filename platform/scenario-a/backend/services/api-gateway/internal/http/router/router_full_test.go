@@ -44,8 +44,8 @@ func (govComplianceStub) GetAuditLogs(context.Context, string, string, string, s
 func (govComplianceStub) GetCircuitBreakerStatus(context.Context) (complianceadapter.CircuitBreakerStatus, error) {
 	return complianceadapter.CircuitBreakerStatus{}, nil
 }
-func (govComplianceStub) ToggleCircuitBreaker(context.Context, bool, string) (bool, error) {
-	return false, nil
+func (govComplianceStub) ToggleCircuitBreaker(context.Context, bool, string) (bool, string, error) {
+	return false, "", nil
 }
 func (govComplianceStub) GetSystemParameters(context.Context) (complianceadapter.SystemParameters, error) {
 	return complianceadapter.SystemParameters{}, nil

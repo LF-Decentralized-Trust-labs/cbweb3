@@ -37,6 +37,9 @@ type CactiCrossCurrencyBridgeOutRequest struct {
 	BeneficiaryBankID  string `json:"beneficiary_bank_id"`
 	SpokeOut           string `json:"spoke_out"`
 	WrappedTargetToken string `json:"wrapped_target_token"`
+	// AmmAddress is the pair's on-chain AMM (dynamic per-pair model). The relay reads
+	// isPaused() on it for its circuit-breaker gate; empty ⇒ relay fails safe.
+	AmmAddress string `json:"amm_address,omitempty"`
 	// SwapSenderAddress is the Hub address that received W-ARS from the AMM swap.
 	// CB-B's executor burns from this address (CENTRAL_BANK_ROLE allows any-address burn).
 	SwapSenderAddress string `json:"swap_sender_address,omitempty"`

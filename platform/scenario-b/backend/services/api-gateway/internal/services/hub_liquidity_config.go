@@ -11,11 +11,11 @@ import (
 // HubLiquidityConfig describes the Hub sovereign AMM deployment (T054 / FR-012 option B).
 // Exposed by CB gateways via GET /api/v2/amm/hub-liquidity-config for commercial banks.
 type HubLiquidityConfig struct {
-	SovereignAMMAddress        string            `json:"sovereign_amm_address"`
-	SovereignHubTokenAAddress  string            `json:"sovereign_hub_token_a_address,omitempty"`
-	SovereignHubTokenBAddress  string            `json:"sovereign_hub_token_b_address,omitempty"`
-	DefaultSovereignPoolPair   string            `json:"default_sovereign_pool_pair,omitempty"`
-	SovereignPairAMMMap        map[string]string `json:"sovereign_pair_amm_map,omitempty"`
+	SovereignAMMAddress       string            `json:"sovereign_amm_address"`
+	SovereignHubTokenAAddress string            `json:"sovereign_hub_token_a_address,omitempty"`
+	SovereignHubTokenBAddress string            `json:"sovereign_hub_token_b_address,omitempty"`
+	DefaultSovereignPoolPair  string            `json:"default_sovereign_pool_pair,omitempty"`
+	SovereignPairAMMMap       map[string]string `json:"sovereign_pair_amm_map,omitempty"`
 }
 
 // HubLiquidityConfigFromEnv builds config when this gateway is a CB with sovereign liquidity wired.
