@@ -100,6 +100,13 @@ type BridgedAssetPosition struct {
 	// unbacked tCeBM to the beneficiary twice. Column created here because the gateway owns the
 	// AutoMigrate for the shared bridged_asset_positions table.
 	SpokeMintTxHash string `gorm:"column:spoke_mint_tx_hash;default:''"`
+	// SpokeFundTxHash is the confirmed Spoke-side mint that funded THIS position's sovereign
+	// lock. Before it existed, the relayer decided whether to mint by reading the signer's
+	// balance: a position whose predecessor had left tokens on that address locked those
+	// instead of minting its own, so the CB's tCeBM supply stopped corresponding to positions.
+	// Recorded on broadcast, like the burn/mint hashes above, so a retry reconciles by hash
+	// instead of funding twice.
+	SpokeFundTxHash string `gorm:"column:spoke_fund_tx_hash;default:''"`
 	// CorrelationID links the position to the cross-currency swap operation (009) for
 	// tracing. Not unique: a rollback position legitimately shares the correlation of
 	// the bridge-in it reverses — replay protection is keyed on SwapTxHash.

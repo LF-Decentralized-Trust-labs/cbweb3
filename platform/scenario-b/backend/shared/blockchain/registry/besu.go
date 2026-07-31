@@ -213,18 +213,27 @@ func (b *BesuClient) SetCertFingerprint(ctx context.Context, wallet string, fing
 // currencyAuthorityPlan is what remains to be done so a sovereign currency's issuance
 // authority rests with its own central bank rather than with the hub that registered it.
 type currencyAuthorityPlan struct {
-	// SetCentralBankOf points IdentityRegistry.getCentralBankOf(token) at the CB.
+	// SetCentralBankOf points IdentityRegistry.getCentralBankOf(token) at the CB. This is on
+	// the registry, whose administration legitimately stays with the hub.
 	SetCentralBankOf bool
 	// GrantCBRole gives the CB CENTRAL_BANK_ROLE on its W-token (mint/burn).
 	GrantCBRole bool
-	// RevokeSignerRole takes CENTRAL_BANK_ROLE away from the hub signer, so the hub
-	// cannot issue another sovereign's money.
+	// GrantCBAdmin gives the CB DEFAULT_ADMIN_ROLE on its W-token, so it — and not the hub —
+	// decides who may issue its money. Without this the revocation below is cosmetic: the
+	// hub could grant CENTRAL_BANK_ROLE back to itself at any time.
+	GrantCBAdmin bool
+	// RevokeSignerRole takes CENTRAL_BANK_ROLE away from the hub signer, so the hub cannot
+	// issue another sovereign's money.
 	RevokeSignerRole bool
+	// RevokeSignerAdmin takes DEFAULT_ADMIN_ROLE away from the hub signer. Applied LAST: it
+	// is what removes the hub's ability to perform any of the steps above.
+	RevokeSignerAdmin bool
 }
 
 // Empty reports whether the authority already rests where it should.
 func (p currencyAuthorityPlan) Empty() bool {
-	return !p.SetCentralBankOf && !p.GrantCBRole && !p.RevokeSignerRole
+	return !p.SetCentralBankOf && !p.GrantCBRole && !p.GrantCBAdmin &&
+		!p.RevokeSignerRole && !p.RevokeSignerAdmin
 }
 
 // planCurrencyAuthority decides which handover steps are still outstanding.
@@ -232,14 +241,16 @@ func (p currencyAuthorityPlan) Empty() bool {
 // Kept pure so the rule is testable without a chain: the on-chain calls around it are thin.
 // When the CB *is* the signer (single-entity local stacks), there is nothing to hand over
 // and nothing to revoke — revoking would leave the token with no issuer at all.
-func planCurrencyAuthority(signer, cb, currentCBOf common.Address, cbHasRole, signerHasRole bool) currencyAuthorityPlan {
+func planCurrencyAuthority(signer, cb, currentCBOf common.Address, cbHasRole, signerHasRole, cbIsAdmin, signerIsAdmin bool) currencyAuthorityPlan {
 	if cb == (common.Address{}) || cb == signer {
 		return currencyAuthorityPlan{}
 	}
 	return currencyAuthorityPlan{
-		SetCentralBankOf: currentCBOf != cb,
-		GrantCBRole:      !cbHasRole,
-		RevokeSignerRole: signerHasRole,
+		SetCentralBankOf:  currentCBOf != cb,
+		GrantCBRole:       !cbHasRole,
+		GrantCBAdmin:      !cbIsAdmin,
+		RevokeSignerRole:  signerHasRole,
+		RevokeSignerAdmin: signerIsAdmin,
 	}
 }
 
@@ -360,6 +371,10 @@ func (b *BesuClient) ensureCurrencyAuthority(ctx context.Context, token, cb comm
 	if err != nil {
 		return "", fmt.Errorf("registry: read CENTRAL_BANK_ROLE: %w", err)
 	}
+	adminRole, err := wToken.DEFAULTADMINROLE(&bind.CallOpts{Context: ctx})
+	if err != nil {
+		return "", fmt.Errorf("registry: read DEFAULT_ADMIN_ROLE: %w", err)
+	}
 	signerHex, err := b.signer.SignerAddress(ctx)
 	if err != nil {
 		return "", fmt.Errorf("registry: resolve signer address: %w", err)
@@ -377,8 +392,16 @@ func (b *BesuClient) ensureCurrencyAuthority(ctx context.Context, token, cb comm
 	if err != nil {
 		return "", fmt.Errorf("registry: read signer role: %w", err)
 	}
+	cbIsAdmin, err := wToken.HasRole(&bind.CallOpts{Context: ctx}, adminRole, cb)
+	if err != nil {
+		return "", fmt.Errorf("registry: read CB admin role: %w", err)
+	}
+	signerIsAdmin, err := wToken.HasRole(&bind.CallOpts{Context: ctx}, adminRole, signerAddr)
+	if err != nil {
+		return "", fmt.Errorf("registry: read signer admin role: %w", err)
+	}
 
-	plan := planCurrencyAuthority(signerAddr, cb, currentCBOf, cbHasRole, signerHasRole)
+	plan := planCurrencyAuthority(signerAddr, cb, currentCBOf, cbHasRole, signerHasRole, cbIsAdmin, signerIsAdmin)
 	if plan.Empty() {
 		return "", nil
 	}
@@ -395,6 +418,20 @@ func (b *BesuClient) ensureCurrencyAuthority(ctx context.Context, token, cb comm
 		}
 		if werr := b.waitMined(ctx, tx); werr != nil {
 			return tx.Hash().Hex(), fmt.Errorf("registry: grant CENTRAL_BANK_ROLE wait: %w", werr)
+		}
+		last = tx.Hash().Hex()
+	}
+	if plan.GrantCBAdmin {
+		opts, oerr := b.transactOpts(ctx)
+		if oerr != nil {
+			return last, oerr
+		}
+		tx, gerr := wToken.GrantRole(opts, adminRole, cb)
+		if gerr != nil {
+			return last, fmt.Errorf("registry: grant DEFAULT_ADMIN_ROLE to %s: %w", cb.Hex(), gerr)
+		}
+		if werr := b.waitMined(ctx, tx); werr != nil {
+			return tx.Hash().Hex(), fmt.Errorf("registry: grant DEFAULT_ADMIN_ROLE wait: %w", werr)
 		}
 		last = tx.Hash().Hex()
 	}
@@ -423,6 +460,23 @@ func (b *BesuClient) ensureCurrencyAuthority(ctx context.Context, token, cb comm
 		}
 		if werr := b.waitMined(ctx, tx); werr != nil {
 			return tx.Hash().Hex(), fmt.Errorf("registry: revoke CENTRAL_BANK_ROLE wait: %w", werr)
+		}
+		last = tx.Hash().Hex()
+	}
+	// LAST: this is the step that ends the hub's authority over the token, so everything above
+	// must already be in place. Doing it earlier would leave the remaining steps unauthorized
+	// and the token half-handed-over with no way to finish.
+	if plan.RevokeSignerAdmin {
+		opts, oerr := b.transactOpts(ctx)
+		if oerr != nil {
+			return last, oerr
+		}
+		tx, rerr := wToken.RevokeRole(opts, adminRole, signerAddr)
+		if rerr != nil {
+			return last, fmt.Errorf("registry: revoke DEFAULT_ADMIN_ROLE from hub signer: %w", rerr)
+		}
+		if werr := b.waitMined(ctx, tx); werr != nil {
+			return tx.Hash().Hex(), fmt.Errorf("registry: revoke DEFAULT_ADMIN_ROLE wait: %w", werr)
 		}
 		last = tx.Hash().Hex()
 	}

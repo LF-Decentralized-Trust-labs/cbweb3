@@ -149,6 +149,11 @@ services:
       # gateway grants it LiquidityProvider on the hub IdentityRegistry at boot (idempotent)
       # and uses it for hub balance reads. Empty on a bank, which holds no hub identity.
       LOCAL_CB_HUB_SIGNER: "${LOCAL_CB_HUB_SIGNER:-}"
+      # The CB's bridge relayer runs on its own hub identity (separate nonce space). It needs
+      # CENTRAL_BANK_ROLE on this CB's W-token to mint and burn; this gateway grants it at boot,
+      # idempotently, using the token administration the currency handover moved to the CB.
+      # Empty on a bank, which runs no relayer and holds no hub identity.
+      HUB_RELAYER_ADDRESS: "${HUB_RELAYER_ADDRESS:-}"
       PAIR_REGISTRY_CONTRACT_ADDRESS: "${PAIR_REGISTRY_CONTRACT_ADDRESS:-}"
       CURRENCY_REGISTRY_CONTRACT_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"
       HUB_TOKEN_A_ADDRESS: "${HUB_TOKEN_A_ADDRESS:-}"

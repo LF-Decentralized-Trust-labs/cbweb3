@@ -180,6 +180,18 @@ func (c SpokeConfig) cbHubKey() string {
 // register-cb's idempotency against the address that will actually be registered.
 func (c SpokeConfig) CBHubAddress() string { return c.cbHubAddress() }
 
+// cbRelayerKey / cbRelayerAddress are the CB's SECOND hub identity, used by its bridge
+// relayer so the gateway and the relayer never share a nonce counter across processes.
+func (c SpokeConfig) cbRelayerKey() string {
+	key, _ := deriveCBRelayerKey(c.SpokeID)
+	return key
+}
+
+func (c SpokeConfig) cbRelayerAddress() string {
+	_, addr := deriveCBRelayerKey(c.SpokeID)
+	return addr
+}
+
 func (c SpokeConfig) cbHubAddress() string {
 	if a := strings.TrimSpace(c.CBAddress); a != "" {
 		return a
@@ -609,6 +621,11 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// The same identity as an address: the gateway grants it LiquidityProvider on the hub
 		// IdentityRegistry at boot (idempotent) and uses it for hub balance reads.
 		"LOCAL_CB_HUB_SIGNER": c.cbHubAddress(),
+		// The relayer's own hub identity. Separate key so the two processes never claim the
+		// same nonce; the gateway grants it CENTRAL_BANK_ROLE at boot, which it can do because
+		// the currency handover made the CB the token's administrator.
+		"HUB_RELAYER_PRIVATE_KEY": c.cbRelayerKey(),
+		"HUB_RELAYER_ADDRESS":     c.cbRelayerAddress(),
 		// The CB's own on-chain address (the dev deployer). Wired into the api-gateway
 		// so its payment routes (backed by the entity-relayer orchestrator via
 		// PAYMENT_GRPC_ADDR) resolve the CB's account.

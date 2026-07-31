@@ -122,11 +122,13 @@ residue return.
 
 **What changed.** `register-currency` deploys the W-token, registers the currency with the hub
 signer as interim central bank (`CurrencyRegistry.registerCurrency` admits only
-`getCentralBankOf(token)` as caller), then transfers `CENTRAL_BANK_ROLE` to the CB's own hub
-address and **revokes it from the hub governance signer**. A sovereign currency must not be
-issuable by the hub.
+`getCentralBankOf(token)` as caller), then hands the CB both `CENTRAL_BANK_ROLE` (issuance) and
+`DEFAULT_ADMIN_ROLE` (administration of the token's roles) and **revokes both from the hub
+governance signer**. Handing over issuance alone would be cosmetic: while the hub kept
+administration it could grant issuance back to itself at any time.
 
-**Point of no return.** The revoke — per currency.
+**Point of no return.** The administration revoke — per currency. It is applied last, after the
+CB holds both roles, so the token is never left without an administrator.
 
 **What a downgrade breaks.** An older toolkit provisions the CB's gateway and relayer with the
 spoke deployer key as their hub signer. That address holds no `CENTRAL_BANK_ROLE` on the
@@ -143,6 +145,12 @@ ROLE=$(cast call "$TOKEN" 'CENTRAL_BANK_ROLE()(bytes32)' --rpc-url "$HUB_RPC")
 # Expect true for the CB's own hub address, false for the hub governance signer.
 cast call "$TOKEN" 'hasRole(bytes32,address)(bool)' "$ROLE" "$CB_HUB_ADDR"  --rpc-url "$HUB_RPC"
 cast call "$TOKEN" 'hasRole(bytes32,address)(bool)' "$ROLE" "$HUB_ADMIN_ADDR" --rpc-url "$HUB_RPC"
+
+# Same expectation for administration — this is what makes the revoke above irreversible by
+# the hub rather than a courtesy.
+ADMIN=$(cast call "$TOKEN" 'DEFAULT_ADMIN_ROLE()(bytes32)' --rpc-url "$HUB_RPC")
+cast call "$TOKEN" 'hasRole(bytes32,address)(bool)' "$ADMIN" "$CB_HUB_ADDR"   --rpc-url "$HUB_RPC"
+cast call "$TOKEN" 'hasRole(bytes32,address)(bool)' "$ADMIN" "$HUB_ADMIN_ADDR" --rpc-url "$HUB_RPC"
 ```
 
 **Recovery.** Re-run `apply` with the current toolkit: `EnsureCurrencyAuthority` reads the
@@ -162,10 +170,20 @@ holds the roles granted when that spoke's own contracts were deployed.
 
 **Check after apply.**
 
-| Entity | `SIGNER_PRIVATE_KEY` in the api-gateway |
-|---|---|
-| Central bank | its derived hub identity (same as `LOCAL_CB_HUB_SIGNER`) |
-| Commercial bank | **empty** |
+| Entity | `SIGNER_PRIVATE_KEY` in the api-gateway | `SIGNER_PRIVATE_KEY` in the relayer |
+|---|---|---|
+| Central bank | its derived hub identity (same as `LOCAL_CB_HUB_SIGNER`) | its derived **relayer** identity, a different address |
+| Commercial bank | **empty** | no relayer |
+
+A central bank runs **two** hub identities: the gateway's (mapped by IdentityRegistry as the
+token's central bank, holder of the token's administration, signer of the corridor's governance
+acts) and the relayer's (issuance only). They must differ — go-ethereum tracks nonces per
+process, so one shared key means two containers each keeping their own counter, and a
+transaction replaced by a nonce collision leaves a position waiting forever on a hash that never
+mines, since the relayer persists it as an intent on broadcast. The gateway grants the relayer
+`CENTRAL_BANK_ROLE` at boot, idempotently; look for `[relayer-role]` in its log. If that grant
+fails, the relayer cannot mint or burn — the usual cause is an incomplete currency handover, so
+re-run `apply`.
 
 A bank that still carries a hub key is a finding, not a convenience: that key is the CB's, and it
 is also the hub governance admin in local stacks.
@@ -205,6 +223,12 @@ but a downgrade silently loses the guard.
 - [ ] Confirm no daily transfer limits are configured with values you have not re-read since this
       release: the limit comparison was fixed (amounts arrive in base units, only the configured
       limit is a human decimal). Previously any configured limit rejected every transfer.
+- [ ] Sovereign liquidity positions in `LOCKING` must be drained. Funding a lock is now decided
+      per position and recorded (`spoke_fund_tx_hash`), not by reading the signer's balance. A
+      position left mid-flight has no funding record, so it will mint its own amount on the next
+      attempt — correct going forward, but any balance a previous run stranded on the signer
+      stays stranded instead of being silently consumed by the next lock. Reconcile it
+      deliberately.
 
 ### Verification after deploy
 

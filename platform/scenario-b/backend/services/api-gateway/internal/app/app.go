@@ -231,6 +231,9 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// Ensure this CB's Hub signer is registered as LiquidityProvider in the Hub
 	// IdentityRegistry (007-bridge-based-cb-liquidity / FR-004). Idempotent.
 	bootstrapLiquidityProviderRole(context.Background())
+	// The CB's relayer signs on the hub with its own identity (separate nonce space); it needs
+	// CENTRAL_BANK_ROLE on this CB's W-token to mint and burn. Idempotent; a no-op on a bank.
+	bootstrapRelayerIssuanceRole(context.Background())
 
 	deps := v2router.Dependencies{
 		AuthProvider: authProvider,

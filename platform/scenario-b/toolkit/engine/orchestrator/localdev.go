@@ -30,6 +30,10 @@ const (
 	// domain from the bank salt so a spoke id and a bank code can never derive the
 	// same key.
 	cbHubKeyDerivationSalt = "cbweb3-scenario-b-cb-hub-key:"
+
+	// cbRelayerKeyDerivationSalt namespaces the CB's RELAYER hub key — a second
+	// identity for the same central bank, in its own derivation domain.
+	cbRelayerKeyDerivationSalt = "cbweb3-scenario-b-cb-relayer-key:"
 )
 
 // deriveCBHubKey deterministically derives a per-CB secp256k1 dev key for the HUB
@@ -51,6 +55,24 @@ const (
 // funding is needed. Dev keys, not secrets — production custody is the KeyProvider's job.
 func deriveCBHubKey(spokeID string) (privHex, addr string) {
 	return deriveKeyFromSalt(cbHubKeyDerivationSalt, spokeID)
+}
+
+// deriveCBRelayerKey derives the hub key for a central bank's bridge relayer, distinct from
+// the key its api-gateway uses.
+//
+// Why two keys for one CB: go-ethereum's nonce counter is per process. The gateway and the
+// relayer are separate containers, so with one shared key each keeps its own counter and two
+// concurrent submissions claim the same nonce — one transaction is then replaced or rejected.
+// That is worse than a retry: the relayer persists a burn/mint hash as an intent the moment it
+// is broadcast, so a replaced transaction leaves a position waiting on a hash that will never
+// be mined, and reconciliation answers "not yet mined" forever.
+//
+// The two identities are not equivalent. The gateway's is the one IdentityRegistry maps as the
+// token's central bank (PairRegistry admits only that address as proposer/confirmer) and it
+// holds the token's DEFAULT_ADMIN_ROLE; the relayer's only needs CENTRAL_BANK_ROLE to mint and
+// burn, which the gateway grants it at boot.
+func deriveCBRelayerKey(spokeID string) (privHex, addr string) {
+	return deriveKeyFromSalt(cbRelayerKeyDerivationSalt, spokeID)
 }
 
 // deriveBankKey deterministically derives a per-bank secp256k1 dev key from the

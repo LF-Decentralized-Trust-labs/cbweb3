@@ -122,3 +122,100 @@ func resolveBootstrapHubChainID(warnLogger *log.Logger) int64 {
 	}
 	return id
 }
+
+// wTokenRoleABI is the minimal AccessControl surface of a sovereign W-token needed to grant the
+// relayer its issuance role.
+const wTokenRoleABI = `[
+{"type":"function","name":"CENTRAL_BANK_ROLE","stateMutability":"view",
+ "inputs":[],"outputs":[{"name":"","type":"bytes32"}]},
+{"type":"function","name":"hasRole","stateMutability":"view",
+ "inputs":[{"name":"role","type":"bytes32"},{"name":"account","type":"address"}],
+ "outputs":[{"name":"","type":"bool"}]},
+{"type":"function","name":"grantRole","stateMutability":"nonpayable",
+ "inputs":[{"name":"role","type":"bytes32"},{"name":"account","type":"address"}],
+ "outputs":[]}
+]`
+
+// bootstrapRelayerIssuanceRole grants this central bank's bridge relayer CENTRAL_BANK_ROLE on
+// the CB's own sovereign W-token, so it can mint on bridge-in and burn on bridge-out.
+//
+// Why the relayer needs its own identity: go-ethereum tracks nonces per process, so a gateway
+// and a relayer sharing one key each keep their own counter and concurrent submissions claim
+// the same nonce. One transaction is then replaced — and because the relayer persists a
+// burn/mint hash as an intent the moment it broadcasts, a replaced transaction leaves the
+// position waiting on a hash that will never be mined.
+//
+// Why this gateway may grant it: the currency handover made this CB the token's
+// DEFAULT_ADMIN_ROLE holder (before it, the hub kept administration and could have granted
+// issuance back to itself at any time).
+//
+// Idempotent and best-effort: it returns silently when not applicable, and logs rather than
+// failing startup — the grant is retried on every boot, and a missing grant surfaces as an
+// explicit AccessControl revert on the relayer's first mint rather than as silent corruption.
+func bootstrapRelayerIssuanceRole(ctx context.Context) {
+	tokenAddr := strings.TrimSpace(os.Getenv("W_TOKEN_ADDRESS"))
+	relayerAddr := strings.TrimSpace(os.Getenv("HUB_RELAYER_ADDRESS"))
+	adminKey := strings.TrimSpace(os.Getenv("SIGNER_PRIVATE_KEY"))
+	rpcURL := strings.TrimSpace(os.Getenv("HUB_BESU_RPC_URL"))
+
+	// A commercial bank has no W-token, no relayer and no hub key — nothing to do.
+	if tokenAddr == "" || relayerAddr == "" || adminKey == "" || rpcURL == "" {
+		return
+	}
+
+	chainID := resolveBootstrapHubChainID(log.New(os.Stderr, "[relayer-role] ", 0))
+
+	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	ec, err := evm.Dial(dialCtx, rpcURL, 10*time.Second)
+	if err != nil {
+		log.Printf("[relayer-role] dial Hub RPC (%s): %v — relayer issuance grant skipped", rpcURL, err)
+		return
+	}
+	defer ec.Close()
+
+	parsedABI, err := evm.ParseABI(wTokenRoleABI)
+	if err != nil {
+		log.Printf("[relayer-role] parse W-token ABI: %v", err)
+		return
+	}
+
+	token := common.HexToAddress(tokenAddr)
+	relayer := common.HexToAddress(relayerAddr)
+
+	readCtx, readCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer readCancel()
+
+	var role [32]byte
+	if err := evm.Call(readCtx, ec, token, parsedABI, "CENTRAL_BANK_ROLE", nil, &role); err != nil {
+		log.Printf("[relayer-role] read CENTRAL_BANK_ROLE on %s: %v — grant skipped", tokenAddr, err)
+		return
+	}
+	var already bool
+	if err := evm.Call(readCtx, ec, token, parsedABI, "hasRole",
+		[]interface{}{role, relayer}, &already); err != nil {
+		log.Printf("[relayer-role] read relayer role: %v — grant skipped", err)
+		return
+	}
+	if already {
+		log.Printf("[relayer-role] %s already holds CENTRAL_BANK_ROLE on %s — no action needed", relayerAddr, tokenAddr) // #nosec G706 -- config-sourced blockchain addresses
+		return
+	}
+
+	signer, err := evm.NewSigner(adminKey, big.NewInt(chainID))
+	if err != nil {
+		log.Printf("[relayer-role] build signer from SIGNER_PRIVATE_KEY: %v", err)
+		return
+	}
+
+	grantCtx, grantCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer grantCancel()
+	txHash, err := evm.SubmitTx(grantCtx, ec, signer, token, parsedABI, "grantRole", role, relayer)
+	if err != nil {
+		// The likeliest cause is this CB not holding the token's DEFAULT_ADMIN_ROLE, i.e. the
+		// currency handover has not completed. Say so instead of leaving a bare revert.
+		log.Printf("[relayer-role] grantRole(CENTRAL_BANK_ROLE, %s) on %s failed: %v — the relayer cannot mint or burn until this succeeds; check that the currency authority handover completed and this gateway holds the token's DEFAULT_ADMIN_ROLE", relayerAddr, tokenAddr, err) // #nosec G706 -- config-sourced blockchain addresses
+		return
+	}
+	log.Printf("[relayer-role] granted CENTRAL_BANK_ROLE to the relayer %s on %s — tx=%s", relayerAddr, tokenAddr, txHash) // #nosec G706 -- config-sourced blockchain values
+}

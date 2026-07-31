@@ -71,6 +71,52 @@ func TestComposeEnvCarriesPerCBHubIdentity(t *testing.T) {
 	}
 }
 
+// One central bank, two hub identities. go-ethereum tracks nonces per process, so the gateway
+// and the relayer sharing one key means each keeps its own counter and concurrent submissions
+// claim the same nonce — and a replaced transaction leaves a position waiting forever on a hash
+// that never mines, because the relayer persists it as an intent on broadcast.
+func TestDeriveCBRelayerKey_DistinctFromTheGatewayIdentity(t *testing.T) {
+	gwKey, gwAddr := deriveCBHubKey("spoke-brl")
+	rlKey, rlAddr := deriveCBRelayerKey("spoke-brl")
+
+	if gwKey == rlKey || gwAddr == rlAddr {
+		t.Fatalf("the relayer must not share the gateway's key/address (%s)", gwAddr)
+	}
+	if k2, a2 := deriveCBRelayerKey("spoke-brl"); k2 != rlKey || a2 != rlAddr {
+		t.Fatalf("relayer derivation must be stable across runs, or its role grant is orphaned")
+	}
+	if _, other := deriveCBRelayerKey("spoke-ars"); other == rlAddr {
+		t.Fatalf("two spokes derived the same relayer identity (%s)", rlAddr)
+	}
+	// It must also stay clear of every other derivation domain.
+	if _, bankAddr := deriveBankKey("spoke-brl"); bankAddr == rlAddr {
+		t.Fatalf("relayer derivation collides with the bank domain (%s)", rlAddr)
+	}
+	if strings.EqualFold(rlAddr, devDeployerAddr) {
+		t.Fatalf("relayer identity collides with the founder/deployer address")
+	}
+}
+
+func TestComposeEnvCarriesTheRelayerIdentity(t *testing.T) {
+	cfg := testSpokeCfg(t, &exec.FakeRunner{})
+	env := envMap(cfg.ComposeEnv())
+
+	wantKey, wantAddr := deriveCBRelayerKey(cfg.SpokeID)
+	if env["HUB_RELAYER_PRIVATE_KEY"] != wantKey {
+		t.Fatalf("HUB_RELAYER_PRIVATE_KEY = %q, want the derived relayer key", env["HUB_RELAYER_PRIVATE_KEY"])
+	}
+	// The address goes to the GATEWAY, which grants the role; the key goes to the relayer.
+	if env["HUB_RELAYER_ADDRESS"] != wantAddr {
+		t.Fatalf("HUB_RELAYER_ADDRESS = %q, want %q", env["HUB_RELAYER_ADDRESS"], wantAddr)
+	}
+	if env["HUB_RELAYER_PRIVATE_KEY"] == env["HUB_SIGNER_PRIVATE_KEY"] {
+		t.Fatalf("the relayer and the gateway must not share a hub key — that is the nonce collision")
+	}
+	if env["HUB_RELAYER_PRIVATE_KEY"] == env["CB_PRIVATE_KEY"] {
+		t.Fatalf("the relayer hub key must differ from the spoke deployer key")
+	}
+}
+
 func TestComposeEnvHubChainID(t *testing.T) {
 	cfg := testSpokeCfg(t, &exec.FakeRunner{})
 	cfg.HubChainID = 1337
