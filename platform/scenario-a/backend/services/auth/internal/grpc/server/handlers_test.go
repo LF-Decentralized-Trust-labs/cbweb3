@@ -128,11 +128,18 @@ func (f *fakeNonce) GetAndDelete(_ context.Context, k string) (string, bool, err
 
 type fakeRegistry struct {
 	registerFn    func(ctx context.Context, addr, inst, role string, fp [32]byte) (string, error)
+	verifyFn      func(ctx context.Context, addr string) (string, error)
 	canTransactFn func(ctx context.Context, addr string) (bool, error)
 }
 
 func (f *fakeRegistry) RegisterParticipant(ctx context.Context, addr, inst, role string, fp [32]byte) (string, error) {
 	return f.registerFn(ctx, addr, inst, role, fp)
+}
+func (f *fakeRegistry) VerifyParticipant(ctx context.Context, addr string) (string, error) {
+	if f.verifyFn != nil {
+		return f.verifyFn(ctx, addr)
+	}
+	return "", nil
 }
 func (f *fakeRegistry) UpdateStatus(_ context.Context, _ string, _ uint8) (string, error) {
 	return "", nil

@@ -458,12 +458,19 @@ func TestOnboardParticipant(t *testing.T) {
 		k := &fakeKMS{createKeyFn: func(_ context.Context, _ string) (kms.KeyInfo, error) {
 			return kms.KeyInfo{Address: "0xWALLET"}, nil
 		}}
-		bc := &fakeRegistry{registerFn: func(_ context.Context, wallet, _, _ string, _ [32]byte) (string, error) {
-			if wallet != "0xWALLET" {
-				t.Fatalf("wallet=%q", wallet)
-			}
-			return "0xTX", nil
-		}}
+		var verifiedWallet string
+		bc := &fakeRegistry{
+			registerFn: func(_ context.Context, wallet, _, _ string, _ [32]byte) (string, error) {
+				if wallet != "0xWALLET" {
+					t.Fatalf("wallet=%q", wallet)
+				}
+				return "0xTX", nil
+			},
+			verifyFn: func(_ context.Context, wallet string) (string, error) {
+				verifiedWallet = wallet
+				return "0xVERIFY", nil
+			},
+		}
 		comp := &fakeCompliance{upsertFn: func(_ context.Context, _ complianceclient.Participant) error { return nil }}
 		resp, err := svc(fullKC(), comp, k, bc, nil, "").OnboardParticipant(ctx, &authv1.OnboardParticipantRequest{
 			Username: "u", Email: "e", Role: domain.RoleCommercialBank, InstitutionName: "Bank",
@@ -471,6 +478,25 @@ func TestOnboardParticipant(t *testing.T) {
 		if err != nil || resp.WalletAddress != "0xWALLET" || resp.TxHash != "0xTX" {
 			t.Fatalf("err=%v resp=%+v", err, resp)
 		}
+		// Two-step onboarding (R1-10.6): verifyParticipant MUST run so the bank ends Verified.
+		if verifiedWallet != "0xWALLET" {
+			t.Fatalf("verifyParticipant not called for wallet; got %q", verifiedWallet)
+		}
+	})
+
+	// R1-10.6: a failing on-chain verify must fail onboarding (participant would be left Pending).
+	t.Run("onchain_verify_error", func(t *testing.T) {
+		k := &fakeKMS{createKeyFn: func(_ context.Context, _ string) (kms.KeyInfo, error) {
+			return kms.KeyInfo{Address: "0xW"}, nil
+		}}
+		bc := &fakeRegistry{
+			registerFn: func(_ context.Context, _, _, _ string, _ [32]byte) (string, error) { return "0xTX", nil },
+			verifyFn:   func(_ context.Context, _ string) (string, error) { return "", errors.New("verify revert") },
+		}
+		_, err := svc(fullKC(), nil, k, bc, nil, "").OnboardParticipant(ctx, &authv1.OnboardParticipantRequest{
+			Username: "u", Email: "e", Role: domain.RoleCommercialBank,
+		})
+		wantCode(t, err, codes.Internal)
 	})
 
 	t.Run("kms_error", func(t *testing.T) {

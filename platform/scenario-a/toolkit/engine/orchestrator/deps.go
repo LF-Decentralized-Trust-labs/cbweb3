@@ -179,8 +179,8 @@ type JoinTimeouts struct {
 	ProofOfPossession time.Duration
 	// PenteFXSetup is the budget for the Pente FX-context steps (create-pente-context and
 	// deploy-fxa-pente). These run multiple SEQUENTIAL private transactions that each require
-	// cross-node endorsement (in-group IdentityRegistry deploy, two registerParticipant calls,
-	// FXAgreement deploy); a single Paladin peer-transport reconnect during the new node's initial
+	// cross-node endorsement (in-group IdentityRegistry deploy, then register + verify for each
+	// participant, FXAgreement deploy); a single Paladin peer-transport reconnect during the new node's initial
 	// mesh can stall one endorsement for minutes, so the whole sequence needs generous headroom.
 	// Default: 20m.
 	PenteFXSetup time.Duration

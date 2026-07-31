@@ -12,6 +12,12 @@
 #
 # Idempotent: re-running resumes from the first incomplete step per entity.
 #
+# JWT validation (R2-H-6): the api-gateway auth service enforces both the token
+# issuer (iss, derived from each entity's Keycloak URL + realm) and audience
+# (aud). The toolkit provisions an oidc-audience-mapper on every backend login
+# client so tokens carry aud=cbweb3-backend, and wires KEYCLOAK_AUDIENCE to match
+# — nothing to set here. NOC backends run NOC_SKIP_AUTH=true (unchanged).
+#
 # Usage:
 #   ./deploy-all.sh              # build CLI, start relay, deploy everything
 #   ./deploy-all.sh --clean      # wipe docker (containers+volumes) + data dirs first
@@ -22,6 +28,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # .../scenario-a/samples
 SCENARIO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"               # .../scenario-a
 export CBWEB3_HOME="${SCENARIO_DIR}"
+# All entities share ONE Docker host here, so their per-entity container-alias
+# advertisedHosts are not externally routable: force the container-name Paladin
+# transport + derived gRPC ports so they do not collide on the fixed peer port 9000.
+export CBWEB3_SINGLE_HOST=1
 
 BUNDLES_DIR="${SCRIPT_DIR}/bundles"
 # The toolkit emits bundles to <outputDir>/bundles, where outputDir defaults to the
@@ -118,16 +128,25 @@ cat <<'EOF'
                                                  treasury   http://localhost:26645
                                                  supervisor http://localhost:30645
                                                  noc        http://localhost:32645
+                                                 launcher   http://localhost:5191
     bank-itau      api http://localhost:18646   portal     http://localhost:25646
+                                                 launcher   http://localhost:5192
     bank-bradesco  api http://localhost:18647   portal     http://localhost:25647
+                                                 launcher   http://localhost:5193
 
   Colombia (spoke-cop)
     central-bank   api http://localhost:18745   governance http://localhost:25745
                                                  treasury   http://localhost:26745
                                                  supervisor http://localhost:30745
                                                  noc        http://localhost:32745
+                                                 launcher   http://localhost:5197
     bank-bancolombia api http://localhost:18746 portal     http://localhost:25746
+                                                 launcher   http://localhost:5198
     bank-davivienda  api http://localhost:18747 portal     http://localhost:25747
+                                                 launcher   http://localhost:5199
+
+  The launcher (per entity) is the A/B entry point; it lists that entity's Scenario A
+  and B portals. Build the image once: ( cd ../../launcher && ./build.sh ).
 
   Note: a joining bank completes onboarding via its Governance Portal. On KYC
   approval the CB compliance service both issues the CB-signed certificate and

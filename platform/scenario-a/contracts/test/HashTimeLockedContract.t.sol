@@ -45,9 +45,11 @@ contract HashTimeLockedContractTest is Test {
         identityRegistry.registerParticipant(
             sender, "Commercial Bank A", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(sender);
         identityRegistry.registerParticipant(
             receiver, "Commercial Bank B", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(receiver);
         vm.stopPrank();
 
         fxAgreement = new FXAgreement(address(identityRegistry));
@@ -427,6 +429,8 @@ contract HashTimeLockedContractTest is Test {
         identityRegistry.registerParticipant(
             centralBank, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        vm.prank(admin);
+        identityRegistry.verifyParticipant(centralBank);
 
         CommitmentHashRegistry reg = new CommitmentHashRegistry(address(identityRegistry));
         vm.prank(centralBank);
@@ -446,6 +450,8 @@ contract HashTimeLockedContractTest is Test {
         identityRegistry.registerParticipant(
             centralBank, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        vm.prank(admin);
+        identityRegistry.verifyParticipant(centralBank);
         reg = new CommitmentHashRegistry(address(identityRegistry));
         htlcFb = new HashTimeLockedContract(address(identityRegistry), address(0), address(reg));
     }

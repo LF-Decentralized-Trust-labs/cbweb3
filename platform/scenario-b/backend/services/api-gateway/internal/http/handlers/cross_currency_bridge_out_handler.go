@@ -54,6 +54,10 @@ type BeneficiaryResolverIface interface {
 // VerifiedSwap carries the on-chain facts of an executed AMM swap, decoded from the
 // transaction receipt on the Hub (mirrors ammclient.VerifiedSwap).
 type VerifiedSwap struct {
+	// User is msg.sender of the swap: the address the AMM pulled TokenIn from, and therefore
+	// the only address that can hold the unspent input. Used by the residue-return handler.
+	User      string
+	TokenIn   string // ERC-20 paid into the pool — must be the source CB's W-token
 	TokenOut  string // ERC-20 the pool paid out — must be this CB's W-token
 	AmountIn  string // gross input amount per LogSwap
 	AmountOut string // output amount per LogSwap
@@ -61,8 +65,10 @@ type VerifiedSwap struct {
 }
 
 // SwapVerifierIface verifies a swap transaction on the Hub and returns its on-chain facts.
+// poolPair identifies the pair whose dedicated AMM must have emitted the LogSwap
+// (dynamic per-pair model); the verifier resolves that AMM from the PairRegistry.
 type SwapVerifierIface interface {
-	VerifySwap(ctx context.Context, txHash string) (*VerifiedSwap, error)
+	VerifySwap(ctx context.Context, txHash, poolPair string) (*VerifiedSwap, error)
 }
 
 // BridgeOutDuplicateFinderIface looks up an existing bridge-out position by swap_tx_hash.
@@ -191,7 +197,7 @@ func (h *CrossCurrencyBridgeOutHandler) HandleBridgeOut(c *fiber.Ctx) error {
 
 	// Verify the swap on the Hub: receipt exists, succeeded, and contains a LogSwap
 	// emitted by the trusted AMM contract.
-	verified, err := h.swapVerifier.VerifySwap(c.Context(), req.SwapTxHash)
+	verified, err := h.swapVerifier.VerifySwap(c.Context(), req.SwapTxHash, req.PoolPair)
 	if err != nil {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": "swap not verified on Hub: " + err.Error(),

@@ -19,6 +19,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/identity"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"github.com/ethereum/go-ethereum/common"
 	gethcrypto "github.com/ethereum/go-ethereum/crypto"
@@ -128,7 +129,17 @@ func New(cfg Config) (*grpc.Server, func(context.Context), error) {
 	if err := svc.loadHTLCsFromDB(context.Background()); err != nil {
 		return nil, nil, err
 	}
-	grpcServer := grpc.NewServer()
+	// R2-H-8: authenticate the caller and authorize the RPC. With nothing set the
+	// server runs in audit mode with NO caller authentication (existing plaintext
+	// callers keep working; audit actors come from the gateway-validated payload).
+	// The x-caller-identity header is trusted only under GRPC_AUTHZ_ALLOW_HEADER_IDENTITY
+	// (transitional). Set the GRPC_MTLS_* vars for mutual TLS; GRPC_AUTHZ_ENFORCE
+	// (which requires mTLS) rejects unauthenticated callers.
+	serverOpts, err := authz.ServerOptionsFromEnv(cfg.Logger, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("configure gRPC security: %w", err)
+	}
+	grpcServer := grpc.NewServer(serverOpts...)
 	pb.RegisterPaymentOrchestratorServiceServer(grpcServer, svc)
 	return grpcServer, svc.startRelayWorkers, nil
 }
@@ -517,6 +528,14 @@ func (s *paymentOrchestratorService) SettleHTLC(ctx context.Context, req *pb.Set
 		return nil, status.Errorf(codes.NotFound, "HTLC %q not found", req.ContractId)
 	}
 
+	// Only an HTLC counterparty may settle it (R2-H-9/H-10). Enforced server-side
+	// from the gateway-forwarded x-caller-identity; skipped for trusted internal/
+	// relay callers (no identity — authenticated by the mTLS transport boundary).
+	if perr := s.checkHTLCCounterparty(ctx, record.Sender, record.Receiver); perr != nil {
+		s.mu.Unlock()
+		return nil, perr
+	}
+
 	if record.State == domain.HTLCStateSettled {
 		// Direct contract_id match but already settled — return idempotent success.
 		s.mu.Unlock()
@@ -662,6 +681,13 @@ func (s *paymentOrchestratorService) RefundHTLC(ctx context.Context, req *pb.Ref
 	if !ok {
 		s.mu.Unlock()
 		return nil, status.Errorf(codes.NotFound, "HTLC %q not found", req.ContractId)
+	}
+
+	// Only an HTLC counterparty may refund it (R2-H-9/H-10), enforced server-side
+	// from the gateway-forwarded x-caller-identity.
+	if perr := s.checkHTLCCounterparty(ctx, record.Sender, record.Receiver); perr != nil {
+		s.mu.Unlock()
+		return nil, perr
 	}
 
 	if record.State == domain.HTLCStateRefunded {
@@ -846,7 +872,46 @@ func (s *paymentOrchestratorService) checkHTLCCounterparty(ctx context.Context, 
 	if senderBank == callerBankID || receiverBank == callerBankID {
 		return nil
 	}
+	// Structured audit log for a compliance-relevant authorization decision
+	// (Constitution Principle VI): a denial must never be swallowed silently.
+	s.logger.Warn("authorization denied: caller is not a counterparty of HTLC",
+		"caller", callerBankID, "sender_bank", senderBank, "receiver_bank", receiverBank)
 	return status.Errorf(codes.PermissionDenied, "caller is not a counterparty of this HTLC")
+}
+
+// checkFXParty returns PermissionDenied when the caller has identified themselves
+// (via x-caller-identity metadata) but is not a party — originator or counterparty
+// B — to the FX agreement. When no identity is provided the check is skipped: the
+// caller is a trusted internal/relay actor authenticated by the transport layer
+// (see authz.ServerOptionsFromEnv — mTLS + allow-list under GRPC_AUTHZ_ENFORCE).
+// Matching uses exact BankID extraction to prevent substring spoofing, and fails
+// closed on an unparseable stored identity. Emits a structured audit log on denial
+// (Constitution Principle VI). action labels the denied operation for the audit trail.
+func (s *paymentOrchestratorService) checkFXParty(ctx context.Context, record *domain.FXAgreementRecord, action string) error {
+	callerBankID := callerIdentityFromContext(ctx)
+	if callerBankID == "" {
+		return nil
+	}
+	// Parties may be stored as full Paladin identities ("op@spoke-a-bank-a") or as
+	// bare bank ids ("bank-a"); accept a match against either form. A parse failure
+	// is logged but is not by itself fatal — the raw-value comparison still applies,
+	// and a caller that matches neither form is denied (fail closed).
+	originatorBank, oErr := identity.BankID(record.Originator)
+	counterpartyBank, cErr := identity.BankID(record.CounterpartyB)
+	if oErr != nil {
+		s.logger.Warn("checkFXParty: unparseable originator identity", "originator", record.Originator, "error", oErr)
+	}
+	if cErr != nil {
+		s.logger.Warn("checkFXParty: unparseable counterparty identity", "counterparty_b", record.CounterpartyB, "error", cErr)
+	}
+	if callerBankID == originatorBank || callerBankID == counterpartyBank ||
+		callerBankID == record.Originator || callerBankID == record.CounterpartyB {
+		return nil
+	}
+	s.logger.Warn("authorization denied: caller is not a party to FX agreement",
+		"action", action, "trade_id", record.TradeID, "caller", callerBankID,
+		"originator_bank", originatorBank, "counterparty_bank", counterpartyBank)
+	return status.Errorf(codes.PermissionDenied, "caller is not a party to this FX agreement")
 }
 
 // callerIdentityFromContext extracts the Paladin identity forwarded by the API
@@ -980,6 +1045,32 @@ func (s *paymentOrchestratorService) ProposeFXAgreement(ctx context.Context, req
 	tradeID := req.TradeId
 	if tradeID == "" {
 		tradeID = newUUID()
+	}
+
+	// Bind the originator to the authenticated caller on a normal (non-on-behalf)
+	// propose: a party identity must never be trusted from the request (R2-H-9/H-10).
+	// When the gateway forwards the caller's bank id (x-caller-identity), a client-
+	// supplied originator naming a *different* bank is rejected — otherwise a caller
+	// could propose with a foreign originator and then "accept" their own trade,
+	// defeating the initiator≠acceptor guard. The relay's governance-coordinated
+	// on_behalf propose legitimately names a remote originator and is exempt (that
+	// path is gated by the on-chain governance role and the mTLS transport boundary).
+	if !req.OnBehalf {
+		if callerBankID := callerIdentityFromContext(ctx); callerBankID != "" && req.Originator != "" {
+			// The originator may arrive as a full Paladin identity
+			// ("op@spoke-a-bank-a") or as a bare bank id ("bank-a"); accept either
+			// form as long as it resolves to the authenticated caller's bank.
+			originatorBank, perr := identity.BankID(req.Originator)
+			mismatch := originatorBank != callerBankID
+			if perr != nil {
+				mismatch = req.Originator != callerBankID
+			}
+			if mismatch {
+				s.logger.Warn("authorization denied: propose originator does not match authenticated caller",
+					"trade_id", tradeID, "caller", callerBankID, "originator", req.Originator)
+				return nil, status.Error(codes.PermissionDenied, "originator must match the authenticated caller")
+			}
+		}
 	}
 
 	// A normal (non-on-behalf) propose omits `originator` — it is the calling bank. Default it
@@ -1228,6 +1319,13 @@ func (s *paymentOrchestratorService) CancelFXAgreement(ctx context.Context, req 
 		return nil, status.Errorf(codes.FailedPrecondition, "FX agreement %q is in state %s, expected PROPOSED or ACCEPTED", req.TradeId, record.State)
 	}
 
+	// Only a party to the agreement may cancel it (R2-H-9/H-10). The gateway
+	// forwards the authenticated caller's bank id in x-caller-identity; a non-party
+	// is rejected server-side rather than relying on the caller's own gateway check.
+	if err := s.checkFXParty(ctx, record, "cancel"); err != nil {
+		return nil, err
+	}
+
 	var txHash string
 	if fxClient, fxCtx, ok := s.selectFXAgreementClient(ctx, record); ok {
 		var tradeIDBytes [32]byte
@@ -1267,6 +1365,12 @@ func (s *paymentOrchestratorService) SettleFXAgreement(ctx context.Context, req 
 	}
 	if record.State != domain.FXStateAccepted {
 		return nil, status.Errorf(codes.FailedPrecondition, "FX agreement %q is in state %s, expected ACCEPTED", req.TradeId, record.State)
+	}
+
+	// Only a party to the agreement may settle it (R2-H-9/H-10), enforced
+	// server-side from the gateway-forwarded x-caller-identity.
+	if err := s.checkFXParty(ctx, record, "settle"); err != nil {
+		return nil, err
 	}
 
 	var txHash string

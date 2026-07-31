@@ -102,7 +102,9 @@ func (s *swapSvcStub) Execute(_ context.Context, _ services.SwapRequest) (*servi
 func swapApp2(svc handlers.SwapServiceIface) *fiber.App {
 	h := handlers.NewSwapHandler(svc)
 	app := fiber.New()
-	app.Post("/swap", h.SwapExactOutput)
+	// The swap handler derives the payer from authenticated claims; mount behind an
+	// injected identity as in production (route is always behind RequireCookieAuth).
+	app.Post("/swap", injectBankClaims("bank-a"), h.SwapExactOutput)
 	return app
 }
 

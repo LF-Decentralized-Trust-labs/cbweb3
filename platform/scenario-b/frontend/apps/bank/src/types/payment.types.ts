@@ -24,12 +24,35 @@ export function currencyFromTokenSymbol(tokenSymbol: string | null | undefined):
   return fiatHasSymbol ? fiatUnitLabel : "";
 }
 
-// tCeBM is denominated in the spoke's fiat currency; surface that alongside the token name.
-// e.g. "tCeBM (BRL)" for Bank A, "tCeBM (ARS)" for Bank B. The currency is sourced from the
-// on-chain token symbol (see currencyFromTokenSymbol); pass the symbol from the balance API.
+// tokenPrefixFromSymbol extracts the token part of an on-chain ERC-20 symbol — the
+// segment BEFORE the last underscore: "tCeBM_BRL" -> "tCeBM", "W-tCeBM_ARS" -> "W-tCeBM".
+// A spoke may deploy a custom symbol (spec.spoke.tokenSymbol), so the prefix is read from
+// the contract instead of assumed. Empty when no symbol is available yet.
+export function tokenPrefixFromSymbol(tokenSymbol?: string | null): string {
+  const s = tokenSymbol?.trim();
+  if (!s) return "";
+  const idx = s.lastIndexOf("_");
+  return idx > 0 ? s.slice(0, idx) : s;
+}
+
+// tokenUnitPrefix is the display name of the asset class for THIS spoke, taken from the
+// on-chain symbol: "btCeBM_BRL" -> "btCeBM", "zfCeBM_ARS" -> "zfCeBM". Use it wherever a
+// screen names the instrument (card titles, table headers, prose) so a spoke that deployed
+// a custom symbol reads consistently. fallback covers the window before the balance API
+// answers: pass "tCeBM" for the reserve token, "fCeBM" for the fiat one.
+export function tokenUnitPrefix(tokenSymbol?: string | null, fallback = "tCeBM"): string {
+  return tokenPrefixFromSymbol(tokenSymbol) || fallback;
+}
+
+// tCeBM is denominated in the spoke's fiat currency; surface that alongside the token
+// symbol, e.g. "tCeBM (BRL)" for Bank A, "tCeBM (ARS)" for Bank B — and "ztCeBM (ARS)"
+// when that spoke deployed a custom symbol. BOTH parts come from the on-chain symbol
+// (pass the one returned by the balance API); "tCeBM" is only the fallback asset-class
+// name for when the balance response has not arrived.
 export function tCeBMUnitLabel(tokenSymbol?: string | null): string {
   const code = currencyFromTokenSymbol(tokenSymbol);
-  return code ? `tCeBM (${code})` : "tCeBM";
+  const prefix = tokenPrefixFromSymbol(tokenSymbol) || "tCeBM";
+  return code ? `${prefix} (${code})` : prefix;
 }
 
 export type PaymentStatus = (typeof PaymentStatus)[keyof typeof PaymentStatus];

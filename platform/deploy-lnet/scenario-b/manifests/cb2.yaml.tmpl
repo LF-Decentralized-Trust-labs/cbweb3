@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
+# LNET deploy — Scenario B. VM ${IP_CB2} — commercial bank cb2, JOINS spoke-brazil.
+apiVersion: cbweb3b/v1
+kind: ParticipantDeployment
+metadata:
+  name: cb2
+spec:
+  scenario: "b"
+  environment: local
+  mode: join
+  topology:
+    role: commercial-bank
+  bankId: cb2
+  displayName: Commercial Bank cb2 (Brazil)
+  spoke:
+    id: spoke-brazil
+    chainId: 2022
+    currency: BRL
+  joinBundleRef: ../../bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml
+  node:
+    advertisedHost: ${IP_CB2}
+    rpc: { port: 8845 }
+    ws:  { port: 8846 }
+    p2p: { port: 30304 }
+    dataDir: bundles/scenario-b/cb2
+    validator: false
+  image: build
+  keyProvider: kms://local-emulator
+  certSource: ca://central-bank-brazil
+  relay:
+    endpoint: http://${IP_HUB}:7000
+  noc:
+    backendURL: http://${IP_CB_BRAZIL}:8090
+  frontendHost: cb2-brazil.cbweb3.l-net.io
+  launcher: enable
+  launcherPort: 5190
+  proxy: enable
+  adminUsers:
+    - { role: BANK, username: admin@cb2.l-net.io, password: change-me-local }

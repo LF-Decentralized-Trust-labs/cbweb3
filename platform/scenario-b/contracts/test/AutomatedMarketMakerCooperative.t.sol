@@ -38,9 +38,11 @@ contract AutomatedMarketMakerFeesTest is Test {
         identityRegistry.registerParticipant(
             governance, "Central Bank", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(governance);
         identityRegistry.registerParticipant(
             nonGovernance, "Commercial Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(nonGovernance);
         vm.stopPrank();
 
         amm = new AutomatedMarketMaker(address(tokenA), address(tokenB), address(identityRegistry));

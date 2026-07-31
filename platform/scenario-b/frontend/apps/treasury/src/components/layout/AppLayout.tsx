@@ -1,20 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
-import { useWebsocketStore } from "../../stores";
 
 export function AppLayout() {
-  const connect = useWebsocketStore((state) => state.connect);
-  const disconnect = useWebsocketStore((state) => state.disconnect);
-
-  useEffect(() => {
-    connect();
-    return () => disconnect();
-  }, [connect, disconnect]);
-
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-muted/30">
       <Header />

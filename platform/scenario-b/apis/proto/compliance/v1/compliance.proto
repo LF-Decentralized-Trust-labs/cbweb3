@@ -132,6 +132,50 @@ message SignParticipantCSRResponse {
   string expires_at = 2; // ISO-8601 UTC
 }
 
+message RegisterParticipantOnChainRequest {
+  string wallet_address = 1; // 0x… address to register
+  string institution_name = 2;
+  string role = 3; // e.g. "ROLE_CENTRAL_BANK"
+  string bank_code = 4; // optional, for the DB mirror / audit
+}
+
+message RegisterParticipantOnChainResponse {
+  string tx_hash = 1; // empty when already registered
+  bool already_registered = 2;
+}
+
+// RegisterCurrencyOnChain asks the hub to deploy a founding central bank's
+// bridge token (W-token) and register the sovereign currency on-chain. The
+// signer (hub admin == the CB in local) deploys the token, maps token→CB on
+// the IdentityRegistry, and registers it on the CurrencyRegistry. Idempotent.
+message RegisterCurrencyOnChainRequest {
+  string currency = 1; // e.g. "BRL"
+  string cb_address = 2; // 0x… central bank wallet address
+  string spoke_id = 3; // optional proposer identifier
+}
+
+message RegisterCurrencyOnChainResponse {
+  string symbol = 1; // W-token symbol (e.g. "W-tCeBM_BRL")
+  string token_address = 2; // deployed W-token address (empty when already registered)
+  bool already_registered = 3;
+  string tx_hash = 4; // last on-chain tx hash
+}
+
+// RegisterPairOnChain deploys the sovereign-pair AMM over the two already-
+// registered W-tokens and registers the pair (proposePair + confirmPair) via the
+// hub compliance signer. The CBs never touch the hub chain. Idempotent by pair id.
+message RegisterPairOnChainRequest {
+  string currency_a = 1; // e.g. "BRL" (resolves symbol "W-tCeBM_BRL")
+  string currency_b = 2; // e.g. "ARS"
+  string pair_id = 3; // e.g. "W-BRL-ARS"
+}
+
+message RegisterPairOnChainResponse {
+  string amm_address = 1; // deployed sovereign-pair AMM (empty when already registered)
+  bool already_registered = 2;
+  string tx_hash = 3; // last on-chain tx hash
+}
+
 // ─── Governance ───────────────────────────────────────────────────────────
 
 message ApproveKYCRequest {
@@ -208,6 +252,22 @@ service ComplianceService {
 
   rpc IssueParticipantCertificate(IssueParticipantCertificateRequest) returns (IssueParticipantCertificateResponse);
   rpc SignParticipantCSR(SignParticipantCSRRequest) returns (SignParticipantCSRResponse);
+
+  // RegisterParticipantOnChain registers a wallet as a participant directly on
+  // the IdentityRegistry (the signer must hold GOVERNANCE_ROLE). Used for
+  // machine-to-machine self-registration (e.g. a founding central bank
+  // registering its spoke) — no CSR / prior DB record required. Idempotent.
+  rpc RegisterParticipantOnChain(RegisterParticipantOnChainRequest) returns (RegisterParticipantOnChainResponse);
+
+  // RegisterCurrencyOnChain deploys a founding central bank's bridge token
+  // (W-token) and registers its sovereign currency on-chain via the hub
+  // compliance signer (hub admin). Idempotent by currency symbol.
+  rpc RegisterCurrencyOnChain(RegisterCurrencyOnChainRequest) returns (RegisterCurrencyOnChainResponse);
+
+  // RegisterPairOnChain deploys the sovereign-pair AMM over two registered
+  // W-tokens and registers the pair (proposePair + confirmPair) via the hub
+  // compliance signer. Idempotent by pair id.
+  rpc RegisterPairOnChain(RegisterPairOnChainRequest) returns (RegisterPairOnChainResponse);
 
   rpc ApproveKYC(ApproveKYCRequest) returns (ApproveKYCResponse);
   rpc ManageParticipantStatus(ManageParticipantStatusRequest) returns (ManageParticipantStatusResponse);

@@ -30,6 +30,10 @@ type EntityEnvData struct {
 	KCRealm        string
 	KCClientID     string
 	KCClientSecret string
+	// KCAudience is the expected "aud" the auth service enforces (KEYCLOAK_AUDIENCE).
+	// The realm's backend login clients carry a matching audience mapper (see
+	// keycloak.go). Empty leaves aud enforcement off (iss is still enforced).
+	KCAudience string
 
 	// Dedicated infra (per-entity).
 	PostgresContainer string
@@ -56,6 +60,10 @@ type EntityEnvData struct {
 	HTLCAddress                string
 	TokenAddress               string
 	SpokeBridgeAddress         string
+	// AMMAddress is the optional AutomatedMarketMaker address. Empty unless an AMM is
+	// deployed and recorded; when set, the CB's compliance service drives the on-chain
+	// circuit breaker instead of a database-only toggle.
+	AMMAddress string
 
 	// BesuOperatorKey is the hex private key (no 0x) the payment-orchestrator signs
 	// Besu-layer transactions with (HTLC/fCeBM). Empty disables the Besu path. In
@@ -142,6 +150,9 @@ KC_CLIENT_SECRET={{.KCClientSecret}}
 KEYCLOAK_REALM={{.KCRealm}}
 KEYCLOAK_CLIENT_ID={{.KCClientID}}
 KEYCLOAK_CLIENT_SECRET={{.KCClientSecret}}
+# Token validation: iss is derived from KEYCLOAK_BASE_URL + realm (always enforced);
+# aud is enforced when set. Backend login clients carry a matching audience mapper.
+KEYCLOAK_AUDIENCE={{.KCAudience}}
 
 # PKI (local dev)
 CA_CERT_FILE={{.CACertFile}}
@@ -159,6 +170,9 @@ FIAT_TOKEN_ADDRESS={{.FiatTokenAddress}}
 HTLC_ADDRESS={{.HTLCAddress}}
 TOKEN_ADDRESS={{.TokenAddress}}
 SPOKE_BRIDGE_ADDRESS={{.SpokeBridgeAddress}}
+# AutomatedMarketMaker (optional). When set, the CB compliance service drives the
+# on-chain circuit breaker (pause 1-of-N / resume 2-of-N); empty -> DB-only toggle.
+AMM_ADDRESS={{.AMMAddress}}
 
 # Besu-layer signing key (local dev operator; empty in prod — see BesuOperatorKey)
 BESU_OPERATOR_KEY={{.BesuOperatorKey}}

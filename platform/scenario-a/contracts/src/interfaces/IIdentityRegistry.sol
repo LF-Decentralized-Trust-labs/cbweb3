@@ -23,6 +23,11 @@ interface IIdentityRegistry {
     /// @notice Error thrown when an unverified account attempts a restricted operation.
     error ParticipantNotVerified(address account);
 
+    /// @notice Error thrown when verifyParticipant targets an account that is not in Pending.
+    /// @dev The verification step is only valid as a Pending -> Verified transition. Verifying an
+    ///      unregistered account, or one that is already Verified/Suspended/Expired, is rejected.
+    error ParticipantNotPending(address account);
+
     /// @notice Error thrown when registration data (e.g., address zero) is invalid.
     error InvalidIdentityData();
 
@@ -46,7 +51,12 @@ interface IIdentityRegistry {
     /// @return bool True if the account is Verified with a governance-capable role (CENTRAL_BANK or GOVERNANCE).
     function canGovern(address account) external view returns (bool);
 
-    /// @notice Registers a new participant. Restricted to governance authorities.
+    /// @notice Registers a new participant in the Pending state. Restricted to governance authorities.
+    /// @dev Step 1 of the two-step onboarding. Registration alone does NOT make the account
+    ///      transactable: the participant is created with KycStatus.Pending and a separate
+    ///      verifyParticipant call (by a VERIFIER_ROLE holder) is required to reach Verified.
+    ///      This enforces separation of duties — the entity that registers must not be the same
+    ///      one that approves the participant for transacting.
     /// @param account Target wallet address.
     /// @param name Legal name of the entity.
     /// @param role Assigned functional role in the network.
@@ -57,6 +67,12 @@ interface IIdentityRegistry {
         IdentityRegistryLibrary.ParticipantRole role,
         bytes32 zkPointer
     ) external;
+
+    /// @notice Verifies a previously registered participant, moving them Pending -> Verified.
+    /// @dev Step 2 of the two-step onboarding. Restricted to VERIFIER_ROLE holders. Reverts with
+    ///      ParticipantNotPending if the account is not currently in the Pending state.
+    /// @param account The wallet address to promote from Pending to Verified.
+    function verifyParticipant(address account) external;
 
     /// @notice Modifies the status of a participant (e.g., suspension).
     /// @param account The address to be updated.

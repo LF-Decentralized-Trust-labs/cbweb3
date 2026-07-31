@@ -12,6 +12,7 @@ import {
   Label,
   Separator,
   toast,
+  BackToLauncherButton,
 } from "@cbweb3/ui";
 import { Building2, LockKeyhole, ShieldCheck, Activity } from "lucide-react";
 import { useEffect } from "react";
@@ -34,8 +35,8 @@ export function LoginPage() {
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
     defaultValues: {
-      username: "noc.admin",
-      password: "NOCAdmin2026!",
+      username: "",
+      password: "",
     },
   });
 
@@ -91,6 +92,7 @@ export function LoginPage() {
 
         <Card className="mx-auto w-full max-w-md border-border/80 shadow-lg">
           <CardHeader>
+            <BackToLauncherButton className="-ml-2 mb-2 self-start" />
             <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Building2 className="h-5 w-5" />
             </div>
@@ -109,10 +111,6 @@ export function LoginPage() {
                 <Label htmlFor="password">Password</Label>
                 <Input id="password" type="password" {...form.register("password")} autoComplete="current-password" />
                 {form.formState.errors.password ? <p className="text-xs text-destructive">{form.formState.errors.password.message}</p> : null}
-              </div>
-
-              <div className="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-                Demo credentials are prefilled for local structural testing.
               </div>
 
               {error ? <p className="text-sm text-destructive">{error}</p> : null}

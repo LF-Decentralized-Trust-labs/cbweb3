@@ -112,9 +112,10 @@ func TestSetupBilateralFXAContext(t *testing.T) {
 		t.Fatalf("addresses: reg=%q fxa=%q, want 0xREG / 0xFXA", reg, fxa)
 	}
 
-	// Expect exactly: registry deploy, 2 registrations, FXAgreement deploy — in order.
-	if len(f.sends) != 4 {
-		t.Fatalf("expected 4 pgroup_sendTransaction calls, got %d", len(f.sends))
+	// Two-step onboarding: each member is registered then verified. Expect exactly:
+	// registry deploy, (register+verify) x2, FXAgreement deploy — in order.
+	if len(f.sends) != 6 {
+		t.Fatalf("expected 6 pgroup_sendTransaction calls, got %d", len(f.sends))
 	}
 
 	// 1) registry deploy: admin = deployer's resolved address.
@@ -125,16 +126,18 @@ func TestSetupBilateralFXAContext(t *testing.T) {
 		t.Errorf("registry admin = %v, want deployer addr 0xCB", in["admin"])
 	}
 
-	// 2) register central bank as CENTRAL_BANK(3).
+	// 2) register central bank as CENTRAL_BANK(3), then verify it.
 	assertRegister(t, f.sends[1], "0xCB", "3")
-	// 3) register commercial bank as COMMERCIAL_BANK(4).
-	assertRegister(t, f.sends[2], "0xITAU", "4")
+	assertVerify(t, f.sends[2], "0xCB")
+	// 3) register commercial bank as COMMERCIAL_BANK(4), then verify it.
+	assertRegister(t, f.sends[3], "0xITAU", "4")
+	assertVerify(t, f.sends[4], "0xITAU")
 
 	// 4) FXAgreement deploy wired to the in-group registry address.
-	if _, ok := f.sends[3]["bytecode"]; !ok {
-		t.Errorf("call[3] should be a deploy (has bytecode)")
+	if _, ok := f.sends[5]["bytecode"]; !ok {
+		t.Errorf("call[5] should be a deploy (has bytecode)")
 	}
-	if in := f.sends[3]["input"].(map[string]any); in["_identityRegistry"] != "0xREG" {
+	if in := f.sends[5]["input"].(map[string]any); in["_identityRegistry"] != "0xREG" {
 		t.Errorf("FXAgreement _identityRegistry = %v, want in-group registry 0xREG", in["_identityRegistry"])
 	}
 
@@ -164,11 +167,12 @@ func TestSetupBilateralFXAContext_SharedKey(t *testing.T) {
 	if _, _, err := setupBilateralFXAContext(context.Background(), srv.URL, "0xGROUP", "cb@brl", regArtifact, fxaArtifact, members, nil); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	// registry deploy + ONE register + FXAgreement deploy = 3 sends (not 4).
-	if len(f.sends) != 3 {
-		t.Fatalf("expected 3 sends (deduped register), got %d", len(f.sends))
+	// registry deploy + ONE (register+verify) + FXAgreement deploy = 4 sends.
+	if len(f.sends) != 4 {
+		t.Fatalf("expected 4 sends (deduped register+verify), got %d", len(f.sends))
 	}
 	assertRegister(t, f.sends[1], "0xSAME", "3") // CENTRAL_BANK wins the collision
+	assertVerify(t, f.sends[2], "0xSAME")
 }
 
 func assertRegister(t *testing.T, tx map[string]any, wantAccount, wantRole string) {
@@ -184,5 +188,18 @@ func assertRegister(t *testing.T, tx map[string]any, wantAccount, wantRole strin
 	}
 	if in["role"] != wantRole {
 		t.Errorf("register role = %v, want %s", in["role"], wantRole)
+	}
+}
+
+func assertVerify(t *testing.T, tx map[string]any, wantAccount string) {
+	t.Helper()
+	fn, _ := tx["function"].(map[string]any)
+	if fn == nil || fn["name"] != "verifyParticipant" {
+		t.Errorf("expected verifyParticipant, got function %v", tx["function"])
+		return
+	}
+	in := tx["input"].(map[string]any)
+	if in["account"] != wantAccount {
+		t.Errorf("verify account = %v, want %s", in["account"], wantAccount)
 	}
 }

@@ -63,6 +63,14 @@ export const authApi = {
     return mapMeToUser(me);
   },
 
+  refresh: async (): Promise<{ expiresIn: number }> => {
+    const token = await apiFetch<LoginTokenResponse>("/api/v1/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    return { expiresIn: token.expiresIn };
+  },
+
   logout: async (): Promise<void> => {
     await apiFetch<unknown>("/api/v1/auth/logout", { method: "POST" });
   },

@@ -1,18 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Cacti Liquidity Relay — entry point (Scenario B).
+ * Cacti Liquidity Relay — entry point (Scenario B, generalized for N spokes, TK-B5).
  *
- * Starts the LiquidityCommitWatcher to observe CommitMatched events from
- * LiquidityCommitRegistry on the Hub and notify configured gateways.
- *
- * Exposes a minimal REST API on CACTI_API_PORT (default 4000):
- *   GET  /api/v1/health  — liveness probe
- *
- * The @hyperledger/cactus-plugin-ledger-connector-besu plugin is initialised
- * here and attached to Express via registerWebServices, making standard
- * Cacti BesuConnector endpoints available (getPastLogs, getBlock, etc.)
- * and enabling watchBlocksV1 event streaming via Socket.IO.
+ * Boots NEUTRAL (zero spokes), hydrates the dynamic SpokeRegistry from the
+ * persisted RelayStore (+ optional SPOKES_JSON), and creates one Besu
+ * connector/watcher per spoke. New spokes register at runtime via
+ * POST /api/v1/spokes (no restart). The LiquidityCommitWatcher on the Hub and
+ * the cross-currency bridge-out relay remain; the latter routes by spoke_out
+ * and validates the AMM circuit breaker (isPaused) before forwarding.
  */
 
 import http from "http";
@@ -21,22 +17,15 @@ import { randomUUID } from "crypto";
 import { Server as SocketIoServer } from "socket.io";
 import { PluginRegistry } from "@hyperledger/cactus-core";
 import { PluginLedgerConnectorBesu } from "@hyperledger/cactus-plugin-ledger-connector-besu";
-import { config } from "./config";
+import { config, loadSpokesFromEnv } from "./config";
+import { SpokeRegistry, Spoke } from "./spoke-registry";
+import { RelayStore } from "./relay-store";
+import { createSpokeRuntimes, RuntimeFactories, SpokeRuntime } from "./spoke-runtimes";
+import { makeSpokesHandler } from "./spokes-api";
 import { createLiquidityCommitWatcherFromEnv } from "./liquidity-commit-watcher";
-import { createCrossCurrencySwapRelayFromEnv } from "./cross-currency-swap-relay";
+import { createCrossCurrencySwapRelay } from "./cross-currency-swap-relay";
+import { makeEthersIsPausedReader, checkNotPaused } from "./circuit-breaker";
 
-
-// ---------------------------------------------------------------------------
-// Hub RPC readiness
-// ---------------------------------------------------------------------------
-
-/**
- * Poll the hub Besu JSON-RPC until it answers eth_blockNumber, so the watcher is only
- * started once the chain is actually reachable. This avoids the failure mode where the
- * relay starts before (or during a restart of) the hub Besu and the watcher races a node
- * that is not yet serving requests. Bounded wait — falls through after maxWaitMs so the
- * watcher's own self-healing (request timeouts + provider reconnect) takes over.
- */
 async function waitForHubRpc(rpcUrl: string, maxWaitMs = 60_000, intervalMs = 2_000): Promise<void> {
   if (!rpcUrl) return;
   const deadline = Date.now() + maxWaitMs;
@@ -56,126 +45,132 @@ async function waitForHubRpc(rpcUrl: string, maxWaitMs = 60_000, intervalMs = 2_
         }
       }
     } catch {
-      // not ready yet — keep polling until the deadline.
+      // not ready yet
     }
     if (Date.now() >= deadline) {
-      console.warn(
-        `[cacti] hub Besu RPC not ready after ${maxWaitMs}ms — starting watcher anyway (it self-heals)`,
-      );
+      console.warn(`[cacti] hub Besu RPC not ready after ${maxWaitMs}ms — continuing (self-heals)`);
       return;
     }
-    await new Promise(r => setTimeout(r, intervalMs));
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
 
-// ---------------------------------------------------------------------------
-// Bootstrap
-// ---------------------------------------------------------------------------
-
 async function main(): Promise<void> {
-  console.log("Cacti Liquidity Relay starting (Scenario B)…");
-  console.log(`  Spoke-A RPC  : ${config.spokeA.besuRpc}`);
-  console.log(`  Spoke-A WS   : ${config.spokeA.besuWs}`);
-  console.log(`  Spoke-B RPC  : ${config.spokeB.besuRpc}`);
-  console.log(`  Spoke-B WS   : ${config.spokeB.besuWs}`);
+  console.log("Cacti Liquidity Relay starting (Scenario B, N-spokes)…");
   console.log(`  API port     : ${config.apiPort}`);
 
-  // ── Cacti PluginRegistry + Besu connectors ──────────────────────────────
   const pluginRegistry = new PluginRegistry();
+  const registry = new SpokeRegistry();
+  const store = new RelayStore(process.env["RELAY_STORE_PATH"] ?? "/data/relay-spokes.json");
 
-  const connectorSpokeA = new PluginLedgerConnectorBesu({
-    instanceId: `besu-connector-spoke-a-${randomUUID()}`,
-    rpcApiHttpHost: config.spokeA.besuRpc,
-    rpcApiWsHost: config.spokeA.besuWs,
-    pluginRegistry,
-    logLevel: "INFO",
-  });
-
-  const connectorSpokeB = new PluginLedgerConnectorBesu({
-    instanceId: `besu-connector-spoke-b-${randomUUID()}`,
-    rpcApiHttpHost: config.spokeB.besuRpc,
-    rpcApiWsHost: config.spokeB.besuWs,
-    pluginRegistry,
-    logLevel: "INFO",
-  });
-
-  await connectorSpokeA.onPluginInit();
-  console.log(`[cacti] PluginLedgerConnectorBesu spoke-a initialized (${connectorSpokeA.getInstanceId()})`);
-
-  await connectorSpokeB.onPluginInit();
-  console.log(`[cacti] PluginLedgerConnectorBesu spoke-b initialized (${connectorSpokeB.getInstanceId()})`);
-
-  // ── Start LiquidityCommitWatcher (007-bridge-based-cb-liquidity) ────────
-  // The Hub is now an independent network (chain 1337) — always use the
-  // HUB_BESU_RPC ethers provider, never Spoke-A's connector.
-  const abortController = new AbortController();
-  const lcrWatcher = createLiquidityCommitWatcherFromEnv();
-  if (lcrWatcher) {
-    // Wait for the hub chain to be reachable before polling, so a relay that comes up
-    // before (or during a restart of) the hub Besu does not race an unavailable node.
-    await waitForHubRpc(process.env["HUB_BESU_RPC"] ?? "");
-    lcrWatcher.start(abortController.signal);
-    console.log("[cacti] LiquidityCommitWatcher started");
-  } else {
-    console.warn("[cacti] LiquidityCommitWatcher not configured — relay will be idle");
-  }
-
-  // ── Cross-currency swap relay (009-commercial-cross-currency-swap) ────────
-  const crossCurrencyRelay = createCrossCurrencySwapRelayFromEnv();
-  if (crossCurrencyRelay) {
-    console.log("[cacti] CrossCurrencySwapRelay started — CB-B bridge-out relay active");
-  } else {
-    console.warn("[cacti] CrossCurrencySwapRelay not configured — cross-currency bridge-out relay disabled");
-  }
-
-  // ── Express REST API ─────────────────────────────────────────────────────
+  // ── Express + Socket.IO (created early so runtime factories can register) ──
   const app = express();
   app.use(express.json());
-
-  // Liveness / readiness
-  app.get("/api/v1/health", (_req: Request, res: Response) => {
-    res.json({
-      status: "ok",
-      uptime: process.uptime(),
-      mode: "scenario-b-liquidity",
-      watcher_active: lcrWatcher !== null,
-      cross_currency_relay_active: crossCurrencyRelay !== null,
-    });
-  });
-
-  // Cross-currency bridge-out relay (009):
-  //   POST /api/v1/cross-currency/bridge-out
-  //   Called by CB-A api-gateway after Hub AMM swap to trigger CB-B bridge-out.
-  if (crossCurrencyRelay) {
-    app.post("/api/v1/cross-currency/bridge-out", crossCurrencyRelay.handleBridgeOut);
-    console.log("[cacti] registered POST /api/v1/cross-currency/bridge-out");
-  }
-
-  // ── HTTP server ─────────────────────────────────────────────────────────
   const httpServer = http.createServer(app);
   const ioServer = new SocketIoServer(httpServer, {
     cors: { origin: "*" },
     path: "/api/v1/plugins/socket.io/",
   });
 
-  // Register Cacti connector web services (REST + watchBlocksV1 Socket.IO)
-  const endpointsA = await connectorSpokeA.registerWebServices(app, ioServer);
-  console.log(`[cacti] spoke-a registered ${endpointsA.length} web service endpoint(s)`);
-  const endpointsB = await connectorSpokeB.registerWebServices(app, ioServer);
-  console.log(`[cacti] spoke-b registered ${endpointsB.length} web service endpoint(s)`);
+  const runtimes = new Map<string, SpokeRuntime>();
+
+  // Real per-spoke factories: create + init a Besu connector and register its
+  // web services (watchBlocksV1). The "watcher" handle mirrors the connector.
+  const factories: RuntimeFactories = {
+    async createConnector(spoke: Spoke) {
+      const connector = new PluginLedgerConnectorBesu({
+        instanceId: `besu-connector-${spoke.spokeId}-${randomUUID()}`,
+        rpcApiHttpHost: spoke.besuRpc,
+        rpcApiWsHost: spoke.besuWs,
+        pluginRegistry,
+        logLevel: "INFO",
+      });
+      await connector.onPluginInit();
+      await connector.registerWebServices(app, ioServer);
+      console.log(`[cacti] connector for ${spoke.spokeId} initialized`);
+      return { connector, stop: () => connector.shutdown().catch(() => {}) };
+    },
+    async createWatcher(spoke: Spoke) {
+      // Per-spoke watcher handle (web services registered with the connector).
+      return { watcher: { spokeId: spoke.spokeId }, stop: () => {} };
+    },
+  };
+
+  async function hydrateSpoke(spoke: Spoke): Promise<void> {
+    if (runtimes.has(spoke.spokeId)) return; // idempotent: already running
+    const [rt] = await createSpokeRuntimes([spoke], factories);
+    runtimes.set(spoke.spokeId, rt);
+  }
+
+  // ── Boot neutro: hydrate registry from store + SPOKES_JSON, build runtimes ─
+  const persisted = await store.load();
+  const seeded = loadSpokesFromEnv();
+  registry.hydrate([...persisted, ...seeded]);
+  for (const spoke of registry.list()) {
+    await hydrateSpoke(spoke);
+  }
+  console.log(`[cacti] booted with ${registry.size} spoke(s)`);
+
+  // ── LiquidityCommitWatcher (Hub) ──────────────────────────────────────────
+  const abortController = new AbortController();
+  const lcrWatcher = createLiquidityCommitWatcherFromEnv();
+  if (lcrWatcher) {
+    await waitForHubRpc(process.env["HUB_BESU_RPC"] ?? "");
+    lcrWatcher.start(abortController.signal);
+    console.log("[cacti] LiquidityCommitWatcher started");
+  } else {
+    console.warn("[cacti] LiquidityCommitWatcher not configured — relay idle on hub events");
+  }
+
+  // ── Cross-currency relay: routes by spoke_out + isPaused gate ─────────────
+  const hubRpc = process.env["HUB_BESU_RPC"] ?? "";
+  const isPausedReader = makeEthersIsPausedReader(hubRpc);
+  const notPaused = (amm: string | undefined) => checkNotPaused(amm, isPausedReader);
+  const crossCurrencyRelay = createCrossCurrencySwapRelay(registry, notPaused);
+  if (crossCurrencyRelay) {
+    app.post("/api/v1/cross-currency/bridge-out", crossCurrencyRelay.handleBridgeOut);
+    console.log("[cacti] registered POST /api/v1/cross-currency/bridge-out");
+  } else {
+    console.warn("[cacti] CrossCurrencySwapRelay disabled (missing INTERNAL_RELAY_AUTH_SECRET)");
+  }
+
+  // ── Runtime spoke registration (TK-B5): POST /api/v1/spokes ───────────────
+  const spokesHandler = makeSpokesHandler({
+    registry,
+    store,
+    onRegister: (spoke) => {
+      void hydrateSpoke(spoke); // create connector/watcher without restart
+    },
+  });
+  app.post("/api/v1/spokes", (req: Request, res: Response) => {
+    void spokesHandler({ body: req.body }, {
+      status: (c: number) => { res.status(c); return res as never; },
+      json: (p: unknown) => res.json(p),
+    });
+  });
+  console.log("[cacti] registered POST /api/v1/spokes");
+
+  // Liveness
+  app.get("/api/v1/health", (_req: Request, res: Response) => {
+    res.json({
+      status: "ok",
+      uptime: process.uptime(),
+      mode: "scenario-b-liquidity",
+      spokes: registry.size,
+      watcher_active: lcrWatcher !== null,
+      cross_currency_relay_active: crossCurrencyRelay !== null,
+    });
+  });
 
   httpServer.listen(config.apiPort, () => {
     console.log(`Cacti Liquidity Relay API listening on :${config.apiPort}`);
   });
 
-  // ── Graceful shutdown ───────────────────────────────────────────────────
   const shutdown = (): void => {
     console.log("Shutting down…");
     abortController.abort();
     lcrWatcher?.stop();
-    // crossCurrencyRelay is stateless — no explicit stop needed.
-    connectorSpokeA.shutdown().catch(() => {});
-    connectorSpokeB.shutdown().catch(() => {});
+    for (const rt of runtimes.values()) rt.stop();
     ioServer.close();
     httpServer.close(() => process.exit(0));
   };

@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"log"
+	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/registry"
 	pki "github.com/LACNetNetworks/cbweb3-platform/backend/shared/identity"
 	authv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -46,7 +49,15 @@ type identityService struct {
 // New builds a configured gRPC server and registers all identity handlers.
 // ns is the NonceStore used for PKI 2FA nonces; use noncestore.NewInMemoryStore()
 // for dev or noncestore.NewRedisStore() for production.
-func New(kc keycloak.Client, kmsProvider kms.Provider, compliance complianceclient.Client, bc blockchainRegistry, caCertPEM string, ns noncestore.NonceStore) *grpc.Server {
+//
+// R2-H-8: the server installs authorization interceptors (and mutual TLS when the
+// GRPC_MTLS_* env vars are set). With nothing set it runs in audit mode with NO
+// caller authentication so existing plaintext callers keep working; the
+// x-caller-identity header is trusted only under GRPC_AUTHZ_ALLOW_HEADER_IDENTITY
+// (transitional). GRPC_AUTHZ_ENFORCE (which requires mTLS) rejects unauthenticated
+// callers. An error is returned on a fail-open misconfiguration (partial mTLS
+// material, or enforcement requested without mTLS).
+func New(kc keycloak.Client, kmsProvider kms.Provider, compliance complianceclient.Client, bc blockchainRegistry, caCertPEM string, ns noncestore.NonceStore) (*grpc.Server, error) {
 	svc := &identityService{
 		keycloak:         kc,
 		kms:              kmsProvider,
@@ -55,9 +66,14 @@ func New(kc keycloak.Client, kmsProvider kms.Provider, compliance complianceclie
 		caCertPEM:        caCertPEM,
 		nonceStore:       ns,
 	}
-	grpcServer := grpc.NewServer()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	serverOpts, err := authz.ServerOptionsFromEnv(logger, nil)
+	if err != nil {
+		return nil, err
+	}
+	grpcServer := grpc.NewServer(serverOpts...)
 	authv1.RegisterAuthServiceServer(grpcServer, svc)
-	return grpcServer
+	return grpcServer, nil
 }
 
 // --- Auth handlers ---
@@ -295,9 +311,15 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *authv1.On
 	// static CB_PRIVATE_KEY (StaticKeySigner). Commercial banks do NOT
 	// perform on-chain registration directly; they proxy via CENTRAL_BANK_API_URL.
 	if domain.RequiresOnChain(req.Role) && resp.WalletAddress != "" {
+		// Two-step onboarding (R1-10.6 / R2-10.6): registerParticipant only creates the
+		// participant in Pending; a follow-up verifyParticipant (VERIFIER_ROLE) is required
+		// before it can transact. The CB signer holds both roles (see role-separation runbook).
 		txHash, chainErr := s.blockchainClient.RegisterParticipant(ctx, resp.WalletAddress, displayName, req.Role, [32]byte{})
 		if chainErr != nil {
 			return nil, status.Errorf(codes.Internal, "onboard: on-chain registration: %v", chainErr)
+		}
+		if _, verifyErr := s.blockchainClient.VerifyParticipant(ctx, resp.WalletAddress); verifyErr != nil {
+			return nil, status.Errorf(codes.Internal, "onboard: on-chain verification: %v", verifyErr)
 		}
 		resp.TxHash = txHash
 	}

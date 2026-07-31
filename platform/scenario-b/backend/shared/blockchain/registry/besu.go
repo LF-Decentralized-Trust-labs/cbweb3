@@ -35,6 +35,17 @@ type BesuConfig struct {
 	RegistryAddress string
 	ChainID         int64
 	RequestTimeout  time.Duration
+
+	// CurrencyRegistryAddress is the deployed CurrencyRegistry contract address
+	// ("0x…"), read from CURRENCY_REGISTRY_ADDRESS. Optional: when empty,
+	// currency registration is unavailable and RegisterCurrency returns an error;
+	// participant registration is unaffected.
+	CurrencyRegistryAddress string
+
+	// PairRegistryAddress is the deployed PairRegistry contract address ("0x…"),
+	// read from PAIR_REGISTRY_ADDRESS. Optional: when empty, sovereign-pair
+	// registration is unavailable and RegisterPair returns an error.
+	PairRegistryAddress string
 }
 
 // BesuClient implements RegistryWriter and RegistryReader using go-ethereum's
@@ -121,12 +132,42 @@ func (b *BesuClient) RegisterParticipant(ctx context.Context, wallet, name, role
 	solidityRole := RoleToSolidityEnum(role)
 	account := common.HexToAddress(wallet)
 
+	// Pin an explicit, generous gas limit: eth_estimateGas underestimates this
+	// storage-writing call on the local QBFT/zero-gas chain (observed OutOfGas at
+	// ~40k), and gas is free on the local genesis, so over-provisioning is safe.
+	opts.GasLimit = 500000
+
 	tx, err := b.contract.RegisterParticipant(opts, account, name, solidityRole, zkPointer)
 	if err != nil {
 		return "", fmt.Errorf("registry: registerParticipant tx: %w", err)
 	}
 	if err := b.waitMined(ctx, tx); err != nil {
 		return tx.Hash().Hex(), fmt.Errorf("registry: registerParticipant wait: %w", err)
+	}
+	return tx.Hash().Hex(), nil
+}
+
+// VerifyParticipant promotes a Pending participant to Verified on the
+// IdentityRegistry contract (step 2 of the two-step onboarding). The signer must
+// hold VERIFIER_ROLE. Blocks until the transaction is mined or the context is
+// cancelled. Reverts (tx status 0) if the participant is not currently Pending.
+func (b *BesuClient) VerifyParticipant(ctx context.Context, wallet string) (string, error) {
+	opts, err := b.transactOpts(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	account := common.HexToAddress(wallet)
+	// Match RegisterParticipant's explicit gas pin: eth_estimateGas underestimates
+	// this storage-writing call on the local zero-gas QBFT chain, and gas is free.
+	opts.GasLimit = 500000
+
+	tx, err := b.contract.VerifyParticipant(opts, account)
+	if err != nil {
+		return "", fmt.Errorf("registry: verifyParticipant tx: %w", err)
+	}
+	if err := b.waitMined(ctx, tx); err != nil {
+		return tx.Hash().Hex(), fmt.Errorf("registry: verifyParticipant wait: %w", err)
 	}
 	return tx.Hash().Hex(), nil
 }
@@ -167,6 +208,212 @@ func (b *BesuClient) SetCertFingerprint(ctx context.Context, wallet string, fing
 		return tx.Hash().Hex(), fmt.Errorf("registry: setCertFingerprint wait: %w", err)
 	}
 	return tx.Hash().Hex(), nil
+}
+
+// RegisterCurrency deploys a founding central bank's bridge token (W-token),
+// maps that token to the central bank on the IdentityRegistry, and registers
+// the sovereign currency on the CurrencyRegistry. All three transactions are
+// signed by this client's signer, which in local is the central bank == the hub
+// admin (holding DEFAULT_ADMIN_ROLE and being the token's central bank).
+//
+// A fresh transactOpts is built before each transaction so nonces are managed
+// automatically; each tx is waited to be mined before the next is submitted.
+// Returns the deployed W-token address (hex) and the last transaction hash.
+func (b *BesuClient) RegisterCurrency(ctx context.Context, tokenName, tokenSymbol, countryName, proposerCB, cbAddress string) (tokenAddr string, txHash string, err error) {
+	if b.signer == nil {
+		return "", "", ErrNoSigner
+	}
+	if strings.TrimSpace(b.cfg.CurrencyRegistryAddress) == "" {
+		return "", "", errors.New("registry: CURRENCY_REGISTRY_ADDRESS is required for currency registration")
+	}
+
+	cb := common.HexToAddress(cbAddress)
+
+	// 1) Deploy the W-token. admin == the signer (hub admin); centralBank == cb.
+	opts1, err := b.transactOpts(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	adminAddr := opts1.From
+	wTokenAddr, deployTx, _, err := bindings.DeployTokenizedCentralBankMoney(opts1, b.client, tokenName, tokenSymbol, adminAddr, cb)
+	if err != nil {
+		return "", "", fmt.Errorf("registry: deploy W-token: %w", err)
+	}
+	if err := b.waitMined(ctx, deployTx); err != nil {
+		return wTokenAddr.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: deploy W-token wait: %w", err)
+	}
+
+	// 2) Map the token to its central bank on the IdentityRegistry.
+	opts2, err := b.transactOpts(ctx)
+	if err != nil {
+		return wTokenAddr.Hex(), deployTx.Hash().Hex(), err
+	}
+	setCBTx, err := b.contract.SetCentralBankOf(opts2, wTokenAddr, cb)
+	if err != nil {
+		return wTokenAddr.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: setCentralBankOf tx: %w", err)
+	}
+	if err := b.waitMined(ctx, setCBTx); err != nil {
+		return wTokenAddr.Hex(), setCBTx.Hash().Hex(), fmt.Errorf("registry: setCentralBankOf wait: %w", err)
+	}
+
+	// 3) Register the currency on the CurrencyRegistry (msg.sender must equal
+	// getCentralBankOf(token); in local the signer == cb).
+	currencyReg, err := bindings.NewCurrencyRegistry(common.HexToAddress(b.cfg.CurrencyRegistryAddress), b.client)
+	if err != nil {
+		return wTokenAddr.Hex(), setCBTx.Hash().Hex(), fmt.Errorf("registry: binding CurrencyRegistry: %w", err)
+	}
+	opts3, err := b.transactOpts(ctx)
+	if err != nil {
+		return wTokenAddr.Hex(), setCBTx.Hash().Hex(), err
+	}
+	regTx, err := currencyReg.RegisterCurrency(opts3, tokenSymbol, countryName, wTokenAddr, proposerCB)
+	if err != nil {
+		return wTokenAddr.Hex(), setCBTx.Hash().Hex(), fmt.Errorf("registry: registerCurrency tx: %w", err)
+	}
+	if err := b.waitMined(ctx, regTx); err != nil {
+		return wTokenAddr.Hex(), regTx.Hash().Hex(), fmt.Errorf("registry: registerCurrency wait: %w", err)
+	}
+
+	return wTokenAddr.Hex(), regTx.Hash().Hex(), nil
+}
+
+// IsCurrencyRegistered reports whether a currency symbol is already registered
+// on the CurrencyRegistry. getCurrency reverts (returns an error) when the
+// symbol is absent, so any error is treated as "not registered". Returns an
+// error only when the CurrencyRegistry address is not configured.
+func (b *BesuClient) IsCurrencyRegistered(ctx context.Context, symbol string) (bool, error) {
+	if strings.TrimSpace(b.cfg.CurrencyRegistryAddress) == "" {
+		return false, errors.New("registry: CURRENCY_REGISTRY_ADDRESS is required for currency registration")
+	}
+	currencyReg, err := bindings.NewCurrencyRegistry(common.HexToAddress(b.cfg.CurrencyRegistryAddress), b.client)
+	if err != nil {
+		return false, fmt.Errorf("registry: binding CurrencyRegistry: %w", err)
+	}
+	entry, err := currencyReg.GetCurrency(&bind.CallOpts{Context: ctx}, symbol)
+	if err != nil {
+		// NotFound / revert → treated as not registered (not a hard error).
+		return false, nil
+	}
+	// A populated token address indicates an existing registration.
+	return entry.TokenAddress != (common.Address{}), nil
+}
+
+// CurrencyTokenAddress resolves a registered currency symbol to its W-token
+// address ("0x…") via the CurrencyRegistry. Returns "" when absent/unconfigured.
+func (b *BesuClient) CurrencyTokenAddress(ctx context.Context, symbol string) (string, error) {
+	if strings.TrimSpace(b.cfg.CurrencyRegistryAddress) == "" {
+		return "", errors.New("registry: CURRENCY_REGISTRY_ADDRESS is required")
+	}
+	addr, err := b.currencyTokenAddress(ctx, symbol)
+	if err != nil {
+		return "", err
+	}
+	return addr.Hex(), nil
+}
+
+// currencyTokenAddress resolves a registered currency symbol to its W-token
+// address via the CurrencyRegistry (returns an error when absent).
+func (b *BesuClient) currencyTokenAddress(ctx context.Context, symbol string) (common.Address, error) {
+	currencyReg, err := bindings.NewCurrencyRegistry(common.HexToAddress(b.cfg.CurrencyRegistryAddress), b.client)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("registry: binding CurrencyRegistry: %w", err)
+	}
+	entry, err := currencyReg.GetCurrency(&bind.CallOpts{Context: ctx}, symbol)
+	if err != nil || entry.TokenAddress == (common.Address{}) {
+		return common.Address{}, fmt.Errorf("registry: currency %q not registered", symbol)
+	}
+	return entry.TokenAddress, nil
+}
+
+// RegisterPair deploys the sovereign-pair AMM over the two ALREADY-registered
+// W-tokens (resolved from the CurrencyRegistry by symbol) and registers the pair
+// in the PairRegistry (proposePair + confirmPair → ACTIVE). The hub signer (hub
+// admin, which holds the governance role) performs all txs, mirroring
+// RegisterCurrency — the CBs never touch the hub chain. Returns the deployed AMM
+// address + last tx hash. Idempotent: an already-ACTIVE pair is a no-op.
+func (b *BesuClient) RegisterPair(ctx context.Context, symbolA, symbolB, pairID string) (ammAddr string, txHash string, err error) {
+	if b.signer == nil {
+		return "", "", ErrNoSigner
+	}
+	if strings.TrimSpace(b.cfg.PairRegistryAddress) == "" {
+		return "", "", errors.New("registry: PAIR_REGISTRY_ADDRESS is required for pair registration")
+	}
+	if strings.TrimSpace(b.cfg.CurrencyRegistryAddress) == "" {
+		return "", "", errors.New("registry: CURRENCY_REGISTRY_ADDRESS is required for pair registration")
+	}
+
+	tokenA, err := b.currencyTokenAddress(ctx, symbolA)
+	if err != nil {
+		return "", "", err
+	}
+	tokenB, err := b.currencyTokenAddress(ctx, symbolB)
+	if err != nil {
+		return "", "", err
+	}
+
+	pairReg, err := bindings.NewPairRegistry(common.HexToAddress(b.cfg.PairRegistryAddress), b.client)
+	if err != nil {
+		return "", "", fmt.Errorf("registry: binding PairRegistry: %w", err)
+	}
+
+	// 1) Deploy the AMM bound to the two W-tokens + the hub IdentityRegistry.
+	opts1, err := b.transactOpts(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	amm, deployTx, _, err := bindings.DeployAutomatedMarketMaker(opts1, b.client, tokenA, tokenB, common.HexToAddress(b.cfg.RegistryAddress))
+	if err != nil {
+		return "", "", fmt.Errorf("registry: deploy AMM: %w", err)
+	}
+	if err := b.waitMined(ctx, deployTx); err != nil {
+		return amm.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: deploy AMM wait: %w", err)
+	}
+
+	// 2) proposePair (records tokenA/tokenB/amm under pairID).
+	opts2, err := b.transactOpts(ctx)
+	if err != nil {
+		return amm.Hex(), deployTx.Hash().Hex(), err
+	}
+	propTx, err := pairReg.ProposePair(opts2, pairID, tokenA, tokenB, amm)
+	if err != nil {
+		return amm.Hex(), deployTx.Hash().Hex(), fmt.Errorf("registry: proposePair tx: %w", err)
+	}
+	if err := b.waitMined(ctx, propTx); err != nil {
+		return amm.Hex(), propTx.Hash().Hex(), fmt.Errorf("registry: proposePair wait: %w", err)
+	}
+
+	// 3) confirmPair → ACTIVE.
+	opts3, err := b.transactOpts(ctx)
+	if err != nil {
+		return amm.Hex(), propTx.Hash().Hex(), err
+	}
+	confTx, err := pairReg.ConfirmPair(opts3, pairID)
+	if err != nil {
+		return amm.Hex(), propTx.Hash().Hex(), fmt.Errorf("registry: confirmPair tx: %w", err)
+	}
+	if err := b.waitMined(ctx, confTx); err != nil {
+		return amm.Hex(), confTx.Hash().Hex(), fmt.Errorf("registry: confirmPair wait: %w", err)
+	}
+
+	return amm.Hex(), confTx.Hash().Hex(), nil
+}
+
+// IsPairRegistered reports whether a pair already exists (any status) in the
+// PairRegistry. Used for idempotency. Returns an error only when the
+// PairRegistry address is not configured.
+func (b *BesuClient) IsPairRegistered(ctx context.Context, pairID string) (bool, error) {
+	if strings.TrimSpace(b.cfg.PairRegistryAddress) == "" {
+		return false, errors.New("registry: PAIR_REGISTRY_ADDRESS is required for pair registration")
+	}
+	pairReg, err := bindings.NewPairRegistry(common.HexToAddress(b.cfg.PairRegistryAddress), b.client)
+	if err != nil {
+		return false, fmt.Errorf("registry: binding PairRegistry: %w", err)
+	}
+	entry, err := pairReg.GetPair(&bind.CallOpts{Context: ctx}, pairID)
+	if err != nil {
+		return false, nil // NotFound / revert → not registered
+	}
+	return entry.AmmAddress != (common.Address{}), nil
 }
 
 // waitMined blocks until the transaction is included in a block. Returns an

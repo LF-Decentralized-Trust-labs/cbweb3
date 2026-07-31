@@ -32,6 +32,7 @@ contract CommitmentHashRegistryTest is Test {
         identityRegistry.registerParticipant(
             governance, "Governance", IdentityRegistryLibrary.ParticipantRole.CENTRAL_BANK, bytes32(0)
         );
+        identityRegistry.verifyParticipant(governance);
         vm.stopPrank();
 
         // Deploy CommitmentHashRegistry
