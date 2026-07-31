@@ -50,7 +50,10 @@ func (m *mockLiquidityService) CancelCommit(_ context.Context, _ string, provide
 	return m.cancelErr
 }
 
-func TestCancelCommit_ProviderMismatchRejected(t *testing.T) {
+// TestCancelCommit_DivergentQueryIgnored: the provider_id query param must never be
+// trusted. When it diverges from the authenticated identity the cancel still
+// proceeds, but for the *authenticated* provider, not the query value.
+func TestCancelCommit_DivergentQueryIgnored(t *testing.T) {
 	svc := &mockLiquidityService{}
 	h := handlers.NewLiquidityHandler(svc)
 
@@ -61,8 +64,26 @@ func TestCancelCommit_ProviderMismatchRejected(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v2/amm/liquidity/commits/cm1?provider_id=bank-b", nil)
 	resp, err := app.Test(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
-	assert.False(t, svc.cancelCalled, "service must not be invoked on identity mismatch")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.True(t, svc.cancelCalled, "service must be invoked")
+	assert.Equal(t, "bank-a", svc.cancelProviderID, "provider must be the authenticated identity, not the query value")
+}
+
+// TestCancelCommit_NoClaimsRejected: with no resolvable identity the cancel must
+// fail closed with 401 and never reach the service (no BANK_CODE fallback set).
+func TestCancelCommit_NoClaimsRejected(t *testing.T) {
+	svc := &mockLiquidityService{}
+	h := handlers.NewLiquidityHandler(svc)
+
+	app := fiber.New()
+	// No claims middleware, and a query provider_id that must NOT be honored.
+	app.Delete("/api/v2/amm/liquidity/commits/:commit_id", h.CancelCommit)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v2/amm/liquidity/commits/cm1?provider_id=bank-b", nil)
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	assert.False(t, svc.cancelCalled, "service must not be invoked without an authenticated identity")
 }
 
 func TestCancelCommit_DerivesProviderFromClaims(t *testing.T) {

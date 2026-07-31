@@ -834,7 +834,21 @@ func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
 			"invalid_identities": invalid,
 		})
 	}
-	result, err := h.payment.ProposeFXAgreement(c.Context(), &pb.ProposeFXAgreementRequest{
+	// Propagate the authenticated caller identity so the orchestrator binds the
+	// originator to the caller and rejects a client-supplied foreign originator
+	// (R2-H-9/H-10). on_behalf is a governance/relay operation (direct gRPC) and is
+	// never honored from this user-facing route.
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok || claims.Subject == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
+	}
+	callerBankID := claims.BankID
+	if callerBankID == "" {
+		callerBankID = h.bankCode
+	}
+	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
+
+	result, err := h.payment.ProposeFXAgreement(ctx, &pb.ProposeFXAgreementRequest{
 		TradeId:         req.TradeID,
 		CounterpartyB:   req.CounterpartyB,
 		Originator:      req.Originator,
@@ -851,7 +865,7 @@ func (h *PaymentHandler) ProposeFXAgreement(c *fiber.Ctx) error {
 		DestSpokeId:     req.DestSpokeID,
 		SourceReceiver:  req.SourceReceiver,
 		DestReceiver:    req.DestReceiver,
-		OnBehalf:        req.OnBehalf,
+		OnBehalf:        false,
 	})
 	if err != nil {
 		return grpcErrorToHTTP(c, err)
@@ -864,11 +878,10 @@ func (h *PaymentHandler) AcceptFXAgreement(c *fiber.Ctx) error {
 	if tradeID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tradeId is required"})
 	}
-	var req struct {
-		OnBehalf bool `json:"on_behalf"`
-	}
-	_ = c.BodyParser(&req)
-
+	// on_behalf is a governance operation (on-chain acceptOnBehalf, GOVERNANCE-only)
+	// driven by the CB relay over a direct gRPC call — never through this
+	// user-facing route. Do NOT read it from the client body: honoring it here would
+	// let any authenticated caller bypass the initiator≠acceptor check (R2-H-9/H-10).
 	claims, ok := c.Locals("claims").(domain.TokenClaims)
 	if !ok || claims.Subject == "" {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
@@ -879,7 +892,7 @@ func (h *PaymentHandler) AcceptFXAgreement(c *fiber.Ctx) error {
 	}
 	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
 
-	result, err := h.payment.AcceptFXAgreement(ctx, tradeID, req.OnBehalf)
+	result, err := h.payment.AcceptFXAgreement(ctx, tradeID, false)
 	if err != nil {
 		return grpcErrorToHTTP(c, err)
 	}
@@ -891,11 +904,9 @@ func (h *PaymentHandler) RejectFXAgreement(c *fiber.Ctx) error {
 	if tradeID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tradeId is required"})
 	}
-	var req struct {
-		OnBehalf bool `json:"on_behalf"`
-	}
-	_ = c.BodyParser(&req)
-
+	// on_behalf is a governance operation (on-chain rejectOnBehalf, GOVERNANCE-only)
+	// driven by the CB relay over a direct gRPC call — never through this
+	// user-facing route. Do NOT read it from the client body (R2-H-9/H-10).
 	claims, ok := c.Locals("claims").(domain.TokenClaims)
 	if !ok || claims.Subject == "" {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "authentication required"})
@@ -906,7 +917,7 @@ func (h *PaymentHandler) RejectFXAgreement(c *fiber.Ctx) error {
 	}
 	ctx := metadata.AppendToOutgoingContext(c.Context(), "x-caller-identity", callerBankID)
 
-	result, err := h.payment.RejectFXAgreement(ctx, tradeID, req.OnBehalf)
+	result, err := h.payment.RejectFXAgreement(ctx, tradeID, false)
 	if err != nil {
 		return grpcErrorToHTTP(c, err)
 	}
