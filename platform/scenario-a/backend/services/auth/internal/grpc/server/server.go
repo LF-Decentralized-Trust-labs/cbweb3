@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"log"
+	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -49,9 +51,12 @@ type identityService struct {
 // for dev or noncestore.NewRedisStore() for production.
 //
 // R2-H-8: the server installs authorization interceptors (and mutual TLS when the
-// GRPC_MTLS_* env vars are set). It defaults to audit mode over the existing
-// transport; set GRPC_AUTHZ_ENFORCE to reject unauthenticated callers. An error
-// is returned only when TLS material is misconfigured.
+// GRPC_MTLS_* env vars are set). With nothing set it runs in audit mode with NO
+// caller authentication so existing plaintext callers keep working; the
+// x-caller-identity header is trusted only under GRPC_AUTHZ_ALLOW_HEADER_IDENTITY
+// (transitional). GRPC_AUTHZ_ENFORCE (which requires mTLS) rejects unauthenticated
+// callers. An error is returned on a fail-open misconfiguration (partial mTLS
+// material, or enforcement requested without mTLS).
 func New(kc keycloak.Client, kmsProvider kms.Provider, compliance complianceclient.Client, bc blockchainRegistry, caCertPEM string, ns noncestore.NonceStore) (*grpc.Server, error) {
 	svc := &identityService{
 		keycloak:         kc,
@@ -61,7 +66,8 @@ func New(kc keycloak.Client, kmsProvider kms.Provider, compliance complianceclie
 		caCertPEM:        caCertPEM,
 		nonceStore:       ns,
 	}
-	serverOpts, err := authz.ServerOptionsFromEnv(nil, nil)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	serverOpts, err := authz.ServerOptionsFromEnv(logger, nil)
 	if err != nil {
 		return nil, err
 	}

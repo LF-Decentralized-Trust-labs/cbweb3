@@ -26,6 +26,11 @@ type Options struct {
 	//     because handlers derive the audit actor from the context identity (empty
 	//     here) instead of the request payload.
 	Enforce bool
+	// Anonymous disables caller authentication entirely. It is the transitional
+	// default when neither mTLS nor header identity is configured: the interceptors
+	// pass the call through without establishing an identity, so audit actors derive
+	// from the (gateway-validated) request payload. Never combine with Enforce.
+	Anonymous bool
 	// Logger, when set, records denied and audit-tolerated events. Optional.
 	Logger *slog.Logger
 }
@@ -49,6 +54,11 @@ func (o Options) policy() Policy {
 // RPC must be rejected. In audit mode a failure returns the original context and
 // a nil error (the call proceeds unauthenticated).
 func (o Options) authenticate(ctx context.Context, fullMethod string) (context.Context, error) {
+	// Transitional anonymous mode: no authenticator is configured. Pass through
+	// without establishing an identity (audit actors fall back to the payload).
+	if o.Anonymous {
+		return ctx, nil
+	}
 	id, err := o.authenticator().Authenticate(ctx)
 	if err == nil {
 		err = o.policy().Authorize(ctx, id, fullMethod)
@@ -65,6 +75,12 @@ func (o Options) authenticate(ctx context.Context, fullMethod string) (context.C
 				"method", fullMethod, "error", err)
 		}
 		return ctx, nil
+	}
+	if o.Logger != nil {
+		// Record how the caller was authenticated so a header-asserted actor is
+		// distinguishable from an mTLS-attested one in the audit/access logs.
+		o.Logger.Info("grpc authz: authenticated call",
+			"rpc", fullMethod, "subject", id.Subject, "auth_method", id.Method)
 	}
 	return NewContext(ctx, id), nil
 }

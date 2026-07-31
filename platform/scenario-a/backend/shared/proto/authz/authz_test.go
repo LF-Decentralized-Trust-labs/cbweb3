@@ -250,3 +250,108 @@ func TestUnaryInterceptor_Enforce_PropagatesAuthenticatorError(t *testing.T) {
 		t.Fatalf("expected authenticator error propagated, got %v", err)
 	}
 }
+
+// --- Anonymous (transitional default) mode ----------------------------------
+
+func TestUnaryInterceptor_Anonymous_PassesThroughWithoutIdentity(t *testing.T) {
+	var seen context.Context
+	interceptor := UnaryServerInterceptor(Options{Anonymous: true})
+	// Even with a caller-settable header present, anonymous mode must not derive an
+	// identity from it — audit actors fall back to the payload downstream.
+	ctx := headerCtx(HeaderMetadataKey, "attacker")
+	resp, err := interceptor(ctx, nil, unaryInfo("/svc/Mint"), passHandler(&seen))
+	if err != nil {
+		t.Fatalf("anonymous mode must not reject: %v", err)
+	}
+	if resp != "ok" {
+		t.Fatal("handler not invoked in anonymous mode")
+	}
+	if got := Actor(seen); got != "" {
+		t.Fatalf("anonymous mode must not inject an identity, got %q", got)
+	}
+}
+
+// --- ServerOptionsFromEnv posture decisions ---------------------------------
+
+func TestOptionsFromEnv_DefaultIsAnonymousAndUnenforced(t *testing.T) {
+	// No env set (the state of every current deployment): no TLS, no authenticator,
+	// and enforcement off — the server accepts existing plaintext callers.
+	opts, creds, err := optionsFromEnv(nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creds != nil {
+		t.Fatal("expected no TLS credentials by default")
+	}
+	if !opts.Anonymous {
+		t.Fatal("expected anonymous transitional default")
+	}
+	if opts.Enforce {
+		t.Fatal("enforcement must be off by default")
+	}
+}
+
+func TestOptionsFromEnv_HeaderIdentityIsOptIn(t *testing.T) {
+	t.Setenv(EnvAllowHeader, "true")
+	opts, creds, err := optionsFromEnv(nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creds != nil {
+		t.Fatal("header identity must not enable TLS")
+	}
+	if opts.Anonymous {
+		t.Fatal("header opt-in must establish an authenticator, not anonymous mode")
+	}
+	if _, ok := opts.Authenticator.(HeaderAuthenticator); !ok {
+		t.Fatalf("expected HeaderAuthenticator, got %T", opts.Authenticator)
+	}
+}
+
+func TestOptionsFromEnv_PartialMTLSIsRejected(t *testing.T) {
+	t.Setenv(EnvCertFile, "/pki/service.crt")
+	// KEY and CA unset: a partial config must fail closed, not downgrade to plaintext.
+	if _, _, err := optionsFromEnv(nil, nil); err == nil {
+		t.Fatal("expected error for partial mTLS configuration")
+	}
+}
+
+func TestOptionsFromEnv_EnforceWithoutMTLSIsRejected(t *testing.T) {
+	t.Setenv(EnvEnforce, "true")
+	// Enforcing over plaintext would only gate an attacker-settable header.
+	if _, _, err := optionsFromEnv(nil, nil); err == nil {
+		t.Fatal("expected error: enforce requires mTLS")
+	}
+}
+
+func TestOptionsFromEnv_AllowedCallersBuildsAllowList(t *testing.T) {
+	t.Setenv(EnvAllowHeader, "true")
+	t.Setenv(EnvAllowedCallers, " api-gateway , payment-orchestrator ")
+	opts, _, err := optionsFromEnv(nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	al, ok := opts.Policy.(AllowList)
+	if !ok {
+		t.Fatalf("expected AllowList policy, got %T", opts.Policy)
+	}
+	if !al.Subjects["api-gateway"] || !al.Subjects["payment-orchestrator"] {
+		t.Fatalf("allow-list missing expected subjects: %v", al.Subjects)
+	}
+	if al.Subjects[""] {
+		t.Fatal("allow-list must not contain an empty subject")
+	}
+}
+
+func TestOptionsFromEnv_ExplicitPolicyWinsOverAllowedCallers(t *testing.T) {
+	t.Setenv(EnvAllowedCallers, "api-gateway")
+	explicit := AllowList{Subjects: map[string]bool{"only-me": true}}
+	opts, _, err := optionsFromEnv(nil, explicit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	al, ok := opts.Policy.(AllowList)
+	if !ok || !al.Subjects["only-me"] || al.Subjects["api-gateway"] {
+		t.Fatalf("explicit policy argument must win, got %#v", opts.Policy)
+	}
+}

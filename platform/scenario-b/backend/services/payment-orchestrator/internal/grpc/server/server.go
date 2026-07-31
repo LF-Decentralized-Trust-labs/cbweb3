@@ -52,10 +52,13 @@ type Config struct {
 }
 
 // New builds a configured gRPC server with all payment-orchestrator handlers.
-// R2-H-8: the returned server installs authorization interceptors (and mutual
-// TLS when the GRPC_MTLS_* env vars are set). It defaults to audit mode over the
-// existing transport; set GRPC_AUTHZ_ENFORCE to reject unauthenticated callers.
-// An error is returned only when TLS material is misconfigured.
+// R2-H-8: the returned server installs authorization interceptors (and mutual TLS
+// when the GRPC_MTLS_* env vars are set). With nothing set it runs in audit mode
+// with NO caller authentication so existing plaintext callers keep working; the
+// x-caller-identity header is trusted only under GRPC_AUTHZ_ALLOW_HEADER_IDENTITY
+// (transitional). GRPC_AUTHZ_ENFORCE (which requires mTLS) rejects unauthenticated
+// callers. An error is returned on a fail-open misconfiguration (partial mTLS
+// material, or enforcement requested without mTLS).
 func New(cfg Config) (*grpc.Server, error) {
 	rateTol := cfg.RateTolPct
 	if rateTol <= 0 {

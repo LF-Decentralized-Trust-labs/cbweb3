@@ -129,9 +129,12 @@ func New(cfg Config) (*grpc.Server, func(context.Context), error) {
 	if err := svc.loadHTLCsFromDB(context.Background()); err != nil {
 		return nil, nil, err
 	}
-	// R2-H-8: authenticate the caller and authorize the RPC. Defaults to audit
-	// mode + header identity over the existing transport; set GRPC_AUTHZ_ENFORCE
-	// and the GRPC_MTLS_* vars to enforce mutual TLS in production.
+	// R2-H-8: authenticate the caller and authorize the RPC. With nothing set the
+	// server runs in audit mode with NO caller authentication (existing plaintext
+	// callers keep working; audit actors come from the gateway-validated payload).
+	// The x-caller-identity header is trusted only under GRPC_AUTHZ_ALLOW_HEADER_IDENTITY
+	// (transitional). Set the GRPC_MTLS_* vars for mutual TLS; GRPC_AUTHZ_ENFORCE
+	// (which requires mTLS) rejects unauthenticated callers.
 	serverOpts, err := authz.ServerOptionsFromEnv(cfg.Logger, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("configure gRPC security: %w", err)

@@ -30,7 +30,9 @@ func ServerTLSConfig(certFile, keyFile, caFile string) (credentials.TransportCre
 		Certificates: []tls.Certificate{cert},
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		ClientCAs:    pool,
-		MinVersion:   tls.VersionTLS12,
+		// Both ends are Go services under our control, so we pin the strongest
+		// widely-supported floor rather than the interoperability default.
+		MinVersion: tls.VersionTLS13,
 	}), nil
 }
 
@@ -51,7 +53,8 @@ func ClientTLSConfig(certFile, keyFile, caFile, serverName string) (credentials.
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      pool,
 		ServerName:   serverName,
-		MinVersion:   tls.VersionTLS12,
+		// Both ends are Go services under our control — pin TLS 1.3.
+		MinVersion: tls.VersionTLS13,
 	}), nil
 }
 
