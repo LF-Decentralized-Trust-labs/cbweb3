@@ -10,8 +10,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
+	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
@@ -114,6 +116,61 @@ func TestRequireRoleBlocksCommercialBank(t *testing.T) {
 		}
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("%s %s: expected 403, got %d", tc.method, tc.path, resp.StatusCode)
+		}
+	}
+}
+
+// TestHTLCMutatingRoutesRoleGate verifies the R2-H-1 follow-up role gate on the
+// mutating HTLC routes: oversight-only sessions (supervisor / NOC) are rejected
+// with 403 before the handler runs, while payment-operator roles — the Keycloak
+// realm role ROLE_BANK, the compliance form ROLE_COMMERCIAL_BANK, ROLE_TREASURY
+// and ROLE_GOVERNANCE — pass the gate (and then fail downstream against the
+// unreachable orchestrator, i.e. anything but 403).
+func TestHTLCMutatingRoutesRoleGate(t *testing.T) {
+	t.Parallel()
+
+	// PaymentHandler pointed at an unreachable orchestrator: the gate decides the
+	// 403 before any dial, and admitted callers surface a non-403 downstream error.
+	adapter, err := paymentadapter.NewGRPCAdapter("127.0.0.1:1", time.Second)
+	if err != nil {
+		t.Fatalf("NewGRPCAdapter: %v", err)
+	}
+	paymentHandler := handlers.NewPaymentHandler(adapter, "bank-a")
+
+	cases := []struct {
+		name       string
+		roles      []string
+		wantDenied bool // true => expect 403 from the role gate
+	}{
+		{"supervisor denied", []string{domain.RoleSupervisor}, true},
+		{"noc denied", []string{"ROLE_NOC_ADMIN"}, true},
+		{"no roles denied", []string{}, true},
+		{"bank realm role allowed", []string{domain.RoleBank}, false},
+		{"commercial-bank compliance role allowed", []string{domain.RoleCommercialBank}, false},
+		{"treasury allowed", []string{domain.RoleTreasury}, false},
+		{"governance allowed", []string{domain.RoleGovernance}, false},
+	}
+	mutatingRoutes := []string{"/api/v1/htlc/lock", "/api/v1/htlc/settle", "/api/v1/htlc/refund"}
+
+	for _, tc := range cases {
+		for _, route := range mutatingRoutes {
+			app := fiber.New()
+			Setup(app, Dependencies{
+				AuthHandler:    handlers.NewAuthHandler(authProviderStub{}, fullKYCManagerStub{}, false),
+				PaymentHandler: paymentHandler,
+				AuthProvider:   roleAuthProviderStub{roles: tc.roles},
+			})
+			req := httptest.NewRequest(http.MethodPost, route, strings.NewReader(`{"contract_id":"x","amount":"1","receiver":"r","secret":"00"}`))
+			req.AddCookie(&http.Cookie{Name: "access_token", Value: "fake-token"})
+			req.Header.Set("Content-Type", "application/json")
+			resp, testErr := app.Test(req)
+			if testErr != nil {
+				t.Fatalf("%s %s: %v", tc.name, route, testErr)
+			}
+			denied := resp.StatusCode == http.StatusForbidden
+			if denied != tc.wantDenied {
+				t.Errorf("%s %s: wantDenied=%v got status %d", tc.name, route, tc.wantDenied, resp.StatusCode)
+			}
 		}
 	}
 }

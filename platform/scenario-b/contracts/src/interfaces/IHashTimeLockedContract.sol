@@ -58,6 +58,11 @@ interface IHashTimeLockedContract {
     function settle(bytes32 contractId, bytes32 secret) external;
 
     /// @notice Marks the lock as refunded after the timeLock has expired.
+    /// @dev R2-H-1: only the original lock `sender` may call this; any other caller
+    ///      reverts with `HTLC__NotSender(msg.sender)`. Restricting the refund keeps
+    ///      this public coordination layer in sync with the private Zeto lock/unlock
+    ///      on the Paladin sidecar. Reverts `HTLC__ContractNotLocked` if the lock is
+    ///      not in the LOCKED state and `HTLC__TimeLockNotExpired` before expiry.
     /// @param contractId The unique identifier of the locked contract.
     function refund(bytes32 contractId) external;
 

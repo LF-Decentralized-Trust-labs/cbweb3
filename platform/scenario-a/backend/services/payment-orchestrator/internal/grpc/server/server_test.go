@@ -1244,6 +1244,68 @@ func TestGetHTLCStatus_BankIDFilterCounterparty(t *testing.T) {
 	}
 }
 
+// TestRefundHTLC_NonCounterparty_Denied asserts the gRPC-level authorization gate
+// on refund: a caller that is neither sender nor receiver of the HTLC is rejected
+// with PermissionDenied before any state change (R2-H-1 off-chain follow-up). The
+// counterparty check runs ahead of the timelock/state checks, so no expiry warp is
+// needed. Sender and receiver must still be allowed.
+func TestRefundHTLC_NonCounterparty_Denied(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_REFUND_AUTHZ_001",
+		Receiver:    "counterparty@spoke-b-bank-b",
+		Amount:      "500",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	// "bank-c" is not a counterparty — refund must be denied.
+	mdCtxC := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-c")
+	_, err = env.client.RefundHTLC(mdCtxC, &pb.RefundHTLCRequest{ContractId: lockResp.ContractId})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Errorf("bank-c (non-counterparty) refund should get PermissionDenied, got: %v", err)
+	}
+
+	// Sender "bank-a" passes the authz gate (fails later on the un-expired timelock,
+	// NOT on PermissionDenied).
+	mdCtxA := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-a")
+	_, err = env.client.RefundHTLC(mdCtxA, &pb.RefundHTLCRequest{ContractId: lockResp.ContractId})
+	if status.Code(err) == codes.PermissionDenied {
+		t.Errorf("bank-a (sender) must not be denied by the counterparty gate, got: %v", err)
+	}
+}
+
+// TestSettleHTLC_NonCounterparty_Denied asserts the gRPC-level authorization gate
+// on settle: a non-counterparty caller is rejected with PermissionDenied before the
+// secret is even evaluated (R2-H-9/H-10). Guards the settle sibling of the refund gate.
+func TestSettleHTLC_NonCounterparty_Denied(t *testing.T) {
+	env := setupTestEnv(t)
+	ctx := context.Background()
+
+	lockResp, err := env.client.LockHTLC(ctx, &pb.LockHTLCRequest{
+		AgreementId: "FX_SETTLE_AUTHZ_001",
+		Receiver:    "counterparty@spoke-b-bank-b",
+		Amount:      "500",
+		TimeLock:    uint64(time.Now().Unix()) + 3600,
+	})
+	if err != nil {
+		t.Fatalf("LockHTLC: %v", err)
+	}
+
+	// Valid hex (so it passes the secret-format check) but wrong preimage; the
+	// counterparty gate rejects bank-c before the secret is ever matched.
+	wrongSecret := "0000000000000000000000000000000000000000000000000000000000000001"
+	mdCtxC := metadata.AppendToOutgoingContext(ctx, "x-caller-identity", "bank-c")
+	_, err = env.client.SettleHTLC(mdCtxC, &pb.SettleHTLCRequest{ContractId: lockResp.ContractId, Secret: wrongSecret})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Errorf("bank-c (non-counterparty) settle should get PermissionDenied, got: %v", err)
+	}
+}
+
 // mockFXRepo is a no-op FXAgreementRepository used in FX agreement tests.
 type mockFXRepo struct{}
 

@@ -56,8 +56,16 @@ const (
 
 // Canonical participant role constants (mirrors identity service roles).
 const (
-	RoleGovernance        = "ROLE_GOVERNANCE"
-	RoleCommercialBank    = "ROLE_COMMERCIAL_BANK"
+	RoleGovernance     = "ROLE_GOVERNANCE"
+	RoleCommercialBank = "ROLE_COMMERCIAL_BANK"
+	// RoleBank is the Keycloak realm role provisioned for commercial-bank operator
+	// accounts by the toolkit (manifest role "commercial-bank" -> "ROLE_BANK", see
+	// toolkit/engine/manifest/validate.go). It is the role string that actually
+	// reaches claims.Roles for a bank session; RoleCommercialBank is the
+	// compliance/registry form, only appended by best-effort JWT enrichment when a
+	// compliance participant record exists. Authorization gates that must admit a
+	// commercial bank should accept BOTH forms.
+	RoleBank              = "ROLE_BANK"
 	RoleTreasury          = "ROLE_TREASURY"
 	RoleSupervisor        = "ROLE_SUPERVISOR"
 	RoleNOC               = "ROLE_NOC"
