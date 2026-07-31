@@ -230,6 +230,16 @@ not start and the previous behaviour (no retry at all) is preserved. Additive sc
 `residue_attempts` and `residue_next_attempt_at` via `AutoMigrate` — so this is not a rollback
 blocker.
 
+**A wedged Hub RPC parks settlements instead of escalating them — measured, and worth knowing
+before you diagnose one.** The relayer's 5-attempt escalation only engages on failures that return
+*fast*: a closed port (connection refused) or a revert. An endpoint that accepts the TCP connection
+and never answers — a paused container, a hung node, a black-holing load balancer — leaves the
+executor blocked inside a single attempt with no timeout. Observed live: `attempt_count` stayed at
+`0` for 150s and the burn completed the instant the node answered again. So a stuck settlement whose
+queue item sits in `IN_FLIGHT` with `attempt_count = 0` is a symptom of an unresponsive Hub, not of
+an exhausted retry budget; `[residue-retry]` and `[RelayerWorker]` will both be silent. Check Hub
+RPC liveness (`eth_blockNumber`) before looking at the queue.
+
 ### 6. Hub reconciliation is now watched (new, additive)
 
 **What it is.** An issuing CB reconciles its own Hub W-token balance against its own records every
