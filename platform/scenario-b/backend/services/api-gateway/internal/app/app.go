@@ -38,6 +38,21 @@ import (
 	"gorm.io/gorm"
 )
 
+// newSignedPaymentProxy builds the bank-side payment proxy with this entity's signer attached.
+//
+// One constructor for both wiring paths: they differ only in when the payment gRPC connection is
+// available, and having each build the proxy on its own is how one of them ends up not signing.
+func newSignedPaymentProxy(cfg config.Config) *handlers.PaymentProxyHandler {
+	proxy := handlers.NewPaymentProxyHandler(cfg.CentralBankAPIURL, cfg.EntityBesuAddress, cfg.RelayAuthSecret)
+	if s, err := relayauth.LoadSigner(cfg.PKIDir, cfg.RelayKeyID); err == nil {
+		log.Printf("[app] payment proxy: per-entity signature enabled (key-id=%s)", cfg.RelayKeyID)
+		return proxy.WithSigner(s)
+	} else if cfg.PKIDir != "" {
+		log.Printf("[app] payment proxy: signing unavailable (%v) — deposits/escrows/redeems fall back to the shared secret", err)
+	}
+	return proxy
+}
+
 // relayAuthConfigFor builds the internal-relay auth configuration from the environment: peer
 // verifying keys pinned from PKI_DIR/<entity>.crt, the legacy shared secret, and whether signatures
 // are mandatory.
@@ -170,11 +185,7 @@ func New(cfg config.Config) (*App, error) {
 				log.Printf("warning: payment gRPC unavailable at %s, payment proxy disabled: %v", cfg.PaymentGRPCAddr, err)
 			} else {
 				closers = append(closers, paymentGRPC)
-				deps.PaymentProxyHandler = handlers.NewPaymentProxyHandler(
-					cfg.CentralBankAPIURL,
-					cfg.EntityBesuAddress,
-					cfg.RelayAuthSecret,
-				)
+				deps.PaymentProxyHandler = newSignedPaymentProxy(cfg)
 				deps.PaymentHandler = handlers.NewPaymentHandler(paymentGRPC)
 			}
 		}
@@ -202,11 +213,7 @@ func New(cfg config.Config) (*App, error) {
 			closers = append(closers, paymentGRPC)
 			deps.PaymentHandler = handlers.NewPaymentHandler(paymentGRPC)
 			if cfg.CentralBankAPIURL != "" {
-				deps.PaymentProxyHandler = handlers.NewPaymentProxyHandler(
-					cfg.CentralBankAPIURL,
-					cfg.EntityBesuAddress,
-					cfg.RelayAuthSecret,
-				)
+				deps.PaymentProxyHandler = newSignedPaymentProxy(cfg)
 			}
 		}
 	}
@@ -560,7 +567,17 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	} else {
 		relaySecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
 		if relaySecret != "" {
-			transferLimitChecker = services.NewRemoteTransferLimitChecker(cfg.CentralBankAPIURL, relaySecret, cfg.RequestTimeout)
+			remoteChecker := services.NewRemoteTransferLimitChecker(cfg.CentralBankAPIURL, relaySecret, cfg.RequestTimeout)
+			// Sign the delegation with this entity's own key, so the CB can attribute the daily-limit
+			// call to a specific bank instead of to "whoever holds the shared secret" — which is
+			// every entity, since the secret is identical across the deployment.
+			if s, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.RelayKeyID); sErr == nil {
+				remoteChecker = remoteChecker.WithSigner(s)
+				log.Printf("[app] transfer limit pre-auth: per-entity signature enabled (key-id=%s)", cfg.RelayKeyID)
+			} else if cfg.PKIDir != "" {
+				log.Printf("[app] transfer limit pre-auth: signing unavailable (%v) — falling back to the shared secret", sErr)
+			}
+			transferLimitChecker = remoteChecker
 			log.Printf("[app] transfer limit enforcement: delegating pre-auth to CB at %s", cfg.CentralBankAPIURL)
 		} else {
 			log.Printf("[app] WARNING: CENTRAL_BANK_API_URL set but INTERNAL_RELAY_AUTH_SECRET missing — transfer limit enforcement disabled")
@@ -803,6 +820,12 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// ACTIVE status — deactivating a bank in compliance is what revokes its ability to authenticate.
 	// Files cover peers that are never onboarded, the Cacti relay being the case that matters.
 	refreshRelayRegistry(context.Background(), deps.RelayAuth.Registry, db, cfg.PKIDir)
+	// Reload on demand when a request presents an unknown key-id, rate-limited. This is what makes a
+	// bank verifiable the moment it finishes onboarding instead of at the next periodic sweep — the
+	// sample deployment onboards a bank and immediately makes a deposit, which would otherwise 401.
+	deps.RelayAuth.Registry.SetRefresher(func() {
+		refreshRelayRegistry(context.Background(), deps.RelayAuth.Registry, db, cfg.PKIDir)
+	}, relayRegistryMinRefreshInterval)
 	if stop := startRelayRegistryRefresher(deps.RelayAuth.Registry, db, cfg.PKIDir); stop != nil {
 		_ = stop // process-lifetime, like the other background workers wired here
 	}

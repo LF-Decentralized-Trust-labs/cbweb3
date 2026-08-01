@@ -202,8 +202,12 @@ func registerTransferLimitInternalRoutes(app *fiber.App, deps Dependencies) {
 	if deps.TransferLimitInternalHandler == nil {
 		return
 	}
+	// Signature-preferred, secret-fallback — the same policy as every other internal route. These two
+	// were the last on the secret alone, and they are not incidental: check-and-deduct is the CB's
+	// authoritative daily-limit gate, and the secret is identical in every entity, so any entity could
+	// forge these calls as any other bank.
 	internal := app.Group("/internal/v2/transfer-limits",
-		middleware.RequireRelayAuth(deps.InternalRelayAuthSecret),
+		middleware.RequireRelayAuthMigrating(deps.RelayAuth),
 	)
 	internal.Post("/check-and-deduct", deps.TransferLimitInternalHandler.HandleCheckAndDeduct)
 	internal.Post("/restore", deps.TransferLimitInternalHandler.HandleRestore)

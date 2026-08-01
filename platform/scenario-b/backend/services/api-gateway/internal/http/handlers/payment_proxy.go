@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/relayauth"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -21,6 +23,17 @@ type PaymentProxyHandler struct {
 	baseURL           string // Central Bank API base URL
 	entityBesuAddress string // this entity's Besu address
 	relayAuthSecret   string // shared secret for X-Relay-Auth header on internal endpoints
+	// signer, when set, signs each proxied request with this entity's own key. Without it the only
+	// credential is relayAuthSecret, which is identical in every entity — so any entity could forge
+	// these calls as any other bank, registering a deposit or driving a redemption in its name.
+	signer *relayauth.Signer
+}
+
+// WithSigner attaches the per-entity signer. The shared secret is still sent alongside, so a central
+// bank that has not pinned this bank yet keeps authenticating it instead of failing the payment.
+func (h *PaymentProxyHandler) WithSigner(s *relayauth.Signer) *PaymentProxyHandler {
+	h.signer = s
+	return h
 }
 
 // NewPaymentProxyHandler creates a proxy handler targeting the given Central Bank URL.
@@ -124,6 +137,21 @@ func (h *PaymentProxyHandler) proxy(c *fiber.Ctx, method, path string, body []by
 	}
 	if h.relayAuthSecret != "" {
 		req.Header.Set("X-Relay-Auth", h.relayAuthSecret)
+	}
+	// Signed HERE, at the single point every proxied call funnels through, so the signature always
+	// covers the body actually sent. That matters because proxyWithEntityEnrichment rewrites the body
+	// before calling this: signing at the caller would sign the pre-enrichment bytes and the
+	// receiver's canonical string would never match.
+	if h.signer != nil {
+		if headers, sErr := h.signer.HeadersFor(method, path, body, time.Now()); sErr == nil {
+			for k, v := range headers {
+				req.Header.Set(k, v)
+			}
+		} else {
+			// Not fatal: the shared secret still authenticates during the migration. Blocking a
+			// payment over a signing failure the receiver can tolerate would be the worse outcome.
+			log.Printf("[payment-proxy] could not sign %s %s: %v (falling back to the shared secret)", method, path, sErr)
+		}
 	}
 
 	resp, err := h.client.Do(req)

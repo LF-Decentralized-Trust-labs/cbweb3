@@ -143,7 +143,7 @@ deve ganhar asserção de que `DEFAULT_ADMIN_ROLE` e `CENTRAL_BANK_ROLE` respond
 **estrutural** — limita qual container faz o quê e fixa a topologia — e não fronteira de sigilo.
 O valor é que, quando a Fase 7 entrar, muda apenas onde a chave mora.
 
-### Fase 5 — relayauth: certificados e identidade única
+### Fase 5 — relayauth: certificados e identidade única · **IMPLEMENTADA**
 
 *Depende da decisão D4.*
 
@@ -168,15 +168,27 @@ Esta fase **não liga** a exigência de assinatura.
 **Verificação**: o registro carrega N chaves; uma requisição assinada por um banco verifica no CB;
 teste que reprova key-ids colidentes.
 
-### Fase 6 — Cacti assina, então exigir assinatura
+### Fase 6 — Cacti assina, então exigir assinatura · **IMPLEMENTADA**
 
 *Depende da decisão D6.*
 
-O comentário do próprio middleware diz que o segredo compartilhado é mantido "for callers that do
-not yet sign (notably the Cacti TS relay)". Enquanto o relay não assinar, ligar a exigência derruba
-os endpoints atendidos por ele. É implementação em TypeScript — a fase de maior esforço depois da 3.
+O relay assina com **identidade própria**, não repassando a do banco originador. Este plano
+recomendava o repasse; a investigação mostrou que estava errado em dois pontos:
 
-Só então `RELAY_REQUIRE_SIGNATURE=true`.
+- **inviável como está** — o relay faz `JSON.stringify(payload)`, re-serializando o corpo, e a
+  assinatura cobre exatamente esses bytes; uma assinatura repassada nunca verificaria;
+- **desnecessário** — o handler de bridge-out do CB de destino **verifica o swap on-chain** pelo
+  recibo (`LogSwap` da AMM do par, montantes lidos do evento, cada `swap_tx_hash` consumido uma vez),
+  e o emissor daquele evento é o CB de origem. A atribuição do ato já é criptográfica na cadeia, então
+  a credencial de transporte só precisa autenticar o **salto**.
+
+A string canônica é o único ponto que precisa concordar byte a byte com o verificador em Go, e
+divergência rejeita tudo — travada por teste em ambos os lados contra um vetor comum.
+
+Enforcement ligada com quatro ajustes que a flag sozinha não cobria: recarga sob demanda para uma
+key-id desconhecida (fecha a janela entre onboarding e a próxima varredura), `pin-relay-cert` como
+dependência de `start-spoke-backend`, restart do relay após o `found-hub` que gera sua chave, e a flag
+forçada vazia em `join` — sem isso, ligá-la para os CBs derrubaria todo gateway de banco.
 
 **Verificação**: E2E com exigência ligada, provando também que o segredo compartilhado deixa de ser
 aceito.

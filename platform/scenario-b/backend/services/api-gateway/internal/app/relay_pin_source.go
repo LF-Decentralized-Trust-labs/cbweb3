@@ -132,6 +132,10 @@ func startRelayRegistryRefresher(store *relayauth.Store, db *gorm.DB, pkiDir str
 
 const relayRegistryDefaultRefresh = 60 * time.Second
 
+// relayRegistryMinRefreshInterval bounds how often an unknown key-id may force a reload. Without a
+// bound, unknown ids would be a free way to make the gateway read its database in a loop.
+const relayRegistryMinRefreshInterval = 5 * time.Second
+
 // relayRegistryRefreshInterval reads RELAY_REGISTRY_REFRESH_SEC. Zero disables the refresher; an
 // invalid value falls back to the default with a warning rather than silently disabling the one thing
 // that keeps a newly onboarded bank verifiable.

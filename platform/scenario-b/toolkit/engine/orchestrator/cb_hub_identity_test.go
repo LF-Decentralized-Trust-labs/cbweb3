@@ -406,3 +406,22 @@ func TestRelayKeyIDFallsBackToTheSpokeID(t *testing.T) {
 		t.Fatalf("fallback relay id = %q, want spoke-brl", got)
 	}
 }
+
+// Enforcement is a RECEIVER-side setting and a commercial bank hosts no internal relay routes, so it
+// must never inherit the flag. If it did, the bank would refuse to start: its PKI dir holds only its
+// own key and its -participant certificate (which the pin loader skips by design), leaving an empty
+// registry — and empty plus enforcement is exactly the combination the gateway refuses. An operator
+// enabling enforcement for the central banks must not take every bank down with it.
+func TestJoinComposeEnvNeverInheritsEnforcement(t *testing.T) {
+	t.Setenv("RELAY_REQUIRE_SIGNATURE", "true")
+	c := JoinConfig{BankID: "bank-itau", SpokeID: "spoke-brl", RPCPort: 33646, VolumePrefix: "bank"}
+	for _, e := range c.ComposeEnv() {
+		if strings.HasPrefix(e, "RELAY_REQUIRE_SIGNATURE=") {
+			if e != "RELAY_REQUIRE_SIGNATURE=" {
+				t.Fatalf("a bank inherited enforcement (%q) — its registry is empty, so it would refuse to start", e)
+			}
+			return
+		}
+	}
+	t.Fatal("RELAY_REQUIRE_SIGNATURE is not set at all on a bank — it would inherit the operator's export")
+}

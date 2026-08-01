@@ -374,9 +374,19 @@ func (c JoinConfig) ComposeEnv() []string {
 		// Governance-portal onboarding (mirrors scenario-a): the api-gateway smart
 		// proxy reads the bank's CSR from PKI_DIR/<bankCode>.csr, and the bank's auth
 		// KMS is seeded with a per-bank key so onboarding registers a DISTINCT wallet.
-		"PKI_DIR":              "/workspace/backend/config/pki",
-		"KMS_SEED_KEY_ID":      c.Entity,
-		"KMS_SEED_PRIVATE_KEY": bankKey,
+		"PKI_DIR": "/workspace/backend/config/pki",
+		// Enforcement is a RECEIVER-side setting, and a commercial bank hosts no internal relay
+		// routes: /internal/amm/*, /internal/v1/payments/* and /internal/v2/transfer-limits/* are all
+		// registered on central-bank gateways only. A bank is purely a sender.
+		//
+		// Forced empty rather than inherited, because inheriting it would make a bank refuse to start:
+		// its PKI dir holds only its own key and its -participant certificate (which the pin loader
+		// skips by design), so its registry is empty — and empty plus enforcement is exactly the
+		// combination the gateway refuses. An operator exporting the flag for the CBs must not take
+		// the banks down with it.
+		"RELAY_REQUIRE_SIGNATURE": "",
+		"KMS_SEED_KEY_ID":         c.Entity,
+		"KMS_SEED_PRIVATE_KEY":    bankKey,
 		// noc (observability — soft). The bank runs its own agent (node-level
 		// monitoring), mounting a rendered agent.yaml from NOC_AGENT_VOLUME and
 		// joining its own ENTITY_NET_PREFIX network to probe besu by container DNS.

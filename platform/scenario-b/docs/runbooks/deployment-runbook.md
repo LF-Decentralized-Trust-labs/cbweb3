@@ -382,6 +382,86 @@ can do what and fixes the topology, and the administration key is derivable by a
 repository (see the custody warning under item 3). It becomes a secrecy boundary only when production
 custody lands — at which point this topology does not change, only where the key lives.
 
+### 9. Service-to-service authentication is per entity (behaviour change + opt-in enforcement)
+
+**What changed.** The `/internal/*` routes authenticated callers with `INTERNAL_RELAY_AUTH_SECRET`, a
+symmetric secret **identical in every entity**. It therefore proved that *some* entity was calling,
+never *which* — so it could not attribute an act, and any entity could forge a call as any other.
+Every caller now signs with its own key (ECDSA P-256 over a canonical string binding method, path,
+body hash and timestamp), and the receiver verifies against that peer's pinned certificate.
+
+| Caller | Signs as |
+|---|---|
+| a bank's gateway → its CB (bridge-in, hub swap, residue return, matched commit) | `RELAY_KEY_ID` (defaults to `BANK_CODE`) |
+| a bank's payment proxy → its CB (deposits, escrows, redeems) | same |
+| a bank's transfer-limit client → its CB (daily limit) | same |
+| the Cacti relay → the beneficiary CB (bridge-out) | `cacti-relay` |
+
+`RELAY_KEY_ID` exists because `BANK_CODE` is the entity **role**, so every central bank carries
+`central-bank` — two CBs sharing an id means the receiver can pin only one of their keys. `BANK_CODE`
+is deliberately untouched: it flows into `owner_bank_id` on bridge positions and into the hub
+reconciliation's self-exclusion, so changing it would be a data migration.
+
+**Where the pins come from.** A CB already holds each bank's certificate — it signed the CSR at
+onboarding and stored the result, and that certificate certifies the very key the bank signs with. So
+the participants table is the authoritative source for onboarded peers, and it carries the `ACTIVE`
+status: **deactivating a bank in compliance revokes its ability to authenticate.** File pins
+(`PKI_DIR/<key-id>.crt`) remain the source for peers that are never onboarded — the Cacti relay is the
+case that matters. An INACTIVE participant also suppresses any file pin for the same id, otherwise a
+leftover file would resurrect a revoked bank.
+
+**Enforcement is opt-in, per entity, and NOT flipped by the toolkit.**
+`RELAY_REQUIRE_SIGNATURE=true` stops the shared secret being accepted. Enable it only when every
+caller signs and every peer is pinned. Three properties make that safe to get wrong:
+
+- a gateway with enforcement set and **no pinned peer refuses to start**, naming both settings,
+  instead of answering 401 to every internal request — which is what it would otherwise do, including
+  to correctly signed ones, taking bridge-in, the delegated hub swap and the residue return down;
+- an **unknown key-id triggers one rate-limited registry reload** before rejection, so a bank becomes
+  verifiable the moment it finishes onboarding rather than at the next periodic sweep;
+- a **commercial bank never inherits the flag** — the toolkit forces it empty on `join`, because
+  enforcement is a receiver-side setting and a bank hosts no internal routes. Without that, exporting
+  the flag for the CBs would take every bank gateway down (a bank's registry is empty by design: the
+  pin loader skips `-participant` certificates).
+
+**Order of operations on a clean deploy.** The relay is started *before* the hub (it is a hard
+prerequisite of `register-relay-spoke`), so it boots before `found-hub`'s `gen-relay-identity-cacti`
+writes its key — and a signer is read once, at construction. **Restart the relay after the hub apply**
+or it forwards the bridge-out leg unsigned; `samples/deploy-all.sh` does this. On the CB side,
+`start-spoke-backend` now depends on `pin-relay-cert`, so the gateway never boots with an incomplete
+registry.
+
+**Check after deploy.**
+
+```bash
+# The CB should list every peer it must verify: its onboarded banks, the relay, and itself.
+docker logs <cb-gateway> 2>&1 | grep '\[relay-auth\]'
+#   [relay-auth] registry refreshed: 3 peer key(s) pinned [bank-itau cacti-relay central-bank-brazil]
+#   [app] relay auth: 3 peer key(s) pinned [...]; require_signature=true
+
+# Each sender should report its signing identity.
+docker logs <bank-gateway> 2>&1 | grep 'signature enabled'
+docker logs cbweb3-cacti-liquidity-relay 2>&1 | grep 'signature enabled'
+
+# With enforcement on, the shared secret alone must be REFUSED (this is the check that proves it):
+curl -s -o /dev/null -w '%{http_code}\n' -X POST "$CB_GW/internal/amm/cross-currency-bridge-in" \
+  -H 'Content-Type: application/json' -H "X-Relay-Auth: $INTERNAL_RELAY_AUTH_SECRET" -d '{}'
+#   401   {"code":"RELAY_SIGNATURE_REQUIRED"}
+```
+
+A `WARNING: the only pinned key is this entity's own` at boot means no peer identity was found —
+neither an onboarded participant with an issued certificate nor a `<key-id>.crt` in `PKI_DIR`. The
+gateway still starts (an entity may legitimately receive no internal calls), but any signed request
+from a peer will be rejected.
+
+**What deliberately still uses the shared secret.** `/internal/v1/spokes/{register,register-currency,
+register-pair}` — the caller is the toolkit CLI running on the host, which has no pinned identity.
+Giving the provisioning tool an identity is a separate decision.
+
+**Rollback.** Unset `RELAY_REQUIRE_SIGNATURE` and the receiver accepts the secret again; senders keep
+signing harmlessly. The signing keys and pins are additive, so a downgrade to a binary that does not
+verify signatures also works — it simply ignores the headers.
+
 ### Pre-deploy checklist
 
 - [ ] Postgres snapshot of every central bank — the only rollback path for item 1.
@@ -394,6 +474,10 @@ custody lands — at which point this topology does not change, only where the k
 - [ ] Confirm no daily transfer limits are configured with values you have not re-read since this
       release: the limit comparison was fixed (amounts arrive in base units, only the configured
       limit is a human decimal). Previously any configured limit rejected every transfer.
+- [ ] Decide per entity whether to set `RELAY_REQUIRE_SIGNATURE` (item 9). If you do, confirm first
+      that every bank shows `signature enabled` in its log, that the relay does too, and that the CB
+      lists them in `[relay-auth] registry refreshed`. A gateway with the flag and no pinned peer
+      refuses to start — deliberately, but it is an outage if you learn it during a deploy window.
 - [ ] Read item 8 before upgrading a CB: after provisioning, the gateway can no longer grant roles
       on its own W-token. Nothing to drain, but the boot log changes from granting the relayer's
       issuance to only checking it, and a `[relayer-role] WARNING` afterwards means the spoke's
@@ -815,6 +899,58 @@ make scenario-b.down-infra        # stop Keycloak, Postgres, Redis, Besu nodes
 ---
 
 ## Troubleshooting
+
+### Internal calls answer 401 RELAY_SIGNATURE_REQUIRED
+
+`RELAY_REQUIRE_SIGNATURE` is on at the receiver and the caller did not sign. Check the caller's log
+for `signature enabled`: a bank needs `PKI_DIR/<key-id>.key` (written by `gen-csr` on join) and the
+relay needs `RELAY_SIGNING_KEY_FILE` (written by the hub's `gen-relay-identity-cacti` — remember the
+relay must be restarted after that step, since it reads its key once at construction).
+
+### Internal calls answer 401 RELAY_SIGNATURE_INVALID
+
+The caller signed but the receiver could not verify. Either the peer is not pinned — check
+`[relay-auth] registry refreshed` on the receiver for its key-id — or the signature does not match the
+request. The signature covers method, path and **body bytes**, so any component that re-serializes the
+body between signing and sending invalidates it. The canonical string is pinned on both sides by test
+(`relayauth` in Go, `relay-auth.test.ts` in the relay, against a shared fixture).
+
+### A newly onboarded bank is briefly rejected
+
+It should not be: an unknown key-id triggers one registry reload before rejection, rate-limited to
+once every 5s. If it persists, the bank has no issued certificate stored — check that onboarding
+completed (`certificate_data` on its `participants` row), since that is the pin source.
+
+### A central bank's CA material is inconsistent (open issue)
+
+**Observed on a live stack and not yet resolved.** A CB's PKI volume can hold three different keys
+where there should be one:
+
+| File | State |
+|---|---|
+| `central-bank-ca.crt` + `central-bank-ca.key` | a matched pair, but not the issuer in use |
+| `central-bank.crt` | the certificate that actually signed the banks' credentials |
+| `central-bank.key` | matches neither certificate present |
+
+The compliance service is configured with `CA_CERT_FILE=central-bank.crt` and
+`CA_KEY_FILE=central-bank.key` — a pair that does not match, which `x509.CreateCertificate` rejects
+with `provided PrivateKey doesn't match parent's PublicKey`. Credential issuance has worked at least
+once in that state, so something is holding usable material elsewhere; the safe conclusion is that
+**future credential issuance is at risk** and this needs its own investigation.
+
+Verify before onboarding a new bank:
+
+```bash
+docker cp <cb-gateway>:/workspace/backend/config/pki/central-bank.crt /tmp/ca.crt
+docker cp <cb-gateway>:/workspace/backend/config/pki/central-bank.key /tmp/ca.key
+# These two hashes must be identical.
+openssl x509 -in /tmp/ca.crt -pubkey -noout | openssl dgst -sha256
+openssl ec   -in /tmp/ca.key -pubout      | openssl dgst -sha256
+```
+
+The relay-auth identities do not depend on this: `gen-relay-identity` falls back to a self-signed
+certificate when the CA cannot issue, which is equivalent for pinning (the pin is the trust anchor, so
+the issuer is never consulted).
 
 ### Keycloak does not initialize
 

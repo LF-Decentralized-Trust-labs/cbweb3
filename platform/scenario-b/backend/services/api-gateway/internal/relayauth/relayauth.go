@@ -32,6 +32,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -242,6 +243,13 @@ func BuildRegistry(files *Registry, participants []ParticipantPin) *Registry {
 // pinned — so its requests would be rejected with 401 until someone restarted the gateway.
 type Store struct {
 	p atomic.Pointer[Registry]
+
+	// refresh reloads the registry from its sources; set at wiring time because loading needs
+	// database access the relayauth package deliberately does not have.
+	mu          sync.Mutex
+	refresh     func()
+	minInterval time.Duration
+	lastRefresh time.Time
 }
 
 // NewStore returns a store holding reg (which may be nil).
@@ -249,6 +257,57 @@ func NewStore(reg *Registry) *Store {
 	s := &Store{}
 	s.Set(reg)
 	return s
+}
+
+// SetRefresher installs the reload function used when a request presents an unknown key-id, and the
+// minimum interval between such reloads.
+func (s *Store) SetRefresher(refresh func(), minInterval time.Duration) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refresh = refresh
+	s.minInterval = minInterval
+}
+
+// EnsureFresh returns the registry in force, reloading it first if keyID is not pinned.
+//
+// Why reload on a miss. A central bank's peers are its onboarded banks, and a bank signs its calls as
+// soon as it has a key — so between onboarding and the next periodic refresh there is a window where a
+// legitimate peer is not pinned and every call it makes is rejected with 401, not downgraded. Treating
+// the miss as a cache miss closes that window.
+//
+// It is not a weakening: a reload can only load certificates this central bank itself issued, so
+// presenting an unknown id gains an attacker nothing. It is rate-limited so unknown ids cannot become
+// a free way to make the gateway hammer its own database.
+func (s *Store) EnsureFresh(keyID string) *Registry {
+	if s == nil {
+		return nil
+	}
+	current := s.Get()
+	// An empty key-id is an unsigned request: nothing to look up, nothing to refresh for.
+	if keyID == "" {
+		return current
+	}
+	if current != nil {
+		if _, pinned := current.keys[keyID]; pinned {
+			return current
+		}
+	}
+	s.mu.Lock()
+	refresh := s.refresh
+	if refresh != nil && (s.minInterval <= 0 || time.Since(s.lastRefresh) >= s.minInterval) {
+		s.lastRefresh = time.Now()
+	} else {
+		refresh = nil
+	}
+	s.mu.Unlock()
+	if refresh == nil {
+		return current
+	}
+	refresh()
+	return s.Get()
 }
 
 // Get returns the registry in force; nil-safe.
@@ -410,6 +469,16 @@ func LoadSigner(pkiDir, keyID string) (*Signer, error) {
 		return nil, err
 	}
 	return &Signer{keyID: keyID, key: key}, nil
+}
+
+// PublicKey returns the verifying key that a peer must pin to authenticate this signer. Exposed so a
+// caller can register its own identity (and so tests can verify end to end rather than trusting that
+// the headers "look signed").
+func (s *Signer) PublicKey() *ecdsa.PublicKey {
+	if s == nil || s.key == nil {
+		return nil
+	}
+	return &s.key.PublicKey
 }
 
 // KeyID returns the signer's key id (the entity/bank code).

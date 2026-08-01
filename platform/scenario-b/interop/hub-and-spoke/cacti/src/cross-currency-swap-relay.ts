@@ -13,6 +13,7 @@
 
 import { Request, Response } from "express";
 import { SpokeRegistry } from "./spoke-registry";
+import { RelaySigner } from "./relay-auth";
 
 export interface CrossCurrencyBridgeOutPayload {
   correlation_id: string;
@@ -32,6 +33,12 @@ export interface CrossCurrencyBridgeOutPayload {
 export type NotPausedGate = (ammAddress: string | undefined) => Promise<boolean>;
 
 export interface CrossCurrencyRelayDeps {
+  /**
+   * signer, when present, signs each forwarded request with the relay's own identity. Without it the
+   * only credential is relayAuthSecret, which is identical in every entity — and the relay was the
+   * last caller on it, which is what blocks enabling RELAY_REQUIRE_SIGNATURE on the CBs.
+   */
+  signer?: RelaySigner;
   registry: SpokeRegistry;
   relayAuthSecret: string;
   notPaused: NotPausedGate;
@@ -42,12 +49,14 @@ export interface CrossCurrencyRelayDeps {
 export class CrossCurrencySwapRelay {
   private readonly registry: SpokeRegistry;
   private readonly relayAuthSecret: string;
+  private readonly signer?: RelaySigner;
   private readonly notPaused: NotPausedGate;
   private readonly fetchFn: typeof fetch;
 
   constructor(deps: CrossCurrencyRelayDeps) {
     this.registry = deps.registry;
     this.relayAuthSecret = deps.relayAuthSecret;
+    this.signer = deps.signer;
     this.notPaused = deps.notPaused;
     this.fetchFn = deps.fetchFn ?? fetch;
   }
@@ -125,15 +134,21 @@ export class CrossCurrencySwapRelay {
     gatewayUrl: string,
     payload: CrossCurrencyBridgeOutPayload,
   ): Promise<void> {
-    const url = `${gatewayUrl}/internal/amm/cross-currency-bridge-out`;
-    const resp = await this.fetchFn(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Relay-Auth": this.relayAuthSecret,
-      },
-      body: JSON.stringify(payload),
-    });
+    const path = "/internal/amm/cross-currency-bridge-out";
+    const url = `${gatewayUrl}${path}`;
+    // Serialized ONCE. The signature covers these exact bytes, so serializing again for the request
+    // body is how a mismatch gets introduced — the receiver would reject every call.
+    const body = JSON.stringify(payload);
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      // Kept alongside the signature for the migration window: a CB that has not pinned the relay
+      // yet still accepts the call, instead of the bridge-out leg failing closed.
+      "X-Relay-Auth": this.relayAuthSecret,
+    };
+    if (this.signer) {
+      Object.assign(headers, this.signer.headersFor("POST", path, body));
+    }
+    const resp = await this.fetchFn(url, { method: "POST", headers, body });
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
       throw new Error(`HTTP ${resp.status} from ${url}: ${body}`);
@@ -166,5 +181,18 @@ export function createCrossCurrencySwapRelay(
     );
     return null;
   }
-  return new CrossCurrencySwapRelay({ registry, relayAuthSecret, notPaused });
+  // The relay's own service identity. Optional on purpose: a deployment that has not provisioned it
+  // keeps working on the shared secret, which is the migration state. It is required only once a CB
+  // sets RELAY_REQUIRE_SIGNATURE — and that CB refuses to start unless it has pinned peers, so the
+  // two ends cannot be enabled out of order without the operator being told.
+  const keyId = process.env["RELAY_KEY_ID"] ?? "cacti-relay";
+  const signer = RelaySigner.fromOptional(keyId, process.env["RELAY_SIGNING_KEY_FILE"]);
+  if (signer) {
+    console.log(`[CrossCurrencySwapRelay] per-entity signature enabled (key-id=${keyId})`);
+  } else {
+    console.log(
+      "[CrossCurrencySwapRelay] no signing key configured (RELAY_SIGNING_KEY_FILE) — forwarding with the shared secret only",
+    );
+  }
+  return new CrossCurrencySwapRelay({ registry, relayAuthSecret, notPaused, signer });
 }

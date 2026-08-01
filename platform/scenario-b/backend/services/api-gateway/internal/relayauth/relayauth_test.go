@@ -367,3 +367,67 @@ func TestLoadRegistryGlob_SkipsCACertificates(t *testing.T) {
 		t.Fatalf("the leaf certificate was not pinned: %v", reg.IDs())
 	}
 }
+
+// --- refresh on an unknown key-id ---
+//
+// A central bank's peers are its onboarded banks, and a bank signs its internal calls from the moment
+// it has a key. With a periodic-only refresh there is a window — up to the refresh interval — where a
+// legitimately onboarded bank is not yet pinned and every call it makes is rejected with 401. The
+// sample deployment hits exactly that: it onboards a bank and immediately makes a deposit.
+//
+// So an unknown key-id triggers ONE refresh before the request is rejected. That is not a weakening:
+// a refresh can only load certificates the CB itself issued, so an attacker presenting an unknown id
+// gains nothing from it. It is rate-limited because otherwise unknown ids would be a free way to make
+// the gateway hammer its own database.
+
+func TestStore_EnsureFreshRefreshesOnlyForAnUnknownKeyID(t *testing.T) {
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	known := NewRegistry()
+	known.Add("bank-itau", &priv.PublicKey)
+
+	store := NewStore(known)
+	calls := 0
+	store.SetRefresher(func() { calls++ }, 0)
+
+	store.EnsureFresh("bank-itau")
+	if calls != 0 {
+		t.Fatalf("a known key-id must not trigger a refresh, got %d", calls)
+	}
+	store.EnsureFresh("bank-bradesco")
+	if calls != 1 {
+		t.Fatalf("an unknown key-id must trigger exactly one refresh, got %d", calls)
+	}
+}
+
+// Rate limit: repeated unknown ids must not turn into repeated database reads.
+func TestStore_EnsureFreshIsRateLimited(t *testing.T) {
+	store := NewStore(NewRegistry())
+	calls := 0
+	store.SetRefresher(func() { calls++ }, time.Hour)
+
+	for i := 0; i < 5; i++ {
+		store.EnsureFresh("unknown-peer")
+	}
+	if calls != 1 {
+		t.Fatalf("expected the refresh to be rate-limited to one call, got %d", calls)
+	}
+}
+
+// An empty key-id is an unsigned request; there is nothing to look up and nothing to refresh for.
+func TestStore_EnsureFreshIgnoresAnEmptyKeyID(t *testing.T) {
+	store := NewStore(NewRegistry())
+	calls := 0
+	store.SetRefresher(func() { calls++ }, 0)
+	store.EnsureFresh("")
+	if calls != 0 {
+		t.Fatalf("an unsigned request must not trigger a refresh, got %d", calls)
+	}
+}
+
+// Without a refresher configured the call must be a harmless no-op, not a panic.
+func TestStore_EnsureFreshWithoutARefresher(t *testing.T) {
+	store := NewStore(NewRegistry())
+	if got := store.EnsureFresh("whoever"); got == nil {
+		t.Fatal("EnsureFresh must still return the registry in force")
+	}
+}

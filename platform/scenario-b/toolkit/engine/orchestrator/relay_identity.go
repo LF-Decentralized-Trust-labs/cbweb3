@@ -8,9 +8,11 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
+	"os"
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/exec"
@@ -146,7 +148,19 @@ func ensureRelayIdentity(ctx context.Context, r exec.CommandRunner, volume, keyI
 	// to filenames or consumers.
 	keyPEM, certPEM, err := issueFromVolumeCA(ctx, r, volume, keyID)
 	if err != nil {
-		log.Printf("[gen-relay-identity] the CB's CA could not issue the service identity for %s (%v) — self-signing instead; peers pin the certificate, so the issuer is not consulted", keyID, err)
+		// Two very different situations, and reporting them the same way sends an operator looking
+		// for a problem that does not exist:
+		//
+		//   no CA material in this volume   EXPECTED for a peer that is not a central bank — the
+		//                                   relay's own volume never holds a CA, since the CA lives in
+		//                                   each CB's volume. Self-signing is the normal path there.
+		//   CA present but unusable         the central bank case, and worth a warning: its CA
+		//                                   material is inconsistent (see the runbook).
+		if errors.Is(err, errNoCAMaterial) {
+			log.Printf("[gen-relay-identity] %s has no CA in its volume (expected for a non-central-bank peer) — issuing a self-signed identity; peers pin the certificate, so the issuer is not consulted", keyID)
+		} else {
+			log.Printf("[gen-relay-identity] WARNING: the CA in this volume could not issue the identity for %s (%v) — self-signing instead. The certificate works for pinning, but the CA material is inconsistent and credential issuance may be affected; see the runbook.", keyID, err)
+		}
 		keyPEM, certPEM, err = selfSignRelayIdentity(keyID)
 		if err != nil {
 			return err
@@ -164,6 +178,8 @@ func ensureRelayIdentity(ctx context.Context, r exec.CommandRunner, volume, keyI
 // falls back on.
 func issueFromVolumeCA(ctx context.Context, r exec.CommandRunner, volume, keyID string) (keyPEM, certPEM []byte, err error) {
 	var lastErr error
+	// sawCA distinguishes "there is no CA here" from "the CA here cannot issue".
+	sawCA := false
 	for _, base := range []string{"central-bank-ca", "central-bank"} {
 		caCertPEM, cErr := readVolumeFile(ctx, r, volume, base+".crt")
 		if cErr != nil {
@@ -175,14 +191,20 @@ func issueFromVolumeCA(ctx context.Context, r exec.CommandRunner, volume, keyID 
 			lastErr = kErr
 			continue
 		}
+		sawCA = true
 		keyPEM, certPEM, err = issueRelayIdentity(caCertPEM, caKeyPEM, keyID)
 		if err == nil {
 			return keyPEM, certPEM, nil
 		}
 		lastErr = fmt.Errorf("%s: %w", base, err)
 	}
+	if !sawCA {
+		// Nothing to issue from. Distinguished from an unusable CA so the caller can report the
+		// expected case (a peer that is not a central bank) without a warning.
+		return nil, nil, errNoCAMaterial
+	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("no CA material found in the volume")
+		lastErr = errNoCAMaterial
 	}
 	return nil, nil, lastErr
 }
@@ -219,3 +241,61 @@ func selfSignRelayIdentity(keyID string) (keyPEM, certPEM []byte, err error) {
 	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
 		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), nil
 }
+
+// pinPeerCert copies a peer's CERTIFICATE from one named volume into another, under <keyID>.crt.
+//
+// Only the certificate. Carrying the private key across would put the peer's signing key inside every
+// central bank's volume, and every CB could then impersonate it — the opposite of what pinning is for.
+//
+// Used for the Cacti relay, the one peer that is never an onboarded participant: it calls a CB's
+// internal bridge-out endpoint but has no CSR and no row in the participants table, so a file pin is
+// the only source available for it.
+//
+// An empty source is refused rather than written: an empty pin still makes the registry non-empty,
+// which flips the middleware to strict verification and rejects every signed request from that peer.
+func pinPeerCert(ctx context.Context, r exec.CommandRunner, srcVolume, dstVolume, keyID string) error {
+	certPEM, err := readVolumeFile(ctx, r, srcVolume, keyID+".crt")
+	if err != nil {
+		return fmt.Errorf("pin %s: read certificate from %s: %w", keyID, srcVolume, err)
+	}
+	if len(bytesTrimSpace(certPEM)) == 0 {
+		return fmt.Errorf("pin %s: the certificate read from %s is empty", keyID, srcVolume)
+	}
+	return writeVolumeFile(ctx, r, dstVolume, keyID+".crt", certPEM, "0644")
+}
+
+// bytesTrimSpace avoids importing strings just to check for an all-whitespace read.
+func bytesTrimSpace(b []byte) []byte {
+	start, end := 0, len(b)
+	for start < end && isSpaceByte(b[start]) {
+		start++
+	}
+	for end > start && isSpaceByte(b[end-1]) {
+		end--
+	}
+	return b[start:end]
+}
+
+func isSpaceByte(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+// relayPeerKeyID is the key-id the Cacti relay signs with, and therefore the filename its certificate
+// is pinned under. Fixed rather than derived: the relay is a single deployment-wide component, not a
+// per-entity one, and its compose file names it the same way.
+const relayPeerKeyID = "cacti-relay"
+
+// relayDataVolume is the relay's own named volume, where its private key lives. Kept in a volume
+// rather than a host path so the key never lands in the repository working tree. Overridable for a
+// deployment that renames it (RELAY_VOLUME_PREFIX in the relay's compose file).
+func relayDataVolume() string {
+	if p := os.Getenv("RELAY_VOLUME_PREFIX"); p != "" {
+		return p + "_data"
+	}
+	return "cbweb3-relay_data"
+}
+
+// errNoCAMaterial means the volume holds no CA to issue from. Expected for any peer that is not a
+// central bank — the relay's own volume, for instance — so the caller reports it as normal rather than
+// as a failure.
+var errNoCAMaterial = errors.New("relay identity: no CA material in the volume")

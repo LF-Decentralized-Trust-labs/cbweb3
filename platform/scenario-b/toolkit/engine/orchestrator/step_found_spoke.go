@@ -1077,6 +1077,24 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			Run: func(ctx context.Context) error { return genServiceTLS(ctx, c.Runner, c.svcTLSVolume()) },
 		},
 		{
+			// Pin the Cacti relay's certificate in this CB's PKI volume. The relay calls this CB's
+			// internal bridge-out endpoint but is never an onboarded participant, so a file pin is the
+			// only source available for it — which is why the registry keeps files as a second source.
+			//
+			// SOFT: the relay is deployed outside the toolkit (provisioning/scripts/start-cacti.sh), so
+			// its identity may legitimately not exist yet. Missing it costs nothing today — the relay
+			// falls back to the shared secret — and it is what RELAY_REQUIRE_SIGNATURE will require.
+			Name: "pin-relay-cert",
+			Deps: []string{"gen-relay-identity"},
+			Soft: true,
+			Check: func(ctx context.Context) (bool, error) {
+				return volumeHasFile(ctx, c.Runner, c.caVolume(), relayPeerKeyID+".crt"), nil
+			},
+			Run: func(ctx context.Context) error {
+				return pinPeerCert(ctx, c.Runner, relayDataVolume(), c.caVolume(), relayPeerKeyID)
+			},
+		},
+		{
 			// The CB's own SERVICE identity: the key it signs with and the certificate peers pin.
 			// It cannot come from onboarding (a CB does not onboard itself), and two consumers need
 			// it — relay auth when this CB is the sender, and the circuit-breaker institutional
@@ -1095,7 +1113,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			},
 		},
 		{Name: "start-spoke-infra", Deps: []string{"render-spoke-env"}, Run: compose("entity-infra")},
-		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke", "gen-tls-spoke", "gen-relay-identity", "gen-svc-tls-spoke"}, Run: func(ctx context.Context) error {
+		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke", "gen-tls-spoke", "gen-relay-identity", "pin-relay-cert", "gen-svc-tls-spoke"}, Run: func(ctx context.Context) error {
 			// Build the backend images before `compose up`. The hub host builds these
 			// too, but a spoke on a SEPARATE Docker daemon (multi-VM lab) never has
 			// them, so compose would try to PULL a local-only tag and fail. Idempotent

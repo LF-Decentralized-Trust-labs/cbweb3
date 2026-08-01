@@ -71,10 +71,12 @@ func (c RelayAuthConfig) Validate() error {
 func RequireRelayAuthMigrating(cfg RelayAuthConfig) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		// Read the registry ONCE per request: a concurrent reload must not make the checks below
-		// disagree with each other.
-		registry := cfg.Registry.Get()
-		hasRegistry := registry != nil && registry.Len() > 0
+		// disagree with each other. EnsureFresh reloads first when the key-id is not pinned, which
+		// closes the window between a peer being onboarded and the next periodic refresh — otherwise a
+		// legitimately onboarded bank is rejected with 401 until that refresh lands.
 		keyID := c.Get(relayauth.HeaderKeyID)
+		registry := cfg.Registry.EnsureFresh(keyID)
+		hasRegistry := registry != nil && registry.Len() > 0
 
 		if hasRegistry && keyID != "" {
 			err := registry.VerifyRequest(

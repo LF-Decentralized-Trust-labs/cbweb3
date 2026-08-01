@@ -24,7 +24,7 @@ type Dependencies struct {
 	OnboardingProxyHandler *handlers.OnboardingProxyHandler
 	// SpokesHandler serves the internal spoke self-registration endpoint (hub only).
 	SpokesHandler *handlers.SpokesHandler
-	AuthProvider           interfaces.IAuthProvider
+	AuthProvider  interfaces.IAuthProvider
 	// PaymentProxyHandler proxies /api/v1/payments/* to the Central Bank gateway.
 	// Only wired when CENTRAL_BANK_API_URL is set (commercial bank gateways).
 	PaymentProxyHandler *handlers.PaymentProxyHandler
@@ -159,8 +159,11 @@ func Setup(app *fiber.App, deps Dependencies) {
 	// Protected by X-Relay-Auth header, used by PaymentProxyHandler from commercial banks.
 	// Only wired on Central Bank gateways (PaymentHandler exists, PaymentProxyHandler doesn't).
 	if deps.PaymentHandler != nil && deps.PaymentProxyHandler == nil {
-		relaySecret := os.Getenv("INTERNAL_RELAY_AUTH_SECRET")
-		internal := app.Group("/internal/v1", middleware.RequireRelayAuth(relaySecret))
+		// Signature-preferred, secret-fallback — the same policy as the /internal/amm routes. These
+		// carry a commercial bank's deposits, escrows and redeems to its CB, so authenticating them by
+		// a secret identical in every entity meant any entity could drive another bank's tokenisation
+		// and redemption. The bank's proxy signs them; the secret remains for the migration window.
+		internal := app.Group("/internal/v1", middleware.RequireRelayAuthMigrating(deps.V2Deps.RelayAuth))
 
 		internalPayments := internal.Group("/payments")
 		internalPayments.Post("/deposits/exchange", deps.PaymentHandler.RequestFiatExchange)
