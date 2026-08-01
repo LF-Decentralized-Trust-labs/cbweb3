@@ -4,7 +4,10 @@ package workers
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	podmain "github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/domain"
@@ -14,14 +17,39 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// testDBSeq keeps the per-test database name unique even when the same test name repeats (subtests,
+// -count>1).
+var testDBSeq atomic.Int64
+
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=private"), &gorm.Config{
+	// An in-memory SQLite database belongs to its CONNECTION. With cache=private the pool can open a
+	// second connection, which is a DIFFERENT, empty database — so AutoMigrate runs on one and the
+	// worker's query lands on another, failing with "no such table: relayer_queue_items". That made
+	// TestRelayerWorker_RunProcessesAndStops flaky (2 failures in 3 runs): the worker queries from its
+	// own goroutine, which is exactly when a second connection is opened.
+	//
+	// cache=shared fixes that, but a shared cache is keyed by NAME — with a fixed name every test in
+	// the package would share one database and collide on unique constraints (which is what happened
+	// on the first attempt at this fix). So the name is unique per test, giving an isolated database
+	// that all of that pool's connections can see.
+	//
+	// The pool is pinned to one connection as well: a shared-cache in-memory database is destroyed
+	// when its LAST connection closes, so pool churn could otherwise drop it mid-test.
+	dsn := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared",
+		strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()), testDBSeq.Add(1))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("sql db: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	if err := db.AutoMigrate(&podmain.BridgedAssetPosition{}, &podmain.RelayerQueueItem{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -64,12 +92,12 @@ var _ RelayerEventExecutor = (*fakeExecutor)(nil)
 
 // fakeFXRepo implements ports.FXAgreementRepository for worker tests.
 type fakeFXRepo struct {
-	expired      []*podmain.FXAgreementRecord
-	listErr      error
-	updateErr    map[string]error // tradeID -> err
-	updated      []*podmain.FXAgreementRecord
-	auditEvents  []*podmain.FXAgreementEvent
-	auditErr     error
+	expired     []*podmain.FXAgreementRecord
+	listErr     error
+	updateErr   map[string]error // tradeID -> err
+	updated     []*podmain.FXAgreementRecord
+	auditEvents []*podmain.FXAgreementEvent
+	auditErr    error
 }
 
 func (r *fakeFXRepo) CreateAgreement(context.Context, *podmain.FXAgreementRecord) error { return nil }

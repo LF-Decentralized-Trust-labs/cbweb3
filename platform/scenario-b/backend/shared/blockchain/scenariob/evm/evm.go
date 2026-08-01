@@ -29,7 +29,12 @@ import (
 // mu serializes nonce assignment through SendTransaction so concurrent callers cannot
 // collide on the same nonce — see signAndSend.
 type Signer struct {
-	key       *ecdsa.PrivateKey
+	// key is set only for a LOCAL signer. A remote one holds no key material — that is the point of
+	// production custody, where the key never leaves the provider.
+	key *ecdsa.PrivateKey
+	// remote and keyID are set only for a remote signer; see NewRemoteSigner.
+	remote    KeySigner
+	keyID     string
 	address   common.Address
 	chainID   *big.Int
 	mu        sync.Mutex
@@ -317,9 +322,9 @@ func (s *Signer) signAndSend(
 
 	for attempt := 0; attempt < 2; attempt++ {
 		tx := types.NewTransaction(s.nonce, contract, big.NewInt(0), gasLimit, gasPrice, input)
-		signed, err := types.SignTx(tx, types.NewLondonSigner(s.ChainID()), s.key)
+		signed, err := s.signTx(ctx, tx)
 		if err != nil {
-			return nil, fmt.Errorf("sign tx: %w", err)
+			return nil, err
 		}
 		if err = ec.SendTransaction(ctx, signed); err == nil {
 			s.nonce++
