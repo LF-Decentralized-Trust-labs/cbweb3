@@ -921,36 +921,47 @@ It should not be: an unknown key-id triggers one registry reload before rejectio
 once every 5s. If it persists, the bank has no issued certificate stored — check that onboarding
 completed (`certificate_data` on its `participants` row), since that is the pin source.
 
-### A central bank's CA material is inconsistent (open issue)
+### A central bank's CA material on disk is misleading (open, low severity)
 
-**Observed on a live stack and not yet resolved.** A CB's PKI volume can hold three different keys
-where there should be one:
+**Reproduced on a clean deploy**, so this is systematic, not the residue of repeated re-applies. A
+CB's PKI volume holds three distinct keys where the filenames suggest two pairs:
 
 | File | State |
 |---|---|
-| `central-bank-ca.crt` + `central-bank-ca.key` | a matched pair, but not the issuer in use |
-| `central-bank.crt` | the certificate that actually signed the banks' credentials |
-| `central-bank.key` | matches neither certificate present |
+| `central-bank-ca.crt` + `central-bank-ca.key` | a matched pair, but NOT the issuer in use |
+| `central-bank.crt` | the certificate that actually signs participant credentials |
+| `central-bank.key` | matches no certificate present |
 
-The compliance service is configured with `CA_CERT_FILE=central-bank.crt` and
-`CA_KEY_FILE=central-bank.key` — a pair that does not match, which `x509.CreateCertificate` rejects
-with `provided PrivateKey doesn't match parent's PublicKey`. Credential issuance has worked at least
-once in that state, so something is holding usable material elsewhere; the safe conclusion is that
-**future credential issuance is at risk** and this needs its own investigation.
+Compliance is configured with `CA_CERT_FILE=central-bank.crt` and `CA_KEY_FILE=central-bank.key` — a
+pair that does not match.
 
-Verify before onboarding a new bank:
+**Credential issuance nevertheless works, and this was verified.** On a freshly deployed stack two
+banks were onboarded end to end (credential request → KYC approval → COMPLETE), and the issued
+certificate verifies against `central-bank.crt`. The consistent explanation is that compliance
+generates and keeps its CA in memory during bootstrap, writes the certificate to `central-bank.crt`,
+and never reads `CA_KEY_FILE` back; the `.key` files in the volume are residue from another generator.
+
+**So the risk is not what it looks like.** Onboarding is not blocked. What is broken is the *disk
+representation*: any component that treats `central-bank.crt` + `central-bank.key` as a CA pair fails
+with `x509: provided PrivateKey doesn't match parent's PublicKey`. That is a trap for future work, not
+an outage — the toolkit's `gen-relay-identity` hit exactly it and now falls back to a self-signed
+identity, which is equivalent under pinning since the issuer is never consulted.
+
+Note also that `genCBCA`'s idempotency check is `volumeHasFile(central-bank.crt)`, so it will never
+repair the pairing on an existing volume.
+
+Verify before building anything that signs with the CB's CA:
 
 ```bash
 docker cp <cb-gateway>:/workspace/backend/config/pki/central-bank.crt /tmp/ca.crt
 docker cp <cb-gateway>:/workspace/backend/config/pki/central-bank.key /tmp/ca.key
-# These two hashes must be identical.
+# These two hashes are currently DIFFERENT; treat the pair as unusable until that is fixed.
 openssl x509 -in /tmp/ca.crt -pubkey -noout | openssl dgst -sha256
 openssl ec   -in /tmp/ca.key -pubout      | openssl dgst -sha256
 ```
 
-The relay-auth identities do not depend on this: `gen-relay-identity` falls back to a self-signed
-certificate when the CA cannot issue, which is equivalent for pinning (the pin is the trust anchor, so
-the issuer is never consulted).
+The CA design is deferred to a later phase of the project; this entry exists so the disk state is not
+mistaken for a usable CA in the meantime.
 
 ### Keycloak does not initialize
 
