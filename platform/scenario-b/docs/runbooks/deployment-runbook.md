@@ -153,6 +153,13 @@ cast call "$TOKEN" 'hasRole(bytes32,address)(bool)' "$ADMIN" "$CB_HUB_ADDR"   --
 cast call "$TOKEN" 'hasRole(bytes32,address)(bool)' "$ADMIN" "$HUB_ADMIN_ADDR" --rpc-url "$HUB_RPC"
 ```
 
+> **The administration expectation above changes after item 8.** The handover described here gives
+> the CB's **gateway** `DEFAULT_ADMIN_ROLE`; provisioning then moves it to a dedicated administration
+> identity and revokes it from the gateway. So on a stack that has run `separate-token-admin`, the
+> `$CB_HUB_ADDR` administration check reads **false** — expected, not a failed handover. Use item 8's
+> table for the post-separation expectations. Issuance (`CENTRAL_BANK_ROLE`) for `$CB_HUB_ADDR` stays
+> **true** either way.
+
 **Recovery.** Re-run `apply` with the current toolkit: `EnsureCurrencyAuthority` reads the
 on-chain state and completes only the outstanding steps, so a run interrupted between
 registration and handover converges. Handing authority back to the hub is **not** automated — it
@@ -187,6 +194,26 @@ re-run `apply`.
 
 A bank that still carries a hub key is a finding, not a convenience: that key is the CB's, and it
 is also the hub governance admin in local stacks.
+
+> **These keys are NOT secret, and this deployment is not production-ready custody.** Read this
+> before concluding that sovereign identity settled the key question — it settled *who signs what*,
+> not *where the key lives*.
+>
+> - `HUB_SIGNER_PRIVATE_KEY` and `HUB_RELAYER_PRIVATE_KEY` are `keccak256(salt || spokeID)`. Both
+>   the salt (a constant in `toolkit/engine/orchestrator/localdev.go`) and the spoke id (in the
+>   manifest) are public, so anyone holding this repository can reproduce **every** central bank's
+>   hub private key with one command.
+> - `CB_PRIVATE_KEY` is a well-known Besu development account, published in the repository and
+>   **identical in every entity**.
+>
+> That is deliberate for a local or lab stack and is what makes `apply` reproducible. It also means
+> the on-chain separation of roles here is *structural* — it bounds which container does what and
+> fixes the topology — and not a secrecy boundary. A real deployment replaces the custody without
+> changing that topology: the `keyprovider` package already carries the interface and a production
+> stub that refuses every operation (`ErrNotImplemented`), and note that `LocalKeyExporter`, which
+> hands out private key material as hex, is implemented **only** by the local provider. Wiring a
+> KMS therefore also means the gateway stops receiving a key in its environment and starts asking
+> the KMS to sign, which is a new signing path in the backend rather than a configuration change.
 
 ### 4. Corridor opening is bilateral (procedure change)
 
@@ -305,6 +332,56 @@ bridge-in position that funded it, so a retried delegation cannot trade twice ag
 bridged balance. Additive: an older binary ignores the table. Not a rollback blocker on its own,
 but a downgrade silently loses the guard.
 
+### 8. W-token administration is separated from issuance (point of no return)
+
+**What changes.** The currency handover left this CB's **gateway** identity holding both
+`CENTRAL_BANK_ROLE` (mint/burn) and `DEFAULT_ADMIN_ROLE` (decide who may issue). Provisioning now
+splits them:
+
+| Role on the CB's W-token | Before | After |
+|---|---|---|
+| `CENTRAL_BANK_ROLE` (gateway) | held | **still held** — the gateway mints when provisioning liquidity |
+| `CENTRAL_BANK_ROLE` (relayer) | granted by the gateway at every boot | granted once at provisioning |
+| `DEFAULT_ADMIN_ROLE` (gateway) | held | **revoked** |
+| `DEFAULT_ADMIN_ROLE` (administration identity) | — | held; its key is in **no container** |
+
+**Why.** Issuance is operational and lives in a long-running container; administration is the
+authority to grant issuance and should be exercised at provisioning. Fused, a compromise of the
+gateway container yields *permanent* issuance rights: the attacker grants the role to an address of
+their own, and rotating the gateway key afterwards does not take it back.
+
+**Point of no return.** The three acts are applied in order by the toolkit step
+`separate-token-admin`, all signed by the gateway key because it is the current administrator. The
+last one revokes that key's own administration — after it, **the gateway can no longer grant any
+role**. Recovery is possible but only through the administration key, which the toolkit re-derives
+deterministically; nothing in a container can do it.
+
+**Behaviour change at boot.** The gateway used to grant the relayer's issuance on every start. It now
+only CHECKS it, because it no longer can grant. A missing grant logs:
+
+```
+[relayer-role] WARNING: relayer 0x… does NOT hold CENTRAL_BANK_ROLE on 0x… — bridge-in mint and
+bridge-out burn will revert. The grant is a provisioning act (toolkit step separate-token-admin …):
+re-run `apply` for this spoke.
+```
+
+That is an incomplete provisioning run, not a code fault. Re-running `apply` for the spoke fixes it;
+the step is idempotent and reads the chain, so an already separated token issues no transaction.
+
+**Check after apply** (`cast call <w-token> "hasRole(bytes32,address)(bool)" <role> <addr>`):
+
+| Expected | Address |
+|---|---|
+| `DEFAULT_ADMIN_ROLE` = **false** | the gateway (`LOCAL_CB_HUB_SIGNER`) |
+| `DEFAULT_ADMIN_ROLE` = **true** | the administration identity (`W_TOKEN_ADMIN_ADDRESS`, written to the spoke env file) |
+| `CENTRAL_BANK_ROLE` = **true** | the gateway — it must keep issuing |
+| `CENTRAL_BANK_ROLE` = **true** | the relayer (`HUB_RELAYER_ADDRESS`) |
+
+**What this is and is not.** With derived keys the split is **structural**: it bounds which container
+can do what and fixes the topology, and the administration key is derivable by anyone holding the
+repository (see the custody warning under item 3). It becomes a secrecy boundary only when production
+custody lands — at which point this topology does not change, only where the key lives.
+
 ### Pre-deploy checklist
 
 - [ ] Postgres snapshot of every central bank — the only rollback path for item 1.
@@ -317,6 +394,10 @@ but a downgrade silently loses the guard.
 - [ ] Confirm no daily transfer limits are configured with values you have not re-read since this
       release: the limit comparison was fixed (amounts arrive in base units, only the configured
       limit is a human decimal). Previously any configured limit rejected every transfer.
+- [ ] Read item 8 before upgrading a CB: after provisioning, the gateway can no longer grant roles
+      on its own W-token. Nothing to drain, but the boot log changes from granting the relayer's
+      issuance to only checking it, and a `[relayer-role] WARNING` afterwards means the spoke's
+      `apply` did not complete rather than a code fault.
 - [ ] Sovereign liquidity positions in `LOCKING` must be drained. Funding a lock is now decided
       per position and recorded (`spoke_fund_tx_hash`), not by reading the signer's balance. A
       position left mid-flight has no funding record, so it will mint its own amount on the next

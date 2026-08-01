@@ -23,20 +23,26 @@ import (
 // relay registrar are injectable so the step set is testable without a live
 // Besu/Keycloak/relay.
 type SpokeConfig struct {
-	Runner              exec.CommandRunner
-	ContractsDir        string
-	TemplatesDir        string
-	OutDir              string
-	SpokeID             string
-	SpokeChainID        uint64
-	SpokeRPC            string
-	SpokeWS             string
-	CBAddress           string
-	GenesisDir          string
-	VolumePrefix        string      // <p>_genesis, <p>_besu_data (node state in named volumes)
-	ContainerPrefix     string      // container name prefix (<p>-<entity>-besu, ...)
-	NetPrefix           string      // docker network name prefix (<p>_besu_network, <p>_infra_network)
-	Entity              string      // compose ENTITY label (e.g. "central-bank")
+	Runner          exec.CommandRunner
+	ContractsDir    string
+	TemplatesDir    string
+	OutDir          string
+	SpokeID         string
+	SpokeChainID    uint64
+	SpokeRPC        string
+	SpokeWS         string
+	CBAddress       string
+	GenesisDir      string
+	VolumePrefix    string // <p>_genesis, <p>_besu_data (node state in named volumes)
+	ContainerPrefix string // container name prefix (<p>-<entity>-besu, ...)
+	NetPrefix       string // docker network name prefix (<p>_besu_network, <p>_infra_network)
+	Entity          string // compose ENTITY label (e.g. "central-bank")
+	// RelayKeyID identifies this central bank in service-to-service authentication. It must be
+	// UNIQUE across the deployment, which ENTITY is not: ENTITY is the ROLE, so every CB carries
+	// "central-bank". The receiver pins one public key per id, so a shared id both breaks the
+	// mechanism (one entry per id in the registry) and destroys the attribution the mechanism
+	// exists for. Set from the manifest name by apply; falls back to the spoke id.
+	RelayKeyID          string
 	RPCPort             int         // host port -> besu 8545; other service ports derive by offset
 	WSPort              int         // host port -> besu 8546
 	P2PPort             int         // host port -> besu 30303
@@ -198,6 +204,15 @@ func (c SpokeConfig) cbHubAddress() string {
 	}
 	_, addr := deriveCBHubKey(c.SpokeID)
 	return addr
+}
+
+// relayKeyID resolves this CB's service-authentication id, falling back to the spoke id — still
+// unique per central bank, and available without threading the manifest name through every path.
+func (c SpokeConfig) relayKeyID() string {
+	if id := strings.TrimSpace(c.RelayKeyID); id != "" {
+		return id
+	}
+	return c.SpokeID
 }
 
 func (c SpokeConfig) nocAgentVolume() string { return c.VolumePrefix + "_noc_agent_cfg" }
@@ -612,6 +627,9 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// the Keycloak realm/client are provisioned by provision-keycloak-spoke.
 		"SPOKE_CHAIN_ID": fmt.Sprintf("%d", c.SpokeChainID),
 		"CB_PRIVATE_KEY": devDeployerKey,
+		// Service-to-service authentication id (X-Relay-Key-Id). Distinct from BANK_CODE, which is
+		// the entity ROLE and identical on every CB; see SpokeConfig.RelayKeyID.
+		"RELAY_KEY_ID": c.relayKeyID(),
 		// Hub signing key: a CB IS a verified Hub participant, so its gateway signs Hub acts
 		// directly — including the AMM swaps it executes on behalf of its member banks
 		// (POST /internal/amm/cross-currency-hub-swap). Per-CB and distinct from the spoke
@@ -637,6 +655,16 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// participant CSRs with it.
 		"CA_VOLUME":      c.caVolume(),
 		"ENTITY_PKI_DIR": "cb_tls", // named volume (holds the generated CA)
+		// PKI_DIR points the gateway at that same mount so it can read peer identities. On a CB the
+		// peers come from the participants table (the certificates it issued at onboarding, which
+		// carry the ACTIVE status and therefore revocation); this path additionally allows pinning a
+		// peer that is never onboarded — the Cacti relay — by dropping its <key-id>.crt here.
+		//
+		// Safe to set even though the CB's own directory holds no peer certificate: the gateway
+		// builds the registry from BOTH sources before reporting, so it never sits in the state
+		// where a registry is non-empty (its own cert) but has no peer, which would reject every
+		// signed request from a bank with 401 instead of falling back to the shared secret.
+		"PKI_DIR": "/workspace/backend/config/pki",
 		// R2-H-8 service-mesh mTLS: the per-entity service CA + leaf certs live in
 		// this volume, mounted read-only at /svc-tls in every backend container.
 		// mTLS activates only when GRPC_MTLS_ENABLE is exported (gated in the
@@ -837,6 +865,38 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			},
 		},
 		{
+			// Split the W-token's ADMINISTRATION from its ISSUANCE, once the handover has made this
+			// CB's gateway the administrator. The gateway keeps CENTRAL_BANK_ROLE (it mints when
+			// provisioning liquidity) and loses DEFAULT_ADMIN_ROLE to an identity whose key is never
+			// handed to a container. The relayer's issuance grant moves here from the gateway's boot
+			// sequence, because after the revoke the gateway can no longer grant anything.
+			//
+			// Idempotent by reading the chain: an already separated token yields no transaction.
+			Name: "separate-token-admin",
+			Deps: []string{"register-currency"},
+			Run: func(ctx context.Context) error {
+				token := addrs.ReadAddr(c.SpokeEnvFile, "W_TOKEN_ADDRESS")
+				if token == "" {
+					return fmt.Errorf("separate-token-admin: W_TOKEN_ADDRESS not found in %s — register-currency must run first", c.SpokeEnvFile)
+				}
+				gatewayKey, gatewayAddr := deriveCBHubKey(c.SpokeID)
+				_, relayerAddr := deriveCBRelayerKey(c.SpokeID)
+				_, adminAddr := deriveCBTokenAdminKey(c.SpokeID)
+				e := tokenAdminExec{
+					Runner: c.Runner, RPCURL: HostReachable(c.HubRPC), Token: token,
+					Signer: gatewayKey, Gateway: gatewayAddr, Relayer: relayerAddr, Admin: adminAddr,
+				}
+				if _, err := e.apply(ctx); err != nil {
+					return fmt.Errorf("separate-token-admin: %w", err)
+				}
+				// The administrator ADDRESS is what an operator needs to audit the split, and the only
+				// part of that identity that may be published. Written on every run, not just when
+				// acts were applied: a stack separated by an earlier version would otherwise never
+				// record it.
+				return addrs.AppendAddr(c.SpokeEnvFile, "W_TOKEN_ADMIN_ADDRESS", adminAddr)
+			},
+		},
+		{
 			Name:  "build-contracts",
 			Check: func(context.Context) (bool, error) { return dirNonEmpty(filepath.Join(c.ContractsDir, "out")), nil },
 			Run: func(ctx context.Context) error {
@@ -1016,8 +1076,26 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 			},
 			Run: func(ctx context.Context) error { return genServiceTLS(ctx, c.Runner, c.svcTLSVolume()) },
 		},
+		{
+			// The CB's own SERVICE identity: the key it signs with and the certificate peers pin.
+			// It cannot come from onboarding (a CB does not onboard itself), and two consumers need
+			// it — relay auth when this CB is the sender, and the circuit-breaker institutional
+			// attestation, which the gateway previously skipped entirely because PKI_DIR was unset.
+			//
+			// A step of its own rather than part of gen-tls-spoke: that step's Check is satisfied by
+			// the CA's presence, so anything folded into it is skipped on every stack that already
+			// has a CA — which is every existing one.
+			Name: "gen-relay-identity",
+			Deps: []string{"gen-tls-spoke"},
+			Check: func(ctx context.Context) (bool, error) {
+				return volumeHasFile(ctx, c.Runner, c.caVolume(), c.relayKeyID()+".crt"), nil
+			},
+			Run: func(ctx context.Context) error {
+				return ensureRelayIdentity(ctx, c.Runner, c.caVolume(), c.relayKeyID())
+			},
+		},
 		{Name: "start-spoke-infra", Deps: []string{"render-spoke-env"}, Run: compose("entity-infra")},
-		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke", "gen-tls-spoke", "gen-svc-tls-spoke"}, Run: func(ctx context.Context) error {
+		{Name: "start-spoke-backend", Deps: []string{"start-spoke-infra", "render-spoke-env", "provision-keycloak-spoke", "gen-tls-spoke", "gen-relay-identity", "gen-svc-tls-spoke"}, Run: func(ctx context.Context) error {
 			// Build the backend images before `compose up`. The hub host builds these
 			// too, but a spoke on a SEPARATE Docker daemon (multi-VM lab) never has
 			// them, so compose would try to PULL a local-only tag and fail. Idempotent

@@ -1,9 +1,13 @@
 package orchestrator
 
 import (
-	"encoding/hex"
+	"context"
+	"fmt"
+	"net/url"
 	"strconv"
+	"sync"
 
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/keyprovider"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -34,6 +38,10 @@ const (
 	// cbRelayerKeyDerivationSalt namespaces the CB's RELAYER hub key — a second
 	// identity for the same central bank, in its own derivation domain.
 	cbRelayerKeyDerivationSalt = "cbweb3-scenario-b-cb-relayer-key:"
+
+	// cbTokenAdminKeyDerivationSalt namespaces the CB's W-token ADMINISTRATION key — a third
+	// identity, in its own domain, and the only one never handed to a container.
+	cbTokenAdminKeyDerivationSalt = "cbweb3-scenario-b-cb-token-admin-key:"
 )
 
 // deriveCBHubKey deterministically derives a per-CB secp256k1 dev key for the HUB
@@ -75,6 +83,24 @@ func deriveCBRelayerKey(spokeID string) (privHex, addr string) {
 	return deriveKeyFromSalt(cbRelayerKeyDerivationSalt, spokeID)
 }
 
+// deriveCBTokenAdminKey derives the identity that ADMINISTERS this CB's W-token — the holder of
+// DEFAULT_ADMIN_ROLE, which decides who may issue the currency.
+//
+// Why it is separate from the gateway's. The gateway mints on every liquidity provisioning
+// (MintAndApproveForAMM), so its key is operational and lives in a long-running container.
+// Administration is the authority to grant issuance, and it should be exercised rarely — at
+// provisioning, not per payment. Fused into one key, as it was, a compromise of the gateway
+// container yields permanent issuance rights: the attacker grants CENTRAL_BANK_ROLE to an address
+// of their own, and rotating the gateway key afterwards does not take it away.
+//
+// This key is deliberately NOT written into any container environment. Only its address goes
+// on-chain; the toolkit re-derives the key when an administrative act is needed. That is the
+// difference between a structural split and a secrecy boundary — with derived keys it is the former,
+// and when production custody lands it becomes the latter without the topology changing.
+func deriveCBTokenAdminKey(spokeID string) (privHex, addr string) {
+	return deriveKeyFromSalt(cbTokenAdminKeyDerivationSalt, spokeID)
+}
+
 // deriveBankKey deterministically derives a per-bank secp256k1 dev key from the
 // bank code, mirroring scenario-a where each commercial bank owns its key. The key
 // seeds the bank's auth KMS (KMS_SEED_PRIVATE_KEY) so onboarding produces a DISTINCT
@@ -88,16 +114,81 @@ func deriveBankKey(bankCode string) (privHex, addr string) {
 // deriveKeyFromSalt derives a deterministic secp256k1 key from a namespacing salt and an
 // id. The salt keeps derivation domains apart, so the same id in two roles never yields
 // the same key. Returns the 0x-prefixed private key hex and the EVM address.
+//
+// It derives THROUGH the KeyProvider rather than hashing here, so the interface that production
+// custody will implement is the one actually exercised on every apply. The addresses are unchanged
+// by construction: the provider hashes seed||id and this used to hash salt+id, which are the same
+// bytes when the seed IS the salt — hence one provider per derivation domain. Locked by
+// TestDerivedHubIdentitiesAreStableAcrossRefactors, because every existing deployment has on-chain
+// roles bound to these exact addresses.
+//
+// The 0x prefix is re-applied here: the provider's exporter returns bare hex, and the compose env
+// contract is 0x-prefixed.
 func deriveKeyFromSalt(salt, id string) (privHex, addr string) {
-	seed := crypto.Keccak256([]byte(salt + id))
-	for {
-		priv, err := crypto.ToECDSA(seed)
-		if err == nil {
-			return "0x" + hex.EncodeToString(crypto.FromECDSA(priv)),
-				crypto.PubkeyToAddress(priv.PublicKey).Hex()
-		}
-		// A keccak digest is a valid secp256k1 scalar with overwhelming probability;
-		// on the vanishingly rare out-of-range value, re-hash to stay deterministic.
-		seed = crypto.Keccak256(seed)
+	priv, address, err := deriveViaKeyProvider(salt, id)
+	if err != nil {
+		// Unreachable with the local provider: the URI is a constant built here, and the local
+		// implementation derives in memory without failing. Panicking rather than returning an
+		// empty key is deliberate — an empty HUB_SIGNER_PRIVATE_KEY would be written into a
+		// compose file and surface much later as an unsignable transaction.
+		panic(fmt.Sprintf("keyprovider derivation failed for domain %q id %q: %v", salt, id, err))
 	}
+	return priv, address
+}
+
+// localKeyProviderURI addresses the seeded in-memory emulator for one derivation domain. The seed
+// is the domain salt, which is what preserves the existing addresses.
+func localKeyProviderURI(salt string) string {
+	return "kms://local-emulator?seed=" + url.QueryEscape(salt)
+}
+
+// deriveViaKeyProvider returns the 0x-prefixed private key hex and EVM address for id within the
+// derivation domain named by salt.
+//
+// Providers are cached per domain: they hold their derived keys in memory, so reusing one keeps a
+// re-derivation of the same id free, and a provisioning run touches only a handful of ids.
+func deriveViaKeyProvider(salt, id string) (privHex, addr string, err error) {
+	kp, err := keyProviderFor(salt)
+	if err != nil {
+		return "", "", err
+	}
+	pub, err := kp.GenerateKey(context.Background(), id)
+	if err != nil {
+		return "", "", fmt.Errorf("generate key: %w", err)
+	}
+	pubKey, err := crypto.UnmarshalPubkey(pub)
+	if err != nil {
+		return "", "", fmt.Errorf("unmarshal public key: %w", err)
+	}
+	// The local provider exports the private key so the backend can keep signing in-process; the
+	// production provider deliberately does not implement LocalKeyExporter, and this path is where
+	// that difference will surface (the toolkit will then emit addresses only).
+	exporter, ok := kp.(keyprovider.LocalKeyExporter)
+	if !ok {
+		return "", "", fmt.Errorf("provider for domain %q does not export private keys", salt)
+	}
+	hexKey, err := exporter.ExportPrivateKeyHex(id)
+	if err != nil {
+		return "", "", fmt.Errorf("export private key: %w", err)
+	}
+	return "0x" + hexKey, crypto.PubkeyToAddress(*pubKey).Hex(), nil
+}
+
+var (
+	keyProviderMu      sync.Mutex
+	keyProvidersBySalt = map[string]keyprovider.KeyProvider{}
+)
+
+func keyProviderFor(salt string) (keyprovider.KeyProvider, error) {
+	keyProviderMu.Lock()
+	defer keyProviderMu.Unlock()
+	if kp, ok := keyProvidersBySalt[salt]; ok {
+		return kp, nil
+	}
+	kp, err := keyprovider.New(localKeyProviderURI(salt))
+	if err != nil {
+		return nil, fmt.Errorf("build key provider for domain %q: %w", salt, err)
+	}
+	keyProvidersBySalt[salt] = kp
+	return kp, nil
 }

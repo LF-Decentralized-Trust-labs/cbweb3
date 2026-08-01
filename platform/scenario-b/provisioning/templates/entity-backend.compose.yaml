@@ -108,6 +108,12 @@ services:
       REQUEST_TIMEOUT_SEC: "30"
       ENTITY: "${ENTITY}"
       BANK_CODE: "${ENTITY}"
+      # Service-to-service authentication id (X-Relay-Key-Id): the receiver pins one public key per
+      # id, so it must be unique across the deployment. BANK_CODE cannot serve: it is the entity
+      # ROLE, so every central bank carries "central-bank" and only one of them could authenticate —
+      # and "signed by central-bank" would not say which one. Empty on a bank, whose BANK_CODE is
+      # already unique and is what the gateway falls back to.
+      RELAY_KEY_ID: "${RELAY_KEY_ID:-}"
       COOKIE_SECURE: "false"
       AUTH_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-auth:9091"
       COMPLIANCE_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-compliance:9093"

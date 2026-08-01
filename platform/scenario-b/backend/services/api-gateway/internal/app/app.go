@@ -38,6 +38,23 @@ import (
 	"gorm.io/gorm"
 )
 
+// relayAuthConfigFor builds the internal-relay auth configuration from the environment: peer
+// verifying keys pinned from PKI_DIR/<entity>.crt, the legacy shared secret, and whether signatures
+// are mandatory.
+//
+// Silent by design — it is called twice, once by New to validate before any side effect and once by
+// the dependency wiring — so the logging lives with the caller that reports the outcome. Loading is
+// file reads only, which is why calling it twice is cheap enough to prefer over threading the
+// result through construction.
+func relayAuthConfigFor(cfg config.Config) middleware.RelayAuthConfig {
+	registry, _ := relayauth.LoadRegistryGlob(cfg.PKIDir)
+	return middleware.RelayAuthConfig{
+		Registry:         relayauth.NewStore(registry),
+		LegacySecret:     os.Getenv("INTERNAL_RELAY_AUTH_SECRET"),
+		RequireSignature: cfg.RelayRequireSignature,
+	}
+}
+
 // App wraps the Fiber HTTP server and all gRPC connections for lifecycle management.
 type App struct {
 	Fiber   *fiber.App
@@ -74,6 +91,17 @@ func dialGRPC(address, serverName string, timeout time.Duration) (*grpc.ClientCo
 }
 
 func New(cfg config.Config) (*App, error) {
+	// Refuse a relay-auth configuration that would answer 401 to every internal request
+	// (enforcement demanded, nothing pinned to verify against) BEFORE anything else happens.
+	//
+	// Placement matters and was chosen from a live run: validating after buildV2Dependencies also
+	// refuses to start, but by then the wiring has already dialled gRPC, started background workers
+	// and — through bootstrapLiquidityProviderRole — submitted an on-chain transaction. A process
+	// that refuses to start must not have written to the ledger first.
+	if err := relayAuthConfigFor(cfg).Validate(); err != nil {
+		return nil, fmt.Errorf("relay auth configuration: %w", err)
+	}
+
 	var closers []io.Closer
 
 	// Single shared gRPC connection for auth + identity (same AUTH_GRPC_ADDR).
@@ -232,8 +260,10 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// IdentityRegistry (007-bridge-based-cb-liquidity / FR-004). Idempotent.
 	bootstrapLiquidityProviderRole(context.Background())
 	// The CB's relayer signs on the hub with its own identity (separate nonce space); it needs
-	// CENTRAL_BANK_ROLE on this CB's W-token to mint and burn. Idempotent; a no-op on a bank.
-	bootstrapRelayerIssuanceRole(context.Background())
+	// CENTRAL_BANK_ROLE on this CB's W-token to mint and burn. This only CHECKS the grant — making
+	// it is a provisioning act now that token administration no longer rests with this gateway.
+	// A no-op on a bank.
+	verifyRelayerIssuanceRole(context.Background())
 
 	deps := v2router.Dependencies{
 		AuthProvider: authProvider,
@@ -261,13 +291,26 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	dbURL := os.Getenv("DATABASE_URL")
 	hubRPC := os.Getenv("HUB_BESU_RPC_URL")
 	signerKey := os.Getenv("SIGNER_PRIVATE_KEY")
-	// This gateway's own Hub address, derived once from SIGNER_PRIVATE_KEY. A CB needs it to
-	// tell a delegating bank where a swap output landed; a bank that delegates every Hub act
-	// has no signing key and leaves this empty.
-	hubSignerAddr := ""
+	// This gateway's own Hub address. A CB needs it to tell a delegating bank where a swap output
+	// landed; a bank that delegates every Hub act has no signing key and leaves this empty.
+	//
+	// LOCAL_CB_HUB_SIGNER (the address) is preferred over deriving it from SIGNER_PRIVATE_KEY,
+	// because it is the form that survives production custody: a KMS never exports the key, so the
+	// address has to arrive as configuration. Deriving from the key stays as the fallback for
+	// deployments that only set the key, and the two are cross-checked when both are present —
+	// a mismatch means the environment describes two different identities, which would have the
+	// gateway report an address it cannot sign from.
+	hubSignerAddr := strings.TrimSpace(os.Getenv("LOCAL_CB_HUB_SIGNER"))
 	if signerKey != "" {
 		if privKey, keyErr := crypto.HexToECDSA(strings.TrimPrefix(signerKey, "0x")); keyErr == nil {
-			hubSignerAddr = crypto.PubkeyToAddress(privKey.PublicKey).Hex()
+			derived := crypto.PubkeyToAddress(privKey.PublicKey).Hex()
+			switch {
+			case hubSignerAddr == "":
+				hubSignerAddr = derived
+			case !strings.EqualFold(hubSignerAddr, derived):
+				log.Printf("warning: LOCAL_CB_HUB_SIGNER (%s) is not the address of SIGNER_PRIVATE_KEY (%s) — using the derived address, since that is the one this gateway can actually sign from", hubSignerAddr, derived)
+				hubSignerAddr = derived
+			}
 		} else {
 			log.Printf("warning: SIGNER_PRIVATE_KEY is not a valid secp256k1 key: %v — Hub signing disabled", keyErr)
 		}
@@ -485,7 +528,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// Circuit-breaker institutional attestation is signed server-side with the CB's PKI
 	// key (PKI_DIR/<BANK_CODE>.key), so operators never supply a signature by hand.
 	if cfg.PKIDir != "" && cfg.BankCode != "" {
-		if cbSigner, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.BankCode); sErr == nil {
+		if cbSigner, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.RelayKeyID); sErr == nil {
 			deps.CircuitBreakerSigner = cbSigner
 		} else {
 			log.Printf("[app] circuit-breaker attestation key unavailable for %q: %v (attestation left empty)", cfg.BankCode, sErr)
@@ -573,7 +616,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		// gateway's PKI key (PKI_DIR/<BANK_CODE>.key). nil falls back to the legacy secret.
 		var relaySigner *relayauth.Signer
 		if cfg.PKIDir != "" && cfg.BankCode != "" {
-			if s, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.BankCode); sErr == nil {
+			if s, sErr := relayauth.LoadSigner(cfg.PKIDir, cfg.RelayKeyID); sErr == nil {
 				relaySigner = s
 			} else {
 				log.Printf("[app] relay signing key unavailable for %q: %v (internal relay calls use legacy secret)", cfg.BankCode, sErr)
@@ -747,19 +790,45 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	// R2-CR-6: per-CB asymmetric relay auth. Pin peer verifying keys from the PKI certs
 	// (PKI_DIR/<entity>.crt). Internal relay routes prefer a valid signature and fall back
 	// to the shared secret until RELAY_REQUIRE_SIGNATURE is set (post-cutover enforcement).
-	relayRegistry, relayRegErr := relayauth.LoadRegistryGlob(cfg.PKIDir)
-	if relayRegErr != nil {
+	if _, relayRegErr := relayauth.LoadRegistryGlob(cfg.PKIDir); relayRegErr != nil {
 		log.Printf("[app] relay auth: could not load peer certs from PKI_DIR=%q: %v", cfg.PKIDir, relayRegErr)
 	}
-	deps.RelayAuth = middleware.RelayAuthConfig{
-		Registry:         relayRegistry,
-		LegacySecret:     deps.InternalRelayAuthSecret,
-		RequireSignature: cfg.RelayRequireSignature,
+	deps.RelayAuth = relayAuthConfigFor(cfg)
+
+	// Fold in the peers this central bank onboarded, THEN report. Order matters: the participants
+	// table is what makes a CB's registry non-empty at all (its PKI dir holds no peer certificates),
+	// so refreshing after the report would describe a state that never existed.
+	//
+	// Two sources on purpose. The table is authoritative for onboarded peers because it carries the
+	// ACTIVE status — deactivating a bank in compliance is what revokes its ability to authenticate.
+	// Files cover peers that are never onboarded, the Cacti relay being the case that matters.
+	refreshRelayRegistry(context.Background(), deps.RelayAuth.Registry, db, cfg.PKIDir)
+	if stop := startRelayRegistryRefresher(deps.RelayAuth.Registry, db, cfg.PKIDir); stop != nil {
+		_ = stop // process-lifetime, like the other background workers wired here
 	}
+
+	relayRegistry := deps.RelayAuth.Registry.Get()
 	if relayRegistry != nil && relayRegistry.Len() > 0 {
-		log.Printf("[app] relay auth: %d peer key(s) pinned from PKI_DIR; require_signature=%v", relayRegistry.Len(), cfg.RelayRequireSignature)
+		ids := relayRegistry.IDs()
+		log.Printf("[app] relay auth: %d peer key(s) pinned %v; require_signature=%v", relayRegistry.Len(), ids, cfg.RelayRequireSignature)
+		// A registry holding ONLY this entity's own id is the dangerous middle state: non-empty, so
+		// the middleware verifies strictly and stops falling back to the shared secret, but with no
+		// peer pinned every SIGNED request is rejected with 401. Banks already sign their internal
+		// calls, so on a CB this silently breaks bridge-in, the delegated hub swap and the residue
+		// return. Not a refusal to start — the entity may legitimately receive no internal calls —
+		// but it must not be discovered from the 401s.
+		if len(ids) == 1 && ids[0] == cfg.RelayKeyID {
+			log.Printf("[app] relay auth: WARNING: the only pinned key is this entity's own (%s) — no PEER identity was found, "+
+				"neither an onboarded participant with an issued certificate nor a <key-id>.crt in PKI_DIR. "+
+				"Any signed request from a peer will be rejected with 401 (RELAY_SIGNATURE_INVALID) instead of falling back to the shared secret.", cfg.RelayKeyID)
+		}
+	} else if cfg.RelayRequireSignature {
+		// Do not claim the legacy fallback here: with enforcement on and nothing pinned, the
+		// shared secret is NOT accepted — every internal request would be rejected. New refuses
+		// to start on this, and the log must not say otherwise.
+		log.Printf("[app] relay auth: no peer keys pinned AND require_signature=true — refusing to start")
 	} else {
-		log.Printf("[app] relay auth: no PKI peer keys pinned; internal routes use legacy shared secret")
+		log.Printf("[app] relay auth: no peer keys pinned; internal routes use legacy shared secret")
 	}
 	lcrAddr := os.Getenv("LIQUIDITY_COMMIT_REGISTRY_ADDRESS")
 	if lcrAddr != "" && hubRPC != "" && signerKey != "" && db != nil {

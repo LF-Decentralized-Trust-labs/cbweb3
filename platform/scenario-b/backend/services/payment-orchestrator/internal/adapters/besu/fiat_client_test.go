@@ -4,6 +4,7 @@ package besu
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -17,6 +18,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
+
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
@@ -91,13 +94,22 @@ func TestFiatClient_GetFiatBalance(t *testing.T) {
 		t.Fatalf("parse fiat ABI: %v", err)
 	}
 
+	// The client now holds a shared evm.Signer instead of a bare key: the address it reads
+	// balances "from" comes from that signer, which is also what serializes nonces across the
+	// sibling clients that share this operator key.
+	signer, err := evm.NewSigner(hex.EncodeToString(crypto.FromECDSA(privateKey)), big.NewInt(1337))
+	if err != nil {
+		t.Fatalf("build signer: %v", err)
+	}
+	if signer.Address() != fromAddress {
+		t.Fatalf("signer address %s does not match the test key %s", signer.Address().Hex(), fromAddress.Hex())
+	}
+
 	client := &FiatTokenClient{
 		ethClient:    ethClient,
 		tokenAddress: fiatAddress,
 		tokenABI:     parsedABI,
-		privateKey:   privateKey,
-		fromAddress:  fromAddress,
-		chainID:      big.NewInt(1337),
+		signer:       signer,
 		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 

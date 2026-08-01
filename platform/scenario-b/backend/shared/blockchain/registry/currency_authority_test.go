@@ -128,3 +128,48 @@ func TestPlanCurrencyAuthority_NeverStrandsAdministration(t *testing.T) {
 		}
 	}
 }
+
+// A re-apply after the SOVEREIGN has moved administration on must be a no-op, not a failed grant.
+//
+// Provisioning separates W-token administration from issuance: the CB's gateway keeps
+// CENTRAL_BANK_ROLE and DEFAULT_ADMIN_ROLE moves to a dedicated identity. This repair path then sees
+// a CB that does not administer its own token and used to plan a grant — signed by the HUB, which
+// gave up administration during the original handover. The grant reverts, and `register-currency`
+// stops being idempotent: re-applying a separated spoke fails and every later step is skipped.
+//
+// What the handover actually protects is narrower than "the CB administers": it is that the HUB does
+// not, so it cannot grant issuance back to itself. Once the hub is out, where the sovereign keeps
+// administration is the sovereign's business.
+func TestPlanCurrencyAuthority_NoGrantWhenAdministrationHasLeftTheHub(t *testing.T) {
+	signer := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	cb := common.HexToAddress("0x2222222222222222222222222222222222222222")
+
+	// Post-separation steady state: the CB holds issuance, administration is elsewhere (a third
+	// identity this package never sees), and the hub holds neither.
+	p := planCurrencyAuthority(signer, cb, cb,
+		true,  // cbHasRole
+		false, // signerHasRole
+		false, // cbIsAdmin — administration moved to the sovereign's admin identity
+		false, // signerIsAdmin — the hub gave it up at handover
+	)
+	if p.GrantCBAdmin {
+		t.Fatalf("planned a DEFAULT_ADMIN_ROLE grant the hub can no longer sign: %+v", p)
+	}
+	if !p.Empty() {
+		t.Fatalf("expected nothing to do on a separated token, got %+v", p)
+	}
+}
+
+// The protection itself must not weaken: while the hub still administers, the handover proceeds.
+func TestPlanCurrencyAuthority_StillGrantsWhileTheHubAdministers(t *testing.T) {
+	signer := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	cb := common.HexToAddress("0x2222222222222222222222222222222222222222")
+
+	p := planCurrencyAuthority(signer, cb, cb, true, false, false, true)
+	if !p.GrantCBAdmin {
+		t.Fatalf("the hub still administers, so administration must be handed over: %+v", p)
+	}
+	if !p.RevokeSignerAdmin {
+		t.Fatalf("the hub's administration must be revoked: %+v", p)
+	}
+}

@@ -213,6 +213,47 @@ func submitTxInternal(
 	if err != nil {
 		return nil, "", fmt.Errorf("pack %s: %w", method, err)
 	}
+	return submitRawInternal(ctx, ec, signer, contract, input, method, onBroadcast)
+}
+
+// SubmitRawTxReceipt submits PRE-PACKED calldata through this package's serialized nonce counter
+// and returns the receipt.
+//
+// It exists for callers that pack their own calldata and previously built their own transactor —
+// three payment-orchestrator clients did, each fetching PendingNonceAt independently while sharing
+// the operator key. Same key, same chain, no shared counter: two concurrent submissions could claim
+// the same nonce and one would be replaced. Routing them here puts every submission behind the one
+// counter in signAndSend.
+//
+// label names the call in error messages only; it does not affect encoding.
+func SubmitRawTxReceipt(
+	ctx context.Context,
+	ec *ethclient.Client,
+	signer *Signer,
+	contract common.Address,
+	input []byte,
+	label string,
+) (*types.Receipt, string, error) {
+	if signer == nil {
+		return nil, "", errors.New("evm: signer is required to submit a transaction")
+	}
+	if len(input) == 0 {
+		// A transaction with no calldata is a plain value transfer, not the contract call the
+		// caller meant to make. Refuse rather than send it.
+		return nil, "", fmt.Errorf("evm: %s: empty calldata", label)
+	}
+	return submitRawInternal(ctx, ec, signer, contract, input, label, nil)
+}
+
+func submitRawInternal(
+	ctx context.Context,
+	ec *ethclient.Client,
+	signer *Signer,
+	contract common.Address,
+	input []byte,
+	label string,
+	onBroadcast func(txHash string),
+) (*types.Receipt, string, error) {
 	gasPrice, err := ec.SuggestGasPrice(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("gas price: %w", err)
@@ -242,7 +283,7 @@ func submitTxInternal(
 		return nil, "", fmt.Errorf("wait mined: %w", err)
 	}
 	if receipt.Status == 0 {
-		return nil, "", fmt.Errorf("transaction reverted on-chain (tx=%s) — check contract permissions and token allowances", signed.Hash().Hex())
+		return nil, "", fmt.Errorf("%s: transaction reverted on-chain (tx=%s) — check contract permissions and token allowances", label, signed.Hash().Hex())
 	}
 	return receipt, signed.Hash().Hex(), nil
 }

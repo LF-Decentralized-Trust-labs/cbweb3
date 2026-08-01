@@ -2,11 +2,14 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/bundle"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/exec"
@@ -210,4 +213,196 @@ func envMap(env []string) map[string]string {
 		}
 	}
 	return out
+}
+
+// --- derivation is load-bearing: lock the actual addresses ---
+//
+// The tests above prove the derivation is deterministic and that the domains are distinct. Neither
+// notices if the derivation CHANGES: every existing deployment has on-chain state bound to these
+// exact addresses — IdentityRegistry maps them as the token's central bank, PairRegistry admits only
+// them as proposer/confirmer, and the W-token's roles are granted to them. A silent change orphans
+// all of it and the failure appears as "not the central bank of tokenB" long after the fact.
+//
+// So these literals are a REGRESSION LOCK, not a specification of the algorithm. They were read off
+// a live stack (verify-sovereign-hub-identity.sh, step 15). If a change to the derivation is
+// intended, the on-chain handover has to be planned and these values updated deliberately.
+func TestDerivedHubIdentitiesAreStableAcrossRefactors(t *testing.T) {
+	cases := []struct {
+		spokeID     string
+		gatewayAddr string
+		relayerAddr string
+	}{
+		{"spoke-brl", "0xaE3467da888C4Af6F171993Fe9D183033FB71E74", "0x9f4fafEEF19E4Dd2472E13d0E1869f9f228B14e2"},
+		{"spoke-ars", "0x383DBDbB1F9Eb49Bc54FF3b8FE38BE1E6580b370", "0x5A6c18C02bE57b819Be807c700eAbC6ee035103b"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.spokeID, func(t *testing.T) {
+			if _, addr := deriveCBHubKey(tc.spokeID); addr != tc.gatewayAddr {
+				t.Fatalf("gateway identity for %s changed to %s (was %s) — on-chain roles are bound to the old address",
+					tc.spokeID, addr, tc.gatewayAddr)
+			}
+			if _, addr := deriveCBRelayerKey(tc.spokeID); addr != tc.relayerAddr {
+				t.Fatalf("relayer identity for %s changed to %s (was %s) — its CENTRAL_BANK_ROLE grant is bound to the old address",
+					tc.spokeID, addr, tc.relayerAddr)
+			}
+		})
+	}
+}
+
+// The private key format is part of the contract with the compose env: the backend receives this
+// string verbatim. keyprovider's exporter returns hex WITHOUT the 0x prefix, so routing the
+// derivation through it must not drop the prefix.
+func TestDerivedKeysKeepTheEnvHexFormat(t *testing.T) {
+	for name, key := range map[string]string{
+		"cb hub":     first(deriveCBHubKey("spoke-brl")),
+		"cb relayer": first(deriveCBRelayerKey("spoke-brl")),
+		"bank":       first(deriveBankKey("bank-itau")),
+	} {
+		if !strings.HasPrefix(key, "0x") || len(key) != 66 {
+			t.Fatalf("%s key %q must be 0x-prefixed and 66 chars", name, key)
+		}
+	}
+}
+
+func first(a, _ string) string { return a }
+
+// Equivalence with the raw derivation, for every domain. This is what makes routing through the
+// KeyProvider a refactor rather than a change: the provider hashes seed||id and the inline path
+// hashed salt+id, which are the same bytes when the seed IS the salt.
+func TestDerivationMatchesTheRawKeccakDomain(t *testing.T) {
+	cases := []struct {
+		name string
+		salt string
+		id   string
+		got  func() (string, string)
+	}{
+		{"cb hub", cbHubKeyDerivationSalt, "spoke-brl", func() (string, string) { return deriveCBHubKey("spoke-brl") }},
+		{"cb relayer", cbRelayerKeyDerivationSalt, "spoke-brl", func() (string, string) { return deriveCBRelayerKey("spoke-brl") }},
+		{"bank", bankKeyDerivationSalt, "bank-itau", func() (string, string) { return deriveBankKey("bank-itau") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			material := crypto.Keccak256([]byte(tc.salt + tc.id))
+			want, err := crypto.ToECDSA(material)
+			if err != nil {
+				t.Skipf("fixture salt+id produced an out-of-range scalar; not expected for these inputs")
+			}
+			wantAddr := crypto.PubkeyToAddress(want.PublicKey).Hex()
+			wantHex := "0x" + hex.EncodeToString(crypto.FromECDSA(want))
+
+			gotHex, gotAddr := tc.got()
+			if gotAddr != wantAddr || gotHex != wantHex {
+				t.Fatalf("derivation diverged from keccak256(salt+id): got %s / %s, want %s / %s",
+					gotAddr, gotHex, wantAddr, wantHex)
+			}
+		})
+	}
+}
+
+// --- token administration as a separate identity ---
+//
+// The gateway key holds BOTH CENTRAL_BANK_ROLE (mint/burn, used on every liquidity provisioning)
+// and DEFAULT_ADMIN_ROLE (decides who may issue). Those are different kinds of authority: issuance
+// is operational, administration should be rare. Fused, a compromise of the gateway container grants
+// permanent issuance rights that survive rotating the gateway key.
+//
+// The administration identity is deliberately NOT handed to any container: only its address goes
+// on-chain, and the toolkit re-derives the key when an administrative act is needed.
+func TestDeriveCBTokenAdminKey_DistinctFromEveryOtherDomain(t *testing.T) {
+	const spokeID = "spoke-brl"
+	_, admin := deriveCBTokenAdminKey(spokeID)
+	_, gateway := deriveCBHubKey(spokeID)
+	_, relayer := deriveCBRelayerKey(spokeID)
+	_, bank := deriveBankKey(spokeID) // the same id in the bank domain
+
+	if admin == "" {
+		t.Fatal("admin identity must be derived")
+	}
+	for name, other := range map[string]string{"gateway": gateway, "relayer": relayer, "bank domain": bank} {
+		if admin == other {
+			t.Fatalf("admin identity collides with the %s identity (%s) — the split would be nominal", name, other)
+		}
+	}
+}
+
+func TestDeriveCBTokenAdminKey_DeterministicAndPerSpoke(t *testing.T) {
+	a1, addr1 := deriveCBTokenAdminKey("spoke-brl")
+	a2, addr2 := deriveCBTokenAdminKey("spoke-brl")
+	if a1 != a2 || addr1 != addr2 {
+		t.Fatal("derivation must be deterministic: a re-apply would otherwise strand the previous administrator")
+	}
+	_, other := deriveCBTokenAdminKey("spoke-ars")
+	if addr1 == other {
+		t.Fatalf("two spokes derived the same administrator (%s) — administration would not be sovereign", other)
+	}
+}
+
+// The administration key must never reach a container: that is the whole point of separating it.
+// Compose env is the only channel the toolkit has, so its absence there is the invariant.
+func TestComposeEnvNeverCarriesTheTokenAdminKey(t *testing.T) {
+	c := SpokeConfig{SpokeID: "spoke-brl", Currency: "BRL", RPCPort: 33645, VolumePrefix: "cb"}
+	adminKey, _ := deriveCBTokenAdminKey(c.SpokeID)
+
+	// ComposeEnv is a []string of "KEY=VALUE", so the check is on the whole entry: a substring
+	// match also catches the key being embedded in a larger value.
+	for _, entry := range c.ComposeEnv() {
+		if strings.Contains(entry, adminKey) || strings.Contains(entry, strings.TrimPrefix(adminKey, "0x")) {
+			name := entry
+			if i := strings.Index(entry, "="); i > 0 {
+				name = entry[:i]
+			}
+			t.Fatalf("compose env %s carries the token administration PRIVATE KEY — it must stay with the toolkit", name)
+		}
+	}
+}
+
+// --- relay key id ---
+//
+// A central bank's ENTITY is its ROLE ("central-bank"), so every CB in the topology carries the same
+// BANK_CODE. That cannot serve as the service-to-service authentication id: the receiver pins one
+// public key per id, so two CBs sharing it means only one of them can ever authenticate — and
+// "signed by central-bank" would not say WHICH central bank, which is the shared-secret problem
+// again with asymmetric keys on top.
+//
+// The id therefore comes from the manifest name, which is unique by construction (it is what the
+// container prefix is built from). BANK_CODE is deliberately left alone: it flows into owner_bank_id
+// on bridge positions and into the reconciliation's self-exclusion.
+func TestComposeEnvCarriesAUniqueRelayKeyID(t *testing.T) {
+	c := SpokeConfig{
+		SpokeID: "spoke-brl", Currency: "BRL", RPCPort: 33645,
+		VolumePrefix: "cb", Entity: "central-bank", RelayKeyID: "central-bank-brazil",
+	}
+	env := map[string]string{}
+	for _, e := range c.ComposeEnv() {
+		if i := strings.Index(e, "="); i > 0 {
+			env[e[:i]] = e[i+1:]
+		}
+	}
+	if env["RELAY_KEY_ID"] != "central-bank-brazil" {
+		t.Fatalf("RELAY_KEY_ID = %q, want central-bank-brazil", env["RELAY_KEY_ID"])
+	}
+	if env["RELAY_KEY_ID"] == env["BANK_CODE"] {
+		t.Fatalf("the relay id must differ from BANK_CODE (%q) — BANK_CODE is the role and collides across CBs", env["BANK_CODE"])
+	}
+	if env["RELAY_KEY_ID"] == env["ENTITY"] {
+		t.Fatalf("the relay id must differ from ENTITY (%q), which is the role", env["ENTITY"])
+	}
+}
+
+// Two central banks must never derive the same relay id, or the receiver can pin only one key.
+func TestRelayKeyIDDiffersBetweenCentralBanks(t *testing.T) {
+	br := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 33645, RelayKeyID: "central-bank-brazil"}
+	ar := SpokeConfig{SpokeID: "spoke-ars", RPCPort: 33745, RelayKeyID: "central-bank-argentina"}
+	if br.relayKeyID() == ar.relayKeyID() {
+		t.Fatalf("both central banks resolved the relay id %q", br.relayKeyID())
+	}
+}
+
+// Without an explicit value the spoke id is the fallback: still unique per CB, and available
+// without threading the manifest name through every construction path.
+func TestRelayKeyIDFallsBackToTheSpokeID(t *testing.T) {
+	c := SpokeConfig{SpokeID: "spoke-brl", RPCPort: 33645}
+	if got := c.relayKeyID(); got != "spoke-brl" {
+		t.Fatalf("fallback relay id = %q, want spoke-brl", got)
+	}
 }

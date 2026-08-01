@@ -66,7 +66,7 @@ func keyAndReg(t *testing.T, keyID string) (*relayauth.Signer, *relayauth.Regist
 // A valid per-CB signature is accepted.
 func TestMigrating_ValidSignatureAccepted(t *testing.T) {
 	signer, reg := keyAndReg(t, "central-bank-a")
-	app := newApp(middleware.RelayAuthConfig{Registry: reg, LegacySecret: "shh"})
+	app := newApp(middleware.RelayAuthConfig{Registry: relayauth.NewStore(reg), LegacySecret: "shh"})
 
 	body := `{"correlation_id":"c1"}`
 	if code := do(t, app, signedReq(t, signer, body, time.Now())); code != http.StatusOK {
@@ -78,7 +78,7 @@ func TestMigrating_ValidSignatureAccepted(t *testing.T) {
 // (no downgrade attack when a signer is in play).
 func TestMigrating_InvalidSignatureNotDowngraded(t *testing.T) {
 	signer, reg := keyAndReg(t, "central-bank-a")
-	app := newApp(middleware.RelayAuthConfig{Registry: reg, LegacySecret: "shh"})
+	app := newApp(middleware.RelayAuthConfig{Registry: relayauth.NewStore(reg), LegacySecret: "shh"})
 
 	// Sign one body, send a different one under the same headers + the valid secret.
 	req := signedReq(t, signer, `{"amount":"1"}`, time.Now())
@@ -94,7 +94,7 @@ func TestMigrating_InvalidSignatureNotDowngraded(t *testing.T) {
 // With no signature, the legacy secret is accepted (Cacti compatibility).
 func TestMigrating_LegacySecretFallback(t *testing.T) {
 	_, reg := keyAndReg(t, "central-bank-a")
-	app := newApp(middleware.RelayAuthConfig{Registry: reg, LegacySecret: "shh"})
+	app := newApp(middleware.RelayAuthConfig{Registry: relayauth.NewStore(reg), LegacySecret: "shh"})
 
 	req := httptest.NewRequest(http.MethodPost, sigPath, strings.NewReader(`{}`))
 	req.Header.Set("X-Relay-Auth", "shh")
@@ -106,7 +106,7 @@ func TestMigrating_LegacySecretFallback(t *testing.T) {
 // With RequireSignature, a secret-only request is rejected (post-cutover enforcement).
 func TestMigrating_RequireSignatureRejectsSecretOnly(t *testing.T) {
 	_, reg := keyAndReg(t, "central-bank-a")
-	app := newApp(middleware.RelayAuthConfig{Registry: reg, LegacySecret: "shh", RequireSignature: true})
+	app := newApp(middleware.RelayAuthConfig{Registry: relayauth.NewStore(reg), LegacySecret: "shh", RequireSignature: true})
 
 	req := httptest.NewRequest(http.MethodPost, sigPath, strings.NewReader(`{}`))
 	req.Header.Set("X-Relay-Auth", "shh")
@@ -133,5 +133,77 @@ func TestMigrating_WrongSecretRejected(t *testing.T) {
 	req.Header.Set("X-Relay-Auth", "nope")
 	if code := do(t, app, req); code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for wrong secret, got %d", code)
+	}
+}
+
+// --- startup validation ---
+//
+// The dangerous combination is RequireSignature with nothing to verify against. In that state
+// RequireRelayAuthMigrating never even attempts verification (hasRegistry is false), so it takes the
+// "no verifiable signature" branch and answers 401 to EVERY internal request — including a correctly
+// signed one. That kills bridge-in, the delegated hub swap and the residue return, so a deployment
+// would stop settling payments because of one boolean. It has to be caught before serving traffic.
+
+func TestRelayAuthConfig_Validate_RejectsEnforcementWithNothingToVerify(t *testing.T) {
+	cases := map[string]middleware.RelayAuthConfig{
+		"nil registry": {
+			RequireSignature: true,
+			LegacySecret:     "some-secret",
+		},
+		"empty registry": {
+			Registry:         relayauth.NewStore(relayauth.NewRegistry()),
+			RequireSignature: true,
+			LegacySecret:     "some-secret",
+		},
+		"empty registry and no secret": {
+			Registry:         relayauth.NewStore(relayauth.NewRegistry()),
+			RequireSignature: true,
+		},
+	}
+	for name, cfg := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("expected enforcement with no pinned keys to be refused: every internal request would 401")
+			}
+			// The message has to name the two settings, or an operator cannot act on it.
+			if !strings.Contains(err.Error(), "RELAY_REQUIRE_SIGNATURE") || !strings.Contains(err.Error(), "PKI_DIR") {
+				t.Fatalf("error must name both settings to be actionable, got: %v", err)
+			}
+		})
+	}
+}
+
+// Enforcement with at least one pinned key is exactly what the operator asked for.
+func TestRelayAuthConfig_Validate_AcceptsEnforcementWithPinnedKeys(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	reg := relayauth.NewRegistry()
+	reg.Add("central-bank-a", &priv.PublicKey)
+
+	cfg := middleware.RelayAuthConfig{Registry: relayauth.NewStore(reg), RequireSignature: true}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("enforcement with a pinned key must be accepted: %v", err)
+	}
+}
+
+// The migrating state — no keys yet, shared secret in use — is the current normal and must keep
+// starting. Refusing it would block every deployment that has not migrated.
+func TestRelayAuthConfig_Validate_AcceptsMigratingState(t *testing.T) {
+	cases := map[string]middleware.RelayAuthConfig{
+		"secret only":               {LegacySecret: "s"},
+		"empty registry and secret": {Registry: relayauth.NewStore(relayauth.NewRegistry()), LegacySecret: "s"},
+		// Neither configured stays a RUNTIME 503 (fail-closed per request), not a startup failure:
+		// a gateway that never receives internal calls is legitimately in this state.
+		"neither configured": {},
+	}
+	for name, cfg := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("must not refuse to start: %v", err)
+			}
+		})
 	}
 }

@@ -53,7 +53,22 @@ var (
 	certSourceRe  = regexp.MustCompile(`^(self-signed(://.*)?|ca://.+)$`)
 	// hexKeyRe matches a bare or 0x-prefixed 64-hex-character private key.
 	hexKeyRe = regexp.MustCompile(`(?i)\b(0x)?[0-9a-f]{64}\b`)
+	// localEmulatorRe matches the one key provider the toolkit can actually honour.
+	localEmulatorRe = regexp.MustCompile(`^kms://local-emulator(\?.*)?$`)
 )
+
+// isSupportedKeyProvider reports whether the toolkit can honour this provider URI.
+//
+// Only the local emulator, deliberately. keyprovider.New returns a production stub for any other
+// host and every one of its operations fails with ErrNotImplemented, so a manifest naming a real
+// KMS cannot be served. Accepting it would be worse than failing: the field is a declaration of
+// custody, and a deployment that declares production custody while running on keys derived from a
+// public salt is exactly the misreading this refusal exists to prevent.
+//
+// When the production provider lands, this is the single place that opens up.
+func isSupportedKeyProvider(uri string) bool {
+	return localEmulatorRe.MatchString(uri)
+}
 
 // Validate checks a single manifest and returns all findings (errors +
 // warnings), collected in one pass (FR-011). A manifest is valid when the
@@ -129,6 +144,14 @@ func Validate(pd *ParticipantDeployment) Result {
 			r.AddError("spec.keyProvider", "required field is missing")
 		} else if !keyProviderRe.MatchString(spec.KeyProvider) {
 			r.AddError("spec.keyProvider", fmt.Sprintf("invalid value %q; must match kms://…", spec.KeyProvider))
+		} else if !isSupportedKeyProvider(spec.KeyProvider) {
+			// Refuse a provider the toolkit cannot honour, instead of accepting the declaration and
+			// provisioning development keys under it. See isSupportedKeyProvider.
+			r.AddError("spec.keyProvider", fmt.Sprintf(
+				"unsupported provider %q: production key custody is not implemented, so this would be "+
+					"accepted and then silently provisioned with development keys derived from a public "+
+					"salt; the only supported value today is kms://local-emulator[?seed=…]",
+				spec.KeyProvider))
 		}
 		if spec.CertSource == "" {
 			r.AddError("spec.certSource", "required field is missing")

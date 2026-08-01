@@ -221,6 +221,13 @@ type currencyAuthorityPlan struct {
 	// GrantCBAdmin gives the CB DEFAULT_ADMIN_ROLE on its W-token, so it — and not the hub —
 	// decides who may issue its money. Without this the revocation below is cosmetic: the
 	// hub could grant CENTRAL_BANK_ROLE back to itself at any time.
+	//
+	// Only ever planned while the hub STILL administers the token. What this handover protects is
+	// narrower than "the CB administers": it is that the HUB does not. Once the hub is out,
+	// administration may legitimately rest with a dedicated sovereign identity rather than the CB's
+	// gateway (provisioning separates issuance from administration), and this package never sees
+	// that address. Planning a grant then would have the hub sign a transaction it no longer has the
+	// authority for — it reverts, and the whole re-apply of that spoke fails with it.
 	GrantCBAdmin bool
 	// RevokeSignerRole takes CENTRAL_BANK_ROLE away from the hub signer, so the hub cannot
 	// issue another sovereign's money.
@@ -246,9 +253,12 @@ func planCurrencyAuthority(signer, cb, currentCBOf common.Address, cbHasRole, si
 		return currencyAuthorityPlan{}
 	}
 	return currencyAuthorityPlan{
-		SetCentralBankOf:  currentCBOf != cb,
-		GrantCBRole:       !cbHasRole,
-		GrantCBAdmin:      !cbIsAdmin,
+		SetCentralBankOf: currentCBOf != cb,
+		GrantCBRole:      !cbHasRole,
+		// See GrantCBAdmin: conditioned on the hub still administering, so a token whose
+		// administration the sovereign has already moved on is left alone instead of triggering a
+		// grant the hub cannot sign.
+		GrantCBAdmin:      !cbIsAdmin && signerIsAdmin,
 		RevokeSignerRole:  signerHasRole,
 		RevokeSignerAdmin: signerIsAdmin,
 	}
