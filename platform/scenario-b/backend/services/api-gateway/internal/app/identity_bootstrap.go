@@ -125,6 +125,9 @@ func resolveBootstrapHubChainID(warnLogger *log.Logger) int64 {
 
 // wTokenRoleABI is the minimal AccessControl surface of a sovereign W-token needed to grant the
 // relayer its issuance role.
+//
+// #nosec G101 -- not a secret; static contract ABI JSON. G101 matches on the identifier ("Token")
+// and the string's length, not on its content.
 const wTokenRoleABI = `[
 {"type":"function","name":"CENTRAL_BANK_ROLE","stateMutability":"view",
  "inputs":[],"outputs":[{"name":"","type":"bytes32"}]},
