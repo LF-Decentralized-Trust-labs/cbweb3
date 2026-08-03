@@ -60,6 +60,20 @@ if [[ -z "${BIN}" ]]; then
   ( cd "${SCENARIO_DIR}/toolkit" && go build -o "${BIN}" ./cmd/cbweb3 )
 fi
 
+# --- contract artifacts -------------------------------------------------------
+# contracts/out/ is gitignored and NO apply step rebuilds it: the engine deploys
+# whatever artifact is already on disk (deps.go points at out/<file>.sol/<name>.json).
+# A stale out/ therefore deploys old bytecode while the engine calls the current
+# ABI — e.g. an artifact predating IdentityRegistry's two-step onboarding has no
+# verifyParticipant selector, so onboard-registry dies with "verifyParticipant tx
+# reverted". deploy-lnet never hits this because ship.sh wipes the remote tree
+# (out/ always empty → it compiles); a long-lived local checkout does. forge build
+# is incremental, so this is cheap on repeat runs.
+log "building scenario-a contract artifacts (forge build)…"
+( cd "${SCENARIO_DIR}/contracts" \
+    && { [[ -d dependencies ]] || forge soldeer install; } \
+    && forge build >/dev/null )
+
 # field <json-line> <key> — extract a string value from a flat JSON log line.
 field() { printf '%s' "$1" | sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p"; }
 

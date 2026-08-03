@@ -56,6 +56,16 @@ if [[ -z "${BIN}" ]]; then
   ( cd "${SCENARIO_DIR}/toolkit" && go build -o "${BIN}" ./cmd/cbweb3 )
 fi
 
+# --- contract artifacts -------------------------------------------------------
+# Same reason as deploy-all.sh: contracts/out/ is gitignored, no apply step rebuilds
+# it, and the engine deploys whatever bytecode is on disk. A stale out/ deploys an
+# old contract against the current ABI (e.g. missing verifyParticipant → onboard-registry
+# reverts). forge build is incremental, so this is cheap on repeat runs.
+log "building scenario-a contract artifacts (forge build)…"
+( cd "${SCENARIO_DIR}/contracts" \
+    && { [[ -d dependencies ]] || forge soldeer install; } \
+    && forge build >/dev/null )
+
 # field <json-line> <key> — extract a string value from a flat JSON log line.
 field() { printf '%s' "$1" | sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p"; }
 
