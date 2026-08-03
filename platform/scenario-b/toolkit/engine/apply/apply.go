@@ -44,18 +44,33 @@ func Apply(ctx context.Context, o Options) (orchestrator.Report, error) {
 		f := res.Errors[0]
 		return orchestrator.Report{}, fmt.Errorf("invalid manifest: %s: %s", f.Field, f.Message)
 	}
+	var rep orchestrator.Report
 	switch pd.Spec.Mode {
 	case "found-hub":
-		return applyFoundHub(ctx, o, pd)
+		rep, err = applyFoundHub(ctx, o, pd)
 	case "found-spoke":
-		return applyFoundSpoke(ctx, o, pd)
+		rep, err = applyFoundSpoke(ctx, o, pd)
 	case "join":
-		return applyJoin(ctx, o, pd)
+		rep, err = applyJoin(ctx, o, pd)
 	case "observe":
-		return applyObserve(ctx, o, pd)
+		rep, err = applyObserve(ctx, o, pd)
 	default:
 		return orchestrator.Report{}, fmt.Errorf("unknown mode %q", pd.Spec.Mode)
 	}
+
+	// Report which directory this run actually used. node.dataDir is relative, so the same command from
+	// two working directories provisions two different entities — and the second one quietly mints a new
+	// identity. Naming the absolute path makes that visible in the output the operator already reads,
+	// including on the failure path, where it is most needed.
+	if rep.DataDir == "" {
+		// spec.node is absent in observe mode, so it cannot be dereferenced unconditionally.
+		manifestDataDir := ""
+		if pd.Spec.Node != nil {
+			manifestDataDir = pd.Spec.Node.DataDir
+		}
+		rep.DataDir = absOr(firstNonEmpty(o.DataDir, manifestDataDir, "."))
+	}
+	return rep, err
 }
 
 // applyObserve stands up an observe-mode NOC deployment: it consumes the NOC

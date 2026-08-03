@@ -674,7 +674,14 @@ func JoinSteps(c JoinConfig) []Step {
 				csrOK := fileExists(filepath.Join(c.pkiDir(), c.BankID+".csr"))
 				return keyOK && csrOK, nil
 			},
-			Run: func(context.Context) error {
+			Run: func(ctx context.Context) error {
+				// Refuse to mint a second identity for a bank that is already running from another
+				// directory (a run started from a different working directory resolves the relative
+				// node.dataDir elsewhere). Generating here would replace the identity the central bank
+				// certified, and every internal call would stop verifying.
+				if err := ensureIdentityDirUnchanged(ctx, c.Runner, c.ContainerPrefix, c.BankID, c.pkiDir()); err != nil {
+					return err
+				}
 				// FR-010: pre-create the pki dir as the host user before any
 				// bind-mount, or Docker creates it root-owned and gen-csr fails.
 				if err := os.MkdirAll(c.pkiDir(), 0o700); err != nil {
