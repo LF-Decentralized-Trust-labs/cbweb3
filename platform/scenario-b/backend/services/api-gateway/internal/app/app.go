@@ -745,41 +745,49 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 	}
 
 	// Phase 8: PairRegistry multi-pair service (FR-017 / D9-D11 / 005-cooperative-liquidity).
-	// PAIR_REGISTRY_CONTRACT_ADDRESS enables propose/confirm; read-only ListActivePairs from DB only.
-	if db != nil && pairRegistryAddr != "" && hubRPC != "" && signerKey != "" {
-		chainID := int64(0)
-		if chainIDStr != "" {
-			bid := new(big.Int)
-			if _, ok := bid.SetString(chainIDStr, 10); ok {
-				chainID = bid.Int64()
+	// PAIR_REGISTRY_CONTRACT_ADDRESS enables propose/confirm; without a signing key the client is
+	// still built, read-only, because the hub registry — not this entity's database — is the
+	// catalogue of pairs. A commercial bank holds no hub key and would otherwise list nothing.
+	if db != nil {
+		pairRepo := NewPairRepository(db)
+		pairMode := resolveHubRegistryMode(pairRegistryAddr, hubRPC, signerKey)
+		// DB-only is the floor, not a failure: the pairs route stays served even when the hub is
+		// unreachable, rather than disappearing into a 404 that reads like a missing feature.
+		deps.PairService = services.NewPairService(nil, pairRepo)
+
+		if pairMode != hubRegistryDisabled {
+			chainID := int64(0)
+			if chainIDStr != "" {
+				bid := new(big.Int)
+				if _, ok := bid.SetString(chainIDStr, 10); ok {
+					chainID = bid.Int64()
+				}
+			}
+			prClient, err := NewPairRegistryClient(context.Background(), PairRegistryConfig{
+				RPCURL:          hubRPC,
+				ContractAddress: pairRegistryAddr,
+				ChainID:         chainID,
+				PrivateKeyHex:   signerKey,
+				Timeout:         15 * time.Second,
+				// Enables ProposePair to deploy a dedicated per-pair AMM (empty amm_address path).
+				IdentityRegistryAddress: os.Getenv("HUB_IDENTITY_REGISTRY_ADDRESS"),
+			})
+			if err != nil {
+				log.Printf("warning: PairRegistry client init failed, pairs served from DB only: %v", err)
+			} else {
+				// The authority reader lets an unauthorized confirm be refused with its real reason
+				// instead of a reverted transaction and a generic message.
+				deps.PairService = services.NewPairService(prClient, pairRepo).
+					WithTokenAuthorityReader(prClient)
+				log.Printf("[app] PairRegistry client ready (%s)", pairMode)
 			}
 		}
-		prClient, err := NewPairRegistryClient(context.Background(), PairRegistryConfig{
-			RPCURL:          hubRPC,
-			ContractAddress: pairRegistryAddr,
-			ChainID:         chainID,
-			PrivateKeyHex:   signerKey,
-			Timeout:         15 * time.Second,
-			// Enables ProposePair to deploy a dedicated per-pair AMM (empty amm_address path).
-			IdentityRegistryAddress: os.Getenv("HUB_IDENTITY_REGISTRY_ADDRESS"),
-		})
-		if err != nil {
-			log.Printf("warning: PairRegistry client init failed: %v", err)
-		} else {
-			pairRepo := NewPairRepository(db)
-			// The authority reader lets an unauthorized confirm be refused with its real reason
-			// instead of a reverted transaction and a generic message.
-			deps.PairService = services.NewPairService(prClient, pairRepo).
-				WithTokenAuthorityReader(prClient)
-		}
-	} else if db != nil {
-		// Read-only mode: ListActivePairs only (no on-chain calls).
-		pairRepo := NewPairRepository(db)
-		deps.PairService = services.NewPairService(nil, pairRepo)
 	}
 
 	// 006-hub-currency-registry: CurrencyRegistry client (read/write on-chain, no DB).
-	if currencyRegistryAddr != "" && hubRPC != "" && signerKey != "" {
+	// Listing currencies is a view call and maps token addresses to symbols for every portal, so it
+	// is built without a signing key too; the adapter's write methods refuse a nil signer.
+	if currencyMode := resolveHubRegistryMode(currencyRegistryAddr, hubRPC, signerKey); currencyMode != hubRegistryDisabled {
 		chainID := int64(0)
 		if chainIDStr != "" {
 			bid := new(big.Int)
@@ -798,6 +806,7 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 			log.Printf("warning: CurrencyRegistry client init failed: %v", err)
 		} else {
 			deps.CurrencyService = services.NewCurrencyService(crClient)
+			log.Printf("[app] CurrencyRegistry client ready (%s)", currencyMode)
 		}
 	}
 
