@@ -168,11 +168,15 @@ func Setup(app *fiber.App, deps Dependencies) {
 		internalPayments := internal.Group("/payments")
 		internalPayments.Post("/deposits/exchange", deps.PaymentHandler.RequestFiatExchange)
 		internalPayments.Post("/deposits", deps.PaymentHandler.RegisterDeposit)
-		internalPayments.Get("/deposits", deps.PaymentHandler.ListDeposits)
 		internalPayments.Post("/escrows", deps.PaymentHandler.RequestEscrow)
-		internalPayments.Get("/escrows", deps.PaymentHandler.ListEscrows)
 		internalPayments.Post("/redeems", deps.PaymentHandler.RequestRedeem)
-		internalPayments.Get("/redeems", deps.PaymentHandler.ListRedeems)
+		// The listing handlers are shared with the CB's own /api/v1/payments routes, where returning the
+		// whole book is the point. Here the caller is a single commercial bank, so an absent requester_id
+		// is a tenant boundary that was never applied — refuse it instead of answering from every bank's
+		// records. The calling bank's proxy always sets it from its own identity.
+		internalPayments.Get("/deposits", middleware.RequireRequesterScope(), deps.PaymentHandler.ListDeposits)
+		internalPayments.Get("/escrows", middleware.RequireRequesterScope(), deps.PaymentHandler.ListEscrows)
+		internalPayments.Get("/redeems", middleware.RequireRequesterScope(), deps.PaymentHandler.ListRedeems)
 	}
 
 	// --- Internal spoke self-registration (hub only) ---
