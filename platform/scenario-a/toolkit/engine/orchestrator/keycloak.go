@@ -61,26 +61,57 @@ type KeycloakRealmPlan struct {
 }
 
 // adminUsersForRealmRoles selects the manifest admin users whose role is one of
-// the realm's roles, mapping each to a KeycloakUserPlan. This routes each admin
+// the realm's roles, mapping them to KeycloakUserPlans. This routes each admin
 // to the realm that actually defines its role (central-bank realm for
-// ROLE_GOVERNANCE/ROLE_TREASURY, the cbweb3/NOC realm for ROLE_NOC_ADMIN, the bank
-// realm for ROLE_BANK).
+// ROLE_GOVERNANCE/ROLE_TREASURY/ROLE_SUPERVISOR, the cbweb3/NOC realm for
+// ROLE_NOC_*, the bank realm for ROLE_BANK).
+//
+// Entries are grouped by username so a single operator granted several roles
+// (multiple spec.adminUsers entries sharing one username) becomes ONE
+// realm-import user carrying all of its roles that belong to THIS realm. Keycloak
+// realm import requires usernames unique per realm, so emitting one plan per role
+// entry would produce a duplicate-username collision; grouping also correctly
+// gives the account every role it was granted. First-seen order is preserved
+// (stable output), and the first occurrence's password wins (the validator
+// rejects a username that repeats with a different password).
 func adminUsersForRealmRoles(admins []manifest.AdminUser, realmRoles ...string) []KeycloakUserPlan {
 	want := map[string]bool{}
 	for _, r := range realmRoles {
 		want[r] = true
 	}
-	var users []KeycloakUserPlan
+	order := []string{}
+	byUser := map[string]*KeycloakUserPlan{}
 	for _, a := range admins {
-		if want[strings.TrimSpace(a.Role)] {
-			users = append(users, KeycloakUserPlan{
-				Username: a.Username,
-				Password: a.Password,
-				Roles:    []string{a.Role},
-			})
+		role := strings.TrimSpace(a.Role)
+		if !want[role] {
+			continue
+		}
+		u, ok := byUser[a.Username]
+		if !ok {
+			u = &KeycloakUserPlan{Username: a.Username, Password: a.Password}
+			byUser[a.Username] = u
+			order = append(order, a.Username)
+		}
+		if !containsString(u.Roles, role) {
+			u.Roles = append(u.Roles, role)
 		}
 	}
+	users := make([]KeycloakUserPlan, 0, len(order))
+	for _, name := range order {
+		users = append(users, *byUser[name])
+	}
 	return users
+}
+
+// containsString reports whether s is already present in xs (small slices — a
+// linear scan keeps role de-duplication order-preserving without a set).
+func containsString(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // nocRealmPlan is the NOC realm hosted on the central bank's Keycloak.

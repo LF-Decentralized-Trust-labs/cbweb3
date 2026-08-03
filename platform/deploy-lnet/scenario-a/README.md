@@ -1,23 +1,27 @@
 # Scenario A — LNET deployment
 
 Toolkit-driven install of **Scenario A (Enhanced Correspondent Banking, dual-layer HTLC)**
-across the LNET 6-VM lab. Two independent spokes (Brazil, Colombia) bridged by a Cacti relay.
-There is **no hub** in Scenario A (the hub is a Scenario-B concept).
+across the LNET 10-VM lab. Three independent spokes (Costa Rica, Chile, Peru) bridged by a Cacti
+relay. There is **no hub** in Scenario A (the hub is a Scenario-B concept).
 
 Shared VM `.20` infrastructure (both Cacti relays; the Scenario-B hub) is documented at the
-[deploy-lnet root README](../README.md). This folder covers Scenario A's spokes and banks (VMs .21–.26).
+[deploy-lnet root README](../README.md). This folder covers Scenario A's spokes and banks (VMs
+.21–.26, .30–.32).
 
 ## Topology
 
 | VM | Role | Spoke | bank-id | Launcher FQDN | Manifest |
 |----|------|-------|---------|---------------|----------|
 | 10.10.0.20 | Cacti relay (Scenario A) | — | — | — | *(no manifest — see root README)* |
-| 10.10.0.21 | Central Bank Brazil (found) | spoke-brazil (BRL, chainId 2021) | — | cb-brazil.cbweb3.l-net.io | [manifests/cb-brazil.yaml](manifests/cb-brazil.yaml) |
-| 10.10.0.22 | Commercial bank (join) | spoke-brazil | cb1 | cb1-brazil.cbweb3.l-net.io | [manifests/cb1.yaml](manifests/cb1.yaml) |
-| 10.10.0.23 | Commercial bank (join) | spoke-brazil | cb2 | cb2-brazil.cbweb3.l-net.io | [manifests/cb2.yaml](manifests/cb2.yaml) |
-| 10.10.0.24 | Central Bank Colombia (found) | spoke-colombia (COP, chainId 2024) | — | cb-colombia.cbweb3.l-net.io | [manifests/cb-colombia.yaml](manifests/cb-colombia.yaml) |
-| 10.10.0.25 | Commercial bank (join) | spoke-colombia | cb3 | cb3-colombia.cbweb3.l-net.io | [manifests/cb3.yaml](manifests/cb3.yaml) |
-| 10.10.0.26 | Commercial bank (join) | spoke-colombia | cb4 | cb4-colombia.cbweb3.l-net.io | [manifests/cb4.yaml](manifests/cb4.yaml) |
+| 10.10.0.21 | Central Bank Costa Rica (found) | spoke-costa-rica (CRC, chainId 2021) | — | cb-costa-rica.cbweb3.l-net.io | [manifests/cb-costa-rica.yaml](manifests/cb-costa-rica.yaml) |
+| 10.10.0.22 | Commercial bank (join) | spoke-costa-rica | cb1 | cb1-costa-rica.cbweb3.l-net.io | [manifests/cb1.yaml](manifests/cb1.yaml) |
+| 10.10.0.23 | Commercial bank (join) | spoke-costa-rica | cb2 | cb2-costa-rica.cbweb3.l-net.io | [manifests/cb2.yaml](manifests/cb2.yaml) |
+| 10.10.0.24 | Central Bank Chile (found) | spoke-chile (CLP, chainId 2024) | — | cb-chile.cbweb3.l-net.io | [manifests/cb-chile.yaml](manifests/cb-chile.yaml) |
+| 10.10.0.25 | Commercial bank (join) | spoke-chile | cb3 | cb3-chile.cbweb3.l-net.io | [manifests/cb3.yaml](manifests/cb3.yaml) |
+| 10.10.0.26 | Commercial bank (join) | spoke-chile | cb4 | cb4-chile.cbweb3.l-net.io | [manifests/cb4.yaml](manifests/cb4.yaml) |
+| 10.10.0.30 | Central Bank Peru (found) | spoke-peru (PEN, chainId 2027) | — | cb-peru.cbweb3.l-net.io | [manifests/cb-peru.yaml](manifests/cb-peru.yaml) |
+| 10.10.0.31 | Commercial bank (join) | spoke-peru | cb5 | cb5-peru.cbweb3.l-net.io | [manifests/cb5.yaml](manifests/cb5.yaml) |
+| 10.10.0.32 | Commercial bank (join) | spoke-peru | cb6 | cb6-peru.cbweb3.l-net.io | [manifests/cb6.yaml](manifests/cb6.yaml) |
 
 ## ⚠️ Read before deploying: multi-VM reality
 
@@ -50,7 +54,7 @@ The manifests here are wired for genuinely separate VMs, but be aware of the sea
    `../../scenario-a/provisioning/templates/*/docker-compose.yaml`) or provide a flat routable overlay.
    This is an operator-patched path, not a toolkit feature.
 
-DNS: point each launcher FQDN (`cb-brazil.cbweb3.l-net.io`, `cb1-brazil...`, etc.) at the matching VM IP.
+DNS: point each launcher FQDN (`cb-costa-rica.cbweb3.l-net.io`, `cb1-costa-rica...`, etc.) at the matching VM IP.
 
 ## Manifests are templates
 
@@ -59,8 +63,8 @@ markers from [`../addresses.env`](../addresses.env) (the toolkit does not expand
 first, or let the wrapper do render + apply in one step:
 
 ```bash
-../deploy.sh render          # render all templates -> *.yaml
-../deploy.sh a cb-brazil     # render + apply this Scenario-A target (adds BESU_NAT_PROFILE=NONE)
+../deploy.sh render             # render all templates -> *.yaml
+../deploy.sh a cb-costa-rica    # render + apply this Scenario-A target (adds BESU_NAT_PROFILE=NONE)
 ```
 
 The manual `./toolkit/cbweb3 apply -f …` commands below operate on the **rendered** `.yaml`; run
@@ -85,11 +89,13 @@ go build -o toolkit/cbweb3 ./toolkit/cmd/cbweb3
 ## Deployment order
 
 Relay first (see root README), then each founder, then the banks (a bank needs its founder's bundle to exist).
+The three countries are independent — deploy them in any order, but within a country the CB founder must
+come up before its two banks.
 
 ### 1 — VM 10.10.0.20 — Cacti relay (Scenario A)
 
 The relay is **not** provisioned by `cbweb3`; start it separately. It must be reachable at
-`http://10.10.0.20:4000` from both CB VMs. Easiest is the wrapper, which starts **both** scenarios'
+`http://10.10.0.20:4000` from every CB VM. Easiest is the wrapper, which starts **both** scenarios'
 relays at once (Scenario A `:4000` + Scenario B `:7000`):
 
 ```bash
@@ -104,44 +110,60 @@ cd scenario-a
 CACTI_PORT=4000 provisioning/scripts/start-cacti.sh
 ```
 
-### 2 — VM 10.10.0.21 — Central Bank Brazil (founder)
+### 2 — VM 10.10.0.21 — Central Bank Costa Rica (founder)
 
 ```bash
 # Preferred: render + apply via the LNET wrapper (creates dataDir under bundles/)
-../deploy.sh a cb-brazil --dry-run   # preview
-../deploy.sh a cb-brazil
-# dataDir:  deploy-lnet/bundles/scenario-a/spoke-brazil/
-# Emits → relocates: deploy-lnet/bundles/scenario-a/spoke-brazil/spoke-brazil.bundle.yaml
+../deploy.sh a cb-costa-rica --dry-run   # preview
+../deploy.sh a cb-costa-rica
+# dataDir:  deploy-lnet/bundles/scenario-a/spoke-costa-rica/
+# Emits → relocates: deploy-lnet/bundles/scenario-a/spoke-costa-rica/spoke-costa-rica.bundle.yaml
 ```
 
-Copy the emitted bundle into each Brazil bank VM (same path):
+> **Costa Rica testing team.** The Costa Rica CB manifest provisions the Banco Central de Costa Rica
+> (BCCR) operators — each granted the full set of central-bank roles (governance + treasury +
+> supervisor + NOC) — plus one SUGEVAL (securities regulator) supervisor account, in addition to the
+> baseline lab operator accounts. Passwords are `change-me-local` placeholders; rotate them to unique
+> per-user passwords out of band (Keycloak) before real use — never commit real credentials. (The
+> other CBs carry only the baseline per-role operator accounts.)
+
+Copy the emitted bundle into each Costa Rica bank VM (same path):
 
 ```bash
-scp $REPO/deploy-lnet/bundles/scenario-a/spoke-brazil/spoke-brazil.bundle.yaml \
-    op@10.10.0.22:$REPO/deploy-lnet/bundles/scenario-a/spoke-brazil/
-scp $REPO/deploy-lnet/bundles/scenario-a/spoke-brazil/spoke-brazil.bundle.yaml \
-    op@10.10.0.23:$REPO/deploy-lnet/bundles/scenario-a/spoke-brazil/
+scp $REPO/deploy-lnet/bundles/scenario-a/spoke-costa-rica/spoke-costa-rica.bundle.yaml \
+    op@10.10.0.22:$REPO/deploy-lnet/bundles/scenario-a/spoke-costa-rica/
+scp $REPO/deploy-lnet/bundles/scenario-a/spoke-costa-rica/spoke-costa-rica.bundle.yaml \
+    op@10.10.0.23:$REPO/deploy-lnet/bundles/scenario-a/spoke-costa-rica/
 ```
 
-### 3 — VMs 10.10.0.22 / 10.10.0.23 — cb1 / cb2 (join Brazil)
+### 3 — VMs 10.10.0.22 / 10.10.0.23 — cb1 / cb2 (join Costa Rica)
 
 ```bash
 ../deploy.sh a cb1     # .22 ; use `a cb2` on .23
 ```
 
-`joinBundleRef` (`../../bundles/scenario-a/spoke-brazil/spoke-brazil.bundle.yaml`) resolves relative
-to the manifest file — the scp target above (spoke drop-zone). Bank **dataDir** is per bank id so
-provisioning state never mixes with the CB spoke:
+`joinBundleRef` (`../../bundles/scenario-a/spoke-costa-rica/spoke-costa-rica.bundle.yaml`) resolves
+relative to the manifest file — the scp target above (spoke drop-zone). Bank **dataDir** is per bank
+id so provisioning state never mixes with the CB spoke:
 `deploy-lnet/bundles/scenario-a/cb1/` (or `cb2/`).
 
-### 4 — VM 10.10.0.24 — Central Bank Colombia (founder)
+### 4 — VM 10.10.0.24 — Central Bank Chile (founder)
 
-Same as step 2 with `a cb-colombia`; emits `spoke-colombia/spoke-colombia.bundle.yaml`. scp it into
-`deploy-lnet/bundles/scenario-a/spoke-colombia/` on `.25` and `.26`.
+Same as step 2 with `a cb-chile`; emits `spoke-chile/spoke-chile.bundle.yaml`. scp it into
+`deploy-lnet/bundles/scenario-a/spoke-chile/` on `.25` and `.26`.
 
-### 5 — VMs 10.10.0.25 / 10.10.0.26 — cb3 / cb4 (join Colombia)
+### 5 — VMs 10.10.0.25 / 10.10.0.26 — cb3 / cb4 (join Chile)
 
 Same as step 3 with `cb3.yaml` / `cb4.yaml`.
+
+### 6 — VM 10.10.0.30 — Central Bank Peru (founder)
+
+Same as step 2 with `a cb-peru`; emits `spoke-peru/spoke-peru.bundle.yaml`. scp it into
+`deploy-lnet/bundles/scenario-a/spoke-peru/` on `.31` and `.32`.
+
+### 7 — VMs 10.10.0.31 / 10.10.0.32 — cb5 / cb6 (join Peru)
+
+Same as step 3 with `cb5.yaml` / `cb6.yaml`.
 
 Re-runs are idempotent: state lives in `<dataDir>/.provisioning-state.yaml`; re-running `apply`
 resumes from the first incomplete step. `--dry-run` plans without side effects.
@@ -177,4 +199,7 @@ Scenario B ports end in `845`, so both scenarios coexist on a shared VM.
 - `frontendHost` carries the launcher FQDN; it is baked into `VITE_API_URL`/`VITE_KEYCLOAK_URL` at
   build time and into the launcher portal links. Portals browsed from a remote machine still call
   `localhost` in some paths — a known local-first limitation.
+- Multiple operator accounts MAY share a role, and one username MAY carry several roles (the toolkit
+  groups a repeated username into a single Keycloak account holding all its roles). A username that
+  repeats must keep the same password.
 - Do **not** commit real credentials. The `change-me-local` passwords are lab placeholders.

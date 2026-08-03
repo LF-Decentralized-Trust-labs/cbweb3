@@ -289,8 +289,14 @@ var requiredAdminRolesByEntity = map[string][]string{
 }
 
 // validateAdminUsers enforces that spec.adminUsers is present, every entry has
-// role/username/password, and there is exactly one admin user per role the
-// entity hosts (login is per role).
+// role/username/password, and every role the entity hosts has at least one
+// admin user. Multiple accounts MAY share a role (e.g. a whole central-bank
+// team each granted ROLE_GOVERNANCE), and one account MAY appear across several
+// role entries under the same username — the Keycloak plan groups those entries
+// by username into a single realm-import user carrying all its roles (see
+// orchestrator.adminUsersForRealmRoles). The only hard rule is that a username
+// used more than once must keep a consistent password (the plan takes the first
+// occurrence's password, so a mismatch would silently drop credentials).
 func validateAdminUsers(m *Manifest) []error {
 	var errs []error
 
@@ -304,6 +310,7 @@ func validateAdminUsers(m *Manifest) []error {
 	}
 
 	seen := map[string]bool{}
+	passwordByUser := map[string]string{}
 	for i, u := range m.Spec.AdminUsers {
 		if u.Role == "" {
 			errs = append(errs, fmt.Errorf("spec.adminUsers[%d].role: required field is missing", i))
@@ -315,10 +322,18 @@ func validateAdminUsers(m *Manifest) []error {
 			errs = append(errs, fmt.Errorf("spec.adminUsers[%d].password: required field is missing", i))
 		}
 		if u.Role != "" {
-			if seen[u.Role] {
-				errs = append(errs, fmt.Errorf("spec.adminUsers: duplicate admin user for role %q", u.Role))
-			}
 			seen[u.Role] = true
+		}
+		// A username repeated across role entries must carry the same password:
+		// the Keycloak plan keeps the first occurrence, so a conflict would
+		// silently drop one credential and confuse the operator.
+		if u.Username != "" && u.Password != "" {
+			if prev, ok := passwordByUser[u.Username]; ok && prev != u.Password {
+				errs = append(errs, fmt.Errorf(
+					"spec.adminUsers[%d]: conflicting password for username %q (each entry sharing a username must repeat the same password)", i, u.Username))
+			} else {
+				passwordByUser[u.Username] = u.Password
+			}
 		}
 	}
 

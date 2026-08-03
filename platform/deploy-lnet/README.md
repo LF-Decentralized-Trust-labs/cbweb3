@@ -1,8 +1,9 @@
 # `deploy-lnet` — LNET lab deployment (Scenario A + Scenario B)
 
-Toolkit-driven install of **both** CBDC scenarios across the same 6-VM LNET lab. Shared VM `.20`
-infrastructure (the Scenario-B hub and both Cacti relays) lives at this root; each scenario's
-spoke/bank manifests live in its own subfolder.
+Toolkit-driven install of **both** CBDC scenarios across the same 10-VM LNET lab: one hub VM plus
+three countries (Costa Rica, Chile, Peru), each a central bank founding its spoke with two
+commercial banks joining. Shared VM `.20` infrastructure (the Scenario-B hub and both Cacti relays)
+lives at this root; each scenario's spoke/bank manifests live in its own subfolder.
 
 ```
 deploy-lnet/
@@ -11,8 +12,8 @@ deploy-lnet/
   deploy.sh           # render + run the toolkit for one target host
   bundles/            # hub/ + scenario-{a,b}/<spoke|bankId>/ (+ <spoke>.bundle.yaml)
   hub/manifests/      # VM .20 — Scenario B found-hub
-  scenario-a/         # Enhanced Correspondent Banking (dual-layer HTLC) — VMs .21–.26
-  scenario-b/         # International Hub spokes/banks — VMs .21–.26
+  scenario-a/         # Enhanced Correspondent Banking (dual-layer HTLC) — VMs .21–.26, .30–.32
+  scenario-b/         # International Hub spokes/banks — VMs .21–.26, .30–.32
 ```
 
 Read the per-scenario runbooks for the full step-by-step:
@@ -38,21 +39,23 @@ one file — [addresses.env](addresses.env) — so re-pointing a VM is a one-lin
 
 ```bash
 # 1. Set the addresses: edit addresses.env, OR export overrides ad hoc:
-export IP_CB_BRAZIL=10.20.0.31        # (optional) override just this VM
+export IP_CB_COSTA_RICA=10.20.0.31    # (optional) override just this VM
 
 # 2a. Render only — produces the git-ignored *.yaml next to each *.yaml.tmpl:
 ./render.sh
 
 # 2b. …or render AND run the toolkit for one target in a single step:
-./deploy.sh cacti                     # VM .20  — both Cacti relays (A :4000 + B :7000)
-./deploy.sh cacti --down              # VM .20  — tear both relays down
-./deploy.sh b hub                     # VM .20  — Scenario B found-hub
-./deploy.sh b noc-hub                 # VM .20  — Scenario B NOC portal for the hub (after b hub)
-./deploy.sh b cb-brazil --dry-run     # VM .21  — Scenario B found-spoke (adds --hub-rpc), preview
-./deploy.sh b noc-brazil              # VM .21  — Scenario B NOC portal for spoke-brazil (after b cb-brazil)
-./deploy.sh a cb-brazil               # VM .21  — Scenario A found
-./deploy.sh a noc-brazil              # VM .21  — Scenario A NOC data plane for spoke-brazil (after a cb-brazil)
-./deploy.sh a cb1                     # VM .22  — Scenario A join (also brings up the bank's noc-agent)
+./deploy.sh cacti                      # VM .20  — both Cacti relays (A :4000 + B :7000)
+./deploy.sh cacti --down               # VM .20  — tear both relays down
+./deploy.sh b hub                      # VM .20  — Scenario B found-hub
+./deploy.sh b noc-hub                  # VM .20  — Scenario B NOC portal for the hub (after b hub)
+./deploy.sh b cb-costa-rica --dry-run  # VM .21  — Scenario B found-spoke (adds --hub-rpc), preview
+./deploy.sh b noc-costa-rica           # VM .21  — Scenario B NOC portal for spoke-costa-rica (after b cb-costa-rica)
+./deploy.sh a cb-costa-rica            # VM .21  — Scenario A found
+./deploy.sh a noc-costa-rica           # VM .21  — Scenario A NOC data plane for spoke-costa-rica (after a cb-costa-rica)
+./deploy.sh a cb1                      # VM .22  — Scenario A join (also brings up the bank's noc-agent)
+./deploy.sh a cb-peru                  # VM .30  — Scenario A found (Peru)
+./deploy.sh a cb5                      # VM .31  — Scenario A join (Peru)
 ```
 
 `deploy.sh` commands:
@@ -61,8 +64,8 @@ export IP_CB_BRAZIL=10.20.0.31        # (optional) override just this VM
 |---------|--------------|
 | `deploy.sh cacti [--down]` | VM .20 — start (or stop) **both** Cacti relays: Scenario A HTLC on `:4000` + Scenario B liquidity on `:7000`, each with a distinct `COMPOSE_PROJECT_NAME`. |
 | `deploy.sh render` | Render every `*.yaml.tmpl` → `*.yaml` (no toolkit call). |
-| `deploy.sh <a\|b> <target>` | Render, build the scenario's toolkit binary, and run `apply` with the right flags/cwd. `target` ∈ `hub` (B only), `cb-brazil`, `cb1`, `cb2`, `cb-colombia`, `cb3`, `cb4`. Extra flags (e.g. `--dry-run`) pass straight through. |
-| `deploy.sh <a\|b> noc-<x>` | Bring up the NOC control plane for one spoke via `observe` mode (skips launcher/contracts, no bundle emit). Targets: `noc-hub` (B only — A has no hub), `noc-brazil`, `noc-colombia`. Run **after** that spoke's `found-*` on the same VM. **B** stands up portal (`:3030`) + backend (`:8090`). **A** stands up backend (`:28645`) + the CB's `noc-agent` only — the portal is already built by A's `found` (see below). The ports are disjoint so both scenarios' NOCs coexist on one founding VM. |
+| `deploy.sh <a\|b> <target>` | Render, build the scenario's toolkit binary, and run `apply` with the right flags/cwd. `target` ∈ `hub` (B only), `cb-costa-rica`, `cb1`, `cb2`, `cb-chile`, `cb3`, `cb4`, `cb-peru`, `cb5`, `cb6`. Extra flags (e.g. `--dry-run`) pass straight through. |
+| `deploy.sh <a\|b> noc-<x>` | Bring up the NOC control plane for one spoke via `observe` mode (skips launcher/contracts, no bundle emit). Targets: `noc-hub` (B only — A has no hub), `noc-costa-rica`, `noc-chile`, `noc-peru`. Run **after** that spoke's `found-*` on the same VM. **B** stands up portal (`:3030`) + backend (`:8090`). **A** stands up backend (`:28645`) + the CB's `noc-agent` only — the portal is already built by A's `found` (see below). The ports are disjoint so both scenarios' NOCs coexist on one founding VM. |
 
 The rendered `*.yaml` and the transferred bundles are git-ignored; the `*.yaml.tmpl` templates and
 `addresses.env` are the tracked source of truth.
@@ -86,7 +89,7 @@ Rules that hold in both scenarios:
 - **`currency` is the key**, not the symbol. In B it also drives the relay id (`spoke-<currency>`), the
   hub currency registration and the mirrored token (`W-tCeBM_<ISO>`); a symbol can never redefine it.
 - **Symbols must keep the `<prefix>_<ISO>` shape** and end in that spoke's own currency. Validation
-  rejects `fBRL` (no currency segment) and `fCeBM_COP` on a BRL spoke. In B this is load-bearing: the
+  rejects `fCRC` (no currency segment) and `fCeBM_CLP` on a CRC spoke. In B this is load-bearing: the
   portals and the api-gateway read the displayed currency code from the segment after the last
   underscore.
 - **All token fields are optional.** Omitted, they derive as `Tokenized <ISO>` / `tCeBM_<ISO>` and
@@ -94,22 +97,25 @@ Rules that hold in both scenarios:
 - **They are immutable after founding** (ERC-20 constructor arguments). Editing a template changes the
   next clean founding, never a running spoke: the deployed contract keeps its original name and symbol.
 
-The LNET currencies are BRL on `cb-brazil` and COP on `cb-colombia`, in both scenarios. The join
-(`cb1`..`cb4`) and `noc-*` manifests carry no token fields: only the founding central bank deploys the
-spoke's tokens.
+The LNET currencies are CRC on `cb-costa-rica`, CLP on `cb-chile`, and PEN on `cb-peru`, in both
+scenarios. The join (`cb1`..`cb6`) and `noc-*` manifests carry no token fields: only the founding
+central bank deploys the spoke's tokens.
 
 ## VM map (both scenarios share the VMs)
 
 
-| VM         | Shared / .20 infra                              | Scenario A          | Scenario B                | Launcher FQDN               |
-| ---------- | ----------------------------------------------- | ------------------- | ------------------------- | --------------------------- |
-| 10.10.0.20 | **hub (B) + Cacti A (:4000) + Cacti B (:7000)** | Cacti relay         | hub + Cacti relay         | —                           |
-| 10.10.0.21 | —                                               | CB Brazil (found)   | CB Brazil (found-spoke)   | cb-brazil.cbweb3.l-net.io    |
-| 10.10.0.22 | —                                               | cb1 (join)          | cb1 (join)                | cb1-brazil.cbweb3.l-net.io   |
-| 10.10.0.23 | —                                               | cb2 (join)          | cb2 (join)                | cb2-brazil.cbweb3.l-net.io   |
-| 10.10.0.24 | —                                               | CB Colombia (found) | CB Colombia (found-spoke) | cb-colombia.cbweb3.l-net.io  |
-| 10.10.0.25 | —                                               | cb3 (join)          | cb3 (join)                | cb3-colombia.cbweb3.l-net.io |
-| 10.10.0.26 | —                                               | cb4 (join)          | cb4 (join)                | cb4-colombia.cbweb3.l-net.io |
+| VM         | Shared / .20 infra                              | Scenario A              | Scenario B                    | Launcher FQDN                  |
+| ---------- | ----------------------------------------------- | ----------------------- | ----------------------------- | ------------------------------ |
+| 10.10.0.20 | **hub (B) + Cacti A (:4000) + Cacti B (:7000)** | Cacti relay             | hub + Cacti relay             | —                              |
+| 10.10.0.21 | —                                               | CB Costa Rica (found)   | CB Costa Rica (found-spoke)   | cb-costa-rica.cbweb3.l-net.io  |
+| 10.10.0.22 | —                                               | cb1 (join)              | cb1 (join)                    | cb1-costa-rica.cbweb3.l-net.io |
+| 10.10.0.23 | —                                               | cb2 (join)              | cb2 (join)                    | cb2-costa-rica.cbweb3.l-net.io |
+| 10.10.0.24 | —                                               | CB Chile (found)        | CB Chile (found-spoke)        | cb-chile.cbweb3.l-net.io       |
+| 10.10.0.25 | —                                               | cb3 (join)              | cb3 (join)                    | cb3-chile.cbweb3.l-net.io      |
+| 10.10.0.26 | —                                               | cb4 (join)              | cb4 (join)                    | cb4-chile.cbweb3.l-net.io      |
+| 10.10.0.30 | —                                               | CB Peru (found)         | CB Peru (found-spoke)         | cb-peru.cbweb3.l-net.io        |
+| 10.10.0.31 | —                                               | cb5 (join)              | cb5 (join)                    | cb5-peru.cbweb3.l-net.io       |
+| 10.10.0.32 | —                                               | cb6 (join)              | cb6 (join)                    | cb6-peru.cbweb3.l-net.io       |
 
 
 
@@ -140,8 +146,8 @@ deploy-lnet/deploy.sh b noc-hub
 Both relays boot **neutral** (no fixed spokes); each founding CB self-registers its spoke at
 `found`/`found-spoke` (`POST /api/v1/spokes`). The Scenario-B liquidity relay also has a
 LiquidityCommitWatcher that reads the hub Besu RPC — its defaults (`HUB_BESU_RPC`,
-`LIQUIDITY_COMMIT_REGISTRY_ADDRESS`, `GATEWAY_INTERNAL_URLS`) matter only once the **sovereign
-BRL/COP pair** is opened (deferred). For the initial bring-up they can stay unset; wire them (via
+`LIQUIDITY_COMMIT_REGISTRY_ADDRESS`, `GATEWAY_INTERNAL_URLS`) matter only once a **sovereign
+cross-currency pair** (e.g. CRC/CLP) is opened (deferred). For the initial bring-up they can stay unset; wire them (via
 `scenario-b/interop/hub-and-spoke/cacti/.env`, e.g. `HUB_BESU_RPC=http://host.docker.internal:8845`)
 when you activate the corridor.
 
@@ -165,9 +171,10 @@ NOC. **Both scenarios ship it** — the difference is who owns the *portal*:
 
 | NOC deployment | VM | Monitors | Scenario B | Scenario A |
 |----------------|----|----------|------------|------------|
-| `noc-hub`      | .20 (hub)          | the hub node                    | `deploy.sh b noc-hub`      | — (no hub) |
-| `noc-brazil`   | .21 (CB Brazil)    | spoke-brazil (CB + cb1 + cb2)   | `deploy.sh b noc-brazil`   | `deploy.sh a noc-brazil`   |
-| `noc-colombia` | .24 (CB Colombia)  | spoke-colombia (CB + cb3 + cb4) | `deploy.sh b noc-colombia` | `deploy.sh a noc-colombia` |
+| `noc-hub`        | .20 (hub)             | the hub node                       | `deploy.sh b noc-hub`        | — (no hub)                   |
+| `noc-costa-rica` | .21 (CB Costa Rica)   | spoke-costa-rica (CB + cb1 + cb2)  | `deploy.sh b noc-costa-rica` | `deploy.sh a noc-costa-rica` |
+| `noc-chile`      | .24 (CB Chile)        | spoke-chile (CB + cb3 + cb4)       | `deploy.sh b noc-chile`      | `deploy.sh a noc-chile`      |
+| `noc-peru`       | .30 (CB Peru)         | spoke-peru (CB + cb5 + cb6)        | `deploy.sh b noc-peru`       | `deploy.sh a noc-peru`       |
 
 How it fits the flow:
 
@@ -212,7 +219,7 @@ Both scenarios run on the same hosts, so their ports are kept disjoint:
 | Launcher (shared per host) | 5190                                    | 5190         |
 
 > **NOC backends are disjoint**, so a single founding VM runs **both** scenarios'
-> NOC data planes side by side (e.g. spoke-brazil on VM `.21` serves a Scenario A
+> NOC data planes side by side (e.g. spoke-costa-rica on VM `.21` serves a Scenario A
 > portal on `:32645`/backend `:28645` **and** a Scenario B portal on `:3030`/
 > backend `:8090`). Scenario A's port is the single source of truth
 > `orchestrator.NOCBackendPort = 28645` — both the `observe` backend publish and
@@ -230,12 +237,12 @@ Every entity manifest sets `proxy: enable`, so each VM runs one **Caddy** revers
 api-gateway are then reached by **path — no port** — on the entity's `frontendHost`:
 
 ```
-http://cb-brazil.cbweb3.l-net.io/              -> launcher (the A/B landing page)
-http://cb-brazil.cbweb3.l-net.io/a/governance/ -> Governance  (Scenario A)
-http://cb-brazil.cbweb3.l-net.io/a/treasury/   -> Treasury    (Scenario A)
-http://cb-brazil.cbweb3.l-net.io/a/supervisor/ -> Supervisor  (Scenario A)
-http://cb-brazil.cbweb3.l-net.io/b/governance/ -> Governance  (Scenario B)  … etc.
-http://cb1-brazil.cbweb3.l-net.io/a/bank/      -> Bank portal (commercial bank, Scenario A)
+http://cb-costa-rica.cbweb3.l-net.io/              -> launcher (the A/B landing page)
+http://cb-costa-rica.cbweb3.l-net.io/a/governance/ -> Governance  (Scenario A)
+http://cb-costa-rica.cbweb3.l-net.io/a/treasury/   -> Treasury    (Scenario A)
+http://cb-costa-rica.cbweb3.l-net.io/a/supervisor/ -> Supervisor  (Scenario A)
+http://cb-costa-rica.cbweb3.l-net.io/b/governance/ -> Governance  (Scenario B)  … etc.
+http://cb1-costa-rica.cbweb3.l-net.io/a/bank/      -> Bank portal (commercial bank, Scenario A)
 http://hub.cbweb3.l-net.io/                    -> hub governance (root redirect; hub has no launcher)
 ```
 
@@ -243,7 +250,7 @@ Both scenarios of an entity share the one proxy container on that host: each sce
 writes its own route fragment (`caddy.a.conf` / `caddy.b.conf`) into a shared conf dir and the proxy
 attaches to both entity Docker networks. Requirements per VM:
 
-- **DNS:** one `A` record per entity → its VM IP (e.g. `cb-brazil.cbweb3.l-net.io → 10.10.0.21`).
+- **DNS:** one `A` record per entity → its VM IP (e.g. `cb-costa-rica.cbweb3.l-net.io → 10.10.0.21`).
   No wildcard needed (single hostname per entity).
 - **Firewall:** open `:80` and `:443`. The high per-portal host ports no longer need to be exposed
   externally (the proxy reaches each portal container on the internal network).
@@ -264,7 +271,7 @@ attaches to both entity Docker networks. Requirements per VM:
     ```bash
     export PROXY_TLS_MODE=cloudflare
     export CF_API_TOKEN=<scoped Cloudflare token: Zone → DNS → Edit on l-net.io>
-    deploy-lnet/deploy.sh a cb-brazil   # and b, per host
+    deploy-lnet/deploy.sh a cb-costa-rica   # and b, per host
     ```
     The proxy image must include the Cloudflare DNS module — `proxy/build.sh` builds it in via
     `xcaddy` (rebuild the image if it predates this: `docker rmi cbweb3/proxy:local` then re-apply).
@@ -284,7 +291,7 @@ attaches to both entity Docker networks. Requirements per VM:
   it brings back valid certificates (and the same Let's Encrypt account) without needing a live token.
 - **Enabling/switching TLS on an already-running proxy:** the proxy container is recreated to pick up
   `:443`, and each scenario re-attaches its own Docker network on apply — so after changing TLS,
-  **re-apply both scenarios on that host** (e.g. `deploy.sh a cb-brazil` and `deploy.sh b cb-brazil`)
+  **re-apply both scenarios on that host** (e.g. `deploy.sh a cb-costa-rica` and `deploy.sh b cb-costa-rica`)
   so the proxy is attached to both entity networks. To force a clean recreate: `docker rm -f cbweb3-proxy`
   then re-apply.
 - To turn the proxy off entirely, set `proxy: disable` in the manifest — the entity falls back to the

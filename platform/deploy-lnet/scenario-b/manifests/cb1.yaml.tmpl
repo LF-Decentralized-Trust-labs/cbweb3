@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../../../scenario-b/provisioning/schema/v1/participant-deployment.schema.yaml
-# LNET deploy — Scenario B. VM ${IP_CB1} — commercial bank cb1, JOINS spoke-brazil.
-# joinBundleRef -> deploy-lnet/bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml
-# (scp the bundle emitted on ${IP_CB_BRAZIL} into that path before apply).
+# LNET deploy — Scenario B. VM ${IP_CB1} — commercial bank cb1, JOINS spoke-costa-rica.
+# joinBundleRef -> deploy-lnet/bundles/scenario-b/spoke-costa-rica/spoke-costa-rica.bundle.yaml
+# (scp the bundle emitted on ${IP_CB_COSTA_RICA} into that path before apply).
 # dataDir is per-bank so .provisioning-state.yaml never mixes with the CB spoke.
 apiVersion: cbweb3b/v1
 kind: ParticipantDeployment
@@ -14,12 +14,12 @@ spec:
   topology:
     role: commercial-bank
   bankId: cb1
-  displayName: Commercial Bank cb1 (Brazil)
+  displayName: Commercial Bank cb1 (Costa Rica)
   spoke:
-    id: spoke-brazil
+    id: spoke-costa-rica
     chainId: 2022
-    currency: BRL
-  joinBundleRef: ../../bundles/scenario-b/spoke-brazil/spoke-brazil.bundle.yaml
+    currency: CRC
+  joinBundleRef: ../../bundles/scenario-b/spoke-costa-rica/spoke-costa-rica.bundle.yaml
   node:
     advertisedHost: ${IP_CB1}
     rpc: { port: 8845 }
@@ -29,12 +29,12 @@ spec:
     validator: false
   image: build
   keyProvider: kms://local-emulator
-  certSource: ca://central-bank-brazil
+  certSource: ca://central-bank-costa-rica
   relay:
     endpoint: http://${IP_HUB}:7000
   noc:
-    backendURL: http://${IP_CB_BRAZIL}:8090
-  frontendHost: cb1-brazil.cbweb3.l-net.io
+    backendURL: http://${IP_CB_COSTA_RICA}:8090
+  frontendHost: cb1-costa-rica.cbweb3.l-net.io
   launcher: enable
   launcherPort: 5190
   proxy: enable
