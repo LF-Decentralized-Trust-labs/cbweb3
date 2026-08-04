@@ -43,7 +43,7 @@ const healthVariant: Record<string, "default" | "secondary" | "warning" | "destr
 
 export function DashboardPage() {
   const { spokes, selectedSpokeId, fetchSpokes, selectSpoke } = useSpokeStore();
-  const { components, fetchComponents } = useInfrastructureStore();
+  const { components, fetchComponents, clearComponents } = useInfrastructureStore();
   const { alerts, fetchAlerts, dismissAlert, clearSelectedAlert } = useAlertStore();
   const { pools, fetch: fetchPools } = usePoolStore();
   const { fallbackPollingSeconds, muteAlerts } = useUiStore();
@@ -54,14 +54,17 @@ export function DashboardPage() {
     void fetchPools();
   }, [fetchSpokes, fetchPools]);
 
+  // Component health is per spoke; on "All Spokes" the alert feed goes platform-wide and
+  // the component tables are cleared instead of showing the previous spoke's rows.
   useEffect(() => {
     if (selectedSpokeId) {
       void fetchComponents(selectedSpokeId);
       void fetchAlerts(selectedSpokeId);
     } else {
+      clearComponents();
       void fetchAlerts();
     }
-  }, [selectedSpokeId, fetchComponents, fetchAlerts]);
+  }, [selectedSpokeId, fetchComponents, clearComponents, fetchAlerts]);
 
   usePolling(() => {
     if (selectedSpokeId) {
@@ -97,6 +100,7 @@ export function DashboardPage() {
             <SelectValue placeholder="All Spokes" />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="all">All Spokes</SelectItem>
             {spokes.filter((s) => s.active).map((s) => (
               <SelectItem key={s.id} value={s.id}>
                 {s.name}
@@ -116,13 +120,17 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Degraded Components</CardDescription>
-            <CardTitle className={degraded > 0 ? "text-warning" : ""}>{degraded}</CardTitle>
+            <CardTitle className={degraded > 0 ? "text-warning" : ""}>
+              {selectedSpokeId ? degraded : "—"}
+            </CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Offline Components</CardDescription>
-            <CardTitle className={offline > 0 ? "text-destructive" : ""}>{offline}</CardTitle>
+            <CardTitle className={offline > 0 ? "text-destructive" : ""}>
+              {selectedSpokeId ? offline : "—"}
+            </CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -159,7 +167,9 @@ export function DashboardPage() {
                 ))}
                 {components.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">No components yet</TableCell>
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                      {selectedSpokeId ? "No components yet" : "Select a spoke to see component health"}
+                    </TableCell>
                   </TableRow>
                 )}
               </TableBody>
