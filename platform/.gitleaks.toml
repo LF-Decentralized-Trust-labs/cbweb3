@@ -59,4 +59,9 @@ regexes = [
   '''c93fa4edf409b4dc98d0982235f75ac4b9c72d970986474508a08adc3f7ab7a9''',
   '''cd9cad007753ac89f39b72af18244e05b5fdc29b100b78b9bdd00a3946047c08''',
   '''f8f8a2f43c8376ccb0871305060d7b27b0554d2cc72bccf41b2705608452f315''',
+  # Well-known PUBLIC Anvil/Hardhat dev account #0 key. Used only as the local
+  # KMS emulator's seeded dev identity so kms://local-emulator resolves to a
+  # stable address (scenario-b/toolkit/engine/keyprovider/local.go); documented
+  # there as non-production. Never protects any real asset.
+  '''ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80''',
 ]
