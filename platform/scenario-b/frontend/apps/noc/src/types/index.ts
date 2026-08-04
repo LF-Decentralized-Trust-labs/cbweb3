@@ -10,6 +10,6 @@ export type { AuditLogEntry, AuditFilter } from "./audit.types";
 export type { NocSpoke } from "./spoke.types";
 export type { NocComponent, NocHealthEvent, ComponentHealthStatus, ComponentType } from "./noc-component.types";
 export type { NocContainerLog } from "./log.types";
-export type { PoolStatus, PoolSeverity } from "./pool.types";
+export type { PoolStatus, PoolSeverity, PoolFetchFailure } from "./pool.types";
 export type { TelemetryFrame, ComponentKind } from "./telemetry.types";
 export type { NocEvent, NocEventType } from "./events.types";
