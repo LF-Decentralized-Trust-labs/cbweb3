@@ -97,9 +97,17 @@ The login page has two panels on desktop:
 > Keycloak.
 
 **Session persistence:** On successful login the portal stores `noc_access_token`
-and `noc_refresh_token` in `localStorage`. The session is checked on page reload;
-if the token is expired the operator is redirected to the login page. Logging
-out clears both tokens.
+and `noc_refresh_token` in `localStorage`. The access token is short-lived (5
+minutes by realm default), so the portal renews it automatically — shortly before
+expiry and again if a request is still rejected — using the refresh token. A
+portal left open therefore keeps working without re-authentication up to the
+realm's SSO session limit, and a page reload within that window restores the
+session instead of returning to the login page.
+
+When renewal is no longer possible (refresh token expired, session revoked), the
+portal drops the session and returns to the login page with *"Session expired.
+Sign in again."*. **Sign out** clears both tokens and returns to the login page;
+use **Back to launcher** to leave the portal for the entity launcher.
 
 ---
 
@@ -330,6 +338,7 @@ parameter (`?name=...`).
 | Control | Description |
 |---|---|
 | **Refresh button** | Force an immediate log fetch. Spinner is shown while loading. |
+| **SNAPSHOT `<n>`s OLD** badge | Appears when the newest line collected is more than 60 seconds old — see *Snapshots, not a live tail* below. |
 
 #### Log Panel
 
@@ -337,13 +346,22 @@ Terminal-style viewer (black background, green text).
 
 | Column | Description |
 |---|---|
-| **Timestamp** | Time portion of the log line's `occurred_at` timestamp (HH:MM:SS.mmm). |
+| **Timestamp** | Time portion of the log line's `occurred_at` timestamp (HH:MM:SS.mmm). This is when the **agent collected** the batch, so a whole batch shares one timestamp; each line's own time appears inside the log text. |
 | **Stream badge** | `stdout` (normal output) or `stderr` (error output). `stderr` lines appear in red. |
 | **Log line** | Raw log text from the container. |
 
 - Displays the **last 500 lines**.
 - Auto-scrolls to the bottom on initial load and on each refresh.
-- Refreshes automatically every **15 seconds**.
+- Refreshes automatically every **15 seconds**. This cycle is fixed and is not
+  affected by the Settings polling interval.
+
+#### Snapshots, not a live tail
+
+Logs are collected by the spoke's NOC agent and pushed to the backend; the viewer
+reads what the backend stored. If the container stops, or its agent stops
+collecting, the screen keeps showing the last snapshot with no other visible
+change — the **SNAPSHOT `<n>`s OLD** badge is what tells you the lines are not
+current.
 
 ---
 
@@ -367,7 +385,7 @@ recorded here.
 | Column | Description |
 |---|---|
 | **Timestamp** | When the action was performed (local time). |
-| **Actor** | Username of the NOC operator who performed the action. |
+| **Actor** | Username of the NOC operator who performed the action, taken from the `preferred_username` claim of the token used. Deployments whose token carries no username fall back to the account's internal ID, and a request with no readable identity is recorded as `dev-user`. |
 | **Action** | The action type: `Acknowledge` (from `ACKNOWLEDGE_ALERT`) or `Dismiss` (from `DISMISS_ALERT`). |
 | **Target** | The internal ID of the alert that was acted upon. |
 | **Detail** | Any additional context recorded at the time of the action. |
@@ -451,6 +469,17 @@ The ACK badge appears on the alert row. The action appears in the Audit Trail.
 
 In both cases the alert disappears from the feed and is logged in the Audit
 Trail. Dismissed alerts cannot be re-activated from the portal.
+
+**Dismissing does not silence an ongoing fault.** If the component is still
+unhealthy, the next agent report raises a new alert for it — dismissal clears the
+row you acted on, not the condition behind it. The alert stops coming back once
+the component reports `HEALTHY`, which also resolves it automatically. Use
+**Acknowledge** for a fault you are actively working on: it keeps the alert in the
+feed and marks it as taken.
+
+An agent that stops reporting is itself alerted on: its components move to
+`UNKNOWN` after the grace window and a `HIGH` alert is raised for each, because a
+NOC that cannot see a component must say so rather than show a quiet screen.
 
 ---
 
@@ -629,6 +658,25 @@ Trail. Dismissed alerts cannot be re-activated from the portal.
   seeding.
 - All-red links indicate that the NOC backend's link health checks are failing
   for every pair. Check backend logs for the health check job errors.
+
+### Returned to the login page while working
+
+- The portal renews its token automatically, so this normally only happens when
+  the realm's SSO session limit is reached or the session was revoked in Keycloak.
+  The message shown is *"Session expired. Sign in again."*
+- If it happens after only a few minutes, the renewal call is failing: check the
+  browser network tab for a rejected request to the Keycloak token endpoint, and
+  confirm the portal's `VITE_KEYCLOAK_URL` points at a realm reachable from the
+  browser.
+
+### Relay logs are empty or a log screen looks frozen
+
+- Container logs are agent-pushed snapshots, not a live tail. A **SNAPSHOT
+  `<n>`s OLD** badge in the viewer header means collection stopped — check the
+  container and its NOC agent, not the viewer.
+- Log collection requires the component to be registered with its container name;
+  a component registered with an endpoint only reports *"No logs available."* even
+  while healthy.
 
 ### Settings do not persist after page reload
 
