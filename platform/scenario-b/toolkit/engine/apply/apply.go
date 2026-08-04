@@ -32,6 +32,12 @@ type Options struct {
 	Relay        string // RelayRegistrar URI (default "local"; e.g. relay://host:4000)
 	Format       string // json | yaml
 	DryRun       bool
+	// Rebuild forces the image build steps to run even when a locally tagged image
+	// already exists. Image tags encode the baked build args, NOT the source tree, so
+	// a code change alone leaves the tag unchanged and the build is skipped — an apply
+	// that reports "done" while still serving the previous binary. Use after editing
+	// service or portal source.
+	Rebuild bool
 }
 
 // Apply loads+validates the manifest and dispatches by mode.
@@ -44,6 +50,9 @@ func Apply(ctx context.Context, o Options) (orchestrator.Report, error) {
 		f := res.Errors[0]
 		return orchestrator.Report{}, fmt.Errorf("invalid manifest: %s: %s", f.Field, f.Message)
 	}
+	// --rebuild makes every image-existence gate report "missing" for this run, so the
+	// build steps run against the current source instead of being skipped by tag.
+	orchestrator.SetForceImageRebuild(o.Rebuild)
 	switch pd.Spec.Mode {
 	case "found-hub":
 		return applyFoundHub(ctx, o, pd)
@@ -115,7 +124,15 @@ func applyObserve(ctx context.Context, o Options, pd *manifest.ParticipantDeploy
 	}
 
 	steps := orchestrator.ObserveSteps(cfg)
-	return orchestrator.New("observe", steps, state, o.DryRun).Run(ctx)
+	run := orchestrator.New("observe", steps, state, o.DryRun)
+	if o.Rebuild {
+		// Rebuild the images AND recreate the containers: compose picks up the new
+		// image id, so a rebuilt portal/backend actually starts serving. wait-noc-backend
+		// must be forced with them — a recreated backend is not ready yet, and the
+		// registration steps that follow would race it and fail on a reset connection.
+		run.Force("build-noc-images", "start-noc-stack", "wait-noc-backend")
+	}
+	return run.Run(ctx)
 }
 
 func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDeployment) (orchestrator.Report, error) {
@@ -242,7 +259,13 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 			Routes:       cfg.ProxyRoutes(),
 		}))
 	}
-	return orchestrator.New("found-spoke", steps, state, o.DryRun).Run(ctx)
+	run := orchestrator.New("found-spoke", steps, state, o.DryRun)
+	if o.Rebuild {
+		// These steps build this entity's service/portal images and then compose up,
+		// so forcing them rebuilds from source and recreates the containers.
+		run.Force("start-spoke-backend", "start-spoke-frontend", "start-spoke-relayer", "add-noc-agent")
+	}
+	return run.Run(ctx)
 }
 
 // launcherStep builds the per-entity launcher step from the manifest: it enables/
@@ -345,7 +368,11 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 			Routes:       cfg.ProxyRoutes(),
 		}))
 	}
-	return orchestrator.New("join", steps, state, o.DryRun).Run(ctx)
+	run := orchestrator.New("join", steps, state, o.DryRun)
+	if o.Rebuild {
+		run.Force("start-bank-payment", "start-bank-backend", "start-bank-frontend", "add-noc-agent")
+	}
+	return run.Run(ctx)
 }
 
 // resolveBundle resolves a (possibly relative) bundle ref against the manifest's
@@ -433,7 +460,11 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 			RootRedirect: "/b/governance/",
 		}))
 	}
-	return orchestrator.New("found-hub", steps, state, o.DryRun).Run(ctx)
+	run := orchestrator.New("found-hub", steps, state, o.DryRun)
+	if o.Rebuild {
+		run.Force("build-hub-backend-image", "start-hub-compliance", "start-hub-backend", "start-hub-frontend", "add-noc-agent")
+	}
+	return run.Run(ctx)
 }
 
 // nodePorts extracts the host RPC/WS/P2P ports from the manifest node (0 when unset).
