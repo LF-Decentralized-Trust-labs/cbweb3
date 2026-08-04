@@ -138,8 +138,16 @@ alert feed.
 
 A dropdown at the top of the page. By default, the first available spoke is
 selected automatically. Select **a specific spoke** to filter both the Component
-Health table and the Alert Feed to that spoke only. The "All Spokes" option
-(when no spoke is explicitly selected) shows alerts across all spokes.
+Health table and the Alert Feed to that spoke only.
+
+> The dropdown lists only registered spokes: the platform-wide "all spokes" mode
+> exists in the code but has no option to select it, so it cannot currently be
+> reached from the UI.
+
+When **Critical Alerts Only** is enabled in [Settings](#47-settings-settings),
+the feed lists only `HIGH` and `CRITICAL` alerts and a `CRITICAL ONLY` badge
+appears next to the feed title. The Summary Cards are not affected by that
+setting.
 
 #### Summary Cards
 
@@ -388,12 +396,23 @@ same browser. They reset when the browser storage is cleared.
 
 | Setting | Default | Description |
 |---|---|---|
-| **Alert Email** | `noc-ops@cbweb3.local` | Email address for alert notifications. Stored locally — not sent to the backend. |
-| **Critical Alerts Only** | Off | When checked, mutes `INFO` and `WARNING` severity alerts from the Dashboard feed. Only `HIGH` and `CRITICAL` alerts appear. |
-| **Polling Interval** | 15 seconds | How frequently the Dashboard auto-refreshes. **Minimum: 5 seconds.** Values below 5 are rejected. |
+| **Alert Email** | `noc-ops@cbweb3.local` | Email address for alert notifications. Stored locally — not sent to the backend. Applied on **Save Settings**. |
+| **Critical Alerts Only** | Off | When checked, hides `INFO` and `WARNING` severity alerts from the Dashboard's Active Alert Feed. Only `HIGH` and `CRITICAL` alerts appear, and a `CRITICAL ONLY` badge is shown on the feed header. Applied immediately on toggle. |
+| **Polling Interval** | 15 seconds | How frequently the auto-refreshing pages reload data. **Minimum: 5 seconds.** Values below 5 are rejected. Applied on **Save Settings**. |
 
-Click **Save Settings** to apply changes. A toast confirms success. The active
-polling interval shown below the input updates immediately.
+Click **Save Settings** to apply the Alert Email and Polling Interval. A toast
+confirms success, and the active polling interval shown below the input updates
+immediately. If the interval is below 5 seconds or not a number, an error toast
+appears and **nothing is saved** — including the Alert Email. The **Critical
+Alerts Only** checkbox does not require Save; it takes effect as soon as it is
+toggled.
+
+The Polling Interval governs every auto-refreshing page in the portal —
+[Dashboard](#41-dashboard-), [Infrastructure](#42-infrastructure-infrastructure)
+and [Relay Status](#43-relay-status-relays) — not the Dashboard alone.
+
+Note that the **Critical / High Alerts** counter in the Dashboard KPI row always
+counts `HIGH` and `CRITICAL` active alerts regardless of this setting.
 
 ---
 
@@ -616,3 +635,8 @@ Trail. Dismissed alerts cannot be re-activated from the portal.
 - Settings are stored in `localStorage` under the key `noc-ui-settings`.
   Verify the browser is not running in a private/incognito mode (which clears
   storage on close) or that storage is not being cleared by a browser extension.
+- Nothing is written until a setting actually changes, so an untouched Settings
+  screen leaves no entry under that key — that is expected, not a failure.
+- If **Save Settings** appears to do nothing, check for the error toast: an
+  interval below 5 seconds (or a non-numeric one) aborts the whole save,
+  including the Alert Email.
