@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import axios, { type InternalAxiosRequestConfig } from "axios";
+import { useFreshnessStore } from "../../stores/freshness.store";
 import { ensureFreshToken, notifySessionExpired, refreshAccessToken } from "./token";
 
 export const httpClient = axios.create({
@@ -24,8 +25,12 @@ httpClient.interceptors.request.use(async (config) => {
 // skew, revoked session, backend restart). Renew once and replay the request; if that
 // fails the session is over and the portal returns to the login screen.
 httpClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    useFreshnessStore.getState().markSuccess();
+    return response;
+  },
   async (error) => {
+    useFreshnessStore.getState().markError();
     const config = error?.config as RetriableConfig | undefined;
     if (error?.response?.status !== 401 || !config || config._retriedAfterRefresh) {
       return Promise.reject(error);
