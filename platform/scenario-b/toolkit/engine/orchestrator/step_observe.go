@@ -55,6 +55,13 @@ type ObserveConfig struct {
 	// KeycloakURL is the routable CB/hub Keycloak the portal password-grants
 	// against (spec.noc.keycloakURL). Baked as the portal's VITE_KEYCLOAK_URL.
 	KeycloakURL string
+	// AMMGatewayURL is the api-gateway the NOC BACKEND (not the browser) reads AMM
+	// pool status from, for the Pool Stability page (spec.noc.ammGatewayURL). The NOC
+	// stack owns its own docker network, so another stack's compose service name does
+	// not resolve here — this must be reachable from the NOC container, typically the
+	// host plus the gateway's published port. Empty leaves the backend default, and
+	// the page reports why it is empty instead of pretending the AMM has no pools.
+	AMMGatewayURL string
 	// LauncherURL is baked as the portal's VITE_LAUNCHER_URL (back-to-launcher).
 	LauncherURL string
 	// ProxyEnabled (spec.proxy == "enable") serves the NOC portal + its backend API
@@ -123,6 +130,11 @@ func (c ObserveConfig) ComposeEnv() []string {
 		// Behind the proxy the portal is same-origin with the backend, so the backend's
 		// browser CORS collapses to the single proxy origin (vs the local "*" default).
 		vars["NOC_FRONTEND_ORIGIN"] = proxyOrigin(c.FrontendHost)
+	}
+	if c.AMMGatewayURL != "" {
+		// Pool Stability data source. Pairs are discovered from this gateway, so no
+		// pair list has to be configured here.
+		vars["AMM_GATEWAY_URL"] = c.AMMGatewayURL
 	}
 	out := make([]string, 0, len(vars))
 	for k, v := range vars {

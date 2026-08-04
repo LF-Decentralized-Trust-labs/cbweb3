@@ -92,6 +92,9 @@ properties:
           launcherURL: { type: string }
           pushIntervalSeconds: { type: integer, minimum: 0 }
           components: { type: array, items: { enum: [BESU, CACTI_RELAY, PALADIN] } }
+          # api-gateway the NOC backend reads AMM pool status from, as reachable FROM
+          # THE NOC CONTAINER (own docker network → use host + published port).
+          ammGatewayURL: { type: string }
       frontendHost: { type: string }
       adminUsers:
         type: array

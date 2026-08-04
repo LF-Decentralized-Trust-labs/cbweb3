@@ -150,6 +150,12 @@ type NOC struct {
 	// LauncherURL is the launcher the NOC portal's "back to launcher" affordance
 	// returns to (VITE_LAUNCHER_URL). Empty → the affordance hides.
 	LauncherURL string `yaml:"launcherURL,omitempty" json:"launcherURL,omitempty"`
+	// AMMGatewayURL is the api-gateway the NOC backend reads AMM pool status from,
+	// as reachable FROM THE NOC CONTAINER (the NOC runs on its own docker network,
+	// so a compose service name of another stack does not resolve — use the host
+	// and published port, e.g. http://host.docker.internal:41645). Empty leaves the
+	// backend default, and Pool Stability stays empty while reporting why.
+	AMMGatewayURL string `yaml:"ammGatewayURL,omitempty" json:"ammGatewayURL,omitempty"`
 }
 
 // Node holds the network addressing configuration for the Besu node.

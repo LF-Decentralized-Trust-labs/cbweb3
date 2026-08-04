@@ -100,8 +100,9 @@ func applyObserve(ctx context.Context, o Options, pd *manifest.ParticipantDeploy
 		NetPrefix:       prefix,
 		VolumePrefix:    prefix,
 		FrontendHost:    pd.Spec.FrontendHost,
-		KeycloakURL:     manifestNOCKeycloakURL(pd), // portal VITE_KEYCLOAK_URL (CB/hub realm)
-		LauncherURL:     manifestNOCLauncherURL(pd), // portal VITE_LAUNCHER_URL (back-to-launcher)
+		KeycloakURL:     manifestNOCKeycloakURL(pd),   // portal VITE_KEYCLOAK_URL (CB/hub realm)
+		LauncherURL:     manifestNOCLauncherURL(pd),   // portal VITE_LAUNCHER_URL (back-to-launcher)
+		AMMGatewayURL:   manifestNOCAMMGatewayURL(pd), // backend AMM_GATEWAY_URL (Pool Stability)
 		ProxyEnabled:    pd.Spec.Proxy == "enable",  // serve portal + backend under the per-host proxy
 		// BackendPort/PortalPort fall back to the local convention in WithDefaults;
 		// spec.noc may carry explicit ports in a later phase.
@@ -527,6 +528,15 @@ func manifestNOCLauncherURL(pd *manifest.ParticipantDeployment) string {
 		return ""
 	}
 	return pd.Spec.NOC.LauncherURL
+}
+
+// manifestNOCAMMGatewayURL returns spec.noc.ammGatewayURL (the api-gateway the NOC
+// backend reads AMM pool status from), or "" when unset.
+func manifestNOCAMMGatewayURL(pd *manifest.ParticipantDeployment) string {
+	if pd.Spec.NOC == nil {
+		return ""
+	}
+	return pd.Spec.NOC.AMMGatewayURL
 }
 
 // toOrchestratorAdminUsers converts the manifest's spec.adminUsers into the
