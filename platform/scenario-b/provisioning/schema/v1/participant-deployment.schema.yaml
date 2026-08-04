@@ -81,6 +81,9 @@ properties:
         properties:
           endpoint: { type: string }
           advertisedHost: { type: string }
+          # Relay container on this host, used only so the noc-agent can collect its
+          # logs. Absent → the NOC reports no logs for the relay component.
+          containerName: { type: string }
       cbEndpoint: { type: string }
       # NOC bundle reference (obrigatório em observe; ver allOf).
       # Bloco NOC opcional em qualquer modo (nunca carrega segredos).

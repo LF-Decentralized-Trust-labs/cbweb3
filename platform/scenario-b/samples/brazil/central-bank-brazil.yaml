@@ -38,6 +38,9 @@ spec:
   certSource: self-signed          # the CB is the CA of its spoke
   relay:
     endpoint: http://localhost:7000
+    # Relay container on this host. Only used so this CB's noc-agent can collect the
+    # relay's container logs (the NOC's Log Viewer); the relay itself is untouched.
+    containerName: cbweb3-cacti-liquidity-relay
   cbEndpoint: http://host.docker.internal:18645
   frontendHost: localhost
   # Per-entity launcher (distributed A/B entry point on this entity's host). "enable"

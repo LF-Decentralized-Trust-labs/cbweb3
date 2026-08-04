@@ -181,6 +181,11 @@ type Port struct {
 type Relay struct {
 	Endpoint       string `yaml:"endpoint" json:"endpoint"`
 	AdvertisedHost string `yaml:"advertisedHost,omitempty" json:"advertisedHost,omitempty"`
+	// ContainerName is the relay's docker container on THIS host. It is only used to
+	// let this entity's noc-agent collect the relay's container logs (the agent reads
+	// the docker socket); the relay itself is never touched. Empty → the NOC shows
+	// "No logs available." for the relay component.
+	ContainerName string `yaml:"containerName,omitempty" json:"containerName,omitempty"`
 }
 
 // AdminUser is a per-role operator account created in the entity's Keycloak

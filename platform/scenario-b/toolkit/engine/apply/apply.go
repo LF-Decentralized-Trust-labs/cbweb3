@@ -182,7 +182,8 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		P2PPort:             p2pPort,
 		AdvertisedHost:      pd.Spec.Node.AdvertisedHost,
 		RelayAdvertisedHost: manifestRelayAdvHost(pd),
-		RelayEndpoint:       manifestRelayEndpoint(pd), // relay's own REST endpoint → CACTI_API_URL
+		RelayEndpoint:       manifestRelayEndpoint(pd),      // relay's own REST endpoint → CACTI_API_URL
+		RelayContainerName:  manifestRelayContainerName(pd), // relay container for noc-agent log collection
 		FrontendHost:        pd.Spec.FrontendHost,
 		LauncherEnabled:     pd.Spec.Launcher == "enable",
 		LauncherPort:        pd.Spec.LauncherPort,
@@ -312,8 +313,9 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
 		HubRPC:          firstNonEmpty(o.HubRPC, sb.HubRPC), // routable hub RPC from the spoke bundle
-		RelayEndpoint:   manifestRelayEndpoint(pd),          // the relay's own REST endpoint → CACTI_API_URL
-		NOCBackendURL:   manifestNOCBackendURL(pd),          // where this bank's noc-agent pushes
+		RelayEndpoint:      manifestRelayEndpoint(pd),      // the relay's own REST endpoint → CACTI_API_URL
+		RelayContainerName: manifestRelayContainerName(pd), // relay container for noc-agent log collection
+		NOCBackendURL:      manifestNOCBackendURL(pd),      // where this bank's noc-agent pushes
 		FrontendHost:    pd.Spec.FrontendHost,
 		LauncherEnabled: pd.Spec.Launcher == "enable",
 		LauncherPort:    pd.Spec.LauncherPort,
@@ -537,6 +539,15 @@ func manifestNOCAMMGatewayURL(pd *manifest.ParticipantDeployment) string {
 		return ""
 	}
 	return pd.Spec.NOC.AMMGatewayURL
+}
+
+// manifestRelayContainerName returns spec.relay.containerName (the relay container
+// whose logs this entity's noc-agent may collect), or "" when unset.
+func manifestRelayContainerName(pd *manifest.ParticipantDeployment) string {
+	if pd.Spec.Relay == nil {
+		return ""
+	}
+	return pd.Spec.Relay.ContainerName
 }
 
 // toOrchestratorAdminUsers converts the manifest's spec.adminUsers into the
