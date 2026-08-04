@@ -166,7 +166,7 @@ func Validate(pd *ParticipantDeployment) Result {
 	if spec.FrontendHost == "" {
 		r.AddError("spec.frontendHost", "required field is missing")
 	}
-	validateAdminUsers(spec.AdminUsers, &r)
+	validateAdminUsers(spec.AdminUsers, spec.Topology.Role, &r)
 	validateNOC(spec.NOC, &r)
 
 	// Launcher (optional): enable | disable when present.
@@ -242,11 +242,24 @@ func validateRelay(rel *Relay, r *Result) {
 	}
 }
 
-func validateAdminUsers(users []AdminUser, r *Result) {
+// requiredAdminRolesByTopologyRole lists the manifest admin-user roles an entity
+// MUST declare, keyed on spec.topology.role. Only the central bank onboards
+// commercial banks, so only it must declare an ADMISSION operator (spec 042):
+// the hub is not an onboarding authority (banks join spokes, not the hub) and a
+// commercial bank is not one either, so both stay exempt.
+var requiredAdminRolesByTopologyRole = map[string][]string{
+	"central-bank": {"ADMISSION"},
+}
+
+// validateAdminUsers checks the per-role operator accounts. topologyRole is
+// spec.topology.role and selects the per-entity required set above; pass "" to skip
+// the entity-specific requirement (shape checks still run).
+func validateAdminUsers(users []AdminUser, topologyRole string, r *Result) {
 	if len(users) == 0 {
 		r.AddError("spec.adminUsers", "required field is missing; declare at least one operator account")
 		return
 	}
+	declared := make(map[string]bool, len(users))
 	for i, u := range users {
 		if u.Role == "" {
 			r.AddError(fmt.Sprintf("spec.adminUsers[%d].role", i), "required field is missing")
@@ -256,6 +269,13 @@ func validateAdminUsers(users []AdminUser, r *Result) {
 		}
 		if u.Password == "" {
 			r.AddError(fmt.Sprintf("spec.adminUsers[%d].password", i), "required field is missing")
+		}
+		declared[strings.ToUpper(strings.TrimSpace(u.Role))] = true
+	}
+	for _, required := range requiredAdminRolesByTopologyRole[strings.TrimSpace(topologyRole)] {
+		if !declared[required] {
+			r.AddError("spec.adminUsers", fmt.Sprintf(
+				"topology.role %q must declare an operator account with role %q", topologyRole, required))
 		}
 	}
 }

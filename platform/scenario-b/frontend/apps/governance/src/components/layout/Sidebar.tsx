@@ -13,11 +13,27 @@ import {
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { isScenarioB } from "../../config/scenario";
-import { useCircuitBreaker } from "../../hooks";
+import { useAuth, useCircuitBreaker } from "../../hooks";
+import {
+  GOVERNANCE_ONLY,
+  GOVERNANCE_OR_ADMISSION,
+  isAllowedOnRoute,
+  type RouteRequirement,
+} from "../../auth/authorization";
 
-const scenarioANavItems = [
+// Each item carries the same requirement its route declares in routes/index.tsx, so the
+// nav can never offer a link the router would bounce (spec 042 FR-008). Default is
+// governance-only: an item added without a requirement stays hidden from Admission.
+type NavItem = {
+  to: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  required?: RouteRequirement;
+};
+
+const scenarioANavItems: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/registry", label: "Registry", icon: ClipboardCheck },
+  { to: "/registry", label: "Registry", icon: ClipboardCheck, required: GOVERNANCE_OR_ADMISSION },
   { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
   { to: "/transfer-limits", label: "Transfer Limits", icon: SlidersHorizontal },
   { to: "/accounts", label: "Accounts", icon: Users },
@@ -25,9 +41,9 @@ const scenarioANavItems = [
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
-const scenarioBNavItems = [
+const scenarioBNavItems: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/registry", label: "Registry", icon: ClipboardCheck },
+  { to: "/registry", label: "Registry", icon: ClipboardCheck, required: GOVERNANCE_OR_ADMISSION },
   { to: "/accounts", label: "Accounts", icon: Users },
   { to: "/swap-monitor", label: "Swap Monitor", icon: ListChecks },
   { to: "/circuit-breaker", label: "Circuit Breaker", icon: ShieldAlert },
@@ -39,8 +55,11 @@ const scenarioBNavItems = [
 
 export function Sidebar() {
   const { circuitBreaker } = useCircuitBreaker();
+  const { profile } = useAuth();
   const isHalted = circuitBreaker?.state === "HALTED";
-  const navItems = isScenarioB ? scenarioBNavItems : scenarioANavItems;
+  const navItems = (isScenarioB ? scenarioBNavItems : scenarioANavItems).filter((item) =>
+    isAllowedOnRoute(profile, item.required ?? GOVERNANCE_ONLY),
+  );
 
   return (
     <aside className="w-full border-b border-border bg-card p-3 md:min-h-full md:w-64 md:shrink-0 md:border-b-0 md:border-r">

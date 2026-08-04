@@ -62,6 +62,7 @@ spec:
     - { role: GOVERNANCE, username: admin@brasil.governance.gov, password: brasil-governance-local }
     - { role: TREASURY,   username: admin@brasil.treasury.gov,   password: brasil-treasury-local }
     - { role: SUPERVISOR, username: admin@brasil.supervisor.gov, password: brasil-supervisor-local }
+    - { role: ADMISSION,  username: admin@brasil.admission.gov, password: brasil-admission-local }
     # NOC operator for the co-located NOC portal (deployed by observe; see
     # brazil/noc-brazil.yaml + deploy-all-with-noc.sh). found-spoke provisions this
     # user in the spoke Keycloak realm; without it the NOC portal has no login.
