@@ -52,6 +52,9 @@ spec:
     - role: ROLE_NOC_ADMIN
       username: admin@brasil.noc.gov
       password: noc-local
+    - role: ROLE_ADMISSION
+      username: admin@brasil.admission.gov
+      password: admission-local
 `
 
 // validManifest returns a fully valid Manifest struct for use in tests.
@@ -82,6 +85,7 @@ func validManifest() *manifest.Manifest {
 				{Role: "ROLE_TREASURY", Username: "admin@brasil.treasury.gov", Password: "treasury-local"},
 				{Role: "ROLE_SUPERVISOR", Username: "admin@brasil.supervisor.gov", Password: "supervisor-local"},
 				{Role: "ROLE_NOC_ADMIN", Username: "admin@brasil.noc.gov", Password: "noc-local"},
+				{Role: "ROLE_ADMISSION", Username: "admin@brasil.admission.gov", Password: "admission-local"},
 			},
 		},
 	}
@@ -443,6 +447,7 @@ func TestValidate_AdminUsers(t *testing.T) {
 		m.Spec.AdminUsers = []manifest.AdminUser{
 			{Role: "ROLE_GOVERNANCE", Username: "admin@brasil.governance.gov", Password: "p"},
 			{Role: "ROLE_NOC_ADMIN", Username: "admin@brasil.noc.gov", Password: "p"},
+			{Role: "ROLE_ADMISSION", Username: "admin@brasil.admission.gov", Password: "admission-local"},
 		}
 		err := manifest.Validate(m)
 		if err == nil || !strings.Contains(err.Error(), "ROLE_TREASURY") {
@@ -480,10 +485,12 @@ func TestValidate_AdminUsers(t *testing.T) {
 			{Role: "ROLE_TREASURY", Username: "a@bccr.fi.cr", Password: "p"},
 			{Role: "ROLE_SUPERVISOR", Username: "a@bccr.fi.cr", Password: "p"},
 			{Role: "ROLE_NOC_ADMIN", Username: "a@bccr.fi.cr", Password: "p"},
+			{Role: "ROLE_ADMISSION", Username: "admin@brasil.admission.gov", Password: "admission-local"},
 			{Role: "ROLE_GOVERNANCE", Username: "b@bccr.fi.cr", Password: "p"},
 			{Role: "ROLE_TREASURY", Username: "b@bccr.fi.cr", Password: "p"},
 			{Role: "ROLE_SUPERVISOR", Username: "b@bccr.fi.cr", Password: "p"},
 			{Role: "ROLE_NOC_ADMIN", Username: "b@bccr.fi.cr", Password: "p"},
+			{Role: "ROLE_ADMISSION", Username: "admin@brasil.admission.gov", Password: "admission-local"},
 			{Role: "ROLE_SUPERVISOR", Username: "reg@sugeval.fi.cr", Password: "p"},
 		}
 		if err := manifest.Validate(m); err != nil {
