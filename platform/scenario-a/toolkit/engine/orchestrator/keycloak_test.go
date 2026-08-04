@@ -89,10 +89,10 @@ func TestCentralBankRealmPlans_RoutesAdminUsersByRole(t *testing.T) {
 // the central-bank realm; NOC_ADMIN routes to the shared cbweb3 realm.
 func TestCentralBankRealmPlans_GroupsMultiRoleUserByUsername(t *testing.T) {
 	admins := []manifest.AdminUser{
-		{Role: "ROLE_GOVERNANCE", Username: "user-governance@cb-costa-rica.l-net.io", Password: "pw"},
-		{Role: "ROLE_TREASURY", Username: "user-governance@cb-costa-rica.l-net.io", Password: "pw"},
-		{Role: "ROLE_SUPERVISOR", Username: "user-governance@cb-costa-rica.l-net.io", Password: "pw"},
-		{Role: "ROLE_NOC_ADMIN", Username: "user-governance@cb-costa-rica.l-net.io", Password: "pw"},
+		{Role: "ROLE_GOVERNANCE", Username: "user-cb@example.test", Password: "pw"},
+		{Role: "ROLE_TREASURY", Username: "user-cb@example.test", Password: "pw"},
+		{Role: "ROLE_SUPERVISOR", Username: "user-cb@example.test", Password: "pw"},
+		{Role: "ROLE_NOC_ADMIN", Username: "user-cb@example.test", Password: "pw"},
 		// A second operator with a single (supervisor-only) role, e.g. SUGEVAL.
 		{Role: "ROLE_SUPERVISOR", Username: "user-reg@example.test", Password: "pw2"},
 	}
@@ -106,7 +106,7 @@ func TestCentralBankRealmPlans_GroupsMultiRoleUserByUsername(t *testing.T) {
 	}
 	var bccr *KeycloakUserPlan
 	for i := range cb.Users {
-		if cb.Users[i].Username == "user-governance@cb-costa-rica.l-net.io" {
+		if cb.Users[i].Username == "user-cb@example.test" {
 			bccr = &cb.Users[i]
 		}
 	}
@@ -124,7 +124,7 @@ func TestCentralBankRealmPlans_GroupsMultiRoleUserByUsername(t *testing.T) {
 	}
 
 	// NOC realm: the BCCR user again (grouped), carrying only ROLE_NOC_ADMIN.
-	if len(noc.Users) != 1 || noc.Users[0].Username != "user-governance@cb-costa-rica.l-net.io" {
+	if len(noc.Users) != 1 || noc.Users[0].Username != "user-cb@example.test" {
 		t.Fatalf("NOC realm user mismatch: %+v", noc.Users)
 	}
 	if len(noc.Users[0].Roles) != 1 || noc.Users[0].Roles[0] != "ROLE_NOC_ADMIN" {
@@ -143,7 +143,7 @@ func TestCentralBankRealmPlans_GroupsMultiRoleUserByUsername(t *testing.T) {
 	}
 	count := 0
 	for _, u := range realm["users"].([]any) {
-		if u.(map[string]any)["username"] == "user-governance@cb-costa-rica.l-net.io" {
+		if u.(map[string]any)["username"] == "user-cb@example.test" {
 			count++
 		}
 	}
