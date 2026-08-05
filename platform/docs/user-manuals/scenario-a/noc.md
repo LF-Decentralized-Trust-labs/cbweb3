@@ -67,8 +67,11 @@ configuration changes) are exposed here.
 **URL:** The NOC Portal URL provided by your system administrator.
 
 **Authentication:** Keycloak OIDC. The portal authenticates against the
-`cbweb3` realm with client ID `noc-portal`. Only accounts carrying the
-`SYS_ADMIN` role are accepted.
+`cbweb3` realm with client ID `noc-portal`. The portal itself does not enforce
+the `SYS_ADMIN` role at login — after a successful Keycloak authentication the
+frontend assigns the `SYS_ADMIN` role to the session. Role-based access control
+is enforced server-side by the NOC backend, which rejects API calls from
+accounts that do not carry the required role.
 
 ![Login Page](../img/scenario-a/noc/01-login.png)
 
@@ -97,9 +100,17 @@ The login page has two panels on desktop:
 > Keycloak.
 
 **Session persistence:** On successful login the portal stores `noc_access_token`
-and `noc_refresh_token` in `localStorage`. The session is checked on page reload;
-if the token is expired the operator is redirected to the login page. Logging
-out clears both tokens.
+and `noc_refresh_token` in `localStorage`. The access token is short-lived (5
+minutes by realm default), so the portal renews it automatically — shortly before
+expiry and again if a request is still rejected — using the refresh token. A
+portal left open therefore keeps working without re-authentication up to the
+realm's SSO session limit, and a page reload within that window restores the
+session instead of returning to the login page.
+
+When renewal is no longer possible (refresh token expired, session revoked), the
+portal drops the session and returns to the login page with *"Session expired.
+Sign in again."*. **Sign out** clears both tokens and returns to the login page;
+use **Back to launcher** to leave the portal for the entity launcher.
 
 ---
 
@@ -136,10 +147,18 @@ alert feed.
 
 #### Spoke Selector
 
-A dropdown at the top of the page. By default, the first available spoke is
+A dropdown at the top of the page. On load, the first available spoke is
 selected automatically. Select **a specific spoke** to filter both the Component
-Health table and the Alert Feed to that spoke only. The "All Spokes" option
-(when no spoke is explicitly selected) shows alerts across all spokes.
+Health table and the Alert Feed to that spoke only.
+
+> The dropdown lists only registered spokes: the platform-wide "all spokes" mode
+> exists in the code but has no option to select it, so it cannot currently be
+> reached from the UI.
+
+When **Critical Alerts Only** is enabled in [Settings](#47-settings-settings),
+the feed lists only `HIGH` and `CRITICAL` alerts and a `CRITICAL ONLY` badge
+appears next to the feed title. The Summary Cards are not affected by that
+setting.
 
 #### Summary Cards
 
@@ -177,9 +196,9 @@ Click any alert row (not the dismiss button) to open the **Alert Detail Modal**.
 |---|---|
 | **Title** | Alert title. |
 | **Severity** | Severity badge. |
-| **Affected component** | The component that raised the alert. |
-| **Description** | Full alert description. |
-| **First detected** | ISO timestamp of alert creation. |
+| **Affected component** | The component that raised the alert (name, type, endpoint, health status). |
+| **Created** | Timestamp of alert creation, shown in browser local time. |
+| **Root cause sig** | System-generated root-cause signature. |
 | **Acknowledge button** | Marks the alert as seen; keeps it in the feed. |
 | **Dismiss button** | Removes the alert from the active feed. |
 
@@ -204,7 +223,7 @@ payment orchestrators. CACTI relay containers are excluded here — use
 
 | Control | Description |
 |---|---|
-| **Spoke Selector** | Select a spoke. The table is empty until a spoke is selected. |
+| **Spoke Selector** | The first available spoke is auto-selected on load, so the table is generally populated on arrival. Selecting a different spoke reloads the table for that spoke. |
 | **Refresh button** | Force an immediate health poll; disabled while loading. |
 
 #### Component Health Table
@@ -232,11 +251,14 @@ Shows the health of **CACTI interoperability relay containers** — the componen
 responsible for cross-spoke event propagation. When a cross-border settlement
 appears stuck, this page is the first place to check.
 
+The sidebar label for this screen is **Relays**; the in-page title is
+**Interoperability Containers**.
+
 #### Controls
 
 | Control | Description |
 |---|---|
-| **Spoke Selector** | You must select a specific spoke. The table is empty until a spoke is chosen. |
+| **Spoke Selector** | The first available spoke is auto-selected on load; its relay containers appear on arrival. Selecting a different spoke reloads the table for that spoke. |
 
 #### Relay Components Table
 
@@ -322,6 +344,7 @@ parameter (`?name=...`).
 | Control | Description |
 |---|---|
 | **Refresh button** | Force an immediate log fetch. Spinner is shown while loading. |
+| **SNAPSHOT `<n>`s OLD** badge | Appears when the newest line collected is more than 60 seconds old — see *Snapshots, not a live tail* below. |
 
 #### Log Panel
 
@@ -329,13 +352,22 @@ Terminal-style viewer (black background, green text).
 
 | Column | Description |
 |---|---|
-| **Timestamp** | Time portion of the log line's `occurred_at` timestamp (HH:MM:SS.mmm). |
+| **Timestamp** | Time portion of the log line's `occurred_at` timestamp (HH:MM:SS.mmm). This is when the **agent collected** the batch, so a whole batch shares one timestamp; each line's own time appears inside the log text. |
 | **Stream badge** | `stdout` (normal output) or `stderr` (error output). `stderr` lines appear in red. |
 | **Log line** | Raw log text from the container. |
 
 - Displays the **last 500 lines**.
 - Auto-scrolls to the bottom on initial load and on each refresh.
-- Refreshes automatically every **15 seconds**.
+- Refreshes automatically every **15 seconds**. This cycle is fixed and is not
+  affected by the Settings polling interval.
+
+#### Snapshots, not a live tail
+
+Logs are collected by the spoke's NOC agent and pushed to the backend; the viewer
+reads what the backend stored. If the container stops, or its agent stops
+collecting, the screen keeps showing the last snapshot with no other visible
+change — the **SNAPSHOT `<n>`s OLD** badge is what tells you the lines are not
+current.
 
 ---
 
@@ -359,7 +391,7 @@ recorded here.
 | Column | Description |
 |---|---|
 | **Timestamp** | When the action was performed (local time). |
-| **Actor** | Username of the NOC operator who performed the action. |
+| **Actor** | Username of the NOC operator who performed the action, taken from the `preferred_username` claim of the token used. Deployments whose token carries no username fall back to the account's internal ID, and a request with no readable identity is recorded as `dev-user`. |
 | **Action** | The action type: `Acknowledge` (from `ACKNOWLEDGE_ALERT`) or `Dismiss` (from `DISMISS_ALERT`). |
 | **Target** | The internal ID of the alert that was acted upon. |
 | **Detail** | Any additional context recorded at the time of the action. |
@@ -382,18 +414,34 @@ dismissal).
 
 ![Settings](../img/scenario-a/noc/08-settings.png)
 
-Configures operator-level monitoring preferences. Settings are persisted to
-`localStorage` (key: `noc-ui-settings`) and survive page reloads within the
-same browser. They reset when the browser storage is cleared.
+Configures operator-level monitoring preferences. These preferences are
+persisted to `localStorage` (key: `noc-ui-settings`): the **Alert Email**
+(`alertEmail`), the "Critical Alerts Only" toggle (`muteAlerts`), the display
+timezone (`timezone`), and the polling interval (`fallbackPollingSeconds`). They
+survive page reloads within the same browser and reset when the browser storage
+is cleared. The Alert Email and Polling Interval are committed when you click
+**Save Settings**; the Critical Alerts Only toggle takes effect immediately. No
+preference is sent to the backend.
 
 | Setting | Default | Description |
 |---|---|---|
-| **Alert Email** | `noc-ops@cbweb3.local` | Email address for alert notifications. Stored locally — not sent to the backend. |
-| **Critical Alerts Only** | Off | When checked, mutes `INFO` and `WARNING` severity alerts from the Dashboard feed. Only `HIGH` and `CRITICAL` alerts appear. |
-| **Polling Interval** | 15 seconds | How frequently the Dashboard auto-refreshes. **Minimum: 5 seconds.** Values below 5 are rejected. |
+| **Alert Email** | `noc-ops@cbweb3.local` | Email address for alert notifications. Stored locally — not sent to the backend. Applied on **Save Settings**. |
+| **Critical Alerts Only** | Off | When checked, hides `INFO` and `WARNING` severity alerts from the Dashboard's Active Alert Feed. Only `HIGH` and `CRITICAL` alerts appear, and a `CRITICAL ONLY` badge is shown on the feed header. Applied immediately on toggle. |
+| **Polling Interval** | 15 seconds | How frequently the auto-refreshing pages reload data. **Minimum: 5 seconds.** Values below 5 are rejected. Applied on **Save Settings**. |
 
-Click **Save Settings** to apply changes. A toast confirms success. The active
-polling interval shown below the input updates immediately.
+Click **Save Settings** to apply the Alert Email and Polling Interval. A toast
+confirms success, and the active polling interval shown below the input updates
+immediately. If the interval is below 5 seconds or not a number, an error toast
+appears and **nothing is saved** — including the Alert Email. The **Critical
+Alerts Only** checkbox does not require Save; it takes effect as soon as it is
+toggled.
+
+The Polling Interval governs every auto-refreshing page in the portal —
+[Dashboard](#41-dashboard-), [Infrastructure](#42-infrastructure-infrastructure)
+and [Relay Status](#43-relay-status-relays) — not the Dashboard alone.
+
+Note that the **Critical / High Alerts** counter in the Dashboard KPI row always
+counts `HIGH` and `CRITICAL` active alerts regardless of this setting.
 
 ---
 
@@ -433,6 +481,17 @@ The ACK badge appears on the alert row. The action appears in the Audit Trail.
 In both cases the alert disappears from the feed and is logged in the Audit
 Trail. Dismissed alerts cannot be re-activated from the portal.
 
+**Dismissing does not silence an ongoing fault.** If the component is still
+unhealthy, the next agent report raises a new alert for it — dismissal clears the
+row you acted on, not the condition behind it. The alert stops coming back once
+the component reports `HEALTHY`, which also resolves it automatically. Use
+**Acknowledge** for a fault you are actively working on: it keeps the alert in the
+feed and marks it as taken.
+
+An agent that stops reporting is itself alerted on: its components move to
+`UNKNOWN` after the grace window and a `HIGH` alert is raised for each, because a
+NOC that cannot see a component must say so rather than show a quiet screen.
+
 ---
 
 ## 6. Typical Workflows
@@ -443,7 +502,7 @@ Trail. Dismissed alerts cannot be re-activated from the portal.
 2. On the **Dashboard**, check the four summary cards. Any non-zero values in
    **Critical / High Alerts** or **Offline Components** require immediate action.
 3. If critical/high alerts are present, click each alert row to open the
-   Alert Detail Modal and review the affected component and description.
+   Alert Detail Modal and review the affected component and its health status.
 4. Navigate to **Infrastructure** and select each spoke in turn. Confirm no
    unexpected `DEGRADED` or `OFFLINE` components.
 5. Navigate to **Relays** and select each spoke. Confirm all CACTI relay
@@ -466,7 +525,7 @@ Trail. Dismissed alerts cannot be re-activated from the portal.
 
 1. On the **Dashboard**, click the alert row in the Active Alert Feed.
 2. Read the Alert Detail Modal fully: title, severity, affected component,
-   description, and first-detected time.
+   created time (local time), and root-cause signature.
 3. If you are taking ownership, click **Acknowledge**. The ACK badge appears.
 4. Investigate using the **Log Viewer** for the affected component.
 5. Once resolved externally, return to the Dashboard and **Dismiss** the alert.
@@ -611,8 +670,32 @@ Trail. Dismissed alerts cannot be re-activated from the portal.
 - All-red links indicate that the NOC backend's link health checks are failing
   for every pair. Check backend logs for the health check job errors.
 
+### Returned to the login page while working
+
+- The portal renews its token automatically, so this normally only happens when
+  the realm's SSO session limit is reached or the session was revoked in Keycloak.
+  The message shown is *"Session expired. Sign in again."*
+- If it happens after only a few minutes, the renewal call is failing: check the
+  browser network tab for a rejected request to the Keycloak token endpoint, and
+  confirm the portal's `VITE_KEYCLOAK_URL` points at a realm reachable from the
+  browser.
+
+### Relay logs are empty or a log screen looks frozen
+
+- Container logs are agent-pushed snapshots, not a live tail. A **SNAPSHOT
+  `<n>`s OLD** badge in the viewer header means collection stopped — check the
+  container and its NOC agent, not the viewer.
+- Log collection requires the component to be registered with its container name;
+  a component registered with an endpoint only reports *"No logs available."* even
+  while healthy.
+
 ### Settings do not persist after page reload
 
 - Settings are stored in `localStorage` under the key `noc-ui-settings`.
   Verify the browser is not running in a private/incognito mode (which clears
   storage on close) or that storage is not being cleared by a browser extension.
+- Nothing is written until a setting actually changes, so an untouched Settings
+  screen leaves no entry under that key — that is expected, not a failure.
+- If **Save Settings** appears to do nothing, check for the error toast: an
+  interval below 5 seconds (or a non-numeric one) aborts the whole save,
+  including the Alert Email.

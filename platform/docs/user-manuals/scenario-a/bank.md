@@ -28,17 +28,17 @@ digital-currency lifecycle:
 
 **URL:** The Bank Portal URL provided by your system administrator (e.g., `http://localhost:5173` in a local deployment).
 
-**Credentials:** A **Client ID** and **Client Secret** issued by the Central Bank operator. The Client ID is in UUID format.
+**Credentials:** A **Username** and **Password** for your institutional operator account. The username must be at least 3 characters; the password at least 6 characters.
 
 ![Bank Portal Login Screen](../img/scenario-a/bank/01-bank-login.png)
 
 ### Signing in
 
 1. Open the Bank Portal URL in your browser.
-2. Enter your **Client ID** and **Client Secret**.
+2. Enter your **Username** and **Password**.
 3. Click **Sign in**.
 
-On success you are redirected to the Dashboard. A "Welcome back" toast appears in the top-right corner.
+On success you are redirected to the Dashboard. A **Signed in** toast appears in the top-right corner (with the description "Welcome back to the Bank Portal.").
 
 > **First login / new institution:** If you see an "unauthorized" error immediately after entering correct credentials, your institution may not yet be fully onboarded. Complete the Onboarding flow first (see [Onboarding](#onboarding-onboarding)).
 
@@ -53,6 +53,7 @@ The left-hand sidebar exposes the following pages. All items below are active in
 | Sidebar label | Route | Purpose |
 |---|---|---|
 | Dashboard | `/` | Balances, pending counts, recent HTLC activity |
+| Statement | `/statement` | Chronological ledger of tokenized-fiat and tCeBM movements |
 | Issuance Requests | `/deposits` | Request tCeBM issuance from the Central Bank |
 | Reserve Tokenisation | `/escrows` | Convert approved fiat reserves into tCeBM |
 | Redeems | `/redeems` | Redeem tCeBM back to fiat reserves |
@@ -100,23 +101,48 @@ A summary card shows HTLC contract counts by lifecycle state:
 
 Below the counters, the 5 most recent HTLC contracts are listed with their Contract ID, receiver identity, and state badge. Two quick-action buttons are available: **Initiate PvP Transfer** (goes to `/htlc/new`) and **View PvP Transfers** (goes to `/htlc`).
 
+#### Recent Movements
+
+A **Recent Movements** card lists the 5 latest tokenized-fiat and tCeBM movements (timestamp, type, token, amount, and a Credit/Debit badge). A **View statement** button opens the full [Statement](#statement-statement) page.
+
+---
+
+### Statement (`/statement`)
+
+The Statement page provides a consolidated, chronological record of tokenized-fiat (fCeBM) and tCeBM movements received and sent by your institution.
+
+Three summary counters are shown at the top: **Total Movements**, **Credits (received)**, and **Debits (sent)**.
+
+Use the **Refresh** button to reload the movements list (the page does not auto-refresh).
+
+#### Movements table
+
+| Column | Description |
+|---|---|
+| **Date** | Movement timestamp |
+| **Type** | Movement kind — Deposit, Reserve Tokenisation, Redeem, or PvP Settlement |
+| **Token** | Tokenized Fiat (fCeBM) or tCeBM |
+| **Direction** | Credit (received) or Debit (sent) badge |
+| **Amount** | Signed amount (`+` for credits, `-` for debits) |
+| **Reference** | On-chain reference hash (truncated; hover for full value) |
+
 ---
 
 ### Onboarding (`/onboarding`)
 
 Before using any operational features, a new commercial bank must complete the onboarding process. This registers the institution with the Central Bank and provisions an EVM wallet.
 
-The wizard progresses through four stages:
+The wizard progresses through four steps (the stepper labels them Operator, Institution, KYC, Complete):
 
 ```
-1. Operator Confirmation  →  2. Institution Form  →  3. Pending Approval  →  4. Complete
+1. Operator Confirmation  →  2. Institution Data  →  3. KYC Approval  →  4. Complete
 ```
 
-#### Stage 1: Operator Confirmation
+#### Step 1: Operator Confirmation
 
 The screen displays your current Operator ID. Verify it matches your institutional account and click **Start Onboarding**.
 
-#### Stage 2: Institution Form
+#### Step 2: Institution Data
 
 Fill in your institution's registration details.
 
@@ -131,7 +157,7 @@ Fill in your institution's registration details.
 
 Click **Submit Onboarding Request**. Inline validation errors appear below each field if constraints are violated.
 
-#### Stage 3: Pending Approval
+#### Step 3: KYC Approval
 
 The request enters `PENDING` state. The portal polls the backend every **5 seconds** automatically; you can also click **Refresh status** manually.
 
@@ -146,7 +172,7 @@ The request enters `PENDING` state. The portal polls the backend every **5 secon
 
 A **Central Bank Governance operator** must log into the Governance Portal, navigate to the Registry, and click **Approve Onboarding** for your pending request. They must provide a reason of at least 10 characters.
 
-#### Stage 4: Completion
+#### Step 4: Complete
 
 Once approved, the portal finalises onboarding: it exchanges the approval for a PKI credential and activates the institution account on-chain.
 
@@ -161,10 +187,11 @@ After completion, all other portal features become available.
 
 | Status | Meaning |
 |---|---|
-| `NONE` | No request submitted; wizard starts at Stage 1 |
+| `NONE` | No request submitted; wizard starts at Step 1 |
 | `PENDING` | Submitted and awaiting Central Bank review |
 | `CREDENTIAL_REQUESTED` | System is internally requesting the PKI credential (shown as Pending to the operator) |
-| `ONBOARDING_APPROVED` | Central Bank approved; final activation in progress |
+| `APPROVED` | Central Bank approved; final activation in progress |
+| `KYC_APPROVED` | Central Bank approved (KYC cleared); treated the same as `APPROVED` — final activation in progress |
 | `ACTIVE` | Fully onboarded; all features accessible |
 | `REJECTED` | Central Bank rejected the request; contact governance support |
 | `REVOKED` | Access revoked after activation; contact governance support |
@@ -308,25 +335,27 @@ Use this page to propose a new FX trade agreement with a counterparty on another
 >
 > Contact your system administrator if you are unsure of the correct identity for a counterparty.
 
-**Parties section** (all fields required except HTLC receivers):
+**Parties section** — Counterparty B, Settlement Agent, Custodian, and Beneficiary are required; the four spoke/receiver fields are optional. All party fields are dropdowns populated from the network's Paladin identity roster:
 
 | Field | Description |
 |---|---|
-| **Counterparty B Identity** | Paladin identity of the receiving institution |
-| **Settlement Agent Identity** | Paladin identity of the settlement intermediary |
-| **Custodian Identity** | Paladin identity of the custodian |
-| **Beneficiary Identity** | Paladin identity of the end beneficiary |
-| **Spoke-A HTLC Receiver** | (Optional) HTLC receiver identity on the originating spoke — used to auto-fill the PvP form |
-| **Spoke-B HTLC Receiver** | (Optional) HTLC receiver identity on the counterparty spoke — used to auto-fill the PvP form |
+| **Counterparty B Identity** | (Required) Paladin identity of the receiving institution |
+| **Settlement Agent Identity** | (Required) Paladin identity of the settlement intermediary |
+| **Custodian Identity** | (Required) Paladin identity of the custodian |
+| **Beneficiary Identity** | (Required) Paladin identity of the end beneficiary |
+| **Source Spoke ID** | (Optional) Spoke identifier of the originating spoke (selected from the roster) |
+| **Destination Spoke ID** | (Optional) Spoke identifier of the counterparty spoke (selected from the roster) |
+| **Source Receiver** | (Optional) HTLC receiver identity on the originating spoke — used to auto-fill the PvP form when you initiate as Originator |
+| **Destination Receiver** | (Optional) HTLC receiver identity on the counterparty spoke — used to auto-fill the PvP form when you continue as Counterparty |
 
 **Trade Terms section:**
 
 | Field | Description |
 |---|---|
 | **Send Amount** | The amount your institution will transfer |
-| **Send Currency** | Currency of the send leg (BRL, EUR, ARS, CLP, MXN, USD) |
+| **Send Currency** | Read-only; fixed to this spoke's own currency (set at build time via `VITE_FIAT_SYMBOL`, e.g. `BRL`) |
 | **Receive Amount** | The amount your institution expects to receive |
-| **Receive Currency** | Currency of the receive leg |
+| **Receive Currency** | Currency of the receive leg, selected from the Latin American currency list: ARS, BOB, BRL, CLP, COP, CRC, CUP, DOP, GTQ, HNL, MXN, NIO, PAB, PEN, PYG, USD, UYU, VES |
 | **Exchange Rate** | Auto-calculated from the two amounts (read-only; displayed as "1 {send} = {rate} {receive}") |
 | **Expiry Date** | Date and time after which the agreement can no longer be settled — must be at least 5 minutes in the future |
 
@@ -356,17 +385,18 @@ The page shows three sections:
 
 | Agreement state | Available buttons |
 |---|---|
-| `PROPOSED` | **Accept**, **Reject**, **Cancel** |
+| `PROPOSED` (you are the originator) | **Cancel** only |
+| `PROPOSED` (you are the counterparty) | **Accept**, **Reject**, **Cancel** |
 | `ACCEPTED` | **Initiate PvP Transfer**, **Continue PvP Transfer** |
 | All other states | No actions available |
 
-> Note: All three actions (Accept, Reject, Cancel) are available on a `PROPOSED` agreement regardless of whether your institution is the originator or the counterparty. A confirmation dialog always appears before executing.
+> Note: **Accept** and **Reject** are counterparty-only actions — the institution that proposed the agreement (the originator) sees only **Cancel**. A confirmation dialog always appears before executing.
 
 - **Accept** — Moves the agreement to `ACCEPTED`; it is now ready for PvP settlement.
 - **Reject** — Declines the proposal. Moves to `REJECTED`. Irreversible.
 - **Cancel** — Cancels the proposal. Moves to `CANCELLED`. Irreversible.
-- **Initiate PvP Transfer** — Navigates to `/htlc/new` pre-filled with your role as Originator (Spoke-A). The agreement ID and receiver are auto-populated from the `Spoke-A HTLC Receiver` field.
-- **Continue PvP Transfer** — Navigates to `/htlc/new` pre-filled with your role as Counterparty (Spoke-B). The agreement ID and receiver are auto-populated from the `Spoke-B HTLC Receiver` field.
+- **Initiate PvP Transfer** — Navigates to `/htlc/new` pre-filled with your role as Originator (Spoke-A). The agreement ID and receiver are auto-populated from the agreement's `Source Receiver` field.
+- **Continue PvP Transfer** — Navigates to `/htlc/new` pre-filled with your role as Counterparty (Spoke-B). The agreement ID and receiver are auto-populated from the agreement's `Destination Receiver` field.
 
 ---
 
@@ -383,9 +413,9 @@ PvP (Payment vs. Payment) settlements use **Hash Time Lock Contracts (HTLCs)** t
 
 ---
 
-#### Settlement History (`/htlc`)
+#### PvP Settlement History (`/htlc`)
 
-Lists all HTLC contracts linked to your institution.
+Lists all HTLC contracts linked to your institution. The in-page title is **PvP Settlement History**.
 
 ![HTLC Settlement History](../img/scenario-a/bank/10-htlc-history.png)
 
@@ -423,7 +453,7 @@ This single page handles both roles in a PvP settlement. Use the **Choose PvP Ac
 
 ##### Optional: Link to an FX Agreement
 
-At the top of the page, select an accepted FX agreement from the dropdown. Then select your role (**I am the Originator (Spoke-A)** or **I am the Counterparty (Spoke-B)**). The form below is auto-filled with the receiver identity and amount from the agreement. You can still edit any field.
+At the top of the page, select an accepted FX agreement from the dropdown. Then select your role (**I am the Originator** or **I am the Counterparty**). The form below is auto-filled with the receiver identity and amount from the agreement. You can still edit any field.
 
 ##### Mode 1: Initiate PvP Transfer (you are Originator / Spoke-A)
 
@@ -453,7 +483,8 @@ Use this mode when the originator has already locked funds and has sent you the 
 | **Settlement Code** | Yes | The 64-character hexadecimal hash received from the originating institution (with or without `0x` prefix) |
 | **Receiver (Paladin identity)** | Yes | The Paladin identity that will receive tCeBM on your spoke |
 | **Amount (tCeBM)** | Yes | Positive integer; the amount specified for the counterparty leg |
-| **Agreement ID** | No | Optional: the FX agreement ID |
+
+> The Continue form has no Agreement ID input. When you reach this form via **Continue PvP Transfer** from an accepted agreement (or the FX agreement picker), the agreement ID is carried through automatically; it is not entered manually here.
 
 Steps:
 1. Enter the Settlement Code exactly as received from the originator.
@@ -465,9 +496,9 @@ On success, you are navigated to the Settlement Detail page for the new contract
 
 ---
 
-#### Settlement Detail (`/htlc/:contractId`)
+#### Settlement Details (`/htlc/:contractId`)
 
-Opened by clicking **View** on any row in the Settlement History, or navigated to automatically after creating a new transfer.
+Opened by clicking **View** on any row in the Settlement History, or navigated to automatically after creating a new transfer. The in-page title is **Settlement Details**.
 
 ![HTLC Details](../img/scenario-a/bank/13-htlc-details.png)
 
@@ -594,7 +625,7 @@ See the [Onboarding status table](#onboarding-status-reference) in the Onboardin
 
 ### Login fails with "unauthorized"
 
-- Verify the **Client ID** and **Client Secret** are correct and have not been rotated.
+- Verify the **Username** and **Password** are correct and have not been rotated.
 - Confirm the institution's onboarding status is `ACTIVE`. New accounts must complete onboarding first.
 - Confirm the spoke backend services are running (`make spoke-up` or check `docker compose ps`).
 
@@ -626,12 +657,12 @@ See the [Onboarding status table](#onboarding-status-reference) in the Onboardin
 
 ### Onboarding form submission fails
 
-- Check that all fields satisfy the constraints listed in the [Institution Form](#stage-2-institution-form) table.
+- Check that all fields satisfy the constraints listed in the [Institution Data](#step-2-institution-data) table.
 - Verify the Bank Portal can reach the API Gateway (check backend connectivity).
 
-### The institution shows `ACTIVE` in the Governance Portal but the wizard is still at Stage 3
+### The institution shows `ACTIVE` in the Governance Portal but the wizard is still at Step 3
 
-- Click **Refresh status** on the Stage 3 screen to force an immediate status check.
+- Click **Refresh status** on the Step 3 (KYC Approval) screen to force an immediate status check.
 - If the session has expired, log out, log back in, and return to the Onboarding page.
 
 ### Settlement Code validation error

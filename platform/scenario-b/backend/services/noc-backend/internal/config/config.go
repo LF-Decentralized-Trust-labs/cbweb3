@@ -29,7 +29,9 @@ type Config struct {
 	SkipAuth bool
 	// AMMGatewayURL is the base URL of the api-gateway exposing AMM pool status.
 	AMMGatewayURL string
-	// AMMPairs is the list of pool pairs to proxy from the AMM gateway.
+	// AMMPairs pins the pool pairs to proxy from the AMM gateway. Empty (the default)
+	// means discover them from the gateway, so a corridor opened at runtime appears
+	// without reconfiguring the NOC.
 	AMMPairs []string
 }
 
@@ -47,7 +49,7 @@ func Load() (*Config, error) {
 		FrontendOrigin:       getEnv("NOC_FRONTEND_ORIGIN", "http://localhost:5173"),
 		SkipAuth:             getEnv("NOC_SKIP_AUTH", "") == "true",
 		AMMGatewayURL:        getEnv("AMM_GATEWAY_URL", "http://api-gateway-cb-a:8080"),
-		AMMPairs:             parsePairs(getEnv("AMM_PAIRS", "W-BRL-ARS")),
+		AMMPairs:             parsePairs(getEnv("AMM_PAIRS", "")),
 	}
 
 	if cfg.DatabaseURL == "" {
