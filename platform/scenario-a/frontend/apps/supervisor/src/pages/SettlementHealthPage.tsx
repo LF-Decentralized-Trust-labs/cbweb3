@@ -11,7 +11,7 @@ const badgeFromState = (state: string): "default" | "secondary" | "destructive" 
   return "warning"; // SETTLING, REFUNDING
 };
 
-export function StabilityControlsPage() {
+export function SettlementHealthPage() {
   const { htlcs, alerts, refresh } = useStabilityStore();
 
   useEffect(() => {

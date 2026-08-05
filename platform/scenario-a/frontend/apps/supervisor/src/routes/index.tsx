@@ -7,9 +7,9 @@ import { AppLayout } from "../components/layout/AppLayout";
 import { AuditVaultPage } from "../pages/AuditVaultPage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { LoginPage } from "../pages/LoginPage";
-import { ParticipantManagementPage } from "../pages/ParticipantManagementPage";
+import { ComplianceRegistryPage } from "../pages/ComplianceRegistryPage";
 import { SettingsPage } from "../pages/SettingsPage";
-import { StabilityControlsPage } from "../pages/StabilityControlsPage";
+import { SettlementHealthPage } from "../pages/SettlementHealthPage";
 import { InvestigationPage } from "../pages/InvestigationPage";
 
 export const routes: RouteObject[] = [
@@ -25,9 +25,9 @@ export const routes: RouteObject[] = [
         element: <AppLayout />,
         children: [
           { index: true, element: <DashboardPage /> },
-          { path: "participants", element: <ParticipantManagementPage /> },
+          { path: "participants", element: <ComplianceRegistryPage /> },
           { path: "audit", element: <AuditVaultPage /> },
-          { path: "stability", element: <StabilityControlsPage /> },
+          { path: "stability", element: <SettlementHealthPage /> },
           { path: "investigation", element: <InvestigationPage /> },
           { path: "settings", element: <SettingsPage /> },
         ],
