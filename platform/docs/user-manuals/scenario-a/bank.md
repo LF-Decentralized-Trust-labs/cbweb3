@@ -111,6 +111,8 @@ A **Recent Movements** card lists the 5 latest tokenized-fiat and tCeBM movement
 
 The Statement page provides a consolidated, chronological record of tokenized-fiat (fCeBM) and tCeBM movements received and sent by your institution.
 
+![Statement Page](../img/scenario-a/bank/14-statement-page.png)
+
 Three summary counters are shown at the top: **Total Movements**, **Credits (received)**, and **Debits (sent)**.
 
 Use the **Refresh** button to reload the movements list (the page does not auto-refresh).

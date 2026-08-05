@@ -117,7 +117,7 @@ Bank B (ARS).
 | B4 | CB treasury | Treasury → [Tokenisation Approvals](./treasury.md#43-tokenisation-approvals-escrows-approval) | Approve the escrow | tCeBM minted to the bank |
 | B5 | Bank operator | Bank → [Dashboard](./bank.md#dashboard) | Refresh | tCeBM balance is non-zero — the bank is ready to transact |
 
-<!-- SCREENSHOT-NEW: ../img/scenario-a/end-to-end-walkthrough/01-tcebm-funded.png — Bank Dashboard showing a non-zero tCeBM balance after issuance and tokenisation -->
+![Bank Dashboard with a non-zero tCeBM balance after issuance and tokenisation](../img/scenario-a/end-to-end-walkthrough/01-tcebm-funded.png)
 
 ### 3.3 Stage C — Negotiate the FX trade agreement
 
@@ -129,7 +129,7 @@ currency, at which rate, and by when. Bank A proposes; Bank B accepts.
 | C1 | Bank A operator | Bank → [Propose Agreement](./bank.md#propose-agreement-agreementsnew) | Fill parties (counterparty, settlement agent, custodian, beneficiary) and trade terms (send BRL, receive ARS, rate, expiry ≥ 5 min ahead); Review then Confirm Proposal | Agreement created in PROPOSED state |
 | C2 | Bank B operator | Bank → [Agreement Inbox](./bank.md#agreement-inbox-agreements) → [Agreement Detail](./bank.md#agreement-detail-agreementstradeid) | Open the PROPOSED agreement, review parties and terms, click Accept | Agreement moves to ACCEPTED — ready for PvP settlement |
 
-<!-- SCREENSHOT-NEW: ../img/scenario-a/end-to-end-walkthrough/02-agreement-accepted.png — Bank Agreement Detail showing the trade agreement in ACCEPTED state with parties and trade terms -->
+![Bank Agreement Detail with the trade agreement in ACCEPTED state, showing parties and trade terms](../img/scenario-a/end-to-end-walkthrough/02-agreement-accepted.png)
 
 ### 3.4 Stage D — Originator locks the first leg
 
@@ -168,7 +168,7 @@ Completion is atomic — it delivers tCeBM to both receivers at once.
 | F2 | Bank B operator | Bank → [Settlement Details](./bank.md#settlement-details-htlccontractid) | Refresh (the page auto-polls every 5 s) | Counterparty contract reaches SETTLED; the BRL counterpart is delivered to Bank B's receiver |
 | F3 | CB treasury | Treasury → [HTLC Monitor](./treasury.md#45-htlc-monitor-htlc-monitor) | Review | Both contracts show as SETTLED end-to-end |
 
-<!-- SCREENSHOT-NEW: ../img/scenario-a/end-to-end-walkthrough/03-settlement-settled.png — Bank Settlement Details showing status SETTLED with Settlement Reference and Completion Code populated -->
+![Bank Settlement Details with status SETTLED and the Settlement Reference populated](../img/scenario-a/end-to-end-walkthrough/03-settlement-settled.png)
 
 ### 3.7 Stage G — Redeem back to fiat
 
