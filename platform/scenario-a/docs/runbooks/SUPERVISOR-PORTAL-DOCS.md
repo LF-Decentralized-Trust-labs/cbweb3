@@ -11,9 +11,9 @@ The Supervisor Portal is the **read-and-intervene** interface for regulatory aut
 3. [Access and Login](#3-access-and-login)
 4. [Module: Dashboard](#4-module-dashboard)
 5. [Module: Liquidity Monitor](#5-module-liquidity-monitor)
-6. [Module: Participant Management](#6-module-participant-management)
+6. [Module: Compliance Registry](#6-module-compliance-registry)
 7. [Module: Audit Vault](#7-module-audit-vault)
-8. [Module: Stability Controls](#8-module-stability-controls)
+8. [Module: Stability Insights](#8-module-stability-insights)
 9. [API Reference](#9-api-reference)
 10. [Security Notes](#10-security-notes)
 11. [Troubleshooting](#11-troubleshooting)
@@ -136,7 +136,7 @@ Lists all imbalance alerts currently active, with pair, severity, and descriptio
 
 ---
 
-## 6. Module: Participant Management
+## 6. Module: Compliance Registry
 
 **Route:** `/participants`
 
@@ -204,7 +204,7 @@ Read-only log of all governance actions taken within the system.
 
 ---
 
-## 8. Module: Stability Controls
+## 8. Module: Stability Insights
 
 **Route:** `/stability`
 
@@ -241,7 +241,7 @@ The Supervisor Portal consumes the following backend endpoints:
 | Dashboard | `GET` | `/api/v1/supervisor/network/overview` | Aggregated network KPIs |
 | Dashboard | `SSE` | `/api/v1/supervisor/events` | Real-time alert stream |
 | Liquidity Monitor | `GET` | `/api/v2/amm/pool/{pair}/status` | Per-pair pool health |
-| Participant Management | `GET` | `/api/v1/compliance/registry` | Registered participant list |
+| Compliance Registry | `GET` | `/api/v1/compliance/registry` | Registered participant list |
 | Audit Vault | `GET` | `/api/v1/compliance/audit/logs` | Immutable governance log |
 | Audit Vault | `POST` | `/api/v1/compliance/audit/decrypt` | Decrypt shielded transaction |
 
