@@ -25,6 +25,13 @@ The originating plan assumed the on-chain reference was already available at the
 | Propose resume | No — the identifier of the proposal is returned instead, and the receipt carrying the reference is discarded | Shared chain-facing component must return both |
 | Execute resume | None exists — it performs no chain call, because resumption happens automatically once the final signature lands | Correctly has no reference; not a gap |
 
+### Discovered during review pass
+
+A second verification pass against the running code surfaced two further facts that change what the work must do:
+
+- **The at-a-glance indicator is network-wide, but the authoritative status is per-pair.** The indicator today reads a pair-less source and renders a global claim ("swaps are globally halted"). The authoritative source is scoped to one currency pair. Making the two agree therefore requires deciding what "halted" means network-wide, not merely swapping one data source for another. Resolved as FR-012: the indicator reports halted when **any** pair is halted. All three places that render the indicator read only the halted/operational condition, so no other information is lost in the switch.
+- **The governance portal cannot currently run component-rendering tests.** Its test runner is configured for plain module tests with no browser-like environment and no component-testing library. Introducing them would add new development dependencies, which this project requires justification for. Resolved by testing the portal's data-handling logic — the parts that capture, retain and derive the reference and the indicator state — and verifying rendering manually. See the testing note in Assumptions.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Governance operator can audit the on-chain action behind a breaker decision (Priority: P1)
@@ -60,9 +67,12 @@ After this change, the indicator and the breaker screen report the same state fr
 
 **Acceptance Scenarios**:
 
-1. **Given** the portal in its default configuration, **When** a pair is halted on-chain, **Then** the at-a-glance indicator reports halted, matching the breaker screen.
+1. **Given** the portal in its default configuration, **When** a pair is halted, **Then** the at-a-glance indicator reports halted, matching the breaker screen.
 2. **Given** the portal in its default configuration, **When** no pair is halted, **Then** the indicator reports operational, matching the breaker screen.
-3. **Given** any configuration of the mock toggle, **When** the operator compares the indicator with the breaker screen, **Then** the two never disagree about whether swaps are halted.
+3. **Given** more than one pair exists and **one** of them is halted, **When** the operator views the indicator, **Then** it reports halted — the indicator is a network-wide claim, so any halted pair halts it.
+4. **Given** a halted pair is resumed while other pairs remain operational, **When** the indicator next refreshes, **Then** it returns to operational.
+5. **Given** any configuration of the mock toggle, **When** the operator compares the indicator with the breaker screen, **Then** the two never disagree about whether swaps are halted.
+6. **Given** no pairs exist yet, or the pair list cannot be retrieved, **When** the operator views the indicator, **Then** it reports an unknown or operational condition without asserting a halt, and without breaking the surrounding layout.
 
 ---
 
@@ -96,6 +106,9 @@ After this change, each manual states the actual behaviour of its portal, the su
 - **Status requested for a pair that has never had a breaker action.** No transaction reference is reported; this is a normal empty state, not an error.
 - **Resume quorum greater than two.** Out of scope to fix. The current signing behaviour reports the resumed state after the final expected signature in a two-signature quorum; for any larger quorum it would report resumed prematurely. This must be recorded as a known limitation so a future quorum change does not inherit a silent defect.
 - **Operator has no copy affordance available** (for example, a restricted browser context). The reference remains visible and selectable, so it is never locked behind the copy control.
+- **No pairs exist, or the pair list cannot be retrieved.** The network-wide indicator must not claim a halt it cannot substantiate; it degrades to unknown or operational and recovers on a later refresh (FR-014).
+- **One pair halted, others operational.** The network-wide indicator reports halted, because it is a claim about the network rather than about the pair the operator happens to have selected (FR-012).
+- **A single pair's status cannot be retrieved while others can.** The indicator must not silently report operational on partial information; an indeterminate pair is treated as not-known-halted and the condition is surfaced rather than swallowed.
 - **Documentation drift after this change.** Each corrected statement must be traceable to the specific behaviour it describes, so that a future behavioural change makes the inaccuracy findable rather than silently reintroducing drift.
 
 ## Requirements *(mandatory)*
@@ -117,34 +130,39 @@ After this change, each manual states the actual behaviour of its portal, the su
 
 **Breaker state consistency (Scenario B)**
 
-- **FR-011**: The at-a-glance breaker indicator in the portal chrome MUST derive its state from the same authoritative source as the dedicated breaker screen.
-- **FR-012**: The at-a-glance indicator MUST NOT be capable of displaying synthetic state while the dedicated breaker screen displays live state.
+- **FR-011**: The at-a-glance breaker indicator in the portal chrome MUST derive its state from the same authoritative source as the dedicated breaker screen, and MUST NOT depend on any source that can be served from synthetic data.
+- **FR-012**: Because the indicator makes a network-wide claim while the authoritative status is per-pair, the indicator MUST report halted when **any** known pair is halted, and operational only when no known pair is halted.
+- **FR-013**: The at-a-glance indicator MUST NOT be capable of displaying synthetic state while the dedicated breaker screen displays live state.
+- **FR-014**: When no pairs exist, or the set of pairs cannot be determined, the indicator MUST NOT assert that swaps are halted. It MUST degrade to an unknown or operational condition without breaking the surrounding layout, and MUST recover on a later refresh.
 
 **Documentation and configuration accuracy**
 
-- **FR-013**: Each portal manual's data-source statement MUST accurately describe whether that portal is backed by live data, including which behaviour applies when the mock toggle is unset.
-- **FR-014**: The Scenario A governance manual MUST describe that portal as live-backed, and MUST NOT describe a selectable mock mode, because no code consumes that portal's mock path. It MUST NOT state or imply that the inert flag or unused mock data will be removed, as that removal is out of scope here.
-- **FR-015**: The Scenario B governance manual MUST state that a mock toggle exists and is consumed, and MUST state the default that applies when the toggle is unset or set to any value other than the exact disabling value.
-- **FR-016**: The Scenario B bank manual and the bank portal's own settings screen MUST agree with each other and with the portal's actual behaviour; statements describing mock services or simulated events MUST be removed or corrected where they do not reflect that behaviour.
-- **FR-017**: The manual summary table MUST agree with the individual manuals and MUST attribute the live mock toggle to the portal that actually has one.
-- **FR-018**: Environment templates MUST NOT declare configuration variables that no code reads; the inert mock variable MUST be removed from both bank portal templates.
-- **FR-019**: The originating review ticket MUST be annotated to record that its scenario attribution is inaccurate, specifically that the mock-default behaviour it attributes to Scenario A governance in fact belongs to Scenario B governance.
+- **FR-015**: Each portal manual's data-source statement MUST accurately describe whether that portal is backed by live data, including which behaviour applies when the mock toggle is unset.
+- **FR-016**: The Scenario A governance manual MUST describe that portal as live-backed, and MUST NOT describe a selectable mock mode, because no code consumes that portal's mock path. It MUST NOT state or imply that the inert flag or unused mock data will be removed, as that removal is out of scope here.
+- **FR-017**: The Scenario B governance manual MUST state that a mock toggle exists and is consumed, and MUST state the default that applies when the toggle is unset or set to any value other than the exact disabling value.
+- **FR-018**: The Scenario B bank manual and the bank portal's own settings screen MUST agree with each other and with the portal's actual behaviour; statements describing mock services or simulated events MUST be removed or corrected where they do not reflect that behaviour.
+- **FR-019**: The manual summary table MUST agree with the individual manuals and MUST attribute the live mock toggle to the portal that actually has one.
+- **FR-020**: Environment templates MUST NOT declare configuration variables that no code reads; the inert mock variable MUST be removed from both bank portal templates.
+- **FR-021**: The originating review ticket MUST be annotated to record that its scenario attribution is inaccurate, specifically that the mock-default behaviour it attributes to Scenario A governance in fact belongs to Scenario B governance.
 
 **Known limitations**
 
-- **FR-020**: The premature resumed-state report that would occur for any resume quorum greater than two MUST be recorded as a known limitation in a location a maintainer will encounter before changing the quorum. It MUST NOT be fixed under this specification.
-- **FR-021**: The absence of governance audit-trail entries for breaker actions MUST be recorded as a discovered pre-existing gap, with enough detail for separate triage. It MUST NOT be fixed under this specification.
+- **FR-022**: The premature resumed-state report that would occur for any resume quorum greater than two MUST be recorded as a known limitation in a location a maintainer will encounter before changing the quorum. It MUST NOT be fixed under this specification.
+- **FR-023**: The absence of governance audit-trail entries for breaker actions MUST be recorded as a discovered pre-existing gap, with enough detail for separate triage. It MUST NOT be fixed under this specification.
 
 **Boundaries**
 
-- **FR-022**: Changes to Scenario B behaviour MUST NOT alter Scenario A behaviour, and the single Scenario A documentation and template correction MUST be separable from the Scenario B changes for independent review.
-- **FR-023**: The change MUST NOT alter the breaker's decision model: pause remains a single-actor emergency action and resume remains a multi-party quorum. Only the visibility of, and confidence in, those actions changes.
+- **FR-024**: Changes to Scenario B behaviour MUST NOT alter Scenario A behaviour, and the single Scenario A documentation and template correction MUST be separable from the Scenario B changes for independent review.
+- **FR-025**: The change MUST NOT alter the breaker's decision model: pause remains a single-actor emergency action and resume remains a multi-party quorum. Only the visibility of, and confidence in, those actions changes.
+- **FR-026**: The change MUST NOT introduce new runtime or development dependencies. Any verification that would require one MUST be achieved another way or performed manually.
+- **FR-027**: Every newly created source file MUST carry the project's mandatory licence header, which is enforced in continuous integration for the affected file types.
 
 ### Key Entities
 
 - **Breaker action**: A governance act against a currency pair — pause, resume proposal, or resume signature — performed by an identified institution, producing a resulting state and, where a chain is wired, an on-chain transaction reference. Finalising a resume is not a breaker action in this sense: it performs no chain call and carries no reference.
 - **Breaker status**: The current condition of a pair — operational, halted, or awaiting resume quorum — together with who initiated it, why, how many signatures a pending resume has collected against how many it needs, and the reference for the pair's most recent action by any institution.
 - **On-chain transaction reference**: The ledger identifier of a breaker action. Present only where a chain is wired; absent otherwise. Never a precondition for the action. Distinct from the **resume proposal identifier**, which names a specific resume proposal so it can be signed — both are returned when a resume is proposed, and neither substitutes for the other.
+- **Network-wide breaker condition**: A derived, not stored, value — halted if any known pair is halted, operational if none is, and indeterminate if the set of pairs is unknown. This is what the chrome indicator renders; it has no single authoritative record of its own because the authoritative state is held per pair.
 - **Data-source statement**: The per-portal claim in a manual about whether the screens show live or synthetic data, which must correspond to that portal's real behaviour.
 
 ## Success Criteria *(mandatory)*
@@ -154,7 +172,7 @@ After this change, each manual states the actual behaviour of its portal, the su
 - **SC-001**: For every breaker action performed in a chain-wired environment, the operator can obtain the corresponding on-chain reference from the portal without leaving it or consulting logs — 100% of pause, resume-proposal and resume-signature actions.
 - **SC-002**: An operator can produce the on-chain reference for the pair's most recent breaker action in a single copy gesture, in under 10 seconds from the action completing, and can still do so after reloading the view.
 - **SC-003**: An auditor reconstructing a breaker incident can match every portal-reported action to a ledger record using only what the portal displays, with no gaps.
-- **SC-004**: The at-a-glance indicator and the dedicated breaker screen report the same halted/operational condition in 100% of observations, in every supported configuration.
+- **SC-004**: The at-a-glance indicator and the dedicated breaker screen report the same halted/operational condition in 100% of observations, in every supported configuration, including when several pairs exist and only one is halted.
 - **SC-005**: Breaker actions succeed at the same rate as before the change in environments with no chain wired — reference visibility introduces no new failure mode.
 - **SC-006**: Every data-source statement in the manual set matches the behaviour of the portal it describes, verified statement by statement — 4 of 4 corrected, 0 remaining contradictions.
 - **SC-007**: No environment template offers a variable that has no effect — 0 inert variables remaining in the bank portal templates.
@@ -171,3 +189,6 @@ After this change, each manual states the actual behaviour of its portal, the su
 - The Scenario A vestigial-AMM retirement described as Workstream 2 of the rescope plan is excluded from this specification and remains available as separate future work.
 - No interface-contract regeneration is required, because the affected flow is the current governance interface rather than the legacy compliance contract.
 - Correcting the manuals here is compatible with the in-flight user-manual screenshot work on other branches; the statements corrected here are distinct from the screenshot-driven text already amended elsewhere.
+- **Portal verification is logic-level, not render-level.** The governance portal's test setup runs plain module tests with no browser-like environment and no component-testing library, and FR-026 forbids adding dependencies. Portal requirements are therefore verified by testing the data-handling logic — capturing the reference from each response, retaining it across a status refresh, and deriving the network-wide condition — with visual rendering confirmed manually against the walkthrough. This is a deliberate trade, not an omission: the logic that could silently drop the reference is covered, and the part left to manual checking is the part a human must look at anyway.
+- The number of currency pairs in any environment is small, so deriving the network-wide condition by consulting each pair's status is acceptable and needs no new aggregate interface.
+- All three places that render the at-a-glance indicator consume only the halted/operational condition, so changing where that condition comes from loses no other information they display.

@@ -60,7 +60,7 @@ Errors unchanged: `400` invalid body / missing `pair`, `bank_id`, `reason_code`;
 
 `tx_hash` is the hash of **this signature's** transaction in both cases. Note that when quorum is met the contract unpauses inside that same signing transaction, so this hash is also the transaction that resumed the pair.
 
-> **Known limitation (FR-020, documented not fixed).** The `LIVE` response is produced after calling `ExecuteResume`, which performs no chain call because the contract auto-unpauses during the final signature. This is correct for a 2-of-N quorum but would report `LIVE` prematurely for any quorum greater than 2. Revisit only if quorum ever exceeds 2.
+> **Known limitation (FR-022, documented not fixed).** The `LIVE` response is produced after calling `ExecuteResume`, which performs no chain call because the contract auto-unpauses during the final signature. This is correct for a 2-of-N quorum but would report `LIVE` prematurely for any quorum greater than 2. Revisit only if quorum ever exceeds 2.
 
 ---
 
