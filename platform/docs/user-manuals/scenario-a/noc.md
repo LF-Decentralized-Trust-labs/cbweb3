@@ -67,8 +67,11 @@ configuration changes) are exposed here.
 **URL:** The NOC Portal URL provided by your system administrator.
 
 **Authentication:** Keycloak OIDC. The portal authenticates against the
-`cbweb3` realm with client ID `noc-portal`. Only accounts carrying the
-`SYS_ADMIN` role are accepted.
+`cbweb3` realm with client ID `noc-portal`. The portal itself does not enforce
+the `SYS_ADMIN` role at login — after a successful Keycloak authentication the
+frontend assigns the `SYS_ADMIN` role to the session. Role-based access control
+is enforced server-side by the NOC backend, which rejects API calls from
+accounts that do not carry the required role.
 
 ![Login Page](../img/scenario-a/noc/01-login.png)
 
@@ -136,7 +139,7 @@ alert feed.
 
 #### Spoke Selector
 
-A dropdown at the top of the page. By default, the first available spoke is
+A dropdown at the top of the page. On load, the first available spoke is
 selected automatically. Select **a specific spoke** to filter both the Component
 Health table and the Alert Feed to that spoke only. The "All Spokes" option
 (when no spoke is explicitly selected) shows alerts across all spokes.
@@ -177,9 +180,9 @@ Click any alert row (not the dismiss button) to open the **Alert Detail Modal**.
 |---|---|
 | **Title** | Alert title. |
 | **Severity** | Severity badge. |
-| **Affected component** | The component that raised the alert. |
-| **Description** | Full alert description. |
-| **First detected** | ISO timestamp of alert creation. |
+| **Affected component** | The component that raised the alert (name, type, endpoint, health status). |
+| **Created** | Timestamp of alert creation, shown in browser local time. |
+| **Root cause sig** | System-generated root-cause signature. |
 | **Acknowledge button** | Marks the alert as seen; keeps it in the feed. |
 | **Dismiss button** | Removes the alert from the active feed. |
 
@@ -204,7 +207,7 @@ payment orchestrators. CACTI relay containers are excluded here — use
 
 | Control | Description |
 |---|---|
-| **Spoke Selector** | Select a spoke. The table is empty until a spoke is selected. |
+| **Spoke Selector** | The first available spoke is auto-selected on load, so the table is generally populated on arrival. Selecting a different spoke reloads the table for that spoke. |
 | **Refresh button** | Force an immediate health poll; disabled while loading. |
 
 #### Component Health Table
@@ -232,11 +235,14 @@ Shows the health of **CACTI interoperability relay containers** — the componen
 responsible for cross-spoke event propagation. When a cross-border settlement
 appears stuck, this page is the first place to check.
 
+The sidebar label for this screen is **Relays**; the in-page title is
+**Interoperability Containers**.
+
 #### Controls
 
 | Control | Description |
 |---|---|
-| **Spoke Selector** | You must select a specific spoke. The table is empty until a spoke is chosen. |
+| **Spoke Selector** | The first available spoke is auto-selected on load; its relay containers appear on arrival. Selecting a different spoke reloads the table for that spoke. |
 
 #### Relay Components Table
 
@@ -382,14 +388,17 @@ dismissal).
 
 ![Settings](../img/scenario-a/noc/08-settings.png)
 
-Configures operator-level monitoring preferences. Settings are persisted to
-`localStorage` (key: `noc-ui-settings`) and survive page reloads within the
-same browser. They reset when the browser storage is cleared.
+Configures operator-level monitoring preferences. Only a subset of these
+preferences is persisted to `localStorage` (key: `noc-ui-settings`): the
+"Critical Alerts Only" toggle (`muteAlerts`), the display timezone (`timezone`),
+and the polling interval (`fallbackPollingSeconds`). These survive page reloads
+within the same browser and reset when the browser storage is cleared. The
+**Alert Email** field is **not** persisted — see the note below.
 
 | Setting | Default | Description |
 |---|---|---|
-| **Alert Email** | `noc-ops@cbweb3.local` | Email address for alert notifications. Stored locally — not sent to the backend. |
-| **Critical Alerts Only** | Off | When checked, mutes `INFO` and `WARNING` severity alerts from the Dashboard feed. Only `HIGH` and `CRITICAL` alerts appear. |
+| **Alert Email** | `noc-ops@cbweb3.local` | Email address for alert notifications. **Session-only** — held in page state, not sent to the backend and not persisted; it resets to the default on every page reload. |
+| **Critical Alerts Only** | Off | **Currently non-functional.** The toggle state is saved to `localStorage`, but it is not read anywhere — it does **not** filter or mute any alerts on the Dashboard feed. All active alerts appear regardless of this setting. |
 | **Polling Interval** | 15 seconds | How frequently the Dashboard auto-refreshes. **Minimum: 5 seconds.** Values below 5 are rejected. |
 
 Click **Save Settings** to apply changes. A toast confirms success. The active
@@ -443,7 +452,7 @@ Trail. Dismissed alerts cannot be re-activated from the portal.
 2. On the **Dashboard**, check the four summary cards. Any non-zero values in
    **Critical / High Alerts** or **Offline Components** require immediate action.
 3. If critical/high alerts are present, click each alert row to open the
-   Alert Detail Modal and review the affected component and description.
+   Alert Detail Modal and review the affected component and its health status.
 4. Navigate to **Infrastructure** and select each spoke in turn. Confirm no
    unexpected `DEGRADED` or `OFFLINE` components.
 5. Navigate to **Relays** and select each spoke. Confirm all CACTI relay
@@ -466,7 +475,7 @@ Trail. Dismissed alerts cannot be re-activated from the portal.
 
 1. On the **Dashboard**, click the alert row in the Active Alert Feed.
 2. Read the Alert Detail Modal fully: title, severity, affected component,
-   description, and first-detected time.
+   created time (local time), and root-cause signature.
 3. If you are taking ownership, click **Acknowledge**. The ACK badge appears.
 4. Investigate using the **Log Viewer** for the affected component.
 5. Once resolved externally, return to the Dashboard and **Dismiss** the alert.

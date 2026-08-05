@@ -54,9 +54,9 @@ In a production or staging deployment, the URL is provided by your network admin
 ### Signing in
 
 1. Open the portal URL.
-2. On the **Sign in to Governance Portal** page, enter your **Client ID** and **Client Secret**.
-   - The Client ID is the Keycloak client identifier for your governance operator account (example: `central-bank-a-client`).
-   - The Client Secret is the corresponding secret provisioned by the network administrator.
+2. On the **Sign in to <Institution> Portal** page (e.g. "Sign in to Central Bank A Portal" — the institution name comes from the `VITE_INSTITUTION_NAME` environment variable), enter your **Username** and **Password**.
+   - The Username is your governance operator account identifier (minimum 3 characters; example: `admin@brasil.governance.gov`).
+   - The Password is the corresponding credential provisioned by the network administrator (minimum 6 characters).
 3. Click **Sign in**.
 4. On success, you are redirected to the Dashboard.
 
@@ -172,7 +172,7 @@ The Audit page (titled **Governance Audit Trail** in the UI) provides an immutab
 
 | Filter | Options |
 |---|---|
-| **Category** | All categories · Credential · Freeze · Parameter |
+| **Category** | All categories · Credential · Circuit Breaker · Freeze · Parameter (Circuit Breaker is a Scenario-B carryover retained in the shared audit type; it typically returns no results in Scenario A) |
 | **Severity** | All severities · Info · Warning · Critical |
 | **From date** | Date picker — start of the date range |
 | **To date** | Date picker — end of the date range |
@@ -188,13 +188,14 @@ Set the desired filters and click **Apply Filters**. The button shows "Applying.
 | **Action** | A short description of what was done (e.g., "Account frozen", "KYC approved", "Parameters updated"). |
 | **Category** | The governance domain. See the [Audit category reference](#audit-category-reference) table below. |
 | **Severity** | `INFO`, `WARNING`, or `CRITICAL`. |
-| **Outcome** | `SUCCESS` or `FAILURE`. |
+| **Outcome** | `SUCCESS` or `FAILED`. |
 
 #### Audit category reference
 
 | Category | Events included |
 |---|---|
 | `CREDENTIAL` | KYC approvals, credential issuance |
+| `CIRCUIT_BREAKER` | Circuit-breaker events (Scenario-B carryover retained in the shared audit type; not emitted in Scenario A) |
 | `FREEZE` | Account freeze and unfreeze events |
 | `PARAMETER` | Parameter update events |
 
@@ -310,13 +311,14 @@ Use this workflow when investigating a past governance action for compliance or 
 | Outcome | Meaning |
 |---|---|
 | `SUCCESS` | The action completed successfully on the backend. |
-| `FAILURE` | The action failed; review the action description and contact backend support. |
+| `FAILED` | The action failed; review the action description and contact backend support. |
 
 ### Audit category
 
 | Category | Governance domain |
 |---|---|
 | `CREDENTIAL` | KYC approvals and credential issuance |
+| `CIRCUIT_BREAKER` | Circuit-breaker control (Scenario-B carryover retained in the shared audit type; not emitted in Scenario A) |
 | `FREEZE` | Account freeze and unfreeze |
 | `PARAMETER` | System parameter updates |
 
