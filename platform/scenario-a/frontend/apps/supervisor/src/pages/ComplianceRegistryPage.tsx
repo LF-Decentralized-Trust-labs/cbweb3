@@ -18,7 +18,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useParticipantsStore } from "../stores";
 
-export function ParticipantManagementPage() {
+export function ComplianceRegistryPage() {
   const { participants, status, error, fetch } = useParticipantsStore();
   const [query, setQuery] = useState("");
 

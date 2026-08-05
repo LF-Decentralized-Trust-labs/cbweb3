@@ -162,7 +162,7 @@ func (h *DashboardHandler) getAlert(c *fiber.Ctx) error {
 
 func (h *DashboardHandler) acknowledgeAlert(c *fiber.Ctx) error {
 	claims, _ := middleware.GetClaims(c)
-	username := claims.Subject
+	username := claims.Actor()
 	if username == "" {
 		username = "unknown"
 	}
@@ -174,7 +174,7 @@ func (h *DashboardHandler) acknowledgeAlert(c *fiber.Ctx) error {
 
 func (h *DashboardHandler) dismissAlert(c *fiber.Ctx) error {
 	claims, _ := middleware.GetClaims(c)
-	actor := claims.Subject
+	actor := claims.Actor()
 	if actor == "" {
 		actor = "unknown"
 	}

@@ -44,6 +44,10 @@ type JoinConfig struct {
 	P2PPort         int    // host port -> besu 30303
 	HubRPC          string // hub RPC (routable, from the spoke bundle) → HUB_BESU_RPC_URL
 	RelayEndpoint   string // the relay's OWN REST endpoint (spec.relay.endpoint, e.g. http://<hub>:7000) → CACTI_API_URL
+	// RelayContainerName is the relay container on THIS host (spec.relay.containerName),
+	// used only so this bank's noc-agent can collect the relay's logs. Empty → no relay
+	// logs in the NOC.
+	RelayContainerName string
 	NOCBackendURL   string // where this bank's noc-agent pushes (spec.noc.backendURL; default host.docker.internal:8090)
 	BesuImage       string
 	GatewayURL      string

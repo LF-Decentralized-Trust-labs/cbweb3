@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { authApi } from "../services/api";
+import { setSessionExpiredHandler } from "../services/api/token";
 import type { AsyncStatus, SysAdminUser } from "../types";
 
 type AuthState = {
@@ -48,3 +49,16 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 }));
+
+// When renewal is no longer possible the API layer reports the session as over; dropping
+// isAuthenticated makes ProtectedRoute send the operator to /login instead of leaving the
+// portal showing stale data behind failing requests.
+setSessionExpiredHandler(() => {
+  useAuthStore.setState({
+    user: null,
+    isAuthenticated: false,
+    initialized: true,
+    status: "idle",
+    error: "Session expired. Sign in again.",
+  });
+});

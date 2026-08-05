@@ -172,12 +172,49 @@ func (r *ComponentsRepository) CaptureLogSnapshot(componentID uuid.UUID, trigger
 	return r.db.Create(snap).Error
 }
 
-// MarkAllComponentsUnknown transitions components of unreachable agents to UNKNOWN.
-func (r *ComponentsRepository) MarkComponentsUnknownForAgent(agentID uuid.UUID) error {
-	return r.db.
+// MarkComponentsUnknownForAgent transitions an unreachable agent's components to UNKNOWN
+// and returns them as they were BEFORE the update, so the caller can evaluate the
+// transition and alert on the blind spot. Returning the previous status is the point: an
+// agent that stopped pushing means the platform no longer knows the health of everything
+// it was watching, and that has to be visible as an alert rather than a quiet status flip.
+func (r *ComponentsRepository) MarkComponentsUnknownForAgent(agentID uuid.UUID) ([]domain.NocComponent, error) {
+	var before []domain.NocComponent
+	if err := r.db.Where("agent_id = ?", agentID).Find(&before).Error; err != nil {
+		return nil, err
+	}
+	if len(before) == 0 {
+		return nil, nil
+	}
+	if err := r.db.
 		Model(&domain.NocComponent{}).
 		Where("agent_id = ? AND health_status != 'UNKNOWN'", agentID).
-		Update("health_status", "UNKNOWN").Error
+		Update("health_status", "UNKNOWN").Error; err != nil {
+		return nil, err
+	}
+
+	// Record the transition in the health history, exactly as a push would. This is not
+	// bookkeeping: prevStatus on the push path is read from the health events, so without
+	// an UNKNOWN event the first healthy push after recovery sees HEALTHY→HEALTHY, takes
+	// the no-change path, and never resolves the alerts raised for the blind spot.
+	now := time.Now()
+	events := make([]domain.NocHealthEvent, 0, len(before))
+	for _, comp := range before {
+		if comp.HealthStatus == "UNKNOWN" {
+			continue // already recorded on an earlier tick
+		}
+		events = append(events, domain.NocHealthEvent{
+			ComponentID: comp.ID,
+			Status:      "UNKNOWN",
+			OccurredAt:  now,
+			ReceivedAt:  now,
+		})
+	}
+	if len(events) > 0 {
+		if err := r.db.Create(&events).Error; err != nil {
+			return before, fmt.Errorf("components: recording unknown transition: %w", err)
+		}
+	}
+	return before, nil
 }
 
 // HealthHistory returns recent health events for a component.

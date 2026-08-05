@@ -33,9 +33,9 @@
 5. [Screens](#5-screens)
    - 5.1 [Dashboard (`/`)](#51-dashboard-)
    - 5.2 [Audit Vault (`/audit`)](#52-audit-vault-audit)
-   - 5.3 [Investigations (`/investigation`)](#53-investigations-investigation)
-   - 5.4 [Participant Management (`/participants`)](#54-participant-management-participants)
-   - 5.5 [Stability Controls (`/stability`)](#55-stability-controls-stability)
+   - 5.3 [Investigation (`/investigation`)](#53-investigation-investigation)
+   - 5.4 [Compliance Registry (`/participants`)](#54-compliance-registry-participants)
+   - 5.5 [Settlement Health (`/stability`)](#55-settlement-health-stability)
    - 5.6 [Settings (`/settings`)](#56-settings-settings)
 6. [Typical workflows](#6-typical-workflows)
 7. [Status reference](#7-status-reference)
@@ -58,9 +58,9 @@ The portal exposes six screens:
 |---|---|---|
 | Dashboard | `/` | Network KPIs and live HTLC settlement table |
 | Audit Vault | `/audit` | Credential verification, transaction decryption, audit log review |
-| Investigations | `/investigation` | Open, co-sign, and look up disclosure requests |
-| Participant Management | `/participants` | Compliance registry — read-only participant list |
-| Stability Controls | `/stability` | HTLC expiry risk and active alert counts |
+| Investigation | `/investigation` | Open, co-sign, and look up disclosure requests |
+| Compliance Registry | `/participants` | Compliance registry — read-only participant list |
+| Settlement Health | `/stability` | HTLC expiry risk and active alert counts |
 | Settings | `/settings` | Session-scoped operational preferences |
 
 ---
@@ -76,7 +76,7 @@ The portal exposes six screens:
 Supervisors cannot mint tokens, burn tokens, or initiate settlements. The only
 write actions available are:
 
-- Opening or co-signing a disclosure request (Investigations screen).
+- Opening or co-signing a disclosure request (Investigation screen).
 - Submitting a transaction decryption request (Audit Vault screen).
 - Saving session-level preferences (Settings screen).
 
@@ -104,9 +104,12 @@ Dashboard.
 > backend accepts any locally-configured credentials. Production Keycloak OIDC
 > enforcement is not yet active. Do not treat this login as a security boundary.
 
-Session credentials are held in memory only. There is no `localStorage` or
-`sessionStorage` persistence for sensitive data. Closing or refreshing the
-browser tab clears the session.
+Session credentials are never written to `localStorage` or `sessionStorage`;
+the session is held in an HttpOnly cookie set by the backend. Refreshing the
+browser tab does **not** end the session — on reload the portal automatically
+restores it from the HttpOnly session cookie (via `/api/v1/auth/me`). You are
+returned to the login screen only when the session/refresh token expires or you
+explicitly log out.
 
 ---
 
@@ -145,6 +148,8 @@ Displays all active and recent HTLC contracts retrieved from the backend.
 | Column | Description |
 |---|---|
 | Contract ID | Unique identifier for the HTLC contract (truncated; click to copy the full value) |
+| Sender | The originating party (institution name and/or on-chain address) |
+| Receiver | The receiving party (institution name and/or on-chain address) |
 | Hash Lock | The cryptographic hash commitment securing the HTLC (truncated; click to copy) |
 | Zeto Ref | The Paladin/Zeto privacy-token lock reference (truncated; click to copy) |
 | Expires | Timestamp at which the time-lock expires and a refund becomes claimable |
@@ -167,7 +172,7 @@ The Audit Vault is a three-panel forensic screen:
 
 1. **Credential Verification** — look up a participant's KYC status by subject
    identifier.
-2. **Compliance and Audit Vault** — decrypt a shielded transaction using a
+2. **Compliance & Audit Vault** — decrypt a shielded transaction using a
    regulatory view key.
 3. **Immutable Audit Logs** — paginated, filterable log of all governance
    actions recorded by the backend.
@@ -243,11 +248,11 @@ requests — is recorded here and is non-repudiable.
 
 ---
 
-### 5.3 Investigations (`/investigation`)
+### 5.3 Investigation (`/investigation`)
 
 ![Supervisor Investigation](../img/scenario-a/supervisor/04-investigation.png)
 
-The Investigations screen manages the **disclosure request workflow** — the
+The Investigation screen manages the **disclosure request workflow** — the
 multi-party sign-off process required to legally compel disclosure of shielded
 transaction details under AML/CFT or court-order authority.
 
@@ -311,7 +316,7 @@ Look up the current state and quorum progress of any disclosure request.
 
 ---
 
-### 5.4 Participant Management (`/participants`)
+### 5.4 Compliance Registry (`/participants`)
 
 ![Compliance Participants](../img/scenario-a/supervisor/05-participants.png)
 
@@ -346,11 +351,11 @@ reinstatement is a governance function handled outside this portal.
 
 ---
 
-### 5.5 Stability Controls (`/stability`)
+### 5.5 Settlement Health (`/stability`)
 
 ![HTLC Health](../img/scenario-a/supervisor/06-htlc-health.png)
 
-The Stability Controls screen provides HTLC expiry risk monitoring and a count
+The Settlement Health screen provides HTLC expiry risk monitoring and a count
 of active stability alerts. It is intended for senior supervisors watching for
 systemic settlement risk.
 
@@ -410,7 +415,7 @@ persisted to the backend.
 1. Open the **Audit Vault** (`/audit`).
 2. In the **Credential Verification** panel, verify the credential status of
    the parties involved using their subject IDs.
-3. In the **Compliance and Audit Vault** panel, enter the transaction hash, your
+3. In the **Compliance & Audit Vault** panel, enter the transaction hash, your
    regulatory view key, and a documented reason. Click **Decrypt Transaction**.
 4. Review the decrypted amount, currency, sender, and receiver in the result
    panel.
@@ -419,7 +424,7 @@ persisted to the backend.
 
 ### Open a multi-party AML disclosure request
 
-1. Navigate to **Investigations** (`/investigation`).
+1. Navigate to **Investigation** (`/investigation`).
 2. In the **Open Disclosure Request** panel, enter the transaction reference,
    your requestor bank ID, and select the appropriate reason code.
 3. Click **Open Request** and note the returned **Request ID**.
@@ -433,7 +438,7 @@ persisted to the backend.
 
 1. Open the **Dashboard** (`/`) to see a summary of active HTLCs and pending
    settlements.
-2. Open **Stability Controls** (`/stability`) for a detailed list of HTLC
+2. Open **Settlement Health** (`/stability`) for a detailed list of HTLC
    contracts with their expiry times.
 3. Focus attention on contracts whose expiry timestamp is approaching. Coordinate
    with the relevant bank operators to ensure secrets are revealed and
@@ -441,7 +446,7 @@ persisted to the backend.
 
 ### Review the compliance registry
 
-1. Navigate to **Participant Management** (`/participants`).
+1. Navigate to **Compliance Registry** (`/participants`).
 2. Note the **Total Participants** and **Active Credentials** counts.
 3. Use the search field to locate a specific institution by name, wallet
    address, or jurisdiction code.
@@ -503,7 +508,7 @@ persisted to the backend.
 | No token issuance | The Supervisor Portal has no mint, burn, or transfer capabilities by design. |
 | View key handling | Regulatory view keys are never written to `localStorage` or `sessionStorage`; they exist in memory only for the active browser session. |
 | Audit trail | Every action — including decryption requests and registry views — is logged in the immutable audit log. |
-| Session persistence | Closing or refreshing the tab clears the in-memory session; the user must sign in again. |
+| Session persistence | The session lives in an HttpOnly cookie, not `localStorage`/`sessionStorage`. Refreshing the tab restores the session automatically via `/api/v1/auth/me`; the user is returned to login only when the session/refresh token expires or logout is invoked. |
 | Role-based access | Three roles are supported: `SUPERVISOR_ROLE`, `COMPLIANCE_OFFICER`, and `CENTRAL_BANK_ADMIN`. All currently share the same set of portal permissions. |
 
 ---
