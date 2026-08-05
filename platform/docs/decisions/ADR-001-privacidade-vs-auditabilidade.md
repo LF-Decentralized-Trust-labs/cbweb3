@@ -59,10 +59,18 @@ o decrypt/recuperação).
 
 ### Opção A — Migrar para Zeto com encryption-to-authority (`_Enc`)
 
-Adotar uma variante Zeto que cifra o payload da transação para uma autoridade
-(por exemplo `Zeto_AnonNullifierEnc` ou `Zeto_AnonEnc`), na qual cada transação
-carrega um ciphertext endereçado à chave pública de uma autoridade de auditoria,
-e construir o caminho de disclosure/decrypt correspondente.
+Adotar uma variante Zeto da família `_Enc`, na qual cada transação carrega um
+ciphertext do payload, e construir o caminho de disclosure/decrypt correspondente.
+
+**Nota de nomenclatura (a validar na PoC).** Os nomes de domínio upstream são
+`Zeto_AnonEnc` e `Zeto_AnonEncNullifier` — **não existe** `Zeto_AnonNullifierEnc`.
+Além disso, nas variantes `_Enc` "puras" o ciphertext é endereçado ao **receptor**
+via segredo compartilhado emissor-receptor, e **não** a uma autoridade de auditoria.
+A variante que habilita decifração por uma autoridade (não-repúdio) é
+`Zeto_AnonEncNullifierNonRepudiation`. A escolha do domínio precisa ser confirmada
+na PoC (passo 1) contra dois requisitos simultâneos: ciphertext endereçado à
+autoridade **e** suporte a `lock`/`transferLocked` — este último exigido porque o
+caminho HTLC do Scenario A usa o circuito `transferLocked`.
 
 **Prós**
 - Mantém a propriedade de privacidade baseada em ZKP já adotada (nulificadores,
@@ -126,8 +134,9 @@ mantendo o quórum em DB como gatilho de processo.
 
 ## Recomendação
 
-**Adotar a Opção A — migrar para Zeto com encryption-to-authority
-(`Zeto_AnonNullifierEnc`) e construir o caminho de disclosure/decrypt.**
+**Adotar a Opção A — migrar para uma variante Zeto com encryption-to-authority
+(candidato: `Zeto_AnonEncNullifierNonRepudiation`, a confirmar na PoC) e construir o
+caminho de disclosure/decrypt.**
 
 Justificativa: preserva o modelo de privacidade por ZKP que já é a direção
 arquitetural do projeto (todos os templates usam Zeto), evita concentrar
@@ -143,20 +152,37 @@ criptográfico e deve ser desenhada com a autoridade competente.
 
 ## Plano de implementação
 
-1. **Prova de conceito de domínio** — validar `Zeto_AnonNullifierEnc` em ambiente
-   local isolado: implantar o domínio, executar deposit/transfer/withdraw e
-   confirmar a emissão do ciphertext endereçado à autoridade.
+1. **Prova de conceito de domínio** — validar a variante candidata
+   (`Zeto_AnonEncNullifierNonRepudiation`) em ambiente local isolado: implantar o
+   domínio, executar deposit/transfer/withdraw e **provar dois requisitos**: (a) o
+   ciphertext é decifrável pela chave da **autoridade** (não apenas pelo receptor) e
+   (b) a variante suporta `lock`/`transferLocked`, exigido pelo caminho HTLC do
+   Scenario A. Se a variante escolhida não atender a ambos, a recomendação deve ser
+   revista antes de prosseguir.
 2. **Definição da chave de autoridade** — especificar o modelo de custódia e
    quórum da chave de auditoria (documento anexo a este ADR, com sign-off
    IDB/LNet). Decidir se a chave é única do banco central ou de quórum n-de-m.
-3. **Atualizar templates do toolkit** — trocar `Zeto_Anon` por
-   `Zeto_AnonNullifierEnc` nos três `config.yaml.tmpl`
-   (`scenario-a/provisioning/templates/*/paladin-config/*/`) e parametrizar a
-   chave pública de autoridade via manifesto.
-4. **Substituir os stubs `PaladinBypass`** — implementar `PaladinClient` real em
-   `scenario-a/backend/shared/blockchain/privacy/`, cobrindo `TransferZeto` (com
-   emissão do ciphertext) e os métodos HTLC; escrever teste falhando antes
-   (test-first) e validar hash real (não zero).
+3. **Atualizar a stack de domínio (escopo completo)** — a troca **não** se limita
+   ao nome nos templates. É necessário: (a) trocar `Zeto_Anon` pela variante
+   escolhida nos três `config.yaml.tmpl`
+   (`scenario-a/provisioning/templates/*/paladin-config/*/`, linha 53) e também nos
+   14 configs de `scenario-a/deploy/local/paladin/**` e em
+   `scenario-b/deploy/local/paladin/spoke-*/config/**`; (b) garantir que o bloco
+   `circuits` e os artefatos de prover da variante `_Enc` estão presentes na imagem
+   Paladin (hoje **não** há artefato `*_enc` no repositório); (c) implantar o novo
+   verifier g16 e os contratos de implementação da variante; (d) re-registrar a
+   variante no `ZetoFactory` (hoje `deploy_zeto_factory_test.go:140-194` registra
+   apenas `Zeto_Anon`); e (e) parametrizar a chave pública de autoridade via
+   manifesto.
+4. **Implementar o `PaladinClient` real e conectá-lo a um caminho vivo** — hoje o
+   stub `PaladinBypass` (`scenario-a/backend/shared/blockchain/privacy/paladin.go:12-28`)
+   é a única implementação de `PrivacyOperator`, mas **não é consumida por nenhum
+   serviço vivo** do Scenario A (só pelo próprio teste; ver
+   `interfaces.go:12`). Portanto o trabalho não é apenas "trocar o no-op": exige
+   implementar `PaladinClient` real cobrindo `TransferZeto` (com emissão do
+   ciphertext) e os métodos HTLC **e** cablá-lo em um caminho de transferência real
+   (o consumidor precisa ser criado). Escrever teste falhando antes (test-first) e
+   validar hash real (não zero).
 5. **Construir o caminho de decrypt** — no `OversightService`
    (`scenario-b/.../oversight_service.go`), ligar o evento
    `QUORUM_REACHED` à recuperação criptográfica efetiva do conteúdo da transação,
@@ -167,3 +193,33 @@ criptográfico e deve ser desenhada com a autoridade competente.
    `_Enc` e confirmar que os caminhos de lock/timeout/refund permanecem íntegros.
 7. **Atualizar documentação de status** — refletir a mudança nos READMEs de
    cenário e no runbook, e registrar o fechamento do finding 7.3.
+
+---
+
+## Esforço e cronograma (estimativa preliminar — a confirmar pelo time)
+
+| Fase | Escopo | Esforço estimado |
+|------|--------|------------------|
+| PoC de domínio (passo 1) | Provar ciphertext à autoridade + `transferLocked` | ~1–2 semanas-dev |
+| Governança da chave de autoridade (passo 2) | Custódia/quórum/rotação + sign-off IDB/LNet | ~1 semana-dev + sign-off (externo) |
+| Stack de domínio (passo 3) | Templates + circuits/prover + verifier/impl + re-registro no factory + deploy/local + Scenario B | ~3–4 semanas-dev |
+| `PaladinClient` real + caminho vivo (passo 4) | Implementação + wiring + testes | ~2–3 semanas-dev |
+| Decrypt no `OversightService` (passo 5) | Ligar `QUORUM_REACHED` ao disclosure real | ~2 semanas-dev |
+| Revalidação de performance/atomicidade (passo 6) | perf-baseline + E2E | ~1 semana-dev |
+
+Estimativa total: **~9–13 semanas-dev**. O passo 2 (governança da chave) é
+bloqueante para os passos 3–5. Datas-alvo a definir no planejamento de release e
+dependentes do sign-off IDB/LNet.
+
+---
+
+## Status / Sign-off
+
+| Parte | Papel | Decisão | Data |
+|-------|-------|---------|------|
+| Time de arquitetura CBWeb3 (AH/GL) | Autor | Proposto | 2026-07-23 |
+| IDB | Aprovação da governança da chave de autoridade | Pendente | — |
+| LNet | Aprovação da governança da chave de autoridade | Pendente | — |
+
+O Status permanece **Proposto** até que as linhas de sign-off acima estejam
+preenchidas com decisão e data.

@@ -13,35 +13,53 @@ O onboarding de participantes evoluiu de forma desalinhada entre duas superfíci
 o **toolkit de provisionamento (CLI)** e o **portal de governança (UI web)**.
 
 - **O bootstrap de banco central por script tornou-se obsoleto.** O toolkit
-  cobre esse fluxo de forma declarativa:
+  cobre a fundação da rede de forma declarativa:
   - `mode: found` (fundação da rede pelo banco central) e o passo
     `scenario-a/toolkit/engine/orchestrator/step_onboard_registry.go` registram o
     participante no `IdentityRegistry` on-chain durante o provisionamento, sem
-    depender de scripts imperativos de bootstrap.
-  - O onboarding é hoje **dirigido por operador** via CLI (`cbweb3 apply`),
-    referenciado em `scenario-a/samples/README.md`. Não há passo self-service pelo
-    portal.
+    depender de scripts imperativos de bootstrap. Esse caminho é **dirigido por
+    operador** via CLI (`cbweb3 apply`), referenciado em
+    `scenario-a/samples/README.md`.
+
+- **Já existe um caminho self-service iniciado pelo banco (candidato).** Ao
+  contrário do que uma leitura inicial do finding sugere, o Scenario A **entrega**
+  um fluxo self-service iniciado pela instituição candidata:
+  - Assistente de onboarding no app do banco:
+    `scenario-a/frontend/apps/bank/src/features/onboarding/OnboardingWizard.tsx`
+    (Step1–Step4) com polling de status (`hooks/useOnboardingPolling`).
+  - O API gateway opera em "smart proxy mode": lê o CSR do disco e **inicia** a
+    solicitação de credencial, encaminhando para
+    `/api/v1/onboarding/credential-request`
+    (`scenario-a/backend/services/api-gateway/internal/http/handlers/onboarding_proxy.go:62-107`).
+  - **Este caminho iniciado pelo banco é exatamente o objeto do finding A-ARCH-2**:
+    coexiste com o registro on-chain do toolkit sem um modelo-alvo acordado de quem
+    inicia e quem aprova cada passo.
 
 - **A UI de registro/emissão de credencial/CSR está comentada** em ambos os
   cenários:
   - `scenario-b/frontend/apps/governance/src/pages/RegistryPage.tsx`: o handler
-    `onIssue` está comentado (linhas 61-80) e o card "Issue Credential" com o
+    `onIssue` está comentado (linha 64) e o card "Issue Credential" com o
     formulário de emissão e o fluxo de confirmação está inteiramente comentado
-    (linhas 95-176, bloco `{/* <Card> ... </Card> */}`).
+    (linhas 132-176, bloco `{/* <Card> ... </Card> */}`).
   - `scenario-a/frontend/apps/governance/src/pages/RegistryPage.tsx` apresenta o
-    mesmo padrão (handler `onIssue` comentado na linha 61; card de emissão
-    comentado a partir da linha 95).
+    mesmo padrão (handler `onIssue` comentado na linha 61; card "Issue Credential"
+    comentado nas linhas 129-173). Neste cenário o próprio card "Compliance Registry"
+    também está comentado (linhas 95-127), ao contrário do Scenario B, onde essa
+    listagem permanece ativa.
   - O que permanece **ativo** na página é a listagem read-only ("Compliance
     Registry") e o fluxo de **"Pending KYC Approvals"** (`onApproveKyc`,
     `scenario-b/.../RegistryPage.tsx:82-94`), que aprova KYC com motivo obrigatório
     e gera entrada de auditoria.
 
-**Conclusão do contexto**: existem hoje dois caminhos parcialmente sobrepostos —
-o toolkit (operador, CLI, declarativo) faz o registro on-chain; o portal tem um
-fluxo de aprovação de KYC ativo, mas a emissão de credencial/CSR pela UI foi
-desativada (comentada). Falta uma decisão sobre qual é o **modelo-alvo de
-onboarding pelo portal** e a matriz de autorização por passo — questão levantada
-pela LNet no finding 7.2 e relevante ao modelo de governança discutido com a CEMLA.
+**Conclusão do contexto**: existem hoje **três** superfícies parcialmente
+sobrepostas — (1) o toolkit (operador, CLI, declarativo) faz o registro on-chain;
+(2) o app do banco tem um assistente self-service ativo (wizard + smart proxy que
+inicia CSR e `credential-request`); e (3) o portal de governança tem um fluxo de
+aprovação de KYC ativo, mas a emissão de credencial/CSR pela UI foi desativada
+(comentada). Falta uma decisão sobre o **modelo-alvo de onboarding** e a matriz de
+autorização por passo, **incluindo se o wizard iniciado pelo banco é mantido ou
+depreciado** — questão levantada pela LNet no finding 7.2 e relevante ao modelo de
+governança discutido com a CEMLA.
 
 ---
 
@@ -118,36 +136,110 @@ reativada como frontend do fluxo do toolkit, não como reimplementação.
 
 **Matriz de autorização recomendada (a validar com IDB/LNet/CEMLA):**
 
-| Passo | Autorizado | Superfície |
-|-------|-----------|------------|
-| Submissão de solicitação de participação / CSR | Instituição candidata | Portal (self-service) |
-| Revisão e aprovação de KYC | Operador de compliance | Portal (fluxo já ativo) |
-| Emissão de credencial / registro on-chain | Governança (quórum banco central) | Portal aciona → toolkit executa |
-| Fundação da rede (`mode: found`) | Operador do banco central | CLI (`cbweb3 apply`) |
+| Passo | Autorizado | Papel on-chain (#116) | Superfície |
+|-------|-----------|------------------------|------------|
+| Submissão de solicitação de participação / CSR | Instituição candidata | — | App do banco (self-service) ¹ |
+| Revisão e aprovação de KYC | Operador de compliance | — | Portal de governança (fluxo já ativo) |
+| Registro do participante (`registerParticipant`) | Governança (quórum banco central) | `GOVERNANCE_ROLE` | Portal aciona → toolkit executa |
+| Verificação do participante (`verifyParticipant`) | Verificador designado (ator distinto) | `VERIFIER_ROLE` | Portal aciona → toolkit executa |
+| Fundação da rede (`mode: found`) | Operador do banco central | — | CLI (`cbweb3 apply`) |
+
+¹ A linha 1 mantém o caminho self-service iniciado pelo banco (o wizard já
+existente). Isso é uma **divergência** frente a um eventual modelo CEMLA-originado e
+exige sign-off explícito da CEMLA: ou o wizard é adotado como caminho oficial, ou é
+depreciado em favor de um modelo originado pela autoridade.
+
+² O PR #116 separa `registerParticipant` (`GOVERNANCE_ROLE`) de `verifyParticipant`
+(`VERIFIER_ROLE`) em `IdentityRegistry`. A matriz **deve** nomear qual papel do
+portal detém `VERIFIER_ROLE`, e esse ator deve ser distinto de quem executa o
+registro; caso contrário a separação de deveres do #116 é anulada no caminho do
+portal.
+
+### Fluxo de onboarding (iniciador e aprovador por passo)
+
+```mermaid
+sequenceDiagram
+    participant Banco as Candidata (app do banco)
+    participant GW as API Gateway (smart proxy)
+    participant Comp as Compliance (portal)
+    participant Gov as Governança/quórum CB (portal)
+    participant Verif as Verificador designado (portal)
+    participant TK as Toolkit (executor)
+    participant Reg as IdentityRegistry
+
+    Banco->>GW: Submete solicitação + CSR (self-service)
+    GW->>Comp: Encaminha para revisão de KYC
+    Comp->>Comp: Aprova KYC (motivo obrigatório + auditoria)
+    Comp->>Gov: Encaminha para autorização de emissão
+    Gov->>TK: Autoriza registro (quórum)
+    TK->>Reg: registerParticipant() [GOVERNANCE_ROLE]
+    Verif->>TK: Verifica participante (ator distinto — separação de deveres)
+    TK->>Reg: verifyParticipant() [VERIFIER_ROLE]
+    Reg-->>Banco: Credencial ativa (trilha de auditoria imutável)
+```
 
 ---
 
 ## Plano de implementação
 
-1. **Definir a matriz de autorização** — validar com IDB/LNet/CEMLA quem autoriza
-   cada passo (tabela acima), formalizando o requisito de quórum para a emissão de
-   credencial. Registrar como anexo deste ADR.
-2. **Expor o caminho do toolkit via API de gateway** — publicar uma operação
+1. **Definir a matriz de autorização e o fluxo-alvo** — validar com IDB/LNet/CEMLA
+   quem inicia e quem aprova cada passo (matriz e diagrama acima), formalizando o
+   requisito de quórum para a emissão e a decisão sobre **manter ou depreciar** o
+   wizard self-service iniciado pelo banco. Registrar como anexo deste ADR.
+2. **Alinhar com o PR #116 (separação de deveres)** — refletir na matriz e no código
+   a separação `registerParticipant` (`GOVERNANCE_ROLE`) → `verifyParticipant`
+   (`VERIFIER_ROLE`), nomeando explicitamente qual papel do portal detém
+   `VERIFIER_ROLE` e garantindo que registro e verificação sejam atores distintos.
+   O #116 deve ser mesclado **antes** de qualquer implementação deste ADR.
+3. **Expor o caminho do toolkit via API de gateway** — publicar uma operação
    autenticada (Keycloak OIDC) que aciona a lógica de `step_onboard_registry`,
    preservando a passagem obrigatória pelo compliance gate do API gateway (sem
    bypass em chamadas serviço-a-serviço).
-3. **Reconciliar o contrato `issueCredential`** — alinhar a assinatura esperada
+4. **Documentar a configuração manual de Keycloak para bancos centrais** —
+   especificar os realms/clients/roles (`GOVERNANCE_ROLE`, `VERIFIER_ROLE`, papel de
+   compliance) hoje provisionados manualmente, para que a matriz seja operável no
+   portal.
+5. **Reconciliar o contrato `issueCredential`** — alinhar a assinatura esperada
    pela UI comentada (`entityName`, `legalEntityId`, `scopes`, `reason`) com a API
-   do passo 2.
-4. **Reativar a UI de emissão** — descomentar e adaptar `onIssue` e o card "Issue
+   dos passos 2–3.
+6. **Reativar a UI de emissão** — descomentar e adaptar `onIssue` e o card "Issue
    Credential" em ambos os `RegistryPage.tsx` (Scenario A e Scenario B),
-   condicionando a ação ao papel de governança e ao motivo obrigatório já usado no
-   fluxo de KYC.
-5. **Encadear KYC → emissão** — garantir que a emissão de credencial só fique
-   disponível para participantes com KYC aprovado, ligando o fluxo `onApproveKyc`
-   existente à nova ação de emissão.
-6. **Trilha de auditoria** — assegurar entrada imutável de auditoria em cada
-   emissão (o próprio comentário da UI já promete "immutable audit entry").
-7. **Testes e documentação** — cobrir o fluxo com testes de frontend e de gateway,
-   atualizar o README de governança e o `samples/README.md` para descrever o
-   modelo portal + toolkit, e registrar o fechamento do finding 7.2.
+   condicionando a ação de registro ao `GOVERNANCE_ROLE` e a de verificação ao
+   `VERIFIER_ROLE`, com o motivo obrigatório já usado no fluxo de KYC.
+7. **Encadear KYC → registro → verificação** — garantir que a emissão só fique
+   disponível para participantes com KYC aprovado (ligando o fluxo `onApproveKyc`
+   existente), e que registro e verificação permaneçam atos distintos (separação de
+   deveres do #116).
+8. **Trilha de auditoria** — assegurar entrada imutável de auditoria em cada passo
+   (o próprio comentário da UI já promete "immutable audit entry").
+9. **Testes e documentação** — cobrir o fluxo com testes de frontend e de gateway,
+   atualizar o README de governança e o `samples/README.md` para descrever o modelo
+   portal + toolkit, e registrar o fechamento do finding 7.2.
+
+---
+
+## Esforço e cronograma (estimativa preliminar — a confirmar pelo time)
+
+| Fase | Escopo | Esforço estimado |
+|------|--------|------------------|
+| Matriz + diagrama + alinhamento #116 (passos 1–2) | Acordo de fluxo/autorização + merge #116 | ~1 semana-dev + sign-off (externo) |
+| Gateway + Keycloak (passos 3–4) | API autenticada para o toolkit + config de realms | ~2 semanas-dev |
+| UI de emissão + encadeamento (passos 5–7) | Reativar card, papéis, KYC→registro→verificação | ~2–3 semanas-dev |
+| Auditoria + testes + docs (passos 8–9) | Trilha, testes de frontend/gateway, docs | ~1–2 semanas-dev |
+
+Estimativa total: **~6–8 semanas-dev**, bloqueadas pelo merge do #116 e pelo
+sign-off da matriz. Datas-alvo a definir no planejamento de release.
+
+---
+
+## Status / Sign-off
+
+| Parte | Papel | Decisão | Data |
+|-------|-------|---------|------|
+| Time de arquitetura CBWeb3 (AH/GL) | Autor | Proposto | 2026-07-23 |
+| IDB | Aprovação da matriz de autorização | Pendente | — |
+| LNet | Aprovação da matriz de autorização | Pendente | — |
+| CEMLA | Aprovação do modelo self-service vs. originado pela autoridade | Pendente | — |
+
+O Status permanece **Proposto** até que as linhas de sign-off acima estejam
+preenchidas.

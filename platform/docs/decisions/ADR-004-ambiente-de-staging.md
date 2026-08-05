@@ -140,3 +140,43 @@ sem assumir operação de infraestrutura.
 7. **Caminho para `environment: prod`** — documentar os requisitos remanescentes
    (custódia de chaves, CAs dos bancos centrais, hardening) e registrar o
    fechamento do finding 12.5.
+
+---
+
+## Escopo desta decisão e relação com T-P1-28
+
+Este ADR decide a **topologia e a divisão de responsabilidades** de staging — é o
+precursor de **go/no-go de topologia (Day-5)**, não a entrega de T-P1-28. A tarefa
+T-P1-28 (K8s multi-região persistente com reconciliação, mTLS e onboarding CEMLA
+operantes, mais runbook de staging) é **implementação** subsequente a esta decisão e
+**permanece aberta**. As CRDs do operador Paladin em
+`scenario-b/deploy/local/paladin/contracts/` são um ativo para o trabalho de charts
+(passo 4).
+
+---
+
+## Esforço e cronograma (estimativa preliminar — a confirmar pelo time)
+
+| Fase | Escopo | Esforço estimado |
+|------|--------|------------------|
+| Acordo de topologia + responsabilidades (passos 1–2) | Coordenação com LNet | ~1 semana + agenda LNet (externo) |
+| FASE 4 do toolkit (passo 3) | KMS/CA reais + `environment: staging`/`prod` | ~4–6 semanas-dev |
+| Charts/manifestos K8s (passo 4) | Helm/manifestos parametrizados por região | ~3–4 semanas-dev |
+| Promoção via manifesto + piloto (passos 5–6) | Validação + deploy piloto multi-região | ~2–3 semanas-dev + agenda LNet |
+| Caminho para prod (passo 7) | Documentação de hardening/custódia | ~1 semana-dev |
+
+Estimativa total: **~10–14 semanas-dev**, dependentes do acordo de topologia com a
+LNet. Datas-alvo a definir em conjunto com a LNet.
+
+---
+
+## Status / Sign-off
+
+| Parte | Papel | Decisão | Data |
+|-------|-------|---------|------|
+| Time de arquitetura CBWeb3 (AH/GL) | Autor | Proposto | 2026-07-23 |
+| LNet | Acordo de topologia e operação de staging | Pendente | — |
+| IDB | Ciência da divisão de responsabilidades | Pendente | — |
+
+O Status permanece **Proposto** até que o acordo de topologia com a LNet esteja
+registrado.
