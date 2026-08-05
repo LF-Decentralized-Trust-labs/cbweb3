@@ -11,8 +11,8 @@
 > In Scenario B the responsibilities of the treasury team are narrower than in Scenario A.
 > Cross-border governance actions — circuit-breaker activation, FX-agreement management,
 > multi-party approvals — are handled in the **Governance Portal**. The Treasury Portal
-> focuses on the domestic token lifecycle (issuance, tokenisation, redemption), transfer
-> policy, liquidity provision, and audit.
+> focuses on the domestic token lifecycle (issuance, tokenisation, redemption), liquidity
+> pool monitoring, cooperative liquidity provisioning, and audit.
 
 ---
 
@@ -23,11 +23,11 @@
 3. [Navigation](#3-navigation)
 4. [Screens](#4-screens)
    - [Dashboard](#41-dashboard)
-   - [Deposits Approval — Issuance Requests](#42-deposits-approval--issuance-requests)
-   - [Escrows Approval — Tokenisation Requests](#43-escrows-approval--tokenisation-requests)
-   - [Redeems Approval — Redemption Requests](#44-redeems-approval--redemption-requests)
+   - [Issuance Approvals](#42-issuance-approvals)
+   - [Tokenisation Approvals](#43-tokenisation-approvals)
+   - [Redeem Approvals](#44-redeem-approvals)
    - [Liquidity Management](#45-liquidity-management)
-   - [Transfer Limits](#46-transfer-limits)
+   - [Liquidity Provisioning](#46-liquidity-provisioning)
    - [Audit](#47-audit)
    - [Settings](#48-settings)
 5. [Typical Workflows](#5-typical-workflows)
@@ -40,8 +40,8 @@
 
 The Treasury Portal is the central bank's operational workbench for managing the tCeBM
 (tokenised Central Bank Money) lifecycle on a spoke network within the International Hub
-architecture. It covers three approval queues, AMM liquidity management, daily transfer
-limit administration, and a structured audit log.
+architecture. It covers three approval queues, read-only liquidity pool monitoring,
+cooperative liquidity provisioning, and a structured audit log.
 
 The Governance Portal handles cross-cutting decisions that affect multiple central banks or
 that require multi-party signatures. The table below summarises the division of responsibilities.
@@ -51,9 +51,8 @@ that require multi-party signatures. The table below summarises the division of 
 | Approve / reject fiat-backed issuance requests | Yes | No |
 | Approve / reject tCeBM tokenisation (lock-to-mint) | Yes | No |
 | Approve / reject tCeBM redemption (burn-to-release) | Yes | No |
-| Set and remove daily transfer limits | Yes | No |
-| Contribute / withdraw AMM liquidity | Yes | No |
-| Monitor hub pool and FX state | Yes (read-only summary) | Full controls |
+| Provision liquidity pools (propose / confirm pairs, seed reserves) | Yes | No |
+| Monitor hub pool and circuit-breaker state | Yes (read-only) | Full controls |
 | Circuit-breaker (halt / resume swaps) | No | Yes |
 | FX-agreement approval | No | Yes |
 | Identity / compliance governance | No | Yes |
@@ -71,8 +70,8 @@ The login form requires two fields:
 
 | Field | Description |
 |---|---|
-| Client ID | The Keycloak client ID assigned to this treasury institution (e.g. `central-bank-a-treasury`). |
-| Client Secret | The corresponding client secret. |
+| Username | The Keycloak client ID assigned to this treasury institution (e.g. `central-bank-a-treasury`). Minimum three characters. |
+| Password | The corresponding client secret. Minimum six characters. |
 
 Credentials are validated against Keycloak. A successful authentication redirects to the
 Dashboard. Access to every route and every approval action requires the `TREASURY` role
@@ -93,14 +92,16 @@ After login, the application shell presents a sidebar with the following items:
 
 | Sidebar label | Route | Description |
 |---|---|---|
-| Dashboard | `/` | Overview of balances, pending queues, pool state, and live events |
-| Deposits Approval | `/deposits-approval` | Issuance request queue |
-| Escrows Approval | `/escrows-approval` | Tokenisation request queue |
-| Redeems Approval | `/redeems-approval` | Redemption request queue |
-| Liquidity | `/liquidity` | AMM pool status and cooperative liquidity management |
-| Transfer Limits | `/transfer-limits` | Daily transfer limit administration |
+| Dashboard | `/` | Overview of balance, pending queues, recent operations, and a seven-day activity chart |
+| Issuance Approvals | `/deposits-approval` | Issuance request queue |
+| Tokenisation Approvals | `/escrows-approval` | Tokenisation request queue |
+| Redeem Approvals | `/redeems-approval` | Redemption request queue |
+| Liquidity Management | `/liquidity` | Read-only monitoring of the pools this central bank provisions |
+| Liquidity Provisioning | `/liquidity-provisioning` | Currency registry, pair proposal / confirmation, and sovereign pool seeding |
 | Audit | `/audit` | Structured audit log |
 | Settings | `/settings` | Security profile reference |
+
+The sidebar links appear in the order shown above.
 
 Unauthenticated requests to any protected route are redirected to `/login`. All other
 unrecognised paths redirect to the Dashboard.
@@ -117,63 +118,39 @@ The Dashboard provides a real-time overview of the treasury position and pending
 It is the first screen seen after login and the primary situational-awareness view.
 
 ![Dashboard](../img/scenario-b/treasury/02-dashboard.png)
+<!-- SCREENSHOT-UPDATE: ../img/scenario-b/treasury/02-dashboard.png — Dashboard redesigned: circuit-breaker banner, hub pool/FX panel and event stream removed; a seven-day transactions chart added. -->
 
-**Identity card.** The top card shows the authenticated institution name (sourced from
-`VITE_INSTITUTION_NAME` or the Keycloak user profile), the wallet address (truncated), the
-user role, and an **Authorised issuer** badge when applicable.
-
-**Circuit-breaker banner.** Immediately below the identity card, a banner shows the current
-hub circuit-breaker state for the configured pool pair. The banner border turns red when
-the pool is halted.
-
-| Banner state | Meaning |
-|---|---|
-| LIVE | The AMM pool is open; commercial swaps can execute. |
-| HALTED | Swaps are suspended. Contact the Governance Portal operator to investigate the pause reason shown. |
-| RESUME PENDING | A resume request has been submitted but requires additional signatures. |
-| UNKNOWN | Circuit-breaker status could not be retrieved from the backend. |
-
-> Halting or resuming the circuit breaker is performed in the **Governance Portal**, not here.
+**Identity card.** The top card greets the authenticated institution ("Welcome, ...", sourced
+from `VITE_INSTITUTION_NAME`, the Keycloak institution ID, or the user name), and shows the
+truncated wallet address, the user role, and an **Authorised issuer** badge when applicable.
 
 **KPI row.** Four summary cards show:
 
 - tCeBM balance of the treasury wallet.
-- Number of pending Issuance approval requests.
-- Number of pending Tokenisation approval requests.
-- Number of pending Redemption approval requests.
+- Number of pending Issuance approvals.
+- Number of pending Tokenisation approvals.
+- Number of pending Redemption approvals.
 
-**Hub Pool and FX panel.** Displays the current pool state for the configured pair:
-
-| Field | Description |
-|---|---|
-| FX rate (ratio) | Current reserve ratio, used as the indicative exchange rate. |
-| Reserve A / Reserve B | Token reserves on each side of the AMM pool. |
-| LP providers | Total number of liquidity providers. |
-| Your pool share | The treasury institution's percentage ownership of the pool. |
-| Your LP shares | The number of CBW3-LP shares held by this institution. |
-| Pending commits | Number of liquidity commits awaiting counterpart matching. |
-
-An **Imbalanced** badge appears when the backend reports a reserve imbalance.
+**Transactions (7 days).** A bar chart of daily activity over the last seven days, counting
+this spoke's own operations (issuances, tokenisations, and redemptions) by their creation date.
 
 **Recent Operations table.** Shows the eight most recent operations across all three queues
 (Issuance, Tokenisation, Redemption), sorted by creation time descending. Columns: Type,
-Requester, Amount, Status.
-
-**Real-time Event Stream.** Displays the latest events received via WebSocket connection.
-Each event shows its type, severity (INFO / CRITICAL), and message. This stream reflects
-on-chain and service-layer events as they occur.
+Requester, Amount, Status. When there is no activity, the table shows "No operations yet."
 
 ---
 
-### 4.2 Deposits Approval — Issuance Requests
+### 4.2 Issuance Approvals
 
+**Sidebar label:** Issuance Approvals
 **Route:** `/deposits-approval`
 
 This screen manages requests from commercial bank participants to obtain fiat-backed tCeBM
 (the "Issuance" or "Deposit" flow). When a participant deposits fiat reserves and requests
 a corresponding tCeBM mint, the request appears here for treasury approval.
 
-![Deposits Approval](../img/scenario-b/treasury/03-deposits.png)
+![Issuance Approvals](../img/scenario-b/treasury/03-deposits.png)
+<!-- SCREENSHOT-UPDATE: ../img/scenario-b/treasury/03-deposits.png — Sidebar relabeled (Issuance Approvals) and a Liquidity Provisioning item added; recapture so the navigation matches the current build. -->
 
 **Summary cards.** Show the total number of issuance requests and the number currently in
 `PENDING` status.
@@ -213,8 +190,9 @@ in either card dismisses it without taking action.
 
 ---
 
-### 4.3 Escrows Approval — Tokenisation Requests
+### 4.3 Tokenisation Approvals
 
+**Sidebar label:** Tokenisation Approvals
 **Route:** `/escrows-approval`
 
 This screen handles tokenisation requests — the cross-currency flow where a participant
@@ -222,7 +200,8 @@ burns tokens on one spoke network (Redemption leg) and mints tokens on a destina
 (Issuance leg) via the hub. Both legs are coordinated atomically; approving an escrow
 triggers both the on-chain burn (Redemption tx hash) and the on-chain mint (Issuance ref).
 
-![Escrows Approval](../img/scenario-b/treasury/04-escrows.png)
+![Tokenisation Approvals](../img/scenario-b/treasury/04-escrows.png)
+<!-- SCREENSHOT-UPDATE: ../img/scenario-b/treasury/04-escrows.png — Sidebar relabeled (Tokenisation Approvals) and a Liquidity Provisioning item added; recapture so the navigation matches the current build. -->
 
 **Summary cards.** Total and pending tokenisation request counts.
 
@@ -256,15 +235,17 @@ Use the **Refresh** button to reload the queue from the backend at any time.
 
 ---
 
-### 4.4 Redeems Approval — Redemption Requests
+### 4.4 Redeem Approvals
 
+**Sidebar label:** Redeem Approvals
 **Route:** `/redeems-approval`
 
 Redemption requests represent a participant returning tCeBM to the central bank in exchange
 for fiat reserves. Approving a redeem burns the participant's tCeBM via a Zeto privacy
 transfer and releases the corresponding fiat reserve.
 
-![Redeems Approval](../img/scenario-b/treasury/05-redeems.png)
+![Redeem Approvals](../img/scenario-b/treasury/05-redeems.png)
+<!-- SCREENSHOT-UPDATE: ../img/scenario-b/treasury/05-redeems.png — Sidebar relabeled (Redeem Approvals) and a Liquidity Provisioning item added; recapture so the navigation matches the current build. -->
 
 **Summary cards.** Total and pending redeem counts.
 
@@ -299,111 +280,104 @@ Use the **Refresh** button to reload the queue at any time.
 
 ### 4.5 Liquidity Management
 
+**Sidebar label:** Liquidity Management
 **Route:** `/liquidity`
 
-This screen allows the central bank to monitor and manage its position in the hub AMM pool.
-It is relevant when the treasury institution acts as a liquidity provider (LP) for cross-border
-FX swaps between two spoke currencies.
+This screen is a read-only monitor of the cross-currency pools that this central bank
+provisions. It lists only the pools whose pair includes the institution's own national
+currency (the corridors it sovereignly provisions). Provisioning actions — proposing and
+confirming pairs and seeding reserves — are performed on the separate **Liquidity
+Provisioning** screen (Section 4.6).
 
 ![Liquidity Management](../img/scenario-b/treasury/06-liquidity-management.png)
+<!-- SCREENSHOT-UPDATE: ../img/scenario-b/treasury/06-liquidity-management.png — Page redesigned into a read-only multi-pool monitor (summary cards, pool list, detail panel with circuit breaker, reserves and on-chain references). The cooperative wizard, remove-liquidity form and session LP-positions table are gone. -->
 
-The screen is organised into the following panels:
+Live pool and circuit-breaker data refresh automatically about every 15 seconds. If the
+national currency cannot be determined (for example, the balance lookup fails), the screen
+falls back to showing all pools rather than hiding everything.
 
-**Pool Status.** Shows live reserve levels, current FX ratio, and a balance indicator
-for the configured pool pair. An **Imbalanced** badge appears when reserves deviate from
-the expected range.
+**Summary cards.** Three cards at the top:
 
-**Central Bank On-Chain Position.** Displays:
-
-| Field | Description |
+| Card | Description |
 |---|---|
-| LP shares (CBW3-LP) | On-chain LP share tokens held by this institution, the source of truth for pool ownership. |
-| Pool ownership | Percentage share of total pool reserves. |
-| tCeBM balance | The institution's own tCeBM balance on the spoke chain. |
+| Pools managed | Number of pools that include this central bank's national currency. |
+| Active | Number of those pools whose status is `ACTIVE`. |
+| Paused (circuit breaker) | Number of those pools whose circuit breaker is `HALTED`. |
 
-**Sovereign Phase / Commit Status / Recommended Action.** Three summary cards showing the
-current phase of the cooperative liquidity lifecycle, the commit status, and a guidance
-message about the next recommended action.
+**Pool list.** A selectable list of the managed pools. Each entry shows the currency pair
+(e.g. `BRL ⇄ COP`), a status badge (Active, Awaiting counterpart, Empty, or Unknown), and
+the circuit-breaker state (Live or Paused). Selecting a pool opens its detail panel.
 
-**Liquidity Coordination.** Reflects cross-CB commit state read live from the hub. Three
-scenarios are possible:
+**Pool detail panel.** For the selected pool:
 
-| Scenario | Display |
-|---|---|
-| Pool is ACTIVE | Green badge; current reserve levels shown. No action required. |
-| A counterpart central bank has committed and is waiting for your matching deposit | Amber panel showing the counterpart's committed amount, the FX-suggested match amount, the signer address, and the expiry countdown. A **Match and Activate Pool** button initiates the cooperative wizard. |
-| Your own commit is pending a counterpart | Outline badge with commit ID, side, and expiry. A **Monitor Pending Commit** button opens the wizard at the monitoring step. |
-| No open intent | Informational message; no action required until a commit is needed. |
+- **Circuit breaker banner.** Shows the current breaker state for that pool. This is
+  read-only in the Treasury Portal; pausing and resuming are performed in the Governance Portal.
 
-**Cooperative Liquidity Wizard.** Clicking **Add Cooperative Liquidity** opens a guided
-multi-step wizard for committing liquidity to the pool. The wizard covers:
+  | Breaker state | Badge | Meaning |
+  |---|---|---|
+  | LIVE | Operational | Swaps are open on this pool. |
+  | HALTED | Paused | A central bank triggered the circuit breaker; swaps are suspended. The pause reason and initiator are shown when available. |
+  | RESUME_PENDING | Resume pending | A resume proposal is awaiting the 2-of-N central bank quorum. |
+  | (other) | Unknown | Circuit-breaker state is not available. |
 
-- Step 1 — Lock-Mint: lock fiat reserves and mint the corresponding tCeBM.
-- Step 2 — Commit: register the liquidity intent on the hub.
-- Step 3 — Monitor: track the commit expiry and await a counterpart match.
-
-When acting as the matching party (in response to a counterpart commit), the wizard
-pre-fills the suggested match amount derived from the current FX rate. The amount
-is editable before submission.
-
-**Remove Liquidity.** A form to withdraw an existing LP position by providing the LP ID,
-pool pair, and provider bank ID. Use the LP ID shown in the session positions table or
-obtained from the cooperative wizard response.
-
-**LP Positions (Session).** A table listing LP positions established during the current
-session. Columns: LP ID, Pool Pair, Provider, National-side tokens contributed,
-Foreign-side tokens contributed, LP shares held on-chain, Status, Added At.
-
-> **Session scope.** The LP positions table is populated from responses received during the
-> current browser session. It does not retroactively display positions from previous sessions.
-> The on-chain LP share balance in the **Central Bank On-Chain Position** card is authoritative
-> for the institution's actual pool ownership.
+- **Reserves.** A balance bar with each side's reserve amount. An **Imbalanced** badge
+  appears when the backend flags a reserve imbalance.
+- **Metrics grid.** Current ratio, fee rate, liquidity provider count, pool state, and last-updated time.
+- **On-chain references.** The AMM contract address, both token addresses (click to copy),
+  and the proposer and confirmer central bank identifiers when present.
 
 ---
 
-### 4.6 Transfer Limits
+### 4.6 Liquidity Provisioning
 
-**Route:** `/transfer-limits`
+**Sidebar label:** Liquidity Provisioning
+**Route:** `/liquidity-provisioning`
 
-Transfer limits define the maximum daily transfer volume permitted for a participant and/or
-currency on this spoke. Limits are enforced by the payment orchestrator at transfer initiation.
+This screen is where a central bank provisions cross-currency liquidity: it registers pairs
+on the hub and seeds pool reserves. Signing is performed by this central bank's own gateway;
+each institution acts only on its own side (sovereign provisioning).
 
-![Transfer Limits](../img/scenario-b/treasury/07-transfer-limits.png)
+<!-- SCREENSHOT-NEW: ../img/scenario-b/treasury/09-liquidity-provisioning.png — Registered Currencies table, Propose Pair, Confirm Pair, and Seed Liquidity (sovereign) cards. -->
 
-**Creating a new limit.**
+**Registered Currencies.** A table of the national currencies registered on the hub currency
+registry. Columns: Symbol, Country, Token Address, Proposer CB. A **Refresh** button reloads
+the list.
 
-Fill in one or more of the following fields and click **Create limit**:
+**Propose Pair.** Creates a new AMM pair from two registered currencies.
 
-| Field | Required | Description |
-|---|---|---|
-| Participant ID | No | Restricts the limit to a specific participant (e.g. `bank-a`). Leave blank to apply to all participants. |
-| Currency | No | Restricts the limit to a specific currency (e.g. `BRL`). Leave blank to apply to all currencies. |
-| Daily Max Amount | Yes | Maximum transfer volume per calendar day, expressed in base units (e.g. `1000000`). |
+1. Select **Currency A** and **Currency B** from the registered currencies.
+2. The **Pair ID**, both token addresses, and the **Proposer CB** are derived automatically
+   (the proposer CB is taken from Currency A). These derived values are shown for reference.
+3. Click **Propose Pair**. The gateway deploys a dedicated per-pair AMM bound to the two
+   tokens; there is no operator-supplied AMM address. A confirmation shows the resulting pair
+   ID, status, and the AMM address when returned.
 
-> At least the Daily Max Amount must be provided. A limit with both Participant ID and Currency
-> blank applies broadly to all participants and currencies — use with care.
+**Confirm Pair.** Confirms a pair that is still awaiting confirmation.
 
-**Active Limits table.** Lists all currently configured limits:
+1. Select a proposed pair from the drop-down. Only pairs in `PROPOSED` or `PENDING` status appear.
+2. The **Confirmer CB** is derived from the pair's token B currency and shown for reference.
+3. Click **Confirm Pair**. A confirmation shows the pair ID, status, and transaction hash.
 
-| Column | Description |
-|---|---|
-| Participant | The restricted participant ID, or "all" when no participant restriction is set. |
-| Currency | The restricted currency code, or "all" when no currency restriction is set. |
-| Daily Max (human) | The configured limit in human-readable form. |
-| Created | Date the limit was created. |
-| (Remove button) | Immediately deletes the limit. There is no confirmation prompt. |
+**Seed Liquidity (sovereign).** Funds a pool's reserves through an escrow-and-finalize flow.
+Each central bank deposits only its own currency; its side is auto-detected from the pair.
 
-Removing a limit takes effect immediately. The payment orchestrator will no longer enforce
-the removed rule from the next transfer attempt onward.
+1. Select a **Pool Pair** and enter an **Amount** in whole tokens of your currency (converted
+   to 18-decimal base units on submit).
+2. Click **Deposit My Side** to escrow your side. The escrow status panel shows whether Side A
+   and Side B are deposited and whether the pool is finalized.
+3. When both sides are escrowed, anyone may click **Finalize Pool** to fund the pool reserves
+   atomically (shares for both sides are reported on success).
+4. Before finalize, you may click **Reclaim My Side** to withdraw your own pending deposit.
 
 ---
 
 ### 4.7 Audit
 
+**Sidebar label:** Audit
 **Route:** `/audit`
 
-The Audit screen provides a filterable log of treasury-relevant events recorded by the
-backend. This is the primary tool for regulatory review and incident investigation.
+The Audit screen (titled "Audit Logs") provides a filterable log of treasury-relevant events
+recorded by the backend. This is the primary tool for regulatory review and incident investigation.
 
 ![Audit](../img/scenario-b/treasury/08-audit.png)
 
@@ -433,11 +407,27 @@ request is in flight. Any backend error is displayed below the table.
 
 ---
 
+### 4.8 Settings
+
+**Sidebar label:** Settings
+**Route:** `/settings`
+
+The Settings screen (titled "Security Settings") is a read-only reference to the portal's
+operational security profile. It has no editable fields. Three sections are shown:
+
+| Section | Content |
+|---|---|
+| RBAC | Route and action guards require the `TREASURY` role claim. |
+| Credential Policy | Mint operations require an approved funding request and valid issuer credentials. |
+| Session Handling | No local storage or session storage is used for authentication tokens or sensitive payloads. |
+
+---
+
 ## 5. Typical Workflows
 
 ### 5.1 Processing a fiat deposit and issuing tCeBM
 
-1. Navigate to **Deposits Approval**.
+1. Navigate to **Issuance Approvals**.
 2. Review the pending issuance request: verify the requester identity and fiat amount.
 3. If the deposit is valid: click **Approve Issuance**, then **Confirm Action**.
    The payment orchestrator triggers the on-chain mint; the status moves to `APPROVED`.
@@ -446,7 +436,7 @@ request is in flight. Any backend error is displayed below the table.
 
 ### 5.2 Processing a cross-border tokenisation (escrow)
 
-1. Navigate to **Escrows Approval**.
+1. Navigate to **Tokenisation Approvals**.
 2. Review the pending tokenisation request: verify the requester, the tCeBM amount,
    and the associated Redemption and Issuance transaction references.
 3. If the request is valid: click **Approve**, then **Confirm Approve**.
@@ -456,7 +446,7 @@ request is in flight. Any backend error is displayed below the table.
 
 ### 5.3 Processing a tCeBM redemption
 
-1. Navigate to **Redeems Approval**.
+1. Navigate to **Redeem Approvals**.
 2. Review the pending redeem: verify the requester identity, the tCeBM amount, and the
    Zeto transfer transaction hash.
 3. If the redemption is valid: click **Approve**, then **Confirm Approve**.
@@ -464,28 +454,24 @@ request is in flight. Any backend error is displayed below the table.
    transaction hash appears in the success notification.
 4. If the redemption should be declined: click **Reject**, enter the reason, click **Confirm Reject**.
 
-### 5.4 Seeding the AMM pool (cooperative liquidity provision)
+### 5.4 Provisioning and seeding a cross-currency pool
 
-1. Coordinate with the counterpart central bank on the planned contribution amounts
-   and timing, using off-system communication as needed.
-2. Navigate to **Liquidity Management**.
-3. If you are initiating: click **Add Cooperative Liquidity** and follow the wizard steps
-   — Lock-Mint, then Commit. Once submitted, the Liquidity Coordination panel shows
-   "Waiting for counterpart" with the expiry countdown.
-4. If a counterpart has already committed: the amber banner appears automatically.
-   Click **Match and Activate Pool** and follow the wizard. Review the pre-filled
-   suggested match amount (editable) and complete the Lock-Mint then Commit steps.
-5. When both sides have committed, the pool status moves to **ACTIVE** and commercial
-   swaps can proceed.
+1. Coordinate with the counterpart central bank on the currencies and contribution amounts,
+   using off-system communication as needed.
+2. Navigate to **Liquidity Provisioning**.
+3. Confirm both currencies appear in the **Registered Currencies** table.
+4. Under **Propose Pair**, select Currency A and Currency B; the pair ID, token addresses, and
+   proposer CB are derived automatically. Click **Propose Pair** to deploy the per-pair AMM.
+5. The counterparty central bank selects the proposed pair under **Confirm Pair** and clicks
+   **Confirm Pair**.
+6. Under **Seed Liquidity (sovereign)**, each central bank selects the pool pair, enters the
+   amount in whole tokens of its own currency, and clicks **Deposit My Side**. Your side is
+   auto-detected from the pair. Use **Reclaim My Side** to withdraw a pending deposit before finalize.
+7. Once both sides show as deposited, click **Finalize Pool** to fund the reserves atomically.
+8. Monitor the resulting pool on the **Liquidity Management** screen, where its status moves to
+   `ACTIVE` and commercial swaps can proceed.
 
-### 5.5 Setting a daily transfer limit
-
-1. Navigate to **Transfer Limits**.
-2. Enter the participant ID (optional), currency (optional), and daily maximum amount.
-3. Click **Create limit**. The new limit appears in the Active Limits table immediately.
-4. To remove a limit, click **Remove** on the corresponding row. Removal takes effect immediately.
-
-### 5.6 Investigating a suspicious event
+### 5.5 Investigating a suspicious event
 
 1. Navigate to **Audit**.
 2. Set the **Severity** filter to **CRITICAL** or **WARNING** to surface high-priority events.
@@ -533,38 +519,38 @@ Common causes:
 Refresh the queue and retry. If the error persists, escalate to the platform operator
 with the error text and the request ID.
 
-### The circuit-breaker banner shows HALTED
+### A pool circuit breaker shows Paused (HALTED)
 
-Swaps are suspended by a governance action. This is not a treasury action — contact the
-operator responsible for the **Governance Portal** to review the pause reason and initiate
-the resume process. The circuit-breaker state is read-only in the Treasury Portal.
+On the **Liquidity Management** screen, the selected pool's circuit-breaker banner shows
+"Paused" when swaps are suspended by a governance action. This is not a treasury action —
+contact the operator responsible for the **Governance Portal** to review the pause reason and
+initiate the resume process. The circuit-breaker state is read-only in the Treasury Portal.
 
 ### Pool shows "Imbalanced"
 
-The AMM reserves have diverged from the expected ratio. Navigate to **Liquidity Management**
-for details on current reserve levels. If your institution is an LP, coordinate with the
-counterpart central bank through the cooperative liquidity workflow to rebalance. If the
-imbalance is caused by a recent large swap, it may self-correct as subsequent swaps trade
-in the opposite direction.
+The AMM reserves have diverged from the expected ratio. Open the pool on the **Liquidity
+Management** screen for current reserve levels. If the imbalance is caused by a recent large
+swap, it may self-correct as subsequent swaps trade in the opposite direction. Additional
+reserves can be seeded on the **Liquidity Provisioning** screen.
 
-### The LP Positions table is empty after adding liquidity
+### A proposed pair does not appear under Confirm Pair
 
-The LP positions table is session-scoped. If the page was reloaded or the session ended
-after the liquidity addition, the table will not repopulate from history. The
-**Central Bank On-Chain Position** card shows your actual LP share balance sourced directly
-from the AMM contract and is the authoritative view of pool ownership.
+The **Confirm Pair** drop-down lists only pairs still in `PROPOSED` or `PENDING` status. If a
+pair is missing, click **Refresh** on the Registered Currencies card to reload registry data,
+and confirm the proposal transaction succeeded on the proposing side.
 
-### Transfer limit creation fails
+### Finalize Pool is disabled
 
-Ensure the **Daily Max Amount** field contains a valid numeric value in base units (no
-currency symbols, no decimal separators other than a period). The field cannot be blank.
+The **Finalize Pool** button is enabled only once both sides of the pool have been escrowed.
+Confirm the escrow status panel shows Side A and Side B as deposited, and that the pool is not
+already finalized.
 
 ### Login fails
 
-Verify that the Client ID and Client Secret are correct for this institution. Client IDs
-must be at least three characters; secrets at least six. If credentials are correct but
-login still fails, the Keycloak service may be temporarily unavailable — contact the
-platform administrator.
+Verify that the Username and Password are correct for this institution. The username (Keycloak
+client ID) must be at least three characters; the password (client secret) at least six. If
+credentials are correct but login still fails, the Keycloak service may be temporarily
+unavailable — contact the platform administrator.
 
 ### Audit log does not load
 

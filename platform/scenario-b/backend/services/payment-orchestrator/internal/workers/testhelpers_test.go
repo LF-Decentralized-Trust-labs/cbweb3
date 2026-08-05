@@ -17,39 +17,54 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// testDBSeq keeps the per-test database name unique even when the same test name repeats (subtests,
-// -count>1).
-var testDBSeq atomic.Int64
+// testDBCounter guarantees a globally unique in-memory database name even when
+// two tests share a sanitized name or run concurrently.
+var testDBCounter atomic.Uint64
 
+// newTestDB returns a fully isolated, freshly migrated SQLite database for a
+// single test.
+//
+// Isolation is enforced on two axes:
+//   - A unique shared-cache in-memory DSN per test (mode=memory&cache=shared
+//     with a name derived from the test name + a monotonic counter). Shared
+//     cache means every pooled connection sees the same database, so a query
+//     never lands on a fresh, empty connection — the root cause of the
+//     intermittent "no such table: relayer_queue_items" under -coverpkg /
+//     -covermode=atomic. A per-test name prevents cross-test state leakage.
+//   - The connection pool is pinned to a single connection. A shared-cache
+//     in-memory database is destroyed when its last connection closes, so
+//     pinning MaxOpenConns/MaxIdleConns to 1 keeps the migrated schema alive
+//     for the whole test and removes any pool-ordering nondeterminism.
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	// An in-memory SQLite database belongs to its CONNECTION. With cache=private the pool can open a
-	// second connection, which is a DIFFERENT, empty database — so AutoMigrate runs on one and the
-	// worker's query lands on another, failing with "no such table: relayer_queue_items". That made
-	// TestRelayerWorker_RunProcessesAndStops flaky (2 failures in 3 runs): the worker queries from its
-	// own goroutine, which is exactly when a second connection is opened.
-	//
-	// cache=shared fixes that, but a shared cache is keyed by NAME — with a fixed name every test in
-	// the package would share one database and collide on unique constraints (which is what happened
-	// on the first attempt at this fix). So the name is unique per test, giving an isolated database
-	// that all of that pool's connections can see.
-	//
-	// The pool is pinned to one connection as well: a shared-cache in-memory database is destroyed
-	// when its LAST connection closes, so pool churn could otherwise drop it mid-test.
-	dsn := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared",
-		strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()), testDBSeq.Add(1))
+
+	safeName := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		default:
+			return '_'
+		}
+	}, t.Name())
+	dsn := fmt.Sprintf("file:memdb_%s_%d?mode=memory&cache=shared", safeName, testDBCounter.Add(1))
+
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+
 	sqlDB, err := db.DB()
 	if err != nil {
-		t.Fatalf("sql db: %v", err)
+		t.Fatalf("get sql.DB: %v", err)
 	}
+	// Keep the shared-cache in-memory database alive for the test's lifetime
+	// and eliminate pool-ordering flakiness.
 	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
+
 	if err := db.AutoMigrate(&podmain.BridgedAssetPosition{}, &podmain.RelayerQueueItem{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -91,13 +106,49 @@ func (f *fakeExecutor) SubmitBurnEvent(_ context.Context, _, positionID string) 
 var _ RelayerEventExecutor = (*fakeExecutor)(nil)
 
 // fakeFXRepo implements ports.FXAgreementRepository for worker tests.
+//
+// `expired`, `listErr`, `updateErr` and `auditErr` are scripted before the
+// worker starts and only read afterwards, so they need no synchronization.
+//
+// `updated` and `auditEvents` are appended to from whichever goroutine drives
+// the worker, so they are guarded by mu and must never be read directly by a
+// test — go through numUpdated, snapshotUpdated or snapshotAuditEvents. Routing
+// every read through an accessor keeps the package -race clean whether a test
+// calls runOnce inline or polls a worker started in its own goroutine.
 type fakeFXRepo struct {
-	expired     []*podmain.FXAgreementRecord
-	listErr     error
-	updateErr   map[string]error // tradeID -> err
+	expired   []*podmain.FXAgreementRecord
+	listErr   error
+	updateErr map[string]error // tradeID -> err
+	auditErr  error
+
+	mu          sync.Mutex
 	updated     []*podmain.FXAgreementRecord
 	auditEvents []*podmain.FXAgreementEvent
-	auditErr    error
+}
+
+// numUpdated returns the count of recorded updates under the lock.
+func (r *fakeFXRepo) numUpdated() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.updated)
+}
+
+// snapshotUpdated returns the recorded updates under the lock. Only the slice is
+// copied: the records are still the worker's, which is safe because the worker
+// populates a record before handing it to UpdateAgreement and never mutates it
+// afterwards.
+func (r *fakeFXRepo) snapshotUpdated() []*podmain.FXAgreementRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]*podmain.FXAgreementRecord(nil), r.updated...)
+}
+
+// snapshotAuditEvents returns the recorded audit events under the lock, with the
+// same shallow-copy semantics as snapshotUpdated.
+func (r *fakeFXRepo) snapshotAuditEvents() []*podmain.FXAgreementEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]*podmain.FXAgreementEvent(nil), r.auditEvents...)
 }
 
 func (r *fakeFXRepo) CreateAgreement(context.Context, *podmain.FXAgreementRecord) error { return nil }
@@ -110,7 +161,9 @@ func (r *fakeFXRepo) UpdateAgreement(_ context.Context, rec *podmain.FXAgreement
 			return err
 		}
 	}
+	r.mu.Lock()
 	r.updated = append(r.updated, rec)
+	r.mu.Unlock()
 	return nil
 }
 func (r *fakeFXRepo) ListAgreements(context.Context, ports.FXAgreementFilter) ([]*podmain.FXAgreementRecord, error) {
@@ -120,7 +173,9 @@ func (r *fakeFXRepo) CreateAuditEvent(_ context.Context, e *podmain.FXAgreementE
 	if r.auditErr != nil {
 		return r.auditErr
 	}
+	r.mu.Lock()
 	r.auditEvents = append(r.auditEvents, e)
+	r.mu.Unlock()
 	return nil
 }
 func (r *fakeFXRepo) ListAuditEvents(context.Context, string) ([]*podmain.FXAgreementEvent, error) {

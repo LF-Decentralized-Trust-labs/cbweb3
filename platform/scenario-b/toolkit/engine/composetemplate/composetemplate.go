@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package composetemplate validates the parametrized Docker Compose templates
 // under scenario-b/provisioning/templates/. It does NOT render, run, or compute
 // port/name offsets (that is the engine's job, TK-B6). Given a template and an

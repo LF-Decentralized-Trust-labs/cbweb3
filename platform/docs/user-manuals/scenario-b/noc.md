@@ -239,7 +239,7 @@ Click any alert row (not the dismiss button) to open the **Alert Detail Modal**.
 | **Severity** | Severity badge. |
 | **State** | `ACTIVE` or `RESOLVED`. |
 | **Affected component** | The component that raised the alert with its health status. |
-| **Created** | ISO timestamp of alert creation. |
+| **Created** | Timestamp of alert creation (shown in local time). |
 | **Root cause sig** | System-generated root cause pattern identifier. |
 | **Acknowledge button** | Marks the alert as seen; keeps it in the feed. |
 | **Dismiss button** | Removes the alert from the active feed. |
@@ -292,7 +292,8 @@ selected.
 Shows the health of **CACTI interoperability relay containers** — the components
 responsible for bridging events between spoke networks and the Regional Hub.
 When a cross-spoke settlement appears stuck, this page is the first place to
-check.
+check. In the portal the page itself is titled **Interoperability Containers**;
+the sidebar entry is **Relays**.
 
 #### Controls
 

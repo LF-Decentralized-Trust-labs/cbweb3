@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package pki provides certificate-request helpers for the toolkit. It
 // generates the bank-side keypair + CSR consumed by the CertSource (the bank
 // holds its own key; the central bank signs the leaf). It never generates CA

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build e2e
 
 // Full-pipeline E2E (build tag `e2e`): composes the toolkit modes end-to-end —

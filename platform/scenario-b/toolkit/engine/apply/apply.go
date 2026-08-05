@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package apply dispatches an `apply` by manifest mode, runs the orchestrator
 // (dry-run or real), and returns a structured Report. It supports the found-hub
 // and found-spoke modes; join is TK-B8.
