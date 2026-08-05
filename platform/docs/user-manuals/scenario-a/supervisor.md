@@ -104,9 +104,12 @@ Dashboard.
 > backend accepts any locally-configured credentials. Production Keycloak OIDC
 > enforcement is not yet active. Do not treat this login as a security boundary.
 
-Session credentials are held in memory only. There is no `localStorage` or
-`sessionStorage` persistence for sensitive data. Closing or refreshing the
-browser tab clears the session.
+Session credentials are never written to `localStorage` or `sessionStorage`;
+the session is held in an HttpOnly cookie set by the backend. Refreshing the
+browser tab does **not** end the session — on reload the portal automatically
+restores it from the HttpOnly session cookie (via `/api/v1/auth/me`). You are
+returned to the login screen only when the session/refresh token expires or you
+explicitly log out.
 
 ---
 
@@ -145,6 +148,8 @@ Displays all active and recent HTLC contracts retrieved from the backend.
 | Column | Description |
 |---|---|
 | Contract ID | Unique identifier for the HTLC contract (truncated; click to copy the full value) |
+| Sender | The originating party (institution name and/or on-chain address) |
+| Receiver | The receiving party (institution name and/or on-chain address) |
 | Hash Lock | The cryptographic hash commitment securing the HTLC (truncated; click to copy) |
 | Zeto Ref | The Paladin/Zeto privacy-token lock reference (truncated; click to copy) |
 | Expires | Timestamp at which the time-lock expires and a refund becomes claimable |
@@ -167,7 +172,7 @@ The Audit Vault is a three-panel forensic screen:
 
 1. **Credential Verification** — look up a participant's KYC status by subject
    identifier.
-2. **Compliance and Audit Vault** — decrypt a shielded transaction using a
+2. **Compliance & Audit Vault** — decrypt a shielded transaction using a
    regulatory view key.
 3. **Immutable Audit Logs** — paginated, filterable log of all governance
    actions recorded by the backend.
@@ -410,7 +415,7 @@ persisted to the backend.
 1. Open the **Audit Vault** (`/audit`).
 2. In the **Credential Verification** panel, verify the credential status of
    the parties involved using their subject IDs.
-3. In the **Compliance and Audit Vault** panel, enter the transaction hash, your
+3. In the **Compliance & Audit Vault** panel, enter the transaction hash, your
    regulatory view key, and a documented reason. Click **Decrypt Transaction**.
 4. Review the decrypted amount, currency, sender, and receiver in the result
    panel.
@@ -503,7 +508,7 @@ persisted to the backend.
 | No token issuance | The Supervisor Portal has no mint, burn, or transfer capabilities by design. |
 | View key handling | Regulatory view keys are never written to `localStorage` or `sessionStorage`; they exist in memory only for the active browser session. |
 | Audit trail | Every action — including decryption requests and registry views — is logged in the immutable audit log. |
-| Session persistence | Closing or refreshing the tab clears the in-memory session; the user must sign in again. |
+| Session persistence | The session lives in an HttpOnly cookie, not `localStorage`/`sessionStorage`. Refreshing the tab restores the session automatically via `/api/v1/auth/me`; the user is returned to login only when the session/refresh token expires or logout is invoked. |
 | Role-based access | Three roles are supported: `SUPERVISOR_ROLE`, `COMPLIANCE_OFFICER`, and `CENTRAL_BANK_ADMIN`. All currently share the same set of portal permissions. |
 
 ---
