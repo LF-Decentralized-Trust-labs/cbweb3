@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package bundle emits/loads/validates the hub bundle (TK-B6) — the public
 // hand-off artifact from found-hub to found-spoke. It carries the hub contract
 // addresses + consumption config (RPC-only); it MUST NOT contain secrets.
