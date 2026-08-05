@@ -43,6 +43,7 @@ type SpokeConfig struct {
 	AdvertisedHost      string      // externally reachable host for the spoke bundle enode (default host.docker.internal)
 	RelayAdvertisedHost string      // host the (external) relay uses to reach this spoke's RPC/WS/gateway (default host.docker.internal)
 	RelayEndpoint       string      // the relay's OWN REST endpoint (spec.relay.endpoint, e.g. http://<hub>:7000) → CACTI_API_URL
+	RelayContainerName  string      // relay container on THIS host (spec.relay.containerName), so the noc-agent can collect its logs; empty → no relay logs in the NOC
 	FrontendHost        string      // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
 	ProxyEnabled        bool        // spec.proxy == enable: serve portals + api behind the per-host reverse proxy
 	LauncherEnabled     bool        // spec.launcher == "enable": bake VITE_LAUNCHER_URL into the CB portals

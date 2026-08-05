@@ -13,7 +13,10 @@ import { RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { nocBackendApi } from "../services/api";
+import { LOG_STALE_SECONDS, snapshotAgeSeconds } from "../stores/log-freshness";
 import type { NocContainerLog } from "../types";
+
+const TICK_MS = 2000;
 
 export function LogViewerPage() {
   const { componentId } = useParams<{ componentId: string }>();
@@ -23,6 +26,7 @@ export function LogViewerPage() {
   const [logs, setLogs] = useState<NocContainerLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const fetchLogs = async () => {
@@ -50,6 +54,14 @@ export function LogViewerPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  const snapshotAge = snapshotAgeSeconds(logs[logs.length - 1]?.occurred_at, now);
+  const snapshotStale = snapshotAge !== null && snapshotAge > LOG_STALE_SECONDS;
+
   return (
     <Card className="flex flex-col h-full">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 shrink-0">
@@ -57,10 +69,17 @@ export function LogViewerPage() {
           <CardTitle>Container Logs</CardTitle>
           <CardDescription>{componentName}</CardDescription>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void fetchLogs()} disabled={loading}>
-          <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {snapshotStale && (
+            <Badge variant="warning" title="The agent has not collected newer lines for this container">
+              SNAPSHOT {snapshotAge}s OLD
+            </Badge>
+          )}
+          <Button variant="outline" size="sm" onClick={() => void fetchLogs()} disabled={loading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="flex-1 overflow-hidden">
         {error && <p className="mb-2 text-sm text-destructive">{error}</p>}

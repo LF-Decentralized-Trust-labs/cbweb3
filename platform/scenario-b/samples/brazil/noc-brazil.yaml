@@ -35,6 +35,12 @@ spec:
     # (RPC 33645 + 7000 = 40645) and the CB's launcher (back-to-launcher target).
     keycloakURL: http://localhost:40645
     launcherURL: http://localhost:5191
+    # Pool Stability data source: central-bank-brazil's api-gateway (RPC 33645 + 8000
+    # = 41645). Reached over the host's published port because the NOC stack owns its
+    # own docker network — the CB's compose service name does not resolve from here.
+    # The backend discovers the active pairs from this gateway, so no pair list is
+    # configured; until a sovereign corridor is opened the page reports it is empty.
+    ammGatewayURL: http://host.docker.internal:41645
   frontendHost: localhost
   # Schema requires at least one operator account. The working login is actually
   # provisioned by central-bank-brazil's found-spoke (this observe run does not

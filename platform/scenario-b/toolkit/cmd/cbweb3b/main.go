@@ -111,7 +111,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 func runApply(args []string, stdout, stderr io.Writer) int {
 	var files fileList
 	var output, dataDir, outDir, repoRoot, hubRPC, hubWS, spokeRPC, spokeWS, gatewayURL, cbAddr, relay string
-	var dryRun bool
+	var dryRun, rebuild bool
 	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Var(&files, "f", "manifest file")
@@ -119,6 +119,7 @@ func runApply(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&output, "o", "yaml", "output format: json|yaml")
 	fs.StringVar(&output, "output", "yaml", "output format: json|yaml")
 	fs.BoolVar(&dryRun, "dry-run", false, "plan the steps without executing effects")
+	fs.BoolVar(&rebuild, "rebuild", false, "rebuild this entity's service/portal images from source and recreate their containers (image tags encode build args, not source, so an unchanged tag otherwise skips the build)")
 	fs.StringVar(&dataDir, "data-dir", "", "state/lock directory (default: manifest node.dataDir)")
 	fs.StringVar(&outDir, "out-dir", "", "bundle output directory (default: data-dir)")
 	fs.StringVar(&repoRoot, "repo-root", ".", "repository root (for contracts/templates)")
@@ -159,6 +160,7 @@ func runApply(args []string, stdout, stderr io.Writer) int {
 		Relay:        relay,
 		Format:       output,
 		DryRun:       dryRun,
+		Rebuild:      rebuild,
 	})
 
 	// Emit whatever report we have (partial on failure/interruption).
@@ -236,13 +238,18 @@ func usage(w io.Writer) {
 
 Usage:
   cbweb3b validate -f <manifest.yaml> [-f ...] [-o json|yaml]
-  cbweb3b apply    -f <manifest.yaml> [--dry-run] [-o json|yaml]
+  cbweb3b apply    -f <manifest.yaml> [--dry-run] [--rebuild] [-o json|yaml]
                    [--data-dir <dir>] [--out-dir <dir>] [--repo-root <dir>]
                    [--hub-rpc <url>] [--hub-ws <url>]
 
 validate: parse/validate manifests and report (no effects).
 apply:    run the orchestrator for the manifest mode (found-hub | found-spoke |
-          join); --dry-run plans without effects.
+          join | observe); --dry-run plans without effects.
+          --rebuild rebuilds this entity's service/portal images from the current
+          source and recreates their containers. Needed after editing code: image
+          tags encode the baked build args, not the source tree, so an unchanged
+          tag makes the build gate report "satisfied" and the container keeps
+          serving the previous binary.
 
 Exit codes: 0 success, 1 validation/config error or failed step, 2 usage/parse error
 `)

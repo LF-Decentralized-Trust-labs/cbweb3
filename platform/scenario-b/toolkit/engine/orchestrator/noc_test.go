@@ -82,6 +82,53 @@ func TestSpokeNOCBundle(t *testing.T) {
 	}
 }
 
+// The relay component only carries a container name when the manifest names one; the
+// agent needs it to collect the relay's logs (without it the NOC shows no relay logs).
+func TestSpokeNOCBundleRelayContainerName(t *testing.T) {
+	cfg := testSpokeCfg(t, &exec.FakeRunner{})
+	cfg.RelayEndpoint = "http://hub:7000"
+	cfg.WithDefaults()
+
+	if got := relayComponent(t, cfg.nocBundle()); got.ContainerName != "" {
+		t.Errorf("ContainerName = %q, want empty when the manifest names no container", got.ContainerName)
+	}
+
+	cfg.RelayContainerName = "cbweb3-cacti-liquidity-relay"
+	got := relayComponent(t, cfg.nocBundle())
+	if got.ContainerName != "cbweb3-cacti-liquidity-relay" {
+		t.Errorf("ContainerName = %q, want the configured relay container", got.ContainerName)
+	}
+	// The Besu component keeps its own container name — the relay must not overwrite it.
+	for _, c := range cfg.nocBundle().Components {
+		if c.Type == "BESU" && c.ContainerName == "" {
+			t.Error("BESU component lost its container name")
+		}
+	}
+}
+
+func TestJoinNOCBundleRelayContainerName(t *testing.T) {
+	cfg := testJoinCfg(t, &exec.FakeRunner{})
+	cfg.RelayEndpoint = "http://hub:7000"
+	cfg.RelayContainerName = "cbweb3-cacti-liquidity-relay"
+	cfg.WithDefaults()
+
+	if got := relayComponent(t, cfg.nocBundle()); got.ContainerName != "cbweb3-cacti-liquidity-relay" {
+		t.Errorf("ContainerName = %q, want the configured relay container", got.ContainerName)
+	}
+}
+
+// relayComponent returns the bundle's CACTI_RELAY component, failing when absent.
+func relayComponent(t *testing.T, b bundle.NOCBundle) bundle.NOCComponent {
+	t.Helper()
+	for _, c := range b.Components {
+		if c.Type == "CACTI_RELAY" {
+			return c
+		}
+	}
+	t.Fatalf("no CACTI_RELAY component in %+v", b.Components)
+	return bundle.NOCComponent{}
+}
+
 func TestHubNOCBundle(t *testing.T) {
 	cfg := testHubConfig(t, &exec.FakeRunner{})
 	cfg.WithDefaults()

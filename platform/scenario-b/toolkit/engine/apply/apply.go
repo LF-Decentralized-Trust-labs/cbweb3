@@ -32,6 +32,12 @@ type Options struct {
 	Relay        string // RelayRegistrar URI (default "local"; e.g. relay://host:4000)
 	Format       string // json | yaml
 	DryRun       bool
+	// Rebuild forces the image build steps to run even when a locally tagged image
+	// already exists. Image tags encode the baked build args, NOT the source tree, so
+	// a code change alone leaves the tag unchanged and the build is skipped — an apply
+	// that reports "done" while still serving the previous binary. Use after editing
+	// service or portal source.
+	Rebuild bool
 }
 
 // Apply loads+validates the manifest and dispatches by mode.
@@ -44,6 +50,9 @@ func Apply(ctx context.Context, o Options) (orchestrator.Report, error) {
 		f := res.Errors[0]
 		return orchestrator.Report{}, fmt.Errorf("invalid manifest: %s: %s", f.Field, f.Message)
 	}
+	// --rebuild makes every image-existence gate report "missing" for this run, so the
+	// build steps run against the current source instead of being skipped by tag.
+	orchestrator.SetForceImageRebuild(o.Rebuild)
 	switch pd.Spec.Mode {
 	case "found-hub":
 		return applyFoundHub(ctx, o, pd)
@@ -100,8 +109,9 @@ func applyObserve(ctx context.Context, o Options, pd *manifest.ParticipantDeploy
 		NetPrefix:       prefix,
 		VolumePrefix:    prefix,
 		FrontendHost:    pd.Spec.FrontendHost,
-		KeycloakURL:     manifestNOCKeycloakURL(pd), // portal VITE_KEYCLOAK_URL (CB/hub realm)
-		LauncherURL:     manifestNOCLauncherURL(pd), // portal VITE_LAUNCHER_URL (back-to-launcher)
+		KeycloakURL:     manifestNOCKeycloakURL(pd),   // portal VITE_KEYCLOAK_URL (CB/hub realm)
+		LauncherURL:     manifestNOCLauncherURL(pd),   // portal VITE_LAUNCHER_URL (back-to-launcher)
+		AMMGatewayURL:   manifestNOCAMMGatewayURL(pd), // backend AMM_GATEWAY_URL (Pool Stability)
 		ProxyEnabled:    pd.Spec.Proxy == "enable",  // serve portal + backend under the per-host proxy
 		// BackendPort/PortalPort fall back to the local convention in WithDefaults;
 		// spec.noc may carry explicit ports in a later phase.
@@ -114,7 +124,15 @@ func applyObserve(ctx context.Context, o Options, pd *manifest.ParticipantDeploy
 	}
 
 	steps := orchestrator.ObserveSteps(cfg)
-	return orchestrator.New("observe", steps, state, o.DryRun).Run(ctx)
+	run := orchestrator.New("observe", steps, state, o.DryRun)
+	if o.Rebuild {
+		// Rebuild the images AND recreate the containers: compose picks up the new
+		// image id, so a rebuilt portal/backend actually starts serving. wait-noc-backend
+		// must be forced with them — a recreated backend is not ready yet, and the
+		// registration steps that follow would race it and fail on a reset connection.
+		run.Force("build-noc-images", "start-noc-stack", "wait-noc-backend")
+	}
+	return run.Run(ctx)
 }
 
 func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDeployment) (orchestrator.Report, error) {
@@ -181,7 +199,8 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 		P2PPort:             p2pPort,
 		AdvertisedHost:      pd.Spec.Node.AdvertisedHost,
 		RelayAdvertisedHost: manifestRelayAdvHost(pd),
-		RelayEndpoint:       manifestRelayEndpoint(pd), // relay's own REST endpoint → CACTI_API_URL
+		RelayEndpoint:       manifestRelayEndpoint(pd),      // relay's own REST endpoint → CACTI_API_URL
+		RelayContainerName:  manifestRelayContainerName(pd), // relay container for noc-agent log collection
 		FrontendHost:        pd.Spec.FrontendHost,
 		LauncherEnabled:     pd.Spec.Launcher == "enable",
 		LauncherPort:        pd.Spec.LauncherPort,
@@ -240,7 +259,13 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 			Routes:       cfg.ProxyRoutes(),
 		}))
 	}
-	return orchestrator.New("found-spoke", steps, state, o.DryRun).Run(ctx)
+	run := orchestrator.New("found-spoke", steps, state, o.DryRun)
+	if o.Rebuild {
+		// These steps build this entity's service/portal images and then compose up,
+		// so forcing them rebuilds from source and recreates the containers.
+		run.Force("start-spoke-backend", "start-spoke-frontend", "start-spoke-relayer", "add-noc-agent")
+	}
+	return run.Run(ctx)
 }
 
 // launcherStep builds the per-entity launcher step from the manifest: it enables/
@@ -311,8 +336,9 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 		WSPort:          wsPort,
 		P2PPort:         p2pPort,
 		HubRPC:          firstNonEmpty(o.HubRPC, sb.HubRPC), // routable hub RPC from the spoke bundle
-		RelayEndpoint:   manifestRelayEndpoint(pd),          // the relay's own REST endpoint → CACTI_API_URL
-		NOCBackendURL:   manifestNOCBackendURL(pd),          // where this bank's noc-agent pushes
+		RelayEndpoint:      manifestRelayEndpoint(pd),      // the relay's own REST endpoint → CACTI_API_URL
+		RelayContainerName: manifestRelayContainerName(pd), // relay container for noc-agent log collection
+		NOCBackendURL:      manifestNOCBackendURL(pd),      // where this bank's noc-agent pushes
 		FrontendHost:    pd.Spec.FrontendHost,
 		LauncherEnabled: pd.Spec.Launcher == "enable",
 		LauncherPort:    pd.Spec.LauncherPort,
@@ -342,7 +368,11 @@ func applyJoin(ctx context.Context, o Options, pd *manifest.ParticipantDeploymen
 			Routes:       cfg.ProxyRoutes(),
 		}))
 	}
-	return orchestrator.New("join", steps, state, o.DryRun).Run(ctx)
+	run := orchestrator.New("join", steps, state, o.DryRun)
+	if o.Rebuild {
+		run.Force("start-bank-payment", "start-bank-backend", "start-bank-frontend", "add-noc-agent")
+	}
+	return run.Run(ctx)
 }
 
 // resolveBundle resolves a (possibly relative) bundle ref against the manifest's
@@ -430,7 +460,11 @@ func applyFoundHub(ctx context.Context, o Options, pd *manifest.ParticipantDeplo
 			RootRedirect: "/b/governance/",
 		}))
 	}
-	return orchestrator.New("found-hub", steps, state, o.DryRun).Run(ctx)
+	run := orchestrator.New("found-hub", steps, state, o.DryRun)
+	if o.Rebuild {
+		run.Force("build-hub-backend-image", "start-hub-compliance", "start-hub-backend", "start-hub-frontend", "add-noc-agent")
+	}
+	return run.Run(ctx)
 }
 
 // nodePorts extracts the host RPC/WS/P2P ports from the manifest node (0 when unset).
@@ -527,6 +561,24 @@ func manifestNOCLauncherURL(pd *manifest.ParticipantDeployment) string {
 		return ""
 	}
 	return pd.Spec.NOC.LauncherURL
+}
+
+// manifestNOCAMMGatewayURL returns spec.noc.ammGatewayURL (the api-gateway the NOC
+// backend reads AMM pool status from), or "" when unset.
+func manifestNOCAMMGatewayURL(pd *manifest.ParticipantDeployment) string {
+	if pd.Spec.NOC == nil {
+		return ""
+	}
+	return pd.Spec.NOC.AMMGatewayURL
+}
+
+// manifestRelayContainerName returns spec.relay.containerName (the relay container
+// whose logs this entity's noc-agent may collect), or "" when unset.
+func manifestRelayContainerName(pd *manifest.ParticipantDeployment) string {
+	if pd.Spec.Relay == nil {
+		return ""
+	}
+	return pd.Spec.Relay.ContainerName
 }
 
 // toOrchestratorAdminUsers converts the manifest's spec.adminUsers into the
