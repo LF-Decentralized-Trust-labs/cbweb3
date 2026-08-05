@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -83,6 +84,14 @@ func (r *CrossCurrencyHubSwapRelay) WithSigner(s *relayauth.Signer) *CrossCurren
 // HubSwapPath is the CB endpoint that receives the delegation.
 const HubSwapPath = "/internal/amm/cross-currency-hub-swap"
 
+// ErrHubSwapNotOurs says the CB refused because this position's swap belongs to someone else: a
+// delivery still trading, or an earlier attempt whose outcome is unknown and awaits reconciliation.
+//
+// It exists so this case is not rolled back. Reversing the bridge-in here would reclaim tokens that
+// another delivery is spending, or that a possibly-broadcast transaction already spent — turning a
+// benign duplicate delivery into a corrupted position.
+var ErrHubSwapNotOurs = errors.New("hub swap for this position is owned by another attempt")
+
 // ExecuteHubSwap POSTs the swap request to the CB and returns the realized outcome.
 //
 // A "duplicate" verdict is a success: the CB already executed this position's swap and
@@ -118,6 +127,13 @@ func (r *CrossCurrencyHubSwapRelay) ExecuteHubSwap(ctx context.Context, req Cros
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusConflict {
+		// The CB claims a position before trading, so a conflict means another delivery of THIS
+		// delegation owns it. Distinguished from a plain failure because the caller must not roll
+		// the bridge-in back: the tokens are being spent by that other delivery right now, and
+		// reversing them would fight it.
+		return nil, fmt.Errorf("%w: %s", ErrHubSwapNotOurs, strings.TrimSpace(string(respBody)))
+	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		return nil, fmt.Errorf("central bank hub-swap returned HTTP %d: %s", resp.StatusCode, string(respBody))
 	}

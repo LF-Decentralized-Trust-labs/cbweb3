@@ -369,3 +369,85 @@ func TestHubReconciliationService_SurfacesReadFailures(t *testing.T) {
 		})
 	}
 }
+
+// A bank that runs Step 2 with its own Hub key trades without this CB recording a cost. The blank
+// column then read as "consumed nothing", so a SETTLED position claimed its whole mint was still on
+// the Hub and the expectation exceeded the balance: `unexplained` went negative, which is the
+// arithmetic contradicting the very condition the report exists to name.
+func TestReconcile_SettledPositionWithNoRecordedCostIsReportedNotCounted(t *testing.T) {
+	report, err := Reconcile(ReconciliationInputs{
+		WToken:         "0xWBRL",
+		HolderAddress:  "0xCB",
+		OnChainBalance: "0",
+		InFlight: []BridgeInContribution{{
+			PositionID:  "pos-local",
+			OwnerBankID: "bank-a",
+			Minted:      "1000",
+			Consumed:    "", // never recorded here: the trade ran somewhere else
+			Returned:    "200",
+			// SwapCostKnown deliberately false
+		}},
+	})
+	if err != nil {
+		t.Fatalf("a settled position with an unrecorded cost must produce a report, not an error: %v", err)
+	}
+	if report.ExpectedInFlight != "0" {
+		t.Fatalf("expected_in_flight = %q; want 0 — the position holds nothing on the Hub", report.ExpectedInFlight)
+	}
+	if report.Unexplained != "0" {
+		t.Fatalf("unexplained = %q; want 0 — excluding a settled position must not move the figure", report.Unexplained)
+	}
+	if len(report.Unattributed) != 1 || report.Unattributed[0].PositionID != "pos-local" {
+		t.Fatalf("the excluded position must be named in the report, got %+v", report.Unattributed)
+	}
+	if report.Unattributed[0].Reason == "" {
+		t.Fatal("an unattributed position must say why it could not be priced")
+	}
+	if !report.Balanced {
+		t.Fatal("nothing is unexplained here, so the report is balanced")
+	}
+}
+
+// The same blank column on a position whose residue has NOT come back still means "not swapped yet",
+// which is the reading that was always correct — so the whole mint stays counted.
+func TestReconcile_UnswappedPositionStillCountsItsWholeMint(t *testing.T) {
+	report, err := Reconcile(ReconciliationInputs{
+		WToken:         "0xWBRL",
+		HolderAddress:  "0xCB",
+		OnChainBalance: "1000",
+		InFlight: []BridgeInContribution{{
+			PositionID: "pos-fresh", OwnerBankID: "bank-a", Minted: "1000", Consumed: "", Returned: "0",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if report.ExpectedInFlight != "1000" {
+		t.Fatalf("expected_in_flight = %q; want 1000", report.ExpectedInFlight)
+	}
+	if len(report.Unattributed) != 0 {
+		t.Fatalf("a position that simply has not been swapped yet is not unattributed, got %+v", report.Unattributed)
+	}
+}
+
+// A recorded cost is unaffected: the delegated path's figures keep the exact arithmetic.
+func TestReconcile_RecordedCostIsUnchanged(t *testing.T) {
+	report, err := Reconcile(ReconciliationInputs{
+		WToken:         "0xWBRL",
+		HolderAddress:  "0xCB",
+		OnChainBalance: "200",
+		InFlight: []BridgeInContribution{{
+			PositionID: "pos-delegated", OwnerBankID: "bank-a",
+			Minted: "1000", Consumed: "800", Returned: "0", SwapCostKnown: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if report.ExpectedInFlight != "200" || report.Unexplained != "0" {
+		t.Fatalf("unexpected report: expected=%q unexplained=%q", report.ExpectedInFlight, report.Unexplained)
+	}
+	if len(report.Unattributed) != 0 {
+		t.Fatalf("a priced position is not unattributed, got %+v", report.Unattributed)
+	}
+}

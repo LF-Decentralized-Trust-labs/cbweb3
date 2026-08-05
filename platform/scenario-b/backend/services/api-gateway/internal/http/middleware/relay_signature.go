@@ -48,11 +48,38 @@ func (c RelayAuthConfig) Validate() error {
 	}
 	if reg := c.Registry.Get(); reg == nil || reg.Len() == 0 {
 		return fmt.Errorf(
-			"RELAY_REQUIRE_SIGNATURE is set but no peer verifying keys are pinned from PKI_DIR: " +
+			"RELAY_REQUIRE_SIGNATURE is set but no peer verifying key is pinned, from either source: " +
 				"every internal relay request would be rejected with 401, including correctly signed ones — " +
-				"provision the peer certificates (PKI_DIR/<entity>.crt) or unset RELAY_REQUIRE_SIGNATURE")
+				"onboard the peers so their issued certificates are on record, or place a peer certificate " +
+				"in PKI_DIR/<entity>.crt (that is how the Cacti relay, which is never onboarded, is trusted), " +
+				"or unset RELAY_REQUIRE_SIGNATURE")
 	}
 	return nil
+}
+
+// RelayCallerLocal is the Fiber locals key holding the entity id whose signature this middleware
+// verified. Only a verified signature writes it, so its presence means "this request came from that
+// entity", not merely "this request was authenticated".
+//
+// Exported so a test can present a request that arrived with a verified identity without
+// reproducing the signing dance. Nothing in the request path may write it — the value's whole
+// meaning is that this middleware, and only this middleware, put it there.
+const RelayCallerLocal = "relay_verified_caller"
+
+// VerifiedRelayCaller returns the entity id whose signature authenticated this request, or "" when
+// no signature was verified.
+//
+// The distinction is the whole point. The legacy shared secret is identical in every entity, so
+// possessing it proves that the caller is *some* participant of the deployment and nothing more.
+// Any handler that acts on behalf of a named institution — the delegated hub swap, bridge-in, the
+// residue return, a tenant-scoped listing — has to authorize against the identity this returns and
+// never against a bank id taken from the request.
+func VerifiedRelayCaller(c *fiber.Ctx) string {
+	if c == nil {
+		return ""
+	}
+	id, _ := c.Locals(RelayCallerLocal).(string)
+	return id
 }
 
 // RequireRelayAuthMigrating enforces relay authentication with a signature-preferred,
@@ -95,6 +122,10 @@ func RequireRelayAuthMigrating(cfg RelayAuthConfig) fiber.Handler {
 					"code":  "RELAY_SIGNATURE_INVALID",
 				})
 			}
+			// Carry the identity forward. Verifying who is calling and then authorizing on a bank id
+			// read from the request body is how an authenticated peer ends up acting for another
+			// bank; the handlers can only close that if the verified id reaches them.
+			c.Locals(RelayCallerLocal, keyID)
 			return c.Next()
 		}
 

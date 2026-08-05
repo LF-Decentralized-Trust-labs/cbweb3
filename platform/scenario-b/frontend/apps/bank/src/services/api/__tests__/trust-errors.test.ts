@@ -2,7 +2,15 @@
 
 import { AxiosError, AxiosHeaders } from "axios";
 import { describe, expect, it } from "vitest";
-import { RELAY_SIGNATURE_INVALID, classifyTrustBlock, isTrustRejection } from "../trust-errors";
+import {
+  RELAY_CALLER_BANK_MISMATCH,
+  RELAY_CALLER_IDENTITY_REQUIRED,
+  RELAY_SIGNATURE_INVALID,
+  RELAY_SIGNATURE_REQUIRED,
+  REQUESTER_NOT_A_PARTICIPANT,
+  classifyTrustBlock,
+  isTrustRejection,
+} from "../trust-errors";
 
 const axiosErrorWith = (status: number, data: unknown) => {
   const headers = new AxiosHeaders();
@@ -24,6 +32,18 @@ describe("isTrustRejection", () => {
 
   it("matches on the code alone, so a future status change does not silently disable the notice", () => {
     expect(isTrustRejection(axiosErrorWith(403, { code: RELAY_SIGNATURE_INVALID }))).toBe(true);
+  });
+
+  // These are the siblings that used to escape into the session branch: the interceptor read the 401
+  // as an expired token, refreshed, retried, failed and logged the operator out — the ejection this
+  // classifier exists to prevent.
+  it.each([
+    RELAY_SIGNATURE_REQUIRED,
+    RELAY_CALLER_IDENTITY_REQUIRED,
+    RELAY_CALLER_BANK_MISMATCH,
+    REQUESTER_NOT_A_PARTICIPANT,
+  ])("recognizes %s as a trust rejection, not an expired session", (code) => {
+    expect(isTrustRejection(axiosErrorWith(401, { code }))).toBe(true);
   });
 
   it("ignores an ordinary expired session", () => {

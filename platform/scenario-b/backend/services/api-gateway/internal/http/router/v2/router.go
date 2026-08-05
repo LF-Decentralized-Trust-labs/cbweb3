@@ -64,6 +64,10 @@ type Dependencies struct {
 	// RelayAuth configures per-CB asymmetric signature verification on internal routes,
 	// with the shared secret as a migration fallback (R2-CR-6).
 	RelayAuth middleware.RelayAuthConfig
+	// RequesterScopeResolver maps the entity id whose signature was verified to the address its
+	// payment records are keyed by, so /internal/v1/payments listings are scoped to the CALLER
+	// rather than to a query parameter no signature covers. Nil makes those listings fail closed.
+	RequesterScopeResolver middleware.RequesterScopeResolver
 	// FiatTokenAddress is the tCeBM contract address on this CB's spoke (TOKEN_ADDRESS).
 	// Used by the cross-currency bridge-out handler so CB-B can enqueue burn without trusting
 	// the relay payload's token address.

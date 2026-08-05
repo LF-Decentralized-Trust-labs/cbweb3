@@ -194,3 +194,70 @@ func (s *fixedSwapService) Execute(context.Context, SwapRequest) (*SwapResult, e
 	s.called = true
 	return s.result, nil
 }
+
+// stubConsumptionRecorder captures what a locally executed trade recorded against its funding
+// position — the figure the issuing CB's Hub reconciliation reads as `consumed`.
+type stubConsumptionRecorder struct {
+	claimed    *HubSwapRecord
+	finalized  [3]string // positionID, amountIn, txHash
+	alreadyOwn *HubSwapRecord
+	claimErr   error
+}
+
+func (s *stubConsumptionRecorder) Claim(_ context.Context, rec *HubSwapRecord) (*HubSwapRecord, bool, error) {
+	if s.claimErr != nil {
+		return nil, false, s.claimErr
+	}
+	if s.alreadyOwn != nil {
+		return s.alreadyOwn, false, nil
+	}
+	s.claimed = rec
+	return nil, true, nil
+}
+
+func (s *stubConsumptionRecorder) Finalize(_ context.Context, positionID, amountIn, txHash string) (*HubSwapRecord, error) {
+	s.finalized = [3]string{positionID, amountIn, txHash}
+	return &HubSwapRecord{BridgeInPositionID: positionID, AmountIn: amountIn, SwapTxHash: txHash}, nil
+}
+
+// A CB that runs Step 2 itself must record what the trade cost, in the same place the delegated path
+// does. Without it the Hub reconciliation reads the position as never swapped, claims its whole mint
+// is still on the Hub, and reports a negative figure once the residue comes back.
+func TestExecute_HubSwap_LocalPathRecordsWhatTheTradeCost(t *testing.T) {
+	recorder := &stubConsumptionRecorder{}
+	local := &fixedSwapService{result: &SwapResult{TxHash: "0xlocal", AmountIn: "800"}}
+
+	orch := hubSwapOrchestrator(local).
+		WithCactiRelay(&stubCactiRelay{}).
+		WithHubSignerAddress("0xOWNSIGNER").
+		WithHubSwapConsumptionRecorder(recorder)
+
+	if _, err := orch.Execute(context.Background(), hubSwapRequest()); err != nil {
+		t.Fatalf("expected the local swap to settle, got %v", err)
+	}
+	if recorder.claimed == nil {
+		t.Fatal("the local trade must be recorded against its funding position")
+	}
+	if recorder.claimed.BridgeInPositionID != "cb-position-123" {
+		t.Fatalf("recorded against %q; want the funding bridge-in position", recorder.claimed.BridgeInPositionID)
+	}
+	if recorder.finalized != [3]string{"cb-position-123", "800", "0xlocal"} {
+		t.Fatalf("finalized with %v; want the realized cost and tx hash", recorder.finalized)
+	}
+}
+
+// Bookkeeping must never fail a completed payment: the trade is on-chain by then, and the missing
+// record is exactly what the reconciliation reports as unattributed.
+func TestExecute_HubSwap_LocalPathSettlesEvenIfRecordingFails(t *testing.T) {
+	recorder := &stubConsumptionRecorder{claimErr: errors.New("db down")}
+	local := &fixedSwapService{result: &SwapResult{TxHash: "0xlocal", AmountIn: "800"}}
+
+	orch := hubSwapOrchestrator(local).
+		WithCactiRelay(&stubCactiRelay{}).
+		WithHubSignerAddress("0xOWNSIGNER").
+		WithHubSwapConsumptionRecorder(recorder)
+
+	if _, err := orch.Execute(context.Background(), hubSwapRequest()); err != nil {
+		t.Fatalf("a failed bookkeeping write must not fail the payment, got %v", err)
+	}
+}

@@ -9,6 +9,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -177,6 +178,11 @@ type CrossCurrencySwapOrchestrator struct {
 	// payerWalletResolver resolves the payer's spoke wallet for the local Step 4 path.
 	// Only consulted when residueRelay is nil (this gateway is the issuing CB itself).
 	payerWalletResolver SpokeWalletResolverIface
+	// hubSwapConsumption records the realized cost of a LOCALLY executed Step 2 against its
+	// funding position. Optional, and bookkeeping only: the delegated path gets this from the
+	// CB's own claim, and without it a locally swapped position looks unspent to the Hub
+	// reconciliation.
+	hubSwapConsumption HubSwapConsumptionRecorder
 }
 
 // AMMAddressResolver resolves a pool_pair (e.g. "W-BRL-W-ARS") to the on-chain
@@ -273,6 +279,67 @@ func (o *CrossCurrencySwapOrchestrator) WithPayerWalletResolver(r SpokeWalletRes
 func (o *CrossCurrencySwapOrchestrator) WithTransferLimitChecker(checker TransferLimitCheckerIface) *CrossCurrencySwapOrchestrator {
 	o.transferLimitChecker = checker
 	return o
+}
+
+// HubSwapConsumptionRecorder records what a trade cost against the bridge-in position that funded
+// it. The delegated Step 2 writes this on the CB as a side effect of its claim; the LOCAL Step 2 has
+// to write it too, or the CB's Hub reconciliation reads "no record" as "nothing consumed" and
+// overstates what the position still has on the Hub.
+type HubSwapConsumptionRecorder interface {
+	Claim(ctx context.Context, rec *HubSwapRecord) (existing *HubSwapRecord, claimed bool, err error)
+	Finalize(ctx context.Context, positionID, amountIn, swapTxHash string) (*HubSwapRecord, error)
+}
+
+// WithHubSwapConsumptionRecorder attaches the consumed-amount record for locally executed swaps.
+//
+// Only meaningful where this gateway shares a database with the reconciliation — that is, when the
+// gateway running the trade IS the issuing CB. On a commercial bank's gateway the row lands in the
+// bank's own database, where it is harmless and simply unread.
+func (o *CrossCurrencySwapOrchestrator) WithHubSwapConsumptionRecorder(r HubSwapConsumptionRecorder) *CrossCurrencySwapOrchestrator {
+	o.hubSwapConsumption = r
+	return o
+}
+
+// recordLocalHubSwapConsumption writes what a locally executed Step 2 cost against the position
+// that funded it.
+//
+// The reason it exists: the CB's Hub reconciliation asks each ACTIVE bridge-in "how much of you is
+// still on the Hub?" and answers minted − consumed − returned. `consumed` comes from the swap
+// records, which only the DELEGATED path wrote. A position swapped locally therefore looked entirely
+// unspent while its residue had already come back, so the CB's expectation exceeded the balance and
+// the report went negative — the opposite of the condition it exists to raise.
+//
+// Best-effort on purpose. The trade is done and the payment must continue; a bookkeeping write is
+// not worth failing it over, and its absence is exactly what the reconciliation now reports as
+// unattributed rather than silently mis-counting.
+func (o *CrossCurrencySwapOrchestrator) recordLocalHubSwapConsumption(
+	ctx context.Context, req CrossCurrencySwapRequest, bridgeInPositionID string, result *SwapResult,
+) {
+	if o.hubSwapConsumption == nil || bridgeInPositionID == "" || result == nil {
+		return
+	}
+	rec := &HubSwapRecord{
+		BridgeInPositionID: bridgeInPositionID,
+		CorrelationID:      req.CorrelationID,
+		PayerBankID:        req.PayerBankID,
+		PoolPair:           req.PoolPair,
+		AmountOut:          req.AmountOut,
+	}
+	if _, claimed, err := o.hubSwapConsumption.Claim(ctx, rec); err != nil {
+		log.Printf("[correlation_id=%s] WARNING: could not record the local swap's cost for position %s: %v",
+			req.CorrelationID, bridgeInPositionID, err)
+		return
+	} else if !claimed {
+		// Something already owns this position's record — the delegated path, or a previous local
+		// attempt. Overwriting it would replace a recorded cost with this one.
+		log.Printf("[correlation_id=%s] local swap cost for position %s was already recorded by another attempt",
+			req.CorrelationID, bridgeInPositionID)
+		return
+	}
+	if _, err := o.hubSwapConsumption.Finalize(ctx, bridgeInPositionID, result.AmountIn, result.TxHash); err != nil {
+		log.Printf("[correlation_id=%s] WARNING: could not finalize the local swap's cost for position %s: %v",
+			req.CorrelationID, bridgeInPositionID, err)
+	}
 }
 
 // Execute orchestrates the full 3-step swap flow with pre-validation.
@@ -513,8 +580,19 @@ func (o *CrossCurrencySwapOrchestrator) Execute(ctx context.Context, req CrossCu
 			BeneficiaryID:  req.BeneficiaryBankID,
 			OutputIsTokenA: outputIsTokenA,
 		})
+		if err == nil {
+			o.recordLocalHubSwapConsumption(ctx, req, bridgeInPositionID, swapResult)
+		}
 	}
 	if err != nil {
+		if errors.Is(err, ErrHubSwapNotOurs) {
+			// Another delivery of this same delegation owns the trade (or an earlier attempt did and
+			// its outcome is unresolved). Rolling the bridge-in back here would reclaim tokens that
+			// are being spent, so this path deliberately changes nothing: the owning attempt
+			// finishes the payment, or an operator reconciles it.
+			log.Printf("[correlation_id=%s] hub swap not ours, leaving the position untouched: %v", req.CorrelationID, err)
+			return nil, fmt.Errorf("swap already owned by another attempt: %w", err)
+		}
 		// Swap failed after bridge-in — trigger automatic rollback
 		log.Printf("[correlation_id=%s] swap failed, triggering rollback: %v", req.CorrelationID, err)
 		_ = o.failSwap(ctx, req.SwapID, fmt.Sprintf("swap failed: %v", err))

@@ -333,3 +333,59 @@ func TestInFlightBridgeIns_EmptyWhenNothingMatches(t *testing.T) {
 		t.Fatalf("expected nothing, got %+v", got)
 	}
 }
+
+// A claim in flight is not a cost. The row exists before the trade returns, and reading its blank
+// amount as "consumed 0" while calling the figure RECORDED would let the arithmetic treat an
+// in-flight delegation as a settled one.
+func TestInFlightBridgeIns_APendingClaimIsNotARecordedCost(t *testing.T) {
+	db := reconRepoDB(t)
+	r := reconRepo(db)
+
+	bridgeIn(db, t, "p1", "bank-a", wToken, "3000", domain.BridgeStateActive)
+	if err := db.Create(&domain.CrossCurrencyHubSwap{
+		BridgeInPositionID: "p1", CorrelationID: "corr-p1", PayerBankID: "bank-a",
+		PoolPair: "W-BRL-W-ARS", AmountOut: "1", Status: "PENDING",
+	}).Error; err != nil {
+		t.Fatalf("seed pending claim: %v", err)
+	}
+
+	got, err := r.InFlightBridgeIns(context.Background(), wToken)
+	if err != nil {
+		t.Fatalf("in-flight: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected one bridge-in, got %v", positionIDs(got))
+	}
+	if got[0].SwapCostKnown {
+		t.Fatal("a PENDING claim must not report a known cost — no trade has returned yet")
+	}
+	if got[0].Consumed != "" {
+		t.Fatalf("consumed = %q; want empty for a claim in flight", got[0].Consumed)
+	}
+}
+
+// The distinction the arithmetic needs: an executed swap reports a KNOWN cost, and a position with
+// no row at all reports an unknown one, even though both hand back the same zero-ish string.
+func TestInFlightBridgeIns_MarksWhetherTheCostIsRecorded(t *testing.T) {
+	db := reconRepoDB(t)
+	r := reconRepo(db)
+
+	bridgeIn(db, t, "p-priced", "bank-a", wToken, "3000", domain.BridgeStateActive)
+	hubSwap(db, t, "p-priced", "1001")
+	bridgeIn(db, t, "p-unpriced", "bank-b", wToken, "2000", domain.BridgeStateActive)
+
+	got, err := r.InFlightBridgeIns(context.Background(), wToken)
+	if err != nil {
+		t.Fatalf("in-flight: %v", err)
+	}
+	byID := map[string]bool{}
+	for _, c := range got {
+		byID[c.PositionID] = c.SwapCostKnown
+	}
+	if !byID["p-priced"] {
+		t.Fatal("a recorded swap must report its cost as known")
+	}
+	if byID["p-unpriced"] {
+		t.Fatal("a position with no swap record must not claim a known cost of zero")
+	}
+}

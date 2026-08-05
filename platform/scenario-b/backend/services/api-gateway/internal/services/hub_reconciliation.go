@@ -59,6 +59,12 @@ type BridgeInContribution struct {
 	Minted   string
 	Consumed string
 	Returned string
+	// SwapCostKnown says whether Consumed is a RECORDED figure. An unrecorded cost is not zero: a
+	// bank that runs Step 2 itself (with a Hub key of its own) trades without this CB recording
+	// anything, so treating the blank as zero claimed the whole mint was still on the Hub while its
+	// residue had already come back — and the report went negative in exactly the case it exists
+	// for. See Reconcile for what is done with it.
+	SwapCostKnown bool
 }
 
 // StrandedItem is a position this CB's own records already flag as needing attention.
@@ -75,6 +81,20 @@ type StrandedItem struct {
 	Direction   string `json:"direction"`
 	Amount      string `json:"amount"`
 	BridgeState string `json:"bridge_state"`
+}
+
+// UnattributedPosition is a settled bridge-in this central bank cannot price.
+//
+// Its residue came back, so the trade certainly happened, but nothing here records what it cost —
+// which is what a bank executing Step 2 with its own Hub key looks like from the CB's side. The
+// position is excluded from the expectation (on-chain it holds nothing) and named here instead, so
+// the gap is visible rather than folded into a figure that happens to balance.
+type UnattributedPosition struct {
+	PositionID  string `json:"position_id"`
+	OwnerBankID string `json:"owner_bank_id"`
+	Minted      string `json:"minted"`
+	Returned    string `json:"returned"`
+	Reason      string `json:"reason"`
 }
 
 // ReconciliationInputs is everything the arithmetic needs, so the computation itself stays pure.
@@ -110,6 +130,10 @@ type ReconciliationReport struct {
 	StrandedTotal string         `json:"stranded_total"`
 	PerBank       []BankExposure `json:"per_bank"`
 	Stranded      []StrandedItem `json:"stranded,omitempty"`
+	// Unattributed lists settled positions whose trade cost this CB never recorded. They are left
+	// OUT of ExpectedInFlight — on-chain they hold nothing — and named here so a reader can see that
+	// the expectation deliberately does not cover them.
+	Unattributed []UnattributedPosition `json:"unattributed,omitempty"`
 	// Balanced reports whether Unexplained is exactly zero.
 	Balanced bool `json:"balanced"`
 }
@@ -129,6 +153,7 @@ func Reconcile(in ReconciliationInputs) (ReconciliationReport, error) {
 	perBank := map[string]*big.Int{}
 	perBankCount := map[string]int{}
 	order := []string{}
+	unattributed := []UnattributedPosition{}
 
 	for _, c := range in.InFlight {
 		minted, ok := new(big.Int).SetString(trimOrZero(c.Minted), 10)
@@ -142,6 +167,25 @@ func Reconcile(in ReconciliationInputs) (ReconciliationReport, error) {
 		returned, ok := new(big.Int).SetString(trimOrZero(c.Returned), 10)
 		if !ok {
 			return ReconciliationReport{}, fmt.Errorf("position %s: unparseable returned amount %q", c.PositionID, c.Returned)
+		}
+
+		// A position whose residue has come back but whose trade this CB never recorded is SETTLED,
+		// not untouched: the input was spent by whoever ran the trade and the remainder was burned
+		// back. Counting its whole mint as still-held is what drove the report negative. The cost
+		// itself stays unknown — it is reported, not invented.
+		if !c.SwapCostKnown && returned.Sign() > 0 {
+			unattributed = append(unattributed, UnattributedPosition{
+				PositionID:  c.PositionID,
+				OwnerBankID: c.OwnerBankID,
+				Minted:      minted.String(),
+				Returned:    returned.String(),
+				Reason: "the residue for this position came back, so its trade happened, but this central bank " +
+					"has no record of what the trade cost — Step 2 was executed somewhere else",
+			})
+			// Contributes nothing to the expectation: on-chain it holds nothing, so excluding it
+			// leaves `unexplained` untouched. It is listed so the omission is visible rather than
+			// implied by a figure that happens to balance.
+			continue
 		}
 
 		still := new(big.Int).Sub(minted, consumed)
@@ -204,6 +248,7 @@ func Reconcile(in ReconciliationInputs) (ReconciliationReport, error) {
 		StrandedTotal:    strandedTotal.String(),
 		PerBank:          exposures,
 		Stranded:         in.Stranded,
+		Unattributed:     unattributed,
 		Balanced:         unexplained.Sign() == 0,
 	}, nil
 }

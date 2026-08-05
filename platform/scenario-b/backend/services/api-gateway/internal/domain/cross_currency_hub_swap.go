@@ -25,11 +25,27 @@ type CrossCurrencyHubSwap struct {
 	PayerBankID        string `gorm:"column:payer_bank_id;not null;index"`
 	PoolPair           string `gorm:"column:pool_pair;not null"`
 	// AmountOut is the exact output requested; AmountIn is the realized cost decoded from
-	// the on-chain LogSwap (never the MaxAmountIn cap).
-	AmountOut  string    `gorm:"column:amount_out;not null"`
-	AmountIn   string    `gorm:"column:amount_in;not null"`
-	SwapTxHash string    `gorm:"column:swap_tx_hash;not null"`
-	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime"`
+	// the on-chain LogSwap (never the MaxAmountIn cap). Both are empty until the trade returns,
+	// because the row is inserted BEFORE it runs.
+	AmountOut  string `gorm:"column:amount_out;not null"`
+	AmountIn   string `gorm:"column:amount_in;not null"`
+	SwapTxHash string `gorm:"column:swap_tx_hash;not null"`
+	// Status is what makes the primary key a guard rather than a record of the past.
+	//
+	// Recording the outcome AFTER the trade deduplicated the WRITE, not the TRADE: two concurrent
+	// deliveries of one delegation both found no row, both swapped on-chain, and the second one's
+	// insert then failed and was reported as a harmless "duplicate" — masking a second trade that
+	// really happened. The row is now claimed PENDING before the swap, so the second delivery is
+	// refused by the constraint before reaching the AMM.
+	//
+	// Legacy rows predate the column and hold ""; a row with a swap_tx_hash is EXECUTED whatever
+	// the column says, which is what keeps an in-place upgrade from re-opening those positions.
+	Status string `gorm:"column:status;not null;default:''"`
+	// FailureReason is why a claim was abandoned, so an operator reconciling the position reads it
+	// from the record instead of correlating logs.
+	FailureReason string    `gorm:"column:failure_reason;not null;default:''"`
+	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 // TableName sets the PostgreSQL table name for GORM AutoMigrate.

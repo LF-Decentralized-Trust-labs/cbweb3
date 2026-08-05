@@ -53,37 +53,60 @@ func (s *stubHubSwapExecutor) Execute(_ context.Context, req services.SwapReques
 }
 
 type stubHubSwapPositionReader struct {
-	pos *services.BridgePositionDetail
-	err error
+	pos   *services.BridgePositionDetail
+	err   error
+	calls int
 }
 
 func (s *stubHubSwapPositionReader) GetPosition(_ context.Context, _ string) (*services.BridgePositionDetail, error) {
+	s.calls++
 	return s.pos, s.err
 }
 
+// stubHubSwapRecorder models the claim guard. `existing` is the row a competing delegation already
+// owns: setting it is how a test says "this position is claimed", and its Status decides whether
+// that is a replay to report, a delegation in flight, or a failed attempt awaiting reconciliation.
 type stubHubSwapRecorder struct {
-	existing   *services.HubSwapRecord
-	findErr    error
-	recorded   *services.HubSwapRecord
-	recordErr  error
-	conflictTo *services.HubSwapRecord // returned by Record to simulate a lost race
-	findCalls  int
+	existing    *services.HubSwapRecord
+	claimErr    error
+	claimCalls  int
+	claimed     *services.HubSwapRecord
+	finalized   *services.HubSwapRecord
+	finalizeErr error
+	abandoned   string
+	abandonErr  error
 }
 
-func (s *stubHubSwapRecorder) FindByBridgeInPosition(_ context.Context, _ string) (*services.HubSwapRecord, error) {
-	s.findCalls++
-	return s.existing, s.findErr
+func (s *stubHubSwapRecorder) Claim(_ context.Context, rec *services.HubSwapRecord) (*services.HubSwapRecord, bool, error) {
+	s.claimCalls++
+	if s.claimErr != nil {
+		return nil, false, s.claimErr
+	}
+	if s.existing != nil {
+		return s.existing, false, nil
+	}
+	s.claimed = rec
+	return nil, true, nil
 }
 
-func (s *stubHubSwapRecorder) Record(_ context.Context, rec *services.HubSwapRecord) (*services.HubSwapRecord, error) {
-	if s.recordErr != nil {
-		return nil, s.recordErr
+func (s *stubHubSwapRecorder) Finalize(_ context.Context, positionID, amountIn, swapTxHash string) (*services.HubSwapRecord, error) {
+	if s.finalizeErr != nil {
+		return nil, s.finalizeErr
 	}
-	if s.conflictTo != nil {
-		return s.conflictTo, nil
+	out := services.HubSwapRecord{BridgeInPositionID: positionID, AmountIn: amountIn, SwapTxHash: swapTxHash, Status: services.HubSwapStatusExecuted}
+	if s.claimed != nil {
+		out.CorrelationID = s.claimed.CorrelationID
+		out.PayerBankID = s.claimed.PayerBankID
+		out.PoolPair = s.claimed.PoolPair
+		out.AmountOut = s.claimed.AmountOut
 	}
-	s.recorded = rec
-	return rec, nil
+	s.finalized = &out
+	return &out, nil
+}
+
+func (s *stubHubSwapRecorder) Abandon(_ context.Context, _, reason string) error {
+	s.abandoned = reason
+	return s.abandonErr
 }
 
 type stubHubSwapPayerResolver struct {
@@ -127,6 +150,13 @@ type hubSwapDeps struct {
 
 func newHubSwapApp(t *testing.T, d hubSwapDeps) (*fiber.App, hubSwapDeps) {
 	t.Helper()
+	return newHubSwapAppAs(t, d, "bank-a")
+}
+
+// newHubSwapAppAs builds the endpoint as it is reached by a given verified caller. An empty caller
+// is a request the relay-auth middleware authenticated by the shared secret, which names no entity.
+func newHubSwapAppAs(t *testing.T, d hubSwapDeps, caller string) (*fiber.App, hubSwapDeps) {
+	t.Helper()
 	if d.executor == nil {
 		d.executor = &stubHubSwapExecutor{txHash: "0xswap", amountIn: "800"}
 	}
@@ -146,7 +176,11 @@ func newHubSwapApp(t *testing.T, d hubSwapDeps) (*fiber.App, hubSwapDeps) {
 		h = h.WithDirectionResolver(d.direction)
 	}
 	app := fiber.New()
-	app.Post(services.HubSwapPath, h.HandleHubSwap)
+	if caller == "" {
+		app.Post(services.HubSwapPath, h.HandleHubSwap)
+	} else {
+		app.Post(services.HubSwapPath, asVerifiedCaller(caller), h.HandleHubSwap)
+	}
 	return app, d
 }
 
@@ -192,9 +226,10 @@ func TestHubSwap_ExecutesAndReportsRealizedCostAndSenderAddress(t *testing.T) {
 	// The output landed on the CB, so the CB must say so — Step 3 burns from here.
 	assert.Equal(t, cbHubSigner, out["swap_sender_address"])
 	assert.Equal(t, 1, d.executor.calls)
-	require.NotNil(t, d.recorder.recorded)
-	assert.Equal(t, "pos-1", d.recorder.recorded.BridgeInPositionID)
-	assert.Equal(t, "800", d.recorder.recorded.AmountIn)
+	require.NotNil(t, d.recorder.claimed, "the position must be claimed before the trade runs")
+	assert.Equal(t, "pos-1", d.recorder.claimed.BridgeInPositionID)
+	require.NotNil(t, d.recorder.finalized)
+	assert.Equal(t, "800", d.recorder.finalized.AmountIn)
 }
 
 func TestHubSwap_RefusesMaxAmountInAboveBridgedAmount(t *testing.T) {
@@ -223,6 +258,7 @@ func TestHubSwap_ReplayReturnsRecordedSwapWithoutSwappingAgain(t *testing.T) {
 	app, d := newHubSwapApp(t, hubSwapDeps{
 		recorder: &stubHubSwapRecorder{existing: &services.HubSwapRecord{
 			BridgeInPositionID: "pos-1", SwapTxHash: "0xfirst", AmountIn: "777",
+			Status: services.HubSwapStatusExecuted,
 		}},
 	})
 
@@ -237,11 +273,12 @@ func TestHubSwap_ReplayReturnsRecordedSwapWithoutSwappingAgain(t *testing.T) {
 }
 
 func TestHubSwap_LostRaceReturnsTheWinningRecord(t *testing.T) {
-	// Two concurrent delegations: the replay lookup found nothing, but the insert lost the
-	// race. The stored record is authoritative.
-	app, _ := newHubSwapApp(t, hubSwapDeps{
-		recorder: &stubHubSwapRecorder{conflictTo: &services.HubSwapRecord{
+	// Two deliveries of one delegation; this one lost the claim to a delivery that has already
+	// finished trading. The stored record is authoritative.
+	app, d := newHubSwapApp(t, hubSwapDeps{
+		recorder: &stubHubSwapRecorder{existing: &services.HubSwapRecord{
 			BridgeInPositionID: "pos-1", SwapTxHash: "0xwinner", AmountIn: "790",
+			Status: services.HubSwapStatusExecuted,
 		}},
 	})
 
@@ -250,6 +287,44 @@ func TestHubSwap_LostRaceReturnsTheWinningRecord(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 	assert.Equal(t, "0xwinner", out["swap_tx_hash"])
 	assert.Equal(t, "790", out["amount_in"])
+	assert.Zero(t, d.executor.calls, "losing the claim must mean not trading, not trading and then deduplicating")
+}
+
+// The window this closes: the loser of a concurrent race used to find no record, trade on-chain, and
+// only then hit the constraint — reported as a harmless "duplicate" while a second trade had really
+// happened. A claim still PENDING says the other delivery is trading right now, and an empty tx hash
+// is not an answer the caller can proceed on.
+func TestHubSwap_RefusesWhileAnotherDeliveryIsStillTrading(t *testing.T) {
+	app, d := newHubSwapApp(t, hubSwapDeps{
+		recorder: &stubHubSwapRecorder{existing: &services.HubSwapRecord{
+			BridgeInPositionID: "pos-1", Status: services.HubSwapStatusPending,
+		}},
+	})
+
+	status, out := postHubSwap(t, app, validHubSwapBody)
+
+	require.Equal(t, http.StatusConflict, status)
+	assert.Equal(t, "SWAP_IN_PROGRESS", out["code"])
+	assert.Zero(t, d.executor.calls, "one position funds one trade")
+	assert.NotContains(t, out, "swap_tx_hash", "a claim in flight has no outcome to report")
+}
+
+// A failed attempt may have failed AFTER broadcasting. Whether the tokens moved cannot be told from
+// here, so a retry is refused and named as a reconciliation task rather than silently traded again.
+func TestHubSwap_RefusesAfterAFailedAttemptUntilReconciled(t *testing.T) {
+	app, d := newHubSwapApp(t, hubSwapDeps{
+		recorder: &stubHubSwapRecorder{existing: &services.HubSwapRecord{
+			BridgeInPositionID: "pos-1", Status: services.HubSwapStatusFailed,
+			FailureReason: "hub RPC timeout",
+		}},
+	})
+
+	status, out := postHubSwap(t, app, validHubSwapBody)
+
+	require.Equal(t, http.StatusConflict, status)
+	assert.Equal(t, "SWAP_CLAIM_FAILED", out["code"])
+	assert.Equal(t, "hub RPC timeout", out["failure_reason"])
+	assert.Zero(t, d.executor.calls)
 }
 
 func TestHubSwap_RejectsForeignPositionBeforeConsultingReplayGuard(t *testing.T) {
@@ -258,8 +333,10 @@ func TestHubSwap_RejectsForeignPositionBeforeConsultingReplayGuard(t *testing.T)
 	pos := activeBridgeInPosition()
 	pos.OwnerBankID = "bank-z"
 	app, d := newHubSwapApp(t, hubSwapDeps{
-		reader:   &stubHubSwapPositionReader{pos: pos},
-		recorder: &stubHubSwapRecorder{existing: &services.HubSwapRecord{SwapTxHash: "0xsecret"}},
+		reader: &stubHubSwapPositionReader{pos: pos},
+		recorder: &stubHubSwapRecorder{existing: &services.HubSwapRecord{
+			SwapTxHash: "0xsecret", Status: services.HubSwapStatusExecuted,
+		}},
 	})
 
 	status, out := postHubSwap(t, app, validHubSwapBody)
@@ -267,7 +344,7 @@ func TestHubSwap_RejectsForeignPositionBeforeConsultingReplayGuard(t *testing.T)
 	require.Equal(t, http.StatusUnprocessableEntity, status)
 	assert.Equal(t, "POSITION_OWNER_MISMATCH", out["code"])
 	assert.NotContains(t, out, "swap_tx_hash")
-	assert.Zero(t, d.recorder.findCalls, "replay lookup must not run for a foreign position")
+	assert.Zero(t, d.recorder.claimCalls, "a foreign position must not even be claimed: the answer would disclose its state")
 	assert.Zero(t, d.executor.calls)
 }
 
@@ -327,7 +404,7 @@ func TestHubSwap_FailsClosedWithoutReplayGuard(t *testing.T) {
 		nil, &stubHubSwapPayerResolver{wallet: "0xBANKA"}, "0xWTOKEN", cbHubSigner,
 	)
 	app := fiber.New()
-	app.Post(services.HubSwapPath, h.HandleHubSwap)
+	app.Post(services.HubSwapPath, asVerifiedCaller("bank-a"), h.HandleHubSwap)
 
 	status, out := postHubSwap(t, app, validHubSwapBody)
 
@@ -343,7 +420,7 @@ func TestHubSwap_FailsClosedWithoutHubSignerAddress(t *testing.T) {
 		&stubHubSwapRecorder{}, &stubHubSwapPayerResolver{wallet: "0xBANKA"}, "0xWTOKEN", "",
 	)
 	app := fiber.New()
-	app.Post(services.HubSwapPath, h.HandleHubSwap)
+	app.Post(services.HubSwapPath, asVerifiedCaller("bank-a"), h.HandleHubSwap)
 
 	status, out := postHubSwap(t, app, validHubSwapBody)
 
@@ -383,14 +460,16 @@ func TestHubSwap_SurfacesExecutionFailureWithoutRecording(t *testing.T) {
 
 	require.Equal(t, http.StatusUnprocessableEntity, status)
 	assert.Equal(t, "SWAP_FAILED", out["code"])
-	assert.Nil(t, d.recorder.recorded, "a failed swap must not be recorded as done")
+	assert.Nil(t, d.recorder.finalized, "a failed swap must not be recorded as done")
+	assert.Contains(t, d.recorder.abandoned, "AMM__SlippageExceeded",
+		"the claim must be marked failed, with the reason, so the position is not silently retried")
 }
 
 func TestHubSwap_ReportsExecutedButUnrecordedForReconciliation(t *testing.T) {
 	// The trade is on-chain but the record was lost. Reporting failure would invite a second
 	// swap; the response says what happened and flags reconciliation instead.
 	app, _ := newHubSwapApp(t, hubSwapDeps{
-		recorder: &stubHubSwapRecorder{recordErr: errors.New("db down")},
+		recorder: &stubHubSwapRecorder{finalizeErr: errors.New("db down")},
 	})
 
 	status, out := postHubSwap(t, app, validHubSwapBody)
@@ -424,4 +503,36 @@ func TestHubSwap_RejectsNonPositiveAmounts(t *testing.T) {
 			assert.Zero(t, d.executor.calls)
 		})
 	}
+}
+
+// --- who may act for whom ---
+//
+// The position id is a correlator, not a permission: it is a UUID the delegating bank knows and
+// which travels through the relay. Authorizing on the request's own payer_bank_id therefore let any
+// authenticated peer name another bank plus that bank's ACTIVE position and have the CB trade
+// against it — at minimum burning the victim's bridged W-<source>. These two cases are the boundary.
+
+func TestHubSwap_RefusesACallerActingForAnotherBank(t *testing.T) {
+	// bank-b is a legitimately onboarded peer of this CB, so its signature verifies. What it may
+	// not do is spend bank-a's position.
+	app, d := newHubSwapAppAs(t, hubSwapDeps{}, "bank-b")
+
+	status, out := postHubSwap(t, app, validHubSwapBody)
+
+	require.Equal(t, http.StatusForbidden, status)
+	assert.Equal(t, "RELAY_CALLER_BANK_MISMATCH", out["code"])
+	assert.Zero(t, d.executor.calls, "no trade may run for a bank the caller is not")
+	assert.Zero(t, d.reader.calls, "the position must not even be read: answering about it discloses another bank's state")
+}
+
+func TestHubSwap_RefusesARequestWithNoVerifiedIdentity(t *testing.T) {
+	// The legacy shared secret is identical in every entity. A request it authenticated cannot say
+	// who is calling, so this endpoint — which acts for the caller — refuses it.
+	app, d := newHubSwapAppAs(t, hubSwapDeps{}, "")
+
+	status, out := postHubSwap(t, app, validHubSwapBody)
+
+	require.Equal(t, http.StatusUnauthorized, status)
+	assert.Equal(t, "RELAY_CALLER_IDENTITY_REQUIRED", out["code"])
+	assert.Zero(t, d.executor.calls)
 }

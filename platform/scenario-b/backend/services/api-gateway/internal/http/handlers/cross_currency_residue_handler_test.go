@@ -142,7 +142,7 @@ func newResidueFixture(
 		h = h.WithSwapVerification(verifier, finder)
 	}
 	app := fiber.New()
-	app.Post("/internal/amm/cross-currency-residue-return", h.HandleResidueReturn)
+	app.Post("/internal/amm/cross-currency-residue-return", asVerifiedCaller("bank-a"), h.HandleResidueReturn)
 	return &residueFixture{app: app, enqueuer: enqueuer, reader: reader}
 }
 
@@ -335,4 +335,29 @@ func TestResidue_RequiresBridgeInPositionID(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	assert.Equal(t, 0, f.enqueuer.calls)
+}
+
+// The residue return sends value back to the named bank's wallet. Ownership of the position was
+// already checked, but against the request's own payer_bank_id — which is only a boundary once that
+// id is known to belong to the caller.
+func TestResidue_RefusesACallerActingForAnotherBank(t *testing.T) {
+	enqueuer := &stubResidueEnqueuer{}
+	reader := &stubResiduePositionReader{pos: bridgeInPositionOK()}
+	h := handlers.NewCrossCurrencyResidueHandler(
+		enqueuer,
+		reader,
+		&stubBeneficiaryResolver{addr: testPayerWallet},
+		testSourceWToken,
+		"0xf12b5dd4ead5f743c6baa640b0216200e89b60da",
+		"spoke-brl",
+	).WithSwapVerification(&stubSwapVerifier{swap: verifiedInputSwapOK()}, nil)
+
+	app := fiber.New()
+	app.Post("/internal/amm/cross-currency-residue-return", asVerifiedCaller("bank-b"), h.HandleResidueReturn)
+
+	resp, out := postResidue(t, app, residueBody())
+
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, "RELAY_CALLER_BANK_MISMATCH", out["code"])
+	assert.Zero(t, enqueuer.calls, "no value goes back to a bank the caller is not")
 }

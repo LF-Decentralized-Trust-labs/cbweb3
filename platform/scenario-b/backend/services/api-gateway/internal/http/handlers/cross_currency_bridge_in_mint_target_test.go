@@ -53,7 +53,7 @@ func postBridgeIn(t *testing.T, cbHubAddr, swapSender string) *stubLockMintEnque
 	).WithHubSignerAddress(cbHubAddr)
 
 	app := fiber.New()
-	app.Post("/internal/amm/cross-currency-bridge-in", h.HandleBridgeIn)
+	app.Post("/internal/amm/cross-currency-bridge-in", asVerifiedCaller("bank-a"), h.HandleBridgeIn)
 
 	body := `{"correlation_id":"corr-1","payer_bank_id":"bank-a","source_currency":"BRL",` +
 		`"amount":"1000","spoke_in":"spoke-brl","swap_sender_address":"` + swapSender + `"}`
@@ -78,4 +78,28 @@ func TestBridgeIn_HonoursAnExplicitMintTarget(t *testing.T) {
 	// the pre-delegation behaviour is unchanged.
 	enq := postBridgeIn(t, "0xCBHUB", "0xLEGACYSIGNER")
 	assert.Equal(t, "0xLEGACYSIGNER", enq.mintTo)
+}
+
+// A bridge-in debits the named bank's tokenized reserves and mints against them, so naming the bank
+// is an act only that bank may request. Before the caller was bound to it, any authenticated peer
+// could drive another bank's reserves into the Hub.
+func TestBridgeIn_RefusesACallerActingForAnotherBank(t *testing.T) {
+	enq := &stubLockMintEnqueuer{}
+	h := handlers.NewCrossCurrencyBridgeInHandler(
+		enq, stubBridgeStateActive{}, "0xWTOKEN", "0xFIAT", "spoke-brl",
+	).WithHubSignerAddress("0xCBHUB")
+
+	app := fiber.New()
+	app.Post("/internal/amm/cross-currency-bridge-in", asVerifiedCaller("bank-b"), h.HandleBridgeIn)
+
+	body := `{"correlation_id":"corr-1","payer_bank_id":"bank-a","source_currency":"BRL",` +
+		`"amount":"1000","spoke_in":"spoke-brl"}`
+	req := httptest.NewRequest(http.MethodPost, "/internal/amm/cross-currency-bridge-in", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Zero(t, enq.calls, "no lock-mint may run for a bank the caller is not")
 }

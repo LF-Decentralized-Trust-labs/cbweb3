@@ -72,11 +72,16 @@ func (r *hubReconciliationRepository) InFlightBridgeIns(ctx context.Context, wTo
 
 	// What the AMM trade actually cost, per funding position. This CB executes the trade itself
 	// (the delegated Step 2), so it is its own record — no other entity has to be trusted for it.
+	//
+	// A row is only a cost once the trade returned: a PENDING claim is a trade in flight and a FAILED
+	// one never produced a figure, and reading either as "consumed 0" is indistinguishable from
+	// "not swapped yet" — which for a claim in flight it effectively is.
 	consumed := map[string]string{}
 	if err := r.eachChunk(ids, func(chunk []string) error {
 		var swaps []domain.CrossCurrencyHubSwap
 		if err := r.db.WithContext(ctx).
 			Where("bridge_in_position_id IN ?", chunk).
+			Where("amount_in <> ''").
 			Find(&swaps).Error; err != nil {
 			return err
 		}
@@ -125,12 +130,18 @@ func (r *hubReconciliationRepository) InFlightBridgeIns(ctx context.Context, wTo
 		if v := returned[p.PositionID]; v != nil {
 			ret = v.String()
 		}
+		amountIn, known := consumed[p.PositionID]
 		out = append(out, services.BridgeInContribution{
 			PositionID:  p.PositionID,
 			OwnerBankID: p.OwnerBankID,
 			Minted:      p.MirroredAmount,
-			Consumed:    consumed[p.PositionID],
+			Consumed:    amountIn,
 			Returned:    ret,
+			// Whether the cost is RECORDED, as opposed to zero. Empty and zero are the same string
+			// here, and the difference decides between "not swapped yet" and "swapped by something
+			// this CB did not record" — a bank running Step 2 locally with the CB's key, which is the
+			// configuration this branch migrates away from but still supports.
+			SwapCostKnown: known,
 		})
 	}
 	return out, nil

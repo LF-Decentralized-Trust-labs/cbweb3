@@ -171,12 +171,15 @@ func Setup(app *fiber.App, deps Dependencies) {
 		internalPayments.Post("/escrows", deps.PaymentHandler.RequestEscrow)
 		internalPayments.Post("/redeems", deps.PaymentHandler.RequestRedeem)
 		// The listing handlers are shared with the CB's own /api/v1/payments routes, where returning the
-		// whole book is the point. Here the caller is a single commercial bank, so an absent requester_id
-		// is a tenant boundary that was never applied — refuse it instead of answering from every bank's
-		// records. The calling bank's proxy always sets it from its own identity.
-		internalPayments.Get("/deposits", middleware.RequireRequesterScope(), deps.PaymentHandler.ListDeposits)
-		internalPayments.Get("/escrows", middleware.RequireRequesterScope(), deps.PaymentHandler.ListEscrows)
-		internalPayments.Get("/redeems", middleware.RequireRequesterScope(), deps.PaymentHandler.ListRedeems)
+		// whole book is the point. Here the caller is a single commercial bank, so requester_id is the
+		// tenant boundary — and it is therefore taken from the identity whose signature was verified,
+		// not from the query string, which no signature covers. A bank that signs a listing request and
+		// attaches another bank's address gets its own records back, and a caller with no verified
+		// identity gets none.
+		scopeToCaller := middleware.ScopeRequesterToCaller(deps.V2Deps.RequesterScopeResolver)
+		internalPayments.Get("/deposits", scopeToCaller, deps.PaymentHandler.ListDeposits)
+		internalPayments.Get("/escrows", scopeToCaller, deps.PaymentHandler.ListEscrows)
+		internalPayments.Get("/redeems", scopeToCaller, deps.PaymentHandler.ListRedeems)
 	}
 
 	// --- Internal spoke self-registration (hub only) ---

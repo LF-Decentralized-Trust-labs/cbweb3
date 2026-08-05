@@ -16,6 +16,10 @@
 //
 // Security model (same as R2-CR-6 / residue-return): the request is a trigger, not an
 // instruction. What the caller may spend is bounded by facts the CB owns:
+//   - the caller must BE the payer bank it names. The signature identifies the peer, and the
+//     bank id in the body is only a boundary once it is known to be the caller's own — otherwise
+//     any authenticated peer could name another bank plus that bank's position id, which is a
+//     correlator and not a permission;
 //   - the bridge-in position is the CB's own record of what it minted on the Hub, and it must
 //     belong to the payer bank named in the request;
 //   - max_amount_in may not exceed that position's mirrored_amount, so a delegation can never
@@ -24,13 +28,14 @@
 //   - the realized cost is decoded from the on-chain LogSwap, never echoed from the request;
 //   - the payer bank's participant status is re-checked here, at payment initiation, not only
 //     at onboarding;
-//   - each bridge-in position funds at most one swap (replay returns the recorded tx hash).
+//   - each bridge-in position funds at most one swap, and the position is CLAIMED before the AMM
+//     is touched: a record written afterwards deduplicates the write, not the trade.
 //
-// Ownership is checked before the replay lookup on purpose: answering "duplicate" to a
-// request naming another bank's position would disclose that position's state to a caller
-// with no claim to it.
+// Ownership is checked before the claim on purpose: answering "duplicate" to a request naming
+// another bank's position would disclose that position's state to a caller with no claim to it.
 //
-// Protected by the same X-Relay-Auth / per-CB signature middleware as bridge-in.
+// Protected by the same per-CB signature middleware as bridge-in — and unlike bridge-out, the
+// shared secret is never sufficient here, because the endpoint acts for the caller.
 package handlers
 
 import (
@@ -49,12 +54,17 @@ type HubSwapExecutorIface interface {
 	Execute(ctx context.Context, req services.SwapRequest) (*services.SwapResult, error)
 }
 
-// HubSwapRecorderIface is the replay guard for delegated swaps. FindByBridgeInPosition
-// returns (nil, nil) when the position has not funded a swap yet; Record persists the
-// outcome and returns the stored record when a concurrent delegation won the race.
+// HubSwapRecorderIface is the guard that keeps one bridge-in position funding one trade.
+//
+// It is a CLAIM, not a log. Claim inserts the record before the AMM is touched and reports
+// (nil, true, nil) when this call owns it, or the stored record with claimed=false when someone
+// already does. Finalize writes the realized outcome onto the claim; Abandon marks one whose trade
+// did not complete. The ordering is the property: recording after the fact deduplicated the write
+// while both callers had already traded.
 type HubSwapRecorderIface interface {
-	FindByBridgeInPosition(ctx context.Context, positionID string) (*services.HubSwapRecord, error)
-	Record(ctx context.Context, rec *services.HubSwapRecord) (*services.HubSwapRecord, error)
+	Claim(ctx context.Context, rec *services.HubSwapRecord) (existing *services.HubSwapRecord, claimed bool, err error)
+	Finalize(ctx context.Context, positionID, amountIn, swapTxHash string) (*services.HubSwapRecord, error)
+	Abandon(ctx context.Context, positionID, reason string) error
 }
 
 // SwapDirectionResolverIface reports whether buying targetCurrency on poolPair outputs the
@@ -103,6 +113,57 @@ func (h *CrossCurrencyHubSwapHandler) WithDirectionResolver(r SwapDirectionResol
 	return h
 }
 
+// answerExistingClaim reports what a delegation that lost the claim must do.
+//
+// Three different situations, and answering them alike is how a second trade goes unnoticed:
+//
+//	EXECUTED  a genuine replay — return the recorded outcome, which is what lets the orchestrator
+//	          continue with the same facts instead of trading again
+//	PENDING   another delivery of this delegation is trading RIGHT NOW. Reporting "duplicate" here
+//	          would hand the caller an empty tx hash and it would proceed on nothing; 409 says
+//	          "come back", and the retry then reads the recorded outcome
+//	FAILED    a previous attempt did not complete, and from here it is unknown whether its
+//	          transaction landed. Retrying blindly is the double-spend; reconciliation decides
+func (h *CrossCurrencyHubSwapHandler) answerExistingClaim(c *fiber.Ctx, correlationID, positionID string, existing *services.HubSwapRecord) error {
+	if existing == nil {
+		// Claim reports "someone else owns it" only together with the record; without one there is
+		// nothing to reason about and executing anyway is the unsafe direction.
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "this position is already claimed for a swap but the claim could not be read",
+		})
+	}
+	switch existing.Status {
+	case services.HubSwapStatusExecuted:
+		log.Printf("[correlation_id=%s] hub-swap replay detected: position=%s already swapped (tx=%s)",
+			sanitizeLogField(correlationID), sanitizeLogField(positionID), existing.SwapTxHash)
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"status":              "duplicate",
+			"swap_sender_address": h.hubSignerAddress,
+			"swap_tx_hash":        existing.SwapTxHash,
+			"amount_in":           existing.AmountIn,
+			"correlation_id":      correlationID,
+		})
+	case services.HubSwapStatusFailed:
+		log.Printf("[correlation_id=%s] hub-swap refused: position=%s has a FAILED claim (%s) — reconcile before retrying",
+			sanitizeLogField(correlationID), sanitizeLogField(positionID), sanitizeLogField(existing.FailureReason))
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": "a previous swap attempt for this position did not complete, and whether its transaction " +
+				"landed cannot be told from here — reconcile the position before retrying",
+			"code":           "SWAP_CLAIM_FAILED",
+			"failure_reason": existing.FailureReason,
+			"correlation_id": correlationID,
+		})
+	default:
+		log.Printf("[correlation_id=%s] hub-swap refused: position=%s is already being swapped by another delivery",
+			sanitizeLogField(correlationID), sanitizeLogField(positionID))
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error":          "another delivery of this delegation is already executing the swap for this position",
+			"code":           "SWAP_IN_PROGRESS",
+			"correlation_id": correlationID,
+		})
+	}
+}
+
 // HandleHubSwap processes the inbound Step 2 delegation.
 //
 // Expected JSON body:
@@ -136,6 +197,16 @@ func (h *CrossCurrencyHubSwapHandler) HandleHubSwap(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "correlation_id, payer_bank_id, bridge_in_position_id, pool_pair, amount_out, max_amount_in are required",
 		})
+	}
+
+	// WHO is calling, before anything the request says about whom it is for. The signature layer
+	// proves the peer; until this check existed the handler authorized on payer_bank_id from the
+	// body, so any authenticated peer could name another bank's code and position id and have this
+	// CB spend that bank's bridged W-<source>.
+	if ok, refusal := authorizeRelayCallerFor(c, req.PayerBankID); !ok {
+		log.Printf("[correlation_id=%s] hub-swap refused: caller may not act for %s",
+			sanitizeLogField(req.CorrelationID), sanitizeLogField(req.PayerBankID))
+		return refusal
 	}
 
 	if h.executor == nil {
@@ -225,26 +296,6 @@ func (h *CrossCurrencyHubSwapHandler) HandleHubSwap(c *fiber.Ctx) error {
 		}
 	}
 
-	// Replay protection: a bridge-in position funds exactly one swap. The AMM swap is not
-	// idempotent on-chain, so a second run would spend the payer's bridged balance twice.
-	existing, findErr := h.recorder.FindByBridgeInPosition(c.Context(), req.BridgeInPositionID)
-	if findErr != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "idempotency lookup failed: " + findErr.Error(),
-		})
-	}
-	if existing != nil {
-		log.Printf("[correlation_id=%s] hub-swap replay detected: position=%s already swapped (tx=%s)",
-			sanitizeLogField(req.CorrelationID), sanitizeLogField(req.BridgeInPositionID), existing.SwapTxHash)
-		return c.Status(fiber.StatusOK).JSON(fiber.Map{
-			"status":              "duplicate",
-			"swap_sender_address": h.hubSignerAddress,
-			"swap_tx_hash":        existing.SwapTxHash,
-			"amount_in":           existing.AmountIn,
-			"correlation_id":      req.CorrelationID,
-		})
-	}
-
 	// The spend ceiling is what this CB minted for this position — never what the request asks
 	// for. This is the invariant that keeps a delegation from reaching into another bank's
 	// W-<source> on the CB's Hub address.
@@ -289,6 +340,28 @@ func (h *CrossCurrencyHubSwapHandler) HandleHubSwap(c *fiber.Ctx) error {
 		}
 	}
 
+	// CLAIM THE POSITION BEFORE TRADING. The AMM swap is not idempotent on-chain, and the
+	// bridge-in position is what funds exactly one of them. Checking for a record and recording
+	// afterwards guarded the WRITE, not the trade: two concurrent deliveries of one delegation both
+	// found nothing, both traded, and the loser's insert then failed and was answered as a benign
+	// "duplicate" — hiding a second trade that had really happened. The primary key can only stop
+	// the second trade if the row is there before the first one.
+	existing, claimed, claimErr := h.recorder.Claim(c.Context(), &services.HubSwapRecord{
+		BridgeInPositionID: req.BridgeInPositionID,
+		CorrelationID:      req.CorrelationID,
+		PayerBankID:        req.PayerBankID,
+		PoolPair:           req.PoolPair,
+		AmountOut:          amountOut.String(),
+	})
+	if claimErr != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "could not claim this position for a swap: " + claimErr.Error(),
+		})
+	}
+	if !claimed {
+		return h.answerExistingClaim(c, req.CorrelationID, req.BridgeInPositionID, existing)
+	}
+
 	result, err := h.executor.Execute(c.Context(), services.SwapRequest{
 		Pair:           req.PoolPair,
 		AmountOut:      amountOut.String(),
@@ -299,27 +372,28 @@ func (h *CrossCurrencyHubSwapHandler) HandleHubSwap(c *fiber.Ctx) error {
 		OutputIsTokenA: outputIsTokenA,
 	})
 	if err != nil {
+		// Mark the claim rather than release it. A trade can fail after being broadcast, so from
+		// here "failed" does not mean "nothing moved", and handing the position back for a blind
+		// retry would reopen the double-spend the claim exists to prevent. The orchestrator rolls
+		// the bridge-in back on this path, so no legitimate delegation is left waiting on it.
+		if abandonErr := h.recorder.Abandon(c.Context(), req.BridgeInPositionID, err.Error()); abandonErr != nil {
+			log.Printf("[correlation_id=%s] WARNING: hub swap failed and its claim could not be marked failed (position %s): %v",
+				sanitizeLogField(req.CorrelationID), sanitizeLogField(req.BridgeInPositionID), abandonErr)
+		}
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": "hub swap failed: " + err.Error(),
 			"code":  "SWAP_FAILED",
 		})
 	}
 
-	// The swap is on-chain. Persist before answering so a retry is recognised as a replay
-	// even if the caller never sees this response.
-	stored, recErr := h.recorder.Record(c.Context(), &services.HubSwapRecord{
-		BridgeInPositionID: req.BridgeInPositionID,
-		CorrelationID:      req.CorrelationID,
-		PayerBankID:        req.PayerBankID,
-		PoolPair:           req.PoolPair,
-		AmountOut:          amountOut.String(),
-		AmountIn:           result.AmountIn,
-		SwapTxHash:         result.TxHash,
-	})
+	// The swap is on-chain. Write the realized outcome onto the claim before answering, so a retry
+	// is recognised as a replay even if the caller never sees this response.
+	stored, recErr := h.recorder.Finalize(c.Context(), req.BridgeInPositionID, result.AmountIn, result.TxHash)
 	if recErr != nil {
-		// The swap already happened; losing the record is a reconciliation problem, not a
-		// reason to report failure and invite a second swap. Surface it loudly instead.
-		log.Printf("[correlation_id=%s] CRITICAL: hub swap executed (tx=%s) but recording it failed — a retry could swap twice: %v",
+		// The swap already happened; losing the outcome is a reconciliation problem, not a reason
+		// to report failure and invite a second swap. The claim row itself survives, so a retry is
+		// refused rather than executed — which is the part that used to be missing here.
+		log.Printf("[correlation_id=%s] CRITICAL: hub swap executed (tx=%s) but recording its outcome failed — the claim still guards the position: %v",
 			sanitizeLogField(req.CorrelationID), result.TxHash, recErr)
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"status":              "executed_unrecorded",
@@ -327,7 +401,7 @@ func (h *CrossCurrencyHubSwapHandler) HandleHubSwap(c *fiber.Ctx) error {
 			"swap_tx_hash":        result.TxHash,
 			"amount_in":           result.AmountIn,
 			"correlation_id":      req.CorrelationID,
-			"warning":             "swap executed but not recorded; reconciliation required before any retry",
+			"warning":             "swap executed but its outcome was not recorded; reconcile this position before any retry",
 		})
 	}
 

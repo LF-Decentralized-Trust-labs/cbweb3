@@ -150,6 +150,12 @@ func (h *CrossCurrencyBridgeInHandler) HandleBridgeIn(c *fiber.Ctx) error {
 		})
 	}
 
+	// The verified caller may only bridge in for itself. Otherwise an authenticated peer names
+	// another bank and this CB debits that bank's tCeBM reserves and mints against them.
+	if ok, refusal := authorizeRelayCallerFor(c, req.PayerBankID); !ok {
+		return refusal
+	}
+
 	if h.wTokenAddress == "" || h.fiatTokenAddress == "" {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": "CB sovereign token addresses not configured (W_TOKEN_ADDRESS / TOKEN_ADDRESS)",

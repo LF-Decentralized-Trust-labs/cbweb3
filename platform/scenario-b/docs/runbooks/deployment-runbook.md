@@ -317,6 +317,15 @@ stopping is deliberate. `HUB_RECONCILIATION_INTERVAL_SEC=0` disables the checker
 - **A residue whose *enqueue* failed** leaves no position on the CB, so it appears inside
   `unexplained` rather than as a named item; the payer's own gateway is what knows which swap it is
   (`RETURN_ESCALATED` in its history).
+- **A position whose trade this CB did not execute is listed, not priced.** `consumed` comes from the
+  CB's own swap records, which exist for the delegated Step 2 and for a Step 2 the CB ran itself. A
+  bank that still swaps with a Hub key of its own leaves no such record here, so the position appears
+  under a new `unattributed` array in the report (with `minted`, `returned` and the reason) and is
+  **excluded from `expected_in_flight`** — on-chain it holds nothing once its residue is back.
+  Previously the blank cost read as "consumed nothing", which claimed the whole mint was still on the
+  Hub and drove `unexplained` NEGATIVE: the arithmetic contradicting the condition the report exists
+  to raise. A non-empty `unattributed` on a fully delegated deployment means some gateway is still
+  trading on the hub itself — worth chasing.
 
 **Expect a non-zero figure on an upgraded stack** that has been running payments: anything stranded
 before item 5's retry existed shows up here. That is the feature working, not a regression.
@@ -326,12 +335,50 @@ backfills it at startup (`IN`/`OUT`, derived from the relayer queue's event type
 rows), plus an index on `(mirrored_asset, leg, bridge_state)`. Both are additive and idempotent; the
 backfill only touches rows whose direction is empty, so a re-run and a rollback are both no-ops.
 
-### 7. Delegated-swap replay guard (additive)
+### 7. Delegated-swap replay guard is now a CLAIM, taken before the trade (behaviour change)
 
 `cross_currency_hub_swaps` is created by `AutoMigrate` and keys each delegated Hub AMM swap on the
 bridge-in position that funded it, so a retried delegation cannot trade twice against the same
-bridged balance. Additive: an older binary ignores the table. Not a rollback blocker on its own,
-but a downgrade silently loses the guard.
+bridged balance.
+
+**What changed.** The row used to be written *after* the trade, which deduplicated the WRITE and not
+the TRADE: two deliveries of one delegation both found no record, both traded on the AMM — which is
+not idempotent on-chain — and the loser's insert then failed and was answered as a harmless
+`duplicate`, hiding a second trade that had really happened. The row is now inserted `PENDING`
+**before** the AMM is touched and finalized with the realized cost afterwards, so the primary key
+refuses the second delivery before it can trade.
+
+`AutoMigrate` adds `status`, `failure_reason` and `updated_at`. Rows written by the previous binary
+carry an empty status and are read as `EXECUTED` whenever they hold a transaction hash — without
+that, every past swap would look like a delegation in flight and legitimate replays would answer 409.
+
+**New responses on `POST /internal/amm/cross-currency-hub-swap`:**
+
+| Response | Meaning | What to do |
+|---|---|---|
+| `200 duplicate` | the position already traded; the recorded cost and hash come back | nothing — the caller proceeds on the same facts |
+| `409 SWAP_IN_PROGRESS` | another delivery of this delegation is trading right now | retry; it then reads the recorded outcome |
+| `409 SWAP_CLAIM_FAILED` | an earlier attempt did not complete, and whether its transaction landed cannot be told from here | reconcile the position before retrying — see below |
+
+A `409` does **not** roll the bridge-in back. Reversing it would reclaim tokens another delivery is
+spending, or that a possibly-broadcast transaction already spent, so the payer's gateway leaves the
+position untouched (`hub swap not ours` in its log).
+
+**Reconciling a `FAILED` claim.** `failure_reason` on the row says why the attempt stopped. Check
+whether its transaction exists on the hub before doing anything else:
+
+```sql
+SELECT bridge_in_position_id, status, amount_in, swap_tx_hash, failure_reason
+  FROM cross_currency_hub_swaps WHERE status = 'FAILED';
+```
+
+If the trade did happen, finalize the row from the on-chain `LogSwap` (`amount_in`, `swap_tx_hash`,
+`status='EXECUTED'`) and let the payment continue. If it demonstrably did not, the bridge-in position
+is the thing to reverse; deleting the claim is what re-opens the double-spend and must be a
+deliberate, recorded decision.
+
+A downgrade to the previous binary keeps working (it ignores the new columns) but silently returns to
+guarding the write instead of the trade.
 
 ### 8. W-token administration is separated from issuance (point of no return)
 
@@ -415,9 +462,14 @@ leftover file would resurrect a revoked bank.
 `RELAY_REQUIRE_SIGNATURE=true` stops the shared secret being accepted. Enable it only when every
 caller signs and every peer is pinned. Three properties make that safe to get wrong:
 
-- a gateway with enforcement set and **no pinned peer refuses to start**, naming both settings,
+- a gateway with enforcement set and **no pinned peer refuses to start**, naming both sources,
   instead of answering 401 to every internal request — which is what it would otherwise do, including
-  to correctly signed ones, taking bridge-in, the delegated hub swap and the residue return down;
+  to correctly signed ones, taking bridge-in, the delegated hub swap and the residue return down.
+  The guard reads **both** pin sources at boot, files *and* the participants table: judging the files
+  alone refused exactly the deployment enforcement is for, since a central bank's peers are the banks
+  it onboarded and its `PKI_DIR` holds no peer certificate at all. A database that cannot be read at
+  boot is not a refusal — nothing is known about the pins then, and the periodic refresh repairs it —
+  but the log says so explicitly;
 - an **unknown key-id triggers one rate-limited registry reload** before rejection, so a bank becomes
   verifiable the moment it finishes onboarding rather than at the next periodic sweep;
 - a **commercial bank never inherits the flag** — the toolkit forces it empty on `join`, because
@@ -455,9 +507,40 @@ neither an onboarded participant with an issued certificate nor a `<key-id>.crt`
 gateway still starts (an entity may legitimately receive no internal calls), but any signed request
 from a peer will be rejected.
 
+**Routes where the shared secret is NEVER enough, whatever `RELAY_REQUIRE_SIGNATURE` says.** Some
+`/internal/*` endpoints act *on behalf of* a named institution, and the secret is identical in every
+entity, so it cannot say who is asking. Those routes now require a verified signature and require the
+verified identity to be the institution named in the request:
+
+| Route | Bound field | Refusals |
+|---|---|---|
+| `/internal/amm/cross-currency-hub-swap` | `payer_bank_id` | `401 RELAY_CALLER_IDENTITY_REQUIRED`, `403 RELAY_CALLER_BANK_MISMATCH` |
+| `/internal/amm/cross-currency-bridge-in` | `payer_bank_id` | same |
+| `/internal/amm/cross-currency-residue-return` | `payer_bank_id` | same |
+| `/internal/v2/transfer-limits/{check-and-deduct,restore}` | `payer_bank_id` | same |
+| `/internal/v1/payments/{deposits,escrows,redeems}` (GET) | `requester_id` (derived, not read) | `401 RELAY_CALLER_IDENTITY_REQUIRED`, `403 REQUESTER_NOT_A_PARTICIPANT` |
+
+Authenticating a peer and then authorizing on a bank id from the request body is the same as not
+authorizing: the position id and the bank code both travel in the request, and a UUID is not a
+permission. So a bank whose signing key fails to load no longer falls back to the shared secret on
+these routes — it gets a loud 401 instead of the ability to act as any other bank. **Operational
+consequence:** a bank must have its key and its issued certificate in place before it can transact,
+which `join` + onboarding already guarantee. Check `signature enabled` in the bank gateway's log
+before its first payment.
+
+The listing routes are scoped from the caller too, not from the query string: the signature covers
+method, path, body hash and timestamp, so an onboarded bank could otherwise sign a listing request
+and hang another bank's address on it. The central bank now resolves the caller's own address from the
+participants table and replaces whatever `requester_id` arrived (the mismatch is logged). This relies
+on `participants.wallet_address` being the bank's `ENTITY_BESU_ADDRESS` — the toolkit derives both
+from the same per-bank key, so they agree by construction; a hand-built stack that sets them
+differently will return empty listings.
+
 **What deliberately still uses the shared secret.** `/internal/v1/spokes/{register,register-currency,
 register-pair}` — the caller is the toolkit CLI running on the host, which has no pinned identity.
-Giving the provisioning tool an identity is a separate decision.
+Giving the provisioning tool an identity is a separate decision. `/internal/amm/cross-currency-bridge-out`
+and `/internal/amm/execute-matched-commit` also stay unbound to a bank: their caller is the Cacti
+relay, acting for the corridor rather than for one institution.
 
 **Rollback.** Unset `RELAY_REQUIRE_SIGNATURE` and the receiver accepts the secret again; senders keep
 signing harmlessly. The signing keys and pins are additive, so a downgrade to a binary that does not
@@ -908,6 +991,35 @@ for `signature enabled`: a bank needs `PKI_DIR/<key-id>.key` (written by `gen-cs
 relay needs `RELAY_SIGNING_KEY_FILE` (written by the hub's `gen-relay-identity-cacti` — remember the
 relay must be restarted after that step, since it reads its key once at construction).
 
+### Internal calls answer 401 RELAY_CALLER_IDENTITY_REQUIRED
+
+The route acts on behalf of a named institution and the request carried no verified signature — the
+shared secret is not accepted there, whatever `RELAY_REQUIRE_SIGNATURE` says (see item 9's table).
+Same fix as above: get the caller signing. In the bank portal this surfaces as the trust notice, not
+as a logout.
+
+### Internal calls answer 403 RELAY_CALLER_BANK_MISMATCH
+
+The signature verified, but as a different entity than the `payer_bank_id` in the request. Two real
+causes: `RELAY_KEY_ID` on the caller does not match the `bank_code` it transacts under (they must be
+the same for a bank — the pin comes from the participants row keyed by `bank_code`), or something is
+genuinely driving a payment for another institution. The message names both sides; compare them
+against the caller's `BANK_CODE`.
+
+### A bank's payment listings come back empty
+
+The central bank scopes `/internal/v1/payments/*` to the caller's own address, resolved from its
+participants row — a supplied `requester_id` is discarded. Empty listings with records visible in the
+CB's own portal mean `participants.wallet_address` is not the address the bank's proxy stamps on its
+writes (`ENTITY_BESU_ADDRESS`). The toolkit derives both from the same per-bank key; a hand-edited
+compose file can split them. Compare:
+
+```bash
+docker exec <cb-postgres> psql -U postgres -d compliance \
+  -c "SELECT bank_code, wallet_address, status FROM participants;"
+docker inspect <bank-gateway> --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ENTITY_BESU_ADDRESS
+```
+
 ### Internal calls answer 401 RELAY_SIGNATURE_INVALID
 
 The caller signed but the receiver could not verify. Either the peer is not pinned — check
@@ -1100,5 +1212,6 @@ After fixing, restart the affected backend services.
 
 | Date | Deliverable | Change |
 |------|-------------|--------|
+| 2026-08-05 | Sovereign hub delegation (review fixes) | **Authorization now follows the verified caller.** The endpoints that act for a named institution bind the signature's identity to `payer_bank_id`, and the internal payment listings derive `requester_id` from it instead of reading the query string (item 9). The delegated-swap guard became a claim taken *before* the trade, with new `409` answers (item 7). The enforcement boot guard reads both pin sources, so a central bank whose peers are its onboarded banks can enable `RELAY_REQUIRE_SIGNATURE` (item 9). Hub reconciliation lists positions it cannot price under `unattributed` instead of counting them as unspent (item 6). |
 | 2026-07-23 | D6 v2 → D12 | **Network parameter rebase.** Besu image `24.x → 25.8.0` (pinned) and chain IDs `80000/80001/80002 → 1337/1338/1339` (hub/spoke-A/spoke-B). Rationale, compatibility verification, LNET coordination, and a flagged Besu version-skew risk in the bring-up scripts are documented in [besu-chainid-migration-notes.md](besu-chainid-migration-notes.md). Operational cutover for the chain-ID change: see [Decommissioning the Legacy Hub-on-Spoke-A Deployment](#decommissioning-the-legacy-hub-on-spoke-a-deployment). |
 | 2026-05-29 | D9 | Initial deployment runbook (PKI → infra → Besu → contracts → seed → backend → relay), health checks, smoke tests, teardown. |

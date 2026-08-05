@@ -70,6 +70,59 @@ func relayAuthConfigFor(cfg config.Config) middleware.RelayAuthConfig {
 	}
 }
 
+// validateRelayAuthForBoot decides whether this gateway may serve traffic with the relay-auth
+// settings it was given, judging the registry that will ACTUALLY verify requests.
+//
+// The file glob alone is the wrong thing to judge on a central bank. Its peers are the banks it
+// onboarded, and those are pinned from the participants table — its PKI dir holds no peer
+// certificates at all. Validating the file registry therefore refused to start exactly the
+// deployment the enforcement flag exists for: enforcement on, peers pinned from the database, the
+// relay's leaf certificate not distributed to this host (a documented cross-VM gap). So the pins are
+// folded in first, using a connection opened and closed here — reads only, and before any gRPC dial,
+// worker or on-chain write, which is the property that made the check belong at boot in the first
+// place.
+//
+// A database that cannot be read is deliberately NOT a refusal. Then nothing is known about the pins,
+// and refusing over a transient outage would take the gateway down for a condition that resolves
+// itself: the periodic refresher pins the peers as soon as the database answers. The state is logged
+// instead, and requests still fail closed one at a time.
+func validateRelayAuthForBoot(cfg config.Config) (middleware.RelayAuthConfig, error) {
+	c := relayAuthConfigFor(cfg)
+	if !c.RequireSignature {
+		return c, nil
+	}
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		// No participant source exists; the files are the whole registry and judging them is right.
+		return c, c.Validate()
+	}
+	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	if err != nil {
+		log.Printf("[app] relay auth: could not read participant pins at boot (%v) — starting anyway; "+
+			"internal requests fail closed until the periodic refresh pins this CB's peers", err)
+		return c, nil
+	}
+	if sqlDB, sqlErr := db.DB(); sqlErr == nil {
+		defer func() { _ = sqlDB.Close() }()
+	}
+	pins, pinErr := loadParticipantPins(context.Background(), db)
+	if pinErr != nil {
+		log.Printf("[app] relay auth: could not read participant pins at boot (%v) — starting anyway; "+
+			"internal requests fail closed until the periodic refresh pins this CB's peers", pinErr)
+		return c, nil
+	}
+	return c, validateRelayAuthWithPins(c, cfg.PKIDir, pins)
+}
+
+// validateRelayAuthWithPins is the decision itself: assemble both sources, then judge. Split out so
+// the rule can be tested with pins in hand, which is the part that was wrong — not the plumbing that
+// fetches them.
+func validateRelayAuthWithPins(c middleware.RelayAuthConfig, pkiDir string, pins []relayauth.ParticipantPin) error {
+	files, _ := relayauth.LoadRegistryGlob(pkiDir)
+	c.Registry.Set(relayauth.BuildRegistry(files, pins))
+	return c.Validate()
+}
+
 // App wraps the Fiber HTTP server and all gRPC connections for lifecycle management.
 type App struct {
 	Fiber   *fiber.App
@@ -113,7 +166,7 @@ func New(cfg config.Config) (*App, error) {
 	// refuses to start, but by then the wiring has already dialled gRPC, started background workers
 	// and — through bootstrapLiquidityProviderRole — submitted an on-chain transaction. A process
 	// that refuses to start must not have written to the ledger first.
-	if err := relayAuthConfigFor(cfg).Validate(); err != nil {
+	if _, err := validateRelayAuthForBoot(cfg); err != nil {
 		return nil, fmt.Errorf("relay auth configuration: %w", err)
 	}
 
@@ -719,6 +772,10 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		// to the payer's own spoke wallet, resolved from the participants registry.
 		if db != nil {
 			orchestrator = orchestrator.WithPayerWalletResolver(services.NewParticipantResolver(db))
+			// A locally executed Step 2 must record what it cost, in the same place the delegated
+			// path does. Without it the Hub reconciliation reads the position as never swapped and
+			// claims more is on the Hub than the balance holds.
+			orchestrator = orchestrator.WithHubSwapConsumptionRecorder(newCrossCurrencyHubSwapRepository(db))
 		}
 		// Dynamic per-pair model: let Step 3 tell the Cacti relay which AMM to run
 		// its isPaused() gate against, resolved from the on-chain PairRegistry.
@@ -820,6 +877,12 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		log.Printf("[app] relay auth: could not load peer certs from PKI_DIR=%q: %v", cfg.PKIDir, relayRegErr)
 	}
 	deps.RelayAuth = relayAuthConfigFor(cfg)
+	// The tenant scope of /internal/v1/payments listings comes from the participants table: it maps
+	// the entity id this gateway verified to the address that bank's records are keyed by. Without a
+	// database those listings fail closed rather than answering from every bank's rows.
+	if db != nil {
+		deps.RequesterScopeResolver = services.NewParticipantResolver(db)
+	}
 
 	// Fold in the peers this central bank onboarded, THEN report. Order matters: the participants
 	// table is what makes a CB's registry non-empty at all (its PKI dir holds no peer certificates),
@@ -855,10 +918,16 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 				"Any signed request from a peer will be rejected with 401 (RELAY_SIGNATURE_INVALID) instead of falling back to the shared secret.", cfg.RelayKeyID)
 		}
 	} else if cfg.RelayRequireSignature {
-		// Do not claim the legacy fallback here: with enforcement on and nothing pinned, the
-		// shared secret is NOT accepted — every internal request would be rejected. New refuses
-		// to start on this, and the log must not say otherwise.
-		log.Printf("[app] relay auth: no peer keys pinned AND require_signature=true — refusing to start")
+		// Do not claim the legacy fallback here: with enforcement on and nothing pinned, the shared
+		// secret is NOT accepted — every internal request is rejected with 401.
+		//
+		// Reaching this line means the boot guard let the process through, which it does only when the
+		// participant pins could not be read (a database that was not answering yet). So the state is
+		// expected to repair itself on the next refresh, and saying "refusing to start" here — as this
+		// line used to — described the one thing that did not happen.
+		log.Printf("[app] relay auth: no peer keys pinned AND require_signature=true — every internal request " +
+			"will be rejected with 401 until this CB's peers are pinned; the participants table could not be " +
+			"read at boot, so the periodic refresh is what will fix this")
 	} else {
 		log.Printf("[app] relay auth: no peer keys pinned; internal routes use legacy shared secret")
 	}

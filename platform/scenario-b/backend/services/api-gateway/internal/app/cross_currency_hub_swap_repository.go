@@ -47,38 +47,100 @@ func (r *crossCurrencyHubSwapRepository) FindByBridgeInPosition(ctx context.Cont
 	return toHubSwapRecord(&row), nil
 }
 
-// Record persists the executed swap. When a concurrent delegation won the race, the insert
-// hits the primary-key constraint and the stored record is returned instead of an error —
-// the swap is already done and the caller must report that outcome, not retry it.
+// Claim reserves the position for this delegation BEFORE the trade runs.
 //
-// Only a unique violation takes this path; a transient DB error surfaces so the caller can
-// react to it rather than mistake it for a duplicate.
-func (r *crossCurrencyHubSwapRepository) Record(ctx context.Context, rec *services.HubSwapRecord) (*services.HubSwapRecord, error) {
+// This is the guard, and its placement is the whole point. Recording the swap afterwards
+// deduplicated the write and not the trade: two concurrent deliveries of one delegation both saw
+// no record, both traded on the AMM — which is not idempotent on-chain — and the loser's insert
+// then failed and was answered as a harmless "duplicate". The primary key can only prevent a
+// second trade if the row exists before the first one.
+//
+// Returns (nil, true, nil) when this call owns the claim. When the row already exists it returns
+// (existing, false, nil) and the caller must decide from the record's status: an EXECUTED claim is
+// a replay to report, a PENDING one is a delegation still in flight, and a FAILED one needs
+// reconciliation before anything else happens.
+func (r *crossCurrencyHubSwapRepository) Claim(ctx context.Context, rec *services.HubSwapRecord) (*services.HubSwapRecord, bool, error) {
 	row := domain.CrossCurrencyHubSwap{
 		BridgeInPositionID: strings.TrimSpace(rec.BridgeInPositionID),
 		CorrelationID:      rec.CorrelationID,
 		PayerBankID:        rec.PayerBankID,
 		PoolPair:           rec.PoolPair,
 		AmountOut:          rec.AmountOut,
-		AmountIn:           rec.AmountIn,
-		SwapTxHash:         rec.SwapTxHash,
+		Status:             services.HubSwapStatusPending,
 	}
 	err := r.db.WithContext(ctx).Create(&row).Error
 	if err == nil {
-		return toHubSwapRecord(&row), nil
+		return nil, true, nil
 	}
 	if !isHubSwapUniqueViolation(err) {
-		return nil, fmt.Errorf("record hub swap for position %s: %w", rec.BridgeInPositionID, err)
+		return nil, false, fmt.Errorf("claim hub swap for position %s: %w", rec.BridgeInPositionID, err)
 	}
 	existing, findErr := r.FindByBridgeInPosition(ctx, rec.BridgeInPositionID)
 	if findErr != nil {
-		return nil, findErr
+		return nil, false, findErr
 	}
 	if existing == nil {
 		// The constraint fired but no row is visible: do not paper over it.
-		return nil, fmt.Errorf("record hub swap for position %s: unique violation with no stored record", rec.BridgeInPositionID)
+		return nil, false, fmt.Errorf("claim hub swap for position %s: unique violation with no stored record", rec.BridgeInPositionID)
 	}
-	return existing, nil
+	return existing, false, nil
+}
+
+// Finalize writes the realized outcome onto a claim this process owns.
+//
+// Scoped to a PENDING row on purpose: if anything else already moved the claim, this call must not
+// overwrite it, and the caller has to learn that rather than believe it recorded the trade.
+func (r *crossCurrencyHubSwapRepository) Finalize(ctx context.Context, positionID, amountIn, swapTxHash string) (*services.HubSwapRecord, error) {
+	id := strings.TrimSpace(positionID)
+	res := r.db.WithContext(ctx).
+		Model(&domain.CrossCurrencyHubSwap{}).
+		Where("bridge_in_position_id = ?", id).
+		Where("status = ?", services.HubSwapStatusPending).
+		Updates(map[string]any{
+			"amount_in":    amountIn,
+			"swap_tx_hash": swapTxHash,
+			"status":       services.HubSwapStatusExecuted,
+		})
+	if res.Error != nil {
+		return nil, fmt.Errorf("finalize hub swap for position %s: %w", positionID, res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return nil, fmt.Errorf("finalize hub swap for position %s: no PENDING claim to finalize", positionID)
+	}
+	return r.FindByBridgeInPosition(ctx, id)
+}
+
+// Abandon marks a claim whose trade did not complete, keeping the reason with the record.
+//
+// The claim is NOT deleted. A swap can fail after the transaction was broadcast, so from here
+// "failed" does not mean "nothing moved"; releasing the position for a blind retry would reopen
+// exactly the double-spend this claim exists to prevent. The normal flow rolls the bridge-in
+// position back, so nothing legitimate is waiting on this row.
+func (r *crossCurrencyHubSwapRepository) Abandon(ctx context.Context, positionID, reason string) error {
+	res := r.db.WithContext(ctx).
+		Model(&domain.CrossCurrencyHubSwap{}).
+		Where("bridge_in_position_id = ?", strings.TrimSpace(positionID)).
+		Where("status = ?", services.HubSwapStatusPending).
+		Updates(map[string]any{
+			"status":         services.HubSwapStatusFailed,
+			"failure_reason": truncateFailureReason(reason),
+		})
+	if res.Error != nil {
+		return fmt.Errorf("abandon hub swap claim for position %s: %w", positionID, res.Error)
+	}
+	return nil
+}
+
+// maxFailureReasonLen bounds what a remote error message can write into the record. An RPC error
+// carries arbitrary text, and the column is not a log.
+const maxFailureReasonLen = 500
+
+func truncateFailureReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if len(reason) > maxFailureReasonLen {
+		return reason[:maxFailureReasonLen]
+	}
+	return reason
 }
 
 func toHubSwapRecord(row *domain.CrossCurrencyHubSwap) *services.HubSwapRecord {
@@ -90,7 +152,24 @@ func toHubSwapRecord(row *domain.CrossCurrencyHubSwap) *services.HubSwapRecord {
 		AmountOut:          row.AmountOut,
 		AmountIn:           row.AmountIn,
 		SwapTxHash:         row.SwapTxHash,
+		Status:             hubSwapStatusOf(row),
+		FailureReason:      row.FailureReason,
 	}
+}
+
+// hubSwapStatusOf reads the status a row means, not just the column.
+//
+// Rows written before the claim existed have an empty status and a transaction hash. Reporting them
+// as PENDING would make every past swap look like a delegation in flight and refuse a legitimate
+// replay answer, so a recorded hash decides.
+func hubSwapStatusOf(row *domain.CrossCurrencyHubSwap) string {
+	if row.Status != "" {
+		return row.Status
+	}
+	if strings.TrimSpace(row.SwapTxHash) != "" {
+		return services.HubSwapStatusExecuted
+	}
+	return services.HubSwapStatusPending
 }
 
 // isHubSwapUniqueViolation reports whether err is a unique-constraint violation. Kept

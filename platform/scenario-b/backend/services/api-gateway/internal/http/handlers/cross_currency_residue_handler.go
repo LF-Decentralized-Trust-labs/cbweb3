@@ -129,6 +129,13 @@ func (h *CrossCurrencyResidueHandler) HandleResidueReturn(c *fiber.Ctx) error {
 		})
 	}
 
+	// The verified caller may only ask for its own residue back. The position's ownership is
+	// checked further down, but against the request's payer_bank_id — which is only a boundary
+	// once that id is known to be the caller's own.
+	if ok, refusal := authorizeRelayCallerFor(c, req.PayerBankID); !ok {
+		return refusal
+	}
+
 	if h.wTokenAddress == "" || h.fiatTokenAddress == "" {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": "CB sovereign token addresses not configured (W_TOKEN_ADDRESS / TOKEN_ADDRESS)",

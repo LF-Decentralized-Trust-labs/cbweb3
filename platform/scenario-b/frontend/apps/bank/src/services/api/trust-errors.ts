@@ -13,6 +13,29 @@ import type { OnboardingRequestStatus } from "../../types";
 export const RELAY_SIGNATURE_INVALID = "RELAY_SIGNATURE_INVALID";
 
 /**
+ * The other ways the central bank says "I cannot tell that this is you".
+ *
+ * Matching only RELAY_SIGNATURE_INVALID left siblings escaping into the session branch, where a 401
+ * means an expired token: the interceptor refreshed, retried, failed again and logged the operator
+ * out — the ejection this notice was added to replace. RELAY_SIGNATURE_REQUIRED is the reachable one
+ * (an unsigned request against a central bank that enforces signatures, e.g. ours failed to load its
+ * signing key and fell back to the shared secret), and the caller-identity codes are the same class:
+ * the request authenticated, but not as anyone the central bank can act for.
+ */
+export const RELAY_SIGNATURE_REQUIRED = "RELAY_SIGNATURE_REQUIRED";
+export const RELAY_CALLER_IDENTITY_REQUIRED = "RELAY_CALLER_IDENTITY_REQUIRED";
+export const RELAY_CALLER_BANK_MISMATCH = "RELAY_CALLER_BANK_MISMATCH";
+export const REQUESTER_NOT_A_PARTICIPANT = "REQUESTER_NOT_A_PARTICIPANT";
+
+const trustRejectionCodes: ReadonlySet<string> = new Set([
+  RELAY_SIGNATURE_INVALID,
+  RELAY_SIGNATURE_REQUIRED,
+  RELAY_CALLER_IDENTITY_REQUIRED,
+  RELAY_CALLER_BANK_MISMATCH,
+  REQUESTER_NOT_A_PARTICIPANT,
+]);
+
+/**
  * isTrustRejection reports whether error is the central bank refusing our identity.
  *
  * The match is on the code rather than the status: the status is an implementation detail of the
@@ -26,7 +49,8 @@ export function isTrustRejection(error: unknown): boolean {
   if (typeof body !== "object" || body === null) {
     return false;
   }
-  return (body as { code?: unknown }).code === RELAY_SIGNATURE_INVALID;
+  const code = (body as { code?: unknown }).code;
+  return typeof code === "string" && trustRejectionCodes.has(code);
 }
 
 export type TrustBlockKind =
