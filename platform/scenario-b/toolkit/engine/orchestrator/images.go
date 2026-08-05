@@ -19,8 +19,24 @@ func cbFrontendImage(app string, gatewayPort int, variant string) string {
 	return fmt.Sprintf("cbweb3b/%s-frontend:gw%d%s", app, gatewayPort, variant)
 }
 
-// imageExists reports whether a local image is present (via the runner).
+// forceImageRebuild makes imageExists report "missing" for the whole run, so the build
+// steps run against the current source. Image tags encode the baked build args, not the
+// source tree: without this, editing a service or portal leaves the tag unchanged and
+// every build gate skips, producing an apply that reports "done" while still serving the
+// previous binary. Set once per process from the CLI (--rebuild); the toolkit is a
+// single-run CLI, so a package-level switch is enough and keeps the build helpers'
+// signatures (used across hub/spoke/join/observe) untouched.
+var forceImageRebuild bool
+
+// SetForceImageRebuild enables/disables the forced-rebuild behaviour for this run.
+func SetForceImageRebuild(force bool) { forceImageRebuild = force }
+
+// imageExists reports whether a local image is present (via the runner). Always false
+// under --rebuild, so callers rebuild instead of trusting an existing tag.
 func imageExists(ctx context.Context, r exec.CommandRunner, image string) bool {
+	if forceImageRebuild {
+		return false
+	}
 	_, err := r.Run(ctx, "docker", "image", "inspect", image)
 	return err == nil
 }

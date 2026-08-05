@@ -76,8 +76,8 @@ export function LoginPage() {
             <div className="flex items-start gap-3 rounded-lg border border-border/80 bg-background/80 p-4">
               <Activity className="mt-0.5 h-5 w-5 text-primary" />
               <div>
-                <p className="text-sm font-medium">Live telemetry</p>
-                <p className="text-xs text-muted-foreground">WebSocket first monitoring with polling fallback for resilience.</p>
+                <p className="text-sm font-medium">Continuous monitoring</p>
+                <p className="text-xs text-muted-foreground">Health, alerts and logs refreshed at the operator-configured interval.</p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-lg border border-border/80 bg-background/80 p-4">

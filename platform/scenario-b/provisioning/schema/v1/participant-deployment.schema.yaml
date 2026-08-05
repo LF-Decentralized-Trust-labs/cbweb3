@@ -81,6 +81,9 @@ properties:
         properties:
           endpoint: { type: string }
           advertisedHost: { type: string }
+          # Relay container on this host, used only so the noc-agent can collect its
+          # logs. Absent → the NOC reports no logs for the relay component.
+          containerName: { type: string }
       cbEndpoint: { type: string }
       # NOC bundle reference (obrigatório em observe; ver allOf).
       # Bloco NOC opcional em qualquer modo (nunca carrega segredos).
@@ -92,6 +95,9 @@ properties:
           launcherURL: { type: string }
           pushIntervalSeconds: { type: integer, minimum: 0 }
           components: { type: array, items: { enum: [BESU, CACTI_RELAY, PALADIN] } }
+          # api-gateway the NOC backend reads AMM pool status from, as reachable FROM
+          # THE NOC CONTAINER (own docker network → use host + published port).
+          ammGatewayURL: { type: string }
       frontendHost: { type: string }
       adminUsers:
         type: array

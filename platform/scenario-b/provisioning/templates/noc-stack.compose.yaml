@@ -31,10 +31,22 @@ services:
       # any bearer, which is how the toolkit registers spokes + provisions keys.
       NOC_SKIP_AUTH: "true"
       NOC_FRONTEND_ORIGIN: "${NOC_FRONTEND_ORIGIN:-*}"
+      # Pool Stability data source (spec.noc.ammGatewayURL). Must be reachable from
+      # THIS container: the NOC owns its own network, so another stack's service name
+      # does not resolve — use the host and the gateway's published port. Unset leaves
+      # the backend default and the page reports that the gateway was unreachable.
+      AMM_GATEWAY_URL: "${AMM_GATEWAY_URL:-}"
+      # Optional pin; empty means discover the active pairs from the gateway.
+      AMM_PAIRS: "${AMM_PAIRS:-}"
     ports:
       - "${NOC_BACKEND_PORT:?}:8080"
     networks:
       - noc_net
+    # The NOC runs on its own network, so the AMM gateway of a co-located entity is
+    # reached over the host's published port — which needs host.docker.internal to
+    # resolve inside this container (same idiom as entity-backend.compose.yaml).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: always
 
   noc-portal:
