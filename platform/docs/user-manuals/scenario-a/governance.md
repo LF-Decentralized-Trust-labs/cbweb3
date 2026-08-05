@@ -344,7 +344,7 @@ Use this workflow when investigating a past governance action for compliance or 
 
 ### "Reason must contain at least 10 characters" error
 
-- All confirmation-gated actions (KYC approval, account freeze/unfreeze, circuit breaker toggle, parameter update) require a reason of at least 10 characters. Enter a descriptive justification before confirming.
+- All confirmation-gated actions (KYC approval, account freeze/unfreeze) require a reason of at least 10 characters. Enter a descriptive justification before confirming.
 
 ### Accounts list is empty or stale
 
