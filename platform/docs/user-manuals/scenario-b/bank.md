@@ -62,8 +62,8 @@ Fill in both fields and click **Sign in**:
 
 | Field | Description |
 |---|---|
-| **Client ID** | The institutional client identifier provided by the Central Bank (minimum 3 characters). |
-| **Client Secret** | The corresponding credential secret (minimum 6 characters). |
+| **Username** | The institutional service account identifier provided by the Central Bank (minimum 3 characters). |
+| **Password** | The corresponding service account secret (minimum 6 characters). |
 
 Authentication is managed via backend HTTP-only session cookies. On success you are redirected to the Dashboard.
 
@@ -564,7 +564,7 @@ Shown as badges in the Bridge History table.
 
 ### Sign-in fails with "unauthorized"
 
-- Verify your **Client ID** and **Client Secret** are correct.
+- Verify your **Username** and **Password** are correct.
 - Confirm the spoke backend services are running and reachable (check with your infrastructure team).
 - Confirm your institution's status is `ACTIVE` — if it is not, complete onboarding first.
 
