@@ -30,7 +30,7 @@ A wholesale CBDC interoperability model built around a dedicated **international
 
 Scenario B models a hub-and-spoke wholesale CBDC ecosystem centred on an **international hub**:
 
-- **Hub** (chain 1337) — an independent Besu QBFT network operating the FX liquidity pool. It hosts the AMM, the FX agreement contract, the liquidity/pair/currency registries, the spoke bridge, and hub-wrapped tokens (W-tCeBM).
+- **Hub** (chain 1337) — an independent Besu QBFT network operating the FX liquidity pool. It hosts the AMM, the FX agreement contract, the liquidity/pair/currency registries, and hub-wrapped tokens (W-tCeBM). The `SpokeBridge` that moves value between a spoke and the hub is deployed spoke-side, not on the hub.
 - **Spoke-A** (chain 1338) — operated by **Central-Bank-A** with commercial bank **Bank-A**.
 - **Spoke-B** (chain 1339) — operated by **Central-Bank-B** with commercial bank **Bank-B**.
 
@@ -44,8 +44,9 @@ Each spoke runs its own Besu QBFT network and a full backend service stack; the 
 | **FX Agreement** — bilateral OTC FX settlement lifecycle on the hub (`PROPOSED → ACCEPTED → SETTLED`, plus reject/cancel and on-behalf variants) | Implemented |
 | **Cooperative liquidity** — `PairRegistry` bilateral currency-pair activation + `LiquidityCommitRegistry` commit-reveal provisioning | Implemented |
 | **Spoke bridge** — `SpokeBridge` lock-and-mint / burn-and-unlock between a spoke tCeBM and hub W-tCeBM | Implemented |
-| **Cross-currency swap orchestration** — backend orchestrator wiring bridge-in → AMM swap → bridge-out, with a rollback coordinator and a `RECONCILIATION_REQUIRED` state for stuck bridge positions | Implemented |
-| **Commercial-bank direct swap (US3)** — end-to-end swap driven directly by a commercial bank | Partial — the governance-driven path works; the commercial-bank direct-authentication path is in progress |
+| **Cross-currency swap orchestration** — backend orchestrator wiring bridge-in → AMM swap → bridge-out, with a rollback coordinator | Implemented |
+| **Stuck-position handling** — a failed bridge position transitions to a terminal `RECONCILIATION_REQUIRED` state that aborts the request; there is no automatic reconciliation worker, so recovery from this state is manual | Implemented (terminal state; manual recovery) |
+| **Commercial-bank direct swap** — end-to-end swap driven directly by a commercial bank | Partial — the governance-driven path works; the commercial-bank direct-authentication path is in progress |
 | **Manual FX oracle** — `ManualOracle` rate feed, fed locally by a mock rate feeder | Implemented |
 | **Identity & compliance** — on-chain `IdentityRegistry`, PKI certificates, Keycloak OIDC, KYC/AML gate at the API gateway | Implemented |
 | **NOC** — Network Operations Center portal + backend + monitoring agents for the hub and both spokes | Implemented |
@@ -118,32 +119,34 @@ Once complete, the four entities (central-bank-a + bank-a on spoke-a, central-ba
 
 ## Running the Scenario B Walkthrough
 
-After `make scenario-b.up` completes, run the end-to-end walkthrough. It covers six user stories; pass a story id or `all`:
+After `make scenario-b.up` completes, run the end-to-end walkthrough. It covers five user stories; the script accepts `us1`, `us2`, `us3`, `us5`, `us6`, or `all` (the numbering skips `us4` — there is no such story):
 
 ```bash
 bash tryouts/tryout-scenario-b-e2e.sh all      # every story
 bash tryouts/tryout-scenario-b-e2e.sh us1      # a single story
 ```
 
-Convenience targets are also available:
+Convenience targets wrap the first three stories:
 
 ```bash
 make scenario-b.tryout          # all stories
-make scenario-b.tryout-us1      # cooperative liquidity pair formation
-make scenario-b.tryout-us2      # MLP bilateral liquidity provisioning
-make scenario-b.tryout-us3      # commercial-bank FX swap via the AMM
+make scenario-b.tryout-us1      # quote + swap + pool status
+make scenario-b.tryout-us2      # spoke↔hub bridging + cooperative liquidity remove
+make scenario-b.tryout-us3      # governance circuit breaker + master viewing key
+make scenario-b.tryout-us2-mlp  # US2 with the MLP dual-sided provisioning step (ENABLE_MLP=true)
 ```
 
-| Story | Description | Status |
-|-------|-------------|--------|
-| **US1** | Central banks cooperatively form a currency pair (PairRegistry) and match liquidity commits (LiquidityCommitRegistry) | Implemented |
-| **US2** | A market liquidity provider registers matched commits on both sides; the relay executes dual-sided provisioning | Implemented |
-| **US3** | A commercial bank performs a cross-currency swap via the hub AMM (quote → bridge in → swap → bridge out) | Partial — governance path works; commercial-bank direct-auth path in progress |
-| **US4** | Two banks execute a full FX Agreement lifecycle on the hub (propose → accept → settle) | Implemented |
-| **US5** | Two central banks activate a currency pair through bilateral PairRegistry approval | Implemented |
-| **US6** | A commercial bank bridges spoke tCeBM to the hub and back (lock-and-mint / burn-and-unlock), conserving total supply | Implemented |
+The table below is derived from the script dispatcher (`tryouts/tryout-scenario-b-e2e.sh`). Each story is cumulative: `us2` also runs the `us1` steps, and `us3` runs `us1` + `us2`.
 
-Focused scripts for individual flows live under `tryouts/`, including `tryout-commercial-swap-e2e.sh` and `tryout-cross-currency-full-lifecycle.sh`. See [`tests/TEST-CATALOG.md`](tests/TEST-CATALOG.md) for the full, per-test status inventory.
+| Story | id | What it exercises | Status |
+|-------|----|-------------------|--------|
+| **US1** | `us1` | Quote + swap on the hub AMM + pool status | Implemented |
+| **US2** | `us2` | Spoke↔hub bridging (lock-and-mint + burn-and-unlock) + cooperative liquidity remove; optional MLP dual-sided provisioning under `ENABLE_MLP=true` (`scenario-b.tryout-us2-mlp`) | Implemented |
+| **US3** | `us3` | Governance circuit breaker (asymmetric: 1-of-N pause, 2-of-N resume) + master viewing key | Implemented |
+| **US5** | `us5` | Bilateral PairRegistry propose + rejection tests + confirm | Implemented |
+| **US6** | `us6` | CurrencyRegistry register / list / reject duplicates / remove (skipped when `CURRENCY_REGISTRY_CONTRACT_ADDRESS` is unset) | Implemented |
+
+The commercial-bank cross-currency swap is not one of these numbered stories; it has its own script, `tryouts/tryout-commercial-swap-e2e.sh` (see also `tryout-cross-currency-full-lifecycle.sh`). See [`tests/TEST-CATALOG.md`](tests/TEST-CATALOG.md) for the full, per-test status inventory.
 
 ---
 
@@ -259,7 +262,8 @@ Built with **Foundry**. Foundry unit tests exist for every contract below (see [
 | Contract | Description |
 |----------|-------------|
 | `TokenizedCentralBankMoney.sol` | ERC-20 tCeBM with role-based minting (central bank only); wrapped as W-tCeBM on the hub |
-| `HashTimeLockedContract.sol` | Hub-side HTLC for hub-native settlement (LOCKED → SETTLED / REFUNDED) |
+| `FiatCentralBankMoney.sol` | ERC-20 fCeBM (fiat central bank money on the spoke ledger); escrowed/redeemed against tCeBM by the central bank |
+| `HashTimeLockedContract.sol` | HTLC deployed on the hub but labelled **Scenario A** (Correspondent Banking) in the deploy script; cross-scenario residue, not part of the Scenario B settlement path |
 | `AutomatedMarketMaker.sol` | Constant-product AMM for FX liquidity pools, with circuit breaker and fee math |
 | `SpokeBridge.sol` | Lock-and-mint / burn-and-unlock bridge between a spoke tCeBM and hub W-tCeBM |
 | `FXAgreement.sol` | Bilateral OTC FX settlement agreement lifecycle |
@@ -320,13 +324,13 @@ The local deployment uses Docker Compose for all infrastructure components. See 
 
 | Service | Container | Port | Purpose |
 |---------|-----------|------|---------|
-| Keycloak | `cbweb3-keycloak` | 8081 | OIDC identity provider (4 realms) |
+| Keycloak | `cbweb3-keycloak` | 8081 | OIDC identity provider (one realm per entity + a NOC realm; an optional `mlp` realm under `ENABLE_MLP=true`) |
 | PostgreSQL | `cbweb3-postgres` | 5432 | 6 databases (four entities + MLP + Keycloak) |
 | Redis | `cbweb3-redis` | 6379 | Cache/session store (4 logical DBs) |
 
 ### Paladin Privacy Nodes (spokes only)
 
-Each spoke runs Paladin nodes (1:1 with its Besu validators) providing Zeto ZKP support for privacy-preserving intra-spoke tCeBM transfers. The hub network does not run Paladin.
+Each spoke runs Paladin nodes providing Zeto ZKP support for privacy-preserving intra-spoke tCeBM transfers. The hub network does not run Paladin. (The spoke compose files currently define more Paladin nodes than the spoke has Besu validators — e.g. `spoke-a` defines `cb`, `bank-a`, and a residual `bank-c` node; the extra node is legacy topology and is not required by the two-entity spoke model.)
 
 ### NOC Stack
 
@@ -377,7 +381,7 @@ Foundry unit tests are fully implemented across all Scenario B contracts. Backen
 E2E walkthroughs and per-flow demos live under `tryouts/`, including:
 
 ```bash
-bash tryouts/tryout-scenario-b-e2e.sh all          # US1–US6 walkthrough
+bash tryouts/tryout-scenario-b-e2e.sh all          # US1/US2/US3/US5/US6 walkthrough
 bash tryouts/tryout-commercial-swap-e2e.sh         # commercial-bank swap flow
 bash tryouts/tryout-cross-currency-full-lifecycle.sh
 bash tryouts/tryout-cacti-interop.sh               # relay interop
