@@ -377,6 +377,27 @@ If the trade did happen, finalize the row from the on-chain `LogSwap` (`amount_i
 is the thing to reverse; deleting the claim is what re-opens the double-spend and must be a
 deliberate, recorded decision.
 
+**Reconciling a claim stranded in `PENDING`.** A claim is finalized (or abandoned) by the same request
+that took it, so if that request dies between the two — the trade broadcast, then `Finalize` fails or
+the 60 s relay timeout cancels the context — the row stays `PENDING` and every retry answers
+`409 SWAP_IN_PROGRESS` forever. This is the **safe** failure (it refuses rather than trades twice) and
+the gateway logs it CRITICAL, but nothing clears it on its own, and nothing should: expiring a
+`PENDING` claim automatically is precisely the double-spend this claim exists to prevent, since "old"
+and "still trading" are indistinguishable from the row.
+
+A claim older than the request that could still hold it — minutes, not seconds — is stranded:
+
+```sql
+SELECT bridge_in_position_id, status, created_at, updated_at, swap_tx_hash
+  FROM cross_currency_hub_swaps
+ WHERE status = 'PENDING' AND updated_at < NOW() - INTERVAL '15 minutes';
+```
+
+Resolve it exactly as a `FAILED` claim, and in the same order: establish from the hub whether the
+trade landed (`LogSwap` for that pair around the claim's timestamp) **before** touching the row.
+Landed → finalize it with the realized `amount_in` and `swap_tx_hash`. Demonstrably did not → reverse
+the bridge-in position; deleting the claim is a deliberate, recorded decision, not cleanup.
+
 A downgrade to the previous binary keeps working (it ignores the new columns) but silently returns to
 guarding the write instead of the trade.
 
@@ -519,6 +540,17 @@ verified identity to be the institution named in the request:
 | `/internal/amm/cross-currency-residue-return` | `payer_bank_id` | same |
 | `/internal/v2/transfer-limits/{check-and-deduct,restore}` | `payer_bank_id` | same |
 | `/internal/v1/payments/{deposits,escrows,redeems}` (GET) | `requester_id` (derived, not read) | `401 RELAY_CALLER_IDENTITY_REQUIRED`, `403 REQUESTER_NOT_A_PARTICIPANT` |
+| `/internal/v1/payments/{deposits,escrows,redeems}` (POST) | `requester_besu_address` (derived, not read) | same |
+| `/internal/v1/payments/deposits/exchange` (POST) | `deposit_id` must belong to the caller | `403 REQUESTER_NOT_DEPOSIT_OWNER`, `503 DEPOSIT_OWNERSHIP_UNAVAILABLE` |
+
+**These routes deliberately ignore `RELAY_REQUIRE_SIGNATURE`, and that divergence must not be
+"fixed".** Everywhere else the flag decides whether the shared secret is still accepted; here it is
+never accepted, flag or no flag. Making these routes honour the flag would mean that with enforcement
+off, a caller presenting the secret is authenticated but unnamed — and an unnamed caller is exactly
+what let one entity list, create or spend for another. It would reopen the tenant boundary rather
+than align a policy. The visible cost is a 401 (`RELAY_CALLER_IDENTITY_REQUIRED`) on a partially
+provisioned stack where a bank has no signing key yet; that is the intended answer, and the bank
+portal renders it as the trust notice rather than a logout.
 
 Authenticating a peer and then authorizing on a bank id from the request body is the same as not
 authorizing: the position id and the bank code both travel in the request, and a UUID is not a
@@ -535,6 +567,29 @@ participants table and replaces whatever `requester_id` arrived (the mismatch is
 on `participants.wallet_address` being the bank's `ENTITY_BESU_ADDRESS` — the toolkit derives both
 from the same per-bank key, so they agree by construction; a hand-built stack that sets them
 differently will return empty listings.
+
+**The payment CREATION routes are bound the same way.** `requester_besu_address` decides whose deposit,
+escrow or redeem is created, and it travelled in the body — which the signature covers but does not
+attribute. The bank proxy injects its own address, which protects honest proxy traffic only, so an
+onboarded bank could POST directly to its CB naming another bank and have the record created against
+it; approving one then burns the victim's fCeBM or converts its tCeBM. The CB now derives the field
+from the verified identity and discards the body value, exactly as it does for `requester_id`. The
+fiat exchange (`deposits/exchange`) carries no address to overwrite — it names a deposit and mints to
+whoever registered it — so it is bound by ownership instead: a deposit id belonging to another
+institution is refused with `403 REQUESTER_NOT_DEPOSIT_OWNER`. Same dependency on
+`participants.wallet_address == ENTITY_BESU_ADDRESS` as the listings.
+
+**Each signature authenticates one request.** A verified signature stays valid for the whole ±5 min
+skew window, so a captured request could be resent inside it. Most routes absorb that (the receiver
+deduplicates), but `/internal/v2/transfer-limits/restore` does not: it *subtracts* from a bank's
+accumulated daily volume, so a replayed restore credits the allowance back and lets the bank transact
+past its configured limit — a compliance control undone by resending bytes. The gateway now remembers
+each accepted signature for the length of that window and refuses a second use with
+`401 RELAY_SIGNATURE_REPLAYED`. No caller has to change: ECDSA signing is randomized, so two genuine
+calls — even with the same body in the same second — carry different signatures. The cache holds only
+signatures that already verified, so it cannot be grown by an unpinned caller, and it is in-memory:
+a gateway restart forgets it, which reopens the window for the remaining skew of any signature
+captured just before the restart.
 
 **What deliberately still uses the shared secret.** `/internal/v1/spokes/{register,register-currency,
 register-pair}` — the caller is the toolkit CLI running on the host, which has no pinned identity.
@@ -609,6 +664,28 @@ not prove anything about whose identity signed.
    settles asynchronously (about 5–10 s on a local stack), so poll
    `GET /api/v1/token/balance` rather than reading it once — an immediate read shows the
    transient full-cap debit.
+
+6. **A verified peer cannot act for another bank, and cannot act twice.** Both need a *signed*
+   request — the shared secret is refused before the check is reached — so sign with one bank's key
+   and name another bank:
+
+   ```bash
+   # Creation bound to the caller: the record must come back owned by the SIGNER, never by the
+   # address in the body. Read it back with the same key.
+   #   POST /internal/v1/payments/deposits  {"requester_besu_address":"<victim>","amount":"1"}
+   #   → 201, and GET /internal/v1/payments/deposits lists it under the signer's own address
+   #
+   # Ownership bound on the exchange: name a deposit registered by another bank.
+   #   POST /internal/v1/payments/deposits/exchange  {"deposit_id":"<victim's deposit>"}
+   #   → 403 {"code":"REQUESTER_NOT_DEPOSIT_OWNER"}
+   #
+   # Replay: send one signed request twice, byte for byte, with the SAME headers.
+   #   → the first 200, the second 401 {"code":"RELAY_SIGNATURE_REPLAYED"}
+   ```
+
+   A bank that legitimately repeats an operation re-signs it, so it is never affected; if a genuine
+   caller ever sees `RELAY_SIGNATURE_REPLAYED`, it is reusing headers across requests, which is a
+   client bug and not a tuning knob.
 
 A scripted version of these checks is kept outside version control (under `tmp/`), so this
 runbook does not depend on it.
@@ -1005,6 +1082,26 @@ causes: `RELAY_KEY_ID` on the caller does not match the `bank_code` it transacts
 the same for a bank — the pin comes from the participants row keyed by `bank_code`), or something is
 genuinely driving a payment for another institution. The message names both sides; compare them
 against the caller's `BANK_CODE`.
+
+### Internal calls answer 403 REQUESTER_NOT_DEPOSIT_OWNER
+
+`POST /internal/v1/payments/deposits/exchange` named a deposit that was not registered by the calling
+institution. The honest path cannot produce it: the bank lists its own deposits (scoped to itself) and
+exchanges one of those. Two real causes — the same `participants.wallet_address` ≠ `ENTITY_BESU_ADDRESS`
+split described under "payment listings come back empty" (the deposit is the caller's, but ownership is
+being asked about a different address), or a caller genuinely driving another institution's deposit.
+Compare the two values first; the listing symptom appears alongside it.
+
+`503 DEPOSIT_OWNERSHIP_UNAVAILABLE` is a different failure: the CB could not reach the
+payment-orchestrator to establish ownership, so it refused rather than assume. Check the orchestrator.
+
+### Internal calls answer 401 RELAY_SIGNATURE_REPLAYED
+
+The receiver has already accepted that exact signature. A correct caller signs every request, so this
+means headers are being reused across requests — a client that caches `X-Relay-*` and re-sends them, or
+a retry that replays a captured request instead of rebuilding it. It is not a tuning knob and there is
+no window to widen: re-sign the retry. If it appears on the Cacti relay, check that `headersFor` is
+called per forward (it is signed per call today, and `cross-currency-swap-relay.test.ts` pins that).
 
 ### A bank's payment listings come back empty
 

@@ -136,6 +136,59 @@ func TestMigrating_WrongSecretRejected(t *testing.T) {
 	}
 }
 
+// --- replay ---
+//
+// The signature is valid for the whole skew window, so a captured request replays cleanly inside it.
+// Most internal routes tolerate that because the receiver deduplicates, but the transfer-limit pair
+// does not: Restore subtracts from the accumulated daily volume, so resending one drives a bank's
+// recorded consumption toward zero and lets it transact past the limit its central bank configured.
+//
+// Rejecting a signature the gateway has already accepted closes it for every signed route at once,
+// and costs nothing in false rejections: ECDSA signing is randomized, so two genuine calls — even
+// with the same body in the same second — carry different signatures.
+
+func TestMigrating_ReplayedSignatureRejected(t *testing.T) {
+	signer, reg := keyAndReg(t, "bank-a")
+	app := newApp(middleware.RelayAuthConfig{
+		Registry: relayauth.NewStore(reg),
+		Replay:   relayauth.NewReplayGuard(relayauth.DefaultMaxSkew),
+	})
+
+	body := `{"payer_bank_id":"bank-a","currency":"BRL","amount_human":"1000"}`
+	req := signedReq(t, signer, body, time.Now())
+	captured := req.Header.Clone()
+
+	if code := do(t, app, req); code != http.StatusOK {
+		t.Fatalf("the original request must be accepted, got %d", code)
+	}
+
+	replay := httptest.NewRequest(http.MethodPost, sigPath, strings.NewReader(body))
+	replay.Header = captured
+	if code := do(t, app, replay); code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for a replayed signature, got %d — a captured restore would keep "+
+			"crediting the bank's daily allowance back", code)
+	}
+}
+
+func TestMigrating_TwoGenuineCallsInTheSameSecondBothPass(t *testing.T) {
+	// Two payments of the same amount failing back-to-back is an ordinary restore pattern. Because
+	// each call is signed separately, the guard must not mistake the second for a replay.
+	signer, reg := keyAndReg(t, "bank-a")
+	app := newApp(middleware.RelayAuthConfig{
+		Registry: relayauth.NewStore(reg),
+		Replay:   relayauth.NewReplayGuard(relayauth.DefaultMaxSkew),
+	})
+
+	body := `{"payer_bank_id":"bank-a","currency":"BRL","amount_human":"1000"}`
+	at := time.Now()
+	if code := do(t, app, signedReq(t, signer, body, at)); code != http.StatusOK {
+		t.Fatalf("first call: got %d", code)
+	}
+	if code := do(t, app, signedReq(t, signer, body, at)); code != http.StatusOK {
+		t.Fatalf("second genuine call in the same second: got %d; want 200", code)
+	}
+}
+
 // --- startup validation ---
 //
 // The dangerous combination is RequireSignature with nothing to verify against. In that state

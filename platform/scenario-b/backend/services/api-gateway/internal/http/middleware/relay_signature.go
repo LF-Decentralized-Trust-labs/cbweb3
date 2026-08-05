@@ -28,6 +28,14 @@ type RelayAuthConfig struct {
 	// RequireSignature, when true, rejects requests that carry no signature even if a
 	// legacy secret is configured — used to enforce the cutover once all callers sign.
 	RequireSignature bool
+	// Replay refuses a signature that already authenticated a request. Nil disables the check.
+	//
+	// Verification alone bounds a replay to the skew window rather than preventing it, and one route
+	// pair cannot afford that: the transfer-limit Restore subtracts from a bank's accumulated daily
+	// volume, so a captured one, resent, credits its allowance back and lets it transact past the
+	// configured limit. See relayauth.ReplayGuard for why an accepted-signature cache is the right
+	// shape here and why it costs no false rejections.
+	Replay *relayauth.ReplayGuard
 }
 
 // Validate refuses the one combination that turns a single boolean into an outage:
@@ -120,6 +128,16 @@ func RequireRelayAuthMigrating(cfg RelayAuthConfig) fiber.Handler {
 				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 					"error": "relay signature verification failed",
 					"code":  "RELAY_SIGNATURE_INVALID",
+				})
+			}
+			// The signature verified — but a verified signature is reusable for the whole skew
+			// window, and on the transfer-limit routes reuse is the attack: a resent Restore credits
+			// a bank's daily allowance back. Admitted once, never again.
+			if !cfg.Replay.Admit(keyID, c.Get(relayauth.HeaderSignature), time.Now()) {
+				log.Printf("[relay-auth] replayed signature rejected for key-id=%q path=%s", keyID, c.Path())
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+					"error": "this relay signature has already been used; a request is authenticated once",
+					"code":  "RELAY_SIGNATURE_REPLAYED",
 				})
 			}
 			// Carry the identity forward. Verifying who is calling and then authorizing on a bank id

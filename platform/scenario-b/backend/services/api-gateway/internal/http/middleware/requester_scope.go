@@ -36,30 +36,14 @@ type RequesterScopeResolver interface {
 // Answering unscoped would mean returning the whole book to a caller entitled to one bank's rows.
 func ScopeRequesterToCaller(resolver RequesterScopeResolver) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// Shared with the write side (ScopeRequesterBodyToCaller): resolving the caller and refusing
+		// when it cannot be resolved is the same decision whichever part of the request carries the
+		// tenant, and one copy is what keeps the two halves of the boundary from drifting apart.
+		addr, ok, refusal := callerAddress(c, resolver)
+		if !ok {
+			return refusal
+		}
 		caller := strings.TrimSpace(VerifiedRelayCaller(c))
-		if caller == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "an internal listing is scoped to the calling institution, so the request must carry a " +
-					"per-entity relay signature: the shared secret is identical in every entity and names no caller",
-				"code": "RELAY_CALLER_IDENTITY_REQUIRED",
-			})
-		}
-		if resolver == nil {
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-				"error": "this gateway cannot resolve the calling institution's address, so a listing cannot be " +
-					"scoped to it (participant lookup unavailable)",
-				"code": "REQUESTER_SCOPE_UNAVAILABLE",
-			})
-		}
-		addr, err := resolver.ResolveWalletAddress(c.Context(), caller)
-		if err != nil || strings.TrimSpace(addr) == "" {
-			log.Printf("[requester-scope] refusing to list for %q: %v", sanitizeCaller(caller), err)
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"error": "the calling institution is not an active participant of this central bank, so it has no " +
-					"records to list here",
-				"code": "REQUESTER_NOT_A_PARTICIPANT",
-			})
-		}
 
 		if supplied := strings.TrimSpace(c.Query("requester_id")); supplied != "" && !strings.EqualFold(supplied, addr) {
 			// Not an error to answer — the value is replaced either way — but it is the fingerprint of

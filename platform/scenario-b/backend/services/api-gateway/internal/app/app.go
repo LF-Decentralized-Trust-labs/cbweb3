@@ -64,8 +64,12 @@ func newSignedPaymentProxy(cfg config.Config) *handlers.PaymentProxyHandler {
 func relayAuthConfigFor(cfg config.Config) middleware.RelayAuthConfig {
 	registry, _ := relayauth.LoadRegistryGlob(cfg.PKIDir)
 	return middleware.RelayAuthConfig{
-		Registry:         relayauth.NewStore(registry),
-		LegacySecret:     os.Getenv("INTERNAL_RELAY_AUTH_SECRET"),
+		Registry:     relayauth.NewStore(registry),
+		LegacySecret: os.Getenv("INTERNAL_RELAY_AUTH_SECRET"),
+		// One accepted signature, one request. The window a verified signature stays replayable in
+		// is the window in which a captured transfer-limit Restore keeps giving a bank its daily
+		// allowance back, so the guard's memory is exactly that window.
+		Replay:           relayauth.NewReplayGuard(relayauth.DefaultMaxSkew),
 		RequireSignature: cfg.RelayRequireSignature,
 	}
 }

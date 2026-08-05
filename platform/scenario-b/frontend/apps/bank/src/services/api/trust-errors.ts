@@ -27,9 +27,18 @@ export const RELAY_CALLER_IDENTITY_REQUIRED = "RELAY_CALLER_IDENTITY_REQUIRED";
 export const RELAY_CALLER_BANK_MISMATCH = "RELAY_CALLER_BANK_MISMATCH";
 export const REQUESTER_NOT_A_PARTICIPANT = "REQUESTER_NOT_A_PARTICIPANT";
 
+/**
+ * The central bank now accepts each relay signature once, so a request it has already seen is
+ * refused with this code. Our gateway signs every call afresh and should never produce it — which is
+ * exactly why it belongs here: an unexpected 401 that nothing classifies is the one that reaches the
+ * session branch and ejects the operator.
+ */
+export const RELAY_SIGNATURE_REPLAYED = "RELAY_SIGNATURE_REPLAYED";
+
 const trustRejectionCodes: ReadonlySet<string> = new Set([
   RELAY_SIGNATURE_INVALID,
   RELAY_SIGNATURE_REQUIRED,
+  RELAY_SIGNATURE_REPLAYED,
   RELAY_CALLER_IDENTITY_REQUIRED,
   RELAY_CALLER_BANK_MISMATCH,
   REQUESTER_NOT_A_PARTICIPANT,
