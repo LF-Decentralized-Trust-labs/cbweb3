@@ -270,6 +270,16 @@ required by the `KeyProvider` for **secp256k1** key handling and EVM address der
 curve used to sign Besu/QBFT transactions, which is outside the Go standard library's
 `crypto/ecdsa`.
 
+The **api-gateway** module adds `github.com/redis/go-redis/v9` (v9.18.0, the version the `auth`
+service already depends on). No new infrastructure: every entity already runs a Redis
+(`entity-infra.compose.yaml`), and `auth` already keeps its PKI login nonces there. The gateway uses
+it for one thing — the relay-auth replay guard, which admits each verified signature once. Held in
+process memory alone, that guard is lost on restart and absent across replicas, and the control it
+enforces is a compliance one (a replayed `transfer-limits/restore` credits a bank's daily allowance
+back). `REDIS_ADDR` unset falls back to per-process memory and the gateway says so at boot; an
+unreachable Redis degrades to the same fallback rather than refusing traffic, since every internal
+route rides that middleware.
+
 ---
 
 ## Smart Contracts

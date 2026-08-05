@@ -3,12 +3,16 @@
 package relayauth_test
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/asn1"
 	"encoding/base64"
+	"errors"
 	"math/big"
+	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -121,6 +125,109 @@ func TestReplayGuard_RejectsAMalleatedCopyOfAnAdmittedSignature(t *testing.T) {
 	}
 	if g.Admit("bank-a", malleated, now) {
 		t.Fatal("a malleated copy of an admitted signature is the same request replayed and must be refused")
+	}
+}
+
+// --- shared store (multi-instance) ---
+//
+// The in-memory guard protects one process. A central bank that runs its gateway behind a load
+// balancer with more than one replica gets no protection at all from it: the capture goes to the
+// other replica, which has never seen the signature. That matters most for the route the guard was
+// added for — a replayed transfer-limit restore credits a bank's daily allowance back — so on a
+// replicated deployment the compliance control would silently be back where it started.
+
+type fakeSeenStore struct {
+	seen  map[string]bool
+	calls int
+	err   error
+}
+
+func newFakeSeenStore() *fakeSeenStore { return &fakeSeenStore{seen: map[string]bool{}} }
+
+func (f *fakeSeenStore) Admit(_ context.Context, key string, _ time.Duration) (bool, error) {
+	f.calls++
+	if f.err != nil {
+		return false, f.err
+	}
+	if f.seen[key] {
+		return false, nil
+	}
+	f.seen[key] = true
+	return true, nil
+}
+
+func TestReplayGuard_SharedStoreRefusesAcrossInstances(t *testing.T) {
+	shared := newFakeSeenStore()
+	// Two guards, one store: the two replicas of one central bank's gateway.
+	a := relayauth.NewReplayGuard(5 * time.Minute).WithShared(shared)
+	b := relayauth.NewReplayGuard(5 * time.Minute).WithShared(shared)
+	now := time.Unix(1_760_000_000, 0)
+
+	if !a.Admit("bank-a", "sig-1", now) {
+		t.Fatal("the first use must be admitted")
+	}
+	if b.Admit("bank-a", "sig-1", now) {
+		t.Fatal("the OTHER replica must refuse the same signature — that is the whole point of sharing")
+	}
+}
+
+func TestReplayGuard_LocalReplayDoesNotConsultTheSharedStore(t *testing.T) {
+	// A signature this process already saw is decided locally: no round-trip, and no way for a Redis
+	// hiccup to turn a known replay into an admission.
+	shared := newFakeSeenStore()
+	g := relayauth.NewReplayGuard(5 * time.Minute).WithShared(shared)
+	now := time.Unix(1_760_000_000, 0)
+
+	g.Admit("bank-a", "sig-1", now)
+	before := shared.calls
+	if g.Admit("bank-a", "sig-1", now) {
+		t.Fatal("a locally known replay must be refused")
+	}
+	if shared.calls != before {
+		t.Fatalf("shared store consulted %d extra time(s); a local replay needs no round-trip",
+			shared.calls-before)
+	}
+}
+
+func TestReplayGuard_SharedStoreFailureFallsBackToLocal(t *testing.T) {
+	// Redis down must not stop settlement: every internal route rides this middleware, so refusing
+	// on a store error would take bridge-in, the hub swap and the residue return down over a cache.
+	// The local guard still holds within the process, which is what the deployment had before.
+	shared := newFakeSeenStore()
+	shared.err = errors.New("connection refused")
+	g := relayauth.NewReplayGuard(5 * time.Minute).WithShared(shared)
+	now := time.Unix(1_760_000_000, 0)
+
+	if !g.Admit("bank-a", "sig-1", now) {
+		t.Fatal("an unreachable shared store must not refuse verified traffic")
+	}
+	if g.Admit("bank-a", "sig-1", now) {
+		t.Fatal("the local guard must still refuse the replay while the shared store is down")
+	}
+}
+
+func TestRedisSeenStore_AdmitsOnce(t *testing.T) {
+	addr := os.Getenv("REDIS_ADDR")
+	if addr == "" {
+		t.Skip("REDIS_ADDR not set — skipping the real Redis round-trip (set it to a reachable Redis to run)")
+	}
+	store := relayauth.NewRedisSeenStore(addr, os.Getenv("REDIS_PASSWORD"), 0)
+	defer func() { _ = store.Close() }()
+
+	key := "test-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	first, err := store.Admit(context.Background(), key, 30*time.Second)
+	if err != nil {
+		t.Fatalf("first admit: %v", err)
+	}
+	if !first {
+		t.Fatal("a key never seen must be admitted")
+	}
+	second, err := store.Admit(context.Background(), key, 30*time.Second)
+	if err != nil {
+		t.Fatalf("second admit: %v", err)
+	}
+	if second {
+		t.Fatal("the same key must not be admitted twice")
 	}
 }
 

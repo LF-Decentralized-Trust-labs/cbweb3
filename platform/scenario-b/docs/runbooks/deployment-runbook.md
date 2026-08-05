@@ -587,9 +587,28 @@ past its configured limit — a compliance control undone by resending bytes. Th
 each accepted signature for the length of that window and refuses a second use with
 `401 RELAY_SIGNATURE_REPLAYED`. No caller has to change: ECDSA signing is randomized, so two genuine
 calls — even with the same body in the same second — carry different signatures. The cache holds only
-signatures that already verified, so it cannot be grown by an unpinned caller, and it is in-memory:
-a gateway restart forgets it, which reopens the window for the remaining skew of any signature
-captured just before the restart.
+signatures that already verified, so it cannot be grown by an unpinned caller.
+
+**Where that memory lives decides whether the control actually holds.** In process memory it protects
+one gateway: a restart forgets it (reopening the window for the remaining skew of anything captured
+just before), and a gateway scaled to more than one replica never had the protection at all — the
+capture simply goes to the replica that has not seen it. So the guard uses the entity's existing
+Redis, via `REDIS_ADDR` (the same instance `auth` keeps its login nonces in; `entity-backend.compose.yaml`
+passes it, and no new service is involved). Check it at boot:
+
+```bash
+docker logs <cb-gateway> 2>&1 | grep 'replay guard'
+#   [app] relay auth: replay guard shared via Redis at <prefix>-<entity>-redis:6379 — one signature
+#   is admitted once across every replica of this gateway
+```
+
+Two deliberate degradations, both loud and neither fatal. `REDIS_ADDR` unset leaves the guard
+per-process and the boot line says so — acceptable on the hub, which serves no signed internal
+routes, and a real gap on a central bank. An unreachable Redis at request time logs
+`shared replay store unavailable` and falls back to this instance's own memory instead of refusing:
+every internal route rides this middleware, so failing closed on a cache would stop bridge-in, the
+delegated hub swap and the residue return — a far larger outage than the window it would close. The
+store call is capped at 250 ms so a hung Redis costs fixed latency, not a parked settlement path.
 
 **What deliberately still uses the shared secret.** `/internal/v1/spokes/{register,register-currency,
 register-pair}` — the caller is the toolkit CLI running on the host, which has no pinned identity.
@@ -1087,10 +1106,19 @@ against the caller's `BANK_CODE`.
 
 `POST /internal/v1/payments/deposits/exchange` named a deposit that was not registered by the calling
 institution. The honest path cannot produce it: the bank lists its own deposits (scoped to itself) and
-exchanges one of those. Two real causes — the same `participants.wallet_address` ≠ `ENTITY_BESU_ADDRESS`
-split described under "payment listings come back empty" (the deposit is the caller's, but ownership is
-being asked about a different address), or a caller genuinely driving another institution's deposit.
-Compare the two values first; the listing symptom appears alongside it.
+exchanges one of those. Three real causes, in the order worth checking:
+
+1. **The payment-orchestrator restarted.** Deposits, escrows and redeems live in
+   `MemoryEscrowRepository` — they do **not** survive a restart of that container. A deposit the bank
+   still holds an id for is then gone, and "gone" reads as "not yours": the ownership check answers
+   `403`, not `404`. This is the common cause on a local or redeployed stack. Confirm with
+   `docker ps` (uptime of `<prefix>-<entity>-payment-orchestrator`) and by listing the bank's
+   deposits — if the listing is empty but the bank has an id, the records were lost, not hidden.
+2. **`participants.wallet_address` ≠ `ENTITY_BESU_ADDRESS`** — the same split described under
+   "payment listings come back empty". The deposit is the caller's, but ownership is being asked
+   about a different address. The listing symptom appears alongside it.
+3. **A caller genuinely driving another institution's deposit** — which is the case the check exists
+   for. The log line names the caller and the deposit.
 
 `503 DEPOSIT_OWNERSHIP_UNAVAILABLE` is a different failure: the CB could not reach the
 payment-orchestrator to establish ownership, so it refused rather than assume. Check the orchestrator.

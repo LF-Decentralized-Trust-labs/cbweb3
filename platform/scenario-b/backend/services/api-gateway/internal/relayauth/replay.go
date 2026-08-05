@@ -3,13 +3,28 @@
 package relayauth
 
 import (
+	"context"
 	"encoding/asn1"
 	"encoding/base64"
+	"log"
 	"math/big"
 	"strings"
 	"sync"
 	"time"
 )
+
+// SeenStore records signature identities somewhere every instance of a gateway can see them.
+//
+// The in-memory guard protects ONE process. A central bank running its gateway behind a load
+// balancer gets nothing from it: the capture goes to a replica that has never seen the signature,
+// and the control the guard exists for — a replayed transfer-limit restore must not credit a bank's
+// daily allowance back — is silently back where it started. This is the seam where that becomes a
+// deployment decision instead of an assumption.
+type SeenStore interface {
+	// Admit reports whether key is being used for the FIRST time within ttl. It must be atomic:
+	// two replicas asking at the same instant must not both be told yes.
+	Admit(ctx context.Context, key string, ttl time.Duration) (bool, error)
+}
 
 // ReplayGuard refuses a signature that has already authenticated a request.
 //
@@ -47,7 +62,15 @@ type ReplayGuard struct {
 	seen      map[string]time.Time
 	ttl       time.Duration
 	lastPrune time.Time
+
+	// shared, when set, is consulted after the local check so replicas of one gateway decide
+	// together. Nil leaves the guard single-process, which is the deployment it was born in.
+	shared SeenStore
 }
+
+// sharedStoreTimeout caps how long a verified request waits on the shared store. A replay cache is
+// worth a few milliseconds of a payment's latency and not one second of it.
+const sharedStoreTimeout = 250 * time.Millisecond
 
 // NewReplayGuard returns a guard that remembers each accepted signature for ttl — which should be
 // the verifier's skew window, since a signature is worthless to a replayer once it is outside it.
@@ -73,6 +96,37 @@ func (g *ReplayGuard) Admit(keyID, signatureB64 string, now time.Time) bool {
 	}
 	key := keyID + "\x00" + signatureIdentity(signatureB64)
 
+	if !g.admitLocal(key, now) {
+		// Already known here. Decided without a round-trip, so no store hiccup can turn a replay
+		// this process has already seen into an admission.
+		return false
+	}
+	if g.shared == nil {
+		return true
+	}
+
+	// Bounded on purpose: this runs inside every internal request, so a store that hangs must cost
+	// a fixed delay, not park the settlement path behind it.
+	ctx, cancel := context.WithTimeout(context.Background(), sharedStoreTimeout)
+	defer cancel()
+	admitted, err := g.shared.Admit(ctx, key, g.ttl)
+	if err != nil {
+		// Deliberately NOT a refusal. Every internal route rides this middleware, so failing closed
+		// on an unreachable cache would stop bridge-in, the delegated hub swap and the residue
+		// return — a far larger outage than the replay window it would close. The local guard still
+		// holds within this process, which is exactly the protection the deployment had before the
+		// store was introduced.
+		log.Printf("[relay-auth] shared replay store unavailable (%v) — falling back to this instance's "+
+			"own memory; a replay sent to another replica would not be caught while this lasts", err)
+		return true
+	}
+	return admitted
+}
+
+// admitLocal is the in-process half: it records the key and reports whether this is its first use
+// here. Split out so the shared round-trip happens outside the mutex — holding it across a network
+// call would serialise every verified request behind the slowest one.
+func (g *ReplayGuard) admitLocal(key string, now time.Time) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.seen == nil {
@@ -85,6 +139,18 @@ func (g *ReplayGuard) Admit(keyID, signatureB64 string, now time.Time) bool {
 	}
 	g.seen[key] = now
 	return true
+}
+
+// WithShared attaches a store that every instance of this gateway can see, making the guard hold
+// across replicas. Returns the guard so it can be chained at wiring time.
+func (g *ReplayGuard) WithShared(s SeenStore) *ReplayGuard {
+	if g == nil {
+		return nil
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.shared = s
+	return g
 }
 
 // Len reports how many signatures are currently remembered. For tests and for an operator counting

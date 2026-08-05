@@ -120,6 +120,13 @@ services:
       # internal request. Turning it on is an operator decision per entity, after the checks in the
       # runbook's "service authentication" section.
       RELAY_REQUIRE_SIGNATURE: "${RELAY_REQUIRE_SIGNATURE:-}"
+      # Where the relay-auth replay guard remembers the signatures it has already admitted. In
+      # memory it protects ONE process, so a gateway scaled to more than one replica would let a
+      # captured request through on the replica that has never seen it — including a transfer-limit
+      # restore, which credits a bank's daily allowance back. This is the entity's existing Redis
+      # (entity-infra), the same one the auth service keeps its login nonces in; no new service.
+      # Unset it to fall back to per-process memory — the gateway then says so at boot.
+      REDIS_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-redis:6379"
       COOKIE_SECURE: "false"
       AUTH_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-auth:9091"
       COMPLIANCE_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-compliance:9093"

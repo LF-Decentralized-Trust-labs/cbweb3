@@ -217,6 +217,30 @@ func New(cfg config.Config) (*App, error) {
 	// --- Scenario B v2 service wiring (T020) ---
 	v2Deps := buildV2Dependencies(cfg, identityGRPCProvider, identityManager)
 
+	// Make the replay guard hold across REPLICAS, not just inside this process.
+	//
+	// Its in-memory half protects one gateway. A central bank that scales its gateway out gets no
+	// protection from that at all — the captured request goes to a replica which has never seen the
+	// signature — and the control this exists for is a compliance one: a replayed transfer-limit
+	// restore credits a bank's daily allowance back and lets it transact past its configured limit.
+	// Redis is where that becomes a shared decision; it already runs per entity (REDIS_ADDR, the
+	// same instance the auth service keeps its login nonces in), so this adds no infrastructure.
+	//
+	// Without REDIS_ADDR the guard stays single-process and says so, because "one replica" then
+	// becomes a property the deployment has to hold rather than one the code enforces.
+	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
+		seen := relayauth.NewRedisSeenStore(redisAddr, os.Getenv("REDIS_PASSWORD"), 0)
+		v2Deps.RelayAuth.Replay.WithShared(seen)
+		closers = append(closers, seen)
+		log.Printf("[app] relay auth: replay guard shared via Redis at %s — one signature is admitted "+
+			"once across every replica of this gateway", redisAddr)
+	} else {
+		log.Printf("[app] relay auth: replay guard is IN-MEMORY only (REDIS_ADDR unset) — a captured " +
+			"request replayed against a DIFFERENT replica of this gateway would not be caught; run a " +
+			"single replica, or set REDIS_ADDR. Harmless on a gateway that serves no signed internal " +
+			"routes (the hub), material on a central bank")
+	}
+
 	deps := router.Dependencies{
 		AuthHandler:       authHandler,
 		ComplianceHandler: complianceHandler,
