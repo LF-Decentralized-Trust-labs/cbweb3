@@ -33,9 +33,9 @@
 5. [Screens](#5-screens)
    - 5.1 [Dashboard (`/`)](#51-dashboard-)
    - 5.2 [Audit Vault (`/audit`)](#52-audit-vault-audit)
-   - 5.3 [Investigations (`/investigation`)](#53-investigations-investigation)
-   - 5.4 [Participant Management (`/participants`)](#54-participant-management-participants)
-   - 5.5 [Stability Controls (`/stability`)](#55-stability-controls-stability)
+   - 5.3 [Investigation (`/investigation`)](#53-investigation-investigation)
+   - 5.4 [Compliance Registry (`/participants`)](#54-compliance-registry-participants)
+   - 5.5 [Settlement Health (`/stability`)](#55-settlement-health-stability)
    - 5.6 [Settings (`/settings`)](#56-settings-settings)
 6. [Typical workflows](#6-typical-workflows)
 7. [Status reference](#7-status-reference)
@@ -58,9 +58,9 @@ The portal exposes six screens:
 |---|---|---|
 | Dashboard | `/` | Network KPIs and live HTLC settlement table |
 | Audit Vault | `/audit` | Credential verification, transaction decryption, audit log review |
-| Investigations | `/investigation` | Open, co-sign, and look up disclosure requests |
-| Participant Management | `/participants` | Compliance registry — read-only participant list |
-| Stability Controls | `/stability` | HTLC expiry risk and active alert counts |
+| Investigation | `/investigation` | Open, co-sign, and look up disclosure requests |
+| Compliance Registry | `/participants` | Compliance registry — read-only participant list |
+| Settlement Health | `/stability` | HTLC expiry risk and active alert counts |
 | Settings | `/settings` | Session-scoped operational preferences |
 
 ---
@@ -76,7 +76,7 @@ The portal exposes six screens:
 Supervisors cannot mint tokens, burn tokens, or initiate settlements. The only
 write actions available are:
 
-- Opening or co-signing a disclosure request (Investigations screen).
+- Opening or co-signing a disclosure request (Investigation screen).
 - Submitting a transaction decryption request (Audit Vault screen).
 - Saving session-level preferences (Settings screen).
 
@@ -243,11 +243,11 @@ requests — is recorded here and is non-repudiable.
 
 ---
 
-### 5.3 Investigations (`/investigation`)
+### 5.3 Investigation (`/investigation`)
 
 ![Supervisor Investigation](../img/scenario-a/supervisor/04-investigation.png)
 
-The Investigations screen manages the **disclosure request workflow** — the
+The Investigation screen manages the **disclosure request workflow** — the
 multi-party sign-off process required to legally compel disclosure of shielded
 transaction details under AML/CFT or court-order authority.
 
@@ -311,7 +311,7 @@ Look up the current state and quorum progress of any disclosure request.
 
 ---
 
-### 5.4 Participant Management (`/participants`)
+### 5.4 Compliance Registry (`/participants`)
 
 ![Compliance Participants](../img/scenario-a/supervisor/05-participants.png)
 
@@ -346,11 +346,11 @@ reinstatement is a governance function handled outside this portal.
 
 ---
 
-### 5.5 Stability Controls (`/stability`)
+### 5.5 Settlement Health (`/stability`)
 
 ![HTLC Health](../img/scenario-a/supervisor/06-htlc-health.png)
 
-The Stability Controls screen provides HTLC expiry risk monitoring and a count
+The Settlement Health screen provides HTLC expiry risk monitoring and a count
 of active stability alerts. It is intended for senior supervisors watching for
 systemic settlement risk.
 
@@ -419,7 +419,7 @@ persisted to the backend.
 
 ### Open a multi-party AML disclosure request
 
-1. Navigate to **Investigations** (`/investigation`).
+1. Navigate to **Investigation** (`/investigation`).
 2. In the **Open Disclosure Request** panel, enter the transaction reference,
    your requestor bank ID, and select the appropriate reason code.
 3. Click **Open Request** and note the returned **Request ID**.
@@ -433,7 +433,7 @@ persisted to the backend.
 
 1. Open the **Dashboard** (`/`) to see a summary of active HTLCs and pending
    settlements.
-2. Open **Stability Controls** (`/stability`) for a detailed list of HTLC
+2. Open **Settlement Health** (`/stability`) for a detailed list of HTLC
    contracts with their expiry times.
 3. Focus attention on contracts whose expiry timestamp is approaching. Coordinate
    with the relevant bank operators to ensure secrets are revealed and
@@ -441,7 +441,7 @@ persisted to the backend.
 
 ### Review the compliance registry
 
-1. Navigate to **Participant Management** (`/participants`).
+1. Navigate to **Compliance Registry** (`/participants`).
 2. Note the **Total Participants** and **Active Credentials** counts.
 3. Use the search field to locate a specific institution by name, wallet
    address, or jurisdiction code.

@@ -474,8 +474,8 @@ func FoundHubSteps(c HubConfig) []Step {
 		{
 			Name: "build-hub-backend-image",
 			Check: func(ctx context.Context) (bool, error) {
-				_, err := c.Runner.Run(ctx, "docker", "image", "inspect", hubBackendImage)
-				return err == nil, nil
+				// imageExists (not an inline inspect) so --rebuild reaches this gate too.
+				return imageExists(ctx, c.Runner, hubBackendImage), nil
 			},
 			Run: func(ctx context.Context) error { return c.buildBackendImage(ctx) },
 		},

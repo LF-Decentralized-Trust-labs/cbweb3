@@ -4,8 +4,8 @@
 **Scenario:** B — International Hub (hub-and-spoke, AMM-based FX settlement).
 **Data source:** The portal connects to a live NOC backend service. Component
 health, alerts, logs, and topology data reflect actual spoke and hub state when
-the stack is running. The WebSocket telemetry stream falls back to HTTP polling
-automatically.
+the stack is running. Every screen refreshes by HTTP polling — there is no
+telemetry push stream.
 
 ---
 
@@ -13,9 +13,15 @@ automatically.
 >
 > The NOC Portal is wired to a real backend API (Keycloak auth + NOC backend
 > service). Component health, alerts, and logs reflect actual spoke and hub
-> state when the stack is running. The **WebSocket push stream** is a stub —
-> the portal always runs in HTTP polling mode until the stream is implemented.
-> Authenticated sessions are stored as JWT tokens in `localStorage`.
+> state when the stack is running. There is **no WebSocket push stream** — the
+> portal runs in HTTP polling mode on every screen, at the interval configured
+> in [Settings](#48-settings-settings). Authenticated sessions are stored as JWT
+> tokens in `localStorage` and renewed automatically (see
+> [Access and Login](#2-access-and-login)).
+>
+> **Pool Stability** requires the NOC backend to be configured with a reachable
+> api-gateway (`spec.noc.ammGatewayURL`) and at least one active AMM pair. The
+> page states which of the two is missing, so an empty table is never ambiguous.
 
 ---
 
@@ -101,8 +107,8 @@ port: `5910`).
 
 The login page has two panels on desktop:
 
-- **Left panel** — feature summary (SYS_ADMIN restriction, live telemetry,
-  read-only operations plane).
+- **Left panel** — feature summary (SYS_ADMIN restriction, continuous
+  monitoring, read-only operations plane).
 - **Right panel** — sign-in form (username, password, submit button).
 
 | Field | Notes |
@@ -118,9 +124,17 @@ The login page has two panels on desktop:
 `NOCAdmin2026!`. These must not be used in any non-local deployment.
 
 **Session persistence:** On successful login the portal stores `noc_access_token`
-and `noc_refresh_token` in `localStorage`. The session is checked on page
-reload; if the token is expired the operator is redirected to the login page.
-Logging out clears both tokens.
+and `noc_refresh_token` in `localStorage`. The access token is short-lived (5
+minutes by realm default), so the portal renews it automatically — shortly
+before expiry and again if a request is still rejected — using the refresh
+token. A portal left open therefore keeps working without re-authentication up
+to the realm's SSO session limit (10 hours by default), and a page reload within
+that window restores the session instead of returning to the login page.
+
+When renewal is no longer possible (refresh token expired, session revoked), the
+portal drops the session and returns to the login page with *"Session expired.
+Sign in again."*. **Sign out** clears both tokens and returns to the login page;
+use **Back to launcher** to leave the portal for the entity launcher.
 
 ---
 
@@ -144,6 +158,20 @@ by clicking the **View Logs** button on the Infrastructure or Relays pages.
 
 Unknown routes redirect to `/` (Dashboard).
 
+### Status bar
+
+A thin bar above the header carries three badges, visible on every screen:
+
+| Badge | Meaning |
+|---|---|
+| **POLLING `<n>`s** | The active refresh interval, as configured in [Settings](#48-settings-settings). |
+| **LIVE DATA** / **STALE DATA** | `STALE DATA` appears when no backend request has succeeded for three polling cycles (minimum 20 seconds) — the screen is showing the last data received. A banner with the same meaning appears above the page content. |
+| **CRITICAL ALERTS: `<n>`** | Count of `CRITICAL` alerts currently loaded, turning red above zero. |
+
+`STALE DATA` points at the portal's link to the NOC backend, not at the health of
+the monitored components — a spoke can be perfectly healthy while the browser
+cannot reach the backend, and vice versa.
+
 ---
 
 ## 4. Screens
@@ -160,8 +188,13 @@ spoke) and displays the active alert feed.
 
 A dropdown at the top of the page. By default, the first available spoke is
 selected automatically. Select **a specific spoke** to filter both the
-Component Health table and the Alert Feed to that spoke only. Clearing the
-selection shows alerts across all spokes.
+Component Health table and the Alert Feed to that spoke only.
+
+Select **All Spokes** for a platform-wide view: the Alert Feed then lists alerts
+from every registered spoke. Component health is only available per spoke, so in
+this mode the Component Health table shows *"Select a spoke to see component
+health"* and the **Degraded Components** / **Offline Components** cards show `—`
+instead of a count.
 
 #### Summary Cards
 
@@ -190,6 +223,11 @@ Lists up to 8 active alerts. Each alert row shows:
 | **Severity badge** | `INFO`, `WARNING`, `HIGH`, or `CRITICAL`. |
 | **ACK badge** | Shown when the alert has been acknowledged by any operator. |
 | **Dismiss button** | X icon on the right — click to dismiss directly from the feed. |
+
+When **Critical Alerts Only** is enabled in [Settings](#48-settings-settings),
+the feed lists only `HIGH` and `CRITICAL` alerts and a `CRITICAL ONLY` badge
+appears next to the feed title. The Summary Cards are not affected by that
+setting.
 
 Click any alert row (not the dismiss button) to open the **Alert Detail Modal**.
 
@@ -289,6 +327,16 @@ NOC Portal.
 Displays the reserve ratios of each AMM (AutomatedMarketMaker) liquidity pool
 and flags pools that have breached the 70/30 threshold. A **Refresh** button
 triggers a manual data reload.
+
+The NOC backend does not hold pool data of its own: it queries the api-gateway
+for each AMM pair it is configured with. The page therefore distinguishes three
+empty outcomes, and it is worth reading which one you are looking at:
+
+| What you see | What it means |
+|---|---|
+| *"No AMM pools are configured for this deployment."* | The backend read the gateway successfully and there is nothing to show — no sovereign pair has been opened yet, or none is configured. |
+| An amber warning listing pairs that **could not be read** | The gateway is unreachable or the pair does not exist there. This is a configuration or connectivity problem, not an empty AMM — the reason reported for each pair comes straight from the gateway. |
+| A red banner: *"Could not reach the NOC backend."* | The portal could not reach the NOC backend at all; nothing on this page is current. |
 
 #### Understanding the 70/30 rule
 
@@ -391,6 +439,7 @@ parameter (`?name=...`).
 | Control | Description |
 |---|---|
 | **Refresh button** | Force an immediate log fetch. Spinner is shown while loading. |
+| **SNAPSHOT `<n>`s OLD** badge | Appears when the newest line collected is more than 60 seconds old — see *Snapshots, not a live tail* below. |
 
 #### Log Panel
 
@@ -398,13 +447,27 @@ Terminal-style viewer (black background, green text).
 
 | Column | Description |
 |---|---|
-| **Timestamp** | Time portion of the log line's `occurred_at` timestamp (HH:MM:SS.mmm). |
+| **Timestamp** | Time portion of the log line's `occurred_at` timestamp (HH:MM:SS.mmm). This is when the **agent collected** the batch, so a whole batch shares one timestamp; each line's own time appears inside the log text. |
 | **Stream badge** | `stdout` (normal output) or `stderr` (error output). `stderr` lines appear in red. |
 | **Log line** | Raw log text from the container. |
 
 - Displays the **last 500 lines**.
 - Auto-scrolls to the bottom on initial load and on each refresh.
-- Refreshes automatically every **15 seconds**.
+- Refreshes automatically every **15 seconds**. This cycle is fixed and is not
+  affected by the Settings polling interval.
+
+#### Snapshots, not a live tail
+
+Logs are collected by the spoke's NOC agent and pushed to the backend; the
+viewer reads what the backend stored. If the container stops, or its agent stops
+collecting, the screen keeps showing the last snapshot with no other visible
+change — the **SNAPSHOT `<n>`s OLD** badge is what tells you the lines are not
+current.
+
+> Log collection requires the component to be registered with its container name.
+> A component registered without one always reports *"No logs available."* even
+> while healthy — for relay components this depends on `spec.relay.containerName`
+> being set in the entity's deployment manifest.
 
 ---
 
@@ -428,7 +491,7 @@ recorded here.
 | Column | Description |
 |---|---|
 | **Timestamp** | When the action was performed (local time). |
-| **Actor** | Username of the NOC operator who performed the action. |
+| **Actor** | Username of the NOC operator who performed the action, taken from the `preferred_username` claim of the token used. Deployments whose token carries no username fall back to the account's internal ID, and a request with no readable identity is recorded as `dev-user`. |
 | **Action** | The action type: `Acknowledge` (from `ACKNOWLEDGE_ALERT`) or `Dismiss` (from `DISMISS_ALERT`). |
 | **Target** | The internal ID of the alert that was acted upon. |
 | **Detail** | Any additional context recorded at the time of the action. |
@@ -457,12 +520,25 @@ same browser. They reset when the browser storage is cleared.
 
 | Setting | Default | Description |
 |---|---|---|
-| **Alert Email** | `noc-ops@cbweb3.local` | Email address for alert notifications. Stored locally — not sent to the backend. |
-| **Critical Alerts Only** | Off | When checked, mutes `INFO` and `WARNING` severity alerts from the Dashboard feed. Only `HIGH` and `CRITICAL` alerts appear. |
-| **Polling Interval** | 15 seconds | How frequently the Dashboard auto-refreshes. **Minimum: 5 seconds.** Values below 5 are rejected. |
+| **Alert Email** | `noc-ops@cbweb3.local` | Email address for alert notifications. Stored locally — not sent to the backend. Applied on **Save Settings**. |
+| **Critical Alerts Only** | Off | When checked, hides `INFO` and `WARNING` severity alerts from the Dashboard's Active Alert Feed. Only `HIGH` and `CRITICAL` alerts appear, and a `CRITICAL ONLY` badge is shown on the feed header. Applied immediately on toggle. |
+| **Polling Interval** | 15 seconds | How frequently the auto-refreshing pages reload data. **Minimum: 5 seconds.** Values below 5 are rejected. Applied on **Save Settings**. |
 
-Click **Save Settings** to apply changes. A toast confirms success. The active
-polling interval shown below the input updates immediately.
+Click **Save Settings** to apply the Alert Email and Polling Interval. A toast
+confirms success, and the active polling interval shown below the input updates
+immediately. If the interval is below 5 seconds or not a number, an error toast
+appears and **nothing is saved** — including the Alert Email. The **Critical
+Alerts Only** checkbox does not require Save; it takes effect as soon as it is
+toggled.
+
+The Polling Interval governs every auto-refreshing page in the portal —
+[Dashboard](#41-dashboard-), [Infrastructure](#42-infrastructure-infrastructure)
+and [Relay Status](#43-relay-status-relays) — not the Dashboard alone. The
+Container Logs refresh cycle is fixed at 15 seconds and is not affected by this
+setting.
+
+Note that the **Critical / High Alerts** counter in the Dashboard KPI row always
+counts `HIGH` and `CRITICAL` active alerts regardless of this setting.
 
 ---
 
@@ -501,6 +577,13 @@ The ACK badge appears on the alert row. The action appears in the Audit Trail.
 
 In both cases the alert disappears from the feed and is logged in the Audit
 Trail. Dismissed alerts cannot be re-activated from the portal.
+
+**Dismissing does not silence an ongoing fault.** If the component is still
+unhealthy, the next agent report raises a new alert for it — dismissal clears
+the row you acted on, not the condition behind it. The alert stops coming back
+once the component reports `HEALTHY`, which also resolves it automatically. Use
+**Acknowledge** for a fault you are actively working on: it keeps the alert in
+the feed and marks it as taken.
 
 ---
 
@@ -654,6 +737,26 @@ Trail. Dismissed alerts cannot be re-activated from the portal.
 - Run `make noc.setup-keycloak` from `scenario-b/` if the `noc-portal` client
   does not yet exist in Keycloak.
 
+### Returned to the login page while working
+
+- The portal renews its token automatically, so this normally only happens when
+  the realm's SSO session limit is reached (10 hours by default) or the session
+  was revoked in Keycloak. The message shown is *"Session expired. Sign in
+  again."*
+- If it happens after only a few minutes, the renewal call is failing: check the
+  browser network tab for a rejected request to the Keycloak token endpoint, and
+  confirm the portal's `VITE_KEYCLOAK_URL` points at a realm reachable from the
+  browser.
+
+### Status bar shows STALE DATA
+
+- The browser has not completed a backend request for three polling cycles. The
+  monitored components may be perfectly healthy — what failed is the portal's
+  own link to the NOC backend.
+- Confirm the NOC backend container is up and answering on its published port.
+- Check the browser console for CORS or connection errors; a portal built with
+  the wrong `VITE_NOC_BACKEND_URL` shows exactly this symptom.
+
 ### Dashboard shows no data or all components show `UNKNOWN`
 
 - Verify the NOC backend service is running and that the spoke services are up.
@@ -663,6 +766,14 @@ Trail. Dismissed alerts cannot be re-activated from the portal.
   spoke-endpoint unreachability.
 - Run `make noc.setup-agents` from `scenario-b/` if spokes are not yet
   registered in the NOC backend.
+
+### Relay logs are empty while the relay is healthy
+
+- Log collection needs the relay's container name in the entity's deployment
+  manifest (`spec.relay.containerName`). Without it the component is registered
+  with an endpoint only, so there is nothing for the agent to read logs from.
+- After adding it, the entity must be re-applied (or its `noc-agent`
+  configuration refreshed) for the change to reach the agent.
 
 ### Relay page shows an empty table
 
@@ -675,10 +786,19 @@ Trail. Dismissed alerts cannot be re-activated from the portal.
 
 ### Pool Stability shows no pools
 
-- Confirm the NOC backend's pool data source is configured and reachable.
-- Check browser console for network errors on the `/api/v1/pools` request.
-- If the stack was just started, allow a few minutes for the AMM to initialise
-  and for the first pool snapshot to be recorded.
+- Read the page's own message first: it says whether the gateway answered with
+  nothing, could not be read, or was never reached (see
+  [Pool Stability](#44-pool-stability-pool-stability)).
+- When pairs are listed as unreadable, the NOC backend logs one line per failed
+  pair with the gateway URL it tried: `docker logs <noc-backend container>`.
+  A wrong `AMM_GATEWAY_URL`, or a gateway on a network the backend cannot reach,
+  produces exactly this.
+- *"not found among active pairs"* means the gateway is reachable but the
+  configured pair does not exist there. Confirm the pair identifier in
+  `AMM_PAIRS` matches an active pair on the api-gateway.
+- If the corridor was never opened, there is genuinely nothing to show: a
+  sovereign pair must be proposed, confirmed and funded with liquidity (done by
+  the central banks from the Governance portal) before any pool exists.
 
 ### Log Viewer shows no logs or an error
 
@@ -696,6 +816,10 @@ Trail. Dismissed alerts cannot be re-activated from the portal.
   to a high value, new alerts will appear infrequently.
 - The WebSocket stream is not yet active — the portal always polls. This is
   expected behavior and not an error.
+- If `INFO` and `WARNING` alerts are missing from the Dashboard feed, check
+  whether **Critical Alerts Only** is enabled in [Settings](#48-settings-settings).
+  The setting persists across reloads, so it may have been left on by an earlier
+  session in the same browser.
 - Click **Refresh** on the Infrastructure page or navigate away and back to the
   Dashboard to trigger an immediate data pull.
 
