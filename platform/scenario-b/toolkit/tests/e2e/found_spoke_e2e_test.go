@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build e2e
 
 // found-spoke E2E (build tag `e2e`): funds a spoke against a founded hub with

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package keyprovider is the custody boundary for the toolkit's blockchain
 // (secp256k1) keys. Each entity holds its own key; the boundary exposes only
 // public keys / EVM addresses and signatures — private key material never

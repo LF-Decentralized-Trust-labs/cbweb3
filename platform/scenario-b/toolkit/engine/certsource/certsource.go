@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package certsource is the spoke-CA boundary of the toolkit (CB-as-CA). The
 // central bank is the CA of its spoke: it issues a commercial bank's leaf
 // certificate from a CSR (the bank holds its own key) and exposes the trust

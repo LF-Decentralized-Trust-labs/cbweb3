@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package orchestrator is the idempotent step engine of the toolkit (TK-B6).
 // It runs a dependency-ordered set of steps with Check→skip / Run→persist,
 // durable per-step state, a flock, dry-run planning and a structured report.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package relayregistrar is the toolkit's pluggable boundary for registering
 // spokes with the generalized relay (TK-B5). A local in-memory implementation
 // (idempotent registry) serves dev/tests; a production stub forwards to the

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package exec is the injectable boundary for external side effects of the
 // toolkit's steps (docker compose, forge, Keycloak). A real runner shells out
 // via os/exec; a fake runner records invocations for tests; a dry runner
