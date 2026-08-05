@@ -35,6 +35,7 @@ This runbook describes the complete procedure for bringing up the CBWeb3 Scenari
 - [Teardown](#teardown)
 - [Troubleshooting](#troubleshooting)
 - [Known limitations](#known-limitations)
+- [Changelog](#changelog)
 
 ---
 
@@ -1092,3 +1093,12 @@ After fixing, restart the affected backend services.
 | US3 (commercial bank swap) partially implemented | Full cross-currency swap lifecycle requires governance account for some steps | Use CB-A governance account for testing; see tryout scripts |
 | Sovereign liquidity auto-recovery not implemented | Failed matched commits leave the pool in a stuck state | Manual re-commit by both CBs |
 | Paladin/Zeto privacy not available on hub | Hub AMM transactions are not privacy-preserving | Privacy is enforced per-spoke only |
+
+---
+
+## Changelog
+
+| Date | Deliverable | Change |
+|------|-------------|--------|
+| 2026-07-23 | D6 v2 → D12 | **Network parameter rebase.** Besu image `24.x → 25.8.0` (pinned) and chain IDs `80000/80001/80002 → 1337/1338/1339` (hub/spoke-A/spoke-B). Rationale, compatibility verification, LNET coordination, and a flagged Besu version-skew risk in the bring-up scripts are documented in [besu-chainid-migration-notes.md](besu-chainid-migration-notes.md). Operational cutover for the chain-ID change: see [Decommissioning the Legacy Hub-on-Spoke-A Deployment](#decommissioning-the-legacy-hub-on-spoke-a-deployment). |
+| 2026-05-29 | D9 | Initial deployment runbook (PKI → infra → Besu → contracts → seed → backend → relay), health checks, smoke tests, teardown. |
