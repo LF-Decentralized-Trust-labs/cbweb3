@@ -40,18 +40,20 @@ func TestFXExpirationWorker_CancelsExpired(t *testing.T) {
 
 	w.runOnce(context.Background())
 
-	if len(repo.updated) != 2 {
-		t.Fatalf("expected 2 updates, got %d", len(repo.updated))
+	updated := repo.snapshotUpdated()
+	if len(updated) != 2 {
+		t.Fatalf("expected 2 updates, got %d", len(updated))
 	}
-	for _, rec := range repo.updated {
+	for _, rec := range updated {
 		if rec.State != domain.FXStateCancelled {
 			t.Errorf("trade %s expected CANCELLED, got %s", rec.TradeID, rec.State)
 		}
 	}
-	if len(repo.auditEvents) != 2 {
-		t.Fatalf("expected 2 audit events, got %d", len(repo.auditEvents))
+	auditEvents := repo.snapshotAuditEvents()
+	if len(auditEvents) != 2 {
+		t.Fatalf("expected 2 audit events, got %d", len(auditEvents))
 	}
-	ev := repo.auditEvents[0]
+	ev := auditEvents[0]
 	if ev.ToState != domain.FXStateCancelled || ev.Source != domain.EventSourceSystemJob {
 		t.Errorf("unexpected audit event: %+v", ev)
 	}
@@ -72,8 +74,9 @@ func TestFXExpirationWorker_SkipsTerminal(t *testing.T) {
 
 	w.runOnce(context.Background())
 
-	if len(repo.updated) != 1 || repo.updated[0].TradeID != "live" {
-		t.Errorf("expected only 'live' updated, got %+v", repo.updated)
+	updated := repo.snapshotUpdated()
+	if len(updated) != 1 || updated[0].TradeID != "live" {
+		t.Errorf("expected only 'live' updated, got %+v", updated)
 	}
 }
 
@@ -84,7 +87,7 @@ func TestFXExpirationWorker_ListErrorIsHandled(t *testing.T) {
 
 	w.runOnce(context.Background())
 
-	if len(repo.updated) != 0 {
+	if repo.numUpdated() != 0 {
 		t.Errorf("expected no updates on list error")
 	}
 }
@@ -103,11 +106,13 @@ func TestFXExpirationWorker_UpdateErrorContinues(t *testing.T) {
 	w.runOnce(context.Background())
 
 	// "bad" update failed (no audit event), "good" succeeded.
-	if len(repo.updated) != 1 || repo.updated[0].TradeID != "good" {
-		t.Errorf("expected only 'good' updated, got %+v", repo.updated)
+	updated := repo.snapshotUpdated()
+	if len(updated) != 1 || updated[0].TradeID != "good" {
+		t.Errorf("expected only 'good' updated, got %+v", updated)
 	}
-	if len(repo.auditEvents) != 1 || repo.auditEvents[0].TradeID != "good" {
-		t.Errorf("expected audit only for 'good', got %+v", repo.auditEvents)
+	auditEvents := repo.snapshotAuditEvents()
+	if len(auditEvents) != 1 || auditEvents[0].TradeID != "good" {
+		t.Errorf("expected audit only for 'good', got %+v", auditEvents)
 	}
 }
 

@@ -107,11 +107,14 @@ var _ RelayerEventExecutor = (*fakeExecutor)(nil)
 
 // fakeFXRepo implements ports.FXAgreementRepository for worker tests.
 //
-// `expired`, `listErr`, `updateErr` and `auditErr` are set before the worker
-// starts and only read afterwards. `updated` and `auditEvents` are appended to
-// from the worker goroutine while the test polls them, so those two — and only
-// those two — are guarded by mu. Read them via numUpdated / snapshotUpdated in
-// concurrent tests.
+// `expired`, `listErr`, `updateErr` and `auditErr` are scripted before the
+// worker starts and only read afterwards, so they need no synchronization.
+//
+// `updated` and `auditEvents` are appended to from whichever goroutine drives
+// the worker, so they are guarded by mu and must never be read directly by a
+// test — go through numUpdated, snapshotUpdated or snapshotAuditEvents. Routing
+// every read through an accessor keeps the package -race clean whether a test
+// calls runOnce inline or polls a worker started in its own goroutine.
 type fakeFXRepo struct {
 	expired   []*podmain.FXAgreementRecord
 	listErr   error
@@ -128,6 +131,24 @@ func (r *fakeFXRepo) numUpdated() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.updated)
+}
+
+// snapshotUpdated returns the recorded updates under the lock. Only the slice is
+// copied: the records are still the worker's, which is safe because the worker
+// populates a record before handing it to UpdateAgreement and never mutates it
+// afterwards.
+func (r *fakeFXRepo) snapshotUpdated() []*podmain.FXAgreementRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]*podmain.FXAgreementRecord(nil), r.updated...)
+}
+
+// snapshotAuditEvents returns the recorded audit events under the lock, with the
+// same shallow-copy semantics as snapshotUpdated.
+func (r *fakeFXRepo) snapshotAuditEvents() []*podmain.FXAgreementEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]*podmain.FXAgreementEvent(nil), r.auditEvents...)
 }
 
 func (r *fakeFXRepo) CreateAgreement(context.Context, *podmain.FXAgreementRecord) error { return nil }
