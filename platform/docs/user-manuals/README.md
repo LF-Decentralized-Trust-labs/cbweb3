@@ -73,6 +73,9 @@ counters rather than fabricated data.
 | Supervisor | Supervisors / regulators (preview) | [scenario-a/supervisor.md](./scenario-a/supervisor.md) |
 | NOC | Network operations engineers | [scenario-a/noc.md](./scenario-a/noc.md) |
 
+For the cross-portal end-to-end golden path (who does what, in which portal, in
+what order) see **[scenario-a/end-to-end-walkthrough.md](./scenario-a/end-to-end-walkthrough.md)**.
+
 ## Scenario B — International Hub
 
 | Portal | Who uses it | Manual |
