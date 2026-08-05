@@ -118,7 +118,6 @@ The Dashboard provides a real-time overview of the treasury position and pending
 It is the first screen seen after login and the primary situational-awareness view.
 
 ![Dashboard](../img/scenario-b/treasury/02-dashboard.png)
-<!-- SCREENSHOT-UPDATE: ../img/scenario-b/treasury/02-dashboard.png — Dashboard redesigned: circuit-breaker banner, hub pool/FX panel and event stream removed; a seven-day transactions chart added. -->
 
 **Identity card.** The top card greets the authenticated institution ("Welcome, ...", sourced
 from `VITE_INSTITUTION_NAME`, the Keycloak institution ID, or the user name), and shows the
@@ -150,7 +149,6 @@ This screen manages requests from commercial bank participants to obtain fiat-ba
 a corresponding tCeBM mint, the request appears here for treasury approval.
 
 ![Issuance Approvals](../img/scenario-b/treasury/03-deposits.png)
-<!-- SCREENSHOT-UPDATE: ../img/scenario-b/treasury/03-deposits.png — Sidebar relabeled (Issuance Approvals) and a Liquidity Provisioning item added; recapture so the navigation matches the current build. -->
 
 **Summary cards.** Show the total number of issuance requests and the number currently in
 `PENDING` status.
@@ -201,7 +199,6 @@ burns tokens on one spoke network (Redemption leg) and mints tokens on a destina
 triggers both the on-chain burn (Redemption tx hash) and the on-chain mint (Issuance ref).
 
 ![Tokenisation Approvals](../img/scenario-b/treasury/04-escrows.png)
-<!-- SCREENSHOT-UPDATE: ../img/scenario-b/treasury/04-escrows.png — Sidebar relabeled (Tokenisation Approvals) and a Liquidity Provisioning item added; recapture so the navigation matches the current build. -->
 
 **Summary cards.** Total and pending tokenisation request counts.
 
@@ -245,7 +242,6 @@ for fiat reserves. Approving a redeem burns the participant's tCeBM via a Zeto p
 transfer and releases the corresponding fiat reserve.
 
 ![Redeem Approvals](../img/scenario-b/treasury/05-redeems.png)
-<!-- SCREENSHOT-UPDATE: ../img/scenario-b/treasury/05-redeems.png — Sidebar relabeled (Redeem Approvals) and a Liquidity Provisioning item added; recapture so the navigation matches the current build. -->
 
 **Summary cards.** Total and pending redeem counts.
 
@@ -290,7 +286,6 @@ confirming pairs and seeding reserves — are performed on the separate **Liquid
 Provisioning** screen (Section 4.6).
 
 ![Liquidity Management](../img/scenario-b/treasury/06-liquidity-management.png)
-<!-- SCREENSHOT-UPDATE: ../img/scenario-b/treasury/06-liquidity-management.png — Page redesigned into a read-only multi-pool monitor (summary cards, pool list, detail panel with circuit breaker, reserves and on-chain references). The cooperative wizard, remove-liquidity form and session LP-positions table are gone. -->
 
 Live pool and circuit-breaker data refresh automatically about every 15 seconds. If the
 national currency cannot be determined (for example, the balance lookup fails), the screen
@@ -337,7 +332,7 @@ This screen is where a central bank provisions cross-currency liquidity: it regi
 on the hub and seeds pool reserves. Signing is performed by this central bank's own gateway;
 each institution acts only on its own side (sovereign provisioning).
 
-<!-- SCREENSHOT-NEW: ../img/scenario-b/treasury/09-liquidity-provisioning.png — Registered Currencies table, Propose Pair, Confirm Pair, and Seed Liquidity (sovereign) cards. -->
+![Liquidity Provisioning](../img/scenario-b/treasury/09-liquidity-provisioning.png)
 
 **Registered Currencies.** A table of the national currencies registered on the hub currency
 registry. Columns: Symbol, Country, Token Address, Proposer CB. A **Refresh** button reloads

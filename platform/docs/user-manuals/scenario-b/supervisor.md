@@ -87,7 +87,6 @@ Navigate to the Supervisor Portal URL. The login page presents an
 institutional SSO/OIDC sign-in form.
 
 ![Login](../img/scenario-b/supervisor/01-login.png)
-<!-- SCREENSHOT-UPDATE: ../img/scenario-b/supervisor/01-login.png — the form now uses Username and Password fields, not Client ID / Client Secret -->
 
 **Fields:**
 
@@ -484,7 +483,7 @@ The Settings screen holds session security and operational preferences. All
 options are toggles that apply to the current browser session only; they are
 not persisted to the backend.
 
-<!-- SCREENSHOT-NEW: ../img/scenario-b/supervisor/08-settings.png — Supervisor Settings card with the three preference toggles and the Save Preferences button -->
+![Settings](../img/scenario-b/supervisor/08-settings.png)
 
 **Preferences:**
 

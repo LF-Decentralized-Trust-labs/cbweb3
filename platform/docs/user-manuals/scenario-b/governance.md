@@ -61,7 +61,6 @@ Central bank governance and compliance officers. Access is provisioned by the ne
 Open the Governance Portal URL for your central bank entity. The URL is defined in the **Portal Ports** table of `scenario-b/frontend/README.md` for the local deployment, or provided by the network administrator for production deployments.
 
 ![Login](../img/scenario-b/governance/01-login.png)
-<!-- SCREENSHOT-UPDATE: ../img/scenario-b/governance/01-login.png — login field labels changed from "Client ID"/"Client Secret" to "Username"/"Password" -->
 
 The login form requires two fields:
 
@@ -175,7 +174,6 @@ To approve a pending bank:
 The Accounts screen (titled "Account Intervention") provides emergency account intervention: governance operators can freeze and unfreeze participant accounts. Every action must be accompanied by a written reason of at least 10 characters.
 
 ![Accounts](../img/scenario-b/governance/04-accounts.png)
-<!-- SCREENSHOT-UPDATE: ../img/scenario-b/governance/04-accounts.png — screen now shows an Unfreeze Account action, a Central Bank "Admin" protected row, and table pagination -->
 
 #### Account list
 
@@ -255,7 +253,6 @@ In Scenario B, the circuit breaker uses a **multi-signature governance model** a
 The acting institution identity is derived from the operator session (falling back to the configured institution name) and is **never typed manually**. The institutional signature is generated server-side from the Central Bank PKI key — operators do not paste a signature. The page polls the current breaker state automatically every 15 seconds and reads the state directly from the blockchain, so every Central Bank sees the same state.
 
 ![Circuit Breaker](../img/scenario-b/governance/06-circuit-breaker.png)
-<!-- SCREENSHOT-UPDATE: ../img/scenario-b/governance/06-circuit-breaker.png — layout changed: pair selector replaces free-text pair, no Bank ID or signature fields, added "What is the circuit breaker?" explainer and RESUME_PENDING state -->
 
 At the top of the screen, an explanatory panel titled "What is the circuit breaker?" describes the control in plain language.
 
@@ -308,7 +305,7 @@ Click **Sign Resume** (enabled only when a pair is selected and a Request ID is 
 
 The Transfer Limits screen lets a Central Bank set daily transfer limits for participants on its spoke. Limits always apply in the spoke's own sovereign currency; a Central Bank cannot set a limit in another currency.
 
-<!-- SCREENSHOT-NEW: ../img/scenario-b/governance/09-transfer-limits.png — Transfer Limits screen showing the New Transfer Limit form and the Active Limits table -->
+![Transfer Limits](../img/scenario-b/governance/09-transfer-limits.png)
 
 #### New Transfer Limit
 
@@ -417,7 +414,7 @@ Click **Apply Filters** to execute the filtered query. The filter state is not p
 
 The Settings screen holds operator session information and local display preferences.
 
-<!-- SCREENSHOT-NEW: ../img/scenario-b/governance/10-settings.png — Settings screen showing the current session panel and display preference controls -->
+![Settings](../img/scenario-b/governance/10-settings.png)
 
 #### Current Session
 
