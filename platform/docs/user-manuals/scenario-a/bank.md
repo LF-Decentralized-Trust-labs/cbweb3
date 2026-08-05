@@ -164,7 +164,8 @@ After completion, all other portal features become available.
 | `NONE` | No request submitted; wizard starts at Stage 1 |
 | `PENDING` | Submitted and awaiting Central Bank review |
 | `CREDENTIAL_REQUESTED` | System is internally requesting the PKI credential (shown as Pending to the operator) |
-| `ONBOARDING_APPROVED` | Central Bank approved; final activation in progress |
+| `APPROVED` | Central Bank approved; final activation in progress |
+| `KYC_APPROVED` | Central Bank approved (KYC cleared); treated the same as `APPROVED` — final activation in progress |
 | `ACTIVE` | Fully onboarded; all features accessible |
 | `REJECTED` | Central Bank rejected the request; contact governance support |
 | `REVOKED` | Access revoked after activation; contact governance support |
