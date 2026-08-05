@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"gorm.io/gorm"
@@ -22,9 +23,15 @@ func NewAlertService(db *gorm.DB) *AlertService {
 	return &AlertService{db: db}
 }
 
-// Evaluate fires or resolves alerts based on component state transitions.
+// Evaluate fires or resolves alerts based on component health reports.
+//
+// Firing is edge-triggered on a status change, with one exception: a component that
+// stays unhealthy with no ACTIVE alert gets a new one. Without that, dismissing the
+// alert of a still-broken component silenced it forever — the fault never transitions
+// again, so no further alert was ever raised. The "no ACTIVE alert for this component
+// and status" condition is what keeps this from becoming an alert storm on every push.
 func (s *AlertService) Evaluate(ctx context.Context, comp *domain.NocComponent, newStatus, prevStatus string) {
-	if newStatus == prevStatus {
+	if newStatus == prevStatus && (newStatus == "HEALTHY" || s.hasActiveAlert(comp.ID.String(), newStatus)) {
 		return
 	}
 
@@ -69,6 +76,22 @@ func (s *AlertService) Evaluate(ctx context.Context, comp *domain.NocComponent, 
 		RootCauseSig: sig,
 	}
 	s.db.Create(alert)
+}
+
+// hasActiveAlert reports whether this component already has an ACTIVE alert for the
+// given status — the guard that keeps a persistent fault from re-alerting on every push.
+func (s *AlertService) hasActiveAlert(componentID, status string) bool {
+	var count int64
+	err := s.db.Model(&domain.NocAlert{}).
+		Where("component_id = ? AND state = 'ACTIVE' AND root_cause_sig = ?", componentID, rootCauseSig(componentID, status)).
+		Count(&count).Error
+	if err != nil {
+		// On a query error, assume an alert exists: a missing re-alert is a lesser evil
+		// than duplicating one on every 15-second push while the database misbehaves.
+		log.Printf("alerts: counting active alerts for component %s: %v", componentID, err)
+		return true
+	}
+	return count > 0
 }
 
 func (s *AlertService) resolveIncidentsIfNeeded(comp *domain.NocComponent) {

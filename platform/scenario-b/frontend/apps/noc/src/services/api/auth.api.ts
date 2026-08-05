@@ -1,31 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { LoginResponse, SysAdminUser } from "../../types";
+import { clearTokens, decodeJwtPayload, ensureFreshToken, keycloakConfig, storeTokens } from "./token";
 
-const KEYCLOAK_URL = import.meta.env.VITE_KEYCLOAK_URL ?? "http://localhost:8080";
-const REALM = import.meta.env.VITE_KEYCLOAK_REALM ?? "cbweb3";
-const CLIENT_ID = import.meta.env.VITE_KEYCLOAK_CLIENT_ID ?? "noc-portal";
-
-function parseJwtPayload(token: string): Record<string, unknown> {
-  try {
-    const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(base64)) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
+function userFromToken(token: string, fallbackName: string): SysAdminUser {
+  const payload = decodeJwtPayload(token);
+  return {
+    id: (payload["sub"] as string) ?? "",
+    name: (payload["preferred_username"] as string) ?? fallbackName,
+    role: "SYS_ADMIN",
+    institutionId: (payload["bank_id"] as string) ?? "",
+  };
 }
 
 export const authApi = {
   login: async (username: string, password: string): Promise<LoginResponse> => {
     const body = new URLSearchParams({
       grant_type: "password",
-      client_id: CLIENT_ID,
+      client_id: keycloakConfig.clientId,
       username,
       password,
     });
 
     const res = await fetch(
-      `${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/token`,
+      `${keycloakConfig.url}/realms/${keycloakConfig.realm}/protocol/openid-connect/token`,
       { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body },
     );
 
@@ -35,39 +33,22 @@ export const authApi = {
     }
 
     const tokens = await res.json() as { access_token: string; refresh_token: string };
-    localStorage.setItem("noc_access_token", tokens.access_token);
-    localStorage.setItem("noc_refresh_token", tokens.refresh_token);
+    storeTokens(tokens.access_token, tokens.refresh_token);
 
-    const payload = parseJwtPayload(tokens.access_token);
-    const user: SysAdminUser = {
-      id: (payload["sub"] as string) ?? "",
-      name: (payload["preferred_username"] as string) ?? username,
-      role: "SYS_ADMIN",
-      institutionId: (payload["bank_id"] as string) ?? "",
-    };
-    return { user };
+    return { user: userFromToken(tokens.access_token, username) };
   },
 
+  // Restores the session on reload. ensureFreshToken renews an expired access token from
+  // the stored refresh token, so reopening the portal after the 5-minute access lifespan
+  // keeps the operator signed in instead of bouncing to /login.
   me: async (): Promise<LoginResponse> => {
-    const token = localStorage.getItem("noc_access_token");
+    const token = await ensureFreshToken();
     if (!token) throw new Error("No session");
-    const payload = parseJwtPayload(token);
-    const exp = payload["exp"] as number | undefined;
-    if (exp && Date.now() / 1000 > exp) {
-      throw new Error("Token expired");
-    }
-    const user: SysAdminUser = {
-      id: (payload["sub"] as string) ?? "",
-      name: (payload["preferred_username"] as string) ?? "NOC User",
-      role: "SYS_ADMIN",
-      institutionId: (payload["bank_id"] as string) ?? "",
-    };
-    return { user };
+    return { user: userFromToken(token, "NOC User") };
   },
 
   logout: async () => {
-    localStorage.removeItem("noc_access_token");
-    localStorage.removeItem("noc_refresh_token");
+    clearTokens();
     return { ok: true };
   },
 };

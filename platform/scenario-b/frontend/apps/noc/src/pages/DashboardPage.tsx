@@ -25,6 +25,7 @@ import { useEffect, useState } from "react";
 import { AlertDetailModal } from "../components/alerts/AlertDetailModal";
 import { usePolling } from "../hooks";
 import { useAlertStore, useInfrastructureStore, usePoolStore, useSpokeStore, useUiStore } from "../stores";
+import { filterActiveAlerts } from "../stores/ui.settings";
 
 const severityVariant: Record<string, "default" | "secondary" | "warning" | "destructive"> = {
   INFO: "secondary",
@@ -42,10 +43,10 @@ const healthVariant: Record<string, "default" | "secondary" | "warning" | "destr
 
 export function DashboardPage() {
   const { spokes, selectedSpokeId, fetchSpokes, selectSpoke } = useSpokeStore();
-  const { components, fetchComponents } = useInfrastructureStore();
+  const { components, fetchComponents, clearComponents } = useInfrastructureStore();
   const { alerts, fetchAlerts, dismissAlert, clearSelectedAlert } = useAlertStore();
   const { pools, fetch: fetchPools } = usePoolStore();
-  const { fallbackPollingSeconds } = useUiStore();
+  const { fallbackPollingSeconds, muteAlerts } = useUiStore();
   const [openAlertId, setOpenAlertId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -53,14 +54,17 @@ export function DashboardPage() {
     void fetchPools();
   }, [fetchSpokes, fetchPools]);
 
+  // Component health is per spoke; on "All Spokes" the alert feed goes platform-wide and
+  // the component tables are cleared instead of showing the previous spoke's rows.
   useEffect(() => {
     if (selectedSpokeId) {
       void fetchComponents(selectedSpokeId);
       void fetchAlerts(selectedSpokeId);
     } else {
+      clearComponents();
       void fetchAlerts();
     }
-  }, [selectedSpokeId, fetchComponents, fetchAlerts]);
+  }, [selectedSpokeId, fetchComponents, clearComponents, fetchAlerts]);
 
   usePolling(() => {
     if (selectedSpokeId) {
@@ -76,7 +80,7 @@ export function DashboardPage() {
   const offline = components.filter((c) => c.health_status === "OFFLINE").length;
   const breachedPools = pools.filter((p) => p.breached7030).length;
 
-  const activeAlerts = alerts.filter((a) => a.state === "ACTIVE");
+  const activeAlerts = filterActiveAlerts(alerts, muteAlerts);
 
   function handleSelectSpoke(value: string) {
     selectSpoke(value === "all" ? null : value);
@@ -96,6 +100,7 @@ export function DashboardPage() {
             <SelectValue placeholder="All Spokes" />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="all">All Spokes</SelectItem>
             {spokes.filter((s) => s.active).map((s) => (
               <SelectItem key={s.id} value={s.id}>
                 {s.name}
@@ -115,13 +120,17 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Degraded Components</CardDescription>
-            <CardTitle className={degraded > 0 ? "text-warning" : ""}>{degraded}</CardTitle>
+            <CardTitle className={degraded > 0 ? "text-warning" : ""}>
+              {selectedSpokeId ? degraded : "—"}
+            </CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Offline Components</CardDescription>
-            <CardTitle className={offline > 0 ? "text-destructive" : ""}>{offline}</CardTitle>
+            <CardTitle className={offline > 0 ? "text-destructive" : ""}>
+              {selectedSpokeId ? offline : "—"}
+            </CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -158,7 +167,9 @@ export function DashboardPage() {
                 ))}
                 {components.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">No components yet</TableCell>
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                      {selectedSpokeId ? "No components yet" : "Select a spoke to see component health"}
+                    </TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -168,7 +179,10 @@ export function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Active Alert Feed</CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle>Active Alert Feed</CardTitle>
+              {muteAlerts && <Badge variant="secondary">CRITICAL ONLY</Badge>}
+            </div>
           </CardHeader>
           <CardContent className="space-y-2">
             {activeAlerts.length === 0 && (
