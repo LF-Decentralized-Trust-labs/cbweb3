@@ -39,6 +39,14 @@ curl http://localhost:8081/realms/master | jq .realm
 
 ---
 
+## Migration notes
+
+| Document | Description |
+|----------|-------------|
+| [besu-chainid-migration-notes.md](besu-chainid-migration-notes.md) | Network-parameter delta D6 v2 → D12: Besu `24.x → 25.8.0` (pinned) and chain IDs `80000/80001/80002 → 1337/1338/1339`, with compatibility verification, LNET coordination, and a flagged Besu version-skew risk in the Scenario B bring-up scripts |
+
+---
+
 ## Portal documentation
 
 | Document | Description |
