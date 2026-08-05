@@ -18,9 +18,10 @@
    - [Accounts](#53-accounts)
    - [Swap Monitor](#54-swap-monitor)
    - [Circuit Breaker](#55-circuit-breaker)
-   - [Oversight](#56-oversight)
-   - [Audit](#57-audit)
-   - [Settings](#58-settings)
+   - [Transfer Limits](#56-transfer-limits)
+   - [Oversight](#57-oversight)
+   - [Audit](#58-audit)
+   - [Settings](#59-settings)
 6. [Typical workflows](#6-typical-workflows)
 7. [Status reference](#7-status-reference)
 8. [Troubleshooting](#8-troubleshooting)
@@ -36,15 +37,16 @@ This portal gives the central bank governance team authority over:
 - **Participant admission** — KYC approval for commercial banks requesting access to the network.
 - **Account intervention** — emergency freeze of a participant account.
 - **AMM oversight** — read-only visibility into in-progress and historical swaps.
-- **Circuit breaker** — pause and resume all AMM swaps using a 1-of-N pause / 2-of-N resume multi-signature mechanism.
+- **Circuit breaker** — pause and resume AMM swaps per currency pair using a 1-of-N pause / 2-of-N resume multi-signature mechanism.
+- **Transfer limits** — set daily transfer limits per participant in the spoke's sovereign currency.
 - **Oversight and disclosure** — open and co-sign AML/CFT disclosure requests for cross-border transactions.
 - **Audit trail** — immutable record of every governance action.
 
-> **Important — Scenario B vs Scenario A.** The Governance Portal serves both scenarios from the same codebase. When `VITE_SCENARIO=b`, a Scenario B-specific route set is activated. In Scenario B, the Deposits Approval, Escrows Approval, Redeems Approval, HTLC Monitor, Parameters, and Transfer Limits screens are **not available** in this portal — they belong to other portals (Treasury, Bank) in the Scenario B architecture. Do not expect those screens to be accessible.
+> **Important — Scenario B vs Scenario A.** The Governance Portal serves both scenarios from the same codebase. When `VITE_SCENARIO=b`, a Scenario B-specific route set is activated. In Scenario B, the Deposits Approval, Escrows Approval, Redeems Approval, HTLC Monitor, and Parameters screens are **not available** in this portal — they belong to other portals (Treasury, Bank) in the Scenario B architecture. Do not expect those screens to be accessible.
 
 | Actor | Portal | Role |
 |---|---|---|
-| Central Bank Governance Operator | Governance Portal | Admits participants, freezes accounts, monitors swaps, operates the circuit breaker, manages AML disclosures |
+| Central Bank Governance Operator | Governance Portal | Admits participants, freezes and unfreezes accounts, monitors swaps, operates the circuit breaker, sets transfer limits, manages AML disclosures |
 
 ---
 
@@ -59,13 +61,14 @@ Central bank governance and compliance officers. Access is provisioned by the ne
 Open the Governance Portal URL for your central bank entity. The URL is defined in the **Portal Ports** table of `scenario-b/frontend/README.md` for the local deployment, or provided by the network administrator for production deployments.
 
 ![Login](../img/scenario-b/governance/01-login.png)
+<!-- SCREENSHOT-UPDATE: ../img/scenario-b/governance/01-login.png — login field labels changed from "Client ID"/"Client Secret" to "Username"/"Password" -->
 
 The login form requires two fields:
 
 | Field | Description |
 |---|---|
-| **Client ID** | Institutional service account identifier (minimum 3 characters). |
-| **Client Secret** | Institutional service account secret (minimum 6 characters). |
+| **Username** | Institutional service account identifier (minimum 3 characters). |
+| **Password** | Institutional service account secret (minimum 6 characters). |
 
 After submitting valid credentials, the portal authenticates via Keycloak OIDC and verifies the `ROLE_GOVERNANCE` role. If the role check passes, the operator is redirected to the Dashboard with a "Welcome to the Governance Portal" confirmation. If the credentials are invalid or the role is missing, an error message is displayed inline on the login form.
 
@@ -83,7 +86,8 @@ In Scenario B, the sidebar contains exactly the following items in order:
 | Registry | `/registry` | Participant compliance registry and KYC approvals |
 | Accounts | `/accounts` | Account freeze for emergency intervention |
 | Swap Monitor | `/swap-monitor` | Read-only visibility into AMM swap operations |
-| Circuit Breaker | `/circuit-breaker` | Pause / resume AMM swaps (multi-sig) |
+| Circuit Breaker | `/circuit-breaker` | Pause / resume AMM swaps per pair (multi-sig) |
+| Transfer Limits | `/transfer-limits` | Daily transfer limits per participant |
 | Oversight | `/oversight` | AML/CFT disclosure requests |
 | Audit | `/audit` | Full governance action audit trail |
 | Settings | `/settings` | Session and display preferences |
@@ -168,32 +172,33 @@ To approve a pending bank:
 
 **Route:** `/accounts`
 
-The Accounts screen provides emergency account intervention: governance operators can freeze a participant account. This is an irreversible action that must be accompanied by a written reason.
+The Accounts screen (titled "Account Intervention") provides emergency account intervention: governance operators can freeze and unfreeze participant accounts. Every action must be accompanied by a written reason of at least 10 characters.
 
 ![Accounts](../img/scenario-b/governance/04-accounts.png)
+<!-- SCREENSHOT-UPDATE: ../img/scenario-b/governance/04-accounts.png — screen now shows an Unfreeze Account action, a Central Bank "Admin" protected row, and table pagination -->
 
 #### Account list
 
-A searchable table of all participant accounts. The search field filters by account ID or participant name.
+A searchable, paginated table of all participant accounts. The search field filters by account ID or participant name. The table shows 10 accounts per page, with Prev / Next controls and a "Showing X–Y of N" indicator below it.
 
 | Column | Description |
 |---|---|
 | **Account** | Account identifier. |
-| **Participant** | Name of the institution that holds the account. |
+| **Participant** | Name of the institution that holds the account. Central Bank accounts are tagged with an "Admin" badge. |
 | **Status** | `ACTIVE` (green) or `FROZEN` (red). |
 | **Frozen At** | Timestamp when the account was frozen, or "—" if active. |
 | **Reason** | The reason recorded at freeze time, or "—" if active. |
-| **Action** | "Freeze Account" button, disabled for already-frozen accounts. |
+| **Action** | "Freeze Account" for active accounts, "Unfreeze Account" for frozen accounts. Central Bank accounts show "Central Bank — protected" and cannot be frozen or unfrozen. |
 
-#### Freezing an account
+#### Freezing or unfreezing an account
 
 1. Locate the account in the list using the search field if needed.
-2. Click **Freeze Account** on the target row. A confirmation panel appears below the list.
+2. Click **Freeze Account** (or **Unfreeze Account** for a frozen account) on the target row. A confirmation panel appears below the list, titled "Confirm Freeze" or "Confirm Unfreeze".
 3. Enter a reason of at least 10 characters in the text area.
-4. Click **Confirm Freeze**. The action is submitted and a success notification appears.
+4. Click **Confirm Freeze** (or **Confirm Unfreeze**). The action is submitted and a success notification appears.
 5. Click **Cancel** to abandon the action.
 
-> Freezing an account is recorded permanently in the audit log under the `FREEZE` category. There is no unfreeze action available in this portal — contact the network administrator for account reinstatement.
+> Freeze and unfreeze actions are recorded permanently in the audit log under the `FREEZE` category. The Central Bank is the governance administrator and can never freeze or unfreeze its own account — its row is protected.
 
 ---
 
@@ -215,7 +220,7 @@ Three summary cards at the top of the screen:
 | **Pending Escrows** | Tokenisation requests awaiting approval. |
 | **Pending Redeems** | Redemption requests awaiting approval. |
 
-> These counts are informational only. The approval screens for deposits, escrows, and redeems are part of other portals in the Scenario B architecture and are not accessible from the Governance Portal sidebar. The cards show the queue depth so governance operators can monitor pipeline health.
+> These counts are informational only. Each card carries a link (Open issuance approvals / Open tokenisation approvals / Open redeem approvals), but the approval screens for deposits, escrows, and redeems are part of other portals in the Scenario B architecture and are not present in the Governance Portal navigation. The cards show the queue depth so governance operators can monitor pipeline health.
 
 #### Swap History
 
@@ -240,74 +245,96 @@ Multiple swaps can be tracked in a single session; each appears as a separate ca
 
 **Route:** `/circuit-breaker`
 
-The Circuit Breaker is the emergency control for all AMM swap operations on the hub. Governance operators use this screen to halt or resume cross-border swap processing.
+The Circuit Breaker is the emergency control for AMM swap operations on the hub. The breaker is applied **per currency pair** — one AMM instance exists per pair — so all actions on this screen apply to the pair currently selected. Governance operators use this screen to halt or resume swap processing for a pair.
 
-In Scenario B, the circuit breaker uses a **multi-signature governance model**:
+In Scenario B, the circuit breaker uses a **multi-signature governance model** across Central Banks:
 
-- **Pausing** the circuit breaker is a unilateral action: any single authorised governance operator can halt swaps immediately (1-of-N).
-- **Resuming** the circuit breaker is a two-step process that requires at least two independent institutional signatures (2-of-N). One institution proposes the resume; a second institution co-signs the proposal before swaps are re-enabled.
+- **Pausing** the breaker is a unilateral action: any single Central Bank can halt the selected pair immediately (1-of-N).
+- **Resuming** the breaker is a two-step process that requires two different Central Banks (2-of-N). One Central Bank proposes the resume; a second Central Bank signs it before swaps are re-enabled.
 
-The page polls the current breaker state automatically every 15 seconds.
+The acting institution identity is derived from the operator session (falling back to the configured institution name) and is **never typed manually**. The institutional signature is generated server-side from the Central Bank PKI key — operators do not paste a signature. The page polls the current breaker state automatically every 15 seconds and reads the state directly from the blockchain, so every Central Bank sees the same state.
 
 ![Circuit Breaker](../img/scenario-b/governance/06-circuit-breaker.png)
+<!-- SCREENSHOT-UPDATE: ../img/scenario-b/governance/06-circuit-breaker.png — layout changed: pair selector replaces free-text pair, no Bank ID or signature fields, added "What is the circuit breaker?" explainer and RESUME_PENDING state -->
 
-#### Current state panel
+At the top of the screen, an explanatory panel titled "What is the circuit breaker?" describes the control in plain language.
 
-At the top of the screen, a status panel shows:
+#### Pair selector and current state
 
-| Field | Description |
+| Element | Description |
 |---|---|
-| **State badge** | `LIVE` (blue) or `HALTED` (red). |
-| **Pair** | The currency pair this breaker state applies to (e.g. `BRL-USD`). |
-| **Active resume request** | If a resume proposal is in progress, the resume request ID is shown here. |
+| **Pair** | A dropdown of the AMM pairs created on the hub. Each option shows the pair identifier and its status, for example `BRL-USD (ACTIVE)`. If no pairs exist yet, the selector reads "No pairs created yet". |
+| **Current state badge** | `LIVE` (default), `HALTED` (red), or `RESUME_PENDING` (amber). |
+| **Resume proposal** | When a resume proposal is in flight, a line shows the truncated resume request ID and signature progress, for example `X/Y signatures`. |
 | **Guidance** | Operational guidance text derived from the current state and freshness. |
 | **Stale indicator** | If the most recent status refresh failed, an amber warning reads "Showing last known state. Latest status refresh failed." |
+| **Acting as** | The Central Bank identity that pause and resume actions are recorded under. |
 
-#### Pause Circuit Breaker
+#### Pause (1-of-N)
 
-Use this panel to halt all swaps for a currency pair immediately.
+Use this panel to halt the selected pair immediately.
 
 | Field | Description |
 |---|---|
-| **Pair** | Currency pair to halt (e.g. `BRL-USD`). |
-| **Bank ID** | Institutional identifier of the operator issuing the pause. |
-| **Reason Code** | Machine-readable reason code (e.g. `INCIDENT_HIGH_VOLATILITY`). |
-| **Institutional Signature (base64)** | Cryptographic signature from the institution's key, base64-encoded. |
+| **Reason Code** | Machine-readable reason code, pre-filled with `INCIDENT_HIGH_VOLATILITY`. |
 
-Click **Pause** to submit. The state panel updates immediately on success.
+Click **Pause** to submit (disabled until a pair is selected). The state updates to `HALTED` on success.
 
-> Pausing is irreversible in the sense that swaps stop immediately. A pause does not require a second operator. Choose the reason code carefully — it is recorded permanently.
+> Pausing stops swaps for the selected pair immediately and does not require a second operator. Choose the reason code carefully — it is recorded permanently.
 
 #### Propose Resume
 
-Use this panel to initiate the two-step resume process after a pause.
+Use this panel to open the resume process after a pause. It counts as the first of the 2-of-N signatures.
+
+Click **Propose Resume** (disabled until a pair is selected). A resume request ID is created and displayed below the button as "Created request: …". A second Central Bank must then sign it.
+
+#### Sign Resume Request (2-of-N)
+
+Use this panel to add the second Central Bank signature to a pending resume proposal.
 
 | Field | Description |
 |---|---|
-| **Pair** | Currency pair to resume. |
-| **Bank ID** | Institutional identifier of the first signer proposing the resume. |
-| **Institutional Signature (base64)** | Cryptographic signature from the proposing institution. |
+| **Request ID** | The resume request ID. This field is auto-filled with the resume request discovered on-chain, so a Central Bank that did not propose can co-sign in one click. |
 
-Click **Propose Resume** to submit. A resume request ID is created and displayed below the button. Communicate this request ID to the second signing institution.
+Click **Sign Resume** (enabled only when a pair is selected and a Request ID is present). Once the 2-of-N quorum is reached, swaps are re-enabled. Click **Refresh Status** at any time to confirm the current state.
 
-#### Sign Resume Request
-
-Use this panel to add the second institutional signature to a pending resume proposal.
-
-| Field | Description |
-|---|---|
-| **Pair** | Currency pair of the resume request. |
-| **Request ID** | The resume request ID created in the Propose Resume step. |
-| **Signer Bank ID** | Institutional identifier of the second signer. |
-| **Institutional Signature (base64)** | Cryptographic signature from the co-signing institution. |
-
-Click **Sign Resume** (enabled only when a Request ID is entered). Once the required threshold of signatures is reached, swaps are re-enabled automatically. Click **Refresh Status** at any time to confirm the current state.
-
-> **Operational protocol.** When a pause is engaged, communicate the event to all participant banks promptly — their transfer operations will fail until the breaker is resumed. Resuming requires coordination between two governance operators from different institutions. Do not share signing keys to circumvent the 2-of-N requirement.
+> **Operational protocol.** When a pause is engaged, communicate the event to all participant banks promptly — their transfer operations for that pair will fail until the breaker is resumed. Resuming requires two different Central Banks. Signatures are produced server-side from each Central Bank's PKI key; the quorum cannot be satisfied by a single institution.
 
 ---
 
-### 5.6 Oversight
+### 5.6 Transfer Limits
+
+**Route:** `/transfer-limits`
+
+The Transfer Limits screen lets a Central Bank set daily transfer limits for participants on its spoke. Limits always apply in the spoke's own sovereign currency; a Central Bank cannot set a limit in another currency.
+
+<!-- SCREENSHOT-NEW: ../img/scenario-b/governance/09-transfer-limits.png — Transfer Limits screen showing the New Transfer Limit form and the Active Limits table -->
+
+#### New Transfer Limit
+
+| Field | Description |
+|---|---|
+| **Participant** | Dropdown of registered banks on the spoke. The default option, "All participants", applies the limit broadly. |
+| **Currency** | Read-only. The spoke's sovereign currency (the human code, for example `COP`, derived from the reserve token such as `tCeBM_COP`). The backend fixes this value. |
+| **Daily Max Amount** | The daily maximum transfer amount, for example `1000000`. Required. |
+
+Click **Create limit** to submit. A success notification confirms the new limit.
+
+#### Active Limits
+
+A table of the daily transfer limits configured for the spoke. When no limits exist, the panel reads "No limits configured."
+
+| Column | Description |
+|---|---|
+| **Participant** | The participant bank code, or "all" if the limit applies broadly. |
+| **Currency** | The currency of the limit, or "all". |
+| **Daily Max** | The formatted daily maximum amount with its currency. |
+| **Created** | Date the limit was created. |
+| (action) | "Remove" button that deletes the limit. |
+
+---
+
+### 5.7 Oversight
 
 **Route:** `/oversight`
 
@@ -350,11 +377,11 @@ A full JSON view of the disclosure record is shown below the summary for detaile
 
 ---
 
-### 5.7 Audit
+### 5.8 Audit
 
 **Route:** `/audit`
 
-The Audit screen provides the immutable governance action trail. Every action taken through this portal — credential approvals, account freezes, parameter changes, circuit breaker operations — is recorded here.
+The Audit screen (titled "Governance Audit Trail") provides the immutable governance action trail. Every action taken through this portal — credential approvals, account freezes, parameter changes, circuit breaker operations — is recorded here.
 
 ![Audit](../img/scenario-b/governance/08-audit.png)
 
@@ -384,6 +411,35 @@ Click **Apply Filters** to execute the filtered query. The filter state is not p
 
 ---
 
+### 5.9 Settings
+
+**Route:** `/settings`
+
+The Settings screen holds operator session information and local display preferences.
+
+<!-- SCREENSHOT-NEW: ../img/scenario-b/governance/10-settings.png — Settings screen showing the current session panel and display preference controls -->
+
+#### Current Session
+
+A read-only panel showing the signed-in operator:
+
+| Field | Description |
+|---|---|
+| **User** | The operator's subject identifier from the session. |
+| **Role** | The roles carried by the session, joined by commas. |
+
+#### Display preferences
+
+| Control | Description |
+|---|---|
+| **Timezone** | Free-text timezone, default `America/Sao_Paulo`. |
+| **Date format** | Free-text date format, default `dd/MM/yyyy HH:mm`. |
+| **Enable dashboard alert sounds** | Checkbox, enabled by default. |
+
+Click **Save Settings** to confirm. These preferences are display-only client-side settings.
+
+---
+
 ## 6. Typical workflows
 
 ### Onboarding a new commercial bank
@@ -408,19 +464,19 @@ Click **Apply Filters** to execute the filtered query. The filter state is not p
 ### Halting AMM swaps (emergency pause)
 
 1. Navigate to **Circuit Breaker** (`/circuit-breaker`).
-2. Confirm the current state is `LIVE` in the status panel.
-3. In the **Pause Circuit Breaker** panel, verify the currency pair, enter your Bank ID, provide the reason code, and paste your institutional signature (base64).
+2. Select the affected pair in the **Pair** dropdown and confirm the current state is `LIVE`.
+3. In the **Pause (1-of-N)** panel, adjust the reason code if required.
 4. Click **Pause**.
-5. The state panel updates to `HALTED`. Communicate the pause to all participant banks immediately.
+5. The state updates to `HALTED`. Communicate the pause to all participant banks immediately.
 6. The pause is recorded in the Audit log under the `CIRCUIT_BREAKER` category.
 
 ### Resuming AMM swaps (two-signature process)
 
-1. **First operator (any central bank):** Navigate to **Circuit Breaker** (`/circuit-breaker`). In the **Propose Resume** panel, enter the currency pair, your Bank ID, and your institutional signature. Click **Propose Resume**. Note the resume request ID that appears below the button.
-2. Communicate the resume request ID to a second governance operator at a different institution.
-3. **Second operator (different institution):** Navigate to **Circuit Breaker**. In the **Sign Resume Request** panel, enter the currency pair, the resume request ID, their Bank ID, and their institutional signature. Click **Sign Resume**.
-4. The state panel updates to `LIVE` once quorum is reached. Verify with **Refresh Status**.
-5. Both signature events are recorded in the Audit log.
+1. **First Central Bank:** Navigate to **Circuit Breaker** (`/circuit-breaker`). Select the pair, then click **Propose Resume** in the **Propose Resume** panel. Note the resume request ID that appears as "Created request: …".
+2. A second Central Bank opens the **Circuit Breaker** screen and selects the same pair. The resume request ID is auto-filled in the **Sign Resume Request (2-of-N)** panel from the on-chain state; if needed, the request ID from step 1 can be entered manually.
+3. **Second Central Bank:** Click **Sign Resume**.
+4. The state updates to `LIVE` once the 2-of-N quorum is reached. Verify with **Refresh Status**.
+5. Both signature events are recorded in the Audit log. Signatures are produced server-side from each Central Bank's PKI key.
 
 ### Investigating a suspicious transaction (AML disclosure)
 
@@ -439,6 +495,14 @@ Click **Apply Filters** to execute the filtered query. The filter state is not p
 3. To investigate a specific swap, obtain the swap ID from the payment team or NOC, enter it in the **Swap ID** field, and click **Track Swap**.
 4. Review the swap record card for status, parties, and transaction references.
 5. If the swap shows a failure status (e.g. `BRIDGE_OUT_FAILED`), escalate to the NOC team — do not attempt to intervene from this portal.
+
+### Setting a daily transfer limit
+
+1. Navigate to **Transfer Limits** (`/transfer-limits`).
+2. In the **New Transfer Limit** form, choose a participant, or leave "All participants" selected to apply the limit broadly.
+3. Confirm the read-only **Currency** — it is fixed to your spoke's sovereign currency.
+4. Enter the **Daily Max Amount** and click **Create limit**. A success notification confirms the new limit.
+5. The limit appears in the **Active Limits** table. Use its **Remove** button to delete it if needed.
 
 ---
 
@@ -461,11 +525,10 @@ Click **Apply Filters** to execute the filtered query. The filter state is not p
 
 | State | Meaning |
 |---|---|
-| `LIVE` | AMM swaps are operational. Normal operating state. |
-| `ACTIVE` | Equivalent to LIVE in some API responses. |
-| `HALTED` | AMM swaps are stopped network-wide. All cross-border transfers fail closed until resumed. |
-| `RESUMING` | A resume proposal is open and collecting signatures. Swaps remain halted until quorum is reached. |
-| `UNKNOWN` | Status could not be retrieved from the backend; check connectivity. |
+| `LIVE` | AMM swaps for the pair are operational. Normal operating state and the default shown when no state has been retrieved. |
+| `HALTED` | AMM swaps for the pair are stopped. Cross-border transfers on that pair fail closed until resumed. |
+| `RESUME_PENDING` | A resume proposal is open and collecting signatures. Swaps remain halted until the 2-of-N quorum is reached. |
+| `UNKNOWN` | Shown on the Dashboard circuit breaker card when the state could not be retrieved from the backend; check connectivity. |
 
 ### Swap status
 

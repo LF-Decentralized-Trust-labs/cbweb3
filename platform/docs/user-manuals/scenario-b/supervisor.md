@@ -12,9 +12,9 @@
 > unavailable (as is the case in most local or demo environments), each screen
 > will show empty tables or zero counters.
 >
-> Additionally, the authentication flow uses a client-credential form that talks
-> to the platform's OIDC provider. In environments where Keycloak is not running,
-> sign-in will fail.
+> Additionally, the authentication flow uses a username and password form that
+> talks to the platform's OIDC provider. In environments where Keycloak is not
+> running, sign-in will fail.
 >
 > - **Do not** rely on any figure, pool status, audit entry, or participant
 >   record shown in a demo or offline environment for a real supervisory or
@@ -87,24 +87,26 @@ Navigate to the Supervisor Portal URL. The login page presents an
 institutional SSO/OIDC sign-in form.
 
 ![Login](../img/scenario-b/supervisor/01-login.png)
+<!-- SCREENSHOT-UPDATE: ../img/scenario-b/supervisor/01-login.png — the form now uses Username and Password fields, not Client ID / Client Secret -->
 
 **Fields:**
 
 | Field | Description |
 |---|---|
-| Client ID | The OIDC client identifier for your institution's supervisor role (example: `central-bank-a-supervisor-client`). |
-| Client Secret | The corresponding client secret issued during onboarding. |
+| Username | The supervisor username issued to your institution (minimum 3 characters). |
+| Password | The corresponding supervisor password (minimum 6 characters). |
 
 **How authentication works:**
 
-The form submits credentials to the platform's Keycloak OIDC provider via the
-backend auth service (`POST /api/v2/auth/login`). On success, a session token
-is issued and the portal redirects to the Dashboard. The session is maintained
-in browser memory; closing the tab ends the session.
+The form submits the username and password to the platform's Keycloak OIDC
+provider via the backend auth service (`POST /api/v1/auth/login`). On success,
+the portal establishes the session, displays a confirmation toast, and
+redirects to the Dashboard. A short-lived access token is renewed automatically
+for the duration of the session; closing the tab ends the session.
 
 > **Privileged environment.** This login is connected to the platform's
 > production identity provider. Credentials are institution-issued and
-> supervised. Do not share your Client Secret.
+> supervised. Do not share your credentials.
 
 **Session security features (configured in Settings):**
 
@@ -226,7 +228,7 @@ Alert cards are generated in real time from two sources:
 
 1. **Circuit-breaker alerts.** If the governance circuit breaker is in `PAUSED`
    state, a `CRITICAL` severity alert labelled `ALL` is displayed with the
-   pause reason and timestamp.
+   pause reason.
 2. **Pool imbalance alerts.** For each active pool with `imbalance_flag = true`,
    a `HIGH` severity alert is shown.
 
@@ -319,9 +321,9 @@ Click **Verify** to submit. The panel displays a result card with:
 | Expires At | Expiry timestamp of the pointer (if applicable). |
 
 > **Live data required.** Verification calls the ZK Pointer API
-> (`GET /api/v2/zk-pointer/verify`). If the backend is unreachable or the
-> combination of bank ID and commitment is not found, the state is shown as
-> `INVALID`.
+> (`GET /api/v1/compliance/zk-pointer/verify`). If the backend is unreachable
+> or the combination of bank ID and commitment is not found (HTTP 404), the
+> state is shown as `INVALID`.
 
 **Immutable Audit Log table:**
 
@@ -474,6 +476,33 @@ The result card shows:
 
 ---
 
+### 5.7 Settings
+
+**Route:** `/settings` · **Sidebar label:** Settings
+
+The Settings screen holds session security and operational preferences. All
+options are toggles that apply to the current browser session only; they are
+not persisted to the backend.
+
+<!-- SCREENSHOT-NEW: ../img/scenario-b/supervisor/08-settings.png — Supervisor Settings card with the three preference toggles and the Save Preferences button -->
+
+**Preferences:**
+
+| Preference | Default | Description |
+|---|---|---|
+| Realtime Telemetry (SSE) | On | Receive imbalance and governance alerts instantly over server-sent events. |
+| Strict Session Management | On | Require periodic re-authentication for privileged operations. |
+| Mask Sensitive Data | On | Prevent accidental exposure of decrypted payloads in UI surfaces. |
+
+Click **Save Preferences** to apply the current selections. A confirmation
+toast is shown and a **Session-only preferences** badge indicates that the
+settings are not stored beyond the active session.
+
+> **Session-only.** Preferences reset when the session ends. Re-apply them at
+> the start of each session if required.
+
+---
+
 ## 6. Typical workflows
 
 ### 6.1 Morning liquidity check
@@ -547,7 +576,7 @@ The result card shows:
 | Status | Badge colour | Meaning |
 |---|---|---|
 | ACTIVE | Green | Institution is cleared to transact in the hub. |
-| PENDING | — | Onboarding in progress; not yet cleared. |
+| PENDING | Red | Onboarding in progress; not yet cleared. Any non-`ACTIVE` status renders red. |
 | REVOKED | Red | Credential has been revoked; institution is blocked. |
 
 ### Audit log outcome
@@ -603,8 +632,8 @@ the display).
 ### Sign-in fails with "Unable to login"
 
 Verify that Keycloak is running and reachable from the browser. Confirm your
-Client ID and Client Secret are correct and have not been rotated. If using
-a local development stack, check that the auth service container is up.
+username and password are correct and have not been rotated. If using a local
+development stack, check that the auth service container is up.
 
 ### ZK Pointer returns INVALID for a known commitment
 
