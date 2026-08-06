@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	"gorm.io/gorm"
 )
 
@@ -144,6 +145,48 @@ func (r *crossCurrencySwapRepository) UpdateResidue(ctx context.Context, swapID,
 		Model(&domain.CrossCurrencySwapOperation{}).
 		Where("swap_id = ?", swapID).
 		Updates(updates).Error
+}
+
+// ListRetryableResidues returns swaps whose residue return failed to ENQUEUE and whose next
+// attempt is due, oldest first.
+//
+// Only RETURN_FAILED is retryable here. RETURN_ENQUEUED already has a bridge position and is
+// driven by the relayer's own queue; NONE has nothing to return; RETURN_ESCALATED gave up and
+// needs a human. A NULL next_attempt_at is due immediately — that is the state a first failure
+// leaves behind, since it predates any scheduling.
+func (r *crossCurrencySwapRepository) ListRetryableResidues(ctx context.Context, now time.Time, limit int) ([]domain.CrossCurrencySwapOperation, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var ops []domain.CrossCurrencySwapOperation
+	err := r.db.WithContext(ctx).
+		Where("residue_status = ?", domain.ResidueReturnFailed).
+		// The attempt ceiling is enforced by the QUERY, not only by the status write that
+		// escalates a row. Those are two separate statements: if the status write fails while
+		// the counter write succeeds, the row stays RETURN_FAILED at the ceiling, and without
+		// this bound it would be re-dispatched to the issuing CB on every sweep forever.
+		Where("residue_attempts < ?", services.ResidueMaxAttempts()).
+		Where("residue_next_attempt_at IS NULL OR residue_next_attempt_at <= ?", now).
+		Order("created_at ASC").
+		Limit(limit).
+		Find(&ops).Error
+	if err != nil {
+		return nil, err
+	}
+	return ops, nil
+}
+
+// RecordResidueAttempt persists the attempt counter and when the next attempt becomes due.
+// A nil nextAttemptAt clears the schedule, which is what a terminal outcome (enqueued or
+// escalated) leaves behind.
+func (r *crossCurrencySwapRepository) RecordResidueAttempt(ctx context.Context, swapID string, attempts int, nextAttemptAt *time.Time) error {
+	return r.db.WithContext(ctx).
+		Model(&domain.CrossCurrencySwapOperation{}).
+		Where("swap_id = ?", swapID).
+		Updates(map[string]interface{}{
+			"residue_attempts":        attempts,
+			"residue_next_attempt_at": nextAttemptAt,
+		}).Error
 }
 
 // UpdateFailureReason sets the failure_reason field when status=FAILED.

@@ -21,6 +21,7 @@ import {
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { BalanceWidget } from "../components/common/BalanceWidget";
+import { RecordsEmptyState } from "../components/common/RecordsEmptyState";
 import { usePaymentStore } from "../stores";
 import {
   PaymentStatus,
@@ -221,11 +222,7 @@ export function RedeemsPage() {
               ))}
             </TableBody>
           </Table>
-          {!total ? (
-            <p className="pt-3 text-sm text-muted-foreground">
-              No redeems found.
-            </p>
-          ) : null}
+          {!total ? <RecordsEmptyState emptyLabel="No redeems found." /> : null}
 
           {/* Pagination */}
           <div className="flex items-center justify-between gap-2 pt-4">

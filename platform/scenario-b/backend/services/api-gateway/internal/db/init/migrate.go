@@ -5,6 +5,7 @@ package init
 
 import (
 	"fmt"
+	"log"
 
 	apidomain "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	"gorm.io/gorm"
@@ -24,7 +25,61 @@ func RunAutoMigrate(db *gorm.DB) error {
 	if err := autoMigrateModels(db); err != nil {
 		return err
 	}
+	if err := backfillBridgeDirection(db); err != nil {
+		return err
+	}
 	return dropLegacySwapTxHashIndex(db)
+}
+
+// backfillBridgeDirection fills the direction of positions created before the column existed.
+//
+// Nothing on the position itself said which way it moved value — that is exactly the gap the
+// column closes — so a legacy row is classified from three durable signals, ANY of which means it
+// burns on the Hub:
+//
+//	a BURN_UNLOCK queue item      the relayer's own record of what it was asked to do
+//	leg = RESIDUE                 a residue leg exists only to burn the unspent buffer back;
+//	                              there is no other kind
+//	burn_from_hub_address <> ''   written only by the cross-currency bridge-out handler, to name
+//	                              the address the burn takes from
+//
+// The queue item alone is NOT enough, and the extra two are not redundancy. A burn position and
+// its queue item are two statements: a row created in the window between them (the gap
+// ensureBurnQueueItem closes going forward) has no queue item at all, and would otherwise fall
+// through to IN — which would make the reconciliation count an outbound position as money the CB
+// still holds, inflating its expectation and hiding a real shortfall behind it.
+//
+// Everything left really is inbound: that is what LockAndEnqueue produces, and it is the only
+// producer whose positions can legitimately reach this point unclassified.
+//
+// Idempotent: it only touches rows whose direction is still empty or NULL — a column added to an
+// existing table leaves one or the other depending on the default — so a re-run is a no-op and a
+// direction written at creation is never overwritten.
+func backfillBridgeDirection(db *gorm.DB) error {
+	m := db.Migrator()
+	pos := &apidomain.BridgedAssetPosition{}
+	if !m.HasColumn(pos, "direction") {
+		return nil
+	}
+	out := db.Model(pos).
+		Where("(direction IS NULL OR direction = '')").
+		Where(db.Where("EXISTS (SELECT 1 FROM relayer_queue_items q WHERE q.position_id = bridged_asset_positions.position_id AND q.event_type = ?)", "BURN_UNLOCK").
+			Or("leg = ?", apidomain.BridgeLegResidue).
+			Or("burn_from_hub_address <> ''")).
+		Update("direction", apidomain.BridgeDirectionOut)
+	if out.Error != nil {
+		return fmt.Errorf("backfill bridge direction (OUT): %w", out.Error)
+	}
+	in := db.Model(pos).
+		Where("(direction IS NULL OR direction = '')").
+		Update("direction", apidomain.BridgeDirectionIn)
+	if in.Error != nil {
+		return fmt.Errorf("backfill bridge direction (IN): %w", in.Error)
+	}
+	if out.RowsAffected > 0 || in.RowsAffected > 0 {
+		log.Printf("[migrate] backfilled bridge direction: %d OUT, %d IN", out.RowsAffected, in.RowsAffected)
+	}
+	return nil
 }
 
 // dropLegacySwapTxHashIndex removes the single-column unique index once AutoMigrate has
@@ -91,6 +146,11 @@ func autoMigrateModels(db *gorm.DB) error {
 		&apidomain.SwapQuote{},
 		&apidomain.SwapRollbackLog{},
 		&apidomain.SwapRateLimitCounter{},
+
+		// Sovereign delegation of the Hub AMM swap (Step 2): the CB records each swap it
+		// executed for a bank, keyed on the funding bridge-in position, so a retried
+		// delegation never runs the swap twice.
+		&apidomain.CrossCurrencyHubSwap{},
 
 		// R1-10.1: configurable CB transfer limits + daily volume tracking
 		&apidomain.TransferLimit{},

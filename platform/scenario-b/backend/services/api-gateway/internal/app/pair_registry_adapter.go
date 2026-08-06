@@ -140,6 +140,45 @@ func NewPairRegistryClient(ctx context.Context, cfg PairRegistryConfig) (*PairRe
 	return c, nil
 }
 
+// identityCBOfABI is the minimal IdentityRegistry read used to resolve which address may act
+// as the central bank of a token on the hub. PairRegistry gates proposePair on
+// getCentralBankOf(tokenA) and confirmPair on getCentralBankOf(tokenB).
+const identityCBOfABI = `[
+{"type":"function","name":"getCentralBankOf","stateMutability":"view","inputs":[{"name":"token","type":"address"}],"outputs":[{"name":"","type":"address"}]}
+]`
+
+// CentralBankOfToken reads IdentityRegistry.getCentralBankOf(token) on the hub, i.e. which
+// address the registry recognises as that token's issuing central bank.
+func (c *PairRegistryClient) CentralBankOfToken(ctx context.Context, tokenAddress string) (string, error) {
+	if c.identityRegistry == (common.Address{}) {
+		return "", fmt.Errorf("pair registry: HUB_IDENTITY_REGISTRY_ADDRESS not configured")
+	}
+	token := common.HexToAddress(tokenAddress)
+	if token == (common.Address{}) {
+		return "", fmt.Errorf("pair registry: invalid token address %q", tokenAddress)
+	}
+	parsed, err := evm.ParseABI(identityCBOfABI)
+	if err != nil {
+		return "", fmt.Errorf("pair registry: parse identity ABI: %w", err)
+	}
+	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	var cb common.Address
+	if err := evm.Call(callCtx, c.ec, c.identityRegistry, parsed, "getCentralBankOf",
+		[]interface{}{token}, &cb); err != nil {
+		return "", fmt.Errorf("pair registry: getCentralBankOf(%s): %w", token.Hex(), err)
+	}
+	return cb.Hex(), nil
+}
+
+// HubSignerAddress is this gateway's hub signing address, or "" on a read-only client.
+func (c *PairRegistryClient) HubSignerAddress() string {
+	if c.signer == nil {
+		return ""
+	}
+	return c.signer.Address().Hex()
+}
+
 // Close releases the underlying RPC connection.
 func (c *PairRegistryClient) Close() {
 	if c.ec != nil {

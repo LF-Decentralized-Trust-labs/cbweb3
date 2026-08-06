@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -88,16 +89,91 @@ type PairRepositoryIface interface {
 	ListAll(ctx context.Context) ([]domain.PairProposal, error)
 }
 
+// zeroEVMAddress is what IdentityRegistry.getCentralBankOf returns for a token it has no
+// mapping for — an unresolved authority, not a rightful confirmer.
+const zeroEVMAddress = "0x0000000000000000000000000000000000000000"
+
+// TokenAuthorityReader resolves, on the hub, which address the IdentityRegistry recognises as a
+// token's issuing central bank, and which address this gateway signs with.
+//
+// It exists so an unauthorized confirm is refused BEFORE a transaction is spent on a certain
+// revert. PairRegistry gates confirmPair on getCentralBankOf(tokenB); the revert carries no
+// decoded reason through the EVM client, so without this pre-check the operator sees a generic
+// "transaction reverted — check contract permissions and token allowances" and a wasted tx.
+// Since each currency's issuance authority moved to its own central bank, a CB attempting to
+// confirm a corridor it does not own is an ordinary operator mistake, not an exotic failure.
+type TokenAuthorityReader interface {
+	CentralBankOfToken(ctx context.Context, tokenAddress string) (string, error)
+	HubSignerAddress() string
+}
+
 // PairService implements PairServiceIface.
 type PairService struct {
-	client PairRegistryClientIface
-	repo   PairRepositoryIface
+	client    PairRegistryClientIface
+	repo      PairRepositoryIface
+	authority TokenAuthorityReader
 }
 
 // NewPairService creates a PairService backed by an on-chain client and a DB repo.
 // client may be nil for read-only mode (ListActivePairs only).
 func NewPairService(client PairRegistryClientIface, repo PairRepositoryIface) *PairService {
 	return &PairService{client: client, repo: repo}
+}
+
+// WithTokenAuthorityReader attaches the hub authority reader used to pre-check confirm rights.
+// Optional: without it an unauthorized confirm still fails, just later and less clearly.
+func (s *PairService) WithTokenAuthorityReader(r TokenAuthorityReader) *PairService {
+	s.authority = r
+	return s
+}
+
+// confirmAuthorityCheck refuses a confirm this gateway is not entitled to make.
+//
+// Read-only and best-effort: any inability to resolve the authority (unknown pair, RPC error,
+// reader not wired) falls through to the on-chain attempt rather than blocking a legitimate
+// confirm on a failed read. Only a definite mismatch is refused.
+func (s *PairService) confirmAuthorityCheck(ctx context.Context, pairID string) error {
+	if s.authority == nil {
+		return nil
+	}
+	self := strings.TrimSpace(s.authority.HubSignerAddress())
+	if self == "" {
+		return nil
+	}
+	pairs, err := s.client.GetAllPairs(ctx)
+	if err != nil {
+		log.Printf("[pair] confirm pre-check: could not list pairs for %q: %v (falling through to on-chain)", pairID, err)
+		return nil
+	}
+	tokenB := ""
+	for _, p := range pairs {
+		if p.PairID == pairID {
+			tokenB = p.TokenB
+			break
+		}
+	}
+	if tokenB == "" {
+		log.Printf("[pair] confirm pre-check: pair %q not found on-chain (falling through to on-chain)", pairID)
+		return nil
+	}
+	expected, err := s.authority.CentralBankOfToken(ctx, tokenB)
+	if err != nil {
+		log.Printf("[pair] confirm pre-check: could not resolve the central bank of %s: %v (falling through to on-chain)", tokenB, err)
+		return nil
+	}
+	expected = strings.TrimSpace(expected)
+	// An absent mapping (empty or the zero address) is not a mismatch — it means the registry
+	// has no issuing central bank for this token yet. Reporting it as "you are not the CB"
+	// would name address zero as the rightful confirmer; leave it to the chain.
+	if expected == "" || expected == zeroEVMAddress {
+		log.Printf("[pair] confirm pre-check: token %s has no central bank on the hub registry (falling through to on-chain)", tokenB)
+		return nil
+	}
+	if strings.EqualFold(expected, self) {
+		return nil
+	}
+	return fmt.Errorf("%w: confirming %s requires the central bank of its token B (%s); this gateway signs as %s",
+		ErrNotCentralBankOfTokenB, pairID, expected, self)
 }
 
 // ProposePair submits an on-chain proposePair transaction and records the proposal in DB.
@@ -159,6 +235,9 @@ func (s *PairService) ProposePair(ctx context.Context, req PairProposeRequest) (
 func (s *PairService) ConfirmPair(ctx context.Context, req PairConfirmRequest) (*PairConfirmResult, error) {
 	if s.client == nil {
 		return nil, fmt.Errorf("pair service: on-chain client not configured (PAIR_REGISTRY_CONTRACT_ADDRESS missing)")
+	}
+	if err := s.confirmAuthorityCheck(ctx, req.PairID); err != nil {
+		return nil, err
 	}
 
 	txHash, err := s.client.ConfirmPair(ctx, req.PairID)

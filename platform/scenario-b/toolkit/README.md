@@ -41,6 +41,13 @@ Secrets are never expressible in a manifest: key/cert material is referenced via
 mode stands up an observability control plane rather than an on-chain node, so
 `node`/`keyProvider`/`certSource`/`relay` are not required for it.
 
+`keyProvider` accepts **only `kms://local-emulator[?seed=…]`** today, and a manifest
+naming any other provider is **rejected**. Production key custody is not implemented
+(`keyprovider`'s production path answers `ErrNotImplemented` to every operation), so
+accepting e.g. `kms://aws-prod` would declare production custody while the deployment
+ran on keys derived from a public salt. The refusal exists to make that impossible to
+believe by accident; see `scenario-b/docs/design/key-custody-plan.md`.
+
 ## Sovereign currency and token metadata
 
 Each spoke declares its own currency in the manifest; nothing about a currency is

@@ -372,3 +372,54 @@ func TestParseErrorClarity(t *testing.T) {
 		t.Errorf("expected single-line error, got: %q", err.Error())
 	}
 }
+
+// A keyProvider the toolkit cannot honour must be REJECTED, not accepted and ignored.
+//
+// Before this, the field was validated for shape and then never read by anything: the only
+// references to spec.KeyProvider were in this validator. A manifest carrying
+// `keyProvider: kms://aws-prod` therefore validated successfully and the deployment ran on keys
+// derived from a public salt — production custody declared, development custody delivered, with no
+// error anywhere. Accepting the declaration is the dangerous part, so validation is where it stops.
+func TestRejectUnsupportedKeyProviderHost(t *testing.T) {
+	for _, uri := range []string{
+		"kms://aws-prod",
+		"kms://prod",
+		"kms://vault.internal",
+		"kms://azure-keyvault?vault=cbdc",
+	} {
+		t.Run(uri, func(t *testing.T) {
+			pd := mustLoad(t, "found-spoke.yaml")
+			pd.Spec.KeyProvider = uri
+			res := Validate(pd)
+			if !findErr(res, "spec.keyProvider") {
+				t.Fatalf("expected %q to be refused: it would silently deliver development keys", uri)
+			}
+			// The message has to say WHY, or an operator reads it as a typo.
+			var msg string
+			for _, f := range res.Errors {
+				if f.Field == "spec.keyProvider" {
+					msg = f.Message
+				}
+			}
+			if !strings.Contains(msg, "local-emulator") {
+				t.Fatalf("message must name the only supported provider, got %q", msg)
+			}
+		})
+	}
+}
+
+// The local emulator stays valid, with or without a seed — it is what every sample uses.
+func TestAcceptLocalEmulatorKeyProvider(t *testing.T) {
+	for _, uri := range []string{
+		"kms://local-emulator",
+		"kms://local-emulator?seed=cbweb3-scenario-b-cb-hub-key:",
+	} {
+		t.Run(uri, func(t *testing.T) {
+			pd := mustLoad(t, "found-spoke.yaml")
+			pd.Spec.KeyProvider = uri
+			if res := Validate(pd); findErr(res, "spec.keyProvider") {
+				t.Fatalf("%q must remain valid: %+v", uri, res.Errors)
+			}
+		})
+	}
+}

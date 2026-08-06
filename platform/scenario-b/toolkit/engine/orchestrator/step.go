@@ -40,7 +40,12 @@ type StepResult struct {
 
 // Report is the structured outcome of a run (emitted as json|yaml).
 type Report struct {
-	Mode       string       `yaml:"mode" json:"mode"`
+	Mode string `yaml:"mode" json:"mode"`
+	// DataDir is the ABSOLUTE directory this run used for state, keys and volumes. It is reported
+	// because node.dataDir is relative in the manifests: the same command run from two working
+	// directories provisions two different entities, and until this was visible the only symptom was a
+	// bank that had quietly been given a second identity.
+	DataDir    string       `yaml:"dataDir,omitempty" json:"dataDir,omitempty"`
 	Steps      []StepResult `yaml:"steps" json:"steps"`
 	BundlePath string       `yaml:"bundlePath,omitempty" json:"bundlePath,omitempty"`
 }

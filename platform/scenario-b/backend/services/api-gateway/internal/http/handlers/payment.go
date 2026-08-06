@@ -3,6 +3,9 @@
 package handlers
 
 import (
+	"context"
+	"strings"
+
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"github.com/gofiber/fiber/v2"
@@ -90,6 +93,26 @@ func (h *PaymentHandler) RequestFiatExchange(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
+// OwnsDeposit reports whether depositID was registered by requesterAddress. It satisfies
+// middleware.DepositOwnership, which binds /internal/v1/payments/deposits/exchange to its caller:
+// that route names a deposit id and nothing else, so ownership is the only thing that can bind it.
+//
+// Answered from the orchestrator's own listing, filtered by requester, rather than a membership
+// check of the caller's own making — the record's owner is what decides, and it lives there.
+func (h *PaymentHandler) OwnsDeposit(ctx context.Context, requesterAddress, depositID string) (bool, error) {
+	deposits, err := h.payment.ListDeposits(ctx, requesterAddress)
+	if err != nil {
+		return false, err
+	}
+	wanted := strings.TrimSpace(depositID)
+	for _, d := range deposits {
+		if strings.EqualFold(strings.TrimSpace(d.ID), wanted) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (h *PaymentHandler) ListDeposits(c *fiber.Ctx) error {

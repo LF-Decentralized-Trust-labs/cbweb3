@@ -135,7 +135,7 @@ func (c *JoinConfig) WithDefaults() {
 func (c JoinConfig) genesisVolume() string  { return c.VolumePrefix + "_genesis" }
 func (c JoinConfig) besuDataVolume() string { return c.VolumePrefix + "_besu_data" }
 func (c JoinConfig) caVolume() string       { return c.VolumePrefix + "_cb_tls" }
-func (c JoinConfig) svcTLSVolume() string    { return c.VolumePrefix + "_svc_tls" }
+func (c JoinConfig) svcTLSVolume() string   { return c.VolumePrefix + "_svc_tls" }
 func (c JoinConfig) keycloakPort() int      { return c.RPCPort + 7000 }
 
 // keycloakContainer matches entity-keycloak.compose.yaml's container_name.
@@ -326,10 +326,17 @@ func (c JoinConfig) ComposeEnv() []string {
 		"CORS_ALLOW_ORIGINS": c.corsOrigins(),
 		// app stack (compliance + auth): the bank is the local signer; the Keycloak
 		// realm/client are provisioned by provision-keycloak-bank.
-		"SPOKE_CHAIN_ID":     fmt.Sprintf("%d", c.SpokeChainID),
-		"CB_PRIVATE_KEY":     devDeployerKey,
-		"KEYCLOAK_REALM":     bankKeycloakRealm,
-		"KEYCLOAK_CLIENT_ID": bankKeycloakClient,
+		"SPOKE_CHAIN_ID": fmt.Sprintf("%d", c.SpokeChainID),
+		"CB_PRIVATE_KEY": devDeployerKey,
+		// Hub signing key: deliberately EMPTY on a commercial bank. The Hub AMM admits only
+		// verified Hub participants and a bank is not one, so every Hub act (bridge-in mint,
+		// AMM swap, bridge-out burn, residue return) is delegated to its CB over the internal
+		// relay channel. Handing the bank the CB's key so it could sign on the Hub itself puts
+		// the sovereign key — which is also the Hub governance admin and CENTRAL_BANK_ROLE
+		// holder — inside a member bank's container. Quotes and reserve reads need no key.
+		"HUB_SIGNER_PRIVATE_KEY": "",
+		"KEYCLOAK_REALM":         bankKeycloakRealm,
+		"KEYCLOAK_CLIENT_ID":     bankKeycloakClient,
 		// CA (scenario-a commercial-bank strategy): the bank has NO CA (only the CB
 		// CA signs). Compliance mounts the bank's own host pki dir (its gen-csr
 		// key/csr) and runs in dev mode (CA_CERT_FILE empty). CA_VOLUME is still set
@@ -373,9 +380,19 @@ func (c JoinConfig) ComposeEnv() []string {
 		// Governance-portal onboarding (mirrors scenario-a): the api-gateway smart
 		// proxy reads the bank's CSR from PKI_DIR/<bankCode>.csr, and the bank's auth
 		// KMS is seeded with a per-bank key so onboarding registers a DISTINCT wallet.
-		"PKI_DIR":              "/workspace/backend/config/pki",
-		"KMS_SEED_KEY_ID":      c.Entity,
-		"KMS_SEED_PRIVATE_KEY": bankKey,
+		"PKI_DIR": "/workspace/backend/config/pki",
+		// Enforcement is a RECEIVER-side setting, and a commercial bank hosts no internal relay
+		// routes: /internal/amm/*, /internal/v1/payments/* and /internal/v2/transfer-limits/* are all
+		// registered on central-bank gateways only. A bank is purely a sender.
+		//
+		// Forced empty rather than inherited, because inheriting it would make a bank refuse to start:
+		// its PKI dir holds only its own key and its -participant certificate (which the pin loader
+		// skips by design), so its registry is empty — and empty plus enforcement is exactly the
+		// combination the gateway refuses. An operator exporting the flag for the CBs must not take
+		// the banks down with it.
+		"RELAY_REQUIRE_SIGNATURE": "",
+		"KMS_SEED_KEY_ID":         c.Entity,
+		"KMS_SEED_PRIVATE_KEY":    bankKey,
 		// noc (observability — soft). The bank runs its own agent (node-level
 		// monitoring), mounting a rendered agent.yaml from NOC_AGENT_VOLUME and
 		// joining its own ENTITY_NET_PREFIX network to probe besu by container DNS.
@@ -663,7 +680,14 @@ func JoinSteps(c JoinConfig) []Step {
 				csrOK := fileExists(filepath.Join(c.pkiDir(), c.BankID+".csr"))
 				return keyOK && csrOK, nil
 			},
-			Run: func(context.Context) error {
+			Run: func(ctx context.Context) error {
+				// Refuse to mint a second identity for a bank that is already running from another
+				// directory (a run started from a different working directory resolves the relative
+				// node.dataDir elsewhere). Generating here would replace the identity the central bank
+				// certified, and every internal call would stop verifying.
+				if err := ensureIdentityDirUnchanged(ctx, c.Runner, c.ContainerPrefix, c.BankID, c.pkiDir()); err != nil {
+					return err
+				}
 				// FR-010: pre-create the pki dir as the host user before any
 				// bind-mount, or Docker creates it root-owned and gen-csr fails.
 				if err := os.MkdirAll(c.pkiDir(), 0o700); err != nil {

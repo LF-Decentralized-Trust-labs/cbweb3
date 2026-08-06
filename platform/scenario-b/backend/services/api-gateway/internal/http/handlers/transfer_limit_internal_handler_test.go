@@ -31,10 +31,16 @@ func (s *stubChecker) Restore(_ context.Context, _, _, _ string) {
 }
 
 func setupInternalHandlerApp(checker services.TransferLimitCheckerIface) *fiber.App {
+	return setupInternalHandlerAppAs(checker, "bank-a")
+}
+
+// setupInternalHandlerAppAs builds the endpoints as reached by a given verified caller. These routes
+// spend (and restore) the named bank's daily allowance, so the caller must be that bank.
+func setupInternalHandlerAppAs(checker services.TransferLimitCheckerIface, caller string) *fiber.App {
 	app := fiber.New()
 	h := handlers.NewTransferLimitInternalHandler(checker)
-	app.Post("/internal/v2/transfer-limits/check-and-deduct", h.HandleCheckAndDeduct)
-	app.Post("/internal/v2/transfer-limits/restore", h.HandleRestore)
+	app.Post("/internal/v2/transfer-limits/check-and-deduct", asVerifiedCaller(caller), h.HandleCheckAndDeduct)
+	app.Post("/internal/v2/transfer-limits/restore", asVerifiedCaller(caller), h.HandleRestore)
 	return app
 }
 
@@ -116,5 +122,36 @@ func TestHandleRestore_AlwaysOK(t *testing.T) {
 	}
 	if stub.restoreCalls != 1 {
 		t.Fatalf("expected 1 Restore call, got %d", stub.restoreCalls)
+	}
+}
+
+// Restore credits allowance back, so an unbound caller could undo another bank's consumption and
+// with it the limit itself. Check-and-deduct is the mirror image: it could exhaust a competitor's.
+func TestTransferLimitInternal_RefusesACallerActingForAnotherBank(t *testing.T) {
+	checker := &stubChecker{}
+	app := setupInternalHandlerAppAs(checker, "bank-b")
+
+	for _, path := range []string{
+		"/internal/v2/transfer-limits/check-and-deduct",
+		"/internal/v2/transfer-limits/restore",
+	} {
+		body, _ := json.Marshal(map[string]string{
+			"payer_bank_id": "bank-a",
+			"currency":      "BRL",
+			"amount_human":  "1000",
+		})
+		req := httptest.NewRequest("POST", path, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != 403 {
+			t.Fatalf("%s: expected 403 for a caller acting for another bank, got %d", path, resp.StatusCode)
+		}
+	}
+	if checker.restoreCalls != 0 {
+		t.Fatalf("no allowance may be restored for a bank the caller is not (restore calls = %d)", checker.restoreCalls)
 	}
 }

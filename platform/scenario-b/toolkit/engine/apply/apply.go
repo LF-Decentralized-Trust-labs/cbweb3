@@ -52,21 +52,36 @@ func Apply(ctx context.Context, o Options) (orchestrator.Report, error) {
 		f := res.Errors[0]
 		return orchestrator.Report{}, fmt.Errorf("invalid manifest: %s: %s", f.Field, f.Message)
 	}
+	var rep orchestrator.Report
 	// --rebuild makes every image-existence gate report "missing" for this run, so the
 	// build steps run against the current source instead of being skipped by tag.
 	orchestrator.SetForceImageRebuild(o.Rebuild)
 	switch pd.Spec.Mode {
 	case "found-hub":
-		return applyFoundHub(ctx, o, pd)
+		rep, err = applyFoundHub(ctx, o, pd)
 	case "found-spoke":
-		return applyFoundSpoke(ctx, o, pd)
+		rep, err = applyFoundSpoke(ctx, o, pd)
 	case "join":
-		return applyJoin(ctx, o, pd)
+		rep, err = applyJoin(ctx, o, pd)
 	case "observe":
-		return applyObserve(ctx, o, pd)
+		rep, err = applyObserve(ctx, o, pd)
 	default:
 		return orchestrator.Report{}, fmt.Errorf("unknown mode %q", pd.Spec.Mode)
 	}
+
+	// Report which directory this run actually used. node.dataDir is relative, so the same command from
+	// two working directories provisions two different entities — and the second one quietly mints a new
+	// identity. Naming the absolute path makes that visible in the output the operator already reads,
+	// including on the failure path, where it is most needed.
+	if rep.DataDir == "" {
+		// spec.node is absent in observe mode, so it cannot be dereferenced unconditionally.
+		manifestDataDir := ""
+		if pd.Spec.Node != nil {
+			manifestDataDir = pd.Spec.Node.DataDir
+		}
+		rep.DataDir = absOr(firstNonEmpty(o.DataDir, manifestDataDir, "."))
+	}
+	return rep, err
 }
 
 // applyObserve stands up an observe-mode NOC deployment: it consumes the NOC
@@ -178,24 +193,28 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	rpcPort, wsPort, p2pPort := nodePorts(pd.Spec.Node)
 	prefix := sanitizePrefix(pd.Metadata.Name) // e.g. "central-bank-brazil"
 	cfg := orchestrator.SpokeConfig{
-		ContractsDir:        filepath.Join(root, "scenario-b", "contracts"),
-		TemplatesDir:        filepath.Join(root, "scenario-b", "provisioning", "templates"),
-		OutDir:              outDir,
-		SpokeID:             pd.Spec.Spoke.ID,
-		SpokeChainID:        uint64(pd.Spec.Spoke.ChainID),
-		SpokeRPC:            firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)),
-		SpokeWS:             firstNonEmpty(o.SpokeWS, localWS(wsPort)), // FR-008: first-class spoke WS (relay registration + bundle)
-		CBAddress:           o.CBAddress,
-		HubBundlePath:       hubBundlePath,
-		HubRPC:              hubRPC,
-		SpokeEnvFile:        filepath.Join(dataDir, ".env.spoke"),
-		KeycloakEnv:         []string{filepath.Join(dataDir, ".env.spoke")},
-		GatewayURL:          o.GatewayURL,
-		Registrar:           reg,
-		VolumePrefix:        prefix,
-		ContainerPrefix:     "sc-b-cbweb3-" + prefix,
-		NetPrefix:           prefix,
-		Entity:              firstNonEmpty(pd.Spec.Topology.Role, "central-bank"),
+		ContractsDir:    filepath.Join(root, "scenario-b", "contracts"),
+		TemplatesDir:    filepath.Join(root, "scenario-b", "provisioning", "templates"),
+		OutDir:          outDir,
+		SpokeID:         pd.Spec.Spoke.ID,
+		SpokeChainID:    uint64(pd.Spec.Spoke.ChainID),
+		SpokeRPC:        firstNonEmpty(o.SpokeRPC, localRPC(rpcPort)),
+		SpokeWS:         firstNonEmpty(o.SpokeWS, localWS(wsPort)), // FR-008: first-class spoke WS (relay registration + bundle)
+		CBAddress:       o.CBAddress,
+		HubBundlePath:   hubBundlePath,
+		HubRPC:          hubRPC,
+		HubChainID:      hub.ChainID,
+		SpokeEnvFile:    filepath.Join(dataDir, ".env.spoke"),
+		KeycloakEnv:     []string{filepath.Join(dataDir, ".env.spoke")},
+		GatewayURL:      o.GatewayURL,
+		Registrar:       reg,
+		VolumePrefix:    prefix,
+		ContainerPrefix: "sc-b-cbweb3-" + prefix,
+		NetPrefix:       prefix,
+		Entity:          firstNonEmpty(pd.Spec.Topology.Role, "central-bank"),
+		// The manifest name is unique by construction (the container prefix is built from it),
+		// which the topology role is not — every central bank shares the role "central-bank".
+		RelayKeyID:          prefix,
 		RPCPort:             rpcPort,
 		WSPort:              wsPort,
 		P2PPort:             p2pPort,
@@ -238,14 +257,19 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	// a re-apply skips re-registration. Not in dry-run (Check runs before the
 	// dry-run branch, so a live probe would be an effect) and only when the hub
 	// RPC + CB address are known.
-	if !o.DryRun && hubRPC != "" && o.CBAddress != "" {
+	// The probe must target the address register-cb will actually register: the CB's own
+	// derived hub identity, unless an operator pinned one via -cb-address. Probing the
+	// founder's address instead would report "already registered" for every CB and skip the
+	// registration of the one that matters.
+	if !o.DryRun && hubRPC != "" {
+		cbHubAddr := cfg.CBHubAddress()
 		identityRegistry := hub.Contracts["identityRegistry"]
 		// The probe runs in the HOST toolkit process, so localize the bundle's
 		// host.docker.internal hub RPC (a container sentinel) to localhost; a routable
 		// multi-VM hub RPC is left unchanged.
 		hubProbeRPC := orchestrator.HostReachable(hubRPC)
 		cfg.CBRegistered = func(ctx context.Context) (bool, error) {
-			return orchestrator.HubCBRegistered(ctx, hubProbeRPC, identityRegistry, o.CBAddress)
+			return orchestrator.HubCBRegistered(ctx, hubProbeRPC, identityRegistry, cbHubAddr)
 		}
 	}
 

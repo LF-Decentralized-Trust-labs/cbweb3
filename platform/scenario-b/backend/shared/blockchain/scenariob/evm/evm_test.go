@@ -198,3 +198,33 @@ func TestCopyOutput(t *testing.T) {
 		}
 	})
 }
+
+// --- raw-input submission ---
+//
+// Three payment-orchestrator clients (tCeBM, fiat, FX agreement) each built their own transactor
+// from the same operator key and fetched PendingNonceAt themselves, bypassing this package's
+// serialized counter. With the same key on the same chain, two concurrent submissions could claim
+// the same nonce and one would be replaced — the failure this Signer exists to prevent, and the
+// same one that motivated giving the CB's relayer its own identity.
+//
+// They pack their own calldata, so converging them needs a raw-input entry point rather than a
+// method+args one. These tests pin the contract of that entry point; the nonce serialization itself
+// is exercised by the shared path they now share.
+
+func TestSubmitRawTxReceipt_RequiresASigner(t *testing.T) {
+	if _, _, err := SubmitRawTxReceipt(context.Background(), nil, nil,
+		common.HexToAddress("0x1"), []byte{0x01}, "mint"); err == nil {
+		t.Fatal("expected a nil signer to be refused rather than panicking")
+	}
+}
+
+func TestSubmitRawTxReceipt_RequiresInput(t *testing.T) {
+	s, err := NewSigner(newKeyHex(t), big.NewInt(1337))
+	if err != nil {
+		t.Fatalf("signer: %v", err)
+	}
+	if _, _, err := SubmitRawTxReceipt(context.Background(), nil, s,
+		common.HexToAddress("0x1"), nil, "mint"); err == nil {
+		t.Fatal("expected empty calldata to be refused: it would send a bare value transfer")
+	}
+}
