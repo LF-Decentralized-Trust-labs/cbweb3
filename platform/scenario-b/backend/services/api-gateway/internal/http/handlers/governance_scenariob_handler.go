@@ -12,12 +12,25 @@ import (
 )
 
 // CircuitBreakerServiceIface is the interface consumed by GovernanceScenarioBHandler.
+// The three write actions return the hash of the on-chain transaction they submitted;
+// ExecuteResume makes no chain call and so has none.
 type CircuitBreakerServiceIface interface {
-	Pause(ctx context.Context, pair, bankID, reasonCode string, signature []byte) error
-	ProposeResume(ctx context.Context, pair, bankID string, sig []byte) (string, error)
-	SignResume(ctx context.Context, pair, requestID, bankID string, sig []byte) error
+	Pause(ctx context.Context, pair, bankID, reasonCode string, signature []byte) (string, error)
+	ProposeResume(ctx context.Context, pair, bankID string, sig []byte) (requestID string, txHash string, err error)
+	SignResume(ctx context.Context, pair, requestID, bankID string, sig []byte) (txHash string, err error)
 	ExecuteResume(ctx context.Context, pair, requestID string) error
 	GetStatus(ctx context.Context, pair string) (*services.CircuitBreakerStatus, error)
+}
+
+// withTxHash adds the on-chain reference to a response body only when one exists. The key is
+// omitted rather than set to "" (contract rule C-1 / FR-009): an empty string would be
+// indistinguishable from "a reference exists but was not returned", whereas an absent key
+// says plainly that this environment recorded no on-chain reference for the action.
+func withTxHash(body fiber.Map, txHash string) fiber.Map {
+	if txHash != "" {
+		body["tx_hash"] = txHash
+	}
+	return body
 }
 
 // CircuitBreakerSigner produces the off-chain institutional attestation for a circuit
@@ -81,10 +94,11 @@ func (h *GovernanceScenarioBHandler) PauseCircuitBreaker(c *fiber.Ctx) error {
 	// Institutional attestation is generated server-side with the CB key (never supplied
 	// by the client). On-chain authorization is the gateway signer address.
 	signature := h.attest("pause", req.Pair, req.BankID, req.ReasonCode)
-	if err := h.cbSvc.Pause(c.Context(), req.Pair, req.BankID, req.ReasonCode, signature); err != nil {
+	txHash, err := h.cbSvc.Pause(c.Context(), req.Pair, req.BankID, req.ReasonCode, signature)
+	if err != nil {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.JSON(fiber.Map{"state": "HALTED", "pair": req.Pair})
+	return c.JSON(withTxHash(fiber.Map{"state": "HALTED", "pair": req.Pair}, txHash))
 }
 
 // ProposeResume handles POST /api/v2/governance/circuit-breaker/resume-request.
@@ -98,11 +112,14 @@ func (h *GovernanceScenarioBHandler) ProposeResume(c *fiber.Ctx) error {
 	}
 
 	signature := h.attest("resume-propose", req.Pair, req.BankID)
-	requestID, err := h.cbSvc.ProposeResume(c.Context(), req.Pair, req.BankID, signature)
+	// request_id and tx_hash are different identifiers and both are returned: request_id is
+	// the proposal a co-signer must submit to resume-sign, tx_hash is the audit reference for
+	// the proposing transaction. Substituting one for the other would break signing.
+	requestID, txHash, err := h.cbSvc.ProposeResume(c.Context(), req.Pair, req.BankID, signature)
 	if err != nil {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.JSON(fiber.Map{"state": "RESUME_PENDING", "request_id": requestID})
+	return c.JSON(withTxHash(fiber.Map{"state": "RESUME_PENDING", "request_id": requestID}, txHash))
 }
 
 // SignResume handles POST /api/v2/governance/circuit-breaker/resume-sign.
@@ -117,18 +134,20 @@ func (h *GovernanceScenarioBHandler) SignResume(c *fiber.Ctx) error {
 	}
 
 	signature := h.attest("resume-sign", req.Pair, req.RequestID, req.BankID)
-	if err := h.cbSvc.SignResume(c.Context(), req.Pair, req.RequestID, req.BankID, signature); err != nil {
+	txHash, err := h.cbSvc.SignResume(c.Context(), req.Pair, req.RequestID, req.BankID, signature)
+	if err != nil {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error":      err.Error(),
 			"error_code": "CIRCUIT_BREAKER_RESUME_DISPUTED",
 		})
 	}
 
-	// Attempt to execute if quorum might be reached
+	// Attempt to execute if quorum might be reached. Either way the signing transaction has
+	// landed, so its hash is reported in both the pending and the resumed response.
 	if err := h.cbSvc.ExecuteResume(c.Context(), req.Pair, req.RequestID); err != nil {
-		return c.JSON(fiber.Map{"state": "RESUME_PENDING", "request_id": req.RequestID})
+		return c.JSON(withTxHash(fiber.Map{"state": "RESUME_PENDING", "request_id": req.RequestID}, txHash))
 	}
-	return c.JSON(fiber.Map{"state": "LIVE", "pair": req.Pair})
+	return c.JSON(withTxHash(fiber.Map{"state": "LIVE", "pair": req.Pair}, txHash))
 }
 
 // GetCircuitBreakerStatus handles GET /api/v2/governance/circuit-breaker/status.

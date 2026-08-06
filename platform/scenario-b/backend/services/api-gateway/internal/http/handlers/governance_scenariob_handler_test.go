@@ -22,24 +22,28 @@ import (
 
 type mockCBService struct {
 	pauseErr   error
+	pauseTx    string
 	proposeID  string
+	proposeTx  string
 	proposeErr error
+	signTx     string
 	signErr    error
 	executeErr error
+	statusTx   string
 	calls      []string
 }
 
-func (m *mockCBService) Pause(ctx context.Context, pair, bankID, reason string, sig []byte) error {
+func (m *mockCBService) Pause(ctx context.Context, pair, bankID, reason string, sig []byte) (string, error) {
 	m.calls = append(m.calls, "Pause")
-	return m.pauseErr
+	return m.pauseTx, m.pauseErr
 }
-func (m *mockCBService) ProposeResume(ctx context.Context, pair, bankID string, sig []byte) (string, error) {
+func (m *mockCBService) ProposeResume(ctx context.Context, pair, bankID string, sig []byte) (string, string, error) {
 	m.calls = append(m.calls, "ProposeResume")
-	return m.proposeID, m.proposeErr
+	return m.proposeID, m.proposeTx, m.proposeErr
 }
-func (m *mockCBService) SignResume(ctx context.Context, pair, requestID, bankID string, sig []byte) error {
+func (m *mockCBService) SignResume(ctx context.Context, pair, requestID, bankID string, sig []byte) (string, error) {
 	m.calls = append(m.calls, "SignResume")
-	return m.signErr
+	return m.signTx, m.signErr
 }
 func (m *mockCBService) ExecuteResume(ctx context.Context, pair, requestID string) error {
 	m.calls = append(m.calls, "ExecuteResume")
@@ -47,7 +51,7 @@ func (m *mockCBService) ExecuteResume(ctx context.Context, pair, requestID strin
 }
 func (m *mockCBService) GetStatus(ctx context.Context, pair string) (*services.CircuitBreakerStatus, error) {
 	m.calls = append(m.calls, "GetStatus")
-	return &services.CircuitBreakerStatus{Pair: pair, State: "LIVE"}, nil
+	return &services.CircuitBreakerStatus{Pair: pair, State: "LIVE", TxHash: m.statusTx}, nil
 }
 
 func newGovFiber(svc handlers.CircuitBreakerServiceIface) *fiber.App {
@@ -149,4 +153,110 @@ func TestGovHandler_Status(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	payload, _ := io.ReadAll(resp.Body)
 	assert.Contains(t, string(payload), "state")
+}
+
+// decodeCBJSON reads a response body into a generic map so a test can assert on key
+// *presence*, which is what contract rule C-1 is about — `""` is not the same as absent.
+func decodeCBJSON(t *testing.T, body io.Reader) map[string]any {
+	t.Helper()
+	var out map[string]any
+	require.NoError(t, json.NewDecoder(body).Decode(&out))
+	return out
+}
+
+func postCBJSON(t *testing.T, app *fiber.App, path string, payload map[string]string) *http.Response {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	return resp
+}
+
+// T011 / FR-002 / C-1: tx_hash is present in all four responses when chain-wired.
+func TestGovHandler_TxHash_PresentWhenChainWired(t *testing.T) {
+	svc := &mockCBService{
+		pauseTx:   "0xpause111",
+		proposeID: "0xproposal222",
+		proposeTx: "0xtx333",
+		signTx:    "0xsign444",
+		statusTx:  "0xstatus555",
+	}
+	app := newGovFiber(svc)
+
+	pause := decodeCBJSON(t, postCBJSON(t, app, "/pause", map[string]string{
+		"pair": "BRL-USD", "bank_id": "cb-bra", "reason_code": "INCIDENT",
+	}).Body)
+	assert.Equal(t, "HALTED", pause["state"])
+	assert.Equal(t, "0xpause111", pause["tx_hash"])
+
+	propose := decodeCBJSON(t, postCBJSON(t, app, "/resume-request", map[string]string{
+		"pair": "BRL-USD", "bank_id": "cb-bra",
+	}).Body)
+	assert.Equal(t, "RESUME_PENDING", propose["state"])
+	assert.Equal(t, "0xproposal222", propose["request_id"])
+	assert.Equal(t, "0xtx333", propose["tx_hash"])
+	// Rule D-3: the proposal id a co-signer must submit is NOT the transaction hash.
+	assert.NotEqual(t, propose["request_id"], propose["tx_hash"],
+		"request_id and tx_hash are different identifiers and both are required")
+
+	sign := decodeCBJSON(t, postCBJSON(t, app, "/resume-sign", map[string]string{
+		"pair": "BRL-USD", "request_id": "0xproposal222", "bank_id": "cb-arg",
+	}).Body)
+	assert.Equal(t, "LIVE", sign["state"])
+	assert.Equal(t, "0xsign444", sign["tx_hash"])
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/status?pair=BRL-USD", nil)
+	statusResp, err := app.Test(statusReq, -1)
+	require.NoError(t, err)
+	status := decodeCBJSON(t, statusResp.Body)
+	assert.Equal(t, "0xstatus555", status["tx_hash"])
+}
+
+// T011 / FR-004: resume-sign still carries this signature's hash when quorum is not yet
+// met, i.e. when ExecuteResume reports the resume as not finalised.
+func TestGovHandler_TxHash_PresentOnPendingResumeSign(t *testing.T) {
+	svc := &mockCBService{signTx: "0xsign444", executeErr: errors.New("quorum not yet met")}
+	app := newGovFiber(svc)
+
+	sign := decodeCBJSON(t, postCBJSON(t, app, "/resume-sign", map[string]string{
+		"pair": "BRL-USD", "request_id": "0xproposal222", "bank_id": "cb-arg",
+	}).Body)
+	assert.Equal(t, "RESUME_PENDING", sign["state"])
+	assert.Equal(t, "0xsign444", sign["tx_hash"])
+}
+
+// T012 / FR-009 / C-1: in no-chain mode tx_hash is absent as a JSON *key*, never "".
+// An empty string would be indistinguishable from "a reference exists but was not shown".
+func TestGovHandler_TxHash_AbsentKeyInNoChainMode(t *testing.T) {
+	svc := &mockCBService{proposeID: "0xproposal222"} // no hashes anywhere
+	app := newGovFiber(svc)
+
+	pause := decodeCBJSON(t, postCBJSON(t, app, "/pause", map[string]string{
+		"pair": "BRL-USD", "bank_id": "cb-bra", "reason_code": "INCIDENT",
+	}).Body)
+	assert.Equal(t, "HALTED", pause["state"], "the action must still succeed (C-3)")
+	assert.NotContains(t, pause, "tx_hash")
+
+	propose := decodeCBJSON(t, postCBJSON(t, app, "/resume-request", map[string]string{
+		"pair": "BRL-USD", "bank_id": "cb-bra",
+	}).Body)
+	assert.Equal(t, "RESUME_PENDING", propose["state"])
+	assert.Equal(t, "0xproposal222", propose["request_id"], "request_id is unaffected by a missing hash")
+	assert.NotContains(t, propose, "tx_hash")
+
+	sign := decodeCBJSON(t, postCBJSON(t, app, "/resume-sign", map[string]string{
+		"pair": "BRL-USD", "request_id": "0xproposal222", "bank_id": "cb-arg",
+	}).Body)
+	assert.Equal(t, "LIVE", sign["state"])
+	assert.NotContains(t, sign, "tx_hash")
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/status?pair=BRL-USD", nil)
+	statusResp, err := app.Test(statusReq, -1)
+	require.NoError(t, err)
+	status := decodeCBJSON(t, statusResp.Body)
+	assert.Equal(t, "LIVE", status["state"])
+	assert.NotContains(t, status, "tx_hash")
 }

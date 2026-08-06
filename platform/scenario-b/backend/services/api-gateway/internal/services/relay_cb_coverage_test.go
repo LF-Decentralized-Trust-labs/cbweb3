@@ -110,7 +110,9 @@ type fakeCBCaller struct {
 	pauseTx      string
 	pauseErr     error
 	proposeReqID string
+	proposeTx    string
 	proposeErr   error
+	signTx       string
 	signErr      error
 	executeErr   error
 	paused       bool
@@ -127,14 +129,14 @@ func (f *fakeCBCaller) PauseCircuitBreaker(_ context.Context, _ string, _ []byte
 	}
 	return f.pauseTx, f.pauseErr
 }
-func (f *fakeCBCaller) ProposeResume(_ context.Context, _ string, _ []byte) (string, error) {
-	return f.proposeReqID, f.proposeErr
+func (f *fakeCBCaller) ProposeResume(_ context.Context, _ string, _ []byte) (string, string, error) {
+	return f.proposeReqID, f.proposeTx, f.proposeErr
 }
-func (f *fakeCBCaller) SignResume(_ context.Context, _, _ string, _ []byte) error {
+func (f *fakeCBCaller) SignResume(_ context.Context, _, _ string, _ []byte) (string, error) {
 	if f.signErr == nil {
 		f.paused = false // quorum reached → AMM auto-unpauses
 	}
-	return f.signErr
+	return f.signTx, f.signErr
 }
 func (f *fakeCBCaller) ExecuteResume(_ context.Context, _, _ string) error { return f.executeErr }
 func (f *fakeCBCaller) IsPaused(_ context.Context, _ string) (bool, error) {
@@ -154,7 +156,7 @@ func TestCircuitBreakerService_Lifecycle(t *testing.T) {
 	sig := []byte{0x01, 0x02}
 
 	// Pause.
-	if err := svc.Pause(context.Background(), "W-BRL-ARS", "bank-a", "FRAUD", sig); err != nil {
+	if _, err := svc.Pause(context.Background(), "W-BRL-ARS", "bank-a", "FRAUD", sig); err != nil {
 		t.Fatalf("pause failed: %v", err)
 	}
 	st, _ := svc.GetStatus(context.Background(), "W-BRL-ARS")
@@ -163,13 +165,13 @@ func TestCircuitBreakerService_Lifecycle(t *testing.T) {
 	}
 
 	// ProposeResume.
-	reqID, err := svc.ProposeResume(context.Background(), "W-BRL-ARS", "bank-a", sig)
+	reqID, _, err := svc.ProposeResume(context.Background(), "W-BRL-ARS", "bank-a", sig)
 	if err != nil || reqID != "req-1" {
 		t.Fatalf("propose resume failed: req=%s err=%v", reqID, err)
 	}
 
 	// SignResume.
-	if err := svc.SignResume(context.Background(), "W-BRL-ARS", "req-1", "bank-b", sig); err != nil {
+	if _, err := svc.SignResume(context.Background(), "W-BRL-ARS", "req-1", "bank-b", sig); err != nil {
 		t.Fatalf("sign resume failed: %v", err)
 	}
 
@@ -187,13 +189,13 @@ func TestCircuitBreakerService_OnChainErrors(t *testing.T) {
 	db := newTestDB(t, &domain.ScenarioBRiskControlState{}, &domain.CircuitBreakerSignature{})
 	ctx := context.Background()
 
-	if err := NewCircuitBreakerService(db, &fakeCBCaller{pauseErr: errPause}).Pause(ctx, "P", "b", "r", nil); err == nil {
+	if _, err := NewCircuitBreakerService(db, &fakeCBCaller{pauseErr: errPause}).Pause(ctx, "P", "b", "r", nil); err == nil {
 		t.Fatal("expected pause on-chain error")
 	}
-	if _, err := NewCircuitBreakerService(db, &fakeCBCaller{proposeErr: errPause}).ProposeResume(ctx, "P", "b", nil); err == nil {
+	if _, _, err := NewCircuitBreakerService(db, &fakeCBCaller{proposeErr: errPause}).ProposeResume(ctx, "P", "b", nil); err == nil {
 		t.Fatal("expected propose on-chain error")
 	}
-	if err := NewCircuitBreakerService(db, &fakeCBCaller{signErr: errPause}).SignResume(ctx, "P", "r", "b", nil); err == nil {
+	if _, err := NewCircuitBreakerService(db, &fakeCBCaller{signErr: errPause}).SignResume(ctx, "P", "r", "b", nil); err == nil {
 		t.Fatal("expected sign on-chain error")
 	}
 	if err := NewCircuitBreakerService(db, &fakeCBCaller{executeErr: errPause}).ExecuteResume(ctx, "P", "r"); err == nil {

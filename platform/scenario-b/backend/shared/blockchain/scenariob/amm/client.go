@@ -728,25 +728,32 @@ func (c *Client) PauseCircuitBreaker(ctx context.Context, reason string) (string
 	return evm.SubmitTx(ctx, c.ec, c.signer, c.contract, c.abi, "pause", reason)
 }
 
-// ProposeResume submits a resume proposal and returns the resulting proposalId (hex string).
-// It extracts the proposalId from the LogResumeProposed event emitted by the AMM.
-func (c *Client) ProposeResume(ctx context.Context) (string, error) {
+// ProposeResume submits a resume proposal and returns the resulting proposalId (hex string)
+// together with the hash of the transaction that created it. It extracts the proposalId from
+// the LogResumeProposed event emitted by the AMM.
+//
+// The two values are distinct identifiers and neither substitutes for the other: proposalId
+// is what a co-signer submits to signResume, while txHash is the auditable on-chain reference
+// for the proposing action itself. The hash comes from the receipt already in hand, so
+// returning it costs no extra round-trip.
+func (c *Client) ProposeResume(ctx context.Context) (proposalIDHex string, txHash string, err error) {
 	if c.signer == nil {
-		return "", errors.New("amm: proposeResume requires a signing key")
+		return "", "", errors.New("amm: proposeResume requires a signing key")
 	}
 	// keccak256("LogResumeProposed(bytes32,address,uint256)")
 	eventSig := crypto.Keccak256Hash([]byte("LogResumeProposed(bytes32,address,uint256)"))
 	receipt, _, err := evm.SubmitTxReceipt(ctx, c.ec, c.signer, c.contract, c.abi, "proposeResume")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+	txHash = receipt.TxHash.Hex()
 	for _, log := range receipt.Logs {
 		if len(log.Topics) >= 2 && log.Topics[0] == eventSig {
 			proposalID := log.Topics[1]
-			return "0x" + hex.EncodeToString(proposalID[:]), nil
+			return "0x" + hex.EncodeToString(proposalID[:]), txHash, nil
 		}
 	}
-	return "", errors.New("amm: LogResumeProposed event not found in receipt")
+	return "", txHash, errors.New("amm: LogResumeProposed event not found in receipt")
 }
 
 // SignResume adds a signature to an existing resume proposal. When quorum (2-of-N) is met

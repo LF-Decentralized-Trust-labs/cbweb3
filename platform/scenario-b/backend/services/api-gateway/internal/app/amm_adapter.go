@@ -359,28 +359,31 @@ func (a *ammAdapter) PauseCircuitBreaker(ctx context.Context, pair string, signa
 	return c.PauseCircuitBreaker(ctx, reason)
 }
 
-func (a *ammAdapter) ProposeResume(ctx context.Context, pair string, sig []byte) (string, error) {
+// ProposeResume returns the proposal id together with the hash of the transaction that
+// created it, so the proposing action is auditable on-chain (FR-003).
+func (a *ammAdapter) ProposeResume(ctx context.Context, pair string, sig []byte) (string, string, error) {
 	c, err := a.clientFor(ctx, pair)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	return c.ProposeResume(ctx)
 }
 
-func (a *ammAdapter) SignResume(ctx context.Context, pair, requestID string, sig []byte) error {
+// SignResume returns the hash of the signing transaction rather than discarding it, so the
+// signature — and, when it completes quorum, the resume itself — is auditable (FR-002).
+func (a *ammAdapter) SignResume(ctx context.Context, pair, requestID string, sig []byte) (string, error) {
 	c, err := a.clientFor(ctx, pair)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var proposalID [32]byte
 	trimmed := strings.TrimPrefix(requestID, "0x")
 	b, err := hex.DecodeString(trimmed)
 	if err != nil || len(b) != 32 {
-		return fmt.Errorf("amm: invalid proposalId %q: %w", requestID, err)
+		return "", fmt.Errorf("amm: invalid proposalId %q: %w", requestID, err)
 	}
 	copy(proposalID[:], b)
-	_, err = c.SignResume(ctx, proposalID)
-	return err
+	return c.SignResume(ctx, proposalID)
 }
 
 func (a *ammAdapter) ExecuteResume(ctx context.Context, pair, requestID string) error {
