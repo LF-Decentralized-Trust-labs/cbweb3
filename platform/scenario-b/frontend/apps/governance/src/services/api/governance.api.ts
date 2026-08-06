@@ -2,9 +2,6 @@
 
 import type {
   AccountEntry,
-  CircuitBreakerPayload,
-  CircuitBreakerResult,
-  CircuitBreakerState,
   FreezePayload,
   FreezeResult,
   GovernanceParameters,
@@ -37,21 +34,11 @@ const toAccountEntry = (p: RawParticipant): AccountEntry => ({
   role: p.role,
 });
 
+// The V1 circuit-breaker calls were removed: they branched on VITE_USE_MOCKS, so the chrome
+// indicator they fed could show synthetic state while the Circuit Breaker page showed live
+// on-chain state. The indicator now derives its condition from the authoritative per-pair V2
+// status (see stores/circuit-breaker.store.ts), which has no mock path.
 export const governanceApi = {
-  getCircuitBreaker: async (): Promise<CircuitBreakerState> => {
-    if (useMocks) {
-      return mockDb.getCircuitBreaker();
-    }
-    const response = await httpClient.get<CircuitBreakerState>("/amm/governance/circuit-breaker");
-    return response.data;
-  },
-  setCircuitBreaker: async (payload: CircuitBreakerPayload): Promise<CircuitBreakerResult> => {
-    if (useMocks) {
-      return mockDb.setCircuitBreaker(payload);
-    }
-    const response = await httpClient.post<CircuitBreakerResult>("/amm/governance/circuit-breaker", payload);
-    return response.data;
-  },
   // Accounts are always served from the real Compliance participant registry
   // (GET /api/v1/governance/accounts), never mocked: this is the source of truth
   // the Central Bank freezes/unfreezes against.

@@ -1,18 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect } from "react";
 import { Outlet } from "react-router-dom";
+import { isScenarioB } from "../../config/scenario";
 import { useCircuitBreaker } from "../../hooks";
+import { usePolling } from "../../hooks/usePolling";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
 
 export function AppLayout() {
   const { circuitBreaker, fetchState } = useCircuitBreaker();
 
-  useEffect(() => {
-    void fetchState();
-  }, [fetchState]);
+  // Refresh on the same cadence as the Circuit Breaker page, so the chrome banner and the
+  // page converge rather than the banner holding a stale claim until the next navigation.
+  // This is also what lets an indeterminate condition (pair set unknown) recover by itself.
+  // Gated on the scenario for the same reason DashboardPage gates it: the per-pair breaker
+  // status is a Scenario B capability.
+  usePolling(() => void fetchState(), 15000, isScenarioB);
 
+  // Only an affirmative halt raises the banner. An indeterminate condition (null) never does:
+  // the chrome must not assert a stop it cannot substantiate.
   const halted = circuitBreaker?.state === "HALTED";
 
   return (

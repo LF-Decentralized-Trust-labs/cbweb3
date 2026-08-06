@@ -5,8 +5,6 @@ import type {
   ApproveKycPayload,
   ApproveKycResponse,
   AuditFilter,
-  CircuitBreakerPayload,
-  CircuitBreakerState,
   FreezePayload,
   GovernanceAuditEntry,
   GovernanceParameters,
@@ -45,11 +43,6 @@ let pendingKyc: KycStatusEntry[] = [
 ];
 let accounts: AccountEntry[] = generateAccounts();
 let parameters: GovernanceParameters = generateParameters();
-let circuitBreaker: CircuitBreakerState = {
-  state: "LIVE",
-  updatedAt: new Date().toISOString(),
-  updatedBy: "system",
-};
 let auditLogs: GovernanceAuditEntry[] = generateAudit();
 
 const appendAudit = (entry: Omit<GovernanceAuditEntry, "id" | "createdAt">) => {
@@ -162,34 +155,8 @@ export const mockDb = {
       pop_nonce: popNonce,
     };
   },
-  getCircuitBreaker: async () => {
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    return circuitBreaker;
-  },
-  setCircuitBreaker: async (payload: CircuitBreakerPayload) => {
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    circuitBreaker = {
-      state: payload.pause ? "HALTED" : "LIVE",
-      updatedAt: new Date().toISOString(),
-      updatedBy: "governance.admin",
-    };
-
-    appendAudit({
-      actor: "governance.admin",
-      action: payload.pause ? "Circuit breaker paused" : "Circuit breaker resumed",
-      category: "CIRCUIT_BREAKER",
-      severity: "CRITICAL",
-      outcome: "SUCCESS",
-      metadata: JSON.stringify(payload),
-    });
-
-    return {
-      success: true,
-      state: circuitBreaker.state,
-      updatedAt: circuitBreaker.updatedAt,
-      updatedBy: circuitBreaker.updatedBy,
-    };
-  },
+  // The mock circuit-breaker entries were removed with the V1 breaker calls: the breaker is
+  // read from on-chain per-pair status only, so there is nothing here to mock.
   listAccounts: async () => {
     await new Promise((resolve) => setTimeout(resolve, 160));
     return accounts;
