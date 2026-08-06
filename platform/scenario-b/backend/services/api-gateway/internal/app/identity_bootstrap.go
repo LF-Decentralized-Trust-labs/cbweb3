@@ -87,7 +87,7 @@ func bootstrapLiquidityProviderRole(ctx context.Context) {
 	}
 
 	// Grant LP role using the admin key (DEFAULT_ADMIN_ROLE on IdentityRegistry).
-	signer, err := evm.NewSigner(adminKey, big.NewInt(chainID))
+	signer, err := evm.SharedSigner(adminKey, big.NewInt(chainID))
 	if err != nil {
 		log.Printf("[identity-bootstrap] build signer from CB_PRIVATE_KEY: %v", err)
 		return

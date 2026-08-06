@@ -216,7 +216,7 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 		approved: make(map[common.Address]bool),
 	}
 	if cfg.PrivateKeyHex != "" {
-		signer, err := evm.NewSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
+		signer, err := evm.SharedSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
 		if err != nil {
 			return nil, err
 		}

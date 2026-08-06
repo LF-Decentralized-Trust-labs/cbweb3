@@ -114,7 +114,7 @@ func NewBesuRelayerExecutor(ctx context.Context, db *gorm.DB, cfg BesuRelayerCon
 		return nil, fmt.Errorf("dial hub RPC %s: %w", cfg.HubRPCURL, err)
 	}
 
-	hubSigner, err := evm.NewSigner(cfg.HubSignerKey, big.NewInt(cfg.HubChainID))
+	hubSigner, err := evm.SharedSigner(cfg.HubSignerKey, big.NewInt(cfg.HubChainID))
 	if err != nil {
 		hubEC.Close()
 		return nil, fmt.Errorf("hub signer: %w", err)
@@ -147,7 +147,11 @@ func NewBesuRelayerExecutor(ctx context.Context, db *gorm.DB, cfg BesuRelayerCon
 		if spokeKey == "" {
 			spokeKey = cfg.HubSignerKey
 		}
-		spokeSigner, signerErr := evm.NewSigner(spokeKey, big.NewInt(cfg.SpokeChainID))
+		// SharedSigner, not NewSigner: SPOKE_SIGNER_KEY defaults to BESU_OPERATOR_KEY, so this is
+		// normally the very account the tCeBM and fCeBM clients sign with in this same process. A
+		// relayer leg overlapping a deposit or escrow approval is routine, and with a private
+		// counter each the two would eventually claim one nonce and drop each other's transaction.
+		spokeSigner, signerErr := evm.SharedSigner(spokeKey, big.NewInt(cfg.SpokeChainID))
 		if signerErr != nil {
 			hubEC.Close()
 			spokeEC.Close()

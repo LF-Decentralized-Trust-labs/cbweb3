@@ -59,7 +59,7 @@ func NewTCeBMClient(cfg TCeBMClientConfig, logger *slog.Logger) (*TCeBMClient, e
 		return nil, fmt.Errorf("parse tCeBM ABI: %w", err)
 	}
 
-	signer, err := evm.NewSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
+	signer, err := evm.SharedSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
 	if err != nil {
 		return nil, fmt.Errorf("build signer: %w", err)
 	}
