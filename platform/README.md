@@ -51,19 +51,24 @@ A correspondent banking model where two independent blockchain networks (**Spoke
 
 ### Scenario B — International Hub with FX Liquidity Pool
 
-> **Status:** Smart contracts in place; hub deployment and end-to-end flows not yet implemented.
+> **Status:** Fully implemented and runnable.
 
-**Directory:** `scenario-b/` *(planned)*
+**Directory:** [`scenario-b/`](scenario-b/README.md)
 
-A dedicated international hub network operating an AMM-based liquidity pool for foreign exchange. Spokes settle cross-currency transactions through the hub, which provides continuous FX pricing and pooled liquidity.
+A dedicated international hub network (chain 1337) operating an AMM-based liquidity pool for foreign exchange. Two sovereign spokes, each run by a central bank and a commercial bank, settle cross-currency transactions through the hub, which provides continuous FX pricing and pooled liquidity.
 
 **Key characteristics:**
 - Hub network acting as an FX intermediary between spokes
 - Automated Market Maker (constant-product) for continuous FX pricing
 - Manual oracle for price feeds
-- FX Agreement contracts for settlement lifecycle management
+- Lock-and-mint / burn-and-unlock bridge between each spoke and the hub, via `SpokeBridge`
+- Governance-controlled circuit breaker gating the pool (1-of-N pause, 2-of-N resume)
+- Cacti-based relay observing events across the hub and both spokes
+- Declarative provisioning toolkit (`scenario-b/toolkit`) driving hub founding, spoke founding, and commercial-bank joins from a manifest
 
-The smart contracts (`AutomatedMarketMaker.sol`, `ManualOracle.sol`, `FXAgreement.sol`) are already developed in Scenario A's contracts directory. The hub deployment, orchestration, and scenario-specific service layer will live under `scenario-b/` once implemented.
+Scenario B carries its own contract tree under [`scenario-b/contracts/`](scenario-b/contracts/), independent of Scenario A's. Alongside `AutomatedMarketMaker.sol`, `ManualOracle.sol` and `FXAgreement.sol` it adds the hub registries — `PairRegistry.sol`, `LiquidityCommitRegistry.sol` and `CurrencyRegistry.sol` — which have no Scenario A counterpart. The two trees are deliberately not shared: scenario isolation is a constitutional rule of this repository.
+
+**Quick start:** `cd scenario-b && make scenario-b.up`
 
 ---
 
@@ -82,7 +87,7 @@ The platform is organized in layers common to all scenarios:
 
 Each entity (central bank or commercial bank) runs its own isolated instance of every service layer, communicating intra-entity via gRPC and cross-entity via on-chain contracts and the relay.
 
-For Scenario A's full system topology, component-level documentation, and flow diagrams, see [`scenario-a/README.md § Architecture`](scenario-a/README.md#architecture).
+For each scenario's full system topology, component-level documentation, and flow diagrams, see [`scenario-a/README.md § Architecture`](scenario-a/README.md#architecture) and [`scenario-b/README.md § Architecture`](scenario-b/README.md#architecture).
 
 ---
 
@@ -101,8 +106,20 @@ cbweb3-platform/
 │   ├── docs/               Architecture diagrams, design docs, runbooks
 │   ├── tryouts/            Per-entity demo scripts
 │   └── README.md           Scenario A detailed documentation
-└── scenario-b/             Scenario B — International Hub (planned)
-    └── README.md           Scenario B documentation (planned)
+└── scenario-b/             Scenario B — International Hub with FX Liquidity
+    ├── backend/            Go microservices (api-gateway, auth, compliance, fx, ledger-gateway, payment-orchestrator, payments)
+    ├── contracts/          Solidity smart contracts (Foundry) — AMM, registries, SpokeBridge
+    ├── frontend/           React applications (bank, governance, supervisor, treasury, noc)
+    ├── deploy/             Docker Compose infrastructure (hub + per-spoke Besu, Keycloak, Postgres, Paladin)
+    ├── interop/            Cacti-based hub-and-spoke relay
+    ├── provisioning/       Compose templates and manifest schema consumed by the toolkit
+    ├── toolkit/            Declarative provisioning CLI (found-hub, found-spoke, join, observe)
+    ├── samples/            Example deployment manifests
+    ├── apis/               OpenAPI specs, proto definitions, generated SDKs
+    ├── tests/              Unit, integration, e2e, and performance test harnesses
+    ├── docs/               Architecture diagrams, design docs, runbooks
+    ├── tryouts/            Per-entity demo scripts
+    └── README.md           Scenario B detailed documentation
 ```
 
 ---

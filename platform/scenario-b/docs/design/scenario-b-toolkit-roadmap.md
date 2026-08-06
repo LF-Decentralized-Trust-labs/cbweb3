@@ -401,20 +401,17 @@ infra / backend / frontend → `register-relay-spoke` (auto-registro no relay vi
 `POST /api/v1/spokes`: WS do spoke + URL do gateway — runtime, sem restart) → `add-noc-agent`
 (soft: sobe um `noc-agent` ligado ao Besu do spoke e o registra no `noc-backend`;
 observabilidade — falha não bloqueia o `found-spoke`)
-→ `open-sovereign-pair` (soft / bilateral — ver abaixo) → `commit-liquidity` (soft: o CB
-contribui apenas com a própria moeda via commit-reveal no `LiquidityCommitRegistry`; o relay
-casa `CommitMatched`) → `seed-oracle` (soft, apenas `local`: alimenta o `ManualOracle` do hub
-com as taxas do par recém-aberto) → emissão do spoke bundle.
+→ emissão do spoke bundle.
 
-> **Abertura de par soberano (bilateral, soft).** Corresponde ao `SeedNewSovereignPair.s.sol`
-> + `contracts.seed-sovereign-pair`: implanta os tokens `W-tCeBM` de cada moeda, cria (ou
-> reutiliza) o `LiquidityCommitRegistry`, implanta uma AMM dedicada ao par (com seu próprio
-> circuit breaker), concede `CENTRAL_BANK_ROLE` ao relayer nos tokens soberanos e executa
-> `proposePair` (CB proponente) + `confirmPair` (CB contraparte) no `PairRegistry`. A
-> liquidez entra em seguida por commit-reveal cooperativo (`LiquidityCommitRegistry`, relay
-> casando `CommitMatched`) — cada CB contribui só com a própria moeda. No modelo declarativo,
-> esses atos são divididos entre H / CB-A / CB-B conforme a **opção B** (ver Steps bilaterais),
-> com **W-token por moeda reutilizável**.
+> **Abertura de par soberano — fora do provisionamento (decisão vigente).** A cauda
+> `open-sovereign-pair` / `commit-liquidity` / `seed-oracle` foi **removida** do `found-spoke`
+> (commit `c90de691`); não existe bloco `spec.pair` no manifesto nem no JSON-Schema, e
+> `TestApplyFoundSpokeHasNoSovereignTail` garante que o `apply` nunca planeje esses steps.
+> Abrir um corredor é um ato de **runtime**, não de provisionamento: um CB propõe pelo portal
+> de governança (`proposePair` no `PairRegistry`) e a contraparte confirma (`confirmPair`);
+> em seguida cada CB compromete a **própria** moeda por commit-reveal no
+> `LiquidityCommitRegistry`, com o relay casando `CommitMatched`. O `found-spoke` registra o CB
+> e a sua moeda soberana no hub, e para por aí — nenhum run detém a chave da contraparte.
 
 > **Camada de privacidade.** O Cenário B, no estado atual, não possui contratos
 > `ZetoToken`/`NotoToken` em `contracts/src` nem integração Paladin nos serviços Go. O
@@ -636,18 +633,19 @@ soberano** (que exige dois spokes prontos + relay).
    de relay nem de noc-agent (a cadeia já é observada desde o `found-spoke`). `vote-qbft` (promoção a
    validador) permanece capacidade diferida (ADR-002). Unidade com FakeRunner; suíte E2E sob build tag
    `e2e`.
-8. **TK-B9** — par soberano (`open-sovereign-pair`) + liquidez cooperativa (commit-reveal) +
-   `seed-oracle`. **[Implementado]** — cauda **soft** do `found-spoke`, disparada por `spec.pair`:
-   `open-sovereign-pair` (proponente: scaffolding — W-tokens dedup-por-moeda + AMM + LCR +
-   `setCentralBankOf` + grant ao relayer — com a chave de **admin do hub**, depois `proposePair` com a
-   chave do **CB corrente**; confirmador: `confirmPair`) → `commit-liquidity` (cada CB contribui só a
-   própria moeda via `registerCommit`; o relay casa `CommitMatched`) → `seed-oracle` (`setRate` no
-   `ManualOracle`, local-only). Idempotência **on-chain** via `cast call getPair(pairId)`
-   (`PROPOSED`/`ACTIVE`). **Soberania estrita**: cada `apply` assina só o ato do seu CB (nenhum run
-   detém a chave da contraparte) — por isso o `SeedNewSovereignPair.s.sol` (exige ambas as chaves)
-   **não** é reusado; os atos são dirigidos discretamente por `cast`/`forge create` (sem alterar
-   contratos). Steps soft não bloqueiam o found-spoke nem o spoke bundle. Breaker opção A; W-token
-   dedup por moeda. Unidade com FakeRunner; suíte E2E sob build tag `e2e`.
+8. **TK-B9** — par soberano + liquidez cooperativa (commit-reveal) + taxa do oráculo.
+   **[Implementado como fluxo de runtime; removido do provisionamento]** — a cauda soft
+   (`open-sovereign-pair` / `commit-liquidity` / `seed-oracle`) disparada por `spec.pair` foi
+   **retirada** do `found-spoke` no commit `c90de691`, junto com o próprio campo `spec.pair`. O
+   `found-spoke` passou a registrar o CB e a sua moeda soberana no hub pela API, e nada mais.
+   Abrir um corredor é hoje uma sequência de **atos de runtime**, cada um assinado pelo seu
+   próprio CB: `proposePair` pelo portal de governança do CB proponente, `confirmPair` pelo da
+   contraparte, e depois `registerCommit` por cada lado (o relay casa `CommitMatched`); em
+   `local`, o `setRate` no `ManualOracle` fecha o ciclo. A motivação continua sendo a
+   **soberania estrita** — nenhum run detém a chave da contraparte, e por isso o
+   `SeedNewSovereignPair.s.sol` (exige ambas as chaves) nunca foi reusado. `apply` não planeja
+   nenhum desses steps, e `TestApplyFoundSpokeHasNoSovereignTail` trava essa garantia. O fluxo
+   de runtime é exercitado por `tests/e2e/sovereign_pair_e2e_test.go` sob o build tag `e2e`.
 9. **TK-B10** — E2E + baseline. **[Implementado]** — fase de verificação (testes + doc): um **E2E de
    pipeline completo** (`tests/e2e/pipeline_e2e_test.go`, tag `e2e`) que compõe os modos via
    `apply.Apply` (found-hub → found-spoke ×2 → join → cauda soberana) e exercita o caminho de negócio —
@@ -796,8 +794,9 @@ Aspectos próprios do Cenário B que o toolkit precisa tratar (verificados na fo
    (`ENABLE_MLP`, `docker-compose-backend.mlp.yaml`, DB `cbweb3_mlp`, grant de role MLP).
    Ausente do modelo. **Decidir em revisão futura** se entra no escopo do toolkit.
 9. **Role on-chain do relayer.** `SeedNewSovereignPair` concede `CENTRAL_BANK_ROLE` ao
-   endereço do relayer nos tokens soberanos — já coberto pelo step `open-sovereign-pair`
-   (seção 6); mantido aqui como item de checklist.
+   endereço do relayer nos tokens soberanos. Com a remoção da cauda soberana do
+   provisionamento (seção 6), esse grant é hoje um ato de **runtime** do CB dono do token —
+   mantido aqui como item de checklist, sem step de toolkit correspondente.
 
 **Impacto menor / precisão**
 
