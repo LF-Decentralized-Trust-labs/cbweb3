@@ -8,6 +8,25 @@ import type { AuditLogEntry } from "../types";
 
 const badgeFromRatio = (imbalanced: boolean): "destructive" | "success" => (imbalanced ? "destructive" : "success");
 
+// The viewer's locale decimal mark. Concatenating a literal "." after a grouped
+// integer renders "1.005.02" in pt-BR, where "." is the thousands separator.
+const DECIMAL_MARK =
+  new Intl.NumberFormat().formatToParts(1.1).find((part) => part.type === "decimal")?.value ?? ".";
+
+// formatTokenAmount renders a base-unit (wei) amount for display. BigInt division keeps
+// full precision: Number() on an 18-decimal balance loses it above 2^53.
+function formatTokenAmount(raw: string, decimals: number): string {
+  try {
+    const scale = BigInt(10) ** BigInt(decimals);
+    const value = BigInt(raw);
+    const whole = value / scale;
+    const frac = ((value % scale) * BigInt(100)) / scale;
+    return `${whole.toLocaleString()}${DECIMAL_MARK}${String(frac).padStart(2, "0")}`;
+  } catch {
+    return "-";
+  }
+}
+
 export function DashboardPage() {
   const { overview, refresh } = useNetworkStore();
   const pools = useStabilityStore((state) => state.pools);
@@ -25,8 +44,12 @@ export function DashboardPage() {
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Total tCeBM Supply</CardDescription>
-            <CardTitle>{overview?.totalSupply.toLocaleString() ?? "-"}</CardTitle>
+            <CardDescription>{overview?.sovereignSupply?.symbol ?? "Wrapped Supply"} on Hub</CardDescription>
+            <CardTitle>
+              {overview?.sovereignSupply
+                ? formatTokenAmount(overview.sovereignSupply.totalSupply, overview.sovereignSupply.decimals)
+                : "-"}
+            </CardTitle>
           </CardHeader>
         </Card>
         <Card>

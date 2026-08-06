@@ -146,8 +146,8 @@ to the Dashboard.
 **Route:** `/` · **Sidebar label:** Dashboard
 
 The Dashboard provides a real-time network-level overview by combining data
-from the network overview API and the stability (AMM pool) API. It is the
-recommended starting point for any supervisory session.
+from the compliance registry, the AMM pool status API and the audit log API.
+It is the recommended starting point for any supervisory session.
 
 ![Dashboard](../img/scenario-b/supervisor/02-dashboard.png)
 
@@ -155,20 +155,36 @@ recommended starting point for any supervisory session.
 
 | Card | Source | Description |
 |---|---|---|
-| Total tCeBM Supply | Network overview API | Aggregate reserve-layer tCeBM token supply across the hub. |
-| Active Institutions | Network overview API | Count of institutions with an ACTIVE credential in the compliance registry. |
-| Healthy Pools | Network overview API | Number of AMM pools whose reserve ratio is within the acceptable threshold. |
-| Imbalanced Pools | Network overview API | Number of AMM pools flagged as imbalanced (ratio outside the 70/30 threshold). |
+| `W-tCeBM_<CUR>` on Hub | `GET /api/v2/hub/token/supply` | Total supply of **this** Central Bank's own wrapped token on the hub — how much of its domestic reserves is currently bridged in. The card is labelled with the live token symbol (for example, `W-tCeBM_BRL on Hub`). |
+| Active Institutions | `GET /api/v1/compliance/participants/summary` | Count of institutions with an ACTIVE credential in the compliance registry. |
+| Healthy Pools | `GET /api/v2/amm/pairs` + `GET /api/v2/amm/pool/{pair}/status` | Number of ACTIVE AMM pairs whose reserve ratio is within the acceptable threshold. |
+| Imbalanced Pools | `GET /api/v2/amm/pairs` + `GET /api/v2/amm/pool/{pair}/status` | Number of ACTIVE AMM pairs flagged as imbalanced (ratio outside the 70/30 threshold). |
 
-> **Live data required.** These counters are populated from the backend network
-> overview API. In an offline environment they will display as dashes (`-`).
+> **The supply card covers one currency, by design.** It is not a network-wide
+> total, and no such figure exists. tCeBM is not a single contract: each spoke
+> deploys its own domestic token (`tCeBM_BRL`, `tCeBM_ARS`, …) on its own network,
+> and every hub corridor adds a pair of wrapped tokens (`W-tCeBM_<A>`,
+> `W-tCeBM_<B>`). Summing across them would mix currencies and double-count the
+> same backing — the domestic token locked in the `SpokeBridge` and the wrapped
+> token minted against it on the hub are the same money. The counterparty's side
+> of a corridor is visible in the Liquidity Health table below and in the
+> Liquidity Monitor (§5.2).
+
+> **Offline behaviour differs per card.** The supply card fails to a dash (`-`):
+> its endpoint returns an error rather than a zero, so an unreadable hub is never
+> shown as "nothing bridged". The three counters do not — each source is fetched
+> independently and an unreachable backend yields `0`. A `0` in Active
+> Institutions, Healthy Pools or Imbalanced Pools therefore means either "none" or
+> "backend unreachable"; cross-check against the Liquidity Monitor (§5.2) and the
+> Compliance Registry (§5.3) before acting on it.
 
 **Liquidity Health table (lower left):**
 
 Displays AMM pair ratios from the stability API, using the same threshold
 logic as the Liquidity Monitor page. Each row shows:
 
-- **Pair** — the currency pair label (for example, `W-BRL-ARS`).
+- **Pair** — the pair identifier as registered in the PairRegistry, following the
+  `W-{source}-W-{target}` convention (for example, `W-BRL-W-ARS`).
 - **Ratio** — the current reserve ratio expressed as `ratioA / ratioB`.
 - **Status** — `HEALTHY` (green) or `IMBALANCED` (red) based on the pool's
   `imbalance_flag`.
@@ -176,9 +192,12 @@ logic as the Liquidity Monitor page. Each row shows:
 The imbalance threshold is **70/30**: a pool whose dominant reserve exceeds
 70% of the total is flagged as imbalanced.
 
-> **Live data required.** Pool ratios come from the AMM pool status API
-> (`GET /api/v2/amm/pool/{pair}/status`). Empty tables indicate the backend
-> is unreachable.
+> **Live data required.** The supervised corridors are discovered at run time
+> from the hub PairRegistry (`GET /api/v2/amm/pairs`, ACTIVE pairs only) and each
+> one is then read from the AMM pool status API
+> (`GET /api/v2/amm/pool/{pair}/status`). A corridor opened by the Central Banks
+> appears here without a portal release. An empty table indicates either that no
+> corridor is funded yet or that the backend is unreachable.
 
 **Recent Events panel (lower right):**
 
@@ -208,7 +227,10 @@ normal operations or a market stress event.
 
 **Pool Status table:**
 
-One row per known AMM pair (currently `W-BRL-ARS`). Columns:
+One row per ACTIVE AMM pair registered in the hub PairRegistry, discovered at
+run time via `GET /api/v2/amm/pairs`. Pairs still in `PROPOSED` state are not
+listed: they carry no liquidity until the counterpart Central Bank confirms
+them. Columns:
 
 | Column | Description |
 |---|---|
@@ -238,9 +260,10 @@ Alert cards are generated in real time from two sources:
 
 When no alerts are active the panel displays "No active alerts."
 
-> **Live data required.** Both pool status and circuit-breaker status are
-> fetched from live backend APIs. In an offline environment the table will be
-> empty and no alerts will be shown.
+> **Live data required.** The pair list, pool status and circuit-breaker status
+> are all fetched from live backend APIs. In an offline environment the table
+> will be empty and no alerts will be shown — an empty screen is not evidence
+> that the network is healthy.
 
 ---
 
@@ -617,9 +640,19 @@ settings are not stored beyond the active session.
 
 ### The Dashboard shows dashes or zero counts
 
-The network overview API is unreachable. Verify that the backend services are
-running and that the portal is configured with the correct API base URL. This
-is expected in fully offline demo environments.
+One of the Dashboard sources — the compliance participants summary, the hub
+pair list, the AMM pool status API or the hub token supply API — is unreachable.
+Verify that the backend services are running and that the portal is configured
+with the correct API base URL. This is expected in fully offline demo
+environments.
+
+Read the two failure shapes differently (see §5.1):
+
+- A dash (`-`) in the supply card means the hub token supply could not be read
+  (`GET /api/v2/hub/token/supply` returned an error). Check the hub RPC and that
+  this Central Bank's currency is registered in the hub CurrencyRegistry.
+- A `0` in the three counters is indistinguishable from a genuine zero. Confirm
+  the backend is up before treating the count as real.
 
 ### Pool tables are empty on Liquidity Monitor or Stability Insights
 
