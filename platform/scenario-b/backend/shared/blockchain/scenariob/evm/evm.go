@@ -63,6 +63,49 @@ func NewSigner(hexKey string, chainID *big.Int) (*Signer, error) {
 	}, nil
 }
 
+// sharedSigners memoizes one Signer per (account, chain) for the lifetime of the process.
+//
+// A Signer owns a nonce counter, so a SECOND Signer built from the same key is a second counter on
+// ONE account, and the two drift apart the moment either of them sends. When they then submit
+// concurrently they claim the same nonce; on a zero-gas chain the price-bump check that normally
+// rejects a replacement passes (0 is not less than 0), so the later transaction replaces the earlier
+// one in the mempool. The replaced hash is never mined and its caller waits for a receipt that will
+// never exist.
+//
+// This is not hypothetical. On the sample stack a fCeBM mint and the bridge relayer's residue leg —
+// both signing with the central bank's spoke operator key, both inside the payment-orchestrator
+// process, each holding its own Signer — collided on nonce 15: the relayer's transaction mined and
+// the mint vanished, hanging the deposit-approval request indefinitely.
+//
+// Keying by derived address rather than by the hex string keeps the "0x"-prefixed and bare forms of
+// the same key on one counter.
+var (
+	sharedSignersMu sync.Mutex
+	sharedSigners   = map[string]*Signer{}
+)
+
+// SharedSigner returns the process-wide Signer for (hexKey, chainID), building it on first use.
+//
+// Production wiring must use this rather than NewSigner: several clients are routinely handed the
+// same operator key, and only a shared instance gives them the one nonce counter that
+// signAndSend's mutex can actually serialize. NewSigner stays available for tests and for callers
+// that deliberately want an isolated counter.
+func SharedSigner(hexKey string, chainID *big.Int) (*Signer, error) {
+	candidate, err := NewSigner(hexKey, chainID)
+	if err != nil {
+		return nil, err
+	}
+	registryKey := candidate.address.Hex() + "@" + chainID.String()
+
+	sharedSignersMu.Lock()
+	defer sharedSignersMu.Unlock()
+	if existing, ok := sharedSigners[registryKey]; ok {
+		return existing, nil
+	}
+	sharedSigners[registryKey] = candidate
+	return candidate, nil
+}
+
 // Address returns the signer's derived address.
 func (s *Signer) Address() common.Address { return s.address }
 
@@ -283,14 +326,52 @@ func submitRawInternal(
 	if onBroadcast != nil {
 		onBroadcast(signed.Hash().Hex())
 	}
-	receipt, err := bind.WaitMined(ctx, ec, signed)
+	receipt, err := WaitForReceipt(ctx, ec, signed, label)
 	if err != nil {
-		return nil, "", fmt.Errorf("wait mined: %w", err)
-	}
-	if receipt.Status == 0 {
-		return nil, "", fmt.Errorf("%s: transaction reverted on-chain (tx=%s) — check contract permissions and token allowances", label, signed.Hash().Hex())
+		return nil, "", err
 	}
 	return receipt, signed.Hash().Hex(), nil
+}
+
+// WaitForReceipt waits for tx to be mined and refuses a reverted receipt.
+//
+// It is exported for the one submission shape this package cannot own: a contract DEPLOY, which
+// go-ethereum's generated bindings broadcast themselves and hand back as a transaction. Those
+// callers still need the same deadline policy as everything else — a deploy that loses a nonce race
+// hangs exactly like a mint does.
+func WaitForReceipt(ctx context.Context, ec *ethclient.Client, tx *types.Transaction, label string) (*types.Receipt, error) {
+	waitCtx, cancel := receiptWaitContext(ctx)
+	defer cancel()
+	receipt, err := bind.WaitMined(waitCtx, ec, tx)
+	if err != nil {
+		// The hash is part of the error on purpose: a submission that is not mined within the
+		// deadline may still be in the mempool, and TxMined on this hash is what tells a retry
+		// apart from a re-submission of a non-idempotent burn or mint.
+		return nil, fmt.Errorf("wait mined (%s tx=%s): %w", label, tx.Hash().Hex(), err)
+	}
+	if receipt.Status == 0 {
+		return nil, fmt.Errorf("%s: transaction reverted on-chain (tx=%s) — check contract permissions and token allowances", label, tx.Hash().Hex())
+	}
+	return receipt, nil
+}
+
+// ReceiptWaitTimeout bounds the wait for a receipt when the caller's context carries no deadline of
+// its own. A caller that sets one keeps it — this only closes the case where nothing bounds the wait.
+//
+// Without it, a transaction that is dropped from the mempool (a nonce collision with another sender
+// on the same account is the way that happens here) parks the caller forever: WaitMined polls for a
+// receipt that will never be written, no error is ever logged, and the request never returns. A
+// deadline turns that into a reportable, retryable failure. It is generous relative to QBFT block
+// time (2–4 s locally) so it never fires on a merely busy chain.
+var ReceiptWaitTimeout = 90 * time.Second
+
+// receiptWaitContext derives the context WaitMined runs under. Exposed as a helper so the deadline
+// policy — inherit the caller's, otherwise impose ReceiptWaitTimeout — is testable on its own.
+func receiptWaitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok || ReceiptWaitTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, ReceiptWaitTimeout)
 }
 
 // signAndSend assigns a unique nonce, signs, and broadcasts the transaction while holding
@@ -341,6 +422,52 @@ func (s *Signer) signAndSend(
 		return nil, fmt.Errorf("send tx: %w", err)
 	}
 	return nil, fmt.Errorf("send tx: nonce re-sync did not resolve the error")
+}
+
+// WithNonce runs broadcast under this signer's nonce counter and returns the transaction it sent.
+//
+// It exists for go-ethereum's generated deployers, which sign and broadcast internally: they read
+// the nonce from bind.TransactOpts, and an opts with a nil Nonce makes bind fetch PendingNonceAt on
+// its own — a private counter again, outside everything signAndSend serializes. Passing the nonce
+// this method supplies puts a deploy back in line with every other submission from the account.
+//
+// broadcast must set the nonce it is given on its TransactOpts and return the broadcast
+// transaction. As in signAndSend, a stale counter is re-synced from PendingNonceAt and the
+// broadcast is retried once.
+func (s *Signer) WithNonce(
+	ctx context.Context,
+	ec *ethclient.Client,
+	broadcast func(nonce uint64) (*types.Transaction, error),
+) (*types.Transaction, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.nonceInit {
+		n, err := ec.PendingNonceAt(ctx, s.Address())
+		if err != nil {
+			return nil, fmt.Errorf("nonce: %w", err)
+		}
+		s.nonce = n
+		s.nonceInit = true
+	}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		tx, err := broadcast(s.nonce)
+		if err == nil {
+			s.nonce++
+			return tx, nil
+		}
+		if attempt == 0 && isNonceTooLow(err) {
+			n, rerr := ec.PendingNonceAt(ctx, s.Address())
+			if rerr != nil {
+				return nil, fmt.Errorf("broadcast: %w (nonce re-sync: %v)", err, rerr)
+			}
+			s.nonce = n
+			continue
+		}
+		return nil, err
+	}
+	return nil, fmt.Errorf("broadcast: nonce re-sync did not resolve the error")
 }
 
 // isNonceTooLow reports whether a SendTransaction error indicates the account nonce on the
