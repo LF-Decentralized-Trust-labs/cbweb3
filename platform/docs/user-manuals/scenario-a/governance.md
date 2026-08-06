@@ -1,7 +1,7 @@
 # Governance Portal — User Manual (Scenario A)
 
 **Audience:** Central bank governance operators.
-**Data source:** Live backend by default (`VITE_USE_MOCKS=false`). A local mock mode is available for development — if the portal is running in mock mode, data shown is synthetic and no changes reach the backend. Confirm with your system administrator which mode is active in your environment.
+**Data source:** Live backend via API Gateway. There is no selectable mock mode in this portal: no source file consumes a mock toggle and the mock data set is not imported anywhere, so every screen shows real backend data regardless of how `VITE_USE_MOCKS` is set.
 
 ---
 
