@@ -30,17 +30,18 @@ behaves in that scenario**.
 
 ## Implementation status — read this first
 
-Every portal below is wired to a live backend through the API Gateway. The
-manuals only describe features that exist in the shipped product, and each manual
-states at the top exactly where its data comes from. A portal's screens are
-populated only when the backend services it calls are reachable; in an offline or
-demo environment with the backends down, screens show empty tables or zero
-counters rather than fabricated data.
+Every portal below is wired to a live backend through the API Gateway, with one
+exception noted in the table: the **Scenario B** Governance portal has a mock
+toggle that is **on by default**. The manuals only describe features that exist in
+the shipped product, and each manual states at the top exactly where its data
+comes from. A portal's screens are populated only when the backend services it
+calls are reachable; in an offline or demo environment with the backends down,
+screens show empty tables or zero counters rather than fabricated data.
 
 | Portal | Scenario A | Scenario B | Data source today |
 |---|---|---|---|
-| **Bank** | Live backend | Live backend | Real API (API Gateway) |
-| **Governance** | Live backend (Dashboard + Registry exposed) | Live backend | Real API; Scenario A retains a development mock toggle |
+| **Bank** | Live backend | Live backend | Real API (API Gateway); no mock toggle is read in either scenario |
+| **Governance** | Live backend (Dashboard + Registry exposed) | Mock by default on the parameters and registry screens; Circuit Breaker always live | Scenario A has no working mock path — its toggle is inert. **Scenario B** consumes `VITE_USE_MOCKS`, read as `!== "false"`, so mock data is served unless it is set to exactly `false` |
 | **Treasury** | Live backend (approvals exposed) | Live backend | Real API (API Gateway) |
 | **Supervisor** | Live backend (connectivity-dependent) | Live backend (connectivity-dependent) | Real API; every screen calls live endpoints. See the note below for auth/data caveats |
 | **NOC** | Live backend | Live backend | Real API — connects to the live NOC backend service |
