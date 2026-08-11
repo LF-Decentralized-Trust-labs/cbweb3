@@ -18,7 +18,6 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -130,7 +129,7 @@ func NewPairRegistryClient(ctx context.Context, cfg PairRegistryConfig) (*PairRe
 		c.identityRegistry = common.HexToAddress(cfg.IdentityRegistryAddress)
 	}
 	if cfg.PrivateKeyHex != "" {
-		signer, sigErr := evm.NewSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
+		signer, sigErr := evm.SharedSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
 		if sigErr != nil {
 			ec.Close()
 			return nil, fmt.Errorf("pair registry: signer: %w", sigErr)
@@ -227,21 +226,30 @@ func (c *PairRegistryClient) DeployDedicatedAMM(ctx context.Context, tokenA, tok
 	if gasPrice, gerr := c.ec.SuggestGasPrice(ctx); gerr == nil {
 		opts.GasPrice = gasPrice
 	}
-	ammAddr, deployTx, _, err := bindings.DeployAutomatedMarketMaker(
-		opts, c.ec,
-		common.HexToAddress(tokenA),
-		common.HexToAddress(tokenB),
-		c.identityRegistry,
-	)
+	// The deploy goes through the signer's counter like every other submission from this account:
+	// bind would otherwise read PendingNonceAt itself and could claim a nonce another call in this
+	// process has already taken. The deployed address is derived from (sender, nonce), so it stays
+	// correct precisely because the nonce is the one actually broadcast.
+	var ammAddr common.Address
+	deployTx, err := c.signer.WithNonce(ctx, c.ec, func(nonce uint64) (*types.Transaction, error) {
+		opts.Nonce = new(big.Int).SetUint64(nonce)
+		addr, tx, _, derr := bindings.DeployAutomatedMarketMaker(
+			opts, c.ec,
+			common.HexToAddress(tokenA),
+			common.HexToAddress(tokenB),
+			c.identityRegistry,
+		)
+		if derr != nil {
+			return nil, derr
+		}
+		ammAddr = addr
+		return tx, nil
+	})
 	if err != nil {
 		return "", fmt.Errorf("pair registry: deploy AMM: %w", err)
 	}
-	receipt, err := bind.WaitMined(ctx, c.ec, deployTx)
-	if err != nil {
-		return "", fmt.Errorf("pair registry: deploy AMM wait: %w", err)
-	}
-	if receipt.Status == 0 {
-		return "", fmt.Errorf("pair registry: deploy AMM reverted (tx=%s)", deployTx.Hash().Hex())
+	if _, err := evm.WaitForReceipt(ctx, c.ec, deployTx, "deploy AMM"); err != nil {
+		return "", fmt.Errorf("pair registry: %w", err)
 	}
 	return ammAddr.Hex(), nil
 }

@@ -59,7 +59,7 @@ func NewFiatTokenClient(cfg FiatTokenClientConfig, logger *slog.Logger) (*FiatTo
 		return nil, fmt.Errorf("parse fCeBM ABI: %w", err)
 	}
 
-	signer, err := evm.NewSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
+	signer, err := evm.SharedSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
 	if err != nil {
 		return nil, fmt.Errorf("build signer: %w", err)
 	}
