@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 name: Secret Scan — gitleaks
 
 # Finding R2-11.3: secret-scan gate.
@@ -18,6 +19,10 @@ env:
   # Pinned gitleaks release. The MIT-licensed binary needs no GITLEAKS_LICENSE,
   # unlike gitleaks-action@v2, which mandates a license key for organizations.
   GITLEAKS_VERSION: "8.28.0"
+  # SHA-256 of gitleaks_8.28.0_linux_x64.tar.gz, from the release asset
+  # gitleaks_8.28.0_checksums.txt. Pinning the version alone is not enough: a
+  # release asset can be replaced. Bump both together when upgrading.
+  GITLEAKS_SHA256: "a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb"
 
 jobs:
   gitleaks:
@@ -28,30 +33,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Full checkout available if the scan scope is ever widened to history.
+          # Full history. NOT used by the scan below, which is working-tree only
+          # — it is here for the second, history-scanning job that R2-11.3 still
+          # owes (see the scan step). Drop to 1 if that job is abandoned.
           fetch-depth: 0
           persist-credentials: false
 
       # Download the pinned, MIT-licensed gitleaks binary (linux x64) directly
       # from the official release. No license key required for organizations.
+      # The checksum is verified before the archive is unpacked, so a swapped
+      # release asset fails the job instead of silently running as the scanner.
       - name: Install gitleaks (pinned)
         run: |
           set -euo pipefail
           curl -sSfL \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
             -o /tmp/gitleaks.tar.gz
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
 
       # The job FAILS (gate) when a secret is detected: --exit-code 1 makes
-      # gitleaks return 1 on findings. Config (default ruleset + local-dev
+      # gitleaks return 1 on findings. Config (default ruleset + documented
       # allowlist) comes from .gitleaks.toml; --redact hides secret values.
       #
-      # --no-git scans the checked-out working tree instead of walking the full
-      # commit history. This mirrors the scope of the previous gitleaks-action
-      # (which scanned only the PR/pushed changes, not all history) and keeps
-      # the gate green on pre-existing historical fixtures while still catching
-      # any real secret present in the current source.
+      # SCOPE: --no-git scans the checked-out working tree only. It does not walk
+      # commit history, so a secret that was committed and later removed is not
+      # caught here. That is a KNOWN GAP, not the finished state of R2-11.3: the
+      # plan also requires a history scan. Implementing it means triaging the
+      # existing historical hits into a baseline (--baseline-path or
+      # .gitleaksignore) and adding a second job running `gitleaks git`, so only
+      # NEW history entries fail. Until that job exists, do not read a green
+      # check here as "no secret has ever been committed".
       - name: Run gitleaks detect
         run: gitleaks detect --no-git --source . --config .gitleaks.toml --redact --exit-code 1
