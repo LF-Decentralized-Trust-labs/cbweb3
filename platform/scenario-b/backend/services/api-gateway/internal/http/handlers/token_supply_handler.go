@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"log"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -42,11 +43,17 @@ func NewTokenSupplyHandler(reader SovereignSupplyReader) *TokenSupplyHandler {
 // Read-only aggregate of public on-chain state, so it is unauthenticated — the same
 // policy as GET /api/v2/hub/currencies. A hub RPC failure is a 502, never a zero:
 // a fabricated zero would read as "nothing is bridged" to a supervisor.
+//
+// The cause is logged and not returned. The reader wraps the hub RPC URL and the token
+// address into its errors, and this endpoint takes no credential — echoing them would
+// hand the hub's internal address to any caller. Mirrors GET /api/v2/hub/currencies.
 func (h *TokenSupplyHandler) GetSovereignSupply(c *fiber.Ctx) error {
 	supply, err := h.reader.SovereignSupply(c.Context())
 	if err != nil {
+		log.Printf("[token-supply] read sovereign token supply: %v", err)
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
-			"error": "read sovereign token supply: " + err.Error(),
+			"error": "failed to read sovereign token supply",
+			"code":  "ONCHAIN_ERROR",
 		})
 	}
 	return c.Status(fiber.StatusOK).JSON(supply)

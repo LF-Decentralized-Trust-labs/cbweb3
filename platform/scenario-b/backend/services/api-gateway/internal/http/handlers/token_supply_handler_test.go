@@ -55,8 +55,13 @@ func TestTokenSupplyHandler_ReturnsSovereignSupply(t *testing.T) {
 
 // A hub RPC failure must surface as 502. Reporting 200 with a zero supply would read
 // as "nothing is bridged" to a supervisor — the exact defect this endpoint replaces.
+//
+// The body must stay generic: this route takes no credential, so the hub RPC URL and
+// the token address the reader wraps into its errors are not the caller's to see.
 func TestTokenSupplyHandler_ReaderErrorIsBadGateway(t *testing.T) {
-	app := supplyApp(&fakeSupplyReader{err: errors.New("dial hub token: connection refused")})
+	app := supplyApp(&fakeSupplyReader{
+		err: errors.New("dial hub token W-tCeBM_BRL (0x686afd): dial http://10.0.0.7:8845: connection refused"),
+	})
 
 	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/supply", nil))
 	require.NoError(t, err)
@@ -64,6 +69,9 @@ func TestTokenSupplyHandler_ReaderErrorIsBadGateway(t *testing.T) {
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	assert.Contains(t, string(body), "read sovereign token supply")
+	assert.Contains(t, string(body), "failed to read sovereign token supply")
+	assert.Contains(t, string(body), "ONCHAIN_ERROR")
 	assert.NotContains(t, string(body), "total_supply")
+	assert.NotContains(t, string(body), "10.0.0.7", "the hub RPC address must not reach an unauthenticated caller")
+	assert.NotContains(t, string(body), "0x686afd")
 }

@@ -146,8 +146,9 @@ to the Dashboard.
 **Route:** `/` · **Sidebar label:** Dashboard
 
 The Dashboard provides a real-time network-level overview by combining data
-from the compliance registry, the AMM pool status API and the audit log API.
-It is the recommended starting point for any supervisory session.
+from the compliance registry, the hub token supply API, the AMM pool status API
+and the audit log API. It is the recommended starting point for any supervisory
+session.
 
 ![Dashboard](../img/scenario-b/supervisor/02-dashboard.png)
 

@@ -21,9 +21,32 @@ interface PairsResponse {
 //
 // Returns [] when the endpoint is unreachable. Callers must treat an empty list as
 // "pool coverage unavailable", never as "the network has no pools".
-export async function listActivePairIds(): Promise<string[]> {
-  const response = await apiFetch<PairsResponse>("/api/v2/amm/pairs");
-  return (response.pairs ?? [])
-    .filter((pair) => pair.status === "ACTIVE")
-    .map((pair) => pair.pair_id);
+//
+// A single Dashboard refresh asks three times (network overview, pool table, alerts),
+// each fanning out one pool-status call per pair. Concurrent and back-to-back callers
+// therefore share one in-flight request for CACHE_TTL_MS; a corridor opened at runtime
+// still lands on the next refresh cycle.
+const CACHE_TTL_MS = 2_000;
+
+let inFlight: Promise<string[]> | null = null;
+let cachedAt = 0;
+
+export function listActivePairIds(): Promise<string[]> {
+  const now = Date.now();
+  if (inFlight && now - cachedAt < CACHE_TTL_MS) return inFlight;
+
+  cachedAt = now;
+  inFlight = apiFetch<PairsResponse>("/api/v2/amm/pairs")
+    .then((response) =>
+      (response.pairs ?? [])
+        .filter((pair) => pair.status === "ACTIVE")
+        .map((pair) => pair.pair_id),
+    )
+    .catch((error) => {
+      // Never cache a failure: the next caller must retry, not inherit an empty list
+      // for the rest of the window and render "no pools" on a healthy network.
+      inFlight = null;
+      throw error;
+    });
+  return inFlight;
 }
