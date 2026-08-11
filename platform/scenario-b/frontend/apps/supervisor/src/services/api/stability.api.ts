@@ -2,6 +2,7 @@
 
 import type { PoolStatus, StabilityAlert } from "../../types";
 import { apiFetch } from "./apiClient";
+import { listActivePairIds } from "./pairs.api";
 
 interface CircuitBreakerStatus {
   state: string;
@@ -29,13 +30,25 @@ async function fetchCircuitBreakerStatus(): Promise<CircuitBreakerStatus | null>
 
 async function fetchPoolStatus(pair: string): Promise<AMMPoolStatus | null> {
   try {
-    return await apiFetch<AMMPoolStatus>(`/api/v2/amm/pool/${pair}/status`);
+    return await apiFetch<AMMPoolStatus>(
+      `/api/v2/amm/pool/${encodeURIComponent(pair)}/status`,
+    );
   } catch {
     return null;
   }
 }
 
-const KNOWN_PAIRS = ["W-BRL-ARS"];
+// activePairs resolves the supervised corridors from the hub PairRegistry. Failing
+// soft to [] keeps the Liquidity Monitor rendering its empty state instead of
+// crashing the page when the gateway is unreachable.
+async function activePairs(): Promise<string[]> {
+  try {
+    return await listActivePairIds();
+  } catch {
+    return [];
+  }
+}
+
 const WEI = BigInt("1000000000000000000");
 
 function fromWei(raw: string): number {
@@ -52,7 +65,8 @@ function fromWei(raw: string): number {
 
 export const stabilityApi = {
   getPoolStatuses: async (): Promise<PoolStatus[]> => {
-    const results = await Promise.allSettled(KNOWN_PAIRS.map((pair) => fetchPoolStatus(pair)));
+    const pairs = await activePairs();
+    const results = await Promise.allSettled(pairs.map((pair) => fetchPoolStatus(pair)));
     const pools: PoolStatus[] = [];
     for (const result of results) {
       if (result.status !== "fulfilled" || !result.value) continue;
@@ -72,9 +86,10 @@ export const stabilityApi = {
   },
 
   getAlerts: async (): Promise<StabilityAlert[]> => {
+    const pairs = await activePairs();
     const [cbResult, ...poolResults] = await Promise.allSettled([
       fetchCircuitBreakerStatus(),
-      ...KNOWN_PAIRS.map((pair) => fetchPoolStatus(pair)),
+      ...pairs.map((pair) => fetchPoolStatus(pair)),
     ]);
 
     const alerts: StabilityAlert[] = [];

@@ -41,6 +41,9 @@ type Dependencies struct {
 	PairService services.PairServiceIface
 	// 006-hub-currency-registry — hub currency discovery
 	CurrencyService services.CurrencyServiceIface
+	// SovereignSupplyReader serves this CB's own wrapped-token supply on the hub
+	// (GET /api/v2/hub/token/supply). Nil = route not registered.
+	SovereignSupplyReader handlers.SovereignSupplyReader
 	// 007-bridge-based-cb-liquidity — sovereign CB liquidity
 	SovereignLiquidityService handlers.SovereignLiquidityServiceIface
 	// LCRRegistrar calls registerCommit on the Hub LiquidityCommitRegistry (T010).
@@ -191,6 +194,7 @@ func Register(app *fiber.App, deps Dependencies) {
 	registerUS3Routes(app, deps)
 	registerPairRegistryRoutes(app, deps)
 	registerCurrencyRegistryRoutes(app, deps)
+	registerTokenSupplyRoutes(app, deps)
 	registerSovereignRoutes(app, deps)
 	registerTransferLimitInternalRoutes(app, deps)
 
@@ -533,6 +537,17 @@ func registerCurrencyRegistryRoutes(app *fiber.App, deps Dependencies) {
 		ch.RemoveCurrency,
 	)
 	hub.Get("/currencies", ch.ListCurrencies)
+}
+
+// registerTokenSupplyRoutes registers the sovereign wrapped-token supply endpoint.
+// GET /api/v2/hub/token/supply — this CB's own W-tCeBM_<CUR> outstanding on the hub
+// (public, like GET /api/v2/hub/currencies: it aggregates public on-chain state).
+func registerTokenSupplyRoutes(app *fiber.App, deps Dependencies) {
+	if deps.SovereignSupplyReader == nil {
+		return
+	}
+	tsh := handlers.NewTokenSupplyHandler(deps.SovereignSupplyReader)
+	app.Group("/api/v2/hub").Get("/token/supply", tsh.GetSovereignSupply)
 }
 
 // POST /api/v2/amm/pairs/propose — Central Bank of tokenA proposes a new pair (requires CB role + auth).

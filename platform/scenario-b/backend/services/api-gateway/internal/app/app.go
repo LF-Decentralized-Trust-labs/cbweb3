@@ -892,6 +892,16 @@ func buildV2Dependencies(cfg config.Config, authProvider interfaces.IAuthProvide
 		} else {
 			deps.CurrencyService = services.NewCurrencyService(crClient)
 			log.Printf("[app] CurrencyRegistry client ready (%s)", currencyMode)
+
+			// Sovereign wrapped-token supply (GET /api/v2/hub/token/supply): resolves this
+			// CB's own W-tCeBM_<CUR> through the registry it just wired, so a currency
+			// registered at runtime needs no restart.
+			if ssa := newSovereignSupplyAdapter(deps.CurrencyService, hubRPC,
+				os.Getenv("NATIVE_ASSET_SYMBOL"), 15*time.Second); ssa != nil {
+				deps.SovereignSupplyReader = ssa
+			} else {
+				log.Printf("[app] sovereign token supply endpoint disabled (NATIVE_ASSET_SYMBOL or HUB_BESU_RPC_URL unset)")
+			}
 		}
 	}
 
