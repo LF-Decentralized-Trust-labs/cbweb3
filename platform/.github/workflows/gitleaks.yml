@@ -33,9 +33,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Full history. NOT used by the scan below, which is working-tree only
-          # — it is here for the second, history-scanning job that R2-11.3 still
-          # owes (see the scan step). Drop to 1 if that job is abandoned.
+          # Full history is REQUIRED by the second scan step below (`gitleaks
+          # git` walks every commit). Do not lower this to 1: a shallow clone
+          # makes the history scan silently cover almost nothing.
           fetch-depth: 0
           persist-credentials: false
 
@@ -54,17 +54,34 @@ jobs:
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
 
+      # SCAN 1 of 2 — WORKING TREE.
+      #
       # The job FAILS (gate) when a secret is detected: --exit-code 1 makes
       # gitleaks return 1 on findings. Config (default ruleset + documented
-      # allowlist) comes from .gitleaks.toml; --redact hides secret values.
+      # allowlist) comes from .gitleaks.toml; --redact keeps secret values out
+      # of the build log.
       #
-      # SCOPE: --no-git scans the checked-out working tree only. It does not walk
-      # commit history, so a secret that was committed and later removed is not
-      # caught here. That is a KNOWN GAP, not the finished state of R2-11.3: the
-      # plan also requires a history scan. Implementing it means triaging the
-      # existing historical hits into a baseline (--baseline-path or
-      # .gitleaksignore) and adding a second job running `gitleaks git`, so only
-      # NEW history entries fail. Until that job exists, do not read a green
-      # check here as "no secret has ever been committed".
-      - name: Run gitleaks detect
+      # --no-git scans the checked-out tree only. It catches a secret that is
+      # present in the source right now; it does not walk commit history. That
+      # is scan 2's job.
+      - name: Run gitleaks — working tree
         run: gitleaks detect --no-git --source . --config .gitleaks.toml --redact --exit-code 1
+
+      # SCAN 2 of 2 — COMMIT HISTORY.
+      #
+      # `gitleaks git` walks every commit reachable from the checked-out ref, so
+      # it catches a secret that was committed and later deleted — invisible to
+      # scan 1. Requires fetch-depth: 0 above.
+      #
+      # Pre-existing findings are suppressed by .gitleaksignore, which holds the
+      # fingerprints (commit:file:rule:line) of history hits already triaged and
+      # accepted. See docs/deliverables/D11-secret-scan-report.md for the
+      # per-finding rationale. Because a fingerprint pins a commit AND a line, a
+      # NEW secret still fails — including one added to a file that already has
+      # accepted entries. Verified with a planted-commit control.
+      #
+      # if: always() so a working-tree failure does not mask the history result;
+      # the job still fails if either scan does.
+      - name: Run gitleaks — commit history
+        if: always()
+        run: gitleaks git . --config .gitleaks.toml --redact --exit-code 1
