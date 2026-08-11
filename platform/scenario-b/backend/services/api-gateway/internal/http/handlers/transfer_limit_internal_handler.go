@@ -45,6 +45,10 @@ func (h *TransferLimitInternalHandler) HandleCheckAndDeduct(c *fiber.Ctx) error 
 	if req.PayerBankID == "" || req.AmountHuman == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "payer_bank_id and amount_human required"})
 	}
+	// A deduction consumes the named bank's daily allowance, so only that bank may ask for it.
+	if ok, refusal := authorizeRelayCallerFor(c, req.PayerBankID); !ok {
+		return refusal
+	}
 
 	if err := h.checker.CheckAndDeduct(c.Context(), req.PayerBankID, req.Currency, req.AmountHuman); err != nil {
 		var limitErr *services.ErrTransferLimitExceeded
@@ -71,6 +75,11 @@ func (h *TransferLimitInternalHandler) HandleRestore(c *fiber.Ctx) error {
 	}
 	if req.PayerBankID == "" || req.AmountHuman == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "payer_bank_id and amount_human required"})
+	}
+	// Restoring credits allowance back. Unbound, it is a way for one peer to undo another bank's
+	// consumption — the limit's enforcement inverted.
+	if ok, refusal := authorizeRelayCallerFor(c, req.PayerBankID); !ok {
+		return refusal
 	}
 
 	h.checker.Restore(c.Context(), req.PayerBankID, req.Currency, req.AmountHuman)

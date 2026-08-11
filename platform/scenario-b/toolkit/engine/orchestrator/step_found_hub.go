@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package orchestrator
 
 import (
@@ -474,8 +476,8 @@ func FoundHubSteps(c HubConfig) []Step {
 		{
 			Name: "build-hub-backend-image",
 			Check: func(ctx context.Context) (bool, error) {
-				_, err := c.Runner.Run(ctx, "docker", "image", "inspect", hubBackendImage)
-				return err == nil, nil
+				// imageExists (not an inline inspect) so --rebuild reaches this gate too.
+				return imageExists(ctx, c.Runner, hubBackendImage), nil
 			},
 			Run: func(ctx context.Context) error { return c.buildBackendImage(ctx) },
 		},
@@ -487,6 +489,22 @@ func FoundHubSteps(c HubConfig) []Step {
 				return volumeHasFile(ctx, c.Runner, c.svcTLSVolume(), "svc-ca.crt"), nil
 			},
 			Run: func(ctx context.Context) error { return genServiceTLS(ctx, c.Runner, c.svcTLSVolume()) },
+		},
+		{
+			// The Cacti relay's own service identity, written into ITS volume so the private key never
+			// lands on the host tree. Generated here because the relay is one per deployment, like the
+			// hub — each CB then pins the certificate half in its own PKI volume (pin-relay-cert).
+			//
+			// SOFT: the relay is deployed outside the toolkit, so its volume may not exist yet. Missing
+			// it leaves the relay on the shared secret, which is the migration state, not a failure.
+			Name: "gen-relay-identity-cacti",
+			Soft: true,
+			Check: func(ctx context.Context) (bool, error) {
+				return volumeHasFile(ctx, c.Runner, relayDataVolume(), relayPeerKeyID+".crt"), nil
+			},
+			Run: func(ctx context.Context) error {
+				return ensureRelayIdentity(ctx, c.Runner, relayDataVolume(), relayPeerKeyID)
+			},
 		},
 		{
 			// Compliance holds the GOVERNANCE signer and performs the on-chain

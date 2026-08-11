@@ -160,6 +160,9 @@ type fakePairClient struct {
 	activeErr  error
 	deployAMM  string
 	deployErr  error
+	// confirmCalls counts confirmPair submissions, so a test can assert that no transaction
+	// was spent on a call the pre-check should have refused.
+	confirmCalls int
 }
 
 func (f *fakePairClient) ProposePair(_ context.Context, _, _, _, _ string) (string, error) {
@@ -169,6 +172,7 @@ func (f *fakePairClient) DeployDedicatedAMM(_ context.Context, _, _ string) (str
 	return f.deployAMM, f.deployErr
 }
 func (f *fakePairClient) ConfirmPair(_ context.Context, _ string) (string, error) {
+	f.confirmCalls++
 	return f.confirmTx, f.confirmErr
 }
 func (f *fakePairClient) GetAllActivePairs(_ context.Context) ([]domain.PairEntry, error) {

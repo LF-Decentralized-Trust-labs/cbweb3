@@ -38,6 +38,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"    # .../scenario-b/s
 SCENARIO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"                # .../scenario-b
 REPO_ROOT="$(cd "${SCENARIO_DIR}/.." && pwd)"                 # repo root (--repo-root)
 
+# Per-entity signatures ENFORCED on the internal routes for this sample: the shared
+# INTERNAL_RELAY_AUTH_SECRET is identical in every entity, so it cannot attribute a call, and every
+# caller here signs (bank gateways, the payment proxy, the transfer-limit client and the Cacti relay).
+#
+# Safe to enforce from a clean deploy because of two properties: a gateway with this set and no pinned
+# peer REFUSES TO START rather than answer 401 to everything, and an unknown key-id triggers one
+# rate-limited registry reload before rejection — which is what makes a bank verifiable the moment it
+# finishes onboarding instead of at the next periodic sweep.
+#
+# Override with RELAY_REQUIRE_SIGNATURE=  (empty) to reproduce the pre-enforcement behaviour.
+export RELAY_REQUIRE_SIGNATURE="${RELAY_REQUIRE_SIGNATURE-true}"
+
 cd "${SCRIPT_DIR}"   # relative node.dataDir -> samples/cbweb3-data/<entity>
 
 log() { printf '\n\033[1;36m[deploy] %s\033[0m\n' "$*"; }
@@ -85,6 +97,14 @@ bash "${SCENARIO_DIR}/provisioning/scripts/start-cacti.sh"
 
 # --- hub -----------------------------------------------------------------------
 apply "Hub — found-hub hub-cbweb3" "${SCRIPT_DIR}/hub/hub-cbweb3.yaml"
+
+# The relay was started BEFORE the hub (it is a hard prerequisite of register-relay-spoke), so it
+# booted before found-hub generated its signing identity — a signer is read once, at construction.
+# Restart it now so it picks the key up; without this it forwards the bridge-out leg unsigned, which
+# the central banks reject once RELAY_REQUIRE_SIGNATURE is on.
+log "restarting the Cacti relay so it picks up its signing identity…"
+docker restart cbweb3-cacti-liquidity-relay >/dev/null 2>&1 || \
+  log "WARNING: could not restart the relay — it will forward unsigned until restarted"
 
 # --- Brazil spoke (spoke-brl) -------------------------------------------------
 apply "Brazil — found-spoke central-bank-brazil (spoke-brl)" \

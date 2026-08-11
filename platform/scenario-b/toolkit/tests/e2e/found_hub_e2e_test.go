@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build e2e
 
 // Package e2e holds the end-to-end suite for the toolkit (build tag `e2e`, so

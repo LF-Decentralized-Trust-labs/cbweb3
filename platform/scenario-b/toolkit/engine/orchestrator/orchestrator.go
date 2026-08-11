@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package orchestrator
 
 import (
@@ -11,10 +13,24 @@ type Orchestrator struct {
 	steps  []Step
 	state  *State
 	dryRun bool
+	forced map[string]bool
 }
 
 func New(mode string, steps []Step, state *State, dryRun bool) *Orchestrator {
-	return &Orchestrator{mode: mode, steps: steps, state: state, dryRun: dryRun}
+	return &Orchestrator{mode: mode, steps: steps, state: state, dryRun: dryRun, forced: map[string]bool{}}
+}
+
+// Force marks steps to run even when their Check (or persisted state) says they are
+// already satisfied. Used by --rebuild: an image tag encodes its baked build args, not
+// the source tree, so after editing code the build gate reports "satisfied" and the
+// container keeps running the previous binary. Only steps that are safe to repeat may
+// be forced — the engine assumes every Run is idempotent, and forcing removes the
+// guard that would otherwise hide a non-idempotent one.
+func (o *Orchestrator) Force(names ...string) *Orchestrator {
+	for _, n := range names {
+		o.forced[n] = true
+	}
+	return o
 }
 
 // Run executes the steps in topological order. Returns a Report always; on a
@@ -31,9 +47,12 @@ func (o *Orchestrator) Run(ctx context.Context) (Report, error) {
 		}
 		res := StepResult{Name: st.Name}
 
-		// Idempotency: prefer the live Check; fall back to persisted state.
+		// Idempotency: prefer the live Check; fall back to persisted state. A forced
+		// step bypasses both.
 		skip := false
-		if st.Check != nil {
+		if o.forced[st.Name] {
+			skip = false
+		} else if st.Check != nil {
 			ok, cerr := st.Check(ctx)
 			if cerr != nil {
 				res.Status, res.Detail = StatusFailed, cerr.Error()

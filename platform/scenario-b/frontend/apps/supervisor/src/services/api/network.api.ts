@@ -2,6 +2,8 @@
 
 import type { NetworkOverview } from "../../types";
 import { apiFetch } from "./apiClient";
+import { listActivePairIds } from "./pairs.api";
+import { getSovereignSupply } from "./token-supply.api";
 
 interface ParticipantsResponse {
   participants: Array<{ status: string }>;
@@ -12,21 +14,27 @@ interface AMMPoolStatus {
   imbalance_flag: boolean;
 }
 
-const KNOWN_PAIRS = ["W-BRL-ARS"];
-
 export const networkApi = {
   getOverview: async (): Promise<NetworkOverview> => {
-    const [participantsResult, ...poolResults] = await Promise.allSettled([
+    const [participantsResult, pairsResult, supplyResult] = await Promise.allSettled([
       apiFetch<ParticipantsResponse>("/api/v1/compliance/participants/summary"),
-      ...KNOWN_PAIRS.map((pair) =>
-        apiFetch<AMMPoolStatus>(`/api/v2/amm/pool/${pair}/status`),
-      ),
+      listActivePairIds(),
+      getSovereignSupply(),
     ]);
 
     const participants =
       participantsResult.status === "fulfilled"
         ? participantsResult.value.participants
         : [];
+
+    const pairs = pairsResult.status === "fulfilled" ? pairsResult.value : [];
+    const poolResults = await Promise.allSettled(
+      pairs.map((pair) =>
+        apiFetch<AMMPoolStatus>(
+          `/api/v2/amm/pool/${encodeURIComponent(pair)}/status`,
+        ),
+      ),
+    );
 
     let healthyPools = 0;
     let imbalancedPools = 0;
@@ -42,9 +50,9 @@ export const networkApi = {
     }
 
     return {
-      totalSupply: 0,
+      // null (not 0) when the read fails — the card renders as unavailable.
+      sovereignSupply: supplyResult.status === "fulfilled" ? supplyResult.value : null,
       activeInstitutions: participants.filter((p) => p.status === "ACTIVE").length,
-      activeAgreements: 0,
       healthyPools,
       imbalancedPools,
       lastUpdatedAt: new Date().toISOString(),

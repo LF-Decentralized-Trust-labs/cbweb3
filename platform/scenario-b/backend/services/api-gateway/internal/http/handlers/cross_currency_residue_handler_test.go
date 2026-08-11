@@ -68,9 +68,11 @@ func (s *stubResiduePositionReader) GetPosition(_ context.Context, _ string) (*s
 type stubResidueDuplicateFinder struct {
 	existing *services.BridgePositionResult
 	err      error
+	calls    int
 }
 
 func (s *stubResidueDuplicateFinder) FindResidueBySwapTxHash(_ context.Context, _ string) (*services.BridgePositionResult, error) {
+	s.calls++
 	return s.existing, s.err
 }
 
@@ -140,7 +142,7 @@ func newResidueFixture(
 		h = h.WithSwapVerification(verifier, finder)
 	}
 	app := fiber.New()
-	app.Post("/internal/amm/cross-currency-residue-return", h.HandleResidueReturn)
+	app.Post("/internal/amm/cross-currency-residue-return", asVerifiedCaller("bank-a"), h.HandleResidueReturn)
 	return &residueFixture{app: app, enqueuer: enqueuer, reader: reader}
 }
 
@@ -217,6 +219,28 @@ func TestResidue_RejectsPositionOfAnotherBank(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 	assert.Equal(t, "POSITION_OWNER_MISMATCH", body["code"])
+	assert.Equal(t, 0, f.enqueuer.calls)
+}
+
+// TestResidue_ForeignPositionLeaksNothingFromTheReplayGuard pins the check order. The replay
+// answer carries the refunding position's id and bridge_state, so consulting it before
+// ownership would tell a caller that names another bank's swap that the swap exists and has
+// already been refunded — information it has no claim to.
+func TestResidue_ForeignPositionLeaksNothingFromTheReplayGuard(t *testing.T) {
+	pos := bridgeInPositionOK()
+	pos.OwnerBankID = "bank-z"
+	finder := &stubResidueDuplicateFinder{existing: &services.BridgePositionResult{
+		PositionID: "residue-of-another-bank", BridgeState: "RELEASED",
+	}}
+	f := newResidueFixture(&stubSwapVerifier{swap: verifiedInputSwapOK()}, finder, pos)
+
+	resp, body := postResidue(t, f.app, residueBody())
+
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	assert.Equal(t, "POSITION_OWNER_MISMATCH", body["code"])
+	assert.NotContains(t, body, "position_id", "a foreign caller must learn nothing about the refunding position")
+	assert.NotContains(t, body, "bridge_state")
+	assert.Zero(t, finder.calls, "the replay lookup must not run before ownership is established")
 	assert.Equal(t, 0, f.enqueuer.calls)
 }
 
@@ -311,4 +335,29 @@ func TestResidue_RequiresBridgeInPositionID(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	assert.Equal(t, 0, f.enqueuer.calls)
+}
+
+// The residue return sends value back to the named bank's wallet. Ownership of the position was
+// already checked, but against the request's own payer_bank_id — which is only a boundary once that
+// id is known to belong to the caller.
+func TestResidue_RefusesACallerActingForAnotherBank(t *testing.T) {
+	enqueuer := &stubResidueEnqueuer{}
+	reader := &stubResiduePositionReader{pos: bridgeInPositionOK()}
+	h := handlers.NewCrossCurrencyResidueHandler(
+		enqueuer,
+		reader,
+		&stubBeneficiaryResolver{addr: testPayerWallet},
+		testSourceWToken,
+		"0xf12b5dd4ead5f743c6baa640b0216200e89b60da",
+		"spoke-brl",
+	).WithSwapVerification(&stubSwapVerifier{swap: verifiedInputSwapOK()}, nil)
+
+	app := fiber.New()
+	app.Post("/internal/amm/cross-currency-residue-return", asVerifiedCaller("bank-b"), h.HandleResidueReturn)
+
+	resp, out := postResidue(t, app, residueBody())
+
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, "RELAY_CALLER_BANK_MISMATCH", out["code"])
+	assert.Zero(t, enqueuer.calls, "no value goes back to a bank the caller is not")
 }

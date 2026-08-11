@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/relayauth"
 	"io"
+	"log"
 	"net/http"
 	"time"
 )
@@ -21,6 +23,11 @@ type RemoteTransferLimitChecker struct {
 	cbURL      string
 	authSecret string
 	httpClient *http.Client
+	// signer, when set, signs each request with this entity's own key so the CB can attribute the
+	// call to a specific bank. Without it the only credential is authSecret — which is identical in
+	// every entity, so any entity could forge these calls as any other, and check-and-deduct is the
+	// CB's authoritative daily-limit gate.
+	signer *relayauth.Signer
 }
 
 // NewRemoteTransferLimitChecker creates a RemoteTransferLimitChecker pointed at cbURL.
@@ -31,6 +38,40 @@ func NewRemoteTransferLimitChecker(cbURL, authSecret string, timeout time.Durati
 		httpClient: &http.Client{Timeout: timeout},
 	}
 }
+
+// WithSigner attaches the per-entity signer. The legacy shared secret is still sent alongside: the
+// receiving CB accepts either during the migration, so a bank that signs and one that does not both
+// keep working, and a CB that has not yet pinned this bank does not fail the payment closed.
+func (r *RemoteTransferLimitChecker) WithSigner(s *relayauth.Signer) *RemoteTransferLimitChecker {
+	r.signer = s
+	return r
+}
+
+// sign attaches the signature headers for the given path and body, when a signer is configured.
+// The signature covers method, path and body, so it must be computed for the exact path called —
+// check-and-deduct and restore are different canonical strings.
+func (r *RemoteTransferLimitChecker) sign(req *http.Request, path string, body []byte) {
+	if r.signer == nil {
+		return
+	}
+	headers, err := r.signer.HeadersFor(req.Method, path, body, time.Now())
+	if err != nil {
+		// Not fatal: the shared secret still authenticates the call during the migration. Failing
+		// here would block a payment over a signing problem the receiver can still tolerate.
+		log.Printf("[transfer-limit] could not sign %s: %v (falling back to the shared secret)", path, err)
+		return
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+}
+
+// The signature covers the PATH, so it must be the same string used to build the URL. Naming both
+// from one constant is what keeps them from drifting.
+const (
+	transferLimitCheckPath   = "/internal/v2/transfer-limits/check-and-deduct"
+	transferLimitRestorePath = "/internal/v2/transfer-limits/restore"
+)
 
 type remoteCheckRequest struct {
 	PayerBankID string `json:"payer_bank_id"`
@@ -47,7 +88,7 @@ func (r *RemoteTransferLimitChecker) CheckAndDeduct(ctx context.Context, payerBa
 	})
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		r.cbURL+"/internal/v2/transfer-limits/check-and-deduct",
+		r.cbURL+transferLimitCheckPath,
 		bytes.NewReader(body),
 	)
 	if err != nil {
@@ -55,6 +96,7 @@ func (r *RemoteTransferLimitChecker) CheckAndDeduct(ctx context.Context, payerBa
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Relay-Auth", r.authSecret)
+	r.sign(req, transferLimitCheckPath, body)
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
@@ -94,7 +136,7 @@ func (r *RemoteTransferLimitChecker) Restore(ctx context.Context, payerBankID, c
 	})
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		r.cbURL+"/internal/v2/transfer-limits/restore",
+		r.cbURL+transferLimitRestorePath,
 		bytes.NewReader(body),
 	)
 	if err != nil {
@@ -102,6 +144,7 @@ func (r *RemoteTransferLimitChecker) Restore(ctx context.Context, payerBankID, c
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Relay-Auth", r.authSecret)
+	r.sign(req, transferLimitRestorePath, body)
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {

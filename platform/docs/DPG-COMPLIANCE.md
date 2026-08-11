@@ -49,6 +49,11 @@ Status legend: ✅ done · 🟡 partial / in progress · ⬜ not started
 - ✅ CI enforcement of license headers: the `License Headers` workflow runs
   `tools/check-license-headers.sh` on every push/PR to `main` and `develop` and
   fails on any first-party Go or TypeScript file missing an SPDX header.
+- ✅ The gate is itself verified: the workflow first runs
+  `tools/check-license-headers.test.sh`, which asserts that a deliberately
+  header-less fixture produces a non-zero exit, and that an incomplete scan
+  aborts rather than reporting success. This closes a period in which the check
+  reported offending files but always exited `0`.
 
 ## 9. Do no harm by design
 - 🟡 Compliance gate (IdentityRegistry + Compliance service + Keycloak OIDC) and

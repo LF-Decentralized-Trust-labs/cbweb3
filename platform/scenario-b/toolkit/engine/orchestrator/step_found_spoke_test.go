@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package orchestrator
 
 import (
@@ -529,6 +531,9 @@ func TestFoundSpokeOrder(t *testing.T) {
 	}
 	must("consume-hub-bundle", "register-cb")
 	must("register-cb", "register-currency")
+	// The separation needs the W-token to exist and the handover to have made this CB its
+	// administrator, both of which register-currency produces.
+	must("register-currency", "separate-token-admin")
 	must("gen-genesis-spoke", "start-besu-spoke")
 	must("start-besu-spoke", "deploy-spoke-contracts")
 	must("deploy-spoke-contracts", "emit-spoke-bundle")

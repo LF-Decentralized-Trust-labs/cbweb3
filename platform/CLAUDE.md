@@ -82,6 +82,70 @@ Proto:
 - Deviations from established patterns go in the plan's Complexity Tracking with rejected alternatives.
 - Scenario `README.md` status (Fully implemented / In progress / Planned) must be accurate at merge.
 - PRs that weaken compliance or security checks need project-lead approval.
+- Every new source file carries an SPDX licence header — see below. Not optional.
+- Branch and PR reviews must verify those headers explicitly, not rely on the CI badge.
+
+## License headers (mandatory)
+
+**Every new source file created in this project must carry an SPDX licence header. This is a hard requirement, not a convention** — it is a Digital Public Goods compliance obligation (`docs/DPG-COMPLIANCE.md`) enforced in CI by the `License Headers` workflow.
+
+The identifier is always `Apache-2.0`. Place it as the **first line** of the file, followed by a blank line:
+
+```go
+// SPDX-License-Identifier: Apache-2.0
+
+package orchestrator
+```
+
+Per language:
+
+| Files | Header | Placement |
+| --- | --- | --- |
+| `.go`, `.ts`, `.tsx`, `.sol` | `// SPDX-License-Identifier: Apache-2.0` | first line (before `//go:build`, before `pragma solidity`) |
+| `.sh`, `.py`, `.yml` | `# SPDX-License-Identifier: Apache-2.0` | first line, or line 2 immediately after a shebang |
+
+Rules:
+
+- The header must appear **within the first 5 lines** — that is the window the checker inspects. A header lower down does not count.
+- In Go files with a build constraint, the SPDX line goes first, then a blank line, then `//go:build` (see `scenario-a/toolkit` for the reference form).
+- Do **not** add headers to generated or vendored output. The documented exclusions are `*.pb.go`, `*/bindings/*`, `vendor`, `node_modules`, `dist`, `build`, `.next`, `.turbo`.
+- Go and TypeScript are enforced by CI. Solidity, shell, Python and YAML are not yet gated, but the header is still required — write it when creating the file rather than backfilling later.
+
+Verify before opening a PR (both must exit `0`):
+
+```bash
+bash tools/check-license-headers.test.sh   # self-test: the gate must fail on a header-less fixture
+bash tools/check-license-headers.sh        # the actual scan
+```
+
+Run the checker with **bash**, never zsh. zsh does not fork the last stage of a pipeline, which masks the class of bug that once made this gate report success without verifying anything.
+
+### Checking it in review
+
+**Reviewing a branch or a PR includes verifying the licence headers. This check is mandatory — no branch or PR is approved without it.** A green `License Headers` badge is not sufficient evidence on its own; confirm it directly.
+
+For every review:
+
+1. List the source files the branch adds, and confirm each one carries the header:
+
+   ```bash
+   git diff --name-only --diff-filter=A origin/develop...HEAD \
+     | grep -E '\.(go|ts|tsx|sol|sh|py)$' \
+     | xargs -r -I{} sh -c 'head -5 "{}" | grep -q SPDX-License-Identifier || echo "MISSING: {}"'
+   ```
+
+2. Run the gate locally on the branch — both commands must exit `0`:
+
+   ```bash
+   bash tools/check-license-headers.test.sh
+   bash tools/check-license-headers.sh
+   ```
+
+3. Cover what CI does not gate. Solidity, shell, Python and YAML additions are outside the scanned set, so they need reading by eye — the workflow going green says nothing about them.
+
+4. Treat a missing header as a change request, not a nit. Headers are added in the branch under review; do not defer them to a follow-up PR.
+
+Also flag, in review, any change that weakens the gate itself: a counter moved back inside a pipe, a new exclusion path, `|| true` on the check step, or the self-test removed from the workflow. Those need explicit justification in the PR description.
 
 ## Gotchas
 

@@ -6,5 +6,7 @@ export * from "./governance.api";
 export * from "./stability.api";
 export * from "./audit.api";
 export * from "./network.api";
+export * from "./pairs.api";
+export * from "./token-supply.api";
 export * from "./zk-pointer.api";
 export * from "./oversight.api";

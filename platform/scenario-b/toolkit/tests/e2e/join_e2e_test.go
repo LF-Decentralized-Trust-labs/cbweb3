@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build e2e
 
 // join E2E (build tag `e2e`): a commercial bank joins a founded spoke with

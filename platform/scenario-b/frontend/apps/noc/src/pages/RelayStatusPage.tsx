@@ -36,6 +36,16 @@ export function RelayStatusPage() {
     void fetchSpokes();
   }, [fetchSpokes]);
 
+  // Fetch as soon as a spoke is known. The polling tick alone is not enough: the spoke
+  // list arrives after mount, so the first tick finds no selection and the page shows
+  // "no interoperability containers" for a whole polling interval — reading as "this
+  // spoke has no relay" on the page an operator opens when a settlement looks stuck.
+  useEffect(() => {
+    if (selectedSpokeId) {
+      void fetchComponents(selectedSpokeId);
+    }
+  }, [selectedSpokeId, fetchComponents]);
+
   usePolling(() => {
     if (selectedSpokeId) {
       void fetchComponents(selectedSpokeId);
