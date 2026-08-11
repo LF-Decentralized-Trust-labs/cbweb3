@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { BackToLauncherButton, Badge, Button, PlatformLogo, goToLauncher } from "@cbweb3/ui";
+import { BackToLauncherButton, Badge, Button, PlatformLogo } from "@cbweb3/ui";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { useAlertStore, useUiStore } from "../../stores";
@@ -11,9 +11,13 @@ export function Header() {
   const criticalCount = useAlertStore((state) => state.alerts.filter((a) => a.severity === "CRITICAL").length);
   const { fallbackPollingSeconds } = useUiStore();
 
+  // Sign out lands on the portal's own login screen. Redirecting to the launcher instead
+  // strands the operator on a browser error whenever the launcher is not deployed on this
+  // host (the URL is baked at build time and never probed) — "Back to launcher" stays as
+  // the explicit way to leave the portal.
   const onLogout = async () => {
     await logout();
-    if (!goToLauncher()) navigate("/login", { replace: true });
+    navigate("/login", { replace: true });
   };
 
   return (

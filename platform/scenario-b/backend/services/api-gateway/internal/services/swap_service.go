@@ -71,6 +71,12 @@ type SwapResult struct {
 	AmountIn    string    `json:"amount_in"`
 	State       string    `json:"state"`
 	ConfirmedAt time.Time `json:"confirmed_at"`
+	// HubSenderAddress is the Hub address that executed the trade and therefore holds the
+	// swap output. Set only when the swap was delegated to the issuing CB (sovereign Step 2):
+	// the output lands on that CB's address, not on this gateway's, so Step 3 must tell the
+	// beneficiary CB where to burn from. Empty for a locally executed swap, where the caller
+	// already knows its own signer.
+	HubSenderAddress string `json:"hub_sender_address,omitempty"`
 }
 
 // ZKValidationError wraps a ZK-Pointer validation failure (FR-058).

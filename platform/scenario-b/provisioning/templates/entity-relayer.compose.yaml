@@ -34,7 +34,18 @@ services:
       # RelayerWorker mints/burns on the hub cross-VM; single-host fallback keeps
       # host.docker.internal:<published-port>. Wrong host here → "Wrong chainId".
       HUB_BESU_RPC_URL: "${HUB_BESU_RPC_URL:-http://host.docker.internal:${HUB_RPC_PORT}}"
-      SIGNER_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
+      # Hub signing key — the RELAYER's own hub identity, distinct from the api-gateway's.
+      # Both belong to this central bank, but go-ethereum tracks nonces per process: with one
+      # shared key the two containers each keep their own counter and concurrent submissions
+      # claim the same nonce, replacing one another. A replaced transaction is worse than a
+      # failed one here, because the burn/mint hash is persisted as an intent on broadcast, so
+      # the position then waits forever on a hash that will never be mined.
+      #
+      # This address needs only CENTRAL_BANK_ROLE on the CB's W-token to mint and burn; the
+      # gateway grants it at boot, which it can do because the currency handover made the CB
+      # the token's administrator. It is deliberately NOT the address IdentityRegistry maps as
+      # the token's central bank — that one signs the corridor's governance acts.
+      SIGNER_PRIVATE_KEY: "${HUB_RELAYER_PRIVATE_KEY:?}"
       HUB_CHAIN_ID: "${HUB_CHAIN_ID:-1337}"
       SPOKE_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
       # Spoke token clients — the deposit/escrow/redeem flow. On deposit APPROVAL the

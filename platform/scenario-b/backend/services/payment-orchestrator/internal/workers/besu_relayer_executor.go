@@ -95,6 +95,11 @@ type BesuRelayerExecutor struct {
 	spokeMintFn    func(ctx context.Context, to, nativeAsset string, amount *big.Int, recordIntent func(txHash string)) (string, error)
 	spokeTxMinedFn func(ctx context.Context, txHash string) (mined bool, success bool, err error)
 	spokeReleaseFn func(ctx context.Context, txID [32]byte) error
+	// spokeFundFn mints the native token that funds a sovereign lock, recording the intent on
+	// broadcast; spokeApproveFn lets the SpokeBridge pull it. Separate seams so the funding
+	// decision — which used to be a balance read — is unit-testable.
+	spokeFundFn    func(ctx context.Context, nativeAsset string, amount *big.Int, recordIntent func(txHash string)) (string, error)
+	spokeApproveFn func(ctx context.Context, nativeAsset string, amount *big.Int) error
 }
 
 // NewBesuRelayerExecutor dials the Hub (and optionally Spoke) chain and returns a ready executor.
@@ -109,7 +114,7 @@ func NewBesuRelayerExecutor(ctx context.Context, db *gorm.DB, cfg BesuRelayerCon
 		return nil, fmt.Errorf("dial hub RPC %s: %w", cfg.HubRPCURL, err)
 	}
 
-	hubSigner, err := evm.NewSigner(cfg.HubSignerKey, big.NewInt(cfg.HubChainID))
+	hubSigner, err := evm.SharedSigner(cfg.HubSignerKey, big.NewInt(cfg.HubChainID))
 	if err != nil {
 		hubEC.Close()
 		return nil, fmt.Errorf("hub signer: %w", err)
@@ -142,7 +147,11 @@ func NewBesuRelayerExecutor(ctx context.Context, db *gorm.DB, cfg BesuRelayerCon
 		if spokeKey == "" {
 			spokeKey = cfg.HubSignerKey
 		}
-		spokeSigner, signerErr := evm.NewSigner(spokeKey, big.NewInt(cfg.SpokeChainID))
+		// SharedSigner, not NewSigner: SPOKE_SIGNER_KEY defaults to BESU_OPERATOR_KEY, so this is
+		// normally the very account the tCeBM and fCeBM clients sign with in this same process. A
+		// relayer leg overlapping a deposit or escrow approval is routine, and with a private
+		// counter each the two would eventually claim one nonce and drop each other's transaction.
+		spokeSigner, signerErr := evm.SharedSigner(spokeKey, big.NewInt(cfg.SpokeChainID))
 		if signerErr != nil {
 			hubEC.Close()
 			spokeEC.Close()
@@ -163,6 +172,8 @@ func NewBesuRelayerExecutor(ctx context.Context, db *gorm.DB, cfg BesuRelayerCon
 		ex.spokeMintFn = ex.spokeMint
 		ex.spokeTxMinedFn = ex.spokeTxMined
 		ex.spokeReleaseFn = ex.spokeRelease
+		ex.spokeFundFn = ex.spokeFundMint
+		ex.spokeApproveFn = ex.spokeApproveBridge
 
 		log.Printf("[BesuRelayerExecutor] spoke bridge configured: rpc=%s contract=%s", cfg.SpokeRPCURL, cfg.SpokeBridgeAddr)
 	} else {
@@ -206,9 +217,9 @@ func (e *BesuRelayerExecutor) SubmitLockEvent(ctx context.Context, _ /*idempoten
 		log.Printf("[BesuRelayerExecutor] spoke burn-from ok — position=%s bank=%s token=%s amount=%s",
 			positionID, bankWallet, pos.NativeAsset, amount.String())
 	} else if e.spokeEC != nil && pos.NativeAsset != "" && !e.cfg.SkipSpokeLock {
-		// ── Sovereign CB self-service: auto-fund signer then lock via SpokeBridge ────────
-		if fundErr := e.ensureSpokeFunds(ctx, pos.NativeAsset, amount); fundErr != nil {
-			return fmt.Errorf("spoke auto-fund (position=%s): %w", positionID, fundErr)
+		// ── Sovereign CB self-service: fund THIS position then lock via SpokeBridge ──────
+		if fundErr := e.ensureSpokeFunds(ctx, pos, amount); fundErr != nil {
+			return fmt.Errorf("spoke fund (position=%s): %w", positionID, fundErr)
 		}
 		txID := deriveSpokeTxID(positionID)
 		if lockErr := e.spokeLock(ctx, pos.NativeAsset, amount, txID); lockErr != nil {
@@ -538,47 +549,112 @@ func (e *BesuRelayerExecutor) spokeTxMined(ctx context.Context, txHash string) (
 	return evm.TxMined(ctx, e.spokeEC, txHash)
 }
 
-// ensureSpokeFunds guarantees the spoke signer holds at least `amount` of the native
-// tCeBM token and has approved the SpokeBridge to spend it, so SpokeBridge.lock's
-// safeTransferFrom(signer → bridge) cannot revert for insufficient balance/allowance.
+// ensureSpokeFunds makes sure THIS position's native tokens exist on the spoke signer and are
+// approved to the SpokeBridge, so SpokeBridge.lock's safeTransferFrom cannot revert.
 //
-// Both steps are idempotent: minting is skipped when the signer balance already covers
-// the amount, and approval is set to the exact amount (SpokeBridge.lock pulls it in full).
-// The signer must hold CENTRAL_BANK_ROLE on the native token (true for the CB hub/spoke
-// signer in Scenario B).
-func (e *BesuRelayerExecutor) ensureSpokeFunds(ctx context.Context, nativeAsset string, amount *big.Int) error {
-	tokenAddr := common.HexToAddress(nativeAsset)
-	if tokenAddr == (common.Address{}) {
-		return fmt.Errorf("invalid native_asset %q (expected ERC-20 address)", nativeAsset)
+// The funding decision is per position and recorded, never inferred from the signer's balance.
+// The previous version minted only when `balanceOf(signer) < amount`, which meant a position
+// whose predecessor had left tokens on that shared address locked those instead of minting its
+// own: the CB's tCeBM supply stopped corresponding to the positions backing it, and a stranded
+// balance was silently consumed by the next lock.
+//
+// Recorded like the Hub burn (R2-H-12): the mint hash is persisted the moment it is broadcast,
+// so a crash or a WaitMined timeout reconciles by hash instead of minting a second time. A
+// recorded-but-unmined mint fails closed — the lock that follows would revert for insufficient
+// balance anyway, and saying so beats minting again to cover it.
+//
+// The signer must hold CENTRAL_BANK_ROLE on the native token (true for the CB's spoke signer).
+func (e *BesuRelayerExecutor) ensureSpokeFunds(ctx context.Context, pos *podmain.BridgedAssetPosition, amount *big.Int) error {
+	if common.HexToAddress(pos.NativeAsset) == (common.Address{}) {
+		return fmt.Errorf("invalid native_asset %q (expected ERC-20 address)", pos.NativeAsset)
 	}
-	signer := e.spokeSigner
 
-	// Mint up to `amount` if the signer is short on balance.
-	var bal big.Int
-	if balErr := evm.Call(ctx, e.spokeEC, tokenAddr, e.hubABI, "balanceOf",
-		[]interface{}{signer.Address()}, &bal,
-	); balErr != nil {
-		return fmt.Errorf("read native balance (token=%s): %w", nativeAsset, balErr)
-	}
-	if bal.Cmp(amount) < 0 {
-		if _, mintErr := evm.SubmitTx(ctx, e.spokeEC, signer, tokenAddr, e.hubABI,
-			"mint", signer.Address(), amount,
-		); mintErr != nil {
-			return fmt.Errorf("native mint (token=%s to=%s amount=%s): %w",
-				nativeAsset, signer.Address().Hex(), amount.String(), mintErr)
+	if pos.SpokeFundTxHash == "" {
+		txHash, mintErr := e.spokeFundFn(ctx, pos.NativeAsset, amount, func(h string) {
+			e.recordSpokeFundIntent(ctx, pos, h)
+		})
+		if mintErr != nil {
+			return fmt.Errorf("native mint (token=%s amount=%s): %w", pos.NativeAsset, amount.String(), mintErr)
 		}
-		log.Printf("[BesuRelayerExecutor] auto-mint ok — token=%s to=%s amount=%s",
-			nativeAsset, signer.Address().Hex(), amount.String())
+		if perr := e.markSpokeFundConfirmed(ctx, pos, txHash); perr != nil {
+			return fmt.Errorf("persist native mint confirmation (position=%s tx=%s): %w", pos.PositionID, txHash, perr)
+		}
+		log.Printf("[BesuRelayerExecutor] position funded — position=%s token=%s amount=%s tx=%s",
+			pos.PositionID, pos.NativeAsset, amount.String(), txHash)
+	} else {
+		mined, success, rerr := e.spokeTxMinedFn(ctx, pos.SpokeFundTxHash)
+		if rerr != nil {
+			return fmt.Errorf("reconcile native mint tx %s (position=%s): %w", pos.SpokeFundTxHash, pos.PositionID, rerr)
+		}
+		if !mined {
+			return fmt.Errorf("native mint tx %s for position %s not yet mined — awaiting confirmation before the lock",
+				pos.SpokeFundTxHash, pos.PositionID)
+		}
+		if !success {
+			return fmt.Errorf("native mint tx %s for position %s reverted on-chain — reconciliation required (no re-mint)",
+				pos.SpokeFundTxHash, pos.PositionID)
+		}
+		log.Printf("[BesuRelayerExecutor] idempotency: position %s already funded (tx=%s) — skipping mint",
+			pos.PositionID, pos.SpokeFundTxHash)
 	}
 
-	// Approve the SpokeBridge to pull `amount` for the upcoming lock.
-	bridgeAddr := common.HexToAddress(e.cfg.SpokeBridgeAddr)
-	if _, approveErr := evm.SubmitTx(ctx, e.spokeEC, signer, tokenAddr, e.hubABI,
-		"approve", bridgeAddr, amount,
-	); approveErr != nil {
-		return fmt.Errorf("native approve (token=%s spender=%s amount=%s): %w",
-			nativeAsset, bridgeAddr.Hex(), amount.String(), approveErr)
+	// Approval is set to the exact amount the upcoming lock pulls, and is safe to repeat.
+	return e.spokeApproveFn(ctx, pos.NativeAsset, amount)
+}
+
+// spokeFundMint mints `amount` of the native token to the spoke signer and returns the confirmed
+// transaction hash. recordIntent is invoked with the hash on broadcast, before the receipt wait.
+func (e *BesuRelayerExecutor) spokeFundMint(ctx context.Context, nativeAsset string, amount *big.Int, recordIntent func(txHash string)) (string, error) {
+	signer := e.spokeSigner
+	if signer == nil {
+		signer = e.hubSigner
 	}
+	return evm.SubmitTxAwaitBroadcast(ctx, e.spokeEC, signer, common.HexToAddress(nativeAsset), e.hubABI,
+		"mint", recordIntent, signer.Address(), amount)
+}
+
+// spokeApproveBridge approves the SpokeBridge to pull exactly `amount` of the native token.
+func (e *BesuRelayerExecutor) spokeApproveBridge(ctx context.Context, nativeAsset string, amount *big.Int) error {
+	signer := e.spokeSigner
+	if signer == nil {
+		signer = e.hubSigner
+	}
+	bridgeAddr := common.HexToAddress(e.cfg.SpokeBridgeAddr)
+	if _, err := evm.SubmitTx(ctx, e.spokeEC, signer, common.HexToAddress(nativeAsset), e.hubABI,
+		"approve", bridgeAddr, amount,
+	); err != nil {
+		return fmt.Errorf("native approve (token=%s spender=%s amount=%s): %w",
+			nativeAsset, bridgeAddr.Hex(), amount.String(), err)
+	}
+	return nil
+}
+
+// recordSpokeFundIntent persists the funding mint hash on broadcast, conditional on the field
+// still being empty so it never clobbers a prior record, and best-effort: the transaction is
+// already in flight and markSpokeFundConfirmed is the authoritative write.
+func (e *BesuRelayerExecutor) recordSpokeFundIntent(ctx context.Context, pos *podmain.BridgedAssetPosition, txHash string) {
+	res := e.db.WithContext(ctx).Model(&podmain.BridgedAssetPosition{}).
+		Where("position_id = ? AND spoke_fund_tx_hash = ''", pos.PositionID).
+		Update("spoke_fund_tx_hash", txHash)
+	if res.Error != nil {
+		log.Printf("[BesuRelayerExecutor] WARN record spoke fund intent failed — position=%s tx=%s err=%v",
+			pos.PositionID, txHash, res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		pos.SpokeFundTxHash = txHash
+	}
+}
+
+// markSpokeFundConfirmed persists the confirmed funding mint. It is the idempotency key
+// ensureSpokeFunds consults on retries.
+func (e *BesuRelayerExecutor) markSpokeFundConfirmed(ctx context.Context, pos *podmain.BridgedAssetPosition, txHash string) error {
+	if err := e.db.WithContext(ctx).Model(&podmain.BridgedAssetPosition{}).
+		Where("position_id = ?", pos.PositionID).
+		Update("spoke_fund_tx_hash", txHash).Error; err != nil {
+		return err
+	}
+	pos.SpokeFundTxHash = txHash
 	return nil
 }
 

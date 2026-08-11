@@ -5,7 +5,6 @@ package besu
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -13,10 +12,10 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 )
@@ -41,10 +40,11 @@ type FiatTokenClient struct {
 	ethClient    *ethclient.Client
 	tokenAddress common.Address
 	tokenABI     abi.ABI
-	privateKey   *ecdsa.PrivateKey
-	fromAddress  common.Address
-	chainID      *big.Int
-	logger       *slog.Logger
+	// signer is the shared, nonce-serialized signer. It replaces a per-client transactor: this
+	// client and its siblings share the operator key, and each fetching PendingNonceAt on its own
+	// let two concurrent submissions claim the same nonce, with one silently replaced.
+	signer *evm.Signer
+	logger *slog.Logger
 }
 
 // NewFiatTokenClient creates a new Besu FiatCentralBankMoney client.
@@ -59,20 +59,16 @@ func NewFiatTokenClient(cfg FiatTokenClientConfig, logger *slog.Logger) (*FiatTo
 		return nil, fmt.Errorf("parse fCeBM ABI: %w", err)
 	}
 
-	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(cfg.PrivateKeyHex, "0x"))
+	signer, err := evm.SharedSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
 	if err != nil {
-		return nil, fmt.Errorf("parse private key: %w", err)
+		return nil, fmt.Errorf("build signer: %w", err)
 	}
-
-	fromAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
 
 	return &FiatTokenClient{
 		ethClient:    ethClient,
 		tokenAddress: common.HexToAddress(cfg.FiatTokenAddress),
 		tokenABI:     parsed,
-		privateKey:   privateKey,
-		fromAddress:  fromAddress,
-		chainID:      big.NewInt(cfg.ChainID),
+		signer:       signer,
 		logger:       logger,
 	}, nil
 }
@@ -83,7 +79,7 @@ func (c *FiatTokenClient) Decimals(ctx context.Context) (uint8, error) {
 	if err != nil {
 		return 0, fmt.Errorf("pack decimals: %w", err)
 	}
-	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{From: c.fromAddress, To: &c.tokenAddress, Data: data}, nil)
+	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{From: c.signer.Address(), To: &c.tokenAddress, Data: data}, nil)
 	if err != nil {
 		return 0, fmt.Errorf("call decimals: %w", err)
 	}
@@ -108,7 +104,7 @@ func (c *FiatTokenClient) Symbol(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("pack symbol: %w", err)
 	}
-	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{From: c.fromAddress, To: &c.tokenAddress, Data: data}, nil)
+	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{From: c.signer.Address(), To: &c.tokenAddress, Data: data}, nil)
 	if err != nil {
 		return "", fmt.Errorf("call symbol: %w", err)
 	}
@@ -161,7 +157,7 @@ func (c *FiatTokenClient) BalanceOf(ctx context.Context, address string) (string
 		return "", fmt.Errorf("pack balanceOf: %w", err)
 	}
 
-	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{From: c.fromAddress, To: &c.tokenAddress, Data: data}, nil)
+	result, err := c.ethClient.CallContract(ctx, ethereum.CallMsg{From: c.signer.Address(), To: &c.tokenAddress, Data: data}, nil)
 	if err != nil {
 		return "", fmt.Errorf("call balanceOf: %w", err)
 	}
@@ -182,51 +178,19 @@ func (c *FiatTokenClient) BalanceOf(ctx context.Context, address string) (string
 
 // GetFiatBalance returns the fCeBM balance for the configured operator address.
 func (c *FiatTokenClient) GetFiatBalance(ctx context.Context) (string, error) {
-	return c.BalanceOf(ctx, c.fromAddress.Hex())
+	return c.BalanceOf(ctx, c.signer.Address().Hex())
 }
 
 // sendFiatTx signs and sends a transaction to the fCeBM contract, waiting for the receipt.
 func (c *FiatTokenClient) sendFiatTx(ctx context.Context, data []byte, method string) (string, error) {
-	nonce, err := c.ethClient.PendingNonceAt(ctx, c.fromAddress)
+	// Submitted through the shared signer so every fCeBM transaction shares ONE nonce counter with
+	// the rest of this process. This client used to build its own transactor and read
+	// PendingNonceAt itself; with siblings on the same operator key, two concurrent submissions
+	// could claim the same nonce and one would be silently replaced.
+	_, txHash, err := evm.SubmitRawTxReceipt(ctx, c.ethClient, c.signer, c.tokenAddress, data, method)
 	if err != nil {
-		return "", fmt.Errorf("get nonce: %w", err)
+		return "", err
 	}
-
-	gasPrice, err := c.ethClient.SuggestGasPrice(ctx)
-	if err != nil {
-		return "", fmt.Errorf("suggest gas price: %w", err)
-	}
-
-	auth, err := bind.NewKeyedTransactorWithChainID(c.privateKey, c.chainID)
-	if err != nil {
-		return "", fmt.Errorf("create transactor: %w", err)
-	}
-	auth.Nonce = new(big.Int).SetUint64(nonce)
-	auth.GasPrice = gasPrice
-	auth.GasLimit = 500_000
-	auth.Context = ctx
-
-	boundContract := bind.NewBoundContract(c.tokenAddress, c.tokenABI, c.ethClient, c.ethClient, c.ethClient)
-
-	signedTx, err := boundContract.RawTransact(auth, data)
-	if err != nil {
-		return "", fmt.Errorf("send %s tx: %w", method, err)
-	}
-
-	receipt, err := bind.WaitMined(ctx, c.ethClient, signedTx)
-	if err != nil {
-		return "", fmt.Errorf("wait %s receipt: %w", method, err)
-	}
-
-	if receipt.Status == 0 {
-		return "", fmt.Errorf("%s transaction reverted: %s", method, signedTx.Hash().Hex())
-	}
-
-	c.logger.Info("fCeBM on-chain tx confirmed",
-		"method", method,
-		"tx_hash", signedTx.Hash().Hex(),
-		"block", receipt.BlockNumber.Uint64(),
-	)
-
-	return signedTx.Hash().Hex(), nil
+	c.logger.Info("fCeBM on-chain tx confirmed", "method", method, "tx_hash", txHash)
+	return txHash, nil
 }

@@ -15,7 +15,9 @@ export function StaleDataBanner({ stale }: StaleDataBannerProps) {
     <div className="mb-3 rounded-md border border-warning/50 bg-warning/10 px-3 py-2 text-sm">
       <div className="flex items-center gap-2">
         <Badge variant="warning">STALE</Badge>
-        <span className="text-muted-foreground">Telemetry stream is stale. Showing fallback polling data.</span>
+        <span className="text-muted-foreground">
+          The last backend refresh failed. Showing the most recent data received.
+        </span>
       </div>
     </div>
   );

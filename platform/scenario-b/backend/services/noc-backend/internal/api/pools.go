@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
 	"time"
@@ -61,23 +62,101 @@ type NocPoolStatus struct {
 	UpdatedAt    string  `json:"updatedAt"`
 }
 
-// GetPools fetches pool stability data for all configured AMM pairs.
-func (h *PoolsHandler) GetPools(c *fiber.Ctx) error {
-	results := make([]NocPoolStatus, 0, len(h.cfg.AMMPairs))
+// PoolFetchFailure reports a pair the gateway could not be queried for, so the portal
+// can tell "this deployment has no pools" apart from "the gateway is unreachable".
+type PoolFetchFailure struct {
+	Pair   string `json:"pair"`
+	Reason string `json:"reason"`
+}
 
-	for _, pair := range h.cfg.AMMPairs {
+// discoveryPseudoPair labels a failure that happened while listing pairs, before any
+// individual pair could be queried.
+const discoveryPseudoPair = "(pair discovery)"
+
+// ammPairsResponse is the JSON returned by the api-gateway GET /api/v2/amm/pairs.
+type ammPairsResponse struct {
+	Pairs []struct {
+		PairID string `json:"pair_id"`
+		Status string `json:"status"`
+	} `json:"pairs"`
+}
+
+// GetPools fetches pool stability data for the deployment's AMM pairs. Pairs that fail
+// are logged and reported alongside the results rather than dropped in silence:
+// swallowing them makes a misconfigured gateway look like an empty AMM.
+func (h *PoolsHandler) GetPools(c *fiber.Ctx) error {
+	pairs, err := h.resolvePairs()
+	if err != nil {
+		log.Printf("pools: listing pairs from %s: %v", h.cfg.AMMGatewayURL, err)
+		return c.JSON(fiber.Map{
+			"data":     []NocPoolStatus{},
+			"failures": []PoolFetchFailure{{Pair: discoveryPseudoPair, Reason: err.Error()}},
+		})
+	}
+
+	results := make([]NocPoolStatus, 0, len(pairs))
+	failures := make([]PoolFetchFailure, 0)
+
+	for _, pair := range pairs {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		pool, err := h.fetchPoolStatus(ctx, pair)
 		cancel()
 		if err != nil {
-			// Log and skip; partial results are better than total failure.
-			_ = fmt.Errorf("pools: fetch %s: %w", pair, err)
+			// Partial results are better than total failure, but the operator and the
+			// logs must both learn that this pair was not read.
+			log.Printf("pools: fetch %s from %s: %v", pair, h.cfg.AMMGatewayURL, err)
+			failures = append(failures, PoolFetchFailure{Pair: pair, Reason: err.Error()})
 			continue
 		}
 		results = append(results, pool)
 	}
 
-	return c.JSON(fiber.Map{"data": results})
+	return c.JSON(fiber.Map{"data": results, "failures": failures})
+}
+
+// resolvePairs returns the pairs to report on. AMM_PAIRS pins them explicitly (useful
+// to narrow a busy gateway); with it unset the pairs are discovered from the gateway,
+// so a corridor opened at runtime by the central banks shows up without reconfiguring
+// and restarting the NOC.
+func (h *PoolsHandler) resolvePairs() ([]string, error) {
+	if len(h.cfg.AMMPairs) > 0 {
+		return h.cfg.AMMPairs, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("%s/api/v2/amm/pairs", h.cfg.AMMGatewayURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("gateway returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var listed ammPairsResponse
+	if err := json.Unmarshal(body, &listed); err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+
+	pairs := make([]string, 0, len(listed.Pairs))
+	for _, p := range listed.Pairs {
+		if p.PairID != "" {
+			pairs = append(pairs, p.PairID)
+		}
+	}
+	return pairs, nil
 }
 
 func (h *PoolsHandler) fetchPoolStatus(ctx context.Context, pair string) (NocPoolStatus, error) {

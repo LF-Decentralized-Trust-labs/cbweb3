@@ -41,6 +41,13 @@ Secrets are never expressible in a manifest: key/cert material is referenced via
 mode stands up an observability control plane rather than an on-chain node, so
 `node`/`keyProvider`/`certSource`/`relay` are not required for it.
 
+`keyProvider` accepts **only `kms://local-emulator[?seed=…]`** today, and a manifest
+naming any other provider is **rejected**. Production key custody is not implemented
+(`keyprovider`'s production path answers `ErrNotImplemented` to every operation), so
+accepting e.g. `kms://aws-prod` would declare production custody while the deployment
+ran on keys derived from a public salt. The refusal exists to make that impossible to
+believe by accident; see `scenario-b/docs/design/key-custody-plan.md`.
+
 ## Sovereign currency and token metadata
 
 Each spoke declares its own currency in the manifest; nothing about a currency is
@@ -106,6 +113,46 @@ shows the CB node plus every bank node under one spoke.
 > `NOC_SKIP_AUTH=true`, whose admin API accepts any bearer. Production NOC
 > backends (real Keycloak realm + out-of-band agent keys) are out of scope here.
 > The portal's Keycloak login is likewise a follow-up.
+
+### NOC configuration worth knowing
+
+| Field | Effect |
+|---|---|
+| `spec.noc.keycloakURL` | Realm the portal password-grants against (baked as `VITE_KEYCLOAK_URL`). |
+| `spec.noc.launcherURL` | "Back to launcher" target (baked as `VITE_LAUNCHER_URL`). |
+| `spec.noc.ammGatewayURL` | api-gateway the **backend** reads AMM pool status from, for Pool Stability. |
+| `spec.noc.backendURL` | Where this entity's agent pushes (default `host.docker.internal:8090`). |
+| `spec.relay.containerName` | Relay container on this host, so the agent can collect its **logs**. |
+
+Two of these are easy to get wrong:
+
+- **`ammGatewayURL` is resolved from inside the NOC container.** The NOC stack owns
+  its own docker network, so another entity's compose service name does not resolve
+  there — use the host and the gateway's published port
+  (`http://host.docker.internal:<rpcPort + 8000>`). The backend then *discovers* the
+  active pairs from that gateway, so no pair list has to be configured; `AMM_PAIRS`
+  remains available as an env-only pin. With the field unset, Pool Stability stays
+  empty and the page reports that the gateway could not be read.
+- **`relay.containerName` is what makes relay logs work.** Component log collection
+  is done by the agent over the docker socket, so a component registered without a
+  container name always reports "No logs available." in the portal. The relay itself
+  is never touched — the name is only read.
+
+### Redeploying after a code change (`--rebuild`)
+
+Image tags encode the **baked build args**, not the source tree. So after editing a
+service or portal, a plain `apply` finds the tag already present, reports every step
+as `done`/`skipped`, and leaves the previous binary running. Use:
+
+```bash
+go run ./cmd/cbweb3b apply -f <manifest.yaml> --repo-root <repo> --rebuild
+```
+
+`--rebuild` forces this entity's image builds *and* the steps that bring its
+containers up (compose then recreates them on the new image id), including the
+readiness gate that follows — a recreated backend is not ready yet, and the steps
+after it would otherwise race it. It does not touch chain state, contracts, PKI or
+genesis.
 
 ## Usage
 

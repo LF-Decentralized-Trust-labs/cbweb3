@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package addrs
 
 import (
@@ -67,4 +69,23 @@ func HasAddr(envPath, key, value string) bool {
 		}
 	}
 	return false
+}
+
+// ReadAddr returns the value of key in an .env file, or "" when the file or the key is absent.
+// The runtime-discovered contract addresses are written by earlier steps (AppendAddr) and read
+// back by later ones, so a step that needs an address does not have to be handed it.
+func ReadAddr(envPath, key string) string {
+	b, err := os.ReadFile(envPath)
+	if err != nil {
+		return ""
+	}
+	prefix := key + "="
+	sc := bufio.NewScanner(strings.NewReader(string(b)))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	return ""
 }

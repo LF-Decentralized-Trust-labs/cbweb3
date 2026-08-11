@@ -19,7 +19,8 @@ import {
 } from "@cbweb3/ui";
 import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
-import { paymentApi } from "../services/api";
+import { hubReconciliationApi, paymentApi } from "../services/api";
+import type { HubReconciliationReport } from "../services/api";
 import { useAuthStore, usePaymentStore } from "../stores";
 import type { BalanceResponse } from "../types";
 import {
@@ -55,6 +56,19 @@ export function DashboardPage() {
   const user = useAuthStore((state) => state.user);
 
   const [balance, setBalance] = useState<BalanceResponse | null>(null);
+  // Hub obligation: what this CB holds for its banks and what part of it its records cannot
+  // attribute. Optional — a gateway without Hub access does not serve it, and the card then
+  // stays hidden rather than showing a zero nobody computed.
+  const [reconciliation, setReconciliation] = useState<HubReconciliationReport | null>(null);
+
+  useEffect(() => {
+    hubReconciliationApi
+      .get()
+      .then(setReconciliation)
+      .catch(() => {
+        /* not an issuing CB, or no Hub access — the card is simply not shown */
+      });
+  }, []);
 
   useEffect(() => {
     void fetchAll();
@@ -110,6 +124,64 @@ export function DashboardPage() {
           {user?.authorizedIssuer ? <Badge variant="success">Authorised issuer</Badge> : null}
         </CardHeader>
       </Card>
+
+      {/* Hub obligation — one number whose expected value is zero. The banks hold no W-token; this
+          balance is what this CB owes them while payments are in flight, so anything it cannot
+          attribute to a payment is a reportable condition. */}
+      {reconciliation ? (
+        <Card>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-2">
+            <div>
+              <CardDescription>
+                {/* The two non-zero cases are not the same finding: an excess is value the records
+                    cannot attribute, a shortfall is value that should be there and is not. */}
+                Hub obligation ·{" "}
+                {reconciliation.balanced
+                  ? "unattributed balance"
+                  : reconciliation.unexplained.startsWith("-")
+                    ? "SHORTFALL against records"
+                    : "unattributed balance"}
+              </CardDescription>
+              <CardTitle className={reconciliation.balanced ? undefined : "text-destructive"}>
+                {reconciliation.balanced ? "Balanced" : formatCeBM(reconciliation.unexplained, decimals, symbol)}
+              </CardTitle>
+            </div>
+            <Badge variant={reconciliation.balanced ? "success" : "destructive"}>
+              {reconciliation.balanced ? "Reconciled" : "Needs reconciliation"}
+            </Badge>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            <div className="grid gap-1 sm:grid-cols-3">
+              <span>On-chain: {formatCeBM(reconciliation.on_chain_balance, decimals, symbol)}</span>
+              <span>In flight: {formatCeBM(reconciliation.expected_in_flight, decimals, symbol)}</span>
+              {/* Context, not a deduction: a stuck residue is usually still counted inside its
+                  parent's in-flight amount, so it is listed rather than netted off. */}
+              <span>Already flagged (not deducted): {formatCeBM(reconciliation.stranded_total, decimals, symbol)}</span>
+            </div>
+            {reconciliation.per_bank.length > 0 ? (
+              <div className="mt-2">
+                Owed per bank:{" "}
+                {reconciliation.per_bank
+                  .map((b) => `${b.owner_bank_id} ${formatCeBM(b.amount, decimals, symbol)} (${b.positions})`)
+                  .join(" · ")}
+              </div>
+            ) : null}
+            {/* Naming the flagged positions is what makes the figure actionable: OUT is value still
+                on this address whose return was given up on, IN is value that never arrived. */}
+            {reconciliation.stranded && reconciliation.stranded.length > 0 ? (
+              <div className="mt-2">
+                Flagged positions:{" "}
+                {reconciliation.stranded
+                  .map(
+                    (s) =>
+                      `${s.position_id} ${s.leg}/${s.direction} ${formatCeBM(s.amount, decimals, symbol)} (${s.bridge_state})`,
+                  )
+                  .join(" · ")}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* KPI row */}
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

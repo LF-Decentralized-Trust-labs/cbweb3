@@ -150,6 +150,12 @@ type NOC struct {
 	// LauncherURL is the launcher the NOC portal's "back to launcher" affordance
 	// returns to (VITE_LAUNCHER_URL). Empty → the affordance hides.
 	LauncherURL string `yaml:"launcherURL,omitempty" json:"launcherURL,omitempty"`
+	// AMMGatewayURL is the api-gateway the NOC backend reads AMM pool status from,
+	// as reachable FROM THE NOC CONTAINER (the NOC runs on its own docker network,
+	// so a compose service name of another stack does not resolve — use the host
+	// and published port, e.g. http://host.docker.internal:41645). Empty leaves the
+	// backend default, and Pool Stability stays empty while reporting why.
+	AMMGatewayURL string `yaml:"ammGatewayURL,omitempty" json:"ammGatewayURL,omitempty"`
 }
 
 // Node holds the network addressing configuration for the Besu node.
@@ -175,6 +181,11 @@ type Port struct {
 type Relay struct {
 	Endpoint       string `yaml:"endpoint" json:"endpoint"`
 	AdvertisedHost string `yaml:"advertisedHost,omitempty" json:"advertisedHost,omitempty"`
+	// ContainerName is the relay's docker container on THIS host. It is only used to
+	// let this entity's noc-agent collect the relay's container logs (the agent reads
+	// the docker socket); the relay itself is never touched. Empty → the NOC shows
+	// "No logs available." for the relay component.
+	ContainerName string `yaml:"containerName,omitempty" json:"containerName,omitempty"`
 }
 
 // AdminUser is a per-role operator account created in the entity's Keycloak

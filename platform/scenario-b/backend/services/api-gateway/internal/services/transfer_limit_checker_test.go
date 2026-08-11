@@ -48,6 +48,16 @@ func (m *mockVolumeRepo) GetAccumulated(_ context.Context, _, _ string, _ time.T
 
 // --- checker tests ---
 
+// Amounts reaching the checker are in BASE UNITS (wei) — that is what the orchestrator, the
+// bridge handler and the CB-internal pre-auth all pass. Only the configured limit is a human
+// decimal string. Converting both is what made any configured limit reject every transfer.
+const (
+	oneToken      = "1000000000000000000"  // 1 * 10^18
+	thirtyTokens  = "30000000000000000000" // 30 * 10^18
+	seventyTokens = "70000000000000000000" // 70 * 10^18
+	eightyTokens  = "80000000000000000000" // 80 * 10^18
+)
+
 func TestChecker_NoLimitConfigured_Passes(t *testing.T) {
 	checker := NewTransferLimitChecker(&mockLimitRepo{limit: nil}, &mockVolumeRepo{})
 	err := checker.CheckAndDeduct(context.Background(), "bank-a", "BRL", "500000")
@@ -59,19 +69,19 @@ func TestChecker_WithinLimit_DeductsVolume(t *testing.T) {
 	vol := &mockVolumeRepo{accumulated: "0"}
 	checker := NewTransferLimitChecker(&mockLimitRepo{limit: limit}, vol)
 
-	err := checker.CheckAndDeduct(context.Background(), "bank-a", "BRL", "500000")
+	// 500,000 tokens in base units against a 1,000,000-token limit.
+	err := checker.CheckAndDeduct(context.Background(), "bank-a", "BRL", "500000000000000000000000")
 	require.NoError(t, err)
-	assert.NotEmpty(t, vol.deducted)
+	assert.Equal(t, "500000000000000000000000", vol.deducted, "volume is recorded in the unit it arrived in")
 }
 
 func TestChecker_LimitExceeded_ReturnsError(t *testing.T) {
-	// max = 100 tokens (human), accumulated = 80 tokens in wei, new = 30 → total 110 > 100
-	accWei := "80000000000000000000" // 80 * 10^18
+	// max = 100 tokens (human limit), accumulated = 80 tokens, new = 30 tokens → 110 > 100
 	limit := &domain.TransferLimit{MaxAmount: "100"}
-	vol := &mockVolumeRepo{accumulated: accWei}
+	vol := &mockVolumeRepo{accumulated: eightyTokens}
 	checker := NewTransferLimitChecker(&mockLimitRepo{limit: limit}, vol)
 
-	err := checker.CheckAndDeduct(context.Background(), "bank-a", "BRL", "30")
+	err := checker.CheckAndDeduct(context.Background(), "bank-a", "BRL", thirtyTokens)
 	require.Error(t, err)
 	var limitErr *ErrTransferLimitExceeded
 	assert.ErrorAs(t, err, &limitErr)
@@ -80,14 +90,37 @@ func TestChecker_LimitExceeded_ReturnsError(t *testing.T) {
 }
 
 func TestChecker_ExactlyAtLimit_Passes(t *testing.T) {
-	// max = 100 tokens (human), accumulated = 70 tokens in wei, new = 30 → total = 100 exactly
-	accWei := "70000000000000000000" // 70 * 10^18
+	// max = 100 tokens (human limit), accumulated = 70 tokens, new = 30 tokens → exactly 100
 	limit := &domain.TransferLimit{MaxAmount: "100"}
-	vol := &mockVolumeRepo{accumulated: accWei}
+	vol := &mockVolumeRepo{accumulated: seventyTokens}
 	checker := NewTransferLimitChecker(&mockLimitRepo{limit: limit}, vol)
 
-	err := checker.CheckAndDeduct(context.Background(), "bank-a", "BRL", "30")
+	err := checker.CheckAndDeduct(context.Background(), "bank-a", "BRL", thirtyTokens)
 	assert.NoError(t, err)
+}
+
+// TestChecker_BaseUnitAmountAgainstHumanLimit is the regression guard for the unit bug: a
+// single-token payment must not breach a 100-token limit. While the amount was also multiplied
+// by 10^18, this compared 10^36 against 10^20 and rejected every transfer as over the limit.
+func TestChecker_BaseUnitAmountAgainstHumanLimit(t *testing.T) {
+	limit := &domain.TransferLimit{MaxAmount: "100"}
+	vol := &mockVolumeRepo{accumulated: "0"}
+	checker := NewTransferLimitChecker(&mockLimitRepo{limit: limit}, vol)
+
+	err := checker.CheckAndDeduct(context.Background(), "bank-a", "BRL", oneToken)
+	require.NoError(t, err, "1 token must fit under a 100-token daily limit")
+	assert.Equal(t, oneToken, vol.deducted)
+}
+
+// Deduct and Restore must move the same number, or a failed swap leaves the quota drifting.
+func TestChecker_RestoreMirrorsDeductedUnit(t *testing.T) {
+	limit := &domain.TransferLimit{MaxAmount: "100"}
+	vol := &mockVolumeRepo{accumulated: "0"}
+	checker := NewTransferLimitChecker(&mockLimitRepo{limit: limit}, vol)
+
+	require.NoError(t, checker.CheckAndDeduct(context.Background(), "bank-a", "BRL", thirtyTokens))
+	checker.Restore(context.Background(), "bank-a", "BRL", thirtyTokens)
+	assert.Equal(t, vol.deducted, vol.restored, "restoring a different unit than deducted drifts the quota")
 }
 
 func TestChecker_Restore_CallsVolumeRepo(t *testing.T) {
@@ -95,7 +128,7 @@ func TestChecker_Restore_CallsVolumeRepo(t *testing.T) {
 	checker := NewTransferLimitChecker(&mockLimitRepo{}, vol)
 
 	checker.Restore(context.Background(), "bank-a", "BRL", "500")
-	assert.NotEmpty(t, vol.restored)
+	assert.Equal(t, "500", vol.restored, "the amount is restored in the unit it arrived in")
 }
 
 func TestChecker_UnknownSpokePrefix_Passes(t *testing.T) {

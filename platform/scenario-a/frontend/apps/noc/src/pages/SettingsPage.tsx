@@ -15,17 +15,22 @@ import {
 } from "@cbweb3/ui";
 import { useState } from "react";
 import { useUiStore } from "../stores";
+import { MIN_POLLING_SECONDS, parsePollingInterval } from "../stores/ui.settings";
 
 export function SettingsPage() {
-  const { muteAlerts, fallbackPollingSeconds, setMuteAlerts, setFallbackPollingSeconds } = useUiStore();
-  const [email, setEmail] = useState("noc-ops@cbweb3.local");
+  const { muteAlerts, fallbackPollingSeconds, alertEmail, setMuteAlerts, setFallbackPollingSeconds, setAlertEmail } =
+    useUiStore();
+  const [localEmail, setLocalEmail] = useState(alertEmail);
   const [localInterval, setLocalInterval] = useState(String(fallbackPollingSeconds));
 
   const handleSave = () => {
-    const parsed = parseInt(localInterval, 10);
-    if (!isNaN(parsed) && parsed >= 5) {
-      setFallbackPollingSeconds(parsed);
+    const parsed = parsePollingInterval(localInterval);
+    if (parsed === null) {
+      toast.error(`Polling interval must be at least ${MIN_POLLING_SECONDS} seconds`);
+      return;
     }
+    setFallbackPollingSeconds(parsed);
+    setAlertEmail(localEmail);
     toast.success("NOC settings updated");
   };
 
@@ -38,21 +43,21 @@ export function SettingsPage() {
       <CardContent className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="alert-email">Alert Email</Label>
-          <Input id="alert-email" value={email} onChange={(event) => setEmail(event.target.value)} />
+          <Input id="alert-email" value={localEmail} onChange={(event) => setLocalEmail(event.target.value)} />
         </div>
         <div className="flex items-center justify-between rounded-md border border-border p-3">
           <div>
             <p className="text-sm font-medium">Critical Alerts Only</p>
-            <p className="text-xs text-muted-foreground">Send notifications only for CRITICAL incidents.</p>
+            <p className="text-xs text-muted-foreground">Hide INFO and WARNING alerts from the Dashboard feed.</p>
           </div>
           <Checkbox checked={muteAlerts} onCheckedChange={(value) => setMuteAlerts(value === true)} />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="poll-interval">Polling Interval (seconds, min 5)</Label>
+          <Label htmlFor="poll-interval">Polling Interval (seconds, min {MIN_POLLING_SECONDS})</Label>
           <Input
             id="poll-interval"
             type="number"
-            min={5}
+            min={MIN_POLLING_SECONDS}
             value={localInterval}
             onChange={(event) => setLocalInterval(event.target.value)}
           />

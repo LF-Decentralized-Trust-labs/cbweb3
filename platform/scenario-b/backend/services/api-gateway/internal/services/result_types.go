@@ -37,6 +37,37 @@ type BridgePositionDetail struct {
 	Leg                  string
 }
 
+// HubSwapRecord is the CB's record of a Hub AMM swap it executed on behalf of a bank
+// (sovereign delegation of Step 2). Keyed on the funding bridge-in position, which backs
+// exactly one swap — the replay anchor for a retried delegation.
+type HubSwapRecord struct {
+	BridgeInPositionID string
+	CorrelationID      string
+	PayerBankID        string
+	PoolPair           string
+	AmountOut          string
+	AmountIn           string
+	SwapTxHash         string
+	// Status says whether the trade this record anchors has completed. It exists because the
+	// record has to be written BEFORE the trade, not after: the AMM swap is not idempotent
+	// on-chain, so two concurrent deliveries of one delegation must not both get past the guard
+	// and trade. See HubSwapStatus*.
+	Status string
+	// FailureReason is why an abandoned claim was abandoned, kept so an operator reconciling the
+	// position does not have to correlate logs to find out.
+	FailureReason string
+}
+
+// The lifecycle of a delegated swap record. The row is inserted PENDING before the trade and moves
+// exactly once: to EXECUTED when the realized cost is known, or to FAILED when the trade did not
+// complete. A FAILED claim is NOT a free retry — a trade can fail after broadcast, so whether the
+// tokens moved is unknown from here and only reconciliation can say.
+const (
+	HubSwapStatusPending  = "PENDING"
+	HubSwapStatusExecuted = "EXECUTED"
+	HubSwapStatusFailed   = "FAILED"
+)
+
 // DisclosureResult is the service-level result for oversight disclosure operations.
 type DisclosureResult struct {
 	RequestID            string     `json:"request_id"`

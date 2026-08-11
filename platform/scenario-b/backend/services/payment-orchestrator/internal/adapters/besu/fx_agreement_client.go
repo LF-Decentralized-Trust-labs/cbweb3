@@ -5,7 +5,6 @@ package besu
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -14,10 +13,10 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 )
@@ -45,13 +44,12 @@ type FXAgreementClientConfig struct {
 
 // FXAgreementClient implements ports.FXAgreementContractPort using go-ethereum.
 type FXAgreementClient struct {
-	ethClient  *ethclient.Client
-	fxAddress  common.Address
-	fxABI      abi.ABI
-	privateKey *ecdsa.PrivateKey
-	fromAddr   common.Address
-	chainID    *big.Int
-	logger     *slog.Logger
+	ethClient *ethclient.Client
+	fxAddress common.Address
+	fxABI     abi.ABI
+	// signer is the shared, nonce-serialized signer (see sendTx).
+	signer *evm.Signer
+	logger *slog.Logger
 }
 
 // NewFXAgreementClient creates a new Besu FXAgreement client.
@@ -66,21 +64,17 @@ func NewFXAgreementClient(cfg FXAgreementClientConfig, logger *slog.Logger) (*FX
 		return nil, fmt.Errorf("parse FXAgreement ABI: %w", err)
 	}
 
-	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(cfg.PrivateKeyHex, "0x"))
+	signer, err := evm.SharedSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
 	if err != nil {
-		return nil, fmt.Errorf("parse private key: %w", err)
+		return nil, fmt.Errorf("build signer: %w", err)
 	}
 
-	fromAddr := crypto.PubkeyToAddress(privateKey.PublicKey)
-
 	return &FXAgreementClient{
-		ethClient:  ethClient,
-		fxAddress:  common.HexToAddress(cfg.FXAgreementAddress),
-		fxABI:      parsed,
-		privateKey: privateKey,
-		fromAddr:   fromAddr,
-		chainID:    big.NewInt(cfg.ChainID),
-		logger:     logger,
+		ethClient: ethClient,
+		fxAddress: common.HexToAddress(cfg.FXAgreementAddress),
+		fxABI:     parsed,
+		signer:    signer,
+		logger:    logger,
 	}, nil
 }
 
@@ -174,62 +168,37 @@ func (c *FXAgreementClient) Settle(ctx context.Context, tradeID [32]byte) (strin
 }
 
 func (c *FXAgreementClient) sendTx(ctx context.Context, data []byte, method string) (string, error) {
-	nonce, err := c.ethClient.PendingNonceAt(ctx, c.fromAddr)
-	if err != nil {
-		return "", fmt.Errorf("get nonce: %w", err)
-	}
-
+	// Pre-flight estimate, kept as this client's own policy: a revert detected here fails the call
+	// BEFORE a transaction is submitted, which the shared submission path does not do (it falls back
+	// to a conservative gas limit and lets the revert surface in the receipt). For FX agreements the
+	// earlier signal is worth the extra call, so it stays.
 	gasPrice, err := c.ethClient.SuggestGasPrice(ctx)
 	if err != nil {
 		return "", fmt.Errorf("suggest gas price: %w", err)
 	}
-
-	auth, err := bind.NewKeyedTransactorWithChainID(c.privateKey, c.chainID)
-	if err != nil {
-		return "", fmt.Errorf("create transactor: %w", err)
-	}
-	auth.Nonce = new(big.Int).SetUint64(nonce)
-	auth.GasPrice = gasPrice
-	auth.GasLimit = 500_000
-	auth.Context = ctx
-
-	// Estimate gas first to detect contract reverts before submitting the tx.
 	msg := ethereum.CallMsg{
-		From:     c.fromAddr,
+		From:     c.signer.Address(),
 		To:       &c.fxAddress,
 		GasPrice: gasPrice,
 		Data:     data,
 	}
-	if estimatedGas, estErr := c.ethClient.EstimateGas(ctx, msg); estErr != nil {
+	if _, estErr := c.ethClient.EstimateGas(ctx, msg); estErr != nil {
 		return "", fmt.Errorf("%s call would revert: %w", method, estErr)
-	} else {
-		auth.GasLimit = estimatedGas * 120 / 100 // 20% headroom
 	}
 
-	boundContract := bind.NewBoundContract(c.fxAddress, c.fxABI, c.ethClient, c.ethClient, c.ethClient)
-
-	signedTx, err := boundContract.RawTransact(auth, data)
-	if err != nil {
-		return "", fmt.Errorf("send %s tx: %w", method, err)
-	}
-
+	// Submitted through the shared signer so every FX transaction shares ONE nonce counter with the
+	// sibling clients on the same operator key. Each of them used to read PendingNonceAt on its own,
+	// which let two concurrent submissions claim the same nonce and one be silently replaced.
 	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-
-	receipt, err := bind.WaitMined(waitCtx, c.ethClient, signedTx)
+	_, txHash, err := evm.SubmitRawTxReceipt(waitCtx, c.ethClient, c.signer, c.fxAddress, data, method)
 	if err != nil {
-		return "", fmt.Errorf("wait %s receipt: %w", method, err)
-	}
-
-	if receipt.Status == 0 {
-		return "", fmt.Errorf("%s transaction reverted: %s", method, signedTx.Hash().Hex())
+		return "", err
 	}
 
 	c.logger.Info("FXAgreement on-chain tx confirmed",
 		"method", method,
-		"tx_hash", signedTx.Hash().Hex(),
-		"block", receipt.BlockNumber.Uint64(),
+		"tx_hash", txHash,
 	)
-
-	return signedTx.Hash().Hex(), nil
+	return txHash, nil
 }

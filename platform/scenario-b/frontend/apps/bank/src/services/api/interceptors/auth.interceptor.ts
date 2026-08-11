@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import axios, { AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from "axios";
+import axios, { AxiosError, type AxiosInstance, type AxiosResponse, type InternalAxiosRequestConfig } from "axios";
+import { isTrustRejection } from "../trust-errors";
 
 const REFRESH_PATH = "/auth/refresh";
 const API_VERSION_PATH_RE = /\/api\/v[0-9]+$/i;
+
+/** pathOf strips the query string, so the same endpoint compares equal across calls. */
+function pathOf(url?: string): string {
+  return (url ?? "").split("?")[0] ?? "";
+}
 
 type RetriableRequestConfig = InternalAxiosRequestConfig & {
   _isRetrying?: boolean;
@@ -34,10 +40,33 @@ function resolveV1BaseURL(baseURL?: string): string {
   return `${normalizedBaseURL}/api/v1`;
 }
 
+async function onTrustRestored(response: AxiosResponse) {
+  const { useTrustStore } = await import("../../../stores/trust.store");
+  // The store decides: only a path the central bank had refused proves the channel works again. This
+  // layer cannot tell, and guessing here is what made two locally-served balance calls retire a notice
+  // that three rejected payment calls had just raised.
+  useTrustStore.getState().noteSuccess(pathOf(response.config.url));
+  return response;
+}
+
+async function onTrustRejected(error: AxiosError) {
+  const { useTrustStore } = await import("../../../stores/trust.store");
+  void useTrustStore.getState().reportRejection(pathOf(error.config?.url));
+  return Promise.reject(error);
+}
+
 export function attachAuthInterceptor(httpClient: AxiosInstance) {
   httpClient.interceptors.response.use(
-    (response) => response,
+    (response) => onTrustRestored(response),
     async (error: AxiosError) => {
+      // The central bank refusing our identity is not an expired session. Refreshing succeeds — the
+      // cookie is valid — the retry is rejected again, and the second 401 used to reach the logout
+      // branch below, ejecting the operator to the login screen over a failure that has nothing to do
+      // with their session. Report it instead, so every screen can explain the real cause.
+      if (isTrustRejection(error)) {
+        return onTrustRejected(error);
+      }
+
       if (!error.response || error.response.status !== 401) {
         return Promise.reject(error);
       }

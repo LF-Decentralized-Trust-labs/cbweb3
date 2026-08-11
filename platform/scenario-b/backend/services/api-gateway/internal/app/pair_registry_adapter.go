@@ -18,7 +18,6 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/evm"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -130,7 +129,7 @@ func NewPairRegistryClient(ctx context.Context, cfg PairRegistryConfig) (*PairRe
 		c.identityRegistry = common.HexToAddress(cfg.IdentityRegistryAddress)
 	}
 	if cfg.PrivateKeyHex != "" {
-		signer, sigErr := evm.NewSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
+		signer, sigErr := evm.SharedSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
 		if sigErr != nil {
 			ec.Close()
 			return nil, fmt.Errorf("pair registry: signer: %w", sigErr)
@@ -138,6 +137,45 @@ func NewPairRegistryClient(ctx context.Context, cfg PairRegistryConfig) (*PairRe
 		c.signer = signer
 	}
 	return c, nil
+}
+
+// identityCBOfABI is the minimal IdentityRegistry read used to resolve which address may act
+// as the central bank of a token on the hub. PairRegistry gates proposePair on
+// getCentralBankOf(tokenA) and confirmPair on getCentralBankOf(tokenB).
+const identityCBOfABI = `[
+{"type":"function","name":"getCentralBankOf","stateMutability":"view","inputs":[{"name":"token","type":"address"}],"outputs":[{"name":"","type":"address"}]}
+]`
+
+// CentralBankOfToken reads IdentityRegistry.getCentralBankOf(token) on the hub, i.e. which
+// address the registry recognises as that token's issuing central bank.
+func (c *PairRegistryClient) CentralBankOfToken(ctx context.Context, tokenAddress string) (string, error) {
+	if c.identityRegistry == (common.Address{}) {
+		return "", fmt.Errorf("pair registry: HUB_IDENTITY_REGISTRY_ADDRESS not configured")
+	}
+	token := common.HexToAddress(tokenAddress)
+	if token == (common.Address{}) {
+		return "", fmt.Errorf("pair registry: invalid token address %q", tokenAddress)
+	}
+	parsed, err := evm.ParseABI(identityCBOfABI)
+	if err != nil {
+		return "", fmt.Errorf("pair registry: parse identity ABI: %w", err)
+	}
+	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	var cb common.Address
+	if err := evm.Call(callCtx, c.ec, c.identityRegistry, parsed, "getCentralBankOf",
+		[]interface{}{token}, &cb); err != nil {
+		return "", fmt.Errorf("pair registry: getCentralBankOf(%s): %w", token.Hex(), err)
+	}
+	return cb.Hex(), nil
+}
+
+// HubSignerAddress is this gateway's hub signing address, or "" on a read-only client.
+func (c *PairRegistryClient) HubSignerAddress() string {
+	if c.signer == nil {
+		return ""
+	}
+	return c.signer.Address().Hex()
 }
 
 // Close releases the underlying RPC connection.
@@ -188,21 +226,30 @@ func (c *PairRegistryClient) DeployDedicatedAMM(ctx context.Context, tokenA, tok
 	if gasPrice, gerr := c.ec.SuggestGasPrice(ctx); gerr == nil {
 		opts.GasPrice = gasPrice
 	}
-	ammAddr, deployTx, _, err := bindings.DeployAutomatedMarketMaker(
-		opts, c.ec,
-		common.HexToAddress(tokenA),
-		common.HexToAddress(tokenB),
-		c.identityRegistry,
-	)
+	// The deploy goes through the signer's counter like every other submission from this account:
+	// bind would otherwise read PendingNonceAt itself and could claim a nonce another call in this
+	// process has already taken. The deployed address is derived from (sender, nonce), so it stays
+	// correct precisely because the nonce is the one actually broadcast.
+	var ammAddr common.Address
+	deployTx, err := c.signer.WithNonce(ctx, c.ec, func(nonce uint64) (*types.Transaction, error) {
+		opts.Nonce = new(big.Int).SetUint64(nonce)
+		addr, tx, _, derr := bindings.DeployAutomatedMarketMaker(
+			opts, c.ec,
+			common.HexToAddress(tokenA),
+			common.HexToAddress(tokenB),
+			c.identityRegistry,
+		)
+		if derr != nil {
+			return nil, derr
+		}
+		ammAddr = addr
+		return tx, nil
+	})
 	if err != nil {
 		return "", fmt.Errorf("pair registry: deploy AMM: %w", err)
 	}
-	receipt, err := bind.WaitMined(ctx, c.ec, deployTx)
-	if err != nil {
-		return "", fmt.Errorf("pair registry: deploy AMM wait: %w", err)
-	}
-	if receipt.Status == 0 {
-		return "", fmt.Errorf("pair registry: deploy AMM reverted (tx=%s)", deployTx.Hash().Hex())
+	if _, err := evm.WaitForReceipt(ctx, c.ec, deployTx, "deploy AMM"); err != nil {
+		return "", fmt.Errorf("pair registry: %w", err)
 	}
 	return ammAddr.Hex(), nil
 }
