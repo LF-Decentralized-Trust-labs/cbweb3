@@ -202,7 +202,7 @@ The MLP (Multilateral Liquidity Provider) stack uses all per-entity common varia
 |----------|-------|------|-------------|
 | `KC_REALM` | `mlp` | string | MLP Keycloak realm |
 | `KC_CLIENT_ID` | `mlp-client` | string | MLP OIDC client ID |
-| `SIGNER_PRIVATE_KEY` | `f8f8a2f43c8376ccb0871305060d7b27b0554d2cc72bccf41b2705608452f315` | hex secret | MLP signer key (local dev only — replace in production) |
+| `SIGNER_PRIVATE_KEY` | *(blank in the template; fill the copied file)* | hex secret | MLP signer key. The local-dev value is the well-known, pre-funded Besu genesis key #4 (address `0x22d491Bde2303f2f43325b2108D26f1eAbA1e32b`) and is deliberately not printed here — see [secret-management.md](../../../docs/secret-management.md) |
 | `GOVERNANCE_USER_ID` | `service-account-mlp-client` | string | Governance user ID for service account operations |
 
 The MLP uses Redis logical DB 6 (`REDIS_URL=redis://redis:6379/6`) and PostgreSQL database `cbweb3_mlp`.

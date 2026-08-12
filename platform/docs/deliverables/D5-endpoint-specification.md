@@ -12,8 +12,13 @@ its API Gateway. There is no shared spec across scenarios (scenario isolation).
 
 | Scenario | Spec file (served + embedded) | `info.version` | Operations | Paths |
 |----------|-------------------------------|----------------|-----------|-------|
-| Scenario A (Enhanced Correspondent Banking) | `scenario-a/backend/services/api-gateway/docs/openapi.yaml` | **2.3.0** | **74** | 66 |
-| Scenario B (International Hub) | `scenario-b/backend/services/api-gateway/docs/openapi.yaml` | **2.3.0** | **93** | 87 |
+| Scenario A (Enhanced Correspondent Banking) | `scenario-a/backend/services/api-gateway/docs/openapi.yaml` | **2.3.0** | **83** | 74 |
+| Scenario B (International Hub) | `scenario-b/backend/services/api-gateway/docs/openapi.yaml` | **2.3.0** | **110** | 99 |
+
+Both counts are verified against the route registrations in
+`internal/http/router/` — every registered route is documented, and the spec
+documents no route that is not registered. `.github/workflows/api-artifacts.yml`
+keeps the published Postman collections in step (see §6).
 
 The spec is embedded into the gateway binary (`//go:embed openapi.yaml`) and
 served at:
@@ -37,6 +42,9 @@ Before this deliverable, Scenario B was fragmented:
   - `scenario-b/backend/services/api-gateway/openapi/v2/scenario-b.yaml` —
     "Liquidity API" **v2.0.0**, ~15 ops.
 
+  Both have since been **deleted**: nothing served or linted them, so they could
+  only drift further from the API they claimed to describe.
+
 The `/api/v2/*` AMM surface is in fact implemented and routed by
 `scenario-b/backend/services/api-gateway/internal/http/router/v2/router.go`,
 but was absent from the served spec.
@@ -44,8 +52,8 @@ but was absent from the served spec.
 **Reconciliation performed:** the `/api/v2/*` operations were folded into the
 single served `docs/openapi.yaml`, and `info.version` was bumped **2.2.0 →
 2.3.0** so the served spec matches the documented v2.3.0 surface. The two
-unwired fragments are now **superseded** by the served spec; they are left in
-place for historical reference but are no longer the source of truth.
+unwired fragments were **superseded and removed**, leaving exactly one spec per
+scenario.
 
 > **Method / assumptions.** The v2 operation list was derived directly from the
 > route registrations in `internal/http/router/v2/router.go` (method + path +
@@ -57,7 +65,7 @@ place for historical reference but are no longer the source of truth.
 > v2 surface depending on its role (commercial bank vs. central bank). The
 > documented surface is the **union** of all routable v2 operations.
 
-## 2. Scenario A — v2 surface (74 operations)
+## 2. Scenario A — v2 surface (83 operations)
 
 Grouped by domain (tags as they appear in the spec):
 
@@ -80,12 +88,12 @@ Grouped by domain (tags as they appear in the spec):
   cross-spoke relay delivery tracking, plus internal relay endpoints consumed
   by the Hyperledger Cacti cross-spoke bridge.
 
-(Scenario A was already at v2.3.0/74 ops; this deliverable did not change its
-spec content, only made its `/docs` page CDN-free — see §5.)
+(Scenario A was already at v2.3.0/83 ops; this deliverable did not change its
+spec content, only made its `/docs` page fully self-contained — see §5.)
 
-## 3. Scenario B — v2.3.0 surface (93 operations)
+## 3. Scenario B — v2.3.0 surface (110 operations)
 
-### 3.1 Core `/api/v1` surface (56 operations)
+### 3.1 Core `/api/v1` surface (49 operations, including `GET /healthz`)
 
 - **Health** — `GET /healthz`.
 - **Authentication** — `/api/v1/auth/{login,refresh,logout,wallet/bind,
@@ -105,29 +113,42 @@ spec content, only made its `/docs` page CDN-free — see §5.)
   deposits/reject,deposits/fiat-exchange,escrows,escrows/approve,
   escrows/reject,redeems,redeems/approve,redeems/reject}`.
 
-### 3.2 Hub-and-Spoke AMM `/api/v2` surface (34 operations) + internal (3)
+### 3.2 Hub-and-Spoke AMM `/api/v2` surface (44 operations) + internal (17)
 
 - **AMM Swap** (`/api/v2/amm`) — `quote/exact-output`,
-  `quote/cross-currency`, `swap/exact-output`, `swap/cross-currency`,
-  `swap/cross-currency/{id}`, `pool/{pair}/status`, `hub-liquidity-config`.
+  `quote/cross-currency`, `swap/exact-output`, `swap/cross-currency`
+  (POST initiate + GET own history), `swap/cross-currency/{id}`,
+  `pool/{pair}/status`, `hub-liquidity-config`, `hub-config`.
 - **AMM Bridge** (`/api/v2/bridge`) — `lock-mint`, `burn-unlock`, `positions`.
   Implements the Scenario B atomicity rule (lock → mint, burn → unlock).
-- **AMM Liquidity** (`/api/v2/amm/liquidity` + `/api/v2/amm/lp-balance`) —
-  `add`, `remove`, `commit`, `commits`, `commits/{commit_id}` (GET + DELETE),
-  `positions`, `sovereign-add`, and `lp-balance` (on-chain CBW3-LP shares).
+- **AMM Liquidity** (`/api/v2/amm/liquidity`, `/api/v2/amm/lp-balance`,
+  `/api/v2/amm/hub-reconciliation`) — sovereign seeding by escrow-and-finalize
+  (`deposit-side`, `finalize`, `reclaim-side`, `escrow`), `remove`, `commit`,
+  `commits`, `commits/{commit_id}` (GET + DELETE), `positions`,
+  `sovereign-add`, `lp-balance` (on-chain CBW3-LP shares), and
+  `hub-reconciliation`. Each Central Bank supplies **only its own side**; the
+  dual-sided `liquidity/add` was removed as a sovereignty breach.
 - **AMM Token** (`/api/v2/amm/token`) — `mint-and-approve`, `approve-amm`.
 - **Hub Currency Registry** (`/api/v2/hub`) — `currencies` (GET/POST),
-  `currencies/{symbol}` (DELETE).
+  `currencies/{symbol}` (DELETE), `token/supply` (this CB's outstanding
+  wrapped-token supply).
 - **AMM Pair Registry** (`/api/v2/amm/pairs`) — `pairs` (GET), `pairs/propose`,
   `pairs/confirm` (two-Central-Bank flow).
 - **Circuit Breaker** (`/api/v2/governance/circuit-breaker`) — `status`,
   `pause` (1-of-N), `resume-request` + `resume-sign` (2-of-N).
+- **Transfer Limits** (`/api/v2/governance/transfer-limits`) — CRUD, plus the
+  CB-internal pre-auth relay under `/internal/v2/transfer-limits`.
 - **Oversight** (`/api/v2/oversight`) — `disclosure-request`,
   `disclosure-sign` (quorum), `disclosure-status/{requestID}`.
 - **AMM Internal** (`/internal/amm`) — `execute-matched-commit`,
-  `cross-currency-bridge-out`, `cross-currency-bridge-in`. Consumed by the
-  Cacti relay; protected by the `X-Relay-Auth` shared secret, **not** user
-  auth.
+  `cross-currency-bridge-out`, `cross-currency-bridge-in`,
+  `cross-currency-hub-swap` (the CB-signed Hub AMM leg) and
+  `cross-currency-residue-return`. Consumed by the Cacti relay; protected by
+  the `X-Relay-Auth` shared secret, **not** user auth.
+- **Internal payment relay** (`/internal/v1/payments`) and **spoke
+  self-registration** (`/internal/v1/spokes/{register,register-currency,
+  register-pair}`, hub gateway only, used by the provisioning toolkit). Same
+  relay-auth guard; never exposed publicly.
 
 ## 4. Security schemes
 
@@ -135,7 +156,14 @@ spec content, only made its `/docs` page CDN-free — see §5.)
 |--------|------|-------|---------|
 | `CookieAuth` | apiKey (cookie `access_token`) | Browser/session flows | most protected endpoints |
 | `BearerAuth` | http bearer (JWT) | `Authorization` header | `/api/v2` M2M sovereign CB flows (RequireAnyAuth) |
-| `RelayAuth` | apiKey (header `X-Relay-Auth`) | relay → gateway | `/internal/amm/*` |
+| `RelayAuth` | apiKey (header `X-Relay-Auth`) | relay → gateway | `/internal/amm/*`, `/internal/v1/*`, `/internal/v2/*` |
+
+Operations that are genuinely public (health, login/refresh/wallet-bind, the
+public AMM reads, hub currency and supply discovery) declare `security: []`
+explicitly, so "no authentication" is a stated fact in the spec rather than an
+omission. The onboarding endpoints declare `- {}` **and** `- CookieAuth: []`:
+they are public on a Central Bank gateway and cookie-protected when a commercial
+bank gateway serves the same path in proxy mode.
 
 `BearerAuth` and `RelayAuth` were added to the Scenario B spec in v2.3.0 to
 describe the M2M and relay paths that the v1 spec omitted.
@@ -155,12 +183,40 @@ the page failed in an air-gapped/offline deployment. This is now fixed
 3. The `/docs` HTML now references **gateway-local** paths
    (`/docs/swagger-ui/swagger-ui.css`, `/docs/swagger-ui/swagger-ui-bundle.js`)
    served by `GET /docs/swagger-ui/:asset`. No `unpkg`/CDN reference remains.
+4. `SwaggerUIBundle` is initialised with `validatorUrl: null`. Left unset, the
+   bundle posts the gateway's spec URL to Swagger's hosted online validator on
+   every `/docs` load, suppressing that only when the URL resolves to localhost —
+   so a page served from any other host would still call out.
 
 **Verification.** `TestSwaggerUI` asserts the HTML contains the local asset
 paths and contains **no** external CDN reference (`unpkg.com`, `jsdelivr`,
 `cdnjs`, or any `://`). `TestSwaggerUIAsset` asserts the CSS and JS bundle are
 served with the correct content type and that an unknown asset name returns
 404. Both gateways `go build` and these tests pass.
+
+## 6. Postman collections (packaged artifacts)
+
+Each scenario publishes a Postman v2.1.0 collection generated from its **served**
+spec — the same file described in §1, never a hand-maintained copy:
+
+| Scenario | Collection | Requests | Folders (by OpenAPI tag) |
+|----------|------------|----------|--------------------------|
+| Scenario A | `scenario-a/apis/postman/cbweb3-scenario-a.postman_collection.json` | 83 | 13 |
+| Scenario B | `scenario-b/apis/postman/cbweb3-scenario-b.postman_collection.json` | 110 | 17 |
+
+Regenerate or verify with `bash apis/postman/generate.sh [--check|--lint-only]`
+from the scenario directory (`make scenario-b.gen-postman`,
+`scenario-b.check-postman` and `scenario-b.validate-openapi` alias the three
+modes). Generator versions are pinned exactly in the script — `openapi-to-postmanv2`
+**6.3.3** and `@redocly/cli` **1.34.5**; a floating range silently rewrites the
+committed artifact.
+
+`.github/workflows/api-artifacts.yml` runs the drift check on every change to a
+served spec or a collection, so a documented surface that no longer matches the
+published collection fails CI rather than shipping. The check compares the
+request surface (folder, name, method, path, query keys, auth), which is
+deterministic; per-item UUIDs and converter-faked example responses are stripped
+during generation.
 
 See the v1→v2 breaking-change list in
 [`D5-changelog-v1-to-v2.md`](./D5-changelog-v1-to-v2.md).

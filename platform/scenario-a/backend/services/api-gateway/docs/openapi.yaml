@@ -136,6 +136,7 @@ paths:
       tags: [Health]
       summary: Health check
       operationId: healthCheck
+      security: []
       responses:
         "200":
           description: Service is healthy
@@ -159,6 +160,7 @@ paths:
         Returns { "nonce": "<hex>" } only — no tokens, no cookies.
         The client must sign the nonce and complete login via POST /auth/wallet/bind.
       operationId: login
+      security: []
       requestBody:
         required: true
         content:
@@ -196,6 +198,7 @@ paths:
         Exchanges a valid refresh token for new access and refresh tokens.
         The response also renews the access_token and refresh_token HttpOnly cookies.
       operationId: refreshToken
+      security: []
       requestBody:
         required: true
         content:
@@ -275,6 +278,7 @@ paths:
         On success, access_token and refresh_token HttpOnly cookies are set in addition
         to the JSON response body.
       operationId: walletBind
+      security: []
       requestBody:
         required: true
         content:
@@ -344,7 +348,6 @@ paths:
       operationId: getMe
       security:
         - CookieAuth: []
-        - CookieAuth: []
       responses:
         "200":
           description: Token claims for the authenticated user
@@ -413,7 +416,6 @@ paths:
         After rotation the old clientSecret is immediately invalidated.
       operationId: changeClientSecret
       security:
-        - CookieAuth: []
         - CookieAuth: []
       requestBody:
         required: true
@@ -1193,6 +1195,11 @@ paths:
         creates a Keycloak user and stores the credential request.
         Poll GET /api/v1/onboarding/status/{requestId} until KYC is approved.
       operationId: submitCredentialRequest
+      # Public on a Central Bank gateway; cookie-protected when a commercial
+      # bank gateway serves the same path in proxy mode (see the Onboarding tag).
+      security:
+        - {}
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -1224,6 +1231,11 @@ paths:
         hex-encoded challenge that must be signed to prove wallet ownership
         (Phase 3).
       operationId: getOnboardingStatus
+      # Public on a Central Bank gateway; cookie-protected when a commercial
+      # bank gateway serves the same path in proxy mode (see the Onboarding tag).
+      security:
+        - {}
+        - CookieAuth: []
       parameters:
         - name: requestId
           in: path
@@ -1256,6 +1268,11 @@ paths:
         issues an X.509 certificate and a one-time `client_secret` for future
         authentication. **Store the client_secret securely — it is not recoverable.**
       operationId: completeOnboarding
+      # Public on a Central Bank gateway; cookie-protected when a commercial
+      # bank gateway serves the same path in proxy mode (see the Onboarding tag).
+      security:
+        - {}
+        - CookieAuth: []
       requestBody:
         required: true
         content:

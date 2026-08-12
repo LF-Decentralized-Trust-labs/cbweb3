@@ -1,0 +1,5377 @@
+{
+  "item": [
+    {
+      "name": "Health",
+      "description": "Service health endpoint",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "name": "Health check",
+            "description": {},
+            "url": {
+              "path": [
+                "healthz"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "description": "Login, refresh, logout, and PKI wallet bind.",
+      "item": [
+        {
+          "name": "Authenticate client credentials and obtain access + refresh tokens",
+          "request": {
+            "name": "Authenticate client credentials and obtain access + refresh tokens",
+            "description": {
+              "content": "Two authentication flows depending on the participant role:\n**Direct login** (ROLE_GOVERNANCE, ROLE_SUPERVISOR, ROLE_NOC, etc.): Returns accessToken + optional refreshToken in the JSON body. Also sets HttpOnly cookies access_token and refresh_token automatically.\n**PKI nonce flow** (ROLE_COMMERCIAL_BANK, ROLE_TREASURY): Returns { \"nonce\": \"<hex>\" } only \u2014 no tokens, no cookies. The client must sign the nonce and complete login via POST /auth/wallet/bind.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"<string>\",\n  \"clientSecret\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Issue a new access token from a valid refresh token",
+          "request": {
+            "name": "Issue a new access token from a valid refresh token",
+            "description": {
+              "content": "Exchanges a valid refresh token for new access and refresh tokens. The response also renews the access_token and refresh_token HttpOnly cookies.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Revoke the current access token and clear auth cookies",
+          "request": {
+            "name": "Revoke the current access token and clear auth cookies",
+            "description": {
+              "content": "Revokes the access token at the identity provider (Keycloak). The token is read from the access_token HttpOnly cookie. On success, both access_token and refresh_token cookies are expired (MaxAge=-1).\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "logout"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Verify PKI login challenge and issue tokens",
+          "request": {
+            "name": "Verify PKI login challenge and issue tokens",
+            "description": {
+              "content": "Step 2 of the PKI authentication flow (public endpoint \u2014 no authentication required). The client submits the user_id, the DER-encoded ECDSA signature (hex) of the login nonce obtained from POST /auth/login, and the participant X.509 certificate PEM issued by the Central Bank CA. On success, access_token and refresh_token HttpOnly cookies are set in addition to the JSON response body.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "wallet",
+                "bind"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"<string>\",\n  \"nonce_signature_hex\": \"<string>\",\n  \"cert_pem\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": null
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Return the authenticated caller's token claims",
+          "request": {
+            "name": "Return the authenticated caller's token claims",
+            "description": {
+              "content": "Validates the bearer token (or access_token cookie) and returns the enriched claims embedded in the JWT by the identity service. Optional fields (wallet, country, bankId, privacyGroup) are only present when populated in the token.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "me"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "PKI re-login after onboarding (Commercial Bank proxy mode)",
+          "request": {
+            "name": "PKI re-login after onboarding (Commercial Bank proxy mode)",
+            "description": {
+              "content": "Available only on Commercial Bank gateways with a proxy handler. Reads the saved participant certificate from `PKI_DIR/{bankCode}-participant.crt`, then executes the two-step PKI login against the Central Bank: 1. POST /auth/login with user_id + client_secret \u2192 nonce 2. Sign nonce with P-256 key \u2192 POST /auth/wallet/bind \u2192 accessToken\nReturns the access token on success. Requires the participant to have completed onboarding (POST /onboarding/complete) so the certificate is on disk.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "pki-login"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"<string>\",\n  \"client_secret\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Rotate the clientSecret for the authenticated participant",
+          "request": {
+            "name": "Rotate the clientSecret for the authenticated participant",
+            "description": {
+              "content": "Allows an authenticated participant (ROLE_COMMERCIAL_BANK, ROLE_TREASURY) to rotate their own clientSecret. Requires a valid access_token cookie and knowledge of the current secret. After rotation the old clientSecret is immediately invalidated.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "client-secret",
+                "change"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_client_secret\": \"<string>\",\n  \"new_client_secret\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Compliance",
+      "description": "KYC credential issuance, verification, AML screening, and governance",
+      "item": [
+        {
+          "name": "Get KYC lifecycle status for a subject",
+          "request": {
+            "name": "Get KYC lifecycle status for a subject",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "compliance",
+                "kyc",
+                "status",
+                ":subject"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "type": "any",
+                  "value": "<string>",
+                  "key": "subject",
+                  "disabled": false,
+                  "description": {
+                    "content": "(Required) The userID or participant identifier",
+                    "type": "text/plain"
+                  }
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Approve KYC for a participant (GOVERNANCE only). Sets status to ACTIVE in PostgreSQL and calls setParticipant(wallet, role, true) on the ParticipantRegistry contract (Hyperledger Besu).\n",
+          "request": {
+            "name": "Approve KYC for a participant (GOVERNANCE only). Sets status to ACTIVE in PostgreSQL and calls setParticipant(wallet, role, true) on the ParticipantRegistry contract (Hyperledger Besu).\n",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "compliance",
+                "approve-kyc"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"<string>\",\n  \"reason\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "AML/CFT screening gate \u2014 checks if a subject is sanctioned. Returns 403 if FROZEN, REVOKED, or REJECTED (REQ-COM-007).\n",
+          "request": {
+            "name": "AML/CFT screening gate \u2014 checks if a subject is sanctioned. Returns 403 if FROZEN, REVOKED, or REJECTED (REQ-COM-007).\n",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "compliance",
+                "aml",
+                "screen"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Set KYC status for a participant (CENTRAL_BANK only). Used for initial approval, freeze, unfreeze, and revocation.\n",
+          "request": {
+            "name": "Set KYC status for a participant (CENTRAL_BANK only). Used for initial approval, freeze, unfreeze, and revocation.\n",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "compliance",
+                "participants",
+                "provision"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"<string>\",\n  \"status\": \"PENDING\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Freeze an account (CENTRAL_BANK only \u2014 REQ-COM-003, UT-API-16). Sets KYC status to FROZEN \u2014 all operations are suspended.\n",
+          "request": {
+            "name": "Freeze an account (CENTRAL_BANK only \u2014 REQ-COM-003, UT-API-16). Sets KYC status to FROZEN \u2014 all operations are suspended.\n",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "compliance",
+                "accounts",
+                "freeze"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Restore a frozen account to APPROVED status (CENTRAL_BANK only)",
+          "request": {
+            "name": "Restore a frozen account to APPROVED status (CENTRAL_BANK only)",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "compliance",
+                "accounts",
+                "unfreeze"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List registered participants (GOVERNANCE only)",
+          "request": {
+            "name": "List registered participants (GOVERNANCE only)",
+            "description": {
+              "content": "Returns all participants registered in the compliance-orchestrator database. Supports optional filtering by onboarding status and free-text search (institution name or legal entity ID, case-insensitive). Requires ROLE_GOVERNANCE.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "compliance",
+                "participants"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by participant onboarding status. If omitted, all statuses are returned. Invalid values return an empty list (no validation error).\n (This can only be one of PENDING,CREDENTIAL_REQUESTED,KYC_APPROVED,ACTIVE,FROZEN,REVOKED)",
+                    "type": "text/plain"
+                  },
+                  "key": "status",
+                  "value": "FROZEN"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Free-text search across institution_name and legal entity ID (case-insensitive ILIKE)",
+                    "type": "text/plain"
+                  },
+                  "key": "search",
+                  "value": "<string>"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Register a new participant (Commercial Bank or Treasury user) \u2014 CENTRAL_BANK only",
+          "request": {
+            "name": "Register a new participant (Commercial Bank or Treasury user) \u2014 CENTRAL_BANK only",
+            "description": {
+              "content": "Called by Central Bank administrators to onboard new Commercial Banks and Treasury users. The identity service creates a Keycloak user, optionally generates a KMS key pair, and optionally registers the wallet address on-chain in the ParticipantRegistry smart contract (signed with CB_PRIVATE_KEY).\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "compliance",
+                "register"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"<string>\",\n  \"email\": \"<email>\",\n  \"role\": \"ROLE_SUPERVISOR\",\n  \"institution_name\": \"<string>\",\n  \"country\": \"<string>\",\n  \"bank_code\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Onboarding",
+      "description": "3-phase PKI + Blockchain participant onboarding.\n**Central Bank mode** (public endpoints at /api/v1/onboarding/): Phase 1: Commercial bank submits CSR + blockchain public key. Phase 2.5: Poll for KYC approval and PoP nonce. Phase 3: Sign PoP nonce to prove wallet ownership, receive certificate and clientSecret. Recovery: GET /api/v1/onboarding/my-status \u2014 look up status from the JWT session (BankID claim); no request_id or query parameters needed.\n**Commercial Bank proxy mode** (protected endpoints at /api/v1/onboarding/): The commercial bank gateway proxies requests to the Central Bank. In smart mode (KMS + PKI configured), the proxy injects CSR, blockchain key, and PoP signature automatically \u2014 the frontend only sends metadata. GET /api/v1/onboarding/my-status with cookie \u2014 the proxy resolves the bank identity from the JWT BankID claim; the frontend sends no parameters.\n",
+      "item": [
+        {
+          "name": "Phase 1: Submit CSR and blockchain public key for credentialing",
+          "request": {
+            "name": "Phase 1: Submit CSR and blockchain public key for credentialing",
+            "description": {
+              "content": "Central Bank mode \u2014 public endpoint. A commercial bank submits its PKCS#10 CSR and secp256k1 blockchain public key to initiate the onboarding process. The Central Bank's identity service creates a Keycloak user and stores the credential request. Poll GET /api/v1/onboarding/status/{requestId} until KYC is approved.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "onboarding",
+                "credential-request"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"csr_pem\": \"<string>\",\n  \"blockchain_pub_key_hex\": \"<string>\",\n  \"role\": \"ROLE_TREASURY\",\n  \"username\": \"<string>\",\n  \"email\": \"<email>\",\n  \"institution_name\": \"<string>\",\n  \"legal_entity_id\": \"<string>\",\n  \"bank_code\": \"<string>\",\n  \"country\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Phase 2.5: Poll onboarding status and retrieve PoP nonce",
+          "request": {
+            "name": "Phase 2.5: Poll onboarding status and retrieve PoP nonce",
+            "description": {
+              "content": "Central Bank mode \u2014 public endpoint. The commercial bank polls this endpoint to discover when KYC approval has been granted. When approved, the response includes `pop_nonce` \u2014 a hex-encoded challenge that must be signed to prove wallet ownership (Phase 3).\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "onboarding",
+                "status",
+                ":requestId"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "type": "any",
+                  "value": "<string>",
+                  "key": "requestId",
+                  "disabled": false,
+                  "description": {
+                    "content": "(Required) Request ID returned by Phase 1 (POST /onboarding/credential-request)",
+                    "type": "text/plain"
+                  }
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Phase 3: Complete onboarding with PoP signature",
+          "request": {
+            "name": "Phase 3: Complete onboarding with PoP signature",
+            "description": {
+              "content": "Central Bank mode \u2014 public endpoint. The commercial bank signs the `pop_nonce` from Phase 2.5 with its secp256k1 private key and submits the signature. On success the CA issues an X.509 certificate and a one-time `client_secret` for future authentication. **Store the client_secret securely \u2014 it is not recoverable.**\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "onboarding",
+                "complete"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"<string>\",\n  \"pop_signature_hex\": \"<string>\",\n  \"blockchain_pub_key_hex\": \"<string>\",\n  \"request_id\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Recover onboarding status from JWT session (no parameters needed)",
+          "request": {
+            "name": "Recover onboarding status from JWT session (no parameters needed)",
+            "description": {
+              "content": "**Commercial Bank mode (primary use case)** \u2014 requires `access_token` cookie.\nThe frontend simply calls `GET /onboarding/my-status` with the session cookie. The backend resolves the bank identity from the JWT `BankID` claim (enriched during token validation from the compliance participant record) and proxies the lookup to the Central Bank. No query parameters are needed.\n**Central Bank mode** \u2014 public endpoint that accepts `bank_code` as a query parameter. Used internally by the proxy and by the governance portal when looking up a specific bank.\nIf `bank_code` is omitted on the Central Bank, the handler falls back to the JWT `BankID` claim (if the caller is authenticated).\nReturns `request_id`, `user_id`, and `status`. Sensitive fields such as `wallet_address` and `pop_nonce` are intentionally omitted from this recovery endpoint.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "onboarding",
+                "my-status"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Optional. Only required when calling the Central Bank endpoint directly (e.g. governance portal). On the Commercial Bank proxy, the bank identity is resolved from the JWT session \u2014 omit this parameter entirely.\n",
+                    "type": "text/plain"
+                  },
+                  "key": "bank_code",
+                  "value": "<string>"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Proxy: Initiate onboarding from Commercial Bank gateway",
+          "request": {
+            "name": "Proxy: Initiate onboarding from Commercial Bank gateway",
+            "description": {
+              "content": "Commercial Bank proxy mode \u2014 requires access_token cookie. Forwards the request to the Central Bank's POST /onboarding/credential-request.\nIn **smart mode** (KMS + PKI_DIR configured), the proxy automatically: 1. Reads the CSR from `PKI_DIR/{bankCode}.csr` 2. Creates/retrieves a secp256k1 key pair via KMS 3. Injects `csr_pem` and `blockchain_pub_key_hex` into the payload\nThe frontend only needs to send institution metadata.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "onboarding",
+                "initiate"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"institution_name\": \"<string>\",\n  \"bank_code\": \"<string>\",\n  \"country\": \"<string>\",\n  \"role\": \"ROLE_TREASURY\",\n  \"email\": \"<email>\",\n  \"username\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Governance",
+      "description": "Governance Portal \u2014 endpoints exclusive to the Central Bank (ROLE_GOVERNANCE). Participant registration, PKI certificate management, account control, circuit breaker, global parameters, audit logs, and user management.\n",
+      "item": [
+        {
+          "name": "Register a participant in the registry (without CSR)",
+          "request": {
+            "name": "Register a participant in the registry (without CSR)",
+            "description": {
+              "content": "Inserts a participant directly into the compliance-orchestrator database. Does not create a Keycloak user \u2014 use this endpoint when the Keycloak user already exists and you only want to insert/update the compliance record. To create the Keycloak user and register, use POST /api/v1/compliance/register.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "participants"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"<string>\",\n  \"role\": \"ROLE_TREASURY\",\n  \"institution_name\": \"<string>\",\n  \"legal_entity_id\": \"<string>\",\n  \"status\": \"PENDING\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List registered participants",
+          "request": {
+            "name": "List registered participants",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "registry"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by status (This can only be one of PENDING,ACTIVE,FROZEN,REVOKED)",
+                    "type": "text/plain"
+                  },
+                  "key": "status",
+                  "value": "FROZEN"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Search by name, legal entity ID, or user_id",
+                    "type": "text/plain"
+                  },
+                  "key": "search",
+                  "value": "<string>"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Sign a PKCS#10 CSR submitted by the participant (preferred flow)",
+          "request": {
+            "name": "Sign a PKCS#10 CSR submitted by the participant (preferred flow)",
+            "description": {
+              "content": "The participant generates their own ECDSA-P256 key pair locally, creates a PKCS#10 CSR, and delivers it to the Central Bank out-of-band. The Central Bank submits the CSR via this endpoint; the CA signs the certificate without ever seeing the participant's private key. The participant is registered with status PENDING until KYC approval (POST /api/v1/compliance/approve-kyc).\nPrerequisite: the participant's Keycloak user must already exist (created via POST /api/v1/compliance/register). The user_id in the payload is the UUID returned by that endpoint.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "registry",
+                "csr"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"csr_pem\": \"<string>\",\n  \"user_id\": \"<string>\",\n  \"role\": \"ROLE_TREASURY\",\n  \"institution_name\": \"<string>\",\n  \"legal_entity_id\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List accounts with operational status",
+          "request": {
+            "name": "List accounts with operational status",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "accounts"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Freeze a participant account",
+          "request": {
+            "name": "Freeze a participant account",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "accounts",
+                "freeze"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"<string>\",\n  \"reason\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Unfreeze a participant account",
+          "request": {
+            "name": "Unfreeze a participant account",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "accounts",
+                "unfreeze"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"<string>\",\n  \"reason\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get global circuit breaker status",
+          "request": {
+            "name": "Get global circuit breaker status",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "circuit-breaker",
+                "status"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Enable or disable the global circuit breaker",
+          "request": {
+            "name": "Enable or disable the global circuit breaker",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "circuit-breaker",
+                "toggle"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pause\": \"<boolean>\",\n  \"reason\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get global system parameters",
+          "request": {
+            "name": "Get global system parameters",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "parameters"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Update global system parameters",
+          "request": {
+            "name": "Update global system parameters",
+            "description": {
+              "content": "The `reason` field is required \u2014 returns 400 if absent.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "parameters"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"<string>\",\n  \"transaction_minimum\": \"<string>\",\n  \"transaction_maximum\": \"<string>\",\n  \"slippage_tolerance\": \"<float>\",\n  \"settlement_window\": \"<integer>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get audit logs",
+          "request": {
+            "name": "Get audit logs",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "audit",
+                "logs"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": " (This can only be one of SESSION,CREDENTIAL,FREEZE,CIRCUIT_BREAKER,PARAMETER,PARTICIPANT)",
+                    "type": "text/plain"
+                  },
+                  "key": "category",
+                  "value": "PARAMETER"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": " (This can only be one of INFO,WARNING,CRITICAL)",
+                    "type": "text/plain"
+                  },
+                  "key": "severity",
+                  "value": "WARNING"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "",
+                    "type": "text/plain"
+                  },
+                  "key": "from_date",
+                  "value": "<dateTime>"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "",
+                    "type": "text/plain"
+                  },
+                  "key": "to_date",
+                  "value": "<dateTime>"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "",
+                    "type": "text/plain"
+                  },
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "",
+                    "type": "text/plain"
+                  },
+                  "key": "limit",
+                  "value": "50"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List registered participants (user management)",
+          "request": {
+            "name": "List registered participants (user management)",
+            "description": {
+              "content": "Returns a paginated list of participants registered in the identity service (Keycloak). Supports filtering by role and status. Optional fields in each entry (institutionName, walletAddress, country, bankCode) are only present when populated.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "users"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by participant role (This can only be one of ROLE_COMMERCIAL_BANK,ROLE_TREASURY,ROLE_NOC,ROLE_SUPERVISOR,ROLE_GOVERNANCE_OFFICER)",
+                    "type": "text/plain"
+                  },
+                  "key": "role",
+                  "value": "ROLE_SUPERVISOR"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by participant status (This can only be one of PENDING,ACTIVE,FROZEN,REVOKED)",
+                    "type": "text/plain"
+                  },
+                  "key": "status",
+                  "value": "FROZEN"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get a specific participant profile",
+          "request": {
+            "name": "Get a specific participant profile",
+            "description": {
+              "content": "Returns the full profile of a single registered participant by their Keycloak UUID. Optional fields (email, institutionName, walletAddress, country, bankCode) are only present when populated.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "users",
+                ":userId"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "type": "any",
+                  "value": "<string>",
+                  "key": "userId",
+                  "disabled": false,
+                  "description": {
+                    "content": "(Required) Keycloak UUID of the participant",
+                    "type": "text/plain"
+                  }
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Approve a pending KYC request and register participant on-chain",
+          "request": {
+            "name": "Approve a pending KYC request and register participant on-chain",
+            "description": {
+              "content": "Approves a pending KYC credential request: validates the participant, registers them in the on-chain IdentityRegistry, and returns a PoP nonce for the participant to complete wallet binding. Requires ROLE_GOVERNANCE.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "governance",
+                "approve-kyc"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"<string>\",\n  \"reason\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "HTLC",
+      "description": "Hash Time-Locked Contract (HTLC) dual-layer operations. Coordinates public HTLC state on Hyperledger Besu with private token locking via Zeto/Paladin. Supports lock, settle (happy path), and refund (timeout path) lifecycle. These endpoints are only available when the payment orchestrator service is configured (PaymentHandler != nil).\n",
+      "item": [
+        {
+          "name": "Create a dual-layer HTLC lock",
+          "request": {
+            "name": "Create a dual-layer HTLC lock",
+            "description": {
+              "content": "Locks tokens via a Hash Time-Locked Contract. The secret is generated internally; a hash lock is derived from it. On the public layer (Besu) the HTLC coordination contract records the lock metadata, while on the private layer (Zeto/Paladin) the actual token amount is locked.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "htlc",
+                "lock"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"receiver\": \"<string>\",\n  \"amount\": \"<string>\",\n  \"agreement_id\": \"<string>\",\n  \"time_lock\": \"<long>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Settle an HTLC by revealing the secret",
+          "request": {
+            "name": "Settle an HTLC by revealing the secret",
+            "description": {
+              "content": "Happy-path settlement. The caller reveals the pre-image (secret) that hashes to the hash lock. The contract validates SHA-256(secret) == hashLock, then calls Zeto transferLocked() to release the privately locked tokens to the receiver.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "htlc",
+                "settle"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contract_id\": \"<string>\",\n  \"secret\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Refund an HTLC after timelock expiry",
+          "request": {
+            "name": "Refund an HTLC after timelock expiry",
+            "description": {
+              "content": "Timeout-path refund. If the timelock has expired and the secret was never revealed, the sender can reclaim the locked tokens via Zeto unlock().\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "htlc",
+                "refund"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contract_id\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get the status of a specific HTLC",
+          "request": {
+            "name": "Get the status of a specific HTLC",
+            "description": {
+              "content": "Returns the full HTLC lock record including state, hash lock, time lock, sender, receiver, and optionally the secret (only visible to the lock creator).\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "htlc",
+                "status",
+                ":contractId"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "type": "any",
+                  "value": "<string>",
+                  "key": "contractId",
+                  "disabled": false,
+                  "description": {
+                    "content": "(Required) HTLC contract identifier returned by POST /htlc/lock",
+                    "type": "text/plain"
+                  }
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Search HTLC locks by criteria",
+          "request": {
+            "name": "Search HTLC locks by criteria",
+            "description": {
+              "content": "Returns a list of HTLC lock records matching the provided filters. All query parameters are optional; when none are provided, all locks visible to the caller are returned.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "htlc",
+                "search"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by FX agreement identifier",
+                    "type": "text/plain"
+                  },
+                  "key": "agreement_id",
+                  "value": "<string>"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by sender identity",
+                    "type": "text/plain"
+                  },
+                  "key": "sender",
+                  "value": "<string>"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by receiver identity",
+                    "type": "text/plain"
+                  },
+                  "key": "receiver",
+                  "value": "<string>"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by HTLC state (This can only be one of LOCKED,SETTLED,REFUNDED)",
+                    "type": "text/plain"
+                  },
+                  "key": "state",
+                  "value": "REFUNDED"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Lock tokens with an externally supplied hash lock (responder leg)",
+          "request": {
+            "name": "Lock tokens with an externally supplied hash lock (responder leg)",
+            "description": {
+              "content": "Locks tokens using a hash_lock received from the cross-spoke initiator (out-of-band). Used by the **responding bank** in a cross-spoke atomic swap: the initiator calls `/htlc/lock` (generating the secret), shares the hash_lock off-chain, and the responder calls this endpoint.\nDefault time_lock is `now + 1800s` (30 minutes) \u2014 intentionally shorter than the initiator's lock (1 hour) so the responder can refund before the initiator if settlement stalls.\nNo secret is generated or stored locally; the secret is only known by the initiating bank.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "htlc",
+                "lock-with-hash"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"receiver\": \"<string>\",\n  \"amount\": \"<string>\",\n  \"hash_lock\": \"<string>\",\n  \"agreement_id\": \"<string>\",\n  \"time_lock\": \"<long>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Token",
+      "description": "Token operations \u2014 mint, transfer, and balance queries for tCeBM (tokenized Central Bank Money) via the Zeto privacy-preserving token system on Paladin sidecar. These endpoints are only available when the payment orchestrator service is configured (PaymentHandler != nil).\n",
+      "item": [
+        {
+          "name": "Mint tCeBM tokens",
+          "request": {
+            "name": "Mint tCeBM tokens",
+            "description": {
+              "content": "Issues new tCeBM (tokenized Central Bank Money) to the specified Paladin identity via the Zeto privacy-preserving token system.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "token",
+                "mint"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"<string>\",\n  \"amount\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Burn tCeBM tokens (Treasury only)",
+          "request": {
+            "name": "Burn tCeBM tokens (Treasury only)",
+            "description": {
+              "content": "Destroys tCeBM tokens via the Zeto withdraw flow. Restricted to ROLE_TREASURY on the Central Bank gateway.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "token",
+                "burn"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"<string>\",\n  \"amount\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Transfer tCeBM tokens",
+          "request": {
+            "name": "Transfer tCeBM tokens",
+            "description": {
+              "content": "Transfers tCeBM tokens to the specified Paladin identity via Zeto's privacy-preserving transfer mechanism.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "token",
+                "transfer"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"<string>\",\n  \"amount\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get token balance for the authenticated bank's Paladin identity",
+          "request": {
+            "name": "Get token balance for the authenticated bank's Paladin identity",
+            "description": {
+              "content": "Returns the tCeBM balance for the Paladin identity configured internally in the payment-orchestrator of the calling bank. No identity parameter is required or accepted.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "token",
+                "balance"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get fiat token balance for the authenticated bank's Besu operator",
+          "request": {
+            "name": "Get fiat token balance for the authenticated bank's Besu operator",
+            "description": {
+              "content": "Returns the fCeBM balance for the Besu operator address configured internally in the payment-orchestrator of the calling bank. No address parameter is required or accepted.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "token",
+                "fiat-balance"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Escrow",
+      "description": "Escrow lifecycle \u2014 deposit, tokenization (fCeBM \u2192 tCeBM), and redeem (tCeBM \u2192 fCeBM) operations. Covers the full lifecycle of converting fiat central bank money (ERC-20) to tokenized central bank money (Zeto privacy token) and back. Central Bank nodes process approve/ reject and fiat-exchange actions; commercial bank nodes proxy deposit, escrow, and redeem requests to the Central Bank.\n",
+      "item": [
+        {
+          "name": "Register a fiat deposit request",
+          "request": {
+            "name": "Register a fiat deposit request",
+            "description": {
+              "content": "Commercial bank registers intent to deposit fiat funds. The Central Bank creates a pending deposit record and returns a deposit ID.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "deposits"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"<string>\",\n  \"requester_besu_address\": \"<string>\",\n  \"requester_paladin_identity\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List deposits",
+          "request": {
+            "name": "List deposits",
+            "description": {
+              "content": "Returns all deposits, optionally filtered by requester_id.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "deposits"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by requester Besu address",
+                    "type": "text/plain"
+                  },
+                  "key": "requester_id",
+                  "value": "<string>"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Approve a pending deposit (Central Bank only)",
+          "request": {
+            "name": "Approve a pending deposit (Central Bank only)",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "deposits",
+                "approve"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deposit_id\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Reject a pending deposit (Central Bank only)",
+          "request": {
+            "name": "Reject a pending deposit (Central Bank only)",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "deposits",
+                "reject"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deposit_id\": \"<string>\",\n  \"reason\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Execute fiat exchange \u2014 mint fCeBM (Central Bank only)",
+          "request": {
+            "name": "Execute fiat exchange \u2014 mint fCeBM (Central Bank only)",
+            "description": {
+              "content": "After approving a deposit, the Central Bank triggers the fiat exchange: mints fCeBM (ERC-20) to the requester's Besu address on-chain.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "deposits",
+                "fiat-exchange"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deposit_id\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Request tokenization escrow (fCeBM \u2192 tCeBM)",
+          "request": {
+            "name": "Request tokenization escrow (fCeBM \u2192 tCeBM)",
+            "description": {
+              "content": "Request to convert fCeBM (fiat token, ERC-20 on Besu) into tCeBM (tokenized central bank money, Zeto privacy token on Paladin). The Central Bank will burn fCeBM and mint equivalent tCeBM.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "escrows"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"<string>\",\n  \"requester_besu_address\": \"<string>\",\n  \"requester_paladin_identity\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List escrow requests",
+          "request": {
+            "name": "List escrow requests",
+            "description": {
+              "content": "Returns all escrow requests, optionally filtered by requester_id.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "escrows"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by requester Besu address",
+                    "type": "text/plain"
+                  },
+                  "key": "requester_id",
+                  "value": "<string>"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Approve escrow \u2014 burn fCeBM + mint tCeBM (Central Bank only)",
+          "request": {
+            "name": "Approve escrow \u2014 burn fCeBM + mint tCeBM (Central Bank only)",
+            "description": {
+              "content": "Burns the requester's fCeBM on Besu and mints equivalent tCeBM via Zeto/Paladin to the requester's Paladin identity.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "escrows",
+                "approve"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"escrow_id\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Reject an escrow request (Central Bank only)",
+          "request": {
+            "name": "Reject an escrow request (Central Bank only)",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "escrows",
+                "reject"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"escrow_id\": \"<string>\",\n  \"reason\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Request redemption (tCeBM \u2192 fCeBM)",
+          "request": {
+            "name": "Request redemption (tCeBM \u2192 fCeBM)",
+            "description": {
+              "content": "Request to redeem tCeBM back into fCeBM. Commercial bank nodes first initiate a Zeto transfer of tCeBM to the Central Bank, then proxy the request with the transfer tx hash.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "redeems"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"<string>\",\n  \"zeto_transfer_tx_hash\": \"<string>\",\n  \"requester_besu_address\": \"<string>\",\n  \"requester_paladin_identity\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List redeem requests",
+          "request": {
+            "name": "List redeem requests",
+            "description": {
+              "content": "Returns all redeem requests, optionally filtered by requester_id.",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "redeems"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by requester Besu address",
+                    "type": "text/plain"
+                  },
+                  "key": "requester_id",
+                  "value": "<string>"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Approve redeem \u2014 mint fCeBM to requester (Central Bank only)",
+          "request": {
+            "name": "Approve redeem \u2014 mint fCeBM to requester (Central Bank only)",
+            "description": {
+              "content": "The Central Bank verifies the Zeto transfer was received, then mints equivalent fCeBM (ERC-20) to the requester's Besu address.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "redeems",
+                "approve"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"redeem_id\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Reject a redeem request \u2014 return tCeBM (Central Bank only)",
+          "request": {
+            "name": "Reject a redeem request \u2014 return tCeBM (Central Bank only)",
+            "description": {
+              "content": "Rejects the redeem request and transfers the tCeBM back to the requester's Paladin identity via Zeto.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "redeems",
+                "reject"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"redeem_id\": \"<string>\",\n  \"reason\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "FX Agreements",
+      "description": "Foreign exchange agreement lifecycle for cross-spoke settlement. A commercial bank proposes an FX agreement specifying origin/counter amounts, currencies, exchange rate, and expiry. The counterparty accepts or rejects. Once accepted, each leg is settled via a paired HTLC lock (LockHTLC on Spoke-A, LockHTLCWithHashLock on Spoke-B). When the initiator reveals the secret on Spoke-A the Cacti relay broadcasts it to Spoke-B for automatic settlement.\nState machine: PROPOSED \u2192 ACCEPTED \u2192 SETTLED (happy path)\n               PROPOSED \u2192 REJECTED (terminal)\n               PROPOSED|ACCEPTED \u2192 CANCELLED (terminal)\n\nThese endpoints require the payment orchestrator service to be configured.\n",
+      "item": [
+        {
+          "name": "Propose a new FX agreement",
+          "request": {
+            "name": "Propose a new FX agreement",
+            "description": {
+              "content": "Creates a new FX agreement in PROPOSED state. The counterparty must accept via `/payments/fx/agreements/{tradeId}/accept` before any HTLC locks can be associated.\nRate consistency is validated: `|counter_amount/origin_amount - rate|` must be \u2264 `FX_RATE_TOLERANCE_PCT` (default 0.1%).\n`expiry_date` must be a future Unix timestamp (seconds). `origin_currency` and `counter_currency` must differ.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "fx",
+                "agreements"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"counterparty_b\": \"<string>\",\n  \"origin_amount\": \"<string>\",\n  \"counter_amount\": \"<string>\",\n  \"origin_currency\": \"<string>\",\n  \"counter_currency\": \"<string>\",\n  \"rate\": \"<string>\",\n  \"expiry_date\": \"<long>\",\n  \"trade_id\": \"<string>\",\n  \"originator\": \"<string>\",\n  \"settlement_agent\": \"<string>\",\n  \"custodian\": \"<string>\",\n  \"beneficiary\": \"<string>\",\n  \"on_behalf\": false,\n  \"source_spoke_id\": \"<string>\",\n  \"dest_spoke_id\": \"<string>\",\n  \"source_receiver\": \"<string>\",\n  \"dest_receiver\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List FX agreements",
+          "request": {
+            "name": "List FX agreements",
+            "description": {
+              "content": "Returns all FX agreements accessible to the caller, ordered by creation time descending. Optionally filter by counterparty identity or agreement state.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "fx",
+                "agreements"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by originator or counterparty_b Paladin identity",
+                    "type": "text/plain"
+                  },
+                  "key": "counterparty",
+                  "value": "<string>"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by agreement state (This can only be one of PROPOSED,ACCEPTED,REJECTED,CANCELLED,SETTLED)",
+                    "type": "text/plain"
+                  },
+                  "key": "state",
+                  "value": "CANCELLED"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get a single FX agreement",
+          "request": {
+            "name": "Get a single FX agreement",
+            "description": {},
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "fx",
+                "agreements",
+                ":tradeId"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "type": "any",
+                  "value": "<string>",
+                  "key": "tradeId",
+                  "disabled": false,
+                  "description": {
+                    "content": "(Required) Trade identifier returned by proposeFXAgreement",
+                    "type": "text/plain"
+                  }
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Accept a proposed FX agreement",
+          "request": {
+            "name": "Accept a proposed FX agreement",
+            "description": {
+              "content": "Transitions the agreement from PROPOSED \u2192 ACCEPTED. Only the counterparty_b party (or a governance actor using `on_behalf`) can accept. Once accepted, both spokes may proceed with HTLC locks.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "fx",
+                "agreements",
+                ":tradeId",
+                "accept"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "type": "any",
+                  "value": "<string>",
+                  "key": "tradeId",
+                  "disabled": false,
+                  "description": {
+                    "content": "(Required) ",
+                    "type": "text/plain"
+                  }
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"on_behalf\": false\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Reject a proposed FX agreement",
+          "request": {
+            "name": "Reject a proposed FX agreement",
+            "description": {
+              "content": "Transitions the agreement from PROPOSED \u2192 REJECTED (terminal state). The counterparty_b party or governance actor (on_behalf) may reject.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "fx",
+                "agreements",
+                ":tradeId",
+                "reject"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "type": "any",
+                  "value": "<string>",
+                  "key": "tradeId",
+                  "disabled": false,
+                  "description": {
+                    "content": "(Required) ",
+                    "type": "text/plain"
+                  }
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"on_behalf\": false\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Cancel a proposed or accepted FX agreement",
+          "request": {
+            "name": "Cancel a proposed or accepted FX agreement",
+            "description": {
+              "content": "Transitions the agreement to CANCELLED (terminal state). Valid from PROPOSED or ACCEPTED states. Typically called by the originator when the deal falls through.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "fx",
+                "agreements",
+                ":tradeId",
+                "cancel"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "type": "any",
+                  "value": "<string>",
+                  "key": "tradeId",
+                  "disabled": false,
+                  "description": {
+                    "content": "(Required) ",
+                    "type": "text/plain"
+                  }
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Settle an accepted FX agreement",
+          "request": {
+            "name": "Settle an accepted FX agreement",
+            "description": {
+              "content": "Transitions the agreement from ACCEPTED \u2192 SETTLED (terminal state). In normal cross-spoke flows this is triggered automatically by the Cacti relay after both HTLC locks are settled. Can also be called manually when Pente integration is not active.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "fx",
+                "agreements",
+                ":tradeId",
+                "settle"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "type": "any",
+                  "value": "<string>",
+                  "key": "tradeId",
+                  "disabled": false,
+                  "description": {
+                    "content": "(Required) ",
+                    "type": "text/plain"
+                  }
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get the audit event trail of an FX agreement",
+          "request": {
+            "name": "Get the audit event trail of an FX agreement",
+            "description": {
+              "content": "Returns the immutable, append-only event log for the given agreement, ordered by occurrence time ascending. Each entry records a state transition, the actor that triggered it, and optional on-chain tx hash.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "fx",
+                "agreements",
+                ":tradeId",
+                "audit"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "type": "any",
+                  "value": "<string>",
+                  "key": "tradeId",
+                  "disabled": false,
+                  "description": {
+                    "content": "(Required) ",
+                    "type": "text/plain"
+                  }
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Supervisor",
+      "description": "Supervisor Portal \u2014 read-only audit log access and regulatory transaction decryption. All endpoints require ROLE_SUPERVISOR. The audit log endpoint mirrors the governance audit log but is scoped to the supervisor's read-only view. DecryptTransaction requires a QUORUM_REACHED disclosure request (2-of-N signatures) before revealing private Zeto state.\n",
+      "item": [
+        {
+          "name": "Get compliance audit logs (ROLE_SUPERVISOR)",
+          "request": {
+            "name": "Get compliance audit logs (ROLE_SUPERVISOR)",
+            "description": {
+              "content": "Read-only audit log access for supervisors. Returns paginated compliance audit log entries. Mirrors the governance audit log but requires ROLE_SUPERVISOR instead of ROLE_GOVERNANCE.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "compliance",
+                "audit",
+                "logs"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": " (This can only be one of SESSION,CREDENTIAL,FREEZE,CIRCUIT_BREAKER,PARAMETER,PARTICIPANT)",
+                    "type": "text/plain"
+                  },
+                  "key": "category",
+                  "value": "PARAMETER"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": " (This can only be one of INFO,WARNING,CRITICAL)",
+                    "type": "text/plain"
+                  },
+                  "key": "severity",
+                  "value": "WARNING"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "",
+                    "type": "text/plain"
+                  },
+                  "key": "from_date",
+                  "value": "<dateTime>"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "",
+                    "type": "text/plain"
+                  },
+                  "key": "to_date",
+                  "value": "<dateTime>"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "",
+                    "type": "text/plain"
+                  },
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "",
+                    "type": "text/plain"
+                  },
+                  "key": "limit",
+                  "value": "20"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Decrypt a private Zeto transaction (ROLE_SUPERVISOR, quorum gate)",
+          "request": {
+            "name": "Decrypt a private Zeto transaction (ROLE_SUPERVISOR, quorum gate)",
+            "description": {
+              "content": "Reveals the private Zeto token state (amount, sender, receiver) for an HTLC identified by its contract ID. **Requires a QUORUM_REACHED disclosure request** (2-of-N signatures via the Oversight module) for the same HTLC contract ID before this endpoint will proceed.\nThe handler resolves the on-chain `zeto_lock_ref` from the HTLC scanner, then calls Paladin `ptx_getStateReceipt` to read the private UTXO state. An immutable audit log entry is written regardless of the outcome.\nReturns 501 if PALADIN_URL, the oversight database, or the HTLC scanner are not configured.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "compliance",
+                "decrypt-transaction"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tx_hash\": \"<string>\",\n  \"view_key\": \"<string>\",\n  \"reason\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List participants summary (ROLE_SUPERVISOR, read-only)",
+          "request": {
+            "name": "List participants summary (ROLE_SUPERVISOR, read-only)",
+            "description": {
+              "content": "Returns all participants registered in the compliance-orchestrator database. Same data as GET /api/v1/compliance/participants (ROLE_GOVERNANCE) but accessible to supervisors (ROLE_SUPERVISOR) in read-only mode. Supports optional filtering by onboarding status and free-text search.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "compliance",
+                "participants",
+                "summary"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by participant onboarding status (This can only be one of PENDING,CREDENTIAL_REQUESTED,KYC_APPROVED,ACTIVE,FROZEN,REVOKED)",
+                    "type": "text/plain"
+                  },
+                  "key": "status",
+                  "value": "FROZEN"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Free-text search across institution_name and legal entity ID (case-insensitive)",
+                    "type": "text/plain"
+                  },
+                  "key": "search",
+                  "value": "<string>"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Oversight",
+      "description": "Investigation Module \u2014 AML/CFT disclosure requests (FR-034/FR-035/FR-036). All endpoints require ROLE_SUPERVISOR. A supervisor opens a disclosure request referencing an HTLC contract ID, other supervisors sign it, and once quorum (2-of-N) is reached the DecryptTransaction endpoint is unlocked.\n",
+      "item": [
+        {
+          "name": "Open an AML/CFT disclosure request (FR-034)",
+          "request": {
+            "name": "Open an AML/CFT disclosure request (FR-034)",
+            "description": {
+              "content": "Creates a new pending disclosure request referencing an HTLC contract ID. The request expires after 72 hours. Once a quorum of supervisor signatures (2-of-N, see POST /api/v1/oversight/disclosure-sign) is collected the request state becomes QUORUM_REACHED and the decrypt endpoint is unlocked.\nValid reason codes: `AML_ALERT`, `CFT_INVESTIGATION`, `COURT_ORDER`, `REGULATORY_EXAM`.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "oversight",
+                "disclosure-request"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tx_ref\": \"<string>\",\n  \"requestor_id\": \"<string>\",\n  \"reason_code\": \"CFT_INVESTIGATION\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Co-sign a pending disclosure request (FR-035)",
+          "request": {
+            "name": "Co-sign a pending disclosure request (FR-035)",
+            "description": {
+              "content": "Adds a supervisor's signature to a pending disclosure request. Each supervisor can sign at most once. When the quorum threshold (2-of-N) is reached the request state transitions to QUORUM_REACHED automatically, unlocking POST /api/v1/compliance/decrypt-transaction.\nReturns 400 if the request is not in PENDING state, already signed by the same signer, or has expired.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "oversight",
+                "disclosure-sign"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"<string>\",\n  \"signer_id\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Get the status of a disclosure request (FR-036)",
+          "request": {
+            "name": "Get the status of a disclosure request (FR-036)",
+            "description": {
+              "content": "Returns the full state of a disclosure request: request ID, target transaction reference, reason code, current state, quorum counters, and timestamps. Use this to poll for QUORUM_REACHED before calling DecryptTransaction.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "oversight",
+                "disclosure-status",
+                ":requestID"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "type": "any",
+                  "value": "<string>",
+                  "key": "requestID",
+                  "disabled": false,
+                  "description": {
+                    "content": "(Required) UUID of the disclosure request",
+                    "type": "text/plain"
+                  }
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Treasury",
+      "description": "Treasury Portal \u2014 transfer limit management. All endpoints require ROLE_TREASURY and are only available on Central Bank gateways (not registered on Commercial Bank gateways). Implements R1-10.1.\n",
+      "item": [
+        {
+          "name": "Create a transfer limit for a participant (ROLE_TREASURY)",
+          "request": {
+            "name": "Create a transfer limit for a participant (ROLE_TREASURY)",
+            "description": {
+              "content": "Configures a maximum daily transfer limit for a specific participant and currency. Requires ROLE_TREASURY and is only available on Central Bank gateways. Implements R1-10.1.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "treasury",
+                "transfer-limits"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"max_amount\": \"<string>\",\n  \"participant_id\": \"<string>\",\n  \"currency\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "List transfer limits (ROLE_TREASURY)",
+          "request": {
+            "name": "List transfer limits (ROLE_TREASURY)",
+            "description": {
+              "content": "Returns all configured transfer limits, optionally filtered by central_bank_id. Requires ROLE_TREASURY.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "treasury",
+                "transfer-limits"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by central bank identifier (optional)",
+                    "type": "text/plain"
+                  },
+                  "key": "central_bank_id",
+                  "value": "<string>"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Delete a transfer limit (ROLE_TREASURY)",
+          "request": {
+            "name": "Delete a transfer limit (ROLE_TREASURY)",
+            "description": {
+              "content": "Removes a transfer limit configuration by its ID. Requires ROLE_TREASURY. Returns 204 No Content on success.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "v1",
+                "treasury",
+                "transfer-limits",
+                ":id"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "type": "any",
+                  "value": "<string>",
+                  "key": "id",
+                  "disabled": false,
+                  "description": {
+                    "content": "(Required) Transfer limit identifier",
+                    "type": "text/plain"
+                  }
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "DELETE",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "access_token"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Internal",
+      "description": "Internal relay endpoints consumed by the Hyperledger Cacti cross-spoke bridge. These endpoints are NOT intended for direct client use.\n**Authentication:** All /internal/v1/ endpoints require the `X-Relay-Auth` HTTP header containing the shared secret configured via the `INTERNAL_RELAY_AUTH_SECRET` environment variable. Requests without a valid header receive HTTP 401.\nThe relay uses these endpoints to: - Register deposit/escrow/redeem events initiated on the counterpart spoke - Deliver FX agreement state changes across spokes (idempotent via\n  deduplication key `${action}:${tradeId}`)\n",
+      "item": [
+        {
+          "name": "[Relay] Register a deposit initiated on the counterpart spoke",
+          "request": {
+            "name": "[Relay] Register a deposit initiated on the counterpart spoke",
+            "description": {
+              "content": "Called by the Cacti relay to register a cross-spoke deposit event. Requires `X-Relay-Auth` header matching `INTERNAL_RELAY_AUTH_SECRET`.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "internal",
+                "v1",
+                "payments",
+                "deposits"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requester_besu_address\": \"<string>\",\n  \"amount\": \"<string>\",\n  \"requester_paladin_identity\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-Relay-Auth"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "[Relay] List deposits visible to the relay",
+          "request": {
+            "name": "[Relay] List deposits visible to the relay",
+            "description": {},
+            "url": {
+              "path": [
+                "internal",
+                "v1",
+                "payments",
+                "deposits"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by requester Besu address",
+                    "type": "text/plain"
+                  },
+                  "key": "requester_id",
+                  "value": "<string>"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-Relay-Auth"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "[Relay] Register an escrow request from the counterpart spoke",
+          "request": {
+            "name": "[Relay] Register an escrow request from the counterpart spoke",
+            "description": {},
+            "url": {
+              "path": [
+                "internal",
+                "v1",
+                "payments",
+                "escrows"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requester_besu_address\": \"<string>\",\n  \"amount\": \"<string>\",\n  \"requester_paladin_identity\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-Relay-Auth"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "[Relay] List escrow requests visible to the relay",
+          "request": {
+            "name": "[Relay] List escrow requests visible to the relay",
+            "description": {},
+            "url": {
+              "path": [
+                "internal",
+                "v1",
+                "payments",
+                "escrows"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "",
+                    "type": "text/plain"
+                  },
+                  "key": "requester_id",
+                  "value": "<string>"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-Relay-Auth"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "[Relay] Register a redeem request from the counterpart spoke",
+          "request": {
+            "name": "[Relay] Register a redeem request from the counterpart spoke",
+            "description": {},
+            "url": {
+              "path": [
+                "internal",
+                "v1",
+                "payments",
+                "redeems"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requester_besu_address\": \"<string>\",\n  \"amount\": \"<string>\",\n  \"zeto_transfer_tx_hash\": \"<string>\",\n  \"requester_paladin_identity\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-Relay-Auth"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "[Relay] List redeem requests visible to the relay",
+          "request": {
+            "name": "[Relay] List redeem requests visible to the relay",
+            "description": {},
+            "url": {
+              "path": [
+                "internal",
+                "v1",
+                "payments",
+                "redeems"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "",
+                    "type": "text/plain"
+                  },
+                  "key": "requester_id",
+                  "value": "<string>"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-Relay-Auth"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "[Relay] List FX agreements for cross-spoke delivery tracking",
+          "request": {
+            "name": "[Relay] List FX agreements for cross-spoke delivery tracking",
+            "description": {
+              "content": "Used by the Cacti relay to query FX agreements on the counterpart spoke for state reconciliation and idempotent event delivery.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "internal",
+                "v1",
+                "payments",
+                "fx",
+                "agreements"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "Filter by originator or counterparty_b identity",
+                    "type": "text/plain"
+                  },
+                  "key": "counterparty",
+                  "value": "<string>"
+                },
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": " (This can only be one of PROPOSED,ACCEPTED,REJECTED,CANCELLED,SETTLED)",
+                    "type": "text/plain"
+                  },
+                  "key": "state",
+                  "value": "CANCELLED"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-Relay-Auth"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}"
+                },
+                {
+                  "key": "in",
+                  "value": "header"
+                }
+              ]
+            }
+          },
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    }
+  ],
+  "event": [],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    }
+  ],
+  "info": {
+    "name": "CBWeb3 API Gateway \u2014 Scenario A \u2014 Enhanced Correspondent Banking",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": {
+      "content": "OpenAPI specification for the CBWeb3 platform API Gateway. Implements authentication, participant onboarding, KYC/AML compliance, governance operations over the identity service (Keycloak + KMS), payment orchestrator operations (HTLC dual-layer + Zeto token management via Paladin sidecar + escrow deposit/tokenization/redeem lifecycle), FX agreement lifecycle (propose/accept/reject/cancel/settle with cross-spoke relay delivery tracking), and internal relay endpoints consumed by the Hyperledger Cacti cross-spoke bridge.\nSecurity note: All /compliance and /governance write endpoints require CENTRAL_BANK or GOVERNANCE role. Payment endpoints (HTLC, Token, FX) are only available when the payment orchestrator service is configured. Internal (/internal/v1/) endpoints require X-Relay-Auth header.\n",
+      "type": "text/plain"
+    }
+  }
+}
