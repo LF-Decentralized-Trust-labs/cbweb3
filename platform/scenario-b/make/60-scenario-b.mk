@@ -325,11 +325,23 @@ scenario-b.perf-soak:
 	 DURATION=$${DURATION:-12h} \
 	 bash tests/performance/run-soak.sh
 
-# ── OpenAPI validation (T108) ────────────────────────────────────────────────
+# ── API artifacts: OpenAPI validation + Postman generation (T108, R1-§8) ─────
+#
+# apis/postman/generate.sh is the supported entry point and the one CI runs —
+# these three targets are thin aliases for its modes, kept because the surrounding
+# make surface still documents them. It pins redocly and the Postman converter to
+# exact versions; the previous target linted an unwired fragment with @latest and,
+# because of a `||` guard, skipped linting entirely whenever redocly was installed.
 
 scenario-b.validate-openapi:
-	@command -v redocly >/dev/null 2>&1 || npx --yes @redocly/cli@latest lint \
-		backend/services/api-gateway/openapi/v2/scenario-b.yaml
+	@bash apis/postman/generate.sh --lint-only
+
+scenario-b.gen-postman:
+	@bash apis/postman/generate.sh
+
+# Fails when the committed collection no longer matches the served spec.
+scenario-b.check-postman:
+	@bash apis/postman/generate.sh --check
 
 .PHONY: \
 	scenario-b.up-infra scenario-b.down-infra \
@@ -344,5 +356,6 @@ scenario-b.validate-openapi:
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
 	scenario-b.test-integration evidence.e2e-b \
 	scenario-b.perf-baseline scenario-b.validate-openapi \
+	scenario-b.gen-postman scenario-b.check-postman \
 	scenario-b.perf-amm-throughput scenario-b.perf-transfer \
 	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all scenario-b.perf-smoke

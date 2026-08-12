@@ -28,7 +28,12 @@ const swaggerHTML = `<!doctype html>
     <script>
       window.ui = SwaggerUIBundle({
         url: "/openapi.yaml",
-        dom_id: "#swagger-ui"
+        dom_id: "#swagger-ui",
+        // Null disables Swagger UI's online spec validator. Left unset, the bundle
+        // posts the gateway's spec URL to the hosted validator on every /docs load,
+        // and only suppresses that when the URL resolves to localhost — so any other
+        // host would call out. This keeps the page air-gapped everywhere.
+        validatorUrl: null
       });
     </script>
   </body>

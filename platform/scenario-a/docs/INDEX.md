@@ -50,7 +50,7 @@ curl http://localhost:58080/healthz   # central-bank-a
 |----------|-------------|
 | [runbooks/configuration-reference.md](runbooks/configuration-reference.md) | Complete environment variable reference by component: infra, api-gateway, auth, compliance, payment-orchestrator, contracts, frontend, NOC, Paladin — across all 6 entities |
 | [runbooks/contract-configuration.md](runbooks/contract-configuration.md) | Smart contract deployment parameters, on-chain RBAC roles (IdentityRegistry, tCeBM, HTLC), Keycloak realm/client/role setup, PKI certificate structure, and post-deployment checklist |
-| [../apis/openapi/api-gateway.yaml](../apis/openapi/api-gateway.yaml) | OpenAPI 3.0 specification — v2.3.0, 75 operations, all public and internal api-gateway endpoints |
+| [../apis/openapi/api-gateway.yaml](../apis/openapi/api-gateway.yaml) | OpenAPI 3.0 specification — v2.3.0, 83 operations, all public and internal api-gateway endpoints |
 | [../apis/README.md](../apis/README.md) | API index with endpoint summary table and usage guide |
 
 ---

@@ -515,7 +515,7 @@ The k6 script (`scenario-b/tests/performance/scenario-b-perf.js`) runs three con
 
 ### API Security (OWASP Controls)
 
-All endpoints defined in the Scenario B OpenAPI spec (`scenario-b/apis/openapi/amm.yaml`) are subject to:
+All endpoints defined in the Scenario B OpenAPI spec (`scenario-b/backend/services/api-gateway/docs/openapi.yaml` — the spec the gateway serves at `GET /openapi.yaml`) are subject to:
 
 | Control | Test |
 |---------|------|
