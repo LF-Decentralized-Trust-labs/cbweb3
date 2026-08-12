@@ -244,7 +244,7 @@ Declarative provisioning toolkit for the Scenario B hub-and-spoke topology, used
 | Orchestration engine + `found-hub` steps + hub bundle + `apply` CLI — TK-B6 | Implemented |
 | `found-spoke` mode (register-cb + spoke contracts + Keycloak + register-relay-spoke + soft add-noc-agent) + spoke bundle emitter — TK-B7 | Implemented |
 | `join` mode (non-validating full node: write-genesis + wait-sync + gen-csr; canonical flow, no relay/noc) — TK-B8 | Implemented |
-| Sovereign-pair tail (open-sovereign-pair + commit-liquidity + seed-oracle; soft, driven by `spec.pair`, strict sovereignty) — TK-B9 | Implemented |
+| Sovereign-pair corridors — **not** a provisioning step: opened at runtime as two independent sovereign acts (one CB proposes via the governance portal, the counterparty confirms), after which each CB commits its own liquidity — TK-B9 | Implemented (runtime, not `apply`) |
 | Full-pipeline E2E (swap + breaker + SpokeBridge) + toolkit-native perf baseline + E2E-STATUS — TK-B10 | Implemented |
 | NOC observability integration (`observe` mode) — TK-B11 | Implemented |
 | Production `CertSource`/`KeyProvider` (KMS/CA), auth-per-CB relay, threshold-gated baseline | Planned |

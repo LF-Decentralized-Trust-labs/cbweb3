@@ -1,9 +1,23 @@
 # CBWeb3 - System Components Documentation
 
+Description of the CBWeb3 component diagram and its layers.
 
-Description of the CBWeb3 component diagram and its layers
-
-
+> **Scope: conceptual reference architecture, not the implemented system.**
+>
+> This document describes the target component model behind the CBWeb3 component
+> diagram. Several layers below — the Paladin privacy layer (Noto and Zeto domains,
+> the private AMM domain, the ZK proof engine) and the WebSocket gateway — have **no
+> counterpart in the Scenario B code**: there are no `ZetoToken`/`NotoToken` contracts
+> under `scenario-b/contracts/src`, no Paladin privacy-layer integration in the Go
+> services (the `noc-agent` health-checks a Paladin node as a monitored component type,
+> which is observability, not a privacy path), and no WebSocket transport in the API
+> gateway. Read this as the reference model; read
+> [`scenario-b/README.md`](../../README.md) for what is actually built and running.
+>
+> Where a component **does** exist, the technology entries below name the implemented
+> stack: Go microservices, gRPC intra-entity, REST through the gateway. Anything
+> describing a Node.js or NestJS runtime has been corrected — the platform has never
+> been implemented on one.
 
 ## System Layers
 
@@ -127,10 +141,18 @@ The API layer acts as a single entry point for all communications between fronte
 - **Authorization:** Role-based permission verification (RBAC)
 - **Rate Limiting:** Request limit control per central bank
 - **Routing:** Request distribution to appropriate microservices
-- **Validation:** ISO 20022 message verification
+- **Validation:** Request-schema validation against the platform's internal data model
+- **ISO 20022 boundary mapping:** Payloads crossing the system boundary are constrained
+  to map explicitly onto ISO 20022 business concepts. ISO 20022 is a **semantic
+  interoperability reference**, not an internal or on-chain message format: internal
+  data models and contract states stay optimised for deterministic execution,
+  auditability and confidentiality on the permissioned ledger. The gateway does not
+  perform runtime ISO 20022 message verification.
 - **Logging:** Recording all requests for audit
 
-**Technology:** NestJS with `@nestjs/microservices`
+**Technology:** Go with [Fiber v2](https://github.com/gofiber/fiber) for HTTP and
+gRPC (`google.golang.org/grpc`) to the internal services — see
+`scenario-b/backend/services/api-gateway/go.mod`.
 
 **Main Endpoints:**
 - `/api/v1/settlements` - Settlement operations
@@ -141,7 +163,7 @@ The API layer acts as a single entry point for all communications between fronte
 
 ---
 
-#### 2.2 WebSocket Gateway
+#### 2.2 WebSocket Gateway *(reference model — not implemented)*
 
 **Purpose:** Real-time bidirectional communication
 
@@ -152,7 +174,10 @@ The API layer acts as a single entry point for all communications between fronte
 - **Health metrics:** Node and corridor status
 - **Paladin events:** Private transaction states
 
-**Technology:** Socket.io with `@nestjs/platform-socket.io`
+**Technology:** Not implemented. The API gateway carries no WebSocket transport
+today; the portals poll REST endpoints for the events listed above. Should this
+component be built, it belongs in the Go gateway alongside the REST routes — not in
+a separate Node.js runtime.
 
 **Namespaces (channels):**
 - `/treasury` - Treasury events
@@ -346,7 +371,16 @@ Ensures cross-chain transactions are atomic (all or nothing).
 
 ---
 
-### 5. Paladin Privacy Layer 
+### 5. Paladin Privacy Layer *(reference model — not implemented in Scenario B)*
+
+> Scenario B has no `ZetoToken`/`NotoToken` contracts and no Paladin privacy-layer
+> integration in its Go services — no domain client, no private-state handling, no
+> proof generation. (The `noc-agent` can health-check a Paladin node as a monitored
+> component type; that is observability only.)
+> Privacy in Scenario B today rests on network permissioning and the
+> tCeBM/fCeBM token model; the Paladin domains below are the target design, retained
+> here for the reference architecture. Scenario A is where Paladin/Zeto is implemented.
+
 
 **Hyperledger Paladin** is the privacy framework that acts as an intermediate layer between the Hub & Spoke and Besu networks, enabling confidential transactions and zero-knowledge proofs.
 

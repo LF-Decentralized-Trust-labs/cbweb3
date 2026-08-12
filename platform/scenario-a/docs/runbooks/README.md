@@ -53,4 +53,9 @@ curl http://localhost:8081/realms/master | jq .realm
 | Scenario | Deployment | Configuration |
 |----------|-----------|---------------|
 | **Scenario A** (Enhanced Correspondent Banking) | Documented and runnable | Documented |
-| **Scenario B** (International Hub + AMM) | Pending — section reserved in each runbook | Pending — planned variables documented |
+| **Scenario B** (International Hub + AMM) | Implemented — documented in [`scenario-b/docs/runbooks/`](../../../scenario-b/docs/runbooks/) | Documented in Scenario B's own runbooks |
+
+> These runbooks cover **Scenario A only**. Scenario B is a separate product with its
+> own contracts, services, provisioning toolkit and runbook set; scenario isolation is
+> a constitutional rule of this repository. Each Scenario B section below points there
+> rather than duplicating it.
