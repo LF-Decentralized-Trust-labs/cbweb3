@@ -326,21 +326,22 @@ scenario-b.perf-soak:
 	 bash tests/performance/run-soak.sh
 
 # ── API artifacts: OpenAPI validation + Postman generation (T108, R1-§8) ─────
+#
+# apis/postman/generate.sh is the supported entry point and the one CI runs —
+# these three targets are thin aliases for its modes, kept because the surrounding
+# make surface still documents them. It pins redocly and the Postman converter to
+# exact versions; the previous target linted an unwired fragment with @latest and,
+# because of a `||` guard, skipped linting entirely whenever redocly was installed.
 
-# Lint the served/embedded OpenAPI spec — the single source of truth that the
-# gateway serves at /openapi.yaml + /docs. The previous target pointed at the
-# unwired openapi/v2/scenario-b.yaml fragment and, because of the `||` guard,
-# skipped linting entirely whenever redocly was already installed. The minimal
-# ruleset gates on structural OpenAPI 3.0 compliance (parse failures, broken
-# $ref) without failing the build on pre-existing stylistic warnings.
 scenario-b.validate-openapi:
-	@npx --yes @redocly/cli@latest lint --extends minimal \
-		backend/services/api-gateway/docs/openapi.yaml
+	@bash apis/postman/generate.sh --lint-only
 
-# Regenerate the Postman collection from the served OpenAPI spec so it stays in
-# sync with the delivered API surface. Runs fully locally (no CDN/hosted svc).
 scenario-b.gen-postman:
 	@bash apis/postman/generate.sh
+
+# Fails when the committed collection no longer matches the served spec.
+scenario-b.check-postman:
+	@bash apis/postman/generate.sh --check
 
 .PHONY: \
 	scenario-b.up-infra scenario-b.down-infra \
@@ -354,6 +355,7 @@ scenario-b.gen-postman:
 	scenario-b.test-contracts scenario-b.test-backend scenario-b.test \
 	scenario-b.tryout scenario-b.tryout-us1 scenario-b.tryout-us2 scenario-b.tryout-us3 \
 	scenario-b.test-integration evidence.e2e-b \
-	scenario-b.perf-baseline scenario-b.validate-openapi scenario-b.gen-postman \
+	scenario-b.perf-baseline scenario-b.validate-openapi \
+	scenario-b.gen-postman scenario-b.check-postman \
 	scenario-b.perf-amm-throughput scenario-b.perf-transfer \
 	scenario-b.perf-zeto scenario-b.perf-soak scenario-b.perf-all scenario-b.perf-smoke

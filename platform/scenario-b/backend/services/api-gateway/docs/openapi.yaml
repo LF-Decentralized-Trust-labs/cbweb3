@@ -81,9 +81,12 @@ tags:
   - name: AMM Liquidity
     description: >
       Liquidity provisioning for the Hub AMM: cooperative commit-reveal
-      (commit / list / status / cancel), sovereign CB deposits, legacy
-      dual-sided add/remove, on-chain LP-share balance, and position listing.
-      Served under /api/v2/amm/liquidity and /api/v2/amm/lp-balance.
+      (commit / list / status / cancel), sovereign seeding by escrow-and-finalize
+      (deposit-side / finalize / reclaim-side / escrow — each Central Bank supplies
+      only its own side), sovereign top-up and withdrawal, on-chain LP-share
+      balance, position listing, and hub reconciliation. Served under
+      /api/v2/amm/liquidity, /api/v2/amm/lp-balance and
+      /api/v2/amm/hub-reconciliation.
   - name: AMM Token
     description: >
       Token preparation for AMM participation — mint-and-approve (Central Bank)
@@ -117,8 +120,10 @@ tags:
     description: >
       Internal relay-to-gateway routes (protected by the X-Relay-Auth shared secret,
       not user auth). Includes: Cacti hub-and-spoke relay endpoints (matched-commit
-      execution, cross-currency bridge-in/out) under /internal/amm; payment relay
-      endpoints proxied by commercial banks under /internal/v1/payments; and
+      execution, cross-currency bridge-in/out, the CB-signed hub swap leg and the
+      residue return) under /internal/amm; payment relay endpoints proxied by
+      commercial banks under /internal/v1/payments; spoke self-registration used by
+      the provisioning toolkit under /internal/v1/spokes (hub gateway only); and
       transfer limit pre-auth relay endpoints under /internal/v2/transfer-limits.
       All are CB-only endpoints that must never be exposed publicly.
 paths:
@@ -127,6 +132,7 @@ paths:
       tags: [Health]
       summary: Health check
       operationId: healthCheck
+      security: []
       responses:
         "200":
           description: Service is healthy
@@ -150,6 +156,7 @@ paths:
         Returns { "nonce": "<hex>" } only — no tokens, no cookies.
         The client must sign the nonce and complete login via POST /auth/wallet/bind.
       operationId: login
+      security: []
       requestBody:
         required: true
         content:
@@ -187,6 +194,7 @@ paths:
         Exchanges a valid refresh token for new access and refresh tokens.
         The response also renews the access_token and refresh_token HttpOnly cookies.
       operationId: refreshToken
+      security: []
       requestBody:
         required: true
         content:
@@ -266,6 +274,7 @@ paths:
         On success, access_token and refresh_token HttpOnly cookies are set in addition
         to the JSON response body.
       operationId: walletBind
+      security: []
       requestBody:
         required: true
         content:
@@ -335,7 +344,6 @@ paths:
       operationId: getMe
       security:
         - CookieAuth: []
-        - CookieAuth: []
       responses:
         "200":
           description: Token claims for the authenticated user
@@ -404,7 +412,6 @@ paths:
         After rotation the old clientSecret is immediately invalidated.
       operationId: changeClientSecret
       security:
-        - CookieAuth: []
         - CookieAuth: []
       requestBody:
         required: true
@@ -761,6 +768,11 @@ paths:
         creates a Keycloak user and stores the credential request.
         Poll GET /api/v1/onboarding/status/{requestId} until KYC is approved.
       operationId: submitCredentialRequest
+      # Public on a Central Bank gateway; cookie-protected when a commercial
+      # bank gateway serves the same path in proxy mode (see the Onboarding tag).
+      security:
+        - {}
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -792,6 +804,11 @@ paths:
         hex-encoded challenge that must be signed to prove wallet ownership
         (Phase 3).
       operationId: getOnboardingStatus
+      # Public on a Central Bank gateway; cookie-protected when a commercial
+      # bank gateway serves the same path in proxy mode (see the Onboarding tag).
+      security:
+        - {}
+        - CookieAuth: []
       parameters:
         - name: requestId
           in: path
@@ -824,6 +841,11 @@ paths:
         issues an X.509 certificate and a one-time `client_secret` for future
         authentication. **Store the client_secret securely — it is not recoverable.**
       operationId: completeOnboarding
+      # Public on a Central Bank gateway; cookie-protected when a commercial
+      # bank gateway serves the same path in proxy mode (see the Onboarding tag).
+      security:
+        - {}
+        - CookieAuth: []
       requestBody:
         required: true
         content:
@@ -1271,6 +1293,55 @@ paths:
                 properties:
                   success: { type: boolean, example: true }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/audit/logs:
+    get:
+      tags: [Governance]
+      summary: Get audit logs (shared across the Central Bank portals)
+      description: >
+        Same read as GET /api/v1/governance/audit/logs, served outside the
+        /governance group so the treasury and supervisor portals can consume it:
+        Fiber group middleware is prefix-scoped and would otherwise 403 any
+        non-governance caller. Read-only — requires ROLE_GOVERNANCE, ROLE_TREASURY
+        or ROLE_SUPERVISOR; every write stays governance-only.
+      operationId: getAuditLogs
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [SESSION, CREDENTIAL, FREEZE, CIRCUIT_BREAKER, PARAMETER, PARTICIPANT]
+        - name: severity
+          in: query
+          schema: { type: string, enum: [INFO, WARNING, CRITICAL] }
+        - name: from_date
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to_date
+          in: query
+          schema: { type: string, format: date-time }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditRecord" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "500": { $ref: "#/components/responses/InternalError" }
@@ -1896,6 +1967,7 @@ paths:
       summary: Exact-output swap quote
       description: Quote the input amount required to receive a fixed output amount on a pair.
       operationId: getExactOutputQuote
+      security: []
       parameters:
         - name: pair
           in: query
@@ -1924,6 +1996,7 @@ paths:
       summary: Cross-currency swap quote (15s TTL)
       description: Generate a short-lived quote for an orchestrated cross-currency swap.
       operationId: getCrossCurrencyQuote
+      security: []
       responses:
         "200":
           description: Quote computed
@@ -1991,6 +2064,55 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+    get:
+      tags: [AMM Swap]
+      summary: List the authenticated bank's own cross-currency swaps
+      description: >
+        Paginated, date-filtered history scoped to the bank resolved from the session
+        (BankID claim) — a bank can never list another bank's swaps. Returns 501 when
+        the gateway has no swap history reader wired.
+      operationId: listCrossCurrencySwaps
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Inclusive lower bound (YYYY-MM-DD).
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Inclusive upper bound (YYYY-MM-DD).
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: page_size
+          in: query
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+          description: Values above 100 are clamped to 100.
+      responses:
+        "200":
+          description: Swap history page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrossCurrencySwapHistory" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "501":
+          description: Swap history is not available on this gateway
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SovereignSeedError" }
 
   /api/v2/amm/swap/cross-currency/{id}:
     get:
@@ -2022,6 +2144,7 @@ paths:
       tags: [AMM Swap]
       summary: Pool reserves and status for a pair
       operationId: getPoolStatus
+      security: []
       parameters:
         - name: pair
           in: path
@@ -2042,12 +2165,71 @@ paths:
       summary: Sovereign Hub AMM config for swap clients
       description: CB gateways expose Hub AMM configuration for commercial bank swap clients.
       operationId: getHubLiquidityConfig
+      security: []
       responses:
         "200":
           description: Hub liquidity config
           content:
             application/json:
               schema: { type: object, additionalProperties: true }
+
+  /api/v2/amm/hub-config:
+    get:
+      tags: [AMM Swap]
+      summary: Hub contract discovery metadata
+      description: >
+        Hub contract addresses (AMM, PairRegistry, CurrencyRegistry) read from the
+        gateway environment. Registered on every gateway regardless of which AMM
+        services are wired, and unauthenticated — the addresses are public on-chain.
+      operationId: getHubContractsConfig
+      security: []
+      responses:
+        "200":
+          description: Hub contract addresses
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  amm_address: { type: string, example: "0x1234abcd..." }
+                  pair_registry: { type: string, example: "0x5678ef01..." }
+                  currency_registry: { type: string, example: "0x9abc2345..." }
+
+  /api/v2/amm/hub-reconciliation:
+    get:
+      tags: [AMM Liquidity]
+      summary: Reconcile this Central Bank's Hub W-token balance against its records
+      description: >
+        Treasury-facing (Central Bank role). Reports the CB's omnibus Hub balance, what
+        in-flight payments legitimately still hold, and the part it cannot attribute.
+        `unexplained` is the number that matters; at rest it should be zero. A read
+        failure is an error, never an empty report.
+      operationId: getHubReconciliation
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Reconciliation report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReconciliationReport" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          description: Reconciliation failed — cause is logged, not returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: >
+            Not configured on this gateway (needs HUB_BESU_RPC_URL, W_TOKEN_ADDRESS
+            and this CB's hub address)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 
   /api/v2/bridge/lock-mint:
     post:
@@ -2132,30 +2314,138 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
-  /api/v2/amm/liquidity/add:
+  # Sovereign seeding (escrow-and-finalize). Each Central Bank deposits ONLY its own
+  # side of the pair; finalize funds both reserves atomically once both sides are in;
+  # a CB may reclaim its own pending side before finalize. The side is auto-resolved
+  # on-chain from the pair — there is no picker. This replaced the dual-sided
+  # /api/v2/amm/liquidity/add, which let one CB supply both sides (sovereignty breach).
+  /api/v2/amm/liquidity/deposit-side:
     post:
       tags: [AMM Liquidity]
-      summary: Add liquidity (legacy dual-sided)
-      operationId: addLiquidity
+      summary: Deposit this Central Bank's own side of a pair into escrow
+      description: >
+        Mints the caller CB's own W-token and approves the pool's AMM, then escrows
+        that side against the pool's shared commit. Requires the liquidity-provider role.
+      operationId: depositLiquiditySide
       security:
         - CookieAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, additionalProperties: true }
+            schema: { $ref: "#/components/schemas/DepositSideRequest" }
       responses:
-        "200":
-          description: Liquidity added
+        "201":
+          description: Side escrowed
           content:
             application/json:
-              schema: { type: object, additionalProperties: true }
+              schema: { $ref: "#/components/schemas/DepositSideResponse" }
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "422":
+          description: >
+            Mint/approve failed (MINT_APPROVE_FAILED) or the escrow deposit
+            reverted (DEPOSIT_FAILED)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SovereignSeedError" }
+
+  /api/v2/amm/liquidity/finalize:
+    post:
+      tags: [AMM Liquidity]
+      summary: Finalize a pool once both sides are escrowed
+      description: >
+        Funds both reserves atomically. Returns 409 (FINALIZE_INCOMPLETE) while the
+        counterpart Central Bank's side is still pending.
+      operationId: finalizeLiquidityCommit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PoolPairRequest" }
+      responses:
+        "200":
+          description: Pool funded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinalizeResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Both sides must be deposited before finalize
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SovereignSeedError" }
+
+  /api/v2/amm/liquidity/reclaim-side:
+    post:
+      tags: [AMM Liquidity]
+      summary: Reclaim this Central Bank's own pending side
+      description: Pulls back the caller CB's escrowed side before finalize.
+      operationId: reclaimLiquiditySide
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PoolPairRequest" }
+      responses:
+        "200":
+          description: Side reclaimed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReclaimSideResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: Reclaim failed (RECLAIM_FAILED)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SovereignSeedError" }
+
+  /api/v2/amm/liquidity/escrow:
+    get:
+      tags: [AMM Liquidity]
+      summary: Escrow commit state for a pool
+      description: Current per-side escrow state, polled by the governance portal.
+      operationId: getLiquidityEscrowState
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: pool_pair
+          in: query
+          required: true
+          schema: { type: string }
+          description: Pool pair identifier, e.g. W-tCeBM_BRL/W-tCeBM_ARS.
+      responses:
+        "200":
+          description: Escrow state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EscrowStatus" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v2/amm/liquidity/remove:
     post:
@@ -2292,6 +2582,7 @@ paths:
       summary: List this gateway's LP positions
       description: Public — each CB gateway reports only its own positions from its DB.
       operationId: listLiquidityPositions
+      security: []
       responses:
         "200":
           description: LP positions
@@ -2309,6 +2600,7 @@ paths:
         Public — present only when LPBalanceReader is wired. Returns the CB's
         live on-chain LP-share position (013-amm-lp-shares).
       operationId: getLPBalance
+      security: []
       responses:
         "200":
           description: LP-share balance
@@ -2396,11 +2688,36 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/v2/hub/token/supply:
+    get:
+      tags: [Hub Currency Registry]
+      summary: Outstanding supply of this Central Bank's wrapped token
+      description: >
+        The amount of this CB's domestic reserves currently bridged to the hub
+        (W-tCeBM_<CUR>). Deliberately scoped to ONE currency: a network-wide total
+        would mix currencies and double-count the same backing. Read-only public
+        on-chain state, so unauthenticated — the same policy as GET /api/v2/hub/currencies.
+        A hub RPC failure is a 502, never a fabricated zero.
+      operationId: getSovereignTokenSupply
+      security: []
+      responses:
+        "200":
+          description: Sovereign wrapped-token supply
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SovereignSupply" }
+        "502":
+          description: Hub RPC read failed (ONCHAIN_ERROR); the cause is logged, not returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /api/v2/hub/currencies:
     get:
       tags: [Hub Currency Registry]
       summary: List registered hub currencies
       operationId: listHubCurrencies
+      security: []
       responses:
         "200":
           description: Registered currencies
@@ -2457,6 +2774,7 @@ paths:
       tags: [AMM Pair Registry]
       summary: List active AMM pairs
       operationId: listPairs
+      security: []
       responses:
         "200":
           description: Active pairs
@@ -2515,6 +2833,7 @@ paths:
       tags: [Circuit Breaker]
       summary: Circuit breaker status
       operationId: getV2CircuitBreakerStatus
+      security: []
       responses:
         "200":
           description: Circuit breaker state
@@ -2715,6 +3034,7 @@ paths:
       tags: [Oversight]
       summary: Disclosure request status
       operationId: getDisclosureStatus
+      security: []
       parameters:
         - name: requestID
           in: path
@@ -2791,6 +3111,71 @@ paths:
       responses:
         "200":
           description: Bridge-in (lock-mint) enqueued / ACTIVE
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/amm/cross-currency-hub-swap:
+    post:
+      tags: [AMM Internal]
+      summary: Execute the Hub AMM leg on behalf of a commercial bank (relay → CB gateway)
+      description: >
+        The issuing Central Bank signs the Hub swap with its own signer; the bank never
+        holds W-token and never signs on the Hub. Idempotent per bridge-in position:
+        a position already swapped returns status "duplicate", and a position with a
+        FAILED claim is refused with 409 until it is reconciled.
+      operationId: crossCurrencyHubSwap
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HubSwapRequest" }
+      responses:
+        "200":
+          description: >
+            Swap executed ("executed"), already executed ("duplicate"), or executed but
+            not recorded ("executed_unrecorded" — reconcile before any retry)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HubSwapResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: A previous attempt for this position did not complete — reconcile first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /internal/amm/cross-currency-residue-return:
+    post:
+      tags: [AMM Internal]
+      summary: Return the unspent slippage buffer to the payer (relay → issuing CB gateway)
+      description: >
+        Step 4 of the cross-currency flow. The amount is derived on the gateway side
+        from the bridge-in position and the executed swap — never taken from the request.
+      operationId: crossCurrencyResidueReturn
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResidueReturnRequest" }
+      responses:
+        "200":
+          description: Residue return enqueued (or already returned)
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "500":
@@ -2952,6 +3337,101 @@ paths:
               schema: { $ref: "#/components/schemas/ListRedeemsResponse" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------------------
+  # Internal V1 Spoke Self-Registration (hub gateway only)
+  # Machine-to-machine, called by the toolkit at found-spoke time and guarded by
+  # X-Relay-Auth. The hub compliance service holds GOVERNANCE_ROLE and performs
+  # the on-chain writes. All three are idempotent: a second call reports
+  # already_registered=true rather than failing.
+  # ---------------------------------------------------------------------------
+
+  /internal/v1/spokes/register:
+    post:
+      tags: [AMM Internal]
+      summary: Register a founding Central Bank on the hub IdentityRegistry
+      operationId: internalRegisterSpoke
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterSpokeRequest" }
+      responses:
+        "200":
+          description: Central Bank registered (or already registered)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterSpokeResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          description: On-chain registration failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /internal/v1/spokes/register-currency:
+    post:
+      tags: [AMM Internal]
+      summary: Deploy a spoke's bridge token and register its sovereign currency
+      operationId: internalRegisterSpokeCurrency
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterSpokeCurrencyRequest" }
+      responses:
+        "200":
+          description: Currency registered (or already registered)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterSpokeCurrencyResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          description: On-chain registration failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /internal/v1/spokes/register-pair:
+    post:
+      tags: [AMM Internal]
+      summary: Deploy the sovereign-pair AMM and register the pair on the hub
+      description: >
+        Deploys the AMM over two already-registered W-tokens and registers the pair
+        (proposePair + confirmPair) — the corridor both Central Banks agreed to open.
+      operationId: internalRegisterSpokePair
+      security:
+        - RelayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterSpokePairRequest" }
+      responses:
+        "200":
+          description: Pair registered (or already registered)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterSpokePairResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          description: On-chain registration failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 
   # ---------------------------------------------------------------------------
   # Internal V2 Transfer Limit Relay Endpoints (CB-side only)
@@ -3996,15 +4476,11 @@ components:
           type: string
           description: Unique deposit identifier
           example: "dep-a1b2c3d4"
-        status:
-          type: string
-          enum: [PENDING, APPROVED, REJECTED]
-          example: PENDING
 
     FiatExchangeResponse:
       type: object
       properties:
-        tx_hash:
+        mint_tx_hash:
           type: string
           description: Besu transaction hash of the tCeBM mint
           example: "0x1234..."
@@ -4064,10 +4540,6 @@ components:
         escrow_id:
           type: string
           example: "esc-a1b2c3d4"
-        status:
-          type: string
-          enum: [PENDING, APPROVED, REJECTED]
-          example: PENDING
 
     ApproveEscrowResponse:
       type: object
@@ -4119,7 +4591,7 @@ components:
 
     RequestRedeemRequest:
       type: object
-      required: [amount, zeto_transfer_tx_hash]
+      required: [amount]
       properties:
         requester_besu_address:
           type: string
@@ -4129,10 +4601,6 @@ components:
           type: string
           description: Amount of tCeBM to redeem (big integer as string)
           example: "5000000"
-        zeto_transfer_tx_hash:
-          type: string
-          description: Paladin tx hash proving tCeBM was transferred to the Central Bank
-          example: "0xabcd..."
 
     RequestRedeemResponse:
       type: object
@@ -4140,15 +4608,11 @@ components:
         redeem_id:
           type: string
           example: "red-a1b2c3d4"
-        status:
-          type: string
-          enum: [PENDING, APPROVED, REJECTED]
-          example: PENDING
 
     ApproveRedeemResponse:
       type: object
       properties:
-        fiat_mint_tx_hash:
+        mint_tx_hash:
           type: string
           description: Besu transaction hash of the tCeBM mint to requester
           example: "0x1234..."
@@ -4169,9 +4633,7 @@ components:
           enum: [PENDING, APPROVED, REJECTED]
         rejection_reason:
           type: string
-        zeto_transfer_tx_hash:
-          type: string
-        fiat_mint_tx_hash:
+        mint_tx_hash:
           type: string
         created_at:
           type: string
@@ -4186,3 +4648,323 @@ components:
             $ref: "#/components/schemas/RedeemRecord"
         total:
           type: integer
+
+    # --- Sovereign liquidity seeding (escrow-and-finalize) ---
+
+    PoolPairRequest:
+      type: object
+      required: [pool_pair]
+      properties:
+        pool_pair:
+          type: string
+          description: Pool pair identifier.
+          example: "W-tCeBM_BRL/W-tCeBM_ARS"
+
+    DepositSideRequest:
+      type: object
+      required: [pool_pair, amount]
+      properties:
+        pool_pair:
+          type: string
+          example: "W-tCeBM_BRL/W-tCeBM_ARS"
+        amount:
+          type: string
+          description: Amount of the caller's own side, in base units (decimal string).
+          example: "1000000000000000000000"
+
+    DepositSideResponse:
+      type: object
+      properties:
+        pool_pair:
+          type: string
+          example: "W-tCeBM_BRL/W-tCeBM_ARS"
+        side:
+          type: string
+          description: Side resolved on-chain from the pair (never chosen by the caller).
+          example: "A"
+        amount:
+          type: string
+          example: "1000000000000000000000"
+        status:
+          type: string
+          example: DEPOSITED
+
+    FinalizeResponse:
+      type: object
+      properties:
+        pool_pair:
+          type: string
+          example: "W-tCeBM_BRL/W-tCeBM_ARS"
+        status:
+          type: string
+          example: FINALIZED
+        shares_a:
+          type: string
+          example: "500000000000000000000"
+        shares_b:
+          type: string
+          example: "500000000000000000000"
+
+    ReclaimSideResponse:
+      type: object
+      properties:
+        pool_pair:
+          type: string
+          example: "W-tCeBM_BRL/W-tCeBM_ARS"
+        side:
+          type: string
+          example: "A"
+        status:
+          type: string
+          example: RECLAIMED
+
+    EscrowStatus:
+      type: object
+      properties:
+        side_a_deposited:
+          type: boolean
+        side_b_deposited:
+          type: boolean
+        amount_a:
+          type: string
+          example: "1000000000000000000000"
+        amount_b:
+          type: string
+          example: "0"
+        finalized:
+          type: boolean
+
+    SovereignSeedError:
+      type: object
+      properties:
+        error:
+          type: string
+        error_code:
+          type: string
+          example: FINALIZE_INCOMPLETE
+        hint:
+          type: string
+
+    # --- Cross-currency swap history ---
+
+    CrossCurrencySwapHistory:
+      type: object
+      properties:
+        operations:
+          type: array
+          items: { $ref: "#/components/schemas/CrossCurrencySwapHistoryItem" }
+        page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 20
+        total:
+          type: integer
+
+    CrossCurrencySwapHistoryItem:
+      type: object
+      properties:
+        swap_id: { type: string }
+        status: { type: string }
+        source_currency: { type: string, example: BRL }
+        target_currency: { type: string, example: ARS }
+        pool_pair: { type: string, example: "W-tCeBM_BRL/W-tCeBM_ARS" }
+        amount_in: { type: string }
+        amount_out: { type: string }
+        effective_rate: { type: number, format: double }
+        swap_tx_hash: { type: string }
+        beneficiary_bank_id: { type: string }
+        failure_reason: { type: string }
+        residue_amount:
+          type: string
+          description: Slippage buffer the bridge-in moved and the swap did not consume.
+        residue_status: { type: string }
+        residue_position_id: { type: string }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+
+    # --- Hub reconciliation and sovereign supply ---
+
+    ReconciliationReport:
+      type: object
+      properties:
+        w_token:
+          type: string
+          example: "0x1234abcd..."
+        holder_address:
+          type: string
+          example: "0x5678ef01..."
+        on_chain_balance:
+          type: string
+          description: Base units (decimal string).
+        expected_in_flight:
+          type: string
+          description: What in-flight payments legitimately still hold on the hub.
+        unexplained:
+          type: string
+          description: >
+            on_chain_balance minus expected_in_flight. Zero is the healthy state;
+            anything else is a reportable condition, not necessarily a loss.
+        stranded_total:
+          type: string
+          description: >
+            Value already flagged by this CB's own records, for context. Not subtracted
+            above and may be counted inside expected_in_flight.
+        per_bank:
+          type: array
+          items: { $ref: "#/components/schemas/BankExposure" }
+        stranded:
+          type: array
+          items: { $ref: "#/components/schemas/StrandedItem" }
+        unattributed:
+          type: array
+          description: >
+            Settled positions whose trade cost this CB never recorded. Deliberately left
+            out of expected_in_flight — on-chain they hold nothing.
+          items: { $ref: "#/components/schemas/UnattributedPosition" }
+        balanced:
+          type: boolean
+          description: True when unexplained is exactly zero.
+
+    BankExposure:
+      type: object
+      properties:
+        owner_bank_id: { type: string }
+        amount: { type: string }
+        positions: { type: integer }
+
+    StrandedItem:
+      type: object
+      properties:
+        position_id: { type: string }
+        owner_bank_id: { type: string }
+        leg: { type: string }
+        direction: { type: string }
+        amount: { type: string }
+        bridge_state: { type: string }
+
+    UnattributedPosition:
+      type: object
+      properties:
+        position_id: { type: string }
+        owner_bank_id: { type: string }
+        minted: { type: string }
+        returned: { type: string }
+        reason: { type: string }
+
+    SovereignSupply:
+      type: object
+      properties:
+        symbol:
+          type: string
+          example: "W-tCeBM_BRL"
+        token_address:
+          type: string
+          example: "0x1234abcd..."
+        total_supply:
+          type: string
+          description: Base units (decimal string).
+        decimals:
+          type: integer
+          example: 18
+
+    # --- Internal relay payloads ---
+
+    HubSwapRequest:
+      type: object
+      required: [correlation_id, payer_bank_id, bridge_in_position_id, pool_pair, amount_out]
+      properties:
+        correlation_id: { type: string, format: uuid }
+        payer_bank_id: { type: string, example: "bank-itau" }
+        beneficiary_bank_id: { type: string, example: "bank-galicia" }
+        bridge_in_position_id: { type: string, format: uuid }
+        pool_pair: { type: string, example: "W-tCeBM_BRL/W-tCeBM_ARS" }
+        target_currency: { type: string, example: ARS }
+        amount_out:
+          type: string
+          description: Exact output amount, base units (decimal string).
+        max_amount_in:
+          type: string
+          description: Slippage ceiling on the input side, base units (decimal string).
+
+    HubSwapResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [executed, duplicate, executed_unrecorded]
+        swap_sender_address:
+          type: string
+          description: The issuing CB's hub signer — the bank never signs on the hub.
+        swap_tx_hash: { type: string }
+        amount_in: { type: string }
+        correlation_id: { type: string, format: uuid }
+        warning:
+          type: string
+          description: Present only for executed_unrecorded.
+
+    ResidueReturnRequest:
+      type: object
+      required: [correlation_id, swap_tx_hash, bridge_in_position_id, payer_bank_id]
+      properties:
+        correlation_id: { type: string, format: uuid }
+        swap_tx_hash: { type: string }
+        pool_pair: { type: string, example: "W-tCeBM_BRL/W-tCeBM_ARS" }
+        bridge_in_position_id: { type: string, format: uuid }
+        payer_bank_id: { type: string, example: "bank-itau" }
+        spoke_in: { type: string, example: "spoke-brl" }
+
+    RegisterSpokeRequest:
+      type: object
+      required: [cb_address]
+      properties:
+        spoke_id: { type: string, example: "spoke-brl" }
+        cb_address: { type: string, example: "0x1234abcd..." }
+        institution_name: { type: string, example: "Banco Central do Brasil" }
+        role:
+          type: string
+          description: Defaults to ROLE_CENTRAL_BANK when omitted.
+          example: ROLE_CENTRAL_BANK
+        bank_code: { type: string, example: "BCB" }
+
+    RegisterSpokeResponse:
+      type: object
+      properties:
+        spoke_id: { type: string }
+        cb_address: { type: string }
+        role: { type: string }
+        already_registered: { type: boolean }
+        tx_hash: { type: string }
+
+    RegisterSpokeCurrencyRequest:
+      type: object
+      required: [currency, cb_address]
+      properties:
+        currency: { type: string, example: BRL }
+        cb_address: { type: string, example: "0x1234abcd..." }
+        spoke_id: { type: string, example: "spoke-brl" }
+
+    RegisterSpokeCurrencyResponse:
+      type: object
+      properties:
+        symbol: { type: string, example: "W-tCeBM_BRL" }
+        token_address: { type: string, example: "0x1234abcd..." }
+        already_registered: { type: boolean }
+        tx_hash: { type: string }
+
+    RegisterSpokePairRequest:
+      type: object
+      required: [currency_a, currency_b]
+      properties:
+        currency_a: { type: string, example: BRL }
+        currency_b: { type: string, example: ARS }
+        pair_id: { type: string, example: "W-tCeBM_BRL/W-tCeBM_ARS" }
+
+    RegisterSpokePairResponse:
+      type: object
+      properties:
+        pair_id: { type: string }
+        amm_address: { type: string, example: "0x1234abcd..." }
+        already_registered: { type: boolean }
+        tx_hash: { type: string }
