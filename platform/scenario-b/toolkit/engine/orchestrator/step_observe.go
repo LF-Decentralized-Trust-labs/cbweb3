@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package orchestrator
 
 import (
@@ -55,6 +57,13 @@ type ObserveConfig struct {
 	// KeycloakURL is the routable CB/hub Keycloak the portal password-grants
 	// against (spec.noc.keycloakURL). Baked as the portal's VITE_KEYCLOAK_URL.
 	KeycloakURL string
+	// AMMGatewayURL is the api-gateway the NOC BACKEND (not the browser) reads AMM
+	// pool status from, for the Pool Stability page (spec.noc.ammGatewayURL). The NOC
+	// stack owns its own docker network, so another stack's compose service name does
+	// not resolve here — this must be reachable from the NOC container, typically the
+	// host plus the gateway's published port. Empty leaves the backend default, and
+	// the page reports why it is empty instead of pretending the AMM has no pools.
+	AMMGatewayURL string
 	// LauncherURL is baked as the portal's VITE_LAUNCHER_URL (back-to-launcher).
 	LauncherURL string
 	// ProxyEnabled (spec.proxy == "enable") serves the NOC portal + its backend API
@@ -123,6 +132,11 @@ func (c ObserveConfig) ComposeEnv() []string {
 		// Behind the proxy the portal is same-origin with the backend, so the backend's
 		// browser CORS collapses to the single proxy origin (vs the local "*" default).
 		vars["NOC_FRONTEND_ORIGIN"] = proxyOrigin(c.FrontendHost)
+	}
+	if c.AMMGatewayURL != "" {
+		// Pool Stability data source. Pairs are discovered from this gateway, so no
+		// pair list has to be configured here.
+		vars["AMM_GATEWAY_URL"] = c.AMMGatewayURL
 	}
 	out := make([]string, 0, len(vars))
 	for k, v := range vars {
@@ -233,17 +247,32 @@ func ObserveSteps(c ObserveConfig) []Step {
 			},
 		},
 		{
+			// The Check looks at the actual containers, never at the persisted state:
+			// state lives on the host while the containers live in docker, so anything
+			// that removes them (docker rm, a --clean redeploy, a pruned host) leaves
+			// state claiming "done" for a stack that is gone. This step would then be
+			// skipped, nothing would come up, and the registration steps after it would
+			// fail against a backend that was never started.
 			Name: "start-noc-stack",
 			Deps: []string{"build-noc-images"},
+			Check: func(ctx context.Context) (bool, error) {
+				return c.stackRunning(ctx), nil
+			},
 			Run: func(ctx context.Context) error {
 				_, err := c.Runner.Run(ctx, "docker", c.composeUpArgs()...)
 				return err
 			},
 		},
 		{
+			// Readiness is likewise a live property: a backend that answers /health now
+			// needs no wait, and one that does not must be waited for regardless of what
+			// a previous run recorded.
 			Name: "wait-noc-backend",
 			Deps: []string{"start-noc-stack"},
-			Run:  func(ctx context.Context) error { return c.WaitBackend(ctx) },
+			Check: func(ctx context.Context) (bool, error) {
+				return c.backendHealthy(ctx), nil
+			},
+			Run: func(ctx context.Context) error { return c.WaitBackend(ctx) },
 		},
 		{
 			// register-noc-spoke records the spoke in the NOC backend under its
@@ -259,9 +288,18 @@ func ObserveSteps(c ObserveConfig) []Step {
 		},
 		{
 			// provision-noc-key binds the founding agent's deterministic key to the
-			// spoke. Idempotent server-side (FirstOrCreate on the key hash).
-			Name: "provision-noc-key",
-			Deps: []string{"register-noc-spoke"},
+			// spoke. Idempotent server-side (FirstOrCreate on the key hash), so it runs
+			// on every apply: the Check below deliberately never skips.
+			//
+			// It must not fall back to the persisted state either. State says "done"
+			// for the host, while the key lives in the NOC database — wipe or replace
+			// that database (a fresh deploy keeping the state file) and the key is gone
+			// while the state still claims otherwise. Every agent then gets 401 on
+			// push and the portal shows no components at all, with nothing in the
+			// report pointing at the cause.
+			Name:  "provision-noc-key",
+			Deps:  []string{"register-noc-spoke"},
+			Check: func(ctx context.Context) (bool, error) { return false, nil },
 			Run: func(ctx context.Context) error {
 				return c.provisionKey(ctx)
 			},
@@ -273,6 +311,44 @@ func ObserveSteps(c ObserveConfig) []Step {
 		steps = append(steps, nocProxyStep(c))
 	}
 	return steps
+}
+
+// stackContainerNames are the NOC control-plane containers the compose file creates.
+func (c ObserveConfig) stackContainerNames() []string {
+	return []string{
+		c.ContainerPrefix + "-noc-db",
+		c.ContainerPrefix + "-noc-backend",
+		c.ContainerPrefix + "-noc-portal",
+	}
+}
+
+// stackRunning reports whether every NOC container exists and is running. Any missing
+// or stopped container means `compose up -d` must run again (it is idempotent for the
+// ones already up).
+func (c ObserveConfig) stackRunning(ctx context.Context) bool {
+	for _, name := range c.stackContainerNames() {
+		out, err := c.Runner.Run(ctx, "docker", "container", "inspect", "-f", "{{.State.Running}}", name)
+		if err != nil || strings.TrimSpace(string(out)) != "true" {
+			return false
+		}
+	}
+	return true
+}
+
+// backendHealthy reports whether the backend answers /health right now (a single quick
+// probe, not the WaitBackend retry loop).
+func (c ObserveConfig) backendHealthy(ctx context.Context) bool {
+	url := strings.TrimRight(c.BackendURL, "/") + "/health"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // spokeRegistered reports whether the spoke already exists (idempotency gate).

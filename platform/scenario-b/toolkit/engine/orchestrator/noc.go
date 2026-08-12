@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package orchestrator
 
 import (
@@ -75,6 +77,10 @@ func (c SpokeConfig) nocBundle() bundle.NOCBundle {
 			Name:     "cacti-relay",
 			Type:     "CACTI_RELAY",
 			Endpoint: c.cactiAPIURL(),
+			// Only set when spec.relay.containerName names a container on THIS host:
+			// without it the agent has nothing to read logs from and the NOC's Log
+			// Viewer reports "No logs available." for the relay.
+			ContainerName: c.RelayContainerName,
 		})
 	}
 	return bundle.NOCBundle{
@@ -127,9 +133,10 @@ func (c JoinConfig) nocBundle() bundle.NOCBundle {
 	}}
 	if c.RelayEndpoint != "" {
 		comps = append(comps, bundle.NOCComponent{
-			Name:     "cacti-relay",
-			Type:     "CACTI_RELAY",
-			Endpoint: relayCactiURL(c.RelayEndpoint),
+			Name:          "cacti-relay",
+			Type:          "CACTI_RELAY",
+			Endpoint:      relayCactiURL(c.RelayEndpoint),
+			ContainerName: c.RelayContainerName,
 		})
 	}
 	return bundle.NOCBundle{

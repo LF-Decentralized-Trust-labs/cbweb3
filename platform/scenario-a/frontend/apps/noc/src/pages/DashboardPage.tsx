@@ -25,6 +25,7 @@ import { useEffect, useState } from "react";
 import { AlertDetailModal } from "../components/alerts/AlertDetailModal";
 import { usePolling } from "../hooks";
 import { useAlertStore, useInfrastructureStore, useSpokeStore, useUiStore } from "../stores";
+import { filterActiveAlerts } from "../stores/ui.settings";
 
 const severityVariant: Record<string, "default" | "secondary" | "warning" | "destructive"> = {
   INFO: "secondary",
@@ -44,7 +45,7 @@ export function DashboardPage() {
   const { spokes, selectedSpokeId, fetchSpokes, selectSpoke } = useSpokeStore();
   const { components, fetchComponents } = useInfrastructureStore();
   const { alerts, fetchAlerts, dismissAlert, clearSelectedAlert } = useAlertStore();
-  const { fallbackPollingSeconds } = useUiStore();
+  const { fallbackPollingSeconds, muteAlerts } = useUiStore();
   const [openAlertId, setOpenAlertId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -74,7 +75,7 @@ export function DashboardPage() {
   const degraded = components.filter((c) => c.health_status !== "HEALTHY").length;
   const offline = components.filter((c) => c.health_status === "OFFLINE").length;
 
-  const activeAlerts = alerts.filter((a) => a.state === "ACTIVE");
+  const activeAlerts = filterActiveAlerts(alerts, muteAlerts);
 
   function handleSelectSpoke(value: string) {
     selectSpoke(value === "all" ? null : value);
@@ -167,7 +168,10 @@ export function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Active Alert Feed</CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle>Active Alert Feed</CardTitle>
+              {muteAlerts && <Badge variant="secondary">CRITICAL ONLY</Badge>}
+            </div>
           </CardHeader>
           <CardContent className="space-y-2">
             {activeAlerts.length === 0 && (

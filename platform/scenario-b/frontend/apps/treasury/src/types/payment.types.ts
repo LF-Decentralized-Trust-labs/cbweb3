@@ -251,16 +251,24 @@ export function formatFiatUnits(rawAmount: string, decimals: number, tokenSymbol
 }
 
 // formatTokenAmount converts a raw base-unit amount string to a display decimal string.
+//
+// Handles NEGATIVE amounts: the Hub reconciliation reports a shortfall (on-chain below what the
+// records expect) as a negative figure, and it is the more serious of the two findings. Taking the
+// magnitude first and re-applying the sign at the end is what keeps it readable — BigInt division
+// truncates toward zero, so a raw `value % divisor` on -2.5 yields a second minus inside the
+// fraction and renders as "-2.-5".
 export function formatTokenAmount(rawAmount: string, decimals: number): string {
   if (!rawAmount || rawAmount === "0") return "0";
   try {
     const divisor = 10n ** BigInt(decimals);
-    const value = BigInt(rawAmount);
+    const signed = BigInt(rawAmount);
+    const sign = signed < 0n ? "-" : "";
+    const value = signed < 0n ? -signed : signed;
     const whole = value / divisor;
     const frac = (value % divisor).toString().padStart(decimals, "0").slice(0, 6).replace(/0+$/, "");
     return frac
-      ? `${whole.toLocaleString("en-US")}.${frac}`
-      : whole.toLocaleString("en-US");
+      ? `${sign}${whole.toLocaleString("en-US")}.${frac}`
+      : `${sign}${whole.toLocaleString("en-US")}`;
   } catch {
     return rawAmount;
   }

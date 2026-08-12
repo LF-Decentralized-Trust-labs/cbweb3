@@ -13,21 +13,19 @@
 3. [Navigation](#3-navigation)
 4. [Screens](#4-screens)
    - 4.1 [Dashboard](#41-dashboard)
-   - 4.2 [Transfer (`/transfer`)](#42-transfer-transfer)
-   - 4.3 [Issuance Requests / Deposits (`/deposits`)](#43-issuance-requests--deposits-deposits)
-   - 4.4 [Reserve Tokenisation / Escrows (`/escrows`)](#44-reserve-tokenisation--escrows-escrows)
-   - 4.5 [Approve AMM (`/approve-amm`)](#45-approve-amm-approve-amm)
-   - 4.6 [Redeems (`/redeems`)](#46-redeems-redeems)
-   - 4.7 [Bridge (`/bridge`)](#47-bridge-bridge)
-   - 4.8 [Compliance (`/compliance`)](#48-compliance-compliance)
-   - 4.9 [Onboarding (`/onboarding`)](#49-onboarding-onboarding)
-   - 4.10 [Settings (`/settings`)](#410-settings-settings)
-   - 4.11 [AMM Trading (`/amm`) — advanced, not in sidebar](#411-amm-trading-amm--advanced-not-in-sidebar)
+   - 4.2 [Bridge (`/bridge`)](#42-bridge-bridge)
+   - 4.3 [Bridge History (`/bridge/history`)](#43-bridge-history-bridgehistory)
+   - 4.4 [Liquidity Pools (`/pools`)](#44-liquidity-pools-pools)
+   - 4.5 [Issuance Requests / Deposits (`/deposits`)](#45-issuance-requests--deposits-deposits)
+   - 4.6 [Reserve Tokenisation / Escrows (`/escrows`)](#46-reserve-tokenisation--escrows-escrows)
+   - 4.7 [Redeems (`/redeems`)](#47-redeems-redeems)
+   - 4.8 [Onboarding (`/onboarding`)](#48-onboarding-onboarding)
+   - 4.9 [Settings (`/settings`)](#49-settings-settings)
+   - 4.10 [Compliance (`/compliance`) — not in sidebar](#410-compliance-compliance--not-in-sidebar)
 5. [Typical Workflows](#5-typical-workflows)
    - 5.1 [Getting started: obtain tCeBM](#51-getting-started-obtain-tcebm)
-   - 5.2 [Initiate a cross-border transfer](#52-initiate-a-cross-border-transfer)
-   - 5.3 [Bridge tCeBM to the Hub and back](#53-bridge-tcebm-to-the-hub-and-back)
-   - 5.4 [Redeem tCeBM for fiat](#54-redeem-tcebm-for-fiat)
+   - 5.2 [Send a cross-currency payment (Bridge)](#52-send-a-cross-currency-payment-bridge)
+   - 5.3 [Redeem tCeBM for fiat](#53-redeem-tcebm-for-fiat)
 6. [Status Reference](#6-status-reference)
 7. [Troubleshooting](#7-troubleshooting)
 
@@ -35,21 +33,20 @@
 
 ## 1. Overview
 
-The Bank Portal is the day-to-day operational interface for a commercial bank operator in **Scenario B — International Hub**. Unlike Scenario A (which settles value bilaterally between two spokes using HTLC), Scenario B routes cross-border value through a shared **Hub** equipped with an **Automated Market Maker (AMM)** for FX. Value moves between a spoke and the Hub via a **bridge** that locks native CBDC (tCeBM) on the spoke and mints a mirrored position at the Hub.
+The Bank Portal is the day-to-day operational interface for a commercial bank operator in **Scenario B — International Hub**. Unlike Scenario A (which settles value bilaterally between two spokes using HTLC), Scenario B routes cross-border value through a shared **Hub** equipped with an **Automated Market Maker (AMM)** for FX. A commercial bank sends value through the **Bridge**, a single cross-currency operation over a liquidity pool that the Central Banks provision: the bank spends its own sovereign currency (tCeBM) and the beneficiary receives the pool counterpart currency on its spoke.
 
 The end-to-end operational lifecycle is:
 
 1. **Onboard** your institution with the Central Bank (one-time).
-2. **Request tCeBM issuance** by submitting a fiat collateral proof (Deposits page).
-3. **Tokenise** the approved fiat reserve into tCeBM (Escrows page).
-4. **Approve the AMM** to spend your tCeBM (Approve AMM page).
-5. **Transfer** value cross-border via the Hub AMM (Transfer page), or **Bridge** tCeBM between the spoke and the Hub (Bridge page).
-6. **Redeem** tCeBM back to fiat when needed (Redeems page).
+2. **Request tCeBM issuance** by submitting a fiat collateral proof (Issuance Requests page).
+3. **Tokenise** the approved fiat reserve into tCeBM (Reserve Tokenisation page).
+4. **Bridge** value cross-border by selecting a liquidity pool, obtaining a quote, and executing the swap (Bridge page).
+5. **Redeem** tCeBM back to fiat when needed (Redeems page).
 
 | Actor | Portal | Role |
 |---|---|---|
-| Commercial Bank Operator | Bank Portal (this portal) | Manages tCeBM balances, issuance, tokenisation, redemption, AMM approvals, cross-border transfers, and bridge operations |
-| Central Bank Governance Operator | Governance Portal | Approves onboarding KYC, issuance, tokenisation, and redeem requests |
+| Commercial Bank Operator | Bank Portal (this portal) | Manages tCeBM balances, issuance, tokenisation, redemption, and cross-currency bridge operations |
+| Central Bank Governance Operator | Governance Portal | Approves onboarding KYC, issuance, tokenisation, and redeem requests; provisions and seeds liquidity pools |
 
 ---
 
@@ -65,8 +62,8 @@ Fill in both fields and click **Sign in**:
 
 | Field | Description |
 |---|---|
-| **Client ID** | The institutional client identifier provided by the Central Bank (minimum 3 characters). |
-| **Client Secret** | The corresponding credential secret (minimum 6 characters). |
+| **Username** | The institutional service account identifier provided by the Central Bank (minimum 3 characters). |
+| **Password** | The corresponding service account secret (minimum 6 characters). |
 
 Authentication is managed via backend HTTP-only session cookies. On success you are redirected to the Dashboard.
 
@@ -80,18 +77,17 @@ The left-hand sidebar lists all screens available in Scenario B:
 
 | Sidebar label | Route | Purpose |
 |---|---|---|
-| **Dashboard** | `/` | Real-time overview of balances, AMM pool status, and recent activity |
-| **Transfer** | `/transfer` | Cross-border transfer via Hub AMM |
+| **Dashboard** | `/` | Real-time overview of balances, pool availability, and recent activity |
+| **Bridge** | `/bridge` | Send a cross-currency payment over a Hub liquidity pool |
+| **Bridge History** | `/bridge/history` | Read-only history of your cross-currency bridge operations |
+| **Liquidity Pools** | `/pools` | Read-only view of the pools your spoke can operate |
 | **Issuance Requests** | `/deposits` | Request the Central Bank to issue tCeBM |
 | **Reserve Tokenisation** | `/escrows` | Convert approved fiat reserve (fCeBM) into tCeBM |
-| **Approve AMM** | `/approve-amm` | Authorise the AMM to spend your tCeBM |
 | **Redeems** | `/redeems` | Convert tCeBM back to fiat |
-| **Bridge** | `/bridge` | Move tCeBM between the spoke and the Hub |
-| **Compliance** | `/compliance` | Attach ZK credentials to pending operations |
 | **Onboarding** | `/onboarding` | Institution registration wizard |
 | **Settings** | `/settings` | Portal environment information |
 
-> The **AMM Trading** page (`/amm`) is accessible by direct URL but is not shown in the sidebar. It is an advanced interface for direct pool swaps and is described in section 4.11.
+> The **Compliance** page (`/compliance`) is accessible by direct URL but is not shown in the sidebar. It is described in section 4.10.
 
 ---
 
@@ -103,11 +99,11 @@ The left-hand sidebar lists all screens available in Scenario B:
 
 ![Dashboard](../img/scenario-b/bank/02-dashboard.png)
 
-The Dashboard provides a real-time summary of your institution's position. It refreshes pool and circuit-breaker status every 30 seconds automatically.
+The Dashboard provides a real-time summary of your institution's position. It refreshes pool availability and bridge activity every 30 seconds automatically.
 
 **Identity / context card**
 
-Displays your bank ID, country, wallet address (truncated), roles, and a compliance status badge derived from your onboarding state.
+Displays a welcome line with your institution name (or bank ID), your country, wallet address (truncated), roles, and a **Compliance** status badge derived from your onboarding state.
 
 **KPI row**
 
@@ -116,102 +112,174 @@ Displays your bank ID, country, wallet address (truncated), roles, and a complia
 | **tCeBM Balance** | Your current on-chain tCeBM token balance. |
 | **Fiat Reserve (fCeBM)** | Your current fCeBM (fiat-backed reserve token) balance. |
 | **Pending Actions** | Combined count of deposits, tokenisations, and redeems in PENDING status. |
-| **Bridged to Hub** | Total tCeBM currently mirrored at the Hub across all active bridge positions. |
-
-**Status strip**
-
-| Card | What it shows |
-|---|---|
-| **Circuit Breaker** | `LIVE` (swaps operational) or `HALTED` (cross-border swaps paused by Central Bank). |
-| **Hub Pool (pair)** | Current pool status (e.g. `ACTIVE`, `INACTIVE`) and whether the pool has an imbalance flag. |
-| **FX Proposals Awaiting You** | Count of FX trade agreements in `PROPOSED` state that require your action. |
+| **Available Pools** | Number of pools currently `ACTIVE`, with the total pool count. This card links to the Liquidity Pools page. |
 
 **Quick actions**
 
-Shortcut buttons to: New Deposit, Redeem, Cross-border Transfer, Bridge to Hub, AMM Trade.
+Shortcut buttons to: New Deposit, Redeem, and Bridge to Hub.
 
 **Recent Activity table**
 
 Chronological list (up to 8 records) of deposits, tokenisations, redeems, and bridge events, with type, amount, status badge, and timestamp.
 
-**Bridge Positions panel**
-
-Shows up to 6 bridge positions with their mirrored amount, asset, and current bridge state badge.
-
 **Charts**
 
-Three bar charts summarising: Tokenised vs Reserve balance comparison, request breakdown by status (Pending/Approved/Rejected) across deposits/tokenisations/redeems, and daily request volume over the past 7 days.
+Three bar charts summarising: **Tokenised vs Reserve** balance comparison, **Requests by Status** (Pending/Approved/Rejected) across deposits/tokenisations/redeems, and **Activity (7 days)** — daily request volume over the past 7 days.
 
 ---
 
-### 4.2 Transfer (`/transfer`)
+### 4.2 Bridge (`/bridge`)
 
-**Route:** `/transfer` · **Sidebar label:** Transfer
+**Route:** `/bridge` · **Sidebar label:** Bridge
 
-![Transfer](../img/scenario-b/bank/03-transfer.png)
+![Bridge](../img/scenario-b/bank/03-bridge.png)
 
-This is the primary screen for initiating a **cross-border payment via the Hub AMM**. The transfer uses the cross-currency swap flow: your tCeBM on the source spoke is bridged in, swapped at the Hub for the target currency, and bridged out to the beneficiary's spoke. The page shows the current pool status for pair **W-BRL-ARS** at the top.
+This is the primary screen for sending a **cross-currency payment** over a Hub liquidity pool. The bridge combines the bridge-in, swap, and bridge-out into one operation: your sovereign tCeBM is spent on the source spoke, swapped at the Hub for the target currency, and delivered to the beneficiary's spoke.
 
-> Before you can execute a transfer, the AMM must be approved to spend your tCeBM (see [Approve AMM](#45-approve-amm-approve-amm)).
+Direction is **not** user-selectable. Your institution always spends its own sovereign currency (the source); the beneficiary receives the pool counterpart (the target). Only pools that include your sovereign currency are listed.
 
-**Step 1 — Get Quote**
+**Step 1 — Select Pool**
 
 | Field | Description |
 |---|---|
-| **Source Currency** | The currency you are sending (e.g. `BRL`). |
-| **Target Currency** | The currency the beneficiary will receive (e.g. `ARS`). |
-| **Amount Out** | The amount the beneficiary should receive (in target currency units). |
+| **Liquidity Pool** | Drop-down of `ACTIVE` pools that include your sovereign currency (for example `BRL ⇄ ARS`). |
+| **Direction (fixed by sovereignty)** | Read-only. Shows `<source> → <target>`; you spend your sovereign currency and the beneficiary receives the counterpart. |
+
+When a pool is selected, a status banner shows whether it is `ACTIVE` (with current reserves for each side) or another lifecycle state. The page polls pool status every 30 seconds.
+
+**Step 2 — Get Quote**
+
+| Field | Description |
+|---|---|
+| **Amount Out** | The amount the beneficiary should receive, in the target currency (exact-output). |
 
 Click **Get Quote**. The Quote Details card appears showing:
 
 | Field | Description |
 |---|---|
 | **Effective Rate** | The implied exchange rate for this swap. |
-| **Amount In** | How much of the source currency you will spend. |
+| **Amount In** | How much of your source currency you will spend. |
 | **Amount Out** | The target amount you entered. |
 | **TTL** | Seconds remaining before the quote expires. |
 
-> Quotes expire. If the TTL reaches zero before you execute, the Execute Transfer button becomes disabled. You must re-submit the Get Quote form to obtain a fresh quote. If the quote was auto-refreshed in the background, a warning banner appears — review the new quote before confirming.
+> Quotes expire. If the TTL reaches zero before you execute, the Execute Bridge button becomes disabled — re-submit the Get Quote form to obtain a fresh quote. Quotes are also auto-refreshed in the background; when that happens a banner reads *"Quote was refreshed. Review and confirm again."*
 
-**Step 2 — Execute Transfer**
+**Step 3 — Execute Bridge**
 
 Once a valid quote is shown:
 
 | Field | Description |
 |---|---|
 | **Max Amount In** | Your slippage ceiling — the maximum source currency you will allow the swap to consume. Enter a value manually or click **Use Suggested Max** to fill in the quote amount plus slippage buffer. |
-| **Beneficiary Bank ID** | The bank identifier of the recipient institution. |
+| **Beneficiary Bank ID** | The bank identifier of the recipient institution (for example `bank-macro`). |
 
-Click **Execute Transfer**. The button is disabled if the pool is not `ACTIVE`, if no quote is loaded, or if any required field is empty.
+Click **Execute Bridge**. The button is disabled if the pool is not `ACTIVE`, if no quote is loaded, if the quote has expired, or if any required field is empty.
 
-**Transfer Progress**
+**Bridge Progress**
 
-While the transfer is in flight, a four-step progress indicator is shown:
+While the bridge is in flight, a four-step progress indicator is shown:
 
 | Step | Meaning |
 |---|---|
 | **BRIDGE IN PROGRESS** | Your tCeBM is being locked on your spoke. |
 | **SWAP IN PROGRESS** | The AMM swap is executing on the Hub. |
-| **BRIDGE OUT PROGRESS** | The swapped tokens are being unlocked on the beneficiary's spoke. |
-| **COMPLETED** | The transfer has settled end-to-end. |
+| **BRIDGE OUT PROGRESS** | The swapped tokens are being delivered on the beneficiary's spoke. |
+| **COMPLETED** | The bridge has settled end-to-end. |
 
-On completion, the screen shows the swap transaction hash, amounts in and out, bridge position IDs, and a correlation ID. Click **Reset** to start a new transfer.
+On completion, the **Bridge Completed** card shows the bridge transaction hash, amounts in and out, and a correlation ID. Click **New Bridge** to start another operation.
 
-**Transfer errors**
+**Bridge errors**
+
+If the operation fails, a **Bridge Failed** card shows a plain-language message and a **Try Again** button. Common causes:
 
 | Error | What it means | Action |
 |---|---|---|
-| Pool not ACTIVE | The Hub pool is not accepting swaps. | Wait for Central Bank to activate the pool. |
-| Circuit Breaker HALTED | Swaps are suspended. | Wait for governance to resume. |
+| Circuit breaker paused | The pool is paused by a Central Bank. | Wait for governance to resume, then retry. |
 | Slippage limit exceeded | Price moved beyond your Max Amount In. | Re-quote and retry. |
-| Insufficient pool liquidity | Pool reserves too low for this amount. | Try a smaller amount or contact your Central Bank. |
-| Daily transfer limit exceeded | Your Central Bank has set a volume cap for today. | Contact your Central Bank to adjust the limit. |
+| Bridge in failed | Funds could not be locked on the source network; the operation was rolled back and no funds were lost. | Retry. |
+| Insufficient pool liquidity | Pool reserves too low for this amount. | Try a smaller amount or wait for the Central Bank to add liquidity. |
 | Quote expired | Quote expired during submission; a new quote was auto-fetched. | Review the refreshed quote and confirm again. |
-| BRIDGE OUT FAILED (critical) | Source funds were debited but the bridge-out failed. | Click **Acknowledge** and immediately contact your Central Bank with the displayed Swap ID. Do not retry without guidance. |
+| Swap failed | The swap transaction failed on the Hub; no funds were moved. | Retry. |
+| Daily transfer limit reached | Your Central Bank has set a volume cap for today. | Contact your Central Bank to adjust the limit. |
 
 ---
 
-### 4.3 Issuance Requests / Deposits (`/deposits`)
+### 4.3 Bridge History (`/bridge/history`)
+
+**Route:** `/bridge/history` · **Sidebar label:** Bridge History
+
+![Bridge History](../img/scenario-b/bank/11-bridge-history.png)
+
+A **read-only** history of the cross-currency bridge operations initiated by your institution.
+
+**Filters**
+
+| Control | Description |
+|---|---|
+| **From** / **To** | Date range. Changing either resets to the first page. |
+| **Clear** | Resets both date filters. |
+
+A counter shows the total number of operations matching the current filter.
+
+**Operations table**
+
+| Column | Description |
+|---|---|
+| **When** | Timestamp the operation was created. |
+| **Route** | Source → target currency, with the beneficiary bank ID beneath it. |
+| **Sent** | Amount spent, in the source currency. |
+| **Received** | Amount delivered, in the target currency. |
+| **Rate** | Effective exchange rate applied. |
+| **Status** | Status badge (see below). |
+| **Tx** | Bridge transaction hash (truncated). |
+
+Results are paginated (20 rows per page) with **Prev** / **Next** controls.
+
+**Status badges**
+
+| Badge | Meaning |
+|---|---|
+| **Completed** | Operation settled end-to-end. |
+| **Failed** | Operation errored (hover the badge for the failure reason). |
+| **Quoting** | A quote is being prepared. |
+| **Bridging in** | Funds are being locked on the source spoke. |
+| **Swapping** | The AMM swap is executing on the Hub. |
+| **Bridging out** | Swapped tokens are being delivered on the beneficiary's spoke. |
+
+---
+
+### 4.4 Liquidity Pools (`/pools`)
+
+**Route:** `/pools` · **Sidebar label:** Liquidity Pools
+
+![Liquidity Pools](../img/scenario-b/bank/12-pools.png)
+
+A **read-only** view of the cross-currency pools your spoke can operate — that is, pools whose Central Bank created a corridor that includes your sovereign currency. The page polls live pool and circuit-breaker data every 15 seconds.
+
+**Summary cards**
+
+| Card | What it shows |
+|---|---|
+| **Pools listed** | Number of pools your spoke can operate. |
+| **Active** | Pools currently in `ACTIVE` status. |
+| **Paused (circuit breaker)** | Pools whose circuit breaker is `HALTED`. |
+
+**Pool list**
+
+A selectable list of pools, each showing the currency pair, a pool-status badge (`Active`, `Awaiting counterpart`, `Empty`, or the raw state), and a circuit-breaker indicator (`Live` / `Paused`).
+
+**Pool detail panel**
+
+Selecting a pool opens a detail panel:
+
+- **Circuit breaker banner** — `Operational` (LIVE), `Paused` (HALTED, with reason and initiator where available), or `Resume pending` (RESUME_PENDING, awaiting the 2-of-N Central Bank quorum).
+- **Reserves** — a balance bar and per-side reserve amounts, with an **Imbalanced** badge when the pool flags an imbalance.
+- **Metrics** — Current ratio, Fee rate, Liquidity providers, Pool state, and Last updated.
+- **On-chain references** — AMM contract address, both token addresses (click to copy), and the Proposer/Confirmer Central Bank identifiers where present.
+
+---
+
+### 4.5 Issuance Requests / Deposits (`/deposits`)
 
 **Route:** `/deposits` · **Sidebar label:** Issuance Requests
 
@@ -241,7 +309,7 @@ Use this screen to request the Central Bank to **issue tCeBM** against your fiat
 
 ---
 
-### 4.4 Reserve Tokenisation / Escrows (`/escrows`)
+### 4.6 Reserve Tokenisation / Escrows (`/escrows`)
 
 **Route:** `/escrows` · **Sidebar label:** Reserve Tokenisation
 
@@ -272,26 +340,7 @@ After a deposit (issuance request) is approved, use this screen to **convert the
 
 ---
 
-### 4.5 Approve AMM (`/approve-amm`)
-
-**Route:** `/approve-amm` · **Sidebar label:** Approve AMM
-
-![Approve AMM](../img/scenario-b/bank/06-approve-amm.png)
-
-Before the AMM can use your tCeBM in a swap, you must grant it a spending allowance. This step is required once per session (or whenever you need to increase the allowance). The screen shows your current tCeBM balance for reference.
-
-**Granting approval**
-
-1. Enter the **Amount** of tCeBM (in base units) you want to approve for AMM usage.
-2. Click **Review Approval**. A warning badge appears if the amount exceeds your current balance (this is non-blocking — you may still submit if you expect the balance to increase).
-3. A confirmation card appears: *"You are about to approve N tCeBM for AMM usage."* Click **Confirm Approval** to submit, or **Cancel** to go back.
-4. On success a toast notification confirms the approval. A green badge **AMM approval confirmed in current session** is shown.
-
-> If a Transfer or AMM swap fails with an approval error, return here and approve a sufficient amount before retrying.
-
----
-
-### 4.6 Redeems (`/redeems`)
+### 4.7 Redeems (`/redeems`)
 
 **Route:** `/redeems` · **Sidebar label:** Redeems
 
@@ -321,77 +370,7 @@ Use this screen to **convert tCeBM back to fiat**. The top of the screen shows y
 
 ---
 
-### 4.7 Bridge (`/bridge`)
-
-**Route:** `/bridge` · **Sidebar label:** Bridge
-
-![Bridge](../img/scenario-b/bank/08-bridge.png)
-
-The Bridge moves tCeBM between your spoke and the Hub using a **lock/mint** (spoke → Hub) and **burn/unlock** (Hub → spoke) model. Positions are tracked in the Bridge Positions table, which polls automatically every 5 seconds while any position is in a non-terminal state.
-
-**Lock & Mint (spoke → Hub)**
-
-1. Enter the **Amount** of tCeBM to bridge (integer, in base units).
-2. Click **Submit Lock & Mint**.
-3. The backend derives your bank identity and asset context from your authenticated session. A new bridge position appears in the table with state `LOCKING`.
-
-**Burn & Unlock (Hub → spoke)**
-
-1. Find the **Position ID** of an `ACTIVE` bridge position in the table below, and copy it.
-2. Paste it into the **Position ID** field.
-3. The form validates that the selected position is in `ACTIVE` state. If the position is not `ACTIVE`, the **Submit Burn & Unlock** button remains disabled.
-4. Click **Submit Burn & Unlock**.
-
-> Burn & Unlock is only available for positions in `ACTIVE` state. If the position is in any other state, wait for it to reach `ACTIVE` before proceeding.
-
-**Bridge Positions table**
-
-Use the **Filter by state** dropdown to narrow the list. Click **Manual Refresh** at any time to force a poll.
-
-| Column | Description |
-|---|---|
-| **Position ID** | Unique identifier for this bridge position. |
-| **Owner** | The bank ID that initiated this position. |
-| **Spoke** | The spoke network where native funds are held. |
-| **Native Asset** | The asset locked on the spoke. |
-| **State** | Current bridge lifecycle state (see state table below). |
-| **Mirrored Amount** | Amount of the mirrored asset at the Hub. |
-| **Relayer Retries** | Number of times the relay has retried this operation. |
-
-If a position remains in `LOCKING` or `BURNING` for more than 2 minutes, the table displays *"Polling timeout reached. Refresh to continue."* — click **Manual Refresh** and check the relay status in the NOC Portal if it remains stuck.
-
----
-
-### 4.8 Compliance (`/compliance`)
-
-**Route:** `/compliance` · **Sidebar label:** Compliance
-
-![Compliance](../img/scenario-b/bank/09-compliance.png)
-
-The Compliance Center allows you to view your institution's ZK-compliance credentials and attach them to pending on-chain operations.
-
-**Credential Library**
-
-A table listing all credentials associated with your institution:
-
-| Column | Description |
-|---|---|
-| **Select** | Checkbox to include this credential in an attachment. |
-| **Credential** | Unique credential identifier. |
-| **Type** | Credential type badge (e.g. KYC, AML). |
-| **Issuer** | The entity that issued this credential. |
-
-**Attach Credentials**
-
-1. Select one or more credentials using the checkboxes.
-2. Enter the **Transaction ID** of the pending operation you want to attach them to.
-3. Click **Attach Selected**.
-
-> Credentials are issued by the Central Bank after KYC approval. Contact your Central Bank if the credential library is empty.
-
----
-
-### 4.9 Onboarding (`/onboarding`)
+### 4.8 Onboarding (`/onboarding`)
 
 **Route:** `/onboarding` · **Sidebar label:** Onboarding
 
@@ -416,56 +395,81 @@ For the full step-by-step onboarding procedure, see the [ONBOARDING-DOCS runbook
 
 ---
 
+### 4.9 Settings (`/settings`)
+
+**Route:** `/settings` · **Sidebar label:** Settings
+
+The Settings screen displays read-only environment information for the portal under an **Environment** card:
+
+| Item | Description |
+|---|---|
+| **API mode** | Indicates whether the frontend is running against mock services or the live backend. |
+| **Authentication** | Backend-managed HTTP-only session cookies. |
+| **WebSocket** | Relay event source used to drive UI flow. |
+
+There are no editable settings on this screen.
+
+---
+
+### 4.10 Compliance (`/compliance`) — not in sidebar
+
+**Route:** `/compliance` · **Not shown in the sidebar** (accessible by direct URL)
+
+![Compliance](../img/scenario-b/bank/09-compliance.png)
+
+The Compliance Center allows you to view your institution's ZK-compliance credentials and attach them to pending on-chain operations. It is reachable at `/compliance` but is not listed in the Scenario B sidebar.
+
+**Credential Library**
+
+A table listing all credentials associated with your institution:
+
+| Column | Description |
+|---|---|
+| **Select** | Checkbox to include this credential in an attachment. |
+| **Credential** | Unique credential identifier. |
+| **Type** | Credential type badge (e.g. KYC, AML). |
+| **Issuer** | The entity that issued this credential. |
+
+**Attach Credentials**
+
+1. Select one or more credentials using the checkboxes.
+2. Enter the **Transaction ID** of the pending operation you want to attach them to.
+3. Click **Attach Selected**.
+
+> Credentials are issued by the Central Bank after KYC approval. Contact your Central Bank if the credential library is empty.
+
+---
+
 ## 5. Typical Workflows
 
 ### 5.1 Getting started: obtain tCeBM
 
-Before you can make cross-border transfers you need tCeBM in your wallet. Follow these steps in order:
+Before you can send a cross-currency payment you need tCeBM in your wallet. Follow these steps in order:
 
 1. **Onboard** (if not already done): navigate to **Onboarding** and complete all four wizard stages.
 2. **Request issuance**: go to **Issuance Requests**, enter a fiat amount, and confirm. Wait for the Central Bank to approve the request (status changes from `PENDING` to `APPROVED`).
 3. **Tokenise the reserve**: go to **Reserve Tokenisation**, select the approved Deposit ID, enter an amount, and confirm. Wait for Central Bank approval (status changes to `APPROVED`). Your tCeBM balance increases.
-4. **Approve the AMM**: go to **Approve AMM**, enter at least the amount you plan to transfer, and confirm. You must do this before the AMM can execute swaps on your behalf.
 
 ---
 
-### 5.2 Initiate a cross-border transfer
+### 5.2 Send a cross-currency payment (Bridge)
 
-Prerequisites: tCeBM balance available, AMM approved.
-
-1. Navigate to **Transfer**.
-2. Confirm the pool status banner shows **Pool W-BRL-ARS - ACTIVE**. If it shows another status, contact your Central Bank.
-3. Enter the **Source Currency**, **Target Currency**, and **Amount Out** (the amount the recipient should receive).
-4. Click **Get Quote** and review the effective rate and Amount In shown in the Quote Details card.
-5. Check the TTL — if it is low, proceed quickly to Step 6 or re-quote.
-6. Click **Use Suggested Max** to fill the Max Amount In field, or enter a custom ceiling.
-7. Enter the **Beneficiary Bank ID**.
-8. Click **Execute Transfer**.
-9. Monitor the four-step progress bar until the status reaches **COMPLETED**.
-10. Note the Swap Tx Hash and Correlation ID for your records. Click **Reset** to prepare for the next transfer.
-
----
-
-### 5.3 Bridge tCeBM to the Hub and back
-
-**Lock & Mint (move tCeBM from your spoke to the Hub)**
+Prerequisites: tCeBM balance available; an `ACTIVE` pool that includes your sovereign currency.
 
 1. Navigate to **Bridge**.
-2. In the **Lock & Mint** card, enter the amount to bridge (in base units).
-3. Click **Submit Lock & Mint**.
-4. A new position appears in the Bridge Positions table with state `LOCKING`. Wait for it to reach `ACTIVE` (auto-polls every 5 seconds).
-
-**Burn & Unlock (retrieve tCeBM from the Hub back to your spoke)**
-
-1. Navigate to **Bridge** and locate the target position in the Bridge Positions table.
-2. Confirm the position state is `ACTIVE`.
-3. Copy the **Position ID** and paste it into the **Burn & Unlock** card.
-4. Click **Submit Burn & Unlock**.
-5. The position state transitions to `BURNING` and eventually `BURNED` / `RELEASED`.
+2. In **Step 1 — Select Pool**, choose a liquidity pool. The direction is fixed: you spend your sovereign currency and the beneficiary receives the counterpart. Confirm the pool banner shows the pool is `ACTIVE`; if it shows another state, contact your Central Bank.
+3. In **Step 2 — Get Quote**, enter the **Amount Out** (the amount the recipient should receive) and click **Get Quote**. Review the effective rate and Amount In in the Quote Details card.
+4. Check the TTL — if it is low, proceed quickly or re-quote.
+5. In **Step 3 — Execute Bridge**, click **Use Suggested Max** to fill the Max Amount In field (or enter a custom ceiling).
+6. Enter the **Beneficiary Bank ID**.
+7. Click **Execute Bridge**.
+8. Monitor the four-step progress indicator until the status reaches **COMPLETED**.
+9. Note the Bridge Tx Hash and Correlation ID for your records. Click **New Bridge** to prepare for the next operation.
+10. To review past operations, open **Bridge History**.
 
 ---
 
-### 5.4 Redeem tCeBM for fiat
+### 5.3 Redeem tCeBM for fiat
 
 1. Navigate to **Redeems**.
 2. Confirm your tCeBM balance is sufficient.
@@ -503,35 +507,43 @@ Prerequisites: tCeBM balance available, AMM approved.
 | `REJECTED` | Declined by the Central Bank; check the Rejection Reason column. |
 | `MINT_FAILED` | Error during on-chain processing — contact your Central Bank. |
 
-### Transfer progress states
+### Bridge progress states (Bridge page)
+
+Shown in the four-step progress indicator on the Bridge page.
 
 | State | Meaning |
 |---|---|
 | `BRIDGE_IN_PROGRESS` | Your tCeBM is being locked on your spoke. |
 | `SWAP_IN_PROGRESS` | The AMM swap is executing on the Hub. |
-| `BRIDGE_OUT_PROGRESS` | Swapped tokens are being unlocked on the beneficiary's spoke. |
-| `COMPLETED` | Transfer fully settled. |
+| `BRIDGE_OUT_PROGRESS` | Swapped tokens are being delivered on the beneficiary's spoke. |
+| `COMPLETED` | The bridge fully settled. |
 
-### Bridge position states
+### Bridge History statuses
 
-| State | Meaning |
-|---|---|
-| `LOCKING` | Lock & Mint initiated; waiting for the relay to confirm the lock on the spoke. |
-| `ACTIVE` | Funds are locked on the spoke and mirrored at the Hub. Burn & Unlock is now available. |
-| `BURNING` | Burn & Unlock initiated; waiting for the relay to confirm the burn at the Hub. |
-| `BURNED` | Mirrored position burned at the Hub; native CBDC unlock in progress on the spoke. |
-| `RELEASED` | Native CBDC successfully unlocked on the spoke. Terminal state. |
-| `RECONCILIATION_REQUIRED` | The relay encountered an error that requires manual intervention. Contact your Central Bank. |
+Shown as badges in the Bridge History table.
 
-### FX Agreement states (visible in Dashboard counter and `/agreements` — Scenario A routes only)
-
-| State | Displayed as | Meaning |
+| Status | Displayed as | Meaning |
 |---|---|---|
-| `FX_STATE_PROPOSED` | Proposed | Agreement has been proposed; counterparty must accept or reject. |
-| `FX_STATE_ACCEPTED` | Accepted | Counterparty accepted; agreement proceeds to settlement. |
-| `FX_STATE_REJECTED` | Rejected | Counterparty rejected the agreement. |
-| `FX_STATE_CANCELLED` | Cancelled | Originator cancelled the agreement. |
-| `FX_STATE_SETTLED` | Settled | Agreement has settled. |
+| `QUOTING` | Quoting | A quote is being prepared. |
+| `BRIDGE_IN_PROGRESS` | Bridging in | Funds are being locked on the source spoke. |
+| `SWAP_IN_PROGRESS` | Swapping | The AMM swap is executing on the Hub. |
+| `BRIDGE_OUT_PROGRESS` | Bridging out | Swapped tokens are being delivered on the beneficiary's spoke. |
+| `COMPLETED` | Completed | Operation settled end-to-end. |
+| `FAILED` | Failed | Operation errored (hover the badge for the failure reason). |
+
+### Pool and circuit-breaker states (Liquidity Pools page)
+
+| Pool status | Displayed as | Meaning |
+|---|---|---|
+| `ACTIVE` | Active | Pool is live and swappable. |
+| `PENDING_COUNTERPART` | Awaiting counterpart | The counterpart Central Bank has not yet confirmed the corridor. |
+| `EMPTY` | Empty | Pool has no liquidity. |
+
+| Circuit-breaker state | Displayed as | Meaning |
+|---|---|---|
+| `LIVE` | Operational | Swaps are open on this pool. |
+| `HALTED` | Paused | A Central Bank triggered the circuit breaker (1-of-N pause). Swaps are suspended. |
+| `RESUME_PENDING` | Resume pending | A resume proposal is awaiting the 2-of-N Central Bank quorum. |
 
 ### Onboarding statuses
 
@@ -552,7 +564,7 @@ Prerequisites: tCeBM balance available, AMM approved.
 
 ### Sign-in fails with "unauthorized"
 
-- Verify your **Client ID** and **Client Secret** are correct.
+- Verify your **Username** and **Password** are correct.
 - Confirm the spoke backend services are running and reachable (check with your infrastructure team).
 - Confirm your institution's status is `ACTIVE` — if it is not, complete onboarding first.
 
@@ -565,31 +577,24 @@ Prerequisites: tCeBM balance available, AMM approved.
 - The Central Bank must approve it from the Governance Portal. Contact your Central Bank governance operator.
 - Click **Refresh** on the relevant page to check for status updates.
 
-### AMM approval error on Transfer or AMM Trading
+### Pool is not ACTIVE — Execute Bridge disabled
 
-- Navigate to **Approve AMM** and grant a sufficient allowance. The approved amount must cover the Amount In of the swap.
+- The selected pool is not yet activated for your corridor. Select another `ACTIVE` pool from the Step 1 drop-down, or contact your Central Bank to activate the pool. You can also review pool availability on the **Liquidity Pools** page.
 
-### "Pool not ACTIVE" — Transfer button disabled
+### Circuit breaker paused — swaps disabled
 
-- The Hub AMM pool is not yet activated for your currency pair. Contact your Central Bank to activate the pool.
+- Cross-border swaps on the pool have been suspended by a Central Bank (1-of-N pause governance). Wait for governance to resume (2-of-N resume). No action is required from the bank operator. The **Liquidity Pools** page shows the current breaker state per pool.
 
-### Circuit Breaker HALTED — swaps disabled
+### Quote expired — Execute Bridge disabled
 
-- Cross-border swaps have been suspended by the Central Bank (1-of-N pause governance). Wait for governance to resume (2-of-N resume). No action is required from the bank operator.
+- Click **Get Quote** again to obtain a fresh quote. If the quote was auto-refreshed, review the new figures before confirming. If the pool is paused or inactive, swaps are not possible until it is operational again.
 
-### Quote expired — Execute Transfer is disabled
+### A bridge operation failed
 
-- Click **Get Quote** again to obtain a fresh quote. If the pool is `HALTED` or `INACTIVE`, swaps are not possible until it is operational again.
-
-### A transfer completed with BRIDGE OUT FAILED (critical)
-
-- Your source funds were debited but the bridge-out to the beneficiary failed. Click **Acknowledge** in the critical error card. Do not retry. Contact your Central Bank immediately with the **Swap ID** shown on screen. Manual reconciliation is required.
-
-### A bridge position is stuck in LOCKING or BURNING
-
-- The relay carries events between the spoke and the Hub. If a position stays in `LOCKING` or `BURNING` for more than 2 minutes, click **Manual Refresh** on the Bridge page.
-- If it remains stuck, check relay status in the **NOC Portal** before assuming a contract problem.
-- If the position state transitions to `RECONCILIATION_REQUIRED`, contact your Central Bank.
+- The Bridge page shows a **Bridge Failed** card with a plain-language reason and a **Try Again** button.
+- A "bridge in failed" or "swap failed" message means the operation was rolled back and no funds were moved — you may retry safely.
+- For a slippage error, re-quote and increase your Max Amount In within tolerance.
+- If the message indicates a daily transfer limit, contact your Central Bank to adjust the cap.
 
 ### Onboarding wizard appears stuck at Step 3 (KYC Pending)
 

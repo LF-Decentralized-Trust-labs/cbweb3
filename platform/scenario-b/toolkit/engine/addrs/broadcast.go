@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package addrs extracts deployed contract addresses from a Foundry broadcast
 // file and writes them into .env files (idempotent upsert). Used by the
 // found-hub deploy/render steps and the hub bundle emitter.

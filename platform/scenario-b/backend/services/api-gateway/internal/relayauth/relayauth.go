@@ -23,12 +23,17 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -135,11 +140,190 @@ func LoadCertPublicKey(path string) (*ecdsa.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("relayauth: parse cert %s: %w", path, err)
 	}
+	// A certificate authority is not a service identity. The toolkit writes the CB's CA as
+	// central-bank.crt, which the name-based skip below does not catch, so it was pinned under the
+	// key-id "central-bank" — a trust anchor asserting something it does not mean.
+	if cert.IsCA {
+		return nil, fmt.Errorf("relayauth: %s is a CA certificate, not a peer identity", path)
+	}
 	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
 	if !ok {
 		return nil, fmt.Errorf("relayauth: %s public key is not ECDSA (%T)", path, cert.PublicKey)
 	}
 	return pub, nil
+}
+
+// ParticipantPin is one onboarded peer's identity as the central bank recorded it: the certificate
+// the CB itself issued when signing that peer's CSR, plus whether the peer is currently active.
+//
+// The certificate certifies the very key the peer signs with — a bank's CSR is generated over the
+// same PKI_DIR/<bankCode>.key its relay signer uses — which is what makes the participants table a
+// valid pin source rather than merely a record.
+type ParticipantPin struct {
+	ID      string
+	CertPEM string
+	// Active is the compliance status. An inactive peer is not pinned, and it also suppresses any
+	// file pin for the same id: otherwise deactivating a bank would revoke nothing, because a stale
+	// file would keep authenticating it.
+	Active bool
+}
+
+// LoadCertPublicKeyPEM extracts the ECDSA public key from a PEM certificate in memory.
+func LoadCertPublicKeyPEM(raw []byte) (*ecdsa.PublicKey, error) {
+	block, _ := pem.Decode(raw)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, errors.New("relayauth: no CERTIFICATE PEM block")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("relayauth: parse certificate: %w", err)
+	}
+	if cert.IsCA {
+		return nil, errors.New("relayauth: certificate is a CA, not a peer identity")
+	}
+	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("relayauth: certificate public key is not ECDSA (%T)", cert.PublicKey)
+	}
+	return pub, nil
+}
+
+// BuildRegistry merges file-sourced pins with the central bank's own participant records.
+//
+// Precedence, and the reason for it:
+//
+//	active participant    pinned from the issued certificate, overriding any file pin — the table is
+//	                      authoritative, so a stale file cannot keep a superseded key alive
+//	inactive participant  NOT pinned, and any file pin for that id is REMOVED. This is the whole
+//	                      revocation story: without the removal, deactivating a bank in compliance
+//	                      would leave it authenticating from a leftover file
+//	not a participant     the file pin stands — that is how a peer the CB never onboards is trusted,
+//	                      the Cacti relay being the case that matters
+//
+// A malformed certificate is skipped rather than fatal: one bad row must not stop every other peer
+// from authenticating.
+func BuildRegistry(files *Registry, participants []ParticipantPin) *Registry {
+	out := NewRegistry()
+	if files != nil {
+		out.maxSkew = files.maxSkew
+		for id, pub := range files.keys {
+			out.keys[id] = pub
+		}
+	}
+	for _, p := range participants {
+		if p.ID == "" {
+			continue
+		}
+		if !p.Active {
+			// Known to compliance and not active: nothing may pin it, files included.
+			delete(out.keys, p.ID)
+			continue
+		}
+		pub, err := LoadCertPublicKeyPEM([]byte(p.CertPEM))
+		if err != nil {
+			log.Printf("[relay-auth] participant %q has an unusable certificate, not pinned: %v", p.ID, err)
+			delete(out.keys, p.ID)
+			continue
+		}
+		out.keys[p.ID] = pub
+	}
+	return out
+}
+
+// Store holds the registry currently in force and allows it to be replaced without locking the
+// verification path.
+//
+// Registries are treated as IMMUTABLE once built: a reload constructs a new one and swaps the
+// pointer atomically. That is what makes hot reload safe here — Registry.keys is a plain map, so
+// mutating a live registry while requests verify against it would be a data race, and taking a lock
+// on every verification to avoid that would put a contended mutex in front of the settlement path.
+//
+// Reload matters because a central bank's peers are its onboarded banks: one onboarded after the
+// gateway booted signs its calls immediately, and with a boot-time-only registry its id would not be
+// pinned — so its requests would be rejected with 401 until someone restarted the gateway.
+type Store struct {
+	p atomic.Pointer[Registry]
+
+	// refresh reloads the registry from its sources; set at wiring time because loading needs
+	// database access the relayauth package deliberately does not have.
+	mu          sync.Mutex
+	refresh     func()
+	minInterval time.Duration
+	lastRefresh time.Time
+}
+
+// NewStore returns a store holding reg (which may be nil).
+func NewStore(reg *Registry) *Store {
+	s := &Store{}
+	s.Set(reg)
+	return s
+}
+
+// SetRefresher installs the reload function used when a request presents an unknown key-id, and the
+// minimum interval between such reloads.
+func (s *Store) SetRefresher(refresh func(), minInterval time.Duration) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refresh = refresh
+	s.minInterval = minInterval
+}
+
+// EnsureFresh returns the registry in force, reloading it first if keyID is not pinned.
+//
+// Why reload on a miss. A central bank's peers are its onboarded banks, and a bank signs its calls as
+// soon as it has a key — so between onboarding and the next periodic refresh there is a window where a
+// legitimate peer is not pinned and every call it makes is rejected with 401, not downgraded. Treating
+// the miss as a cache miss closes that window.
+//
+// It is not a weakening: a reload can only load certificates this central bank itself issued, so
+// presenting an unknown id gains an attacker nothing. It is rate-limited so unknown ids cannot become
+// a free way to make the gateway hammer its own database.
+func (s *Store) EnsureFresh(keyID string) *Registry {
+	if s == nil {
+		return nil
+	}
+	current := s.Get()
+	// An empty key-id is an unsigned request: nothing to look up, nothing to refresh for.
+	if keyID == "" {
+		return current
+	}
+	if current != nil {
+		if _, pinned := current.keys[keyID]; pinned {
+			return current
+		}
+	}
+	s.mu.Lock()
+	refresh := s.refresh
+	if refresh != nil && (s.minInterval <= 0 || time.Since(s.lastRefresh) >= s.minInterval) {
+		s.lastRefresh = time.Now()
+	} else {
+		refresh = nil
+	}
+	s.mu.Unlock()
+	if refresh == nil {
+		return current
+	}
+	refresh()
+	return s.Get()
+}
+
+// Get returns the registry in force; nil-safe.
+func (s *Store) Get() *Registry {
+	if s == nil {
+		return nil
+	}
+	return s.p.Load()
+}
+
+// Set replaces the registry in force.
+func (s *Store) Set(reg *Registry) {
+	if s == nil {
+		return
+	}
+	s.p.Store(reg)
 }
 
 // Registry maps an entity key-id to its verifying public key. It is the trust
@@ -169,6 +353,26 @@ func (r *Registry) WithMaxSkew(d time.Duration) *Registry {
 
 // Len reports how many peer keys are pinned.
 func (r *Registry) Len() int { return len(r.keys) }
+
+// IDs returns the pinned key-ids, sorted.
+//
+// For visibility at boot. A registry that is non-empty but missing the callers' ids is worse than an
+// empty one: empty means "no signatures here" and the middleware falls back to the shared secret,
+// while non-empty means "verify strictly", so a SIGNED request from an unpinned id is rejected with
+// 401 and never downgraded. That refusal is correct — downgrading would make the signature
+// worthless — but it stops the settlement path, so which ids are pinned has to be visible before
+// traffic arrives rather than inferred from a wave of 401s.
+func (r *Registry) IDs() []string {
+	if r == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(r.keys))
+	for id := range r.keys {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
 
 // LoadRegistryFromPKIDir pins one verifying key per entity by reading
 // PKI_DIR/<entity>.crt for each entity id in entityIDs. Missing or non-ECDSA certs
@@ -265,6 +469,16 @@ func LoadSigner(pkiDir, keyID string) (*Signer, error) {
 		return nil, err
 	}
 	return &Signer{keyID: keyID, key: key}, nil
+}
+
+// PublicKey returns the verifying key that a peer must pin to authenticate this signer. Exposed so a
+// caller can register its own identity (and so tests can verify end to end rather than trusting that
+// the headers "look signed").
+func (s *Signer) PublicKey() *ecdsa.PublicKey {
+	if s == nil || s.key == nil {
+		return nil
+	}
+	return &s.key.PublicKey
 }
 
 // KeyID returns the signer's key id (the entity/bank code).

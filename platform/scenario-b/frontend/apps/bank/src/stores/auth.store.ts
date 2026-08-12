@@ -5,6 +5,7 @@ import { authApi } from "../services/api";
 import { cancelTokenRefresh, scheduleTokenRefresh } from "../services/api/token-refresh";
 import type { AsyncStatus, UserProfile } from "../types";
 import { BANK_UNAUTHORIZED_MESSAGE, hasBankAccess } from "../auth/authorization";
+import { useTrustStore } from "./trust.store";
 
 type AuthState = {
   profile: UserProfile | null;
@@ -58,6 +59,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   logout: async () => {
     cancelTokenRefresh();
+    // The notice belongs to the institution that was signed in; carrying it into the next session
+    // would accuse a different bank of not being registered.
+    useTrustStore.getState().clear();
     try {
       await authApi.logout();
     } finally {
@@ -72,6 +76,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   forceLogout: () => {
     cancelTokenRefresh();
+    useTrustStore.getState().clear();
     set({
       profile: null,
       isAuthenticated: false,

@@ -47,6 +47,13 @@ func (s *BridgeLockMintService) LockAndEnqueue(ctx context.Context, ownerBankID,
 
 	positionID := uuid.NewString()
 	now := time.Now()
+	// NOTE: this writes bridged_asset_positions, which the api-gateway's Hub reconciliation reads
+	// and which now carries a `direction` column (IN = mints on the Hub, OUT = burns). This
+	// service is currently wired nowhere — the gateway's own BridgeLockMintService is the live
+	// producer — and the orchestrator's model does not declare the column, so a row created here
+	// would be invisible to the reconciliation until the gateway's startup backfill defaults it to
+	// IN. If this service is ever wired up, add the column to podmain.BridgedAssetPosition and set
+	// it here rather than relying on that backfill.
 	pos := &podmain.BridgedAssetPosition{
 		PositionID:     positionID,
 		OwnerBankID:    ownerBankID,

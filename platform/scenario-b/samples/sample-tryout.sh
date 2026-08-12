@@ -181,15 +181,42 @@ printf '%s' "$BODY" | grep -q "W-tCeBM_${CUR_B}" || die "W-tCeBM_${CUR_B} not re
 ok "W-tCeBM_${CUR_A} and W-tCeBM_${CUR_B} are registered"
 
 # ═══════════════════════════════ OPEN CORRIDOR ══════════════════════════════════
-# The hub deploys the sovereign-pair AMM over the two registered W-tokens and
-# registers the pair (proposePair + confirmPair). CBs never touch the hub chain;
-# the hub governance signer performs the on-chain acts. Idempotent by pair id.
-step "Open the ${CUR_A}↔${CUR_B} corridor (hub deploys the sovereign AMM + registers the pair)"
-call POST "$HUB/internal/v1/spokes/register-pair" "" \
-  "{\"currency_a\":\"$CUR_A\",\"currency_b\":\"$CUR_B\",\"pair_id\":\"$POOL\"}" \
-  "X-Relay-Auth: $RELAY_SECRET"
+# A corridor is a bilateral act, and the PairRegistry enforces it: proposePair admits
+# only getCentralBankOf(tokenA) and confirmPair only getCentralBankOf(tokenB). Each
+# sovereign W-token's issuance authority belongs to its own central bank, so the pair is
+# opened by TWO signatures — the issuing CB of each side, from its own governance portal.
+#
+# The hub-mediated shortcut (POST /internal/v1/spokes/register-pair) is deliberately not
+# used: it only ever worked while one key was the central bank of both tokens, which made a
+# single holder able to confirm both sides of a bilateral corridor.
+step "Open the ${CUR_A}↔${CUR_B} corridor (${CUR_A} CB proposes, ${CUR_B} CB confirms)"
+relogin
+TOKEN_A=$(try GET "$BR_CB/api/v2/hub/currencies" "$BR_TOK"; printf '%s' "$BODY" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+rows = d if isinstance(d, list) else d.get("currencies", [])
+sym = "W-tCeBM_" + sys.argv[1]
+print(next((r.get("token_address", "") for r in rows if r.get("symbol") == sym), ""))
+' "$CUR_A")
+TOKEN_B=$(try GET "$BR_CB/api/v2/hub/currencies" "$BR_TOK"; printf '%s' "$BODY" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+rows = d if isinstance(d, list) else d.get("currencies", [])
+sym = "W-tCeBM_" + sys.argv[1]
+print(next((r.get("token_address", "") for r in rows if r.get("symbol") == sym), ""))
+' "$CUR_B")
+[[ -n $TOKEN_A && -n $TOKEN_B ]] || die "could not resolve the W-token addresses for $CUR_A/$CUR_B"
+info "tokenA=$TOKEN_A tokenB=$TOKEN_B"
+
+# The proposing CB deploys the pair's dedicated AMM when amm_address is omitted, so the
+# corridor's infrastructure and its first sovereign act land in one signed call.
+call POST "$BR_CB/api/v2/amm/pairs/propose" "$BR_TOK" \
+  "{\"pair_id\":\"$POOL\",\"token_a_address\":\"$TOKEN_A\",\"token_b_address\":\"$TOKEN_B\",\"proposer_cb\":\"$CUR_A\"}"
 AMM=$(printf '%s' "$BODY" | jget amm_address)
-ok "corridor $POOL ready (amm=$AMM already_registered=$(printf '%s' "$BODY" | jget already_registered))"
+ok "${CUR_A} CB proposed $POOL (amm=$AMM)"
+
+call POST "$AR_CB/api/v2/amm/pairs/confirm" "$AR_TOK" "{\"pair_id\":\"$POOL\",\"confirmer_cb\":\"$CUR_B\"}"
+ok "${CUR_B} CB confirmed $POOL — corridor ACTIVE"
 
 # ═══════════════════════════════ LIQUIDITY ══════════════════════════════════════
 # Sovereign escrow-and-finalize seeding: each central bank deposits ONLY its own side

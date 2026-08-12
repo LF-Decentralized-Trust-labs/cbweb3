@@ -61,14 +61,14 @@ Open the **Treasury Portal URL** provided by your system administrator in your b
 
 | Field | Description |
 |---|---|
-| **Client ID** | Your operator client identifier (e.g., `central-bank-a-treasury-client`). |
-| **Client Secret** | Your operator client secret. Minimum 6 characters. |
+| **Username** | Your operator username (e.g., `admin@brasil.treasury.gov`). Minimum 3 characters. |
+| **Password** | Your operator password. Minimum 6 characters. |
 
 Click **Sign in**. On success, you are redirected to the Dashboard. If the account does not carry the `ROLE_TREASURY` claim, sign-in will succeed at the authentication layer but the portal will deny access with an authorisation error.
 
 > **Session note:** Session credentials are held in memory only and are not persisted to local storage or across browser tabs. Opening the portal in a new browser tab requires a fresh sign-in.
 
-> **PKI accounts:** Accounts that require PKI-certificate-based authentication cannot log in through this portal. Use a standard client-ID / client-secret treasury account.
+> **PKI accounts:** Accounts that require PKI-certificate-based authentication cannot log in through this portal. Use a standard username / password treasury account.
 
 ---
 
@@ -81,7 +81,7 @@ The sidebar provides access to all currently active screens.
 | Dashboard | `/` | Landing page after login |
 | Issuance Approvals | `/deposits-approval` | Approve or reject bank deposit / issuance requests |
 | Tokenisation Approvals | `/escrows-approval` | Approve or reject burn-to-mint (pledge) requests |
-| Redeems Approval | `/redeems-approval` | Approve or reject tCeBM redemption requests |
+| Redeem Approvals | `/redeems-approval` | Approve or reject tCeBM redemption requests |
 | PvP Settlement | `/htlc-monitor` | Read-only monitor of cross-border HTLC contracts |
 | Transfer Limits | `/transfer-limits` | Create and remove per-participant daily transfer limits |
 
@@ -93,7 +93,9 @@ Any URL that does not match a known route redirects automatically to the Dashboa
 
 ### 4.1 Dashboard (`/`)
 
-The Dashboard is the landing page after login. It provides a live summary of supply metrics, pending work, recent mint/burn operations, and a real-time event stream.
+The Dashboard is the landing page after login. It provides a live summary of supply metrics, pending work, recent mint/burn operations, and a simulated event stream.
+
+> **Note:** The event stream on this Dashboard is a browser-simulated demo ticker. It is **not** backed by the API Gateway or any live backend connection. The supply metrics, pending-request counts, and mint/burn operations cards are sourced from the real backend; the event stream is not.
 
 ![Treasury Dashboard](../img/scenario-a/treasury/02-treasury-dashboard.png)
 
@@ -118,7 +120,7 @@ Displays the six most recent token operations (mints and burns), including opera
 
 #### Real-time Event Stream
 
-Displays the eight most recent events pushed from the backend over the live event connection. Events are classified by type and severity (`INFO`, `WARNING`, `CRITICAL`). The stream is read-only; no actions are available here.
+This panel is labelled **Real-time Event Stream** on screen, but despite its name it is a browser-simulated demo ticker. It displays the eight most recent events from that ticker. The ticker is generated locally in the portal (a fixed set of sample messages, one emitted approximately every 12 seconds) and is **not** connected to the API Gateway or any backend event feed. Events are classified by type and severity (`INFO`, `WARNING`, `CRITICAL`). The stream is read-only; no actions are available here.
 
 ---
 
@@ -145,6 +147,7 @@ Enter a **Requester ID** (e.g., `bank-a-client`) and click **Apply Filter** to n
 |---|---|
 | **ID** | Unique request identifier (truncated; hover for full value). |
 | **Requester** | The commercial bank operator's identity (truncated; hover for full value). |
+| **Requester Name** | The display name of the requesting institution (falls back to `—` when unavailable). |
 | **Fiat Amount** | The fiat collateral amount backing this issuance request. |
 | **Status** | Current request status — see [Status Reference](#7-status-reference). |
 | **Issuance Reference** | On-chain transaction hash of the tokenised fiat mint (populated after approval). |
@@ -192,6 +195,7 @@ After the Central Bank approves an issuance request (tokenised fiat minted), the
 |---|---|
 | **ID** | Unique request identifier (truncated; hover for full value). |
 | **Requester** | The commercial bank operator's identity. |
+| **Requester Name** | The display name of the requesting institution (falls back to `—` when unavailable). |
 | **Amount** | The amount of tCeBM to be minted (and the equivalent tokenised fiat to be burned). |
 | **Status** | Current request status — see [Status Reference](#7-status-reference). |
 | **Redemption ID** | Transaction hash of the burn operation (populated after approval). |
@@ -235,6 +239,7 @@ When a commercial bank wishes to convert tCeBM back to fiat reserves, it submits
 |---|---|
 | **ID** | Unique request identifier (truncated; hover for full value). |
 | **Requester** | The commercial bank operator's identity. |
+| **Requester Name** | The display name of the requesting institution (falls back to `—` when unavailable). |
 | **Amount** | The amount of tCeBM to be redeemed. |
 | **Status** | Current request status — see [Status Reference](#7-status-reference). |
 | **Zeto Transfer Tx Hash** | Transaction hash of the privacy-preserving Zeto token transfer previously executed by the privacy proxy (system-populated). |
@@ -261,7 +266,7 @@ Click **Refresh** at any time to manually reload the redeem queue.
 
 ### 4.5 HTLC Monitor (`/htlc-monitor`)
 
-This page provides a **read-only** view of all cross-border atomic settlement contracts (Hash Time Lock Contracts — HTLCs) tracked by the system. No approval actions are available here; it is used for oversight and auditing of the PvP settlement lifecycle.
+The in-page title of this screen is **PvP Settlement Monitor**. It provides a **read-only** view of all cross-border atomic settlement contracts (Hash Time Lock Contracts — HTLCs) tracked by the system. No approval actions are available here; it is used for oversight and auditing of the PvP settlement lifecycle.
 
 ![HTLC Monitor](../img/scenario-a/treasury/09-htlc-monitor.png)
 
@@ -456,7 +461,7 @@ If a contract is stuck in `PENDING_SETTLEMENT` past its expiry, the counterparty
 | `PENDING` | Request submitted by the bank; awaiting your action. | Approve or Reject. |
 | `APPROVED` | Request approved; on-chain operation completed successfully. | No action required. |
 | `REJECTED` | Request rejected by a treasury operator; a reason is recorded. | No further action. The bank must submit a new request if needed. |
-| `MINT_FAILED` | Approval was granted but the on-chain mint transaction failed. | Use **Retry Mint** (Issuance Approvals only). Investigate backend and node connectivity. |
+| `MINT_FAILED` | Approval was granted but the on-chain mint transaction failed. Displayed in the status badge as **MINT FAILED** (no underscore). | Use **Retry Mint** (Issuance Approvals only). Investigate backend and node connectivity. |
 
 ### HTLC Contract States
 
@@ -474,9 +479,9 @@ If a contract is stuck in `PENDING_SETTLEMENT` past its expiry, the counterparty
 
 ### Login fails with "unauthorized" or access is denied
 
-- Verify that the Client ID and Client Secret are correct.
+- Verify that the Username and Password are correct.
 - Confirm the treasury operator account exists and carries the `ROLE_TREASURY` claim. Accounts without this claim will be rejected after authentication.
-- Accounts requiring PKI-certificate authentication cannot log in here. Use a standard client-ID/client-secret treasury account.
+- Accounts requiring PKI-certificate authentication cannot log in here. Use a standard username/password treasury account.
 - Confirm the spoke backend services are running (`docker compose ps` from the relevant `deploy/local/` directory).
 
 ### An approval request does not appear in the queue
@@ -510,8 +515,8 @@ If a contract is stuck in `PENDING_SETTLEMENT` past its expiry, the counterparty
 - If the expiry has not passed, the receiving bank must complete the settlement from their Bank Portal.
 - If a cross-spoke settlement appears frozen before expiry, check the relay (Cacti hub-and-spoke) logs for event propagation issues.
 
-### The Real-time Event Stream on the Dashboard shows no events
+### The Event Stream on the Dashboard shows no events
 
-- The event stream uses a server-sent event connection to the backend. If the connection drops, events stop arriving.
-- Reload the page to re-establish the connection.
-- Confirm the backend services are running and reachable.
+- The Dashboard event stream is a browser-simulated demo ticker, not a backend feed. It begins emitting sample events shortly after the Dashboard loads (approximately one every 12 seconds).
+- If it appears empty, reload the page to restart the ticker.
+- Absence of events here does not indicate a backend outage; the event stream is not connected to the backend.

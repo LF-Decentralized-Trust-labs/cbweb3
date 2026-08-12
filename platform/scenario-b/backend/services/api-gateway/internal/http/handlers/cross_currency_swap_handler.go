@@ -372,8 +372,15 @@ type crossCurrencySwapHistoryItem struct {
 	SwapTxHash        string  `json:"swap_tx_hash,omitempty"`
 	BeneficiaryBankID string  `json:"beneficiary_bank_id,omitempty"`
 	FailureReason     string  `json:"failure_reason,omitempty"`
-	CreatedAt         string  `json:"created_at"`
-	CompletedAt       string  `json:"completed_at,omitempty"`
+	// Residue fields: the slippage buffer the bridge-in had to move and the swap did not
+	// consume, plus what became of its return. Surfaced because a payer that is owed money has
+	// to be able to see it — until now the history exposed none of this, so a return that
+	// failed to enqueue was invisible to the bank it belonged to.
+	ResidueAmount     string `json:"residue_amount,omitempty"`
+	ResidueStatus     string `json:"residue_status,omitempty"`
+	ResiduePositionID string `json:"residue_position_id,omitempty"`
+	CreatedAt         string `json:"created_at"`
+	CompletedAt       string `json:"completed_at,omitempty"`
 }
 
 const iso8601 = "2006-01-02T15:04:05Z07:00"
@@ -399,6 +406,11 @@ func swapOpToHistoryItem(op *domain.CrossCurrencySwapOperation) crossCurrencySwa
 	}
 	if op.CompletedAt != nil {
 		item.CompletedAt = op.CompletedAt.Format(iso8601)
+	}
+	item.ResidueAmount = op.ResidueAmount
+	item.ResidueStatus = string(op.ResidueStatus)
+	if op.ResiduePositionID != nil {
+		item.ResiduePositionID = *op.ResiduePositionID
 	}
 	return item
 }

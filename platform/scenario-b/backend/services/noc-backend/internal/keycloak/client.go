@@ -24,7 +24,20 @@ import (
 // TokenClaims is the normalized token payload used by NOC backend.
 type TokenClaims struct {
 	Subject string
-	Roles   []string
+	// Username is the operator-facing identity (preferred_username), used for the
+	// audit trail and alert acknowledgements. Subject is the opaque Keycloak "sub"
+	// UUID, which is not what an operator reading the Audit page expects to see.
+	Username string
+	Roles    []string
+}
+
+// Actor returns the identity to record for an operator action: the username when the
+// realm provides one, otherwise the subject.
+func (c TokenClaims) Actor() string {
+	if strings.TrimSpace(c.Username) != "" {
+		return c.Username
+	}
+	return c.Subject
 }
 
 // Client validates Keycloak JWTs.
@@ -140,10 +153,12 @@ func (c *client) ValidateToken(ctx context.Context, accessToken string) (TokenCl
 	}
 
 	subject, _ := claims["sub"].(string)
+	username, _ := claims["preferred_username"].(string)
 
 	return TokenClaims{
-		Subject: subject,
-		Roles:   extractRealmRoles(claims),
+		Subject:  subject,
+		Username: username,
+		Roles:    extractRealmRoles(claims),
 	}, nil
 }
 
@@ -283,9 +298,42 @@ func NewNoOp() Client {
 	return &noOpClient{}
 }
 
-func (n *noOpClient) ValidateToken(_ context.Context, _ string) (TokenClaims, error) {
+// devUser is the identity recorded when the presented token carries no readable one.
+const devUser = "dev-user"
+
+// ValidateToken approves any token, but still reads its identity claims so operator
+// actions are attributed to the person who performed them instead of a single stub
+// user. The signature is deliberately NOT verified — that is the whole point of
+// NOC_SKIP_AUTH — so these claims are for attribution only, never authorization.
+func (n *noOpClient) ValidateToken(_ context.Context, accessToken string) (TokenClaims, error) {
+	subject, username := unverifiedIdentity(accessToken)
+	if subject == "" {
+		subject = devUser
+	}
 	return TokenClaims{
-		Subject: "dev-user",
-		Roles:   []string{"ROLE_NOC_ADMIN", "ROLE_NOC_OPERATOR", "ROLE_NOC_VIEWER"},
+		Subject:  subject,
+		Username: username,
+		Roles:    []string{"ROLE_NOC_ADMIN", "ROLE_NOC_OPERATOR", "ROLE_NOC_VIEWER"},
 	}, nil
+}
+
+// unverifiedIdentity extracts sub + preferred_username from a JWT payload without
+// verifying it. Returns empty strings for anything unparseable.
+func unverifiedIdentity(accessToken string) (subject, username string) {
+	parts := strings.Split(accessToken, ".")
+	if len(parts) < 2 {
+		return "", ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
+	if err != nil {
+		return "", ""
+	}
+	var claims struct {
+		Subject  string `json:"sub"`
+		Username string `json:"preferred_username"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return "", ""
+	}
+	return claims.Subject, claims.Username
 }

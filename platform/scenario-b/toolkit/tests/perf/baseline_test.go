@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build perf
 
 // Package perf holds the toolkit-native performance baseline (build tag `perf`,

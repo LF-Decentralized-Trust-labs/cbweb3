@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // sanitizeLogField strips CR/LF so relay-influenced fields (correlation_id, swap_tx_hash)
@@ -101,6 +102,7 @@ func (s *BridgeLockMintService) LockAndEnqueue(ctx context.Context, ownerBankID,
 		MirroredAsset:        mirroredAsset,
 		MirroredAmount:       amount,
 		BridgeState:          domain.BridgeStateLocking,
+		Direction:            domain.BridgeDirectionIn,
 		MintToHubAddress:     mintTo,
 		BurnFromSpokeAddress: burnFromSpoke,
 		FirstAttemptAt:       &now,
@@ -274,6 +276,21 @@ type burnParams struct {
 	parentPositionID string
 }
 
+// ensureBurnQueueItem makes sure a BURN_UNLOCK queue item exists for the position, so that
+// something will actually drive it. Idempotent on the item's own unique idempotency_key: an
+// item that is already there — pending, in flight or already completed — is left untouched.
+func (s *BridgeBurnUnlockService) ensureBurnQueueItem(ctx context.Context, positionID string) error {
+	item := &domain.RelayerQueueItem{
+		ItemID:         uuid.NewString(),
+		IdempotencyKey: fmt.Sprintf("burn:%s", positionID),
+		EventType:      "BURN_UNLOCK",
+		PositionID:     positionID,
+		State:          domain.RelayerStatePending,
+		NextAttemptAt:  time.Now(),
+	}
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(item).Error
+}
+
 func (s *BridgeBurnUnlockService) enqueueBurn(ctx context.Context, p burnParams) (*BridgePositionResult, error) {
 	if p.ownerBankID == "" || p.spokeNetwork == "" || p.mirroredAsset == "" || p.amount == "" {
 		return nil, fmt.Errorf("owner_bank_id, spoke_network, mirrored_asset, and amount are required")
@@ -300,6 +317,7 @@ func (s *BridgeBurnUnlockService) enqueueBurn(ctx context.Context, p burnParams)
 		MirroredAsset:           p.mirroredAsset,
 		MirroredAmount:          p.amount,
 		BridgeState:             domain.BridgeStateActive,
+		Direction:               domain.BridgeDirectionOut,
 		BurnFromHubAddress:      p.burnFrom,
 		BeneficiarySpokeAddress: p.beneficiarySpoke,
 		SwapTxHash:              p.swapTxHash,
@@ -316,6 +334,19 @@ func (s *BridgeBurnUnlockService) enqueueBurn(ctx context.Context, p burnParams)
 		// deadlock, etc.) must propagate so the caller can retry safely.
 		if p.swapTxHash != "" && isUniqueViolation(err) {
 			if existing, findErr := s.findBySwapTxHashLeg(ctx, p.swapTxHash, p.leg); findErr == nil && existing != nil {
+				// The position existing does not mean anything is driving it. This function
+				// persists the position and its queue item in two statements, so a failure on
+				// the second leaves a position with no queue item and returns an error — the
+				// caller records the attempt as failed. A later retry lands HERE, on the unique
+				// violation, and would report success for a position nothing will ever process.
+				// Ensure the queue item first, idempotently on its own unique key: a genuine
+				// replay is a no-op, the interrupted case is repaired. Re-driving an
+				// already-settled burn is safe — the executor reconciles by persisted tx hash
+				// rather than re-burning (R2-H-12).
+				if qerr := s.ensureBurnQueueItem(ctx, existing.PositionID); qerr != nil {
+					return nil, fmt.Errorf("duplicate position %s has no relayer queue item and it could not be created: %w",
+						existing.PositionID, qerr)
+				}
 				fmt.Printf("%sbridge-out duplicate swap_tx_hash=%s leg=%s — returning existing position %s\n",
 					logPrefix, sanitizeLogField(p.swapTxHash), p.leg, existing.PositionID)
 				return existing, nil
@@ -324,16 +355,7 @@ func (s *BridgeBurnUnlockService) enqueueBurn(ctx context.Context, p burnParams)
 		return nil, fmt.Errorf("persist bridge-out position failed: %w", err)
 	}
 
-	idempotencyKey := fmt.Sprintf("burn:%s", positionID)
-	item := &domain.RelayerQueueItem{
-		ItemID:         uuid.NewString(),
-		IdempotencyKey: idempotencyKey,
-		EventType:      "BURN_UNLOCK",
-		PositionID:     positionID,
-		State:          domain.RelayerStatePending,
-		NextAttemptAt:  now,
-	}
-	if err := s.db.WithContext(ctx).Create(item).Error; err != nil {
+	if err := s.ensureBurnQueueItem(ctx, positionID); err != nil {
 		return nil, fmt.Errorf("persist relayer queue item failed: %w", err)
 	}
 

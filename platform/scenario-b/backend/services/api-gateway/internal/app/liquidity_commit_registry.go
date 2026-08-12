@@ -127,7 +127,7 @@ func NewLiquidityCommitRegistryClient(ctx context.Context, cfg LiquidityCommitRe
 		timeout:  cfg.Timeout,
 	}
 	if cfg.PrivateKeyHex != "" {
-		signer, sigErr := evm.NewSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
+		signer, sigErr := evm.SharedSigner(cfg.PrivateKeyHex, big.NewInt(cfg.ChainID))
 		if sigErr != nil {
 			ec.Close()
 			return nil, fmt.Errorf("liquidity commit registry: signer: %w", sigErr)

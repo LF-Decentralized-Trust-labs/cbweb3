@@ -18,6 +18,26 @@ const (
 	BridgeStateBurning                BridgeState = "BURNING"
 	BridgeStateReleased               BridgeState = "RELEASED"
 	BridgeStateReconciliationRequired BridgeState = "RECONCILIATION_REQUIRED"
+	// BridgeStateBurned is written by the relayer once a Hub burn is CONFIRMED on-chain, before
+	// the spoke-side delivery. The gateway needs it to tell a confirmed burn from a merely
+	// broadcast one: the tx hash alone is recorded pre-confirmation as an intent, so reading the
+	// hash would count value as gone while it is still sitting on the Hub address.
+	BridgeStateBurned BridgeState = "BURNED"
+)
+
+// BridgeDirection says which way a position moves value, which no other field on the row does.
+//
+// Without it a bridge-out is indistinguishable from a bridge-in: both are created with
+// leg=SETTLEMENT, both reach ACTIVE, and both carry the local CB's own W-token as
+// mirrored_asset. Anything reasoning about what a CB HOLDS therefore has to know the direction,
+// or it counts inbound payments — whose tokens sit at the SOURCE CB's address — as its own.
+type BridgeDirection string
+
+const (
+	// BridgeDirectionIn mints the mirrored asset on the Hub (lock/burn on the spoke first).
+	BridgeDirectionIn BridgeDirection = "IN"
+	// BridgeDirectionOut burns the mirrored asset on the Hub and delivers on a spoke.
+	BridgeDirectionOut BridgeDirection = "OUT"
 )
 
 // BridgeLeg distinguishes what a position settles for a given Hub swap. A single swap
@@ -37,17 +57,26 @@ const (
 
 // BridgedAssetPosition tracks a cross-spoke bridging lifecycle (Lock→Active→Burn→Released).
 type BridgedAssetPosition struct {
-	PositionID      string      `gorm:"primaryKey;column:position_id;type:varchar(64)"`
-	OwnerBankID     string      `gorm:"column:owner_bank_id;not null"`
-	SpokeNetwork    string      `gorm:"column:spoke_network;not null"`
-	NativeAsset     string      `gorm:"column:native_asset;not null"`
-	MirroredAsset   string      `gorm:"column:mirrored_asset;not null"`
-	MirroredAmount  string      `gorm:"column:mirrored_amount;not null"`
-	BridgeState     BridgeState `gorm:"column:bridge_state;not null;default:'LOCKING'"`
-	RelayerRetries  int         `gorm:"column:relayer_retries;not null;default:0"`
-	LastAttemptAt   *time.Time  `gorm:"column:last_attempt_at"`
-	FirstAttemptAt  *time.Time  `gorm:"column:first_attempt_at"`
-	RelayerErrorLog *string     `gorm:"column:relayer_error_log;type:jsonb"`
+	PositionID   string `gorm:"primaryKey;column:position_id;type:varchar(64)"`
+	OwnerBankID  string `gorm:"column:owner_bank_id;not null"`
+	SpokeNetwork string `gorm:"column:spoke_network;not null"`
+	NativeAsset  string `gorm:"column:native_asset;not null"`
+	// MirroredAsset leads the reconciliation index. That query filters on
+	// (mirrored_asset, leg, bridge_state) to find what a CB still holds on the Hub for its banks;
+	// without it, a gateway with a long payment history would scan the whole table every few
+	// minutes. owner_bank_id is deliberately NOT the indexed column — the query groups by it,
+	// it does not filter on it.
+	MirroredAsset  string `gorm:"column:mirrored_asset;not null;index:idx_bridge_recon,priority:1"`
+	MirroredAmount string `gorm:"column:mirrored_amount;not null"`
+	// Direction distinguishes a mint-on-Hub from a burn-on-Hub. Set at creation; legacy rows are
+	// backfilled from the relayer queue's event type, which is the only durable record of which
+	// way a pre-existing position went.
+	Direction       BridgeDirection `gorm:"column:direction;default:''"`
+	BridgeState     BridgeState     `gorm:"column:bridge_state;not null;default:'LOCKING';index:idx_bridge_recon,priority:3"`
+	RelayerRetries  int             `gorm:"column:relayer_retries;not null;default:0"`
+	LastAttemptAt   *time.Time      `gorm:"column:last_attempt_at"`
+	FirstAttemptAt  *time.Time      `gorm:"column:first_attempt_at"`
+	RelayerErrorLog *string         `gorm:"column:relayer_error_log;type:jsonb"`
 	// BurnFromHubAddress overrides the default burnFrom in the Relayer executor for
 	// cross-currency bridge-out (009). When empty, the executor falls back to
 	// HUB_MINT_RECIPIENT env var. Populated by CrossCurrencyBridgeOutHandler with
@@ -80,7 +109,7 @@ type BridgedAssetPosition struct {
 	SwapTxHash string `gorm:"column:swap_tx_hash;default:'';index:idx_bridge_swap_tx_leg,unique,priority:1,where:swap_tx_hash <> ''"`
 	// Leg is SETTLEMENT (the payment) or RESIDUE (return of the unspent slippage buffer).
 	// Legacy rows default to SETTLEMENT, which is what they are.
-	Leg BridgeLeg `gorm:"column:leg;not null;default:'SETTLEMENT';index:idx_bridge_swap_tx_leg,unique,priority:2"`
+	Leg BridgeLeg `gorm:"column:leg;not null;default:'SETTLEMENT';index:idx_bridge_swap_tx_leg,unique,priority:2;index:idx_bridge_recon,priority:2"`
 	// ParentPositionID links a RESIDUE leg to the bridge-in position it corrects. The net
 	// amount actually consumed by the swap is parent.mirrored_amount − residue.mirrored_amount;
 	// the parent's mirrored_amount is never rewritten, since it records what the chain did.
@@ -100,6 +129,13 @@ type BridgedAssetPosition struct {
 	// unbacked tCeBM to the beneficiary twice. Column created here because the gateway owns the
 	// AutoMigrate for the shared bridged_asset_positions table.
 	SpokeMintTxHash string `gorm:"column:spoke_mint_tx_hash;default:''"`
+	// SpokeFundTxHash is the confirmed Spoke-side mint that funded THIS position's sovereign
+	// lock. Before it existed, the relayer decided whether to mint by reading the signer's
+	// balance: a position whose predecessor had left tokens on that address locked those
+	// instead of minting its own, so the CB's tCeBM supply stopped corresponding to positions.
+	// Recorded on broadcast, like the burn/mint hashes above, so a retry reconciles by hash
+	// instead of funding twice.
+	SpokeFundTxHash string `gorm:"column:spoke_fund_tx_hash;default:''"`
 	// CorrelationID links the position to the cross-currency swap operation (009) for
 	// tracing. Not unique: a rollback position legitimately shares the correlation of
 	// the bridge-in it reverses — replay protection is keyed on SwapTxHash.

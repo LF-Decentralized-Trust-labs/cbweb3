@@ -87,7 +87,7 @@ func main() {
 	// Services
 	alertSvc := service.NewAlertService(db)
 	relayMetricsSvc := service.NewRelayMetricsService(db)
-	watchdog := service.NewWatchdogService(agentsRepo, componentsRepo, db, cfg.AgentGraceMultiplier)
+	watchdog := service.NewWatchdogService(agentsRepo, componentsRepo, alertSvc, db, cfg.AgentGraceMultiplier)
 	retention := service.NewRetentionWorker(db)
 
 	ctx, cancel := context.WithCancel(context.Background())

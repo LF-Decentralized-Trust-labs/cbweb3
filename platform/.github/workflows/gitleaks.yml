@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Secret Scan — gitleaks
+
+# Finding R2-11.3: secret-scan gate.
+# Must live DIRECTLY under .github/workflows/ (not a subfolder) so GitHub
+# Actions discovers it — see finding R2-11.2 / H-14.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  # Pinned gitleaks release. The MIT-licensed binary needs no GITLEAKS_LICENSE,
+  # unlike gitleaks-action@v2, which mandates a license key for organizations.
+  GITLEAKS_VERSION: "8.28.0"
+  # SHA-256 of gitleaks_8.28.0_linux_x64.tar.gz, from the release asset
+  # gitleaks_8.28.0_checksums.txt. Pinning the version alone is not enough: a
+  # release asset can be replaced. Bump both together when upgrading.
+  GITLEAKS_SHA256: "a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb"
+
+jobs:
+  gitleaks:
+    name: gitleaks secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history is REQUIRED by the second scan step below (`gitleaks
+          # git` walks every commit). Do not lower this to 1: a shallow clone
+          # makes the history scan silently cover almost nothing.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Download the pinned, MIT-licensed gitleaks binary (linux x64) directly
+      # from the official release. No license key required for organizations.
+      # The checksum is verified before the archive is unpacked, so a swapped
+      # release asset fails the job instead of silently running as the scanner.
+      - name: Install gitleaks (pinned)
+        run: |
+          set -euo pipefail
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            -o /tmp/gitleaks.tar.gz
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      # SCAN 1 of 2 — WORKING TREE.
+      #
+      # The job FAILS (gate) when a secret is detected: --exit-code 1 makes
+      # gitleaks return 1 on findings. Config (default ruleset + documented
+      # allowlist) comes from .gitleaks.toml; --redact keeps secret values out
+      # of the build log.
+      #
+      # --no-git scans the checked-out tree only. It catches a secret that is
+      # present in the source right now; it does not walk commit history. That
+      # is scan 2's job.
+      - name: Run gitleaks — working tree
+        run: gitleaks detect --no-git --source . --config .gitleaks.toml --redact --exit-code 1
+
+      # SCAN 2 of 2 — COMMIT HISTORY.
+      #
+      # `gitleaks git` walks every commit reachable from the checked-out ref, so
+      # it catches a secret that was committed and later deleted — invisible to
+      # scan 1. Requires fetch-depth: 0 above.
+      #
+      # Pre-existing findings are suppressed by .gitleaksignore, which holds the
+      # fingerprints (commit:file:rule:line) of history hits already triaged and
+      # accepted. See docs/deliverables/D11-secret-scan-report.md for the
+      # per-finding rationale. Because a fingerprint pins a commit AND a line, a
+      # NEW secret still fails — including one added to a file that already has
+      # accepted entries. Verified with a planted-commit control.
+      #
+      # if: always() so a working-tree failure does not mask the history result;
+      # the job still fails if either scan does.
+      - name: Run gitleaks — commit history
+        if: always()
+        run: gitleaks git . --config .gitleaks.toml --redact --exit-code 1
