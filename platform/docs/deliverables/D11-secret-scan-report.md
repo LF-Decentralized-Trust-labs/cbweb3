@@ -92,6 +92,8 @@ Each allowlist entry is tagged **LIVE** (read by one of those paths, by the tool
 
 Production key material is never committed. It is delivered at runtime through the environment or a secret manager, and the provisioning toolkit mints per-entity keys in memory (`KeyProvider` / `CertSource`) without persisting them.
 
+The handling rules those exemptions are measured against — the no-key-in-VCS principle, the per-environment key sources, and the `KeyProvider` path to HSM-backed signing — are in [`docs/secret-management.md`](../secret-management.md) (finding R2-10.4). Note in particular the caveat recorded there: only the local tier is selectable today, so the LNET deploy runs on public dev keys by design.
+
 ## 6. Gate verification
 
 The gate was verified by control rather than by observing a green check, since a passing scan proves nothing on its own about whether the scanner would catch anything.
