@@ -19,8 +19,16 @@ Both run idempotently (re-running `apply` resumes from the first incomplete step
 ### `found` (central bank) — ✅ complete
 `start-besu → deploy-contracts → gen-tls → render-configs → register-nodes →
 start-paladin → create-zeto-token → onboard-registry → deploy-fiat-token →
-deploy-htlc → register-relay → render-cb-env → start-cb-infra →
-provision-keycloak → start-cb-backend → start-cb-frontend`
+deploy-htlc → render-cb-env → start-cb-infra → provision-keycloak →
+start-cb-backend → start-cb-frontend → register-relay → start-launcher`
+
+> The order above is `orchestrator.CanonicalStepOrder`, which
+> `TestCanonicalStepOrderMatchesExecution` locks to what `buildSteps` assembles.
+> `register-relay` runs **after** the frontend, not after `deploy-htlc`: the relay
+> is handed the CB coordinator endpoints, so those services must exist first.
+> `start-launcher` is soft. A manifest with `proxy: enable` appends an 18th step,
+> `start-proxy` (also soft) — build the order for a given manifest with
+> `orchestrator.PlannedStepOrder(mode, proxyEnabled)`.
 
 - Besu (QBFT) + Paladin up; spoke contracts + IdentityRegistry deployed; relay
   registered; join bundle emitted.
@@ -32,13 +40,29 @@ provision-keycloak → start-cb-backend → start-cb-frontend`
   (`CB_PRIVATE_KEY` empty; signing via the KeyProvider abstraction).
 
 ### `join` (commercial bank) — ✅ provisioning complete
-`write-genesis → start-besu-join → wait-sync → vote-qbft → gen-tls-join →
+`write-genesis → start-besu-join → wait-sync → gen-tls-join →
 render-config-join → start-paladin-join → register-paladin-node →
-render-bank-env → start-bank-infra → provision-bank-keycloak → start-backend`
-then the **deferred soft tail**: `create-pente-context → deploy-fxa-pente →
-proof-of-possession → gen-csr → request-cert → receive-cert`.
+render-bank-env → start-bank-infra → provision-bank-keycloak → start-backend →
+start-bank-frontend` then the **deferred tail**: `create-pente-context →
+deploy-fxa-pente → gen-csr → start-launcher`.
 
-- Besu joins the shared spoke network, syncs, and is voted in as a QBFT validator.
+> The order above is `orchestrator.CanonicalJoinStepOrder`, locked to
+> `buildJoinSteps` by `TestCanonicalJoinStepOrderMatchesExecution`. Of the tail,
+> `create-pente-context` and `deploy-fxa-pente` are the non-fatal pair
+> (`isDeferredOnboardingStep`); `gen-csr` is a hard step and `start-launcher` is
+> soft. `proxy: enable` appends `start-proxy`.
+>
+> `vote-qbft` is **not** in the sequence: a commercial bank joins as a
+> non-validating full node (see below). Neither are `request-cert`,
+> `receive-cert` or `proof-of-possession` — cert issuance and on-chain
+> participant registration are not join steps (Option C, see the tail note below).
+> Those three constants still exist in `step.go` with no call sites.
+
+- Besu joins the shared spoke network and syncs. It is **not** promoted to QBFT
+  validator: the central bank is the spoke's sole validator, which keeps consensus
+  liveness independent of any bank's availability and lets banks join without a
+  validator-set majority vote. (`vote-qbft` is retained for a future
+  validator-join mode.)
 - Paladin node brought up (dedicated ports) and registered on-chain.
 - Bank operational stack: dedicated Postgres + Redis + Keycloak (bank realm) +
   the 4 backend services, in commercial-bank mode.
@@ -48,7 +72,7 @@ proof-of-possession → gen-csr → request-cert → receive-cert`.
 For `environment: local`, bundle endpoints (built from the CB's in-Docker
 advertised host) are adapted on the join side:
 - Besu peers over the shared spoke network using the container-internal P2P port
-  (validated: `peers ≥ 1`, sync, QBFT vote).
+  (validated: `peers ≥ 1`, sync to the CB's head).
 - The host-run toolkit reaches the CB JSON-RPC / api-gateway via published host
   ports (`localhost`); the bank backend reaches the CB via `host.docker.internal`.
 
@@ -83,23 +107,39 @@ Prod (staging) wiring of the operator signing key and per-entity funded wallets 
 FASE 4 (not implemented); in local all entities share the public dev operator key,
 so per-entity fiat balances are not independently meaningful.
 
-## Deferred (soft, non-fatal — logged with an actionable message)
+## Deferred
 
-These run in the join's deferred tail; a failure does not block provisioning
-because the bank is already fully operational and none are consumed by the backend.
+Two distinct things, often confused: identity acts the join **does not perform at
+all**, and join steps that run in the tail where a failure is non-fatal.
 
-### 1. Governance-gated identity
-- `proof-of-possession` — participant registration in `IdentityRegistry` is
-  `onlyRole(GOVERNANCE_ROLE)`; performed by the **CB on KYC approval**
-  (`approve-kyc → setParticipant`), not by the bank.
-- `request-cert` / `receive-cert` — the CB-signed PKI cert is a **runtime**
-  identity credential issued only after a **governance KYC approval** (Governance
-  Portal). `request-cert` succeeds (credential request accepted, Keycloak user +
-  wallet created); `receive-cert` reports *awaiting governance KYC approval*.
-  Re-running `apply` after approval resumes the flow.
+### 1. Governance-gated identity — moved out of the join entirely (Option C)
+None of these are steps in `CanonicalJoinStepOrder`; `apply` never plans them.
+They are runtime acts performed by the central bank when it approves the bank's
+KYC in the Governance Portal:
 
-### 2. Bilateral Pente / FXAgreement (US3)
-`create-pente-context` / `deploy-fxa-pente` create the bilateral CB↔bank Pente
+- **Participant registration** in `IdentityRegistry` is `onlyRole(GOVERNANCE_ROLE)`
+  and must register the bank's runtime KMS wallet, so the CB compliance service
+  performs it (`registerParticipant`, signed with `CB_PRIVATE_KEY`) on KYC
+  approval — not the bank, and not the toolkit.
+- **Cert issuance** happens on that same approval: the portal signs the CSR the
+  join produced. The toolkit does not submit the CSR itself, because that would
+  create a second participant record keyed on the toolkit `KeyProvider` wallet
+  instead of the bank's runtime wallet, colliding with the portal's record.
+
+`gen-csr` is therefore the join's only PKI step, and it is a **hard** one: it
+writes `<dataDir>/pki/<bank>.csr`, which the bank's api-gateway reads at portal
+onboarding. The `proof-of-possession`, `request-cert` and `receive-cert` step
+implementations still exist in the toolkit with **zero call sites** — dead code
+pending removal, not a flow this document describes.
+
+### 2. Bilateral Pente / FXAgreement (US3) — the non-fatal pair
+`create-pente-context` / `deploy-fxa-pente` are the only two steps
+`isDeferredOnboardingStep` marks non-fatal: a failure is recorded as `pending` and
+the join still reports success, because the bank is already fully operational and
+neither is consumed by the backend. (`start-backend` is soft on failure for the
+same reason, and `start-launcher` / `start-proxy` are soft by construction.)
+
+They create the bilateral CB↔bank Pente
 privacy group and deploy `FXAgreement` inside it. The cross-node transport that
 these need is now **working** (see resolved issue below). `create-pente-context`
 opens with a **peer-readiness gate** (`waitPentePeersReady`): it probes each member

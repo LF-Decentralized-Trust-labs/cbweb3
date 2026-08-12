@@ -10,7 +10,7 @@ This guide covers Solidity contract deployment parameters, the on-chain role mod
 
 - [Contract deployment parameters](#contract-deployment-parameters)
   - [Scenario A — spoke-a and spoke-b](#scenario-a--spoke-a-and-spoke-b)
-  - [Scenario B — hub (planned)](#scenario-b--hub-planned)
+  - [Scenario B — hub](#scenario-b--hub)
 - [On-chain roles and permissions](#on-chain-roles-and-permissions)
   - [IdentityRegistry (on-chain RBAC)](#identityregistry-on-chain-rbac)
   - [TokenizedCentralBankMoney (tCeBM)](#tokenizedcentralbankmoney-tcebm)
@@ -22,7 +22,7 @@ This guide covers Solidity contract deployment parameters, the on-chain role mod
   - [Service account roles](#service-account-roles)
 - [PKI — X.509 Certificates](#pki--x509-certificates)
 - [Post-deployment configuration checklist](#post-deployment-configuration-checklist)
-- [Scenario B — planned extensions](#scenario-b--planned-extensions)
+- [Scenario B — contract configuration](#scenario-b--contract-configuration)
 
 ---
 
@@ -90,16 +90,11 @@ The `RegisterParticipants.s.sol` script registers all entities in the IdentityRe
 
 ---
 
-### Scenario B — hub (planned)
+### Scenario B — hub
 
-When implemented, the hub deployment will use:
-
-| Variable | Type | Description |
-|----------|------|-------------|
-| `HUB_RPC_URL` | URL | Hub RPC — planned: `http://127.0.0.1:8545` |
-| `HUB_CHAIN_ID` | int | Hub chain ID (1337) |
-
-Planned contracts for the hub: `AutomatedMarketMaker`, `ManualOracle`, `FXAgreement`.
+Implemented, and deployed from Scenario B's own contract tree by the `cbweb3b`
+toolkit's `found-hub` mode — not by any script documented here. See
+[`scenario-b/docs/runbooks/contract-configuration.md`](../../../scenario-b/docs/runbooks/contract-configuration.md).
 
 ---
 
@@ -350,32 +345,15 @@ Run after `make spoke-all` to validate everything is correctly configured:
 
 ---
 
-## Scenario B — planned extensions
+## Scenario B — contract configuration
 
-When Scenario B (AMM hub) is implemented, the following configurations will be added:
+Scenario B is implemented. Its AMM, oracle, registries and `SpokeBridge` live in
+[`scenario-b/contracts/src/`](../../../scenario-b/contracts/src/) — a tree
+independent of Scenario A's, deliberately not shared (scenario isolation). Their
+configuration is documented with them, not here:
 
-### AMM parameters
+- [`scenario-b/docs/runbooks/contract-configuration.md`](../../../scenario-b/docs/runbooks/contract-configuration.md) — AMM, `ManualOracle`, `PairRegistry`, `LiquidityCommitRegistry`, `CurrencyRegistry`, `SpokeBridge`
+- [`scenario-b/README.md`](../../../scenario-b/README.md) — deployment and the circuit-breaker model (1-of-N pause, 2-of-N resume)
 
-| Parameter | Description |
-|-----------|-------------|
-| Initial liquidity | Amounts of tokenA and tokenB deposited in the pool at creation |
-| `slippageTolerance` | Maximum slippage tolerance (e.g. 1% = 100 bps) |
-| Swap fee | Fee percentage applied to each operation |
-
-### ManualOracle
-
-| Parameter | Description |
-|-----------|-------------|
-| `GOVERNANCE_ROLE` holders | Addresses authorized to update FX prices |
-| `updateInterval` | Minimum interval between price updates |
-
-### FXAgreement on the hub
-
-| Parameter | Description |
-|-----------|-------------|
-| `counterpartyRegistryAddress` | Hub IdentityRegistry |
-| `oracleAddress` | ManualOracle address |
-| `settlementTimeout` | Maximum settlement window after lock |
-| `htlcStrictMode` | Require HTLC linked to FX Agreement |
-
-This guide will be updated when the hub deployment is available.
+Nothing in this guide configures a Scenario B contract, and the `AutomatedMarketMaker`
+row in the constructor table above refers to Scenario A's own copy.

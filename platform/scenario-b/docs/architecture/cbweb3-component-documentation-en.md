@@ -8,8 +8,10 @@ Description of the CBWeb3 component diagram and its layers.
 > diagram. Several layers below — the Paladin privacy layer (Noto and Zeto domains,
 > the private AMM domain, the ZK proof engine) and the WebSocket gateway — have **no
 > counterpart in the Scenario B code**: there are no `ZetoToken`/`NotoToken` contracts
-> under `scenario-b/contracts/src`, no Paladin integration in the Go services, and no
-> WebSocket transport in the API gateway. Read this as the reference model; read
+> under `scenario-b/contracts/src`, no Paladin privacy-layer integration in the Go
+> services (the `noc-agent` health-checks a Paladin node as a monitored component type,
+> which is observability, not a privacy path), and no WebSocket transport in the API
+> gateway. Read this as the reference model; read
 > [`scenario-b/README.md`](../../README.md) for what is actually built and running.
 >
 > Where a component **does** exist, the technology entries below name the implemented
@@ -371,8 +373,11 @@ Ensures cross-chain transactions are atomic (all or nothing).
 
 ### 5. Paladin Privacy Layer *(reference model — not implemented in Scenario B)*
 
-> Scenario B has no `ZetoToken`/`NotoToken` contracts and no Paladin integration in
-> its Go services. Privacy in Scenario B today rests on network permissioning and the
+> Scenario B has no `ZetoToken`/`NotoToken` contracts and no Paladin privacy-layer
+> integration in its Go services — no domain client, no private-state handling, no
+> proof generation. (The `noc-agent` can health-check a Paladin node as a monitored
+> component type; that is observability only.)
+> Privacy in Scenario B today rests on network permissioning and the
 > tCeBM/fCeBM token model; the Paladin domains below are the target design, retained
 > here for the reference architecture. Scenario A is where Paladin/Zeto is implemented.
 

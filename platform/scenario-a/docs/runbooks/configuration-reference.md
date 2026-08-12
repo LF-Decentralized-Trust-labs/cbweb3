@@ -17,7 +17,7 @@ This document is the complete reference for all system environment variables, gr
 - [Frontend (frontend/.env)](#frontend-frontendenv)
 - [NOC Stack](#noc-stack)
 - [Paladin (config.yaml per node)](#paladin-configyaml-per-node)
-- [Scenario B — additional variables (planned)](#scenario-b--additional-variables-planned)
+- [Scenario B — configuration](#scenario-b--configuration)
 
 ---
 
@@ -380,16 +380,15 @@ The fields below are the main configurable parameters. Full example values are i
 
 ---
 
-## Scenario B — additional variables (planned)
+## Scenario B — configuration
 
-When Scenario B is implemented, the following variables will be added:
+Scenario B is implemented and carries its own configuration surface, rendered by the
+`cbweb3b` provisioning toolkit rather than shared with Scenario A. This document
+covers Scenario A only; for Scenario B see:
 
-| Variable | Component | Description |
-|----------|-----------|-------------|
-| `HUB_RPC_URL` | Contracts | Hub node URL (chain 1337) — already exists in `contracts/.env` |
-| `AMM_ADDRESS` | Hub backend | AutomatedMarketMaker address on the hub |
-| `MANUAL_ORACLE_ADDRESS` | Hub backend | ManualOracle address |
-| `HUB_FX_AGREEMENT_ADDRESS` | Hub backend | FXAgreement on the hub |
-| `HUB_CHAIN_ID` | Hub backend | Hub chain ID (1337) |
+- [`scenario-b/docs/runbooks/configuration-reference.md`](../../../scenario-b/docs/runbooks/configuration-reference.md) — the variable reference
+- [`scenario-b/docs/runbooks/contract-configuration.md`](../../../scenario-b/docs/runbooks/contract-configuration.md) — contract addresses and wiring
+- [`scenario-b/provisioning/`](../../../scenario-b/provisioning/) — the compose templates and manifest schema the toolkit renders from
 
-This document will be updated with the complete hub configuration section when the Scenario B deployment is available.
+Scenario isolation is a constitutional rule of this repository: no variable
+documented here is read by a Scenario B service.

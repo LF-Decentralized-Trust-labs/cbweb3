@@ -11,7 +11,7 @@ This guide covers local environment preparation before running the deployment. F
 - [Required tools](#required-tools)
 - [Tool installation](#tool-installation)
 - [Port reference — Scenario A](#port-reference--scenario-a)
-- [Port reference — Scenario B (planned)](#port-reference--scenario-b-planned)
+- [Port reference — Scenario B](#port-reference--scenario-b)
 - [Configuration files per entity](#configuration-files-per-entity)
 - [Docker network](#docker-network)
 
@@ -164,15 +164,20 @@ openssl version           # OpenSSL 3.x
 
 ---
 
-## Port reference — Scenario B (planned)
+## Port reference — Scenario B
 
-> When implemented, Scenario B will add an intermediate hub network. The ports below are a planned reservation.
+Scenario B is implemented and allocates its own port ranges, which do not overlap
+Scenario A's. It is a separate product under [`scenario-b/`](../../../scenario-b/README.md);
+its ports are documented with its own environment setup, not here:
 
-| Component | Port (planned) | Notes |
-|-----------|---------------|-------|
-| Besu hub (chain 1337) | 8545 | AMM/FX hub network |
-| API Gateway hub | — | To be defined |
-| AMM / ManualOracle | — | Deployed via existing contracts |
+- [`scenario-b/docs/runbooks/environment-setup.md`](../../../scenario-b/docs/runbooks/environment-setup.md) — prerequisites and the full port reference
+- [`scenario-b/README.md`](../../../scenario-b/README.md) — port reference per entity
+- [`scenario-b/samples/deploy-all.sh`](../../../scenario-b/samples/deploy-all.sh) — the sample deployment prints every endpoint it brings up
+
+Both scenarios can run on one host: an entity's Scenario A and Scenario B stacks
+publish on different port ranges (Scenario A api-gateway on `186xx` and portals on
+`25xxx`/`26xxx`; Scenario B on `416xx`/`426xx`). The per-entity launcher is shared —
+one launcher per entity lists that entity's Scenario A **and** Scenario B portals.
 
 ---
 

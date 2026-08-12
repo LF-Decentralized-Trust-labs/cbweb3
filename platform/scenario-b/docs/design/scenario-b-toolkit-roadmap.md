@@ -414,7 +414,9 @@ observabilidade — falha não bloqueia o `found-spoke`)
 > e a sua moeda soberana no hub, e para por aí — nenhum run detém a chave da contraparte.
 
 > **Camada de privacidade.** O Cenário B, no estado atual, não possui contratos
-> `ZetoToken`/`NotoToken` em `contracts/src` nem integração Paladin nos serviços Go. O
+> `ZetoToken`/`NotoToken` em `contracts/src` nem integração Paladin de camada de privacidade
+> nos serviços Go (o `noc-agent` faz health-check de um nó Paladin como tipo de componente
+> monitorado — observabilidade, não caminho de privacidade). O
 > toolkit provisiona exatamente o que o cenário executa (tCeBM/fCeBM/AMM/registries;
 > `SpokeBridge` provê lock-and-mint entre spoke e hub). Se a camada de privacidade entrar no
 > escopo, os steps correspondentes são acrescentados — decisão registrada na seção 13.
@@ -452,8 +454,18 @@ pela **máquina de estados on-chain** do `PairRegistry` (`PROPOSED→ACTIVE`; ev
 4. **descoberta** (CB-B) — o `Check()` do step lê `getPair(pairId).status`; `PROPOSED` = aguardando.
 5. **`confirm-pair`** (CB-B, soberano — **gated pela governança do CB-B**) — `confirmPair`;
    `PROPOSED→ACTIVE`; emite `PairRegistered` (só então o `PairRouter` do gateway enxerga o par).
-6. **`commit-liquidity`** (CB-A e CB-B) — commit-reveal, cada CB só a sua moeda; o relay casa
-   `CommitMatched`. Em seguida **`seed-oracle`** (`setRate`).
+6. **liquidez cooperativa** (CB-A e CB-B) — commit-reveal no `LiquidityCommitRegistry`, cada CB
+   só a sua moeda; o relay casa `CommitMatched`. Em seguida um `setRate` inicial no
+   `ManualOracle`.
+
+> **Nota de estado (leia antes de usar esta seção).** As fases 1–6 acima são o **desenho**
+> proposto para o fluxo bilateral, não a implementação vigente. Nenhuma delas é um step do
+> toolkit: a cauda soberana foi removida do `found-spoke` no commit `c90de691` (ver a nota da
+> §6) e `apply` não planeja `open-sovereign-pair` / `commit-liquidity` / `seed-oracle`. Os nomes
+> em `code` nas fases 3, 5 e 6 são chamadas de contrato (`proposePair`, `confirmPair`,
+> `registerCommit`, `setRate`), hoje disparadas em runtime pelos portais de governança — não
+> nomes de step. A sequência lógica e o modelo de soberania seguem válidos; a forma de execução
+> mudou.
 
 **Idempotência:** o estado vive on-chain, então re-rodar qualquer `apply` converge (`ACTIVE` →
 pula; `PROPOSED` → pending aguardando a contraparte; inexistente → propõe, se eu for o CB de
@@ -648,7 +660,8 @@ soberano** (que exige dois spokes prontos + relay).
    de runtime é exercitado por `tests/e2e/sovereign_pair_e2e_test.go` sob o build tag `e2e`.
 9. **TK-B10** — E2E + baseline. **[Implementado]** — fase de verificação (testes + doc): um **E2E de
    pipeline completo** (`tests/e2e/pipeline_e2e_test.go`, tag `e2e`) que compõe os modos via
-   `apply.Apply` (found-hub → found-spoke ×2 → join → cauda soberana) e exercita o caminho de negócio —
+   `apply.Apply` (found-hub → found-spoke ×2 → join; o corredor é aberto em runtime, fora do
+   `apply` — ver TK-B9 acima) e exercita o caminho de negócio —
    **swap** (`swapTokensForExactTokens`), **circuit breaker** (`pause`/`signResume` quorum 2/`isPaused`)
    e **`SpokeBridge`** (`lock`/`release`) — mais **idempotência** (re-`apply` converge). Sub-testes
    skip-com-aviso: `TestPipeline_HubMint` (mint relay-mediado, poll de saldo) e `TestPipeline_BridgeRefund`
@@ -782,7 +795,8 @@ Aspectos próprios do Cenário B que o toolkit precisa tratar (verificados na fo
    registra no `noc-backend`. Amarrado ao inventário do §6.
 6. **[Ajuste futuro] Oracle de FX (baixo impacto).** `mock-fx-feeder` alimenta o `ManualOracle`;
    sem taxas os swaps falham. O essencial — um `setRate` inicial (**seed one-shot**) na abertura
-   do par — fica coberto pelo step `seed-oracle` (soft, local-only, no `found-spoke`). A escolha
+   do par — é hoje um **ato de runtime** do CB, junto com a abertura do corredor: não existe step
+   `seed-oracle` no `found-spoke` (removido em `c90de691`, ver §6). A escolha
    **seed único vs. serviço feeder contínuo** (jitter) é detalhe **só de `local`**, sem impacto
    em arquitetura/modos/manifesto/contratos → **ajuste futuro** (seed único vs. serviço feeder,
    só de `local`).

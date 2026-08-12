@@ -45,7 +45,7 @@ A correspondent banking model where two independent blockchain networks (**Spoke
 - Cross-spoke atomic swaps with automatic relay settlement
 - On-chain identity registry, Onboarding/AML compliance, and Keycloak OIDC
 
-**Quick start:** `cd scenario-a && make spoke-all`
+**Quick start:** `cd scenario-a/samples && ./deploy-all.sh`
 
 ---
 
@@ -68,7 +68,7 @@ A dedicated international hub network (chain 1337) operating an AMM-based liquid
 
 Scenario B carries its own contract tree under [`scenario-b/contracts/`](scenario-b/contracts/), independent of Scenario A's. Alongside `AutomatedMarketMaker.sol`, `ManualOracle.sol` and `FXAgreement.sol` it adds the hub registries — `PairRegistry.sol`, `LiquidityCommitRegistry.sol` and `CurrencyRegistry.sol` — which have no Scenario A counterpart. The two trees are deliberately not shared: scenario isolation is a constitutional rule of this repository.
 
-**Quick start:** `cd scenario-b && make scenario-b.up`
+**Quick start:** `cd scenario-b/samples && ./deploy-all.sh`
 
 ---
 
@@ -142,13 +142,27 @@ cbweb3-platform/
 
 ## Getting Started
 
-Each scenario is self-contained. Navigate to the scenario directory and follow its README:
+Each scenario is self-contained. The current entry point for both is the sample
+deployment script, which drives that scenario's provisioning toolkit (`cbweb3` /
+`cbweb3b`) from manifests — building the CLI, compiling contracts, starting the
+relay, and founding and joining every entity in order:
 
 ```bash
 # Scenario A — Enhanced Correspondent Banking
-cd scenario-a
-cat README.md
-make spoke-all
+# Two spokes, six entities (2 central banks + 4 commercial banks)
+cd scenario-a/samples && ./deploy-all.sh
+
+# Scenario B — International Hub with FX Liquidity Pool
+# One hub + two sovereign spokes, seven entities
+cd scenario-b/samples && ./deploy-all.sh
 ```
 
-For a detailed walkthrough of Scenario A, including the cross-spoke HTLC demo, architecture, port reference, and all make targets, see [`scenario-a/README.md`](scenario-a/README.md).
+Both are idempotent: re-running resumes from the first incomplete step per entity.
+Pass `--clean` to wipe containers, volumes and data directories first. Each script
+prints every endpoint it brings up when it finishes.
+
+> The per-scenario `make` targets (`make spoke-all`, `make scenario-b.up`) predate
+> the toolkit and are **not** the maintained path — prefer `deploy-all.sh` above.
+> For multi-host deployment, see [`deploy-lnet/`](deploy-lnet/).
+
+For a detailed walkthrough of Scenario A, including the cross-spoke HTLC demo, architecture and port reference, see [`scenario-a/README.md`](scenario-a/README.md) and [`scenario-a/samples/README.md`](scenario-a/samples/README.md). For Scenario B, see [`scenario-b/README.md`](scenario-b/README.md).
