@@ -301,6 +301,46 @@ attaches to both entity Docker networks. Requirements per VM:
 OIDC redirect URIs are unchanged); it is intentionally excluded from proxy path routing and from the
 proxy-mode launcher for now.
 
+## Paladin UI (per Paladin node)
+
+Paladin ships a web UI (transactions, registry, privacy groups) as a React SPA baked into the image
+at `/app/ui`. It is served **by the node's own JSON-RPC HTTP listener** under `/ui` — there is no
+separate UI port and no extra container:
+
+```
+http://${IP_CB_COSTA_RICA}:31648/ui   -> CB Paladin  (302 -> /ui/activity)
+http://${IP_CB1}:27645/ui             -> cb1 Paladin
+```
+
+Ports: the CB node's Paladin RPC is **31648** (override `CBWEB3_PALADIN_CB_URL`); a commercial bank's
+is **its Besu RPC port + 19000** (`8645 → 27645`). Open those ports on the VM firewall to reach the UI
+from a browser — the Caddy proxy on `:80` does not route Paladin.
+
+The listener only serves the UI when the config declares a static-file server, which the config
+templates now do:
+
+```yaml
+rpcServer:
+  http:
+    staticServers:
+      - { enabled: true, staticPath: /app/ui, urlPath: /ui, baseRedirect: ui/activity }
+```
+
+**Already-deployed hosts** rendered their `config.yaml` before that block existed and answer `/ui`
+with a bare `404 page not found`. A re-apply does **not** fix it — `step_render_configs` skips itself
+once `config.yaml` exists on the volume. Patch those hosts in place instead (no redeploy, no state
+loss — chain data, keystore and the Paladin DB are on separate volumes):
+
+```bash
+deploy-lnet/enable-paladin-ui.sh --dry-run   # list what would change
+deploy-lnet/enable-paladin-ui.sh             # every running paladin-* container on this VM
+deploy-lnet/enable-paladin-ui.sh paladin-spoke-costa-rica-cb   # or name them explicitly
+```
+
+It edits `config.yaml` on the container's `/etc/paladin` volume (backup: `config.yaml.pre-ui.bak`
+beside it), restarts the container, and verifies `/ui` returns `302`. It is idempotent and leaves a
+config that already declares `staticServers` untouched.
+
 ## ⚠️ Multi-VM caveat (applies to both scenarios)
 
 The toolkit only executes `environment: local`, a profile validated all-on-one-host. The **Besu/P2P**
