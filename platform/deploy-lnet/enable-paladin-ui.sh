@@ -17,20 +17,33 @@
 # need it because step_render_configs skips itself when config.yaml is already
 # present on the volume — a re-apply will not rewrite it.
 #
+# THE RESTART IS THE RISKY PART, NOT THE EDIT. Paladin queries eth_chainId at
+# startup and, after ~10 retries, exits rc=1 ("PD010003: Error starting ethereum
+# client") if its Besu node is unreachable. The compose policy is
+# `restart: unless-stopped`, so a Paladin restarted while its chain is down goes
+# into a crash loop instead of coming back. A Paladin that is ALREADY running
+# tolerates losing the chain, which is why a degraded node can look healthy until
+# you bounce it. Each target is therefore gated on a live eth_chainId probe of
+# the very URL in its own config (blockchain.http.url), reached the same way the
+# container reaches it. --force skips the gate; nothing else does.
+#
 # Usage:
 #   ./enable-paladin-ui.sh                     # every running paladin-* container on this host
 #   ./enable-paladin-ui.sh paladin-spoke-costa-rica-cb [more...]
-#   ./enable-paladin-ui.sh --dry-run           # show what would change, touch nothing
+#   ./enable-paladin-ui.sh --dry-run           # report only: probe the chain, touch nothing
+#   ./enable-paladin-ui.sh --force <name>      # patch + restart even if the chain probe fails
 #
 # Idempotent: a config that already declares staticServers is left alone.
 set -euo pipefail
 
 DRY_RUN=false
+FORCE=false
 TARGETS=()
 for arg in "$@"; do
   case "$arg" in
     --dry-run|-n) DRY_RUN=true ;;
-    -h|--help) sed -n '4,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --force) FORCE=true ;;
+    -h|--help) sed -n '4,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown flag: $arg" >&2; exit 2 ;;
     *) TARGETS+=("$arg") ;;
   esac
@@ -54,7 +67,11 @@ fi
 # Exit 1 if the anchor was never found, so a surprising config fails loudly
 # instead of being rewritten unchanged.
 AWK_PATCH="$(mktemp)"
-trap 'rm -f "$AWK_PATCH"' EXIT
+# Second awk: print blockchain.http.url, so the chain probe targets exactly what
+# this node dials rather than an assumed port.
+AWK_CHAINURL="$(mktemp)"
+trap 'rm -f "$AWK_PATCH" "$AWK_CHAINURL"' EXIT
+
 cat > "$AWK_PATCH" <<'AWK'
 /^rpcServer:[[:space:]]*$/ { in_rpc = 1; print; next }
 in_rpc && /^[^[:space:]]/  { in_rpc = 0 }
@@ -72,9 +89,23 @@ in_rpc && !done && /^  http:[[:space:]]*$/ {
 END { exit(done ? 0 : 1) }
 AWK
 
+cat > "$AWK_CHAINURL" <<'AWK'
+/^blockchain:[[:space:]]*$/ { in_bc = 1; next }
+in_bc && /^[^[:space:]]/    { in_bc = 0 }
+in_bc && /^  http:[[:space:]]*$/ { in_http = 1; next }
+in_bc && /^  [^[:space:]]/  { in_http = 0 }
+in_bc && in_http && /^    url:/ {
+  sub(/^[[:space:]]*url:[[:space:]]*/, "")
+  gsub(/["']/, "")
+  print
+  exit 0
+}
+AWK
+
 patched=0
 skipped=0
 failed=0
+blocked=0
 
 for ctr in "${TARGETS[@]}"; do
   log "=== $ctr"
@@ -94,19 +125,50 @@ for ctr in "${TARGETS[@]}"; do
     continue
   fi
 
+  # --- gate: is this node's chain reachable? ---------------------------------
+  # Probed from a container with the same host-gateway alias the Paladin service
+  # gets (extra_hosts), so "host.docker.internal:<port>" resolves as it does for
+  # the real node. A node whose chain is down must not be restarted.
+  chain_url="$(docker run --rm --user 0:0 -v "$vol":/cfg -v "$AWK_CHAINURL":/url.awk:ro \
+                 alpine:3.20 awk -f /url.awk /cfg/config.yaml 2>/dev/null || true)"
+  if [[ -z "$chain_url" ]]; then
+    log "WARNING — could not read blockchain.http.url from config.yaml; treating the chain as unverified"
+  else
+    log "chain probe: eth_chainId -> $chain_url"
+    chain_out="$(docker run --rm --add-host host.docker.internal:host-gateway alpine:3.20 \
+                   wget -q -T 6 -O- --header 'Content-Type: application/json' \
+                   --post-data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
+                   "$chain_url" 2>/dev/null || true)"
+    if [[ "$chain_out" == *'"result"'* ]]; then
+      log "chain OK — $chain_out"
+    else
+      log "BLOCKED — $chain_url did not answer eth_chainId."
+      log "  Restarting $ctr now would very likely crash-loop it: Paladin exits rc=1 when the"
+      log "  chain is unreachable at startup, and the compose restart policy keeps retrying."
+      log "  Bring this spoke's Besu node back first, then re-run. Override with --force."
+      if [[ "$FORCE" != true ]]; then
+        blocked=$((blocked + 1))
+        continue
+      fi
+      log "  --force given — proceeding anyway"
+    fi
+  fi
+
   if [[ "$DRY_RUN" == true ]]; then
     log "DRY-RUN — would patch config.yaml on $vol and restart $ctr"
     continue
   fi
 
-  # Backup first, then patch. cp onto the existing config.yaml keeps that file's
-  # ownership/mode (root:root 0644 as seeded by writeVolumeFile), which the
-  # container's uid 1000 needs to read it.
+  # Backup, then install the patched config with an atomic rename inside the
+  # volume. Mode/owner are set explicitly (root:root 0644, matching
+  # writeVolumeFile) because the container reads config.yaml as uid 1000.
   if ! docker run --rm --user 0:0 -v "$vol":/cfg -v "$AWK_PATCH":/patch.awk:ro alpine:3.20 sh -c '
         set -e
         [ -f /cfg/config.yaml.pre-ui.bak ] || cp -p /cfg/config.yaml /cfg/config.yaml.pre-ui.bak
-        awk -f /patch.awk /cfg/config.yaml > /tmp/config.yaml
-        cp /tmp/config.yaml /cfg/config.yaml
+        awk -f /patch.awk /cfg/config.yaml > /cfg/.config.yaml.new
+        chown 0:0 /cfg/.config.yaml.new
+        chmod 0644 /cfg/.config.yaml.new
+        mv /cfg/.config.yaml.new /cfg/config.yaml
       '; then
     log "ERROR — patch failed (rpcServer.http anchor not found?); config.yaml left as-is"
     failed=$((failed + 1))
@@ -135,11 +197,14 @@ for ctr in "${TARGETS[@]}"; do
     log "OK — /ui redirects to /ui/activity on host port $hostport"
     patched=$((patched + 1))
   else
-    log "WARNING — /ui returned $code after restart; check: docker logs --tail 50 $ctr"
+    log "WARNING — /ui returned $code after 90s; the node may not have come back up."
+    log "  Inspect:  docker logs --tail 50 $ctr"
+    log "  Roll back: docker run --rm --user 0:0 -v $vol:/cfg alpine:3.20 \\"
+    log "               cp /cfg/config.yaml.pre-ui.bak /cfg/config.yaml && docker restart $ctr"
     failed=$((failed + 1))
   fi
 done
 
-log "=== done: $patched patched, $skipped already enabled, $failed need attention"
+log "=== done: $patched patched, $skipped already enabled, $blocked blocked (chain down), $failed need attention"
 [[ "$DRY_RUN" == true ]] && exit 0
-[[ $failed -eq 0 ]]
+[[ $failed -eq 0 && $blocked -eq 0 ]]
