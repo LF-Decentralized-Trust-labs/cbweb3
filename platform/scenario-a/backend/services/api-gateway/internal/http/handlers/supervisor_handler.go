@@ -16,7 +16,12 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-const maxAuditLimit = 100
+const (
+	maxAuditLimit = 100
+	// defaultAuditLimit is the page size used when the client asks for none or asks for
+	// something unusable. It matches the compliance repository's own default.
+	defaultAuditLimit = 50
+)
 
 // ComplianceAuditLister fetches and writes compliance audit log entries.
 type ComplianceAuditLister interface {
@@ -155,7 +160,7 @@ func (h *SupervisorHandler) DecryptTransaction(c *fiber.Ctx) error {
 	}
 
 	var req struct {
-		TxHash  string `json:"tx_hash"`  // HTLC contract ID (0x...), same as shown in the dashboard
+		TxHash  string `json:"tx_hash"` // HTLC contract ID (0x...), same as shown in the dashboard
 		ViewKey string `json:"view_key"`
 		Reason  string `json:"reason"`
 	}

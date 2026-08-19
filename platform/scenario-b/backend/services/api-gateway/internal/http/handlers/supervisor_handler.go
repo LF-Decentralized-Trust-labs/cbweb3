@@ -13,7 +13,12 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-const maxAuditLimit = 100
+const (
+	maxAuditLimit = 100
+	// defaultAuditLimit is the page size used when the client asks for none or asks for
+	// something unusable. It matches the compliance repository's own default.
+	defaultAuditLimit = 50
+)
 
 // ComplianceAuditLister fetches immutable audit log entries from the compliance service.
 type ComplianceAuditLister interface {

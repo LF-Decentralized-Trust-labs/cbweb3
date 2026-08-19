@@ -148,6 +148,69 @@ contract PairRegistry {
     /// @notice Returns all pairs that are currently in ACTIVE status.
     /// @dev Used by the Go PairRouter at startup to initialise its routing cache (D10).
     ///      Pairs in PROPOSED status are excluded.
+    /// @notice Largest page a single paged read may return.
+    /// @dev getAllActivePairs() returns every active pair. It is `external view`, so nothing pays
+    ///      gas for it on-chain — the cost is response size and the RPC round trip, and it grows
+    ///      with the number of corridors (finding R2-M-14). Mirrors CurrencyRegistry.
+    uint256 public constant MAX_PAGE_SIZE = 100;
+
+    /// @notice Default page size when a caller passes limit = 0.
+    uint256 public constant DEFAULT_PAGE_SIZE = 50;
+
+    /// @notice Number of ACTIVE pairs, so a caller can size its paging loop.
+    function activePairCount() external view returns (uint256 count) {
+        for (uint256 i; i < _pairIds.length; ++i) {
+            if (_pairs[_key(_pairIds[i])].status == PairStatus.ACTIVE) {
+                ++count;
+            }
+        }
+    }
+
+    /// @notice Reads a bounded window of the ACTIVE pairs.
+    /// @param offset Active entries to skip; at or past the end returns an empty page rather than
+    ///        reverting, so a paging loop terminates on a short read.
+    /// @param limit Page size. Zero means DEFAULT_PAGE_SIZE; above MAX_PAGE_SIZE is clamped to it.
+    /// @return page The window, in registration order.
+    /// @return total Number of ACTIVE pairs, so a caller knows whether more remain.
+    function getActivePairsPaged(uint256 offset, uint256 limit)
+        external
+        view
+        returns (PairEntry[] memory page, uint256 total)
+    {
+        if (limit == 0) {
+            limit = DEFAULT_PAGE_SIZE;
+        } else if (limit > MAX_PAGE_SIZE) {
+            limit = MAX_PAGE_SIZE;
+        }
+
+        uint256 active;
+        uint256 inWindow;
+        for (uint256 i; i < _pairIds.length; ++i) {
+            if (_pairs[_key(_pairIds[i])].status != PairStatus.ACTIVE) continue;
+            if (active >= offset && inWindow < limit) {
+                ++inWindow;
+            }
+            ++active;
+        }
+        total = active;
+
+        page = new PairEntry[](inWindow);
+        if (inWindow == 0) {
+            return (page, total);
+        }
+
+        uint256 seen;
+        uint256 idx;
+        for (uint256 i; i < _pairIds.length && idx < inWindow; ++i) {
+            PairEntry storage e = _pairs[_key(_pairIds[i])];
+            if (e.status != PairStatus.ACTIVE) continue;
+            if (seen >= offset) {
+                page[idx++] = e;
+            }
+            ++seen;
+        }
+    }
+
     function getAllActivePairs() external view returns (PairEntry[] memory) {
         uint256 count;
         for (uint256 i; i < _pairIds.length; ++i) {

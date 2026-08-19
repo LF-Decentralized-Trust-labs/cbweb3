@@ -14,6 +14,11 @@ type FXAgreementFilter struct {
 	Counterparty string
 	// State filters by exact FXState value. Empty means all states.
 	State domain.FXState
+	// Limit caps the rows returned. Zero, negative, or above
+	// repository.MaxFXAgreementPageSize is clamped to that maximum: the query used to have
+	// no bound at all, and an optional filter meant one request could read the whole table
+	// (finding R2-M-14).
+	Limit int
 }
 
 // FXAgreementRepository provides durable storage for FX agreements and audit events.
