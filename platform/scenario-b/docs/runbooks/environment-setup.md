@@ -10,6 +10,11 @@
 
 This guide covers local environment preparation before running the Scenario B deployment. For the deployment procedure itself, see [`deployment-runbook.md`](deployment-runbook.md).
 
+> **Version authority:** the tool versions below are platform-wide — Scenario A and
+> Scenario B share one floor. [`docs/TOOLCHAIN.md`](../../../docs/TOOLCHAIN.md) is the
+> authoritative list and records where each version is enforced (`go.mod`, Dockerfiles,
+> `.nvmrc`, `engines`, CI). This page adds the Scenario B port reference on top of it.
+
 ---
 
 ## Table of Contents
@@ -35,9 +40,9 @@ This guide covers local environment preparation before running the Scenario B de
 | **Docker** | 24.x | Container orchestration for all services |
 | **Docker Compose** | v2 (plugin) | Multi-container stack management |
 | **GNU Make** | 3.81 | Build automation (`make scenario-b.up`) |
-| **Go** | 1.26 | Backend services compilation |
-| **Node.js** | 20 LTS | Cacti relay (TypeScript) |
-| **npm** | 10 | Package management for Cacti relay |
+| **Go** | 1.26 | Backend services and the `cbweb3b` toolkit |
+| **Node.js** | 22 LTS | Frontend applications (React/Vite) and the Cacti relay (TypeScript) |
+| **npm** | 10 | JavaScript package management |
 | **Foundry** (`forge`, `cast`) | nightly | Solidity contract compilation and deployment |
 | **k6** | 0.50 | Load and performance tests |
 | **jq** | 1.6 | JSON processing in shell scripts |
@@ -78,13 +83,13 @@ brew install k6
 
 ```bash
 # Go 1.26
-wget https://go.dev/dl/go1.26.linux-amd64.tar.gz
-sudo tar -C /usr/local -xzf go1.26.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.26.0.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.26.0.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 
-# Node.js 20 via nvm
+# Node.js 22 via nvm (the repository root carries a .nvmrc, so `nvm use` also works)
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-nvm install 20 && nvm use 20
+nvm install 22 && nvm use 22
 
 # Tools
 sudo apt-get install -y jq openssl make
@@ -113,7 +118,7 @@ sudo apt-get update && sudo apt-get install k6
 docker --version          # Docker version 24.x or later
 docker compose version    # Docker Compose version v2.x
 go version                # go1.26.x
-node --version            # v20.x or later
+node --version            # v22.x
 npm --version             # 10.x
 forge --version           # forge x.x.x (nightly)
 k6 version                # k6 v0.50.x

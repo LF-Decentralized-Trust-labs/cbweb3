@@ -11,7 +11,7 @@
 // default `go test` lane never compiles or runs it.
 module github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/tests/integration
 
-go 1.25.5
+go 1.26
 
 require (
 	github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator v0.0.0

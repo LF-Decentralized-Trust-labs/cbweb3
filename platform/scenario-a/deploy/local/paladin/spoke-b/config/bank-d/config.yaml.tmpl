@@ -15,6 +15,15 @@ rpcServer:
   http:
     port: 8548
     address: 0.0.0.0
+    # Paladin ships a web UI (React SPA baked into the image at /app/ui). It is
+    # only reachable when the RPC HTTP listener is given this static-file server —
+    # otherwise the listener answers JSON-RPC only and /ui returns 404. Same
+    # defaults the Paladin operator injects when it renders a node config.
+    staticServers:
+      - enabled: true
+        staticPath: /app/ui
+        urlPath: /ui
+        baseRedirect: ui/activity
   ws:
     port: 8549
     address: 0.0.0.0

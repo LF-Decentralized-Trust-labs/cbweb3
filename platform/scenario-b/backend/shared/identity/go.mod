@@ -1,6 +1,6 @@
 module github.com/LACNetNetworks/cbweb3-platform/backend/shared/identity
 
-go 1.25.5
+go 1.26
 
 require (
 	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6 // indirect
