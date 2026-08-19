@@ -107,15 +107,19 @@ Each entity runs its own isolated service stack (api-gateway, auth, compliance, 
 
 ## Prerequisites
 
-| Tool | Purpose |
-|------|---------|
-| **Docker & Docker Compose** | Container orchestration for all services |
-| **GNU Make** | Build automation (`make` targets) |
-| **Go** (1.22+) | Backend services and Paladin tooling |
-| **Node.js** (22+) & npm | Frontend applications |
-| **Foundry** (forge, cast) | Solidity contract compilation, testing, deployment |
-| **jq** | JSON processing in shell scripts |
-| **openssl** | PKI certificate generation |
+Versions are platform-wide, not per scenario — see [`docs/TOOLCHAIN.md`](../docs/TOOLCHAIN.md)
+for the authoritative list and where each floor is enforced.
+
+| Tool | Minimum version | Purpose |
+|------|-----------------|---------|
+| **Docker & Docker Compose** | Docker 24.x, Compose v2 | Container orchestration for all services |
+| **GNU Make** | 3.81 | Build automation (`make` targets) |
+| **Go** | 1.26 | Backend services, the `cbweb3` toolkit, and Paladin tooling |
+| **Node.js** & npm | Node 22 LTS, npm 10 | Frontend applications and the Cacti relay |
+| **Foundry** (forge, cast) | nightly | Solidity contract compilation, testing, deployment |
+| **jq** | 1.6 | JSON processing in shell scripts |
+| **openssl** | 3.x | PKI certificate generation |
+| **k6** | 0.50 | Performance suite only (`make scenario-a.perf-baseline`) |
 
 > **Note:** The full platform runs ~30 containers. Allocate at least 8 GB RAM and 4 CPUs to Docker.
 

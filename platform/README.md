@@ -18,6 +18,7 @@ A research platform implementing a **hub-and-spoke wholesale CBDC ecosystem** fo
 - [Repository Structure](#repository-structure)
 - [Prerequisites](#prerequisites)
 - [Getting Started](#getting-started)
+- [Toolchain reference](docs/TOOLCHAIN.md)
 
 ---
 
@@ -126,17 +127,23 @@ cbweb3-platform/
 
 ## Prerequisites
 
-| Tool | Purpose |
-|------|---------|
-| **Docker & Docker Compose** | Container orchestration |
-| **GNU Make** | Build automation |
-| **Go** (1.22+) | Backend services |
-| **Node.js** (22+) & npm | Frontend applications |
-| **Foundry** (forge, cast) | Solidity compilation and deployment |
-| **jq** | JSON processing in shell scripts |
-| **openssl** | PKI certificate generation |
+The toolchain is identical for both scenarios. [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md) is
+the authoritative version list and records where each floor is enforced; the table below
+restates it.
 
-> **Note:** The full platform runs ~30 containers. Allocate at least 8 GB RAM and 4 CPUs to Docker.
+| Tool | Minimum version | Purpose |
+|------|-----------------|---------|
+| **Docker & Docker Compose** | Docker 24.x, Compose v2 | Container orchestration |
+| **GNU Make** | 3.81 | Build automation |
+| **Go** | 1.26 | Backend services and both provisioning toolkits |
+| **Node.js** & npm | Node 22 LTS, npm 10 | Frontend applications and the Cacti relay |
+| **Foundry** (forge, cast) | nightly | Solidity compilation and deployment |
+| **jq** | 1.6 | JSON processing in shell scripts |
+| **openssl** | 3.x | PKI certificate generation |
+| **k6** | 0.50 | Performance suites only |
+
+> **Note:** Scenario A runs ~30 containers (8 GB RAM minimum); Scenario B runs ~35 (12 GB
+> minimum). Allocate 16 GB RAM and 8 CPUs to Docker to run either comfortably.
 
 ---
 

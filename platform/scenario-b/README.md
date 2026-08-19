@@ -77,17 +77,23 @@ The scenario is organized in layers:
 
 ## Prerequisites
 
-| Tool | Purpose |
-|------|---------|
-| **Docker & Docker Compose** | Container orchestration for all services |
-| **GNU Make** | Build automation (`make` targets) |
-| **Go** (1.26+) | Backend services and Paladin tooling |
-| **Node.js** (22+) & npm | Frontend applications and the Cacti relay |
-| **Foundry** (forge, cast) | Solidity contract compilation, testing, deployment |
-| **jq** | JSON processing in shell scripts |
-| **openssl** | PKI certificate generation |
+Versions are platform-wide, not per scenario — see [`docs/TOOLCHAIN.md`](../docs/TOOLCHAIN.md)
+for the authoritative list and where each floor is enforced.
 
-> **Note:** Ensure Docker has sufficient resources allocated (recommended: 8+ GB RAM, 4+ CPUs) since the full stack runs the hub, two spokes, Paladin nodes, shared infra, and per-entity backend stacks.
+| Tool | Minimum version | Purpose |
+|------|-----------------|---------|
+| **Docker & Docker Compose** | Docker 24.x, Compose v2 | Container orchestration for all services |
+| **GNU Make** | 3.81 | Build automation (`make` targets) |
+| **Go** | 1.26 | Backend services, the `cbweb3b` toolkit, and Paladin tooling |
+| **Node.js** & npm | Node 22 LTS, npm 10 | Frontend applications and the Cacti relay |
+| **Foundry** (forge, cast) | nightly | Solidity contract compilation, testing, deployment |
+| **jq** | 1.6 | JSON processing in shell scripts |
+| **openssl** | 3.x | PKI certificate generation |
+| **k6** | 0.50 | Performance suite only (`make scenario-b.perf-baseline`) |
+
+> **Note:** The full stack runs ~35 containers (hub, two spokes, Paladin nodes, shared infra,
+> per-entity backend stacks). Allocate at least 12 GB RAM and 4 CPUs to Docker; 16 GB and 8
+> CPUs recommended.
 
 All commands below are run from the `scenario-b/` directory.
 

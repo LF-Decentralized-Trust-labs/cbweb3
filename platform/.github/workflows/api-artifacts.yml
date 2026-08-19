@@ -41,7 +41,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       # Lints the served spec and fails if the committed collection no longer
       # matches it. Regenerate locally with `bash apis/postman/generate.sh`.
