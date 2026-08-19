@@ -23,12 +23,20 @@ Architectural and process rules live in `.specify/memory/constitution.md` (curre
 - Hyperledger Besu 25.8.0 with **QBFT** consensus (not IBFT 2.0), one network per spoke + hub
 - Solidity contracts compiled and tested with Foundry (`forge`)
 - Paladin Core (Zeto + Noto domains) for privacy tokens
-- Go 1.26+ microservices, gRPC intra-entity, REST via API Gateway externally
+- Go 1.26 microservices, gRPC intra-entity, REST via API Gateway externally
 - Keycloak (OIDC) for auth; PKI from central bank CAs
-- React + Turborepo frontend
+- React + Turborepo frontend on Node 22 LTS
 - Docker Compose per scenario; Postgres for service persistence
 
 New runtime dependencies outside this stack require justification in the PR and the scenario README.
+
+**Toolchain versions live in [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md) and that file wins.**
+The floor is the same for both scenarios: **Go 1.26** (every `go.mod`, every
+`golang:1.26-alpine` builder) and **Node 22 LTS** (root `.nvmrc`, `engines`, every
+`node:22-alpine` image, `@types/node ^22`). Older versions quoted in the Active
+Technologies list below are historical records of individual specs, not the current floor.
+Do not introduce a per-scenario or per-module version split without recording it in the
+Recorded deviations table of that file.
 
 ## Scenario B layout (most active)
 

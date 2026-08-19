@@ -26,6 +26,20 @@ Authoritative architecture and process rules live in
 - Use conventional, descriptive branch names, e.g. `feat/...`, `fix/...`,
   `chore/...`, `docs/...`.
 
+## Toolchain
+
+The required tool versions are platform-wide — Scenario A and Scenario B share one floor —
+and are listed in [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md). In short: **Go 1.26**,
+**Node 22 LTS**, npm 10, Docker 24 with Compose v2, GNU Make 3.81, Foundry (nightly), `jq`,
+`openssl` 3.x, and k6 0.50 for the performance suites.
+
+Each floor is enforced somewhere that fails the build — the `go` directive in every
+`go.mod`, the `golang:1.26-alpine` and `node:22-alpine` builder images, the root `.nvmrc`,
+the `engines` field in each `package.json`, and CI. If you raise a version, raise it in all
+of those places and in `docs/TOOLCHAIN.md` in the same PR. A module that needs a different
+version needs a row in that file's Recorded deviations table explaining why; without one,
+reviewers should treat the split as drift and request a change.
+
 ## Before you open a PR
 
 - **Test-first, every layer.** Foundry (`forge`) for contracts, `go test` for

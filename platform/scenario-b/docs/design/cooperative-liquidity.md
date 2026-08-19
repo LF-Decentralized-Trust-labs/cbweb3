@@ -236,7 +236,7 @@ Hub (AMM executa swap BRL → EUR)
                                via SettleHTLC() gRPC (fecha ciclo)
 ```
 
-#### Componente: `cbweb3-cacti-relay` (TypeScript / Node 20)
+#### Componente: `cbweb3-cacti-relay` (TypeScript / Node 22)
 
 | Arquivo | Responsabilidade |
 |---------|-----------------|

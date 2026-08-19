@@ -1,6 +1,10 @@
 {
   "name": "cbweb3-launcher",
   "private": true,
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
+  },
   "version": "0.0.0",
   "type": "module",
   "description": "Neutral entry point that routes users to the Scenario A or Scenario B portals. Standalone (no scenario code) to respect scenario isolation.",

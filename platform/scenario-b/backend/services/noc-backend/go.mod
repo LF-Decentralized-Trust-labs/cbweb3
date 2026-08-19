@@ -1,6 +1,6 @@
 module github.com/LACNetNetworks/cbweb3-platform/scenario-b/backend/services/noc-backend
 
-go 1.25.5
+go 1.26
 
 require (
 	github.com/gofiber/fiber/v2 v2.52.9

@@ -40,8 +40,8 @@ Install all tools before proceeding. See the detailed guide in [`environment-set
 |------|----------------|-------|
 | Docker + Docker Compose | Docker 24+ | `docker --version` |
 | GNU Make | 3.81+ | `make --version` |
-| Go | 1.22+ | `go version` |
-| Node.js | 22+ | `node --version` |
+| Go | 1.26+ | `go version` |
+| Node.js | 22 LTS | `node --version` |
 | npm | 10+ | `npm --version` |
 | Foundry (`forge`, `cast`) | nightly | `forge --version` |
 | `jq` | 1.6+ | `jq --version` |

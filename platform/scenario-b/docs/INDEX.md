@@ -38,6 +38,7 @@
 |----------|--------|-------------|
 | [runbooks/deployment-runbook.md](runbooks/deployment-runbook.md) | **[FORTHCOMING]** | Complete deployment guide: hub and spoke bring-up, phase-by-phase walkthrough, health checks, AMM smoke test, and teardown procedure |
 | [runbooks/environment-setup.md](runbooks/environment-setup.md) | **[FORTHCOMING]** | Prerequisites, tool installation (Go, Foundry, Docker, k6), and full port reference for all 7 entities (6 core + MLP opt-in) |
+| [`docs/TOOLCHAIN.md`](../../docs/TOOLCHAIN.md) | | **Authoritative** tool versions for the whole platform (Go 1.26, Node 22 LTS, …) and where each floor is enforced |
 
 **Quick start (when runbook is available):**
 
