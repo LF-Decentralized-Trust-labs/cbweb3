@@ -31,7 +31,3 @@ export type SupplySnapshot = {
   updatedAt: string;
 };
 
-export type BurnToMintValidation = {
-  isValid: boolean;
-  reason?: string;
-};

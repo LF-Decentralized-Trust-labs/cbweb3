@@ -4,8 +4,8 @@ import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Table, 
 import { useEffect, useMemo, useState } from "react";
 import { useFundingRequests } from "../hooks";
 import type { FundingRequest } from "../types";
+import { formatAmountString } from "../lib/format";
 
-const formatAmount = (value: string) => Number(value).toLocaleString();
 
 export function FundingRequestsPage() {
   const { requests, fetchRequests, approveRequest, rejectRequest, status, error } = useFundingRequests();
@@ -66,7 +66,7 @@ export function FundingRequestsPage() {
                 <TableRow key={request.id} className="cursor-pointer" onClick={() => setSelectedRequest(request)}>
                   <TableCell>{request.id}</TableCell>
                   <TableCell>{request.institutionName}</TableCell>
-                  <TableCell>{formatAmount(request.amount)}</TableCell>
+                  <TableCell>{formatAmountString(request.amount)}</TableCell>
                   <TableCell>{request.status}</TableCell>
                 </TableRow>
               ))}

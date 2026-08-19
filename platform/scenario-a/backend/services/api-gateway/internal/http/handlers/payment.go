@@ -34,6 +34,14 @@ type ParticipantResolver interface {
 	ListParticipants(ctx context.Context, statusFilter, search string) ([]complianceadapter.Participant, error)
 }
 
+// AuditLogWriter persists a single audit entry. Mint and burn create and destroy
+// money, and until R2-M-8 neither left any record of who did it, for how much or
+// why — which is also why the treasury history screen, reading the TREASURY
+// category, had nothing to show. Writing is best effort: see recordTokenAudit.
+type AuditLogWriter interface {
+	CreateAuditLog(ctx context.Context, entry complianceadapter.AuditEntry) error
+}
+
 // PvPLedger persists settled inter-bank PvP legs at the Central Bank and serves
 // each bank the legs on which it is the receiver (the credit side of its
 // statement). *services.PvPLedgerService implements it. Only the central-bank
@@ -64,6 +72,10 @@ type PaymentHandler struct {
 	rosterRetryMax     time.Duration
 	// pvpLedger persists/serves settled inter-bank PvP legs. Central-bank gateway only.
 	pvpLedger PvPLedger
+	// auditLogger records mint/burn in the immutable audit trail. Optional: when
+	// nil the handlers behave exactly as they did before R2-M-8, so an entity
+	// without compliance wired is unaffected.
+	auditLogger AuditLogWriter
 }
 
 // NewPaymentHandler creates a new PaymentHandler.
@@ -80,6 +92,13 @@ func NewPaymentHandler(payment *paymentadapter.GRPCAdapter, bankCode string) *Pa
 // enrich deposit/escrow/redeem listings with the requester's institution name.
 func (h *PaymentHandler) WithParticipantResolver(resolver ParticipantResolver) *PaymentHandler {
 	h.participants = resolver
+	return h
+}
+
+// WithAuditLogger attaches the compliance audit writer used to record mint and
+// burn. Without it those operations leave no trail at all.
+func (h *PaymentHandler) WithAuditLogger(writer AuditLogWriter) *PaymentHandler {
+	h.auditLogger = writer
 	return h
 }
 
@@ -510,6 +529,12 @@ func (h *PaymentHandler) MintToken(c *fiber.Ctx) error {
 	var req struct {
 		To     string `json:"to"`
 		Amount string `json:"amount"`
+		// RequestID and ReserveProofRef are the operator's stated backing for the
+		// issuance. They are recorded when present but NOT required: the livehappy
+		// E2E, the performance provisioning script and the FX tryout all mint as
+		// scenario setup, with no deposit to reference.
+		RequestID       string `json:"request_id"`
+		ReserveProofRef string `json:"reserve_proof_ref"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
@@ -518,13 +543,51 @@ func (h *PaymentHandler) MintToken(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
+	h.recordTokenAudit(c, "TOKEN_MINT", req.To, fmt.Sprintf(
+		`{"amount":%q,"to":%q,"request_id":%q,"reserve_proof_ref":%q}`,
+		req.Amount, req.To, req.RequestID, req.ReserveProofRef))
 	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
+// recordTokenAudit writes one entry for a completed mint or burn.
+//
+// Best effort by design: the on-chain operation has already happened and cannot
+// be rolled back, so failing the response would report a false negative to the
+// operator. Blocking on it would also let a compliance outage stop money
+// operations that work today. The failure is logged, never swallowed. Category
+// is TREASURY because that is what the treasury history screen reads.
+func (h *PaymentHandler) recordTokenAudit(c *fiber.Ctx, action, target, details string) {
+	if h.auditLogger == nil {
+		return
+	}
+	actor := ""
+	if claims, ok := c.Locals("claims").(domain.TokenClaims); ok {
+		actor = claims.Subject
+	}
+	if err := h.auditLogger.CreateAuditLog(c.UserContext(), complianceadapter.AuditEntry{
+		ActorSubject:  actor,
+		ActorAddress:  c.IP(),
+		IPAddress:     c.IP(),
+		ActionType:    action,
+		TargetSubject: target,
+		Result:        "SUCCESS",
+		Category:      "TREASURY",
+		Severity:      "HIGH",
+		Details:       details,
+	}); err != nil {
+		log.Printf("[payment] %s audit log write failed (non-fatal): %v", action, err)
+	}
 }
 
 func (h *PaymentHandler) BurnToken(c *fiber.Ctx) error {
 	var req struct {
 		From   string `json:"from"`
 		Amount string `json:"amount"`
+		// Reason is the operator's justification for destroying money. The screen
+		// has always demanded it, but it used to be dropped in the browser, so the
+		// stated reason existed nowhere on the server. It is required here so it
+		// cannot be lost again.
+		Reason string `json:"reason"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
@@ -532,10 +595,15 @@ func (h *PaymentHandler) BurnToken(c *fiber.Ctx) error {
 	if req.From == "" || req.Amount == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "from and amount are required"})
 	}
+	if strings.TrimSpace(req.Reason) == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "reason is required"})
+	}
 	result, err := h.payment.BurnToken(c.Context(), req.From, req.Amount)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
+	h.recordTokenAudit(c, "TOKEN_BURN", req.From, fmt.Sprintf(
+		`{"amount":%q,"from":%q,"reason":%q}`, req.Amount, req.From, strings.TrimSpace(req.Reason)))
 	return c.Status(fiber.StatusCreated).JSON(result)
 }
 

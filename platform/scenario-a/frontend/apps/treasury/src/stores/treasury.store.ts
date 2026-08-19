@@ -2,16 +2,14 @@
 
 import { create } from "zustand";
 import { treasuryApi } from "../services/api";
-import type { AsyncStatus, BurnPayload, BurnToMintValidation, MintPayload, SupplySnapshot, TreasuryOperation } from "../types";
+import type { AsyncStatus, BurnPayload, MintPayload, SupplySnapshot, TreasuryOperation } from "../types";
 
 type TreasuryState = {
   supply: SupplySnapshot | null;
   operations: TreasuryOperation[];
-  validation: BurnToMintValidation | null;
   status: AsyncStatus;
   error: string | null;
   fetch: () => Promise<void>;
-  validateBurnToMint: (requestId: string, amount: string) => Promise<void>;
   mint: (payload: MintPayload) => Promise<void>;
   burn: (payload: BurnPayload) => Promise<void>;
 };
@@ -19,7 +17,6 @@ type TreasuryState = {
 export const useTreasuryStore = create<TreasuryState>((set) => ({
   supply: null,
   operations: [],
-  validation: null,
   status: "idle",
   error: null,
   fetch: async () => {
@@ -29,15 +26,6 @@ export const useTreasuryStore = create<TreasuryState>((set) => ({
       set({ supply, operations, status: "idle" });
     } catch (error) {
       set({ status: "error", error: error instanceof Error ? error.message : "Unable to load treasury data" });
-    }
-  },
-  validateBurnToMint: async (requestId, amount) => {
-    set({ status: "loading", error: null });
-    try {
-      const validation = await treasuryApi.validateBurnToMint(requestId, amount);
-      set({ validation, status: "idle" });
-    } catch (error) {
-      set({ status: "error", error: error instanceof Error ? error.message : "Unable to validate" });
     }
   },
   mint: async (payload) => {
