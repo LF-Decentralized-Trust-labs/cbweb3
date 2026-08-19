@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # setup-noc-realm.sh — Creates the NOC Portal realm, client, roles and default user
 # in an already-running Keycloak instance (cbweb3-keycloak container).
 #
@@ -14,6 +15,7 @@
 #   NOC_CLIENT_ID     OIDC client ID            (default: noc-portal)
 #   NOC_USER          Default NOC user login     (default: noc-admin)
 #   NOC_PASSWORD      Default NOC user password  (default: noc-admin)
+#   KC_ACCESS_TOKEN_LIFESPAN  Access-token lifespan, seconds (default: 300)
 
 set -euo pipefail
 
@@ -30,6 +32,7 @@ NOC_REALM="${NOC_REALM:-cbweb3}"
 NOC_CLIENT_ID="${NOC_CLIENT_ID:-noc-portal}"
 NOC_USER="${NOC_USER:-noc-admin}"
 NOC_PASSWORD="${NOC_PASSWORD:-noc-admin}"
+KC_ACCESS_TOKEN_LIFESPAN="${KC_ACCESS_TOKEN_LIFESPAN:-300}"
 
 KCADM="docker exec ${KC_CONTAINER} /opt/keycloak/bin/kcadm.sh"
 
@@ -65,7 +68,7 @@ else
     -s enabled=true \
     -s "displayName=CBweb3 NOC" \
     -s sslRequired=none \
-    -s accessTokenLifespan=86400
+    -s "accessTokenLifespan=${KC_ACCESS_TOKEN_LIFESPAN}"
   echo -e "${GREEN}  Realm '${NOC_REALM}' created.${NC}"
 fi
 

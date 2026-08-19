@@ -155,6 +155,78 @@ tier must stay valueless.
 - No secret is echoed to stdout/stderr or structured logs (see the observability
   rules in the constitution).
 
+## Keycloak realm posture (R1-10.7)
+
+The realms the toolkit provisions used to ship three permissive defaults, identical on a
+laptop and on a routable host: `redirectUris: ["*"]`, `webOrigins: ["*"]` and
+`sslRequired: "none"`. Two rules now govern them — and a third governs the `deploy/local`
+realms, provisioned by a different path, which carried a permissive token lifespan of
+their own.
+
+**Browser origins come from one source.** A realm's `redirectUris` and `webOrigins` are
+derived from the same origin list the entity's api-gateway receives as
+`CORS_ALLOW_ORIGINS` — `cbCORSOriginsFor` / `bankCORSOriginsFor` in scenario-a,
+`nocPortalOrigins` for the public `noc-portal` client in scenario-b.
+
+In **scenario-a** that is an identity, and it is pinned. Both sides are built from the
+same call inside `buildSteps`, and `TestCBRealmOriginsMatchTheGatewayCORS` /
+`TestBankRealmOriginsMatchTheGatewayCORS` walk the steps the engine actually assembles,
+recompute the gateway's list from the env step's own inputs, and fail if the two ever
+disagree. Keycloak and the gateway therefore cannot drift from each other, nor from the
+ports the stack publishes.
+
+In **scenario-b** the two lists are related but not identical, and the claim should not be
+stated more strongly than that. The spoke is consistent: `corsOriginsCB` includes the NOC
+portal's RPC+12000 origin that `nocPortalOrigins` grants the client. The hub is not —
+`nocPortalOrigins` gives the `noc-portal` client RPC+12000, while the hub gateway's
+`CORS_ALLOW_ORIGINS` is `corsOriginSingle`, RPC+9000 only (`step_found_hub.go`). That
+mismatch is pre-existing and inert today, because `found-hub` never composes the
+`noc-stack` the client exists for, but it is a mismatch and not an invariant.
+
+A wildcard here is not cosmetic. `redirectUris: ["*"]` makes the realm an open redirector
+for the authorization code, and `webOrigins: ["*"]` lets any page read a token response.
+The `noc-portal` client is the sharpest case: it is **public** and uses a direct password
+grant, so no client secret stands between an attacker's page and a usable token.
+
+`renderRealmJSON` **fails closed** — a plan that reaches it with no origins is an error,
+not a document that falls back to a wildcard. That is deliberate: the wildcard existed
+precisely because an absent value had a permissive default.
+
+**`sslRequired` follows `spec.environment`.** Only an explicit `local` gets `none`, which
+is the affordance a developer needs to reach Keycloak and the portals over plain HTTP.
+Every other value — including an empty one — gets Keycloak's own default, `external`: TLS
+demanded on any non-private address.
+
+The consequence for a deployment is worth stating plainly. A stack that serves its portals
+over **plain HTTP on a routable address** must declare `spec.environment: local`, or
+Keycloak will refuse the password grant with `HTTPS required`. That is the intended
+pressure: the alternative is to put a TLS terminator in front, which is what a non-local
+deployment should be doing anyway.
+
+The field is no longer optional anywhere, so an absent value cannot reach the renderer by
+accident. There is **no JSON-Schema for the manifest in this repository** — the Go
+validators are the whole rule. `scenario-b/toolkit/engine/manifest/validate.go` requires
+`spec.environment` and accepts only `local` in this phase (staging/prod are rejected
+outright); `scenario-a/toolkit/engine/manifest/validate.go` requires it and accepts
+`local`, `staging` or `prod`. Requiring it is what turns a forgotten field into a
+validation error naming it, instead of a login failing with `HTTPS required` far from the
+cause.
+
+**Access-token lifespan.** The realms the toolkit provisions never set
+`accessTokenLifespan`, so they inherit Keycloak's own default of 300 seconds. The
+`deploy/local` path is a **second enforcement point**, and it did set one: `init.sh` — the
+Keycloak container's entrypoint, so every `make *.up` — defaulted to 21600 (six hours),
+and `setup-noc-realm.sh` created the NOC realm at 86400 (twenty-four). Both now default to
+300, overridable through `KC_ACCESS_TOKEN_LIFESPAN`.
+
+The lifespan is the window in which a leaked, logged or shoulder-surfed bearer is
+replayable, and it costs nothing to shorten here: every portal renews silently — a
+proactive refresh timer plus a 401-retry interceptor (`services/api/token-refresh.ts`, and
+`apps/noc/src/services/api/token.ts`, whose own comment already assumed a 5-minute token).
+`TestDeployLocalAccessTokenLifespanIsShort` in each toolkit reads those scripts, rejects
+any value above 900 seconds, and fails closed if it can no longer find a lifespan
+declaration at all.
+
 ## Checklist for reviewers
 
 Run the two automated gates first — they cover the live deploy path and are cheaper
