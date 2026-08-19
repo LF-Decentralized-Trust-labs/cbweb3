@@ -29,20 +29,10 @@ func DryRun(ctx context.Context, in ApplyInput) (ApplyResult, error) {
 	// Read state file — missing file means all steps pending.
 	state, _ := orchestrator.LoadState(m.Spec.Node.DataDir)
 
-	// Select the step order for the manifest's mode.
-	stepOrder := orchestrator.CanonicalStepOrder
-	if m.Spec.Mode == "join" {
-		stepOrder = orchestrator.CanonicalJoinStepOrder
-	}
-	// The reverse-proxy step is soft-appended by the orchestrator ONLY when
-	// spec.proxy == "enable" (see buildSteps / buildJoinSteps). Mirror that here so
-	// the plan reflects it. Copy the shared canonical slice before appending — never
-	// mutate the package-level order.
-	if m.Spec.Proxy == "enable" {
-		order := make([]string, len(stepOrder), len(stepOrder)+1)
-		copy(order, stepOrder)
-		stepOrder = append(order, orchestrator.StepStartProxy)
-	}
+	// Same source the apply report uses — mode dispatch and the soft-appended
+	// reverse-proxy step both live in PlannedStepOrder, so plan and report cannot
+	// drift apart.
+	stepOrder := plannedStepOrder(m)
 
 	steps := make([]StepResult, len(stepOrder))
 	for i, stepName := range stepOrder {

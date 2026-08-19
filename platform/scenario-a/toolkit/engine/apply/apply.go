@@ -69,7 +69,7 @@ func runFoundMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyRes
 	if err := os.MkdirAll(m.Spec.Node.DataDir, 0o755); err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("create data dir: %v", err)
-		result.Steps = pendingSteps()
+		result.Steps = pendingSteps(m)
 		return result, err
 	}
 
@@ -78,7 +78,7 @@ func runFoundMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyRes
 	if err != nil {
 		result.Status = "failed"
 		result.Error = err.Error()
-		result.Steps = pendingSteps()
+		result.Steps = pendingSteps(m)
 		return result, err
 	}
 
@@ -87,7 +87,7 @@ func runFoundMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyRes
 
 	// Read final state to build the step report regardless of error.
 	state, _ := orchestrator.LoadState(m.Spec.Node.DataDir)
-	result.Steps = buildStepResults(orchestrator.CanonicalStepOrder, state)
+	result.Steps = buildStepResults(plannedStepOrder(m), state)
 
 	if ctx.Err() != nil {
 		// Mark the last step that was running when context was cancelled (recorded
@@ -183,7 +183,7 @@ func runJoinMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyResu
 	if err := os.MkdirAll(m.Spec.Node.DataDir, 0o755); err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("create data dir: %v", err)
-		result.Steps = pendingJoinSteps()
+		result.Steps = pendingSteps(m)
 		return result, err
 	}
 
@@ -192,13 +192,13 @@ func runJoinMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyResu
 	if err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("load join bundle: %v", err)
-		result.Steps = pendingJoinSteps()
+		result.Steps = pendingSteps(m)
 		return result, err
 	}
 	if err := bundle.ValidateForJoin(b); err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("invalid join bundle: %v", err)
-		result.Steps = pendingJoinSteps()
+		result.Steps = pendingSteps(m)
 		return result, err
 	}
 
@@ -206,14 +206,14 @@ func runJoinMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyResu
 	if err != nil {
 		result.Status = "failed"
 		result.Error = err.Error()
-		result.Steps = pendingJoinSteps()
+		result.Steps = pendingSteps(m)
 		return result, err
 	}
 
 	runErr := fns.runJoin(ctx, m, b, deps)
 
 	state, _ := orchestrator.LoadState(m.Spec.Node.DataDir)
-	result.Steps = buildStepResults(orchestrator.CanonicalJoinStepOrder, state)
+	result.Steps = buildStepResults(plannedStepOrder(m), state)
 
 	if ctx.Err() != nil {
 		for i := len(result.Steps) - 1; i >= 0; i-- {
@@ -249,6 +249,13 @@ func runJoinMode(ctx context.Context, in ApplyInput, fns runnerFuncs) (ApplyResu
 	return result, nil
 }
 
+// plannedStepOrder returns the steps this manifest will actually execute. Both the
+// apply report and the dry-run plan go through here so they cannot diverge — never
+// read orchestrator.CanonicalStepOrder / CanonicalJoinStepOrder directly.
+func plannedStepOrder(m *manifest.Manifest) []string {
+	return orchestrator.PlannedStepOrder(m.Spec.Mode, m.Spec.Proxy == "enable")
+}
+
 // buildStepResults constructs the step report from orchestrator state.
 func buildStepResults(stepOrder []string, state orchestrator.ProvisioningState) []StepResult {
 	results := make([]StepResult, len(stepOrder))
@@ -278,19 +285,12 @@ func buildStepResults(stepOrder []string, state orchestrator.ProvisioningState) 
 	return results
 }
 
-// pendingSteps returns 10 StepResults all with status "pending".
-func pendingSteps() []StepResult {
-	results := make([]StepResult, len(orchestrator.CanonicalStepOrder))
-	for i, name := range orchestrator.CanonicalStepOrder {
-		results[i] = StepResult{Name: name, Status: "pending"}
-	}
-	return results
-}
-
-// pendingJoinSteps returns the 9 mode:join StepResults all with status "pending".
-func pendingJoinSteps() []StepResult {
-	results := make([]StepResult, len(orchestrator.CanonicalJoinStepOrder))
-	for i, name := range orchestrator.CanonicalJoinStepOrder {
+// pendingSteps returns every step this manifest would execute, all "pending" —
+// used when the run aborts before the engine starts.
+func pendingSteps(m *manifest.Manifest) []StepResult {
+	order := plannedStepOrder(m)
+	results := make([]StepResult, len(order))
+	for i, name := range order {
 		results[i] = StepResult{Name: name, Status: "pending"}
 	}
 	return results

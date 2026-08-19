@@ -18,7 +18,7 @@ This runbook describes the complete procedure for bringing up the CBWeb3 environ
   - [Health verification](#health-verification)
   - [End-to-end demo (HTLC cross-spoke)](#end-to-end-demo-htlc-cross-spoke)
   - [Teardown](#teardown)
-- [Scenario B — International Hub (planned)](#scenario-b--international-hub-planned)
+- [Scenario B — International Hub](#scenario-b--international-hub)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -28,7 +28,7 @@ This runbook describes the complete procedure for bringing up the CBWeb3 environ
 | Scenario | Status | Description |
 |----------|--------|-------------|
 | **Scenario A** | Implemented and runnable | Enhanced Correspondent Banking (two Besu spokes, HTLC, Paladin/Zeto) |
-| **Scenario B** | Contracts ready; deployment pending | International Hub with AMM/FX (will be added to this runbook) |
+| **Scenario B** | Implemented and runnable | International Hub with AMM/FX — deployed from its own tree; see [`scenario-b/docs/runbooks/deployment-runbook.md`](../../../scenario-b/docs/runbooks/deployment-runbook.md) |
 
 ---
 
@@ -40,8 +40,8 @@ Install all tools before proceeding. See the detailed guide in [`environment-set
 |------|----------------|-------|
 | Docker + Docker Compose | Docker 24+ | `docker --version` |
 | GNU Make | 3.81+ | `make --version` |
-| Go | 1.22+ | `go version` |
-| Node.js | 22+ | `node --version` |
+| Go | 1.26+ | `go version` |
+| Node.js | 22 LTS | `node --version` |
 | npm | 10+ | `npm --version` |
 | Foundry (`forge`, `cast`) | nightly | `forge --version` |
 | `jq` | 1.6+ | `jq --version` |
@@ -325,19 +325,19 @@ make spoke-b-down    # backend + Paladin + Besu spoke-b
 
 ---
 
-## Scenario B — International Hub (planned)
+## Scenario B — International Hub
 
-> **Status:** Smart contracts implemented; hub deployment and end-to-end flows pending.
+> **Status:** implemented and runnable. Deployed from its own tree and documented in its own runbook — this document covers Scenario A only.
 
-Scenario B adds a hub network with an AMM pool for FX settlement between spokes. When implemented, this runbook will be extended with:
+Scenario B adds a neutral hub network (chain 1337) with an AMM pool for FX settlement between sovereign spokes. It is a separate product under [`scenario-b/`](../../../scenario-b/README.md), with its own contracts, services, provisioning toolkit and runbooks. Scenario isolation is a constitutional rule of this repository: the two trees are deliberately not shared, and nothing in this runbook applies to Scenario B.
 
-- `make hub-up` — start the hub Besu network (chain 1337)
-- `make contracts.deploy-hub` — deploy AMM, ManualOracle, FXAgreement on the hub
-- `make spoke-all-with-hub` — full stack with hub + both spokes
-- Hub endpoint health checks
-- Cross-spoke FX demo via AMM
+For Scenario B deployment, see:
 
-Existing contracts for Scenario B: `AutomatedMarketMaker.sol`, `ManualOracle.sol`, `FXAgreement.sol` (in `scenario-a/contracts/src/`).
+- [`scenario-b/docs/runbooks/deployment-runbook.md`](../../../scenario-b/docs/runbooks/deployment-runbook.md) — the deployment procedure
+- [`scenario-b/docs/runbooks/environment-setup.md`](../../../scenario-b/docs/runbooks/environment-setup.md) — prerequisites and port reference
+- [`scenario-b/samples/deploy-all.sh`](../../../scenario-b/samples/deploy-all.sh) — the sample deployment (hub + two spokes + four commercial banks) driven by the `cbweb3b` toolkit
+
+Scenario B's contracts live in [`scenario-b/contracts/src/`](../../../scenario-b/contracts/src/), **not** in Scenario A's tree. Alongside `AutomatedMarketMaker.sol`, `ManualOracle.sol` and `FXAgreement.sol` it carries the hub registries — `PairRegistry.sol`, `LiquidityCommitRegistry.sol`, `CurrencyRegistry.sol` and `SpokeBridge.sol` — which have no Scenario A counterpart.
 
 ---
 

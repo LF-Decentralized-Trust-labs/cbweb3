@@ -3,8 +3,10 @@
 //go:build e2e
 
 // Full-pipeline E2E (build tag `e2e`): composes the toolkit modes end-to-end —
-// found-hub → found-spoke ×2 (CB-A/CB-B) → join (bank) → sovereign tail — against
-// real Docker, then exercises the business path (swap through the AMM, circuit
+// found-hub → found-spoke ×2 (CB-A/CB-B) → join (bank) — against real Docker.
+// Opening the corridor is not part of provisioning; the pair is expected already
+// ACTIVE from the two runtime sovereign acts (see sovereign_pair_e2e_test.go).
+// The test then exercises the business path (swap through the AMM, circuit
 // breaker pause/resume, SpokeBridge lock/release) and idempotency (re-apply
 // converges). SKIPS WITH A WARNING when the environment is absent — never a false
 // green (FR-006 / SC-005).

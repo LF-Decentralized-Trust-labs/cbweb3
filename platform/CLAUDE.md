@@ -23,12 +23,20 @@ Architectural and process rules live in `.specify/memory/constitution.md` (curre
 - Hyperledger Besu 25.8.0 with **QBFT** consensus (not IBFT 2.0), one network per spoke + hub
 - Solidity contracts compiled and tested with Foundry (`forge`)
 - Paladin Core (Zeto + Noto domains) for privacy tokens
-- Go 1.26+ microservices, gRPC intra-entity, REST via API Gateway externally
+- Go 1.26 microservices, gRPC intra-entity, REST via API Gateway externally
 - Keycloak (OIDC) for auth; PKI from central bank CAs
-- React + Turborepo frontend
+- React + Turborepo frontend on Node 22 LTS
 - Docker Compose per scenario; Postgres for service persistence
 
 New runtime dependencies outside this stack require justification in the PR and the scenario README.
+
+**Toolchain versions live in [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md) and that file wins.**
+The floor is the same for both scenarios: **Go 1.26** (every `go.mod`, every
+`golang:1.26-alpine` builder) and **Node 22 LTS** (root `.nvmrc`, `engines`, every
+`node:22-alpine` image, `@types/node ^22`). Older versions quoted in the Active
+Technologies list below are historical records of individual specs, not the current floor.
+Do not introduce a per-scenario or per-module version split without recording it in the
+Recorded deviations table of that file.
 
 ## Scenario B layout (most active)
 
@@ -200,9 +208,9 @@ Also flag, in review, any change that weakens the gate itself: a counter moved b
 - Spoke bundle at `<outDir>/bundles/spoke-<id>.bundle.yaml` includes genesis + enode + chainId + spoke contract addresses (public, no secrets); consumed by join (TK-B8) (038-tk-b7-found)
 - Go 1.26 (toolkit) — no new Go deps; join mode reuses the TK-B6/B7 engine/exec/addrs/bundle (LoadSpoke) + pki.GenerateBankCSR; new wait-sync gate via eth_syncing; canonical flow has no relay/noc step (039-tk-b8-join)
 - Bank joins as a non-validating full node (CB is the sole QBFT validator): write-genesis copies the spoke bundle genesis (non-destructive + sha256 guard), wait-sync blocks on eth_syncing, gen-csr is the only PKI step (key 0600, OU=ROLE_COMMERCIAL_BANK, zero CA material; signing/registration are runtime) (039-tk-b8-join)
-- Go 1.26 (toolkit) — no new Go deps; sovereign-pair tail (open-sovereign-pair/commit-liquidity/seed-oracle) is a SOFT tail of found-spoke, triggered by spec.pair; idempotency is on-chain via cast call getPair status (040-tk-b9-sovereign-pair)
-- Strict sovereignty: each apply signs only the current CB's act (CB-A scaffolds + proposePair; a separate CB-B found-spoke confirmPair); no run holds the counterparty key, so SeedNewSovereignPair.s.sol (needs both keys) is NOT reused — acts driven discretely via cast/forge create; seed-oracle is local-only (040-tk-b9-sovereign-pair)
-- Go 1.26 (toolkit e2e/perf tests) — no new Go deps; TK-B10 is a verification phase (tests + docs): a full-pipeline E2E (found-hub→found-spoke×2→join→sovereign tail via apply.Apply) exercising swap/breaker/SpokeBridge, plus a toolkit-native Go perf baseline (p95 quote/swap) and E2E-STATUS.md; all skip-with-warning (041-tk-b10-e2e-baseline)
+- Go 1.26 (toolkit) — **SUPERSEDED**: the sovereign-pair tail (open-sovereign-pair/commit-liquidity/seed-oracle) and the `spec.pair` manifest field were REMOVED from found-spoke in c90de691. There is no provisioning step for corridors; `TestApplyFoundSpokeHasNoSovereignTail` asserts apply never plans them (040-tk-b9-sovereign-pair)
+- Strict sovereignty (still the governing rule, now enforced at runtime): opening a corridor is two independent sovereign acts, each signed by its own CB — one proposes via the governance portal (proposePair), the counterparty confirms (confirmPair), then each commits its own liquidity. No run holds the counterparty key, so SeedNewSovereignPair.s.sol (needs both) is NOT reused (040-tk-b9-sovereign-pair)
+- Go 1.26 (toolkit e2e/perf tests) — no new Go deps; TK-B10 is a verification phase (tests + docs): a full-pipeline E2E (found-hub→found-spoke×2→join via apply.Apply; the corridor is opened separately at runtime) exercising swap/breaker/SpokeBridge, plus a toolkit-native Go perf baseline (p95 quote/swap) and E2E-STATUS.md; all skip-with-warning (041-tk-b10-e2e-baseline)
 - SpokeBridge reality: only lock(token,amount,txId) + release(txId) (GOVERNANCE) + getLock — no on-chain mint/burn/unlock/timeout; mint is relay-mediated, refund is release; AMM swap is swapTokensForExactTokens; breaker via pause/signResume (quorum 2)/isPaused (041-tk-b10-e2e-baseline)
 
 ## Recent Changes

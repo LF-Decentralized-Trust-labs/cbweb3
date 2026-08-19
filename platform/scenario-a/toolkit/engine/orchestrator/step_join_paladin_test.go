@@ -4,11 +4,15 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/dockervolume"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/keyprovider"
 )
 
@@ -188,19 +192,97 @@ func TestStartPaladinJoinStep_RoutablePublishesGRPC9000(t *testing.T) {
 	}
 }
 
-func TestRegisterPaladinNodeStep_Check_StateDriven(t *testing.T) {
+// markRegisterPaladinDone writes the state file entry the step's Check reads first.
+func markRegisterPaladinDone(t *testing.T, dir string) {
+	t.Helper()
+	state := markStep(ProvisioningState{SpokeID: "spoke-brl"}, StepRegisterPaladinNode, "done", "2026-06-29T00:00:00Z")
+	if err := saveState(dir, state); err != nil {
+		t.Fatalf("saveState: %v", err)
+	}
+}
+
+// Check is NOT state-driven alone (it was until 69e44bcf). It is done only when
+// the state says so AND the transport cert in the Paladin config volume still
+// matches the fingerprint published on the last successful Run. gen-tls-join may
+// regenerate that cert on a later run; without the drift check the step would stay
+// "done" while Paladin presents a cert the CB no longer trusts, surfacing as
+// `tls: bad certificate` on create-pente-context.
+//
+// These two cases need no Docker: both must be false.
+func TestRegisterPaladinNodeStep_Check_FalseWithoutFingerprintEvidence(t *testing.T) {
 	dir := t.TempDir()
 	step := newRegisterPaladinNodeStep("spoke-brl", "bank-itau", dir, "http://localhost:8746", "0xREG", "", keyprovider.NewLocalKeyProviderSeeded(), 0)
-	done, _ := step.Check(context.Background())
+
+	done, err := step.Check(context.Background())
+	if err != nil {
+		t.Fatalf("Check with no state: %v", err)
+	}
 	if done {
 		t.Error("Check should be false with no state")
 	}
-	state := ProvisioningState{SpokeID: "spoke-brl"}
-	state = markStep(state, StepRegisterPaladinNode, "done", "2026-06-29T00:00:00Z")
-	saveState(dir, state)
-	done, _ = step.Check(context.Background())
+
+	// State alone is not enough: with the config volume absent there is no cert to
+	// compare, so the step must re-run once gen-tls-join recreates it.
+	markRegisterPaladinDone(t, dir)
+	done, err = step.Check(context.Background())
+	if err != nil {
+		t.Fatalf("Check with state but no volume: %v", err)
+	}
+	if done {
+		t.Error("Check should be false when the state says done but the Paladin config volume is absent")
+	}
+}
+
+// The volume-backed half of the contract: a matching fingerprint means done, a
+// stale one means the cert drifted and the node must republish. This is the
+// regression 69e44bcf fixed, and it had no test until now.
+func TestRegisterPaladinNodeStep_Check_TLSFingerprintDrift(t *testing.T) {
+	requireDocker(t)
+	dir := t.TempDir()
+	const bankID = "bank-itau-fingerprint"
+	volume := "spoke-brl_" + bankID + "_paladin_config"
+	cleanupVolume(t, volume)
+
+	step := newRegisterPaladinNodeStep("spoke-brl", bankID, dir, "http://localhost:8746", "0xREG", "", keyprovider.NewLocalKeyProviderSeeded(), 0).(*registerPaladinNodeStep)
+	markRegisterPaladinDone(t, dir)
+
+	certPEM := []byte("-----BEGIN CERTIFICATE-----\nfingerprint-fixture\n-----END CERTIFICATE-----\n")
+	if err := dockervolume.WriteFile(context.Background(), volume, "tls.crt", certPEM, "0644"); err != nil {
+		t.Fatalf("seed volume cert: %v", err)
+	}
+
+	// A cert in the volume with no recorded fingerprint forces one republish.
+	done, err := step.Check(context.Background())
+	if err != nil {
+		t.Fatalf("Check with no recorded fingerprint: %v", err)
+	}
+	if done {
+		t.Error("Check should be false before any fingerprint has been recorded")
+	}
+
+	sum := sha256.Sum256(certPEM)
+	if err := os.WriteFile(step.paladinTLSFingerprintFile(), []byte(hex.EncodeToString(sum[:])), 0o644); err != nil {
+		t.Fatalf("write fingerprint: %v", err)
+	}
+	done, err = step.Check(context.Background())
+	if err != nil {
+		t.Fatalf("Check with matching fingerprint: %v", err)
+	}
 	if !done {
-		t.Error("Check should be true when register-paladin-node is done")
+		t.Error("Check should be true when the state is done and the volume cert matches the recorded fingerprint")
+	}
+
+	// gen-tls-join regenerates the cert → the recorded fingerprint no longer matches.
+	if err := dockervolume.WriteFile(context.Background(), volume, "tls.crt",
+		[]byte("-----BEGIN CERTIFICATE-----\nrotated\n-----END CERTIFICATE-----\n"), "0644"); err != nil {
+		t.Fatalf("rotate volume cert: %v", err)
+	}
+	done, err = step.Check(context.Background())
+	if err != nil {
+		t.Fatalf("Check after cert rotation: %v", err)
+	}
+	if done {
+		t.Error("Check should be false after the volume cert drifted from the recorded fingerprint")
 	}
 }
 

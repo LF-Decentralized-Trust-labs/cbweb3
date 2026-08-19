@@ -2,6 +2,10 @@
   "name": "@cbweb3/cacti-htlc-relay",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
+  },
   "description": "Hyperledger Cacti interoperability service for HTLC cross-spoke relay",
   "scripts": {
     "build": "tsc",
@@ -25,7 +29,7 @@
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^20.11.0",
+    "@types/node": "^22.10.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.0",
     "vitest": "^2.0.0"

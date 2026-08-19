@@ -2,6 +2,11 @@
 
 Auto-generated from all feature plans. Last updated: 2026-05-22
 
+> **Toolchain versions:** [`docs/TOOLCHAIN.md`](../docs/TOOLCHAIN.md) is authoritative. The
+> current floor is **Go 1.26** and **Node 22 LTS** for both scenarios. The versions in the
+> list below are historical records of individual feature plans and must not be used as the
+> required toolchain.
+
 ## Active Technologies
 - Go 1.25.5 (payment-orchestrator), TypeScript 5.4 + Node 20 (relay Cacti), Solidity 0.8.20 (contratos) + gRPC/protobuf, go-ethereum v1.17.1, GORM + Postgres driver (padrão compliance), ethers v6, @grpc/grpc-js, Hyperledger Cacti packages, Paladin Pente client (001-harden-fx-agreement)
 - PostgreSQL — `fx_agreements`, `fx_agreement_events`, relay durability tables; padrão GORM conforme compliance service (001-harden-fx-agreement)

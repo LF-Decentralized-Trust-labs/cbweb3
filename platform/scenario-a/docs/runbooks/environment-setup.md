@@ -4,6 +4,11 @@
 
 This guide covers local environment preparation before running the deployment. For the deployment procedure itself, see [`deployment-runbook.md`](deployment-runbook.md).
 
+> **Version authority:** the tool versions below are platform-wide — Scenario A and
+> Scenario B share one floor. [`docs/TOOLCHAIN.md`](../../../docs/TOOLCHAIN.md) is the
+> authoritative list and records where each version is enforced (`go.mod`, Dockerfiles,
+> `.nvmrc`, `engines`, CI). This page adds the Scenario A port reference on top of it.
+
 ---
 
 ## Table of Contents
@@ -11,7 +16,7 @@ This guide covers local environment preparation before running the deployment. F
 - [Required tools](#required-tools)
 - [Tool installation](#tool-installation)
 - [Port reference — Scenario A](#port-reference--scenario-a)
-- [Port reference — Scenario B (planned)](#port-reference--scenario-b-planned)
+- [Port reference — Scenario B](#port-reference--scenario-b)
 - [Configuration files per entity](#configuration-files-per-entity)
 - [Docker network](#docker-network)
 
@@ -24,10 +29,11 @@ This guide covers local environment preparation before running the deployment. F
 | **Docker** | 24.x | Container orchestration for all services |
 | **Docker Compose** | v2 (plugin) | Multi-container stack management |
 | **GNU Make** | 3.81 | Build automation (`make spoke-all`) |
-| **Go** | 1.22 | Backend services and Paladin scripts |
-| **Node.js** | 22 LTS | Frontend applications (React/Vite) |
-| **npm** | 10 | Frontend package management |
+| **Go** | 1.26 | Backend services, the `cbweb3` toolkit, and Paladin scripts |
+| **Node.js** | 22 LTS | Frontend applications (React/Vite) and the Cacti relay |
+| **npm** | 10 | JavaScript package management |
 | **Foundry** (`forge`, `cast`) | nightly | Solidity contract compilation and deployment |
+| **k6** | 0.50 | Load and performance tests (`make scenario-a.perf-baseline`) |
 | **jq** | 1.6 | JSON processing in shell scripts |
 | **openssl** | 3.x | PKI certificate generation (EC prime256v1) |
 
@@ -47,7 +53,7 @@ This guide covers local environment preparation before running the deployment. F
 
 ```bash
 # Homebrew
-brew install go node jq openssl make
+brew install go node jq openssl make k6
 
 # Foundry
 curl -L https://foundry.paradigm.xyz | bash
@@ -60,12 +66,12 @@ foundryup
 ### Linux (Ubuntu/Debian)
 
 ```bash
-# Go
-wget https://go.dev/dl/go1.22.linux-amd64.tar.gz
-sudo tar -C /usr/local -xzf go1.22.linux-amd64.tar.gz
+# Go 1.26
+wget https://go.dev/dl/go1.26.0.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.26.0.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 
-# Node.js 22 via nvm
+# Node.js 22 via nvm (the repository root carries a .nvmrc, so `nvm use` also works)
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 nvm install 22 && nvm use 22
 
@@ -84,7 +90,7 @@ foundryup
 ```bash
 docker --version          # Docker version 24.x
 docker compose version    # Docker Compose version v2.x
-go version                # go1.22.x
+go version                # go1.26.x
 node --version            # v22.x
 npm --version             # 10.x
 forge --version           # forge x.x.x
@@ -164,15 +170,20 @@ openssl version           # OpenSSL 3.x
 
 ---
 
-## Port reference — Scenario B (planned)
+## Port reference — Scenario B
 
-> When implemented, Scenario B will add an intermediate hub network. The ports below are a planned reservation.
+Scenario B is implemented and allocates its own port ranges, which do not overlap
+Scenario A's. It is a separate product under [`scenario-b/`](../../../scenario-b/README.md);
+its ports are documented with its own environment setup, not here:
 
-| Component | Port (planned) | Notes |
-|-----------|---------------|-------|
-| Besu hub (chain 1337) | 8545 | AMM/FX hub network |
-| API Gateway hub | — | To be defined |
-| AMM / ManualOracle | — | Deployed via existing contracts |
+- [`scenario-b/docs/runbooks/environment-setup.md`](../../../scenario-b/docs/runbooks/environment-setup.md) — prerequisites and the full port reference
+- [`scenario-b/README.md`](../../../scenario-b/README.md) — port reference per entity
+- [`scenario-b/samples/deploy-all.sh`](../../../scenario-b/samples/deploy-all.sh) — the sample deployment prints every endpoint it brings up
+
+Both scenarios can run on one host: an entity's Scenario A and Scenario B stacks
+publish on different port ranges (Scenario A api-gateway on `186xx` and portals on
+`25xxx`/`26xxx`; Scenario B on `416xx`/`426xx`). The per-entity launcher is shared —
+one launcher per entity lists that entity's Scenario A **and** Scenario B portals.
 
 ---
 

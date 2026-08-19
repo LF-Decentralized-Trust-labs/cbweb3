@@ -27,7 +27,7 @@
   - [State Machines](#state-machines)
   - [Data Flows and Network Boundaries](#data-flows-and-network-boundaries)
   - [Key Design Decisions](#key-design-decisions)
-- [Scenario B — International Hub with AMM (Planned)](#scenario-b--international-hub-with-amm-planned)
+- [Scenario B — International Hub with AMM](#scenario-b--international-hub-with-amm)
 - [Technology Stack Summary](#technology-stack-summary)
 - [Related Documents](#related-documents)
 
