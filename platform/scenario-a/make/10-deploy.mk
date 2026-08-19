@@ -100,18 +100,25 @@ deploy.down: deploy.down-infra deploy.down-besu
 
 # ── Backend services (pattern rules) ─────────────────────────────────────────
 
+# The api-gateway and compliance images are non-root (uid 10001, finding R2-M-12) but mount
+# ./config/pki from this repository, owned by whoever checked it out. Passing the caller's
+# uid/gid lets them persist an issued certificate there; without it the mount is readable
+# but not writable and PKI bootstrap degrades with a warning.
+ENTITY_RUN_UID ?= $(shell id -u)
+ENTITY_RUN_GID ?= $(shell id -g)
+
 deploy.up-backend-%:
 	@echo "Starting backend $* services..."
-	@docker compose --env-file $(BACKEND_ENV_DIR)/.env.infra.$* \
+	@ENTITY_RUN_UID=$(ENTITY_RUN_UID) ENTITY_RUN_GID=$(ENTITY_RUN_GID) docker compose --env-file $(BACKEND_ENV_DIR)/.env.infra.$* \
 		-f $(BACKEND_DIR)/docker-compose-backend.$*.yaml up -d
 
 deploy.down-backend-%:
 	@echo "Stopping backend $* services..."
-	@docker compose --env-file $(BACKEND_ENV_DIR)/.env.infra.$* \
+	@ENTITY_RUN_UID=$(ENTITY_RUN_UID) ENTITY_RUN_GID=$(ENTITY_RUN_GID) docker compose --env-file $(BACKEND_ENV_DIR)/.env.infra.$* \
 		-f $(BACKEND_DIR)/docker-compose-backend.$*.yaml down -v
 
 deploy.validate-backend-%:
-	@docker compose --env-file $(BACKEND_ENV_DIR)/.env.infra.$* \
+	@ENTITY_RUN_UID=$(ENTITY_RUN_UID) ENTITY_RUN_GID=$(ENTITY_RUN_GID) docker compose --env-file $(BACKEND_ENV_DIR)/.env.infra.$* \
 		-f $(BACKEND_DIR)/docker-compose-backend.$*.yaml config -q
 
 deploy.build-backend:

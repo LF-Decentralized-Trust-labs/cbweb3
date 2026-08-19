@@ -19,6 +19,8 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/bundle"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/exec"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/relayregistrar"
+	"os"
+	"strconv"
 )
 
 // SpokeConfig parametrizes the found-spoke mode. External gates/reads and the
@@ -658,6 +660,14 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// participant CSRs with it.
 		"CA_VOLUME":      c.caVolume(),
 		"ENTITY_PKI_DIR": "cb_tls", // named volume (holds the generated CA)
+		// The service images are non-root by default (uid 10001, finding R2-M-12), but the
+		// two services that mount the PKI read the CA and persist issued certificates there.
+		// On a bank that path is a host bind owned by whoever ran this toolkit, at mode 0700,
+		// so no other uid can read it — those containers therefore run as the invoking user.
+		// Same reasoning as HOST_UID for the Besu containers (ADR-001 / T028); the compose
+		// default keeps a hand-run stack on the image's non-root uid.
+		"ENTITY_RUN_UID": strconv.Itoa(os.Getuid()),
+		"ENTITY_RUN_GID": strconv.Itoa(os.Getgid()),
 		// PKI_DIR points the gateway at that same mount so it can read peer identities. On a CB the
 		// peers come from the participants table (the certificates it issued at onboarding, which
 		// carry the ACTIVE status and therefore revocation); this path additionally allows pinning a
