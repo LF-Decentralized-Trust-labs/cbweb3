@@ -34,6 +34,12 @@
 #   ./enable-paladin-ui.sh --force <name>      # patch + restart even if the chain probe fails
 #
 # Idempotent: a config that already declares staticServers is left alone.
+#
+# Requires on the host: docker, curl, and the ability to pull alpine:3.20 (or to
+# have it cached) — the config volume is read and written through short-lived
+# alpine containers, since the volume is not reachable from the host filesystem.
+# On a host with a restricted registry every such `docker run` fails and the
+# script reports the failure instead of changing anything.
 set -euo pipefail
 
 DRY_RUN=false
@@ -51,12 +57,15 @@ done
 
 log() { echo "[paladin-ui] $*"; }
 
-if [[ ${#TARGETS[@]} -eq 0 ]]; then
+# ${arr[*]-} rather than ${#arr[@]}: the length operator on an unset/empty array
+# is an "unbound variable" error under `set -u` before bash 4.4, and macOS still
+# ships bash 3.2 — someone running --dry-run from a laptop would hit it.
+if [[ -z "${TARGETS[*]-}" ]]; then
   while IFS= read -r name; do [[ -n "$name" ]] && TARGETS+=("$name"); done \
     < <(docker ps --filter 'name=^paladin-' --format '{{.Names}}' | sort)
 fi
 
-if [[ ${#TARGETS[@]} -eq 0 ]]; then
+if [[ -z "${TARGETS[*]-}" ]]; then
   echo "[paladin-ui] ERROR: no running paladin-* container on this host — pass a container name explicitly" >&2
   exit 1
 fi
@@ -165,7 +174,10 @@ for ctr in "${TARGETS[@]}"; do
   if ! docker run --rm --user 0:0 -v "$vol":/cfg -v "$AWK_PATCH":/patch.awk:ro alpine:3.20 sh -c '
         set -e
         [ -f /cfg/config.yaml.pre-ui.bak ] || cp -p /cfg/config.yaml /cfg/config.yaml.pre-ui.bak
-        awk -f /patch.awk /cfg/config.yaml > /cfg/.config.yaml.new
+        awk -f /patch.awk /cfg/config.yaml > /cfg/.config.yaml.new || {
+          rm -f /cfg/.config.yaml.new
+          exit 1
+        }
         chown 0:0 /cfg/.config.yaml.new
         chmod 0644 /cfg/.config.yaml.new
         mv /cfg/.config.yaml.new /cfg/config.yaml
@@ -206,5 +218,7 @@ for ctr in "${TARGETS[@]}"; do
 done
 
 log "=== done: $patched patched, $skipped already enabled, $blocked blocked (chain down), $failed need attention"
-[[ "$DRY_RUN" == true ]] && exit 0
+# Both modes share this status. A --dry-run that counted a blocked target (chain
+# down) or a failed one (no named volume at /etc/paladin) exits non-zero, so a
+# wrapper iterating over hosts can detect it without parsing the log.
 [[ $failed -eq 0 && $blocked -eq 0 ]]

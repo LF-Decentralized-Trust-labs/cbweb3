@@ -341,6 +341,18 @@ It edits `config.yaml` on the container's `/etc/paladin` volume (backup: `config
 beside it), restarts the container, and verifies `/ui` returns `302`. It is idempotent and leaves a
 config that already declares `staticServers` untouched.
 
+A node is restarted only after its own chain answers `eth_chainId` — Paladin exits `rc=1` when the
+chain is unreachable at startup and `restart: unless-stopped` turns that into a crash loop. Targets
+that fail the probe are reported as blocked and skipped; `--force` is the only override.
+
+**Host requirements:** `docker`, `curl`, and `alpine:3.20` pullable or already cached — the config
+volume is not reachable from the host filesystem, so it is read and written through short-lived
+alpine containers. On a host with a restricted registry those `docker run` calls fail and the script
+reports the failure rather than changing anything.
+
+**Exit status:** non-zero when any target was blocked (chain down) or needs attention, in `--dry-run`
+as well as in a real run, so a wrapper looping over hosts can branch on it without parsing the log.
+
 ## ⚠️ Multi-VM caveat (applies to both scenarios)
 
 The toolkit only executes `environment: local`, a profile validated all-on-one-host. The **Besu/P2P**
