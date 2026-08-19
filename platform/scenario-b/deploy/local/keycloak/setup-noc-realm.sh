@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # setup-noc-realm.sh — Creates the NOC Portal client, roles and default user
 # in the existing cbweb3 Keycloak realm for Scenario B.
 #
