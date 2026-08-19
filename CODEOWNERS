@@ -1,4 +1,31 @@
 # SPDX-License-Identifier: Apache-2.0
+#
+# Review ownership for cbweb3. The last matching pattern wins.
+#
+# Note: @LF-Decentralized-Trust-labs/cbweb3-maintainers currently holds every
+# participant with write access — the platform vendor, LNet, CEMLA, FLAR, nuam and the
+# participating central banks. Membership of that team means you can contribute; it does
+# not make you a maintainer. See MAINTAINERS.md.
 
-# cbweb3 Maintainers
-*       @LF-Decentralized-Trust-labs/cbweb3-maintainers
+# Default owner
+*                           @LF-Decentralized-Trust-labs/cbweb3-maintainers
+
+# Governance documents change the rules everyone else works under, so they are
+# deliberately narrower than the default.
+#
+# TODO: point these at @LF-Decentralized-Trust-labs/cbweb3-governance once the team
+# exists. Until then the default owner applies and these lines are inert.
+#
+# /CONTRIBUTING.md          @LF-Decentralized-Trust-labs/cbweb3-governance
+# /MAINTAINERS.md           @LF-Decentralized-Trust-labs/cbweb3-governance
+# /CODEOWNERS               @LF-Decentralized-Trust-labs/cbweb3-governance
+# /CODE_OF_CONDUCT.md       @LF-Decentralized-Trust-labs/cbweb3-governance
+# /LICENSE                  @LF-Decentralized-Trust-labs/cbweb3-governance
+# /NOTICE                   @LF-Decentralized-Trust-labs/cbweb3-governance
+# /SECURITY.md              @LF-Decentralized-Trust-labs/cbweb3-governance
+
+# Area ownership, to be enabled as the teams are created.
+#
+# /platform/                @LF-Decentralized-Trust-labs/cbweb3-platform-maintainers
+# /Toolbox/                 @LF-Decentralized-Trust-labs/cbweb3-toolbox-maintainers
+# /docs/                    @LF-Decentralized-Trust-labs/cbweb3-docs-maintainers

@@ -69,8 +69,13 @@ This repository is the **coordination hub** for the CBWeb3 DPG Working Group. It
 cbweb3/
 ├── Toolbox/              Integration kit: contracts, mocks, test vectors,
 │                         conformance tests, sandbox tutorials
-├── docs/                 DPG assessment, research papers, public documentation
+├── docs/                 DPG assessment, research papers, technical blueprint,
+│                         published documentation site
 ├── CONTRIBUTING.md       Governance model, roles, decision-making process
+├── MAINTAINERS.md        Who maintains what
+├── SECURITY.md           How to report a vulnerability
+├── AGENTS.md             Conventions for AI coding tools
+├── CHANGELOG.md          Notable changes
 └── README.md             This file
 ```
 
@@ -156,7 +161,7 @@ CBWeb3 is governed by a **DPG Working Group (DPG WG)** with open participation:
 
 **Decisions** follow a consensus-first model with a GitVote fallback (50%+1 quorum, simple majority).
 
-See the full [participation guidelines](CONTRIBUTING.md) for details on roles, voting, and the decision-making process.
+See the full [participation guidelines](CONTRIBUTING.md) for details on roles, voting, and the decision-making process, and [MAINTAINERS.md](MAINTAINERS.md) for who currently holds each role.
 
 ### Join us
 
@@ -180,9 +185,20 @@ See the full [participation guidelines](CONTRIBUTING.md) for details on roles, v
 
 ---
 
+## Security
+
+Found a vulnerability? **Do not open a public issue.** Report it through
+[GitHub private vulnerability reporting](https://github.com/LF-Decentralized-Trust-labs/cbweb3/security/advisories/new).
+See [SECURITY.md](SECURITY.md) for scope, response targets, and the coordinated disclosure policy.
+
+---
+
 ## License
 
-[Apache-2.0](LICENSE)
+[Apache-2.0](LICENSE) — see [NOTICE](NOTICE) for attribution.
+
+Contributions require a [DCO](https://developercertificate.org/) sign-off (`git commit -s`).
+If you used AI assistance, disclose it with an `Assisted-by:` trailer — see [AGENTS.md](AGENTS.md).
 
 ---
 

@@ -1,2 +1,19 @@
+# Working documents that are not published
 localdocs/
-localdocs/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# MkDocs build output
+site/
+
+# Node
+node_modules/
+
+# Editor and OS
+.DS_Store
+*.swp

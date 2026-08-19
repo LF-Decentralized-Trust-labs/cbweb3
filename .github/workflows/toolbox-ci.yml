@@ -1,10 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
 name: Toolbox CI
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'Toolbox/**'
+      - '.github/workflows/toolbox-ci.yml'
   pull_request:
     paths:
       - 'Toolbox/**'
       - '.github/workflows/toolbox-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   lint-openapi:
