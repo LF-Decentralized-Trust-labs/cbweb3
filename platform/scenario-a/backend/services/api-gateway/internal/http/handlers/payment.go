@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -539,14 +540,40 @@ func (h *PaymentHandler) MintToken(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
+	fields := map[string]string{
+		"amount":            req.Amount,
+		"to":                req.To,
+		"request_id":        req.RequestID,
+		"reserve_proof_ref": req.ReserveProofRef,
+	}
 	result, err := h.payment.MintToken(c.Context(), req.To, req.Amount)
 	if err != nil {
+		// A rejected attempt to create money is itself worth a record: without
+		// this, the trail only ever shows what succeeded.
+		fields["error"] = err.Error()
+		h.recordTokenAudit(c, "TOKEN_MINT", "FAILURE", req.To, auditDetails(fields))
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	h.recordTokenAudit(c, "TOKEN_MINT", req.To, fmt.Sprintf(
-		`{"amount":%q,"to":%q,"request_id":%q,"reserve_proof_ref":%q}`,
-		req.Amount, req.To, req.RequestID, req.ReserveProofRef))
+	h.recordTokenAudit(c, "TOKEN_MINT", "SUCCESS", req.To, auditDetails(fields))
 	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
+// auditDetails encodes the audit Details payload.
+//
+// Built with encoding/json rather than fmt.Sprintf and %q on purpose: %q is Go
+// quoting, not JSON quoting. A control byte or invalid UTF-8 in an
+// operator-typed field renders as \x7f, which JSON rejects — so the record
+// created for accountability would be the one nobody can parse. Marshalling a
+// map cannot produce that.
+func auditDetails(fields map[string]string) string {
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		// json.Marshal of map[string]string does not fail; if it ever did,
+		// losing the detail must not lose the entry.
+		log.Printf("[payment] audit details encode failed: %v", err)
+		return "{}"
+	}
+	return string(encoded)
 }
 
 // recordTokenAudit writes one entry for a completed mint or burn.
@@ -556,7 +583,7 @@ func (h *PaymentHandler) MintToken(c *fiber.Ctx) error {
 // operator. Blocking on it would also let a compliance outage stop money
 // operations that work today. The failure is logged, never swallowed. Category
 // is TREASURY because that is what the treasury history screen reads.
-func (h *PaymentHandler) recordTokenAudit(c *fiber.Ctx, action, target, details string) {
+func (h *PaymentHandler) recordTokenAudit(c *fiber.Ctx, action, result, target, details string) {
 	if h.auditLogger == nil {
 		return
 	}
@@ -570,7 +597,7 @@ func (h *PaymentHandler) recordTokenAudit(c *fiber.Ctx, action, target, details 
 		IPAddress:     c.IP(),
 		ActionType:    action,
 		TargetSubject: target,
-		Result:        "SUCCESS",
+		Result:        result,
 		Category:      "TREASURY",
 		Severity:      "HIGH",
 		Details:       details,
@@ -598,12 +625,19 @@ func (h *PaymentHandler) BurnToken(c *fiber.Ctx) error {
 	if strings.TrimSpace(req.Reason) == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "reason is required"})
 	}
+	fields := map[string]string{
+		"amount": req.Amount,
+		"from":   req.From,
+		"reason": strings.TrimSpace(req.Reason),
+	}
 	result, err := h.payment.BurnToken(c.Context(), req.From, req.Amount)
 	if err != nil {
+		// A failed attempt to destroy money is a recordable event too.
+		fields["error"] = err.Error()
+		h.recordTokenAudit(c, "TOKEN_BURN", "FAILURE", req.From, auditDetails(fields))
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	h.recordTokenAudit(c, "TOKEN_BURN", req.From, fmt.Sprintf(
-		`{"amount":%q,"from":%q,"reason":%q}`, req.Amount, req.From, strings.TrimSpace(req.Reason)))
+	h.recordTokenAudit(c, "TOKEN_BURN", "SUCCESS", req.From, auditDetails(fields))
 	return c.Status(fiber.StatusCreated).JSON(result)
 }
 

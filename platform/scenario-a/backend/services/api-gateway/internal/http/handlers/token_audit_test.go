@@ -25,6 +25,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -33,6 +34,8 @@ import (
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
 	"github.com/gofiber/fiber/v2"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // fakeAuditWriter records the entries a handler writes, and can be made to fail.
@@ -201,5 +204,101 @@ func TestTokenHandlers_NoAuditLoggerWired(t *testing.T) {
 	}
 	if resp := postJSON(t, app, "/burn", map[string]any{"from": "x", "amount": "1", "reason": "r"}); resp.StatusCode != http.StatusCreated {
 		t.Errorf("burn with no audit writer: want 201, got %d", resp.StatusCode)
+	}
+}
+
+// The audit Details field must be valid JSON for any operator input.
+//
+// It was built with fmt.Sprintf and %q, which is Go quoting, not JSON quoting:
+// a control byte or invalid UTF-8 in the reason renders as \x7f, which JSON
+// rejects. The record created for accountability would be the one that cannot
+// be parsed — and an operator types this field by hand.
+func TestBurnToken_AuditDetailsAreValidJSON(t *testing.T) {
+	t.Parallel()
+	for name, reason := range map[string]string{
+		"quotes":       `he said "settle it"`,
+		"control byte": "reason with \x01 control",
+		"del byte":     "reason with \x7f del",
+		"invalid utf8": string([]byte{0x66, 0x6f, 0x6f, 0xff}),
+		"newline":      "first line\nsecond line",
+	} {
+		t.Run(name, func(t *testing.T) {
+			writer := &fakeAuditWriter{}
+			app, _ := tokenAuditApp(t, writer)
+
+			resp := postJSON(t, app, "/burn", map[string]any{
+				"from": "vault-01", "amount": "50000", "reason": reason,
+			})
+			if resp.StatusCode != http.StatusCreated {
+				t.Fatalf("burn: want 201, got %d", resp.StatusCode)
+			}
+			if len(writer.entries) != 1 {
+				t.Fatalf("want 1 audit entry, got %d", len(writer.entries))
+			}
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(writer.entries[0].Details), &parsed); err != nil {
+				t.Fatalf("Details is not valid JSON (%v): %s", err, writer.entries[0].Details)
+			}
+			if parsed["amount"] != "50000" {
+				t.Errorf("amount = %v, want 50000", parsed["amount"])
+			}
+		})
+	}
+}
+
+// A rejected burn must leave a record too. Auditing only successes means the
+// trail cannot answer "did anyone try", which is the question an incident
+// review asks first.
+func TestBurnToken_FailedAttemptIsAudited(t *testing.T) {
+	t.Parallel()
+	writer := &fakeAuditWriter{}
+	fake := &fakePaymentServer{err: status.Error(codes.Internal, "zeto burn rejected")}
+	h := startFakePaymentBackend(t, fake).WithAuditLogger(writer)
+	app := fiber.New()
+	app.Use(authedClaims("central-bank-a"))
+	app.Post("/burn", h.BurnToken)
+
+	resp := postJSON(t, app, "/burn", map[string]any{
+		"from": "vault-01", "amount": "50000", "reason": "quarterly redemption",
+	})
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("burn against a failing backend: want 500, got %d", resp.StatusCode)
+	}
+	if len(writer.entries) != 1 {
+		t.Fatalf("want 1 audit entry for the failed attempt, got %d", len(writer.entries))
+	}
+	entry := writer.entries[0]
+	if entry.Result != "FAILURE" {
+		t.Errorf("Result = %q, want FAILURE", entry.Result)
+	}
+	if entry.ActionType != "TOKEN_BURN" {
+		t.Errorf("ActionType = %q, want TOKEN_BURN", entry.ActionType)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(entry.Details), &parsed); err != nil {
+		t.Fatalf("Details is not valid JSON: %v", err)
+	}
+	if parsed["reason"] != "quarterly redemption" {
+		t.Errorf("the operator's reason is missing from the failed-attempt record: %v", parsed)
+	}
+	if parsed["error"] == nil || parsed["error"] == "" {
+		t.Error("the failure record carries no error detail")
+	}
+}
+
+// The success path must still be marked SUCCESS after the result argument was
+// introduced — a mislabelled record is worse than none.
+func TestBurnToken_SuccessIsMarkedSuccess(t *testing.T) {
+	t.Parallel()
+	writer := &fakeAuditWriter{}
+	app, _ := tokenAuditApp(t, writer)
+
+	if resp := postJSON(t, app, "/burn", map[string]any{
+		"from": "vault-01", "amount": "1", "reason": "r",
+	}); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("burn: want 201, got %d", resp.StatusCode)
+	}
+	if got := writer.entries[0].Result; got != "SUCCESS" {
+		t.Errorf("Result = %q, want SUCCESS", got)
 	}
 }

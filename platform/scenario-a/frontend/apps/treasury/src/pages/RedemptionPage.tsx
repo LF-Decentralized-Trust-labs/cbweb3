@@ -115,7 +115,17 @@ export function RedemptionPage() {
         fields={[
           { label: "Signing identity", value: GATEWAY_SIGNING_IDENTITY },
           { label: "Amount", value: amount },
-          { label: "Balance after", value: projected !== null ? formatTokenAmount(projected) : "-" },
+          {
+            // The projection is floored at zero, so an over-sized burn would
+            // otherwise read as a plausible "0" here — on the very step meant to
+            // catch that mistake. Say so instead.
+            label: "Balance after",
+            value: exceedsBalance
+              ? "exceeds the account balance"
+              : projected !== null
+                ? formatTokenAmount(projected)
+                : "-",
+          },
           { label: "Reason", value: reason.trim() },
         ]}
         confirmLabel="Confirm burn"
