@@ -375,7 +375,7 @@ function AMMTradingV2() {
           { label: "Beneficiary", value: beneficiaryId },
           { label: "Amount out (exact)", value: amountOut },
           { label: "Max amount in", value: maxAmountIn },
-          { label: "Quoted input", value: quote ? weiToDisplay(quote.amount_in, tokenDecimals) : "no quote fetched" },
+          { label: "Quoted input", value: quote ? weiToDisplay(quote.required_input, tokenDecimals) : "no quote fetched" },
         ]}
         confirmLabel="Confirm swap"
         busy={status === "loading"}
