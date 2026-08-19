@@ -11,6 +11,7 @@ package handlers_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +31,10 @@ import (
 // asked for — the repository lookup is by id, which is exactly the surface under test.
 type mockOwnedSwapOrchestrator struct {
 	ownerBankID string
-	calls       int
+	// absent makes GetStatus report the swap as missing, the way the repository does for an
+	// id that is not in the table. Needed to compare that answer with a cross-tenant denial.
+	absent bool
+	calls  int
 }
 
 func (m *mockOwnedSwapOrchestrator) Execute(_ context.Context, req services.CrossCurrencySwapRequest) (*services.CrossCurrencySwapResult, error) {
@@ -39,6 +43,9 @@ func (m *mockOwnedSwapOrchestrator) Execute(_ context.Context, req services.Cros
 
 func (m *mockOwnedSwapOrchestrator) GetStatus(_ context.Context, swapID string) (*services.CrossCurrencySwapResult, error) {
 	m.calls++
+	if m.absent {
+		return nil, fmt.Errorf("swap %s not found: record not found", swapID)
+	}
 	return &services.CrossCurrencySwapResult{
 		SwapID:        swapID,
 		CorrelationID: "corr-1",
@@ -154,4 +161,37 @@ func TestGetSwapStatus_OwnerComparisonIgnoresCaseAndPadding(t *testing.T) {
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+// The load-bearing property of answering 404 instead of 403: a swap owned by another bank
+// must be indistinguishable from a swap that does not exist. If the two answers differ in
+// any byte — an extra field, a different error_code, a different status — the endpoint
+// becomes an existence oracle and the disclosure this finding closes is back, because a
+// caller can still confirm which ids are real.
+//
+// Both branches go through respondSwapNotFound for that reason; this test is what stops a
+// later edit from splitting them apart again with the rest of the suite still green.
+func TestGetSwapStatus_ForeignAndAbsentAreByteIdentical(t *testing.T) {
+	foreign := &mockOwnedSwapOrchestrator{ownerBankID: "bank-a"}
+	foreignResp, err := statusApp(foreign, "bank-b", true, "").
+		Test(httptest.NewRequest(http.MethodGet, "/swap/SWAP-001", nil), -1)
+	require.NoError(t, err)
+	defer foreignResp.Body.Close()
+	foreignBody := readBody(t, foreignResp)
+
+	absent := &mockOwnedSwapOrchestrator{ownerBankID: "bank-a", absent: true}
+	absentResp, err := statusApp(absent, "bank-b", true, "").
+		Test(httptest.NewRequest(http.MethodGet, "/swap/SWAP-404", nil), -1)
+	require.NoError(t, err)
+	defer absentResp.Body.Close()
+	absentBody := readBody(t, absentResp)
+
+	require.Equal(t, http.StatusNotFound, foreignResp.StatusCode)
+	require.Equal(t, http.StatusNotFound, absentResp.StatusCode)
+	assert.Equal(t, absentResp.StatusCode, foreignResp.StatusCode,
+		"a foreign swap and an absent swap must share a status code")
+	assert.Equal(t, absentBody, foreignBody,
+		"a foreign swap and an absent swap must share a byte-identical body, or the endpoint "+
+			"confirms which swap ids exist")
+	assert.Equal(t, absentResp.Header.Get("Content-Type"), foreignResp.Header.Get("Content-Type"))
 }

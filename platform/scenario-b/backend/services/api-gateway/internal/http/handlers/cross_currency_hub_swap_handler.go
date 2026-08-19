@@ -257,7 +257,7 @@ func (h *CrossCurrencyHubSwapHandler) HandleHubSwap(c *fiber.Ctx) error {
 	}
 	// Ownership first — before any lookup that could leak the position's state to a caller
 	// that has no claim to it.
-	if !strings.EqualFold(strings.TrimSpace(pos.OwnerBankID), strings.TrimSpace(req.PayerBankID)) {
+	if !sameBank(pos.OwnerBankID, req.PayerBankID) {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": "bridge-in position belongs to another bank",
 			"code":  "POSITION_OWNER_MISMATCH",

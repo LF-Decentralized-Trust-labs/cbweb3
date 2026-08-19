@@ -252,10 +252,7 @@ func (h *CrossCurrencySwapHandler) GetSwapStatus(c *fiber.Ctx) error {
 	result, err := h.orchestrator.GetStatus(c.Context(), swapID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "record not found") {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-				"error":      "swap not found",
-				"error_code": "SWAP_NOT_FOUND",
-			})
+			return respondSwapNotFound(c)
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error":      "failed to retrieve swap status",
@@ -264,15 +261,14 @@ func (h *CrossCurrencySwapHandler) GetSwapStatus(c *fiber.Ctx) error {
 		})
 	}
 
-	// Indistinguishable from a genuinely absent swap, on purpose. Logged so an operator can
-	// still see the attempt — silent denial would hide probing (Constitution VI).
+	// Indistinguishable from a genuinely absent swap, on purpose — same responder as the
+	// branch above, so the two answers cannot drift apart into an existence oracle. Logged
+	// so an operator can still see the attempt — silent denial would hide probing
+	// (Constitution VI). swapID is request-supplied, hence sanitized.
 	if !sameBank(result.PayerBankID, callerBankID) {
 		log.Printf("[cross-currency-swap] denied cross-tenant status read: swap=%s owner=%s caller=%s",
-			swapID, result.PayerBankID, callerBankID)
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error":      "swap not found",
-			"error_code": "SWAP_NOT_FOUND",
-		})
+			sanitizeLogField(swapID), result.PayerBankID, callerBankID)
+		return respondSwapNotFound(c)
 	}
 
 	resp := crossCurrencySwapStatusResponse{
@@ -298,10 +294,24 @@ func (h *CrossCurrencySwapHandler) GetSwapStatus(c *fiber.Ctx) error {
 	return c.JSON(resp)
 }
 
-// sameBank reports whether a stored owner and an authenticated caller are the same bank.
-// Case- and padding-insensitive: the two values arrive from different sources — a JWT claim
-// and a database column — and an incidental difference in casing must not read as a
-// different institution, nor a matching one as the same.
+// respondSwapNotFound is the ONLY 404 the by-id read emits, for both an absent swap and a
+// swap owned by another bank. One responder, not two identical literals: the whole point of
+// answering 404 on a cross-tenant read is that the two cases are byte-identical, and two
+// copies of the body are two chances for a later edit to add a distinguishing field to one
+// of them and quietly restore the existence oracle (finding R2-M-10).
+// TestGetSwapStatus_ForeignAndAbsentAreByteIdentical pins the property.
+func respondSwapNotFound(c *fiber.Ctx) error {
+	return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+		"error":      "swap not found",
+		"error_code": "SWAP_NOT_FOUND",
+	})
+}
+
+// sameBank reports whether two bank identifiers name the same institution — a stored owner
+// and an authenticated caller, or a position's owner and the payer a delegated call claims
+// to act for. Case- and padding-insensitive: the values arrive from different sources (a JWT
+// claim, a database column, a JSON payload), and an incidental difference in casing must not
+// read as a different institution, nor a matching one as the same.
 func sameBank(owner, caller string) bool {
 	return strings.EqualFold(strings.TrimSpace(owner), strings.TrimSpace(caller))
 }
