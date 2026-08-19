@@ -31,7 +31,7 @@ type LoginForm = z.infer<typeof schema>;
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { login, status, error, isAuthenticated } = useAuthStore();
+  const { login, status, error, isAuthenticated, initialized, checkSession } = useAuthStore();
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -39,6 +39,18 @@ export function LoginPage() {
       password: "",
     },
   });
+
+  // A live session lives in an HttpOnly cookie, never in this store or in web storage
+  // (see "No sensitive data persistence" below). So a reload — or landing on /login
+  // directly — starts with isAuthenticated=false even when the operator is still
+  // signed in, and without this probe they are asked to re-authenticate against a
+  // valid session. ProtectedRoute does exactly this for the protected tree; /login
+  // is the one route outside it, so it has to probe for itself.
+  useEffect(() => {
+    if (!initialized) {
+      void checkSession();
+    }
+  }, [initialized, checkSession]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -54,6 +66,14 @@ export function LoginPage() {
   });
 
   const institutionName = (import.meta.env.VITE_INSTITUTION_NAME ?? "Central Bank").trim() || "Central Bank";
+
+  if (!initialized) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">Checking supervisor session...</p>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-primary/10 via-background to-background">
