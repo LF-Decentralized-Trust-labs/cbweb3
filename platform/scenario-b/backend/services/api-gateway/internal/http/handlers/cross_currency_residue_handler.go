@@ -169,7 +169,7 @@ func (h *CrossCurrencyResidueHandler) HandleResidueReturn(c *fiber.Ctx) error {
 	// Ownership is checked BEFORE the replay lookup: answering "duplicate" to a request that
 	// names another bank's swap would disclose that position's id and state to a caller with no
 	// claim to it. The reordering costs nothing — both are local reads.
-	if !strings.EqualFold(strings.TrimSpace(pos.OwnerBankID), strings.TrimSpace(req.PayerBankID)) {
+	if !sameBank(pos.OwnerBankID, req.PayerBankID) {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": "bridge-in position belongs to another bank",
 			"code":  "POSITION_OWNER_MISMATCH",

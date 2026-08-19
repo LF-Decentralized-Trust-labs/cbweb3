@@ -1,6 +1,6 @@
 module github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator
 
-go 1.25.5
+go 1.26
 
 replace (
 	github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain => ../../shared/blockchain

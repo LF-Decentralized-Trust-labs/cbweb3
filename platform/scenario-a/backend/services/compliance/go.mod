@@ -1,6 +1,6 @@
 module github.com/LACNetNetworks/cbweb3-platform/backend/services/compliance
 
-go 1.25.5
+go 1.26
 
 require (
 	github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain v0.0.0

@@ -704,7 +704,7 @@ func (c SpokeConfig) ComposeEnv() []string {
 		"CA_KEY_FILE":    "/workspace/backend/config/pki/central-bank.key",
 		// Shared secret for the hub-mediated M2M endpoints + cross-currency bridge
 		// delegation (a bank delegates bridge-in lock-mint to its CB; bridge-out to CB-B).
-		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
+		"INTERNAL_RELAY_AUTH_SECRET": HubRelayAuthSecret,
 		// Cacti relay endpoint: the cross-currency swap orchestrator delegates the
 		// Step 3 bridge-out to the beneficiary CB (CB-B) through it. The relay runs
 		// in its own stack, reached from a container via host.docker.internal.
@@ -821,7 +821,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					return err
 				}
 				req.Header.Set("Content-Type", "application/json")
-				req.Header.Set("X-Relay-Auth", hubRelayAuthSecret)
+				req.Header.Set("X-Relay-Auth", HubRelayAuthSecret)
 				resp, err := http.DefaultClient.Do(req)
 				if err != nil {
 					return fmt.Errorf("register-cb: POST %s: %w", url, err)
@@ -871,7 +871,7 @@ func FoundSpokeSteps(c SpokeConfig) []Step {
 					return err
 				}
 				req.Header.Set("Content-Type", "application/json")
-				req.Header.Set("X-Relay-Auth", hubRelayAuthSecret)
+				req.Header.Set("X-Relay-Auth", HubRelayAuthSecret)
 				resp, err := http.DefaultClient.Do(req)
 				if err != nil {
 					return fmt.Errorf("register-currency: POST %s: %w", url, err)

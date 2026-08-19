@@ -191,9 +191,50 @@ type crossCurrencySwapStatusResponse struct {
 	FailureReason     string `json:"failure_reason,omitempty"`
 }
 
+// resolveCallerBank derives the bank the request acts for from the authenticated claims,
+// falling back to the gateway's own bank code when the token carries no bank (a gateway is
+// deployed per entity, so its code is that entity).
+//
+// On failure it WRITES the 401 itself and reports ok=false; the caller must return nil and
+// add nothing further to the response. The boolean carries the outcome rather than an error
+// because `c.Status(...).JSON(...)` returns nil on a successful write — reading that return
+// value as "did it fail" silently lets a rejected request continue into the handler body,
+// which is precisely the bug this signature avoids.
+//
+// Shared by the by-id read and the history listing so the two cannot drift: they diverged
+// once already, and the read was the side that ended up unscoped (finding R2-M-10).
+func (h *CrossCurrencySwapHandler) resolveCallerBank(c *fiber.Ctx) (string, bool) {
+	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	if !ok {
+		_ = c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":      "missing authenticated claims",
+			"error_code": "UNAUTHENTICATED",
+		})
+		return "", false
+	}
+	bankID := strings.TrimSpace(claims.BankID)
+	if bankID == "" {
+		bankID = h.fallbackBankCode
+	}
+	if bankID == "" {
+		_ = c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error":      "unable to determine bank from authenticated session",
+			"error_code": "UNAUTHENTICATED",
+		})
+		return "", false
+	}
+	return bankID, true
+}
+
 // GetSwapStatus returns the current status of a cross-currency swap by swap_id.
 // GET /api/v2/amm/swap/cross-currency/:id
 // Requires commercial_bank role (FR-001).
+//
+// The read is scoped to the caller's own bank. A swap id confers no authority: it travels in
+// responses, logs and support threads, so resolving one by id alone let any authenticated
+// bank read another bank's amounts, effective rate, counterparty and bridge position ids
+// (finding R2-M-10). A swap owned by someone else answers 404, not 403 — a 403 would confirm
+// the id exists, which is the disclosure this closes.
 func (h *CrossCurrencySwapHandler) GetSwapStatus(c *fiber.Ctx) error {
 	swapID := c.Params("id")
 	if swapID == "" {
@@ -203,19 +244,31 @@ func (h *CrossCurrencySwapHandler) GetSwapStatus(c *fiber.Ctx) error {
 		})
 	}
 
+	callerBankID, ok := h.resolveCallerBank(c)
+	if !ok {
+		return nil // resolveCallerBank already wrote the 401
+	}
+
 	result, err := h.orchestrator.GetStatus(c.Context(), swapID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "record not found") {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-				"error":      "swap not found",
-				"error_code": "SWAP_NOT_FOUND",
-			})
+			return respondSwapNotFound(c)
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error":      "failed to retrieve swap status",
 			"error_code": "INTERNAL_ERROR",
 			"details":    err.Error(),
 		})
+	}
+
+	// Indistinguishable from a genuinely absent swap, on purpose — same responder as the
+	// branch above, so the two answers cannot drift apart into an existence oracle. Logged
+	// so an operator can still see the attempt — silent denial would hide probing
+	// (Constitution VI). swapID is request-supplied, hence sanitized.
+	if !sameBank(result.PayerBankID, callerBankID) {
+		log.Printf("[cross-currency-swap] denied cross-tenant status read: swap=%s owner=%s caller=%s",
+			sanitizeLogField(swapID), result.PayerBankID, callerBankID)
+		return respondSwapNotFound(c)
 	}
 
 	resp := crossCurrencySwapStatusResponse{
@@ -239,6 +292,28 @@ func (h *CrossCurrencySwapHandler) GetSwapStatus(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(resp)
+}
+
+// respondSwapNotFound is the ONLY 404 the by-id read emits, for both an absent swap and a
+// swap owned by another bank. One responder, not two identical literals: the whole point of
+// answering 404 on a cross-tenant read is that the two cases are byte-identical, and two
+// copies of the body are two chances for a later edit to add a distinguishing field to one
+// of them and quietly restore the existence oracle (finding R2-M-10).
+// TestGetSwapStatus_ForeignAndAbsentAreByteIdentical pins the property.
+func respondSwapNotFound(c *fiber.Ctx) error {
+	return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+		"error":      "swap not found",
+		"error_code": "SWAP_NOT_FOUND",
+	})
+}
+
+// sameBank reports whether two bank identifiers name the same institution — a stored owner
+// and an authenticated caller, or a position's owner and the payer a delegated call claims
+// to act for. Case- and padding-insensitive: the values arrive from different sources (a JWT
+// claim, a database column, a JSON payload), and an incidental difference in casing must not
+// read as a different institution, nor a matching one as the same.
+func sameBank(owner, caller string) bool {
+	return strings.EqualFold(strings.TrimSpace(owner), strings.TrimSpace(caller))
 }
 
 // handleCrossCurrencySwapError maps service errors to HTTP responses with user-friendly messages (FR-004, T024).
@@ -458,22 +533,9 @@ func (h *CrossCurrencySwapHandler) ListSwaps(c *fiber.Ctx) error {
 		})
 	}
 
-	claims, ok := c.Locals("claims").(domain.TokenClaims)
+	payerBankID, ok := h.resolveCallerBank(c)
 	if !ok {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error":      "missing authenticated claims",
-			"error_code": "UNAUTHENTICATED",
-		})
-	}
-	payerBankID := strings.TrimSpace(claims.BankID)
-	if payerBankID == "" {
-		payerBankID = h.fallbackBankCode
-	}
-	if payerBankID == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error":      "unable to determine bank from authenticated session",
-			"error_code": "UNAUTHENTICATED",
-		})
+		return nil // resolveCallerBank already wrote the 401
 	}
 
 	from, err := parseDateQuery(c.Query("from"), false)
