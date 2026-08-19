@@ -2,6 +2,10 @@
   "name": "frontend",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
+  },
   "workspaces": [
     "packages/*",
     "apps/*"

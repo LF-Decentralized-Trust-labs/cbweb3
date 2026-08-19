@@ -1,8 +1,7 @@
 module cbweb3/paladin-scripts
 
-go 1.24.0
+go 1.26
 
-toolchain go1.24.4
 
 require (
 	github.com/ethereum/go-ethereum v1.16.8

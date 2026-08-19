@@ -58,7 +58,7 @@ Install all tools before proceeding. See the detailed guide in [`environment-set
 | Docker + Docker Compose | Docker 24+ | `docker --version` |
 | GNU Make | 3.81+ | `make --version` |
 | Go | 1.26+ | `go version` |
-| Node.js | 20+ | `node --version` |
+| Node.js | 22 LTS | `node --version` |
 | npm | 10+ | `npm --version` |
 | Foundry (`forge`, `cast`) | nightly | `forge --version` |
 | k6 | 0.50+ | `k6 version` |
@@ -930,7 +930,7 @@ make scenario-b.down-backend-mlp
 make scenario-b.up-relayer
 ```
 
-Starts the Hyperledger Cacti `LiquidityCommitWatcher` relay (TypeScript, Node.js 20) that:
+Starts the Hyperledger Cacti `LiquidityCommitWatcher` relay (TypeScript, Node.js 22) that:
 
 - Monitors `LogHTLCLocked` and `LogHTLCClaimed` events on both Spoke-A and Spoke-B via `PluginLedgerConnectorBesu`
 - Calls `PaymentOrchestratorService.SettleHTLC` gRPC on the target spoke's payment-orchestrator to propagate the secret and complete the cross-spoke bridge cycle

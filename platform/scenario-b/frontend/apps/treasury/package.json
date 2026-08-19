@@ -32,7 +32,7 @@
     "@cbweb3/config": "*",
     "@eslint/js": "^9.39.1",
     "@tailwindcss/postcss": "^4.1.12",
-    "@types/node": "^24.10.1",
+    "@types/node": "^22.10.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react-swc": "^4.2.2",
