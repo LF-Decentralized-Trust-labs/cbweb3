@@ -14,6 +14,7 @@
 import { Request, Response } from "express";
 import { SpokeRegistry } from "./spoke-registry";
 import { RelaySigner } from "./relay-auth";
+import { isRelayAuthorized } from "./relay-route-auth";
 
 export interface CrossCurrencyBridgeOutPayload {
   correlation_id: string;
@@ -71,8 +72,9 @@ export class CrossCurrencySwapRelay {
   }
 
   handleBridgeOut = async (req: Request, res: Response): Promise<void> => {
-    const provided = req.headers["x-relay-auth"];
-    if (!provided || provided !== this.relayAuthSecret) {
+    // Constant-time comparison through the single audited guard: `!==` returned on the
+    // first differing byte, which timed how much of a guess was right (finding R2-M-10).
+    if (!isRelayAuthorized(req.headers["x-relay-auth"], this.relayAuthSecret)) {
       res.status(401).json({ error: "X-Relay-Auth invalid or missing" });
       return;
     }

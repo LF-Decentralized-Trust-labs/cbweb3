@@ -174,7 +174,11 @@ func applyFoundSpoke(ctx context.Context, o Options, pd *manifest.ParticipantDep
 	// Relay is external (scenario-a strategy): its address comes from the manifest
 	// spec.relay.endpoint (an --relay flag overrides). Absent → local in-memory.
 	relayURI := firstNonEmpty(o.Relay, manifestRelayEndpoint(pd), "local")
-	reg, err := relayregistrar.New(relayURI)
+	// The relay authenticates POST /api/v1/spokes (finding R2-M-10), so the registrar has to
+	// carry the same credential the relay was started with: the env override first, then the
+	// value this toolkit injects into the relay's own compose environment.
+	relaySecret := firstNonEmpty(os.Getenv("INTERNAL_RELAY_AUTH_SECRET"), orchestrator.HubRelayAuthSecret)
+	reg, err := relayregistrar.NewWithSecret(relayURI, relaySecret)
 	if err != nil {
 		return orchestrator.Report{}, err
 	}

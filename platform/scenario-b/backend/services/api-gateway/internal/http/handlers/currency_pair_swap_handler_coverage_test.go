@@ -229,7 +229,9 @@ func (m *mockOrchestrator) GetStatus(_ context.Context, swapID string) (*service
 	if m.statusErr != nil {
 		return nil, m.statusErr
 	}
-	return &services.CrossCurrencySwapResult{SwapID: swapID, Status: domain.SwapStatusCompleted, CreatedAt: time.Now()}, nil
+	// PayerBankID matches the bank swapApp authenticates as: the by-id read is scoped to the
+	// caller's own swaps (finding R2-M-10), so an ownerless result now answers 404.
+	return &services.CrossCurrencySwapResult{SwapID: swapID, PayerBankID: "bank-a", Status: domain.SwapStatusCompleted, CreatedAt: time.Now()}, nil
 }
 
 // withClaims injects authenticated claims so the handler passes the auth gate.
