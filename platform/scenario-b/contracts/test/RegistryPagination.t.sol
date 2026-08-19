@@ -57,8 +57,7 @@ contract RegistryPaginationTest is Test {
         (ICurrencyRegistry.CurrencyEntry[] memory second,) = registry.getCurrenciesPaged(2, 2);
         assertEq(second.length, 2, "second page size honoured");
         assertTrue(
-            keccak256(bytes(second[0].symbol)) != keccak256(bytes(page[0].symbol)),
-            "offset must advance the window"
+            keccak256(bytes(second[0].symbol)) != keccak256(bytes(page[0].symbol)), "offset must advance the window"
         );
     }
 
