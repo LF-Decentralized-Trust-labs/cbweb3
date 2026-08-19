@@ -8,6 +8,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  ConfirmActionDialog,
   Input,
   Label,
 } from "@cbweb3/ui";
@@ -81,6 +82,7 @@ export function CrossCurrencyBridgePage() {
   const [amountOut, setAmountOut] = useState("");
   const [amountInInput, setAmountInInput] = useState("");
   const [beneficiaryBankId, setBeneficiaryBankId] = useState("");
+  const [confirmingSwap, setConfirmingSwap] = useState(false);
   const [nowTimestamp, setNowTimestamp] = useState(() => Date.now());
 
   // Load the CB-built pools + the currency registry + this bank's own token symbol.
@@ -220,11 +222,23 @@ export function CrossCurrencyBridgePage() {
     await fetchQuote(sourceCurrency, targetCurrency, displayToBase(parseAmountInput(amountOut), tokenDecimals), selectedPair?.pair_id);
   };
 
-  const handleExecuteSwap = async (event: FormEvent<HTMLFormElement>) => {
+  // The submit used to bridge, swap and bridge out on one click (finding R2-M-8).
+  // This is the reachable swap screen of scenario B — the AMM Trading page is only
+  // routed in the scenario A route set, so it is dropped from this build. Settlement
+  // crosses two spokes and cannot be undone, so the operator confirms first.
+  const handleExecuteSwap = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!quote || !selectedPair) {
       return;
     }
+    setConfirmingSwap(true);
+  };
+
+  const confirmExecuteSwap = async () => {
+    if (!quote || !selectedPair) {
+      return;
+    }
+    setConfirmingSwap(false);
     clearQuoteRefreshedNotice();
     await executeSwap({
       source_currency: sourceCurrency,
@@ -508,6 +522,24 @@ export function CrossCurrencyBridgePage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <ConfirmActionDialog
+        open={confirmingSwap}
+        onOpenChange={setConfirmingSwap}
+        title="Confirm cross-currency swap"
+        description="This bridges in, swaps and bridges out across two spokes. Settlement is on-chain and cannot be undone."
+        fields={[
+          { label: "Direction", value: `${sourceCurrency} → ${targetCurrency}` },
+          { label: "Pool", value: selectedPair?.pair_id ?? "-" },
+          { label: "Beneficiary bank", value: beneficiaryBankId || "-" },
+          { label: "Amount out (exact)", value: amountOut },
+          { label: "Max amount in", value: amountInInput },
+          { label: "Quote", value: quote?.quote_id ?? "-" },
+        ]}
+        confirmLabel="Confirm swap"
+        busy={step !== "idle"}
+        onConfirm={() => void confirmExecuteSwap()}
+      />
     </div>
   );
 }

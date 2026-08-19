@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Guards the confirmation step on the two live swap flows (finding R2-M-8).
+// Guards the confirmation step on every swap flow of the bank portal (R2-M-8).
 //
-// Both flows used to execute straight off the form submit: one click settled
+// All of them used to execute straight off the form submit: one click settled
 // on-chain, with no step showing the operator the amounts about to be sent.
-// This page is the reachable one — the scenario A equivalent is commented out
-// of its router, so scenario B is where the finding actually bites.
+//
+// Which page is actually reachable is not obvious and was got wrong once. The
+// route list is split by build flag in routes/index.tsx: `{path: "amm"}` belongs
+// to scenarioAChildren, so with VITE_SCENARIO=scenario-b (what the toolkit
+// passes) AMMTradingPage is NOT routed and Vite drops it from the bundle —
+// verified by grepping the built asset of a deployed portal. The reachable swap
+// screen of scenario B is CrossCurrencyBridgePage, at `{path: "bridge"}`.
+// Both are covered here so neither regresses.
 //
 // This is a source-level guard rather than a rendering test: the repository has
 // no DOM test harness (no @testing-library anywhere in either monorepo) and
@@ -18,6 +24,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync(fileURLToPath(new URL("../AMMTradingPage.tsx", import.meta.url)), "utf8");
+const bridgeSource = readFileSync(fileURLToPath(new URL("../CrossCurrencyBridgePage.tsx", import.meta.url)), "utf8");
+const routes = readFileSync(fileURLToPath(new URL("../../routes/index.tsx", import.meta.url)), "utf8");
 
 /** Extracts the body of every arrow function bound to a `handle*` const. */
 function handlerBodies(text: string): { name: string; body: string }[] {
@@ -64,5 +72,40 @@ describe("AMM swap confirmation", () => {
     expect(/const confirmSwap = async \(\) => \{/.test(source)).toBe(true);
     expect(/const confirmExecuteSwap = async \(\) => \{/.test(source)).toBe(true);
     expect((source.match(/await executeSwap\(/g) ?? []).length).toBe(2);
+  });
+});
+
+describe("cross-currency bridge confirmation (the reachable scenario B screen)", () => {
+  it("renders a confirmation dialog", () => {
+    expect((bridgeSource.match(/<ConfirmActionDialog/g) ?? []).length).toBe(1);
+  });
+
+  it("the submit handler does not execute the swap directly", () => {
+    const offenders = handlerBodies(bridgeSource)
+      .filter((handler) => /executeSwap\s*\(/.test(handler.body))
+      .map((handler) => handler.name);
+    expect(offenders).toEqual([]);
+  });
+
+  it("the submit handler opens the confirmation", () => {
+    const opening = handlerBodies(bridgeSource).filter((h) => /setConfirmingSwap\(true\)/.test(h.body));
+    expect(opening.map((h) => h.name)).toEqual(["handleExecuteSwap"]);
+  });
+
+  it("the swap is still reachable from the confirm callback", () => {
+    expect(/const confirmExecuteSwap = async \(\) => \{/.test(bridgeSource)).toBe(true);
+    expect((bridgeSource.match(/await executeSwap\(/g) ?? []).length).toBe(1);
+  });
+});
+
+describe("which swap screen the build actually ships", () => {
+  it("the bridge page is in the scenario B route set and the AMM page is not", () => {
+    // Pins the fact that made the earlier reading wrong: the `amm` route sits in
+    // the scenario A list, so a scenario-b build does not ship AMMTradingPage.
+    const bStart = routes.indexOf("const scenarioBChildren");
+    expect(bStart).toBeGreaterThan(-1);
+    const bBlock = routes.slice(bStart, routes.indexOf("];", bStart));
+    expect(bBlock).toContain("CrossCurrencyBridgePage");
+    expect(bBlock).not.toContain("AMMTradingPage");
   });
 });
