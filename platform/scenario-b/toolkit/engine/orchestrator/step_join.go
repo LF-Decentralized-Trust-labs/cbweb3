@@ -368,7 +368,7 @@ func (c JoinConfig) ComposeEnv() []string {
 		"LIQUIDITY_COMMIT_REGISTRY_ADDRESS":  b.HubContracts["liquidityCommitRegistry"],
 		// Shared secret so the bank delegates the cross-currency bridge-in lock-mint
 		// to its CB (only CBs hold CENTRAL_BANK_ROLE to mint W-tokens) and bridge-out.
-		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
+		"INTERNAL_RELAY_AUTH_SECRET": HubRelayAuthSecret,
 		// Cacti relay endpoint: the bank's cross-currency swap orchestrator delegates
 		// the Step 3 bridge-out to the beneficiary CB (CB-B) through it. Fixed relay
 		// Cacti relay REST endpoint: the relay's OWN endpoint (spec.relay.endpoint,

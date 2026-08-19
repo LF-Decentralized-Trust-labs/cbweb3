@@ -170,9 +170,16 @@ const (
 	// the W-<source> on the hub (hub-only mode). Deployed per CB (found-spoke).
 	hubPaymentOrchestratorImage = "cbweb3b/payment-orchestrator:local"
 
-	// hubRelayAuthSecret guards the hub's internal spoke self-registration
-	// endpoint (X-Relay-Auth); local-dev value, shared with the toolkit caller.
-	hubRelayAuthSecret = "cbweb3-relay-shared-secret"
+	// HubRelayAuthSecret is the X-Relay-Auth credential shared by an entity's internal
+	// endpoints and the relay's inbound routes, including the relay's own
+	// POST /api/v1/spokes, which authenticates it since finding R2-M-10. Exported because
+	// apply must hand it to the RelayRegistrar: the toolkit is that route's only caller, so
+	// the guard and the registrar have to agree on one value.
+	//
+	// Local-dev value. Deployments override it by setting INTERNAL_RELAY_AUTH_SECRET, which
+	// both the relay's compose default and the registrar read; overriding one side alone
+	// leaves spokes unable to register.
+	HubRelayAuthSecret = "cbweb3-relay-shared-secret"
 
 	// spokeFrontendImage is the per-entity (bank/CB) frontend image built for a
 	// spoke; distinct from the hub's governance frontend.
@@ -296,7 +303,7 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"COMPLIANCE_GRPC_ADDR":       e + "-hub-compliance:9093",
 		"HUB_CHAIN_ID":               itoa(int(c.ChainID)),
 		"HUB_ADMIN_PRIVATE_KEY":      devDeployerKey, // holds GOVERNANCE_ROLE on the hub registry
-		"INTERNAL_RELAY_AUTH_SECRET": hubRelayAuthSecret,
+		"INTERNAL_RELAY_AUTH_SECRET": HubRelayAuthSecret,
 		"FRONTEND_IMAGE":             cbFrontendImage("governance", c.RPCPort+8000, c.frontendVariant()),
 		"FRONTEND_PORT":              itoa(c.RPCPort + 9000),
 		// Browser CORS: the single proxy origin (path routing), else the hub governance

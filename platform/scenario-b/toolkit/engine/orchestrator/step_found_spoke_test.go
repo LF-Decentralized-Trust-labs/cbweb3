@@ -106,8 +106,8 @@ func TestRegisterCBSelfRegistersViaHub(t *testing.T) {
 	if gotPath != "/internal/v1/spokes/register" {
 		t.Fatalf("wrong path: %s", gotPath)
 	}
-	if gotAuth != hubRelayAuthSecret {
-		t.Fatalf("X-Relay-Auth = %q, want %q", gotAuth, hubRelayAuthSecret)
+	if gotAuth != HubRelayAuthSecret {
+		t.Fatalf("X-Relay-Auth = %q, want %q", gotAuth, HubRelayAuthSecret)
 	}
 	if !strings.Contains(gotBody, "ROLE_CENTRAL_BANK") || !strings.Contains(gotBody, "cb_address") {
 		t.Fatalf("payload missing fields: %s", gotBody)

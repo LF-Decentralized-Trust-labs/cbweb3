@@ -119,8 +119,13 @@ type CrossCurrencySwapRequest struct {
 
 // CrossCurrencySwapResult carries the outcome of orchestrated swap.
 type CrossCurrencySwapResult struct {
-	SwapID              string
-	CorrelationID       string
+	SwapID        string
+	CorrelationID string
+	// PayerBankID owns the swap. It is carried on the result so callers can authorize a
+	// read against the caller's own identity: GetStatus resolves a swap by id alone, and
+	// without the owner every authenticated bank could read every other bank's swap
+	// (finding R2-M-10).
+	PayerBankID         string
 	Status              domain.SwapOperationStatus
 	AmountIn            string
 	AmountOut           string
@@ -957,6 +962,7 @@ func (o *CrossCurrencySwapOrchestrator) GetStatus(ctx context.Context, swapID st
 	result := &CrossCurrencySwapResult{
 		SwapID:        op.SwapID,
 		CorrelationID: op.CorrelationID,
+		PayerBankID:   op.PayerBankID,
 		Status:        op.Status,
 		AmountIn:      op.AmountIn,
 		AmountOut:     op.AmountOut,

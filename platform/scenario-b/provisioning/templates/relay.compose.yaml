@@ -9,6 +9,13 @@ services:
     environment:
       RELAY_PORT: "${RELAY_PORT:?}"
       HUB_RPC_URL: "http://host.docker.internal:${HUB_RPC_PORT:?}"
+      # X-Relay-Auth credential for the relay's inbound routes, POST /api/v1/spokes
+      # included (finding R2-M-10). Required, not defaulted: the guard fails closed, so a
+      # relay started without it refuses every spoke registration — and the cross-currency
+      # bridge-out relay already refused to start without it. Compose failing here names
+      # the missing variable instead of leaving a relay that silently accepts nothing.
+      # The toolkit writes it to the hub env file; deployments override it there.
+      INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:?}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # The relay app listens on RELAY_PORT inside the container, so map host:port
