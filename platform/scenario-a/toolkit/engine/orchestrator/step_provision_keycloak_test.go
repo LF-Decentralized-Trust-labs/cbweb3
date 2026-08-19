@@ -18,7 +18,7 @@ func TestProvisionKeycloakStep_RendersRealmsAndEnv(t *testing.T) {
 		KCUser:       "default",
 		KCPassword:   "default",
 		HostPort:     24645,
-		Realms:       centralBankRealmPlans("central-bank-brazil", nil),
+		Realms:       centralBankRealmPlans("central-bank-brazil", nil, "local", testPortalOrigins),
 	}).(*provisionKeycloakStep)
 	cleanupVolume(t, s.importVolume())
 

@@ -155,6 +155,41 @@ tier must stay valueless.
 - No secret is echoed to stdout/stderr or structured logs (see the observability
   rules in the constitution).
 
+## Keycloak realm posture (R1-10.7)
+
+The realms the toolkit provisions used to ship three permissive defaults, identical on a
+laptop and on a routable host: `redirectUris: ["*"]`, `webOrigins: ["*"]` and
+`sslRequired: "none"`. Two rules now govern them.
+
+**Browser origins come from one source.** A realm's `redirectUris` and `webOrigins` are
+derived from the same origin list the entity's api-gateway receives as
+`CORS_ALLOW_ORIGINS` — `cbCORSOriginsFor` / `bankCORSOriginsFor` in scenario-a,
+`nocPortalOrigins` for the public `noc-portal` client in scenario-b. Keycloak and the
+gateway therefore cannot disagree about which portals may talk to them, and neither can
+drift from the ports the stack actually publishes.
+
+A wildcard here is not cosmetic. `redirectUris: ["*"]` makes the realm an open redirector
+for the authorization code, and `webOrigins: ["*"]` lets any page read a token response.
+The `noc-portal` client is the sharpest case: it is **public** and uses a direct password
+grant, so no client secret stands between an attacker's page and a usable token.
+
+`renderRealmJSON` **fails closed** — a plan that reaches it with no origins is an error,
+not a document that falls back to a wildcard. That is deliberate: the wildcard existed
+precisely because an absent value had a permissive default.
+
+**`sslRequired` follows `spec.environment`.** Only an explicit `local` gets `none`, which
+is the affordance a developer needs to reach Keycloak and the portals over plain HTTP.
+Every other value — including an empty one — gets Keycloak's own default, `external`: TLS
+demanded on any non-private address.
+
+The consequence for a deployment is worth stating plainly. A stack that serves its portals
+over **plain HTTP on a routable address** must declare `spec.environment: local`, or
+Keycloak will refuse the password grant with `HTTPS required`. That is the intended
+pressure: the alternative is to put a TLS terminator in front, which is what a non-local
+deployment should be doing anyway. Scenario-b's manifest schema currently accepts only
+`local` (`environment: { enum: [local] }`), so its behaviour is unchanged until that
+schema opens up.
+
 ## Checklist for reviewers
 
 Run the two automated gates first — they cover the live deploy path and are cheaper

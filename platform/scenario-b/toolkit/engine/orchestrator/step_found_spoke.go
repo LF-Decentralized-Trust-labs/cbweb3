@@ -408,7 +408,7 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
 		"--cclientid realm-management --rolename manage-users --rolename view-users || true) && ",
 		kc, spokeKeycloakRealm, spokeKeycloakClient)
-	appendNOCPortalClient(&b, kc, spokeKeycloakRealm)
+	appendNOCPortalClient(&b, kc, spokeKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy()))
 	// Per-role operator accounts from the manifest (spec.adminUsers). Fall back to a
 	// single default CB admin when the manifest declares none. Each user's manifest
 	// role maps to the realm roles the api-gateway checks (realmRolesForAdminRole).
@@ -423,14 +423,41 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 
 // appendNOCPortalClient appends an idempotent kcadm command creating the PUBLIC
 // noc-portal client used by the co-located NOC portal's browser password grant.
-// publicClient + directAccessGrants (password grant, no secret); webOrigins=* so
-// the browser token fetch passes Keycloak's CORS. Shared by found-spoke and
-// found-hub (same realm: cbweb3).
-func appendNOCPortalClient(b *strings.Builder, kc, realm string) {
+// publicClient + directAccessGrants (password grant, no secret). Shared by found-spoke
+// and found-hub (same realm: cbweb3).
+//
+// webOrigins is the portal's own origin(s), not "*" (finding R1-10.7). The client needs
+// SOME web origin or the browser token fetch fails Keycloak's CORS; scoping it to the
+// origin the portal is actually served from is what nocPortalOrigins computes.
+//
+// The previous value was written as `[\"*\"]`, and that never reached Keycloak. This
+// command is handed to `bash -c` as a single argv element, so bash keeps the backslashes
+// literal inside the single-quoted -s argument and kcadm answers "Cannot parse the JSON"
+// — verified against keycloak:26.0. The `|| true` below then swallowed it, so the
+// noc-portal client was NOT created at all on a toolkit-provisioned entity, and the NOC
+// portal's password grant had no client to authenticate against. So this fixes a silent
+// total failure, not a live wildcard.
+func appendNOCPortalClient(b *strings.Builder, kc, realm string, origins []string) {
 	fmt.Fprintf(b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s enabled=true "+
 		"-s publicClient=true -s standardFlowEnabled=false -s directAccessGrantsEnabled=true "+
-		"-s 'webOrigins=[\"*\"]' %[4]s || true) && ",
-		kc, realm, nocKeycloakClient, audienceMapperArg(keycloakNOCAudience))
+		"-s 'webOrigins=%[5]s' %[4]s || true) && ",
+		kc, realm, nocKeycloakClient, audienceMapperArg(keycloakNOCAudience), jsonStringArray(origins))
+}
+
+// jsonStringArray renders origins as the JSON array kcadm's -s flag expects.
+//
+// Plain double quotes, matching the protocolMappers argument on the same command — the
+// form kcadm actually parses. The backslash-escaped form this replaces does not survive
+// the single-quoted -s argument (see appendNOCPortalClient above). Quotes are stripped
+// from the inputs so a malformed origin cannot break out of that argument.
+func jsonStringArray(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.ReplaceAll(v, `"`, "")
+		v = strings.ReplaceAll(v, "'", "")
+		quoted = append(quoted, `"`+v+`"`)
+	}
+	return "[" + strings.Join(quoted, ",") + "]"
 }
 
 // appendKeycloakUsers appends idempotent kcadm commands that create each admin user

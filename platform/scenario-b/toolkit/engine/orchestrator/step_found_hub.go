@@ -245,7 +245,7 @@ func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
 	// Public noc-portal client so the hub's co-located NOC portal can password-grant
 	// against this realm (hub NOC operator users are a separate follow-up — found-hub
 	// does not yet provision operator accounts).
-	appendNOCPortalClient(&b, kc, hubKeycloakRealm)
+	appendNOCPortalClient(&b, kc, hubKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy()))
 	script := strings.TrimSuffix(b.String(), " && ")
 	_, err := c.Runner.Run(ctx, "docker", "exec", c.keycloakContainer(), "bash", "-c", script)
 	return err
