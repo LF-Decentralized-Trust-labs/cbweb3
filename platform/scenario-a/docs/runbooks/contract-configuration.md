@@ -243,16 +243,20 @@ To inspect assigned roles via kcadm:
 
 Each realm is configured by init.sh with:
 
-- **Access token lifespan:** 1 hour (default)
+- **Access token lifespan:** 5 minutes (300s, Keycloak's own default; override with
+  `KC_ACCESS_TOKEN_LIFESPAN`). The portals renew silently, so a short token costs no
+  operator session — it was 6 hours until finding R1-10.7.
 - **Protocol:** `openid-connect`
 - **Enabled grant types:** `authorization_code`, `client_credentials`
 - **Attribute mappers:** roles mapped to the JWT as the `roles` claim
 
-To change the token TTL via the Keycloak API:
+To change the token TTL via the Keycloak API (keep it short — the lifespan is the window
+in which a leaked bearer stays replayable, and `TestDeployLocalAccessTokenLifespanIsShort`
+rejects anything above 900s on the scripted path):
 
 ```bash
 /opt/keycloak/bin/kcadm.sh update realms/bank-a \
-  -s accessTokenLifespan=7200 \
+  -s accessTokenLifespan=900 \
   --server http://localhost:8081 \
   --realm master --user admin --password admin
 ```

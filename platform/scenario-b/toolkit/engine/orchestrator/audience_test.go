@@ -37,7 +37,9 @@ func TestBackendAndNOCAudiencesAreDistinct(t *testing.T) {
 // audience — so a token minted for the NOC portal is not accepted at the gateway.
 func TestNOCPortalClientStampsNOCAudience(t *testing.T) {
 	var b strings.Builder
-	appendNOCPortalClient(&b, "/opt/keycloak/bin/kcadm.sh", spokeKeycloakRealm, []string{"http://localhost:45845"})
+	if err := appendNOCPortalClient(&b, "/opt/keycloak/bin/kcadm.sh", spokeKeycloakRealm, []string{"http://localhost:45845"}); err != nil {
+		t.Fatalf("appendNOCPortalClient: %v", err)
+	}
 	s := b.String()
 	if !strings.Contains(s, "oidc-audience-mapper") || !strings.Contains(s, keycloakNOCAudience) {
 		t.Errorf("noc-portal must stamp audience %q via an oidc-audience-mapper; got: %s", keycloakNOCAudience, s)

@@ -103,8 +103,15 @@ func Validate(m *Manifest) error {
 		}
 	}
 
-	// spec.environment (optional, but constrained when present)
-	if m.Spec.Environment != "" {
+	// spec.environment (required, and constrained). It was optional, and an absent
+	// value is now load-bearing: it decides the Keycloak realms' sslRequired, where
+	// the safe default ("external", TLS demanded) makes a forgotten field surface as
+	// a login failing with "HTTPS required" — far from the cause. Requiring it turns
+	// that into a validation error naming the field, and matches scenario-b, which
+	// has always required it.
+	if m.Spec.Environment == "" {
+		errs = append(errs, errors.New("spec.environment: required field is missing"))
+	} else {
 		switch m.Spec.Environment {
 		case "local", "staging", "prod":
 		default:
