@@ -34,7 +34,7 @@ type LoginForm = z.infer<typeof schema>;
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { login, status, error, isAuthenticated, profile } = useAuthStore();
+  const { login, status, error, isAuthenticated, profile, initialized, checkSession } = useAuthStore();
 
   const form = useForm<LoginForm>({
     resolver: zodResolver(schema),
@@ -43,6 +43,17 @@ export function LoginPage() {
       clientSecret: "",
     },
   });
+
+  // A live session lives in an HttpOnly cookie, not in this store and not in web
+  // storage, so a reload — or landing on /login directly — starts with
+  // isAuthenticated=false even when the operator is still signed in. Without this
+  // probe they are asked to re-authenticate against a valid session. ProtectedRoute
+  // does the same for the protected tree; /login is the one route outside it.
+  useEffect(() => {
+    if (!initialized) {
+      void checkSession();
+    }
+  }, [initialized, checkSession]);
 
   useEffect(() => {
     if (isAuthenticated && hasGovernanceAccess(profile)) {
@@ -56,6 +67,14 @@ export function LoginPage() {
   const onSubmit = form.handleSubmit(async (values) => {
     await login(values.clientId, values.clientSecret);
   });
+
+  if (!initialized) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">Checking governance session...</p>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-primary/10 via-background to-background">
