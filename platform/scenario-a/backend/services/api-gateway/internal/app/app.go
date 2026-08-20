@@ -154,6 +154,11 @@ func New(cfg config.Config) (*App, error) {
 		// Resolve requester institution names for deposit/escrow/redeem listings
 		// (Treasury portal auditing) via the compliance participant registry.
 		ph = ph.WithParticipantResolver(complianceGRPC)
+		// Record mint and burn in the immutable audit trail. Before R2-M-8 the two
+		// operations that create and destroy money left no record of who, how much
+		// or why — which is also why the Treasury history screen, which reads the
+		// TREASURY category, had nothing to show.
+		ph = ph.WithAuditLogger(complianceGRPC)
 		// FX party roster sourced from real Pente membership (via the orchestrator),
 		// with PALADIN_IDENTITIES as an optional static override. Shared by the
 		// identities endpoint and propose-time validation, so an identity that is

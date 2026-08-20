@@ -54,3 +54,5 @@ export {
   DialogTitle,
   DialogTrigger,
 } from "./components/dialog";
+export { ConfirmActionDialog } from "./components/confirm-action-dialog";
+export type { ConfirmActionField } from "./components/confirm-action-dialog";
