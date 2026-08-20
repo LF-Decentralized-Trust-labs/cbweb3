@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,13 +51,13 @@ type JoinConfig struct {
 	// used only so this bank's noc-agent can collect the relay's logs. Empty → no relay
 	// logs in the NOC.
 	RelayContainerName string
-	NOCBackendURL   string // where this bank's noc-agent pushes (spec.noc.backendURL; default host.docker.internal:8090)
-	BesuImage       string
-	GatewayURL      string
-	FrontendHost    string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
-	ProxyEnabled    bool   // spec.proxy == enable: serve the bank portal + api behind the per-host reverse proxy
-	LauncherEnabled bool   // spec.launcher == "enable": bake VITE_LAUNCHER_URL into the bank portal
-	LauncherPort    int    // spec.launcherPort: launcher host port (0 → env/default); host = FrontendHost
+	NOCBackendURL      string // where this bank's noc-agent pushes (spec.noc.backendURL; default host.docker.internal:8090)
+	BesuImage          string
+	GatewayURL         string
+	FrontendHost       string // browser-facing host baked into VITE_API_URL + api-gateway CORS (spec.frontendHost; default localhost)
+	ProxyEnabled       bool   // spec.proxy == enable: serve the bank portal + api behind the per-host reverse proxy
+	LauncherEnabled    bool   // spec.launcher == "enable": bake VITE_LAUNCHER_URL into the bank portal
+	LauncherPort       int    // spec.launcherPort: launcher host port (0 → env/default); host = FrontendHost
 
 	// Injectable seams (defaults wired by WithDefaults).
 	WaitRPC          func(ctx context.Context) error
@@ -344,6 +345,14 @@ func (c JoinConfig) ComposeEnv() []string {
 		// uninstantiated (ENTITY_PKI_DIR is a host bind, not the named volume).
 		"CA_VOLUME":      c.caVolume(),
 		"ENTITY_PKI_DIR": c.pkiDir(),
+		// The service images are non-root by default (uid 10001, finding R2-M-12), but the
+		// two services that mount the PKI read the CA and persist issued certificates there.
+		// On a bank that path is a host bind owned by whoever ran this toolkit, at mode 0700,
+		// so no other uid can read it — those containers therefore run as the invoking user.
+		// Same reasoning as HOST_UID for the Besu containers (ADR-001 / T028); the compose
+		// default keeps a hand-run stack on the image's non-root uid.
+		"ENTITY_RUN_UID": strconv.Itoa(os.Getuid()),
+		"ENTITY_RUN_GID": strconv.Itoa(os.Getgid()),
 		// R2-H-8 service-mesh mTLS: the bank's own service CA + leaf certs (separate
 		// from the consortium CA, which the bank does not hold) live in this volume,
 		// mounted at /svc-tls. mTLS activates only when GRPC_MTLS_ENABLE is exported.
@@ -397,6 +406,12 @@ func (c JoinConfig) ComposeEnv() []string {
 		// monitoring), mounting a rendered agent.yaml from NOC_AGENT_VOLUME and
 		// joining its own ENTITY_NET_PREFIX network to probe besu by container DNS.
 		"NOC_AGENT_ENTITY": c.Entity,
+		// Supplementary group for the read-only Docker socket the agent tails logs
+		// from. The image is non-root (uid 65532) and the socket is root:docker 0660,
+		// so without this every log read is denied — silently, because the agent
+		// discards that error. Empty here → the compose default → the agent says so at
+		// startup (finding R2-M-12).
+		"NOC_DOCKER_GID":   dockerSocketGID(),
 		"NOC_AGENT_VOLUME": c.nocAgentVolume(),
 		"NOC_AGENT_IMAGE":  hubNocAgentImage,
 	}

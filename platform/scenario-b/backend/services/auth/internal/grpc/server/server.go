@@ -618,11 +618,22 @@ func (s *identityService) ChangeClientSecret(ctx context.Context, req *authv1.Ch
 	return &authv1.ChangeClientSecretResponse{}, nil
 }
 
+// auditEmitTimeout bounds the detached audit call below.
+//
+// Detaching from the request context is deliberate — the audit entry must outlive the RPC
+// that triggered it — but detached is not the same as unbounded. Without a deadline a
+// compliance service that accepts the connection and then stops answering leaks one
+// goroutine per audited operation, for the life of the process (finding R2-LOW). Writing
+// one audit row is a single insert, so ten seconds is well past a healthy write.
+const auditEmitTimeout = 10 * time.Second
+
 // emitAudit fires an audit log entry asynchronously (fire-and-forget).
 // Failures in audit logging must NOT block the main business operation.
 func (s *identityService) emitAudit(ctx context.Context, action, actorSubject, actorAddress, targetSubject, correlationID, ip, result string) {
 	go func() {
-		if err := s.compliance.CreateAuditLog(context.Background(), complianceclient.AuditEntry{
+		callCtx, cancel := context.WithTimeout(context.Background(), auditEmitTimeout)
+		defer cancel()
+		if err := s.compliance.CreateAuditLog(callCtx, complianceclient.AuditEntry{
 			ActionType:    action,
 			ActorSubject:  actorSubject,
 			ActorAddress:  actorAddress,
