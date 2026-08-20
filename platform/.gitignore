@@ -16,6 +16,13 @@ Thumbs.db
 .claude/worktrees/
 .mcp.json
 .playwright-mcp/
+# Per-developer agent state: tool-permission allowlists and MCP server
+# enablement. Committing it would publish one machine's local approvals and
+# force them on everyone else. Until now this file was only kept out by whatever
+# personal global ignore each developer happened to have — which protects
+# nothing on a new clone or in CI, so the rule belongs here.
+.claude/settings.local.json
+**/.claude/settings.local.json
 
 # --- Provisioning / samples runtime data (regenerated locally) ---
 # Toolkit-driven spoke/bank provisioning writes runtime state and data volumes
