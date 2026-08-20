@@ -111,9 +111,17 @@ func TestServerTimeouts_AreConfigured(t *testing.T) {
 	if cfg.IdleTimeout <= 0 {
 		t.Error("IdleTimeout is unset — idle keep-alive connections are never reclaimed")
 	}
-	// An hour-long read window is a bound in name only; keep the value meaningful.
+	// An hour-long read window is a bound in name only; keep the values meaningful. The
+	// write and idle sides need the same ceiling: checking only that they are non-zero
+	// would let someone "keep the timeout" while setting it to an hour.
 	if cfg.ReadTimeout > time.Minute {
 		t.Errorf("ReadTimeout = %v: too long to bound a stalled request usefully", cfg.ReadTimeout)
+	}
+	if cfg.WriteTimeout > time.Minute {
+		t.Errorf("WriteTimeout = %v: too long to bound a stalled response write usefully", cfg.WriteTimeout)
+	}
+	if cfg.IdleTimeout > 10*time.Minute {
+		t.Errorf("IdleTimeout = %v: idle keep-alive connections are held too long to be reclaimed usefully", cfg.IdleTimeout)
 	}
 }
 

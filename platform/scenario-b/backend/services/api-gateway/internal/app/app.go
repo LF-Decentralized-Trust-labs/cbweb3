@@ -1303,6 +1303,11 @@ func serverConfig() fiber.Config {
 // should pay to assert something a short timeout proves identically.
 func serverConfigWith(read, write, idle time.Duration) fiber.Config {
 	return fiber.Config{
+		// BodyLimit and ReadTimeout are coupled: in fasthttp the read deadline covers the
+		// headers AND the body, so the largest accepted body must be uploadable within
+		// ReadTimeout. 10MB in 30s needs roughly 2.7 Mbit/s. Today's payloads are small
+		// JSON and PEMs, so there is slack to spare — but move either number and check the
+		// other still fits.
 		BodyLimit:    10 * 1024 * 1024,
 		AppName:      "api-gateway",
 		ReadTimeout:  read,

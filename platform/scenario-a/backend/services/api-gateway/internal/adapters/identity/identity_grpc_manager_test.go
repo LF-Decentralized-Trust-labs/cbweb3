@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/interfaces"
 	authv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1"
@@ -23,9 +24,14 @@ type mockAuthClient struct {
 	onboardParticipantFn   func(*authv1.OnboardParticipantRequest) (*authv1.OnboardParticipantResponse, error)
 	listUsersFn            func(*authv1.ListUsersRequest) (*authv1.ListUsersResponse, error)
 	getUserFn              func(*authv1.GetUserRequest) (*authv1.GetUserResponse, error)
+
+	// kycCallCtx records the context GetKYCStatus was invoked with, so a test can assert
+	// the call carries a deadline rather than only that it returned a value.
+	kycCallCtx context.Context
 }
 
-func (m *mockAuthClient) GetKYCStatus(_ context.Context, in *authv1.GetKYCStatusRequest, _ ...grpc.CallOption) (*authv1.GetKYCStatusResponse, error) {
+func (m *mockAuthClient) GetKYCStatus(ctx context.Context, in *authv1.GetKYCStatusRequest, _ ...grpc.CallOption) (*authv1.GetKYCStatusResponse, error) {
+	m.kycCallCtx = ctx
 	if m.getKYCStatusFn != nil {
 		return m.getKYCStatusFn(in)
 	}
@@ -278,4 +284,41 @@ func TestGetUser_NotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
+// GetStatus is the KYCChecker fallback: its signature has no context, so it starts one of
+// its own. That context must carry a deadline. Without one, an auth service that accepts
+// the connection and then stops answering pins the Fiber handler that called this — and
+// pins it for good, because the server's WriteTimeout bounds writing the response, not
+// the handler's duration (finding R2-LOW). A background context here would put the
+// slowloris hole back one layer down from where TestServerTimeouts closed it.
+func TestGetStatus_CallIsBounded(t *testing.T) {
+	m := &mockAuthClient{
+		getKYCStatusFn: func(*authv1.GetKYCStatusRequest) (*authv1.GetKYCStatusResponse, error) {
+			return &authv1.GetKYCStatusResponse{Status: "APPROVED"}, nil
+		},
+	}
+	mgr := &IdentityGRPCManager{cc: m}
 
+	mgr.GetStatus("subject-1")
+
+	if m.kycCallCtx == nil {
+		t.Fatal("GetKYCStatus was never called")
+	}
+	deadline, ok := m.kycCallCtx.Deadline()
+	if !ok {
+		t.Fatal("GetStatus issued the call with no deadline: a hung auth service holds the handler indefinitely")
+	}
+	if remaining := time.Until(deadline); remaining <= 0 || remaining > kycFallbackTimeout {
+		t.Errorf("deadline is %v away, want (0, %v]", remaining, kycFallbackTimeout)
+	}
+}
+
+// The bound must stay short enough to be worth having: a handler held for minutes is the
+// problem, not the fix.
+func TestKYCFallbackTimeout_IsMeaningful(t *testing.T) {
+	if kycFallbackTimeout <= 0 {
+		t.Fatal("kycFallbackTimeout is unset — the call is unbounded")
+	}
+	if kycFallbackTimeout > 30*time.Second {
+		t.Errorf("kycFallbackTimeout = %v: too long to bound a request-path lookup", kycFallbackTimeout)
+	}
+}
