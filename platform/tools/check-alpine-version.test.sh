@@ -185,6 +185,57 @@ if run 1 "with the pin on 3.20, the 3.23 reference is the offender"; then
   esac
 fi
 
+# --- 10. a non-3.x tag is an offender too ------------------------------------
+# The gap this closes: the parent card R2-M-12 was ABOUT `alpine:latest`, and a
+# pattern matching only `alpine:3.x` reported OK with one sitting in the tree.
+pin 3.23
+rm -f "$fixture/svc/vol.go"
+printf 'FROM alpine:latest\n' > "$fixture/svc/stale.Dockerfile"
+if run 1 "alpine:latest is an offender"; then
+  case $LAST_OUT in
+    *"FAIL: 1 of "*) pass "counts the non-3.x offender" ;;
+    *) fail "expected a count of 1, got: $LAST_OUT" ;;
+  esac
+fi
+rm -f "$fixture/svc/stale.Dockerfile"
+
+# --- 11. an UNtagged reference is an offender --------------------------------
+# `FROM alpine` and `docker run … alpine` mean :latest by omission. Found live in
+# proxy/backup-certs.sh, which the version-only pattern reported as OK.
+for form in 'FROM alpine' 'docker run --rm -v x:/data alpine tar czf /b.tgz /data'; do
+  printf '%s\n' "$form" > "$fixture/svc/untagged.sh"
+  if run 1 "untagged reference is an offender: ${form%% *}…"; then
+    case $LAST_OUT in
+      *"untagged Alpine reference"*) pass "names it as untagged rather than mismatched" ;;
+      *) fail "expected the untagged message, got: $LAST_OUT" ;;
+    esac
+  fi
+done
+rm -f "$fixture/svc/untagged.sh"
+
+# --- 12. other Alpine-BASED images are not governed by this pin --------------
+# Ten images in this tree carry `-alpine` as a tag suffix. Flagging them would make
+# the gate unusable, so this asserts the boundary rather than trusting the regex.
+{
+  printf 'FROM golang:1.26-alpine AS builder\n'
+  printf 'FROM node:22-alpine\n'
+  printf 'image: postgres:17-alpine\n'
+  printf 'image: "${REDIS_IMAGE_TAG:-7-alpine}"\n'
+} > "$fixture/svc/based.Dockerfile"
+run 0 "images merely BASED on Alpine (golang:1.26-alpine, node:22-alpine, …) are left alone"
+rm -f "$fixture/svc/based.Dockerfile"
+
+# --- 13. a narrated version in a comment is not a reference ------------------
+# Several Dockerfiles explain in a comment why they left `alpine:latest`. Flagging
+# that would punish the documentation the parent card asked for.
+{
+  printf '# moved off alpine:latest because the tag is a moving target\n'
+  printf '// the old alpine:3.20 helper is gone\n'
+  printf 'FROM alpine:3.23\n'
+} > "$fixture/svc/narrated.Dockerfile"
+run 0 "a version named in a comment is prose, not a reference"
+rm -f "$fixture/svc/narrated.Dockerfile"
+
 echo ""
 if [ "$failures" -gt 0 ]; then
   echo "FAIL: $failures assertion(s) failed in $(basename "$0")."

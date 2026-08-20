@@ -41,6 +41,24 @@ set -uo pipefail
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${1:-$(cd "$SELF/.." && pwd)}"
 PIN_FILE="$ROOT/docs/TOOLCHAIN.md"
+# TAGGED matches any tagged Alpine reference, not just a 3.x one, so `alpine:latest`
+# and `alpine:edge` are offenders rather than invisible. That gap mattered: the parent
+# card R2-M-12 was ABOUT `alpine:latest`, and a pattern that only saw `alpine:3.x`
+# could not have caught the very thing it follows up.
+#
+# It deliberately needs a colon and a tag. Ten images in this tree carry `-alpine` as a
+# TAG SUFFIX — golang:1.26-alpine, node:22-alpine, postgres:17-alpine, redis:7-alpine,
+# nginx:1.27-alpine, caddy:2-alpine and the ${X:-N-alpine} env defaults. Those are other
+# images that happen to be Alpine-based and are not governed by this pin; none has a
+# colon after "alpine", so requiring one excludes them without an exception list.
+TAGGED='alpine:[A-Za-z0-9._-]+'
+
+# UNTAGGED catches `FROM alpine`, `image: alpine` and `docker run … alpine`, which mean
+# :latest by omission. Restricted to those three image positions on purpose: a bare
+# match on the word would flag every sentence that mentions Alpine.
+UNTAGGED='(FROM[[:space:]]+|image:[[:space:]]*"?|docker[[:space:]]+run[[:space:]].*[[:space:]])alpine([[:space:]"'"'"']|$)'
+
+# PATTERN is what the PIN row is read with — the pin itself is always a version.
 PATTERN='alpine:3\.[0-9]+'
 
 # The pin is read from the document of record rather than hardcoded here, so this
@@ -75,16 +93,34 @@ if [ "$find_rc" -ne 0 ]; then
   exit 2
 fi
 
+# is_comment <grep-hit> — true when the matched line is a comment in any of the
+# languages this tree uses (#, //). grep -n prefixes "LINE:", stripped first.
+is_comment() {
+  local text="${1#*:}"
+  case "${text#"${text%%[![:space:]]*}"}" in
+    '#'*|'//'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 offenders=0
 total=0
 while IFS= read -r -d '' file; do
   rel="${file#$ROOT/}"
-  # This checker and its self-test necessarily name other versions to describe the
-  # rule, so they are not subject to it.
-  case "$rel" in tools/check-alpine-version*) continue ;; esac
+  # Files whose job is to name bad versions are not subject to the rule: this checker
+  # and its self-test, and the sibling Dockerfile-hardening guards, whose fixture
+  # tables list `alpine:latest` precisely as the thing to reject.
+  case "$rel" in
+    tools/check-alpine-version*) continue ;;
+    *dockerfile_hardening_test.go) continue ;;
+  esac
   # -I skips binaries; a match count of 0 costs nothing.
   while IFS= read -r hit; do
     [ -z "$hit" ] && continue
+    # A commented-out or narrated reference is not one Docker will ever pull. Several
+    # Dockerfiles explain in a comment why they moved off `alpine:latest`; flagging that
+    # would punish the documentation R2-M-12 asked for.
+    is_comment "$hit" && continue
     total=$((total + 1))
     case "$hit" in
       *"$PINNED"*) ;;
@@ -94,7 +130,18 @@ while IFS= read -r -d '' file; do
         echo "  $rel:$hit"
         ;;
     esac
-  done < <(grep -InE "$PATTERN" "$file" 2>/dev/null)
+  done < <(grep -InE "$TAGGED" "$file" 2>/dev/null)
+
+  # An untagged reference is :latest by omission — the defect R2-M-12 fixed. It is
+  # counted and reported separately because there is no wrong version to name.
+  while IFS= read -r hit; do
+    [ -z "$hit" ] && continue
+    is_comment "$hit" && continue
+    total=$((total + 1))
+    offenders=$((offenders + 1))
+    echo "::error file=$rel::untagged Alpine reference; pin it to $PINNED"
+    echo "  $rel:$hit"
+  done < <(grep -InE "$UNTAGGED" "$file" 2>/dev/null)
 done < "$list"
 
 echo ""

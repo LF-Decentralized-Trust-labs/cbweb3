@@ -34,7 +34,7 @@ case "${1:-}" in
     mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
     ts="$(date +%Y%m%d-%H%M%S)"
     out="proxy-data-${ts}.tgz"
-    docker run --rm -v "$VOLUME":/data:ro -v "$BACKUP_DIR":/backup alpine \
+    docker run --rm -v "$VOLUME":/data:ro -v "$BACKUP_DIR":/backup alpine:3.23 \
       tar czf "/backup/${out}" -C /data .
     chmod 600 "$BACKUP_DIR/${out}"
     echo "Backup written: $BACKUP_DIR/${out}"
@@ -43,7 +43,7 @@ case "${1:-}" in
     archive="${2:-}"; [ -n "$archive" ] || usage
     [ -f "$archive" ] || { echo "no such file: $archive" >&2; exit 1; }
     volume_exists || docker volume create "$VOLUME" >/dev/null
-    docker run --rm -v "$VOLUME":/data -v "$(cd "$(dirname "$archive")" && pwd)":/backup alpine \
+    docker run --rm -v "$VOLUME":/data -v "$(cd "$(dirname "$archive")" && pwd)":/backup alpine:3.23 \
       sh -c "cd /data && tar xzf /backup/$(basename "$archive")"
     echo "Restored $archive into volume $VOLUME."
     echo "Recreate the proxy to pick it up: docker rm -f cbweb3-proxy, then re-apply."
