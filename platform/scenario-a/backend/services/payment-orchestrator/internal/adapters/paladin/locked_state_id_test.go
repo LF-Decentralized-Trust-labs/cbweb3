@@ -75,10 +75,10 @@ func TestUnsettleableLockedStateID(t *testing.T) {
 		// Do not invent a verdict for something that is not a 32-byte id: a short or
 		// malformed value is not the failure this guard knows about, and blocking a
 		// lock on a guess would be worse than letting the settle report the truth.
-		"too short to judge":  {ids: []string{"0x00"}},
-		"empty string":        {ids: []string{""}},
-		"just the prefix":     {ids: []string{"0x"}},
-		"not hex":             {ids: []string{"lock-reference-not-an-id"}},
+		"too short to judge": {ids: []string{"0x00"}},
+		"empty string":       {ids: []string{""}},
+		"just the prefix":    {ids: []string{"0x"}},
+		"not hex":            {ids: []string{"lock-reference-not-an-id"}},
 	}
 
 	for name, tc := range cases {

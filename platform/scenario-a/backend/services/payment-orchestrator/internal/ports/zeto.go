@@ -2,7 +2,10 @@
 
 package ports
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // ZetoLockResult holds the outputs from a Zeto lock operation.
 type ZetoLockResult struct {
@@ -10,6 +13,16 @@ type ZetoLockResult struct {
 	ZetoLockRef    string   `json:"zeto_lock_ref"`
 	LockedStateIDs []string `json:"locked_state_ids"`
 }
+
+// ErrUnsettleableLock marks a lock the adapter refused because the state id Paladin
+// returned cannot later be spent by transferLocked (see the Zeto adapter for the
+// reproduction). It lives here, not in the adapter, so the gRPC layer can recognise it
+// without importing an adapter.
+//
+// The distinction is worth a sentinel rather than a substring match: the request was
+// well-formed and the service is healthy, so the caller should retry — and a client
+// cannot act on advice buried in an error string.
+var ErrUnsettleableLock = errors.New("zeto lock refused: unsettleable locked state id")
 
 // ZetoOperator abstracts Zeto token operations via the Paladin sidecar HTTP API.
 // The payment-orchestrator calls this port for private token movements.

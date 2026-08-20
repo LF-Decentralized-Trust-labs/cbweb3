@@ -5,6 +5,8 @@ package paladin
 import (
 	"fmt"
 	"strings"
+
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 )
 
 // stateIDHexDigits is the width of a Zeto state id in hex digits (32 bytes).
@@ -56,10 +58,10 @@ func unsettleableLockedStateID(ids []string) (string, bool) {
 // trade behind it.
 func errUnsettleableLock(id string) error {
 	return fmt.Errorf(
-		"locked state %s begins with a zero byte, which this Paladin build cannot spend "+
+		"%w: locked state %s begins with a zero byte, which this Paladin build cannot spend "+
 			"via transferLocked (PD210134: state lookup misses because the id is not padded "+
 			"back to 32 bytes); refusing the lock instead of creating an HTLC that can never "+
 			"settle — retry the lock to obtain a different state id. The amount locked by this "+
 			"attempt cannot be released, because the rollback path uses the same call",
-		id)
+		ports.ErrUnsettleableLock, id)
 }

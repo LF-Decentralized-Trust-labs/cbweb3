@@ -454,8 +454,15 @@ func (c *Client) Lock(ctx context.Context, amount string, delegate string) (*por
 	// cross-spoke commitment is created and the relay never sees an event it would
 	// retry forever. See locked_state_id.go for the reproduction and the evidence.
 	if bad, found := unsettleableLockedStateID(lockedIDs); found {
-		c.logger.Error("refusing an unsettleable Zeto lock",
-			"txHash", txHash, "stateID", bad, "lockedStateIDs", lockedIDs)
+		// The amount is recorded on purpose, against the general rule that settlement
+		// amounts stay out of the logs. These tokens are locked on-chain and cannot be
+		// released, so this line is the only trace that a specific sum became
+		// unrecoverable — an incident record, not routine settlement traffic, and one
+		// reconciliation has no other way to explain. A durable audit row would be
+		// better; this service has no audit sink, which is its own follow-up.
+		c.logger.Error("refusing an unsettleable Zeto lock; the locked amount cannot be released",
+			"txHash", txHash, "stateID", bad, "lockedStateIDs", lockedIDs,
+			"amount", amount, "delegate", delegate)
 		return nil, errUnsettleableLock(bad)
 	}
 

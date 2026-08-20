@@ -16,14 +16,18 @@
 package paladin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/payment-orchestrator/internal/ports"
 )
 
 // stubPaladin answers the three calls Lock makes, returning the given state id from
@@ -112,5 +116,49 @@ func TestLock_AcceptsOrdinaryStateIDs(t *testing.T) {
 				t.Errorf("LockedStateIDs = %v, want [%s]", result.LockedStateIDs, id)
 			}
 		})
+	}
+}
+
+// The refusal must be recognisable by the caller, not only readable by a human. The
+// gRPC layer maps this sentinel to FailedPrecondition so a client can tell "retry, you
+// will almost certainly get a usable id" from a genuine fault.
+func TestLock_RefusalMatchesTheSentinel(t *testing.T) {
+	t.Parallel()
+	const bad = "0x00758ab137c47984ef49b1b7c3b073fb698f7366a8ad8ea98d8b915c4eb723b6"
+	srv := stubPaladin(t, bad)
+	defer srv.Close()
+
+	_, err := testClient(t, srv.URL).Lock(context.Background(), "1", "funded_operator@spoke-brl-bank-bradesco")
+	if !errors.Is(err, ports.ErrUnsettleableLock) {
+		t.Fatalf("refusal does not match ports.ErrUnsettleableLock: %v", err)
+	}
+}
+
+// The tokens of a refused lock are locked on-chain and cannot be released, so this log
+// line is the only trace that a specific sum became unrecoverable. Without the amount it
+// cannot be reconciled against anything — the record has to say how much.
+func TestLock_RefusalRecordsTheOrphanedAmount(t *testing.T) {
+	t.Parallel()
+	const bad = "0x00758ab137c47984ef49b1b7c3b073fb698f7366a8ad8ea98d8b915c4eb723b6"
+	const amount = "1000"
+	srv := stubPaladin(t, bad)
+	defer srv.Close()
+
+	var logged bytes.Buffer
+	client := NewClient(ClientConfig{
+		BaseURL:          srv.URL,
+		Identity:         "funded_operator@spoke-brl-bank-itau",
+		ZetoTokenAddress: "0x6213607c2fab2ddd572f7754a608565cd28ba7aa",
+	}, slog.New(slog.NewTextHandler(&logged, nil)))
+
+	if _, err := client.Lock(context.Background(), amount, "funded_operator@spoke-brl-bank-bradesco"); err == nil {
+		t.Fatal("Lock accepted an unsettleable state id")
+	}
+
+	out := logged.String()
+	for _, want := range []string{amount, bad, "cannot be released"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the refusal record does not mention %q; got:\n%s", want, out)
+		}
 	}
 }
