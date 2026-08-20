@@ -271,7 +271,7 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 	hashLock := hex.EncodeToString(hashLockBytes[:])
 
 	// 2. Lock tokens privately via Zeto
-	s.logger.Info("locking Zeto tokens", "amount", req.Amount, "receiver", req.Receiver)
+	s.logger.Info("locking Zeto tokens", "receiver", req.Receiver, "agreement_id", req.AgreementId)
 	lockResult, err := s.zeto.Lock(ctx, req.Amount, req.Receiver)
 	if err != nil {
 		// FailedPrecondition, not Internal: the request was well-formed and the service is
@@ -414,7 +414,7 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 	}
 
 	// Lock tokens privately via Zeto
-	s.logger.Info("locking Zeto tokens (with external hashLock)", "amount", req.Amount, "receiver", req.Receiver)
+	s.logger.Info("locking Zeto tokens (with external hashLock)", "receiver", req.Receiver, "agreement_id", req.AgreementId)
 	lockResult, err := s.zeto.Lock(ctx, req.Amount, req.Receiver)
 	if err != nil {
 		// FailedPrecondition, not Internal: the request was well-formed and the service is
@@ -1965,6 +1965,12 @@ func (s *paymentOrchestratorService) handleRelayLockEvent(proof ports.Interopera
 	s.mu.Unlock()
 
 	if s.fxRepo == nil {
+		// hashLock is intentionally logged: it is already public. The HTLC contract
+		// emits it in LogHTLCLocked (and the secret in LogHTLCClaimed), and the Cacti
+		// relay reads it from the chain to pair the two legs. Redacting it here would
+		// hide nothing and would cost the only handle for correlating a stuck relay
+		// event with its trade. What must never appear next to it is the Zeto amount —
+		// see private_amount_logging_test.go.
 		s.logger.Warn("relay lock: no FX repository — cannot determine local receiver", "hashLock", proof.HashLock)
 		return nil
 	}
