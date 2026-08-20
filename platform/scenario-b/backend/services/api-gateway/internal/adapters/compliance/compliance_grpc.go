@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/grpcx"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/deadlines"
 	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -90,6 +92,7 @@ func NewGRPCAdapter(address string, timeout time.Duration) (*GRPCAdapter, error)
 		dialCtx,
 		address,
 		credOpt,
+		grpc.WithUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Compliance)),
 	)
 	if err != nil {
 		return nil, err

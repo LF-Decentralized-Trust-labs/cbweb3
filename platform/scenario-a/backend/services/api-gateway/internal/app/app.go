@@ -24,6 +24,8 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/grpcx"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/deadlines"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"google.golang.org/grpc"
@@ -63,6 +65,7 @@ func dialGRPC(address, serverName string, timeout time.Duration) (*grpc.ClientCo
 		dialCtx,
 		address,
 		credOpt,
+		grpc.WithUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Auth)),
 	)
 }
 

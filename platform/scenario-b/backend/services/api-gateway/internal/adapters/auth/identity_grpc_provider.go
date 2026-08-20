@@ -9,6 +9,8 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	authv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/grpcx"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/deadlines"
 	"google.golang.org/grpc"
 )
 
@@ -31,6 +33,7 @@ func NewIdentityGRPCAuthProvider(address string, timeout time.Duration) (*Identi
 		dialCtx,
 		address,
 		credOpt,
+		grpc.WithUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Auth)),
 	)
 	if err != nil {
 		return nil, err
