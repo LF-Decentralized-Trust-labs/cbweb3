@@ -10,7 +10,6 @@ export type {
   BurnPayload,
   TreasuryOperation,
   SupplySnapshot,
-  BurnToMintValidation,
 } from "./treasury.types";
 export type { TvlSnapshot, SpokeHubDelta } from "./reconciliation.types";
 export type { AuditLogEntry, AuditFilter } from "./audit.types";

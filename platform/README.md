@@ -123,6 +123,32 @@ cbweb3-platform/
     └── README.md           Scenario B detailed documentation
 ```
 
+Alongside the two scenarios, the repository root carries the shared documentation and
+the development process itself:
+
+```
+cbweb3-platform/
+├── docs/                   Platform-wide docs: ADRs, toolchain floor, DPG compliance,
+│                           user manuals, scenario A/B drift inventory
+├── tools/                  Repo-wide checks (e.g. the SPDX licence-header gate)
+├── .specify/               Spec-Driven Development machinery (Spec Kit): the project
+│                           constitution (memory/constitution.md — authoritative for
+│                           architecture and process), spec/plan/task templates, the
+│                           workflow definition and its shell scripts
+├── .claude/skills/         Spec Kit commands rendered for Claude Code
+└── .cursor/skills/         The same commands rendered for Cursor
+```
+
+`.specify/` is **project source, not editor cruft**: the constitution it holds is what
+every implementation plan is checked against, and the templates are what produce the
+`specs/` directories in each scenario. The two `skills/` trees are per-agent renderings
+of the same Spec Kit commands — they differ only in front-matter and in the agent name
+passed to `update-agent-context.sh` — so which of them exist is a question of which
+coding agents the team supports, not of leftover files.
+
+Per-developer state from those tools (permission allowlists, MCP server enablement,
+worktrees) is git-ignored and must stay that way.
+
 ---
 
 ## Prerequisites

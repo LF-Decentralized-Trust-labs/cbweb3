@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -32,6 +33,14 @@ type TransferLimitChecker interface {
 // listings can surface the requesting institution's name instead of a raw address.
 type ParticipantResolver interface {
 	ListParticipants(ctx context.Context, statusFilter, search string) ([]complianceadapter.Participant, error)
+}
+
+// AuditLogWriter persists a single audit entry. Mint and burn create and destroy
+// money, and until R2-M-8 neither left any record of who did it, for how much or
+// why — which is also why the treasury history screen, reading the TREASURY
+// category, had nothing to show. Writing is best effort: see recordTokenAudit.
+type AuditLogWriter interface {
+	CreateAuditLog(ctx context.Context, entry complianceadapter.AuditEntry) error
 }
 
 // PvPLedger persists settled inter-bank PvP legs at the Central Bank and serves
@@ -64,6 +73,10 @@ type PaymentHandler struct {
 	rosterRetryMax     time.Duration
 	// pvpLedger persists/serves settled inter-bank PvP legs. Central-bank gateway only.
 	pvpLedger PvPLedger
+	// auditLogger records mint/burn in the immutable audit trail. Optional: when
+	// nil the handlers behave exactly as they did before R2-M-8, so an entity
+	// without compliance wired is unaffected.
+	auditLogger AuditLogWriter
 }
 
 // NewPaymentHandler creates a new PaymentHandler.
@@ -80,6 +93,13 @@ func NewPaymentHandler(payment *paymentadapter.GRPCAdapter, bankCode string) *Pa
 // enrich deposit/escrow/redeem listings with the requester's institution name.
 func (h *PaymentHandler) WithParticipantResolver(resolver ParticipantResolver) *PaymentHandler {
 	h.participants = resolver
+	return h
+}
+
+// WithAuditLogger attaches the compliance audit writer used to record mint and
+// burn. Without it those operations leave no trail at all.
+func (h *PaymentHandler) WithAuditLogger(writer AuditLogWriter) *PaymentHandler {
+	h.auditLogger = writer
 	return h
 }
 
@@ -510,21 +530,109 @@ func (h *PaymentHandler) MintToken(c *fiber.Ctx) error {
 	var req struct {
 		To     string `json:"to"`
 		Amount string `json:"amount"`
+		// RequestID and ReserveProofRef are the operator's stated backing for the
+		// issuance. They are recorded when present but NOT required: the livehappy
+		// E2E, the performance provisioning script and the FX tryout all mint as
+		// scenario setup, with no deposit to reference.
+		RequestID       string `json:"request_id"`
+		ReserveProofRef string `json:"reserve_proof_ref"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
+	fields := map[string]string{
+		"amount":            req.Amount,
+		"to":                req.To,
+		"request_id":        req.RequestID,
+		"reserve_proof_ref": req.ReserveProofRef,
+	}
 	result, err := h.payment.MintToken(c.Context(), req.To, req.Amount)
 	if err != nil {
+		// A rejected attempt to create money is itself worth a record: without
+		// this, the trail only ever shows what succeeded.
+		fields["error"] = err.Error()
+		h.recordTokenAudit(c, "TOKEN_MINT", "FAILURE", req.To, auditDetails(fields))
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
+	h.recordTokenAudit(c, "TOKEN_MINT", "SUCCESS", req.To, auditDetails(fields))
 	return c.Status(fiber.StatusCreated).JSON(result)
+}
+
+// auditDetails encodes the audit Details payload.
+//
+// Built with encoding/json rather than fmt.Sprintf and %q on purpose: %q is Go
+// quoting, not JSON quoting. A control byte or invalid UTF-8 in an
+// operator-typed field renders as \x7f, which JSON rejects — so the record
+// created for accountability would be the one nobody can parse. Marshalling a
+// map cannot produce that.
+func auditDetails(fields map[string]string) string {
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		// json.Marshal of map[string]string does not fail; if it ever did,
+		// losing the detail must not lose the entry.
+		log.Printf("[payment] audit details encode failed: %v", err)
+		return "{}"
+	}
+	return string(encoded)
+}
+
+// auditWriteTimeout bounds the audit write below.
+//
+// Without it "best effort" is not achievable, only claimed. c.UserContext() is
+// context.Background() plus correlation values — no deadline — and the compliance
+// gRPC adapter bounds its dial but not its calls, so a compliance service that
+// accepts the connection and then stops answering pins the mint or burn handler
+// indefinitely. Not slowly: forever. The Fiber WriteTimeout does not rescue it
+// either, because fasthttp applies that to writing the response rather than to
+// the handler's duration.
+//
+// Five seconds is far past a single audit insert and short enough that a dead
+// dependency costs one visible pause rather than a stuck money operation.
+const auditWriteTimeout = 5 * time.Second
+
+// recordTokenAudit writes one entry for a completed mint or burn.
+//
+// Best effort by design: the on-chain operation has already happened and cannot
+// be rolled back, so failing the response would report a false negative to the
+// operator. Blocking on it would also let a compliance outage stop money
+// operations that work today — which is why the call is bounded by
+// auditWriteTimeout rather than merely wrapped in an error check. The failure is
+// logged, never swallowed. Category is TREASURY because that is what the treasury
+// history screen reads.
+func (h *PaymentHandler) recordTokenAudit(c *fiber.Ctx, action, result, target, details string) {
+	if h.auditLogger == nil {
+		return
+	}
+	actor := ""
+	if claims, ok := c.Locals("claims").(domain.TokenClaims); ok {
+		actor = claims.Subject
+	}
+	ctx, cancel := context.WithTimeout(c.UserContext(), auditWriteTimeout)
+	defer cancel()
+	if err := h.auditLogger.CreateAuditLog(ctx, complianceadapter.AuditEntry{
+		ActorSubject:  actor,
+		ActorAddress:  c.IP(),
+		IPAddress:     c.IP(),
+		ActionType:    action,
+		TargetSubject: target,
+		Result:        result,
+		Category:      "TREASURY",
+		Severity:      "HIGH",
+		Details:       details,
+	}); err != nil {
+		log.Printf("[payment] %s audit log write failed (non-fatal): %v", action, err)
+	}
 }
 
 func (h *PaymentHandler) BurnToken(c *fiber.Ctx) error {
 	var req struct {
 		From   string `json:"from"`
 		Amount string `json:"amount"`
+		// Reason is the operator's justification for destroying money. The screen
+		// has always demanded it, but it used to be dropped in the browser, so the
+		// stated reason existed nowhere on the server. It is required here so it
+		// cannot be lost again.
+		Reason string `json:"reason"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
@@ -532,10 +640,22 @@ func (h *PaymentHandler) BurnToken(c *fiber.Ctx) error {
 	if req.From == "" || req.Amount == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "from and amount are required"})
 	}
+	if strings.TrimSpace(req.Reason) == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "reason is required"})
+	}
+	fields := map[string]string{
+		"amount": req.Amount,
+		"from":   req.From,
+		"reason": strings.TrimSpace(req.Reason),
+	}
 	result, err := h.payment.BurnToken(c.Context(), req.From, req.Amount)
 	if err != nil {
+		// A failed attempt to destroy money is a recordable event too.
+		fields["error"] = err.Error()
+		h.recordTokenAudit(c, "TOKEN_BURN", "FAILURE", req.From, auditDetails(fields))
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
+	h.recordTokenAudit(c, "TOKEN_BURN", "SUCCESS", req.From, auditDetails(fields))
 	return c.Status(fiber.StatusCreated).JSON(result)
 }
 

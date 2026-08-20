@@ -4009,6 +4009,19 @@ components:
           type: string
           description: Amount to mint (big integer as string)
           example: "10000000"
+        request_id:
+          type: string
+          description: >
+            Approved funding request (deposit) this issuance is backed by.
+            Recorded in the audit trail when supplied. Optional: scenario setup
+            tooling mints with no deposit to reference.
+          example: "dep-77"
+        reserve_proof_ref:
+          type: string
+          description: >
+            Operator's reference to the reserve proof backing this issuance.
+            Recorded in the audit trail when supplied.
+          example: "proof-2026-08-19"
 
     MintTokenResponse:
       type: object
@@ -4020,16 +4033,25 @@ components:
 
     BurnTokenRequest:
       type: object
-      required: [from, amount]
+      required: [from, amount, reason]
       properties:
         from:
           type: string
-          description: Paladin identity whose tokens will be burned
+          description: >
+            Informational. The Zeto withdraw is signed by the gateway's own
+            configured Paladin identity, so this value does NOT select the
+            account that is debited; it is recorded in the audit trail only.
           example: "funded_operator@spoke-a-cb"
         amount:
           type: string
           description: Amount to burn (big integer as string)
           example: "10000000"
+        reason:
+          type: string
+          description: >
+            Operator's justification for destroying the tokens. Required, and
+            recorded in the audit trail under category TREASURY.
+          example: "quarterly redemption for bank-a"
 
     BurnTokenResponse:
       type: object

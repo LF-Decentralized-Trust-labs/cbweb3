@@ -37,6 +37,13 @@ services:
       dockerfile: services/compliance/Dockerfile
     image: cbweb3/compliance:${BACKEND_IMAGE_TAG:-local}
     container_name: ${ENTITY_PREFIX:?ENTITY_PREFIX is required}-compliance
+    # Runs as the host user, not the image default (uid 10001), because this service reads
+    # and writes the PKI material on a host-owned bind mount — the toolkit creates the
+    # pki directory owned by the invoking user, so any other uid can neither read the CA
+    # nor persist an issued certificate. Same reasoning and same pattern as the Besu
+    # containers (ADR-001 / T028). Falls back to the image uid when the variables are
+    # absent, so a hand-run compose still gets a non-root process.
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
     env_file:
       - path: ${ENTITY_ENV_FILE:?ENTITY_ENV_FILE is required}
         required: true
@@ -78,6 +85,13 @@ services:
       dockerfile: services/payment-orchestrator/Dockerfile
     image: cbweb3/payment-orchestrator:${BACKEND_IMAGE_TAG:-local}
     container_name: ${ENTITY_PREFIX}-payment-orchestrator
+    # Runs as the host user, not the image default (uid 10001), because this service reads
+    # and writes the PKI material on a host-owned bind mount — the toolkit creates the
+    # pki directory owned by the invoking user, so any other uid can neither read the CA
+    # nor persist an issued certificate. Same reasoning and same pattern as the Besu
+    # containers (ADR-001 / T028). Falls back to the image uid when the variables are
+    # absent, so a hand-run compose still gets a non-root process.
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
     env_file:
       - path: ${ENTITY_ENV_FILE}
         required: true
@@ -115,6 +129,13 @@ services:
       dockerfile: services/api-gateway/Dockerfile
     image: cbweb3/api-gateway:${BACKEND_IMAGE_TAG:-local}
     container_name: ${ENTITY_PREFIX}-api-gateway
+    # Runs as the host user, not the image default (uid 10001), because this service reads
+    # and writes the PKI material on a host-owned bind mount — the toolkit creates the
+    # pki directory owned by the invoking user, so any other uid can neither read the CA
+    # nor persist an issued certificate. Same reasoning and same pattern as the Besu
+    # containers (ADR-001 / T028). Falls back to the image uid when the variables are
+    # absent, so a hand-run compose still gets a non-root process.
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
     env_file:
       - path: ${ENTITY_ENV_FILE}
         required: true

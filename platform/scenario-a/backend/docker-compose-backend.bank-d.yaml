@@ -6,6 +6,12 @@ services:
     image: cbweb3/compliance:local
     pull_policy: build
     container_name: "backend-compliance-bank-d"
+    # Runs as the host user rather than the image default (uid 10001): this service mounts
+    # ./config/pki from the repository, owned by whoever checked it out, so another uid can
+    # read it (0775) but cannot persist an issued certificate. The make targets export these;
+    # a hand-run `docker compose` falls back to the image uid, which is still not root
+    # (finding R2-M-12).
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
     env_file:
       - path: ./config/.env.infra.bank-d
         required: true
@@ -89,6 +95,12 @@ services:
     image: cbweb3/api-gateway:local
     pull_policy: build
     container_name: "backend-api-gateway-bank-d"
+    # Runs as the host user rather than the image default (uid 10001): this service mounts
+    # ./config/pki from the repository, owned by whoever checked it out, so another uid can
+    # read it (0775) but cannot persist an issued certificate. The make targets export these;
+    # a hand-run `docker compose` falls back to the image uid, which is still not root
+    # (finding R2-M-12).
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
     env_file:
       - path: ./config/.env.infra.bank-d
         required: true

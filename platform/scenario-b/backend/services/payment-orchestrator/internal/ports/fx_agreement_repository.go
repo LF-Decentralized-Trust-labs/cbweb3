@@ -14,7 +14,25 @@ type FXAgreementFilter struct {
 	Counterparty string
 	// State filters by exact FXState value. Empty means all states.
 	State domain.FXState
+	// Limit caps the rows returned. Zero, negative, or above MaxFXAgreementPageSize is
+	// clamped to that maximum: the query used to have no bound at all, and an optional
+	// filter meant one request could read the whole table (finding R2-M-14).
+	//
+	// Set it explicitly at the call site. Relying on the repository's clamp works, but it
+	// makes the bound invisible to anyone reading the caller, and a truncated list that
+	// nobody knows is truncated is how rows go missing without an error.
+	Limit int
 }
+
+// MaxFXAgreementPageSize is the largest page ListAgreements will return, whatever the filter
+// asks for. It lives here rather than in the repository so a caller can name the bound it is
+// accepting without importing the storage layer.
+//
+// There is no Offset yet, so this is a cap and not pagination: a node holding more agreements
+// than this returns only the newest page, and the gRPC response carries no total to say so.
+// Surfacing that needs a page-size and total on ListFXAgreementsRequest/Response, which is a
+// proto change and a separate piece of work.
+const MaxFXAgreementPageSize = 200
 
 // FXAgreementRepository provides durable storage for FX agreements and audit events.
 // Implementations must guarantee:
