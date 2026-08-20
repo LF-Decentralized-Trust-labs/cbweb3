@@ -233,7 +233,6 @@ func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "logged out successfully"})
 }
 
-// containsRole checks if a role is in the claims roles list.
 // WalletBind handles PKI login step 2 (POST /api/v1/auth/wallet/bind).
 // The client submits the DER-encoded ECDSA signature of their nonce (hex) plus
 // their X.509 certificate PEM issued by the Central Bank CA.
@@ -350,13 +349,4 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 		resp["privacyGroup"] = claims.PrivacyGroup
 	}
 	return c.Status(fiber.StatusOK).JSON(resp)
-}
-
-func containsRole(roles []string, role string) bool {
-	for _, r := range roles {
-		if r == role {
-			return true
-		}
-	}
-	return false
 }
