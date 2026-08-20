@@ -29,7 +29,13 @@ deviation must be recorded in [Recorded deviations](#recorded-deviations) with a
 | **bash** | 5+ | The deployment and check scripts. Run `tools/check-license-headers.sh` with **bash**, never zsh |
 
 Pinned container images are not developer prerequisites — they are pulled automatically:
-`hyperledger/besu:25.8.0`, Paladin Core (project-pinned), Keycloak, Postgres, Redis.
+`hyperledger/besu:25.8.0`, Paladin Core (`docker.io/lfdecentralizedtrust/paladin:v0.15.0-rc.1`),
+Keycloak, Postgres, Redis.
+
+> **The Paladin pin is known to be behind and must be upgraded.** `v0.15.0-rc.1` carries a
+> Zeto `transferLocked` defect that permanently strands a private lock in ~1 of every 256
+> attempts; it is fixed upstream from `v1.0.0-rc.8`. Read
+> [`docs/paladin-upgrade.md`](paladin-upgrade.md) before changing, or relying on, this pin.
 
 ---
 
@@ -50,6 +56,7 @@ the mechanism that actually fails the build when the floor is violated.
 | Node 22 | CI: `actions/setup-node` with `node-version: "22"` | |
 | Besu 25.8.0 | `BESU_IMAGE` default in the compose templates | Pinned; not a developer prerequisite |
 | Alpine 3.23 | `alpine:3.23` everywhere: the shipped runtime `Dockerfile` stages, the toolkit helper-image constants (`dockervolume.HelperImage` in Scenario A, `volHelperImage` in Scenario B) and the helper `docker run`/compose services | Gated by `tools/check-alpine-version.sh`, which reads this row as the pin. Supported until 2027-11-01 |
+| Paladin v0.15.0-rc.1 | Nothing — the tag is hardcoded in six files across Scenario A | Not enforced, and Scenario B's provisioning templates still default to a floating `latest` on a different image repository. See [`docs/paladin-upgrade.md`](paladin-upgrade.md) |
 
 Verify the whole matrix is still self-consistent:
 
@@ -168,3 +175,4 @@ should treat it as a change request.
 - [`scenario-a/docs/runbooks/environment-setup.md`](../scenario-a/docs/runbooks/environment-setup.md) — Scenario A port reference
 - [`scenario-b/docs/runbooks/environment-setup.md`](../scenario-b/docs/runbooks/environment-setup.md) — Scenario B port reference
 - [`docs/DPG-COMPLIANCE.md`](DPG-COMPLIANCE.md) — licence-header obligation enforced in CI
+- [`docs/paladin-upgrade.md`](paladin-upgrade.md) — the pinned Paladin version, the defect it carries and the upgrade it requires
