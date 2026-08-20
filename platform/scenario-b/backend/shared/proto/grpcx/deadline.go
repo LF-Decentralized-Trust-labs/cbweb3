@@ -30,6 +30,12 @@ import (
 // not exist yet. A per-method edit bounds today's call sites and silently misses
 // the next one added, which is the same class of gap this closes.
 //
+// Unary only, on purpose. No adapter in this gateway opens a streaming RPC today, and
+// a default deadline would be the wrong shape for one if it did: a stream's lifetime is
+// legitimately open-ended, so bounding it by the clock would kill long-lived
+// subscriptions rather than protect anything. A streaming call that needs a bound
+// should carry its own, chosen for that call.
+//
 // It is a BACKSTOP, not a policy override: a caller that already set a deadline
 // keeps it, whether tighter or looser than d. A caller that bounded itself has
 // made a considered choice, and a "safety" net that overrode it would be a bug

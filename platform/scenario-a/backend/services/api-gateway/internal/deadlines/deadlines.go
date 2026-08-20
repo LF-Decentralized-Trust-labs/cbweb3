@@ -58,12 +58,19 @@ const (
 	// slower. 120s leaves room for that without leaving the call unbounded.
 	Compliance = 120 * time.Second
 
-	// Payment carries the cross-currency swap path. This is the one value that must
-	// not be derived from the read-path measurement: the swap write path could not be
-	// exercised here (the payments routes require the internal relay signature), so
-	// the bound comes from what the repository already documents about it — the
-	// bridge relay's own HTTP client allows 150s and the tryout documents a swap
-	// taking up to 180s. 240s sits above both. A 30s default, which is what a
-	// blanket choice would have produced, would cut a legitimate swap.
+	// Payment in THIS scenario carries the HTLC and Zeto path — LockHTLC, SettleHTLC,
+	// RefundHTLC, MintToken, BurnToken, balances. It does NOT carry a cross-currency
+	// swap: Scenario A has no bridge relay, so the 150s HTTP client and the 180s swap
+	// that justify this number in Scenario B are not evidence about this tree, and are
+	// deliberately not cited as such.
+	//
+	// What is known here: a Zeto lock runs on the order of tens of seconds, and the
+	// write path was NOT measured (its routes sit behind the internal relay signature,
+	// and no signature was forged to get around that). So this value is not derived —
+	// it is deliberately conservative, and deliberately identical to Scenario B's.
+	// Picking a different number for this tree without measuring its own tail would be
+	// inventing one, which is the mistake this whole exercise exists to avoid; and an
+	// unrecorded divergence between the two trees is worse than a shared loose bound.
+	// Measuring this tail, and only then tightening it per scenario, is a follow-up.
 	Payment = 240 * time.Second
 )

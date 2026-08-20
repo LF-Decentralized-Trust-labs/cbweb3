@@ -16,6 +16,11 @@ import (
 // tests in shared/proto/grpcx, and no unit test can observe whether a given
 // grpc.DialContext call was given it.
 //
+// The assertion is on WithChainUnaryInterceptor, not WithUnaryInterceptor, and that
+// is load-bearing: WithUnaryInterceptor ASSIGNS (o.unaryInt = f), so a second one
+// added at the same dial silently replaces the first, while the chain variant appends.
+// A backstop that a later, unrelated interceptor can quietly drop is not a backstop.
+//
 // It exists because the defect it guards was itself an omission of exactly this
 // shape. The adapters already bounded the DIAL — `context.WithTimeout` around
 // grpc.DialContext — which reads, at a glance, like the calls are bounded too. They
@@ -52,7 +57,7 @@ func TestEveryDialSiteAppliesTheDeadlineBackstop(t *testing.T) {
 			t.Errorf("%s: no grpc.DialContext found; drop it from this list or restore the dial", s.file)
 			continue
 		}
-		want := "grpc.WithUnaryInterceptor(grpcx.WithDefaultDeadline(" + s.value + "))"
+		want := "grpc.WithChainUnaryInterceptor(grpcx.WithDefaultDeadline(" + s.value + "))"
 		if !strings.Contains(body, want) {
 			t.Errorf("%s (%s): dial does not apply the backstop.\n  want to find: %s",
 				s.file, s.note, want)

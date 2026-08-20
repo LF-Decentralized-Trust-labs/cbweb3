@@ -38,7 +38,7 @@ func NewIdentityGRPCManager(address string, timeout time.Duration) (*IdentityGRP
 		dialCtx,
 		address,
 		credOpt,
-		grpc.WithUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Auth)),
+		grpc.WithChainUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Auth)),
 	)
 	if err != nil {
 		return nil, err

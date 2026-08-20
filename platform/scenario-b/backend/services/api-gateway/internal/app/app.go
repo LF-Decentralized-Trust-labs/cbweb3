@@ -161,7 +161,7 @@ func dialGRPC(address, serverName string, timeout time.Duration) (*grpc.ClientCo
 		dialCtx,
 		address,
 		credOpt,
-		grpc.WithUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Auth)),
+		grpc.WithChainUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Auth)),
 	)
 }
 

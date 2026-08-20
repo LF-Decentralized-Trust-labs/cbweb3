@@ -34,7 +34,7 @@ func NewGRPCAdapter(address string, timeout time.Duration) (*GRPCAdapter, error)
 		dialCtx,
 		address,
 		credOpt,
-		grpc.WithUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Payment)),
+		grpc.WithChainUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Payment)),
 	)
 	if err != nil {
 		return nil, err

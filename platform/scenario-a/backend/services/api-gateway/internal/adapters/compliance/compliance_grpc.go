@@ -96,7 +96,7 @@ func NewGRPCAdapter(address string, timeout time.Duration) (*GRPCAdapter, error)
 		dialCtx,
 		address,
 		credOpt,
-		grpc.WithUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Compliance)),
+		grpc.WithChainUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Compliance)),
 	)
 	if err != nil {
 		return nil, err
