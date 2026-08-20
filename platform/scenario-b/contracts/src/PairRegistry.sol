@@ -145,9 +145,6 @@ contract PairRegistry {
         emit PairRegistered(pairId, entry.ammAddress, entry.tokenA, entry.tokenB);
     }
 
-    /// @notice Returns all pairs that are currently in ACTIVE status.
-    /// @dev Used by the Go PairRouter at startup to initialise its routing cache (D10).
-    ///      Pairs in PROPOSED status are excluded.
     /// @notice Largest page a single paged read may return.
     /// @dev getAllActivePairs() returns every active pair. It is `external view`, so nothing pays
     ///      gas for it on-chain — the cost is response size and the RPC round trip, and it grows
@@ -172,6 +169,14 @@ contract PairRegistry {
     /// @param limit Page size. Zero means DEFAULT_PAGE_SIZE; above MAX_PAGE_SIZE is clamped to it.
     /// @return page The window, in registration order.
     /// @return total Number of ACTIVE pairs, so a caller knows whether more remain.
+    /// @dev COST. This bounds the RESPONSE, not the work. Both passes scan the whole _pairIds
+    ///      array whatever the window, because the ACTIVE entries are not indexed separately —
+    ///      so one page is O(n), and walking the whole set in pages of `limit` is O(n^2/limit),
+    ///      which is more total node work than a single getAllActivePairs() at O(n). That is the
+    ///      right trade while the response is what fails first (an oversized eth_call fails worse
+    ///      than several small ones) and while n is small. If the corridor count ever makes the
+    ///      scan itself the problem, the fix is a compacted index of ACTIVE pairIds maintained on
+    ///      write, which would let a page seek directly instead of scanning.
     function getActivePairsPaged(uint256 offset, uint256 limit)
         external
         view
@@ -211,6 +216,11 @@ contract PairRegistry {
         }
     }
 
+    /// @notice Returns all pairs that are currently in ACTIVE status.
+    /// @dev Used by the Go PairRouter at startup to initialise its routing cache (D10).
+    ///      Pairs in PROPOSED status are excluded.
+    /// @dev Superseded for platform use by getActivePairsPaged; kept because truncating a
+    ///      function named getAll would lie to its callers (finding R2-M-14).
     function getAllActivePairs() external view returns (PairEntry[] memory) {
         uint256 count;
         for (uint256 i; i < _pairIds.length; ++i) {

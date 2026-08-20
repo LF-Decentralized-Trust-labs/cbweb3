@@ -50,3 +50,23 @@ func TestAuditPageNumber_FloorsAtOne(t *testing.T) {
 		t.Errorf("page=7 produced %d, want 7", got)
 	}
 }
+
+// `limit=0` must mean "the default page", never "the largest page". The supervisor route used to
+// map anything below 1 to maxAuditLimit, so asking for nothing returned the most rows available —
+// the opposite of a bound, and the opposite of what the governance route did with the same input.
+// Both routes now share this helper, so this test pins the behaviour for both.
+func TestAuditPageSize_ZeroMeansTheDefaultNotTheMaximum(t *testing.T) {
+	for _, in := range []string{"", "0", "-5", "abc"} {
+		if got := auditPageSize(in); got != defaultAuditLimit {
+			t.Errorf("limit=%q produced %d, want the default %d (and specifically not the maximum %d)",
+				in, got, defaultAuditLimit, maxAuditLimit)
+		}
+	}
+}
+
+// The default has to sit inside the bound, or the two constants contradict each other.
+func TestAuditLimits_DefaultIsWithinTheMaximum(t *testing.T) {
+	if defaultAuditLimit < 1 || defaultAuditLimit > maxAuditLimit {
+		t.Errorf("defaultAuditLimit = %d, outside 1..%d", defaultAuditLimit, maxAuditLimit)
+	}
+}

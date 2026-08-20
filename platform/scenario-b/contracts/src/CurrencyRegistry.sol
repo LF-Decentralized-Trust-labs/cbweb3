@@ -133,6 +133,14 @@ contract CurrencyRegistry is ICurrencyRegistry {
     ///        clamped to it, so the bound cannot be defeated by asking for more.
     /// @return page The window, in registration order.
     /// @return total The number of active entries, so a caller knows whether more remain.
+    /// @dev COST. This bounds the RESPONSE, not the work. Both passes scan the whole _symbols
+    ///      array whatever the window, because removeCurrency tombstones in place rather than
+    ///      compacting — so one page is O(n), and walking the whole set in pages of `limit` is
+    ///      O(n^2/limit), which is more total node work than a single getAllCurrencies() at O(n).
+    ///      That is the right trade while the response is what fails first (an oversized eth_call
+    ///      fails worse than several small ones) and while n is small. If the registry ever grows
+    ///      enough for the scan itself to be the problem, the fix is a compacted index of active
+    ///      symbols maintained on write, which would let a page seek directly instead of scanning.
     function getCurrenciesPaged(uint256 offset, uint256 limit)
         external
         view

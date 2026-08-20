@@ -83,12 +83,82 @@ contract RegistryPaginationTest is Test {
     }
 
     /// Paging must cover the set exactly once — no gaps, no repeats.
-    function test_getCurrenciesPaged_walksTheWholeSetExactlyOnce() public view {
-        uint256 seen;
-        for (uint256 off; off < SEEDED; off += 2) {
-            (ICurrencyRegistry.CurrencyEntry[] memory page,) = registry.getCurrenciesPaged(off, 2);
-            seen += page.length;
+    /// @dev By identity, not by arithmetic. Summing page lengths cannot tell a repeated entry from
+    ///      a fresh one, so an implementation that returned the same window for every offset would
+    ///      satisfy a count-only check.
+    function test_getCurrenciesPaged_walksTheWholeSetExactlyOnce() public {
+        _assertPagedWalkMatches(_seededSymbols(), 2);
+    }
+
+    /// The offset counts ACTIVE entries, not array slots, and removeCurrency tombstones in place
+    /// rather than compacting `_symbols`. Until a hole exists the two indices are identical, so
+    /// every other test in this file passes against an implementation that offsets by raw array
+    /// position. This is the test that separates them.
+    function test_getCurrenciesPaged_walksCorrectlyAcrossATombstone() public {
+        string memory removed = "tCeBM_1";
+        vm.prank(cb);
+        registry.removeCurrency(removed);
+
+        assertEq(registry.currencyCount(), SEEDED - 1, "the removal must drop the active count");
+
+        string[] memory expected = new string[](SEEDED - 1);
+        uint256 n;
+        for (uint256 i; i < SEEDED; ++i) {
+            string memory sym = string.concat("tCeBM_", vm.toString(i));
+            if (keccak256(bytes(sym)) == keccak256(bytes(removed))) continue;
+            expected[n++] = sym;
         }
-        assertEq(seen, SEEDED, "walking in pages of 2 must visit every entry once");
+        _assertPagedWalkMatches(expected, 2);
+    }
+
+    /// A tombstoned entry must not surface in any page.
+    function test_getCurrenciesPaged_skipsTombstonedEntries() public {
+        vm.prank(cb);
+        registry.removeCurrency("tCeBM_0");
+
+        (ICurrencyRegistry.CurrencyEntry[] memory page, uint256 total) =
+            registry.getCurrenciesPaged(0, registry.MAX_PAGE_SIZE());
+        assertEq(total, SEEDED - 1, "total must exclude the tombstone");
+        for (uint256 i; i < page.length; ++i) {
+            assertTrue(
+                keccak256(bytes(page[i].symbol)) != keccak256(bytes("tCeBM_0")), "a removed entry must not be paged"
+            );
+        }
+    }
+
+    // ─────────────────────────────── helpers ───────────────────────────────
+
+    function _seededSymbols() internal view returns (string[] memory out) {
+        out = new string[](SEEDED);
+        for (uint256 i; i < SEEDED; ++i) {
+            out[i] = string.concat("tCeBM_", vm.toString(i));
+        }
+    }
+
+    /// Walks the registry in pages of `pageSize` and asserts the pages together hold exactly
+    /// `expected`: every symbol present, each exactly once, and nothing extra.
+    function _assertPagedWalkMatches(string[] memory expected, uint256 pageSize) internal view {
+        uint256 total = registry.currencyCount();
+        assertEq(total, expected.length, "currencyCount must match the expected active set");
+
+        // Oversized on purpose: an implementation that over-returns must overflow the expected
+        // count and be caught below, not silently write past the end.
+        string[] memory seen = new string[](total + pageSize + 1);
+        uint256 n;
+        for (uint256 off; off < total; off += pageSize) {
+            (ICurrencyRegistry.CurrencyEntry[] memory page,) = registry.getCurrenciesPaged(off, pageSize);
+            for (uint256 j; j < page.length && n < seen.length; ++j) {
+                seen[n++] = page[j].symbol;
+            }
+        }
+        assertEq(n, total, "paging must yield exactly the active count: no gaps, no extras");
+
+        for (uint256 i; i < expected.length; ++i) {
+            uint256 hits;
+            for (uint256 j; j < n; ++j) {
+                if (keccak256(bytes(seen[j])) == keccak256(bytes(expected[i]))) ++hits;
+            }
+            assertEq(hits, 1, string.concat("must appear exactly once across the pages: ", expected[i]));
+        }
     }
 }
