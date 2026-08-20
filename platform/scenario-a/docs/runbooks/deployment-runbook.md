@@ -343,6 +343,24 @@ Scenario B's contracts live in [`scenario-b/contracts/src/`](../../../scenario-b
 
 ## Troubleshooting
 
+> **Which deployment path are you on?** Every command in this section hardcodes a container name or
+> a port from the **compose path** (`make deploy.up-*`, containers `cbweb3-keycloak`,
+> `cbweb3-api-gateway-bank-a`, …). The toolkit path — `cd scenario-a/samples && ./deploy-all.sh` —
+> derives its names per entity instead (`ENTITY_PREFIX` / `ENTITY_INFRA_PREFIX` in
+> `provisioning/templates/*/`), so `docker logs` with the names below answers *No such container*.
+> Until this section carries the toolkit table, list what is actually running:
+>
+> ```bash
+> docker ps --format '{{.Names}}'
+> ```
+>
+> Per-entity step state is in `<dataDir>/.provisioning-state.yaml`; `apply` prints a per-step report,
+> which is the right place to start before reading container logs. Scenario B's runbook has the
+> equivalent table already filled in — see
+> [`scenario-b/docs/runbooks/deployment-runbook.md` § First: which deployment path are you on?](../../../scenario-b/docs/runbooks/deployment-runbook.md#first-which-deployment-path-are-you-on)
+> for the shape it should take here.
+
+
 ### Keycloak does not initialize
 
 ```bash
