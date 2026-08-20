@@ -30,7 +30,7 @@ services:
       PARTICIPANT_REGISTRY_ADDRESS: "${SPOKE_IDENTITY_REGISTRY_ADDRESS:-}"
       CURRENCY_REGISTRY_ADDRESS: "${CURRENCY_REGISTRY_CONTRACT_ADDRESS:-}"
       CB_PRIVATE_KEY: "${CB_PRIVATE_KEY:?}"
-      POSTGRES_DSN: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
+      POSTGRES_DSN: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:?}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
       BANK_CODE: "${ENTITY}"
       # CA (scenario-a standard): the CB seeds central-bank.crt/.key into cb_tls;
       # compliance signs participant CSRs with it. Empty on a bank → dev mode
@@ -79,6 +79,7 @@ services:
       # keep the default in sync with orchestrator.keycloakBackendAudience.
       KEYCLOAK_AUDIENCE: "${KEYCLOAK_AUDIENCE:-cbweb3-backend}"
       REDIS_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-redis:6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?}"
       BLOCKCHAIN_CLIENT: "besu"
       BESU_RPC_URL: "http://host.docker.internal:${ENTITY_RPC_PORT:?}"
       BESU_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
@@ -141,6 +142,7 @@ services:
       # (entity-infra), the same one the auth service keeps its login nonces in; no new service.
       # Unset it to fall back to per-process memory — the gateway then says so at boot.
       REDIS_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-redis:6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?}"
       COOKIE_SECURE: "false"
       AUTH_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-auth:9091"
       COMPLIANCE_GRPC_ADDR: "${CONTAINER_PREFIX}-${ENTITY}-compliance:9093"
@@ -200,7 +202,7 @@ services:
       # Hub-wide LCR → enables SovereignLiquidityService (sovereign-add +
       # cross-currency bridge-in/out endpoints).
       LIQUIDITY_COMMIT_REGISTRY_ADDRESS: "${LIQUIDITY_COMMIT_REGISTRY_ADDRESS:-}"
-      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:?}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
       # Commercial banks resolve the sovereign AMM from their CB (empty on a CB).
       CENTRAL_BANK_API_URL: "${CENTRAL_BANK_API_URL:-}"
       INTERNAL_RELAY_AUTH_SECRET: "${INTERNAL_RELAY_AUTH_SECRET:-}"

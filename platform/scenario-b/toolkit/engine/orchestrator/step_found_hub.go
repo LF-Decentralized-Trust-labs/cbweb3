@@ -248,7 +248,8 @@ func (c HubConfig) provisionKeycloakRealm(ctx context.Context) error {
 			"(%[1]s update realms/%[4]s -s sslRequired=NONE || true) && "+
 			"(%[1]s create clients -r %[4]s -s clientId=%[5]s -s secret=%[6]s -s enabled=true "+
 			"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[7]s || true) && ",
-		kc, "admin", "admin", hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret, audienceMapperArg(keycloakBackendAudience))
+		kc, "admin", mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
+		hubKeycloakRealm, hubKeycloakClient, hubKeycloakSecret, audienceMapperArg(keycloakBackendAudience))
 	// Public noc-portal client so the hub's co-located NOC portal can password-grant
 	// against this realm (hub NOC operator users are a separate follow-up — found-hub
 	// does not yet provision operator accounts).
@@ -286,14 +287,17 @@ func (c HubConfig) renderHubComposeEnv() error {
 		// GRPC_MTLS_ENABLE is exported.
 		"SVC_TLS_VOLUME": c.svcTLSVolume(),
 		// infra: postgres + redis (single DB doubles as the keycloak DB locally)
-		"POSTGRES_USER":     "cbweb3",
-		"POSTGRES_PASSWORD": "cbweb3",
+		"POSTGRES_USER": "cbweb3",
+		// Per-entity, generated on first provisioning and read back after; the
+		// operator can override via the environment. Never a constant again.
+		"POSTGRES_PASSWORD": mustInfraSecret(secretsDirOf(c.HubEnvFile), "POSTGRES_PASSWORD"),
+		"REDIS_PASSWORD":    mustInfraSecret(secretsDirOf(c.HubEnvFile), "REDIS_PASSWORD"),
 		"POSTGRES_DB":       "keycloak",
 		"POSTGRES_PORT":     itoa(c.RPCPort + 5000),
 		"REDIS_PORT":        itoa(c.RPCPort + 6000),
 		// keycloak (joins the entity infra network; DB is the infra postgres)
 		"KC_ADMIN_USER":     "admin",
-		"KC_ADMIN_PASSWORD": "admin",
+		"KC_ADMIN_PASSWORD": mustInfraSecret(secretsDirOf(c.HubEnvFile), "KC_ADMIN_PASSWORD"),
 		"KC_DB_URL":         "jdbc:postgresql://" + e + "-hub-postgres:5432/keycloak",
 		"KEYCLOAK_PORT":     itoa(c.RPCPort + 7000),
 		// backend / frontend / relay / noc (images must be pre-built locally)

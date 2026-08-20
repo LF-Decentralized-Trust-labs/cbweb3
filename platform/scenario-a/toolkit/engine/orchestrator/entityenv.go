@@ -44,6 +44,9 @@ type EntityEnvData struct {
 	RedisContainer    string
 	RedisPort         int
 	RedisDB           int
+	// RedisPassword is required: this Redis holds the auth service's PKI login
+	// nonces, and the service reads REDIS_PASSWORD from its environment.
+	RedisPassword string
 
 	// PKI (local dev files).
 	CACertFile string
@@ -139,6 +142,7 @@ REDIS_CONTAINER_NAME={{.RedisContainer}}
 REDIS_IMAGE_TAG=7-alpine
 REDIS_PORT={{.RedisPort}}
 REDIS_DB={{.RedisDB}}
+REDIS_PASSWORD={{.RedisPassword}}
 
 # Keycloak (CB instance for CB/NOC/Governance; own when per-entity)
 KC_BASE_PATH={{.KeycloakURL}}

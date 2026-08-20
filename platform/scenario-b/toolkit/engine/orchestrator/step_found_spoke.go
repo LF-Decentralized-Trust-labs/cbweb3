@@ -396,7 +396,10 @@ var spokeCBRoles = []string{"central_bank", "ROLE_GOVERNANCE", "ROLE_TREASURY"}
 func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	kc := "/opt/keycloak/bin/kcadm.sh"
 	var b strings.Builder
-	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password admin && ", kc)
+	// Same password the compose env gave the Keycloak container; resolved from the
+	// entity secrets file, not a constant.
+	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s && ",
+		kc, mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"))
 	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || true) && ", kc, spokeKeycloakRealm)
 	// Local lab uses plain HTTP; the NOC portal does a browser-direct password
 	// grant from the entity's IP, which Keycloak's default sslRequired=external
@@ -664,14 +667,17 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// tests) so the compose template's own default applies.
 		"HUB_CHAIN_ID": hubChainIDEnv(c.HubChainID),
 		// infra: postgres + redis (single DB doubles as the keycloak DB locally)
-		"POSTGRES_USER":     "cbweb3",
-		"POSTGRES_PASSWORD": "cbweb3",
+		"POSTGRES_USER": "cbweb3",
+		// Per-entity, generated on first provisioning and read back after; the
+		// operator can override via the environment. Never a constant again.
+		"POSTGRES_PASSWORD": mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "POSTGRES_PASSWORD"),
+		"REDIS_PASSWORD":    mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "REDIS_PASSWORD"),
 		"POSTGRES_DB":       "keycloak",
 		"POSTGRES_PORT":     itoa(c.RPCPort + 5000),
 		"REDIS_PORT":        itoa(c.RPCPort + 6000),
 		// keycloak (joins the entity infra network; DB is the infra postgres)
 		"KC_ADMIN_USER":     "admin",
-		"KC_ADMIN_PASSWORD": "admin",
+		"KC_ADMIN_PASSWORD": mustInfraSecret(secretsDirOf(c.SpokeEnvFile), "KC_ADMIN_PASSWORD"),
 		"KC_DB_URL":         "jdbc:postgresql://" + e + "-" + c.Entity + "-postgres:5432/keycloak",
 		"KEYCLOAK_PORT":     itoa(c.RPCPort + 7000),
 		// backend / frontend (images shared with the hub; must be pre-built)
