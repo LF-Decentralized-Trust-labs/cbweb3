@@ -1421,7 +1421,11 @@ func (s *paymentOrchestratorService) ListFXAgreements(ctx context.Context, req *
 	stateFilter := strings.TrimPrefix(req.State, "FX_STATE_")
 
 	if s.fxRepo != nil {
-		f := ports.FXAgreementFilter{Counterparty: req.Counterparty}
+		// Explicit, not left to the repository's clamp: the response is capped at one page
+		// and ListFXAgreementsRequest carries no page size, so a node with more agreements
+		// than this returns only the newest MaxFXAgreementPageSize of them. Naming the bound
+		// here is what keeps that visible to anyone reading this handler (finding R2-M-14).
+		f := ports.FXAgreementFilter{Counterparty: req.Counterparty, Limit: ports.MaxFXAgreementPageSize}
 		if stateFilter != "" {
 			f.State = domain.FXState(stateFilter)
 		}
@@ -1963,7 +1967,8 @@ func (s *paymentOrchestratorService) handleRelayLockEvent(proof ports.Interopera
 	}
 
 	// Find the accepted FX agreement where the counterparty spoke's receiver matches.
-	agreements, err := s.fxRepo.ListAgreements(context.Background(), ports.FXAgreementFilter{State: domain.FXStateAccepted})
+	agreements, err := s.fxRepo.ListAgreements(context.Background(),
+		ports.FXAgreementFilter{State: domain.FXStateAccepted, Limit: ports.MaxFXAgreementPageSize})
 	if err != nil {
 		return fmt.Errorf("relay lock: list agreements: %w", err)
 	}

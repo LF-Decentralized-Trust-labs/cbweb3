@@ -145,9 +145,82 @@ contract PairRegistry {
         emit PairRegistered(pairId, entry.ammAddress, entry.tokenA, entry.tokenB);
     }
 
+    /// @notice Largest page a single paged read may return.
+    /// @dev getAllActivePairs() returns every active pair. It is `external view`, so nothing pays
+    ///      gas for it on-chain — the cost is response size and the RPC round trip, and it grows
+    ///      with the number of corridors (finding R2-M-14). Mirrors CurrencyRegistry.
+    uint256 public constant MAX_PAGE_SIZE = 100;
+
+    /// @notice Default page size when a caller passes limit = 0.
+    uint256 public constant DEFAULT_PAGE_SIZE = 50;
+
+    /// @notice Number of ACTIVE pairs, so a caller can size its paging loop.
+    function activePairCount() external view returns (uint256 count) {
+        for (uint256 i; i < _pairIds.length; ++i) {
+            if (_pairs[_key(_pairIds[i])].status == PairStatus.ACTIVE) {
+                ++count;
+            }
+        }
+    }
+
+    /// @notice Reads a bounded window of the ACTIVE pairs.
+    /// @param offset Active entries to skip; at or past the end returns an empty page rather than
+    ///        reverting, so a paging loop terminates on a short read.
+    /// @param limit Page size. Zero means DEFAULT_PAGE_SIZE; above MAX_PAGE_SIZE is clamped to it.
+    /// @return page The window, in registration order.
+    /// @return total Number of ACTIVE pairs, so a caller knows whether more remain.
+    /// @dev COST. This bounds the RESPONSE, not the work. Both passes scan the whole _pairIds
+    ///      array whatever the window, because the ACTIVE entries are not indexed separately —
+    ///      so one page is O(n), and walking the whole set in pages of `limit` is O(n^2/limit),
+    ///      which is more total node work than a single getAllActivePairs() at O(n). That is the
+    ///      right trade while the response is what fails first (an oversized eth_call fails worse
+    ///      than several small ones) and while n is small. If the corridor count ever makes the
+    ///      scan itself the problem, the fix is a compacted index of ACTIVE pairIds maintained on
+    ///      write, which would let a page seek directly instead of scanning.
+    function getActivePairsPaged(uint256 offset, uint256 limit)
+        external
+        view
+        returns (PairEntry[] memory page, uint256 total)
+    {
+        if (limit == 0) {
+            limit = DEFAULT_PAGE_SIZE;
+        } else if (limit > MAX_PAGE_SIZE) {
+            limit = MAX_PAGE_SIZE;
+        }
+
+        uint256 active;
+        uint256 inWindow;
+        for (uint256 i; i < _pairIds.length; ++i) {
+            if (_pairs[_key(_pairIds[i])].status != PairStatus.ACTIVE) continue;
+            if (active >= offset && inWindow < limit) {
+                ++inWindow;
+            }
+            ++active;
+        }
+        total = active;
+
+        page = new PairEntry[](inWindow);
+        if (inWindow == 0) {
+            return (page, total);
+        }
+
+        uint256 seen;
+        uint256 idx;
+        for (uint256 i; i < _pairIds.length && idx < inWindow; ++i) {
+            PairEntry storage e = _pairs[_key(_pairIds[i])];
+            if (e.status != PairStatus.ACTIVE) continue;
+            if (seen >= offset) {
+                page[idx++] = e;
+            }
+            ++seen;
+        }
+    }
+
     /// @notice Returns all pairs that are currently in ACTIVE status.
     /// @dev Used by the Go PairRouter at startup to initialise its routing cache (D10).
     ///      Pairs in PROPOSED status are excluded.
+    /// @dev Superseded for platform use by getActivePairsPaged; kept because truncating a
+    ///      function named getAll would lie to its callers (finding R2-M-14).
     function getAllActivePairs() external view returns (PairEntry[] memory) {
         uint256 count;
         for (uint256 i; i < _pairIds.length; ++i) {
