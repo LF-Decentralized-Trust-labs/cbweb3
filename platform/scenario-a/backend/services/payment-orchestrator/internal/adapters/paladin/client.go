@@ -449,6 +449,16 @@ func (c *Client) Lock(ctx context.Context, amount string, delegate string) (*por
 		return nil, fmt.Errorf("get locked state IDs: %w", err)
 	}
 
+	// Refuse a lock this build cannot settle later. The caller aborts before the
+	// public HTLC record exists (server.go LockHTLC returns on this error), so no
+	// cross-spoke commitment is created and the relay never sees an event it would
+	// retry forever. See locked_state_id.go for the reproduction and the evidence.
+	if bad, found := unsettleableLockedStateID(lockedIDs); found {
+		c.logger.Error("refusing an unsettleable Zeto lock",
+			"txHash", txHash, "stateID", bad, "lockedStateIDs", lockedIDs)
+		return nil, errUnsettleableLock(bad)
+	}
+
 	return &ports.ZetoLockResult{
 		TxHash:         txHash,
 		ZetoLockRef:    txHash,
