@@ -345,7 +345,7 @@ A node is restarted only after its own chain answers `eth_chainId` — Paladin e
 chain is unreachable at startup and `restart: unless-stopped` turns that into a crash loop. Targets
 that fail the probe are reported as blocked and skipped; `--force` is the only override.
 
-**Host requirements:** `docker`, `curl`, and `alpine:3.20` pullable or already cached — the config
+**Host requirements:** `docker`, `curl`, and `alpine:3.23` pullable or already cached — the config
 volume is not reachable from the host filesystem, so it is read and written through short-lived
 alpine containers. On a host with a restricted registry those `docker run` calls fail and the script
 reports the failure rather than changing anything.
