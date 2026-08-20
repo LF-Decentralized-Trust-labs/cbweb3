@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path"
 	"strings"
@@ -43,7 +44,20 @@ func WriteFile(ctx context.Context, volume, filePath string, content []byte, mod
 		mode = "0644"
 	}
 	target := path.Join("/target", filePath)
-	script := fmt.Sprintf("mkdir -p %q && cat > %q && chmod %s %q", path.Dir(target), target, mode, target)
+	// The helper runs as root — a freshly created named volume is root-owned, so it has
+	// to. Everything it seeds is therefore root-owned too, which was harmless while every
+	// consumer ran as root and stopped being harmless when the backend service images
+	// became non-root (finding R2-M-12): a 0600 key owned by root is unreadable to the
+	// service that needs it, and a root-owned directory is unwritable. Both surfaced as a
+	// logged warning rather than a hard failure, which is worse. The invoking user is the
+	// right owner because that is the uid those containers are given (ENTITY_RUN_UID, the
+	// pattern ADR-001 established); containers still running as root are unaffected,
+	// since root ignores ownership.
+	owner := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	// Not recursive: callers seed at the volume root too, and -R would walk whatever else
+	// that volume holds. Each seeded file is chowned by its own call, covering the same set.
+	script := fmt.Sprintf("mkdir -p %q && cat > %q && chmod %s %q && chown %s %q %q",
+		path.Dir(target), target, mode, target, owner, path.Dir(target), target)
 
 	cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "-i",
 		"-v", volume+":/target",

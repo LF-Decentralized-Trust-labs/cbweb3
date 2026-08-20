@@ -11,9 +11,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -723,6 +725,14 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// participant CSRs with it.
 		"CA_VOLUME":      c.caVolume(),
 		"ENTITY_PKI_DIR": "cb_tls", // named volume (holds the generated CA)
+		// The service images are non-root by default (uid 10001, finding R2-M-12), but the
+		// two services that mount the PKI read the CA and persist issued certificates there.
+		// On a bank that path is a host bind owned by whoever ran this toolkit, at mode 0700,
+		// so no other uid can read it — those containers therefore run as the invoking user.
+		// Same reasoning as HOST_UID for the Besu containers (ADR-001 / T028); the compose
+		// default keeps a hand-run stack on the image's non-root uid.
+		"ENTITY_RUN_UID": strconv.Itoa(os.Getuid()),
+		"ENTITY_RUN_GID": strconv.Itoa(os.Getgid()),
 		// PKI_DIR points the gateway at that same mount so it can read peer identities. On a CB the
 		// peers come from the participants table (the certificates it issued at onboarding, which
 		// carry the ACTIVE status and therefore revocation); this path additionally allows pinning a
@@ -759,17 +769,23 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// its own ENTITY_NET_PREFIX network to probe besu by container DNS.
 		"NOC_AGENT_BESU_RPC": fmt.Sprintf("http://%s-%s-besu:8545", e, c.Entity),
 		"NOC_AGENT_ENTITY":   c.Entity,
-		"NOC_AGENT_VOLUME":   c.nocAgentVolume(),
-		"NOC_AGENT_IMAGE":    hubNocAgentImage,
-		"NOC_BACKEND_IMAGE":  hubNocBackendImage,
-		"NOC_BACKEND_PORT":   itoa(c.RPCPort + 11000),
-		"NOC_DB_NAME":        "noc",
-		"NOC_DB_USER":        "cbweb3",
-		"NOC_DB_PASSWORD":    "cbweb3",
-		"NOC_NET_PREFIX":     c.NetPrefix,
-		"NOC_PORTAL_IMAGE":   hubNocPortalImage,
-		"NOC_PORTAL_PORT":    itoa(c.RPCPort + 12000),
-		"NOC_VOLUME_PREFIX":  c.VolumePrefix,
+		// Supplementary group for the read-only Docker socket the agent tails logs
+		// from. The image is non-root (uid 65532) and the socket is root:docker 0660,
+		// so without this every log read is denied — silently, because the agent
+		// discards that error. Empty here → the compose default → the agent says so at
+		// startup (finding R2-M-12).
+		"NOC_DOCKER_GID":    dockerSocketGID(),
+		"NOC_AGENT_VOLUME":  c.nocAgentVolume(),
+		"NOC_AGENT_IMAGE":   hubNocAgentImage,
+		"NOC_BACKEND_IMAGE": hubNocBackendImage,
+		"NOC_BACKEND_PORT":  itoa(c.RPCPort + 11000),
+		"NOC_DB_NAME":       "noc",
+		"NOC_DB_USER":       "cbweb3",
+		"NOC_DB_PASSWORD":   "cbweb3",
+		"NOC_NET_PREFIX":    c.NetPrefix,
+		"NOC_PORTAL_IMAGE":  hubNocPortalImage,
+		"NOC_PORTAL_PORT":   itoa(c.RPCPort + 12000),
+		"NOC_VOLUME_PREFIX": c.VolumePrefix,
 	}
 	env := make([]string, 0, len(vars))
 	for k, v := range vars {

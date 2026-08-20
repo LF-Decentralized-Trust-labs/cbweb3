@@ -29,6 +29,17 @@ func main() {
 	}
 
 	dockerClient := logs.New(socketPath)
+	// Report a socket the agent cannot use once, at startup. Without this the failure is
+	// invisible: the agent runs as a non-root uid (finding R2-M-12), the socket is
+	// normally root:docker mode 0660, and collectLogs discards the resulting error — so
+	// the Log Viewer goes empty with nothing here to explain it. Health collection does
+	// not use the socket, so this reports and carries on rather than exiting.
+	if err := dockerClient.Ping(context.Background()); err != nil {
+		log.Printf("ERROR: docker socket %s is not usable: %v", socketPath, err)
+		log.Printf("ERROR: container logs will be empty. This agent runs as a non-root uid; " +
+			"give the container the socket's group (compose group_add / NOC_DOCKER_GID, or " +
+			"docker run --group-add). Health collection is unaffected.")
+	}
 	chk := collector.New(dockerClient)
 	push := pusher.New(cfg)
 
