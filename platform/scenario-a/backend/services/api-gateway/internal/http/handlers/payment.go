@@ -576,13 +576,29 @@ func auditDetails(fields map[string]string) string {
 	return string(encoded)
 }
 
+// auditWriteTimeout bounds the audit write below.
+//
+// Without it "best effort" is not achievable, only claimed. c.UserContext() is
+// context.Background() plus correlation values — no deadline — and the compliance
+// gRPC adapter bounds its dial but not its calls, so a compliance service that
+// accepts the connection and then stops answering pins the mint or burn handler
+// indefinitely. Not slowly: forever. The Fiber WriteTimeout does not rescue it
+// either, because fasthttp applies that to writing the response rather than to
+// the handler's duration.
+//
+// Five seconds is far past a single audit insert and short enough that a dead
+// dependency costs one visible pause rather than a stuck money operation.
+const auditWriteTimeout = 5 * time.Second
+
 // recordTokenAudit writes one entry for a completed mint or burn.
 //
 // Best effort by design: the on-chain operation has already happened and cannot
 // be rolled back, so failing the response would report a false negative to the
 // operator. Blocking on it would also let a compliance outage stop money
-// operations that work today. The failure is logged, never swallowed. Category
-// is TREASURY because that is what the treasury history screen reads.
+// operations that work today — which is why the call is bounded by
+// auditWriteTimeout rather than merely wrapped in an error check. The failure is
+// logged, never swallowed. Category is TREASURY because that is what the treasury
+// history screen reads.
 func (h *PaymentHandler) recordTokenAudit(c *fiber.Ctx, action, result, target, details string) {
 	if h.auditLogger == nil {
 		return
@@ -591,7 +607,9 @@ func (h *PaymentHandler) recordTokenAudit(c *fiber.Ctx, action, result, target, 
 	if claims, ok := c.Locals("claims").(domain.TokenClaims); ok {
 		actor = claims.Subject
 	}
-	if err := h.auditLogger.CreateAuditLog(c.UserContext(), complianceadapter.AuditEntry{
+	ctx, cancel := context.WithTimeout(c.UserContext(), auditWriteTimeout)
+	defer cancel()
+	if err := h.auditLogger.CreateAuditLog(ctx, complianceadapter.AuditEntry{
 		ActorSubject:  actor,
 		ActorAddress:  c.IP(),
 		IPAddress:     c.IP(),

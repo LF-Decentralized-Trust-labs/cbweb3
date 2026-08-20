@@ -17,6 +17,9 @@
 //   - a failure to write that entry does NOT fail the operation (best effort), because
 //     blocking a money operation on the availability of the compliance service would
 //     break a flow that works today;
+//   - and neither does a compliance service that HANGS. That is the half best effort
+//     actually turns on: an error returns, an outage does not, so only a bounded call
+//     keeps the promise. The first version of this feature bounded nothing;
 //   - a handler with no audit writer wired behaves exactly as before (regression guard);
 //   - mint does NOT require a request id. Three pieces of tooling mint as scenario
 //     setup with no deposit to reference (the livehappy E2E, the performance
@@ -24,12 +27,15 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	complianceadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/compliance"
 	pb "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/payment_orchestrator/v1"
@@ -300,5 +306,79 @@ func TestBurnToken_SuccessIsMarkedSuccess(t *testing.T) {
 	}
 	if got := writer.entries[0].Result; got != "SUCCESS" {
 		t.Errorf("Result = %q, want SUCCESS", got)
+	}
+}
+
+// hangingAuditWriter accepts the call and then stops answering, which is how an
+// unhealthy dependency usually behaves — it rarely has the courtesy to return an error.
+type hangingAuditWriter struct {
+	reached chan struct{}
+	ctxErr  chan error
+}
+
+func (h *hangingAuditWriter) CreateAuditLog(ctx context.Context, _ complianceadapter.AuditEntry) error {
+	close(h.reached)
+	<-ctx.Done() // returns only because the caller bounded the call
+	h.ctxErr <- ctx.Err()
+	return ctx.Err()
+}
+
+// A compliance service that hangs must not hang the mint.
+//
+// The best-effort test above uses a writer that returns an error immediately, which pins
+// a property nobody doubted. This pins the one that bites: c.UserContext() carries no
+// deadline and the compliance adapter bounds its dial rather than its calls, so without
+// auditWriteTimeout this handler never responds at all. Fiber's WriteTimeout does not
+// rescue it either — fasthttp applies that to writing the response, not to the handler.
+func TestMintToken_HangingAuditWriterDoesNotHangTheRequest(t *testing.T) {
+	t.Parallel()
+	w := &hangingAuditWriter{reached: make(chan struct{}), ctxErr: make(chan error, 1)}
+	app, _ := tokenAuditApp(t, w)
+
+	type outcome struct {
+		status int
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		body, _ := json.Marshal(map[string]any{"to": "alice", "amount": "1"})
+		req := httptest.NewRequest(http.MethodPost, "/mint", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		// -1 disables the client-side timeout, so the server is the only thing that can
+		// end this request. With an unbounded audit write, nothing does.
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			done <- outcome{err: err}
+			return
+		}
+		done <- outcome{status: resp.StatusCode}
+	}()
+
+	select {
+	case <-w.reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the audit writer was never called")
+	}
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("mint returned an error: %v", got.err)
+		}
+		if got.status != http.StatusCreated {
+			t.Errorf("mint status = %d, want %d: a stalled audit write must not change the outcome", got.status, http.StatusCreated)
+		}
+	case <-time.After(auditWriteTimeout + 10*time.Second):
+		t.Fatalf("mint did not respond within %v of a hung compliance service: the audit write is unbounded",
+			auditWriteTimeout+10*time.Second)
+	}
+
+	select {
+	case err := <-w.ctxErr:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("audit context ended with %v, want context.DeadlineExceeded", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("the audit call context was never cancelled")
 	}
 }

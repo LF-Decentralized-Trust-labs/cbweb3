@@ -238,8 +238,10 @@ export function CrossCurrencyBridgePage() {
     if (!quote || !selectedPair) {
       return;
     }
-    setConfirmingSwap(false);
     clearQuoteRefreshedNotice();
+    // The dialog closes after the call, not before it. Closing first made the `busy`
+    // prop unreachable — the dialog was already gone by the time the swap was in
+    // flight — so the confirm button was never actually disabled during settlement.
     await executeSwap({
       source_currency: sourceCurrency,
       target_currency: targetCurrency,
@@ -249,6 +251,7 @@ export function CrossCurrencyBridgePage() {
       beneficiary_bank_id: beneficiaryBankId,
       quote_id: quote.quote_id,
     });
+    setConfirmingSwap(false);
   };
 
   const progressSteps = ["BRIDGE_IN_PROGRESS", "SWAP_IN_PROGRESS", "BRIDGE_OUT_PROGRESS", "COMPLETED"];

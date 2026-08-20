@@ -60,7 +60,15 @@ export function RedemptionPage() {
 
   const onConfirmBurn = async () => {
     setConfirming(false);
-    await burn({ sourceAccount: GATEWAY_SIGNING_IDENTITY, amount, reason });
+    // Report what actually happened. This used to toast success unconditionally, so a
+    // rejected burn — an insufficient-funds 500 from the orchestrator, say — told the
+    // operator it had gone through, and cleared the form so there was nothing left to
+    // show what had been attempted.
+    const failure = await burn({ sourceAccount: GATEWAY_SIGNING_IDENTITY, amount, reason });
+    if (failure) {
+      toast.error(failure);
+      return;
+    }
     toast.success("Burn operation submitted");
     setAmount("");
     setReason("");

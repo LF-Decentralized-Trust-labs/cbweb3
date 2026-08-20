@@ -38,12 +38,18 @@ export function IssuancePage() {
       return;
     }
     setConfirming(false);
-    await mint({
+    // Report what actually happened: a rejected mint used to toast success and clear
+    // the form, leaving the operator believing money had been issued.
+    const failure = await mint({
       requestId,
       targetInstitutionId: selectedRequest.institutionId,
       amount,
       reserveProofRef,
     });
+    if (failure) {
+      toast.error(failure);
+      return;
+    }
     toast.success("Mint operation submitted");
     setAmount("");
     setReserveProofRef("");
