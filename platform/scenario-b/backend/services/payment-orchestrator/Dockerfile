@@ -9,8 +9,14 @@ RUN go build -o /app/service ./cmd/payment-orchestrator
 
 # Pinned, not `latest`: `latest` makes the image a moving target, so the same tag can
 # resolve to different content on two machines and a rebuild can pull in changes nobody
-# reviewed. 3.20 is the version already used across this repository (finding R2-M-12).
-FROM alpine:3.20
+# reviewed (finding R2-M-12).
+#
+# 3.23 rather than the 3.20 used elsewhere in this repository: 3.20 left support on
+# 2026-04-01, so `apk add` against it now resolves a branch that receives no further
+# security fixes — the wrong pin for an image that ships. 3.23 is supported until
+# 2027-11-01. The other 3.20 references are throwaway `docker run --rm` helpers rather
+# than shipped images; bumping those is tracked separately.
+FROM alpine:3.23
 RUN apk --no-cache add ca-certificates
 COPY --from=builder /app/service /app/service
 # Non-root by default (finding R2-M-12). A fixed uid so a deployment can reason about

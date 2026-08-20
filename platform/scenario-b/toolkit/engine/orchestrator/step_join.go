@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,7 +18,6 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/bundle"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/exec"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-b/toolkit/engine/pki"
-	"strconv"
 )
 
 // JoinConfig parametrizes the join mode (a commercial bank attaching to its
@@ -406,6 +406,12 @@ func (c JoinConfig) ComposeEnv() []string {
 		// monitoring), mounting a rendered agent.yaml from NOC_AGENT_VOLUME and
 		// joining its own ENTITY_NET_PREFIX network to probe besu by container DNS.
 		"NOC_AGENT_ENTITY": c.Entity,
+		// Supplementary group for the read-only Docker socket the agent tails logs
+		// from. The image is non-root (uid 65532) and the socket is root:docker 0660,
+		// so without this every log read is denied — silently, because the agent
+		// discards that error. Empty here → the compose default → the agent says so at
+		// startup (finding R2-M-12).
+		"NOC_DOCKER_GID":   dockerSocketGID(),
 		"NOC_AGENT_VOLUME": c.nocAgentVolume(),
 		"NOC_AGENT_IMAGE":  hubNocAgentImage,
 	}

@@ -51,6 +51,16 @@ services:
     image: cbweb3/noc-agent:local
     container_name: noc-agent-spoke-a
     restart: unless-stopped
+    # Supplementary group for the read-only Docker socket below. The image is non-root
+    # (uid 65532, finding R2-M-12) and the socket is root:docker mode 0660, so an
+    # unprivileged uid outside that group is denied every log read — and the agent
+    # discards that error, so the portal's Log Viewer simply goes empty with nothing in
+    # the agent's own output. The toolkit and the NOC make targets compute
+    # NOC_DOCKER_GID from the socket itself. The default is the agent's own gid, which
+    # grants nothing: the agent then reports the problem at startup rather than
+    # collecting no logs in silence.
+    group_add:
+      - "${NOC_DOCKER_GID:-65532}"
     volumes:
       - ./agent-configs/spoke-a/agent.yaml:/etc/noc-agent/agent.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -65,6 +75,16 @@ services:
     image: cbweb3/noc-agent:local
     container_name: noc-agent-spoke-b
     restart: unless-stopped
+    # Supplementary group for the read-only Docker socket below. The image is non-root
+    # (uid 65532, finding R2-M-12) and the socket is root:docker mode 0660, so an
+    # unprivileged uid outside that group is denied every log read — and the agent
+    # discards that error, so the portal's Log Viewer simply goes empty with nothing in
+    # the agent's own output. The toolkit and the NOC make targets compute
+    # NOC_DOCKER_GID from the socket itself. The default is the agent's own gid, which
+    # grants nothing: the agent then reports the problem at startup rather than
+    # collecting no logs in silence.
+    group_add:
+      - "${NOC_DOCKER_GID:-65532}"
     volumes:
       - ./agent-configs/spoke-b/agent.yaml:/etc/noc-agent/agent.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro

@@ -309,17 +309,23 @@ func (c HubConfig) renderHubComposeEnv() error {
 		"RELAY_PORT":           "7000",
 		"NOC_AGENT_BESU_RPC":   fmt.Sprintf("http://%s-hub-validator:8545", e),
 		"NOC_AGENT_ENTITY":     "hub",
-		"NOC_AGENT_VOLUME":     c.nocAgentVolume(),
-		"NOC_AGENT_IMAGE":      hubNocAgentImage,
-		"NOC_BACKEND_IMAGE":    hubNocBackendImage,
-		"NOC_BACKEND_PORT":     itoa(c.RPCPort + 11000),
-		"NOC_DB_NAME":          "noc",
-		"NOC_DB_USER":          "cbweb3",
-		"NOC_DB_PASSWORD":      "cbweb3",
-		"NOC_NET_PREFIX":       c.NetPrefix,
-		"NOC_PORTAL_IMAGE":     hubNocPortalImage,
-		"NOC_PORTAL_PORT":      itoa(c.RPCPort + 12000),
-		"NOC_VOLUME_PREFIX":    c.VolumePrefix,
+		// Supplementary group for the read-only Docker socket the agent tails logs
+		// from. The image is non-root (uid 65532) and the socket is root:docker 0660,
+		// so without this every log read is denied — silently, because the agent
+		// discards that error. Empty here → the compose default → the agent says so at
+		// startup (finding R2-M-12).
+		"NOC_DOCKER_GID":    dockerSocketGID(),
+		"NOC_AGENT_VOLUME":  c.nocAgentVolume(),
+		"NOC_AGENT_IMAGE":   hubNocAgentImage,
+		"NOC_BACKEND_IMAGE": hubNocBackendImage,
+		"NOC_BACKEND_PORT":  itoa(c.RPCPort + 11000),
+		"NOC_DB_NAME":       "noc",
+		"NOC_DB_USER":       "cbweb3",
+		"NOC_DB_PASSWORD":   "cbweb3",
+		"NOC_NET_PREFIX":    c.NetPrefix,
+		"NOC_PORTAL_IMAGE":  hubNocPortalImage,
+		"NOC_PORTAL_PORT":   itoa(c.RPCPort + 12000),
+		"NOC_VOLUME_PREFIX": c.VolumePrefix,
 	}
 	for k, v := range vars {
 		if err := addrs.AppendAddr(c.HubEnvFile, k, v); err != nil {

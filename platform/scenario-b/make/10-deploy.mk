@@ -145,8 +145,21 @@ deploy.ci-local: deploy.build-ci-runner
 		$(ARGS)
 
 ## NOC targets (Scenario B)
+# Supplementary group the noc-agent containers need for the read-only Docker socket they
+# tail container logs from. The agent image is non-root (uid 65532, finding R2-M-12) and
+# the socket is root:docker mode 0660, so without this every log read is denied — and the
+# agent discards that error, so the Log Viewer just goes empty with nothing in the
+# agent's own output to explain it.
+#
+# Read from inside a throwaway container rather than with a host `stat`, because those
+# two disagree: what group_add needs is the gid the socket carries as the agent sees it,
+# and Docker Desktop proxies the socket (this host: gid 1 outside, 0 inside). The host
+# stats are a fallback for when docker cannot be run. Empty falls back to the compose
+# default, which grants nothing and makes the agent report it at startup.
+NOC_DOCKER_GID ?= $(shell docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro alpine:3.23 stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null)
+
 noc.up:
-	@docker compose -f $(DEPLOY_DIR)/compose.noc.yml up -d --build
+	@NOC_DOCKER_GID=$(NOC_DOCKER_GID) docker compose -f $(DEPLOY_DIR)/compose.noc.yml up -d --build
 
 noc.down:
 	@docker compose -f $(DEPLOY_DIR)/compose.noc.yml down
