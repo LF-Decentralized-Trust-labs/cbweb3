@@ -67,14 +67,28 @@ func (m *IdentityGRPCManager) GetKYCStatus(ctx context.Context, subject string) 
 	return domain.KYCStatus(out.Status), nil
 }
 
+// kycFallbackTimeout bounds the sync fallback below.
+//
+// The call has to start from a background context because KYCChecker's signature carries
+// none, but detached is not the same as unbounded: without a deadline a hung auth service
+// pins the Fiber handler that called it, and it pins it forever, because the server's
+// WriteTimeout bounds writing the response rather than the handler's duration (finding
+// R2-LOW). A KYC status lookup is a single indexed read, so ten seconds is already far
+// past a healthy answer — long enough not to fail a slow-but-working peer, short enough
+// that a dead one frees the handler.
+const kycFallbackTimeout = 10 * time.Second
+
 // GetStatus satisfies KYCChecker (sync fallback — uses background context).
 // The KYCChecker signature has no error return, so a dependency failure cannot
 // be propagated here; it is logged (silent swallowing is prohibited) and mapped
 // to KYCPending, which the allowlist-based AML gate treats as "not cleared"
 // (fail-closed). Callers that must distinguish a dependency error from a real
 // PENDING status should use GetKYCStatus, which returns the error (R2-H-7).
+// A deadline exceeded here lands on that same fail-closed path.
 func (m *IdentityGRPCManager) GetStatus(subject string) domain.KYCStatus {
-	s, err := m.GetKYCStatus(context.Background(), subject)
+	ctx, cancel := context.WithTimeout(context.Background(), kycFallbackTimeout)
+	defer cancel()
+	s, err := m.GetKYCStatus(ctx, subject)
 	if err != nil {
 		slog.Error("kyc status lookup failed; defaulting to PENDING (fail-closed)",
 			"service", "api-gateway",

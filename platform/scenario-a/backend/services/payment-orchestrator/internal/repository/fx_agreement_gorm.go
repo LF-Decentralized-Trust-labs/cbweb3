@@ -86,6 +86,14 @@ func (r *gormFXAgreementRepository) UpdateAgreement(ctx context.Context, rec *do
 		}).Error
 }
 
+// MaxFXAgreementPageSize bounds ListAgreements (finding R2-M-14). The query had no LIMIT at
+// all, and its filter is optional — an empty filter matched the whole table, so one request
+// loaded and serialised every agreement the node had ever recorded.
+//
+// Defined in ports so callers can name the bound without importing this package; re-exported
+// here because the clamp below is what enforces it.
+const MaxFXAgreementPageSize = ports.MaxFXAgreementPageSize
+
 // ListAgreements returns agreements matching the filter, ordered by created_at DESC.
 func (r *gormFXAgreementRepository) ListAgreements(ctx context.Context, f ports.FXAgreementFilter) ([]*domain.FXAgreementRecord, error) {
 	q := r.db.WithContext(ctx).Model(&FXAgreementModel{})
@@ -95,8 +103,13 @@ func (r *gormFXAgreementRepository) ListAgreements(ctx context.Context, f ports.
 	if f.State != "" {
 		q = q.Where("state = ?", string(f.State))
 	}
+	// Bounded. Newest first, so a truncated page keeps recent activity rather than hiding it.
+	limit := f.Limit
+	if limit <= 0 || limit > MaxFXAgreementPageSize {
+		limit = MaxFXAgreementPageSize
+	}
 	var models []FXAgreementModel
-	if err := q.Order("created_at DESC").Find(&models).Error; err != nil {
+	if err := q.Order("created_at DESC").Limit(limit).Find(&models).Error; err != nil {
 		return nil, err
 	}
 	result := make([]*domain.FXAgreementRecord, len(models))

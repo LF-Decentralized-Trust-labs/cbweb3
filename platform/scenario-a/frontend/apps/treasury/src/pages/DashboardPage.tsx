@@ -4,8 +4,8 @@ import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Table
 import { useEffect } from "react";
 import { useFundingRequests, useReconciliation, useSupplyAudit } from "../hooks";
 import { useWebsocketStore } from "../stores";
+import { formatAmountString } from "../lib/format";
 
-const formatAmount = (value: string) => Number(value).toLocaleString();
 
 export function DashboardPage() {
   const { requests, fetchRequests } = useFundingRequests();
@@ -27,7 +27,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Circulating Supply</CardDescription>
-            <CardTitle>{supply ? formatAmount(supply.circulatingSupply) : "-"}</CardTitle>
+            <CardTitle>{supply ? formatAmountString(supply.circulatingSupply) : "-"}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -68,7 +68,7 @@ export function DashboardPage() {
                 {operations.slice(0, 6).map((operation) => (
                   <TableRow key={operation.id}>
                     <TableCell>{operation.kind}</TableCell>
-                    <TableCell>{formatAmount(operation.amount)}</TableCell>
+                    <TableCell>{formatAmountString(operation.amount)}</TableCell>
                     <TableCell>
                       <Badge variant={operation.status === "CONFIRMED" ? "default" : "outline"}>{operation.status}</Badge>
                     </TableCell>

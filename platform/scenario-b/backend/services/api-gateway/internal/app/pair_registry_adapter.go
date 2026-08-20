@@ -35,6 +35,18 @@ const pairRegistryABI = `[
 {"type":"function","name":"confirmPair","stateMutability":"nonpayable","inputs":[
   {"name":"pairId","type":"string"}
 ],"outputs":[]},
+{"type":"function","name":"getActivePairsPaged","stateMutability":"view","inputs":[{"name":"offset","type":"uint256"},{"name":"limit","type":"uint256"}],"outputs":[
+  {"name":"page","type":"tuple[]","components":[
+    {"name":"pairId","type":"string"},
+    {"name":"ammAddress","type":"address"},
+    {"name":"tokenA","type":"address"},
+    {"name":"tokenB","type":"address"},
+    {"name":"status","type":"uint8"},
+    {"name":"proposer","type":"address"},
+    {"name":"confirmer","type":"address"}
+  ]},
+  {"name":"total","type":"uint256"}
+]},
 {"type":"function","name":"getAllActivePairs","stateMutability":"view","inputs":[],"outputs":[
   {"name":"","type":"tuple[]","components":[
     {"name":"pairId","type":"string"},
@@ -266,35 +278,66 @@ func (c *PairRegistryClient) ConfirmPair(ctx context.Context, pairID string) (st
 	return txHash, nil
 }
 
-// GetAllActivePairs reads all ACTIVE pairs from on-chain.
+// pairPageSize is how many entries one getActivePairsPaged call asks for; it matches the
+// contract's MAX_PAGE_SIZE, which clamps anything larger anyway.
+const pairPageSize = 100
+
+// GetAllActivePairs reads every ACTIVE pair from on-chain, one bounded page at a time.
+//
+// It used to call getAllActivePairs(), which returns the whole set in one response. That is
+// `external view` so no gas is at stake, but the response grows with the number of corridors
+// and one oversized eth_call fails worse than several small ones (finding R2-M-14). The
+// contract keeps that function for compatibility; the platform no longer uses it.
+//
+// The loop stops on a short page, which is also how an offset past the end reads, so a set
+// that shrinks mid-walk terminates rather than spinning.
 func (c *PairRegistryClient) GetAllActivePairs(ctx context.Context) ([]domain.PairEntry, error) {
-	input, err := c.parsed.Pack("getAllActivePairs")
+	var out []domain.PairEntry
+	for offset := uint64(0); ; offset += pairPageSize {
+		page, total, err := c.activePairsPage(ctx, offset, pairPageSize)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page...)
+		if len(page) < pairPageSize || uint64(len(out)) >= total {
+			return out, nil
+		}
+	}
+}
+
+// activePairsPage reads one window and reports the total so the caller can stop.
+func (c *PairRegistryClient) activePairsPage(ctx context.Context, offset, limit uint64) ([]domain.PairEntry, uint64, error) {
+	input, err := c.parsed.Pack("getActivePairsPaged", new(big.Int).SetUint64(offset), new(big.Int).SetUint64(limit))
 	if err != nil {
-		return nil, fmt.Errorf("pair registry getAllActivePairs pack: %w", err)
+		return nil, 0, fmt.Errorf("pair registry getActivePairsPaged pack: %w", err)
 	}
 	msg := ethereum.CallMsg{To: &c.contract, Data: input}
 	raw, err := c.ec.CallContract(ctx, msg, nil)
 	if err != nil {
-		return nil, fmt.Errorf("pair registry getAllActivePairs call: %w", err)
+		return nil, 0, fmt.Errorf("pair registry getActivePairsPaged call: %w", err)
 	}
 	if len(raw) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 
-	method := c.parsed.Methods["getAllActivePairs"]
+	method := c.parsed.Methods["getActivePairsPaged"]
 	entries, err := method.Outputs.Unpack(raw)
 	if err != nil {
-		return nil, fmt.Errorf("pair registry getAllActivePairs unpack: %w", err)
+		return nil, 0, fmt.Errorf("pair registry getActivePairsPaged unpack: %w", err)
 	}
-	if len(entries) == 0 {
-		return nil, nil
+	if len(entries) < 2 {
+		return nil, 0, fmt.Errorf("pair registry getActivePairsPaged: expected (page, total), got %d outputs", len(entries))
+	}
+	total, ok := entries[1].(*big.Int)
+	if !ok {
+		return nil, 0, fmt.Errorf("pair registry getActivePairsPaged: total has unexpected type %T", entries[1])
 	}
 
 	// go-ethereum unpacks tuple[] as a slice of anonymous structs via reflection.
 	// Type-asserting to a named struct always fails; use reflect to extract fields.
 	rv := reflect.ValueOf(entries[0])
 	if rv.Kind() != reflect.Slice {
-		return nil, fmt.Errorf("pair registry getAllActivePairs: unexpected output type %T", entries[0])
+		return nil, 0, fmt.Errorf("pair registry getActivePairsPaged: unexpected output type %T", entries[0])
 	}
 
 	result := make([]domain.PairEntry, 0, rv.Len())
@@ -317,7 +360,7 @@ func (c *PairRegistryClient) GetAllActivePairs(ctx context.Context) ([]domain.Pa
 			TokenB:     strings.ToLower(tokenB.Interface().(common.Address).Hex()),
 		})
 	}
-	return result, nil
+	return result, total.Uint64(), nil
 }
 
 // GetAllPairs reads every registered pair from on-chain, regardless of status
