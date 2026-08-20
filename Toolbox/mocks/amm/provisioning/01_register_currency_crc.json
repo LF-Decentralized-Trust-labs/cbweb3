@@ -1,0 +1,33 @@
+{
+  "id": "mock-amm-prov-01",
+  "title": "Corridor step 1a — BCCR registers the Costa Rican colon on the Hub",
+  "description": "Registering a currency deploys and records its Hub W-token. Each Central Bank registers only its own currency; this is step 0 of opening a corridor.",
+  "notes": "Gateway: BCCR (Banco Central de Costa Rica) Central Bank gateway, spoke-crc. Requires the central_bank realm role — note that /api/v2 uses lowercase unprefixed roles, while /api/v1 uses the ROLE_-prefixed ones; both namespaces coexist in the same token's roles array. Divergence, documented in contracts/amm: the platform declares 200 with no schema; the delivered handler returns 201 with the service result. Undocumented upstream: 409 with code CURRENCY_ALREADY_EXISTS or TOKEN_ALREADY_REGISTERED. Registry errors use a `code` key, while the AMM and swap handlers use `error_code` and the /api/v1 surface has no code at all — three spellings of the same idea in one gateway.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v2/hub/currencies",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "symbol": "W-tCeBM_CRC",
+      "country_name": "Costa Rica",
+      "token_address": "0x1a3e796c050839af5f0af526c1a562889e603d38",
+      "proposer_cb": "central_bank_crc"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "5a2f71f0bd6bb4337acabb138527ac1b"
+    },
+    "body": {
+      "symbol": "W-tCeBM_CRC",
+      "country_name": "Costa Rica",
+      "token_address": "0x1a3e796c050839af5f0af526c1a562889e603d38",
+      "proposer_cb": "central_bank_crc"
+    }
+  }
+}

@@ -1,0 +1,512 @@
+{
+  "contract": "CBWeb3 Scenario B — Hub-and-spoke settlement (circuit breaker, transfer limits, oversight disclosure)",
+  "contractVersion": "2.3.0",
+  "generatedAt": "2026-08-20",
+  "vectors": [
+    {
+      "id": "limits-hp-01",
+      "title": "Create a daily transfer limit — human decimal in, wei out",
+      "description": "A Central Bank caps a participant's daily outflow. The same logical field changes unit between request and response.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "cookie carrying the central_bank realm role"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/governance/transfer-limits",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "participant_id": "bank-a",
+          "currency": "BRL",
+          "max_amount": "100000.00"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "limit_id": "{{NON_EMPTY_STRING}}",
+          "central_bank_id": "{{NON_EMPTY_STRING}}",
+          "participant_id": "bank-a",
+          "currency": "BRL",
+          "max_amount": "100000000000000000000000",
+          "is_active": true
+        }
+      },
+      "notes": "COMPOUNDING UNIT TRAP. max_amount is a HUMAN DECIMAL on input ('100000.00') and WEI on output ('100000000000000000000000'), under the same field name. A client that reads a limit and writes it back unchanged shrinks it by 10^18. An empty participant_id means 'all participants on this spoke'; an empty currency means 'all currencies'. Only max_amount is required."
+    },
+    {
+      "id": "limits-hp-02",
+      "title": "List the limits this Central Bank created",
+      "description": "Scoped to the authenticated Central Bank. There is no network-wide view.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "central_bank cookie",
+        "atLeastOneLimit": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/governance/transfer-limits",
+        "headers": {
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "limits": "{{ARRAY}}"
+        }
+      },
+      "notes": "Every max_amount in this list is in wei — see limits-hp-01."
+    },
+    {
+      "id": "limits-hp-03",
+      "title": "Delete a limit — 204 with no body",
+      "description": "The only 204 in the entire published Toolbox surface.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "central_bank cookie",
+        "limitExists": true,
+        "limitOwnedByCaller": true
+      },
+      "input": {
+        "method": "DELETE",
+        "path": "/api/v2/governance/transfer-limits/{id}",
+        "pathParams": {
+          "id": "{{LIMIT_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 204
+      },
+      "notes": "Assert there is no response body. A client that unconditionally parses JSON on a 2xx will throw here."
+    },
+    {
+      "id": "limits-err-01",
+      "title": "A max_amount that is not a decimal is 422, not 400",
+      "description": "The canonical malformed-amount assertion for Scenario B: the request shape is valid, the value is not.",
+      "category": "error",
+      "preconditions": {
+        "session": "central_bank cookie"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/governance/transfer-limits",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "participant_id": "bank-a",
+          "currency": "BRL",
+          "max_amount": "one hundred thousand"
+        }
+      },
+      "expectedOutput": {
+        "status": 422,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "422 for an unparseable value, 400 only for a malformed body or an absent max_amount. This is one of the few places on the platform where the 400/422 distinction is drawn deliberately and documented upstream."
+    },
+    {
+      "id": "limits-err-02",
+      "title": "Deleting another Central Bank's limit is 422, not 403",
+      "description": "The limit exists but cannot be deleted by this caller. The platform expresses that as unprocessable rather than forbidden.",
+      "category": "error",
+      "preconditions": {
+        "session": "central_bank cookie for Central Bank A",
+        "limitOwnedBy": "Central Bank B"
+      },
+      "input": {
+        "method": "DELETE",
+        "path": "/api/v2/governance/transfer-limits/{id}",
+        "pathParams": {
+          "id": "{{OTHER_CB_LIMIT_ID}}"
+        },
+        "headers": {
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 422,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "A limit id that does not exist at all is 404 on the same route. The 403 declared on this operation is the role gate, not the ownership check — three distinct refusals, three different codes."
+    },
+    {
+      "id": "breaker-hp-01",
+      "title": "Pause a pair 1-of-N — a request body the platform declares nowhere",
+      "description": "Any single Central Bank can halt a pair. Resuming takes two.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "central_bank cookie",
+        "breakerState": "LIVE"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/governance/circuit-breaker/pause",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "bank_id": "cb-a",
+          "reason_code": "SETTLEMENT_ANOMALY"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "state": "HALTED",
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}"
+        }
+      },
+      "notes": "The platform document declares NO requestBody at all for this operation, yet all three fields are required. A client built from the upstream document literally cannot operate the circuit breaker. The contract publishes the body under x-cbweb3-source: implementation-observed. reason_code is stored verbatim and the platform declares no vocabulary for it, so none is published."
+    },
+    {
+      "id": "breaker-hp-02",
+      "title": "Propose a resume (2-of-N step 1)",
+      "description": "Returns a request_id that the second Central Bank must sign.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "central_bank cookie",
+        "breakerState": "HALTED"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/governance/circuit-breaker/resume-request",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "bank_id": "cb-a"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "state": "RESUME_PENDING",
+          "request_id": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Also declared with no requestBody upstream. Note this handler does NOT check for a missing pair or bank_id up front, so an incomplete body fails as 422 rather than 400 — the opposite of pause."
+    },
+    {
+      "id": "breaker-hp-03",
+      "title": "Sign the resume — the second Central Bank executes it",
+      "description": "Two Central Banks are required, so the signer must not be the proposer. On execution the breaker returns to LIVE.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "central_bank cookie for a DIFFERENT Central Bank than the proposer",
+        "resumeProposed": "breaker-hp-02",
+        "quorumRemaining": 1
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/governance/circuit-breaker/resume-sign",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_B_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "request_id": "{{RESUME_REQUEST_ID}}",
+          "bank_id": "cb-b"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "state": "LIVE",
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}"
+        }
+      },
+      "notes": "Confirm with GET /api/v2/governance/circuit-breaker/status that trading actually resumed — see breaker-edge-01 for why the 200 alone is not enough."
+    },
+    {
+      "id": "breaker-err-01",
+      "title": "Pause without reason_code is 400",
+      "description": "All three fields are checked up front by the pause handler, unlike the resume-request handler.",
+      "category": "error",
+      "preconditions": {
+        "session": "central_bank cookie"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/governance/circuit-breaker/pause",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "bank_id": "cb-a"
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Undeclared upstream, since the platform document declares neither the body nor this status. Published in the contract under x-cbweb3-source: implementation-observed."
+    },
+    {
+      "id": "breaker-err-02",
+      "title": "A disputed resume signature is 422 CIRCUIT_BREAKER_RESUME_DISPUTED",
+      "description": "The one circuit-breaker failure that carries a machine-readable error_code.",
+      "category": "error",
+      "preconditions": {
+        "session": "central_bank cookie",
+        "resumeDisputed": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/governance/circuit-breaker/resume-sign",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_B_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "request_id": "{{RESUME_REQUEST_ID}}",
+          "bank_id": "cb-b"
+        }
+      },
+      "expectedOutput": {
+        "status": 422,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}",
+          "error_code": "CIRCUIT_BREAKER_RESUME_DISPUTED"
+        }
+      },
+      "notes": "Undeclared upstream. Every other circuit-breaker failure returns a bare {error}, so this is the only one a client can branch on programmatically."
+    },
+    {
+      "id": "breaker-edge-01",
+      "title": "A 200 on resume-sign does NOT mean trading resumed",
+      "description": "The signature was recorded but the resume did not execute — quorum is not yet met, or execution failed. The breaker is still not LIVE.",
+      "category": "edge-case",
+      "preconditions": {
+        "session": "central_bank cookie",
+        "resumeProposed": true,
+        "quorumNotYetMet": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/governance/circuit-breaker/resume-sign",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_B_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "request_id": "{{RESUME_REQUEST_ID}}",
+          "bank_id": "cb-b"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "state": "RESUME_PENDING",
+          "request_id": "{{RESUME_REQUEST_ID}}"
+        }
+      },
+      "notes": "BRANCH ON state, NOT ON THE STATUS CODE. state LIVE means the resume executed; state RESUME_PENDING on the same 200 means it did not, and swaps on the pair will still fail with 422 CIRCUIT_BREAKER_HALTED. Note also that pause_initiator and pause_reason on the status endpoint are only present in the LOCAL projection — a pause raised on another gateway is visible as state but not as attribution."
+    },
+    {
+      "id": "disclosure-hp-01",
+      "title": "Open a Master Viewing Key disclosure request",
+      "description": "Supervisory disclosure of a private transaction, gated by a two-signature quorum and a 72-hour expiry.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "cookie with the oversight/central_bank role"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/oversight/disclosure-request",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "tx_ref": "0xabcd1234ef567890abcd1234ef567890abcd1234ef567890abcd1234ef567890",
+          "requestor_id": "cb-a",
+          "reason_code": "AML_ALERT"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "request_id": "{{NON_EMPTY_STRING}}",
+          "requested_by_bank_id": "cb-a",
+          "target_transaction_ref": "0xabcd1234ef567890abcd1234ef567890abcd1234ef567890abcd1234ef567890",
+          "reason_code": "AML_ALERT",
+          "state": "PENDING",
+          "quorum_required": 2,
+          "quorum_reached": 0,
+          "expires_at": "{{RFC3339}}"
+        }
+      },
+      "notes": "200, not 201, despite creating a record. TWO FIELDS ARE RENAMED between request and record: requestor_id becomes requested_by_bank_id and tx_ref becomes target_transaction_ref. requestor_id is taken from the BODY and is not cross-checked against the session — unlike everywhere else on this platform. reason_code is stored verbatim and validated against nothing. tx_ref is unconstrained in form; note that the compliance surface elsewhere describes an HTLC contract id as 0x-prefixed hex while every HTLC endpoint uses the htlc-a1b2c3d4 form, so a third identifier convention is in play here."
+    },
+    {
+      "id": "disclosure-hp-02",
+      "title": "Sign a disclosure request — the acknowledgement tells you nothing",
+      "description": "Records one signature. The response is a fixed acknowledgement that does not report whether quorum was reached.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "cookie for a signing authority",
+        "requestState": "PENDING",
+        "signerHasNotSignedBefore": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/oversight/disclosure-sign",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{SUPERVISOR_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "request_id": "{{DISCLOSURE_REQUEST_ID}}",
+          "signer_id": "supervisor-1"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "status": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Re-read GET /api/v2/oversight/disclosure-status/{requestID} afterwards to learn the real outcome — this response is a fixed literal and carries no state. A second signature from the SAME signer_id is rejected, so the quorum is genuinely two distinct authorities."
+    },
+    {
+      "id": "disclosure-hp-03",
+      "title": "Read disclosure status — public, mixed-case path placeholder",
+      "description": "Unauthenticated read of the request record. Note the path placeholder is requestID in mixed case, unlike every other identifier on this surface.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "none",
+        "requestExists": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/oversight/disclosure-status/{requestID}",
+        "pathParams": {
+          "requestID": "{{DISCLOSURE_REQUEST_ID}}"
+        },
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "request_id": "{{DISCLOSURE_REQUEST_ID}}",
+          "state": "{{NON_EMPTY_STRING}}",
+          "quorum_required": 2,
+          "quorum_reached": "{{NON_NEGATIVE_INTEGER}}"
+        }
+      },
+      "notes": "The delivered state vocabulary is PENDING, QUORUM_REACHED, APPROVED, EXPIRED, REJECTED. Signing after expires_at (72 hours after opened_at) fails and transitions the request to EXPIRED. closed_at appears only once quorum is reached."
+    },
+    {
+      "id": "disclosure-err-01",
+      "title": "Signing an expired or already-signed request is 422",
+      "description": "One 422 covers four distinct conditions: unknown request, request not PENDING, request expired, or this signer_id has already signed.",
+      "category": "error",
+      "preconditions": {
+        "session": "cookie for a signing authority",
+        "requestState": "EXPIRED"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/oversight/disclosure-sign",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{SUPERVISOR_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "request_id": "{{EXPIRED_DISCLOSURE_REQUEST_ID}}",
+          "signer_id": "supervisor-1"
+        }
+      },
+      "expectedOutput": {
+        "status": 422,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Undeclared upstream. A client cannot tell the four conditions apart from the status code, and the error text is free-form, so re-read the status endpoint to decide what to do."
+    },
+    {
+      "id": "disclosure-err-02",
+      "title": "An unknown disclosure request id is 404",
+      "description": "Unlike the sign route, the public status route does distinguish a missing record.",
+      "category": "error",
+      "preconditions": {
+        "session": "none",
+        "requestExists": false
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v2/oversight/disclosure-status/{requestID}",
+        "pathParams": {
+          "requestID": "00000000-0000-0000-0000-000000000000"
+        },
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 404,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "An EMPTY identifier is 400 rather than 404 on the same route."
+    },
+    {
+      "id": "sovereign-hp-01",
+      "title": "Sovereign liquidity top-up — omitting is_token_a means side B",
+      "description": "A Central Bank adds to its own side of a sovereign pair. The side selector defaults in a way that silently picks the other side.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "cookie or bearer for a Central Bank",
+        "pairIsSovereign": true,
+        "sufficientBalance": true
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v2/amm/liquidity/sovereign-add",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{CB_A_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "amount": "1000000000000000000",
+          "is_token_a": true
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "status": "ok",
+          "pool_pair": "{{PAIR_ID_FROM_LISTPAIRS}}",
+          "amount": "1000000000000000000",
+          "side": "A"
+        }
+      },
+      "notes": "201, not 200. ALWAYS send is_token_a explicitly: omitting it does not mean 'unspecified', it means side B. Assert the returned side matches your intent. A pair the gateway does not classify as sovereign yields 422 NOT_SOVEREIGN_PAIR; an insufficient balance yields 422 INSUFFICIENT_BALANCE; a gateway with the feature unwired yields 501, which is a deployment-shape skip rather than a failure. The contract's example pair_id here is a third naming convention (W-BRL-ARS) — do not copy it, take the value from listPairs."
+    }
+  ]
+}

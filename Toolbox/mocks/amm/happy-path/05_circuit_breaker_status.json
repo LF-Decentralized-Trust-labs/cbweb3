@@ -1,0 +1,21 @@
+{
+  "id": "mock-amm-hp-05",
+  "title": "Discovery 5 — the breaker is LIVE for this pair (no credentials)",
+  "description": "Any single Central Bank can halt the Hub AMM for a pair; restarting it takes two. Check this before swapping: a halted breaker makes the swap fail with 422 CIRCUIT_BREAKER_HALTED.",
+  "notes": "Gateway: any. ALWAYS pass pair. The breaker is per pair and omitting the parameter does not report 'the network' — the handler substitutes the literal BRL-USD, which on most deployments is not a registered pair at all, so an omitted parameter can return a healthy-looking LIVE for a pair nobody trades. Note also that a LIVE answer is not proof no peer has halted: when the chain cannot be read the gateway silently falls back to its local projection, and to LIVE when it has no record. The pair parameter is undeclared upstream; both it and the response shape come from the delivered handler.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v2/governance/circuit-breaker/status?pair=W-CRC-CLP"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "5424eebaa7de7df7732d1deee51c56e9"
+    },
+    "body": {
+      "pair": "W-CRC-CLP",
+      "state": "LIVE"
+    }
+  }
+}

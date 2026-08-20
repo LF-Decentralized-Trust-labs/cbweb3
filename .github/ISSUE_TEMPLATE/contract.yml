@@ -11,7 +11,7 @@ body:
     attributes:
       label: Domain
       description: "Which domain does this contract belong to?"
-      placeholder: "e.g., pvp, ccip, privacy, observability"
+      placeholder: "e.g., auth, pvp (Scenario A), amm (Scenario B)"
     validations:
       required: true
   - type: textarea
@@ -25,7 +25,7 @@ body:
     id: proposed-artifact
     attributes:
       label: Proposed artifact
-      description: "Describe the contract (endpoints, schemas, error model). Reference deliverables (D2-D6) if applicable."
+      description: "Describe the contract (endpoints, schemas, error model). Every path, field, status code, enum value and schema MUST exist on the delivered CBWeb3 API Gateway — never invent one; if something is genuinely absent, say so explicitly. Shapes recovered from delivered source rather than from the gateway's own OpenAPI document must be marked x-cbweb3-source: implementation-observed."
     validations:
       required: true
   - type: textarea
@@ -35,8 +35,12 @@ body:
       description: "What must be true for this contract to be considered complete?"
       value: |
         - [ ] OpenAPI 3.0.3 spec with paths, schemas, error model, and examples
+        - [ ] Every path verified against the delivered gateway specification
+        - [ ] Self-contained: no cross-file $ref, independently lintable and Prism-mockable
+        - [ ] Version tracks the gateway version it describes, in the filename and info.version
         - [ ] CHANGELOG.md with version history
-        - [ ] README.md with flow diagram and validation instructions
+        - [ ] README.md with scenario framing, divergences from the platform document, and
+              open questions recorded rather than resolved by guesswork
         - [ ] Passes Spectral lint without errors
         - [ ] No secrets or sensitive data
     validations:

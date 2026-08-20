@@ -1,0 +1,28 @@
+{
+  "id": "mock-amm-prov-06",
+  "title": "Corridor step 5 — BCCR mints its Hub W-token and grants the AMM an allowance",
+  "description": "Preparation for seeding: mint W-tCeBM_CRC and approve the per-pair AMM to spend it.",
+  "notes": "Gateway: BCCR (Banco Central de Costa Rica) Central Bank gateway, spoke-crc. Requires the central_bank realm role — note that /api/v2 uses lowercase unprefixed roles, while /api/v1 uses the ROLE_-prefixed ones; both namespaces coexist in the same token's roles array. amount is the only field the handler requires, and the platform's own end-to-end test sends it alone. The superseded amount_a / amount_b fields are rejected outright with 400. An anti-cross guard applies when a recipient is named: minting to another Central Bank's address answers 403 with code CROSS_CB_MINT_PROHIBITED. Both the request and response shapes are declared free-form upstream and are recovered from the delivered handler.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v2/amm/token/mint-and-approve",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "amount": "500000000000000000000000"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "3d374f2d6873f56a2dd352ea3e6be376"
+    },
+    "body": {
+      "status": "ok",
+      "amount": "500000000000000000000000"
+    }
+  }
+}

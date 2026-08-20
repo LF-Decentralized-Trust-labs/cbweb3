@@ -1,0 +1,28 @@
+{
+  "id": "mock-pvp-hp-06",
+  "title": "Step 6 — BCCR burns 8,000,000 fCeBM on Besu and mints 8,000,000 tCeBM on Paladin",
+  "description": "Two chains move, so two transaction hashes come back: the Besu burn of the fiat token and the Zeto/Paladin mint of the privacy token.",
+  "notes": "Gateway: BCCR Central Bank gateway (spoke-crc). The approve/reject/exchange half of the reserve lifecycle is registered only on a Central Bank gateway and is gated to ROLE_TREASURY; a commercial-bank gateway answers 404 on this path. Field divergence, verified in the delivered gateway (ApproveEscrowResult): the Paladin-side hash is named mint_tx_hash, not the zeto_mint_tx_hash declared by the Scenario A OpenAPI document and by contracts/pvp. Scenario B's contract has this right; Scenario A's document does not describe its own gateway.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/escrows/approve",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "escrow_id": "d60cb321-374d-4cb4-b3ca-b878d9c06d03"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "0f02d6113023d2bc94709177d916736f"
+    },
+    "body": {
+      "burn_tx_hash": "0xae02ecf610a02ac406d2e45c1522c25e115ebe8ae7edf5a64f29e07766f21534",
+      "mint_tx_hash": "0xf2fc21f53ac6f551d882d35b632deaf9e2ca7ee72e11b7af278e030161ad1711"
+    }
+  }
+}

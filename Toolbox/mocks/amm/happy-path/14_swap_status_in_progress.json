@@ -1,0 +1,31 @@
+{
+  "id": "mock-amm-hp-14",
+  "title": "Payment step 3 — polling: the Hub leg is executing",
+  "description": "The intermediate states are QUOTING, BRIDGE_IN_PROGRESS, SWAP_IN_PROGRESS and BRIDGE_OUT_PROGRESS. Fields appear as the orchestration reaches them: the swap hash is present, the bridge-out position is not yet.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway, spoke-crc. Poll until COMPLETED or FAILED. Spec gap: that status vocabulary is not in the platform OpenAPI document at all — it is recovered from Go domain code, which is why contracts/amm publishes status as a plain string rather than an enum the vendor has not committed to. Everything except swap_id, correlation_id, status and created_at is conditional on progress; a client must tolerate their absence.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v2/amm/swap/cross-currency/swp-794fff1b",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "6c0fbd240ff1171342e88709ee4ef434"
+    },
+    "body": {
+      "swap_id": "swp-794fff1b",
+      "correlation_id": "914512b0-8413-45e6-a46e-e9d1de6a8e25",
+      "status": "SWAP_IN_PROGRESS",
+      "amount_in": "542753802533140547183",
+      "amount_out": "1000000000000000000000",
+      "effective_rate": 1.842456,
+      "bridge_in_position_id": "e2b86dab-27ed-4d68-80b5-8fec5eab6b8e",
+      "swap_tx_hash": "0x9db9107e81b2607e6729940e78a3963621f9a977328beeb750ab631a74c7b3fa",
+      "created_at": "2026-06-18T10:00:00Z"
+    }
+  }
+}

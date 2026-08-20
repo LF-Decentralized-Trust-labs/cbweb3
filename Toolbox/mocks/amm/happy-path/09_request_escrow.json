@@ -1,0 +1,28 @@
+{
+  "id": "mock-amm-hp-09",
+  "title": "Reserve step 4 — Reserve Tokenisation: request conversion of fCeBM into tCeBM",
+  "description": "This is the step that makes the payer able to settle. It is a hard precondition, not an optional privacy step.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway, spoke-crc. The cross-currency bridge-in handler refuses a swap from a bank that does not already hold sufficient tCeBM: 'insufficient tokenized reserves: bank %s holds %s tCeBM, need %s — complete Reserve Tokenisation first'. Enforcement is DISABLED when the gateway runs without PAYMENT_GRPC_ADDR, so a sandbox can silently accept a swap that production would refuse — a conformance run must include this step regardless. Scenario B's request carries deposit_id, linking the escrow to the approved deposit; Scenario A's does not.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/escrows",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "amount": "600000000000000000000000",
+      "deposit_id": "b7a87cc9-4c09-4eb5-9263-f1a1448c1ee2"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "2a135f5a00f096fc3acda3f8ec24f659"
+    },
+    "body": {
+      "escrow_id": "2fbf99fb-65b6-47d8-99a3-d3ec10faf37d"
+    }
+  }
+}

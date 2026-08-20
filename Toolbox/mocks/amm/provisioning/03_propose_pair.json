@@ -1,0 +1,36 @@
+{
+  "id": "mock-amm-prov-03",
+  "title": "Corridor step 2 — BCCR proposes the CRC/CLP pair",
+  "description": "Only the Central Bank that issues token A may propose. The service deploys a dedicated per-pair AMM bound to (token_a, token_b) and returns the pair in PROPOSED status.",
+  "notes": "Gateway: BCCR (Banco Central de Costa Rica) Central Bank gateway, spoke-crc. Requires the central_bank realm role — note that /api/v2 uses lowercase unprefixed roles, while /api/v1 uses the ROLE_-prefixed ones; both namespaces coexist in the same token's roles array. Omit amm_address unless you know exactly why you are setting it: supplying a shared or bootstrap AMM mis-binds the pool and makes every later add-liquidity call revert. The 201 here is another delivered-vs-documented divergence (the platform declares 200 with no schema). Undocumented upstream: 409 PAIR_ALREADY_EXISTS / PAIR_ALREADY_ACTIVE, 404 PAIR_NOT_FOUND, and a 403 carrying code NOT_CENTRAL_BANK_OF_TOKEN_A.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v2/amm/pairs/propose",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "pair_id": "W-CRC-CLP",
+      "token_a_address": "0x1a3e796c050839af5f0af526c1a562889e603d38",
+      "token_b_address": "0xf5049d776fa8137e2e1b948671c734ea7627c4fd",
+      "proposer_cb": "central_bank_crc"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "396ec15caddb63dd56c87d4a102d64f8"
+    },
+    "body": {
+      "pair_id": "W-CRC-CLP",
+      "status": "PROPOSED",
+      "token_a_address": "0x1a3e796c050839af5f0af526c1a562889e603d38",
+      "token_b_address": "0xf5049d776fa8137e2e1b948671c734ea7627c4fd",
+      "amm_address": "0xcbc2bfd758c87b8e6db22afa3dc7c83e00b65baf",
+      "proposer_cb": "central_bank_crc",
+      "proposed_at": "2026-06-17T14:00:00Z"
+    }
+  }
+}

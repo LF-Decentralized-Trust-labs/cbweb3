@@ -1,0 +1,303 @@
+{
+  "contract": "CBWeb3 Scenario B — Hub-and-spoke settlement (reserve lifecycle)",
+  "contractVersion": "2.3.0",
+  "generatedAt": "2026-08-20",
+  "vectors": [
+    {
+      "id": "hubreserve-hp-01",
+      "title": "Register a fiat deposit on a Scenario B spoke",
+      "description": "Step 1 of the mandatory reserve prelude. Without tCeBM on its own spoke a bank cannot be bridged into the Hub and cannot pay.",
+      "category": "happy-path",
+      "preconditions": {
+        "gateway": "Scenario B commercial-bank gateway",
+        "session": "access_token cookie for a commercial-bank participant"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/deposits",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "amount": "10000000"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "deposit_id": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Scenario B's request has no requester_paladin_identity field at all, unlike Scenario A's. requester_besu_address is scoped to the verified caller by the relay and is overwritten if sent. Amounts on the /api/v1 surface are 7-digit-looking opaque strings with no stated unit; amounts on /api/v2 are explicitly 18-decimal base units. There is no documented conversion between the two, so never move a figure from a deposit straight into a swap."
+    },
+    {
+      "id": "hubreserve-hp-02",
+      "title": "Central Bank approves the deposit",
+      "description": "Moves the record to APPROVED. As in Scenario A the platform answers 201 rather than 200.",
+      "category": "happy-path",
+      "preconditions": {
+        "gateway": "Scenario B Central Bank gateway",
+        "session": "central_bank role",
+        "depositStatus": "PENDING"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/deposits/approve",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "deposit_id": "{{DEPOSIT_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "status": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": null
+    },
+    {
+      "id": "hubreserve-hp-03",
+      "title": "Fiat exchange at .../deposits/exchange, not .../deposits/fiat-exchange",
+      "description": "The Scenario B path and response field both differ from Scenario A. Neither gateway serves the other's path, so this is the single most likely place a client written for one scenario silently 404s against the other.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "central_bank role",
+        "depositStatus": "APPROVED"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/deposits/exchange",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "deposit_id": "{{DEPOSIT_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "mint_tx_hash": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Scenario A returns tx_hash here; Scenario B returns mint_tx_hash. The platform's own summary and field description for this operation say the token minted is tCeBM. Both are wrong: the token minted is fCeBM, the ERC-20 fiat token. tCeBM appears one step later, at escrows/approve."
+    },
+    {
+      "id": "hubreserve-hp-04",
+      "title": "Request Reserve Tokenisation, quoting the approved deposit",
+      "description": "Scenario B's escrow request carries an extra deposit_id linking the tokenisation to the deposit that funded it. Scenario A's does not.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "commercial-bank session",
+        "depositStatus": "APPROVED and exchanged",
+        "fiatBalance": "at least the requested amount"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/escrows",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "deposit_id": "{{DEPOSIT_ID}}",
+          "amount": "5000000"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "escrow_id": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "The platform's own description of amount on this request reads 'tCeBM to convert into tCeBM'. The real conversion is fCeBM to tCeBM."
+    },
+    {
+      "id": "hubreserve-hp-05",
+      "title": "Approve the escrow — burn fCeBM, mint tCeBM",
+      "description": "Two chains move. Note the second hash is mint_tx_hash here, where Scenario A calls the same value zeto_mint_tx_hash.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "central_bank role",
+        "escrowStatus": "PENDING"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/escrows/approve",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "escrow_id": "{{ESCROW_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "burn_tx_hash": "{{NON_EMPTY_STRING}}",
+          "mint_tx_hash": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": null
+    },
+    {
+      "id": "hubreserve-hp-06",
+      "title": "tCeBM balance is non-zero — the gate on every swap",
+      "description": "The reserve prelude is not optional in Scenario B: bridge lock-mint locks spoke tCeBM the bank must already hold, and a cross-currency swap bridges in on the payer's behalf.",
+      "category": "happy-path",
+      "preconditions": {
+        "escrowStatus": "APPROVED"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/token/balance",
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "balance": "{{NON_ZERO_BIGINT_STRING}}"
+        }
+      },
+      "notes": "Capture this value before a swap and compare after: the payer must be debited amount_in, NOT max_amount_in. See amm_swap_vectors.json swap-hp-04."
+    },
+    {
+      "id": "hubreserve-hp-07",
+      "title": "List escrows scoped to the calling bank",
+      "description": "No pagination. On a commercial-bank gateway the relay pins the scope to the caller regardless of the requester_id sent.",
+      "category": "happy-path",
+      "preconditions": {
+        "escrowExists": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/payments/escrows",
+        "query": {
+          "requester_id": "0x1234abcd00000000000000000000000000000000"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "escrows": "{{ARRAY}}",
+          "total": "{{NON_NEGATIVE_INTEGER}}"
+        }
+      },
+      "notes": "Scenario B's escrow records carry besu_address where Scenario A's carry requester_besu_address, plus an extra requester_id bank code. The two record shapes are not interchangeable."
+    },
+    {
+      "id": "hubreserve-err-01",
+      "title": "Escrow amount sent as a JSON number is 400",
+      "description": "Amounts are decimal strings everywhere on this surface. A JSON number fails body parsing.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid commercial-bank session"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/escrows",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "deposit_id": "{{DEPOSIT_ID}}",
+          "amount": 5000000
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "400 is declared on this operation. A body that parses but omits amount is refused further downstream; the reserve handlers do not translate that failure into a 400, so expect 500 there rather than 400."
+    },
+    {
+      "id": "hubreserve-err-02",
+      "title": "Approving an escrow without the Central Bank role is 403",
+      "description": "Every Central-Bank-side reserve mutation in Scenario B is role-gated exactly as in Scenario A.",
+      "category": "error",
+      "preconditions": {
+        "gateway": "Scenario B Central Bank gateway",
+        "session": "valid cookie WITHOUT the central_bank role",
+        "escrowStatus": "PENDING"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/escrows/approve",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{NON_CB_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "escrow_id": "{{ESCROW_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 403,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "The role in the token is the lowercase Keycloak realm role central_bank. ROLE_CENTRAL_BANK_SCENARIO_B, which the platform document writes in prose, is a Go constant name and never appears in a JWT."
+    },
+    {
+      "id": "hubreserve-err-03",
+      "title": "No session cookie is 401 on the fiat balance probe",
+      "description": "Confirms the /api/v1 surface in Scenario B is cookie-guarded too. Bearer tokens are accepted only on twelve /api/v2 routes and on none of these.",
+      "category": "error",
+      "preconditions": {
+        "session": "empty cookie jar"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/token/fiat-balance",
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 401,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": null
+    },
+    {
+      "id": "hubreserve-edge-01",
+      "title": "A gateway with no fiat adapter answers 503, not 500",
+      "description": "getFiatBalance is the only operation in either scenario that declares a 503. It is a deployment-shape signal — this node has no fiat token adapter wired — and not a transient fault to retry.",
+      "category": "edge-case",
+      "preconditions": {
+        "gateway": "a deployment with no fiat token adapter configured",
+        "session": "valid"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/token/fiat-balance",
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 503,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "A conformance runner should SKIP rather than FAIL when a gateway profile lacks the adapter. The same reasoning applies to a 404 from a route group the deployment never registered, and to the 501 on GET /api/v2/amm/swap/cross-currency when no history reader is wired."
+    }
+  ]
+}

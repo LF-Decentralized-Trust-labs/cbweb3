@@ -1,0 +1,32 @@
+{
+  "id": "mock-pvp-hp-13",
+  "title": "Step 13 — the initiator checks that the mirror leg exists before revealing anything",
+  "description": "counterparty_locked is the gate that makes the swap safe: until the relay has observed the responder's lock on spoke-pen, the initiator must not settle, and the gateway refuses to.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway, reading its own leg (mock-pvp-hp-11). BLOCKING DIVERGENCE, verified in the delivered gateway (GetHTLCStatus returns c.JSON(result)): the body is the bare lock record, NOT wrapped in a lock key as the platform OpenAPI document and contracts/pvp declare. The delivered record also carries counterparty_locked, amount and created_at, which the contract does not declare, and carries no secret field, which the contract does. state uses the prefixed vocabulary (HTLC_STATE_LOCKED) while the state query parameter of /api/v1/htlc/search takes the bare form (LOCKED) — the platform never reconciles the two. Attempting to settle with counterparty_locked false yields 500 with 'counterparty spoke has not yet locked its leg'.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/htlc/status/382307e71ddcd22f2e345d29eb396e0880e9a194aa90bc09110d15ea097ed1f5",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "9f7b595ca4a808b3d92e1192b91678e3"
+    },
+    "body": {
+      "contract_id": "382307e71ddcd22f2e345d29eb396e0880e9a194aa90bc09110d15ea097ed1f5",
+      "sender": "funded_operator@spoke-crc-bank-sanjose",
+      "receiver": "funded_operator@spoke-crc-bank-heredia",
+      "hash_lock": "93d1f1757cd69442489f4f788d90c4dbc37605905c5bf496dea38fadba3ddef2",
+      "time_lock": 1781781300,
+      "zeto_lock_ref": "zeto-utxo-70be923c4307",
+      "state": "HTLC_STATE_LOCKED",
+      "counterparty_locked": true,
+      "amount": "5000000",
+      "created_at": "2026-06-18T10:15:00Z"
+    }
+  }
+}

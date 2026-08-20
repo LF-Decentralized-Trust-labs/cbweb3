@@ -1,0 +1,27 @@
+{
+  "id": "mock-pvp-timeout-01",
+  "title": "The responder never locked — refunding before the timelock expires is refused",
+  "description": "A second CRC/PEN trade in which Banco de Lima never locked its leg. At 09:30 the initiator tries to reclaim its 5,000,000 CRC, 30 minutes before the timelock at 10:00. The gateway refuses.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway (spoke-crc). Trade 799ec833-4563-4e26-87f5-b842bbb763c3 is a separate story from mocks/pvp/happy-path; nothing here contradicts that flow. Status and body verified in the delivered payment orchestrator (internal/grpc/server/server.go RefundHTLC): the guard returns gRPC FailedPrecondition, which the gateway maps to HTTP 500 by default, and the raw gRPC string is passed straight through into error. Two things follow. First, the /api/v1 error model leaks transport internals and has no machine-readable code, so assert on the status and never on this string. Second, contracts/pvp does not declare a 500 meaning for this operation at all — it is the generic InternalError. A refund that is merely early is not a server fault, but the platform reports it as one.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/refund",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "contract_id": "7ad86b6b574fae1af798923bb1c50138b94ec5c11b1b6bf4ea2b22e2fb2fa0cb"
+    }
+  },
+  "response": {
+    "status": 500,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "7e8e223222f81a34ea9628c5bb01fd02"
+    },
+    "body": {
+      "error": "rpc error: code = FailedPrecondition desc = time lock has not expired yet"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "mock-auth-hp-04",
+  "title": "Introspect the session — which bank will the gateway attribute writes to?",
+  "description": "GET /api/v1/auth/me returns the claims the gateway derived from the access_token cookie. bankId is the identity every write is attributed to.",
+  "notes": "Gateway: any. This is how a client discovers its own bankId, and why request bodies must never carry payer_bank_id, payer_id, owner_bank_id or requester_besu_address — those fields are deprecated and overwritten from this claim. Scenario-dependent behaviour: when the JWT carries no bank id, Scenario A substitutes the gateway's BANK_CODE here while Scenario B omits bankId entirely, so a test asserting its absence passes on B and fails on A.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/auth/me",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "d33942b0cb65b51a8f181f66f17fa7a4"
+    },
+    "body": {
+      "subject": "0575c01c-dbcd-4620-85a5-908c93046e54",
+      "issuer": "http://keycloak:8080/realms/cbweb3-spoke-crc",
+      "roles": [
+        "ROLE_COMMERCIAL_BANK"
+      ],
+      "wallet": "0x6f8152258b780742803b85de3dd176ecd9fff90f",
+      "country": "CR",
+      "bankId": "bank-sanjose"
+    }
+  }
+}

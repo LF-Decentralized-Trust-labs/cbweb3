@@ -1,0 +1,361 @@
+{
+  "contract": "CBWeb3 Scenario A — PvP Settlement (reserve lifecycle: deposit, escrow, redeem)",
+  "contractVersion": "2.3.0",
+  "generatedAt": "2026-08-20",
+  "vectors": [
+    {
+      "id": "reserve-hp-01",
+      "title": "Register a fiat deposit",
+      "description": "Step 1 of the reserve lifecycle. A commercial bank registers its intent to deposit fiat with its Central Bank. The Central Bank creates a PENDING record and returns a deposit_id.",
+      "category": "happy-path",
+      "preconditions": {
+        "gateway": "commercial-bank gateway (Scenario A). A Central Bank gateway does not register this public route and answers 404.",
+        "session": "access_token cookie for a ROLE_COMMERCIAL_BANK participant"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/deposits",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "amount": "10000000"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "deposit_id": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Assert ONLY deposit_id. The contract declares a second property status: PENDING because the platform document does, but the delivered response message carries a single field (apis/proto/payment_orchestrator/v1/payment_orchestrator.proto:375-377) and no status is emitted. Do not send requester_besu_address or requester_paladin_identity: the commercial-bank proxy overwrites both from the verified caller. Amounts are opaque big-integer STRINGS — no decimals count is stated anywhere in the platform document for tCeBM or fCeBM."
+    },
+    {
+      "id": "reserve-hp-02",
+      "title": "Central Bank approves the deposit (201, not 200)",
+      "description": "The Central Bank confirms receipt of the fiat and moves the record to APPROVED. Nothing is minted on chain yet — reserve-hp-03 does that.",
+      "category": "happy-path",
+      "preconditions": {
+        "gateway": "Central Bank gateway",
+        "session": "access_token cookie carrying ROLE_TREASURY",
+        "depositStatus": "PENDING"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/deposits/approve",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "deposit_id": "{{DEPOSIT_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "status": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "The platform answers 201 here even though nothing is created. A client asserting 200 fails against every deployment."
+    },
+    {
+      "id": "reserve-hp-03",
+      "title": "Fiat exchange mints fCeBM",
+      "description": "The Central Bank triggers the on-chain fiat exchange, minting fCeBM (ERC-20 on Besu) to the requester's Besu address. After this call getFiatBalance on the requester's gateway is non-zero.",
+      "category": "happy-path",
+      "preconditions": {
+        "gateway": "Central Bank gateway",
+        "session": "ROLE_TREASURY",
+        "depositStatus": "APPROVED"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/deposits/fiat-exchange",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "deposit_id": "{{DEPOSIT_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "mint_tx_hash": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Scenario A serves this at .../deposits/fiat-exchange; Scenario B serves the equivalent at .../deposits/exchange, and returns mint_tx_hash rather than tx_hash. Neither gateway serves both paths. This is why the reserve lifecycle is duplicated per scenario in the Toolbox rather than shared. Divergence: the platform OpenAPI document names this field tx_hash. The delivered Scenario A gateway returns FiatExchangeResult, whose JSON tag is mint_tx_hash, passed straight to c.JSON — so tx_hash never reaches a client. This is a document-vs-implementation split inside Scenario A, not a Scenario A vs Scenario B difference: Scenario B uses mint_tx_hash too."
+    },
+    {
+      "id": "reserve-hp-04",
+      "title": "Request Reserve Tokenisation escrow (fCeBM to tCeBM)",
+      "description": "The bank asks its Central Bank to convert fCeBM into tCeBM. This is the step that makes a bank able to settle: POST /api/v1/htlc/lock locks tCeBM the bank must already hold.",
+      "category": "happy-path",
+      "preconditions": {
+        "gateway": "commercial-bank gateway",
+        "session": "ROLE_COMMERCIAL_BANK",
+        "fiatBalance": "at least the requested amount"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/escrows",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "amount": "5000000"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "escrow_id": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "As with reserve-hp-01, assert only escrow_id — the delivered RequestEscrowResponse carries one field (payment_orchestrator.proto:421-423), while the contract mirrors the platform document's extra status property. A conformance suite that skips this vector can never execute a real HTLC lock."
+    },
+    {
+      "id": "reserve-hp-05",
+      "title": "Approve escrow — two chains move, two hashes come back",
+      "description": "The Central Bank burns the requester's fCeBM on Besu and mints the equivalent tCeBM via Zeto on Paladin. Both transaction hashes are returned.",
+      "category": "happy-path",
+      "preconditions": {
+        "gateway": "Central Bank gateway",
+        "session": "ROLE_TREASURY",
+        "escrowStatus": "PENDING"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/escrows/approve",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "escrow_id": "{{ESCROW_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "burn_tx_hash": "{{NON_EMPTY_STRING}}",
+          "mint_tx_hash": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Two hashes because Reserve Tokenisation is two on-chain acts: the fCeBM is burned and the tCeBM is minted into Zeto. Divergence: the platform OpenAPI document names this field zeto_mint_tx_hash. The delivered Scenario A gateway returns ApproveEscrowResult, whose JSON tag is mint_tx_hash, passed straight to c.JSON — so zeto_mint_tx_hash never reaches a client. This is a document-vs-implementation split inside Scenario A, not a Scenario A vs Scenario B difference: Scenario B uses mint_tx_hash too."
+    },
+    {
+      "id": "reserve-hp-06",
+      "title": "tCeBM balance is non-zero after tokenisation",
+      "description": "The pre-condition probe for every settlement test. No identity parameter is required or accepted — the balance returned is the one belonging to the gateway you called, resolved from the session.",
+      "category": "happy-path",
+      "preconditions": {
+        "escrowStatus": "APPROVED",
+        "session": "the requester's own session"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/token/balance",
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "balance": "{{NON_ZERO_BIGINT_STRING}}"
+        }
+      },
+      "notes": "balance is a big-integer string with no stated scale. Compare it as an integer string, never as a float, and never assume 18 decimals — the only place in the whole CBWeb3 surface that states a decimals count is GET /api/v2/hub/token/supply in Scenario B, and it refers to a Hub W-token, not to tCeBM."
+    },
+    {
+      "id": "reserve-hp-07",
+      "title": "List deposits filtered by requester",
+      "description": "Poll this to observe a deposit reaching APPROVED. There is no pagination: total is simply the length of the returned array.",
+      "category": "happy-path",
+      "preconditions": {
+        "depositExists": true
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/payments/deposits",
+        "query": {
+          "requester_id": "0x1234abcd00000000000000000000000000000000"
+        },
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "deposits": "{{ARRAY}}",
+          "total": "{{NON_NEGATIVE_INTEGER}}"
+        }
+      },
+      "notes": "requester_id filters on the requester's Besu ADDRESS, not on a bank code. On a commercial-bank gateway the proxy pins the filter to the caller's own address regardless of what is sent, so a bank can only ever see its own records."
+    },
+    {
+      "id": "reserve-err-01",
+      "title": "Amount sent as a JSON number is rejected 400",
+      "description": "Every amount on the /api/v1 surface is a decimal STRING. Sending a JSON number makes body parsing fail and is the reachable 400 on this endpoint.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid commercial-bank session"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/deposits",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "amount": 10000000
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "The handler decodes into a struct whose Amount field is a Go string; a JSON number fails to unmarshal and produces 400 'invalid request body' (internal/http/handlers/payment.go:596-598). This is the only 400 the delivered handler can emit on this route — see reserve-err-02."
+    },
+    {
+      "id": "reserve-err-02",
+      "title": "Missing required amount is 500, not 400",
+      "description": "A body that parses but omits amount passes the gateway untouched and is refused downstream. The failure surfaces as 500, because this handler maps every downstream error to 500 rather than translating the gRPC status.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid commercial-bank session"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/deposits",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {}
+      },
+      "expectedOutput": {
+        "status": 500,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Verified divergence, mirrored not fixed. The orchestrator answers InvalidArgument ('requester_besu_address and amount are required', escrow.go:19-21) but the gateway handler returns fiber.StatusInternalServerError unconditionally (payment.go:599-602) instead of using its own grpcErrorToHTTP mapper. The contract declares 400 for this case because the platform document does; the delivered gateway returns 500. Both 400 and 500 are declared on the operation, so a status-code assertion of 500 stays inside the contract."
+    },
+    {
+      "id": "reserve-err-03",
+      "title": "Approving a deposit without ROLE_TREASURY is 403",
+      "description": "Every Central-Bank-side reserve mutation is gated by RequireRole(ROLE_TREASURY) in the router. An authenticated session lacking it is refused after authentication, not before.",
+      "category": "error",
+      "preconditions": {
+        "gateway": "Central Bank gateway",
+        "session": "valid cookie WITHOUT ROLE_TREASURY (e.g. a supervisor or NOC session)",
+        "depositStatus": "PENDING"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/deposits/approve",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{NON_TREASURY_ACCESS_TOKEN}}"
+        },
+        "body": {
+          "deposit_id": "{{DEPOSIT_ID}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 403,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "The body also carries an undocumented required_role array (internal/http/middleware/require_role.go). Treat it as advisory and assert on the status code. The same 403 applies to rejectDeposit, requestFiatExchange, approveEscrow, rejectEscrow, approveRedeem, rejectRedeem and burnToken."
+    },
+    {
+      "id": "reserve-err-04",
+      "title": "Redeem without an amount is a 400",
+      "description": "`amount` is the only field a client supplies to this route. Omitting it is the one 400 the operation raises before anything is proxied.",
+      "category": "error",
+      "preconditions": {
+        "session": "valid commercial-bank session",
+        "zetoTransferPerformed": false
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/redeems",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {}
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Do NOT assert a 400 (or a 500) for a missing zeto_transfer_tx_hash. The public route is served by PaymentProxyHandler.RequestRedeem on a commercial-bank gateway, which performs the tCeBM transfer itself and injects zeto_transfer_tx_hash, requester_besu_address and requester_paladin_identity before forwarding — so omitting the hash SUCCEEDS. The platform document presents it as a client obligation and it is not one; the contract now says so."
+    },
+    {
+      "id": "reserve-err-05",
+      "title": "No session cookie is 401 on the balance probe",
+      "description": "Confirms the balance route is genuinely guarded. This is the assertion that still works against a stateless mock, because Prism rejects a missing apiKey-in-cookie credential without inspecting its value.",
+      "category": "error",
+      "preconditions": {
+        "session": "empty cookie jar"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/token/balance",
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 401,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "No Authorization header will help: the entire /api/v1 surface is CookieAuth-only. BearerAuth is accepted only on twelve /api/v2 routes in Scenario B."
+    },
+    {
+      "id": "reserve-edge-01",
+      "title": "Client-supplied requester identity is overwritten, not honoured",
+      "description": "A client that sends requester_besu_address and requester_paladin_identity still succeeds, but the values it sent are discarded: the commercial-bank proxy injects the verified caller's identity. Sending a foreign address does not create a deposit for that bank.",
+      "category": "edge-case",
+      "preconditions": {
+        "gateway": "commercial-bank gateway (proxy mode)",
+        "session": "ROLE_COMMERCIAL_BANK for bank-a"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/payments/deposits",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        },
+        "body": {
+          "requester_besu_address": "0xdeadbeef00000000000000000000000000000000",
+          "requester_paladin_identity": "funded_operator@spoke-a-bank-z",
+          "amount": "10000000"
+        }
+      },
+      "expectedOutput": {
+        "status": 201,
+        "body": {
+          "deposit_id": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Verify the outcome, not the status: list the deposits afterwards and assert the record's requester_besu_address is the CALLER's address, never 0xdeadbeef. Caller identity is never taken from a request body anywhere on the CBWeb3 surface; payer_bank_id, payer_id and owner_bank_id are deprecated for the same reason."
+    }
+  ]
+}

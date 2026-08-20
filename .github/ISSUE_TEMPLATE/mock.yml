@@ -12,7 +12,7 @@ body:
     attributes:
       label: Domain
       description: "Which domain do these mocks belong to?"
-      placeholder: "e.g., pvp, ccip, privacy, observability"
+      placeholder: "e.g., auth, pvp (Scenario A), amm (Scenario B)"
     validations:
       required: true
   - type: input
@@ -20,7 +20,7 @@ body:
     attributes:
       label: Related contract
       description: "Path to the interface contract these mocks implement."
-      placeholder: "e.g., Toolbox/contracts/pvp/openapi_pvp_v0.1.0.yaml"
+      placeholder: "e.g., Toolbox/contracts/pvp/openapi_pvp_v2.3.0.yaml"
     validations:
       required: true
   - type: textarea
@@ -37,8 +37,12 @@ body:
       description: "What must be true for these mocks to be considered complete?"
       value: |
         - [ ] JSON fixtures with id, title, description, request, response
-        - [ ] Organized by scenario (happy-path/, timeout-refund/, etc.)
-        - [ ] Consistent with the related OpenAPI contract
+        - [ ] Organized by scenario (happy-path/, timeout-refund/, residue/, errors/)
+        - [ ] Validates against Toolbox/schemas/mock.schema.json
+        - [ ] Every path and method resolves against a contract
+              (python Toolbox/tools/validate_artifact_paths.py)
+        - [ ] Session credential carried as a `Cookie: access_token=...` request header,
+              never as `Authorization: Bearer`
         - [ ] Uses only synthetic data (no real credentials, endpoints, or participant info)
         - [ ] README.md with usage guide
     validations:

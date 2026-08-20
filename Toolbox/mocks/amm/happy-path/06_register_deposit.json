@@ -1,0 +1,27 @@
+{
+  "id": "mock-amm-hp-06",
+  "title": "Reserve step 1 — the payer bank registers a 600,000 CRC fiat deposit",
+  "description": "Discovery needs no credentials; moving value does. Banco de San Jose registers its intent to deposit fiat with BCCR, which creates a PENDING record.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway, spoke-crc. Registered only on commercial-bank gateways, which proxy to the Central Bank. Send only amount — the proxy overwrites requester_besu_address from the verified caller. Unit caveat, stated once and true of every amount in this directory: the platform documents /api/v1 escrow amounts as 'big integer as string' with NO decimals count stated anywhere, and /api/v2 AMM amounts as 18-decimal base units. Both denominate the same asset — the payer's spoke tCeBM — so these fixtures express them in the same base units end to end, which is the only way the flow reconciles. The platform never asserts that scale factor. This is the one unresolved ambiguity in the Scenario B flow and it is flagged, not hidden.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/deposits",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "amount": "600000000000000000000000"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "f3e574c623b2c5007a38d0faf2c0ceca"
+    },
+    "body": {
+      "deposit_id": "b7a87cc9-4c09-4eb5-9263-f1a1448c1ee2"
+    }
+  }
+}

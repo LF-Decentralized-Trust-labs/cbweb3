@@ -1,0 +1,32 @@
+{
+  "id": "mock-amm-hp-18",
+  "title": "Payment step 7 — BCCR's Hub position reconciles: balanced true, unexplained zero",
+  "description": "Treasury-facing. With the swap settled and the residue returned, nothing is in flight and nothing is unattributed: the Central Bank's omnibus Hub balance is fully explained.",
+  "notes": "Gateway: BCCR Central Bank gateway. Accepts a bearer token as well as the cookie, and requires the central_bank realm role. unexplained is the number that matters and balanced is true exactly when it is zero; stranded_total is context, not a deduction, and unattributed covers settled positions whose trade cost was never recorded — deliberately excluded from expected_in_flight because on-chain they hold nothing. A read failure answers 500: this endpoint reports an error rather than fabricating a benign zero, which is the right behaviour for a reconciliation surface. BCCR's own 500,000 W-tCeBM_CRC seed is not counted here because it now sits in the AMM, not in the omnibus address.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v2/amm/hub-reconciliation",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "2c0b4ced1c23d472bcfe318f619209ba"
+    },
+    "body": {
+      "w_token": "0x1a3e796c050839af5f0af526c1a562889e603d38",
+      "holder_address": "0xacd4461e8f0d4a4d9a2949753a419568f9a1de97",
+      "on_chain_balance": "0",
+      "expected_in_flight": "0",
+      "unexplained": "0",
+      "stranded_total": "0",
+      "per_bank": [],
+      "stranded": [],
+      "unattributed": [],
+      "balanced": true
+    }
+  }
+}

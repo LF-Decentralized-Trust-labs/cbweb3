@@ -1,0 +1,26 @@
+{
+  "id": "mock-pvp-hp-09",
+  "title": "Step 9 — Banco de Lima accepts: PROPOSED -> ACCEPTED",
+  "description": "Only counterparty_b may accept, and the originator may not accept its own proposal. Once ACCEPTED, both spokes may lock their HTLC legs.",
+  "notes": "Gateway: Banco de Lima commercial-bank gateway (spoke-pen) — a different host from every other fixture in this directory. The request body is optional; POST with no body means 'accept in my own name'. on_behalf is never honoured on this user-facing route. Field divergence, verified in the delivered gateway (AcceptFXAgreement): the 200 body carries trade_id as well as tx_hash, while contracts/pvp declares tx_hash alone.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/fx/agreements/aaeca49d-89f2-4bf1-9410-0779f50b9754/accept",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {}
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "9b5f90f4d46f77a53ff7a25d83047434"
+    },
+    "body": {
+      "trade_id": "aaeca49d-89f2-4bf1-9410-0779f50b9754",
+      "tx_hash": "0x4b34189bdf0a514c12bbf193c3c76fbdf0c56dfbbcab6fa0395fb9cc3c92817d"
+    }
+  }
+}

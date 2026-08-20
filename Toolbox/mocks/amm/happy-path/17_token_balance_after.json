@@ -1,0 +1,23 @@
+{
+  "id": "mock-amm-hp-17",
+  "title": "Payment step 6 — settlement verification: debited amount_in, not max_amount_in",
+  "description": "600,000 CRC before, 599,457.25 after: a net debit of exactly amount_in. Had the residue not returned, the balance would show a debit of max_amount_in and the payer would be 5.43 CRC short.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway, spoke-crc. This single assertion is the difference between a settlement test and an API test. 600000000000000000000000 - 542753802533140547183 = 599457246197466859452817.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/token/balance",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "8e83a2740b3dadc71262512484d7d47f"
+    },
+    "body": {
+      "balance": "599457246197466859452817"
+    }
+  }
+}

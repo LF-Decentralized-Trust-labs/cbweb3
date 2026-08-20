@@ -1,0 +1,34 @@
+{
+  "id": "mock-amm-err-02",
+  "title": "422 POOL_NOT_ACTIVE — only one Central Bank has seeded the pool",
+  "description": "A corridor whose pair is confirmed but whose pool is still PENDING_COUNTERPART cannot trade. GET /api/v2/amm/pool/{pair}/status would have shown this before the swap was attempted.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway, spoke-crc. Verified in the delivered gateway (mapSwapExecError, domain.ErrCodePoolNotActive): exactly this error, error_code and recommended_action. This is why mock-amm-hp-04 belongs in the flow — the pool check is a precondition a client owns, not something the swap will do politely on its behalf. A pair id is used here that a client would have taken verbatim from listPairs; it is a genuinely different corridor, not a malformed identifier.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v2/amm/swap/cross-currency",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "source_currency": "CRC",
+      "target_currency": "PEN",
+      "pool_pair": "W-CRC-PEN",
+      "amount_out": "1000000000000000000000",
+      "max_amount_in": "548181340558471952655",
+      "beneficiary_bank_id": "bank-lima"
+    }
+  },
+  "response": {
+    "status": 422,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "187eb2bb7a38c5922d5ccfabc6f13fd6"
+    },
+    "body": {
+      "error": "pool is not active",
+      "error_code": "POOL_NOT_ACTIVE",
+      "recommended_action": "Wait for central banks to provision liquidity"
+    }
+  }
+}

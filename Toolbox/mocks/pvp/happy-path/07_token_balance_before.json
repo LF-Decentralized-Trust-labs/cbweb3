@@ -1,0 +1,23 @@
+{
+  "id": "mock-pvp-hp-07",
+  "title": "Step 7 — the settlement precondition: 8,000,000 tCeBM held",
+  "description": "The payer bank's tCeBM balance is non-zero. Until it is, every HTLC lock in this flow fails. This is the pre-condition half of the settlement assertion; mock-pvp-hp-17 is the post-condition.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway. The remaining 2,000,000 fCeBM stays as fiat token and is untouched by this settlement.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/token/balance",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "0424b47c53a2654f6376c5b1208b7c16"
+    },
+    "body": {
+      "balance": "8000000"
+    }
+  }
+}

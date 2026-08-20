@@ -1,0 +1,3172 @@
+openapi: 3.0.3
+
+info:
+  title: CBWeb3 Toolbox — PvP Settlement Contract (Scenario A)
+  version: 2.3.0
+  description: |
+    Normative interface contract for **Payment-versus-Payment (PvP) cross-border
+    settlement** on CBWeb3 **Scenario A** (single-ledger, spoke-to-spoke), as delivered
+    in **CBWeb3 API Gateway v2.3.0**.
+
+    Scenario A settles a cross-currency payment as an **atomic swap of two tokenised
+    central bank money (tCeBM) legs**, coordinated by a bilateral FX agreement and
+    executed by a pair of dual-layer Hash Time-Locked Contracts (HTLCs).
+
+    This contract covers that settlement path **end to end**, in 28 paths:
+
+    | Surface | Paths | Why it is here |
+    |---|---|---|
+    | Token (`/api/v1/token/*`) | 5 | The balances an HTLC lock actually moves, and the probes a settlement test asserts on. |
+    | Reserve lifecycle (`/api/v1/payments/{deposits,escrows,redeems}*`) | 15 | How a bank **obtains** the tCeBM it will lock. A hard precondition, not an optional step. |
+    | FX agreement (`/api/v1/payments/fx/agreements*`) | 7 | Agreeing the terms of the swap. |
+    | HTLC (`/api/v1/htlc/*`) | 6 | Executing the swap atomically. |
+
+    The reserve lifecycle is included deliberately. **A bank cannot
+    `POST /api/v1/htlc/lock` tokens it does not hold**, and tCeBM is obtained only by
+    completing deposit → approve → fiat-exchange → escrow → approve. A conformance
+    suite without it can assert response shapes against a mock and nothing more.
+
+    > **Scenario A only.** Scenario B (hub-and-spoke) has **no** FX agreement surface
+    > and **no** HTLC endpoints whatsoever; it settles via escrow, bridge lock-mint /
+    > burn-unlock, and Hub AMM swaps. See `Toolbox/contracts/amm/`. The eight
+    > `LockHTLC*` / `HTLCLock` component schemas that appear in the Scenario B platform
+    > document are unreferenced copy-paste residue and are deliberately not published.
+
+    ## The settlement flow this contract describes
+
+    Two spokes, A and B, each running a gateway. Bank-A on Spoke-A wants to pay Bank-D
+    on Spoke-B, exchanging BRL-denominated tCeBM for ARS-denominated tCeBM.
+
+    0. **Reserve prelude — both banks must already hold tCeBM.**
+       `POST /api/v1/payments/deposits` (bank) → `POST .../deposits/approve` (CB) →
+       `POST .../deposits/fiat-exchange` (CB, mints fCeBM) →
+       `POST /api/v1/payments/escrows` (bank) → `POST .../escrows/approve` (CB, burns
+       fCeBM and mints tCeBM) → `GET /api/v1/token/balance` is non-zero. Steps 3 and 5
+       below fail without this.
+    1. **Agree the terms.** Bank-A calls `POST /api/v1/payments/fx/agreements`,
+       specifying both legs, the rate and an expiry. The agreement is created
+       `PROPOSED`. The server validates rate consistency
+       (`|counter_amount/origin_amount − rate| ≤ FX_RATE_TOLERANCE_PCT`, default 0.1%)
+       and that the two currencies differ.
+    2. **Counterparty accepts.** The `counterparty_b` party calls
+       `POST .../{tradeId}/accept` → `ACCEPTED`. Only now may HTLC locks be associated.
+    3. **Initiator locks.** Bank-A calls `POST /api/v1/htlc/lock`. The gateway generates
+       a secret **internally**, derives a SHA-256 hash lock from it, records the lock
+       metadata on the public layer (Besu) and locks the actual token amount on the
+       private layer (Zeto/Paladin). Default timelock: **now + 3600s**.
+    4. **Hash lock crosses out-of-band.** The initiator shares `hash_lock` with the
+       responder **off-chain**. *There is no API endpoint for this* — see "What is not
+       here" below.
+    5. **Responder locks.** Bank-D calls `POST /api/v1/htlc/lock-with-hash` supplying
+       that `hash_lock`. Default timelock: **now + 1800s** — deliberately *shorter*
+       than the initiator's, so the responder can refund first if settlement stalls.
+    6. **Initiator settles, revealing the secret.** `POST /api/v1/htlc/settle` on
+       Spoke-A. The contract checks `SHA-256(secret) == hash_lock`, then calls Zeto
+       `transferLocked()` to release the private tokens to the receiver. The Cacti relay
+       broadcasts the revealed secret to Spoke-B, which settles the mirror leg
+       automatically.
+    7. **Agreement reaches SETTLED**, normally driven by the relay, optionally by
+       `POST .../{tradeId}/settle`.
+
+    **Timeout path:** if the secret is never revealed, each side reclaims its own tokens
+    via `POST /api/v1/htlc/refund` after its own timelock expires.
+
+    ### The timelock ordering rule is safety-critical
+
+    The initiator's timelock **must** be longer than the responder's. The platform
+    expresses this in prose only — nothing in any schema enforces it. A test vector or
+    tutorial that inverts the ordering models an **unsafe swap** in which the initiator
+    can claim the responder's leg after the responder has lost the ability to refund.
+
+    ## Authentication
+
+    Cookie-based, not bearer. Obtain an `access_token` HttpOnly cookie via the flows in
+    `Toolbox/contracts/auth/openapi_auth_v2.3.0.yaml` — commercial banks must complete
+    the two-step PKI nonce dance (`/auth/login` → sign nonce → `/auth/wallet/bind`).
+    There is no root-level `security` block: every operation declares its own, exactly
+    as the platform document does.
+
+    ## What is deliberately not here
+
+    * **Internal relay endpoints.** The platform exposes one relay-facing FX route,
+      `GET /internal/v1/payments/fx/agreements`, authenticated by an `X-Relay-Auth`
+      shared secret and consumed by the Hyperledger Cacti cross-spoke bridge. It is not
+      part of the community surface and is excluded. There are no `/internal` routes for
+      HTLC at all.
+    * **The cross-spoke choreography itself.** Transferring the `hash_lock` from
+      initiator to responder, and broadcasting the revealed secret from Spoke-A to
+      Spoke-B, both happen out-of-band via the relay. Neither has an API endpoint in the
+      delivered gateway. A single `POST /api/v1/htlc/settle` therefore produces asynchronous
+      state changes on a spoke you never called.
+    * **The compliance, governance, supervisor, oversight, onboarding, identities,
+      statement and PKI-administration surface** — roughly 42 of the Scenario A
+      gateway's 69 `/api/v1` paths. Those serve supervisors and regulators rather than
+      the settlement integrator this contract targets; they are deferred to a future
+      `contracts/compliance/` document, not forgotten.
+    * **Routes the platform registers but never documents.** The Scenario A router wires
+      `GET /api/v1/statement`, `/api/v1/identities/*`, `/internal/v1/identities/*`,
+      `POST /internal/v1/payments/pvp-legs` and `GET /internal/v1/payments/pvp-credits`,
+      none of which appear anywhere in the platform's own OpenAPI document. The last two
+      are the **only** endpoints on the entire platform whose names contain "pvp", and
+      they are relay-internal. This contract records the gap rather than filling it with
+      a guess; nothing here is modelled on them.
+
+    ## Conditional availability
+
+    Every endpoint in this contract requires the gateway's payment orchestrator service
+    to be wired (`PaymentHandler != nil`). When it is not, the routes are simply never
+    registered and a client receives **404**, not 501. A 404 from a conformance run may
+    therefore mean "this gateway is not that kind of node" rather than "the
+    implementation is non-conformant". Declare a gateway profile before asserting.
+
+    **The reserve lifecycle is split across two gateway roles, and the split is not
+    symmetric.** This matters more than any other deployment fact in this document:
+
+    | Operation group | Commercial-bank gateway | Central Bank gateway |
+    |---|---|---|
+    | `POST` deposits / escrows / redeems | **served** (proxied to the CB) | 404 — the CB receives these over the relay-internal path instead |
+    | `GET` deposits / escrows / redeems | served | served |
+    | `approve` / `reject` / `fiat-exchange` | 404 | **served**, `ROLE_TREASURY` |
+    | `POST /api/v1/token/burn` | 404 | served, `ROLE_TREASURY` |
+    | `POST /api/v1/token/mint` | served, **no role gate** | served, `ROLE_TREASURY` |
+    | HTLC, FX, `token/transfer`, both balances | served | served |
+
+    So **no single base URL can drive the whole reserve lifecycle.** A test that creates
+    a deposit and approves it must hold two sessions against two hosts. This is a
+    property of the delivered system, not of this contract.
+
+    Two server-side environment variables change behaviour without being discoverable
+    through any endpoint: `FX_RATE_TOLERANCE_PCT` (rate check tightness) and
+    `FX_AGREEMENT_HTLC_STRICT` (whether `agreement_id` on an HTLC lock is validated
+    against the agreement). A client cannot query either.
+
+    ## Conventions reproduced verbatim from the platform
+
+    * **Path placeholders are camelCase** (`{tradeId}`, `{contractId}`) while every JSON
+      body and response field is **snake_case** (`trade_id`, `contract_id`, `hash_lock`,
+      `time_lock`, `on_behalf`, `occurred_at_unix`). This is not harmonised here.
+    * **Amounts and rates are decimal strings**, never numbers: `"1000000"`, `"0.85"`.
+    * **Timestamps are `integer/int64` Unix *seconds***, not milliseconds and not
+      RFC 3339: `time_lock`, `expiry_date`, `occurred_at_unix`.
+    * **Identities are Paladin `name@node` strings** such as
+      `funded_operator@spoke-a-bank-c` — not wallet addresses and not bank codes.
+    * **The HTLC's link to an FX agreement is called `agreement_id`, not `trade_id`,**
+      even though the value *is* an FX `trade_id`. This cross-domain rename is a real
+      trap; it is reproduced as-is.
+    * **There is no pagination** anywhere in this surface — no `limit`, `offset`, `page`
+      or cursor on either list endpoint. `total` is the length of the returned array.
+    * **No `pattern` constraint exists** on any identifier in the platform document.
+      Identifier shapes below are conveyed by example only. Do not validate them with
+      regexes the platform does not enforce.
+
+    ## Source of truth
+
+    Derived from the delivered Scenario A gateway document
+    `scenario-a/backend/services/api-gateway/docs/openapi.yaml`
+    (`openapi: 3.0.3`, `info.title: CBWeb3 API Gateway`, `info.version: 2.3.0`),
+    cross-checked against `internal/http/router/router.go`.
+
+    Where the delivered implementation and the platform's own document disagree, this
+    contract documents **what a client actually observes** and marks the discrepancy
+    inline with a `Spec divergence:` paragraph.
+  contact:
+    name: CBWeb3 Toolbox Working Group
+    url: https://github.com/LFDT-Lab/cbweb3
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development gateway (generic)
+  - url: http://localhost:18080
+    description: "Scenario A — bank-a (Spoke-A)"
+  - url: http://localhost:28080
+    description: "Scenario A — bank-b (Spoke-B)"
+  - url: http://localhost:38080
+    description: "Scenario A — central-bank-a (Spoke-A)"
+  - url: http://localhost:48080
+    description: "Scenario A — bank-c (Spoke-A)"
+  - url: http://localhost:58080
+    description: "Scenario A — bank-d (Spoke-B)"
+  - url: http://localhost:60080
+    description: "Scenario A — central-bank-b (Spoke-B)"
+  - url: http://127.0.0.1:4010
+    description: >-
+      Local Prism mock of this contract. The Toolbox convention is one Prism
+      instance per contract — 4010 pvp, 4011 amm, 4012 auth — so all three can run
+      side by side: npx @stoplight/prism-cli mock
+      Toolbox/contracts/pvp/openapi_pvp_v2.3.0.yaml --port 4010
+
+tags:
+  - name: Token
+    description: |
+      tCeBM (Zeto/Paladin privacy token) and fCeBM (ERC-20 on Besu) balance and
+      issuance operations. `getTokenBalance` and `getFiatBalance` are the pre- and
+      post-condition probes for any settlement test; `mintToken` and `burnToken` are
+      sovereign issuance operations, not the route a participant bank uses to obtain
+      tCeBM.
+
+      Requires the payment orchestrator service to be configured.
+  - name: Escrow
+    description: |
+      The reserve lifecycle — deposit, tokenisation escrow and redemption — by which a
+      commercial bank converts fiat into fCeBM and fCeBM into the tCeBM it will lock in
+      an HTLC. This is a **hard precondition** for Scenario A settlement, not an
+      optional privacy step: `lockHTLC` locks tokens the bank must already hold.
+
+      The create half and the approve half of every lifecycle live on **different
+      gateways** (commercial bank vs Central Bank). See each operation's deployment
+      note.
+
+      Requires the payment orchestrator service to be configured.
+  - name: FX Agreements
+    description: |
+      Bilateral foreign-exchange agreement lifecycle for cross-spoke settlement. A bank
+      proposes an agreement specifying origin/counter amounts, currencies, exchange rate
+      and expiry; the counterparty accepts or rejects. Once accepted, each leg is
+      settled via a paired HTLC lock (`lockHTLC` on Spoke-A, `lockHTLCWithHash` on
+      Spoke-B).
+
+      State machine: `PROPOSED → ACCEPTED → SETTLED` (happy path);
+      `PROPOSED → REJECTED` (terminal);
+      `PROPOSED | ACCEPTED → CANCELLED` (terminal).
+
+      Note there is **no `EXPIRED` state**, despite `expiry_date` and a documented
+      `SYSTEM_JOB` "background expiration worker" event source. Expiry apparently
+      produces no distinct state.
+
+      Requires the payment orchestrator service to be configured.
+  - name: HTLC
+    description: |
+      Hash Time-Locked Contract dual-layer operations. Coordinates public HTLC state on
+      Hyperledger Besu with private token locking via Zeto/Paladin. Supports lock,
+      settle (happy path) and refund (timeout path).
+
+      Requires the payment orchestrator service to be configured.
+
+paths:
+
+  # ===========================================================================
+  # Token — the tCeBM/fCeBM balances an HTLC lock actually moves
+  # ===========================================================================
+
+  /api/v1/token/mint:
+    post:
+      tags: [Token]
+      summary: Mint tCeBM tokens
+      description: |
+        Issues new tCeBM (tokenised central bank money) to the specified Paladin
+        identity via the Zeto privacy-preserving token system.
+
+        This is a **sovereign issuance** operation, not the route a commercial bank
+        uses to obtain tCeBM. A participant bank obtains tCeBM by completing the
+        deposit → escrow reserve lifecycle below, which burns its fCeBM and mints the
+        equivalent tCeBM against it. Direct minting bypasses that reserve backing.
+
+        `Undocumented status code:` on a **Central Bank gateway** the router gates this
+        route with `RequireRole(ROLE_TREASURY)`, so a **403** is possible; on a
+        commercial-bank gateway (proxy mode) the same route carries no role gate at
+        all. Neither fact is expressed in the platform document, and no 403 is declared
+        there for this operation.
+      operationId: mintToken
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MintTokenRequest"
+            example:
+              to: "funded_operator@spoke-a-cb"
+              amount: "10000000"
+      responses:
+        "201":
+          description: Tokens minted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MintTokenResponse"
+              example:
+                tx_hash: "0x1234..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenTreasuryRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/token/burn:
+    post:
+      tags: [Token]
+      summary: Burn tCeBM tokens (Treasury only)
+      description: |
+        Destroys tCeBM tokens via the Zeto withdraw flow. Restricted to `ROLE_TREASURY`
+        on the Central Bank gateway.
+
+        `Deployment shape:` this route is registered **only on a Central Bank gateway**
+        (`PaymentProxyHandler == nil`). A commercial-bank gateway never serves it and
+        answers **404**, which is a deployment signal rather than a conformance failure.
+      operationId: burnToken
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BurnTokenRequest"
+            example:
+              from: "funded_operator@spoke-a-cb"
+              amount: "10000000"
+      responses:
+        "201":
+          description: Tokens burned successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BurnTokenResponse"
+              example:
+                tx_hash: "0x1234..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenTreasuryRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/token/transfer:
+    post:
+      tags: [Token]
+      summary: Transfer tCeBM tokens
+      description: |
+        Transfers tCeBM tokens to the specified Paladin identity via Zeto's
+        privacy-preserving transfer mechanism.
+
+        Note this is an **unconditional** transfer with no hash lock and no time lock —
+        it is *not* a settlement primitive. Cross-currency PvP settlement uses
+        `lockHTLC` / `lockHTLCWithHash` / `settleHTLC`. The one place a plain transfer
+        is part of a documented flow is redemption: a commercial bank transfers its
+        tCeBM to the Central Bank and then quotes the resulting Paladin transaction hash
+        as `zeto_transfer_tx_hash` on `requestRedeem`.
+
+        Open to any authenticated caller — the router applies no role gate.
+      operationId: transferToken
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransferTokenRequest"
+            example:
+              to: "funded_operator@spoke-b-cb"
+              amount: "500000"
+      responses:
+        "200":
+          description: Tokens transferred successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransferTokenResponse"
+              example:
+                tx_hash: "0x5678..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/token/balance:
+    get:
+      tags: [Token]
+      summary: Get token balance for the authenticated bank's Paladin identity
+      description: |
+        Returns the **tCeBM** balance for the Paladin identity configured internally in
+        the payment orchestrator of the calling bank. **No identity parameter is
+        required or accepted** — the balance you get is the one belonging to the
+        gateway you called, resolved from the session, not from anything you send.
+
+        This is the pre- and post-condition probe for a settlement test: assert it is
+        non-zero after the reserve lifecycle completes, and assert the expected delta
+        after an HTLC settles.
+
+        No decimals count is stated anywhere in the platform document for tCeBM or
+        fCeBM. Treat the value as an opaque big-integer decimal string and compare
+        deltas; do not assume a scale factor.
+      operationId: getTokenBalance
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Balance returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetBalanceResponse"
+              example:
+                balance: "9000000"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/token/fiat-balance:
+    get:
+      tags: [Token]
+      summary: Get fiat token balance for the authenticated bank's Besu operator
+      description: |
+        Returns the **fCeBM** (ERC-20 fiat token on Besu) balance for the Besu operator
+        address configured internally in the payment orchestrator of the calling bank.
+        As with `getTokenBalance`, no address parameter is required or accepted.
+
+        This is the balance a deposit approval credits and an escrow approval burns.
+      operationId: getFiatBalance
+      security:
+        - CookieAuth: []
+      responses:
+        "200":
+          description: Fiat balance returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetFiatBalanceResponse"
+              example:
+                balance: "1250000"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          description: |
+            Fiat token adapter unavailable. Declared by the platform on this operation
+            only — no other endpoint in this contract documents a 503.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "fiat token adapter unavailable"
+
+  # ===========================================================================
+  # Reserve lifecycle (Escrow) — how a bank obtains the tCeBM it will lock
+  #
+  #   deposit  -> CB approve -> CB fiat-exchange  ... mints fCeBM (ERC-20, Besu)
+  #   escrow   -> CB approve                      ... burns fCeBM, mints tCeBM (Zeto)
+  #   redeem   -> CB approve                      ... burns tCeBM, mints fCeBM
+  #
+  # Deployment shape, and it is not symmetric: the CREATE half
+  # (POST deposits / escrows / redeems) is registered only on a COMMERCIAL BANK
+  # gateway, where it proxies to the Central Bank. The APPROVE/REJECT half is
+  # registered only on a CENTRAL BANK gateway, treasury-gated. The Central Bank
+  # gateway receives creations over the relay-internal /internal/v1 routes, which
+  # are deliberately not published here. No single gateway serves both halves.
+  # ===========================================================================
+
+  /api/v1/payments/deposits:
+    post:
+      tags: [Escrow]
+      summary: Register a fiat deposit request
+      description: |
+        Step 1 of the reserve lifecycle. A commercial bank registers its intent to
+        deposit fiat funds with its Central Bank; the Central Bank creates a `PENDING`
+        deposit record and returns a `deposit_id`.
+
+        `Deployment shape:` served by a **commercial-bank** gateway, which proxies to
+        the Central Bank. A Central Bank gateway does not register this public route —
+        it receives creations on the relay-internal path instead — and answers **404**.
+
+        `Do not send caller identity.` The commercial-bank proxy overwrites
+        `requester_besu_address` and `requester_paladin_identity` from the verified
+        caller. Values a client supplies are replaced.
+
+        `Spec divergence — validation surfaces as 500, not 400.` The delivered handler
+        checks only that the body parses; a missing or malformed `amount` is rejected
+        one hop further in, and the handler wraps **every** downstream error as
+        **500 Internal Server Error** rather than routing it through `grpcErrorToHTTP`.
+        The declared 400 covers unparseable JSON only. The same applies to
+        `requestEscrow`, `requestRedeem` and both HTLC lock routes.
+      operationId: registerDeposit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDepositRequest"
+            example:
+              amount: "10000000"
+      responses:
+        "201":
+          description: Deposit registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterDepositResponse"
+              example:
+                deposit_id: "dep-a1b2c3d4"
+                status: PENDING
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      tags: [Escrow]
+      summary: List deposits
+      description: |
+        Returns all deposits visible to the calling gateway, optionally filtered by
+        `requester_id`. Registered on both gateway roles.
+
+        There is no pagination: `total` is the length of the returned array. Poll this
+        endpoint to observe a deposit reaching `APPROVED`.
+      operationId: listDeposits
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          required: false
+          description: Filter by requester Besu address.
+          schema:
+            type: string
+          example: "0x1234abcd..."
+      responses:
+        "200":
+          description: Deposits listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListDepositsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/deposits/approve:
+    post:
+      tags: [Escrow]
+      summary: Approve a pending deposit (Central Bank only)
+      description: |
+        The Central Bank confirms it has received the fiat funds and moves the deposit
+        record to `APPROVED`. This records the approval; it does **not** yet mint
+        anything on chain — `requestFiatExchange` does that.
+
+        `Deployment shape:` registered only on a Central Bank gateway
+        (`PaymentProxyHandler == nil`) and gated by `RequireRole(ROLE_TREASURY)`.
+
+        Note the platform returns **201** here, not 200, even though nothing is created.
+      operationId: approveDeposit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepositIdRequest"
+            example:
+              deposit_id: "dep-a1b2c3d4"
+      responses:
+        "201":
+          description: Deposit approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusAcknowledgement"
+              example:
+                status: approved
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenTreasuryRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/deposits/reject:
+    post:
+      tags: [Escrow]
+      summary: Reject a pending deposit (Central Bank only)
+      description: |
+        Terminal rejection of a pending deposit. The optional `reason` is echoed back
+        and stored on the record as `rejection_reason`.
+
+        `Deployment shape:` Central Bank gateway only, `RequireRole(ROLE_TREASURY)`.
+      operationId: rejectDeposit
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepositRejectRequest"
+            example:
+              deposit_id: "dep-a1b2c3d4"
+              reason: "funds not received by settlement cut-off"
+      responses:
+        "200":
+          description: Deposit rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReasonAcknowledgement"
+              example:
+                reason: "funds not received by settlement cut-off"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenTreasuryRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/deposits/fiat-exchange:
+    post:
+      tags: [Escrow]
+      summary: Execute fiat exchange — mint fCeBM (Central Bank only)
+      description: |
+        After approving a deposit, the Central Bank triggers the fiat exchange: it mints
+        fCeBM (ERC-20) to the requester's Besu address on chain. After this call
+        succeeds, `getFiatBalance` on the requester's gateway reports a non-zero
+        balance.
+
+        `Path divergence between scenarios:` Scenario A serves this operation at
+        `/api/v1/payments/deposits/`**`fiat-exchange`**, while Scenario B serves the
+        equivalent at `/api/v1/payments/deposits/`**`exchange`**. Neither gateway serves
+        both. This is why the reserve lifecycle is duplicated per scenario in the
+        Toolbox rather than shared.
+
+        `Deployment shape:` Central Bank gateway only, `RequireRole(ROLE_TREASURY)`.
+      operationId: requestFiatExchange
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepositIdRequest"
+            example:
+              deposit_id: "dep-a1b2c3d4"
+      responses:
+        "201":
+          description: Fiat exchange completed — fCeBM minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatExchangeResponse"
+              example:
+                mint_tx_hash: "0x1234..."
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenTreasuryRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/escrows:
+    post:
+      tags: [Escrow]
+      summary: Request tokenisation escrow (fCeBM → tCeBM)
+      description: |
+        **Reserve Tokenisation.** Requests conversion of fCeBM (fiat token, ERC-20 on
+        Besu) into tCeBM (tokenised central bank money, Zeto privacy token on Paladin).
+        On approval the Central Bank burns the requester's fCeBM and mints the
+        equivalent tCeBM.
+
+        This is the step that makes a bank able to settle: **`POST /api/v1/htlc/lock`
+        locks tCeBM the bank must already hold.** A conformance suite that skips the
+        reserve lifecycle can never execute a real lock.
+
+        `Deployment shape:` commercial-bank gateway (proxy). A Central Bank gateway
+        answers 404 on this public route.
+      operationId: requestEscrow
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestEscrowRequest"
+            example:
+              amount: "5000000"
+      responses:
+        "201":
+          description: Escrow request registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestEscrowResponse"
+              example:
+                escrow_id: "esc-a1b2c3d4"
+                status: PENDING
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      tags: [Escrow]
+      summary: List escrow requests
+      description: |
+        Returns all escrow requests visible to the calling gateway, optionally filtered
+        by `requester_id`. No pagination.
+      operationId: listEscrows
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          required: false
+          description: Filter by requester Besu address.
+          schema:
+            type: string
+          example: "0x1234abcd..."
+      responses:
+        "200":
+          description: Escrows listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListEscrowsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/escrows/approve:
+    post:
+      tags: [Escrow]
+      summary: Approve escrow — burn fCeBM + mint tCeBM (Central Bank only)
+      description: |
+        Burns the requester's fCeBM on Besu and mints equivalent tCeBM via Zeto/Paladin
+        to the requester's Paladin identity. Two chains move, so two transaction hashes
+        come back: `burn_tx_hash` (Besu) and `mint_tx_hash` (Paladin). The platform
+        document calls the second one `zeto_mint_tx_hash`; the delivered gateway does
+        not — see `ApproveEscrowResponse`.
+
+        After this call, poll `getTokenBalance` on the requester's gateway until the
+        tCeBM balance is non-zero — settlement in Scenario A cannot proceed before it.
+
+        `Deployment shape:` Central Bank gateway only, `RequireRole(ROLE_TREASURY)`.
+      operationId: approveEscrow
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EscrowIdRequest"
+            example:
+              escrow_id: "esc-a1b2c3d4"
+      responses:
+        "201":
+          description: Escrow approved — fCeBM burned, tCeBM minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApproveEscrowResponse"
+              example:
+                burn_tx_hash: "0x1234..."
+                mint_tx_hash: "0x5678..."
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenTreasuryRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/escrows/reject:
+    post:
+      tags: [Escrow]
+      summary: Reject an escrow request (Central Bank only)
+      description: |
+        Terminal rejection of a pending tokenisation escrow. No fCeBM is burned and no
+        tCeBM is minted. The optional `reason` is echoed back and stored as
+        `rejection_reason`.
+
+        `Deployment shape:` Central Bank gateway only, `RequireRole(ROLE_TREASURY)`.
+      operationId: rejectEscrow
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EscrowRejectRequest"
+            example:
+              escrow_id: "esc-a1b2c3d4"
+              reason: "insufficient fCeBM balance at time of approval"
+      responses:
+        "200":
+          description: Escrow rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReasonAcknowledgement"
+              example:
+                reason: "insufficient fCeBM balance at time of approval"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenTreasuryRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/redeems:
+    post:
+      tags: [Escrow]
+      summary: Request redemption (tCeBM → fCeBM)
+      description: |
+        Requests redemption of tCeBM back into fCeBM — the unwind of Reserve
+        Tokenisation.
+
+        `Read the ordering carefully.` Unlike the escrow direction, the participant
+        moves value **before** calling this endpoint: a commercial-bank node first
+        performs a Zeto transfer of the tCeBM to the Central Bank
+        (`POST /api/v1/token/transfer`), then submits this request quoting the resulting
+        Paladin transaction hash as `zeto_transfer_tx_hash`, which the platform marks
+        **required**. The Central Bank verifies that transfer before minting fCeBM back.
+
+        `Scenario divergence:` Scenario B's equivalent request carries **no**
+        `zeto_transfer_tx_hash` field at all. The two reserve lifecycles are not
+        interchangeable.
+
+        `Deployment shape:` commercial-bank gateway (proxy).
+      operationId: requestRedeem
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestRedeemRequest"
+            example:
+              amount: "5000000"
+              zeto_transfer_tx_hash: "0xabcd..."
+      responses:
+        "201":
+          description: Redeem request registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestRedeemResponse"
+              example:
+                redeem_id: "red-a1b2c3d4"
+                status: PENDING
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      tags: [Escrow]
+      summary: List redeem requests
+      description: |
+        Returns all redeem requests visible to the calling gateway, optionally filtered
+        by `requester_id`. No pagination.
+      operationId: listRedeems
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: requester_id
+          in: query
+          required: false
+          description: Filter by requester Besu address.
+          schema:
+            type: string
+          example: "0x1234abcd..."
+      responses:
+        "200":
+          description: Redeems listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListRedeemsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/redeems/approve:
+    post:
+      tags: [Escrow]
+      summary: Approve redeem — mint fCeBM to requester (Central Bank only)
+      description: |
+        The Central Bank verifies that the Zeto transfer quoted on the request was
+        received, then mints equivalent fCeBM (ERC-20) to the requester's Besu address.
+
+        `Deployment shape:` Central Bank gateway only, `RequireRole(ROLE_TREASURY)`.
+      operationId: approveRedeem
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RedeemIdRequest"
+            example:
+              redeem_id: "red-a1b2c3d4"
+      responses:
+        "201":
+          description: Redeem approved — fCeBM minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApproveRedeemResponse"
+              example:
+                fiat_mint_tx_hash: "0x1234..."
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenTreasuryRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/redeems/reject:
+    post:
+      tags: [Escrow]
+      summary: Reject a redeem request — return tCeBM (Central Bank only)
+      description: |
+        Rejects the redeem request and transfers the tCeBM **back** to the requester's
+        Paladin identity via Zeto. Unlike the deposit and escrow rejections, this one
+        moves value on chain, because the requester had already surrendered its tCeBM
+        before the request was made.
+
+        `Deployment shape:` Central Bank gateway only, `RequireRole(ROLE_TREASURY)`.
+      operationId: rejectRedeem
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RedeemRejectRequest"
+            example:
+              redeem_id: "red-a1b2c3d4"
+              reason: "zeto transfer hash could not be verified"
+      responses:
+        "200":
+          description: Redeem rejected — tCeBM returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReasonAcknowledgement"
+              example:
+                reason: "zeto transfer hash could not be verified"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenTreasuryRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ===========================================================================
+  # FX Agreements — negotiate the terms before any value is locked
+  # ===========================================================================
+
+  /api/v1/payments/fx/agreements:
+    post:
+      tags: [FX Agreements]
+      summary: Propose a new FX agreement
+      description: |
+        Creates a new FX agreement in `PROPOSED` state — step 1 of a PvP settlement. The
+        counterparty must accept via `POST /api/v1/payments/fx/agreements/{tradeId}/accept`
+        before any HTLC locks can be associated with it.
+
+        Server-side validation:
+
+        * Rate consistency: `|counter_amount / origin_amount − rate|` must be
+          ≤ `FX_RATE_TOLERANCE_PCT` (default 0.1%). The tolerance is a gateway
+          environment variable and is not discoverable through the API.
+        * `expiry_date` must be a **future** Unix timestamp in seconds.
+        * `origin_currency` and `counter_currency` must differ.
+        * `origin_amount` and `counter_amount` must be positive decimal strings.
+
+        `trade_id` is optional; when omitted the server generates one and returns it.
+
+        The platform declares no role restriction on the FX routes and the router
+        registers them with cookie auth only — any authenticated caller on a gateway
+        with the payment orchestrator wired may propose.
+      operationId: proposeFXAgreement
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProposeFXAgreementRequest"
+            example:
+              trade_id: "trade-a1b2c3d4"
+              counterparty_b: "funded_operator@spoke-b-bank-d"
+              originator: "funded_operator@spoke-a-bank-a"
+              settlement_agent: "funded_operator@spoke-a-bank-c"
+              custodian: "funded_operator@spoke-b-bank-d"
+              beneficiary: "funded_operator@spoke-b-bank-b"
+              origin_amount: "1000000"
+              counter_amount: "850000"
+              origin_currency: "BRL"
+              counter_currency: "ARS"
+              rate: "0.85"
+              expiry_date: 1711590000
+              on_behalf: false
+              source_spoke_id: "spoke-brl"
+              dest_spoke_id: "spoke-usd"
+              source_receiver: "funded_operator@spoke-brl-bank-c"
+              dest_receiver: "funded_operator@spoke-usd-bank-b"
+      responses:
+        "201":
+          description: FX agreement created in PROPOSED state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProposeFXAgreementResponse"
+              example:
+                trade_id: "trade-a1b2c3d4"
+                tx_hash: "0xabcd1234..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    get:
+      tags: [FX Agreements]
+      summary: List FX agreements
+      description: |
+        Returns all FX agreements accessible to the caller, ordered by creation time
+        descending. Optionally filter by counterparty identity or agreement state.
+
+        Note that the single `counterparty` filter matches **either side** — it is
+        applied against `originator` *or* `counterparty_b`. There is no separate
+        originator filter, and the query parameter is spelled `counterparty` while the
+        record field it can match is spelled `counterparty_b`.
+
+        There is **no pagination**: no `limit`, `offset`, `page` or cursor parameter
+        exists, and `total` is simply the length of `agreements`.
+      operationId: listFXAgreements
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: counterparty
+          in: query
+          required: false
+          description: Filter by originator or counterparty_b Paladin identity
+          schema:
+            type: string
+          example: "funded_operator@spoke-b-bank-d"
+        - name: state
+          in: query
+          required: false
+          description: |
+            Filter by agreement state.
+
+            `Spec divergence:` this **query parameter** takes the bare vocabulary, but
+            the `state` **field of every agreement returned** is prefixed
+            (`FX_STATE_ACCEPTED`, ...) — see `FXAgreement.state`. The delivered
+            orchestrator strips an `FX_STATE_` prefix before matching
+            (`strings.TrimPrefix(req.State, "FX_STATE_")`), so **both spellings are
+            accepted here**; the bare form below is the one the platform document
+            declares. What comes back is always prefixed, whichever you send.
+          schema:
+            type: string
+            enum: [PROPOSED, ACCEPTED, REJECTED, CANCELLED, SETTLED]
+          example: ACCEPTED
+      responses:
+        "200":
+          description: FX agreements listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListFXAgreementsResponse"
+              example:
+                agreements:
+                  - trade_id: "trade-a1b2c3d4"
+                    originator: "funded_operator@spoke-a-bank-a"
+                    counterparty_b: "funded_operator@spoke-b-bank-d"
+                    origin_amount: "1000000"
+                    counter_amount: "850000"
+                    origin_currency: "BRL"
+                    counter_currency: "ARS"
+                    rate: "0.85"
+                    expiry_date: 1711590000
+                    state: "FX_STATE_ACCEPTED"
+                total: 1
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/fx/agreements/{tradeId}:
+    get:
+      tags: [FX Agreements]
+      summary: Get a single FX agreement
+      description: |
+        Returns the full agreement record, wrapped in a singular `agreement` key. (The
+        list endpoint uses the plural `agreements`; the path segment is plural
+        `agreements` while the identifier is singular `{tradeId}`.)
+
+        Note that **no field of `FXAgreement` is declared required** by the platform
+        document — including `trade_id` and `state`. Conformance assertions must not
+        assume any response field is guaranteed present.
+      operationId: getFXAgreement
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TradeId"
+      responses:
+        "200":
+          description: FX agreement details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetFXAgreementResponse"
+              example:
+                agreement:
+                  trade_id: "trade-a1b2c3d4"
+                  originator: "funded_operator@spoke-a-bank-a"
+                  counterparty_b: "funded_operator@spoke-b-bank-d"
+                  settlement_agent: "funded_operator@spoke-a-bank-c"
+                  custodian: "funded_operator@spoke-b-bank-d"
+                  beneficiary: "funded_operator@spoke-b-bank-b"
+                  origin_amount: "1000000"
+                  counter_amount: "850000"
+                  origin_currency: "BRL"
+                  counter_currency: "ARS"
+                  rate: "0.85"
+                  source_spoke_id: "spoke-brl"
+                  dest_spoke_id: "spoke-usd"
+                  source_receiver: "funded_operator@spoke-brl-bank-c"
+                  dest_receiver: "funded_operator@spoke-usd-bank-b"
+                  expiry_date: 1711590000
+                  state: "FX_STATE_ACCEPTED"
+                  group_id: "pente-group-abc123"
+                  contract_address: "0x1234abcd..."
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/fx/agreements/{tradeId}/accept:
+    post:
+      tags: [FX Agreements]
+      summary: Accept a proposed FX agreement
+      description: |
+        Transitions the agreement `PROPOSED → ACCEPTED`. Only the `counterparty_b` party
+        — or a governance actor using `on_behalf` — can accept. Once accepted, both
+        spokes may proceed with their HTLC locks.
+
+        The request body is **optional**: `POST` with no body at all is valid and means
+        "accept in my own name".
+      operationId: acceptFXAgreement
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TradeId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FXAgreementOnBehalfRequest"
+            example:
+              on_behalf: false
+      responses:
+        "200":
+          description: Agreement accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FXAgreementActionResponse"
+              example:
+                tx_hash: "0xabcd1234..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            The agreement is not in a state from which it can be accepted (only
+            `FX_STATE_PROPOSED` is valid), or it has expired.
+
+            `Spec divergence:` the platform document declares **412 Precondition
+            Failed** for this refusal. The delivered gateway never emits 412 from any
+            payments or HTLC route — the only 412 in the whole Scenario A gateway is the
+            missing-participant-certificate branch of `/pki-login`. State-machine
+            refusals arrive as gRPC `FailedPrecondition`, and the gateway's
+            `grpcErrorToHTTP` maps that to **409 Conflict**. This contract declares 409,
+            which is what a client actually receives.
+
+            The platform additionally reuses a single shared 412 response here whose
+            example message is about a missing onboarding certificate, which has nothing
+            to do with FX state transitions. This contract states the real per-endpoint
+            meaning instead.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "invalid state transition"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/fx/agreements/{tradeId}/reject:
+    post:
+      tags: [FX Agreements]
+      summary: Reject a proposed FX agreement
+      description: |
+        Transitions the agreement `PROPOSED → REJECTED` (terminal state). The
+        `counterparty_b` party, or a governance actor using `on_behalf`, may reject.
+
+        As with accept, the request body is optional.
+
+        The platform document gives `on_behalf` a description on `accept` but not on
+        `reject`; the semantics are the same.
+      operationId: rejectFXAgreement
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TradeId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FXAgreementOnBehalfRequest"
+            example:
+              on_behalf: false
+      responses:
+        "200":
+          description: Agreement rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FXAgreementActionResponse"
+              example:
+                tx_hash: "0xabcd1234..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            The agreement is not `FX_STATE_PROPOSED`, so it cannot be rejected.
+
+            `Spec divergence:` the platform document declares **412 Precondition
+            Failed** for this refusal. The delivered gateway never emits 412 from any
+            payments or HTLC route — the only 412 in the whole Scenario A gateway is the
+            missing-participant-certificate branch of `/pki-login`. State-machine
+            refusals arrive as gRPC `FailedPrecondition`, and the gateway's
+            `grpcErrorToHTTP` maps that to **409 Conflict**. This contract declares 409,
+            which is what a client actually receives.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "invalid state transition"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/fx/agreements/{tradeId}/cancel:
+    post:
+      tags: [FX Agreements]
+      summary: Cancel a proposed or accepted FX agreement
+      description: |
+        Transitions the agreement to `CANCELLED` (terminal state). Valid from `PROPOSED`
+        or `ACCEPTED`. Typically called by the originator when the deal falls through.
+
+        Note the British double-L spelling `CANCELLED` used throughout the platform.
+
+        This operation declares **no request body at all** — there is no `on_behalf`
+        option for cancel — and correspondingly documents **no 400 response**, unlike
+        accept and reject. That asymmetry is reproduced here rather than smoothed over.
+      operationId: cancelFXAgreement
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TradeId"
+      responses:
+        "200":
+          description: Agreement cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FXAgreementActionResponse"
+              example:
+                tx_hash: "0xabcd1234..."
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            The agreement is already in a terminal state (`FX_STATE_REJECTED`,
+            `FX_STATE_CANCELLED` or `FX_STATE_SETTLED`) and cannot be cancelled.
+
+            `Spec divergence:` the platform document declares **412 Precondition
+            Failed** for this refusal. The delivered gateway never emits 412 from any
+            payments or HTLC route — the only 412 in the whole Scenario A gateway is the
+            missing-participant-certificate branch of `/pki-login`. State-machine
+            refusals arrive as gRPC `FailedPrecondition`, and the gateway's
+            `grpcErrorToHTTP` maps that to **409 Conflict**. This contract declares 409,
+            which is what a client actually receives.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "invalid state transition"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/fx/agreements/{tradeId}/settle:
+    post:
+      tags: [FX Agreements]
+      summary: Settle an accepted FX agreement
+      description: |
+        Transitions the agreement `ACCEPTED → SETTLED` (terminal state).
+
+        In normal cross-spoke flows an integrator **does not call this**: it is triggered
+        automatically by the Cacti relay once both HTLC legs have settled. It can be
+        called manually when Pente integration is not active — which is one of the ways
+        FX behaviour differs materially between Pente-on and Pente-off deployments, with
+        no capability endpoint to tell the two apart.
+
+        Like cancel, this operation declares no request body and no 400 response.
+      operationId: settleFXAgreement
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TradeId"
+      responses:
+        "200":
+          description: Agreement settled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FXAgreementActionResponse"
+              example:
+                tx_hash: "0xabcd1234..."
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            The agreement is not `FX_STATE_ACCEPTED`, so it cannot be settled.
+
+            `Spec divergence:` the platform document declares **412 Precondition
+            Failed** for this refusal. The delivered gateway never emits 412 from any
+            payments or HTLC route — the only 412 in the whole Scenario A gateway is the
+            missing-participant-certificate branch of `/pki-login`. State-machine
+            refusals arrive as gRPC `FailedPrecondition`, and the gateway's
+            `grpcErrorToHTTP` maps that to **409 Conflict**. This contract declares 409,
+            which is what a client actually receives.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "invalid state transition"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/payments/fx/agreements/{tradeId}/audit:
+    get:
+      tags: [FX Agreements]
+      summary: Get the audit event trail of an FX agreement
+      description: |
+        Returns the immutable, append-only event log for the given agreement, ordered by
+        occurrence time ascending. Each entry records a state transition, the actor that
+        triggered it, and an optional on-chain transaction hash.
+
+        The `source` field is the most useful part for an integrator debugging a
+        cross-spoke flow: it distinguishes a local API call (`LOCAL_API`) from a
+        relay-delivered change made on the other spoke (`RELAY`), from a background
+        expiry sweep (`SYSTEM_JOB`), from a governance action taken on someone's behalf
+        (`ON_BEHALF`).
+      operationId: listFXAgreementEvents
+      security:
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TradeId"
+      responses:
+        "200":
+          description: Audit event trail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListFXAgreementEventsResponse"
+              example:
+                events:
+                  - id: 1
+                    trade_id: "trade-a1b2c3d4"
+                    from_state: "FX_STATE_PROPOSED"
+                    to_state: "FX_STATE_ACCEPTED"
+                    actor: "payment-orchestrator"
+                    occurred_at_unix: 1711500000
+                    tx_hash: "0xabcd1234..."
+                    source: "FX_EVENT_SOURCE_LOCAL_API"
+                total: 1
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ===========================================================================
+  # HTLC — the atomic value transfer itself
+  # ===========================================================================
+
+  /api/v1/htlc/lock:
+    post:
+      tags: [HTLC]
+      summary: Create a dual-layer HTLC lock (initiator leg)
+      description: |
+        Locks tokens via a Hash Time-Locked Contract. **The secret is generated
+        internally by the gateway**; a hash lock is derived from it and returned. On the
+        public layer (Besu) the HTLC coordination contract records the lock metadata,
+        while on the private layer (Zeto/Paladin) the actual token amount is locked.
+
+        This is the **initiator** leg of a cross-spoke atomic swap. The returned
+        `hash_lock` must be conveyed to the responding bank out-of-band; the responder
+        then calls `POST /api/v1/htlc/lock-with-hash`.
+
+        `time_lock` defaults to **now + 3600s (1 hour)** and **must be longer than the
+        responder's**, which defaults to 30 minutes. Nothing in the schema enforces
+        this; see the timelock ordering rule in the contract description.
+
+        `agreement_id` is optional, and carries an FX **`trade_id`** value despite its
+        different name. When it is supplied and the gateway runs with
+        `FX_AGREEMENT_HTLC_STRICT=true`, the server validates that the agreement is
+        `ACCEPTED` and non-expired and that `receiver`/`amount` match the agreed
+        Spoke-A leg.
+
+        `Undocumented status code:` the platform document declares no 403 for this
+        operation, but the router wraps it in a role gate
+        (`ROLE_BANK`, `ROLE_COMMERCIAL_BANK`, `ROLE_TREASURY`, `ROLE_GOVERNANCE`) so
+        that an oversight-only session (supervisor / NOC) cannot drive value movement. A
+        conforming client **can** receive 403 from this endpoint; it is declared here.
+      operationId: lockHTLC
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LockHTLCRequest"
+            example:
+              agreement_id: "trade-a1b2c3d4"
+              receiver: "funded_operator@spoke-a-bank-c"
+              amount: "1000000"
+              time_lock: 1711503600
+      responses:
+        "201":
+          description: HTLC created and tokens locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LockHTLCResponse"
+              example:
+                contract_id: "htlc-a1b2c3d4"
+                hash_lock: "0xabcdef1234567890..."
+                htlc_tx_hash: "0x1234..."
+                zeto_tx_hash: "0x5678..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenHTLCRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/lock-with-hash:
+    post:
+      tags: [HTLC]
+      summary: Lock tokens with an externally supplied hash lock (responder leg)
+      description: |
+        Locks tokens using a `hash_lock` received from the cross-spoke initiator
+        out-of-band. Used by the **responding bank** in a cross-spoke atomic swap: the
+        initiator calls `/api/v1/htlc/lock` (which generates the secret), shares the
+        `hash_lock` off-chain, and the responder calls this endpoint.
+
+        **No secret is generated or stored locally** — the secret is known only to the
+        initiating bank until it reveals it by settling.
+
+        Default `time_lock` is **now + 1800s (30 minutes)** — intentionally shorter than
+        the initiator's 1-hour lock, so the responder can refund before the initiator if
+        settlement stalls. Supplying a `time_lock` longer than the initiator's turns a
+        safe swap into an unsafe one and is not prevented by the server.
+
+        `Undocumented status code:` as with `/api/v1/htlc/lock`, the router applies a role gate
+        that the platform document does not declare, so **403** is possible. It is
+        declared here.
+
+        `Spec divergence:` the platform document declares **412** here, described as a
+        missing participant certificate. That is unreachable: the delivered handler
+        validates the body, deducts the transfer limit and then returns **201**, or
+        **400**, or **500** — it never consults a certificate and never calls
+        `grpcErrorToHTTP`. The 412 is therefore not declared in this contract. (The one
+        genuine 412 in the Scenario A gateway belongs to `/pki-login`.)
+      operationId: lockHTLCWithHash
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LockHTLCWithHashLockRequest"
+            example:
+              agreement_id: "trade-a1b2c3d4"
+              receiver: "funded_operator@spoke-b-bank-d"
+              amount: "1000000"
+              time_lock: 1711501800
+              hash_lock: "a3f1b2c4d5e6f7890123456789abcdef0123456789abcdef0123456789abcdef01"
+      responses:
+        "201":
+          description: HTLC locked with external hash lock
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LockHTLCWithHashLockResponse"
+              example:
+                contract_id: "htlc-b9c8d7e6"
+                hash_lock: "a3f1b2c4d5e6f7890123456789abcdef0123456789abcdef0123456789abcdef01"
+                htlc_tx_hash: "0xabcd1234..."
+                zeto_tx_hash: "0xef567890..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenHTLCRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/settle:
+    post:
+      tags: [HTLC]
+      summary: Settle an HTLC by revealing the secret
+      description: |
+        Happy-path settlement. The caller reveals the pre-image (secret) that hashes to
+        the hash lock. The contract validates `SHA-256(secret) == hashLock`, then calls
+        Zeto `transferLocked()` to release the privately locked tokens to the receiver.
+
+        **This call is what makes the swap atomic.** Revealing the secret on Spoke-A
+        publishes it: the Cacti relay picks it up and broadcasts it to Spoke-B, which
+        settles the mirror leg automatically. There is no API endpoint for that
+        broadcast — a successful call here produces state changes on a gateway you never
+        contacted.
+
+        `Undocumented status code:` role-gated by the router; **403** is possible and is
+        declared here.
+      operationId: settleHTLC
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettleHTLCRequest"
+            example:
+              contract_id: "htlc-a1b2c3d4"
+              secret: "deadbeef01234567..."
+      responses:
+        "200":
+          description: HTLC settled — tokens released to receiver
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettleHTLCResponse"
+              example:
+                htlc_tx_hash: "0x1234..."
+                zeto_tx_hash: "0x5678..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenHTLCRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/refund:
+    post:
+      tags: [HTLC]
+      summary: Refund an HTLC after timelock expiry
+      description: |
+        Timeout-path refund. If the timelock has expired and the secret was never
+        revealed, the sender reclaims the locked tokens via Zeto `unlock()`.
+
+        Each side refunds its own leg independently. Because the responder's timelock is
+        shorter, the responder can always refund before the initiator regains the
+        ability to — that ordering is the safety property of the whole scheme.
+
+        `Undocumented status code:` role-gated by the router; **403** is possible and is
+        declared here.
+      operationId: refundHTLC
+      security:
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundHTLCRequest"
+            example:
+              contract_id: "htlc-a1b2c3d4"
+      responses:
+        "200":
+          description: HTLC refunded — tokens returned to sender
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundHTLCResponse"
+              example:
+                htlc_tx_hash: "0x1234..."
+                zeto_tx_hash: "0x5678..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenHTLCRole"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/status/{contractId}:
+    get:
+      tags: [HTLC]
+      summary: Get the status of a specific HTLC
+      description: |
+        Returns the full HTLC lock record: state, hash lock, time lock, sender,
+        receiver, amount, creation time and whether the counterparty has locked.
+
+        Read routes carry no role gate: any authenticated caller may query, but the
+        handler answers **403** unless the caller is the sender or the receiver.
+
+        Note the identifier naming: the path placeholder is camelCase `contractId`, the
+        JSON field is snake_case `contract_id`, and there is no field called `id` or
+        `htlcId` anywhere.
+
+        `Spec divergence:` the platform document wraps the record as
+        `{"lock": { ... }}`. The delivered handler returns the record **bare**, at the
+        top level (`return c.JSON(result)` over `*HTLCStatus`). This contract documents
+        the bare record. `searchHTLC`, by contrast, really does wrap — as
+        `{"locks": [...], "total": n}`.
+
+        `Spec divergence:` the platform document declares a `secret` field here. The
+        delivered `HTLCStatus` struct has **no `secret` field at all**, so it is never
+        returned; it carries `counterparty_locked`, `amount` and `created_at` instead,
+        none of which the platform document declares. See `HTLCLock`.
+      operationId: getHTLCStatus
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          description: HTLC contract identifier returned by POST /api/v1/htlc/lock
+          schema:
+            type: string
+          example: "htlc-a1b2c3d4"
+      responses:
+        "200":
+          description: HTLC status returned, as a bare record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTLCLock"
+              example:
+                contract_id: "htlc-a1b2c3d4"
+                sender: "funded_operator@spoke-a-bank-a"
+                receiver: "funded_operator@spoke-a-bank-c"
+                hash_lock: "0xabcdef1234567890..."
+                time_lock: 1711503600
+                zeto_lock_ref: "zeto-utxo-8f21c0"
+                state: "HTLC_STATE_LOCKED"
+                counterparty_locked: false
+                amount: "1000000"
+                created_at: "2026-06-18T09:58:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: |
+            The caller is neither the sender nor the receiver of this HTLC. Not declared
+            in the platform document; observed in the delivered handler.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "not a counterparty of this HTLC"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/htlc/search:
+    get:
+      tags: [HTLC]
+      summary: Search HTLC locks by criteria
+      description: |
+        Returns a list of HTLC lock records matching the provided filters. All query
+        parameters are optional; when none are provided, all locks visible to the caller
+        are returned. A caller holding `ROLE_SUPERVISOR` gets network-wide read via the
+        on-chain HTLC scanner.
+
+        `Spec divergence — open question:` the `state` **query parameter** here is
+        declared with the bare enum `LOCKED | SETTLED | REFUNDED`, while the `state`
+        **field of the `HTLCLock` record** uses the prefixed enum
+        `HTLC_STATE_INVALID | HTLC_STATE_PENDING | HTLC_STATE_LOCKED |
+        HTLC_STATE_SETTLED | HTLC_STATE_REFUNDED`. The platform document never
+        reconciles the two, so a client cannot tell from the specification alone whether
+        to send `LOCKED` or `HTLC_STATE_LOCKED` to this filter. **Both vocabularies are
+        reproduced here exactly as published rather than silently normalised.** Resolve
+        this against a live gateway before relying on the filter.
+
+        `Undocumented status code:` when the supervisor scanner path fails the handler
+        answers **502** with `{"error": "on-chain scan failed: ..."}`. This is not in the
+        platform document; it is declared here.
+
+        There is no pagination.
+      operationId: searchHTLC
+      security:
+        - CookieAuth: []
+      parameters:
+        - name: agreement_id
+          in: query
+          required: false
+          description: |
+            Filter by FX agreement identifier. Note the value is an FX `trade_id`
+            despite the parameter name.
+          schema:
+            type: string
+          example: "trade-a1b2c3d4"
+        - name: sender
+          in: query
+          required: false
+          description: Filter by sender identity
+          schema:
+            type: string
+          example: "funded_operator@spoke-a-bank-a"
+        - name: receiver
+          in: query
+          required: false
+          description: Filter by receiver identity
+          schema:
+            type: string
+          example: "funded_operator@spoke-a-bank-c"
+        - name: state
+          in: query
+          required: false
+          description: |
+            Filter by HTLC state. Declared with the **unprefixed** vocabulary, which
+            does not match the prefixed vocabulary used by `HTLCLock.state` — see the
+            operation description.
+          schema:
+            type: string
+            enum: [LOCKED, SETTLED, REFUNDED]
+          example: LOCKED
+      responses:
+        "200":
+          description: Matching HTLC locks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchHTLCResponse"
+              example:
+                locks:
+                  - contract_id: "htlc-a1b2c3d4"
+                    sender: "funded_operator@spoke-a-bank-a"
+                    receiver: "funded_operator@spoke-a-bank-c"
+                    hash_lock: "0xabcdef1234567890..."
+                    time_lock: 1711503600
+                    zeto_lock_ref: "zeto-utxo-8f21c0"
+                    state: "HTLC_STATE_LOCKED"
+                    counterparty_locked: false
+                    amount: "1000000"
+                    created_at: "2026-06-18T09:58:00Z"
+                total: 1
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          description: |
+            On-chain scan failed (supervisor network-wide read path). Not declared in
+            the platform document; observed in the delivered handler
+            (`internal/http/handlers/payment.go`, `SearchHTLC`).
+          x-cbweb3-source: implementation-observed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "on-chain scan failed: dial tcp 127.0.0.1:8545: connect: connection refused"
+
+components:
+
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: |
+        HttpOnly cookie set automatically by POST /auth/login (direct flow),
+        POST /auth/wallet/bind, and POST /auth/refresh.
+        All protected endpoints require this cookie to be present.
+        Attributes: HttpOnly, SameSite=Strict, Path=/; Secure flag depends on
+        the COOKIE_SECURE environment variable (true for HTTPS, false for HTTP).
+
+        There is no bearer scheme on the Scenario A surface and no CSRF token of any
+        kind; `SameSite=Strict` is the only cross-site mitigation.
+
+  parameters:
+    TradeId:
+      name: tradeId
+      in: path
+      required: true
+      description: |
+        Trade identifier returned by `proposeFXAgreement`. Described in the platform as
+        a UUID, though its own examples are of the form `trade-a1b2c3d4`. No `pattern`
+        constraint is enforced.
+      schema:
+        type: string
+      example: "trade-a1b2c3d4"
+
+  responses:
+    BadRequest:
+      description: Invalid body or missing required fields
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "invalid request body"
+    Unauthorized:
+      description: Missing or invalid access_token cookie
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            missingCookie:
+              value:
+                error: "missing access_token cookie"
+            invalidToken:
+              value:
+                error: "invalid token"
+    ForbiddenHTLCRole:
+      description: |
+        Authenticated but insufficient role. The four mutating HTLC routes are gated by
+        the router to `ROLE_BANK`, `ROLE_COMMERCIAL_BANK`, `ROLE_TREASURY` and
+        `ROLE_GOVERNANCE`, so that an oversight-only session (supervisor / NOC) cannot
+        drive a lock, settle or refund.
+
+        `Spec divergence:` this response is **not declared** on these operations in the
+        platform document, but the middleware emits it (`internal/http/middleware/
+        require_role.go`). The body carries an undocumented `required_role` array in
+        addition to `error`; the declared schema is the platform's own `ErrorResponse`,
+        so treat `required_role` as advisory and assert on the status code.
+      x-cbweb3-source: implementation-observed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "insufficient permissions"
+            required_role:
+              - ROLE_BANK
+              - ROLE_COMMERCIAL_BANK
+              - ROLE_TREASURY
+              - ROLE_GOVERNANCE
+    ForbiddenTreasuryRole:
+      description: |
+        Authenticated but insufficient role. Every Central-Bank-side reserve operation
+        (`approveDeposit`, `rejectDeposit`, `requestFiatExchange`, `approveEscrow`,
+        `rejectEscrow`, `approveRedeem`, `rejectRedeem`) is gated by the router to
+        `ROLE_TREASURY`, as is `burnToken` and — on a Central Bank gateway only —
+        `mintToken`.
+
+        The platform document declares this 403 on every one of those operations
+        **except `mintToken`**, where the role gate exists only on a Central Bank gateway
+        and is undeclared upstream.
+
+        The body carries an undocumented `required_role` array in addition to `error`
+        (`internal/http/middleware/require_role.go`); the declared schema is the
+        platform's own `ErrorResponse`, so treat `required_role` as advisory and assert
+        on the status code.
+      x-cbweb3-source: implementation-observed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "insufficient permissions"
+            required_role:
+              - ROLE_TREASURY
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "not found"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "internal server error"
+
+  schemas:
+
+    ErrorResponse:
+      type: object
+      description: |
+        The universal CBWeb3 error body. Not RFC 7807: no `type`/`title`/`detail`, no
+        `application/problem+json`, and **no machine-readable error code** on the
+        `/api/v1` surface. `error` is free-form and its wording is implementation
+        detail. Assert on the status code.
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable failure message.
+          example: "not found"
+
+    # ---------------------------------------------------------------- HTLC ---
+
+    LockHTLCRequest:
+      type: object
+      required: [receiver, amount]
+      properties:
+        agreement_id:
+          type: string
+          description: |
+            Optional FX agreement trade_id linking this HTLC to an accepted FX
+            agreement. When provided and FX_AGREEMENT_HTLC_STRICT=true the server
+            validates that the agreement is ACCEPTED and non-expired and that
+            receiver/amount match the agreed Spoke-A leg.
+          example: "trade-a1b2c3d4"
+        receiver:
+          type: string
+          description: Paladin identity of the token receiver (must be on the local spoke)
+          example: "funded_operator@spoke-a-bank-c"
+        amount:
+          type: string
+          description: Token amount to lock (decimal string)
+          example: "1000000"
+        time_lock:
+          type: integer
+          format: int64
+          description: |
+            Unix timestamp (seconds) after which the sender can refund.
+            Defaults to now+3600 (1 hour). The initiator's lock must have a
+            longer timelock than the responder's (see lock-with-hash).
+          example: 1711503600
+
+    LockHTLCResponse:
+      type: object
+      required: [contract_id, hash_lock]
+      properties:
+        contract_id:
+          type: string
+          description: Unique HTLC contract identifier
+          example: "htlc-a1b2c3d4"
+        hash_lock:
+          type: string
+          description: |
+            SHA-256 hash of the secret (hex-encoded). Convey this to the responding bank
+            out-of-band. Note the platform's examples are inconsistent about the
+            `0x` prefix — `LockHTLCResponse` shows `0xabcdef...` while
+            `LockHTLCWithHashLockRequest` shows a bare hex string. Treat the value as
+            opaque and echo exactly what you received.
+
+            `Do not copy the example literally:` the platform's example ends in an
+            ellipsis and is a truncated placeholder, not a digest.
+          example: "0xabcdef1234567890..."
+        htlc_tx_hash:
+          type: string
+          description: On-chain (Besu) transaction hash for HTLC coordination
+          example: "0x1234..."
+        zeto_tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for private token lock
+          example: "0x5678..."
+        secret:
+          type: string
+          description: |
+            The pre-image the gateway generated for this lock, hex-encoded.
+
+            `Spec divergence:` the platform document does not declare this field. The
+            delivered `LockHTLCResult` carries it, and **this response is the only place
+            it is ever returned** — `getHTLCStatus` and `searchHTLC` do not expose it.
+            Store it securely at once: losing it means the lock can only be refunded
+            after the time lock expires, never settled.
+          example: "6362776562332d746f6f6c626f782d68746c632d766563746f722d30312d6f6b"
+
+    LockHTLCWithHashLockRequest:
+      type: object
+      required: [receiver, amount, hash_lock]
+      properties:
+        agreement_id:
+          type: string
+          description: |
+            Optional FX agreement trade_id. When provided the server validates
+            that the agreement is ACCEPTED and that receiver/amount match the
+            agreed Spoke-B leg.
+          example: "trade-a1b2c3d4"
+        receiver:
+          type: string
+          description: Paladin identity of the token receiver (must be on the local spoke)
+          example: "funded_operator@spoke-b-bank-d"
+        amount:
+          type: string
+          description: Token amount to lock (decimal string)
+          example: "1000000"
+        time_lock:
+          type: integer
+          format: int64
+          description: |
+            Unix timestamp (seconds) after which the sender can refund.
+            Defaults to now+1800 (30 minutes). Must be shorter than the
+            initiator's lock so the responder can refund safely.
+          example: 1711501800
+        hash_lock:
+          type: string
+          description: |
+            SHA-256 hash of the initiator's secret (hex-encoded, 64 chars).
+            Provided out-of-band by the initiating bank after calling POST /api/v1/htlc/lock.
+
+            `Do not copy the example literally.` It is the platform document's own
+            example and is **66 hex characters**, two more than the 64 its own
+            description requires — a defect upstream, reproduced here rather than
+            silently corrected. Send the exact value returned as `hash_lock` by the
+            initiator's `POST /api/v1/htlc/lock`. A real value is the 32-byte SHA-256
+            digest of the secret, hex-encoded: 64 characters.
+          example: "a3f1b2c4d5e6f7890123456789abcdef0123456789abcdef0123456789abcdef01"
+
+    LockHTLCWithHashLockResponse:
+      type: object
+      required: [contract_id, hash_lock]
+      properties:
+        contract_id:
+          type: string
+          description: Unique HTLC contract identifier for this leg
+          example: "htlc-b9c8d7e6"
+        hash_lock:
+          type: string
+          description: Echoed hash_lock (the secret is NOT known locally)
+          example: "a3f1b2c4d5e6f7890123456789abcdef0123456789abcdef0123456789abcdef01"
+        htlc_tx_hash:
+          type: string
+          description: On-chain (Besu) HTLC coordination transaction hash
+          example: "0xabcd1234..."
+        zeto_tx_hash:
+          type: string
+          description: Zeto/Paladin private token lock transaction hash
+          example: "0xef567890..."
+
+    SettleHTLCRequest:
+      type: object
+      required: [contract_id, secret]
+      properties:
+        contract_id:
+          type: string
+          description: HTLC contract identifier (from LockHTLCResponse)
+          example: "htlc-a1b2c3d4"
+        secret:
+          type: string
+          description: Pre-image whose SHA-256 hash equals the hash lock
+          example: "deadbeef01234567..."
+
+    SettleHTLCResponse:
+      type: object
+      description: |
+        No field is declared required — do not assume either hash is present.
+      properties:
+        htlc_tx_hash:
+          type: string
+          description: On-chain (Besu) transaction hash for settle
+          example: "0x1234..."
+        zeto_tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for token release
+          example: "0x5678..."
+
+    RefundHTLCRequest:
+      type: object
+      required: [contract_id]
+      properties:
+        contract_id:
+          type: string
+          description: HTLC contract identifier (from LockHTLCResponse)
+          example: "htlc-a1b2c3d4"
+
+    RefundHTLCResponse:
+      type: object
+      description: |
+        No field is declared required — do not assume either hash is present.
+      properties:
+        htlc_tx_hash:
+          type: string
+          description: On-chain (Besu) transaction hash for refund
+          example: "0x1234..."
+        zeto_tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for token unlock
+          example: "0x5678..."
+
+    HTLCLock:
+      type: object
+      description: |
+        Full HTLC lock record — the delivered `HTLCStatus` struct. It is what
+        `getHTLCStatus` returns bare, and what fills the `locks` array of `searchHTLC`.
+
+        **No field is declared required** by the platform document — including
+        `contract_id` and `state`. Conformance tests must not assume any of them is
+        present.
+
+        `Spec divergence:` the platform document declares a `secret` field on this
+        record. The delivered struct has none, so no caller ever receives one; the
+        pre-image is returned only by `settleHTLC`. Conversely the delivered struct
+        carries `counterparty_locked`, `amount` and `created_at`, which the platform
+        document does not declare. All three are documented below.
+      properties:
+        contract_id:
+          type: string
+          description: Unique HTLC contract identifier
+          example: "htlc-a1b2c3d4"
+        sender:
+          type: string
+          description: Paladin identity of the token sender/locker
+          example: "funded_operator@spoke-a-bank-a"
+        receiver:
+          type: string
+          description: Paladin identity of the intended token receiver
+          example: "funded_operator@spoke-a-bank-c"
+        hash_lock:
+          type: string
+          description: SHA-256 hash of the secret (hex-encoded)
+          example: "0xabcdef1234567890..."
+        time_lock:
+          type: integer
+          format: int64
+          description: Unix timestamp (seconds) after which the sender can refund
+          example: 1711503600
+        zeto_lock_ref:
+          type: string
+          description: Reference to the Zeto locked UTXO
+          example: "zeto-utxo-8f21c0"
+        state:
+          type: string
+          description: |
+            Current lifecycle state of the HTLC, using the **prefixed** vocabulary.
+            This does not match the unprefixed vocabulary accepted by the `state` query
+            parameter of `searchHTLC` — an unreconciled inconsistency in the platform
+            document, reproduced here rather than normalised.
+          enum:
+            - HTLC_STATE_INVALID
+            - HTLC_STATE_PENDING
+            - HTLC_STATE_LOCKED
+            - HTLC_STATE_SETTLED
+            - HTLC_STATE_REFUNDED
+          example: HTLC_STATE_LOCKED
+        counterparty_locked:
+          type: boolean
+          description: |
+            Whether the counterparty has already locked its own side of the swap. Not
+            declared in the platform document; emitted by the delivered gateway.
+          example: false
+        amount:
+          type: string
+          description: |
+            Locked amount, base units. Not declared in the platform document; emitted by
+            the delivered gateway.
+          example: "1000000"
+        created_at:
+          type: string
+          description: |
+            When the lock was created (RFC 3339). Not declared in the platform document;
+            emitted by the delivered gateway.
+          example: "2026-06-18T09:58:00Z"
+
+    SearchHTLCResponse:
+      type: object
+      properties:
+        locks:
+          type: array
+          items:
+            $ref: "#/components/schemas/HTLCLock"
+        total:
+          type: integer
+          description: |
+            Number of matching HTLC locks. This is the length of `locks`, not a page
+            count — the endpoint has no pagination.
+          example: 1
+
+    # -------------------------------------------------------- FX Agreements ---
+
+    FXAgreement:
+      type: object
+      description: |
+        Full FX agreement record. **No field is declared required** by the platform
+        document. `group_id` and `contract_address` are populated only when Pente
+        integration is active and have no request-side counterpart.
+      properties:
+        trade_id:
+          type: string
+          description: Primary identifier (UUID)
+          example: "trade-a1b2c3d4"
+        originator:
+          type: string
+          description: Paladin identity of the proposing party (e.g. Bank-A)
+          example: "funded_operator@spoke-a-bank-a"
+        counterparty_b:
+          type: string
+          description: Paladin identity of the accepting authority (e.g. Bank-D)
+          example: "funded_operator@spoke-b-bank-d"
+        settlement_agent:
+          type: string
+          description: Paladin identity of the settlement agent (e.g. Bank-C)
+          example: "funded_operator@spoke-a-bank-c"
+        custodian:
+          type: string
+          description: Paladin identity of the custodian (e.g. Bank-D)
+          example: "funded_operator@spoke-b-bank-d"
+        beneficiary:
+          type: string
+          description: Paladin identity of the beneficiary (e.g. Bank-B)
+          example: "funded_operator@spoke-b-bank-b"
+        origin_amount:
+          type: string
+          description: Origin leg amount (decimal string)
+          example: "1000000"
+        counter_amount:
+          type: string
+          description: Counter leg amount (decimal string)
+          example: "850000"
+        origin_currency:
+          type: string
+          description: |
+            ISO 4217 currency code for origin leg. Unconstrained string — no pattern, no
+            enum, no length constraint is enforced.
+          example: "BRL"
+        counter_currency:
+          type: string
+          description: ISO 4217 currency code for counter leg
+          example: "ARS"
+        rate:
+          type: string
+          description: |
+            Exchange rate (decimal string). Must satisfy:
+            |counter_amount / origin_amount - rate| <= FX_RATE_TOLERANCE_PCT
+          example: "0.85"
+        source_spoke_id:
+          type: string
+          description: |
+            Spoke ID of the initiating leg. Note the platform's spoke-id examples come
+            in two incompatible families — `spoke-a`/`spoke-b` in the server and
+            identity examples, currency-flavoured `spoke-brl`/`spoke-usd` here. The
+            platform never states which is canonical.
+          example: "spoke-brl"
+        dest_spoke_id:
+          type: string
+          description: Spoke ID of the receiving leg
+          example: "spoke-usd"
+        source_receiver:
+          type: string
+          description: Paladin identity receiving the HTLC lock on the source spoke
+          example: "funded_operator@spoke-brl-bank-c"
+        dest_receiver:
+          type: string
+          description: Paladin identity receiving the HTLC lock on the destination spoke
+          example: "funded_operator@spoke-usd-bank-b"
+        expiry_date:
+          type: integer
+          format: int64
+          description: Unix timestamp (seconds) after which the agreement expires
+          example: 1711590000
+        state:
+          type: string
+          description: |
+            Current lifecycle state, using the **prefixed** vocabulary.
+
+            `Spec divergence:` the platform document declares the bare values
+            (`PROPOSED`, `ACCEPTED`, ...). The delivered gateway serialises the protobuf
+            enum with `ag.State.String()`, so what a client actually receives is
+            `FX_STATE_PROPOSED`, `FX_STATE_ACCEPTED`, and so on. This contract declares
+            the delivered vocabulary. Note that `FX_STATE_INVALID` (the protobuf
+            zero value) is representable and has no bare counterpart.
+
+            There is still **no EXPIRED state**, despite `expiry_date` on every
+            agreement and a `SYSTEM_JOB` "background expiration worker" event source.
+            Expiry has no representable terminal state.
+          enum:
+            - FX_STATE_INVALID
+            - FX_STATE_PROPOSED
+            - FX_STATE_ACCEPTED
+            - FX_STATE_REJECTED
+            - FX_STATE_CANCELLED
+            - FX_STATE_SETTLED
+          example: "FX_STATE_ACCEPTED"
+        group_id:
+          type: string
+          description: Pente privacy group ID (set when Pente integration is active)
+          example: "pente-group-abc123"
+        contract_address:
+          type: string
+          description: Address of the deployed FXAgreement Pente contract
+          example: "0x1234abcd..."
+
+    FXAgreementEvent:
+      type: object
+      description: Immutable audit event recording a state transition
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: |
+            Auto-increment primary key of the event row. This is a database key, not a
+            business identifier — `FXAgreement` itself has no `id` field.
+          example: 1
+        trade_id:
+          type: string
+          description: Foreign key to the FX agreement
+          example: "trade-a1b2c3d4"
+        from_state:
+          type: string
+          description: |
+            State before the transition, using the **prefixed** vocabulary — the
+            delivered gateway emits `ev.FromState.String()` over the protobuf enum. See
+            `FXAgreement.state` for the divergence note.
+          enum:
+            - FX_STATE_INVALID
+            - FX_STATE_PROPOSED
+            - FX_STATE_ACCEPTED
+            - FX_STATE_REJECTED
+            - FX_STATE_CANCELLED
+            - FX_STATE_SETTLED
+          example: FX_STATE_PROPOSED
+        to_state:
+          type: string
+          description: |
+            State after the transition, using the **prefixed** vocabulary — the
+            delivered gateway emits `ev.ToState.String()` over the protobuf enum.
+          enum:
+            - FX_STATE_INVALID
+            - FX_STATE_PROPOSED
+            - FX_STATE_ACCEPTED
+            - FX_STATE_REJECTED
+            - FX_STATE_CANCELLED
+            - FX_STATE_SETTLED
+          example: FX_STATE_ACCEPTED
+        actor:
+          type: string
+          description: |
+            User or service identity that triggered the transition.
+
+            `Spec divergence:` the platform document presents this as a party identity.
+            The delivered orchestrator hard-codes the literal string
+            `"payment-orchestrator"` on every event it writes
+            (`appendFXAuditEvent`), so **the audit trail does not identify who acted**.
+            Use `source` to tell a direct call (`FX_EVENT_SOURCE_LOCAL_API`) from a
+            governance call made for another party (`FX_EVENT_SOURCE_ON_BEHALF`); the
+            acting principal itself is not recorded.
+          example: "payment-orchestrator"
+        occurred_at_unix:
+          type: integer
+          format: int64
+          description: Unix timestamp (seconds) when the transition occurred
+          example: 1711500000
+        notes:
+          type: string
+          description: |
+            Human-readable detail about the transition.
+
+            `Spec divergence:` never populated by the delivered orchestrator —
+            `appendFXAuditEvent` does not set it, and nothing else writes FX audit
+            events on the transition paths. Expect it absent or empty.
+          example: "KYC verified — agreement accepted"
+        tx_hash:
+          type: string
+          description: On-chain transaction reference (if applicable)
+          example: "0xabcd1234..."
+        source:
+          type: string
+          description: |
+            Origin of the event, using the **prefixed** vocabulary:
+            `FX_EVENT_SOURCE_LOCAL_API` — direct API call from this spoke;
+            `FX_EVENT_SOURCE_RELAY` — cross-spoke Cacti relay delivery;
+            `FX_EVENT_SOURCE_SYSTEM_JOB` — background expiration worker;
+            `FX_EVENT_SOURCE_ON_BEHALF` — governance call on behalf of another party.
+
+            `Spec divergence:` the platform document declares the bare values. The
+            delivered gateway emits `ev.Source.String()` over the protobuf enum, so the
+            prefixed form is what a client receives. Unlike `FXState`, this enum has no
+            `INVALID` member — `FX_EVENT_SOURCE_LOCAL_API` is the protobuf zero value.
+          enum:
+            - FX_EVENT_SOURCE_LOCAL_API
+            - FX_EVENT_SOURCE_RELAY
+            - FX_EVENT_SOURCE_SYSTEM_JOB
+            - FX_EVENT_SOURCE_ON_BEHALF
+          example: FX_EVENT_SOURCE_LOCAL_API
+
+    ProposeFXAgreementRequest:
+      type: object
+      description: |
+        `Spec divergence:` the platform document marks only the first seven fields
+        required. The delivered orchestrator additionally rejects a proposal that omits
+        `source_spoke_id`, `dest_spoke_id`, `source_receiver` or `dest_receiver`
+        (`InvalidArgument`, surfacing as **400**), so all eleven are required here. The
+        gateway's own body check covers only the first seven; the other four are caught
+        one hop further in.
+      required:
+        - counterparty_b
+        - origin_amount
+        - counter_amount
+        - origin_currency
+        - counter_currency
+        - rate
+        - expiry_date
+        - source_spoke_id
+        - dest_spoke_id
+        - source_receiver
+        - dest_receiver
+      properties:
+        trade_id:
+          type: string
+          description: Optional UUID; auto-generated if empty
+          example: "trade-a1b2c3d4"
+        counterparty_b:
+          type: string
+          description: Paladin identity of the accepting authority
+          example: "funded_operator@spoke-b-bank-d"
+        originator:
+          type: string
+          description: Paladin identity of the originator (for on_behalf calls)
+          example: "funded_operator@spoke-a-bank-a"
+        settlement_agent:
+          type: string
+          description: Paladin identity of the settlement agent
+          example: "funded_operator@spoke-a-bank-c"
+        custodian:
+          type: string
+          description: Paladin identity of the custodian
+          example: "funded_operator@spoke-b-bank-d"
+        beneficiary:
+          type: string
+          description: Paladin identity of the beneficiary
+          example: "funded_operator@spoke-b-bank-b"
+        origin_amount:
+          type: string
+          description: Origin leg amount (decimal string, must be positive)
+          example: "1000000"
+        counter_amount:
+          type: string
+          description: Counter leg amount (decimal string, must be positive)
+          example: "850000"
+        origin_currency:
+          type: string
+          description: ISO 4217 code, must differ from counter_currency
+          example: "BRL"
+        counter_currency:
+          type: string
+          description: ISO 4217 code, must differ from origin_currency
+          example: "ARS"
+        rate:
+          type: string
+          description: Exchange rate (decimal string)
+          example: "0.85"
+        expiry_date:
+          type: integer
+          format: int64
+          description: Unix timestamp (seconds), must be in the future
+          example: 1711590000
+        on_behalf:
+          type: boolean
+          description: When true, calls proposeOnBehalf() via governance
+          default: false
+          example: false
+        source_spoke_id:
+          type: string
+          description: Spoke ID of the initiating leg
+          example: "spoke-brl"
+        dest_spoke_id:
+          type: string
+          description: Spoke ID of the receiving leg
+          example: "spoke-usd"
+        source_receiver:
+          type: string
+          description: Paladin identity receiving the HTLC lock on the source spoke
+          example: "funded_operator@spoke-brl-bank-c"
+        dest_receiver:
+          type: string
+          description: Paladin identity receiving the HTLC lock on the destination spoke
+          example: "funded_operator@spoke-usd-bank-b"
+
+    ProposeFXAgreementResponse:
+      type: object
+      properties:
+        trade_id:
+          type: string
+          description: Generated or echoed trade identifier
+          example: "trade-a1b2c3d4"
+        tx_hash:
+          type: string
+          description: On-chain transaction hash (empty if no on-chain submit)
+          example: "0xabcd1234..."
+
+    FXAgreementOnBehalfRequest:
+      type: object
+      description: |
+        Optional body accepted by the `accept` and `reject` actions. Declared inline
+        (anonymously) in the platform document on both operations; named here so clients
+        and mocks can reference it. There is no such body on `cancel` or `settle`.
+      properties:
+        on_behalf:
+          type: boolean
+          description: |
+            When true, the governance actor acts on behalf of counterparty_b via the
+            FXAgreement contract's acceptOnBehalf() function.
+          default: false
+          example: false
+
+    FXAgreementActionResponse:
+      type: object
+      description: |
+        Response for accept / reject / cancel / settle actions.
+
+        `Spec divergence:` the platform document declares only `tx_hash`. The delivered
+        gateway returns an `FXAgreementResult` whose `trade_id` is always populated
+        (every other field is `omitempty` and stays absent on an action response), so a
+        caller receives `{trade_id, tx_hash}`. Both are documented here.
+      properties:
+        trade_id:
+          type: string
+          description: |
+            The agreement acted upon, echoed back. Not declared in the platform
+            document; always present in the delivered response.
+          example: "trade-a1b2c3d4"
+        tx_hash:
+          type: string
+          description: On-chain transaction hash for the state transition
+          example: "0xabcd1234..."
+
+    GetFXAgreementResponse:
+      type: object
+      properties:
+        agreement:
+          $ref: "#/components/schemas/FXAgreement"
+
+    ListFXAgreementsResponse:
+      type: object
+      properties:
+        agreements:
+          type: array
+          items:
+            $ref: "#/components/schemas/FXAgreement"
+        total:
+          type: integer
+          description: |
+            Total number of matching agreements. Equal to the length of `agreements` —
+            there is no pagination on this endpoint.
+          example: 1
+
+    ListFXAgreementEventsResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/FXAgreementEvent"
+        total:
+          type: integer
+          description: Total number of audit events for this agreement
+          example: 1
+
+    # --------------------------------------------------------------- Token ---
+
+    MintTokenRequest:
+      type: object
+      required: [to, amount]
+      properties:
+        to:
+          type: string
+          description: Paladin identity to receive the minted tokens.
+          example: "funded_operator@spoke-a-cb"
+        amount:
+          type: string
+          description: Amount to mint (big integer as string).
+          example: "10000000"
+
+    MintTokenResponse:
+      type: object
+      description: No field is declared required by the platform document.
+      properties:
+        tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for the mint operation.
+          example: "0x1234..."
+
+    BurnTokenRequest:
+      type: object
+      required: [from, amount]
+      properties:
+        from:
+          type: string
+          description: Paladin identity whose tokens will be burned.
+          example: "funded_operator@spoke-a-cb"
+        amount:
+          type: string
+          description: Amount to burn (big integer as string).
+          example: "10000000"
+
+    BurnTokenResponse:
+      type: object
+      description: No field is declared required by the platform document.
+      properties:
+        tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for the burn operation.
+          example: "0x1234..."
+
+    TransferTokenRequest:
+      type: object
+      required: [to, amount]
+      properties:
+        to:
+          type: string
+          description: Paladin identity to receive the tokens.
+          example: "funded_operator@spoke-b-cb"
+        amount:
+          type: string
+          description: Amount to transfer (big integer as string).
+          example: "500000"
+
+    TransferTokenResponse:
+      type: object
+      description: |
+        No field is declared required by the platform document. When this transfer is
+        the pre-step of a redemption, `tx_hash` is the value to quote as
+        `zeto_transfer_tx_hash` on `requestRedeem`.
+      properties:
+        tx_hash:
+          type: string
+          description: Zeto/Paladin transaction hash for the transfer.
+          example: "0x5678..."
+
+    GetBalanceResponse:
+      type: object
+      description: |
+        No field is declared required by the platform document — a conformance test must
+        not assume `balance` is present.
+      properties:
+        balance:
+          type: string
+          description: |
+            Current tCeBM balance (big integer as string). No decimals count is stated
+            anywhere in the platform document; do not assume a scale factor.
+          example: "9000000"
+
+    GetFiatBalanceResponse:
+      type: object
+      description: No field is declared required by the platform document.
+      properties:
+        balance:
+          type: string
+          description: Current fCeBM balance (big integer as string).
+          example: "1250000"
+
+    # ------------------------------------------------- Reserve lifecycle ---
+
+    RegisterDepositRequest:
+      type: object
+      required: [amount]
+      properties:
+        requester_besu_address:
+          type: string
+          description: |
+            Besu address of the depositor. Injected by the commercial-bank proxy from
+            the verified caller identity — a value a client sends is overwritten. Do
+            not send it.
+          example: "0x1234abcd..."
+        requester_paladin_identity:
+          type: string
+          description: |
+            Paladin identity of the depositor. Also proxy-injected. Present on Scenario
+            A only — Scenario B's equivalent request has no such field.
+          example: "funded_operator@spoke-a-bank-a"
+        amount:
+          type: string
+          description: Fiat amount to deposit (big integer as string).
+          example: "10000000"
+
+    RegisterDepositResponse:
+      type: object
+      description: |
+        No field is declared required by the platform document.
+
+        `Spec divergence:` the platform document also declares a `status` field here.
+        The delivered result struct has **only the identifier**, so `status` is never
+        returned on creation. Read the record back through the corresponding list
+        operation to learn its status (it is `PENDING`). `status` is therefore not
+        declared below.
+      properties:
+        deposit_id:
+          type: string
+          description: Unique deposit identifier.
+          example: "dep-a1b2c3d4"
+
+    DepositIdRequest:
+      type: object
+      description: |
+        Deposit selector used by `approveDeposit` and `requestFiatExchange`. Declared
+        inline (anonymously) by the platform on both operations; named here so client
+        generators produce one type instead of two.
+      required: [deposit_id]
+      properties:
+        deposit_id:
+          type: string
+          description: Identifier returned by `registerDeposit`.
+          example: "dep-a1b2c3d4"
+
+    DepositRejectRequest:
+      type: object
+      description: Declared inline (anonymously) by the platform on `rejectDeposit`.
+      required: [deposit_id]
+      properties:
+        deposit_id:
+          type: string
+          description: Identifier returned by `registerDeposit`.
+          example: "dep-a1b2c3d4"
+        reason:
+          type: string
+          description: Optional free-text rejection reason, stored as `rejection_reason`.
+          example: "funds not received by settlement cut-off"
+
+    FiatExchangeResponse:
+      type: object
+      description: |
+        No field is declared required by the platform document.
+
+        `Spec divergence:` the platform document names the field `tx_hash`. The
+        delivered Scenario A gateway returns `FiatExchangeResult`, whose single field is
+        tagged **`mint_tx_hash`** — the response is passed straight through to
+        `c.JSON`, so `tx_hash` never appears. This contract declares the delivered name.
+        (Scenario B names the equivalent field `mint_tx_hash` too, so the two scenarios
+        agree with each other and only the document disagrees with both.)
+      properties:
+        mint_tx_hash:
+          type: string
+          description: Besu transaction hash of the fCeBM mint.
+          example: "0x1234..."
+
+    DepositRecord:
+      type: object
+      description: A deposit record. No field is declared required by the platform document.
+      properties:
+        id:
+          type: string
+          description: Deposit identifier.
+          example: "dep-a1b2c3d4"
+        requester_besu_address:
+          type: string
+          description: Besu address credited by the fiat exchange.
+          example: "0x1234abcd..."
+        requester_paladin_identity:
+          type: string
+          description: Paladin identity of the depositor.
+          example: "funded_operator@spoke-a-bank-a"
+        amount:
+          type: string
+          description: Deposited fiat amount (big integer as string).
+          example: "10000000"
+        status:
+          type: string
+          description: Lifecycle status of the deposit.
+          enum: [PENDING, APPROVED, REJECTED]
+          example: APPROVED
+        rejection_reason:
+          type: string
+          description: Reason recorded when the deposit was rejected; empty otherwise.
+          example: ""
+        fiat_mint_tx_hash:
+          type: string
+          description: Besu transaction hash of the fCeBM mint, once exchanged.
+          example: "0x1234..."
+        created_at:
+          type: string
+          format: date-time
+          description: Record creation time (RFC 3339, UTC).
+          example: "2026-06-18T10:00:00Z"
+
+    ListDepositsResponse:
+      type: object
+      description: |
+        No pagination exists on this endpoint. `total` is the length of `deposits`, not
+        a page count.
+      properties:
+        deposits:
+          type: array
+          description: Matching deposit records.
+          items:
+            $ref: "#/components/schemas/DepositRecord"
+        total:
+          type: integer
+          description: Number of records returned.
+          example: 1
+
+    RequestEscrowRequest:
+      type: object
+      description: |
+        `Scenario divergence:` Scenario B's equivalent request carries a `deposit_id`
+        field linking the escrow to the approved deposit being tokenised. Scenario A's
+        does not.
+      required: [amount]
+      properties:
+        requester_besu_address:
+          type: string
+          description: |
+            Besu address of the requester. Proxy-injected from the verified caller; do
+            not send it.
+          example: "0x1234abcd..."
+        requester_paladin_identity:
+          type: string
+          description: Paladin identity of the requester. Also proxy-injected.
+          example: "funded_operator@spoke-a-bank-a"
+        amount:
+          type: string
+          description: Amount of fCeBM to convert into tCeBM (big integer as string).
+          example: "5000000"
+
+    RequestEscrowResponse:
+      type: object
+      description: |
+        No field is declared required by the platform document.
+
+        `Spec divergence:` the platform document also declares a `status` field here.
+        The delivered result struct has **only the identifier**, so `status` is never
+        returned on creation. Read the record back through the corresponding list
+        operation to learn its status (it is `PENDING`). `status` is therefore not
+        declared below.
+      properties:
+        escrow_id:
+          type: string
+          description: Unique escrow identifier.
+          example: "esc-a1b2c3d4"
+
+    EscrowIdRequest:
+      type: object
+      description: Declared inline (anonymously) by the platform on `approveEscrow`.
+      required: [escrow_id]
+      properties:
+        escrow_id:
+          type: string
+          description: Identifier returned by `requestEscrow`.
+          example: "esc-a1b2c3d4"
+
+    EscrowRejectRequest:
+      type: object
+      description: Declared inline (anonymously) by the platform on `rejectEscrow`.
+      required: [escrow_id]
+      properties:
+        escrow_id:
+          type: string
+          description: Identifier returned by `requestEscrow`.
+          example: "esc-a1b2c3d4"
+        reason:
+          type: string
+          description: Optional free-text rejection reason, stored as `rejection_reason`.
+          example: "insufficient fCeBM balance at time of approval"
+
+    ApproveEscrowResponse:
+      type: object
+      description: |
+        Two chains move on an escrow approval, so two hashes are returned.
+
+        `Spec divergence:` the platform document names the Paladin-side hash
+        `zeto_mint_tx_hash`. The delivered Scenario A gateway returns
+        `ApproveEscrowResult`, whose fields are tagged `burn_tx_hash` and
+        **`mint_tx_hash`** — the result is passed straight through to `c.JSON`, so
+        `zeto_mint_tx_hash` never appears. This contract declares the delivered names.
+        (Scenario B uses `mint_tx_hash` as well; the two scenarios agree with each other
+        and only the document disagrees with both.)
+      properties:
+        burn_tx_hash:
+          type: string
+          description: Besu transaction hash for the fCeBM burn.
+          example: "0x1234..."
+        mint_tx_hash:
+          type: string
+          description: Paladin transaction hash for the tCeBM mint.
+          example: "0x5678..."
+
+    EscrowRecord:
+      type: object
+      description: An escrow record. No field is declared required by the platform document.
+      properties:
+        id:
+          type: string
+          description: Escrow identifier.
+          example: "esc-a1b2c3d4"
+        requester_besu_address:
+          type: string
+          description: Besu address whose fCeBM is burned.
+          example: "0x1234abcd..."
+        requester_paladin_identity:
+          type: string
+          description: Paladin identity credited with the minted tCeBM.
+          example: "funded_operator@spoke-a-bank-a"
+        amount:
+          type: string
+          description: Amount tokenised (big integer as string).
+          example: "5000000"
+        status:
+          type: string
+          description: Lifecycle status of the escrow.
+          enum: [PENDING, APPROVED, REJECTED]
+          example: APPROVED
+        rejection_reason:
+          type: string
+          description: Reason recorded when the escrow was rejected; empty otherwise.
+          example: ""
+        burn_tx_hash:
+          type: string
+          description: Besu transaction hash of the fCeBM burn.
+          example: "0x1234..."
+        zeto_mint_tx_hash:
+          type: string
+          description: Paladin transaction hash of the tCeBM mint.
+          example: "0x5678..."
+        created_at:
+          type: string
+          format: date-time
+          description: Record creation time (RFC 3339, UTC).
+          example: "2026-06-18T10:05:00Z"
+
+    ListEscrowsResponse:
+      type: object
+      description: No pagination. `total` is the length of `escrows`.
+      properties:
+        escrows:
+          type: array
+          description: Matching escrow records.
+          items:
+            $ref: "#/components/schemas/EscrowRecord"
+        total:
+          type: integer
+          description: Number of records returned.
+          example: 1
+
+    RequestRedeemRequest:
+      type: object
+      description: |
+        **`amount` is the only field a client sends.** The public route is served by the
+        commercial-bank *proxy*, which performs the tCeBM transfer to the Central Bank
+        itself and then injects `requester_besu_address`, `requester_paladin_identity`
+        and `zeto_transfer_tx_hash` into the payload before forwarding it. Values a
+        client supplies for those three are overwritten.
+
+        `Spec divergence:` the platform document presents `zeto_transfer_tx_hash` as a
+        client obligation. It is not: `PaymentProxyHandler.RequestRedeem` sets it from
+        its own `InitiateZetoTransfer` result. Omitting it is **not** an error; omitting
+        `amount` is the one 400 this operation raises before proxying. Scenario B's
+        equivalent request has no such field at all.
+      required: [amount]
+      properties:
+        requester_besu_address:
+          type: string
+          description: |
+            Besu address to receive the minted fCeBM. Proxy-injected from the verified
+            caller; do not send it.
+          example: "0x1234abcd..."
+        requester_paladin_identity:
+          type: string
+          description: |
+            Paladin identity that transferred tCeBM to the Central Bank. Proxy-injected;
+            do not send it.
+          example: "funded_operator@spoke-a-bank-a"
+        amount:
+          type: string
+          description: Amount of tCeBM to redeem (big integer as string).
+          example: "5000000"
+        zeto_transfer_tx_hash:
+          type: string
+          description: |
+            Paladin transaction hash proving the tCeBM was transferred to the Central
+            Bank. **Proxy-injected — do not send it.** The proxy initiates that transfer
+            on the caller's behalf and overwrites whatever the body carried.
+          example: "0xabcd..."
+
+    RequestRedeemResponse:
+      type: object
+      description: |
+        No field is declared required by the platform document.
+
+        `Spec divergence:` the platform document also declares a `status` field here.
+        The delivered result struct has **only the identifier**, so `status` is never
+        returned on creation. Read the record back through the corresponding list
+        operation to learn its status (it is `PENDING`). `status` is therefore not
+        declared below.
+      properties:
+        redeem_id:
+          type: string
+          description: Unique redeem identifier.
+          example: "red-a1b2c3d4"
+
+    RedeemIdRequest:
+      type: object
+      description: Declared inline (anonymously) by the platform on `approveRedeem`.
+      required: [redeem_id]
+      properties:
+        redeem_id:
+          type: string
+          description: Identifier returned by `requestRedeem`.
+          example: "red-a1b2c3d4"
+
+    RedeemRejectRequest:
+      type: object
+      description: Declared inline (anonymously) by the platform on `rejectRedeem`.
+      required: [redeem_id]
+      properties:
+        redeem_id:
+          type: string
+          description: Identifier returned by `requestRedeem`.
+          example: "red-a1b2c3d4"
+        reason:
+          type: string
+          description: Optional free-text rejection reason, stored as `rejection_reason`.
+          example: "zeto transfer hash could not be verified"
+
+    ApproveRedeemResponse:
+      type: object
+      description: |
+        No field is declared required by the platform document.
+
+        `Scenario divergence:` Scenario A names this field `fiat_mint_tx_hash`;
+        Scenario B names the equivalent field `mint_tx_hash`.
+      properties:
+        fiat_mint_tx_hash:
+          type: string
+          description: Besu transaction hash of the fCeBM mint to the requester.
+          example: "0x1234..."
+
+    RedeemRecord:
+      type: object
+      description: A redeem record. No field is declared required by the platform document.
+      properties:
+        id:
+          type: string
+          description: Redeem identifier.
+          example: "red-a1b2c3d4"
+        requester_besu_address:
+          type: string
+          description: Besu address credited with the minted fCeBM.
+          example: "0x1234abcd..."
+        requester_paladin_identity:
+          type: string
+          description: Paladin identity that surrendered the tCeBM.
+          example: "funded_operator@spoke-a-bank-a"
+        amount:
+          type: string
+          description: Amount redeemed (big integer as string).
+          example: "5000000"
+        status:
+          type: string
+          description: Lifecycle status of the redeem.
+          enum: [PENDING, APPROVED, REJECTED]
+          example: APPROVED
+        rejection_reason:
+          type: string
+          description: Reason recorded when the redeem was rejected; empty otherwise.
+          example: ""
+        zeto_transfer_tx_hash:
+          type: string
+          description: Paladin transaction hash quoted on the request.
+          example: "0xabcd..."
+        fiat_mint_tx_hash:
+          type: string
+          description: Besu transaction hash of the fCeBM mint back to the requester.
+          example: "0x1234..."
+        created_at:
+          type: string
+          format: date-time
+          description: Record creation time (RFC 3339, UTC).
+          example: "2026-06-18T11:00:00Z"
+
+    ListRedeemsResponse:
+      type: object
+      description: No pagination. `total` is the length of `redeems`.
+      properties:
+        redeems:
+          type: array
+          description: Matching redeem records.
+          items:
+            $ref: "#/components/schemas/RedeemRecord"
+        total:
+          type: integer
+          description: Number of records returned.
+          example: 1
+
+    StatusAcknowledgement:
+      type: object
+      description: |
+        Minimal acknowledgement carrying only a status word. Declared inline
+        (anonymously) by the platform on `approveDeposit`, the one approval whose
+        response carries no transaction hash — the escrow and redeem approvals return
+        richer bodies.
+      properties:
+        status:
+          type: string
+          description: Status word, e.g. `approved`.
+          example: approved
+
+    ReasonAcknowledgement:
+      type: object
+      description: |
+        Echo of the rejection reason. Declared inline (anonymously) by the platform on
+        all three reject operations.
+      properties:
+        reason:
+          type: string
+          description: The rejection reason recorded against the record.
+          example: "funds not received by settlement cut-off"

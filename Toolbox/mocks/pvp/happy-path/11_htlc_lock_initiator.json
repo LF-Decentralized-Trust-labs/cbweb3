@@ -1,0 +1,34 @@
+{
+  "id": "mock-pvp-hp-11",
+  "title": "Step 11 — the initiator locks 5,000,000 tCeBM on spoke-crc, timelock now+3600",
+  "description": "Banco de San Jose locks the CRC leg. The gateway generates a 32-byte secret internally, derives hash_lock = SHA-256(secret) and returns both. Only the initiator ever holds the secret.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway (spoke-crc). Locked at 2026-06-18T10:15:00Z, time_lock 1781781300 = 2026-06-18T11:15:00Z (now+3600, the default). SAFETY-CRITICAL: this timelock MUST be longer than the responder's 1781779800 in mock-pvp-hp-12. Nothing in any schema enforces it; inverting the two models an unsafe swap in which the initiator can claim the responder's leg after the responder has lost the ability to refund. agreement_id carries an FX trade_id despite its name; receiver must be on the local spoke or the lock is rejected. Divergence, verified in the delivered gateway (LockHTLCResult): the 201 body also carries secret, which contracts/pvp does not declare — it is returned exactly once and never re-exposed. hash_lock is bare 64-character hex with no 0x prefix: the responder endpoint hex-decodes it and rejects anything that is not exactly 32 bytes, so the 0x-prefixed and 66-character examples in the platform document cannot be sent literally.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/lock",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "agreement_id": "aaeca49d-89f2-4bf1-9410-0779f50b9754",
+      "receiver": "funded_operator@spoke-crc-bank-heredia",
+      "amount": "5000000",
+      "time_lock": 1781781300
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "b3056f4eeb4226f787fd1c8bef907b0f"
+    },
+    "body": {
+      "contract_id": "382307e71ddcd22f2e345d29eb396e0880e9a194aa90bc09110d15ea097ed1f5",
+      "hash_lock": "93d1f1757cd69442489f4f788d90c4dbc37605905c5bf496dea38fadba3ddef2",
+      "htlc_tx_hash": "0x0644673e324c112bb1c656cf79c89cbbb92d695114902a5c60315dc02f9d2199",
+      "zeto_tx_hash": "0x8f1bc5f33392b1e647c8759c295c73c88bd6fdd31a72356da98eabf9e8a0d196",
+      "secret": "d2aec5d19f13a018dd1895ef2f97b1cb0ca95664ff69b99bde9303a7a5dda43c"
+    }
+  }
+}

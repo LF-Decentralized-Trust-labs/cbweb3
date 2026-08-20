@@ -1,0 +1,29 @@
+{
+  "id": "mock-amm-hp-04",
+  "title": "Discovery 4 — the pool is ACTIVE and tradeable (no credentials)",
+  "description": "500,000 W-tCeBM_CRC against 925,000 W-tCeBM_CLP, one Central Bank on each side. ACTIVE means both sides are seeded; EMPTY means neither is; PENDING_COUNTERPART means one Central Bank has committed and the other has not.",
+  "notes": "Gateway: any. The pair travels in the URL path here, which is why this kit uses the slash-free pair id: the route is /api/v2/amm/pool/:pair/status, a single path segment. Divergence: the platform document declares 404 for an unavailable pool while the delivered handler answers 422 with error_code POOL_STATUS_UNAVAILABLE; handle whichever you get. pool_status is the one recovered vocabulary published as a real enum, because the gateway derives it exhaustively from the two reserves and gates swaps on it.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v2/amm/pool/W-CRC-CLP/status"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "d3d91f0f2b5a9fdf39eb469c1d1f2718"
+    },
+    "body": {
+      "pool_pair": "W-CRC-CLP",
+      "pool_status": "ACTIVE",
+      "reserve_a": "500000000000000000000000",
+      "reserve_b": "925000000000000000000000",
+      "current_ratio": 1.85,
+      "imbalance_flag": false,
+      "fee_rate_bps": 30,
+      "total_lp_count": 2,
+      "pending_commits": [],
+      "updated_at": "2026-06-18T09:58:00Z"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "mock-pvp-hp-17",
+  "title": "Step 17 — settlement verification: the payer is down exactly the origin leg",
+  "description": "8,000,000 tCeBM before the swap, 3,000,000 after: a debit of exactly the 5,000,000 CRC origin leg agreed in step 8. This assertion, not a 200 from settle, is what makes a conformance run a settlement test.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway. The platform does not document whether the reduction becomes observable at lock time or only after settlement, so assert the end state rather than an intermediate one. The mirror assertion belongs on the spoke-pen gateway, where the beneficiary's tCeBM balance rises by 37,000 PEN; this kit cannot express both in one fixture because they are different hosts.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/token/balance",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "e1465fb0c4080d9f1d83f4ab2414100e"
+    },
+    "body": {
+      "balance": "3000000"
+    }
+  }
+}

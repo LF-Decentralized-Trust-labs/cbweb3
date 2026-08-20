@@ -1,0 +1,55 @@
+{
+  "id": "mock-pvp-hp-16",
+  "title": "Step 16 — the immutable audit trail of the agreement",
+  "description": "Every state transition, in occurrence order, with the on-chain hash that carried it. source is the field that tells an operator whether a change came from a local API call or was delivered across the relay from the other spoke.",
+  "notes": "Gateway: either side. Divergences, all verified in the delivered gateway (fxAgreementEventToResult calls .String() on the protobuf enums): from_state, to_state and source come back PREFIXED — FX_STATE_PROPOSED, FX_EVENT_SOURCE_LOCAL_API — not the bare PROPOSED / LOCAL_API that contracts/pvp declares. The creation event's from_state is FX_STATE_INVALID, a sixth value absent from the contract enum entirely. actor is the literal string 'payment-orchestrator', not a Paladin identity as the platform's example suggests, and notes is never populated by the delivered code. The SETTLED transition here was driven by the relay after both HTLC legs settled, not by an API call. Note there is no EXPIRED state anywhere in Scenario A, despite expiry_date and a documented SYSTEM_JOB expiration worker.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/payments/fx/agreements/aaeca49d-89f2-4bf1-9410-0779f50b9754/audit",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "304e8599d283248c44df562b9bd20f93"
+    },
+    "body": {
+      "events": [
+        {
+          "id": 1,
+          "trade_id": "aaeca49d-89f2-4bf1-9410-0779f50b9754",
+          "from_state": "FX_STATE_INVALID",
+          "to_state": "FX_STATE_PROPOSED",
+          "actor": "payment-orchestrator",
+          "occurred_at_unix": 1781777400,
+          "tx_hash": "0x5d45f3b3fa34d7d2e091e8105ee94bc0ed70b283e8fc57170d73a4c526615488",
+          "source": "FX_EVENT_SOURCE_LOCAL_API"
+        },
+        {
+          "id": 2,
+          "trade_id": "aaeca49d-89f2-4bf1-9410-0779f50b9754",
+          "from_state": "FX_STATE_PROPOSED",
+          "to_state": "FX_STATE_ACCEPTED",
+          "actor": "payment-orchestrator",
+          "occurred_at_unix": 1781777520,
+          "tx_hash": "0x4b34189bdf0a514c12bbf193c3c76fbdf0c56dfbbcab6fa0395fb9cc3c92817d",
+          "source": "FX_EVENT_SOURCE_LOCAL_API"
+        },
+        {
+          "id": 3,
+          "trade_id": "aaeca49d-89f2-4bf1-9410-0779f50b9754",
+          "from_state": "FX_STATE_ACCEPTED",
+          "to_state": "FX_STATE_SETTLED",
+          "actor": "payment-orchestrator",
+          "occurred_at_unix": 1781778300,
+          "tx_hash": "0x6c6ab6fc8f76126a53f0aaa72c034c8b758eaf3ec9b65bea18a63d4dce233712",
+          "source": "FX_EVENT_SOURCE_RELAY"
+        }
+      ],
+      "total": 3
+    }
+  }
+}

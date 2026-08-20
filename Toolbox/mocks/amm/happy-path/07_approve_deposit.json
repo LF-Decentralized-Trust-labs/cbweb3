@@ -1,0 +1,27 @@
+{
+  "id": "mock-amm-hp-07",
+  "title": "Reserve step 2 — BCCR confirms the fiat arrived",
+  "description": "The deposit record moves to APPROVED. No token has been minted yet.",
+  "notes": "Gateway: BCCR Central Bank gateway, spoke-crc — the approve/reject/exchange half of the reserve lifecycle is registered only on a Central Bank gateway; a commercial-bank gateway answers 404. 201, not 200, even though nothing is created.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/deposits/approve",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "deposit_id": "b7a87cc9-4c09-4eb5-9263-f1a1448c1ee2"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "12054d24daa094660d7a9a3c6bc3cc7f"
+    },
+    "body": {
+      "status": "approved"
+    }
+  }
+}

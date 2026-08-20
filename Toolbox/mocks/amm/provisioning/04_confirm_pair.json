@@ -1,0 +1,36 @@
+{
+  "id": "mock-amm-prov-04",
+  "title": "Corridor step 3 — the Central Bank of Chile confirms, and the corridor becomes ACTIVE",
+  "description": "Only the Central Bank of token B may confirm. On success the pair reaches ACTIVE status and liquidity can be seeded.",
+  "notes": "Gateway: Banco Central de Chile Central Bank gateway. pair_id W-CRC-CLP is the identifier every later call reuses verbatim — quote, swap, pool status, circuit breaker and liquidity commit. Never construct one: five incompatible conventions appear across the delivered artefacts and none is documented as canonical (catalogued in Toolbox/DIVERGENCES.md). This kit uses the slash-free form because the pool-status route is /api/v2/amm/pool/:pair/status — a single path segment, which an identifier containing a slash cannot occupy. The sovereign form is real and produced by the platform itself: normalizeSovereignPoolPair in scenario-b central_bank_pool_client.go rewrites W-BRL-W-ARS to W-BRL-ARS.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v2/amm/pairs/confirm",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "pair_id": "W-CRC-CLP",
+      "confirmer_cb": "central_bank_clp"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "2e4377f17471bf7a902fc535afd2797f"
+    },
+    "body": {
+      "pair_id": "W-CRC-CLP",
+      "status": "ACTIVE",
+      "token_a_address": "0x1a3e796c050839af5f0af526c1a562889e603d38",
+      "token_b_address": "0xf5049d776fa8137e2e1b948671c734ea7627c4fd",
+      "amm_address": "0xcbc2bfd758c87b8e6db22afa3dc7c83e00b65baf",
+      "proposer_cb": "central_bank_crc",
+      "confirmer_cb": "central_bank_clp",
+      "proposed_at": "2026-06-17T14:00:00Z",
+      "confirmed_at": "2026-06-17T14:20:00Z"
+    }
+  }
+}

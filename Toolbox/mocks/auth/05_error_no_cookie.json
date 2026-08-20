@@ -1,0 +1,20 @@
+{
+  "id": "mock-auth-err-01",
+  "title": "No cookie, no session — 401 from the cookie-auth middleware",
+  "description": "Any protected endpoint called without the access_token cookie is rejected by middleware before the handler runs. This is the negative assertion every conformance run should make first.",
+  "notes": "Verified against the delivered gateway middleware (internal/http/middleware/auth.go): a missing cookie yields exactly {\"error\": \"missing access_token cookie\"} and a present-but-invalid one yields {\"error\": \"invalid token\"}. Assert on the 401, never on the string — the /api/v1 error model carries no machine-readable code.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/auth/me"
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "b7cd944ff1e9de94a1fbb2e26665cf5a"
+    },
+    "body": {
+      "error": "missing access_token cookie"
+    }
+  }
+}

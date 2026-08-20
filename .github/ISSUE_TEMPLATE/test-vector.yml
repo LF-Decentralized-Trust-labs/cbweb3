@@ -12,7 +12,7 @@ body:
     attributes:
       label: Domain
       description: "Which domain do these vectors belong to?"
-      placeholder: "e.g., pvp, ccip, privacy, observability"
+      placeholder: "e.g., auth, pvp (Scenario A), amm (Scenario B)"
     validations:
       required: true
   - type: input
@@ -20,7 +20,7 @@ body:
     attributes:
       label: Related contract
       description: "Path to the interface contract these vectors validate."
-      placeholder: "e.g., Toolbox/contracts/pvp/openapi_pvp_v0.1.0.yaml"
+      placeholder: "e.g., Toolbox/contracts/pvp/openapi_pvp_v2.3.0.yaml"
     validations:
       required: true
   - type: textarea
@@ -39,7 +39,12 @@ body:
         - [ ] JSON file with id, title, description, category, preconditions, input, expectedOutput
         - [ ] Covers happy paths, error cases, and edge cases
         - [ ] Uses placeholder conventions ({{NON_EMPTY_STRING}}, etc.) where appropriate
-        - [ ] Cryptographic values are verifiable (real hashes of stated inputs)
+        - [ ] Asserts on STATUS CODES, never on error message text — the /api/v1 error
+              model has no machine-readable code
+        - [ ] Every path and method resolves against a contract
+              (python Toolbox/tools/validate_artifact_paths.py)
+        - [ ] Cryptographic values are verifiable — real hashes of stated inputs, checked by
+              python Toolbox/tools/verify_hashlocks.py
         - [ ] README.md with validation guide
     validations:
       required: true

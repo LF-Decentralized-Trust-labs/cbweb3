@@ -1,0 +1,32 @@
+{
+  "id": "mock-amm-hp-03",
+  "title": "Discovery 3 — the only supported source of a pool_pair value (no credentials)",
+  "description": "The CRC/CLP corridor opened in mocks/amm/provisioning is ACTIVE. pair_id is taken verbatim from here into every subsequent call.",
+  "notes": "Gateway: any. Served from the gateway's pair_proposals table with no on-chain RPC. Treat pair_id as an opaque string: five incompatible naming conventions coexist across the delivered artefacts and none is documented as canonical (catalogued in Toolbox/DIVERGENCES.md), and the currency symbols above (W-tCeBM_CRC / W-tCeBM_CLP) are deliberately NOT the components of the pair id — do not try to derive one from the other. Wrapped-object divergence as in mock-amm-hp-02.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v2/amm/pairs"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "0630e75c3a5b55a53b5f5b7f562d8dee"
+    },
+    "body": {
+      "pairs": [
+        {
+          "pair_id": "W-CRC-CLP",
+          "status": "ACTIVE",
+          "token_a_address": "0x1a3e796c050839af5f0af526c1a562889e603d38",
+          "token_b_address": "0xf5049d776fa8137e2e1b948671c734ea7627c4fd",
+          "amm_address": "0xcbc2bfd758c87b8e6db22afa3dc7c83e00b65baf",
+          "proposer_cb": "central_bank_crc",
+          "confirmer_cb": "central_bank_clp",
+          "proposed_at": "2026-06-17T14:00:00Z",
+          "confirmed_at": "2026-06-17T14:20:00Z"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "mock-pvp-hp-04",
+  "title": "Step 4 — confirm the fCeBM landed",
+  "description": "The payer bank reads its own fCeBM balance: 10,000,000, exactly the deposit. fCeBM is the ERC-20 fiat token on Besu and is NOT what an HTLC locks.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway. No address parameter is accepted or required — a bank can only read the balance of the Besu operator its own gateway is configured with. No decimals count is stated anywhere in the platform for fCeBM or tCeBM: treat the value as an opaque big-integer decimal string and compare deltas, never assume a scale factor.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/token/fiat-balance",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "a98b7e3bb496344ac56abe0e491051f6"
+    },
+    "body": {
+      "balance": "10000000"
+    }
+  }
+}

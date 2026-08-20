@@ -104,7 +104,24 @@ spectral lint Toolbox/contracts/*/openapi_*.yaml --fail-severity=error
 ajv validate -s Toolbox/schemas/mock.schema.json   -d "Toolbox/mocks/**/*.json"        --spec=draft2020
 ajv validate -s Toolbox/schemas/vector.schema.json -d "Toolbox/test-vectors/**/*.json" --spec=draft2020
 
-# Conformance tests against a mock server
-prism mock Toolbox/contracts/pvp/openapi_pvp_v0.1.0.yaml --port 4010 &
-cd Toolbox/conformance && pytest tests/ -m happy_path --base-url=http://localhost:4010
+# Artifact paths must resolve against the contracts, and hash locks must recompute
+python Toolbox/tools/validate_artifact_paths.py
+python Toolbox/tools/verify_hashlocks.py
+
+# Conformance tests against mock servers — one Prism instance per contract
+prism mock Toolbox/contracts/pvp/openapi_pvp_v2.3.0.yaml   --port 4010 &
+prism mock Toolbox/contracts/amm/openapi_amm_v2.3.0.yaml   --port 4011 &
+prism mock Toolbox/contracts/auth/openapi_auth_v2.3.0.yaml --port 4012 &
+cd Toolbox/conformance && \
+  CBWEB3_AUTH_MODE=mock CBWEB3_PROFILE=mock \
+  pytest tests/ -m "mock_safe and happy_path" --base-url=http://localhost:4010
 ```
+
+Notes that are easy to get wrong:
+
+- Contract paths carry their own `/api/v1` or `/api/v2` prefix and the `servers:` entries
+  are bare origins. **Never append `/api/v1` to a base URL.**
+- The `/api/v1` surface is authenticated by an `access_token` **HttpOnly cookie**, not by
+  `Authorization: Bearer`. `CBWEB3_AUTH_TOKEN` does not exist.
+- `live_only` tests are skipped in mock mode because Prism is stateless. A green
+  `mock_safe` run proves shapes, not settlement.

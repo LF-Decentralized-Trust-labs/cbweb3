@@ -1,0 +1,34 @@
+{
+  "id": "mock-pvp-hp-12",
+  "title": "Step 12 — the responder locks 37,000 tCeBM on spoke-pen, timelock now+1800",
+  "description": "Banco de Lima locks the PEN leg against the SAME hash_lock, received from the initiator out-of-band. No secret is generated or stored on this spoke.",
+  "notes": "Gateway: Banco de Lima commercial-bank gateway (spoke-pen). Locked at 2026-06-18T10:20:00Z, time_lock 1781779800 = 2026-06-18T10:50:00Z (now+1800, the default) — deliberately SHORTER than the initiator's 1781781300, so the responder can reclaim its tokens first if settlement stalls. The hash_lock crosses from step 11 to here out-of-band: there is no API endpoint for that transfer anywhere on the platform. The gateway hex-decodes hash_lock and answers 400 'hash_lock must be a 64-char hex string (32 bytes)' for anything else.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/lock-with-hash",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "agreement_id": "aaeca49d-89f2-4bf1-9410-0779f50b9754",
+      "receiver": "funded_operator@spoke-pen-bank-callao",
+      "amount": "37000",
+      "time_lock": 1781779800,
+      "hash_lock": "93d1f1757cd69442489f4f788d90c4dbc37605905c5bf496dea38fadba3ddef2"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "0f8f49fce776fe16c3ed526bf030efe1"
+    },
+    "body": {
+      "contract_id": "6672df6d1d680bbb8152c211516e2952e04e19aae217ff23765b40911a74c828",
+      "hash_lock": "93d1f1757cd69442489f4f788d90c4dbc37605905c5bf496dea38fadba3ddef2",
+      "htlc_tx_hash": "0x04f50d1afe041f33f41df7233de534b90da4ae8171aed815c1d015df239836e1",
+      "zeto_tx_hash": "0x14e0b9c1dfe76ed8ec024295cb800e6658712652f661aa813fdbbd6daf58bf61"
+    }
+  }
+}

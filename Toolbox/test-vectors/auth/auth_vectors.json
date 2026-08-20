@@ -1,0 +1,281 @@
+{
+  "contract": "CBWeb3 Authentication and Session (shared, Scenario A + Scenario B)",
+  "contractVersion": "2.3.0",
+  "generatedAt": "2026-08-20",
+  "vectors": [
+    {
+      "id": "auth-hp-01",
+      "title": "Direct login returns tokens and sets the session cookie",
+      "description": "A governance/supervisor/NOC participant authenticates with clientId + clientSecret. The gateway answers 200 with an AuthResponse and installs the access_token and refresh_token HttpOnly cookies via Set-Cookie. From this point the session is usable with no Authorization header.",
+      "category": "happy-path",
+      "preconditions": {
+        "gateway": "any CBWeb3 gateway (Scenario A or Scenario B)",
+        "participantExists": true,
+        "participantFlow": "direct (ROLE_GOVERNANCE, ROLE_SUPERVISOR, ROLE_NOC)",
+        "session": "no cookie jar yet"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "clientId": "gov-a",
+          "clientSecret": "{{CLIENT_SECRET}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "accessToken": "{{NON_EMPTY_STRING}}",
+          "expiresIn": "{{POSITIVE_INTEGER}}",
+          "tokenType": "Bearer"
+        },
+        "setsCookies": ["access_token", "refresh_token"]
+      },
+      "notes": "The cookie is the credential for the whole /api/v1 surface. tokenType is always the literal 'Bearer' in the delivered gateway, but the /api/v1 routes are guarded by CookieAuth, not by an Authorization header. refreshToken is optional and may be absent."
+    },
+    {
+      "id": "auth-hp-02",
+      "title": "PKI login step 1 returns a nonce and no tokens",
+      "description": "The same endpoint behaves differently for a commercial bank or treasury participant: it returns only {\"nonce\": \"<hex>\"}. No tokens are issued and no cookie is set. The client must sign the nonce and call POST /api/v1/auth/wallet/bind.",
+      "category": "happy-path",
+      "preconditions": {
+        "participantFlow": "PKI (ROLE_COMMERCIAL_BANK, ROLE_TREASURY)",
+        "participantOnboarded": true,
+        "session": "no cookie jar yet"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "clientId": "bank-a",
+          "clientSecret": "{{CLIENT_SECRET}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "nonce": "{{HEX_STRING}}"
+        },
+        "setsCookies": []
+      },
+      "notes": "Load-bearing upstream defect, mirrored not fixed: the platform types this 200 as AuthResponse, whose required properties are accessToken/expiresIn/tokenType and which has no nonce property. A strict OpenAPI response validator therefore FAILS a perfectly correct PKI login. The contract models the nonce branch as a documented oneOf carrying x-cbweb3-source: implementation-observed. The server chooses the flow from the participant's role; the client cannot request one."
+    },
+    {
+      "id": "auth-hp-03",
+      "title": "PKI login step 2 — wallet bind issues the session",
+      "description": "The client signs the nonce from auth-hp-02 with the P-256 private key matching its participant certificate, DER-encodes the signature and hex-encodes it, then posts it with the certificate PEM. This is how a commercial bank actually obtains a session.",
+      "category": "happy-path",
+      "preconditions": {
+        "nonceObtained": "from auth-hp-02, unexpired",
+        "participantKey": "P-256 private key matching cert_pem",
+        "kycStatus": "verified"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/auth/wallet/bind",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "user_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+          "nonce_signature_hex": "{{DER_ECDSA_SIGNATURE_HEX}}",
+          "cert_pem": "{{PARTICIPANT_CERT_PEM}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "accessToken": "{{NON_EMPTY_STRING}}",
+          "expiresIn": "{{POSITIVE_INTEGER}}",
+          "tokenType": "Bearer"
+        },
+        "setsCookies": ["access_token", "refresh_token"]
+      },
+      "notes": "Public endpoint (security: []) because the signature over the nonce IS the credential. A deployment with PKI unconfigured answers 501 — a deployment-shape signal, not a client error."
+    },
+    {
+      "id": "auth-hp-04",
+      "title": "Session introspection returns roles and bankId",
+      "description": "GET /api/v1/auth/me is the canonical readiness probe for a session and the only way to discover the bankId the gateway will attribute the caller's writes to. A conformance runner reads roles here to decide which endpoint families the run may exercise.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "access_token cookie present and valid"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/auth/me",
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "subject": "{{NON_EMPTY_STRING}}",
+          "issuer": "{{NON_EMPTY_STRING}}",
+          "roles": "{{ARRAY_OF_STRING}}"
+        }
+      },
+      "notes": "Only subject, issuer and roles are required. wallet, country, bankId and privacyGroup appear only when populated in the token. Two role namespaces coexist in the same roles array: ROLE_-prefixed names gate /api/v1 (ROLE_TREASURY, ROLE_COMMERCIAL_BANK, ROLE_GOVERNANCE...) and lowercase Keycloak realm roles gate /api/v2 (central_bank, commercial_bank, mlp). ROLE_CENTRAL_BANK_SCENARIO_B is a Go constant name and will never appear in a token."
+    },
+    {
+      "id": "auth-hp-05",
+      "title": "Refresh with an empty body succeeds from the cookie",
+      "description": "The platform document marks the request body required and refreshToken a required property. The delivered handler falls back to the refresh_token cookie when refreshToken is absent, so a browser-style client can refresh with an empty JSON body.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "refresh_token cookie present and valid"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/auth/refresh",
+        "headers": {
+          "Content-Type": "application/json",
+          "Cookie": "refresh_token={{REFRESH_TOKEN}}"
+        },
+        "body": {}
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "accessToken": "{{NON_EMPTY_STRING}}",
+          "expiresIn": "{{POSITIVE_INTEGER}}",
+          "tokenType": "Bearer"
+        },
+        "setsCookies": ["access_token", "refresh_token"]
+      },
+      "notes": "Spec divergence mirrored in the contract description: a request-body validator built strictly from the schema would reject this call, which the gateway accepts. Both cookies are renewed."
+    },
+    {
+      "id": "auth-hp-06",
+      "title": "Logout revokes the token and expires both cookies",
+      "description": "Revokes the access token at Keycloak and expires the access_token and refresh_token cookies with Max-Age=-1. After this, auth-err-01 becomes the expected behaviour for the same jar.",
+      "category": "happy-path",
+      "preconditions": {
+        "session": "access_token cookie present and valid"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "headers": {
+          "Cookie": "access_token={{ACCESS_TOKEN}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 200,
+        "body": {
+          "message": "{{NON_EMPTY_STRING}}"
+        },
+        "expiresCookies": ["access_token", "refresh_token"]
+      },
+      "notes": "The contract declares a 400 on this operation because the platform does, but the route sits behind the cookie-auth middleware, so a request with no cookie is rejected with 401 before the handler runs (see auth-err-01)."
+    },
+    {
+      "id": "auth-err-01",
+      "title": "No session cookie is 401 on every guarded route",
+      "description": "The negative assertion that makes cookie authentication testable even against a stateless mock: a request to a CookieAuth-guarded route carrying no access_token cookie is rejected with 401 and a bare {error} body.",
+      "category": "error",
+      "preconditions": {
+        "session": "empty cookie jar; no Authorization header"
+      },
+      "input": {
+        "method": "GET",
+        "path": "/api/v1/auth/me",
+        "headers": {}
+      },
+      "expectedOutput": {
+        "status": 401,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Assert on the status code only. The /api/v1 error model is {error: \"<free-form string>\"} with no machine-readable code; the wording ('missing access_token cookie', 'invalid token', 'authentication required') varies by handler and is implementation detail."
+    },
+    {
+      "id": "auth-err-02",
+      "title": "Login without clientSecret is 400",
+      "description": "Both clientId and clientSecret are required. Omitting either is a request-shape failure, not an authentication failure, and is answered 400 rather than 401.",
+      "category": "error",
+      "preconditions": {
+        "session": "no cookie jar"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "clientId": "bank-a"
+        }
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "Distinguishing 400 from 401 here matters: a client that retries a 401 with fresh credentials will loop forever on a 400."
+    },
+    {
+      "id": "auth-err-03",
+      "title": "Wallet bind with a signature that does not verify is 401",
+      "description": "A syntactically valid but cryptographically wrong nonce signature fails PKI verification. No cookies are set.",
+      "category": "error",
+      "preconditions": {
+        "nonceObtained": "from auth-hp-02",
+        "signingKey": "a key that does NOT match cert_pem"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/auth/wallet/bind",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "user_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+          "nonce_signature_hex": "3045022100deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef0220deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+          "cert_pem": "{{PARTICIPANT_CERT_PEM}}"
+        }
+      },
+      "expectedOutput": {
+        "status": 401,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        },
+        "setsCookies": []
+      },
+      "notes": "The auth service is the one place on the surface that sometimes puts a code-like token in the free-form error field (NONCE_SIGNATURE_MISMATCH, INVALID_CERTIFICATE_CHAIN) and sometimes a human sentence — in the same field, on the same endpoint. Never match on it; assert 401."
+    },
+    {
+      "id": "auth-err-04",
+      "title": "Refresh with neither a body token nor a cookie is 400",
+      "description": "The complement of auth-hp-05: with no refreshToken property AND no refresh_token cookie, the handler has no credential to exchange and answers 400, not 401.",
+      "category": "error",
+      "preconditions": {
+        "session": "empty cookie jar"
+      },
+      "input": {
+        "method": "POST",
+        "path": "/api/v1/auth/refresh",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {}
+      },
+      "expectedOutput": {
+        "status": 400,
+        "body": {
+          "error": "{{NON_EMPTY_STRING}}"
+        }
+      },
+      "notes": "401 is reserved for a refresh token that is present but invalid or expired."
+    }
+  ]
+}

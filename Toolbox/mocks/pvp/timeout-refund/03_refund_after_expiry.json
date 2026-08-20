@@ -1,0 +1,28 @@
+{
+  "id": "mock-pvp-timeout-03",
+  "title": "After the timelock the initiator reclaims its 5,000,000 CRC",
+  "description": "At 10:06 the same call succeeds: Zeto unlocks the private tokens back to the sender and the record becomes HTLC_STATE_REFUNDED. The secret was never revealed, so no value crossed the corridor and the responder is not exposed.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway. This is the safety property the asymmetric timelock ordering buys: because the responder's lock always expires first, the responder can always refund before the initiator regains the ability to. Refund is idempotent — calling it on an already REFUNDED record returns 200 with the same hashes. Neither field of the 200 body is declared required by the platform; do not assume either hash is present.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/refund",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "contract_id": "7ad86b6b574fae1af798923bb1c50138b94ec5c11b1b6bf4ea2b22e2fb2fa0cb"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "df9199148b889b0a77db61ef38a6a693"
+    },
+    "body": {
+      "htlc_tx_hash": "0x3ba1a8716b83810c13c67ef9fe4784b565576c7799b0d1a1cb77c4107d1a5df2",
+      "zeto_tx_hash": "0x0811ada8b4655bd121aea85d2f3e5ebe6b322f4e57dd6675e83cc678537a4ec9"
+    }
+  }
+}

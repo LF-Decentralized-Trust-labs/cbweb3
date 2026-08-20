@@ -1,0 +1,32 @@
+{
+  "id": "mock-auth-hp-03",
+  "title": "PKI login step 2 — sign the nonce, bind the wallet, receive the cookie",
+  "description": "The bank signs the nonce from mock-auth-hp-02 with the P-256 private key matching its Central-Bank-issued X.509 participant certificate and POSTs the DER signature (hex) together with the certificate PEM. Only now are the access_token and refresh_token cookies set.",
+  "notes": "Public endpoint (security: []) — the signature over the nonce is the credential. nonce_signature_hex and cert_pem below are placeholder strings, not a real signature or certificate; this kit never ships key material. Binding fails if the participant's KYC status is not ACTIVE. Undocumented upstream: this handler can also answer 403 and 500.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/auth/wallet/bind",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "user_id": "0575c01c-dbcd-4620-85a5-908c93046e54",
+      "nonce_signature_hex": "SYNTHETIC-DER-ECDSA-SIGNATURE-HEX-DO-NOT-USE",
+      "cert_pem": "-----BEGIN CERTIFICATE-----\nSYNTHETIC-PARTICIPANT-CERTIFICATE-DO-NOT-USE\n-----END CERTIFICATE-----\n"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "7f0bb5506f063f87b3d15f46379938c3",
+      "Set-Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture; Path=/; HttpOnly; SameSite=Strict; Max-Age=900"
+    },
+    "body": {
+      "accessToken": "SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture",
+      "refreshToken": "SYNTHETIC.NOT-A-REAL-REFRESH-TOKEN.cbweb3-toolbox-fixture",
+      "expiresIn": 900,
+      "tokenType": "Bearer"
+    }
+  }
+}

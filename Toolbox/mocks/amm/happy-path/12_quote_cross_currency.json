@@ -1,0 +1,31 @@
+{
+  "id": "mock-amm-hp-12",
+  "title": "Payment step 1 — quote 1,000 CLP of output, 15-second TTL (no credentials)",
+  "description": "An exact-OUTPUT quote: the payer names what the beneficiary must receive and the AMM answers what that costs. 542.75 W-tCeBM_CRC buys exactly 1,000 W-tCeBM_CLP at the current reserves, 30 bps fee included.",
+  "notes": "Gateway: any. THE QUOTE LIVES 15 SECONDS — created_at 1781776800, valid_until 1781776815 — so quote and swap must be issued programmatically in one step; a test that pauses between them will flake. BLOCKING DIVERGENCE, documented in contracts/amm: the platform document declares ZERO parameters for this operation while the handler requires three (source_currency, target_currency, amount_out); following the document literally always yields 400. Note created_at and valid_until are Unix INTEGERS here, unlike almost every other timestamp in this surface, which are RFC 3339 strings. Undocumented upstream: 422 INSUFFICIENT_POOL_LIQUIDITY. The numbers are reproducible from mock-amm-hp-04: for reserves 500000e18 / 925000e18 and a 30 bps fee, the constant-product exact-output input for 1000e18 out is reserve_a*out*10000 // ((reserve_b-out)*9970) + 1.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v2/amm/quote/cross-currency?source_currency=CRC&target_currency=CLP&amount_out=1000000000000000000000"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "604e3edac9419028e31f72de5ccd5cda"
+    },
+    "body": {
+      "quote_id": "q-45513218",
+      "pool_pair": "W-CRC-CLP",
+      "amount_out": "1000000000000000000000",
+      "amount_in": "542753802533140547183",
+      "effective_rate": 1.842456,
+      "fee_bps": 30,
+      "max_slippage_pct": 0.01,
+      "reserve_a_snapshot": "500000000000000000000000",
+      "reserve_b_snapshot": "925000000000000000000000",
+      "created_at": 1781776800,
+      "valid_until": 1781776815,
+      "time_remaining_seconds": 15
+    }
+  }
+}

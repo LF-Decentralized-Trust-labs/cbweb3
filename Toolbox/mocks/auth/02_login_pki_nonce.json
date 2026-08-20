@@ -1,0 +1,27 @@
+{
+  "id": "mock-auth-hp-02",
+  "title": "PKI login step 1 — a commercial bank receives a nonce, no cookie",
+  "description": "The same POST /api/v1/auth/login, for ROLE_COMMERCIAL_BANK / ROLE_TREASURY, answers 200 with a bare {\"nonce\": \"<hex>\"} and sets no cookies at all. The caller is not authenticated yet.",
+  "notes": "Gateway: BCCR Central Bank gateway. This is the flow an external integrator will almost always hit, because commercial banks are the actors they build for. A fixture that stops here holds no session. Spec defect reproduced deliberately: the platform types this 200 as AuthResponse, which has no nonce property and requires accessToken/expiresIn/tokenType — a strict response validator fails this perfectly correct login. Note the absence of any Set-Cookie header.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/auth/login",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "clientId": "bank-sanjose",
+      "clientSecret": "SYNTHETIC-CLIENT-SECRET-DO-NOT-USE"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "42702139393b15f921cc1b1ba74bd2be"
+    },
+    "body": {
+      "nonce": "827ede279ca6dc5b57d375217adcd855"
+    }
+  }
+}

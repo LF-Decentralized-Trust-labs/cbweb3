@@ -1,367 +1,427 @@
 """
-Conformance tests: PvP Settlement — HTLC
+Conformance: Scenario A dual-layer HTLC settlement.
 
-Source contract: contracts/pvp/openapi_pvp_v0.1.0.yaml
-Source vectors:  test-vectors/pvp/pvp_htlc_vectors.json
+Source contract: contracts/pvp/openapi_pvp_v2.3.0.yaml
+  POST /api/v1/htlc/lock            (initiator; time_lock defaults to now+3600)
+  POST /api/v1/htlc/lock-with-hash  (responder;  time_lock defaults to now+1800)
+  POST /api/v1/htlc/settle          (reveals the pre-image)
+  POST /api/v1/htlc/refund
+  GET  /api/v1/htlc/status/{contractId}
+  GET  /api/v1/htlc/search
 
-These tests validate that an implementation of the CBWeb3 PvP Settlement API
-conforms to the HTLC interface contract.
+Scenario B has NO HTLC endpoints at all — the eight HTLC schemas in its platform
+document are unreferenced copy-paste residue. Everything here is `scenario_a`.
 
-Synthetic cryptographic data:
-  Secret:   cbweb3-test-secret-2026
-  SHA-256:  0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069
+THE HASH LOCK CROSSES OUT-OF-BAND. There is no API endpoint that transports it:
+the initiator locks, reads `hash_lock` from the 201, and conveys it to the
+responder by some other channel. Cross-spoke secret propagation is likewise
+described in prose with no HTTP endpoint, and HTLC has no relay endpoints
+whatsoever. Nothing here invents one.
+
+TWO STATE VOCABULARIES, DELIBERATELY NOT RECONCILED
+  HTLCLock.state             HTLC_STATE_LOCKED, ... (prefixed, 5 values)
+  /api/v1/htlc/search ?state=       LOCKED, SETTLED, REFUNDED (bare, 3 values)
+The platform never reconciles them and a client cannot tell which to send where.
+Both are reproduced verbatim; neither is normalised. What the search endpoint
+does with a prefixed value is undocumented, so no test asserts it.
+
+NOT TESTED, AND WHY
+  * The 403 on the four mutating HTLC routes: the router gates them with
+    RequireRole(ROLE_BANK, ROLE_COMMERCIAL_BANK, ROLE_TREASURY, ROLE_GOVERNANCE)
+    and our contract declares the 403, but provoking it needs a second session
+    holding none of those roles, which a one-credential run cannot provision.
+  * `compliance/decrypt-transaction` takes a third HTLC identifier form
+    ("0x-prefixed hex") while every HTLC endpoint uses `htlc-a1b2c3d4`. The
+    compliance surface is out of scope for this release, so the mismatch is
+    recorded, not exercised.
 """
 
+import os
 import time
 
 import pytest
-import requests
 
-VALID_HASH_LOCK = (
-    "0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069"
+from tests.helpers import (
+    HTLC_HASH_LOCK,
+    HTLC_LOCK_STATES,
+    HTLC_SEARCH_STATES,
+    HTLC_SECRET,
+    HTLC_WRONG_SECRET,
+    PALADIN_SPOKE_A_RECEIVER,
+    PALADIN_SPOKE_B_RECEIVER,
+    V1_HTLC_AMOUNT,
+    has_keys,
+    initiator_time_lock,
+    json_body,
+    responder_time_lock,
+    hash_lock_for,
+    status_is,
 )
-VALID_SECRET = "cbweb3-test-secret-2026"
-INVALID_SECRET = "wrong-secret"
 
-# timeLock far in the future (year 2030) for happy-path tests
-FUTURE_TIME_LOCK = 1893456000
-
-# timeLock in the past for expiry tests
-PAST_TIME_LOCK = 1700000000
+pytestmark = [pytest.mark.pvp, pytest.mark.htlc, pytest.mark.scenario_a]
 
 
 @pytest.fixture()
-def accepted_agreement(base_url, auth_headers):
-    """Create and accept an FX agreement, return the agreementId."""
-    create_resp = requests.post(
-        f"{base_url}/fx/agreement",
+def initiator_lock(session, pvp_url, timeout):
+    """
+    Lock as the initiator and return (contract_id, hash_lock).
+
+    Against Prism, which cannot persist a lock, the 201 is the contract's static
+    example — which still yields a usable contract id, because Prism matches the
+    path template rather than the value.
+    """
+    resp = session.post(
+        f"{pvp_url}/api/v1/htlc/lock",
         json={
-            "sourceCurrency": "tCeBM-A",
-            "targetCurrency": "tCeBM-B",
-            "sourceAmount": "1000000",
-            "exchangeRate": "0.058",
-            "counterpartyAddress": "0xCB002_CountryB",
+            "receiver": PALADIN_SPOKE_A_RECEIVER,
+            "amount": V1_HTLC_AMOUNT,
+            "time_lock": initiator_time_lock(),
         },
-        headers=auth_headers,
+        timeout=timeout,
     )
-    assert create_resp.status_code == 201
-    agreement_id = create_resp.json()["agreementId"]
-
-    accept_resp = requests.post(
-        f"{base_url}/fx/agreement/{agreement_id}/accept",
-        headers=auth_headers,
-    )
-    assert accept_resp.status_code == 200
-
-    return agreement_id
-
-
-@pytest.fixture()
-def proposed_agreement(base_url, auth_headers):
-    """Create an FX agreement but do NOT accept it. Return the agreementId."""
-    create_resp = requests.post(
-        f"{base_url}/fx/agreement",
-        json={
-            "sourceCurrency": "tCeBM-A",
-            "targetCurrency": "tCeBM-B",
-            "sourceAmount": "1000000",
-            "exchangeRate": "0.058",
-            "counterpartyAddress": "0xCB002_CountryB",
-        },
-        headers=auth_headers,
-    )
-    assert create_resp.status_code == 201
-    return create_resp.json()["agreementId"]
-
-
-@pytest.fixture()
-def locked_htlc(base_url, auth_headers, accepted_agreement):
-    """Lock funds for an accepted agreement, return (agreementId, contractId)."""
-    lock_resp = requests.post(
-        f"{base_url}/htlc/lock",
-        json={
-            "agreementId": accepted_agreement,
-            "hashLock": VALID_HASH_LOCK,
-            "timeLock": FUTURE_TIME_LOCK,
-        },
-        headers=auth_headers,
-    )
-    assert lock_resp.status_code == 201
-    contract_id = lock_resp.json()["contractId"]
-    return accepted_agreement, contract_id
+    status_is(resp, 201)
+    body = json_body(resp)
+    return body["contract_id"], body["hash_lock"]
 
 
 # ---------------------------------------------------------------------------
-# Vector htlc-hp-01: Lock funds — happy path
-# ---------------------------------------------------------------------------
-@pytest.mark.happy_path
-@pytest.mark.htlc
-class TestHtlcLock:
-    """POST /htlc/lock — lock tCeBM linked to an accepted FX agreement."""
-
-    def test_returns_201_with_locked_status(
-        self, base_url, auth_headers, accepted_agreement
-    ):
-        """Locking funds for a READY_FOR_SETTLEMENT agreement returns 201 LOCKED."""
-        resp = requests.post(
-            f"{base_url}/htlc/lock",
-            json={
-                "agreementId": accepted_agreement,
-                "hashLock": VALID_HASH_LOCK,
-                "timeLock": FUTURE_TIME_LOCK,
-            },
-            headers=auth_headers,
-        )
-
-        assert resp.status_code == 201
-        body = resp.json()
-        assert "contractId" in body
-        assert isinstance(body["contractId"], str) and len(body["contractId"]) > 0
-        assert "transactionHash" in body
-        assert isinstance(body["transactionHash"], str) and len(body["transactionHash"]) > 0
-        assert body["status"] == "LOCKED"
-        assert "blockNumber" in body
-        assert isinstance(body["blockNumber"], int) and body["blockNumber"] > 0
-
-
-# ---------------------------------------------------------------------------
-# Vector htlc-hp-02: Settle HTLC — valid secret
-# ---------------------------------------------------------------------------
-@pytest.mark.happy_path
-@pytest.mark.htlc
-class TestHtlcSettle:
-    """POST /htlc/settle — reveal secret to claim locked funds."""
-
-    def test_returns_200_with_settled_status(
-        self, base_url, auth_headers, locked_htlc
-    ):
-        """Revealing the correct secret settles the HTLC (200 SETTLED)."""
-        _, contract_id = locked_htlc
-
-        resp = requests.post(
-            f"{base_url}/htlc/settle",
-            json={
-                "contractId": contract_id,
-                "secret": VALID_SECRET,
-            },
-            headers=auth_headers,
-        )
-
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["contractId"] == contract_id
-        assert body["status"] == "SETTLED"
-
-
-# ---------------------------------------------------------------------------
-# Vector htlc-err-01: Settle HTLC — invalid secret (hash mismatch)
-# ---------------------------------------------------------------------------
-@pytest.mark.error
-@pytest.mark.htlc
-class TestHtlcSettleInvalidSecret:
-    """POST /htlc/settle with wrong secret returns 400 HTLC_HASH_MISMATCH."""
-
-    def test_returns_400_hash_mismatch(self, base_url, auth_headers, locked_htlc):
-        """Providing a secret that does not hash to the hashLock returns 400."""
-        _, contract_id = locked_htlc
-
-        resp = requests.post(
-            f"{base_url}/htlc/settle",
-            json={
-                "contractId": contract_id,
-                "secret": INVALID_SECRET,
-            },
-            headers=auth_headers,
-        )
-
-        assert resp.status_code == 400
-        body = resp.json()
-        assert body["code"] == "HTLC_HASH_MISMATCH"
-        assert "message" in body
-        assert isinstance(body["message"], str) and len(body["message"]) > 0
-
-
-# ---------------------------------------------------------------------------
-# Vector htlc-err-02: Settle HTLC — expired timeLock (410)
-# ---------------------------------------------------------------------------
-@pytest.mark.error
-@pytest.mark.htlc
-class TestHtlcSettleExpired:
-    """POST /htlc/settle after timeLock expiry returns 410."""
-
-    def test_returns_410_expired(self, base_url, auth_headers, accepted_agreement):
-        """Settling an expired HTLC returns 410 with HTLC_EXPIRED error."""
-        # Lock with a timeLock in the past
-        lock_resp = requests.post(
-            f"{base_url}/htlc/lock",
-            json={
-                "agreementId": accepted_agreement,
-                "hashLock": VALID_HASH_LOCK,
-                "timeLock": PAST_TIME_LOCK,
-            },
-            headers=auth_headers,
-        )
-        # Note: some implementations may reject locking with a past timeLock (400).
-        # If lock succeeds, attempt settle should return 410.
-        if lock_resp.status_code != 201:
-            pytest.skip("Implementation rejects lock with past timeLock (acceptable)")
-
-        contract_id = lock_resp.json()["contractId"]
-
-        resp = requests.post(
-            f"{base_url}/htlc/settle",
-            json={
-                "contractId": contract_id,
-                "secret": VALID_SECRET,
-            },
-            headers=auth_headers,
-        )
-
-        assert resp.status_code == 410
-        body = resp.json()
-        assert body["code"] == "HTLC_EXPIRED"
-
-
-# ---------------------------------------------------------------------------
-# Vector htlc-hp-03: Refund HTLC — after timeLock expiry
-# ---------------------------------------------------------------------------
-@pytest.mark.happy_path
-@pytest.mark.htlc
-class TestHtlcRefund:
-    """POST /htlc/refund — reclaim funds after timeLock expires."""
-
-    def test_returns_200_with_refunded_status(
-        self, base_url, auth_headers, accepted_agreement
-    ):
-        """Refunding an expired, unsettled HTLC returns 200 REFUNDED."""
-        # Lock with a timeLock in the past
-        lock_resp = requests.post(
-            f"{base_url}/htlc/lock",
-            json={
-                "agreementId": accepted_agreement,
-                "hashLock": VALID_HASH_LOCK,
-                "timeLock": PAST_TIME_LOCK,
-            },
-            headers=auth_headers,
-        )
-        if lock_resp.status_code != 201:
-            pytest.skip("Implementation rejects lock with past timeLock (acceptable)")
-
-        contract_id = lock_resp.json()["contractId"]
-
-        resp = requests.post(
-            f"{base_url}/htlc/refund",
-            json={"contractId": contract_id},
-            headers=auth_headers,
-        )
-
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["contractId"] == contract_id
-        assert body["status"] == "REFUNDED"
-
-
-# ---------------------------------------------------------------------------
-# Vector htlc-err-03: Refund HTLC — not yet expired (409)
-# ---------------------------------------------------------------------------
-@pytest.mark.error
-@pytest.mark.htlc
-class TestHtlcRefundNotExpired:
-    """POST /htlc/refund before timeLock expiry returns 409."""
-
-    def test_returns_409(self, base_url, auth_headers, locked_htlc):
-        """Attempting refund before timeLock expires returns 409."""
-        _, contract_id = locked_htlc
-
-        resp = requests.post(
-            f"{base_url}/htlc/refund",
-            json={"contractId": contract_id},
-            headers=auth_headers,
-        )
-
-        assert resp.status_code == 409
-
-
-# ---------------------------------------------------------------------------
-# Vector htlc-err-04: Refund HTLC — already settled (409)
-# ---------------------------------------------------------------------------
-@pytest.mark.error
-@pytest.mark.htlc
-class TestHtlcRefundAlreadySettled:
-    """POST /htlc/refund on a settled HTLC returns 409."""
-
-    def test_returns_409(self, base_url, auth_headers, locked_htlc):
-        """Refunding an already-settled HTLC returns 409."""
-        _, contract_id = locked_htlc
-
-        # Settle it first
-        settle_resp = requests.post(
-            f"{base_url}/htlc/settle",
-            json={
-                "contractId": contract_id,
-                "secret": VALID_SECRET,
-            },
-            headers=auth_headers,
-        )
-        assert settle_resp.status_code == 200
-
-        # Try to refund
-        resp = requests.post(
-            f"{base_url}/htlc/refund",
-            json={"contractId": contract_id},
-            headers=auth_headers,
-        )
-
-        assert resp.status_code == 409
-
-
-# ---------------------------------------------------------------------------
-# Vector htlc-edge-01: Lock HTLC — agreement not yet accepted
+# Fixture-data guards: these assert our own vectors, not the implementation.
+# They exist because the previous Toolbox generation shipped a false hash pair
+# and instructed integrators to verify it.
 # ---------------------------------------------------------------------------
 @pytest.mark.edge_case
-@pytest.mark.htlc
-class TestHtlcLockNotAccepted:
-    """POST /htlc/lock for a PROPOSED (not accepted) agreement returns 400."""
+@pytest.mark.mock_safe
+def test_hash_lock_is_the_sha256_of_the_secret():
+    """
+    HTLC_HASH_LOCK == SHA-256(decoded bytes of HTLC_SECRET), recomputed at run time.
 
-    def test_returns_400(self, base_url, auth_headers, proposed_agreement):
-        """Lock should only be allowed when agreement is READY_FOR_SETTLEMENT."""
-        resp = requests.post(
-            f"{base_url}/htlc/lock",
-            json={
-                "agreementId": proposed_agreement,
-                "hashLock": VALID_HASH_LOCK,
-                "timeLock": FUTURE_TIME_LOCK,
-            },
-            headers=auth_headers,
-        )
+    The derivation follows the delivered implementation exactly: the secret is 32
+    random bytes carried as hex, and the digest is taken over the DECODED bytes,
+    never over the hex text (server.go:264-270 for lock, :492-497 for settle,
+    where a non-hex secret is rejected outright as "invalid secret hex").
 
-        assert resp.status_code == 400
+    The superseded artefacts published a hash lock for the secret
+    "cbweb3-test-secret-2026" that was not its digest — the true value begins
+    000cd63c — and told integrators to verify it, so anyone who did got a
+    mismatch. This test, plus Toolbox/tools/verify_hashlocks.py, makes the defect
+    unrepeatable. The false digest itself is purged from the repository.
+    """
+    assert hash_lock_for(HTLC_SECRET) == HTLC_HASH_LOCK
+    assert len(HTLC_HASH_LOCK) == 64 and len(HTLC_SECRET) == 64
+    int(HTLC_HASH_LOCK, 16)  # raises unless it is pure hex
+    int(HTLC_SECRET, 16)  # the secret must be hex too, or settle 400s on parse
+    assert hash_lock_for(HTLC_WRONG_SECRET) != HTLC_HASH_LOCK
+
+
+@pytest.mark.edge_case
+@pytest.mark.mock_safe
+def test_initiator_timelock_outlives_the_responder_timelock():
+    """
+    SAFETY CRITICAL, AND ENFORCED ONLY BY PROSE.
+
+    The initiator's lock must expire LATER than the responder's, so the responder
+    can refund before the initiator can. Nothing in the schema enforces the
+    ordering — it exists only in the two `time_lock` descriptions (defaults
+    now+3600 and now+1800). A fixture that inverts it models an unsafe swap, so
+    the ordering is asserted on our own request data.
+    """
+    assert initiator_time_lock() > responder_time_lock()
 
 
 # ---------------------------------------------------------------------------
-# HTLC Status — happy path
+# Lock
 # ---------------------------------------------------------------------------
 @pytest.mark.happy_path
-@pytest.mark.htlc
-class TestHtlcStatus:
-    """GET /htlc/status — check HTLC contract state."""
+@pytest.mark.mock_safe
+def test_initiator_lock_returns_contract_id_and_hash_lock(session, pvp_url, timeout):
+    """
+    POST /api/v1/htlc/lock -> 201. `contract_id` and `hash_lock` are the two
+    REQUIRED response fields: the server generates the secret and returns only
+    its digest, which is why the pre-image must reach the responder by another
+    channel entirely.
+    """
+    resp = session.post(
+        f"{pvp_url}/api/v1/htlc/lock",
+        json={
+            "receiver": PALADIN_SPOKE_A_RECEIVER,
+            "amount": V1_HTLC_AMOUNT,
+            "time_lock": initiator_time_lock(),
+        },
+        timeout=timeout,
+    )
 
-    def test_returns_200_with_status(self, base_url, auth_headers, locked_htlc):
-        """Querying an existing HTLC returns 200 with HtlcStatusResponse schema."""
-        _, contract_id = locked_htlc
+    status_is(resp, 201)
+    body = json_body(resp)
+    has_keys(body, "contract_id", "hash_lock")
+    assert isinstance(body["contract_id"], str) and body["contract_id"]
+    assert isinstance(body["hash_lock"], str) and body["hash_lock"]
 
-        resp = requests.get(
-            f"{base_url}/htlc/status",
-            params={"contractId": contract_id},
-            headers=auth_headers,
-        )
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["contractId"] == contract_id
-        assert body["status"] in ["LOCKED", "SETTLED", "REFUNDED", "EXPIRED"]
-        assert "hashLock" in body
-        assert "timeLock" in body
-        assert "amount" in body
-        assert "sender" in body
-        assert "receiver" in body
+@pytest.mark.error
+@pytest.mark.mock_safe
+def test_lock_without_cookie_returns_401(anon_session, pvp_url, timeout, expect_error):
+    """No HTLC operation is public."""
+    resp = anon_session.post(
+        f"{pvp_url}/api/v1/htlc/lock",
+        json={"receiver": PALADIN_SPOKE_A_RECEIVER, "amount": V1_HTLC_AMOUNT},
+        timeout=timeout,
+    )
+
+    expect_error(resp, 401)
+
+
+@pytest.mark.happy_path
+@pytest.mark.mock_safe
+def test_responder_lock_with_hash_returns_contract_id(session, pvp_url, timeout):
+    """
+    POST /api/v1/htlc/lock-with-hash -> 201, mirroring the initiator's digest.
+
+    `hash_lock` is sent as bare 64-character hex. The platform's own example for
+    this field is 66 characters against its own "64 chars" description, and the
+    RESPONSE example carries a 0x prefix the request example lacks — both
+    reproduced in the contract with an explicit "do not copy literally" note, and
+    neither copied here.
+    """
+    resp = session.post(
+        f"{pvp_url}/api/v1/htlc/lock-with-hash",
+        json={
+            "receiver": PALADIN_SPOKE_B_RECEIVER,
+            "amount": V1_HTLC_AMOUNT,
+            "hash_lock": HTLC_HASH_LOCK,
+            "time_lock": responder_time_lock(),
+        },
+        timeout=timeout,
+    )
+
+    status_is(resp, 201)
+    has_keys(json_body(resp), "contract_id", "hash_lock")
+
+
+@pytest.mark.error
+@pytest.mark.live_only
+def test_lock_with_hash_without_a_hash_lock_returns_400(session, pvp_url, timeout, expect_error):
+    """`hash_lock` is required alongside `receiver` and `amount`; 400 is declared."""
+    resp = session.post(
+        f"{pvp_url}/api/v1/htlc/lock-with-hash",
+        json={
+            "receiver": PALADIN_SPOKE_B_RECEIVER,
+            "amount": V1_HTLC_AMOUNT,
+            "time_lock": responder_time_lock(),
+        },
+        timeout=timeout,
+    )
+
+    expect_error(resp, 400)
+
+
+# ---------------------------------------------------------------------------
+# Status and search
+# ---------------------------------------------------------------------------
+@pytest.mark.happy_path
+@pytest.mark.mock_safe
+def test_status_returns_a_lock_in_the_prefixed_vocabulary(
+    session, pvp_url, timeout, initiator_lock
+):
+    """
+    GET /api/v1/htlc/status/{contractId} -> 200, a BARE lock record whose `state`
+    is drawn from the PREFIXED five-value enum.
+
+    `Divergence:` the platform OpenAPI document wraps the record as
+    `{"lock": {...}}`. The delivered gateway returns it at the top level
+    (`c.JSON(result)` over `*HTLCStatus`), and the contract, the mocks and the
+    vectors all follow the gateway. `searchHTLC` really does wrap — as
+    `{"locks": [...], "total": n}` — which is where the confusion came from.
+
+    The record also has NO `secret` field: the delivered `HTLCStatus` struct does
+    not declare one, whatever the platform document says. It carries
+    `counterparty_locked`, `amount` and `created_at` instead.
+    """
+    contract_id, _ = initiator_lock
+
+    resp = session.get(
+        f"{pvp_url}/api/v1/htlc/status/{contract_id}", timeout=timeout
+    )
+
+    status_is(resp, 200)
+    lock = json_body(resp)
+    assert "lock" not in lock, (
+        "the delivered gateway returns the bare record; a {'lock': ...} wrapper "
+        "means the deployment is serving the platform document, not the gateway"
+    )
+    if "state" in lock:
+        assert lock["state"] in HTLC_LOCK_STATES
+    if "time_lock" in lock:
+        # Unix epoch SECONDS as int64 — never an RFC 3339 string.
+        assert isinstance(lock["time_lock"], int)
+    if "counterparty_locked" in lock:
+        assert isinstance(lock["counterparty_locked"], bool)
+
+
+@pytest.mark.happy_path
+@pytest.mark.mock_safe
+def test_search_accepts_the_bare_state_vocabulary(session, pvp_url, timeout, skip_if_unavailable):
+    """
+    GET /api/v1/htlc/search?state=LOCKED -> 200 {locks[], total}.
+
+    The query parameter's enum is the BARE vocabulary while the returned
+    `HTLCLock.state` uses the PREFIXED one, so a caller filters on LOCKED and
+    reads back HTLC_STATE_LOCKED. That is what the platform does; it is not
+    normalised here. The declared 502 (Central Bank API unreachable) skips.
+    """
+    resp = session.get(
+        f"{pvp_url}/api/v1/htlc/search", params={"state": "LOCKED"}, timeout=timeout
+    )
+    skip_if_unavailable(resp)
+
+    status_is(resp, 200)
+    body = json_body(resp)
+    has_keys(body, "locks", "total")
+    assert isinstance(body["locks"], list)
+    assert "LOCKED" in HTLC_SEARCH_STATES
+    for lock in body["locks"]:
+        if "state" in lock:
+            assert lock["state"] in HTLC_LOCK_STATES
+
+
+# ---------------------------------------------------------------------------
+# Settle
+# ---------------------------------------------------------------------------
+@pytest.mark.happy_path
+@pytest.mark.live_only
+def test_settle_with_the_revealed_secret_returns_200(
+    session, pvp_url, timeout, require_profile
+):
+    """
+    The responder's leg settles when the initiator reveals the pre-image.
+
+    Built as a self-contained responder lock (our own verified secret/hash pair)
+    followed by a settle, because the initiator's lock is created server-side
+    with a secret the client never sees — there is no endpoint that reveals it.
+    """
+    require_profile("scenario-a-bank", "scenario-a-cb")
+
+    lock = session.post(
+        f"{pvp_url}/api/v1/htlc/lock-with-hash",
+        json={
+            "receiver": PALADIN_SPOKE_B_RECEIVER,
+            "amount": V1_HTLC_AMOUNT,
+            "hash_lock": HTLC_HASH_LOCK,
+            "time_lock": responder_time_lock(),
+        },
+        timeout=timeout,
+    )
+    status_is(lock, 201)
+    contract_id = json_body(lock)["contract_id"]
+
+    resp = session.post(
+        f"{pvp_url}/api/v1/htlc/settle",
+        json={"contract_id": contract_id, "secret": HTLC_SECRET},
+        timeout=timeout,
+    )
+
+    status_is(resp, 200)
+    body = json_body(resp)
+    assert "htlc_tx_hash" in body or "zeto_tx_hash" in body
+
+    state = session.get(f"{pvp_url}/api/v1/htlc/status/{contract_id}", timeout=timeout)
+    status_is(state, 200)
+    # Bare record, not {"lock": {...}} — see
+    # test_status_returns_a_lock_in_the_prefixed_vocabulary.
+    assert json_body(state)["state"] == "HTLC_STATE_SETTLED"
+
+
+@pytest.mark.error
+@pytest.mark.live_only
+def test_settle_with_a_non_matching_secret_does_not_settle(session, pvp_url, timeout):
+    """
+    A wrong pre-image must not settle the lock.
+
+    HTLC_WRONG_SECRET is a syntactically VALID 32-byte hex secret, so this
+    exercises the digest-mismatch path rather than the "invalid secret hex" parse
+    rejection that any non-hex string would trigger first.
+
+    The declared response set for this operation is closed — 200, 400, 401, 403,
+    500 — so a refusal has to land on 400 or 500. The platform documents no
+    machine-readable code (the old HTLC_HASH_MISMATCH / HTLC_EXPIRED codes were
+    invented by the superseded Toolbox and exist nowhere on the platform), so
+    only the status code is asserted.
+    """
+    lock = session.post(
+        f"{pvp_url}/api/v1/htlc/lock-with-hash",
+        json={
+            "receiver": PALADIN_SPOKE_B_RECEIVER,
+            "amount": V1_HTLC_AMOUNT,
+            "hash_lock": HTLC_HASH_LOCK,
+            "time_lock": responder_time_lock(),
+        },
+        timeout=timeout,
+    )
+    status_is(lock, 201)
+
+    resp = session.post(
+        f"{pvp_url}/api/v1/htlc/settle",
+        json={
+            "contract_id": json_body(lock)["contract_id"],
+            "secret": HTLC_WRONG_SECRET,
+        },
+        timeout=timeout,
+    )
+
+    status_is(resp, 400, 500)
+
+
+# ---------------------------------------------------------------------------
+# Timeout branch
+# ---------------------------------------------------------------------------
+@pytest.mark.edge_case
+@pytest.mark.live_only
+def test_refund_after_the_timelock_expires_returns_200(session, pvp_url, timeout):
+    """
+    The timeout branch: lock with a short timelock, wait it out, refund.
+
+    `time_lock` is the Unix second after which the SENDER can refund. The wait is
+    real time and configurable via CBWEB3_REFUND_WAIT_SECONDS (default 20).
+    What the platform does NOT document is the status code for refunding BEFORE
+    expiry, so that case is deliberately not asserted anywhere in this suite.
+    """
+    wait = int(os.environ.get("CBWEB3_REFUND_WAIT_SECONDS", "20"))
+
+    lock = session.post(
+        f"{pvp_url}/api/v1/htlc/lock-with-hash",
+        json={
+            "receiver": PALADIN_SPOKE_B_RECEIVER,
+            "amount": V1_HTLC_AMOUNT,
+            "hash_lock": HTLC_HASH_LOCK,
+            "time_lock": int(time.time()) + max(wait - 5, 1),
+        },
+        timeout=timeout,
+    )
+    status_is(lock, 201)
+    contract_id = json_body(lock)["contract_id"]
+
+    time.sleep(wait)
+
+    resp = session.post(
+        f"{pvp_url}/api/v1/htlc/refund",
+        json={"contract_id": contract_id},
+        timeout=timeout,
+    )
+
+    status_is(resp, 200)
+    state = session.get(f"{pvp_url}/api/v1/htlc/status/{contract_id}", timeout=timeout)
+    status_is(state, 200)
+    # Bare record, not {"lock": {...}}.
+    assert json_body(state)["state"] == "HTLC_STATE_REFUNDED"
+
+
+@pytest.mark.error
+@pytest.mark.mock_safe
+def test_refund_without_cookie_returns_401(anon_session, pvp_url, timeout, expect_error):
+    """Refund is a mutating HTLC route and requires a session."""
+    resp = anon_session.post(
+        f"{pvp_url}/api/v1/htlc/refund",
+        json={"contract_id": "htlc-a1b2c3d4"},
+        timeout=timeout,
+    )
+
+    expect_error(resp, 401)

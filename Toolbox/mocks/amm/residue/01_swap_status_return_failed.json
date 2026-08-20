@@ -1,0 +1,36 @@
+{
+  "id": "mock-amm-res-01",
+  "title": "The swap says COMPLETED but the payer has NOT been made whole",
+  "description": "A second swap on the same corridor reaches COMPLETED — the beneficiary was paid in full — yet residue_status reads RETURN_FAILED. The 5.43 CRC slippage buffer is stranded on the Hub swap signer and the payer is that much short. A client asserting only on status would report this payment as clean.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway, spoke-crc. This is the single most important negative case in Scenario B and it is invisible unless a client reads residue_status. The residue leg is a SEPARATE bridge position from the settlement one, so nothing about the beneficiary's credit tells you whether it succeeded. Conformance must assert residue reconciliation, not merely status == COMPLETED.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v2/amm/swap/cross-currency/swp-66d2faf0",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "f34415028bb1b7bef4ec8bbf53edaa93"
+    },
+    "body": {
+      "swap_id": "swp-66d2faf0",
+      "correlation_id": "abf0b81f-21c9-4361-a274-a3bbcf8629fb",
+      "status": "COMPLETED",
+      "amount_in": "542753802533140547183",
+      "amount_out": "1000000000000000000000",
+      "effective_rate": 1.842456,
+      "bridge_in_position_id": "c4287678-1403-48d0-820e-e99be3b1c9ed",
+      "swap_tx_hash": "0x7590e7cd25642c6f83274ed83c1454b75188c8ba7cf02d501e75b522b6c876a7",
+      "bridge_out_position_id": "05650837-bd50-4293-a3d9-be1d6dff2878",
+      "residue_amount": "5427538025331405472",
+      "residue_position_id": "d56cf828-40a7-42ad-b327-4d7398e94bc4",
+      "residue_status": "RETURN_FAILED",
+      "created_at": "2026-06-18T14:00:00Z",
+      "completed_at": "2026-06-18T14:00:39Z"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "mock-amm-prov-08",
+  "title": "Corridor step 7 — both commits matched, the pool is funded",
+  "description": "Polling the commit until EXECUTED is what tells a Central Bank the counterpart committed too and the relay funded the pool. Only then does the pool reach ACTIVE.",
+  "notes": "Gateway: BCCR (Banco Central de Costa Rica) Central Bank gateway, spoke-crc. Requires the central_bank realm role — note that /api/v2 uses lowercase unprefixed roles, while /api/v1 uses the ROLE_-prefixed ones; both namespaces coexist in the same token's roles array. side comes back as A here because the on-chain resolver decided it, not because the request asked for it. The commit shape is declared free-form upstream; these fields are the ones the delivered endpoints and the platform's end-to-end test exchange, and no field is guaranteed present.",
+  "request": {
+    "method": "GET",
+    "path": "/api/v2/amm/liquidity/commits/cmt-504855b5",
+    "headers": {
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "01477526830c00dcf4460fa52b189521"
+    },
+    "body": {
+      "commit_id": "cmt-504855b5",
+      "pool_pair": "W-CRC-CLP",
+      "provider_id": "central_bank_crc",
+      "side": "A",
+      "amount": "500000000000000000000000",
+      "status": "EXECUTED"
+    }
+  }
+}

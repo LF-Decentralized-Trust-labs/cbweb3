@@ -1,0 +1,33 @@
+{
+  "id": "mock-amm-prov-02",
+  "title": "Corridor step 1b — the Central Bank of Chile registers the Chilean peso",
+  "description": "The counterpart Central Bank does the same for its own currency. Neither Central Bank can register the other's.",
+  "notes": "Gateway: Banco Central de Chile Central Bank gateway, spoke-clp — a different host from every other fixture in this directory. Two Central Banks are required at every stage of corridor opening by design; one can never open a corridor alone.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v2/hub/currencies",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "symbol": "W-tCeBM_CLP",
+      "country_name": "Chile",
+      "token_address": "0xf5049d776fa8137e2e1b948671c734ea7627c4fd",
+      "proposer_cb": "central_bank_clp"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "0707768437e43b4aa7334e068d2758b1"
+    },
+    "body": {
+      "symbol": "W-tCeBM_CLP",
+      "country_name": "Chile",
+      "token_address": "0xf5049d776fa8137e2e1b948671c734ea7627c4fd",
+      "proposer_cb": "central_bank_clp"
+    }
+  }
+}

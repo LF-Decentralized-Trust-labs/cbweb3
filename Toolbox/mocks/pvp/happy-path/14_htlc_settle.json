@@ -1,0 +1,29 @@
+{
+  "id": "mock-pvp-hp-14",
+  "title": "Step 14 — the initiator reveals the secret and both legs settle",
+  "description": "Revealing the pre-image on spoke-crc releases the 5,000,000 CRC leg to the settlement agent and publishes the secret. The Cacti relay picks it up and settles the mirror leg on spoke-pen automatically. This single call is what makes the swap atomic.",
+  "notes": "Gateway: Banco de San Jose commercial-bank gateway. Verify the pair yourself: `printf 'd2aec5d19f13a018dd1895ef2f97b1cb0ca95664ff69b99bde9303a7a5dda43c' | xxd -r -p | sha256sum` equals the hash_lock of steps 11 and 12. The secret is hex-decoded before hashing — SHA-256 is taken over the 32 decoded BYTES, not over the ASCII characters, so a non-hex secret is rejected with 400 'invalid secret hex'. There is no API endpoint for the cross-spoke broadcast: a successful call here produces state changes on a gateway you never contacted. The delivered settle path performs NO timelock check of its own; expiry is enforced by the on-chain HTLC, and a rejection there surfaces as 500.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/htlc/settle",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "contract_id": "382307e71ddcd22f2e345d29eb396e0880e9a194aa90bc09110d15ea097ed1f5",
+      "secret": "d2aec5d19f13a018dd1895ef2f97b1cb0ca95664ff69b99bde9303a7a5dda43c"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "feca992db44a290aa19031efc5125136"
+    },
+    "body": {
+      "htlc_tx_hash": "0x67ab5184dab20fedb166f1333270f6ee2685a7697fffa3693022ff2e5f864504",
+      "zeto_tx_hash": "0x001fe5fe47b0d78ce9442ab7491a433aaca6bce3139705f0227be9171d35c40e"
+    }
+  }
+}

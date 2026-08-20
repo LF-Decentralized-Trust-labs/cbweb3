@@ -1,0 +1,28 @@
+{
+  "id": "mock-amm-hp-10",
+  "title": "Reserve step 5 — BCCR burns the fCeBM and mints tCeBM",
+  "description": "Two chains move: the Besu burn of the fiat token and the Zeto/Paladin mint of the privacy token, each with its own hash.",
+  "notes": "Gateway: BCCR Central Bank gateway, spoke-crc — the approve/reject/exchange half of the reserve lifecycle is registered only on a Central Bank gateway; a commercial-bank gateway answers 404. Scenario B names the Paladin-side hash mint_tx_hash. Scenario A's OpenAPI document calls the same field zeto_mint_tx_hash, but its delivered gateway also emits mint_tx_hash — see mocks/pvp/happy-path/06.",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/payments/escrows/approve",
+    "headers": {
+      "Content-Type": "application/json",
+      "Cookie": "access_token=SYNTHETIC.NOT-A-REAL-TOKEN.cbweb3-toolbox-fixture"
+    },
+    "body": {
+      "escrow_id": "2fbf99fb-65b6-47d8-99a3-d3ec10faf37d"
+    }
+  },
+  "response": {
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Correlation-Id": "67c10616d5aa17875456c248022f5169"
+    },
+    "body": {
+      "burn_tx_hash": "0x64633c9b92d02453578b58ffa02ccabec2997e7ac217d1e7f660fad98706d280",
+      "mint_tx_hash": "0x8c677bbc1abfda651b2b1c42e17442d20b2cd4e5b7552037fc987680d5ee8684"
+    }
+  }
+}

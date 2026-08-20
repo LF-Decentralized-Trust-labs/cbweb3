@@ -87,11 +87,11 @@ The [**Toolbox**](Toolbox/README.md) is a curated set of integration-ready artif
 
 | Artifact | What it provides | Status |
 |----------|-----------------|--------|
-| [Interface contracts](Toolbox/contracts/pvp/) | OpenAPI 3.0.3 specs for PvP settlement (7 endpoints) | Available |
-| [Reference mocks](Toolbox/mocks/pvp/) | Canonical API responses for the full PvP flow (8 fixtures) | Available |
-| [Test vectors](Toolbox/test-vectors/pvp/) | Deterministic input/output fixtures (13 vectors) | Available |
-| [Conformance tests](Toolbox/conformance/) | Executable compliance checks (16 test methods) | Available |
-| [Sandbox & tutorials](Toolbox/sandbox/) | Quick-start guides, mock server setup, step-by-step tutorials | Available |
+| [Interface contracts](Toolbox/contracts/) | OpenAPI 3.0.3 specs mirroring API Gateway v2.3.0: `auth/` shared (8 paths), `pvp/` Scenario A (28 paths), `amm/` Scenario B (52 paths) — 88 paths / 99 operations | Available |
+| [Reference mocks](Toolbox/mocks/) | Canonical request/response fixtures for both settlement flows (59 fixtures across `auth/`, `pvp/`, `amm/`) | Available |
+| [Test vectors](Toolbox/test-vectors/) | Deterministic input/output fixtures (140 vectors in 9 files) | Available |
+| [Conformance tests](Toolbox/conformance/) | Executable compliance checks against a mock or a live gateway (91 test methods) | Available |
+| [Sandbox & tutorials](Toolbox/sandbox/) | Quick-start guides, mock server setup, and three step-by-step tutorials (Scenario A, conformance, Scenario B) | Available |
 
 ### Community Backlog
 
