@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/manifest"
@@ -58,6 +59,17 @@ type KeycloakRealmPlan struct {
 	Realm   string
 	Clients []KeycloakClientPlan
 	Users   []KeycloakUserPlan
+	// Environment is the manifest's spec.environment ("local" | "staging" | "prod").
+	// It decides sslRequired: "none" is a local-only affordance, since a developer
+	// reaches Keycloak and the portals over plain HTTP. An empty value is treated as
+	// NOT local — the permissive path must be asked for, never fallen into.
+	Environment string
+	// Origins are the browser origins this entity serves its portals from — the same
+	// list the api-gateway receives as CORS_ALLOW_ORIGINS, so the two cannot drift.
+	// They become the clients' webOrigins, and their "/*" forms the redirectUris.
+	// Required: renderRealmJSON refuses a plan without them rather than falling back
+	// to a wildcard, which is the defect this replaces (finding R1-10.7).
+	Origins []string
 }
 
 // adminUsersForRealmRoles selects the manifest admin users whose role is one of
@@ -117,9 +129,11 @@ func containsString(xs []string, s string) bool {
 // nocRealmPlan is the NOC realm hosted on the central bank's Keycloak.
 // The client ID must match the VITE_KEYCLOAK_CLIENT_ID baked into the NOC
 // frontend at build time (see orchestrator.go: KeycloakClient: "cbweb3-noc").
-func nocRealmPlan() KeycloakRealmPlan {
+func nocRealmPlan(environment string, origins []string) KeycloakRealmPlan {
 	return KeycloakRealmPlan{
-		Realm: "cbweb3",
+		Realm:       "cbweb3",
+		Environment: environment,
+		Origins:     origins,
 		Clients: []KeycloakClientPlan{
 			{ClientID: "cbweb3-noc", Secret: "", Roles: []string{"ROLE_NOC_VIEWER", "ROLE_NOC_OPERATOR", "ROLE_NOC_ADMIN"}, Audience: keycloakNOCAudience},
 		},
@@ -131,12 +145,14 @@ func nocRealmPlan() KeycloakRealmPlan {
 // manifest's admin users are routed to the realm that defines their role:
 // ROLE_GOVERNANCE/ROLE_TREASURY/ROLE_SUPERVISOR into the central-bank realm,
 // ROLE_NOC_ADMIN into the shared cbweb3/NOC realm.
-func centralBankRealmPlans(entity string, admins []manifest.AdminUser) []KeycloakRealmPlan {
-	noc := nocRealmPlan()
+func centralBankRealmPlans(entity string, admins []manifest.AdminUser, environment string, origins []string) []KeycloakRealmPlan {
+	noc := nocRealmPlan(environment, origins)
 	noc.Users = adminUsersForRealmRoles(admins, "ROLE_NOC_ADMIN", "ROLE_NOC_OPERATOR", "ROLE_NOC_VIEWER")
 	return []KeycloakRealmPlan{
 		{
-			Realm: entity,
+			Realm:       entity,
+			Environment: environment,
+			Origins:     origins,
 			Clients: []KeycloakClientPlan{
 				{ClientID: entity + "-client", Secret: entity + "-local-secret", Roles: []string{"ROLE_GOVERNANCE"}, Audience: keycloakBackendAudience},
 				{ClientID: entity + "-treasury-client", Secret: entity + "-treasury-local-secret", Roles: []string{"ROLE_TREASURY"}, Audience: keycloakBackendAudience},
@@ -149,9 +165,11 @@ func centralBankRealmPlans(entity string, admins []manifest.AdminUser) []Keycloa
 
 // commercialBankRealmPlan returns the realm/client for a commercial bank, with
 // the manifest's ROLE_BANK admin user provisioned for portal login.
-func commercialBankRealmPlan(entity string, admins []manifest.AdminUser) KeycloakRealmPlan {
+func commercialBankRealmPlan(entity string, admins []manifest.AdminUser, environment string, origins []string) KeycloakRealmPlan {
 	return KeycloakRealmPlan{
-		Realm: entity,
+		Realm:       entity,
+		Environment: environment,
+		Origins:     origins,
 		Clients: []KeycloakClientPlan{
 			{ClientID: entity + "-client", Secret: entity + "-local-secret", Roles: []string{"ROLE_BANK"}, Audience: keycloakBackendAudience},
 		},
@@ -169,6 +187,14 @@ func governanceUserID(entity string) string {
 // its realm roles, and confidential service-account clients (fixed secret,
 // directAccessGrants for ROPC). Keycloak imports this on startup (--import-realm).
 func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
+	// Fail closed. An empty origin list used to render as `["*"]`, which is an open
+	// redirector for the authorization code and lets any page read token responses.
+	// A plan that reaches here without origins is a provisioning bug, and the right
+	// answer is to stop rather than to publish the permissive document.
+	if len(plan.Origins) == 0 {
+		return nil, fmt.Errorf("keycloak realm %q: no browser origins in the plan; "+
+			"redirectUris/webOrigins would fall back to a wildcard", plan.Realm)
+	}
 	roleSet := map[string]bool{}
 	var realmRoles []map[string]any
 	clients := make([]map[string]any, 0, len(plan.Clients))
@@ -192,8 +218,8 @@ func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
 			"standardFlowEnabled":       true,
 			"directAccessGrantsEnabled": true,
 			"serviceAccountsEnabled":    c.Secret != "",
-			"redirectUris":              []string{"*"},
-			"webOrigins":                []string{"*"},
+			"redirectUris":              redirectURIsFor(plan.Origins),
+			"webOrigins":                append([]string(nil), plan.Origins...),
 		}
 		// Stamp a fixed "aud" via an audience mapper so the consuming backend can
 		// enforce KEYCLOAK_AUDIENCE. Without this Keycloak omits the client id from
@@ -269,10 +295,13 @@ func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
 	realm := map[string]any{
 		"realm":   plan.Realm,
 		"enabled": true,
-		// sslRequired "none" allows HTTP access from browsers in local/dev
-		// deployments. External (prod) deployments must place a TLS terminator
-		// in front; this flag must be changed to "external" or "all" there.
-		"sslRequired": "none",
+		// "none" only for a local stack, where Keycloak and the portals are reached
+		// over plain HTTP on the developer's machine. Anything else gets Keycloak's
+		// own default, "external": TLS demanded on every non-private address. A
+		// deployment that terminates TLS in front therefore needs no override; one
+		// that serves the portals over plain HTTP on a routable address has to say so
+		// by declaring spec.environment: local (finding R1-10.7).
+		"sslRequired": sslRequiredFor(plan.Environment),
 		"roles":       map[string]any{"realm": realmRoles},
 		"clients":     clients,
 	}
@@ -280,4 +309,25 @@ func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
 		realm["users"] = users
 	}
 	return json.MarshalIndent(realm, "", "  ")
+}
+
+// sslRequiredFor maps a manifest environment onto Keycloak's sslRequired. Only an
+// explicit "local" gets "none"; every other value — including an empty one — gets
+// "external", so a forgotten environment hardens rather than opens.
+func sslRequiredFor(environment string) string {
+	if environment == "local" {
+		return "none"
+	}
+	return "external"
+}
+
+// redirectURIsFor turns portal origins into Keycloak redirect URIs. Keycloak matches
+// redirect URIs by path, so each origin contributes "<origin>/*": scoped to the origin
+// the portal is actually served from, unlike the "*" this replaces.
+func redirectURIsFor(origins []string) []string {
+	uris := make([]string, 0, len(origins))
+	for _, o := range origins {
+		uris = append(uris, strings.TrimRight(o, "/")+"/*")
+	}
+	return uris
 }

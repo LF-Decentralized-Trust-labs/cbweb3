@@ -58,3 +58,23 @@ func corsOriginSingle(rpcPort int, frontendHost string) string {
 	}
 	return fmt.Sprintf("%s,http://%s:%d", local, frontendHost, rpcPort+9000)
 }
+
+// nocPortalOrigins returns the browser origin(s) the co-located NOC portal is served
+// from: RPC+12000, plus the routable-host form when frontendHost is not localhost, or the
+// single proxy origin when the entity runs behind the reverse proxy.
+//
+// Used for the PUBLIC noc-portal Keycloak client's webOrigins. That client did a browser
+// password grant with webOrigins=["*"], which let any origin read its token response —
+// the worst shape for a public client, since there is no client secret between an
+// attacker's page and a token (finding R1-10.7). Scoping it to the portal's own origin
+// keeps the grant working and closes that.
+func nocPortalOrigins(rpcPort int, frontendHost string, proxy bool) []string {
+	if proxy && frontendHost != "" {
+		return []string{proxyOrigin(frontendHost)}
+	}
+	origins := []string{fmt.Sprintf("http://localhost:%d", rpcPort+12000)}
+	if frontendHost != "" && frontendHost != "localhost" {
+		origins = append(origins, fmt.Sprintf("http://%s:%d", frontendHost, rpcPort+12000))
+	}
+	return origins
+}

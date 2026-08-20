@@ -16,7 +16,7 @@ func TestCentralBankRealmPlans_RoutesAdminUsersByRole(t *testing.T) {
 		{Role: "ROLE_SUPERVISOR", Username: "admin@brasil.supervisor.gov", Password: "sup-pw"},
 		{Role: "ROLE_NOC_ADMIN", Username: "admin@brasil.noc.gov", Password: "noc-pw"},
 	}
-	plans := centralBankRealmPlans("central-bank-brazil", admins)
+	plans := centralBankRealmPlans("central-bank-brazil", admins, "local", testPortalOrigins)
 	cb, noc := plans[0], plans[1]
 
 	// Governance + treasury + supervisor admins land in the central-bank realm; the
@@ -96,7 +96,7 @@ func TestCentralBankRealmPlans_GroupsMultiRoleUserByUsername(t *testing.T) {
 		// A second operator with a single (supervisor-only) role, e.g. SUGEVAL.
 		{Role: "ROLE_SUPERVISOR", Username: "user-reg@example.test", Password: "pw2"},
 	}
-	plans := centralBankRealmPlans("central-bank-costa-rica", admins)
+	plans := centralBankRealmPlans("central-bank-costa-rica", admins, "local", testPortalOrigins)
 	cb, noc := plans[0], plans[1]
 
 	// central-bank realm: exactly two users (one per username), the BCCR one
@@ -156,7 +156,7 @@ func TestCommercialBankRealmPlan_AdminUser(t *testing.T) {
 	admins := []manifest.AdminUser{
 		{Role: "ROLE_BANK", Username: "admin@itau.brasil.com", Password: "bank-pw"},
 	}
-	p := commercialBankRealmPlan("bank-itau", admins)
+	p := commercialBankRealmPlan("bank-itau", admins, "local", testPortalOrigins)
 	if len(p.Users) != 1 || p.Users[0].Username != "admin@itau.brasil.com" {
 		t.Fatalf("bank realm admin user mismatch: %+v", p.Users)
 	}
@@ -166,7 +166,7 @@ func TestCommercialBankRealmPlan_AdminUser(t *testing.T) {
 }
 
 func TestCentralBankRealmPlans_IncludeNOCAndTreasury(t *testing.T) {
-	plans := centralBankRealmPlans("central-bank-brazil", nil)
+	plans := centralBankRealmPlans("central-bank-brazil", nil, "local", testPortalOrigins)
 	if len(plans) != 2 {
 		t.Fatalf("expected 2 realms (central-bank + cbweb3), got %d", len(plans))
 	}
@@ -189,7 +189,7 @@ func TestCentralBankRealmPlans_IncludeNOCAndTreasury(t *testing.T) {
 }
 
 func TestCommercialBankRealmPlan(t *testing.T) {
-	p := commercialBankRealmPlan("bank-itau", nil)
+	p := commercialBankRealmPlan("bank-itau", nil, "local", testPortalOrigins)
 	if p.Realm != "bank-itau" {
 		t.Errorf("realm = %q; want bank-itau", p.Realm)
 	}
@@ -205,7 +205,7 @@ func TestGovernanceUserID(t *testing.T) {
 }
 
 func TestRenderRealmJSON_ClientsRolesSecret(t *testing.T) {
-	plans := centralBankRealmPlans("central-bank-brazil", nil)
+	plans := centralBankRealmPlans("central-bank-brazil", nil, "local", testPortalOrigins)
 	data, err := renderRealmJSON(plans[0])
 	if err != nil {
 		t.Fatalf("renderRealmJSON: %v", err)

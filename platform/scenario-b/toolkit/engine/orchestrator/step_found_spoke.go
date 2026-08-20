@@ -6,12 +6,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -408,7 +412,9 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	fmt.Fprintf(&b, "(%[1]s add-roles -r %[2]s --uusername service-account-%[3]s "+
 		"--cclientid realm-management --rolename manage-users --rolename view-users || true) && ",
 		kc, spokeKeycloakRealm, spokeKeycloakClient)
-	appendNOCPortalClient(&b, kc, spokeKeycloakRealm)
+	if err := appendNOCPortalClient(&b, kc, spokeKeycloakRealm, nocPortalOrigins(c.RPCPort, c.FrontendHost, c.useProxy())); err != nil {
+		return err
+	}
 	// Per-role operator accounts from the manifest (spec.adminUsers). Fall back to a
 	// single default CB admin when the manifest declares none. Each user's manifest
 	// role maps to the realm roles the api-gateway checks (realmRolesForAdminRole).
@@ -423,14 +429,75 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 
 // appendNOCPortalClient appends an idempotent kcadm command creating the PUBLIC
 // noc-portal client used by the co-located NOC portal's browser password grant.
-// publicClient + directAccessGrants (password grant, no secret); webOrigins=* so
-// the browser token fetch passes Keycloak's CORS. Shared by found-spoke and
-// found-hub (same realm: cbweb3).
-func appendNOCPortalClient(b *strings.Builder, kc, realm string) {
+// publicClient + directAccessGrants (password grant, no secret). Shared by found-spoke
+// and found-hub (same realm: cbweb3).
+//
+// webOrigins is the portal's own origin(s), not "*" (finding R1-10.7). The client needs
+// SOME web origin or the browser token fetch fails Keycloak's CORS; scoping it to the
+// origin the portal is actually served from is what nocPortalOrigins computes.
+//
+// The previous value was written as `[\"*\"]`, and that never reached Keycloak. This
+// command is handed to `bash -c` as a single argv element, so bash keeps the backslashes
+// literal inside the single-quoted -s argument and kcadm answers "Cannot parse the JSON"
+// — verified against keycloak:26.0. The `|| true` below then swallowed it, so the
+// noc-portal client was NOT created at all on a toolkit-provisioned entity, and the NOC
+// portal's password grant had no client to authenticate against. So this fixes a silent
+// total failure, not a live wildcard.
+//
+// The `|| true` on the create keeps the command idempotent (a re-run finds the client
+// already there), but on its own it also swallows a genuine failure — which is exactly
+// how the escaping bug above stayed invisible. So the create is followed by an explicit
+// existence check that exits non-zero when the client is absent: "created, or a named
+// error", never "created, or silently missing".
+func appendNOCPortalClient(b *strings.Builder, kc, realm string, origins []string) error {
+	webOrigins, err := jsonStringArray(origins)
+	if err != nil {
+		return fmt.Errorf("noc-portal webOrigins: %w", err)
+	}
 	fmt.Fprintf(b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s enabled=true "+
 		"-s publicClient=true -s standardFlowEnabled=false -s directAccessGrantsEnabled=true "+
-		"-s 'webOrigins=[\"*\"]' %[4]s || true) && ",
-		kc, realm, nocKeycloakClient, audienceMapperArg(keycloakNOCAudience))
+		"-s 'webOrigins=%[5]s' %[4]s || true) && ",
+		kc, realm, nocKeycloakClient, audienceMapperArg(keycloakNOCAudience), webOrigins)
+	fmt.Fprintf(b, "({ %[1]s get clients -r %[2]s -q clientId=%[3]s --fields id | grep -q '\"id\"'; } "+
+		"|| { echo 'noc-portal client %[3]s was not created in realm %[2]s' >&2; exit 1; }) && ",
+		kc, realm, nocKeycloakClient)
+	return nil
+}
+
+// browserOriginPattern is the only shape an origin may take on the kcadm command line:
+// scheme, host, optional port. Nothing else is JSON-safe AND shell-safe at once, which is
+// the property that actually matters here — the value is embedded in a JSON array inside
+// a single-quoted argument inside a `bash -c` string.
+var browserOriginPattern = regexp.MustCompile(`^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?$`)
+
+// jsonStringArray renders origins as the JSON array kcadm's -s flag expects, and REFUSES
+// anything it cannot prove renders as valid JSON.
+//
+// Plain double quotes, matching the protocolMappers argument on the same command — the
+// form kcadm actually parses. The backslash-escaped form this replaces does not survive
+// the single-quoted -s argument (see appendNOCPortalClient above).
+//
+// Validating against a whitelist rather than stripping a couple of characters is the
+// point. The first version stripped `"` and `'` and let `\` through, which produces an
+// invalid JSON escape, the same "Cannot parse the JSON" from kcadm, and — behind the
+// `|| true` this function's caller now guards — the same silent absence of the client.
+// Enumerating the characters that break it is how that class of bug survives; proving
+// the ones that work is how it does not. An empty list is an error too: a client with no
+// web origin cannot serve the browser grant, and there is no wildcard to fall back to.
+func jsonStringArray(values []string) (string, error) {
+	if len(values) == 0 {
+		return "", errors.New("no origins given; the noc-portal client needs at least one explicit origin")
+	}
+	for _, v := range values {
+		if !browserOriginPattern.MatchString(v) {
+			return "", fmt.Errorf("origin %q is not a plain scheme://host[:port] value", v)
+		}
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return "", fmt.Errorf("encode origins: %w", err)
+	}
+	return string(encoded), nil
 }
 
 // appendKeycloakUsers appends idempotent kcadm commands that create each admin user
@@ -658,6 +725,14 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// participant CSRs with it.
 		"CA_VOLUME":      c.caVolume(),
 		"ENTITY_PKI_DIR": "cb_tls", // named volume (holds the generated CA)
+		// The service images are non-root by default (uid 10001, finding R2-M-12), but the
+		// two services that mount the PKI read the CA and persist issued certificates there.
+		// On a bank that path is a host bind owned by whoever ran this toolkit, at mode 0700,
+		// so no other uid can read it — those containers therefore run as the invoking user.
+		// Same reasoning as HOST_UID for the Besu containers (ADR-001 / T028); the compose
+		// default keeps a hand-run stack on the image's non-root uid.
+		"ENTITY_RUN_UID": strconv.Itoa(os.Getuid()),
+		"ENTITY_RUN_GID": strconv.Itoa(os.Getgid()),
 		// PKI_DIR points the gateway at that same mount so it can read peer identities. On a CB the
 		// peers come from the participants table (the certificates it issued at onboarding, which
 		// carry the ACTIVE status and therefore revocation); this path additionally allows pinning a
@@ -694,17 +769,23 @@ func (c SpokeConfig) ComposeEnv() []string {
 		// its own ENTITY_NET_PREFIX network to probe besu by container DNS.
 		"NOC_AGENT_BESU_RPC": fmt.Sprintf("http://%s-%s-besu:8545", e, c.Entity),
 		"NOC_AGENT_ENTITY":   c.Entity,
-		"NOC_AGENT_VOLUME":   c.nocAgentVolume(),
-		"NOC_AGENT_IMAGE":    hubNocAgentImage,
-		"NOC_BACKEND_IMAGE":  hubNocBackendImage,
-		"NOC_BACKEND_PORT":   itoa(c.RPCPort + 11000),
-		"NOC_DB_NAME":        "noc",
-		"NOC_DB_USER":        "cbweb3",
-		"NOC_DB_PASSWORD":    "cbweb3",
-		"NOC_NET_PREFIX":     c.NetPrefix,
-		"NOC_PORTAL_IMAGE":   hubNocPortalImage,
-		"NOC_PORTAL_PORT":    itoa(c.RPCPort + 12000),
-		"NOC_VOLUME_PREFIX":  c.VolumePrefix,
+		// Supplementary group for the read-only Docker socket the agent tails logs
+		// from. The image is non-root (uid 65532) and the socket is root:docker 0660,
+		// so without this every log read is denied — silently, because the agent
+		// discards that error. Empty here → the compose default → the agent says so at
+		// startup (finding R2-M-12).
+		"NOC_DOCKER_GID":    dockerSocketGID(),
+		"NOC_AGENT_VOLUME":  c.nocAgentVolume(),
+		"NOC_AGENT_IMAGE":   hubNocAgentImage,
+		"NOC_BACKEND_IMAGE": hubNocBackendImage,
+		"NOC_BACKEND_PORT":  itoa(c.RPCPort + 11000),
+		"NOC_DB_NAME":       "noc",
+		"NOC_DB_USER":       "cbweb3",
+		"NOC_DB_PASSWORD":   "cbweb3",
+		"NOC_NET_PREFIX":    c.NetPrefix,
+		"NOC_PORTAL_IMAGE":  hubNocPortalImage,
+		"NOC_PORTAL_PORT":   itoa(c.RPCPort + 12000),
+		"NOC_VOLUME_PREFIX": c.VolumePrefix,
 	}
 	env := make([]string, 0, len(vars))
 	for k, v := range vars {

@@ -154,7 +154,6 @@ func TestValidate_ValidManifest(t *testing.T) {
 
 func TestValidate_ValidManifest_OptionalFieldsOmitted(t *testing.T) {
 	m := validManifest()
-	m.Spec.Environment = ""   // optional
 	m.Spec.Relay = nil        // optional
 	m.Spec.JoinBundleRef = "" // optional
 	m.Spec.Node.RPC = nil     // optional
@@ -203,6 +202,14 @@ func TestValidate_MissingRequiredFields(t *testing.T) {
 			name:       "missing spec.mode",
 			modify:     func(m *manifest.Manifest) { m.Spec.Mode = "" },
 			wantInErrs: []string{"spec.mode"},
+		},
+		{
+			// Required since R1-10.7: it decides the Keycloak realms' sslRequired,
+			// and an absent value fails login with "HTTPS required" far from the
+			// cause. Scenario-b has always required it.
+			name:       "missing spec.environment",
+			modify:     func(m *manifest.Manifest) { m.Spec.Environment = "" },
+			wantInErrs: []string{"spec.environment"},
 		},
 		{
 			name:       "missing spec.spoke.id",

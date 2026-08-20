@@ -189,6 +189,16 @@ func (s *startBackendStackStep) composeEnv() []string {
 	case s.useTLSVolume:
 		env = append(env, "ENTITY_PKI_DIR="+entityPKIVolumeKey)
 	}
+	// The service images are non-root by default (uid 10001, finding R2-M-12), but the
+	// three services that mount the PKI read the CA and persist issued certificates
+	// there — and that path is owned by whoever ran this toolkit, at mode 0700 for a
+	// bank. Any other uid can neither read nor write it, so those containers run as the
+	// invoking user. Same reasoning as HOST_UID for the Besu containers (ADR-001 / T028);
+	// the compose default keeps a hand-run stack on the image's non-root uid.
+	env = append(env,
+		"ENTITY_RUN_UID="+strconv.Itoa(os.Getuid()),
+		"ENTITY_RUN_GID="+strconv.Itoa(os.Getgid()),
+	)
 	// Un-gate the payment-orchestrator Besu path only when a signing URL is set
 	// (local). The compose defaults BESU_RPC_URL empty via ${PAYMENT_ORCH_BESU_RPC_URL-},
 	// so leaving this unset preserves the disabled-by-default behaviour.

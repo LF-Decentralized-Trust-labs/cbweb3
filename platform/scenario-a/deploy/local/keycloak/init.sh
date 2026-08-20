@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 set -euo pipefail
 
 PROJECT_ROOT="${PROJECT_ROOT:-/opt/keycloak/host}"
@@ -101,7 +102,13 @@ create_realm_and_client() {
     /opt/keycloak/bin/kcadm.sh create realms -s "realm=${realm_name}" -s enabled=true
   fi
 
-  local token_lifespan="${KC_ACCESS_TOKEN_LIFESPAN:-21600}"
+  # Access-token lifespan. 300s is Keycloak's own default, and the realms the
+  # toolkit provisions already run at it; the portals renew silently (proactive
+  # refresh + a 401-retry interceptor), so a short-lived token costs no session.
+  # This was 21600 — six hours — on the `make *.up` path, which is the finding
+  # R1-10.7 / R2-4.11 calls out: a leaked or logged bearer stayed usable for a
+  # working day. Overridable, but never back to a value measured in hours.
+  local token_lifespan="${KC_ACCESS_TOKEN_LIFESPAN:-300}"
   /opt/keycloak/bin/kcadm.sh update "realms/${realm_name}" \
     -s "accessTokenLifespan=${token_lifespan}"
 

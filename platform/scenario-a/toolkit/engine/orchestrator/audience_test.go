@@ -38,7 +38,7 @@ func TestRenderRealmJSON_AudienceMapper(t *testing.T) {
 		t.Fatal("backend and NOC audiences must differ")
 	}
 
-	entity, err := renderRealmJSON(centralBankRealmPlans("central-bank-brazil", nil)[0])
+	entity, err := renderRealmJSON(centralBankRealmPlans("central-bank-brazil", nil, "local", testPortalOrigins)[0])
 	if err != nil {
 		t.Fatalf("renderRealmJSON (entity): %v", err)
 	}
@@ -49,7 +49,7 @@ func TestRenderRealmJSON_AudienceMapper(t *testing.T) {
 		t.Errorf("treasury client audience = %v, want %v", got, keycloakBackendAudience)
 	}
 
-	noc, err := renderRealmJSON(nocRealmPlan())
+	noc, err := renderRealmJSON(nocRealmPlan("local", testPortalOrigins))
 	if err != nil {
 		t.Fatalf("renderRealmJSON (noc): %v", err)
 	}
@@ -61,6 +61,9 @@ func TestRenderRealmJSON_AudienceMapper(t *testing.T) {
 // A client with no Audience must not get an audience mapper (so aud stays opt-in).
 func TestRenderRealmJSON_NoMapperWithoutAudience(t *testing.T) {
 	data, err := renderRealmJSON(KeycloakRealmPlan{
+		// Origins are required since R1-10.7 (a plan without them fails closed rather
+		// than rendering a wildcard); this test is about the audience mapper.
+		Origins: testPortalOrigins,
 		Realm:   "x",
 		Clients: []KeycloakClientPlan{{ClientID: "x-client", Secret: "s", Roles: []string{"ROLE_X"}}},
 	})
