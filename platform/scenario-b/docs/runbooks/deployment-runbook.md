@@ -1080,6 +1080,84 @@ make scenario-b.down-infra        # stop Keycloak, Postgres, Redis, Besu nodes
 
 ## Troubleshooting
 
+### First: which deployment path are you on?
+
+Scenario B can be brought up two ways, and **they name everything differently**. Every command in
+the sections below that hardcodes a container name or a port was written for the compose path; on
+the toolkit path those names do not exist and `docker logs` answers *No such container*.
+
+| | Compose path | Toolkit path |
+| --- | --- | --- |
+| How it is started | `make scenario-b.up` (and the `deploy.up-*` targets) | `cd scenario-b/samples && ./deploy-all.sh` — the quick start in the root README |
+| Container names | fixed, e.g. `cbweb3-keycloak`, `cbweb3-api-gateway-bank-a` | derived, see below |
+| Ports | fixed, e.g. Keycloak `8081`, API `18080` | derived from each entity's Besu RPC port |
+
+**Container names on the toolkit path** follow
+`sc-b-cbweb3-<manifest-name>-<entity>-<service>`, where `<manifest-name>` is `metadata.name` of the
+manifest being applied (`engine/apply/apply.go`, `ContainerPrefix`). Because the entity repeats the
+manifest name, the names are long — `sc-b-cbweb3-bank-itau-bank-itau-api-gateway`. List them rather
+than typing them:
+
+```bash
+docker ps --format '{{.Names}}' | grep '^sc-b-cbweb3-'
+```
+
+**Ports on the toolkit path** are all offsets from the entity's `spec.node.rpc.port` in its
+manifest, so each entity gets its own set and nothing collides:
+
+| Service | Offset | Example (bank-itau, RPC `33646`) |
+| --- | --- | --- |
+| Besu JSON-RPC | `+0` | `33646` |
+| Postgres | `+5000` | `38646` |
+| Redis | `+6000` | `39646` |
+| Keycloak (CB/hub only) | `+7000` | — |
+| API gateway | `+8000` | `41646` |
+| Portal (bank) / governance portal (CB) | `+9000` | `42646` |
+| NOC backend (CB/hub only) | `+11000` | — |
+| NOC portal (CB/hub only) | `+12000` | — |
+| Treasury portal (CB only) | `+13000` | — |
+| Supervisor portal (CB only) | `+14000` | — |
+
+The sample topology therefore exposes the hub gateway on `41845` (RPC `33845`), Brazil's central
+bank on `41645` and bank-itau on `41646`.
+
+**Per-entity step state** lives in `<dataDir>/.provisioning-state.yaml` — that is what makes a
+re-run resume instead of restarting. `apply` prints a per-step report; read it before reading logs.
+
+### A step reports `soft-failed`
+
+Soft steps are allowed to fail without aborting the run, so a green deploy can still leave pieces
+missing. The three seen on a core sample deploy, and whether they matter:
+
+| Step | Cause | Matters? |
+| --- | --- | --- |
+| `add-noc-agent` | `noc provision-key: … connection refused` — the NOC backend (default port `8090`, `engine/orchestrator/step_observe.go`) is not part of the core sample | No, unless you need the NOC. Use `samples/deploy-all-with-noc.sh`. |
+| `emit-noc-bundle` | same absent NOC | No, same condition |
+| `start-launcher` | `launcher image "cbweb3/launcher:local" not found; build it first with launcher/build.sh` (`engine/orchestrator/launcher.go`) | No, unless you need the cross-scenario launcher |
+
+Anything else reported as `soft-failed` is worth investigating: check the `detail` field the report
+prints for that step.
+
+### A frontend change is not in the deployed portal
+
+The toolkit **skips the image build when a tag already exists**, and the tag encodes only the
+gateway port — `cbweb3b/bank-frontend:gw<port>` (`engine/orchestrator/images.go`,
+`buildFrontendImage`). `deploy-all.sh --clean` removes containers, volumes and data dirs but **not
+images**, so a re-deploy after changing frontend code silently serves the previous build.
+
+```bash
+# Prove what the running portal actually serves
+docker exec <portal-container> grep -c 'a distinctive string from your change' \
+  /usr/share/nginx/html/assets/*.js
+
+# Force a rebuild
+docker rmi -f cbweb3b/bank-frontend:gw41646
+```
+
+Then re-run the deploy (or the single `start-bank-frontend` step). The same applies to the CB
+portals, which carry their own per-port tags.
+
+
 ### Internal calls answer 401 RELAY_SIGNATURE_REQUIRED
 
 `RELAY_REQUIRE_SIGNATURE` is on at the receiver and the caller did not sign. Check the caller's log
@@ -1249,12 +1327,32 @@ If a commit is in the `MATCHED` state but the pool did not activate, sovereign l
 
 ### Cacti relay not forwarding events
 
+The relay container is `cbweb3-cacti-liquidity-relay`
+(`interop/hub-and-spoke/cacti/docker-compose.yaml`) on **both** deployment paths — the name
+`cbweb3-cacti-relay` used by earlier revisions of this section belongs to Scenario A's relay and
+does not exist here.
+
 ```bash
-docker logs cbweb3-cacti-relay --tail 50
-curl -s http://localhost:4000/api/v1/health
+docker logs cbweb3-cacti-liquidity-relay --tail 50
+
+# Host port comes from CACTI_API_PORT (compose default 7000). The toolkit path starts the
+# relay with provisioning/scripts/start-cacti.sh, whose CACTI_PORT default is also 7000.
+curl -s http://localhost:7000/api/v1/health
 ```
 
 Verify `LIQUIDITY_COMMIT_REGISTRY_ADDRESS` is set correctly in `interop/hub-and-spoke/cacti/.env`. Re-run `make scenario-b.deploy-contracts` to re-sync addresses.
+
+On the toolkit path, also confirm the relay knows the spokes — the registry is populated at
+provisioning time by each central bank's `register-relay-spoke` step, not at relay boot:
+
+```bash
+curl -s http://localhost:7000/api/v1/spokes
+```
+
+An empty list with healthy stacks means the registration step did not run or did not reach the
+relay. Note that `CACTI_RELAYER_URL` in `make/60-scenario-b.mk` still defaults to
+`http://localhost:4000`, which does not match the compose default above; if a make target cannot
+reach the relay, that mismatch is the first thing to check.
 
 ### Port already in use
 

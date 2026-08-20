@@ -343,6 +343,76 @@ Scenario B's contracts live in [`scenario-b/contracts/src/`](../../../scenario-b
 
 ## Troubleshooting
 
+### First: which deployment path are you on?
+
+Scenario A can be brought up two ways, and **they name everything differently**. Every command in
+the sections below that hardcodes a container name or a port was written for the compose path; on
+the toolkit path those names do not exist and `docker logs` answers *No such container*.
+
+| | Compose path | Toolkit path |
+| --- | --- | --- |
+| How it is started | `make deploy.up-*` / `make scenario-a.up` | `cd scenario-a/samples && ./deploy-all.sh` — the quick start in the root README |
+| Container names | fixed, e.g. `cbweb3-keycloak`, `cbweb3-api-gateway-bank-a` | derived, see below |
+| Ports | fixed, e.g. Keycloak `8081`, API `18080` | derived from each entity's Besu RPC port |
+
+**Container names on the toolkit path** are `cbweb3-<entity>-<service>`, where `<entity>` is
+`metadata.name` of the manifest being applied (`entityContainerPrefix`, in
+`engine/orchestrator/step_render_cb_env.go`). Two services do not follow it:
+
+| Service | Name | Example |
+| --- | --- | --- |
+| Backend, infra, portals | `cbweb3-<entity>-<service>` | `cbweb3-central-bank-brazil-api-gateway`, `cbweb3-bank-itau-postgres` |
+| Besu | `cbweb3-<spoke-id>-besu.<entity-suffix>` | `cbweb3-spoke-brl-besu.central-bank`, `cbweb3-spoke-brl-besu.bank-itau` |
+| Paladin | `paladin-<spoke-id>-<role>` | `paladin-spoke-brl-cb`, `paladin-spoke-brl-bank-itau` |
+
+The portal container differs by entity kind: a central bank runs
+`-governance-frontend`, `-treasury-frontend`, `-supervisor-frontend` and `-noc-frontend`; a
+commercial bank runs a single `-bank-frontend`. List what is there rather than guessing:
+
+```bash
+docker ps --format '{{.Names}}' | grep '^cbweb3-'
+```
+
+**Ports on the toolkit path** are all offsets from the entity's `spec.node.rpc.port` in its
+manifest, so each entity gets its own set and nothing collides. The offsets are defined in one
+place — `engine/orchestrator/ports.go` — which also explains why the bands are 1000 apart: entities
+inside a spoke differ by as little as 1 in their Besu port, so a band keeps them distinct.
+
+| Service | Offset | central-bank-brazil (RPC `8645`) | bank-itau (RPC `8646`) |
+| --- | --- | --- | --- |
+| Besu JSON-RPC / WS | `+0` / `+10` | `8645` / `8655` | `8646` / `8656` |
+| API gateway | `+10000` | `18645` | `18646` |
+| Auth gRPC | `+11000` | `19645` | `19646` |
+| Compliance gRPC | `+12000` | `20645` | `20646` |
+| Payment-orchestrator gRPC | `+13000` | `21645` | `21646` |
+| Postgres | `+14000` | `22645` | `22646` |
+| Redis | `+15000` | `23645` | `23646` |
+| Keycloak | `+16000` | `24645` | `24646` |
+| Portal — governance (CB) / bank (commercial) | `+17000` | `25645` | `25646` |
+| Portal — treasury (CB) | `+18000` | `26645` | — |
+| Portal — supervisor (CB) | `+22000` | `30645` | — |
+| Portal — NOC (CB) | `+24000` | `32645` | — |
+| Paladin (commercial bank) | `+19000` / `+20000` / `+21000` | — | `27646` / `28646` / `29646` |
+
+The offsets come from `ports.go`; the columns were then confirmed against the published ports of a
+running sample deploy (two spokes, six entities, 67 containers) rather than assumed from the
+manifest. To re-confirm any single row:
+
+```bash
+docker inspect <container> --format '{{range $p,$b := .NetworkSettings.Ports}}{{if $b}}{{$p}}->{{(index $b 0).HostPort}} {{end}}{{end}}'
+```
+
+Note that in Scenario A a **commercial bank runs its own Keycloak** (`+16000`), unlike Scenario B
+where the realm lives with the central bank or the hub.
+
+**The relay** is `cbweb3-cacti-relay` on `:4000` on both paths
+(`interop/hub-and-spoke/cacti/docker-compose.yaml`, and `spec.relay.endpoint` in each manifest). It
+must already be running before `apply` — the `register-relay` step is hard, not soft. Start it with
+`provisioning/scripts/start-cacti.sh`.
+
+**Per-entity step state** lives in `<dataDir>/.provisioning-state.yaml` — that is what makes a
+re-run resume instead of restarting. `apply` prints a per-step report; read it before reading logs.
+
 ### Keycloak does not initialize
 
 ```bash
