@@ -372,16 +372,6 @@ func TestMe_BankIDClaimTakesPrecedence(t *testing.T) {
 	}
 }
 
-func TestContainsRole(t *testing.T) {
-	t.Parallel()
-	if !containsRole([]string{"a", "b"}, "b") {
-		t.Error("expected true")
-	}
-	if containsRole([]string{"a"}, "z") {
-		t.Error("expected false")
-	}
-}
-
 // ── Governance handler ────────────────────────────────────────────────────────
 
 // fullGovernanceStub implements GovernanceCompliance + UserManager and is

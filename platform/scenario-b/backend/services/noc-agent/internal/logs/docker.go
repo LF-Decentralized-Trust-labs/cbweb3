@@ -18,7 +18,7 @@ import (
 
 // LogLine is a single log entry from a container.
 type LogLine struct {
-	Stream     string    // "stdout" or "stderr"
+	Stream     string // "stdout" or "stderr"
 	Text       string
 	OccurredAt time.Time
 }
@@ -143,4 +143,28 @@ func parseMuxedStream(r io.Reader) ([]LogLine, error) {
 		})
 	}
 	return lines, nil
+}
+
+// Ping checks that the Docker socket is reachable and usable by this process.
+//
+// The agent runs as a non-root uid (finding R2-M-12) while the socket is normally
+// root:docker mode 0660, so a container started without that supplementary group is
+// denied every request. collectLogs discards its error (it is called under `if err ==
+// nil`), so that denial would otherwise show up only as a permanently empty Log Viewer,
+// with nothing in the agent's own output pointing at the cause. main calls this once at
+// startup so the cause is stated where an operator will look.
+func (c *DockerClient) Ping(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost/_ping", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("docker ping: unexpected status %s", resp.Status)
+	}
+	return nil
 }

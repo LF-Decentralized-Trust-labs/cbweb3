@@ -3,6 +3,6 @@
 import { useTreasuryStore } from "../stores";
 
 export const useIssuance = () => {
-  const { mint, validateBurnToMint, validation, status, error } = useTreasuryStore();
-  return { mint, validateBurnToMint, validation, status, error };
+  const { mint, status, error } = useTreasuryStore();
+  return { mint, status, error };
 };

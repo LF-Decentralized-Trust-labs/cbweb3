@@ -10,6 +10,7 @@ import {
   CardTitle,
   Input,
   Label,
+  ConfirmActionDialog,
   Progress,
   Tabs,
   TabsContent,
@@ -24,6 +25,7 @@ export function AMMTradingPage() {
   const [tokenIn, setTokenIn] = useState("BRL-tCeBM");
   const [tokenOut, setTokenOut] = useState("ARS-tCeBM");
   const [exactOutputAmount, setExactOutputAmount] = useState("1000");
+  const [confirmingSwap, setConfirmingSwap] = useState(false);
 
   useEffect(() => {
     void refreshPool();
@@ -80,7 +82,7 @@ export function AMMTradingPage() {
           </TabsContent>
           <TabsContent value="execute" className="space-y-2">
             <p className="text-sm text-muted-foreground">Review quote before execution.</p>
-            <Button variant="outline" onClick={() => void swap({ tokenIn, tokenOut, exactOutputAmount })} disabled={status === "loading"}>
+            <Button variant="outline" onClick={() => setConfirmingSwap(true)} disabled={status === "loading"}>
               Execute Swap
             </Button>
           </TabsContent>
@@ -115,6 +117,26 @@ export function AMMTradingPage() {
         <p className="text-sm">Imbalance alert: {pool?.imbalanceFlag ? "true" : "false"}</p>
         </CardContent>
       </Card>
+
+      <ConfirmActionDialog
+        open={confirmingSwap}
+        onOpenChange={setConfirmingSwap}
+        title="Confirm swap"
+        description="This executes the swap against the pool at the quoted rate. Settlement is on-chain and cannot be undone."
+        fields={[
+          { label: "Token in", value: tokenIn },
+          { label: "Token out", value: tokenOut },
+          { label: "Exact output", value: exactOutputAmount },
+          { label: "Required input", value: quote?.requiredInputAmount ?? "no quote fetched" },
+          { label: "Price impact", value: quote?.priceImpactPct !== undefined ? `${quote.priceImpactPct}%` : "-" },
+        ]}
+        confirmLabel="Confirm swap"
+        busy={status === "loading"}
+        onConfirm={() => {
+          setConfirmingSwap(false);
+          void swap({ tokenIn, tokenOut, exactOutputAmount });
+        }}
+      />
     </div>
   );
 }

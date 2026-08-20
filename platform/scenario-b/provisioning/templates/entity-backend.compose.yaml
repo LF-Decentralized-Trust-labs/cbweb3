@@ -14,6 +14,13 @@ services:
   compliance:
     image: "${COMPLIANCE_IMAGE:-cbweb3b/compliance:local}"
     container_name: "${CONTAINER_PREFIX:?}-${ENTITY:?}-compliance"
+    # Runs as the host user, not the image default (uid 10001), because this service reads
+    # and writes the PKI material on a host-owned bind mount — the toolkit creates
+    # <dataDir>/pki with mode 0700 owned by the invoking user, so any other uid can
+    # neither read the CA nor persist an issued certificate. Same reasoning and same
+    # pattern as the Besu containers (ADR-001 / T028). Falls back to the image uid when
+    # the variables are absent, so a hand-run compose still gets a non-root process.
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
     environment:
       COMPLIANCE_GRPC_PORT: "9093"
       BLOCKCHAIN_CLIENT: "besu"
@@ -103,6 +110,13 @@ services:
   api-gateway:
     image: "${BACKEND_IMAGE:-cbweb3b/api-gateway:local}"
     container_name: "${CONTAINER_PREFIX}-${ENTITY}-api-gateway"
+    # Runs as the host user, not the image default (uid 10001), because this service reads
+    # and writes the PKI material on a host-owned bind mount — the toolkit creates
+    # <dataDir>/pki with mode 0700 owned by the invoking user, so any other uid can
+    # neither read the CA nor persist an issued certificate. Same reasoning and same
+    # pattern as the Besu containers (ADR-001 / T028). Falls back to the image uid when
+    # the variables are absent, so a hand-run compose still gets a non-root process.
+    user: "${ENTITY_RUN_UID:-10001}:${ENTITY_RUN_GID:-10001}"
     environment:
       APP_PORT: "8080"
       REQUEST_TIMEOUT_SEC: "30"

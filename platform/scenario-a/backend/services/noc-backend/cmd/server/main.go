@@ -62,6 +62,16 @@ func main() {
 	}
 
 	app := fiber.New(fiber.Config{
+		// Connection timeouts (finding R2-LOW). Without ReadTimeout a connection can open,
+		// dribble its headers and hold a server slot indefinitely — the slowloris shape, and
+		// nothing in the handler chain bounds it because it happens before any handler runs.
+		// IdleTimeout does the same for keep-alive connections that go quiet. Safe to set
+		// firmly here: this service exposes request/response dashboard reads only — no
+		// text/event-stream or websocket endpoint exists in either scenario's Go backends,
+		// so there is no long-lived stream for WriteTimeout to cut.
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {

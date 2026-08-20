@@ -265,8 +265,11 @@ func (h *GovernanceHandler) GetAuditLogs(c *fiber.Ctx) error {
 	severity := c.Query("severity")
 	fromDate := c.Query("from_date")
 	toDate := c.Query("to_date")
-	page, _ := strconv.Atoi(c.Query("page", "1"))
-	limit, _ := strconv.Atoi(c.Query("limit", "50"))
+	// Bounded: the repository defaults an absent limit but caps nothing, so an unbounded
+	// value here becomes an unbounded query (finding R2-M-14). Same bounds the supervisor
+	// route has always applied to the same log.
+	page := auditPageNumber(c.Query("page"))
+	limit := auditPageSize(c.Query("limit"))
 
 	logs, err := h.compliance.GetAuditLogs(c.UserContext(), category, severity, fromDate, toDate, page, limit)
 	if err != nil {
@@ -353,4 +356,33 @@ func (h *GovernanceHandler) GetUser(c *fiber.Ctx) error {
 		resp["bankCode"] = user.BankCode
 	}
 	return c.Status(fiber.StatusOK).JSON(resp)
+}
+
+// auditPageSize turns the client's `limit` query value into a legal page size: a positive
+// integer no greater than maxAuditLimit (finding R2-M-14).
+//
+// The governance route used to pass this value through untouched. The compliance repository
+// defaults an absent or non-positive limit to 50 but imposes no maximum, so `?limit=10000000`
+// reached the database as a request for ten million rows. Garbage and non-positive values
+// fall back to the default rather than erroring: this is a read with a sensible default, and
+// rejecting the request would be a worse answer than serving the first page.
+func auditPageSize(raw string) int {
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return defaultAuditLimit
+	}
+	if n > maxAuditLimit {
+		return maxAuditLimit
+	}
+	return n
+}
+
+// auditPageNumber floors the client's `page` at the first page. A negative page becomes a
+// negative OFFSET in the repository's (page-1)*limit arithmetic.
+func auditPageNumber(raw string) int {
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 1
+	}
+	return n
 }
