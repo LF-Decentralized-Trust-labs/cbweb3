@@ -42,7 +42,7 @@ fail() { log "FAIL $1: $2"; FAIL=$((FAIL + 1)); }
 # read_genesis_hash prints sha256(genesis.json) from the cb_genesis volume, or
 # nothing if the file/volume does not exist yet.
 read_genesis_hash() {
-    docker run --rm -v "${GENESIS_VOLUME}:/target:ro" alpine:3.20 \
+    docker run --rm -v "${GENESIS_VOLUME}:/target:ro" alpine:3.23 \
         sh -c 'sha256sum /target/genesis.json 2>/dev/null | cut -d" " -f1' || true
 }
 
@@ -63,7 +63,7 @@ fi
 # Seed qbftConfigFile.json (chainId 1337, 1 validator, QBFT) directly into the
 # cb_config named volume — piped via stdin, no host file involved (mirrors
 # step_start_besu_found.go's scaffold()).
-docker run --rm -i -v "${CONFIG_VOLUME}:/target" alpine:3.20 \
+docker run --rm -i -v "${CONFIG_VOLUME}:/target" alpine:3.23 \
     sh -c 'mkdir -p /target && cat > /target/qbftConfigFile.json' << 'QBFT_EOF'
 {
   "genesis": {

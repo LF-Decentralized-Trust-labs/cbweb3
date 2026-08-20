@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/bundle"
+	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/dockervolume"
 	"github.com/LACNetNetworks/cbweb3-platform/scenario-a/toolkit/engine/orchestrator"
 )
 
@@ -34,7 +35,8 @@ const (
 	// nocAgentImage is the local NOC agent image the observe deployment builds.
 	nocAgentImage = "cbweb3/noc-agent:local"
 	// nocAgentVolHelperImage seeds the rendered agent.yaml into a named volume.
-	nocAgentVolHelperImage = "alpine:3.20"
+	// Single source of truth lives in the dockervolume package.
+	nocAgentVolHelperImage = dockervolume.HelperImage
 )
 
 // observeStepOrder is the linear step set reported for mode:observe.

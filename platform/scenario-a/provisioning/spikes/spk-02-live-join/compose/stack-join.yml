@@ -34,7 +34,7 @@ services:
       - --min-gas-price=0
 
   paladin-bx-data-init:
-    image: alpine:3.20
+    image: alpine:3.23
     user: "0:0"
     volumes:
       - paladin_bx_data:/data/bx

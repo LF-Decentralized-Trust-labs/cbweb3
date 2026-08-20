@@ -14,7 +14,7 @@
 
 services:
   paladin-data-init:
-    image: alpine:3.20
+    image: alpine:3.23
     user: "0:0"
     volumes:
       - cb_data:/data/cb

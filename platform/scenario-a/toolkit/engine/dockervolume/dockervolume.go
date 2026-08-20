@@ -27,7 +27,12 @@ import (
 // HelperImage is the throwaway image used to read/write files inside a named
 // Docker volume. Pinned and small; already pulled by besu-data-init /
 // paladin-data-init in the compose templates, so this adds no new image.
-const HelperImage = "alpine:3.20"
+//
+// This is the single source of truth for the helper image across this toolkit —
+// every other reference derives from it rather than repeating the literal, so a
+// version bump is one edit here. The version itself is pinned in
+// docs/TOOLCHAIN.md and gated by tools/check-alpine-version.sh.
+const HelperImage = "alpine:3.23"
 
 // ErrNotFound is returned by ReadFile when path does not exist inside the volume.
 var ErrNotFound = errors.New("dockervolume: file not found in volume")

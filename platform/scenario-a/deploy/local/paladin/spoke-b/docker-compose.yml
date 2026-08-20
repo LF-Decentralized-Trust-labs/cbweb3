@@ -3,7 +3,7 @@ services:
   # Named volumes are created owned by root (0755); this service runs as root
   # and makes them world-writable before the Paladin nodes start.
   paladin-data-init:
-    image: alpine:3.20
+    image: alpine:3.23
     user: "0:0"
     volumes:
       - paladin_spoke_b_cb_data:/data/cb
