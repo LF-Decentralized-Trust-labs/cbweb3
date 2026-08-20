@@ -19,7 +19,7 @@
 
 services:
   paladin-bank-data-init:
-    image: alpine:3.20
+    image: alpine:3.23
     user: "0:0"
     volumes:
       - bank_data:/data/bank

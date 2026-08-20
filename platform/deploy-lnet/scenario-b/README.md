@@ -209,13 +209,13 @@ same spirit as the hub-bundle `scp` above — the certificate is public, the pri
 
 ```bash
 # On .20 — extract the relay's certificate (NOT its key) from the relay's volume:
-docker run --rm -v cbweb3-relay_data:/t:ro alpine:3.20 cat /t/cacti-relay.crt > /tmp/cacti-relay.crt
+docker run --rm -v cbweb3-relay_data:/t:ro alpine:3.23 cat /t/cacti-relay.crt > /tmp/cacti-relay.crt
 scp /tmp/cacti-relay.crt op@10.10.0.21:/tmp/
 scp /tmp/cacti-relay.crt op@10.10.0.24:/tmp/
 
 # On each CB VM (.21 and .24) — pin it in that CB's PKI volume. <prefix> is the entity's
 # volume prefix (e.g. spoke-brl_central-bank); `docker volume ls | grep cb_tls` finds it.
-docker run --rm -v <prefix>_cb_tls:/t -v /tmp:/in:ro alpine:3.20 \
+docker run --rm -v <prefix>_cb_tls:/t -v /tmp:/in:ro alpine:3.23 \
   sh -c 'cp /in/cacti-relay.crt /t/cacti-relay.crt && chmod 0644 /t/cacti-relay.crt'
 ```
 

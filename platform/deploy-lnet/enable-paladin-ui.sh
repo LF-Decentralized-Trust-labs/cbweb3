@@ -35,7 +35,7 @@
 #
 # Idempotent: a config that already declares staticServers is left alone.
 #
-# Requires on the host: docker, curl, and the ability to pull alpine:3.20 (or to
+# Requires on the host: docker, curl, and the ability to pull alpine:3.23 (or to
 # have it cached) — the config volume is read and written through short-lived
 # alpine containers, since the volume is not reachable from the host filesystem.
 # On a host with a restricted registry every such `docker run` fails and the
@@ -127,7 +127,7 @@ for ctr in "${TARGETS[@]}"; do
   fi
   log "config volume: $vol"
 
-  if docker run --rm --user 0:0 -v "$vol":/cfg alpine:3.20 \
+  if docker run --rm --user 0:0 -v "$vol":/cfg alpine:3.23 \
        grep -q 'staticServers' /cfg/config.yaml 2>/dev/null; then
     log "already declares staticServers — nothing to do"
     skipped=$((skipped + 1))
@@ -139,12 +139,12 @@ for ctr in "${TARGETS[@]}"; do
   # gets (extra_hosts), so "host.docker.internal:<port>" resolves as it does for
   # the real node. A node whose chain is down must not be restarted.
   chain_url="$(docker run --rm --user 0:0 -v "$vol":/cfg -v "$AWK_CHAINURL":/url.awk:ro \
-                 alpine:3.20 awk -f /url.awk /cfg/config.yaml 2>/dev/null || true)"
+                 alpine:3.23 awk -f /url.awk /cfg/config.yaml 2>/dev/null || true)"
   if [[ -z "$chain_url" ]]; then
     log "WARNING — could not read blockchain.http.url from config.yaml; treating the chain as unverified"
   else
     log "chain probe: eth_chainId -> $chain_url"
-    chain_out="$(docker run --rm --add-host host.docker.internal:host-gateway alpine:3.20 \
+    chain_out="$(docker run --rm --add-host host.docker.internal:host-gateway alpine:3.23 \
                    wget -q -T 6 -O- --header 'Content-Type: application/json' \
                    --post-data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
                    "$chain_url" 2>/dev/null || true)"
@@ -171,7 +171,7 @@ for ctr in "${TARGETS[@]}"; do
   # Backup, then install the patched config with an atomic rename inside the
   # volume. Mode/owner are set explicitly (root:root 0644, matching
   # writeVolumeFile) because the container reads config.yaml as uid 1000.
-  if ! docker run --rm --user 0:0 -v "$vol":/cfg -v "$AWK_PATCH":/patch.awk:ro alpine:3.20 sh -c '
+  if ! docker run --rm --user 0:0 -v "$vol":/cfg -v "$AWK_PATCH":/patch.awk:ro alpine:3.23 sh -c '
         set -e
         [ -f /cfg/config.yaml.pre-ui.bak ] || cp -p /cfg/config.yaml /cfg/config.yaml.pre-ui.bak
         awk -f /patch.awk /cfg/config.yaml > /cfg/.config.yaml.new || {
@@ -211,7 +211,7 @@ for ctr in "${TARGETS[@]}"; do
   else
     log "WARNING — /ui returned $code after 90s; the node may not have come back up."
     log "  Inspect:  docker logs --tail 50 $ctr"
-    log "  Roll back: docker run --rm --user 0:0 -v $vol:/cfg alpine:3.20 \\"
+    log "  Roll back: docker run --rm --user 0:0 -v $vol:/cfg alpine:3.23 \\"
     log "               cp /cfg/config.yaml.pre-ui.bak /cfg/config.yaml && docker restart $ctr"
     failed=$((failed + 1))
   fi

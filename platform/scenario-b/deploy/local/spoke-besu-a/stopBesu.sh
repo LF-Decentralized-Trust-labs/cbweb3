@@ -21,7 +21,7 @@ cleanup_path() {
     fi
 
     # Fallback for root-owned files created by dockerized Besu processes.
-    docker run --rm -v "$(pwd):/workspace" alpine:3.20 sh -c "rm -rf /workspace/$relative_path" >/dev/null 2>&1 || true
+    docker run --rm -v "$(pwd):/workspace" alpine:3.23 sh -c "rm -rf /workspace/$relative_path" >/dev/null 2>&1 || true
 }
 
 echo -e "${YELLOW}Cleaning old files...${NC}"

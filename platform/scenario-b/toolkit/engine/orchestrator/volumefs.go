@@ -19,7 +19,13 @@ import (
 // The only bind mount kept on the host is the bank pki/ dir (onboarding/KYC).
 
 // volHelperImage is the small throwaway image used to touch named-volume files.
-const volHelperImage = "alpine:3.20"
+//
+// This is the single source of truth for the helper image across this toolkit —
+// every call site below derives from it rather than repeating the literal, so a
+// version bump is one edit here. Unexported deliberately: nothing outside this
+// package needs the value. The version is pinned in docs/TOOLCHAIN.md and gated
+// by tools/check-alpine-version.sh.
+const volHelperImage = "alpine:3.23"
 
 // volumeOwner is the uid:gid seeded files are given.
 //

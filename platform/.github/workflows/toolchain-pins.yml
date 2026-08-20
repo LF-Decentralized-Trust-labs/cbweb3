@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Toolchain Pins
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  alpine-pin:
+    name: Alpine version pin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Runs first: proves the checker still fails on a stale fixture. docs/TOOLCHAIN.md
+      # opens with "a documented floor that nothing checks drifts again within a
+      # release" — a gate that cannot fail is such a floor, so the failure path is
+      # asserted before the scan is trusted.
+      - name: Self-test the Alpine checker (fail path must fail)
+        run: bash tools/check-alpine-version.test.sh
+
+      # bash, never zsh: zsh does not fork the last stage of a pipeline, which masks
+      # the counter-in-a-subshell bug that once let the licence gate pass vacuously.
+      - name: Verify every Alpine reference matches the pin
+        run: bash tools/check-alpine-version.sh
