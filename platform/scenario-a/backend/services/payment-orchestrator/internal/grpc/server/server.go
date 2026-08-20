@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -273,6 +274,13 @@ func (s *paymentOrchestratorService) LockHTLC(ctx context.Context, req *pb.LockH
 	s.logger.Info("locking Zeto tokens", "amount", req.Amount, "receiver", req.Receiver)
 	lockResult, err := s.zeto.Lock(ctx, req.Amount, req.Receiver)
 	if err != nil {
+		// FailedPrecondition, not Internal: the request was well-formed and the service is
+		// healthy — this attempt merely drew a state id this Paladin build cannot spend.
+		// The remedy is to retry, and the code has to say so, because a client cannot act
+		// on advice that exists only in the message text.
+		if errors.Is(err, ports.ErrUnsettleableLock) {
+			return nil, status.Errorf(codes.FailedPrecondition, "zeto lock: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "zeto lock: %v", err)
 	}
 
@@ -409,6 +417,13 @@ func (s *paymentOrchestratorService) LockHTLCWithHashLock(ctx context.Context, r
 	s.logger.Info("locking Zeto tokens (with external hashLock)", "amount", req.Amount, "receiver", req.Receiver)
 	lockResult, err := s.zeto.Lock(ctx, req.Amount, req.Receiver)
 	if err != nil {
+		// FailedPrecondition, not Internal: the request was well-formed and the service is
+		// healthy — this attempt merely drew a state id this Paladin build cannot spend.
+		// The remedy is to retry, and the code has to say so, because a client cannot act
+		// on advice that exists only in the message text.
+		if errors.Is(err, ports.ErrUnsettleableLock) {
+			return nil, status.Errorf(codes.FailedPrecondition, "zeto lock: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "zeto lock: %v", err)
 	}
 
