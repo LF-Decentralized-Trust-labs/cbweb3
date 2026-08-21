@@ -60,7 +60,9 @@ make contracts.coverage
 # Note (scenario-a): run with contracts/.env absent — Foundry auto-loads it and the dev
 # CENTRAL_BANK_ADDRESS breaks a deploy-script test locally (CI is unaffected; .env is git-ignored).
 
-# Live-stack E2E happy path (brings the stack up if needed)
+# Live-stack E2E happy path (needs an already-running stack: since the legacy
+# deploy/local path was retired on 2026-08-21, no make target brings one up — and the
+# test still names the retired topology, see docs/deliverables/D12-defect-log.md DEF-007)
 make scenario-a.test-integration            # scenario-b: make scenario-b.test-integration
 
 # Performance suite

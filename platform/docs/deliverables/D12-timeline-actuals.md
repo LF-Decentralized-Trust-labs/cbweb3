@@ -27,10 +27,10 @@ for that phase.
 
 | Phase | Planned | Actual window | Status | Evidence |
 | --- | --- | --- | --- | --- |
-| **0 — Mobilization** | Week 1 | 2026-05-29 → open | **Partially met** | Plan published 2026-05-29. Local devnet bring-up is available and documented, but the provisioning path was still changing in August (per-entity infra credentials, 2026-08-20). Bank UAT testers were never identified — the one Phase 0 item the banks own. |
+| **0 — Mobilization** | Week 1 | 2026-05-29 → open | **Partially met** | Plan published 2026-05-29. Devnet bring-up is available and documented, but the provisioning path kept moving through August: per-entity infra credentials on 2026-08-20, then the retirement of the legacy `deploy/local` path on 2026-08-21 (`3b14ecaa`), which makes the toolkit the only way to provision and removes `make spoke-all` — the command this deliverable's own Phase 0 checklist still names (DEF-021). Bank UAT testers were never identified — the one Phase 0 item the banks own. |
 | **1 — Unit Testing** | Week 2 | 2026-06-08 → 2026-06-19 (extended 2026-08-21) | **Met, then continuous** | Coverage/vet/gosec gates in CI from 2026-06-08 (`backend-scenario-{a,b}.yml`, `contracts-scenario-{a,b}.yml`). Measured coverage recorded 2026-06-19 — see [`D12_results.md`](../../D12_results.md) §A.1/A.2/B.1/B.2. Invariant suites added 2026-08-20 (Scenario B) and 2026-08-21 (Scenario A). |
 | **2 — Integration Testing** | Week 3 | 2026-06-08 → 2026-06-19 | **Met, then continuous** | Hermetic `integration_lite` gated per PR from 2026-06-08. Live-infrastructure integration confirmed 2026-06-19 (`D12_results.md` §A.3/B.3). |
-| **3 — E2E Core Flows** | Week 4 | 2026-06-19 (single capture) | **Met once; not currently reproducible** | `TestFullHappyPath` PASS both scenarios on 2026-06-19 — 8/8 phases, 56.1 s (A) and 63.1 s (B). Machine-readable bundles: `tools/gen_evidence_bundles.py`, added 2026-06-19. A clean local bring-up has not authenticated since 2026-06-30 — DEF-007. |
+| **3 — E2E Core Flows** | Week 4 | 2026-06-19 (single capture) | **Met once; not currently reproducible** | `TestFullHappyPath` PASS both scenarios on 2026-06-19 — 8/8 phases, 56.1 s (A) and 63.1 s (B). Machine-readable bundles: `tools/gen_evidence_bundles.py`, added 2026-06-19. The capture ran on the legacy `deploy/local` stack, which was deleted on 2026-08-21; the test still names that topology and reads secrets the toolkit does not write, so it has no current reproduction path — DEF-007, restated the same day. |
 | **4 — Performance & Security** | Week 5 | 2026-06-11 → 2026-08-11 | **Partially met** | Harness 2026-06-11. Scenario B run `20260618T162301Z` (2026-06-18, [`RESULTS.md`](../../scenario-b/docs/performance/RESULTS.md)); Scenario A run `20260619T160230Z` plus an AWS c6a.8xlarge confirmation run (2026-06-19, [`scenario-a/docs/performance/`](../../scenario-a/docs/performance/)). Security: gosec + Slither in CI from 2026-06-08; gitleaks gate 2026-07-23 with the [D11 report](D11-secret-scan-report.md) 2026-08-11. OWASP ZAP baseline: **not executed** (D-4). Six threshold findings remain open — DEF-001 … DEF-006. |
 | **5 — User Acceptance Testing** | Weeks 6–7 | — | **Not started** | Zero UAT records on file; no bank testers named. See [UAT records](D12-uat-records.md) §5 for the preconditions that are still open. |
 | **6 — Regression & Retest** | Week 8 | — (continuous instead) | **Not started as a phase** | There is no fix-and-retest cycle against a bank-signed defect list, because Phase 5 has not run. Regression itself is continuous: every PR re-runs the coverage, `integration_lite` and contract gates, and defects found by internal review were fixed and covered between 2026-06-19 and 2026-08-21 (see the [defect log](D12-defect-log.md)). |
@@ -83,12 +83,17 @@ performance confirmation was a one-off host, not a standing environment. This is
 finding R1-12.5 and it directly constrains Phase 5: bank testers cannot be handed a stack
 that exists only while a developer's laptop is up. *Owed:* R1-12.5.
 
-**D-7 — Phase 3 evidence is real but not currently reproducible.**
-`TestFullHappyPath` passed on 2026-06-19. Since the 2026-06-30 decision to accept only the
-OIDC password grant for portal login, the test's client-credentials authentication is
-refused, and the local Keycloak init script provisions no users to authenticate as instead.
-Confirmed still failing 2026-08-21. Tracked as DEF-007 and documented in
-[`scenario-a/tests/e2e/README.md`](../../scenario-a/tests/e2e/README.md). *Owed:* DEF-007.
+**D-7 — Phase 3 evidence is real but not currently reproducible, and the reason changed.**
+`TestFullHappyPath` passed on 2026-06-19 against the legacy `deploy/local` stack. Through
+August the blocker was authentication: the 2026-06-30 decision to accept only the OIDC
+password grant refused the test's client credentials, and the legacy Keycloak init created
+no users to authenticate as instead. That reading expired on 2026-08-21, when `3b14ecaa`
+deleted the legacy path outright. Login is no longer the problem — the toolkit provisions
+per-role users from `spec.adminUsers` and the samples walkthrough authenticates every
+entity — but the test still targets the deleted topology (legacy entities and ports, plus
+eight secrets from `backend/config/.env.infra.*` that the toolkit deliberately does not
+write), and `scenario-a.test-integration` no longer brings a stack up. *Owed:* DEF-007, now
+an E2E-to-toolkit migration rather than a Keycloak fix.
 
 **D-8 — Phases 5–7 are unscheduled, and the blockers are not all platform-side.**
 No bank UAT testers were identified in Phase 0; there is no persistent environment (D-6);
@@ -96,6 +101,16 @@ Phase 3 is not on-demand reproducible (D-7); Scenario B's plan assigns UAT to an
 Portal" that does not exist as a frontend application; and the catalog still records
 E2E-B-03 (commercial-bank swap path, US3) as Partial. *Owed:* see
 [UAT records](D12-uat-records.md) §5.
+
+**D-10 — The environment that produced the Phase 1–4 evidence no longer exists.**
+Every dated capture in §2 was taken on the legacy `deploy/local` stack. That path — the
+compose files, the Keycloak init, `make spoke-all`, and the tryout scripts the plan's Phase 3
+checklist enumerates — was removed on 2026-08-21 (`3b14ecaa`, `a9f837b2`), leaving the
+provisioning toolkit as the only way to stand a stack up. The evidence remains valid as a
+record of what passed on the day; what is gone is the ability to re-run it by following the
+plan. Reproduction now means the toolkit topology plus the migration tracked in DEF-007, and
+the plan text that still names the retired commands is DEF-021. *Owed:* DEF-007 and DEF-021,
+after which §2's commands describe something a reader can actually run.
 
 **D-9 — Scenario B did not wait for a Scenario A baseline.**
 Scenario B's plan states that its execution "begins after Scenario A baseline has been

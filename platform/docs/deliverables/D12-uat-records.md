@@ -171,12 +171,13 @@ These are open, and each blocks or degrades UAT. They are not all platform-side.
 | --- | --- | --- | --- |
 | 1 | UAT testers named per entity and per portal role | Not done — the one Phase 0 item the banks own | Banks |
 | 2 | An environment that outlives a session, with seeded balances and registered identities | Not available — all evidence to date is from ephemeral devnet stacks; finding R1-12.5 is open (see [timeline actuals](D12-timeline-actuals.md) D-6) | LNET |
-| 3 | Portal login working for real users on that environment | Blocked — DEF-007: local Keycloak provisions no users, and only the password grant is accepted | LNET |
-| 4 | The E2E happy path reproducible on demand, so a UAT failure can be told from an environment failure | Blocked by 3 | LNET |
+| 3 | Portal login working for real users on that environment | **Met** on a toolkit-provisioned stack: per-role users come from the manifest's `spec.adminUsers`, and the samples walkthrough logs in as every entity. (This was blocked while the legacy `deploy/local` Keycloak init was the local path; that path was retired on 2026-08-21.) | LNET |
+| 4 | The E2E happy path reproducible on demand, so a UAT failure can be told from an environment failure | Blocked — DEF-007: the E2E targets the retired topology and secrets the toolkit does not write. Independent of 3, which is now met | LNET |
 | 5 | Scenario B: which portal the MLP tester uses | Unresolved — the plan names an "MLP Portal"; `scenario-b/frontend/apps/` ships bank, governance, supervisor, treasury and noc. The MLP has its own backend stack and gateway, so its UAT is API-driven unless a portal decision is made | LNET + project lead |
 | 6 | Scenario B: commercial-bank swap path (US3 / `E2E-B-03`) | The catalog records it as **Partial** — governance path works, commercial-bank direct path in progress. A bank cannot accept a flow that is not finished | LNET |
 | 7 | An agreed calendar for Phases 5–7 | Not agreed (see [timeline actuals](D12-timeline-actuals.md) D-1) | LNET + IDB Technical Committee |
 | 8 | Phase 4 threshold findings dispositioned — fixed, or a revised target accepted in writing | Six open: DEF-001 … DEF-006 | LNET + project lead |
 
-Items 1–4 are hard blockers: without them there is no UAT to record. Items 5–8 shape scope,
+Items 1, 2 and 4 are hard blockers: without them there is no UAT to record. Item 3 is met
+and is listed so a reader does not re-derive it from the older statement of DEF-007. Items 5–8 shape scope,
 and each one left open narrows what the banks can be asked to accept.
