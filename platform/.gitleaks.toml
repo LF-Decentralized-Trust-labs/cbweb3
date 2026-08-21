@@ -32,18 +32,33 @@ useDefault = true
 #               toolkit templates / test suites they invoke. The exemption is
 #               settled and stays until the file itself changes.
 #
-#   PROVISIONAL nothing in the deployed surface reads the file. The exemption
-#               keeps the gate green over an asset that is not load-bearing for
-#               a deploy, not because the asset is worth keeping. Intended
-#               resolution: DELETE the files and shrink this allowlist. A
-#               committed private key that no live deploy path consumes is pure
-#               liability.
+#   PROVISIONAL nothing in the deployed surface reads the file. It survives from
+#               the earlier `make *.up` flow, which those scripts superseded.
+#               The exemption keeps the gate green over dead assets, not because
+#               the assets are worth keeping. Intended resolution: DELETE the
+#               files and shrink this allowlist. A committed private key that no
+#               live deploy path consumes is pure liability.
 #
-#               The `make *.up` half of this backlog is DONE: deploy/local/ and
-#               the make targets that referenced it were removed, and the six
-#               Besu keys plus the configTemplate.json glob that only that tree
-#               contained went with them. What remains below is provisional for
-#               a different reason — read its own note.
+#               MEASURED CORRECTION (2026-08-21). The plan above says removal is
+#               blocked "only by scenario-{a,b}/make/*.mk still referencing
+#               them". That is wrong, and deleting the files is not enough to
+#               free the exemptions. deploy/local/ and its make targets were
+#               removed, leaving the six Besu keys and the configTemplate.json
+#               glob at zero occurrences in the tree — and dropping them turned
+#               the gate red anyway: `leaks found: 120`.
+#
+#               The reason is the second scan step. `gitleaks git .` walks all
+#               ~2024 commits, so a deleted file still leaks from history, and
+#               these value exemptions are the only thing suppressing it there.
+#               A tree-only check (git grep on HEAD) cannot tell you an
+#               exemption is dead; it answers about one of the two scans.
+#
+#               So the shrink needs one of: rewriting history (not worth it for
+#               public dev keys), or .gitleaksignore fingerprints per historical
+#               finding (file:rule:line, and the file's own note explains why
+#               those are avoided — they lapse on edit). Until then these
+#               entries stay, and the label PROVISIONAL records intent, not an
+#               action that is available today.
 #
 # When you add an entry:
 #   - prefer a value in `regexes` over a path glob. A glob exempts the file from
@@ -57,11 +72,11 @@ useDefault = true
 description = "Public local-development keys and example env files (not real secrets)"
 
 paths = [
+  # PROVISIONAL — Besu QBFT node keys under scenario-{a,b}/deploy/local/.
+  # Make-era only: none of the three deploy scripts reads deploy/local/.
+  '''.*/config/configTemplate\.json$''',
   # PROVISIONAL — SPK-01/SPK-02 provisioning-spike genesis (local dev validators
-  # under scenario-a/provisioning/spikes/). Not referenced by any deploy script,
-  # but not dead either: the spikes' own genesis-once.sh / env-defaults.sh read
-  # it. Removing it means retiring the spikes, which is a separate decision from
-  # the deploy/local removal — the keys are local dev validators, not fleet keys.
+  # under scenario-a/provisioning/spikes/). Not referenced by any deploy script.
   '''.*/genesis-config\.json$''',
   # LIVE — committed reference env files. The toolkit renders per-entity env from
   # provisioning/templates/, and these .example copies document that schema.
@@ -81,22 +96,20 @@ paths = [
 
 # Public dev private keys that appear across templates and compose files, listed
 # by VALUE so the gate stays strict for every other 64-hex string in the same
-# files. The first seven are canonical Besu dev-network keys.
-#
-# Shrunk when deploy/local/ was removed — the follow-up this file's preamble
-# describes ("DELETE the files and shrink this allowlist", blocked only by the
-# make targets, which went with it). Six Besu keys and the configTemplate.json
-# path glob were dropped because nothing in the tree contains them any more; each
-# was verified at 0 occurrences before removal, so this cannot turn the gate red.
-# A dead exemption is not neutral: it would silently permit that key to reappear
-# anywhere in the repository.
+# files. The first thirteen are the canonical Besu dev-network keys.
 regexes = [
+  '''027c7c15318e6ad5155041943c7f2a047111e205813d6befd3bc6ecde7154f97''',
   '''0dbbe8e4ae425a6d2687f1a7e3ba17bc98c673636790f1b8ad91193c05875ef1''',
   '''5b02fc9b19facc6de72b514a03db7f7fbd9f46b6ad6ffb24b8df575593ae87f1''',
+  '''808757b2a58565d728ad93093521bc6542fb3cf13a887669f7addf7a82ef085c''',
   '''8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63''',
+  '''92f407740816a68b070375ff77002e3c44e577cfa4174be1ffabd7d74381b746''',
+  '''ad7f423fe95b75d2d5492ee3fd75d2eaa3e191779e0385b18eac14aa586e9f1e''',
   '''ae6ae8e5ccbfb04590405997ee2d52d2b330726137b875053c36d94e974d162f''',
   '''c87509a1c067bbde78beb793e6fa76530b6382a4c0241e5e4a9ec0a0f44dc0d3''',
   '''c88b703fb08cbea894b6aeff5a544fb92e78a18e19814cd85da83b71f772aa6f''',
+  '''c93fa4edf409b4dc98d0982235f75ac4b9c72d970986474508a08adc3f7ab7a9''',
+  '''cd9cad007753ac89f39b72af18244e05b5fdc29b100b78b9bdd00a3946047c08''',
   '''f8f8a2f43c8376ccb0871305060d7b27b0554d2cc72bccf41b2705608452f315''',
   # LIVE — well-known PUBLIC Anvil/Hardhat dev account #0 key, seeded into the
   # local KMS emulator so kms://local-emulator resolves to a stable address
