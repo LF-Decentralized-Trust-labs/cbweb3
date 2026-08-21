@@ -404,9 +404,7 @@ Per-entity onboarding and payment demos:
 
 ```bash
 ./tryouts/tryout-spoke-a-bank-a.sh   # Bank-A + Central-Bank-A flow
-./tryouts/tryout-spoke-a-bank-c.sh   # Bank-C + Central-Bank-A flow
 ./tryouts/tryout-spoke-b-bank-b.sh   # Bank-B + Central-Bank-B flow
-./tryouts/tryout-spoke-b-bank-d.sh   # Bank-D + Central-Bank-B flow
 ```
 
 ---

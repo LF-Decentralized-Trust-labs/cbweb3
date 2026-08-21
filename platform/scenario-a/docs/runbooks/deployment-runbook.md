@@ -395,9 +395,7 @@ Per-entity scripts:
 
 ```bash
 ./tryouts/tryout-spoke-a-bank-a.sh   # Onboarding + payment Bank-A
-./tryouts/tryout-spoke-a-bank-c.sh   # Onboarding + payment Bank-C
 ./tryouts/tryout-spoke-b-bank-b.sh   # Onboarding + payment Bank-B
-./tryouts/tryout-spoke-b-bank-d.sh   # Onboarding + payment Bank-D
 ```
 
 ---

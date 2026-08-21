@@ -363,7 +363,7 @@ forge test --match-path "test/AutomatedMarketMaker.t.sol" -vv
 ### E2E-B-03 — Commercial Bank FX Swap via AMM (US3)
 
 - **Test ID**: E2E-B-03
-- **Script / Command**: `bash tryouts/tryout-scenario-b-e2e.sh us3`; `bash tryouts/tryout-commercial-swap-e2e.sh`
+- **Script / Command**: `bash tryouts/tryout-scenario-b-e2e.sh us3`; `(cd samples && ./sample-tryout.sh)`
 - **Status**: [Partial] — governance path works; commercial bank direct swap path is in progress
 - **User Story**: US3 — Commercial bank performs a cross-currency swap via the hub AMM: obtains a quote, submits an exact-output swap, and bridges back to their spoke
 - **Preconditions**: Hub devnet running; BRL-USD pair active; AMM pool seeded; bank-a registered as commercial bank with sufficient tCeBMa on spoke
