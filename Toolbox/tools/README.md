@@ -98,9 +98,12 @@ Two results are **not** failures and are reported for information:
   publishes only the digest.
 
 The discredited pre-realignment digest is rejected outright wherever it appears as a
-published value. A companion CI step greps the working tree for it, allowing only lines that
-explicitly retract it — the repository is permitted to remember its own history, not to ship
-it.
+published value. A companion CI step greps the working tree and fails on **any** occurrence
+of the full 64-character literal, retraction notes included — a grep cannot tell a field
+value from a sentence about a field value, so it refuses both. That is why every retraction
+in this repository writes the digest elided (`7f83b165…`). If you need to cite it in full,
+you cannot: elide it, and let `verify_hashlocks.py` — which parses the artifacts and *can*
+tell the difference — enforce the value-level rule.
 
 ---
 

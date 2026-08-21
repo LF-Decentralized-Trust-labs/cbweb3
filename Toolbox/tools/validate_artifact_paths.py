@@ -103,7 +103,14 @@ class Surface:
                 self.patterns.append((re.compile(regex), path))
 
     def resolve(self, path: str) -> list[str]:
-        """Return every contract template the path resolves to, exact match first."""
+        """Return every contract template the path resolves to, exact match first.
+
+        A fixture path still carrying `{placeholder}` is never a match, even though it
+        would compare equal to the contract template it was copied from. That equality is
+        what lets an unsubstituted copy-paste ship green, so it is rejected up front.
+        """
+        if "{" in path or "}" in path:
+            return []
         if path in self.templates:
             return [path]
         return [template for pattern, template in self.patterns if pattern.match(path)]

@@ -286,7 +286,7 @@ def test_cross_currency_swap_without_cookie_returns_401(
 @pytest.mark.bearer_ok
 @pytest.mark.live_only
 def test_cross_currency_swap_refuses_a_bearer_token(
-    session, amm_url, timeout, auth_mode, pool_pair
+    session, amm_url, timeout, auth_mode, pool_pair, require_profile
 ):
     """
     A bearer token is NOT accepted on the swap endpoints.
@@ -297,6 +297,11 @@ def test_cross_currency_swap_refuses_a_bearer_token(
     """
     if auth_mode != "bearer":
         pytest.skip("bearer-mode assertion; run with CBWEB3_AUTH_MODE=bearer")
+    # The premise is a 401. If the gateway has regressed and accepts the bearer token —
+    # exactly the defect this test hunts — the body below would execute a real
+    # cross-currency payment. Require the same explicit opt-in as every other
+    # value-moving test here, so a regression cannot spend anything.
+    require_profile("scenario-b-bank", "scenario-b-cb")
 
     resp = session.post(
         f"{amm_url}/api/v2/amm/swap/cross-currency",

@@ -91,6 +91,8 @@ class Checker:
     def __init__(self) -> None:
         self.pairs: list[tuple[str, str, str, str]] = []  # (source, label, secret, hash)
         self.orphans: list[tuple[str, str]] = []          # (source, hash with no secret)
+        self.declared: set[str] = set()                   # digests declared secretWithheld
+        self.errors: list[str] = []                       # gate defects, not pair mismatches
 
     def add(self, source: str, label: str, secret: str, digest: str) -> None:
         self.pairs.append((source, label, secret, normalise(digest)))
@@ -112,10 +114,21 @@ class Checker:
                 low = key.lower()
                 # "hash" wins over "secret": `wrongSecretHash` is a digest, not a secret.
                 if "hash" in low:
-                    hashes[low.replace("hashlock", "").replace("hash", "")
-                              .replace("secret", "").replace("hex", "")] = value
+                    prefix = (low.replace("hashlock", "").replace("hash", "")
+                                 .replace("secret", "").replace("hex", ""))
+                    if prefix in hashes and hashes[prefix] != value:
+                        self.errors.append(
+                            f"{rel(path)}: syntheticSecrets keys collide on prefix "
+                            f"'{prefix or 'default'}' — {hashes[prefix][:16]}… and "
+                            f"{value[:16]}… cannot both be checked. Rename one key.")
+                    hashes[prefix] = value
                 elif "secret" in low:
-                    secrets[low.replace("secret", "").replace("hex", "")] = value
+                    prefix = low.replace("secret", "").replace("hex", "")
+                    if prefix in secrets and secrets[prefix] != value:
+                        self.errors.append(
+                            f"{rel(path)}: syntheticSecrets keys collide on prefix "
+                            f"'{prefix or 'default'}' — two secrets map to it. Rename one key.")
+                    secrets[prefix] = value
             for prefix, secret in secrets.items():
                 if prefix in hashes:
                     self.add(rel(path), f"syntheticSecrets[{prefix or 'default'}]",
@@ -154,6 +167,9 @@ class Checker:
                 secrets.setdefault(cid, (found["secret"], rel(path)))
             if found.get("hash_lock"):
                 locks.setdefault(cid, []).append((found["hash_lock"], rel(path)))
+                # A fixture may declare that no preimage exists for this digest, and why.
+                if isinstance(doc.get("secretWithheld"), str) and doc["secretWithheld"].strip():
+                    self.declared.add(normalise(found["hash_lock"]))
 
         for cid, entries in locks.items():
             if cid in secrets:
@@ -210,8 +226,15 @@ class Checker:
                     self.add(rel(path), label, secret, digest)
             secrets = table_secret.findall(text)
             hashes = table_hash.findall(text)
-            if len(secrets) == 1 and len(hashes) == 1:
-                self.add(rel(path), "reference-value table", secrets[0], hashes[0])
+            if len(secrets) != len(hashes):
+                self.errors.append(
+                    f"{rel(path)}: {len(secrets)} table secret row(s) but {len(hashes)} "
+                    "hash-lock row(s) — they cannot be paired, so none was checked.")
+            else:
+                for index, (secret, digest) in enumerate(zip(secrets, hashes)):
+                    label = ("reference-value table" if len(secrets) == 1
+                             else f"reference-value table[{index}]")
+                    self.add(rel(path), label, secret, digest)
 
     # -- rule 2: the retracted digest must not appear as a hash-bearing VALUE
     def scan_retracted_values(self) -> list[str]:
@@ -311,16 +334,33 @@ class Checker:
                   "exactly right:\nboth legs of an HTLC swap share one hash lock.")
             for source, digest in shared:
                 print(f"  OK  {source}: {digest[:16]}…")
-        if remaining:
-            print(f"\n{len(remaining)} hash lock(s) published without a secret "
-                  "(expected — the gateway keeps a live secret private until settlement):")
-            for source, digest in remaining:
-                print(f"  --  {source}: {digest[:16]}…")
+        undeclared = [(source, digest) for source, digest in remaining
+                      if digest not in self.declared]
+        declared = [(source, digest) for source, digest in remaining
+                    if digest in self.declared]
+        if declared:
+            print(f"\n{len(declared)} hash lock(s) published without a secret, each "
+                  "declaring why via secretWithheld:")
+            for source, digest in declared:
+                print(f"  OK  {source}: {digest[:16]}…")
+        if undeclared:
+            self.errors.append(
+                f"{len(undeclared)} hash lock(s) published with no documented secret and no "
+                "secretWithheld declaration:\n" +
+                "\n".join(f"      {source}: {digest[:16]}…" for source, digest in undeclared) +
+                "\n    An undeclared orphan is indistinguishable from an unrecomputable "
+                "published digest.\n    Add a secretWithheld note saying why the preimage "
+                "is absent, or publish the secret.")
 
         if fallbacks:
             print("\nWARNING — non-hex secrets:")
             for note in fallbacks:
                 print(f"  !!  {note}")
+
+        if self.errors:
+            print(f"\n{len(self.errors)} gate defect(s) — the check could not do its job:\n")
+            for error in self.errors:
+                print(f"  !!  {error}")
 
         if failures:
             print(f"\n{len(failures)} documented pair(s) FAILED to recompute:\n")
@@ -331,6 +371,9 @@ class Checker:
                 "no reference value:\nan integrator who trusts it gets a mismatch and "
                 "blames their own implementation."
             )
+            return 1
+
+        if self.errors:
             return 1
 
         print("\nOK — every documented secret / hash-lock pair recomputes correctly.")

@@ -74,7 +74,7 @@ npx @stoplight/prism-cli mock ../contracts/pvp/openapi_pvp_v2.3.0.yaml   --port 
 npx @stoplight/prism-cli mock ../contracts/amm/openapi_amm_v2.3.0.yaml   --port 4011 &
 npx @stoplight/prism-cli mock ../contracts/auth/openapi_auth_v2.3.0.yaml --port 4012 &
 
-pytest -m mock_safe                  # 53 tests, no configuration needed
+pytest -m mock_safe                  # 54 tests, no configuration needed
 ```
 
 `CBWEB3_AUTH_MODE` defaults to `mock` and `CBWEB3_BASE_URL` to
@@ -145,7 +145,7 @@ Three orthogonal axes. Combine them freely: `pytest -m "mock_safe and scenario_b
 
 | Marker | Count | Selects |
 |---|---:|---|
-| `mock_safe` | 53 | Single-request shape/status assertions. Pass against **both** Prism and a live gateway. |
+| `mock_safe` | 54 | Single-request shape/status assertions. Pass against **both** Prism and a live gateway. |
 | `live_only` | 37 | Multi-step state transitions, settlement verification, balance deltas, residue reconciliation. **Auto-skipped** when `CBWEB3_AUTH_MODE=mock`, because Prism cannot persist state. |
 | `bearer_ok` | 5 | Operations where `BearerAuth` is a declared alternative to the cookie. The only tests that run under `CBWEB3_AUTH_MODE=bearer`. |
 

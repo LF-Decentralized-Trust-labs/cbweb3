@@ -205,12 +205,13 @@ def test_hub_token_supply_declares_decimals(anon_session, amm_url, timeout, skip
 @pytest.mark.happy_path
 @pytest.mark.mock_safe
 def test_lp_balance_is_public(anon_session, amm_url, timeout):
-    """GET /api/v2/amm/lp-balance -> 200 {lp_shares, total_supply}, both strings."""
+    """GET /api/v2/amm/lp-balance -> 200 {lp_shares, lp_total_supply}, both strings."""
     resp = anon_session.get(f"{amm_url}/api/v2/amm/lp-balance", timeout=timeout)
 
     status_is(resp, 200)
     body = json_body(resp)
-    for field in ("lp_shares", "total_supply"):
+    has_keys(body, "lp_shares", "lp_total_supply")
+    for field in ("lp_shares", "lp_total_supply"):
         if field in body:
             assert is_amount_string(body[field])
 

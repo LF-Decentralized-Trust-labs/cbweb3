@@ -181,14 +181,43 @@ jobs:
       - name: Start Prism mock servers
         run: |
           set -euo pipefail
-          prism mock Toolbox/contracts/pvp/openapi_pvp_v2.3.0.yaml   --port 4010 --host 0.0.0.0 > /tmp/prism-pvp.log  2>&1 &
-          prism mock Toolbox/contracts/amm/openapi_amm_v2.3.0.yaml   --port 4011 --host 0.0.0.0 > /tmp/prism-amm.log  2>&1 &
-          prism mock Toolbox/contracts/auth/openapi_auth_v2.3.0.yaml --port 4012 --host 0.0.0.0 > /tmp/prism-auth.log 2>&1 &
+          # Resolve each contract by glob so a version bump does not silently break this
+          # job while every other job keeps globbing correctly.
+          for domain in pvp amm auth; do
+            match=$(ls Toolbox/contracts/"$domain"/openapi_*.yaml 2>/dev/null | head -1)
+            if [ -z "$match" ]; then
+              echo "::error::no contract found at Toolbox/contracts/$domain/openapi_*.yaml"
+              exit 1
+            fi
+            echo "$domain -> $match"
+            eval "spec_$domain=\$match"
+          done
+          prism mock "$spec_pvp"  --port 4010 --host 0.0.0.0 > /tmp/prism-pvp.log  2>&1 &
+          prism mock "$spec_amm"  --port 4011 --host 0.0.0.0 > /tmp/prism-amm.log  2>&1 &
+          prism mock "$spec_auth" --port 4012 --host 0.0.0.0 > /tmp/prism-auth.log 2>&1 &
+          # Wait for Prism specifically. A bare 200 from "/" proves only that something is
+          # listening; Prism answers /healthz-style unknown paths with a JSON error body
+          # carrying its own type URI, so match on that instead.
           for port in 4010 4011 4012; do
+            case "$port" in
+              4010) log=/tmp/prism-pvp.log;;
+              4011) log=/tmp/prism-amm.log;;
+              *)    log=/tmp/prism-auth.log;;
+            esac
+            ready=""
             for attempt in $(seq 1 30); do
-              if curl -s -o /dev/null "http://localhost:${port}/" ; then break; fi
+              if curl -s "http://localhost:${port}/__prism_readiness__" \
+                   | grep -qi 'prism\|NOT_FOUND\|No route matched'; then
+                ready=yes; break
+              fi
               sleep 2
             done
+            if [ -z "$ready" ]; then
+              echo "::error::Prism on port ${port} never became ready — last 40 log lines:"
+              tail -40 "$log" || true
+              exit 1
+            fi
+            echo "prism ready on ${port}"
           done
       # Readiness probes hit a real path on each contract with the credential that
       # contract actually declares. Prism validates the PRESENCE of the access_token
