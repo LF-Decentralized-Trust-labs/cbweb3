@@ -530,4 +530,39 @@ contract IdentityRegistryTest is Test {
         assertTrue(registry.hasRole(registry.GOVERNANCE_ROLE(), admin));
         assertTrue(registry.hasRole(registry.VERIFIER_ROLE(), admin));
     }
+
+    /// @notice The institutionId a bank code hashes to, pinned to the same literals the Go side uses.
+    /// @dev The AMM resume quorum counts distinct institutions, which only works if every wallet of one
+    ///      institution resolves to the SAME id. Three independent implementations derive it —
+    ///      `RegisterParticipants.s.sol` (`keccak256(abi.encodePacked(bankCode))`, exercised here), the
+    ///      Go services (`registry.InstitutionIDFromString`) and the provisioning toolkit
+    ///      (`institutionIDFromCode`). None can import another, so agreement is enforced by pinning the
+    ///      same VALUES in all three rather than by each recomputing keccak256 in its own test — three
+    ///      implementations that drifted together would otherwise all pass.
+    ///
+    ///      The failure this guards is silent: one path deriving a different id for a bank's second
+    ///      governance wallet makes the contract see two institutions, and that bank can resume the
+    ///      breaker alone.
+    function test_InstitutionId_MatchesThePinnedValues() public pure {
+        assertEq(
+            keccak256(abi.encodePacked("central-bank-a")),
+            0x1581556895c0bf3377dffd4c68bd1ada3f1f3d6aac4d828859fd4c862e9a2769,
+            "central-bank-a drifted from the id the Go services and the toolkit pin"
+        );
+        assertEq(
+            keccak256(abi.encodePacked("bank-a")),
+            0xee8ed86961a76066712cc2d2c7c9faed0a887ade4278e8d358d4044bc91f5834,
+            "bank-a drifted from the id the Go services and the toolkit pin"
+        );
+        assertEq(
+            keccak256(abi.encodePacked("central-bank-b")),
+            0xa7417e4e6b59702f4117b65b72e2d7022c272b3fafa8ca90d4962efbfe514619,
+            "central-bank-b drifted from the id the Go services and the toolkit pin"
+        );
+        assertEq(
+            keccak256(abi.encodePacked("bank-b")),
+            0x85b692ac840718c4c20a3acce04167775b2adbf21f59bcf5bd69abd16c1f9512,
+            "bank-b drifted from the id the Go services and the toolkit pin"
+        );
+    }
 }

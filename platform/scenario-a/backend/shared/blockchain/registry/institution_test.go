@@ -3,6 +3,7 @@
 package registry
 
 import (
+	"encoding/hex"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/crypto"
@@ -66,5 +67,33 @@ func TestInstitutionIDForParticipant_TwoWalletsOneInstitution(t *testing.T) {
 	governance := InstitutionIDForParticipant("central-bank-a", "CB-A Governance Signer")
 	if operational != governance {
 		t.Fatalf("one bank code must yield one institution id: %x vs %x", operational, governance)
+	}
+}
+
+// The same literals the toolkit and the seed script pin.
+//
+// The existing test above proves this implementation is keccak256 of the code. That is not
+// enough on its own: three independent implementations derive this id — this one, the
+// provisioning toolkit (a separate Go module that cannot import this package), and
+// contracts/script/RegisterParticipants.s.sol — and each recomputing keccak256 in its own
+// test would let all three drift together without a failure.
+//
+// Pinning the VALUE ties them. If this list and the toolkit's disagree, one of the two
+// changed, and the AMM resume quorum would read two wallets of one institution as two
+// institutions — the failure the quorum exists to prevent, reached silently.
+func TestInstitutionIDFromString_MatchesThePinnedValues(t *testing.T) {
+	t.Parallel()
+	for code, want := range map[string]string{
+		"central-bank-a": "1581556895c0bf3377dffd4c68bd1ada3f1f3d6aac4d828859fd4c862e9a2769",
+		"bank-a":         "ee8ed86961a76066712cc2d2c7c9faed0a887ade4278e8d358d4044bc91f5834",
+		"central-bank-b": "a7417e4e6b59702f4117b65b72e2d7022c272b3fafa8ca90d4962efbfe514619",
+		"bank-b":         "85b692ac840718c4c20a3acce04167775b2adbf21f59bcf5bd69abd16c1f9512",
+	} {
+		id := InstitutionIDFromString(code)
+		if got := hex.EncodeToString(id[:]); got != want {
+			t.Errorf("InstitutionIDFromString(%q) = %s, want %s\n"+
+				"  The toolkit and the seed script pin the same value; this derivation has drifted "+
+				"from them.", code, got, want)
+		}
 	}
 }
