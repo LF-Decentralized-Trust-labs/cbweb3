@@ -49,6 +49,7 @@ the mechanism that actually fails the build when the floor is violated.
 | Node 22 | `@types/node: ^22.x` in every `package.json` that declares it | Types must describe the runtime that actually executes the code, not a newer or older one |
 | Node 22 | CI: `actions/setup-node` with `node-version: "22"` | |
 | Besu 25.8.0 | `BESU_IMAGE` default in the compose templates | Pinned; not a developer prerequisite |
+| Alpine 3.23 | `alpine:3.23` everywhere: the shipped runtime `Dockerfile` stages, the toolkit helper-image constants (`dockervolume.HelperImage` in Scenario A, `volHelperImage` in Scenario B) and the helper `docker run`/compose services | Gated by `tools/check-alpine-version.sh`, which reads this row as the pin. Supported until 2027-11-01 |
 
 Verify the whole matrix is still self-consistent:
 
@@ -63,7 +64,16 @@ grep -rh 'FROM golang:' --include='Dockerfile*' scenario-a scenario-b \
 
 # every Node image matches
 grep -rh 'FROM node:' --include='Dockerfile*' . | sort -u        # expect one line: 22-alpine
+
+# every Alpine reference matches the pin in the table above
+bash tools/check-alpine-version.sh                               # expect: OK, one version
 ```
+
+Alpine is the one image pinned by a checker rather than by eye, because its references
+are spread across four kinds of surface — runtime `Dockerfile` stages, Go constants in
+both toolkits, `docker run` invocations in shell scripts, and compose helper services —
+and a `grep` for `FROM alpine:` finds only the first kind. Bumping it means editing the
+row above and running the checker, which lists every reference still on the old value.
 
 ---
 

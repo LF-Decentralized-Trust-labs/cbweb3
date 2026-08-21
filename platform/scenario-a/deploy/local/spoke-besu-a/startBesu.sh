@@ -122,7 +122,7 @@ cp tmpFiles/networkFiles/genesis.json genesis/genesis.json
 
 echo -e "${YELLOW}Removing tmpFiles...${NC}"
 if ! rm -rf tmpFiles 2>/dev/null; then
-    docker run --rm -v "$(pwd):/workspace" alpine:3.20 \
+    docker run --rm -v "$(pwd):/workspace" alpine:3.23 \
         sh -c "rm -rf /workspace/tmpFiles" >/dev/null 2>&1 || true
 fi
 

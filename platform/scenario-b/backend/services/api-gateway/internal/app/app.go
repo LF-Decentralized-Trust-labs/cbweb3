@@ -20,6 +20,7 @@ import (
 	paymentadapter "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/adapters/payment"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/config"
 	dbinit "github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/db/init"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/deadlines"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/handlers"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/middleware"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/http/router"
@@ -29,6 +30,7 @@ import (
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/services"
 	tcebmclient "github.com/LACNetNetworks/cbweb3-platform/backend/shared/blockchain/scenariob/tcebm"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/grpcx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gofiber/fiber/v2"
@@ -159,6 +161,7 @@ func dialGRPC(address, serverName string, timeout time.Duration) (*grpc.ClientCo
 		dialCtx,
 		address,
 		credOpt,
+		grpc.WithChainUnaryInterceptor(grpcx.WithDefaultDeadline(deadlines.Auth)),
 	)
 }
 
