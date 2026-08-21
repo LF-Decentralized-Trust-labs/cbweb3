@@ -23,15 +23,32 @@ este documento é o registro da decisão e do que ainda depende de acordo.
 
 Entre D6 v2 e D12, três parâmetros de rede mudaram:
 
-| Parâmetro | D6 v2 | D12 | Onde está definido |
+Os valores abaixo são do **cenário B**, o único com hub. A coluna de origem cita onde o
+parâmetro é definido *hoje*: os arquivos `deploy/local/*/config/configTemplate.json` que
+registravam esses IDs na época do D12 foram removidos junto com o bring-up legado, e o
+manifest do toolkit passou a ser a única definição.
+
+| Parâmetro | D6 v2 | D12 | Onde está definido hoje |
 |---|---|---|---|
-| Chain ID do hub | `80000` | **`1337`** | `deploy/local/hub-besu/config/configTemplate.json` |
-| Chain ID da Spoke-A | `80001` | **`1338`** | `deploy/local/spoke-besu-a/config/configTemplate.json` |
-| Chain ID da Spoke-B | `80002` | **`1339`** | `deploy/local/spoke-besu-b/config/configTemplate.json` |
+| Chain ID do hub | `80000` | **`1337`** | `scenario-b/samples/hub/hub-cbweb3.yaml` |
+| Chain ID da spoke Brasil | `80001` | **`1338`** | `scenario-b/samples/brazil/central-bank-brazil.yaml` |
+| Chain ID da spoke Argentina | `80002` | **`1339`** | `scenario-b/samples/argentina/central-bank-argentina.yaml` |
 
 A alocação segue o padrão hoje nos manifests dos samples — uma chain por spoke, IDs
 distintos e contíguos: Brasil `1338`, Argentina `1339`, Colômbia `1340`
 (`scenario-b/samples/*/central-bank-*.yaml`, campo `spec.node.chainId`).
+
+**A alocação não é comum aos dois cenários, e isso não está registrado.** O cenário A não
+tem hub, e usa a mesma faixa deslocada: Brasil `1337`, Colômbia `1338`, Argentina `1339`
+(`scenario-a/samples/*/central-bank-*.yaml`). O mesmo número designa coisas diferentes —
+`1337` é o hub no cenário B e a spoke do Brasil no cenário A; `1338` é o Brasil no B e a
+Colômbia no A. Pela regra de isolamento de cenários isto não é defeito: são produtos
+separados, que não se conectam. Mas é exatamente o tipo de assimetria que
+[`../scenario-drift.md`](../scenario-drift.md) existe para classificar como deliberada ou
+acidental, e hoje ela não aparece lá — chain ID não é mencionado no arquivo. Registrar a
+decisão (faixas separadas de propósito, ou convergir para uma alocação única) fica como
+item aberto deste ADR, porque a resposta muda o que um participante precisa presumir se
+os cenários vierem a coexistir num mesmo operador.
 
 Isto é consequência direta de [`ADR-006`](ADR-006-isolamento-de-rede-do-hub.md): com o
 hub em rede própria, a alocação de chain ID deixa de ser detalhe local de cada stack e
@@ -77,24 +94,26 @@ deste ADR.
 a LNET, porque a rede operada por eles precisa dos mesmos parâmetros. Enquanto isso não
 fechar, o parâmetro é decidido do lado da plataforma e **presumido** do lado da operação.
 
-**Risco vivo, verificado nesta data — skew de versão do Besu.** A nota de julho sinalizou
-que os scripts de bring-up baixam a distribuição `besu-25.8.0` para gerar o genesis mas
-sobem os containers com `hyperledger/besu:latest`. Conferido hoje: são **15 ocorrências
-de `hyperledger/besu:latest`** nos scripts `startBesu.sh` dos dois cenários, enquanto os
-templates de provisioning do toolkit fixam `hyperledger/besu:25.8.0` corretamente (8
-ocorrências).
+**Fechado — skew de versão do Besu.** A nota de julho sinalizou que os scripts de
+bring-up baixavam a distribuição `besu-25.8.0` para gerar o genesis mas subiam os
+containers com `hyperledger/besu:latest`, de modo que o genesis era gerado por uma versão
+e servido por outra, que avançava sozinha. Quando este ADR foi escrito eram 15 ocorrências
+de `:latest`, todas nos scripts `startBesu.sh` dos dois cenários.
 
-Consequência prática: o genesis é gerado por uma versão e servido por outra, que muda
-sozinha quando a tag `latest` avança. Isso não é problema de chain ID, mas está no mesmo
-parágrafo de risco porque é o mesmo material — parâmetro de rede que se presume fixo e
-não está.
+Esses scripts eram do caminho `deploy/local`, removido em favor do toolkit como única
+forma de subir ambiente. Com a remoção, `startBesu.sh` deixou de existir e nenhum caminho
+executável puxa `:latest`: hoje 44 arquivos fixam `hyperledger/besu:25.8.0` e as duas
+únicas ocorrências restantes de `:latest` são prosa em
+`scenario-b/docs/charts/scenario-b/architecture.md` e na própria nota de migração que este
+ADR promove — texto desatualizado, não configuração.
 
-Vale notar que [`../TOOLCHAIN.md`](../TOOLCHAIN.md) afirma que Besu 25.8.0 é garantido
-pelo *"`BESU_IMAGE` default in the compose templates"*, o que é verdade para os templates
-do toolkit e **falso para os scripts legados**. Existe hoje um gate para o mesmo problema
-em imagens Alpine (`tools/check-alpine-version.sh`, que lê o pino do próprio
-`TOOLCHAIN.md`); generalizá-lo para Besu fecharia esta lacuna e é candidato a card
-próprio.
+Com isso, a afirmação de [`../TOOLCHAIN.md`](../TOOLCHAIN.md) de que Besu 25.8.0 é
+garantido pelo *"`BESU_IMAGE` default in the compose templates"* passou a ser verdadeira
+sem ressalva: os templates do toolkit são a única origem da imagem. Continua candidato a
+card próprio generalizar para Besu o gate que já existe para Alpine
+(`tools/check-alpine-version.sh`, que lê o pino do próprio `TOOLCHAIN.md`) — agora mais
+barato, porque há uma origem só a conferir, e é o que impediria a regressão de voltar pela
+prosa ou por um template novo.
 
 ## Status / Sign-off
 
