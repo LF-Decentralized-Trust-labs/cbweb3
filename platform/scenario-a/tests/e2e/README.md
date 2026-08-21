@@ -25,6 +25,19 @@ mock.
 make -C ../.. scenario-a.test-integration   # brings the stack up if it is not already running
 ```
 
+> **Known broken as of 2026-08-21.** On a clean local bring-up this test does not get
+> past `Phase1_Login`, and the bring-up itself aborts earlier at `noc.setup-agents`.
+> Both are the same defect and neither is in the test: the gateway is given
+> `KC_BASE_PATH=http://localhost:8081` — a host URL — while running inside a container,
+> so it cannot reach Keycloak and every credential exchange returns 401. Verified from
+> inside the container: `localhost:8081` refuses the connection, `cbweb3-keycloak:8080`
+> answers. Tracked as a P0 in Notion — "Scenario A: local bring-up cannot authenticate".
+>
+> This is recorded here rather than left for the next person to rediscover: a pointer
+> that sends someone to a command which fails is worse than no pointer. The E2E suite
+> itself is real and is where this file says it is; what is broken is the environment it
+> needs.
+
 The same module carries a hermetic lane under the tag `integration_lite`, which needs no
 stack and is the one CI runs on every pull request:
 
