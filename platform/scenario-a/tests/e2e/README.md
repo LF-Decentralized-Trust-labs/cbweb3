@@ -25,25 +25,35 @@ mock.
 make -C ../.. scenario-a.test-integration   # brings the stack up if it is not already running
 ```
 
-> **Known broken as of 2026-08-21.** On a clean local bring-up this test does not get
-> past `Phase1_Login`, and the bring-up itself aborts earlier at `noc.setup-agents`.
-> Both are the same defect and neither is in the test: the gateway is given
-> `KC_BASE_PATH=http://localhost:8081` — a host URL — while running inside a container,
-> so it cannot reach Keycloak and every credential exchange returns 401. Verified from
-> inside the container: `localhost:8081` refuses the connection, `cbweb3-keycloak:8080`
-> answers. Tracked as a P0 in Notion — "Scenario A: local bring-up cannot authenticate".
+> **This test does not pass on a clean local bring-up, and that is a provisioning gap
+> rather than a defect.** Ran on 2026-08-21: `TestFullHappyPath` fails at `Phase1_Login`
+> with `{"error":"invalid credentials"}`, and phases 2–8 then fail on the dependency.
+> Phase0 passes and all five gateways answer 200 on `/healthz`, so the stack is up.
 >
-> This is recorded here rather than left for the next person to rediscover: a pointer
-> that sends someone to a command which fails is worse than no pointer. The E2E suite
-> itself is real and is where this file says it is; what is broken is the environment it
-> needs.
-
-The same module carries a hermetic lane under the tag `integration_lite`, which needs no
-stack and is the one CI runs on every pull request:
-
-```bash
-cd ../integration && go test -tags integration_lite ./...
-```
+> The reason is a deliberate design decision, not a bug. Since `f55ade5b`
+> (*feat(auth): require user (password grant) login for portals*, 2026-06-30) the auth
+> service accepts **only** the OIDC password grant: portal login must be a real Keycloak
+> **user** — the per-role admin users provisioned from `spec.adminUsers` — precisely so
+> an operator cannot log in with a realm client id/secret. `client_credentials` is
+> refused on purpose.
+>
+> This test predates that decision. It authenticates with the `clientId`/`clientSecret`
+> pair from `backend/config/.env.infra.*`, which is exactly the credential type the
+> decision rejects. Compounding it, `deploy/local/keycloak/init.sh` creates the clients
+> and service accounts but **no users** — realms `bank-a`, `bank-b` and `central-bank-a`
+> hold zero — so there is currently no user for the supported path to authenticate as
+> either.
+>
+> Ruled out along the way, so nobody repeats the search: the client secrets are correct
+> and identical to what Keycloak holds; the `.env.infra.*` files all exist (they are
+> dotfiles, so a plain `ls` hides them); the clients live in **per-entity** realms, not
+> in `cbweb3`; the auth service reaches Keycloak fine at `http://keycloak:8080` and the
+> issuer on the minted token matches what it expects; and audience enforcement is off.
+> The 401 is the password grant refusing a client credential, nothing more.
+>
+> What would close it: provision the per-role users locally the way the toolkit does
+> from `spec.adminUsers`, then have the test log in as one. Both are decisions for whoever
+> owns the local bring-up, so this file records the state rather than guessing at a fix.
 
 ## The scripted end-to-end walkthroughs
 
