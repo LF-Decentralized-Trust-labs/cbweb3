@@ -166,6 +166,12 @@ func (c JoinConfig) provisionKeycloakRealm(ctx context.Context) error {
 	var b strings.Builder
 	// Same password the compose env gave the Keycloak container; resolved from the
 	// entity secrets file, not a constant.
+	// Caveat, stated rather than glossed: kcadm takes the password as an argument, so
+	// it transits the Keycloak container's process list for the duration of this exec.
+	// There is no env equivalent for `kcadm config credentials` (unlike REDISCLI_AUTH,
+	// which is why Redis is handled differently). This is not new — the value used to be
+	// the constant admin — but the exposure window is real and belongs in a follow-up
+	// once realm provisioning moves to an imported realm file, as Scenario A does it.
 	fmt.Fprintf(&b, "%[1]s config credentials --server http://localhost:8080 --realm master --user admin --password %[2]s && ",
 		kc, mustInfraSecret(c.DataDir, "KC_ADMIN_PASSWORD"))
 	fmt.Fprintf(&b, "(%[1]s create realms -s realm=%[2]s -s enabled=true || true) && ", kc, bankKeycloakRealm)
