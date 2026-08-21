@@ -149,16 +149,27 @@ delivered Go source because the platform's document declares them as free-form o
 That is more than half of Scenario B. It is honest and it is annotated, but it is not the
 vendor's normative artifact and we should never describe it as one.
 
-Three of the divergences are **blocking** — a client written strictly against the vendor's
-published document cannot work:
+**Five** of the divergences are blocking — a client written strictly against the vendor's
+published document cannot work. Three are in Scenario A; two are carried as
+`Spec divergence (blocking):` notes on the Scenario B AMM quote operations:
 
 | Row | The document says | The gateway does |
 |---|---|---|
 | A1/A2 | `state: "ACCEPTED"` | `state: "FX_STATE_ACCEPTED"` — the protobuf enum name |
 | A4 | **412** on an invalid FX state transition | **409 Conflict**. No payments or HTLC route emits 412 at all |
 | A5/A6 | `GET /htlc/status` returns `{"lock": {…}}` with a `secret` | the **bare** record, with `counterparty_locked`/`amount`/`created_at` and **no** `secret` |
+| B13 | `quote/exact-output` takes **`amountOut`** (camelCase) | reads **`amount_out`**; the documented name always yields `400 INVALID_REQUEST` |
+| B14 | `quote/cross-currency` declares **zero parameters** | requires three (`source_currency`, `target_currency`, `amount_out`); following the document literally always yields 400 |
+
+The two AMM rows are the only divergences the contracts themselves label `(blocking)`; the
+three Scenario A rows were classified during this review. The word is now used for the same
+thing in both places.
 
 Each was verified directly in the delivered source during this report's own review (see §4).
+
+The Scenario B circuit-breaker operations are **not** in this set. They are `Spec gap:` cases
+— the platform declares no request or response body where the handler requires one — which
+leaves an integrator without guidance rather than actively misleading them.
 
 ### 2.7 Two new CI gates, because the absence of them is what let this happen
 
@@ -428,7 +439,7 @@ constraint), or is mitigated at the deployment layer.
 
 ### 6.5 Decide how the 23 divergences are communicated to the vendor
 
-Nothing was sent. Three are blocking — a client written strictly against GL/AH's own
+Nothing was sent. Five are blocking — a client written strictly against GL/AH's own
 published OpenAPI document cannot operate the FX state machine, cannot read HTLC status,
 and cannot operate the Scenario B circuit breaker (which declares no request body at all
 while requiring one). This is genuinely useful information for them and costs them nothing
