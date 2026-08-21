@@ -410,7 +410,8 @@ func (c SpokeConfig) provisionKeycloakRealm(ctx context.Context) error {
 	// Local lab uses plain HTTP; the NOC portal does a browser-direct password
 	// grant from the entity's IP, which Keycloak's default sslRequired=external
 	// rejects with "HTTPS required". Relax it for local (never in production).
-	fmt.Fprintf(&b, "(%[1]s update realms/%[2]s -s sslRequired=NONE || true) && ", kc, spokeKeycloakRealm)
+	fmt.Fprintf(&b, "(%[1]s update realms/%[2]s -s sslRequired=NONE -s accessTokenLifespan=%[3]d || true) && ",
+		kc, spokeKeycloakRealm, accessTokenLifespanSeconds)
 	fmt.Fprintf(&b, "(%[1]s create clients -r %[2]s -s clientId=%[3]s -s secret=%[4]s -s enabled=true "+
 		"-s publicClient=false -s serviceAccountsEnabled=true -s directAccessGrantsEnabled=true %[5]s || true) && ",
 		kc, spokeKeycloakRealm, spokeKeycloakClient, spokeKeycloakSecret, audienceMapperArg(keycloakBackendAudience))

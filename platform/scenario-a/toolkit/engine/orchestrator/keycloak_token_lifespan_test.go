@@ -19,10 +19,7 @@
 package orchestrator
 
 import (
-	"os"
-	"path/filepath"
 	"regexp"
-	"strconv"
 	"testing"
 )
 
@@ -38,35 +35,20 @@ var (
 	literalLifespanRe = regexp.MustCompile(`accessTokenLifespan=(\d+)`)
 )
 
-func TestDeployLocalAccessTokenLifespanIsShort(t *testing.T) {
-	for _, name := range []string{"init.sh", "setup-noc-realm.sh"} {
-		path, err := filepath.Abs(filepath.Join("../../../deploy/local/keycloak", name))
-		if err != nil {
-			t.Fatalf("resolve %s: %v", name, err)
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		script := string(body)
-
-		found := 0
-		for _, re := range []*regexp.Regexp{envDefaultLifespanRe, literalLifespanRe} {
-			for _, m := range re.FindAllStringSubmatch(script, -1) {
-				found++
-				secs, err := strconv.Atoi(m[1])
-				if err != nil {
-					t.Fatalf("%s: unparseable lifespan %q", name, m[1])
-				}
-				if secs > maxAccessTokenLifespanSeconds {
-					t.Errorf("%s sets an access-token lifespan of %ds (%.1fh); the ceiling is %ds",
-						name, secs, float64(secs)/3600, maxAccessTokenLifespanSeconds)
-				}
-			}
-		}
-		if found == 0 {
-			t.Errorf("%s declares no access-token lifespan; this guard must not pass by "+
-				"failing to find one — update the patterns if the script was reworked", name)
-		}
+func TestToolkitAccessTokenLifespanIsShort(t *testing.T) {
+	// Replaces TestDeployLocalAccessTokenLifespanIsShort, which read
+	// deploy/local/keycloak/init.sh. That path was removed as a duplicate of the
+	// toolkit — and the toolkit set no lifespan at all, so the control would have been
+	// dropped silently with the scripts. It is now set by the toolkit itself, and this
+	// asserts the value the toolkit uses rather than the value a script wrote.
+	if accessTokenLifespanSeconds > maxAccessTokenLifespanSeconds {
+		t.Errorf("the toolkit issues access tokens valid for %ds (%.1fh); the ceiling is %ds",
+			accessTokenLifespanSeconds, float64(accessTokenLifespanSeconds)/3600,
+			maxAccessTokenLifespanSeconds)
+	}
+	if accessTokenLifespanSeconds <= 0 {
+		t.Errorf("accessTokenLifespanSeconds is %d; a non-positive lifespan would let Keycloak "+
+			"fall back to whatever the server was configured with, which is what stating it here avoids",
+			accessTokenLifespanSeconds)
 	}
 }

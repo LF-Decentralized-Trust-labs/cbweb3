@@ -98,7 +98,7 @@ contracts.register-participants: contracts.register-participants-spoke-a contrac
 contracts.deploy-cbweb3-besu: contracts.deploy-hub
 
 contracts.sync-addresses:
-	@./deploy/local/tools/sync-contracts.sh
+	@./tools/sync-contracts.sh
 
 contracts.deploy-all-with-sync: contracts.deploy-all contracts.sync-addresses contracts.register-participants
 
