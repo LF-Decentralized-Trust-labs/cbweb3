@@ -27,6 +27,7 @@ type provisionKeycloakStep struct {
 	kcDBURL       string
 	kcUser        string
 	kcPassword    string
+	kcAdminPass   string
 	keycloakImage string
 	hostPort      int
 	realms        []KeycloakRealmPlan
@@ -42,6 +43,7 @@ func newProvisionKeycloakStep(name string, p keycloakStepParams) Step {
 		kcDBURL:       p.KCDBURL,
 		kcUser:        p.KCUser,
 		kcPassword:    p.KCPassword,
+		kcAdminPass:   p.KCAdminPassword,
 		keycloakImage: p.KeycloakImage,
 		hostPort:      p.HostPort,
 		realms:        p.Realms,
@@ -51,16 +53,17 @@ func newProvisionKeycloakStep(name string, p keycloakStepParams) Step {
 
 // keycloakStepParams groups the inputs for provisionKeycloakStep.
 type keycloakStepParams struct {
-	EntityPrefix  string
-	NetName       string
-	ComposePath   string
-	KCDBURL       string
-	KCUser        string
-	KCPassword    string
-	KeycloakImage string
-	HostPort      int
-	Realms        []KeycloakRealmPlan
-	Timeout       time.Duration
+	EntityPrefix    string
+	NetName         string
+	ComposePath     string
+	KCDBURL         string
+	KCUser          string
+	KCPassword      string
+	KeycloakImage   string
+	HostPort        int
+	Realms          []KeycloakRealmPlan
+	Timeout         time.Duration
+	KCAdminPassword string
 }
 
 func (s *provisionKeycloakStep) Name() string { return s.name }
@@ -123,10 +126,12 @@ func (s *provisionKeycloakStep) composeEnv() []string {
 	if user == "" {
 		user = "default"
 	}
+	// No "default" fallback: Keycloak connects to the entity's Postgres, which is now
+	// initialised with a generated password. A fallback here is how this step spent a
+	// deploy authenticating as default/default against a database that had moved on —
+	// it fails as a five-minute readiness timeout, which reads like a slow container
+	// rather than a wrong credential.
 	pass := s.kcPassword
-	if pass == "" {
-		pass = "default"
-	}
 	img := s.keycloakImage
 	if img == "" {
 		img = "quay.io/keycloak/keycloak:26.0"
@@ -138,6 +143,7 @@ func (s *provisionKeycloakStep) composeEnv() []string {
 		"KC_DB_URL="+s.kcDBURL,
 		"KC_DB_USERNAME="+user,
 		"KC_DB_PASSWORD="+pass,
+		"KC_BOOTSTRAP_ADMIN_PASSWORD="+s.kcAdminPass,
 		"KEYCLOAK_IMAGE="+img,
 	)
 }
