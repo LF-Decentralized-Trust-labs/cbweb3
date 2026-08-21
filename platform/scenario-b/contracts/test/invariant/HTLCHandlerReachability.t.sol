@@ -69,6 +69,45 @@ contract HTLCHandlerReachabilityTest is Test {
         assertEq(handler.callsRefund(), 1, "refund never succeeded");
     }
 
+    /// @notice A settled lock must refuse a second settle, and refuse it as "not
+    ///         locked" rather than for any other reason.
+    ///
+    /// The invariant that covers this is only able to see the violation because the
+    /// handler records a success on an already-terminal lock. That is a subtle enough
+    /// mechanism to deserve a deterministic partner: SETTLED -> SETTLED changes no
+    /// state, so the sweep comparing recorded state against reported state sees
+    /// nothing, and a mutation permitting it passed all six invariants until the
+    /// handler learned to flag it.
+    ///
+    /// It matters because a second settle re-emits LogHTLCClaimed for one contractId,
+    /// and the relay reads those events to release private value.
+    function test_settleIsRefusedOnAnAlreadySettledLock() public {
+        handler.lock(9, 2 days);
+        handler.settle(0);
+        assertEq(handler.callsSettle(), 1, "the first settle did not succeed");
+
+        HTLCLib.LockDetails memory d = htlc.getLockDetails(_firstContractId(9));
+        vm.prank(receiver);
+        vm.expectRevert(IHashTimeLockedContract.HTLC__ContractNotLocked.selector);
+        htlc.settle(_firstContractId(9), d.secret);
+    }
+
+    /// @notice And the same on the other terminal state.
+    function test_refundIsRefusedOnAnAlreadyRefundedLock() public {
+        handler.lock(10, 2 days);
+        handler.refundAfterExpiry(0);
+        assertEq(handler.callsRefund(), 1, "the first refund did not succeed");
+
+        vm.prank(sender);
+        vm.expectRevert(IHashTimeLockedContract.HTLC__ContractNotLocked.selector);
+        htlc.refund(_firstContractId(10));
+    }
+
+    /// @dev Mirrors the handler's id derivation for the first lock of a fresh handler.
+    function _firstContractId(uint256 seed) private pure returns (bytes32) {
+        return keccak256(abi.encode("lock", seed, uint256(0)));
+    }
+
     /// @notice The relock attempt must reach the CONTRACT'S guard. If it is rejected
     ///         before that — an unverified caller, an expired timelock — the invariant
     ///         built on it proves nothing.

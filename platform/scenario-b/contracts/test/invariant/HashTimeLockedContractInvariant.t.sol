@@ -93,6 +93,7 @@ contract HashTimeLockedContractInvariantTest is StdInvariant, Test {
         handler.sweep();
         assertFalse(handler.bothSettledAndRefunded(), "a lock was both settled and refunded");
         assertFalse(handler.terminalStateChanged(), "a terminal state was left or overwritten");
+        assertFalse(handler.terminalLockReTransitioned(), "a lock in a terminal state accepted a second transition");
     }
 
     /// @notice The stored secret is the settle receipt. Finding one on a lock that was

@@ -45,6 +45,16 @@ contract HTLCHandler is CommonBase, StdCheats, StdUtils {
     bool public refundedByNonSender;
     bool public relockSucceeded;
     bool public terminalStateChanged;
+    /// @notice A lock already in a terminal state accepted a second transition.
+    ///
+    /// Distinct from terminalStateChanged, which compares the state the contract
+    /// reports against what the handler recorded. A repeated settle leaves
+    /// SETTLED -> SETTLED, so nothing diverges and that comparison sees nothing — yet
+    /// the call succeeded and re-emitted LogHTLCClaimed for the same contractId. The
+    /// relay reads those events to decide whether to release private value, so a
+    /// second one is a second release signal for a single lock. Caught only at the
+    /// point of success, which is why this is recorded here rather than in sweep().
+    bool public terminalLockReTransitioned;
     bool public bothSettledAndRefunded;
     bool public secretSetWithoutSettle;
 
@@ -93,6 +103,8 @@ contract HTLCHandler is CommonBase, StdCheats, StdUtils {
 
         vm.prank(RECEIVER);
         try HTLC.settle(t.contractId, t.secret) {
+            // Succeeding on a lock we already settled means SETTLED is not terminal.
+            if (t.settledByUs || t.refundedByUs) terminalLockReTransitioned = true;
             callsSettle++;
             t.settledByUs = true;
         } catch {}
@@ -124,6 +136,8 @@ contract HTLCHandler is CommonBase, StdCheats, StdUtils {
         }
         vm.prank(SENDER);
         try HTLC.refund(t.contractId) {
+            // Same rule on the other terminal state.
+            if (t.refundedByUs || t.settledByUs) terminalLockReTransitioned = true;
             callsRefund++;
             t.refundedByUs = true;
         } catch {}
