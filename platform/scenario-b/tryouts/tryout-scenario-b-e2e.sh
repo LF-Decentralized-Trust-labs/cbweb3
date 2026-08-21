@@ -1102,8 +1102,16 @@ print_report() {
     for msg in "${fail_[@]}"; do printf '      ✗  %s\n' "$msg" >&2; done
   fi
 
+  # A green verdict must mean "checks ran and passed", not "no check recorded a
+  # failure". Without the first line below, a run that connected to nothing printed
+  # `RESULT: ✅ OK ( PASS=0 FAIL=0 )` — measured on 2026-08-21 against a healthy
+  # toolkit stack, where every call failed on the retired deploy/local port and the
+  # verdict still read OK. The EXIT trap makes it worse: an aborted or timed-out run
+  # reaches this function too, so the banner appeared for runs that barely started.
+  # Anyone using that banner as evidence was reading a default, not a result.
   local overall='✅ OK'
-  [[ ${#warn[@]} -gt 0 && ${#fail_[@]} -eq 0 ]] && overall='⚠️  OK WITH WARNINGS'
+  [[ ${#pass[@]} -eq 0 ]] && overall='❌ NOTHING VERIFIED (no check ran)'
+  [[ ${#warn[@]} -gt 0 && ${#fail_[@]} -eq 0 && ${#pass[@]} -gt 0 ]] && overall='⚠️  OK WITH WARNINGS'
   [[ ${#fail_[@]} -gt 0 ]] && overall='❌ FAILED'
 
   printf '\n' >&2

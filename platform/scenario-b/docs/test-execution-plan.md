@@ -177,9 +177,7 @@ The following are explicitly **out of scope**:
 - [ ] `tryout-scenario-b-e2e.sh us4` — FX Agreement lifecycle on hub
 - [ ] `tryout-scenario-b-e2e.sh us5` — PairRegistry bilateral pair approval
 - [ ] `tryout-scenario-b-e2e.sh us6` — SpokeBridge Lock&Mint / Burn&Unlock
-- [ ] `tryout-cross-currency-full-lifecycle.sh` — Full payment lifecycle including bridge
 - [ ] `tryout-cacti-interop.sh` — Cacti relay health + CommitMatched event detection
-- [ ] `tryout-commercial-swap-e2e.sh` — Commercial bank cross-currency swap (partial; commercial bank path in progress)
 - [ ] Evidence bundle generated per flow
 
 #### Phase 4 — Performance & Security (Week 5)
@@ -298,10 +296,7 @@ E2E scripts are located in `scenario-b/tryouts/`. See the [API-First E2E Executi
 | `tryout-scenario-b-e2e.sh us4` | US4: FX Agreement lifecycle on hub | Implemented |
 | `tryout-scenario-b-e2e.sh us5` | US5: PairRegistry bilateral pair approval | Implemented |
 | `tryout-scenario-b-e2e.sh us6` | US6: SpokeBridge Lock&Mint / Burn&Unlock | Implemented |
-| `tryout-commercial-swap-e2e.sh` | Commercial bank cross-currency swap | Partial |
-| `tryout-cross-currency-full-lifecycle.sh` | Full payment lifecycle including bridge | Implemented |
 | `tryout-cacti-interop.sh` | Cacti relay health + CommitMatched event detection | Implemented |
-| `tryout-deposit-flow.sh` | Spoke deposit (fCeBM) flow | Implemented |
 | `tryout-lp-bilateral-ratio.sh` | LP share ratio calculation | Implemented |
 | `tryout-payment-routes.sh` | Payment routing validation | Implemented |
 
@@ -339,7 +334,7 @@ E2E scripts are located in `scenario-b/tryouts/`. See the [API-First E2E Executi
 9. Assert: W-tCeBM burned on hub; spoke tCeBM balance increased by corresponding amount
 10. Assert: FX swap fully settled; no orphaned tokens on hub or spoke
 
-- **Scripts**: `tryout-scenario-b-e2e.sh us3`, `tryout-commercial-swap-e2e.sh`
+- **Scripts**: `tryout-scenario-b-e2e.sh us3`, `samples/sample-tryout.sh`
 - **Status**: Partial — governance path works; commercial bank direct swap path is in progress
 
 #### Flow 3 — SpokeBridge Round-Trip (US6)
@@ -585,9 +580,7 @@ cd scenario-b && make scenario-b.up
 
 # E2E flows
 bash tryouts/tryout-scenario-b-e2e.sh all
-bash tryouts/tryout-commercial-swap-e2e.sh
 bash tryouts/tryout-cacti-interop.sh
-bash tryouts/tryout-cross-currency-full-lifecycle.sh
 
 # Performance baseline
 make scenario-b.perf-baseline
@@ -650,7 +643,6 @@ The following areas are identified as having incomplete or missing test coverage
 | PairRegistry pair removal / archival | `PairRegistry.sol` | Removing an active pair; archiving deactivated pairs; re-proposing an archived pair | Medium |
 | FXAgreement concurrent settlement | `FXAgreement.sol` (hub) | Two concurrent `settle` calls on the same agreement; only one should succeed | High |
 | LiquidityCommitRegistry garbage collection | `LiquidityCommitRegistry.sol` | Batch expiry of multiple expired commits; gas cost of cleanup; state consistency after cleanup | Medium |
-| Commercial bank FX swap E2E | `tryout-commercial-swap-e2e.sh` | Full commercial bank path (not governance bypass): quote → swap → bridge round-trip | High |
 | Integration: Cacti event detection | Cacti relay + hub | End-to-end test that Cacti watcher detects `CommitMatched` on hub and triggers spoke action | High |
 | Integration: SpokeBridge on-chain | SpokeBridge API | Full integration test: API call → on-chain `Locked` event → W-tCeBM minted on hub | Medium |
 | AMM throughput validation | k6 performance | 30 TPS target is draft; must be validated with measured devnet results under realistic load | Medium |

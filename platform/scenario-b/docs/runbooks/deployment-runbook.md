@@ -1146,9 +1146,8 @@ bash tryouts/tryout-scenario-b-e2e.sh us2   # MLP bilateral liquidity
 bash tryouts/tryout-scenario-b-e2e.sh us3   # commercial bank cross-currency swap
 bash tryouts/tryout-scenario-b-e2e.sh us5   # PairRegistry bilateral approval
 
-# Additional scenario scripts
-bash tryouts/tryout-commercial-swap-e2e.sh
-bash tryouts/tryout-cross-currency-full-lifecycle.sh
+# The full commercial-bank path (corridor → liquidity → tokenisation → swap → redeem)
+cd samples && ./sample-tryout.sh
 ```
 
 To skip the `make scenario-b.up` step if the stack is already running:

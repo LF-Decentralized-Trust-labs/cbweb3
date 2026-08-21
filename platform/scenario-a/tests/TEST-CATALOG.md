@@ -276,7 +276,10 @@ See `SpokeBridge.t.sol` for function-level test list. Tests cover cross-spoke me
 
 ### E2E-A-05 — Escrow Flow (Deposit → Escrow → Redeem)
 
-- **Script**: `tryouts/tryout-escrow-flow.sh`
+- **Script**: `samples/sample-tryout.sh` (issuance + tokenisation steps, then the redeem
+  steps at the end). It replaced `tryouts/tryout-escrow-flow.sh`, which was retired with
+  the legacy test layer — that script drove the removed deploy/local topology and could
+  not authenticate against a toolkit stack.
 - **Status**: [Implemented]
 - **Preconditions**: bank-a and central-bank-a on Spoke-A; fiat collateral initialized
 
@@ -295,7 +298,14 @@ See `SpokeBridge.t.sol` for function-level test list. Tests cover cross-spoke me
 
 ### E2E-A-06 — Compliance Participant Screening
 
-- **Script**: `tryouts/tryout-compliance-participants.sh`
+- **Script**: `tests/integration` under the `integration_lite` tag —
+  `TestAML_DeniedTransfer_BlocksSettlement_NoSideEffect` and
+  `TestAML_RecheckedAtInitiation_NotJustOnboarding` (CI runs this lane on every PR).
+  Named deliberately instead of `samples/sample-tryout.sh`: the sample walkthrough drives
+  the happy path and does NOT screen a sanctioned participant, so pointing this entry at
+  it would overstate the coverage. The retired
+  `tryouts/tryout-compliance-participants.sh` was the live-stack version of the same
+  checks.
 - **Status**: [Implemented]
 - **Flow**: Register sanctioned participant → attempt FX Agreement with sanctioned counterparty → verify block at pre-agreement stage
 - **Success Criteria**: AML block triggered before any `agreementId` is created; no DLT interaction occurs

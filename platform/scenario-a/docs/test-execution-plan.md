@@ -152,9 +152,7 @@ The following are explicitly **out of scope**:
 - [ ] `tryout-spoke-a-bank-a.sh` — Spoke-A onboarding + lifecycle
 - [ ] `tryout-spoke-b-bank-b.sh` — Spoke-B onboarding + lifecycle
 - [ ] `tryout-fx-agreement-e2e.sh` — Full HTLC cross-spoke settlement (happy path + timeout refund)
-- [ ] `tryout-escrow-flow.sh` — Full deposit → escrow → redeem
 - [ ] `tryout-cacti-interop.sh` — Cacti relay health and event propagation
-- [ ] `tryout-compliance-participants.sh` — Compliance and AML screening
 - [ ] Interoperability resilience scenarios: relay downtime, network partition, duplicate messages
 - [ ] Evidence bundle generated per flow
 
@@ -254,15 +252,10 @@ Existing E2E scripts (in `scenario-a/tryouts/`):
 | Script | Flow |
 |--------|------|
 | `tryout-spoke-a-bank-a.sh` | Onboarding + token lifecycle (bank-a, Spoke-A) |
-| `tryout-spoke-a-bank-c.sh` | Onboarding + token lifecycle (bank-c, Spoke-A) |
 | `tryout-spoke-b-bank-b.sh` | Onboarding + token lifecycle (bank-b, Spoke-B) |
-| `tryout-spoke-b-bank-d.sh` | Onboarding + token lifecycle (bank-d, Spoke-B) |
 | `tryout-fx-agreement-e2e.sh` | Full FX Agreement + HTLC cross-spoke settlement |
-| `tryout-escrow-flow.sh` | Full deposit → escrow → redeem lifecycle |
 | `tryout-cacti-interop.sh` | Cacti relay health + PluginLedgerConnectorBesu validation |
-| `tryout-compliance-participants.sh` | Participant compliance screening |
 | `tryout-internal-relay-auth.sh` | Internal relay authentication |
-| `tryout-my-onboarding-status.sh` | Onboarding status polling |
 
 ---
 
@@ -532,7 +525,6 @@ cd scenario-a && make spoke-all
 
 # E2E flows
 ./tryouts/tryout-fx-agreement-e2e.sh
-./tryouts/tryout-escrow-flow.sh
 ./tryouts/tryout-cacti-interop.sh
 ./tryouts/tryout-spoke-a-bank-a.sh
 ./tryouts/tryout-spoke-b-bank-b.sh

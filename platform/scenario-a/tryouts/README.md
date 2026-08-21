@@ -27,14 +27,12 @@ Each entity runs its own API Gateway backed by its own Keycloak realm, PostgreSQ
 
 ### Bank Onboarding Tryouts
 
-All four onboarding scripts share the same **dual-entity 3-phase PKI + Blockchain flow** (7 steps). The entity-specific parameters (URLs, env files, client IDs) are the only things that differ between them.
+Both onboarding scripts share the same **dual-entity 3-phase PKI + Blockchain flow** (7 steps). The entity-specific parameters (URLs, env files, client IDs) are the only things that differ between them — which is why the bank-c and bank-d variants were retired: they were parameter clones of these two, and the sample walkthrough (`samples/sample-tryout.sh`) onboards all four banks anyway.
 
 | Script | Bank | Central Bank | Bank Port | CB Port |
 |---|---|---|---|---|
 | `tryout-spoke-a-bank-a.sh` | bank-a | central-bank-a | 18080 | 38080 |
-| `tryout-spoke-a-bank-c.sh` | bank-c | central-bank-a | 48080 | 38080 |
 | `tryout-spoke-b-bank-b.sh` | bank-b | central-bank-b | 28080 | 60080 |
-| `tryout-spoke-b-bank-d.sh` | bank-d | central-bank-b | 58080 | 60080 |
 
 #### Onboarding Flow (7 Steps)
 
@@ -63,7 +61,10 @@ This dual-actor simulation means a single script exercises both sides of the tru
 
 ### Compliance Tryout
 
-**`tryout-compliance-participants.sh`** — Exercises the `GET /compliance/participants` endpoint under four scenarios to validate role-based access control (RBAC) and filter behaviour:
+The live-stack script for this was retired with the legacy test layer. The same four
+expectations are asserted hermetically in `tests/integration` under the
+`integration_lite` tag (`TestAML_*`), which CI runs on every pull request; the table
+below is kept as the statement of what that endpoint must answer.
 
 | Scenario | Actor | Expected HTTP |
 |---|---|---|

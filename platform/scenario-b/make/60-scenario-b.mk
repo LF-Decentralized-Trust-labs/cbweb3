@@ -178,7 +178,7 @@ scenario-b.nuke:
 	@docker ps -a --format '{{.Names}}' | grep -E 'cbweb3|backend-' && echo "  WARN: containers still present (see above)" || echo "  OK: no cbweb3 containers"
 	@docker volume ls --format '{{.Name}}' | grep -E 'local_postgres_data' && echo "  WARN: postgres volume still present" || echo "  OK: no postgres volume"
 	@docker volume ls --format '{{.Name}}' | grep -E '_besu_data|_genesis' && echo "  WARN: besu volumes still present (toolkit-provisioned state)" || echo "  OK: no besu volumes"
-	@echo "[scenario-b] nuke complete — run 'make scenario-b.up' for a fresh stack"
+	@echo "[scenario-b] nuke complete — bring a fresh stack up with: cd samples && ./deploy-all.sh"
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -218,8 +218,14 @@ SKIP_DOWN ?= 1
 scenario-b.test-integration: ## Run full happy-path API integration test against a live stack
 	@echo "[scenario-b] running integration test (full happy path)..."
 ifeq ($(SKIP_UP),0)
-	@echo "[scenario-b] bringing stack up (SKIP_UP=0)..."
-	@$(MAKE) scenario-b.up
+	@# SKIP_UP=0 used to call `scenario-b.up`, the legacy deploy/local bring-up. That
+	@# target no longer exists, so this branch failed with "No rule to make target"
+	@# instead of doing anything. There is no automatic bring-up any more: the toolkit
+	@# is the single provisioning path and it is driven from samples/, not from here.
+	@echo "[scenario-b] SKIP_UP=0 is no longer supported: this target does not provision."
+	@echo "[scenario-b] Bring a stack up first:  cd samples && ./deploy-all.sh"
+	@echo "[scenario-b] then re-run without SKIP_UP=0, passing the toolkit's gateway URLs."
+	@exit 1
 endif
 	@cd tests/integration && \
 	  SKIP_UP=1 \
