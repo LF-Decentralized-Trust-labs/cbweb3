@@ -6,11 +6,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/deadlines"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/domain"
 	authv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/auth/v1"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/grpcx"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/deadlines"
 	"google.golang.org/grpc"
 )
 

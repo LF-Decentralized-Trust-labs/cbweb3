@@ -9,10 +9,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
-	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/grpcx"
 	"github.com/LACNetNetworks/cbweb3-platform/backend/services/api-gateway/internal/deadlines"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/authz"
 	compliancv1 "github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/compliance/v1"
+	"github.com/LACNetNetworks/cbweb3-platform/backend/shared/proto/grpcx"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"

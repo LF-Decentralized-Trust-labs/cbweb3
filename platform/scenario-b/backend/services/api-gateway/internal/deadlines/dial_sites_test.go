@@ -3,6 +3,7 @@
 package deadlines
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,13 +27,17 @@ import (
 // grpc.DialContext — which reads, at a glance, like the calls are bounded too. They
 // were not. A new adapter added tomorrow would look equally finished and be equally
 // unbounded, and nothing else in the suite would notice.
-func TestEveryDialSiteAppliesTheDeadlineBackstop(t *testing.T) {
-	// Relative to internal/deadlines/.
-	sites := []struct {
-		file  string
-		value string
-		note  string
-	}{
+type dialSite struct {
+	file  string
+	value string
+	note  string
+}
+
+// dialSites maps each known gRPC dial to the constant it must apply. Paths are
+// relative to internal/deadlines/. TestNoDialSiteEscapesThisList checks that this
+// list is complete, so adding an adapter cannot quietly opt out of the backstop.
+func dialSites() []dialSite {
+	return []dialSite{
 		{"../app/app.go", "deadlines.Auth",
 			"the shared auth+identity connection — the one production actually dials"},
 		{"../adapters/compliance/compliance_grpc.go", "deadlines.Compliance",
@@ -44,8 +49,10 @@ func TestEveryDialSiteAppliesTheDeadlineBackstop(t *testing.T) {
 		{"../adapters/auth/identity_grpc_provider.go", "deadlines.Auth",
 			"auth adapter's own dial: test-only caller today, but exported"},
 	}
+}
 
-	for _, s := range sites {
+func TestEveryDialSiteAppliesTheDeadlineBackstop(t *testing.T) {
+	for _, s := range dialSites() {
 		src, err := os.ReadFile(filepath.Clean(s.file))
 		if err != nil {
 			t.Errorf("%s: cannot read (%s): %v", s.file, s.note, err)
@@ -62,6 +69,68 @@ func TestEveryDialSiteAppliesTheDeadlineBackstop(t *testing.T) {
 			t.Errorf("%s (%s): dial does not apply the backstop.\n  want to find: %s",
 				s.file, s.note, want)
 		}
+	}
+}
+
+// No dial site may escape the list above.
+//
+// The list on its own has the very weakness the interceptor was chosen to avoid: it
+// bounds today's dial sites and silently misses the next one. WithDefaultDeadline
+// covers methods that do not exist yet; nothing covered ADAPTERS that do not exist
+// yet, so a new one could open an unbounded connection and the suite would stay
+// green — the omission this whole change exists to prevent, one level up.
+//
+// So the sites are discovered rather than enumerated: every non-test .go file under
+// internal/ that opens a gRPC connection must appear in dialSites(), which then
+// forces it through the check above.
+func TestNoDialSiteEscapesThisList(t *testing.T) {
+	known := map[string]bool{}
+	for _, s := range dialSites() {
+		known[filepath.ToSlash(filepath.Clean(s.file))] = true
+	}
+
+	found := 0
+	err := filepath.WalkDir("..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			// Vendored and generated trees are third-party dials, not this gateway's.
+			switch d.Name() {
+			case "vendor", "testdata":
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		body := string(src)
+		if !strings.Contains(body, "grpc.DialContext(") && !strings.Contains(body, "grpc.NewClient(") {
+			return nil
+		}
+		found++
+		rel := filepath.ToSlash(filepath.Clean(path))
+		if !known[rel] {
+			t.Errorf("%s opens a gRPC connection but is not in dialSites().\n"+
+				"  Add it with the constant its peer needs, so the backstop check covers it.", rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking internal/: %v", err)
+	}
+
+	// A walk that finds nothing would pass vacuously — the failure mode that let the
+	// licence gate report success without checking anything. The list is non-empty, so
+	// the discovery must at least rediscover it.
+	if found < len(known) {
+		t.Errorf("discovered %d dial site(s) but dialSites() lists %d: the walk is not reaching them",
+			found, len(known))
 	}
 }
 
