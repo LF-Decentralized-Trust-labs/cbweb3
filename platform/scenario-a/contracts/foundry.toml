@@ -11,6 +11,10 @@ optimizer_runs = 200
 # which overflows the legacy codegen stack; IR-based codegen resolves it cleanly.
 via_ir = true
 fuzz = { runs = 10000 }
+# Same profile as Scenario B's: depth is how many handler actions are interleaved per
+# run, and the default 15 barely gets past the setup, so the sequences these suites
+# exist to explore never happen.
+invariant = { runs = 256, depth = 50, fail_on_revert = false }
 
 [profile.ci]
 
