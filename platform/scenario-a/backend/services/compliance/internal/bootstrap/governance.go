@@ -53,6 +53,13 @@ func EnsureGovernanceParticipant(
 		return fmt.Errorf("bootstrap: derive wallet: %w", err)
 	}
 
+	// Resolve the governance bank code once. The persisted record and the on-chain institutionId
+	// must derive from the same value: reading it twice with divergent defaults would let the
+	// database and the chain disagree about which institution this wallet belongs to, and the AMM
+	// resume quorum trusts the chain's answer.
+	const institutionName = "Banco Central"
+	bankCode := getEnv("GOVERNANCE_BANK_CODE", "governance-bootstrap")
+
 	// 3. Upsert participant with ROLE_GOVERNANCE and ACTIVE status.
 	certPEM := ""
 	if ca != nil {
@@ -60,11 +67,12 @@ func EnsureGovernanceParticipant(
 	}
 	if err := repo.UpsertParticipant(ctx, repository.Participant{
 		UserID:          userID,
-		InstitutionName: "Banco Central",
+		InstitutionName: institutionName,
 		Role:            "ROLE_GOVERNANCE",
 		Status:          "ACTIVE",
 		WalletAddress:   walletAddr,
 		CertificateData: certPEM,
+		BankCode:        bankCode,
 	}); err != nil {
 		return fmt.Errorf("bootstrap: upsert governance participant: %w", err)
 	}
@@ -73,7 +81,11 @@ func EnsureGovernanceParticipant(
 	// (R1-10.6 / R2-10.6): registerParticipant alone would leave the CB in Pending, so canGovern
 	// would be false and every governance-gated call would revert. EnsureVerifiedParticipant
 	// completes the Pending->Verified promotion and is idempotent across restarts (no demotion).
-	if _, err := registry.EnsureVerifiedParticipant(ctx, bc, walletAddr, "Banco Central", "ROLE_GOVERNANCE", [32]byte{}); err != nil {
+	// The institutionId source is the same one every other registration path uses.
+	if _, err := registry.EnsureVerifiedParticipant(
+		ctx, bc, walletAddr, institutionName, "ROLE_GOVERNANCE", [32]byte{},
+		registry.InstitutionIDForParticipant(bankCode, institutionName),
+	); err != nil {
 		log.Printf("bootstrap: on-chain register+verify failed (non-fatal): %v", err)
 	}
 

@@ -41,11 +41,15 @@ contract SpokeBridgeTest is Test {
         // Register participants
         vm.startPrank(admin);
         registry.registerParticipant(
-            alice, "Alice Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            alice,
+            "Alice Bank",
+            IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK,
+            bytes32(0),
+            bytes32("inst-alice")
         );
         registry.verifyParticipant(alice);
         registry.registerParticipant(
-            bob, "Bob Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0)
+            bob, "Bob Bank", IdentityRegistryLibrary.ParticipantRole.COMMERCIAL_BANK, bytes32(0), bytes32("inst-bob")
         );
         registry.verifyParticipant(bob);
         vm.stopPrank();

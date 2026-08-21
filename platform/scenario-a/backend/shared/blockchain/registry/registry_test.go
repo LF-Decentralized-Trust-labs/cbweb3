@@ -58,7 +58,7 @@ func TestNoopRegistryClient(t *testing.T) {
 	ctx := context.Background()
 	zeroHash := "0x0000000000000000000000000000000000000000000000000000000000000000"
 
-	if h, err := c.RegisterParticipant(ctx, "0xabc", "Bank", "ROLE_COMMERCIAL_BANK", [32]byte{}); err != nil || h != zeroHash {
+	if h, err := c.RegisterParticipant(ctx, "0xabc", "Bank", "ROLE_COMMERCIAL_BANK", [32]byte{}, [32]byte{}); err != nil || h != zeroHash {
 		t.Errorf("RegisterParticipant = (%q, %v)", h, err)
 	}
 	if h, err := c.UpdateStatus(ctx, "0xabc", KycStatusVerified); err != nil || h != zeroHash {

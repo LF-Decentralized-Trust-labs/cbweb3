@@ -56,7 +56,7 @@ contract AMMHandlerReachabilityTest is Test {
     }
 
     function _verify(address who, string memory name, IdentityRegistryLibrary.ParticipantRole role) private {
-        registry.registerParticipant(who, name, role, bytes32(0));
+        registry.registerParticipant(who, name, role, bytes32(0), keccak256(abi.encodePacked("inst-", who)));
         registry.verifyParticipant(who);
     }
 

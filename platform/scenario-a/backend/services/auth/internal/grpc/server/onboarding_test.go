@@ -290,7 +290,9 @@ func TestCompleteOnboarding_Success(t *testing.T) {
 			},
 			upsertFn: func(ctx context.Context, p complianceclient.Participant) error { return nil },
 		},
-		blockchainClient: &fakeRegistry{registerFn: func(ctx context.Context, a, i, r string, fp [32]byte) (string, error) { return "0xtx", nil }},
+		blockchainClient: &fakeRegistry{registerFn: func(ctx context.Context, a, i, r string, fp, institutionID [32]byte) (string, error) {
+			return "0xtx", nil
+		}},
 		keycloak: &fakeKeycloak{
 			adminTokenFn: func(ctx context.Context) (string, error) { return "adm", nil },
 			resetPwFn:    func(ctx context.Context, a, u, p string) error { return nil },

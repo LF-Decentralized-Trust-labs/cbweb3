@@ -40,6 +40,12 @@ interface IAutomatedMarketMaker {
     error AMM__ProposalNotFound(bytes32 proposalId);
     /// @dev The signer has already signed this resume proposal (no self-quorum).
     error AMM__AlreadySigned(bytes32 proposalId, address signer);
+    /// @dev Another wallet of the same institution has already signed this resume proposal. The quorum
+    ///      counts distinct institutions, so a single institution cannot reach it with two keys.
+    error AMM__InstitutionAlreadySigned(bytes32 proposalId, bytes32 institutionId);
+    /// @dev The signer carries no institution identifier in the IdentityRegistry, so its signature cannot
+    ///      be attributed to an institution and cannot be counted towards the quorum.
+    error AMM__InvalidInstitutionId(address account);
     /// @dev The resume proposal was raised against a stale pause epoch; a new pause has since occurred,
     ///      so signatures collected against the old pause can no longer form quorum (R2-H-2 epoch binding).
     error AMM__ProposalExpired(bytes32 proposalId, uint256 proposalEpoch, uint256 currentEpoch);

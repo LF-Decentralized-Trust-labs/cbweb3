@@ -314,7 +314,12 @@ func (s *identityService) OnboardParticipant(ctx context.Context, req *authv1.On
 		// Two-step onboarding (R1-10.6 / R2-10.6): registerParticipant only creates the
 		// participant in Pending; a follow-up verifyParticipant (VERIFIER_ROLE) is required
 		// before it can transact. The CB signer holds both roles (see role-separation runbook).
-		txHash, chainErr := s.blockchainClient.RegisterParticipant(ctx, resp.WalletAddress, displayName, req.Role, [32]byte{})
+		// The institutionId comes from the bank code, which is the identity every wallet of one
+		// institution shares — see registry.InstitutionIDForParticipant. It is what lets the AMM
+		// resume quorum count institutions instead of keys, so a CB onboarding a second wallet for
+		// itself must reuse the same code rather than invent one.
+		institutionID := registry.InstitutionIDForParticipant(req.BankCode, displayName)
+		txHash, chainErr := s.blockchainClient.RegisterParticipant(ctx, resp.WalletAddress, displayName, req.Role, [32]byte{}, institutionID)
 		if chainErr != nil {
 			return nil, status.Errorf(codes.Internal, "onboard: on-chain registration: %v", chainErr)
 		}

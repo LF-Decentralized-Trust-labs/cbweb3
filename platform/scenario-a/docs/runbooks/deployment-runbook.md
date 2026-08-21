@@ -515,6 +515,45 @@ cat contracts/.env
 
 Make sure `DEPLOYER_PRIVATE_KEY`, `ADMIN_ADDRESS`, and `CENTRAL_BANK_ADDRESS` are set in `contracts/.env`.
 
+### Resume is refused, or a participant cannot be registered (institutionId)
+
+The IdentityRegistry carries an `institutionId` per participant, and the AMM resume quorum
+counts **distinct institutions** rather than distinct addresses. Two consequences show up at
+deploy time.
+
+**The registry ABI changed.** `registerParticipant` takes a fifth argument (`bytes32
+institutionId`) and `getInstitutionId(address)` is new. A registry deployed before this
+change does not answer `getInstitutionId`, and an AMM pointed at it refuses every resume
+signature with `AMM__InvalidInstitutionId`. There is no migration path on a deployed
+instance — the registry holds no such field. Redeploy the contracts and re-sync the
+addresses, then re-run participant registration:
+
+```bash
+make contracts.deploy-all-with-sync     # deploy + sync-addresses + register-participants
+```
+
+Both paths must be redeployed together: local (`make spoke-all`, toolkit/samples) and any
+multi-infra deployment (`deploy-lnet`). A stack with a new AMM and an old registry, or the
+reverse, fails at the first resume rather than at deploy.
+
+**One institution must resolve to one id.** The id is `keccak256(bankCode)`, computed
+identically in three places — the Go services
+(`backend/shared/blockchain/registry.InstitutionIDForParticipant`), the seed script
+(`contracts/script/RegisterParticipants.s.sol`, env `CENTRAL_BANK_CODE`) and the
+provisioning toolkit (which renders `GOVERNANCE_BANK_CODE` into the CB's env and hashes the
+same value). If a central bank registers a second governance wallet under a different code,
+the contract sees two institutions and that bank can resume on its own — the failure this
+control exists to prevent, and it fails silently. Check the codes agree:
+
+```bash
+grep GOVERNANCE_BANK_CODE backend/config/.env.infra.central-bank-a
+cast call $IDENTITY_REGISTRY "getInstitutionId(address)(bytes32)" $WALLET --rpc-url $RPC
+```
+
+A zero `institutionId` is refused at registration (`InvalidIdentityData`), so a registered
+participant always has one; a zero returned by `getInstitutionId` means the address is not
+registered at all.
+
 ### Paladin fails to start
 
 ```bash
