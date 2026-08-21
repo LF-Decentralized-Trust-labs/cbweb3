@@ -186,6 +186,12 @@ func governanceUserID(entity string) string {
 // renderRealmJSON produces a Keycloak realm-import document for a plan: the realm,
 // its realm roles, and confidential service-account clients (fixed secret,
 // directAccessGrants for ROPC). Keycloak imports this on startup (--import-realm).
+// accessTokenLifespanSeconds caps how long an issued access token stays valid. Short on
+// purpose: a leaked token is only useful for this window, and the portals refresh
+// silently through the refresh cookie, so a short access token costs the operator
+// nothing.
+const accessTokenLifespanSeconds = 300
+
 func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
 	// Fail closed. An empty origin list used to render as `["*"]`, which is an open
 	// redirector for the authorization code and lets any page read token responses.
@@ -304,6 +310,16 @@ func renderRealmJSON(plan KeycloakRealmPlan) ([]byte, error) {
 		"sslRequired": sslRequiredFor(plan.Environment),
 		"roles":       map[string]any{"realm": realmRoles},
 		"clients":     clients,
+		// Access-token lifespan. Keycloak's own default is 5 minutes, but a realm-import
+		// document that stays silent inherits whatever the server was configured with, so
+		// the ceiling is stated here rather than assumed.
+		//
+		// This control used to live in deploy/local/keycloak/init.sh and was guarded by
+		// TestDeployLocalAccessTokenLifespanIsShort. That path was removed as a duplicate
+		// of this one, and the toolkit set no lifespan at all — so the guard would have
+		// been dropped silently along with the scripts. Recreated here, and the test now
+		// reads this instead.
+		"accessTokenLifespan": accessTokenLifespanSeconds,
 	}
 	if len(users) > 0 {
 		realm["users"] = users

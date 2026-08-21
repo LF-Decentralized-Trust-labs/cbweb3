@@ -46,7 +46,7 @@ scenario-b/
   backend/services/      api-gateway, auth, compliance, fx, ledger-gateway, payment-orchestrator, payments
   frontend/apps/         bank, governance, supervisor, treasury, noc
   interop/hub-and-spoke/ Cacti-based relay
-  deploy/local/          Docker Compose stacks + tooling
+  provisioning/          Compose templates the toolkit renders (the only bring-up path)
   make/                  Modular makefiles (included by scenario-b/Makefile)
   tests/                 E2E + performance baselines
   specs/                 Feature specs and plans
@@ -55,11 +55,18 @@ scenario-b/
 ## Common commands (run from `scenario-b/`)
 
 Infra and stack:
-- `make scenario-b.up` / `make scenario-b.down` — full stack lifecycle
+- `cd samples && ./deploy-all.sh` — **the** way to bring a stack up (hub + spokes + banks via `cbweb3b apply`)
 - `make scenario-b.nuke` — wipe state
-- `make scenario-b.restart`
-- `make deploy.up-besu` / `deploy.up-infra` / `deploy.up-backend` — bring up layers individually
-- `make dev.up-bank-a` / `dev.up-central-bank-a` / etc. — per-entity dev stacks
+- `make scenario-b.up-relayer` / `down-relayer` — the Cacti relay, an external prerequisite of `apply`
+
+The legacy `deploy/local` bring-up was removed: `scenario-b.up`, `deploy.up-*` and
+`dev.up-<entity>` no longer exist. It duplicated the toolkit and kept falling behind it —
+the Besu pin never reached it, and per-entity credentials and Redis auth only did because
+one PR touched both trees deliberately. One path means one place to harden.
+
+Targets that act ON a running stack are unchanged (contracts, tryouts, performance,
+evidence, tests), but their defaults still name the removed stack's ports; pass the
+toolkit's URLs explicitly until the migration card lands.
 
 Contracts:
 - `make contracts.build` / `contracts.test` / `contracts.fmt` / `contracts.lint` / `contracts.slither`

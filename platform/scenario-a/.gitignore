@@ -97,3 +97,12 @@ openspec/
 
 # spoke runtime data dir (relative node.dataDir resolved against CWD; see samples/README.md)
 cbweb3-data/
+
+# Generated provisioning state. The Paladin deployment scripts write the deployed
+# contract addresses next to themselves, and since they moved from deploy/local (which
+# was ignored wholesale) into provisioning/ (which is tracked), the state needs an
+# explicit rule. Caught by the gitleaks gate when a run's addresses were committed.
+**/.deployed-addrs.env
+provisioning/paladin/*/
+!provisioning/paladin/scripts/
+!provisioning/paladin/contracts/

@@ -72,7 +72,7 @@ func TestLocalProfileFromExDir_CBWEB3HomeTakesPrecedence(t *testing.T) {
 	if p.CentralBankComposePath != wantCB {
 		t.Errorf("CentralBankComposePath = %q; want %q", p.CentralBankComposePath, wantCB)
 	}
-	wantScripts := filepath.Join(home, "deploy", "local", "paladin", "scripts")
+	wantScripts := filepath.Join(home, "provisioning", "paladin", "scripts")
 	if p.ScriptsDir != wantScripts {
 		t.Errorf("ScriptsDir = %q; want %q", p.ScriptsDir, wantScripts)
 	}

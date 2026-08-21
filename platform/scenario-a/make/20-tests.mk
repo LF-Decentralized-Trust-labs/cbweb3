@@ -34,17 +34,25 @@ API_GW_BANK_D_URL         ?= http://localhost:58080
 API_GW_CENTRAL_BANK_A_URL ?= http://localhost:38080
 API_GW_CENTRAL_BANK_B_URL ?= http://localhost:60080
 
-scenario-a.test-integration: ## Run the happy-path test; brings the stack up automatically if it isn't already running
+scenario-a.test-integration: ## Run the happy-path test against an ALREADY-RUNNING stack
 	@echo "[scenario-a] running integration test (full happy path)..."
-	@if [ "$(SKIP_UP)" = "0" ]; then \
-	  echo "[scenario-a] SKIP_UP=0 — forcing a fresh bring-up (regenerates genesis, WIPES the chain)..."; \
-	  $(MAKE) spoke-all; \
-	elif [ "$(SKIP_UP)" = "auto" ] && ! curl -sf -o /dev/null --max-time 5 "$(API_GW_BANK_A_URL)/healthz"; then \
-	  echo "[scenario-a] stack not detected at $(API_GW_BANK_A_URL) — bringing it up via spoke-all..."; \
-	  $(MAKE) spoke-all; \
-	else \
-	  echo "[scenario-a] stack detected — running against the live stack..."; \
+	@# This target no longer brings a stack up. It used to call `spoke-all`, the legacy
+	@# deploy/local path, which was removed in favour of the toolkit as the single way to
+	@# provision. The test itself is unchanged and takes every endpoint from the
+	@# variables above, so it runs against whatever provisioned the stack.
+	@#
+	@# The DEFAULTS above still name the legacy stack's ports and entities
+	@# (bank-a/bank-b/bank-d). Pointing them at a toolkit-provisioned topology is the
+	@# migration tracked in the "migrar o E2E e os tryouts para o toolkit" card, which
+	@# also covers the 8 secrets the test reads from backend/config/.env.infra.* — files
+	@# the toolkit deliberately does not write.
+	@if ! curl -sf -o /dev/null --max-time 5 "$(API_GW_BANK_A_URL)/healthz"; then \
+	  echo "[scenario-a] no stack answering at $(API_GW_BANK_A_URL)."; \
+	  echo "[scenario-a] Bring one up with the toolkit first:  cd samples && ./deploy-all.sh"; \
+	  echo "[scenario-a] then pass the gateway URLs, e.g.  make scenario-a.test-integration API_GW_BANK_A_URL=http://localhost:18645"; \
+	  exit 1; \
 	fi
+	@echo "[scenario-a] stack detected — running against the live stack...
 	@cd tests/integration && \
 	  SKIP_UP=1 \
 	  SKIP_DOWN=$(SKIP_DOWN) \
@@ -104,7 +112,9 @@ scenario-a.test-backend-coverage:
 # Fill measured numbers into docs/performance/RESULTS-TEMPLATE.md after a real run.
 # Do NOT run the soak in CI.
 
-# Default to the real bank-a API gateway host port (deploy/local/README.md).
+# Default to the bank-a API gateway host port of the removed legacy stack. These
+# defaults are kept only so an override still has something to override; the
+# toolkit publishes different ports (see the migration card for this suite).
 API_GW_URL ?= http://localhost:18080
 
 scenario-a.perf-baseline:

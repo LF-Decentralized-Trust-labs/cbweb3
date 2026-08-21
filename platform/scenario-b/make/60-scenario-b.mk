@@ -1,19 +1,22 @@
 # make/60-scenario-b.mk — Scenario B (Hub-and-Spoke Liquidity Pool) orchestration.
 #
-# Scenario B reuses the transverse infrastructure of Scenario A:
-#   * Keycloak + Postgres + Redis   (deploy.up-infra)
-#   * Hub Besu     (independent network, chain 1337, RPC port 8845)
-#   * Spoke-A Besu  (deploy.up-spoke-a, chain 1338, RPC port 8645)
-#   * Spoke-B Besu  (deploy.up-spoke-b, chain 1339, RPC port 8745)
-#   * Hyperledger Cacti Relayer    (scenario-b.up-relayer)
+# The stack is brought up by the TOOLKIT — `samples/deploy-all.sh`, which runs
+# `cbweb3b apply` per entity. The legacy `deploy/local` bring-up that used to live in
+# make/10-deploy.mk and make/15-dev.mk was removed: it duplicated the toolkit and kept
+# falling behind it (the Besu pin never reached it, credentials and Redis auth only did
+# because one PR touched both trees).
 #
-# The Hub runs on its own Besu network (chain 1337) for AMM contracts, fully
-# isolated from the spokes. Override BESU_HUB_RPC in the env to point at a
-# different Hub endpoint.
+# What remains here are the targets that act ON a running stack rather than create one:
+# contracts, tryouts, performance baselines, evidence capture, tests and Postman. They
+# find the stack through URLs and ports, so they work against whatever provisioned it —
+# but their DEFAULTS still point at the ports the legacy stack published (hub 8845,
+# spokes 8645/8745). Pointing them at the toolkit's ports is tracked in the migration
+# card for this suite; until then, pass the URLs explicitly.
+#
+# The Hub runs on its own Besu network for the AMM contracts, isolated from the spokes —
+# see docs/decisions/ADR-006. Override BESU_HUB_RPC to point at a different Hub.
 
 # ── Feature toggle: MLP Path B ──────────────────────────────────────────────────
-# Loaded from deploy/local/.env (gitignored). Copy from deploy/local/.env.example.
--include deploy/local/.env
 export ENABLE_MLP
 export MLP_ADDRESS
 
@@ -42,18 +45,16 @@ SCENARIO_B_ENV := \
 scenario-b.prepare-pki: pki.gen-all
 	@echo "[scenario-b] PKI prepared (idempotent; use FORCE=1 to regenerate)"
 
-scenario-b.up-infra: deploy.up-infra deploy.up-besu
-	@echo "[scenario-b] shared infra + besu spokes up"
 
-scenario-b.down-infra: deploy.down-besu deploy.down-infra
-	@echo "[scenario-b] shared infra + besu spokes down"
 
 # ── Relayer (Cacti) ──────────────────────────────────────────────────────────
 
-scenario-b.up-relayer: cacti-up
+scenario-b.up-relayer:
+	@bash provisioning/scripts/start-cacti.sh
 	@echo "[scenario-b] Cacti Relayer up at $(CACTI_RELAYER_URL)"
 
-scenario-b.down-relayer: cacti-down
+scenario-b.down-relayer:
+	@docker compose -p cacti down -v --remove-orphans
 	@echo "[scenario-b] Cacti Relayer down"
 
 # ── Contracts (AMM on Hub, SpokeBridge on each Spoke) ────────────────────────
@@ -106,10 +107,8 @@ scenario-b.build-backend-images:
 	@echo "[scenario-b] building backend Docker images (compliance, auth, payment-orchestrator, api-gateway)..."
 	@bash $(CURDIR)/build-backend-images.sh $(or $(TAG),local) $(or $(VERSION),latest)
 
-scenario-b.up-backend: scenario-b.build-backend-images deploy.up-backend-entities
-	@echo "[scenario-b] backend services (api-gateway v2, payment-orchestrator, compliance) up"
 
-scenario-b.down-backend: deploy.down-backend-entities
+
 # ── MLP backend services (opt-in: ENABLE_MLP=true) ───────────────────────────
 
 scenario-b.up-backend-mlp:
@@ -137,7 +136,7 @@ scenario-b.up-fx-feeder:
 	@if [ -f $(FX_FEEDER_PID) ] && kill -0 $$(cat $(FX_FEEDER_PID)) 2>/dev/null; then \
 	  echo "  already running (pid $$(cat $(FX_FEEDER_PID)))"; \
 	else \
-	  DURATION_SECS=0 nohup ./deploy/local/tools/mock-fx-feeder.sh > $(FX_FEEDER_LOG) 2>&1 & \
+	  DURATION_SECS=0 nohup ./tools/mock-fx-feeder.sh > $(FX_FEEDER_LOG) 2>&1 & \
 	  echo $$! > $(FX_FEEDER_PID); \
 	  echo "  started (pid $$(cat $(FX_FEEDER_PID))) — log: $(FX_FEEDER_LOG)"; \
 	fi
@@ -153,20 +152,13 @@ scenario-b.down-fx-feeder:
 # down-fx-feeder runs first: the feeder signs setRate with the admin/deployer key, the
 # same account forge uses in deploy-contracts — a stale feeder from a prior `up` would
 # race the deploy's nonce. up-fx-feeder restarts it fresh at the end.
-scenario-b.up: scenario-b.down-fx-feeder scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend scenario-b.up-fx-feeder noc.setup-keycloak noc.up noc.setup-agents
-	@echo "[scenario-b] full stack up — ready for tryout (bash tryouts/tryout-scenario-b-e2e.sh)"
 
 # Perf-lean bring-up: the full settlement stack (infra + contracts + relayer + backend +
 # fx-feeder) WITHOUT the NOC operations portal (noc.setup-keycloak/noc.up/noc.setup-agents).
 # The NOC portal is a monitoring frontend and is not on the perf path; excluding it keeps the
 # R1-12.3 perf harness (scenario-b.perf-all) from depending on the NOC frontend build.
-scenario-b.up-perf: scenario-b.down-fx-feeder scenario-b.prepare-pki scenario-b.up-infra scenario-b.deploy-contracts scenario-b.up-relayer scenario-b.up-backend scenario-b.up-fx-feeder
-	@echo "[scenario-b] perf stack up (no NOC portal) — ready for make scenario-b.perf-all"
 
-scenario-b.down: scenario-b.down-fx-feeder scenario-b.down-backend scenario-b.down-relayer scenario-b.down-infra noc.down
-	@echo "[scenario-b] full stack down"
 
-scenario-b.restart: scenario-b.down scenario-b.up
 
 # ── Full wipe ────────────────────────────────────────────────────────────────
 # scenario-b.nuke — best-effort total teardown for a guaranteed clean slate.
@@ -177,8 +169,6 @@ scenario-b.restart: scenario-b.down scenario-b.up
 # All steps are best-effort (errors ignored) so it always reaches the force-clean.
 scenario-b.nuke:
 	@echo "[scenario-b] NUKE — tearing down the entire stack + volumes..."
-	-@$(MAKE) scenario-b.down
-	-@$(MAKE) noc.down
 	-@$(MAKE) frontend-scenario-b-down
 	@echo "[scenario-b] force-removing any leftover containers..."
 	-@docker rm -f $$(docker ps -aq --filter name=cbweb3 --filter name=backend-) 2>/dev/null || true
@@ -187,7 +177,7 @@ scenario-b.nuke:
 	@echo "[scenario-b] verifying clean state..."
 	@docker ps -a --format '{{.Names}}' | grep -E 'cbweb3|backend-' && echo "  WARN: containers still present (see above)" || echo "  OK: no cbweb3 containers"
 	@docker volume ls --format '{{.Name}}' | grep -E 'local_postgres_data' && echo "  WARN: postgres volume still present" || echo "  OK: no postgres volume"
-	@ls -d deploy/local/*/nodes/*/data 2>/dev/null && echo "  WARN: besu chain data still present" || echo "  OK: no besu chain data"
+	@docker volume ls --format '{{.Name}}' | grep -E '_besu_data|_genesis' && echo "  WARN: besu volumes still present (toolkit-provisioned state)" || echo "  OK: no besu volumes"
 	@echo "[scenario-b] nuke complete — run 'make scenario-b.up' for a fresh stack"
 
 # ── Tests ────────────────────────────────────────────────────────────────────

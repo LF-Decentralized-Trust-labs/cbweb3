@@ -47,12 +47,12 @@ echo "[start-found] waiting for block production..."
 
 # Step 5: Deploy IdentityRegistry contract using existing Go test
 echo "[start-found] deploying IdentityRegistry contract..."
-PALADIN_SCRIPTS="${SCENARIO_ROOT}/deploy/local/paladin/scripts"
+PALADIN_SCRIPTS="${SCENARIO_ROOT}/provisioning/paladin/scripts"
 
 # Ensure the ARTIFACTS_DIR points to the contracts directory
-CONTRACTS_DIR="${SCENARIO_ROOT}/deploy/local/paladin/contracts"
+CONTRACTS_DIR="${SCENARIO_ROOT}/provisioning/paladin/contracts"
 if [ ! -d "${CONTRACTS_DIR}" ]; then
-    CONTRACTS_DIR="${SCENARIO_ROOT}/../../../scenario-a/deploy/local/paladin/contracts"
+    CONTRACTS_DIR="${SCENARIO_ROOT}/../../../scenario-a/provisioning/paladin/contracts"
 fi
 
 REGISTRY_DEPLOY_OUTPUT=$(cd "${PALADIN_SCRIPTS}" && \
@@ -66,7 +66,13 @@ REGISTRY_ADDR=$(echo "${REGISTRY_DEPLOY_OUTPUT}" | grep -oP 'REGISTRY_CONTRACT_A
 if [ -z "${REGISTRY_ADDR}" ]; then
     echo "[start-found] WARNING: could not parse REGISTRY_CONTRACT_ADDRESS from test output"
     echo "[start-found] attempting to read from spoke-a .deployed-addrs.env..."
-    REGISTRY_ADDR=$(grep -oP 'REGISTRY_CONTRACT_ADDRESS=\K0x[a-fA-F0-9]{40}' "${SCENARIO_ROOT}/deploy/local/paladin/spoke-a/.deployed-addrs.env" 2>/dev/null | tail -1 || true)
+    # Generated state, not a tracked file. The legacy path wrote it under
+    # deploy/local/paladin/<spoke>/; the toolkit writes it to the entity's dataDir
+    # (<dataDir>/.deployed-addrs.env). Override DEPLOYED_ADDRS to point at the run
+    # you are inspecting — this spike predates the toolkit and has no default that
+    # is true for both.
+    DEPLOYED_ADDRS="${DEPLOYED_ADDRS:-}"
+    REGISTRY_ADDR=$(grep -oP 'REGISTRY_CONTRACT_ADDRESS=\K0x[a-fA-F0-9]{40}' "${DEPLOYED_ADDRS}" 2>/dev/null | tail -1 || true)
 fi
 
 if [ -z "${REGISTRY_ADDR}" ]; then
