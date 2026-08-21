@@ -71,19 +71,26 @@ func (s *startInfraStep) composeEnv() []string {
 	if user == "" {
 		user = "default"
 	}
+	// The credential comes from the entity's secrets file (generated on first
+	// provisioning, read back after), which is the same source the render steps use —
+	// so the database is created with the password the services will present. The old
+	// `if pass == "" { pass = "default" }` fallback is gone on purpose: a fallback is
+	// how every entity in every deployment ended up sharing one password.
 	pass := s.pgPassword
 	if pass == "" {
-		pass = "default"
+		pass = mustInfraSecret(s.dataDir, "POSTGRES_PASSWORD")
 	}
+	// REDIS_HOST_PORT is deliberately not passed: Redis is no longer published on a
+	// host port, and every consumer reaches it by container name over ENTITY_NET_NAME.
 	return append(os.Environ(),
 		"ENTITY_INFRA_PREFIX="+s.entityPrefix,
 		"ENTITY_NET_NAME="+s.netName,
 		"SPOKE_DATA_DIR="+s.dataDir,
 		"POSTGRES_HOST_PORT="+strconv.Itoa(s.pgPort),
-		"REDIS_HOST_PORT="+strconv.Itoa(s.redisPort),
 		"POSTGRES_DB="+s.dbName,
 		"POSTGRES_USER="+user,
 		"POSTGRES_PASSWORD="+pass,
+		"REDIS_PASSWORD="+mustInfraSecret(s.dataDir, "REDIS_PASSWORD"),
 	)
 }
 

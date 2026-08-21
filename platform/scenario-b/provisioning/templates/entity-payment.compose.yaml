@@ -22,7 +22,7 @@ services:
       # but the process fails fast without it).
       CACTI_API_URL: "${CACTI_API_URL:-http://host.docker.internal:7000}"
       # FX-agreement persistence — shares the entity Postgres with the api-gateway.
-      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:?}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
       SPOKE_CHAIN_ID: "${SPOKE_CHAIN_ID:-1337}"
       # Spoke token clients (READ path): the bank's fiat (fCeBM) and tCeBM balances
       # are read from its own spoke node — this is how the portal shows the FIAT the

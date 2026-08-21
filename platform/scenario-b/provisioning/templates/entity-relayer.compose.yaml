@@ -27,7 +27,7 @@ services:
       # when the spoke is configured, which local dev skips.
       CACTI_API_URL: "${CACTI_API_URL:-http://host.docker.internal:7000}"
       # Shared DB with the api-gateway: the outbox the gateway enqueues to.
-      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:-cbweb3}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-cbweb3}:${POSTGRES_PASSWORD:?}@${CONTAINER_PREFIX}-${ENTITY}-postgres:5432/${POSTGRES_DB:-keycloak}?sslmode=disable"
       # Hub signing: the CB holds CENTRAL_BANK_ROLE on the W-<source> token and
       # mints it on the hub. Chain id defaults to the hub's (1337 locally).
       # Routable hub RPC (set by the toolkit from the hub bundle) so the bridge

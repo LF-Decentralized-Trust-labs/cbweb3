@@ -105,11 +105,14 @@ func (s *renderBankEnvStep) Run(_ context.Context) error {
 		PostgresContainer: prefix + "-postgres",
 		PostgresPort:      ports.Postgres,
 		PostgresUser:      "default",
-		PostgresPassword:  "default",
-		DBName:            entityDBName(s.bankCode),
-		RedisContainer:    prefix + "-redis",
-		RedisPort:         ports.Redis,
-		RedisDB:           0,
+		// Per-entity, generated on first provisioning and read back after; the operator
+		// can override via the environment. "default" used to be every entity's password.
+		PostgresPassword: mustInfraSecret(s.dataDir, "POSTGRES_PASSWORD"),
+		DBName:           entityDBName(s.bankCode),
+		RedisContainer:   prefix + "-redis",
+		RedisPort:        ports.Redis,
+		RedisDB:          0,
+		RedisPassword:    mustInfraSecret(s.dataDir, "REDIS_PASSWORD"),
 
 		// A commercial bank does not issue participant certificates (that is the
 		// CB's role), so no CA is mounted; compliance runs without a CA.

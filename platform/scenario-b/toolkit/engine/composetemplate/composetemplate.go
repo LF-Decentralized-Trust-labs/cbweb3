@@ -134,6 +134,10 @@ func Validate(t *Template, env map[string]string) Result {
 var (
 	secretRe   = regexp.MustCompile(`(?i)(password|secret|private[_-]?key|api[_-]?key)\s*[:=]\s*["']?[^"'\s${][^"'\n]*`)
 	varStripRe = regexp.MustCompile(`\$\{[^}]*\}`)
+	// ${NAME:-DEFAULT} — the form that hides a credential from the check below.
+	varDefaultRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}`)
+	// Variable NAMES that make their default a credential rather than a setting.
+	credentialNameRe = regexp.MustCompile(`(?i)(password|passwd|secret|private[_-]?key|api[_-]?key)`)
 )
 
 // checkNoSecrets rejects literal secret material in the raw template (values
@@ -147,6 +151,24 @@ func checkNoSecrets(raw string, res *Result) {
 		l := strings.TrimSpace(line)
 		if l == "" || strings.HasPrefix(l, "#") {
 			continue
+		}
+		// Credential defaults must be caught BEFORE stripping: varStripRe removes the
+		// whole ${...} reference, so a secret sitting in a variable's default value was
+		// invisible to the literal check below. ${POSTGRES_PASSWORD:-cbweb3} is a
+		// hardcoded credential wearing a parameter's clothes — worse than an obvious
+		// one, because it reads as parameterized and every deployment that does not set
+		// the variable silently shares one well-known password.
+		for _, m := range varDefaultRe.FindAllStringSubmatch(l, -1) {
+			name, def := m[1], strings.TrimSpace(m[2])
+			if def == "" || !credentialNameRe.MatchString(name) {
+				continue
+			}
+			// A default that is itself a reference resolves elsewhere; it is not a literal.
+			if strings.Contains(def, "${") {
+				continue
+			}
+			res.add("no-secrets", "credential default for "+name+
+				" (use ${"+name+":?} so a deployment cannot fall back to a shared value): "+l)
 		}
 		stripped := varStripRe.ReplaceAllString(l, "")
 		if secretRe.MatchString(stripped) {

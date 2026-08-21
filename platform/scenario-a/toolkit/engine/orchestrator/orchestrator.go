@@ -226,12 +226,14 @@ func buildSteps(m *manifest.Manifest, deps Deps, dataDir string, _ ProvisioningS
 		newRenderCBEnvStep(spokeID, entity, m.Spec.Spoke.Currency, besuRPCPort, m.Spec.Spoke.ChainID, dataDir, operatorKeyHex, frontendAdvertisedHost(m), m.Spec.FXPartyRoster, cactiContainerURL(manifestRelayEndpoint(m)), proxyEnabled),
 		newStartInfraStep(StepStartCBInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
-			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
+			dbName, "default", "", ports.Postgres, ports.Redis, stackTO),
 		newProvisionKeycloakStep(StepProvisionKeycloak, keycloakStepParams{
 			EntityPrefix: prefix, NetName: net,
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
-			KCDBURL:     kcDBURL, KCUser: "default", KCPassword: "default",
-			HostPort: ports.Keycloak, Timeout: stackTO,
+			KCDBURL:     kcDBURL, KCUser: "default",
+			KCPassword:      mustInfraSecret(dataDir, "POSTGRES_PASSWORD"),
+			KCAdminPassword: mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD"),
+			HostPort:        ports.Keycloak, Timeout: stackTO,
 			// The realm's redirectUris/webOrigins are the SAME origins the api-gateway is
 			// given as CORS_ALLOW_ORIGINS, so Keycloak and the gateway cannot disagree about
 			// which portals may talk to them (finding R1-10.7 — they used to be "*").
@@ -722,12 +724,14 @@ func buildJoinSteps(m *manifest.Manifest, b *bundle.JoinBundle, deps JoinDeps, d
 		}),
 		newStartInfraStep(StepStartBankInfra, prefix, net, dataDir,
 			filepath.Join(templatesDir, "entity-infra", "infra-compose.yaml"),
-			dbName, "default", "default", ports.Postgres, ports.Redis, stackTO),
+			dbName, "default", "", ports.Postgres, ports.Redis, stackTO),
 		newProvisionKeycloakStep(StepProvisionBankKeycloak, keycloakStepParams{
 			EntityPrefix: prefix, NetName: net,
 			ComposePath: filepath.Join(templatesDir, "entity-keycloak", "keycloak-compose.yaml"),
-			KCDBURL:     kcDBURL, KCUser: "default", KCPassword: "default",
-			HostPort: ports.Keycloak, Timeout: stackTO,
+			KCDBURL:     kcDBURL, KCUser: "default",
+			KCPassword:      mustInfraSecret(dataDir, "POSTGRES_PASSWORD"),
+			KCAdminPassword: mustInfraSecret(dataDir, "KC_ADMIN_PASSWORD"),
+			HostPort:        ports.Keycloak, Timeout: stackTO,
 			// Same origin list the bank's api-gateway receives as CORS_ALLOW_ORIGINS.
 			Realms: []KeycloakRealmPlan{commercialBankRealmPlan(bank, m.Spec.AdminUsers, m.Spec.Environment,
 				splitOrigins(bankCORSOriginsFor(ports, frontendAdvertisedHost(m), proxyEnabled)))},
