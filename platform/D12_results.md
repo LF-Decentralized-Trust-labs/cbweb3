@@ -13,6 +13,12 @@ from real runs on this branch. Every gate that is **not** met is accompanied by 
 justification. Per-scenario detail lives in `scenario-{a,b}/docs/TEST-REPORT.md`; raw
 performance evidence in `scenario-{a,b}/docs/performance/`.
 
+Execution record — dates, deviations, defects and the UAT sign-off structure — lives in
+[`docs/deliverables/D12-timeline-actuals.md`](docs/deliverables/D12-timeline-actuals.md),
+[`docs/deliverables/D12-defect-log.md`](docs/deliverables/D12-defect-log.md) and
+[`docs/deliverables/D12-uat-records.md`](docs/deliverables/D12-uat-records.md). The gates not
+met below are carried there as DEF-001 … DEF-006.
+
 ---
 
 ## Executive summary

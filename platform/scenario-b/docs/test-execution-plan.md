@@ -125,6 +125,15 @@ The following are explicitly **out of scope**:
 
 > Total: **~9 weeks** from mobilization to submission. Scenario B execution begins after Scenario A baseline has been established. Actual calendar dates are to be agreed with the IDB Technical Committee.
 
+> **What actually happened is recorded elsewhere.** The windows above are the plan; execution
+> did not follow the stated ordering (Scenario B's performance run preceded Scenario A's).
+> Absolute dates per phase, the deviations, and the phases not yet started are in
+> [`docs/deliverables/D12-timeline-actuals.md`](../../docs/deliverables/D12-timeline-actuals.md).
+> Defects found by the executed phases are in
+> [`docs/deliverables/D12-defect-log.md`](../../docs/deliverables/D12-defect-log.md), and the
+> Phase 5 record and sign-off formats are in
+> [`docs/deliverables/D12-uat-records.md`](../../docs/deliverables/D12-uat-records.md).
+
 ### Phase Checklists
 
 #### Phase 0 — Mobilization (Week 1)

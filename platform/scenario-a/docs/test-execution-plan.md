@@ -112,6 +112,14 @@ The following are explicitly **out of scope**:
 
 > Total: **~9 weeks** from mobilization to submission. Actual calendar dates are to be agreed with the IDB Technical Committee.
 
+> **What actually happened is recorded elsewhere.** The windows above are the plan. Absolute
+> dates per phase, the deviations from this schedule, and the phases not yet started are in
+> [`docs/deliverables/D12-timeline-actuals.md`](../../docs/deliverables/D12-timeline-actuals.md).
+> Defects found by the executed phases are in
+> [`docs/deliverables/D12-defect-log.md`](../../docs/deliverables/D12-defect-log.md), and the
+> Phase 5 record and sign-off formats are in
+> [`docs/deliverables/D12-uat-records.md`](../../docs/deliverables/D12-uat-records.md).
+
 ### Phase Checklists
 
 #### Phase 0 — Mobilization (Week 1)

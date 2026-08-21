@@ -67,6 +67,20 @@ make scenario-a.test-integration            # scenario-b: make scenario-b.test-i
 make scenario-a.perf-all                    # scenario-b: make scenario-b.perf-all
 ```
 
+## Execution record (D12)
+
+Measured results answer *what the tests found*. These three answer *what was run, when, and
+what is still open*:
+
+| Document | Holds |
+|----------|-------|
+| [`deliverables/D12-timeline-actuals.md`](deliverables/D12-timeline-actuals.md) | Planned vs actual dates per phase, and the nine recorded deviations |
+| [`deliverables/D12-defect-log.md`](deliverables/D12-defect-log.md) | The defect register — format, severity/SLA, lifecycle, and the 14 defects the executed phases produced |
+| [`deliverables/D12-uat-records.md`](deliverables/D12-uat-records.md) | Phase 5 UAT record and sign-off formats, plus the preconditions still blocking UAT |
+
+Phases 1–4 have executed; Phase 5 (bank-led UAT) has not, and there are no UAT records on
+file. Six Phase 4 threshold findings remain open.
+
 ## Next pass
 - Side-by-side perf deep-dive (the two throughput ceilings: A = Paladin/Zeto blocking lock
   path; B = single-signer EVM nonce — different root causes, different fixes).
